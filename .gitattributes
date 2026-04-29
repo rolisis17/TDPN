@@ -1,0 +1,8 @@
+/.codex* export-ignore
+/User/ export-ignore
+/bin/ export-ignore
+/data/ export-ignore
+/deploy/.env* export-ignore
+/deploy/data/ export-ignore
+/deploy/tls/ export-ignore
+/.easy-node-logs/ export-ignore

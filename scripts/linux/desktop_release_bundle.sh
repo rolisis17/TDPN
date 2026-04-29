@@ -11,6 +11,9 @@ BUILD_REQUIRED_TOOLS=(node npm rustc cargo git bash)
 MISSING_BUILD_TOOLS=()
 SCANNED_ARTIFACTS_JSON="[]"
 SCANNED_ARTIFACTS_BY_KIND_JSON='{"appimage":[],"deb":[],"rpm":[],"tarball":[],"sig":[],"file":[]}'
+SCANNED_ADMIN_ARTIFACT_COUNT=0
+SCANNED_ADMIN_ARTIFACTS_JSON="[]"
+BUNDLE_ARTIFACT_MARKER=""
 
 show_usage() {
   cat <<'USAGE'
@@ -210,10 +213,21 @@ size_bytes_for_file() {
   printf '%s' "0"
 }
 
+is_admin_console_artifact_path() {
+  local value="$1"
+  local normalized
+  normalized="$(to_lower "$value")"
+  local tokenized="${normalized// /-}"
+  tokenized="${tokenized//_/-}"
+
+  [[ "$tokenized" == *admin-console* || "$tokenized" == *gpm-admin* || "$normalized" == *tauri.admin-console.conf.json* ]]
+}
+
 scan_release_bundle_artifacts() {
   local bundle_root_path="$1"
 
   local artifacts_entries=()
+  local admin_artifact_entries=()
   local appimage_entries=()
   local deb_entries=()
   local rpm_entries=()
@@ -240,6 +254,8 @@ scan_release_bundle_artifacts() {
 
       local artifact_name
       artifact_name="${artifact_path##*/}"
+      local artifact_path_lower
+      artifact_path_lower="$(to_lower "$artifact_path")"
 
       local extension_kind
       extension_kind="$(artifact_extension_and_kind "$artifact_name")"
@@ -262,6 +278,14 @@ scan_release_bundle_artifacts() {
       artifact_kind_json="\"$(json_escape "$artifact_kind")\""
       local artifact_sha256_json
       artifact_sha256_json="\"$(json_escape "$artifact_sha256")\""
+
+      if is_admin_console_artifact_path "$artifact_path_lower"; then
+        admin_artifact_entries+=("$artifact_path_json")
+      fi
+
+      if [[ -n "${BUNDLE_ARTIFACT_MARKER:-}" && -f "$BUNDLE_ARTIFACT_MARKER" && ! "$artifact_path" -nt "$BUNDLE_ARTIFACT_MARKER" ]]; then
+        continue
+      fi
 
       artifacts_entries+=("{\"path\":$artifact_path_json,\"name\":$artifact_name_json,\"extension\":$artifact_extension_json,\"kind\":$artifact_kind_json,\"size_bytes\":$artifact_size_bytes,\"sha256\":$artifact_sha256_json}")
 
@@ -295,14 +319,44 @@ scan_release_bundle_artifacts() {
     fi
   fi
 
+  SCANNED_ARTIFACTS_COUNT="${#artifacts_entries[@]}"
   SCANNED_ARTIFACTS_JSON="$(json_array_from_entries artifacts_entries)"
   SCANNED_ARTIFACTS_BY_KIND_JSON="{\"appimage\":$(json_array_from_entries appimage_entries),\"deb\":$(json_array_from_entries deb_entries),\"rpm\":$(json_array_from_entries rpm_entries),\"tarball\":$(json_array_from_entries tarball_entries),\"sig\":$(json_array_from_entries sig_entries),\"file\":$(json_array_from_entries file_entries)}"
+  SCANNED_ADMIN_ARTIFACT_COUNT="${#admin_artifact_entries[@]}"
+  SCANNED_ADMIN_ARTIFACTS_JSON="$(json_array_from_entries admin_artifact_entries)"
+}
+
+assert_no_public_admin_artifacts() {
+  if [[ "${SCANNED_ADMIN_ARTIFACT_COUNT:-0}" -gt 0 ]]; then
+    echo "public desktop release bundle refuses Admin Console artifacts in shared bundle output; clean the bundle directory or use the separate Admin Console release bundle" >&2
+    echo "admin artifact paths: $SCANNED_ADMIN_ARTIFACTS_JSON" >&2
+    exit 1
+  fi
+}
+
+assert_release_bundle_artifacts_present() {
+  scan_release_bundle_artifacts "$BUNDLE_ROOT"
+  assert_no_public_admin_artifacts
+  if [[ "${SCANNED_ARTIFACTS_COUNT:-0}" -eq 0 ]]; then
+    echo "desktop release bundle build produced no artifacts under $BUNDLE_ROOT" >&2
+    exit 1
+  fi
 }
 
 emit_success_summary_json() {
   local generated_at_utc
   generated_at_utc="$(printf '%(%Y-%m-%dT%H:%M:%SZ)T' -1)"
   scan_release_bundle_artifacts "$BUNDLE_ROOT"
+  assert_no_public_admin_artifacts
+  local artifact_validation_status="unsigned_scaffold_artifacts"
+  local release_ready="0"
+  if [[ "${SCANNED_ARTIFACTS_COUNT:-0}" -eq 0 ]]; then
+    if [[ "$skip_build" == "1" ]]; then
+      artifact_validation_status="skipped_no_artifacts"
+    else
+      artifact_validation_status="missing"
+    fi
+  fi
 
   local summary_dir="$summary_json"
   if [[ "$summary_dir" == */* ]]; then
@@ -327,6 +381,9 @@ emit_success_summary_json() {
     "  \"install_missing_requested\": $(bool_to_json "$install_missing")," \
     "  \"bundle_root\": \"$(json_escape "$BUNDLE_ROOT")\"," \
     "  \"artifact_hint\": \"$(json_escape "$BUNDLE_ROOT")\"," \
+    "  \"artifact_count\": ${SCANNED_ARTIFACTS_COUNT:-0}," \
+    "  \"artifact_validation_status\": \"$(json_escape "$artifact_validation_status")\"," \
+    "  \"release_ready\": $(bool_to_json "$release_ready")," \
     "  \"artifacts\": $SCANNED_ARTIFACTS_JSON," \
     "  \"artifacts_by_kind\": $SCANNED_ARTIFACTS_BY_KIND_JSON" \
     '}')"
@@ -368,6 +425,16 @@ validate_update_feed_url() {
     echo "invalid --update-feed-url '$candidate' (expected absolute URL like https://updates.example.invalid/gpm/beta.json)" >&2
     exit 2
   fi
+  if [[ "$candidate" == *"?"* || "$candidate" == *"#"* ]]; then
+    echo "invalid --update-feed-url '$candidate' (query/fragment is not allowed)" >&2
+    exit 2
+  fi
+  local authority="${candidate#*://}"
+  authority="${authority%%/*}"
+  if [[ "$authority" == *"@"* ]]; then
+    echo "invalid --update-feed-url '$candidate' (userinfo is not allowed)" >&2
+    exit 2
+  fi
 
   local scheme_raw="${BASH_REMATCH[1]}"
   local scheme
@@ -394,6 +461,97 @@ validate_update_feed_url() {
   if [[ "$is_local_host" == "0" && "$scheme" != "https" ]]; then
     echo "invalid --update-feed-url '$candidate' (non-local update feeds must use https)" >&2
     exit 2
+  fi
+}
+
+assert_public_tauri_args() {
+  local expect_features_value="0"
+  local expect_config_value="0"
+  local arg
+  local normalized
+
+  for arg in "$@"; do
+    normalized="$(printf '%s' "$arg" | tr '[:upper:]' '[:lower:]')"
+    normalized="${normalized#"${normalized%%[![:space:]]*}"}"
+    normalized="${normalized%"${normalized##*[![:space:]]}"}"
+    if [[ -z "$normalized" ]]; then
+      if [[ "$expect_config_value" == "1" || "$expect_features_value" == "1" ]]; then
+        echo "public desktop release bundle refuses empty --features/--config value" >&2
+        exit 1
+      fi
+      continue
+    fi
+    if [[ "$normalized" == "--" ]]; then
+      continue
+    fi
+    if [[ "$expect_config_value" == "1" ]]; then
+      if [[ "$normalized" == --* ]]; then
+        echo "public desktop release bundle refuses missing or flag-like --config value" >&2
+        exit 1
+      fi
+      if [[ "$normalized" == *tauri.admin-console.conf.json* || "$normalized" == *admin-console* ]]; then
+        echo "public desktop release bundle refuses Admin Console Tauri config; use the separate Admin Console build command instead" >&2
+        exit 1
+      fi
+      expect_config_value="0"
+      continue
+    fi
+    if [[ "$expect_features_value" == "1" ]]; then
+      if [[ "$normalized" == --* ]]; then
+        echo "public desktop release bundle refuses missing or flag-like --features value" >&2
+        exit 1
+      fi
+      if [[ "$normalized" =~ (^|,|[[:space:]])admin-console($|,|[[:space:]]) ]]; then
+        echo "public desktop release bundle refuses admin-console feature flags; use the separate Admin Console build command instead" >&2
+        exit 1
+      fi
+      expect_features_value="0"
+      continue
+    fi
+    case "$normalized" in
+      --all-features)
+        echo "public desktop release bundle refuses --all-features because it can include admin-console; use the separate Admin Console build command instead" >&2
+        exit 1
+        ;;
+      --features)
+        expect_features_value="1"
+        ;;
+      --features=*)
+        if [[ "$normalized" == "--features=" ]]; then
+          echo "public desktop release bundle refuses empty --features value" >&2
+          exit 1
+        fi
+        if [[ "$normalized" == *admin-console* ]]; then
+          echo "public desktop release bundle refuses admin-console feature flags; use the separate Admin Console build command instead" >&2
+          exit 1
+        fi
+        ;;
+      --config)
+        expect_config_value="1"
+        ;;
+      --config=*)
+        if [[ "$normalized" == "--config=" ]]; then
+          echo "public desktop release bundle refuses empty --config value" >&2
+          exit 1
+        fi
+        if [[ "$normalized" == *tauri.admin-console.conf.json* || "$normalized" == *admin-console* ]]; then
+          echo "public desktop release bundle refuses Admin Console Tauri config; use the separate Admin Console build command instead" >&2
+          exit 1
+        fi
+        ;;
+      *tauri.admin-console.conf.json*|*admin-console*)
+        echo "public desktop release bundle refuses Admin Console Tauri config; use the separate Admin Console build command instead" >&2
+        exit 1
+        ;;
+    esac
+  done
+  if [[ "$expect_config_value" == "1" ]]; then
+    echo "public desktop release bundle refuses missing --config value" >&2
+    exit 1
+  fi
+  if [[ "$expect_features_value" == "1" ]]; then
+    echo "public desktop release bundle refuses missing --features value" >&2
+    exit 1
   fi
 }
 
@@ -446,6 +604,10 @@ SCOPED_ENV_NAMES=(
   "TDPN_DESKTOP_SIGNING_CERT_PATH"
   "GPM_DESKTOP_SIGNING_CERT_PASSWORD"
   "TDPN_DESKTOP_SIGNING_CERT_PASSWORD"
+  "GPM_DESKTOP_ADMIN_CONSOLE"
+  "GPM_DESKTOP_BUILD_ADMIN_CONSOLE"
+  "TDPN_DESKTOP_ADMIN_CONSOLE"
+  "VITE_GPM_ADMIN_CONSOLE"
 )
 
 save_scoped_env() {
@@ -470,6 +632,13 @@ restore_scoped_env() {
       unset "$name"
     fi
   done
+}
+
+cleanup_release_bundle() {
+  if [[ -n "${BUNDLE_ARTIFACT_MARKER:-}" ]]; then
+    rm -f "$BUNDLE_ARTIFACT_MARKER"
+  fi
+  restore_scoped_env
 }
 
 channel="stable"
@@ -589,12 +758,17 @@ fi
 
 validate_update_feed_url "$update_feed_url"
 validate_signing_placeholders "$signing_identity" "$signing_cert_path" "$signing_cert_password"
+assert_public_tauri_args "${tauri_args[@]}"
 
 save_scoped_env
-trap restore_scoped_env EXIT
+trap cleanup_release_bundle EXIT
 
 export GPM_DESKTOP_UPDATE_CHANNEL="$channel"
 export TDPN_DESKTOP_UPDATE_CHANNEL="$channel"
+export GPM_DESKTOP_ADMIN_CONSOLE="0"
+export GPM_DESKTOP_BUILD_ADMIN_CONSOLE="0"
+export TDPN_DESKTOP_ADMIN_CONSOLE="0"
+export VITE_GPM_ADMIN_CONSOLE="0"
 if [[ -n "$update_feed_url" ]]; then
   export GPM_DESKTOP_UPDATE_FEED_URL="$update_feed_url"
   export TDPN_DESKTOP_UPDATE_FEED_URL="$update_feed_url"
@@ -665,6 +839,9 @@ fi
 
 ensure_tauri_icon_scaffold
 
+BUNDLE_ARTIFACT_MARKER="$(mktemp)"
+touch "$BUNDLE_ARTIFACT_MARKER"
+
 pushd "$DESKTOP_DIR" >/dev/null
 npm_args=("run" "tauri" "--" "build")
 if [[ "${#tauri_args[@]}" -gt 0 ]]; then
@@ -674,6 +851,8 @@ fi
 echo "[desktop-release-bundle] running: npm ${npm_args[*]}"
 npm "${npm_args[@]}"
 popd >/dev/null
+
+assert_release_bundle_artifacts_present
 
 echo "[desktop-release-bundle] status=ok"
 echo "[desktop-release-bundle] artifact_hint=$DESKTOP_DIR/src-tauri/target/release/bundle"

@@ -162,13 +162,15 @@ func (a GRPCQueryAdapter) ListDistributionRecords(ctx context.Context, _ *pb.Que
 
 func moduleAccrualToProto(record modtypes.RewardAccrual) *pb.RewardAccrual {
 	return &pb.RewardAccrual{
-		AccrualId:      record.AccrualID,
-		SessionId:      record.SessionID,
-		ProviderId:     record.ProviderID,
-		AssetDenom:     record.AssetDenom,
-		Amount:         record.Amount,
-		AccruedAtUnix:  record.AccruedAtUnix,
-		OperationState: moduleStatusToProto(record.OperationState),
+		AccrualId:       record.AccrualID,
+		SessionId:       record.SessionID,
+		ProviderId:      record.ProviderID,
+		AssetDenom:      record.AssetDenom,
+		Amount:          record.Amount,
+		AccruedAtUnix:   record.AccruedAtUnix,
+		PayoutStartUnix: record.PayoutStartUnix,
+		PayoutEndUnix:   record.PayoutEndUnix,
+		OperationState:  moduleStatusToProto(record.OperationState),
 	}
 }
 
@@ -178,12 +180,14 @@ func protoAccrualToModule(record *pb.RewardAccrual) modtypes.RewardAccrual {
 	}
 
 	return modtypes.RewardAccrual{
-		AccrualID:     record.GetAccrualId(),
-		SessionID:     record.GetSessionId(),
-		ProviderID:    record.GetProviderId(),
-		AssetDenom:    record.GetAssetDenom(),
-		Amount:        record.GetAmount(),
-		AccruedAtUnix: record.GetAccruedAtUnix(),
+		AccrualID:       record.GetAccrualId(),
+		SessionID:       record.GetSessionId(),
+		ProviderID:      record.GetProviderId(),
+		AssetDenom:      record.GetAssetDenom(),
+		Amount:          record.GetAmount(),
+		AccruedAtUnix:   record.GetAccruedAtUnix(),
+		PayoutStartUnix: record.GetPayoutStartUnix(),
+		PayoutEndUnix:   record.GetPayoutEndUnix(),
 		// OperationState is server-owned lifecycle metadata and must not be client-injectable.
 		OperationState: "",
 	}

@@ -6,7 +6,7 @@
     <title>Global Private Mesh (GPM) Desktop</title>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
-  <body class="page-desktop">
+  <body class="page-desktop public-app-mode">
     <main class="app vpn-shell">
       <header class="hero-card">
         <div class="hero-copy">
@@ -182,13 +182,13 @@
             <button id="session_rotate_btn" class="secondary">Rotate Session</button>
             <button id="session_revoke_btn" class="secondary">Sign Out</button>
             <button id="manifest_btn" class="secondary">Manifest</button>
-            <button id="audit_recent_btn" class="secondary">Recent Audit</button>
+            <button id="audit_recent_btn" class="secondary" data-admin-only>Recent Audit</button>
           </div>
           <p id="signin_policy_hint" class="hint">
             Wallet Sign-In is recommended; production mode requires Wallet Sign-In and disables manual Sign In.
           </p>
 
-          <div class="grid grid-2">
+          <div class="grid grid-2" data-admin-only>
             <label>
               Audit limit
               <input id="audit_limit" type="number" min="1" max="200" value="25" />
@@ -225,54 +225,104 @@
               Current role
               <input id="current_role" value="client" readonly />
             </label>
-            <label class="span-2">
-              Chain operator ID
-              <input id="chain_operator_id" placeholder="operator-id" />
-            </label>
-            <label class="span-2">
-              Selected application updated at
-              <input id="selected_application_updated_at" placeholder="2026-04-19T12:34:56Z" readonly />
-            </label>
-            <label class="span-2">
-              Moderation reason
-              <input id="operator_reason" placeholder="required for rejection; optional for approval" />
-            </label>
-            <label>
-              Queue status
-              <select id="operator_list_status">
-                <option value="">All</option>
-                <option value="pending">Pending</option>
-                <option value="approved">Approved</option>
-                <option value="rejected">Rejected</option>
-              </select>
-            </label>
-            <label>
-              Queue search
-              <input id="operator_list_search" placeholder="wallet, operator ID, or label" />
-            </label>
-            <label>
-              Queue limit
-              <input id="operator_list_limit" type="number" min="1" value="25" />
-            </label>
-            <label class="span-2">
-              Queue next cursor
-              <input id="operator_list_next_cursor" placeholder="set by latest list response" readonly />
-            </label>
+            <div class="span-2 grid grid-2 admin-console-fields" data-admin-only>
+              <label class="span-2">
+                Chain operator ID
+                <input id="chain_operator_id" placeholder="operator-id" />
+              </label>
+              <label class="span-2">
+                Selected application updated at
+                <input id="selected_application_updated_at" placeholder="2026-04-19T12:34:56Z" readonly />
+              </label>
+              <label class="span-2">
+                Moderation reason
+                <input id="operator_reason" placeholder="required for rejection; optional for approval" />
+              </label>
+              <label>
+                Queue status
+                <select id="operator_list_status">
+                  <option value="">All</option>
+                  <option value="pending">Pending</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </label>
+              <label>
+                Queue search
+                <input id="operator_list_search" placeholder="wallet, operator ID, or label" />
+              </label>
+              <label>
+                Queue limit
+                <input id="operator_list_limit" type="number" min="1" value="25" />
+              </label>
+              <label class="span-2">
+                Queue next cursor
+                <input id="operator_list_next_cursor" placeholder="set by latest list response" readonly />
+              </label>
+              <label>
+                Contribution status
+                <select id="admin_contribution_status">
+                  <option value="enabled">Enabled</option>
+                  <option value="all">All</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </label>
+              <label>
+                Contribution role
+                <select id="admin_contribution_role">
+                  <option value="">All roles</option>
+                  <option value="micro-relay">Micro-relay</option>
+                  <option value="micro-exit">Micro-exit beta</option>
+                </select>
+              </label>
+              <label>
+                Contribution wallet
+                <input id="admin_contribution_wallet" placeholder="cosmos1... optional filter" />
+              </label>
+              <label>
+                Contribution limit
+                <input id="admin_contribution_limit" type="number" min="1" max="500" value="25" />
+              </label>
+              <label class="span-2">
+                Reward week start
+                <input id="admin_reward_week_start" placeholder="optional Monday 00:00 UTC timestamp" />
+              </label>
+              <label>
+                Reward hold source
+                <select id="admin_reward_hold_source">
+                  <option value="admin_reward_hold">Admin review</option>
+                  <option value="traffic_proof">Traffic proof</option>
+                  <option value="slashing_evidence">Slashing evidence</option>
+                  <option value="abuse_flag">Abuse flag</option>
+                  <option value="policy_violation">Policy violation</option>
+                  <option value="chain_binding">Chain binding</option>
+                </select>
+              </label>
+              <label>
+                Reward hold reason
+                <input id="admin_reward_hold_reason" placeholder="required when placing a hold" />
+              </label>
+            </div>
           </div>
 
           <div class="actions">
             <button id="register_client_btn">Register Client</button>
-            <button id="apply_operator_btn" class="secondary">Apply Operator Role</button>
-            <button id="operator_status_btn" class="secondary">Operator Status</button>
-            <button id="operator_list_filter_btn" class="secondary">List Operator Queue</button>
-            <button id="operator_list_pending_btn" class="secondary">List Pending Operators</button>
-            <button id="operator_load_next_pending_btn" class="secondary">Load Next Pending</button>
-            <button id="operator_list_all_btn" class="secondary">List All Operators</button>
-            <button id="operator_list_next_btn" class="secondary" disabled>Next Queue Page</button>
-            <button id="approve_operator_btn" class="secondary">Approve Operator</button>
-            <button id="reject_operator_btn" class="secondary">Reject Operator</button>
+            <button id="apply_operator_btn" class="secondary" data-admin-only>Apply Operator Role</button>
+            <button id="operator_status_btn" class="secondary" data-admin-only>Operator Status</button>
+            <button id="operator_list_filter_btn" class="secondary" data-admin-only>List Operator Queue</button>
+            <button id="operator_list_pending_btn" class="secondary" data-admin-only>List Pending Operators</button>
+            <button id="operator_load_next_pending_btn" class="secondary" data-admin-only>Load Next Pending</button>
+            <button id="operator_list_all_btn" class="secondary" data-admin-only>List All Operators</button>
+            <button id="operator_list_next_btn" class="secondary" disabled data-admin-only>Next Queue Page</button>
+            <button id="approve_operator_btn" class="secondary" data-admin-only>Approve Operator</button>
+            <button id="reject_operator_btn" class="secondary" data-admin-only>Reject Operator</button>
+            <button id="admin_contribution_list_btn" class="secondary" data-admin-only>Review Contributions</button>
+            <button id="admin_reward_review_btn" class="secondary" data-admin-only>Review Weekly Reward</button>
+            <button id="admin_reward_hold_btn" class="secondary" data-admin-only>Hold Weekly Reward</button>
+            <button id="admin_reward_release_btn" class="secondary" data-admin-only>Release Reward Hold</button>
+            <button id="admin_reward_finalize_btn" class="secondary" data-admin-only>Finalize Weekly Reward</button>
           </div>
-          <p id="operator_approval_policy_hint" class="hint">
+          <p id="operator_approval_policy_hint" class="hint" data-admin-only>
             Operator approval auth policy: admin session token required by desktop actions; runtime config controls strictness and fallback posture.
           </p>
         </section>
@@ -332,8 +382,8 @@
                 <label>
                   Path profile
                   <select id="path_profile">
-                    <option value="2hop">2hop (balanced)</option>
-                    <option value="1hop">1hop (speed)</option>
+                    <option value="2hop">2hop (balanced/speed)</option>
+                    <option value="1hop">1hop (direct beta)</option>
                     <option value="3hop">3hop (private)</option>
                   </select>
                 </label>
@@ -368,7 +418,7 @@
                   PROD profile
                 </label>
                 <label class="check">
-                  <input id="install_route" type="checkbox" checked />
+                  <input id="install_route" type="checkbox" />
                   Install default route
                 </label>
               </div>
@@ -398,6 +448,47 @@
                   </label>
                 </div>
               </details>
+
+              <div class="contribution-card">
+                <div class="section-head">
+                  <h3>Contribution Mode</h3>
+                  <p>
+                    Optional beta micro-relay/micro-exit contribution. The GPM Agent sets safe caps from local
+                    hardware and network quality, and weekly payouts are based on valid metered contribution.
+                  </p>
+                </div>
+                <div class="grid grid-2">
+                  <label>
+                    Contribution role
+                    <select id="contribution_role">
+                      <option value="micro-relay">Micro-relay</option>
+                      <option value="micro-exit">Micro-exit beta</option>
+                    </select>
+                  </label>
+                  <article class="status-tile compact-tile">
+                    <span class="status-label">Eligibility</span>
+                    <strong id="contribution_state">Unknown</strong>
+                    <span id="contribution_detail" class="status-detail">Sign in, then check contribution status.</span>
+                  </article>
+                  <article class="status-tile compact-tile">
+                    <span class="status-label">Agent Caps</span>
+                    <strong id="contribution_capacity">Unknown</strong>
+                    <span class="status-detail">User VPN traffic is always prioritized.</span>
+                  </article>
+                  <article class="status-tile compact-tile">
+                    <span class="status-label">Weekly Reward</span>
+                    <strong id="contribution_reward">Pending</strong>
+                    <span class="status-detail">Settles weekly, Monday 00:00 UTC.</span>
+                  </article>
+                </div>
+                <div class="actions">
+                  <button id="contribution_status_btn" class="secondary">Contribution Status</button>
+                  <button id="contribution_enable_btn">Enable Contribution</button>
+                  <button id="contribution_disable_btn" class="secondary">Disable Contribution</button>
+                  <button id="rewards_current_week_btn" class="secondary">Current Week</button>
+                  <button id="rewards_history_btn" class="secondary">Reward History</button>
+                </div>
+              </div>
             </div>
 
             <div class="actions">
@@ -415,7 +506,7 @@
               <p id="server_lock_hint" class="hint">
                 Server tab guidance appears here, including lock reasons and next steps.
               </p>
-              <div class="row">
+              <div class="row" data-admin-only>
                 <label>
                   Active profile
                   <select id="set_profile">
@@ -427,7 +518,7 @@
               </div>
             </div>
 
-            <div class="actions">
+            <div class="actions" data-admin-only>
               <button id="set_profile_btn">Set Profile</button>
               <button id="status_btn_server" class="secondary">Status</button>
               <button id="service_status_btn" class="secondary">Service Status</button>

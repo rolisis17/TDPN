@@ -25,6 +25,9 @@ func TestGRPCMsgAdapterSubmitEvidenceAndRecordPenalty(t *testing.T) {
 			ViolationType: "double-sign",
 			Kind:          modtypes.EvidenceKindObjective,
 			ProofHash:     testSHAProof("proof-grpc-1"),
+			SlashAmount:   1500,
+			SlashDenom:    "UTDPN",
+			Status:        pb.ReconciliationStatus_RECONCILIATION_STATUS_FAILED,
 		},
 	})
 	if err != nil {
@@ -36,12 +39,35 @@ func TestGRPCMsgAdapterSubmitEvidenceAndRecordPenalty(t *testing.T) {
 	if evidenceResp.GetEvidence().GetViolationType() != "double-sign" {
 		t.Fatalf("expected violation_type %q, got %q", "double-sign", evidenceResp.GetEvidence().GetViolationType())
 	}
+	if evidenceResp.GetEvidence().GetSlashAmount() != 1500 {
+		t.Fatalf("expected evidence slash amount 1500, got %d", evidenceResp.GetEvidence().GetSlashAmount())
+	}
+	if evidenceResp.GetEvidence().GetSlashDenom() != "utdpn" {
+		t.Fatalf("expected evidence slash denom %q, got %q", "utdpn", evidenceResp.GetEvidence().GetSlashDenom())
+	}
+	if evidenceResp.GetEvidence().GetStatus() != pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED {
+		t.Fatalf("expected server-owned submitted evidence status, got %v", evidenceResp.GetEvidence().GetStatus())
+	}
+	confirmResp, err := adapter.ConfirmEvidence(context.Background(), &pb.MsgConfirmEvidenceRequest{
+		EvidenceId: " EVIDENCE-GRPC-1 ",
+	})
+	if err != nil {
+		t.Fatalf("ConfirmEvidence returned unexpected error: %v", err)
+	}
+	if confirmResp.GetEvidence().GetEvidenceId() != "evidence-grpc-1" {
+		t.Fatalf("expected confirmed evidence id %q, got %q", "evidence-grpc-1", confirmResp.GetEvidence().GetEvidenceId())
+	}
+	if confirmResp.GetEvidence().GetStatus() != pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED {
+		t.Fatalf("expected confirmed evidence status, got %v", confirmResp.GetEvidence().GetStatus())
+	}
 
 	penaltyResp, err := adapter.RecordPenalty(context.Background(), &pb.MsgRecordPenaltyRequest{
 		Penalty: &pb.PenaltyDecision{
 			PenaltyId:       "penalty-grpc-1",
 			EvidenceId:      "evidence-grpc-1",
 			SlashBasisPoint: 42,
+			SlashAmount:     1500,
+			SlashDenom:      "UTDPN",
 		},
 	})
 	if err != nil {
@@ -52,6 +78,12 @@ func TestGRPCMsgAdapterSubmitEvidenceAndRecordPenalty(t *testing.T) {
 	}
 	if penaltyResp.GetPenalty().GetStatus() != pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED {
 		t.Fatalf("expected submitted status, got %v", penaltyResp.GetPenalty().GetStatus())
+	}
+	if penaltyResp.GetPenalty().GetSlashAmount() != 1500 {
+		t.Fatalf("expected penalty slash amount 1500, got %d", penaltyResp.GetPenalty().GetSlashAmount())
+	}
+	if penaltyResp.GetPenalty().GetSlashDenom() != "utdpn" {
+		t.Fatalf("expected penalty slash denom %q, got %q", "utdpn", penaltyResp.GetPenalty().GetSlashDenom())
 	}
 }
 
@@ -125,6 +157,11 @@ func TestGRPCMsgAdapterNilRequestsMapToValidationClassification(t *testing.T) {
 		t.Fatalf("expected ErrInvalidEvidence for nil evidence request, got %v", evidenceErr)
 	}
 
+	_, confirmErr := adapter.ConfirmEvidence(context.Background(), nil)
+	if !errors.Is(confirmErr, ErrInvalidEvidence) {
+		t.Fatalf("expected ErrInvalidEvidence for nil confirm request, got %v", confirmErr)
+	}
+
 	_, penaltyErr := adapter.RecordPenalty(context.Background(), nil)
 	if !errors.Is(penaltyErr, ErrInvalidPenalty) {
 		t.Fatalf("expected ErrInvalidPenalty for nil penalty request, got %v", penaltyErr)
@@ -156,6 +193,42 @@ func TestGRPCMsgAdapterSubmitEvidenceHonorsCanceledContext(t *testing.T) {
 	}
 	if _, ok := k.GetEvidence(evidenceID); ok {
 		t.Fatal("did not expect evidence persistence on canceled context")
+	}
+}
+
+func TestGRPCMsgAdapterConfirmEvidenceHonorsCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	adapter := NewGRPCMsgAdapter(NewMsgServer(&k))
+
+	const evidenceID = "evidence-grpc-canceled-confirm"
+	if _, err := adapter.SubmitEvidence(context.Background(), &pb.MsgSubmitEvidenceRequest{
+		Evidence: &pb.SlashEvidence{
+			EvidenceId:    evidenceID,
+			ProviderId:    "provider-grpc-canceled-confirm",
+			SessionId:     "session-grpc-canceled-confirm",
+			ViolationType: "double-sign",
+			Kind:          modtypes.EvidenceKindObjective,
+			ProofHash:     testSHAProof("proof-grpc-canceled-confirm"),
+		},
+	}); err != nil {
+		t.Fatalf("SubmitEvidence returned unexpected error: %v", err)
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := adapter.ConfirmEvidence(canceledCtx, &pb.MsgConfirmEvidenceRequest{EvidenceId: evidenceID})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	stored, ok := k.GetEvidence(evidenceID)
+	if !ok {
+		t.Fatalf("expected persisted evidence %q", evidenceID)
+	}
+	if stored.Status == chaintypes.ReconciliationConfirmed {
+		t.Fatal("did not expect evidence confirmation on canceled context")
 	}
 }
 
@@ -318,6 +391,177 @@ func TestGRPCQueryAdapterListMethods(t *testing.T) {
 	if penaltiesResp.GetPenalties()[0].GetPenaltyId() != "penalty-a" || penaltiesResp.GetPenalties()[1].GetPenaltyId() != "penalty-b" {
 		t.Fatalf("expected sorted penalty IDs [penalty-a penalty-b], got [%s %s]", penaltiesResp.GetPenalties()[0].GetPenaltyId(), penaltiesResp.GetPenalties()[1].GetPenaltyId())
 	}
+}
+
+func TestGRPCQueryAdapterListSlashEvidenceForwardsFilters(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	k.UpsertEvidence(modtypes.SlashEvidence{
+		EvidenceID:      "evidence-filter-target",
+		ProviderID:      "provider-filter-1",
+		SessionID:       "session-filter-1",
+		ViolationType:   "double-sign",
+		Kind:            modtypes.EvidenceKindObjective,
+		ProofHash:       testSHAProof("proof-filter-target"),
+		SubmittedAtUnix: 200,
+		Status:          chaintypes.ReconciliationConfirmed,
+	})
+	k.UpsertEvidence(modtypes.SlashEvidence{
+		EvidenceID:      "evidence-filter-too-old",
+		ProviderID:      "provider-filter-1",
+		SessionID:       "session-filter-1",
+		ViolationType:   "double-sign",
+		Kind:            modtypes.EvidenceKindObjective,
+		ProofHash:       testSHAProof("proof-filter-too-old"),
+		SubmittedAtUnix: 50,
+		Status:          chaintypes.ReconciliationConfirmed,
+	})
+	k.UpsertEvidence(modtypes.SlashEvidence{
+		EvidenceID:      "evidence-filter-failed",
+		ProviderID:      "provider-filter-1",
+		SessionID:       "session-filter-1",
+		ViolationType:   "double-sign",
+		Kind:            modtypes.EvidenceKindObjective,
+		ProofHash:       testSHAProof("proof-filter-failed"),
+		SubmittedAtUnix: 210,
+		Status:          chaintypes.ReconciliationFailed,
+	})
+	k.UpsertEvidence(modtypes.SlashEvidence{
+		EvidenceID:      "evidence-filter-provider-mismatch",
+		ProviderID:      "provider-filter-2",
+		SessionID:       "session-filter-1",
+		ViolationType:   "double-sign",
+		Kind:            modtypes.EvidenceKindObjective,
+		ProofHash:       testSHAProof("proof-filter-provider-mismatch"),
+		SubmittedAtUnix: 220,
+		Status:          chaintypes.ReconciliationConfirmed,
+	})
+	k.UpsertEvidence(modtypes.SlashEvidence{
+		EvidenceID:    "evidence-filter-zero",
+		ProviderID:    "provider-filter-1",
+		SessionID:     "session-filter-1",
+		ViolationType: "double-sign",
+		Kind:          modtypes.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-filter-zero"),
+		Status:        chaintypes.ReconciliationConfirmed,
+	})
+
+	adapter := NewGRPCQueryAdapter(NewQueryServer(&k))
+	resp, err := adapter.ListSlashEvidence(context.Background(), &pb.QueryListSlashEvidenceRequest{
+		ProviderId:             "provider-filter-1",
+		SessionId:              "session-filter-1",
+		ViolationType:          "double-sign",
+		SubmittedAtOrAfterUnix: 100,
+		SubmittedBeforeUnix:    300,
+		IncludeFailed:          boolPtr(false),
+	})
+	if err != nil {
+		t.Fatalf("ListSlashEvidence returned unexpected error: %v", err)
+	}
+	if len(resp.GetEvidence()) != 1 {
+		t.Fatalf("expected 1 filtered evidence record, got %d: %+v", len(resp.GetEvidence()), resp.GetEvidence())
+	}
+	if got := resp.GetEvidence()[0].GetEvidenceId(); got != "evidence-filter-target" {
+		t.Fatalf("expected filtered evidence id %q, got %q", "evidence-filter-target", got)
+	}
+}
+
+func TestGRPCQueryAdapterListSlashEvidenceReturnsFailedStatusWhenIncluded(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	k.UpsertEvidence(modtypes.SlashEvidence{
+		EvidenceID:      "evidence-status-submitted",
+		ProviderID:      "provider-status-1",
+		SessionID:       "session-status-1",
+		ViolationType:   "double-sign",
+		Kind:            modtypes.EvidenceKindObjective,
+		ProofHash:       testSHAProof("proof-status-submitted"),
+		SubmittedAtUnix: 200,
+		Status:          chaintypes.ReconciliationSubmitted,
+	})
+	k.UpsertEvidence(modtypes.SlashEvidence{
+		EvidenceID:      "evidence-status-failed",
+		ProviderID:      "provider-status-1",
+		SessionID:       "session-status-1",
+		ViolationType:   "double-sign",
+		Kind:            modtypes.EvidenceKindObjective,
+		ProofHash:       testSHAProof("proof-status-failed"),
+		SubmittedAtUnix: 210,
+		Status:          chaintypes.ReconciliationFailed,
+	})
+
+	adapter := NewGRPCQueryAdapter(NewQueryServer(&k))
+	resp, err := adapter.ListSlashEvidence(context.Background(), &pb.QueryListSlashEvidenceRequest{
+		ProviderId:    "provider-status-1",
+		SessionId:     "session-status-1",
+		IncludeFailed: boolPtr(true),
+	})
+	if err != nil {
+		t.Fatalf("ListSlashEvidence returned unexpected error: %v", err)
+	}
+	if len(resp.GetEvidence()) != 2 {
+		t.Fatalf("expected submitted and failed evidence records, got %d", len(resp.GetEvidence()))
+	}
+	seenFailed := false
+	for _, evidence := range resp.GetEvidence() {
+		if evidence.GetEvidenceId() == "evidence-status-failed" {
+			seenFailed = true
+			if evidence.GetStatus() != pb.ReconciliationStatus_RECONCILIATION_STATUS_FAILED {
+				t.Fatalf("expected failed status in query response, got %v", evidence.GetStatus())
+			}
+		}
+	}
+	if !seenFailed {
+		t.Fatal("expected failed evidence record to be returned when include_failed=true")
+	}
+}
+
+func TestGRPCQueryAdapterListSlashEvidenceIncludeFailedPresence(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	k.UpsertEvidence(modtypes.SlashEvidence{
+		EvidenceID:    "evidence-grpc-presence-submitted",
+		ViolationType: "double-sign",
+		Kind:          modtypes.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-grpc-presence-submitted"),
+		Status:        chaintypes.ReconciliationSubmitted,
+	})
+	k.UpsertEvidence(modtypes.SlashEvidence{
+		EvidenceID:    "evidence-grpc-presence-failed",
+		ViolationType: "double-sign",
+		Kind:          modtypes.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-grpc-presence-failed"),
+		Status:        chaintypes.ReconciliationFailed,
+	})
+
+	adapter := NewGRPCQueryAdapter(NewQueryServer(&k))
+	defaultResp, err := adapter.ListSlashEvidence(context.Background(), &pb.QueryListSlashEvidenceRequest{})
+	if err != nil {
+		t.Fatalf("ListSlashEvidence returned unexpected error: %v", err)
+	}
+	if len(defaultResp.GetEvidence()) != 2 {
+		t.Fatalf("expected unset include_failed to preserve failed records, got %d", len(defaultResp.GetEvidence()))
+	}
+
+	explicitFalseResp, err := adapter.ListSlashEvidence(context.Background(), &pb.QueryListSlashEvidenceRequest{
+		IncludeFailed: boolPtr(false),
+	})
+	if err != nil {
+		t.Fatalf("ListSlashEvidence returned unexpected error: %v", err)
+	}
+	if len(explicitFalseResp.GetEvidence()) != 1 {
+		t.Fatalf("expected explicit false include_failed to drop failed records, got %d", len(explicitFalseResp.GetEvidence()))
+	}
+	if got := explicitFalseResp.GetEvidence()[0].GetEvidenceId(); got != "evidence-grpc-presence-submitted" {
+		t.Fatalf("expected submitted evidence after explicit false include_failed, got %q", got)
+	}
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func TestGRPCAdaptersNilKeeperPropagatesErrNilKeeper(t *testing.T) {

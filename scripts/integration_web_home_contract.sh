@@ -45,13 +45,18 @@ HOME_HTML_MARKERS=(
   'id="portal-cta-heading"'
   'class="[^"]*cta-panel'
   'href="./portal.html"'
-  'href="./portal.html#operator"'
 )
 
 for pattern in "${HOME_HTML_MARKERS[@]}"; do
   require_regex_marker "$INDEX_HTML" "$pattern" "homepage structure"
 done
 echo "[web-home] homepage structure markers are present"
+
+if grep -qF 'portal.html#operator' "$INDEX_HTML"; then
+  echo "web home contract failed: public homepage must not deep-link to hidden operator/admin portal routes"
+  exit 1
+fi
+echo "[web-home] public homepage does not deep-link to operator/admin portal routes"
 
 HOME_CSS_MARKERS=(
   '^:root[[:space:]]*\{'

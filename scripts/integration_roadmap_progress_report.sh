@@ -502,7 +502,8 @@ cat >"$PHASE0_SUMMARY_JSON" <<'EOF_PHASE0_SUMMARY'
     "launcher_runtime": {"status": "pass", "rc": 0},
     "prompt_budget": {"status": "pass", "rc": 0},
     "config_v1": {"status": "pass", "rc": 0},
-    "local_control_api": {"status": "pass", "rc": 0}
+    "local_control_api": {"status": "pass", "rc": 0},
+    "public_admin_split": {"status": "pass", "rc": 0}
   },
   "summary": {
     "contract_ok": true,
@@ -904,6 +905,7 @@ if ! jq -e \
   and .vpn_track.phase0_product_surface.prompt_budget_ok == true
   and .vpn_track.phase0_product_surface.config_v1_ok == true
   and .vpn_track.phase0_product_surface.local_control_api_ok == true
+  and .vpn_track.phase0_product_surface.public_admin_split_ok == true
   and (.vpn_track.pending_real_host_checks | length) == 2
   and .vpn_track.pending_real_host_checks[0].check_id == "machine_c_vpn_smoke"
   and .vpn_track.pending_real_host_checks[1].check_id == "three_machine_prod_signoff"
@@ -940,6 +942,11 @@ if ! jq -e \
   and (.next_actions | length) >= 1
   and ((.next_actions_remediation // []) | type) == "array"
   and (.next_actions[0].id // "") == "machine_c_vpn_smoke"
+  and .next_actions[0].requires_real_hosts == true
+  and .next_actions[0].local_pack_only == false
+  and .next_actions[0].missing_evidence_family == "machine-c-vpn-smoke"
+  and .next_actions[0].missing_evidence_families == ["machine-c-vpn-smoke"]
+  and .next_actions[0].missing_evidence_action_kind == "real-host"
   and (
     if .vpn_track.profile_default_gate.next_command_has_unresolved_placeholders == true then
       (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
@@ -1075,6 +1082,12 @@ if ! jq -e \
            and (.label // "") == "Roadmap live-evidence archive run"
            and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-archive-run --reports-dir .easy-node-logs --summary-json .easy-node-logs/roadmap_live_evidence_archive_run_summary.json --print-summary-json 1"
            and (.reason // "") == "archive current live evidence artifacts before rerunning cycles"
+           and .requires_real_hosts == false
+           and .local_pack_only == true
+           and ((.missing_evidence_families // []) | type) == "array"
+           and ((.missing_evidence_families // []) | length) > 0
+           and ((.missing_evidence_action_kinds // []) | index("archive")) != null
+           and (.missing_evidence_action_kind // "") == "archive"
          ))
        else
          .next_actions_summary.live_evidence_archive_helper_emitted == false
@@ -1089,6 +1102,12 @@ if ! jq -e \
            and (.label // "") == "Three-machine real-host validation pack"
            and (.command // "") == "./scripts/easy_node.sh three-machine-real-host-validation-pack --reports-dir .easy-node-logs --summary-json .easy-node-logs/three_machine_real_host_validation_pack_summary.json --print-summary-json 1"
            and (.reason // "") == "package current three-machine validation evidence while real-host signoff is still pending"
+           and .requires_real_hosts == false
+           and .local_pack_only == true
+           and .missing_evidence_family == "three-machine-real-host"
+           and .missing_evidence_families == ["three-machine-real-host"]
+           and ((.missing_evidence_action_kinds // []) | index("archive")) != null
+           and ((.missing_evidence_action_kinds // []) | index("real-host")) != null
          ))
        else
          .next_actions_summary.three_machine_real_host_validation_pack_helper_emitted == false
@@ -8633,6 +8652,12 @@ if ! jq -e \
     and (.label // "") == "Roadmap live-evidence actionable run"
     and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-actionable-run --reports-dir .easy-node-logs --print-summary-json 1"
     and (.reason // "") == "batch-run pending live evidence cycle actions"
+    and .requires_real_hosts == true
+    and .local_pack_only == false
+    and ((.missing_evidence_families // []) | index("runtime-actuation")) != null
+    and ((.missing_evidence_families // []) | index("multi-vm")) != null
+    and ((.missing_evidence_action_kinds // []) | index("live-evidence")) != null
+    and (.missing_evidence_action_kind // "") == "live-evidence"
   ))
   and .next_actions_summary.live_evidence_batch_helper_emitted == true
   and .next_actions_summary.live_evidence_individual_suppression_mode == false
@@ -8661,6 +8686,12 @@ if ! jq -e \
            and (.label // "") == "Roadmap live-evidence archive run"
            and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-archive-run --reports-dir .easy-node-logs --summary-json .easy-node-logs/roadmap_live_evidence_archive_run_summary.json --print-summary-json 1"
            and (.reason // "") == "archive current live evidence artifacts before rerunning cycles"
+           and .requires_real_hosts == false
+           and .local_pack_only == true
+           and ((.missing_evidence_families // []) | index("runtime-actuation")) != null
+           and ((.missing_evidence_families // []) | index("multi-vm")) != null
+           and ((.missing_evidence_action_kinds // []) | index("archive")) != null
+           and (.missing_evidence_action_kind // "") == "archive"
          ))
        else
          .next_actions_summary.live_evidence_archive_helper_emitted == false
@@ -8677,6 +8708,12 @@ if ! jq -e \
            and (.label // "") == "Three-machine real-host validation pack"
            and (.command // "") == "./scripts/easy_node.sh three-machine-real-host-validation-pack --reports-dir .easy-node-logs --summary-json .easy-node-logs/three_machine_real_host_validation_pack_summary.json --print-summary-json 1"
            and (.reason // "") == "package current three-machine validation evidence while real-host signoff is still pending"
+           and .requires_real_hosts == false
+           and .local_pack_only == true
+           and .missing_evidence_family == "three-machine-real-host"
+           and .missing_evidence_families == ["three-machine-real-host"]
+           and ((.missing_evidence_action_kinds // []) | index("archive")) != null
+           and ((.missing_evidence_action_kinds // []) | index("real-host")) != null
          ))
        else
          .next_actions_summary.three_machine_real_host_validation_pack_helper_emitted == false
@@ -8692,6 +8729,12 @@ if ! jq -e \
            and (.label // "") == "Roadmap live-evidence cycle-batch run"
            and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs --print-summary-json 1"
            and (.reason // "") == "repeat pending live evidence cycles across tracks in one helper run"
+           and .requires_real_hosts == true
+           and .local_pack_only == false
+           and ((.missing_evidence_families // []) | index("runtime-actuation")) != null
+           and ((.missing_evidence_families // []) | index("multi-vm")) != null
+           and ((.missing_evidence_action_kinds // []) | index("live-evidence")) != null
+           and (.missing_evidence_action_kind // "") == "live-evidence"
          ))
        else
          .next_actions_summary.live_evidence_cycle_batch_helper_emitted == false
@@ -8756,6 +8799,12 @@ if ! jq -e \
     and (.label // "") == "Roadmap live-evidence actionable run"
     and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-actionable-run --reports-dir .easy-node-logs --print-summary-json 1"
     and (.reason // "") == "batch-run pending live evidence cycle actions"
+    and .requires_real_hosts == true
+    and .local_pack_only == false
+    and ((.missing_evidence_families // []) | index("runtime-actuation")) != null
+    and ((.missing_evidence_families // []) | index("multi-vm")) != null
+    and ((.missing_evidence_action_kinds // []) | index("live-evidence")) != null
+    and (.missing_evidence_action_kind // "") == "live-evidence"
   ))
   and .next_actions_summary.live_evidence_batch_helper_emitted == true
   and .next_actions_summary.profile_default_live_evidence_publish_bundle_helper_available == $expect_profile_default_live_evidence_publish_bundle_helper
@@ -8779,6 +8828,12 @@ if ! jq -e \
          and ((.next_actions // []) | any(
            .id == "roadmap_live_evidence_archive_run"
            and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-archive-run --reports-dir .easy-node-logs --summary-json .easy-node-logs/roadmap_live_evidence_archive_run_summary.json --print-summary-json 1"
+           and .requires_real_hosts == false
+           and .local_pack_only == true
+           and ((.missing_evidence_families // []) | index("runtime-actuation")) != null
+           and ((.missing_evidence_families // []) | index("multi-vm")) != null
+           and ((.missing_evidence_action_kinds // []) | index("archive")) != null
+           and (.missing_evidence_action_kind // "") == "archive"
          ))
        else
          .next_actions_summary.live_evidence_archive_helper_emitted == false
@@ -8793,6 +8848,12 @@ if ! jq -e \
          and ((.next_actions // []) | any(
            .id == "three_machine_real_host_validation_pack"
            and (.command // "") == "./scripts/easy_node.sh three-machine-real-host-validation-pack --reports-dir .easy-node-logs --summary-json .easy-node-logs/three_machine_real_host_validation_pack_summary.json --print-summary-json 1"
+           and .requires_real_hosts == false
+           and .local_pack_only == true
+           and .missing_evidence_family == "three-machine-real-host"
+           and .missing_evidence_families == ["three-machine-real-host"]
+           and ((.missing_evidence_action_kinds // []) | index("archive")) != null
+           and ((.missing_evidence_action_kinds // []) | index("real-host")) != null
          ))
        else
          .next_actions_summary.three_machine_real_host_validation_pack_helper_emitted == false
@@ -8805,6 +8866,12 @@ if ! jq -e \
          and ((.next_actions // []) | any(
            .id == "roadmap_live_evidence_cycle_batch_run"
            and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs --print-summary-json 1"
+           and .requires_real_hosts == true
+           and .local_pack_only == false
+           and ((.missing_evidence_families // []) | index("runtime-actuation")) != null
+           and ((.missing_evidence_families // []) | index("multi-vm")) != null
+           and ((.missing_evidence_action_kinds // []) | index("live-evidence")) != null
+           and (.missing_evidence_action_kind // "") == "live-evidence"
          ))
        else
          .next_actions_summary.live_evidence_cycle_batch_helper_emitted == false

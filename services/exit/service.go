@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,86 +40,92 @@ import (
 )
 
 type sessionInfo struct {
-	claims        crypto.CapabilityClaims
-	seenNonces    map[uint64]struct{}
-	highestNonce  uint64
-	lastActivity  time.Time
-	transport     string
-	sessionKeyID  string
-	clientInnerIP string
-	clientPubKey  string
-	peerAddr      string
-	peerLastSeen  int64
-	downNonce     uint64
-	ingressBytes  int64
-	egressBytes   int64
+	claims               crypto.CapabilityClaims
+	seenNonces           map[uint64]struct{}
+	highestNonce         uint64
+	lastActivity         time.Time
+	transport            string
+	sessionKeyID         string
+	reservationID        string
+	reservationSessionID string
+	reservationSubjectID string
+	clientInnerIP        string
+	clientPubKey         string
+	peerAddr             string
+	peerLastSeen         int64
+	downNonce            uint64
+	ingressBytes         int64
+	egressBytes          int64
 }
 
 type Service struct {
-	addr                             string
-	dataAddr                         string
-	issuerURL                        string
-	issuerURLs                       []string
-	issuerMinSources                 int
-	issuerMinOperators               int
-	issuerMinKeyVotes                int
-	issuerRequireID                  bool
-	revocationsURL                   string
-	revocationsURLs                  []string
-	dataMode                         string
-	opaqueSinkAddr                   string
-	opaqueSourceAddr                 string
-	opaqueEcho                       bool
-	wgPubKey                         string
-	wgExitIP                         string
-	wgMTU                            int
-	wgKeepaliveSec                   int
-	ipAllocCursor                    uint32
-	wgInterface                      string
-	wgPrivateKey                     string
-	wgListenPort                     int
-	wgBackend                        string
-	wgKernelProxy                    bool
-	wgKernelProxyMax                 int
-	wgKernelProxyIdle                time.Duration
-	sessionCleanupSec                int
-	maxActiveSessions                int
-	wgKernelTargetUDP                *net.UDPAddr
-	wgManager                        wg.Manager
-	liveWGMode                       bool
-	wgOnlyMode                       bool
-	egressBackend                    string
-	egressIface                      string
-	egressCIDR                       string
-	egressChain                      string
-	egressConfigured                 bool
-	tokenProofReplayGuard            bool
-	tokenProofReplaySharedFileMode   bool
-	tokenProofReplayLockTimeout      time.Duration
-	tokenProofReplayRedisAddr        string
-	tokenProofReplayRedisPassword    string
-	tokenProofReplayRedisDB          int
-	tokenProofReplayRedisTLS         bool
-	tokenProofReplayRedisPrefix      string
-	tokenProofReplayRedisDialTimeout time.Duration
-	peerRebindAfter                  time.Duration
-	revocationRefreshSec             int
-	accountingFile                   string
-	tokenProofReplayStoreFile        string
-	accountingFlushSec               int
-	settlementReconcileSec           int
-	startupSyncTimeout               time.Duration
-	verifyRefreshMinInterval         time.Duration
-	exitRelayID                      string
-	betaStrict                       bool
-	prodStrict                       bool
-	strictModeParseErr               error
-	enforcer                         *policy.Enforcer
-	httpClient                       *http.Client
-	httpSrv                          *http.Server
-	udpConn                          *net.UDPConn
-	opaqueSourceConn                 *net.UDPConn
-	opaqueSinkUDP                    *net.UDPAddr
+	addr                              string
+	dataAddr                          string
+	issuerURL                         string
+	issuerURLs                        []string
+	issuerMinSources                  int
+	issuerMinOperators                int
+	issuerMinKeyVotes                 int
+	issuerRequireID                   bool
+	revocationsURL                    string
+	revocationsURLs                   []string
+	dataMode                          string
+	opaqueSinkAddr                    string
+	opaqueSourceAddr                  string
+	opaqueEcho                        bool
+	wgPubKey                          string
+	wgExitIP                          string
+	wgMTU                             int
+	wgKeepaliveSec                    int
+	ipAllocCursor                     uint32
+	allocatedClientInnerIPs           map[string]struct{}
+	wgInterface                       string
+	wgPrivateKey                      string
+	wgListenPort                      int
+	wgBackend                         string
+	wgKernelProxy                     bool
+	wgKernelProxyMax                  int
+	wgKernelProxyIdle                 time.Duration
+	sessionCleanupSec                 int
+	maxActiveSessions                 int
+	wgKernelTargetUDP                 *net.UDPAddr
+	wgManager                         wg.Manager
+	liveWGMode                        bool
+	wgOnlyMode                        bool
+	egressBackend                     string
+	egressIface                       string
+	egressCIDR                        string
+	egressChain                       string
+	egressConfigured                  bool
+	tokenProofReplayGuard             bool
+	tokenProofReplaySharedFileMode    bool
+	tokenProofReplayLockTimeout       time.Duration
+	tokenProofReplayRedisAddr         string
+	tokenProofReplayRedisPassword     string
+	tokenProofReplayRedisDB           int
+	tokenProofReplayRedisTLS          bool
+	tokenProofReplayRedisPrefix       string
+	tokenProofReplayRedisDialTimeout  time.Duration
+	peerRebindAfter                   time.Duration
+	revocationRefreshSec              int
+	accountingFile                    string
+	tokenProofReplayStoreFile         string
+	tokenProofReplayStoreFileExplicit bool
+	accountingFlushSec                int
+	settlementReconcileSec            int
+	startupSyncTimeout                time.Duration
+	verifyRefreshMinInterval          time.Duration
+	exitRelayID                       string
+	trustedEntryRouteAssertionPubs    map[string]ed25519.PublicKey
+	betaStrict                        bool
+	prodStrict                        bool
+	strictModeParseErr                error
+	enforcer                          *policy.Enforcer
+	httpClient                        *http.Client
+	httpSrv                           *http.Server
+	udpConn                           *net.UDPConn
+	opaqueSourceConn                  *net.UDPConn
+	opaqueSinkUDP                     *net.UDPAddr
 
 	mu                          sync.RWMutex
 	issuerPub                   ed25519.PublicKey
@@ -134,6 +142,7 @@ type Service struct {
 	minTokenEpoch               map[string]int64
 	revocationVersion           map[string]int64
 	settlement                  settlement.Service
+	settlementChainBacked       bool
 	sessionReserve              int64
 	settlementStatus            settlementStatusSnapshot
 	tokenProofReplayRedisMu     sync.Mutex
@@ -219,11 +228,16 @@ const remoteResponseMaxBodyBytes int64 = 1 << 20
 const defaultVerifyRefreshMinInterval = 2 * time.Second
 const allowDangerousIssuerKeysetReplacement = "EXIT_ALLOW_DANGEROUS_ISSUER_KEYSET_REPLACEMENT"
 const allowDangerousCosmosAdapterFallback = "SETTLEMENT_ALLOW_DANGEROUS_COSMOS_INIT_FALLBACK"
+const clientInnerIPFirstOctet uint32 = 2
+const clientInnerIPAfterLastOctet uint32 = 250
+const clientInnerIPPoolSize = int(clientInnerIPAfterLastOctet - clientInnerIPFirstOctet)
 
 var (
 	egressChainPattern            = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 	egressIfacePattern            = regexp.MustCompile(`^[A-Za-z0-9_.:@-]{1,64}$`)
+	runShellCommand               = runShell
 	sharedAddressSpaceCGNATPrefix = netip.MustParsePrefix("100.64.0.0/10")
+	errClientInnerIPPoolExhausted = errors.New("client inner ip pool exhausted")
 )
 
 func New() *Service {
@@ -375,6 +389,7 @@ func New() *Service {
 	}
 	tokenProofReplayGuard := os.Getenv("EXIT_TOKEN_PROOF_REPLAY_GUARD") != "0"
 	tokenProofReplayStoreFile := strings.TrimSpace(os.Getenv("EXIT_TOKEN_PROOF_REPLAY_STORE_FILE"))
+	tokenProofReplayStoreFileExplicit := tokenProofReplayStoreFile != ""
 	if tokenProofReplayStoreFile == "" {
 		tokenProofReplayStoreFile = "data/exit_token_proof_replay.json"
 	}
@@ -439,6 +454,10 @@ func New() *Service {
 		}
 	}
 	exitRelayID := strings.TrimSpace(os.Getenv("EXIT_RELAY_ID"))
+	trustedEntryRouteAssertionPubs, trustedEntryRouteAssertionErr := parseTrustedEntryRouteAssertionPubKeys(os.Getenv("EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS"))
+	if trustedEntryRouteAssertionErr != nil {
+		log.Printf("exit trusted entry route assertion keys ignored: %v", trustedEntryRouteAssertionErr)
+	}
 	betaStrict, betaStrictErr := envStrictBoolOr("BETA_STRICT_MODE", "EXIT_BETA_STRICT", false)
 	prodStrict, prodStrictErr := envStrictBoolOr("PROD_STRICT_MODE", "EXIT_PROD_STRICT", false)
 	strictModeParseErr := firstEnvParseError(
@@ -468,77 +487,107 @@ func New() *Service {
 		}
 	}
 
+	settlementSvc := newSettlementServiceFromEnv()
+	settlementChainBacked := settlementServiceChainBacked(settlementSvc)
+
 	return &Service{
-		addr:                             addr,
-		dataAddr:                         dataAddr,
-		issuerURL:                        issuerURL,
-		issuerURLs:                       issuerURLs,
-		issuerMinSources:                 issuerMinSources,
-		issuerMinOperators:               issuerMinOperators,
-		issuerMinKeyVotes:                issuerMinKeyVotes,
-		issuerRequireID:                  issuerRequireID,
-		revocationsURL:                   revocationsURL,
-		revocationsURLs:                  revocationsURLs,
-		dataMode:                         dataMode,
-		opaqueSinkAddr:                   opaqueSinkAddr,
-		opaqueSourceAddr:                 opaqueSourceAddr,
-		opaqueEcho:                       opaqueEcho,
-		wgPubKey:                         wgPubKey,
-		wgExitIP:                         wgExitIP,
-		wgMTU:                            1280,
-		wgKeepaliveSec:                   25,
-		ipAllocCursor:                    2,
-		wgInterface:                      wgInterface,
-		wgPrivateKey:                     wgPrivateKey,
-		wgListenPort:                     wgListenPort,
-		wgBackend:                        wgBackend,
-		wgKernelProxy:                    wgKernelProxy,
-		wgKernelProxyMax:                 wgKernelProxyMax,
-		wgKernelProxyIdle:                wgKernelProxyIdle,
-		sessionCleanupSec:                sessionCleanupSec,
-		maxActiveSessions:                maxActiveSessions,
-		wgManager:                        wgManager,
-		liveWGMode:                       liveWGMode,
-		wgOnlyMode:                       wgOnlyMode,
-		egressBackend:                    egressBackend,
-		egressIface:                      egressIface,
-		egressCIDR:                       egressCIDR,
-		egressChain:                      egressChain,
-		tokenProofReplayGuard:            tokenProofReplayGuard,
-		tokenProofReplaySharedFileMode:   tokenProofReplaySharedFileMode,
-		tokenProofReplayLockTimeout:      tokenProofReplayLockTimeout,
-		tokenProofReplayRedisAddr:        tokenProofReplayRedisAddr,
-		tokenProofReplayRedisPassword:    tokenProofReplayRedisPassword,
-		tokenProofReplayRedisDB:          tokenProofReplayRedisDB,
-		tokenProofReplayRedisTLS:         tokenProofReplayRedisTLS,
-		tokenProofReplayRedisPrefix:      tokenProofReplayRedisPrefix,
-		tokenProofReplayRedisDialTimeout: tokenProofReplayRedisDialTimeout,
-		tokenProofReplayStoreFile:        tokenProofReplayStoreFile,
-		peerRebindAfter:                  peerRebindAfter,
-		revocationRefreshSec:             revocationRefreshSec,
-		accountingFile:                   accountingFile,
-		accountingFlushSec:               accountingFlushSec,
-		settlementReconcileSec:           settlementReconcileSec,
-		startupSyncTimeout:               startupSyncTimeout,
-		verifyRefreshMinInterval:         verifyRefreshMinInterval,
-		exitRelayID:                      exitRelayID,
-		betaStrict:                       betaStrict,
-		prodStrict:                       prodStrict,
-		strictModeParseErr:               strictModeParseErr,
-		enforcer:                         policy.NewEnforcer(),
-		httpClient:                       &http.Client{Timeout: 5 * time.Second},
-		issuerPubs:                       make(map[string]ed25519.PublicKey),
-		issuerKeyIssuer:                  make(map[string]string),
-		sessions:                         make(map[string]sessionInfo),
-		wgSessionProxies:                 make(map[string]*net.UDPConn),
-		wgProxyLastSeen:                  make(map[string]int64),
-		proofNonceSeen:                   make(map[string]map[string]int64),
-		revokedJTI:                       make(map[string]int64),
-		minTokenEpoch:                    make(map[string]int64),
-		revocationVersion:                make(map[string]int64),
-		settlement:                       newSettlementServiceFromEnv(),
-		sessionReserve:                   sessionReserve,
+		addr:                              addr,
+		dataAddr:                          dataAddr,
+		issuerURL:                         issuerURL,
+		issuerURLs:                        issuerURLs,
+		issuerMinSources:                  issuerMinSources,
+		issuerMinOperators:                issuerMinOperators,
+		issuerMinKeyVotes:                 issuerMinKeyVotes,
+		issuerRequireID:                   issuerRequireID,
+		revocationsURL:                    revocationsURL,
+		revocationsURLs:                   revocationsURLs,
+		dataMode:                          dataMode,
+		opaqueSinkAddr:                    opaqueSinkAddr,
+		opaqueSourceAddr:                  opaqueSourceAddr,
+		opaqueEcho:                        opaqueEcho,
+		wgPubKey:                          wgPubKey,
+		wgExitIP:                          wgExitIP,
+		wgMTU:                             1280,
+		wgKeepaliveSec:                    25,
+		ipAllocCursor:                     clientInnerIPFirstOctet,
+		allocatedClientInnerIPs:           make(map[string]struct{}),
+		wgInterface:                       wgInterface,
+		wgPrivateKey:                      wgPrivateKey,
+		wgListenPort:                      wgListenPort,
+		wgBackend:                         wgBackend,
+		wgKernelProxy:                     wgKernelProxy,
+		wgKernelProxyMax:                  wgKernelProxyMax,
+		wgKernelProxyIdle:                 wgKernelProxyIdle,
+		sessionCleanupSec:                 sessionCleanupSec,
+		maxActiveSessions:                 maxActiveSessions,
+		wgManager:                         wgManager,
+		liveWGMode:                        liveWGMode,
+		wgOnlyMode:                        wgOnlyMode,
+		egressBackend:                     egressBackend,
+		egressIface:                       egressIface,
+		egressCIDR:                        egressCIDR,
+		egressChain:                       egressChain,
+		tokenProofReplayGuard:             tokenProofReplayGuard,
+		tokenProofReplaySharedFileMode:    tokenProofReplaySharedFileMode,
+		tokenProofReplayLockTimeout:       tokenProofReplayLockTimeout,
+		tokenProofReplayRedisAddr:         tokenProofReplayRedisAddr,
+		tokenProofReplayRedisPassword:     tokenProofReplayRedisPassword,
+		tokenProofReplayRedisDB:           tokenProofReplayRedisDB,
+		tokenProofReplayRedisTLS:          tokenProofReplayRedisTLS,
+		tokenProofReplayRedisPrefix:       tokenProofReplayRedisPrefix,
+		tokenProofReplayRedisDialTimeout:  tokenProofReplayRedisDialTimeout,
+		tokenProofReplayStoreFile:         tokenProofReplayStoreFile,
+		tokenProofReplayStoreFileExplicit: tokenProofReplayStoreFileExplicit,
+		peerRebindAfter:                   peerRebindAfter,
+		revocationRefreshSec:              revocationRefreshSec,
+		accountingFile:                    accountingFile,
+		accountingFlushSec:                accountingFlushSec,
+		settlementReconcileSec:            settlementReconcileSec,
+		startupSyncTimeout:                startupSyncTimeout,
+		verifyRefreshMinInterval:          verifyRefreshMinInterval,
+		exitRelayID:                       exitRelayID,
+		trustedEntryRouteAssertionPubs:    trustedEntryRouteAssertionPubs,
+		betaStrict:                        betaStrict,
+		prodStrict:                        prodStrict,
+		strictModeParseErr:                strictModeParseErr,
+		enforcer:                          policy.NewEnforcer(),
+		httpClient:                        &http.Client{Timeout: 5 * time.Second},
+		issuerPubs:                        make(map[string]ed25519.PublicKey),
+		issuerKeyIssuer:                   make(map[string]string),
+		sessions:                          make(map[string]sessionInfo),
+		wgSessionProxies:                  make(map[string]*net.UDPConn),
+		wgProxyLastSeen:                   make(map[string]int64),
+		proofNonceSeen:                    make(map[string]map[string]int64),
+		revokedJTI:                        make(map[string]int64),
+		minTokenEpoch:                     make(map[string]int64),
+		revocationVersion:                 make(map[string]int64),
+		settlement:                        settlementSvc,
+		settlementChainBacked:             settlementChainBacked,
+		sessionReserve:                    sessionReserve,
 	}
+}
+
+func parseTrustedEntryRouteAssertionPubKeys(raw string) (map[string]ed25519.PublicKey, error) {
+	keys := splitCSV(raw)
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]ed25519.PublicKey, len(keys))
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		pub, err := crypto.ParseEd25519PublicKey(key)
+		if err != nil {
+			return nil, fmt.Errorf("invalid trusted entry route assertion pubkey: %w", err)
+		}
+		out[crypto.EncodeEd25519PublicKey(pub)] = pub
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 func newSettlementServiceFromEnv() settlement.Service {
@@ -585,6 +634,14 @@ func newSettlementServiceFromEnv() settlement.Service {
 			}
 			allowInsecureHTTP = v
 		}
+		trustedBridgeFinality := false
+		if raw := strings.TrimSpace(os.Getenv(prefix + "TRUSTED_BRIDGE_FINALITY")); raw != "" {
+			v, err := strconv.ParseBool(raw)
+			if err != nil {
+				return nil, endpoint, fmt.Errorf("%sTRUSTED_BRIDGE_FINALITY must be boolean: %w", prefix, err)
+			}
+			trustedBridgeFinality = v
+		}
 
 		queueSize := 256
 		if raw := strings.TrimSpace(os.Getenv(prefix + "QUEUE_SIZE")); raw != "" {
@@ -623,6 +680,10 @@ func newSettlementServiceFromEnv() settlement.Service {
 			HTTPTimeout:           timeout,
 			AllowInsecureHTTP:     allowInsecureHTTP,
 			SubmitMode:            submitMode,
+			TrustedBridgeFinality: trustedBridgeFinality,
+			RewardProofAuthToken:  strings.TrimSpace(os.Getenv(prefix + "REWARD_PROOF_AUTH_TOKEN")),
+			FinalityAuthToken:     strings.TrimSpace(os.Getenv(prefix + "FINALITY_AUTH_TOKEN")),
+			RewardProofVerifierID: exitSettlementRewardProofVerifierID(prefix),
 			SignedTxBroadcastPath: strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_BROADCAST_PATH")),
 			SignedTxChainID:       strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_CHAIN_ID")),
 			SignedTxSigner:        strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_SIGNER")),
@@ -671,6 +732,21 @@ func newSettlementServiceFromEnv() settlement.Service {
 		}
 	}
 	return settlement.NewMemoryService(opts...)
+}
+
+func settlementServiceChainBacked(svc settlement.Service) bool {
+	type chainBackedReporter interface {
+		ChainBacked() bool
+	}
+	reporter, ok := svc.(chainBackedReporter)
+	return ok && reporter.ChainBacked()
+}
+
+func exitSettlementRewardProofVerifierID(prefix string) string {
+	if verifierID := strings.TrimSpace(os.Getenv(prefix + "REWARD_PROOF_VERIFIER_ID")); verifierID != "" {
+		return verifierID
+	}
+	return "gpm-exit-session-meter-v1"
 }
 
 func (s *Service) Run(ctx context.Context) error {
@@ -744,6 +820,9 @@ func (s *Service) Run(ctx context.Context) error {
 		return err
 	}
 	if err := s.configureEgress(ctx); err != nil {
+		if s.failClosedOnEgressSetupError() {
+			return fmt.Errorf("exit egress setup failed in strict mode: %w", err)
+		}
 		log.Printf("exit egress setup failed: %v", err)
 	}
 	defer func() {
@@ -756,6 +835,7 @@ func (s *Service) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/path/open", s.handlePathOpen)
 	mux.HandleFunc("/v1/path/close", s.handlePathClose)
 	mux.HandleFunc("/v1/health", s.handleHealth)
+	mux.HandleFunc("/v1/ready", s.handleReady)
 	mux.HandleFunc("/v1/metrics", s.handleMetrics)
 	mux.HandleFunc("/v1/settlement/status", s.handleSettlementStatus)
 
@@ -984,6 +1064,9 @@ func (s *Service) validateRuntimeConfig() error {
 		if s.peerRebindAfter > 0 {
 			return fmt.Errorf("BETA_STRICT_MODE requires EXIT_PEER_REBIND_SEC=0")
 		}
+		if len(s.trustedEntryRouteAssertionPubs) == 0 {
+			return fmt.Errorf("BETA_STRICT_MODE requires EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS")
+		}
 		if envEnabled(allowDangerousOutboundPrivateDNS) {
 			return fmt.Errorf("BETA_STRICT_MODE forbids %s", allowDangerousOutboundPrivateDNS)
 		}
@@ -1010,10 +1093,16 @@ func (s *Service) validateRuntimeConfig() error {
 				return fmt.Errorf("BETA_STRICT_MODE requires EXIT_ISSUER_REQUIRE_ID=1 when multiple ISSUER_URLS are configured")
 			}
 		}
+		if s.egressBackend != "command" {
+			return fmt.Errorf("BETA_STRICT_MODE requires EXIT_EGRESS_BACKEND=command")
+		}
 	}
 	if s.prodStrict {
 		if !s.betaStrict {
 			return fmt.Errorf("PROD_STRICT_MODE requires BETA_STRICT_MODE=1")
+		}
+		if !s.durableTokenProofReplayStorageConfigured() {
+			return fmt.Errorf("PROD_STRICT_MODE requires durable token proof replay storage (set EXIT_TOKEN_PROOF_REPLAY_STORE_FILE or EXIT_TOKEN_PROOF_REPLAY_REDIS_ADDR)")
 		}
 		if !securehttp.Enabled() {
 			return fmt.Errorf("PROD_STRICT_MODE requires MTLS_ENABLE=1")
@@ -1033,8 +1122,18 @@ func (s *Service) validateRuntimeConfig() error {
 		if !s.issuerRequireID {
 			return fmt.Errorf("PROD_STRICT_MODE requires EXIT_ISSUER_REQUIRE_ID=1")
 		}
+		if len(s.trustedEntryRouteAssertionPubs) == 0 {
+			return fmt.Errorf("PROD_STRICT_MODE requires EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS")
+		}
+		if !s.settlementChainBacked {
+			return fmt.Errorf("PROD_STRICT_MODE requires SETTLEMENT_CHAIN_ADAPTER=cosmos")
+		}
 	}
 	return nil
+}
+
+func (s *Service) durableTokenProofReplayStorageConfigured() bool {
+	return s.tokenProofReplayRedisEnabled() || (s.tokenProofReplayStoreFileExplicit && strings.TrimSpace(s.tokenProofReplayStoreFile) != "")
 }
 
 func (s *Service) ensureStartupIssuerSync(ctx context.Context) error {
@@ -1718,6 +1817,7 @@ func (s *Service) teardownSession(ctx context.Context, sessionID string, opts se
 	}
 	staleProxy := s.takeWGProxyLocked(sessionID, false)
 	delete(s.sessions, sessionID)
+	s.releaseClientInnerIPLocked(current.clientInnerIP)
 	s.metrics.ActiveSessions = uint64(len(s.sessions))
 	s.mu.Unlock()
 
@@ -1811,6 +1911,10 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	if req.Transport == "" {
 		req.Transport = "policy-json"
 	}
+	if !s.pathOpenEgressReady() {
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "exit egress not ready"})
+		return
+	}
 
 	claims, issuerKeyID, err := s.verifyToken(req.Token)
 	if err != nil {
@@ -1837,8 +1941,20 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: err.Error()})
 		return
 	}
+	if err := validatePathRouteAssertions(req); err != nil {
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: err.Error()})
+		return
+	}
 	if s.pathOpenExitIdentityMismatch(req.ExitID) {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "exit identity mismatch"})
+		return
+	}
+	if err := s.validateStrictPathOpenEntryRoute(req); err != nil {
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: err.Error()})
+		return
+	}
+	if err := s.validatePathOpenReservation(r.Context(), req, claims); err != nil {
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: err.Error()})
 		return
 	}
 	if err := s.checkAndRememberProofNonce(claims, req, nowUnix); err != nil {
@@ -1848,6 +1964,15 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: err.Error()})
 		return
 	}
+	pathOpenAccepted := false
+	defer func() {
+		if pathOpenAccepted {
+			return
+		}
+		if err := s.forgetProofNonce(claims, req, time.Now().Unix()); err != nil {
+			log.Printf("exit token proof replay rollback failed token_id=%s nonce=%s err=%v", strings.TrimSpace(claims.TokenID), strings.TrimSpace(req.TokenProofNonce), err)
+		}
+	}()
 
 	if len(claims.ExitScope) == 0 {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "token exit scope required"})
@@ -1876,6 +2001,10 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "transport must be policy-json in json mode"})
 		return
 	}
+	if err := validatePathOpenTransportClaim(req.Transport, claims, s.prodStrict); err != nil {
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: err.Error()})
+		return
+	}
 	if s.dataMode == "opaque" && hasPortPolicyClaims(claims) {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "opaque mode cannot enforce port policy"})
 		return
@@ -1893,7 +2022,7 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "failed to create session key"})
 		return
 	}
-	clientIP := s.allocateClientInnerIP()
+	clientIP := ""
 
 	s.mu.Lock()
 	if _, exists := s.sessions[req.SessionID]; exists {
@@ -1906,27 +2035,32 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "session capacity reached"})
 		return
 	}
+	if req.Transport == "wireguard-udp" {
+		clientIP, err = s.allocateClientInnerIPLocked()
+		if err != nil {
+			s.mu.Unlock()
+			_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: err.Error()})
+			return
+		}
+	}
 	staleProxy := s.takeWGProxyLocked(req.SessionID, false)
 	s.sessions[req.SessionID] = sessionInfo{
-		claims:        claims,
-		seenNonces:    make(map[uint64]struct{}),
-		lastActivity:  time.Now(),
-		transport:     req.Transport,
-		sessionKeyID:  sessionKeyID,
-		clientInnerIP: clientIP,
-		clientPubKey:  req.ClientInnerPub,
+		claims:               claims,
+		seenNonces:           make(map[uint64]struct{}),
+		lastActivity:         time.Now(),
+		transport:            req.Transport,
+		sessionKeyID:         sessionKeyID,
+		reservationID:        strings.TrimSpace(req.ReservationID),
+		reservationSessionID: strings.TrimSpace(req.ReservationSessionID),
+		reservationSubjectID: strings.TrimSpace(req.ReservationSubjectID),
+		clientInnerIP:        clientIP,
+		clientPubKey:         req.ClientInnerPub,
 	}
 	s.metrics.ActiveSessions = uint64(len(s.sessions))
 	s.mu.Unlock()
 	if staleProxy != nil {
 		_ = staleProxy.Close()
 	}
-	subjectForSettlement := strings.TrimSpace(claims.Subject)
-	if subjectForSettlement == "" {
-		subjectForSettlement = "client-anon"
-	}
-	s.reserveSettlementForSession(r.Context(), req.SessionID, subjectForSettlement)
-
 	if req.Transport == "wireguard-udp" {
 		wgCfg := wg.SessionConfig{
 			SessionID:      req.SessionID,
@@ -1943,11 +2077,26 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		if err := s.wgManager.ConfigureSession(r.Context(), wgCfg); err != nil {
 			s.closeWGSessionProxy(req.SessionID)
 			s.mu.Lock()
-			delete(s.sessions, req.SessionID)
+			if current, exists := s.sessions[req.SessionID]; exists &&
+				current.sessionKeyID == sessionKeyID &&
+				current.clientInnerIP == clientIP &&
+				current.clientPubKey == req.ClientInnerPub &&
+				current.transport == req.Transport {
+				delete(s.sessions, req.SessionID)
+				s.releaseClientInnerIPLocked(clientIP)
+				s.metrics.ActiveSessions = uint64(len(s.sessions))
+			}
 			s.mu.Unlock()
 			_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "wg configure failed"})
 			return
 		}
+	}
+	subjectForSettlement := strings.TrimSpace(claims.Subject)
+	if subjectForSettlement == "" {
+		subjectForSettlement = "client-anon"
+	}
+	if strings.TrimSpace(req.ReservationID) == "" {
+		s.reserveSettlementForSession(r.Context(), req.SessionID, subjectForSettlement)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1964,6 +2113,7 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		resp.InnerMTU = s.wgMTU
 		resp.KeepaliveSec = s.wgKeepaliveSec
 	}
+	pathOpenAccepted = true
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
@@ -2092,25 +2242,367 @@ func hasPortPolicyClaims(claims crypto.CapabilityClaims) bool {
 	return len(claims.AllowPorts) > 0 || len(claims.DenyPorts) > 0
 }
 
+func validatePathOpenTransportClaim(requestTransport string, claims crypto.CapabilityClaims, requireBoundTransport bool) error {
+	requestTransport = strings.TrimSpace(requestTransport)
+	claimTransport := strings.TrimSpace(claims.Transport)
+	if claimTransport == "" {
+		// Legacy tokens omitted transport. New issuer tokens bind this value so
+		// no-port-policy WireGuard tokens cannot be replayed into JSON mode.
+		if requireBoundTransport {
+			return errors.New("token transport required")
+		}
+		return nil
+	}
+	if claimTransport != "policy-json" && claimTransport != "wireguard-udp" {
+		return errors.New("token transport invalid")
+	}
+	if requestTransport != claimTransport {
+		return errors.New("token transport mismatch")
+	}
+	return nil
+}
+
 func verifyPathOpenTokenProof(req proto.PathOpenRequest, claims crypto.CapabilityClaims) error {
 	pub, err := crypto.ParseEd25519PublicKey(claims.CNFEd25519)
 	if err != nil {
 		return errors.New("token proof key invalid")
 	}
 	input := crypto.PathOpenProofInput{
-		Token:           req.Token,
-		ExitID:          req.ExitID,
-		MiddleRelayID:   req.MiddleRelayID,
-		TokenProofNonce: req.TokenProofNonce,
-		ClientInnerPub:  req.ClientInnerPub,
-		Transport:       req.Transport,
-		RequestedMTU:    req.RequestedMTU,
-		RequestedRegion: req.RequestedRegion,
+		Token:                req.Token,
+		ExitID:               req.ExitID,
+		MiddleRelayID:        req.MiddleRelayID,
+		PathProfile:          req.PathProfile,
+		SessionID:            req.SessionID,
+		TokenProofNonce:      req.TokenProofNonce,
+		ReservationID:        req.ReservationID,
+		ReservationSessionID: req.ReservationSessionID,
+		ReservationSubjectID: req.ReservationSubjectID,
+		ClientInnerPub:       req.ClientInnerPub,
+		Transport:            req.Transport,
+		RequestedMTU:         req.RequestedMTU,
+		RequestedRegion:      req.RequestedRegion,
+		ClientRoute:          pathRouteAssertionProofInput(req.ClientRouteAssertion),
 	}
 	if err := crypto.VerifyPathOpenProof(req.TokenProof, pub, input); err != nil {
 		return errors.New("token proof invalid")
 	}
 	return nil
+}
+
+func pathRouteAssertionProofInput(assertion *proto.PathRouteAssertion) crypto.PathRouteAssertionInput {
+	if assertion == nil {
+		return crypto.PathRouteAssertionInput{}
+	}
+	return crypto.PathRouteAssertionInput{
+		PathProfile:          assertion.PathProfile,
+		EntryRelayID:         assertion.EntryRelayID,
+		MiddleRelayID:        assertion.MiddleRelayID,
+		ExitRelayID:          assertion.ExitRelayID,
+		SessionID:            assertion.SessionID,
+		ReservationID:        assertion.ReservationID,
+		ReservationSessionID: assertion.ReservationSessionID,
+		ReservationSubjectID: assertion.ReservationSubjectID,
+		TokenProofNonce:      assertion.TokenProofNonce,
+		ClientInnerPub:       assertion.ClientInnerPub,
+		Transport:            assertion.Transport,
+		RequestedMTU:         assertion.RequestedMTU,
+		RequestedRegion:      assertion.RequestedRegion,
+		TokenSHA256:          assertion.TokenSHA256,
+		TokenProofSHA256:     assertion.TokenProofSHA256,
+		SignerPubKey:         assertion.SignerPubKey,
+		Signature:            assertion.Signature,
+	}
+}
+
+func validatePathRouteAssertions(req proto.PathOpenRequest) error {
+	profile, err := normalizePathRouteAssertionProfile(req.PathProfile)
+	if err != nil {
+		return err
+	}
+	clientProfile, err := validateSinglePathRouteAssertion("client", req.ClientRouteAssertion, req)
+	if err != nil {
+		return err
+	}
+	entryProfile, err := validateSinglePathRouteAssertion("entry", req.EntryRouteAssertion, req)
+	if err != nil {
+		return err
+	}
+	for _, assertedProfile := range []string{clientProfile, entryProfile} {
+		if assertedProfile == "" {
+			continue
+		}
+		if profile != "" && profile != assertedProfile {
+			return errors.New("route assertion profile mismatch")
+		}
+		if profile == "" {
+			profile = assertedProfile
+		}
+	}
+	if req.ClientRouteAssertion != nil && req.EntryRouteAssertion != nil {
+		if !pathRouteAssertionFieldMatches(req.ClientRouteAssertion.EntryRelayID, req.EntryRouteAssertion.EntryRelayID) ||
+			!pathRouteAssertionFieldMatches(req.ClientRouteAssertion.MiddleRelayID, req.EntryRouteAssertion.MiddleRelayID) ||
+			!pathRouteAssertionFieldMatches(req.ClientRouteAssertion.ExitRelayID, req.EntryRouteAssertion.ExitRelayID) ||
+			!pathRouteAssertionFieldMatches(req.ClientRouteAssertion.ReservationID, req.EntryRouteAssertion.ReservationID) ||
+			!pathRouteAssertionFieldMatches(req.ClientRouteAssertion.ReservationSessionID, req.EntryRouteAssertion.ReservationSessionID) ||
+			!pathRouteAssertionFieldMatches(req.ClientRouteAssertion.ReservationSubjectID, req.EntryRouteAssertion.ReservationSubjectID) {
+			return errors.New("route assertion mismatch")
+		}
+	}
+	if profile == "2hop" || profile == "3hop" {
+		if req.ClientRouteAssertion == nil || req.EntryRouteAssertion == nil {
+			return errors.New("route assertion required")
+		}
+		if strings.TrimSpace(req.ClientRouteAssertion.EntryRelayID) == "" ||
+			strings.TrimSpace(req.ClientRouteAssertion.ExitRelayID) == "" ||
+			strings.TrimSpace(req.EntryRouteAssertion.EntryRelayID) == "" ||
+			strings.TrimSpace(req.EntryRouteAssertion.ExitRelayID) == "" {
+			return errors.New("route assertion incomplete")
+		}
+	}
+	if profile == "3hop" {
+		if strings.TrimSpace(req.MiddleRelayID) == "" {
+			return errors.New("route assertion middle required")
+		}
+		if strings.TrimSpace(req.ClientRouteAssertion.MiddleRelayID) == "" ||
+			strings.TrimSpace(req.EntryRouteAssertion.MiddleRelayID) == "" ||
+			strings.TrimSpace(req.ClientRouteAssertion.MiddleRelayID) != strings.TrimSpace(req.EntryRouteAssertion.MiddleRelayID) {
+			return errors.New("route assertion incomplete")
+		}
+	}
+	return nil
+}
+
+func (s *Service) validateStrictPathOpenEntryRoute(req proto.PathOpenRequest) error {
+	profile, err := normalizePathRouteAssertionProfile(req.PathProfile)
+	if err != nil {
+		return err
+	}
+	requiresTrustedEntryRoute := profile == "2hop" || profile == "3hop" || (s != nil && (s.betaStrict || s.prodStrict))
+	if !requiresTrustedEntryRoute {
+		return nil
+	}
+	if req.EntryRouteAssertion == nil {
+		return errors.New("entry route assertion required")
+	}
+	if strings.TrimSpace(req.EntryRouteAssertion.EntryRelayID) == "" ||
+		strings.TrimSpace(req.EntryRouteAssertion.ExitRelayID) == "" {
+		return errors.New("entry route assertion incomplete")
+	}
+	if err := validateEntryRouteAssertionRequestBinding(*req.EntryRouteAssertion, req); err != nil {
+		return err
+	}
+	if err := s.verifyEntryRouteAssertionSignature(*req.EntryRouteAssertion); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateEntryRouteAssertionRequestBinding(assertion proto.PathRouteAssertion, req proto.PathOpenRequest) error {
+	if strings.TrimSpace(assertion.SessionID) == "" ||
+		strings.TrimSpace(assertion.TokenProofNonce) == "" ||
+		strings.TrimSpace(assertion.ClientInnerPub) == "" ||
+		strings.TrimSpace(assertion.Transport) == "" ||
+		strings.TrimSpace(assertion.TokenSHA256) == "" ||
+		strings.TrimSpace(assertion.TokenProofSHA256) == "" {
+		return errors.New("entry route assertion request binding incomplete")
+	}
+	if strings.TrimSpace(assertion.SessionID) != strings.TrimSpace(req.SessionID) {
+		return errors.New("entry route assertion session mismatch")
+	}
+	if strings.TrimSpace(req.ReservationSessionID) != "" && strings.TrimSpace(req.SessionID) != strings.TrimSpace(req.ReservationSessionID) {
+		return errors.New("entry route assertion reservation session mismatch")
+	}
+	if err := validatePathOpenReservationBinding("entry route assertion", assertion.ReservationID, assertion.ReservationSessionID, assertion.ReservationSubjectID, assertion.SessionID, req); err != nil {
+		return err
+	}
+	if strings.TrimSpace(assertion.TokenProofNonce) != strings.TrimSpace(req.TokenProofNonce) {
+		return errors.New("entry route assertion nonce mismatch")
+	}
+	if strings.TrimSpace(assertion.ClientInnerPub) != strings.TrimSpace(req.ClientInnerPub) {
+		return errors.New("entry route assertion client key mismatch")
+	}
+	if strings.TrimSpace(assertion.Transport) != strings.TrimSpace(req.Transport) {
+		return errors.New("entry route assertion transport mismatch")
+	}
+	if assertion.RequestedMTU != req.RequestedMTU {
+		return errors.New("entry route assertion mtu mismatch")
+	}
+	if strings.TrimSpace(assertion.RequestedRegion) != strings.TrimSpace(req.RequestedRegion) {
+		return errors.New("entry route assertion region mismatch")
+	}
+	if strings.TrimSpace(assertion.TokenSHA256) != crypto.PathRouteAssertionBindingHash(req.Token) {
+		return errors.New("entry route assertion token mismatch")
+	}
+	if strings.TrimSpace(assertion.TokenProofSHA256) != crypto.PathRouteAssertionBindingHash(req.TokenProof) {
+		return errors.New("entry route assertion token proof mismatch")
+	}
+	return nil
+}
+
+func (s *Service) verifyEntryRouteAssertionSignature(assertion proto.PathRouteAssertion) error {
+	if s == nil || len(s.trustedEntryRouteAssertionPubs) == 0 {
+		return errors.New("entry route assertion trusted key unavailable")
+	}
+	signer := strings.TrimSpace(assertion.SignerPubKey)
+	if signer == "" || strings.TrimSpace(assertion.Signature) == "" {
+		return errors.New("entry route assertion signature required")
+	}
+	pub, ok := s.trustedEntryRouteAssertionPubs[signer]
+	if !ok {
+		return errors.New("entry route assertion signer not trusted")
+	}
+	if err := crypto.VerifyPathRouteAssertionSignature(assertion, pub); err != nil {
+		return fmt.Errorf("entry route assertion signature invalid: %w", err)
+	}
+	return nil
+}
+
+func validateSinglePathRouteAssertion(source string, assertion *proto.PathRouteAssertion, req proto.PathOpenRequest) (string, error) {
+	if assertion == nil {
+		return "", nil
+	}
+	profile, err := normalizePathRouteAssertionProfile(assertion.PathProfile)
+	if err != nil {
+		return "", err
+	}
+	if assertedExit := strings.TrimSpace(assertion.ExitRelayID); assertedExit != "" && assertedExit != strings.TrimSpace(req.ExitID) {
+		return "", fmt.Errorf("%s route assertion exit mismatch", source)
+	}
+	if strings.TrimSpace(assertion.MiddleRelayID) != strings.TrimSpace(req.MiddleRelayID) {
+		return "", fmt.Errorf("%s route assertion middle mismatch", source)
+	}
+	if err := validatePathOpenReservationBinding(source+" route assertion", assertion.ReservationID, assertion.ReservationSessionID, assertion.ReservationSubjectID, assertion.SessionID, req); err != nil {
+		return "", err
+	}
+	return profile, nil
+}
+
+func (s *Service) validatePathOpenReservation(ctx context.Context, req proto.PathOpenRequest, claims crypto.CapabilityClaims) error {
+	reservationID := strings.TrimSpace(req.ReservationID)
+	reservationSessionID := strings.TrimSpace(req.ReservationSessionID)
+	reservationSubjectID := strings.TrimSpace(req.ReservationSubjectID)
+	sessionID := strings.TrimSpace(req.SessionID)
+	if s != nil && s.prodStrict && (reservationID == "" || reservationSessionID == "" || reservationSubjectID == "") {
+		return errors.New("reservation required")
+	}
+	if (reservationID != "" || reservationSessionID != "" || reservationSubjectID != "") && reservationSessionID == "" {
+		return errors.New("reservation session required")
+	}
+	if reservationSessionID != "" && sessionID != reservationSessionID {
+		return errors.New("reservation session mismatch")
+	}
+	if reservationID == "" {
+		return nil
+	}
+	if s == nil || s.settlement == nil {
+		return errors.New("fund reservation verification requires settlement service")
+	}
+	materialQuerier, ok := s.settlement.(settlement.FundReservationQuerier)
+	if !ok || materialQuerier == nil {
+		return errors.New("fund reservation ownership verification required")
+	}
+	reservation, found, err := materialQuerier.FundReservation(ctx, reservationID)
+	if err != nil {
+		return fmt.Errorf("fund reservation query failed: %w", err)
+	}
+	if !found {
+		return errors.New("fund reservation unknown")
+	}
+	if got := strings.TrimSpace(reservation.ReservationID); got != "" && got != reservationID {
+		return errors.New("fund reservation id mismatch")
+	}
+	if strings.TrimSpace(reservation.SessionID) != reservationSessionID {
+		return errors.New("fund reservation session mismatch")
+	}
+	if reservationSubjectID == "" {
+		return errors.New("fund reservation subject required")
+	}
+	if reservationSubjectID != "" && !strings.EqualFold(strings.TrimSpace(reservation.SubjectID), reservationSubjectID) {
+		return errors.New("fund reservation subject mismatch")
+	}
+	tokenSubject := strings.TrimSpace(claims.Subject)
+	if tokenSubject == "" {
+		return errors.New("token subject required for reservation binding")
+	}
+	if !reservationSubjectMatchesTokenSubject(strings.TrimSpace(reservation.SubjectID), tokenSubject) {
+		return errors.New("token subject does not match fund reservation subject")
+	}
+	if reservation.AmountMicros <= 0 {
+		return errors.New("fund reservation amount invalid")
+	}
+	status := reservation.Status
+	if statusQuerier, ok := s.settlement.(settlement.ChainFundReservationStatusQuerier); ok && statusQuerier != nil {
+		var statusFound bool
+		status, statusFound, err = statusQuerier.FundReservationStatus(ctx, reservationID)
+		if err != nil {
+			return fmt.Errorf("fund reservation status query failed: %w", err)
+		}
+		if !statusFound {
+			return errors.New("fund reservation status unknown")
+		}
+	}
+	if s.prodStrict && status != settlement.OperationStatusConfirmed {
+		return errors.New("fund reservation not confirmed")
+	}
+	if status == settlement.OperationStatusFailed {
+		return errors.New("fund reservation failed")
+	}
+	return nil
+}
+
+func reservationSubjectMatchesTokenSubject(reservationSubjectID string, tokenSubject string) bool {
+	reservationSubjectID = strings.TrimSpace(reservationSubjectID)
+	tokenSubject = strings.TrimSpace(tokenSubject)
+	if reservationSubjectID == "" || tokenSubject == "" {
+		return false
+	}
+	if strings.EqualFold(reservationSubjectID, tokenSubject) {
+		return true
+	}
+	walletSubject := strings.TrimPrefix(tokenSubject, "wallet:")
+	return !strings.EqualFold(walletSubject, tokenSubject) && strings.EqualFold(reservationSubjectID, strings.TrimSpace(walletSubject))
+}
+
+func validatePathOpenReservationBinding(source string, reservationID string, reservationSessionID string, reservationSubjectID string, assertionSessionID string, req proto.PathOpenRequest) error {
+	requestReservationID := strings.TrimSpace(req.ReservationID)
+	requestReservationSessionID := strings.TrimSpace(req.ReservationSessionID)
+	requestReservationSubjectID := strings.TrimSpace(req.ReservationSubjectID)
+	assertedReservationID := strings.TrimSpace(reservationID)
+	assertedReservationSessionID := strings.TrimSpace(reservationSessionID)
+	assertedReservationSubjectID := strings.TrimSpace(reservationSubjectID)
+	assertedSessionID := strings.TrimSpace(assertionSessionID)
+	if (requestReservationID != "" || requestReservationSessionID != "" || requestReservationSubjectID != "" || assertedReservationID != "" || assertedReservationSessionID != "" || assertedReservationSubjectID != "") && requestReservationSessionID == "" {
+		return fmt.Errorf("%s reservation session required", source)
+	}
+	if assertedReservationID != "" && assertedReservationID != requestReservationID {
+		return fmt.Errorf("%s reservation mismatch", source)
+	}
+	if assertedReservationSessionID != "" && assertedReservationSessionID != requestReservationSessionID {
+		return fmt.Errorf("%s reservation session mismatch", source)
+	}
+	if assertedReservationSubjectID != "" && !strings.EqualFold(assertedReservationSubjectID, requestReservationSubjectID) {
+		return fmt.Errorf("%s reservation subject mismatch", source)
+	}
+	if requestReservationSessionID != "" && assertedSessionID != "" && assertedSessionID != requestReservationSessionID {
+		return fmt.Errorf("%s reservation session mismatch", source)
+	}
+	return nil
+}
+
+func normalizePathRouteAssertionProfile(raw string) (string, error) {
+	profile := strings.ToLower(strings.TrimSpace(raw))
+	switch profile {
+	case "", "1hop", "2hop", "3hop":
+		return profile, nil
+	default:
+		return "", errors.New("path profile invalid")
+	}
+}
+
+func pathRouteAssertionFieldMatches(left string, right string) bool {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	return left == "" || right == "" || left == right
 }
 
 func (s *Service) checkAndRememberProofNonce(claims crypto.CapabilityClaims, req proto.PathOpenRequest, nowUnix int64) error {
@@ -2139,9 +2631,6 @@ func (s *Service) checkAndRememberProofNonce(claims crypto.CapabilityClaims, req
 	if s.tokenProofReplaySharedFileMode {
 		return s.checkAndRememberProofNonceShared(tokenID, nonce, exp, nowUnix, replayStorePath)
 	}
-	needsPersist := replayStorePath != ""
-	var snapshot tokenProofReplayStoreSnapshot
-
 	s.mu.Lock()
 	if s.proofNonceSeen == nil {
 		s.proofNonceSeen = make(map[string]map[string]int64)
@@ -2172,31 +2661,72 @@ func (s *Service) checkAndRememberProofNonce(claims crypto.CapabilityClaims, req
 		return errors.New("token proof replay cache saturated")
 	}
 	seen[nonce] = exp
-	if needsPersist {
-		snapshot = tokenProofReplayStoreSnapshot{
+	if replayStorePath != "" {
+		// Persist while holding s.mu so concurrent accepted nonces cannot write
+		// older snapshots after newer ones and reopen a replay window on restart.
+		snapshot := tokenProofReplayStoreSnapshot{
 			Version:     1,
 			SavedAtUnix: nowUnix,
 			Buckets:     cloneProofNonceBuckets(s.proofNonceSeen),
 		}
-	}
-	s.mu.Unlock()
-
-	if !needsPersist {
-		return nil
-	}
-	if err := persistTokenProofReplayStoreSnapshot(replayStorePath, snapshot); err != nil {
-		s.mu.Lock()
-		seen = s.proofNonceSeen[tokenID]
-		if seen != nil {
-			if until, exists := seen[nonce]; exists && until == exp {
-				delete(seen, nonce)
-				if len(seen) == 0 {
-					delete(s.proofNonceSeen, tokenID)
+		if err := persistTokenProofReplayStoreSnapshot(replayStorePath, snapshot); err != nil {
+			seen = s.proofNonceSeen[tokenID]
+			if seen != nil {
+				if until, exists := seen[nonce]; exists && until == exp {
+					delete(seen, nonce)
+					if len(seen) == 0 {
+						delete(s.proofNonceSeen, tokenID)
+					}
 				}
 			}
+			s.mu.Unlock()
+			return fmt.Errorf("token proof replay persistence failed: %w", err)
 		}
-		s.mu.Unlock()
-		return fmt.Errorf("token proof replay persistence failed: %w", err)
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Service) forgetProofNonce(claims crypto.CapabilityClaims, req proto.PathOpenRequest, nowUnix int64) error {
+	if !s.tokenProofReplayGuard {
+		return nil
+	}
+	tokenID := strings.TrimSpace(claims.TokenID)
+	nonce := strings.TrimSpace(req.TokenProofNonce)
+	if tokenID == "" || nonce == "" {
+		return nil
+	}
+	if s.tokenProofReplayRedisEnabled() {
+		return s.forgetProofNonceRedis(tokenID, nonce)
+	}
+	replayStorePath := strings.TrimSpace(s.tokenProofReplayStoreFile)
+	if s.tokenProofReplaySharedFileMode {
+		return s.forgetProofNonceShared(tokenID, nonce, nowUnix, replayStorePath)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := s.proofNonceSeen[tokenID]
+	if seen == nil {
+		return nil
+	}
+	if _, exists := seen[nonce]; !exists {
+		return nil
+	}
+	delete(seen, nonce)
+	if len(seen) == 0 {
+		delete(s.proofNonceSeen, tokenID)
+	}
+	if replayStorePath == "" {
+		return nil
+	}
+	snapshot := tokenProofReplayStoreSnapshot{
+		Version:     1,
+		SavedAtUnix: nowUnix,
+		Buckets:     cloneProofNonceBuckets(s.proofNonceSeen),
+	}
+	if err := persistTokenProofReplayStoreSnapshot(replayStorePath, snapshot); err != nil {
+		return fmt.Errorf("token proof replay rollback persistence failed: %w", err)
 	}
 	return nil
 }
@@ -2498,7 +3028,7 @@ func (s *Service) checkAndRememberProofNonceRedis(tokenID string, nonce string, 
 	if ttlSec < 1 {
 		ttlSec = 1
 	}
-	key := fmt.Sprintf("%s:%s:%s", s.effectiveTokenProofReplayRedisPrefix(), tokenID, nonce)
+	key := tokenProofReplayRedisKey(s.effectiveTokenProofReplayRedisPrefix(), tokenID, nonce)
 	ctx, cancel := context.WithTimeout(context.Background(), s.effectiveTokenProofReplayRedisDialTimeout())
 	defer cancel()
 	ok, err := client.SetNX(ctx, key, "1", time.Duration(ttlSec)*time.Second).Result()
@@ -2509,6 +3039,29 @@ func (s *Service) checkAndRememberProofNonceRedis(tokenID string, nonce string, 
 		return errors.New("token proof replay")
 	}
 	return nil
+}
+
+func (s *Service) forgetProofNonceRedis(tokenID string, nonce string) error {
+	client, err := s.tokenProofReplayRedisClientOrInit()
+	if err != nil {
+		return fmt.Errorf("token proof replay redis init failed: %w", err)
+	}
+	key := tokenProofReplayRedisKey(s.effectiveTokenProofReplayRedisPrefix(), tokenID, nonce)
+	ctx, cancel := context.WithTimeout(context.Background(), s.effectiveTokenProofReplayRedisDialTimeout())
+	defer cancel()
+	if err := client.Del(ctx, key).Err(); err != nil {
+		return fmt.Errorf("token proof replay redis rollback failed: %w", err)
+	}
+	return nil
+}
+
+func tokenProofReplayRedisKey(prefix string, tokenID string, nonce string) string {
+	return fmt.Sprintf(
+		"%s:%s:%s",
+		prefix,
+		base64.RawURLEncoding.EncodeToString([]byte(tokenID)),
+		base64.RawURLEncoding.EncodeToString([]byte(nonce)),
+	)
 }
 
 func (s *Service) checkAndRememberProofNonceShared(tokenID string, nonce string, exp int64, nowUnix int64, replayStorePath string) error {
@@ -2564,6 +3117,55 @@ func (s *Service) checkAndRememberProofNonceShared(tokenID string, nonce string,
 		return fmt.Errorf("token proof replay persistence failed: %w", err)
 	}
 
+	s.mu.Lock()
+	s.proofNonceSeen = cloneProofNonceBuckets(snapshot.Buckets)
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Service) forgetProofNonceShared(tokenID string, nonce string, nowUnix int64, replayStorePath string) error {
+	if replayStorePath == "" {
+		return errors.New("token proof replay shared file mode requires replay store file path")
+	}
+	lock, err := acquireTokenProofReplayFileLock(replayStorePath, s.effectiveTokenProofReplayLockTimeout())
+	if err != nil {
+		return fmt.Errorf("token proof replay lock failed: %w", err)
+	}
+	defer func() {
+		if releaseErr := lock.release(); releaseErr != nil {
+			log.Printf("exit token proof replay guard: release lock failed path=%s err=%v", replayStorePath, releaseErr)
+		}
+	}()
+
+	buckets, err := loadTokenProofReplayStoreBuckets(replayStorePath, nowUnix)
+	if err != nil {
+		return fmt.Errorf("token proof replay store load failed: %w", err)
+	}
+	seen := buckets[tokenID]
+	if seen == nil {
+		s.mu.Lock()
+		s.proofNonceSeen = cloneProofNonceBuckets(buckets)
+		s.mu.Unlock()
+		return nil
+	}
+	if _, exists := seen[nonce]; !exists {
+		s.mu.Lock()
+		s.proofNonceSeen = cloneProofNonceBuckets(buckets)
+		s.mu.Unlock()
+		return nil
+	}
+	delete(seen, nonce)
+	if len(seen) == 0 {
+		delete(buckets, tokenID)
+	}
+	snapshot := tokenProofReplayStoreSnapshot{
+		Version:     1,
+		SavedAtUnix: nowUnix,
+		Buckets:     cloneProofNonceBuckets(buckets),
+	}
+	if err := persistTokenProofReplayStoreSnapshot(replayStorePath, snapshot); err != nil {
+		return fmt.Errorf("token proof replay rollback persistence failed: %w", err)
+	}
 	s.mu.Lock()
 	s.proofNonceSeen = cloneProofNonceBuckets(snapshot.Buckets)
 	s.mu.Unlock()
@@ -3104,15 +3706,68 @@ func randomIDHex(n int) (string, error) {
 	return fmt.Sprintf("%x", b), nil
 }
 
-func (s *Service) allocateClientInnerIP() string {
+func formatClientInnerIP(octet uint32) string {
+	return fmt.Sprintf("10.90.0.%d/32", octet)
+}
+
+func (s *Service) ensureAllocatedClientInnerIPsLocked() {
+	if s.allocatedClientInnerIPs != nil {
+		return
+	}
+	s.allocatedClientInnerIPs = make(map[string]struct{})
+	for _, session := range s.sessions {
+		ip := strings.TrimSpace(session.clientInnerIP)
+		if ip == "" {
+			continue
+		}
+		s.allocatedClientInnerIPs[ip] = struct{}{}
+	}
+}
+
+func (s *Service) allocateClientInnerIP() (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.ipAllocCursor >= 250 {
-		s.ipAllocCursor = 2
+	return s.allocateClientInnerIPLocked()
+}
+
+func (s *Service) allocateClientInnerIPLocked() (string, error) {
+	s.ensureAllocatedClientInnerIPsLocked()
+	if s.ipAllocCursor < clientInnerIPFirstOctet || s.ipAllocCursor >= clientInnerIPAfterLastOctet {
+		s.ipAllocCursor = clientInnerIPFirstOctet
 	}
-	ip := fmt.Sprintf("10.90.0.%d/32", s.ipAllocCursor)
-	s.ipAllocCursor++
-	return ip
+	for range clientInnerIPPoolSize {
+		if s.ipAllocCursor >= clientInnerIPAfterLastOctet {
+			s.ipAllocCursor = clientInnerIPFirstOctet
+		}
+		ip := formatClientInnerIP(s.ipAllocCursor)
+		s.ipAllocCursor++
+		if _, active := s.allocatedClientInnerIPs[ip]; active {
+			continue
+		}
+		s.allocatedClientInnerIPs[ip] = struct{}{}
+		return ip, nil
+	}
+	return "", errClientInnerIPPoolExhausted
+}
+
+func (s *Service) releaseClientInnerIP(ip string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.releaseClientInnerIPLocked(ip)
+}
+
+func (s *Service) releaseClientInnerIPLocked(ip string) {
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		return
+	}
+	s.ensureAllocatedClientInnerIPsLocked()
+	for _, session := range s.sessions {
+		if strings.TrimSpace(session.clientInnerIP) == ip {
+			return
+		}
+	}
+	delete(s.allocatedClientInnerIPs, ip)
 }
 
 func (s *Service) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -3122,6 +3777,45 @@ func (s *Service) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
+}
+
+func (s *Service) handleReady(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if ok, reason := s.ready(); !ok {
+		http.Error(w, reason, http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ready"))
+}
+
+func (s *Service) ready() (bool, string) {
+	s.mu.RLock()
+	hasIssuerKeys := len(s.issuerPubs) > 0 || len(s.issuerPub) > 0
+	s.mu.RUnlock()
+	if s.udpConn == nil {
+		return false, "exit data plane not ready"
+	}
+	if !hasIssuerKeys {
+		return false, "exit issuer keys not ready"
+	}
+	if s.egressBackend == "command" && !s.egressConfigured {
+		return false, "exit egress not ready"
+	}
+	return true, ""
+}
+
+func (s *Service) pathOpenEgressReady() bool {
+	if s == nil {
+		return false
+	}
+	if s.egressBackend == "command" {
+		return s.egressConfigured
+	}
+	return !s.betaStrict && !s.prodStrict
 }
 
 func (s *Service) handleMetrics(w http.ResponseWriter, r *http.Request) {
@@ -3202,7 +3896,10 @@ func (s *Service) finalizeSettlementForSession(ctx context.Context, sessionID st
 	if sessionID == "" {
 		return
 	}
-	subjectID := strings.TrimSpace(session.claims.Subject)
+	subjectID := strings.TrimSpace(session.reservationSubjectID)
+	if subjectID == "" {
+		subjectID = strings.TrimSpace(session.claims.Subject)
+	}
 	if subjectID == "" {
 		subjectID = "client-anon"
 	}
@@ -3226,16 +3923,71 @@ func (s *Service) finalizeSettlementForSession(ctx context.Context, sessionID st
 		return
 	}
 	providerSubjectID := "exit:" + strings.ReplaceAll(s.addr, ":", "_")
-	if _, err := s.settlement.IssueReward(ctx, settlement.RewardIssue{
+	issuedAt := time.Now().UTC()
+	payoutPeriodStart, payoutPeriodEnd := weeklyRewardPayoutPeriodFor(issuedAt)
+	rewardIssue := settlement.RewardIssue{
 		RewardID:          "rew-" + sessionID,
 		ProviderSubjectID: providerSubjectID,
 		SessionID:         sessionID,
 		RewardMicros:      rewardMicros,
 		Currency:          sessionSettlement.Currency,
-		IssuedAt:          time.Now().UTC(),
-	}); err != nil {
+		TrafficProofRef:   exitSessionTrafficProofRef(sessionID, subjectID, providerSubjectID, session, sessionSettlement),
+		PayoutPeriodStart: payoutPeriodStart,
+		PayoutPeriodEnd:   payoutPeriodEnd,
+		IssuedAt:          issuedAt,
+	}
+	if sessionSettlement.Status == settlement.OperationStatusConfirmed && strings.TrimSpace(sessionSettlement.SettlementID) != "" {
+		rewardIssue.SettlementReferenceID = strings.TrimSpace(sessionSettlement.SettlementID)
+	}
+	if registrar, ok := s.settlement.(settlement.RewardProofRegistrar); ok {
+		proofPath := strings.TrimSpace(strings.TrimPrefix(rewardIssue.TrafficProofRef, "obj://"))
+		if proofPath != "" {
+			if err := registrar.RegisterRewardProof(ctx, settlement.RewardProofRecord{
+				ProofPath:         proofPath,
+				TrafficProofRef:   rewardIssue.TrafficProofRef,
+				TrustContract:     settlement.RewardProofTrustContractObjectiveTrafficV1,
+				RewardID:          rewardIssue.RewardID,
+				ProviderSubjectID: rewardIssue.ProviderSubjectID,
+				SessionID:         rewardIssue.SessionID,
+				PayoutPeriodStart: rewardIssue.PayoutPeriodStart,
+				PayoutPeriodEnd:   rewardIssue.PayoutPeriodEnd,
+				RewardMicros:      rewardIssue.RewardMicros,
+				Currency:          rewardIssue.Currency,
+				IssuedAt:          rewardIssue.IssuedAt,
+				Verified:          true,
+				VerifierID:        "gpm-exit-session-meter-v1",
+				VerifiedAt:        rewardIssue.IssuedAt,
+			}); err != nil {
+				log.Printf("exit settlement reward proof warning session=%s err=%v", sessionID, err)
+				return
+			}
+		}
+	}
+	if _, err := s.settlement.IssueReward(ctx, rewardIssue); err != nil {
 		log.Printf("exit settlement reward warning session=%s err=%v", sessionID, err)
 	}
+}
+
+func exitSessionTrafficProofRef(sessionID string, subjectID string, providerSubjectID string, session sessionInfo, settled settlement.SessionSettlement) string {
+	hashInput := strings.Join([]string{
+		strings.TrimSpace(sessionID),
+		strings.TrimSpace(subjectID),
+		strings.TrimSpace(providerSubjectID),
+		strconv.FormatInt(session.ingressBytes, 10),
+		strconv.FormatInt(session.egressBytes, 10),
+		strconv.FormatInt(settled.ChargedMicros, 10),
+		strings.TrimSpace(settled.Currency),
+	}, "|")
+	sum := sha256.Sum256([]byte(hashInput))
+	return "obj://traffic-proof/exit-session/" + hex.EncodeToString(sum[:])
+}
+
+func weeklyRewardPayoutPeriodFor(t time.Time) (time.Time, time.Time) {
+	utc := t.UTC()
+	start := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
+	daysSinceMonday := (int(start.Weekday()) + 6) % 7
+	start = start.AddDate(0, 0, -daysSinceMonday)
+	return start, start.AddDate(0, 0, 7)
 }
 
 func (s *Service) reconcileSettlement(ctx context.Context) {
@@ -3410,12 +4162,29 @@ func (s *Service) configureEgress(ctx context.Context) error {
 		return err
 	}
 	for _, cmdStr := range buildEgressSetupCommands(chain, cidr, iface) {
-		if err := runShell(ctx, cmdStr); err != nil {
+		if err := runShellCommand(ctx, cmdStr); err != nil {
+			if cleanupErr := cleanupPartialEgress(ctx, chain, cidr, iface); cleanupErr != nil {
+				return fmt.Errorf("egress setup failed cmd=%q: %w; partial cleanup failed: %v", cmdStr, err, cleanupErr)
+			}
 			return fmt.Errorf("egress setup failed cmd=%q: %w", cmdStr, err)
 		}
 	}
 	s.egressConfigured = true
 	return nil
+}
+
+func (s *Service) failClosedOnEgressSetupError() bool {
+	return s.betaStrict || s.prodStrict
+}
+
+func cleanupPartialEgress(ctx context.Context, chain string, cidr string, iface string) error {
+	var firstErr error
+	for _, cmdStr := range buildEgressCleanupCommands(chain, cidr, iface) {
+		if err := runShellCommand(ctx, cmdStr); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("egress cleanup failed cmd=%q: %w", cmdStr, err)
+		}
+	}
+	return firstErr
 }
 
 func (s *Service) teardownEgress(ctx context.Context) error {
@@ -3428,7 +4197,7 @@ func (s *Service) teardownEgress(ctx context.Context) error {
 	}
 	var firstErr error
 	for _, cmdStr := range buildEgressCleanupCommands(chain, cidr, iface) {
-		if err := runShell(ctx, cmdStr); err != nil && firstErr == nil {
+		if err := runShellCommand(ctx, cmdStr); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("egress cleanup failed cmd=%q: %w", cmdStr, err)
 		}
 	}

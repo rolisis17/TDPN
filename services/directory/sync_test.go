@@ -453,6 +453,266 @@ func TestPeerDescriptorFingerprintIgnoresScoreFields(t *testing.T) {
 	}
 }
 
+func TestSyncPeerRelaysConservativelyMergesMicroRelayDescriptorQuality(t *testing.T) {
+	urlA := "http://peer-a.local"
+	urlB := "http://peer-b.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	pubB, privB, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenB: %v", err)
+	}
+	now := time.Now()
+	highQuality := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:      "middle-shared",
+		Role:         "micro-relay",
+		OperatorID:   "op-middle-shared",
+		Endpoint:     "127.0.0.1:51823",
+		ValidUntil:   now.Add(2 * time.Minute),
+		Reputation:   0.9,
+		Uptime:       0.95,
+		Capacity:     0.92,
+		AbusePenalty: 0.1,
+		BondScore:    0.8,
+		StakeScore:   0.7,
+	}, privA)
+	lowQuality := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:      "middle-shared",
+		Role:         "micro-relay",
+		OperatorID:   "op-middle-shared",
+		Endpoint:     "127.0.0.1:51823",
+		ValidUntil:   now.Add(time.Minute),
+		Reputation:   0.4,
+		Uptime:       0.45,
+		Capacity:     0.49,
+		AbusePenalty: 0.7,
+		BondScore:    0.2,
+		StakeScore:   0.3,
+	}, privB)
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubA)}),
+		urlA + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{highQuality}}),
+		urlB + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubB)}),
+		urlB + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{lowQuality}}),
+	}
+	s := &Service{
+		operatorID:     "op-local",
+		peerURLs:       []string{urlA, urlB},
+		peerMinVotes:   2,
+		peerMaxHops:    2,
+		peerRelays:     make(map[string]proto.RelayDescriptor),
+		peerRelayETags: make(map[string]string),
+		peerRelayCache: make(map[string][]proto.RelayDescriptor),
+		httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	if err := s.syncPeerRelays(context.Background()); err != nil {
+		t.Fatalf("syncPeerRelays: %v", err)
+	}
+	relays := s.snapshotPeerRelays()
+	if len(relays) != 1 {
+		t.Fatalf("expected one merged micro-relay, got %d", len(relays))
+	}
+	got := relays[0]
+	if got.RelayID != "middle-shared" || got.Role != "micro-relay" {
+		t.Fatalf("unexpected merged relay: %+v", got)
+	}
+	if got.Reputation != 0.4 || got.Uptime != 0.45 || got.Capacity != 0.49 {
+		t.Fatalf("expected conservative min quality scores, got rep=%.2f uptime=%.2f capacity=%.2f", got.Reputation, got.Uptime, got.Capacity)
+	}
+	if got.AbusePenalty != 0.7 || got.BondScore != 0.2 || got.StakeScore != 0.3 {
+		t.Fatalf("expected conservative abuse/bond/stake scores, got abuse=%.2f bond=%.2f stake=%.2f", got.AbusePenalty, got.BondScore, got.StakeScore)
+	}
+}
+
+func TestSyncPeerRelaysConservativelyMergesMicroExitQualitySignals(t *testing.T) {
+	urlA := "http://peer-a.local"
+	urlB := "http://peer-b.local"
+	pubA, privA, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	pubB, privB, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenB: %v", err)
+	}
+	now := time.Now()
+	healthyDesc := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:      "micro-exit-shared",
+		Role:         "micro-exit",
+		OperatorID:   "op-micro-exit-shared",
+		Endpoint:     "127.0.0.1:51824",
+		ControlURL:   "http://micro-exit.local",
+		Capabilities: []string{"wg", "tiered-policy"},
+		HopRoles:     []string{"exit"},
+		ValidUntil:   now.Add(2 * time.Minute),
+		Reputation:   0.9,
+		Uptime:       0.95,
+		Capacity:     0.92,
+		AbusePenalty: 0.1,
+		BondScore:    0.8,
+		StakeScore:   0.7,
+	}, privA)
+	lowQualityDesc := signedDescriptor(t, proto.RelayDescriptor{
+		RelayID:      "micro-exit-shared",
+		Role:         "micro-exit",
+		OperatorID:   "op-micro-exit-shared",
+		Endpoint:     "127.0.0.1:51824",
+		ControlURL:   "http://micro-exit.local",
+		Capabilities: []string{"wg", "tiered-policy"},
+		HopRoles:     []string{"exit"},
+		ValidUntil:   now.Add(time.Minute),
+		Reputation:   0.4,
+		Uptime:       0.45,
+		Capacity:     0.49,
+		AbusePenalty: 0.7,
+		BondScore:    0.2,
+		StakeScore:   0.3,
+	}, privB)
+	selectionA := proto.RelaySelectionFeedResponse{
+		Operator:    "op-a",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Scores: []proto.RelaySelectionScore{
+			{RelayID: "micro-exit-shared", Role: "micro-exit", Reputation: 0.9, Uptime: 0.95, Capacity: 0.92, AbusePenalty: 0.1, BondScore: 0.8, StakeScore: 0.7},
+		},
+	}
+	selectionASig, err := crypto.SignRelaySelectionFeed(selectionA, privA)
+	if err != nil {
+		t.Fatalf("sign selectionA: %v", err)
+	}
+	selectionA.Signature = selectionASig
+	selectionB := proto.RelaySelectionFeedResponse{
+		Operator:    "op-b",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Scores: []proto.RelaySelectionScore{
+			{RelayID: "micro-exit-shared", Role: "micro-exit", Reputation: 0.4, Uptime: 0.45, Capacity: 0.49, AbusePenalty: 0.7, BondScore: 0.2, StakeScore: 0.3},
+		},
+	}
+	selectionBSig, err := crypto.SignRelaySelectionFeed(selectionB, privB)
+	if err != nil {
+		t.Fatalf("sign selectionB: %v", err)
+	}
+	selectionB.Signature = selectionBSig
+	trustA := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "op-a",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "micro-exit-shared",
+				Role:         "micro-exit",
+				OperatorID:   "op-micro-exit-shared",
+				Reputation:   0.9,
+				Uptime:       0.95,
+				Capacity:     0.92,
+				AbusePenalty: 0.1,
+				BondScore:    0.8,
+				StakeScore:   0.7,
+				Confidence:   0.9,
+			},
+		},
+	}
+	trustASig, err := crypto.SignRelayTrustAttestationFeed(trustA, privA)
+	if err != nil {
+		t.Fatalf("sign trustA: %v", err)
+	}
+	trustA.Signature = trustASig
+	trustB := proto.RelayTrustAttestationFeedResponse{
+		Operator:    "op-b",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(30 * time.Second).Unix(),
+		Attestations: []proto.RelayTrustAttestation{
+			{
+				RelayID:      "micro-exit-shared",
+				Role:         "micro-exit",
+				OperatorID:   "op-micro-exit-shared",
+				Reputation:   0.4,
+				Uptime:       0.45,
+				Capacity:     0.49,
+				AbusePenalty: 0.7,
+				BondScore:    0.2,
+				StakeScore:   0.3,
+				Confidence:   0.6,
+			},
+		},
+	}
+	trustBSig, err := crypto.SignRelayTrustAttestationFeed(trustB, privB)
+	if err != nil {
+		t.Fatalf("sign trustB: %v", err)
+	}
+	trustB.Signature = trustBSig
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlA + "/v1/pubkey":             jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubA)}),
+		urlA + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{healthyDesc}}),
+		urlA + "/v1/selection-feed":     jsonResp(selectionA),
+		urlA + "/v1/trust-attestations": jsonResp(trustA),
+		urlB + "/v1/pubkey":             jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pubB)}),
+		urlB + "/v1/relays":             jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{lowQualityDesc}}),
+		urlB + "/v1/selection-feed":     jsonResp(selectionB),
+		urlB + "/v1/trust-attestations": jsonResp(trustB),
+	}
+	s := &Service{
+		operatorID:           "op-local",
+		microExitBetaAllowed: true,
+		peerURLs:             []string{urlA, urlB},
+		peerMinVotes:         2,
+		peerScoreMinVotes:    2,
+		peerTrustMinVotes:    2,
+		peerMaxHops:          2,
+		peerRelays:           make(map[string]proto.RelayDescriptor),
+		peerScores:           make(map[string]proto.RelaySelectionScore),
+		peerTrust:            make(map[string]proto.RelayTrustAttestation),
+		peerRelayETags:       make(map[string]string),
+		peerRelayCache:       make(map[string][]proto.RelayDescriptor),
+		peerScoreETags:       make(map[string]string),
+		peerScoreCache:       make(map[string]map[string]proto.RelaySelectionScore),
+		peerTrustETags:       make(map[string]string),
+		peerTrustCache:       make(map[string]map[string]proto.RelayTrustAttestation),
+		httpClient:           &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+	if err := s.syncPeerRelays(context.Background()); err != nil {
+		t.Fatalf("syncPeerRelays: %v", err)
+	}
+
+	key := relayKey("micro-exit-shared", "micro-exit")
+	relays := s.snapshotPeerRelays()
+	if len(relays) != 1 {
+		t.Fatalf("expected one merged micro-exit, got %d", len(relays))
+	}
+	gotDesc := relays[0]
+	if relayKey(gotDesc.RelayID, gotDesc.Role) != key {
+		t.Fatalf("unexpected merged relay: %+v", gotDesc)
+	}
+	if gotDesc.Reputation != 0.4 || gotDesc.Uptime != 0.45 || gotDesc.Capacity != 0.49 {
+		t.Fatalf("expected conservative micro-exit descriptor quality scores, got %+v", gotDesc)
+	}
+	if gotDesc.AbusePenalty != 0.7 || gotDesc.BondScore != 0.2 || gotDesc.StakeScore != 0.3 {
+		t.Fatalf("expected conservative micro-exit descriptor abuse/bond/stake scores, got %+v", gotDesc)
+	}
+	score, ok := s.snapshotPeerScores()[key]
+	if !ok {
+		t.Fatalf("expected merged micro-exit peer score")
+	}
+	if score.Reputation != 0.4 || score.Uptime != 0.45 || score.Capacity != 0.49 || score.AbusePenalty != 0.7 {
+		t.Fatalf("expected conservative micro-exit peer score, got %+v", score)
+	}
+	att, ok := s.snapshotPeerTrust()[key]
+	if !ok {
+		t.Fatalf("expected merged micro-exit peer trust attestation")
+	}
+	if att.Reputation != 0.4 || att.Uptime != 0.45 || att.Capacity != 0.49 || att.AbusePenalty != 0.7 || att.Confidence != 0.6 {
+		t.Fatalf("expected conservative micro-exit peer trust attestation, got %+v", att)
+	}
+	for _, desc := range s.buildRelayDescriptors(now) {
+		if relayKey(desc.RelayID, desc.Role) == key {
+			t.Fatalf("expected demoted micro-exit to be withheld from publication, got %+v", desc)
+		}
+	}
+}
+
 func TestFetchPeerPubKeysStrictRejectsLegacyFallback(t *testing.T) {
 	peerURL := "http://peer-a.local"
 	pub, _, err := crypto.GenerateEd25519Keypair()
@@ -643,6 +903,54 @@ func TestBuildRelayDescriptorsIncludesPeerRelay(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected synced peer relay in published descriptors")
+	}
+}
+
+func TestBuildRelayDescriptorsPrunesExpiredPeerRelay(t *testing.T) {
+	pub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	now := time.Now().UTC()
+	s := &Service{
+		pubKey:            pub,
+		entryEndpoints:    []string{"127.0.0.1:51820"},
+		endpointRotateSec: 30,
+		peerRelays: map[string]proto.RelayDescriptor{
+			relayKey("exit-peer-expired", "exit"): {
+				RelayID:    "exit-peer-expired",
+				Role:       "exit",
+				Endpoint:   "127.0.0.1:51831",
+				ControlURL: "http://127.0.0.1:8184",
+				ValidUntil: now.Add(-time.Second),
+			},
+			relayKey("exit-peer-live", "exit"): {
+				RelayID:    "exit-peer-live",
+				Role:       "exit",
+				Endpoint:   "127.0.0.1:51832",
+				ControlURL: "http://127.0.0.1:8185",
+				ValidUntil: now.Add(time.Minute),
+			},
+		},
+	}
+	relays := s.buildRelayDescriptors(now)
+	var foundExpired, foundLive bool
+	for _, desc := range relays {
+		switch desc.RelayID {
+		case "exit-peer-expired":
+			foundExpired = true
+		case "exit-peer-live":
+			foundLive = true
+		}
+	}
+	if foundExpired {
+		t.Fatalf("expected expired peer relay to be pruned from published descriptors")
+	}
+	if !foundLive {
+		t.Fatalf("expected live peer relay in published descriptors")
+	}
+	if _, ok := s.peerRelays[relayKey("exit-peer-expired", "exit")]; ok {
+		t.Fatalf("expected expired peer relay pruned from cache")
 	}
 }
 
@@ -1132,6 +1440,16 @@ func TestSyncPeerRelaysAggregatesPeerSelectionScores(t *testing.T) {
 	if score.Reputation < 0.79 || score.Reputation > 0.81 {
 		t.Fatalf("expected averaged reputation around 0.8, got %f", score.Reputation)
 	}
+	middleScore, ok := scores[relayKey("middle-shared", "micro-relay")]
+	if !ok {
+		t.Fatalf("expected aggregated micro-relay score")
+	}
+	if middleScore.Reputation != 0.4 || middleScore.Uptime != 0.3 || middleScore.Capacity != 0.2 {
+		t.Fatalf("expected conservative micro-relay quality scores, got %+v", middleScore)
+	}
+	if middleScore.AbusePenalty != 0.25 {
+		t.Fatalf("expected conservative micro-relay abuse penalty, got %+v", middleScore)
+	}
 }
 
 func TestSyncPeerRelaysAggregatesPeerTrustAttestations(t *testing.T) {
@@ -1295,6 +1613,16 @@ func TestSyncPeerRelaysAggregatesPeerTrustAttestations(t *testing.T) {
 	}
 	if got.StakeScore < 0.29 || got.StakeScore > 0.31 {
 		t.Fatalf("expected averaged stake score around 0.3, got %f", got.StakeScore)
+	}
+	middle, ok := att[relayKey("middle-shared", "micro-relay")]
+	if !ok {
+		t.Fatalf("expected aggregated micro-relay trust attestation")
+	}
+	if middle.Reputation != 0.4 || middle.Uptime != 0.3 || middle.Capacity != 0.2 {
+		t.Fatalf("expected conservative micro-relay trust quality scores, got %+v", middle)
+	}
+	if middle.AbusePenalty != 0.25 || middle.BondScore != 0.3 || middle.StakeScore != 0.2 {
+		t.Fatalf("expected conservative micro-relay trust abuse/bond/stake scores, got %+v", middle)
 	}
 }
 

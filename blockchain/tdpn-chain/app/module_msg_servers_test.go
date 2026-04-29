@@ -17,13 +17,13 @@ func TestRewardsMsgServer_AccessorAndFlow(t *testing.T) {
 	scaffold := NewChainScaffold()
 	server := scaffold.RewardsMsgServer()
 
-	accrual := rewardstypes.RewardAccrual{
+	accrual := withTestRewardPayout(rewardstypes.RewardAccrual{
 		AccrualID:  "acc-1",
 		SessionID:  "sess-1",
 		ProviderID: "provider-1",
 		AssetDenom: "utdpn",
 		Amount:     50,
-	}
+	})
 	accrualResp, err := server.CreateAccrual(context.Background(), RewardsCreateAccrualRequest{Record: accrual})
 	if err != nil {
 		t.Fatalf("expected create accrual success, got %v", err)
@@ -55,8 +55,8 @@ func TestRewardsMsgServer_AccessorAndFlow(t *testing.T) {
 	if !ok {
 		t.Fatal("expected accrual to exist")
 	}
-	if updatedAccrual.OperationState != chaintypes.ReconciliationConfirmed {
-		t.Fatalf("expected accrual status %q after distribution, got %q", chaintypes.ReconciliationConfirmed, updatedAccrual.OperationState)
+	if updatedAccrual.OperationState != chaintypes.ReconciliationSubmitted {
+		t.Fatalf("expected accrual status %q after distribution, got %q", chaintypes.ReconciliationSubmitted, updatedAccrual.OperationState)
 	}
 
 	replayResp, err := server.RecordDistribution(context.Background(), RewardsRecordDistributionRequest{Record: dist})
@@ -65,6 +65,68 @@ func TestRewardsMsgServer_AccessorAndFlow(t *testing.T) {
 	}
 	if !replayResp.Replay {
 		t.Fatal("expected replay=true for duplicate distribution")
+	}
+}
+
+func TestRewardsMsgServer_RecordDistributionRequiresContextAuthorityForFinality(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.RewardsMsgServer()
+
+	accrual := withTestRewardPayout(rewardstypes.RewardAccrual{
+		AccrualID:  "acc-finality-context-1",
+		SessionID:  "sess-finality-context-1",
+		ProviderID: "provider-finality-context-1",
+		AssetDenom: "utdpn",
+		Amount:     50,
+	})
+	if _, err := server.CreateAccrual(context.Background(), RewardsCreateAccrualRequest{Record: accrual}); err != nil {
+		t.Fatalf("expected create accrual success, got %v", err)
+	}
+
+	submitted := rewardstypes.DistributionRecord{
+		DistributionID: "dist-finality-context-1",
+		AccrualID:      accrual.AccrualID,
+		PayoutRef:      "payout-finality-context-1",
+		DistributedAt:  testRewardPayoutEndUnix + 1,
+		Status:         chaintypes.ReconciliationSubmitted,
+	}
+	if _, err := server.RecordDistribution(context.Background(), RewardsRecordDistributionRequest{Record: submitted}); err != nil {
+		t.Fatalf("expected submitted distribution success, got %v", err)
+	}
+
+	confirmed := submitted
+	confirmed.Status = chaintypes.ReconciliationConfirmed
+	_, err := server.RecordDistribution(context.Background(), RewardsRecordDistributionRequest{
+		Record:                 confirmed,
+		AllowFinalityAuthority: true,
+	})
+	if err == nil {
+		t.Fatal("expected finality authority without context marker to fail")
+	}
+	if !strings.Contains(err.Error(), "finality authority") {
+		t.Fatalf("expected finality authority error, got %v", err)
+	}
+
+	stored, ok := scaffold.RewardsModule.Keeper.GetDistribution(submitted.DistributionID)
+	if !ok {
+		t.Fatal("expected submitted distribution to remain persisted")
+	}
+	if stored.Status != chaintypes.ReconciliationSubmitted {
+		t.Fatalf("expected rejected app finality to leave status submitted, got %q", stored.Status)
+	}
+
+	resp, err := server.RecordDistribution(WithRewardsFinalityAuthority(context.Background()), RewardsRecordDistributionRequest{
+		Record:                 confirmed,
+		AllowFinalityAuthority: true,
+	})
+	if err != nil {
+		t.Fatalf("expected context-authorized finality success, got %v", err)
+	}
+	if resp.Replay {
+		t.Fatal("expected first context-authorized finality transition to not be replay")
+	}
+	if resp.Distribution.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected confirmed distribution, got %q", resp.Distribution.Status)
 	}
 }
 
@@ -93,6 +155,8 @@ func TestSlashingMsgServer_AccessorAndFlow(t *testing.T) {
 
 	evidence := slashingtypes.SlashEvidence{
 		EvidenceID:    "evidence-1",
+		ProviderID:    "provider-1",
+		SessionID:     "session-1",
 		Kind:          slashingtypes.EvidenceKindObjective,
 		ViolationType: "double-sign",
 		ProofHash:     "sha256:6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090",
@@ -107,6 +171,9 @@ func TestSlashingMsgServer_AccessorAndFlow(t *testing.T) {
 	if evResp.Evidence.Status != chaintypes.ReconciliationSubmitted {
 		t.Fatalf("expected evidence status %q, got %q", chaintypes.ReconciliationSubmitted, evResp.Evidence.Status)
 	}
+	confirmedEvidence := evResp.Evidence
+	confirmedEvidence.Status = chaintypes.ReconciliationConfirmed
+	scaffold.SlashingModule.Keeper.UpsertEvidence(confirmedEvidence)
 
 	penalty := slashingtypes.PenaltyDecision{
 		PenaltyID:       "penalty-1",
@@ -140,6 +207,8 @@ func TestSlashingMsgServer_NilScaffold(t *testing.T) {
 	_, err := server.SubmitEvidence(context.Background(), SlashingSubmitEvidenceRequest{
 		Record: slashingtypes.SlashEvidence{
 			EvidenceID:    "evidence-nil",
+			ProviderID:    "provider-nil",
+			SessionID:     "session-nil",
 			Kind:          slashingtypes.EvidenceKindObjective,
 			ViolationType: "double-sign",
 			ProofHash:     "sha256:97a85b9f687bba82d44975f5f92f40894dc150ae53b4683e2e1509313bac6f73",
@@ -420,13 +489,13 @@ func TestRewardsMsgServer_CreateAccrualHonorsCanceledContext(t *testing.T) {
 	scaffold := NewChainScaffold()
 	server := scaffold.RewardsMsgServer()
 
-	accrual := rewardstypes.RewardAccrual{
+	accrual := withTestRewardPayout(rewardstypes.RewardAccrual{
 		AccrualID:  "acc-canceled-ctx-1",
 		SessionID:  "sess-canceled-ctx-1",
 		ProviderID: "provider-canceled-ctx-1",
 		AssetDenom: "utdpn",
 		Amount:     5,
-	}
+	})
 
 	canceledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -444,13 +513,13 @@ func TestRewardsMsgServer_RecordDistributionHonorsCanceledContext(t *testing.T) 
 	scaffold := NewChainScaffold()
 	server := scaffold.RewardsMsgServer()
 
-	accrual := rewardstypes.RewardAccrual{
+	accrual := withTestRewardPayout(rewardstypes.RewardAccrual{
 		AccrualID:  "acc-canceled-ctx-2",
 		SessionID:  "sess-canceled-ctx-2",
 		ProviderID: "provider-canceled-ctx-2",
 		AssetDenom: "utdpn",
 		Amount:     11,
-	}
+	})
 	if _, err := server.CreateAccrual(context.Background(), RewardsCreateAccrualRequest{Record: accrual}); err != nil {
 		t.Fatalf("expected create accrual success, got %v", err)
 	}
@@ -479,6 +548,8 @@ func TestSlashingMsgServer_SubmitEvidenceHonorsCanceledContext(t *testing.T) {
 
 	evidence := slashingtypes.SlashEvidence{
 		EvidenceID:    "evidence-canceled-ctx-1",
+		ProviderID:    "provider-canceled-ctx-1",
+		SessionID:     "session-canceled-ctx-1",
 		Kind:          slashingtypes.EvidenceKindObjective,
 		ViolationType: "double-sign",
 		ProofHash:     "sha256:991f4ec8f0f9dc31c0f8243e304fb5f87bc9ec89e7c0f9eb9cd0af2fbd2db10f",
@@ -502,6 +573,8 @@ func TestSlashingMsgServer_ApplyPenaltyHonorsCanceledContext(t *testing.T) {
 
 	evidence := slashingtypes.SlashEvidence{
 		EvidenceID:    "evidence-canceled-ctx-2",
+		ProviderID:    "provider-canceled-ctx-2",
+		SessionID:     "session-canceled-ctx-2",
 		Kind:          slashingtypes.EvidenceKindObjective,
 		ViolationType: "double-sign",
 		ProofHash:     "sha256:77eca79149ed12a1d5f4191e4ea292072ee2d851bf9ce9ff7e4a0ab9ccb85fa8",

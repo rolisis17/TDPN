@@ -1,11 +1,17 @@
 mod local_api;
 
 use local_api::{
-    ConnectRequest, GPMAuditRecentRequest, GPMClientRegisterRequest, GPMClientStatusRequest,
-    GPMOperatorApplyRequest, GPMOperatorApproveRequest, GPMOperatorListRequest,
-    GPMOperatorStatusRequest, GPMServerStatusRequest, GPMSessionStatusRequest,
+    ConnectRequest, GPMClientRegisterRequest, GPMClientStatusRequest, GPMContributionStatusRequest,
+    GPMContributionToggleRequest, GPMSessionStatusRequest, GPMSettlementReserveFundsRequest,
     GPMWalletChallengeRequest, GPMWalletVerifyRequest, LocalApiClient, LocalApiConfig,
-    ProfileRequest, RuntimePolicyConfig,
+    RuntimePolicyConfig,
+};
+#[cfg(feature = "admin-console")]
+use local_api::{
+    GPMAdminContributionListRequest, GPMAdminRewardFinalizeRequest, GPMAdminRewardHoldRequest,
+    GPMAdminRewardReviewRequest, GPMAuditRecentRequest, GPMOperatorApplyRequest,
+    GPMOperatorApproveRequest, GPMOperatorListRequest, GPMOperatorStatusRequest,
+    GPMServerStatusRequest, ProfileRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -17,8 +23,30 @@ struct AppState {
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct ServiceLifecycleRequest {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    session_token: Option<String>,
+    #[serde(default)]
+    session_token: String,
+}
+
+#[cfg(any(feature = "admin-console", test))]
+impl ServiceLifecycleRequest {
+    fn validate(&self) -> Result<(), String> {
+        validate_admin_session_token(&self.session_token)
+    }
+}
+
+#[cfg(any(feature = "admin-console", test))]
+fn validate_admin_session_token(session_token: &str) -> Result<(), String> {
+    let token = session_token.trim();
+    if token.is_empty() {
+        return Err("session_token is required for Admin Console mutations".to_string());
+    }
+    if token.chars().any(char::is_whitespace) {
+        return Err("session_token cannot contain whitespace".to_string());
+    }
+    if token.len() > 4096 {
+        return Err("session_token is too long".to_string());
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -45,6 +73,8 @@ struct ControlConfig {
     allow_service_mutations: bool,
     connect_require_session: bool,
     allow_legacy_connect_override: bool,
+    admin_console_enabled: bool,
+    app_mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     update_channel: Option<String>,
     update_feed_configured: bool,
@@ -70,6 +100,7 @@ struct RuntimePolicyView {
 #[tauri::command]
 fn control_config(state: State<'_, AppState>) -> ControlConfig {
     let cfg = state.local_api.config();
+    let admin_console_enabled = cfg!(feature = "admin-console") && cfg.admin_console_enabled;
     ControlConfig {
         base_url: cfg.redacted_base_url(),
         timeout_sec: cfg.timeout_sec,
@@ -79,6 +110,12 @@ fn control_config(state: State<'_, AppState>) -> ControlConfig {
         allow_service_mutations: cfg.allow_service_mutations,
         connect_require_session: cfg.connect_require_session,
         allow_legacy_connect_override: cfg.allow_legacy_connect_override,
+        admin_console_enabled,
+        app_mode: if admin_console_enabled {
+            "admin_console".to_string()
+        } else {
+            "public_app".to_string()
+        },
         update_channel: optional_env_any(&[
             "GPM_DESKTOP_UPDATE_CHANNEL",
             "TDPN_DESKTOP_UPDATE_CHANNEL",
@@ -99,6 +136,26 @@ fn control_config(state: State<'_, AppState>) -> ControlConfig {
         product_short_name: "GPM".to_string(),
         api_contract: "gpm-v1-with-tdpn-compat".to_string(),
     }
+}
+
+#[cfg(any(feature = "admin-console", test))]
+fn ensure_admin_console_config(config: &LocalApiConfig, action: &str) -> Result<(), String> {
+    if !cfg!(feature = "admin-console") {
+        return Err(format!(
+            "{action} is available only in the separate GPM Admin Console build (compile with cargo feature `admin-console`; the public GPM App does not expose admin commands)"
+        ));
+    }
+    if config.admin_console_enabled {
+        return Ok(());
+    }
+    Err(format!(
+        "{action} is available only in the separate GPM Admin Console (Admin Console feature builds are enabled by default; unset GPM_DESKTOP_ADMIN_CONSOLE or set it to 1, legacy alias: TDPN_DESKTOP_ADMIN_CONSOLE=1; set it to 0 only as a kill switch)"
+    ))
+}
+
+#[cfg(feature = "admin-console")]
+fn ensure_admin_console_state(state: &State<'_, AppState>, action: &str) -> Result<(), String> {
+    ensure_admin_console_config(state.local_api.config(), action)
 }
 
 #[tauri::command]
@@ -135,11 +192,14 @@ async fn control_runtime_config(state: State<'_, AppState>) -> Result<RuntimePol
         }
         Err(_) => RuntimePolicyView {
             available: false,
-            policy_source: "env_default".to_string(),
-            connect_require_session: None,
-            allow_legacy_connect_override: None,
+            policy_source: "config_unavailable".to_string(),
+            connect_require_session: Some(true),
+            allow_legacy_connect_override: Some(false),
             config: None,
-            note: Some("runtime config unavailable; using env default".to_string()),
+            note: Some(
+                "runtime config unavailable; failing closed until /v1/config is reachable"
+                    .to_string(),
+            ),
         },
     };
     Ok(view)
@@ -327,6 +387,7 @@ fn is_sensitive_field_key(key: &str) -> bool {
             | "privatekey"
             | "invite_key"
             | "invitekey"
+            | "compat_subject_hint"
             | "bearer"
             | "api_key"
             | "apikey"
@@ -336,6 +397,7 @@ fn is_sensitive_field_key(key: &str) -> bool {
         || normalized.ends_with("_private_key")
         || normalized.ends_with("_invite_key")
         || normalized.ends_with("_api_key")
+        || normalized.contains("subject_hint")
         || normalized.contains("private_key")
         || normalized.contains("privatekey")
         || normalized.contains("invite_key")
@@ -372,9 +434,16 @@ fn sanitize_desktop_payload(value: Value) -> Value {
     redact_sensitive_fields(remove_unbounded_output_fields(value))
 }
 
-fn fallback_to_legacy_service_endpoint(error: &str) -> bool {
-    let normalized = error.to_ascii_lowercase();
-    normalized.contains("404 not found") || normalized.contains("501 not implemented")
+fn sanitize_token_issuing_payload(value: Value) -> Value {
+    let session_token = value
+        .get("session_token")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let mut sanitized = sanitize_desktop_payload(value);
+    if let (Some(token), Some(object)) = (session_token, sanitized.as_object_mut()) {
+        object.insert("session_token".to_string(), Value::String(token));
+    }
+    sanitized
 }
 
 fn diagnostics_allowlisted_view(payload: Value) -> Value {
@@ -452,6 +521,10 @@ fn diagnostics_allowlisted_view(payload: Value) -> Value {
     Value::Object(response)
 }
 
+fn public_diagnostics_view(payload: Value) -> Value {
+    diagnostics_allowlisted_view(sanitize_desktop_payload(payload))
+}
+
 #[tauri::command]
 async fn control_health(state: State<'_, AppState>) -> Result<Value, String> {
     state
@@ -472,11 +545,27 @@ async fn control_status(state: State<'_, AppState>) -> Result<Value, String> {
 
 #[tauri::command]
 async fn control_get_diagnostics(state: State<'_, AppState>) -> Result<Value, String> {
+    #[cfg(feature = "admin-console")]
+    let admin_diagnostics_enabled = ensure_admin_console_state(&state, "Diagnostics").is_ok();
+    #[cfg(not(feature = "admin-console"))]
+    let admin_diagnostics_enabled = false;
+
+    let diagnostics_path = if admin_diagnostics_enabled {
+        "/v1/get_diagnostics"
+    } else {
+        "/v1/gpm/diagnostics/public"
+    };
     state
         .local_api
-        .get_json("/v1/get_diagnostics")
+        .get_json(diagnostics_path)
         .await
-        .map(diagnostics_allowlisted_view)
+        .map(|payload| {
+            if admin_diagnostics_enabled {
+                sanitize_desktop_payload(payload)
+            } else {
+                public_diagnostics_view(payload)
+            }
+        })
 }
 
 #[tauri::command]
@@ -485,6 +574,7 @@ async fn control_connect(
     request: ConnectRequest,
 ) -> Result<Value, String> {
     request.validate()?;
+    enforce_connect_policy(&state, &request).await?;
     state
         .local_api
         .post_json("/v1/connect", &request)
@@ -492,20 +582,109 @@ async fn control_connect(
         .map(sanitize_desktop_payload)
 }
 
+async fn enforce_connect_policy(
+    state: &State<'_, AppState>,
+    request: &ConnectRequest,
+) -> Result<(), String> {
+    let policy = state
+        .local_api
+        .get_runtime_policy_config()
+        .await
+        .map_err(|_| {
+            "Connect is unavailable: runtime policy is unavailable; retry after /v1/config is reachable"
+                .to_string()
+        })?;
+    enforce_connect_policy_request(request, &policy)
+}
+
+fn enforce_connect_policy_request(
+    request: &ConnectRequest,
+    policy: &RuntimePolicyConfig,
+) -> Result<(), String> {
+    let session_token = request
+        .session_token
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("");
+    let production_mode = runtime_config_bool(
+        policy.config.as_ref(),
+        &[
+            "gpm_production_mode",
+            "gpmProductionMode",
+            "production_mode",
+            "productionMode",
+        ],
+    )
+    .unwrap_or(false);
+    let require_session = policy
+        .connect_require_session
+        .unwrap_or(production_mode || request.prod_profile == Some(true));
+    let allow_legacy = policy.allow_legacy_connect_override.unwrap_or(false);
+
+    if session_token.is_empty() && (require_session || !allow_legacy) {
+        return Err("connect requires session_token by runtime policy".to_string());
+    }
+    if request.prod_profile == Some(true) && request.install_route == Some(false) {
+        return Err("production profile connect requires install_route=true so host traffic is routed through GPM".to_string());
+    }
+    if request.prod_profile == Some(true)
+        && request.path_profile.trim().eq_ignore_ascii_case("1hop")
+    {
+        return Err(
+            "production profile connect requires a strict 2hop or 3hop profile".to_string(),
+        );
+    }
+    if production_mode || request.prod_profile == Some(true) {
+        if session_token.is_empty() {
+            return Err("production connect requires session_token".to_string());
+        }
+        let reservation_id = request
+            .reservation_id
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("");
+        let reservation_session_id = request
+            .reservation_session_id
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("");
+        if reservation_id.is_empty() || reservation_session_id.is_empty() {
+            return Err("production profile connect requires chain-confirmed reservation_id and reservation_session_id".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn runtime_config_bool(config: Option<&Value>, keys: &[&str]) -> Option<bool> {
+    let object = config?.as_object()?;
+    for key in keys {
+        if let Some(value) = object.get(*key).and_then(Value::as_bool) {
+            return Some(value);
+        }
+    }
+    None
+}
+
 #[tauri::command]
-async fn control_disconnect(state: State<'_, AppState>) -> Result<Value, String> {
+async fn control_disconnect(
+    state: State<'_, AppState>,
+    request: Option<ServiceLifecycleRequest>,
+) -> Result<Value, String> {
+    let request = request.unwrap_or_default();
     state
         .local_api
-        .post_empty("/v1/disconnect")
+        .post_json("/v1/disconnect", &request)
         .await
         .map(sanitize_desktop_payload)
 }
 
+#[cfg(feature = "admin-console")]
 #[tauri::command]
 async fn control_set_profile(
     state: State<'_, AppState>,
     request: ProfileRequest,
 ) -> Result<Value, String> {
+    ensure_admin_console_state(&state, "Set Profile")?;
     request.validate()?;
     state
         .local_api
@@ -514,8 +693,14 @@ async fn control_set_profile(
         .map(sanitize_desktop_payload)
 }
 
+#[cfg(feature = "admin-console")]
 #[tauri::command]
-async fn control_update(state: State<'_, AppState>) -> Result<Value, String> {
+async fn control_update(
+    state: State<'_, AppState>,
+    request: ServiceLifecycleRequest,
+) -> Result<Value, String> {
+    ensure_admin_console_state(&state, "Update")?;
+    request.validate()?;
     if !state.local_api.config().allow_update_mutations {
         return Err(
             "desktop update action disabled (set GPM_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1; legacy alias: TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1)"
@@ -524,20 +709,27 @@ async fn control_update(state: State<'_, AppState>) -> Result<Value, String> {
     }
     state
         .local_api
-        .post_empty("/v1/update")
+        .post_json("/v1/update", &request)
         .await
         .map(sanitize_desktop_payload)
 }
 
+#[cfg(feature = "admin-console")]
 #[tauri::command]
-async fn control_service_status(state: State<'_, AppState>) -> Result<Value, String> {
+async fn control_service_status(
+    state: State<'_, AppState>,
+    request: ServiceLifecycleRequest,
+) -> Result<Value, String> {
+    ensure_admin_console_state(&state, "Service Status")?;
+    request.validate()?;
     state
         .local_api
-        .get_json("/v1/service/status")
+        .post_json("/v1/gpm/service/status", &request)
         .await
         .map(sanitize_desktop_payload)
 }
 
+#[cfg(feature = "admin-console")]
 #[tauri::command]
 async fn control_service_start(
     state: State<'_, AppState>,
@@ -546,11 +738,14 @@ async fn control_service_start(
     control_service_lifecycle(state, "start", request.unwrap_or_default()).await
 }
 
+#[cfg(feature = "admin-console")]
 async fn control_service_lifecycle(
     state: State<'_, AppState>,
     action: &str,
     request: ServiceLifecycleRequest,
 ) -> Result<Value, String> {
+    ensure_admin_console_state(&state, "Service Lifecycle")?;
+    request.validate()?;
     if !state.local_api.config().allow_service_mutations {
         return Err(
             "service lifecycle actions disabled (set GPM_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1; legacy alias: TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1)"
@@ -558,20 +753,14 @@ async fn control_service_lifecycle(
         );
     }
     let gpm_path = format!("/v1/gpm/service/{action}");
-    match state.local_api.post_json(&gpm_path, &request).await {
-        Ok(value) => Ok(sanitize_desktop_payload(value)),
-        Err(error) if fallback_to_legacy_service_endpoint(&error) => {
-            let legacy_path = format!("/v1/service/{action}");
-            state
-                .local_api
-                .post_json(&legacy_path, &request)
-                .await
-                .map(sanitize_desktop_payload)
-        }
-        Err(error) => Err(error),
-    }
+    state
+        .local_api
+        .post_json(&gpm_path, &request)
+        .await
+        .map(sanitize_desktop_payload)
 }
 
+#[cfg(feature = "admin-console")]
 #[tauri::command]
 async fn control_service_stop(
     state: State<'_, AppState>,
@@ -580,6 +769,7 @@ async fn control_service_stop(
     control_service_lifecycle(state, "stop", request.unwrap_or_default()).await
 }
 
+#[cfg(feature = "admin-console")]
 #[tauri::command]
 async fn control_service_restart(
     state: State<'_, AppState>,
@@ -614,11 +804,12 @@ async fn control_gpm_auth_verify(
     state: State<'_, AppState>,
     request: GPMWalletVerifyRequest,
 ) -> Result<Value, String> {
+    request.validate()?;
     state
         .local_api
         .post_json("/v1/gpm/auth/verify", &request)
         .await
-        .map(sanitize_desktop_payload)
+        .map(sanitize_token_issuing_payload)
 }
 
 #[tauri::command]
@@ -631,19 +822,23 @@ async fn control_gpm_session(
         .local_api
         .post_json("/v1/gpm/session", &request)
         .await
-        .map(sanitize_desktop_payload)
+        .map(sanitize_token_issuing_payload)
 }
 
+#[cfg(feature = "admin-console")]
 #[tauri::command]
 async fn control_gpm_audit_recent(
     state: State<'_, AppState>,
+    session_token: Option<String>,
     limit: Option<u32>,
     offset: Option<u32>,
     event: Option<String>,
     wallet_address: Option<String>,
     order: Option<String>,
 ) -> Result<Value, String> {
-    let query = GPMAuditRecentRequest {
+    ensure_admin_console_state(&state, "Recent Audit")?;
+    let mut query = GPMAuditRecentRequest {
+        session_token,
         limit,
         offset,
         event,
@@ -651,9 +846,15 @@ async fn control_gpm_audit_recent(
         order,
     }
     .sanitize()?;
+    let session_token = query
+        .session_token
+        .as_deref()
+        .ok_or_else(|| "session_token is required".to_string())?
+        .to_string();
+    query.session_token = None;
     state
         .local_api
-        .get_json_with_query("/v1/gpm/audit/recent", &query)
+        .get_json_with_gpm_session_query("/v1/gpm/audit/recent", &session_token, &query)
         .await
         .map(sanitize_desktop_payload)
 }
@@ -663,6 +864,7 @@ async fn control_gpm_client_register(
     state: State<'_, AppState>,
     request: GPMClientRegisterRequest,
 ) -> Result<Value, String> {
+    request.validate()?;
     state
         .local_api
         .post_json("/v1/gpm/onboarding/client/register", &request)
@@ -675,6 +877,7 @@ async fn control_gpm_client_status(
     state: State<'_, AppState>,
     request: GPMClientStatusRequest,
 ) -> Result<Value, String> {
+    request.validate()?;
     state
         .local_api
         .post_json("/v1/gpm/onboarding/client/status", &request)
@@ -683,10 +886,146 @@ async fn control_gpm_client_status(
 }
 
 #[tauri::command]
+async fn control_gpm_contribution_status(
+    state: State<'_, AppState>,
+    request: GPMContributionStatusRequest,
+) -> Result<Value, String> {
+    request.validate()?;
+    state
+        .local_api
+        .post_json("/v1/gpm/contribution/status", &request)
+        .await
+        .map(sanitize_desktop_payload)
+}
+
+#[tauri::command]
+async fn control_gpm_contribution_enable(
+    state: State<'_, AppState>,
+    request: GPMContributionToggleRequest,
+) -> Result<Value, String> {
+    request.validate()?;
+    state
+        .local_api
+        .post_json("/v1/gpm/contribution/enable", &request)
+        .await
+        .map(sanitize_desktop_payload)
+}
+
+#[tauri::command]
+async fn control_gpm_contribution_disable(
+    state: State<'_, AppState>,
+    request: GPMContributionToggleRequest,
+) -> Result<Value, String> {
+    request.validate()?;
+    state
+        .local_api
+        .post_json("/v1/gpm/contribution/disable", &request)
+        .await
+        .map(sanitize_desktop_payload)
+}
+
+#[tauri::command]
+async fn control_gpm_rewards_current_week(
+    state: State<'_, AppState>,
+    request: GPMContributionStatusRequest,
+) -> Result<Value, String> {
+    request.validate()?;
+    state
+        .local_api
+        .post_json("/v1/gpm/rewards/current-week", &request)
+        .await
+        .map(sanitize_desktop_payload)
+}
+
+#[tauri::command]
+async fn control_gpm_rewards_history(
+    state: State<'_, AppState>,
+    request: GPMContributionStatusRequest,
+) -> Result<Value, String> {
+    request.validate()?;
+    state
+        .local_api
+        .post_json("/v1/gpm/rewards/history", &request)
+        .await
+        .map(sanitize_desktop_payload)
+}
+
+#[tauri::command]
+async fn control_gpm_settlement_reserve_funds(
+    state: State<'_, AppState>,
+    request: GPMSettlementReserveFundsRequest,
+) -> Result<Value, String> {
+    request.validate()?;
+    state
+        .local_api
+        .post_json("/v1/gpm/settlement/reserve-funds", &request)
+        .await
+        .map(sanitize_desktop_payload)
+}
+
+#[cfg(feature = "admin-console")]
+#[tauri::command]
+async fn control_gpm_admin_contribution_list(
+    state: State<'_, AppState>,
+    request: GPMAdminContributionListRequest,
+) -> Result<Value, String> {
+    ensure_admin_console_state(&state, "Contribution Review")?;
+    state
+        .local_api
+        .post_json("/v1/gpm/admin/contributions/list", &request)
+        .await
+        .map(sanitize_desktop_payload)
+}
+
+#[cfg(feature = "admin-console")]
+#[tauri::command]
+async fn control_gpm_admin_reward_review(
+    state: State<'_, AppState>,
+    request: GPMAdminRewardReviewRequest,
+) -> Result<Value, String> {
+    ensure_admin_console_state(&state, "Reward Review")?;
+    state
+        .local_api
+        .post_json("/v1/gpm/admin/rewards/review", &request)
+        .await
+        .map(sanitize_desktop_payload)
+}
+
+#[cfg(feature = "admin-console")]
+#[tauri::command]
+async fn control_gpm_admin_reward_hold(
+    state: State<'_, AppState>,
+    request: GPMAdminRewardHoldRequest,
+) -> Result<Value, String> {
+    ensure_admin_console_state(&state, "Reward Hold")?;
+    state
+        .local_api
+        .post_json("/v1/gpm/admin/rewards/hold", &request)
+        .await
+        .map(sanitize_desktop_payload)
+}
+
+#[cfg(feature = "admin-console")]
+#[tauri::command]
+async fn control_gpm_admin_reward_finalize(
+    state: State<'_, AppState>,
+    request: GPMAdminRewardFinalizeRequest,
+) -> Result<Value, String> {
+    ensure_admin_console_state(&state, "Reward Finalize")?;
+    state
+        .local_api
+        .post_json("/v1/gpm/admin/rewards/finalize", &request)
+        .await
+        .map(sanitize_desktop_payload)
+}
+
+#[cfg(feature = "admin-console")]
+#[tauri::command]
 async fn control_gpm_server_status(
     state: State<'_, AppState>,
     request: GPMServerStatusRequest,
 ) -> Result<Value, String> {
+    ensure_admin_console_state(&state, "Server Status")?;
     state
         .local_api
         .post_json("/v1/gpm/onboarding/server/status", &request)
@@ -707,11 +1046,13 @@ async fn control_gpm_onboarding_overview(
         .map(sanitize_desktop_payload)
 }
 
+#[cfg(feature = "admin-console")]
 #[tauri::command]
 async fn control_gpm_operator_apply(
     state: State<'_, AppState>,
     request: GPMOperatorApplyRequest,
 ) -> Result<Value, String> {
+    ensure_admin_console_state(&state, "Apply Operator Role")?;
     state
         .local_api
         .post_json("/v1/gpm/onboarding/operator/apply", &request)
@@ -719,11 +1060,13 @@ async fn control_gpm_operator_apply(
         .map(sanitize_desktop_payload)
 }
 
+#[cfg(feature = "admin-console")]
 #[tauri::command]
 async fn control_gpm_operator_status(
     state: State<'_, AppState>,
     request: GPMOperatorStatusRequest,
 ) -> Result<Value, String> {
+    ensure_admin_console_state(&state, "Operator Status")?;
     state
         .local_api
         .post_json("/v1/gpm/onboarding/operator/status", &request)
@@ -731,11 +1074,13 @@ async fn control_gpm_operator_status(
         .map(sanitize_desktop_payload)
 }
 
+#[cfg(feature = "admin-console")]
 #[tauri::command]
 async fn control_gpm_operator_list(
     state: State<'_, AppState>,
     request: GPMOperatorListRequest,
 ) -> Result<Value, String> {
+    ensure_admin_console_state(&state, "Operator Queue")?;
     state
         .local_api
         .post_json("/v1/gpm/onboarding/operator/list", &request)
@@ -743,11 +1088,13 @@ async fn control_gpm_operator_list(
         .map(sanitize_desktop_payload)
 }
 
+#[cfg(feature = "admin-console")]
 #[tauri::command]
 async fn control_gpm_operator_approve(
     state: State<'_, AppState>,
     request: GPMOperatorApproveRequest,
 ) -> Result<Value, String> {
+    ensure_admin_console_state(&state, "Operator Approval")?;
     state
         .local_api
         .post_json("/v1/gpm/onboarding/operator/approve", &request)
@@ -757,7 +1104,11 @@ async fn control_gpm_operator_approve(
 
 #[cfg(test)]
 mod tests {
-    use super::{sanitize_desktop_payload, ServiceLifecycleRequest, Value};
+    use super::{
+        enforce_connect_policy_request, ensure_admin_console_config, public_diagnostics_view,
+        sanitize_desktop_payload, ConnectRequest, LocalApiConfig, RuntimePolicyConfig,
+        ServiceLifecycleRequest, Value,
+    };
     use serde_json::json;
 
     #[test]
@@ -808,13 +1159,96 @@ mod tests {
     }
 
     #[test]
+    fn public_diagnostics_view_keeps_only_redacted_summary_fields() {
+        let findings: Vec<Value> = (0..101)
+            .map(|idx| {
+                json!({
+                    "severity": "warning",
+                    "code": format!("check-{idx}"),
+                    "message": format!("public finding {idx}"),
+                    "remediation": "retry after reviewing public status",
+                    "output": "raw command output",
+                    "admin_token": "admin-secret"
+                })
+            })
+            .collect();
+        let payload = json!({
+            "ok": true,
+            "output": "root command output",
+            "raw": "root raw output",
+            "diagnostics": {
+                "status": "warn",
+                "generated_at_utc": "2026-04-29T00:00:00Z",
+                "raw": "doctor raw output",
+                "output": "doctor command output",
+                "environment": {
+                    "admin_token": "admin-secret"
+                },
+                "summary": {
+                    "findings_total": 101,
+                    "warnings_total": 101,
+                    "failures_total": 0,
+                    "admin_notes": "private"
+                },
+                "inputs": {
+                    "base_port": 8095,
+                    "client_iface": "wgclient0",
+                    "exit_iface": "wgexit0",
+                    "vpn_iface": "wgvpn0",
+                    "invite_key": "invite-secret"
+                },
+                "findings": findings
+            }
+        });
+
+        let public_view = public_diagnostics_view(payload);
+        assert!(public_view.get("output").is_none());
+        assert!(public_view.get("raw").is_none());
+
+        let diagnostics = public_view
+            .get("diagnostics")
+            .and_then(Value::as_object)
+            .expect("public diagnostics object");
+        assert_eq!(diagnostics.get("status"), Some(&json!("warn")));
+        assert!(diagnostics.get("raw").is_none());
+        assert!(diagnostics.get("output").is_none());
+        assert!(diagnostics.get("environment").is_none());
+
+        let summary = diagnostics
+            .get("summary")
+            .and_then(Value::as_object)
+            .expect("public summary object");
+        assert_eq!(summary.get("findings_total"), Some(&json!(101)));
+        assert_eq!(summary.get("warnings_total"), Some(&json!(101)));
+        assert_eq!(summary.get("failures_total"), Some(&json!(0)));
+        assert!(summary.get("admin_notes").is_none());
+
+        let inputs = diagnostics
+            .get("inputs")
+            .and_then(Value::as_object)
+            .expect("public inputs object");
+        assert_eq!(inputs.get("base_port"), Some(&json!(8095)));
+        assert_eq!(inputs.get("vpn_iface"), Some(&json!("wgvpn0")));
+        assert!(inputs.get("invite_key").is_none());
+
+        let findings = diagnostics
+            .get("findings")
+            .and_then(Value::as_array)
+            .expect("public findings array");
+        assert_eq!(findings.len(), 100);
+        assert_eq!(diagnostics.get("findings_truncated"), Some(&json!(true)));
+        assert_eq!(findings[0].get("severity"), Some(&json!("warning")));
+        assert_eq!(findings[0].get("code"), Some(&json!("check-0")));
+        assert!(findings[0].get("output").is_none());
+        assert!(findings[0].get("admin_token").is_none());
+    }
+
+    #[test]
     fn service_lifecycle_request_serialization_preserves_session_token_semantics() {
         let with_session_token = ServiceLifecycleRequest {
-            session_token: Some("session-123".to_string()),
+            session_token: "session-123".to_string(),
         };
-        let without_session_token = ServiceLifecycleRequest {
-            session_token: None,
-        };
+        let without_session_token = ServiceLifecycleRequest::default();
 
         assert_eq!(
             serde_json::to_value(with_session_token).expect("serialize with token"),
@@ -822,8 +1256,171 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_value(without_session_token).expect("serialize without token"),
-            json!({})
+            json!({ "session_token": "" })
         );
+    }
+
+    #[test]
+    fn service_lifecycle_request_requires_session_token() {
+        let missing = ServiceLifecycleRequest::default();
+        let err = missing.validate().expect_err("missing token should fail");
+        assert!(err.contains("session_token is required"), "{err}");
+
+        let whitespace = ServiceLifecycleRequest {
+            session_token: "session token".to_string(),
+        };
+        let err = whitespace
+            .validate()
+            .expect_err("whitespace token should fail");
+        assert!(err.contains("cannot contain whitespace"), "{err}");
+
+        let valid = ServiceLifecycleRequest {
+            session_token: "session-token".to_string(),
+        };
+        valid.validate().expect("valid token should pass");
+    }
+
+    fn connect_request_for_policy(
+        session_token: Option<&str>,
+        prod_profile: bool,
+    ) -> ConnectRequest {
+        ConnectRequest {
+            bootstrap_directory: if session_token.is_some() {
+                "".to_string()
+            } else {
+                "https://directory.example.invalid:8081".to_string()
+            },
+            invite_key: if session_token.is_some() {
+                "".to_string()
+            } else {
+                "inv-test".to_string()
+            },
+            session_token: session_token.map(str::to_string),
+            session_bootstrap_directory: None,
+            reservation_id: None,
+            reservation_session_id: None,
+            path_profile: "2hop".to_string(),
+            policy_profile: None,
+            interface: None,
+            discovery_wait_sec: None,
+            ready_timeout_sec: None,
+            run_preflight: None,
+            prod_profile: Some(prod_profile),
+            install_route: None,
+        }
+    }
+
+    #[test]
+    fn connect_policy_rejects_legacy_when_runtime_requires_session() {
+        let request = connect_request_for_policy(None, false);
+        let policy = RuntimePolicyConfig {
+            connect_require_session: Some(true),
+            allow_legacy_connect_override: Some(true),
+            config: Some(json!({})),
+        };
+        let err = enforce_connect_policy_request(&request, &policy)
+            .expect_err("session-required policy should reject legacy connect");
+        assert!(err.contains("session_token"), "{err}");
+    }
+
+    #[test]
+    fn connect_policy_requires_reservation_for_production_connect() {
+        let mut request = connect_request_for_policy(Some("session-token"), true);
+        let policy = RuntimePolicyConfig {
+            connect_require_session: Some(true),
+            allow_legacy_connect_override: Some(false),
+            config: Some(json!({ "gpm_production_mode": true })),
+        };
+        let err = enforce_connect_policy_request(&request, &policy)
+            .expect_err("production policy should require reservation binding");
+        assert!(err.contains("reservation_id"), "{err}");
+
+        request.reservation_id = Some("reservation-1".to_string());
+        request.reservation_session_id = Some("reservation-session-1".to_string());
+        enforce_connect_policy_request(&request, &policy)
+            .expect("session and reservation-bound production connect should pass");
+    }
+
+    #[test]
+    fn connect_policy_prod_profile_requires_settlement_reservation() {
+        let mut request = connect_request_for_policy(Some("session-token"), true);
+        let policy = RuntimePolicyConfig {
+            connect_require_session: None,
+            allow_legacy_connect_override: Some(false),
+            config: Some(json!({ "gpm_production_mode": false })),
+        };
+
+        let err = enforce_connect_policy_request(&request, &policy)
+            .expect_err("prod profile should require reservation binding");
+        assert!(err.contains("reservation_id"), "{err}");
+
+        request.reservation_id = Some("reservation-1".to_string());
+        request.reservation_session_id = Some("reservation-session-1".to_string());
+        enforce_connect_policy_request(&request, &policy)
+            .expect("prod profile with session and reservation binding should pass");
+    }
+
+    #[test]
+    fn connect_policy_prod_profile_rejects_explicit_no_route() {
+        let mut request = connect_request_for_policy(Some("session-token"), true);
+        request.install_route = Some(false);
+        let policy = RuntimePolicyConfig {
+            connect_require_session: None,
+            allow_legacy_connect_override: Some(false),
+            config: Some(json!({ "gpm_production_mode": false })),
+        };
+
+        let err = enforce_connect_policy_request(&request, &policy)
+            .expect_err("prod profile should reject explicit no-route connects");
+        assert!(err.contains("install_route=true"), "{err}");
+    }
+
+    #[test]
+    fn connect_policy_prod_profile_rejects_one_hop() {
+        let mut request = connect_request_for_policy(Some("session-token"), true);
+        request.path_profile = "1hop".to_string();
+        request.install_route = Some(true);
+        let policy = RuntimePolicyConfig {
+            connect_require_session: None,
+            allow_legacy_connect_override: Some(false),
+            config: Some(json!({ "gpm_production_mode": false })),
+        };
+
+        let err = enforce_connect_policy_request(&request, &policy)
+            .expect_err("prod profile should reject one-hop routing");
+        assert!(err.contains("strict 2hop or 3hop"), "{err}");
+    }
+
+    #[test]
+    fn admin_console_guard_blocks_public_mode_commands() {
+        let public_cfg = LocalApiConfig {
+            base_url: "http://127.0.0.1:8095".to_string(),
+            timeout_sec: 20,
+            allow_remote: false,
+            auth_bearer: None,
+            allow_update_mutations: false,
+            allow_service_mutations: false,
+            connect_require_session: false,
+            allow_legacy_connect_override: false,
+            admin_console_enabled: false,
+        };
+        let err = ensure_admin_console_config(&public_cfg, "Operator Queue")
+            .expect_err("public mode should reject admin command");
+        assert!(err.contains("GPM Admin Console"), "{err}");
+
+        let admin_cfg = LocalApiConfig {
+            admin_console_enabled: true,
+            ..public_cfg
+        };
+        if cfg!(feature = "admin-console") {
+            ensure_admin_console_config(&admin_cfg, "Operator Queue")
+                .expect("admin console feature build should allow admin command when enabled");
+        } else {
+            let err = ensure_admin_console_config(&admin_cfg, "Operator Queue").expect_err(
+                "public feature build should reject admin commands even when env is set",
+            );
+            assert!(err.contains("Admin Console build"), "{err}");
+        }
     }
 }
 
@@ -833,36 +1430,73 @@ fn main() {
     let local_api = LocalApiClient::new(local_api_config)
         .expect("failed to initialize local daemon API client");
 
-    tauri::Builder::default()
-        .manage(AppState { local_api })
-        .invoke_handler(tauri::generate_handler![
-            control_config,
-            control_runtime_config,
-            control_health,
-            control_status,
-            control_get_diagnostics,
-            control_connect,
-            control_disconnect,
-            control_set_profile,
-            control_update,
-            control_service_status,
-            control_service_start,
-            control_service_stop,
-            control_service_restart,
-            control_gpm_bootstrap_manifest,
-            control_gpm_auth_challenge,
-            control_gpm_auth_verify,
-            control_gpm_session,
-            control_gpm_audit_recent,
-            control_gpm_client_register,
-            control_gpm_client_status,
-            control_gpm_server_status,
-            control_gpm_onboarding_overview,
-            control_gpm_operator_apply,
-            control_gpm_operator_status,
-            control_gpm_operator_list,
-            control_gpm_operator_approve
-        ])
+    let builder = tauri::Builder::default().manage(AppState { local_api });
+
+    #[cfg(feature = "admin-console")]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        control_config,
+        control_runtime_config,
+        control_health,
+        control_status,
+        control_get_diagnostics,
+        control_connect,
+        control_disconnect,
+        control_set_profile,
+        control_update,
+        control_service_status,
+        control_service_start,
+        control_service_stop,
+        control_service_restart,
+        control_gpm_bootstrap_manifest,
+        control_gpm_auth_challenge,
+        control_gpm_auth_verify,
+        control_gpm_session,
+        control_gpm_audit_recent,
+        control_gpm_client_register,
+        control_gpm_client_status,
+        control_gpm_contribution_status,
+        control_gpm_contribution_enable,
+        control_gpm_contribution_disable,
+        control_gpm_rewards_current_week,
+        control_gpm_rewards_history,
+        control_gpm_settlement_reserve_funds,
+        control_gpm_admin_contribution_list,
+        control_gpm_admin_reward_review,
+        control_gpm_admin_reward_hold,
+        control_gpm_admin_reward_finalize,
+        control_gpm_server_status,
+        control_gpm_onboarding_overview,
+        control_gpm_operator_apply,
+        control_gpm_operator_status,
+        control_gpm_operator_list,
+        control_gpm_operator_approve
+    ]);
+
+    #[cfg(not(feature = "admin-console"))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        control_config,
+        control_runtime_config,
+        control_health,
+        control_status,
+        control_get_diagnostics,
+        control_connect,
+        control_disconnect,
+        control_gpm_bootstrap_manifest,
+        control_gpm_auth_challenge,
+        control_gpm_auth_verify,
+        control_gpm_session,
+        control_gpm_client_register,
+        control_gpm_client_status,
+        control_gpm_contribution_status,
+        control_gpm_contribution_enable,
+        control_gpm_contribution_disable,
+        control_gpm_rewards_current_week,
+        control_gpm_rewards_history,
+        control_gpm_settlement_reserve_funds,
+        control_gpm_onboarding_overview
+    ]);
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running Global Private Mesh (GPM) desktop scaffold");
 }

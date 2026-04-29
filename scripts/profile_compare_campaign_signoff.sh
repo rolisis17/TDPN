@@ -318,6 +318,62 @@ is_local_host() {
   host_resolves_to_loopback_only "${1:-}"
 }
 
+endpoint_preflight_probe_path_for_label() {
+  local label="$1"
+  case "$label" in
+    directory*|bootstrap|issuer)
+      printf '%s' "/v1/pubkeys"
+      ;;
+    entry|exit)
+      printf '%s' "/v1/ready"
+      ;;
+    *)
+      printf '%s' ""
+      ;;
+  esac
+}
+
+endpoint_preflight_url_has_non_root_path() {
+  local url="$1"
+  local remainder path
+  if [[ ! "$url" =~ ^https?:// ]]; then
+    return 1
+  fi
+  remainder="${url#*://}"
+  if [[ "$remainder" != */* ]]; then
+    return 1
+  fi
+  path="/${remainder#*/}"
+  [[ "$path" != "/" ]]
+}
+
+endpoint_preflight_probe_url() {
+  local label="$1"
+  local url="$2"
+  local probe_path base query="" fragment=""
+  probe_path="$(endpoint_preflight_probe_path_for_label "$label")"
+  if [[ -z "$probe_path" ]]; then
+    printf '%s' "$url"
+    return
+  fi
+
+  base="$url"
+  if [[ "$base" == *"#"* ]]; then
+    fragment="#${base#*#}"
+    base="${base%%#*}"
+  fi
+  if [[ "$base" == *"?"* ]]; then
+    query="?${base#*\?}"
+    base="${base%%\?*}"
+  fi
+  if endpoint_preflight_url_has_non_root_path "$base"; then
+    printf '%s' "$url"
+    return
+  fi
+
+  printf '%s%s%s%s' "${base%/}" "$probe_path" "$query" "$fragment"
+}
+
 run_campaign_endpoint_preflight() {
   local log_path="$1"
   local -a candidate_records=()
@@ -349,6 +405,7 @@ run_campaign_endpoint_preflight() {
     if [[ ! "$endpoint_url" =~ ^https?:// ]]; then
       return
     fi
+    endpoint_url="$(endpoint_preflight_probe_url "$endpoint_label" "$endpoint_url")"
     local endpoint_host
     endpoint_host="$(extract_url_host "$endpoint_url")"
     candidate_records+=("${endpoint_label}"$'\t'"${endpoint_url}"$'\t'"${endpoint_host}")

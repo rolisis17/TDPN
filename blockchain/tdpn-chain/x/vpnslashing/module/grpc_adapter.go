@@ -56,6 +56,28 @@ func (a GRPCMsgAdapter) SubmitEvidence(ctx context.Context, req *pb.MsgSubmitEvi
 	}, nil
 }
 
+func (a GRPCMsgAdapter) ConfirmEvidence(ctx context.Context, req *pb.MsgConfirmEvidenceRequest) (*pb.MsgConfirmEvidenceResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
+	evidenceID := ""
+	if req != nil {
+		evidenceID = req.GetEvidenceId()
+	}
+
+	resp, err := a.msg.ConfirmEvidence(ConfirmEvidenceRequest{
+		EvidenceID: evidenceID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &pb.MsgConfirmEvidenceResponse{
+		Evidence: moduleEvidenceToProto(resp.Evidence),
+	}, nil
+}
+
 func (a GRPCMsgAdapter) RecordPenalty(ctx context.Context, req *pb.MsgRecordPenaltyRequest) (*pb.MsgRecordPenaltyResponse, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
@@ -126,12 +148,25 @@ func (a GRPCQueryAdapter) PenaltyDecision(ctx context.Context, req *pb.QueryPena
 	}, nil
 }
 
-func (a GRPCQueryAdapter) ListSlashEvidence(ctx context.Context, _ *pb.QueryListSlashEvidenceRequest) (*pb.QueryListSlashEvidenceResponse, error) {
+func (a GRPCQueryAdapter) ListSlashEvidence(ctx context.Context, req *pb.QueryListSlashEvidenceRequest) (*pb.QueryListSlashEvidenceResponse, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
 
-	resp, err := a.query.ListEvidence(ListEvidenceRequest{})
+	listReq := ListEvidenceRequest{}
+	if req != nil {
+		listReq = ListEvidenceRequest{
+			ProviderID:             req.GetProviderId(),
+			SessionID:              req.GetSessionId(),
+			ViolationType:          req.GetViolationType(),
+			SubmittedAtOrAfterUnix: req.GetSubmittedAtOrAfterUnix(),
+			SubmittedBeforeUnix:    req.GetSubmittedBeforeUnix(),
+			IncludeFailed:          req.GetIncludeFailed(),
+			IncludeFailedSet:       req.IncludeFailed != nil,
+			IncludeZeroSubmitted:   req.GetIncludeZeroSubmitted(),
+		}
+	}
+	resp, err := a.query.ListEvidence(listReq)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +212,10 @@ func moduleEvidenceToProto(record modtypes.SlashEvidence) *pb.SlashEvidence {
 		ViolationType:   record.ViolationType,
 		Kind:            record.Kind,
 		ProofHash:       record.ProofHash,
+		SlashAmount:     record.SlashAmount,
+		SlashDenom:      record.SlashDenom,
 		SubmittedAtUnix: record.SubmittedAtUnix,
+		Status:          moduleStatusToProto(record.Status),
 	}
 }
 
@@ -193,7 +231,11 @@ func protoEvidenceToModule(record *pb.SlashEvidence) modtypes.SlashEvidence {
 		ViolationType:   record.GetViolationType(),
 		Kind:            record.GetKind(),
 		ProofHash:       record.GetProofHash(),
+		SlashAmount:     record.GetSlashAmount(),
+		SlashDenom:      record.GetSlashDenom(),
 		SubmittedAtUnix: record.GetSubmittedAtUnix(),
+		// Status is server-owned lifecycle metadata and must not be client-injectable.
+		Status: "",
 	}
 }
 
@@ -202,6 +244,8 @@ func modulePenaltyToProto(record modtypes.PenaltyDecision) *pb.PenaltyDecision {
 		PenaltyId:       record.PenaltyID,
 		EvidenceId:      record.EvidenceID,
 		SlashBasisPoint: record.SlashBasisPoint,
+		SlashAmount:     record.SlashAmount,
+		SlashDenom:      record.SlashDenom,
 		Jailed:          record.Jailed,
 		AppliedAtUnix:   record.AppliedAtUnix,
 		Status:          moduleStatusToProto(record.Status),
@@ -217,6 +261,8 @@ func protoPenaltyToModule(record *pb.PenaltyDecision) modtypes.PenaltyDecision {
 		PenaltyID:       record.GetPenaltyId(),
 		EvidenceID:      record.GetEvidenceId(),
 		SlashBasisPoint: record.GetSlashBasisPoint(),
+		SlashAmount:     record.GetSlashAmount(),
+		SlashDenom:      record.GetSlashDenom(),
 		Jailed:          record.GetJailed(),
 		AppliedAtUnix:   record.GetAppliedAtUnix(),
 	}

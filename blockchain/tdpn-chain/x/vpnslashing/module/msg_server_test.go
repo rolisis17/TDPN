@@ -29,6 +29,16 @@ func (s *msgReadErrorPenaltyStore) ListPenaltiesWithError() ([]types.PenaltyDeci
 	return s.InMemoryStore.ListPenalties(), nil
 }
 
+func confirmMsgServerEvidenceForTest(t *testing.T, k *keeper.Keeper, evidenceID string) {
+	t.Helper()
+	evidence, ok := k.GetEvidence(evidenceID)
+	if !ok {
+		t.Fatalf("expected evidence %q to exist before confirming", evidenceID)
+	}
+	evidence.Status = chaintypes.ReconciliationConfirmed
+	k.UpsertEvidence(evidence)
+}
+
 func TestMsgServerSubmitSlashEvidenceHappyPath(t *testing.T) {
 	t.Parallel()
 
@@ -58,6 +68,48 @@ func TestMsgServerSubmitSlashEvidenceHappyPath(t *testing.T) {
 	}
 	if resp.Evidence.Status != chaintypes.ReconciliationSubmitted {
 		t.Fatalf("expected default evidence status %q, got %q", chaintypes.ReconciliationSubmitted, resp.Evidence.Status)
+	}
+}
+
+func TestMsgServerConfirmEvidenceHappyPath(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	if _, err := server.SubmitSlashEvidence(SubmitSlashEvidenceRequest{
+		Evidence: types.SlashEvidence{
+			EvidenceID:    "evidence-msg-confirm-1",
+			ProviderID:    "provider-msg-confirm-1",
+			SessionID:     "session-msg-confirm-1",
+			Kind:          types.EvidenceKindObjective,
+			ViolationType: "double-sign",
+			ProofHash:     testSHAProof("proof-msg-confirm-1"),
+		},
+	}); err != nil {
+		t.Fatalf("submit evidence failed: %v", err)
+	}
+
+	resp, err := server.ConfirmEvidence(ConfirmEvidenceRequest{EvidenceID: " EVIDENCE-MSG-CONFIRM-1 "})
+	if err != nil {
+		t.Fatalf("confirm evidence failed: %v", err)
+	}
+	if resp.Evidence.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("status=%q want confirmed", resp.Evidence.Status)
+	}
+	if !resp.Existed {
+		t.Fatal("expected existed=true for confirmed evidence")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false for first status transition")
+	}
+
+	replay, err := server.ConfirmEvidence(ConfirmEvidenceRequest{EvidenceID: "evidence-msg-confirm-1"})
+	if err != nil {
+		t.Fatalf("confirm evidence replay failed: %v", err)
+	}
+	if !replay.Idempotent {
+		t.Fatal("expected idempotent=true for replayed confirmation")
 	}
 }
 
@@ -343,6 +395,7 @@ func TestMsgServerApplyPenaltyHappyPath(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("submit evidence failed: %v", err)
 	}
+	confirmMsgServerEvidenceForTest(t, &k, "evidence-msg-4")
 
 	resp, err := server.ApplyPenalty(ApplyPenaltyRequest{
 		Penalty: types.PenaltyDecision{
@@ -383,6 +436,7 @@ func TestMsgServerApplyPenaltyIdempotentReplay(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("submit evidence failed: %v", err)
 	}
+	confirmMsgServerEvidenceForTest(t, &k, "evidence-msg-5")
 
 	req := ApplyPenaltyRequest{
 		Penalty: types.PenaltyDecision{
@@ -425,6 +479,7 @@ func TestMsgServerApplyPenaltyRejectsSecondPenaltyForSameEvidence(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("submit evidence failed: %v", err)
 	}
+	confirmMsgServerEvidenceForTest(t, &k, "evidence-msg-5b")
 
 	first := ApplyPenaltyRequest{
 		Penalty: types.PenaltyDecision{
@@ -480,6 +535,7 @@ func TestMsgServerApplyPenaltyCanonicalEvidenceIDConflictClassification(t *testi
 	}); err != nil {
 		t.Fatalf("submit evidence failed: %v", err)
 	}
+	confirmMsgServerEvidenceForTest(t, &k, "evidence-msg-canonical-conflict")
 
 	if _, err := server.ApplyPenalty(ApplyPenaltyRequest{
 		Penalty: types.PenaltyDecision{
@@ -533,6 +589,7 @@ func TestMsgServerApplyPenaltyConflictPropagation(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("submit evidence failed: %v", err)
 	}
+	confirmMsgServerEvidenceForTest(t, &k, "evidence-msg-6")
 
 	base := ApplyPenaltyRequest{
 		Penalty: types.PenaltyDecision{
@@ -655,6 +712,7 @@ func TestMsgServerApplyPenaltyFailsClosedWhenEvidenceHasNoProviderSubject(t *tes
 		Kind:          types.EvidenceKindObjective,
 		ViolationType: "double-sign",
 		ProofHash:     testSHAProof("proof-msg-no-provider-subject"),
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 
 	resp, err := server.ApplyPenalty(ApplyPenaltyRequest{
@@ -692,6 +750,7 @@ func TestMsgServerApplyPenaltyFailsClosedWhenPenaltyListReadFails(t *testing.T) 
 		Kind:          types.EvidenceKindObjective,
 		ViolationType: "double-sign",
 		ProofHash:     testSHAProof("proof-msg-read-fail-closed"),
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 	store.penaltyListErr = errors.New("penalty index decode failure")
 

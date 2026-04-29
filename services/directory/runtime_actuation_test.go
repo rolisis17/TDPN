@@ -90,6 +90,115 @@ func TestBuildRelayDescriptorsDemotesAndRecoversMicroRelayFromQualitySignals(t *
 	}
 }
 
+func TestBuildRelayDescriptorsDemotesAndRecoversMicroExitFromQualitySignals(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	key := relayKey("micro-exit-provider-1", "micro-exit")
+	s := &Service{
+		operatorID:           "op-local",
+		microExitBetaAllowed: true,
+		providerRelays: map[string]proto.RelayDescriptor{
+			key: {
+				RelayID:      "micro-exit-provider-1",
+				Role:         "micro-exit",
+				OperatorID:   "op-provider",
+				Endpoint:     "127.0.0.1:51826",
+				ControlURL:   "http://127.0.0.1:18086",
+				Reputation:   0.86,
+				Uptime:       0.91,
+				Capacity:     0.88,
+				AbusePenalty: 0.12,
+				ValidUntil:   now.Add(time.Minute),
+			},
+		},
+		peerScores: map[string]proto.RelaySelectionScore{
+			key: {
+				RelayID:      "micro-exit-provider-1",
+				Role:         "micro-exit",
+				Reputation:   0.2,
+				Uptime:       0.9,
+				Capacity:     0.9,
+				AbusePenalty: 0.1,
+			},
+		},
+	}
+
+	relays := s.buildRelayDescriptors(now)
+	if hasRelay(relays, "micro-exit-provider-1", "micro-exit") {
+		t.Fatalf("expected unhealthy micro-exit quality signals to demote descriptor")
+	}
+
+	s.peerScores[key] = proto.RelaySelectionScore{
+		RelayID:      "micro-exit-provider-1",
+		Role:         "micro-exit",
+		Reputation:   0.9,
+		Uptime:       0.95,
+		Capacity:     0.92,
+		AbusePenalty: 0.1,
+	}
+	relays = s.buildRelayDescriptors(now)
+	if !hasRelay(relays, "micro-exit-provider-1", "micro-exit") {
+		t.Fatalf("expected healthy micro-exit quality signals to re-promote descriptor")
+	}
+}
+
+func TestBuildRelayDescriptorsHidesMicroExitWhenBetaDisabled(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	s := &Service{
+		operatorID: "op-local",
+		providerRelays: map[string]proto.RelayDescriptor{
+			relayKey("micro-exit-provider-1", "micro-exit"): {
+				RelayID:      "micro-exit-provider-1",
+				Role:         "micro-exit",
+				OperatorID:   "op-provider",
+				Endpoint:     "127.0.0.1:51826",
+				ControlURL:   "http://127.0.0.1:18086",
+				Reputation:   0.86,
+				Uptime:       0.91,
+				Capacity:     0.88,
+				AbusePenalty: 0.12,
+				ValidUntil:   now.Add(time.Minute),
+			},
+			relayKey("micro-relay-provider-1", "micro-relay"): {
+				RelayID:      "micro-relay-provider-1",
+				Role:         "micro-relay",
+				OperatorID:   "op-provider",
+				Endpoint:     "127.0.0.1:51825",
+				ControlURL:   "http://127.0.0.1:18085",
+				Reputation:   0.82,
+				Uptime:       0.9,
+				Capacity:     0.86,
+				AbusePenalty: 0.2,
+				ValidUntil:   now.Add(time.Minute),
+			},
+		},
+		peerRelays: map[string]proto.RelayDescriptor{
+			relayKey("micro-exit-peer-1", "micro-exit"): {
+				RelayID:      "micro-exit-peer-1",
+				Role:         "micro-exit",
+				OperatorID:   "op-peer",
+				Endpoint:     "127.0.0.1:51827",
+				ControlURL:   "http://127.0.0.1:18087",
+				Reputation:   0.86,
+				Uptime:       0.91,
+				Capacity:     0.88,
+				AbusePenalty: 0.12,
+				ValidUntil:   now.Add(time.Minute),
+			},
+		},
+	}
+
+	relays := s.buildRelayDescriptors(now)
+	if hasRelay(relays, "micro-exit-provider-1", "micro-exit") {
+		t.Fatalf("expected provider micro-exit to be hidden while beta is disabled")
+	}
+	if hasRelay(relays, "micro-exit-peer-1", "micro-exit") {
+		t.Fatalf("expected peer micro-exit to be hidden while beta is disabled")
+	}
+	if !hasRelay(relays, "micro-relay-provider-1", "micro-relay") {
+		t.Fatalf("expected micro-relay publication to remain enabled")
+	}
+}
+
 func TestBuildRelayDescriptorsDemotesAndRecoversMicroRelayFromTrustSignals(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	key := relayKey("micro-provider-1", "micro-relay")

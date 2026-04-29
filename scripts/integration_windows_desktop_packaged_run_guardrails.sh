@@ -123,6 +123,10 @@ FAKE_TDPN_EXECUTABLE_PATH="$TMP_DIR/fake-tdpn-desktop.exe"
 printf '%s\n' "placeholder desktop executable for TDPN_DESKTOP_PACKAGED_EXE guardrails" >"$FAKE_TDPN_EXECUTABLE_PATH"
 FAKE_TDPN_EXECUTABLE_PATH_PS="$(to_powershell_path "$FAKE_TDPN_EXECUTABLE_PATH")"
 
+FAKE_ADMIN_EXECUTABLE_PATH="$TMP_DIR/gpm-admin-console.exe"
+printf '%s\n' "placeholder admin console executable used by packaged-run guardrails" >"$FAKE_ADMIN_EXECUTABLE_PATH"
+FAKE_ADMIN_EXECUTABLE_PATH_PS="$(to_powershell_path "$FAKE_ADMIN_EXECUTABLE_PATH")"
+
 MISSING_EXECUTABLE_PATH="$TMP_DIR/missing-desktop.exe"
 MISSING_EXECUTABLE_PATH_PS="$(to_powershell_path "$MISSING_EXECUTABLE_PATH")"
 SUMMARY_JSON_PATH="$TMP_DIR/desktop_packaged_run_windows_summary.json"
@@ -159,60 +163,74 @@ if [[ ! -f "$SUMMARY_JSON_PATH" ]]; then
   cat "$SUMMARY_TEST_LOG"
   exit 1
 fi
-if ! "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference='Stop'; \$s = Get-Content -LiteralPath '$SUMMARY_JSON_PATH_PS' -Raw | ConvertFrom-Json; if (\$s.version -ne 1) { throw 'missing version' }; if ((\$s.status -ne 'ok') -and (\$s.status -ne 'fail')) { throw 'unexpected status' }; if (\$s.platform -ne 'windows') { throw 'platform != windows' }; if (\$s.mode -ne 'desktop_packaged_run_scaffold') { throw 'mode mismatch' }; if (\$s.dry_run -ne \$true) { throw 'dry_run != true' }; if (\$s.resolved_desktop_executable_source -ne 'override') { throw 'resolved source != override' }; if (\$s.status -eq 'ok') { if ([int]\$s.rc -ne 0) { throw 'rc != 0 when status=ok' }; if (\$s.failure_stage -ne 'none') { throw 'failure_stage != none when status=ok' }; if (\$s.doctor.status -ne 'pass') { throw 'doctor.status != pass when status=ok' }; if ([int]\$s.doctor.rc -ne 0) { throw 'doctor.rc != 0 when status=ok' }; if (\$s.bootstrap.status -ne 'pass') { throw 'bootstrap.status != pass when status=ok' }; if ([int]\$s.bootstrap.rc -ne 0) { throw 'bootstrap.rc != 0 when status=ok' } } else { if ([int]\$s.rc -eq 0) { throw 'rc == 0 when status=fail' }; if (([string]\$s.failure_stage).Length -eq 0 -or \$s.failure_stage -eq 'none') { throw 'failure_stage missing when status=fail' } };" >/dev/null 2>&1; then
+if ! "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference='Stop'; \$s = Get-Content -LiteralPath '$SUMMARY_JSON_PATH_PS' -Raw | ConvertFrom-Json; if (\$s.version -ne 1) { throw 'missing version' }; if ((\$s.status -ne 'ok') -and (\$s.status -ne 'fail')) { throw 'unexpected status' }; if (\$s.platform -ne 'windows') { throw 'platform != windows' }; if (\$s.mode -ne 'desktop_packaged_run_scaffold') { throw 'mode mismatch' }; if (\$s.dry_run -ne \$true) { throw 'dry_run != true' }; if (\$s.install_missing_intent -ne \$false) { throw 'default install_missing_intent != false' }; if (\$s.policy_bypass_enabled -ne \$false) { throw 'default policy_bypass_enabled != false' }; if (\$s.resolved_desktop_executable_source -ne 'override') { throw 'resolved source != override' }; if (\$s.status -eq 'ok') { if ([int]\$s.rc -ne 0) { throw 'rc != 0 when status=ok' }; if (\$s.failure_stage -ne 'none') { throw 'failure_stage != none when status=ok' }; if (\$s.doctor.status -ne 'pass') { throw 'doctor.status != pass when status=ok' }; if ([int]\$s.doctor.rc -ne 0) { throw 'doctor.rc != 0 when status=ok' }; if (\$s.bootstrap.status -ne 'pass') { throw 'bootstrap.status != pass when status=ok' }; if ([int]\$s.bootstrap.rc -ne 0) { throw 'bootstrap.rc != 0 when status=ok' } } else { if ([int]\$s.rc -eq 0) { throw 'rc == 0 when status=fail' }; if (([string]\$s.failure_stage).Length -eq 0 -or \$s.failure_stage -eq 'none') { throw 'failure_stage missing when status=fail' } };" >/dev/null 2>&1; then
   echo "windows desktop packaged-run guardrails failed: summary json key fields invalid for $SUMMARY_TEST_NAME"
   cat "$SUMMARY_TEST_LOG"
   exit 1
 fi
 
-echo "[windows-desktop-packaged-run-guardrails] default auto-install intent keeps doctor in fix mode"
+echo "[windows-desktop-packaged-run-guardrails] default install intent keeps doctor in check mode"
 run_expect_pass_regex \
-  "dry_run_doctor_mode_default_fix" \
-  "\\[desktop-doctor\\][[:space:]]+mode=fix" \
+  "dry_run_doctor_mode_default_check" \
+  "\\[desktop-doctor\\][[:space:]]+mode=check" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=''; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=''; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING=''; \$env:TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING=''; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
 
-echo "[windows-desktop-packaged-run-guardrails] GPM env disable forces doctor check mode"
+echo "[windows-desktop-packaged-run-guardrails] GPM packaged-run env disable forces doctor check mode"
 run_expect_pass_regex \
   "dry_run_doctor_mode_gpm_env_disable_check" \
   "\\[desktop-doctor\\][[:space:]]+mode=check" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='0'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING='0'; \$env:TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING='1'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
 
-echo "[windows-desktop-packaged-run-guardrails] GPM env enable keeps doctor fix mode"
+echo "[windows-desktop-packaged-run-guardrails] GPM packaged-run env enable keeps doctor fix mode"
 run_expect_pass_regex \
   "dry_run_doctor_mode_gpm_env_enable_fix" \
   "\\[desktop-doctor\\][[:space:]]+mode=fix" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='0'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING='1'; \$env:TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING='0'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
 
-echo "[windows-desktop-packaged-run-guardrails] TDPN legacy alias disable applies when GPM env is unset"
+echo "[windows-desktop-packaged-run-guardrails] TDPN packaged-run legacy alias disable applies when GPM env is unset"
 run_expect_pass_regex \
   "dry_run_doctor_mode_tdpn_legacy_disable_check" \
   "\\[desktop-doctor\\][[:space:]]+mode=check" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=''; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='0'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING=''; \$env:TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING='0'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
 
 echo "[windows-desktop-packaged-run-guardrails] explicit -InstallMissing:\$false overrides env enable and forces check mode"
 run_expect_pass_regex \
   "dry_run_doctor_mode_explicit_false_beats_env_enable" \
   "\\[desktop-doctor\\][[:space:]]+mode=check" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS' -InstallMissing:\$false"
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING='1'; \$env:TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING='1'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS' -InstallMissing:\$false"
 
 echo "[windows-desktop-packaged-run-guardrails] explicit -NoInstallMissing overrides env enable and forces check mode"
 run_expect_pass_regex \
   "dry_run_doctor_mode_explicit_no_install_beats_env_enable" \
   "\\[desktop-doctor\\][[:space:]]+mode=check" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='1'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS' -NoInstallMissing"
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING='1'; \$env:TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING='1'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS' -NoInstallMissing"
 
 echo "[windows-desktop-packaged-run-guardrails] explicit -InstallMissing overrides env disable and forces fix mode"
 run_expect_pass_regex \
   "dry_run_doctor_mode_explicit_true_beats_env_disable" \
   "\\[desktop-doctor\\][[:space:]]+mode=fix" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='0'; \$env:TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING='0'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS' -InstallMissing"
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING='0'; \$env:TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING='0'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS' -InstallMissing"
+
+echo "[windows-desktop-packaged-run-guardrails] invalid GPM install remediation env fails closed before TDPN alias"
+run_expect_fail_regex \
+  "invalid_gpm_install_env_fail" \
+  "invalid boolean value for GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING|install remediation fallback" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING='maybe'; \$env:TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING='1'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
+
+INVALID_GPM_INSTALL_LOG="$TMP_DIR/invalid_gpm_install_env_fail.log"
+if grep -Eiq -- "\\[desktop-doctor\\]|desktop launch resolved|desktop-native-bootstrap|bootstrap" "$INVALID_GPM_INSTALL_LOG"; then
+  echo "windows desktop packaged-run guardrails failed: invalid install env rejection must happen before doctor/bootstrap"
+  cat "$INVALID_GPM_INSTALL_LOG"
+  exit 1
+fi
 
 GPM_DESKTOP_PACKAGED_EXE_WAS_SET="0"
 GPM_DESKTOP_PACKAGED_EXE_ORIGINAL=""
@@ -290,6 +308,49 @@ if [[ "$TDPN_DESKTOP_PACKAGED_EXE_WAS_SET" == "1" ]]; then
   fi
 elif [[ "${TDPN_DESKTOP_PACKAGED_EXE+x}" == x ]]; then
   echo "windows desktop packaged-run guardrails failed: leaked TDPN_DESKTOP_PACKAGED_EXE into caller environment"
+  exit 1
+fi
+
+echo "[windows-desktop-packaged-run-guardrails] public packaged mode refuses daemon admin route env before doctor/bootstrap"
+run_expect_fail_regex \
+  "public_admin_routes_env_fail" \
+  "public packaged mode refuses daemon admin routes|GPM Admin Console" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GPM_LOCAL_API_ADMIN_ROUTES='1'; \$env:TDPN_LOCAL_API_ADMIN_ROUTES='0'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
+
+PUBLIC_ADMIN_ROUTES_LOG="$TMP_DIR/public_admin_routes_env_fail.log"
+if grep -Eiq -- "\\[desktop-doctor\\]|desktop launch resolved|desktop-native-bootstrap|bootstrap" "$PUBLIC_ADMIN_ROUTES_LOG"; then
+  echo "windows desktop packaged-run guardrails failed: admin-route rejection must happen before doctor/bootstrap"
+  cat "$PUBLIC_ADMIN_ROUTES_LOG"
+  exit 1
+fi
+
+echo "[windows-desktop-packaged-run-guardrails] public packaged mode refuses admin console env before doctor/bootstrap"
+run_expect_fail_regex \
+  "public_admin_console_env_fail" \
+  "public packaged mode refuses admin console mode|GPM Admin Console" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; \$env:GPM_DESKTOP_ADMIN_CONSOLE='1'; & '$SCRIPT_UNDER_TEST_PS' -DryRun -DesktopExecutablePath '$FAKE_EXECUTABLE_PATH_PS'"
+
+PUBLIC_ADMIN_CONSOLE_ENV_LOG="$TMP_DIR/public_admin_console_env_fail.log"
+if grep -Eiq -- "\\[desktop-doctor\\]|desktop launch resolved|desktop-native-bootstrap|bootstrap" "$PUBLIC_ADMIN_CONSOLE_ENV_LOG"; then
+  echo "windows desktop packaged-run guardrails failed: admin-console env rejection must happen before doctor/bootstrap"
+  cat "$PUBLIC_ADMIN_CONSOLE_ENV_LOG"
+  exit 1
+fi
+
+echo "[windows-desktop-packaged-run-guardrails] public packaged mode refuses admin console executable override"
+run_expect_fail_regex \
+  "public_admin_console_executable_fail" \
+  "public packaged mode refuses admin console executable" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -DryRun \
+    -DesktopExecutablePath "$FAKE_ADMIN_EXECUTABLE_PATH_PS"
+
+PUBLIC_ADMIN_CONSOLE_EXE_LOG="$TMP_DIR/public_admin_console_executable_fail.log"
+if grep -Eiq -- "\\[desktop-doctor\\]|desktop launch resolved|desktop-native-bootstrap|bootstrap" "$PUBLIC_ADMIN_CONSOLE_EXE_LOG"; then
+  echo "windows desktop packaged-run guardrails failed: admin executable rejection must happen before doctor/bootstrap"
+  cat "$PUBLIC_ADMIN_CONSOLE_EXE_LOG"
   exit 1
 fi
 

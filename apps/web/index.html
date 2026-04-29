@@ -61,7 +61,7 @@
                   <strong class="trust-item__value">Apply and unlock lifecycle actions only after approval</strong>
                 </div>
               </div>
-              <a class="btn secondary" href="./portal.html#operator">Open operator workflow</a>
+              <a class="btn secondary" href="#admin-console-note">Admin Console is separate</a>
             </aside>
           </div>
 
@@ -113,12 +113,12 @@
               </div>
             </article>
 
-            <article class="card lane-card lane-card--operator">
+            <article class="card lane-card lane-card--operator" id="admin-console-note">
               <p class="lane-card__badge">Operator approval lane</p>
               <h3>Apply for elevated access and unlock controls after review.</h3>
               <p>
-                Designed for operator governance with visible pending, approved, or rejected states so elevated
-                actions only become available when conditions are satisfied.
+                Designed for a separate GPM Admin Console so elevated actions never ship inside the public
+                client portal or release app.
               </p>
               <ol class="lane-steps" aria-label="Operator approval flow">
                 <li><strong>Apply:</strong> Submit operator identity and required context.</li>
@@ -126,7 +126,7 @@
                 <li><strong>Operate:</strong> Approved sessions unlock operator lifecycle actions.</li>
               </ol>
               <div class="lane-card__actions">
-                <a class="btn secondary" href="./portal.html#operator">Open operator lane in portal</a>
+                <a class="btn secondary" href="#admin-console-note">Use the separate Admin Console</a>
               </div>
             </article>
           </div>
@@ -200,12 +200,12 @@
               <h2 id="portal-cta-heading">Launch the portal and continue in the lane that fits your role.</h2>
             </div>
             <p class="meta cta-panel__copy">
-              Sign in once, follow the guided next action path, and keep client onboarding plus operator
-              governance in one workspace.
+              Sign in once, follow the guided next action path, and keep public client onboarding separate from
+              operator governance.
             </p>
             <div class="hero-actions" aria-label="Portal actions">
               <a class="btn primary btn--cta" href="./portal.html">Open Portal</a>
-              <a class="btn secondary" href="./portal.html#operator">Go to Operator Workflow</a>
+              <a class="btn secondary" href="#admin-console-note">Admin Console is separate</a>
             </div>
           </div>
         </div>

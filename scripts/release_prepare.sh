@@ -118,8 +118,8 @@ fi
 require_cmds
 
 if [[ "$allow_dirty" == "0" ]]; then
-  if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "working tree is dirty; commit or stash changes (or use --allow-dirty 1)"
+  if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+    echo "working tree is dirty or has untracked files; commit, stash, or remove them (or use --allow-dirty 1)"
     exit 1
   fi
 fi
@@ -158,9 +158,26 @@ if [[ "${#targets[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-release_dir="${out_dir%/}/${version}"
+mkdir -p "$out_dir"
+out_dir_abs="$(cd "$out_dir" && pwd -P)"
+if [[ -z "$out_dir_abs" || "$out_dir_abs" == "/" ]]; then
+  echo "refusing unsafe release output directory: ${out_dir:-<empty>}"
+  exit 1
+fi
+release_dir="${out_dir_abs}/${version}"
+case "$release_dir" in
+  "$out_dir_abs"/*) ;;
+  *)
+    echo "refusing unsafe release directory outside output directory: $release_dir"
+    exit 1
+    ;;
+esac
+if [[ "$release_dir" == "$out_dir_abs" || "$release_dir" == "/" || -z "$version" ]]; then
+  echo "refusing unsafe release directory: $release_dir"
+  exit 1
+fi
 bin_dir="${release_dir}/bin"
-rm -rf "$release_dir"
+rm -rf -- "$release_dir"
 mkdir -p "$bin_dir"
 
 echo "[release-prepare] version=${version} commit=${commit}"

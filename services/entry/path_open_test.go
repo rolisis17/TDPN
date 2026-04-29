@@ -187,7 +187,7 @@ func TestHandlePathOpenStrictRejectsEmptyExitIDBeforeForwarding(t *testing.T) {
 	}
 }
 
-func TestHandlePathOpenStrictAutoSelectsMissingMiddleRelayBeforeForwarding(t *testing.T) {
+func TestHandlePathOpenStrictRejectsMissingMiddleRelayBeforeAutoSelect(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
 	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
@@ -258,11 +258,365 @@ func TestHandlePathOpenStrictAutoSelectsMissingMiddleRelayBeforeForwarding(t *te
 	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
+	if out.Accepted {
+		t.Fatalf("expected strict mode to reject missing middle relay")
+	}
+	if out.Reason != "middle-relay-required" {
+		t.Fatalf("reason=%q want middle-relay-required", out.Reason)
+	}
+	if exitCalls != 0 {
+		t.Fatalf("expected no call to exit when strict client route is missing, got %d", exitCalls)
+	}
+}
+
+func TestHandlePathOpenRejectsThreeHopClientAssertionMissingMiddleBeforeAutoSelect(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:      "middle-auto",
+			Role:         "micro-relay",
+			HopRoles:     []string{"middle"},
+			OperatorID:   "op-middle",
+			Endpoint:     "middle.example:51822",
+			Reputation:   0.9,
+			Uptime:       0.9,
+			Capacity:     0.9,
+			AbusePenalty: 0.1,
+			ValidUntil:   time.Now().Add(time.Minute),
+		},
+	})
+
+	exitCalls := 0
+	handlers["https://exit.example/v1/path/open"] = func(req *http.Request) (*http.Response, error) {
+		exitCalls++
+		return jsonResp(proto.PathOpenResponse{Accepted: true, SessionExp: time.Now().Add(5 * time.Minute).Unix(), Transport: "wireguard-udp"})(req)
+	}
+
+	s := &Service{
+		requireMiddleRelay: true,
+		relayID:            "entry-a",
+		dataAddr:           "127.0.0.1:51820",
+		httpClient:         &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		sessions:           map[string]sessionState{},
+		exitRouteCache:     map[string]exitRoute{"exit-b": strictExitRouteFixture()},
+		directoryURLs:      []string{durl},
+		buckets:            map[string]rateBucket{},
+		abuse:              map[string]abuseState{},
+		openRPS:            100,
+		routeTTL:           time.Minute,
+	}
+
+	reqBody, err := json.Marshal(proto.PathOpenRequest{
+		ExitID:          "exit-b",
+		PathProfile:     "3hop",
+		TokenProof:      "proof",
+		TokenProofNonce: "nonce-strict-missing-asserted-middle",
+		ClientRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:  "3hop",
+			EntryRelayID: "entry-a",
+			ExitRelayID:  "exit-b",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:41018"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Accepted {
+		t.Fatalf("expected asserted 3hop open without middle to be denied")
+	}
+	if out.Reason != "middle-relay-required" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+	if exitCalls != 0 {
+		t.Fatalf("expected no call to exit after assertion/middle mismatch, got %d", exitCalls)
+	}
+}
+
+func TestHandlePathOpenStrictRejectsThreeHopClientAssertionWithoutConfiguredEntryRelayID(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:    "exit-b",
+			Role:       "exit",
+			OperatorID: "op-exit",
+			Endpoint:   "exit.example:51821",
+			ControlURL: "https://exit.example",
+			ValidUntil: time.Now().Add(time.Minute),
+		},
+	})
+
+	exitCalls := 0
+	handlers["https://exit.example/v1/path/open"] = func(req *http.Request) (*http.Response, error) {
+		exitCalls++
+		return jsonResp(proto.PathOpenResponse{Accepted: true, SessionExp: time.Now().Add(5 * time.Minute).Unix(), Transport: "wireguard-udp"})(req)
+	}
+
+	s := &Service{
+		betaStrict:     true,
+		dataAddr:       "127.0.0.1:51820",
+		httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		sessions:       map[string]sessionState{},
+		exitRouteCache: map[string]exitRoute{},
+		directoryURLs:  []string{durl},
+		buckets:        map[string]rateBucket{},
+		abuse:          map[string]abuseState{},
+		openRPS:        100,
+		routeTTL:       time.Minute,
+	}
+
+	reqBody, err := json.Marshal(proto.PathOpenRequest{
+		ExitID:          "exit-b",
+		MiddleRelayID:   "middle-a",
+		PathProfile:     "3hop",
+		TokenProof:      base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, ed25519.SignatureSize)),
+		TokenProofNonce: "nonce-strict-missing-entry-relay-id",
+		ClientRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:   "3hop",
+			EntryRelayID:  "client-supplied-entry",
+			MiddleRelayID: "middle-a",
+			ExitRelayID:   "exit-b",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:41019"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Accepted {
+		t.Fatalf("expected strict 3hop assertion without configured entry relay id to be denied")
+	}
+	if out.Reason != "entry-relay-id-required" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+	if exitCalls != 0 {
+		t.Fatalf("expected no call to exit when configured entry relay id is missing, got %d", exitCalls)
+	}
+}
+
+func TestHandlePathOpenNonStrictDoesNotCopyClientEntryRelayIDIntoEntryAssertion(t *testing.T) {
+	exitCalls := 0
+	forwardedEntryRelayID := "unset"
+	exitSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		exitCalls++
+		var in proto.PathOpenRequest
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			t.Fatalf("decode forwarded request: %v", err)
+		}
+		if in.EntryRouteAssertion == nil {
+			t.Fatalf("expected forwarded entry route assertion")
+		}
+		forwardedEntryRelayID = strings.TrimSpace(in.EntryRouteAssertion.EntryRelayID)
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{
+			Accepted:   true,
+			SessionExp: time.Now().Add(5 * time.Minute).Unix(),
+			Transport:  "wireguard-udp",
+		})
+	}))
+	defer exitSrv.Close()
+
+	s := &Service{
+		dataAddr:       "127.0.0.1:51820",
+		httpClient:     exitSrv.Client(),
+		sessions:       map[string]sessionState{},
+		exitRouteCache: map[string]exitRoute{"exit-b": {controlURL: exitSrv.URL, dataAddr: "127.0.0.1:51821", operatorID: "op-exit", fetchedAt: time.Now()}},
+		buckets:        map[string]rateBucket{},
+		abuse:          map[string]abuseState{},
+		openRPS:        100,
+		routeTTL:       time.Minute,
+	}
+
+	reqBody, err := json.Marshal(proto.PathOpenRequest{
+		ExitID:      "exit-b",
+		PathProfile: "2hop",
+		TokenProof:  "proof",
+		ClientRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:  "2hop",
+			EntryRelayID: "client-supplied-entry",
+			ExitRelayID:  "exit-b",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:41020"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if !out.Accepted {
-		t.Fatalf("expected strict mode to auto-select missing middle relay, reason=%q", out.Reason)
+		t.Fatalf("expected non-strict compatible assertion to remain accepted, reason=%q", out.Reason)
+	}
+	if forwardedEntryRelayID != "" {
+		t.Fatalf("expected entry assertion to omit unconfigured entry relay id, got %q", forwardedEntryRelayID)
 	}
 	if exitCalls != 1 {
-		t.Fatalf("expected one call to exit when middle relay is auto-selected, got %d", exitCalls)
+		t.Fatalf("expected one call to exit, got %d", exitCalls)
+	}
+}
+
+func TestEntryRouteAssertionForRequestSignsWhenConfigured(t *testing.T) {
+	pub, priv, err := pncrypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	s := &Service{relayID: "entry-a", routeAssertionPriv: priv}
+	assertion := s.entryRouteAssertionForRequest(proto.PathOpenRequest{
+		ExitID:               "exit-b",
+		MiddleRelayID:        "middle-a",
+		PathProfile:          "3hop",
+		SessionID:            "res-session-a",
+		ReservationID:        "res-a",
+		ReservationSessionID: "res-session-a",
+		ReservationSubjectID: "cosmos1subject",
+	})
+	if assertion == nil {
+		t.Fatalf("expected assertion")
+	}
+	if assertion.SignerPubKey != pncrypto.EncodeEd25519PublicKey(pub) {
+		t.Fatalf("signer_pub_key=%q want entry signing pubkey", assertion.SignerPubKey)
+	}
+	if assertion.Signature == "" {
+		t.Fatalf("expected route assertion signature")
+	}
+	if assertion.ReservationID != "res-a" || assertion.ReservationSessionID != "res-session-a" || assertion.ReservationSubjectID != "cosmos1subject" || assertion.SessionID != "res-session-a" {
+		t.Fatalf("expected reservation-bound entry assertion, got %+v", assertion)
+	}
+	if err := pncrypto.VerifyPathRouteAssertionSignature(*assertion, pub); err != nil {
+		t.Fatalf("verify route assertion signature: %v", err)
+	}
+
+	assertion.ReservationID = "res-b"
+	if err := pncrypto.VerifyPathRouteAssertionSignature(*assertion, pub); err == nil {
+		t.Fatalf("expected mutated reservation id to fail signature verification")
+	}
+}
+
+func TestPathOpenSessionIDForRequestUsesReservationSession(t *testing.T) {
+	s := &Service{prodStrict: true}
+	sessionID, reason, err := s.pathOpenSessionIDForRequest(proto.PathOpenRequest{
+		SessionID:            "",
+		ReservationID:        "res-a",
+		ReservationSessionID: "res-session-a",
+		ReservationSubjectID: "cosmos1subject",
+	})
+	if err != nil || reason != "" {
+		t.Fatalf("unexpected session resolution failure reason=%q err=%v", reason, err)
+	}
+	if sessionID != "res-session-a" {
+		t.Fatalf("sessionID=%q want reservation session", sessionID)
+	}
+
+	_, reason, err = s.pathOpenSessionIDForRequest(proto.PathOpenRequest{
+		SessionID:            "other-session",
+		ReservationID:        "res-a",
+		ReservationSessionID: "res-session-a",
+		ReservationSubjectID: "cosmos1subject",
+	})
+	if err != nil || reason != "reservation-session-mismatch" {
+		t.Fatalf("reason=%q err=%v want reservation-session-mismatch", reason, err)
+	}
+
+	_, reason, err = s.pathOpenSessionIDForRequest(proto.PathOpenRequest{})
+	if err != nil || reason != "reservation-required" {
+		t.Fatalf("reason=%q err=%v want reservation-required", reason, err)
+	}
+}
+
+func TestValidateClientRouteAssertionRejectsReservationMismatch(t *testing.T) {
+	s := &Service{betaStrict: true, relayID: "entry-a"}
+	req := proto.PathOpenRequest{
+		ExitID:               "exit-b",
+		PathProfile:          "2hop",
+		ReservationID:        "res-a",
+		ReservationSessionID: "res-session-a",
+		ReservationSubjectID: "cosmos1subject",
+		ClientRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:          "2hop",
+			EntryRelayID:         "entry-a",
+			ExitRelayID:          "exit-b",
+			SessionID:            "res-session-a",
+			ReservationID:        "res-b",
+			ReservationSessionID: "res-session-a",
+			ReservationSubjectID: "cosmos1subject",
+		},
+	}
+	if reason := s.validateClientRouteAssertion(&req); reason != "client-reservation-mismatch" {
+		t.Fatalf("reason=%q want client-reservation-mismatch", reason)
+	}
+
+	req.ClientRouteAssertion.ReservationID = ""
+	req.ClientRouteAssertion.ReservationSessionID = ""
+	req.ClientRouteAssertion.ReservationSubjectID = ""
+	if reason := s.validateClientRouteAssertion(&req); reason != "client-reservation-assertion-required" {
+		t.Fatalf("reason=%q want client-reservation-assertion-required", reason)
+	}
+}
+
+func TestValidateClientRouteAssertionRejectsRequestBindingMismatch(t *testing.T) {
+	s := &Service{betaStrict: true, relayID: "entry-a"}
+	req := proto.PathOpenRequest{
+		ExitID:               "exit-b",
+		PathProfile:          "2hop",
+		SessionID:            "res-session-a",
+		Token:                "tok-a",
+		TokenProof:           "proof-a",
+		TokenProofNonce:      "nonce-a",
+		ReservationID:        "res-a",
+		ReservationSessionID: "res-session-a",
+		ReservationSubjectID: "cosmos1subject",
+		ClientInnerPub:       "client-pub-a",
+		Transport:            "wireguard-udp",
+		RequestedMTU:         1280,
+		RequestedRegion:      "us-east",
+		ClientRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:          "2hop",
+			EntryRelayID:         "entry-a",
+			ExitRelayID:          "exit-b",
+			SessionID:            "res-session-a",
+			TokenProofNonce:      "nonce-a",
+			ReservationID:        "res-a",
+			ReservationSessionID: "res-session-a",
+			ReservationSubjectID: "cosmos1subject",
+			ClientInnerPub:       "client-pub-a",
+			Transport:            "wireguard-udp",
+			RequestedMTU:         1280,
+			RequestedRegion:      "us-east",
+			TokenSHA256:          pncrypto.PathRouteAssertionBindingHash("tok-a"),
+		},
+	}
+	if reason := s.validateClientRouteAssertion(&req); reason != "" {
+		t.Fatalf("unexpected reason=%q", reason)
+	}
+
+	req.ClientRouteAssertion.TokenProofNonce = "nonce-b"
+	if reason := s.validateClientRouteAssertion(&req); reason != "client-route-assertion-nonce-mismatch" {
+		t.Fatalf("reason=%q want client-route-assertion-nonce-mismatch", reason)
+	}
+	req.ClientRouteAssertion.TokenProofNonce = "nonce-a"
+	req.ClientRouteAssertion.TokenSHA256 = pncrypto.PathRouteAssertionBindingHash("tok-b")
+	if reason := s.validateClientRouteAssertion(&req); reason != "client-route-assertion-token-mismatch" {
+		t.Fatalf("reason=%q want client-route-assertion-token-mismatch", reason)
 	}
 }
 
@@ -391,7 +745,7 @@ func TestHandlePathOpenRequireMiddleRelayRejectsEmptyAutoSelectedRelayID(t *test
 	}
 }
 
-func TestHandlePathOpenRequireMiddleRelayAutoSelectsDeterministicTieBreak(t *testing.T) {
+func TestHandlePathOpenRequireMiddleRelayRejectsMissingMiddleBeforeAutoSelect(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
 	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
@@ -422,14 +776,8 @@ func TestHandlePathOpenRequireMiddleRelayAutoSelectsDeterministicTieBreak(t *tes
 	})
 
 	exitCalls := 0
-	forwardedMiddle := ""
 	handlers["http://exit.local/v1/path/open"] = func(req *http.Request) (*http.Response, error) {
 		exitCalls++
-		var in proto.PathOpenRequest
-		if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
-			t.Fatalf("decode forwarded request: %v", err)
-		}
-		forwardedMiddle = in.MiddleRelayID
 		return jsonResp(proto.PathOpenResponse{
 			Accepted:   true,
 			SessionExp: time.Now().Add(5 * time.Minute).Unix(),
@@ -468,14 +816,98 @@ func TestHandlePathOpenRequireMiddleRelayAutoSelectsDeterministicTieBreak(t *tes
 	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if !out.Accepted {
-		t.Fatalf("expected accepted open with auto-selected middle relay, reason=%q", out.Reason)
+	if out.Accepted {
+		t.Fatalf("expected rejected open when middle relay is required but omitted")
 	}
-	if forwardedMiddle != "middle-a" {
-		t.Fatalf("expected deterministic middle relay tie-break to pick middle-a, got %q", forwardedMiddle)
+	if out.Reason != "middle-relay-required" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
 	}
-	if exitCalls != 1 {
-		t.Fatalf("expected one call to exit, got %d", exitCalls)
+	if exitCalls != 0 {
+		t.Fatalf("expected no call to exit when middle relay is omitted, got %d", exitCalls)
+	}
+}
+
+func TestHandlePathOpenRequireMiddleRelayRejectsSignedProofWithoutMiddleBeforeExitMismatch(t *testing.T) {
+	_, popPriv, err := pncrypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("generate pop keypair: %v", err)
+	}
+	openReq := proto.PathOpenRequest{
+		ExitID:          "exit-b",
+		Token:           "token-bound-to-empty-middle",
+		TokenProofNonce: "nonce-missing-middle",
+		Transport:       "wireguard-udp",
+	}
+	proof, err := pncrypto.SignPathOpenProof(popPriv, pncrypto.PathOpenProofInput{
+		Token:           openReq.Token,
+		ExitID:          openReq.ExitID,
+		MiddleRelayID:   openReq.MiddleRelayID,
+		TokenProofNonce: openReq.TokenProofNonce,
+		Transport:       openReq.Transport,
+	})
+	if err != nil {
+		t.Fatalf("sign token proof: %v", err)
+	}
+	openReq.TokenProof = proof
+
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:      "middle-auto",
+			Role:         "micro-relay",
+			HopRoles:     []string{"middle"},
+			OperatorID:   "op-middle",
+			Endpoint:     "middle.example:51822",
+			Reputation:   0.9,
+			Uptime:       0.9,
+			Capacity:     0.9,
+			AbusePenalty: 0.1,
+			ValidUntil:   time.Now().Add(time.Minute),
+		},
+	})
+
+	exitCalls := 0
+	handlers["http://exit.local/v1/path/open"] = func(req *http.Request) (*http.Response, error) {
+		exitCalls++
+		return jsonResp(proto.PathOpenResponse{Accepted: false, Reason: "token proof invalid"})(req)
+	}
+
+	s := &Service{
+		requireMiddleRelay: true,
+		dataAddr:           "127.0.0.1:51820",
+		operatorID:         "op-entry",
+		httpClient:         &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		sessions:           map[string]sessionState{},
+		exitRouteCache:     map[string]exitRoute{"exit-b": {controlURL: "http://exit.local", dataAddr: "127.0.0.1:51821", operatorID: "op-exit", fetchedAt: time.Now()}},
+		directoryURLs:      []string{durl},
+		buckets:            map[string]rateBucket{},
+		abuse:              map[string]abuseState{},
+		openRPS:            100,
+		routeTTL:           time.Minute,
+	}
+
+	reqBody, err := json.Marshal(openReq)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:41012"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Accepted {
+		t.Fatalf("expected rejected open when signed proof omits required middle relay")
+	}
+	if out.Reason != "middle-relay-required" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+	if exitCalls != 0 {
+		t.Fatalf("expected entry to reject before forwarding to exit proof verification, got %d calls", exitCalls)
 	}
 }
 
@@ -1377,7 +1809,7 @@ func TestHandlePathOpenRequireMiddleRelayBypassesStaleMiddleRelayCache(t *testin
 	}
 }
 
-func TestHandlePathOpenNonStrictModeUsesStaleMiddleRelayCache(t *testing.T) {
+func TestHandlePathOpenNonStrictModeBypassesStaleMiddleRelayCache(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
 	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
@@ -1439,14 +1871,91 @@ func TestHandlePathOpenNonStrictModeUsesStaleMiddleRelayCache(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if !out.Accepted {
-		t.Fatalf("expected non-strict mode to use cached middle relay descriptor, reason=%q", out.Reason)
+	if out.Accepted {
+		t.Fatalf("expected non-strict mode to reject stale cached middle relay descriptor")
 	}
-	if relayCalls != 0 {
-		t.Fatalf("expected non-strict mode to use cache without fetching relay descriptor, calls=%d", relayCalls)
+	if out.Reason != "middle-relay-role-invalid" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
 	}
-	if exitCalls != 1 {
-		t.Fatalf("expected one call to exit, got %d", exitCalls)
+	if relayCalls == 0 {
+		t.Fatalf("expected non-strict mode to bypass cache and fetch directory relay descriptor")
+	}
+	if exitCalls != 0 {
+		t.Fatalf("expected no call to exit, got %d", exitCalls)
+	}
+}
+
+func TestHandlePathOpenNonStrictModeRejectsWithdrawnMiddleRelayCache(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, nil)
+	relayCalls := 0
+	baseRelaysHandler := handlers[durl+"/v1/relays"]
+	handlers[durl+"/v1/relays"] = func(req *http.Request) (*http.Response, error) {
+		relayCalls++
+		return baseRelaysHandler(req)
+	}
+
+	exitCalls := 0
+	handlers["http://exit.local/v1/path/open"] = func(_ *http.Request) (*http.Response, error) {
+		exitCalls++
+		return jsonResp(proto.PathOpenResponse{Accepted: true, SessionExp: time.Now().Add(5 * time.Minute).Unix()})(nil)
+	}
+
+	s := &Service{
+		dataAddr:       "127.0.0.1:51820",
+		operatorID:     "op-entry",
+		httpClient:     &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		sessions:       map[string]sessionState{},
+		exitRouteCache: map[string]exitRoute{"exit-b": {controlURL: "http://exit.local", dataAddr: "127.0.0.1:51821", operatorID: "op-exit", fetchedAt: time.Now()}},
+		relayDescCache: map[string]cachedRelayDescriptor{
+			"middle-withdrawn": {
+				desc: proto.RelayDescriptor{
+					RelayID:    "middle-withdrawn",
+					Role:       "micro-relay",
+					OperatorID: "op-middle",
+					Endpoint:   "127.0.0.1:51822",
+					ValidUntil: time.Now().Add(time.Minute),
+				},
+				fetchedAt: time.Now(),
+			},
+		},
+		directoryURLs: []string{durl},
+		routeTTL:      time.Minute,
+		buckets:       map[string]rateBucket{},
+		abuse:         map[string]abuseState{},
+		openRPS:       100,
+	}
+
+	reqBody, err := json.Marshal(proto.PathOpenRequest{
+		ExitID:        "exit-b",
+		MiddleRelayID: "middle-withdrawn",
+		Transport:     "wireguard-udp",
+		TokenProof:    "proof",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:41044"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Accepted {
+		t.Fatalf("expected non-strict mode to reject withdrawn cached middle relay descriptor")
+	}
+	if out.Reason != "unknown-middle-relay" {
+		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+	if relayCalls == 0 {
+		t.Fatalf("expected non-strict mode to bypass cache and fetch directory relay descriptor")
+	}
+	if exitCalls != 0 {
+		t.Fatalf("expected no call to exit, got %d", exitCalls)
 	}
 }
 

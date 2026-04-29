@@ -15,6 +15,12 @@ import (
 	"privacynode/pkg/proto"
 )
 
+type clientModeRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f clientModeRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestAllowSyntheticFallback(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -97,6 +103,42 @@ func TestValidateRuntimeConfigLiveModeRequiresSink(t *testing.T) {
 	}
 	if err := c.validateRuntimeConfig(); err == nil {
 		t.Fatalf("expected live mode validation error without CLIENT_OPAQUE_SINK_ADDR")
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictRequiresFullTunnelRouteInstall(t *testing.T) {
+	c := &Client{
+		prodStrict:     true,
+		wgAllowedIPs:   "0.0.0.0/0,::/0",
+		wgInstallRoute: false,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected prod strict full-tunnel route install validation error")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_WG_INSTALL_ROUTE=1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAppAllowedIPsIncludeFullTunnel(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "default empty means full tunnel", raw: "", want: true},
+		{name: "ipv4 full tunnel", raw: "10.90.0.0/24, 0.0.0.0/0", want: true},
+		{name: "ipv6 full tunnel", raw: "::/0", want: true},
+		{name: "split tunnel only", raw: "10.90.0.0/24,fd00::/64", want: false},
+		{name: "invalid ignored", raw: "not-cidr,10.90.0.0/24", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := appAllowedIPsIncludeFullTunnel(tc.raw); got != tc.want {
+				t.Fatalf("appAllowedIPsIncludeFullTunnel(%q)=%t want=%t", tc.raw, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -602,6 +644,35 @@ func TestValidatePathOpenEntryDataAddrBinding(t *testing.T) {
 	}
 }
 
+func TestValidatePathOpenEntryDataAddrBindingRejectsReturnedDNSAlias(t *testing.T) {
+	c := &Client{
+		exitControlURL: "https://exit.example:8443",
+	}
+	pair := relayPair{
+		entry: proto.RelayDescriptor{
+			Endpoint:   "entry.example:51820",
+			ControlURL: "https://entry.example:8443",
+		},
+		exit: proto.RelayDescriptor{
+			Endpoint:   "exit.example:51830",
+			ControlURL: "https://exit.example:8443",
+		},
+	}
+
+	if err := c.validatePathOpenEntryDataAddrBinding("https://entry.example:8443", pair, "ENTRY.example:51820"); err != nil {
+		t.Fatalf("entry hostname binding failed: %v", err)
+	}
+	if err := c.validatePathOpenEntryDataAddrBinding("https://entry.example:8443", pair, "127.0.0.1:51820"); err == nil {
+		t.Fatalf("expected returned DNS-equivalent address with different host to be rejected")
+	}
+	if err := c.validatePathOpenEntryDataAddrBinding("https://exit.example:8443", pair, "exit.example:51830"); err != nil {
+		t.Fatalf("direct-exit hostname binding failed: %v", err)
+	}
+	if err := c.validatePathOpenEntryDataAddrBinding("https://exit.example:8443", pair, "entry.example:51830"); err == nil {
+		t.Fatalf("expected direct-exit returned host mismatch rejection")
+	}
+}
+
 func TestPruneHealthCacheLockedCapsEntries(t *testing.T) {
 	c := &Client{
 		healthCacheTTL: 5 * time.Second,
@@ -879,6 +950,26 @@ func TestNewClientPathProfileSpeedAliasMapsTo2Hop(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigRejects1HopWithoutForceDirectExit(t *testing.T) {
+	c := &Client{
+		pathProfile:              "1hop",
+		dataMode:                 "json",
+		innerSource:              "synthetic",
+		wgBackend:                "noop",
+		requireDistinctOps:       false,
+		requireDistinctCountries: false,
+		allowDirectExitFallback:  true,
+		forceDirectExit:          false,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected 1hop without force-direct validation failure")
+	}
+	if !strings.Contains(err.Error(), "CLIENT_PATH_PROFILE=1hop requires CLIENT_FORCE_DIRECT_EXIT=1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestNewClientPathProfileInvalidFailsClosedAtValidation(t *testing.T) {
 	t.Setenv("CLIENT_PATH_PROFILE", "turbo")
 	c := NewClient()
@@ -912,12 +1003,12 @@ func TestNewClientRequireMiddleRelayEnvOverrideOn(t *testing.T) {
 	}
 }
 
-func TestNewClientRequireMiddleRelayEnvOverrideOffFor3Hop(t *testing.T) {
+func TestNewClientRequireMiddleRelayEnvOverrideCannotDowngrade3Hop(t *testing.T) {
 	t.Setenv("CLIENT_PATH_PROFILE", "3hop")
 	t.Setenv("CLIENT_REQUIRE_MIDDLE_RELAY", "0")
 	c := NewClient()
-	if c.requireMiddleRelay {
-		t.Fatalf("expected CLIENT_REQUIRE_MIDDLE_RELAY=0 to disable strict middle relay requirement override")
+	if !c.requireMiddleRelay {
+		t.Fatalf("expected CLIENT_PATH_PROFILE=3hop to require middle relay even when CLIENT_REQUIRE_MIDDLE_RELAY=0")
 	}
 }
 
@@ -1196,6 +1287,295 @@ func TestValidateRuntimeConfigForceDirectExitAcceptsNonStrictConfig(t *testing.T
 	}
 }
 
+func TestValidateRuntimeConfigRejectsDirectExitFallbackWithThreeHopProfile(t *testing.T) {
+	c := &Client{
+		pathProfile:             "3hop",
+		preferMiddleRelay:       true,
+		requireMiddleRelay:      true,
+		dataMode:                "json",
+		innerSource:             "synthetic",
+		wgBackend:               "noop",
+		requireDistinctOps:      false,
+		allowDirectExitFallback: true,
+		forceDirectExit:         false,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected direct-exit fallback rejection for 3hop profile")
+	}
+	if !strings.Contains(err.Error(), "requires explicit direct-exit mode") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsAmbiguousDirectExitFallbackWithTwoHopProfile(t *testing.T) {
+	c := &Client{
+		pathProfile:             "2hop",
+		dataMode:                "json",
+		innerSource:             "synthetic",
+		wgBackend:               "noop",
+		requireDistinctOps:      false,
+		allowDirectExitFallback: true,
+		forceDirectExit:         false,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected ambiguous two-hop direct-exit fallback rejection")
+	}
+	if !strings.Contains(err.Error(), "requires explicit direct-exit mode") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsDirectExitFallbackWithMiddleRelayPolicy(t *testing.T) {
+	c := &Client{
+		pathProfile:             "2hop",
+		requireMiddleRelay:      true,
+		dataMode:                "json",
+		innerSource:             "synthetic",
+		wgBackend:               "noop",
+		requireDistinctOps:      false,
+		allowDirectExitFallback: true,
+		forceDirectExit:         false,
+	}
+	err := c.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected direct-exit fallback rejection for middle-relay policy")
+	}
+	if !strings.Contains(err.Error(), "requires explicit direct-exit mode") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigAllowsDirectExitFallbackInSupportMode(t *testing.T) {
+	c := &Client{
+		pathProfile:             "2hop",
+		dataMode:                "json",
+		innerSource:             "synthetic",
+		wgBackend:               "noop",
+		requireDistinctOps:      false,
+		allowDirectExitFallback: true,
+		directExitSupportMode:   true,
+		forceDirectExit:         false,
+	}
+	if err := c.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected direct-exit support mode to validate, got %v", err)
+	}
+}
+
+func TestShouldRetryDirectExitFallbackHonorsPathPolicy(t *testing.T) {
+	err := errors.New("path open denied: unknown-exit")
+	tests := []struct {
+		name   string
+		client *Client
+		want   bool
+	}{
+		{
+			name: "ambiguous two-hop fallback blocked",
+			client: &Client{
+				pathProfile:             "2hop",
+				allowDirectExitFallback: true,
+			},
+			want: false,
+		},
+		{
+			name: "support-mode two-hop fallback allowed",
+			client: &Client{
+				pathProfile:             "2hop",
+				allowDirectExitFallback: true,
+				directExitSupportMode:   true,
+			},
+			want: true,
+		},
+		{
+			name: "force-direct fallback allowed",
+			client: &Client{
+				pathProfile:             "1hop",
+				allowDirectExitFallback: true,
+				forceDirectExit:         true,
+			},
+			want: true,
+		},
+		{
+			name: "three-hop fallback blocked",
+			client: &Client{
+				pathProfile:             "3hop",
+				preferMiddleRelay:       true,
+				requireMiddleRelay:      true,
+				allowDirectExitFallback: true,
+			},
+			want: false,
+		},
+		{
+			name: "preferred middle relay blocks fallback",
+			client: &Client{
+				pathProfile:             "2hop",
+				preferMiddleRelay:       true,
+				allowDirectExitFallback: true,
+			},
+			want: false,
+		},
+		{
+			name: "required middle relay blocks fallback",
+			client: &Client{
+				pathProfile:             "2hop",
+				requireMiddleRelay:      true,
+				allowDirectExitFallback: true,
+			},
+			want: false,
+		},
+		{
+			name: "disabled flag blocks fallback",
+			client: &Client{
+				pathProfile:             "2hop",
+				allowDirectExitFallback: false,
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.client.shouldRetryDirectExitFallback(err); got != tc.want {
+				t.Fatalf("shouldRetryDirectExitFallback()=%t want=%t", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRankRelayPairsDirectExitRanksExitsWithoutEntries(t *testing.T) {
+	tests := []struct {
+		name   string
+		client *Client
+	}{
+		{
+			name: "force-direct-exit",
+			client: &Client{
+				forceDirectExit:    true,
+				healthCheckEnabled: false,
+			},
+		},
+		{
+			name: "1hop-profile",
+			client: &Client{
+				pathProfile:        "1hop",
+				healthCheckEnabled: false,
+			},
+		},
+	}
+
+	relays := []proto.RelayDescriptor{
+		{RelayID: "exit-a", Role: "exit", ControlURL: "https://exit-a.example", Endpoint: "203.0.113.10:51820"},
+		{RelayID: "exit-b", Role: "exit", ControlURL: "https://exit-b.example", Endpoint: "203.0.113.11:51820"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pairs := tc.client.rankRelayPairs(context.Background(), relays)
+			if len(pairs) != len(relays) {
+				t.Fatalf("expected one direct-exit pair per exit, got %d", len(pairs))
+			}
+			for i, pair := range pairs {
+				if pair.entry.RelayID != "" {
+					t.Fatalf("expected direct-exit pair %d to omit entry relay, got %q", i, pair.entry.RelayID)
+				}
+				if pair.exit.RelayID == "" {
+					t.Fatalf("expected direct-exit pair %d to include exit relay", i)
+				}
+			}
+		})
+	}
+}
+
+func TestRankRelayPairsThreeHopRequiresMiddleEvenWhenManualConfigDisablesRequireFlag(t *testing.T) {
+	c := &Client{
+		pathProfile:              "3hop",
+		preferMiddleRelay:        true,
+		requireMiddleRelay:       false,
+		healthCheckEnabled:       false,
+		requireDistinctOps:       false,
+		requireDistinctCountries: false,
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", ControlURL: "https://entry-a.example", Endpoint: "203.0.113.20:51820"},
+		{RelayID: "exit-a", Role: "exit", ControlURL: "https://exit-a.example", Endpoint: "203.0.113.21:51820"},
+	}
+
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) != 0 {
+		t.Fatalf("expected 3hop selection to fail closed without middle relay, got %d pairs: %+v", len(pairs), pairs)
+	}
+}
+
+func TestDirectExitStickyPreferenceWorksWithoutEntryRelay(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	c := &Client{
+		forceDirectExit:          true,
+		pathProfile:              "1hop",
+		stickyPairSec:            300,
+		healthCheckEnabled:       false,
+		exitExplorationPct:       0,
+		exitSelectionSeed:        1,
+		maxPairCandidates:        0,
+		requireDistinctOps:       false,
+		requireDistinctCountries: false,
+	}
+	c.rememberSelectedPair(relayPair{
+		exit: proto.RelayDescriptor{RelayID: "exit-b", Role: "exit"},
+	}, now)
+
+	pairs := c.rankDirectExitPairs(context.Background(), []proto.RelayDescriptor{
+		{RelayID: "exit-a", Role: "exit", ControlURL: "https://exit-a.example", Endpoint: "203.0.113.10:51820"},
+		{RelayID: "exit-b", Role: "exit", ControlURL: "https://exit-b.example", Endpoint: "203.0.113.11:51820"},
+	}, now.Add(30*time.Second))
+	if len(pairs) != 2 {
+		t.Fatalf("expected two direct-exit pairs, got %d", len(pairs))
+	}
+	if pairs[0].exit.RelayID != "exit-b" {
+		t.Fatalf("expected sticky direct-exit selection to prefer exit-b, got %q", pairs[0].exit.RelayID)
+	}
+	if pairs[0].entry.RelayID != "" {
+		t.Fatalf("expected direct-exit sticky pair to keep empty entry relay, got %q", pairs[0].entry.RelayID)
+	}
+}
+
+func TestRankRelayPairsForceDirectExitSkipsEntryHealth(t *testing.T) {
+	var requested []string
+	c := &Client{
+		forceDirectExit:    true,
+		pathProfile:        "1hop",
+		entryURL:           "http://entry-fallback.local",
+		healthCheckEnabled: true,
+		healthCacheTTL:     0,
+		healthCache:        map[string]healthProbeState{},
+		httpClient: &http.Client{Transport: clientModeRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requested = append(requested, req.URL.String())
+			if req.URL.String() == "http://exit-healthy.local/v1/ready" {
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody}, nil
+			}
+			return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: http.NoBody}, nil
+		})},
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-unneeded", Role: "entry", ControlURL: "http://entry-unneeded.local"},
+		{RelayID: "exit-healthy", Role: "exit", ControlURL: "http://exit-healthy.local", Endpoint: "127.0.0.1:51820"},
+	}
+
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) != 1 {
+		t.Fatalf("expected direct-exit ranking to select the healthy exit, got %d pairs", len(pairs))
+	}
+	if pairs[0].entry.RelayID != "" {
+		t.Fatalf("expected direct-exit pair to omit entry relay, got %q", pairs[0].entry.RelayID)
+	}
+	if pairs[0].exit.RelayID != "exit-healthy" {
+		t.Fatalf("expected exit-healthy selected, got %q", pairs[0].exit.RelayID)
+	}
+	if len(requested) != 1 || requested[0] != "http://exit-healthy.local/v1/ready" {
+		t.Fatalf("expected only exit readiness to be probed, got %v", requested)
+	}
+}
+
 func TestBootstrapDelayForFailures(t *testing.T) {
 	base := 2 * time.Second
 	maxDelay := 9 * time.Second
@@ -1394,6 +1774,16 @@ func TestNormalizeControlURLAllowsLoopbackHTTPByDefault(t *testing.T) {
 	}
 }
 
+func TestNormalizeControlURLRejectsPathPrefixByDefault(t *testing.T) {
+	t.Setenv("CLIENT_BETA_STRICT", "")
+	t.Setenv("CLIENT_PROD_STRICT", "")
+	t.Setenv("CLIENT_REQUIRE_HTTPS_CONTROL_URL", "")
+	got := normalizeControlURL("https://directory.example.invalid:8443/provider-prefix")
+	if got != "" {
+		t.Fatalf("expected control URL path prefix to be rejected by default, got %q", got)
+	}
+}
+
 func TestNormalizeControlURLRejectsNonLoopbackHTTPByDefaultOutsideStrictMode(t *testing.T) {
 	t.Setenv("CLIENT_BETA_STRICT", "")
 	t.Setenv("CLIENT_PROD_STRICT", "")
@@ -1413,5 +1803,17 @@ func TestNormalizeControlURLAllowsNonLoopbackHTTPWhenRequireHTTPSDisabled(t *tes
 	got := normalizeControlURL("http://directory.example.invalid:8081")
 	if got != "http://directory.example.invalid:8081" {
 		t.Fatalf("expected CLIENT_REQUIRE_HTTPS_CONTROL_URL=0 to allow URL, got %q", got)
+	}
+}
+
+func TestNormalizeControlURLAllowsPathPrefixOnlyWhenStrictPathGuardDisabled(t *testing.T) {
+	t.Setenv("CLIENT_BETA_STRICT", "")
+	t.Setenv("CLIENT_PROD_STRICT", "")
+	t.Setenv("BETA_STRICT_MODE", "")
+	t.Setenv("PROD_STRICT_MODE", "")
+	t.Setenv("CLIENT_REQUIRE_HTTPS_CONTROL_URL", "0")
+	got := normalizeControlURL("https://directory.example.invalid:8443/provider-prefix/")
+	if got != "https://directory.example.invalid:8443/provider-prefix" {
+		t.Fatalf("expected support override to preserve path prefix, got %q", got)
 	}
 }

@@ -163,6 +163,117 @@ func TestQueryServerListNonEmpty(t *testing.T) {
 	}
 }
 
+func TestQueryServerListEvidenceFiltersBeforeClamp(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	k.UpsertEvidence(types.SlashEvidence{
+		EvidenceID:      "evidence-filter-match",
+		ProviderID:      "provider-filter",
+		SessionID:       "sess-filter",
+		ViolationType:   "invalid-settlement-proof",
+		Kind:            types.EvidenceKindObjective,
+		ProofHash:       testSHAProof("proof-filter-match"),
+		SubmittedAtUnix: 1776643200,
+	})
+	k.UpsertEvidence(types.SlashEvidence{
+		EvidenceID:      "evidence-filter-other-provider",
+		ProviderID:      "provider-other",
+		SessionID:       "sess-filter",
+		ViolationType:   "invalid-settlement-proof",
+		Kind:            types.EvidenceKindObjective,
+		ProofHash:       testSHAProof("proof-filter-provider"),
+		SubmittedAtUnix: 1776643200,
+	})
+	k.UpsertEvidence(types.SlashEvidence{
+		EvidenceID:      "evidence-filter-outside-week",
+		ProviderID:      "provider-filter",
+		SessionID:       "sess-filter",
+		ViolationType:   "invalid-settlement-proof",
+		Kind:            types.EvidenceKindObjective,
+		ProofHash:       testSHAProof("proof-filter-time"),
+		SubmittedAtUnix: 1777248000,
+	})
+
+	server := NewQueryServer(&k)
+	evidenceResp, evidenceErr := server.ListEvidence(ListEvidenceRequest{
+		ProviderID:             "provider-filter",
+		SessionID:              "sess-filter",
+		ViolationType:          "INVALID-SETTLEMENT-PROOF",
+		SubmittedAtOrAfterUnix: 1776643200,
+		SubmittedBeforeUnix:    1777248000,
+	})
+	if evidenceErr != nil {
+		t.Fatalf("expected list evidence success, got %v", evidenceErr)
+	}
+	if len(evidenceResp.Evidence) != 1 || evidenceResp.Evidence[0].EvidenceID != "evidence-filter-match" {
+		t.Fatalf("filtered evidence=%+v want only evidence-filter-match", evidenceResp.Evidence)
+	}
+}
+
+func TestQueryServerListEvidenceCanonicalizesProviderAndSessionFilters(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	k.UpsertEvidence(types.SlashEvidence{
+		EvidenceID:      "evidence-filter-canonical",
+		ProviderID:      " Provider-Canonical ",
+		SessionID:       " Sess-Canonical ",
+		ViolationType:   "invalid-settlement-proof",
+		Kind:            types.EvidenceKindObjective,
+		ProofHash:       testSHAProof("proof-filter-canonical"),
+		SubmittedAtUnix: 1776643200,
+	})
+
+	server := NewQueryServer(&k)
+	evidenceResp, evidenceErr := server.ListEvidence(ListEvidenceRequest{
+		ProviderID: "provider-canonical",
+		SessionID:  "sess-canonical",
+	})
+	if evidenceErr != nil {
+		t.Fatalf("expected list evidence success, got %v", evidenceErr)
+	}
+	if len(evidenceResp.Evidence) != 1 || evidenceResp.Evidence[0].EvidenceID != "evidence-filter-canonical" {
+		t.Fatalf("canonicalized evidence filter=%+v want evidence-filter-canonical", evidenceResp.Evidence)
+	}
+}
+
+func TestQueryServerListEvidenceIncludeFailedPresence(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	k.UpsertEvidence(types.SlashEvidence{
+		EvidenceID: "evidence-status-submitted",
+		Kind:       types.EvidenceKindObjective,
+		ProofHash:  testSHAProof("proof-status-submitted"),
+		Status:     "submitted",
+	})
+	k.UpsertEvidence(types.SlashEvidence{
+		EvidenceID: "evidence-status-failed",
+		Kind:       types.EvidenceKindObjective,
+		ProofHash:  testSHAProof("proof-status-failed"),
+		Status:     "failed",
+	})
+
+	server := NewQueryServer(&k)
+
+	defaultResp, err := server.ListEvidence(ListEvidenceRequest{})
+	if err != nil {
+		t.Fatalf("expected default list evidence success, got %v", err)
+	}
+	if len(defaultResp.Evidence) != 2 {
+		t.Fatalf("expected unset include_failed to preserve failed records, got %d", len(defaultResp.Evidence))
+	}
+
+	explicitFalseResp, err := server.ListEvidence(ListEvidenceRequest{IncludeFailed: false, IncludeFailedSet: true})
+	if err != nil {
+		t.Fatalf("expected explicit false list evidence success, got %v", err)
+	}
+	if len(explicitFalseResp.Evidence) != 1 || explicitFalseResp.Evidence[0].EvidenceID != "evidence-status-submitted" {
+		t.Fatalf("expected explicit false to drop failed evidence, got %+v", explicitFalseResp.Evidence)
+	}
+}
+
 func TestQueryServerListFailsClosedOnReadError(t *testing.T) {
 	t.Parallel()
 

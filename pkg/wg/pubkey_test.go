@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -135,6 +136,9 @@ func TestReadPrivateKeyFileStrictRejectsOversizedFile(t *testing.T) {
 
 func TestReadPrivateKeyFileStrictReadsValidFile(t *testing.T) {
 	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows temp directory ACL inheritance varies; fileperm package covers Windows ACL validation")
+	}
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "wg-private.key")

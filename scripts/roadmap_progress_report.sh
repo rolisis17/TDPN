@@ -6584,6 +6584,7 @@ phase0_product_surface_launcher_runtime_ok_json="null"
 phase0_product_surface_prompt_budget_ok_json="null"
 phase0_product_surface_config_v1_ok_json="null"
 phase0_product_surface_local_control_api_ok_json="null"
+phase0_product_surface_public_admin_split_ok_json="null"
 if [[ -f "$phase0_summary_json" ]]; then
   if [[ "$(phase0_summary_usable_01 "$phase0_summary_json")" == "1" ]]; then
     phase0_product_surface_available_json="true"
@@ -6620,6 +6621,7 @@ if [[ -f "$phase0_summary_json" ]]; then
     phase0_product_surface_prompt_budget_ok_json="$(phase0_step_ok_json_or_null "$phase0_summary_json" "prompt_budget")"
     phase0_product_surface_config_v1_ok_json="$(phase0_step_ok_json_or_null "$phase0_summary_json" "config_v1")"
     phase0_product_surface_local_control_api_ok_json="$(phase0_step_ok_json_or_null "$phase0_summary_json" "local_control_api")"
+    phase0_product_surface_public_admin_split_ok_json="$(phase0_step_ok_json_or_null "$phase0_summary_json" "public_admin_split")"
   else
     phase0_product_surface_status_json="invalid"
   fi
@@ -10789,7 +10791,8 @@ phase0_product_surface_needs_attention_json="true"
 if [[ "$phase0_product_surface_available_json" == "true" \
    && "${phase0_product_surface_status_json,,}" == "pass" \
    && "$phase0_product_surface_contract_ok_json" == "true" \
-   && "$phase0_product_surface_all_required_steps_ok_json" == "true" ]]; then
+   && "$phase0_product_surface_all_required_steps_ok_json" == "true" \
+   && "$phase0_product_surface_public_admin_split_ok_json" == "true" ]]; then
   phase0_product_surface_needs_attention_json="false"
 fi
 
@@ -10805,6 +10808,8 @@ if [[ "$phase0_product_surface_needs_attention_json" == "true" ]]; then
     phase0_product_surface_reason="phase0 contract_ok=${phase0_product_surface_contract_ok_json}"
   elif [[ "$phase0_product_surface_all_required_steps_ok_json" != "true" ]]; then
     phase0_product_surface_reason="phase0 all_required_steps_ok=${phase0_product_surface_all_required_steps_ok_json}"
+  elif [[ "$phase0_product_surface_public_admin_split_ok_json" != "true" ]]; then
+    phase0_product_surface_reason="phase0 public_admin_split_ok=${phase0_product_surface_public_admin_split_ok_json}"
   fi
 fi
 
@@ -11261,13 +11266,61 @@ next_actions_candidate_json="$(
         . + [$item]
       end
     );
+  def unique_strings_preserve_order:
+    reduce .[] as $item (
+      [];
+      if (($item | type) != "string") or (($item | length) == 0) or ((. | index($item)) != null) then
+        .
+      else
+        . + [$item]
+      end
+    );
+  def action_evidence_metadata($families; $requires_real_hosts; $local_pack_only; $kinds):
+    ($families | unique_strings_preserve_order) as $normalized_families
+    | ($kinds | unique_strings_preserve_order) as $normalized_kinds
+    | {
+        requires_real_hosts: $requires_real_hosts,
+        local_pack_only: $local_pack_only,
+        missing_evidence_families: $normalized_families,
+        missing_evidence_family: (if ($normalized_families | length) == 1 then $normalized_families[0] else null end),
+        missing_evidence_action_kinds: $normalized_kinds,
+        missing_evidence_action_kind: (if ($normalized_kinds | length) == 1 then $normalized_kinds[0] else null end)
+      };
+  def primary_real_host_metadata:
+    if ($next_action_check_id // "") == "machine_c_vpn_smoke" then
+      action_evidence_metadata(["machine-c-vpn-smoke"]; true; false; ["real-host"])
+    elif ($next_action_check_id // "") == "three_machine_prod_signoff" then
+      action_evidence_metadata(["three-machine-real-host"]; true; false; ["real-host"])
+    else
+      {}
+    end;
+  def pending_live_evidence_families_after_bundle:
+    [
+      (if $profile_default_gate_live_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true then "profile-default" else empty end),
+      (if $runtime_actuation_promotion_live_action_ready == true and $runtime_actuation_live_and_pack_bundle_ready != true then "runtime-actuation" else empty end),
+      (if (
+          $multi_vm_stability_live_action_ready == true
+          or ($multi_vm_stability_promotion_live_action_ready == true and $profile_compare_multi_vm_live_and_pack_bundle_ready != true)
+        ) then "multi-vm" else empty end)
+    ]
+    | unique_strings_preserve_order;
+  def pending_evidence_pack_families_after_bundle:
+    [
+      (if $profile_default_gate_evidence_pack_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true then "profile-default" else empty end),
+      (if $runtime_actuation_promotion_evidence_pack_action_ready == true and $runtime_actuation_live_and_pack_bundle_ready != true then "runtime-actuation" else empty end),
+      (if $multi_vm_stability_promotion_evidence_pack_action_ready == true and $profile_compare_multi_vm_live_and_pack_bundle_ready != true then "multi-vm" else empty end)
+    ]
+    | unique_strings_preserve_order;
+  def pending_live_and_pack_families_after_bundle:
+    (pending_live_evidence_families_after_bundle + pending_evidence_pack_families_after_bundle)
+    | unique_strings_preserve_order;
   [
     (if ($next_action_command // "") != "" then {
       id: (if ($next_action_check_id // "") != "" then $next_action_check_id else "next_action" end),
       label: (if ($next_action_label // "") != "" then $next_action_label elif ($next_action_check_id // "") != "" then $next_action_check_id else "Next action" end),
       command: $next_action_command,
       reason: "primary roadmap gate"
-    } else empty end),
+    } + primary_real_host_metadata else empty end),
     (if ($profile_default_gate_live_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true and ($profile_default_gate_next_command // "") != "") then {
       id: "profile_default_gate",
       label: "Profile default decision gate",
@@ -11275,97 +11328,97 @@ next_actions_candidate_json="$(
       reason: (if ($profile_default_gate_next_command_reason // "") != "" then $profile_default_gate_next_command_reason else "non-blocking profile default decision" end),
       placeholder_unresolved: $profile_default_gate_next_command_has_unresolved_placeholders,
       placeholder_keys: $profile_default_gate_unresolved_placeholder_keys
-    } else empty end),
+    } + action_evidence_metadata(["profile-default"]; true; false; ["live-evidence"]) else empty end),
     (if ($multi_vm_stability_live_action_ready == true and ($multi_vm_stability_next_command // "") != "") then {
       id: "profile_compare_multi_vm_stability",
       label: "Profile compare multi-VM stability cycle",
       command: $multi_vm_stability_next_command,
       reason: (if ($multi_vm_stability_next_command_reason // "") != "" then $multi_vm_stability_next_command_reason else "multi-VM stability evidence requires refresh; rerun stability cycle and review check summary" end)
-    } else empty end),
+    } + action_evidence_metadata(["multi-vm"]; true; false; ["live-evidence"]) else empty end),
     (if ($multi_vm_stability_promotion_live_action_ready == true and $profile_compare_multi_vm_live_and_pack_bundle_ready != true and ($multi_vm_stability_promotion_next_command // "") != "") then {
       id: "profile_compare_multi_vm_stability_promotion",
       label: "Profile compare multi-VM stability promotion cycle",
       command: $multi_vm_stability_promotion_next_command,
       reason: (if ($multi_vm_stability_promotion_next_command_reason // "") != "" then $multi_vm_stability_promotion_next_command_reason else "multi-VM stability promotion evidence requires refresh; rerun promotion cycle" end)
-    } else empty end),
+    } + action_evidence_metadata(["multi-vm"]; true; false; ["live-evidence"]) else empty end),
     (if ($runtime_actuation_promotion_live_action_ready == true and $runtime_actuation_live_and_pack_bundle_ready != true and ($runtime_actuation_promotion_next_command // "") != "") then {
       id: "runtime_actuation_promotion",
       label: "Runtime-actuation promotion cycle",
       command: $runtime_actuation_promotion_next_command,
       reason: (if ($runtime_actuation_promotion_next_command_reason // "") != "" then $runtime_actuation_promotion_next_command_reason else "runtime-actuation promotion evidence requires refresh; rerun promotion cycle" end)
-    } else empty end),
+    } + action_evidence_metadata(["runtime-actuation"]; true; false; ["live-evidence"]) else empty end),
     (if ($profile_default_gate_live_and_pack_bundle_ready == true) then {
       id: "profile_default_gate_live_evidence_publish_bundle",
       label: "Profile default live+publish bundle",
       command: "./scripts/easy_node.sh profile-default-gate-live-evidence-publish-bundle --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "profile-default live gate and evidence-pack publish are both pending; run the bundled orchestrator"
-    } else empty end),
+    } + action_evidence_metadata(["profile-default"]; true; false; ["live-evidence","evidence-pack"]) else empty end),
     (if ($runtime_actuation_live_and_pack_bundle_ready == true) then {
       id: "runtime_actuation_live_evidence_publish_bundle",
       label: "Runtime-actuation live+publish bundle",
       command: "./scripts/easy_node.sh runtime-actuation-live-evidence-publish-bundle --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "runtime-actuation live gate and evidence-pack publish are both pending; run the bundled orchestrator"
-    } else empty end),
+    } + action_evidence_metadata(["runtime-actuation"]; true; false; ["live-evidence","evidence-pack"]) else empty end),
     (if ($profile_compare_multi_vm_live_and_pack_bundle_ready == true) then {
       id: "profile_compare_multi_vm_live_evidence_publish_bundle",
       label: "Multi-VM live+publish bundle",
       command: "./scripts/easy_node.sh profile-compare-multi-vm-live-evidence-publish-bundle --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "multi-VM live gate and evidence-pack publish are both pending; run the bundled orchestrator"
-    } else empty end),
+    } + action_evidence_metadata(["multi-vm"]; true; false; ["live-evidence","evidence-pack"]) else empty end),
     (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0) then {
       id: "roadmap_live_evidence_actionable_run",
       label: "Roadmap live-evidence actionable run",
       command: "./scripts/easy_node.sh roadmap-live-evidence-actionable-run --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "batch-run pending live evidence cycle actions"
-    } else empty end),
+    } + action_evidence_metadata(pending_live_evidence_families_after_bundle; true; false; ["live-evidence"]) else empty end),
     (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0 and $live_evidence_cycle_batch_helper_available == true) then {
       id: "roadmap_live_evidence_cycle_batch_run",
       label: "Roadmap live-evidence cycle-batch run",
       command: "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "repeat pending live evidence cycles across tracks in one helper run"
-    } else empty end),
+    } + action_evidence_metadata(pending_live_evidence_families_after_bundle; true; false; ["live-evidence"]) else empty end),
     (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0 and $live_evidence_archive_helper_available == true) then {
       id: "roadmap_live_evidence_archive_run",
       label: "Roadmap live-evidence archive run",
       command: "./scripts/easy_node.sh roadmap-live-evidence-archive-run --reports-dir .easy-node-logs --summary-json .easy-node-logs/roadmap_live_evidence_archive_run_summary.json --print-summary-json 1",
       reason: "archive current live evidence artifacts before rerunning cycles"
-    } else empty end),
+    } + action_evidence_metadata(pending_live_evidence_families_after_bundle; false; true; ["archive"]) else empty end),
     (if ($three_machine_real_host_validation_pack_signoff_pending == true and $three_machine_real_host_validation_pack_helper_available == true) then {
       id: "three_machine_real_host_validation_pack",
       label: "Three-machine real-host validation pack",
       command: "./scripts/easy_node.sh three-machine-real-host-validation-pack --reports-dir .easy-node-logs --summary-json .easy-node-logs/three_machine_real_host_validation_pack_summary.json --print-summary-json 1",
       reason: "package current three-machine validation evidence while real-host signoff is still pending"
-    } else empty end),
+    } + action_evidence_metadata(["three-machine-real-host"]; false; true; ["archive","real-host"]) else empty end),
     (if ($profile_default_gate_evidence_pack_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true and ($profile_default_gate_evidence_pack_next_command // "") != "") then {
       id: "profile_default_gate_evidence_pack",
       label: "Profile default evidence-pack publish",
       command: $profile_default_gate_evidence_pack_next_command,
       reason: (if ($profile_default_gate_evidence_pack_next_command_reason // "") != "" then $profile_default_gate_evidence_pack_next_command_reason else "profile-default evidence-pack requires refresh/publish" end)
-    } else empty end),
+    } + action_evidence_metadata(["profile-default"]; false; true; ["evidence-pack"]) else empty end),
     (if ($runtime_actuation_promotion_evidence_pack_action_ready == true and $runtime_actuation_live_and_pack_bundle_ready != true and ($runtime_actuation_promotion_evidence_pack_next_command // "") != "") then {
       id: "runtime_actuation_promotion_evidence_pack",
       label: "Runtime-actuation evidence-pack publish",
       command: $runtime_actuation_promotion_evidence_pack_next_command,
       reason: (if ($runtime_actuation_promotion_evidence_pack_next_command_reason // "") != "" then $runtime_actuation_promotion_evidence_pack_next_command_reason else "runtime-actuation evidence-pack requires refresh/publish" end)
-    } else empty end),
+    } + action_evidence_metadata(["runtime-actuation"]; false; true; ["evidence-pack"]) else empty end),
     (if ($multi_vm_stability_promotion_evidence_pack_action_ready == true and $profile_compare_multi_vm_live_and_pack_bundle_ready != true and ($multi_vm_stability_promotion_evidence_pack_next_command // "") != "") then {
       id: "profile_compare_multi_vm_stability_promotion_evidence_pack",
       label: "Multi-VM promotion evidence-pack publish",
       command: $multi_vm_stability_promotion_evidence_pack_next_command,
       reason: (if ($multi_vm_stability_promotion_evidence_pack_next_command_reason // "") != "" then $multi_vm_stability_promotion_evidence_pack_next_command_reason else "multi-VM promotion evidence-pack requires refresh/publish" end)
-    } else empty end),
+    } + action_evidence_metadata(["multi-vm"]; false; true; ["evidence-pack"]) else empty end),
     (if ($next_actions_evidence_pack_pending_action_count_after_bundle > 0) then {
       id: "roadmap_evidence_pack_actionable_run",
       label: "Roadmap evidence-pack actionable run",
       command: "./scripts/easy_node.sh roadmap-evidence-pack-actionable-run --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "batch-run pending evidence-pack publish actions"
-    } else empty end),
+    } + action_evidence_metadata(pending_evidence_pack_families_after_bundle; false; true; ["evidence-pack"]) else empty end),
     (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0 and $next_actions_evidence_pack_pending_action_count_after_bundle > 0) then {
       id: "roadmap_live_and_pack_actionable_run",
       label: "Roadmap live+pack actionable run",
       command: "./scripts/easy_node.sh roadmap-live-and-pack-actionable-run --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "live-evidence cycles and evidence-pack publishes are both pending; run the combined orchestrator"
-    } else empty end),
+    } + action_evidence_metadata(pending_live_and_pack_families_after_bundle; true; false; ["live-evidence","evidence-pack"]) else empty end),
     (if ($blockchain_mainnet_activation_missing_metrics_action_available == true and (($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") != "" or ($blockchain_mainnet_activation_missing_metrics_action_operator_pack_command // "") != "")) then {
       id: "blockchain_mainnet_activation_missing_metrics",
       label: (if ($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") != "" then "Blockchain missing-metrics real-evidence run" else "Blockchain missing-metrics operator pack" end),
@@ -11723,6 +11776,7 @@ summary_payload_jq_args=(
   --argjson phase0_product_surface_prompt_budget_ok "$phase0_product_surface_prompt_budget_ok_json" \
   --argjson phase0_product_surface_config_v1_ok "$phase0_product_surface_config_v1_ok_json" \
   --argjson phase0_product_surface_local_control_api_ok "$phase0_product_surface_local_control_api_ok_json" \
+  --argjson phase0_product_surface_public_admin_split_ok "$phase0_product_surface_public_admin_split_ok_json" \
   --argjson phase1_resilience_handoff_available "$phase1_resilience_handoff_available_json" \
   --arg phase1_resilience_handoff_input_summary_json "$phase1_resilience_handoff_input_summary_json" \
   --arg phase1_resilience_handoff_source_summary_json "$phase1_resilience_handoff_source_summary_json" \
@@ -12167,7 +12221,8 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
         launcher_runtime_ok: $phase0_product_surface_launcher_runtime_ok,
         prompt_budget_ok: $phase0_product_surface_prompt_budget_ok,
         config_v1_ok: $phase0_product_surface_config_v1_ok,
-        local_control_api_ok: $phase0_product_surface_local_control_api_ok
+        local_control_api_ok: $phase0_product_surface_local_control_api_ok,
+        public_admin_split_ok: $phase0_product_surface_public_admin_split_ok
       },
       phase1_resilience_handoff: {
         available: $phase1_resilience_handoff_available,
@@ -12799,6 +12854,7 @@ cat >"$report_tmp" <<EOF_MD
 - Phase-0 prompt_budget_ok: $(jq -r '.vpn_track.phase0_product_surface.prompt_budget_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-0 config_v1_ok: $(jq -r '.vpn_track.phase0_product_surface.config_v1_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-0 local_control_api_ok: $(jq -r '.vpn_track.phase0_product_surface.local_control_api_ok | if . == null then "null" else tostring end' "$summary_json")
+- Phase-0 public_admin_split_ok: $(jq -r '.vpn_track.phase0_product_surface.public_admin_split_ok | if . == null then "null" else tostring end' "$summary_json")
 - Phase-1 handoff available: $(jq -r '.vpn_track.phase1_resilience_handoff.available' "$summary_json")
 - Phase-1 handoff input: $(jq -r '.vpn_track.phase1_resilience_handoff.input_summary_json // "none"' "$summary_json")
 - Phase-1 handoff source: $(jq -r '.vpn_track.phase1_resilience_handoff.source_summary_json // "none"' "$summary_json")
@@ -13133,7 +13189,7 @@ echo "[roadmap-progress-report] single_machine_refresh_non_blocking_transient=$s
 echo "[roadmap-progress-report] manual_validation_summary_valid_after_run=$manual_summary_valid_after_run restored_from_snapshot=$manual_summary_restored"
 echo "[roadmap-progress-report] single_machine_summary_valid_after_run=$single_machine_summary_valid_after_run restored_from_snapshot=$single_machine_summary_restored"
 echo "[roadmap-progress-report] phase0_product_surface_available=$phase0_product_surface_available_json source_summary_json=${phase0_product_surface_source_summary_json:-} input_summary_json=${phase0_product_surface_input_summary_json:-}"
-echo "[roadmap-progress-report] phase0_product_surface_status=$phase0_product_surface_status_json contract_ok=$phase0_product_surface_contract_ok_json all_required_steps_ok=$phase0_product_surface_all_required_steps_ok_json launcher_wiring_ok=$phase0_product_surface_launcher_wiring_ok_json launcher_runtime_ok=$phase0_product_surface_launcher_runtime_ok_json prompt_budget_ok=$phase0_product_surface_prompt_budget_ok_json config_v1_ok=$phase0_product_surface_config_v1_ok_json local_control_api_ok=$phase0_product_surface_local_control_api_ok_json"
+echo "[roadmap-progress-report] phase0_product_surface_status=$phase0_product_surface_status_json contract_ok=$phase0_product_surface_contract_ok_json all_required_steps_ok=$phase0_product_surface_all_required_steps_ok_json launcher_wiring_ok=$phase0_product_surface_launcher_wiring_ok_json launcher_runtime_ok=$phase0_product_surface_launcher_runtime_ok_json prompt_budget_ok=$phase0_product_surface_prompt_budget_ok_json config_v1_ok=$phase0_product_surface_config_v1_ok_json local_control_api_ok=$phase0_product_surface_local_control_api_ok_json public_admin_split_ok=$phase0_product_surface_public_admin_split_ok_json"
 echo "[roadmap-progress-report] phase1_resilience_handoff_available=$phase1_resilience_handoff_available_json source_summary_json=${phase1_resilience_handoff_source_summary_json:-} source_kind=${phase1_resilience_handoff_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase1_resilience_handoff_profile_matrix_stable=$phase1_resilience_handoff_profile_matrix_stable_json peer_loss_recovery_ok=$phase1_resilience_handoff_peer_loss_recovery_ok_json session_churn_guard_ok=$phase1_resilience_handoff_session_churn_guard_ok_json automatable_without_sudo_or_github=$phase1_resilience_handoff_automatable_without_sudo_or_github_json"
 echo "[roadmap-progress-report] phase1_resilience_handoff_failure_kind=${phase1_resilience_handoff_failure_kind_json:-} policy_outcome_decision=${phase1_resilience_handoff_policy_outcome_decision_json:-} policy_outcome_fail_closed_no_go=$phase1_resilience_handoff_policy_outcome_fail_closed_no_go_json"

@@ -111,14 +111,29 @@ func TestPathOpenProofSignVerify(t *testing.T) {
 		t.Fatalf("keygen failed: %v", err)
 	}
 	input := PathOpenProofInput{
-		Token:           "tok-1",
-		ExitID:          "exit-a",
-		MiddleRelayID:   "middle-a",
-		TokenProofNonce: "nonce-a",
-		ClientInnerPub:  "pub-a",
-		Transport:       "policy-json",
-		RequestedMTU:    1280,
-		RequestedRegion: "local",
+		Token:                "tok-1",
+		ExitID:               "exit-a",
+		MiddleRelayID:        "middle-a",
+		PathProfile:          "3hop",
+		SessionID:            "res-session-a",
+		TokenProofNonce:      "nonce-a",
+		ReservationID:        "res-a",
+		ReservationSessionID: "res-session-a",
+		ReservationSubjectID: "cosmos1subject",
+		ClientInnerPub:       "pub-a",
+		Transport:            "policy-json",
+		RequestedMTU:         1280,
+		RequestedRegion:      "local",
+		ClientRoute: PathRouteAssertionInput{
+			PathProfile:          "3hop",
+			EntryRelayID:         "entry-a",
+			MiddleRelayID:        "middle-a",
+			ExitRelayID:          "exit-a",
+			SessionID:            "res-session-a",
+			ReservationID:        "res-a",
+			ReservationSessionID: "res-session-a",
+			ReservationSubjectID: "cosmos1subject",
+		},
 	}
 	proof, err := SignPathOpenProof(priv, input)
 	if err != nil {
@@ -134,7 +149,55 @@ func TestPathOpenProofSignVerify(t *testing.T) {
 	mutated := input
 	mutated.MiddleRelayID = "middle-b"
 	if err := VerifyPathOpenProof(proof, pub, mutated); err == nil {
-		t.Fatalf("expected proof verification failure on mutated request")
+		t.Fatalf("expected proof verification failure on mutated middle relay")
+	}
+
+	mutated = input
+	mutated.PathProfile = "2hop"
+	if err := VerifyPathOpenProof(proof, pub, mutated); err == nil {
+		t.Fatalf("expected proof verification failure on mutated path profile")
+	}
+
+	mutated = input
+	mutated.SessionID = "res-session-b"
+	if err := VerifyPathOpenProof(proof, pub, mutated); err == nil {
+		t.Fatalf("expected proof verification failure on mutated session id")
+	}
+
+	mutated = input
+	mutated.ReservationID = "res-b"
+	if err := VerifyPathOpenProof(proof, pub, mutated); err == nil {
+		t.Fatalf("expected proof verification failure on mutated reservation id")
+	}
+
+	mutated = input
+	mutated.ReservationSessionID = "res-session-b"
+	if err := VerifyPathOpenProof(proof, pub, mutated); err == nil {
+		t.Fatalf("expected proof verification failure on mutated reservation session id")
+	}
+
+	mutated = input
+	mutated.ReservationSubjectID = "cosmos1other"
+	if err := VerifyPathOpenProof(proof, pub, mutated); err == nil {
+		t.Fatalf("expected proof verification failure on mutated reservation subject id")
+	}
+
+	mutated = input
+	mutated.ClientRoute.MiddleRelayID = "middle-b"
+	if err := VerifyPathOpenProof(proof, pub, mutated); err == nil {
+		t.Fatalf("expected proof verification failure on mutated client route assertion")
+	}
+
+	mutated = input
+	mutated.ClientRoute.ReservationSessionID = "res-session-b"
+	if err := VerifyPathOpenProof(proof, pub, mutated); err == nil {
+		t.Fatalf("expected proof verification failure on mutated client route reservation session id")
+	}
+
+	mutated = input
+	mutated.ClientRoute.ReservationSubjectID = "cosmos1other"
+	if err := VerifyPathOpenProof(proof, pub, mutated); err == nil {
+		t.Fatalf("expected proof verification failure on mutated client route reservation subject id")
 	}
 }
 
@@ -182,6 +245,42 @@ func TestPathOpenProofVerifyLegacyNoRequestedRegion(t *testing.T) {
 	}
 	if err := VerifyPathOpenProofStrict(proof, pub, input); err == nil {
 		t.Fatalf("expected strict verifier to reject legacy no-region proof")
+	}
+}
+
+func TestPathOpenProofCompatRejectsLegacyNoRouteWhenClientRoutePresent(t *testing.T) {
+	pub, priv, err := GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen failed: %v", err)
+	}
+	input := PathOpenProofInput{
+		Token:                "tok-legacy-route",
+		ExitID:               "exit-a",
+		MiddleRelayID:        "middle-a",
+		PathProfile:          "3hop",
+		SessionID:            "res-session-a",
+		TokenProofNonce:      "nonce-a",
+		ReservationID:        "res-a",
+		ReservationSessionID: "res-session-a",
+		ReservationSubjectID: "cosmos1subject",
+		ClientInnerPub:       "pub-a",
+		Transport:            "policy-json",
+		RequestedMTU:         1280,
+		RequestedRegion:      "local",
+		ClientRoute: PathRouteAssertionInput{
+			PathProfile:          "3hop",
+			EntryRelayID:         "entry-a",
+			MiddleRelayID:        "middle-a",
+			ExitRelayID:          "exit-a",
+			SessionID:            "res-session-a",
+			ReservationID:        "res-a",
+			ReservationSessionID: "res-session-a",
+			ReservationSubjectID: "cosmos1subject",
+		},
+	}
+	proof := signLegacyPathOpenProofNoRoute(t, priv, input)
+	if err := VerifyPathOpenProofCompat(proof, pub, input); err == nil {
+		t.Fatalf("expected compatibility verifier to reject proof that omits present client route assertion")
 	}
 }
 
@@ -288,6 +387,16 @@ func signLegacyPathOpenProofNoRegion(t *testing.T, priv ed25519.PrivateKey, inpu
 	msg, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal legacy no-region payload: %v", err)
+	}
+	sig := ed25519.Sign(priv, msg)
+	return base64.RawURLEncoding.EncodeToString(sig)
+}
+
+func signLegacyPathOpenProofNoRoute(t *testing.T, priv ed25519.PrivateKey, input PathOpenProofInput) string {
+	t.Helper()
+	msg, err := pathOpenProofMessageVariant(input, true, true, true, true, false)
+	if err != nil {
+		t.Fatalf("marshal legacy no-route payload: %v", err)
 	}
 	sig := ed25519.Sign(priv, msg)
 	return base64.RawURLEncoding.EncodeToString(sig)

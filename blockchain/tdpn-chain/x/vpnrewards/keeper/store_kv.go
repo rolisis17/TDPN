@@ -12,6 +12,7 @@ import (
 const (
 	accrualPrefix      = "accrual/"
 	distributionPrefix = "distribution/"
+	proofPrefix        = "proof/"
 	maxKVPayloadBytes  = 1 << 20
 )
 
@@ -172,12 +173,96 @@ func (s *KVStore) ListDistributionsWithError() ([]types.DistributionRecord, erro
 	return records, nil
 }
 
+func (s *KVStore) UpsertProof(record types.RewardProofRecord) {
+	_ = s.UpsertProofWithError(record)
+}
+
+func (s *KVStore) UpsertProofWithError(record types.RewardProofRecord) error {
+	normalized := normalizeProof(record)
+	if err := normalized.ValidateBasic(); err != nil {
+		return err
+	}
+	if existing, found := s.GetProof(normalized.ProofPath); found && !proofRecordsEqual(existing, normalized) {
+		return conflictError("proof", normalized.ProofPath)
+	}
+
+	payload, err := json.Marshal(normalized)
+	if err != nil {
+		return err
+	}
+	s.store.Set(proofKey(normalized.ProofPath), payload)
+	return nil
+}
+
+func (s *KVStore) GetProof(proofPath string) (types.RewardProofRecord, bool) {
+	canonicalProofPath := canonicalKVProofPath(proofPath)
+	if canonicalProofPath == "" {
+		return types.RewardProofRecord{}, false
+	}
+
+	payload, ok := s.store.Get(proofKey(canonicalProofPath))
+	if !ok {
+		return types.RewardProofRecord{}, false
+	}
+
+	record, err := decodeProof(payload)
+	if err != nil {
+		return types.RewardProofRecord{}, false
+	}
+	if record.ProofPath != canonicalProofPath {
+		return types.RewardProofRecord{}, false
+	}
+
+	return record, true
+}
+
+func (s *KVStore) ListProofs() []types.RewardProofRecord {
+	records, err := s.ListProofsWithError()
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (s *KVStore) ListProofsWithError() ([]types.RewardProofRecord, error) {
+	records := make([]types.RewardProofRecord, 0)
+	var decodeErr error
+	s.store.IteratePrefix([]byte(proofPrefix), func(key []byte, value []byte) bool {
+		keyID, err := parsePrefixedProofPath(key, proofPrefix)
+		if err != nil {
+			decodeErr = fmt.Errorf("decode proof key %q: %w", string(key), err)
+			return false
+		}
+
+		record, err := decodeProof(value)
+		if err != nil {
+			decodeErr = fmt.Errorf("decode proof %q: %w", keyID, err)
+			return false
+		}
+		if record.ProofPath != keyID {
+			decodeErr = fmt.Errorf("proof key/value path mismatch: key=%q payload=%q", keyID, record.ProofPath)
+			return false
+		}
+
+		records = append(records, record)
+		return true
+	})
+	if decodeErr != nil {
+		return nil, decodeErr
+	}
+	return records, nil
+}
+
 func accrualKey(accrualID string) []byte {
 	return []byte(accrualPrefix + accrualID)
 }
 
 func distributionKey(distributionID string) []byte {
 	return []byte(distributionPrefix + distributionID)
+}
+
+func proofKey(proofPath string) []byte {
+	return []byte(proofPrefix + proofPath)
 }
 
 func decodeAccrual(payload []byte) (types.RewardAccrual, error) {
@@ -220,6 +305,26 @@ func decodeDistribution(payload []byte) (types.DistributionRecord, error) {
 	return normalized, nil
 }
 
+func decodeProof(payload []byte) (types.RewardProofRecord, error) {
+	if len(payload) == 0 {
+		return types.RewardProofRecord{}, fmt.Errorf("payload is empty")
+	}
+	if len(payload) > maxKVPayloadBytes {
+		return types.RewardProofRecord{}, fmt.Errorf("payload exceeds %d bytes", maxKVPayloadBytes)
+	}
+
+	var record types.RewardProofRecord
+	if err := json.Unmarshal(payload, &record); err != nil {
+		return types.RewardProofRecord{}, err
+	}
+
+	normalized := normalizeProof(record)
+	if err := normalized.ValidateBasic(); err != nil {
+		return types.RewardProofRecord{}, err
+	}
+	return normalized, nil
+}
+
 func parsePrefixedID(key []byte, prefix string) (string, error) {
 	rawKey := string(key)
 	if !strings.HasPrefix(rawKey, prefix) {
@@ -236,6 +341,26 @@ func parsePrefixedID(key []byte, prefix string) (string, error) {
 	return suffix, nil
 }
 
+func parsePrefixedProofPath(key []byte, prefix string) (string, error) {
+	rawKey := string(key)
+	if !strings.HasPrefix(rawKey, prefix) {
+		return "", fmt.Errorf("missing prefix %q", prefix)
+	}
+
+	suffix := canonicalKVProofPath(strings.TrimPrefix(rawKey, prefix))
+	if suffix == "" {
+		return "", fmt.Errorf("key proof path is empty")
+	}
+	if rawKey != prefix+suffix {
+		return "", fmt.Errorf("key proof path is not canonical")
+	}
+	return suffix, nil
+}
+
 func canonicalKVToken(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func canonicalKVProofPath(value string) string {
+	return strings.TrimSpace(value)
 }

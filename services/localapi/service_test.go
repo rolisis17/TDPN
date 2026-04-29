@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"privacynode/pkg/settlement"
 )
 
 type fakeFileInfo struct {
@@ -142,6 +144,10 @@ case "$cmd" in
       echo "invalid subject value"
       exit 49
     fi
+    if [[ -n "${LOCALAPI_TEST_EXPECT_SUBJECT_VALUE:-}" && "$subject_value" != "${LOCALAPI_TEST_EXPECT_SUBJECT_VALUE}" ]]; then
+      echo "unexpected subject value: $subject_value"
+      exit 47
+    fi
     if [[ -n "${LOCALAPI_TEST_UP_FAIL_BOOTSTRAP:-}" && "$bootstrap_directory" == "${LOCALAPI_TEST_UP_FAIL_BOOTSTRAP}" ]]; then
       echo "connect failed"
       exit 43
@@ -149,6 +155,10 @@ case "$cmd" in
     if [[ "${LOCALAPI_TEST_UP_FAIL:-0}" == "1" ]]; then
       echo "connect failed"
       exit 43
+    fi
+    if [[ -n "${LOCALAPI_TEST_BLOCK_STATE_PATH_AFTER_UP:-}" ]]; then
+      rm -f "${LOCALAPI_TEST_BLOCK_STATE_PATH_AFTER_UP}"
+      mkdir -p "${LOCALAPI_TEST_BLOCK_STATE_PATH_AFTER_UP}"
     fi
     echo "connect ok"
     ;;
@@ -162,7 +172,7 @@ case "$cmd" in
     elif [[ "${LOCALAPI_TEST_STATUS_RAW:-0}" == "1" ]]; then
       echo "status-raw"
     else
-      echo '{"connected":true,"profile":"2hop"}'
+      echo '{"connected":true,"running":true,"interface":"wgvpn0","interface_state":"present","profile":"2hop","route_mode":"full-tunnel"}'
     fi
     ;;
   client-vpn-down)
@@ -255,6 +265,157 @@ func callJSONHandlerWithHeaders(t *testing.T, h http.HandlerFunc, method, path, 
 		t.Fatalf("decode response json (status=%d body=%q): %v", rr.Code, rr.Body.String(), err)
 	}
 	return rr.Code, out
+}
+
+func callRouteStatus(t *testing.T, h http.Handler, method, path string) int {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	return rr.Code
+}
+
+func seedGPMTestSession(t *testing.T, svc *Service, token string, walletAddress string, tier int, stakeSatisfied bool, prepaidSatisfied bool) string {
+	t.Helper()
+	if svc.gpmState == nil {
+		svc.gpmState = newGPMRuntimeState()
+	}
+	if token == "" {
+		token = "gpm-test-session-" + strings.TrimPrefix(walletAddress, "cosmos1")
+	}
+	svc.gpmState.putSession(gpmSession{
+		Token:                   token,
+		WalletAddress:           walletAddress,
+		WalletProvider:          "keplr",
+		Role:                    "client",
+		WalletBindingVerified:   true,
+		ClientTier:              tier,
+		StakeSatisfied:          stakeSatisfied,
+		PrepaidBalanceSatisfied: prepaidSatisfied,
+		ExpiresAt:               time.Now().UTC().Add(time.Hour),
+	})
+	return token
+}
+
+func markGPMTestSessionEntitlementsTrusted(t *testing.T, svc *Service, token string) {
+	t.Helper()
+	if svc == nil || svc.gpmState == nil {
+		t.Fatal("gpm state is required")
+	}
+	svc.gpmState.mu.Lock()
+	defer svc.gpmState.mu.Unlock()
+	session, ok := svc.gpmState.sessions[token]
+	if !ok {
+		t.Fatalf("session %q not found", token)
+	}
+	session.EntitlementEvidenceSource = "chain"
+	svc.gpmState.sessions[token] = session
+}
+
+func markGPMTestSessionEntitlementsLocal(t *testing.T, svc *Service, token string) {
+	t.Helper()
+	if svc == nil || svc.gpmState == nil {
+		t.Fatal("gpm state is required")
+	}
+	svc.gpmState.mu.Lock()
+	defer svc.gpmState.mu.Unlock()
+	session, ok := svc.gpmState.sessions[token]
+	if !ok {
+		t.Fatalf("session %q not found", token)
+	}
+	session.EntitlementEvidenceSource = "local_env"
+	svc.gpmState.sessions[token] = session
+}
+
+func seedGPMTrustedTestSession(t *testing.T, svc *Service, token string, walletAddress string, tier int, stakeSatisfied bool, prepaidSatisfied bool) string {
+	t.Helper()
+	token = seedGPMTestSession(t, svc, token, walletAddress, tier, stakeSatisfied, prepaidSatisfied)
+	markGPMTestSessionEntitlementsTrusted(t, svc, token)
+	return token
+}
+
+func seedGPMUnboundTestSession(t *testing.T, svc *Service, token string, walletAddress string) string {
+	t.Helper()
+	if svc.gpmState == nil {
+		svc.gpmState = newGPMRuntimeState()
+	}
+	if token == "" {
+		token = "gpm-unbound-test-session-" + strings.TrimPrefix(walletAddress, "cosmos1")
+	}
+	svc.gpmState.putSession(gpmSession{
+		Token:                 token,
+		WalletAddress:         walletAddress,
+		WalletProvider:        "keplr",
+		Role:                  "client",
+		WalletBindingVerified: false,
+		ExpiresAt:             time.Now().UTC().Add(time.Hour),
+	})
+	return token
+}
+
+func trustGPMAdminTestPolicy(svc *Service, walletAddress string) {
+	walletAddress = normalizeWalletAddress(walletAddress)
+	if walletAddress == "" {
+		return
+	}
+	if svc.gpmAdminWalletAllowlist == nil {
+		svc.gpmAdminWalletAllowlist = map[string]struct{}{}
+	}
+	svc.gpmAdminWalletAllowlist[walletAddress] = struct{}{}
+	if strings.TrimSpace(svc.gpmAuthVerifyCommand) == "" {
+		svc.gpmAuthVerifyCommand = "test-command-backed-wallet-verifier"
+	}
+}
+
+func seedGPMAdminTestSession(t *testing.T, svc *Service, token string, walletAddress string) string {
+	t.Helper()
+	if svc.gpmState == nil {
+		svc.gpmState = newGPMRuntimeState()
+	}
+	if token == "" {
+		token = "gpm-admin-test-session-" + strings.TrimPrefix(walletAddress, "cosmos1")
+	}
+	svc.gpmState.putSession(gpmSession{
+		Token:                  token,
+		WalletAddress:          walletAddress,
+		WalletProvider:         "keplr",
+		Role:                   "admin",
+		WalletBindingVerified:  true,
+		AuthVerificationSource: "command",
+		CreatedAt:              time.Now().UTC(),
+		ExpiresAt:              time.Now().UTC().Add(time.Hour),
+	})
+	trustGPMAdminTestPolicy(svc, walletAddress)
+	return token
+}
+
+func auditRecentAdminPath(t *testing.T, svc *Service, path string) string {
+	t.Helper()
+	token := seedGPMAdminTestSession(t, svc, "gpm-audit-admin-token", "cosmos1auditadmin")
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return path + separator + "session_token=" + token
+}
+
+func TestGPMOperatorApplyRequiresWalletBoundSession(t *testing.T) {
+	svc := &Service{
+		addr:      "127.0.0.1:8095",
+		authToken: "operator-apply-test-token",
+		gpmState:  newGPMRuntimeState(),
+	}
+	token := seedGPMUnboundTestSession(t, svc, "gpm-unbound-operator-apply", "cosmos1operatorapply")
+	body := fmt.Sprintf(`{"session_token":%q,"chain_operator_id":"gpmvaloper1operator","server_label":"operator-a"}`, token)
+	code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMOperatorApply, http.MethodPost, "/v1/gpm/operator/apply", body, map[string]string{
+		"Authorization": "Bearer operator-apply-test-token",
+	})
+	if code != http.StatusForbidden {
+		t.Fatalf("status=%d payload=%v", code, payload)
+	}
+	if _, ok := svc.gpmState.getOperator("cosmos1operatorapply"); ok {
+		t.Fatalf("unbound session should not persist operator application")
+	}
 }
 
 func readCommandLog(t *testing.T, path string) [][]string {
@@ -525,6 +686,203 @@ func deterministicSecp256k1Proof(message string) (signatureBase64 string, public
 	return base64.StdEncoding.EncodeToString(signature), base64.StdEncoding.EncodeToString(publicKey)
 }
 
+type gpmRewardFinalizeConfirmationAdapter struct {
+	confirmRewards    bool
+	rewardSubmitCalls int
+	rewards           map[string]settlement.RewardIssue
+	slashEvidence     []settlement.SlashEvidence
+	slashListCalls    []settlement.SlashEvidenceFilter
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) SubmitSessionSettlement(context.Context, settlement.SessionSettlement) (string, error) {
+	return "session-chain-ref", nil
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) SubmitRewardIssue(_ context.Context, reward settlement.RewardIssue) (string, error) {
+	a.rewardSubmitCalls++
+	if a.rewards == nil {
+		a.rewards = map[string]settlement.RewardIssue{}
+	}
+	a.rewards[reward.RewardID] = reward
+	return "reward-chain-ref-" + reward.RewardID, nil
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) SubmitSponsorReservation(context.Context, settlement.SponsorCreditReservation) (string, error) {
+	return "sponsor-chain-ref", nil
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) SubmitSlashEvidence(context.Context, settlement.SlashEvidence) (string, error) {
+	return "slash-chain-ref", nil
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) Health(context.Context) error {
+	return nil
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) HasSessionSettlement(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) HasRewardIssue(context.Context, string) (bool, error) {
+	return a.confirmRewards, nil
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) HasSponsorReservation(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) HasSlashEvidence(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) SessionSettlementStatus(context.Context, string) (settlement.OperationStatus, bool, error) {
+	return "", false, nil
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) RewardIssueStatus(context.Context, string) (settlement.OperationStatus, bool, error) {
+	if !a.confirmRewards {
+		return settlement.OperationStatusSubmitted, true, nil
+	}
+	return settlement.OperationStatusConfirmed, true, nil
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) RewardIssue(_ context.Context, rewardID string) (settlement.RewardIssue, bool, error) {
+	reward, ok := a.rewards[rewardID]
+	if !ok {
+		return settlement.RewardIssue{}, false, nil
+	}
+	if a.confirmRewards {
+		reward.Status = settlement.OperationStatusConfirmed
+	} else {
+		reward.Status = settlement.OperationStatusSubmitted
+	}
+	return reward, true, nil
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) SponsorReservationStatus(context.Context, string) (settlement.OperationStatus, bool, error) {
+	return "", false, nil
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) SlashEvidenceStatus(context.Context, string) (settlement.OperationStatus, bool, error) {
+	return "", false, nil
+}
+
+func (a *gpmRewardFinalizeConfirmationAdapter) ListSlashEvidence(_ context.Context, filter settlement.SlashEvidenceFilter) ([]settlement.SlashEvidence, error) {
+	a.slashListCalls = append(a.slashListCalls, filter)
+	out := make([]settlement.SlashEvidence, 0, len(a.slashEvidence))
+	for _, evidence := range a.slashEvidence {
+		if strings.TrimSpace(filter.SubjectID) != "" && strings.TrimSpace(evidence.SubjectID) != strings.TrimSpace(filter.SubjectID) {
+			continue
+		}
+		if strings.TrimSpace(filter.SessionID) != "" && strings.TrimSpace(evidence.SessionID) != strings.TrimSpace(filter.SessionID) {
+			continue
+		}
+		if strings.TrimSpace(filter.ViolationType) != "" && strings.TrimSpace(evidence.ViolationType) != strings.TrimSpace(filter.ViolationType) {
+			continue
+		}
+		if evidence.ObservedAt.IsZero() && !filter.IncludeZeroObserved {
+			continue
+		}
+		if !evidence.ObservedAt.IsZero() {
+			if !filter.ObservedAtOrAfter.IsZero() && evidence.ObservedAt.Before(filter.ObservedAtOrAfter) {
+				continue
+			}
+			if !filter.ObservedBefore.IsZero() && !evidence.ObservedAt.Before(filter.ObservedBefore) {
+				continue
+			}
+		}
+		out = append(out, evidence)
+	}
+	return out, nil
+}
+
+type gpmNoSlashEvidenceListService struct {
+	settlement.Service
+}
+
+type gpmReserveFundsFinalityService struct {
+	settlement.Service
+	returnedStatus settlement.OperationStatus
+	chainStatus    settlement.OperationStatus
+	chainFound     bool
+	chainErr       error
+	reservation    settlement.FundReservation
+	reservationOK  bool
+	reservationErr error
+}
+
+func (s *gpmReserveFundsFinalityService) ReserveFunds(_ context.Context, reservation settlement.FundReservation) (settlement.FundReservation, error) {
+	if strings.TrimSpace(reservation.ReservationID) == "" {
+		reservation.ReservationID = "res-" + strings.TrimSpace(reservation.SessionID)
+	}
+	if strings.TrimSpace(reservation.Currency) == "" {
+		reservation.Currency = "TDPNC"
+	}
+	if reservation.CreatedAt.IsZero() {
+		reservation.CreatedAt = time.Now().UTC()
+	}
+	reservation.Status = s.returnedStatus
+	if reservation.Status == "" {
+		reservation.Status = settlement.OperationStatusSubmitted
+	}
+	return reservation, nil
+}
+
+func (s *gpmReserveFundsFinalityService) FundReservationStatus(context.Context, string) (settlement.OperationStatus, bool, error) {
+	return s.chainStatus, s.chainFound, s.chainErr
+}
+
+func (s *gpmReserveFundsFinalityService) FundReservation(_ context.Context, reservationID string) (settlement.FundReservation, bool, error) {
+	if s.reservationErr != nil {
+		return settlement.FundReservation{}, false, s.reservationErr
+	}
+	if !s.reservationOK {
+		return settlement.FundReservation{}, false, nil
+	}
+	reservation := s.reservation
+	if strings.TrimSpace(reservation.ReservationID) == "" {
+		reservation.ReservationID = strings.TrimSpace(reservationID)
+	}
+	return reservation, true, nil
+}
+
+type gpmReserveFundsChainStatusAdapter struct {
+	status                 settlement.OperationStatus
+	found                  bool
+	submittedReservations  []settlement.FundReservation
+	reservationStatusCalls []string
+}
+
+func (a *gpmReserveFundsChainStatusAdapter) SubmitSessionSettlement(context.Context, settlement.SessionSettlement) (string, error) {
+	return "session-chain-ref", nil
+}
+
+func (a *gpmReserveFundsChainStatusAdapter) SubmitFundReservation(_ context.Context, reservation settlement.FundReservation) (string, error) {
+	a.submittedReservations = append(a.submittedReservations, reservation)
+	return "reservation-chain-ref-" + reservation.ReservationID, nil
+}
+
+func (a *gpmReserveFundsChainStatusAdapter) SubmitRewardIssue(context.Context, settlement.RewardIssue) (string, error) {
+	return "reward-chain-ref", nil
+}
+
+func (a *gpmReserveFundsChainStatusAdapter) SubmitSponsorReservation(context.Context, settlement.SponsorCreditReservation) (string, error) {
+	return "sponsor-chain-ref", nil
+}
+
+func (a *gpmReserveFundsChainStatusAdapter) SubmitSlashEvidence(context.Context, settlement.SlashEvidence) (string, error) {
+	return "slash-chain-ref", nil
+}
+
+func (a *gpmReserveFundsChainStatusAdapter) Health(context.Context) error {
+	return nil
+}
+
+func (a *gpmReserveFundsChainStatusAdapter) FundReservationStatus(_ context.Context, reservationID string) (settlement.OperationStatus, bool, error) {
+	a.reservationStatusCalls = append(a.reservationStatusCalls, reservationID)
+	return a.status, a.found, nil
+}
+
 func TestNormalizePathProfile(t *testing.T) {
 	tests := []struct {
 		in   string
@@ -607,6 +965,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
 		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", "")
 		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC", "")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC", "")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC", "")
 		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("GPM_OPERATOR_APPROVAL_REQUIRE_SESSION", "")
@@ -623,6 +983,11 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE", "")
 		t.Setenv("GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "")
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "")
+		t.Setenv("GPM_LOCAL_API_ADMIN_ROUTES", "")
+		t.Setenv("TDPN_LOCAL_API_ADMIN_ROUTES", "")
+		t.Setenv("GPM_ADMIN_CONSOLE", "")
+		t.Setenv("GPM_DESKTOP_ADMIN_CONSOLE", "")
+		t.Setenv("TDPN_DESKTOP_ADMIN_CONSOLE", "")
 
 		s := New()
 		if s.addr != defaultAddr {
@@ -670,6 +1035,12 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.gpmAllowLegacyConnectOverride {
 			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=false", s.gpmAllowLegacyConnectOverride)
 		}
+		if s.gpmAdminRoutesEnabled {
+			t.Fatalf("gpmAdminRoutesEnabled=%t want=false", s.gpmAdminRoutesEnabled)
+		}
+		if s.gpmAdminRoutesSource != "default" {
+			t.Fatalf("gpmAdminRoutesSource=%q want=default", s.gpmAdminRoutesSource)
+		}
 		if s.gpmLegacyConnectRequireTrustedManifestBootstrap {
 			t.Fatalf("gpmLegacyConnectRequireTrustedManifestBootstrap=%t want=false", s.gpmLegacyConnectRequireTrustedManifestBootstrap)
 		}
@@ -709,6 +1080,12 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.gpmManifestRemoteRefreshSrc != "default" {
 			t.Fatalf("gpmManifestRemoteRefreshSrc=%q want=default", s.gpmManifestRemoteRefreshSrc)
 		}
+		if s.gpmManifestRefreshFailureMaxCacheAge != 0 {
+			t.Fatalf("gpmManifestRefreshFailureMaxCacheAge=%s want=0s", s.gpmManifestRefreshFailureMaxCacheAge)
+		}
+		if s.gpmManifestRefreshFailureMaxCacheAgeSrc != "default" {
+			t.Fatalf("gpmManifestRefreshFailureMaxCacheAgeSrc=%q want=default", s.gpmManifestRefreshFailureMaxCacheAgeSrc)
+		}
 		if s.gpmAuthVerifyPolicyMode != "default" {
 			t.Fatalf("gpmAuthVerifyPolicyMode=%q want=default", s.gpmAuthVerifyPolicyMode)
 		}
@@ -744,6 +1121,78 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if got := len(s.gpmLegacyEnvAliasWarnings); got != 0 {
 			t.Fatalf("gpmLegacyEnvAliasWarnings len=%d want=0", got)
+		}
+	})
+
+	t.Run("default role cannot mint admin sessions", func(t *testing.T) {
+		t.Setenv("GPM_DEFAULT_ROLE", "admin")
+		s := New()
+		if s.gpmRoleDefault != "client" {
+			t.Fatalf("gpmRoleDefault=%q want=client", s.gpmRoleDefault)
+		}
+	})
+
+	t.Run("admin routes require explicit daemon opt in", func(t *testing.T) {
+		t.Setenv("GPM_LOCAL_API_ADMIN_ROUTES", "1")
+		t.Setenv("TDPN_LOCAL_API_ADMIN_ROUTES", "")
+		t.Setenv("GPM_ADMIN_CONSOLE", "")
+		t.Setenv("GPM_DESKTOP_ADMIN_CONSOLE", "")
+		t.Setenv("TDPN_DESKTOP_ADMIN_CONSOLE", "")
+
+		s := New()
+		if !s.gpmAdminRoutesEnabled {
+			t.Fatalf("gpmAdminRoutesEnabled=%t want=true", s.gpmAdminRoutesEnabled)
+		}
+		if s.gpmAdminRoutesSource != "GPM_LOCAL_API_ADMIN_ROUTES" {
+			t.Fatalf("gpmAdminRoutesSource=%q want=GPM_LOCAL_API_ADMIN_ROUTES", s.gpmAdminRoutesSource)
+		}
+	})
+
+	t.Run("admin console ui mode does not enable daemon admin routes", func(t *testing.T) {
+		t.Setenv("GPM_LOCAL_API_ADMIN_ROUTES", "")
+		t.Setenv("TDPN_LOCAL_API_ADMIN_ROUTES", "")
+		t.Setenv("GPM_ADMIN_CONSOLE", "1")
+		t.Setenv("GPM_DESKTOP_ADMIN_CONSOLE", "1")
+		t.Setenv("TDPN_DESKTOP_ADMIN_CONSOLE", "1")
+
+		s := New()
+		if s.gpmAdminRoutesEnabled {
+			t.Fatalf("gpmAdminRoutesEnabled=%t want=false", s.gpmAdminRoutesEnabled)
+		}
+		if s.gpmAdminRoutesSource != "default" {
+			t.Fatalf("gpmAdminRoutesSource=%q want=default", s.gpmAdminRoutesSource)
+		}
+	})
+
+	t.Run("explicit disabled admin route env is not overridden by ui mode", func(t *testing.T) {
+		t.Setenv("GPM_LOCAL_API_ADMIN_ROUTES", "0")
+		t.Setenv("TDPN_LOCAL_API_ADMIN_ROUTES", "")
+		t.Setenv("GPM_ADMIN_CONSOLE", "1")
+		t.Setenv("GPM_DESKTOP_ADMIN_CONSOLE", "1")
+		t.Setenv("TDPN_DESKTOP_ADMIN_CONSOLE", "1")
+
+		s := New()
+		if s.gpmAdminRoutesEnabled {
+			t.Fatalf("gpmAdminRoutesEnabled=%t want=false", s.gpmAdminRoutesEnabled)
+		}
+		if s.gpmAdminRoutesSource != "GPM_LOCAL_API_ADMIN_ROUTES" {
+			t.Fatalf("gpmAdminRoutesSource=%q want=GPM_LOCAL_API_ADMIN_ROUTES", s.gpmAdminRoutesSource)
+		}
+	})
+
+	t.Run("invalid admin route opt in fails closed", func(t *testing.T) {
+		t.Setenv("GPM_LOCAL_API_ADMIN_ROUTES", "sometimes")
+		t.Setenv("TDPN_LOCAL_API_ADMIN_ROUTES", "")
+		t.Setenv("GPM_ADMIN_CONSOLE", "")
+		t.Setenv("GPM_DESKTOP_ADMIN_CONSOLE", "")
+		t.Setenv("TDPN_DESKTOP_ADMIN_CONSOLE", "")
+
+		s := New()
+		if s.gpmAdminRoutesEnabled {
+			t.Fatalf("gpmAdminRoutesEnabled=%t want=false", s.gpmAdminRoutesEnabled)
+		}
+		if s.gpmAdminRoutesSource != "GPM_LOCAL_API_ADMIN_ROUTES-invalid-env-fail-closed" {
+			t.Fatalf("gpmAdminRoutesSource=%q want invalid fail-closed source", s.gpmAdminRoutesSource)
 		}
 	})
 
@@ -948,6 +1397,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "")
 		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
 		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC", "")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC", "")
 		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("GPM_OPERATOR_APPROVAL_REQUIRE_SESSION", "")
@@ -1017,6 +1468,15 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.gpmManifestRequireSigSource != "production-default" {
 			t.Fatalf("gpmManifestRequireSigSource=%q want=production-default", s.gpmManifestRequireSigSource)
 		}
+		if s.gpmManifestRefreshFailureMaxCacheAge != 15*time.Minute {
+			t.Fatalf("gpmManifestRefreshFailureMaxCacheAge=%s want=15m0s", s.gpmManifestRefreshFailureMaxCacheAge)
+		}
+		if s.gpmManifestRefreshFailureMaxCacheAgeSrc != "production-default" {
+			t.Fatalf(
+				"gpmManifestRefreshFailureMaxCacheAgeSrc=%q want=production-default",
+				s.gpmManifestRefreshFailureMaxCacheAgeSrc,
+			)
+		}
 		if !s.gpmAuthVerifyRequireMetadata {
 			t.Fatalf("gpmAuthVerifyRequireMetadata=%t want=true", s.gpmAuthVerifyRequireMetadata)
 		}
@@ -1052,6 +1512,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 	t.Run("production mode fails closed when GPM_PRODUCTION_MODE env is invalid", func(t *testing.T) {
 		t.Setenv("GPM_PRODUCTION_MODE", "definitely-not-bool")
 		t.Setenv("TDPN_PRODUCTION_MODE", "")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC", "")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC", "")
 		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "")
 		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "")
 
@@ -1076,6 +1538,68 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if s.gpmAuthVerifyPolicySource != "production-invalid-env-fail-closed" {
 			t.Fatalf("gpmAuthVerifyPolicySource=%q want=production-invalid-env-fail-closed", s.gpmAuthVerifyPolicySource)
+		}
+		if s.gpmManifestRefreshFailureMaxCacheAge != 15*time.Minute {
+			t.Fatalf("gpmManifestRefreshFailureMaxCacheAge=%s want=15m0s", s.gpmManifestRefreshFailureMaxCacheAge)
+		}
+		if s.gpmManifestRefreshFailureMaxCacheAgeSrc != "production-default" {
+			t.Fatalf(
+				"gpmManifestRefreshFailureMaxCacheAgeSrc=%q want=production-default",
+				s.gpmManifestRefreshFailureMaxCacheAgeSrc,
+			)
+		}
+	})
+
+	t.Run("production mode fails closed when manifest refresh-failure cache ceiling is disabled or invalid", func(t *testing.T) {
+		t.Setenv("GPM_PRODUCTION_MODE", "1")
+		t.Setenv("TDPN_PRODUCTION_MODE", "")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC", "0")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC", "")
+
+		s := New()
+		if s.gpmManifestRefreshFailureMaxCacheAge != 15*time.Minute {
+			t.Fatalf("gpmManifestRefreshFailureMaxCacheAge=%s want=15m0s", s.gpmManifestRefreshFailureMaxCacheAge)
+		}
+		if s.gpmManifestRefreshFailureMaxCacheAgeSrc != "production-refresh-failure-cache-fail-closed" {
+			t.Fatalf(
+				"gpmManifestRefreshFailureMaxCacheAgeSrc=%q want=production-refresh-failure-cache-fail-closed",
+				s.gpmManifestRefreshFailureMaxCacheAgeSrc,
+			)
+		}
+
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC", "not-a-duration")
+		s = New()
+		if s.gpmManifestRefreshFailureMaxCacheAge != 15*time.Minute {
+			t.Fatalf("invalid env gpmManifestRefreshFailureMaxCacheAge=%s want=15m0s", s.gpmManifestRefreshFailureMaxCacheAge)
+		}
+		if s.gpmManifestRefreshFailureMaxCacheAgeSrc != "production-invalid-env-fail-closed" {
+			t.Fatalf(
+				"invalid env gpmManifestRefreshFailureMaxCacheAgeSrc=%q want=production-invalid-env-fail-closed",
+				s.gpmManifestRefreshFailureMaxCacheAgeSrc,
+			)
+		}
+	})
+
+	t.Run("production mode enforces manifest trust even when flags are explicitly false", func(t *testing.T) {
+		t.Setenv("GPM_PRODUCTION_MODE", "1")
+		t.Setenv("TDPN_PRODUCTION_MODE", "")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "0")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "")
+		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "false")
+		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
+
+		s := New()
+		if !s.gpmManifestRequireHTTPS {
+			t.Fatalf("gpmManifestRequireHTTPS=%t want=true", s.gpmManifestRequireHTTPS)
+		}
+		if s.gpmManifestRequireHTTPSSource != "production-enforced" {
+			t.Fatalf("gpmManifestRequireHTTPSSource=%q want=production-enforced", s.gpmManifestRequireHTTPSSource)
+		}
+		if !s.gpmManifestRequireSignature {
+			t.Fatalf("gpmManifestRequireSignature=%t want=true", s.gpmManifestRequireSignature)
+		}
+		if s.gpmManifestRequireSigSource != "production-enforced" {
+			t.Fatalf("gpmManifestRequireSigSource=%q want=production-enforced", s.gpmManifestRequireSigSource)
 		}
 	})
 
@@ -1197,11 +1721,13 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit connect and auth policy flags override production defaults", func(t *testing.T) {
+	t.Run("production mode enforces connect guardrails even when legacy envs try to relax them", func(t *testing.T) {
 		t.Setenv("GPM_PRODUCTION_MODE", "1")
 		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "0")
 		t.Setenv("GPM_OPERATOR_APPROVAL_REQUIRE_SESSION", "0")
 		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "1")
+		t.Setenv("GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP", "0")
+		t.Setenv("TDPN_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP", "")
 		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "0")
 		t.Setenv("TDPN_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", "")
 		t.Setenv("GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", "")
@@ -1219,8 +1745,8 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		t.Setenv("TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", "")
 
 		s := New()
-		if s.gpmConnectRequireSession {
-			t.Fatalf("gpmConnectRequireSession=%t want=false", s.gpmConnectRequireSession)
+		if !s.gpmConnectRequireSession {
+			t.Fatalf("gpmConnectRequireSession=%t want=true", s.gpmConnectRequireSession)
 		}
 		if s.gpmOperatorApprovalRequireSession {
 			t.Fatalf("gpmOperatorApprovalRequireSession=%t want=false", s.gpmOperatorApprovalRequireSession)
@@ -1231,8 +1757,20 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 				s.gpmOperatorApprovalRequireSessionSource,
 			)
 		}
-		if !s.gpmAllowLegacyConnectOverride {
-			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=true", s.gpmAllowLegacyConnectOverride)
+		if s.gpmAllowLegacyConnectOverride {
+			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=false", s.gpmAllowLegacyConnectOverride)
+		}
+		if !s.gpmLegacyConnectRequireTrustedManifestBootstrap {
+			t.Fatalf(
+				"gpmLegacyConnectRequireTrustedManifestBootstrap=%t want=true",
+				s.gpmLegacyConnectRequireTrustedManifestBootstrap,
+			)
+		}
+		if s.gpmLegacyConnectRequireTrustedManifestBootstrapSource != "production-enforced" {
+			t.Fatalf(
+				"gpmLegacyConnectRequireTrustedManifestBootstrapSource=%q want=production-enforced",
+				s.gpmLegacyConnectRequireTrustedManifestBootstrapSource,
+			)
 		}
 		if s.gpmConnectPolicyMode != "production" {
 			t.Fatalf("gpmConnectPolicyMode=%q want=production", s.gpmConnectPolicyMode)
@@ -1246,17 +1784,17 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		if s.gpmManifestTrustPolicySource != "GPM_PRODUCTION_MODE" {
 			t.Fatalf("gpmManifestTrustPolicySource=%q want=GPM_PRODUCTION_MODE", s.gpmManifestTrustPolicySource)
 		}
-		if s.gpmManifestRequireHTTPS {
-			t.Fatalf("gpmManifestRequireHTTPS=%t want=false", s.gpmManifestRequireHTTPS)
+		if !s.gpmManifestRequireHTTPS {
+			t.Fatalf("gpmManifestRequireHTTPS=%t want=true", s.gpmManifestRequireHTTPS)
 		}
-		if s.gpmManifestRequireSignature {
-			t.Fatalf("gpmManifestRequireSignature=%t want=false", s.gpmManifestRequireSignature)
+		if !s.gpmManifestRequireSignature {
+			t.Fatalf("gpmManifestRequireSignature=%t want=true", s.gpmManifestRequireSignature)
 		}
-		if s.gpmManifestRequireHTTPSSource != "GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS" {
-			t.Fatalf("gpmManifestRequireHTTPSSource=%q want=GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS", s.gpmManifestRequireHTTPSSource)
+		if s.gpmManifestRequireHTTPSSource != "production-enforced" {
+			t.Fatalf("gpmManifestRequireHTTPSSource=%q want=production-enforced", s.gpmManifestRequireHTTPSSource)
 		}
-		if s.gpmManifestRequireSigSource != "TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE" {
-			t.Fatalf("gpmManifestRequireSigSource=%q want=TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE", s.gpmManifestRequireSigSource)
+		if s.gpmManifestRequireSigSource != "production-enforced" {
+			t.Fatalf("gpmManifestRequireSigSource=%q want=production-enforced", s.gpmManifestRequireSigSource)
 		}
 		if s.gpmAuthVerifyRequireMetadata {
 			t.Fatalf("gpmAuthVerifyRequireMetadata=%t want=false", s.gpmAuthVerifyRequireMetadata)
@@ -1287,6 +1825,37 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 		}
 		if s.gpmAuthVerifyCryptoSource != "GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF" {
 			t.Fatalf("gpmAuthVerifyCryptoSource=%q want=GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", s.gpmAuthVerifyCryptoSource)
+		}
+	})
+
+	t.Run("production mode enforces connect guardrails for TDPN legacy aliases too", func(t *testing.T) {
+		t.Setenv("GPM_PRODUCTION_MODE", "1")
+		t.Setenv("TDPN_PRODUCTION_MODE", "")
+		t.Setenv("GPM_CONNECT_REQUIRE_SESSION", "")
+		t.Setenv("TDPN_CONNECT_REQUIRE_SESSION", "0")
+		t.Setenv("GPM_ALLOW_LEGACY_CONNECT_OVERRIDE", "")
+		t.Setenv("TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE", "1")
+		t.Setenv("GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP", "")
+		t.Setenv("TDPN_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP", "0")
+
+		s := New()
+		if !s.gpmConnectRequireSession {
+			t.Fatalf("gpmConnectRequireSession=%t want=true", s.gpmConnectRequireSession)
+		}
+		if s.gpmAllowLegacyConnectOverride {
+			t.Fatalf("gpmAllowLegacyConnectOverride=%t want=false", s.gpmAllowLegacyConnectOverride)
+		}
+		if !s.gpmLegacyConnectRequireTrustedManifestBootstrap {
+			t.Fatalf(
+				"gpmLegacyConnectRequireTrustedManifestBootstrap=%t want=true",
+				s.gpmLegacyConnectRequireTrustedManifestBootstrap,
+			)
+		}
+		if s.gpmLegacyConnectRequireTrustedManifestBootstrapSource != "production-enforced" {
+			t.Fatalf(
+				"gpmLegacyConnectRequireTrustedManifestBootstrapSource=%q want=production-enforced",
+				s.gpmLegacyConnectRequireTrustedManifestBootstrapSource,
+			)
 		}
 	})
 
@@ -1384,6 +1953,230 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 			t.Fatalf("scriptPath=%q want empty when configured script path is invalid", s.scriptPath)
 		}
 	})
+}
+
+func TestLocalAPIPublicModeDoesNotRegisterAdminRoutes(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmAdminRoutesEnabled = false
+	handler := svc.routes()
+
+	adminRoutes := []string{
+		"/v1/set_profile",
+		"/v1/update",
+		"/v1/service/status",
+		"/v1/service/start",
+		"/v1/service/stop",
+		"/v1/service/restart",
+		"/v1/get_diagnostics",
+		"/v1/gpm/service/start",
+		"/v1/gpm/service/stop",
+		"/v1/gpm/service/restart",
+		"/v1/gpm/audit/recent",
+		"/v1/gpm/gaps/summary",
+		"/v1/gpm/admin/contributions/list",
+		"/v1/gpm/admin/rewards/review",
+		"/v1/gpm/admin/rewards/hold",
+		"/v1/gpm/admin/rewards/finalize",
+		"/v1/gpm/onboarding/server/status",
+		"/v1/gpm/onboarding/operator/apply",
+		"/v1/gpm/onboarding/operator/status",
+		"/v1/gpm/onboarding/operator/list",
+		"/v1/gpm/onboarding/operator/approve",
+	}
+	for _, route := range adminRoutes {
+		if got := callRouteStatus(t, handler, http.MethodGet, route); got != http.StatusNotFound {
+			t.Fatalf("public daemon route %s status=%d want=404", route, got)
+		}
+	}
+
+	publicRoutes := []string{
+		"/v1/health",
+		"/v1/config",
+		"/v1/connect",
+		"/v1/disconnect",
+		"/v1/gpm/bootstrap/manifest",
+		"/v1/gpm/auth/challenge",
+		"/v1/gpm/session",
+		"/v1/gpm/onboarding/client/status",
+		"/v1/gpm/contribution/status",
+		"/v1/gpm/rewards/history",
+		"/v1/gpm/onboarding/overview",
+	}
+	for _, route := range publicRoutes {
+		if got := callRouteStatus(t, handler, http.MethodGet, route); got == http.StatusNotFound {
+			t.Fatalf("public daemon route %s status=404 want registered", route)
+		}
+	}
+}
+
+func TestLocalAPIAdminConsoleEnvDoesNotRegisterAdminRoutes(t *testing.T) {
+	t.Setenv("GPM_LOCAL_API_ADMIN_ROUTES", "")
+	t.Setenv("TDPN_LOCAL_API_ADMIN_ROUTES", "")
+	t.Setenv("GPM_ADMIN_CONSOLE", "1")
+	t.Setenv("GPM_DESKTOP_ADMIN_CONSOLE", "1")
+	t.Setenv("TDPN_DESKTOP_ADMIN_CONSOLE", "1")
+
+	svc := New()
+	handler := svc.routes()
+
+	if got := callRouteStatus(t, handler, http.MethodGet, "/v1/gpm/admin/contributions/list"); got != http.StatusNotFound {
+		t.Fatalf("admin console ui env route status=%d want=404", got)
+	}
+	if got := callRouteStatus(t, handler, http.MethodGet, "/v1/service/status"); got != http.StatusNotFound {
+		t.Fatalf("legacy admin service route status=%d want=404", got)
+	}
+}
+
+func TestLocalAPIExplicitAdminRoutesEnvRegistersAdminRoutes(t *testing.T) {
+	t.Setenv("GPM_LOCAL_API_ADMIN_ROUTES", "1")
+	t.Setenv("TDPN_LOCAL_API_ADMIN_ROUTES", "")
+	t.Setenv("GPM_ADMIN_CONSOLE", "")
+	t.Setenv("GPM_DESKTOP_ADMIN_CONSOLE", "")
+	t.Setenv("TDPN_DESKTOP_ADMIN_CONSOLE", "")
+
+	svc := New()
+	handler := svc.routes()
+
+	if got := callRouteStatus(t, handler, http.MethodGet, "/v1/gpm/admin/contributions/list"); got == http.StatusNotFound {
+		t.Fatalf("explicit admin route env status=404 want registered")
+	}
+	if got := callRouteStatus(t, handler, http.MethodGet, "/v1/service/status"); got == http.StatusNotFound {
+		t.Fatalf("explicit legacy admin service route status=404 want registered")
+	}
+	if !svc.gpmOperatorApprovalRequireSession {
+		t.Fatalf("admin routes should default operator approval to admin session auth")
+	}
+	if svc.gpmOperatorApprovalRequireSessionSource != "admin-routes-default" {
+		t.Fatalf("operator approval source=%q want admin-routes-default", svc.gpmOperatorApprovalRequireSessionSource)
+	}
+}
+
+func TestLocalAPIAdminConsoleModeRegistersAdminRoutes(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmAdminRoutesEnabled = true
+	handler := svc.routes()
+
+	adminRoutes := []string{
+		"/v1/set_profile",
+		"/v1/update",
+		"/v1/service/status",
+		"/v1/service/start",
+		"/v1/service/stop",
+		"/v1/service/restart",
+		"/v1/get_diagnostics",
+		"/v1/gpm/service/start",
+		"/v1/gpm/service/stop",
+		"/v1/gpm/service/restart",
+		"/v1/gpm/audit/recent",
+		"/v1/gpm/gaps/summary",
+		"/v1/gpm/admin/contributions/list",
+		"/v1/gpm/admin/rewards/review",
+		"/v1/gpm/admin/rewards/hold",
+		"/v1/gpm/admin/rewards/finalize",
+		"/v1/gpm/onboarding/server/status",
+		"/v1/gpm/onboarding/operator/apply",
+		"/v1/gpm/onboarding/operator/status",
+		"/v1/gpm/onboarding/operator/list",
+		"/v1/gpm/onboarding/operator/approve",
+	}
+	for _, route := range adminRoutes {
+		if got := callRouteStatus(t, handler, http.MethodGet, route); got == http.StatusNotFound {
+			t.Fatalf("admin daemon route %s status=404 want registered", route)
+		}
+	}
+}
+
+func TestLocalAPICORSPreflight(t *testing.T) {
+	t.Run("auth configured allows loopback portal preflight from another port", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.authToken = "local-api-token"
+		handler := svc.routes()
+		req := httptest.NewRequest(http.MethodOptions, "/v1/gpm/auth/challenge", nil)
+		req.Header.Set("Origin", "http://127.0.0.1:5173")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		req.Header.Set("Access-Control-Request-Headers", "Authorization, Content-Type")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("status=%d want=204 body=%s", rr.Code, rr.Body.String())
+		}
+		if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "http://127.0.0.1:5173" {
+			t.Fatalf("allow-origin=%q", got)
+		}
+	})
+
+	t.Run("auth configured rejects dns rebinding loopback origin", func(t *testing.T) {
+		originalLookup := lookupIPAddr
+		t.Cleanup(func() {
+			lookupIPAddr = originalLookup
+		})
+		lookupIPAddr = func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+		}
+
+		svc, _ := newFakeService(t, false)
+		svc.authToken = "local-api-token"
+		handler := svc.routes()
+		req := httptest.NewRequest(http.MethodOptions, "/v1/gpm/auth/challenge", nil)
+		req.Header.Set("Origin", "http://rebind.example:5173")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("status=%d want=403 body=%s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("unauth loopback rejects cross-port preflight", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.allowUnauthLoopback = true
+		handler := svc.routes()
+		req := httptest.NewRequest(http.MethodOptions, "/v1/gpm/auth/challenge", nil)
+		req.Header.Set("Origin", "http://127.0.0.1:5173")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("status=%d want=403 body=%s", rr.Code, rr.Body.String())
+		}
+	})
+}
+
+func TestConfigReportsDaemonAdminRouteSurface(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmAdminRoutesEnabled = false
+	svc.gpmAdminRoutesSource = "default"
+	code, payload := callJSONHandler(t, svc.handleConfig, http.MethodGet, "/v1/config", "")
+	if code != http.StatusOK {
+		t.Fatalf("config code=%d payload=%v", code, payload)
+	}
+	cfg := payload["config"].(map[string]any)
+	if mode, _ := cfg["gpm_daemon_surface_mode"].(string); mode != "public_app" {
+		t.Fatalf("gpm_daemon_surface_mode=%q want public_app payload=%v", mode, payload)
+	}
+	if enabled, _ := cfg["gpm_admin_routes_enabled"].(bool); enabled {
+		t.Fatalf("gpm_admin_routes_enabled=%v want=false payload=%v", enabled, payload)
+	}
+	if source, _ := cfg["gpm_admin_routes_policy_source"].(string); source != "default" {
+		t.Fatalf("gpm_admin_routes_policy_source=%q want default payload=%v", source, payload)
+	}
+
+	svc.gpmAdminRoutesEnabled = true
+	svc.gpmAdminRoutesSource = "GPM_LOCAL_API_ADMIN_ROUTES"
+	code, payload = callJSONHandler(t, svc.handleConfig, http.MethodGet, "/v1/config", "")
+	if code != http.StatusOK {
+		t.Fatalf("config(admin) code=%d payload=%v", code, payload)
+	}
+	cfg = payload["config"].(map[string]any)
+	if mode, _ := cfg["gpm_daemon_surface_mode"].(string); mode != "admin_console" {
+		t.Fatalf("gpm_daemon_surface_mode=%q want admin_console payload=%v", mode, payload)
+	}
+	if enabled, _ := cfg["gpm_admin_routes_enabled"].(bool); !enabled {
+		t.Fatalf("gpm_admin_routes_enabled=%v want=true payload=%v", enabled, payload)
+	}
+	if source, _ := cfg["gpm_admin_routes_policy_source"].(string); source != "GPM_LOCAL_API_ADMIN_ROUTES" {
+		t.Fatalf("gpm_admin_routes_policy_source=%q want GPM_LOCAL_API_ADMIN_ROUTES payload=%v", source, payload)
+	}
 }
 
 func TestRunRejectsInsecureNonLoopbackBindByDefault(t *testing.T) {
@@ -1704,6 +2497,7 @@ func TestHandleConnectDefaults2Hop(t *testing.T) {
 
 	mustFlagValue(t, cmds[0], "--bootstrap-directory", "https://dir.example:8081")
 	mustFlagValue(t, cmds[0], "--discovery-wait-sec", "20")
+	mustFlagValue(t, cmds[0], "--path-profile", "2hop")
 	mustFlagValue(t, cmds[0], "--prod-profile", "0")
 	mustFlagValue(t, cmds[0], "--interface", "wgvpn0")
 	mustFlagValue(t, cmds[0], "--operator-floor-check", "1")
@@ -1723,7 +2517,7 @@ func TestHandleConnectDefaults2Hop(t *testing.T) {
 	mustFlagValue(t, cmds[1], "--min-operators", "2")
 	mustFlagValue(t, cmds[1], "--beta-profile", "1")
 	mustFlagValue(t, cmds[1], "--prod-profile", "0")
-	mustFlagValue(t, cmds[1], "--install-route", "1")
+	mustFlagValue(t, cmds[1], "--install-route", "0")
 	mustFlagValue(t, cmds[1], "--ready-timeout-sec", "35")
 }
 
@@ -1751,6 +2545,7 @@ func TestHandleConnectOneHopNormalizationAndOverrides(t *testing.T) {
 		mustFlagValue(t, cmds[0], "--operator-min-operators", "1")
 		mustFlagValue(t, cmds[0], "--issuer-quorum-check", "0")
 		mustFlagValue(t, cmds[0], "--issuer-min-operators", "1")
+		mustFlagValue(t, cmds[0], "--path-profile", "1hop")
 		mustFlagValue(t, cmds[1], "--path-profile", "1hop")
 		mustFlagValue(t, cmds[1], "--session-reuse", "1")
 		mustFlagValue(t, cmds[1], "--allow-session-churn", "0")
@@ -1760,7 +2555,7 @@ func TestHandleConnectOneHopNormalizationAndOverrides(t *testing.T) {
 		mustFlagValue(t, cmds[1], "--install-route", "0")
 	})
 
-	t.Run("one-hop install_route override and no preflight", func(t *testing.T) {
+	t.Run("one-hop install_route override is ignored unless explicitly unlocked", func(t *testing.T) {
 		svc, logPath := newFakeService(t, false)
 
 		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
@@ -1783,16 +2578,85 @@ func TestHandleConnectOneHopNormalizationAndOverrides(t *testing.T) {
 		}
 		mustFlagValue(t, cmds[0], "--session-reuse", "1")
 		mustFlagValue(t, cmds[0], "--allow-session-churn", "0")
+		mustFlagValue(t, cmds[0], "--install-route", "0")
+	})
+
+	t.Run("one-hop install_route expert override and no preflight", func(t *testing.T) {
+		t.Setenv("GPM_ALLOW_1HOP_INSTALL_ROUTE", "1")
+		svc, logPath := newFakeService(t, false)
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+				"bootstrap_directory":"https://dir.example:8081",
+				"invite_key":"inv-test-1hop-up-expert",
+				"path_profile":"1hop",
+				"run_preflight":false,
+				"install_route":true
+		}`)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+
+		cmds := readCommandLog(t, logPath)
+		if len(cmds) != 2 {
+			t.Fatalf("commands=%d want=2 (%v)", len(cmds), cmds)
+		}
 		mustFlagValue(t, cmds[0], "--install-route", "1")
 	})
 }
 
 func TestHandleConnectThreeHopProdOverrides(t *testing.T) {
 	svc, logPath := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmSettlementChainBacked = true
+	now := time.Now().UTC()
+	wallet := "cosmos1connect3hopprod"
+	reservationID := "res-connect-3hop-prod"
+	reservationSessionID := "sess-connect-3hop-prod"
+	svc.gpmSettlement = &gpmReserveFundsFinalityService{
+		chainStatus:   settlement.OperationStatusConfirmed,
+		chainFound:    true,
+		reservationOK: true,
+		reservation: settlement.FundReservation{
+			ReservationID: reservationID,
+			SessionID:     reservationSessionID,
+			SubjectID:     wallet,
+			AmountMicros:  200000,
+			Status:        settlement.OperationStatusConfirmed,
+		},
+	}
+	t.Setenv("LOCALAPI_TEST_STATUS_JSON", `{"connected":true,"running":true,"interface":"wgtest0","interface_state":"present","profile":"3hop","route_mode":"full-tunnel"}`)
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version":               1,
+			"generated_at_utc":      now.Format(time.RFC3339),
+			"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+			"bootstrap_directories": []string{"https://dir.example:8081"},
+		})
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+	svc.gpmState.putSession(gpmSession{
+		Token:                     "gpm-connect-3hop-prod-token",
+		WalletAddress:             wallet,
+		WalletProvider:            "keplr",
+		Role:                      "client",
+		WalletBindingVerified:     true,
+		EntitlementEvidenceSource: "chain",
+		ClientTier:                2,
+		StakeSatisfied:            true,
+		PrepaidBalanceSatisfied:   true,
+		CreatedAt:                 now,
+		ExpiresAt:                 now.Add(time.Hour),
+		BootstrapDirectory:        "https://dir.example:8081",
+		InviteKey:                 "inv-test-3hop",
+		PathProfile:               "3hop",
+	})
 
 	code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
-		"bootstrap_directory":"https://dir.example:8081",
-		"invite_key":"inv-test-3hop",
+		"session_token":"gpm-connect-3hop-prod-token",
+		"reservation_id":"res-connect-3hop-prod",
+		"reservation_session_id":"sess-connect-3hop-prod",
 		"path_profile":"privacy",
 		"interface":"wgtest0",
 		"discovery_wait_sec":33,
@@ -1813,6 +2677,7 @@ func TestHandleConnectThreeHopProdOverrides(t *testing.T) {
 	mustFlagValue(t, cmds[0], "--prod-profile", "1")
 	mustFlagValue(t, cmds[0], "--interface", "wgtest0")
 	mustFlagValue(t, cmds[0], "--discovery-wait-sec", "33")
+	mustFlagValue(t, cmds[0], "--path-profile", "3hop")
 	mustFlagValue(t, cmds[1], "--path-profile", "3hop")
 	mustFlagValue(t, cmds[1], "--session-reuse", "1")
 	mustFlagValue(t, cmds[1], "--allow-session-churn", "0")
@@ -1820,6 +2685,540 @@ func TestHandleConnectThreeHopProdOverrides(t *testing.T) {
 	mustFlagValue(t, cmds[1], "--beta-profile", "1")
 	mustFlagValue(t, cmds[1], "--ready-timeout-sec", "66")
 	mustFlagValue(t, cmds[1], "--install-route", "1")
+
+	code, payload = callJSONHandler(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", "")
+	if code != http.StatusOK {
+		t.Fatalf("disconnect status=%d body=%v", code, payload)
+	}
+	cmds = readCommandLog(t, logPath)
+	if len(cmds) != 4 {
+		t.Fatalf("commands=%d want=4 (%v)", len(cmds), cmds)
+	}
+	if cmds[3][0] != "client-vpn-down" {
+		t.Fatalf("disconnect command=%q want client-vpn-down all=%v", cmds[3][0], cmds)
+	}
+	mustFlagValue(t, cmds[3], "--force-iface-cleanup", "0")
+	if _, ok := commandFlags(cmds[3])["--iface"]; ok {
+		t.Fatalf("public disconnect should not pass --iface for privileged cleanup, got=%v", cmds[3])
+	}
+}
+
+func configureTestConnectManifest(t *testing.T, svc *Service, bootstrapDirectories ...string) {
+	t.Helper()
+	now := time.Now().UTC()
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version":               1,
+			"generated_at_utc":      now.Format(time.RFC3339),
+			"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+			"bootstrap_directories": bootstrapDirectories,
+		})
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+}
+
+func TestHandleConnectProdProfileRejectsOneHopOutsideProductionMode(t *testing.T) {
+	svc, logPath := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	now := time.Now().UTC()
+	configureTestConnectManifest(t, svc, "https://dir.example:8081")
+	svc.gpmState.putSession(gpmSession{
+		Token:                     "gpm-connect-prod-1hop-token",
+		WalletAddress:             "cosmos1connectprod1hop",
+		WalletProvider:            "keplr",
+		Role:                      "client",
+		WalletBindingVerified:     true,
+		EntitlementEvidenceSource: "chain",
+		ClientTier:                2,
+		StakeSatisfied:            true,
+		PrepaidBalanceSatisfied:   true,
+		CreatedAt:                 now,
+		ExpiresAt:                 now.Add(time.Hour),
+		BootstrapDirectory:        "https://dir.example:8081",
+		InviteKey:                 "wallet:cosmos1connectprod1hop",
+		PathProfile:               "1hop",
+	})
+
+	code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+		"session_token":"gpm-connect-prod-1hop-token",
+		"path_profile":"1hop",
+		"prod_profile":true,
+		"install_route":true,
+		"run_preflight":false
+	}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("status=%d want=%d body=%v", code, http.StatusBadRequest, payload)
+	}
+	if got, _ := payload["error"].(string); !strings.Contains(got, "strict 2hop or 3hop") {
+		t.Fatalf("error=%q want strict profile guidance payload=%v", got, payload)
+	}
+	if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+		t.Fatalf("prod_profile 1hop should not execute commands, got=%v", cmds)
+	}
+}
+
+func TestHandleConnectProdProfileRequiresSettlementReservationOutsideProductionMode(t *testing.T) {
+	svc, logPath := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmSettlementChainBacked = true
+	now := time.Now().UTC()
+	configureTestConnectManifest(t, svc, "https://dir.example:8081")
+	svc.gpmState.putSession(gpmSession{
+		Token:                     "gpm-connect-prod-profile-token",
+		WalletAddress:             "cosmos1connectprodprofile",
+		WalletProvider:            "keplr",
+		Role:                      "client",
+		WalletBindingVerified:     true,
+		EntitlementEvidenceSource: "chain",
+		ClientTier:                2,
+		StakeSatisfied:            true,
+		PrepaidBalanceSatisfied:   true,
+		CreatedAt:                 now,
+		ExpiresAt:                 now.Add(time.Hour),
+		BootstrapDirectory:        "https://dir.example:8081",
+		InviteKey:                 "wallet:cosmos1connectprodprofile",
+		PathProfile:               "2hop",
+	})
+
+	code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+		"session_token":"gpm-connect-prod-profile-token",
+		"path_profile":"2hop",
+		"prod_profile":true,
+		"run_preflight":false
+	}`)
+	if code != http.StatusForbidden {
+		t.Fatalf("status=%d want=%d body=%v", code, http.StatusForbidden, payload)
+	}
+	if got, _ := payload["error"].(string); !strings.Contains(got, "reservation_id") {
+		t.Fatalf("error=%q want reservation guidance payload=%v", got, payload)
+	}
+	if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+		t.Fatalf("prod_profile without reservation should not execute commands, got=%v", cmds)
+	}
+}
+
+func TestHandleDisconnectProductionRequiresWalletBoundSession(t *testing.T) {
+	t.Run("missing session token is rejected before command execution", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmConnectPolicyMode = "production"
+
+		code, payload := callJSONHandler(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", "")
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d payload=%v", code, http.StatusBadRequest, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "session_token is required") {
+			t.Fatalf("error=%q want session_token guidance payload=%v", got, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("missing production session_token should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("unbound wallet session is rejected before command execution", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmConnectPolicyMode = "production"
+		token := seedGPMUnboundTestSession(t, svc, "gpm-disconnect-unbound", "cosmos1disconnectunbound")
+
+		code, payload := callJSONHandler(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", `{"session_token":"`+token+`"}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "wallet-bound session") {
+			t.Fatalf("error=%q want wallet-bound guidance payload=%v", got, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("unbound production session should not execute commands, got=%v", cmds)
+		}
+	})
+}
+
+func TestHandleDisconnectProductionMatchesActiveReservationWallet(t *testing.T) {
+	svc, logPath := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmConnectPolicyMode = "production"
+	now := time.Now().UTC()
+	const wallet = "cosmos1disconnectowner"
+	if _, ok, reason := svc.gpmState.claimReservationForConnect("res-disconnect-active", "sess-disconnect-active", wallet, now); !ok {
+		t.Fatalf("claim reservation: %s", reason)
+	}
+	if !svc.gpmState.markReservationConnectLaunched("res-disconnect-active", "sess-disconnect-active", wallet, now) {
+		t.Fatal("mark reservation launched failed")
+	}
+	ownerToken := seedGPMTestSession(t, svc, "gpm-disconnect-owner", wallet, 3, true, true)
+	otherToken := seedGPMTestSession(t, svc, "gpm-disconnect-other", "cosmos1disconnectother", 3, true, true)
+
+	code, payload := callJSONHandler(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", `{"session_token":"`+otherToken+`"}`)
+	if code != http.StatusForbidden {
+		t.Fatalf("status=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+	}
+	if got, _ := payload["error"].(string); !strings.Contains(got, "does not match the active production reservation") {
+		t.Fatalf("error=%q want active reservation guidance payload=%v", got, payload)
+	}
+	if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+		t.Fatalf("mismatched wallet should not execute disconnect command, got=%v", cmds)
+	}
+
+	code, payload = callJSONHandler(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", `{"session_token":"`+ownerToken+`"}`)
+	if code != http.StatusOK {
+		t.Fatalf("owner disconnect status=%d payload=%v", code, payload)
+	}
+	cmds := readCommandLog(t, logPath)
+	if len(cmds) != 1 || cmds[0][0] != "client-vpn-down" {
+		t.Fatalf("owner disconnect commands=%v want single client-vpn-down", cmds)
+	}
+}
+
+func TestHandleConnectProductionModeForcesStrictProdProfile(t *testing.T) {
+	svc, logPath := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmConnectPolicyMode = "production"
+	svc.gpmConnectPolicySource = "test"
+	svc.gpmSettlementChainBacked = true
+	now := time.Now().UTC()
+	wallet := "cosmos1connectprodforce"
+	reservationID := "res-prod-force-1"
+	reservationSessionID := "res-session-prod-force-1"
+	svc.gpmSettlement = &gpmReserveFundsFinalityService{
+		chainStatus:   settlement.OperationStatusConfirmed,
+		chainFound:    true,
+		reservationOK: true,
+		reservation: settlement.FundReservation{
+			ReservationID: reservationID,
+			SessionID:     reservationSessionID,
+			SubjectID:     wallet,
+			AmountMicros:  200000,
+			Status:        settlement.OperationStatusConfirmed,
+		},
+	}
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version":               1,
+			"generated_at_utc":      now.Format(time.RFC3339),
+			"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+			"bootstrap_directories": []string{"https://dir.example:8081"},
+		})
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+	svc.gpmState.putSession(gpmSession{
+		Token:                     "gpm-connect-prod-force-token",
+		WalletAddress:             wallet,
+		WalletProvider:            "keplr",
+		Role:                      "client",
+		WalletBindingVerified:     true,
+		EntitlementEvidenceSource: "chain",
+		ClientTier:                2,
+		StakeSatisfied:            true,
+		PrepaidBalanceSatisfied:   true,
+		CreatedAt:                 now,
+		ExpiresAt:                 now.Add(time.Hour),
+		BootstrapDirectory:        "https://dir.example:8081",
+		InviteKey:                 "inv-test-prod-force",
+		PathProfile:               "2hop",
+	})
+
+	code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+		"session_token":"gpm-connect-prod-force-token",
+		"reservation_id":"res-prod-force-1",
+		"reservation_session_id":"res-session-prod-force-1",
+		"prod_profile":false
+	}`)
+	if code != http.StatusOK {
+		t.Fatalf("status=%d body=%v", code, payload)
+	}
+
+	cmds := readCommandLog(t, logPath)
+	if len(cmds) != 3 {
+		t.Fatalf("commands=%d want=3 (%v)", len(cmds), cmds)
+	}
+	mustFlagValue(t, cmds[0], "--prod-profile", "1")
+	mustFlagValue(t, cmds[1], "--prod-profile", "1")
+	mustFlagValue(t, cmds[1], "--install-route", "1")
+}
+
+func TestGPMProductionConnectReservationClaimFailsClosedOnStateStoreLoadFailure(t *testing.T) {
+	svc := &Service{
+		gpmState:                 newGPMRuntimeState(),
+		gpmStateStoreLoadFailed:  true,
+		gpmStateStoreLoadFailure: "decode state store: invalid json",
+	}
+	code, payload := svc.claimGPMProductionConnectReservation(gpmProductionConnectEntitlement{
+		WalletAddress:        "cosmos1stateloadfailed",
+		ReservationID:        "res-state-load-failed",
+		ReservationSessionID: "sess-state-load-failed",
+	})
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d want=%d payload=%v", code, http.StatusServiceUnavailable, payload)
+	}
+	if allowed, _ := payload["connect_allowed"].(bool); allowed {
+		t.Fatalf("connect_allowed=%v want=false payload=%v", allowed, payload)
+	}
+	if got, _ := payload["state_store_error"].(string); !strings.Contains(got, "decode state store") {
+		t.Fatalf("state_store_error=%q want decode state store payload=%v", got, payload)
+	}
+}
+
+func TestGPMProductionConnectReservationClaimRequiresDurablePersist(t *testing.T) {
+	blockerPath := filepath.Join(t.TempDir(), "gpm_state_blocker")
+	if err := os.MkdirAll(blockerPath, 0o755); err != nil {
+		t.Fatalf("mkdir blocker: %v", err)
+	}
+	svc := &Service{
+		gpmStateStorePath: blockerPath,
+		gpmState:          newGPMRuntimeState(),
+	}
+	code, payload := svc.claimGPMProductionConnectReservation(gpmProductionConnectEntitlement{
+		WalletAddress:        "cosmos1persistrequired",
+		ReservationID:        "res-persist-required",
+		ReservationSessionID: "sess-persist-required",
+	})
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d want=%d payload=%v", code, http.StatusServiceUnavailable, payload)
+	}
+	if got, _ := payload["error"].(string); !strings.Contains(got, "failed to persist production reservation claim") {
+		t.Fatalf("error=%q payload=%v", got, payload)
+	}
+	_, _, _, _, _, claims := svc.gpmState.snapshotPersistent(time.Now().UTC())
+	if len(claims) != 0 {
+		t.Fatalf("claims=%v want none after failed durable claim", claims)
+	}
+}
+
+func TestGPMProductionConnectLaunchStartedPersistsBeforeVPNLaunch(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "gpm_state.json")
+	entitlement := gpmProductionConnectEntitlement{
+		WalletAddress:        "cosmos1launchstarted",
+		ReservationID:        "res-launch-started",
+		ReservationSessionID: "sess-launch-started",
+	}
+	svc := &Service{
+		gpmStateStorePath: statePath,
+		gpmState:          newGPMRuntimeState(),
+	}
+	if code, payload := svc.claimGPMProductionConnectReservation(entitlement); payload != nil {
+		t.Fatalf("claim status=%d payload=%v", code, payload)
+	}
+	if code, payload := svc.markGPMProductionConnectReservationLaunchStarted(entitlement); payload != nil {
+		t.Fatalf("launch-start status=%d payload=%v", code, payload)
+	}
+
+	body, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	var store gpmStateStoreFile
+	if err := json.Unmarshal(body, &store); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	if len(store.ReservationClaims) != 1 {
+		t.Fatalf("claims=%d want=1 body=%s", len(store.ReservationClaims), string(body))
+	}
+	claim := store.ReservationClaims[0]
+	if claim.Status != "launching" {
+		t.Fatalf("claim status=%q want=launching claim=%+v", claim.Status, claim)
+	}
+	if claim.LaunchStartedAt.IsZero() {
+		t.Fatalf("launch_started_at not persisted claim=%+v", claim)
+	}
+}
+
+func TestGPMProductionConnectLaunchedStatePersistsDurably(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "gpm_state.json")
+	entitlement := gpmProductionConnectEntitlement{
+		WalletAddress:        "cosmos1launchedpersisted",
+		ReservationID:        "res-launched-persisted",
+		ReservationSessionID: "sess-launched-persisted",
+	}
+	svc := &Service{
+		gpmStateStorePath: statePath,
+		gpmState:          newGPMRuntimeState(),
+	}
+	if code, payload := svc.claimGPMProductionConnectReservation(entitlement); payload != nil {
+		t.Fatalf("claim status=%d payload=%v", code, payload)
+	}
+	if code, payload := svc.markGPMProductionConnectReservationLaunchStarted(entitlement); payload != nil {
+		t.Fatalf("launch-start status=%d payload=%v", code, payload)
+	}
+	if code, payload := svc.markGPMProductionConnectReservationLaunched(entitlement); payload != nil {
+		t.Fatalf("launched status=%d payload=%v", code, payload)
+	}
+
+	body, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	var store gpmStateStoreFile
+	if err := json.Unmarshal(body, &store); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	if len(store.ReservationClaims) != 1 {
+		t.Fatalf("claims=%d want=1 body=%s", len(store.ReservationClaims), string(body))
+	}
+	claim := store.ReservationClaims[0]
+	if claim.Status != "launched" {
+		t.Fatalf("claim status=%q want=launched claim=%+v", claim.Status, claim)
+	}
+	if claim.LaunchedAt.IsZero() {
+		t.Fatalf("launched_at not persisted claim=%+v", claim)
+	}
+}
+
+func TestGPMProductionConnectLaunchedStateFailsClosedOnPersistFailure(t *testing.T) {
+	blockerPath := filepath.Join(t.TempDir(), "gpm_state_blocker")
+	if err := os.MkdirAll(blockerPath, 0o755); err != nil {
+		t.Fatalf("mkdir blocker: %v", err)
+	}
+	entitlement := gpmProductionConnectEntitlement{
+		WalletAddress:        "cosmos1launchedblocked",
+		ReservationID:        "res-launched-blocked",
+		ReservationSessionID: "sess-launched-blocked",
+	}
+	svc := &Service{
+		gpmStateStorePath: blockerPath,
+		gpmState:          newGPMRuntimeState(),
+	}
+	claim, ok, reason := svc.gpmState.claimReservationForConnect(entitlement.ReservationID, entitlement.ReservationSessionID, entitlement.WalletAddress, time.Now().UTC())
+	if !ok {
+		t.Fatalf("claim rejected claim=%+v reason=%q", claim, reason)
+	}
+	if !svc.gpmState.markReservationConnectLaunchStarted(entitlement.ReservationID, entitlement.ReservationSessionID, entitlement.WalletAddress, time.Now().UTC()) {
+		t.Fatal("expected launch-start marker")
+	}
+
+	code, payload := svc.markGPMProductionConnectReservationLaunched(entitlement)
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d want=%d payload=%v", code, http.StatusServiceUnavailable, payload)
+	}
+	if got, _ := payload["error"].(string); !strings.Contains(got, "failed to persist production reservation launched state") {
+		t.Fatalf("error=%q payload=%v", got, payload)
+	}
+	if status, _ := payload["reservation_claim_status"].(string); status != "launched" {
+		t.Fatalf("reservation_claim_status=%q want launched payload=%v", status, payload)
+	}
+}
+
+func TestGPMRuntimeStateRejectsRetryDuringFreshLaunchClaim(t *testing.T) {
+	st := newGPMRuntimeState()
+	now := time.Now().UTC()
+	claim, ok, reason := st.claimReservationForConnect("res-fresh-launch", "sess-fresh-launch", "cosmos1fresh", now)
+	if !ok {
+		t.Fatalf("initial claim rejected claim=%+v reason=%q", claim, reason)
+	}
+	if !st.markReservationConnectLaunchStarted("res-fresh-launch", "sess-fresh-launch", "cosmos1fresh", now) {
+		t.Fatal("expected launch-start marker")
+	}
+
+	_, ok, reason = st.claimReservationForConnect("res-fresh-launch", "sess-fresh-launch", "cosmos1fresh", now.Add(time.Minute))
+	if ok || !strings.Contains(reason, "already started") {
+		t.Fatalf("fresh launching claim ok=%v reason=%q want already started", ok, reason)
+	}
+}
+
+func TestGPMProductionConnectRetainsStaleLaunchingClaimWhenRuntimeNotRunning(t *testing.T) {
+	svc, logPath := newFakeService(t, false)
+	t.Setenv("LOCALAPI_TEST_STATUS_JSON", `{"connected":false,"profile":"2hop"}`)
+	statePath := filepath.Join(t.TempDir(), "gpm_state.json")
+	svc.gpmStateStorePath = statePath
+	svc.gpmState = newGPMRuntimeState()
+	entitlement := gpmProductionConnectEntitlement{
+		WalletAddress:        "cosmos1staledisconnected",
+		ReservationID:        "res-stale-disconnected",
+		ReservationSessionID: "sess-stale-disconnected",
+	}
+	staleAt := time.Now().UTC().Add(-(gpmReservationLaunchClaimTTL + time.Minute))
+	if claim, ok, reason := svc.gpmState.claimReservationForConnect(entitlement.ReservationID, entitlement.ReservationSessionID, entitlement.WalletAddress, staleAt); !ok {
+		t.Fatalf("initial claim rejected claim=%+v reason=%q", claim, reason)
+	}
+	if !svc.gpmState.markReservationConnectLaunchStarted(entitlement.ReservationID, entitlement.ReservationSessionID, entitlement.WalletAddress, staleAt) {
+		t.Fatal("expected stale launch-start marker")
+	}
+	svc.persistGPMStateBestEffort("seed_stale_launching_claim")
+	svc.gpmState = newGPMRuntimeState()
+	svc.loadGPMStateBestEffort()
+
+	if code, payload := svc.claimGPMProductionConnectReservation(entitlement); code != http.StatusConflict || payload == nil {
+		t.Fatalf("claim after stale disconnected status=%d payload=%v want conflict", code, payload)
+	} else if retained, _ := payload["reservation_claim_retained"].(bool); !retained {
+		t.Fatalf("reservation_claim_retained=%v want=true payload=%v", retained, payload)
+	}
+	svc.gpmState.mu.RLock()
+	claim := svc.gpmState.reservationClaims[entitlement.ReservationID]
+	svc.gpmState.mu.RUnlock()
+	if claim.Status != "launching" {
+		t.Fatalf("claim status=%q want launching claim=%+v", claim.Status, claim)
+	}
+	body, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	var store gpmStateStoreFile
+	if err := json.Unmarshal(body, &store); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	if len(store.ReservationClaims) != 1 || store.ReservationClaims[0].Status != "launching" {
+		t.Fatalf("persisted claims=%+v want one retained launching", store.ReservationClaims)
+	}
+	cmds := readCommandLog(t, logPath)
+	if len(cmds) != 1 || cmds[0][0] != "client-vpn-status" {
+		t.Fatalf("commands=%v want one client-vpn-status reconciliation", cmds)
+	}
+}
+
+func TestGPMProductionConnectMarksStaleLaunchingClaimLaunchedWhenRuntimeRunning(t *testing.T) {
+	svc, logPath := newFakeService(t, false)
+	t.Setenv("LOCALAPI_TEST_STATUS_JSON", `{"connected":true,"reservation_id":"res-stale-running","session_id":"sess-stale-running"}`)
+	statePath := filepath.Join(t.TempDir(), "gpm_state.json")
+	svc.gpmStateStorePath = statePath
+	svc.gpmState = newGPMRuntimeState()
+	entitlement := gpmProductionConnectEntitlement{
+		WalletAddress:        "cosmos1stalerunning",
+		ReservationID:        "res-stale-running",
+		ReservationSessionID: "sess-stale-running",
+	}
+	staleAt := time.Now().UTC().Add(-(gpmReservationLaunchClaimTTL + time.Minute))
+	if claim, ok, reason := svc.gpmState.claimReservationForConnect(entitlement.ReservationID, entitlement.ReservationSessionID, entitlement.WalletAddress, staleAt); !ok {
+		t.Fatalf("initial claim rejected claim=%+v reason=%q", claim, reason)
+	}
+	if !svc.gpmState.markReservationConnectLaunchStarted(entitlement.ReservationID, entitlement.ReservationSessionID, entitlement.WalletAddress, staleAt) {
+		t.Fatal("expected stale launch-start marker")
+	}
+	svc.persistGPMStateBestEffort("seed_stale_launching_claim")
+	svc.gpmState = newGPMRuntimeState()
+	svc.loadGPMStateBestEffort()
+
+	code, payload := svc.claimGPMProductionConnectReservation(entitlement)
+	if code != http.StatusConflict {
+		t.Fatalf("status=%d want=%d payload=%v", code, http.StatusConflict, payload)
+	}
+	if status, _ := payload["reservation_claim_status"].(string); status != "launched" {
+		t.Fatalf("reservation_claim_status=%q want launched payload=%v", status, payload)
+	}
+	svc.gpmState.mu.RLock()
+	claim := svc.gpmState.reservationClaims[entitlement.ReservationID]
+	svc.gpmState.mu.RUnlock()
+	if claim.Status != "launched" || claim.LaunchedAt.IsZero() {
+		t.Fatalf("claim=%+v want launched with timestamp", claim)
+	}
+	body, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	var store gpmStateStoreFile
+	if err := json.Unmarshal(body, &store); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	if len(store.ReservationClaims) != 1 || store.ReservationClaims[0].Status != "launched" {
+		t.Fatalf("persisted claims=%+v want one launched", store.ReservationClaims)
+	}
+	cmds := readCommandLog(t, logPath)
+	if len(cmds) != 1 || cmds[0][0] != "client-vpn-status" {
+		t.Fatalf("commands=%v want one client-vpn-status reconciliation", cmds)
+	}
 }
 
 func TestHandleConnectFailuresAndValidation(t *testing.T) {
@@ -1968,6 +3367,74 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		}
 	})
 
+	t.Run("production mode rejects legacy manual overrides even if fields are relaxed", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectPolicyMode = "production"
+		svc.gpmConnectRequireSession = false
+		svc.gpmAllowLegacyConnectOverride = true
+		svc.gpmLegacyConnectRequireTrustedManifestBootstrap = false
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"bootstrap_directory":"https://dir-production-manual.example:8081",
+			"invite_key":"inv-production-manual-disabled",
+			"run_preflight":false
+		}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "manual bootstrap_directory/invite_key overrides are disabled") {
+			t.Fatalf("error=%q want production manual-overrides-disabled message", got)
+		}
+
+		code, payload = callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "connect requires a registered session_token") {
+			t.Fatalf("error=%q want production session-token-required message", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("production guardrail rejections should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("production session token connect still requires trusted manifest revalidation", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectPolicyMode = "production"
+		svc.gpmConnectRequireSession = false
+		svc.gpmAllowLegacyConnectOverride = true
+		svc.gpmLegacyConnectRequireTrustedManifestBootstrap = false
+		svc.gpmState = newGPMRuntimeState()
+		now := time.Now().UTC()
+		svc.gpmState.putSession(gpmSession{
+			Token:                 "gpm-production-connect-session-token",
+			WalletAddress:         "cosmos1productionconnect",
+			WalletProvider:        "keplr",
+			Role:                  "client",
+			WalletBindingVerified: true,
+			CreatedAt:             now,
+			ExpiresAt:             now.Add(time.Hour),
+			BootstrapDirectory:    "https://dir-production-session.example:8081",
+			InviteKey:             "wallet:cosmos1productionconnect",
+		})
+		svc.gpmMainDomain = "https://127.0.0.1:1"
+		svc.gpmManifestURL = "https://127.0.0.1:1/v1/bootstrap/manifest"
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-production-connect-session-token",
+			"run_preflight":false
+		}`)
+		if code != http.StatusBadGateway {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "trusted manifest") {
+			t.Fatalf("error=%q want trusted-manifest revalidation failure", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("trusted-manifest rejection should not execute commands, got=%v", cmds)
+		}
+	})
+
 	t.Run("manual overrides remain allowed when trusted-manifest binding policy is disabled", func(t *testing.T) {
 		svc, logPath := newFakeService(t, false)
 		svc.gpmConnectRequireSession = false
@@ -2024,6 +3491,32 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 			t.Fatalf("unexpected command order: %v", cmds)
 		}
 		mustFlagValue(t, cmds[0], "--bootstrap-directory", trustedBootstrap)
+		mustFlagNonEmptyValue(t, cmds[0], "--subject-file")
+	})
+
+	t.Run("manual trusted-manifest comparison uses canonical bootstrap directory url", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = false
+		svc.gpmAllowLegacyConnectOverride = true
+		svc.gpmLegacyConnectRequireTrustedManifestBootstrap = true
+
+		now := time.Now().UTC()
+		configureSessionManifest(t, svc, now, "https://Dir-Manual-Canonical.example:443/")
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"bootstrap_directory":"https://dir-manual-canonical.example/",
+			"invite_key":"inv-manual-canonical-bootstrap",
+			"run_preflight":false
+		}`)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+
+		cmds := readCommandLog(t, logPath)
+		if len(cmds) != 2 {
+			t.Fatalf("commands=%d want=2 (%v)", len(cmds), cmds)
+		}
+		mustFlagValue(t, cmds[0], "--bootstrap-directory", "https://dir-manual-canonical.example")
 		mustFlagNonEmptyValue(t, cmds[0], "--subject-file")
 	})
 
@@ -2162,12 +3655,13 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		svc.gpmConnectRequireSession = true
 		svc.gpmState = newGPMRuntimeState()
 		svc.gpmState.putSession(gpmSession{
-			Token:          "gpm-connect-unregistered-session-token",
-			WalletAddress:  "cosmos1connectunregistered",
-			WalletProvider: "keplr",
-			Role:           "client",
-			CreatedAt:      time.Now().UTC(),
-			ExpiresAt:      time.Now().UTC().Add(time.Hour),
+			Token:                 "gpm-connect-unregistered-session-token",
+			WalletAddress:         "cosmos1connectunregistered",
+			WalletProvider:        "keplr",
+			Role:                  "client",
+			WalletBindingVerified: true,
+			CreatedAt:             time.Now().UTC(),
+			ExpiresAt:             time.Now().UTC().Add(time.Hour),
 		})
 
 		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
@@ -2191,14 +3685,15 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		now := time.Now().UTC()
 		configureSessionManifest(t, svc, now, "https://dir.example:8081")
 		svc.gpmState.putSession(gpmSession{
-			Token:              "gpm-connect-session-token",
-			WalletAddress:      "cosmos1connectsession",
-			WalletProvider:     "keplr",
-			Role:               "client",
-			CreatedAt:          now,
-			ExpiresAt:          now.Add(time.Hour),
-			BootstrapDirectory: "https://dir.example:8081",
-			InviteKey:          "wallet:cosmos1connectsession",
+			Token:                 "gpm-connect-session-token",
+			WalletAddress:         "cosmos1connectsession",
+			WalletProvider:        "keplr",
+			Role:                  "client",
+			WalletBindingVerified: true,
+			CreatedAt:             now,
+			ExpiresAt:             now.Add(time.Hour),
+			BootstrapDirectory:    "https://dir.example:8081",
+			InviteKey:             "wallet:cosmos1connectsession",
 		})
 
 		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
@@ -2220,6 +3715,38 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		mustFlagNonEmptyValue(t, cmds[0], "--subject-file")
 	})
 
+	t.Run("registered unbound session token is rejected before connect", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectRequireSession = true
+		svc.gpmState = newGPMRuntimeState()
+		now := time.Now().UTC()
+		configureSessionManifest(t, svc, now, "https://dir.example:8081")
+		svc.gpmState.putSession(gpmSession{
+			Token:              "gpm-connect-unbound-session-token",
+			WalletAddress:      "cosmos1connectunbound",
+			WalletProvider:     "keplr",
+			Role:               "client",
+			CreatedAt:          now,
+			ExpiresAt:          now.Add(time.Hour),
+			BootstrapDirectory: "https://dir.example:8081",
+			InviteKey:          "wallet:cosmos1connectunbound",
+		})
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-connect-unbound-session-token",
+			"run_preflight":false
+		}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "wallet-bound session is required for connect") {
+			t.Fatalf("error=%q want wallet-bound rejection", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("unbound session rejection should not execute commands, got=%v", cmds)
+		}
+	})
+
 	t.Run("selected session bootstrap directory works and uses selected value", func(t *testing.T) {
 		svc, logPath := newFakeService(t, false)
 		svc.gpmConnectRequireSession = true
@@ -2229,15 +3756,16 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		selectedBootstrap := "https://dir-selected.example:8081"
 		configureSessionManifest(t, svc, now, primaryBootstrap, selectedBootstrap)
 		svc.gpmState.putSession(gpmSession{
-			Token:                "gpm-connect-session-selected-token",
-			WalletAddress:        "cosmos1connectselected",
-			WalletProvider:       "keplr",
-			Role:                 "client",
-			CreatedAt:            now,
-			ExpiresAt:            now.Add(time.Hour),
-			BootstrapDirectory:   primaryBootstrap,
-			BootstrapDirectories: []string{primaryBootstrap, selectedBootstrap},
-			InviteKey:            "wallet:cosmos1connectselected",
+			Token:                 "gpm-connect-session-selected-token",
+			WalletAddress:         "cosmos1connectselected",
+			WalletProvider:        "keplr",
+			Role:                  "client",
+			WalletBindingVerified: true,
+			CreatedAt:             now,
+			ExpiresAt:             now.Add(time.Hour),
+			BootstrapDirectory:    primaryBootstrap,
+			BootstrapDirectories:  []string{primaryBootstrap, selectedBootstrap},
+			InviteKey:             "wallet:cosmos1connectselected",
 		})
 
 		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
@@ -2288,14 +3816,15 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		now := time.Now().UTC()
 		configureSessionManifest(t, svc, now, "https://dir.example:8081")
 		svc.gpmState.putSession(gpmSession{
-			Token:              "gpm-connect-session-conflict-token",
-			WalletAddress:      "cosmos1connectconflict",
-			WalletProvider:     "keplr",
-			Role:               "client",
-			CreatedAt:          now,
-			ExpiresAt:          now.Add(time.Hour),
-			BootstrapDirectory: "https://dir.example:8081",
-			InviteKey:          "wallet:cosmos1connectconflict",
+			Token:                 "gpm-connect-session-conflict-token",
+			WalletAddress:         "cosmos1connectconflict",
+			WalletProvider:        "keplr",
+			Role:                  "client",
+			WalletBindingVerified: true,
+			CreatedAt:             now,
+			ExpiresAt:             now.Add(time.Hour),
+			BootstrapDirectory:    "https://dir.example:8081",
+			InviteKey:             "wallet:cosmos1connectconflict",
 		})
 
 		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
@@ -2325,14 +3854,15 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		bootstrapDirectory := "https://dir-session.example:8081"
 		configureSessionManifest(t, svc, now, bootstrapDirectory)
 		svc.gpmState.putSession(gpmSession{
-			Token:              "gpm-connect-session-manual-invite-override-token",
-			WalletAddress:      "cosmos1manualinviteoverride",
-			WalletProvider:     "keplr",
-			Role:               "client",
-			CreatedAt:          now,
-			ExpiresAt:          now.Add(time.Hour),
-			BootstrapDirectory: bootstrapDirectory,
-			InviteKey:          "wallet:cosmos1manualinviteoverride",
+			Token:                 "gpm-connect-session-manual-invite-override-token",
+			WalletAddress:         "cosmos1manualinviteoverride",
+			WalletProvider:        "keplr",
+			Role:                  "client",
+			WalletBindingVerified: true,
+			CreatedAt:             now,
+			ExpiresAt:             now.Add(time.Hour),
+			BootstrapDirectory:    bootstrapDirectory,
+			InviteKey:             "wallet:cosmos1manualinviteoverride",
 		})
 
 		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
@@ -2360,15 +3890,16 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		untrustedBootstrap := "https://dir-untrusted.example:8081"
 		configureSessionManifest(t, svc, now, trustedBootstrap)
 		svc.gpmState.putSession(gpmSession{
-			Token:                "gpm-connect-session-untrusted-token",
-			WalletAddress:        "cosmos1connectuntrusted",
-			WalletProvider:       "keplr",
-			Role:                 "client",
-			CreatedAt:            now,
-			ExpiresAt:            now.Add(time.Hour),
-			BootstrapDirectory:   trustedBootstrap,
-			BootstrapDirectories: []string{trustedBootstrap},
-			InviteKey:            "wallet:cosmos1connectuntrusted",
+			Token:                 "gpm-connect-session-untrusted-token",
+			WalletAddress:         "cosmos1connectuntrusted",
+			WalletProvider:        "keplr",
+			Role:                  "client",
+			WalletBindingVerified: true,
+			CreatedAt:             now,
+			ExpiresAt:             now.Add(time.Hour),
+			BootstrapDirectory:    trustedBootstrap,
+			BootstrapDirectories:  []string{trustedBootstrap},
+			InviteKey:             "wallet:cosmos1connectuntrusted",
 		})
 
 		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", fmt.Sprintf(`{
@@ -2405,15 +3936,16 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		svc.gpmMainDomain = manifestServer.URL
 		svc.gpmManifestURL = manifestServer.URL
 		svc.gpmState.putSession(gpmSession{
-			Token:                "gpm-connect-session-failover-token",
-			WalletAddress:        "cosmos1connectfailover",
-			WalletProvider:       "keplr",
-			Role:                 "client",
-			CreatedAt:            now,
-			ExpiresAt:            now.Add(time.Hour),
-			BootstrapDirectory:   firstBootstrap,
-			BootstrapDirectories: []string{firstBootstrap, secondBootstrap},
-			InviteKey:            "wallet:cosmos1connectfailover",
+			Token:                 "gpm-connect-session-failover-token",
+			WalletAddress:         "cosmos1connectfailover",
+			WalletProvider:        "keplr",
+			Role:                  "client",
+			WalletBindingVerified: true,
+			CreatedAt:             now,
+			ExpiresAt:             now.Add(time.Hour),
+			BootstrapDirectory:    firstBootstrap,
+			BootstrapDirectories:  []string{firstBootstrap, secondBootstrap},
+			InviteKey:             "wallet:cosmos1connectfailover",
 		})
 		t.Setenv("LOCALAPI_TEST_UP_FAIL_BOOTSTRAP", firstBootstrap)
 
@@ -2461,15 +3993,16 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		svc.gpmManifestURL = manifestServer.URL
 
 		svc.gpmState.putSession(gpmSession{
-			Token:                "gpm-connect-session-drift-token",
-			WalletAddress:        "cosmos1connectdrift",
-			WalletProvider:       "keplr",
-			Role:                 "client",
-			CreatedAt:            now,
-			ExpiresAt:            now.Add(time.Hour),
-			BootstrapDirectory:   "https://dir-revoked-primary.example:8081",
-			BootstrapDirectories: []string{"https://dir-revoked-primary.example:8081", "https://dir-revoked-secondary.example:8081"},
-			InviteKey:            "wallet:cosmos1connectdrift",
+			Token:                 "gpm-connect-session-drift-token",
+			WalletAddress:         "cosmos1connectdrift",
+			WalletProvider:        "keplr",
+			Role:                  "client",
+			WalletBindingVerified: true,
+			CreatedAt:             now,
+			ExpiresAt:             now.Add(time.Hour),
+			BootstrapDirectory:    "https://dir-revoked-primary.example:8081",
+			BootstrapDirectories:  []string{"https://dir-revoked-primary.example:8081", "https://dir-revoked-secondary.example:8081"},
+			InviteKey:             "wallet:cosmos1connectdrift",
 		})
 
 		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
@@ -2511,15 +4044,16 @@ func TestHandleConnectSessionRequiredMode(t *testing.T) {
 		svc.gpmManifestURL = manifestServer.URL
 
 		svc.gpmState.putSession(gpmSession{
-			Token:                "gpm-connect-session-partial-trust-token",
-			WalletAddress:        "cosmos1connectpartialtrust",
-			WalletProvider:       "keplr",
-			Role:                 "client",
-			CreatedAt:            now,
-			ExpiresAt:            now.Add(time.Hour),
-			BootstrapDirectory:   revokedBootstrap,
-			BootstrapDirectories: []string{revokedBootstrap, trustedBootstrap},
-			InviteKey:            "wallet:cosmos1connectpartialtrust",
+			Token:                 "gpm-connect-session-partial-trust-token",
+			WalletAddress:         "cosmos1connectpartialtrust",
+			WalletProvider:        "keplr",
+			Role:                  "client",
+			WalletBindingVerified: true,
+			CreatedAt:             now,
+			ExpiresAt:             now.Add(time.Hour),
+			BootstrapDirectory:    revokedBootstrap,
+			BootstrapDirectories:  []string{revokedBootstrap, trustedBootstrap},
+			InviteKey:             "wallet:cosmos1connectpartialtrust",
 		})
 
 		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
@@ -2580,15 +4114,16 @@ func TestHandleConnectSessionPathProfilePolicyEnforcement(t *testing.T) {
 		svc.gpmState = newGPMRuntimeState()
 		configureConnectManifest(t, svc, "https://dir.example:8081")
 		svc.gpmState.putSession(gpmSession{
-			Token:              "gpm-connect-profile-conflict-token",
-			WalletAddress:      "cosmos1profileconflict",
-			WalletProvider:     "keplr",
-			Role:               "client",
-			CreatedAt:          time.Now().UTC(),
-			ExpiresAt:          time.Now().UTC().Add(time.Hour),
-			BootstrapDirectory: "https://dir.example:8081",
-			InviteKey:          "wallet:cosmos1profileconflict",
-			PathProfile:        "3hop",
+			Token:                 "gpm-connect-profile-conflict-token",
+			WalletAddress:         "cosmos1profileconflict",
+			WalletProvider:        "keplr",
+			Role:                  "client",
+			WalletBindingVerified: true,
+			CreatedAt:             time.Now().UTC(),
+			ExpiresAt:             time.Now().UTC().Add(time.Hour),
+			BootstrapDirectory:    "https://dir.example:8081",
+			InviteKey:             "wallet:cosmos1profileconflict",
+			PathProfile:           "3hop",
 		})
 
 		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
@@ -2613,15 +4148,16 @@ func TestHandleConnectSessionPathProfilePolicyEnforcement(t *testing.T) {
 		svc.gpmState = newGPMRuntimeState()
 		configureConnectManifest(t, svc, "https://dir.example:8081")
 		svc.gpmState.putSession(gpmSession{
-			Token:              "gpm-connect-profile-inherit-token",
-			WalletAddress:      "cosmos1profileinherit",
-			WalletProvider:     "keplr",
-			Role:               "client",
-			CreatedAt:          time.Now().UTC(),
-			ExpiresAt:          time.Now().UTC().Add(time.Hour),
-			BootstrapDirectory: "https://dir.example:8081",
-			InviteKey:          "wallet:cosmos1profileinherit",
-			PathProfile:        "1hop",
+			Token:                 "gpm-connect-profile-inherit-token",
+			WalletAddress:         "cosmos1profileinherit",
+			WalletProvider:        "keplr",
+			Role:                  "client",
+			WalletBindingVerified: true,
+			CreatedAt:             time.Now().UTC(),
+			ExpiresAt:             time.Now().UTC().Add(time.Hour),
+			BootstrapDirectory:    "https://dir.example:8081",
+			InviteKey:             "wallet:cosmos1profileinherit",
+			PathProfile:           "1hop",
 		})
 
 		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
@@ -2659,15 +4195,19 @@ func TestHandleConnectSessionPathProfilePolicyEnforcement(t *testing.T) {
 		svc.gpmState = newGPMRuntimeState()
 		configureConnectManifest(t, svc, "https://dir.example:8081")
 		svc.gpmState.putSession(gpmSession{
-			Token:              "gpm-connect-profile-compat-token",
-			WalletAddress:      "cosmos1profilecompat",
-			WalletProvider:     "keplr",
-			Role:               "client",
-			CreatedAt:          time.Now().UTC(),
-			ExpiresAt:          time.Now().UTC().Add(time.Hour),
-			BootstrapDirectory: "https://dir.example:8081",
-			InviteKey:          "wallet:cosmos1profilecompat",
-			PathProfile:        "",
+			Token:                   "gpm-connect-profile-compat-token",
+			WalletAddress:           "cosmos1profilecompat",
+			WalletProvider:          "keplr",
+			Role:                    "client",
+			WalletBindingVerified:   true,
+			ClientTier:              2,
+			StakeSatisfied:          true,
+			PrepaidBalanceSatisfied: true,
+			CreatedAt:               time.Now().UTC(),
+			ExpiresAt:               time.Now().UTC().Add(time.Hour),
+			BootstrapDirectory:      "https://dir.example:8081",
+			InviteKey:               "wallet:cosmos1profilecompat",
+			PathProfile:             "",
 		})
 
 		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
@@ -2693,12 +4233,675 @@ func TestHandleConnectSessionPathProfilePolicyEnforcement(t *testing.T) {
 		mustFlagValue(t, cmds[0], "--min-operators", "2")
 		mustFlagValue(t, cmds[0], "--beta-profile", "1")
 	})
+
+	t.Run("session 3hop requires micro-relay entitlement", func(t *testing.T) {
+		resetConnectDefaultEnv(t)
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		configureConnectManifest(t, svc, "https://dir.example:8081")
+		svc.gpmState.putSession(gpmSession{
+			Token:                   "gpm-connect-tier1-3hop-token",
+			WalletAddress:           "cosmos1tier1connect3hop",
+			WalletProvider:          "keplr",
+			Role:                    "client",
+			WalletBindingVerified:   true,
+			ClientTier:              1,
+			StakeSatisfied:          true,
+			PrepaidBalanceSatisfied: true,
+			CreatedAt:               time.Now().UTC(),
+			ExpiresAt:               time.Now().UTC().Add(time.Hour),
+			BootstrapDirectory:      "https://dir.example:8081",
+			InviteKey:               "wallet:cosmos1tier1connect3hop",
+			PathProfile:             "3hop",
+		})
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-connect-tier1-3hop-token",
+			"run_preflight":false
+		}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusForbidden, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "Tier 2 or Tier 3") {
+			t.Fatalf("error=%q want Tier 2/3 guidance payload=%v", got, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("tier-locked 3hop connect should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("session stake and prepaid entitlements are fixed at issuance", func(t *testing.T) {
+		resetConnectDefaultEnv(t)
+		t.Setenv("GPM_STAKE_SATISFIED", "1")
+		t.Setenv("GPM_PREPAID_BALANCE_SATISFIED", "1")
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		configureConnectManifest(t, svc, "https://dir.example:8081")
+		svc.gpmState.putSession(gpmSession{
+			Token:                   "gpm-connect-session-bound-entitlements",
+			WalletAddress:           "cosmos1sessionboundentitlements",
+			WalletProvider:          "keplr",
+			Role:                    "client",
+			WalletBindingVerified:   true,
+			ClientTier:              2,
+			StakeSatisfied:          false,
+			PrepaidBalanceSatisfied: false,
+			CreatedAt:               time.Now().UTC(),
+			ExpiresAt:               time.Now().UTC().Add(time.Hour),
+			BootstrapDirectory:      "https://dir.example:8081",
+			InviteKey:               "wallet:cosmos1sessionboundentitlements",
+			PathProfile:             "3hop",
+		})
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"gpm-connect-session-bound-entitlements",
+			"run_preflight":false
+		}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusForbidden, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "stake requirement is not satisfied") {
+			t.Fatalf("error=%q want session-bound stake guidance payload=%v", got, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("env-upgraded 3hop connect should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("manual 3hop requires authenticated contribution entitlement", func(t *testing.T) {
+		resetConnectDefaultEnv(t)
+		svc, logPath := newFakeService(t, false)
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"bootstrap_directory":"http://127.0.0.1:8081",
+			"invite_key":"inv-manual-3hop",
+			"path_profile":"3hop",
+			"run_preflight":false
+		}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusForbidden, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "authenticated Tier 2 or Tier 3") {
+			t.Fatalf("error=%q want authenticated Tier 2/3 guidance payload=%v", got, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("manual 3hop without session should not execute commands, got=%v", cmds)
+		}
+	})
+}
+
+func TestHandleConnectProductionEntitlementGate(t *testing.T) {
+	configureConnectManifest := func(t *testing.T, svc *Service, bootstrapDirectories ...string) {
+		t.Helper()
+		now := time.Now().UTC()
+		manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"version":               1,
+				"generated_at_utc":      now.Format(time.RFC3339),
+				"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+				"bootstrap_directories": bootstrapDirectories,
+			})
+		}))
+		t.Cleanup(manifestServer.Close)
+		svc.gpmMainDomain = manifestServer.URL
+		svc.gpmManifestURL = manifestServer.URL
+	}
+	seedConnectSession := func(t *testing.T, svc *Service, token string, stakeSatisfied bool, prepaidSatisfied bool) string {
+		t.Helper()
+		if svc.gpmState == nil {
+			svc.gpmState = newGPMRuntimeState()
+		}
+		svc.gpmState.putSession(gpmSession{
+			Token:                     token,
+			WalletAddress:             "cosmos1connectprod",
+			WalletProvider:            "keplr",
+			Role:                      "client",
+			WalletBindingVerified:     true,
+			EntitlementEvidenceSource: "chain",
+			ClientTier:                2,
+			StakeSatisfied:            stakeSatisfied,
+			PrepaidBalanceSatisfied:   prepaidSatisfied,
+			CreatedAt:                 time.Now().UTC(),
+			ExpiresAt:                 time.Now().UTC().Add(time.Hour),
+			BootstrapDirectory:        "https://dir.example:8081",
+			InviteKey:                 "wallet:cosmos1connectprod",
+			PathProfile:               "2hop",
+		})
+		return token
+	}
+	newProductionConnectService := func(t *testing.T, status settlement.OperationStatus, found bool) (*Service, string, string) {
+		t.Helper()
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmConnectPolicyMode = "production"
+		svc.gpmConnectRequireSession = true
+		svc.gpmSettlementChainBacked = true
+		svc.gpmSettlementBackend = "cosmos"
+		svc.gpmSettlement = &gpmReserveFundsFinalityService{
+			returnedStatus: settlement.OperationStatusSubmitted,
+			chainStatus:    status,
+			chainFound:     found,
+			reservation: settlement.FundReservation{
+				SessionID:    "vpn-session-prod",
+				SubjectID:    "cosmos1connectprod",
+				AmountMicros: 200000,
+				Currency:     "TDPNC",
+				Status:       status,
+			},
+			reservationOK: found,
+		}
+		configureConnectManifest(t, svc, "https://dir.example:8081")
+		token := seedConnectSession(t, svc, "gpm-connect-prod-token", true, true)
+		return svc, logPath, token
+	}
+
+	t.Run("missing reservation fails closed before launching vpn", func(t *testing.T) {
+		svc, logPath, token := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"`+token+`",
+			"run_preflight":false
+		}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusForbidden, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "confirmed settlement reservation_id") {
+			t.Fatalf("error=%q want confirmed reservation guidance payload=%v", got, payload)
+		}
+		if allowed, _ := payload["connect_allowed"].(bool); allowed {
+			t.Fatalf("connect_allowed=%v want=false payload=%v", allowed, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("missing reservation should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("local only account eligibility fails closed before launching vpn", func(t *testing.T) {
+		svc, logPath, token := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+		markGPMTestSessionEntitlementsLocal(t, svc, token)
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"`+token+`",
+			"reservation_id":"res-prod-confirmed",
+			"reservation_session_id":"vpn-session-prod",
+			"run_preflight":false
+		}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusForbidden, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "trusted chain or signed entitlement evidence") {
+			t.Fatalf("error=%q want entitlement evidence guidance payload=%v", got, payload)
+		}
+		if trusted, _ := payload["entitlement_evidence_trusted"].(bool); trusted {
+			t.Fatalf("entitlement_evidence_trusted=%v want=false payload=%v", trusted, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("local-only eligibility should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("missing stake fails closed for normal 2hop connect", func(t *testing.T) {
+		svc, logPath, _ := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+		token := seedConnectSession(t, svc, "gpm-connect-prod-no-stake", false, true)
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"`+token+`",
+			"reservation_id":"res-prod-confirmed",
+			"reservation_session_id":"vpn-session-prod",
+			"run_preflight":false
+		}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusForbidden, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "stake is required") {
+			t.Fatalf("error=%q want stake guidance payload=%v", got, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("missing stake should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("pending reservation fails closed before launching vpn", func(t *testing.T) {
+		svc, logPath, token := newProductionConnectService(t, settlement.OperationStatusSubmitted, true)
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"`+token+`",
+			"reservation_id":"res-prod-pending",
+			"reservation_session_id":"vpn-session-prod",
+			"run_preflight":false
+		}`)
+		if code != http.StatusAccepted {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusAccepted, payload)
+		}
+		if allowed, _ := payload["connect_allowed"].(bool); allowed {
+			t.Fatalf("connect_allowed=%v want=false payload=%v", allowed, payload)
+		}
+		if state, _ := payload["reservation_finalization_state"].(string); state != "pending_chain_confirmation" {
+			t.Fatalf("reservation_finalization_state=%q want pending_chain_confirmation payload=%v", state, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("pending reservation should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("missing reservation session id fails closed", func(t *testing.T) {
+		svc, logPath, token := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"`+token+`",
+			"reservation_id":"res-prod-confirmed",
+			"run_preflight":false
+		}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusBadRequest, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "reservation_session_id is required") {
+			t.Fatalf("error=%q want reservation_session_id guidance payload=%v", got, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("missing reservation_session_id should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("cross wallet reservation fails closed", func(t *testing.T) {
+		svc, logPath, token := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+		svc.gpmSettlement.(*gpmReserveFundsFinalityService).reservation.SubjectID = "cosmos1otherwallet"
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"`+token+`",
+			"reservation_id":"res-prod-confirmed",
+			"reservation_session_id":"vpn-session-prod",
+			"run_preflight":false
+		}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusForbidden, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "signed-in wallet") {
+			t.Fatalf("error=%q want wallet binding guidance payload=%v", got, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("cross-wallet reservation should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("wrong reservation session id fails closed", func(t *testing.T) {
+		svc, logPath, token := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"`+token+`",
+			"reservation_id":"res-prod-confirmed",
+			"reservation_session_id":"vpn-session-other",
+			"run_preflight":false
+		}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusForbidden, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "session_id does not match") {
+			t.Fatalf("error=%q want session binding guidance payload=%v", got, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("wrong-session reservation should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("wrong reservation amount fails closed", func(t *testing.T) {
+		svc, logPath, token := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+		svc.gpmSettlement.(*gpmReserveFundsFinalityService).reservation.AmountMicros = 300000
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"`+token+`",
+			"reservation_id":"res-prod-confirmed",
+			"reservation_session_id":"vpn-session-prod",
+			"run_preflight":false
+		}`)
+		if code != http.StatusConflict {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusConflict, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "public VPN reservation amount") {
+			t.Fatalf("error=%q want fixed amount guidance payload=%v", got, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("wrong-amount reservation should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("explicit production no-route fails closed before launching vpn", func(t *testing.T) {
+		svc, logPath, token := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"`+token+`",
+			"reservation_id":"res-prod-confirmed",
+			"reservation_session_id":"vpn-session-prod",
+			"install_route":false,
+			"run_preflight":false
+		}`)
+		if code != http.StatusBadRequest {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusBadRequest, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "production connect requires install_route=true") {
+			t.Fatalf("error=%q want production install_route guidance payload=%v", got, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("explicit no-route production connect should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("confirmed reservation launches vpn and reports entitlement", func(t *testing.T) {
+		svc, logPath, token := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+
+		connectBody := `{
+			"session_token":"` + token + `",
+			"reservation_id":"res-prod-confirmed",
+			"reservation_session_id":"vpn-session-prod",
+			"run_preflight":false
+		}`
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", connectBody)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusOK, payload)
+		}
+		if allowed, _ := payload["connect_allowed"].(bool); !allowed {
+			t.Fatalf("connect_allowed=%v want=true payload=%v", allowed, payload)
+		}
+		if status, _ := payload["reservation_chain_status"].(string); status != string(settlement.OperationStatusConfirmed) {
+			t.Fatalf("reservation_chain_status=%q want confirmed payload=%v", status, payload)
+		}
+		if sessionID, _ := payload["reservation_session_id"].(string); sessionID != "vpn-session-prod" {
+			t.Fatalf("reservation_session_id=%q want vpn-session-prod payload=%v", sessionID, payload)
+		}
+		if source, _ := payload["reservation_status_source"].(string); source != "chain_status_query" {
+			t.Fatalf("reservation_status_source=%q want chain_status_query payload=%v", source, payload)
+		}
+		cmds := readCommandLog(t, logPath)
+		if len(cmds) != 2 {
+			t.Fatalf("commands=%d want=2 (%v)", len(cmds), cmds)
+		}
+		if cmds[0][0] != "client-vpn-up" || cmds[1][0] != "client-vpn-status" {
+			t.Fatalf("unexpected command order: %v", cmds)
+		}
+		mustFlagValue(t, cmds[0], "--install-route", "1")
+
+		code, payload = callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", connectBody)
+		if code != http.StatusConflict {
+			t.Fatalf("reuse status=%d want=%d body=%v", code, http.StatusConflict, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "already been used") {
+			t.Fatalf("reuse error=%q want already-used guidance payload=%v", got, payload)
+		}
+		if cmds = readCommandLog(t, logPath); len(cmds) != 2 {
+			t.Fatalf("reservation reuse should not execute more commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("production connect stages wallet reservation subject instead of custom invite key", func(t *testing.T) {
+		t.Setenv("LOCALAPI_TEST_EXPECT_SUBJECT_VALUE", "cosmos1connectprod")
+		svc, logPath, token := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+		session, ok, err := svc.gpmSessionFromToken(token)
+		if err != nil {
+			t.Fatalf("seeded session violates wallet policy: %v", err)
+		}
+		if !ok {
+			t.Fatalf("missing seeded session")
+		}
+		session.InviteKey = "custom-invite-key-that-is-not-the-wallet-subject"
+		svc.gpmState.putSession(session)
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"`+token+`",
+			"reservation_id":"res-prod-confirmed",
+			"reservation_session_id":"vpn-session-prod",
+			"run_preflight":false
+		}`)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusOK, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 2 {
+			t.Fatalf("commands=%d want=2 (%v)", len(cmds), cmds)
+		}
+		claim := svc.gpmState.reservationClaims["res-prod-confirmed"]
+		if claim.Status != "launched" {
+			t.Fatalf("reservation claim status=%q want launched claim=%+v", claim.Status, claim)
+		}
+	})
+
+	t.Run("post launch readiness failures release only when stopped is proven", func(t *testing.T) {
+		cases := []struct {
+			name         string
+			statusJSON   string
+			wantReason   string
+			wantReleased bool
+		}{
+			{
+				name:         "running false",
+				statusJSON:   `{"running":false,"interface":"wgvpn0","interface_state":"present","route_mode":"full-tunnel"}`,
+				wantReason:   "running=false",
+				wantReleased: true,
+			},
+			{
+				name:       "interface missing",
+				statusJSON: `{"running":true,"interface":"wgother0","interface_state":"present","route_mode":"full-tunnel"}`,
+				wantReason: "expected WireGuard interface",
+			},
+			{
+				name:       "no route",
+				statusJSON: `{"running":true,"interface":"wgvpn0","interface_state":"present","route_mode":"no-route"}`,
+				wantReason: "unsafe route_mode",
+			},
+			{
+				name:       "split route",
+				statusJSON: `{"running":true,"interface":"wgvpn0","interface_state":"present","route_mode":"split-route"}`,
+				wantReason: "unsafe route_mode",
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Setenv("LOCALAPI_TEST_STATUS_JSON", tc.statusJSON)
+				svc, logPath, token := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+
+				code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+					"session_token":"`+token+`",
+					"reservation_id":"res-prod-confirmed",
+					"reservation_session_id":"vpn-session-prod",
+					"run_preflight":false
+				}`)
+				if code != http.StatusBadGateway {
+					t.Fatalf("status=%d want=%d body=%v", code, http.StatusBadGateway, payload)
+				}
+				if got, _ := payload["error"].(string); got != "production VPN readiness check failed after launch" {
+					t.Fatalf("error=%q payload=%v", got, payload)
+				}
+				if got, _ := payload["readiness_error"].(string); !strings.Contains(got, tc.wantReason) {
+					t.Fatalf("readiness_error=%q want contains %q payload=%v", got, tc.wantReason, payload)
+				}
+				if allowed, _ := payload["connect_allowed"].(bool); allowed {
+					t.Fatalf("connect_allowed=%v want=false payload=%v", allowed, payload)
+				}
+				if released, _ := payload["reservation_claim_released"].(bool); released != tc.wantReleased {
+					t.Fatalf("reservation_claim_released=%v want %v payload=%v", released, tc.wantReleased, payload)
+				}
+				if retained, _ := payload["reservation_claim_retained"].(bool); retained != !tc.wantReleased {
+					t.Fatalf("reservation_claim_retained=%v want %v payload=%v", retained, !tc.wantReleased, payload)
+				}
+				wantClaimStatus := "launching"
+				if tc.wantReleased {
+					wantClaimStatus = "released"
+				}
+				if status, _ := payload["reservation_claim_status"].(string); status != wantClaimStatus {
+					t.Fatalf("reservation_claim_status=%q want %q payload=%v", status, wantClaimStatus, payload)
+				}
+				if attempted, _ := payload["teardown_attempted"].(bool); !attempted {
+					t.Fatalf("teardown_attempted=%v want true payload=%v", attempted, payload)
+				}
+
+				cmds := readCommandLog(t, logPath)
+				if len(cmds) != 3 {
+					t.Fatalf("commands=%d want=3 (%v)", len(cmds), cmds)
+				}
+				if cmds[0][0] != "client-vpn-up" || cmds[1][0] != "client-vpn-status" || cmds[2][0] != "client-vpn-down" {
+					t.Fatalf("unexpected command order after readiness failure: %v", cmds)
+				}
+				mustFlagValue(t, cmds[0], "--install-route", "1")
+				mustFlagValue(t, cmds[2], "--iface", "wgvpn0")
+
+				svc.gpmState.mu.RLock()
+				claim, claimed := svc.gpmState.reservationClaims["res-prod-confirmed"]
+				svc.gpmState.mu.RUnlock()
+				if tc.wantReleased && claimed {
+					t.Fatalf("reservation claim should be released after readiness failure")
+				}
+				if !tc.wantReleased {
+					if !claimed {
+						t.Fatalf("ambiguous readiness failure should retain reservation claim")
+					}
+					if claim.Status != "launching" {
+						t.Fatalf("claim status=%q want launching claim=%+v", claim.Status, claim)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("post launch readiness status failure retains reservation", func(t *testing.T) {
+		t.Setenv("LOCALAPI_TEST_STATUS_FAIL", "1")
+		svc, logPath, token := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"`+token+`",
+			"reservation_id":"res-prod-confirmed",
+			"reservation_session_id":"vpn-session-prod",
+			"run_preflight":false
+		}`)
+		if code != http.StatusBadGateway {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusBadGateway, payload)
+		}
+		if released, _ := payload["reservation_claim_released"].(bool); released {
+			t.Fatalf("reservation_claim_released=%v want=false payload=%v", released, payload)
+		}
+		if retained, _ := payload["reservation_claim_retained"].(bool); !retained {
+			t.Fatalf("reservation_claim_retained=%v want=true payload=%v", retained, payload)
+		}
+		if _, ok := payload["status_error"].(string); !ok {
+			t.Fatalf("status_error missing payload=%v", payload)
+		}
+		cmds := readCommandLog(t, logPath)
+		if len(cmds) != 3 || cmds[0][0] != "client-vpn-up" || cmds[1][0] != "client-vpn-status" || cmds[2][0] != "client-vpn-down" {
+			t.Fatalf("unexpected command order after status failure: %v", cmds)
+		}
+		svc.gpmState.mu.RLock()
+		claim, claimed := svc.gpmState.reservationClaims["res-prod-confirmed"]
+		svc.gpmState.mu.RUnlock()
+		if !claimed || claim.Status != "launching" {
+			t.Fatalf("status failure should retain launching claim claimed=%v claim=%+v", claimed, claim)
+		}
+	})
+
+	t.Run("post launch teardown failure retains reservation", func(t *testing.T) {
+		t.Setenv("LOCALAPI_TEST_STATUS_JSON", `{"running":false,"interface":"wgvpn0","interface_state":"absent","route_mode":"full-tunnel"}`)
+		t.Setenv("LOCALAPI_TEST_DOWN_FAIL", "1")
+		svc, _, token := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"`+token+`",
+			"reservation_id":"res-prod-confirmed",
+			"reservation_session_id":"vpn-session-prod",
+			"run_preflight":false
+		}`)
+		if code != http.StatusBadGateway {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusBadGateway, payload)
+		}
+		if released, _ := payload["reservation_claim_released"].(bool); released {
+			t.Fatalf("reservation_claim_released=%v want=false payload=%v", released, payload)
+		}
+		if retained, _ := payload["reservation_claim_retained"].(bool); !retained {
+			t.Fatalf("reservation_claim_retained=%v want=true payload=%v", retained, payload)
+		}
+		if _, ok := payload["teardown_error"].(string); !ok {
+			t.Fatalf("teardown_error missing payload=%v", payload)
+		}
+		svc.gpmState.mu.RLock()
+		claim, claimed := svc.gpmState.reservationClaims["res-prod-confirmed"]
+		svc.gpmState.mu.RUnlock()
+		if !claimed || claim.Status != "launching" {
+			t.Fatalf("teardown failure should retain launching claim claimed=%v claim=%+v", claimed, claim)
+		}
+	})
+
+	t.Run("post launch state persist failure tears down and fails closed", func(t *testing.T) {
+		statePath := filepath.Join(t.TempDir(), "gpm_state.json")
+		t.Setenv("LOCALAPI_TEST_BLOCK_STATE_PATH_AFTER_UP", statePath)
+		svc, logPath, token := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+		svc.gpmStateStorePath = statePath
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"`+token+`",
+			"reservation_id":"res-prod-confirmed",
+			"reservation_session_id":"vpn-session-prod",
+			"run_preflight":false
+		}`)
+		if code != http.StatusServiceUnavailable {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusServiceUnavailable, payload)
+		}
+		if stage, _ := payload["stage"].(string); stage != "connect_state_persist" {
+			t.Fatalf("stage=%q want connect_state_persist payload=%v", stage, payload)
+		}
+		if attempted, _ := payload["teardown_attempted"].(bool); !attempted {
+			t.Fatalf("teardown_attempted=%v want true payload=%v", attempted, payload)
+		}
+		cmds := readCommandLog(t, logPath)
+		if len(cmds) != 3 {
+			t.Fatalf("commands=%d want=3 (%v)", len(cmds), cmds)
+		}
+		if cmds[0][0] != "client-vpn-up" || cmds[1][0] != "client-vpn-status" || cmds[2][0] != "client-vpn-down" {
+			t.Fatalf("unexpected command order after persist failure: %v", cmds)
+		}
+		mustFlagValue(t, cmds[2], "--iface", "wgvpn0")
+
+		svc.gpmState.mu.RLock()
+		claim := svc.gpmState.reservationClaims["res-prod-confirmed"]
+		svc.gpmState.mu.RUnlock()
+		if claim.Status != "launched" {
+			t.Fatalf("claim status=%q want launched after ambiguous post-launch persist failure", claim.Status)
+		}
+	})
+
+	t.Run("failed connect retains launching reservation claim for reconciliation", func(t *testing.T) {
+		t.Setenv("LOCALAPI_TEST_UP_FAIL", "1")
+		svc, logPath, token := newProductionConnectService(t, settlement.OperationStatusConfirmed, true)
+
+		code, payload := callJSONHandler(t, svc.handleConnect, http.MethodPost, "/v1/connect", `{
+			"session_token":"`+token+`",
+			"reservation_id":"res-prod-confirmed",
+			"reservation_session_id":"vpn-session-prod",
+			"run_preflight":false
+		}`)
+		if code != http.StatusBadGateway {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusBadGateway, payload)
+		}
+		if retained, _ := payload["reservation_claim_retained"].(bool); !retained {
+			t.Fatalf("reservation_claim_retained=%v want true payload=%v", retained, payload)
+		}
+		if status, _ := payload["reservation_claim_status"].(string); status != "launching" {
+			t.Fatalf("reservation_claim_status=%q want launching payload=%v", status, payload)
+		}
+		svc.gpmState.mu.RLock()
+		claim, claimed := svc.gpmState.reservationClaims["res-prod-confirmed"]
+		svc.gpmState.mu.RUnlock()
+		if !claimed {
+			t.Fatalf("failed connect should retain reservation claim for reconciliation")
+		}
+		if claim.Status != "launching" || claim.LaunchStartedAt.IsZero() {
+			t.Fatalf("claim=%+v want launching with launch_started_at", claim)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 1 || cmds[0][0] != "client-vpn-up" {
+			t.Fatalf("failed connect commands=%v want single client-vpn-up", cmds)
+		}
+	})
 }
 
 func TestHandleSetProfileNormalizationAndValidation(t *testing.T) {
 	svc, logPath := newFakeService(t, false)
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-set-profile-admin", "cosmos1setprofileadmin")
 
-	code, payload := callJSONHandler(t, svc.handleSetProfile, http.MethodPost, "/v1/set_profile", `{"path_profile":" FAST "}`)
+	code, payload := callJSONHandler(t, svc.handleSetProfile, http.MethodPost, "/v1/set_profile", `{"path_profile":" FAST ","session_token":"`+adminToken+`"}`)
 	if code != http.StatusOK {
 		t.Fatalf("status=%d body=%v", code, payload)
 	}
@@ -2713,7 +4916,8 @@ func TestHandleSetProfileNormalizationAndValidation(t *testing.T) {
 	mustFlagValue(t, cmds[0], "--path-profile", "2hop")
 
 	svc2, logPath2 := newFakeService(t, false)
-	code, _ = callJSONHandler(t, svc2.handleSetProfile, http.MethodPost, "/v1/set_profile", `{"path_profile":"bad"}`)
+	adminToken2 := seedGPMAdminTestSession(t, svc2, "gpm-set-profile-admin-2", "cosmos1setprofileadmin2")
+	code, _ = callJSONHandler(t, svc2.handleSetProfile, http.MethodPost, "/v1/set_profile", `{"path_profile":"bad","session_token":"`+adminToken2+`"}`)
 	if code != http.StatusBadRequest {
 		t.Fatalf("invalid profile status=%d want=%d", code, http.StatusBadRequest)
 	}
@@ -2744,10 +4948,12 @@ func TestHandleUpdateGateAndForwarding(t *testing.T) {
 
 	t.Run("enabled forwards optional args", func(t *testing.T) {
 		svc, logPath := newFakeService(t, true)
+		adminToken := seedGPMAdminTestSession(t, svc, "gpm-update-admin", "cosmos1updateadmin")
 		code, payload := callJSONHandler(t, svc.handleUpdate, http.MethodPost, "/v1/update", `{
 			"remote":"upstream",
 			"branch":"release/v1",
-			"allow_dirty":false
+			"allow_dirty":false,
+			"session_token":"`+adminToken+`"
 		}`)
 		if code != http.StatusOK {
 			t.Fatalf("status=%d body=%v", code, payload)
@@ -2764,10 +4970,12 @@ func TestHandleUpdateGateAndForwarding(t *testing.T) {
 
 	t.Run("invalid remote and branch are rejected", func(t *testing.T) {
 		svc, logPath := newFakeService(t, true)
+		adminToken := seedGPMAdminTestSession(t, svc, "gpm-update-invalid-admin", "cosmos1updateinvalidadmin")
 
 		code, payload := callJSONHandler(t, svc.handleUpdate, http.MethodPost, "/v1/update", `{
 			"remote":"--upload-pack=sh",
-			"branch":"main"
+			"branch":"main",
+			"session_token":"`+adminToken+`"
 		}`)
 		if code != http.StatusBadRequest {
 			t.Fatalf("status=%d body=%v", code, payload)
@@ -2778,7 +4986,8 @@ func TestHandleUpdateGateAndForwarding(t *testing.T) {
 
 		code, payload = callJSONHandler(t, svc.handleUpdate, http.MethodPost, "/v1/update", `{
 			"remote":"origin",
-			"branch":"bad..branch"
+			"branch":"bad..branch",
+			"session_token":"`+adminToken+`"
 		}`)
 		if code != http.StatusBadRequest {
 			t.Fatalf("status=%d body=%v", code, payload)
@@ -2966,6 +5175,10 @@ func TestHandleConfig(t *testing.T) {
 		svc.gpmAuthVerifyMetadataSource = "production-default"
 		svc.gpmAuthVerifyWalletExtSource = "GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE"
 		svc.gpmAuthVerifyCryptoSource = "GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF"
+		svc.gpmAuthExpectedChainID = "gpm-testnet-1"
+		svc.gpmAuthExpectedChainIDSource = "GPM_AUTH_VERIFY_EXPECTED_CHAIN_ID"
+		svc.gpmAuthExpectedWalletHRP = "gpm"
+		svc.gpmAuthExpectedWalletHRPSource = "GPM_AUTH_VERIFY_EXPECTED_WALLET_HRP"
 		svc.gpmLegacyEnvAliasesActive = []string{
 			"TDPN_PRODUCTION_MODE",
 			"TDPN_AUTH_VERIFY_REQUIRE_METADATA",
@@ -2995,8 +5208,8 @@ func TestHandleConfig(t *testing.T) {
 		if got, _ := configMap["connect_require_session"].(bool); !got {
 			t.Fatalf("connect_require_session=%v want=true", configMap["connect_require_session"])
 		}
-		if got, _ := configMap["allow_legacy_connect_override"].(bool); !got {
-			t.Fatalf("allow_legacy_connect_override=%v want=true", configMap["allow_legacy_connect_override"])
+		if got, _ := configMap["allow_legacy_connect_override"].(bool); got {
+			t.Fatalf("allow_legacy_connect_override=%v want=false in production", configMap["allow_legacy_connect_override"])
 		}
 		if got, _ := configMap["gpm_production_mode"].(bool); !got {
 			t.Fatalf("gpm_production_mode=%v want=true", configMap["gpm_production_mode"])
@@ -3076,6 +5289,18 @@ func TestHandleConfig(t *testing.T) {
 		}
 		if got, _ := configMap["gpm_auth_verify_command_configured"].(bool); !got {
 			t.Fatalf("gpm_auth_verify_command_configured=%v want=true", configMap["gpm_auth_verify_command_configured"])
+		}
+		if got, _ := configMap["gpm_auth_expected_chain_id"].(string); got != "gpm-testnet-1" {
+			t.Fatalf("gpm_auth_expected_chain_id=%q want=gpm-testnet-1", got)
+		}
+		if got, _ := configMap["gpm_auth_expected_chain_id_source"].(string); got != "GPM_AUTH_VERIFY_EXPECTED_CHAIN_ID" {
+			t.Fatalf("gpm_auth_expected_chain_id_source=%q want=GPM_AUTH_VERIFY_EXPECTED_CHAIN_ID", got)
+		}
+		if got, _ := configMap["gpm_auth_expected_wallet_hrp"].(string); got != "gpm" {
+			t.Fatalf("gpm_auth_expected_wallet_hrp=%q want=gpm", got)
+		}
+		if got, _ := configMap["gpm_auth_expected_wallet_hrp_source"].(string); got != "GPM_AUTH_VERIFY_EXPECTED_WALLET_HRP" {
+			t.Fatalf("gpm_auth_expected_wallet_hrp_source=%q want=GPM_AUTH_VERIFY_EXPECTED_WALLET_HRP", got)
 		}
 		if got, _ := configMap["gpm_main_domain"].(string); got != "https://gpm.example" {
 			t.Fatalf("gpm_main_domain=%q want=%q", got, "https://gpm.example")
@@ -3665,6 +5890,57 @@ func TestServiceLifecycleMutationAuthRequired(t *testing.T) {
 	})
 }
 
+func TestServiceLifecycleMutationProductionGuard(t *testing.T) {
+	t.Run("production blocks legacy lifecycle endpoint by default", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmConnectPolicyMode = "production"
+		svc.serviceRestart = lifecycleSuccessCommand("restart-ok")
+
+		code, payload := callJSONHandler(t, svc.handleServiceRestart, http.MethodPost, "/v1/service/restart", "")
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "legacy service lifecycle endpoint is disabled") {
+			t.Fatalf("error=%q want legacy lifecycle disabled payload=%v", got, payload)
+		}
+		if got, _ := payload["hint"].(string); !strings.Contains(got, "GPM_ALLOW_LEGACY_SERVICE_MUTATIONS=1") {
+			t.Fatalf("hint=%q want break-glass env payload=%v", got, payload)
+		}
+		if data, err := os.ReadFile(logPath); err != nil {
+			t.Fatalf("read fake script log: %v", err)
+		} else if strings.TrimSpace(string(data)) != "" {
+			t.Fatalf("legacy command executed despite production guard: %q", string(data))
+		}
+	})
+
+	t.Run("production break glass still requires gpm lifecycle session", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmConnectPolicyMode = "production"
+		svc.gpmAllowLegacyServiceMutations = true
+		svc.serviceRestart = lifecycleSuccessCommand("restart-ok")
+
+		code, payload := callJSONHandler(t, svc.handleServiceRestart, http.MethodPost, "/v1/service/restart", "")
+		if code != http.StatusUnauthorized {
+			t.Fatalf("status=%d want missing session rejection payload=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "session token is required") {
+			t.Fatalf("error=%q want session token guidance payload=%v", got, payload)
+		}
+
+		token := seedGPMAdminTestSession(t, svc, "gpm-break-glass-admin", "cosmos1breakglassadmin")
+		code, payload = callJSONHandler(t, svc.handleServiceRestart, http.MethodPost, "/v1/service/restart", `{"session_token":"`+token+`"}`)
+		if code != http.StatusOK {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		if got, _ := payload["action"].(string); got != "restart" {
+			t.Fatalf("action=%q want restart payload=%v", got, payload)
+		}
+		if got, _ := payload["note"].(string); !strings.Contains(got, "/v1/gpm/service/restart") {
+			t.Fatalf("note=%q want GPM migration hint payload=%v", got, payload)
+		}
+	})
+}
+
 func TestGPMServiceLifecycleMutationSessionGate(t *testing.T) {
 	t.Run("missing session token rejected", func(t *testing.T) {
 		svc, logPath := newFakeService(t, false)
@@ -3753,12 +6029,13 @@ func TestGPMServiceLifecycleMutationSessionGate(t *testing.T) {
 		svc.gpmState = newGPMRuntimeState()
 		svc.serviceStart = "echo gpm-start-ok"
 		svc.gpmState.putSession(gpmSession{
-			Token:           "gpm-operator-pending-token",
-			Role:            "operator",
-			CreatedAt:       time.Now().UTC(),
-			ExpiresAt:       time.Now().UTC().Add(time.Hour),
-			WalletAddress:   "cosmos1operatorpending",
-			ChainOperatorID: "operator-pending-1",
+			Token:                 "gpm-operator-pending-token",
+			Role:                  "operator",
+			WalletBindingVerified: true,
+			CreatedAt:             time.Now().UTC(),
+			ExpiresAt:             time.Now().UTC().Add(time.Hour),
+			WalletAddress:         "cosmos1operatorpending",
+			ChainOperatorID:       "operator-pending-1",
 		})
 		svc.gpmState.upsertOperator(gpmOperatorApplication{
 			WalletAddress:   "cosmos1operatorpending",
@@ -3780,16 +6057,49 @@ func TestGPMServiceLifecycleMutationSessionGate(t *testing.T) {
 		}
 	})
 
+	t.Run("unbound operator role rejected before lifecycle mutation", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.serviceStart = "echo gpm-start-ok"
+		svc.gpmState.putSession(gpmSession{
+			Token:           "gpm-operator-unbound-token",
+			Role:            "operator",
+			CreatedAt:       time.Now().UTC(),
+			ExpiresAt:       time.Now().UTC().Add(time.Hour),
+			WalletAddress:   "cosmos1operatorunbound",
+			ChainOperatorID: "operator-unbound-1",
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:   "cosmos1operatorunbound",
+			ChainOperatorID: "operator-unbound-1",
+			ServerLabel:     "approved-node",
+			Status:          "approved",
+			UpdatedAt:       time.Now().UTC(),
+		})
+
+		code, payload := callJSONHandler(t, svc.handleGPMServiceStart, http.MethodPost, "/v1/gpm/service/start", `{"session_token":"gpm-operator-unbound-token"}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d body=%v", code, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "wallet-bound session") {
+			t.Fatalf("error=%q want wallet-bound-session message", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("unbound operator session should not execute commands, got=%v", cmds)
+		}
+	})
+
 	t.Run("operator role with approved application but missing session chain operator id rejected", func(t *testing.T) {
 		svc, logPath := newFakeService(t, false)
 		svc.gpmState = newGPMRuntimeState()
 		svc.serviceStart = "echo gpm-start-ok"
 		svc.gpmState.putSession(gpmSession{
-			Token:         "gpm-operator-approved-missing-session-chain-token",
-			Role:          "operator",
-			CreatedAt:     time.Now().UTC(),
-			ExpiresAt:     time.Now().UTC().Add(time.Hour),
-			WalletAddress: "cosmos1operatormissingsessionchain",
+			Token:                 "gpm-operator-approved-missing-session-chain-token",
+			Role:                  "operator",
+			WalletBindingVerified: true,
+			CreatedAt:             time.Now().UTC(),
+			ExpiresAt:             time.Now().UTC().Add(time.Hour),
+			WalletAddress:         "cosmos1operatormissingsessionchain",
 		})
 		svc.gpmState.upsertOperator(gpmOperatorApplication{
 			WalletAddress:   "cosmos1operatormissingsessionchain",
@@ -3816,12 +6126,13 @@ func TestGPMServiceLifecycleMutationSessionGate(t *testing.T) {
 		svc.gpmState = newGPMRuntimeState()
 		svc.serviceStart = "echo gpm-start-ok"
 		svc.gpmState.putSession(gpmSession{
-			Token:           "gpm-operator-approved-missing-approved-chain-token",
-			Role:            "operator",
-			CreatedAt:       time.Now().UTC(),
-			ExpiresAt:       time.Now().UTC().Add(time.Hour),
-			WalletAddress:   "cosmos1operatormissingapprovedchain",
-			ChainOperatorID: "operator-approved-missing-approved-chain-1",
+			Token:                 "gpm-operator-approved-missing-approved-chain-token",
+			Role:                  "operator",
+			WalletBindingVerified: true,
+			CreatedAt:             time.Now().UTC(),
+			ExpiresAt:             time.Now().UTC().Add(time.Hour),
+			WalletAddress:         "cosmos1operatormissingapprovedchain",
+			ChainOperatorID:       "operator-approved-missing-approved-chain-1",
 		})
 		svc.gpmState.upsertOperator(gpmOperatorApplication{
 			WalletAddress: "cosmos1operatormissingapprovedchain",
@@ -3847,12 +6158,13 @@ func TestGPMServiceLifecycleMutationSessionGate(t *testing.T) {
 		svc.gpmState = newGPMRuntimeState()
 		svc.serviceStart = "echo gpm-start-ok"
 		svc.gpmState.putSession(gpmSession{
-			Token:           "gpm-operator-approved-mismatch-chain-token",
-			Role:            "operator",
-			CreatedAt:       time.Now().UTC(),
-			ExpiresAt:       time.Now().UTC().Add(time.Hour),
-			WalletAddress:   "cosmos1operatormismatchchain",
-			ChainOperatorID: "operator-approved-mismatch-a",
+			Token:                 "gpm-operator-approved-mismatch-chain-token",
+			Role:                  "operator",
+			WalletBindingVerified: true,
+			CreatedAt:             time.Now().UTC(),
+			ExpiresAt:             time.Now().UTC().Add(time.Hour),
+			WalletAddress:         "cosmos1operatormismatchchain",
+			ChainOperatorID:       "operator-approved-mismatch-a",
 		})
 		svc.gpmState.upsertOperator(gpmOperatorApplication{
 			WalletAddress:   "cosmos1operatormismatchchain",
@@ -3871,6 +6183,41 @@ func TestGPMServiceLifecycleMutationSessionGate(t *testing.T) {
 		}
 		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
 			t.Fatalf("operator with mismatched chain binding should not execute commands, got=%v", cmds)
+		}
+	})
+
+	t.Run("production operator role with local approval evidence rejected", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmConnectPolicyMode = "production"
+		svc.serviceStart = "echo gpm-start-ok"
+		svc.gpmState.putSession(gpmSession{
+			Token:                 "gpm-operator-local-approval-token",
+			Role:                  "operator",
+			WalletBindingVerified: true,
+			CreatedAt:             time.Now().UTC(),
+			ExpiresAt:             time.Now().UTC().Add(time.Hour),
+			WalletAddress:         "cosmos1operatorlocalapproval",
+			ChainOperatorID:       "operator-local-approval",
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:          "cosmos1operatorlocalapproval",
+			ChainOperatorID:        "operator-local-approval",
+			ServerLabel:            "approved-node",
+			Status:                 "approved",
+			ApprovalEvidenceSource: "admin_session",
+			UpdatedAt:              time.Now().UTC(),
+		})
+
+		code, payload := callJSONHandler(t, svc.handleGPMServiceStart, http.MethodPost, "/v1/gpm/service/start", `{"session_token":"gpm-operator-local-approval-token"}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d body=%v", code, http.StatusForbidden, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "chain-governance approval evidence") {
+			t.Fatalf("error=%q want production approval evidence message", got)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("operator with local-only approval evidence should not execute commands, got=%v", cmds)
 		}
 	})
 
@@ -3899,12 +6246,13 @@ func TestGPMServiceLifecycleMutationSessionGate(t *testing.T) {
 					svc.serviceRestart = tc.command
 				}
 				svc.gpmState.putSession(gpmSession{
-					Token:           "gpm-operator-token",
-					Role:            "operator",
-					CreatedAt:       time.Now().UTC(),
-					ExpiresAt:       time.Now().UTC().Add(time.Hour),
-					WalletAddress:   "cosmos1operator",
-					ChainOperatorID: "operator-approved-1",
+					Token:                 "gpm-operator-token",
+					Role:                  "operator",
+					WalletBindingVerified: true,
+					CreatedAt:             time.Now().UTC(),
+					ExpiresAt:             time.Now().UTC().Add(time.Hour),
+					WalletAddress:         "cosmos1operator",
+					ChainOperatorID:       "operator-approved-1",
 				})
 				svc.gpmState.upsertOperator(gpmOperatorApplication{
 					WalletAddress:   "cosmos1operator",
@@ -3936,12 +6284,15 @@ func TestGPMServiceLifecycleMutationSessionGate(t *testing.T) {
 		svc.gpmState = newGPMRuntimeState()
 		svc.serviceRestart = "go version"
 		svc.gpmState.putSession(gpmSession{
-			Token:         "gpm-admin-token",
-			Role:          "admin",
-			CreatedAt:     time.Now().UTC(),
-			ExpiresAt:     time.Now().UTC().Add(time.Hour),
-			WalletAddress: "cosmos1admin",
+			Token:                  "gpm-admin-token",
+			Role:                   "admin",
+			WalletBindingVerified:  true,
+			AuthVerificationSource: "command",
+			CreatedAt:              time.Now().UTC(),
+			ExpiresAt:              time.Now().UTC().Add(time.Hour),
+			WalletAddress:          "cosmos1admin",
 		})
+		trustGPMAdminTestPolicy(svc, "cosmos1admin")
 
 		code, payload := callJSONHandler(t, svc.handleGPMServiceRestart, http.MethodPost, "/v1/gpm/service/restart", `{"session_token":"gpm-admin-token"}`)
 		if code != http.StatusOK {
@@ -3952,6 +6303,115 @@ func TestGPMServiceLifecycleMutationSessionGate(t *testing.T) {
 		}
 		if got, _ := payload["output"].(string); got == "" {
 			t.Fatalf("output should not be empty: %v", payload)
+		}
+	})
+}
+
+func TestGPMAdminSurfacesRejectUnboundAdminSessions(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	now := time.Now().UTC()
+	svc.gpmState.putSession(gpmSession{
+		Token:          "gpm-unbound-admin-token",
+		WalletAddress:  "cosmos1unboundadmin",
+		WalletProvider: "keplr",
+		Role:           "admin",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	})
+
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+		method  string
+		target  string
+		body    string
+	}{
+		{
+			name:    "audit_recent",
+			handler: svc.handleGPMAuditRecent,
+			method:  http.MethodGet,
+			target:  "/v1/gpm/audit/recent?session_token=gpm-unbound-admin-token",
+		},
+		{
+			name:    "admin_contribution_list",
+			handler: svc.handleGPMAdminContributionList,
+			method:  http.MethodPost,
+			target:  "/v1/gpm/admin/contributions/list",
+			body:    `{"session_token":"gpm-unbound-admin-token"}`,
+		},
+		{
+			name:    "admin_reward_review",
+			handler: svc.handleGPMAdminRewardReview,
+			method:  http.MethodPost,
+			target:  "/v1/gpm/admin/rewards/review",
+			body:    `{"session_token":"gpm-unbound-admin-token","wallet_address":"cosmos1reward"}`,
+		},
+		{
+			name:    "admin_reward_hold",
+			handler: svc.handleGPMAdminRewardHold,
+			method:  http.MethodPost,
+			target:  "/v1/gpm/admin/rewards/hold",
+			body:    `{"session_token":"gpm-unbound-admin-token","wallet_address":"cosmos1reward","action":"hold","reason":"test"}`,
+		},
+		{
+			name:    "operator_list",
+			handler: svc.handleGPMOperatorList,
+			method:  http.MethodPost,
+			target:  "/v1/gpm/onboarding/operator/list",
+			body:    `{"session_token":"gpm-unbound-admin-token"}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			code, payload := callJSONHandler(t, tc.handler, tc.method, tc.target, tc.body)
+			if code != http.StatusForbidden {
+				t.Fatalf("status=%d payload=%v", code, payload)
+			}
+			if got, _ := payload["error"].(string); !strings.Contains(got, "wallet-bound admin session") {
+				t.Fatalf("error=%q want wallet-bound admin session payload=%v", got, payload)
+			}
+		})
+	}
+}
+
+func TestGPMAdminSurfacesRevalidateCurrentAdminPolicy(t *testing.T) {
+	t.Run("rejects admin session when wallet is no longer allowlisted", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		token := seedGPMAdminTestSession(t, svc, "gpm-admin-stale-allowlist-token", "cosmos1staleadmin")
+		svc.gpmAdminWalletAllowlist = map[string]struct{}{}
+
+		code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?session_token="+token, "")
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "allowlisted") {
+			t.Fatalf("error=%q want allowlist revalidation message payload=%v", got, payload)
+		}
+	})
+
+	t.Run("rejects legacy persisted admin session without command verification source", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmState.putSession(gpmSession{
+			Token:                 "gpm-admin-legacy-source-token",
+			WalletAddress:         "cosmos1legacyadmin",
+			WalletProvider:        "keplr",
+			Role:                  "admin",
+			WalletBindingVerified: true,
+			CreatedAt:             time.Now().UTC(),
+			ExpiresAt:             time.Now().UTC().Add(time.Hour),
+		})
+		trustGPMAdminTestPolicy(svc, "cosmos1legacyadmin")
+
+		code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?session_token=gpm-admin-legacy-source-token", "")
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "command-backed wallet-bound admin session") {
+			t.Fatalf("error=%q want command-backed source revalidation message payload=%v", got, payload)
 		}
 	})
 }
@@ -4104,6 +6564,7 @@ func TestMutationAuthGuard(t *testing.T) {
 		svc, _ := newFakeService(t, true)
 		svc.addr = "0.0.0.0:8095"
 		svc.authToken = "secret-token"
+		adminToken := seedGPMAdminTestSession(t, svc, "gpm-bearer-admin", "cosmos1beareradmin")
 
 		code, payload := callJSONHandlerWithHeaders(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", "", map[string]string{
 			"Authorization": "Bearer secret-token",
@@ -4112,14 +6573,14 @@ func TestMutationAuthGuard(t *testing.T) {
 			t.Fatalf("disconnect status=%d body=%v", code, payload)
 		}
 
-		code, payload = callJSONHandlerWithHeaders(t, svc.handleSetProfile, http.MethodPost, "/v1/set_profile", `{"path_profile":"2hop"}`, map[string]string{
+		code, payload = callJSONHandlerWithHeaders(t, svc.handleSetProfile, http.MethodPost, "/v1/set_profile", `{"path_profile":"2hop","session_token":"`+adminToken+`"}`, map[string]string{
 			"Authorization": "Bearer secret-token",
 		})
 		if code != http.StatusOK {
 			t.Fatalf("set_profile status=%d body=%v", code, payload)
 		}
 
-		code, payload = callJSONHandlerWithHeaders(t, svc.handleUpdate, http.MethodPost, "/v1/update", `{}`, map[string]string{
+		code, payload = callJSONHandlerWithHeaders(t, svc.handleUpdate, http.MethodPost, "/v1/update", `{"session_token":"`+adminToken+`"}`, map[string]string{
 			"Authorization": "Bearer secret-token",
 		})
 		if code != http.StatusOK {
@@ -4382,7 +6843,8 @@ func TestIsAllowedVPNInterfaceName(t *testing.T) {
 
 func TestUpdateOmitOptionalFlagsWhenUnset(t *testing.T) {
 	svc, logPath := newFakeService(t, true)
-	code, payload := callJSONHandler(t, svc.handleUpdate, http.MethodPost, "/v1/update", `{}`)
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-update-omit-admin", "cosmos1updateomitadmin")
+	code, payload := callJSONHandler(t, svc.handleUpdate, http.MethodPost, "/v1/update", `{"session_token":"`+adminToken+`"}`)
 	if code != http.StatusOK {
 		t.Fatalf("status=%d body=%v", code, payload)
 	}
@@ -4505,8 +6967,8 @@ func TestResolveConnectOptionsDefaults(t *testing.T) {
 	if !got.prodProfile {
 		t.Fatalf("prodProfile=%t want true", got.prodProfile)
 	}
-	if !got.installRoute {
-		t.Fatalf("installRoute=%t want true", got.installRoute)
+	if got.installRoute {
+		t.Fatalf("installRoute=%t want false", got.installRoute)
 	}
 	if got.installRouteIsSet {
 		t.Fatalf("installRouteIsSet=%t want false", got.installRouteIsSet)
@@ -4716,22 +7178,7 @@ func TestCommandBackedHandlersReturn429WhenConcurrencySaturated(t *testing.T) {
 	}
 }
 
-func TestIsLoopbackBindAddrRequiresLoopbackDNSResolution(t *testing.T) {
-	originalLookup := lookupIPAddr
-	t.Cleanup(func() {
-		lookupIPAddr = originalLookup
-	})
-
-	lookupIPAddr = func(context.Context, string) ([]net.IPAddr, error) {
-		return []net.IPAddr{{IP: net.ParseIP("203.0.113.10")}}, nil
-	}
-
-	if isLoopbackBindAddr("localhost:8095") {
-		t.Fatal("expected localhost bind to be rejected when DNS resolves to non-loopback")
-	}
-}
-
-func TestIsAllowedUnauthLoopbackOriginRequiresLoopbackDNSResolution(t *testing.T) {
+func TestIsLoopbackBindAddrAllowsLiteralLoopbackAndLocalhostOnly(t *testing.T) {
 	originalLookup := lookupIPAddr
 	t.Cleanup(func() {
 		lookupIPAddr = originalLookup
@@ -4740,15 +7187,36 @@ func TestIsAllowedUnauthLoopbackOriginRequiresLoopbackDNSResolution(t *testing.T
 	lookupIPAddr = func(context.Context, string) ([]net.IPAddr, error) {
 		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
 	}
-	if !isAllowedUnauthLoopbackOrigin("127.0.0.1:8095", "http://localhost:8095") {
-		t.Fatal("expected localhost origin to pass when DNS resolves to loopback")
-	}
 
-	lookupIPAddr = func(context.Context, string) ([]net.IPAddr, error) {
-		return []net.IPAddr{{IP: net.ParseIP("203.0.113.11")}}, nil
+	if !isLoopbackBindAddr("localhost:8095") {
+		t.Fatal("expected localhost bind to be allowed without DNS trust")
 	}
-	if isAllowedUnauthLoopbackOrigin("127.0.0.1:8095", "http://localhost:8095") {
-		t.Fatal("expected localhost origin to be rejected when DNS resolves to non-loopback")
+	if !isLoopbackBindAddr("127.0.0.1:8095") {
+		t.Fatal("expected literal IPv4 loopback bind to be allowed")
+	}
+	if !isLoopbackBindAddr("[::1]:8095") {
+		t.Fatal("expected literal IPv6 loopback bind to be allowed")
+	}
+	if isLoopbackBindAddr("rebind.example:8095") {
+		t.Fatal("expected DNS-resolved loopback hostname bind to be rejected")
+	}
+}
+
+func TestIsAllowedUnauthLoopbackOriginAllowsLiteralLoopbackAndLocalhostOnly(t *testing.T) {
+	if !isAllowedUnauthLoopbackOrigin("127.0.0.1:8095", "http://localhost:8095") {
+		t.Fatal("expected localhost origin to pass without DNS trust")
+	}
+	if !isAllowedUnauthLoopbackOrigin("127.0.0.1:8095", "http://127.0.0.1:8095") {
+		t.Fatal("expected literal IPv4 loopback origin to pass")
+	}
+	if !isAllowedUnauthLoopbackOrigin("127.0.0.1:8095", "http://[::1]:8095") {
+		t.Fatal("expected literal IPv6 loopback origin to pass")
+	}
+	if isAllowedUnauthLoopbackOrigin("127.0.0.1:8095", "http://rebind.example:8095") {
+		t.Fatal("expected DNS-rebinding hostname origin to be rejected")
+	}
+	if isAllowedUnauthLoopbackOrigin("127.0.0.1:8095", "http://127.0.0.1:5173") {
+		t.Fatal("expected unauth loopback origin with different port to be rejected")
 	}
 }
 
@@ -4818,6 +7286,2937 @@ func TestGPMAuthChallengeVerifyAndSessionStatus(t *testing.T) {
 	}
 	if sessionReconciled {
 		t.Fatalf("session_reconciled=%v want=false payload=%v", sessionReconciled, payload)
+	}
+
+	code, payload = callJSONHandlerWithHeaders(
+		t,
+		svc.handleGPMSessionStatus,
+		http.MethodPost,
+		"/v1/gpm/session",
+		`{"action":"status"}`,
+		map[string]string{"X-GPM-Session-Token": sessionToken},
+	)
+	if code != http.StatusOK {
+		t.Fatalf("session status with X-GPM-Session-Token=%d body=%v", code, payload)
+	}
+	sessionPayload, _ = payload["session"].(map[string]any)
+	if statusRole, _ := sessionPayload["role"].(string); statusRole != "client" {
+		t.Fatalf("session header status role=%q want=client", statusRole)
+	}
+}
+
+func TestGPMSessionTokenHeaderSupportsPublicUserFlows(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-header-session", "cosmos1headersession", 2, true, true)
+
+	headers := map[string]string{"X-GPM-Session-Token": token}
+	for _, tc := range []struct {
+		name      string
+		handler   http.HandlerFunc
+		method    string
+		path      string
+		body      string
+		wantField string
+	}{
+		{
+			name:      "contribution_status_get",
+			handler:   svc.handleGPMContributionStatus,
+			method:    http.MethodGet,
+			path:      "/v1/gpm/contribution/status",
+			wantField: "contribution_profile",
+		},
+		{
+			name:      "contribution_status_post",
+			handler:   svc.handleGPMContributionStatus,
+			method:    http.MethodPost,
+			path:      "/v1/gpm/contribution/status",
+			body:      `{}`,
+			wantField: "contribution_profile",
+		},
+		{
+			name:      "rewards_current_week_get",
+			handler:   svc.handleGPMRewardsCurrentWeek,
+			method:    http.MethodGet,
+			path:      "/v1/gpm/rewards/current-week",
+			wantField: "reward",
+		},
+		{
+			name:      "rewards_history_get",
+			handler:   svc.handleGPMRewardsHistory,
+			method:    http.MethodGet,
+			path:      "/v1/gpm/rewards/history",
+			wantField: "rewards",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, payload := callJSONHandlerWithHeaders(t, tc.handler, tc.method, tc.path, tc.body, headers)
+			if code != http.StatusOK {
+				t.Fatalf("code=%d payload=%v", code, payload)
+			}
+			if _, ok := payload[tc.wantField]; !ok {
+				t.Fatalf("missing %q payload=%v", tc.wantField, payload)
+			}
+		})
+	}
+}
+
+func TestGPMContributionProductionRequiresTrustedEntitlementEvidence(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmConnectPolicyMode = "production"
+	token := seedGPMTestSession(t, svc, "gpm-prod-local-entitlements", "cosmos1prodlocalentitlements", 3, true, true)
+	markGPMTestSessionEntitlementsLocal(t, svc, token)
+
+	code, payload := callJSONHandler(t, svc.handleGPMContributionStatus, http.MethodGet, "/v1/gpm/contribution/status?session_token="+token, "")
+	if code != http.StatusOK {
+		t.Fatalf("status code=%d payload=%v", code, payload)
+	}
+	if canUse, _ := payload["can_use_micro_relays"].(bool); canUse {
+		t.Fatalf("can_use_micro_relays=%v want=false payload=%v", canUse, payload)
+	}
+	if canEnable, _ := payload["can_enable_requested_role"].(bool); canEnable {
+		t.Fatalf("can_enable_requested_role=%v want=false payload=%v", canEnable, payload)
+	}
+	if got, _ := payload["contribution_lock_reason"].(string); !strings.Contains(got, "trusted chain or signed entitlement evidence") {
+		t.Fatalf("contribution_lock_reason=%q want trusted evidence guidance payload=%v", got, payload)
+	}
+
+	code, payload = callJSONHandler(t, svc.handleGPMContributionEnable, http.MethodPost, "/v1/gpm/contribution/enable", `{
+		"session_token":"`+token+`",
+		"role":"micro-relay"
+	}`)
+	if code != http.StatusForbidden {
+		t.Fatalf("enable code=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+	}
+	if got, _ := payload["error"].(string); !strings.Contains(got, "trusted chain or signed entitlement evidence") {
+		t.Fatalf("enable error=%q want trusted evidence guidance payload=%v", got, payload)
+	}
+}
+
+func TestGPMContributionTierOneCannotUseOrProvideMicroRelay(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-tier1", "cosmos1tierone", 1, true, true)
+
+	code, payload := callJSONHandler(t, svc.handleGPMContributionStatus, http.MethodGet, "/v1/gpm/contribution/status?session_token="+token, "")
+	if code != http.StatusOK {
+		t.Fatalf("status code=%d payload=%v", code, payload)
+	}
+	if canUse, _ := payload["can_use_micro_relays"].(bool); canUse {
+		t.Fatalf("Tier 1 can_use_micro_relays=%v want=false payload=%v", canUse, payload)
+	}
+	if canEnable, _ := payload["can_enable_micro_relay"].(bool); canEnable {
+		t.Fatalf("Tier 1 can_enable_micro_relay=%v want=false payload=%v", canEnable, payload)
+	}
+
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-relay"}`,
+	)
+	if code != http.StatusForbidden {
+		t.Fatalf("enable code=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "Tier 2 or Tier 3") {
+		t.Fatalf("error=%q want Tier 2/3 payload=%v", errMsg, payload)
+	}
+}
+
+func TestGPMContributionEntitlementsRemainSessionBoundAfterEnvChange(t *testing.T) {
+	t.Setenv("GPM_STAKE_SATISFIED", "1")
+	t.Setenv("GPM_PREPAID_BALANCE_SATISFIED", "1")
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-session-bound-entitlements", "cosmos1sessionbound", 2, false, false)
+
+	code, payload := callJSONHandler(t, svc.handleGPMContributionStatus, http.MethodPost, "/v1/gpm/contribution/status", `{"session_token":"`+token+`"}`)
+	if code != http.StatusOK {
+		t.Fatalf("status code=%d payload=%v", code, payload)
+	}
+	if stakeSatisfied, _ := payload["stake_satisfied"].(bool); stakeSatisfied {
+		t.Fatalf("stake_satisfied=%v want=false from issued session payload=%v", stakeSatisfied, payload)
+	}
+	if prepaidSatisfied, _ := payload["prepaid_balance_satisfied"].(bool); prepaidSatisfied {
+		t.Fatalf("prepaid_balance_satisfied=%v want=false from issued session payload=%v", prepaidSatisfied, payload)
+	}
+	if canUse, _ := payload["can_use_micro_relays"].(bool); canUse {
+		t.Fatalf("can_use_micro_relays=%v want=false after env flip payload=%v", canUse, payload)
+	}
+
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-relay"}`,
+	)
+	if code != http.StatusForbidden {
+		t.Fatalf("enable code=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "stake requirement is not satisfied") {
+		t.Fatalf("error=%q want session-bound stake guidance payload=%v", errMsg, payload)
+	}
+}
+
+func TestGPMContributionMicroExitBetaRequiresExplicitPolicyOptIn(t *testing.T) {
+	t.Setenv("GPM_MICRO_EXIT_BETA", "1")
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-micro-exit-default-off", "cosmos1microexitdefaultoff", 3, true, true)
+
+	code, payload := callJSONHandler(t, svc.handleGPMContributionStatus, http.MethodGet, "/v1/gpm/contribution/status?session_token="+token, "")
+	if code != http.StatusOK {
+		t.Fatalf("status code=%d payload=%v", code, payload)
+	}
+	if allowed, _ := payload["micro_exit_beta_allowed"].(bool); allowed {
+		t.Fatalf("micro_exit_beta_allowed=%v want=false by default payload=%v", allowed, payload)
+	}
+	if canExit, _ := payload["can_enable_micro_exit"].(bool); canExit {
+		t.Fatalf("can_enable_micro_exit=%v want=false by default payload=%v", canExit, payload)
+	}
+
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-exit"}`,
+	)
+	if code != http.StatusForbidden {
+		t.Fatalf("enable code=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "micro-exit beta is disabled by policy") {
+		t.Fatalf("error=%q want disabled-by-policy guidance payload=%v", errMsg, payload)
+	}
+}
+
+func TestGPMContributionMicroExitBetaMalformedPolicyFailsClosed(t *testing.T) {
+	t.Setenv("GPM_MICRO_EXIT_BETA_ALLOWED", "definitely")
+	t.Setenv("TDPN_MICRO_EXIT_BETA_ALLOWED", "1")
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-micro-exit-malformed", "cosmos1microexitmalformed", 3, true, true)
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-exit"}`,
+	)
+	if code != http.StatusForbidden {
+		t.Fatalf("enable code=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+	}
+	status, _ := payload["status"].(map[string]any)
+	if allowed, _ := status["micro_exit_beta_allowed"].(bool); allowed {
+		t.Fatalf("micro_exit_beta_allowed=%v want=false when primary policy value is malformed payload=%v", allowed, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "micro-exit beta is disabled by policy") {
+		t.Fatalf("error=%q want disabled-by-policy guidance payload=%v", errMsg, payload)
+	}
+}
+
+func TestGPMContributionTierTwoEnablesMicroExitAndCurrentWeekReward(t *testing.T) {
+	t.Setenv("GPM_MICRO_EXIT_BETA_ALLOWED", "1")
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	t.Setenv("GPM_CONTRIBUTION_TRAFFIC_PROOF_MODE", "trusted-counter-test")
+	t.Setenv("GPM_AGENT_UPLINK_MBPS", "120")
+	t.Setenv("GPM_AGENT_DOWNLINK_MBPS", "300")
+	t.Setenv("GPM_AGENT_LATENCY_MS", "18")
+	t.Setenv("GPM_AGENT_PACKET_LOSS_PCT", "0")
+	t.Setenv("GPM_AGENT_MEMORY_GB", "16")
+	t.Setenv("GPM_AGENT_RELIABILITY_PCT", "99")
+	token := seedGPMTestSession(t, svc, "gpm-tier2", "cosmos1tiertwo", 2, true, true)
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-exit"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("enable code=%d payload=%v", code, payload)
+	}
+	if canExit, _ := payload["can_enable_micro_exit"].(bool); !canExit {
+		t.Fatalf("can_enable_micro_exit=%v want=true payload=%v", canExit, payload)
+	}
+	profile, _ := payload["contribution_profile"].(map[string]any)
+	if role, _ := profile["role"].(string); role != "micro-exit" {
+		t.Fatalf("profile role=%q want=micro-exit payload=%v", role, payload)
+	}
+	if maxSessions := intFromAny(profile["max_forwarded_sessions"]); maxSessions <= 0 {
+		t.Fatalf("max_forwarded_sessions=%d want>0 profile=%v", maxSessions, profile)
+	}
+
+	state, ok := svc.gpmState.getContribution("cosmos1tiertwo")
+	if !ok {
+		t.Fatal("expected contribution state to be persisted")
+	}
+	state.LastMeteredAt = time.Now().UTC().Add(-2 * time.Hour)
+	svc.gpmState.upsertContribution(state)
+
+	code, payload = callJSONHandler(t, svc.handleGPMRewardsCurrentWeek, http.MethodGet, "/v1/gpm/rewards/current-week?session_token="+token, "")
+	if code != http.StatusOK {
+		t.Fatalf("current-week code=%d payload=%v", code, payload)
+	}
+	reward, _ := payload["reward"].(map[string]any)
+	if frequency, _ := payload["settlement_frequency"].(string); frequency != "weekly" {
+		t.Fatalf("settlement_frequency=%q want=weekly payload=%v", frequency, payload)
+	}
+	if units := floatFromAny(reward["reward_units"]); units <= 0 {
+		t.Fatalf("reward_units=%v want>0 reward=%v", reward["reward_units"], reward)
+	}
+}
+
+func TestGPMContributionRewardReadsAcceptPostSessionTokenBody(t *testing.T) {
+	t.Setenv("GPM_CONTRIBUTION_TRAFFIC_PROOF_MODE", "trusted-counter-test")
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-post-body-reward", "cosmos1postbodyreward", 2, true, true)
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-relay"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("enable code=%d payload=%v", code, payload)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		handler   http.HandlerFunc
+		path      string
+		wantField string
+	}{
+		{
+			name:      "contribution_status",
+			handler:   svc.handleGPMContributionStatus,
+			path:      "/v1/gpm/contribution/status",
+			wantField: "contribution_profile",
+		},
+		{
+			name:      "rewards_current_week",
+			handler:   svc.handleGPMRewardsCurrentWeek,
+			path:      "/v1/gpm/rewards/current-week",
+			wantField: "reward",
+		},
+		{
+			name:      "rewards_history",
+			handler:   svc.handleGPMRewardsHistory,
+			path:      "/v1/gpm/rewards/history",
+			wantField: "rewards",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, payload := callJSONHandler(t, tc.handler, http.MethodPost, tc.path, `{"session_token":"`+token+`"}`)
+			if code != http.StatusOK {
+				t.Fatalf("%s POST code=%d payload=%v", tc.name, code, payload)
+			}
+			if _, ok := payload[tc.wantField]; !ok {
+				t.Fatalf("%s missing %q payload=%v", tc.name, tc.wantField, payload)
+			}
+		})
+	}
+}
+
+func TestGPMContributionToggleRejectsUnboundWalletSession(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		handler http.HandlerFunc
+		body    string
+	}{
+		{
+			name:    "enable",
+			handler: nil,
+			body:    `{"session_token":"gpm-unbound-contribution","role":"micro-relay"}`,
+		},
+		{
+			name:    "disable",
+			handler: nil,
+			body:    `{"session_token":"gpm-unbound-contribution"}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := newFakeService(t, false)
+			svc.gpmState = newGPMRuntimeState()
+			seedGPMUnboundTestSession(t, svc, "gpm-unbound-contribution", "cosmos1unboundcontribution")
+			handler := svc.handleGPMContributionEnable
+			if tc.name == "disable" {
+				handler = svc.handleGPMContributionDisable
+			}
+
+			code, payload := callJSONHandler(t, handler, http.MethodPost, "/v1/gpm/contribution/"+tc.name, tc.body)
+			if code != http.StatusForbidden {
+				t.Fatalf("status=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+			}
+			if got, _ := payload["error"].(string); !strings.Contains(got, "wallet-bound session") {
+				t.Fatalf("error=%q want wallet-bound guidance payload=%v", got, payload)
+			}
+			if _, ok := svc.gpmState.getContribution("cosmos1unboundcontribution"); ok {
+				t.Fatalf("unbound %s should not persist contribution state", tc.name)
+			}
+		})
+	}
+}
+
+func TestGPMPublicSessionEndpointsRejectStaleWalletPolicy(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler func(*Service) http.HandlerFunc
+		method  string
+		path    string
+		body    string
+	}{
+		{
+			name:    "contribution_status_get",
+			handler: func(svc *Service) http.HandlerFunc { return svc.handleGPMContributionStatus },
+			method:  http.MethodGet,
+			path:    "/v1/gpm/contribution/status?session_token=gpm-stale-wallet-policy",
+		},
+		{
+			name:    "contribution_status_post",
+			handler: func(svc *Service) http.HandlerFunc { return svc.handleGPMContributionStatus },
+			method:  http.MethodPost,
+			path:    "/v1/gpm/contribution/status",
+			body:    `{"session_token":"gpm-stale-wallet-policy"}`,
+		},
+		{
+			name:    "contribution_enable",
+			handler: func(svc *Service) http.HandlerFunc { return svc.handleGPMContributionEnable },
+			method:  http.MethodPost,
+			path:    "/v1/gpm/contribution/enable",
+			body:    `{"session_token":"gpm-stale-wallet-policy","role":"micro-relay"}`,
+		},
+		{
+			name:    "contribution_disable",
+			handler: func(svc *Service) http.HandlerFunc { return svc.handleGPMContributionDisable },
+			method:  http.MethodPost,
+			path:    "/v1/gpm/contribution/disable",
+			body:    `{"session_token":"gpm-stale-wallet-policy"}`,
+		},
+		{
+			name:    "settlement_reserve_funds",
+			handler: func(svc *Service) http.HandlerFunc { return svc.handleGPMSettlementReserveFunds },
+			method:  http.MethodPost,
+			path:    "/v1/gpm/settlement/reserve-funds",
+			body:    `{"session_token":"gpm-stale-wallet-policy","session_id":"vpn-session-stale-policy","amount_micros":200000,"currency":"TDPNC"}`,
+		},
+		{
+			name:    "rewards_current_week_get",
+			handler: func(svc *Service) http.HandlerFunc { return svc.handleGPMRewardsCurrentWeek },
+			method:  http.MethodGet,
+			path:    "/v1/gpm/rewards/current-week?session_token=gpm-stale-wallet-policy",
+		},
+		{
+			name:    "rewards_current_week_post",
+			handler: func(svc *Service) http.HandlerFunc { return svc.handleGPMRewardsCurrentWeek },
+			method:  http.MethodPost,
+			path:    "/v1/gpm/rewards/current-week",
+			body:    `{"session_token":"gpm-stale-wallet-policy"}`,
+		},
+		{
+			name:    "rewards_history_get",
+			handler: func(svc *Service) http.HandlerFunc { return svc.handleGPMRewardsHistory },
+			method:  http.MethodGet,
+			path:    "/v1/gpm/rewards/history?session_token=gpm-stale-wallet-policy",
+		},
+		{
+			name:    "rewards_history_post",
+			handler: func(svc *Service) http.HandlerFunc { return svc.handleGPMRewardsHistory },
+			method:  http.MethodPost,
+			path:    "/v1/gpm/rewards/history",
+			body:    `{"session_token":"gpm-stale-wallet-policy"}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := newFakeService(t, false)
+			svc.gpmState = newGPMRuntimeState()
+			seedGPMTestSession(t, svc, "gpm-stale-wallet-policy", "cosmos1stalepolicy", 2, true, true)
+			svc.gpmAuthExpectedChainID = "gpm-testnet-1"
+
+			code, payload := callJSONHandler(t, tc.handler(svc), tc.method, tc.path, tc.body)
+			if code != http.StatusForbidden {
+				t.Fatalf("status=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+			}
+			errMsg, _ := payload["error"].(string)
+			if !strings.Contains(errMsg, "session no longer satisfies wallet auth policy") {
+				t.Fatalf("error=%q want stale wallet policy guidance payload=%v", errMsg, payload)
+			}
+		})
+	}
+}
+
+func TestGPMContributionCurrentWeekHoldsWithoutTrustedTrafficProof(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-traffic-proof-hold", "cosmos1trafficproofhold", 2, true, true)
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-relay"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("enable code=%d payload=%v", code, payload)
+	}
+	now := time.Now().UTC()
+	state, ok := svc.gpmState.getContribution("cosmos1trafficproofhold")
+	if !ok {
+		t.Fatal("expected contribution state")
+	}
+	state.MeteredWeekStartUTC = gpmWeekStartUTC(now).Format(time.RFC3339)
+	state.MeteredSeconds = 3600
+	state.ValidBytes = 100_000_000
+	state.PendingRewardUnits = gpmPendingRewardUnits(state)
+	state.LastMeteredAt = now
+	svc.gpmState.upsertContribution(state)
+
+	code, payload = callJSONHandler(t, svc.handleGPMRewardsCurrentWeek, http.MethodGet, "/v1/gpm/rewards/current-week?session_token="+token, "")
+	if code != http.StatusOK {
+		t.Fatalf("current-week code=%d payload=%v", code, payload)
+	}
+	reward, _ := payload["reward"].(map[string]any)
+	if status, _ := reward["status"].(string); status != "hold" {
+		t.Fatalf("status=%q want=hold reward=%v payload=%v", status, reward, payload)
+	}
+	if proof, _ := reward["traffic_proof_status"].(string); proof != "missing" {
+		t.Fatalf("traffic_proof_status=%q want=missing reward=%v", proof, reward)
+	}
+	if units := floatFromAny(reward["reward_units"]); units != 0 {
+		t.Fatalf("reward_units=%v want=0 reward=%v", reward["reward_units"], reward)
+	}
+	if sources := fmt.Sprint(reward["hold_sources"]); !strings.Contains(sources, "pending_traffic_proof") {
+		t.Fatalf("hold_sources=%v want pending_traffic_proof reward=%v", reward["hold_sources"], reward)
+	}
+}
+
+func TestGPMContributionAdaptiveCapacityDemotesLowQualityDevices(t *testing.T) {
+	t.Setenv("GPM_AGENT_UPLINK_MBPS", "3")
+	t.Setenv("GPM_AGENT_DOWNLINK_MBPS", "12")
+	t.Setenv("GPM_AGENT_LATENCY_MS", "140")
+	t.Setenv("GPM_AGENT_PACKET_LOSS_PCT", "4")
+	t.Setenv("GPM_AGENT_RELIABILITY_PCT", "55")
+	low := gpmAdaptiveContributionProfile("micro-relay")
+	if low.DemotionState != "disabled_capacity" && low.DemotionState != "disabled_health" {
+		t.Fatalf("low-quality demotion_state=%q want disabled_capacity/disabled_health profile=%+v", low.DemotionState, low)
+	}
+	if strings.TrimSpace(low.LockReason) == "" {
+		t.Fatalf("low-quality lock reason missing profile=%+v", low)
+	}
+
+	t.Setenv("GPM_AGENT_UPLINK_MBPS", "200")
+	t.Setenv("GPM_AGENT_DOWNLINK_MBPS", "400")
+	t.Setenv("GPM_AGENT_LATENCY_MS", "12")
+	t.Setenv("GPM_AGENT_PACKET_LOSS_PCT", "0")
+	t.Setenv("GPM_AGENT_RELIABILITY_PCT", "99")
+	high := gpmAdaptiveContributionProfile("micro-relay")
+	if high.MaxForwardedSessions <= low.MaxForwardedSessions {
+		t.Fatalf("high max sessions=%d low=%d", high.MaxForwardedSessions, low.MaxForwardedSessions)
+	}
+	if high.MaxBandwidthMbps <= low.MaxBandwidthMbps {
+		t.Fatalf("high bandwidth=%d low=%d", high.MaxBandwidthMbps, low.MaxBandwidthMbps)
+	}
+	if high.DemotionState != "none" {
+		t.Fatalf("high-quality demotion_state=%q want=none profile=%+v", high.DemotionState, high)
+	}
+}
+
+func TestGPMContributionWeeklyHistoryClosesPreviousEpochPendingAdminChain(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-history", "cosmos1history", 3, true, true)
+
+	currentWeekStart := gpmWeekStartUTC(time.Now().UTC())
+	previousWeekStart := currentWeekStart.AddDate(0, 0, -7)
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           "cosmos1history",
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              3,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		CapacityScore:           82,
+		HealthScore:             91,
+		MaxForwardedSessions:    12,
+		MaxBandwidthMbps:        60,
+		UptimeReliabilityPct:    98,
+		DemotionState:           "none",
+		MeteredWeekStartUTC:     previousWeekStart.Format(time.RFC3339),
+		MeteredSeconds:          int64((36 * time.Hour).Seconds()),
+		ValidBytes:              99_000_000,
+		LastMeteredAt:           previousWeekStart.Add(36 * time.Hour),
+		UpdatedAt:               previousWeekStart.Add(36 * time.Hour),
+	})
+
+	code, payload := callJSONHandler(t, svc.handleGPMRewardsHistory, http.MethodGet, "/v1/gpm/rewards/history?session_token="+token, "")
+	if code != http.StatusOK {
+		t.Fatalf("history code=%d payload=%v", code, payload)
+	}
+	if count := intFromAny(payload["count"]); count != 1 {
+		t.Fatalf("history count=%d want=1 payload=%v", count, payload)
+	}
+	rewards, _ := payload["rewards"].([]any)
+	if len(rewards) != 1 {
+		t.Fatalf("rewards len=%d want=1 payload=%v", len(rewards), payload)
+	}
+	reward, _ := rewards[0].(map[string]any)
+	if status, _ := reward["status"].(string); status != "hold" {
+		t.Fatalf("reward status=%q want=hold reward=%v", status, reward)
+	}
+	if proof, _ := reward["traffic_proof_status"].(string); proof != "missing" {
+		t.Fatalf("traffic_proof_status=%q want=missing reward=%v", proof, reward)
+	}
+	if sources := fmt.Sprint(reward["hold_sources"]); !strings.Contains(sources, "pending_traffic_proof") {
+		t.Fatalf("hold_sources=%v want pending_traffic_proof reward=%v", reward["hold_sources"], reward)
+	}
+	if payoutAllowed, _ := reward["payout_allowed"].(bool); payoutAllowed {
+		t.Fatalf("payout_allowed=%v want=false until admin+chain finalization reward=%v", payoutAllowed, reward)
+	}
+	if state, _ := reward["settlement_finalization_state"].(string); state != "pending_admin_chain_finalization" {
+		t.Fatalf("settlement_finalization_state=%q reward=%v", state, reward)
+	}
+	if start, _ := reward["week_start_utc"].(string); start != previousWeekStart.Format(time.RFC3339) {
+		t.Fatalf("week_start_utc=%q want=%q reward=%v", start, previousWeekStart.Format(time.RFC3339), reward)
+	}
+}
+
+func TestGPMContributionWeeklyHistoryCanonicalizesStoredWeekStart(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-history-canonical", "cosmos1historycanon", 3, true, true)
+
+	currentWeekStart := gpmWeekStartUTC(time.Now().UTC())
+	previousWeekStart := currentWeekStart.AddDate(0, 0, -7)
+	nonCanonicalStoredStart := previousWeekStart.AddDate(0, 0, 2).Add(6 * time.Hour)
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           "cosmos1historycanon",
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              3,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		CapacityScore:           82,
+		HealthScore:             91,
+		MaxForwardedSessions:    12,
+		MaxBandwidthMbps:        60,
+		UptimeReliabilityPct:    98,
+		DemotionState:           "none",
+		MeteredWeekStartUTC:     nonCanonicalStoredStart.Format(time.RFC3339),
+		MeteredSeconds:          int64((18 * time.Hour).Seconds()),
+		ValidBytes:              57_000_000,
+		LastMeteredAt:           nonCanonicalStoredStart.Add(18 * time.Hour),
+		UpdatedAt:               nonCanonicalStoredStart.Add(18 * time.Hour),
+	})
+
+	code, payload := callJSONHandler(t, svc.handleGPMRewardsHistory, http.MethodGet, "/v1/gpm/rewards/history?session_token="+token, "")
+	if code != http.StatusOK {
+		t.Fatalf("history code=%d payload=%v", code, payload)
+	}
+	rewards, _ := payload["rewards"].([]any)
+	if len(rewards) != 1 {
+		t.Fatalf("rewards len=%d want=1 payload=%v", len(rewards), payload)
+	}
+	reward, _ := rewards[0].(map[string]any)
+	if start, _ := reward["week_start_utc"].(string); start != previousWeekStart.Format(time.RFC3339) {
+		t.Fatalf("week_start_utc=%q want canonical %q reward=%v", start, previousWeekStart.Format(time.RFC3339), reward)
+	}
+	state, ok := svc.gpmState.getContribution("cosmos1historycanon")
+	if !ok {
+		t.Fatal("expected contribution state")
+	}
+	if state.MeteredWeekStartUTC != currentWeekStart.Format(time.RFC3339) {
+		t.Fatalf("metered_week_start_utc=%q want current canonical %q state=%+v", state.MeteredWeekStartUTC, currentWeekStart.Format(time.RFC3339), state)
+	}
+}
+
+func TestGPMContributionWeeklyHistoryRolloverIsIdempotentByEpoch(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-history-idempotent", "cosmos1historyidem", 3, true, true)
+
+	currentWeekStart := gpmWeekStartUTC(time.Now().UTC())
+	previousWeekStart := currentWeekStart.AddDate(0, 0, -7)
+	existing := gpmWeeklyRewardSummary{
+		WalletAddress:               "cosmos1historyidem",
+		WeekStartUTC:                previousWeekStart.Format(time.RFC3339),
+		WeekEndUTC:                  previousWeekStart.Add(7 * 24 * time.Hour).Format(time.RFC3339),
+		Status:                      "hold",
+		Role:                        "micro-relay",
+		TrafficProofStatus:          "missing",
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		HoldSources:                 []string{"pending_traffic_proof"},
+	}
+	svc.gpmState.upsertRewardHistory("cosmos1historyidem", existing)
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           "cosmos1historyidem",
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              3,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		CapacityScore:           82,
+		HealthScore:             91,
+		MaxForwardedSessions:    12,
+		MaxBandwidthMbps:        60,
+		UptimeReliabilityPct:    98,
+		DemotionState:           "none",
+		MeteredWeekStartUTC:     previousWeekStart.Format(time.RFC3339),
+		MeteredSeconds:          int64((12 * time.Hour).Seconds()),
+		ValidBytes:              42_000_000,
+		LastMeteredAt:           previousWeekStart.Add(12 * time.Hour),
+		UpdatedAt:               previousWeekStart.Add(12 * time.Hour),
+	})
+
+	for i := 0; i < 2; i++ {
+		code, payload := callJSONHandler(t, svc.handleGPMRewardsHistory, http.MethodGet, "/v1/gpm/rewards/history?session_token="+token, "")
+		if code != http.StatusOK {
+			t.Fatalf("history call %d code=%d payload=%v", i+1, code, payload)
+		}
+		if count := intFromAny(payload["count"]); count != 1 {
+			t.Fatalf("history call %d count=%d want=1 payload=%v", i+1, count, payload)
+		}
+		rewards, _ := payload["rewards"].([]any)
+		if len(rewards) != 1 {
+			t.Fatalf("history call %d rewards len=%d want=1 payload=%v", i+1, len(rewards), payload)
+		}
+		reward, _ := rewards[0].(map[string]any)
+		if start, _ := reward["week_start_utc"].(string); start != previousWeekStart.Format(time.RFC3339) {
+			t.Fatalf("history call %d week_start_utc=%q want=%q reward=%v", i+1, start, previousWeekStart.Format(time.RFC3339), reward)
+		}
+	}
+}
+
+func TestGPMContributionAutoDemotionPersistsAndRewardsHold(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-auto-demote", "cosmos1autodemote", 2, true, true)
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-relay"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("enable code=%d payload=%v", code, payload)
+	}
+	state, ok := svc.gpmState.getContribution("cosmos1autodemote")
+	if !ok {
+		t.Fatal("expected contribution state")
+	}
+	now := time.Now().UTC()
+	state.MeteredWeekStartUTC = gpmWeekStartUTC(now).Format(time.RFC3339)
+	state.MeteredSeconds = 3600
+	state.ValidBytes = 25_000_000
+	state.PendingRewardUnits = gpmPendingRewardUnits(state)
+	state.LastMeteredAt = now.Add(-1 * time.Hour)
+	svc.gpmState.upsertContribution(state)
+
+	seedGPMTestSession(t, svc, token, "cosmos1autodemote", 1, true, true)
+	code, payload = callJSONHandler(t, svc.handleGPMRewardsCurrentWeek, http.MethodGet, "/v1/gpm/rewards/current-week?session_token="+token, "")
+	if code != http.StatusOK {
+		t.Fatalf("reward code=%d payload=%v", code, payload)
+	}
+	reward, _ := payload["reward"].(map[string]any)
+	if status, _ := reward["status"].(string); status != "hold" {
+		t.Fatalf("reward status=%q want=hold reward=%v payload=%v", status, reward, payload)
+	}
+	if units := floatFromAny(reward["reward_units"]); units != 0 {
+		t.Fatalf("reward_units=%v want=0 reward=%v", reward["reward_units"], reward)
+	}
+	state, ok = svc.gpmState.getContribution("cosmos1autodemote")
+	if !ok {
+		t.Fatal("expected contribution state after demotion")
+	}
+	if state.Enabled {
+		t.Fatalf("state.Enabled=true want=false state=%+v", state)
+	}
+	if state.DemotionState != "auto_demoted" {
+		t.Fatalf("demotion_state=%q want=auto_demoted state=%+v", state.DemotionState, state)
+	}
+	if !strings.Contains(state.LockReason, "Tier 2 or Tier 3") {
+		t.Fatalf("lock_reason=%q want Tier 2/3 state=%+v", state.LockReason, state)
+	}
+	if state.MeteredSeconds != 3600 {
+		t.Fatalf("metered_seconds=%d want=3600; ineligible session must not accrue extra time state=%+v", state.MeteredSeconds, state)
+	}
+	if state.ValidBytes != 25_000_000 {
+		t.Fatalf("valid_bytes=%d want=25000000; ineligible session must not accrue extra bytes state=%+v", state.ValidBytes, state)
+	}
+	if state.LastMeteredAt.Before(now) {
+		t.Fatalf("last_metered_at=%s should move to demotion time after %s", state.LastMeteredAt, now)
+	}
+
+	seedGPMTestSession(t, svc, token, "cosmos1autodemote", 2, true, true)
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-relay"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("reenable after demotion code=%d payload=%v", code, payload)
+	}
+	state, ok = svc.gpmState.getContribution("cosmos1autodemote")
+	if !ok {
+		t.Fatal("expected contribution state after reenable")
+	}
+	if state.MeteredSeconds != 0 {
+		t.Fatalf("metered_seconds=%d want=0; auto-demoted metering must not carry into a later eligible opt-in state=%+v", state.MeteredSeconds, state)
+	}
+	if state.ValidBytes != 0 {
+		t.Fatalf("valid_bytes=%d want=0; auto-demoted metering must not carry into a later eligible opt-in state=%+v", state.ValidBytes, state)
+	}
+}
+
+func TestGPMContributionDisablePreservesLastContributionRoleForSettlement(t *testing.T) {
+	t.Setenv("GPM_MICRO_EXIT_BETA_ALLOWED", "1")
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-disable-role", "cosmos1disablerole", 3, true, true)
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-exit"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("enable code=%d payload=%v", code, payload)
+	}
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMContributionDisable,
+		http.MethodPost,
+		"/v1/gpm/contribution/disable",
+		`{"session_token":"`+token+`"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("disable code=%d payload=%v", code, payload)
+	}
+	state, ok := svc.gpmState.getContribution("cosmos1disablerole")
+	if !ok {
+		t.Fatal("expected contribution state")
+	}
+	if state.Enabled {
+		t.Fatalf("state.Enabled=true want=false state=%+v", state)
+	}
+	if state.Role != "micro-exit" {
+		t.Fatalf("state.Role=%q want=micro-exit state=%+v", state.Role, state)
+	}
+}
+
+func TestGPMContributionReenablePreservesCurrentWeekMetering(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-reenable-metering", "cosmos1reenablemetering", 3, true, true)
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-relay"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("enable code=%d payload=%v", code, payload)
+	}
+	now := time.Now().UTC()
+	state, ok := svc.gpmState.getContribution("cosmos1reenablemetering")
+	if !ok {
+		t.Fatal("expected contribution state")
+	}
+	state.MeteredWeekStartUTC = gpmWeekStartUTC(now).Format(time.RFC3339)
+	state.MeteredSeconds = 3600
+	state.ValidBytes = 25_000_000
+	state.PendingRewardUnits = gpmPendingRewardUnits(state)
+	state.LastMeteredAt = now
+	svc.gpmState.upsertContribution(state)
+
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMContributionDisable,
+		http.MethodPost,
+		"/v1/gpm/contribution/disable",
+		`{"session_token":"`+token+`"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("disable code=%d payload=%v", code, payload)
+	}
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-relay"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("reenable code=%d payload=%v", code, payload)
+	}
+	state, ok = svc.gpmState.getContribution("cosmos1reenablemetering")
+	if !ok {
+		t.Fatal("expected contribution state after reenable")
+	}
+	if state.MeteredSeconds < 3600 {
+		t.Fatalf("metered_seconds=%d want>=3600 state=%+v", state.MeteredSeconds, state)
+	}
+	if state.ValidBytes < 25_000_000 {
+		t.Fatalf("valid_bytes=%d want>=25000000 state=%+v", state.ValidBytes, state)
+	}
+	if state.LastMeteredAt.Before(now) {
+		t.Fatalf("last_metered_at=%s should restart at re-enable time after %s", state.LastMeteredAt, now)
+	}
+}
+
+func TestGPMContributionRoleSwitchDoesNotRerateExistingMetering(t *testing.T) {
+	t.Setenv("GPM_MICRO_EXIT_BETA_ALLOWED", "1")
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-role-switch-metering", "cosmos1roleswitchmetering", 3, true, true)
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-relay"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("enable relay code=%d payload=%v", code, payload)
+	}
+	now := time.Now().UTC()
+	state, ok := svc.gpmState.getContribution("cosmos1roleswitchmetering")
+	if !ok {
+		t.Fatal("expected contribution state")
+	}
+	state.MeteredWeekStartUTC = gpmWeekStartUTC(now).Format(time.RFC3339)
+	state.MeteredSeconds = 7200
+	state.ValidBytes = 50_000_000
+	state.PendingRewardUnits = gpmPendingRewardUnits(state)
+	state.LastMeteredAt = now
+	svc.gpmState.upsertContribution(state)
+
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMContributionDisable,
+		http.MethodPost,
+		"/v1/gpm/contribution/disable",
+		`{"session_token":"`+token+`"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("disable relay code=%d payload=%v", code, payload)
+	}
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-exit"}`,
+	)
+	if code != http.StatusConflict {
+		t.Fatalf("enable exit code=%d payload=%v want conflict", code, payload)
+	}
+	if got, _ := payload["error"].(string); !strings.Contains(got, "next weekly epoch") {
+		t.Fatalf("expected weekly epoch lock guidance, got payload=%v", payload)
+	}
+	state, ok = svc.gpmState.getContribution("cosmos1roleswitchmetering")
+	if !ok {
+		t.Fatal("expected contribution state after rejected role switch")
+	}
+	if state.Role != "micro-relay" {
+		t.Fatalf("role=%q want=micro-relay after rejected role switch state=%+v", state.Role, state)
+	}
+	if state.MeteredSeconds != 7200 || state.ValidBytes != 50_000_000 {
+		t.Fatalf("rejected role switch changed metering state=%+v", state)
+	}
+	history := svc.gpmState.rewardHistoryFor("cosmos1roleswitchmetering")
+	if len(history) != 0 {
+		t.Fatalf("history len=%d want=0 after rejected role switch history=%+v", len(history), history)
+	}
+}
+
+func TestGPMContributionRoleSwitchWithoutCurrentWeekMeteringIsAllowed(t *testing.T) {
+	t.Setenv("GPM_MICRO_EXIT_BETA_ALLOWED", "1")
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-role-switch-zero", "cosmos1roleswitchzero", 3, true, true)
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-relay"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("enable relay code=%d payload=%v", code, payload)
+	}
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-exit"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("enable exit code=%d payload=%v", code, payload)
+	}
+	state, ok := svc.gpmState.getContribution("cosmos1roleswitchzero")
+	if !ok {
+		t.Fatal("expected contribution state after zero-metering role switch")
+	}
+	if state.Role != "micro-exit" {
+		t.Fatalf("role=%q want=micro-exit state=%+v", state.Role, state)
+	}
+}
+
+func TestGPMContributionFailedRoleEnableDoesNotDisableActiveRole(t *testing.T) {
+	t.Setenv("GPM_MICRO_EXIT_BETA_ALLOWED", "0")
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-failed-role-enable", "cosmos1failedroleenable", 3, true, true)
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-relay"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("enable relay code=%d payload=%v", code, payload)
+	}
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+token+`","role":"micro-exit"}`,
+	)
+	if code != http.StatusForbidden {
+		t.Fatalf("enable locked exit code=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+	}
+	state, ok := svc.gpmState.getContribution("cosmos1failedroleenable")
+	if !ok {
+		t.Fatal("expected contribution state")
+	}
+	if !state.Enabled {
+		t.Fatalf("active micro-relay was disabled by failed micro-exit request state=%+v", state)
+	}
+	if state.Role != "micro-relay" {
+		t.Fatalf("role=%q want=micro-relay state=%+v", state.Role, state)
+	}
+	if state.DemotionState != "none" {
+		t.Fatalf("demotion_state=%q want=none state=%+v", state.DemotionState, state)
+	}
+}
+
+func TestGPMAdminContributionListRequiresAdminAndReturnsReviewSurface(t *testing.T) {
+	t.Setenv("GPM_MICRO_EXIT_BETA_ALLOWED", "1")
+	t.Setenv("GPM_CONTRIBUTION_TRAFFIC_PROOF_MODE", "trusted-counter-test")
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-review", "cosmos1adminreview")
+	clientToken := seedGPMTestSession(t, svc, "gpm-client-review", "cosmos1clientreview", 3, true, true)
+	microExitToken := seedGPMTestSession(t, svc, "gpm-client-review-exit", "cosmos1clientreviewexit", 3, true, true)
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+clientToken+`","role":"micro-relay"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("enable code=%d payload=%v", code, payload)
+	}
+	state, ok := svc.gpmState.getContribution("cosmos1clientreview")
+	if !ok {
+		t.Fatal("expected contribution state after enable")
+	}
+	state.LastMeteredAt = time.Now().UTC().Add(-90 * time.Minute)
+	svc.gpmState.upsertContribution(state)
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+microExitToken+`","role":"micro-exit"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("enable micro-exit code=%d payload=%v", code, payload)
+	}
+
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMAdminContributionList,
+		http.MethodPost,
+		"/v1/gpm/admin/contributions/list",
+		`{"session_token":"`+clientToken+`"}`,
+	)
+	if code != http.StatusForbidden {
+		t.Fatalf("non-admin list code=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "admin session role") {
+		t.Fatalf("non-admin error=%q payload=%v", errMsg, payload)
+	}
+
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMAdminContributionList,
+		http.MethodPost,
+		"/v1/gpm/admin/contributions/list",
+		`{"session_token":"`+adminToken+`","status":"enabled","role":"micro-relay"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("admin list code=%d payload=%v", code, payload)
+	}
+	if surface, _ := payload["admin_api_surface"].(string); surface != "gpm_admin_console" {
+		t.Fatalf("admin_api_surface=%q want=gpm_admin_console payload=%v", surface, payload)
+	}
+	if publicControls, _ := payload["public_app_admin_controls"].(bool); publicControls {
+		t.Fatalf("public_app_admin_controls=%v want=false payload=%v", publicControls, payload)
+	}
+	if count := intFromAny(payload["count"]); count != 1 {
+		t.Fatalf("count=%d want=1 payload=%v", count, payload)
+	}
+	items, _ := payload["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items len=%d want=1 payload=%v", len(items), payload)
+	}
+	item, _ := items[0].(map[string]any)
+	if wallet, _ := item["wallet_address"].(string); wallet != "cosmos1clientreview" {
+		t.Fatalf("wallet=%q want=cosmos1clientreview item=%v", wallet, item)
+	}
+	currentWeekReward, ok := item["current_week_reward"].(map[string]any)
+	if !ok {
+		t.Fatalf("current_week_reward missing item=%v", item)
+	}
+	if units := floatFromAny(currentWeekReward["reward_units"]); units <= 0 {
+		t.Fatalf("admin list reward_units=%v want>0 after stale metering refresh reward=%v", currentWeekReward["reward_units"], currentWeekReward)
+	}
+
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMAdminContributionList,
+		http.MethodPost,
+		"/v1/gpm/admin/contributions/list",
+		`{"session_token":"`+adminToken+`"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("admin all-role list code=%d payload=%v", code, payload)
+	}
+	if count := intFromAny(payload["count"]); count != 2 {
+		t.Fatalf("all-role count=%d want=2 payload=%v", count, payload)
+	}
+}
+
+func TestGPMSettlementReserveFundsBindsSubjectToWalletAndReplaysExactly(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-reserve-client", "cosmos1reserveclient", 2, true, true)
+
+	body := `{"session_token":"` + token + `","session_id":"vpn-session-reserve-1","subject_id":"cosmos1attacker","amount_micros":200000,"currency":"TDPNC"}`
+	code, payload := callJSONHandler(t, svc.handleGPMSettlementReserveFunds, http.MethodPost, "/v1/gpm/settlement/reserve-funds", body)
+	if code != http.StatusOK {
+		t.Fatalf("reserve code=%d payload=%v", code, payload)
+	}
+	if publicControls, _ := payload["public_app_admin_controls"].(bool); publicControls {
+		t.Fatalf("public_app_admin_controls=%v want=false payload=%v", publicControls, payload)
+	}
+	if replay, _ := payload["idempotent_replay"].(bool); replay {
+		t.Fatalf("idempotent_replay=%v want=false on first reserve payload=%v", replay, payload)
+	}
+	reservation, _ := payload["reservation"].(map[string]any)
+	if subject, _ := reservation["subject_id"].(string); subject != "cosmos1reserveclient" {
+		t.Fatalf("reservation subject_id=%q want signed-in wallet; reservation=%v payload=%v", subject, reservation, payload)
+	}
+	if sessionID, _ := reservation["session_id"].(string); sessionID != "vpn-session-reserve-1" {
+		t.Fatalf("reservation session_id=%q payload=%v", sessionID, payload)
+	}
+	if status, _ := reservation["status"].(string); status != string(settlement.OperationStatusConfirmed) {
+		t.Fatalf("reservation status=%q want confirmed reservation=%v", status, reservation)
+	}
+
+	code, payload = callJSONHandler(t, svc.handleGPMSettlementReserveFunds, http.MethodPost, "/v1/gpm/settlement/reserve-funds", body)
+	if code != http.StatusOK {
+		t.Fatalf("exact replay code=%d payload=%v", code, payload)
+	}
+	if replay, _ := payload["idempotent_replay"].(bool); !replay {
+		t.Fatalf("idempotent_replay=%v want=true on exact reserve replay payload=%v", replay, payload)
+	}
+
+	amountDriftBody := `{"session_token":"` + token + `","session_id":"vpn-session-reserve-arbitrary-amount","amount_micros":300000,"currency":"TDPNC"}`
+	code, payload = callJSONHandler(t, svc.handleGPMSettlementReserveFunds, http.MethodPost, "/v1/gpm/settlement/reserve-funds", amountDriftBody)
+	if code != http.StatusBadRequest {
+		t.Fatalf("amount drift code=%d want=%d payload=%v", code, http.StatusBadRequest, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "public VPN reservation amount") {
+		t.Fatalf("amount drift error=%q payload=%v", errMsg, payload)
+	}
+
+	driftBody := `{"session_token":"` + token + `","session_id":"vpn-session-reserve-1","reservation_id":"res-drift-reserve-1","amount_micros":200000,"currency":"TDPNC"}`
+	code, payload = callJSONHandler(t, svc.handleGPMSettlementReserveFunds, http.MethodPost, "/v1/gpm/settlement/reserve-funds", driftBody)
+	if code != http.StatusConflict {
+		t.Fatalf("drift replay code=%d want=%d payload=%v", code, http.StatusConflict, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "fund reservation idempotency conflict") {
+		t.Fatalf("drift error=%q payload=%v", errMsg, payload)
+	}
+}
+
+func TestGPMSettlementReserveFundsRequiresWalletBoundStakeAndPrepaid(t *testing.T) {
+	t.Run("rejects unbound session", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmState.putSession(gpmSession{
+			Token:                   "gpm-reserve-unbound",
+			WalletAddress:           "cosmos1reserveunbound",
+			Role:                    "client",
+			StakeSatisfied:          true,
+			PrepaidBalanceSatisfied: true,
+			ExpiresAt:               time.Now().UTC().Add(time.Hour),
+		})
+		body := `{"session_token":"gpm-reserve-unbound","session_id":"vpn-session-reserve-unbound","amount_micros":200000}`
+		code, payload := callJSONHandler(t, svc.handleGPMSettlementReserveFunds, http.MethodPost, "/v1/gpm/settlement/reserve-funds", body)
+		if code != http.StatusForbidden {
+			t.Fatalf("unbound code=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+		}
+		if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "wallet-bound session") {
+			t.Fatalf("unbound error=%q payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("rejects missing stake", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		token := seedGPMTestSession(t, svc, "gpm-reserve-no-stake", "cosmos1reservenostake", 2, false, true)
+		body := `{"session_token":"` + token + `","session_id":"vpn-session-reserve-no-stake","amount_micros":200000}`
+		code, payload := callJSONHandler(t, svc.handleGPMSettlementReserveFunds, http.MethodPost, "/v1/gpm/settlement/reserve-funds", body)
+		if code != http.StatusForbidden {
+			t.Fatalf("no-stake code=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+		}
+		if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "stake is required") {
+			t.Fatalf("no-stake error=%q payload=%v", errMsg, payload)
+		}
+	})
+
+	t.Run("rejects missing prepaid balance", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		token := seedGPMTestSession(t, svc, "gpm-reserve-no-prepaid", "cosmos1reservenoprepaid", 2, true, false)
+		body := `{"session_token":"` + token + `","session_id":"vpn-session-reserve-no-prepaid","amount_micros":200000}`
+		code, payload := callJSONHandler(t, svc.handleGPMSettlementReserveFunds, http.MethodPost, "/v1/gpm/settlement/reserve-funds", body)
+		if code != http.StatusForbidden {
+			t.Fatalf("no-prepaid code=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+		}
+		if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "prepaid balance is required") {
+			t.Fatalf("no-prepaid error=%q payload=%v", errMsg, payload)
+		}
+	})
+}
+
+func TestGPMSettlementReserveFundsProductionRequiresTrustedEntitlementEvidence(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmConnectPolicyMode = "production"
+	token := seedGPMTestSession(t, svc, "gpm-reserve-prod-local", "cosmos1reserveprodlocal", 2, true, true)
+	markGPMTestSessionEntitlementsLocal(t, svc, token)
+
+	body := `{"session_token":"` + token + `","session_id":"vpn-session-reserve-prod-local","amount_micros":200000,"currency":"TDPNC"}`
+	code, payload := callJSONHandler(t, svc.handleGPMSettlementReserveFunds, http.MethodPost, "/v1/gpm/settlement/reserve-funds", body)
+	if code != http.StatusForbidden {
+		t.Fatalf("prod local evidence code=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "trusted chain or signed entitlement evidence") {
+		t.Fatalf("prod local evidence error=%q payload=%v", errMsg, payload)
+	}
+	if allowed, _ := payload["reservation_allowed"].(bool); allowed {
+		t.Fatalf("reservation_allowed=%v want=false payload=%v", allowed, payload)
+	}
+}
+
+func TestGPMSettlementReserveFundsProductionFailsClosedWithoutChainAdapter(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmSettlementChainRequired = true
+	svc.gpmSettlementChainRequiredSource = "test-production"
+	token := seedGPMTestSession(t, svc, "gpm-reserve-prod", "cosmos1reserveprod", 2, true, true)
+
+	body := `{"session_token":"` + token + `","session_id":"vpn-session-reserve-prod","amount_micros":200000,"currency":"TDPNC"}`
+	code, payload := callJSONHandler(t, svc.handleGPMSettlementReserveFunds, http.MethodPost, "/v1/gpm/settlement/reserve-funds", body)
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("prod code=%d want=%d payload=%v", code, http.StatusServiceUnavailable, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "chain-backed GPM settlement adapter is required") {
+		t.Fatalf("prod error=%q payload=%v", errMsg, payload)
+	}
+	status, _ := payload["settlement_status"].(map[string]any)
+	if mode, _ := status["gpm_settlement_mode"].(string); mode != "required_unconfigured" {
+		t.Fatalf("settlement mode=%q want required_unconfigured status=%v payload=%v", mode, status, payload)
+	}
+	if allowed, _ := payload["reservation_allowed"].(bool); allowed {
+		t.Fatalf("reservation_allowed=%v want=false payload=%v", allowed, payload)
+	}
+}
+
+func TestResolveGPMSettlementWiringProductionRejectsSignedTxEnvelopeMode(t *testing.T) {
+	t.Setenv("GPM_SETTLEMENT_BACKEND", "cosmos")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_ENDPOINT", "https://cosmos.globalprivatemesh.example")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_SUBMIT_MODE", settlement.CosmosSubmitModeSignedTx)
+	t.Setenv("GPM_SETTLEMENT_COSMOS_SIGNED_TX_SIGNER", "cosmos1signer")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_SIGNED_TX_SECRET", "signed-tx-test-secret")
+
+	wiring := resolveGPMSettlementWiring(true, "test-production", func(string, string) {})
+	if wiring.chainBacked {
+		t.Fatalf("chainBacked=%v want=false for experimental signed-tx production wiring", wiring.chainBacked)
+	}
+	if wiring.adapterConfigured {
+		t.Fatalf("adapterConfigured=%v want=false for experimental signed-tx production wiring", wiring.adapterConfigured)
+	}
+	if !strings.Contains(wiring.adapterConfigError, "experimental signed-tx JSON envelope mode") {
+		t.Fatalf("adapterConfigError=%q want experimental signed-tx production rejection", wiring.adapterConfigError)
+	}
+}
+
+func TestResolveGPMSettlementWiringProductionRejectsTrustedBridgeFinality(t *testing.T) {
+	t.Setenv("GPM_SETTLEMENT_BACKEND", "cosmos")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_ENDPOINT", "https://cosmos.globalprivatemesh.example")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_TRUSTED_BRIDGE_FINALITY", "1")
+
+	wiring := resolveGPMSettlementWiring(true, "test-production", func(string, string) {})
+	if wiring.chainBacked {
+		t.Fatalf("chainBacked=%v want=false for trusted bridge finality production wiring", wiring.chainBacked)
+	}
+	if wiring.adapterConfigured {
+		t.Fatalf("adapterConfigured=%v want=false for trusted bridge finality production wiring", wiring.adapterConfigured)
+	}
+	if !wiring.trustedBridgeFinality {
+		t.Fatalf("trustedBridgeFinality=%v want=true for telemetry and diagnostics", wiring.trustedBridgeFinality)
+	}
+	if !strings.Contains(wiring.adapterConfigError, "trusted HTTP bridge finality") {
+		t.Fatalf("adapterConfigError=%q want trusted bridge finality production rejection", wiring.adapterConfigError)
+	}
+}
+
+func TestResolveGPMSettlementWiringForwardsScopedBridgeTokens(t *testing.T) {
+	t.Setenv("GPM_SETTLEMENT_BACKEND", "cosmos")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_ENDPOINT", "https://cosmos.globalprivatemesh.example")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_API_KEY", "bridge-token")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_TRUSTED_BRIDGE_FINALITY", "1")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_REWARD_PROOF_AUTH_TOKEN", "proof-token")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_FINALITY_AUTH_TOKEN", "finality-token")
+
+	wiring := resolveGPMSettlementWiring(false, "test-compat", func(string, string) {})
+	if !wiring.chainBacked || !wiring.adapterConfigured {
+		t.Fatalf("expected scoped-token Cosmos wiring to configure adapter, chainBacked=%v adapterConfigured=%v error=%q", wiring.chainBacked, wiring.adapterConfigured, wiring.adapterConfigError)
+	}
+	if !wiring.trustedBridgeFinality {
+		t.Fatalf("trustedBridgeFinality=%v want=true", wiring.trustedBridgeFinality)
+	}
+	if wiring.adapterConfigError != "" {
+		t.Fatalf("adapterConfigError=%q want empty", wiring.adapterConfigError)
+	}
+}
+
+func TestGPMSettlementReserveFundsBlockchainFinalityRequiresConfirmedReservation(t *testing.T) {
+	tests := []struct {
+		name         string
+		localStatus  settlement.OperationStatus
+		chainStatus  settlement.OperationStatus
+		chainFound   bool
+		wantCode     int
+		wantAllowed  bool
+		wantState    string
+		wantStatus   settlement.OperationStatus
+		wantSource   string
+		wantErrorSub string
+	}{
+		{
+			name:        "confirmed_allows",
+			chainStatus: settlement.OperationStatusConfirmed,
+			chainFound:  true,
+			wantCode:    http.StatusOK,
+			wantAllowed: true,
+			wantState:   "chain_confirmed",
+			wantStatus:  settlement.OperationStatusConfirmed,
+			wantSource:  "chain_status_query",
+		},
+		{
+			name:         "pending_submission_holds",
+			chainStatus:  settlement.OperationStatusPending,
+			chainFound:   true,
+			wantCode:     http.StatusAccepted,
+			wantAllowed:  false,
+			wantState:    "pending_chain_submission",
+			wantStatus:   settlement.OperationStatusPending,
+			wantSource:   "chain_status_query",
+			wantErrorSub: "pending chain submission",
+		},
+		{
+			name:         "pending_confirmation_holds",
+			chainStatus:  settlement.OperationStatusSubmitted,
+			chainFound:   true,
+			wantCode:     http.StatusAccepted,
+			wantAllowed:  false,
+			wantState:    "pending_chain_confirmation",
+			wantStatus:   settlement.OperationStatusSubmitted,
+			wantSource:   "chain_status_query",
+			wantErrorSub: "pending chain confirmation",
+		},
+		{
+			name:         "query_miss_uses_local_pending_submission",
+			localStatus:  settlement.OperationStatusPending,
+			chainFound:   false,
+			wantCode:     http.StatusAccepted,
+			wantAllowed:  false,
+			wantState:    "pending_chain_submission",
+			wantStatus:   settlement.OperationStatusPending,
+			wantSource:   "settlement_service_pending_chain_status_query_miss",
+			wantErrorSub: "pending chain submission",
+		},
+		{
+			name:         "query_miss_uses_local_pending_confirmation",
+			localStatus:  settlement.OperationStatusSubmitted,
+			chainFound:   false,
+			wantCode:     http.StatusAccepted,
+			wantAllowed:  false,
+			wantState:    "pending_chain_confirmation",
+			wantStatus:   settlement.OperationStatusSubmitted,
+			wantSource:   "settlement_service_pending_chain_status_query_miss",
+			wantErrorSub: "pending chain confirmation",
+		},
+		{
+			name:         "query_miss_with_unknown_local_status_fails_closed",
+			localStatus:  settlement.OperationStatus("mystery"),
+			chainFound:   false,
+			wantCode:     http.StatusServiceUnavailable,
+			wantAllowed:  false,
+			wantState:    "unknown_chain_status",
+			wantSource:   "chain_status_query",
+			wantErrorSub: "chain status is unknown",
+		},
+		{
+			name:         "rejected_fails_closed",
+			chainStatus:  settlement.OperationStatusFailed,
+			chainFound:   true,
+			wantCode:     http.StatusConflict,
+			wantAllowed:  false,
+			wantState:    "chain_rejected",
+			wantStatus:   settlement.OperationStatusFailed,
+			wantSource:   "chain_status_query",
+			wantErrorSub: "rejected by chain",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := newFakeService(t, false)
+			svc.gpmState = newGPMRuntimeState()
+			svc.gpmSettlementChainRequired = true
+			svc.gpmSettlementChainRequiredSource = "test-production"
+			svc.gpmSettlementChainBacked = true
+			svc.gpmSettlementBackend = "cosmos"
+			localStatus := tc.localStatus
+			if localStatus == "" {
+				localStatus = settlement.OperationStatusSubmitted
+			}
+			svc.gpmSettlement = &gpmReserveFundsFinalityService{
+				returnedStatus: localStatus,
+				chainStatus:    tc.chainStatus,
+				chainFound:     tc.chainFound,
+			}
+			wallet := "cosmos1reservefinality" + strings.ReplaceAll(tc.name, "_", "")
+			token := seedGPMTestSession(t, svc, "gpm-reserve-finality-"+tc.name, wallet, 2, true, true)
+
+			body := `{"session_token":"` + token + `","session_id":"vpn-session-` + tc.name + `","amount_micros":200000,"currency":"TDPNC"}`
+			code, payload := callJSONHandler(t, svc.handleGPMSettlementReserveFunds, http.MethodPost, "/v1/gpm/settlement/reserve-funds", body)
+			if code != tc.wantCode {
+				t.Fatalf("code=%d want=%d payload=%v", code, tc.wantCode, payload)
+			}
+			if allowed, _ := payload["reservation_allowed"].(bool); allowed != tc.wantAllowed {
+				t.Fatalf("reservation_allowed=%v want=%v payload=%v", allowed, tc.wantAllowed, payload)
+			}
+			if state, _ := payload["reservation_finalization_state"].(string); state != tc.wantState {
+				t.Fatalf("reservation_finalization_state=%q want=%q payload=%v", state, tc.wantState, payload)
+			}
+			if source, _ := payload["reservation_status_source"].(string); source != tc.wantSource {
+				t.Fatalf("reservation_status_source=%q want %q payload=%v", source, tc.wantSource, payload)
+			}
+			if status, _ := payload["reservation_chain_status"].(string); status != string(tc.wantStatus) {
+				t.Fatalf("reservation_chain_status=%q want=%q payload=%v", status, tc.wantStatus, payload)
+			}
+			if tc.wantAllowed {
+				if ok, _ := payload["ok"].(bool); !ok {
+					t.Fatalf("ok=%v want=true payload=%v", ok, payload)
+				}
+				return
+			}
+			if ok, _ := payload["ok"].(bool); ok {
+				t.Fatalf("ok=%v want=false for held/fail-closed reservation payload=%v", ok, payload)
+			}
+			if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, tc.wantErrorSub) {
+				t.Fatalf("error=%q want substring %q payload=%v", errMsg, tc.wantErrorSub, payload)
+			}
+		})
+	}
+}
+
+func TestGPMSettlementReserveFundsBlockchainFinalityUsesWrappedMemoryAdapterStatus(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmSettlementChainRequired = true
+	svc.gpmSettlementChainRequiredSource = "test-production"
+	svc.gpmSettlementChainBacked = true
+	svc.gpmSettlementBackend = "cosmos"
+	adapter := &gpmReserveFundsChainStatusAdapter{
+		status: settlement.OperationStatusConfirmed,
+		found:  true,
+	}
+	svc.gpmSettlement = settlement.NewMemoryService(
+		settlement.WithBlockchainMode(true),
+		settlement.WithChainAdapter(adapter),
+	)
+	token := seedGPMTestSession(t, svc, "gpm-reserve-wrapped-finality", "cosmos1reservewrappedfinality", 2, true, true)
+
+	body := `{"session_token":"` + token + `","session_id":"vpn-session-wrapped-finality","amount_micros":200000,"currency":"TDPNC"}`
+	code, payload := callJSONHandler(t, svc.handleGPMSettlementReserveFunds, http.MethodPost, "/v1/gpm/settlement/reserve-funds", body)
+	if code != http.StatusOK {
+		t.Fatalf("code=%d want=%d payload=%v", code, http.StatusOK, payload)
+	}
+	if allowed, _ := payload["reservation_allowed"].(bool); !allowed {
+		t.Fatalf("reservation_allowed=%v want=true payload=%v", allowed, payload)
+	}
+	if state, _ := payload["reservation_finalization_state"].(string); state != "chain_confirmed" {
+		t.Fatalf("reservation_finalization_state=%q want chain_confirmed payload=%v", state, payload)
+	}
+	if source, _ := payload["reservation_status_source"].(string); source != "chain_status_query" {
+		t.Fatalf("reservation_status_source=%q want chain_status_query payload=%v", source, payload)
+	}
+	if status, _ := payload["reservation_chain_status"].(string); status != string(settlement.OperationStatusConfirmed) {
+		t.Fatalf("reservation_chain_status=%q want confirmed payload=%v", status, payload)
+	}
+	if len(adapter.submittedReservations) != 1 {
+		t.Fatalf("submittedReservations=%d want=1 payload=%v", len(adapter.submittedReservations), payload)
+	}
+	if len(adapter.reservationStatusCalls) != 1 || adapter.reservationStatusCalls[0] != adapter.submittedReservations[0].ReservationID {
+		t.Fatalf("reservationStatusCalls=%v submitted=%v", adapter.reservationStatusCalls, adapter.submittedReservations)
+	}
+}
+
+func TestGPMAdminRewardReviewRequiresAdminAndSurfacesSlashEvidenceIntegration(t *testing.T) {
+	t.Setenv("GPM_MICRO_EXIT_BETA_ALLOWED", "1")
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-reward", "cosmos1adminreward")
+	clientToken := seedGPMTestSession(t, svc, "gpm-client-reward", "cosmos1clientreward", 2, true, true)
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+clientToken+`","role":"micro-exit"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("enable code=%d payload=%v", code, payload)
+	}
+
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMAdminRewardReview,
+		http.MethodPost,
+		"/v1/gpm/admin/rewards/review",
+		`{"session_token":"`+clientToken+`","wallet_address":"cosmos1clientreward"}`,
+	)
+	if code != http.StatusForbidden {
+		t.Fatalf("non-admin review code=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+	}
+
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMAdminRewardReview,
+		http.MethodPost,
+		"/v1/gpm/admin/rewards/review",
+		`{"session_token":"`+adminToken+`","wallet_address":"cosmos1clientreward"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("admin review code=%d payload=%v", code, payload)
+	}
+	if state, _ := payload["settlement_finalization_state"].(string); state != "pending_chain_bound_admin_console" {
+		t.Fatalf("settlement_finalization_state=%q payload=%v", state, payload)
+	}
+	if integration, _ := payload["slashing_hold_integration"].(string); integration != "local_settlement_slash_evidence" {
+		t.Fatalf("slashing_hold_integration=%q payload=%v", integration, payload)
+	}
+	if _, ok := payload["current_week_reward"].(map[string]any); !ok {
+		t.Fatalf("current_week_reward missing payload=%v", payload)
+	}
+}
+
+func TestGPMAdminRewardReviewAndFinalizeHoldChainSlashEvidence(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-slash-hold", "cosmos1adminslashhold")
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now).AddDate(0, 0, -7)
+	wallet := "cosmos1slashhold"
+	summary := gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                weekStart.Format(time.RFC3339),
+		WeekEndUTC:                  weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-exit",
+		MeteredSeconds:              7200,
+		ValidBytes:                  500_000_000,
+		CapacityScore:               90,
+		HealthScore:                 85,
+		RewardUnits:                 3.75,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "trusted_counter",
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	}
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 true,
+		Role:                    "micro-exit",
+		RequestedRole:           "micro-exit",
+		ClientTier:              3,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     gpmWeekStartUTC(now).Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, summary)
+	if _, err := svc.gpmSettlementService().SubmitSlashEvidence(context.Background(), settlement.SlashEvidence{
+		EvidenceID:    "slash-gpm-weekly-review-1",
+		SubjectID:     wallet,
+		SessionID:     gpmWeeklyRewardSessionID(summary),
+		ViolationType: "invalid-settlement-proof",
+		EvidenceRef:   "sha256:" + strings.Repeat("a", 64),
+		SlashMicros:   125,
+		Currency:      "TDPNC",
+		ObservedAt:    weekStart.Add(2 * time.Hour),
+	}); err != nil {
+		t.Fatalf("SubmitSlashEvidence: %v", err)
+	}
+
+	body := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + weekStart.Format(time.RFC3339) + `"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAdminRewardReview, http.MethodPost, "/v1/gpm/admin/rewards/review", body)
+	if code != http.StatusOK {
+		t.Fatalf("admin review code=%d payload=%v", code, payload)
+	}
+	if integration, _ := payload["slashing_hold_integration"].(string); integration != "local_settlement_slash_evidence" {
+		t.Fatalf("slashing_hold_integration=%q payload=%v", integration, payload)
+	}
+	if count := intFromAny(payload["chain_slashing_hold_count"]); count != 1 {
+		t.Fatalf("chain_slashing_hold_count=%d want=1 payload=%v", count, payload)
+	}
+	selectedReward, _ := payload["selected_week_reward"].(map[string]any)
+	if status, _ := selectedReward["status"].(string); status != "hold" {
+		t.Fatalf("selected reward status=%q want=hold reward=%v payload=%v", status, selectedReward, payload)
+	}
+	if sources := fmt.Sprint(selectedReward["hold_sources"]); !strings.Contains(sources, "slashing_evidence") {
+		t.Fatalf("hold_sources=%v want slashing_evidence reward=%v", selectedReward["hold_sources"], selectedReward)
+	}
+
+	code, payload = callJSONHandler(t, svc.handleGPMAdminRewardHold, http.MethodPost, "/v1/gpm/admin/rewards/hold", `{"session_token":"`+adminToken+`","wallet_address":"`+wallet+`","week_start_utc":"`+weekStart.Format(time.RFC3339)+`","action":"release"}`)
+	if code != http.StatusOK {
+		t.Fatalf("release code=%d payload=%v", code, payload)
+	}
+	if count := intFromAny(payload["chain_slashing_hold_count"]); count != 1 {
+		t.Fatalf("chain_slashing_hold_count after manual release=%d want=1 payload=%v", count, payload)
+	}
+	selectedReward, _ = payload["selected_week_reward"].(map[string]any)
+	if status, _ := selectedReward["status"].(string); status != "hold" {
+		t.Fatalf("selected reward status after manual release=%q want=hold reward=%v payload=%v", status, selectedReward, payload)
+	}
+
+	code, payload = callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusConflict {
+		t.Fatalf("finalize code=%d want=%d payload=%v", code, http.StatusConflict, payload)
+	}
+	if count := intFromAny(payload["chain_slashing_hold_count"]); count != 1 {
+		t.Fatalf("finalize chain_slashing_hold_count=%d want=1 payload=%v", count, payload)
+	}
+}
+
+func TestGPMAdminRewardFinalizeHoldsZeroTimestampSessionSlashEvidence(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	adapter := &gpmRewardFinalizeConfirmationAdapter{}
+	svc.gpmSettlement = settlement.NewMemoryService(settlement.WithBlockchainMode(true), settlement.WithChainAdapter(adapter))
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-zero-slash-hold", "cosmos1adminzeroslashhold")
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now).AddDate(0, 0, -7)
+	wallet := "cosmos1zeroslashhold"
+	summary := gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                weekStart.Format(time.RFC3339),
+		WeekEndUTC:                  weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-relay",
+		MeteredSeconds:              7200,
+		ValidBytes:                  500_000_000,
+		RewardUnits:                 2.5,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "signed_traffic_proof",
+		TrafficProofRef:             "sha256:" + strings.Repeat("e", 64),
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	}
+	adapter.slashEvidence = []settlement.SlashEvidence{{
+		EvidenceID:    "slash-gpm-zero-session-1",
+		SubjectID:     wallet,
+		SessionID:     gpmWeeklyRewardSessionID(summary),
+		ViolationType: "invalid-settlement-proof",
+		EvidenceRef:   "sha256:" + strings.Repeat("f", 64),
+	}}
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              2,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     gpmWeekStartUTC(now).Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, summary)
+
+	body := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + weekStart.Format(time.RFC3339) + `"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusConflict {
+		t.Fatalf("finalize code=%d want=%d payload=%v", code, http.StatusConflict, payload)
+	}
+	if count := intFromAny(payload["chain_slashing_hold_count"]); count != 1 {
+		t.Fatalf("chain_slashing_hold_count=%d want=1 payload=%v", count, payload)
+	}
+	if len(adapter.slashListCalls) == 0 || !adapter.slashListCalls[0].IncludeZeroObserved {
+		t.Fatalf("expected session slash lookup to include zero observed records, calls=%+v", adapter.slashListCalls)
+	}
+}
+
+func TestGPMAdminRewardFinalizeUsesClosedTrustedWeekDespiteCurrentStakeEligibilityLoss(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-finalize-stake-lock", "cosmos1adminstakefinalize")
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now).AddDate(0, 0, -7)
+	wallet := "cosmos1stakelockfinalize"
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 false,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              2,
+		StakeSatisfied:          false,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     gpmWeekStartUTC(now).Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                weekStart.Format(time.RFC3339),
+		WeekEndUTC:                  weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-relay",
+		MeteredSeconds:              3600,
+		ValidBytes:                  100_000_000,
+		RewardUnits:                 1.25,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "signed_traffic_proof",
+		TrafficProofRef:             "sha256:" + strings.Repeat("b", 64),
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	})
+
+	body := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + weekStart.Format(time.RFC3339) + `"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusOK {
+		t.Fatalf("finalize code=%d want=%d payload=%v", code, http.StatusOK, payload)
+	}
+	selectedReward, _ := payload["selected_week_reward"].(map[string]any)
+	if status, _ := selectedReward["status"].(string); status != "finalized_chain_confirmed" {
+		t.Fatalf("selected reward status=%q want=finalized_chain_confirmed reward=%v payload=%v", status, selectedReward, payload)
+	}
+	if units := floatFromAny(selectedReward["reward_units"]); units != 1.25 {
+		t.Fatalf("reward_units=%v want preserved closed-week reward reward=%v payload=%v", units, selectedReward, payload)
+	}
+	if allowed, _ := selectedReward["payout_allowed"].(bool); !allowed {
+		t.Fatalf("payout_allowed=%v want true reward=%v payload=%v", allowed, selectedReward, payload)
+	}
+}
+
+func TestGPMAdminRewardReviewHonorsSelectedWeek(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-selected-week", "cosmos1adminselectedweek")
+	wallet := "cosmos1selectedweek"
+	now := time.Now().UTC()
+	currentWeek := gpmWeekStartUTC(now)
+	selectedWeek := currentWeek.AddDate(0, 0, -7)
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              2,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     currentWeek.Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                selectedWeek.Format(time.RFC3339),
+		WeekEndUTC:                  selectedWeek.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-relay",
+		MeteredSeconds:              7200,
+		ValidBytes:                  500_000_000,
+		RewardUnits:                 2.5,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "trusted_counter",
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	})
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMAdminRewardReview,
+		http.MethodPost,
+		"/v1/gpm/admin/rewards/review",
+		`{"session_token":"`+adminToken+`","wallet_address":"`+wallet+`","week_start_utc":"`+selectedWeek.Format(time.RFC3339)+`"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("admin review code=%d payload=%v", code, payload)
+	}
+	if got, _ := payload["selected_week_start_utc"].(string); got != selectedWeek.Format(time.RFC3339) {
+		t.Fatalf("selected_week_start_utc=%q want=%q payload=%v", got, selectedWeek.Format(time.RFC3339), payload)
+	}
+	selectedReward, _ := payload["selected_week_reward"].(map[string]any)
+	if got, _ := selectedReward["week_start_utc"].(string); got != selectedWeek.Format(time.RFC3339) {
+		t.Fatalf("selected reward week_start_utc=%q want=%q reward=%v", got, selectedWeek.Format(time.RFC3339), selectedReward)
+	}
+	if status, _ := selectedReward["status"].(string); status != "week_closed_pending_admin_chain" {
+		t.Fatalf("selected reward status=%q reward=%v", status, selectedReward)
+	}
+
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMAdminRewardHold,
+		http.MethodPost,
+		"/v1/gpm/admin/rewards/hold",
+		`{"session_token":"`+adminToken+`","wallet_address":"`+wallet+`","week_start_utc":"`+selectedWeek.Format(time.RFC3339)+`","action":"hold","source":"manual_review","reason":"historical week review"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("historical hold code=%d payload=%v", code, payload)
+	}
+	selectedReward, _ = payload["selected_week_reward"].(map[string]any)
+	if got, _ := selectedReward["week_start_utc"].(string); got != selectedWeek.Format(time.RFC3339) {
+		t.Fatalf("held selected reward week_start_utc=%q want=%q reward=%v", got, selectedWeek.Format(time.RFC3339), selectedReward)
+	}
+	if status, _ := selectedReward["status"].(string); status != "hold" {
+		t.Fatalf("held selected reward status=%q want=hold reward=%v", status, selectedReward)
+	}
+}
+
+func TestGPMAdminRewardHoldRequiresAdminAndBlocksReward(t *testing.T) {
+	t.Setenv("GPM_CONTRIBUTION_TRAFFIC_PROOF_MODE", "trusted-counter-test")
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-hold", "cosmos1adminhold")
+	clientToken := seedGPMTestSession(t, svc, "gpm-client-hold", "cosmos1clienthold", 2, true, true)
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now)
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMContributionEnable,
+		http.MethodPost,
+		"/v1/gpm/contribution/enable",
+		`{"session_token":"`+clientToken+`","role":"micro-relay"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("enable code=%d payload=%v", code, payload)
+	}
+	state, ok := svc.gpmState.getContribution("cosmos1clienthold")
+	if !ok {
+		t.Fatal("expected contribution state")
+	}
+	state.MeteredWeekStartUTC = weekStart.Format(time.RFC3339)
+	state.MeteredSeconds = 3600
+	state.ValidBytes = 120_000_000
+	state.PendingRewardUnits = gpmPendingRewardUnits(state)
+	state.LastMeteredAt = now
+	svc.gpmState.upsertContribution(state)
+
+	holdBody := `{"session_token":"` + clientToken + `","wallet_address":"cosmos1clienthold","week_start_utc":"` + weekStart.Format(time.RFC3339) + `","action":"hold","source":"slashing_evidence","reason":"operator slash evidence pending"}`
+	code, payload = callJSONHandler(t, svc.handleGPMAdminRewardHold, http.MethodPost, "/v1/gpm/admin/rewards/hold", holdBody)
+	if code != http.StatusForbidden {
+		t.Fatalf("non-admin hold code=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+	}
+
+	holdBody = `{"session_token":"` + adminToken + `","wallet_address":"cosmos1clienthold","week_start_utc":"` + weekStart.Format(time.RFC3339) + `","action":"hold","source":"slashing_evidence","reason":"operator slash evidence pending"}`
+	code, payload = callJSONHandler(t, svc.handleGPMAdminRewardHold, http.MethodPost, "/v1/gpm/admin/rewards/hold", holdBody)
+	if code != http.StatusBadRequest {
+		t.Fatalf("reserved-source hold code=%d want=%d payload=%v", code, http.StatusBadRequest, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "reserved for chain-derived evidence") {
+		t.Fatalf("reserved-source error=%q payload=%v", errMsg, payload)
+	}
+
+	holdBody = `{"session_token":"` + adminToken + `","wallet_address":"cosmos1clienthold","week_start_utc":"` + weekStart.Format(time.RFC3339) + `","action":"hold","source":"manual_admin_review","reason":"operator slash evidence pending"}`
+	code, payload = callJSONHandler(t, svc.handleGPMAdminRewardHold, http.MethodPost, "/v1/gpm/admin/rewards/hold", holdBody)
+	if code != http.StatusOK {
+		t.Fatalf("admin hold code=%d payload=%v", code, payload)
+	}
+	if count := intFromAny(payload["active_hold_count"]); count != 1 {
+		t.Fatalf("active_hold_count=%d want=1 payload=%v", count, payload)
+	}
+	selectedReward, _ := payload["selected_week_reward"].(map[string]any)
+	if status, _ := selectedReward["status"].(string); status != "hold" {
+		t.Fatalf("selected reward status=%q want=hold reward=%v payload=%v", status, selectedReward, payload)
+	}
+	if units := floatFromAny(selectedReward["reward_units"]); units != 0 {
+		t.Fatalf("held reward_units=%v want=0 reward=%v", selectedReward["reward_units"], selectedReward)
+	}
+	if sources := fmt.Sprint(selectedReward["hold_sources"]); !strings.Contains(sources, "admin_reward_hold") {
+		t.Fatalf("hold_sources=%v want admin_reward_hold reward=%v", selectedReward["hold_sources"], selectedReward)
+	}
+
+	code, payload = callJSONHandler(t, svc.handleGPMRewardsCurrentWeek, http.MethodGet, "/v1/gpm/rewards/current-week?session_token="+clientToken, "")
+	if code != http.StatusOK {
+		t.Fatalf("current-week code=%d payload=%v", code, payload)
+	}
+	reward, _ := payload["reward"].(map[string]any)
+	if status, _ := reward["status"].(string); status != "hold" {
+		t.Fatalf("current-week status=%q want=hold reward=%v payload=%v", status, reward, payload)
+	}
+
+	releaseBody := `{"session_token":"` + adminToken + `","wallet_address":"cosmos1clienthold","week_start_utc":"` + weekStart.Format(time.RFC3339) + `","action":"release"}`
+	code, payload = callJSONHandler(t, svc.handleGPMAdminRewardHold, http.MethodPost, "/v1/gpm/admin/rewards/hold", releaseBody)
+	if code != http.StatusOK {
+		t.Fatalf("admin release code=%d payload=%v", code, payload)
+	}
+	if count := intFromAny(payload["active_hold_count"]); count != 0 {
+		t.Fatalf("active_hold_count=%d want=0 payload=%v", count, payload)
+	}
+	selectedReward, _ = payload["selected_week_reward"].(map[string]any)
+	if status, _ := selectedReward["status"].(string); status == "hold" {
+		t.Fatalf("selected reward status=%q want non-hold after release reward=%v payload=%v", status, selectedReward, payload)
+	}
+	if units := floatFromAny(selectedReward["reward_units"]); units <= 0 {
+		t.Fatalf("released reward_units=%v want>0 reward=%v", selectedReward["reward_units"], selectedReward)
+	}
+}
+
+func TestGPMAdminRewardFinalizeIssuesSettlementForClosedTrustedWeek(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-finalize", "cosmos1adminfinalize")
+	clientToken := seedGPMTestSession(t, svc, "gpm-client-finalize", "cosmos1finalize", 2, true, true)
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now).AddDate(0, 0, -7)
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           "cosmos1finalize",
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              2,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     gpmWeekStartUTC(now).Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory("cosmos1finalize", gpmWeeklyRewardSummary{
+		WalletAddress:               "cosmos1finalize",
+		WeekStartUTC:                weekStart.Format(time.RFC3339),
+		WeekEndUTC:                  weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-relay",
+		MeteredSeconds:              7200,
+		ValidBytes:                  500_000_000,
+		CapacityScore:               80,
+		HealthScore:                 90,
+		RewardUnits:                 2.5,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "trusted_counter",
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	})
+
+	code, payload := callJSONHandler(
+		t,
+		svc.handleGPMAdminRewardFinalize,
+		http.MethodPost,
+		"/v1/gpm/admin/rewards/finalize",
+		`{"session_token":"`+clientToken+`","wallet_address":"cosmos1finalize","week_start_utc":"`+weekStart.Format(time.RFC3339)+`"}`,
+	)
+	if code != http.StatusForbidden {
+		t.Fatalf("non-admin finalize code=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+	}
+
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMAdminRewardFinalize,
+		http.MethodPost,
+		"/v1/gpm/admin/rewards/finalize",
+		`{"session_token":"`+adminToken+`","wallet_address":"cosmos1finalize"}`,
+	)
+	if code != http.StatusBadRequest {
+		t.Fatalf("missing week_start_utc finalize code=%d want=%d payload=%v", code, http.StatusBadRequest, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "week_start_utc is required") {
+		t.Fatalf("missing week_start_utc error=%q payload=%v", errMsg, payload)
+	}
+
+	currentState, ok := svc.gpmState.getContribution("cosmos1finalize")
+	if !ok {
+		t.Fatal("expected current contribution state")
+	}
+	currentState.StakeSatisfied = false
+	currentState.PrepaidBalanceSatisfied = false
+	currentState.LockReason = "current week eligibility changed after closed-week reward was recorded"
+	svc.gpmState.upsertContribution(currentState)
+
+	code, payload = callJSONHandler(
+		t,
+		svc.handleGPMAdminRewardFinalize,
+		http.MethodPost,
+		"/v1/gpm/admin/rewards/finalize",
+		`{"session_token":"`+adminToken+`","wallet_address":"cosmos1finalize","week_start_utc":"`+weekStart.Format(time.RFC3339)+`"}`,
+	)
+	if code != http.StatusOK {
+		t.Fatalf("admin finalize code=%d payload=%v", code, payload)
+	}
+	if allowed, _ := payload["payout_allowed"].(bool); !allowed {
+		t.Fatalf("payout_allowed=%v want=true payload=%v", allowed, payload)
+	}
+	selectedReward, _ := payload["selected_week_reward"].(map[string]any)
+	if status, _ := selectedReward["status"].(string); status != "finalized_chain_confirmed" {
+		t.Fatalf("status=%q want finalized_chain_confirmed reward=%v payload=%v", status, selectedReward, payload)
+	}
+	if state, _ := selectedReward["settlement_finalization_state"].(string); state != "chain_confirmed" {
+		t.Fatalf("settlement_finalization_state=%q want chain_confirmed reward=%v", state, selectedReward)
+	}
+	if issueID, _ := selectedReward["reward_issue_id"].(string); issueID == "" {
+		t.Fatalf("reward_issue_id missing reward=%v", selectedReward)
+	}
+	history := svc.gpmState.rewardHistoryFor("cosmos1finalize")
+	if len(history) != 1 {
+		t.Fatalf("history len=%d want=1 history=%v", len(history), history)
+	}
+	if history[0].Status != "finalized_chain_confirmed" || !history[0].PayoutAllowed {
+		t.Fatalf("history[0]=%+v want finalized confirmed payout", history[0])
+	}
+}
+
+func TestGPMAdminRewardFinalizeIdempotentReplayReconcilesChainStatus(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	adapter := &gpmRewardFinalizeConfirmationAdapter{}
+	svc.gpmSettlement = settlement.NewMemoryService(settlement.WithChainAdapter(adapter))
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-finalize-reconcile", "cosmos1adminfinalizereconcile")
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now).AddDate(0, 0, -7)
+	wallet := "cosmos1finalizereconcile"
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              2,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     gpmWeekStartUTC(now).Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                weekStart.Format(time.RFC3339),
+		WeekEndUTC:                  weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-relay",
+		MeteredSeconds:              7200,
+		ValidBytes:                  500_000_000,
+		CapacityScore:               80,
+		HealthScore:                 90,
+		RewardUnits:                 2.5,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "trusted_counter",
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	})
+
+	body := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + weekStart.Format(time.RFC3339) + `"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusOK {
+		t.Fatalf("initial finalize code=%d payload=%v", code, payload)
+	}
+	selectedReward, _ := payload["selected_week_reward"].(map[string]any)
+	if chainStatus, _ := selectedReward["settlement_chain_status"].(string); chainStatus != string(settlement.OperationStatusSubmitted) {
+		t.Fatalf("initial settlement_chain_status=%q want submitted reward=%v payload=%v", chainStatus, selectedReward, payload)
+	}
+	if allowed, _ := payload["payout_allowed"].(bool); allowed {
+		t.Fatalf("initial payout_allowed=%v want=false until chain confirmation payload=%v", allowed, payload)
+	}
+
+	history := svc.gpmState.rewardHistoryFor(wallet)
+	if len(history) != 1 {
+		t.Fatalf("history len after initial finalize=%d want=1 history=%v", len(history), history)
+	}
+	history[0].GeneratedAtUTC = now.Add(2 * time.Hour).Format(time.RFC3339)
+	svc.gpmState.upsertRewardHistory(wallet, history[0])
+
+	adapter.confirmRewards = true
+	code, payload = callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusOK {
+		t.Fatalf("idempotent finalize code=%d payload=%v", code, payload)
+	}
+	if replay, _ := payload["idempotent_replay"].(bool); !replay {
+		t.Fatalf("idempotent_replay=%v want=true payload=%v", replay, payload)
+	}
+	if allowed, _ := payload["payout_allowed"].(bool); !allowed {
+		t.Fatalf("payout_allowed=%v want=true after reconcile payload=%v", allowed, payload)
+	}
+	selectedReward, _ = payload["selected_week_reward"].(map[string]any)
+	if chainStatus, _ := selectedReward["settlement_chain_status"].(string); chainStatus != string(settlement.OperationStatusConfirmed) {
+		t.Fatalf("settlement_chain_status=%q want confirmed reward=%v payload=%v", chainStatus, selectedReward, payload)
+	}
+	if status, _ := selectedReward["status"].(string); status != "finalized_chain_confirmed" {
+		t.Fatalf("status=%q want finalized_chain_confirmed reward=%v payload=%v", status, selectedReward, payload)
+	}
+	history = svc.gpmState.rewardHistoryFor(wallet)
+	if len(history) != 1 {
+		t.Fatalf("history len=%d want=1 history=%v", len(history), history)
+	}
+	if history[0].SettlementChainStatus != string(settlement.OperationStatusConfirmed) || !history[0].PayoutAllowed {
+		t.Fatalf("history[0]=%+v want confirmed payout after idempotent reconcile", history[0])
+	}
+	if adapter.rewardSubmitCalls != 1 {
+		t.Fatalf("rewardSubmitCalls=%d want=1; idempotent replay should load existing issue without resubmitting", adapter.rewardSubmitCalls)
+	}
+	if _, err := svc.gpmSettlementService().SubmitSlashEvidence(context.Background(), settlement.SlashEvidence{
+		EvidenceID:    "slash-gpm-finalize-replay-1",
+		SubjectID:     wallet,
+		SessionID:     gpmWeeklyRewardSessionID(history[0]),
+		ViolationType: "invalid-settlement-proof",
+		EvidenceRef:   "sha256:" + strings.Repeat("b", 64),
+		SlashMicros:   250,
+		Currency:      "TDPNC",
+		ObservedAt:    weekStart.Add(3 * time.Hour),
+	}); err != nil {
+		t.Fatalf("SubmitSlashEvidence after finalize: %v", err)
+	}
+	code, payload = callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusConflict {
+		t.Fatalf("idempotent finalize with slash hold code=%d want=%d payload=%v", code, http.StatusConflict, payload)
+	}
+	if count := intFromAny(payload["chain_slashing_hold_count"]); count != 1 {
+		t.Fatalf("chain_slashing_hold_count=%d want=1 payload=%v", count, payload)
+	}
+}
+
+func TestGPMAdminRewardFinalizeReplayUsesPersistedSettlementIssuedAt(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	adapter := &gpmRewardFinalizeConfirmationAdapter{}
+	svc.gpmSettlement = settlement.NewMemoryService(settlement.WithChainAdapter(adapter))
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-finalize-issued-at", "cosmos1adminfinalizeissuedat")
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now).AddDate(0, 0, -7)
+	generatedAt := weekStart.Add(12 * time.Hour).UTC()
+	wallet := "cosmos1finalizeissuedat"
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              2,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     gpmWeekStartUTC(now).Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                weekStart.Format(time.RFC3339),
+		WeekEndUTC:                  weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-relay",
+		MeteredSeconds:              7200,
+		ValidBytes:                  500_000_000,
+		CapacityScore:               80,
+		HealthScore:                 90,
+		RewardUnits:                 2.5,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "trusted_counter",
+		GeneratedAtUTC:              generatedAt.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	})
+
+	body := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + weekStart.Format(time.RFC3339) + `"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusOK {
+		t.Fatalf("initial finalize code=%d payload=%v", code, payload)
+	}
+	history := svc.gpmState.rewardHistoryFor(wallet)
+	if len(history) != 1 {
+		t.Fatalf("history len after initial finalize=%d want=1 history=%v", len(history), history)
+	}
+	if history[0].SettlementIssuedAtUTC != generatedAt.Format(time.RFC3339) {
+		t.Fatalf("settlement_issued_at_utc=%q want original generated_at %q history=%+v", history[0].SettlementIssuedAtUTC, generatedAt.Format(time.RFC3339), history[0])
+	}
+	if history[0].FinalizedAtUTC == generatedAt.Format(time.RFC3339) {
+		t.Fatalf("test fixture expected finalized_at to differ from original issued-at material history=%+v", history[0])
+	}
+
+	adapter.confirmRewards = true
+	if _, err := svc.gpmSettlementService().Reconcile(context.Background()); err != nil {
+		t.Fatalf("reconcile after chain confirmation: %v", err)
+	}
+
+	code, payload = callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusOK {
+		t.Fatalf("retry finalize code=%d payload=%v", code, payload)
+	}
+	if replay, _ := payload["idempotent_replay"].(bool); !replay {
+		t.Fatalf("idempotent_replay=%v want=true payload=%v", replay, payload)
+	}
+	if allowed, _ := payload["payout_allowed"].(bool); !allowed {
+		t.Fatalf("payout_allowed=%v want=true after confirmed replay payload=%v", allowed, payload)
+	}
+	history = svc.gpmState.rewardHistoryFor(wallet)
+	if len(history) != 1 {
+		t.Fatalf("history len after retry=%d want=1 history=%v", len(history), history)
+	}
+	if history[0].SettlementIssuedAtUTC != generatedAt.Format(time.RFC3339) {
+		t.Fatalf("settlement_issued_at_utc after retry=%q want %q history=%+v", history[0].SettlementIssuedAtUTC, generatedAt.Format(time.RFC3339), history[0])
+	}
+	if history[0].SettlementChainStatus != string(settlement.OperationStatusConfirmed) || !history[0].PayoutAllowed {
+		t.Fatalf("history[0]=%+v want confirmed payout after issued-at stable replay", history[0])
+	}
+	if adapter.rewardSubmitCalls != 1 {
+		t.Fatalf("rewardSubmitCalls=%d want=1; retry should not resubmit changed material", adapter.rewardSubmitCalls)
+	}
+}
+
+func TestGPMAdminRewardFinalizeReplayRequiresTrustedTrafficProof(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmSettlement = settlement.NewMemoryService(settlement.WithChainAdapter(&gpmRewardFinalizeConfirmationAdapter{}))
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-finalize-replay-untrusted", "cosmos1adminfinalizeuntrusted")
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now).AddDate(0, 0, -7)
+	wallet := "cosmos1finalizeuntrusted"
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              2,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     gpmWeekStartUTC(now).Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                weekStart.Format(time.RFC3339),
+		WeekEndUTC:                  weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-relay",
+		MeteredSeconds:              7200,
+		ValidBytes:                  500_000_000,
+		CapacityScore:               80,
+		HealthScore:                 90,
+		RewardUnits:                 2.5,
+		Status:                      "finalized_chain_submitted",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_chain_confirmation",
+		TrafficProofStatus:          "untrusted",
+		MeteringSource:              "untrusted_counter",
+		RewardIssueID:               "gpm-weekly-reward-existing-untrusted",
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	})
+
+	body := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + weekStart.Format(time.RFC3339) + `"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusConflict {
+		t.Fatalf("replay finalize code=%d want=%d payload=%v", code, http.StatusConflict, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "trusted traffic proof is required") {
+		t.Fatalf("error=%q want trusted proof requirement payload=%v", errMsg, payload)
+	}
+	if _, ok := payload["idempotent_replay"]; ok {
+		t.Fatalf("idempotent_replay should not be reached for untrusted proof payload=%v", payload)
+	}
+}
+
+func TestGPMAdminRewardFinalizeReplayRejectsMaterialDrift(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmSettlement = settlement.NewMemoryService(settlement.WithChainAdapter(&gpmRewardFinalizeConfirmationAdapter{}))
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-finalize-drift", "cosmos1adminfinalizedrift")
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now).AddDate(0, 0, -7)
+	wallet := "cosmos1finalizedrift"
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              2,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     gpmWeekStartUTC(now).Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                weekStart.Format(time.RFC3339),
+		WeekEndUTC:                  weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-relay",
+		MeteredSeconds:              7200,
+		ValidBytes:                  500_000_000,
+		CapacityScore:               80,
+		HealthScore:                 90,
+		RewardUnits:                 2.5,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "trusted_counter",
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	})
+
+	body := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + weekStart.Format(time.RFC3339) + `"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusOK {
+		t.Fatalf("initial finalize code=%d payload=%v", code, payload)
+	}
+
+	history := svc.gpmState.rewardHistoryFor(wallet)
+	if len(history) != 1 {
+		t.Fatalf("history len=%d want=1 history=%v", len(history), history)
+	}
+	history[0].RewardUnits = 3.5
+	history[0].GeneratedAtUTC = now.Add(2 * time.Hour).Format(time.RFC3339)
+	svc.gpmState.upsertRewardHistory(wallet, history[0])
+
+	code, payload = callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusConflict {
+		t.Fatalf("material-drift finalize code=%d want=%d payload=%v", code, http.StatusConflict, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "settlement reward replay failed") || !strings.Contains(errMsg, "idempotency conflict") {
+		t.Fatalf("error=%q want replay idempotency conflict payload=%v", errMsg, payload)
+	}
+	if replay, _ := payload["idempotent_replay"].(bool); replay {
+		t.Fatalf("idempotent_replay=%v want=false on material drift payload=%v", replay, payload)
+	}
+}
+
+func TestGPMAdminRewardFinalizeBlocksUnsafeEpochs(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-finalize-block", "cosmos1adminfinalizeblock")
+	now := time.Now().UTC()
+	currentWeek := gpmWeekStartUTC(now)
+	previousWeek := currentWeek.AddDate(0, 0, -7)
+	wallet := "cosmos1finalizeblock"
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              2,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     currentWeek.Format(time.RFC3339),
+		MeteredSeconds:          600,
+		ValidBytes:              12_000_000,
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                previousWeek.Format(time.RFC3339),
+		WeekEndUTC:                  previousWeek.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-relay",
+		MeteredSeconds:              3600,
+		ValidBytes:                  100_000_000,
+		RewardUnits:                 1.5,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "trusted_counter",
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	})
+
+	currentBody := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + currentWeek.Format(time.RFC3339) + `"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", currentBody)
+	if code != http.StatusConflict {
+		t.Fatalf("current-week finalize code=%d want=%d payload=%v", code, http.StatusConflict, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "only closed weekly reward epochs") {
+		t.Fatalf("error=%q payload=%v", errMsg, payload)
+	}
+
+	svc.gpmState.upsertRewardHold(gpmRewardHold{
+		HoldID:        "hold-finalize-block",
+		WalletAddress: wallet,
+		WeekStartUTC:  previousWeek.Format(time.RFC3339),
+		Source:        "slashing_evidence",
+		Reason:        "slash evidence pending",
+		Status:        "active",
+		CreatedBy:     "cosmos1adminfinalizeblock",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+	heldBody := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + previousWeek.Format(time.RFC3339) + `"}`
+	code, payload = callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", heldBody)
+	if code != http.StatusConflict {
+		t.Fatalf("held finalize code=%d want=%d payload=%v", code, http.StatusConflict, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "active holds") {
+		t.Fatalf("error=%q payload=%v", errMsg, payload)
+	}
+}
+
+func TestGPMAdminRewardFinalizeProductionRejectsTrustedCounterWithoutObjectiveProofRef(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmConnectPolicyMode = "production"
+	adapter := &gpmRewardFinalizeConfirmationAdapter{}
+	svc.gpmSettlement = settlement.NewMemoryService(settlement.WithChainAdapter(adapter))
+	svc.gpmSettlementChainBacked = true
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-finalize-prod-proof", "cosmos1adminfinalizeprodproof")
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now).AddDate(0, 0, -7)
+	wallet := "cosmos1finalizeprodproof"
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              2,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     gpmWeekStartUTC(now).Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                weekStart.Format(time.RFC3339),
+		WeekEndUTC:                  weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-relay",
+		MeteredSeconds:              7200,
+		ValidBytes:                  500_000_000,
+		RewardUnits:                 2.5,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "trusted_counter",
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	})
+
+	body := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + weekStart.Format(time.RFC3339) + `"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusConflict {
+		t.Fatalf("admin finalize code=%d want=%d payload=%v", code, http.StatusConflict, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "objective signed or chain-queryable traffic proof evidence") {
+		t.Fatalf("error=%q want objective proof-ref requirement payload=%v", errMsg, payload)
+	}
+	if adapter.rewardSubmitCalls != 0 {
+		t.Fatalf("rewardSubmitCalls=%d want=0; production proof guard must run before reward submission", adapter.rewardSubmitCalls)
+	}
+}
+
+func TestGPMAdminRewardFinalizeProductionRejectsSettlementReferenceWithoutTrafficProofRef(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmConnectPolicyMode = "production"
+	adapter := &gpmRewardFinalizeConfirmationAdapter{}
+	svc.gpmSettlement = settlement.NewMemoryService(settlement.WithChainAdapter(adapter))
+	svc.gpmSettlementChainBacked = true
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-finalize-settlement-ref-proof", "cosmos1adminfinalizesettlementrefproof")
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now).AddDate(0, 0, -7)
+	wallet := "cosmos1finalizesettlementrefproof"
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              2,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     gpmWeekStartUTC(now).Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                weekStart.Format(time.RFC3339),
+		WeekEndUTC:                  weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-relay",
+		MeteredSeconds:              7200,
+		ValidBytes:                  500_000_000,
+		RewardUnits:                 2.5,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "chain_traffic_proof",
+		SettlementReferenceID:       "settlement-ref-only",
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	})
+
+	body := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + weekStart.Format(time.RFC3339) + `"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusConflict {
+		t.Fatalf("admin finalize code=%d want=%d payload=%v", code, http.StatusConflict, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "objective signed or chain-queryable traffic proof evidence") {
+		t.Fatalf("error=%q want objective proof-ref requirement payload=%v", errMsg, payload)
+	}
+	if adapter.rewardSubmitCalls != 0 {
+		t.Fatalf("rewardSubmitCalls=%d want=0; settlement references must not bypass production proof guard", adapter.rewardSubmitCalls)
+	}
+}
+
+func TestGPMAdminRewardFinalizeProductionRejectsFormatOnlyTrafficProofRef(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmConnectPolicyMode = "production"
+	adapter := &gpmRewardFinalizeConfirmationAdapter{}
+	svc.gpmSettlement = settlement.NewMemoryService(settlement.WithChainAdapter(adapter))
+	svc.gpmSettlementChainBacked = true
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-finalize-format-proof", "cosmos1adminfinalizeformatproof")
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now).AddDate(0, 0, -7)
+	wallet := "cosmos1finalizeformatproof"
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              2,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     gpmWeekStartUTC(now).Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                weekStart.Format(time.RFC3339),
+		WeekEndUTC:                  weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-relay",
+		MeteredSeconds:              7200,
+		ValidBytes:                  500_000_000,
+		RewardUnits:                 2.5,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "signed_traffic_proof",
+		TrafficProofRef:             "sha256:" + strings.Repeat("c", 64),
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	})
+
+	body := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + weekStart.Format(time.RFC3339) + `"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusConflict {
+		t.Fatalf("admin finalize code=%d want=%d payload=%v", code, http.StatusConflict, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "objective signed or chain-queryable traffic proof evidence") {
+		t.Fatalf("error=%q want stronger proof-ref requirement payload=%v", errMsg, payload)
+	}
+	if adapter.rewardSubmitCalls != 0 {
+		t.Fatalf("rewardSubmitCalls=%d want=0; production proof guard must run before reward submission", adapter.rewardSubmitCalls)
+	}
+}
+
+func TestGPMAdminRewardFinalizeProductionFailsClosedWithoutChainAdapter(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmConnectPolicyMode = "production"
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-finalize-pending", "cosmos1adminfinalizepending")
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now).AddDate(0, 0, -7)
+	wallet := "cosmos1finalizepending"
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 true,
+		Role:                    "micro-exit",
+		RequestedRole:           "micro-exit",
+		ClientTier:              3,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     gpmWeekStartUTC(now).Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                weekStart.Format(time.RFC3339),
+		WeekEndUTC:                  weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-exit",
+		MeteredSeconds:              7200,
+		ValidBytes:                  500_000_000,
+		RewardUnits:                 4.25,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "signed_traffic_proof",
+		TrafficProofRef:             "sha256:" + strings.Repeat("c", 64),
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	})
+
+	body := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + weekStart.Format(time.RFC3339) + `"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusConflict {
+		t.Fatalf("admin finalize code=%d want=%d payload=%v", code, http.StatusConflict, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "active holds") {
+		t.Fatalf("error=%q want active hold requirement payload=%v", errMsg, payload)
+	}
+	if holdErr, _ := payload["slashing_hold_error"].(string); !strings.Contains(holdErr, "chain adapter not configured") {
+		t.Fatalf("slashing_hold_error=%q want chain adapter requirement payload=%v", holdErr, payload)
+	}
+	if count := intFromAny(payload["active_hold_count"]); count != 1 {
+		t.Fatalf("active_hold_count=%d want=1 payload=%v", count, payload)
+	}
+	history := svc.gpmState.rewardHistoryFor(wallet)
+	if len(history) != 1 {
+		t.Fatalf("history len=%d want=1 history=%v", len(history), history)
+	}
+	if history[0].RewardIssueID != "" || history[0].Status != "week_closed_pending_admin_chain" {
+		t.Fatalf("history[0]=%+v want unfinalized after fail-closed response", history[0])
+	}
+}
+
+func TestGPMAdminRewardFinalizeProductionRequiresSlashEvidenceLister(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmConnectPolicyMode = "production"
+	svc.gpmSettlement = gpmNoSlashEvidenceListService{
+		Service: settlement.NewMemoryService(settlement.WithBlockchainMode(true)),
+	}
+	svc.gpmSettlementChainBacked = true
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-finalize-no-slash-lister", "cosmos1adminfinalizenoslash")
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now).AddDate(0, 0, -7)
+	wallet := "cosmos1finalizenoslash"
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              2,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     gpmWeekStartUTC(now).Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                weekStart.Format(time.RFC3339),
+		WeekEndUTC:                  weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-relay",
+		MeteredSeconds:              7200,
+		ValidBytes:                  500_000_000,
+		RewardUnits:                 4.25,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "signed_metered_counter",
+		TrafficProofRef:             "obj://gpm-weekly-proof/finalize-no-slash-lister",
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	})
+
+	body := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + weekStart.Format(time.RFC3339) + `"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusConflict {
+		t.Fatalf("admin finalize code=%d want=%d payload=%v", code, http.StatusConflict, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "active holds") {
+		t.Fatalf("error=%q want active hold requirement payload=%v", errMsg, payload)
+	}
+	if integration, _ := payload["slashing_hold_integration"].(string); integration != "local_settlement_slash_evidence_error" {
+		t.Fatalf("slashing_hold_integration=%q want local_settlement_slash_evidence_error payload=%v", integration, payload)
+	}
+	if holdErr, _ := payload["slashing_hold_error"].(string); !strings.Contains(holdErr, "chain slash evidence lister") {
+		t.Fatalf("slashing_hold_error=%q want missing lister production guard payload=%v", holdErr, payload)
+	}
+	if count := intFromAny(payload["active_hold_count"]); count != 1 {
+		t.Fatalf("active_hold_count=%d want=1 payload=%v", count, payload)
+	}
+}
+
+func TestGPMSettlementCosmosEnvWiringProductionFinalizesViaChainAdapter(t *testing.T) {
+	const apiKey = "settlement-api-token"
+	const expectedAuth = "Bearer " + apiKey
+	postCh := make(chan string, 1)
+	queryCh := make(chan string, 1)
+	now := time.Now().UTC()
+	weekStart := gpmWeekStartUTC(now).AddDate(0, 0, -7)
+	wallet := "cosmos1finalizecosmos"
+	rewardID := "gpm-weekly-reward-" + wallet + "-" + weekStart.Format("20060102")
+	sessionID := "gpm-weekly-session-" + wallet + "-" + weekStart.Format("20060102")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if auth := r.Header.Get("Authorization"); auth != expectedAuth {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/x/vpnrewards/issues":
+			select {
+			case postCh <- r.URL.Path:
+			default:
+			}
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/x/vpnrewards/proofs/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"proof": map[string]any{
+					"verified":            true,
+					"verifier_id":         "test-cosmos-proof-registry",
+					"verified_at_utc":     now.Format(time.RFC3339),
+					"traffic_proof_ref":   "obj://traffic-proof/gpm-finalize-cosmos",
+					"trust_contract":      string(settlement.RewardProofTrustContractObjectiveTrafficV1),
+					"reward_id":           rewardID,
+					"provider_subject_id": wallet,
+					"session_id":          sessionID,
+					"payout_period_start": weekStart.Format(time.RFC3339),
+					"payout_period_end":   weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+					"reward_micros":       int64(2_500_000),
+					"currency":            "TDPNC",
+					"issued_at":           now.Format(time.RFC3339),
+				},
+			})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/x/vpnrewards/distributions/dist:gpm-weekly-reward-"):
+			select {
+			case queryCh <- r.URL.Path:
+			default:
+			}
+			payoutRef, _ := json.Marshal(map[string]any{
+				"RewardID":          rewardID,
+				"TrafficProofRef":   "obj://traffic-proof/gpm-finalize-cosmos",
+				"PayoutPeriodStart": weekStart.Format(time.RFC3339),
+				"PayoutPeriodEnd":   weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+			})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"distribution": map[string]any{
+					"DistributionID":    "dist:" + rewardID,
+					"AccrualID":         rewardID,
+					"PayoutRef":         string(payoutRef),
+					"DistributedAtUnix": now.Unix(),
+					"Status":            string(settlement.OperationStatusConfirmed),
+				},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/x/vpnrewards/accruals/"+rewardID:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"accrual": map[string]any{
+					"AccrualID":       rewardID,
+					"SessionID":       sessionID,
+					"ProviderID":      wallet,
+					"AssetDenom":      "TDPNC",
+					"Amount":          int64(2_500_000),
+					"AccruedAtUnix":   now.Unix(),
+					"PayoutStartUnix": weekStart.Unix(),
+					"PayoutEndUnix":   weekStart.AddDate(0, 0, 7).Unix(),
+					"OperationState":  string(settlement.OperationStatusConfirmed),
+				},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/x/vpnslashing/evidence":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "evidence": []any{}})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK", "1")
+	t.Setenv("LOCAL_CONTROL_API_AUTH_TOKEN", "")
+	t.Setenv("GPM_PRODUCTION_MODE", "1")
+	t.Setenv("TDPN_PRODUCTION_MODE", "")
+	t.Setenv("GPM_SETTLEMENT_BACKEND", "")
+	t.Setenv("TDPN_SETTLEMENT_BACKEND", "")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_ENDPOINT", srv.URL)
+	t.Setenv("TDPN_SETTLEMENT_COSMOS_ENDPOINT", "")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_API_KEY", apiKey)
+	t.Setenv("GPM_SETTLEMENT_COSMOS_REWARD_PROOF_VERIFIER_ID", "test-cosmos-proof-registry")
+	t.Setenv("TDPN_SETTLEMENT_COSMOS_API_KEY", "")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_QUEUE_SIZE", "8")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_MAX_RETRIES", "1")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_BASE_BACKOFF_MS", "1")
+	t.Setenv("GPM_SETTLEMENT_COSMOS_HTTP_TIMEOUT_SEC", "2")
+	t.Setenv("GPM_STATE_STORE_PATH", filepath.Join(tmpDir, "gpm_state.json"))
+	t.Setenv("GPM_AUDIT_LOG_PATH", filepath.Join(tmpDir, "gpm_audit.jsonl"))
+
+	svc := New()
+	if svc.gpmSettlementClose != nil {
+		t.Cleanup(svc.gpmSettlementClose)
+	}
+	svc.gpmState = newGPMRuntimeState()
+	if !svc.gpmSettlementChainBacked {
+		t.Fatalf("gpmSettlementChainBacked=%v want=true config_error=%q", svc.gpmSettlementChainBacked, svc.gpmSettlementAdapterConfigError)
+	}
+	if svc.gpmSettlementBackend != "cosmos" {
+		t.Fatalf("gpmSettlementBackend=%q want=cosmos", svc.gpmSettlementBackend)
+	}
+
+	code, payload := callJSONHandler(t, svc.handleConfig, http.MethodGet, "/v1/config", "")
+	if code != http.StatusOK {
+		t.Fatalf("config status=%d payload=%v", code, payload)
+	}
+	configMap, _ := payload["config"].(map[string]any)
+	if configMap == nil {
+		t.Fatalf("config missing payload=%v", payload)
+	}
+	if got, _ := configMap["gpm_settlement_mode"].(string); got != "chain_backed" {
+		t.Fatalf("gpm_settlement_mode=%q want chain_backed config=%v", got, configMap)
+	}
+	if got, _ := configMap["gpm_settlement_backend"].(string); got != "cosmos" {
+		t.Fatalf("gpm_settlement_backend=%q want cosmos config=%v", got, configMap)
+	}
+	if got, _ := configMap["gpm_settlement_backend_source"].(string); got != "GPM_SETTLEMENT_COSMOS_ENDPOINT" {
+		t.Fatalf("gpm_settlement_backend_source=%q want endpoint source config=%v", got, configMap)
+	}
+	if got, _ := configMap["gpm_settlement_chain_required"].(bool); !got {
+		t.Fatalf("gpm_settlement_chain_required=%v want=true config=%v", got, configMap)
+	}
+	if got, _ := configMap["gpm_settlement_chain_backed"].(bool); !got {
+		t.Fatalf("gpm_settlement_chain_backed=%v want=true config=%v", got, configMap)
+	}
+	if got, _ := configMap["gpm_settlement_adapter_configured"].(bool); !got {
+		t.Fatalf("gpm_settlement_adapter_configured=%v want=true config=%v", got, configMap)
+	}
+	if got, _ := configMap["gpm_settlement_adapter_config_error"].(string); got != "" {
+		t.Fatalf("gpm_settlement_adapter_config_error=%q want empty config=%v", got, configMap)
+	}
+	if _, exists := configMap["gpm_settlement_cosmos_api_key"]; exists {
+		t.Fatalf("gpm_settlement_cosmos_api_key must not be exposed config=%v", configMap)
+	}
+
+	adminToken := seedGPMAdminTestSession(t, svc, "gpm-admin-finalize-cosmos", "cosmos1adminfinalizecosmos")
+	summary := gpmWeeklyRewardSummary{
+		WalletAddress:               wallet,
+		WeekStartUTC:                weekStart.Format(time.RFC3339),
+		WeekEndUTC:                  weekStart.AddDate(0, 0, 7).Format(time.RFC3339),
+		Role:                        "micro-relay",
+		MeteredSeconds:              7200,
+		ValidBytes:                  500_000_000,
+		CapacityScore:               80,
+		HealthScore:                 90,
+		RewardUnits:                 2.5,
+		Status:                      "week_closed_pending_admin_chain",
+		PayoutAllowed:               false,
+		SettlementFinalizationState: "pending_admin_chain_finalization",
+		TrafficProofStatus:          "trusted",
+		MeteringSource:              "signed_traffic_proof",
+		TrafficProofRef:             "obj://traffic-proof/gpm-finalize-cosmos",
+		GeneratedAtUTC:              now.Format(time.RFC3339),
+		SettlementFrequency:         "weekly",
+	}
+	svc.gpmState.upsertContribution(gpmContributionState{
+		WalletAddress:           wallet,
+		Enabled:                 true,
+		Role:                    "micro-relay",
+		RequestedRole:           "micro-relay",
+		ClientTier:              2,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		MeteredWeekStartUTC:     gpmWeekStartUTC(now).Format(time.RFC3339),
+		LastMeteredAt:           now,
+	})
+	svc.gpmState.appendRewardHistory(wallet, summary)
+
+	body := `{"session_token":"` + adminToken + `","wallet_address":"` + wallet + `","week_start_utc":"` + weekStart.Format(time.RFC3339) + `"}`
+	code, payload = callJSONHandler(t, svc.handleGPMAdminRewardFinalize, http.MethodPost, "/v1/gpm/admin/rewards/finalize", body)
+	if code != http.StatusOK {
+		t.Fatalf("admin finalize code=%d payload=%v", code, payload)
+	}
+	if allowed, _ := payload["payout_allowed"].(bool); !allowed {
+		t.Fatalf("payout_allowed=%v want=true payload=%v", allowed, payload)
+	}
+	selectedReward, _ := payload["selected_week_reward"].(map[string]any)
+	if status, _ := selectedReward["status"].(string); status != "finalized_chain_confirmed" {
+		t.Fatalf("status=%q want finalized_chain_confirmed reward=%v payload=%v", status, selectedReward, payload)
+	}
+	settlementStatus, _ := payload["settlement_status"].(map[string]any)
+	if settlementStatus == nil {
+		t.Fatalf("settlement_status missing payload=%v", payload)
+	}
+	if got, _ := settlementStatus["gpm_settlement_mode"].(string); got != "chain_backed" {
+		t.Fatalf("gpm_settlement_mode=%q want chain_backed status=%v payload=%v", got, settlementStatus, payload)
+	}
+
+	select {
+	case <-queryCh:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for reward confirmation query")
+	}
+	select {
+	case <-postCh:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for reward issue submission")
 	}
 }
 
@@ -4944,6 +10343,181 @@ func TestGPMAuthVerifyUsesCustomSignatureVerifier(t *testing.T) {
 	if strings.TrimSpace(sessionToken) == "" {
 		t.Fatalf("session_token missing: %v", payload)
 	}
+	if verified, _ := payload["wallet_binding_verified"].(bool); verified {
+		t.Fatalf("wallet_binding_verified=%v want=false for metadata-blind custom verifier payload=%v", verified, payload)
+	}
+	sessionPayload, _ := payload["session"].(map[string]any)
+	if verified, _ := sessionPayload["wallet_binding_verified"].(bool); verified {
+		t.Fatalf("session.wallet_binding_verified=%v want=false for metadata-blind custom verifier payload=%v", verified, payload)
+	}
+}
+
+func TestGPMAuthVerifyMintsAdminOnlyForVerifiedAllowlistedWallet(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	adminWallet := deterministicSecp256k1WalletAddress(t, "cosmos")
+	svc.gpmAdminWalletAllowlist = normalizeGPMAdminWalletAllowlist(adminWallet + ", cosmos1otheradmin")
+	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignature("admin-bound-signature", "bad-signature", 12)
+	expectedSignature := ""
+
+	svc.gpmAuthSignatureVerifier = func(challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error {
+		if walletAddress != adminWallet {
+			return fmt.Errorf("wallet_address=%q", walletAddress)
+		}
+		if walletProvider != "keplr" {
+			return fmt.Errorf("wallet_provider=%q", walletProvider)
+		}
+		if signature != expectedSignature {
+			return fmt.Errorf("signature=%q", signature)
+		}
+		if strings.TrimSpace(challenge.Message) == "" {
+			return errors.New("challenge message missing")
+		}
+		return nil
+	}
+
+	challengeBody := `{"wallet_address":"` + adminWallet + `","wallet_provider":"keplr"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+	if code != http.StatusOK {
+		t.Fatalf("challenge status=%d body=%v", code, payload)
+	}
+	challengeID, _ := payload["challenge_id"].(string)
+	challengeMessage, _ := payload["message"].(string)
+	signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
+	expectedSignature = signature
+	svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignature(signature, "bad-signature", 12)
+
+	verifyRequest := map[string]any{
+		"wallet_address":            adminWallet,
+		"wallet_provider":           "keplr",
+		"challenge_id":              challengeID,
+		"signature":                 signature,
+		"signature_public_key":      publicKey,
+		"signature_public_key_type": "secp256k1",
+		"signed_message":            challengeMessage,
+	}
+	verifyBodyBytes, err := json.Marshal(verifyRequest)
+	if err != nil {
+		t.Fatalf("json marshal verify request: %v", err)
+	}
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+	if code != http.StatusOK {
+		t.Fatalf("verify status=%d body=%v", code, payload)
+	}
+	sessionPayload, _ := payload["session"].(map[string]any)
+	if role, _ := sessionPayload["role"].(string); role != "admin" {
+		t.Fatalf("role=%q want=admin payload=%v", role, payload)
+	}
+	if verified, _ := sessionPayload["wallet_binding_verified"].(bool); !verified {
+		t.Fatalf("wallet_binding_verified=%v want=true payload=%v", verified, payload)
+	}
+	token, _ := payload["session_token"].(string)
+	session, ok := svc.gpmState.getSession(token, time.Now().UTC())
+	if !ok {
+		t.Fatalf("admin session not stored for token %q", token)
+	}
+	if session.Role != "admin" || !session.WalletBindingVerified {
+		t.Fatalf("session=%+v want wallet-bound admin", session)
+	}
+}
+
+func TestGPMAuthVerifyDoesNotMintAdminForAllowlistWithoutCommandVerifier(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmAdminWalletAllowlist = normalizeGPMAdminWalletAllowlist("cosmos1adminnocmd")
+	expectedSignature := ""
+
+	svc.gpmAuthSignatureVerifier = func(challenge gpmWalletChallenge, walletAddress string, walletProvider string, signature string) error {
+		if walletAddress != "cosmos1adminnocmd" {
+			return fmt.Errorf("wallet_address=%q", walletAddress)
+		}
+		if walletProvider != "keplr" {
+			return fmt.Errorf("wallet_provider=%q", walletProvider)
+		}
+		if signature != expectedSignature {
+			return fmt.Errorf("signature=%q", signature)
+		}
+		if strings.TrimSpace(challenge.Message) == "" {
+			return errors.New("challenge message missing")
+		}
+		return nil
+	}
+
+	challengeBody := `{"wallet_address":"cosmos1adminnocmd","wallet_provider":"keplr"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+	if code != http.StatusOK {
+		t.Fatalf("challenge status=%d body=%v", code, payload)
+	}
+	challengeID, _ := payload["challenge_id"].(string)
+	challengeMessage, _ := payload["message"].(string)
+	signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
+	expectedSignature = signature
+	verifyRequest := map[string]any{
+		"wallet_address":            "cosmos1adminnocmd",
+		"wallet_provider":           "keplr",
+		"challenge_id":              challengeID,
+		"signature":                 signature,
+		"signature_public_key":      publicKey,
+		"signature_public_key_type": "secp256k1",
+		"signed_message":            challengeMessage,
+	}
+	verifyBodyBytes, err := json.Marshal(verifyRequest)
+	if err != nil {
+		t.Fatalf("json marshal verify request: %v", err)
+	}
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+	if code != http.StatusOK {
+		t.Fatalf("verify status=%d body=%v", code, payload)
+	}
+	sessionPayload, _ := payload["session"].(map[string]any)
+	if role, _ := sessionPayload["role"].(string); role != "client" {
+		t.Fatalf("role=%q want=client when command verifier absent payload=%v", role, payload)
+	}
+	if verified, _ := sessionPayload["wallet_binding_verified"].(bool); verified {
+		t.Fatalf("wallet_binding_verified=%v want=false when command verifier absent payload=%v", verified, payload)
+	}
+}
+
+func TestGPMAuthVerifyDefaultVerifierCannotMintAllowlistedAdmin(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmAdminWalletAllowlist = normalizeGPMAdminWalletAllowlist("cosmos1admindefault")
+
+	challengeBody := `{"wallet_address":"cosmos1admindefault","wallet_provider":"keplr"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+	if code != http.StatusOK {
+		t.Fatalf("challenge status=%d body=%v", code, payload)
+	}
+	challengeID, _ := payload["challenge_id"].(string)
+	challengeMessage, _ := payload["message"].(string)
+	signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
+	verifyRequest := map[string]any{
+		"wallet_address":            "cosmos1admindefault",
+		"wallet_provider":           "keplr",
+		"challenge_id":              challengeID,
+		"signature":                 signature,
+		"signature_public_key":      publicKey,
+		"signature_public_key_type": "secp256k1",
+		"signed_message":            challengeMessage,
+	}
+	verifyBodyBytes, err := json.Marshal(verifyRequest)
+	if err != nil {
+		t.Fatalf("json marshal verify request: %v", err)
+	}
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+	if code != http.StatusOK {
+		t.Fatalf("verify status=%d body=%v", code, payload)
+	}
+	sessionPayload, _ := payload["session"].(map[string]any)
+	if role, _ := sessionPayload["role"].(string); role != "client" {
+		t.Fatalf("role=%q want=client for default verifier payload=%v", role, payload)
+	}
+	if verified, _ := sessionPayload["wallet_binding_verified"].(bool); verified {
+		t.Fatalf("wallet_binding_verified=%v want=false payload=%v", verified, payload)
+	}
 }
 
 func TestGPMAuthVerifyCustomSignatureVerifierRejects(t *testing.T) {
@@ -5020,6 +10594,104 @@ func TestGPMAuthVerifyConfiguredVerifierCommandAllowsValidSignature(t *testing.T
 	}
 	if got, _ := payload["session_token"].(string); strings.TrimSpace(got) == "" {
 		t.Fatalf("session_token missing payload=%v", payload)
+	}
+}
+
+func TestGPMAuthVerifyUnboundCryptoProofCannotUnlockEntitlements(t *testing.T) {
+	t.Setenv("GPM_DEFAULT_CLIENT_TIER", "3")
+	t.Setenv("GPM_DEFAULT_STAKE_SATISFIED", "1")
+	t.Setenv("GPM_DEFAULT_PREPAID_BALANCE_SATISFIED", "1")
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	wallet := "cosmos1unboundoperator"
+	svc.gpmState.upsertOperator(gpmOperatorApplication{
+		WalletAddress:   wallet,
+		ChainOperatorID: "operator-unbound-1",
+		Status:          "approved",
+		UpdatedAt:       time.Now().UTC(),
+	})
+
+	challengeBody := `{"wallet_address":"` + wallet + `","wallet_provider":"keplr"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+	if code != http.StatusOK {
+		t.Fatalf("challenge status=%d body=%v", code, payload)
+	}
+	challengeID, _ := payload["challenge_id"].(string)
+	challengeMessage, _ := payload["message"].(string)
+	signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
+	verifyRequest := map[string]any{
+		"wallet_address":            wallet,
+		"wallet_provider":           "keplr",
+		"challenge_id":              challengeID,
+		"signature":                 signature,
+		"signature_public_key":      publicKey,
+		"signature_public_key_type": "secp256k1",
+		"signed_message":            challengeMessage,
+	}
+	verifyBodyBytes, err := json.Marshal(verifyRequest)
+	if err != nil {
+		t.Fatalf("json marshal verify request: %v", err)
+	}
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+	if code != http.StatusOK {
+		t.Fatalf("verify status=%d body=%v", code, payload)
+	}
+	session, _ := payload["session"].(map[string]any)
+	if got, _ := session["role"].(string); got != "client" {
+		t.Fatalf("role=%q want=client payload=%v", got, payload)
+	}
+	if got, _ := session["wallet_binding_verified"].(bool); got {
+		t.Fatalf("wallet_binding_verified=%v want=false payload=%v", got, payload)
+	}
+	if got := intFromAny(session["client_tier"]); got != 1 {
+		t.Fatalf("client_tier=%d want=1 payload=%v", got, payload)
+	}
+	if got, _ := session["stake_satisfied"].(bool); got {
+		t.Fatalf("stake_satisfied=%v want=false payload=%v", got, payload)
+	}
+	if got, _ := session["prepaid_balance_satisfied"].(bool); got {
+		t.Fatalf("prepaid_balance_satisfied=%v want=false payload=%v", got, payload)
+	}
+	if got, _ := session["chain_operator_id"].(string); got != "" {
+		t.Fatalf("chain_operator_id=%q want empty payload=%v", got, payload)
+	}
+}
+
+func TestGPMAuthVerifyStrictCryptoProofRequiresWalletBoundVerifier(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmAuthVerifyRequireCryptoProof = true
+
+	challengeBody := `{"wallet_address":"cosmos1strictcryptounbound","wallet_provider":"keplr"}`
+	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
+	if code != http.StatusOK {
+		t.Fatalf("challenge status=%d body=%v", code, payload)
+	}
+	challengeID, _ := payload["challenge_id"].(string)
+	challengeMessage, _ := payload["message"].(string)
+	signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
+	verifyRequest := map[string]any{
+		"wallet_address":            "cosmos1strictcryptounbound",
+		"wallet_provider":           "keplr",
+		"challenge_id":              challengeID,
+		"signature":                 signature,
+		"signature_public_key":      publicKey,
+		"signature_public_key_type": "secp256k1",
+		"signed_message":            challengeMessage,
+	}
+	verifyBodyBytes, err := json.Marshal(verifyRequest)
+	if err != nil {
+		t.Fatalf("json marshal verify request: %v", err)
+	}
+	code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
+	if code != http.StatusUnauthorized {
+		t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "wallet-bound signature verifier command is required") {
+		t.Fatalf("error=%q want wallet-bound verifier requirement payload=%v", errMsg, payload)
 	}
 }
 
@@ -5146,7 +10818,7 @@ func TestGPMAuthVerifyConfiguredVerifierCommandPropagatesSignatureMetadata(t *te
 		SignatureEnvelope:      "envelope-v1",
 	}
 
-	challengeBody := `{"wallet_address":"cosmos1cmdmeta","wallet_provider":"keplr"}`
+	challengeBody := `{"wallet_address":"cosmos1cmdmeta","wallet_provider":"keplr","chain_id":"evm-11155111"}`
 	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
 	if code != http.StatusOK {
 		t.Fatalf("challenge status=%d body=%v", code, payload)
@@ -5203,7 +10875,7 @@ func TestGPMAuthVerifyConfiguredVerifierCommandAcceptsLegacyPublicKeyAliases(t *
 		SignatureEnvelope:      "envelope-v1",
 	}
 
-	challengeBody := `{"wallet_address":"cosmos1cmdmetaalias","wallet_provider":"keplr"}`
+	challengeBody := `{"wallet_address":"cosmos1cmdmetaalias","wallet_provider":"keplr","chain_id":"evm-11155111"}`
 	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
 	if code != http.StatusOK {
 		t.Fatalf("challenge status=%d body=%v", code, payload)
@@ -5260,7 +10932,7 @@ func TestGPMAuthVerifyConfiguredVerifierCommandCanonicalPublicKeyMetadataTakesPr
 		SignatureEnvelope:      "envelope-v1",
 	}
 
-	challengeBody := `{"wallet_address":"cosmos1cmdmetaprefer","wallet_provider":"keplr"}`
+	challengeBody := `{"wallet_address":"cosmos1cmdmetaprefer","wallet_provider":"keplr","chain_id":"evm-11155111"}`
 	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
 	if code != http.StatusOK {
 		t.Fatalf("challenge status=%d body=%v", code, payload)
@@ -5312,7 +10984,7 @@ func TestGPMAuthVerifyAcceptsKnownOptionalSignatureMetadataValues(t *testing.T) 
 	svc.gpmState = newGPMRuntimeState()
 	svc.gpmRoleDefault = "client"
 
-	challengeBody := `{"wallet_address":"cosmos1metaallow","wallet_provider":"keplr"}`
+	challengeBody := `{"wallet_address":"cosmos1metaallow","wallet_provider":"keplr","chain_id":"mesh-mainnet-1"}`
 	code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
 	if code != http.StatusOK {
 		t.Fatalf("challenge status=%d body=%v", code, payload)
@@ -5727,7 +11399,8 @@ func TestGPMAuthVerifyStrictCryptographicProofPolicy(t *testing.T) {
 		svc.gpmRoleDefault = "client"
 		svc.gpmAuthVerifyRequireCryptoProof = true
 
-		challengeBody := `{"wallet_address":"cosmos1strictcryptosecppass","wallet_provider":"keplr"}`
+		walletAddress := deterministicSecp256k1WalletAddress(t, "cosmos")
+		challengeBody := `{"wallet_address":"` + walletAddress + `","wallet_provider":"keplr"}`
 		code, payload := callJSONHandler(t, svc.handleGPMAuthChallenge, http.MethodPost, "/v1/gpm/auth/challenge", challengeBody)
 		if code != http.StatusOK {
 			t.Fatalf("challenge status=%d body=%v", code, payload)
@@ -5741,9 +11414,10 @@ func TestGPMAuthVerifyStrictCryptographicProofPolicy(t *testing.T) {
 			t.Fatalf("message missing: %v", payload)
 		}
 		signature, publicKey := deterministicSecp256k1Proof(challengeMessage)
+		svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignature(signature, "bad-signature", 13)
 
 		verifyRequest := map[string]any{
-			"wallet_address":            "cosmos1strictcryptosecppass",
+			"wallet_address":            walletAddress,
 			"wallet_provider":           "keplr",
 			"challenge_id":              challengeID,
 			"signature":                 signature,
@@ -5765,7 +11439,7 @@ func TestGPMAuthVerifyStrictCryptographicProofPolicy(t *testing.T) {
 		}
 	})
 
-	t.Run("accepts valid ed25519 proofs when strict crypto policy is enabled", func(t *testing.T) {
+	t.Run("rejects ed25519 proofs for wallet-bound strict crypto policy", func(t *testing.T) {
 		svc, _ := newFakeService(t, false)
 		svc.gpmState = newGPMRuntimeState()
 		svc.gpmRoleDefault = "client"
@@ -5786,6 +11460,7 @@ func TestGPMAuthVerifyStrictCryptographicProofPolicy(t *testing.T) {
 		}
 
 		signature, publicKey := deterministicEd25519Proof(challengeMessage)
+		svc.gpmAuthVerifyCommand = authVerifierCommandExpectSignature(signature, "bad-signature", 13)
 		verifyRequest := map[string]any{
 			"wallet_address":            "cosmos1strictcryptoed",
 			"wallet_provider":           "keplr",
@@ -5801,11 +11476,11 @@ func TestGPMAuthVerifyStrictCryptographicProofPolicy(t *testing.T) {
 		}
 
 		code, payload = callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(verifyBodyBytes))
-		if code != http.StatusOK {
-			t.Fatalf("verify status=%d body=%v", code, payload)
+		if code != http.StatusUnauthorized {
+			t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
 		}
-		if got, _ := payload["session_token"].(string); strings.TrimSpace(got) == "" {
-			t.Fatalf("session_token missing payload=%v", payload)
+		if got, _ := payload["error"].(string); !strings.Contains(got, "wallet-bound signature verifier") {
+			t.Fatalf("error=%q want wallet-bound verifier guidance payload=%v", got, payload)
 		}
 	})
 }
@@ -6026,8 +11701,8 @@ func TestGPMAuthVerifyConfiguredVerifierCommandRejectsSignature(t *testing.T) {
 	if !strings.Contains(errMsg, "rejected signature") {
 		t.Fatalf("error=%q want rejected-signature marker payload=%v", errMsg, payload)
 	}
-	if !strings.Contains(errMsg, "bad-signature") {
-		t.Fatalf("error=%q want verifier command output marker payload=%v", errMsg, payload)
+	if strings.Contains(errMsg, "bad-signature") {
+		t.Fatalf("error=%q leaked verifier command output payload=%v", errMsg, payload)
 	}
 	records := readAuditLogRecords(t, svc.gpmAuditLogPath)
 	var failureRecord map[string]any
@@ -6128,6 +11803,160 @@ func TestGPMSessionRefreshAndRevoke(t *testing.T) {
 	}
 }
 
+func TestGPMSessionRefreshRejectsProductionMode(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmConnectPolicyMode = "production"
+	now := time.Now().UTC()
+	const token = "gpm-session-token-production-refresh"
+	svc.gpmState.putSession(gpmSession{
+		Token:                     token,
+		WalletAddress:             "cosmos1prodrefresh",
+		WalletProvider:            "keplr",
+		Role:                      "client",
+		WalletBindingVerified:     true,
+		ClientTier:                3,
+		StakeSatisfied:            true,
+		PrepaidBalanceSatisfied:   true,
+		EntitlementEvidenceSource: "chain",
+		CreatedAt:                 now,
+		ExpiresAt:                 now.Add(time.Hour),
+	})
+
+	body := `{"session_token":"` + token + `","action":"refresh"}`
+	code, payload := callJSONHandler(t, svc.handleGPMSessionStatus, http.MethodPost, "/v1/gpm/session", body)
+	if code != http.StatusForbidden {
+		t.Fatalf("refresh status=%d want=%d body=%v", code, http.StatusForbidden, payload)
+	}
+	if got, _ := payload["error"].(string); !strings.Contains(got, "fresh wallet challenge") {
+		t.Fatalf("error=%q want fresh-wallet guidance payload=%v", got, payload)
+	}
+	if _, ok := svc.gpmState.getSession(token, time.Now().UTC()); !ok {
+		t.Fatalf("rejected production refresh should not delete the existing session")
+	}
+}
+
+func TestGPMSessionRefreshRejectsSessionOutsideCurrentWalletChainPolicy(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmAuthExpectedChainID = "gpm-testnet-1"
+	now := time.Now().UTC()
+	const token = "gpm-session-token-old-chain"
+	svc.gpmState.putSession(gpmSession{
+		Token:                 token,
+		WalletAddress:         "cosmos1oldchainuser",
+		WalletProvider:        "keplr",
+		Role:                  "client",
+		WalletBindingVerified: true,
+		CreatedAt:             now,
+		ExpiresAt:             now.Add(time.Hour),
+	})
+
+	body := `{"session_token":"` + token + `","action":"refresh"}`
+	code, payload := callJSONHandler(t, svc.handleGPMSessionStatus, http.MethodPost, "/v1/gpm/session", body)
+	if code != http.StatusForbidden {
+		t.Fatalf("refresh status=%d want=%d body=%v", code, http.StatusForbidden, payload)
+	}
+	if got, _ := payload["error"].(string); !strings.Contains(got, "session chain_id is missing") {
+		t.Fatalf("error=%q want session chain policy guidance payload=%v", got, payload)
+	}
+	if _, ok := svc.gpmState.getSession(token, time.Now().UTC()); !ok {
+		t.Fatalf("rejected refresh should not delete the existing session")
+	}
+}
+
+func TestGPMSessionUseRejectsSessionOutsideCurrentWalletChainPolicy(t *testing.T) {
+	t.Run("contribution status rejects stale chain session", func(t *testing.T) {
+		svc, _ := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmAuthExpectedChainID = "gpm-testnet-1"
+		const token = "gpm-stale-chain-contribution"
+		svc.gpmState.putSession(gpmSession{
+			Token:                     token,
+			WalletAddress:             "cosmos1stalechaincontrib",
+			WalletProvider:            "keplr",
+			Role:                      "client",
+			WalletBindingVerified:     true,
+			EntitlementEvidenceSource: "chain",
+			ClientTier:                3,
+			StakeSatisfied:            true,
+			PrepaidBalanceSatisfied:   true,
+			CreatedAt:                 time.Now().UTC(),
+			ExpiresAt:                 time.Now().UTC().Add(time.Hour),
+		})
+
+		code, payload := callJSONHandler(t, svc.handleGPMContributionStatus, http.MethodGet, "/v1/gpm/contribution/status?session_token="+token, "")
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "session chain_id is missing") {
+			t.Fatalf("error=%q want stale chain policy guidance payload=%v", got, payload)
+		}
+	})
+
+	t.Run("service mutation gives stale chain policy guidance", func(t *testing.T) {
+		svc, logPath := newFakeService(t, false)
+		svc.gpmState = newGPMRuntimeState()
+		svc.gpmAuthExpectedChainID = "gpm-testnet-1"
+		svc.serviceStart = "echo gpm-start-ok"
+		svc.gpmState.putSession(gpmSession{
+			Token:                 "gpm-stale-chain-operator",
+			Role:                  "operator",
+			WalletAddress:         "cosmos1stalechainoperator",
+			WalletProvider:        "keplr",
+			WalletBindingVerified: true,
+			ChainOperatorID:       "operator-stale-chain",
+			CreatedAt:             time.Now().UTC(),
+			ExpiresAt:             time.Now().UTC().Add(time.Hour),
+		})
+		svc.gpmState.upsertOperator(gpmOperatorApplication{
+			WalletAddress:          "cosmos1stalechainoperator",
+			ChainOperatorID:        "operator-stale-chain",
+			Status:                 "approved",
+			ApprovalEvidenceSource: "chain-governance",
+			UpdatedAt:              time.Now().UTC(),
+		})
+
+		code, payload := callJSONHandler(t, svc.handleGPMServiceStart, http.MethodPost, "/v1/gpm/service/start", `{"session_token":"gpm-stale-chain-operator"}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+		}
+		if got, _ := payload["error"].(string); !strings.Contains(got, "session no longer satisfies wallet auth policy") {
+			t.Fatalf("error=%q want stale policy guidance payload=%v", got, payload)
+		}
+		if cmds := readCommandLog(t, logPath); len(cmds) != 0 {
+			t.Fatalf("stale chain session should not execute commands, got=%v", cmds)
+		}
+	})
+}
+
+func TestGPMSessionUseRejectsSessionMintedUnderDifferentAuthPolicy(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMTestSession(t, svc, "gpm-policy-fingerprint-session", "cosmos1policyfingerprint", 2, true, true)
+	session, ok, err := svc.gpmSessionFromToken(token)
+	if err != nil {
+		t.Fatalf("seeded session should satisfy baseline policy: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected seeded session")
+	}
+	session.AuthPolicyFingerprint = svc.gpmCurrentAuthPolicyFingerprint()
+	svc.gpmState.putSession(session)
+
+	svc.gpmAuthVerifyRequireCryptoProof = true
+	_, ok, err = svc.gpmSessionFromToken(token)
+	if err == nil {
+		t.Fatal("expected stale auth policy fingerprint rejection")
+	}
+	if ok {
+		t.Fatal("session minted under stale auth policy should not be accepted")
+	}
+	if !strings.Contains(err.Error(), "different wallet auth policy") {
+		t.Fatalf("error=%q want auth policy fingerprint guidance", err)
+	}
+}
+
 func TestGPMSessionStatusReconcilesStaleOperatorSessionToClient(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -6211,12 +12040,13 @@ func TestGPMSessionStatusUpgradesClientSessionToOperatorWhenApproved(t *testing.
 	const sessionToken = "gpm-session-upgrade-operator"
 	now := time.Now().UTC()
 	svc.gpmState.putSession(gpmSession{
-		Token:          sessionToken,
-		WalletAddress:  "cosmos1upgradeoperator",
-		WalletProvider: "keplr",
-		Role:           "client",
-		CreatedAt:      now,
-		ExpiresAt:      now.Add(time.Hour),
+		Token:                 sessionToken,
+		WalletAddress:         "cosmos1upgradeoperator",
+		WalletProvider:        "keplr",
+		Role:                  "client",
+		WalletBindingVerified: true,
+		CreatedAt:             now,
+		ExpiresAt:             now.Add(time.Hour),
 	})
 	svc.gpmState.upsertOperator(gpmOperatorApplication{
 		WalletAddress:   "cosmos1upgradeoperator",
@@ -6256,6 +12086,91 @@ func TestGPMSessionStatusUpgradesClientSessionToOperatorWhenApproved(t *testing.
 	}
 	if storedSession.ChainOperatorID != "operator-approved-123" {
 		t.Fatalf("stored session chain_operator_id=%q want=operator-approved-123", storedSession.ChainOperatorID)
+	}
+}
+
+func TestGPMOperatorDecisionOnlyPromotesWalletBoundSessions(t *testing.T) {
+	state := newGPMRuntimeState()
+	now := time.Now().UTC()
+	const wallet = "cosmos1operatorapproval"
+	state.putSession(gpmSession{
+		Token:                 "gpm-bound-operator-session",
+		WalletAddress:         wallet,
+		WalletProvider:        "keplr",
+		Role:                  "client",
+		WalletBindingVerified: true,
+		CreatedAt:             now,
+		ExpiresAt:             now.Add(time.Hour),
+	})
+	state.putSession(gpmSession{
+		Token:          "gpm-unbound-operator-session",
+		WalletAddress:  wallet,
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	})
+
+	if changed := state.applyOperatorDecisionToSessions(wallet, true, "operator-approved-123"); !changed {
+		t.Fatal("expected approval decision to update at least one session")
+	}
+
+	bound, ok := state.getSession("gpm-bound-operator-session", now)
+	if !ok {
+		t.Fatal("expected bound session to remain present")
+	}
+	if bound.Role != "operator" || bound.ChainOperatorID != "operator-approved-123" {
+		t.Fatalf("bound session not promoted correctly: %+v", bound)
+	}
+	unbound, ok := state.getSession("gpm-unbound-operator-session", now)
+	if !ok {
+		t.Fatal("expected unbound session to remain present")
+	}
+	if unbound.Role != "client" || strings.TrimSpace(unbound.ChainOperatorID) != "" {
+		t.Fatalf("unbound session should stay client without chain binding: %+v", unbound)
+	}
+}
+
+func TestGPMSessionStatusDoesNotUpgradeUnboundSessionWhenApproved(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+
+	const sessionToken = "gpm-session-unbound-upgrade-blocked"
+	now := time.Now().UTC()
+	svc.gpmState.putSession(gpmSession{
+		Token:          sessionToken,
+		WalletAddress:  "cosmos1unboundupgrade",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	})
+	svc.gpmState.upsertOperator(gpmOperatorApplication{
+		WalletAddress:   "cosmos1unboundupgrade",
+		ChainOperatorID: "operator-approved-123",
+		Status:          "approved",
+		UpdatedAt:       now,
+	})
+
+	statusBody := `{"session_token":"` + sessionToken + `","action":"status"}`
+	code, payload := callJSONHandler(t, svc.handleGPMSessionStatus, http.MethodPost, "/v1/gpm/session", statusBody)
+	if code != http.StatusOK {
+		t.Fatalf("session status=%d payload=%v", code, payload)
+	}
+	if sessionReconciled, _ := payload["session_reconciled"].(bool); sessionReconciled {
+		t.Fatalf("unbound approved session should not be reconciled to operator payload=%v", payload)
+	}
+	sessionPayload, _ := payload["session"].(map[string]any)
+	if role, _ := sessionPayload["role"].(string); role != "client" {
+		t.Fatalf("session.role=%q want=client payload=%v", role, payload)
+	}
+
+	storedSession, ok := svc.gpmState.getSession(sessionToken, time.Now().UTC())
+	if !ok {
+		t.Fatal("expected session to remain present")
+	}
+	if storedSession.Role != "client" || strings.TrimSpace(storedSession.ChainOperatorID) != "" {
+		t.Fatalf("stored unbound session should remain client without chain id: %+v", storedSession)
 	}
 }
 
@@ -6307,12 +12222,16 @@ func TestGPMClientRegisterUsesManifestAndPersistsSessionConnectSecrets(t *testin
 
 	const token = "gpm-session-token"
 	svc.gpmState.putSession(gpmSession{
-		Token:          token,
-		WalletAddress:  "cosmos1registeredclient",
-		WalletProvider: "keplr",
-		Role:           "client",
-		CreatedAt:      now,
-		ExpiresAt:      now.Add(time.Hour),
+		Token:                   token,
+		WalletAddress:           "cosmos1registeredclient",
+		WalletProvider:          "keplr",
+		Role:                    "client",
+		WalletBindingVerified:   true,
+		ClientTier:              2,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		CreatedAt:               now,
+		ExpiresAt:               now.Add(time.Hour),
 	})
 
 	registerBody := `{"session_token":"` + token + `","bootstrap_directory":"` + secondaryBootstrapDirectory + `","path_profile":"3hop"}`
@@ -6349,6 +12268,123 @@ func TestGPMClientRegisterUsesManifestAndPersistsSessionConnectSecrets(t *testin
 	}
 	if session.PathProfile != "3hop" {
 		t.Fatalf("session path_profile=%q want=3hop", session.PathProfile)
+	}
+}
+
+func TestGPMClientRegisterRejectsUnboundWalletSession(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	token := seedGPMUnboundTestSession(t, svc, "gpm-unbound-register-session", "cosmos1unboundregister")
+
+	code, payload := callJSONHandler(t, svc.handleGPMClientRegister, http.MethodPost, "/v1/gpm/onboarding/client/register", `{
+		"session_token":"`+token+`",
+		"bootstrap_directory":"https://directory.globalprivatemesh.example:8081"
+	}`)
+	if code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%v", code, payload)
+	}
+	if got, _ := payload["error"].(string); !strings.Contains(got, "wallet-bound session is required for client registration") {
+		t.Fatalf("error=%q want wallet-bound registration rejection", got)
+	}
+}
+
+func TestGPMClientRegisterCanonicalizesBootstrapDirectoryBeforeStorageAndComparison(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+
+	now := time.Now().UTC()
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version":               1,
+			"generated_at_utc":      now.Format(time.RFC3339),
+			"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+			"bootstrap_directories": []string{"https://Directory.GlobalPrivateMesh.Example:443/"},
+		})
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+
+	const token = "gpm-session-token-canonical-bootstrap"
+	svc.gpmState.putSession(gpmSession{
+		Token:                 token,
+		WalletAddress:         "cosmos1canonicalclient",
+		WalletProvider:        "keplr",
+		Role:                  "client",
+		WalletBindingVerified: true,
+		CreatedAt:             now,
+		ExpiresAt:             now.Add(time.Hour),
+	})
+
+	registerBody := `{"session_token":"` + token + `","bootstrap_directory":"https://directory.globalprivatemesh.example/","path_profile":"2hop"}`
+	code, payload := callJSONHandler(t, svc.handleGPMClientRegister, http.MethodPost, "/v1/gpm/onboarding/client/register", registerBody)
+	if code != http.StatusOK {
+		t.Fatalf("register status=%d body=%v", code, payload)
+	}
+	profile, _ := payload["profile"].(map[string]any)
+	if got, _ := profile["bootstrap_directory"].(string); got != "https://directory.globalprivatemesh.example" {
+		t.Fatalf("profile.bootstrap_directory=%q want canonical payload=%v", got, payload)
+	}
+	session, ok := svc.gpmState.getSession(token, now)
+	if !ok {
+		t.Fatal("expected session to remain valid")
+	}
+	if session.BootstrapDirectory != "https://directory.globalprivatemesh.example" {
+		t.Fatalf("session.BootstrapDirectory=%q want canonical", session.BootstrapDirectory)
+	}
+	if len(session.BootstrapDirectories) != 1 || session.BootstrapDirectories[0] != "https://directory.globalprivatemesh.example" {
+		t.Fatalf("session.BootstrapDirectories=%v want canonical singleton", session.BootstrapDirectories)
+	}
+}
+
+func TestGPMClientRegisterRejectsTierOneMicroRelayPath(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
+	svc.gpmManifestMaxAge = 24 * time.Hour
+
+	bootstrapDirectory := "https://directory.globalprivatemesh.example:8081"
+	now := time.Now().UTC()
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version":               1,
+			"generated_at_utc":      now.Format(time.RFC3339),
+			"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+			"bootstrap_directories": []string{bootstrapDirectory},
+		})
+	}))
+	t.Cleanup(manifestServer.Close)
+	svc.gpmMainDomain = manifestServer.URL
+	svc.gpmManifestURL = manifestServer.URL
+
+	const token = "gpm-session-token-tier1-3hop"
+	svc.gpmState.putSession(gpmSession{
+		Token:                   token,
+		WalletAddress:           "cosmos1tier1register",
+		WalletProvider:          "keplr",
+		Role:                    "client",
+		WalletBindingVerified:   true,
+		ClientTier:              1,
+		StakeSatisfied:          true,
+		PrepaidBalanceSatisfied: true,
+		CreatedAt:               now,
+		ExpiresAt:               now.Add(time.Hour),
+	})
+
+	registerBody := `{"session_token":"` + token + `","path_profile":"3hop"}`
+	code, payload := callJSONHandler(t, svc.handleGPMClientRegister, http.MethodPost, "/v1/gpm/onboarding/client/register", registerBody)
+	if code != http.StatusForbidden {
+		t.Fatalf("register status=%d want=%d body=%v", code, http.StatusForbidden, payload)
+	}
+	if got, _ := payload["error"].(string); !strings.Contains(got, "Tier 2 or Tier 3") {
+		t.Fatalf("error=%q want Tier 2/3 guidance payload=%v", got, payload)
+	}
+	if canUse, _ := payload["can_use_micro_relays"].(bool); canUse {
+		t.Fatalf("can_use_micro_relays=%v want=false payload=%v", canUse, payload)
 	}
 }
 
@@ -6588,6 +12624,16 @@ func TestGPMServerStatus(t *testing.T) {
 		}
 	}
 	now := time.Now().UTC()
+	putServerStatusClientSession := func(svc *Service, token, wallet string) {
+		svc.gpmState.putSession(gpmSession{
+			Token:          token,
+			WalletAddress:  wallet,
+			WalletProvider: "keplr",
+			Role:           "client",
+			CreatedAt:      now,
+			ExpiresAt:      now.Add(time.Hour),
+		})
+	}
 
 	t.Run("admin unlocked", func(t *testing.T) {
 		svc := newServerStatusService(t)
@@ -6640,7 +12686,7 @@ func TestGPMServerStatus(t *testing.T) {
 			CreatedAt:          now,
 			ExpiresAt:          now.Add(time.Hour),
 			BootstrapDirectory: "https://bootstrap.globalprivatemesh.net",
-			InviteKey:          "inv-0123456789abcdef012345",
+			InviteKey:          "inv-REDACTED-test-fixture",
 		})
 
 		body := `{"session_token":"gpm-server-admin-dual-role-token"}`
@@ -6931,8 +12977,9 @@ func TestGPMServerStatus(t *testing.T) {
 
 	t.Run("wallet-only path with not_submitted", func(t *testing.T) {
 		svc := newServerStatusService(t)
+		putServerStatusClientSession(svc, "gpm-server-wallet-only-status-token", "cosmos1walletonlystatus")
 
-		body := `{"wallet_address":"cosmos1walletonlystatus"}`
+		body := `{"session_token":"gpm-server-wallet-only-status-token"}`
 		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
 		if code != http.StatusOK {
 			t.Fatalf("status=%d payload=%v", code, payload)
@@ -6941,8 +12988,8 @@ func TestGPMServerStatus(t *testing.T) {
 		if got, _ := readiness["wallet_address"].(string); got != "cosmos1walletonlystatus" {
 			t.Fatalf("wallet_address=%q want=cosmos1walletonlystatus payload=%v", got, payload)
 		}
-		if got, _ := readiness["session_present"].(bool); got {
-			t.Fatalf("session_present=%v want=false payload=%v", readiness["session_present"], payload)
+		if got, _ := readiness["session_present"].(bool); !got {
+			t.Fatalf("session_present=%v want=true payload=%v", readiness["session_present"], payload)
 		}
 		if got, _ := readiness["operator_application_status"].(string); got != "not_submitted" {
 			t.Fatalf("operator_application_status=%q want=not_submitted payload=%v", got, payload)
@@ -6954,12 +13001,13 @@ func TestGPMServerStatus(t *testing.T) {
 
 	t.Run("endpoint diagnostics are additive and backward compatible", func(t *testing.T) {
 		svc := newServerStatusService(t)
+		putServerStatusClientSession(svc, "gpm-server-diag-backcompat-token", "cosmos1diagbackcompat")
 		t.Setenv("EASY_NODE_SERVER_MODE", "")
 		t.Setenv("CORE_ISSUER_URL", "")
 		t.Setenv("ISSUER_URLS", "")
 		t.Setenv("DIRECTORY_ISSUER_TRUST_URLS", "")
 
-		body := `{"wallet_address":"cosmos1diagbackcompat"}`
+		body := `{"session_token":"gpm-server-diag-backcompat-token"}`
 		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
 		if code != http.StatusOK {
 			t.Fatalf("status=%d payload=%v", code, payload)
@@ -6996,12 +13044,13 @@ func TestGPMServerStatus(t *testing.T) {
 
 	t.Run("provider mode missing issuer configuration warns", func(t *testing.T) {
 		svc := newServerStatusService(t)
+		putServerStatusClientSession(svc, "gpm-server-diag-provider-token", "cosmos1diagprovider")
 		t.Setenv("EASY_NODE_SERVER_MODE", "provider")
 		t.Setenv("CORE_ISSUER_URL", "")
 		t.Setenv("ISSUER_URLS", "")
 		t.Setenv("DIRECTORY_ISSUER_TRUST_URLS", "")
 
-		body := `{"wallet_address":"cosmos1diagprovider"}`
+		body := `{"session_token":"gpm-server-diag-provider-token"}`
 		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
 		if code != http.StatusOK {
 			t.Fatalf("status=%d payload=%v", code, payload)
@@ -7018,12 +13067,13 @@ func TestGPMServerStatus(t *testing.T) {
 
 	t.Run("authority mode missing trust configuration warns", func(t *testing.T) {
 		svc := newServerStatusService(t)
+		putServerStatusClientSession(svc, "gpm-server-diag-authority-token", "cosmos1diagauthority")
 		t.Setenv("EASY_NODE_SERVER_MODE", "authority")
 		t.Setenv("CORE_ISSUER_URL", "https://authority.globalprivatemesh.example:8082")
 		t.Setenv("ISSUER_URLS", "")
 		t.Setenv("DIRECTORY_ISSUER_TRUST_URLS", "")
 
-		body := `{"wallet_address":"cosmos1diagauthority"}`
+		body := `{"session_token":"gpm-server-diag-authority-token"}`
 		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
 		if code != http.StatusOK {
 			t.Fatalf("status=%d payload=%v", code, payload)
@@ -7040,12 +13090,13 @@ func TestGPMServerStatus(t *testing.T) {
 
 	t.Run("mixed scheme remote http and core mismatch warnings", func(t *testing.T) {
 		svc := newServerStatusService(t)
+		putServerStatusClientSession(svc, "gpm-server-diag-mixed-token", "cosmos1diagmixed")
 		t.Setenv("EASY_NODE_SERVER_MODE", "provider")
 		t.Setenv("CORE_ISSUER_URL", "https://core.globalprivatemesh.example:8082")
 		t.Setenv("ISSUER_URLS", "https://issuer-a.globalprivatemesh.example:8082,http://203.0.113.20:8082")
 		t.Setenv("DIRECTORY_ISSUER_TRUST_URLS", "https://issuer-b.globalprivatemesh.example:8082,http://198.51.100.21:8082")
 
-		body := `{"wallet_address":"cosmos1diagmixed"}`
+		body := `{"session_token":"gpm-server-diag-mixed-token"}`
 		code, payload := callJSONHandler(t, svc.handleGPMServerStatus, http.MethodPost, "/v1/gpm/onboarding/server/status", body)
 		if code != http.StatusOK {
 			t.Fatalf("status=%d payload=%v", code, payload)
@@ -7419,13 +13470,16 @@ func TestGPMOperatorList(t *testing.T) {
 	}
 	putAdminSession := func(svc *Service, token string, now time.Time) {
 		svc.gpmState.putSession(gpmSession{
-			Token:          token,
-			WalletAddress:  "cosmos1operatorlistadmin",
-			WalletProvider: "keplr",
-			Role:           "admin",
-			CreatedAt:      now,
-			ExpiresAt:      now.Add(time.Hour),
+			Token:                  token,
+			WalletAddress:          "cosmos1operatorlistadmin",
+			WalletProvider:         "keplr",
+			Role:                   "admin",
+			WalletBindingVerified:  true,
+			AuthVerificationSource: "command",
+			CreatedAt:              now,
+			ExpiresAt:              now.Add(time.Hour),
 		})
+		trustGPMAdminTestPolicy(svc, "cosmos1operatorlistadmin")
 	}
 
 	t.Run("missing session token", func(t *testing.T) {
@@ -7805,13 +13859,16 @@ func TestGPMOperatorApproveAuthorization(t *testing.T) {
 	t.Run("approves with admin session token", func(t *testing.T) {
 		svc := newOperatorApproveService(t)
 		svc.gpmState.putSession(gpmSession{
-			Token:          "gpm-admin-approval-token",
-			WalletAddress:  "cosmos1adminapprover",
-			WalletProvider: "keplr",
-			Role:           "admin",
-			CreatedAt:      time.Now().UTC(),
-			ExpiresAt:      time.Now().UTC().Add(time.Hour),
+			Token:                  "gpm-admin-approval-token",
+			WalletAddress:          "cosmos1adminapprover",
+			WalletProvider:         "keplr",
+			Role:                   "admin",
+			WalletBindingVerified:  true,
+			AuthVerificationSource: "command",
+			CreatedAt:              time.Now().UTC(),
+			ExpiresAt:              time.Now().UTC().Add(time.Hour),
 		})
+		trustGPMAdminTestPolicy(svc, "cosmos1adminapprover")
 		body := `{"wallet_address":"cosmos1approvaltarget","approved":true,"session_token":"gpm-admin-approval-token"}`
 		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
 		if code != http.StatusOK {
@@ -7826,6 +13883,63 @@ func TestGPMOperatorApproveAuthorization(t *testing.T) {
 		application, _ := payload["application"].(map[string]any)
 		if got, _ := application["status"].(string); got != "approved" {
 			t.Fatalf("application.status=%q want=approved payload=%v", got, payload)
+		}
+	})
+
+	t.Run("production disables local admin approval decisions", func(t *testing.T) {
+		svc := newOperatorApproveService(t)
+		svc.gpmConnectPolicyMode = "production"
+		svc.gpmState.putSession(gpmSession{
+			Token:                  "gpm-admin-approval-production-token",
+			WalletAddress:          "cosmos1adminapproverprod",
+			WalletProvider:         "keplr",
+			Role:                   "admin",
+			WalletBindingVerified:  true,
+			AuthVerificationSource: "command",
+			CreatedAt:              time.Now().UTC(),
+			ExpiresAt:              time.Now().UTC().Add(time.Hour),
+		})
+		trustGPMAdminTestPolicy(svc, "cosmos1adminapproverprod")
+		body := `{"wallet_address":"cosmos1approvaltarget","approved":true,"session_token":"gpm-admin-approval-production-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+		}
+		if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "chain-governance approval evidence") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+		app, ok := svc.gpmState.getOperator("cosmos1approvaltarget")
+		if !ok {
+			t.Fatal("expected operator application")
+		}
+		if got := strings.ToLower(strings.TrimSpace(app.Status)); got != "pending" {
+			t.Fatalf("application status=%q want pending", got)
+		}
+	})
+
+	t.Run("rejects admin session when admin wallet is no longer allowlisted", func(t *testing.T) {
+		svc := newOperatorApproveService(t)
+		svc.gpmState.putSession(gpmSession{
+			Token:                  "gpm-admin-approval-revoked-token",
+			WalletAddress:          "cosmos1revokedadminapprover",
+			WalletProvider:         "keplr",
+			Role:                   "admin",
+			WalletBindingVerified:  true,
+			AuthVerificationSource: "command",
+			CreatedAt:              time.Now().UTC(),
+			ExpiresAt:              time.Now().UTC().Add(time.Hour),
+		})
+		trustGPMAdminTestPolicy(svc, "cosmos1revokedadminapprover")
+		delete(svc.gpmAdminWalletAllowlist, "cosmos1revokedadminapprover")
+
+		body := `{"wallet_address":"cosmos1approvaltarget","approved":true,"session_token":"gpm-admin-approval-revoked-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "admin wallet is not currently allowlisted") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
 		}
 	})
 
@@ -7872,13 +13986,16 @@ func TestGPMOperatorApproveAuthorization(t *testing.T) {
 		svc.gpmApprovalToken = "legacy-approval-token"
 		svc.gpmOperatorApprovalRequireSession = true
 		svc.gpmState.putSession(gpmSession{
-			Token:          "gpm-admin-approval-strict-token",
-			WalletAddress:  "cosmos1strictadminapprover",
-			WalletProvider: "keplr",
-			Role:           "admin",
-			CreatedAt:      time.Now().UTC(),
-			ExpiresAt:      time.Now().UTC().Add(time.Hour),
+			Token:                  "gpm-admin-approval-strict-token",
+			WalletAddress:          "cosmos1strictadminapprover",
+			WalletProvider:         "keplr",
+			Role:                   "admin",
+			WalletBindingVerified:  true,
+			AuthVerificationSource: "command",
+			CreatedAt:              time.Now().UTC(),
+			ExpiresAt:              time.Now().UTC().Add(time.Hour),
 		})
+		trustGPMAdminTestPolicy(svc, "cosmos1strictadminapprover")
 		body := `{"wallet_address":"cosmos1approvaltarget","approved":true,"session_token":"gpm-admin-approval-strict-token"}`
 		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
 		if code != http.StatusOK {
@@ -7902,6 +14019,27 @@ func TestGPMOperatorApproveAuthorization(t *testing.T) {
 			t.Fatalf("error=%q payload=%v", errMsg, payload)
 		}
 	})
+
+	t.Run("rejects unbound admin session token", func(t *testing.T) {
+		svc := newOperatorApproveService(t)
+		svc.gpmState.putSession(gpmSession{
+			Token:          "gpm-admin-approval-unbound-token",
+			WalletAddress:  "cosmos1unboundadminapprover",
+			WalletProvider: "keplr",
+			Role:           "admin",
+			CreatedAt:      time.Now().UTC(),
+			ExpiresAt:      time.Now().UTC().Add(time.Hour),
+		})
+		body := `{"wallet_address":"cosmos1approvaltarget","approved":true,"session_token":"gpm-admin-approval-unbound-token"}`
+		code, payload := callJSONHandler(t, svc.handleGPMOperatorApprove, http.MethodPost, "/v1/gpm/onboarding/operator/approve", body)
+		if code != http.StatusForbidden {
+			t.Fatalf("status=%d payload=%v", code, payload)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "wallet-bound admin session") {
+			t.Fatalf("error=%q payload=%v", errMsg, payload)
+		}
+	})
 }
 
 func TestGPMOperatorApproveDecisionContract(t *testing.T) {
@@ -7921,13 +14059,16 @@ func TestGPMOperatorApproveDecisionContract(t *testing.T) {
 	putAdminSession := func(svc *Service, token string) {
 		now := time.Now().UTC()
 		svc.gpmState.putSession(gpmSession{
-			Token:          token,
-			WalletAddress:  "cosmos1decisionadmin",
-			WalletProvider: "keplr",
-			Role:           "admin",
-			CreatedAt:      now,
-			ExpiresAt:      now.Add(time.Hour),
+			Token:                  token,
+			WalletAddress:          "cosmos1decisionadmin",
+			WalletProvider:         "keplr",
+			Role:                   "admin",
+			WalletBindingVerified:  true,
+			AuthVerificationSource: "command",
+			CreatedAt:              now,
+			ExpiresAt:              now.Add(time.Hour),
 		})
+		trustGPMAdminTestPolicy(svc, "cosmos1decisionadmin")
 	}
 
 	t.Run("rejection without reason returns bad request", func(t *testing.T) {
@@ -8075,13 +14216,16 @@ func TestGPMOperatorApproveConcurrencyGuard(t *testing.T) {
 	putAdminSession := func(svc *Service, token string) {
 		now := time.Now().UTC()
 		svc.gpmState.putSession(gpmSession{
-			Token:          token,
-			WalletAddress:  "cosmos1concurrencyadmin",
-			WalletProvider: "keplr",
-			Role:           "admin",
-			CreatedAt:      now,
-			ExpiresAt:      now.Add(time.Hour),
+			Token:                  token,
+			WalletAddress:          "cosmos1concurrencyadmin",
+			WalletProvider:         "keplr",
+			Role:                   "admin",
+			WalletBindingVerified:  true,
+			AuthVerificationSource: "command",
+			CreatedAt:              now,
+			ExpiresAt:              now.Add(time.Hour),
 		})
+		trustGPMAdminTestPolicy(svc, "cosmos1concurrencyadmin")
 	}
 
 	t.Run("invalid if_updated_at_utc returns bad request", func(t *testing.T) {
@@ -8224,12 +14368,13 @@ func TestGPMClientRegisterRejectsPinnedMainDomainHostMismatch(t *testing.T) {
 
 	const token = "gpm-session-token-mismatch"
 	svc.gpmState.putSession(gpmSession{
-		Token:          token,
-		WalletAddress:  "cosmos1registeredclientmismatch",
-		WalletProvider: "keplr",
-		Role:           "client",
-		CreatedAt:      now,
-		ExpiresAt:      now.Add(time.Hour),
+		Token:                 token,
+		WalletAddress:         "cosmos1registeredclientmismatch",
+		WalletProvider:        "keplr",
+		Role:                  "client",
+		WalletBindingVerified: true,
+		CreatedAt:             now,
+		ExpiresAt:             now.Add(time.Hour),
 	})
 
 	registerBody := `{"session_token":"` + token + `","path_profile":"3hop"}`
@@ -8258,12 +14403,13 @@ func TestGPMClientRegisterRejectsPinnedManifestHTTPURLWhenHTTPSRequired(t *testi
 	now := time.Now().UTC()
 	const token = "gpm-session-token-http-manifest-blocked"
 	svc.gpmState.putSession(gpmSession{
-		Token:          token,
-		WalletAddress:  "cosmos1httppinnedmanifest",
-		WalletProvider: "keplr",
-		Role:           "client",
-		CreatedAt:      now,
-		ExpiresAt:      now.Add(time.Hour),
+		Token:                 token,
+		WalletAddress:         "cosmos1httppinnedmanifest",
+		WalletProvider:        "keplr",
+		Role:                  "client",
+		WalletBindingVerified: true,
+		CreatedAt:             now,
+		ExpiresAt:             now.Add(time.Hour),
 	})
 
 	registerBody := `{"session_token":"` + token + `","path_profile":"3hop"}`
@@ -8314,6 +14460,78 @@ func TestValidateManifestSourceURLPolicyRejectsUserinfoQueryAndFragment(t *testi
 	}
 }
 
+func TestNormalizeBootstrapDirectoriesCanonicalizesURLs(t *testing.T) {
+	got := normalizeBootstrapDirectories([]string{
+		" HTTPS://Directory.GPM.Example:443/ ",
+		"https://directory.gpm.example",
+		"https://directory.gpm.example:8443/root/",
+		"https://DIRECTORY.gpm.example:8443/root",
+	})
+	want := []string{
+		"https://directory.gpm.example",
+		"https://directory.gpm.example:8443/root",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("canonical bootstrap directories=%v want=%v", got, want)
+	}
+}
+
+func TestFetchRemoteManifestWithPolicyProductionRejectsPrivateLoopbackAndLinkLocalTargets(t *testing.T) {
+	originalLookup := lookupIPAddr
+	t.Cleanup(func() {
+		lookupIPAddr = originalLookup
+	})
+
+	tests := []struct {
+		name        string
+		manifestURL string
+		lookupIPs   []net.IPAddr
+	}{
+		{
+			name:        "literal loopback",
+			manifestURL: "https://127.0.0.1:9443/v1/bootstrap/manifest",
+		},
+		{
+			name:        "literal link local",
+			manifestURL: "https://[fe80::1]/v1/bootstrap/manifest",
+		},
+		{
+			name:        "dns private",
+			manifestURL: "https://bootstrap.private.gpm.example/v1/bootstrap/manifest",
+			lookupIPs:   []net.IPAddr{{IP: net.ParseIP("10.12.0.8")}},
+		},
+		{
+			name:        "dns cgnat",
+			manifestURL: "https://bootstrap.cgnat.gpm.example/v1/bootstrap/manifest",
+			lookupIPs:   []net.IPAddr{{IP: net.ParseIP("100.64.12.8")}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			lookupIPAddr = func(context.Context, string) ([]net.IPAddr, error) {
+				return tc.lookupIPs, nil
+			}
+			svc := &Service{
+				gpmManifestTrustPolicyMode: "production",
+				gpmManifestRequireHTTPS:    true,
+				gpmManifestURL:             tc.manifestURL,
+			}
+			_, _, _, _, err := svc.fetchRemoteManifestWithPolicy(context.Background(), tc.manifestURL)
+			if err == nil {
+				t.Fatalf("expected production manifest fetch target %q to fail closed", tc.manifestURL)
+			}
+			errMsg := err.Error()
+			if !strings.Contains(errMsg, "production manifest outbound policy") {
+				t.Fatalf("error=%q want production outbound policy rejection", errMsg)
+			}
+			if !strings.Contains(errMsg, "private, loopback, or link-local") && !strings.Contains(errMsg, "shared address space") {
+				t.Fatalf("error=%q want private/loopback/link-local/shared-address rejection", errMsg)
+			}
+		})
+	}
+}
+
 func TestReadBootstrapManifestCacheEnforcesSourceURLPolicyWithoutPinnedOrHTTPSRequirements(t *testing.T) {
 	now := time.Now().UTC()
 	cachePath := filepath.Join(t.TempDir(), "manifest_cache_source_policy.json")
@@ -8351,6 +14569,54 @@ func TestReadBootstrapManifestCacheEnforcesSourceURLPolicyWithoutPinnedOrHTTPSRe
 	errMsg := err.Error()
 	if !strings.Contains(errMsg, "cached manifest source url") || !strings.Contains(errMsg, "unsupported url scheme") {
 		t.Fatalf("error=%q want cached source url scheme validation failure", errMsg)
+	}
+}
+
+func TestReadBootstrapManifestCacheProductionRejectsCachedSourceCGNATResolution(t *testing.T) {
+	originalLookup := lookupIPAddr
+	t.Cleanup(func() {
+		lookupIPAddr = originalLookup
+	})
+	lookupIPAddr = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("100.64.12.8")}}, nil
+	}
+
+	now := time.Now().UTC()
+	cachePath := filepath.Join(t.TempDir(), "manifest_cache_source_cgnat.json")
+	cache := gpmBootstrapManifestCacheFile{
+		Version:           1,
+		FetchedAtUTC:      now.Format(time.RFC3339),
+		SourceURL:         "https://bootstrap-cache-cgnat.globalprivatemesh.example/v1/bootstrap/manifest",
+		SignatureVerified: true,
+		Manifest: gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{"https://directory.cache-cgnat.globalprivatemesh.example:8081"},
+		},
+	}
+	cacheBody, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal cache: %v", err)
+	}
+	if err := os.WriteFile(cachePath, cacheBody, 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	svc := &Service{
+		gpmManifestURL:             "https://bootstrap-cache-cgnat.globalprivatemesh.example/v1/bootstrap/manifest",
+		gpmManifestCache:           cachePath,
+		gpmManifestMaxAge:          24 * time.Hour,
+		gpmManifestRequireHTTPS:    true,
+		gpmManifestTrustPolicyMode: "production",
+	}
+	_, _, err = svc.readBootstrapManifestCache()
+	if err == nil {
+		t.Fatal("expected production cached source URL outbound policy to fail closed")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "cached manifest source url") || !strings.Contains(errMsg, "shared address space") {
+		t.Fatalf("error=%q want cached source production CGNAT rejection", errMsg)
 	}
 }
 
@@ -8878,7 +15144,7 @@ func TestGPMStateStoreLoadSkipsOversizedFile(t *testing.T) {
 	}
 	svc.loadGPMStateBestEffort()
 
-	sessions, _ := svc.gpmState.snapshotPersistent(time.Now().UTC())
+	sessions, _, _, _, _, _ := svc.gpmState.snapshotPersistent(time.Now().UTC())
 	if len(sessions) != 0 {
 		t.Fatalf("expected oversized state load to be skipped, sessions=%d", len(sessions))
 	}
@@ -9093,12 +15359,13 @@ func TestGPMClientRegisterUsesPinnedCacheFirstWhenCacheIsFresh(t *testing.T) {
 
 	const token = "gpm-session-token-cache-fallback"
 	svc.gpmState.putSession(gpmSession{
-		Token:          token,
-		WalletAddress:  "cosmos1cachefallback",
-		WalletProvider: "keplr",
-		Role:           "client",
-		CreatedAt:      now,
-		ExpiresAt:      now.Add(time.Hour),
+		Token:                 token,
+		WalletAddress:         "cosmos1cachefallback",
+		WalletProvider:        "keplr",
+		Role:                  "client",
+		WalletBindingVerified: true,
+		CreatedAt:             now,
+		ExpiresAt:             now.Add(time.Hour),
 	})
 
 	registerBody := `{"session_token":"` + token + `","path_profile":"2hop"}`
@@ -9535,12 +15802,13 @@ func TestGPMClientRegisterRejectsPinnedCacheFallbackWithoutSignedPayloadEvidence
 
 	const token = "gpm-session-token-cache-hmac-missing-evidence"
 	svc.gpmState.putSession(gpmSession{
-		Token:          token,
-		WalletAddress:  "cosmos1cachehmacevidence",
-		WalletProvider: "keplr",
-		Role:           "client",
-		CreatedAt:      now,
-		ExpiresAt:      now.Add(time.Hour),
+		Token:                 token,
+		WalletAddress:         "cosmos1cachehmacevidence",
+		WalletProvider:        "keplr",
+		Role:                  "client",
+		WalletBindingVerified: true,
+		CreatedAt:             now,
+		ExpiresAt:             now.Add(time.Hour),
 	})
 
 	registerBody := `{"session_token":"` + token + `","path_profile":"2hop"}`
@@ -9561,7 +15829,6 @@ func TestGPMClientRegisterRejectsCacheFallbackWhenSignatureRequiredButVerifierKe
 	svc, _ := newFakeService(t, false)
 	svc.gpmState = newGPMRuntimeState()
 	svc.gpmRoleDefault = "client"
-	svc.gpmManifestTrustPolicyMode = "production"
 	svc.gpmManifestRequireSignature = true
 	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
 	svc.gpmManifestMaxAge = 24 * time.Hour
@@ -9591,12 +15858,13 @@ func TestGPMClientRegisterRejectsCacheFallbackWhenSignatureRequiredButVerifierKe
 
 	const token = "gpm-session-token-cache-missing-key"
 	svc.gpmState.putSession(gpmSession{
-		Token:          token,
-		WalletAddress:  "cosmos1cachemissingkey",
-		WalletProvider: "keplr",
-		Role:           "client",
-		CreatedAt:      now,
-		ExpiresAt:      now.Add(time.Hour),
+		Token:                 token,
+		WalletAddress:         "cosmos1cachemissingkey",
+		WalletProvider:        "keplr",
+		Role:                  "client",
+		WalletBindingVerified: true,
+		CreatedAt:             now,
+		ExpiresAt:             now.Add(time.Hour),
 	})
 
 	registerBody := `{"session_token":"` + token + `","path_profile":"2hop"}`
@@ -9660,12 +15928,13 @@ func TestGPMClientRegisterUsesPinnedCacheFirstWithSignedPayloadEvidenceWhenHMACR
 
 	const token = "gpm-session-token-cache-hmac-verified"
 	svc.gpmState.putSession(gpmSession{
-		Token:          token,
-		WalletAddress:  "cosmos1cachehmacverified",
-		WalletProvider: "keplr",
-		Role:           "client",
-		CreatedAt:      now,
-		ExpiresAt:      now.Add(time.Hour),
+		Token:                 token,
+		WalletAddress:         "cosmos1cachehmacverified",
+		WalletProvider:        "keplr",
+		Role:                  "client",
+		WalletBindingVerified: true,
+		CreatedAt:             now,
+		ExpiresAt:             now.Add(time.Hour),
 	})
 
 	registerBody := `{"session_token":"` + token + `","path_profile":"2hop"}`
@@ -9730,12 +15999,13 @@ func TestGPMClientRegisterRejectsPinnedCacheFallbackSourceHostMismatch(t *testin
 
 	const token = "gpm-session-token-cache-mismatch"
 	svc.gpmState.putSession(gpmSession{
-		Token:          token,
-		WalletAddress:  "cosmos1cachemismatch",
-		WalletProvider: "keplr",
-		Role:           "client",
-		CreatedAt:      now,
-		ExpiresAt:      now.Add(time.Hour),
+		Token:                 token,
+		WalletAddress:         "cosmos1cachemismatch",
+		WalletProvider:        "keplr",
+		Role:                  "client",
+		WalletBindingVerified: true,
+		CreatedAt:             now,
+		ExpiresAt:             now.Add(time.Hour),
 	})
 
 	registerBody := `{"session_token":"` + token + `","path_profile":"3hop"}`
@@ -9785,27 +16055,29 @@ func TestGPMStateStorePersistAndLoadRoundTrip(t *testing.T) {
 	})
 	svc.persistGPMStateBestEffort("test_roundtrip")
 
+	body, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state store: %v", err)
+	}
+	if strings.Contains(string(body), "persist-token") || strings.Contains(string(body), "wallet:cosmos1persist") {
+		t.Fatalf("state store persisted bearer session material: %s", string(body))
+	}
+	var persisted gpmStateStoreFile
+	if err := json.Unmarshal(body, &persisted); err != nil {
+		t.Fatalf("decode state store: %v", err)
+	}
+	if len(persisted.Sessions) != 0 {
+		t.Fatalf("persisted sessions=%d want 0; session tokens must not be written to disk", len(persisted.Sessions))
+	}
+
 	loaded := &Service{
 		gpmStateStorePath: statePath,
 		gpmState:          newGPMRuntimeState(),
 	}
 	loaded.loadGPMStateBestEffort()
 
-	session, ok := loaded.gpmState.getSession("persist-token", now)
-	if !ok {
-		t.Fatal("expected persisted session to be loaded")
-	}
-	if session.Role != "operator" {
-		t.Fatalf("loaded role=%q want=operator", session.Role)
-	}
-	if session.ChainOperatorID != "operator-persist-1" {
-		t.Fatalf("loaded chain_operator_id=%q want=operator-persist-1", session.ChainOperatorID)
-	}
-	if len(session.BootstrapDirectories) != 2 {
-		t.Fatalf("loaded bootstrap_directories=%v want two directories", session.BootstrapDirectories)
-	}
-	if session.BootstrapDirectories[0] != "https://directory.gpm.example:8081" || session.BootstrapDirectories[1] != "https://directory-backup.gpm.example:8081" {
-		t.Fatalf("loaded bootstrap_directories=%v", session.BootstrapDirectories)
+	if _, ok := loaded.gpmState.getSession("persist-token", now); ok {
+		t.Fatal("session tokens must not survive state-store reload; user should re-authenticate after daemon restart")
 	}
 
 	operator, ok := loaded.gpmState.getOperator("cosmos1persist")
@@ -9814,6 +16086,86 @@ func TestGPMStateStorePersistAndLoadRoundTrip(t *testing.T) {
 	}
 	if operator.Status != "approved" {
 		t.Fatalf("loaded operator status=%q want=approved", operator.Status)
+	}
+}
+
+func TestGPMStateStoreProductionLoadSanitizesPersistedTrust(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "gpm_state.json")
+	now := time.Now().UTC()
+	store := gpmStateStoreFile{
+		Version:        1,
+		GeneratedAtUTC: now.Format(time.RFC3339),
+		Sessions: []gpmSession{{
+			Token:                     "persisted-prod-operator",
+			WalletAddress:             "cosmos1persistedprod",
+			WalletProvider:            "keplr",
+			Role:                      "operator",
+			WalletBindingVerified:     true,
+			EntitlementEvidenceSource: "chain",
+			ClientTier:                3,
+			StakeSatisfied:            true,
+			PrepaidBalanceSatisfied:   true,
+			ChainOperatorID:           "operator-persisted-prod",
+			CreatedAt:                 now,
+			ExpiresAt:                 now.Add(time.Hour),
+		}},
+		Operators: []gpmOperatorApplication{{
+			WalletAddress:          "cosmos1persistedprod",
+			ChainOperatorID:        "operator-persisted-prod",
+			Status:                 "approved",
+			ApprovalEvidenceSource: "chain-governance",
+			UpdatedAt:              now,
+		}},
+		Contributions: []gpmContributionState{{
+			WalletAddress:           "cosmos1persistedprod",
+			Enabled:                 true,
+			Role:                    "micro-relay",
+			RequestedRole:           "micro-relay",
+			ClientTier:              3,
+			StakeSatisfied:          true,
+			PrepaidBalanceSatisfied: true,
+			ExplicitOptIn:           true,
+			PendingRewardUnits:      25,
+			UpdatedAt:               now,
+		}},
+	}
+	body, err := json.Marshal(store)
+	if err != nil {
+		t.Fatalf("marshal state: %v", err)
+	}
+	if err := os.WriteFile(statePath, body, 0o600); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	loaded := &Service{
+		gpmConnectPolicyMode: "production",
+		gpmStateStorePath:    statePath,
+		gpmState:             newGPMRuntimeState(),
+	}
+	loaded.loadGPMStateBestEffort()
+
+	if _, ok := loaded.gpmState.getSession("persisted-prod-operator", now); ok {
+		t.Fatal("legacy persisted session tokens must be stripped on load")
+	}
+	operator, ok := loaded.gpmState.getOperator("cosmos1persistedprod")
+	if !ok {
+		t.Fatal("expected persisted operator")
+	}
+	if operator.ApprovalEvidenceSource != "" {
+		t.Fatalf("operator approval evidence source=%q want empty", operator.ApprovalEvidenceSource)
+	}
+	contribution, ok := loaded.gpmState.getContribution("cosmos1persistedprod")
+	if !ok {
+		t.Fatal("expected persisted contribution")
+	}
+	if contribution.Enabled {
+		t.Fatalf("contribution enabled=%v want false", contribution.Enabled)
+	}
+	if contribution.PendingRewardUnits != 0 {
+		t.Fatalf("pending reward units=%v want 0", contribution.PendingRewardUnits)
+	}
+	if !strings.Contains(contribution.LockReason, "fresh trusted chain") {
+		t.Fatalf("lock reason=%q want fresh trusted chain guidance", contribution.LockReason)
 	}
 }
 
@@ -9861,7 +16213,7 @@ func TestGPMAuditRecentHandlerDefaultBehavior(t *testing.T) {
 	svc.appendGPMAudit("event_one", map[string]any{"idx": 1})
 	svc.appendGPMAudit("event_two", map[string]any{"idx": 2})
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent", "")
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent"), "")
 	if code != http.StatusOK {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -9900,6 +16252,12 @@ func TestGPMAuditRecentHandlerDefaultBehavior(t *testing.T) {
 	if got, _ := filters["order"].(string); got != "desc" {
 		t.Fatalf("filters.order=%q want=desc payload=%v", got, payload)
 	}
+	if surface, _ := payload["admin_api_surface"].(string); surface != "gpm_admin_console" {
+		t.Fatalf("admin_api_surface=%q want=gpm_admin_console payload=%v", surface, payload)
+	}
+	if publicControls, _ := payload["public_app_admin_controls"].(bool); publicControls {
+		t.Fatalf("public_app_admin_controls=%v want=false payload=%v", publicControls, payload)
+	}
 
 	entries, _ := payload["entries"].([]any)
 	if len(entries) != 2 {
@@ -9915,6 +16273,34 @@ func TestGPMAuditRecentHandlerDefaultBehavior(t *testing.T) {
 	}
 }
 
+func TestGPMAuditRecentHandlerRequiresAdminSession(t *testing.T) {
+	auditPath := filepath.Join(t.TempDir(), "gpm_audit.jsonl")
+	svc := &Service{
+		addr:                "127.0.0.1:8095",
+		allowUnauthLoopback: true,
+		gpmAuditLogPath:     auditPath,
+		gpmState:            newGPMRuntimeState(),
+	}
+	svc.appendGPMAudit("event_one", map[string]any{"idx": 1})
+
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent", "")
+	if code != http.StatusBadRequest {
+		t.Fatalf("missing admin session status=%d want=%d payload=%v", code, http.StatusBadRequest, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "session_token is required") {
+		t.Fatalf("missing admin error=%q payload=%v", errMsg, payload)
+	}
+
+	clientToken := seedGPMTestSession(t, svc, "gpm-audit-client-token", "cosmos1auditclient", 2, true, true)
+	code, payload = callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?session_token="+clientToken, "")
+	if code != http.StatusForbidden {
+		t.Fatalf("non-admin audit status=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "admin session role") {
+		t.Fatalf("non-admin audit error=%q payload=%v", errMsg, payload)
+	}
+}
+
 func TestGPMAuditRecentHandlerLimitQueryBackwardCompatible(t *testing.T) {
 	auditPath := filepath.Join(t.TempDir(), "gpm_audit.jsonl")
 	svc := &Service{
@@ -9926,7 +16312,7 @@ func TestGPMAuditRecentHandlerLimitQueryBackwardCompatible(t *testing.T) {
 	svc.appendGPMAudit("event_one", map[string]any{"idx": 1})
 	svc.appendGPMAudit("event_two", map[string]any{"idx": 2})
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?limit=1", "")
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent?limit=1"), "")
 	if code != http.StatusOK {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -9972,7 +16358,7 @@ func TestGPMAuditRecentHandlerEventFilter(t *testing.T) {
 	svc.appendGPMAudit("session_refreshed", map[string]any{"idx": 2})
 	svc.appendGPMAudit("AUTH_VERIFIED", map[string]any{"idx": 3})
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?event=AuTh_VeRiFiEd", "")
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent?event=AuTh_VeRiFiEd"), "")
 	if code != http.StatusOK {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -10014,7 +16400,7 @@ func TestGPMAuditRecentHandlerWalletFilter(t *testing.T) {
 	svc.appendGPMAudit("session_refreshed", map[string]any{"wallet_address": "cosmos1walletb"})
 	svc.appendGPMAudit("session_revoked", map[string]any{"role": "client"})
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?wallet_address=COSMOS1WALLETA", "")
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent?wallet_address=COSMOS1WALLETA"), "")
 	if code != http.StatusOK {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -10053,7 +16439,7 @@ func TestGPMAuditRecentHandlerOffsetPagingMetadata(t *testing.T) {
 	svc.appendGPMAudit("event_three", map[string]any{"idx": 3})
 	svc.appendGPMAudit("event_four", map[string]any{"idx": 4})
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?limit=2&offset=1&order=desc", "")
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent?limit=2&offset=1&order=desc"), "")
 	if code != http.StatusOK {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -10104,7 +16490,7 @@ func TestGPMAuditRecentHandlerRejectsInvalidOrder(t *testing.T) {
 		gpmState:            newGPMRuntimeState(),
 	}
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?order=sideways", "")
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent?order=sideways"), "")
 	if code != http.StatusBadRequest {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -10123,7 +16509,7 @@ func TestGPMAuditRecentHandlerRejectsInvalidWalletFilter(t *testing.T) {
 		gpmState:            newGPMRuntimeState(),
 	}
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?wallet_address=bad!", "")
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent?wallet_address=bad!"), "")
 	if code != http.StatusBadRequest {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -10146,7 +16532,7 @@ func TestGPMAuditRecentHandlerRejectsOversizedAuditFile(t *testing.T) {
 		gpmState:            newGPMRuntimeState(),
 	}
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent", "")
+	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent"), "")
 	if code != http.StatusInternalServerError {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}

@@ -638,6 +638,13 @@ if [[ "$live_requirement_fail_closed" == "1" ]]; then
   final_rc=4
   final_status="fail"
   echo "[roadmap-evidence-pack-actionable-run] stage=roadmap_next_actions_run status=skipped reason=$next_actions_skip_reason"
+elif (( scope_match_count == 0 )); then
+  next_actions_skip_reason="no_matching_evidence_pack_actions"
+  nested_runner_status="skipped_${next_actions_skip_reason}"
+  nested_runner_rc=0
+  final_rc=0
+  final_status="pass"
+  echo "[roadmap-evidence-pack-actionable-run] stage=roadmap_next_actions_run status=skipped reason=$next_actions_skip_reason"
 else
   rm -f "$next_actions_summary_json" "$next_actions_log"
   echo "[roadmap-evidence-pack-actionable-run] stage=roadmap_next_actions_run status=running"

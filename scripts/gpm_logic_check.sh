@@ -8,6 +8,7 @@ gpm_logic_check_default_checks_rel() {
   cat <<'DEFAULT_CHECKS'
 scripts/integration_roadmap_next_actions_run.sh
 scripts/integration_roadmap_non_blockchain_actionable_run.sh
+scripts/integration_roadmap_progress_report.sh
 scripts/integration_vpn_non_blockchain_fastlane.sh
 scripts/integration_roadmap_blockchain_actionable_run.sh
 scripts/integration_blockchain_fastlane.sh
@@ -60,8 +61,6 @@ Failure mode:
   --allow-missing-defaults=1 (or GPM_LOGIC_CHECK_ALLOW_MISSING_DEFAULTS=1).
   Also fails closed when any selected check script is missing, unreadable,
   or empty (zero-byte).
-  For deep/full coverage, include heavyweight checks explicitly, for example:
-  --include-check scripts/integration_roadmap_progress_report.sh
 USAGE
 }
 

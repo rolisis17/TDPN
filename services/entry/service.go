@@ -81,7 +81,10 @@ type Service struct {
 	betaStrict            bool
 	prodStrict            bool
 	strictModeParseErr    error
+	relayID               string
 	operatorID            string
+	routeAssertionPriv    ed25519.PrivateKey
+	routeAssertionKeyErr  error
 	requireDistinctExitOp bool
 	requireMiddleRelay    bool
 	requireMiddleRelayErr error
@@ -215,6 +218,14 @@ func New() *Service {
 	if prodStrict {
 		wgOnlyMode = true
 	}
+	relayID := strings.TrimSpace(os.Getenv("ENTRY_RELAY_ID"))
+	if relayID == "" {
+		relayID = strings.TrimSpace(os.Getenv("RELAY_ID"))
+	}
+	routeAssertionPriv, routeAssertionKeyErr := loadEntryRouteAssertionPrivateKeyFromEnv()
+	if routeAssertionKeyErr != nil {
+		log.Printf("entry route assertion signing disabled: %v", routeAssertionKeyErr)
+	}
 	operatorID := strings.TrimSpace(os.Getenv("ENTRY_OPERATOR_ID"))
 	if operatorID == "" {
 		operatorID = strings.TrimSpace(os.Getenv("DIRECTORY_OPERATOR_ID"))
@@ -269,7 +280,10 @@ func New() *Service {
 		betaStrict:            betaStrict,
 		prodStrict:            prodStrict,
 		strictModeParseErr:    strictModeParseErr,
+		relayID:               relayID,
 		operatorID:            operatorID,
+		routeAssertionPriv:    routeAssertionPriv,
+		routeAssertionKeyErr:  routeAssertionKeyErr,
 		requireDistinctExitOp: requireDistinctExitOp,
 		requireMiddleRelay:    requireMiddleRelay,
 		requireMiddleRelayErr: requireMiddleRelayErr,
@@ -305,6 +319,32 @@ func New() *Service {
 	}
 }
 
+func loadEntryRouteAssertionPrivateKeyFromEnv() (ed25519.PrivateKey, error) {
+	raw := strings.TrimSpace(os.Getenv("ENTRY_ROUTE_ASSERTION_PRIVATE_KEY"))
+	if raw == "" {
+		path := strings.TrimSpace(os.Getenv("ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE"))
+		if path == "" {
+			return nil, nil
+		}
+		payload, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE: %w", err)
+		}
+		raw = strings.TrimSpace(string(payload))
+	}
+	if raw == "" {
+		return nil, nil
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("decode ENTRY_ROUTE_ASSERTION_PRIVATE_KEY: %w", err)
+	}
+	if len(decoded) != ed25519.PrivateKeySize {
+		return nil, fmt.Errorf("ENTRY_ROUTE_ASSERTION_PRIVATE_KEY invalid size")
+	}
+	return ed25519.PrivateKey(decoded), nil
+}
+
 func (s *Service) Run(ctx context.Context) error {
 	httpClient, err := securehttp.NewClient(5 * time.Second)
 	if err != nil {
@@ -326,6 +366,7 @@ func (s *Service) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/path/open", s.handlePathOpen)
 	mux.HandleFunc("/v1/path/close", s.handlePathClose)
 	mux.HandleFunc("/v1/health", s.handleHealth)
+	mux.HandleFunc("/v1/ready", s.handleReady)
 
 	s.httpSrv = &http.Server{
 		Addr:              s.addr,
@@ -372,6 +413,9 @@ func (s *Service) validateRuntimeConfig() error {
 	}
 	if s.betaStrict || s.prodStrict {
 		s.requireMiddleRelay = true
+	}
+	if s.prodStrict && !s.betaStrict {
+		return fmt.Errorf("PROD_STRICT_MODE requires BETA_STRICT_MODE=1")
 	}
 	if securehttp.Enabled() {
 		if s.prodStrict && securehttp.InsecureSkipVerifyConfigured() {
@@ -425,10 +469,18 @@ func (s *Service) validateRuntimeConfig() error {
 			}
 		}
 	}
-	if s.prodStrict {
-		if !s.betaStrict {
-			return fmt.Errorf("PROD_STRICT_MODE requires BETA_STRICT_MODE=1")
+	if s.betaStrict || s.prodStrict {
+		if strings.TrimSpace(s.relayID) == "" {
+			return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_RELAY_ID")
 		}
+		if s.routeAssertionKeyErr != nil {
+			return fmt.Errorf("invalid ENTRY_ROUTE_ASSERTION_PRIVATE_KEY or ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE: %w", s.routeAssertionKeyErr)
+		}
+		if len(s.routeAssertionPriv) != ed25519.PrivateKeySize {
+			return fmt.Errorf("BETA_STRICT_MODE requires ENTRY_ROUTE_ASSERTION_PRIVATE_KEY or ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE")
+		}
+	}
+	if s.prodStrict {
 		if !securehttp.Enabled() {
 			return fmt.Errorf("PROD_STRICT_MODE requires MTLS_ENABLE=1")
 		}
@@ -606,19 +658,29 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if reason := s.validateClientRouteAssertion(&req); reason != "" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: reason})
+		return
+	}
 	middleRelayRuntime, reason := s.validateMiddleRelayRequest(r.Context(), &req, route)
 	if reason != "" {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: reason})
 		return
 	}
-
-	sessionID, err := randomSessionID()
+	sessionID, sessionReason, err := s.pathOpenSessionIDForRequest(req)
+	if sessionReason != "" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: sessionReason})
+		return
+	}
 	if err != nil {
 		http.Error(w, "failed to generate session id", http.StatusInternalServerError)
 		return
 	}
 	req.SessionID = sessionID
+	req.EntryRouteAssertion = s.entryRouteAssertionForRequest(req)
 
 	resp, err := s.forwardPathOpen(r.Context(), route.controlURL, req)
 	if err != nil {
@@ -1184,6 +1246,26 @@ func (s *Service) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
+func (s *Service) handleReady(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if ok, reason := s.ready(); !ok {
+		http.Error(w, reason, http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ready"))
+}
+
+func (s *Service) ready() (bool, string) {
+	if s.udpConn == nil {
+		return false, "entry data plane not ready"
+	}
+	return true, ""
+}
+
 func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRoute, error) {
 	strictMode := s.betaStrict || s.prodStrict
 	enforcementSensitive := s.requireDistinctExitOp || strictMode
@@ -1243,7 +1325,12 @@ func (s *Service) resolveExitRoute(ctx context.Context, exitID string) (exitRout
 		successOperators[sourceOperator] = struct{}{}
 		seenFromSource := make(map[string]struct{})
 		for _, desc := range relays {
-			if desc.Role != "exit" || desc.RelayID != exitID {
+			role := strings.TrimSpace(strings.ToLower(desc.Role))
+			if (role != "exit" && role != "micro-exit") || desc.RelayID != exitID {
+				continue
+			}
+			if role == "micro-exit" && relayDescriptorHasInvalidMicroExitRuntimeAdmission(desc) {
+				lastErr = fmt.Errorf("micro-exit route failed runtime admission")
 				continue
 			}
 			if !desc.ValidUntil.IsZero() && now.After(desc.ValidUntil) {
@@ -1330,32 +1417,19 @@ func (s *Service) validateMiddleRelayRequest(ctx context.Context, req *proto.Pat
 		return middleRelayRuntime{}, "exit-operator-missing"
 	}
 	if middleRelayID == "" {
+		if s.betaStrict || s.prodStrict {
+			return middleRelayRuntime{}, "middle-relay-required"
+		}
 		if !s.requireMiddleRelay {
 			return middleRelayRuntime{}, ""
 		}
-		selected, err := s.selectMiddleRelayDescriptor(ctx, route, exitID)
-		if err != nil {
-			log.Printf("entry middle relay auto-selection failed exit=%s err=%v", strings.TrimSpace(req.ExitID), err)
-			return middleRelayRuntime{}, "middle-relay-required"
-		}
-		selectedRelayID := strings.TrimSpace(selected.RelayID)
-		if selectedRelayID == "" {
-			log.Printf("entry middle relay auto-selection returned empty relay id exit=%s", strings.TrimSpace(req.ExitID))
-			return middleRelayRuntime{}, "middle-relay-required"
-		}
-		runtime, reason := middleRelayRuntimeForSession(selectedRelayID, selected, route)
-		if reason != "" {
-			log.Printf("entry middle relay runtime metadata missing relay=%s reason=%s", selectedRelayID, reason)
-			return middleRelayRuntime{}, reason
-		}
-		req.MiddleRelayID = selectedRelayID
-		return runtime, ""
+		log.Printf("entry middle relay admission denied: client must include middle_relay_id when middle relay enforcement is enabled exit=%s", exitID)
+		return middleRelayRuntime{}, "middle-relay-required"
 	}
 	if exitID != "" && middleRelayID == exitID {
 		return middleRelayRuntime{}, "middle-relay-equals-exit"
 	}
-	useCache := !(s.betaStrict || s.prodStrict || s.requireDistinctExitOp || s.requireMiddleRelay)
-	desc, err := s.resolveRelayDescriptorWithCachePolicy(ctx, middleRelayID, useCache)
+	desc, err := s.resolveRelayDescriptorWithCachePolicy(ctx, middleRelayID, false)
 	if err != nil {
 		return middleRelayRuntime{}, "unknown-middle-relay"
 	}
@@ -1369,6 +1443,211 @@ func (s *Service) validateMiddleRelayRequest(ctx context.Context, req *proto.Pat
 	}
 	req.MiddleRelayID = middleRelayID
 	return runtime, ""
+}
+
+func (s *Service) validateClientRouteAssertion(req *proto.PathOpenRequest) string {
+	if req == nil {
+		return ""
+	}
+	strictMode := s.betaStrict || s.prodStrict
+	profile := strings.TrimSpace(req.PathProfile)
+	assertion := req.ClientRouteAssertion
+	if assertion == nil {
+		if profile == "3hop" {
+			return "route-assertion-required"
+		}
+		return ""
+	}
+	assertedProfile := strings.TrimSpace(assertion.PathProfile)
+	if profile != "" && assertedProfile != "" && profile != assertedProfile {
+		return "route-assertion-profile-mismatch"
+	}
+	if profile == "" {
+		profile = assertedProfile
+	}
+	if profile == "3hop" {
+		if strictMode && strings.TrimSpace(s.relayID) == "" {
+			return "entry-relay-id-required"
+		}
+		if strings.TrimSpace(assertion.MiddleRelayID) == "" || strings.TrimSpace(req.MiddleRelayID) == "" {
+			return "middle-relay-required"
+		}
+		if strings.TrimSpace(assertion.EntryRelayID) == "" || strings.TrimSpace(assertion.ExitRelayID) == "" {
+			return "route-assertion-incomplete"
+		}
+	}
+	if assertedExit := strings.TrimSpace(assertion.ExitRelayID); assertedExit != "" && assertedExit != strings.TrimSpace(req.ExitID) {
+		return "route-assertion-exit-mismatch"
+	}
+	if strings.TrimSpace(assertion.MiddleRelayID) != strings.TrimSpace(req.MiddleRelayID) {
+		return "route-assertion-middle-mismatch"
+	}
+	if reason := validateReservationRouteAssertionBinding("client", assertion, *req, strictMode); reason != "" {
+		return reason
+	}
+	if reason := validateClientRouteAssertionRequestBinding(assertion, *req, strictMode); reason != "" {
+		return reason
+	}
+	if entryRelayID := strings.TrimSpace(s.relayID); entryRelayID != "" {
+		if assertedEntry := strings.TrimSpace(assertion.EntryRelayID); assertedEntry != "" && assertedEntry != entryRelayID {
+			return "route-assertion-entry-mismatch"
+		}
+	}
+	return ""
+}
+
+func validateClientRouteAssertionRequestBinding(assertion *proto.PathRouteAssertion, req proto.PathOpenRequest, strictMode bool) string {
+	if assertion == nil {
+		return ""
+	}
+	requiredMissing := func() bool {
+		return strings.TrimSpace(assertion.SessionID) == "" ||
+			strings.TrimSpace(assertion.TokenProofNonce) == "" ||
+			strings.TrimSpace(assertion.ClientInnerPub) == "" ||
+			strings.TrimSpace(assertion.Transport) == "" ||
+			strings.TrimSpace(assertion.TokenSHA256) == ""
+	}
+	if strictMode && requiredMissing() {
+		return "client-route-assertion-incomplete"
+	}
+	if strings.TrimSpace(assertion.SessionID) != "" && strings.TrimSpace(assertion.SessionID) != strings.TrimSpace(req.SessionID) {
+		return "client-route-assertion-session-mismatch"
+	}
+	if strings.TrimSpace(assertion.TokenProofNonce) != "" && strings.TrimSpace(assertion.TokenProofNonce) != strings.TrimSpace(req.TokenProofNonce) {
+		return "client-route-assertion-nonce-mismatch"
+	}
+	if strings.TrimSpace(assertion.ClientInnerPub) != "" && strings.TrimSpace(assertion.ClientInnerPub) != strings.TrimSpace(req.ClientInnerPub) {
+		return "client-route-assertion-client-key-mismatch"
+	}
+	if strings.TrimSpace(assertion.Transport) != "" && strings.TrimSpace(assertion.Transport) != strings.TrimSpace(req.Transport) {
+		return "client-route-assertion-transport-mismatch"
+	}
+	if assertion.RequestedMTU != 0 && assertion.RequestedMTU != req.RequestedMTU {
+		return "client-route-assertion-mtu-mismatch"
+	}
+	if strings.TrimSpace(assertion.RequestedRegion) != "" && strings.TrimSpace(assertion.RequestedRegion) != strings.TrimSpace(req.RequestedRegion) {
+		return "client-route-assertion-region-mismatch"
+	}
+	if strings.TrimSpace(assertion.TokenSHA256) != "" && strings.TrimSpace(assertion.TokenSHA256) != nodecrypto.PathRouteAssertionBindingHash(req.Token) {
+		return "client-route-assertion-token-mismatch"
+	}
+	if strings.TrimSpace(assertion.TokenProofSHA256) != "" && strings.TrimSpace(assertion.TokenProofSHA256) != nodecrypto.PathRouteAssertionBindingHash(req.TokenProof) {
+		return "client-route-assertion-token-proof-mismatch"
+	}
+	return ""
+}
+
+func (s *Service) entryRouteAssertionForRequest(req proto.PathOpenRequest) *proto.PathRouteAssertion {
+	profile := strings.TrimSpace(req.PathProfile)
+	entryRelayID := strings.TrimSpace(s.relayID)
+	if req.ClientRouteAssertion != nil {
+		if profile == "" {
+			profile = strings.TrimSpace(req.ClientRouteAssertion.PathProfile)
+		}
+	}
+	if profile == "" && strings.TrimSpace(req.MiddleRelayID) == "" && strings.TrimSpace(entryRelayID) == "" {
+		return nil
+	}
+	assertion := proto.PathRouteAssertion{
+		PathProfile:          profile,
+		EntryRelayID:         entryRelayID,
+		MiddleRelayID:        strings.TrimSpace(req.MiddleRelayID),
+		ExitRelayID:          strings.TrimSpace(req.ExitID),
+		SessionID:            strings.TrimSpace(req.SessionID),
+		ReservationID:        strings.TrimSpace(req.ReservationID),
+		ReservationSessionID: strings.TrimSpace(req.ReservationSessionID),
+		ReservationSubjectID: strings.TrimSpace(req.ReservationSubjectID),
+		TokenProofNonce:      strings.TrimSpace(req.TokenProofNonce),
+		ClientInnerPub:       strings.TrimSpace(req.ClientInnerPub),
+		Transport:            strings.TrimSpace(req.Transport),
+		RequestedMTU:         req.RequestedMTU,
+		RequestedRegion:      strings.TrimSpace(req.RequestedRegion),
+		TokenSHA256:          nodecrypto.PathRouteAssertionBindingHash(req.Token),
+		TokenProofSHA256:     nodecrypto.PathRouteAssertionBindingHash(req.TokenProof),
+	}
+	if len(s.routeAssertionPriv) == ed25519.PrivateKeySize {
+		signed, err := nodecrypto.SignPathRouteAssertion(s.routeAssertionPriv, assertion)
+		if err == nil {
+			assertion = signed
+		} else {
+			log.Printf("entry route assertion signing failed: %v", err)
+		}
+	}
+	return &assertion
+}
+
+func (s *Service) pathOpenSessionIDForRequest(req proto.PathOpenRequest) (string, string, error) {
+	reservationID := strings.TrimSpace(req.ReservationID)
+	reservationSessionID := strings.TrimSpace(req.ReservationSessionID)
+	reservationSubjectID := strings.TrimSpace(req.ReservationSubjectID)
+	sessionID := strings.TrimSpace(req.SessionID)
+	if s != nil && s.prodStrict && (reservationID == "" || reservationSessionID == "" || reservationSubjectID == "") {
+		return "", "reservation-required", nil
+	}
+	if (reservationID != "" || reservationSessionID != "") && reservationSessionID == "" {
+		return "", "reservation-session-required", nil
+	}
+	if reservationSessionID != "" {
+		if sessionID != "" && sessionID != reservationSessionID {
+			return "", "reservation-session-mismatch", nil
+		}
+		sessionID = reservationSessionID
+	}
+	if sessionID == "" {
+		generated, err := randomSessionID()
+		if err != nil {
+			return "", "", err
+		}
+		sessionID = generated
+	}
+	if !validPathOpenSessionID(sessionID) {
+		return "", "invalid-session-id", nil
+	}
+	return sessionID, "", nil
+}
+
+func validPathOpenSessionID(sessionID string) bool {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || len(sessionID) > 256 {
+		return false
+	}
+	return !strings.ContainsFunc(sessionID, func(r rune) bool {
+		return r < 0x20 || r == 0x7f
+	})
+}
+
+func validateReservationRouteAssertionBinding(source string, assertion *proto.PathRouteAssertion, req proto.PathOpenRequest, strictMode bool) string {
+	if assertion == nil {
+		return ""
+	}
+	requestReservationID := strings.TrimSpace(req.ReservationID)
+	requestReservationSessionID := strings.TrimSpace(req.ReservationSessionID)
+	requestReservationSubjectID := strings.TrimSpace(req.ReservationSubjectID)
+	assertedReservationID := strings.TrimSpace(assertion.ReservationID)
+	assertedReservationSessionID := strings.TrimSpace(assertion.ReservationSessionID)
+	assertedReservationSubjectID := strings.TrimSpace(assertion.ReservationSubjectID)
+	assertedSessionID := strings.TrimSpace(assertion.SessionID)
+	if (requestReservationID != "" || requestReservationSessionID != "" || requestReservationSubjectID != "" || assertedReservationID != "" || assertedReservationSessionID != "" || assertedReservationSubjectID != "") && requestReservationSessionID == "" {
+		return source + "-reservation-session-required"
+	}
+	if strictMode && (requestReservationID != "" || requestReservationSessionID != "") {
+		if assertedReservationID == "" || assertedReservationSessionID == "" || assertedReservationSubjectID == "" {
+			return source + "-reservation-assertion-required"
+		}
+	}
+	if assertedReservationID != "" && assertedReservationID != requestReservationID {
+		return source + "-reservation-mismatch"
+	}
+	if assertedReservationSessionID != "" && assertedReservationSessionID != requestReservationSessionID {
+		return source + "-reservation-session-mismatch"
+	}
+	if assertedReservationSubjectID != "" && assertedReservationSubjectID != requestReservationSubjectID {
+		return source + "-reservation-subject-mismatch"
+	}
+	if requestReservationSessionID != "" && assertedSessionID != "" && assertedSessionID != requestReservationSessionID {
+		return source + "-reservation-session-mismatch"
+	}
+	return ""
 }
 
 func middleRelayRuntimeForSession(relayID string, desc proto.RelayDescriptor, route exitRoute) (middleRelayRuntime, string) {
@@ -1760,6 +2039,49 @@ func relayDescriptorHasInvalidMiddleRuntimeAdmission(relay proto.RelayDescriptor
 	return false
 }
 
+func relayDescriptorHasInvalidMicroExitRuntimeAdmission(relay proto.RelayDescriptor) bool {
+	if strings.ToLower(strings.TrimSpace(relay.Role)) != "micro-exit" {
+		return false
+	}
+	if relay.Reputation < middleRelayMinReputationScore {
+		return true
+	}
+	if relay.Uptime < middleRelayMinUptimeScore {
+		return true
+	}
+	if relay.Capacity < middleRelayMinCapacityScore {
+		return true
+	}
+	if relay.AbusePenalty > middleRelayMaxAbusePenalty {
+		return true
+	}
+	for _, hopRole := range relay.HopRoles {
+		if role := canonicalizePathHopRole(hopRole); role != "" && role != "exit" {
+			return true
+		}
+	}
+	for _, capability := range relay.Capabilities {
+		switch strings.ToLower(strings.TrimSpace(capability)) {
+		case "two-hop", "middle", "relay", "micro-relay", "micro_relay", "transit", "three-hop-middle":
+			return true
+		}
+	}
+	return false
+}
+
+func canonicalizePathHopRole(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "entry", "ingress", "guard":
+		return "entry"
+	case "middle", "relay", "micro-relay", "micro_relay", "transit", "three-hop-middle":
+		return "middle"
+	case "exit", "egress":
+		return "exit"
+	default:
+		return ""
+	}
+}
+
 func hopRoleIsMiddleDescriptor(raw string) bool {
 	switch canonicalizeMiddleRoleAlias(strings.ToLower(strings.TrimSpace(raw))) {
 	case "micro-relay":
@@ -1998,6 +2320,17 @@ func validateStrictExitControlRoute(controlURL, dataAddr string) error {
 	if isDisallowedStrictRouteHost(dataHost) {
 		return fmt.Errorf("exit data endpoint host not allowed")
 	}
+	controlIP := net.ParseIP(controlHost)
+	dataIP := net.ParseIP(dataHost)
+	if controlIP != nil && dataIP != nil && !controlIP.Equal(dataIP) {
+		return fmt.Errorf("exit control url IP host must match exit data IP host")
+	}
+	if controlIP == nil && strictRouteHostnameResolvesToDisallowed(controlHost) {
+		return fmt.Errorf("exit control url host resolves to disallowed address")
+	}
+	if dataIP == nil && strictRouteHostnameResolvesToDisallowed(dataHost) {
+		return fmt.Errorf("exit data endpoint host resolves to disallowed address")
+	}
 	if !strings.EqualFold(controlHost, dataHost) {
 		return fmt.Errorf("exit control url host must match exit data host")
 	}
@@ -2101,6 +2434,23 @@ func isDisallowedStrictRouteHost(host string) bool {
 	}
 	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
 		return true
+	}
+	return false
+}
+
+func strictRouteHostnameResolvesToDisallowed(host string) bool {
+	host = normalizeHostForCompare(host)
+	if host == "" || net.ParseIP(host) != nil {
+		return false
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return false
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+			return true
+		}
 	}
 	return false
 }

@@ -253,6 +253,8 @@ func TestValidateRuntimeConfigBetaStrict(t *testing.T) {
 		directoryURLs:         []string{"http://127.0.0.1:8081"},
 		directoryMinSources:   1,
 		directoryMinOperators: 1,
+		relayID:               "entry-a",
+		routeAssertionPriv:    testEntryRouteAssertionPrivateKeyBytes(t),
 	}
 	if err := s.validateRuntimeConfig(); err != nil {
 		t.Fatalf("expected strict config valid, got %v", err)
@@ -451,6 +453,8 @@ func TestValidateRuntimeConfigBetaStrictAllowsMultiDirectoryWithRelayVoteQuorum(
 		directoryMinSources:   2,
 		directoryMinOperators: 2,
 		directoryMinVotes:     2,
+		relayID:               "entry-a",
+		routeAssertionPriv:    testEntryRouteAssertionPrivateKeyBytes(t),
 	}
 	if err := s.validateRuntimeConfig(); err != nil {
 		t.Fatalf("expected strict config valid, got %v", err)

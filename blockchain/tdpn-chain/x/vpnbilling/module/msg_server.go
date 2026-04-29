@@ -43,6 +43,18 @@ type FinalizeUsageResponse struct {
 	Idempotent bool
 }
 
+// ConfirmReservationRequest captures an existing reservation finality transition.
+type ConfirmReservationRequest struct {
+	Reservation types.CreditReservation
+}
+
+// ConfirmReservationResponse returns the confirmed reservation plus replay metadata.
+type ConfirmReservationResponse struct {
+	Reservation types.CreditReservation
+	Existed     bool
+	Idempotent  bool
+}
+
 // MsgServer exposes a lightweight Cosmos-style message surface for vpnbilling.
 type MsgServer struct {
 	keeper *keeper.Keeper
@@ -67,6 +79,33 @@ func (s MsgServer) ReserveCredits(req ReserveCreditsRequest) (ReserveCreditsResp
 		Reservation: record,
 		Existed:     existed,
 		Idempotent:  existed && err == nil,
+	}
+	if err != nil {
+		if strings.Contains(err.Error(), "conflicting fields") {
+			return resp, fmt.Errorf("%w: %v", ErrReservationConflict, err)
+		}
+		return resp, fmt.Errorf("%w: %v", ErrInvalidReservation, err)
+	}
+	return resp, nil
+}
+
+func (s MsgServer) ConfirmReservation(req ConfirmReservationRequest) (ConfirmReservationResponse, error) {
+	if s.keeper == nil {
+		return ConfirmReservationResponse{}, ErrNilKeeper
+	}
+	existed := false
+	if req.Reservation.ReservationID != "" {
+		_, existed = s.keeper.GetReservation(req.Reservation.ReservationID)
+	}
+	if !existed {
+		return ConfirmReservationResponse{}, fmt.Errorf("%w: reservation_id=%s", ErrReservationNotFound, req.Reservation.ReservationID)
+	}
+
+	record, replay, err := s.keeper.ConfirmReservation(req.Reservation)
+	resp := ConfirmReservationResponse{
+		Reservation: record,
+		Existed:     existed,
+		Idempotent:  replay,
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "conflicting fields") {

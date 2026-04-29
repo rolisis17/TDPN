@@ -716,6 +716,10 @@ if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--allow-pro
   echo "help output missing --allow-profile-default-gate-unreachable [0|1]"
   exit 1
 fi
+if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--allow-empty-actions [0|1]" >/dev/null; then
+  echo "help output missing --allow-empty-actions [0|1]"
+  exit 1
+fi
 if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--profile-default-gate-subject ID" >/dev/null; then
   echo "help output missing --profile-default-gate-subject ID"
   exit 1
@@ -2585,6 +2589,7 @@ fi
 echo "[roadmap-next-actions-run] no-actions path"
 SUMMARY_EMPTY="$TMP_DIR/summary_empty.json"
 REPORTS_EMPTY="$TMP_DIR/reports_empty"
+set +e
 ROADMAP_NEXT_ACTIONS_SCENARIO=no_actions \
 PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
 ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
@@ -2592,13 +2597,21 @@ bash ./scripts/roadmap_next_actions_run.sh \
   --reports-dir "$REPORTS_EMPTY" \
   --summary-json "$SUMMARY_EMPTY" \
   --print-summary-json 0
+empty_rc=$?
+set -e
+if [[ "$empty_rc" != "4" ]]; then
+  echo "expected no-actions fail-closed rc=4, got rc=$empty_rc"
+  cat "$SUMMARY_EMPTY"
+  exit 1
+fi
 
 if ! jq -e '
-  .status == "pass"
-  and .rc == 0
+  .status == "fail"
+  and .rc == 4
   and .roadmap.actions_selected_count == 0
   and .roadmap.selected_action_ids == []
   and .summary.actions_executed == 0
+  and .summary.empty_actions_allowed == false
   and .summary.pass == 0
   and .summary.fail == 0
   and .summary.timed_out == 0
@@ -2606,6 +2619,32 @@ if ! jq -e '
 ' "$SUMMARY_EMPTY" >/dev/null; then
   echo "no-actions summary mismatch"
   cat "$SUMMARY_EMPTY"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] no-actions explicit allow override"
+SUMMARY_EMPTY_ALLOWED="$TMP_DIR/summary_empty_allowed.json"
+REPORTS_EMPTY_ALLOWED="$TMP_DIR/reports_empty_allowed"
+ROADMAP_NEXT_ACTIONS_SCENARIO=no_actions \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_EMPTY_ALLOWED" \
+  --summary-json "$SUMMARY_EMPTY_ALLOWED" \
+  --allow-empty-actions 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.allow_empty_actions == true
+  and .summary.empty_actions_allowed == true
+  and .roadmap.actions_selected_count == 0
+  and .summary.actions_executed == 0
+  and ((.actions // []) | length == 0)
+' "$SUMMARY_EMPTY_ALLOWED" >/dev/null; then
+  echo "no-actions allow override summary mismatch"
+  cat "$SUMMARY_EMPTY_ALLOWED"
   exit 1
 fi
 

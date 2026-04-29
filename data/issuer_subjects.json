@@ -1,9 +1,0 @@
-{
-  "exit-local-1": {
-    "subject": "exit-local-1",
-    "kind": "relay-exit",
-    "tier": 3,
-    "reputation": 0.97,
-    "bond": 600
-  }
-}

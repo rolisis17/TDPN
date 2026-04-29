@@ -86,6 +86,9 @@ type SlashEvidence struct {
 	ProofHash       string                 `protobuf:"bytes,5,opt,name=proof_hash,json=proofHash,proto3" json:"proof_hash,omitempty"`
 	SubmittedAtUnix int64                  `protobuf:"varint,6,opt,name=submitted_at_unix,json=submittedAtUnix,proto3" json:"submitted_at_unix,omitempty"`
 	ViolationType   string                 `protobuf:"bytes,7,opt,name=violation_type,json=violationType,proto3" json:"violation_type,omitempty"`
+	SlashAmount     int64                  `protobuf:"varint,8,opt,name=slash_amount,json=slashAmount,proto3" json:"slash_amount,omitempty"`
+	SlashDenom      string                 `protobuf:"bytes,9,opt,name=slash_denom,json=slashDenom,proto3" json:"slash_denom,omitempty"`
+	Status          ReconciliationStatus   `protobuf:"varint,10,opt,name=status,proto3,enum=tdpn.vpnslashing.v1.ReconciliationStatus" json:"status,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -169,6 +172,27 @@ func (x *SlashEvidence) GetViolationType() string {
 	return ""
 }
 
+func (x *SlashEvidence) GetSlashAmount() int64 {
+	if x != nil {
+		return x.SlashAmount
+	}
+	return 0
+}
+
+func (x *SlashEvidence) GetSlashDenom() string {
+	if x != nil {
+		return x.SlashDenom
+	}
+	return ""
+}
+
+func (x *SlashEvidence) GetStatus() ReconciliationStatus {
+	if x != nil {
+		return x.Status
+	}
+	return ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED
+}
+
 // PenaltyDecision captures slash/jail intent generated from verified evidence.
 type PenaltyDecision struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -178,6 +202,8 @@ type PenaltyDecision struct {
 	Jailed          bool                   `protobuf:"varint,4,opt,name=jailed,proto3" json:"jailed,omitempty"`
 	AppliedAtUnix   int64                  `protobuf:"varint,5,opt,name=applied_at_unix,json=appliedAtUnix,proto3" json:"applied_at_unix,omitempty"`
 	Status          ReconciliationStatus   `protobuf:"varint,6,opt,name=status,proto3,enum=tdpn.vpnslashing.v1.ReconciliationStatus" json:"status,omitempty"`
+	SlashAmount     int64                  `protobuf:"varint,7,opt,name=slash_amount,json=slashAmount,proto3" json:"slash_amount,omitempty"`
+	SlashDenom      string                 `protobuf:"bytes,8,opt,name=slash_denom,json=slashDenom,proto3" json:"slash_denom,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -254,11 +280,25 @@ func (x *PenaltyDecision) GetStatus() ReconciliationStatus {
 	return ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED
 }
 
+func (x *PenaltyDecision) GetSlashAmount() int64 {
+	if x != nil {
+		return x.SlashAmount
+	}
+	return 0
+}
+
+func (x *PenaltyDecision) GetSlashDenom() string {
+	if x != nil {
+		return x.SlashDenom
+	}
+	return ""
+}
+
 var File_tdpn_vpnslashing_v1_types_proto protoreflect.FileDescriptor
 
 const file_tdpn_vpnslashing_v1_types_proto_rawDesc = "" +
 	"\n" +
-	"\x1ftdpn/vpnslashing/v1/types.proto\x12\x13tdpn.vpnslashing.v1\"\xf6\x01\n" +
+	"\x1ftdpn/vpnslashing/v1/types.proto\x12\x13tdpn.vpnslashing.v1\"\xfd\x02\n" +
 	"\rSlashEvidence\x12\x1f\n" +
 	"\vevidence_id\x18\x01 \x01(\tR\n" +
 	"evidenceId\x12\x1d\n" +
@@ -270,7 +310,12 @@ const file_tdpn_vpnslashing_v1_types_proto_rawDesc = "" +
 	"\n" +
 	"proof_hash\x18\x05 \x01(\tR\tproofHash\x12*\n" +
 	"\x11submitted_at_unix\x18\x06 \x01(\x03R\x0fsubmittedAtUnix\x12%\n" +
-	"\x0eviolation_type\x18\a \x01(\tR\rviolationType\"\x80\x02\n" +
+	"\x0eviolation_type\x18\a \x01(\tR\rviolationType\x12!\n" +
+	"\fslash_amount\x18\b \x01(\x03R\vslashAmount\x12\x1f\n" +
+	"\vslash_denom\x18\t \x01(\tR\n" +
+	"slashDenom\x12A\n" +
+	"\x06status\x18\n" +
+	" \x01(\x0e2).tdpn.vpnslashing.v1.ReconciliationStatusR\x06status\"\xc4\x02\n" +
 	"\x0fPenaltyDecision\x12\x1d\n" +
 	"\n" +
 	"penalty_id\x18\x01 \x01(\tR\tpenaltyId\x12\x1f\n" +
@@ -279,7 +324,10 @@ const file_tdpn_vpnslashing_v1_types_proto_rawDesc = "" +
 	"\x11slash_basis_point\x18\x03 \x01(\rR\x0fslashBasisPoint\x12\x16\n" +
 	"\x06jailed\x18\x04 \x01(\bR\x06jailed\x12&\n" +
 	"\x0fapplied_at_unix\x18\x05 \x01(\x03R\rappliedAtUnix\x12A\n" +
-	"\x06status\x18\x06 \x01(\x0e2).tdpn.vpnslashing.v1.ReconciliationStatusR\x06status*\xcc\x01\n" +
+	"\x06status\x18\x06 \x01(\x0e2).tdpn.vpnslashing.v1.ReconciliationStatusR\x06status\x12!\n" +
+	"\fslash_amount\x18\a \x01(\x03R\vslashAmount\x12\x1f\n" +
+	"\vslash_denom\x18\b \x01(\tR\n" +
+	"slashDenom*\xcc\x01\n" +
 	"\x14ReconciliationStatus\x12%\n" +
 	"!RECONCILIATION_STATUS_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dRECONCILIATION_STATUS_PENDING\x10\x01\x12#\n" +
@@ -307,12 +355,13 @@ var file_tdpn_vpnslashing_v1_types_proto_goTypes = []any{
 	(*PenaltyDecision)(nil),   // 2: tdpn.vpnslashing.v1.PenaltyDecision
 }
 var file_tdpn_vpnslashing_v1_types_proto_depIdxs = []int32{
-	0, // 0: tdpn.vpnslashing.v1.PenaltyDecision.status:type_name -> tdpn.vpnslashing.v1.ReconciliationStatus
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	0, // 0: tdpn.vpnslashing.v1.SlashEvidence.status:type_name -> tdpn.vpnslashing.v1.ReconciliationStatus
+	0, // 1: tdpn.vpnslashing.v1.PenaltyDecision.status:type_name -> tdpn.vpnslashing.v1.ReconciliationStatus
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_tdpn_vpnslashing_v1_types_proto_init() }

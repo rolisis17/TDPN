@@ -13,6 +13,7 @@ func TestRewardAccrualValidateBasic(t *testing.T) {
 		AccrualID:  "acc-1",
 		SessionID:  "sess-1",
 		ProviderID: "provider-1",
+		AssetDenom: "uusdc",
 		Amount:     42,
 	}
 
@@ -24,28 +25,108 @@ func TestRewardAccrualValidateBasic(t *testing.T) {
 		{name: "valid", record: base},
 		{
 			name:    "missing accrual id",
-			record:  RewardAccrual{SessionID: base.SessionID, ProviderID: base.ProviderID, Amount: base.Amount},
+			record:  RewardAccrual{SessionID: base.SessionID, ProviderID: base.ProviderID, AssetDenom: base.AssetDenom, Amount: base.Amount},
 			wantErr: "accrual id is required",
+		},
+		{
+			name:    "missing session id",
+			record:  RewardAccrual{AccrualID: base.AccrualID, ProviderID: base.ProviderID, AssetDenom: base.AssetDenom, Amount: base.Amount},
+			wantErr: "session id is required",
 		},
 		{
 			name:    "missing provider id",
-			record:  RewardAccrual{AccrualID: base.AccrualID, SessionID: base.SessionID, Amount: base.Amount},
+			record:  RewardAccrual{AccrualID: base.AccrualID, SessionID: base.SessionID, AssetDenom: base.AssetDenom, Amount: base.Amount},
 			wantErr: "provider id is required",
+		},
+		{
+			name:    "missing asset denom",
+			record:  RewardAccrual{AccrualID: base.AccrualID, SessionID: base.SessionID, ProviderID: base.ProviderID, Amount: base.Amount},
+			wantErr: "asset denom is required",
 		},
 		{
 			name:    "whitespace-only accrual id",
-			record:  RewardAccrual{AccrualID: " \t ", ProviderID: base.ProviderID, Amount: base.Amount},
+			record:  RewardAccrual{AccrualID: " \t ", SessionID: base.SessionID, ProviderID: base.ProviderID, AssetDenom: base.AssetDenom, Amount: base.Amount},
 			wantErr: "accrual id is required",
 		},
 		{
+			name:    "whitespace-only session id",
+			record:  RewardAccrual{AccrualID: base.AccrualID, SessionID: " \t ", ProviderID: base.ProviderID, AssetDenom: base.AssetDenom, Amount: base.Amount},
+			wantErr: "session id is required",
+		},
+		{
 			name:    "whitespace-only provider id",
-			record:  RewardAccrual{AccrualID: base.AccrualID, ProviderID: " \n ", Amount: base.Amount},
+			record:  RewardAccrual{AccrualID: base.AccrualID, SessionID: base.SessionID, ProviderID: " \n ", AssetDenom: base.AssetDenom, Amount: base.Amount},
 			wantErr: "provider id is required",
 		},
 		{
+			name:    "whitespace-only asset denom",
+			record:  RewardAccrual{AccrualID: base.AccrualID, SessionID: base.SessionID, ProviderID: base.ProviderID, AssetDenom: " \n ", Amount: base.Amount},
+			wantErr: "asset denom is required",
+		},
+		{
+			name:    "zero amount",
+			record:  RewardAccrual{AccrualID: base.AccrualID, SessionID: base.SessionID, ProviderID: base.ProviderID, AssetDenom: base.AssetDenom},
+			wantErr: "amount must be positive",
+		},
+		{
 			name:    "negative amount",
-			record:  RewardAccrual{AccrualID: base.AccrualID, SessionID: base.SessionID, ProviderID: base.ProviderID, Amount: -1},
-			wantErr: "amount cannot be negative",
+			record:  RewardAccrual{AccrualID: base.AccrualID, SessionID: base.SessionID, ProviderID: base.ProviderID, AssetDenom: base.AssetDenom, Amount: -1},
+			wantErr: "amount must be positive",
+		},
+		{
+			name:    "unknown operation state",
+			record:  RewardAccrual{AccrualID: base.AccrualID, SessionID: base.SessionID, ProviderID: base.ProviderID, AssetDenom: base.AssetDenom, Amount: base.Amount, OperationState: "mystery"},
+			wantErr: "operation state must be pending, submitted, confirmed, or failed",
+		},
+		{
+			name: "valid weekly payout period",
+			record: RewardAccrual{
+				AccrualID:       base.AccrualID,
+				SessionID:       base.SessionID,
+				ProviderID:      base.ProviderID,
+				AssetDenom:      base.AssetDenom,
+				Amount:          base.Amount,
+				PayoutStartUnix: 1776643200, // 2026-04-20T00:00:00Z
+				PayoutEndUnix:   1777248000, // 2026-04-27T00:00:00Z
+			},
+		},
+		{
+			name: "payout start without end",
+			record: RewardAccrual{
+				AccrualID:       base.AccrualID,
+				SessionID:       base.SessionID,
+				ProviderID:      base.ProviderID,
+				AssetDenom:      base.AssetDenom,
+				Amount:          base.Amount,
+				PayoutStartUnix: 1776643200,
+			},
+			wantErr: "payout start and end are required together",
+		},
+		{
+			name: "payout start not monday",
+			record: RewardAccrual{
+				AccrualID:       base.AccrualID,
+				SessionID:       base.SessionID,
+				ProviderID:      base.ProviderID,
+				AssetDenom:      base.AssetDenom,
+				Amount:          base.Amount,
+				PayoutStartUnix: 1776729600, // 2026-04-21T00:00:00Z
+				PayoutEndUnix:   1777334400,
+			},
+			wantErr: "payout start must be Monday 00:00:00 UTC",
+		},
+		{
+			name: "payout end not weekly",
+			record: RewardAccrual{
+				AccrualID:       base.AccrualID,
+				SessionID:       base.SessionID,
+				ProviderID:      base.ProviderID,
+				AssetDenom:      base.AssetDenom,
+				Amount:          base.Amount,
+				PayoutStartUnix: 1776643200,
+				PayoutEndUnix:   1777161600,
+			},
+			wantErr: "payout end must be exactly 7 days after payout start",
 		},
 	}
 
@@ -114,6 +195,11 @@ func TestDistributionRecordValidateBasic(t *testing.T) {
 			record:  DistributionRecord{DistributionID: base.DistributionID, AccrualID: base.AccrualID, PayoutRef: " \n\t "},
 			wantErr: "payout ref is required",
 		},
+		{
+			name:    "unknown status",
+			record:  DistributionRecord{DistributionID: base.DistributionID, AccrualID: base.AccrualID, PayoutRef: base.PayoutRef, Status: "mystery"},
+			wantErr: "status must be pending, submitted, confirmed, or failed",
+		},
 	}
 
 	for _, tc := range tests {
@@ -133,6 +219,45 @@ func TestDistributionRecordValidateBasic(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRewardProofRecordValidateVerifiedBinding(t *testing.T) {
+	t.Parallel()
+
+	record := RewardProofRecord{
+		ProofPath:         "traffic-proof/reward-proof-1",
+		TrafficProofRef:   "obj://traffic-proof/reward-proof-1",
+		TrustContract:     RewardProofTrustContractObjectiveTrafficV1,
+		RewardID:          "reward-proof-1",
+		ProviderSubjectID: "provider-proof-1",
+		SessionID:         "session-proof-1",
+		PayoutStartUnix:   1776643200,
+		PayoutEndUnix:     1777248000,
+		RewardMicros:      100,
+		Currency:          "uusdc",
+		IssuedAtUnix:      1777248001,
+		Verified:          true,
+		VerifierID:        "proof-verifier-1",
+		VerifiedAtUnix:    1777248002,
+	}
+	if err := record.ValidateVerified(); err != nil {
+		t.Fatalf("expected valid verified proof record, got %v", err)
+	}
+
+	mismatch := record
+	mismatch.TrafficProofRef = "obj://traffic-proof/other"
+	if err := mismatch.ValidateBasic(); err == nil {
+		t.Fatal("expected traffic proof ref/path mismatch to fail")
+	}
+
+	unverified := record
+	unverified.Verified = false
+	if err := unverified.ValidateBasic(); err != nil {
+		t.Fatalf("expected unverified record to be structurally storable, got %v", err)
+	}
+	if err := unverified.ValidateVerified(); err == nil {
+		t.Fatal("expected unverified record to fail verified query validation")
 	}
 }
 

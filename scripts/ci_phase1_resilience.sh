@@ -38,7 +38,7 @@ Purpose:
     4) vpn_rc_matrix_path.sh
     5) vpn_rc_resilience_path.sh
     6) integration_session_churn_guard.sh
-    7) integration_live_wg_full_path_strict.sh (optional)
+    7) integration_client_3hop_runtime.sh
 
 Dry-run mode:
   --dry-run 1 forwards dry-run to wrapper stages so checks are deterministic
@@ -317,7 +317,7 @@ run_three_machine_docker_profile_matrix_record="${CI_PHASE1_RESILIENCE_RUN_THREE
 run_vpn_rc_matrix_path="${CI_PHASE1_RESILIENCE_RUN_VPN_RC_MATRIX_PATH:-1}"
 run_vpn_rc_resilience_path="${CI_PHASE1_RESILIENCE_RUN_VPN_RC_RESILIENCE_PATH:-1}"
 run_session_churn_guard="${CI_PHASE1_RESILIENCE_RUN_SESSION_CHURN_GUARD:-1}"
-run_3hop_runtime_integration="${CI_PHASE1_RESILIENCE_RUN_3HOP_RUNTIME_INTEGRATION:-0}"
+run_3hop_runtime_integration="${CI_PHASE1_RESILIENCE_RUN_3HOP_RUNTIME_INTEGRATION:-1}"
 
 three_machine_docker_profile_matrix_timeout_sec="${CI_PHASE1_RESILIENCE_THREE_MACHINE_DOCKER_PROFILE_MATRIX_TIMEOUT_SEC:-5400}"
 profile_compare_docker_matrix_timeout_sec="${CI_PHASE1_RESILIENCE_PROFILE_COMPARE_DOCKER_MATRIX_TIMEOUT_SEC:-5400}"
@@ -508,7 +508,7 @@ three_machine_docker_profile_matrix_record_script="${CI_PHASE1_RESILIENCE_THREE_
 vpn_rc_matrix_path_script="${CI_PHASE1_RESILIENCE_VPN_RC_MATRIX_PATH_SCRIPT:-$ROOT_DIR/scripts/vpn_rc_matrix_path.sh}"
 vpn_rc_resilience_path_script="${CI_PHASE1_RESILIENCE_VPN_RC_RESILIENCE_PATH_SCRIPT:-$ROOT_DIR/scripts/vpn_rc_resilience_path.sh}"
 session_churn_guard_script="${CI_PHASE1_RESILIENCE_SESSION_CHURN_GUARD_SCRIPT:-$ROOT_DIR/scripts/integration_session_churn_guard.sh}"
-three_hop_runtime_integration_script="${CI_PHASE1_RESILIENCE_THREE_HOP_RUNTIME_INTEGRATION_SCRIPT:-$ROOT_DIR/scripts/integration_live_wg_full_path_strict.sh}"
+three_hop_runtime_integration_script="${CI_PHASE1_RESILIENCE_THREE_HOP_RUNTIME_INTEGRATION_SCRIPT:-$ROOT_DIR/scripts/integration_client_3hop_runtime.sh}"
 
 if [[ "$run_three_machine_docker_profile_matrix" == "1" && ! -x "$three_machine_docker_profile_matrix_script" ]]; then
   echo "missing executable stage script: $three_machine_docker_profile_matrix_script"

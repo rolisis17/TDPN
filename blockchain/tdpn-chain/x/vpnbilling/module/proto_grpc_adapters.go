@@ -34,6 +34,7 @@ func (a *ProtoMsgServerAdapter) ReserveCredits(ctx context.Context, req *pb.MsgR
 	if req != nil && req.GetReservation() != nil {
 		record = fromProtoCreditReservation(req.GetReservation())
 	}
+	record.Status = chaintypes.ReconciliationPending
 
 	resp, err := a.msg.ReserveCredits(ReserveCreditsRequest{Reservation: record})
 	out := &pb.MsgReserveCreditsResponse{
@@ -55,6 +56,7 @@ func (a *ProtoMsgServerAdapter) FinalizeUsage(ctx context.Context, req *pb.MsgFi
 	if req != nil && req.GetSettlement() != nil {
 		record = fromProtoSettlementRecord(req.GetSettlement())
 	}
+	record.OperationState = chaintypes.ReconciliationSubmitted
 
 	resp, err := a.msg.FinalizeUsage(FinalizeUsageRequest{Settlement: record})
 	out := &pb.MsgFinalizeUsageResponse{
@@ -169,8 +171,7 @@ func fromProtoCreditReservation(in *pb.CreditReservation) billingtypes.CreditRes
 		SessionID:     in.GetSessionId(),
 		AssetDenom:    in.GetAssetDenom(),
 		Amount:        in.GetAmount(),
-		// Server owns reconciliation lifecycle transitions for writes.
-		Status:        "",
+		Status:        fromProtoStatus(in.GetStatus()),
 		CreatedAtUnix: in.GetCreatedAtUnix(),
 	}
 }
@@ -192,15 +193,14 @@ func fromProtoSettlementRecord(in *pb.SettlementRecord) billingtypes.SettlementR
 		return billingtypes.SettlementRecord{}
 	}
 	return billingtypes.SettlementRecord{
-		SettlementID:  in.GetSettlementId(),
-		ReservationID: in.GetReservationId(),
-		SessionID:     in.GetSessionId(),
-		BilledAmount:  in.GetBilledAmount(),
-		UsageBytes:    in.GetUsageBytes(),
-		AssetDenom:    in.GetAssetDenom(),
-		SettledAtUnix: in.GetSettledAtUnix(),
-		// Server owns reconciliation lifecycle transitions for writes.
-		OperationState: "",
+		SettlementID:   in.GetSettlementId(),
+		ReservationID:  in.GetReservationId(),
+		SessionID:      in.GetSessionId(),
+		BilledAmount:   in.GetBilledAmount(),
+		UsageBytes:     in.GetUsageBytes(),
+		AssetDenom:     in.GetAssetDenom(),
+		SettledAtUnix:  in.GetSettledAtUnix(),
+		OperationState: fromProtoStatus(in.GetOperationState()),
 	}
 }
 

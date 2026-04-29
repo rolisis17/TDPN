@@ -29,17 +29,24 @@ import (
 )
 
 type settlementServiceStub struct {
-	reserveFundsFn           func(context.Context, settlement.FundReservation) (settlement.FundReservation, error)
-	recordUsageFn            func(context.Context, settlement.UsageRecord) error
-	settleSessionFn          func(context.Context, string) (settlement.SessionSettlement, error)
-	issueRewardFn            func(context.Context, settlement.RewardIssue) (settlement.RewardIssue, error)
-	reconcileFn              func(context.Context) (settlement.ReconcileReport, error)
-	reserveFundsCalls        int
-	recordUsageCalls         int
-	settleSessionCalls       int
-	issueRewardCalls         int
-	reconcileCalls           int
-	submitSlashEvidenceCalls int
+	reserveFundsFn             func(context.Context, settlement.FundReservation) (settlement.FundReservation, error)
+	fundReservationFn          func(context.Context, string) (settlement.FundReservation, bool, error)
+	fundReservationStatusFn    func(context.Context, string) (settlement.OperationStatus, bool, error)
+	recordUsageFn              func(context.Context, settlement.UsageRecord) error
+	settleSessionFn            func(context.Context, string) (settlement.SessionSettlement, error)
+	issueRewardFn              func(context.Context, settlement.RewardIssue) (settlement.RewardIssue, error)
+	reconcileFn                func(context.Context) (settlement.ReconcileReport, error)
+	reserveFundsCalls          int
+	fundReservationCalls       int
+	fundReservationStatusCalls int
+	recordUsageCalls           int
+	settleSessionCalls         int
+	issueRewardCalls           int
+	reconcileCalls             int
+	submitSlashEvidenceCalls   int
+	registerRewardProofCalls   int
+	lastRewardIssue            settlement.RewardIssue
+	lastRewardProof            settlement.RewardProofRecord
 }
 
 func (s *settlementServiceStub) RecordUsage(ctx context.Context, usage settlement.UsageRecord) error {
@@ -63,6 +70,22 @@ func (s *settlementServiceStub) ReserveFunds(ctx context.Context, reservation se
 		return s.reserveFundsFn(ctx, reservation)
 	}
 	return reservation, nil
+}
+
+func (s *settlementServiceStub) FundReservation(ctx context.Context, reservationID string) (settlement.FundReservation, bool, error) {
+	s.fundReservationCalls++
+	if s.fundReservationFn != nil {
+		return s.fundReservationFn(ctx, reservationID)
+	}
+	return settlement.FundReservation{}, false, nil
+}
+
+func (s *settlementServiceStub) FundReservationStatus(ctx context.Context, reservationID string) (settlement.OperationStatus, bool, error) {
+	s.fundReservationStatusCalls++
+	if s.fundReservationStatusFn != nil {
+		return s.fundReservationStatusFn(ctx, reservationID)
+	}
+	return settlement.OperationStatusPending, false, nil
 }
 
 func (s *settlementServiceStub) ReserveSponsorCredits(_ context.Context, reservation settlement.SponsorCreditReservation) (settlement.SponsorCreditReservation, error) {
@@ -93,10 +116,17 @@ func (s *settlementServiceStub) SettleSession(ctx context.Context, sessionID str
 
 func (s *settlementServiceStub) IssueReward(ctx context.Context, reward settlement.RewardIssue) (settlement.RewardIssue, error) {
 	s.issueRewardCalls++
+	s.lastRewardIssue = reward
 	if s.issueRewardFn != nil {
 		return s.issueRewardFn(ctx, reward)
 	}
 	return reward, nil
+}
+
+func (s *settlementServiceStub) RegisterRewardProof(_ context.Context, proof settlement.RewardProofRecord) error {
+	s.registerRewardProofCalls++
+	s.lastRewardProof = proof
+	return nil
 }
 
 func (s *settlementServiceStub) SubmitSlashEvidence(_ context.Context, evidence settlement.SlashEvidence) (settlement.SlashEvidence, error) {
@@ -139,6 +169,78 @@ func (a *failingSettlementChainAdapter) Health(_ context.Context) error {
 	return errors.New("chain unavailable")
 }
 
+type verifyingRewardChainAdapter struct {
+	reservations  map[string]settlement.FundReservation
+	proofRequests []settlement.RewardProofVerificationRequest
+	rewardIssues  []settlement.RewardIssue
+}
+
+func (a *verifyingRewardChainAdapter) RequiresRewardProofReference() bool {
+	return true
+}
+
+func (a *verifyingRewardChainAdapter) SubmitFundReservation(_ context.Context, reservation settlement.FundReservation) (string, error) {
+	if a.reservations == nil {
+		a.reservations = map[string]settlement.FundReservation{}
+	}
+	chainReservation := reservation
+	chainReservation.Status = settlement.OperationStatusConfirmed
+	a.reservations[reservation.ReservationID] = chainReservation
+	return "chain-" + reservation.ReservationID, nil
+}
+
+func (a *verifyingRewardChainAdapter) FundReservation(_ context.Context, reservationID string) (settlement.FundReservation, bool, error) {
+	reservation, ok := a.reservations[reservationID]
+	return reservation, ok, nil
+}
+
+func (a *verifyingRewardChainAdapter) FundReservationStatus(_ context.Context, reservationID string) (settlement.OperationStatus, bool, error) {
+	reservation, ok := a.reservations[reservationID]
+	if !ok {
+		return "", false, nil
+	}
+	return reservation.Status, true, nil
+}
+
+func (a *verifyingRewardChainAdapter) SubmitSessionSettlement(_ context.Context, sessionSettlement settlement.SessionSettlement) (string, error) {
+	return "chain-" + sessionSettlement.SettlementID, nil
+}
+
+func (a *verifyingRewardChainAdapter) SubmitRewardIssue(_ context.Context, reward settlement.RewardIssue) (string, error) {
+	a.rewardIssues = append(a.rewardIssues, reward)
+	return "chain-" + reward.RewardID, nil
+}
+
+func (a *verifyingRewardChainAdapter) SubmitSponsorReservation(_ context.Context, reservation settlement.SponsorCreditReservation) (string, error) {
+	return "chain-" + reservation.ReservationID, nil
+}
+
+func (a *verifyingRewardChainAdapter) SubmitSlashEvidence(_ context.Context, evidence settlement.SlashEvidence) (string, error) {
+	return "chain-" + evidence.EvidenceID, nil
+}
+
+func (a *verifyingRewardChainAdapter) ListSlashEvidence(context.Context, settlement.SlashEvidenceFilter) ([]settlement.SlashEvidence, error) {
+	return nil, nil
+}
+
+func (a *verifyingRewardChainAdapter) VerifyRewardProof(_ context.Context, request settlement.RewardProofVerificationRequest) (settlement.RewardProofVerification, error) {
+	a.proofRequests = append(a.proofRequests, request)
+	if request.TrustContract != settlement.RewardProofTrustContractObjectiveTrafficV1 ||
+		!strings.HasPrefix(request.TrafficProofRef, "obj://traffic-proof/exit-session/") ||
+		strings.HasPrefix(request.TrafficProofRef, "sha256:") {
+		return settlement.RewardProofVerification{Verified: false}, nil
+	}
+	return settlement.RewardProofVerification{
+		Verified:   true,
+		VerifierID: "exit-test-proof-verifier",
+		VerifiedAt: time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC),
+	}, nil
+}
+
+func (a *verifyingRewardChainAdapter) Health(_ context.Context) error {
+	return nil
+}
+
 type sequentialWGManager struct {
 	removeSessionErrs  []error
 	removeSessionCalls int
@@ -158,6 +260,39 @@ func (m *sequentialWGManager) RemoveSession(_ context.Context, cfg wg.SessionCon
 	err := m.removeSessionErrs[0]
 	m.removeSessionErrs = m.removeSessionErrs[1:]
 	return err
+}
+
+type pathOpenFlakyWGManager struct {
+	mu sync.Mutex
+
+	configureSessionErrs  []error
+	configureSessionCalls int
+	removeSessionCalls    int
+}
+
+func (m *pathOpenFlakyWGManager) ConfigureSession(_ context.Context, _ wg.SessionConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.configureSessionCalls++
+	if len(m.configureSessionErrs) == 0 {
+		return nil
+	}
+	err := m.configureSessionErrs[0]
+	m.configureSessionErrs = m.configureSessionErrs[1:]
+	return err
+}
+
+func (m *pathOpenFlakyWGManager) RemoveSession(_ context.Context, _ wg.SessionConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.removeSessionCalls++
+	return nil
+}
+
+func (m *pathOpenFlakyWGManager) ConfigureSessionCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.configureSessionCalls
 }
 
 type blockingWGManager struct {
@@ -248,6 +383,209 @@ func TestHandlePathCloseFinalizeWarningDoesNotFailSessionClose(t *testing.T) {
 	}
 	if stub.issueRewardCalls != 0 {
 		t.Fatalf("expected no reward issue attempt after settle warning, got %d", stub.issueRewardCalls)
+	}
+}
+
+func TestHandlePathCloseIssuesRewardWithObjectiveProofAndSettlementRef(t *testing.T) {
+	stub := &settlementServiceStub{
+		settleSessionFn: func(_ context.Context, sessionID string) (settlement.SessionSettlement, error) {
+			return settlement.SessionSettlement{
+				SettlementID:  "set-" + sessionID,
+				SessionID:     sessionID,
+				ChargedMicros: 1000,
+				Currency:      "TDPNC",
+				Status:        settlement.OperationStatusConfirmed,
+			}, nil
+		},
+	}
+	now := time.Now()
+	s := &Service{
+		addr:       "127.0.0.1:8084",
+		settlement: stub,
+		sessions: map[string]sessionInfo{
+			"sid-close-reward-proof": {
+				claims:       crypto.CapabilityClaims{Subject: "client-reward-proof", ExpiryUnix: now.Add(2 * time.Minute).Unix()},
+				seenNonces:   map[uint64]struct{}{},
+				sessionKeyID: "sk-close-reward-proof",
+				ingressBytes: 2048,
+				egressBytes:  4096,
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sid-close-reward-proof","session_key_id":"sk-close-reward-proof"}`))
+	rr := httptest.NewRecorder()
+	s.handlePathClose(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected close HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if stub.issueRewardCalls != 1 {
+		t.Fatalf("issueRewardCalls=%d want=1", stub.issueRewardCalls)
+	}
+	reward := stub.lastRewardIssue
+	if reward.SettlementReferenceID != "set-sid-close-reward-proof" {
+		t.Fatalf("settlement reference=%q want set-sid-close-reward-proof reward=%+v", reward.SettlementReferenceID, reward)
+	}
+	if !strings.HasPrefix(reward.TrafficProofRef, "obj://traffic-proof/exit-session/") || len(reward.TrafficProofRef) != len("obj://traffic-proof/exit-session/")+64 {
+		t.Fatalf("traffic proof ref=%q want strong objective obj ref reward=%+v", reward.TrafficProofRef, reward)
+	}
+	if reward.RewardMicros != 500 {
+		t.Fatalf("reward micros=%d want=500 reward=%+v", reward.RewardMicros, reward)
+	}
+	if reward.PayoutPeriodStart.IsZero() || reward.PayoutPeriodEnd.IsZero() || !reward.PayoutPeriodEnd.Equal(reward.PayoutPeriodStart.AddDate(0, 0, 7)) {
+		t.Fatalf("reward payout period should be populated with a weekly window, got %+v", reward)
+	}
+	if stub.registerRewardProofCalls != 1 {
+		t.Fatalf("registerRewardProofCalls=%d want=1", stub.registerRewardProofCalls)
+	}
+	proof := stub.lastRewardProof
+	if proof.TrafficProofRef != reward.TrafficProofRef ||
+		proof.RewardID != reward.RewardID ||
+		proof.ProviderSubjectID != reward.ProviderSubjectID ||
+		proof.SessionID != reward.SessionID ||
+		proof.RewardMicros != reward.RewardMicros ||
+		proof.Currency != reward.Currency ||
+		!proof.Verified ||
+		proof.VerifierID != "gpm-exit-session-meter-v1" {
+		t.Fatalf("registered reward proof does not match reward issue proof=%+v reward=%+v", proof, reward)
+	}
+}
+
+func TestHandlePathCloseChainBackedRewardUsesVerifiedObjectProof(t *testing.T) {
+	adapter := &verifyingRewardChainAdapter{}
+	memSettlement := settlement.NewMemoryService(
+		settlement.WithPricePerMiBMicros(100000),
+		settlement.WithChainAdapter(adapter),
+		settlement.WithBlockchainMode(true),
+	)
+	now := time.Now()
+	s := &Service{
+		addr:           "127.0.0.1:51820",
+		settlement:     memSettlement,
+		sessionReserve: 500000,
+		sessions: map[string]sessionInfo{
+			"sid-close-chain-reward-proof": {
+				claims:       crypto.CapabilityClaims{Subject: "client-chain-reward-proof", ExpiryUnix: now.Add(2 * time.Minute).Unix()},
+				seenNonces:   map[uint64]struct{}{},
+				sessionKeyID: "sk-close-chain-reward-proof",
+				ingressBytes: 400000,
+				egressBytes:  200000,
+			},
+		},
+	}
+
+	s.reserveSettlementForSession(context.Background(), "sid-close-chain-reward-proof", "client-chain-reward-proof")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sid-close-chain-reward-proof","session_key_id":"sk-close-chain-reward-proof"}`))
+	rr := httptest.NewRecorder()
+	s.handlePathClose(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected close HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(adapter.proofRequests) != 1 {
+		t.Fatalf("expected one chain reward proof verification, got %d", len(adapter.proofRequests))
+	}
+	proofRef := adapter.proofRequests[0].TrafficProofRef
+	if !strings.HasPrefix(proofRef, "obj://traffic-proof/exit-session/") || strings.HasPrefix(proofRef, "sha256:") {
+		t.Fatalf("chain reward proof ref=%q want verified obj:// traffic proof", proofRef)
+	}
+	if len(adapter.rewardIssues) != 1 {
+		t.Fatalf("expected one chain reward submission, got %d", len(adapter.rewardIssues))
+	}
+	reward := adapter.rewardIssues[0]
+	if reward.TrafficProofRef != proofRef || !reward.TrafficProofVerified || reward.TrafficProofVerifierID != "exit-test-proof-verifier" {
+		t.Fatalf("reward submitted without verified proof metadata: request_ref=%q reward=%+v", proofRef, reward)
+	}
+	if reward.TrafficProofTrustContract != settlement.RewardProofTrustContractObjectiveTrafficV1 {
+		t.Fatalf("reward trust contract=%q want %q", reward.TrafficProofTrustContract, settlement.RewardProofTrustContractObjectiveTrafficV1)
+	}
+	if reward.PayoutPeriodStart.IsZero() || reward.PayoutPeriodEnd.IsZero() || !reward.PayoutPeriodEnd.Equal(reward.PayoutPeriodStart.AddDate(0, 0, 7)) {
+		t.Fatalf("reward payout period should be populated with a weekly window, got %+v", reward)
+	}
+}
+
+func TestFinalizeSettlementUsesReservationSubjectWhenPresent(t *testing.T) {
+	var recordedSubject string
+	stub := &settlementServiceStub{
+		recordUsageFn: func(_ context.Context, usage settlement.UsageRecord) error {
+			recordedSubject = usage.SubjectID
+			return nil
+		},
+		settleSessionFn: func(_ context.Context, sessionID string) (settlement.SessionSettlement, error) {
+			return settlement.SessionSettlement{
+				SettlementID:  "set-" + sessionID,
+				SessionID:     sessionID,
+				SubjectID:     "cosmos1reservation",
+				ChargedMicros: 1000,
+				Currency:      "TDPNC",
+				Status:        settlement.OperationStatusConfirmed,
+			}, nil
+		},
+	}
+	now := time.Now()
+	session := sessionInfo{
+		claims:               crypto.CapabilityClaims{Subject: "wallet:cosmos1reservation", ExpiryUnix: now.Add(2 * time.Minute).Unix()},
+		seenNonces:           map[uint64]struct{}{},
+		sessionKeyID:         "sk-close-reservation-subject",
+		reservationID:        "res-close-reservation-subject",
+		reservationSessionID: "sid-close-reservation-subject",
+		reservationSubjectID: "cosmos1reservation",
+		ingressBytes:         2048,
+		egressBytes:          4096,
+	}
+	s := &Service{
+		addr:       "127.0.0.1:8084",
+		settlement: stub,
+		sessions: map[string]sessionInfo{
+			"sid-close-reservation-subject": session,
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/close", strings.NewReader(`{"session_id":"sid-close-reservation-subject","session_key_id":"sk-close-reservation-subject"}`))
+	rr := httptest.NewRecorder()
+	s.handlePathClose(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected close HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if recordedSubject != "cosmos1reservation" {
+		t.Fatalf("usage subject=%q want reservation subject", recordedSubject)
+	}
+	expectedProof := exitSessionTrafficProofRef(
+		"sid-close-reservation-subject",
+		"cosmos1reservation",
+		"exit:127.0.0.1_8084",
+		session,
+		settlement.SessionSettlement{
+			SettlementID:  "set-sid-close-reservation-subject",
+			SessionID:     "sid-close-reservation-subject",
+			SubjectID:     "cosmos1reservation",
+			ChargedMicros: 1000,
+			Currency:      "TDPNC",
+			Status:        settlement.OperationStatusConfirmed,
+		},
+	)
+	if stub.lastRewardIssue.TrafficProofRef != expectedProof {
+		t.Fatalf("traffic proof=%q want reservation-subject bound proof %q", stub.lastRewardIssue.TrafficProofRef, expectedProof)
+	}
+	claimsSubjectProof := exitSessionTrafficProofRef(
+		"sid-close-reservation-subject",
+		"wallet:cosmos1reservation",
+		"exit:127.0.0.1_8084",
+		session,
+		settlement.SessionSettlement{
+			SettlementID:  "set-sid-close-reservation-subject",
+			SessionID:     "sid-close-reservation-subject",
+			SubjectID:     "cosmos1reservation",
+			ChargedMicros: 1000,
+			Currency:      "TDPNC",
+			Status:        settlement.OperationStatusConfirmed,
+		},
+	)
+	if stub.lastRewardIssue.TrafficProofRef == claimsSubjectProof {
+		t.Fatalf("traffic proof ref used claims subject instead of reservation subject: %q", stub.lastRewardIssue.TrafficProofRef)
 	}
 }
 
@@ -697,25 +1035,96 @@ func signedPathOpenRequestBody(t *testing.T, req proto.PathOpenRequest, claims c
 	req.Token = token
 
 	tokenProof, err := crypto.SignPathOpenProof(popPriv, crypto.PathOpenProofInput{
-		Token:           req.Token,
-		ExitID:          req.ExitID,
-		MiddleRelayID:   req.MiddleRelayID,
-		TokenProofNonce: req.TokenProofNonce,
-		ClientInnerPub:  req.ClientInnerPub,
-		Transport:       req.Transport,
-		RequestedMTU:    req.RequestedMTU,
-		RequestedRegion: req.RequestedRegion,
+		Token:                req.Token,
+		ExitID:               req.ExitID,
+		MiddleRelayID:        req.MiddleRelayID,
+		PathProfile:          req.PathProfile,
+		SessionID:            req.SessionID,
+		TokenProofNonce:      req.TokenProofNonce,
+		ReservationID:        req.ReservationID,
+		ReservationSessionID: req.ReservationSessionID,
+		ReservationSubjectID: req.ReservationSubjectID,
+		ClientInnerPub:       req.ClientInnerPub,
+		Transport:            req.Transport,
+		RequestedMTU:         req.RequestedMTU,
+		RequestedRegion:      req.RequestedRegion,
+		ClientRoute:          pathRouteAssertionProofInput(req.ClientRouteAssertion),
 	})
 	if err != nil {
 		t.Fatalf("sign path-open proof: %v", err)
 	}
 	req.TokenProof = tokenProof
+	if req.EntryRouteAssertion != nil && strings.TrimSpace(req.EntryRouteAssertion.Signature) == "" {
+		bindEntryRouteAssertionToRequestForTest(req.EntryRouteAssertion, req)
+	}
 
 	body, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("marshal path-open request: %v", err)
 	}
 	return body
+}
+
+func signedPathOpenRequestBodyWithEntrySigner(t *testing.T, req proto.PathOpenRequest, claims crypto.CapabilityClaims, issuerPriv ed25519.PrivateKey, popPriv ed25519.PrivateKey, entryPriv ed25519.PrivateKey) []byte {
+	t.Helper()
+
+	token, err := crypto.SignClaims(claims, issuerPriv)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	req.Token = token
+
+	tokenProof, err := crypto.SignPathOpenProof(popPriv, crypto.PathOpenProofInput{
+		Token:                req.Token,
+		ExitID:               req.ExitID,
+		MiddleRelayID:        req.MiddleRelayID,
+		PathProfile:          req.PathProfile,
+		SessionID:            req.SessionID,
+		TokenProofNonce:      req.TokenProofNonce,
+		ReservationID:        req.ReservationID,
+		ReservationSessionID: req.ReservationSessionID,
+		ReservationSubjectID: req.ReservationSubjectID,
+		ClientInnerPub:       req.ClientInnerPub,
+		Transport:            req.Transport,
+		RequestedMTU:         req.RequestedMTU,
+		RequestedRegion:      req.RequestedRegion,
+		ClientRoute:          pathRouteAssertionProofInput(req.ClientRouteAssertion),
+	})
+	if err != nil {
+		t.Fatalf("sign path-open proof: %v", err)
+	}
+	req.TokenProof = tokenProof
+	if req.EntryRouteAssertion != nil {
+		bindEntryRouteAssertionToRequestForTest(req.EntryRouteAssertion, req)
+		assertion, err := crypto.SignPathRouteAssertion(entryPriv, *req.EntryRouteAssertion)
+		if err != nil {
+			t.Fatalf("sign entry route assertion: %v", err)
+		}
+		req.EntryRouteAssertion = &assertion
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal path-open request: %v", err)
+	}
+	return body
+}
+
+func bindEntryRouteAssertionToRequestForTest(assertion *proto.PathRouteAssertion, req proto.PathOpenRequest) {
+	if assertion == nil {
+		return
+	}
+	assertion.SessionID = strings.TrimSpace(req.SessionID)
+	assertion.ReservationID = strings.TrimSpace(req.ReservationID)
+	assertion.ReservationSessionID = strings.TrimSpace(req.ReservationSessionID)
+	assertion.ReservationSubjectID = strings.TrimSpace(req.ReservationSubjectID)
+	assertion.TokenProofNonce = strings.TrimSpace(req.TokenProofNonce)
+	assertion.ClientInnerPub = strings.TrimSpace(req.ClientInnerPub)
+	assertion.Transport = strings.TrimSpace(req.Transport)
+	assertion.RequestedMTU = req.RequestedMTU
+	assertion.RequestedRegion = strings.TrimSpace(req.RequestedRegion)
+	assertion.TokenSHA256 = crypto.PathRouteAssertionBindingHash(req.Token)
+	assertion.TokenProofSHA256 = crypto.PathRouteAssertionBindingHash(req.TokenProof)
 }
 
 func TestHandlePathOpenRejectsExitIdentityMismatchInEnforceMode(t *testing.T) {
@@ -737,6 +1146,11 @@ func TestHandlePathOpenRejectsExitIdentityMismatchInEnforceMode(t *testing.T) {
 		RequestedMTU:    1280,
 		RequestedRegion: "local",
 		SessionID:       "sid-open-exit-id-mismatch",
+		EntryRouteAssertion: &proto.PathRouteAssertion{
+			EntryRelayID:  "entry-local-1",
+			MiddleRelayID: "middle-local-1",
+			ExitRelayID:   "exit-remote-2",
+		},
 	}
 	claims := crypto.CapabilityClaims{
 		Issuer:     "issuer-local",
@@ -751,15 +1165,17 @@ func TestHandlePathOpenRejectsExitIdentityMismatchInEnforceMode(t *testing.T) {
 	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
 
 	s := &Service{
-		dataMode:      "json",
-		betaStrict:    true,
-		exitRelayID:   "exit-local-1",
-		issuerPubs:    map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
-		issuerPub:     issuerPub,
-		sessions:      map[string]sessionInfo{},
-		enforcer:      policy.NewEnforcer(),
-		revokedJTI:    map[string]int64{},
-		minTokenEpoch: map[string]int64{},
+		dataMode:         "json",
+		betaStrict:       true,
+		exitRelayID:      "exit-local-1",
+		issuerPubs:       map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:        issuerPub,
+		sessions:         map[string]sessionInfo{},
+		enforcer:         policy.NewEnforcer(),
+		revokedJTI:       map[string]int64{},
+		minTokenEpoch:    map[string]int64{},
+		egressBackend:    "command",
+		egressConfigured: true,
 	}
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
 	rr := httptest.NewRecorder()
@@ -802,6 +1218,11 @@ func TestHandlePathOpenRejectsWhenStrictBindingExitRelayIDUnset(t *testing.T) {
 		RequestedMTU:    1280,
 		RequestedRegion: "local",
 		SessionID:       "sid-open-exit-id-unset",
+		EntryRouteAssertion: &proto.PathRouteAssertion{
+			EntryRelayID:  "entry-local-1",
+			MiddleRelayID: "middle-local-1",
+			ExitRelayID:   "exit-local-1",
+		},
 	}
 	claims := crypto.CapabilityClaims{
 		Issuer:     "issuer-local",
@@ -816,15 +1237,17 @@ func TestHandlePathOpenRejectsWhenStrictBindingExitRelayIDUnset(t *testing.T) {
 	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
 
 	s := &Service{
-		dataMode:      "json",
-		betaStrict:    true,
-		exitRelayID:   " ",
-		issuerPubs:    map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
-		issuerPub:     issuerPub,
-		sessions:      map[string]sessionInfo{},
-		enforcer:      policy.NewEnforcer(),
-		revokedJTI:    map[string]int64{},
-		minTokenEpoch: map[string]int64{},
+		dataMode:         "json",
+		betaStrict:       true,
+		exitRelayID:      " ",
+		issuerPubs:       map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:        issuerPub,
+		sessions:         map[string]sessionInfo{},
+		enforcer:         policy.NewEnforcer(),
+		revokedJTI:       map[string]int64{},
+		minTokenEpoch:    map[string]int64{},
+		egressBackend:    "command",
+		egressConfigured: true,
 	}
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
 	rr := httptest.NewRecorder()
@@ -857,6 +1280,10 @@ func TestHandlePathOpenAcceptsMatchingExitIdentityInEnforceMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pop keygen: %v", err)
 	}
+	entryPub, entryPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("entry keygen: %v", err)
+	}
 
 	req := proto.PathOpenRequest{
 		ExitID:          "exit-local-1",
@@ -867,6 +1294,11 @@ func TestHandlePathOpenAcceptsMatchingExitIdentityInEnforceMode(t *testing.T) {
 		RequestedMTU:    1280,
 		RequestedRegion: "local",
 		SessionID:       "sid-open-exit-id-match",
+		EntryRouteAssertion: &proto.PathRouteAssertion{
+			EntryRelayID:  "entry-local-1",
+			MiddleRelayID: "middle-local-1",
+			ExitRelayID:   "exit-local-1",
+		},
 	}
 	claims := crypto.CapabilityClaims{
 		Issuer:     "issuer-local",
@@ -878,18 +1310,23 @@ func TestHandlePathOpenAcceptsMatchingExitIdentityInEnforceMode(t *testing.T) {
 		TokenID:    "jti-open-exit-id-match",
 		ExitScope:  []string{"exit-alt-1", req.ExitID},
 	}
-	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
+	body := signedPathOpenRequestBodyWithEntrySigner(t, req, claims, issuerPriv, popPriv, entryPriv)
 
 	s := &Service{
-		dataMode:      "json",
-		betaStrict:    true,
-		exitRelayID:   req.ExitID,
-		issuerPubs:    map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
-		issuerPub:     issuerPub,
-		sessions:      map[string]sessionInfo{},
-		enforcer:      policy.NewEnforcer(),
-		revokedJTI:    map[string]int64{},
-		minTokenEpoch: map[string]int64{},
+		dataMode:         "json",
+		betaStrict:       true,
+		exitRelayID:      req.ExitID,
+		issuerPubs:       map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:        issuerPub,
+		sessions:         map[string]sessionInfo{},
+		enforcer:         policy.NewEnforcer(),
+		revokedJTI:       map[string]int64{},
+		minTokenEpoch:    map[string]int64{},
+		egressBackend:    "command",
+		egressConfigured: true,
+		trustedEntryRouteAssertionPubs: map[string]ed25519.PublicKey{
+			crypto.EncodeEd25519PublicKey(entryPub): entryPub,
+		},
 	}
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
 	rr := httptest.NewRecorder()
@@ -913,6 +1350,66 @@ func TestHandlePathOpenAcceptsMatchingExitIdentityInEnforceMode(t *testing.T) {
 	}
 	if _, exists := s.sessions[req.SessionID]; !exists {
 		t.Fatalf("expected accepted path-open to create session")
+	}
+}
+
+func TestHandlePathOpenRejectsCommandEgressNotReady(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("pop keygen: %v", err)
+	}
+
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-egress-1",
+		TokenProofNonce: "nonce-egress-not-ready",
+		ClientInnerPub:  crypto.EncodeEd25519PublicKey(popPub),
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		SessionID:       "sid-egress-not-ready",
+	}
+	claims := crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "exit",
+		TokenType:  crypto.TokenTypeClientAccess,
+		CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(2 * time.Minute).Unix(),
+		TokenID:    "jti-egress-not-ready",
+		ExitScope:  []string{req.ExitID},
+	}
+	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
+
+	s := &Service{
+		dataMode:         "json",
+		egressBackend:    "command",
+		egressConfigured: false,
+		issuerPubs:       map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:        issuerPub,
+		sessions:         map[string]sessionInfo{},
+		enforcer:         policy.NewEnforcer(),
+		revokedJTI:       map[string]int64{},
+		minTokenEpoch:    map[string]int64{},
+	}
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathOpenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Accepted || resp.Reason != "exit egress not ready" {
+		t.Fatalf("expected egress not ready rejection, got %+v", resp)
+	}
+	if _, exists := s.sessions[req.SessionID]; exists {
+		t.Fatalf("expected egress-not-ready path-open to avoid creating session")
 	}
 }
 
@@ -1198,6 +1695,272 @@ func TestHandlePathOpenAcceptsOpaqueModeWhenPortPolicyClaimsAbsent(t *testing.T)
 	}
 }
 
+func TestHandlePathOpenRollsBackProofNonceAfterWGConfigureFailure(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("pop keygen: %v", err)
+	}
+	clientInnerPub := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-local-1",
+		MiddleRelayID:   "middle-local-1",
+		TokenProofNonce: "nonce-open-wg-config-retry",
+		ClientInnerPub:  clientInnerPub,
+		Transport:       "wireguard-udp",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		SessionID:       "sid-open-wg-config-retry",
+	}
+	claims := crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "exit",
+		TokenType:  crypto.TokenTypeClientAccess,
+		CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
+		Transport:  "wireguard-udp",
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(2 * time.Minute).Unix(),
+		TokenID:    "jti-open-wg-config-retry",
+		ExitScope:  []string{req.ExitID},
+	}
+	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
+	wgManager := &pathOpenFlakyWGManager{
+		configureSessionErrs: []error{errors.New("wg temporarily unavailable")},
+	}
+	s := &Service{
+		dataMode:              "opaque",
+		exitRelayID:           req.ExitID,
+		issuerPubs:            map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:             issuerPub,
+		sessions:              map[string]sessionInfo{},
+		enforcer:              policy.NewEnforcer(),
+		tokenProofReplayGuard: true,
+		proofNonceSeen:        make(map[string]map[string]int64),
+		wgManager:             wgManager,
+	}
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+	firstRR := httptest.NewRecorder()
+	s.handlePathOpen(firstRR, firstReq)
+	if firstRR.Code != http.StatusOK {
+		t.Fatalf("expected first HTTP 200, got %d body=%s", firstRR.Code, firstRR.Body.String())
+	}
+	var firstResp proto.PathOpenResponse
+	if err := json.Unmarshal(firstRR.Body.Bytes(), &firstResp); err != nil {
+		t.Fatalf("decode first response: %v", err)
+	}
+	if firstResp.Accepted {
+		t.Fatalf("expected first path-open to fail wg setup, got %+v", firstResp)
+	}
+	if firstResp.Reason != "wg configure failed" {
+		t.Fatalf("first reason=%q want=wg configure failed", firstResp.Reason)
+	}
+	if _, exists := s.sessions[req.SessionID]; exists {
+		t.Fatalf("expected failed path-open to remove tentative session")
+	}
+	if seen := s.proofNonceSeen[claims.TokenID]; seen != nil {
+		if _, exists := seen[req.TokenProofNonce]; exists {
+			t.Fatalf("expected failed path-open to release token proof nonce")
+		}
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+	secondRR := httptest.NewRecorder()
+	s.handlePathOpen(secondRR, secondReq)
+	if secondRR.Code != http.StatusOK {
+		t.Fatalf("expected second HTTP 200, got %d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	var secondResp proto.PathOpenResponse
+	if err := json.Unmarshal(secondRR.Body.Bytes(), &secondResp); err != nil {
+		t.Fatalf("decode second response: %v", err)
+	}
+	if !secondResp.Accepted {
+		t.Fatalf("expected retry with same proof nonce to succeed after transient wg failure, got %+v", secondResp)
+	}
+	if got := wgManager.ConfigureSessionCalls(); got != 2 {
+		t.Fatalf("expected two wg configure attempts, got %d", got)
+	}
+	if _, exists := s.sessions[req.SessionID]; !exists {
+		t.Fatalf("expected accepted retry to create session")
+	}
+	if seen := s.proofNonceSeen[claims.TokenID]; seen == nil {
+		t.Fatalf("expected accepted retry to retain token proof nonce")
+	} else if _, exists := seen[req.TokenProofNonce]; !exists {
+		t.Fatalf("expected accepted retry nonce to remain consumed")
+	}
+
+	thirdReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+	thirdRR := httptest.NewRecorder()
+	s.handlePathOpen(thirdRR, thirdReq)
+	if thirdRR.Code != http.StatusOK {
+		t.Fatalf("expected third HTTP 200, got %d body=%s", thirdRR.Code, thirdRR.Body.String())
+	}
+	var thirdResp proto.PathOpenResponse
+	if err := json.Unmarshal(thirdRR.Body.Bytes(), &thirdResp); err != nil {
+		t.Fatalf("decode third response: %v", err)
+	}
+	if thirdResp.Accepted {
+		t.Fatalf("expected replay after accepted retry to be rejected, got %+v", thirdResp)
+	}
+	if thirdResp.Reason != "token proof replay" {
+		t.Fatalf("third reason=%q want=token proof replay", thirdResp.Reason)
+	}
+}
+
+func TestHandlePathOpenDoesNotReserveLegacySettlementWhenWGConfigureFails(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("pop keygen: %v", err)
+	}
+	clientInnerPub := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-local-1",
+		MiddleRelayID:   "middle-local-1",
+		TokenProofNonce: "nonce-open-wg-config-no-reserve",
+		ClientInnerPub:  clientInnerPub,
+		Transport:       "wireguard-udp",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		SessionID:       "sid-open-wg-config-no-reserve",
+	}
+	claims := crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "exit",
+		TokenType:  crypto.TokenTypeClientAccess,
+		CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
+		Subject:    "client-wg-config-no-reserve",
+		Transport:  "wireguard-udp",
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(2 * time.Minute).Unix(),
+		TokenID:    "jti-open-wg-config-no-reserve",
+		ExitScope:  []string{req.ExitID},
+	}
+	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
+	settlementStub := &settlementServiceStub{}
+	s := &Service{
+		dataMode:    "opaque",
+		exitRelayID: req.ExitID,
+		issuerPubs:  map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:   issuerPub,
+		sessions:    map[string]sessionInfo{},
+		enforcer:    policy.NewEnforcer(),
+		wgManager: &pathOpenFlakyWGManager{
+			configureSessionErrs: []error{errors.New("wg configure failed for regression")},
+		},
+		settlement: settlementStub,
+	}
+
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathOpenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Accepted {
+		t.Fatalf("expected path-open to fail wg setup, got %+v", resp)
+	}
+	if resp.Reason != "wg configure failed" {
+		t.Fatalf("reason=%q want=wg configure failed", resp.Reason)
+	}
+	if settlementStub.reserveFundsCalls != 0 {
+		t.Fatalf("expected no legacy settlement reservation on wg configure failure, got %d", settlementStub.reserveFundsCalls)
+	}
+	if settlementStub.recordUsageCalls != 0 || settlementStub.settleSessionCalls != 0 {
+		t.Fatalf("expected no settlement finalize rollback on unreserved wg failure, got usage=%d settle=%d", settlementStub.recordUsageCalls, settlementStub.settleSessionCalls)
+	}
+	if _, exists := s.sessions[req.SessionID]; exists {
+		t.Fatalf("expected failed path-open to remove tentative session")
+	}
+}
+
+func TestHandlePathOpenRejectsTokenTransportMismatch(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("pop keygen: %v", err)
+	}
+
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-local-1",
+		MiddleRelayID:   "middle-local-1",
+		TokenProofNonce: "nonce-open-transport-mismatch",
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		SessionID:       "sid-open-transport-mismatch",
+	}
+	claims := crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "exit",
+		TokenType:  crypto.TokenTypeClientAccess,
+		CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
+		Transport:  "wireguard-udp",
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(2 * time.Minute).Unix(),
+		TokenID:    "jti-open-transport-mismatch",
+		ExitScope:  []string{req.ExitID},
+	}
+	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
+
+	s := &Service{
+		dataMode:      "json",
+		exitRelayID:   req.ExitID,
+		issuerPubs:    map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:     issuerPub,
+		sessions:      map[string]sessionInfo{},
+		enforcer:      policy.NewEnforcer(),
+		revokedJTI:    map[string]int64{},
+		minTokenEpoch: map[string]int64{},
+	}
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathOpenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Accepted {
+		t.Fatalf("expected transport mismatch rejection, got %+v", resp)
+	}
+	if resp.Reason != "token transport mismatch" {
+		t.Fatalf("reason=%q want=token transport mismatch", resp.Reason)
+	}
+	if _, exists := s.sessions[req.SessionID]; exists {
+		t.Fatalf("expected rejected path-open to avoid creating session")
+	}
+}
+
+func TestValidatePathOpenTransportClaimRequiresBoundTransportInProd(t *testing.T) {
+	if err := validatePathOpenTransportClaim("wireguard-udp", crypto.CapabilityClaims{}, true); err == nil || err.Error() != "token transport required" {
+		t.Fatalf("err=%v want token transport required", err)
+	}
+	if err := validatePathOpenTransportClaim("wireguard-udp", crypto.CapabilityClaims{Transport: "wireguard-udp"}, true); err != nil {
+		t.Fatalf("expected bound transport to pass prod validation, got %v", err)
+	}
+	if err := validatePathOpenTransportClaim("wireguard-udp", crypto.CapabilityClaims{}, false); err != nil {
+		t.Fatalf("expected non-prod legacy transport compatibility, got %v", err)
+	}
+}
+
 func TestHandlePathOpenRejectsDuplicateSessionID(t *testing.T) {
 	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
@@ -1292,6 +2055,156 @@ func TestEffectiveMaxActiveSessionsDefaults(t *testing.T) {
 	s := &Service{}
 	if got := s.effectiveMaxActiveSessions(); got != defaultMaxActiveSessions {
 		t.Fatalf("effectiveMaxActiveSessions()=%d want=%d", got, defaultMaxActiveSessions)
+	}
+}
+
+func TestAllocateClientInnerIPExhaustsBeforeActiveCollision(t *testing.T) {
+	s := &Service{
+		sessions:      map[string]sessionInfo{},
+		ipAllocCursor: clientInnerIPFirstOctet,
+	}
+
+	seen := make(map[string]struct{}, clientInnerIPPoolSize)
+	firstAllocated := ""
+	for i := 0; i < clientInnerIPPoolSize; i++ {
+		ip, err := s.allocateClientInnerIP()
+		if err != nil {
+			t.Fatalf("allocate #%d failed: %v", i+1, err)
+		}
+		if _, exists := seen[ip]; exists {
+			t.Fatalf("allocator reused active ip %s before exhaustion", ip)
+		}
+		if firstAllocated == "" {
+			firstAllocated = ip
+		}
+		seen[ip] = struct{}{}
+	}
+
+	if _, err := s.allocateClientInnerIP(); !errors.Is(err, errClientInnerIPPoolExhausted) {
+		t.Fatalf("expected pool exhaustion after %d allocations, got %v", clientInnerIPPoolSize, err)
+	}
+
+	s.releaseClientInnerIP(firstAllocated)
+	reused, err := s.allocateClientInnerIP()
+	if err != nil {
+		t.Fatalf("expected released ip to be reusable: %v", err)
+	}
+	if reused != firstAllocated {
+		t.Fatalf("expected released ip %s to be reused after wrap, got %s", firstAllocated, reused)
+	}
+}
+
+func TestTeardownSessionReleasesClientInnerIP(t *testing.T) {
+	clientIP := formatClientInnerIP(clientInnerIPFirstOctet)
+	s := &Service{
+		wgInterface:             "wg-test0",
+		wgManager:               &sequentialWGManager{},
+		ipAllocCursor:           clientInnerIPFirstOctet,
+		allocatedClientInnerIPs: map[string]struct{}{clientIP: {}},
+		sessions: map[string]sessionInfo{
+			"sid-release-ip": {
+				claims:        crypto.CapabilityClaims{ExpiryUnix: time.Now().Add(time.Minute).Unix()},
+				seenNonces:    map[uint64]struct{}{},
+				transport:     "wireguard-udp",
+				sessionKeyID:  "sk-release-ip",
+				clientInnerIP: clientIP,
+				clientPubKey:  base64.StdEncoding.EncodeToString(make([]byte, 32)),
+			},
+		},
+	}
+
+	teardown := s.teardownSession(context.Background(), "sid-release-ip", sessionTeardownOptions{})
+	if !teardown.closed || teardown.wgRemoveErr != nil {
+		t.Fatalf("expected teardown to close cleanly, got %+v", teardown)
+	}
+	if _, active := s.allocatedClientInnerIPs[clientIP]; active {
+		t.Fatalf("expected teardown to release active client inner ip %s", clientIP)
+	}
+	reused, err := s.allocateClientInnerIP()
+	if err != nil {
+		t.Fatalf("expected released teardown ip to be reusable: %v", err)
+	}
+	if reused != clientIP {
+		t.Fatalf("expected released teardown ip %s to be reused, got %s", clientIP, reused)
+	}
+}
+
+func TestHandlePathOpenRejectsWhenClientInnerIPPoolExhausted(t *testing.T) {
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	popPub, popPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("pop keygen: %v", err)
+	}
+
+	clientInnerPub := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-local-1",
+		MiddleRelayID:   "middle-local-1",
+		TokenProofNonce: "nonce-open-ip-pool-exhausted",
+		ClientInnerPub:  clientInnerPub,
+		Transport:       "wireguard-udp",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		SessionID:       "sid-open-ip-pool-exhausted",
+	}
+	claims := crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "exit",
+		TokenType:  crypto.TokenTypeClientAccess,
+		CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
+		Transport:  "wireguard-udp",
+		Tier:       1,
+		ExpiryUnix: time.Now().Add(2 * time.Minute).Unix(),
+		TokenID:    "jti-open-ip-pool-exhausted",
+		ExitScope:  []string{req.ExitID},
+	}
+	body := signedPathOpenRequestBody(t, req, claims, issuerPriv, popPriv)
+
+	activeSessions := make(map[string]sessionInfo, clientInnerIPPoolSize)
+	for octet := clientInnerIPFirstOctet; octet < clientInnerIPAfterLastOctet; octet++ {
+		activeSessions[fmt.Sprintf("sid-active-ip-%d", octet)] = sessionInfo{
+			claims:        crypto.CapabilityClaims{ExpiryUnix: time.Now().Add(2 * time.Minute).Unix()},
+			seenNonces:    map[uint64]struct{}{},
+			transport:     "wireguard-udp",
+			sessionKeyID:  fmt.Sprintf("sk-active-ip-%d", octet),
+			clientInnerIP: formatClientInnerIP(octet),
+			clientPubKey:  clientInnerPub,
+		}
+	}
+	s := &Service{
+		dataMode:      "opaque",
+		exitRelayID:   req.ExitID,
+		issuerPubs:    map[string]ed25519.PublicKey{issuerKeyID(issuerPub): issuerPub},
+		issuerPub:     issuerPub,
+		sessions:      activeSessions,
+		enforcer:      policy.NewEnforcer(),
+		wgManager:     wg.NewNoopManager(),
+		revokedJTI:    map[string]int64{},
+		minTokenEpoch: map[string]int64{},
+	}
+
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, httpReq)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp proto.PathOpenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Accepted {
+		t.Fatalf("expected exhausted pool rejection, got %+v", resp)
+	}
+	if resp.Reason != errClientInnerIPPoolExhausted.Error() {
+		t.Fatalf("reason=%q want=%q", resp.Reason, errClientInnerIPPoolExhausted.Error())
+	}
+	if _, exists := s.sessions[req.SessionID]; exists {
+		t.Fatalf("expected exhausted path-open not to create a session")
 	}
 }
 
@@ -1622,6 +2535,29 @@ func hasSettlementAdapterRequest(requests []settlementAdapterRequest, path strin
 	return false
 }
 
+func writeConfirmedReservationStatus(w http.ResponseWriter, r *http.Request) {
+	reservationID := strings.TrimSpace(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:])
+	sessionID := strings.TrimPrefix(reservationID, "res-")
+	subjectID := "subject-env-test"
+	switch sessionID {
+	case "sess-shadow-mirror":
+		subjectID = "subject-shadow-mirror"
+	case "sess-shadow-signedtx":
+		subjectID = "subject-shadow-signedtx"
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok": true,
+		"reservation": map[string]any{
+			"ReservationID": reservationID,
+			"SessionID":     sessionID,
+			"SubjectID":     subjectID,
+			"AmountMicros":  int64(200000),
+			"Currency":      "TDPNC",
+			"Status":        "confirmed",
+		},
+	})
+}
+
 func runSettlementForAdapterEnvTest(t *testing.T, svc settlement.Service, sessionID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -1746,8 +2682,12 @@ func TestSettlementServiceFromEnvDualNativeCurrencySettlementCoherence(t *testin
 }
 
 func TestNewSettlementServiceFromEnvCosmosDefaultHTTPSubmitMode(t *testing.T) {
-	seenCh := make(chan settlementAdapterRequest, 1)
+	seenCh := make(chan settlementAdapterRequest, 2)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/x/vpnbilling/reservations/") {
+			writeConfirmedReservationStatus(w, r)
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		seenCh <- settlementAdapterRequest{
 			path: r.URL.Path,
@@ -1774,22 +2714,22 @@ func TestNewSettlementServiceFromEnvCosmosDefaultHTTPSubmitMode(t *testing.T) {
 	svc := newSettlementServiceFromEnv()
 	runSettlementForAdapterEnvTest(t, svc, "sess-http-default")
 
-	select {
-	case got := <-seenCh:
-		if got.path != "/x/vpnbilling/settlements" {
-			t.Fatalf("expected default HTTP submit path, got %q", got.path)
-		}
-		if got.auth != "Bearer api-http-1" {
-			t.Fatalf("expected bearer auth preserved, got %q", got.auth)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for HTTP-mode settlement submit")
+	requests := collectSettlementAdapterRequests(t, seenCh, 2)
+	if !hasSettlementAdapterRequest(requests, "/x/vpnbilling/reservations", "Bearer api-http-1") {
+		t.Fatalf("expected default HTTP fund reservation submit, got %+v", requests)
+	}
+	if !hasSettlementAdapterRequest(requests, "/x/vpnbilling/settlements", "Bearer api-http-1") {
+		t.Fatalf("expected default HTTP settlement submit, got %+v", requests)
 	}
 }
 
 func TestNewSettlementServiceFromEnvCosmosSignedTxModeUsesConfiguredFields(t *testing.T) {
-	seenCh := make(chan settlementAdapterRequest, 1)
+	seenCh := make(chan settlementAdapterRequest, 2)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/x/vpnbilling/reservations/") {
+			writeConfirmedReservationStatus(w, r)
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		seenCh <- settlementAdapterRequest{
 			path: r.URL.Path,
@@ -1818,8 +2758,10 @@ func TestNewSettlementServiceFromEnvCosmosSignedTxModeUsesConfiguredFields(t *te
 	svc := newSettlementServiceFromEnv()
 	runSettlementForAdapterEnvTest(t, svc, "sess-signed-env")
 
-	select {
-	case got := <-seenCh:
+	requests := collectSettlementAdapterRequests(t, seenCh, 2)
+	var settlementReq *settlementAdapterRequest
+	for i := range requests {
+		got := requests[i]
 		if got.path != "/custom/tx/broadcast" {
 			t.Fatalf("expected signed-tx broadcast path override, got %q", got.path)
 		}
@@ -1847,14 +2789,15 @@ func TestNewSettlementServiceFromEnvCosmosSignedTxModeUsesConfiguredFields(t *te
 		if req.Tx.Signer != "signer-env-1" {
 			t.Fatalf("expected signed-tx signer from env, got %q", req.Tx.Signer)
 		}
-		if req.Tx.MessageType != "/x/vpnbilling/settlements" {
-			t.Fatalf("expected settlement message type in signed-tx request, got %q", req.Tx.MessageType)
-		}
 		if req.Tx.Signature == "" {
 			t.Fatalf("expected non-empty signed-tx signature")
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for signed-tx settlement submit")
+		if req.Tx.MessageType == "/x/vpnbilling/settlements" {
+			settlementReq = &got
+		}
+	}
+	if settlementReq == nil {
+		t.Fatalf("expected settlement message type in signed-tx requests, got %+v", requests)
 	}
 }
 
@@ -1919,7 +2862,41 @@ func TestNewSettlementServiceFromEnvCosmosSignedTxMissingRequiredFieldsFallsBack
 
 func TestNewSettlementServiceFromEnvCosmosShadowAdapterMirrorsSubmissions(t *testing.T) {
 	primarySeenCh := make(chan settlementAdapterRequest, 4)
+	rewardIssuedAt := time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC)
+	rewardPeriodStart := time.Date(2026, 4, 20, 0, 0, 0, 0, time.UTC)
+	rewardPeriodEnd := time.Date(2026, 4, 27, 0, 0, 0, 0, time.UTC)
 	primarySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/x/vpnbilling/reservations/") {
+			writeConfirmedReservationStatus(w, r)
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/x/vpnslashing/evidence" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":       true,
+				"evidence": []map[string]any{},
+			})
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/x/vpnrewards/proofs/") {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"proof": map[string]any{
+					"verified":            true,
+					"verifier_id":         "test-exit-proof-registry",
+					"verified_at_utc":     rewardIssuedAt.Add(time.Minute).Format(time.RFC3339),
+					"traffic_proof_ref":   "obj://traffic-proof/shadow-mirror-1",
+					"trust_contract":      string(settlement.RewardProofTrustContractObjectiveTrafficV1),
+					"reward_id":           "rew-shadow-mirror-1",
+					"provider_subject_id": "provider-shadow-mirror-1",
+					"session_id":          "sess-shadow-mirror",
+					"payout_period_start": rewardPeriodStart.Format(time.RFC3339),
+					"payout_period_end":   rewardPeriodEnd.Format(time.RFC3339),
+					"reward_micros":       int64(100),
+					"currency":            "TDPNC",
+					"issued_at":           rewardIssuedAt.Format(time.RFC3339),
+				},
+			})
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		primarySeenCh <- settlementAdapterRequest{
 			path: r.URL.Path,
@@ -1945,6 +2922,7 @@ func TestNewSettlementServiceFromEnvCosmosShadowAdapterMirrorsSubmissions(t *tes
 	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
 	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", primarySrv.URL)
 	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "api-primary-1")
+	t.Setenv("COSMOS_SETTLEMENT_REWARD_PROOF_VERIFIER_ID", "test-exit-proof-registry")
 	t.Setenv("COSMOS_SETTLEMENT_QUEUE_SIZE", "8")
 	t.Setenv("COSMOS_SETTLEMENT_MAX_RETRIES", "1")
 	t.Setenv("COSMOS_SETTLEMENT_BASE_BACKOFF_MS", "5")
@@ -1959,6 +2937,7 @@ func TestNewSettlementServiceFromEnvCosmosShadowAdapterMirrorsSubmissions(t *tes
 
 	t.Setenv("COSMOS_SETTLEMENT_SHADOW_ENDPOINT", shadowSrv.URL)
 	t.Setenv("COSMOS_SETTLEMENT_SHADOW_API_KEY", "api-shadow-1")
+	t.Setenv("COSMOS_SETTLEMENT_SHADOW_REWARD_PROOF_VERIFIER_ID", "test-exit-proof-registry")
 	t.Setenv("COSMOS_SETTLEMENT_SHADOW_QUEUE_SIZE", "8")
 	t.Setenv("COSMOS_SETTLEMENT_SHADOW_MAX_RETRIES", "1")
 	t.Setenv("COSMOS_SETTLEMENT_SHADOW_BASE_BACKOFF_MS", "5")
@@ -2009,8 +2988,12 @@ func TestNewSettlementServiceFromEnvCosmosShadowAdapterMirrorsSubmissions(t *tes
 		RewardID:          "rew-shadow-mirror-1",
 		ProviderSubjectID: "provider-shadow-mirror-1",
 		SessionID:         sessionID,
+		TrafficProofRef:   "obj://traffic-proof/shadow-mirror-1",
+		PayoutPeriodStart: rewardPeriodStart,
+		PayoutPeriodEnd:   rewardPeriodEnd,
 		RewardMicros:      100,
 		Currency:          "TDPNC",
+		IssuedAt:          rewardIssuedAt,
 	})
 	if err != nil {
 		t.Fatalf("issue reward: %v", err)
@@ -2019,9 +3002,12 @@ func TestNewSettlementServiceFromEnvCosmosShadowAdapterMirrorsSubmissions(t *tes
 		t.Fatalf("expected shadow adapter submission marker on reward")
 	}
 
-	primaryRequests := collectSettlementAdapterRequests(t, primarySeenCh, 2)
+	primaryRequests := collectSettlementAdapterRequests(t, primarySeenCh, 3)
 	shadowRequests := collectSettlementAdapterRequests(t, shadowSeenCh, 2)
 
+	if !hasSettlementAdapterRequest(primaryRequests, "/x/vpnbilling/reservations", "Bearer api-primary-1") {
+		t.Fatalf("expected primary reservation submission with primary auth, got %+v", primaryRequests)
+	}
 	if !hasSettlementAdapterRequest(primaryRequests, "/x/vpnbilling/settlements", "Bearer api-primary-1") {
 		t.Fatalf("expected primary settlement submission with primary auth, got %+v", primaryRequests)
 	}
@@ -2051,6 +3037,10 @@ func TestNewSettlementServiceFromEnvCosmosShadowAdapterMirrorsSubmissions(t *tes
 func TestNewSettlementServiceFromEnvCosmosShadowAdapterSignedTxModeUsesConfiguredFields(t *testing.T) {
 	primarySeenCh := make(chan settlementAdapterRequest, 2)
 	primarySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/x/vpnbilling/reservations/") {
+			writeConfirmedReservationStatus(w, r)
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		primarySeenCh <- settlementAdapterRequest{
 			path: r.URL.Path,
@@ -2136,10 +3126,19 @@ func TestNewSettlementServiceFromEnvCosmosShadowAdapterSignedTxModeUsesConfigure
 		t.Fatalf("expected shadow settlement status submitted, got %s", sessionSettlement.ShadowAdapterStatus)
 	}
 
-	primaryRequests := collectSettlementAdapterRequests(t, primarySeenCh, 1)
+	primaryRequests := collectSettlementAdapterRequests(t, primarySeenCh, 2)
 	shadowRequests := collectSettlementAdapterRequests(t, shadowSeenCh, 1)
 
-	primaryReq := primaryRequests[0]
+	var primaryReq *settlementAdapterRequest
+	for i := range primaryRequests {
+		if primaryRequests[i].path == "/x/vpnbilling/settlements" {
+			primaryReq = &primaryRequests[i]
+			break
+		}
+	}
+	if primaryReq == nil {
+		t.Fatalf("expected primary settlement request, got %+v", primaryRequests)
+	}
 	if primaryReq.path != "/x/vpnbilling/settlements" {
 		t.Fatalf("expected canonical primary HTTP path, got %q", primaryReq.path)
 	}
@@ -2237,6 +3236,10 @@ func TestNewSettlementServiceFromEnvCosmosShadowAdapterInitFailurePanicsByDefaul
 func TestNewSettlementServiceFromEnvCosmosShadowAdapterInitFailureWithDangerousOverrideDoesNotBlockPrimary(t *testing.T) {
 	primarySeenCh := make(chan settlementAdapterRequest, 2)
 	primarySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/x/vpnbilling/reservations/") {
+			writeConfirmedReservationStatus(w, r)
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		primarySeenCh <- settlementAdapterRequest{
 			path: r.URL.Path,
@@ -2285,16 +3288,12 @@ func TestNewSettlementServiceFromEnvCosmosShadowAdapterInitFailureWithDangerousO
 	svc := newSettlementServiceFromEnv()
 	runSettlementForAdapterEnvTest(t, svc, "sess-shadow-init-fallback")
 
-	select {
-	case got := <-primarySeenCh:
-		if got.path != "/x/vpnbilling/settlements" {
-			t.Fatalf("expected primary settlement path, got %q", got.path)
-		}
-		if got.auth != "Bearer api-primary-only" {
-			t.Fatalf("expected primary auth header, got %q", got.auth)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for primary settlement submit")
+	primaryRequests := collectSettlementAdapterRequests(t, primarySeenCh, 2)
+	if !hasSettlementAdapterRequest(primaryRequests, "/x/vpnbilling/reservations", "Bearer api-primary-only") {
+		t.Fatalf("expected primary reservation path, got %+v", primaryRequests)
+	}
+	if !hasSettlementAdapterRequest(primaryRequests, "/x/vpnbilling/settlements", "Bearer api-primary-only") {
+		t.Fatalf("expected primary settlement path, got %+v", primaryRequests)
 	}
 
 	select {
@@ -2489,24 +3488,34 @@ func TestVerifyPathOpenTokenProof(t *testing.T) {
 		CNFEd25519: crypto.EncodeEd25519PublicKey(popPub),
 	}
 	req := proto.PathOpenRequest{
-		ExitID:          "exit-local-1",
-		MiddleRelayID:   "middle-local-1",
-		Token:           "tok-1",
-		TokenProofNonce: "nonce-1",
-		ClientInnerPub:  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-		Transport:       "policy-json",
-		RequestedMTU:    1280,
-		RequestedRegion: "local",
+		ExitID:               "exit-local-1",
+		MiddleRelayID:        "middle-local-1",
+		Token:                "tok-1",
+		TokenProofNonce:      "nonce-1",
+		ReservationID:        "res-1",
+		SessionID:            "res-session-1",
+		ReservationSessionID: "res-session-1",
+		ReservationSubjectID: "cosmos1subject",
+		ClientInnerPub:       "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		Transport:            "policy-json",
+		RequestedMTU:         1280,
+		RequestedRegion:      "local",
 	}
 	req.TokenProof, err = crypto.SignPathOpenProof(popPriv, crypto.PathOpenProofInput{
-		Token:           req.Token,
-		ExitID:          req.ExitID,
-		MiddleRelayID:   req.MiddleRelayID,
-		TokenProofNonce: req.TokenProofNonce,
-		ClientInnerPub:  req.ClientInnerPub,
-		Transport:       req.Transport,
-		RequestedMTU:    req.RequestedMTU,
-		RequestedRegion: req.RequestedRegion,
+		Token:                req.Token,
+		ExitID:               req.ExitID,
+		MiddleRelayID:        req.MiddleRelayID,
+		PathProfile:          req.PathProfile,
+		SessionID:            req.SessionID,
+		TokenProofNonce:      req.TokenProofNonce,
+		ReservationID:        req.ReservationID,
+		ReservationSessionID: req.ReservationSessionID,
+		ReservationSubjectID: req.ReservationSubjectID,
+		ClientInnerPub:       req.ClientInnerPub,
+		Transport:            req.Transport,
+		RequestedMTU:         req.RequestedMTU,
+		RequestedRegion:      req.RequestedRegion,
+		ClientRoute:          pathRouteAssertionProofInput(req.ClientRouteAssertion),
 	})
 	if err != nil {
 		t.Fatalf("sign proof: %v", err)
@@ -2518,6 +3527,484 @@ func TestVerifyPathOpenTokenProof(t *testing.T) {
 	req.MiddleRelayID = "middle-other"
 	if err := verifyPathOpenTokenProof(req, claims); err == nil {
 		t.Fatalf("expected token proof verification failure for mutated request")
+	}
+
+	req.MiddleRelayID = "middle-local-1"
+	req.SessionID = "res-session-other"
+	if err := verifyPathOpenTokenProof(req, claims); err == nil {
+		t.Fatalf("expected token proof verification failure for mutated session id")
+	}
+
+	req.SessionID = "res-session-1"
+	req.ReservationSessionID = "res-session-other"
+	if err := verifyPathOpenTokenProof(req, claims); err == nil {
+		t.Fatalf("expected token proof verification failure for mutated reservation session")
+	}
+
+	req.ReservationSessionID = "res-session-1"
+	req.ReservationSubjectID = "cosmos1other"
+	if err := verifyPathOpenTokenProof(req, claims); err == nil {
+		t.Fatalf("expected token proof verification failure for mutated reservation subject")
+	}
+}
+
+func TestValidatePathRouteAssertionsRejectsThreeHopWithoutEntryAssertion(t *testing.T) {
+	req := proto.PathOpenRequest{
+		ExitID:        "exit-local-1",
+		MiddleRelayID: "middle-local-1",
+		PathProfile:   "3hop",
+		ClientRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:   "3hop",
+			EntryRelayID:  "entry-local-1",
+			MiddleRelayID: "middle-local-1",
+			ExitRelayID:   "exit-local-1",
+		},
+	}
+
+	err := validatePathRouteAssertions(req)
+	if err == nil || err.Error() != "route assertion required" {
+		t.Fatalf("expected missing entry assertion rejection, got %v", err)
+	}
+}
+
+func TestValidatePathRouteAssertionsRejectsTwoHopWithoutEntryAssertion(t *testing.T) {
+	req := proto.PathOpenRequest{
+		ExitID:      "exit-local-1",
+		PathProfile: "2hop",
+		ClientRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:  "2hop",
+			EntryRelayID: "entry-local-1",
+			ExitRelayID:  "exit-local-1",
+		},
+	}
+
+	err := validatePathRouteAssertions(req)
+	if err == nil || err.Error() != "route assertion required" {
+		t.Fatalf("expected missing entry assertion rejection, got %v", err)
+	}
+}
+
+func TestValidatePathRouteAssertionsAcceptsTwoHopWithEntryAssertion(t *testing.T) {
+	req := proto.PathOpenRequest{
+		ExitID:      "exit-local-1",
+		PathProfile: "2hop",
+		ClientRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:  "2hop",
+			EntryRelayID: "entry-local-1",
+			ExitRelayID:  "exit-local-1",
+		},
+		EntryRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:  "2hop",
+			EntryRelayID: "entry-local-1",
+			ExitRelayID:  "exit-local-1",
+		},
+	}
+
+	if err := validatePathRouteAssertions(req); err != nil {
+		t.Fatalf("expected 2hop route assertions to validate, got %v", err)
+	}
+}
+
+func TestValidatePathRouteAssertionsRejectsProfileMismatch(t *testing.T) {
+	req := proto.PathOpenRequest{
+		ExitID:        "exit-local-1",
+		MiddleRelayID: "middle-local-1",
+		PathProfile:   "3hop",
+		ClientRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:   "2hop",
+			EntryRelayID:  "entry-local-1",
+			MiddleRelayID: "middle-local-1",
+			ExitRelayID:   "exit-local-1",
+		},
+		EntryRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:   "3hop",
+			EntryRelayID:  "entry-local-1",
+			MiddleRelayID: "middle-local-1",
+			ExitRelayID:   "exit-local-1",
+		},
+	}
+
+	err := validatePathRouteAssertions(req)
+	if err == nil || err.Error() != "route assertion profile mismatch" {
+		t.Fatalf("expected profile mismatch rejection, got %v", err)
+	}
+}
+
+func TestValidatePathRouteAssertionsRejectsReservationMismatch(t *testing.T) {
+	req := proto.PathOpenRequest{
+		ExitID:               "exit-local-1",
+		SessionID:            "res-session-1",
+		ReservationID:        "res-1",
+		ReservationSessionID: "res-session-1",
+		ClientRouteAssertion: &proto.PathRouteAssertion{
+			ExitRelayID:          "exit-local-1",
+			SessionID:            "res-session-1",
+			ReservationID:        "res-other",
+			ReservationSessionID: "res-session-1",
+		},
+	}
+
+	err := validatePathRouteAssertions(req)
+	if err == nil || err.Error() != "client route assertion reservation mismatch" {
+		t.Fatalf("expected reservation mismatch rejection, got %v", err)
+	}
+}
+
+func TestValidatePathOpenReservationRequiresProdReservationAndSessionBinding(t *testing.T) {
+	strict := &Service{prodStrict: true}
+	if err := strict.validatePathOpenReservation(context.Background(), proto.PathOpenRequest{}, crypto.CapabilityClaims{}); err == nil || err.Error() != "reservation required" {
+		t.Fatalf("expected prod reservation required, got %v", err)
+	}
+	err := strict.validatePathOpenReservation(context.Background(), proto.PathOpenRequest{
+		SessionID:            "other-session",
+		ReservationID:        "res-1",
+		ReservationSessionID: "res-session-1",
+		ReservationSubjectID: "cosmos1subject",
+	}, crypto.CapabilityClaims{})
+	if err == nil || err.Error() != "reservation session mismatch" {
+		t.Fatalf("expected reservation session mismatch, got %v", err)
+	}
+	strict.settlement = &settlementServiceStub{
+		fundReservationFn: func(_ context.Context, reservationID string) (settlement.FundReservation, bool, error) {
+			return settlement.FundReservation{
+				ReservationID: "res-1",
+				SessionID:     "res-session-1",
+				SubjectID:     "cosmos1subject",
+				AmountMicros:  200000,
+				Status:        settlement.OperationStatusConfirmed,
+			}, true, nil
+		},
+		fundReservationStatusFn: func(_ context.Context, reservationID string) (settlement.OperationStatus, bool, error) {
+			return settlement.OperationStatusConfirmed, true, nil
+		},
+	}
+	if err := strict.validatePathOpenReservation(context.Background(), proto.PathOpenRequest{
+		SessionID:            "res-session-1",
+		ReservationID:        "res-1",
+		ReservationSessionID: "res-session-1",
+		ReservationSubjectID: "cosmos1subject",
+	}, crypto.CapabilityClaims{Subject: "wallet:cosmos1subject"}); err != nil {
+		t.Fatalf("expected reservation-bound request to pass, got %v", err)
+	}
+	err = strict.validatePathOpenReservation(context.Background(), proto.PathOpenRequest{
+		SessionID:            "res-session-1",
+		ReservationID:        "res-1",
+		ReservationSessionID: "res-session-1",
+		ReservationSubjectID: "cosmos1subject",
+	}, crypto.CapabilityClaims{Subject: "wallet:cosmos1other"})
+	if err == nil || err.Error() != "token subject does not match fund reservation subject" {
+		t.Fatalf("expected token subject mismatch, got %v", err)
+	}
+}
+
+func TestValidatePathOpenReservationRejectsUnknownUnconfirmedAndWrongSubject(t *testing.T) {
+	baseReq := proto.PathOpenRequest{
+		SessionID:            "res-session-1",
+		ReservationID:        "res-1",
+		ReservationSessionID: "res-session-1",
+		ReservationSubjectID: "cosmos1subject",
+	}
+	material := settlement.FundReservation{
+		ReservationID: "res-1",
+		SessionID:     "res-session-1",
+		SubjectID:     "cosmos1subject",
+		AmountMicros:  200000,
+		Status:        settlement.OperationStatusConfirmed,
+	}
+	tests := []struct {
+		name       string
+		material   settlement.FundReservation
+		found      bool
+		status     settlement.OperationStatus
+		statusOK   bool
+		wantReason string
+	}{
+		{
+			name:       "unknown",
+			found:      false,
+			status:     settlement.OperationStatusConfirmed,
+			statusOK:   true,
+			wantReason: "fund reservation unknown",
+		},
+		{
+			name:       "wrong subject",
+			material:   func() settlement.FundReservation { m := material; m.SubjectID = "cosmos1other"; return m }(),
+			found:      true,
+			status:     settlement.OperationStatusConfirmed,
+			statusOK:   true,
+			wantReason: "fund reservation subject mismatch",
+		},
+		{
+			name:       "unconfirmed",
+			material:   material,
+			found:      true,
+			status:     settlement.OperationStatusSubmitted,
+			statusOK:   true,
+			wantReason: "fund reservation not confirmed",
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			strict := &Service{
+				prodStrict: true,
+				settlement: &settlementServiceStub{
+					fundReservationFn: func(_ context.Context, reservationID string) (settlement.FundReservation, bool, error) {
+						return tc.material, tc.found, nil
+					},
+					fundReservationStatusFn: func(_ context.Context, reservationID string) (settlement.OperationStatus, bool, error) {
+						return tc.status, tc.statusOK, nil
+					},
+				},
+			}
+			err := strict.validatePathOpenReservation(context.Background(), baseReq, crypto.CapabilityClaims{Subject: "wallet:cosmos1subject"})
+			if err == nil || err.Error() != tc.wantReason {
+				t.Fatalf("err=%v want %q", err, tc.wantReason)
+			}
+		})
+	}
+}
+
+func TestValidatePathOpenReservationBindsSubjectOutsideProdStrict(t *testing.T) {
+	svc := &Service{
+		settlement: &settlementServiceStub{
+			fundReservationFn: func(_ context.Context, reservationID string) (settlement.FundReservation, bool, error) {
+				return settlement.FundReservation{
+					ReservationID: reservationID,
+					SessionID:     "res-session-1",
+					SubjectID:     "cosmos1subject",
+					AmountMicros:  200000,
+					Status:        settlement.OperationStatusConfirmed,
+				}, true, nil
+			},
+			fundReservationStatusFn: func(_ context.Context, reservationID string) (settlement.OperationStatus, bool, error) {
+				return settlement.OperationStatusConfirmed, true, nil
+			},
+		},
+	}
+	baseReq := proto.PathOpenRequest{
+		SessionID:            "res-session-1",
+		ReservationID:        "res-1",
+		ReservationSessionID: "res-session-1",
+	}
+	if err := svc.validatePathOpenReservation(context.Background(), baseReq, crypto.CapabilityClaims{Subject: "wallet:cosmos1subject"}); err == nil || err.Error() != "fund reservation subject required" {
+		t.Fatalf("expected missing reservation subject to fail outside prod strict, got %v", err)
+	}
+	baseReq.ReservationSubjectID = "cosmos1subject"
+	if err := svc.validatePathOpenReservation(context.Background(), baseReq, crypto.CapabilityClaims{Subject: "wallet:cosmos1other"}); err == nil || err.Error() != "token subject does not match fund reservation subject" {
+		t.Fatalf("expected token subject mismatch outside prod strict, got %v", err)
+	}
+	if err := svc.validatePathOpenReservation(context.Background(), baseReq, crypto.CapabilityClaims{Subject: "wallet:cosmos1subject"}); err != nil {
+		t.Fatalf("expected matching reservation subject outside prod strict to pass, got %v", err)
+	}
+}
+
+func TestReservationSubjectMatchesTokenSubject(t *testing.T) {
+	tests := []struct {
+		name        string
+		reservation string
+		token       string
+		want        bool
+	}{
+		{name: "exact", reservation: "cosmos1subject", token: "cosmos1subject", want: true},
+		{name: "wallet prefix", reservation: "cosmos1subject", token: "wallet:cosmos1subject", want: true},
+		{name: "case folded wallet prefix", reservation: "COSMOS1SUBJECT", token: "wallet:cosmos1subject", want: true},
+		{name: "mismatch", reservation: "cosmos1subject", token: "wallet:cosmos1other", want: false},
+		{name: "empty reservation", reservation: "", token: "wallet:cosmos1subject", want: false},
+		{name: "empty token", reservation: "cosmos1subject", token: "", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := reservationSubjectMatchesTokenSubject(tc.reservation, tc.token); got != tc.want {
+				t.Fatalf("reservationSubjectMatchesTokenSubject(%q,%q)=%t want=%t", tc.reservation, tc.token, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateStrictPathOpenEntryRouteRequiresEntryAssertion(t *testing.T) {
+	strict := &Service{betaStrict: true}
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-local-1",
+		SessionID:       "sid-route-binding",
+		Token:           "tok-route-binding",
+		TokenProof:      "proof-route-binding",
+		TokenProofNonce: "nonce-route-binding",
+		ClientInnerPub:  "client-route-binding",
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+	}
+	if err := strict.validateStrictPathOpenEntryRoute(req); err == nil || err.Error() != "entry route assertion required" {
+		t.Fatalf("err=%v want entry route assertion required", err)
+	}
+
+	req.EntryRouteAssertion = &proto.PathRouteAssertion{EntryRelayID: "entry-local-1"}
+	if err := strict.validateStrictPathOpenEntryRoute(req); err == nil || err.Error() != "entry route assertion incomplete" {
+		t.Fatalf("err=%v want entry route assertion incomplete", err)
+	}
+
+	req.EntryRouteAssertion.ExitRelayID = "exit-local-1"
+	if err := strict.validateStrictPathOpenEntryRoute(req); err == nil || err.Error() != "entry route assertion request binding incomplete" {
+		t.Fatalf("err=%v want entry route assertion request binding incomplete", err)
+	}
+	bindEntryRouteAssertionToRequestForTest(req.EntryRouteAssertion, req)
+	if err := strict.validateStrictPathOpenEntryRoute(req); err == nil || err.Error() != "entry route assertion trusted key unavailable" {
+		t.Fatalf("err=%v want entry route assertion trusted key unavailable", err)
+	}
+
+	nonStrictSignature := &Service{}
+	req.PathProfile = "2hop"
+	req.ReservationID = "res-route-binding"
+	req.ReservationSessionID = "res-session-route-binding"
+	req.SessionID = "res-session-route-binding"
+	bindEntryRouteAssertionToRequestForTest(req.EntryRouteAssertion, req)
+	req.EntryRouteAssertion.ReservationSessionID = "res-session-other"
+	if err := nonStrictSignature.validateStrictPathOpenEntryRoute(req); err == nil || err.Error() != "entry route assertion reservation session mismatch" {
+		t.Fatalf("err=%v want entry route assertion reservation session mismatch", err)
+	}
+}
+
+func TestValidateStrictPathOpenEntryRouteAllowsNonStrictDirectOpen(t *testing.T) {
+	nonStrict := &Service{}
+	req := proto.PathOpenRequest{ExitID: "exit-local-1"}
+	if err := nonStrict.validateStrictPathOpenEntryRoute(req); err != nil {
+		t.Fatalf("non-strict direct open should remain support/lab allowed, got %v", err)
+	}
+}
+
+func TestValidateStrictPathOpenEntryRouteRequiresTrustedSignatureForNonStrictMultiHop(t *testing.T) {
+	nonStrict := &Service{}
+	req := proto.PathOpenRequest{
+		PathProfile:     "2hop",
+		ExitID:          "exit-local-1",
+		SessionID:       "sid-route-nonstrict",
+		Token:           "tok-route-nonstrict",
+		TokenProof:      "proof-route-nonstrict",
+		TokenProofNonce: "nonce-route-nonstrict",
+		ClientInnerPub:  "client-route-nonstrict",
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		EntryRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:  "2hop",
+			EntryRelayID: "entry-local-1",
+			ExitRelayID:  "exit-local-1",
+		},
+	}
+	bindEntryRouteAssertionToRequestForTest(req.EntryRouteAssertion, req)
+	err := nonStrict.validateStrictPathOpenEntryRoute(req)
+	if err == nil || err.Error() != "entry route assertion trusted key unavailable" {
+		t.Fatalf("err=%v want trusted key unavailable", err)
+	}
+}
+
+func TestValidateStrictPathOpenEntryRouteVerifiesTrustedSignatureForNonStrictMultiHop(t *testing.T) {
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	nonStrict := &Service{
+		trustedEntryRouteAssertionPubs: map[string]ed25519.PublicKey{
+			crypto.EncodeEd25519PublicKey(pub): pub,
+		},
+	}
+	req := proto.PathOpenRequest{
+		PathProfile:     "2hop",
+		ExitID:          "exit-local-1",
+		SessionID:       "sid-route-nonstrict-signed",
+		Token:           "tok-route-nonstrict-signed",
+		TokenProof:      "proof-route-nonstrict-signed",
+		TokenProofNonce: "nonce-route-nonstrict-signed",
+		ClientInnerPub:  "client-route-nonstrict-signed",
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		EntryRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:  "2hop",
+			EntryRelayID: "entry-local-1",
+			ExitRelayID:  "exit-local-1",
+		},
+	}
+	bindEntryRouteAssertionToRequestForTest(req.EntryRouteAssertion, req)
+	assertion, err := crypto.SignPathRouteAssertion(priv, *req.EntryRouteAssertion)
+	if err != nil {
+		t.Fatalf("sign assertion: %v", err)
+	}
+	req.EntryRouteAssertion = &assertion
+	if err := nonStrict.validateStrictPathOpenEntryRoute(req); err != nil {
+		t.Fatalf("expected signed non-strict multi-hop entry route assertion to pass, got %v", err)
+	}
+}
+
+func TestValidateStrictPathOpenEntryRouteRequiresTrustedSignatureInProd(t *testing.T) {
+	strict := &Service{prodStrict: true}
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-local-1",
+		SessionID:       "sid-route-prod",
+		Token:           "tok-route-prod",
+		TokenProof:      "proof-route-prod",
+		TokenProofNonce: "nonce-route-prod",
+		ClientInnerPub:  "client-route-prod",
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		EntryRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:   "3hop",
+			EntryRelayID:  "entry-local-1",
+			MiddleRelayID: "middle-local-1",
+			ExitRelayID:   "exit-local-1",
+		},
+	}
+	bindEntryRouteAssertionToRequestForTest(req.EntryRouteAssertion, req)
+	err := strict.validateStrictPathOpenEntryRoute(req)
+	if err == nil || err.Error() != "entry route assertion trusted key unavailable" {
+		t.Fatalf("err=%v want trusted key unavailable", err)
+	}
+}
+
+func TestValidateStrictPathOpenEntryRouteVerifiesTrustedSignature(t *testing.T) {
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	strict := &Service{
+		betaStrict: true,
+		trustedEntryRouteAssertionPubs: map[string]ed25519.PublicKey{
+			crypto.EncodeEd25519PublicKey(pub): pub,
+		},
+	}
+	req := proto.PathOpenRequest{
+		ExitID:          "exit-local-1",
+		MiddleRelayID:   "middle-local-1",
+		SessionID:       "sid-route-signed",
+		Token:           "tok-route-signed",
+		TokenProof:      "proof-route-signed",
+		TokenProofNonce: "nonce-route-signed",
+		ClientInnerPub:  "client-route-signed",
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		EntryRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:   "3hop",
+			EntryRelayID:  "entry-local-1",
+			MiddleRelayID: "middle-local-1",
+			ExitRelayID:   "exit-local-1",
+		},
+	}
+	bindEntryRouteAssertionToRequestForTest(req.EntryRouteAssertion, req)
+	assertion, err := crypto.SignPathRouteAssertion(priv, *req.EntryRouteAssertion)
+	if err != nil {
+		t.Fatalf("sign assertion: %v", err)
+	}
+	req.EntryRouteAssertion = &assertion
+	if err := strict.validateStrictPathOpenEntryRoute(req); err != nil {
+		t.Fatalf("expected signed entry route assertion to pass, got %v", err)
+	}
+
+	req.EntryRouteAssertion.MiddleRelayID = "middle-other"
+	if err := strict.validateStrictPathOpenEntryRoute(req); err == nil || !strings.Contains(err.Error(), "signature invalid") {
+		t.Fatalf("expected mutated entry assertion signature failure, got %v", err)
 	}
 }
 
@@ -2652,6 +4139,54 @@ func TestCheckAndRememberProofNoncePersistsAcrossReload(t *testing.T) {
 	}
 }
 
+func TestCheckAndRememberProofNoncePersistsConcurrentNonces(t *testing.T) {
+	now := time.Now().Unix()
+	storePath := filepath.Join(t.TempDir(), "exit_replay_store.json")
+	claims := crypto.CapabilityClaims{
+		TokenID:    "jti-persist-concurrent",
+		ExpiryUnix: now + 3600,
+	}
+	s := &Service{
+		tokenProofReplayGuard:     true,
+		tokenProofReplayStoreFile: storePath,
+		proofNonceSeen:            make(map[string]map[string]int64),
+	}
+
+	const nonceCount = 24
+	var wg sync.WaitGroup
+	errs := make(chan error, nonceCount)
+	for i := 0; i < nonceCount; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := proto.PathOpenRequest{TokenProofNonce: fmt.Sprintf("nonce-concurrent-%02d", i)}
+			errs <- s.checkAndRememberProofNonce(claims, req, now+int64(i))
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent nonce should pass: %v", err)
+		}
+	}
+
+	loaded := &Service{
+		tokenProofReplayGuard:     true,
+		tokenProofReplayStoreFile: storePath,
+	}
+	if err := loaded.loadTokenProofReplayStore(now + nonceCount + 1); err != nil {
+		t.Fatalf("load replay store: %v", err)
+	}
+	for i := 0; i < nonceCount; i++ {
+		req := proto.PathOpenRequest{TokenProofNonce: fmt.Sprintf("nonce-concurrent-%02d", i)}
+		if err := loaded.checkAndRememberProofNonce(claims, req, now+nonceCount+2); err == nil || !strings.Contains(err.Error(), "replay") {
+			t.Fatalf("expected persisted replay rejection for nonce %d, got %v", i, err)
+		}
+	}
+}
+
 func TestLoadTokenProofReplayStorePrunesExpiredEntries(t *testing.T) {
 	now := time.Now().Unix()
 	storePath := filepath.Join(t.TempDir(), "exit_replay_store.json")
@@ -2740,6 +4275,18 @@ func TestNewReadsTokenProofReplayRedisConfig(t *testing.T) {
 	}
 	if got := s.tokenProofReplayMode(); got != "redis" {
 		t.Fatalf("replay mode=%q want=%q", got, "redis")
+	}
+}
+
+func TestTokenProofReplayRedisKeyEncodesDelimitedComponents(t *testing.T) {
+	prefix := "gpm:test:exit:replay"
+	keyA := tokenProofReplayRedisKey(prefix, "token:with-delimiter", "nonce")
+	keyB := tokenProofReplayRedisKey(prefix, "token", "with-delimiter:nonce")
+	if keyA == keyB {
+		t.Fatalf("redis replay keys collided: %q", keyA)
+	}
+	if strings.Contains(keyA, "token:with-delimiter") || strings.Contains(keyB, "with-delimiter:nonce") {
+		t.Fatalf("redis replay key did not encode delimiter-bearing components: keyA=%q keyB=%q", keyA, keyB)
 	}
 }
 
@@ -3317,6 +4864,73 @@ func TestValidateRuntimeConfigRejectsMalformedProdStrictModeEnv(t *testing.T) {
 	}
 }
 
+func trustedEntryRouteAssertionPubsForTest() map[string]ed25519.PublicKey {
+	return map[string]ed25519.PublicKey{
+		"test": make(ed25519.PublicKey, ed25519.PublicKeySize),
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictRequiresDurableReplayStorage(t *testing.T) {
+	s := &Service{
+		prodStrict:                     true,
+		betaStrict:                     true,
+		exitRelayID:                    "exit-local-1",
+		dataMode:                       "opaque",
+		dataAddr:                       "127.0.0.1:51821",
+		wgBackend:                      "command",
+		wgPrivateKey:                   "/tmp/wg-exit.key",
+		wgKernelProxy:                  true,
+		wgListenPort:                   51831,
+		liveWGMode:                     true,
+		opaqueEcho:                     false,
+		opaqueSinkAddr:                 "127.0.0.1:53011",
+		opaqueSourceAddr:               "127.0.0.1:53012",
+		tokenProofReplayGuard:          true,
+		peerRebindAfter:                0,
+		startupSyncTimeout:             8 * time.Second,
+		trustedEntryRouteAssertionPubs: trustedEntryRouteAssertionPubsForTest(),
+		egressBackend:                  "command",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected prod strict durable replay storage validation failure")
+	}
+	if !strings.Contains(err.Error(), "durable token proof replay storage") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewProdStrictRequiresExplicitReplayStoreFile(t *testing.T) {
+	t.Setenv("BETA_STRICT_MODE", "1")
+	t.Setenv("PROD_STRICT_MODE", "1")
+	t.Setenv("EXIT_TOKEN_PROOF_REPLAY_STORE_FILE", "")
+	t.Setenv("EXIT_RELAY_ID", "exit-local-1")
+	t.Setenv("DATA_PLANE_MODE", "opaque")
+	t.Setenv("WG_BACKEND", "command")
+	t.Setenv("EXIT_WG_PRIVATE_KEY_PATH", "/tmp/wg-exit.key")
+	t.Setenv("EXIT_WG_KERNEL_PROXY", "1")
+	t.Setenv("EXIT_LIVE_WG_MODE", "1")
+	t.Setenv("EXIT_OPAQUE_ECHO", "0")
+	t.Setenv("EXIT_OPAQUE_SINK_ADDR", "127.0.0.1:53011")
+	t.Setenv("EXIT_OPAQUE_SOURCE_ADDR", "127.0.0.1:53012")
+	t.Setenv("EXIT_STARTUP_SYNC_TIMEOUT_SEC", "8")
+	t.Setenv("EXIT_EGRESS_BACKEND", "command")
+	entryPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("entry keygen: %v", err)
+	}
+	t.Setenv("EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS", crypto.EncodeEd25519PublicKey(entryPub))
+
+	s := New()
+	err = s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected prod strict default replay file to fail closed without explicit storage env")
+	}
+	if !strings.Contains(err.Error(), "durable token proof replay storage") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigRejectsStrictModeWithEmptyExitRelayID(t *testing.T) {
 	t.Setenv("BETA_STRICT_MODE", "1")
 	t.Setenv("EXIT_RELAY_ID", " ")
@@ -3347,44 +4961,76 @@ func TestValidateRuntimeConfigAllowsNonStrictModeWithEmptyExitRelayID(t *testing
 
 func TestValidateRuntimeConfigBetaStrictRequiresLiveKernelReplayGuard(t *testing.T) {
 	s := &Service{
-		betaStrict:            true,
-		exitRelayID:           "exit-local-1",
-		dataMode:              "opaque",
-		dataAddr:              "127.0.0.1:51821",
-		wgBackend:             "command",
-		wgPrivateKey:          "/tmp/wg-exit.key",
-		wgKernelProxy:         true,
-		wgListenPort:          51831,
-		liveWGMode:            true,
-		opaqueEcho:            false,
-		opaqueSinkAddr:        "127.0.0.1:53011",
-		opaqueSourceAddr:      "127.0.0.1:53012",
-		tokenProofReplayGuard: true,
-		peerRebindAfter:       0,
-		startupSyncTimeout:    8 * time.Second,
+		betaStrict:                     true,
+		exitRelayID:                    "exit-local-1",
+		dataMode:                       "opaque",
+		dataAddr:                       "127.0.0.1:51821",
+		wgBackend:                      "command",
+		wgPrivateKey:                   "/tmp/wg-exit.key",
+		wgKernelProxy:                  true,
+		wgListenPort:                   51831,
+		liveWGMode:                     true,
+		opaqueEcho:                     false,
+		opaqueSinkAddr:                 "127.0.0.1:53011",
+		opaqueSourceAddr:               "127.0.0.1:53012",
+		tokenProofReplayGuard:          true,
+		peerRebindAfter:                0,
+		startupSyncTimeout:             8 * time.Second,
+		trustedEntryRouteAssertionPubs: trustedEntryRouteAssertionPubsForTest(),
+		egressBackend:                  "command",
 	}
 	if err := s.validateRuntimeConfig(); err != nil {
 		t.Fatalf("expected strict config to validate, got %v", err)
 	}
 }
 
+func TestValidateRuntimeConfigBetaStrictRejectsNoopEgress(t *testing.T) {
+	s := &Service{
+		betaStrict:                     true,
+		exitRelayID:                    "exit-local-1",
+		dataMode:                       "opaque",
+		dataAddr:                       "127.0.0.1:51821",
+		wgBackend:                      "command",
+		wgPrivateKey:                   "/tmp/wg-exit.key",
+		wgKernelProxy:                  true,
+		wgListenPort:                   51831,
+		liveWGMode:                     true,
+		opaqueEcho:                     false,
+		opaqueSinkAddr:                 "127.0.0.1:53011",
+		opaqueSourceAddr:               "127.0.0.1:53012",
+		tokenProofReplayGuard:          true,
+		peerRebindAfter:                0,
+		startupSyncTimeout:             8 * time.Second,
+		trustedEntryRouteAssertionPubs: trustedEntryRouteAssertionPubsForTest(),
+		egressBackend:                  "noop",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode to reject noop egress")
+	}
+	if !strings.Contains(err.Error(), "EXIT_EGRESS_BACKEND=command") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigBetaStrictRejectsNoReplayGuard(t *testing.T) {
 	s := &Service{
-		betaStrict:            true,
-		exitRelayID:           "exit-local-1",
-		dataMode:              "opaque",
-		dataAddr:              "127.0.0.1:51821",
-		wgBackend:             "command",
-		wgPrivateKey:          "/tmp/wg-exit.key",
-		wgKernelProxy:         true,
-		wgListenPort:          51831,
-		liveWGMode:            true,
-		opaqueEcho:            false,
-		opaqueSinkAddr:        "127.0.0.1:53011",
-		opaqueSourceAddr:      "127.0.0.1:53012",
-		tokenProofReplayGuard: false,
-		peerRebindAfter:       0,
-		startupSyncTimeout:    8 * time.Second,
+		betaStrict:                     true,
+		exitRelayID:                    "exit-local-1",
+		dataMode:                       "opaque",
+		dataAddr:                       "127.0.0.1:51821",
+		wgBackend:                      "command",
+		wgPrivateKey:                   "/tmp/wg-exit.key",
+		wgKernelProxy:                  true,
+		wgListenPort:                   51831,
+		liveWGMode:                     true,
+		opaqueEcho:                     false,
+		opaqueSinkAddr:                 "127.0.0.1:53011",
+		opaqueSourceAddr:               "127.0.0.1:53012",
+		tokenProofReplayGuard:          false,
+		peerRebindAfter:                0,
+		startupSyncTimeout:             8 * time.Second,
+		trustedEntryRouteAssertionPubs: trustedEntryRouteAssertionPubsForTest(),
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -3399,21 +5045,22 @@ func TestValidateRuntimeConfigBetaStrictRejectsDangerousOutboundPrivateDNS(t *te
 	t.Setenv(allowDangerousOutboundPrivateDNS, "1")
 
 	s := &Service{
-		betaStrict:            true,
-		exitRelayID:           "exit-local-1",
-		dataMode:              "opaque",
-		dataAddr:              "127.0.0.1:51821",
-		wgBackend:             "command",
-		wgPrivateKey:          "/tmp/wg-exit.key",
-		wgKernelProxy:         true,
-		wgListenPort:          51831,
-		liveWGMode:            true,
-		opaqueEcho:            false,
-		opaqueSinkAddr:        "127.0.0.1:53011",
-		opaqueSourceAddr:      "127.0.0.1:53012",
-		tokenProofReplayGuard: true,
-		peerRebindAfter:       0,
-		startupSyncTimeout:    8 * time.Second,
+		betaStrict:                     true,
+		exitRelayID:                    "exit-local-1",
+		dataMode:                       "opaque",
+		dataAddr:                       "127.0.0.1:51821",
+		wgBackend:                      "command",
+		wgPrivateKey:                   "/tmp/wg-exit.key",
+		wgKernelProxy:                  true,
+		wgListenPort:                   51831,
+		liveWGMode:                     true,
+		opaqueEcho:                     false,
+		opaqueSinkAddr:                 "127.0.0.1:53011",
+		opaqueSourceAddr:               "127.0.0.1:53012",
+		tokenProofReplayGuard:          true,
+		peerRebindAfter:                0,
+		startupSyncTimeout:             8 * time.Second,
+		trustedEntryRouteAssertionPubs: trustedEntryRouteAssertionPubsForTest(),
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -3429,21 +5076,22 @@ func TestValidateRuntimeConfigBetaStrictRejectsDangerousIssuerKeysetReplacement(
 	t.Setenv(allowDangerousIssuerKeysetReplacement, "1")
 
 	s := &Service{
-		betaStrict:            true,
-		exitRelayID:           "exit-local-1",
-		dataMode:              "opaque",
-		dataAddr:              "127.0.0.1:51821",
-		wgBackend:             "command",
-		wgPrivateKey:          "/tmp/wg-exit.key",
-		wgKernelProxy:         true,
-		wgListenPort:          51831,
-		liveWGMode:            true,
-		opaqueEcho:            false,
-		opaqueSinkAddr:        "127.0.0.1:53011",
-		opaqueSourceAddr:      "127.0.0.1:53012",
-		tokenProofReplayGuard: true,
-		peerRebindAfter:       0,
-		startupSyncTimeout:    8 * time.Second,
+		betaStrict:                     true,
+		exitRelayID:                    "exit-local-1",
+		dataMode:                       "opaque",
+		dataAddr:                       "127.0.0.1:51821",
+		wgBackend:                      "command",
+		wgPrivateKey:                   "/tmp/wg-exit.key",
+		wgKernelProxy:                  true,
+		wgListenPort:                   51831,
+		liveWGMode:                     true,
+		opaqueEcho:                     false,
+		opaqueSinkAddr:                 "127.0.0.1:53011",
+		opaqueSourceAddr:               "127.0.0.1:53012",
+		tokenProofReplayGuard:          true,
+		peerRebindAfter:                0,
+		startupSyncTimeout:             8 * time.Second,
+		trustedEntryRouteAssertionPubs: trustedEntryRouteAssertionPubsForTest(),
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -3459,21 +5107,22 @@ func TestValidateRuntimeConfigBetaStrictRejectsDangerousCosmosFallback(t *testin
 	t.Setenv(allowDangerousCosmosAdapterFallback, "1")
 
 	s := &Service{
-		betaStrict:            true,
-		exitRelayID:           "exit-local-1",
-		dataMode:              "opaque",
-		dataAddr:              "127.0.0.1:51821",
-		wgBackend:             "command",
-		wgPrivateKey:          "/tmp/wg-exit.key",
-		wgKernelProxy:         true,
-		wgListenPort:          51831,
-		liveWGMode:            true,
-		opaqueEcho:            false,
-		opaqueSinkAddr:        "127.0.0.1:53011",
-		opaqueSourceAddr:      "127.0.0.1:53012",
-		tokenProofReplayGuard: true,
-		peerRebindAfter:       0,
-		startupSyncTimeout:    8 * time.Second,
+		betaStrict:                     true,
+		exitRelayID:                    "exit-local-1",
+		dataMode:                       "opaque",
+		dataAddr:                       "127.0.0.1:51821",
+		wgBackend:                      "command",
+		wgPrivateKey:                   "/tmp/wg-exit.key",
+		wgKernelProxy:                  true,
+		wgListenPort:                   51831,
+		liveWGMode:                     true,
+		opaqueEcho:                     false,
+		opaqueSinkAddr:                 "127.0.0.1:53011",
+		opaqueSourceAddr:               "127.0.0.1:53012",
+		tokenProofReplayGuard:          true,
+		peerRebindAfter:                0,
+		startupSyncTimeout:             8 * time.Second,
+		trustedEntryRouteAssertionPubs: trustedEntryRouteAssertionPubsForTest(),
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -3487,21 +5136,22 @@ func TestValidateRuntimeConfigBetaStrictRejectsDangerousCosmosFallback(t *testin
 
 func TestValidateRuntimeConfigBetaStrictRejectsPeerRebind(t *testing.T) {
 	s := &Service{
-		betaStrict:            true,
-		exitRelayID:           "exit-local-1",
-		dataMode:              "opaque",
-		dataAddr:              "127.0.0.1:51821",
-		wgBackend:             "command",
-		wgPrivateKey:          "/tmp/wg-exit.key",
-		wgKernelProxy:         true,
-		wgListenPort:          51831,
-		liveWGMode:            true,
-		opaqueEcho:            false,
-		opaqueSinkAddr:        "127.0.0.1:53011",
-		opaqueSourceAddr:      "127.0.0.1:53012",
-		tokenProofReplayGuard: true,
-		peerRebindAfter:       5 * time.Second,
-		startupSyncTimeout:    8 * time.Second,
+		betaStrict:                     true,
+		exitRelayID:                    "exit-local-1",
+		dataMode:                       "opaque",
+		dataAddr:                       "127.0.0.1:51821",
+		wgBackend:                      "command",
+		wgPrivateKey:                   "/tmp/wg-exit.key",
+		wgKernelProxy:                  true,
+		wgListenPort:                   51831,
+		liveWGMode:                     true,
+		opaqueEcho:                     false,
+		opaqueSinkAddr:                 "127.0.0.1:53011",
+		opaqueSourceAddr:               "127.0.0.1:53012",
+		tokenProofReplayGuard:          true,
+		peerRebindAfter:                5 * time.Second,
+		startupSyncTimeout:             8 * time.Second,
+		trustedEntryRouteAssertionPubs: trustedEntryRouteAssertionPubsForTest(),
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -3514,21 +5164,22 @@ func TestValidateRuntimeConfigBetaStrictRejectsPeerRebind(t *testing.T) {
 
 func TestValidateRuntimeConfigBetaStrictRejectsMissingStartupSyncTimeout(t *testing.T) {
 	s := &Service{
-		betaStrict:            true,
-		exitRelayID:           "exit-local-1",
-		dataMode:              "opaque",
-		dataAddr:              "127.0.0.1:51821",
-		wgBackend:             "command",
-		wgPrivateKey:          "/tmp/wg-exit.key",
-		wgKernelProxy:         true,
-		wgListenPort:          51831,
-		liveWGMode:            true,
-		opaqueEcho:            false,
-		opaqueSinkAddr:        "127.0.0.1:53011",
-		opaqueSourceAddr:      "127.0.0.1:53012",
-		tokenProofReplayGuard: true,
-		peerRebindAfter:       0,
-		startupSyncTimeout:    0,
+		betaStrict:                     true,
+		exitRelayID:                    "exit-local-1",
+		dataMode:                       "opaque",
+		dataAddr:                       "127.0.0.1:51821",
+		wgBackend:                      "command",
+		wgPrivateKey:                   "/tmp/wg-exit.key",
+		wgKernelProxy:                  true,
+		wgListenPort:                   51831,
+		liveWGMode:                     true,
+		opaqueEcho:                     false,
+		opaqueSinkAddr:                 "127.0.0.1:53011",
+		opaqueSourceAddr:               "127.0.0.1:53012",
+		tokenProofReplayGuard:          true,
+		peerRebindAfter:                0,
+		startupSyncTimeout:             0,
+		trustedEntryRouteAssertionPubs: trustedEntryRouteAssertionPubsForTest(),
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -3541,24 +5192,25 @@ func TestValidateRuntimeConfigBetaStrictRejectsMissingStartupSyncTimeout(t *test
 
 func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutSourceQuorum(t *testing.T) {
 	s := &Service{
-		betaStrict:            true,
-		exitRelayID:           "exit-local-1",
-		dataMode:              "opaque",
-		dataAddr:              "127.0.0.1:51821",
-		wgBackend:             "command",
-		wgPrivateKey:          "/tmp/wg-exit.key",
-		wgKernelProxy:         true,
-		wgListenPort:          51831,
-		liveWGMode:            true,
-		opaqueEcho:            false,
-		opaqueSinkAddr:        "127.0.0.1:53011",
-		opaqueSourceAddr:      "127.0.0.1:53012",
-		tokenProofReplayGuard: true,
-		peerRebindAfter:       0,
-		startupSyncTimeout:    8 * time.Second,
-		issuerURLs:            []string{"http://127.0.0.1:8082", "http://127.0.0.1:8086"},
-		issuerMinSources:      1,
-		issuerMinOperators:    2,
+		betaStrict:                     true,
+		exitRelayID:                    "exit-local-1",
+		dataMode:                       "opaque",
+		dataAddr:                       "127.0.0.1:51821",
+		wgBackend:                      "command",
+		wgPrivateKey:                   "/tmp/wg-exit.key",
+		wgKernelProxy:                  true,
+		wgListenPort:                   51831,
+		liveWGMode:                     true,
+		opaqueEcho:                     false,
+		opaqueSinkAddr:                 "127.0.0.1:53011",
+		opaqueSourceAddr:               "127.0.0.1:53012",
+		tokenProofReplayGuard:          true,
+		peerRebindAfter:                0,
+		startupSyncTimeout:             8 * time.Second,
+		issuerURLs:                     []string{"http://127.0.0.1:8082", "http://127.0.0.1:8086"},
+		issuerMinSources:               1,
+		issuerMinOperators:             2,
+		trustedEntryRouteAssertionPubs: trustedEntryRouteAssertionPubsForTest(),
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -3571,24 +5223,25 @@ func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutSourceQuorum(t 
 
 func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutOperatorQuorum(t *testing.T) {
 	s := &Service{
-		betaStrict:            true,
-		exitRelayID:           "exit-local-1",
-		dataMode:              "opaque",
-		dataAddr:              "127.0.0.1:51821",
-		wgBackend:             "command",
-		wgPrivateKey:          "/tmp/wg-exit.key",
-		wgKernelProxy:         true,
-		wgListenPort:          51831,
-		liveWGMode:            true,
-		opaqueEcho:            false,
-		opaqueSinkAddr:        "127.0.0.1:53011",
-		opaqueSourceAddr:      "127.0.0.1:53012",
-		tokenProofReplayGuard: true,
-		peerRebindAfter:       0,
-		startupSyncTimeout:    8 * time.Second,
-		issuerURLs:            []string{"http://127.0.0.1:8082", "http://127.0.0.1:8086"},
-		issuerMinSources:      2,
-		issuerMinOperators:    1,
+		betaStrict:                     true,
+		exitRelayID:                    "exit-local-1",
+		dataMode:                       "opaque",
+		dataAddr:                       "127.0.0.1:51821",
+		wgBackend:                      "command",
+		wgPrivateKey:                   "/tmp/wg-exit.key",
+		wgKernelProxy:                  true,
+		wgListenPort:                   51831,
+		liveWGMode:                     true,
+		opaqueEcho:                     false,
+		opaqueSinkAddr:                 "127.0.0.1:53011",
+		opaqueSourceAddr:               "127.0.0.1:53012",
+		tokenProofReplayGuard:          true,
+		peerRebindAfter:                0,
+		startupSyncTimeout:             8 * time.Second,
+		issuerURLs:                     []string{"http://127.0.0.1:8082", "http://127.0.0.1:8086"},
+		issuerMinSources:               2,
+		issuerMinOperators:             1,
+		trustedEntryRouteAssertionPubs: trustedEntryRouteAssertionPubsForTest(),
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -3601,26 +5254,27 @@ func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutOperatorQuorum(
 
 func TestValidateRuntimeConfigBetaStrictRejectsMultiIssuerWithoutIdentityRequirement(t *testing.T) {
 	s := &Service{
-		betaStrict:            true,
-		exitRelayID:           "exit-local-1",
-		dataMode:              "opaque",
-		dataAddr:              "127.0.0.1:51821",
-		wgBackend:             "command",
-		wgPrivateKey:          "/tmp/wg-exit.key",
-		wgKernelProxy:         true,
-		wgListenPort:          51831,
-		liveWGMode:            true,
-		opaqueEcho:            false,
-		opaqueSinkAddr:        "127.0.0.1:53011",
-		opaqueSourceAddr:      "127.0.0.1:53012",
-		tokenProofReplayGuard: true,
-		peerRebindAfter:       0,
-		startupSyncTimeout:    8 * time.Second,
-		issuerURLs:            []string{"http://127.0.0.1:8082", "http://127.0.0.1:8086"},
-		issuerMinSources:      2,
-		issuerMinOperators:    2,
-		issuerMinKeyVotes:     2,
-		issuerRequireID:       false,
+		betaStrict:                     true,
+		exitRelayID:                    "exit-local-1",
+		dataMode:                       "opaque",
+		dataAddr:                       "127.0.0.1:51821",
+		wgBackend:                      "command",
+		wgPrivateKey:                   "/tmp/wg-exit.key",
+		wgKernelProxy:                  true,
+		wgListenPort:                   51831,
+		liveWGMode:                     true,
+		opaqueEcho:                     false,
+		opaqueSinkAddr:                 "127.0.0.1:53011",
+		opaqueSourceAddr:               "127.0.0.1:53012",
+		tokenProofReplayGuard:          true,
+		peerRebindAfter:                0,
+		startupSyncTimeout:             8 * time.Second,
+		issuerURLs:                     []string{"http://127.0.0.1:8082", "http://127.0.0.1:8086"},
+		issuerMinSources:               2,
+		issuerMinOperators:             2,
+		issuerMinKeyVotes:              2,
+		issuerRequireID:                false,
+		trustedEntryRouteAssertionPubs: trustedEntryRouteAssertionPubsForTest(),
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -3657,6 +5311,9 @@ func TestValidateRuntimeConfigProdStrictRejectsInsecureSkipVerify(t *testing.T) 
 		issuerMinOperators:    2,
 		issuerMinKeyVotes:     2,
 		issuerRequireID:       true,
+		trustedEntryRouteAssertionPubs: map[string]ed25519.PublicKey{
+			"test": make(ed25519.PublicKey, ed25519.PublicKeySize),
+		},
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
@@ -5184,6 +6841,92 @@ func TestConfigureEgressRejectsInvalidCommandInputs(t *testing.T) {
 	}
 	if s.egressConfigured {
 		t.Fatalf("expected egressConfigured to remain false on validation failure")
+	}
+}
+
+func TestFailClosedOnEgressSetupErrorOnlyInStrictModes(t *testing.T) {
+	testCases := []struct {
+		name       string
+		service    Service
+		wantClosed bool
+	}{
+		{name: "default compatibility logs only", service: Service{}, wantClosed: false},
+		{name: "beta strict fails closed", service: Service{betaStrict: true}, wantClosed: true},
+		{name: "prod strict fails closed", service: Service{prodStrict: true}, wantClosed: true},
+	}
+	for i := range testCases {
+		tc := &testCases[i]
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.service.failClosedOnEgressSetupError(); got != tc.wantClosed {
+				t.Fatalf("failClosedOnEgressSetupError=%t want %t", got, tc.wantClosed)
+			}
+		})
+	}
+}
+
+func TestPathOpenEgressReadyFailsClosedForStrictNoopEgress(t *testing.T) {
+	if (&Service{egressBackend: "noop"}).pathOpenEgressReady() != true {
+		t.Fatalf("expected non-strict noop egress to remain lab-compatible")
+	}
+	if (&Service{egressBackend: "noop", betaStrict: true}).pathOpenEgressReady() {
+		t.Fatalf("expected beta strict noop egress to fail closed")
+	}
+	if (&Service{egressBackend: "noop", prodStrict: true}).pathOpenEgressReady() {
+		t.Fatalf("expected prod strict noop egress to fail closed")
+	}
+	if (&Service{egressBackend: "command", egressConfigured: false}).pathOpenEgressReady() {
+		t.Fatalf("expected command egress to require successful configuration")
+	}
+	if !(&Service{egressBackend: "command", egressConfigured: true, betaStrict: true}).pathOpenEgressReady() {
+		t.Fatalf("expected configured command egress to satisfy strict readiness")
+	}
+}
+
+func TestConfigureEgressCleansUpPartialSetupFailure(t *testing.T) {
+	originalRunShellCommand := runShellCommand
+	t.Cleanup(func() {
+		runShellCommand = originalRunShellCommand
+	})
+
+	var commands []string
+	runShellCommand = func(_ context.Context, cmdStr string) error {
+		commands = append(commands, cmdStr)
+		if strings.Contains(cmdStr, "iptables -t nat -F PRIVNODE_EGRESS") {
+			return errors.New("forced setup failure")
+		}
+		return nil
+	}
+
+	s := &Service{
+		egressBackend: "command",
+		egressChain:   "PRIVNODE_EGRESS",
+		egressCIDR:    "10.90.0.0/24",
+		egressIface:   "eth0",
+		betaStrict:    true,
+	}
+	err := s.configureEgress(context.Background())
+	if err == nil {
+		t.Fatalf("expected configureEgress failure")
+	}
+	if s.egressConfigured {
+		t.Fatalf("expected egressConfigured to remain false after partial setup failure")
+	}
+
+	sawSetupFailurePoint := false
+	sawCleanupDelete := false
+	for _, cmd := range commands {
+		if strings.Contains(cmd, "iptables -t nat -F PRIVNODE_EGRESS") {
+			sawSetupFailurePoint = true
+		}
+		if strings.Contains(cmd, "iptables -t nat -X PRIVNODE_EGRESS") {
+			sawCleanupDelete = true
+		}
+	}
+	if !sawSetupFailurePoint {
+		t.Fatalf("expected test to reach forced setup failure point; commands=%v", commands)
+	}
+	if !sawCleanupDelete {
+		t.Fatalf("expected partial setup failure to run cleanup commands; commands=%v", commands)
 	}
 }
 

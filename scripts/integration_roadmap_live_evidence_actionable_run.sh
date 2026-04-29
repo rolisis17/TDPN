@@ -1011,10 +1011,11 @@ if ! jq -e '
   exit 1
 fi
 
-echo "[roadmap-live-evidence-actionable-run] no-targets path is handled as pass with zero actions"
+echo "[roadmap-live-evidence-actionable-run] no-targets path fails closed with zero actions"
 SUMMARY_EMPTY="$TMP_DIR/summary_empty.json"
 REPORTS_EMPTY="$TMP_DIR/reports_empty"
 : >"$EXEC_LOG"
+set +e
 ROADMAP_LIVE_EVIDENCE_ACTIONABLE_SCENARIO=no_targets \
 PASS_PROFILE_DEFAULT_GATE="$PASS_PROFILE_DEFAULT_GATE" \
 PASS_RUNTIME_ACTUATION_PROMOTION="$PASS_RUNTIME_ACTUATION_PROMOTION" \
@@ -1026,10 +1027,18 @@ bash ./scripts/roadmap_live_evidence_actionable_run.sh \
   --reports-dir "$REPORTS_EMPTY" \
   --summary-json "$SUMMARY_EMPTY" \
   --print-summary-json 0
+EMPTY_RC=$?
+set -e
+
+if [[ "$EMPTY_RC" -ne 4 ]]; then
+  echo "expected no-targets path to fail closed with rc=4, got rc=$EMPTY_RC"
+  cat "$SUMMARY_EMPTY"
+  exit 1
+fi
 
 if ! jq -e '
-  .status == "pass"
-  and .rc == 0
+  .status == "fail"
+  and .rc == 4
   and .inputs.no_selected_actions_fast_path == true
   and .roadmap.target_match_count == 0
   and .roadmap.target_match_action_ids == []
@@ -1051,11 +1060,11 @@ if ! jq -e '
   and .summary.fail == 0
   and .delegated_runner.summary_valid == false
   and .delegated_runner.invoked == false
-  and .delegated_runner.contract_valid == true
-  and .delegated_runner.contract_failure_reason == null
-  and .delegated_runner.failure_substep == null
+  and .delegated_runner.contract_valid == false
+  and .delegated_runner.contract_failure_reason == "no live-evidence actions selected for resolved scope"
+  and .delegated_runner.failure_substep == "no_selected_actions"
   and .delegated_runner.status == "skipped_no_selected_actions"
-  and .delegated_runner.rc == 0
+  and .delegated_runner.rc == 4
   and .delegated_runner.process_rc == null
   and ((.actions // []) | length == 0)
 ' "$SUMMARY_EMPTY" >/dev/null; then

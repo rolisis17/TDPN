@@ -68,6 +68,25 @@ func TestNewProdStrictConflictPreservesStrictMode(t *testing.T) {
 	}
 }
 
+func TestNewMicroExitBetaPolicyDefaultsOff(t *testing.T) {
+	t.Setenv(directoryMicroExitBetaAllowed, "")
+	t.Setenv("GPM_MICRO_EXIT_BETA", "1")
+
+	s := New()
+	if s.microExitBetaAllowed {
+		t.Fatalf("expected micro-exit beta policy disabled by default")
+	}
+}
+
+func TestNewMicroExitBetaPolicyRequiresExplicitDirectoryOptIn(t *testing.T) {
+	t.Setenv(directoryMicroExitBetaAllowed, "1")
+
+	s := New()
+	if !s.microExitBetaAllowed {
+		t.Fatalf("expected explicit directory micro-exit beta opt-in")
+	}
+}
+
 func TestNewDoesNotFallbackToDevAdminTokenByDefault(t *testing.T) {
 	t.Setenv("DIRECTORY_ADMIN_TOKEN", "")
 	t.Setenv("DIRECTORY_ALLOW_DANGEROUS_DEV_ADMIN_TOKEN_FALLBACK", "0")

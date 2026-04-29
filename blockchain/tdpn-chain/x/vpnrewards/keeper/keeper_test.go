@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 	kvtypes "github.com/tdpn/tdpn-chain/types/kv"
@@ -90,6 +91,7 @@ func TestKeeperAccrualUpsertAndGet(t *testing.T) {
 		AccrualID:  "acc-1",
 		SessionID:  "sess-1",
 		ProviderID: "provider-1",
+		AssetDenom: "uusdc",
 		Amount:     10,
 	}
 	k.UpsertAccrual(initial)
@@ -226,6 +228,55 @@ func TestKeeperListDistributionsDeterministicOrder(t *testing.T) {
 	}
 }
 
+func TestKeeperUpsertProofAllowsExactReplayAndRejectsConflict(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	proof := types.RewardProofRecord{
+		ProofPath:         "traffic/proof-replay-1",
+		TrafficProofRef:   "obj://traffic/proof-replay-1",
+		RewardID:          "reward-proof-replay-1",
+		ProviderSubjectID: "provider-proof-replay-1",
+		SessionID:         "session-proof-replay-1",
+		PayoutStartUnix:   1776643200,
+		PayoutEndUnix:     1776643200 + weeklyEpochSeconds,
+		RewardMicros:      100,
+		Currency:          "uusdc",
+		IssuedAtUnix:      1777248001,
+		Verified:          true,
+		VerifierID:        "verifier-proof-replay-1",
+		VerifiedAtUnix:    1777248010,
+	}
+	if err := k.UpsertProofWithError(proof); err != nil {
+		t.Fatalf("UpsertProofWithError returned unexpected error: %v", err)
+	}
+
+	replay := proof
+	replay.TrustContract = types.RewardProofTrustContractObjectiveTrafficV1
+	if err := k.UpsertProofWithError(replay); err != nil {
+		t.Fatalf("expected exact proof replay to succeed, got %v", err)
+	}
+
+	conflict := proof
+	conflict.RewardMicros++
+	err := k.UpsertProofWithError(conflict)
+	if err == nil {
+		t.Fatal("expected conflicting proof upsert to fail")
+	}
+	if !strings.Contains(err.Error(), "conflicting fields") {
+		t.Fatalf("expected conflict error, got %v", err)
+	}
+
+	got, ok := k.GetProof(proof.ProofPath)
+	if !ok {
+		t.Fatal("expected original proof to remain stored")
+	}
+	if got != normalizeProof(proof) {
+		t.Fatalf("expected conflicting upsert to preserve original proof %+v, got %+v", normalizeProof(proof), got)
+	}
+}
+
 func TestKeeperCreateAccrualDefaultsAndIdempotency(t *testing.T) {
 	t.Parallel()
 
@@ -275,6 +326,7 @@ func TestKeeperCreateAccrualConflict(t *testing.T) {
 		AccrualID:  "acc-1",
 		SessionID:  "sess-1",
 		ProviderID: "provider-1",
+		AssetDenom: "uusdc",
 		Amount:     10,
 	}
 	if _, err := k.CreateAccrual(initial); err != nil {
@@ -292,15 +344,212 @@ func TestKeeperCreateAccrualConflict(t *testing.T) {
 	}
 }
 
+func TestKeeperCreateAccrualRejectsDuplicateProviderWeeklyEpoch(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	first := types.RewardAccrual{
+		AccrualID:       "acc-weekly-1",
+		SessionID:       "sess-weekly-1",
+		ProviderID:      "provider-weekly-1",
+		AssetDenom:      "uusdc",
+		Amount:          10,
+		AccruedAtUnix:   1700000000,
+		PayoutStartUnix: 1699833600,
+		PayoutEndUnix:   1699833600 + weeklyEpochSeconds,
+	}
+	if _, err := k.CreateAccrual(first); err != nil {
+		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
+	}
+
+	duplicateWeek := types.RewardAccrual{
+		AccrualID:       "acc-weekly-2",
+		SessionID:       "sess-weekly-2",
+		ProviderID:      "provider-weekly-1",
+		AssetDenom:      "uusdc",
+		Amount:          11,
+		AccruedAtUnix:   first.AccruedAtUnix + 3600,
+		PayoutStartUnix: first.PayoutStartUnix,
+		PayoutEndUnix:   first.PayoutEndUnix,
+	}
+	_, err := k.CreateAccrual(duplicateWeek)
+	if err == nil {
+		t.Fatal("expected conflict for duplicate provider weekly epoch")
+	}
+	if !strings.Contains(err.Error(), "weekly epoch") {
+		t.Fatalf("expected weekly epoch conflict, got %v", err)
+	}
+
+	nextWeek := duplicateWeek
+	nextWeek.AccrualID = "acc-weekly-3"
+	nextWeek.AccruedAtUnix = first.AccruedAtUnix + weeklyEpochSeconds
+	nextWeek.PayoutStartUnix = first.PayoutStartUnix + weeklyEpochSeconds
+	nextWeek.PayoutEndUnix = first.PayoutEndUnix + weeklyEpochSeconds
+	if _, err := k.CreateAccrual(nextWeek); err != nil {
+		t.Fatalf("expected next-week accrual to succeed, got %v", err)
+	}
+}
+
+func TestKeeperCreateAccrualAllowsMultipleSessionRewardsInSameWeek(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	first := types.RewardAccrual{
+		AccrualID:     "acc-session-reward-1",
+		SessionID:     "sess-session-reward-1",
+		ProviderID:    "provider-session-reward-1",
+		AssetDenom:    "uusdc",
+		Amount:        10,
+		AccruedAtUnix: 1700000000,
+	}
+	if _, err := k.CreateAccrual(first); err != nil {
+		t.Fatalf("CreateAccrual first session reward returned unexpected error: %v", err)
+	}
+
+	second := types.RewardAccrual{
+		AccrualID:     "acc-session-reward-2",
+		SessionID:     "sess-session-reward-2",
+		ProviderID:    "provider-session-reward-1",
+		AssetDenom:    "uusdc",
+		Amount:        11,
+		AccruedAtUnix: first.AccruedAtUnix + 3600,
+	}
+	if _, err := k.CreateAccrual(second); err != nil {
+		t.Fatalf("expected second non-weekly session reward to succeed, got %v", err)
+	}
+}
+
+func TestKeeperCreateAccrualRejectsMissingPeriodAgainstExistingWeeklyPayout(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	weekly := types.RewardAccrual{
+		AccrualID:       "acc-weekly-period-1",
+		SessionID:       "sess-weekly-period-1",
+		ProviderID:      "provider-weekly-period-1",
+		AssetDenom:      "uusdc",
+		Amount:          10,
+		AccruedAtUnix:   1776643200,
+		PayoutStartUnix: 1776643200,
+		PayoutEndUnix:   1776643200 + weeklyEpochSeconds,
+	}
+	if _, err := k.CreateAccrual(weekly); err != nil {
+		t.Fatalf("CreateAccrual weekly seed returned unexpected error: %v", err)
+	}
+
+	missingPeriod := types.RewardAccrual{
+		AccrualID:     "acc-weekly-period-2",
+		SessionID:     "sess-weekly-period-2",
+		ProviderID:    weekly.ProviderID,
+		AssetDenom:    "uusdc",
+		Amount:        11,
+		AccruedAtUnix: weekly.AccruedAtUnix + 3600,
+	}
+	_, err := k.CreateAccrual(missingPeriod)
+	if err == nil {
+		t.Fatal("expected missing-period accrual to conflict with existing weekly payout")
+	}
+	if !strings.Contains(err.Error(), "weekly epoch") || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("expected weekly missing-period conflict, got %v", err)
+	}
+	if _, ok := k.GetAccrual(missingPeriod.AccrualID); ok {
+		t.Fatal("expected missing-period conflict to leave no stored accrual")
+	}
+}
+
+func TestKeeperCreateAccrualRejectsWeeklyPayoutAgainstExistingMissingPeriod(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	missingPeriod := types.RewardAccrual{
+		AccrualID:     "acc-weekly-period-existing-missing-1",
+		SessionID:     "sess-weekly-period-existing-missing-1",
+		ProviderID:    "provider-weekly-period-existing-missing",
+		AssetDenom:    "uusdc",
+		Amount:        10,
+		AccruedAtUnix: 1776643200,
+	}
+	if _, err := k.CreateAccrual(missingPeriod); err != nil {
+		t.Fatalf("CreateAccrual missing-period seed returned unexpected error: %v", err)
+	}
+
+	weekly := types.RewardAccrual{
+		AccrualID:       "acc-weekly-period-existing-missing-2",
+		SessionID:       "sess-weekly-period-existing-missing-2",
+		ProviderID:      missingPeriod.ProviderID,
+		AssetDenom:      "uusdc",
+		Amount:          11,
+		AccruedAtUnix:   missingPeriod.AccruedAtUnix,
+		PayoutStartUnix: 1776643200,
+		PayoutEndUnix:   1776643200 + weeklyEpochSeconds,
+	}
+	_, err := k.CreateAccrual(weekly)
+	if err == nil {
+		t.Fatal("expected weekly payout to conflict with existing missing-period accrual")
+	}
+	if !strings.Contains(err.Error(), "weekly epoch") || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("expected weekly missing-period conflict, got %v", err)
+	}
+	if _, ok := k.GetAccrual(weekly.AccrualID); ok {
+		t.Fatal("expected weekly conflict to leave no stored accrual")
+	}
+}
+
+func TestKeeperCreateAccrualWeeklyEpochStartsMondayUTC(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	mondayStart := time.Date(2026, 4, 27, 0, 0, 0, 0, time.UTC)
+
+	first := types.RewardAccrual{
+		AccrualID:       "acc-monday-epoch-1",
+		SessionID:       "sess-monday-epoch-1",
+		ProviderID:      "provider-monday-epoch",
+		AssetDenom:      "uusdc",
+		Amount:          10,
+		AccruedAtUnix:   mondayStart.Unix(),
+		PayoutStartUnix: mondayStart.Unix(),
+		PayoutEndUnix:   mondayStart.Add(7 * 24 * time.Hour).Unix(),
+	}
+	if _, err := k.CreateAccrual(first); err != nil {
+		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
+	}
+
+	sundaySameWeek := first
+	sundaySameWeek.AccrualID = "acc-monday-epoch-2"
+	sundaySameWeek.SessionID = "sess-monday-epoch-2"
+	sundaySameWeek.Amount = 11
+	if _, err := k.CreateAccrual(sundaySameWeek); err == nil {
+		t.Fatal("expected conflict before next Monday 00:00 UTC")
+	} else if !strings.Contains(err.Error(), "weekly epoch") {
+		t.Fatalf("expected weekly epoch conflict, got %v", err)
+	}
+
+	nextMonday := sundaySameWeek
+	nextMonday.AccrualID = "acc-monday-epoch-3"
+	nextMonday.SessionID = "sess-monday-epoch-3"
+	nextMonday.AccruedAtUnix = mondayStart.Add(7 * 24 * time.Hour).Unix()
+	nextMonday.PayoutStartUnix = mondayStart.Add(7 * 24 * time.Hour).Unix()
+	nextMonday.PayoutEndUnix = mondayStart.Add(14 * 24 * time.Hour).Unix()
+	if _, err := k.CreateAccrual(nextMonday); err != nil {
+		t.Fatalf("expected next Monday accrual to succeed, got %v", err)
+	}
+}
+
 func TestKeeperCreateAccrualValidation(t *testing.T) {
 	t.Parallel()
 
 	k := NewKeeper()
 
 	_, err := k.CreateAccrual(types.RewardAccrual{
-		AccrualID: "acc-1",
-		SessionID: "sess-1",
-		Amount:    10,
+		AccrualID:  "acc-1",
+		SessionID:  "sess-1",
+		AssetDenom: "uusdc",
+		Amount:     10,
 	})
 	if err == nil {
 		t.Fatal("expected validation error for missing provider id")
@@ -315,6 +564,7 @@ func TestKeeperRecordDistributionDefaultsAndIdempotency(t *testing.T) {
 		AccrualID:  "acc-1",
 		SessionID:  "sess-1",
 		ProviderID: "provider-1",
+		AssetDenom: "uusdc",
 		Amount:     20,
 	})
 	if err != nil {
@@ -367,6 +617,7 @@ func TestKeeperRecordDistributionFailsSafeWhenAccrualAdvanceWriteFails(t *testin
 		AccrualID:      "acc-failsafe-accrual-write",
 		SessionID:      "sess-failsafe-accrual-write",
 		ProviderID:     "provider-failsafe-accrual-write",
+		AssetDenom:     "uusdc",
 		Amount:         20,
 		OperationState: chaintypes.ReconciliationPending,
 	})
@@ -415,6 +666,7 @@ func TestKeeperRecordDistributionRollsBackAccrualAdvanceWhenDistributionWriteFai
 		AccrualID:      "acc-failsafe-distribution-write",
 		SessionID:      "sess-failsafe-distribution-write",
 		ProviderID:     "provider-failsafe-distribution-write",
+		AssetDenom:     "uusdc",
 		Amount:         20,
 		OperationState: chaintypes.ReconciliationPending,
 	})
@@ -461,6 +713,7 @@ func TestKeeperRecordDistributionConflict(t *testing.T) {
 		AccrualID:  "acc-1",
 		SessionID:  "sess-1",
 		ProviderID: "provider-1",
+		AssetDenom: "uusdc",
 		Amount:     20,
 	}); err != nil {
 		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
@@ -494,6 +747,7 @@ func TestKeeperRecordDistributionRejectsDuplicateAccrualWithDifferentDistributio
 		AccrualID:  "acc-dup-1",
 		SessionID:  "sess-dup-1",
 		ProviderID: "provider-dup-1",
+		AssetDenom: "uusdc",
 		Amount:     20,
 	}); err != nil {
 		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
@@ -541,6 +795,7 @@ func TestKeeperRecordDistributionRejectsMissingPayoutRefWithoutAdvancingAccrual(
 		AccrualID:      "acc-missing-payout-ref",
 		SessionID:      "sess-missing-payout-ref",
 		ProviderID:     "provider-missing-payout-ref",
+		AssetDenom:     "uusdc",
 		Amount:         20,
 		OperationState: chaintypes.ReconciliationPending,
 	})
@@ -599,19 +854,35 @@ func TestKeeperRecordDistributionAdvancesAccrualState(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		initial     chaintypes.ReconciliationStatus
-		expectAfter chaintypes.ReconciliationStatus
+		name                   string
+		initial                chaintypes.ReconciliationStatus
+		distributionStatus     chaintypes.ReconciliationStatus
+		allowFinalityAuthority bool
+		expectAfter            chaintypes.ReconciliationStatus
 	}{
 		{
-			name:        "pending advances to confirmed",
+			name:        "pending advances to submitted",
 			initial:     chaintypes.ReconciliationPending,
-			expectAfter: chaintypes.ReconciliationConfirmed,
+			expectAfter: chaintypes.ReconciliationSubmitted,
 		},
 		{
-			name:        "submitted advances to confirmed",
+			name:        "submitted remains submitted",
 			initial:     chaintypes.ReconciliationSubmitted,
-			expectAfter: chaintypes.ReconciliationConfirmed,
+			expectAfter: chaintypes.ReconciliationSubmitted,
+		},
+		{
+			name:                   "confirmed distribution confirms accrual with finality authority",
+			initial:                chaintypes.ReconciliationSubmitted,
+			distributionStatus:     chaintypes.ReconciliationConfirmed,
+			allowFinalityAuthority: true,
+			expectAfter:            chaintypes.ReconciliationConfirmed,
+		},
+		{
+			name:                   "failed distribution fails accrual with finality authority",
+			initial:                chaintypes.ReconciliationSubmitted,
+			distributionStatus:     chaintypes.ReconciliationFailed,
+			allowFinalityAuthority: true,
+			expectAfter:            chaintypes.ReconciliationFailed,
 		},
 	}
 
@@ -625,6 +896,7 @@ func TestKeeperRecordDistributionAdvancesAccrualState(t *testing.T) {
 				AccrualID:      "acc-1",
 				SessionID:      "sess-1",
 				ProviderID:     "provider-1",
+				AssetDenom:     "uusdc",
 				Amount:         20,
 				OperationState: tc.initial,
 			})
@@ -635,11 +907,17 @@ func TestKeeperRecordDistributionAdvancesAccrualState(t *testing.T) {
 				t.Fatalf("expected initial state %q, got %q", tc.initial, accrual.OperationState)
 			}
 
-			_, err = k.RecordDistribution(types.DistributionRecord{
+			distribution := types.DistributionRecord{
 				DistributionID: "dist-1",
 				AccrualID:      accrual.AccrualID,
 				PayoutRef:      "payout-1",
-			})
+				Status:         tc.distributionStatus,
+			}
+			if tc.allowFinalityAuthority {
+				_, err = k.RecordDistributionWithFinalityAuthority(distribution)
+			} else {
+				_, err = k.RecordDistribution(distribution)
+			}
 			if err != nil {
 				t.Fatalf("RecordDistribution returned unexpected error: %v", err)
 			}
@@ -652,6 +930,148 @@ func TestKeeperRecordDistributionAdvancesAccrualState(t *testing.T) {
 				t.Fatalf("expected accrual state %q after distribution, got %q", tc.expectAfter, updated.OperationState)
 			}
 		})
+	}
+}
+
+func TestKeeperRecordDistributionRejectsNewTerminalWithoutFinalityAuthority(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	accrual, err := k.CreateAccrual(types.RewardAccrual{
+		AccrualID:      "acc-terminal-new",
+		SessionID:      "sess-terminal-new",
+		ProviderID:     "provider-terminal-new",
+		AssetDenom:     "uusdc",
+		Amount:         20,
+		OperationState: chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
+	}
+
+	_, err = k.RecordDistribution(types.DistributionRecord{
+		DistributionID: "dist-terminal-new",
+		AccrualID:      accrual.AccrualID,
+		PayoutRef:      "payout-terminal-new",
+		Status:         chaintypes.ReconciliationConfirmed,
+	})
+	if err == nil {
+		t.Fatal("expected new terminal distribution without finality authority to fail")
+	}
+	if !strings.Contains(err.Error(), "requires finality authority") {
+		t.Fatalf("expected finality authority error, got %v", err)
+	}
+	if _, ok := k.GetDistribution("dist-terminal-new"); ok {
+		t.Fatal("expected rejected terminal distribution to not be persisted")
+	}
+
+	updated, ok := k.GetAccrual(accrual.AccrualID)
+	if !ok {
+		t.Fatal("expected accrual to remain available")
+	}
+	if updated.OperationState != chaintypes.ReconciliationPending {
+		t.Fatalf("expected accrual to remain pending, got %q", updated.OperationState)
+	}
+}
+
+func TestKeeperRecordDistributionFinalityAuthorityTransitionsStatusOnly(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	accrual, err := k.CreateAccrual(types.RewardAccrual{
+		AccrualID:      "acc-finality-transition",
+		SessionID:      "sess-finality-transition",
+		ProviderID:     "provider-finality-transition",
+		AssetDenom:     "uusdc",
+		Amount:         20,
+		OperationState: chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
+	}
+	initial := types.DistributionRecord{
+		DistributionID: "dist-finality-transition",
+		AccrualID:      accrual.AccrualID,
+		PayoutRef:      "payout-finality-transition",
+		DistributedAt:  1777248001,
+		Status:         chaintypes.ReconciliationSubmitted,
+	}
+	if _, err := k.RecordDistribution(initial); err != nil {
+		t.Fatalf("RecordDistribution returned unexpected error: %v", err)
+	}
+
+	confirmed := initial
+	confirmed.Status = chaintypes.ReconciliationConfirmed
+	if _, err := k.RecordDistribution(confirmed); err == nil {
+		t.Fatal("expected normal RecordDistribution to reject status-only finality change")
+	}
+	recorded, err := k.RecordDistributionWithFinalityAuthority(confirmed)
+	if err != nil {
+		t.Fatalf("RecordDistributionWithFinalityAuthority returned unexpected error: %v", err)
+	}
+	if recorded.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected distribution status confirmed, got %q", recorded.Status)
+	}
+	updatedAccrual, ok := k.GetAccrual(accrual.AccrualID)
+	if !ok {
+		t.Fatal("expected accrual after finality")
+	}
+	if updatedAccrual.OperationState != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected accrual state confirmed, got %q", updatedAccrual.OperationState)
+	}
+
+	replayed, err := k.RecordDistributionWithFinalityAuthority(confirmed)
+	if err != nil {
+		t.Fatalf("finality replay returned unexpected error: %v", err)
+	}
+	if !distributionRecordsEqual(replayed, confirmed.Canonicalize()) {
+		t.Fatalf("unexpected finality replay record: got=%+v want=%+v", replayed, confirmed.Canonicalize())
+	}
+
+	failed := confirmed
+	failed.Status = chaintypes.ReconciliationFailed
+	if _, err := k.RecordDistributionWithFinalityAuthority(failed); err == nil {
+		t.Fatal("expected terminal-to-terminal finality change to be rejected")
+	}
+	changedPayoutRef := initial
+	changedPayoutRef.Status = chaintypes.ReconciliationFailed
+	changedPayoutRef.PayoutRef = "payout-finality-tampered"
+	if _, err := k.RecordDistributionWithFinalityAuthority(changedPayoutRef); err == nil {
+		t.Fatal("expected finality transition with changed immutable payout ref to be rejected")
+	}
+}
+
+func TestKeeperCreateAccrualAllowsReplayAfterStateAdvanceWithoutDowngrade(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	input := types.RewardAccrual{
+		AccrualID:      "acc-state-advance-replay",
+		SessionID:      "sess-state-advance-replay",
+		ProviderID:     "provider-state-advance-replay",
+		AssetDenom:     "uusdc",
+		Amount:         20,
+		OperationState: chaintypes.ReconciliationPending,
+	}
+	accrual, err := k.CreateAccrual(input)
+	if err != nil {
+		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
+	}
+	if _, err := k.RecordDistribution(types.DistributionRecord{
+		DistributionID: "dist-state-advance-replay",
+		AccrualID:      accrual.AccrualID,
+		PayoutRef:      "payout-state-advance-replay",
+		Status:         chaintypes.ReconciliationSubmitted,
+	}); err != nil {
+		t.Fatalf("RecordDistribution returned unexpected error: %v", err)
+	}
+
+	replayed, err := k.CreateAccrual(input)
+	if err != nil {
+		t.Fatalf("CreateAccrual replay after state advance returned unexpected error: %v", err)
+	}
+	if replayed.OperationState != chaintypes.ReconciliationSubmitted {
+		t.Fatalf("expected replay to preserve submitted state, got %q", replayed.OperationState)
 	}
 }
 
@@ -769,6 +1189,7 @@ func TestKeeperRecordDistributionCanonicalCreateReplayGetAndList(t *testing.T) {
 		AccrualID:  " ACC-CANON-DIST-1 ",
 		SessionID:  "sess-canon-dist-1",
 		ProviderID: "provider-canon-dist-1",
+		AssetDenom: "uusdc",
 		Amount:     50,
 	})
 	if err != nil {
@@ -833,6 +1254,7 @@ func TestKeeperRecordDistributionCanonicalConflictSemantics(t *testing.T) {
 		AccrualID:  "acc-conflict-dist-1",
 		SessionID:  "sess-conflict-dist-1",
 		ProviderID: "provider-conflict-dist-1",
+		AssetDenom: "uusdc",
 		Amount:     15,
 	}); err != nil {
 		t.Fatalf("CreateAccrual returned unexpected error: %v", err)
@@ -900,7 +1322,9 @@ func TestKeeperRecordDistributionFailsClosedOnCorruptDistributionListing(t *test
 
 	if _, err := k.CreateAccrual(types.RewardAccrual{
 		AccrualID:  "acc-corrupt-dist",
+		SessionID:  "sess-corrupt-dist",
 		ProviderID: "provider-corrupt-dist",
+		AssetDenom: "uusdc",
 		Amount:     20,
 	}); err != nil {
 		t.Fatalf("CreateAccrual returned unexpected error: %v", err)

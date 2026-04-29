@@ -114,6 +114,29 @@ func TestStrictTrustTOFURejectsMalformedKeysetWithoutPersisting(t *testing.T) {
 	}
 }
 
+func TestStrictTrustTOFURejectsAmbiguousMultiKeyFirstContact(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "trusted.txt")
+
+	keyABytes := make([]byte, 32)
+	keyBBytes := make([]byte, 32)
+	for i := range keyABytes {
+		keyABytes[i] = byte(i + 1)
+		keyBBytes[i] = byte(i + 41)
+	}
+	keyA := base64.RawURLEncoding.EncodeToString(keyABytes)
+	keyB := base64.RawURLEncoding.EncodeToString(keyBBytes)
+
+	c := &Client{trustStrict: true, trustTOFU: true, trustFile: file}
+	err := c.enforceDirectoryTrustSet([]string{keyA, keyB})
+	if err == nil || !strings.Contains(err.Error(), "TOFU requires exactly one pubkey") {
+		t.Fatalf("expected ambiguous TOFU keyset rejection, got %v", err)
+	}
+	if _, statErr := os.Stat(file); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no trust file write on ambiguous first contact, stat err=%v", statErr)
+	}
+}
+
 func TestFetchDirectoryPubKeysFromRejectsMalformedKeysetWithoutPersisting(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "trusted.txt")
@@ -136,7 +159,7 @@ func TestFetchDirectoryPubKeysFromRejectsMalformedKeysetWithoutPersisting(t *tes
 		}}},
 	}
 
-	if _, _, err := c.fetchDirectoryPubKeysFrom(context.Background(), url); err == nil {
+	if _, _, _, err := c.fetchDirectoryPubKeysFrom(context.Background(), url); err == nil {
 		t.Fatalf("expected malformed pubkey response to fail")
 	}
 	if _, err := os.Stat(file); !os.IsNotExist(err) {
@@ -172,7 +195,7 @@ func TestFetchDirectoryPubKeysFromStrictFiltersUntrustedKeys(t *testing.T) {
 		}}},
 	}
 
-	keys, _, err := c.fetchDirectoryPubKeysFrom(context.Background(), url)
+	keys, _, _, err := c.fetchDirectoryPubKeysFrom(context.Background(), url)
 	if err != nil {
 		t.Fatalf("fetchDirectoryPubKeysFrom: %v", err)
 	}

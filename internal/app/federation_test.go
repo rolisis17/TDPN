@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -98,6 +99,87 @@ func TestFetchRelaysFederatedOperatorQuorumFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("keygen1: %v", err)
 	}
+	pubKey := base64.RawURLEncoding.EncodeToString(pub1)
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		url1 + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			Operator: "operator-a",
+			PubKeys:  []string{pubKey},
+		}),
+		url2 + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			Operator: "operator-b",
+			PubKeys:  []string{pubKey},
+		}),
+		url1 + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{signedDesc(t, "entry-a", "entry", priv1)}}),
+		url2 + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{signedDesc(t, "exit-a", "exit", priv1)}}),
+	}
+
+	c := &Client{
+		directoryURLs:         []string{url1, url2},
+		directoryMinSources:   2,
+		directoryMinOperators: 2,
+		directoryMinVotes:     1,
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		trustStrict:           false,
+	}
+	if _, err := c.fetchRelaysFederated(context.Background()); err == nil {
+		t.Fatalf("expected operator quorum failure")
+	} else if !strings.Contains(err.Error(), "operator quorum") {
+		t.Fatalf("expected operator quorum failure, got %v", err)
+	}
+}
+
+func TestFetchRelaysFederatedOperatorQuorumIgnoresMultiKeyOrderAlias(t *testing.T) {
+	url1 := "http://d1.local"
+	url2 := "http://d2.local"
+
+	pub1, priv1, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen1: %v", err)
+	}
+	pub2, priv2, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen2: %v", err)
+	}
+	pubKey1 := base64.RawURLEncoding.EncodeToString(pub1)
+	pubKey2 := base64.RawURLEncoding.EncodeToString(pub2)
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		url1 + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			Operator: "operator-a",
+			PubKeys:  []string{pubKey1, pubKey2},
+		}),
+		url2 + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			Operator: "operator-b",
+			PubKeys:  []string{pubKey2, pubKey1},
+		}),
+		url1 + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{signedDesc(t, "entry-a", "entry", priv1)}}),
+		url2 + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{signedDesc(t, "exit-a", "exit", priv2)}}),
+	}
+
+	c := &Client{
+		directoryURLs:         []string{url1, url2},
+		directoryMinSources:   2,
+		directoryMinOperators: 2,
+		directoryMinVotes:     1,
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		trustStrict:           false,
+	}
+	if _, err := c.fetchRelaysFederated(context.Background()); err == nil {
+		t.Fatalf("expected operator quorum failure")
+	} else if !strings.Contains(err.Error(), "operator quorum") {
+		t.Fatalf("expected operator quorum failure, got %v", err)
+	}
+}
+
+func TestFetchRelaysFederatedOperatorQuorumDedupsExplicitOperatorName(t *testing.T) {
+	url1 := "http://d1.local"
+	url2 := "http://d2.local"
+
+	pub1, priv1, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen1: %v", err)
+	}
 	pub2, priv2, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
 		t.Fatalf("keygen2: %v", err)
@@ -105,11 +187,11 @@ func TestFetchRelaysFederatedOperatorQuorumFailure(t *testing.T) {
 
 	handlers := map[string]func(*http.Request) (*http.Response, error){
 		url1 + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
-			Operator: "operator-a",
+			Operator: "operator-shared",
 			PubKeys:  []string{base64.RawURLEncoding.EncodeToString(pub1)},
 		}),
 		url2 + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
-			Operator: "operator-a",
+			Operator: "operator-shared",
 			PubKeys:  []string{base64.RawURLEncoding.EncodeToString(pub2)},
 		}),
 		url1 + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{signedDesc(t, "entry-a", "entry", priv1)}}),
@@ -126,6 +208,8 @@ func TestFetchRelaysFederatedOperatorQuorumFailure(t *testing.T) {
 	}
 	if _, err := c.fetchRelaysFederated(context.Background()); err == nil {
 		t.Fatalf("expected operator quorum failure")
+	} else if !strings.Contains(err.Error(), "operator quorum") {
+		t.Fatalf("expected operator quorum failure, got %v", err)
 	}
 }
 
@@ -142,8 +226,19 @@ func TestFetchRelaysFederatedRelayVoteThreshold(t *testing.T) {
 		t.Fatalf("keygen2: %v", err)
 	}
 
-	sharedEntry1 := signedDesc(t, "entry-shared", "entry", priv1)
-	sharedEntry2 := signedDesc(t, "entry-shared", "entry", priv2)
+	validUntil := time.Now().Add(time.Minute).UTC().Round(0)
+	sharedEntry1 := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "entry-shared",
+		Role:       "entry",
+		Endpoint:   "127.0.0.1:1",
+		ValidUntil: validUntil,
+	}, priv1)
+	sharedEntry2 := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "entry-shared",
+		Role:       "entry",
+		Endpoint:   "127.0.0.1:1",
+		ValidUntil: validUntil,
+	}, priv2)
 	uniqueExit := signedDesc(t, "exit-unique", "exit", priv2)
 
 	handlers := map[string]func(*http.Request) (*http.Response, error){
@@ -173,7 +268,7 @@ func TestFetchRelaysFederatedRelayVoteThreshold(t *testing.T) {
 	}
 }
 
-func TestFetchRelaysFederatedRelayVotesDedupByOperator(t *testing.T) {
+func TestFetchRelaysFederatedRelayVoteThresholdIgnoresDescriptorEpochAndRoleAliases(t *testing.T) {
 	url1 := "http://d1.local"
 	url2 := "http://d2.local"
 
@@ -186,17 +281,203 @@ func TestFetchRelaysFederatedRelayVotesDedupByOperator(t *testing.T) {
 		t.Fatalf("keygen2: %v", err)
 	}
 
-	shared1 := signedDesc(t, "exit-shared", "exit", priv1)
-	shared2 := signedDesc(t, "exit-shared", "exit", priv2)
+	olderValidUntil := time.Now().Add(time.Minute).UTC().Round(0)
+	newerValidUntil := olderValidUntil.Add(5 * time.Minute)
+	first := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    " Entry-Shared ",
+		Role:       " ENTRY ",
+		Endpoint:   "127.0.0.1:1",
+		ValidUntil: olderValidUntil,
+	}, priv1)
+	second := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "entry-shared",
+		Role:       "entry",
+		Endpoint:   "127.0.0.1:1",
+		ValidUntil: newerValidUntil,
+	}, priv2)
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		url1 + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub1)}),
+		url2 + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub2)}),
+		url1 + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{first}}),
+		url2 + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{second}}),
+	}
+
+	c := &Client{
+		directoryURLs:       []string{url1, url2},
+		directoryMinSources: 2,
+		directoryMinVotes:   2,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		trustStrict:         false,
+	}
+
+	relays, err := c.fetchRelaysFederated(context.Background())
+	if err != nil {
+		t.Fatalf("fetch federated failed: %v", err)
+	}
+	if len(relays) != 1 {
+		t.Fatalf("expected shared relay to pass vote threshold, got %d", len(relays))
+	}
+	if relays[0].RelayID != "entry-shared" || relays[0].Role != "entry" {
+		t.Fatalf("expected canonical relay id/role, got %+v", relays[0])
+	}
+	if !relays[0].ValidUntil.Equal(newerValidUntil) {
+		t.Fatalf("expected freshest valid_until %s, got %s", newerValidUntil, relays[0].ValidUntil)
+	}
+}
+
+func TestFetchRelaysFederatedRelayVoteThresholdRejectsConflictingDescriptorEndpoints(t *testing.T) {
+	url1 := "http://d1.local"
+	url2 := "http://d2.local"
+
+	pub1, priv1, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen1: %v", err)
+	}
+	pub2, priv2, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen2: %v", err)
+	}
+
+	validUntil := time.Now().Add(time.Minute).UTC().Round(0)
+	first := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "exit-shared",
+		Role:       "exit",
+		OperatorID: "operator-exit",
+		PubKey:     "relay-pub-key",
+		Endpoint:   "203.0.113.10:51820",
+		ControlURL: "https://exit-a.example",
+		ValidUntil: validUntil,
+	}, priv1)
+	second := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "exit-shared",
+		Role:       "exit",
+		OperatorID: "operator-exit",
+		PubKey:     "relay-pub-key",
+		Endpoint:   "203.0.113.11:51820",
+		ControlURL: "https://exit-b.example",
+		ValidUntil: validUntil,
+	}, priv2)
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		url1 + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub1)}),
+		url2 + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub2)}),
+		url1 + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{first}}),
+		url2 + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{second}}),
+	}
+
+	c := &Client{
+		directoryURLs:       []string{url1, url2},
+		directoryMinSources: 2,
+		directoryMinVotes:   2,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		trustStrict:         false,
+	}
+
+	if _, err := c.fetchRelaysFederated(context.Background()); err == nil {
+		t.Fatalf("expected conflicting relay descriptors to miss vote threshold")
+	} else if !strings.Contains(err.Error(), "no relays met vote threshold") {
+		t.Fatalf("expected relay vote threshold failure, got %v", err)
+	}
+}
+
+func TestFetchRelaysFederatedRelayVoteThresholdRejectsConflictingDescriptorCapabilities(t *testing.T) {
+	url1 := "http://d1.local"
+	url2 := "http://d2.local"
+
+	pub1, priv1, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen1: %v", err)
+	}
+	pub2, priv2, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen2: %v", err)
+	}
+
+	validUntil := time.Now().Add(time.Minute).UTC().Round(0)
+	first := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:       "exit-shared",
+		Role:          "exit",
+		OperatorID:    "operator-exit",
+		PubKey:        "relay-pub-key",
+		Endpoint:      "203.0.113.10:51820",
+		ControlURL:    "https://exit.example",
+		CountryCode:   "US",
+		GeoConfidence: 0.9,
+		Region:        "na",
+		Capabilities:  []string{"wireguard", "micro-exit"},
+		HopRoles:      []string{"exit"},
+		ValidUntil:    validUntil,
+	}, priv1)
+	second := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:       "exit-shared",
+		Role:          "exit",
+		OperatorID:    "operator-exit",
+		PubKey:        "relay-pub-key",
+		Endpoint:      "203.0.113.10:51820",
+		ControlURL:    "https://exit.example",
+		CountryCode:   "US",
+		GeoConfidence: 0.9,
+		Region:        "na",
+		Capabilities:  []string{"wireguard"},
+		HopRoles:      []string{"exit"},
+		ValidUntil:    validUntil,
+	}, priv2)
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		url1 + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub1)}),
+		url2 + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub2)}),
+		url1 + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{first}}),
+		url2 + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{second}}),
+	}
+
+	c := &Client{
+		directoryURLs:       []string{url1, url2},
+		directoryMinSources: 2,
+		directoryMinVotes:   2,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		trustStrict:         false,
+	}
+
+	if _, err := c.fetchRelaysFederated(context.Background()); err == nil {
+		t.Fatalf("expected conflicting relay capability metadata to miss vote threshold")
+	} else if !strings.Contains(err.Error(), "no relays met vote threshold") {
+		t.Fatalf("expected relay vote threshold failure, got %v", err)
+	}
+}
+
+func TestFetchRelaysFederatedRelayVotesDedupByOperator(t *testing.T) {
+	url1 := "http://d1.local"
+	url2 := "http://d2.local"
+
+	pub1, priv1, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen1: %v", err)
+	}
+	pubKey := base64.RawURLEncoding.EncodeToString(pub1)
+
+	validUntil := time.Now().Add(time.Minute).UTC().Round(0)
+	shared1 := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "exit-shared",
+		Role:       "exit",
+		Endpoint:   "127.0.0.1:1",
+		ValidUntil: validUntil,
+	}, priv1)
+	shared2 := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "exit-shared",
+		Role:       "exit",
+		Endpoint:   "127.0.0.1:1",
+		ValidUntil: validUntil,
+	}, priv1)
 
 	handlers := map[string]func(*http.Request) (*http.Response, error){
 		url1 + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
 			Operator: "operator-a",
-			PubKeys:  []string{base64.RawURLEncoding.EncodeToString(pub1)},
+			PubKeys:  []string{pubKey},
 		}),
 		url2 + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
-			Operator: "operator-a",
-			PubKeys:  []string{base64.RawURLEncoding.EncodeToString(pub2)},
+			Operator: "operator-b",
+			PubKeys:  []string{pubKey},
 		}),
 		url1 + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{shared1}}),
 		url2 + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{shared2}}),
@@ -366,18 +647,19 @@ func TestFetchRelaysFederatedSelectionFeedMinVotes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("keygen2: %v", err)
 	}
+	validUntil := time.Now().Add(time.Minute).UTC().Round(0)
 	shared1 := signedDescFrom(t, proto.RelayDescriptor{
 		RelayID:    "exit-shared",
 		Role:       "exit",
 		Endpoint:   "127.0.0.1:1",
-		ValidUntil: time.Now().Add(time.Minute),
+		ValidUntil: validUntil,
 		Reputation: 0.30,
 	}, priv1)
 	shared2 := signedDescFrom(t, proto.RelayDescriptor{
 		RelayID:    "exit-shared",
 		Role:       "exit",
 		Endpoint:   "127.0.0.1:1",
-		ValidUntil: time.Now().Add(time.Minute),
+		ValidUntil: validUntil,
 		Reputation: 0.30,
 	}, priv2)
 	feed := proto.RelaySelectionFeedResponse{
@@ -641,7 +923,7 @@ func TestFetchRelaysFederatedAppealMitigatesDisputePenalty(t *testing.T) {
 	}
 }
 
-func TestBootstrapDirectExitFallbackOnEntryUnknownExit(t *testing.T) {
+func TestBootstrapDirectExitFallbackOnEntryUnknownExitSupportMode(t *testing.T) {
 	directoryURL := "http://d1.local"
 	issuerURL := "http://issuer.local"
 	entryURL := "http://entry.local"
@@ -667,23 +949,14 @@ func TestBootstrapDirectExitFallbackOnEntryUnknownExit(t *testing.T) {
 		Endpoint:   "127.0.0.1:9",
 		ValidUntil: time.Now().Add(time.Minute),
 	}, priv)
-	middle := signedDescFrom(t, proto.RelayDescriptor{
-		RelayID:    "middle-c",
-		Role:       "entry",
-		ControlURL: "http://middle.local",
-		OperatorID: "op-c",
-		Endpoint:   "127.0.0.1:51822",
-		HopRoles:   []string{"middle"},
-		ValidUntil: time.Now().Add(time.Minute),
-	}, priv)
-
 	entryOpenCalls := 0
 	exitOpenCalls := 0
 	exitCloseCalls := 0
 	seenSessionID := ""
+	statusFile := filepath.Join(t.TempDir(), "client-vpn-status.json")
 	handlers := map[string]func(*http.Request) (*http.Response, error){
 		directoryURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
-		directoryURL + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{entry, exit, middle}}),
+		directoryURL + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{entry, exit}}),
 		issuerURL + "/v1/token": func(req *http.Request) (*http.Response, error) {
 			var in proto.IssueTokenRequest
 			if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
@@ -713,8 +986,20 @@ func TestBootstrapDirectExitFallbackOnEntryUnknownExit(t *testing.T) {
 			if in.ExitID != "exit-b" {
 				t.Fatalf("unexpected direct fallback exit id: %q", in.ExitID)
 			}
-			if in.MiddleRelayID != "middle-c" {
+			if in.PathProfile != "1hop" {
+				t.Fatalf("expected direct fallback path profile to be rebound to 1hop, got %q", in.PathProfile)
+			}
+			if strings.TrimSpace(in.MiddleRelayID) != "" {
 				t.Fatalf("unexpected direct fallback middle relay id: %q", in.MiddleRelayID)
+			}
+			if in.ClientRouteAssertion == nil {
+				t.Fatalf("expected direct fallback client route assertion")
+			}
+			if in.ClientRouteAssertion.PathProfile != "1hop" ||
+				strings.TrimSpace(in.ClientRouteAssertion.EntryRelayID) != "" ||
+				strings.TrimSpace(in.ClientRouteAssertion.MiddleRelayID) != "" ||
+				in.ClientRouteAssertion.ExitRelayID != "exit-b" {
+				t.Fatalf("direct fallback route assertion not rebound to direct path: %+v", in.ClientRouteAssertion)
 			}
 			seenSessionID = in.SessionID
 			return jsonResp(proto.PathOpenResponse{
@@ -751,11 +1036,14 @@ func TestBootstrapDirectExitFallbackOnEntryUnknownExit(t *testing.T) {
 		maxPairCandidates:        1,
 		healthCheckEnabled:       false,
 		allowDirectExitFallback:  true,
+		directExitSupportMode:    true,
 		allowUnknownExitFallback: false,
-		pathProfile:              "3hop",
-		preferMiddleRelay:        true,
-		requireMiddleRelay:       true,
-		requireDistinctOps:       true,
+		sessionReuse:             true,
+		pathProfile:              "2hop",
+		preferMiddleRelay:        false,
+		requireMiddleRelay:       false,
+		requireDistinctOps:       false,
+		clientStatusFile:         statusFile,
 		httpClient:               &http.Client{Transport: mockRoundTripper{handlers: handlers}},
 	}
 
@@ -770,6 +1058,115 @@ func TestBootstrapDirectExitFallbackOnEntryUnknownExit(t *testing.T) {
 	}
 	if exitCloseCalls == 0 {
 		t.Fatalf("expected direct fallback session close on exit")
+	}
+	if session, ok := c.snapshotActiveSession(); ok {
+		t.Fatalf("direct fallback session should not be retained for reuse: %+v", session)
+	}
+	status, ok := c.snapshotClientVPNStatus()
+	if !ok {
+		t.Fatal("expected direct fallback path status")
+	}
+	if status.PathMode != clientVPNPathModeDirectFallback || status.SessionActive || status.ExitRelayID != "exit-b" {
+		t.Fatalf("unexpected direct fallback status: %+v", status)
+	}
+	persisted := readClientVPNStatusForTest(t, statusFile)
+	if persisted.PathMode != clientVPNPathModeDirectFallback || persisted.SessionActive || persisted.ExitRelayID != "exit-b" {
+		t.Fatalf("unexpected persisted direct fallback status: %+v", persisted)
+	}
+}
+
+func TestBootstrapDirectExitFallbackBlockedForThreeHopMiddlePolicy(t *testing.T) {
+	directoryURL := "http://d1.local"
+	issuerURL := "http://issuer.local"
+	entryURL := "http://entry.local"
+	exitURL := "http://exit.local"
+
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	entry := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "entry-a",
+		Role:       "entry",
+		ControlURL: entryURL,
+		OperatorID: "op-a",
+		Endpoint:   "127.0.0.1:51820",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+	exit := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "exit-b",
+		Role:       "exit",
+		ControlURL: exitURL,
+		OperatorID: "op-b",
+		Endpoint:   "127.0.0.1:9",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+	middle := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "middle-c",
+		Role:       "micro-relay",
+		ControlURL: "http://middle.local",
+		OperatorID: "op-c",
+		Endpoint:   "127.0.0.1:51822",
+		Reputation: 0.9,
+		Uptime:     0.9,
+		Capacity:   0.9,
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+
+	entryOpenCalls := 0
+	exitOpenCalls := 0
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		directoryURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+		directoryURL + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{entry, exit, middle}}),
+		issuerURL + "/v1/token": jsonResp(proto.IssueTokenResponse{
+			Token:   "tok-direct-fallback-blocked",
+			Expires: time.Now().Add(time.Minute).Unix(),
+		}),
+		entryURL + "/v1/path/open": func(req *http.Request) (*http.Response, error) {
+			entryOpenCalls++
+			return jsonResp(proto.PathOpenResponse{Accepted: false, Reason: "unknown-exit"})(req)
+		},
+		exitURL + "/v1/path/open": func(req *http.Request) (*http.Response, error) {
+			exitOpenCalls++
+			return jsonResp(proto.PathOpenResponse{Accepted: true})(req)
+		},
+	}
+
+	c := &Client{
+		directoryURLs:            []string{directoryURL},
+		directoryMinSources:      1,
+		directoryMinOperators:    1,
+		directoryMinVotes:        1,
+		issuerURL:                issuerURL,
+		subject:                  "inv-test",
+		entryURL:                 entryURL,
+		exitControlURL:           exitURL,
+		dataMode:                 "json",
+		clientWGPub:              mustRandomWGPublicKeyLike(t),
+		pathOpenMaxAttempts:      1,
+		maxPairCandidates:        1,
+		healthCheckEnabled:       false,
+		allowDirectExitFallback:  true,
+		allowUnknownExitFallback: false,
+		pathProfile:              "3hop",
+		preferMiddleRelay:        true,
+		requireMiddleRelay:       true,
+		requireDistinctOps:       true,
+		httpClient:               &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	err = c.bootstrap(context.Background())
+	if err == nil {
+		t.Fatalf("expected 3hop bootstrap to fail closed instead of direct-exit fallback")
+	}
+	if !strings.Contains(err.Error(), "path open denied: unknown-exit") {
+		t.Fatalf("unexpected bootstrap error: %v", err)
+	}
+	if entryOpenCalls == 0 {
+		t.Fatalf("expected entry path open attempt before rejecting direct fallback")
+	}
+	if exitOpenCalls != 0 {
+		t.Fatalf("direct-exit fallback should not call exit path open for 3hop policy, got %d calls", exitOpenCalls)
 	}
 }
 

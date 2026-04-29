@@ -248,7 +248,7 @@ for _ in $(seq 1 200); do
     cat "$LOG_FILE"
     exit 1
   fi
-  if rg -q "client received wg-session config:" "$LOG_FILE"; then
+  if rg -q "client wireguard runtime ready:" "$LOG_FILE"; then
     ready=1
     break
   fi

@@ -15,6 +15,7 @@ var (
 // SlashingMsgServer exposes phase-1 vpnslashing operations through the scaffold.
 type SlashingMsgServer interface {
 	SubmitEvidence(context.Context, SlashingSubmitEvidenceRequest) (SlashingSubmitEvidenceResponse, error)
+	ConfirmEvidence(context.Context, SlashingConfirmEvidenceRequest) (SlashingConfirmEvidenceResponse, error)
 	ApplyPenalty(context.Context, SlashingApplyPenaltyRequest) (SlashingApplyPenaltyResponse, error)
 }
 
@@ -36,6 +37,15 @@ type SlashingApplyPenaltyResponse struct {
 	Replay  bool
 }
 
+type SlashingConfirmEvidenceRequest struct {
+	EvidenceID string
+}
+
+type SlashingConfirmEvidenceResponse struct {
+	Evidence slashingtypes.SlashEvidence
+	Replay   bool
+}
+
 type slashingMsgServer struct {
 	msgServer slashingmodule.MsgServer
 }
@@ -55,6 +65,26 @@ func (m slashingMsgServer) SubmitEvidence(ctx context.Context, req SlashingSubmi
 		return SlashingSubmitEvidenceResponse{}, err
 	}
 	return SlashingSubmitEvidenceResponse{
+		Evidence: resp.Evidence,
+		Replay:   resp.Idempotent,
+	}, nil
+}
+
+func (m slashingMsgServer) ConfirmEvidence(ctx context.Context, req SlashingConfirmEvidenceRequest) (SlashingConfirmEvidenceResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return SlashingConfirmEvidenceResponse{}, err
+		}
+	}
+
+	resp, err := m.msgServer.ConfirmEvidence(slashingmodule.ConfirmEvidenceRequest{EvidenceID: req.EvidenceID})
+	if err != nil {
+		if errors.Is(err, slashingmodule.ErrNilKeeper) {
+			return SlashingConfirmEvidenceResponse{}, errSlashingKeeperNotWired
+		}
+		return SlashingConfirmEvidenceResponse{}, err
+	}
+	return SlashingConfirmEvidenceResponse{
 		Evidence: resp.Evidence,
 		Replay:   resp.Idempotent,
 	}, nil

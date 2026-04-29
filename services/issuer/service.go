@@ -65,6 +65,7 @@ type Service struct {
 	prodStrict                    bool
 	settlementReconcileSec        int
 	settlement                    settlement.Service
+	settlementChainBacked         bool
 	settlementStatus              settlementStatusSnapshot
 	requirePaymentProof           bool
 	sponsorAPIToken               string
@@ -314,6 +315,7 @@ func New() *Service {
 		}
 	}
 	settlementSvc := newSettlementServiceFromEnv()
+	settlementChainBacked := settlementServiceChainBacked(settlementSvc)
 	return &Service{
 		addr:                          addr,
 		issuerID:                      issuerID,
@@ -346,6 +348,7 @@ func New() *Service {
 		prodStrict:                    prodStrict,
 		settlementReconcileSec:        settlementReconcileSec,
 		settlement:                    settlementSvc,
+		settlementChainBacked:         settlementChainBacked,
 		requirePaymentProof:           requirePaymentProof,
 		sponsorAPIToken:               sponsorAPIToken,
 		sponsorMaxSubjectLen:          sponsorMaxSubjectLen,
@@ -613,6 +616,9 @@ func (s *Service) validateRuntimeConfig() error {
 		if adminTokenAuthEnabled {
 			return fmt.Errorf("PROD_STRICT_MODE requires ISSUER_ADMIN_ALLOW_TOKEN=0")
 		}
+		if !s.settlementChainBacked {
+			return fmt.Errorf("PROD_STRICT_MODE requires SETTLEMENT_CHAIN_ADAPTER=cosmos")
+		}
 	}
 	return nil
 }
@@ -711,6 +717,11 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 	}
 	req.Subject = strings.TrimSpace(req.Subject)
 	req.AnonCred = strings.TrimSpace(req.AnonCred)
+	req.Transport = normalizeTokenTransport(req.Transport)
+	if req.Transport != "" && req.Transport != "policy-json" && req.Transport != "wireguard-udp" {
+		http.Error(w, "unsupported transport", http.StatusBadRequest)
+		return
+	}
 	tokenType := crypto.NormalizeTokenType(req.TokenType)
 	if tokenType == "" {
 		http.Error(w, "invalid token_type", http.StatusBadRequest)
@@ -766,7 +777,7 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 				http.Error(w, err.Error(), http.StatusPaymentRequired)
 				return
 			}
-			claims = baseClaimsForTier(s.issuerID, subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, exitScope)
+			claims = baseClaimsForTierWithTransport(s.issuerID, subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, exitScope, req.Transport, tokenTransportEnforcesPortPolicy(req.Transport))
 			claims.AnonCredID = anonymousCredentialPresentationID(s.issuerID, cred.CredentialID, claims.TokenID, s.anonCredExposeID)
 		} else {
 			if s.clientAllowlistOnly && !s.subjectEligibleForClientToken(req.Subject) {
@@ -779,7 +790,7 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 				http.Error(w, err.Error(), http.StatusPaymentRequired)
 				return
 			}
-			claims = baseClaimsForTier(s.issuerID, req.Subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, exitScope)
+			claims = baseClaimsForTierWithTransport(s.issuerID, req.Subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, exitScope, req.Transport, tokenTransportEnforcesPortPolicy(req.Transport))
 		}
 	case crypto.TokenTypeProviderRole:
 		if req.Subject == "" {
@@ -2627,6 +2638,14 @@ func newSettlementServiceFromEnv() settlement.Service {
 			}
 			allowInsecureHTTP = v
 		}
+		trustedBridgeFinality := false
+		if raw := strings.TrimSpace(os.Getenv(prefix + "TRUSTED_BRIDGE_FINALITY")); raw != "" {
+			v, err := strconv.ParseBool(raw)
+			if err != nil {
+				return nil, endpoint, fmt.Errorf("%sTRUSTED_BRIDGE_FINALITY must be boolean: %w", prefix, err)
+			}
+			trustedBridgeFinality = v
+		}
 
 		queueSize := 256
 		if raw := strings.TrimSpace(os.Getenv(prefix + "QUEUE_SIZE")); raw != "" {
@@ -2666,6 +2685,10 @@ func newSettlementServiceFromEnv() settlement.Service {
 			HTTPTimeout:           timeout,
 			AllowInsecureHTTP:     allowInsecureHTTP,
 			SubmitMode:            submitMode,
+			TrustedBridgeFinality: trustedBridgeFinality,
+			RewardProofAuthToken:  strings.TrimSpace(os.Getenv(prefix + "REWARD_PROOF_AUTH_TOKEN")),
+			FinalityAuthToken:     strings.TrimSpace(os.Getenv(prefix + "FINALITY_AUTH_TOKEN")),
+			RewardProofVerifierID: strings.TrimSpace(os.Getenv(prefix + "REWARD_PROOF_VERIFIER_ID")),
 			SignedTxBroadcastPath: strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_BROADCAST_PATH")),
 			SignedTxChainID:       strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_CHAIN_ID")),
 			SignedTxSigner:        strings.TrimSpace(os.Getenv(prefix + "SIGNED_TX_SIGNER")),
@@ -2718,6 +2741,14 @@ func newSettlementServiceFromEnv() settlement.Service {
 	return settlement.NewMemoryService(opts...)
 }
 
+func settlementServiceChainBacked(svc settlement.Service) bool {
+	type chainBackedReporter interface {
+		ChainBacked() bool
+	}
+	reporter, ok := svc.(chainBackedReporter)
+	return ok && reporter.ChainBacked()
+}
+
 func normalizeExitScopeIDs(raw []string) []string {
 	if len(raw) == 0 {
 		return nil
@@ -2754,6 +2785,14 @@ func redactEndpointForLog(raw string) string {
 }
 
 func baseClaimsForTier(issuerID string, subject string, keyEpoch int64, audience string, tokenType string, cnfPubKey string, tier int, expires time.Time, exitScope []string) crypto.CapabilityClaims {
+	return baseClaimsForTierWithTransport(issuerID, subject, keyEpoch, audience, tokenType, cnfPubKey, tier, expires, exitScope, "policy-json", true)
+}
+
+func baseClaimsForTierWithPortPolicy(issuerID string, subject string, keyEpoch int64, audience string, tokenType string, cnfPubKey string, tier int, expires time.Time, exitScope []string, includePortPolicy bool) crypto.CapabilityClaims {
+	return baseClaimsForTierWithTransport(issuerID, subject, keyEpoch, audience, tokenType, cnfPubKey, tier, expires, exitScope, "policy-json", includePortPolicy)
+}
+
+func baseClaimsForTierWithTransport(issuerID string, subject string, keyEpoch int64, audience string, tokenType string, cnfPubKey string, tier int, expires time.Time, exitScope []string, transport string, includePortPolicy bool) crypto.CapabilityClaims {
 	claims := crypto.CapabilityClaims{
 		Issuer:     issuerID,
 		Audience:   strings.TrimSpace(audience),
@@ -2761,6 +2800,7 @@ func baseClaimsForTier(issuerID string, subject string, keyEpoch int64, audience
 		KeyEpoch:   keyEpoch,
 		TokenType:  tokenType,
 		CNFEd25519: strings.TrimSpace(cnfPubKey),
+		Transport:  normalizeTokenTransport(transport),
 		Tier:       clampTier(tier),
 		ExpiryUnix: expires.Unix(),
 		TokenID:    randomID("", 18),
@@ -2772,12 +2812,16 @@ func baseClaimsForTier(issuerID string, subject string, keyEpoch int64, audience
 		claims.BWKbps = 512
 		claims.ConnRate = 20
 		claims.MaxConns = 50
-		claims.DenyPorts = []int{25}
+		if includePortPolicy {
+			claims.DenyPorts = []int{25}
+		}
 	case 2:
 		claims.BWKbps = 2048
 		claims.ConnRate = 100
 		claims.MaxConns = 200
-		claims.DenyPorts = []int{25}
+		if includePortPolicy {
+			claims.DenyPorts = []int{25}
+		}
 	case 3:
 		claims.BWKbps = 10240
 		claims.ConnRate = 300
@@ -2785,6 +2829,23 @@ func baseClaimsForTier(issuerID string, subject string, keyEpoch int64, audience
 	}
 
 	return claims
+}
+
+func tokenTransportEnforcesPortPolicy(transport string) bool {
+	switch normalizeTokenTransport(transport) {
+	case "wireguard-udp":
+		return false
+	default:
+		return true
+	}
+}
+
+func normalizeTokenTransport(transport string) string {
+	transport = strings.TrimSpace(transport)
+	if transport == "" {
+		return "policy-json"
+	}
+	return transport
 }
 
 func baseProviderClaims(issuerID string, subject string, keyEpoch int64, tier int, cnfPubKey string, expires time.Time) crypto.CapabilityClaims {

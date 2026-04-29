@@ -31,7 +31,15 @@ message QueryPenaltyDecisionResponse {
   bool found = 2;
 }
 
-message QueryListSlashEvidenceRequest {}
+message QueryListSlashEvidenceRequest {
+  string provider_id = 1;
+  string session_id = 2;
+  string violation_type = 3;
+  int64 submitted_at_or_after_unix = 4;
+  int64 submitted_before_unix = 5;
+  optional bool include_failed = 6;
+  bool include_zero_submitted = 7;
+}
 
 message QueryListSlashEvidenceResponse {
   repeated SlashEvidence evidence = 1;

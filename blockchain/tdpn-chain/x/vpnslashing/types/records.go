@@ -2,7 +2,9 @@ package types
 
 import (
 	"errors"
+	"net/url"
 	"strings"
+	"unicode"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 )
@@ -16,6 +18,7 @@ const (
 	maxViolationTypeLen   = 64
 	maxProofHashLength    = 1024
 	maxPenaltyIDLength    = 128
+	maxSlashDenomLength   = 64
 )
 
 var objectiveViolationTypeSet = map[string]struct{}{
@@ -36,8 +39,25 @@ func NormalizeEvidenceID(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
+// NormalizeProviderID canonicalizes provider identifiers for storage, lookup,
+// and slash-hold matching.
+func NormalizeProviderID(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+// NormalizeSessionID canonicalizes session identifiers for storage, lookup,
+// and slash-hold matching.
+func NormalizeSessionID(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
 // NormalizePenaltyID canonicalizes penalty identifiers for storage and lookup.
 func NormalizePenaltyID(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+// NormalizeSlashDenom canonicalizes slash currency/denom input for storage.
+func NormalizeSlashDenom(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
@@ -47,12 +67,37 @@ func NormalizePenaltyID(value string) string {
 func CanonicalObjectiveEvidenceIdentity(record SlashEvidence) string {
 	parts := []string{
 		canonicalObjectiveIdentityToken(record.Kind),
-		canonicalObjectiveIdentityToken(record.ProviderID),
-		canonicalObjectiveIdentityToken(record.SessionID),
+		NormalizeProviderID(record.ProviderID),
+		NormalizeSessionID(record.SessionID),
 		canonicalObjectiveIdentityToken(NormalizeViolationType(record.ViolationType)),
-		canonicalObjectiveIdentityToken(record.ProofHash),
+		canonicalObjectiveIdentityToken(CanonicalObjectiveEvidenceProofRef(record.ProofHash)),
 	}
 	return strings.Join(parts, "|")
+}
+
+// CanonicalObjectiveEvidenceProofRef unwraps bridge amount/currency metadata
+// so duplicate incident detection remains keyed by the objective proof.
+func CanonicalObjectiveEvidenceProofRef(value string) string {
+	value = strings.TrimSpace(value)
+	if unwrapped, ok := bridgeWrappedEvidenceRef(value); ok {
+		return unwrapped
+	}
+	return value
+}
+
+func bridgeWrappedEvidenceRef(value string) (string, bool) {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", false
+	}
+	if !strings.EqualFold(parsed.Scheme, "obj") || !strings.EqualFold(parsed.Host, "settlement-slash") {
+		return "", false
+	}
+	evidenceRef := strings.TrimSpace(parsed.Query().Get("evidence_ref"))
+	if evidenceRef == "" {
+		return "", false
+	}
+	return evidenceRef, true
 }
 
 func canonicalObjectiveIdentityToken(value string) string {
@@ -67,15 +112,21 @@ type SlashEvidence struct {
 	ViolationType   string
 	Kind            string
 	ProofHash       string
+	SlashAmount     int64
+	SlashDenom      string
 	SubmittedAtUnix int64
 	Status          chaintypes.ReconciliationStatus
 }
 
 // PenaltyDecision captures slash/jail intent generated from verified evidence.
+// SlashBasisPoint remains valid for stake-relative slashing; SlashAmount and
+// SlashDenom are required only when a concrete token-denominated slash is set.
 type PenaltyDecision struct {
 	PenaltyID       string
 	EvidenceID      string
 	SlashBasisPoint uint32
+	SlashAmount     int64
+	SlashDenom      string
 	Jailed          bool
 	AppliedAtUnix   int64
 	Status          chaintypes.ReconciliationStatus
@@ -126,6 +177,10 @@ func (e SlashEvidence) ValidateBasic() error {
 	if _, ok := objectiveViolationTypeSet[canonicalViolationType]; !ok {
 		return errors.New("violation type must be one of: double-sign, downtime-proof, invalid-settlement-proof, session-replay-proof, sponsor-overdraft-proof")
 	}
+	hasTypedSlashValue := e.SlashAmount != 0 || strings.TrimSpace(e.SlashDenom) != ""
+	if err := validateSlashValue(e.SlashAmount, e.SlashDenom, hasTypedSlashValue); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -147,8 +202,34 @@ func (d PenaltyDecision) ValidateBasic() error {
 	if d.SlashBasisPoint > 10000 {
 		return errors.New("slash basis points cannot exceed 10000")
 	}
-	if d.SlashBasisPoint == 0 && !d.Jailed {
+	hasTypedSlashValue := d.SlashAmount != 0 || strings.TrimSpace(d.SlashDenom) != ""
+	if err := validateSlashValue(d.SlashAmount, d.SlashDenom, hasTypedSlashValue); err != nil {
+		return err
+	}
+	if d.SlashBasisPoint == 0 && d.SlashAmount == 0 && !d.Jailed {
 		return errors.New("penalty decision must slash or jail")
+	}
+	return nil
+}
+
+func validateSlashValue(amount int64, denom string, requirePositive bool) error {
+	canonicalDenom := NormalizeSlashDenom(denom)
+	if amount < 0 {
+		return errors.New("slash amount cannot be negative")
+	}
+	if requirePositive && amount == 0 {
+		return errors.New("slash amount must be positive")
+	}
+	if (amount > 0 || requirePositive) && canonicalDenom == "" {
+		return errors.New("slash denom is required")
+	}
+	if canonicalDenom != "" && len(canonicalDenom) > maxSlashDenomLength {
+		return errors.New("slash denom exceeds 64 characters")
+	}
+	if canonicalDenom != "" && strings.IndexFunc(canonicalDenom, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	}) >= 0 {
+		return errors.New("slash denom must be a canonical non-empty token")
 	}
 	return nil
 }

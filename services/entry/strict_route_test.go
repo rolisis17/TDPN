@@ -48,6 +48,33 @@ func TestValidateStrictExitControlRouteRejectsLoopbackAliasHost(t *testing.T) {
 	}
 }
 
+func TestValidateStrictExitControlRouteAllowsUnresolvedHostnameHost(t *testing.T) {
+	t.Parallel()
+
+	if err := validateStrictExitControlRoute("https://relay.example.invalid:8084", "relay.example.invalid:51820"); err != nil {
+		t.Fatalf("expected unresolved hostname fixture to remain accepted, got %v", err)
+	}
+}
+
+func TestValidateStrictExitControlRouteRejectsMismatchedIPHost(t *testing.T) {
+	t.Parallel()
+
+	if err := validateStrictExitControlRoute("https://8.8.8.8:8084", "1.1.1.1:51820"); err == nil {
+		t.Fatal("expected strict mode to reject mismatched control/data IPs")
+	}
+}
+
+func TestStrictRouteHostnameResolvesToDisallowed(t *testing.T) {
+	t.Parallel()
+
+	if !strictRouteHostnameResolvesToDisallowed("localhost") {
+		t.Fatal("expected localhost resolution to be treated as disallowed")
+	}
+	if strictRouteHostnameResolvesToDisallowed("relay.example.invalid") {
+		t.Fatal("expected unresolved hostname to avoid DNS-derived disallow decision")
+	}
+}
+
 func TestValidateStrictExitControlRouteAllowsPublicIPHost(t *testing.T) {
 	t.Parallel()
 

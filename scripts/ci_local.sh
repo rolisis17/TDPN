@@ -504,6 +504,15 @@ echo "[ci] local API gpm bootstrap trust integration"
 echo "[ci] desktop scaffold contract integration"
 ./scripts/integration_desktop_scaffold_contract.sh
 
+echo "[ci] desktop admin-console contract integration"
+./scripts/integration_desktop_admin_console_contract.sh
+
+echo "[ci] desktop admin-console release bundle guardrails integration"
+./scripts/integration_desktop_admin_console_release_bundle_guardrails.sh
+
+echo "[ci] GPM admin settlement contract integration"
+./scripts/integration_gpm_admin_settlement_contract.sh
+
 echo "[ci] web portal contract integration"
 ./scripts/integration_web_portal_contract.sh
 

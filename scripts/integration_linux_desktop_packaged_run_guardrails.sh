@@ -132,6 +132,8 @@ FAKE_EXECUTABLE_PATH="$TMP_DIR/fake-desktop"
 printf '%s\n' "placeholder desktop executable used by dry-run integration guardrails" >"$FAKE_EXECUTABLE_PATH"
 FAKE_REBRAND_EXECUTABLE_PATH="$TMP_DIR/global-private-mesh-desktop"
 printf '%s\n' "placeholder rebrand desktop executable used by dry-run integration guardrails" >"$FAKE_REBRAND_EXECUTABLE_PATH"
+FAKE_ADMIN_EXECUTABLE_PATH="$TMP_DIR/gpm-admin-console"
+printf '%s\n' "placeholder admin console executable used by dry-run integration guardrails" >"$FAKE_ADMIN_EXECUTABLE_PATH"
 
 MISSING_EXECUTABLE_PATH="$TMP_DIR/missing-desktop"
 DOCTOR_MARKER_PATH="$TMP_DIR/doctor.marker"
@@ -168,8 +170,8 @@ run_expect_pass \
   env \
     DESKTOP_LINUX_DOCTOR_SCRIPT_UNDER_TEST="$FAKE_DOCTOR_SCRIPT" \
     DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT_UNDER_TEST="$FAKE_BOOTSTRAP_SCRIPT" \
-    GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING= \
-    TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING= \
+    GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING= \
+    TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING= \
     DOCTOR_MARKER_PATH="$DOCTOR_MARKER_PATH" \
     DOCTOR_ARGS_MARKER_PATH="$DOCTOR_ARGS_MARKER_PATH" \
     BOOTSTRAP_ARGS_MARKER_PATH="$BOOTSTRAP_ARGS_MARKER_PATH" \
@@ -189,7 +191,7 @@ assert_file_contains_regex "$SUMMARY_JSON_PATH" '"rc":[[:space:]]*0' "summary rc
 assert_file_contains_regex "$SUMMARY_JSON_PATH" '"platform":[[:space:]]*"linux"' "summary platform"
 assert_file_contains_regex "$SUMMARY_JSON_PATH" '"mode":[[:space:]]*"desktop_packaged_run_scaffold"' "summary mode"
 assert_file_contains_regex "$SUMMARY_JSON_PATH" '"dry_run":[[:space:]]*true' "summary dry_run"
-assert_file_contains_regex "$SUMMARY_JSON_PATH" '"install_missing_intent":[[:space:]]*true' "summary install intent"
+assert_file_contains_regex "$SUMMARY_JSON_PATH" '"install_missing_intent":[[:space:]]*false' "summary install intent"
 assert_file_contains_regex "$SUMMARY_JSON_PATH" '"api_addr":[[:space:]]*"127\.0\.0\.1:8095"' "summary api_addr"
 assert_file_contains_regex "$SUMMARY_JSON_PATH" '"resolved_desktop_executable_path":[[:space:]]*".+"' "summary resolved path"
 assert_file_contains_regex "$SUMMARY_JSON_PATH" '"resolved_desktop_executable_source":[[:space:]]*"override"' "summary resolved source"
@@ -202,20 +204,20 @@ assert_file_contains_regex "$SUMMARY_JSON_PATH" '"status":[[:space:]]*"pass"' "s
 assert_file_contains_regex "$SUMMARY_JSON_PATH" '"doctor_summary_json_forwarded":[[:space:]]*""' "summary doctor summary forward path default empty"
 assert_file_contains_fixed "$BOOTSTRAP_ARGS_MARKER_PATH" '--mode run-full' "default bootstrap mode"
 assert_file_contains_fixed "$BOOTSTRAP_ARGS_MARKER_PATH" '--desktop-launch-strategy packaged' "default packaged launch strategy"
-assert_file_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--mode fix' "default doctor mode=fix"
-assert_file_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--install-missing' "default doctor install forwarding"
-assert_file_contains_fixed "$BOOTSTRAP_ARGS_MARKER_PATH" '--install-missing' "default bootstrap install forwarding"
+assert_file_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--mode check' "default doctor mode=check"
+assert_file_not_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--install-missing' "default doctor install forwarding"
+assert_file_not_contains_fixed "$BOOTSTRAP_ARGS_MARKER_PATH" '--install-missing' "default bootstrap install forwarding"
 
 reset_markers
 
-echo "[linux-desktop-packaged-run-guardrails] GPM env disable forces doctor check mode and removes install forwarding"
+echo "[linux-desktop-packaged-run-guardrails] GPM packaged-run env disable forces doctor check mode and removes install forwarding"
 run_expect_pass \
   "dry_run_install_intent_gpm_disable_check" \
   env \
     DESKTOP_LINUX_DOCTOR_SCRIPT_UNDER_TEST="$FAKE_DOCTOR_SCRIPT" \
     DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT_UNDER_TEST="$FAKE_BOOTSTRAP_SCRIPT" \
-    GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=0 \
-    TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=1 \
+    GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING=0 \
+    TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING=1 \
     DOCTOR_MARKER_PATH="$DOCTOR_MARKER_PATH" \
     DOCTOR_ARGS_MARKER_PATH="$DOCTOR_ARGS_MARKER_PATH" \
     BOOTSTRAP_ARGS_MARKER_PATH="$BOOTSTRAP_ARGS_MARKER_PATH" \
@@ -224,20 +226,20 @@ run_expect_pass \
       --desktop-executable-path "$FAKE_EXECUTABLE_PATH"
 
 assert_runtime_markers_present "GPM env disable check"
-assert_file_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--mode check' "GPM env disable doctor mode=check"
-assert_file_not_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--install-missing' "GPM env disable doctor install forwarding"
-assert_file_not_contains_fixed "$BOOTSTRAP_ARGS_MARKER_PATH" '--install-missing' "GPM env disable bootstrap install forwarding"
+assert_file_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--mode check' "GPM packaged-run env disable doctor mode=check"
+assert_file_not_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--install-missing' "GPM packaged-run env disable doctor install forwarding"
+assert_file_not_contains_fixed "$BOOTSTRAP_ARGS_MARKER_PATH" '--install-missing' "GPM packaged-run env disable bootstrap install forwarding"
 
 reset_markers
 
-echo "[linux-desktop-packaged-run-guardrails] GPM env enable keeps doctor fix mode and install forwarding"
+echo "[linux-desktop-packaged-run-guardrails] GPM packaged-run env enable keeps doctor fix mode and install forwarding"
 run_expect_pass \
   "dry_run_install_intent_gpm_enable_fix" \
   env \
     DESKTOP_LINUX_DOCTOR_SCRIPT_UNDER_TEST="$FAKE_DOCTOR_SCRIPT" \
     DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT_UNDER_TEST="$FAKE_BOOTSTRAP_SCRIPT" \
-    GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=1 \
-    TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=0 \
+    GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING=1 \
+    TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING=0 \
     DOCTOR_MARKER_PATH="$DOCTOR_MARKER_PATH" \
     DOCTOR_ARGS_MARKER_PATH="$DOCTOR_ARGS_MARKER_PATH" \
     BOOTSTRAP_ARGS_MARKER_PATH="$BOOTSTRAP_ARGS_MARKER_PATH" \
@@ -246,20 +248,20 @@ run_expect_pass \
       --desktop-executable-path "$FAKE_EXECUTABLE_PATH"
 
 assert_runtime_markers_present "GPM env enable fix"
-assert_file_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--mode fix' "GPM env enable doctor mode=fix"
-assert_file_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--install-missing' "GPM env enable doctor install forwarding"
-assert_file_contains_fixed "$BOOTSTRAP_ARGS_MARKER_PATH" '--install-missing' "GPM env enable bootstrap install forwarding"
+assert_file_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--mode fix' "GPM packaged-run env enable doctor mode=fix"
+assert_file_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--install-missing' "GPM packaged-run env enable doctor install forwarding"
+assert_file_contains_fixed "$BOOTSTRAP_ARGS_MARKER_PATH" '--install-missing' "GPM packaged-run env enable bootstrap install forwarding"
 
 reset_markers
 
-echo "[linux-desktop-packaged-run-guardrails] TDPN legacy alias disable applies when GPM env is unset"
+echo "[linux-desktop-packaged-run-guardrails] TDPN packaged-run legacy alias disable applies when GPM env is unset"
 run_expect_pass \
   "dry_run_install_intent_tdpn_disable_check" \
   env \
     DESKTOP_LINUX_DOCTOR_SCRIPT_UNDER_TEST="$FAKE_DOCTOR_SCRIPT" \
     DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT_UNDER_TEST="$FAKE_BOOTSTRAP_SCRIPT" \
-    GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING= \
-    TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=0 \
+    GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING= \
+    TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING=0 \
     DOCTOR_MARKER_PATH="$DOCTOR_MARKER_PATH" \
     DOCTOR_ARGS_MARKER_PATH="$DOCTOR_ARGS_MARKER_PATH" \
     BOOTSTRAP_ARGS_MARKER_PATH="$BOOTSTRAP_ARGS_MARKER_PATH" \
@@ -268,9 +270,9 @@ run_expect_pass \
       --desktop-executable-path "$FAKE_EXECUTABLE_PATH"
 
 assert_runtime_markers_present "TDPN legacy disable check"
-assert_file_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--mode check' "TDPN legacy disable doctor mode=check"
-assert_file_not_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--install-missing' "TDPN legacy disable doctor install forwarding"
-assert_file_not_contains_fixed "$BOOTSTRAP_ARGS_MARKER_PATH" '--install-missing' "TDPN legacy disable bootstrap install forwarding"
+assert_file_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--mode check' "TDPN packaged-run legacy disable doctor mode=check"
+assert_file_not_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--install-missing' "TDPN packaged-run legacy disable doctor install forwarding"
+assert_file_not_contains_fixed "$BOOTSTRAP_ARGS_MARKER_PATH" '--install-missing' "TDPN packaged-run legacy disable bootstrap install forwarding"
 
 reset_markers
 
@@ -280,8 +282,8 @@ run_expect_pass \
   env \
     DESKTOP_LINUX_DOCTOR_SCRIPT_UNDER_TEST="$FAKE_DOCTOR_SCRIPT" \
     DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT_UNDER_TEST="$FAKE_BOOTSTRAP_SCRIPT" \
-    GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=1 \
-    TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=1 \
+    GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING=1 \
+    TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING=1 \
     DOCTOR_MARKER_PATH="$DOCTOR_MARKER_PATH" \
     DOCTOR_ARGS_MARKER_PATH="$DOCTOR_ARGS_MARKER_PATH" \
     BOOTSTRAP_ARGS_MARKER_PATH="$BOOTSTRAP_ARGS_MARKER_PATH" \
@@ -303,8 +305,8 @@ run_expect_pass \
   env \
     DESKTOP_LINUX_DOCTOR_SCRIPT_UNDER_TEST="$FAKE_DOCTOR_SCRIPT" \
     DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT_UNDER_TEST="$FAKE_BOOTSTRAP_SCRIPT" \
-    GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=0 \
-    TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING=0 \
+    GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING=0 \
+    TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING=0 \
     DOCTOR_MARKER_PATH="$DOCTOR_MARKER_PATH" \
     DOCTOR_ARGS_MARKER_PATH="$DOCTOR_ARGS_MARKER_PATH" \
     BOOTSTRAP_ARGS_MARKER_PATH="$BOOTSTRAP_ARGS_MARKER_PATH" \
@@ -317,6 +319,30 @@ assert_runtime_markers_present "explicit --install-missing precedence"
 assert_file_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--mode fix' "explicit --install-missing doctor mode=fix"
 assert_file_contains_fixed "$DOCTOR_ARGS_MARKER_PATH" '--install-missing' "explicit --install-missing doctor install forwarding"
 assert_file_contains_fixed "$BOOTSTRAP_ARGS_MARKER_PATH" '--install-missing' "explicit --install-missing bootstrap install forwarding"
+
+reset_markers
+
+echo "[linux-desktop-packaged-run-guardrails] invalid GPM install remediation env fails closed before TDPN alias"
+run_expect_fail_regex \
+  "invalid_gpm_install_env_fail" \
+  "invalid boolean value for GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING|install remediation fallback" \
+  env \
+    DESKTOP_LINUX_DOCTOR_SCRIPT_UNDER_TEST="$FAKE_DOCTOR_SCRIPT" \
+    DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT_UNDER_TEST="$FAKE_BOOTSTRAP_SCRIPT" \
+    GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING=maybe \
+    TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING=1 \
+    DOCTOR_MARKER_PATH="$DOCTOR_MARKER_PATH" \
+    DOCTOR_ARGS_MARKER_PATH="$DOCTOR_ARGS_MARKER_PATH" \
+    BOOTSTRAP_ARGS_MARKER_PATH="$BOOTSTRAP_ARGS_MARKER_PATH" \
+    "$SCRIPT_UNDER_TEST" \
+      --dry-run \
+      --desktop-executable-path "$FAKE_EXECUTABLE_PATH"
+
+if [[ -f "$DOCTOR_MARKER_PATH" || -f "$DOCTOR_ARGS_MARKER_PATH" || -f "$BOOTSTRAP_ARGS_MARKER_PATH" ]]; then
+  echo "linux desktop packaged-run guardrails failed: invalid install env rejection must happen before doctor/bootstrap"
+  ls -la "$TMP_DIR"
+  exit 1
+fi
 
 reset_markers
 
@@ -340,6 +366,75 @@ fi
 if ! grep -F -- "--desktop-executable-override-path $FAKE_REBRAND_EXECUTABLE_PATH" "$BOOTSTRAP_ARGS_MARKER_PATH" >/dev/null 2>&1; then
   echo "linux desktop packaged-run guardrails failed: bootstrap invocation did not include rebrand override path"
   cat "$BOOTSTRAP_ARGS_MARKER_PATH"
+  exit 1
+fi
+
+reset_markers
+
+echo "[linux-desktop-packaged-run-guardrails] public packaged mode refuses daemon admin route env before doctor/bootstrap"
+run_expect_fail_regex \
+  "public_admin_routes_env_fail" \
+  "public packaged mode refuses daemon admin routes|GPM Admin Console" \
+  env \
+    DESKTOP_LINUX_DOCTOR_SCRIPT_UNDER_TEST="$FAKE_DOCTOR_SCRIPT" \
+    DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT_UNDER_TEST="$FAKE_BOOTSTRAP_SCRIPT" \
+    GPM_LOCAL_API_ADMIN_ROUTES=1 \
+    TDPN_LOCAL_API_ADMIN_ROUTES=0 \
+    DOCTOR_MARKER_PATH="$DOCTOR_MARKER_PATH" \
+    DOCTOR_ARGS_MARKER_PATH="$DOCTOR_ARGS_MARKER_PATH" \
+    BOOTSTRAP_ARGS_MARKER_PATH="$BOOTSTRAP_ARGS_MARKER_PATH" \
+    "$SCRIPT_UNDER_TEST" \
+      --dry-run \
+      --desktop-executable-path "$FAKE_EXECUTABLE_PATH"
+
+if [[ -f "$DOCTOR_MARKER_PATH" || -f "$DOCTOR_ARGS_MARKER_PATH" || -f "$BOOTSTRAP_ARGS_MARKER_PATH" ]]; then
+  echo "linux desktop packaged-run guardrails failed: admin-route rejection must happen before doctor/bootstrap"
+  ls -la "$TMP_DIR"
+  exit 1
+fi
+
+reset_markers
+
+echo "[linux-desktop-packaged-run-guardrails] public packaged mode refuses admin console env before doctor/bootstrap"
+run_expect_fail_regex \
+  "public_admin_console_env_fail" \
+  "public packaged mode refuses admin console mode|GPM Admin Console" \
+  env \
+    DESKTOP_LINUX_DOCTOR_SCRIPT_UNDER_TEST="$FAKE_DOCTOR_SCRIPT" \
+    DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT_UNDER_TEST="$FAKE_BOOTSTRAP_SCRIPT" \
+    GPM_DESKTOP_ADMIN_CONSOLE=1 \
+    DOCTOR_MARKER_PATH="$DOCTOR_MARKER_PATH" \
+    DOCTOR_ARGS_MARKER_PATH="$DOCTOR_ARGS_MARKER_PATH" \
+    BOOTSTRAP_ARGS_MARKER_PATH="$BOOTSTRAP_ARGS_MARKER_PATH" \
+    "$SCRIPT_UNDER_TEST" \
+      --dry-run \
+      --desktop-executable-path "$FAKE_EXECUTABLE_PATH"
+
+if [[ -f "$DOCTOR_MARKER_PATH" || -f "$DOCTOR_ARGS_MARKER_PATH" || -f "$BOOTSTRAP_ARGS_MARKER_PATH" ]]; then
+  echo "linux desktop packaged-run guardrails failed: admin-console env rejection must happen before doctor/bootstrap"
+  ls -la "$TMP_DIR"
+  exit 1
+fi
+
+reset_markers
+
+echo "[linux-desktop-packaged-run-guardrails] public packaged mode refuses admin console executable override"
+run_expect_fail_regex \
+  "public_admin_console_executable_fail" \
+  "public packaged mode refuses admin console executable|admin_console_executable_guard" \
+  env \
+    DESKTOP_LINUX_DOCTOR_SCRIPT_UNDER_TEST="$FAKE_DOCTOR_SCRIPT" \
+    DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT_UNDER_TEST="$FAKE_BOOTSTRAP_SCRIPT" \
+    DOCTOR_MARKER_PATH="$DOCTOR_MARKER_PATH" \
+    DOCTOR_ARGS_MARKER_PATH="$DOCTOR_ARGS_MARKER_PATH" \
+    BOOTSTRAP_ARGS_MARKER_PATH="$BOOTSTRAP_ARGS_MARKER_PATH" \
+    "$SCRIPT_UNDER_TEST" \
+      --dry-run \
+      --desktop-executable-path "$FAKE_ADMIN_EXECUTABLE_PATH"
+
+if [[ -f "$DOCTOR_MARKER_PATH" || -f "$DOCTOR_ARGS_MARKER_PATH" || -f "$BOOTSTRAP_ARGS_MARKER_PATH" ]]; then
+  echo "linux desktop packaged-run guardrails failed: admin executable rejection must happen before doctor/bootstrap"
+  ls -la "$TMP_DIR"
   exit 1
 fi
 

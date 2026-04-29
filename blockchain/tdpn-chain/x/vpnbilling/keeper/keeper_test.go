@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -235,25 +236,27 @@ func TestKeeperFinalizeSettlementDefaultsAndIdempotency(t *testing.T) {
 		SessionID:     "sess-1",
 		AssetDenom:    "uusdc",
 		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 	if err != nil {
 		t.Fatalf("CreateReservation returned unexpected error: %v", err)
 	}
 
 	input := types.SettlementRecord{
-		SettlementID:  "set-1",
-		ReservationID: reservation.ReservationID,
-		SessionID:     reservation.SessionID,
-		BilledAmount:  50,
-		AssetDenom:    reservation.AssetDenom,
+		SettlementID:   "set-1",
+		ReservationID:  reservation.ReservationID,
+		SessionID:      reservation.SessionID,
+		BilledAmount:   50,
+		AssetDenom:     reservation.AssetDenom,
+		OperationState: chaintypes.ReconciliationConfirmed,
 	}
 
 	finalized, err := k.FinalizeSettlement(input)
 	if err != nil {
 		t.Fatalf("FinalizeSettlement returned unexpected error: %v", err)
 	}
-	if finalized.OperationState != chaintypes.ReconciliationSubmitted {
-		t.Fatalf("expected operation state %q, got %q", chaintypes.ReconciliationSubmitted, finalized.OperationState)
+	if finalized.OperationState != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected operation state %q, got %q", chaintypes.ReconciliationConfirmed, finalized.OperationState)
 	}
 
 	idempotent, err := k.FinalizeSettlement(input)
@@ -264,14 +267,14 @@ func TestKeeperFinalizeSettlementDefaultsAndIdempotency(t *testing.T) {
 		t.Fatalf("expected idempotent result to match finalized record, got %+v vs %+v", idempotent, finalized)
 	}
 
-	explicitSubmitted := input
-	explicitSubmitted.OperationState = chaintypes.ReconciliationSubmitted
-	idempotent, err = k.FinalizeSettlement(explicitSubmitted)
+	explicitConfirmed := input
+	explicitConfirmed.OperationState = " CONFIRMED "
+	idempotent, err = k.FinalizeSettlement(explicitConfirmed)
 	if err != nil {
-		t.Fatalf("FinalizeSettlement explicit submitted idempotent call returned unexpected error: %v", err)
+		t.Fatalf("FinalizeSettlement explicit confirmed idempotent call returned unexpected error: %v", err)
 	}
 	if idempotent != finalized {
-		t.Fatalf("expected explicit submitted result to match finalized record, got %+v vs %+v", idempotent, finalized)
+		t.Fatalf("expected explicit confirmed result to match finalized record, got %+v vs %+v", idempotent, finalized)
 	}
 }
 
@@ -284,17 +287,19 @@ func TestKeeperFinalizeSettlementConflict(t *testing.T) {
 		SessionID:     "sess-1",
 		AssetDenom:    "uusdc",
 		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 	if err != nil {
 		t.Fatalf("CreateReservation returned unexpected error: %v", err)
 	}
 
 	initial := types.SettlementRecord{
-		SettlementID:  "set-1",
-		ReservationID: reservation.ReservationID,
-		SessionID:     reservation.SessionID,
-		BilledAmount:  50,
-		AssetDenom:    reservation.AssetDenom,
+		SettlementID:   "set-1",
+		ReservationID:  reservation.ReservationID,
+		SessionID:      reservation.SessionID,
+		BilledAmount:   50,
+		AssetDenom:     reservation.AssetDenom,
+		OperationState: chaintypes.ReconciliationConfirmed,
 	}
 	if _, err = k.FinalizeSettlement(initial); err != nil {
 		t.Fatalf("FinalizeSettlement returned unexpected error: %v", err)
@@ -320,28 +325,31 @@ func TestKeeperFinalizeSettlementRejectsDuplicateReservationSettlement(t *testin
 		SessionID:     "sess-duplicate-settlement",
 		AssetDenom:    "uusdc",
 		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 	if err != nil {
 		t.Fatalf("CreateReservation returned unexpected error: %v", err)
 	}
 
 	first := types.SettlementRecord{
-		SettlementID:  "set-duplicate-1",
-		ReservationID: reservation.ReservationID,
-		SessionID:     reservation.SessionID,
-		BilledAmount:  60,
-		AssetDenom:    reservation.AssetDenom,
+		SettlementID:   "set-duplicate-1",
+		ReservationID:  reservation.ReservationID,
+		SessionID:      reservation.SessionID,
+		BilledAmount:   60,
+		AssetDenom:     reservation.AssetDenom,
+		OperationState: chaintypes.ReconciliationConfirmed,
 	}
 	if _, err = k.FinalizeSettlement(first); err != nil {
 		t.Fatalf("FinalizeSettlement returned unexpected error: %v", err)
 	}
 
 	second := types.SettlementRecord{
-		SettlementID:  "set-duplicate-2",
-		ReservationID: reservation.ReservationID,
-		SessionID:     reservation.SessionID,
-		BilledAmount:  40,
-		AssetDenom:    reservation.AssetDenom,
+		SettlementID:   "set-duplicate-2",
+		ReservationID:  reservation.ReservationID,
+		SessionID:      reservation.SessionID,
+		BilledAmount:   40,
+		AssetDenom:     reservation.AssetDenom,
+		OperationState: chaintypes.ReconciliationConfirmed,
 	}
 	_, err = k.FinalizeSettlement(second)
 	if err == nil {
@@ -547,23 +555,24 @@ func TestKeeperFinalizeSettlementRejectsEmptyAssetDenomWithoutAdvancingReservati
 	}
 }
 
-func TestKeeperFinalizeSettlementAdvancesReservationStatus(t *testing.T) {
+func TestKeeperFinalizeSettlementRequiresConfirmedReservation(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		initial     chaintypes.ReconciliationStatus
-		expectAfter chaintypes.ReconciliationStatus
+		name    string
+		initial chaintypes.ReconciliationStatus
 	}{
 		{
-			name:        "pending advances to confirmed",
-			initial:     chaintypes.ReconciliationPending,
-			expectAfter: chaintypes.ReconciliationConfirmed,
+			name:    "pending rejected",
+			initial: chaintypes.ReconciliationPending,
 		},
 		{
-			name:        "submitted advances to confirmed",
-			initial:     chaintypes.ReconciliationSubmitted,
-			expectAfter: chaintypes.ReconciliationConfirmed,
+			name:    "submitted rejected",
+			initial: chaintypes.ReconciliationSubmitted,
+		},
+		{
+			name:    "failed rejected",
+			initial: chaintypes.ReconciliationFailed,
 		},
 	}
 
@@ -574,8 +583,8 @@ func TestKeeperFinalizeSettlementAdvancesReservationStatus(t *testing.T) {
 
 			k := NewKeeper()
 			reservation, err := k.CreateReservation(types.CreditReservation{
-				ReservationID: "res-1",
-				SessionID:     "sess-1",
+				ReservationID: "res-" + string(tc.initial),
+				SessionID:     "sess-" + string(tc.initial),
 				AssetDenom:    "uusdc",
 				Amount:        100,
 				Status:        tc.initial,
@@ -587,25 +596,131 @@ func TestKeeperFinalizeSettlementAdvancesReservationStatus(t *testing.T) {
 				t.Fatalf("expected initial status %q, got %q", tc.initial, reservation.Status)
 			}
 
+			settlementID := "set-" + string(tc.initial)
 			_, err = k.FinalizeSettlement(types.SettlementRecord{
-				SettlementID:  "set-1",
-				ReservationID: reservation.ReservationID,
-				SessionID:     reservation.SessionID,
-				BilledAmount:  10,
-				AssetDenom:    reservation.AssetDenom,
+				SettlementID:   settlementID,
+				ReservationID:  reservation.ReservationID,
+				SessionID:      reservation.SessionID,
+				BilledAmount:   10,
+				AssetDenom:     reservation.AssetDenom,
+				OperationState: chaintypes.ReconciliationConfirmed,
 			})
-			if err != nil {
-				t.Fatalf("FinalizeSettlement returned unexpected error: %v", err)
+			if err == nil {
+				t.Fatal("expected reservation status to reject settlement finalization")
+			}
+			if !strings.Contains(err.Error(), fmt.Sprintf(`status "%s"`, tc.initial)) {
+				t.Fatalf("expected reservation status error, got: %v", err)
+			}
+			if _, ok := k.GetSettlement(settlementID); ok {
+				t.Fatal("expected settlement to remain absent when reservation status is not confirmed")
 			}
 
 			updated, ok := k.GetReservation(reservation.ReservationID)
 			if !ok {
-				t.Fatal("expected reservation to exist after settlement finalization")
+				t.Fatal("expected reservation to exist after rejected settlement finalization")
 			}
-			if updated.Status != tc.expectAfter {
-				t.Fatalf("expected reservation status %q after finalize, got %q", tc.expectAfter, updated.Status)
+			if updated.Status != tc.initial {
+				t.Fatalf("expected reservation status %q after rejected finalize, got %q", tc.initial, updated.Status)
 			}
 		})
+	}
+}
+
+func TestKeeperFinalizeSettlementRequiresConfirmedOperationState(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		state chaintypes.ReconciliationStatus
+	}{
+		{name: "omitted rejected", state: ""},
+		{name: "pending rejected", state: chaintypes.ReconciliationPending},
+		{name: "submitted rejected", state: chaintypes.ReconciliationSubmitted},
+		{name: "failed rejected", state: chaintypes.ReconciliationFailed},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			k := NewKeeper()
+			reservation, err := k.CreateReservation(types.CreditReservation{
+				ReservationID: "res-settlement-state-" + strings.ReplaceAll(tc.name, " ", "-"),
+				SessionID:     "sess-settlement-state-" + strings.ReplaceAll(tc.name, " ", "-"),
+				AssetDenom:    "uusdc",
+				Amount:        100,
+				Status:        chaintypes.ReconciliationConfirmed,
+			})
+			if err != nil {
+				t.Fatalf("CreateReservation returned unexpected error: %v", err)
+			}
+
+			settlementID := "set-settlement-state-" + strings.ReplaceAll(tc.name, " ", "-")
+			_, err = k.FinalizeSettlement(types.SettlementRecord{
+				SettlementID:   settlementID,
+				ReservationID:  reservation.ReservationID,
+				SessionID:      reservation.SessionID,
+				BilledAmount:   10,
+				AssetDenom:     reservation.AssetDenom,
+				OperationState: tc.state,
+			})
+			if err == nil {
+				t.Fatal("expected non-confirmed settlement operation state to be rejected")
+			}
+			expectedState := tc.state
+			if expectedState == "" {
+				expectedState = chaintypes.ReconciliationSubmitted
+			}
+			if !strings.Contains(err.Error(), fmt.Sprintf(`operation state "%s"`, expectedState)) {
+				t.Fatalf("expected operation state error, got: %v", err)
+			}
+			if _, ok := k.GetSettlement(settlementID); ok {
+				t.Fatal("expected settlement to remain absent when operation state is not confirmed")
+			}
+		})
+	}
+}
+
+func TestKeeperFinalizeSettlementSettlesConfirmedReservation(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	reservation, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-confirmed-state",
+		SessionID:     "sess-confirmed-state",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
+	})
+	if err != nil {
+		t.Fatalf("CreateReservation returned unexpected error: %v", err)
+	}
+
+	settlement, err := k.FinalizeSettlement(types.SettlementRecord{
+		SettlementID:   "set-confirmed-state",
+		ReservationID:  reservation.ReservationID,
+		SessionID:      reservation.SessionID,
+		BilledAmount:   10,
+		AssetDenom:     reservation.AssetDenom,
+		OperationState: chaintypes.ReconciliationConfirmed,
+	})
+	if err != nil {
+		t.Fatalf("FinalizeSettlement returned unexpected error: %v", err)
+	}
+	if settlement.ReservationID != reservation.ReservationID {
+		t.Fatalf("expected settlement reservation %q, got %q", reservation.ReservationID, settlement.ReservationID)
+	}
+	if settlement.OperationState != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected settlement operation state %q, got %q", chaintypes.ReconciliationConfirmed, settlement.OperationState)
+	}
+
+	after, ok := k.GetReservation(reservation.ReservationID)
+	if !ok {
+		t.Fatalf("expected reservation %q to remain available", reservation.ReservationID)
+	}
+	if after.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected reservation status %q, got %q", chaintypes.ReconciliationConfirmed, after.Status)
 	}
 }
 
@@ -626,11 +741,12 @@ func TestKeeperFinalizeSettlementRejectsFailedReservationWithoutWritingSettlemen
 	}
 
 	_, err = k.FinalizeSettlement(types.SettlementRecord{
-		SettlementID:  "set-failed-state",
-		ReservationID: reservation.ReservationID,
-		SessionID:     reservation.SessionID,
-		BilledAmount:  10,
-		AssetDenom:    reservation.AssetDenom,
+		SettlementID:   "set-failed-state",
+		ReservationID:  reservation.ReservationID,
+		SessionID:      reservation.SessionID,
+		BilledAmount:   10,
+		AssetDenom:     reservation.AssetDenom,
+		OperationState: chaintypes.ReconciliationConfirmed,
 	})
 	if err == nil {
 		t.Fatal("expected failed reservation status to reject settlement finalization")
@@ -883,17 +999,19 @@ func TestKeeperFinalizeSettlementCanonicalizationCreateGetListAndReplay(t *testi
 		SessionID:     "  SESS-1  ",
 		AssetDenom:    "  UUSDC  ",
 		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 	if err != nil {
 		t.Fatalf("CreateReservation returned unexpected error: %v", err)
 	}
 
 	finalized, err := k.FinalizeSettlement(types.SettlementRecord{
-		SettlementID:  "  SET-1  ",
-		ReservationID: "  RES-1  ",
-		SessionID:     "  SESS-1  ",
-		BilledAmount:  50,
-		AssetDenom:    "  UUSDC  ",
+		SettlementID:   "  SET-1  ",
+		ReservationID:  "  RES-1  ",
+		SessionID:      "  SESS-1  ",
+		BilledAmount:   50,
+		AssetDenom:     "  UUSDC  ",
+		OperationState: "  CONFIRMED  ",
 	})
 	if err != nil {
 		t.Fatalf("FinalizeSettlement returned unexpected error: %v", err)
@@ -933,7 +1051,7 @@ func TestKeeperFinalizeSettlementCanonicalizationCreateGetListAndReplay(t *testi
 		SessionID:      "sess-1",
 		BilledAmount:   50,
 		AssetDenom:     "uusdc",
-		OperationState: chaintypes.ReconciliationSubmitted,
+		OperationState: chaintypes.ReconciliationConfirmed,
 	})
 	if err != nil {
 		t.Fatalf("FinalizeSettlement replay returned unexpected error: %v", err)
@@ -952,28 +1070,31 @@ func TestKeeperFinalizeSettlementConflictCanonicalBoundary(t *testing.T) {
 		SessionID:     "sess-1",
 		AssetDenom:    "uusdc",
 		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 	if err != nil {
 		t.Fatalf("CreateReservation returned unexpected error: %v", err)
 	}
 
 	_, err = k.FinalizeSettlement(types.SettlementRecord{
-		SettlementID:  "set-1",
-		ReservationID: reservation.ReservationID,
-		SessionID:     reservation.SessionID,
-		BilledAmount:  50,
-		AssetDenom:    reservation.AssetDenom,
+		SettlementID:   "set-1",
+		ReservationID:  reservation.ReservationID,
+		SessionID:      reservation.SessionID,
+		BilledAmount:   50,
+		AssetDenom:     reservation.AssetDenom,
+		OperationState: chaintypes.ReconciliationConfirmed,
 	})
 	if err != nil {
 		t.Fatalf("FinalizeSettlement returned unexpected error: %v", err)
 	}
 
 	_, err = k.FinalizeSettlement(types.SettlementRecord{
-		SettlementID:  "  SET-1  ",
-		ReservationID: "  RES-1  ",
-		SessionID:     "  SESS-1  ",
-		BilledAmount:  51,
-		AssetDenom:    "  UUSDC  ",
+		SettlementID:   "  SET-1  ",
+		ReservationID:  "  RES-1  ",
+		SessionID:      "  SESS-1  ",
+		BilledAmount:   51,
+		AssetDenom:     "  UUSDC  ",
+		OperationState: chaintypes.ReconciliationConfirmed,
 	})
 	if err == nil {
 		t.Fatal("expected conflict error for canonicalized settlement id with different billed amount")
@@ -993,6 +1114,7 @@ func TestKeeperFinalizeSettlementRejectsDuplicateBusinessKeyViaDifferentReservat
 		SessionID:     "sess-key-1",
 		AssetDenom:    "uusdc",
 		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 	k.UpsertReservation(types.CreditReservation{
 		ReservationID: "res-key-2",
@@ -1000,24 +1122,27 @@ func TestKeeperFinalizeSettlementRejectsDuplicateBusinessKeyViaDifferentReservat
 		SessionID:     "SESS-KEY-1",
 		AssetDenom:    "UUSDC",
 		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 
 	if _, err := k.FinalizeSettlement(types.SettlementRecord{
-		SettlementID:  "set-key-1",
-		ReservationID: "res-key-1",
-		SessionID:     "sess-key-1",
-		BilledAmount:  50,
-		AssetDenom:    "uusdc",
+		SettlementID:   "set-key-1",
+		ReservationID:  "res-key-1",
+		SessionID:      "sess-key-1",
+		BilledAmount:   50,
+		AssetDenom:     "uusdc",
+		OperationState: chaintypes.ReconciliationConfirmed,
 	}); err != nil {
 		t.Fatalf("FinalizeSettlement returned unexpected error: %v", err)
 	}
 
 	_, err := k.FinalizeSettlement(types.SettlementRecord{
-		SettlementID:  "set-key-2",
-		ReservationID: "res-key-2",
-		SessionID:     "sess-key-1",
-		BilledAmount:  50,
-		AssetDenom:    "uusdc",
+		SettlementID:   "set-key-2",
+		ReservationID:  "res-key-2",
+		SessionID:      "sess-key-1",
+		BilledAmount:   50,
+		AssetDenom:     "uusdc",
+		OperationState: chaintypes.ReconciliationConfirmed,
 	})
 	if err == nil {
 		t.Fatal("expected duplicate business-key settlement to be rejected")
@@ -1051,7 +1176,7 @@ func TestKeeperCreateReservationPropagatesStoreWriteErrors(t *testing.T) {
 	}
 }
 
-func TestKeeperFinalizeSettlementRollsBackReservationOnSettlementWriteError(t *testing.T) {
+func TestKeeperFinalizeSettlementDoesNotMutateReservationOnSettlementWriteError(t *testing.T) {
 	t.Parallel()
 
 	store := newFailWriteStore()
@@ -1062,21 +1187,23 @@ func TestKeeperFinalizeSettlementRollsBackReservationOnSettlementWriteError(t *t
 		SessionID:     "sess-rollback",
 		AssetDenom:    "uusdc",
 		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 	if err != nil {
 		t.Fatalf("CreateReservation returned unexpected error: %v", err)
 	}
-	if reservation.Status != chaintypes.ReconciliationPending {
-		t.Fatalf("expected initial status %q, got %q", chaintypes.ReconciliationPending, reservation.Status)
+	if reservation.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected initial status %q, got %q", chaintypes.ReconciliationConfirmed, reservation.Status)
 	}
 
 	store.failSettlementWrite = true
 	_, err = k.FinalizeSettlement(types.SettlementRecord{
-		SettlementID:  "set-rollback",
-		ReservationID: reservation.ReservationID,
-		SessionID:     reservation.SessionID,
-		BilledAmount:  10,
-		AssetDenom:    reservation.AssetDenom,
+		SettlementID:   "set-rollback",
+		ReservationID:  reservation.ReservationID,
+		SessionID:      reservation.SessionID,
+		BilledAmount:   10,
+		AssetDenom:     reservation.AssetDenom,
+		OperationState: chaintypes.ReconciliationConfirmed,
 	})
 	if err == nil {
 		t.Fatal("expected finalize settlement to return write error")
@@ -1092,8 +1219,8 @@ func TestKeeperFinalizeSettlementRollsBackReservationOnSettlementWriteError(t *t
 	if !ok {
 		t.Fatal("expected reservation to remain present after rollback")
 	}
-	if after.Status != chaintypes.ReconciliationPending {
-		t.Fatalf("expected reservation status rollback to %q, got %q", chaintypes.ReconciliationPending, after.Status)
+	if after.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected reservation status %q after settlement write failure, got %q", chaintypes.ReconciliationConfirmed, after.Status)
 	}
 }
 
@@ -1133,6 +1260,7 @@ func TestKeeperFinalizeSettlementFailsClosedOnCorruptSettlementListing(t *testin
 		SessionID:     "sess-corrupt-settlement",
 		AssetDenom:    "uusdc",
 		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 	if err != nil {
 		t.Fatalf("create reservation returned unexpected error: %v", err)
@@ -1141,11 +1269,12 @@ func TestKeeperFinalizeSettlementFailsClosedOnCorruptSettlementListing(t *testin
 	backend.Set(settlementKey("set-corrupt"), []byte("{"))
 
 	_, err = k.FinalizeSettlement(types.SettlementRecord{
-		SettlementID:  "set-new",
-		ReservationID: reservation.ReservationID,
-		SessionID:     reservation.SessionID,
-		BilledAmount:  5,
-		AssetDenom:    reservation.AssetDenom,
+		SettlementID:   "set-new",
+		ReservationID:  reservation.ReservationID,
+		SessionID:      reservation.SessionID,
+		BilledAmount:   5,
+		AssetDenom:     reservation.AssetDenom,
+		OperationState: chaintypes.ReconciliationConfirmed,
 	})
 	if err == nil {
 		t.Fatal("expected finalize settlement to fail closed on corrupt listing")

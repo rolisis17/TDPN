@@ -113,7 +113,7 @@ client_pid=$!
 
 ready=0
 for _ in $(seq 1 180); do
-  if rg -q "client received wg-session config:" "$LOG_CLIENT"; then
+  if rg -q "client wireguard runtime ready:" "$LOG_CLIENT"; then
     ready=1
     break
   fi

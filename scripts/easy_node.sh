@@ -200,6 +200,46 @@ seed_client_vpn_trust_file_if_empty() {
   rm -f "$keys_tmp"
 }
 
+client_vpn_signed_bootstrap_manifest_configured() {
+  local manifest_url="${GPM_BOOTSTRAP_MANIFEST_URL:-${TDPN_BOOTSTRAP_MANIFEST_URL:-}}"
+  local hmac_key="${GPM_BOOTSTRAP_MANIFEST_HMAC_KEY:-${TDPN_BOOTSTRAP_MANIFEST_HMAC_KEY:-}}"
+  local ed25519_key="${GPM_BOOTSTRAP_MANIFEST_ED25519_PUBLIC_KEY:-${TDPN_BOOTSTRAP_MANIFEST_ED25519_PUBLIC_KEY:-}}"
+  local require_signature_raw="${GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE:-${TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE:-}}"
+  local require_signature=""
+
+  if [[ -z "$manifest_url" ]]; then
+    return 1
+  fi
+  if [[ -z "$hmac_key" && -z "$ed25519_key" ]]; then
+    return 1
+  fi
+  if [[ -n "$require_signature_raw" ]]; then
+    require_signature="$(normalize_config_bool_01 "$require_signature_raw" 2>/dev/null || true)"
+    if [[ "$require_signature" != "1" ]]; then
+      return 1
+    fi
+  fi
+  return 0
+}
+
+ensure_client_vpn_prod_trust_bootstrap_or_die() {
+  local trusted_keys_file="$1"
+
+  if [[ -n "$trusted_keys_file" && -s "$trusted_keys_file" ]]; then
+    return 0
+  fi
+  if client_vpn_signed_bootstrap_manifest_configured; then
+    return 0
+  fi
+
+  echo "client-vpn-up --prod-profile requires a pre-existing non-empty DIRECTORY_TRUSTED_KEYS_FILE or an explicitly signed bootstrap manifest (GPM_BOOTSTRAP_MANIFEST_URL plus GPM_BOOTSTRAP_MANIFEST_HMAC_KEY or GPM_BOOTSTRAP_MANIFEST_ED25519_PUBLIC_KEY)."
+  echo "refusing to seed production directory trust from live /v1/pubkeys while DIRECTORY_TRUST_TOFU=0."
+  if [[ -n "$trusted_keys_file" ]]; then
+    echo "trusted keys file: $trusted_keys_file"
+  fi
+  exit 2
+}
+
 root_help_is_expert() {
   local mode="${EASY_NODE_HELP_MODE:-}"
   mode="$(printf '%s' "$mode" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
@@ -245,6 +285,7 @@ Usage:
   ./scripts/easy_node.sh desktop-installer [--platform auto|linux|windows] [desktop_installer args...]
   ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-release-bundle [--platform auto|linux|windows] [desktop_release_bundle args...]
+  ./scripts/easy_node.sh desktop-admin-console-release-bundle [desktop_admin_console_release_bundle args...]
   ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [local_api_session args...]
   ./scripts/easy_node.sh desktop-check [--platform auto|linux|windows] [desktop_doctor args...]
   ./scripts/easy_node.sh desktop-fix [--platform auto|linux|windows] [desktop_doctor args...]
@@ -453,7 +494,7 @@ Usage:
   ./scripts/easy_node.sh gpm-logic-check [gpm_logic_check args...]
   ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
   ./scripts/easy_node.sh simple-client-vpn-preflight [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--prod-profile [0|1]] [--interface IFACE]
-  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID|--subject-file PATH] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--startup-sync-timeout-sec N] [--session-reuse [0|1]] [--allow-session-churn [0|1]] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH]
+  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID|--subject-file PATH] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--allow-no-route [0|1]] [--startup-sync-timeout-sec N] [--session-reuse [0|1]] [--allow-session-churn [0|1]] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH] [--status-file PATH]
   ./scripts/easy_node.sh client-vpn-smoke [client-vpn-up args...] [--run-preflight [0|1]] [--defer-no-root [0|1]] [--status-check [0|1]] [--keep-up [0|1]] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--trust-reset-on-key-mismatch [0|1]] [--trust-reset-scope scoped|global] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-timeout-sec N] [--incident-bundle-dir PATH] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--public-ip-url URL] [--country-url URL] [--curl-timeout-sec N] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-vpn-profile-compare [--profiles CSV] [--rounds N] [--pause-sec N] [--min-pass-rate-pct N] [--fail-on-any-fail [0|1]] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--run-preflight [0|1]] [--status-check [0|1]] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--trust-reset-on-key-mismatch [0|1]] [--trust-reset-scope scoped|global] [--public-ip-url URL] [--country-url URL] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-vpn-status [--show-json [0|1]]
@@ -470,6 +511,7 @@ Usage:
   ./scripts/easy_node.sh desktop-installer [--platform auto|linux|windows] [desktop_installer args...]
   ./scripts/easy_node.sh desktop-packaged-run [--platform auto|linux|windows] [desktop_packaged_run args...]
   ./scripts/easy_node.sh desktop-release-bundle [--platform auto|linux|windows] [desktop_release_bundle args...]
+  ./scripts/easy_node.sh desktop-admin-console-release-bundle [desktop_admin_console_release_bundle args...]
   ./scripts/easy_node.sh desktop-local-api-session [--platform auto|linux|windows] [local_api_session args...]
   ./scripts/easy_node.sh desktop-check [--platform auto|linux|windows] [desktop_doctor args...]
   ./scripts/easy_node.sh desktop-fix [--platform auto|linux|windows] [desktop_doctor args...]
@@ -793,6 +835,7 @@ Notes:
   - desktop-windows-native-bootstrap-guardrails runs the Windows-native bootstrap guardrail integration contract to verify dry-run mode handling, invalid-mode fail-close behavior, and summary-json output markers before operator-facing runs.
   - desktop-windows-installer-guardrails runs the Windows desktop installer guardrail integration contract for scaffold installer command behavior and fail-close validation.
   - desktop-linux-installer-guardrails runs the Linux desktop installer guardrail integration contract for scaffold installer command behavior and fail-close validation.
+  - desktop-admin-console-release-bundle wraps the Linux-first GPM Admin Console release bundle helper script with pass-through args.
   - desktop-install-launch aliases route to desktop installer flows with build-if-missing enabled by default and launch-after-install defaults when installer scripts support launch flags; older installer scripts still run unchanged for compatibility.
   - legacy desktop platform aliases (`desktop-linux-*`, `desktop-windows-*`) remain compatible and print migration hints to unified commands; set `EASY_NODE_DESKTOP_SUPPRESS_LEGACY_HINT=1` to suppress hints in scripted environments.
   - single-machine-prod-readiness runs all production-grade checks feasible on one host (ci_local, beta_preflight, deep_test_suite, runtime-fix-record, optional dockerized 3-machine rehearsal, optional profile-compare campaign signoff, optional pre-real-host-readiness, optional Linux root real-WG matrix receipt refresh), then reports exactly which remaining blockers require machine-C/3-machine execution; in auto mode it bootstraps missing profile-compare campaign artifacts, preferring docker rehearsal endpoints when available.
@@ -2879,17 +2922,118 @@ csv_has_middle_signal() {
   return 1
 }
 
+csv_has_non_middle_signal() {
+  local csv="${1:-}"
+  local token
+  while IFS= read -r token; do
+    token="$(printf '%s' "$token" | tr '[:upper:]' '[:lower:]')"
+    token="$(trim "$token")"
+    [[ -z "$token" ]] && continue
+    case "$token" in
+      middle|relay|micro-relay|micro_relay|transit|three-hop-middle)
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  done < <(printf '%s\n' "$csv" | tr ',' '\n')
+  return 1
+}
+
+csv_has_runtime_blocked_middle_capability() {
+  local csv="${1:-}"
+  local token
+  while IFS= read -r token; do
+    token="$(printf '%s' "$token" | tr '[:upper:]' '[:lower:]')"
+    token="$(trim "$token")"
+    case "$token" in
+      two-hop|tiered-policy)
+        return 0
+        ;;
+    esac
+  done < <(printf '%s\n' "$csv" | tr ',' '\n')
+  return 1
+}
+
+decimal_ge() {
+  local value="${1:-}"
+  local min="${2:-}"
+  awk -v value="$value" -v min="$min" 'BEGIN {
+    if (value !~ /^[-+]?[0-9]+([.][0-9]+)?$/ || min !~ /^[-+]?[0-9]+([.][0-9]+)?$/) exit 1
+    exit((value + 0) >= (min + 0) ? 0 : 1)
+  }'
+}
+
+decimal_le() {
+  local value="${1:-}"
+  local max="${2:-}"
+  awk -v value="$value" -v max="$max" 'BEGIN {
+    if (value !~ /^[-+]?[0-9]+([.][0-9]+)?$/ || max !~ /^[-+]?[0-9]+([.][0-9]+)?$/) exit 1
+    exit((value + 0) <= (max + 0) ? 0 : 1)
+  }'
+}
+
+client_vpn_valid_middle_relay_endpoint() {
+  local endpoint
+  endpoint="$(trim "${1:-}")"
+  [[ -z "$endpoint" ]] && return 1
+  local port=""
+  if [[ "$endpoint" =~ ^\[([^][]+)\]:([0-9]+)$ ]]; then
+    port="${BASH_REMATCH[2]}"
+  elif [[ "$endpoint" =~ ^([^:[:space:]]+):([0-9]+)$ ]]; then
+    port="${BASH_REMATCH[2]}"
+  else
+    return 1
+  fi
+  awk -v port="$port" 'BEGIN { exit((port + 0) >= 1 && (port + 0) <= 65535 ? 0 : 1) }'
+}
+
+client_vpn_runtime_middle_relay_eligible() {
+  local relay_id="$1"
+  local role="$2"
+  local endpoint="$3"
+  local reputation="$4"
+  local uptime="$5"
+  local capacity="$6"
+  local abuse_penalty="$7"
+  local hop_roles="$8"
+  local capabilities="$9"
+
+  role="$(printf '%s' "$role" | tr '[:upper:]' '[:lower:]')"
+  role="$(trim "$role")"
+  relay_id="$(trim "$relay_id")"
+  [[ -n "$relay_id" && "$relay_id" != "null" ]] || return 1
+  [[ "$role" == "micro-relay" ]] || return 1
+  client_vpn_valid_middle_relay_endpoint "$endpoint" || return 1
+  decimal_ge "$reputation" "0.5" || return 1
+  decimal_ge "$uptime" "0.5" || return 1
+  decimal_ge "$capacity" "0.5" || return 1
+  decimal_le "$abuse_penalty" "0.5" || return 1
+  if csv_has_non_middle_signal "$hop_roles"; then
+    return 1
+  fi
+  if csv_has_runtime_blocked_middle_capability "$capabilities"; then
+    return 1
+  fi
+  return 0
+}
+
 client_vpn_middle_relay_summary() {
   local directory_urls="$1"
   local timeout_sec="${2:-8}"
+  local require_runtime_eligible="${3:-0}"
   declare -A middle_ops=()
   declare -A entry_ops=()
   declare -A exit_ops=()
+  declare -A entry_exit_ops=()
+  declare -A entry_countries=()
+  declare -A exit_countries=()
+  declare -A middle_operator_countries=()
   local middle_relays=0
   local missing_middle_operator=0
   local fetch_fail=0
   local parse_fail=0
-  local directory_url payload parsed role op hop_roles capabilities
+  local directory_url payload parsed relay_id role op country hop_roles capabilities endpoint reputation uptime capacity abuse_penalty
   local -a tls_opts
 
   while IFS= read -r directory_url; do
@@ -2902,28 +3046,50 @@ client_vpn_middle_relay_summary() {
     fi
 
     parsed=0
-    while IFS=$'\t' read -r role op hop_roles capabilities; do
+    while IFS=$'\037' read -r relay_id role op country hop_roles capabilities endpoint reputation uptime capacity abuse_penalty; do
       parsed=1
+      relay_id="$(trim "$relay_id")"
       role="$(printf '%s' "$role" | tr '[:upper:]' '[:lower:]')"
       role="$(trim "$role")"
       op="$(trim "$op")"
+      country="$(printf '%s' "$country" | tr '[:lower:]' '[:upper:]')"
+      country="$(trim "$country")"
       hop_roles="$(trim "$hop_roles")"
       capabilities="$(trim "$capabilities")"
+      endpoint="$(trim "$endpoint")"
+      reputation="$(trim "$reputation")"
+      uptime="$(trim "$uptime")"
+      capacity="$(trim "$capacity")"
+      abuse_penalty="$(trim "$abuse_penalty")"
       [[ -z "$role" ]] && continue
       if [[ "$role" == "entry" && -n "$op" && "$op" != "null" ]]; then
         entry_ops["$op"]=1
+        entry_exit_ops["$op"]=1
+      fi
+      if [[ "$role" == "entry" && -n "$country" && "$country" != "NULL" ]]; then
+        entry_countries["$country"]=1
       fi
       if [[ "$role" == "exit" && -n "$op" && "$op" != "null" ]]; then
         exit_ops["$op"]=1
+        entry_exit_ops["$op"]=1
+      fi
+      if [[ "$role" == "exit" && -n "$country" && "$country" != "NULL" ]]; then
+        exit_countries["$country"]=1
       fi
 
       local middle_like=0
-      if [[ "$role" == "middle" ]]; then
-        middle_like=1
-      elif csv_has_middle_signal "$hop_roles"; then
-        middle_like=1
-      elif csv_has_middle_signal "$capabilities"; then
-        middle_like=1
+      if [[ "$require_runtime_eligible" == "1" ]]; then
+        if client_vpn_runtime_middle_relay_eligible "$relay_id" "$role" "$endpoint" "$reputation" "$uptime" "$capacity" "$abuse_penalty" "$hop_roles" "$capabilities"; then
+          middle_like=1
+        fi
+      else
+        if [[ "$role" == "middle" || "$role" == "micro-relay" || "$role" == "micro_relay" ]]; then
+          middle_like=1
+        elif csv_has_middle_signal "$hop_roles"; then
+          middle_like=1
+        elif csv_has_middle_signal "$capabilities"; then
+          middle_like=1
+        fi
       fi
       if [[ "$middle_like" == "1" ]]; then
         middle_relays=$((middle_relays + 1))
@@ -2931,9 +3097,12 @@ client_vpn_middle_relay_summary() {
           missing_middle_operator=$((missing_middle_operator + 1))
         else
           middle_ops["$op"]=1
+          if [[ "$require_runtime_eligible" == "1" && -n "$country" && "$country" != "NULL" ]]; then
+            middle_operator_countries["$op|$country"]=1
+          fi
         fi
       fi
-    done < <(printf '%s\n' "$payload" | jq -r '.relays[]? | [(.role // ""), ((.operator_id // .operator // .origin_operator // "") | tostring), ((.hop_roles // []) | map(tostring) | join(",")), ((.capabilities // []) | map(tostring) | join(","))] | @tsv' 2>/dev/null || true)
+    done < <(printf '%s\n' "$payload" | jq -r '.relays[]? | [(.relay_id // .id // ""), (.role // ""), ((.operator_id // .operator // .origin_operator // "") | tostring), ((.country_code // .country // "") | tostring), ((.hop_roles // []) | map(tostring) | join(",")), ((.capabilities // []) | map(tostring) | join(",")), (.endpoint // "" | tostring), ((.reputation_score // .reputation // 0) | tostring), ((.uptime_score // .uptime // 0) | tostring), ((.capacity_score // .capacity // 0) | tostring), ((.abuse_penalty // .abusePenalty // 0) | tostring)] | join("\u001f")' 2>/dev/null || true)
 
     if [[ "$parsed" -eq 0 ]]; then
       if ! printf '%s\n' "$payload" | jq -e '.relays' >/dev/null 2>&1; then
@@ -2943,18 +3112,38 @@ client_vpn_middle_relay_summary() {
   done < <(split_csv_lines "$directory_urls")
 
   declare -A eligible_middle_ops=()
+  declare -A country_eligible_middle_ops=()
   local op
   for op in "${!middle_ops[@]}"; do
-    if [[ -n "${entry_ops[$op]+x}" || -n "${exit_ops[$op]+x}" ]]; then
+    if [[ "$require_runtime_eligible" != "1" && ( -n "${entry_ops[$op]+x}" || -n "${exit_ops[$op]+x}" ) ]]; then
+      continue
+    fi
+    if [[ "$require_runtime_eligible" == "1" && "${#entry_exit_ops[@]}" -gt 1 && "${#middle_ops[@]}" -gt 1 && -n "${entry_exit_ops[$op]+x}" ]]; then
+      # Runtime evaluates middle distinctness against the selected entry/exit
+      # pair, not globally against every advertised entry/exit operator. Keep a
+      # conservative fallback only when no alternate middle operator exists.
       continue
     fi
     eligible_middle_ops["$op"]=1
   done
+  local middle_country_key middle_country entry_country exit_country
+  for middle_country_key in "${!middle_operator_countries[@]}"; do
+    op="${middle_country_key%%|*}"
+    middle_country="${middle_country_key#*|}"
+    for entry_country in "${!entry_countries[@]}"; do
+      [[ -z "$entry_country" || "$entry_country" == "$middle_country" ]] && continue
+      for exit_country in "${!exit_countries[@]}"; do
+        [[ -z "$exit_country" || "$exit_country" == "$middle_country" || "$exit_country" == "$entry_country" ]] && continue
+        country_eligible_middle_ops["$op"]=1
+      done
+    done
+  done
 
-  local middle_ops_csv eligible_middle_ops_csv
+  local middle_ops_csv eligible_middle_ops_csv country_eligible_middle_ops_csv
   middle_ops_csv="$(sorted_csv "${!middle_ops[@]}")"
   eligible_middle_ops_csv="$(sorted_csv "${!eligible_middle_ops[@]}")"
-  echo "${#middle_ops[@]}|${#eligible_middle_ops[@]}|$middle_relays|$missing_middle_operator|$fetch_fail|$parse_fail|$middle_ops_csv|$eligible_middle_ops_csv"
+  country_eligible_middle_ops_csv="$(sorted_csv "${!country_eligible_middle_ops[@]}")"
+  echo "${#middle_ops[@]}|${#eligible_middle_ops[@]}|${#country_eligible_middle_ops[@]}|$middle_relays|$missing_middle_operator|$fetch_fail|$parse_fail|$middle_ops_csv|$eligible_middle_ops_csv|$country_eligible_middle_ops_csv"
 }
 
 client_vpn_issuer_quorum_summary() {
@@ -7015,6 +7204,10 @@ wg_only_stack_up() {
         log_file="${2:-}"
         shift 2
         ;;
+      --status-file)
+        status_file="${2:-}"
+        shift 2
+        ;;
       *)
         echo "unknown arg for wg-only-stack-up: $1"
         exit 2
@@ -7625,11 +7818,11 @@ wg_only_stack_selftest() {
   proxy_addr="127.0.0.1:$((base_port + 103))"
   exit_metrics_url="${exit_url%/}/v1/metrics"
 
-  wait_for_wg_session_config() {
+  wait_for_wg_runtime_ready() {
     local attempts="${1:-240}"
     local i
     for i in $(seq 1 "$attempts"); do
-      if rg -q "client received wg-session config:" "$log_file"; then
+      if rg -q "client wireguard runtime ready:" "$log_file"; then
         return 0
       fi
       sleep 0.2
@@ -7637,7 +7830,7 @@ wg_only_stack_selftest() {
     return 1
   }
 
-  if wait_for_wg_session_config 240; then
+  if wait_for_wg_runtime_ready 240; then
     ready="1"
   elif rg -q 'directory key is not trusted' "$log_file"; then
     local trust_reset_output=""
@@ -7645,7 +7838,7 @@ wg_only_stack_selftest() {
     if trust_reset_output="$(client_vpn_trust_reset --directory-urls "$directory_url" --trust-scope scoped 2>&1)"; then
       [[ -n "$trust_reset_output" ]] && printf '%s\n' "$trust_reset_output"
       echo "wg-only stack selftest: waiting for client bootstrap retry after trust reset"
-      if wait_for_wg_session_config 240; then
+      if wait_for_wg_runtime_ready 240; then
         ready="1"
       fi
     else
@@ -7656,7 +7849,7 @@ wg_only_stack_selftest() {
     fi
   fi
   if [[ "$ready" != "1" ]]; then
-    echo "wg-only stack selftest: client did not receive wg-session config"
+    echo "wg-only stack selftest: client wireguard runtime did not become ready"
     cat "$log_file"
     exit 1
   fi
@@ -8951,6 +9144,11 @@ desktop_linux_packaged_run() {
 
 desktop_linux_release_bundle() {
   local script="${DESKTOP_LINUX_RELEASE_BUNDLE_SCRIPT:-$ROOT_DIR/scripts/linux/desktop_release_bundle.sh}"
+  run_desktop_wrapper_script "$script" "$@"
+}
+
+desktop_admin_console_release_bundle() {
+  local script="${DESKTOP_ADMIN_CONSOLE_RELEASE_BUNDLE_SCRIPT:-$ROOT_DIR/scripts/linux/desktop_admin_console_release_bundle.sh}"
   run_desktop_wrapper_script "$script" "$@"
 }
 
@@ -13249,7 +13447,7 @@ EOF_CLIENT
     echo "client test: ok"
     echo "client test log: $out"
     echo "key log lines:"
-    rg 'client selected entry=|client received wg-session config|bootstrap failed' "$out" || true
+    rg 'client selected entry=|client received wg-session config|client wireguard runtime ready|bootstrap failed' "$out" || true
     cleanup_client_test_subject_file
     return 0
   fi
@@ -13458,6 +13656,9 @@ client_vpn_preflight() {
     else
       middle_relay_check="0"
     fi
+  fi
+  if [[ "$normalized_path_profile" == "privacy" ]]; then
+    middle_relay_check="1"
   fi
   if [[ "$middle_relay_check" != "0" && "$middle_relay_check" != "1" ]]; then
     echo "client-vpn-preflight requires --middle-relay-check 0 or 1"
@@ -13675,11 +13876,15 @@ client_vpn_preflight() {
   fi
 
   if [[ "$middle_relay_check" == "1" ]]; then
-    local middle_ops eligible_middle_ops middle_relays missing_middle_ops middle_fetch_fail middle_parse_fail
-    local middle_ops_list eligible_middle_ops_list
+    local middle_ops eligible_middle_ops country_eligible_middle_ops middle_relays missing_middle_ops middle_fetch_fail middle_parse_fail
+    local middle_ops_list eligible_middle_ops_list country_eligible_middle_ops_list
+    local middle_runtime_strict="0"
+    if [[ "$normalized_path_profile" == "privacy" ]]; then
+      middle_runtime_strict="1"
+    fi
     local middle_floor_failed=0
-    IFS='|' read -r middle_ops eligible_middle_ops middle_relays missing_middle_ops middle_fetch_fail middle_parse_fail middle_ops_list eligible_middle_ops_list < <(client_vpn_middle_relay_summary "$directory_urls" "$timeout_sec")
-    echo "  middle relay diversity: middle_ops=$middle_ops eligible_middle_ops=$eligible_middle_ops middle_relays=$middle_relays missing_middle_operator_fields=$missing_middle_ops fetch_failures=$middle_fetch_fail parse_failures=$middle_parse_fail"
+    IFS='|' read -r middle_ops eligible_middle_ops country_eligible_middle_ops middle_relays missing_middle_ops middle_fetch_fail middle_parse_fail middle_ops_list eligible_middle_ops_list country_eligible_middle_ops_list < <(client_vpn_middle_relay_summary "$directory_urls" "$timeout_sec" "$middle_runtime_strict")
+    echo "  middle relay diversity: middle_ops=$middle_ops eligible_middle_ops=$eligible_middle_ops country_eligible_middle_ops=$country_eligible_middle_ops middle_relays=$middle_relays runtime_strict=$middle_runtime_strict missing_middle_operator_fields=$missing_middle_ops fetch_failures=$middle_fetch_fail parse_failures=$middle_parse_fail"
     if ((middle_fetch_fail > 0)); then
       echo "  [fail] could not fetch relay set from all configured directories for middle-relay check"
       fail=$((fail + 1))
@@ -13701,6 +13906,11 @@ client_vpn_preflight() {
         fail=$((fail + 1))
         middle_floor_failed=1
       fi
+      if [[ "$middle_runtime_strict" == "1" && "$require_distinct_countries" == "1" ]] && ((country_eligible_middle_ops < middle_relay_min_operators)); then
+        echo "  [fail] middle-relay country floor not met (need >=$middle_relay_min_operators middle operators compatible with distinct entry/exit countries, observed=$country_eligible_middle_ops)"
+        fail=$((fail + 1))
+        middle_floor_failed=1
+      fi
     else
       if ((middle_ops < middle_relay_min_operators)); then
         echo "  [fail] middle-relay operator floor not met (need >=$middle_relay_min_operators distinct middle operators, observed=$middle_ops)"
@@ -13709,8 +13919,8 @@ client_vpn_preflight() {
       fi
     fi
     if ((middle_floor_failed > 0)); then
-      echo "  observed middle operators: all=${middle_ops_list:-none} eligible_distinct=${eligible_middle_ops_list:-none}"
-      echo "  hint: for staged labs, lower the middle floor with --middle-relay-min-operators 1 or disable with --middle-relay-check 0"
+      echo "  observed middle operators: all=${middle_ops_list:-none} eligible_distinct=${eligible_middle_ops_list:-none} country_eligible=${country_eligible_middle_ops_list:-none}"
+      echo "  hint: for staged labs, lower the middle floor with --middle-relay-min-operators 1; 3hop/private requires a runtime-eligible middle relay"
     fi
   fi
 
@@ -14312,6 +14522,37 @@ client_vpn_state_file() {
   echo "$DEPLOY_DIR/data/client_vpn.state"
 }
 
+client_vpn_allowed_ips_full_tunnel() {
+  local allowed_ips="${1:-}"
+  local token
+  IFS=',' read -ra _client_vpn_allowed_ip_tokens <<<"$allowed_ips"
+  for token in "${_client_vpn_allowed_ip_tokens[@]}"; do
+    token="$(printf '%s' "$token" | tr -d '[:space:]')"
+    if [[ "$token" == "0.0.0.0/0" || "$token" == "::/0" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+client_vpn_route_mode_for() {
+  local allowed_ips="${1:-}"
+  local install_route="${2:-0}"
+  if client_vpn_allowed_ips_full_tunnel "$allowed_ips"; then
+    if [[ "$install_route" == "1" ]]; then
+      echo "full-tunnel"
+    else
+      echo "no-route"
+    fi
+    return 0
+  fi
+  if [[ "$install_route" == "1" ]]; then
+    echo "split-route"
+  else
+    echo "manual-route"
+  fi
+}
+
 client_vpn_smoke() {
   local smoke_script="${CLIENT_VPN_SMOKE_SCRIPT:-$ROOT_DIR/scripts/client_vpn_smoke.sh}"
   "$smoke_script" "$@"
@@ -14348,10 +14589,11 @@ client_vpn_status() {
     return 0
   fi
 
-  local pid iface log_file key_file trust_file trust_scope proxy_addr directory_urls issuer_url issuer_urls entry_url exit_url path_profile prod_profile beta_profile session_reuse allow_session_churn
+  local pid iface log_file status_file key_file trust_file trust_scope proxy_addr directory_urls issuer_url issuer_urls entry_url exit_url path_profile allowed_ips install_route route_mode prod_profile beta_profile session_reuse allow_session_churn
   pid="$(identity_value "$state_file" "CLIENT_VPN_PID")"
   iface="$(identity_value "$state_file" "CLIENT_VPN_IFACE")"
   log_file="$(identity_value "$state_file" "CLIENT_VPN_LOG_FILE")"
+  status_file="$(identity_value "$state_file" "CLIENT_VPN_STATUS_FILE")"
   key_file="$(identity_value "$state_file" "CLIENT_VPN_KEY_FILE")"
   trust_file="$(identity_value "$state_file" "CLIENT_VPN_TRUST_FILE")"
   trust_scope="$(identity_value "$state_file" "CLIENT_VPN_TRUST_SCOPE")"
@@ -14362,10 +14604,38 @@ client_vpn_status() {
   entry_url="$(identity_value "$state_file" "CLIENT_VPN_ENTRY_URL")"
   exit_url="$(identity_value "$state_file" "CLIENT_VPN_EXIT_URL")"
   path_profile="$(identity_value "$state_file" "CLIENT_VPN_PATH_PROFILE")"
+  allowed_ips="$(identity_value "$state_file" "CLIENT_VPN_ALLOWED_IPS")"
+  install_route="$(identity_value "$state_file" "CLIENT_VPN_INSTALL_ROUTE")"
+  route_mode="$(identity_value "$state_file" "CLIENT_VPN_ROUTE_MODE")"
+  if [[ -z "$route_mode" ]]; then
+    route_mode="$(client_vpn_route_mode_for "$allowed_ips" "${install_route:-0}")"
+  fi
   session_reuse="$(identity_value "$state_file" "CLIENT_VPN_SESSION_REUSE")"
   allow_session_churn="$(identity_value "$state_file" "CLIENT_VPN_ALLOW_SESSION_CHURN")"
   prod_profile="$(identity_value "$state_file" "CLIENT_VPN_PROD_PROFILE")"
   beta_profile="$(identity_value "$state_file" "CLIENT_VPN_BETA_PROFILE")"
+
+  local client_status_json="{}"
+  local path_mode="" session_active="" session_id="" entry_relay_id="" middle_relay_id="" exit_relay_id="" selected_relay_ids=""
+  if [[ -n "$status_file" && -f "$status_file" ]]; then
+    if command -v jq >/dev/null 2>&1; then
+      client_status_json="$(jq -c 'if type == "object" then . else {} end' "$status_file" 2>/dev/null || printf '{}')"
+      path_mode="$(printf '%s\n' "$client_status_json" | jq -r '.path_mode // empty' 2>/dev/null || true)"
+      session_active="$(printf '%s\n' "$client_status_json" | jq -r 'if has("session_active") then (.session_active | tostring) else "" end' 2>/dev/null || true)"
+      session_id="$(printf '%s\n' "$client_status_json" | jq -r '.session_id // empty' 2>/dev/null || true)"
+      entry_relay_id="$(printf '%s\n' "$client_status_json" | jq -r '.entry_relay_id // empty' 2>/dev/null || true)"
+      middle_relay_id="$(printf '%s\n' "$client_status_json" | jq -r '.middle_relay_id // empty' 2>/dev/null || true)"
+      exit_relay_id="$(printf '%s\n' "$client_status_json" | jq -r '.exit_relay_id // empty' 2>/dev/null || true)"
+      selected_relay_ids="$(printf '%s\n' "$client_status_json" | jq -r '(.selected_relay_ids // []) | join(",")' 2>/dev/null || true)"
+    else
+      path_mode="$(sed -nE 's/.*"path_mode"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' "$status_file" | head -n 1)"
+      session_active="$(sed -nE 's/.*"session_active"[[:space:]]*:[[:space:]]*(true|false).*/\1/p' "$status_file" | head -n 1)"
+      session_id="$(sed -nE 's/.*"session_id"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' "$status_file" | head -n 1)"
+      entry_relay_id="$(sed -nE 's/.*"entry_relay_id"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' "$status_file" | head -n 1)"
+      middle_relay_id="$(sed -nE 's/.*"middle_relay_id"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' "$status_file" | head -n 1)"
+      exit_relay_id="$(sed -nE 's/.*"exit_relay_id"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' "$status_file" | head -n 1)"
+    fi
+  fi
 
   local running="no"
   if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
@@ -14386,6 +14656,11 @@ client_vpn_status() {
         --arg interface_state "$interface_state" \
         --arg proxy_addr "${proxy_addr:-}" \
         --arg path_profile "${path_profile:-}" \
+        --arg status_file "${status_file:-}" \
+        --argjson client_status "$client_status_json" \
+        --arg allowed_ips "${allowed_ips:-}" \
+        --arg install_route "${install_route:-}" \
+        --arg route_mode "${route_mode:-}" \
         --arg session_reuse "${session_reuse:-}" \
         --arg allow_session_churn "${allow_session_churn:-}" \
         --arg beta_profile "${beta_profile:-}" \
@@ -14406,6 +14681,19 @@ client_vpn_status() {
           interface_state: $interface_state,
           proxy_addr: $proxy_addr,
           path_profile: $path_profile,
+          status_file: $status_file,
+          path_mode: ($client_status.path_mode // ""),
+          session_active: ($client_status.session_active // false),
+          session_id: ($client_status.session_id // ""),
+          entry_relay_id: ($client_status.entry_relay_id // ""),
+          middle_relay_id: ($client_status.middle_relay_id // ""),
+          exit_relay_id: ($client_status.exit_relay_id // ""),
+          selected_relay_ids: ($client_status.selected_relay_ids // []),
+          selected_relay_id_map: ($client_status.selected_relay_id_map // {}),
+          client_status: $client_status,
+          allowed_ips: $allowed_ips,
+          install_route: $install_route,
+          route_mode: $route_mode,
           session_reuse: $session_reuse,
           allow_session_churn: $allow_session_churn,
           beta_profile: $beta_profile,
@@ -14421,12 +14709,20 @@ client_vpn_status() {
           log_file: $log_file
         }'
     else
-      printf '{"running":%s,"pid":"%s","interface":"%s","interface_state":"%s","path_profile":"%s"}\n' \
+      printf '{"running":%s,"pid":"%s","interface":"%s","interface_state":"%s","path_profile":"%s","path_mode":"%s","session_active":"%s","session_id":"%s","entry_relay_id":"%s","middle_relay_id":"%s","exit_relay_id":"%s","route_mode":"%s","status_file":"%s"}\n' \
         "$([[ "$running" == "yes" ]] && printf 'true' || printf 'false')" \
         "${pid:-}" \
         "${iface:-}" \
         "$interface_state" \
-        "${path_profile:-}"
+        "${path_profile:-}" \
+        "${path_mode:-}" \
+        "${session_active:-}" \
+        "${session_id:-}" \
+        "${entry_relay_id:-}" \
+        "${middle_relay_id:-}" \
+        "${exit_relay_id:-}" \
+        "${route_mode:-}" \
+        "${status_file:-}"
     fi
     return 0
   fi
@@ -14437,6 +14733,19 @@ client_vpn_status() {
   echo "  interface: ${iface:-unknown}"
   echo "  proxy_addr: ${proxy_addr:-unknown}"
   echo "  path_profile: ${path_profile:-default}"
+  echo "  path_mode: ${path_mode:-unknown}"
+  echo "  session_active: ${session_active:-unknown}"
+  echo "  session_id: ${session_id:-unknown}"
+  echo "  selected_relay_ids: ${selected_relay_ids:-unknown}"
+  echo "  entry_relay_id: ${entry_relay_id:-unknown}"
+  echo "  middle_relay_id: ${middle_relay_id:-unknown}"
+  echo "  exit_relay_id: ${exit_relay_id:-unknown}"
+  echo "  allowed_ips: ${allowed_ips:-unknown}"
+  echo "  install_route: ${install_route:-unknown}"
+  echo "  route_mode: ${route_mode:-unknown}"
+  if [[ "$route_mode" == "no-route" ]]; then
+    echo "  route_warning: full-tunnel AllowedIPs are configured but install_route=0, so host traffic is not routed through the VPN"
+  fi
   echo "  session_reuse: ${session_reuse:-unknown}"
   echo "  allow_session_churn: ${allow_session_churn:-unknown}"
   echo "  beta_profile: ${beta_profile:-0}"
@@ -14450,6 +14759,7 @@ client_vpn_status() {
   echo "  trust_file: ${trust_file:-unknown}"
   echo "  trust_scope: ${trust_scope:-unknown}"
   echo "  log_file: ${log_file:-unknown}"
+  echo "  status_file: ${status_file:-unknown}"
 
   if [[ -n "$iface" ]]; then
     if [[ "$interface_state" == "present" ]]; then
@@ -15266,7 +15576,7 @@ simple_client_vpn_session() {
   local operator_min_operators="2"
   local issuer_quorum_check="1"
   local issuer_min_operators="2"
-  local install_route="1"
+  local install_route="0"
   if [[ "$normalized_path_profile" == "speed-1hop" ]]; then
     min_operators="1"
     operator_floor_check="0"
@@ -15677,13 +15987,17 @@ client_vpn_up() {
   local operator_min_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_OPERATORS:-2}"
   local operator_min_entry_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_ENTRY_OPERATORS:-}"
   local operator_min_exit_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_EXIT_OPERATORS:-}"
+  local middle_relay_check="${EASY_NODE_CLIENT_VPN_MIDDLE_RELAY_CHECK:-}"
+  local middle_relay_min_operators="${EASY_NODE_CLIENT_VPN_MIDDLE_RELAY_MIN_OPERATORS:-1}"
+  local middle_relay_require_distinct="${EASY_NODE_CLIENT_VPN_MIDDLE_RELAY_REQUIRE_DISTINCT:-1}"
   local issuer_quorum_check="${EASY_NODE_CLIENT_VPN_ISSUER_QUORUM_CHECK:-}"
   local issuer_min_operators="${EASY_NODE_CLIENT_VPN_ISSUER_MIN_OPERATORS:-2}"
   local interface_name="${CLIENT_WG_INTERFACE:-wgvpn0}"
   local proxy_addr="${CLIENT_WG_PROXY_ADDR:-127.0.0.1:57970}"
   local private_key_file=""
-  local allowed_ips="${CLIENT_WG_ALLOWED_IPS:-0.0.0.0/0}"
-  local install_route="${CLIENT_WG_INSTALL_ROUTE:-1}"
+  local allowed_ips="${CLIENT_WG_ALLOWED_IPS:-0.0.0.0/0,::/0}"
+  local install_route="${CLIENT_WG_INSTALL_ROUTE:-0}"
+  local allow_no_route="${GPM_CLIENT_VPN_ALLOW_NO_ROUTE:-${TDPN_CLIENT_VPN_ALLOW_NO_ROUTE:-${CLIENT_WG_ALLOW_NO_ROUTE:-0}}}"
   local startup_sync_timeout_sec="${CLIENT_STARTUP_SYNC_TIMEOUT_SEC:-12}"
   local session_reuse="${CLIENT_SESSION_REUSE:-1}"
   local allow_session_churn="${CLIENT_DIRECT_EXIT_ALLOW_SESSION_CHURN:-0}"
@@ -15696,6 +16010,7 @@ client_vpn_up() {
   local mtls_client_key_file="$DEPLOY_DIR/tls/client.key"
   local trust_scope_mode="${EASY_NODE_CLIENT_VPN_TRUST_SCOPE:-scoped}"
   local log_file=""
+  local status_file="${CLIENT_VPN_STATUS_FILE:-}"
   local min_sources_set=0
   local min_operators_set=0
   local distinct_set=0
@@ -15709,6 +16024,8 @@ client_vpn_up() {
   local entry_rotation_jitter_pct_set=0
   local exit_exploration_pct_set=0
   local speed_onehop_profile=0
+  local settlement_reservation_expires_at_unix="${GPM_SETTLEMENT_RESERVATION_EXPIRES_AT_UNIX:-}"
+  local opaque_session_sec="${CLIENT_OPAQUE_SESSION_SEC:-}"
 
   if [[ -n "${CLIENT_STICKY_PAIR_SEC+x}" ]]; then
     sticky_pair_sec_set=1
@@ -15874,6 +16191,28 @@ client_vpn_up() {
         operator_min_exit_operators="${2:-}"
         shift 2
         ;;
+      --middle-relay-check)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          middle_relay_check="${2:-}"
+          shift 2
+        else
+          middle_relay_check="1"
+          shift
+        fi
+        ;;
+      --middle-relay-min-operators)
+        middle_relay_min_operators="${2:-}"
+        shift 2
+        ;;
+      --middle-relay-require-distinct)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          middle_relay_require_distinct="${2:-}"
+          shift 2
+        else
+          middle_relay_require_distinct="1"
+          shift
+        fi
+        ;;
       --issuer-quorum-check)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
           issuer_quorum_check="${2:-}"
@@ -15909,6 +16248,15 @@ client_vpn_up() {
           shift 2
         else
           install_route="1"
+          shift
+        fi
+        ;;
+      --allow-no-route)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          allow_no_route="${2:-}"
+          shift 2
+        else
+          allow_no_route="1"
           shift
         fi
         ;;
@@ -16117,6 +16465,28 @@ client_vpn_up() {
     echo "client-vpn-up requires --operator-min-exit-operators >= 1"
     exit 2
   fi
+  if [[ -z "$middle_relay_check" ]]; then
+    if [[ "$normalized_path_profile" == "privacy" ]]; then
+      middle_relay_check="1"
+    else
+      middle_relay_check="0"
+    fi
+  fi
+  if [[ "$normalized_path_profile" == "privacy" ]]; then
+    middle_relay_check="1"
+  fi
+  if [[ "$middle_relay_check" != "0" && "$middle_relay_check" != "1" ]]; then
+    echo "client-vpn-up requires --middle-relay-check 0 or 1"
+    exit 2
+  fi
+  if [[ "$middle_relay_require_distinct" != "0" && "$middle_relay_require_distinct" != "1" ]]; then
+    echo "client-vpn-up requires --middle-relay-require-distinct 0 or 1"
+    exit 2
+  fi
+  if ! [[ "$middle_relay_min_operators" =~ ^[0-9]+$ ]] || ((middle_relay_min_operators < 1)); then
+    echo "client-vpn-up requires --middle-relay-min-operators >= 1"
+    exit 2
+  fi
   if [[ -z "$issuer_quorum_check" ]]; then
     if [[ "$prod_profile" == "1" ]]; then
       issuer_quorum_check="1"
@@ -16135,6 +16505,19 @@ client_vpn_up() {
   if [[ "$install_route" != "0" && "$install_route" != "1" ]]; then
     echo "client-vpn-up requires --install-route 0 or 1"
     exit 2
+  fi
+  if [[ "$allow_no_route" != "0" && "$allow_no_route" != "1" ]]; then
+    echo "client-vpn-up requires --allow-no-route 0 or 1"
+    exit 2
+  fi
+  local route_mode
+  route_mode="$(client_vpn_route_mode_for "$allowed_ips" "$install_route")"
+  if [[ "$route_mode" == "no-route" ]]; then
+    if [[ "$prod_profile" == "1" ]]; then
+      echo "client-vpn-up refuses no-route full-tunnel in prod profile: full-tunnel AllowedIPs=$allowed_ips with install_route=0 would not route host traffic through the VPN; set --install-route 1 or disable --prod-profile for controlled diagnostics"
+      exit 2
+    fi
+    echo "client-vpn-up route mode: no-route (full-tunnel AllowedIPs=$allowed_ips with install_route=0; host traffic will not be routed through the VPN)"
   fi
   if [[ "$force_restart" != "0" && "$force_restart" != "1" ]]; then
     echo "client-vpn-up requires --force-restart 0 or 1"
@@ -16228,6 +16611,9 @@ client_vpn_up() {
 
   if [[ -n "$bootstrap_directory" ]]; then
     bootstrap_directory="$(ensure_url_scheme "$bootstrap_directory" "$client_url_scheme")"
+    if ! require_https_for_remote_url "$bootstrap_directory" "client-vpn-up --bootstrap-directory"; then
+      exit 2
+    fi
     local discovered
     discovered="$(discover_directory_urls "$bootstrap_directory" "$discovery_wait_sec" "$min_sources")"
     if [[ -z "$directory_urls" ]]; then
@@ -16338,6 +16724,46 @@ client_vpn_up() {
     fi
   fi
 
+  if [[ "$middle_relay_check" == "1" ]]; then
+    local middle_ops eligible_middle_ops country_eligible_middle_ops middle_relays missing_middle_ops middle_fetch_fail middle_parse_fail
+    local middle_ops_list eligible_middle_ops_list country_eligible_middle_ops_list
+    local middle_runtime_strict="0"
+    if [[ "$normalized_path_profile" == "privacy" ]]; then
+      middle_runtime_strict="1"
+    fi
+    IFS='|' read -r middle_ops eligible_middle_ops country_eligible_middle_ops middle_relays missing_middle_ops middle_fetch_fail middle_parse_fail middle_ops_list eligible_middle_ops_list country_eligible_middle_ops_list < <(client_vpn_middle_relay_summary "$directory_urls" 8 "$middle_runtime_strict")
+    if ((middle_fetch_fail > 0)); then
+      echo "client-vpn-up middle-relay check failed: could not fetch relays from all configured directories (failures=$middle_fetch_fail)"
+      exit 1
+    fi
+    if ((middle_parse_fail > 0)); then
+      echo "client-vpn-up middle-relay check failed: parse errors while reading directory relays (errors=$middle_parse_fail)"
+      exit 1
+    fi
+    if ((middle_relay_require_distinct > 0)); then
+      if ((missing_middle_ops > 0)); then
+        echo "client-vpn-up middle-relay check failed: middle-relay descriptors missing operator metadata (count=$missing_middle_ops)"
+        exit 1
+      fi
+      if ((eligible_middle_ops < middle_relay_min_operators)); then
+        echo "client-vpn-up middle-relay check failed: need >=$middle_relay_min_operators distinct middle operators not used by entry/exit (observed=$eligible_middle_ops)"
+        echo "observed middle operators: all=${middle_ops_list:-none} eligible_distinct=${eligible_middle_ops_list:-none} country_eligible=${country_eligible_middle_ops_list:-none}"
+        exit 1
+      fi
+      if [[ "$middle_runtime_strict" == "1" && "$require_distinct_countries" == "1" ]] && ((country_eligible_middle_ops < middle_relay_min_operators)); then
+        echo "client-vpn-up middle-relay check failed: need >=$middle_relay_min_operators middle operators compatible with distinct entry/exit countries (observed=$country_eligible_middle_ops)"
+        echo "observed middle operators: all=${middle_ops_list:-none} eligible_distinct=${eligible_middle_ops_list:-none} country_eligible=${country_eligible_middle_ops_list:-none}"
+        exit 1
+      fi
+    else
+      if ((middle_ops < middle_relay_min_operators)); then
+        echo "client-vpn-up middle-relay check failed: need >=$middle_relay_min_operators distinct middle operators (observed=$middle_ops)"
+        echo "observed middle operators: all=${middle_ops_list:-none} eligible_distinct=${eligible_middle_ops_list:-none} country_eligible=${country_eligible_middle_ops_list:-none}"
+        exit 1
+      fi
+    fi
+  fi
+
   if [[ "$issuer_quorum_check" == "1" ]]; then
     local issuer_ops missing_issuer missing_keys issuer_fetch_fail issuer_parse_fail
     IFS='|' read -r issuer_ops missing_issuer missing_keys issuer_fetch_fail issuer_parse_fail < <(client_vpn_issuer_quorum_summary "$issuer_urls" 8)
@@ -16409,6 +16835,34 @@ client_vpn_up() {
       fi
     done
   fi
+  if [[ "$prod_profile" == "1" && -n "${GPM_SETTLEMENT_RESERVATION_ID:-}" && -z "$settlement_reservation_expires_at_unix" ]]; then
+    echo "client-vpn-up prod profile requires GPM_SETTLEMENT_RESERVATION_EXPIRES_AT_UNIX when a settlement reservation is bound"
+    exit 2
+  fi
+  if [[ -n "$settlement_reservation_expires_at_unix" ]]; then
+    if ! [[ "$settlement_reservation_expires_at_unix" =~ ^[0-9]+$ ]]; then
+      echo "client-vpn-up requires GPM_SETTLEMENT_RESERVATION_EXPIRES_AT_UNIX to be a unix timestamp"
+      exit 2
+    fi
+    local now_unix
+    now_unix="$(date -u +%s)"
+    local reservation_remaining_sec=$((settlement_reservation_expires_at_unix - now_unix))
+    if (( reservation_remaining_sec <= 0 )); then
+      echo "client-vpn-up refuses expired settlement reservation"
+      exit 2
+    fi
+    if [[ -z "$opaque_session_sec" ]]; then
+      opaque_session_sec="$reservation_remaining_sec"
+    elif ! [[ "$opaque_session_sec" =~ ^[0-9]+$ ]] || (( opaque_session_sec <= 0 )); then
+      echo "client-vpn-up requires CLIENT_OPAQUE_SESSION_SEC to be a positive integer"
+      exit 2
+    elif (( opaque_session_sec > reservation_remaining_sec )); then
+      opaque_session_sec="$reservation_remaining_sec"
+    fi
+  elif [[ -n "$opaque_session_sec" ]] && { ! [[ "$opaque_session_sec" =~ ^[0-9]+$ ]] || (( opaque_session_sec <= 0 )); }; then
+    echo "client-vpn-up requires CLIENT_OPAQUE_SESSION_SEC to be a positive integer"
+    exit 2
+  fi
 
   local log_dir
   log_dir="$(prepare_log_dir)"
@@ -16416,12 +16870,11 @@ client_vpn_up() {
     log_file="$log_dir/easy_node_client_vpn_$(date +%Y%m%d_%H%M%S).log"
   fi
   rm -f "$log_file"
-
-  ip link delete "$interface_name" >/dev/null 2>&1 || true
-  if ! ip link add dev "$interface_name" type wireguard >/dev/null 2>&1; then
-    echo "client-vpn failed to create wireguard interface: $interface_name"
-    exit 1
+  if [[ -z "$status_file" ]]; then
+    status_file="$DEPLOY_DIR/data/client_vpn.status.json"
   fi
+  mkdir -p "$(dirname "$status_file")" >/dev/null 2>&1 || true
+  rm -f "$status_file"
 
   local trusted_keys_file="${DIRECTORY_TRUSTED_KEYS_FILE:-}"
   if [[ -z "$trusted_keys_file" ]]; then
@@ -16434,7 +16887,17 @@ client_vpn_up() {
     trusted_keys_dir="$ROOT_DIR/$(dirname "$trusted_keys_file")"
   fi
   mkdir -p "$trusted_keys_dir" >/dev/null 2>&1 || true
-  seed_client_vpn_trust_file_if_empty "$trusted_keys_file" "$directory_urls"
+  if [[ "$prod_profile" == "1" ]]; then
+    ensure_client_vpn_prod_trust_bootstrap_or_die "$trusted_keys_file"
+  else
+    seed_client_vpn_trust_file_if_empty "$trusted_keys_file" "$directory_urls"
+  fi
+
+  ip link delete "$interface_name" >/dev/null 2>&1 || true
+  if ! ip link add dev "$interface_name" type wireguard >/dev/null 2>&1; then
+    echo "client-vpn failed to create wireguard interface: $interface_name"
+    exit 1
+  fi
 
   local runtime_subject_file=""
   cleanup_runtime_subject_file() {
@@ -16442,6 +16905,10 @@ client_vpn_up() {
       rm -f "$runtime_subject_file" >/dev/null 2>&1 || true
       runtime_subject_file=""
     fi
+  }
+  cleanup_client_vpn_startup_failure() {
+    cleanup_runtime_subject_file
+    ip link delete "$interface_name" >/dev/null 2>&1 || true
   }
   local -a env_vars
   env_vars=(
@@ -16462,6 +16929,7 @@ client_vpn_up() {
     "CLIENT_WG_PUBLIC_KEY=$client_wg_pub"
     "CLIENT_WG_ALLOWED_IPS=$allowed_ips"
     "CLIENT_WG_INSTALL_ROUTE=$install_route"
+    "CLIENT_WG_ALLOW_NO_ROUTE=$allow_no_route"
     "CLIENT_WG_KERNEL_PROXY=1"
     "CLIENT_WG_PROXY_ADDR=$proxy_addr"
     "CLIENT_INNER_SOURCE=udp"
@@ -16483,10 +16951,26 @@ client_vpn_up() {
     "CLIENT_SESSION_REUSE=$session_reuse"
     "CLIENT_DIRECT_EXIT_ALLOW_SESSION_CHURN=$allow_session_churn"
     "CLIENT_SESSION_REFRESH_LEAD_SEC=$session_refresh_lead_sec"
+    "CLIENT_VPN_STATUS_FILE=$status_file"
     "CLIENT_STARTUP_SYNC_TIMEOUT_SEC=$startup_sync_timeout_sec"
     "BETA_STRICT_MODE=$beta_profile"
     "PROD_STRICT_MODE=$prod_profile"
   )
+  if [[ -n "$opaque_session_sec" ]]; then
+    env_vars+=("CLIENT_OPAQUE_SESSION_SEC=$opaque_session_sec")
+  fi
+  if [[ -n "${GPM_SETTLEMENT_RESERVATION_ID:-}" ]]; then
+    env_vars+=("GPM_SETTLEMENT_RESERVATION_ID=${GPM_SETTLEMENT_RESERVATION_ID}")
+  fi
+  if [[ -n "${GPM_SETTLEMENT_RESERVATION_SESSION_ID:-}" ]]; then
+    env_vars+=("GPM_SETTLEMENT_RESERVATION_SESSION_ID=${GPM_SETTLEMENT_RESERVATION_SESSION_ID}")
+  fi
+  if [[ -n "${GPM_SETTLEMENT_WALLET_ADDRESS:-}" ]]; then
+    env_vars+=("GPM_SETTLEMENT_WALLET_ADDRESS=${GPM_SETTLEMENT_WALLET_ADDRESS}")
+  fi
+  if [[ -n "$settlement_reservation_expires_at_unix" ]]; then
+    env_vars+=("GPM_SETTLEMENT_RESERVATION_EXPIRES_AT_UNIX=$settlement_reservation_expires_at_unix")
+  fi
   if [[ "$speed_onehop_profile" == "1" ]]; then
     env_vars+=(
       "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1"
@@ -16559,7 +17043,7 @@ client_vpn_up() {
   if [[ -z "$pid" ]] || ! kill -0 "$pid" >/dev/null 2>&1; then
     echo "client-vpn failed to start; log follows:"
     cat "$log_file"
-    cleanup_runtime_subject_file
+    cleanup_client_vpn_startup_failure
     exit 1
   fi
 
@@ -16570,17 +17054,17 @@ client_vpn_up() {
       echo "client-vpn exited before tunnel became ready"
       cat "$log_file"
       print_client_vpn_trust_mismatch_hint "$log_file" "$trusted_keys_file" "$trust_scope_mode"
-      cleanup_runtime_subject_file
+      cleanup_client_vpn_startup_failure
       exit 1
     fi
-    if rg -q "client received wg-session config" "$log_file"; then
+    if rg -q "client wireguard runtime ready:" "$log_file"; then
       ready=1
       break
     fi
     sleep 1
   done
   if [[ "$ready" -ne 1 ]]; then
-    echo "client-vpn did not receive wg-session config within ${ready_timeout_sec}s"
+    echo "client-vpn did not receive wg-session config within ${ready_timeout_sec}s as a tunnel-ready signal; wireguard runtime did not become ready"
     echo "log: $log_file"
     tail -n 120 "$log_file" || true
     print_client_vpn_trust_mismatch_hint "$log_file" "$trusted_keys_file" "$trust_scope_mode"
@@ -16626,6 +17110,7 @@ client_vpn_up() {
 CLIENT_VPN_PID=$pid
 CLIENT_VPN_IFACE=$interface_name
 CLIENT_VPN_LOG_FILE=$log_file
+CLIENT_VPN_STATUS_FILE=$status_file
 CLIENT_VPN_KEY_FILE=$private_key_file
 CLIENT_VPN_TRUST_FILE=$trusted_keys_file
 CLIENT_VPN_TRUST_SCOPE=$trust_scope_mode
@@ -16637,6 +17122,10 @@ CLIENT_VPN_ENTRY_URL=$entry_url
 CLIENT_VPN_EXIT_URL=$exit_url
 CLIENT_VPN_EXIT_WG_PUBKEY=$exit_wg_pub
 CLIENT_VPN_PATH_PROFILE=$normalized_path_profile
+CLIENT_VPN_ALLOWED_IPS=$allowed_ips
+CLIENT_VPN_INSTALL_ROUTE=$install_route
+CLIENT_VPN_ALLOW_NO_ROUTE=$allow_no_route
+CLIENT_VPN_ROUTE_MODE=$route_mode
 CLIENT_VPN_SESSION_REUSE=$session_reuse
 CLIENT_VPN_ALLOW_SESSION_CHURN=$allow_session_churn
 CLIENT_VPN_BETA_PROFILE=$beta_profile
@@ -16649,6 +17138,11 @@ EOF_STATE
   echo "  interface: $interface_name"
   echo "  allowed_ips: $allowed_ips"
   echo "  install_route: $install_route"
+  echo "  allow_no_route: $allow_no_route"
+  echo "  route_mode: $route_mode"
+  if [[ "$route_mode" == "no-route" ]]; then
+    echo "  route_warning: full-tunnel AllowedIPs are configured but install_route=0, so host traffic is not routed through the VPN"
+  fi
   echo "  path_profile: ${normalized_path_profile:-default}"
   echo "  session_reuse: $session_reuse"
   echo "  allow_session_churn: $allow_session_churn"
@@ -16659,6 +17153,7 @@ EOF_STATE
   echo "  issuer_quorum_check: $issuer_quorum_check"
   echo "  issuer_urls: $issuer_urls"
   echo "  log: $log_file"
+  echo "  status_file: $status_file"
   echo "use './scripts/easy_node.sh client-vpn-status' to inspect"
   echo "use 'sudo ./scripts/easy_node.sh client-vpn-down' to stop and cleanup"
 }
@@ -16726,6 +17221,10 @@ main() {
     desktop-release-bundle)
       shift
       desktop_generic_dispatch desktop-release-bundle desktop_linux_release_bundle desktop_windows_release_bundle "$@"
+      ;;
+    desktop-admin-console-release-bundle)
+      shift
+      desktop_admin_console_release_bundle "$@"
       ;;
     desktop-local-api-session)
       shift

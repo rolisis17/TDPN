@@ -53,12 +53,22 @@ FAKE_LAUNCHER_RUNTIME="$TMP_DIR/fake_launcher_runtime.sh"
 FAKE_PROMPT_BUDGET="$TMP_DIR/fake_prompt_budget.sh"
 FAKE_CONFIG_V1="$TMP_DIR/fake_config_v1.sh"
 FAKE_LOCAL_CONTROL="$TMP_DIR/fake_local_control_api.sh"
+FAKE_PUBLIC_ADMIN_SPLIT="$TMP_DIR/fake_public_admin_split.sh"
+FAKE_DESKTOP_ADMIN_CONSOLE="$TMP_DIR/fake_desktop_admin_console.sh"
+FAKE_DESKTOP_RELEASE_GUARDRAILS="$TMP_DIR/fake_desktop_release_guardrails.sh"
+FAKE_DESKTOP_ADMIN_CONSOLE_RELEASE_GUARDRAILS="$TMP_DIR/fake_desktop_admin_console_release_guardrails.sh"
+FAKE_GPM_ADMIN_SETTLEMENT_CONTRACT="$TMP_DIR/fake_gpm_admin_settlement_contract.sh"
 
 make_fake_step "$FAKE_LAUNCHER_WIRING" "launcher_wiring"
 make_fake_step "$FAKE_LAUNCHER_RUNTIME" "launcher_runtime"
 make_fake_step "$FAKE_PROMPT_BUDGET" "prompt_budget"
 make_fake_step "$FAKE_CONFIG_V1" "config_v1"
 make_fake_step "$FAKE_LOCAL_CONTROL" "local_control_api"
+make_fake_step "$FAKE_PUBLIC_ADMIN_SPLIT" "public_admin_split"
+make_fake_step "$FAKE_DESKTOP_ADMIN_CONSOLE" "desktop_admin_console"
+make_fake_step "$FAKE_DESKTOP_RELEASE_GUARDRAILS" "desktop_release_guardrails"
+make_fake_step "$FAKE_DESKTOP_ADMIN_CONSOLE_RELEASE_GUARDRAILS" "desktop_admin_console_release_guardrails"
+make_fake_step "$FAKE_GPM_ADMIN_SETTLEMENT_CONTRACT" "gpm_admin_settlement_contract"
 
 run_under_test() {
   CI_PHASE0_CAPTURE_FILE="$CAPTURE" \
@@ -67,6 +77,11 @@ run_under_test() {
   CI_PHASE0_PROMPT_BUDGET_SCRIPT="$FAKE_PROMPT_BUDGET" \
   CI_PHASE0_CONFIG_V1_SCRIPT="$FAKE_CONFIG_V1" \
   CI_PHASE0_LOCAL_CONTROL_API_SCRIPT="$FAKE_LOCAL_CONTROL" \
+  CI_PHASE0_PUBLIC_ADMIN_SPLIT_SCRIPT="$FAKE_PUBLIC_ADMIN_SPLIT" \
+  CI_PHASE0_DESKTOP_ADMIN_CONSOLE_SCRIPT="$FAKE_DESKTOP_ADMIN_CONSOLE" \
+  CI_PHASE0_DESKTOP_RELEASE_GUARDRAILS_SCRIPT="$FAKE_DESKTOP_RELEASE_GUARDRAILS" \
+  CI_PHASE0_DESKTOP_ADMIN_CONSOLE_RELEASE_GUARDRAILS_SCRIPT="$FAKE_DESKTOP_ADMIN_CONSOLE_RELEASE_GUARDRAILS" \
+  CI_PHASE0_GPM_ADMIN_SETTLEMENT_CONTRACT_SCRIPT="$FAKE_GPM_ADMIN_SETTLEMENT_CONTRACT" \
   "$TARGET_SCRIPT" "$@"
 }
 
@@ -95,7 +110,7 @@ if ! grep -F -- '[ci-phase0] dry-run complete' "$DRY_LOG" >/dev/null; then
   cat "$DRY_LOG"
   exit 1
 fi
-for expected in "$FAKE_LAUNCHER_WIRING" "$FAKE_LAUNCHER_RUNTIME" "$FAKE_PROMPT_BUDGET" "$FAKE_CONFIG_V1" "$FAKE_LOCAL_CONTROL"; do
+for expected in "$FAKE_LAUNCHER_WIRING" "$FAKE_LAUNCHER_RUNTIME" "$FAKE_PROMPT_BUDGET" "$FAKE_CONFIG_V1" "$FAKE_LOCAL_CONTROL" "$FAKE_PUBLIC_ADMIN_SPLIT" "$FAKE_DESKTOP_ADMIN_CONSOLE" "$FAKE_DESKTOP_RELEASE_GUARDRAILS" "$FAKE_DESKTOP_ADMIN_CONSOLE_RELEASE_GUARDRAILS" "$FAKE_GPM_ADMIN_SETTLEMENT_CONTRACT"; do
   if ! grep -F -- "$expected" "$DRY_LOG" >/dev/null; then
     echo "dry-run output missing command path: $expected"
     cat "$DRY_LOG"
@@ -108,11 +123,16 @@ if ! jq -e '
   and .status == "dry-run"
   and .rc == 0
   and .dry_run == true
-  and .summary.total_steps == 5
-  and .summary.dry_run_steps == 5
+  and .summary.total_steps == 10
+  and .summary.dry_run_steps == 10
   and .summary.contract_ok == false
   and .steps.launcher_wiring.status == "dry-run"
   and .steps.local_control_api.status == "dry-run"
+  and .steps.public_admin_split.status == "dry-run"
+  and .steps.desktop_admin_console.status == "dry-run"
+  and .steps.desktop_release_guardrails.status == "dry-run"
+  and .steps.desktop_admin_console_release_guardrails.status == "dry-run"
+  and .steps.gpm_admin_settlement_contract.status == "dry-run"
   and .artifacts.summary_json == "'"$DRY_SUMMARY"'"
 ' "$DRY_SUMMARY" >/dev/null; then
   echo "dry-run summary missing expected fields"
@@ -137,6 +157,11 @@ launcher_runtime
 prompt_budget
 config_v1
 local_control_api
+public_admin_split
+desktop_admin_console
+desktop_release_guardrails
+desktop_admin_console_release_guardrails
+gpm_admin_settlement_contract
 EOF_ORDER
 )"
 if [[ "$actual_order" != "$expected_order" ]]; then
@@ -153,13 +178,18 @@ if ! jq -e '
   and .status == "pass"
   and .rc == 0
   and .dry_run == false
-  and .summary.total_steps == 5
-  and .summary.pass_steps == 5
+  and .summary.total_steps == 10
+  and .summary.pass_steps == 10
   and .summary.fail_steps == 0
   and .summary.contract_ok == true
   and .summary.all_required_steps_ok == true
   and .steps.prompt_budget.status == "pass"
   and .steps.local_control_api.status == "pass"
+  and .steps.public_admin_split.status == "pass"
+  and .steps.desktop_admin_console.status == "pass"
+  and .steps.desktop_release_guardrails.status == "pass"
+  and .steps.desktop_admin_console_release_guardrails.status == "pass"
+  and .steps.gpm_admin_settlement_contract.status == "pass"
   and .artifacts.summary_json == "'"$SUCCESS_SUMMARY"'"
 ' "$SUCCESS_SUMMARY" >/dev/null; then
   echo "success summary missing expected fields"
@@ -180,7 +210,7 @@ if [[ "$fail_rc" -ne 37 ]]; then
   cat "$FAIL_LOG"
   exit 1
 fi
-if grep -F -- 'config_v1' "$CAPTURE" >/dev/null || grep -F -- 'local_control_api' "$CAPTURE" >/dev/null; then
+if grep -F -- 'config_v1' "$CAPTURE" >/dev/null || grep -F -- 'local_control_api' "$CAPTURE" >/dev/null || grep -F -- 'public_admin_split' "$CAPTURE" >/dev/null || grep -F -- 'desktop_admin_console' "$CAPTURE" >/dev/null || grep -F -- 'desktop_release_guardrails' "$CAPTURE" >/dev/null || grep -F -- 'desktop_admin_console_release_guardrails' "$CAPTURE" >/dev/null || grep -F -- 'gpm_admin_settlement_contract' "$CAPTURE" >/dev/null; then
   echo "fail-fast contract broken: downstream steps executed after prompt_budget failure"
   cat "$CAPTURE"
   cat "$FAIL_LOG"
@@ -198,12 +228,17 @@ if ! jq -e '
   and .dry_run == false
   and .summary.pass_steps == 2
   and .summary.fail_steps == 1
-  and .summary.skipped_steps == 2
+  and .summary.skipped_steps == 7
   and .summary.contract_ok == false
   and .steps.prompt_budget.status == "fail"
   and .steps.prompt_budget.rc == 37
   and .steps.config_v1.status == "skipped"
   and .steps.local_control_api.status == "skipped"
+  and .steps.public_admin_split.status == "skipped"
+  and .steps.desktop_admin_console.status == "skipped"
+  and .steps.desktop_release_guardrails.status == "skipped"
+  and .steps.desktop_admin_console_release_guardrails.status == "skipped"
+  and .steps.gpm_admin_settlement_contract.status == "skipped"
   and .artifacts.summary_json == "'"$FAIL_SUMMARY"'"
 ' "$FAIL_SUMMARY" >/dev/null; then
   echo "fail summary missing expected fields"

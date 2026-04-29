@@ -1228,6 +1228,7 @@ elif [[ "$unresolved_placeholder_selection_valid" != "1" ]]; then
 elif (( scope_match_unique_count == 0 )); then
   no_selected_actions_mode="1"
   delegated_runner_invoked="0"
+  next_actions_rc=4
   echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=skipped reason=no-selected-actions"
 else
   echo "[roadmap-live-evidence-actionable-run] stage=roadmap_next_actions_run status=running"
@@ -1271,9 +1272,10 @@ elif [[ "$placeholder_precondition_mode" == "1" ]]; then
   final_rc=4
 elif [[ "$no_selected_actions_mode" == "1" ]]; then
   nested_runner_status="skipped_no_selected_actions"
-  nested_runner_rc=0
-  delegated_runner_contract_valid="1"
-  final_rc=0
+  nested_runner_rc=4
+  delegated_runner_contract_failure_reason="no live-evidence actions selected for resolved scope"
+  delegated_runner_failure_substep="no_selected_actions"
+  final_rc=4
 fi
 
 if [[ "$print_only_mode" != "1" && "$deterministic_conflict_mode" != "1" && "$placeholder_precondition_mode" != "1" && "$no_selected_actions_mode" != "1" ]] && [[ -f "$next_actions_summary_json" ]] && jq -e . "$next_actions_summary_json" >/dev/null 2>&1; then

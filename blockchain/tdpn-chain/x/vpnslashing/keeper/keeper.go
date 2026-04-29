@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -82,6 +83,38 @@ func (k *Keeper) SubmitEvidence(record types.SlashEvidence) (types.SlashEvidence
 	return normalized, nil
 }
 
+// ConfirmEvidence advances submitted objective evidence into the final
+// confirmed state required before penalties may be applied.
+func (k *Keeper) ConfirmEvidence(evidenceID string) (types.SlashEvidence, error) {
+	normalizedEvidenceID := types.NormalizeEvidenceID(evidenceID)
+	if normalizedEvidenceID == "" {
+		return types.SlashEvidence{}, errors.New("evidence_id is required")
+	}
+
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	evidence, ok := k.store.GetEvidence(normalizedEvidenceID)
+	if !ok {
+		return types.SlashEvidence{}, missingEvidenceError(normalizedEvidenceID)
+	}
+	normalized := normalizeEvidence(evidence)
+	switch normalized.Status {
+	case chaintypes.ReconciliationConfirmed:
+		return normalized, nil
+	case chaintypes.ReconciliationPending, chaintypes.ReconciliationSubmitted:
+		normalized.Status = chaintypes.ReconciliationConfirmed
+	case chaintypes.ReconciliationFailed:
+		return types.SlashEvidence{}, fmt.Errorf("evidence %q cannot be confirmed from failed status", normalizedEvidenceID)
+	default:
+		return types.SlashEvidence{}, fmt.Errorf("evidence %q cannot be confirmed from status %q", normalizedEvidenceID, normalized.Status)
+	}
+	if err := k.upsertEvidenceLocked(normalized); err != nil {
+		return types.SlashEvidence{}, err
+	}
+	return normalized, nil
+}
+
 func (k *Keeper) GetEvidence(evidenceID string) (types.SlashEvidence, bool) {
 	normalizedEvidenceID := types.NormalizeEvidenceID(evidenceID)
 
@@ -144,6 +177,12 @@ func (k *Keeper) ApplyPenalty(record types.PenaltyDecision) (types.PenaltyDecisi
 		return types.PenaltyDecision{}, missingEvidenceError(normalized.EvidenceID)
 	}
 	normalizedEvidence := normalizeEvidence(evidence)
+	if err := validatePenaltyEvidenceActionable(normalized, normalizedEvidence); err != nil {
+		return types.PenaltyDecision{}, err
+	}
+	if err := validatePenaltyBoundToEvidence(normalized, normalizedEvidence); err != nil {
+		return types.PenaltyDecision{}, err
+	}
 
 	existing, ok := k.store.GetPenalty(normalized.PenaltyID)
 	if ok {
@@ -167,6 +206,27 @@ func (k *Keeper) ApplyPenalty(record types.PenaltyDecision) (types.PenaltyDecisi
 		return types.PenaltyDecision{}, err
 	}
 	return normalized, nil
+}
+
+func validatePenaltyEvidenceActionable(penalty types.PenaltyDecision, evidence types.SlashEvidence) error {
+	if evidence.Status == chaintypes.ReconciliationConfirmed {
+		return nil
+	}
+	return fmt.Errorf("penalty %q cannot be applied to non-final evidence %q with status %q", penalty.PenaltyID, evidence.EvidenceID, evidence.Status)
+}
+
+func validatePenaltyBoundToEvidence(penalty types.PenaltyDecision, evidence types.SlashEvidence) error {
+	evidenceHasSlashAmount := evidence.SlashAmount != 0 || evidence.SlashDenom != ""
+	penaltyHasSlashAmount := penalty.SlashAmount != 0 || penalty.SlashDenom != ""
+	if !evidenceHasSlashAmount && penaltyHasSlashAmount {
+		return fmt.Errorf("penalty %q slash amount is not authorized by evidence %q", penalty.PenaltyID, evidence.EvidenceID)
+	}
+	if evidenceHasSlashAmount {
+		if penalty.SlashAmount != evidence.SlashAmount || penalty.SlashDenom != evidence.SlashDenom {
+			return fmt.Errorf("penalty %q slash amount does not match evidence %q", penalty.PenaltyID, evidence.EvidenceID)
+		}
+	}
+	return nil
 }
 
 func (k *Keeper) GetPenalty(penaltyID string) (types.PenaltyDecision, bool) {
@@ -303,6 +363,7 @@ func (k *Keeper) listPenaltiesLocked() ([]types.PenaltyDecision, error) {
 func normalizeEvidence(record types.SlashEvidence) types.SlashEvidence {
 	record.EvidenceID = types.NormalizeEvidenceID(record.EvidenceID)
 	record.ViolationType = types.NormalizeViolationType(record.ViolationType)
+	record.SlashDenom = types.NormalizeSlashDenom(record.SlashDenom)
 	if record.Status == "" {
 		record.Status = chaintypes.ReconciliationSubmitted
 	}
@@ -312,6 +373,7 @@ func normalizeEvidence(record types.SlashEvidence) types.SlashEvidence {
 func normalizePenalty(record types.PenaltyDecision) types.PenaltyDecision {
 	record.PenaltyID = types.NormalizePenaltyID(record.PenaltyID)
 	record.EvidenceID = types.NormalizeEvidenceID(record.EvidenceID)
+	record.SlashDenom = types.NormalizeSlashDenom(record.SlashDenom)
 	if record.Status == "" {
 		record.Status = chaintypes.ReconciliationSubmitted
 	}
@@ -321,12 +383,14 @@ func normalizePenalty(record types.PenaltyDecision) types.PenaltyDecision {
 func normalizeEvidenceForUpsert(record types.SlashEvidence) types.SlashEvidence {
 	record.EvidenceID = types.NormalizeEvidenceID(record.EvidenceID)
 	record.ViolationType = types.NormalizeViolationType(record.ViolationType)
+	record.SlashDenom = types.NormalizeSlashDenom(record.SlashDenom)
 	return record
 }
 
 func normalizePenaltyForUpsert(record types.PenaltyDecision) types.PenaltyDecision {
 	record.PenaltyID = types.NormalizePenaltyID(record.PenaltyID)
 	record.EvidenceID = types.NormalizeEvidenceID(record.EvidenceID)
+	record.SlashDenom = types.NormalizeSlashDenom(record.SlashDenom)
 	return record
 }
 
@@ -361,6 +425,8 @@ func slashEvidenceRecordsEqual(a, b types.SlashEvidence) bool {
 		a.ViolationType == b.ViolationType &&
 		a.Kind == b.Kind &&
 		a.ProofHash == b.ProofHash &&
+		a.SlashAmount == b.SlashAmount &&
+		a.SlashDenom == b.SlashDenom &&
 		a.SubmittedAtUnix == b.SubmittedAtUnix &&
 		a.Status == b.Status
 }
@@ -373,6 +439,8 @@ func penaltyRecordsEqual(a, b types.PenaltyDecision) bool {
 	return a.PenaltyID == b.PenaltyID &&
 		a.EvidenceID == b.EvidenceID &&
 		a.SlashBasisPoint == b.SlashBasisPoint &&
+		a.SlashAmount == b.SlashAmount &&
+		a.SlashDenom == b.SlashDenom &&
 		a.Jailed == b.Jailed &&
 		a.AppliedAtUnix == b.AppliedAtUnix &&
 		a.Status == b.Status

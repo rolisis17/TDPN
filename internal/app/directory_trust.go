@@ -52,6 +52,9 @@ func (c *Client) selectTrustedDirectoryPubKeys(pubKeys []string) ([]string, []ed
 		return allowedCanonical, allowedDecoded, nil
 	}
 	if c.trustTOFU && len(trusted) == 0 {
+		if len(canonical) != 1 {
+			return nil, nil, fmt.Errorf("directory TOFU requires exactly one pubkey on first contact; got %d", len(canonical))
+		}
 		for _, key := range canonical {
 			if err := appendTrustedKey(c.trustFile, key); err != nil {
 				return nil, nil, err

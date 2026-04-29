@@ -44,6 +44,19 @@ type ApplyPenaltyResponse struct {
 	Idempotent bool
 }
 
+// ConfirmEvidenceRequest advances evidence to final status after chain/bridge
+// finality has been established.
+type ConfirmEvidenceRequest struct {
+	EvidenceID string
+}
+
+// ConfirmEvidenceResponse returns the confirmed evidence and replay metadata.
+type ConfirmEvidenceResponse struct {
+	Evidence   types.SlashEvidence
+	Existed    bool
+	Idempotent bool
+}
+
 // MsgServer exposes a lightweight Cosmos-style message surface for vpnslashing.
 type MsgServer struct {
 	keeper *keeper.Keeper
@@ -73,6 +86,30 @@ func (s MsgServer) SubmitSlashEvidence(req SubmitSlashEvidenceRequest) (SubmitSl
 		if strings.Contains(err.Error(), "conflicting fields") ||
 			strings.Contains(err.Error(), "duplicates already-recorded evidence") {
 			return resp, fmt.Errorf("%w: %v", ErrEvidenceConflict, err)
+		}
+		return resp, fmt.Errorf("%w: %v", ErrInvalidEvidence, err)
+	}
+	return resp, nil
+}
+
+func (s MsgServer) ConfirmEvidence(req ConfirmEvidenceRequest) (ConfirmEvidenceResponse, error) {
+	if s.keeper == nil {
+		return ConfirmEvidenceResponse{}, ErrNilKeeper
+	}
+	normalizedEvidenceID := types.NormalizeEvidenceID(req.EvidenceID)
+	if normalizedEvidenceID == "" {
+		return ConfirmEvidenceResponse{}, fmt.Errorf("%w: evidence_id is required", ErrInvalidEvidence)
+	}
+	existing, existed := s.keeper.GetEvidence(normalizedEvidenceID)
+	record, err := s.keeper.ConfirmEvidence(normalizedEvidenceID)
+	resp := ConfirmEvidenceResponse{
+		Evidence:   record,
+		Existed:    existed,
+		Idempotent: existed && existing.Status == record.Status,
+	}
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return resp, fmt.Errorf("%w: %v", ErrEvidenceNotFound, err)
 		}
 		return resp, fmt.Errorf("%w: %v", ErrInvalidEvidence, err)
 	}

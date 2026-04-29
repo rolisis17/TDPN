@@ -32,18 +32,44 @@ type RelayDescriptor struct {
 }
 
 type PathOpenRequest struct {
-	ExitID          string `json:"exit_id"`
-	MiddleRelayID   string `json:"middle_relay_id,omitempty"`
-	Token           string `json:"token"`
-	TokenProof      string `json:"token_proof,omitempty"`
-	TokenProofNonce string `json:"token_proof_nonce,omitempty"`
-	ClientInnerPub  string `json:"client_inner_pub"`
-	Transport       string `json:"transport,omitempty"`
-	RequestedMTU    int    `json:"requested_mtu"`
-	RequestedRegion string `json:"requested_region"`
-	PuzzleNonce     string `json:"puzzle_nonce,omitempty"`
-	PuzzleDigest    string `json:"puzzle_digest,omitempty"`
-	SessionID       string `json:"session_id,omitempty"`
+	ExitID               string              `json:"exit_id"`
+	MiddleRelayID        string              `json:"middle_relay_id,omitempty"`
+	PathProfile          string              `json:"path_profile,omitempty"`
+	ClientRouteAssertion *PathRouteAssertion `json:"client_route_assertion,omitempty"`
+	EntryRouteAssertion  *PathRouteAssertion `json:"entry_route_assertion,omitempty"`
+	Token                string              `json:"token"`
+	TokenProof           string              `json:"token_proof,omitempty"`
+	TokenProofNonce      string              `json:"token_proof_nonce,omitempty"`
+	ReservationID        string              `json:"reservation_id,omitempty"`
+	ReservationSessionID string              `json:"reservation_session_id,omitempty"`
+	ReservationSubjectID string              `json:"reservation_subject_id,omitempty"`
+	ClientInnerPub       string              `json:"client_inner_pub"`
+	Transport            string              `json:"transport,omitempty"`
+	RequestedMTU         int                 `json:"requested_mtu"`
+	RequestedRegion      string              `json:"requested_region"`
+	PuzzleNonce          string              `json:"puzzle_nonce,omitempty"`
+	PuzzleDigest         string              `json:"puzzle_digest,omitempty"`
+	SessionID            string              `json:"session_id,omitempty"`
+}
+
+type PathRouteAssertion struct {
+	PathProfile          string `json:"path_profile,omitempty"`
+	EntryRelayID         string `json:"entry_relay_id,omitempty"`
+	MiddleRelayID        string `json:"middle_relay_id,omitempty"`
+	ExitRelayID          string `json:"exit_relay_id,omitempty"`
+	SessionID            string `json:"session_id,omitempty"`
+	TokenProofNonce      string `json:"token_proof_nonce,omitempty"`
+	ReservationID        string `json:"reservation_id,omitempty"`
+	ReservationSessionID string `json:"reservation_session_id,omitempty"`
+	ReservationSubjectID string `json:"reservation_subject_id,omitempty"`
+	ClientInnerPub       string `json:"client_inner_pub,omitempty"`
+	Transport            string `json:"transport,omitempty"`
+	RequestedMTU         int    `json:"requested_mtu,omitempty"`
+	RequestedRegion      string `json:"requested_region,omitempty"`
+	TokenSHA256          string `json:"token_sha256,omitempty"`
+	TokenProofSHA256     string `json:"token_proof_sha256,omitempty"`
+	SignerPubKey         string `json:"signer_pub_key,omitempty"`
+	Signature            string `json:"signature,omitempty"`
 }
 
 type PathOpenResponse struct {
@@ -72,6 +98,7 @@ type IssueTokenRequest struct {
 	Subject      string               `json:"subject,omitempty"`
 	TokenType    string               `json:"token_type,omitempty"`
 	PopPubKey    string               `json:"pop_pub_key,omitempty"`
+	Transport    string               `json:"transport,omitempty"`
 	ExitScope    []string             `json:"exit_scope,omitempty"`
 	AnonCred     string               `json:"anon_cred,omitempty"`
 	PaymentProof *SponsorPaymentProof `json:"payment_proof,omitempty"`

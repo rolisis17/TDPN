@@ -12,10 +12,12 @@ rm -f "$LOG_FILE"
 
 TMP_BIN_DIR="$(mktemp -d)"
 KEY_FILE="$(mktemp)"
+TRUST_FILE="$(mktemp)"
 cleanup() {
   kill "${node_pid:-}" >/dev/null 2>&1 || true
   rm -rf "$TMP_BIN_DIR"
   rm -f "$KEY_FILE"
+  rm -f "$TRUST_FILE"
 }
 trap cleanup EXIT
 
@@ -45,6 +47,13 @@ CLIENT_WG_PRIVATE_KEY_PATH="$KEY_FILE" \
 CLIENT_WG_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
 CLIENT_WG_KERNEL_PROXY=1 \
 CLIENT_WG_PROXY_ADDR=127.0.0.1:57920 \
+WG_ALLOW_UNTRUSTED_BINARY_PATH=1 \
+CLIENT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1 \
+ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1 \
+EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1 \
+DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1 \
+DIRECTORY_TRUST_TOFU=1 \
+DIRECTORY_TRUSTED_KEYS_FILE="$TRUST_FILE" \
 CLIENT_INNER_SOURCE=udp \
 CLIENT_DISABLE_SYNTHETIC_FALLBACK=1 \
 CLIENT_OPAQUE_SESSION_SEC=2 \
@@ -57,14 +66,14 @@ node_pid=$!
 
 ready=0
 for _ in $(seq 1 140); do
-  if rg -q "client received wg-session config:" "$LOG_FILE"; then
+  if rg -q "client wg-kernel proxy listening:" "$LOG_FILE"; then
     ready=1
     break
   fi
   sleep 0.2
 done
 if [[ "$ready" -ne 1 ]]; then
-  echo "client did not reach wg session config stage"
+  echo "client did not reach wg kernel proxy listening stage"
   cat "$LOG_FILE"
   exit 1
 fi

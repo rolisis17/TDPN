@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 
 	billingkeeper "github.com/tdpn/tdpn-chain/x/vpnbilling/keeper"
 	billingmodule "github.com/tdpn/tdpn-chain/x/vpnbilling/module"
@@ -302,5 +304,13 @@ func syncDirectory(path string) error {
 		return err
 	}
 	defer dir.Close()
-	return dir.Sync()
+	if err := dir.Sync(); err != nil {
+		if runtime.GOOS == "windows" && (os.IsPermission(err) || errors.Is(err, syscall.EINVAL)) {
+			// Windows commonly rejects syncing directory handles. The file itself
+			// is still fsynced before creation/rename, so directory sync is best effort.
+			return nil
+		}
+		return err
+	}
+	return nil
 }

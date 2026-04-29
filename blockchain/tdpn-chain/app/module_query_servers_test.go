@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	chaintypes "github.com/tdpn/tdpn-chain/types"
 	billingtypes "github.com/tdpn/tdpn-chain/x/vpnbilling/types"
 	rewardstypes "github.com/tdpn/tdpn-chain/x/vpnrewards/types"
 	slashingtypes "github.com/tdpn/tdpn-chain/x/vpnslashing/types"
@@ -32,6 +33,7 @@ func TestBillingQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 		SessionID:     "session-1",
 		AssetDenom:    "utdpn",
 		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
 	}
 	if _, err := msgServer.CreateReservation(context.Background(), BillingCreateReservationRequest{Record: reservation}); err != nil {
 		t.Fatalf("expected create reservation to succeed, got %v", err)
@@ -61,12 +63,13 @@ func TestBillingQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 	}
 
 	settlement := billingtypes.SettlementRecord{
-		SettlementID:  "set-query-1",
-		ReservationID: reservation.ReservationID,
-		SessionID:     reservation.SessionID,
-		BilledAmount:  20,
-		UsageBytes:    1024,
-		AssetDenom:    "utdpn",
+		SettlementID:   "set-query-1",
+		ReservationID:  reservation.ReservationID,
+		SessionID:      reservation.SessionID,
+		BilledAmount:   20,
+		UsageBytes:     1024,
+		AssetDenom:     "utdpn",
+		OperationState: chaintypes.ReconciliationConfirmed,
 	}
 	if _, err := msgServer.FinalizeSettlement(context.Background(), BillingFinalizeSettlementRequest{Record: settlement}); err != nil {
 		t.Fatalf("expected finalize settlement to succeed, got %v", err)
@@ -91,18 +94,20 @@ func TestBillingQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 		SessionID:     "session-0",
 		AssetDenom:    "utdpn",
 		Amount:        50,
+		Status:        chaintypes.ReconciliationConfirmed,
 	}
 	if _, err := msgServer.CreateReservation(context.Background(), BillingCreateReservationRequest{Record: anotherReservation}); err != nil {
 		t.Fatalf("expected create second reservation to succeed, got %v", err)
 	}
 
 	anotherSettlement := billingtypes.SettlementRecord{
-		SettlementID:  "set-query-0",
-		ReservationID: anotherReservation.ReservationID,
-		SessionID:     anotherReservation.SessionID,
-		BilledAmount:  10,
-		UsageBytes:    512,
-		AssetDenom:    "utdpn",
+		SettlementID:   "set-query-0",
+		ReservationID:  anotherReservation.ReservationID,
+		SessionID:      anotherReservation.SessionID,
+		BilledAmount:   10,
+		UsageBytes:     512,
+		AssetDenom:     "utdpn",
+		OperationState: chaintypes.ReconciliationConfirmed,
 	}
 	if _, err := msgServer.FinalizeSettlement(context.Background(), BillingFinalizeSettlementRequest{Record: anotherSettlement}); err != nil {
 		t.Fatalf("expected finalize second settlement to succeed, got %v", err)
@@ -183,13 +188,13 @@ func TestRewardsQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 		t.Fatal("expected missing accrual query to return found=false")
 	}
 
-	accrual := rewardstypes.RewardAccrual{
+	accrual := withTestRewardPayout(rewardstypes.RewardAccrual{
 		AccrualID:  "acc-query-1",
 		SessionID:  "session-1",
 		ProviderID: "provider-1",
 		AssetDenom: "utdpn",
 		Amount:     10,
-	}
+	})
 	if _, err := msgServer.CreateAccrual(context.Background(), RewardsCreateAccrualRequest{Record: accrual}); err != nil {
 		t.Fatalf("expected create accrual to succeed, got %v", err)
 	}
@@ -239,13 +244,13 @@ func TestRewardsQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 		t.Fatalf("expected distribution id %q, got %q", distribution.DistributionID, foundDistribution.Distribution.DistributionID)
 	}
 
-	anotherAccrual := rewardstypes.RewardAccrual{
+	anotherAccrual := withTestRewardPayout(rewardstypes.RewardAccrual{
 		AccrualID:  "acc-query-0",
 		SessionID:  "session-0",
 		ProviderID: "provider-0",
 		AssetDenom: "utdpn",
 		Amount:     5,
-	}
+	})
 	if _, err := msgServer.CreateAccrual(context.Background(), RewardsCreateAccrualRequest{Record: anotherAccrual}); err != nil {
 		t.Fatalf("expected create second accrual to succeed, got %v", err)
 	}
@@ -336,6 +341,8 @@ func TestSlashingQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 
 	evidence := slashingtypes.SlashEvidence{
 		EvidenceID:    "ev-query-1",
+		ProviderID:    "provider-query-1",
+		SessionID:     "session-query-1",
 		Kind:          slashingtypes.EvidenceKindObjective,
 		ViolationType: "double-sign",
 		ProofHash:     "sha256:98c28e7336b1709232b3cf6d5a5af8c4d0a779fe32360f37d8a1c832f03e5cbf",
@@ -356,6 +363,9 @@ func TestSlashingQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 	if foundEvidence.Evidence.EvidenceID != evidence.EvidenceID {
 		t.Fatalf("expected evidence id %q, got %q", evidence.EvidenceID, foundEvidence.Evidence.EvidenceID)
 	}
+	confirmedEvidence := foundEvidence.Evidence
+	confirmedEvidence.Status = chaintypes.ReconciliationConfirmed
+	scaffold.SlashingModule.Keeper.UpsertEvidence(confirmedEvidence)
 
 	missingPenalty, err := queryServer.GetPenalty(context.Background(), SlashingGetPenaltyRequest{
 		PenaltyID: "missing-penalty",
@@ -391,6 +401,8 @@ func TestSlashingQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 
 	anotherEvidence := slashingtypes.SlashEvidence{
 		EvidenceID:    "ev-query-0",
+		ProviderID:    "provider-query-0",
+		SessionID:     "session-query-0",
 		Kind:          slashingtypes.EvidenceKindObjective,
 		ViolationType: "double-sign",
 		ProofHash:     "sha256:8df34bb962577b90d574a51ed2ca75759f1f2a17e6f59f8adf173808261ed7e6",
@@ -398,6 +410,12 @@ func TestSlashingQueryServer_AccessorHappyPathAndNotFound(t *testing.T) {
 	if _, err := msgServer.SubmitEvidence(context.Background(), SlashingSubmitEvidenceRequest{Record: anotherEvidence}); err != nil {
 		t.Fatalf("expected submit second evidence to succeed, got %v", err)
 	}
+	confirmedAnotherEvidence, ok := scaffold.SlashingModule.Keeper.GetEvidence(anotherEvidence.EvidenceID)
+	if !ok {
+		t.Fatalf("expected evidence %s to exist", anotherEvidence.EvidenceID)
+	}
+	confirmedAnotherEvidence.Status = chaintypes.ReconciliationConfirmed
+	scaffold.SlashingModule.Keeper.UpsertEvidence(confirmedAnotherEvidence)
 
 	anotherPenalty := slashingtypes.PenaltyDecision{
 		PenaltyID:       "pen-query-0",

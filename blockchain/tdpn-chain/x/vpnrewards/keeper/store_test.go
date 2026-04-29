@@ -145,7 +145,9 @@ func TestKeeperCreateAndRecordUseCustomStoreWithStatusProgression(t *testing.T) 
 
 	accrual, err := k.CreateAccrual(types.RewardAccrual{
 		AccrualID:  "acc-1",
+		SessionID:  "sess-1",
 		ProviderID: "provider-1",
+		AssetDenom: "uusdc",
 		Amount:     100,
 	})
 	if err != nil {
@@ -174,8 +176,8 @@ func TestKeeperCreateAndRecordUseCustomStoreWithStatusProgression(t *testing.T) 
 	if !ok {
 		t.Fatal("expected accrual to exist after recording distribution")
 	}
-	if updated.OperationState != chaintypes.ReconciliationConfirmed {
-		t.Fatalf("expected accrual state %q after distribution, got %q", chaintypes.ReconciliationConfirmed, updated.OperationState)
+	if updated.OperationState != chaintypes.ReconciliationSubmitted {
+		t.Fatalf("expected accrual state %q after distribution, got %q", chaintypes.ReconciliationSubmitted, updated.OperationState)
 	}
 }
 
@@ -255,13 +257,17 @@ func TestFileStoreListAccrualsAndDistributionsAcrossReopen(t *testing.T) {
 
 	accrualA := types.RewardAccrual{
 		AccrualID:      "acc-file-a",
+		SessionID:      "sess-file-a",
 		ProviderID:     "provider-a",
+		AssetDenom:     "uusdc",
 		Amount:         11,
 		OperationState: chaintypes.ReconciliationPending,
 	}
 	accrualB := types.RewardAccrual{
 		AccrualID:      "acc-file-b",
+		SessionID:      "sess-file-b",
 		ProviderID:     "provider-b",
+		AssetDenom:     "uusdc",
 		Amount:         22,
 		OperationState: chaintypes.ReconciliationSubmitted,
 	}

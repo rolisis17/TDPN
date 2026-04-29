@@ -10,8 +10,28 @@ import (
 	"strings"
 	"testing"
 
+	"privacynode/pkg/crypto"
 	"privacynode/pkg/proto"
 )
+
+func TestPacketNonceGeneratorIsMonotonic(t *testing.T) {
+	g := &packetNonceGenerator{next: 41}
+	if got := g.Next(); got != 41 {
+		t.Fatalf("first nonce=%d want 41", got)
+	}
+	if got := g.Next(); got != 42 {
+		t.Fatalf("second nonce=%d want 42", got)
+	}
+
+	const maxUint64 = ^uint64(0)
+	g = &packetNonceGenerator{next: maxUint64}
+	if got := g.Next(); got != maxUint64 {
+		t.Fatalf("max nonce=%d want %d", got, maxUint64)
+	}
+	if got := g.Next(); got != 1 {
+		t.Fatalf("wrapped nonce=%d want 1", got)
+	}
+}
 
 func TestOpenPathWithChallengeRetries(t *testing.T) {
 	entryURL := "http://entry.local"
@@ -83,6 +103,59 @@ func TestOpenPathWithChallengeDenied(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "path open denied") {
 		t.Fatalf("expected denied error, got %v", err)
+	}
+}
+
+func TestClientRouteAssertionForPairBindsSelectedPath(t *testing.T) {
+	pair := relayPair{
+		entry:     proto.RelayDescriptor{RelayID: "entry-a"},
+		middle:    proto.RelayDescriptor{RelayID: "middle-a"},
+		hasMiddle: true,
+		exit:      proto.RelayDescriptor{RelayID: "exit-a"},
+	}
+
+	assertion := clientRouteAssertionForPair(pair, "3hop", pair.middle.RelayID, "res-a", "res-session-a", "cosmos1subject")
+	if assertion == nil {
+		t.Fatalf("expected route assertion")
+	}
+	if assertion.PathProfile != "3hop" {
+		t.Fatalf("path profile=%q want 3hop", assertion.PathProfile)
+	}
+	if assertion.EntryRelayID != "entry-a" || assertion.MiddleRelayID != "middle-a" || assertion.ExitRelayID != "exit-a" {
+		t.Fatalf("unexpected assertion: %+v", assertion)
+	}
+	if assertion.ReservationID != "res-a" || assertion.ReservationSessionID != "res-session-a" || assertion.ReservationSubjectID != "cosmos1subject" || assertion.SessionID != "res-session-a" {
+		t.Fatalf("expected reservation-bound assertion, got %+v", assertion)
+	}
+}
+
+func TestBindClientRouteAssertionToRequestBindsProofFields(t *testing.T) {
+	assertion := &proto.PathRouteAssertion{
+		PathProfile:  "2hop",
+		EntryRelayID: "entry-a",
+		ExitRelayID:  "exit-a",
+	}
+	req := proto.PathOpenRequest{
+		Token:                "tok-a",
+		TokenProofNonce:      "nonce-a",
+		SessionID:            "session-a",
+		ReservationID:        "res-a",
+		ReservationSessionID: "session-a",
+		ReservationSubjectID: "cosmos1subject",
+		ClientInnerPub:       "client-pub-a",
+		Transport:            "wireguard-udp",
+		RequestedMTU:         1280,
+		RequestedRegion:      "us-east",
+	}
+	bindClientRouteAssertionToRequest(assertion, req)
+	if assertion.SessionID != "session-a" ||
+		assertion.TokenProofNonce != "nonce-a" ||
+		assertion.ClientInnerPub != "client-pub-a" ||
+		assertion.Transport != "wireguard-udp" ||
+		assertion.RequestedMTU != 1280 ||
+		assertion.RequestedRegion != "us-east" ||
+		assertion.TokenSHA256 != crypto.PathRouteAssertionBindingHash("tok-a") {
+		t.Fatalf("assertion not request-bound: %+v", assertion)
 	}
 }
 

@@ -90,6 +90,7 @@ func TestHandleSubmitSlashEvidenceRejectsNonObjectiveViolation(t *testing.T) {
 	body, _ := json.Marshal(proto.SubmitSlashEvidenceRequest{
 		EvidenceID:    "ev-3",
 		Subject:       "provider-3",
+		SessionID:     "sess-3",
 		ViolationType: "manual-review-only",
 		EvidenceRef:   "obj://validator/manual/block-14",
 	})
@@ -106,4 +107,3 @@ func TestHandleSubmitSlashEvidenceRejectsNonObjectiveViolation(t *testing.T) {
 		t.Fatalf("expected objective violation_type error, got %q", rr.Body.String())
 	}
 }
-

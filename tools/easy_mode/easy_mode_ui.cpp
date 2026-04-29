@@ -848,10 +848,10 @@ std::string normalizePathProfileChoice(const std::string &raw) {
   std::string value = trim(raw);
   std::transform(value.begin(), value.end(), value.begin(),
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  if (value == "1" || value == "1hop" || value == "speed" || value == "speed-1hop") {
+  if (value == "1" || value == "1hop" || value == "speed-1hop") {
     return "1";
   }
-  if (value == "2" || value == "2hop" || value == "balanced") {
+  if (value == "2" || value == "2hop" || value == "balanced" || value == "speed") {
     return "2";
   }
   if (value == "3" || value == "3hop" || value == "private" || value == "privacy") {

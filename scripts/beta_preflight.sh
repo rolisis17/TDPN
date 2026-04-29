@@ -118,6 +118,9 @@ run_step "linux desktop one-click guardrails integration" ./scripts/integration_
 run_step "linux desktop installer guardrails integration" ./scripts/integration_linux_desktop_installer_guardrails.sh
 run_step "desktop release bundle guardrails integration" ./scripts/integration_desktop_release_bundle_guardrails.sh
 run_step "desktop linux release bundle guardrails integration" ./scripts/integration_desktop_linux_release_bundle_guardrails.sh
+run_step "desktop admin-console contract" ./scripts/integration_desktop_admin_console_contract.sh
+run_step "desktop admin-console release bundle guardrails integration" ./scripts/integration_desktop_admin_console_release_bundle_guardrails.sh
+run_step "GPM admin settlement contract integration" ./scripts/integration_gpm_admin_settlement_contract.sh
 run_step "phase-5 settlement layer gate integration" ./scripts/integration_ci_phase5_settlement_layer.sh
 run_step "phase-5 settlement layer check integration" ./scripts/integration_phase5_settlement_layer_check.sh
 run_step "phase-5 settlement layer run integration" ./scripts/integration_phase5_settlement_layer_run.sh

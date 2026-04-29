@@ -13,6 +13,7 @@ done
 
 TMP_DIR="$(mktemp -d)"
 FAKE_SCRIPT="$TMP_DIR/fake_easy_node.sh"
+AUTH_VERIFY_SCRIPT="$TMP_DIR/fake_auth_verify.sh"
 CALLS_FILE="$TMP_DIR/easy_node_calls.tsv"
 SERVER_LOG="$TMP_DIR/local_api_server.log"
 LOCAL_API_BASE=""
@@ -49,6 +50,13 @@ fi
 echo "$cmd ok"
 EOF_FAKE
 chmod +x "$FAKE_SCRIPT"
+
+cat >"$AUTH_VERIFY_SCRIPT" <<'EOF_AUTH_VERIFY'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF_AUTH_VERIFY
+chmod +x "$AUTH_VERIFY_SCRIPT"
 
 pick_port() {
   local candidate=""
@@ -98,6 +106,7 @@ start_local_api() {
   local allow_legacy_connect_override="${12-}"
   local manifest_remote_refresh_interval="${13-}"
   local require_crypto_proof="${14-}"
+  local auth_verify_command="${15-$AUTH_VERIFY_SCRIPT}"
   local port=""
   local attempt=0
   local max_attempts=8
@@ -126,6 +135,12 @@ start_local_api() {
       "GPM_STATE_STORE_PATH=$TMP_DIR/gpm_state.json"
       "GPM_AUDIT_LOG_PATH=$TMP_DIR/gpm_audit.jsonl"
     )
+    if [[ "$auth_verify_command" == "__none__" ]]; then
+      auth_verify_command=""
+    fi
+    if [[ -n "$auth_verify_command" ]]; then
+      api_env+=("GPM_AUTH_VERIFY_COMMAND=$auth_verify_command")
+    fi
     if [[ -n "$connect_require_session" ]]; then
       api_env+=("GPM_CONNECT_REQUIRE_SESSION=$connect_require_session")
     fi
@@ -279,6 +294,29 @@ assert_json_expr() {
   fi
 }
 
+require_easy_node_marker() {
+  local pattern="$1"
+  local message="$2"
+  if ! grep -Eq "$pattern" "$ROOT_DIR/scripts/easy_node.sh"; then
+    echo "$message"
+    exit 1
+  fi
+}
+
+echo "[local-control-api-gpm-manifest-trust] production trust pinning refuses live pubkeys bootstrap"
+require_easy_node_marker '^ensure_client_vpn_prod_trust_bootstrap_or_die\(\)' \
+  "expected easy_node.sh to define a production trust bootstrap guard"
+require_easy_node_marker '^client_vpn_signed_bootstrap_manifest_configured\(\)' \
+  "expected easy_node.sh to recognize explicitly signed bootstrap manifest configuration"
+require_easy_node_marker 'ensure_client_vpn_prod_trust_bootstrap_or_die "\$trusted_keys_file"' \
+  "expected client-vpn-up production path to require pre-seeded trust or signed bootstrap manifest"
+require_easy_node_marker 'seed_client_vpn_trust_file_if_empty "\$trusted_keys_file" "\$directory_urls"' \
+  "expected client-vpn-up non-production path to retain support-mode trust seeding"
+require_easy_node_marker 'refusing to seed production directory trust from live /v1/pubkeys while DIRECTORY_TRUST_TOFU=0' \
+  "expected production path to reject live /v1/pubkeys first-contact trust seeding"
+require_easy_node_marker 'GPM_BOOTSTRAP_MANIFEST_URL plus GPM_BOOTSTRAP_MANIFEST_HMAC_KEY or GPM_BOOTSTRAP_MANIFEST_ED25519_PUBLIC_KEY' \
+  "expected production trust guard to document signed bootstrap manifest requirements"
+
 echo "[local-control-api-gpm-manifest-trust] /v1/config surfaces strict auth policy keys"
 strict_manifest_url="http://127.0.0.1:1/v1/bootstrap/manifest"
 strict_bootstrap_directory="https://directory.strict.globalprivatemesh.example:8081"
@@ -401,7 +439,9 @@ start_local_api \
   "" \
   "" \
   "" \
-  ""
+  "" \
+  "" \
+  "__none__"
 
 echo "[local-control-api-gpm-manifest-trust] production mode /v1/config surfaces fail-closed connect policy defaults"
 prod_auth_config_json="$(api_get_json "/v1/config")"

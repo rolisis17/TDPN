@@ -5,7 +5,7 @@ This guide captures the runtime wiring between VPN services and the Cosmos-first
 ## Core Principle
 
 - VPN dataplane/session forwarding remains independent from chain liveness.
-- Settlement, rewards, sponsor reservations, and slash evidence are fail-soft control-plane operations.
+- Billing reservations, settlement, rewards, sponsor reservations, and slash evidence are fail-soft control-plane operations.
 - When chain submissions fail, operations are deferred and reconciled asynchronously.
 
 ## Common Settlement Configuration
@@ -43,7 +43,7 @@ Signed-tx mode note:
 - Service behavior remains fail-soft: VPN session setup/forwarding stays available while settlement writes are deferred and reconciled later.
 
 Shadow dual-write note:
-- `COSMOS_SETTLEMENT_SHADOW_ENDPOINT` enables optional best-effort shadow submissions for settlement/reward/sponsor/slash writes.
+- `COSMOS_SETTLEMENT_SHADOW_ENDPOINT` enables optional best-effort shadow submissions for billing-reservation/settlement/reward/sponsor/slash writes.
 - Shadow submission failures never block primary adapter submission, session setup, or dataplane forwarding.
 - Shadow outcomes are surfaced for operator visibility via reconcile metadata (`attempted/submitted/failed` shadow counters plus per-record shadow fields).
 
@@ -53,14 +53,25 @@ Shadow dual-write note:
   - `--settlement-http-listen`
   - `--settlement-http-auth-token`
   - `--settlement-http-auth-principal` (optional identity binding for billing/reward/sponsor/governance caller fields when auth token mode is enabled)
+  - `--settlement-http-reward-proof-auth-token` (optional scoped bearer token for `X-GPM-Reward-Proof-Authorization` on proof registration)
+  - `--settlement-http-finality-auth-token` (optional scoped bearer token for `X-GPM-Finality-Authorization` on trusted finality assertions)
+  - `--settlement-http-reward-proof-verifier-id` (trusted verifier id stamped onto bridge-registered reward proofs)
   - `--state-dir` (optional file-backed module stores under one runtime state root)
 - Example:
   - `go run ./cmd/tdpnd --settlement-http-listen 127.0.0.1:8080 --state-dir ./.tdpn-chain-state`
 - Endpoint/auth contract:
   - `GET /health` (no auth)
   - write (`POST`) endpoints:
+    - `POST /x/vpnbilling/reservations`
+      - normal client reservation payload uses `ReservationID`, `SessionID`, `SubjectID`, `AmountMicros`, `Currency`, optional `CreatedAt`, and optional `Status`.
+      - bridge persistence maps `SubjectID` onto the vpnbilling reservation subject field used for later settlement matching.
     - `POST /x/vpnbilling/settlements`
     - `POST /x/vpnrewards/issues`
+      - chain-backed reward issuance requires `TrafficProofRef` to be an `obj://<proof_path>` locator for a verified reward proof record bound to the exact reward material; `SettlementReferenceID` may add a confirmed settlement/session binding check, but it does not replace the verified traffic proof.
+      - `sha256:<64hex>` reward proof refs are format-only and rejected when reward proof metadata is required.
+    - `POST /x/vpnrewards/proofs`
+      - registers verified objective reward proof records before issue submission.
+      - when configured, requires both the generic bearer token and `X-GPM-Reward-Proof-Authorization`.
     - `POST /x/vpnsponsor/reservations`
       - sponsor reservation payload supports optional `AppID` and `EndUserID`.
       - when omitted, bridge compatibility fallback derives both from `SubjectID`.
@@ -69,6 +80,10 @@ Shadow dual-write note:
       - `ViolationType` must be objective and one of: `double-sign`, `downtime-proof`, `invalid-settlement-proof`, `session-replay-proof`, `sponsor-overdraft-proof`.
       - v1 validation expectation: slash evidence must be machine-verifiable, and `EvidenceRef`/proof reference must use `sha256:<64hex>` or `obj://<path>`.
       - Bridge mapping no longer derives proof references from violation-type fallback; callers must provide canonical proof references.
+    - `PATCH /x/vpnslashing/evidence/{evidence_id}` with `{"Status":"confirmed"}`
+      - advances submitted objective evidence into the final state required before penalties can be applied.
+    - `POST /x/vpnslashing/penalties`
+      - applies a slash/jail penalty only after the referenced evidence is confirmed.
     - `POST /x/vpnvalidator/eligibilities`
     - `POST /x/vpnvalidator/status-records`
     - `POST /x/vpngovernance/policies`
@@ -88,7 +103,7 @@ Shadow dual-write note:
     - `GET /x/vpngovernance/policies` and `GET /x/vpngovernance/policies/{policy_id}`
     - `GET /x/vpngovernance/decisions` and `GET /x/vpngovernance/decisions/{decision_id}`
     - `GET /x/vpngovernance/audit-actions` and `GET /x/vpngovernance/audit-actions/{action_id}`
-  - when `--settlement-http-auth-token` is set, bearer auth is required on all `POST` endpoints (including validator/governance writes) only; `GET` query paths and `GET /health` remain open.
+  - when `--settlement-http-auth-token` is set, bearer auth is required on all `POST`/write bridge endpoints, including validator/governance writes; `GET` query routes and `GET /health` remain open.
   - optional identity-bound writes:
     - when `--settlement-http-auth-principal` (or `SETTLEMENT_HTTP_AUTH_PRINCIPAL`) is configured with auth token mode, `SubjectID`, `ProviderSubjectID`, `SponsorID`, `Decider`, and `Actor` are bound to that principal (case-insensitive), mismatches return `403`, and omitted fields are auto-filled.
     - `--settlement-http-auth-principal` requires `--settlement-http-auth-token` (or token-file/env equivalent).
@@ -146,11 +161,11 @@ Exit settlement status endpoint:
 
 ## Reconciliation Behavior
 
-- Settlement/reward/sponsor/slash operation statuses use `pending|submitted|confirmed|failed`.
+- Billing-reservation/settlement/reward/sponsor/slash operation statuses use `pending|submitted|confirmed|failed`.
 - Deferred adapter operations are tracked per idempotency key (`pending` lifecycle).
 - Periodic reconcile loops in issuer/exit call settlement `Reconcile(...)`.
 - Successful replay marks settlement/reward/sponsor/slash operations `submitted` and clears deferred backlog.
-- When adapter query surfaces observe by-id bridge records, reconcile promotes settlement/reward/sponsor/slash operations from `submitted` to `confirmed`.
+- When adapter query surfaces observe by-id bridge records, reconcile promotes settlement/sponsor/slash operations from `submitted` to `confirmed` under trusted persisted-status policy; reward operations follow the distribution record's own terminal status and do not infer confirmation from accrual advancement.
 - This confirmation capability is exposed as optional settlement adapter interface `ChainConfirmationQuerier` (`pkg/settlement/types.go`).
 - `failed` remains an explicit reconciliation state for operator visibility, with replay/remediation driven by later reconcile cycles.
 - Phase-6 scaffold supports optional shadow adapter mirroring on submission (best-effort only): shadow failures are visible in reconcile metadata and never block primary/session flow.
@@ -188,7 +203,7 @@ Exit settlement status endpoint:
 - Phase7 cutover handoff wrappers are `scripts/phase7_mainnet_cutover_handoff_check.sh` and `scripts/phase7_mainnet_cutover_handoff_run.sh`, with integration coverage from `scripts/integration_phase7_mainnet_cutover_handoff_check.sh` and `scripts/integration_phase7_mainnet_cutover_handoff_run.sh`; easy-node exposes `./scripts/easy_node.sh phase7-mainnet-cutover-handoff-check` and `./scripts/easy_node.sh phase7-mainnet-cutover-handoff-run`.
 - Phase7 summary helper is `scripts/phase7_mainnet_cutover_summary_report.sh`, with integration coverage from `scripts/integration_phase7_mainnet_cutover_summary_report.sh`, aggregates check/run/handoff-check/handoff-run artifacts, and has easy-node wrapper `./scripts/easy_node.sh phase7-mainnet-cutover-summary-report`.
 - Phase7 summary/report surfacing now includes runtime/readiness signals `module_tx_surface_ok`, `tdpnd_grpc_live_smoke_ok`, `tdpnd_grpc_auth_live_smoke_ok`, `cosmos_module_coverage_floor_ok`, `cosmos_keeper_coverage_floor_ok`, and `cosmos_app_coverage_floor_ok`, gate signals `mainnet_activation_gate_go_ok` and `bootstrap_governance_graduation_gate_go_ok`, and `dual_write_parity_ok` through `scripts/phase7_mainnet_cutover_summary_report.sh` and `scripts/roadmap_progress_report.sh`; optional `tdpnd_comet_runtime_smoke_ok` is preserved when available.
-- Phase7 check/run/handoff-check/handoff-run signal snapshots include `mainnet_activation_gate_go` and `bootstrap_governance_graduation_gate_go`; both requirements remain optional by default and are only required when operators explicitly enable `--require-mainnet-activation-gate-go` and/or `--require-bootstrap-governance-graduation-gate-go` in phase7 cutover gates.
+- Phase7 check/run/handoff-check/handoff-run signal snapshots include `mainnet_activation_gate_go` and `bootstrap_governance_graduation_gate_go`; both requirements are required by default in phase7 cutover gates and may only be relaxed explicitly with `--require-mainnet-activation-gate-go 0` and/or `--require-bootstrap-governance-graduation-gate-go 0` for non-production dry-run/support scenarios.
 - Phase7 cutover check/handoff now gate on phase6 contracts coverage-floor signals (`cosmos_module_coverage_floor`, `cosmos_keeper_coverage_floor`, `cosmos_app_coverage_floor`) plus dual-write parity confirmation, surfaced through `scripts/phase7_mainnet_cutover_check.sh`, `scripts/phase7_mainnet_cutover_handoff_check.sh`, and optional `--require-mainnet-activation-gate-go` / `--require-bootstrap-governance-graduation-gate-go` enforcement.
 - `scripts/roadmap_progress_report.sh` now consumes optional phase6 and phase7 cutover summary artifacts and surfaces `phase6_cosmos_l1_handoff` and `phase7_mainnet_cutover` status/signals under `blockchain_track`, with integration coverage in `scripts/integration_roadmap_progress_report.sh`.
 - Easy-node fail-closed blockchain gate wrappers cover phase5 + phase6 + phase7 entrypoints: `./scripts/easy_node.sh ci-phase5-settlement-layer`, `./scripts/easy_node.sh phase5-settlement-layer-check`, `./scripts/easy_node.sh ci-phase6-cosmos-l1-build-testnet`, `./scripts/easy_node.sh ci-phase6-cosmos-l1-contracts`, `./scripts/easy_node.sh ci-phase7-mainnet-cutover`, `./scripts/easy_node.sh phase7-mainnet-cutover-check`, `./scripts/easy_node.sh phase7-mainnet-cutover-run`, `./scripts/easy_node.sh phase7-mainnet-cutover-handoff-check`, and `./scripts/easy_node.sh phase7-mainnet-cutover-handoff-run`.
@@ -214,6 +229,7 @@ Exit settlement status endpoint:
 - Governance/validator bootstrap RPC highlights:
   - `tdpn.vpngovernance.v1.Msg/RecordAuditAction` plus query surfaces `GovernanceAuditAction` and `ListGovernanceAuditActions`.
   - `tdpn.vpnvalidator.v1.Query/PreviewEpochSelection` for deterministic validator-set preview from policy + candidate inputs.
+  - `tdpn.vpnslashing.v1.Msg/ConfirmEvidence` advances submitted objective evidence to confirmed state before `RecordPenalty`, avoiding test-only keeper shortcuts in generated gRPC flows.
   - `scripts/integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh` now exercises `PreviewEpochSelection` with and without `--grpc-auth-token` so the preview endpoint stays bearer-gated in auth mode and remains deterministic when authenticated.
 - Optional local serve mode:
   - `go run ./cmd/tdpnd --grpc-listen 127.0.0.1:9090`
@@ -251,7 +267,7 @@ Exit settlement status endpoint:
   - `integration_cosmos_tdpnd_state_dir_persistence.sh`: targeted state-dir persistence tests (`app` scaffold reopen + `cmd/tdpnd` state-dir runtime wiring/error propagation).
   - `integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh`: live `tdpnd --settlement-http-listen` process smoke (startup, auth enforcement, module POST acceptance, billing/rewards/sponsor/slashing/validator/governance GET by-id/list query coverage, graceful shutdown).
   - `integration_cosmos_tdpnd_settlement_bridge_live_smoke.sh` also validates `tdpn.vpnvalidator.v1.Query/PreviewEpochSelection` auth posture and deterministic seat selection through the live gRPC runtime.
-  - `integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`: live adapter roundtrip from `pkg/settlement` into `tdpnd` bridge endpoints (settlement/reward/sponsor/slash submission paths).
+  - `integration_cosmos_adapter_tdpnd_bridge_roundtrip.sh`: live adapter roundtrip from `pkg/settlement` into `tdpnd` bridge endpoints (billing-reservation/settlement/reward/sponsor/slash submission paths).
   - `integration_cosmos_tdpnd_comet_runtime_smoke.sh`: mixed Comet+gRPC runtime smoke (`tdpnd` Comet RPC status plus gRPC health-open, reflection/list disabled, and bearer-gated billing query checks), with deterministic mixed-mode runtime-test fallback covering that auth path when `grpcurl` is unavailable.
   - `integration_cosmos_tdpnd_grpc_live_smoke.sh`: live `tdpnd --grpc-listen` process smoke (startup, health/reflection availability, reflected module-service parity, billing/rewards/slashing/sponsor/validator/governance query dispatch, validator/governance canonicalization checks, graceful shutdown).
   - `integration_cosmos_tdpnd_grpc_auth_live_smoke.sh`: live `tdpnd --grpc-auth-token` process smoke (health-open posture plus bearer-token gating for billing/rewards/slashing/sponsor/validator/governance query RPCs, including validator/governance auth-path canonicalization checks).

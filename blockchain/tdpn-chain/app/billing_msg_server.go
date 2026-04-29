@@ -15,6 +15,7 @@ var (
 // BillingMsgServer captures phase-1 vpnbilling stateful operations without Cosmos SDK dependencies.
 type BillingMsgServer interface {
 	CreateReservation(context.Context, BillingCreateReservationRequest) (BillingCreateReservationResponse, error)
+	ConfirmReservation(context.Context, BillingConfirmReservationRequest) (BillingConfirmReservationResponse, error)
 	FinalizeSettlement(context.Context, BillingFinalizeSettlementRequest) (BillingFinalizeSettlementResponse, error)
 }
 
@@ -23,6 +24,15 @@ type BillingCreateReservationRequest struct {
 }
 
 type BillingCreateReservationResponse struct {
+	Reservation billingtypes.CreditReservation
+	Replay      bool
+}
+
+type BillingConfirmReservationRequest struct {
+	Record billingtypes.CreditReservation
+}
+
+type BillingConfirmReservationResponse struct {
 	Reservation billingtypes.CreditReservation
 	Replay      bool
 }
@@ -55,6 +65,26 @@ func (m billingMsgServer) CreateReservation(ctx context.Context, req BillingCrea
 		return BillingCreateReservationResponse{}, err
 	}
 	return BillingCreateReservationResponse{
+		Reservation: resp.Reservation,
+		Replay:      resp.Idempotent,
+	}, nil
+}
+
+func (m billingMsgServer) ConfirmReservation(ctx context.Context, req BillingConfirmReservationRequest) (BillingConfirmReservationResponse, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return BillingConfirmReservationResponse{}, err
+		}
+	}
+
+	resp, err := m.msgServer.ConfirmReservation(billingmodule.ConfirmReservationRequest{Reservation: req.Record})
+	if err != nil {
+		if errors.Is(err, billingmodule.ErrNilKeeper) {
+			return BillingConfirmReservationResponse{}, errBillingKeeperNotWired
+		}
+		return BillingConfirmReservationResponse{}, err
+	}
+	return BillingConfirmReservationResponse{
 		Reservation: resp.Reservation,
 		Replay:      resp.Idempotent,
 	}, nil

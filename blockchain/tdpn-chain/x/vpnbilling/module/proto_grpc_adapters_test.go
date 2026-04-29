@@ -49,45 +49,36 @@ func TestProtoMsgServerAdapterFinalizeUsage(t *testing.T) {
 	k := keeper.NewKeeper()
 	adapter := NewProtoMsgServerAdapter(&k)
 
-	if _, err := adapter.ReserveCredits(context.Background(), &pb.MsgReserveCreditsRequest{
-		Reservation: &pb.CreditReservation{
-			ReservationId: "res-adapter-2",
-			SponsorId:     "sponsor-adapter-2",
-			SessionId:     "sess-2",
-			AssetDenom:    "uusdc",
-			Amount:        100,
-		},
+	if _, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-adapter-2",
+		SponsorID:     "sponsor-adapter-2",
+		SessionID:     "sess-2",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
 	}); err != nil {
-		t.Fatalf("reserve failed: %v", err)
+		t.Fatalf("create confirmed reservation failed: %v", err)
 	}
 
 	resp, err := adapter.FinalizeUsage(context.Background(), &pb.MsgFinalizeUsageRequest{
 		Settlement: &pb.SettlementRecord{
-			SettlementId:  "set-adapter-2",
-			ReservationId: "res-adapter-2",
-			SessionId:     "sess-2",
-			AssetDenom:    "uusdc",
-			BilledAmount:  60,
+			SettlementId:   "set-adapter-2",
+			ReservationId:  "res-adapter-2",
+			SessionId:      "sess-2",
+			AssetDenom:     "uusdc",
+			BilledAmount:   60,
+			OperationState: pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
 		},
 	})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	if !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("expected public gRPC finality assertion to fail with ErrInvalidSettlement, got resp=%+v err=%v", resp, err)
 	}
-	if resp.GetSettlement().GetSettlementId() != "set-adapter-2" {
-		t.Fatalf("unexpected settlement id %q", resp.GetSettlement().GetSettlementId())
-	}
-	if resp.GetIdempotentReplay() {
-		t.Fatal("expected idempotent_replay=false for first finalize")
-	}
-	if resp.GetConflict() {
-		t.Fatal("expected conflict=false for successful finalize")
-	}
-	if resp.GetSettlement().GetOperationState() != pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED {
-		t.Fatalf("expected submitted operation state, got %v", resp.GetSettlement().GetOperationState())
+	if _, found := k.GetSettlement("set-adapter-2"); found {
+		t.Fatal("public gRPC finality assertion should not write settlement")
 	}
 }
 
-func TestProtoMsgServerAdapterReserveCreditsIgnoresClientSuppliedStatus(t *testing.T) {
+func TestProtoMsgServerAdapterReserveCreditsSanitizesClientSuppliedFinalStatus(t *testing.T) {
 	t.Parallel()
 
 	k := keeper.NewKeeper()
@@ -106,26 +97,25 @@ func TestProtoMsgServerAdapterReserveCreditsIgnoresClientSuppliedStatus(t *testi
 		t.Fatalf("expected no error, got %v", err)
 	}
 	if resp.GetReservation().GetStatus() != pb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING {
-		t.Fatalf("expected server-owned pending status, got %v", resp.GetReservation().GetStatus())
+		t.Fatalf("expected pending status, got %v", resp.GetReservation().GetStatus())
 	}
 }
 
-func TestProtoMsgServerAdapterFinalizeUsageIgnoresClientSuppliedStatus(t *testing.T) {
+func TestProtoMsgServerAdapterFinalizeUsageSanitizesClientSuppliedFinalStatus(t *testing.T) {
 	t.Parallel()
 
 	k := keeper.NewKeeper()
 	adapter := NewProtoMsgServerAdapter(&k)
 
-	if _, err := adapter.ReserveCredits(context.Background(), &pb.MsgReserveCreditsRequest{
-		Reservation: &pb.CreditReservation{
-			ReservationId: "res-adapter-status-2",
-			SponsorId:     "sponsor-adapter-status-2",
-			SessionId:     "sess-status-2",
-			AssetDenom:    "uusdc",
-			Amount:        100,
-		},
+	if _, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-adapter-status-2",
+		SponsorID:     "sponsor-adapter-status-2",
+		SessionID:     "sess-status-2",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
 	}); err != nil {
-		t.Fatalf("reserve failed: %v", err)
+		t.Fatalf("create confirmed reservation failed: %v", err)
 	}
 
 	resp, err := adapter.FinalizeUsage(context.Background(), &pb.MsgFinalizeUsageRequest{
@@ -138,11 +128,11 @@ func TestProtoMsgServerAdapterFinalizeUsageIgnoresClientSuppliedStatus(t *testin
 			OperationState: pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
 		},
 	})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	if !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("expected public gRPC finality assertion to fail with ErrInvalidSettlement, got resp=%+v err=%v", resp, err)
 	}
-	if resp.GetSettlement().GetOperationState() != pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED {
-		t.Fatalf("expected server-owned submitted operation state, got %v", resp.GetSettlement().GetOperationState())
+	if _, found := k.GetSettlement("set-adapter-status-2"); found {
+		t.Fatal("public gRPC finality assertion should not write settlement")
 	}
 }
 
@@ -247,81 +237,34 @@ func TestProtoGrpcAdaptersCanonicalizeFinalizeUsageOnWriteAndMixedCaseQuery(t *t
 
 	k := keeper.NewKeeper()
 	msgAdapter := NewProtoMsgServerAdapter(&k)
-	queryAdapter := NewProtoQueryServerAdapter(&k)
 
-	if _, err := msgAdapter.ReserveCredits(context.Background(), &pb.MsgReserveCreditsRequest{
-		Reservation: &pb.CreditReservation{
-			ReservationId: "  ReS-Finalize-Canonical-Adapter-1  ",
-			SponsorId:     "  SpOnSoR-Finalize-Canonical-Adapter-1  ",
-			SessionId:     "  SeSs-Finalize-Canonical-Adapter-1  ",
-			AssetDenom:    "  UuSdC  ",
-			Amount:        250,
-		},
+	if _, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "  ReS-Finalize-Canonical-Adapter-1  ",
+		SponsorID:     "  SpOnSoR-Finalize-Canonical-Adapter-1  ",
+		SessionID:     "  SeSs-Finalize-Canonical-Adapter-1  ",
+		AssetDenom:    "  UuSdC  ",
+		Amount:        250,
+		Status:        chaintypes.ReconciliationConfirmed,
 	}); err != nil {
-		t.Fatalf("reserve failed: %v", err)
+		t.Fatalf("create confirmed reservation failed: %v", err)
 	}
 
 	finalizeResp, err := msgAdapter.FinalizeUsage(context.Background(), &pb.MsgFinalizeUsageRequest{
 		Settlement: &pb.SettlementRecord{
-			SettlementId:  "  SeT-Finalize-Canonical-Adapter-1  ",
-			ReservationId: "  RES-FINALIZE-CANONICAL-ADAPTER-1  ",
-			SessionId:     "  SeSs-Finalize-Canonical-Adapter-1  ",
-			AssetDenom:    "  UuSdC  ",
-			BilledAmount:  200,
-			UsageBytes:    4096,
+			SettlementId:   "  SeT-Finalize-Canonical-Adapter-1  ",
+			ReservationId:  "  RES-FINALIZE-CANONICAL-ADAPTER-1  ",
+			SessionId:      "  SeSs-Finalize-Canonical-Adapter-1  ",
+			AssetDenom:     "  UuSdC  ",
+			BilledAmount:   200,
+			UsageBytes:     4096,
+			OperationState: pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
 		},
 	})
-	if err != nil {
-		t.Fatalf("expected finalize success, got %v", err)
+	if !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("expected public gRPC finality assertion to fail with ErrInvalidSettlement, got resp=%+v err=%v", finalizeResp, err)
 	}
-	if finalizeResp.GetSettlement() == nil {
-		t.Fatal("expected settlement in finalize response")
-	}
-	if finalizeResp.GetSettlement().GetSettlementId() != "set-finalize-canonical-adapter-1" {
-		t.Fatalf("expected canonical settlement id %q, got %q", "set-finalize-canonical-adapter-1", finalizeResp.GetSettlement().GetSettlementId())
-	}
-	if finalizeResp.GetSettlement().GetReservationId() != "res-finalize-canonical-adapter-1" {
-		t.Fatalf("expected canonical reservation id %q, got %q", "res-finalize-canonical-adapter-1", finalizeResp.GetSettlement().GetReservationId())
-	}
-	if finalizeResp.GetSettlement().GetSessionId() != "sess-finalize-canonical-adapter-1" {
-		t.Fatalf("expected canonical session id %q, got %q", "sess-finalize-canonical-adapter-1", finalizeResp.GetSettlement().GetSessionId())
-	}
-	if finalizeResp.GetSettlement().GetAssetDenom() != "uusdc" {
-		t.Fatalf("expected canonical asset denom %q, got %q", "uusdc", finalizeResp.GetSettlement().GetAssetDenom())
-	}
-	if finalizeResp.GetSettlement().GetOperationState() != pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED {
-		t.Fatalf("expected submitted operation state after canonicalized finalize, got %v", finalizeResp.GetSettlement().GetOperationState())
-	}
-	if finalizeResp.GetConflict() {
-		t.Fatal("expected conflict=false on first finalize")
-	}
-	if finalizeResp.GetIdempotentReplay() {
-		t.Fatal("expected idempotent_replay=false on first finalize")
-	}
-
-	queryResp, err := queryAdapter.SettlementRecord(context.Background(), &pb.QuerySettlementRecordRequest{
-		SettlementId: "  SET-FINALIZE-CANONICAL-ADAPTER-1  ",
-	})
-	if err != nil {
-		t.Fatalf("expected settlement query success, got %v", err)
-	}
-	if !queryResp.GetFound() {
-		t.Fatal("expected found=true for mixed-case settlement query")
-	}
-	if queryResp.GetSettlement() == nil {
-		t.Fatal("expected settlement in query response")
-	}
-	if queryResp.GetSettlement().GetSettlementId() != "set-finalize-canonical-adapter-1" {
-		t.Fatalf("expected canonical settlement id %q from query, got %q", "set-finalize-canonical-adapter-1", queryResp.GetSettlement().GetSettlementId())
-	}
-	if queryResp.GetSettlement().GetReservationId() != "res-finalize-canonical-adapter-1" {
-		t.Fatalf("expected canonical reservation id %q from query, got %q", "res-finalize-canonical-adapter-1", queryResp.GetSettlement().GetReservationId())
-	}
-	if queryResp.GetSettlement().GetSessionId() != "sess-finalize-canonical-adapter-1" {
-		t.Fatalf("expected canonical session id %q from query, got %q", "sess-finalize-canonical-adapter-1", queryResp.GetSettlement().GetSessionId())
-	}
-	if queryResp.GetSettlement().GetAssetDenom() != "uusdc" {
-		t.Fatalf("expected canonical asset denom %q from query, got %q", "uusdc", queryResp.GetSettlement().GetAssetDenom())
+	if _, found := k.GetSettlement("set-finalize-canonical-adapter-1"); found {
+		t.Fatal("public gRPC finality assertion should not write canonicalized settlement")
 	}
 }
 

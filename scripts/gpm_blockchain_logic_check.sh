@@ -8,6 +8,8 @@ gpm_blockchain_logic_check_default_checks_spec() {
   cat <<'DEFAULT_CHECKS'
 internal_app_tests|go test ./internal/app -count=1
 settlement_tests|go test ./pkg/settlement -count=1
+chain_rewards_billing_slashing_tests|cd blockchain/tdpn-chain && go test ./x/vpnrewards/keeper ./x/vpnrewards/module ./x/vpnbilling/keeper ./x/vpnbilling/module ./x/vpnslashing/keeper ./x/vpnslashing/module -count=1
+chain_bridge_app_tests|cd blockchain/tdpn-chain && go test ./cmd/tdpnd ./app -count=1
 integration_blockchain_cosmos_only_guardrail|bash ./scripts/integration_blockchain_cosmos_only_guardrail.sh
 DEFAULT_CHECKS
 }
@@ -588,6 +590,10 @@ done < <(gpm_blockchain_logic_check_default_checks_spec)
 
 declare -a include_check_id=()
 declare -a include_check_command=()
+if [[ "${#include_commands_raw[@]}" -gt 0 && "${CI:-}" == "true" && "${GPM_BLOCKCHAIN_LOGIC_CHECK_ALLOW_INCLUDE_COMMAND:-0}" != "1" ]]; then
+  echo "--include-command is disabled in CI unless GPM_BLOCKCHAIN_LOGIC_CHECK_ALLOW_INCLUDE_COMMAND=1 is set by trusted workflow configuration"
+  exit 2
+fi
 for include_spec in "${include_commands_raw[@]}"; do
   include_id=""
   include_command=""

@@ -1,6 +1,6 @@
 # GPM Big-Bang Productization Gap Status
 
-Snapshot date: 2026-04-25
+Snapshot date: 2026-04-26
 
 ## Scope and source of truth
 
@@ -30,19 +30,31 @@ Snapshot date: 2026-04-25
 - Signal: `multi_vm_stability.status=missing` with unresolved VM command source; downstream `multi_vm_stability_promotion.status=fail` and evidence-pack status `fail`.
 - Next actionable step: provide a runnable VM command source (`--vm-command` or `--vm-command-file`), execute multi-VM stability cycle/check, then rerun promotion cycle and evidence-pack publish.
 
+### P1-4: Live-chain settlement reservation and reward-proof closure is blocked
+- Requirement: Admin Console weekly payouts must be backed by live-chain reservation/write, objective proof-validation, and finalized chain-confirmation evidence before release payout finalization is trusted.
+- Signal: local wallet/session-bound reserve-and-connect binding with single-use local connect claims, client -> entry -> exit reservation id/session/subject binding through path-open proofs/assertions, chain-backed billing reservation submit/query support, authenticated bridge POST coverage for `/x/vpnbilling/reservations`, explicit verified reward-proof registry/query plumbing, and bounded trusted-bridge finality controls are now wired locally; live reservation/settlement round-trip evidence, staging round-trip evidence for the reserve-and-connect dataplane path, live objective reward/slashing proof evidence, finalized chain-status reconciliation, and production Admin Console payout/slashing evidence remain blockers.
+- Next actionable step: archive API-to-chain reserve-and-connect reservation evidence, run staging reserve-and-connect round trips that exercise the client -> entry -> exit reservation binding, feed verified live proof records through the reward/slashing proof registry, require finalized chain status during reconciliation, rerun live bridge reservation/settlement round-trip smoke tests, and rerun `go test ./pkg/settlement`, `go test ./cmd/tdpnd` from `blockchain/tdpn-chain`, and the Admin Console settlement contract before payout-finalization signoff.
+
 ### P2-1: M1 remains validation debt behind M2/M4/M5 closure
 - Requirement: complete scheduler/path-selection adoption and end-to-end validation artifacts for micro-relay admission.
 - Signal: M1 is explicitly marked as remaining validation debt in next-wave guidance.
 - Next actionable step: schedule dedicated validation slice after M2/M4/M5 pass, focused on scheduler adoption and operator/runtime controls evidence.
 
+### P1-5: M3 production middle-hop evidence and admission closure is blocked
+- Requirement: strict 3-hop clients must be protected by middle-node deployment/admission policy, exit-side entry-signed path/profile/middle assertions, and durable strict replay-guard storage.
+- Signal: local 3-hop runtime validation now proves advertised middle-hop packet forwarding through the local production middle role (`go run ./cmd/node --middle`) with static entry/exit peer allowlisting, but real-host evidence, production deployment/admission policy, and published signoff artifacts remain blockers.
+- Next actionable step: run real-host strict 3-hop validation with the local production middle role, publish the evidence pack, formalize middle-node deployment/admission policy, bind exit path-open admission to route assertions, and require durable replay storage for strict production exit deployments.
+
 ### P2-2: M3 real-host 3-hop validation remains debt
 - Requirement: deterministic repeated real-host 3-hop validation (not only local/docker rehearsal).
-- Signal: M3 explicitly remains validation debt in next-wave guidance.
-- Next actionable step: run/pack real-host validation artifacts and gate signoff once M2/M4/M5 live-evidence blockers are cleared.
+- Signal: M3 explicitly remains validation debt in next-wave guidance after local production middle-role and anti-downgrade hardening.
+- Next actionable step: run/pack real-host validation artifacts and gate signoff once M2/M4/M5 live-evidence blockers plus M3 deployment/admission, evidence-publication, and replay blockers are cleared.
 
 ## Recommended execution order
 
 1. Close M2 real-host default-profile stability evidence and evidence-pack publication.
 2. Close M4 runtime-actuation promotion thresholds and evidence-pack publication.
 3. Close M5 multi-VM command-source resolution, stability/promotion cycles, and evidence-pack publication.
-4. Burn down M1 and M3 validation debt with dedicated post-closure verification runs.
+4. Close M3 real-host middle-role evidence, production deployment/admission policy, route assertion anti-downgrade, and durable strict replay-guard storage.
+5. Close live-chain settlement reservation, proof-registry verification, and finalized chain-confirmation validation before any release payout-finalization signoff.
+6. Burn down M1 and M3 validation debt with dedicated post-closure verification runs.

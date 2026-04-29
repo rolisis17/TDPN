@@ -106,6 +106,11 @@ assert_file_contains "$PRIMARY_SUMMARY_JSON" '"text": "In progress two with cont
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"severity": "p2"' "summary JSON missing expected in-progress severity classification"
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"severity": "p1"' "summary JSON missing expected missing/next severity classification"
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"recommended_action": "' "summary JSON missing recommended_action field"
+assert_file_contains "$PRIMARY_SUMMARY_JSON" '"closure_mode": "local_only"' "summary JSON missing local_only closure_mode"
+assert_file_contains "$PRIMARY_SUMMARY_JSON" '"blocked_by": []' "summary JSON missing empty blocked_by array"
+assert_file_contains "$PRIMARY_SUMMARY_JSON" '"requires_real_hosts": false' "summary JSON missing requires_real_hosts false"
+assert_file_contains "$PRIMARY_SUMMARY_JSON" '"suggested_tests": []' "summary JSON missing empty suggested_tests array"
+assert_file_contains "$PRIMARY_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md"]' "summary JSON missing default suggested_files array"
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"top_actionable_item_ids": [' "summary JSON missing top_actionable_item_ids field"
 
 echo "[gpm-gap-scan] optional roadmap summary contributes machine-readable blockers"
@@ -168,7 +173,305 @@ assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap profile-default gate next 
 assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap multi-VM stability command source is not actionable' "roadmap-aware summary missing multi-vm blocker"
 assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap runtime-actuation promotion is not green' "roadmap-aware summary missing runtime promotion blocker"
 assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap evidence pack profile_default_gate_evidence_pack needs attention' "roadmap-aware summary missing profile evidence-pack blocker"
+assert_file_contains "$ROADMAP_SUMMARY_JSON" '"closure_mode": "real_host_required"' "roadmap-aware summary missing real_host_required closure mode"
+assert_file_contains "$ROADMAP_SUMMARY_JSON" '"closure_mode": "network_required"' "roadmap-aware summary missing network_required closure mode"
+assert_file_contains "$ROADMAP_SUMMARY_JSON" '"blocked_by": ["unresolved_placeholders", "real_hosts", "network"]' "roadmap-aware summary missing placeholder/real-host/network blocker metadata"
+assert_file_contains "$ROADMAP_SUMMARY_JSON" '"blocked_by": ["vm_command_source"]' "roadmap-aware summary missing vm command blocker metadata"
+assert_file_contains "$ROADMAP_SUMMARY_JSON" '"blocked_by": ["promotion_thresholds", "evidence_pack_artifacts"]' "roadmap-aware summary missing promotion/evidence blocker metadata"
+assert_file_contains "$ROADMAP_SUMMARY_JSON" '"requires_real_hosts": true' "roadmap-aware summary missing requires_real_hosts true"
+assert_file_contains "$ROADMAP_SUMMARY_JSON" '"suggested_tests": ["scripts/integration_client_vpn_path_profile_wiring.sh"]' "roadmap-aware summary missing profile suggested test"
+assert_file_contains "$ROADMAP_SUMMARY_JSON" '"suggested_tests": ["scripts/integration_3machine_prod_wg_validate.sh"]' "roadmap-aware summary missing multi-vm suggested test"
 assert_file_contains "$ROADMAP_STDOUT" "## Missing / Next (7)" "roadmap-aware markdown missing expanded missing/next count"
+
+echo "[gpm-gap-scan] missing roadmap fields fail closed"
+MISSING_FIELDS_STATUS_DOC="$TMP_DIR/missing_fields_status.md"
+MISSING_FIELDS_INPUT="$TMP_DIR/missing_fields_roadmap.json"
+MISSING_FIELDS_SUMMARY_JSON="$TMP_DIR/missing_fields_summary.json"
+
+cat >"$MISSING_FIELDS_STATUS_DOC" <<'EOF_MISSING_FIELDS_STATUS'
+# Missing Roadmap Fields Fixture
+
+## In-Progress
+- Schema transition check.
+
+## Missing / Next
+- Keep roadmap evidence packs fresh.
+EOF_MISSING_FIELDS_STATUS
+
+cat >"$MISSING_FIELDS_INPUT" <<'EOF_MISSING_FIELDS_SUMMARY'
+{
+  "vpn_track": {
+    "profile_default_gate": {
+      "unresolved_placeholders": false
+    },
+    "runtime_actuation_promotion": {
+      "status": "pass",
+      "decision": "GO"
+    }
+  }
+}
+EOF_MISSING_FIELDS_SUMMARY
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$MISSING_FIELDS_STATUS_DOC" \
+  --roadmap-summary-json "$MISSING_FIELDS_INPUT" \
+  --summary-json "$MISSING_FIELDS_SUMMARY_JSON" \
+  --print-summary-json 0 >/dev/null
+
+assert_file_matches_regex "$MISSING_FIELDS_SUMMARY_JSON" '"missing_next"[[:space:]]*:[[:space:]]*5' "missing roadmap fields should add four fail-closed blockers"
+assert_file_contains "$MISSING_FIELDS_SUMMARY_JSON" 'Roadmap multi-VM stability command source is not actionable (vm_command_source_ready=unknown, next_command_actionable=unknown)' "missing roadmap fields summary missing multi-vm unknown blocker"
+assert_file_contains "$MISSING_FIELDS_SUMMARY_JSON" 'Roadmap evidence pack profile_default_gate_evidence_pack needs attention (status=missing)' "missing roadmap fields summary missing profile evidence-pack blocker"
+assert_file_contains "$MISSING_FIELDS_SUMMARY_JSON" 'Roadmap evidence pack runtime_actuation_promotion_evidence_pack needs attention (status=missing)' "missing roadmap fields summary missing runtime evidence-pack blocker"
+assert_file_contains "$MISSING_FIELDS_SUMMARY_JSON" 'Roadmap evidence pack profile_compare_multi_vm_stability_promotion_evidence_pack needs attention (status=missing)' "missing roadmap fields summary missing multi-vm evidence-pack blocker"
+
+echo "[gpm-gap-scan] admin settlement/slashing blockers are classified"
+ADMIN_STATUS_DOC="$TMP_DIR/admin_status.md"
+ADMIN_SUMMARY_JSON="$TMP_DIR/admin_summary.json"
+ADMIN_STDOUT="$TMP_DIR/admin_stdout.md"
+
+cat >"$ADMIN_STATUS_DOC" <<'EOF_ADMIN_STATUS'
+# Admin Settlement Fixture
+
+## In-Progress
+- Admin Console settlement review remains local-only until live chain proof is archived.
+
+## Missing / Next
+- Productization: finish end-to-end Admin Console validation against live chain settlement, slashing holds, dispute/finalization review, and weekly payout release evidence.
+EOF_ADMIN_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$ADMIN_STATUS_DOC" \
+  --summary-json "$ADMIN_SUMMARY_JSON" \
+  --print-summary-json 0 >"$ADMIN_STDOUT"
+
+assert_file_contains "$ADMIN_SUMMARY_JSON" '"recommended_action": "Run Admin Console settlement/slashing validation, then archive live-chain payout evidence."' "admin fixture summary missing admin settlement action"
+assert_file_contains "$ADMIN_SUMMARY_JSON" '"closure_mode": "network_required"' "admin fixture summary missing network_required closure mode"
+assert_file_contains "$ADMIN_SUMMARY_JSON" '"blocked_by": ["admin_settlement_validation", "live_chain"]' "admin fixture summary missing admin/live-chain blockers"
+assert_file_contains "$ADMIN_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/integration_gpm_admin_settlement_contract.sh\", \"go test ./services/localapi -run GPMAdminRewardFinalize -count=1\", \"go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1\"]" "admin fixture summary missing settlement suggested tests"
+assert_file_contains "$ADMIN_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "scripts/integration_gpm_admin_settlement_contract.sh", "services/localapi/gpm_api.go", "pkg/settlement/memory.go"]' "admin fixture summary missing admin suggested files"
+
+echo "[gpm-gap-scan] wallet auth hardening blockers stay separate from admin settlement"
+AUTH_STATUS_DOC="$TMP_DIR/auth_status.md"
+AUTH_SUMMARY_JSON="$TMP_DIR/auth_summary.json"
+AUTH_STDOUT="$TMP_DIR/auth_stdout.md"
+
+cat >"$AUTH_STATUS_DOC" <<'EOF_AUTH_STATUS'
+# Auth Fixture
+
+## In-Progress
+- Local wallet binding for GPM auth now works for secp256k1 wallet proofs.
+
+## Missing / Next
+- Auth hardening: capture end-to-end Keplr and Leap wallet-extension evidence against the local secp256k1 binding path, including alias pubkey types and mismatched-wallet rejection. Admin Console access remains command-backed even after local binding.
+EOF_AUTH_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$AUTH_STATUS_DOC" \
+  --summary-json "$AUTH_SUMMARY_JSON" \
+  --print-summary-json 0 >"$AUTH_STDOUT"
+
+assert_file_contains "$AUTH_SUMMARY_JSON" '"recommended_action": "Archive Keplr/Leap wallet-extension auth evidence for secp256k1 binding and mismatched-wallet rejection."' "auth fixture summary missing wallet evidence action"
+assert_file_contains "$AUTH_SUMMARY_JSON" '"blocked_by": ["wallet_extension_evidence"]' "auth fixture summary should not route to admin settlement blockers"
+assert_file_contains "$AUTH_SUMMARY_JSON" "\"suggested_tests\": [\"go test ./services/localapi -run 'GPM.*Auth|Wallet|Keplr|Leap|Secp' -count=1\"]" "auth fixture summary missing wallet auth suggested tests"
+assert_file_contains "$AUTH_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "services/localapi/gpm_api.go", "services/localapi/gpm_api_test.go"]' "auth fixture summary missing wallet auth suggested files"
+
+echo "[gpm-gap-scan] reservation write blockers are classified"
+RESERVATION_STATUS_DOC="$TMP_DIR/reservation_status.md"
+RESERVATION_SUMMARY_JSON="$TMP_DIR/reservation_summary.json"
+RESERVATION_STDOUT="$TMP_DIR/reservation_stdout.md"
+
+cat >"$RESERVATION_STATUS_DOC" <<'EOF_RESERVATION_STATUS'
+# Reservation Write Fixture
+
+## In-Progress
+- Chain settlement reservation-write bridge support exists, but the local GPM API subject_id reservation binding and API-to-chain evidence are still missing for ReserveFunds intents.
+
+## Missing / Next
+- Productization: add authenticated local GPM ReserveFunds reservation API and archive live API-to-chain reservation-write evidence.
+EOF_RESERVATION_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$RESERVATION_STATUS_DOC" \
+  --summary-json "$RESERVATION_SUMMARY_JSON" \
+  --print-summary-json 0 >"$RESERVATION_STDOUT"
+
+assert_file_contains "$RESERVATION_SUMMARY_JSON" '"recommended_action": "Wire the local GPM ReserveFunds API path, then archive API-to-chain reservation evidence."' "reservation fixture summary missing reservation action"
+assert_file_contains "$RESERVATION_SUMMARY_JSON" '"blocked_by": ["admin_settlement_validation", "local_api_reservation_evidence", "live_chain"]' "reservation fixture summary missing precise reservation blockers"
+assert_file_contains "$RESERVATION_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/integration_gpm_admin_settlement_contract.sh\", \"go test ./services/localapi -run GPMAdminRewardFinalize -count=1\", \"go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1\", \"go test ./services/localapi -run 'ReserveFunds|SettlementReservation|GPM.*Reservation' -count=1\", \"go test ./pkg/settlement -run 'ReserveFunds|CosmosAdapter' -count=1\", \"go test ./blockchain/tdpn-chain/cmd/tdpnd -run 'Settlement.*Reservation|BillingReservation' -count=1\"]" "reservation fixture summary missing reservation suggested tests"
+assert_file_contains "$RESERVATION_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "scripts/integration_gpm_admin_settlement_contract.sh", "services/localapi/gpm_api.go", "pkg/settlement/memory.go", "services/localapi/service.go", "pkg/settlement/types.go", "pkg/settlement/cosmos_adapter.go", "blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge.go", "blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge_test.go"]' "reservation fixture summary missing reservation suggested files"
+
+echo "[gpm-gap-scan] wired reservation blockers are classified as evidence work"
+RESERVATION_WIRED_STATUS_DOC="$TMP_DIR/reservation_wired_status.md"
+RESERVATION_WIRED_SUMMARY_JSON="$TMP_DIR/reservation_wired_summary.json"
+RESERVATION_WIRED_STDOUT="$TMP_DIR/reservation_wired_stdout.md"
+
+cat >"$RESERVATION_WIRED_STATUS_DOC" <<'EOF_RESERVATION_WIRED_STATUS'
+# Wired Reservation Evidence Fixture
+
+## In-Progress
+- GPM addendum implementation has wallet-bound local GPM API reservation binding wired, but live API-to-chain ReserveFunds reservation evidence and live-chain settlement round-trip evidence remain blockers.
+
+## Missing / Next
+- Productization: finish API-to-chain reservation evidence for the wallet-bound ReserveFunds path and rerun live bridge reservation/settlement smoke.
+EOF_RESERVATION_WIRED_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$RESERVATION_WIRED_STATUS_DOC" \
+  --summary-json "$RESERVATION_WIRED_SUMMARY_JSON" \
+  --print-summary-json 0 >"$RESERVATION_WIRED_STDOUT"
+
+assert_file_contains "$RESERVATION_WIRED_SUMMARY_JSON" '"recommended_action": "Archive API-to-chain ReserveFunds reservation evidence, then rerun live bridge reservation/settlement smoke."' "wired reservation fixture summary missing evidence archival action"
+assert_file_contains "$RESERVATION_WIRED_SUMMARY_JSON" '"blocked_by": ["admin_settlement_validation", "local_api_reservation_evidence", "live_chain"]' "wired reservation fixture summary missing evidence/live-chain blockers"
+
+echo "[gpm-gap-scan] route fallback blockers are classified"
+ROUTE_STATUS_DOC="$TMP_DIR/route_status.md"
+ROUTE_SUMMARY_JSON="$TMP_DIR/route_summary.json"
+ROUTE_STDOUT="$TMP_DIR/route_stdout.md"
+
+cat >"$ROUTE_STATUS_DOC" <<'EOF_ROUTE_STATUS'
+# Route Hardening Fixture
+
+## In-Progress
+- Route hardening: keep direct-exit fallback as an explicit 1hop/support-mode behavior only.
+
+## Missing / Next
+- Core env paths still permit CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1 on a nominal 2hop client when strict/middle/distinct policies are off, so a follow-up code gate should reject that ambiguous combination by default.
+EOF_ROUTE_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$ROUTE_STATUS_DOC" \
+  --summary-json "$ROUTE_SUMMARY_JSON" \
+  --print-summary-json 0 >"$ROUTE_STDOUT"
+
+assert_file_contains "$ROUTE_SUMMARY_JSON" '"recommended_action": "Close the direct-exit fallback ambiguity with a fail-closed runtime gate and profile contract regression."' "route fixture summary missing direct-exit action"
+assert_file_contains "$ROUTE_SUMMARY_JSON" '"blocked_by": ["route_policy"]' "route fixture summary missing route policy blocker"
+assert_file_contains "$ROUTE_SUMMARY_JSON" "\"suggested_tests\": [\"go test ./internal/app -run 'DirectExitFallback|ValidateRuntimeConfig' -count=1\", \"scripts/integration_client_vpn_path_profile_wiring.sh\"]" "route fixture summary missing route suggested tests"
+assert_file_contains "$ROUTE_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "internal/app/client.go", "internal/app/client_mode_test.go", "scripts/integration_client_vpn_path_profile_wiring.sh"]' "route fixture summary missing route suggested files"
+
+echo "[gpm-gap-scan] middle-hop anti-downgrade blockers are classified"
+MIDDLE_STATUS_DOC="$TMP_DIR/middle_status.md"
+MIDDLE_SUMMARY_JSON="$TMP_DIR/middle_summary.json"
+MIDDLE_STDOUT="$TMP_DIR/middle_stdout.md"
+
+cat >"$MIDDLE_STATUS_DOC" <<'EOF_MIDDLE_STATUS'
+# Middle Hop Fixture
+
+## In-Progress
+- M3 route-policy and 3-hop validation are partially wired, but exit-side path/profile/middle anti-downgrade binding still needs focused local closure.
+
+## Missing / Next
+- M3: bind exit admission to entry-signed path/profile/middle assertions so strict 3-hop clients cannot be downgraded by direct exit path-open calls.
+EOF_MIDDLE_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$MIDDLE_STATUS_DOC" \
+  --summary-json "$MIDDLE_SUMMARY_JSON" \
+  --print-summary-json 0 >"$MIDDLE_STDOUT"
+
+assert_file_contains "$MIDDLE_SUMMARY_JSON" '"recommended_action": "Close M3 exit-side anti-downgrade binding with path/profile/middle assertions and focused route tests."' "middle fixture summary missing anti-downgrade action"
+assert_file_contains "$MIDDLE_SUMMARY_JSON" '"blocked_by": ["route_policy"]' "middle fixture summary missing route policy blocker"
+assert_file_contains "$MIDDLE_SUMMARY_JSON" "\"suggested_tests\": [\"go test ./internal/app ./services/entry -run 'PathOpen|3Hop|Middle|Profile|Downgrade' -count=1\", \"scripts/integration_client_3hop_runtime.sh\"]" "middle fixture summary missing anti-downgrade suggested tests"
+assert_file_contains "$MIDDLE_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "internal/app/client.go", "internal/app/selection_test.go", "services/entry/service.go", "services/entry/path_open_test.go", "scripts/integration_client_3hop_runtime.sh"]' "middle fixture summary missing anti-downgrade suggested files"
+
+echo "[gpm-gap-scan] middle-role deployment/evidence blockers are classified"
+MIDDLE_SERVICE_STATUS_DOC="$TMP_DIR/middle_service_status.md"
+MIDDLE_SERVICE_SUMMARY_JSON="$TMP_DIR/middle_service_summary.json"
+MIDDLE_SERVICE_STDOUT="$TMP_DIR/middle_service_stdout.md"
+
+cat >"$MIDDLE_SERVICE_STATUS_DOC" <<'EOF_MIDDLE_SERVICE_STATUS'
+# Middle Role Deployment Evidence Fixture
+
+## In-Progress
+- M3 local 3-hop runtime has a middle role available via go run ./cmd/node --middle with static entry/exit peer allowlisting, but real-host evidence and published signoff artifacts are still missing.
+
+## Missing / Next
+- M3: run real-host 3-hop validation with the local middle role, publish the evidence pack, and formalize deployment admission policy.
+EOF_MIDDLE_SERVICE_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$MIDDLE_SERVICE_STATUS_DOC" \
+  --summary-json "$MIDDLE_SERVICE_SUMMARY_JSON" \
+  --print-summary-json 0 >"$MIDDLE_SERVICE_STDOUT"
+
+assert_file_contains "$MIDDLE_SERVICE_SUMMARY_JSON" '"recommended_action": "Validate the local production middle role contract, then publish real-host middle-hop evidence and deployment admission policy."' "middle role fixture summary missing production middle action"
+assert_file_contains "$MIDDLE_SERVICE_SUMMARY_JSON" '"blocked_by": ["real_hosts", "production_admission_policy", "evidence_pack_artifacts"]' "middle role fixture summary missing real-host/evidence/admission blockers"
+assert_file_contains "$MIDDLE_SERVICE_SUMMARY_JSON" "\"suggested_tests\": [\"go test ./services/middle ./services/entry ./services/exit -run 'Middle|Relay|Ready|Stats|PathOpen|ServiceContract' -count=1\", \"scripts/integration_middle_service_contract.sh\", \"scripts/integration_client_3hop_runtime.sh\", \"scripts/integration_roadmap_progress_report.sh\"]" "middle role fixture summary missing middle role suggested tests"
+assert_file_contains "$MIDDLE_SERVICE_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/global-privacy-mesh-track.md", "docs/product-roadmap.md", "scripts/integration_3machine_prod_wg_validate.sh", "services/middle/service.go", "services/middle/service_test.go", "services/entry/service.go", "services/exit/service.go", "internal/app/client.go", "scripts/integration_middle_service_contract.sh", "scripts/integration_client_3hop_runtime.sh", "scripts/roadmap_progress_report.sh"]' "middle role fixture summary missing middle role suggested files"
+
+echo "[gpm-gap-scan] objective proof verification blockers are classified"
+PROOF_STATUS_DOC="$TMP_DIR/proof_status.md"
+PROOF_SUMMARY_JSON="$TMP_DIR/proof_summary.json"
+PROOF_STDOUT="$TMP_DIR/proof_stdout.md"
+
+cat >"$PROOF_STATUS_DOC" <<'EOF_PROOF_STATUS'
+# Proof Trust Fixture
+
+## In-Progress
+- Reward proof trust is bounded to objective proof reference shapes, but proof verification remains unverified without a proof registry.
+
+## Missing / Next
+- Settlement: promote reward proof and slashing objective proof references from shape checks to proof registry verification before payout signoff.
+EOF_PROOF_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$PROOF_STATUS_DOC" \
+  --summary-json "$PROOF_SUMMARY_JSON" \
+  --print-summary-json 0 >"$PROOF_STDOUT"
+
+assert_file_contains "$PROOF_SUMMARY_JSON" '"recommended_action": "Promote reward/slashing proof references from shape checks to objective proof registry verification before payout signoff."' "proof fixture summary missing proof-verification action"
+assert_file_contains "$PROOF_SUMMARY_JSON" '"blocked_by": ["admin_settlement_validation", "objective_proof_verification", "live_chain"]' "proof fixture summary missing proof/live-chain blockers"
+assert_file_contains "$PROOF_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/integration_gpm_admin_settlement_contract.sh\", \"go test ./services/localapi -run GPMAdminRewardFinalize -count=1\", \"go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1\", \"go test ./pkg/settlement -run 'IssueReward|Proof|Objective|FinalizeWeekly' -count=1\", \"go test ./services/localapi -run 'GPMAdminRewardFinalize|RewardProof' -count=1\", \"go test ./blockchain/tdpn-chain/cmd/tdpnd -run 'Reward|Proof|Settlement' -count=1\"]" "proof fixture summary missing proof suggested tests"
+assert_file_contains "$PROOF_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "scripts/integration_gpm_admin_settlement_contract.sh", "services/localapi/gpm_api.go", "pkg/settlement/memory.go", "pkg/settlement/reward_proof_trust.md", "blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge.go"]' "proof fixture summary missing proof suggested files"
+
+echo "[gpm-gap-scan] settlement confirmation blockers are classified"
+CONFIRM_STATUS_DOC="$TMP_DIR/confirm_status.md"
+CONFIRM_SUMMARY_JSON="$TMP_DIR/confirm_summary.json"
+CONFIRM_STDOUT="$TMP_DIR/confirm_stdout.md"
+
+cat >"$CONFIRM_STATUS_DOC" <<'EOF_CONFIRM_STATUS'
+# Settlement Confirmation Fixture
+
+## In-Progress
+- Settlement Reconcile can promote submitted records from chain record existence, but pending chain state should not be treated as confirmed.
+
+## Missing / Next
+- Settlement: require finalized chain confirmation status before Reconcile promotes submitted payout, reservation, or slashing records.
+EOF_CONFIRM_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$CONFIRM_STATUS_DOC" \
+  --summary-json "$CONFIRM_SUMMARY_JSON" \
+  --print-summary-json 0 >"$CONFIRM_STDOUT"
+
+assert_file_contains "$CONFIRM_SUMMARY_JSON" '"recommended_action": "Require finalized chain status during settlement reconciliation; do not promote submitted records from existence alone."' "confirmation fixture summary missing confirmation action"
+assert_file_contains "$CONFIRM_SUMMARY_JSON" '"blocked_by": ["admin_settlement_validation", "chain_confirmation_status"]' "confirmation fixture summary missing confirmation blocker"
+assert_file_contains "$CONFIRM_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/integration_gpm_admin_settlement_contract.sh\", \"go test ./services/localapi -run GPMAdminRewardFinalize -count=1\", \"go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1\", \"go test ./pkg/settlement -run 'Reconcile|Confirmation|Pending|Submitted' -count=1\", \"go test ./services/localapi -run 'Reconcile|RewardFinalize' -count=1\"]" "confirmation fixture summary missing confirmation suggested tests"
+assert_file_contains "$CONFIRM_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "scripts/integration_gpm_admin_settlement_contract.sh", "services/localapi/gpm_api.go", "pkg/settlement/memory.go", "pkg/settlement/types.go", "pkg/settlement/cosmos_adapter.go"]' "confirmation fixture summary missing confirmation suggested files"
+
+echo "[gpm-gap-scan] durable replay guard blockers are classified"
+REPLAY_STATUS_DOC="$TMP_DIR/replay_status.md"
+REPLAY_SUMMARY_JSON="$TMP_DIR/replay_summary.json"
+REPLAY_STDOUT="$TMP_DIR/replay_stdout.md"
+
+cat >"$REPLAY_STATUS_DOC" <<'EOF_REPLAY_STATUS'
+# Replay Guard Fixture
+
+## In-Progress
+- Strict replay guard validation exists, but production multi-instance replay storage is not durable across restart.
+
+## Missing / Next
+- VPN: require durable replay guard storage for strict production exit deployments and reject in-memory-only replay cache in multi-instance mode.
+EOF_REPLAY_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$REPLAY_STATUS_DOC" \
+  --summary-json "$REPLAY_SUMMARY_JSON" \
+  --print-summary-json 0 >"$REPLAY_STDOUT"
+
+assert_file_contains "$REPLAY_SUMMARY_JSON" '"recommended_action": "Require durable shared replay storage for strict production exit deployments and add restart/multi-instance regressions."' "replay fixture summary missing replay action"
+assert_file_contains "$REPLAY_SUMMARY_JSON" '"blocked_by": ["durable_replay_storage"]' "replay fixture summary missing durable replay blocker"
+assert_file_contains "$REPLAY_SUMMARY_JSON" "\"suggested_tests\": [\"go test ./services/exit -run 'Replay|Guard|Durable|Strict' -count=1\", \"scripts/integration_live_wg_full_path_strict.sh\"]" "replay fixture summary missing durable replay suggested tests"
+assert_file_contains "$REPLAY_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "services/exit/service.go", "services/exit/service_test.go"]' "replay fixture summary missing durable replay suggested files"
 
 echo "[gpm-gap-scan] helper naming extraction remains deterministic"
 HELPER_STATUS_DOC="$TMP_DIR/helper_status.md"
@@ -198,6 +501,78 @@ assert_file_contains "$HELPER_STDOUT" "1. Batch helper accelerators include \`ro
 assert_file_contains "$HELPER_STDOUT" "1. Real-host evidence capture/publish remains the blocker for M2/M4/M5 closure." "helper fixture markdown missing blocker text"
 assert_file_contains "$HELPER_SUMMARY_JSON" '"text": "Batch helper accelerators include `roadmap_live_evidence_actionable_run`, `roadmap_evidence_pack_actionable_run`, `roadmap_live_and_pack_actionable_run`, `roadmap-live-evidence-cycle-batch-run`, and `roadmap-validation-debt-actionable-run`."' "helper fixture summary missing helper text"
 assert_file_contains "$HELPER_SUMMARY_JSON" '"text": "Real-host evidence capture/publish remains the blocker for M2/M4/M5 closure."' "helper fixture summary missing blocker text"
+assert_file_contains "$HELPER_SUMMARY_JSON" '"blocked_by": ["real_hosts", "evidence_pack_artifacts"]' "helper fixture summary missing real-host/evidence blocker metadata"
+assert_file_contains "$HELPER_SUMMARY_JSON" '"requires_real_hosts": true' "helper fixture summary missing real-host requirement metadata"
+assert_file_contains "$HELPER_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "scripts/integration_3machine_prod_wg_validate.sh", "scripts/roadmap_progress_report.sh"]' "helper fixture summary missing real-host suggested files"
+
+echo "[gpm-gap-scan] informational tooling notes are not promoted as blockers"
+NOTE_STATUS_DOC="$TMP_DIR/note_status.md"
+NOTE_SUMMARY_JSON="$TMP_DIR/note_summary.json"
+NOTE_STDOUT="$TMP_DIR/note_stdout.md"
+
+cat >"$NOTE_STATUS_DOC" <<'EOF_NOTE_STATUS'
+# Tooling Note Fixture
+
+## In-Progress
+- Concrete in-progress blocker is missing live chain evidence.
+
+## Missing / Next
+- Tooling note: roadmap output now surfaces batch launchers to reduce manual invocation. These are accelerators only; they do not replace required real-host evidence capture/publish.
+- Real-host evidence capture/publish remains the blocker for M2/M4/M5 closure.
+EOF_NOTE_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$NOTE_STATUS_DOC" \
+  --summary-json "$NOTE_SUMMARY_JSON" \
+  --print-summary-json 0 >"$NOTE_STDOUT"
+
+assert_file_contains "$NOTE_SUMMARY_JSON" '"text": "Tooling note: roadmap output now surfaces batch launchers to reduce manual invocation. These are accelerators only; they do not replace required real-host evidence capture/publish."' "note fixture summary missing tooling note text"
+assert_file_contains "$NOTE_SUMMARY_JSON" '"actionable": false' "note fixture summary should mark tooling note non-actionable"
+assert_file_contains "$NOTE_SUMMARY_JSON" '"recommended_action": "No direct closure action; use this note as operator guidance for related roadmap blockers."' "note fixture summary missing informational action"
+assert_file_contains "$NOTE_SUMMARY_JSON" '"blocked_by": []' "note fixture summary should not assign blockers to tooling note"
+assert_file_contains "$NOTE_SUMMARY_JSON" '"requires_real_hosts": false' "note fixture summary should not require real hosts for tooling note"
+if grep -A24 '"id": "missing_next_01"' "$NOTE_SUMMARY_JSON" | grep -F '"top_actionable_item_ids"' >/dev/null 2>&1; then
+  echo "note fixture layout unexpectedly collapsed before item assertions"
+  cat "$NOTE_SUMMARY_JSON"
+  exit 1
+fi
+if grep -A80 '"top_actionable_item_ids": \[' "$NOTE_SUMMARY_JSON" | grep -F '"missing_next_01"' >/dev/null 2>&1; then
+  echo "tooling note should not appear in top_actionable_item_ids"
+  cat "$NOTE_SUMMARY_JSON"
+  exit 1
+fi
+if ! grep -A80 '"top_actionable_item_ids": \[' "$NOTE_SUMMARY_JSON" | grep -F '"missing_next_02"' >/dev/null 2>&1; then
+  echo "real blocker should remain in top_actionable_item_ids"
+  cat "$NOTE_SUMMARY_JSON"
+  exit 1
+fi
+
+GENERIC_NOTE_STATUS_DOC="$TMP_DIR/generic_note_status.md"
+GENERIC_NOTE_SUMMARY_JSON="$TMP_DIR/generic_note_summary.json"
+GENERIC_NOTE_STDOUT="$TMP_DIR/generic_note_stdout.md"
+
+cat >"$GENERIC_NOTE_STATUS_DOC" <<'EOF_GENERIC_NOTE_STATUS'
+# Generic Note Blocker Fixture
+
+## In-Progress
+- Note: live chain evidence is missing and remains a blocker for payout finality.
+
+## Missing / Next
+- Note: live chain evidence is missing and remains a blocker for payout finality.
+EOF_GENERIC_NOTE_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$GENERIC_NOTE_STATUS_DOC" \
+  --summary-json "$GENERIC_NOTE_SUMMARY_JSON" \
+  --print-summary-json 0 >"$GENERIC_NOTE_STDOUT"
+
+assert_file_contains "$GENERIC_NOTE_SUMMARY_JSON" '"text": "Note: live chain evidence is missing and remains a blocker for payout finality."' "generic note fixture summary missing blocker note text"
+assert_file_contains "$GENERIC_NOTE_SUMMARY_JSON" '"actionable": true' "generic note with blocker language should remain actionable"
+if ! grep -A80 '"top_actionable_item_ids": \[' "$GENERIC_NOTE_SUMMARY_JSON" | grep -F '"missing_next_01"' >/dev/null 2>&1; then
+  echo "generic blocker note should appear in top_actionable_item_ids"
+  cat "$GENERIC_NOTE_SUMMARY_JSON"
+  exit 1
+fi
 
 echo "[gpm-gap-scan] heading normalization + default summary path"
 VARIANT_STATUS_DOC="$TMP_DIR/variant_status.md"

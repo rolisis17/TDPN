@@ -34,6 +34,10 @@ check_pattern '^print_client_vpn_trust_mismatch_hint\(\)' \
   "missing print_client_vpn_trust_mismatch_hint helper"
 check_pattern '^seed_client_vpn_trust_file_if_empty\(\)' \
   "missing seed_client_vpn_trust_file_if_empty helper"
+check_pattern '^ensure_client_vpn_prod_trust_bootstrap_or_die\(\)' \
+  "missing prod trust bootstrap guard helper"
+check_pattern '^client_vpn_signed_bootstrap_manifest_configured\(\)' \
+  "missing signed bootstrap manifest trust helper"
 
 echo "[client-vpn-trust-scope] client-vpn-up trust scope behavior"
 check_pattern 'local trust_scope_mode="\$\{EASY_NODE_CLIENT_VPN_TRUST_SCOPE:-scoped\}"' \
@@ -42,8 +46,14 @@ check_pattern 'client-vpn-up requires EASY_NODE_CLIENT_VPN_TRUST_SCOPE to be one
   "client-vpn-up missing trust scope validation message"
 check_pattern 'trusted_keys_file="\$\(default_client_vpn_trust_file_for_directory_urls "\$directory_urls" "\$trust_scope_mode"\)"' \
   "client-vpn-up missing scoped trust-file resolution"
+check_pattern 'ensure_client_vpn_prod_trust_bootstrap_or_die "\$trusted_keys_file"' \
+  "client-vpn-up missing production trust bootstrap guard"
 check_pattern 'seed_client_vpn_trust_file_if_empty "\$trusted_keys_file" "\$directory_urls"' \
-  "client-vpn-up missing first-run trust seed for multi-directory strict mode"
+  "client-vpn-up missing non-production first-run trust seed for multi-directory strict mode"
+check_pattern 'refusing to seed production directory trust from live /v1/pubkeys while DIRECTORY_TRUST_TOFU=0' \
+  "client-vpn-up missing production live-pubkeys seeding refusal"
+check_pattern 'GPM_BOOTSTRAP_MANIFEST_URL plus GPM_BOOTSTRAP_MANIFEST_HMAC_KEY or GPM_BOOTSTRAP_MANIFEST_ED25519_PUBLIC_KEY' \
+  "client-vpn-up missing signed bootstrap manifest production escape-hatch guidance"
 check_pattern 'CLIENT_VPN_TRUST_SCOPE=\$trust_scope_mode' \
   "client-vpn-up state file missing trust scope record"
 check_pattern 'echo "  trust_scope: \$trust_scope_mode"' \

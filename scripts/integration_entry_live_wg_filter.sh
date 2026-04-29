@@ -62,7 +62,7 @@ send_udp_wg_transport() {
   ' "127.0.0.1:57900"
 }
 
-if ! wait_for_log 'client received wg-session config:' 20; then
+if ! wait_for_log 'client wireguard runtime ready:' 20; then
   echo "timed out waiting for client session bootstrap"
   cat "${LOG_FILE}"
   exit 1

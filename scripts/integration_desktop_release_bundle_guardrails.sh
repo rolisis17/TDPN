@@ -9,6 +9,11 @@ if [[ ! -f "$SCRIPT_UNDER_TEST" ]]; then
   echo "desktop release bundle guardrails failed: missing script: $SCRIPT_UNDER_TEST"
   exit 1
 fi
+LINUX_SCRIPT_UNDER_TEST="${DESKTOP_RELEASE_BUNDLE_LINUX_SCRIPT_UNDER_TEST:-$ROOT_DIR/scripts/linux/desktop_release_bundle.sh}"
+if [[ ! -f "$LINUX_SCRIPT_UNDER_TEST" ]]; then
+  echo "desktop release bundle guardrails failed: missing linux script: $LINUX_SCRIPT_UNDER_TEST"
+  exit 1
+fi
 
 assert_marker_present() {
   local marker="$1"
@@ -28,9 +33,26 @@ assert_marker_present "function Normalize-NpmCommandPath" "$SCRIPT_UNDER_TEST"
 assert_marker_present "function Resolve-ToolPath" "$SCRIPT_UNDER_TEST"
 assert_marker_present "function Resolve-NpmCommandPath" "$SCRIPT_UNDER_TEST"
 assert_marker_present "function Refresh-AndAugmentDesktopProcessPath" "$SCRIPT_UNDER_TEST"
+assert_marker_present "NewerThanUtc" "$SCRIPT_UNDER_TEST"
+assert_marker_present "BuildStartedAtUtc" "$SCRIPT_UNDER_TEST"
 assert_marker_present "Resolve-NpmCommandPath -LogFallbackHint -FailOnNpmPs1WithoutCmd" "$SCRIPT_UNDER_TEST"
 assert_marker_present "npm resolver fallback: ignoring npm.ps1 shim and using sibling npm.cmd" "$SCRIPT_UNDER_TEST"
 assert_marker_present "npm.ps1 was resolved but sibling npm.cmd was not found" "$SCRIPT_UNDER_TEST"
+assert_marker_present "function Assert-PublicTauriArgs" "$SCRIPT_UNDER_TEST"
+assert_marker_present 'Assert-PublicTauriArgs -CandidateArgs $TauriArgs' "$SCRIPT_UNDER_TEST"
+assert_marker_present "desktop release bundle build produced no artifacts" "$SCRIPT_UNDER_TEST"
+assert_marker_present "--all-features" "$SCRIPT_UNDER_TEST"
+assert_marker_present "admin-console feature flags" "$SCRIPT_UNDER_TEST"
+assert_marker_present "Admin Console Tauri config" "$SCRIPT_UNDER_TEST"
+assert_marker_present "assert_public_tauri_args()" "$LINUX_SCRIPT_UNDER_TEST"
+assert_marker_present 'assert_public_tauri_args "${tauri_args[@]}"' "$LINUX_SCRIPT_UNDER_TEST"
+assert_marker_present "assert_release_bundle_artifacts_present" "$LINUX_SCRIPT_UNDER_TEST"
+assert_marker_present "desktop release bundle build produced no artifacts" "$LINUX_SCRIPT_UNDER_TEST"
+assert_marker_present "BUNDLE_ARTIFACT_MARKER" "$LINUX_SCRIPT_UNDER_TEST"
+assert_marker_present "-nt" "$LINUX_SCRIPT_UNDER_TEST"
+assert_marker_present "--all-features" "$LINUX_SCRIPT_UNDER_TEST"
+assert_marker_present "admin-console feature flags" "$LINUX_SCRIPT_UNDER_TEST"
+assert_marker_present "Admin Console Tauri config" "$LINUX_SCRIPT_UNDER_TEST"
 
 if command -v powershell >/dev/null 2>&1; then
   POWERSHELL_BIN="powershell"
@@ -46,15 +68,32 @@ fi
 POWERSHELL_USES_WINDOWS_PATHS="0"
 if [[ "$POWERSHELL_BIN" == *.exe ]]; then
   POWERSHELL_USES_WINDOWS_PATHS="1"
+elif command -v cygpath >/dev/null 2>&1; then
+  powershell_resolved="$(command -v "$POWERSHELL_BIN" 2>/dev/null || true)"
+  case "$powershell_resolved" in
+    /[a-zA-Z]/* | /proc/cygdrive/[a-zA-Z]/*)
+      POWERSHELL_USES_WINDOWS_PATHS="1"
+      ;;
+  esac
 fi
 
 to_powershell_path() {
   local path="$1"
-  if [[ "$POWERSHELL_USES_WINDOWS_PATHS" == "1" ]] && command -v wslpath >/dev/null 2>&1; then
-    wslpath -w "$path"
+  if [[ "$POWERSHELL_USES_WINDOWS_PATHS" == "1" ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      cygpath -w "$path"
+      return
+    fi
+    if command -v wslpath >/dev/null 2>&1; then
+      wslpath -w "$path"
+      return
+    fi
+    echo "desktop release bundle guardrails failed: cannot convert POSIX path for Windows PowerShell: $path" >&2
+    exit 2
+  else
+    printf '%s' "$path"
     return
   fi
-  printf '%s' "$path"
 }
 
 TMP_DIR="$(mktemp -d)"
@@ -140,7 +179,110 @@ fi
 run_expect_pass \
   "skip_build_summary_json_validate" \
   "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
-    "\$ErrorActionPreference='Stop'; \$summary = Get-Content -Raw -LiteralPath '$SUMMARY_JSON_PATH_PS' | ConvertFrom-Json; if (\$summary.version -ne 1) { throw 'version mismatch' }; if (\$summary.status -ne 'ok') { throw 'status mismatch' }; if (\$summary.platform -ne 'windows') { throw 'platform mismatch' }; if (-not \$summary.skip_build) { throw 'skip_build mismatch' }; if (\$summary.channel -ne 'beta') { throw 'channel mismatch' }"
+    "\$ErrorActionPreference='Stop'; \$summary = Get-Content -Raw -LiteralPath '$SUMMARY_JSON_PATH_PS' | ConvertFrom-Json; if (\$summary.version -ne 1) { throw 'version mismatch' }; if (\$summary.status -ne 'ok') { throw 'status mismatch' }; if (\$summary.platform -ne 'windows') { throw 'platform mismatch' }; if (-not \$summary.skip_build) { throw 'skip_build mismatch' }; if (\$summary.channel -ne 'beta') { throw 'channel mismatch' }; if (\$null -eq \$summary.artifact_validation_status) { throw 'artifact validation status missing' }; if (\$null -eq \$summary.release_ready) { throw 'release_ready missing' }"
+
+echo "[desktop-release-bundle-guardrails] public windows release refuses admin-console feature flags"
+run_expect_fail \
+  "windows_admin_console_feature_fail" \
+  "public desktop release bundle refuses admin-console feature flags" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; & '$SCRIPT_UNDER_TEST_PS' -SkipBuild -TauriArgs '--features','admin-console'"
+
+run_expect_fail \
+  "windows_admin_console_feature_equals_fail" \
+  "public desktop release bundle refuses admin-console feature flags" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; & '$SCRIPT_UNDER_TEST_PS' -SkipBuild -TauriArgs '--features=admin-console'"
+
+run_expect_fail \
+  "windows_all_features_fail" \
+  "public desktop release bundle refuses --all-features" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; & '$SCRIPT_UNDER_TEST_PS' -SkipBuild -TauriArgs '--all-features'"
+
+run_expect_fail \
+  "windows_admin_console_config_fail" \
+  "public desktop release bundle refuses Admin Console Tauri config" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; & '$SCRIPT_UNDER_TEST_PS' -SkipBuild -TauriArgs '--config','src-tauri/tauri.admin-console.conf.json'"
+
+run_expect_fail \
+  "windows_admin_console_empty_feature_bypass_fail" \
+  "empty --features/--config value" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; & '$SCRIPT_UNDER_TEST_PS' -SkipBuild -TauriArgs '--features','','--config','src-tauri/tauri.admin-console.conf.json'"
+
+run_expect_fail \
+  "windows_admin_console_flag_like_feature_bypass_fail" \
+  "flag-like --features value" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference='Stop'; & '$SCRIPT_UNDER_TEST_PS' -SkipBuild -TauriArgs '--features','--config','src-tauri/tauri.admin-console.conf.json'"
+
+echo "[desktop-release-bundle-guardrails] public linux release refuses admin-console feature flags"
+run_expect_fail \
+  "linux_admin_console_feature_fail" \
+  "public desktop release bundle refuses admin-console feature flags" \
+  bash "$LINUX_SCRIPT_UNDER_TEST" \
+    --skip-build \
+    -- --features admin-console
+
+run_expect_fail \
+  "linux_admin_console_feature_equals_fail" \
+  "public desktop release bundle refuses admin-console feature flags" \
+  bash "$LINUX_SCRIPT_UNDER_TEST" \
+    --skip-build \
+    -- --features=admin-console
+
+run_expect_fail \
+  "linux_all_features_fail" \
+  "public desktop release bundle refuses --all-features" \
+  bash "$LINUX_SCRIPT_UNDER_TEST" \
+    --skip-build \
+    -- --all-features
+
+run_expect_fail \
+  "linux_admin_console_config_fail" \
+  "public desktop release bundle refuses Admin Console Tauri config" \
+  bash "$LINUX_SCRIPT_UNDER_TEST" \
+    --skip-build \
+    -- --config src-tauri/tauri.admin-console.conf.json
+
+run_expect_fail \
+  "linux_admin_console_empty_feature_bypass_fail" \
+  "empty --features/--config value" \
+  bash "$LINUX_SCRIPT_UNDER_TEST" \
+    --skip-build \
+    -- --features "" --config src-tauri/tauri.admin-console.conf.json
+
+run_expect_fail \
+  "linux_admin_console_flag_like_feature_bypass_fail" \
+  "flag-like --features value" \
+  bash "$LINUX_SCRIPT_UNDER_TEST" \
+    --skip-build \
+    -- --features --config src-tauri/tauri.admin-console.conf.json
+
+PUBLIC_BUNDLE_ROOT="$ROOT_DIR/apps/desktop/src-tauri/target/release/bundle"
+STALE_ADMIN_ARTIFACT_DIR="$PUBLIC_BUNDLE_ROOT/gpm-admin-console"
+STALE_ADMIN_ARTIFACT_PATH="$STALE_ADMIN_ARTIFACT_DIR/stale-admin-artifact.txt"
+mkdir -p "$STALE_ADMIN_ARTIFACT_DIR"
+printf '%s\n' "stale admin artifact guardrail fixture" >"$STALE_ADMIN_ARTIFACT_PATH"
+trap 'rm -f "$STALE_ADMIN_ARTIFACT_PATH"; rmdir "$STALE_ADMIN_ARTIFACT_DIR" "$PUBLIC_BUNDLE_ROOT" 2>/dev/null || true; rm -rf "$TMP_DIR"' EXIT
+
+echo "[desktop-release-bundle-guardrails] public release refuses stale admin artifacts in shared bundle output"
+run_expect_fail \
+  "windows_stale_admin_artifact_fail" \
+  "public desktop release bundle refuses Admin Console artifacts" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -SkipBuild
+
+run_expect_fail \
+  "linux_stale_admin_artifact_fail" \
+  "public desktop release bundle refuses Admin Console artifacts" \
+  bash "$LINUX_SCRIPT_UNDER_TEST" \
+    --skip-build
+
+rm -f "$STALE_ADMIN_ARTIFACT_PATH"
+rmdir "$STALE_ADMIN_ARTIFACT_DIR" "$PUBLIC_BUNDLE_ROOT" 2>/dev/null || true
 
 echo "[desktop-release-bundle-guardrails] localhost http update feed passes"
 run_expect_pass \
@@ -167,6 +309,15 @@ run_expect_fail \
     -Channel beta \
     -UpdateFeedUrl "ftp://updates.example.invalid/gpm/beta.json" \
     -SkipBuild
+
+echo "[desktop-release-bundle-guardrails] linux update feed rejects userinfo-obfuscated host"
+run_expect_fail \
+  "linux_userinfo_update_feed_fail" \
+  "userinfo is not allowed" \
+  bash "$LINUX_SCRIPT_UNDER_TEST" \
+    --channel beta \
+    --update-feed-url "https://trusted.example@evil.example/gpm/beta.json" \
+    --skip-build
 
 POWERSHELL_CONSTRAINED_PATH_PREFLIGHT="\$ErrorActionPreference='Stop'; \$env:PATH=''; foreach (\$tool in 'node','npm.cmd','rustc','cargo') { if (Get-Command \$tool -CommandType Application -ErrorAction SilentlyContinue) { throw \"constrained PATH unexpectedly resolved '\$tool'\" } };"
 

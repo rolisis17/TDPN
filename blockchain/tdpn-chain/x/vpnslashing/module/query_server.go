@@ -3,6 +3,7 @@ package module
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/tdpn/tdpn-chain/x/vpnslashing/keeper"
 	"github.com/tdpn/tdpn-chain/x/vpnslashing/types"
@@ -35,8 +36,18 @@ type GetPenaltyResponse struct {
 	Penalty types.PenaltyDecision
 }
 
-// ListEvidenceRequest requests all evidence records.
-type ListEvidenceRequest struct{}
+// ListEvidenceRequest requests evidence records, optionally filtered before
+// the response clamp is applied.
+type ListEvidenceRequest struct {
+	ProviderID             string
+	SessionID              string
+	ViolationType          string
+	SubmittedAtOrAfterUnix int64
+	SubmittedBeforeUnix    int64
+	IncludeFailed          bool
+	IncludeFailedSet       bool
+	IncludeZeroSubmitted   bool
+}
 
 // ListEvidenceResponse contains evidence records ordered by evidence_id.
 type ListEvidenceResponse struct {
@@ -85,7 +96,6 @@ func (s QueryServer) GetPenalty(req GetPenaltyRequest) (GetPenaltyResponse, erro
 }
 
 func (s QueryServer) ListEvidence(req ListEvidenceRequest) (ListEvidenceResponse, error) {
-	_ = req
 	if s.keeper == nil {
 		return ListEvidenceResponse{}, ErrNilKeeper
 	}
@@ -94,7 +104,7 @@ func (s QueryServer) ListEvidence(req ListEvidenceRequest) (ListEvidenceResponse
 	if err != nil {
 		return ListEvidenceResponse{}, fmt.Errorf("%w: list evidence: %v", ErrQueryReadFailed, err)
 	}
-	return ListEvidenceResponse{Evidence: clampEvidence(records)}, nil
+	return ListEvidenceResponse{Evidence: clampEvidence(filterEvidence(records, req))}, nil
 }
 
 func (s QueryServer) ListPenalties(req ListPenaltiesRequest) (ListPenaltiesResponse, error) {
@@ -115,6 +125,42 @@ func clampEvidence(records []types.SlashEvidence) []types.SlashEvidence {
 		return records
 	}
 	return records[:maxQueryListResults]
+}
+
+func filterEvidence(records []types.SlashEvidence, req ListEvidenceRequest) []types.SlashEvidence {
+	providerID := types.NormalizeProviderID(req.ProviderID)
+	sessionID := types.NormalizeSessionID(req.SessionID)
+	violationType := types.NormalizeViolationType(req.ViolationType)
+	out := make([]types.SlashEvidence, 0, len(records))
+	for _, record := range records {
+		if providerID != "" && types.NormalizeProviderID(record.ProviderID) != providerID {
+			continue
+		}
+		if sessionID != "" && types.NormalizeSessionID(record.SessionID) != sessionID {
+			continue
+		}
+		if violationType != "" && types.NormalizeViolationType(record.ViolationType) != violationType {
+			continue
+		}
+		if req.IncludeFailedSet && !req.IncludeFailed && strings.EqualFold(string(record.Status), "failed") {
+			continue
+		}
+		hasTimeFilter := req.SubmittedAtOrAfterUnix > 0 || req.SubmittedBeforeUnix > 0
+		if record.SubmittedAtUnix == 0 {
+			if hasTimeFilter && !req.IncludeZeroSubmitted {
+				continue
+			}
+		} else {
+			if req.SubmittedAtOrAfterUnix > 0 && record.SubmittedAtUnix < req.SubmittedAtOrAfterUnix {
+				continue
+			}
+			if req.SubmittedBeforeUnix > 0 && record.SubmittedAtUnix >= req.SubmittedBeforeUnix {
+				continue
+			}
+		}
+		out = append(out, record)
+	}
+	return out
 }
 
 func clampPenalties(records []types.PenaltyDecision) []types.PenaltyDecision {

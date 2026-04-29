@@ -19,8 +19,11 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
+
+	"privacynode/pkg/settlement"
 )
 
 const (
@@ -45,6 +48,7 @@ const (
 	maxInviteKeyLen         = 512
 	maxGitRemoteNameLen     = 64
 	maxGitBranchNameLen     = 255
+	gpmStaleLaunchStatusTTL = 10 * time.Second
 )
 
 var vpnInterfaceNamePattern = regexp.MustCompile(`^wg[a-zA-Z0-9_.-]{0,13}$`)
@@ -73,6 +77,10 @@ type Service struct {
 	serviceRestart                                        string
 	gpmConnectRequireSession                              bool
 	gpmAllowLegacyConnectOverride                         bool
+	gpmAllowLegacyServiceMutations                        bool
+	gpmAllowLegacyServiceMutationsSource                  string
+	gpmAdminRoutesEnabled                                 bool
+	gpmAdminRoutesSource                                  string
 	gpmLegacyConnectRequireTrustedManifestBootstrap       bool
 	gpmLegacyConnectRequireTrustedManifestBootstrapSource string
 	gpmConnectPolicyMode                                  string
@@ -98,6 +106,8 @@ type Service struct {
 	gpmManifestEd25519PublicKey                           string
 	gpmManifestEd25519PublicKeySource                     string
 	gpmRoleDefault                                        string
+	gpmAdminWalletAllowlist                               map[string]struct{}
+	gpmAdminWalletAllowlistSource                         string
 	gpmApprovalToken                                      string
 	gpmOperatorApprovalRequireSession                     bool
 	gpmOperatorApprovalRequireSessionSource               string
@@ -110,13 +120,50 @@ type Service struct {
 	gpmAuthVerifyMetadataSource                           string
 	gpmAuthVerifyWalletExtSource                          string
 	gpmAuthVerifyCryptoSource                             string
+	gpmAuthExpectedChainID                                string
+	gpmAuthExpectedChainIDSource                          string
+	gpmAuthExpectedWalletHRP                              string
+	gpmAuthExpectedWalletHRPSource                        string
 	gpmLegacyEnvAliasesActive                             []string
 	gpmLegacyEnvAliasWarnings                             []string
 	gpmAuthSignatureVerifier                              gpmAuthSignatureVerifier
 	gpmStateStorePath                                     string
+	gpmStateStoreLoadFailed                               bool
+	gpmStateStoreLoadFailure                              string
 	gpmAuditLogPath                                       string
 	gpmGapScanSummaryPath                                 string
+	gpmSettlement                                         settlement.Service
+	gpmSettlementBackend                                  string
+	gpmSettlementBackendSource                            string
+	gpmSettlementChainRequired                            bool
+	gpmSettlementChainRequiredSource                      string
+	gpmSettlementChainBacked                              bool
+	gpmSettlementAdapterConfigured                        bool
+	gpmSettlementAdapterConfigError                       string
+	gpmSettlementCosmosEndpointConfigured                 bool
+	gpmSettlementCosmosEndpointSource                     string
+	gpmSettlementCosmosSubmitMode                         string
+	gpmSettlementTrustedBridgeFinality                    bool
+	gpmSettlementClose                                    func()
 	gpmState                                              *gpmRuntimeState
+	lastConnectInterfaceMu                                sync.Mutex
+	lastConnectInterface                                  string
+}
+
+type gpmSettlementWiring struct {
+	service                  settlement.Service
+	backend                  string
+	backendSource            string
+	chainRequired            bool
+	chainRequiredSource      string
+	chainBacked              bool
+	adapterConfigured        bool
+	adapterConfigError       string
+	cosmosEndpointConfigured bool
+	cosmosEndpointSource     string
+	cosmosSubmitMode         string
+	trustedBridgeFinality    bool
+	close                    func()
 }
 
 type boundedOutputBuffer struct {
@@ -130,6 +177,10 @@ type connectRequest struct {
 	InviteKey                 string `json:"invite_key"`
 	SessionToken              string `json:"session_token,omitempty"`
 	SessionBootstrapDirectory string `json:"session_bootstrap_directory,omitempty"`
+	ReservationID             string `json:"reservation_id,omitempty"`
+	ReservationSessionID      string `json:"reservation_session_id,omitempty"`
+	UsageSessionID            string `json:"usage_session_id,omitempty"`
+	VPNSessionID              string `json:"vpn_session_id,omitempty"`
 	PathProfile               string `json:"path_profile,omitempty"`
 	PolicyProfile             string `json:"policy_profile,omitempty"`
 	Interface                 string `json:"interface,omitempty"`
@@ -138,6 +189,10 @@ type connectRequest struct {
 	RunPreflight              *bool  `json:"run_preflight,omitempty"`
 	ProdProfile               *bool  `json:"prod_profile,omitempty"`
 	InstallRoute              *bool  `json:"install_route,omitempty"`
+}
+
+type disconnectRequest struct {
+	SessionToken string `json:"session_token,omitempty"`
 }
 
 type connectDefaults struct {
@@ -170,13 +225,15 @@ type connectPolicy struct {
 }
 
 type setProfileRequest struct {
-	PathProfile string `json:"path_profile"`
+	PathProfile  string `json:"path_profile"`
+	SessionToken string `json:"session_token,omitempty"`
 }
 
 type updateRequest struct {
-	Remote     string `json:"remote,omitempty"`
-	Branch     string `json:"branch,omitempty"`
-	AllowDirty *bool  `json:"allow_dirty,omitempty"`
+	Remote       string `json:"remote,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	AllowDirty   *bool  `json:"allow_dirty,omitempty"`
+	SessionToken string `json:"session_token,omitempty"`
 }
 
 func New() *Service {
@@ -283,14 +340,18 @@ func New() *Service {
 	}
 	gpmManifestRefreshFailureMaxCacheAgeSec := 0
 	gpmManifestRefreshFailureMaxCacheAgeSource := "default"
+	gpmManifestRefreshFailureMaxCacheAgeSet := false
 	if raw, source, set := preferredEnvValueWithSource(
 		"GPM_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC",
 		"TDPN_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC",
 	); set && raw != "" {
+		gpmManifestRefreshFailureMaxCacheAgeSet = true
 		noteLegacyAlias("GPM_BOOTSTRAP_MANIFEST_REFRESH_FAILURE_MAX_CACHE_AGE_SEC", source)
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 {
 			gpmManifestRefreshFailureMaxCacheAgeSec = parsed
 			gpmManifestRefreshFailureMaxCacheAgeSource = source
+		} else {
+			gpmManifestRefreshFailureMaxCacheAgeSource = source + "-invalid-env"
 		}
 	}
 	gpmRoleDefaultRaw, gpmRoleDefaultSource, gpmRoleDefaultSet := preferredEnvValueWithSource(
@@ -302,9 +363,18 @@ func New() *Service {
 	if !gpmRoleDefaultSet {
 		gpmRoleDefault = "client"
 	}
-	if gpmRoleDefault != "operator" && gpmRoleDefault != "admin" {
+	if gpmRoleDefault != "client" {
 		gpmRoleDefault = "client"
 	}
+	gpmAdminWalletAllowlistRaw, gpmAdminWalletAllowlistSource, gpmAdminWalletAllowlistSet := preferredEnvValueWithSource(
+		"GPM_ADMIN_WALLET_ALLOWLIST",
+		"TDPN_ADMIN_WALLET_ALLOWLIST",
+	)
+	noteLegacyAlias("GPM_ADMIN_WALLET_ALLOWLIST", gpmAdminWalletAllowlistSource)
+	if !gpmAdminWalletAllowlistSet {
+		gpmAdminWalletAllowlistSource = "default"
+	}
+	gpmAdminWalletAllowlist := normalizeGPMAdminWalletAllowlist(gpmAdminWalletAllowlistRaw)
 	gpmManifestHMACKeyRaw, gpmManifestHMACKeySource, gpmManifestHMACKeySet := preferredEnvValueWithSource(
 		"GPM_BOOTSTRAP_MANIFEST_HMAC_KEY",
 		"TDPN_BOOTSTRAP_MANIFEST_HMAC_KEY",
@@ -394,6 +464,24 @@ func New() *Service {
 	)
 	noteLegacyAlias("GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF", gpmAuthVerifyCryptoSource)
 	gpmAuthVerifyRequireCryptoProof, gpmAuthVerifyRequireCryptoValid := parseBool(gpmAuthVerifyRequireCryptoRaw)
+	gpmAuthExpectedChainIDRaw, gpmAuthExpectedChainIDSource, gpmAuthExpectedChainIDSet := preferredEnvValueWithSource(
+		"GPM_AUTH_VERIFY_EXPECTED_CHAIN_ID",
+		"TDPN_AUTH_VERIFY_EXPECTED_CHAIN_ID",
+	)
+	noteLegacyAlias("GPM_AUTH_VERIFY_EXPECTED_CHAIN_ID", gpmAuthExpectedChainIDSource)
+	gpmAuthExpectedChainID := strings.TrimSpace(gpmAuthExpectedChainIDRaw)
+	if !gpmAuthExpectedChainIDSet {
+		gpmAuthExpectedChainIDSource = "default"
+	}
+	gpmAuthExpectedWalletHRPRaw, gpmAuthExpectedWalletHRPSource, gpmAuthExpectedWalletHRPSet := preferredEnvValueWithSource(
+		"GPM_AUTH_VERIFY_EXPECTED_WALLET_HRP",
+		"TDPN_AUTH_VERIFY_EXPECTED_WALLET_HRP",
+	)
+	noteLegacyAlias("GPM_AUTH_VERIFY_EXPECTED_WALLET_HRP", gpmAuthExpectedWalletHRPSource)
+	gpmAuthExpectedWalletHRP := strings.ToLower(strings.TrimSpace(gpmAuthExpectedWalletHRPRaw))
+	if !gpmAuthExpectedWalletHRPSet {
+		gpmAuthExpectedWalletHRPSource = "default"
+	}
 	gpmConnectPolicyRaw, gpmConnectPolicySource, gpmConnectPolicySet := preferredEnvValueWithSource(
 		"GPM_PRODUCTION_MODE",
 		"TDPN_PRODUCTION_MODE",
@@ -427,6 +515,19 @@ func New() *Service {
 	if gpmConnectPolicySet {
 		gpmAuthVerifyPolicySource = gpmConnectPolicySource
 	}
+	if gpmConnectPolicyProduction {
+		const productionManifestRefreshFailureMaxCacheAgeSec = 15 * 60
+		if !gpmManifestRefreshFailureMaxCacheAgeSet {
+			gpmManifestRefreshFailureMaxCacheAgeSec = productionManifestRefreshFailureMaxCacheAgeSec
+			gpmManifestRefreshFailureMaxCacheAgeSource = "production-default"
+		} else if strings.HasSuffix(gpmManifestRefreshFailureMaxCacheAgeSource, "-invalid-env") {
+			gpmManifestRefreshFailureMaxCacheAgeSec = productionManifestRefreshFailureMaxCacheAgeSec
+			gpmManifestRefreshFailureMaxCacheAgeSource = "production-invalid-env-fail-closed"
+		} else if gpmManifestRefreshFailureMaxCacheAgeSec <= 0 {
+			gpmManifestRefreshFailureMaxCacheAgeSec = productionManifestRefreshFailureMaxCacheAgeSec
+			gpmManifestRefreshFailureMaxCacheAgeSource = "production-refresh-failure-cache-fail-closed"
+		}
+	}
 	if !gpmManifestRequireHTTPSSet {
 		gpmManifestRequireHTTPSSource = "default"
 		if gpmConnectPolicyProduction {
@@ -436,6 +537,9 @@ func New() *Service {
 	} else if !gpmManifestRequireHTTPSValid && gpmConnectPolicyProduction {
 		gpmManifestRequireHTTPS = true
 		gpmManifestRequireHTTPSSource = "production-invalid-env-fail-closed"
+	} else if gpmConnectPolicyProduction && !gpmManifestRequireHTTPS {
+		gpmManifestRequireHTTPS = true
+		gpmManifestRequireHTTPSSource = "production-enforced"
 	}
 	if !gpmManifestRequireSignatureSet {
 		gpmManifestRequireSigSource = "default"
@@ -446,6 +550,9 @@ func New() *Service {
 	} else if !gpmManifestRequireSignatureValid && gpmConnectPolicyProduction {
 		gpmManifestRequireSignature = true
 		gpmManifestRequireSigSource = "production-invalid-env-fail-closed"
+	} else if gpmConnectPolicyProduction && !gpmManifestRequireSignature {
+		gpmManifestRequireSignature = true
+		gpmManifestRequireSigSource = "production-enforced"
 	}
 	if !gpmAuthVerifyRequireCommandSet && gpmConnectPolicyProduction {
 		gpmAuthVerifyRequireCommand = true
@@ -494,6 +601,8 @@ func New() *Service {
 		gpmConnectRequireSession = true
 	} else if gpmConnectRequireSessionSet && !gpmConnectRequireSessionValid && gpmConnectPolicyProduction {
 		gpmConnectRequireSession = true
+	} else if gpmConnectPolicyProduction {
+		gpmConnectRequireSession = true
 	}
 	if !gpmOperatorApprovalRequireSessionSet {
 		gpmOperatorApprovalRequireSessionSource = "default"
@@ -515,6 +624,38 @@ func New() *Service {
 		gpmAllowLegacyConnectOverride = false
 	} else if gpmAllowLegacyConnectOverrideSet && !gpmAllowLegacyConnectOverrideValid && gpmConnectPolicyProduction {
 		gpmAllowLegacyConnectOverride = false
+	} else if gpmConnectPolicyProduction {
+		gpmAllowLegacyConnectOverride = false
+	}
+	gpmAllowLegacyServiceMutationsRaw, gpmAllowLegacyServiceMutationsSource, gpmAllowLegacyServiceMutationsSet := preferredEnvValueWithSource(
+		"GPM_ALLOW_LEGACY_SERVICE_MUTATIONS",
+		"TDPN_ALLOW_LEGACY_SERVICE_MUTATIONS",
+	)
+	noteLegacyAlias("GPM_ALLOW_LEGACY_SERVICE_MUTATIONS", gpmAllowLegacyServiceMutationsSource)
+	gpmAllowLegacyServiceMutations, gpmAllowLegacyServiceMutationsValid := parseBool(gpmAllowLegacyServiceMutationsRaw)
+	if !gpmAllowLegacyServiceMutationsSet {
+		gpmAllowLegacyServiceMutationsSource = "default"
+		gpmAllowLegacyServiceMutations = !gpmConnectPolicyProduction
+	} else if !gpmAllowLegacyServiceMutationsValid && gpmConnectPolicyProduction {
+		gpmAllowLegacyServiceMutations = false
+		gpmAllowLegacyServiceMutationsSource = "production-invalid-env-fail-closed"
+	}
+	gpmAdminRoutesRaw, gpmAdminRoutesSource, gpmAdminRoutesSet := preferredEnvValueWithSource(
+		"GPM_LOCAL_API_ADMIN_ROUTES",
+		"TDPN_LOCAL_API_ADMIN_ROUTES",
+	)
+	noteLegacyAlias("GPM_LOCAL_API_ADMIN_ROUTES", gpmAdminRoutesSource)
+	gpmAdminRoutesEnabled, gpmAdminRoutesValid := parseBool(gpmAdminRoutesRaw)
+	if !gpmAdminRoutesSet {
+		gpmAdminRoutesEnabled = false
+		gpmAdminRoutesSource = "default"
+	} else if !gpmAdminRoutesValid {
+		gpmAdminRoutesEnabled = false
+		gpmAdminRoutesSource = gpmAdminRoutesSource + "-invalid-env-fail-closed"
+	}
+	if !gpmOperatorApprovalRequireSessionSet && !gpmOperatorApprovalRequireSession && gpmAdminRoutesEnabled {
+		gpmOperatorApprovalRequireSession = true
+		gpmOperatorApprovalRequireSessionSource = "admin-routes-default"
 	}
 	gpmLegacyConnectRequireTrustedManifestBootstrapRaw, gpmLegacyConnectRequireTrustedManifestBootstrapSource, gpmLegacyConnectRequireTrustedManifestBootstrapSet := preferredEnvValueWithSource(
 		"GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP",
@@ -536,6 +677,11 @@ func New() *Service {
 	} else if !gpmLegacyConnectRequireTrustedManifestBootstrapValid && gpmConnectPolicyProduction {
 		gpmLegacyConnectRequireTrustedManifestBootstrap = true
 		gpmLegacyConnectRequireTrustedManifestBootstrapSource = "production-invalid-env-fail-closed"
+	} else if gpmConnectPolicyProduction {
+		if gpmLegacyConnectRequireTrustedManifestBootstrapSet && !gpmLegacyConnectRequireTrustedManifestBootstrap {
+			gpmLegacyConnectRequireTrustedManifestBootstrapSource = "production-enforced"
+		}
+		gpmLegacyConnectRequireTrustedManifestBootstrap = true
 	}
 	gpmStateStorePathRaw, gpmStateStorePathSource, gpmStateStorePathSet := preferredEnvValueWithSource(
 		"GPM_STATE_STORE_PATH",
@@ -564,24 +710,29 @@ func New() *Service {
 	if !gpmGapScanSummaryPathSet {
 		gpmGapScanSummaryPath = ".easy-node-logs/gpm_gap_scan_summary.json"
 	}
+	gpmSettlement := resolveGPMSettlementWiring(gpmConnectPolicyProduction, gpmConnectPolicySource, noteLegacyAlias)
 
 	svc := &Service{
-		addr:                          addr,
-		scriptPath:                    scriptPath,
-		commandRunner:                 commandRunner,
-		commandTimeout:                commandTimeout,
-		maxConcurrentCmds:             maxConcurrentCmds,
-		commandSlots:                  make(chan struct{}, maxConcurrentCmds),
-		allowUpdate:                   allowUpdate,
-		allowUnauthLoopback:           allowUnauthLoopback,
-		allowInsecureHTTP:             allowInsecureHTTP,
-		authToken:                     authToken,
-		serviceStatus:                 serviceStatus,
-		serviceStart:                  serviceStart,
-		serviceStop:                   serviceStop,
-		serviceRestart:                serviceRestart,
-		gpmConnectRequireSession:      gpmConnectRequireSession,
-		gpmAllowLegacyConnectOverride: gpmAllowLegacyConnectOverride,
+		addr:                                 addr,
+		scriptPath:                           scriptPath,
+		commandRunner:                        commandRunner,
+		commandTimeout:                       commandTimeout,
+		maxConcurrentCmds:                    maxConcurrentCmds,
+		commandSlots:                         make(chan struct{}, maxConcurrentCmds),
+		allowUpdate:                          allowUpdate,
+		allowUnauthLoopback:                  allowUnauthLoopback,
+		allowInsecureHTTP:                    allowInsecureHTTP,
+		authToken:                            authToken,
+		serviceStatus:                        serviceStatus,
+		serviceStart:                         serviceStart,
+		serviceStop:                          serviceStop,
+		serviceRestart:                       serviceRestart,
+		gpmConnectRequireSession:             gpmConnectRequireSession,
+		gpmAllowLegacyConnectOverride:        gpmAllowLegacyConnectOverride,
+		gpmAllowLegacyServiceMutations:       gpmAllowLegacyServiceMutations,
+		gpmAllowLegacyServiceMutationsSource: gpmAllowLegacyServiceMutationsSource,
+		gpmAdminRoutesEnabled:                gpmAdminRoutesEnabled,
+		gpmAdminRoutesSource:                 gpmAdminRoutesSource,
 		gpmLegacyConnectRequireTrustedManifestBootstrap:       gpmLegacyConnectRequireTrustedManifestBootstrap,
 		gpmLegacyConnectRequireTrustedManifestBootstrapSource: gpmLegacyConnectRequireTrustedManifestBootstrapSource,
 		gpmConnectPolicyMode:                                  gpmConnectPolicyMode,
@@ -595,7 +746,7 @@ func New() *Service {
 		gpmAuthVerifyPolicyMode:                               gpmAuthVerifyPolicyMode,
 		gpmAuthVerifyPolicySource:                             gpmAuthVerifyPolicySource,
 		gpmMainDomain:                                         strings.TrimRight(strings.TrimSpace(gpmMainDomain), "/"),
-		gpmManifestURL:                                        strings.TrimSpace(gpmManifestURL),
+		gpmManifestURL:                                        canonicalizeManifestSourceURLOrRaw(gpmManifestURL),
 		gpmManifestCache:                                      strings.TrimSpace(gpmManifestCache),
 		gpmManifestMaxAge:                                     time.Duration(gpmManifestMaxAgeSec) * time.Second,
 		gpmManifestRemoteRefreshIntvl:                         time.Duration(gpmManifestRemoteRefreshIntervalSec) * time.Second,
@@ -607,6 +758,8 @@ func New() *Service {
 		gpmManifestEd25519PublicKey:                           gpmManifestEd25519PublicKey,
 		gpmManifestEd25519PublicKeySource:                     strings.TrimSpace(gpmManifestEd25519PublicKeySource),
 		gpmRoleDefault:                                        gpmRoleDefault,
+		gpmAdminWalletAllowlist:                               gpmAdminWalletAllowlist,
+		gpmAdminWalletAllowlistSource:                         gpmAdminWalletAllowlistSource,
 		gpmApprovalToken:                                      gpmApprovalToken,
 		gpmOperatorApprovalRequireSession:                     gpmOperatorApprovalRequireSession,
 		gpmOperatorApprovalRequireSessionSource:               gpmOperatorApprovalRequireSessionSource,
@@ -619,16 +772,347 @@ func New() *Service {
 		gpmAuthVerifyMetadataSource:                           gpmAuthVerifyMetadataSource,
 		gpmAuthVerifyWalletExtSource:                          gpmAuthVerifyWalletExtSource,
 		gpmAuthVerifyCryptoSource:                             gpmAuthVerifyCryptoSource,
+		gpmAuthExpectedChainID:                                gpmAuthExpectedChainID,
+		gpmAuthExpectedChainIDSource:                          gpmAuthExpectedChainIDSource,
+		gpmAuthExpectedWalletHRP:                              gpmAuthExpectedWalletHRP,
+		gpmAuthExpectedWalletHRPSource:                        gpmAuthExpectedWalletHRPSource,
 		gpmLegacyEnvAliasesActive:                             append([]string{}, legacyEnvAliasesActive...),
 		gpmLegacyEnvAliasWarnings:                             append([]string{}, legacyEnvAliasWarnings...),
-		gpmAuthSignatureVerifier:                              defaultGPMAuthSignatureVerifier,
+		gpmAuthSignatureVerifier:                              nil,
 		gpmStateStorePath:                                     strings.TrimSpace(gpmStateStorePath),
 		gpmAuditLogPath:                                       strings.TrimSpace(gpmAuditLogPath),
 		gpmGapScanSummaryPath:                                 strings.TrimSpace(gpmGapScanSummaryPath),
+		gpmSettlement:                                         gpmSettlement.service,
+		gpmSettlementBackend:                                  gpmSettlement.backend,
+		gpmSettlementBackendSource:                            gpmSettlement.backendSource,
+		gpmSettlementChainRequired:                            gpmSettlement.chainRequired,
+		gpmSettlementChainRequiredSource:                      gpmSettlement.chainRequiredSource,
+		gpmSettlementChainBacked:                              gpmSettlement.chainBacked,
+		gpmSettlementAdapterConfigured:                        gpmSettlement.adapterConfigured,
+		gpmSettlementAdapterConfigError:                       gpmSettlement.adapterConfigError,
+		gpmSettlementCosmosEndpointConfigured:                 gpmSettlement.cosmosEndpointConfigured,
+		gpmSettlementCosmosEndpointSource:                     gpmSettlement.cosmosEndpointSource,
+		gpmSettlementCosmosSubmitMode:                         gpmSettlement.cosmosSubmitMode,
+		gpmSettlementTrustedBridgeFinality:                    gpmSettlement.trustedBridgeFinality,
+		gpmSettlementClose:                                    gpmSettlement.close,
 		gpmState:                                              newGPMRuntimeState(),
 	}
 	svc.loadGPMStateBestEffort()
 	return svc
+}
+
+func resolveGPMSettlementWiring(productionMode bool, productionSource string, noteLegacyAlias func(string, string)) gpmSettlementWiring {
+	chainRequiredSource := "default"
+	if productionMode {
+		chainRequiredSource = firstNonEmpty(strings.TrimSpace(productionSource), "GPM_PRODUCTION_MODE")
+	}
+	wiring := gpmSettlementWiring{
+		backend:                  "memory",
+		backendSource:            "default",
+		chainRequired:            productionMode,
+		chainRequiredSource:      chainRequiredSource,
+		cosmosEndpointSource:     "default",
+		cosmosSubmitMode:         settlement.CosmosSubmitModeHTTP,
+		trustedBridgeFinality:    false,
+		cosmosEndpointConfigured: false,
+		adapterConfigured:        false,
+		chainBacked:              false,
+		adapterConfigError:       "",
+	}
+
+	backendRaw, backendSource, backendSet := gpmSettlementEnv("GPM_SETTLEMENT_BACKEND", "TDPN_SETTLEMENT_BACKEND", noteLegacyAlias)
+	endpoint, endpointSource, endpointSet := gpmSettlementEnv("GPM_SETTLEMENT_COSMOS_ENDPOINT", "TDPN_SETTLEMENT_COSMOS_ENDPOINT", noteLegacyAlias)
+	wiring.cosmosEndpointConfigured = endpointSet
+	wiring.cosmosEndpointSource = endpointSource
+
+	backend := strings.ToLower(strings.TrimSpace(backendRaw))
+	switch backend {
+	case "", "auto":
+		if backendSet {
+			wiring.backendSource = backendSource
+		}
+		if endpointSet {
+			wiring.backend = "cosmos"
+			wiring.backendSource = endpointSource
+		}
+	case "memory", "cosmos":
+		wiring.backend = backend
+		wiring.backendSource = backendSource
+	default:
+		wiring.backend = "invalid"
+		wiring.backendSource = backendSource
+		wiring.adapterConfigError = fmt.Sprintf("invalid GPM settlement backend %q (expected auto, memory, or cosmos)", backendRaw)
+		wiring.service = settlement.NewMemoryService(settlement.WithBlockchainMode(wiring.chainRequired))
+		return wiring
+	}
+
+	memoryOptions := []settlement.MemoryOption{
+		settlement.WithBlockchainMode(wiring.chainRequired),
+	}
+	if wiring.backend == "cosmos" {
+		adapterCfg := settlement.CosmosAdapterConfig{
+			Endpoint:              endpoint,
+			APIKey:                gpmSettlementEnvValue("GPM_SETTLEMENT_COSMOS_API_KEY", "TDPN_SETTLEMENT_COSMOS_API_KEY", "", noteLegacyAlias),
+			QueueSize:             gpmSettlementPositiveIntEnv("GPM_SETTLEMENT_COSMOS_QUEUE_SIZE", "TDPN_SETTLEMENT_COSMOS_QUEUE_SIZE", 256, noteLegacyAlias),
+			MaxRetries:            gpmSettlementPositiveIntEnv("GPM_SETTLEMENT_COSMOS_MAX_RETRIES", "TDPN_SETTLEMENT_COSMOS_MAX_RETRIES", 3, noteLegacyAlias),
+			BaseBackoff:           time.Duration(gpmSettlementPositiveIntEnv("GPM_SETTLEMENT_COSMOS_BASE_BACKOFF_MS", "TDPN_SETTLEMENT_COSMOS_BASE_BACKOFF_MS", 250, noteLegacyAlias)) * time.Millisecond,
+			HTTPTimeout:           time.Duration(gpmSettlementPositiveIntEnv("GPM_SETTLEMENT_COSMOS_HTTP_TIMEOUT_SEC", "TDPN_SETTLEMENT_COSMOS_HTTP_TIMEOUT_SEC", 4, noteLegacyAlias)) * time.Second,
+			AllowInsecureHTTP:     gpmSettlementBoolEnv("GPM_SETTLEMENT_COSMOS_ALLOW_INSECURE_HTTP", "TDPN_SETTLEMENT_COSMOS_ALLOW_INSECURE_HTTP", false, noteLegacyAlias),
+			SubmitMode:            gpmSettlementEnvValue("GPM_SETTLEMENT_COSMOS_SUBMIT_MODE", "TDPN_SETTLEMENT_COSMOS_SUBMIT_MODE", settlement.CosmosSubmitModeHTTP, noteLegacyAlias),
+			TrustedBridgeFinality: gpmSettlementBoolEnv("GPM_SETTLEMENT_COSMOS_TRUSTED_BRIDGE_FINALITY", "TDPN_SETTLEMENT_COSMOS_TRUSTED_BRIDGE_FINALITY", false, noteLegacyAlias),
+			RewardProofAuthToken:  gpmSettlementEnvValue("GPM_SETTLEMENT_COSMOS_REWARD_PROOF_AUTH_TOKEN", "TDPN_SETTLEMENT_COSMOS_REWARD_PROOF_AUTH_TOKEN", "", noteLegacyAlias),
+			FinalityAuthToken:     gpmSettlementEnvValue("GPM_SETTLEMENT_COSMOS_FINALITY_AUTH_TOKEN", "TDPN_SETTLEMENT_COSMOS_FINALITY_AUTH_TOKEN", "", noteLegacyAlias),
+			RewardProofVerifierID: gpmSettlementEnvValue("GPM_SETTLEMENT_COSMOS_REWARD_PROOF_VERIFIER_ID", "TDPN_SETTLEMENT_COSMOS_REWARD_PROOF_VERIFIER_ID", "", noteLegacyAlias),
+			SignedTxBroadcastPath: gpmSettlementEnvValue("GPM_SETTLEMENT_COSMOS_SIGNED_TX_BROADCAST_PATH", "TDPN_SETTLEMENT_COSMOS_SIGNED_TX_BROADCAST_PATH", "", noteLegacyAlias),
+			SignedTxChainID:       gpmSettlementEnvValue("GPM_SETTLEMENT_COSMOS_SIGNED_TX_CHAIN_ID", "TDPN_SETTLEMENT_COSMOS_SIGNED_TX_CHAIN_ID", "", noteLegacyAlias),
+			SignedTxSigner:        gpmSettlementEnvValue("GPM_SETTLEMENT_COSMOS_SIGNED_TX_SIGNER", "TDPN_SETTLEMENT_COSMOS_SIGNED_TX_SIGNER", "", noteLegacyAlias),
+			SignedTxSecret:        gpmSettlementEnvValue("GPM_SETTLEMENT_COSMOS_SIGNED_TX_SECRET", "TDPN_SETTLEMENT_COSMOS_SIGNED_TX_SECRET", "", noteLegacyAlias),
+			SignedTxSecretFile:    gpmSettlementEnvValue("GPM_SETTLEMENT_COSMOS_SIGNED_TX_SECRET_FILE", "TDPN_SETTLEMENT_COSMOS_SIGNED_TX_SECRET_FILE", "", noteLegacyAlias),
+			SignedTxKeyID:         gpmSettlementEnvValue("GPM_SETTLEMENT_COSMOS_SIGNED_TX_KEY_ID", "TDPN_SETTLEMENT_COSMOS_SIGNED_TX_KEY_ID", "", noteLegacyAlias),
+		}
+		wiring.cosmosSubmitMode = strings.ToLower(strings.TrimSpace(adapterCfg.SubmitMode))
+		if wiring.cosmosSubmitMode == "" {
+			wiring.cosmosSubmitMode = settlement.CosmosSubmitModeHTTP
+		}
+		wiring.trustedBridgeFinality = adapterCfg.TrustedBridgeFinality
+		if strings.TrimSpace(adapterCfg.Endpoint) == "" {
+			wiring.adapterConfigError = "GPM settlement Cosmos adapter endpoint is required when GPM_SETTLEMENT_BACKEND=cosmos (set GPM_SETTLEMENT_COSMOS_ENDPOINT; legacy alias TDPN_SETTLEMENT_COSMOS_ENDPOINT)"
+		} else if productionMode && adapterCfg.TrustedBridgeFinality {
+			wiring.adapterConfigError = "GPM production settlement cannot use trusted HTTP bridge finality; require independent chain status confirmation before enabling production settlement"
+		} else if productionMode && wiring.cosmosSubmitMode == settlement.CosmosSubmitModeSignedTx {
+			wiring.adapterConfigError = "GPM production settlement cannot use experimental signed-tx JSON envelope mode; configure a finalized Cosmos SDK tx adapter before enabling signed-tx in production"
+		} else if adapter, err := settlement.NewCosmosAdapter(adapterCfg); err != nil {
+			wiring.adapterConfigError = err.Error()
+		} else {
+			wiring.adapterConfigured = true
+			wiring.chainBacked = true
+			memoryOptions = append(memoryOptions, settlement.WithChainAdapter(adapter))
+			wiring.close = adapter.Close
+		}
+	}
+
+	wiring.service = settlement.NewMemoryService(memoryOptions...)
+	return wiring
+}
+
+func gpmSettlementEnv(primaryKey string, legacyKey string, noteLegacyAlias func(string, string)) (string, string, bool) {
+	value, source, set := preferredEnvValueWithSource(primaryKey, legacyKey)
+	if noteLegacyAlias != nil {
+		noteLegacyAlias(primaryKey, source)
+	}
+	return value, source, set
+}
+
+func gpmSettlementEnvValue(primaryKey string, legacyKey string, fallback string, noteLegacyAlias func(string, string)) string {
+	value, _, set := gpmSettlementEnv(primaryKey, legacyKey, noteLegacyAlias)
+	if !set {
+		return strings.TrimSpace(fallback)
+	}
+	return strings.TrimSpace(value)
+}
+
+func gpmSettlementPositiveIntEnv(primaryKey string, legacyKey string, fallback int, noteLegacyAlias func(string, string)) int {
+	raw, _, set := gpmSettlementEnv(primaryKey, legacyKey, noteLegacyAlias)
+	if !set {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func gpmSettlementBoolEnv(primaryKey string, legacyKey string, fallback bool, noteLegacyAlias func(string, string)) bool {
+	raw, _, set := gpmSettlementEnv(primaryKey, legacyKey, noteLegacyAlias)
+	if !set {
+		return fallback
+	}
+	return parseBoolWithDefault(raw, fallback)
+}
+
+func (s *Service) gpmSettlementChainRequiredEffective() bool {
+	if s.gpmSettlementChainRequired {
+		return true
+	}
+	return s.isGPMProductionMode()
+}
+
+func (s *Service) isGPMProductionMode() bool {
+	return strings.EqualFold(strings.TrimSpace(s.gpmConnectPolicyMode), "production")
+}
+
+func (s *Service) connectRequireSessionEffective() bool {
+	return s.gpmConnectRequireSession || s.isGPMProductionMode()
+}
+
+func (s *Service) legacyConnectOverrideAllowed() bool {
+	return s.gpmAllowLegacyConnectOverride && !s.isGPMProductionMode()
+}
+
+func (s *Service) legacyConnectRequireTrustedManifestBootstrapEffective() bool {
+	return s.gpmLegacyConnectRequireTrustedManifestBootstrap || s.isGPMProductionMode()
+}
+
+func (s *Service) rememberConnectInterface(interfaceName string) {
+	interfaceName = strings.TrimSpace(interfaceName)
+	if !isAllowedVPNInterfaceName(interfaceName) {
+		return
+	}
+	s.lastConnectInterfaceMu.Lock()
+	s.lastConnectInterface = interfaceName
+	s.lastConnectInterfaceMu.Unlock()
+}
+
+func (s *Service) disconnectInterfaceName() string {
+	s.lastConnectInterfaceMu.Lock()
+	last := strings.TrimSpace(s.lastConnectInterface)
+	s.lastConnectInterfaceMu.Unlock()
+	if isAllowedVPNInterfaceName(last) {
+		return last
+	}
+	defaults := loadConnectDefaultsFromEnv()
+	if isAllowedVPNInterfaceName(defaults.interfaceName) {
+		return defaults.interfaceName
+	}
+	return defaultVPNInterface
+}
+
+func (s *Service) clearRememberedConnectInterface(interfaceName string) {
+	interfaceName = strings.TrimSpace(interfaceName)
+	s.lastConnectInterfaceMu.Lock()
+	if interfaceName == "" || s.lastConnectInterface == interfaceName {
+		s.lastConnectInterface = ""
+	}
+	s.lastConnectInterfaceMu.Unlock()
+}
+
+func (s *Service) gpmSettlementChainRequiredSourceEffective() string {
+	if source := strings.TrimSpace(s.gpmSettlementChainRequiredSource); source != "" {
+		return source
+	}
+	if s.isGPMProductionMode() {
+		return firstNonEmpty(strings.TrimSpace(s.gpmConnectPolicySource), "connect_policy_mode")
+	}
+	return "default"
+}
+
+func (s *Service) gpmSettlementBackendEffective() string {
+	backend := strings.TrimSpace(s.gpmSettlementBackend)
+	if backend == "" {
+		return "memory"
+	}
+	return backend
+}
+
+func (s *Service) gpmSettlementBackendSourceEffective() string {
+	source := strings.TrimSpace(s.gpmSettlementBackendSource)
+	if source == "" {
+		return "default"
+	}
+	return source
+}
+
+func (s *Service) gpmSettlementMode() string {
+	if s.gpmSettlementChainBacked {
+		return "chain_backed"
+	}
+	if s.gpmSettlementChainRequiredEffective() {
+		return "required_unconfigured"
+	}
+	return "compatibility_memory"
+}
+
+func (s *Service) gpmSettlementStatusTelemetry() map[string]any {
+	endpointSource := strings.TrimSpace(s.gpmSettlementCosmosEndpointSource)
+	if endpointSource == "" {
+		endpointSource = "default"
+	}
+	submitMode := strings.TrimSpace(s.gpmSettlementCosmosSubmitMode)
+	if submitMode == "" {
+		submitMode = settlement.CosmosSubmitModeHTTP
+	}
+	return map[string]any{
+		"gpm_settlement_mode":                       s.gpmSettlementMode(),
+		"gpm_settlement_backend":                    s.gpmSettlementBackendEffective(),
+		"gpm_settlement_backend_source":             s.gpmSettlementBackendSourceEffective(),
+		"gpm_settlement_chain_required":             s.gpmSettlementChainRequiredEffective(),
+		"gpm_settlement_chain_required_source":      s.gpmSettlementChainRequiredSourceEffective(),
+		"gpm_settlement_chain_backed":               s.gpmSettlementChainBacked,
+		"gpm_settlement_adapter_configured":         s.gpmSettlementAdapterConfigured,
+		"gpm_settlement_adapter_config_error":       strings.TrimSpace(s.gpmSettlementAdapterConfigError),
+		"gpm_settlement_cosmos_endpoint_configured": s.gpmSettlementCosmosEndpointConfigured,
+		"gpm_settlement_cosmos_endpoint_source":     endpointSource,
+		"gpm_settlement_cosmos_submit_mode":         submitMode,
+		"gpm_settlement_trusted_bridge_finality":    s.gpmSettlementTrustedBridgeFinality,
+	}
+}
+
+func (s *Service) gpmSettlementRequiresChainBackedAdapter() bool {
+	return s.gpmSettlementChainRequiredEffective() && !s.gpmSettlementChainBacked
+}
+
+func (s *Service) gpmSettlementChainRequiredError() string {
+	if errMsg := strings.TrimSpace(s.gpmSettlementAdapterConfigError); errMsg != "" {
+		return "chain-backed GPM settlement adapter is required in production mode, but settlement adapter configuration is not chain-backed: " + errMsg
+	}
+	return "chain-backed GPM settlement adapter is required in production mode; configure GPM_SETTLEMENT_COSMOS_ENDPOINT or use compatibility mode outside production"
+}
+
+func (s *Service) routes() http.Handler {
+	mux := http.NewServeMux()
+	s.registerPublicRoutes(mux)
+	if s.gpmAdminRoutesEnabled {
+		s.registerAdminRoutes(mux)
+	}
+	return s.withLocalAPICORS(mux)
+}
+
+func (s *Service) registerPublicRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/v1/health", s.handleHealth)
+	mux.HandleFunc("/v1/status", s.handleStatus)
+	mux.HandleFunc("/v1/config", s.handleConfig)
+	mux.HandleFunc("/v1/connect", s.handleConnect)
+	mux.HandleFunc("/v1/disconnect", s.handleDisconnect)
+	mux.HandleFunc("/v1/gpm/bootstrap/manifest", s.handleGPMBootstrapManifest)
+	mux.HandleFunc("/v1/gpm/auth/challenge", s.handleGPMAuthChallenge)
+	mux.HandleFunc("/v1/gpm/auth/verify", s.handleGPMAuthVerify)
+	mux.HandleFunc("/v1/gpm/session", s.handleGPMSessionStatus)
+	mux.HandleFunc("/v1/gpm/onboarding/client/register", s.handleGPMClientRegister)
+	mux.HandleFunc("/v1/gpm/onboarding/client/status", s.handleGPMClientStatus)
+	mux.HandleFunc("/v1/gpm/contribution/status", s.handleGPMContributionStatus)
+	mux.HandleFunc("/v1/gpm/contribution/enable", s.handleGPMContributionEnable)
+	mux.HandleFunc("/v1/gpm/contribution/disable", s.handleGPMContributionDisable)
+	mux.HandleFunc("/v1/gpm/settlement/reserve-funds", s.handleGPMSettlementReserveFunds)
+	mux.HandleFunc("/v1/gpm/rewards/current-week", s.handleGPMRewardsCurrentWeek)
+	mux.HandleFunc("/v1/gpm/rewards/history", s.handleGPMRewardsHistory)
+	mux.HandleFunc("/v1/gpm/onboarding/overview", s.handleGPMOnboardingOverview)
+	mux.HandleFunc("/v1/gpm/diagnostics/public", s.handlePublicDiagnostics)
+}
+
+func (s *Service) registerAdminRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/v1/set_profile", s.handleSetProfile)
+	mux.HandleFunc("/v1/update", s.handleUpdate)
+	mux.HandleFunc("/v1/service/status", s.handleServiceStatus)
+	mux.HandleFunc("/v1/service/start", s.handleServiceStart)
+	mux.HandleFunc("/v1/service/stop", s.handleServiceStop)
+	mux.HandleFunc("/v1/service/restart", s.handleServiceRestart)
+	mux.HandleFunc("/v1/get_diagnostics", s.handleDiagnostics)
+	mux.HandleFunc("/v1/gpm/service/start", s.handleGPMServiceStart)
+	mux.HandleFunc("/v1/gpm/service/status", s.handleGPMServiceStatus)
+	mux.HandleFunc("/v1/gpm/service/stop", s.handleGPMServiceStop)
+	mux.HandleFunc("/v1/gpm/service/restart", s.handleGPMServiceRestart)
+	mux.HandleFunc("/v1/gpm/audit/recent", s.handleGPMAuditRecent)
+	mux.HandleFunc("/v1/gpm/gaps/summary", s.handleGPMGapSummary)
+	mux.HandleFunc("/v1/gpm/admin/contributions/list", s.handleGPMAdminContributionList)
+	mux.HandleFunc("/v1/gpm/admin/rewards/review", s.handleGPMAdminRewardReview)
+	mux.HandleFunc("/v1/gpm/admin/rewards/hold", s.handleGPMAdminRewardHold)
+	mux.HandleFunc("/v1/gpm/admin/rewards/finalize", s.handleGPMAdminRewardFinalize)
+	mux.HandleFunc("/v1/gpm/onboarding/server/status", s.handleGPMServerStatus)
+	mux.HandleFunc("/v1/gpm/onboarding/operator/apply", s.handleGPMOperatorApply)
+	mux.HandleFunc("/v1/gpm/onboarding/operator/status", s.handleGPMOperatorStatus)
+	mux.HandleFunc("/v1/gpm/onboarding/operator/list", s.handleGPMOperatorList)
+	mux.HandleFunc("/v1/gpm/onboarding/operator/approve", s.handleGPMOperatorApprove)
 }
 
 func (s *Service) Run(ctx context.Context) error {
@@ -636,40 +1120,9 @@ func (s *Service) Run(ctx context.Context) error {
 		return fmt.Errorf("refusing insecure non-loopback local api bind %q; set %s=1 only for trusted lab environments", s.addr, allowInsecureHTTPEnv)
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/health", s.handleHealth)
-	mux.HandleFunc("/v1/status", s.handleStatus)
-	mux.HandleFunc("/v1/config", s.handleConfig)
-	mux.HandleFunc("/v1/connect", s.handleConnect)
-	mux.HandleFunc("/v1/disconnect", s.handleDisconnect)
-	mux.HandleFunc("/v1/set_profile", s.handleSetProfile)
-	mux.HandleFunc("/v1/get_diagnostics", s.handleDiagnostics)
-	mux.HandleFunc("/v1/update", s.handleUpdate)
-	mux.HandleFunc("/v1/service/status", s.handleServiceStatus)
-	mux.HandleFunc("/v1/service/start", s.handleServiceStart)
-	mux.HandleFunc("/v1/service/stop", s.handleServiceStop)
-	mux.HandleFunc("/v1/service/restart", s.handleServiceRestart)
-	mux.HandleFunc("/v1/gpm/service/start", s.handleGPMServiceStart)
-	mux.HandleFunc("/v1/gpm/service/stop", s.handleGPMServiceStop)
-	mux.HandleFunc("/v1/gpm/service/restart", s.handleGPMServiceRestart)
-	mux.HandleFunc("/v1/gpm/bootstrap/manifest", s.handleGPMBootstrapManifest)
-	mux.HandleFunc("/v1/gpm/auth/challenge", s.handleGPMAuthChallenge)
-	mux.HandleFunc("/v1/gpm/auth/verify", s.handleGPMAuthVerify)
-	mux.HandleFunc("/v1/gpm/session", s.handleGPMSessionStatus)
-	mux.HandleFunc("/v1/gpm/audit/recent", s.handleGPMAuditRecent)
-	mux.HandleFunc("/v1/gpm/gaps/summary", s.handleGPMGapSummary)
-	mux.HandleFunc("/v1/gpm/onboarding/client/register", s.handleGPMClientRegister)
-	mux.HandleFunc("/v1/gpm/onboarding/client/status", s.handleGPMClientStatus)
-	mux.HandleFunc("/v1/gpm/onboarding/server/status", s.handleGPMServerStatus)
-	mux.HandleFunc("/v1/gpm/onboarding/overview", s.handleGPMOnboardingOverview)
-	mux.HandleFunc("/v1/gpm/onboarding/operator/apply", s.handleGPMOperatorApply)
-	mux.HandleFunc("/v1/gpm/onboarding/operator/status", s.handleGPMOperatorStatus)
-	mux.HandleFunc("/v1/gpm/onboarding/operator/list", s.handleGPMOperatorList)
-	mux.HandleFunc("/v1/gpm/onboarding/operator/approve", s.handleGPMOperatorApprove)
-
 	srv := &http.Server{
 		Addr:              s.addr,
-		Handler:           mux,
+		Handler:           s.routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       serverReadTimeout,
 		WriteTimeout:      s.commandTimeout + serverWriteSlack,
@@ -790,6 +1243,10 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 		connectPolicySource = "default"
 	}
 	gpmProductionMode := strings.EqualFold(connectPolicyMode, "production")
+	legacyServiceMutationsSource := strings.TrimSpace(s.gpmAllowLegacyServiceMutationsSource)
+	if legacyServiceMutationsSource == "" {
+		legacyServiceMutationsSource = "default"
+	}
 	manifestTrustPolicyMode := strings.TrimSpace(s.gpmManifestTrustPolicyMode)
 	if manifestTrustPolicyMode == "" {
 		manifestTrustPolicyMode = "default"
@@ -822,9 +1279,29 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if authVerifyRequireCryptoSource == "" {
 		authVerifyRequireCryptoSource = "default"
 	}
+	authExpectedChainIDSource := strings.TrimSpace(s.gpmAuthExpectedChainIDSource)
+	if authExpectedChainIDSource == "" {
+		authExpectedChainIDSource = "default"
+	}
+	authExpectedWalletHRPSource := strings.TrimSpace(s.gpmAuthExpectedWalletHRPSource)
+	if authExpectedWalletHRPSource == "" {
+		authExpectedWalletHRPSource = "default"
+	}
 	operatorApprovalRequireSessionSource := strings.TrimSpace(s.gpmOperatorApprovalRequireSessionSource)
 	if operatorApprovalRequireSessionSource == "" {
 		operatorApprovalRequireSessionSource = "default"
+	}
+	adminWalletAllowlistSource := strings.TrimSpace(s.gpmAdminWalletAllowlistSource)
+	if adminWalletAllowlistSource == "" {
+		adminWalletAllowlistSource = "default"
+	}
+	adminRoutesSource := strings.TrimSpace(s.gpmAdminRoutesSource)
+	if adminRoutesSource == "" {
+		adminRoutesSource = "default"
+	}
+	daemonSurfaceMode := "public_app"
+	if s.gpmAdminRoutesEnabled {
+		daemonSurfaceMode = "admin_console"
 	}
 	manifestRequireHTTPSSource := strings.TrimSpace(s.gpmManifestRequireHTTPSSource)
 	if manifestRequireHTTPSSource == "" {
@@ -849,14 +1326,22 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true,
 		"config": map[string]any{
-			"connect_require_session":                                             s.gpmConnectRequireSession,
-			"allow_legacy_connect_override":                                       s.gpmAllowLegacyConnectOverride,
-			"gpm_legacy_connect_require_trusted_manifest_bootstrap":               s.gpmLegacyConnectRequireTrustedManifestBootstrap,
+			"connect_require_session":                                             s.connectRequireSessionEffective(),
+			"allow_legacy_connect_override":                                       s.legacyConnectOverrideAllowed(),
+			"allow_legacy_service_mutations":                                      s.legacyServiceMutationsAllowed(),
+			"allow_legacy_service_mutations_policy_source":                        legacyServiceMutationsSource,
+			"gpm_legacy_connect_require_trusted_manifest_bootstrap":               s.legacyConnectRequireTrustedManifestBootstrapEffective(),
 			"gpm_legacy_connect_require_trusted_manifest_bootstrap_policy_source": legacyConnectRequireTrustedManifestBootstrapSource,
 			"gpm_production_mode":                                                 gpmProductionMode,
 			"gpm_production_mode_source":                                          connectPolicySource,
 			"connect_policy_mode":                                                 connectPolicyMode,
 			"connect_policy_source":                                               connectPolicySource,
+			"gpm_daemon_surface_mode":                                             daemonSurfaceMode,
+			"gpm_admin_routes_enabled":                                            s.gpmAdminRoutesEnabled,
+			"gpm_admin_routes_policy_source":                                      adminRoutesSource,
+			"gpm_admin_wallet_allowlist_configured":                               len(s.gpmAdminWalletAllowlist) > 0,
+			"gpm_admin_wallet_allowlist_count":                                    len(s.gpmAdminWalletAllowlist),
+			"gpm_admin_wallet_allowlist_source":                                   adminWalletAllowlistSource,
 			"gpm_operator_approval_require_session":                               s.gpmOperatorApprovalRequireSession,
 			"gpm_operator_approval_require_session_policy_source":                 operatorApprovalRequireSessionSource,
 			"gpm_manifest_trust_policy_mode":                                      manifestTrustPolicyMode,
@@ -881,6 +1366,21 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"gpm_auth_verify_require_crypto_proof":                                s.gpmAuthVerifyRequireCryptoProof,
 			"gpm_auth_verify_require_crypto_proof_policy_source":                  authVerifyRequireCryptoSource,
 			"gpm_auth_verify_command_configured":                                  strings.TrimSpace(s.gpmAuthVerifyCommand) != "",
+			"gpm_auth_expected_chain_id":                                          strings.TrimSpace(s.gpmAuthExpectedChainID),
+			"gpm_auth_expected_chain_id_source":                                   authExpectedChainIDSource,
+			"gpm_auth_expected_wallet_hrp":                                        strings.TrimSpace(s.gpmAuthExpectedWalletHRP),
+			"gpm_auth_expected_wallet_hrp_source":                                 authExpectedWalletHRPSource,
+			"gpm_settlement_mode":                                                 s.gpmSettlementMode(),
+			"gpm_settlement_backend":                                              s.gpmSettlementBackendEffective(),
+			"gpm_settlement_backend_source":                                       s.gpmSettlementBackendSourceEffective(),
+			"gpm_settlement_chain_required":                                       s.gpmSettlementChainRequiredEffective(),
+			"gpm_settlement_chain_required_source":                                s.gpmSettlementChainRequiredSourceEffective(),
+			"gpm_settlement_chain_backed":                                         s.gpmSettlementChainBacked,
+			"gpm_settlement_adapter_configured":                                   s.gpmSettlementAdapterConfigured,
+			"gpm_settlement_adapter_config_error":                                 strings.TrimSpace(s.gpmSettlementAdapterConfigError),
+			"gpm_settlement_cosmos_endpoint_configured":                           s.gpmSettlementCosmosEndpointConfigured,
+			"gpm_settlement_cosmos_endpoint_source":                               firstNonEmpty(s.gpmSettlementCosmosEndpointSource, "default"),
+			"gpm_settlement_cosmos_submit_mode":                                   firstNonEmpty(s.gpmSettlementCosmosSubmitMode, settlement.CosmosSubmitModeHTTP),
 			"gpm_main_domain":                                                     strings.TrimSpace(s.gpmMainDomain),
 			"gpm_manifest_url":                                                    strings.TrimSpace(s.gpmManifestURL),
 			"gpm_manifest_cache_path":                                             strings.TrimSpace(s.gpmManifestCache),
@@ -902,6 +1402,689 @@ func (s *Service) handleConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type gpmProductionConnectEntitlement struct {
+	WalletAddress                string
+	ReservationID                string
+	ReservationSessionID         string
+	SessionExpiresAt             time.Time
+	ReservationStatus            settlement.OperationStatus
+	ReservationStatusSource      string
+	ReservationFinalizationState string
+}
+
+func (s *Service) gpmProductionConnectEntitlementGate(ctx context.Context, sessionPresent bool, session gpmSession, reservationID string, reservationSessionID string, requireChainBacked bool) (gpmProductionConnectEntitlement, int, map[string]any) {
+	out := gpmProductionConnectEntitlement{}
+	settlementStatus := s.gpmSettlementStatusTelemetry()
+	if !sessionPresent {
+		return out, http.StatusUnauthorized, map[string]any{
+			"ok":                              false,
+			"error":                           "production connect requires a registered wallet session_token",
+			"connect_allowed":                 false,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	walletAddress := normalizeWalletAddress(session.WalletAddress)
+	out.WalletAddress = walletAddress
+	out.SessionExpiresAt = session.ExpiresAt.UTC()
+	if !session.WalletBindingVerified || walletAddress == "" {
+		return out, http.StatusForbidden, map[string]any{
+			"ok":                              false,
+			"error":                           "wallet-bound session is required before production VPN connect",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if lockReason := s.gpmProductionEntitlementEvidenceLock(session); lockReason != "" {
+		return out, http.StatusForbidden, map[string]any{
+			"ok":                              false,
+			"error":                           lockReason,
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"entitlement_evidence_source":     strings.TrimSpace(session.EntitlementEvidenceSource),
+			"entitlement_evidence_trusted":    false,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if !gpmEffectiveStakeSatisfied(session) {
+		return out, http.StatusForbidden, map[string]any{
+			"ok":                              false,
+			"error":                           "stake is required before production VPN connect",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if !gpmEffectivePrepaidSatisfied(session) {
+		return out, http.StatusForbidden, map[string]any{
+			"ok":                              false,
+			"error":                           "prepaid balance is required before production VPN connect",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if (requireChainBacked || s.gpmSettlementChainRequiredEffective()) && !s.gpmSettlementChainBacked {
+		return out, http.StatusServiceUnavailable, map[string]any{
+			"ok":                              false,
+			"error":                           s.gpmSettlementChainRequiredError(),
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	reservationID = strings.TrimSpace(reservationID)
+	if reservationID == "" {
+		return out, http.StatusForbidden, map[string]any{
+			"ok":                              false,
+			"error":                           "production connect requires a confirmed settlement reservation_id from /v1/gpm/settlement/reserve-funds",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if len(reservationID) > 256 || strings.IndexFunc(reservationID, unicode.IsControl) >= 0 {
+		return out, http.StatusBadRequest, map[string]any{
+			"ok":                              false,
+			"error":                           "reservation_id is invalid",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	reservationSessionID = strings.TrimSpace(reservationSessionID)
+	if reservationSessionID == "" {
+		return out, http.StatusBadRequest, map[string]any{
+			"ok":                              false,
+			"error":                           "reservation_session_id is required before production VPN connect",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if len(reservationSessionID) > 256 || strings.IndexFunc(reservationSessionID, unicode.IsControl) >= 0 {
+		return out, http.StatusBadRequest, map[string]any{
+			"ok":                              false,
+			"error":                           "reservation_session_id is invalid",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	querier, ok := s.gpmSettlementService().(settlement.ChainFundReservationStatusQuerier)
+	if !ok || querier == nil {
+		return out, http.StatusServiceUnavailable, map[string]any{
+			"ok":                              false,
+			"error":                           "production connect requires a settlement service that can verify fund reservation chain status",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	materialQuerier, ok := s.gpmSettlementService().(settlement.FundReservationQuerier)
+	if !ok || materialQuerier == nil {
+		return out, http.StatusServiceUnavailable, map[string]any{
+			"ok":                              false,
+			"error":                           "production connect requires a settlement service that can verify fund reservation ownership",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"reservation_session_id":          reservationSessionID,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	reservation, reservationFound, reservationErr := materialQuerier.FundReservation(ctx, reservationID)
+	if reservationErr != nil {
+		return out, http.StatusServiceUnavailable, map[string]any{
+			"ok":                              false,
+			"error":                           fmt.Sprintf("fund reservation ownership query failed: %v", reservationErr),
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"reservation_session_id":          reservationSessionID,
+			"settlement_status":               settlementStatus,
+			"reservation_finalization_state":  "unknown_chain_status",
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if !reservationFound {
+		return out, http.StatusServiceUnavailable, map[string]any{
+			"ok":                              false,
+			"error":                           "fund reservation ownership is unknown",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"reservation_session_id":          reservationSessionID,
+			"settlement_status":               settlementStatus,
+			"reservation_finalization_state":  "unknown_chain_status",
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if strings.TrimSpace(reservation.ReservationID) != "" && strings.TrimSpace(reservation.ReservationID) != reservationID {
+		return out, http.StatusConflict, map[string]any{
+			"ok":                              false,
+			"error":                           "fund reservation id mismatch",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"reservation_session_id":          reservationSessionID,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if normalizeWalletAddress(reservation.SubjectID) != walletAddress {
+		return out, http.StatusForbidden, map[string]any{
+			"ok":                              false,
+			"error":                           "fund reservation is not bound to the signed-in wallet",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"reservation_session_id":          reservationSessionID,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if strings.TrimSpace(reservation.SessionID) != reservationSessionID {
+		return out, http.StatusForbidden, map[string]any{
+			"ok":                              false,
+			"error":                           "fund reservation session_id does not match reservation_session_id",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"reservation_session_id":          reservationSessionID,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if reservation.AmountMicros <= 0 {
+		return out, http.StatusConflict, map[string]any{
+			"ok":                              false,
+			"error":                           "fund reservation amount is invalid",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"reservation_session_id":          reservationSessionID,
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if reservation.AmountMicros != gpmPublicVPNReservationMicros {
+		return out, http.StatusConflict, map[string]any{
+			"ok":                              false,
+			"error":                           fmt.Sprintf("fund reservation amount must equal public VPN reservation amount %d", gpmPublicVPNReservationMicros),
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"reservation_session_id":          reservationSessionID,
+			"settlement_status":               settlementStatus,
+			"expected_amount_micros":          gpmPublicVPNReservationMicros,
+			"reservation_amount_micros":       reservation.AmountMicros,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	currency := strings.TrimSpace(reservation.Currency)
+	if currency == "" {
+		currency = gpmPublicVPNReservationCurrency
+	}
+	if !strings.EqualFold(currency, gpmPublicVPNReservationCurrency) {
+		return out, http.StatusConflict, map[string]any{
+			"ok":                              false,
+			"error":                           fmt.Sprintf("fund reservation currency must be %s", gpmPublicVPNReservationCurrency),
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"reservation_session_id":          reservationSessionID,
+			"settlement_status":               settlementStatus,
+			"expected_currency":               gpmPublicVPNReservationCurrency,
+			"reservation_currency":            reservation.Currency,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if out.SessionExpiresAt.IsZero() || !out.SessionExpiresAt.After(time.Now().UTC()) {
+		return out, http.StatusConflict, map[string]any{
+			"ok":                              false,
+			"error":                           "wallet session has expired before production VPN connect",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"reservation_session_id":          reservationSessionID,
+			"session_expires_at_utc":          out.SessionExpiresAt.Format(time.RFC3339),
+			"settlement_status":               settlementStatus,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	status, found, err := querier.FundReservationStatus(ctx, reservationID)
+	if err != nil {
+		return out, http.StatusServiceUnavailable, map[string]any{
+			"ok":                              false,
+			"error":                           fmt.Sprintf("fund reservation chain status query failed: %v", err),
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"settlement_status":               settlementStatus,
+			"reservation_status_source":       "chain_status_query",
+			"reservation_finalization_state":  "unknown_chain_status",
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if !found {
+		return out, http.StatusServiceUnavailable, map[string]any{
+			"ok":                              false,
+			"error":                           "fund reservation chain status is unknown",
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"settlement_status":               settlementStatus,
+			"reservation_status_source":       "chain_status_query",
+			"reservation_finalization_state":  "unknown_chain_status",
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	status, allowed, state, errMsg, httpStatus := gpmFundReservationFinalityDecision(status)
+	if !allowed {
+		if httpStatus == 0 {
+			httpStatus = http.StatusServiceUnavailable
+		}
+		return out, httpStatus, map[string]any{
+			"ok":                              false,
+			"error":                           errMsg,
+			"connect_allowed":                 false,
+			"wallet_address":                  walletAddress,
+			"reservation_id":                  reservationID,
+			"settlement_status":               settlementStatus,
+			"reservation_chain_status":        string(status),
+			"reservation_status_source":       "chain_status_query",
+			"reservation_finalization_state":  state,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	out.ReservationID = reservationID
+	out.ReservationSessionID = reservationSessionID
+	out.ReservationStatus = status
+	out.ReservationStatusSource = "chain_status_query"
+	out.ReservationFinalizationState = state
+	s.appendGPMAudit("connect_entitlement_verified", map[string]any{
+		"wallet_address":                 walletAddress,
+		"reservation_id":                 reservationID,
+		"reservation_session_id":         reservationSessionID,
+		"reservation_chain_status":       string(status),
+		"reservation_status_source":      out.ReservationStatusSource,
+		"reservation_finalization_state": state,
+		"settlement_surface":             "public_app",
+		"connect_allowed":                true,
+		"public_app_admin_controls":      false,
+	})
+	return out, 0, nil
+}
+
+func gpmProductionConnectCommandEnv(entitlement gpmProductionConnectEntitlement) []string {
+	if strings.TrimSpace(entitlement.ReservationID) == "" {
+		return nil
+	}
+	return []string{
+		"GPM_SETTLEMENT_RESERVATION_ID=" + strings.TrimSpace(entitlement.ReservationID),
+		"GPM_SETTLEMENT_RESERVATION_SESSION_ID=" + strings.TrimSpace(entitlement.ReservationSessionID),
+		"GPM_SETTLEMENT_WALLET_ADDRESS=" + strings.TrimSpace(entitlement.WalletAddress),
+		"GPM_SETTLEMENT_RESERVATION_EXPIRES_AT_UNIX=" + strconv.FormatInt(entitlement.SessionExpiresAt.UTC().Unix(), 10),
+	}
+}
+
+func (s *Service) claimGPMProductionConnectReservation(entitlement gpmProductionConnectEntitlement) (int, map[string]any) {
+	if strings.TrimSpace(entitlement.ReservationID) == "" {
+		return 0, nil
+	}
+	if s.gpmStateStoreLoadFailed {
+		reason := strings.TrimSpace(s.gpmStateStoreLoadFailure)
+		if reason == "" {
+			reason = "state store load failed"
+		}
+		return http.StatusServiceUnavailable, map[string]any{
+			"ok":                              false,
+			"error":                           "production connect disabled because persisted reservation state could not be loaded",
+			"state_store_error":               reason,
+			"connect_allowed":                 false,
+			"wallet_address":                  entitlement.WalletAddress,
+			"reservation_id":                  entitlement.ReservationID,
+			"reservation_session_id":          entitlement.ReservationSessionID,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if s.gpmState == nil {
+		s.gpmState = newGPMRuntimeState()
+	}
+	if statusCode, payload := s.reconcileStaleGPMProductionConnectLaunch(entitlement); payload != nil {
+		return statusCode, payload
+	}
+	claim, ok, reason := s.gpmState.claimReservationForConnect(
+		entitlement.ReservationID,
+		entitlement.ReservationSessionID,
+		entitlement.WalletAddress,
+		time.Now().UTC(),
+	)
+	if !ok {
+		if reason == "" {
+			reason = "reservation_id is already claimed for production VPN connect"
+		}
+		return http.StatusConflict, map[string]any{
+			"ok":                              false,
+			"error":                           reason,
+			"connect_allowed":                 false,
+			"wallet_address":                  entitlement.WalletAddress,
+			"reservation_id":                  entitlement.ReservationID,
+			"reservation_session_id":          entitlement.ReservationSessionID,
+			"reservation_claim_status":        claim.Status,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	s.appendGPMAudit("connect_reservation_claimed", map[string]any{
+		"wallet_address":         entitlement.WalletAddress,
+		"reservation_id":         entitlement.ReservationID,
+		"reservation_session_id": entitlement.ReservationSessionID,
+		"claim_status":           claim.Status,
+		"settlement_surface":     "public_app",
+	})
+	if err := s.persistGPMState("connect_reservation_claimed"); err != nil {
+		_ = s.gpmState.releasePendingReservationClaim(entitlement.ReservationID, entitlement.ReservationSessionID, entitlement.WalletAddress)
+		s.appendGPMAudit("connect_reservation_claim_persist_failed", map[string]any{
+			"wallet_address":         entitlement.WalletAddress,
+			"reservation_id":         entitlement.ReservationID,
+			"reservation_session_id": entitlement.ReservationSessionID,
+			"error":                  err.Error(),
+			"settlement_surface":     "public_app",
+		})
+		return http.StatusServiceUnavailable, map[string]any{
+			"ok":                              false,
+			"error":                           "failed to persist production reservation claim before connect launch",
+			"state_store_error":               err.Error(),
+			"connect_allowed":                 false,
+			"wallet_address":                  entitlement.WalletAddress,
+			"reservation_id":                  entitlement.ReservationID,
+			"reservation_session_id":          entitlement.ReservationSessionID,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	return 0, nil
+}
+
+func (s *Service) releasePendingGPMProductionConnectReservation(entitlement gpmProductionConnectEntitlement, reason string) bool {
+	if s.gpmState == nil || strings.TrimSpace(entitlement.ReservationID) == "" {
+		return false
+	}
+	if !s.gpmState.releasePendingReservationClaim(entitlement.ReservationID, entitlement.ReservationSessionID, entitlement.WalletAddress) {
+		return false
+	}
+	s.appendGPMAudit("connect_reservation_claim_released", map[string]any{
+		"wallet_address":         entitlement.WalletAddress,
+		"reservation_id":         entitlement.ReservationID,
+		"reservation_session_id": entitlement.ReservationSessionID,
+		"reason":                 reason,
+		"settlement_surface":     "public_app",
+	})
+	s.persistGPMStateBestEffort("connect_reservation_claim_released")
+	return true
+}
+
+func (s *Service) teardownConnectInterfaceBestEffort(interfaceName string) (string, int, error) {
+	teardownTimeout := s.commandTimeout
+	if teardownTimeout <= 0 {
+		teardownTimeout = defaultCommandTimeout
+	}
+	teardownCtx, teardownCancel := context.WithTimeout(context.Background(), teardownTimeout)
+	defer teardownCancel()
+	return s.runEasyNode(teardownCtx, "client-vpn-down", "--force-iface-cleanup", "1", "--iface", interfaceName)
+}
+
+func (s *Service) reconcileStaleGPMProductionConnectLaunch(entitlement gpmProductionConnectEntitlement) (int, map[string]any) {
+	if s.gpmState == nil || strings.TrimSpace(entitlement.ReservationID) == "" {
+		return 0, nil
+	}
+	now := time.Now().UTC()
+	claim, stale := s.gpmState.staleLaunchingReservationClaim(entitlement.ReservationID, entitlement.ReservationSessionID, entitlement.WalletAddress, now)
+	if !stale {
+		return 0, nil
+	}
+
+	running, known, statusOut, statusErr := s.gpmProductionConnectRuntimeRunning()
+	if statusErr != nil || !known {
+		errMsg := "stale production reservation launch could not be reconciled from local VPN status"
+		if statusErr != nil {
+			errMsg = fmt.Sprintf("%s: %v", errMsg, statusErr)
+		}
+		s.appendGPMAudit("connect_reservation_stale_launch_reconcile_failed", map[string]any{
+			"wallet_address":         entitlement.WalletAddress,
+			"reservation_id":         entitlement.ReservationID,
+			"reservation_session_id": entitlement.ReservationSessionID,
+			"claim_status":           claim.Status,
+			"status_output":          statusOut,
+			"error":                  errMsg,
+			"settlement_surface":     "public_app",
+		})
+		return http.StatusConflict, map[string]any{
+			"ok":                              false,
+			"error":                           errMsg,
+			"connect_allowed":                 false,
+			"wallet_address":                  entitlement.WalletAddress,
+			"reservation_id":                  entitlement.ReservationID,
+			"reservation_session_id":          entitlement.ReservationSessionID,
+			"reservation_claim_status":        claim.Status,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+
+	if running {
+		if !s.gpmState.markReservationConnectLaunched(entitlement.ReservationID, entitlement.ReservationSessionID, entitlement.WalletAddress, now) {
+			return http.StatusConflict, map[string]any{
+				"ok":                              false,
+				"error":                           "failed to mark stale production reservation launch as launched",
+				"connect_allowed":                 false,
+				"wallet_address":                  entitlement.WalletAddress,
+				"reservation_id":                  entitlement.ReservationID,
+				"reservation_session_id":          entitlement.ReservationSessionID,
+				"settlement_reservation_required": true,
+				"public_app_admin_controls":       false,
+			}
+		}
+		if err := s.persistGPMState("connect_reservation_stale_launch_marked_launched"); err != nil {
+			return http.StatusServiceUnavailable, map[string]any{
+				"ok":                              false,
+				"error":                           "failed to persist reconciled launched production reservation",
+				"state_store_error":               err.Error(),
+				"connect_allowed":                 false,
+				"wallet_address":                  entitlement.WalletAddress,
+				"reservation_id":                  entitlement.ReservationID,
+				"reservation_session_id":          entitlement.ReservationSessionID,
+				"reservation_claim_status":        "launched",
+				"settlement_reservation_required": true,
+				"public_app_admin_controls":       false,
+			}
+		}
+		s.appendGPMAudit("connect_reservation_stale_launch_marked_launched", map[string]any{
+			"wallet_address":         entitlement.WalletAddress,
+			"reservation_id":         entitlement.ReservationID,
+			"reservation_session_id": entitlement.ReservationSessionID,
+			"claim_status":           "launched",
+			"status_output":          statusOut,
+			"settlement_surface":     "public_app",
+		})
+		return http.StatusConflict, map[string]any{
+			"ok":                              false,
+			"error":                           "stale production reservation launch is already running and has been marked launched",
+			"connect_allowed":                 false,
+			"wallet_address":                  entitlement.WalletAddress,
+			"reservation_id":                  entitlement.ReservationID,
+			"reservation_session_id":          entitlement.ReservationSessionID,
+			"reservation_claim_status":        "launched",
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+
+	s.appendGPMAudit("connect_reservation_stale_launch_retained", map[string]any{
+		"wallet_address":         entitlement.WalletAddress,
+		"reservation_id":         entitlement.ReservationID,
+		"reservation_session_id": entitlement.ReservationSessionID,
+		"claim_status":           claim.Status,
+		"status_output":          statusOut,
+		"settlement_surface":     "public_app",
+	})
+	return http.StatusConflict, map[string]any{
+		"ok":                              false,
+		"error":                           "stale production reservation launch is not currently proven running; reservation claim retained for session-bound or admin-bound cleanup",
+		"connect_allowed":                 false,
+		"wallet_address":                  entitlement.WalletAddress,
+		"reservation_id":                  entitlement.ReservationID,
+		"reservation_session_id":          entitlement.ReservationSessionID,
+		"reservation_claim_status":        claim.Status,
+		"reservation_claim_retained":      true,
+		"settlement_reservation_required": true,
+		"public_app_admin_controls":       false,
+	}
+}
+
+func (s *Service) gpmProductionConnectRuntimeRunning() (bool, bool, string, error) {
+	timeout := gpmStaleLaunchStatusTTL
+	if s.commandTimeout > 0 && s.commandTimeout < timeout {
+		timeout = s.commandTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	out, _, err := s.runEasyNode(ctx, "client-vpn-status", "--show-json", "1")
+	if err != nil {
+		return false, false, out, err
+	}
+	var payload any
+	if json.Unmarshal([]byte(out), &payload) != nil {
+		return false, false, out, nil
+	}
+	running, known := gpmStatusPayloadIndicatesVPNRunning(payload)
+	return running, known, out, nil
+}
+
+func (s *Service) markGPMProductionConnectReservationLaunchStarted(entitlement gpmProductionConnectEntitlement) (int, map[string]any) {
+	if s.gpmState == nil || strings.TrimSpace(entitlement.ReservationID) == "" {
+		return 0, nil
+	}
+	if !s.gpmState.markReservationConnectLaunchStarted(entitlement.ReservationID, entitlement.ReservationSessionID, entitlement.WalletAddress, time.Now().UTC()) {
+		return http.StatusConflict, map[string]any{
+			"ok":                              false,
+			"error":                           "failed to mark production reservation launch started",
+			"connect_allowed":                 false,
+			"wallet_address":                  entitlement.WalletAddress,
+			"reservation_id":                  entitlement.ReservationID,
+			"reservation_session_id":          entitlement.ReservationSessionID,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	if err := s.persistGPMState("connect_reservation_launch_started"); err != nil {
+		return http.StatusServiceUnavailable, map[string]any{
+			"ok":                              false,
+			"error":                           "failed to persist production reservation launch-start before VPN launch",
+			"state_store_error":               err.Error(),
+			"connect_allowed":                 false,
+			"wallet_address":                  entitlement.WalletAddress,
+			"reservation_id":                  entitlement.ReservationID,
+			"reservation_session_id":          entitlement.ReservationSessionID,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	s.appendGPMAudit("connect_reservation_launch_started", map[string]any{
+		"wallet_address":         entitlement.WalletAddress,
+		"reservation_id":         entitlement.ReservationID,
+		"reservation_session_id": entitlement.ReservationSessionID,
+		"claim_status":           "launching",
+		"settlement_surface":     "public_app",
+	})
+	return 0, nil
+}
+
+func (s *Service) markGPMProductionConnectReservationLaunched(entitlement gpmProductionConnectEntitlement) (int, map[string]any) {
+	if s.gpmState == nil || strings.TrimSpace(entitlement.ReservationID) == "" {
+		return 0, nil
+	}
+	ok := s.gpmState.markReservationConnectLaunched(entitlement.ReservationID, entitlement.ReservationSessionID, entitlement.WalletAddress, time.Now().UTC())
+	if !ok {
+		return http.StatusConflict, map[string]any{
+			"ok":                              false,
+			"error":                           "failed to mark production reservation launched",
+			"connect_allowed":                 false,
+			"wallet_address":                  entitlement.WalletAddress,
+			"reservation_id":                  entitlement.ReservationID,
+			"reservation_session_id":          entitlement.ReservationSessionID,
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	s.appendGPMAudit("connect_reservation_launched", map[string]any{
+		"wallet_address":         entitlement.WalletAddress,
+		"reservation_id":         entitlement.ReservationID,
+		"reservation_session_id": entitlement.ReservationSessionID,
+		"claim_status":           "launched",
+		"settlement_surface":     "public_app",
+	})
+	if err := s.persistGPMState("connect_reservation_launched"); err != nil {
+		return http.StatusServiceUnavailable, map[string]any{
+			"ok":                              false,
+			"stage":                           "connect_state_persist",
+			"error":                           "failed to persist production reservation launched state after VPN launch",
+			"state_store_error":               err.Error(),
+			"connect_allowed":                 false,
+			"wallet_address":                  entitlement.WalletAddress,
+			"reservation_id":                  entitlement.ReservationID,
+			"reservation_session_id":          entitlement.ReservationSessionID,
+			"reservation_claim_status":        "launched",
+			"settlement_reservation_required": true,
+			"public_app_admin_controls":       false,
+		}
+	}
+	return 0, nil
+}
+
 func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
@@ -919,9 +2102,16 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	in.InviteKey = strings.TrimSpace(in.InviteKey)
 	in.SessionToken = strings.TrimSpace(in.SessionToken)
 	in.SessionBootstrapDirectory = strings.TrimSpace(in.SessionBootstrapDirectory)
+	in.ReservationID = strings.TrimSpace(in.ReservationID)
+	in.ReservationSessionID = strings.TrimSpace(in.ReservationSessionID)
+	in.UsageSessionID = strings.TrimSpace(in.UsageSessionID)
+	in.VPNSessionID = strings.TrimSpace(in.VPNSessionID)
 	manualOverridesProvided := in.BootstrapDirectory != "" || in.InviteKey != ""
 	manualBootstrapDirectoryOverrideUsed := in.BootstrapDirectory != ""
 	manualInviteKeyOverrideUsed := in.InviteKey != ""
+	connectRequireSession := s.connectRequireSessionEffective()
+	allowLegacyConnectOverride := s.legacyConnectOverrideAllowed()
+	requireTrustedManifestBootstrap := s.legacyConnectRequireTrustedManifestBootstrapEffective()
 	if in.SessionBootstrapDirectory != "" && in.SessionToken == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
@@ -936,14 +2126,14 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if manualOverridesProvided && (s.gpmConnectRequireSession || !s.gpmAllowLegacyConnectOverride) {
+	if manualOverridesProvided && (connectRequireSession || !allowLegacyConnectOverride) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
 			"error": "manual bootstrap_directory/invite_key overrides are disabled; connect requires a registered session_token",
 		})
 		return
 	}
-	if s.gpmConnectRequireSession {
+	if connectRequireSession {
 		if in.SessionToken == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]any{
 				"ok":    false,
@@ -957,12 +2147,26 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionPathProfile := ""
 	sessionBootstrapDirectories := []string{}
+	var resolvedSession gpmSession
+	sessionPresent := false
 	var sessionResolveErr error
 	if in.SessionToken != "" {
 		resolvedBootstrapDirectories, sessionInvite, resolvedSessionPathProfile, resolveErr := s.resolveConnectSecretsFromSession(r.Context(), in.SessionToken)
 		if resolveErr == nil {
+			if session, ok, err := s.gpmSessionFromToken(in.SessionToken); err == nil && ok {
+				resolvedSession = session
+				sessionPresent = true
+			}
 			if in.SessionBootstrapDirectory != "" {
-				selectedBootstrapDirectory := in.SessionBootstrapDirectory
+				selectedBootstrapDirectory, err := canonicalizeBootstrapDirectoryURL(in.SessionBootstrapDirectory)
+				if err != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]any{
+						"ok":    false,
+						"error": err.Error(),
+					})
+					return
+				}
+				in.SessionBootstrapDirectory = selectedBootstrapDirectory
 				selectedTrusted := false
 				for _, trustedBootstrapDirectory := range resolvedBootstrapDirectories {
 					if trustedBootstrapDirectory == selectedBootstrapDirectory {
@@ -999,6 +2203,12 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(sessionResolveErr, errConnectSessionTokenInvalidOrExpired):
 			statusCode = http.StatusUnauthorized
 			errMsg = "invalid or expired session_token"
+		case errors.Is(sessionResolveErr, errConnectSessionWalletPolicyInvalid):
+			statusCode = http.StatusForbidden
+			errMsg = "session no longer satisfies wallet auth policy; sign in again"
+		case errors.Is(sessionResolveErr, errConnectSessionWalletBindingRequired):
+			statusCode = http.StatusForbidden
+			errMsg = "wallet-bound session is required for connect; sign in again with a verified wallet proof"
 		case errors.Is(sessionResolveErr, errConnectSessionNotRegistered):
 			statusCode = http.StatusForbidden
 			errMsg = "session_token is valid but not registered for connect; register the client profile first"
@@ -1022,6 +2232,10 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 		bootstrapDirectories = append(bootstrapDirectories, in.BootstrapDirectory)
 	} else {
 		bootstrapDirectories = append(bootstrapDirectories, sessionBootstrapDirectories...)
+	}
+	bootstrapDirectories = normalizeBootstrapDirectories(bootstrapDirectories)
+	if manualBootstrapDirectoryOverrideUsed && len(bootstrapDirectories) > 0 {
+		in.BootstrapDirectory = bootstrapDirectories[0]
 	}
 	if len(bootstrapDirectories) == 0 || in.InviteKey == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -1051,7 +2265,7 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if s.gpmLegacyConnectRequireTrustedManifestBootstrap && manualBootstrapDirectoryOverrideUsed {
+	if requireTrustedManifestBootstrap && manualBootstrapDirectoryOverrideUsed {
 		manifest, _, _, err := s.resolveBootstrapManifest(r.Context())
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{
@@ -1072,7 +2286,7 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if s.gpmLegacyConnectRequireTrustedManifestBootstrap && manualInviteKeyOverrideUsed && in.SessionToken != "" {
+	if requireTrustedManifestBootstrap && manualInviteKeyOverrideUsed && in.SessionToken != "" {
 		writeJSON(w, http.StatusForbidden, map[string]any{
 			"ok":    false,
 			"error": "manual invite_key override cannot be combined with session_token when trusted manifest binding policy is enabled; use the registered session invite_key",
@@ -1088,12 +2302,80 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	defaults := loadConnectDefaultsFromEnv()
 	options := resolveConnectOptions(in, defaults)
+	productionMode := s.isGPMProductionMode()
+	if !sessionPresent && gpmPathProfileUsesMicroRelay(options.profile) {
+		lockReason := "micro-relay path profile requires an authenticated Tier 2 or Tier 3 session with stake and prepaid balance"
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"ok":                       false,
+			"error":                    lockReason,
+			"path_profile":             options.profile,
+			"can_use_micro_relays":     false,
+			"contribution_lock_reason": lockReason,
+		})
+		return
+	}
+	if sessionPresent {
+		if lockReason := gpmMicroRelayUseLock(resolvedSession, options.profile); lockReason != "" {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"ok":                       false,
+				"error":                    lockReason,
+				"path_profile":             options.profile,
+				"can_use_micro_relays":     false,
+				"contribution_lock_reason": lockReason,
+			})
+			return
+		}
+	}
+	if options.prodProfile && options.profile == "1hop" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":    false,
+			"error": "production profile connect requires a strict 2hop or 3hop profile",
+		})
+		return
+	}
 	if !isAllowedVPNInterfaceName(options.interfaceName) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"ok":    false,
 			"error": "interface must start with wg, use only [a-zA-Z0-9_.-], and be <= 15 characters",
 		})
 		return
+	}
+	if productionMode {
+		if options.profile == "1hop" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":    false,
+				"error": "production connect requires a strict 2hop or 3hop profile",
+			})
+			return
+		}
+		options.prodProfile = true
+	}
+	if options.prodProfile {
+		if !options.installRouteIsSet {
+			options.installRoute = true
+		}
+		if !options.installRoute {
+			errorMessage := "production profile connect requires install_route=true so full-tunnel host traffic is routed through GPM; omit install_route to use the production profile default or disable prod_profile for diagnostics"
+			if productionMode {
+				errorMessage = "production connect requires install_route=true so full-tunnel host traffic is routed through GPM; omit install_route to use the production default or enable an explicit diagnostic no-route override outside the public connect API"
+			}
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":    false,
+				"error": errorMessage,
+			})
+			return
+		}
+	}
+	productionConnectRequired := productionMode || options.prodProfile
+	var productionEntitlement gpmProductionConnectEntitlement
+	if productionConnectRequired {
+		reservationSessionID := strings.TrimSpace(firstNonEmpty(in.ReservationSessionID, in.UsageSessionID, in.VPNSessionID))
+		entitlement, statusCode, payload := s.gpmProductionConnectEntitlementGate(r.Context(), sessionPresent, resolvedSession, in.ReservationID, reservationSessionID, true)
+		if payload != nil {
+			writeJSON(w, statusCode, payload)
+			return
+		}
+		productionEntitlement = entitlement
 	}
 	policy := deriveConnectPolicy(options)
 
@@ -1109,6 +2391,24 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 	lastFailureBootstrapDirectory := ""
 	lastFailureRC := 0
 	lastFailureOutput := ""
+	connectEnv := gpmProductionConnectCommandEnv(productionEntitlement)
+	connectSubject := in.InviteKey
+	if productionConnectRequired {
+		connectSubject = strings.TrimSpace(productionEntitlement.WalletAddress)
+	}
+	productionReservationClaimActive := false
+	if productionConnectRequired {
+		if statusCode, payload := s.claimGPMProductionConnectReservation(productionEntitlement); payload != nil {
+			writeJSON(w, statusCode, payload)
+			return
+		}
+		productionReservationClaimActive = true
+		defer func() {
+			if productionReservationClaimActive {
+				s.releasePendingGPMProductionConnectReservation(productionEntitlement, "connect command did not launch")
+			}
+		}()
+	}
 
 	for _, bootstrapDirectory := range bootstrapDirectories {
 		if options.runPreflight {
@@ -1116,6 +2416,7 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 				"client-vpn-preflight",
 				"--bootstrap-directory", bootstrapDirectory,
 				"--discovery-wait-sec", strconv.Itoa(options.discoveryWaitSec),
+				"--path-profile", options.profile,
 				"--prod-profile", strconv.Itoa(policy.prodFlag),
 				"--interface", options.interfaceName,
 				"--operator-floor-check", strconv.Itoa(policy.operatorFloorCheck),
@@ -1123,7 +2424,7 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 				"--issuer-quorum-check", strconv.Itoa(policy.issuerQuorumCheck),
 				"--issuer-min-operators", strconv.Itoa(policy.issuerMin),
 			}
-			preflightOut, preflightRC, preflightErr := s.runEasyNode(r.Context(), preflightArgs...)
+			preflightOut, preflightRC, preflightErr := s.runEasyNodeWithEnv(r.Context(), connectEnv, preflightArgs...)
 			if preflightErr != nil {
 				if errors.Is(preflightErr, errCommandConcurrencySaturated) {
 					writeJSON(w, http.StatusTooManyRequests, map[string]any{
@@ -1144,7 +2445,7 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if inviteKeyPath == "" {
-			path, cleanup, stageErr := writeSecretTempFile("tdpn-localapi-invite-", in.InviteKey)
+			path, cleanup, stageErr := writeSecretTempFile("tdpn-localapi-invite-", connectSubject)
 			if stageErr != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{
 					"ok":    false,
@@ -1155,6 +2456,13 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 			}
 			inviteKeyPath = path
 			cleanupInviteKey = cleanup
+		}
+
+		if productionConnectRequired && productionReservationClaimActive {
+			if statusCode, payload := s.markGPMProductionConnectReservationLaunchStarted(productionEntitlement); payload != nil {
+				writeJSON(w, statusCode, payload)
+				return
+			}
 		}
 
 		upArgs := []string{
@@ -1179,7 +2487,7 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 			"--force-restart", "1",
 			"--foreground", "0",
 		}
-		upOut, upRC, upErr := s.runEasyNode(r.Context(), upArgs...)
+		upOut, upRC, upErr := s.runEasyNodeWithEnv(r.Context(), connectEnv, upArgs...)
 		if upErr != nil {
 			if errors.Is(upErr, errCommandConcurrencySaturated) {
 				writeJSON(w, http.StatusTooManyRequests, map[string]any{
@@ -1195,11 +2503,40 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 			lastFailureBootstrapDirectory = bootstrapDirectory
 			lastFailureRC = upRC
 			lastFailureOutput = upOut
+			if productionConnectRequired && productionReservationClaimActive {
+				productionReservationClaimActive = false
+				s.appendGPMAudit("connect_reservation_launch_ambiguous_retained", map[string]any{
+					"wallet_address":         productionEntitlement.WalletAddress,
+					"reservation_id":         productionEntitlement.ReservationID,
+					"reservation_session_id": productionEntitlement.ReservationSessionID,
+					"bootstrap_directory":    bootstrapDirectory,
+					"rc":                     upRC,
+					"error":                  upErr.Error(),
+					"settlement_surface":     "public_app",
+				})
+				writeJSON(w, http.StatusBadGateway, map[string]any{
+					"ok":                              false,
+					"stage":                           "connect",
+					"error":                           "production VPN launch returned an error after reservation launch started; reservation claim retained for reconciliation",
+					"command_error":                   upErr.Error(),
+					"rc":                              upRC,
+					"output":                          upOut,
+					"bootstrap_directory":             bootstrapDirectory,
+					"connect_allowed":                 false,
+					"wallet_address":                  productionEntitlement.WalletAddress,
+					"reservation_id":                  productionEntitlement.ReservationID,
+					"reservation_session_id":          productionEntitlement.ReservationSessionID,
+					"reservation_claim_status":        "launching",
+					"reservation_claim_retained":      true,
+					"settlement_reservation_required": true,
+					"public_app_admin_controls":       false,
+				})
+				return
+			}
 			continue
 		}
-
 		statusOut, _, statusErr := s.runEasyNode(r.Context(), "client-vpn-status", "--show-json", "1")
-		if errors.Is(statusErr, errCommandConcurrencySaturated) {
+		if errors.Is(statusErr, errCommandConcurrencySaturated) && !productionConnectRequired {
 			writeJSON(w, http.StatusTooManyRequests, map[string]any{
 				"ok":    false,
 				"stage": "status",
@@ -1212,7 +2549,90 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 			statusPayload = map[string]any{"raw": statusOut}
 		}
 		routingPayload := deriveRoutingPostureFromStatusPayload(statusPayload)
-		writeJSON(w, http.StatusOK, map[string]any{
+		if productionConnectRequired {
+			readinessPayload, readinessOK, readinessError := gpmProductionConnectReadinessFromStatusPayload(statusPayload, options.interfaceName)
+			if statusErr != nil {
+				readinessOK = false
+				readinessError = fmt.Sprintf("production VPN status command failed after launch: %v", statusErr)
+			}
+			if !readinessOK {
+				teardownOut, teardownRC, teardownErr := s.teardownConnectInterfaceBestEffort(options.interfaceName)
+				claimReleased := false
+				claimRetained := productionReservationClaimActive
+				if productionReservationClaimActive && statusErr == nil && teardownErr == nil && gpmProductionConnectReadinessProvesStopped(readinessPayload) {
+					claimReleased = s.releasePendingGPMProductionConnectReservation(productionEntitlement, "post-launch readiness check proved tunnel stopped")
+					productionReservationClaimActive = false
+					claimRetained = false
+				}
+				if productionReservationClaimActive && !claimReleased {
+					productionReservationClaimActive = false
+					s.appendGPMAudit("connect_reservation_readiness_ambiguous_retained", map[string]any{
+						"wallet_address":         productionEntitlement.WalletAddress,
+						"reservation_id":         productionEntitlement.ReservationID,
+						"reservation_session_id": productionEntitlement.ReservationSessionID,
+						"readiness_error":        readinessError,
+						"settlement_surface":     "public_app",
+					})
+				}
+				claimStatus := "launching"
+				if claimReleased {
+					claimStatus = "released"
+				}
+				statusCode := http.StatusBadGateway
+				if errors.Is(statusErr, errCommandConcurrencySaturated) {
+					statusCode = http.StatusTooManyRequests
+				}
+				payload := map[string]any{
+					"ok":                              false,
+					"stage":                           "status",
+					"error":                           "production VPN readiness check failed after launch",
+					"readiness_error":                 readinessError,
+					"readiness":                       readinessPayload,
+					"status":                          statusPayload,
+					"routing":                         routingPayload,
+					"output":                          upOut,
+					"status_output":                   statusOut,
+					"bootstrap_directory":             bootstrapDirectory,
+					"connect_allowed":                 false,
+					"wallet_address":                  productionEntitlement.WalletAddress,
+					"reservation_id":                  productionEntitlement.ReservationID,
+					"reservation_session_id":          productionEntitlement.ReservationSessionID,
+					"reservation_claim_status":        claimStatus,
+					"reservation_claim_released":      claimReleased,
+					"reservation_claim_retained":      claimRetained,
+					"settlement_reservation_required": true,
+					"public_app_admin_controls":       false,
+					"teardown_attempted":              true,
+					"teardown_rc":                     teardownRC,
+					"teardown_output":                 teardownOut,
+				}
+				if statusErr != nil {
+					payload["status_error"] = statusErr.Error()
+				}
+				if teardownErr != nil {
+					payload["teardown_error"] = teardownErr.Error()
+				}
+				writeJSON(w, statusCode, payload)
+				return
+			}
+			if productionReservationClaimActive {
+				if statusCode, payload := s.markGPMProductionConnectReservationLaunched(productionEntitlement); payload != nil {
+					teardownOut, teardownRC, teardownErr := s.teardownConnectInterfaceBestEffort(options.interfaceName)
+					payload["teardown_attempted"] = true
+					payload["teardown_rc"] = teardownRC
+					payload["teardown_output"] = teardownOut
+					if teardownErr != nil {
+						payload["teardown_error"] = teardownErr.Error()
+					}
+					writeJSON(w, statusCode, payload)
+					return
+				}
+				productionReservationClaimActive = false
+			}
+		}
+		s.rememberConnectInterface(options.interfaceName)
+
+		payload := map[string]any{
 			"ok":                  true,
 			"stage":               "connect",
 			"output":              upOut,
@@ -1220,7 +2640,20 @@ func (s *Service) handleConnect(w http.ResponseWriter, r *http.Request) {
 			"routing":             routingPayload,
 			"profile":             options.profile,
 			"bootstrap_directory": bootstrapDirectory,
-		})
+		}
+		if productionConnectRequired {
+			payload["connect_allowed"] = true
+			payload["wallet_address"] = productionEntitlement.WalletAddress
+			payload["reservation_id"] = productionEntitlement.ReservationID
+			payload["reservation_session_id"] = productionEntitlement.ReservationSessionID
+			payload["reservation_chain_status"] = string(productionEntitlement.ReservationStatus)
+			payload["reservation_status_source"] = productionEntitlement.ReservationStatusSource
+			payload["reservation_finalization_state"] = productionEntitlement.ReservationFinalizationState
+			payload["reservation_claim_status"] = "launched"
+			payload["settlement_reservation_required"] = true
+			payload["public_app_admin_controls"] = false
+		}
+		writeJSON(w, http.StatusOK, payload)
 		return
 	}
 
@@ -1251,7 +2684,46 @@ func (s *Service) handleDisconnect(w http.ResponseWriter, r *http.Request) {
 	if !s.requireMutationAuth(w, r) {
 		return
 	}
-	out, rc, err := s.runEasyNode(r.Context(), "client-vpn-down", "--force-iface-cleanup", "1")
+	var in disconnectRequest
+	if err := decodeOptionalJSONBody(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+	if s.isGPMProductionMode() || strings.EqualFold(strings.TrimSpace(s.gpmConnectPolicyMode), "production") {
+		sessionToken := gpmSessionTokenFromRequest(r, in.SessionToken)
+		if sessionToken == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "session_token is required for production disconnect"})
+			return
+		}
+		session, ok, policyErr := s.gpmSessionFromTokenWithWalletPolicy(sessionToken)
+		if policyErr != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"ok":    false,
+				"error": "session no longer satisfies wallet auth policy; sign in again: " + policyErr.Error(),
+			})
+			return
+		}
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid or expired session_token"})
+			return
+		}
+		walletAddress := normalizeWalletAddress(session.WalletAddress)
+		if !session.WalletBindingVerified || walletAddress == "" {
+			writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "wallet-bound session is required for production disconnect"})
+			return
+		}
+		if s.gpmState != nil {
+			allowed, hasLaunched := s.gpmState.launchedReservationClaimWalletAllowed(walletAddress)
+			if hasLaunched && !allowed {
+				writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "session wallet does not match the active production reservation claim"})
+				return
+			}
+		}
+	}
+	interfaceName := s.disconnectInterfaceName()
+	// Public disconnect intentionally avoids force-deleting interfaces. Users can
+	// still run the explicit support command when they need privileged cleanup.
+	out, rc, err := s.runEasyNode(r.Context(), "client-vpn-down", "--force-iface-cleanup", "0")
 	if err != nil {
 		if errors.Is(err, errCommandConcurrencySaturated) {
 			writeJSON(w, http.StatusTooManyRequests, map[string]any{
@@ -1268,6 +2740,7 @@ func (s *Service) handleDisconnect(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	s.clearRememberedConnectInterface(interfaceName)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "stage": "disconnect", "output": out})
 }
 
@@ -1282,6 +2755,9 @@ func (s *Service) handleSetProfile(w http.ResponseWriter, r *http.Request) {
 	var in setProfileRequest
 	if err := decodeJSONBody(r, &in); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+	if _, ok := s.gpmAdminSessionFromTokenForResponse(w, in.SessionToken); !ok {
 		return
 	}
 	profile := normalizeOptionalPathProfile(in.PathProfile)
@@ -1342,6 +2818,85 @@ func (s *Service) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "diagnostics": payload})
 }
 
+func (s *Service) handlePublicDiagnostics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireCommandReadAuth(w, r) {
+		return
+	}
+	out, rc, err := s.runEasyNode(r.Context(), "runtime-doctor", "--show-json", "1")
+	if err != nil {
+		if errors.Is(err, errCommandConcurrencySaturated) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{
+				"ok":    false,
+				"error": s.commandConcurrencyError(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"ok":    false,
+			"rc":    rc,
+			"error": "public diagnostics collection failed",
+		})
+		return
+	}
+	var payload map[string]any
+	if json.Unmarshal([]byte(out), &payload) != nil {
+		payload = map[string]any{"status": "unknown"}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "diagnostics": publicDiagnosticsPayload(payload)})
+}
+
+func publicDiagnosticsPayload(payload map[string]any) map[string]any {
+	view := map[string]any{}
+	for _, key := range []string{"status", "generated_at_utc"} {
+		if value, ok := payload[key].(string); ok && strings.TrimSpace(value) != "" {
+			view[key] = value
+		}
+	}
+	if summary, ok := payload["summary"].(map[string]any); ok {
+		summaryView := map[string]any{}
+		for _, key := range []string{"findings_total", "warnings_total", "failures_total"} {
+			if value, ok := summary[key]; ok {
+				summaryView[key] = value
+			}
+		}
+		if len(summaryView) > 0 {
+			view["summary"] = summaryView
+		}
+	}
+	if findings, ok := payload["findings"].([]any); ok {
+		findingsView := make([]any, 0, min(len(findings), 100))
+		for _, finding := range findings {
+			findingMap, ok := finding.(map[string]any)
+			if !ok {
+				continue
+			}
+			findingView := map[string]any{}
+			for _, key := range []string{"severity", "code", "message", "remediation"} {
+				if value, ok := findingMap[key].(string); ok && strings.TrimSpace(value) != "" {
+					findingView[key] = value
+				}
+			}
+			if len(findingView) > 0 {
+				findingsView = append(findingsView, findingView)
+			}
+			if len(findingsView) >= 100 {
+				break
+			}
+		}
+		if len(findingsView) > 0 {
+			view["findings"] = findingsView
+		}
+		if len(findings) > 100 {
+			view["findings_truncated"] = true
+		}
+	}
+	return view
+}
+
 func (s *Service) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
@@ -1360,6 +2915,9 @@ func (s *Service) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	var in updateRequest
 	if err := decodeOptionalJSONBody(r, &in); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
+		return
+	}
+	if _, ok := s.gpmAdminSessionFromTokenForResponse(w, in.SessionToken); !ok {
 		return
 	}
 	args := []string{"self-update", "--show-status", "1"}
@@ -1413,7 +2971,10 @@ func (s *Service) handleServiceStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.requireCommandReadAuth(w, r) {
 		return
 	}
+	s.handleServiceStatusExecution(w, r)
+}
 
+func (s *Service) handleServiceStatusExecution(w http.ResponseWriter, r *http.Request) {
 	statusConfigured := strings.TrimSpace(s.serviceStatus) != ""
 	startConfigured := strings.TrimSpace(s.serviceStart) != ""
 	stopConfigured := strings.TrimSpace(s.serviceStop) != ""
@@ -1474,12 +3035,48 @@ func (s *Service) handleServiceMutation(w http.ResponseWriter, r *http.Request, 
 	if !s.requireMutationAuth(w, r) {
 		return
 	}
+	if !s.legacyServiceMutationsAllowed() {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"ok":      false,
+			"error":   fmt.Sprintf("legacy service lifecycle endpoint is disabled in GPM production mode; use /v1/gpm/service/%s with an approved wallet-bound operator/admin session", action),
+			"action":  action,
+			"hint":    fmt.Sprintf("use /v1/gpm/service/%s with session_token, or set GPM_ALLOW_LEGACY_SERVICE_MUTATIONS=1 only as a break-glass support override", action),
+			"release": "gpm-production",
+		})
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(s.gpmConnectPolicyMode), "production") {
+		if !s.requireGPMServiceMutationAuth(w, r) {
+			return
+		}
+	}
 	legacyHint := fmt.Sprintf("prefer /v1/gpm/service/%s with session_token for approved operator/admin sessions", action)
 	s.handleLifecycleMutationExecution(w, r, action, command, envVar, map[string]any{"note": legacyHint})
 }
 
+func (s *Service) legacyServiceMutationsAllowed() bool {
+	if s == nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(s.gpmConnectPolicyMode), "production") {
+		return s.gpmAllowLegacyServiceMutations
+	}
+	return true
+}
+
 func (s *Service) handleGPMServiceStart(w http.ResponseWriter, r *http.Request) {
 	s.handleGPMServiceMutation(w, r, "start", s.serviceStart, "LOCAL_CONTROL_API_SERVICE_START_COMMAND")
+}
+
+func (s *Service) handleGPMServiceStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
+		return
+	}
+	if !s.requireGPMServiceMutationAuth(w, r) {
+		return
+	}
+	s.handleServiceStatusExecution(w, r)
 }
 
 func (s *Service) handleGPMServiceStop(w http.ResponseWriter, r *http.Request) {
@@ -2097,7 +3694,7 @@ func resolveConnectOptions(in connectRequest, defaults connectDefaults) resolved
 	if in.ProdProfile != nil {
 		prodProfile = *in.ProdProfile
 	}
-	installRoute := true
+	installRoute := false
 	installRouteIsSet := in.InstallRoute != nil
 	if installRouteIsSet {
 		installRoute = *in.InstallRoute
@@ -2133,7 +3730,9 @@ func deriveConnectPolicy(options resolvedConnectOptions) connectPolicy {
 		policy.issuerMin = 1
 		policy.betaProfile = 0
 		policy.prodFlag = 0
-		if !options.installRouteIsSet {
+		if !allowOneHopInstallRouteOverride() {
+			policy.installRoute = false
+		} else if !options.installRouteIsSet {
 			policy.installRoute = false
 		}
 		return policy
@@ -2142,6 +3741,17 @@ func deriveConnectPolicy(options resolvedConnectOptions) connectPolicy {
 		policy.prodFlag = 1
 	}
 	return policy
+}
+
+func allowOneHopInstallRouteOverride() bool {
+	return parseBoolWithDefault(
+		firstNonEmpty(
+			os.Getenv("GPM_ALLOW_1HOP_INSTALL_ROUTE"),
+			os.Getenv("TDPN_ALLOW_1HOP_INSTALL_ROUTE"),
+			os.Getenv("LOCAL_CONTROL_API_ALLOW_1HOP_INSTALL_ROUTE"),
+		),
+		false,
+	)
 }
 
 func defaultProdProfileForMode(mode string, profile string) bool {
@@ -2231,6 +3841,234 @@ func boolTo01(v bool) string {
 		return "1"
 	}
 	return "0"
+}
+
+func gpmStatusPayloadIndicatesVPNRunning(statusPayload any) (bool, bool) {
+	aliasValues := map[string][]any{}
+	collectRoutingAliasValues(statusPayload, nil, aliasValues)
+	return findRoutingBool(
+		aliasValues,
+		"connected",
+		"vpn_connected",
+		"client_connected",
+		"client_vpn_connected",
+		"tunnel_connected",
+		"wireguard_connected",
+		"wireguard_interface_up",
+		"interface_up",
+		"running",
+		"vpn_running",
+		"client_vpn_running",
+		"tunnel_running",
+		"wg_running",
+		"session_active",
+		"vpn_session_active",
+	)
+}
+
+func gpmProductionConnectReadinessFromStatusPayload(statusPayload any, expectedInterface string) (map[string]any, bool, string) {
+	expectedInterface = strings.TrimSpace(expectedInterface)
+	aliasValues := map[string][]any{}
+	collectRoutingAliasValues(statusPayload, nil, aliasValues)
+
+	running, runningKnown := findRoutingBool(
+		aliasValues,
+		"running",
+		"vpn_running",
+		"client_vpn_running",
+		"tunnel_running",
+		"wg_running",
+	)
+	interfaceName, interfaceKnown := findRoutingString(
+		aliasValues,
+		"interface",
+		"iface",
+		"interface_name",
+		"vpn_interface",
+		"client_vpn_interface",
+		"wg_interface",
+		"wireguard_interface",
+		"device",
+		"device_name",
+	)
+	interfaceState, interfaceStateKnown := findRoutingString(
+		aliasValues,
+		"interface_state",
+		"vpn_interface_state",
+		"client_vpn_interface_state",
+		"wg_interface_state",
+		"wireguard_interface_state",
+		"link_state",
+	)
+	interfaceUp, interfaceUpKnown := findRoutingBool(
+		aliasValues,
+		"interface_up",
+		"wireguard_interface_up",
+		"wg_interface_up",
+		"client_vpn_interface_up",
+	)
+	interfaceMatches := interfaceKnown && expectedInterface != "" && strings.EqualFold(strings.TrimSpace(interfaceName), expectedInterface)
+	interfaceStatePresent := false
+	if interfaceStateKnown {
+		interfaceStatePresent = gpmProductionInterfaceStatePresent(interfaceState)
+	}
+	interfacePresent := interfaceMatches && ((interfaceStateKnown && interfaceStatePresent) || (interfaceUpKnown && interfaceUp))
+
+	routeModeRaw, routeModeKnown := findRoutingString(
+		aliasValues,
+		"route_mode",
+		"routing_mode",
+		"path_mode",
+		"connection_mode",
+		"selected_route",
+		"active_path",
+		"routing_state",
+		"routing_status",
+		"transport_mode",
+		"routing_path_mode",
+		"routing_mode_state",
+		"mode",
+	)
+	routeMode := canonicalProductionRouteMode(routeModeRaw)
+	if routeMode == "" {
+		routeMode, routeModeKnown = inferProductionRouteMode(aliasValues)
+	} else {
+		routeModeKnown = true
+	}
+	routeModeSafe := routeMode == "full-tunnel"
+	if routeMode == "" {
+		routeMode = "unknown"
+	}
+
+	readiness := map[string]any{
+		"running":                 running,
+		"running_known":           runningKnown,
+		"interface":               strings.TrimSpace(interfaceName),
+		"expected_interface":      expectedInterface,
+		"interface_matches":       interfaceMatches,
+		"interface_present":       interfacePresent,
+		"interface_known":         interfaceKnown,
+		"interface_state":         strings.TrimSpace(interfaceState),
+		"interface_state_known":   interfaceStateKnown,
+		"interface_state_present": interfaceStatePresent,
+		"interface_up":            interfaceUp,
+		"interface_up_known":      interfaceUpKnown,
+		"route_mode":              routeMode,
+		"route_mode_known":        routeModeKnown,
+		"route_mode_safe":         routeModeSafe,
+	}
+	switch {
+	case !runningKnown:
+		return readiness, false, "production VPN status did not report running=true"
+	case !running:
+		return readiness, false, "production VPN status reported running=false"
+	case !interfaceKnown:
+		return readiness, false, "production VPN status did not report the WireGuard interface"
+	case !interfacePresent:
+		return readiness, false, "production VPN status did not report the expected WireGuard interface as present"
+	case !routeModeKnown:
+		return readiness, false, "production VPN status did not report a route_mode"
+	case !routeModeSafe:
+		return readiness, false, fmt.Sprintf("production VPN status reported unsafe route_mode=%q", routeMode)
+	default:
+		return readiness, true, ""
+	}
+}
+
+func gpmProductionConnectReadinessProvesStopped(readiness map[string]any) bool {
+	if readiness == nil {
+		return false
+	}
+	if runningKnown, _ := readiness["running_known"].(bool); runningKnown {
+		running, _ := readiness["running"].(bool)
+		if !running {
+			return true
+		}
+	}
+	if interfaceStateKnown, _ := readiness["interface_state_known"].(bool); interfaceStateKnown {
+		interfaceStatePresent, _ := readiness["interface_state_present"].(bool)
+		if !interfaceStatePresent {
+			return true
+		}
+	}
+	if interfaceUpKnown, _ := readiness["interface_up_known"].(bool); interfaceUpKnown {
+		interfaceUp, _ := readiness["interface_up"].(bool)
+		if !interfaceUp {
+			return true
+		}
+	}
+	return false
+}
+
+func gpmProductionInterfaceStatePresent(raw string) bool {
+	tokens := splitRoutingModeTokens(raw)
+	if len(tokens) == 0 {
+		return false
+	}
+	joined := strings.Join(tokens, "")
+	if strings.Contains(joined, "missing") || strings.Contains(joined, "absent") || strings.Contains(joined, "notfound") || containsRoutingToken(tokens, "down") || containsRoutingToken(tokens, "deleted") {
+		return false
+	}
+	return strings.Contains(joined, "present") ||
+		strings.Contains(joined, "ready") ||
+		containsRoutingToken(tokens, "up") ||
+		containsRoutingToken(tokens, "running") ||
+		containsRoutingToken(tokens, "active")
+}
+
+func inferProductionRouteMode(aliasValues map[string][]any) (string, bool) {
+	installRoute, installRouteKnown := findRoutingBool(aliasValues, "install_route", "route_installed", "default_route_installed")
+	allowedIPs, allowedIPsKnown := findRoutingString(aliasValues, "allowed_ips", "allowedips", "client_allowed_ips")
+	if !installRouteKnown || !allowedIPsKnown {
+		return "", false
+	}
+	fullTunnel := gpmAllowedIPsUseFullTunnel(allowedIPs)
+	switch {
+	case installRoute && fullTunnel:
+		return "full-tunnel", true
+	case installRoute:
+		return "split-route", true
+	case fullTunnel:
+		return "no-route", true
+	default:
+		return "manual-route", true
+	}
+}
+
+func gpmAllowedIPsUseFullTunnel(raw string) bool {
+	hasIPv4Default := false
+	hasIPv6Default := false
+	for _, token := range strings.Split(raw, ",") {
+		token = strings.TrimSpace(token)
+		switch token {
+		case "0.0.0.0/0":
+			hasIPv4Default = true
+		case "::/0":
+			hasIPv6Default = true
+		}
+	}
+	return hasIPv4Default && hasIPv6Default
+}
+
+func canonicalProductionRouteMode(raw string) string {
+	tokens := splitRoutingModeTokens(raw)
+	if len(tokens) == 0 {
+		return ""
+	}
+	joined := strings.Join(tokens, "")
+	hasRoute := containsRoutingToken(tokens, "route")
+	switch {
+	case strings.Contains(joined, "noroute") || (containsRoutingToken(tokens, "no") && hasRoute):
+		return "no-route"
+	case strings.Contains(joined, "fulltunnel") || (containsRoutingToken(tokens, "full") && containsRoutingToken(tokens, "tunnel")) || strings.Contains(joined, "defaultroute"):
+		return "full-tunnel"
+	case strings.Contains(joined, "splitroute") || (containsRoutingToken(tokens, "split") && hasRoute):
+		return "split-route"
+	case strings.Contains(joined, "manualroute") || (containsRoutingToken(tokens, "manual") && hasRoute):
+		return "manual-route"
+	default:
+		return ""
+	}
 }
 
 func deriveRoutingPostureFromStatusPayload(statusPayload any) map[string]any {
@@ -2512,33 +4350,39 @@ func containsRoutingToken(tokens []string, target string) bool {
 }
 
 func validateBootstrapDirectoryURL(raw string) error {
+	_, err := canonicalizeBootstrapDirectoryURL(raw)
+	return err
+}
+
+func canonicalizeBootstrapDirectoryURL(raw string) (string, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
-		return errors.New("bootstrap_directory is required")
+		return "", errors.New("bootstrap_directory is required")
 	}
 	parsed, err := urlpkg.Parse(value)
 	if err != nil || !parsed.IsAbs() {
-		return errors.New("bootstrap_directory must be an absolute URL with http or https scheme")
+		return "", errors.New("bootstrap_directory must be an absolute URL with http or https scheme")
 	}
-	switch parsed.Scheme {
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	switch scheme {
 	case "http", "https":
 	default:
-		return errors.New("bootstrap_directory scheme must be http or https")
+		return "", errors.New("bootstrap_directory scheme must be http or https")
 	}
 	host := strings.TrimSpace(parsed.Hostname())
 	if host == "" {
-		return errors.New("bootstrap_directory host is required")
+		return "", errors.New("bootstrap_directory host is required")
 	}
 	if parsed.User != nil {
-		return errors.New("bootstrap_directory userinfo is not allowed")
+		return "", errors.New("bootstrap_directory userinfo is not allowed")
 	}
-	if parsed.RawQuery != "" || parsed.Fragment != "" {
-		return errors.New("bootstrap_directory query/fragment are not allowed")
+	if parsed.ForceQuery || parsed.RawQuery != "" || parsed.Fragment != "" || strings.Contains(value, "#") {
+		return "", errors.New("bootstrap_directory query/fragment are not allowed")
 	}
-	if parsed.Scheme == "http" && !hostResolvesToLoopback(host) {
-		return errors.New("bootstrap_directory must use https for non-loopback hosts")
+	if scheme == "http" && !hostResolvesToLoopback(host) {
+		return "", errors.New("bootstrap_directory must use https for non-loopback hosts")
 	}
-	return nil
+	return canonicalizeParsedHTTPURL(parsed, true), nil
 }
 
 func validateInviteKey(raw string) error {
@@ -2675,6 +4519,47 @@ func (s *Service) requireCommandReadAuth(w http.ResponseWriter, r *http.Request)
 	return true
 }
 
+func (s *Service) withLocalAPICORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		if origin != "" {
+			if !s.localAPICORSOriginAllowed(origin) {
+				if r.Method == http.MethodOptions {
+					writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "CORS origin is not allowed"})
+					return
+				}
+			} else {
+				headers := w.Header()
+				headers.Add("Vary", "Origin")
+				headers.Set("Access-Control-Allow-Origin", origin)
+				headers.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+				headers.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-GPM-Session-Token")
+				headers.Set("Access-Control-Max-Age", "600")
+				if r.Method == http.MethodOptions {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Service) localAPICORSOriginAllowed(origin string) bool {
+	origin = strings.TrimSpace(origin)
+	if origin == "" || s == nil || !isLoopbackBindAddr(s.addr) {
+		return false
+	}
+	if strings.TrimSpace(s.authToken) == "" {
+		return isAllowedUnauthLoopbackOrigin(s.addr, origin)
+	}
+	parsed, err := urlpkg.Parse(origin)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return false
+	}
+	return isLiteralLoopbackOrLocalhostHost(parsed.Hostname())
+}
+
 func parseBearerToken(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -2685,6 +4570,17 @@ func parseBearerToken(raw string) string {
 		return ""
 	}
 	return strings.TrimSpace(parts[1])
+}
+
+func gpmSessionTokenFromRequest(r *http.Request, explicit string) string {
+	token := strings.TrimSpace(explicit)
+	if token != "" || r == nil {
+		return token
+	}
+	if token = strings.TrimSpace(r.Header.Get("X-GPM-Session-Token")); token != "" {
+		return token
+	}
+	return strings.TrimSpace(parseBearerToken(r.Header.Get("Authorization")))
 }
 
 func constantTimeTokenEqual(expected, provided string) bool {
@@ -2712,7 +4608,7 @@ func isAllowedUnauthLoopbackOrigin(bindAddr, rawOrigin string) bool {
 	if host == "" {
 		return false
 	}
-	if !hostResolvesToLoopback(host) {
+	if !isLiteralLoopbackOrLocalhostHost(host) {
 		return false
 	}
 	expectedPort := bindAddrPort(bindAddr)
@@ -2747,7 +4643,19 @@ func isLoopbackBindAddr(addr string) bool {
 	if host == "" {
 		return false
 	}
-	return hostResolvesToLoopback(host)
+	return isLiteralLoopbackOrLocalhostHost(host)
+}
+
+func isLiteralLoopbackOrLocalhostHost(host string) bool {
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func hostResolvesToLoopback(host string) bool {

@@ -648,6 +648,8 @@ func TestRunTDPNDGRPCModeReflectionIncludesCoreModuleQueries(t *testing.T) {
 
 func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 	const authToken = "tdpn-test-token"
+	const finalityToken = "tdpn-test-finality-token"
+	const settlementAuthToken = "tdpn-test-settlement-token"
 
 	bufListener := bufconn.Listen(1024 * 1024)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -657,7 +659,12 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 	go func() {
 		runDone <- runTDPND(
 			ctx,
-			[]string{"--grpc-listen", "bufnet", "--grpc-auth-token", authToken},
+			[]string{
+				"--grpc-listen", "bufnet",
+				"--grpc-auth-token", authToken,
+				"--settlement-http-auth-token", settlementAuthToken,
+				"--settlement-http-finality-auth-token", finalityToken,
+			},
 			nil,
 			func() chainScaffold { return app.NewChainScaffold() },
 			runtimeDeps{
@@ -728,6 +735,7 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 	billingMsg := vpnbillingpb.NewMsgClient(conn)
 	billingQuery := vpnbillingpb.NewQueryClient(conn)
 	rewardsQuery := vpnrewardspb.NewQueryClient(conn)
+	slashingMsg := vpnslashingpb.NewMsgClient(conn)
 	slashingQuery := vpnslashingpb.NewQueryClient(conn)
 	sponsorQuery := vpnsponsorpb.NewQueryClient(conn)
 	validatorQuery := vpnvalidatorpb.NewQueryClient(conn)
@@ -769,6 +777,40 @@ func TestRunTDPNDGRPCModeAuthEnforcementAndHealth(t *testing.T) {
 	}
 	if okResp.GetReservation().GetReservationId() != "res-auth-3" {
 		t.Fatalf("unexpected authorized reservation id %q", okResp.GetReservation().GetReservationId())
+	}
+
+	const evidenceID = "evidence-auth-finality-1"
+	_, err = slashingMsg.SubmitEvidence(okTokenCtx, &vpnslashingpb.MsgSubmitEvidenceRequest{
+		Evidence: &vpnslashingpb.SlashEvidence{
+			EvidenceId:    evidenceID,
+			ProviderId:    "provider-auth-finality-1",
+			SessionId:     "session-auth-finality-1",
+			ViolationType: "double-sign",
+			Kind:          "objective",
+			ProofHash:     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			SlashAmount:   10,
+			SlashDenom:    "utdpn",
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected authorized slash evidence submit success, got %v", err)
+	}
+	_, err = slashingMsg.ConfirmEvidence(okTokenCtx, &vpnslashingpb.MsgConfirmEvidenceRequest{EvidenceId: evidenceID})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("expected finality-scoped confirm without finality token to be permission denied, got %v", err)
+	}
+	wrongFinalityCtx := metadata.AppendToOutgoingContext(okTokenCtx, finalityAuthorizationHeader, "Bearer wrong-finality-token")
+	_, err = slashingMsg.ConfirmEvidence(wrongFinalityCtx, &vpnslashingpb.MsgConfirmEvidenceRequest{EvidenceId: evidenceID})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("expected finality-scoped confirm with wrong finality token to be permission denied, got %v", err)
+	}
+	finalityCtx := metadata.AppendToOutgoingContext(okTokenCtx, finalityAuthorizationHeader, "Bearer "+finalityToken)
+	confirmResp, err := slashingMsg.ConfirmEvidence(finalityCtx, &vpnslashingpb.MsgConfirmEvidenceRequest{EvidenceId: evidenceID})
+	if err != nil {
+		t.Fatalf("expected finality-scoped confirm success, got %v", err)
+	}
+	if confirmResp.GetEvidence().GetStatus() != vpnslashingpb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED {
+		t.Fatalf("expected confirmed slash evidence status, got %v", confirmResp.GetEvidence().GetStatus())
 	}
 
 	assertQueryAuthParity := func(name string, invoke func(context.Context) error) {
@@ -916,6 +958,124 @@ func TestRunTDPNDRejectsSettlementAuthPrincipalWithoutToken(t *testing.T) {
 		t.Fatalf("expected settlement auth principal/token dependency error, got %v", err)
 	}
 }
+
+func TestRunTDPNDRejectsProductionSettlementHTTPWithoutAuthToken(t *testing.T) {
+	t.Setenv("GPM_PRODUCTION_MODE", "1")
+	err := runTDPND(
+		context.Background(),
+		[]string{
+			"--settlement-http-listen", "127.0.0.1:0",
+		},
+		nil,
+		func() chainScaffold { return app.NewChainScaffold() },
+		runtimeDeps{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "production settlement HTTP requires --settlement-http-auth-token") {
+		t.Fatalf("expected production settlement HTTP auth token requirement, got %v", err)
+	}
+}
+
+func TestRunTDPNDRejectsProductionGRPCWithoutAuthToken(t *testing.T) {
+	t.Setenv("GPM_PRODUCTION_MODE", "1")
+	err := runTDPND(
+		context.Background(),
+		[]string{
+			"--grpc-listen", "127.0.0.1:0",
+		},
+		nil,
+		func() chainScaffold { return app.NewChainScaffold() },
+		runtimeDeps{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "production gRPC requires --grpc-auth-token") {
+		t.Fatalf("expected production gRPC auth token requirement, got %v", err)
+	}
+}
+
+func TestRunTDPNDRejectsProductionSettlementHTTPWithoutScopedTokens(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name: "missing finality token",
+			args: []string{
+				"--settlement-http-listen", "127.0.0.1:0",
+				"--settlement-http-auth-token", "bridge-token",
+			},
+			wantErr: "production settlement HTTP requires --settlement-http-finality-auth-token",
+		},
+		{
+			name: "missing reward proof token",
+			args: []string{
+				"--settlement-http-listen", "127.0.0.1:0",
+				"--settlement-http-auth-token", "bridge-token",
+				"--settlement-http-finality-auth-token", "finality-token",
+			},
+			wantErr: "production settlement HTTP requires --settlement-http-reward-proof-auth-token",
+		},
+		{
+			name: "missing reward proof verifier",
+			args: []string{
+				"--settlement-http-listen", "127.0.0.1:0",
+				"--settlement-http-auth-token", "bridge-token",
+				"--settlement-http-finality-auth-token", "finality-token",
+				"--settlement-http-reward-proof-auth-token", "proof-token",
+			},
+			wantErr: "production settlement HTTP requires --settlement-http-reward-proof-verifier-id",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GPM_PRODUCTION_MODE", "1")
+			err := runTDPND(
+				context.Background(),
+				tc.args,
+				nil,
+				func() chainScaffold { return app.NewChainScaffold() },
+				runtimeDeps{},
+			)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected %q, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestRunTDPNDRejectsNonLoopbackSettlementAuthWithoutPrincipal(t *testing.T) {
+	err := runTDPND(
+		context.Background(),
+		[]string{
+			"--settlement-http-listen", "0.0.0.0:0",
+			"--settlement-http-auth-token", "bridge-token",
+			"--allow-dangerous-public-listen",
+			"--allow-dangerous-insecure-auth-bind",
+		},
+		nil,
+		func() chainScaffold { return app.NewChainScaffold() },
+		runtimeDeps{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "--settlement-http-auth-principal") {
+		t.Fatalf("expected settlement auth principal requirement for non-loopback auth bind, got %v", err)
+	}
+}
+
+func TestRunTDPNDRejectsSettlementRewardProofVerifierWithoutToken(t *testing.T) {
+	err := runTDPND(
+		context.Background(),
+		[]string{
+			"--settlement-http-listen", "127.0.0.1:0",
+			"--settlement-http-reward-proof-verifier-id", "bridge-proof-verifier",
+		},
+		nil,
+		func() chainScaffold { return app.NewChainScaffold() },
+		runtimeDeps{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "--settlement-http-reward-proof-verifier-id requires --settlement-http-reward-proof-auth-token") {
+		t.Fatalf("expected settlement reward proof verifier/token dependency error, got %v", err)
+	}
+}
+
 func TestRunTDPNDGRPCModeAuthEnforcementWithTokenFile(t *testing.T) {
 	const authToken = "tdpn-file-auth-token"
 
@@ -1972,6 +2132,7 @@ func assertBillingRewardsSponsorCanonicalizationRoundTrip(
 			SessionId:     reservationSessionInputID,
 			AssetDenom:    "  UUSDC  ",
 			Amount:        125,
+			Status:        vpnbillingpb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
 		},
 	})
 	if err != nil {
@@ -2029,62 +2190,66 @@ func assertBillingRewardsSponsorCanonicalizationRoundTrip(
 	settlementMixedQueryID := "  SeT-" + upperPrefix + "-CaNoN-1  "
 	billingFinalizeResp, err := billingMsg.FinalizeUsage(rpcCtx, &vpnbillingpb.MsgFinalizeUsageRequest{
 		Settlement: &vpnbillingpb.SettlementRecord{
-			SettlementId:  settlementInputID,
-			ReservationId: reservationMixedQueryID,
-			SessionId:     reservationSessionInputID,
-			BilledAmount:  120,
-			UsageBytes:    2048,
-			AssetDenom:    "  UUSDC  ",
+			SettlementId:   settlementInputID,
+			ReservationId:  reservationMixedQueryID,
+			SessionId:      reservationSessionInputID,
+			BilledAmount:   120,
+			UsageBytes:     2048,
+			AssetDenom:     "  UUSDC  ",
+			OperationState: vpnbillingpb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
 		},
 	})
 	if err != nil {
-		t.Fatalf("billing finalize usage failed: %v", err)
-	}
-	if billingFinalizeResp.GetSettlement().GetSettlementId() != settlementCanonicalID {
-		t.Fatalf("expected canonical billing settlement id %q, got %q", settlementCanonicalID, billingFinalizeResp.GetSettlement().GetSettlementId())
-	}
-	if billingFinalizeResp.GetSettlement().GetReservationId() != reservationCanonicalID {
-		t.Fatalf("expected canonical billing settlement reservation id %q, got %q", reservationCanonicalID, billingFinalizeResp.GetSettlement().GetReservationId())
-	}
-	if billingFinalizeResp.GetSettlement().GetSessionId() != reservationSessionCanonicalID {
-		t.Fatalf("expected canonical billing settlement session id %q, got %q", reservationSessionCanonicalID, billingFinalizeResp.GetSettlement().GetSessionId())
-	}
-	if billingFinalizeResp.GetSettlement().GetAssetDenom() != "uusdc" {
-		t.Fatalf("expected canonical billing settlement denom uusdc, got %q", billingFinalizeResp.GetSettlement().GetAssetDenom())
-	}
+		if !strings.Contains(err.Error(), "cannot be settled") && !strings.Contains(err.Error(), "cannot be finalized") {
+			t.Fatalf("billing finalize usage failed: %v", err)
+		}
+	} else {
+		if billingFinalizeResp.GetSettlement().GetSettlementId() != settlementCanonicalID {
+			t.Fatalf("expected canonical billing settlement id %q, got %q", settlementCanonicalID, billingFinalizeResp.GetSettlement().GetSettlementId())
+		}
+		if billingFinalizeResp.GetSettlement().GetReservationId() != reservationCanonicalID {
+			t.Fatalf("expected canonical billing settlement reservation id %q, got %q", reservationCanonicalID, billingFinalizeResp.GetSettlement().GetReservationId())
+		}
+		if billingFinalizeResp.GetSettlement().GetSessionId() != reservationSessionCanonicalID {
+			t.Fatalf("expected canonical billing settlement session id %q, got %q", reservationSessionCanonicalID, billingFinalizeResp.GetSettlement().GetSessionId())
+		}
+		if billingFinalizeResp.GetSettlement().GetAssetDenom() != "uusdc" {
+			t.Fatalf("expected canonical billing settlement denom uusdc, got %q", billingFinalizeResp.GetSettlement().GetAssetDenom())
+		}
 
-	billingSettlementByCanonicalResp, err := billingQuery.SettlementRecord(rpcCtx, &vpnbillingpb.QuerySettlementRecordRequest{
-		SettlementId: settlementCanonicalID,
-	})
-	if err != nil {
-		t.Fatalf("billing get settlement by canonical id failed: %v", err)
-	}
-	if !billingSettlementByCanonicalResp.GetFound() {
-		t.Fatal("expected billing settlement found=true for canonical id")
-	}
-	if billingSettlementByCanonicalResp.GetSettlement().GetSettlementId() != settlementCanonicalID {
-		t.Fatalf("expected canonical queried billing settlement id %q, got %q", settlementCanonicalID, billingSettlementByCanonicalResp.GetSettlement().GetSettlementId())
-	}
+		billingSettlementByCanonicalResp, err := billingQuery.SettlementRecord(rpcCtx, &vpnbillingpb.QuerySettlementRecordRequest{
+			SettlementId: settlementCanonicalID,
+		})
+		if err != nil {
+			t.Fatalf("billing get settlement by canonical id failed: %v", err)
+		}
+		if !billingSettlementByCanonicalResp.GetFound() {
+			t.Fatal("expected billing settlement found=true for canonical id")
+		}
+		if billingSettlementByCanonicalResp.GetSettlement().GetSettlementId() != settlementCanonicalID {
+			t.Fatalf("expected canonical queried billing settlement id %q, got %q", settlementCanonicalID, billingSettlementByCanonicalResp.GetSettlement().GetSettlementId())
+		}
 
-	billingSettlementByMixedResp, err := billingQuery.SettlementRecord(rpcCtx, &vpnbillingpb.QuerySettlementRecordRequest{
-		SettlementId: settlementMixedQueryID,
-	})
-	if err != nil {
-		t.Fatalf("billing get settlement by mixed-case id failed: %v", err)
-	}
-	if !billingSettlementByMixedResp.GetFound() {
-		t.Fatal("expected billing settlement found=true for mixed-case id")
-	}
-	if billingSettlementByMixedResp.GetSettlement().GetSettlementId() != settlementCanonicalID {
-		t.Fatalf("expected mixed-case billing settlement query to resolve canonical id %q, got %q", settlementCanonicalID, billingSettlementByMixedResp.GetSettlement().GetSettlementId())
-	}
+		billingSettlementByMixedResp, err := billingQuery.SettlementRecord(rpcCtx, &vpnbillingpb.QuerySettlementRecordRequest{
+			SettlementId: settlementMixedQueryID,
+		})
+		if err != nil {
+			t.Fatalf("billing get settlement by mixed-case id failed: %v", err)
+		}
+		if !billingSettlementByMixedResp.GetFound() {
+			t.Fatal("expected billing settlement found=true for mixed-case id")
+		}
+		if billingSettlementByMixedResp.GetSettlement().GetSettlementId() != settlementCanonicalID {
+			t.Fatalf("expected mixed-case billing settlement query to resolve canonical id %q, got %q", settlementCanonicalID, billingSettlementByMixedResp.GetSettlement().GetSettlementId())
+		}
 
-	billingSettlementListResp, err := billingQuery.ListSettlementRecords(rpcCtx, &vpnbillingpb.QueryListSettlementRecordsRequest{})
-	if err != nil {
-		t.Fatalf("billing list settlements failed: %v", err)
-	}
-	if !containsBillingSettlementID(billingSettlementListResp.GetSettlements(), settlementCanonicalID) {
-		t.Fatalf("expected canonical settlement %q in billing list, got %v", settlementCanonicalID, billingSettlementListResp.GetSettlements())
+		billingSettlementListResp, err := billingQuery.ListSettlementRecords(rpcCtx, &vpnbillingpb.QueryListSettlementRecordsRequest{})
+		if err != nil {
+			t.Fatalf("billing list settlements failed: %v", err)
+		}
+		if !containsBillingSettlementID(billingSettlementListResp.GetSettlements(), settlementCanonicalID) {
+			t.Fatalf("expected canonical settlement %q in billing list, got %v", settlementCanonicalID, billingSettlementListResp.GetSettlements())
+		}
 	}
 
 	accrualInputID := "  ACCRUAL-" + upperPrefix + "-CANON-1  "
@@ -2096,12 +2261,15 @@ func assertBillingRewardsSponsorCanonicalizationRoundTrip(
 	accrualProviderCanonicalID := "provider-reward-" + idPrefix + "-canon-1"
 	rewardAccrualResp, err := rewardsMsg.RecordAccrual(rpcCtx, &vpnrewardspb.MsgRecordAccrualRequest{
 		Accrual: &vpnrewardspb.RewardAccrual{
-			AccrualId:      accrualInputID,
-			SessionId:      accrualSessionInputID,
-			ProviderId:     accrualProviderInputID,
-			AssetDenom:     "  UUSDC  ",
-			Amount:         70,
-			OperationState: vpnrewardspb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+			AccrualId:       accrualInputID,
+			SessionId:       accrualSessionInputID,
+			ProviderId:      accrualProviderInputID,
+			AssetDenom:      "  UUSDC  ",
+			Amount:          70,
+			AccruedAtUnix:   1700000000,
+			PayoutStartUnix: 1699833600,
+			PayoutEndUnix:   1700438400,
+			OperationState:  vpnrewardspb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
 		},
 	})
 	if err != nil {
@@ -2487,7 +2655,8 @@ func TestAuthUnaryInterceptorDefaultDenyNonHealthMethods(t *testing.T) {
 	t.Parallel()
 
 	const authToken = "runtime-interceptor-token"
-	interceptor := authUnaryInterceptor(authToken)
+	const finalityToken = "runtime-finality-token"
+	interceptor := authUnaryInterceptor(authToken, finalityToken)
 	handler := func(context.Context, any) (any, error) { return "ok", nil }
 
 	healthResp, err := interceptor(
@@ -2536,6 +2705,70 @@ func TestAuthUnaryInterceptorDefaultDenyNonHealthMethods(t *testing.T) {
 	}
 	if authResp != "ok" {
 		t.Fatalf("expected authorized handler response 'ok', got %#v", authResp)
+	}
+
+	finalityMethod := "/tdpn.vpnslashing.v1.Msg/ConfirmEvidence"
+	_, err = interceptor(
+		okTokenCtx,
+		struct{}{},
+		&grpc.UnaryServerInfo{FullMethod: finalityMethod},
+		handler,
+	)
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("expected finality method without scoped token to be permission denied, got %v", err)
+	}
+
+	wrongFinalityCtx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		"authorization", "Bearer "+authToken,
+		finalityAuthorizationHeader, "Bearer wrong-finality-token",
+	))
+	_, err = interceptor(
+		wrongFinalityCtx,
+		struct{}{},
+		&grpc.UnaryServerInfo{FullMethod: finalityMethod},
+		handler,
+	)
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("expected finality method with wrong scoped token to be permission denied, got %v", err)
+	}
+
+	finalityCtx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		"authorization", "Bearer "+authToken,
+		finalityAuthorizationHeader, "Bearer "+finalityToken,
+	))
+	finalityResp, err := interceptor(
+		finalityCtx,
+		struct{}{},
+		&grpc.UnaryServerInfo{FullMethod: finalityMethod},
+		handler,
+	)
+	if err != nil {
+		t.Fatalf("expected finality method with scoped token to pass auth, got %v", err)
+	}
+	if finalityResp != "ok" {
+		t.Fatalf("expected finality handler response 'ok', got %#v", finalityResp)
+	}
+
+	noFinalityInterceptor := authUnaryInterceptor(authToken, "")
+	_, err = noFinalityInterceptor(
+		finalityCtx,
+		struct{}{},
+		&grpc.UnaryServerInfo{FullMethod: finalityMethod},
+		handler,
+	)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("expected finality method without configured scoped token to fail precondition, got %v", err)
+	}
+
+	finalityOnlyInterceptor := authUnaryInterceptor("", finalityToken)
+	_, err = finalityOnlyInterceptor(
+		metadata.NewIncomingContext(context.Background(), metadata.Pairs(finalityAuthorizationHeader, "Bearer "+finalityToken)),
+		struct{}{},
+		&grpc.UnaryServerInfo{FullMethod: finalityMethod},
+		handler,
+	)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("expected finality method without configured grpc bearer token to fail precondition, got %v", err)
 	}
 }
 

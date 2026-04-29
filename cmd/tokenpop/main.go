@@ -38,6 +38,9 @@ func runGen(args []string) {
 	if err != nil {
 		exitf("keygen failed: %v", err)
 	}
+	if *showPrivateKey && !allowStdoutPrivateKeys() {
+		exitf("--show-private-key requires GPM_ALLOW_STDOUT_PRIVATE_KEYS=1")
+	}
 	out := map[string]string{
 		"public_key": crypto.EncodeEd25519PublicKey(pub),
 	}
@@ -45,6 +48,16 @@ func runGen(args []string) {
 		out["private_key"] = base64.RawURLEncoding.EncodeToString(priv)
 	}
 	writeJSON(out)
+}
+
+func allowStdoutPrivateKeys() bool {
+	for _, name := range []string{"GPM_ALLOW_STDOUT_PRIVATE_KEYS", "GPM_TEST_ALLOW_STDOUT_PRIVATE_KEYS", "TDPN_ALLOW_STDOUT_PRIVATE_KEYS"} {
+		switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+		case "1", "true", "yes", "on":
+			return true
+		}
+	}
+	return false
 }
 
 func runSign(args []string) {

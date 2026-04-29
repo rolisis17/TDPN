@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	chaintypes "github.com/tdpn/tdpn-chain/types"
 	billingtypes "github.com/tdpn/tdpn-chain/x/vpnbilling/types"
 )
 
@@ -61,9 +62,11 @@ func TestNewChainScaffoldWithStateDirPersistsAcrossReopen(t *testing.T) {
 	_, err = scaffoldA.BillingMsgServer().CreateReservation(context.Background(), BillingCreateReservationRequest{
 		Record: billingtypes.CreditReservation{
 			ReservationID: reservationID,
+			SponsorID:     "sponsor-persist-1",
 			SessionID:     sessionID,
 			Amount:        100,
 			AssetDenom:    "TDPNC",
+			Status:        chaintypes.ReconciliationConfirmed,
 		},
 	})
 	if err != nil {
@@ -71,11 +74,12 @@ func TestNewChainScaffoldWithStateDirPersistsAcrossReopen(t *testing.T) {
 	}
 	_, err = scaffoldA.BillingMsgServer().FinalizeSettlement(context.Background(), BillingFinalizeSettlementRequest{
 		Record: billingtypes.SettlementRecord{
-			SettlementID:  settlementID,
-			ReservationID: reservationID,
-			SessionID:     sessionID,
-			BilledAmount:  75,
-			AssetDenom:    "TDPNC",
+			SettlementID:   settlementID,
+			ReservationID:  reservationID,
+			SessionID:      sessionID,
+			BilledAmount:   75,
+			AssetDenom:     "TDPNC",
+			OperationState: chaintypes.ReconciliationConfirmed,
 		},
 	})
 	if err != nil {

@@ -8,6 +8,7 @@ import "tdpn/vpnslashing/v1/types.proto";
 
 service Msg {
   rpc SubmitEvidence(MsgSubmitEvidenceRequest) returns (MsgSubmitEvidenceResponse);
+  rpc ConfirmEvidence(MsgConfirmEvidenceRequest) returns (MsgConfirmEvidenceResponse);
   rpc RecordPenalty(MsgRecordPenaltyRequest) returns (MsgRecordPenaltyResponse);
 }
 
@@ -16,6 +17,14 @@ message MsgSubmitEvidenceRequest {
 }
 
 message MsgSubmitEvidenceResponse {
+  SlashEvidence evidence = 1;
+}
+
+message MsgConfirmEvidenceRequest {
+  string evidence_id = 1;
+}
+
+message MsgConfirmEvidenceResponse {
   SlashEvidence evidence = 1;
 }
 

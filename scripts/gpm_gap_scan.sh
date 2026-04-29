@@ -18,7 +18,8 @@ Description:
   Scans docs/gpm-productization-status.md and emits a deterministic markdown
   summary focused on In-Progress and Missing / Next roadmap gaps. When a
   roadmap summary JSON is provided, adds selected machine-readable blockers
-  from the live roadmap artifact.
+  from the live roadmap artifact. The summary JSON includes backward-compatible
+  item metadata for actionability classification.
 
 Defaults:
   --status-doc docs/gpm-productization-status.md
@@ -242,6 +243,12 @@ declare -a ITEM_TEXTS=()
 declare -a ITEM_NORMALIZED_TEXTS=()
 declare -a ITEM_SEVERITIES=()
 declare -a ITEM_RECOMMENDED_ACTIONS=()
+declare -a ITEM_CLOSURE_MODES=()
+declare -a ITEM_BLOCKED_BYS=()
+declare -a ITEM_REQUIRES_REAL_HOSTS=()
+declare -a ITEM_SUGGESTED_TESTS=()
+declare -a ITEM_SUGGESTED_FILES=()
+declare -a ITEM_ACTIONABLES=()
 
 in_progress_count=0
 missing_next_count=0
@@ -263,6 +270,12 @@ flush_pending_item() {
     ITEM_NORMALIZED_TEXTS+=("$item_normalized")
     ITEM_SEVERITIES+=("$(infer_item_severity "$pending_section" "$item_normalized")")
     ITEM_RECOMMENDED_ACTIONS+=("$(infer_item_recommended_action "$pending_section" "$item_normalized")")
+    ITEM_CLOSURE_MODES+=("$(infer_item_closure_mode "$pending_section" "$item_normalized")")
+    ITEM_BLOCKED_BYS+=("$(infer_item_blocked_by "$pending_section" "$item_normalized")")
+    ITEM_REQUIRES_REAL_HOSTS+=("$(infer_item_requires_real_hosts "$pending_section" "$item_normalized")")
+    ITEM_SUGGESTED_TESTS+=("$(infer_item_suggested_tests "$pending_section" "$item_normalized")")
+    ITEM_SUGGESTED_FILES+=("$(infer_item_suggested_files "$pending_section" "$item_normalized")")
+    ITEM_ACTIONABLES+=("$(infer_item_actionable "$pending_section" "$item_normalized")")
     if [[ "$pending_section" == "in_progress" ]]; then
       in_progress_count=$((in_progress_count + 1))
     elif [[ "$pending_section" == "missing_next" ]]; then
@@ -287,6 +300,12 @@ append_gap_item() {
   ITEM_NORMALIZED_TEXTS+=("$item_normalized")
   ITEM_SEVERITIES+=("$(infer_item_severity "$section" "$item_normalized")")
   ITEM_RECOMMENDED_ACTIONS+=("$(infer_item_recommended_action "$section" "$item_normalized")")
+  ITEM_CLOSURE_MODES+=("$(infer_item_closure_mode "$section" "$item_normalized")")
+  ITEM_BLOCKED_BYS+=("$(infer_item_blocked_by "$section" "$item_normalized")")
+  ITEM_REQUIRES_REAL_HOSTS+=("$(infer_item_requires_real_hosts "$section" "$item_normalized")")
+  ITEM_SUGGESTED_TESTS+=("$(infer_item_suggested_tests "$section" "$item_normalized")")
+  ITEM_SUGGESTED_FILES+=("$(infer_item_suggested_files "$section" "$item_normalized")")
+  ITEM_ACTIONABLES+=("$(infer_item_actionable "$section" "$item_normalized")")
   if [[ "$section" == "in_progress" ]]; then
     in_progress_count=$((in_progress_count + 1))
   elif [[ "$section" == "missing_next" ]]; then
@@ -294,9 +313,48 @@ append_gap_item() {
   fi
 }
 
+is_informational_gap_item() {
+  local normalized_text="${1:-}"
+  if [[ "$normalized_text" == "tooling note:"* \
+     || "$normalized_text" == "tooling note "* \
+     || "$normalized_text" == "operator note:"* \
+     || "$normalized_text" == "operator note "* \
+     || "$normalized_text" == "compatibility note:"* \
+     || "$normalized_text" == "compatibility note "* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+is_auth_wallet_gap_item() {
+  local normalized_text="${1:-}"
+  if [[ "$normalized_text" == *"auth hardening"* \
+     || "$normalized_text" == *"keplr"* \
+     || "$normalized_text" == *"leap"* \
+     || ( "$normalized_text" == *"wallet-extension"* && "$normalized_text" == *"secp256k1"* ) \
+     || ( "$normalized_text" == *"wallet extension"* && "$normalized_text" == *"secp256k1"* ) ]]; then
+    return 0
+  fi
+  return 1
+}
+
+infer_item_actionable() {
+  local section="${1:-}"
+  local normalized_text="${2:-}"
+  if is_informational_gap_item "$normalized_text"; then
+    printf '%s' "false"
+    return
+  fi
+  printf '%s' "true"
+}
+
 infer_item_severity() {
   local section="${1:-}"
   local normalized_text="${2:-}"
+  if is_informational_gap_item "$normalized_text"; then
+    printf '%s' "p3"
+    return
+  fi
   if [[ "$normalized_text" == *"blocked"* \
      || "$normalized_text" == *"blocker"* \
      || "$normalized_text" == *"no-go"* \
@@ -320,6 +378,67 @@ infer_item_severity() {
 infer_item_recommended_action() {
   local section="${1:-}"
   local normalized_text="${2:-}"
+  if is_informational_gap_item "$normalized_text"; then
+    printf '%s' "No direct closure action; use this note as operator guidance for related roadmap blockers."
+    return
+  fi
+  local reservation_signal="0"
+  if [[ "$normalized_text" == *"reservation-write"* \
+     || "$normalized_text" == *"reservation write"* \
+     || "$normalized_text" == *"vpnbilling/reservations"* \
+     || ( "$normalized_text" == *"reservefunds"* && "$normalized_text" == *"chain"* ) ]]; then
+    reservation_signal="1"
+  fi
+  local proof_signal="0"
+  if [[ ( "$normalized_text" == *"reward proof"* || "$normalized_text" == *"objective proof"* || "$normalized_text" == *"proof reference"* || "$normalized_text" == *"proof-reference"* || "$normalized_text" == *"proof-validation"* || "$normalized_text" == *"proof verification"* || "$normalized_text" == *"proof-registry"* ) \
+     && ( "$normalized_text" == *"trust"* || "$normalized_text" == *"shape"* || "$normalized_text" == *"unverified"* || "$normalized_text" == *"verification"* || "$normalized_text" == *"registry"* || "$normalized_text" == *"blocked"* || "$normalized_text" == *"signoff"* ) ]]; then
+    proof_signal="1"
+  fi
+  local confirmation_signal="0"
+  if [[ ( "$normalized_text" == *"confirmation"* || "$normalized_text" == *"confirmed"* || "$normalized_text" == *"reconcile"* || "$normalized_text" == *"chain state"* || "$normalized_text" == *"chain-status"* || "$normalized_text" == *"chain status"* ) \
+     && ( "$normalized_text" == *"existence"* || "$normalized_text" == *"pending"* || "$normalized_text" == *"submitted"* || "$normalized_text" == *"promot"* || "$normalized_text" == *"final"* ) ]]; then
+    confirmation_signal="1"
+  fi
+  if [[ "$reservation_signal" == "1" && ( "$proof_signal" == "1" || "$confirmation_signal" == "1" ) ]]; then
+    printf '%s' "Close live-chain reservation evidence, objective proof verification, and finalized chain confirmation before payout signoff."
+    return
+  fi
+  if [[ "$reservation_signal" == "1" ]]; then
+    if [[ "$normalized_text" == *"still missing"* \
+       || "$normalized_text" == *"api subject_id reservation binding"* \
+       || "$normalized_text" == *"add authenticated local gpm reservefunds"* \
+       || "$normalized_text" == *"local gpm api"* && "$normalized_text" == *"missing"* ]]; then
+      printf '%s' "Wire the local GPM ReserveFunds API path, then archive API-to-chain reservation evidence."
+      return
+    fi
+    printf '%s' "Archive API-to-chain ReserveFunds reservation evidence, then rerun live bridge reservation/settlement smoke."
+    return
+  fi
+  if [[ ( "$normalized_text" == *"middle-hop"* || "$normalized_text" == *"middle hop"* || "$normalized_text" == *"3-hop"* || "$normalized_text" == *"3hop"* ) \
+     && ( "$normalized_text" == *"anti-downgrade"* || "$normalized_text" == *"downgrad"* || "$normalized_text" == *"path/profile"* || "$normalized_text" == *"strict"* ) ]]; then
+    printf '%s' "Close M3 exit-side anti-downgrade binding with path/profile/middle assertions and focused route tests."
+    return
+  fi
+  if [[ ( "$normalized_text" == *"middle-hop"* || "$normalized_text" == *"middle hop"* || "$normalized_text" == *"middle relay"* || "$normalized_text" == *"middle role"* || "$normalized_text" == *"3-hop"* || "$normalized_text" == *"3hop"* ) \
+     && ( "$normalized_text" == *"production"* || "$normalized_text" == *"control-plane"* || "$normalized_text" == *"data service"* || "$normalized_text" == *"service contract"* || "$normalized_text" == *"deployment"* || "$normalized_text" == *"admission policy"* ) ]]; then
+    printf '%s' "Validate the local production middle role contract, then publish real-host middle-hop evidence and deployment admission policy."
+    return
+  fi
+  if [[ ( "$normalized_text" == *"reward proof"* || "$normalized_text" == *"objective proof"* || "$normalized_text" == *"proof reference"* || "$normalized_text" == *"proof-reference"* || "$normalized_text" == *"proof-validation"* || "$normalized_text" == *"proof verification"* || "$normalized_text" == *"proof-registry"* ) \
+     && ( "$normalized_text" == *"trust"* || "$normalized_text" == *"shape"* || "$normalized_text" == *"unverified"* || "$normalized_text" == *"verification"* || "$normalized_text" == *"registry"* || "$normalized_text" == *"blocked"* ) ]]; then
+    printf '%s' "Promote reward/slashing proof references from shape checks to objective proof registry verification before payout signoff."
+    return
+  fi
+  if [[ ( "$normalized_text" == *"confirmation"* || "$normalized_text" == *"confirmed"* || "$normalized_text" == *"reconcile"* || "$normalized_text" == *"chain state"* || "$normalized_text" == *"chain-status"* || "$normalized_text" == *"chain status"* ) \
+     && ( "$normalized_text" == *"existence"* || "$normalized_text" == *"pending"* || "$normalized_text" == *"submitted"* || "$normalized_text" == *"promot"* || "$normalized_text" == *"final"* ) ]]; then
+    printf '%s' "Require finalized chain status during settlement reconciliation; do not promote submitted records from existence alone."
+    return
+  fi
+  if [[ ( "$normalized_text" == *"replay guard"* || "$normalized_text" == *"replay-guard"* || "$normalized_text" == *"replay storage"* || "$normalized_text" == *"replay-storage"* || "$normalized_text" == *"replay cache"* || "$normalized_text" == *"replay-cache"* ) \
+     && ( "$normalized_text" == *"durable"* || "$normalized_text" == *"strict"* || "$normalized_text" == *"multi-instance"* || "$normalized_text" == *"production"* ) ]]; then
+    printf '%s' "Require durable shared replay storage for strict production exit deployments and add restart/multi-instance regressions."
+    return
+  fi
   if [[ "$normalized_text" == *"invite_key"* \
      || "$normalized_text" == *"campaign-subject"* \
      || "$normalized_text" == *"subject"* ]]; then
@@ -346,11 +465,458 @@ infer_item_recommended_action() {
     printf '%s' "Capture real-host validation artifacts and attach them to the promoted summary path."
     return
   fi
+  if [[ "$normalized_text" == *"direct-exit fallback"* \
+     || "$normalized_text" == *"direct exit fallback"* \
+     || "$normalized_text" == *"explicit 1hop"* \
+     || ( "$normalized_text" == *"route hardening"* && "$normalized_text" == *"fallback"* ) ]]; then
+    printf '%s' "Close the direct-exit fallback ambiguity with a fail-closed runtime gate and profile contract regression."
+    return
+  fi
+  if is_auth_wallet_gap_item "$normalized_text"; then
+    printf '%s' "Archive Keplr/Leap wallet-extension auth evidence for secp256k1 binding and mismatched-wallet rejection."
+    return
+  fi
+  if ! is_auth_wallet_gap_item "$normalized_text" && [[ "$normalized_text" == *"admin console"* \
+     || "$normalized_text" == *"admin"* \
+     || "$normalized_text" == *"settlement"* \
+     || "$normalized_text" == *"payout"* \
+     || "$normalized_text" == *"slashing"* \
+     || "$normalized_text" == *"slash"* \
+     || "$normalized_text" == *"dispute"* \
+     || "$normalized_text" == *"finalization"* \
+     || "$normalized_text" == *"finalize"* ]]; then
+    printf '%s' "Run Admin Console settlement/slashing validation, then archive live-chain payout evidence."
+    return
+  fi
   if [[ "$section" == "missing_next" ]]; then
     printf '%s' "Close this missing/next gap with one deterministic command and summary artifact."
     return
   fi
   printf '%s' "Continue implementation and refresh summary artifacts for this in-progress item."
+}
+
+infer_item_closure_mode() {
+  local section="${1:-}"
+  local normalized_text="${2:-}"
+  if is_informational_gap_item "$normalized_text"; then
+    printf '%s' "local_only"
+    return
+  fi
+  if [[ "$normalized_text" == *"real-host"* \
+     || "$normalized_text" == *"real host"* \
+     || "$normalized_text" == *"a_host"* \
+     || "$normalized_text" == *"b_host"* \
+     || "$normalized_text" == *"vm command"* \
+     || "$normalized_text" == *"--vm-command"* \
+     || "$normalized_text" == *"multi-vm"* ]]; then
+    printf '%s' "real_host_required"
+    return
+  fi
+  if [[ "$normalized_text" == *"runtime-actuation"* \
+     || "$normalized_text" == *"promotion cycle"* \
+     || "$normalized_text" == *"live stability"* \
+     || "$normalized_text" == *"live wg"* \
+     || "$normalized_text" == *"wireguard"* \
+     || "$normalized_text" == *"network"* \
+     || "$normalized_text" == *"live chain"* \
+     || "$normalized_text" == *"chain-bound"* \
+     || "$normalized_text" == *"chain settlement"* \
+     || "$normalized_text" == *"proof registry"* \
+     || "$normalized_text" == *"proof-registry"* \
+     || "$normalized_text" == *"proof verification"* \
+     || "$normalized_text" == *"cosmos"* ]]; then
+    printf '%s' "network_required"
+    return
+  fi
+  printf '%s' "local_only"
+}
+
+infer_item_blocked_by() {
+  local section="${1:-}"
+  local normalized_text="${2:-}"
+  local blockers=()
+  if is_informational_gap_item "$normalized_text"; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$normalized_text" == *"unresolved placeholder"* \
+     || "$normalized_text" == *"invite_key"* \
+     || "$normalized_text" == *"campaign-subject"* \
+     || "$normalized_text" == *"a_host"* \
+     || "$normalized_text" == *"b_host"* ]]; then
+    blockers+=("unresolved_placeholders")
+  fi
+  if [[ "$normalized_text" == *"real-host"* \
+     || "$normalized_text" == *"real host"* \
+     || "$normalized_text" == *"a_host"* \
+     || "$normalized_text" == *"b_host"* ]]; then
+    blockers+=("real_hosts")
+  fi
+  if [[ "$normalized_text" == *"vm command"* \
+     || "$normalized_text" == *"--vm-command"* \
+     || "$normalized_text" == *"multi-vm"* ]]; then
+    blockers+=("vm_command_source")
+  fi
+  if [[ "$normalized_text" == *"runtime-actuation"* \
+     || "$normalized_text" == *"promotion is not green"* \
+     || "$normalized_text" == *"decision=no-go"* \
+     || "$normalized_text" == *"threshold"* ]]; then
+    blockers+=("promotion_thresholds")
+  fi
+  if [[ "$normalized_text" == *"live stability"* \
+     || "$normalized_text" == *"live wg"* \
+     || "$normalized_text" == *"wireguard"* \
+     || "$normalized_text" == *"network"* ]]; then
+    blockers+=("network")
+  fi
+  if [[ "$normalized_text" == *"direct-exit fallback"* \
+     || "$normalized_text" == *"direct exit fallback"* \
+     || "$normalized_text" == *"explicit 1hop"* \
+     || ( "$normalized_text" == *"route hardening"* && "$normalized_text" == *"fallback"* ) \
+     || ( ( "$normalized_text" == *"middle-hop"* || "$normalized_text" == *"middle hop"* || "$normalized_text" == *"3-hop"* || "$normalized_text" == *"3hop"* ) \
+       && ( "$normalized_text" == *"anti-downgrade"* || "$normalized_text" == *"downgrad"* || "$normalized_text" == *"path/profile"* || "$normalized_text" == *"strict"* ) ) \
+     || ( ( "$normalized_text" == *"middle-hop"* || "$normalized_text" == *"middle hop"* || "$normalized_text" == *"middle relay"* || "$normalized_text" == *"3-hop"* || "$normalized_text" == *"3hop"* ) \
+       && ( "$normalized_text" == *"production"* || "$normalized_text" == *"control-plane"* || "$normalized_text" == *"data service"* || "$normalized_text" == *"service contract"* ) ) ]]; then
+    blockers+=("route_policy")
+  fi
+  if [[ ( "$normalized_text" == *"middle-hop"* || "$normalized_text" == *"middle hop"* || "$normalized_text" == *"middle relay"* || "$normalized_text" == *"middle role"* || "$normalized_text" == *"3-hop"* || "$normalized_text" == *"3hop"* ) \
+     && ( "$normalized_text" == *"production"* || "$normalized_text" == *"control-plane"* || "$normalized_text" == *"data service"* || "$normalized_text" == *"service contract"* ) \
+     && "$normalized_text" != *"available via go run ./cmd/node --middle"* \
+     && "$normalized_text" != *"production middle role"* \
+     && "$normalized_text" != *"local middle role"* ]]; then
+    blockers+=("middle_service_contract")
+  fi
+  if [[ ( "$normalized_text" == *"middle-hop"* || "$normalized_text" == *"middle hop"* || "$normalized_text" == *"middle relay"* || "$normalized_text" == *"middle role"* || "$normalized_text" == *"3-hop"* || "$normalized_text" == *"3hop"* ) \
+     && ( "$normalized_text" == *"deployment"* || "$normalized_text" == *"admission policy"* ) ]]; then
+    blockers+=("production_admission_policy")
+  fi
+  if [[ "$normalized_text" == *"evidence pack"* \
+     || "$normalized_text" == *"evidence-pack"* \
+     || "$normalized_text" == *"capture/publish"* ]]; then
+    blockers+=("evidence_pack_artifacts")
+  fi
+  if is_auth_wallet_gap_item "$normalized_text"; then
+    blockers+=("wallet_extension_evidence")
+  fi
+  if ! is_auth_wallet_gap_item "$normalized_text" && [[ "$normalized_text" == *"admin console"* \
+     || "$normalized_text" == *"admin"* \
+     || "$normalized_text" == *"settlement"* \
+     || "$normalized_text" == *"payout"* \
+     || "$normalized_text" == *"slashing"* \
+     || "$normalized_text" == *"slash"* \
+     || "$normalized_text" == *"dispute"* \
+     || "$normalized_text" == *"finalization"* \
+     || "$normalized_text" == *"finalize"* ]]; then
+    blockers+=("admin_settlement_validation")
+  fi
+  if [[ "$normalized_text" == *"reservation-write"* \
+     || "$normalized_text" == *"reservation write"* \
+     || "$normalized_text" == *"vpnbilling/reservations"* \
+     || ( "$normalized_text" == *"reservefunds"* && "$normalized_text" == *"chain"* ) ]]; then
+    blockers+=("local_api_reservation_evidence")
+  fi
+  if [[ ( "$normalized_text" == *"reward proof"* || "$normalized_text" == *"objective proof"* || "$normalized_text" == *"proof reference"* || "$normalized_text" == *"proof-reference"* || "$normalized_text" == *"proof-validation"* || "$normalized_text" == *"proof verification"* || "$normalized_text" == *"proof-registry"* ) \
+     && ( "$normalized_text" == *"trust"* || "$normalized_text" == *"shape"* || "$normalized_text" == *"unverified"* || "$normalized_text" == *"verification"* || "$normalized_text" == *"registry"* || "$normalized_text" == *"blocked"* ) ]]; then
+    blockers+=("objective_proof_verification")
+  fi
+  if [[ ( "$normalized_text" == *"confirmation"* || "$normalized_text" == *"confirmed"* || "$normalized_text" == *"reconcile"* || "$normalized_text" == *"chain state"* || "$normalized_text" == *"chain-status"* || "$normalized_text" == *"chain status"* ) \
+     && ( "$normalized_text" == *"existence"* || "$normalized_text" == *"pending"* || "$normalized_text" == *"submitted"* || "$normalized_text" == *"promot"* || "$normalized_text" == *"final"* ) ]]; then
+    blockers+=("chain_confirmation_status")
+  fi
+  if [[ ( "$normalized_text" == *"replay guard"* || "$normalized_text" == *"replay-guard"* || "$normalized_text" == *"replay storage"* || "$normalized_text" == *"replay-storage"* || "$normalized_text" == *"replay cache"* || "$normalized_text" == *"replay-cache"* ) \
+     && ( "$normalized_text" == *"durable"* || "$normalized_text" == *"strict"* || "$normalized_text" == *"multi-instance"* || "$normalized_text" == *"production"* ) ]]; then
+    blockers+=("durable_replay_storage")
+  fi
+  if [[ "$normalized_text" == *"live chain"* \
+     || "$normalized_text" == *"chain-bound"* \
+     || "$normalized_text" == *"chain settlement"* \
+     || "$normalized_text" == *"proof registry"* \
+     || "$normalized_text" == *"proof-registry"* \
+     || "$normalized_text" == *"proof verification"* \
+     || "$normalized_text" == *"reservation-write"* \
+     || "$normalized_text" == *"reservation write"* \
+     || "$normalized_text" == *"vpnbilling/reservations"* \
+     || "$normalized_text" == *"cosmos"* ]]; then
+    blockers+=("live_chain")
+  fi
+  if (( ${#blockers[@]} > 0 )); then
+    local IFS=","
+    printf '%s' "${blockers[*]}"
+    return
+  fi
+  printf '%s' ""
+}
+
+infer_item_requires_real_hosts() {
+  local section="${1:-}"
+  local normalized_text="${2:-}"
+  local closure_mode
+  if is_informational_gap_item "$normalized_text"; then
+    printf '%s' "false"
+    return
+  fi
+  closure_mode="$(infer_item_closure_mode "$section" "$normalized_text")"
+  if [[ "$closure_mode" == "real_host_required" ]]; then
+    printf '%s' "true"
+  else
+    printf '%s' "false"
+  fi
+}
+
+infer_item_suggested_tests() {
+  local section="${1:-}"
+  local normalized_text="${2:-}"
+  local tests=()
+  if is_informational_gap_item "$normalized_text"; then
+    printf '%s' ""
+    return
+  fi
+  if is_auth_wallet_gap_item "$normalized_text"; then
+    tests+=("go test ./services/localapi -run 'GPM.*Auth|Wallet|Keplr|Leap|Secp' -count=1")
+  fi
+  if [[ "$normalized_text" == *"invite_key"* \
+     || "$normalized_text" == *"campaign-subject"* \
+     || "$normalized_text" == *"profile-default"* \
+     || "$normalized_text" == *"subject"* ]]; then
+    tests+=("scripts/integration_client_vpn_path_profile_wiring.sh")
+  fi
+  if [[ "$normalized_text" == *"vm command"* \
+     || "$normalized_text" == *"--vm-command"* \
+     || "$normalized_text" == *"multi-vm"* ]]; then
+    tests+=("scripts/integration_3machine_prod_wg_validate.sh")
+  fi
+  if [[ "$normalized_text" == *"runtime-actuation"* \
+     || "$normalized_text" == *"promotion"* \
+     || "$normalized_text" == *"live wg"* \
+     || "$normalized_text" == *"wireguard"* ]]; then
+    tests+=("scripts/integration_client_3hop_runtime.sh")
+    tests+=("scripts/integration_live_wg_full_path_strict.sh")
+  fi
+  if [[ "$normalized_text" == *"direct-exit fallback"* \
+     || "$normalized_text" == *"direct exit fallback"* \
+     || "$normalized_text" == *"explicit 1hop"* \
+     || ( "$normalized_text" == *"route hardening"* && "$normalized_text" == *"fallback"* ) ]]; then
+    tests+=("go test ./internal/app -run 'DirectExitFallback|ValidateRuntimeConfig' -count=1")
+    tests+=("scripts/integration_client_vpn_path_profile_wiring.sh")
+  fi
+  if [[ ( "$normalized_text" == *"middle-hop"* || "$normalized_text" == *"middle hop"* || "$normalized_text" == *"3-hop"* || "$normalized_text" == *"3hop"* ) \
+     && ( "$normalized_text" == *"anti-downgrade"* || "$normalized_text" == *"downgrad"* || "$normalized_text" == *"path/profile"* || "$normalized_text" == *"strict"* ) ]]; then
+    tests+=("go test ./internal/app ./services/entry -run 'PathOpen|3Hop|Middle|Profile|Downgrade' -count=1")
+    tests+=("scripts/integration_client_3hop_runtime.sh")
+  fi
+  if [[ ( "$normalized_text" == *"middle-hop"* || "$normalized_text" == *"middle hop"* || "$normalized_text" == *"middle relay"* || "$normalized_text" == *"middle role"* || "$normalized_text" == *"3-hop"* || "$normalized_text" == *"3hop"* ) \
+     && ( "$normalized_text" == *"production"* || "$normalized_text" == *"control-plane"* || "$normalized_text" == *"data service"* || "$normalized_text" == *"service contract"* || "$normalized_text" == *"deployment"* || "$normalized_text" == *"admission policy"* ) ]]; then
+    tests+=("go test ./services/middle ./services/entry ./services/exit -run 'Middle|Relay|Ready|Stats|PathOpen|ServiceContract' -count=1")
+    tests+=("scripts/integration_middle_service_contract.sh")
+    tests+=("scripts/integration_client_3hop_runtime.sh")
+  fi
+  if [[ "$normalized_text" == *"evidence pack"* \
+     || "$normalized_text" == *"evidence-pack"* \
+     || "$normalized_text" == *"publish"* ]]; then
+    tests+=("scripts/integration_roadmap_progress_report.sh")
+  fi
+  if ! is_auth_wallet_gap_item "$normalized_text" && [[ "$normalized_text" == *"admin console"* \
+     || "$normalized_text" == *"admin"* \
+     || "$normalized_text" == *"settlement"* \
+     || "$normalized_text" == *"reservation-write"* \
+     || "$normalized_text" == *"reservation write"* \
+     || "$normalized_text" == *"vpnbilling/reservations"* \
+     || "$normalized_text" == *"payout"* \
+     || "$normalized_text" == *"slashing"* \
+     || "$normalized_text" == *"slash"* \
+     || "$normalized_text" == *"dispute"* \
+     || "$normalized_text" == *"finalization"* \
+     || "$normalized_text" == *"finalize"* ]]; then
+    tests+=("scripts/integration_gpm_admin_settlement_contract.sh")
+    tests+=("go test ./services/localapi -run GPMAdminRewardFinalize -count=1")
+    tests+=("go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1")
+  fi
+  if [[ "$normalized_text" == *"reservation-write"* \
+     || "$normalized_text" == *"reservation write"* \
+     || "$normalized_text" == *"vpnbilling/reservations"* \
+     || ( "$normalized_text" == *"reservefunds"* && "$normalized_text" == *"chain"* ) ]]; then
+    tests+=("go test ./services/localapi -run 'ReserveFunds|SettlementReservation|GPM.*Reservation' -count=1")
+    tests+=("go test ./pkg/settlement -run 'ReserveFunds|CosmosAdapter' -count=1")
+    tests+=("go test ./blockchain/tdpn-chain/cmd/tdpnd -run 'Settlement.*Reservation|BillingReservation' -count=1")
+  fi
+  if [[ ( "$normalized_text" == *"reward proof"* || "$normalized_text" == *"objective proof"* || "$normalized_text" == *"proof reference"* || "$normalized_text" == *"proof-reference"* || "$normalized_text" == *"proof-validation"* || "$normalized_text" == *"proof verification"* || "$normalized_text" == *"proof-registry"* ) \
+     && ( "$normalized_text" == *"trust"* || "$normalized_text" == *"shape"* || "$normalized_text" == *"unverified"* || "$normalized_text" == *"verification"* || "$normalized_text" == *"registry"* || "$normalized_text" == *"blocked"* ) ]]; then
+    tests+=("go test ./pkg/settlement -run 'IssueReward|Proof|Objective|FinalizeWeekly' -count=1")
+    tests+=("go test ./services/localapi -run 'GPMAdminRewardFinalize|RewardProof' -count=1")
+    tests+=("go test ./blockchain/tdpn-chain/cmd/tdpnd -run 'Reward|Proof|Settlement' -count=1")
+  fi
+  if [[ ( "$normalized_text" == *"confirmation"* || "$normalized_text" == *"confirmed"* || "$normalized_text" == *"reconcile"* || "$normalized_text" == *"chain state"* || "$normalized_text" == *"chain-status"* || "$normalized_text" == *"chain status"* ) \
+     && ( "$normalized_text" == *"existence"* || "$normalized_text" == *"pending"* || "$normalized_text" == *"submitted"* || "$normalized_text" == *"promot"* || "$normalized_text" == *"final"* ) ]]; then
+    tests+=("go test ./pkg/settlement -run 'Reconcile|Confirmation|Pending|Submitted' -count=1")
+    tests+=("go test ./services/localapi -run 'Reconcile|RewardFinalize' -count=1")
+  fi
+  if [[ ( "$normalized_text" == *"replay guard"* || "$normalized_text" == *"replay-guard"* || "$normalized_text" == *"replay storage"* || "$normalized_text" == *"replay-storage"* || "$normalized_text" == *"replay cache"* || "$normalized_text" == *"replay-cache"* ) \
+     && ( "$normalized_text" == *"durable"* || "$normalized_text" == *"strict"* || "$normalized_text" == *"multi-instance"* || "$normalized_text" == *"production"* ) ]]; then
+    tests+=("go test ./services/exit -run 'Replay|Guard|Durable|Strict' -count=1")
+    tests+=("scripts/integration_live_wg_full_path_strict.sh")
+  fi
+  if (( ${#tests[@]} > 0 )); then
+    dedupe_csv_from_args "${tests[@]}"
+    return
+  fi
+  printf '%s' ""
+}
+
+infer_item_suggested_files() {
+  local section="${1:-}"
+  local normalized_text="${2:-}"
+  local files=("docs/gpm-productization-status.md")
+  if is_informational_gap_item "$normalized_text"; then
+    printf '%s' "docs/gpm-productization-status.md"
+    return
+  fi
+  if is_auth_wallet_gap_item "$normalized_text"; then
+    files+=("docs/local-control-api.md")
+    files+=("services/localapi/gpm_api.go")
+    files+=("services/localapi/gpm_api_test.go")
+  fi
+  if [[ "$normalized_text" == *"roadmap"* \
+     || "$normalized_text" == *"promotion"* \
+     || "$normalized_text" == *"evidence pack"* \
+     || "$normalized_text" == *"evidence-pack"* ]]; then
+    files+=("docs/global-privacy-mesh-track.md")
+    files+=("docs/product-roadmap.md")
+  fi
+  if [[ "$normalized_text" == *"profile-default"* \
+     || "$normalized_text" == *"profile compare"* \
+     || "$normalized_text" == *"multi-vm"* ]]; then
+    files+=("scripts/profile_compare_local.sh")
+  fi
+  if [[ "$normalized_text" == *"vm command"* \
+     || "$normalized_text" == *"--vm-command"* \
+     || "$normalized_text" == *"real-host"* \
+     || "$normalized_text" == *"real host"* ]]; then
+    files+=("scripts/integration_3machine_prod_wg_validate.sh")
+  fi
+  if [[ "$normalized_text" == *"runtime-actuation"* \
+     || "$normalized_text" == *"live wg"* \
+     || "$normalized_text" == *"wireguard"* ]]; then
+    files+=("scripts/integration_client_3hop_runtime.sh")
+  fi
+  if [[ "$normalized_text" == *"direct-exit fallback"* \
+     || "$normalized_text" == *"direct exit fallback"* \
+     || "$normalized_text" == *"explicit 1hop"* \
+     || ( "$normalized_text" == *"route hardening"* && "$normalized_text" == *"fallback"* ) ]]; then
+    files+=("internal/app/client.go")
+    files+=("internal/app/client_mode_test.go")
+    files+=("scripts/integration_client_vpn_path_profile_wiring.sh")
+  fi
+  if [[ ( "$normalized_text" == *"middle-hop"* || "$normalized_text" == *"middle hop"* || "$normalized_text" == *"3-hop"* || "$normalized_text" == *"3hop"* ) \
+     && ( "$normalized_text" == *"anti-downgrade"* || "$normalized_text" == *"downgrad"* || "$normalized_text" == *"path/profile"* || "$normalized_text" == *"strict"* ) ]]; then
+    files+=("internal/app/client.go")
+    files+=("internal/app/selection_test.go")
+    files+=("services/entry/service.go")
+    files+=("services/entry/path_open_test.go")
+    files+=("scripts/integration_client_3hop_runtime.sh")
+  fi
+  if [[ ( "$normalized_text" == *"middle-hop"* || "$normalized_text" == *"middle hop"* || "$normalized_text" == *"middle relay"* || "$normalized_text" == *"middle role"* || "$normalized_text" == *"3-hop"* || "$normalized_text" == *"3hop"* ) \
+     && ( "$normalized_text" == *"production"* || "$normalized_text" == *"control-plane"* || "$normalized_text" == *"data service"* || "$normalized_text" == *"service contract"* || "$normalized_text" == *"deployment"* || "$normalized_text" == *"admission policy"* ) ]]; then
+    files+=("services/middle/service.go")
+    files+=("services/middle/service_test.go")
+    files+=("services/entry/service.go")
+    files+=("services/exit/service.go")
+    files+=("internal/app/client.go")
+    files+=("scripts/integration_middle_service_contract.sh")
+    files+=("scripts/integration_client_3hop_runtime.sh")
+  fi
+  if [[ "$normalized_text" == *"evidence pack"* \
+     || "$normalized_text" == *"evidence-pack"* \
+     || "$normalized_text" == *"publish"* ]]; then
+    files+=("scripts/roadmap_progress_report.sh")
+  fi
+  if ! is_auth_wallet_gap_item "$normalized_text" && [[ "$normalized_text" == *"admin console"* \
+     || "$normalized_text" == *"admin"* \
+     || "$normalized_text" == *"settlement"* \
+     || "$normalized_text" == *"reservation-write"* \
+     || "$normalized_text" == *"reservation write"* \
+     || "$normalized_text" == *"vpnbilling/reservations"* \
+     || "$normalized_text" == *"payout"* \
+     || "$normalized_text" == *"slashing"* \
+     || "$normalized_text" == *"slash"* \
+     || "$normalized_text" == *"dispute"* \
+     || "$normalized_text" == *"finalization"* \
+     || "$normalized_text" == *"finalize"* ]]; then
+    files+=("docs/local-control-api.md")
+    files+=("scripts/integration_gpm_admin_settlement_contract.sh")
+    files+=("services/localapi/gpm_api.go")
+    files+=("pkg/settlement/memory.go")
+  fi
+  if [[ "$normalized_text" == *"reservation-write"* \
+     || "$normalized_text" == *"reservation write"* \
+     || "$normalized_text" == *"vpnbilling/reservations"* \
+     || ( "$normalized_text" == *"reservefunds"* && "$normalized_text" == *"chain"* ) ]]; then
+    files+=("services/localapi/service.go")
+    files+=("pkg/settlement/types.go")
+    files+=("pkg/settlement/cosmos_adapter.go")
+    files+=("blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge.go")
+    files+=("blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge_test.go")
+  fi
+  if [[ ( "$normalized_text" == *"reward proof"* || "$normalized_text" == *"objective proof"* || "$normalized_text" == *"proof reference"* || "$normalized_text" == *"proof-reference"* || "$normalized_text" == *"proof-validation"* || "$normalized_text" == *"proof verification"* || "$normalized_text" == *"proof-registry"* ) \
+     && ( "$normalized_text" == *"trust"* || "$normalized_text" == *"shape"* || "$normalized_text" == *"unverified"* || "$normalized_text" == *"verification"* || "$normalized_text" == *"registry"* || "$normalized_text" == *"blocked"* ) ]]; then
+    files+=("pkg/settlement/memory.go")
+    files+=("pkg/settlement/reward_proof_trust.md")
+    files+=("services/localapi/gpm_api.go")
+    files+=("blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge.go")
+  fi
+  if [[ ( "$normalized_text" == *"confirmation"* || "$normalized_text" == *"confirmed"* || "$normalized_text" == *"reconcile"* || "$normalized_text" == *"chain state"* || "$normalized_text" == *"chain-status"* || "$normalized_text" == *"chain status"* ) \
+     && ( "$normalized_text" == *"existence"* || "$normalized_text" == *"pending"* || "$normalized_text" == *"submitted"* || "$normalized_text" == *"promot"* || "$normalized_text" == *"final"* ) ]]; then
+    files+=("pkg/settlement/types.go")
+    files+=("pkg/settlement/memory.go")
+    files+=("pkg/settlement/cosmos_adapter.go")
+  fi
+  if [[ ( "$normalized_text" == *"replay guard"* || "$normalized_text" == *"replay-guard"* || "$normalized_text" == *"replay storage"* || "$normalized_text" == *"replay-storage"* || "$normalized_text" == *"replay cache"* || "$normalized_text" == *"replay-cache"* ) \
+     && ( "$normalized_text" == *"durable"* || "$normalized_text" == *"strict"* || "$normalized_text" == *"multi-instance"* || "$normalized_text" == *"production"* ) ]]; then
+    files+=("services/exit/service.go")
+    files+=("services/exit/service_test.go")
+  fi
+  dedupe_csv_from_args "${files[@]}"
+}
+
+dedupe_csv_from_args() {
+  local seen="|"
+  local value=""
+  local unique=()
+  for value in "$@"; do
+    value="$(trim "$value")"
+    if [[ -z "$value" ]]; then
+      continue
+    fi
+    if [[ "$seen" == *"|$value|"* ]]; then
+      continue
+    fi
+    seen+="$value|"
+    unique+=("$value")
+  done
+  local IFS=","
+  printf '%s' "${unique[*]}"
+}
+
+print_json_string_array() {
+  local csv="${1:-}"
+  local first=1
+  local value=""
+  printf '['
+  if [[ -n "$csv" ]]; then
+    local IFS=","
+    read -r -a values <<<"$csv"
+    for value in "${values[@]}"; do
+      value="$(trim "$value")"
+      if [[ -z "$value" ]]; then
+        continue
+      fi
+      if (( first == 0 )); then
+        printf ', '
+      fi
+      printf '"%s"' "$(json_escape "$value")"
+      first=0
+    done
+  fi
+  printf ']'
 }
 
 while IFS= read -r line || [[ -n "$line" ]]; do
@@ -425,10 +991,10 @@ if [[ -n "$roadmap_summary_json" ]]; then
     append_gap_item "missing_next" "Roadmap profile-default gate next action has unresolved placeholders (${profile_placeholder_keys}); run gpm-endpoint-posture-remediate or export A_HOST/B_HOST/CAMPAIGN_SUBJECT before the live stability cycle."
   fi
 
-  multi_vm_source_ready="$(jq -r '(.vpn_track.profile_compare_multi_vm_stability.vm_command_source_ready | if . == null then true else . end)' "$roadmap_summary_json")"
-  multi_vm_actionable="$(jq -r '(.vpn_track.profile_compare_multi_vm_stability.next_command_actionable | if . == null then true else . end)' "$roadmap_summary_json")"
-  if [[ "$multi_vm_source_ready" == "false" || "$multi_vm_actionable" == "false" ]]; then
-    append_gap_item "missing_next" "Roadmap multi-VM stability command source is not actionable; generate a VM command file or pass --vm-command VM_ID::COMMAND before running the M5 stability cycle."
+  multi_vm_source_ready="$(jq -r 'if (.vpn_track.profile_compare_multi_vm_stability | type) == "object" and (.vpn_track.profile_compare_multi_vm_stability.vm_command_source_ready | type) == "boolean" then .vpn_track.profile_compare_multi_vm_stability.vm_command_source_ready else "unknown" end' "$roadmap_summary_json")"
+  multi_vm_actionable="$(jq -r 'if (.vpn_track.profile_compare_multi_vm_stability | type) == "object" and (.vpn_track.profile_compare_multi_vm_stability.next_command_actionable | type) == "boolean" then .vpn_track.profile_compare_multi_vm_stability.next_command_actionable else "unknown" end' "$roadmap_summary_json")"
+  if [[ "$multi_vm_source_ready" != "true" || "$multi_vm_actionable" != "true" ]]; then
+    append_gap_item "missing_next" "Roadmap multi-VM stability command source is not actionable (vm_command_source_ready=${multi_vm_source_ready}, next_command_actionable=${multi_vm_actionable}); generate a VM command file or pass --vm-command VM_ID::COMMAND before running the M5 stability cycle."
   fi
 
   runtime_status="$(jq -r '.vpn_track.runtime_actuation_promotion.status // ""' "$roadmap_summary_json")"
@@ -441,8 +1007,14 @@ if [[ -n "$roadmap_summary_json" ]]; then
     '.vpn_track.profile_default_gate_evidence_pack' \
     '.vpn_track.runtime_actuation_promotion_evidence_pack' \
     '.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack'; do
-    evidence_status="$(jq -r "${evidence_path}.status // \"\"" "$roadmap_summary_json")"
-    evidence_needs_attention="$(jq -r "${evidence_path}.needs_attention // false" "$roadmap_summary_json")"
+    evidence_type="$(jq -r "${evidence_path} | type" "$roadmap_summary_json")"
+    if [[ "$evidence_type" != "object" ]]; then
+      evidence_status="missing"
+      evidence_needs_attention="true"
+    else
+      evidence_status="$(jq -r "${evidence_path}.status // \"missing\"" "$roadmap_summary_json")"
+      evidence_needs_attention="$(jq -r "${evidence_path}.needs_attention // false" "$roadmap_summary_json")"
+    fi
     if [[ "$evidence_needs_attention" == "true" || "$evidence_status" == "missing" || "$evidence_status" == "invalid" || "$evidence_status" == "stale" || "$evidence_status" == "fail" ]]; then
       evidence_id="${evidence_path##*.}"
       append_gap_item "missing_next" "Roadmap evidence pack ${evidence_id} needs attention (status=${evidence_status:-unknown}); refresh source artifacts and rerun the corresponding evidence-pack helper."
@@ -465,6 +1037,9 @@ for wanted_severity in p1 p2 p3; do
     if [[ "${ITEM_SEVERITIES[$idx]:-}" != "$wanted_severity" ]]; then
       continue
     fi
+    if [[ "${ITEM_ACTIONABLES[$idx]:-true}" != "true" ]]; then
+      continue
+    fi
     section="${ITEM_SECTIONS[$idx]}"
     if [[ "$section" == "in_progress" ]]; then
       ordinal=$((idx + 1))
@@ -483,7 +1058,7 @@ done
   printf '  "schema": {\n'
   printf '    "id": "gpm_gap_scan_summary",\n'
   printf '    "major": 1,\n'
-  printf '    "minor": 0\n'
+  printf '    "minor": 1\n'
   printf '  },\n'
   printf '  "generated_at_utc": "%s",\n' "$(json_escape "$generated_at_utc")"
   printf '  "status": "ok",\n'
@@ -511,6 +1086,12 @@ done
       normalized_text="${ITEM_NORMALIZED_TEXTS[$idx]}"
       severity="${ITEM_SEVERITIES[$idx]}"
       recommended_action="${ITEM_RECOMMENDED_ACTIONS[$idx]}"
+      closure_mode="${ITEM_CLOSURE_MODES[$idx]}"
+      blocked_by="${ITEM_BLOCKED_BYS[$idx]}"
+      requires_real_hosts="${ITEM_REQUIRES_REAL_HOSTS[$idx]}"
+      suggested_tests="${ITEM_SUGGESTED_TESTS[$idx]}"
+      suggested_files="${ITEM_SUGGESTED_FILES[$idx]}"
+      actionable="${ITEM_ACTIONABLES[$idx]}"
       if [[ "$section" == "in_progress" ]]; then
         in_progress_ordinal=$((in_progress_ordinal + 1))
         ordinal="$in_progress_ordinal"
@@ -530,7 +1111,19 @@ done
       printf '      "text": "%s",\n' "$(json_escape "$text")"
       printf '      "normalized_text": "%s",\n' "$(json_escape "$normalized_text")"
       printf '      "severity": "%s",\n' "$(json_escape "$severity")"
-      printf '      "recommended_action": "%s"\n' "$(json_escape "$recommended_action")"
+      printf '      "actionable": %s,\n' "$actionable"
+      printf '      "recommended_action": "%s",\n' "$(json_escape "$recommended_action")"
+      printf '      "closure_mode": "%s",\n' "$(json_escape "$closure_mode")"
+      printf '      "blocked_by": '
+      print_json_string_array "$blocked_by"
+      printf ',\n'
+      printf '      "requires_real_hosts": %s,\n' "$requires_real_hosts"
+      printf '      "suggested_tests": '
+      print_json_string_array "$suggested_tests"
+      printf ',\n'
+      printf '      "suggested_files": '
+      print_json_string_array "$suggested_files"
+      printf '\n'
       printf '    }'
     done
     printf '\n'

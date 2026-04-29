@@ -27,6 +27,9 @@ check_forbidden_tracked_paths() {
   print_header "checking forbidden tracked runtime artifacts"
   local path
   local forbidden_paths=(
+    ".codex_security_scan_hits.txt"
+    "bin/privacynode-easy"
+    "deploy/.env.easy.client"
     "deploy/.env.easy.server"
     "deploy/.env.easy.provider"
     "deploy/data/easy_node_identity.conf"
@@ -42,6 +45,14 @@ check_forbidden_tracked_paths() {
     [[ -z "$deploy_data_path" ]] && continue
     record_failure "unexpected tracked deploy/data artifact: $deploy_data_path"
   done < <(git ls-files | rg '^deploy/data/' || true)
+
+  local forbidden_prefix
+  for forbidden_prefix in '^User/' '^\.codex' '^bin/' '^data/' '^deploy/tls/' '^deploy/\.env'; do
+    while IFS= read -r path; do
+      [[ -z "$path" ]] && continue
+      record_failure "forbidden tracked runtime/local artifact: $path"
+    done < <(git ls-files | rg "$forbidden_prefix" || true)
+  done
 }
 
 check_tracked_sensitive_extensions() {

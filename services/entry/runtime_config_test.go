@@ -1,6 +1,11 @@
 package entry
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -66,6 +71,64 @@ func TestValidateRuntimeConfigBetaStrictRejectsDangerousOutboundPrivateDNS(t *te
 	}
 }
 
+func TestValidateRuntimeConfigBetaStrictRejectsMissingRelayID(t *testing.T) {
+	setValidBetaStrictEnv(t)
+	t.Setenv("ENTRY_ROUTE_ASSERTION_PRIVATE_KEY", testEntryRouteAssertionPrivateKey(t))
+
+	s := New()
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected beta strict to require ENTRY_RELAY_ID")
+	}
+	if !strings.Contains(err.Error(), "ENTRY_RELAY_ID") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsMissingRouteAssertionKey(t *testing.T) {
+	setValidBetaStrictEnv(t)
+	t.Setenv("ENTRY_RELAY_ID", "entry-a")
+
+	s := New()
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected beta strict to require route assertion key")
+	}
+	if !strings.Contains(err.Error(), "ENTRY_ROUTE_ASSERTION_PRIVATE_KEY") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsInvalidRouteAssertionKey(t *testing.T) {
+	setValidBetaStrictEnv(t)
+	t.Setenv("ENTRY_RELAY_ID", "entry-a")
+	t.Setenv("ENTRY_ROUTE_ASSERTION_PRIVATE_KEY", "not-base64")
+
+	s := New()
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected beta strict to reject invalid route assertion key")
+	}
+	if !strings.Contains(err.Error(), "invalid ENTRY_ROUTE_ASSERTION_PRIVATE_KEY") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictAcceptsRouteAssertionKeyFile(t *testing.T) {
+	setValidBetaStrictEnv(t)
+	t.Setenv("ENTRY_RELAY_ID", "entry-a")
+	path := filepath.Join(t.TempDir(), "entry-route-assertion.key")
+	if err := os.WriteFile(path, []byte(testEntryRouteAssertionPrivateKey(t)), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+	t.Setenv("ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE", path)
+
+	s := New()
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected valid beta strict runtime config: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigRejectsMalformedRequireMiddleRelayEnv(t *testing.T) {
 	t.Setenv("ENTRY_REQUIRE_MIDDLE_RELAY", "maybe")
 
@@ -77,6 +140,30 @@ func TestValidateRuntimeConfigRejectsMalformedRequireMiddleRelayEnv(t *testing.T
 	if !strings.Contains(err.Error(), "ENTRY_REQUIRE_MIDDLE_RELAY invalid") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func setValidBetaStrictEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("BETA_STRICT_MODE", "1")
+	t.Setenv("ENTRY_LIVE_WG_MODE", "1")
+	t.Setenv("ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR", "1")
+	t.Setenv("ENTRY_OPERATOR_ID", "op-entry")
+	t.Setenv("ENTRY_PUZZLE_SECRET", "entry-secret-012345")
+	t.Setenv("ENTRY_PUZZLE_DIFFICULTY", "1")
+}
+
+func testEntryRouteAssertionPrivateKey(t *testing.T) string {
+	t.Helper()
+	return base64.RawURLEncoding.EncodeToString(testEntryRouteAssertionPrivateKeyBytes(t))
+}
+
+func testEntryRouteAssertionPrivateKeyBytes(t *testing.T) ed25519.PrivateKey {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate route assertion key: %v", err)
+	}
+	return priv
 }
 
 func TestValidateRuntimeConfigRejectsMalformedStrictModeEnv(t *testing.T) {

@@ -368,6 +368,84 @@ func TestBootstrapStrictPreferMiddleReportsMiddleRequirement(t *testing.T) {
 	}
 }
 
+func TestBootstrapClosesPathWhenPostOpenValidationFails(t *testing.T) {
+	directoryURL := "http://d1.local"
+	issuerURL := "http://issuer.local"
+	entryURL := "http://entry-a.local"
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	entry := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "entry-a",
+		Role:       "entry",
+		ControlURL: entryURL,
+		OperatorID: "op-a",
+		Endpoint:   "entry.example:51820",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+	exit := signedDescFrom(t, proto.RelayDescriptor{
+		RelayID:    "exit-a",
+		Role:       "exit",
+		ControlURL: "http://exit-a.local",
+		OperatorID: "op-b",
+		Endpoint:   "exit.example:51821",
+		ValidUntil: time.Now().Add(time.Minute),
+	}, priv)
+
+	pathCloseCalls := 0
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		directoryURL + "/v1/pubkey": jsonResp(map[string]string{"pub_key": base64.RawURLEncoding.EncodeToString(pub)}),
+		directoryURL + "/v1/relays": jsonResp(proto.RelayListResponse{Relays: []proto.RelayDescriptor{entry, exit}}),
+		issuerURL + "/v1/token": jsonResp(proto.IssueTokenResponse{
+			Token:   "tok-a",
+			Expires: time.Now().Add(time.Minute).Unix(),
+		}),
+		entryURL + "/v1/path/open": jsonResp(proto.PathOpenResponse{
+			Accepted:      true,
+			SessionID:     "sess-a",
+			SessionExp:    time.Now().Add(time.Minute).Unix(),
+			EntryDataAddr: "127.0.0.1:51820",
+			Transport:     "policy-json",
+		}),
+		entryURL + "/v1/path/close": func(req *http.Request) (*http.Response, error) {
+			pathCloseCalls++
+			var in proto.PathCloseRequest
+			if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
+				t.Fatalf("decode path close request: %v", err)
+			}
+			if in.SessionID != "sess-a" {
+				t.Fatalf("path close session=%q want sess-a", in.SessionID)
+			}
+			return jsonResp(proto.PathCloseResponse{Closed: true})(req)
+		},
+	}
+
+	c := &Client{
+		directoryURLs:         []string{directoryURL},
+		directoryMinSources:   1,
+		directoryMinOperators: 1,
+		directoryMinVotes:     1,
+		issuerURL:             issuerURL,
+		subject:               "cleanup-test",
+		dataMode:              "json",
+		clientWGPub:           mustRandomWGPublicKeyLike(t),
+		healthCheckEnabled:    false,
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	err = c.bootstrap(context.Background())
+	if err == nil {
+		t.Fatalf("expected bootstrap to reject returned endpoint host mismatch")
+	}
+	if !strings.Contains(err.Error(), "untrusted entry_data_addr") {
+		t.Fatalf("expected endpoint binding error, got %v", err)
+	}
+	if pathCloseCalls != 1 {
+		t.Fatalf("path close calls=%d want 1", pathCloseCalls)
+	}
+}
+
 func TestRankRelayPairsAppliesExitOperatorCap(t *testing.T) {
 	c := &Client{
 		entryURL:            "http://fallback-entry.local",
@@ -506,8 +584,8 @@ func TestRankRelayPairsThreeHopPrefersPairsWithMiddleRelay(t *testing.T) {
 		{RelayID: "entry-a", Role: "entry", OperatorID: "op-a"},
 		{RelayID: "entry-b", Role: "entry", OperatorID: "op-b"},
 		{RelayID: "exit-c", Role: "exit", OperatorID: "op-c"},
-		{RelayID: "middle-a", Role: "entry", OperatorID: "op-a", HopRoles: []string{"middle"}},
-		{RelayID: "middle-d", Role: "entry", OperatorID: "op-d", HopRoles: []string{"middle"}},
+		{RelayID: "middle-a", Role: "micro-relay", OperatorID: "op-a", Endpoint: "127.0.0.1:51830", Reputation: 0.8, Uptime: 0.9, Capacity: 0.85, AbusePenalty: 0.1},
+		{RelayID: "middle-d", Role: "micro-relay", OperatorID: "op-d", Endpoint: "127.0.0.1:51831", Reputation: 0.8, Uptime: 0.9, Capacity: 0.85, AbusePenalty: 0.1},
 	}
 	pairs := c.rankRelayPairs(context.Background(), relays)
 	if len(pairs) == 0 {
@@ -579,8 +657,7 @@ func TestRankRelayPairsStrictThreeHopAcceptsAliasMiddleRole(t *testing.T) {
 	relays := []proto.RelayDescriptor{
 		{RelayID: "entry-a", Role: "entry", OperatorID: "op-a"},
 		{RelayID: "exit-b", Role: "exit", OperatorID: "op-b"},
-		// Role alias only; no HopRoles/Capabilities.
-		{RelayID: "middle-c", Role: "micro-relay", OperatorID: "op-c"},
+		{RelayID: "middle-c", Role: "micro-relay", OperatorID: "op-c", Endpoint: "127.0.0.1:51830", Reputation: 0.8, Uptime: 0.9, Capacity: 0.85, AbusePenalty: 0.1},
 	}
 	pairs := c.rankRelayPairs(context.Background(), relays)
 	if len(pairs) == 0 {
@@ -591,6 +668,51 @@ func TestRankRelayPairsStrictThreeHopAcceptsAliasMiddleRole(t *testing.T) {
 	}
 	if pairs[0].middle.RelayID != "middle-c" {
 		t.Fatalf("expected middle-c to be selected, got %q", pairs[0].middle.RelayID)
+	}
+}
+
+func TestRankRelayPairsStrictThreeHopRejectsLowQualityMiddleRelay(t *testing.T) {
+	c := &Client{
+		entryURL:           "http://fallback-entry.local",
+		exitControlURL:     "http://fallback-exit.local",
+		healthCheckEnabled: false,
+		pathProfile:        "3hop",
+		preferMiddleRelay:  true,
+		requireMiddleRelay: true,
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", OperatorID: "op-a"},
+		{RelayID: "exit-b", Role: "exit", OperatorID: "op-b"},
+		{RelayID: "middle-low", Role: "micro-relay", OperatorID: "op-c", Endpoint: "127.0.0.1:51830", Reputation: 0.49, Uptime: 0.9, Capacity: 0.85, AbusePenalty: 0.1},
+		{RelayID: "middle-no-endpoint", Role: "micro-relay", OperatorID: "op-d", Reputation: 0.8, Uptime: 0.9, Capacity: 0.85, AbusePenalty: 0.1},
+	}
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) != 0 {
+		t.Fatalf("expected strict 3hop to reject low-quality/missing-endpoint middle relays, got %d", len(pairs))
+	}
+}
+
+func TestRankRelayPairsThreeHopChoosesHigherQualityMiddleRelay(t *testing.T) {
+	c := &Client{
+		entryURL:           "http://fallback-entry.local",
+		exitControlURL:     "http://fallback-exit.local",
+		healthCheckEnabled: false,
+		pathProfile:        "3hop",
+		preferMiddleRelay:  true,
+		requireMiddleRelay: true,
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", OperatorID: "op-a", Region: "na"},
+		{RelayID: "exit-b", Role: "exit", OperatorID: "op-b", Region: "na"},
+		{RelayID: "middle-a", Role: "micro-relay", OperatorID: "op-c", Endpoint: "127.0.0.1:51830", Region: "na", Reputation: 0.55, Uptime: 0.55, Capacity: 0.55, AbusePenalty: 0.1},
+		{RelayID: "middle-z", Role: "micro-relay", OperatorID: "op-d", Endpoint: "127.0.0.1:51831", Region: "na", Reputation: 0.95, Uptime: 0.95, Capacity: 0.95, AbusePenalty: 0.05, BondScore: 0.8, StakeScore: 0.7},
+	}
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) == 0 {
+		t.Fatalf("expected strict 3hop pair")
+	}
+	if got := pairs[0].middle.RelayID; got != "middle-z" {
+		t.Fatalf("expected higher-quality middle-z to be selected, got %q", got)
 	}
 }
 
@@ -884,6 +1006,94 @@ func TestScoreExitsIncludesBondStakeSignals(t *testing.T) {
 	}
 }
 
+func TestRankRelayPairsRejectsUnderThresholdMicroExit(t *testing.T) {
+	c := &Client{
+		entryURL:            "http://fallback-entry.local",
+		exitControlURL:      "http://fallback-exit.local",
+		healthCheckEnabled:  false,
+		maxPairCandidates:   0,
+		maxExitsPerOperator: 0,
+	}
+	relays := []proto.RelayDescriptor{
+		{RelayID: "entry-a", Role: "entry", ControlURL: "http://entry-a.local"},
+		{
+			RelayID:      "micro-exit-bad",
+			Role:         "micro-exit",
+			ControlURL:   "http://micro-exit-bad.local",
+			Reputation:   0.95,
+			Uptime:       0.95,
+			Capacity:     0.10,
+			AbusePenalty: 0.10,
+		},
+	}
+	if pairs := c.rankRelayPairs(context.Background(), relays); len(pairs) != 0 {
+		t.Fatalf("expected under-threshold micro-exit to be excluded, got %+v", pairs)
+	}
+
+	relays[1].Capacity = 0.85
+	pairs := c.rankRelayPairs(context.Background(), relays)
+	if len(pairs) != 1 {
+		t.Fatalf("expected healthy micro-exit to be selectable, got %d pairs", len(pairs))
+	}
+	if pairs[0].exit.RelayID != "micro-exit-bad" {
+		t.Fatalf("selected exit=%q want micro-exit-bad", pairs[0].exit.RelayID)
+	}
+}
+
+func TestRankRelayPairsRejectsMalformedMicroExitMetadata(t *testing.T) {
+	c := &Client{
+		entryURL:            "http://fallback-entry.local",
+		exitControlURL:      "http://fallback-exit.local",
+		healthCheckEnabled:  false,
+		maxPairCandidates:   0,
+		maxExitsPerOperator: 0,
+	}
+	cases := []struct {
+		name   string
+		mutate func(*proto.RelayDescriptor)
+	}{
+		{
+			name: "middle-hop-role",
+			mutate: func(desc *proto.RelayDescriptor) {
+				desc.HopRoles = []string{"middle"}
+			},
+		},
+		{
+			name: "two-hop-capability",
+			mutate: func(desc *proto.RelayDescriptor) {
+				desc.Capabilities = []string{"two-hop"}
+			},
+		},
+		{
+			name: "middle-capability-alias",
+			mutate: func(desc *proto.RelayDescriptor) {
+				desc.Capabilities = []string{"micro-relay"}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			microExit := proto.RelayDescriptor{
+				RelayID:      "micro-exit-bad",
+				Role:         "micro-exit",
+				ControlURL:   "http://micro-exit-bad.local",
+				Reputation:   0.95,
+				Uptime:       0.95,
+				Capacity:     0.95,
+				AbusePenalty: 0.10,
+			}
+			tc.mutate(&microExit)
+			relays := []proto.RelayDescriptor{
+				{RelayID: "entry-a", Role: "entry", ControlURL: "http://entry-a.local"},
+				microExit,
+			}
+			if pairs := c.rankRelayPairs(context.Background(), relays); len(pairs) != 0 {
+				t.Fatalf("expected malformed micro-exit to be excluded, got %+v", pairs)
+			}
+		})
+	}
+}
+
 func TestRankRelayPairsWeightedExplorationFloor(t *testing.T) {
 	c := &Client{
 		entryURL:            "http://fallback-entry.local",
@@ -1141,4 +1351,92 @@ func statusResp(status int) func(*http.Request) (*http.Response, error) {
 			Body:       io.NopCloser(strings.NewReader("ok")),
 		}, nil
 	}
+}
+
+func TestRelayHealthyPrefersReady(t *testing.T) {
+	var requested []string
+	c := &Client{
+		healthCheckEnabled: true,
+		healthCacheTTL:     0,
+		healthCache:        map[string]healthProbeState{},
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requested = append(requested, req.URL.String())
+			switch req.URL.String() {
+			case "http://relay.local/v1/ready":
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody}, nil
+			case "http://relay.local/v1/health":
+				return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: http.NoBody}, nil
+			default:
+				return &http.Response{StatusCode: http.StatusNotFound, Header: make(http.Header), Body: http.NoBody}, nil
+			}
+		})},
+	}
+
+	if !c.relayHealthy(context.Background(), "http://relay.local") {
+		t.Fatalf("expected ready relay to be healthy")
+	}
+	if len(requested) != 1 || requested[0] != "http://relay.local/v1/ready" {
+		t.Fatalf("expected only /v1/ready probe, got %v", requested)
+	}
+}
+
+func TestRelayHealthyFallsBackToHealthForLegacyRelay(t *testing.T) {
+	var requested []string
+	c := &Client{
+		healthCheckEnabled: true,
+		healthCacheTTL:     0,
+		healthCache:        map[string]healthProbeState{},
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requested = append(requested, req.URL.String())
+			switch req.URL.String() {
+			case "http://relay.local/v1/ready":
+				return &http.Response{StatusCode: http.StatusNotFound, Header: make(http.Header), Body: http.NoBody}, nil
+			case "http://relay.local/v1/health":
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody}, nil
+			default:
+				return &http.Response{StatusCode: http.StatusNotFound, Header: make(http.Header), Body: http.NoBody}, nil
+			}
+		})},
+	}
+
+	if !c.relayHealthy(context.Background(), "http://relay.local") {
+		t.Fatalf("expected legacy health fallback to pass")
+	}
+	want := []string{"http://relay.local/v1/ready", "http://relay.local/v1/health"}
+	if strings.Join(requested, ",") != strings.Join(want, ",") {
+		t.Fatalf("requested=%v want=%v", requested, want)
+	}
+}
+
+func TestRelayHealthyDoesNotFallBackWhenReadyFails(t *testing.T) {
+	var requested []string
+	c := &Client{
+		healthCheckEnabled: true,
+		healthCacheTTL:     0,
+		healthCache:        map[string]healthProbeState{},
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requested = append(requested, req.URL.String())
+			switch req.URL.String() {
+			case "http://relay.local/v1/ready":
+				return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: http.NoBody}, nil
+			case "http://relay.local/v1/health":
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody}, nil
+			default:
+				return &http.Response{StatusCode: http.StatusNotFound, Header: make(http.Header), Body: http.NoBody}, nil
+			}
+		})},
+	}
+
+	if c.relayHealthy(context.Background(), "http://relay.local") {
+		t.Fatalf("expected failed readiness to fail closed")
+	}
+	if len(requested) != 1 || requested[0] != "http://relay.local/v1/ready" {
+		t.Fatalf("expected no health fallback after readiness failure, got %v", requested)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

@@ -5,15 +5,23 @@
 # Local logs and run artifacts
 .easy-node-logs/
 :8081
-User/History/
+User/
+.codex*
+*.vscdb
+*.vscdb-journal
+chatSessions/
+bin/
 
 # Local server env (contains admin/operator secrets)
+deploy/.env.easy.client
 deploy/.env.easy.server
 deploy/.env.easy.provider
+deploy/tls/
 
 # Generated runtime data for docker/easy-mode runs
 deploy/data/
 runtime/
+data/
 data/easy_mode_hosts.conf
 data/issuer_subjects.json
 data/issuer_revocations.json
@@ -33,4 +41,3 @@ data/directory_peer_trusted_keys.txt
 *.pk8
 
 # Local editor/runtime state (never commit)
-User/globalStorage/

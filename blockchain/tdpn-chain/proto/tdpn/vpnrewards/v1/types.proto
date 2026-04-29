@@ -21,6 +21,8 @@ message RewardAccrual {
   int64 amount = 5;
   int64 accrued_at_unix = 6;
   ReconciliationStatus operation_state = 7;
+  int64 payout_start_unix = 8;
+  int64 payout_end_unix = 9;
 }
 
 // DistributionRecord records payout references for accrued rewards.

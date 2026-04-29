@@ -169,6 +169,7 @@ func TestKeeperSubmitAndApplyUseCustomStoreWithEvidenceProgression(t *testing.T)
 		t.Fatalf("expected submit path to touch custom evidence store, got upsert=%d get=%d", store.upsertEvidenceCalls, store.getEvidenceCalls)
 	}
 
+	evidence = confirmPenaltyEvidenceForTest(t, &k, evidence.EvidenceID)
 	_, err = k.ApplyPenalty(types.PenaltyDecision{
 		PenaltyID:       "penalty-2",
 		EvidenceID:      evidence.EvidenceID,
@@ -212,6 +213,7 @@ func TestApplyPenaltyFileStorePersistsEvidenceAdvanceAndPenaltyAtomically(t *tes
 	if err != nil {
 		t.Fatalf("seed evidence: %v", err)
 	}
+	evidence = confirmPenaltyEvidenceForTest(t, &k, evidence.EvidenceID)
 
 	persistCalls := 0
 	store.persistFailureInjector = func() error {
@@ -258,6 +260,7 @@ func TestApplyPenaltyFileStoreAtomicPersistFailureLeavesDurableStateUnchanged(t 
 	if err != nil {
 		t.Fatalf("seed evidence: %v", err)
 	}
+	confirmPenaltyEvidenceForTest(t, &k, evidenceID)
 
 	failOnce := true
 	store.persistFailureInjector = func() error {
@@ -277,8 +280,8 @@ func TestApplyPenaltyFileStoreAtomicPersistFailureLeavesDurableStateUnchanged(t 
 	if err == nil {
 		t.Fatal("expected apply penalty to fail when atomic persist fails")
 	}
-	if !strings.Contains(err.Error(), "atomically") {
-		t.Fatalf("expected atomic persistence failure, got %v", err)
+	if !strings.Contains(err.Error(), "persist penalty") {
+		t.Fatalf("expected penalty persistence failure, got %v", err)
 	}
 	store.persistFailureInjector = nil
 
@@ -290,10 +293,10 @@ func TestApplyPenaltyFileStoreAtomicPersistFailureLeavesDurableStateUnchanged(t 
 	if !ok {
 		t.Fatalf("expected evidence %q to remain available", evidenceID)
 	}
-	if evidenceAfter.Status != chaintypes.ReconciliationPending {
+	if evidenceAfter.Status != chaintypes.ReconciliationConfirmed {
 		t.Fatalf(
 			"expected in-memory evidence status %q after failed apply, got %q",
-			chaintypes.ReconciliationPending,
+			chaintypes.ReconciliationConfirmed,
 			evidenceAfter.Status,
 		)
 	}
@@ -311,10 +314,10 @@ func TestApplyPenaltyFileStoreAtomicPersistFailureLeavesDurableStateUnchanged(t 
 	if !ok {
 		t.Fatalf("expected durable evidence %q to remain available", evidenceID)
 	}
-	if durableEvidence.Status != chaintypes.ReconciliationPending {
+	if durableEvidence.Status != chaintypes.ReconciliationConfirmed {
 		t.Fatalf(
 			"expected durable evidence status %q after failed apply, got %q",
-			chaintypes.ReconciliationPending,
+			chaintypes.ReconciliationConfirmed,
 			durableEvidence.Status,
 		)
 	}

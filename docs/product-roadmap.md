@@ -58,14 +58,17 @@ Status update (March 24, 2026):
 - `vpn-rc-matrix-path` is now the one-command RC matrix chain path for profile-campaign refresh/check handoff, with gate coverage wired into `ci_local` and `beta_preflight` via `integration_vpn_rc_matrix_path.sh`.
 - `vpn-rc-resilience-path` is now the phase-1 resilience chain path in `easy_node.sh`, with gate coverage wired into `ci_local` and `beta_preflight` via `integration_vpn_rc_resilience_path.sh`.
 - profile contract guard is now wired in local gates (`integration_path_profile_contract.sh` in `ci_local` / `beta_preflight`) to keep public profile UX/API naming fixed at `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (`speed-1hop` explicit experimental alias on non-strict `client-test`/`client-vpn-up`), while retaining `fast|privacy` as legacy compatibility aliases.
+- GPM Admin Console split controls are now contract-documented: admin role elevation requires `GPM_ADMIN_WALLET_ALLOWLIST` plus command-backed wallet verification, production blocks legacy `/v1/service/start|stop|restart` unless break-glass `GPM_ALLOW_LEGACY_SERVICE_MUTATIONS=1` is set, and `POST /v1/gpm/admin/rewards/finalize` only finalizes closed weekly rewards with no active holds, objective signed or chain-queryable traffic proof evidence in production rather than env-derived trusted status alone, and no local settlement slash-evidence holds while keeping chain-pending rewards non-payable until confirmation. Docs-layer coverage is `scripts/integration_gpm_admin_settlement_contract.sh`.
 - launcher profile/expert split is now enforced as a contract: simple client flows stay preset-driven, while explicit policy overrides are isolated to advanced option 34 (`Client VPN up (real mode, expert/manual)`), with wiring/runtime coverage to prevent regressions.
 - simple launcher prompts are now further reduced: main-menu client/server no longer ask inline "expert override" questions, and provider simple mode auto-derives authority directory/issuer URLs from configured peer hosts; advanced overrides remain in Other options.
 - simple launcher server path now waits for federation readiness by default (`SIMPLE_SERVER_FEDERATION_WAIT=1` -> `server-session --federation-wait 1`), with diagnostics override via config `SIMPLE_SERVER_FEDERATION_WAIT=0` or expert `server-session --federation-wait 0`.
 - `client-vpn-preflight` is now profile-aware for real routing checks: it accepts `--path-profile` directly and auto-enables middle-relay diversity checks for `3hop` (`--middle-relay-check`, `--middle-relay-min-operators`, `--middle-relay-require-distinct`) with staged-lab override knobs.
 - launcher runtime wiring now forwards `--path-profile` into preflight paths (simple real-VPN flow and advanced option 31), with integration coverage to keep that contract stable.
 - simple-mode prompt budget is now contract-tested in integration gates: launcher wiring/runtime checks enforce the `<=6` prompt budget for client/server simple flows.
-- runtime `3hop` behavior is now strict-by-default in client selection: middle relay is required unless explicitly overridden with `CLIENT_REQUIRE_MIDDLE_RELAY=0`, and unit/integration coverage now exercises fail/override/pass middle-relay scenarios.
+- runtime `3hop` behavior is now fail-closed in client selection: a canonical eligible middle relay is required and `CLIENT_REQUIRE_MIDDLE_RELAY=0` no longer downgrades explicit `3hop`; direct-exit fallback requires explicit support mode outside production.
 - path-open contract now carries `middle_relay_id` end-to-end (`client -> entry -> exit`) and includes it in token-proof signing/verification; entry now rejects invalid middle-hop requests early (`middle-relay-equals-exit`, `unknown-middle-relay`, `middle-relay-role-invalid`, operator-collision reasons) with added unit coverage.
+- a production middle service role now exists locally via `go run ./cmd/node --middle`, with static entry/exit peer allowlisting and local 3-hop runtime coverage; remaining M3 blockers are real-host evidence, production deployment/admission policy, and evidence publication rather than replacing the local UDP harness.
+- reservation id/session/subject are now locally bound through the client -> entry -> exit path-open proof/assertion chain and the local production connect reserve-and-connect flow, so reservation identity cannot be swapped independently of the wallet-bound session in local admission tests. Live-chain reservation/settlement evidence and staging reserve-and-connect dataplane round-trip evidence remain required before production signoff.
 - session lifecycle defaults are now explicit and stable in real VPN flows: `client-vpn-up` exports `CLIENT_SESSION_REUSE=1` and `CLIENT_SESSION_REFRESH_LEAD_SEC=20` by default (overrideable), and client runtime defaults to reuse-on when `CLIENT_SESSION_REUSE` is unset while preserving explicit disable (`0`) semantics.
 - client session churn guard now includes `CLIENT_SESSION_MIN_REFRESH_SEC` to enforce a minimum refresh interval floor during repeated control-plane retries.
 - in `1hop` direct-exit with churn protection on (default), the client applies that minimum refresh floor by default to prevent rapid reopen/close loops; diagnostics override is `CLIENT_SESSION_MIN_REFRESH_SEC=0` or (when churn behavior is needed) `CLIENT_DIRECT_EXIT_ALLOW_SESSION_CHURN=1`.
@@ -153,16 +156,27 @@ Exit criteria:
 Goal: evolve from fixed 2-hop topology toward an optional micro-relay mesh model,
 without regressing current production-grade VPN stability work.
 
+Product addendum (April 25, 2026):
+- external product name is `Global Private Mesh (GPM)`.
+- keep one normal public GPM App for client VPN use and optional contribution mode, with zero admin tools in release builds.
+- add a separate Linux-first GPM Admin Console for server/client control, approvals, policy changes, slashing review, settlement review, and payout finalization.
+- Tier 1 users cannot use or provide micro-relay/micro-exit; Tier 2 and Tier 3 users can use micro-relays and can opt into micro-relay or micro-exit beta only when stake, prepaid balance, policy, explicit opt-in, and device checks pass.
+- the background GPM Agent measures hardware/network capacity and automatically sets safe relay/exit caps while prioritizing the user's own VPN traffic.
+- contribution is metered continuously but settled and paid weekly, with Monday 00:00 UTC epochs by default.
+
 Scope (current):
 - define role model for `client`, `micro-relay`, `exit`, and `validator`
 - define explicit user-facing hop modes (`1-hop`, `2-hop`, `3-hop`) with clear tradeoff labeling
 - define safe rotation policy for relay/exit selection (bounded stickiness + jitter)
 - define operator and client safety baselines for broader participation
+- enforce public-app vs Admin Console split before release
+- wire contribution eligibility, adaptive caps, weekly payout accounting, slashing/abuse holds, and chain-bound settlement
 
 Guardrails:
 - keep blockchain/validator logic out of packet forwarding critical path
 - keep 2-hop balanced mode as stable default until comparative metrics justify changes
 - keep exit role hardened and specialized; micro-relay rollout should not imply default exit participation
+- keep public client/server app free of admin controls; admin workflows belong only to the dedicated Admin Console
 
 Track docs:
 - `docs/global-privacy-mesh-track.md`
@@ -175,6 +189,9 @@ Exit criteria for this track to affect default behavior:
 - multi-run comparative evidence for latency/reliability/privacy across hop profiles
 - abuse handling quality unchanged or improved under micro-relay participation
 - no regression in production-grade VPN RC checks
+- Tier 1/Tier 2/Tier 3 contribution gates verified
+- weekly reward rollup, slashing hold/void behavior, and settlement history verified
+- release/public app verified to contain no admin controls or server-management UI
 
 ## Phase 3: Cross-Platform Clients (After Linux Beta Stability)
 
@@ -270,7 +287,7 @@ Current implementation posture:
 - phase7 mainnet cutover wrappers are available as `scripts/phase7_mainnet_cutover_check.sh` and `scripts/phase7_mainnet_cutover_run.sh`, with integration coverage in `scripts/integration_phase7_mainnet_cutover_check.sh` and `scripts/integration_phase7_mainnet_cutover_run.sh`.
 - phase7 mainnet cutover handoff wrappers are available as `scripts/phase7_mainnet_cutover_handoff_check.sh` and `scripts/phase7_mainnet_cutover_handoff_run.sh`, with integration coverage in `scripts/integration_phase7_mainnet_cutover_handoff_check.sh` and `scripts/integration_phase7_mainnet_cutover_handoff_run.sh`; easy-node exposes `./scripts/easy_node.sh phase7-mainnet-cutover-handoff-check` and `./scripts/easy_node.sh phase7-mainnet-cutover-handoff-run`.
 - phase7 check/run/handoff-check/handoff-run signal snapshots include `mainnet_activation_gate_go` and `bootstrap_governance_graduation_gate_go` for validator-policy gate visibility.
-- `mainnet_activation_gate_go` and `bootstrap_governance_graduation_gate_go` enforcement remain optional by default and are only required when operators explicitly enable `--require-mainnet-activation-gate-go` and/or `--require-bootstrap-governance-graduation-gate-go` in phase7 cutover gates.
+- `mainnet_activation_gate_go` and `bootstrap_governance_graduation_gate_go` enforcement are required by default in phase7 cutover gates; operators may only relax them explicitly with `--require-mainnet-activation-gate-go 0` and/or `--require-bootstrap-governance-graduation-gate-go 0` for non-production dry-run/support scenarios.
 - phase7 mainnet cutover CI wrapper is `scripts/ci_phase7_mainnet_cutover.sh`, with contract coverage in `scripts/integration_ci_phase7_mainnet_cutover.sh` for fail-closed stage ordering across check/run/handoff-check/handoff-run and first-failure RC propagation.
 - phase7 operator summary helper is `scripts/phase7_mainnet_cutover_summary_report.sh`, with integration coverage in `scripts/integration_phase7_mainnet_cutover_summary_report.sh`, and it aggregates check/run/handoff-check/handoff-run artifacts.
 - phase7 summary/report surfacing now includes runtime/readiness signals `module_tx_surface_ok`, `tdpnd_grpc_live_smoke_ok`, `tdpnd_grpc_auth_live_smoke_ok`, `cosmos_module_coverage_floor_ok`, `cosmos_keeper_coverage_floor_ok`, and `cosmos_app_coverage_floor_ok`, gate signals `mainnet_activation_gate_go_ok` and `bootstrap_governance_graduation_gate_go_ok`, and `dual_write_parity_ok` through `scripts/phase7_mainnet_cutover_summary_report.sh` and `scripts/roadmap_progress_report.sh`; optional `tdpnd_comet_runtime_smoke_ok` is preserved when available.

@@ -12,6 +12,7 @@ import (
 type RewardsQueryServer interface {
 	GetAccrual(context.Context, RewardsGetAccrualRequest) (RewardsGetAccrualResponse, error)
 	GetDistribution(context.Context, RewardsGetDistributionRequest) (RewardsGetDistributionResponse, error)
+	GetProof(context.Context, RewardsGetProofRequest) (RewardsGetProofResponse, error)
 	ListAccruals(context.Context, RewardsListAccrualsRequest) (RewardsListAccrualsResponse, error)
 	ListDistributions(context.Context, RewardsListDistributionsRequest) (RewardsListDistributionsResponse, error)
 }
@@ -32,6 +33,15 @@ type RewardsGetDistributionRequest struct {
 type RewardsGetDistributionResponse struct {
 	Distribution rewardstypes.DistributionRecord
 	Found        bool
+}
+
+type RewardsGetProofRequest struct {
+	ProofPath string
+}
+
+type RewardsGetProofResponse struct {
+	Proof rewardstypes.RewardProofRecord
+	Found bool
 }
 
 type RewardsListAccrualsRequest struct{}
@@ -81,6 +91,23 @@ func (m rewardsQueryServer) GetDistribution(_ context.Context, req RewardsGetDis
 	return RewardsGetDistributionResponse{
 		Distribution: resp.Distribution,
 		Found:        true,
+	}, nil
+}
+
+func (m rewardsQueryServer) GetProof(_ context.Context, req RewardsGetProofRequest) (RewardsGetProofResponse, error) {
+	resp, err := m.queryServer.GetProof(rewardsmodule.GetProofRequest{ProofPath: req.ProofPath})
+	if err != nil {
+		if errors.Is(err, rewardsmodule.ErrNilKeeper) {
+			return RewardsGetProofResponse{}, errRewardsKeeperNotWired
+		}
+		if errors.Is(err, rewardsmodule.ErrProofNotFound) {
+			return RewardsGetProofResponse{Found: false}, nil
+		}
+		return RewardsGetProofResponse{}, err
+	}
+	return RewardsGetProofResponse{
+		Proof: resp.Proof,
+		Found: true,
 	}, nil
 }
 

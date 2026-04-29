@@ -54,6 +54,29 @@ func TestBaseClaimsForTier1(t *testing.T) {
 	}
 }
 
+func TestBaseClaimsForTierOmitsPortPolicyForOpaqueTransport(t *testing.T) {
+	exp := time.Now().Add(10 * time.Minute)
+	popPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen failed: %v", err)
+	}
+	popPubB64 := crypto.EncodeEd25519PublicKey(popPub)
+	claims := baseClaimsForTierWithTransport("issuer", "subject-a", 4, "exit", crypto.TokenTypeClientAccess, popPubB64, 1, exp, []string{"exit-a"}, "wireguard-udp", tokenTransportEnforcesPortPolicy("wireguard-udp"))
+	if claims.Transport != "wireguard-udp" {
+		t.Fatalf("wireguard token transport=%q want=wireguard-udp", claims.Transport)
+	}
+	if len(claims.AllowPorts) != 0 || len(claims.DenyPorts) != 0 {
+		t.Fatalf("opaque/wireguard tokens should omit unenforceable port policy claims, got allow=%v deny=%v", claims.AllowPorts, claims.DenyPorts)
+	}
+	jsonClaims := baseClaimsForTierWithTransport("issuer", "subject-a", 4, "exit", crypto.TokenTypeClientAccess, popPubB64, 1, exp, []string{"exit-a"}, "policy-json", tokenTransportEnforcesPortPolicy("policy-json"))
+	if jsonClaims.Transport != "policy-json" {
+		t.Fatalf("json token transport=%q want=policy-json", jsonClaims.Transport)
+	}
+	if len(jsonClaims.DenyPorts) != 1 || jsonClaims.DenyPorts[0] != 25 {
+		t.Fatalf("policy-json tokens should retain deny port policy, got %v", jsonClaims.DenyPorts)
+	}
+}
+
 func TestBaseProviderClaims(t *testing.T) {
 	exp := time.Now().Add(10 * time.Minute)
 	popPub, _, err := crypto.GenerateEd25519Keypair()

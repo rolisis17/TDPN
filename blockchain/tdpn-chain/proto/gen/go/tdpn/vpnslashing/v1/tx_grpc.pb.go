@@ -19,8 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Msg_SubmitEvidence_FullMethodName = "/tdpn.vpnslashing.v1.Msg/SubmitEvidence"
-	Msg_RecordPenalty_FullMethodName  = "/tdpn.vpnslashing.v1.Msg/RecordPenalty"
+	Msg_SubmitEvidence_FullMethodName  = "/tdpn.vpnslashing.v1.Msg/SubmitEvidence"
+	Msg_ConfirmEvidence_FullMethodName = "/tdpn.vpnslashing.v1.Msg/ConfirmEvidence"
+	Msg_RecordPenalty_FullMethodName   = "/tdpn.vpnslashing.v1.Msg/RecordPenalty"
 )
 
 // MsgClient is the client API for Msg service.
@@ -28,6 +29,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type MsgClient interface {
 	SubmitEvidence(ctx context.Context, in *MsgSubmitEvidenceRequest, opts ...grpc.CallOption) (*MsgSubmitEvidenceResponse, error)
+	ConfirmEvidence(ctx context.Context, in *MsgConfirmEvidenceRequest, opts ...grpc.CallOption) (*MsgConfirmEvidenceResponse, error)
 	RecordPenalty(ctx context.Context, in *MsgRecordPenaltyRequest, opts ...grpc.CallOption) (*MsgRecordPenaltyResponse, error)
 }
 
@@ -49,6 +51,16 @@ func (c *msgClient) SubmitEvidence(ctx context.Context, in *MsgSubmitEvidenceReq
 	return out, nil
 }
 
+func (c *msgClient) ConfirmEvidence(ctx context.Context, in *MsgConfirmEvidenceRequest, opts ...grpc.CallOption) (*MsgConfirmEvidenceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgConfirmEvidenceResponse)
+	err := c.cc.Invoke(ctx, Msg_ConfirmEvidence_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *msgClient) RecordPenalty(ctx context.Context, in *MsgRecordPenaltyRequest, opts ...grpc.CallOption) (*MsgRecordPenaltyResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MsgRecordPenaltyResponse)
@@ -64,6 +76,7 @@ func (c *msgClient) RecordPenalty(ctx context.Context, in *MsgRecordPenaltyReque
 // for forward compatibility.
 type MsgServer interface {
 	SubmitEvidence(context.Context, *MsgSubmitEvidenceRequest) (*MsgSubmitEvidenceResponse, error)
+	ConfirmEvidence(context.Context, *MsgConfirmEvidenceRequest) (*MsgConfirmEvidenceResponse, error)
 	RecordPenalty(context.Context, *MsgRecordPenaltyRequest) (*MsgRecordPenaltyResponse, error)
 	mustEmbedUnimplementedMsgServer()
 }
@@ -77,6 +90,9 @@ type UnimplementedMsgServer struct{}
 
 func (UnimplementedMsgServer) SubmitEvidence(context.Context, *MsgSubmitEvidenceRequest) (*MsgSubmitEvidenceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SubmitEvidence not implemented")
+}
+func (UnimplementedMsgServer) ConfirmEvidence(context.Context, *MsgConfirmEvidenceRequest) (*MsgConfirmEvidenceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ConfirmEvidence not implemented")
 }
 func (UnimplementedMsgServer) RecordPenalty(context.Context, *MsgRecordPenaltyRequest) (*MsgRecordPenaltyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RecordPenalty not implemented")
@@ -120,6 +136,24 @@ func _Msg_SubmitEvidence_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Msg_ConfirmEvidence_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgConfirmEvidenceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).ConfirmEvidence(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_ConfirmEvidence_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).ConfirmEvidence(ctx, req.(*MsgConfirmEvidenceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Msg_RecordPenalty_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(MsgRecordPenaltyRequest)
 	if err := dec(in); err != nil {
@@ -148,6 +182,10 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SubmitEvidence",
 			Handler:    _Msg_SubmitEvidence_Handler,
+		},
+		{
+			MethodName: "ConfirmEvidence",
+			Handler:    _Msg_ConfirmEvidence_Handler,
 		},
 		{
 			MethodName: "RecordPenalty",

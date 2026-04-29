@@ -58,8 +58,6 @@ Notes:
   - Alias --phase6-summary-json is accepted.
   - Required toggles default to 1, except:
       require_tdpnd_comet_runtime_smoke_ok=0
-      require_mainnet_activation_gate_go=0
-      require_bootstrap_governance_graduation_gate_go=0
       require_operator_approval_ok=0
 USAGE
 }
@@ -290,8 +288,8 @@ require_dual_write_parity_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_DUAL_WRITE_
 require_cosmos_module_coverage_floor_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_COSMOS_MODULE_COVERAGE_FLOOR_OK:-1}"
 require_cosmos_keeper_coverage_floor_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_COSMOS_KEEPER_COVERAGE_FLOOR_OK:-1}"
 require_cosmos_app_coverage_floor_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_COSMOS_APP_COVERAGE_FLOOR_OK:-1}"
-require_mainnet_activation_gate_go="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_MAINNET_ACTIVATION_GATE_GO:-0}"
-require_bootstrap_governance_graduation_gate_go="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_GO:-0}"
+require_mainnet_activation_gate_go="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_MAINNET_ACTIVATION_GATE_GO:-1}"
+require_bootstrap_governance_graduation_gate_go="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_GO:-1}"
 require_rollback_path_ready="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_ROLLBACK_PATH_READY:-1}"
 require_operator_approval_ok="${PHASE7_MAINNET_CUTOVER_CHECK_REQUIRE_OPERATOR_APPROVAL_OK:-0}"
 

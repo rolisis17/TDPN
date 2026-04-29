@@ -53,9 +53,11 @@ type Service struct {
 	providerIssuerPubCacheTTL        time.Duration
 	providerRelayMaxTTL              time.Duration
 	providerMinEntryTier             int
+	providerMinMicroRelayTier        int
 	providerMinExitTier              int
 	providerMaxPerOperator           int
 	providerSplitRoles               bool
+	microExitBetaAllowed             bool
 	issuerTrustURLs                  []string
 	issuerTrustedKeysFile            string
 	issuerTrustedKeys                []ed25519.PublicKey
@@ -202,6 +204,7 @@ const allowDangerousDevAdminTokenFallback = "DIRECTORY_ALLOW_DANGEROUS_DEV_ADMIN
 const allowDangerousIssuerTrustWithoutAnchors = "DIRECTORY_ALLOW_DANGEROUS_ISSUER_TRUST_WITHOUT_ANCHORS"
 const allowDangerousOutboundPrivateDNS = "DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS"
 const allowDangerousProviderTokenBypass = "DIRECTORY_ALLOW_DANGEROUS_PROVIDER_RELAY_TOKEN_BYPASS"
+const directoryMicroExitBetaAllowed = "DIRECTORY_MICRO_EXIT_BETA_ALLOWED"
 const defaultIssuerTrustedKeysFile = "data/directory_issuer_trusted_keys.txt"
 const directoryPrivateKeyMaxBytes int64 = 16 * 1024
 const directoryTrustedKeysFileMaxBytes int64 = 1 * 1024 * 1024
@@ -218,6 +221,7 @@ const microRelayMinCapacityScore = 0.5
 const microRelayMaxAbusePenalty = 0.5
 
 var errProviderRelayOwnershipConflict = errors.New("provider relay owned by different operator")
+var errMicroExitBetaDisabled = errors.New("micro-exit beta is disabled by directory policy")
 var sharedAddressSpaceCGNATPrefix = netip.MustParsePrefix("100.64.0.0/10")
 
 func New() *Service {
@@ -477,6 +481,12 @@ func New() *Service {
 			providerMinEntryTier = clampProviderTier(parsed)
 		}
 	}
+	providerMinMicroRelayTier := 2
+	if v := strings.TrimSpace(os.Getenv("DIRECTORY_PROVIDER_MIN_MICRO_RELAY_TIER")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			providerMinMicroRelayTier = clampProviderTier(parsed)
+		}
+	}
 	providerMinExitTier := 1
 	if v := strings.TrimSpace(os.Getenv("DIRECTORY_PROVIDER_MIN_EXIT_TIER")); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil {
@@ -511,6 +521,7 @@ func New() *Service {
 	if betaStrict {
 		providerSplitRoles = true
 	}
+	microExitBetaAllowed := envEnabled(directoryMicroExitBetaAllowed)
 	adminToken := strings.TrimSpace(os.Getenv("DIRECTORY_ADMIN_TOKEN"))
 	if adminToken == "" && envEnabled(allowDangerousDevAdminTokenFallback) {
 		adminToken = "dev-admin-token"
@@ -550,9 +561,11 @@ func New() *Service {
 		providerIssuerPubCacheTTL:        providerIssuerPubCacheTTL,
 		providerRelayMaxTTL:              providerRelayMaxTTL,
 		providerMinEntryTier:             providerMinEntryTier,
+		providerMinMicroRelayTier:        providerMinMicroRelayTier,
 		providerMinExitTier:              providerMinExitTier,
 		providerMaxPerOperator:           providerMaxPerOperator,
 		providerSplitRoles:               providerSplitRoles,
+		microExitBetaAllowed:             microExitBetaAllowed,
 		issuerTrustURLs:                  issuerTrustURLs,
 		issuerSyncSec:                    issuerSyncSec,
 		issuerTrustMinVotes:              issuerTrustMinVotes,
@@ -717,8 +730,8 @@ func (s *Service) Run(ctx context.Context) error {
 		IdleTimeout:       serverIdleTimeout,
 		MaxHeaderBytes:    serverMaxHeaderBytes,
 	}
-	log.Printf("directory federation policy: peers=%d peer_min_operators=%d peer_min_votes=%d peer_discovery_min_votes=%d peer_discovery_require_hint=%t peer_discovery_max_per_source=%d peer_discovery_max_per_operator=%d peer_discovery_fail_threshold=%d peer_discovery_backoff_sec=%d peer_discovery_max_backoff_sec=%d peer_discovery_dns_seeds=%d peer_discovery_dns_refresh_sec=%d adjudication_meta_min_votes=%d final_dispute_min_votes=%d final_appeal_min_votes=%d final_adjudication_min_operators=%d final_adjudication_min_sources=%d final_adjudication_min_ratio=%.2f dispute_max_ttl_sec=%d appeal_max_ttl_sec=%d issuer_urls=%d issuer_min_operators=%d issuer_min_votes=%d provider_issuer_urls=%d provider_relay_max_ttl_sec=%d provider_min_entry_tier=%d provider_min_exit_tier=%d provider_max_relays_per_operator=%d provider_split_roles=%t key_rotate_sec=%d key_history=%d",
-		len(s.peerURLs), s.peerMinOperators, s.peerMinVotes, maxInt(1, s.peerDiscoveryMinVotes), s.peerDiscoveryRequireHint, maxInt(0, s.peerDiscoveryMaxPerSrc), maxInt(0, s.peerDiscoveryMaxPerOp), maxInt(1, s.peerDiscoveryFailN), int(s.peerDiscoveryBackoff/time.Second), int(s.peerDiscoveryBackoffMax/time.Second), len(s.peerDiscoveryDNSSeeds), int(s.peerDiscoveryDNSRefresh/time.Second), maxInt(1, s.adjudicationMetaMin), s.effectiveFinalDisputeMinVotes(), s.effectiveFinalAppealMinVotes(), s.effectiveFinalAdjudicationMinOperators(), s.effectiveFinalAdjudicationMinSources(), s.effectiveFinalAdjudicationMinRatio(), int(s.disputeMaxTTL/time.Second), int(s.appealMaxTTL/time.Second), len(s.issuerTrustURLs), s.issuerMinOperators, s.issuerTrustMinVotes, len(s.providerIssuerURLs), int(s.providerRelayMaxTTL/time.Second), s.effectiveProviderMinEntryTier(), s.effectiveProviderMinExitTier(), s.effectiveProviderMaxRelaysPerOperator(), s.providerSplitRoles, int(s.keyRotateEvery/time.Second), s.effectiveKeyHistory())
+	log.Printf("directory federation policy: peers=%d peer_min_operators=%d peer_min_votes=%d peer_discovery_min_votes=%d peer_discovery_require_hint=%t peer_discovery_max_per_source=%d peer_discovery_max_per_operator=%d peer_discovery_fail_threshold=%d peer_discovery_backoff_sec=%d peer_discovery_max_backoff_sec=%d peer_discovery_dns_seeds=%d peer_discovery_dns_refresh_sec=%d adjudication_meta_min_votes=%d final_dispute_min_votes=%d final_appeal_min_votes=%d final_adjudication_min_operators=%d final_adjudication_min_sources=%d final_adjudication_min_ratio=%.2f dispute_max_ttl_sec=%d appeal_max_ttl_sec=%d issuer_urls=%d issuer_min_operators=%d issuer_min_votes=%d provider_issuer_urls=%d provider_relay_max_ttl_sec=%d provider_min_entry_tier=%d provider_min_micro_relay_tier=%d provider_min_exit_tier=%d provider_max_relays_per_operator=%d provider_split_roles=%t micro_exit_beta_allowed=%t key_rotate_sec=%d key_history=%d",
+		len(s.peerURLs), s.peerMinOperators, s.peerMinVotes, maxInt(1, s.peerDiscoveryMinVotes), s.peerDiscoveryRequireHint, maxInt(0, s.peerDiscoveryMaxPerSrc), maxInt(0, s.peerDiscoveryMaxPerOp), maxInt(1, s.peerDiscoveryFailN), int(s.peerDiscoveryBackoff/time.Second), int(s.peerDiscoveryBackoffMax/time.Second), len(s.peerDiscoveryDNSSeeds), int(s.peerDiscoveryDNSRefresh/time.Second), maxInt(1, s.adjudicationMetaMin), s.effectiveFinalDisputeMinVotes(), s.effectiveFinalAppealMinVotes(), s.effectiveFinalAdjudicationMinOperators(), s.effectiveFinalAdjudicationMinSources(), s.effectiveFinalAdjudicationMinRatio(), int(s.disputeMaxTTL/time.Second), int(s.appealMaxTTL/time.Second), len(s.issuerTrustURLs), s.issuerMinOperators, s.issuerTrustMinVotes, len(s.providerIssuerURLs), int(s.providerRelayMaxTTL/time.Second), s.effectiveProviderMinEntryTier(), s.effectiveProviderMinMicroRelayTier(), s.effectiveProviderMinExitTier(), s.effectiveProviderMaxRelaysPerOperator(), s.providerSplitRoles, s.microExitBetaAllowed, int(s.keyRotateEvery/time.Second), s.effectiveKeyHistory())
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -1166,8 +1179,15 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 		return nil
 	}
 	type peerCandidate struct {
-		desc  proto.RelayDescriptor
-		votes int
+		desc         proto.RelayDescriptor
+		votes        int
+		qualityVotes int
+		reputation   float64
+		uptime       float64
+		capacity     float64
+		abusePenalty float64
+		bondScore    float64
+		stakeScore   float64
 	}
 	type scoreCandidate struct {
 		relayID      string
@@ -1289,15 +1309,50 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 			}
 			cand := candidates[key][fingerprint]
 			cand.votes++
+			if usesConservativePeerQualityAggregation(desc.Role) {
+				rep := clampScore(desc.Reputation)
+				uptime := clampScore(desc.Uptime)
+				capacity := clampScore(desc.Capacity)
+				abusePenalty := clampScore(desc.AbusePenalty)
+				bondScore := clampScore(desc.BondScore)
+				stakeScore := clampScore(desc.StakeScore)
+				if cand.qualityVotes == 0 {
+					cand.reputation = rep
+					cand.uptime = uptime
+					cand.capacity = capacity
+					cand.abusePenalty = abusePenalty
+					cand.bondScore = bondScore
+					cand.stakeScore = stakeScore
+				} else {
+					cand.reputation = minFloat(cand.reputation, rep)
+					cand.uptime = minFloat(cand.uptime, uptime)
+					cand.capacity = minFloat(cand.capacity, capacity)
+					cand.abusePenalty = maxFloat(cand.abusePenalty, abusePenalty)
+					cand.bondScore = minFloat(cand.bondScore, bondScore)
+					cand.stakeScore = minFloat(cand.stakeScore, stakeScore)
+				}
+				cand.qualityVotes++
+			}
 			if cand.desc.RelayID == "" || desc.ValidUntil.After(cand.desc.ValidUntil) {
 				cand.desc = desc
 				cand.desc.Signature = ""
+			}
+			if cand.qualityVotes > 0 {
+				cand.desc.Reputation = cand.reputation
+				cand.desc.Uptime = cand.uptime
+				cand.desc.Capacity = cand.capacity
+				cand.desc.AbusePenalty = cand.abusePenalty
+				cand.desc.BondScore = cand.bondScore
+				cand.desc.StakeScore = cand.stakeScore
 			}
 			candidates[key][fingerprint] = cand
 		}
 		for _, score := range scores {
 			role, ok := canonicalizeSignalRole(score.Role)
 			if !ok || strings.TrimSpace(score.RelayID) == "" {
+				continue
+			}
+			if !s.microExitRoleEnabled(role) {
 				continue
 			}
 			key := relayKey(score.RelayID, role)
@@ -1308,17 +1363,44 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 			cand.relayID = score.RelayID
 			cand.role = role
 			cand.votes++
-			cand.reputation += clampScore(score.Reputation)
-			cand.uptime += clampScore(score.Uptime)
-			cand.capacity += clampScore(score.Capacity)
-			cand.abusePenalty += clampScore(score.AbusePenalty)
-			cand.bondScore += clampScore(score.BondScore)
-			cand.stakeScore += clampScore(score.StakeScore)
+			reputation := clampScore(score.Reputation)
+			uptime := clampScore(score.Uptime)
+			capacity := clampScore(score.Capacity)
+			abusePenalty := clampScore(score.AbusePenalty)
+			bondScore := clampScore(score.BondScore)
+			stakeScore := clampScore(score.StakeScore)
+			if usesConservativePeerQualityAggregation(role) {
+				if cand.votes == 1 {
+					cand.reputation = reputation
+					cand.uptime = uptime
+					cand.capacity = capacity
+					cand.abusePenalty = abusePenalty
+					cand.bondScore = bondScore
+					cand.stakeScore = stakeScore
+				} else {
+					cand.reputation = minFloat(cand.reputation, reputation)
+					cand.uptime = minFloat(cand.uptime, uptime)
+					cand.capacity = minFloat(cand.capacity, capacity)
+					cand.abusePenalty = maxFloat(cand.abusePenalty, abusePenalty)
+					cand.bondScore = minFloat(cand.bondScore, bondScore)
+					cand.stakeScore = minFloat(cand.stakeScore, stakeScore)
+				}
+			} else {
+				cand.reputation += reputation
+				cand.uptime += uptime
+				cand.capacity += capacity
+				cand.abusePenalty += abusePenalty
+				cand.bondScore += bondScore
+				cand.stakeScore += stakeScore
+			}
 			scoreCandidates[key] = cand
 		}
 		for _, att := range attestations {
 			role, ok := canonicalizeSignalRole(att.Role)
 			if !ok || strings.TrimSpace(att.RelayID) == "" {
+				continue
+			}
+			if !s.microExitRoleEnabled(role) {
 				continue
 			}
 			key := relayKey(att.RelayID, role)
@@ -1330,13 +1412,40 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 			cand.role = role
 			cand.operatorID = strings.TrimSpace(att.OperatorID)
 			cand.votes++
-			cand.reputation += clampScore(att.Reputation)
-			cand.uptime += clampScore(att.Uptime)
-			cand.capacity += clampScore(att.Capacity)
-			cand.abusePenalty += clampScore(att.AbusePenalty)
-			cand.bondScore += clampScore(att.BondScore)
-			cand.stakeScore += clampScore(att.StakeScore)
-			cand.confidence += clampScore(att.Confidence)
+			reputation := clampScore(att.Reputation)
+			uptime := clampScore(att.Uptime)
+			capacity := clampScore(att.Capacity)
+			abusePenalty := clampScore(att.AbusePenalty)
+			bondScore := clampScore(att.BondScore)
+			stakeScore := clampScore(att.StakeScore)
+			confidence := clampScore(att.Confidence)
+			if usesConservativePeerQualityAggregation(role) {
+				if cand.votes == 1 {
+					cand.reputation = reputation
+					cand.uptime = uptime
+					cand.capacity = capacity
+					cand.abusePenalty = abusePenalty
+					cand.bondScore = bondScore
+					cand.stakeScore = stakeScore
+					cand.confidence = confidence
+				} else {
+					cand.reputation = minFloat(cand.reputation, reputation)
+					cand.uptime = minFloat(cand.uptime, uptime)
+					cand.capacity = minFloat(cand.capacity, capacity)
+					cand.abusePenalty = maxFloat(cand.abusePenalty, abusePenalty)
+					cand.bondScore = minFloat(cand.bondScore, bondScore)
+					cand.stakeScore = minFloat(cand.stakeScore, stakeScore)
+					cand.confidence = minFloat(cand.confidence, confidence)
+				}
+			} else {
+				cand.reputation += reputation
+				cand.uptime += uptime
+				cand.capacity += capacity
+				cand.abusePenalty += abusePenalty
+				cand.bondScore += bondScore
+				cand.stakeScore += stakeScore
+				cand.confidence += confidence
+			}
 			if capTier, until, ok := s.activeDispute(att, nowUnix); ok {
 				cand.disputeVotes++
 				if cand.disputeCaps == nil {
@@ -1398,6 +1507,9 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 			continue
 		}
 		n := float64(cand.votes)
+		if usesConservativePeerQualityAggregation(cand.role) {
+			n = 1
+		}
 		mergedScores[key] = proto.RelaySelectionScore{
 			RelayID:      cand.relayID,
 			Role:         cand.role,
@@ -1415,6 +1527,9 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 			continue
 		}
 		n := float64(cand.votes)
+		if usesConservativePeerQualityAggregation(cand.role) {
+			n = 1
+		}
 		att := proto.RelayTrustAttestation{
 			RelayID:      cand.relayID,
 			Role:         cand.role,
@@ -3071,6 +3186,12 @@ func (s *Service) recordPeerSyncFailure(peerURL string, now time.Time, err error
 }
 
 func (s *Service) preparePeerDescriptor(desc proto.RelayDescriptor) (proto.RelayDescriptor, bool) {
+	if role, err := canonicalizePeerRelayRole(desc.Role); err == nil {
+		if !s.microExitRoleEnabled(role) {
+			return desc, false
+		}
+		desc.Role = role
+	}
 	origin := strings.TrimSpace(desc.OriginOperator)
 	if origin == "" {
 		origin = strings.TrimSpace(desc.OperatorID)
@@ -3638,13 +3759,19 @@ func (s *Service) handleProviderRelayUpsert(w http.ResponseWriter, r *http.Reque
 
 	desc, err := s.buildProviderRelayDescriptor(req, claims, now)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		status := http.StatusBadRequest
+		if errors.Is(err, errMicroExitBetaDisabled) {
+			status = http.StatusForbidden
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
 	if err := s.upsertProviderRelay(desc); err != nil {
 		status := http.StatusTooManyRequests
 		if errors.Is(err, errProviderRelayOwnershipConflict) {
 			status = http.StatusConflict
+		} else if errors.Is(err, errMicroExitBetaDisabled) {
+			status = http.StatusForbidden
 		}
 		http.Error(w, err.Error(), status)
 		return
@@ -3656,24 +3783,28 @@ func (s *Service) handleProviderRelayUpsert(w http.ResponseWriter, r *http.Reque
 func canonicalizeProviderRelayRole(raw string) (string, error) {
 	role := strings.TrimSpace(strings.ToLower(raw))
 	switch role {
-	case "entry", "exit", "micro-relay":
+	case "entry", "exit", "micro-relay", "micro-exit":
 		return role, nil
 	case "micro_relay", "middle", "relay", "transit", "three-hop-middle":
 		return "micro-relay", nil
+	case "micro_exit", "client-exit", "contribution-exit":
+		return "micro-exit", nil
 	default:
-		return "", fmt.Errorf("provider relay role must be entry, exit, or micro-relay (aliases: micro_relay, middle, relay, transit, three-hop-middle)")
+		return "", fmt.Errorf("provider relay role must be entry, exit, micro-relay, or micro-exit (aliases: micro_relay, micro_exit, middle, relay, transit, three-hop-middle, client-exit, contribution-exit)")
 	}
 }
 
 func canonicalizePeerRelayRole(raw string) (string, error) {
 	role := strings.TrimSpace(strings.ToLower(raw))
 	switch role {
-	case "entry", "exit", "micro-relay":
+	case "entry", "exit", "micro-relay", "micro-exit":
 		return role, nil
 	case "micro_relay", "middle", "relay", "transit", "three-hop-middle":
 		return "micro-relay", nil
+	case "micro_exit", "client-exit", "contribution-exit":
+		return "micro-exit", nil
 	default:
-		return "", fmt.Errorf("relay role must be entry, exit, or micro-relay (aliases: micro_relay, middle, relay, transit, three-hop-middle)")
+		return "", fmt.Errorf("relay role must be entry, exit, micro-relay, or micro-exit (aliases: micro_relay, micro_exit, middle, relay, transit, three-hop-middle, client-exit, contribution-exit)")
 	}
 }
 
@@ -3686,10 +3817,21 @@ func canonicalizeSignalRole(raw string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	if canonicalRole != "exit" && canonicalRole != "micro-relay" {
+	if canonicalRole != "exit" && canonicalRole != "micro-relay" && canonicalRole != "micro-exit" {
 		return "", false
 	}
 	return canonicalRole, true
+}
+
+func (s *Service) validateMicroExitBetaPolicy(role string) error {
+	if strings.TrimSpace(strings.ToLower(role)) == "micro-exit" && !s.microExitBetaAllowed {
+		return errMicroExitBetaDisabled
+	}
+	return nil
+}
+
+func (s *Service) microExitRoleEnabled(role string) bool {
+	return s.validateMicroExitBetaPolicy(role) == nil
 }
 
 func validateProviderRelayUpsertShape(req proto.ProviderRelayUpsertRequest) error {
@@ -3719,35 +3861,50 @@ func validateProviderRelayRuntimeAdmission(desc proto.RelayDescriptor) error {
 	if strings.TrimSpace(desc.RelayID) == "" {
 		return fmt.Errorf("provider relay_id is required")
 	}
-	if role != "micro-relay" {
+	if role != "micro-relay" && role != "micro-exit" {
 		return nil
 	}
 	if normalizeOperatorID(desc.OperatorID) == "" {
-		return fmt.Errorf("provider micro-relay operator id invalid")
+		return fmt.Errorf("provider %s operator id invalid", role)
 	}
 	for _, hopRole := range normalizeHopRoles(desc.HopRoles) {
-		if hopRole != "middle" {
+		if role == "micro-relay" && hopRole != "middle" {
 			return fmt.Errorf("provider micro-relay hop_roles must only include middle")
+		}
+		if role == "micro-exit" && hopRole != "exit" {
+			return fmt.Errorf("provider micro-exit hop_roles must only include exit")
 		}
 	}
 	for _, capability := range normalizeCapabilities(desc.Capabilities, role) {
-		if capability == "two-hop" || capability == "tiered-policy" {
+		if role == "micro-relay" && (capability == "two-hop" || capability == "tiered-policy") {
 			return fmt.Errorf("provider micro-relay capability %q is not allowed", capability)
+		}
+		if role == "micro-exit" && (capability == "two-hop" || capabilityIsMiddleHopAlias(capability)) {
+			return fmt.Errorf("provider micro-exit capability %q is not allowed", capability)
 		}
 	}
 	if desc.Reputation < microRelayMinReputationScore {
-		return fmt.Errorf("provider micro-relay reputation score %.2f below minimum %.2f", desc.Reputation, microRelayMinReputationScore)
+		return fmt.Errorf("provider %s reputation score %.2f below minimum %.2f", role, desc.Reputation, microRelayMinReputationScore)
 	}
 	if desc.Uptime < microRelayMinUptimeScore {
-		return fmt.Errorf("provider micro-relay uptime score %.2f below minimum %.2f", desc.Uptime, microRelayMinUptimeScore)
+		return fmt.Errorf("provider %s uptime score %.2f below minimum %.2f", role, desc.Uptime, microRelayMinUptimeScore)
 	}
 	if desc.Capacity < microRelayMinCapacityScore {
-		return fmt.Errorf("provider micro-relay capacity score %.2f below minimum %.2f", desc.Capacity, microRelayMinCapacityScore)
+		return fmt.Errorf("provider %s capacity score %.2f below minimum %.2f", role, desc.Capacity, microRelayMinCapacityScore)
 	}
 	if desc.AbusePenalty > microRelayMaxAbusePenalty {
-		return fmt.Errorf("provider micro-relay abuse penalty %.2f exceeds maximum %.2f", desc.AbusePenalty, microRelayMaxAbusePenalty)
+		return fmt.Errorf("provider %s abuse penalty %.2f exceeds maximum %.2f", role, desc.AbusePenalty, microRelayMaxAbusePenalty)
 	}
 	return nil
+}
+
+func capabilityIsMiddleHopAlias(raw string) bool {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "middle", "relay", "micro-relay", "micro_relay", "transit", "three-hop-middle":
+		return true
+	default:
+		return false
+	}
 }
 
 func decodeStrictJSONBody(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) error {
@@ -4030,23 +4187,21 @@ func (s *Service) markProviderTokenProofReplayInstanceLocal(tokenID string, nonc
 	if needsPersist {
 		before = cloneProviderTokenProofSeen(s.providerTokenProofSeen)
 	}
-	if providerTokenProofReplaySeenMapMarkAndCheck(s.providerTokenProofSeen, tokenID, nonce, now) {
+	if err := providerTokenProofReplaySeenMapMarkAndCheck(s.providerTokenProofSeen, tokenID, nonce, now); err != nil {
 		s.providerMu.Unlock()
-		return fmt.Errorf("provider token proof nonce replayed")
+		return err
 	}
 	if needsPersist {
 		snapshot = cloneProviderTokenProofSeen(s.providerTokenProofSeen)
-	}
-	s.providerMu.Unlock()
-	if !needsPersist {
+		if err := persistProviderTokenProofReplayStoreSnapshot(replayStorePath, now, snapshot); err != nil {
+			s.providerTokenProofSeen = before
+			s.providerMu.Unlock()
+			return fmt.Errorf("provider token proof replay persistence failed: %w", err)
+		}
+		s.providerMu.Unlock()
 		return nil
 	}
-	if err := persistProviderTokenProofReplayStoreSnapshot(replayStorePath, now, snapshot); err != nil {
-		s.providerMu.Lock()
-		s.providerTokenProofSeen = before
-		s.providerMu.Unlock()
-		return fmt.Errorf("provider token proof replay persistence failed: %w", err)
-	}
+	s.providerMu.Unlock()
 	return nil
 }
 
@@ -4068,11 +4223,11 @@ func (s *Service) markProviderTokenProofReplayShared(tokenID string, nonce strin
 	if seen == nil {
 		seen = make(map[string]time.Time)
 	}
-	if providerTokenProofReplaySeenMapMarkAndCheck(seen, tokenID, nonce, now) {
+	if err := providerTokenProofReplaySeenMapMarkAndCheck(seen, tokenID, nonce, now); err != nil {
 		s.providerMu.Lock()
 		s.providerTokenProofSeen = cloneProviderTokenProofSeen(seen)
 		s.providerMu.Unlock()
-		return fmt.Errorf("provider token proof nonce replayed")
+		return err
 	}
 	if err := persistProviderTokenProofReplayStoreSnapshot(replayStorePath, now, seen); err != nil {
 		return fmt.Errorf("provider token proof replay persistence failed: %w", err)
@@ -4106,12 +4261,12 @@ func (s *Service) markProviderTokenProofReplayRedis(tokenID string, nonce string
 	if s.providerTokenProofSeen == nil {
 		s.providerTokenProofSeen = make(map[string]time.Time)
 	}
-	providerTokenProofReplaySeenMapMarkAndCheck(s.providerTokenProofSeen, tokenID, nonce, now)
+	_ = providerTokenProofReplaySeenMapMarkAndCheck(s.providerTokenProofSeen, tokenID, nonce, now)
 	s.providerMu.Unlock()
 	return nil
 }
 
-func providerTokenProofReplaySeenMapMarkAndCheck(seen map[string]time.Time, tokenID string, nonce string, now time.Time) bool {
+func providerTokenProofReplaySeenMapMarkAndCheck(seen map[string]time.Time, tokenID string, nonce string, now time.Time) error {
 	cutoff := now.Add(-providerRelayUpsertProofReplayTTL)
 	for key, seenAt := range seen {
 		if seenAt.Before(cutoff) {
@@ -4120,40 +4275,23 @@ func providerTokenProofReplaySeenMapMarkAndCheck(seen map[string]time.Time, toke
 	}
 	replayKey := tokenID + ":" + nonce
 	if seenAt, ok := seen[replayKey]; ok && !seenAt.Before(cutoff) {
-		return true
+		return fmt.Errorf("provider token proof nonce replayed")
 	}
 	tokenCount := 0
-	oldestTokenKey := ""
-	oldestTokenSeenAt := now
-	for key, seenAt := range seen {
+	for key := range seen {
 		if !strings.HasPrefix(key, tokenID+":") {
 			continue
 		}
 		tokenCount++
-		if oldestTokenKey == "" || seenAt.Before(oldestTokenSeenAt) {
-			oldestTokenKey = key
-			oldestTokenSeenAt = seenAt
-		}
 	}
-	if tokenCount >= providerRelayUpsertProofReplayMaxPerToken && oldestTokenKey != "" {
-		delete(seen, oldestTokenKey)
+	if tokenCount >= providerRelayUpsertProofReplayMaxPerToken {
+		return fmt.Errorf("provider token proof replay window saturated for token")
 	}
-	for len(seen) >= providerRelayUpsertProofReplayMaxEntries {
-		oldestKey := ""
-		oldestSeenAt := now
-		for key, seenAt := range seen {
-			if oldestKey == "" || seenAt.Before(oldestSeenAt) {
-				oldestKey = key
-				oldestSeenAt = seenAt
-			}
-		}
-		if oldestKey == "" {
-			break
-		}
-		delete(seen, oldestKey)
+	if len(seen) >= providerRelayUpsertProofReplayMaxEntries {
+		return fmt.Errorf("provider token proof replay window saturated")
 	}
 	seen[replayKey] = now
-	return false
+	return nil
 }
 
 func acquireProviderTokenProofReplayStoreLock(path string, timeout time.Duration) (func(), error) {
@@ -4389,6 +4527,9 @@ func (s *Service) buildProviderRelayDescriptor(req proto.ProviderRelayUpsertRequ
 	if err != nil {
 		return proto.RelayDescriptor{}, err
 	}
+	if err := s.validateMicroExitBetaPolicy(role); err != nil {
+		return proto.RelayDescriptor{}, err
+	}
 	minTier := s.providerTierMinForRole(role)
 	if claims.Tier < minTier {
 		return proto.RelayDescriptor{}, fmt.Errorf("provider token tier below minimum for role")
@@ -4468,6 +4609,9 @@ func (s *Service) upsertProviderRelay(desc proto.RelayDescriptor) error {
 	if err != nil {
 		return err
 	}
+	if err := s.validateMicroExitBetaPolicy(role); err != nil {
+		return err
+	}
 	desc.Role = role
 	if err := validateProviderRelayRuntimeAdmission(desc); err != nil {
 		return err
@@ -4493,9 +4637,6 @@ func (s *Service) upsertProviderRelay(desc proto.RelayDescriptor) error {
 		if !ok && count >= maxPerOperator {
 			return fmt.Errorf("provider operator relay limit reached")
 		}
-	}
-	if ok && prev.ValidUntil.After(desc.ValidUntil) {
-		desc.ValidUntil = prev.ValidUntil
 	}
 	if err := s.enforceProviderSplitRolesLocked(key, desc); err != nil {
 		return err
@@ -4531,6 +4672,13 @@ func (s *Service) effectiveProviderMinEntryTier() int {
 	return clampProviderTier(s.providerMinEntryTier)
 }
 
+func (s *Service) effectiveProviderMinMicroRelayTier() int {
+	if s.providerMinMicroRelayTier <= 0 {
+		return 2
+	}
+	return clampProviderTier(s.providerMinMicroRelayTier)
+}
+
 func (s *Service) effectiveProviderMinExitTier() int {
 	return clampProviderTier(s.providerMinExitTier)
 }
@@ -4546,6 +4694,9 @@ func (s *Service) providerTierMinForRole(role string) int {
 	role = strings.TrimSpace(strings.ToLower(role))
 	if role == "exit" {
 		return s.effectiveProviderMinExitTier()
+	}
+	if role == "micro-relay" || role == "micro-exit" {
+		return s.effectiveProviderMinMicroRelayTier()
 	}
 	return s.effectiveProviderMinEntryTier()
 }
@@ -4663,7 +4814,7 @@ func (s *Service) buildRelayDescriptors(now time.Time) []proto.RelayDescriptor {
 		},
 	}
 	providers := s.snapshotProviderRelays(now)
-	peers := s.snapshotPeerRelays()
+	peers := s.snapshotPeerRelays(now)
 	merged := make([]proto.RelayDescriptor, 0, len(local)+len(providers)+len(peers))
 	seen := make(map[string]struct{}, len(local))
 	for _, desc := range local {
@@ -4693,9 +4844,16 @@ func (s *Service) buildRelayDescriptors(now time.Time) []proto.RelayDescriptor {
 	nowUnix := now.Unix()
 	actuated := make([]proto.RelayDescriptor, 0, len(merged))
 	for _, desc := range merged {
-		if role, ok := canonicalizeSignalRole(desc.Role); ok && role == "micro-relay" {
+		if role, ok := canonicalizeSignalRole(desc.Role); ok {
 			desc.Role = role
-			if !s.microRelayEligibleForPublication(desc, nowUnix, peerScores, peerTrust, issuerTrust) {
+			if !s.microExitRoleEnabled(role) {
+				continue
+			}
+			if role != "micro-relay" && role != "micro-exit" {
+				actuated = append(actuated, desc)
+				continue
+			}
+			if !s.contributionRelayEligibleForPublication(desc, role, nowUnix, peerScores, peerTrust, issuerTrust) {
 				continue
 			}
 		}
@@ -4711,6 +4869,18 @@ func (s *Service) microRelayEligibleForPublication(
 	peerTrust map[string]proto.RelayTrustAttestation,
 	issuerTrust map[string]proto.RelayTrustAttestation,
 ) bool {
+	return s.contributionRelayEligibleForPublication(desc, "micro-relay", nowUnix, peerScores, peerTrust, issuerTrust)
+}
+
+func (s *Service) contributionRelayEligibleForPublication(
+	desc proto.RelayDescriptor,
+	role string,
+	nowUnix int64,
+	peerScores map[string]proto.RelaySelectionScore,
+	peerTrust map[string]proto.RelayTrustAttestation,
+	issuerTrust map[string]proto.RelayTrustAttestation,
+) bool {
+	role = strings.TrimSpace(strings.ToLower(role))
 	relayID := strings.TrimSpace(desc.RelayID)
 	if relayID == "" {
 		return false
@@ -4718,10 +4888,10 @@ func (s *Service) microRelayEligibleForPublication(
 	if normalizeOperatorID(desc.OperatorID) == "" {
 		return false
 	}
-	key := relayKey(relayID, "micro-relay")
+	key := relayKey(relayID, role)
 	localScore := proto.RelaySelectionScore{
 		RelayID:      relayID,
-		Role:         "micro-relay",
+		Role:         role,
 		Reputation:   desc.Reputation,
 		Uptime:       desc.Uptime,
 		Capacity:     desc.Capacity,
@@ -4762,6 +4932,10 @@ func microRelayScoreEligible(score proto.RelaySelectionScore) bool {
 	return true
 }
 
+func usesConservativePeerQualityAggregation(role string) bool {
+	return role == "micro-relay" || role == "micro-exit"
+}
+
 func (s *Service) buildSelectionScores(relays []proto.RelayDescriptor) []proto.RelaySelectionScore {
 	type scoreAgg struct {
 		relayID      string
@@ -4778,6 +4952,9 @@ func (s *Service) buildSelectionScores(relays []proto.RelayDescriptor) []proto.R
 	add := func(score proto.RelaySelectionScore) {
 		role, ok := canonicalizeSignalRole(score.Role)
 		if !ok || strings.TrimSpace(score.RelayID) == "" {
+			return
+		}
+		if !s.microExitRoleEnabled(role) {
 			return
 		}
 		score.Role = role
@@ -4883,6 +5060,9 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 	add := func(att proto.RelayTrustAttestation, sourceClass string) {
 		role, ok := canonicalizeSignalRole(att.Role)
 		if !ok || strings.TrimSpace(att.RelayID) == "" {
+			return
+		}
+		if !s.microExitRoleEnabled(role) {
 			return
 		}
 		att.Role = role
@@ -5008,11 +5188,20 @@ func (s *Service) buildTrustAttestations(relays []proto.RelayDescriptor) []proto
 	return out
 }
 
-func (s *Service) snapshotPeerRelays() []proto.RelayDescriptor {
-	s.peerMu.RLock()
-	defer s.peerMu.RUnlock()
+func (s *Service) snapshotPeerRelays(at ...time.Time) []proto.RelayDescriptor {
+	now := time.Now().UTC()
+	if len(at) > 0 && !at[0].IsZero() {
+		now = at[0]
+	}
+	nowUnix := now.Unix()
+	s.peerMu.Lock()
+	defer s.peerMu.Unlock()
 	out := make([]proto.RelayDescriptor, 0, len(s.peerRelays))
-	for _, desc := range s.peerRelays {
+	for key, desc := range s.peerRelays {
+		if desc.ValidUntil.IsZero() || nowUnix >= desc.ValidUntil.Unix() {
+			delete(s.peerRelays, key)
+			continue
+		}
 		out = append(out, desc)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -5035,6 +5224,12 @@ func (s *Service) snapshotProviderRelays(now time.Time) []proto.RelayDescriptor 
 		if !desc.ValidUntil.IsZero() && nowUnix >= desc.ValidUntil.Unix() {
 			delete(s.providerRelays, key)
 			continue
+		}
+		if role, err := canonicalizeProviderRelayRole(desc.Role); err == nil {
+			desc.Role = role
+			if !s.microExitRoleEnabled(role) {
+				continue
+			}
 		}
 		out = append(out, desc)
 	}
@@ -5491,8 +5686,14 @@ func validateProviderControlURL(controlURL, endpoint string, strict bool) error 
 	if scheme != "http" && scheme != "https" {
 		return fmt.Errorf("provider control_url invalid")
 	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("provider control_url must not include userinfo, query, or fragment")
+	}
 	if strict && scheme != "https" {
 		return fmt.Errorf("provider control_url must use https in strict mode")
+	}
+	if strict && controlURLHasPathPrefix(parsed) {
+		return fmt.Errorf("provider control_url path prefixes are not allowed in strict mode")
 	}
 	controlHost := normalizeHostForCompare(parsed.Hostname())
 	if controlHost == "" {
@@ -5509,6 +5710,14 @@ func validateProviderControlURL(controlURL, endpoint string, strict bool) error 
 		return fmt.Errorf("provider control_url host must match endpoint host")
 	}
 	return nil
+}
+
+func controlURLHasPathPrefix(parsed *urlpkg.URL) bool {
+	if parsed == nil {
+		return false
+	}
+	path := strings.TrimSpace(parsed.EscapedPath())
+	return path != "" && path != "/"
 }
 
 func hostFromEndpoint(endpoint string) string {
@@ -5580,6 +5789,11 @@ func isDisallowedStrictControlHost(host string) bool {
 	ip := net.ParseIP(host)
 	if ip == nil {
 		return false
+	}
+	if ipv4 := ip.To4(); ipv4 != nil {
+		if addr, ok := netip.AddrFromSlice(ipv4); ok && sharedAddressSpaceCGNATPrefix.Contains(addr) {
+			return true
+		}
 	}
 	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
 		return true
@@ -6092,7 +6306,7 @@ func normalizeRegion(v string) string {
 func normalizeCapabilities(values []string, role string) []string {
 	role = strings.TrimSpace(strings.ToLower(role))
 	base := []string{"wg"}
-	if role == "exit" {
+	if role == "exit" || role == "micro-exit" {
 		base = append(base, "tiered-policy")
 	} else if role == "entry" {
 		base = append(base, "two-hop")
@@ -6590,6 +6804,13 @@ func tickerC(t *time.Ticker) <-chan time.Time {
 
 func maxFloat(a float64, b float64) float64 {
 	if a > b {
+		return a
+	}
+	return b
+}
+
+func minFloat(a float64, b float64) float64 {
+	if a < b {
 		return a
 	}
 	return b

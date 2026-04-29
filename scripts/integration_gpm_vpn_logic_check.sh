@@ -116,6 +116,9 @@ declare -a REQUIRED_DEFAULT_CHECKS=(
   "vpn_wireguard_runtime_contract"
   "vpn_wireguard_key_contract"
   "vpn_wireguard_packet_contract"
+  "vpn_direct_exit_fallback_contract"
+  "vpn_entry_middle_route_contract"
+  "vpn_exit_route_assertion_contract"
 )
 for required_default in "${REQUIRED_DEFAULT_CHECKS[@]}"; do
   if ! printf '%s\n' "${DEFAULT_EXCLUDES[@]}" | grep -Fx -- "$required_default" >/dev/null 2>&1; then

@@ -783,6 +783,42 @@ function Get-DesktopPackagedExecutableCandidates {
   return $candidates
 }
 
+function Test-AdminConsoleExecutablePath {
+  param(
+    [AllowEmptyString()]
+    [string]$ExecutablePath
+  )
+
+  if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
+    return $false
+  }
+
+  $leaf = [System.IO.Path]::GetFileName($ExecutablePath).ToLowerInvariant()
+  $tokenizedLeaf = ($leaf -replace '[\s_]+', '-')
+  $pathValue = $ExecutablePath.ToLowerInvariant()
+  $tokenizedPath = ($pathValue -replace '[\s_]+', '-')
+  return (
+    $tokenizedLeaf.Contains("admin-console") -or
+    $tokenizedLeaf.Contains("gpm-admin") -or
+    $tokenizedPath.Contains("admin-console") -or
+    $tokenizedPath.Contains("gpm-admin")
+  )
+}
+
+function Assert-PublicDesktopExecutableNotAdminConsole {
+  param(
+    [AllowEmptyString()]
+    [string]$ExecutablePath
+  )
+
+  if (Test-AdminConsoleExecutablePath -ExecutablePath $ExecutablePath) {
+    throw (New-DesktopLaunchError -Headline "public desktop bootstrap refuses Admin Console executable: $ExecutablePath" -Hints @(
+      "Use the separate GPM Admin Console launcher for admin builds.",
+      "For the public app, pass -DesktopExecutableOverridePath or GPM_DESKTOP_PACKAGED_EXE pointing to GPM Desktop / Global Private Mesh Desktop instead."
+    ))
+  }
+}
+
 function Get-DesktopPackagedExecutableFallbackCandidate {
   param(
     [Parameter(Mandatory = $true)]
@@ -826,6 +862,9 @@ function Get-DesktopPackagedExecutableFallbackCandidate {
     foreach ($scanResult in $scanResults) {
       $fileName = $scanResult.Name.ToLowerInvariant()
       if ($fileName -like "*uninstall*.exe" -or $fileName -match "^unins\d*\.exe$") {
+        continue
+      }
+      if (Test-AdminConsoleExecutablePath -ExecutablePath $scanResult.FullName) {
         continue
       }
       $exeCandidates += $scanResult
@@ -883,6 +922,7 @@ function Resolve-DesktopExecutableResolution {
         "For a local build, try the packaged output under apps\desktop\src-tauri\target\release after building the desktop app."
       ))
     }
+    Assert-PublicDesktopExecutableNotAdminConsole -ExecutablePath $candidateOverride
     return [PSCustomObject]@{
       Path = (Resolve-Path -LiteralPath $candidateOverride).Path
       Source = "override"
@@ -904,6 +944,7 @@ function Resolve-DesktopExecutableResolution {
       ))
     }
 
+    Assert-PublicDesktopExecutableNotAdminConsole -ExecutablePath $candidateOverride
     return [PSCustomObject]@{
       Path = (Resolve-Path -LiteralPath $candidateOverride).Path
       Source = ("env:{0}" -f $envOverride.Name)
@@ -915,6 +956,7 @@ function Resolve-DesktopExecutableResolution {
       continue
     }
     if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      Assert-PublicDesktopExecutableNotAdminConsole -ExecutablePath $candidate
       return [PSCustomObject]@{
         Path = (Resolve-Path -LiteralPath $candidate).Path
         Source = "packaged-default"

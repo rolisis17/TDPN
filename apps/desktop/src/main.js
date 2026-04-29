@@ -1,11 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 
+const ADMIN_CONSOLE_RENDERER = import.meta.env.VITE_GPM_ADMIN_CONSOLE === "1";
+
 function byId(id) {
   const el = document.getElementById(id);
   if (!el) {
     throw new Error(`Missing element: ${id}`);
   }
   return el;
+}
+
+function adminById(id) {
+  return ADMIN_CONSOLE_RENDERER ? byId(id) : null;
 }
 
 const outputEl = byId("output");
@@ -32,18 +38,25 @@ const signatureSourceEl = byId("signature_source");
 const signatureChainIdEl = byId("chain_id");
 const signedMessageEl = byId("signed_message");
 const signatureEnvelopeEl = byId("signature_envelope");
-const chainOperatorIdEl = byId("chain_operator_id");
-const selectedApplicationUpdatedAtEl = byId("selected_application_updated_at");
-const operatorReasonEl = byId("operator_reason");
-const operatorListStatusEl = byId("operator_list_status");
-const operatorListSearchEl = byId("operator_list_search");
-const operatorListLimitEl = byId("operator_list_limit");
-const operatorListNextCursorEl = byId("operator_list_next_cursor");
-const auditLimitEl = byId("audit_limit");
-const auditOffsetEl = byId("audit_offset");
-const auditEventEl = byId("audit_event");
-const auditWalletAddressEl = byId("audit_wallet_address");
-const auditOrderEl = byId("audit_order");
+const chainOperatorIdEl = adminById("chain_operator_id");
+const selectedApplicationUpdatedAtEl = adminById("selected_application_updated_at");
+const operatorReasonEl = adminById("operator_reason");
+const operatorListStatusEl = adminById("operator_list_status");
+const operatorListSearchEl = adminById("operator_list_search");
+const operatorListLimitEl = adminById("operator_list_limit");
+const operatorListNextCursorEl = adminById("operator_list_next_cursor");
+const adminContributionStatusEl = adminById("admin_contribution_status");
+const adminContributionRoleEl = adminById("admin_contribution_role");
+const adminContributionWalletEl = adminById("admin_contribution_wallet");
+const adminContributionLimitEl = adminById("admin_contribution_limit");
+const adminRewardWeekStartEl = adminById("admin_reward_week_start");
+const adminRewardHoldSourceEl = adminById("admin_reward_hold_source");
+const adminRewardHoldReasonEl = adminById("admin_reward_hold_reason");
+const auditLimitEl = adminById("audit_limit");
+const auditOffsetEl = adminById("audit_offset");
+const auditEventEl = adminById("audit_event");
+const auditWalletAddressEl = adminById("audit_wallet_address");
+const auditOrderEl = adminById("audit_order");
 const pathProfileEl = byId("path_profile");
 const serverLockHintEl = byId("server_lock_hint");
 const clientLockHintEl = byId("client_lock_hint");
@@ -59,14 +72,25 @@ const readinessFreshnessStateEl = document.getElementById("readiness_freshness_s
 const readinessFreshnessDetailEl = document.getElementById("readiness_freshness_detail");
 const signInPolicyHintEl = document.getElementById("signin_policy_hint");
 const sessionBootstrapDirectoryEl = byId("session_bootstrap_directory");
+const adminOnlyEls = Array.from(document.querySelectorAll("[data-admin-only]"));
+const contributionRoleEl = byId("contribution_role");
+const contributionStateEl = byId("contribution_state");
+const contributionDetailEl = byId("contribution_detail");
+const contributionCapacityEl = byId("contribution_capacity");
+const contributionRewardEl = byId("contribution_reward");
+const contributionStatusBtnEl = byId("contribution_status_btn");
+const contributionEnableBtnEl = byId("contribution_enable_btn");
+const contributionDisableBtnEl = byId("contribution_disable_btn");
+const rewardsCurrentWeekBtnEl = byId("rewards_current_week_btn");
+const rewardsHistoryBtnEl = byId("rewards_history_btn");
 
-const updateBtnEl = byId("update_btn");
+const updateBtnEl = adminById("update_btn");
 const walletSignInBtnEl = byId("wallet_signin_btn");
 const signInBtnEl = byId("signin_btn");
-const setProfileBtnEl = byId("set_profile_btn");
-const serviceStartBtnEl = byId("service_start_btn");
-const serviceStopBtnEl = byId("service_stop_btn");
-const serviceRestartBtnEl = byId("service_restart_btn");
+const setProfileBtnEl = adminById("set_profile_btn");
+const serviceStartBtnEl = adminById("service_start_btn");
+const serviceStopBtnEl = adminById("service_stop_btn");
+const serviceRestartBtnEl = adminById("service_restart_btn");
 const tabClientEl = byId("tab_client");
 const tabServerEl = byId("tab_server");
 const panelClientEl = byId("panel_client");
@@ -90,9 +114,9 @@ const desktopOnboardingBannerEl = document.getElementById("desktop_onboarding_ba
 const desktopOnboardingStateEl = document.getElementById("desktop_onboarding_state");
 const desktopOnboardingDetailEl = document.getElementById("desktop_onboarding_detail");
 const desktopOnboardingNextActionEl = document.getElementById("desktop_onboarding_next_action");
-const operatorListNextBtnEl = byId("operator_list_next_btn");
-const approveOperatorBtnEl = byId("approve_operator_btn");
-const rejectOperatorBtnEl = byId("reject_operator_btn");
+const operatorListNextBtnEl = adminById("operator_list_next_btn");
+const approveOperatorBtnEl = adminById("approve_operator_btn");
+const rejectOperatorBtnEl = adminById("reject_operator_btn");
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const OPERATOR_PENDING_LIST_LIMIT = 25;
 const OPERATOR_LOAD_NEXT_LIMIT = 1;
@@ -120,6 +144,7 @@ const COMPAT_ADVANCED_PRODUCTION_HINT =
 const SESSION_BOOTSTRAP_DIRECTORY_AUTO_LABEL = "Auto (preferred trusted bootstrap)";
 const CONNECT_POLICY_SOURCE_ENV_DEFAULT = "env_default";
 const CONNECT_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
+const CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE = "config_unavailable";
 const CONNECT_POLICY_MODE_SESSION_REQUIRED = "session_required";
 const CONNECT_POLICY_MODE_COMPAT_ALLOWED = "compat_allowed";
 const PRODUCTION_MODE_SOURCE_POLICY_FALLBACK_CONNECT = "policy_fallback_connect";
@@ -144,12 +169,17 @@ const SIGN_IN_VALIDATION_PRODUCTION_LOCK_HINT =
   "Manual Sign In is disabled by production mode; use Wallet Sign-In.";
 const SIGN_IN_VALIDATION_RUNTIME_LOCK_HINT =
   "Manual Sign In is disabled by active auth policy; use Wallet Sign-In (signature_source must be wallet_extension).";
+const PRODUCTION_CONNECT_RESERVATION_AMOUNT_MICROS = 200000;
+const PRODUCTION_CONNECT_RESERVATION_CURRENCY = "TDPNC";
+const PRODUCTION_CONNECT_RESERVATION_MAX_ATTEMPTS = 6;
+const PRODUCTION_CONNECT_RESERVATION_RETRY_DELAY_MS = 1500;
 const TDPN_ENV_NAME_REGEX = /\bTDPN_([A-Z0-9_]+)\b/g;
 const LEGACY_SECRET_STORAGE_KEYS = Object.freeze(["gpm.desktop.session_token"]);
 const STORAGE_KEYS = Object.freeze({
   role: "gpm.desktop.role",
   walletAddress: "gpm.desktop.wallet_address",
   walletProvider: "gpm.desktop.wallet_provider",
+  chainId: "gpm.desktop.chain_id",
   chainOperatorId: "gpm.desktop.chain_operator_id",
   selectedApplicationUpdatedAt: "gpm.desktop.selected_application_updated_at",
   pathProfile: "gpm.desktop.path_profile"
@@ -195,6 +225,7 @@ const state = {
   productionModeSource: CONNECT_POLICY_SOURCE_ENV_DEFAULT,
   connectPolicySource: CONNECT_POLICY_SOURCE_ENV_DEFAULT,
   connectPolicyMode: CONNECT_POLICY_MODE_COMPAT_ALLOWED,
+  runtimeConfigUnavailableFailClosed: false,
   authVerifyRequireMetadata: false,
   authVerifyRequireWalletExtensionSource: false,
   authVerifyRequireCryptoProof: false,
@@ -208,6 +239,8 @@ const state = {
   profileGateAllowRemoteHttpProbe: undefined,
   profileGateAllowInsecureProbe: undefined,
   profileGateProbePolicySource: PROFILE_GATE_PROBE_POLICY_SOURCE_ENV_DEFAULT,
+  adminConsoleEnabled: false,
+  appMode: "public_app",
   legacyEnvAliasesActive: [],
   legacyEnvAliasWarnings: [],
   legacyEnvAliasActiveCount: 0,
@@ -224,6 +257,8 @@ const state = {
   readinessFreshnessLastError: "",
   operatorListNextCursor: "",
   operatorListRequestContext: null,
+  contributionStatus: null,
+  productionConnectReservation: null,
   walletSignatureContext: null,
   authChallengeMessage: ""
 };
@@ -750,10 +785,28 @@ function challengeIdFromPayload(payload) {
   );
 }
 
+function challengeChainIdFromPayload(payload) {
+  return (
+    nonEmptyStringOrUndefined(
+      firstDefined(
+        payload?.chain_id,
+        payload?.chainId,
+        payload?.challenge?.chain_id,
+        payload?.challenge?.chainId
+      )
+    ) || ""
+  );
+}
+
 function applyChallengePayload(payload) {
   const challengeId = challengeIdFromPayload(payload);
   if (challengeId) {
     challengeIdEl.value = challengeId;
+  }
+  const challengeChainId = challengeChainIdFromPayload(payload);
+  if (challengeChainId) {
+    signatureChainIdEl.value = challengeChainId;
+    writePersistedValue(STORAGE_KEYS.chainId, challengeChainId);
   }
   state.authChallengeMessage = challengeMessageFromPayload(payload);
   if (state.authChallengeMessage) {
@@ -765,7 +818,8 @@ function applyChallengePayload(payload) {
 function readWalletPayload() {
   return {
     wallet_address: walletAddressEl.value.trim(),
-    wallet_provider: walletProviderEl.value
+    wallet_provider: walletProviderEl.value,
+    chain_id: signatureChainIdEl.value.trim()
   };
 }
 
@@ -1029,7 +1083,7 @@ async function runWalletExtensionSignIn() {
 
   clearWalletSignatureContext();
   const challengeResult = await call("gpm_auth_challenge", "control_gpm_auth_challenge", {
-    request: { wallet_address: walletAddress, wallet_provider: provider }
+    request: { wallet_address: walletAddress, wallet_provider: provider, chain_id: chainId }
   });
   applyChallengePayload(challengeResult);
   const challengeId = challengeIdEl.value.trim();
@@ -1367,10 +1421,10 @@ function normalizeRoutingProfileHint(value) {
   if (!text) {
     return undefined;
   }
-  if (text.includes("1hop") || text.includes("1-hop") || text.includes("speed")) {
+  if (text.includes("1hop") || text.includes("1-hop") || text.includes("speed-1hop")) {
     return "1hop";
   }
-  if (text.includes("2hop") || text.includes("2-hop") || text.includes("balanced")) {
+  if (text === "speed" || text.includes("2hop") || text.includes("2-hop") || text.includes("balanced")) {
     return "2hop";
   }
   if (text.includes("3hop") || text.includes("3-hop") || text.includes("private")) {
@@ -2042,6 +2096,9 @@ function formatConnectPolicySourceLabel(source) {
   if (source === CONNECT_POLICY_SOURCE_RUNTIME_CONFIG) {
     return "runtime config";
   }
+  if (source === CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE) {
+    return "config unavailable";
+  }
   if (source === CONNECT_POLICY_SOURCE_ENV_DEFAULT) {
     return "env default";
   }
@@ -2051,6 +2108,9 @@ function formatConnectPolicySourceLabel(source) {
 function formatConnectPolicyClientSourceLabel(source) {
   if (source === CONNECT_POLICY_SOURCE_RUNTIME_CONFIG) {
     return "runtime config (/v1/config)";
+  }
+  if (source === CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE) {
+    return "restricted fail-closed because /v1/config is unavailable";
   }
   return "env defaults (GPM_CONNECT_REQUIRE_SESSION / GPM_ALLOW_LEGACY_CONNECT_OVERRIDE; legacy aliases: TDPN_CONNECT_REQUIRE_SESSION / TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE)";
 }
@@ -2622,6 +2682,13 @@ function formatConfigMeta(cfg) {
     "allow_legacy_connect_override",
     "allowLegacyConnectOverride"
   ]);
+  const adminConsoleEnabled = readConfigBoolean(cfg, [
+    "admin_console_enabled",
+    "adminConsoleEnabled",
+    "gpm_admin_console_enabled",
+    "gpmAdminConsoleEnabled"
+  ]);
+  const appMode = readConfigString(cfg, ["app_mode", "appMode"]) || (adminConsoleEnabled ? "admin_console" : "public_app");
   const authVerifyRequireMetadata = firstDefined(
     readConfigBoolean(cfg, [
       "gpm_auth_verify_require_metadata",
@@ -2689,6 +2756,7 @@ function formatConfigMeta(cfg) {
   if (allowLegacyConnectOverride !== undefined) {
     hints.push(allowLegacyConnectOverride ? "legacy compat controls enabled" : "legacy compat controls locked");
   }
+  hints.push(appMode === "admin_console" ? "admin console mode" : "public app mode");
   if (authVerifyRequireMetadata !== undefined) {
     hints.push(authVerifyRequireMetadata ? "auth verify metadata required" : "auth verify metadata optional");
   }
@@ -2714,6 +2782,8 @@ function formatConfigMeta(cfg) {
     connectRequireSession: connectRequireSession === true,
     productionMode: productionMode === true,
     allowLegacyConnectOverride: allowLegacyConnectOverride === true,
+    adminConsoleEnabled: adminConsoleEnabled === true || appMode === "admin_console",
+    appMode,
     authVerifyRequireMetadata: authVerifyRequireMetadata === true,
     authVerifyRequireWalletExtensionSource: authVerifyRequireWalletExtensionSource === true,
     authVerifyRequireCryptoProof: authVerifyRequireCryptoProof === true,
@@ -2955,7 +3025,9 @@ function setSelectedApplicationUpdatedAt(value, options = {}) {
   const { persist = true } = options;
   const normalized = typeof value === "string" ? value.trim() : "";
   state.selectedApplicationUpdatedAtUtc = normalized;
-  selectedApplicationUpdatedAtEl.value = normalized;
+  if (selectedApplicationUpdatedAtEl) {
+    selectedApplicationUpdatedAtEl.value = normalized;
+  }
   if (persist) {
     writePersistedValue(STORAGE_KEYS.selectedApplicationUpdatedAt, normalized);
   }
@@ -2976,7 +3048,9 @@ function applySelectedOperatorPrefill(values, options = {}) {
     }
   }
   if (mode === "replace" || chainOperatorId) {
-    chainOperatorIdEl.value = chainOperatorId;
+    if (chainOperatorIdEl) {
+      chainOperatorIdEl.value = chainOperatorId;
+    }
     if (persist) {
       writePersistedValue(STORAGE_KEYS.chainOperatorId, chainOperatorId);
     }
@@ -3082,7 +3156,9 @@ function syncOperatorListPaginationControlState() {
     !!state.sessionToken &&
     !!state.operatorListNextCursor &&
     !!state.operatorListRequestContext;
-  operatorListNextBtnEl.disabled = !canPage;
+  if (operatorListNextBtnEl) {
+    operatorListNextBtnEl.disabled = !canPage;
+  }
 }
 
 function setOperatorListRequestContext(context) {
@@ -3093,7 +3169,9 @@ function setOperatorListRequestContext(context) {
 function setOperatorListNextCursor(value) {
   const cursor = nonEmptyStringOrUndefined(value) || "";
   state.operatorListNextCursor = cursor;
-  operatorListNextCursorEl.value = cursor;
+  if (operatorListNextCursorEl) {
+    operatorListNextCursorEl.value = cursor;
+  }
   syncOperatorListPaginationControlState();
 }
 
@@ -3104,9 +3182,9 @@ function clearOperatorListPaginationState() {
 
 function readOperatorListFilterControls() {
   return normalizeOperatorListFilterContext({
-    status: operatorListStatusEl.value,
-    search: operatorListSearchEl.value,
-    limit: operatorListLimitEl.value
+    status: operatorListStatusEl?.value,
+    search: operatorListSearchEl?.value,
+    limit: operatorListLimitEl?.value
   });
 }
 
@@ -3128,6 +3206,68 @@ function buildOperatorListRequest(filter, options = {}) {
     request.cursor = cursor;
   }
   return request;
+}
+
+function buildAdminContributionListRequest() {
+  const request = {
+    session_token: state.sessionToken
+  };
+  const status = nonEmptyStringOrUndefined(adminContributionStatusEl.value);
+  const role = nonEmptyStringOrUndefined(adminContributionRoleEl.value);
+  const wallet = nonEmptyStringOrUndefined(adminContributionWalletEl.value);
+  const limit = numberOrUndefined(adminContributionLimitEl.value);
+  if (status) {
+    request.status = status;
+  }
+  if (role) {
+    request.role = role;
+  }
+  if (wallet) {
+    request.wallet_address = wallet;
+  }
+  if (limit !== undefined) {
+    request.limit = limit;
+  }
+  return request;
+}
+
+function buildAdminRewardReviewRequest() {
+  const wallet =
+    nonEmptyStringOrUndefined(adminContributionWalletEl.value) ||
+    nonEmptyStringOrUndefined(walletAddressEl.value);
+  if (!wallet) {
+    return undefined;
+  }
+  const request = {
+    session_token: state.sessionToken,
+    wallet_address: wallet
+  };
+  const weekStart = nonEmptyStringOrUndefined(adminRewardWeekStartEl.value);
+  if (weekStart) {
+    request.week_start_utc = weekStart;
+  }
+  return request;
+}
+
+function buildAdminRewardHoldRequest(action) {
+  const request = buildAdminRewardReviewRequest();
+  if (!request) {
+    return undefined;
+  }
+  request.action = action;
+  const source = nonEmptyStringOrUndefined(adminRewardHoldSourceEl.value);
+  const reason = nonEmptyStringOrUndefined(adminRewardHoldReasonEl.value);
+  if (source) {
+    request.source = source;
+  }
+  if (reason) {
+    request.reason = reason;
+  }
+  return request;
+}
+
+function buildAdminRewardFinalizeRequest() {
+  return buildAdminRewardReviewRequest();
 }
 
 function formatOperatorListDisplayPayload(result, request) {
@@ -3514,6 +3654,9 @@ function isServerTabVisibleRole(role = state.role) {
 }
 
 function isClientTabVisibleRole(role = state.role) {
+  if (!state.sessionToken && !state.serverReadiness) {
+    return true;
+  }
   if (state.serverReadiness && typeof state.serverReadiness.clientTabVisible === "boolean") {
     return state.serverReadiness.clientTabVisible;
   }
@@ -4039,9 +4182,12 @@ function syncDesktopOnboardingSteps() {
 }
 
 function syncServerMutationControls() {
+  if (!setProfileBtnEl || !serviceStartBtnEl || !serviceStopBtnEl || !serviceRestartBtnEl) {
+    return;
+  }
   const serviceMutationsConfigured = state.serverReadiness?.serviceMutationsConfigured !== false;
   const mutationsEnabled =
-    state.serviceMutationsAllowed && serviceMutationsConfigured && isServerMutationRoleEligible();
+    state.adminConsoleEnabled && state.serviceMutationsAllowed && serviceMutationsConfigured && isServerMutationRoleEligible();
   setProfileBtnEl.disabled = !mutationsEnabled;
   serviceStartBtnEl.disabled = !mutationsEnabled;
   serviceStopBtnEl.disabled = !mutationsEnabled;
@@ -4423,6 +4569,7 @@ function setSessionToken(value, options = {}) {
     state.clientRegistered = false;
     clearClientRegistrationTrustState();
     clearOperatorListPaginationState();
+    state.contributionStatus = null;
     state.sessionBootstrapDirectoryOptions = [];
     state.readinessHeartbeatInFlight = false;
     state.readinessFreshnessLastAttemptMs = 0;
@@ -4432,6 +4579,11 @@ function setSessionToken(value, options = {}) {
   }
   state.sessionToken = nextValue;
   if (!state.sessionToken) {
+    state.role = "client";
+    currentRoleEl.value = "client";
+    if (persist) {
+      writePersistedValue(STORAGE_KEYS.role, "");
+    }
     clearSessionFreshnessTelemetry();
   }
   sessionTokenEl.value = state.sessionToken;
@@ -4442,6 +4594,13 @@ function setSessionToken(value, options = {}) {
   syncServerRoleLockState();
   syncOperatorListPaginationControlState();
   syncReadinessFreshnessIndicator();
+  if (!state.sessionToken) {
+    renderContributionStatus({
+      can_enable_requested_role: false,
+      requested_role: contributionRoleEl.value,
+      contribution_lock_reason: "sign in first"
+    });
+  }
 }
 
 function setOperatorApplicationStatus(value) {
@@ -4453,10 +4612,14 @@ function restorePersistedSessionErgonomics() {
   clearLegacySecretStorage();
   restoreSelectValue(walletProviderEl, readPersistedValue(STORAGE_KEYS.walletProvider));
   walletAddressEl.value = readPersistedValue(STORAGE_KEYS.walletAddress) || "";
-  chainOperatorIdEl.value = readPersistedValue(STORAGE_KEYS.chainOperatorId) || "";
+  signatureChainIdEl.value = readPersistedValue(STORAGE_KEYS.chainId) || signatureChainIdEl.value;
+  if (chainOperatorIdEl) {
+    chainOperatorIdEl.value = readPersistedValue(STORAGE_KEYS.chainOperatorId) || "";
+  }
   restoreSelectValue(pathProfileEl, readPersistedValue(STORAGE_KEYS.pathProfile));
   setSessionToken("", { persist: false });
-  setRole(readPersistedValue(STORAGE_KEYS.role) || "client", { persist: false });
+  writePersistedValue(STORAGE_KEYS.role, "");
+  setRole("client", { persist: false });
   setSelectedApplicationUpdatedAt(readPersistedValue(STORAGE_KEYS.selectedApplicationUpdatedAt) || "", {
     persist: false
   });
@@ -4512,11 +4675,11 @@ function requireServerLifecycleEligibility(actionLabel) {
 }
 
 function operatorModerationReason() {
-  return operatorReasonEl.value.trim();
+  return operatorReasonEl?.value.trim() || "";
 }
 
 function selectedApplicationUpdatedAt() {
-  return state.selectedApplicationUpdatedAtUtc || selectedApplicationUpdatedAtEl.value.trim();
+  return state.selectedApplicationUpdatedAtUtc || selectedApplicationUpdatedAtEl?.value.trim() || "";
 }
 
 function isDecisionConflictError(err) {
@@ -4580,7 +4743,9 @@ function updateConnectPolicyHint() {
   const modeLabel = formatConnectPolicyModeLabel(state.connectPolicyMode);
   const sourceLabel = formatConnectPolicyClientSourceLabel(state.connectPolicySource);
   let postureHint = "manual bootstrap/invite fields are optional compatibility controls.";
-  if (state.productionMode) {
+  if (state.runtimeConfigUnavailableFailClosed) {
+    postureHint = "runtime policy is unavailable; connect is locked until /v1/config is reachable.";
+  } else if (state.productionMode) {
     postureHint = "production mode is active; manual bootstrap/invite fields are hidden and locked.";
   } else if (state.connectRequireSession) {
     postureHint = "manual bootstrap/invite fields are intentionally locked by production policy.";
@@ -4592,6 +4757,22 @@ function updateConnectPolicyHint() {
     "locked",
     state.productionMode || state.connectRequireSession || !state.allowLegacyConnectOverride
   );
+}
+
+function prodProfileRequestedByUI() {
+  return state.productionMode === true || byId("prod_profile").checked;
+}
+
+function syncInstallRoutePolicy() {
+  const installRouteEl = byId("install_route");
+  const prodRequested = prodProfileRequestedByUI();
+  if (prodRequested) {
+    installRouteEl.checked = true;
+  }
+  installRouteEl.disabled = prodRequested || state.productionMode === true;
+  installRouteEl.title = prodRequested
+    ? "Production profile requires default-route installation so host traffic routes through GPM."
+    : "Expert option: install the system default route through GPM.";
 }
 
 function summarizeLegacyAliasNames(aliasNames, maxVisible = 3) {
@@ -4741,6 +4922,17 @@ function updateOperatorApprovalPolicyHint() {
   if (!operatorApprovalPolicyHintEl || !approveOperatorBtnEl || !rejectOperatorBtnEl) {
     return;
   }
+  if (!state.adminConsoleEnabled) {
+    operatorApprovalPolicyHintEl.textContent =
+      "Admin controls are not available in the public GPM App. Use the separate GPM Admin Console for approvals and server control.";
+    operatorApprovalPolicyHintEl.classList.add("locked");
+    for (const button of [approveOperatorBtnEl, rejectOperatorBtnEl]) {
+      button.disabled = true;
+      button.setAttribute("aria-disabled", "true");
+      button.title = "Use the separate GPM Admin Console for moderation.";
+    }
+    return;
+  }
   const computeModerationReadiness = () => {
     if (!state.sessionToken) {
       return {
@@ -4813,9 +5005,42 @@ function updateOperatorApprovalPolicyHint() {
   }
 }
 
+function syncAdminConsoleMode() {
+  const enabled = state.adminConsoleEnabled === true;
+  document.body.classList.toggle("admin-console-mode", enabled);
+  document.body.classList.toggle("public-app-mode", !enabled);
+  for (const el of adminOnlyEls) {
+    el.hidden = !enabled;
+    if ("disabled" in el && !enabled) {
+      el.disabled = true;
+      el.setAttribute("aria-disabled", "true");
+      el.title = "Admin controls live in the separate GPM Admin Console.";
+    }
+  }
+  if (!enabled) {
+    state.serviceMutationsAllowed = false;
+    if (serverLockHintEl) {
+      serverLockHintEl.textContent =
+        "Server/admin controls are intentionally absent from the public GPM App. Use the separate GPM Admin Console for approvals, lifecycle, policy, slashing, and payouts.";
+      serverLockHintEl.classList.add("locked");
+    }
+  }
+  updateOperatorApprovalPolicyHint();
+  syncServerMutationControls();
+}
+
+function requireAdminConsoleMode(actionLabel) {
+  if (state.adminConsoleEnabled) {
+    return true;
+  }
+  print("validation", `${actionLabel} is available only in the separate GPM Admin Console, not the public GPM App.`);
+  return false;
+}
+
 function applyConnectModePolicy(enabled) {
   state.connectRequireSession = !!enabled;
   syncCompatAdvancedVisibility();
+  syncInstallRoutePolicy();
   if (state.connectRequireSession || state.productionMode) {
     bootstrapDirectoryEl.value = "";
     inviteKeyEl.value = "";
@@ -4917,6 +5142,8 @@ function connectPayload() {
   const compatOverrideActive =
     state.allowLegacyConnectOverride && !state.connectRequireSession && !state.productionMode && compatEnableEl.checked;
   const sessionBootstrapDirectory = nonEmptyStringOrUndefined(sessionBootstrapDirectoryEl.value);
+  const prodProfile = prodProfileRequestedByUI();
+  const installRoute = prodProfile || byId("install_route").checked;
   const payload = {
     session_token: state.sessionToken || undefined,
     path_profile: pathProfileEl.value,
@@ -4925,9 +5152,11 @@ function connectPayload() {
     discovery_wait_sec: numberOrUndefined(byId("discovery_wait_sec").value),
     ready_timeout_sec: numberOrUndefined(byId("ready_timeout_sec").value),
     run_preflight: byId("run_preflight").checked,
-    prod_profile: byId("prod_profile").checked,
-    install_route: byId("install_route").checked
+    prod_profile: prodProfile
   };
+  if (installRoute) {
+    payload.install_route = true;
+  }
 
   if (state.sessionToken && !compatOverrideActive && sessionBootstrapDirectory) {
     payload.session_bootstrap_directory = sessionBootstrapDirectory;
@@ -4944,6 +5173,122 @@ function connectPayload() {
     }
   }
   return payload;
+}
+
+function runtimeConfigUnavailableFailClosedMode() {
+  return state.runtimeConfigUnavailableFailClosed === true;
+}
+
+function productionConnectReservationSessionID() {
+  if (window.crypto && typeof window.crypto.randomUUID === "function") {
+    return `gpm-vpn-${window.crypto.randomUUID()}`;
+  }
+  return `gpm-vpn-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function reservationString(payload, key) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  const value = payload[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function reservationPayloadObject(payload) {
+  return payload && typeof payload.reservation === "object" && payload.reservation
+    ? payload.reservation
+    : {};
+}
+
+function reservationFinalityLabel(payload) {
+  const reservation = reservationPayloadObject(payload);
+  return (
+    reservationString(payload, "reservation_finalization_state") ||
+    reservationString(payload, "reservation_chain_status") ||
+    reservationString(reservation, "status") ||
+    "pending"
+  );
+}
+
+function productionReservationConfirmed(payload) {
+  const reservation = reservationPayloadObject(payload);
+  const chainStatus = reservationString(payload, "reservation_chain_status").toLowerCase();
+  const stateLabel = reservationString(payload, "reservation_finalization_state").toLowerCase();
+  const reservationStatus = reservationString(reservation, "status").toLowerCase();
+  return (
+    chainStatus === "confirmed" ||
+    chainStatus === "finalized" ||
+    stateLabel === "chain_confirmed" ||
+    stateLabel === "finalized" ||
+    reservationStatus === "confirmed" ||
+    reservationStatus === "finalized"
+  );
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+async function attachProductionConnectReservation(request) {
+  const productionConnectRequested = state.productionMode === true || request?.prod_profile === true;
+  if (!productionConnectRequested || !request || request.reservation_id || request.reservation_session_id) {
+    return request;
+  }
+  const sessionToken = typeof request.session_token === "string" ? request.session_token.trim() : "";
+  if (!sessionToken) {
+    throw new Error("Production connect requires sign-in before reserving VPN funds.");
+  }
+  let cached =
+    state.productionConnectReservation &&
+    state.productionConnectReservation.sessionToken === sessionToken
+      ? state.productionConnectReservation
+      : null;
+  if (!cached) {
+    cached = {
+      sessionToken,
+      sessionID: productionConnectReservationSessionID(),
+      reservationID: ""
+    };
+    state.productionConnectReservation = cached;
+  }
+
+  let lastResult = null;
+  for (let attempt = 1; attempt <= PRODUCTION_CONNECT_RESERVATION_MAX_ATTEMPTS; attempt += 1) {
+    const reserveRequest = {
+      session_token: sessionToken,
+      session_id: cached.sessionID,
+      amount_micros: PRODUCTION_CONNECT_RESERVATION_AMOUNT_MICROS,
+      currency: PRODUCTION_CONNECT_RESERVATION_CURRENCY
+    };
+    if (cached.reservationID) {
+      reserveRequest.reservation_id = cached.reservationID;
+    }
+    lastResult = await invoke("control_gpm_settlement_reserve_funds", { request: reserveRequest });
+    const reservation = reservationPayloadObject(lastResult);
+    cached.reservationID =
+      reservationString(reservation, "reservation_id") ||
+      reservationString(lastResult, "reservation_id") ||
+      cached.reservationID;
+    cached.sessionID =
+      reservationString(reservation, "session_id") ||
+      reservationString(lastResult, "reservation_session_id") ||
+      cached.sessionID;
+
+    if (cached.reservationID && cached.sessionID && productionReservationConfirmed(lastResult)) {
+      request.reservation_id = cached.reservationID;
+      request.reservation_session_id = cached.sessionID;
+      return request;
+    }
+    if (attempt < PRODUCTION_CONNECT_RESERVATION_MAX_ATTEMPTS) {
+      await delay(PRODUCTION_CONNECT_RESERVATION_RETRY_DELAY_MS);
+    }
+  }
+
+  throw new Error(
+    `Production connect fund reservation is not chain-confirmed yet (${reservationFinalityLabel(lastResult)}). Try Connect again in a moment.`
+  );
 }
 
 function parseEpochMilliseconds(value) {
@@ -5526,6 +5871,10 @@ async function loadManifest() {
 
 async function refreshOperatorApplicationStatus(options = {}) {
   const { quiet = true } = options;
+  if (!ADMIN_CONSOLE_RENDERER) {
+    setOperatorApplicationStatus(undefined);
+    return undefined;
+  }
   if (!state.sessionToken) {
     setOperatorApplicationStatus(undefined);
     return undefined;
@@ -5550,7 +5899,8 @@ async function refreshOperatorApplicationStatus(options = {}) {
   }
 }
 
-async function refreshServerReadinessStatus(options = {}) {
+const refreshServerReadinessStatus = ADMIN_CONSOLE_RENDERER
+  ? async function refreshServerReadinessStatus(options = {}) {
   const { quiet = true } = options;
   const sessionToken = state.sessionToken || undefined;
   const walletAddress = walletAddressEl.value.trim() || undefined;
@@ -5577,6 +5927,10 @@ async function refreshServerReadinessStatus(options = {}) {
     throw err;
   }
 }
+  : async function refreshServerReadinessStatus() {
+    setServerReadiness(null);
+    return undefined;
+  };
 
 async function refreshClientRegistrationStatus(options = {}) {
   const { quiet = true } = options;
@@ -5597,6 +5951,128 @@ async function refreshClientRegistrationStatus(options = {}) {
     setClientRegistrationStateFromPayload(result, { allowFallback: true });
     syncDesktopOnboardingSteps();
     markReadinessHeartbeatSuccess();
+    return result;
+  } catch (err) {
+    if (quiet) {
+      return undefined;
+    }
+    throw err;
+  }
+}
+
+function contributionRequest() {
+  return {
+    session_token: state.sessionToken
+  };
+}
+
+function contributionToggleRequest() {
+  return {
+    session_token: state.sessionToken,
+    role: contributionRoleEl.value
+  };
+}
+
+function formatContributionDetail(payload) {
+  const tier = firstDefined(payload?.client_tier, payload?.clientTier);
+  const stake = toBooleanLike(firstDefined(payload?.stake_satisfied, payload?.stakeSatisfied));
+  const prepaid = toBooleanLike(firstDefined(payload?.prepaid_balance_satisfied, payload?.prepaidBalanceSatisfied));
+  const lockReason = toDetailText(firstDefined(payload?.contribution_lock_reason, payload?.contributionLockReason));
+  const requestedRole = toDetailText(firstDefined(payload?.requested_role, payload?.requestedRole)) || contributionRoleEl.value;
+  if (lockReason) {
+    return `Role ${requestedRole} locked: ${lockReason}`;
+  }
+  return `Tier ${tier || "unknown"} ready. Stake: ${stake === true ? "yes" : "no"}. Prepaid balance: ${prepaid === true ? "yes" : "no"}.`;
+}
+
+function renderContributionStatus(payload) {
+  const previous = state.contributionStatus && typeof state.contributionStatus === "object" ? state.contributionStatus : {};
+  const currentReward = payload?.current_week_reward || payload?.currentWeekReward || payload?.reward;
+  const merged = {
+    ...previous,
+    ...(payload || {}),
+    contribution_profile: {
+      ...(previous.contribution_profile || previous.contributionProfile || {}),
+      ...(payload?.contribution_profile || payload?.contributionProfile || {})
+    },
+    current_week_reward: currentReward || previous.current_week_reward || previous.currentWeekReward
+  };
+  state.contributionStatus = merged;
+
+  const profile = merged.contribution_profile || merged.contributionProfile || {};
+  const enabled = toBooleanLike(firstDefined(profile.enabled, merged?.enabled));
+  const role = toDetailText(firstDefined(profile.role, merged?.requested_role, merged?.requestedRole)) || contributionRoleEl.value;
+  const canEnable = toBooleanLike(firstDefined(merged?.can_enable_requested_role, merged?.canEnableRequestedRole));
+  const capacityScore = firstDefined(profile.capacity_score, profile.capacityScore);
+  const healthScore = firstDefined(profile.health_score, profile.healthScore);
+  const maxSessions = firstDefined(profile.max_forwarded_sessions, profile.maxForwardedSessions);
+  const maxBandwidth = firstDefined(profile.max_bandwidth_mbps, profile.maxBandwidthMbps);
+  const reward = merged.current_week_reward || merged.currentWeekReward || merged.reward || {};
+  const rewardUnits = firstDefined(reward.reward_units, reward.rewardUnits, profile.pending_reward_units, profile.pendingRewardUnits);
+  const meteredSeconds = firstDefined(reward.metered_seconds, reward.meteredSeconds, profile.metered_seconds, profile.meteredSeconds);
+
+  contributionStateEl.textContent = enabled
+    ? `Enabled (${role})`
+    : canEnable === true
+      ? "Eligible"
+      : "Locked";
+  contributionDetailEl.textContent = formatContributionDetail(merged);
+  contributionCapacityEl.textContent =
+    capacityScore !== undefined || healthScore !== undefined
+      ? `capacity ${capacityScore ?? "?"} / health ${healthScore ?? "?"}`
+      : "Unknown";
+  contributionCapacityEl.nextElementSibling.textContent =
+    maxSessions !== undefined || maxBandwidth !== undefined
+      ? `Caps: ${maxSessions ?? "?"} sessions, ${maxBandwidth ?? "?"} Mbps. User VPN traffic stays first.`
+      : "User VPN traffic is always prioritized.";
+  contributionRewardEl.textContent =
+    rewardUnits !== undefined ? `${Number(rewardUnits).toFixed(3)} units pending` : "Pending";
+  contributionRewardEl.nextElementSibling.textContent =
+    meteredSeconds !== undefined
+      ? `Metered ${formatDurationCompact(Number(meteredSeconds))}; settles weekly Monday 00:00 UTC.`
+      : "Settles weekly, Monday 00:00 UTC.";
+  contributionEnableBtnEl.disabled = !state.sessionToken || canEnable !== true || enabled === true;
+  contributionDisableBtnEl.disabled = !state.sessionToken || enabled !== true;
+}
+
+function renderRewardHistorySummary(payload) {
+  const rewards = Array.isArray(payload?.rewards)
+    ? payload.rewards
+    : Array.isArray(payload?.reward_history)
+      ? payload.reward_history
+      : [];
+  if (rewards.length === 0) {
+    contributionRewardEl.textContent = "No closed weeks yet";
+    contributionRewardEl.nextElementSibling.textContent =
+      "Current-week contribution is still pending until Monday 00:00 UTC.";
+    return;
+  }
+  const latest = rewards[0] || {};
+  const units = firstDefined(latest.reward_units, latest.rewardUnits);
+  const status = toDetailText(firstDefined(latest.status, latest.decision)) || "recorded";
+  const weekStart = toDetailText(firstDefined(latest.week_start_utc, latest.weekStartUtc)) || "latest week";
+  contributionRewardEl.textContent =
+    units !== undefined ? `${Number(units).toFixed(3)} units ${status}` : `${rewards.length} weekly rewards`;
+  contributionRewardEl.nextElementSibling.textContent =
+    `${rewards.length} closed week${rewards.length === 1 ? "" : "s"} pending admin+chain finalization; latest starts ${weekStart}.`;
+}
+
+async function refreshContributionStatus(options = {}) {
+  const { quiet = false } = options;
+  if (!state.sessionToken) {
+    renderContributionStatus({
+      can_enable_requested_role: false,
+      requested_role: contributionRoleEl.value,
+      contribution_lock_reason: "sign in first"
+    });
+    return undefined;
+  }
+  const request = contributionRequest();
+  try {
+    const result = quiet
+      ? await invoke("control_gpm_contribution_status", { request })
+      : await call("gpm_contribution_status", "control_gpm_contribution_status", { request });
+    renderContributionStatus(result);
     return result;
   } catch (err) {
     if (quiet) {
@@ -5644,6 +6120,7 @@ async function refreshSession(action = "status") {
     await refreshServerReadinessStatus({ quiet: true });
   }
   await refreshOperatorApplicationStatus({ quiet: true });
+  await refreshContributionStatus({ quiet: true });
   markReadinessHeartbeatSuccess();
   return result;
 }
@@ -5677,6 +6154,8 @@ async function refreshSessionOnInit() {
   }
   const operatorResult = await refreshOperatorApplicationStatus({ quiet: true });
   refreshed = refreshed || !!operatorResult;
+  const contributionResult = await refreshContributionStatus({ quiet: true });
+  refreshed = refreshed || !!contributionResult;
   if (refreshed) {
     markReadinessHeartbeatSuccess();
   } else {
@@ -5735,18 +6214,20 @@ async function runReadinessHeartbeat(reason = "interval") {
       const registrationResult = await refreshClientRegistrationStatus({ quiet: true });
       const readinessResult = await refreshServerReadinessStatus({ quiet: true });
       const operatorResult = await refreshOperatorApplicationStatus({ quiet: true });
+      const contributionResult = await refreshContributionStatus({ quiet: true });
       if (state.sessionToken !== heartbeatSessionToken) {
         aborted = true;
         return;
       }
-      refreshed = refreshed || !!registrationResult || !!readinessResult || !!operatorResult;
+      refreshed = refreshed || !!registrationResult || !!readinessResult || !!operatorResult || !!contributionResult;
     } else {
       const operatorResult = await refreshOperatorApplicationStatus({ quiet: true });
+      const contributionResult = await refreshContributionStatus({ quiet: true });
       if (state.sessionToken !== heartbeatSessionToken) {
         aborted = true;
         return;
       }
-      refreshed = refreshed || !!operatorResult;
+      refreshed = refreshed || !!operatorResult || !!contributionResult;
     }
   } catch (err) {
     errorText = heartbeatErrorText(err);
@@ -5920,34 +6401,42 @@ walletSignatureEl.addEventListener("input", () => {
   syncDesktopOnboardingBanner();
 });
 signatureChainIdEl.addEventListener("input", () => {
+  writePersistedValue(STORAGE_KEYS.chainId, signatureChainIdEl.value);
   clearWalletSignatureContext();
 });
 signedMessageEl.addEventListener("input", () => {
   clearWalletSignatureContext();
   syncDesktopOnboardingBanner();
 });
-chainOperatorIdEl.addEventListener("input", () => {
-  writePersistedValue(STORAGE_KEYS.chainOperatorId, chainOperatorIdEl.value);
-  setSelectedApplicationUpdatedAt("");
-});
+if (ADMIN_CONSOLE_RENDERER) {
+  chainOperatorIdEl.addEventListener("input", () => {
+    writePersistedValue(STORAGE_KEYS.chainOperatorId, chainOperatorIdEl.value);
+    setSelectedApplicationUpdatedAt("");
+  });
+}
 pathProfileEl.addEventListener("change", () => {
   writePersistedValue(STORAGE_KEYS.pathProfile, pathProfileEl.value);
 });
-operatorListStatusEl.addEventListener("change", () => {
-  clearOperatorListPaginationState();
+byId("prod_profile").addEventListener("change", () => {
+  syncInstallRoutePolicy();
 });
-operatorListSearchEl.addEventListener("input", () => {
-  clearOperatorListPaginationState();
-});
-operatorListLimitEl.addEventListener("input", () => {
-  clearOperatorListPaginationState();
-});
+if (ADMIN_CONSOLE_RENDERER) {
+  operatorListStatusEl.addEventListener("change", () => {
+    clearOperatorListPaginationState();
+  });
+  operatorListSearchEl.addEventListener("input", () => {
+    clearOperatorListPaginationState();
+  });
+  operatorListLimitEl.addEventListener("input", () => {
+    clearOperatorListPaginationState();
+  });
+}
 
 byId("challenge_btn").addEventListener("click", async () => {
-  const { wallet_address, wallet_provider } = readWalletPayload();
+  const { wallet_address, wallet_provider, chain_id } = readWalletPayload();
   clearWalletSignatureContext();
   const result = await call("gpm_auth_challenge", "control_gpm_auth_challenge", {
-    request: { wallet_address, wallet_provider }
+    request: { wallet_address, wallet_provider, chain_id }
   });
   applyChallengePayload(result);
 });
@@ -6006,13 +6495,19 @@ byId("manifest_btn").addEventListener("click", async () => {
   await loadManifest();
 });
 
-byId("audit_recent_btn").addEventListener("click", async () => {
-  const requestContext = readAuditRecentControls();
-  const request = buildAuditRecentRequest(requestContext);
-  await call("gpm_audit_recent", "control_gpm_audit_recent", request, {
-    formatResultForDisplay: (payload) => formatAuditRecentDisplayPayload(payload, requestContext)
+if (ADMIN_CONSOLE_RENDERER) {
+  byId("audit_recent_btn").addEventListener("click", async () => {
+    if (!requireSessionToken("load recent audit")) {
+      return;
+    }
+    const requestContext = readAuditRecentControls();
+    const request = buildAuditRecentRequest(requestContext);
+    request.session_token = state.sessionToken;
+    await call("gpm_audit_recent", "control_gpm_audit_recent", request, {
+      formatResultForDisplay: (payload) => formatAuditRecentDisplayPayload(payload, requestContext)
+    });
   });
-});
+}
 
 byId("register_client_btn").addEventListener("click", async () => {
   if (!requireClientControlEligibility("Register client profile")) {
@@ -6044,132 +6539,287 @@ byId("register_client_btn").addEventListener("click", async () => {
   clearClientRegistrationTrustState();
   setRole(parseSessionRole(result));
   await refreshClientRegistrationStatus({ quiet: true });
+  await refreshContributionStatus({ quiet: true });
 });
 
-byId("apply_operator_btn").addEventListener("click", async () => {
-  if (!state.sessionToken) {
-    print("validation", "session_token is required; sign in first");
-    return;
-  }
-  const request = {
-    session_token: state.sessionToken,
-    chain_operator_id: chainOperatorIdEl.value.trim(),
-    server_label: "desktop-operator"
-  };
-  await call("gpm_operator_apply", "control_gpm_operator_apply", { request });
-  await refreshOperatorApplicationStatus({ quiet: true });
-  await refreshServerReadinessStatus({ quiet: true });
-});
-
-byId("operator_status_btn").addEventListener("click", async () => {
-  await refreshOperatorApplicationStatus({ quiet: false });
-  await refreshServerReadinessStatus({ quiet: true });
-});
-
-byId("operator_list_filter_btn").addEventListener("click", async () => {
-  if (!requireSessionToken("list the operator queue")) {
-    return;
-  }
-  await requestOperatorList("gpm_operator_list_filtered", readOperatorListFilterControls(), {
-    syncControls: true
+if (ADMIN_CONSOLE_RENDERER) {
+  byId("apply_operator_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Apply Operator Role")) {
+      return;
+    }
+    if (!state.sessionToken) {
+      print("validation", "session_token is required; sign in first");
+      return;
+    }
+    const request = {
+      session_token: state.sessionToken,
+      chain_operator_id: chainOperatorIdEl.value.trim(),
+      server_label: "desktop-operator"
+    };
+    await call("gpm_operator_apply", "control_gpm_operator_apply", { request });
+    await refreshOperatorApplicationStatus({ quiet: true });
+    await refreshServerReadinessStatus({ quiet: true });
   });
-});
 
-byId("operator_list_pending_btn").addEventListener("click", async () => {
-  if (!requireSessionToken("list pending operators")) {
-    return;
-  }
-  await requestOperatorList("gpm_operator_list_pending", {
-    status: "pending",
-    limit: OPERATOR_PENDING_LIST_LIMIT
-  }, { syncControls: true });
-});
-
-byId("operator_load_next_pending_btn").addEventListener("click", async () => {
-  await loadNextPendingOperator();
-});
-
-byId("operator_list_all_btn").addEventListener("click", async () => {
-  if (!requireSessionToken("list all operators")) {
-    return;
-  }
-  await requestOperatorList("gpm_operator_list_all", {
-    status: "",
-    limit: OPERATOR_LIST_ALL_LIMIT
-  }, { syncControls: true });
-});
-
-byId("operator_list_next_btn").addEventListener("click", async () => {
-  await loadNextOperatorListPage();
-});
-
-byId("approve_operator_btn").addEventListener("click", async () => {
-  if (!requireSessionToken("approve an operator")) {
-    return;
-  }
-  const request = {
-    wallet_address: walletAddressEl.value.trim(),
-    approved: true,
-    session_token: state.sessionToken
-  };
-  const ifUpdatedAtUtc = selectedApplicationUpdatedAt();
-  if (ifUpdatedAtUtc) {
-    request.if_updated_at_utc = ifUpdatedAtUtc;
-  }
-  const reason = operatorModerationReason();
-  if (reason) {
-    request.reason = reason;
-  }
-  try {
-    await call("gpm_operator_approve", "control_gpm_operator_approve", { request });
-  } catch (err) {
-    if (isDecisionConflictError(err)) {
-      print("gpm_operator_approve (conflict)", {
-        error: String(err && err.message ? err.message : err),
-        guidance: OPERATOR_DECISION_CONFLICT_GUIDANCE
-      });
+  byId("operator_status_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Operator Status")) {
       return;
     }
-    throw err;
-  }
-  await refreshSession();
+    await refreshOperatorApplicationStatus({ quiet: false });
+    await refreshServerReadinessStatus({ quiet: true });
+  });
+}
+
+contributionRoleEl.addEventListener("change", async () => {
+  await refreshContributionStatus({ quiet: true });
 });
 
-byId("reject_operator_btn").addEventListener("click", async () => {
-  if (!requireSessionToken("reject an operator")) {
+contributionStatusBtnEl.addEventListener("click", async () => {
+  await refreshContributionStatus({ quiet: false });
+});
+
+contributionEnableBtnEl.addEventListener("click", async () => {
+  if (!requireSessionToken("enable contribution mode")) {
     return;
   }
-  const reason = operatorModerationReason();
-  if (!reason) {
-    print("validation", "moderation reason is required to reject an operator");
+  const request = contributionToggleRequest();
+  const result = await call("gpm_contribution_enable", "control_gpm_contribution_enable", { request });
+  renderContributionStatus(result);
+});
+
+contributionDisableBtnEl.addEventListener("click", async () => {
+  if (!requireSessionToken("disable contribution mode")) {
     return;
   }
-  const request = {
-    wallet_address: walletAddressEl.value.trim(),
-    approved: false,
-    reason,
-    session_token: state.sessionToken
-  };
-  const ifUpdatedAtUtc = selectedApplicationUpdatedAt();
-  if (ifUpdatedAtUtc) {
-    request.if_updated_at_utc = ifUpdatedAtUtc;
+  const request = contributionRequest();
+  const result = await call("gpm_contribution_disable", "control_gpm_contribution_disable", { request });
+  renderContributionStatus(result);
+});
+
+rewardsCurrentWeekBtnEl.addEventListener("click", async () => {
+  if (!requireSessionToken("view current-week rewards")) {
+    return;
   }
-  try {
-    await call("gpm_operator_reject", "control_gpm_operator_approve", { request });
-  } catch (err) {
-    if (isDecisionConflictError(err)) {
-      print("gpm_operator_reject (conflict)", {
-        error: String(err && err.message ? err.message : err),
-        guidance: OPERATOR_DECISION_CONFLICT_GUIDANCE
-      });
+  const request = contributionRequest();
+  const result = await call("gpm_rewards_current_week", "control_gpm_rewards_current_week", { request });
+  renderContributionStatus({ ...state.contributionStatus, current_week_reward: result?.reward });
+});
+
+rewardsHistoryBtnEl.addEventListener("click", async () => {
+  if (!requireSessionToken("view reward history")) {
+    return;
+  }
+  const request = contributionRequest();
+  const result = await call("gpm_rewards_history", "control_gpm_rewards_history", { request });
+  renderRewardHistorySummary(result);
+});
+
+if (ADMIN_CONSOLE_RENDERER) {
+  byId("admin_contribution_list_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Review Contributions")) {
       return;
     }
-    throw err;
-  }
-  await refreshSession();
-});
+    if (!requireSessionToken("review contributions")) {
+      return;
+    }
+    const request = buildAdminContributionListRequest();
+    await call("gpm_admin_contribution_list", "control_gpm_admin_contribution_list", { request });
+  });
+
+  byId("admin_reward_review_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Review Weekly Reward")) {
+      return;
+    }
+    if (!requireSessionToken("review weekly rewards")) {
+      return;
+    }
+    const request = buildAdminRewardReviewRequest();
+    if (!request) {
+      print("validation", "wallet_address is required to review a weekly reward; use Contribution wallet or Wallet address.");
+      return;
+    }
+    await call("gpm_admin_reward_review", "control_gpm_admin_reward_review", { request });
+  });
+
+  byId("admin_reward_hold_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Hold Weekly Reward")) {
+      return;
+    }
+    if (!requireSessionToken("hold weekly rewards")) {
+      return;
+    }
+    const request = buildAdminRewardHoldRequest("hold");
+    if (!request) {
+      print("validation", "wallet_address is required to hold a weekly reward; use Contribution wallet or Wallet address.");
+      return;
+    }
+    if (!nonEmptyStringOrUndefined(request.reason)) {
+      print("validation", "reward hold reason is required before placing a hold.");
+      return;
+    }
+    await call("gpm_admin_reward_hold", "control_gpm_admin_reward_hold", { request });
+  });
+
+  byId("admin_reward_release_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Release Reward Hold")) {
+      return;
+    }
+    if (!requireSessionToken("release weekly reward holds")) {
+      return;
+    }
+    const request = buildAdminRewardHoldRequest("release");
+    if (!request) {
+      print("validation", "wallet_address is required to release a weekly reward hold; use Contribution wallet or Wallet address.");
+      return;
+    }
+    await call("gpm_admin_reward_release", "control_gpm_admin_reward_hold", { request });
+  });
+
+  byId("admin_reward_finalize_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Finalize Weekly Reward")) {
+      return;
+    }
+    if (!requireSessionToken("finalize weekly rewards")) {
+      return;
+    }
+    const request = buildAdminRewardFinalizeRequest();
+    if (!request) {
+      print("validation", "wallet_address is required to finalize a weekly reward; use Contribution wallet or Wallet address.");
+      return;
+    }
+    await call("gpm_admin_reward_finalize", "control_gpm_admin_reward_finalize", { request });
+  });
+
+  byId("operator_list_filter_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("List Operator Queue")) {
+      return;
+    }
+    if (!requireSessionToken("list the operator queue")) {
+      return;
+    }
+    await requestOperatorList("gpm_operator_list_filtered", readOperatorListFilterControls(), {
+      syncControls: true
+    });
+  });
+
+  byId("operator_list_pending_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("List Pending Operators")) {
+      return;
+    }
+    if (!requireSessionToken("list pending operators")) {
+      return;
+    }
+    await requestOperatorList("gpm_operator_list_pending", {
+      status: "pending",
+      limit: OPERATOR_PENDING_LIST_LIMIT
+    }, { syncControls: true });
+  });
+
+  byId("operator_load_next_pending_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Load Next Pending Operator")) {
+      return;
+    }
+    await loadNextPendingOperator();
+  });
+
+  byId("operator_list_all_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("List All Operators")) {
+      return;
+    }
+    if (!requireSessionToken("list all operators")) {
+      return;
+    }
+    await requestOperatorList("gpm_operator_list_all", {
+      status: "",
+      limit: OPERATOR_LIST_ALL_LIMIT
+    }, { syncControls: true });
+  });
+
+  byId("operator_list_next_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Load Operator Queue Page")) {
+      return;
+    }
+    await loadNextOperatorListPage();
+  });
+
+  byId("approve_operator_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Approve Operator")) {
+      return;
+    }
+    if (!requireSessionToken("approve an operator")) {
+      return;
+    }
+    const request = {
+      wallet_address: walletAddressEl.value.trim(),
+      approved: true,
+      session_token: state.sessionToken
+    };
+    const ifUpdatedAtUtc = selectedApplicationUpdatedAt();
+    if (ifUpdatedAtUtc) {
+      request.if_updated_at_utc = ifUpdatedAtUtc;
+    }
+    const reason = operatorModerationReason();
+    if (reason) {
+      request.reason = reason;
+    }
+    try {
+      await call("gpm_operator_approve", "control_gpm_operator_approve", { request });
+    } catch (err) {
+      if (isDecisionConflictError(err)) {
+        print("gpm_operator_approve (conflict)", {
+          error: String(err && err.message ? err.message : err),
+          guidance: OPERATOR_DECISION_CONFLICT_GUIDANCE
+        });
+        return;
+      }
+      throw err;
+    }
+    await refreshSession();
+  });
+
+  byId("reject_operator_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Reject Operator")) {
+      return;
+    }
+    if (!requireSessionToken("reject an operator")) {
+      return;
+    }
+    const reason = operatorModerationReason();
+    if (!reason) {
+      print("validation", "moderation reason is required to reject an operator");
+      return;
+    }
+    const request = {
+      wallet_address: walletAddressEl.value.trim(),
+      approved: false,
+      reason,
+      session_token: state.sessionToken
+    };
+    const ifUpdatedAtUtc = selectedApplicationUpdatedAt();
+    if (ifUpdatedAtUtc) {
+      request.if_updated_at_utc = ifUpdatedAtUtc;
+    }
+    try {
+      await call("gpm_operator_reject", "control_gpm_operator_approve", { request });
+    } catch (err) {
+      if (isDecisionConflictError(err)) {
+        print("gpm_operator_reject (conflict)", {
+          error: String(err && err.message ? err.message : err),
+          guidance: OPERATOR_DECISION_CONFLICT_GUIDANCE
+        });
+        return;
+      }
+      throw err;
+    }
+    await refreshSession();
+  });
+}
 
 byId("connect_btn").addEventListener("click", async () => {
+  if (runtimeConfigUnavailableFailClosedMode()) {
+    print("validation", "Connect is unavailable: runtime policy is unavailable; retry after /v1/config is reachable.");
+    return;
+  }
   if (!requireClientControlEligibility("Connect")) {
     return;
   }
@@ -6191,9 +6841,11 @@ byId("connect_btn").addEventListener("click", async () => {
   }
   inviteKeyEl.value = "";
   try {
+    await attachProductionConnectReservation(request);
     const result = await call("connect", "control_connect", { request });
     updateConnectionDashboard("connect", result);
-  } catch {
+  } catch (err) {
+    print("connect (error)", err);
     applyConnectionSnapshot({
       state: formatConnectionStateLabel("disconnected"),
       detail: "Connect request failed. Review output diagnostics and retry.",
@@ -6220,7 +6872,11 @@ disconnectBtnEl.addEventListener("click", async () => {
     return;
   }
   try {
-    const result = await call("disconnect", "control_disconnect");
+    const result = await call("disconnect", "control_disconnect", {
+      request: {
+        session_token: state.sessionToken || ""
+      }
+    });
     updateConnectionDashboard("disconnect", result);
   } catch {
     applyConnectionSnapshot({
@@ -6239,10 +6895,15 @@ byId("status_btn").addEventListener("click", async () => {
   updateConnectionDashboard("status", result);
 });
 
-byId("status_btn_server").addEventListener("click", async () => {
-  const result = await call("status_server", "control_status");
-  updateConnectionDashboard("status", result);
-});
+if (ADMIN_CONSOLE_RENDERER) {
+  byId("status_btn_server").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Server Status")) {
+      return;
+    }
+    const result = await call("status_server", "control_status");
+    updateConnectionDashboard("status", result);
+  });
+}
 
 byId("diagnostics_btn").addEventListener("click", async () => {
   await call("diagnostics", "control_get_diagnostics");
@@ -6253,54 +6914,86 @@ byId("health_btn").addEventListener("click", async () => {
   updateConnectionDashboard("health", result);
 });
 
-byId("set_profile_btn").addEventListener("click", async () => {
-  if (!requireServerLifecycleEligibility("Set profile")) {
-    return;
-  }
-  const request = { path_profile: byId("set_profile").value };
-  await call("set_profile", "control_set_profile", { request });
-});
+if (ADMIN_CONSOLE_RENDERER) {
+  byId("set_profile_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Set Server Profile")) {
+      return;
+    }
+    if (!requireServerLifecycleEligibility("Set profile")) {
+      return;
+    }
+    if (!requireSessionToken("set the server profile")) {
+      return;
+    }
+    const request = {
+      path_profile: byId("set_profile").value,
+      session_token: state.sessionToken
+    };
+    await call("set_profile", "control_set_profile", { request });
+  });
 
-byId("update_btn").addEventListener("click", async () => {
-  await call("update", "control_update");
-});
+  byId("update_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Update Runtime")) {
+      return;
+    }
+    if (!requireSessionToken("update the runtime")) {
+      return;
+    }
+    await call("update", "control_update", { request: serviceLifecycleRequest() });
+  });
 
-byId("service_status_btn").addEventListener("click", async () => {
-  if (!requireServerTabEligibility("Check service status")) {
-    return;
-  }
-  await call("service_status", "control_service_status");
-});
+  byId("service_status_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Service Status")) {
+      return;
+    }
+    if (!requireServerTabEligibility("Check service status")) {
+      return;
+    }
+    if (!requireSessionToken("check service status")) {
+      return;
+    }
+    await call("service_status", "control_service_status", { request: serviceLifecycleRequest() });
+  });
 
-byId("service_start_btn").addEventListener("click", async () => {
-  if (!requireServerLifecycleEligibility("Start service")) {
-    return;
-  }
-  if (!requireSessionToken("start the service")) {
-    return;
-  }
-  await call("service_start", "control_service_start", { request: serviceLifecycleRequest() });
-});
+  byId("service_start_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Start Service")) {
+      return;
+    }
+    if (!requireServerLifecycleEligibility("Start service")) {
+      return;
+    }
+    if (!requireSessionToken("start the service")) {
+      return;
+    }
+    await call("service_start", "control_service_start", { request: serviceLifecycleRequest() });
+  });
 
-byId("service_stop_btn").addEventListener("click", async () => {
-  if (!requireServerLifecycleEligibility("Stop service")) {
-    return;
-  }
-  if (!requireSessionToken("stop the service")) {
-    return;
-  }
-  await call("service_stop", "control_service_stop", { request: serviceLifecycleRequest() });
-});
+  byId("service_stop_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Stop Service")) {
+      return;
+    }
+    if (!requireServerLifecycleEligibility("Stop service")) {
+      return;
+    }
+    if (!requireSessionToken("stop the service")) {
+      return;
+    }
+    await call("service_stop", "control_service_stop", { request: serviceLifecycleRequest() });
+  });
 
-byId("service_restart_btn").addEventListener("click", async () => {
-  if (!requireServerLifecycleEligibility("Restart service")) {
-    return;
-  }
-  if (!requireSessionToken("restart the service")) {
-    return;
-  }
-  await call("service_restart", "control_service_restart", { request: serviceLifecycleRequest() });
-});
+  byId("service_restart_btn").addEventListener("click", async () => {
+    if (!requireAdminConsoleMode("Restart Service")) {
+      return;
+    }
+    if (!requireServerLifecycleEligibility("Restart service")) {
+      return;
+    }
+    if (!requireSessionToken("restart the service")) {
+      return;
+    }
+    await call("service_restart", "control_service_restart", { request: serviceLifecycleRequest() });
+  });
+}
 
 async function init() {
   setRole("client", { persist: false });
@@ -6323,6 +7016,7 @@ async function init() {
     let allowLegacyConnectOverride = meta.allowLegacyConnectOverride;
     let connectPolicySource = CONNECT_POLICY_SOURCE_ENV_DEFAULT;
     let connectPolicyMode = connectPolicyModeFromRequireSession(connectRequireSession);
+    let runtimeConfigUnavailableFailClosed = false;
     let authVerifyRequireMetadata = meta.authVerifyRequireMetadata;
     let authVerifyRequireWalletExtensionSource = meta.authVerifyRequireWalletExtensionSource;
     let authVerifyRequireCryptoProof = meta.authVerifyRequireCryptoProof;
@@ -6338,6 +7032,9 @@ async function init() {
     let profileGateProbePolicySource = PROFILE_GATE_PROBE_POLICY_SOURCE_ENV_DEFAULT;
     try {
       const runtimeCfg = await invoke("control_runtime_config");
+      if (runtimeCfg?.available === false) {
+        throw new Error(runtimeCfg?.error || "runtime policy config unavailable");
+      }
       const runtimeConnectPolicy = readRuntimeConnectPolicyMetadata(runtimeCfg || {});
       const runtimeAuthVerifyPolicy = readRuntimeAuthVerifyPolicyMetadata(runtimeCfg || {});
       const runtimeOperatorApprovalPolicy = readRuntimeOperatorApprovalPolicyMetadata(runtimeCfg || {});
@@ -6429,9 +7126,13 @@ async function init() {
         profileGateProbePolicySource = PROFILE_GATE_PROBE_POLICY_SOURCE_RUNTIME_CONFIG;
       }
     } catch {
-      productionModeSource = CONNECT_POLICY_SOURCE_ENV_DEFAULT;
-      connectPolicySource = CONNECT_POLICY_SOURCE_ENV_DEFAULT;
-      connectPolicyMode = connectPolicyModeFromRequireSession(connectRequireSession);
+      productionMode = false;
+      productionModeSource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
+      connectRequireSession = true;
+      allowLegacyConnectOverride = false;
+      connectPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
+      connectPolicyMode = CONNECT_POLICY_MODE_SESSION_REQUIRED;
+      runtimeConfigUnavailableFailClosed = true;
       authVerifyRuntimeRequireWalletExtensionSource = false;
       authVerifyRequireCryptoProof = false;
       authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
@@ -6442,6 +7143,7 @@ async function init() {
     }
     state.connectPolicySource = connectPolicySource;
     state.connectPolicyMode = connectPolicyMode;
+    state.runtimeConfigUnavailableFailClosed = runtimeConfigUnavailableFailClosed;
     state.productionMode = productionMode === true;
     state.productionModeSource = productionModeSource || CONNECT_POLICY_SOURCE_ENV_DEFAULT;
     state.allowLegacyConnectOverride = !!allowLegacyConnectOverride;
@@ -6461,6 +7163,8 @@ async function init() {
     state.legacyEnvAliasesActive = legacyAliasTelemetry.activeAliases;
     state.legacyEnvAliasWarnings = legacyAliasTelemetry.warnings;
     state.legacyEnvAliasActiveCount = legacyAliasTelemetry.activeCount;
+    state.adminConsoleEnabled = meta.adminConsoleEnabled === true;
+    state.appMode = meta.appMode || (state.adminConsoleEnabled ? "admin_console" : "public_app");
     apiBaseEl.textContent = meta.apiLine;
     apiHintsEl.textContent = [
       meta.hintLine,
@@ -6482,20 +7186,26 @@ async function init() {
     ]
       .filter((value) => typeof value === "string" && value.trim().length > 0)
       .join(" | ");
-    updateBtnEl.disabled = !meta.updateMutationsEnabled;
+    if (updateBtnEl) {
+      updateBtnEl.disabled = !meta.updateMutationsEnabled;
+    }
     state.serviceMutationsAllowed = meta.serviceMutationsEnabled;
     applyConnectModePolicy(connectRequireSession);
     updateAuthVerifyPolicyHint();
     updateOperatorApprovalPolicyHint();
     updateLegacyAliasRuntimeHint();
+    syncAdminConsoleMode();
     syncServerRoleLockState();
   } catch (err) {
     apiBaseEl.textContent = "API: unavailable";
     apiHintsEl.textContent = "";
-    updateBtnEl.disabled = true;
+    if (updateBtnEl) {
+      updateBtnEl.disabled = true;
+    }
     state.serviceMutationsAllowed = false;
-    state.connectPolicySource = CONNECT_POLICY_SOURCE_ENV_DEFAULT;
-    state.connectPolicyMode = CONNECT_POLICY_MODE_COMPAT_ALLOWED;
+    state.connectPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
+    state.connectPolicyMode = CONNECT_POLICY_MODE_SESSION_REQUIRED;
+    state.runtimeConfigUnavailableFailClosed = true;
     state.productionMode = false;
     state.productionModeSource = CONNECT_POLICY_SOURCE_ENV_DEFAULT;
     state.allowLegacyConnectOverride = false;
@@ -6515,10 +7225,13 @@ async function init() {
     state.legacyEnvAliasesActive = [];
     state.legacyEnvAliasWarnings = [];
     state.legacyEnvAliasActiveCount = 0;
-    applyConnectModePolicy(false);
+    state.adminConsoleEnabled = false;
+    state.appMode = "public_app";
+    applyConnectModePolicy(true);
     updateAuthVerifyPolicyHint();
     updateOperatorApprovalPolicyHint();
     updateLegacyAliasRuntimeHint();
+    syncAdminConsoleMode();
     syncServerRoleLockState();
     print("init (error)", err);
   }

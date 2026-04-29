@@ -13,6 +13,7 @@ import (
 	"privacynode/services/exit"
 	"privacynode/services/issuer"
 	"privacynode/services/localapi"
+	"privacynode/services/middle"
 	"privacynode/services/wgio"
 	"privacynode/services/wgioinject"
 	"privacynode/services/wgiotap"
@@ -21,6 +22,7 @@ import (
 type Roles struct {
 	Client     bool
 	Entry      bool
+	Middle     bool
 	Exit       bool
 	Directory  bool
 	Issuer     bool
@@ -31,7 +33,7 @@ type Roles struct {
 }
 
 func (r Roles) Any() bool {
-	return r.Client || r.Entry || r.Exit || r.Directory || r.Issuer || r.LocalAPI || r.WGIO || r.WGIOTap || r.WGIOInject
+	return r.Client || r.Entry || r.Middle || r.Exit || r.Directory || r.Issuer || r.LocalAPI || r.WGIO || r.WGIOTap || r.WGIOInject
 }
 
 type Config struct {
@@ -65,6 +67,10 @@ func Run(ctx context.Context, cfg Config) error {
 		svc := entry.New()
 		runners = append(runners, svc.Run)
 	}
+	if cfg.Roles.Middle {
+		svc := middle.New()
+		runners = append(runners, svc.Run)
+	}
 	if cfg.Roles.Exit {
 		svc := exit.New()
 		runners = append(runners, svc.Run)
@@ -90,6 +96,18 @@ func Run(ctx context.Context, cfg Config) error {
 		return errors.New("no services enabled")
 	}
 
+	if err := runRunners(ctx, runners); err != nil {
+		return err
+	}
+
+	log.Println("node stopped")
+	return nil
+}
+
+func runRunners(ctx context.Context, runners []func(context.Context) error) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	errCh := make(chan error, len(runners))
 	for _, runner := range runners {
 		go func(runFn func(context.Context) error) {
@@ -97,16 +115,32 @@ func Run(ctx context.Context, cfg Config) error {
 		}(runner)
 	}
 
+	var firstErr error
 	for i := 0; i < len(runners); i++ {
 		err := <-errCh
-		if err == nil || errors.Is(err, context.Canceled) {
+		if err == nil || isContextStop(ctx, err) {
 			continue
 		}
-		return fmt.Errorf("node stopped: %w", err)
+		if firstErr == nil {
+			firstErr = err
+			cancel()
+		}
 	}
 
-	log.Println("node stopped")
+	if firstErr != nil {
+		return fmt.Errorf("node stopped: %w", firstErr)
+	}
 	return nil
+}
+
+func isContextStop(ctx context.Context, err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, ctxErr) {
+		return true
+	}
+	return false
 }
 
 func autoWireRoleURLs(roles Roles) {

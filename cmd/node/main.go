@@ -14,6 +14,7 @@ func main() {
 	cfgPath := flag.String("config", "", "optional path to config file")
 	client := flag.Bool("client", false, "enable client role")
 	entry := flag.Bool("entry", false, "enable entry role")
+	middle := flag.Bool("middle", false, "enable middle relay role")
 	exit := flag.Bool("exit", false, "enable exit role")
 	directory := flag.Bool("directory", false, "enable directory role")
 	issuer := flag.Bool("issuer", false, "enable token issuer role")
@@ -31,6 +32,7 @@ func main() {
 		Roles: app.Roles{
 			Client:     *client,
 			Entry:      *entry,
+			Middle:     *middle,
 			Exit:       *exit,
 			Directory:  *directory,
 			Issuer:     *issuer,
@@ -42,7 +44,7 @@ func main() {
 	}
 
 	if !nodeCfg.Roles.Any() {
-		log.Fatal("no role selected; pass one or more of --client --entry --exit --directory --issuer --local-api --wgio --wgiotap --wgioinject")
+		log.Fatal("no role selected; pass one or more of --client --entry --middle --exit --directory --issuer --local-api --wgio --wgiotap --wgioinject")
 	}
 
 	if err := app.Run(ctx, nodeCfg); err != nil {

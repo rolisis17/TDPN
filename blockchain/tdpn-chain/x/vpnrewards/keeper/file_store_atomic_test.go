@@ -23,6 +23,7 @@ func TestKeeperRecordDistributionFileStoreUsesSingleAtomicPersist(t *testing.T) 
 		AccrualID:      "acc-file-atomic-1",
 		SessionID:      "sess-file-atomic-1",
 		ProviderID:     "provider-file-atomic-1",
+		AssetDenom:     "uusdc",
 		Amount:         101,
 		OperationState: chaintypes.ReconciliationSubmitted,
 	})
@@ -53,8 +54,8 @@ func TestKeeperRecordDistributionFileStoreUsesSingleAtomicPersist(t *testing.T) 
 	if !ok {
 		t.Fatalf("expected accrual %q to exist after recording distribution", accrual.AccrualID)
 	}
-	if accrualAfter.OperationState != chaintypes.ReconciliationConfirmed {
-		t.Fatalf("expected accrual state %q after distribution, got %q", chaintypes.ReconciliationConfirmed, accrualAfter.OperationState)
+	if accrualAfter.OperationState != chaintypes.ReconciliationSubmitted {
+		t.Fatalf("expected accrual state %q after distribution, got %q", chaintypes.ReconciliationSubmitted, accrualAfter.OperationState)
 	}
 
 	if _, ok := k.GetDistribution(distributionID); !ok {
@@ -76,6 +77,7 @@ func TestKeeperRecordDistributionFileStoreFailureInjectionCannotOrphanAccrualAdv
 		AccrualID:      "acc-file-atomic-failsafe",
 		SessionID:      "sess-file-atomic-failsafe",
 		ProviderID:     "provider-file-atomic-failsafe",
+		AssetDenom:     "uusdc",
 		Amount:         202,
 		OperationState: chaintypes.ReconciliationSubmitted,
 	})
@@ -116,8 +118,8 @@ func TestKeeperRecordDistributionFileStoreFailureInjectionCannotOrphanAccrualAdv
 	if !ok {
 		t.Fatalf("expected durable accrual %q after record", accrual.AccrualID)
 	}
-	if durableAccrual.OperationState != chaintypes.ReconciliationConfirmed {
-		t.Fatalf("expected durable accrual state %q, got %q", chaintypes.ReconciliationConfirmed, durableAccrual.OperationState)
+	if durableAccrual.OperationState != chaintypes.ReconciliationSubmitted {
+		t.Fatalf("expected durable accrual state %q, got %q", chaintypes.ReconciliationSubmitted, durableAccrual.OperationState)
 	}
 
 	durableDistribution, ok := reopened.GetDistribution(distributionID)
@@ -143,6 +145,7 @@ func TestKeeperRecordDistributionFileStoreAtomicPersistFailureRollsBackDurably(t
 		AccrualID:      "acc-file-atomic-failure",
 		SessionID:      "sess-file-atomic-failure",
 		ProviderID:     "provider-file-atomic-failure",
+		AssetDenom:     "uusdc",
 		Amount:         303,
 		OperationState: chaintypes.ReconciliationSubmitted,
 	})

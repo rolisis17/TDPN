@@ -7,6 +7,10 @@ description = "Global Private Mesh (GPM) desktop scaffold using local daemon con
 [package.metadata]
 # Scaffold placeholder to satisfy tauri-build metadata probing on Windows.
 
+[features]
+default = []
+admin-console = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

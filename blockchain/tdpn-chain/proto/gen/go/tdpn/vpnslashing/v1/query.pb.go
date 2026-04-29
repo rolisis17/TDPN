@@ -214,9 +214,16 @@ func (x *QueryPenaltyDecisionResponse) GetFound() bool {
 }
 
 type QueryListSlashEvidenceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	ProviderId             string                 `protobuf:"bytes,1,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	SessionId              string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ViolationType          string                 `protobuf:"bytes,3,opt,name=violation_type,json=violationType,proto3" json:"violation_type,omitempty"`
+	SubmittedAtOrAfterUnix int64                  `protobuf:"varint,4,opt,name=submitted_at_or_after_unix,json=submittedAtOrAfterUnix,proto3" json:"submitted_at_or_after_unix,omitempty"`
+	SubmittedBeforeUnix    int64                  `protobuf:"varint,5,opt,name=submitted_before_unix,json=submittedBeforeUnix,proto3" json:"submitted_before_unix,omitempty"`
+	IncludeFailed          *bool                  `protobuf:"varint,6,opt,name=include_failed,json=includeFailed,proto3,oneof" json:"include_failed,omitempty"`
+	IncludeZeroSubmitted   bool                   `protobuf:"varint,7,opt,name=include_zero_submitted,json=includeZeroSubmitted,proto3" json:"include_zero_submitted,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *QueryListSlashEvidenceRequest) Reset() {
@@ -247,6 +254,55 @@ func (x *QueryListSlashEvidenceRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use QueryListSlashEvidenceRequest.ProtoReflect.Descriptor instead.
 func (*QueryListSlashEvidenceRequest) Descriptor() ([]byte, []int) {
 	return file_tdpn_vpnslashing_v1_query_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *QueryListSlashEvidenceRequest) GetProviderId() string {
+	if x != nil {
+		return x.ProviderId
+	}
+	return ""
+}
+
+func (x *QueryListSlashEvidenceRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *QueryListSlashEvidenceRequest) GetViolationType() string {
+	if x != nil {
+		return x.ViolationType
+	}
+	return ""
+}
+
+func (x *QueryListSlashEvidenceRequest) GetSubmittedAtOrAfterUnix() int64 {
+	if x != nil {
+		return x.SubmittedAtOrAfterUnix
+	}
+	return 0
+}
+
+func (x *QueryListSlashEvidenceRequest) GetSubmittedBeforeUnix() int64 {
+	if x != nil {
+		return x.SubmittedBeforeUnix
+	}
+	return 0
+}
+
+func (x *QueryListSlashEvidenceRequest) GetIncludeFailed() bool {
+	if x != nil && x.IncludeFailed != nil {
+		return *x.IncludeFailed
+	}
+	return false
+}
+
+func (x *QueryListSlashEvidenceRequest) GetIncludeZeroSubmitted() bool {
+	if x != nil {
+		return x.IncludeZeroSubmitted
+	}
+	return false
 }
 
 type QueryListSlashEvidenceResponse struct {
@@ -389,8 +445,18 @@ const file_tdpn_vpnslashing_v1_query_proto_rawDesc = "" +
 	"penalty_id\x18\x01 \x01(\tR\tpenaltyId\"t\n" +
 	"\x1cQueryPenaltyDecisionResponse\x12>\n" +
 	"\apenalty\x18\x01 \x01(\v2$.tdpn.vpnslashing.v1.PenaltyDecisionR\apenalty\x12\x14\n" +
-	"\x05found\x18\x02 \x01(\bR\x05found\"\x1f\n" +
-	"\x1dQueryListSlashEvidenceRequest\"`\n" +
+	"\x05found\x18\x02 \x01(\bR\x05found\"\xeb\x02\n" +
+	"\x1dQueryListSlashEvidenceRequest\x12\x1f\n" +
+	"\vprovider_id\x18\x01 \x01(\tR\n" +
+	"providerId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12%\n" +
+	"\x0eviolation_type\x18\x03 \x01(\tR\rviolationType\x12:\n" +
+	"\x1asubmitted_at_or_after_unix\x18\x04 \x01(\x03R\x16submittedAtOrAfterUnix\x122\n" +
+	"\x15submitted_before_unix\x18\x05 \x01(\x03R\x13submittedBeforeUnix\x12*\n" +
+	"\x0einclude_failed\x18\x06 \x01(\bH\x00R\rincludeFailed\x88\x01\x01\x124\n" +
+	"\x16include_zero_submitted\x18\a \x01(\bR\x14includeZeroSubmittedB\x11\n" +
+	"\x0f_include_failed\"`\n" +
 	"\x1eQueryListSlashEvidenceResponse\x12>\n" +
 	"\bevidence\x18\x01 \x03(\v2\".tdpn.vpnslashing.v1.SlashEvidenceR\bevidence\"\"\n" +
 	" QueryListPenaltyDecisionsRequest\"g\n" +
@@ -453,6 +519,7 @@ func file_tdpn_vpnslashing_v1_query_proto_init() {
 		return
 	}
 	file_tdpn_vpnslashing_v1_types_proto_init()
+	file_tdpn_vpnslashing_v1_query_proto_msgTypes[4].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

@@ -33,16 +33,19 @@ type PriceQuote struct {
 }
 
 type FundReservation struct {
-	ReservationID string
-	SessionID     string
-	SubjectID     string
-	AmountMicros  int64
-	Currency      string
-	CreatedAt     time.Time
+	ReservationID    string
+	SessionID        string
+	SubjectID        string
+	AmountMicros     int64
+	Currency         string
+	CreatedAt        time.Time
+	IdempotentReplay bool
+	Status           OperationStatus
 }
 
 type SessionSettlement struct {
 	SettlementID               string
+	ReservationID              string
 	SessionID                  string
 	SubjectID                  string
 	ChargedMicros              int64
@@ -64,6 +67,14 @@ type RewardIssue struct {
 	RewardID                   string
 	ProviderSubjectID          string
 	SessionID                  string
+	SettlementReferenceID      string
+	TrafficProofRef            string
+	TrafficProofVerified       bool
+	TrafficProofVerifierID     string
+	TrafficProofVerifiedAt     time.Time
+	TrafficProofTrustContract  RewardProofTrustContract
+	PayoutPeriodStart          time.Time
+	PayoutPeriodEnd            time.Time
 	RewardMicros               int64
 	Currency                   string
 	IssuedAt                   time.Time
@@ -141,6 +152,71 @@ type SlashEvidence struct {
 	Status                     OperationStatus
 }
 
+type SlashEvidenceFilter struct {
+	SubjectID           string
+	SessionID           string
+	ViolationType       string
+	ObservedAtOrAfter   time.Time
+	ObservedBefore      time.Time
+	IncludeFailed       bool
+	IncludeFailedSet    bool
+	IncludeZeroObserved bool
+}
+
+type RewardProofTrustContract string
+
+const (
+	// RewardProofTrustContractObjectiveTrafficV1 requires the verifier to bind
+	// the referenced objective traffic proof to the reward's payout material.
+	RewardProofTrustContractObjectiveTrafficV1 RewardProofTrustContract = "settlement.reward.objective-traffic.v1"
+)
+
+type RewardProofVerificationRequest struct {
+	TrustContract     RewardProofTrustContract
+	TrafficProofRef   string
+	RewardID          string
+	ProviderSubjectID string
+	SessionID         string
+	PayoutPeriodStart time.Time
+	PayoutPeriodEnd   time.Time
+	RewardMicros      int64
+	Currency          string
+	IssuedAt          time.Time
+}
+
+type RewardProofVerification struct {
+	Verified   bool
+	VerifierID string
+	VerifiedAt time.Time
+}
+
+type RewardProofRecord struct {
+	ProofPath         string
+	TrafficProofRef   string
+	TrustContract     RewardProofTrustContract
+	RewardID          string
+	ProviderSubjectID string
+	SessionID         string
+	PayoutPeriodStart time.Time
+	PayoutPeriodEnd   time.Time
+	RewardMicros      int64
+	Currency          string
+	IssuedAt          time.Time
+	Verified          bool
+	VerifierID        string
+	VerifiedAt        time.Time
+}
+
+type RewardProofRegistrar interface {
+	RegisterRewardProof(ctx context.Context, proof RewardProofRecord) error
+}
+
+// RewardProofVerifier verifies traffic proof object references before they can
+// stand in for a finalized settlement reference on chain-backed reward payouts.
+type RewardProofVerifier interface {
+	VerifyRewardProof(ctx context.Context, request RewardProofVerificationRequest) (RewardProofVerification, error)
+}
+
 type ReconcileReport struct {
 	GeneratedAt               time.Time
 	OpenReservations          int
@@ -186,13 +262,85 @@ type ChainAdapter interface {
 	Health(ctx context.Context) error
 }
 
-// ChainConfirmationQuerier is an optional adapter capability used by reconcile
-// flows to promote submitted records to confirmed when chain lookups succeed.
+type ChainRewardProofRegistrar interface {
+	SubmitRewardProof(ctx context.Context, proof RewardProofRecord) (referenceID string, err error)
+}
+
+// ChainBillingReservationSubmitter is an optional adapter capability for
+// submitting normal client fund reservations before session settlement.
+type ChainBillingReservationSubmitter interface {
+	SubmitFundReservation(ctx context.Context, reservation FundReservation) (referenceID string, err error)
+}
+
+// ChainRewardProofRequirement marks adapters whose reward write surface rejects
+// rewards without an objective traffic proof or finalized settlement reference.
+type ChainRewardProofRequirement interface {
+	RequiresRewardProofReference() bool
+}
+
+// ChainSlashEvidenceLister is an optional adapter capability for querying
+// chain-wide slashing evidence before reward payout finalization.
+type ChainSlashEvidenceLister interface {
+	ListSlashEvidence(ctx context.Context, filter SlashEvidenceFilter) ([]SlashEvidence, error)
+}
+
+// ChainConfirmationQuerier is a legacy optional adapter capability for
+// by-ID existence checks. Existence alone is not sufficient finality for
+// submitted -> confirmed reconciliation promotion.
 type ChainConfirmationQuerier interface {
 	HasSessionSettlement(ctx context.Context, settlementID string) (bool, error)
 	HasRewardIssue(ctx context.Context, rewardID string) (bool, error)
 	HasSponsorReservation(ctx context.Context, reservationID string) (bool, error)
 	HasSlashEvidence(ctx context.Context, evidenceID string) (bool, error)
+}
+
+// ChainConfirmationStatusQuerier is an optional adapter capability used by
+// reconcile flows to promote submitted records only after chain state reports
+// the record as confirmed/finalized.
+type ChainConfirmationStatusQuerier interface {
+	SessionSettlementStatus(ctx context.Context, settlementID string) (OperationStatus, bool, error)
+	RewardIssueStatus(ctx context.Context, rewardID string) (OperationStatus, bool, error)
+	SponsorReservationStatus(ctx context.Context, reservationID string) (OperationStatus, bool, error)
+	SlashEvidenceStatus(ctx context.Context, evidenceID string) (OperationStatus, bool, error)
+}
+
+// SessionSettlementQuerier returns the material chain settlement record for
+// reconciliation paths that must bind confirmation to the local session.
+type SessionSettlementQuerier interface {
+	SessionSettlement(ctx context.Context, settlementID string) (SessionSettlement, bool, error)
+}
+
+// RewardIssueQuerier returns the material chain reward record for finality
+// checks that must bind confirmation to the local reward intent.
+type RewardIssueQuerier interface {
+	RewardIssue(ctx context.Context, rewardID string) (RewardIssue, bool, error)
+}
+
+// SlashEvidenceQuerier returns the material chain slash record for finality
+// checks that must bind confirmation to the local slash evidence intent.
+type SlashEvidenceQuerier interface {
+	SlashEvidence(ctx context.Context, evidenceID string) (SlashEvidence, bool, error)
+}
+
+// ChainFundReservationStatusQuerier is an optional adapter capability for
+// checking normal client fund reservation finality before those reservations
+// are treated as spendable in chain-backed flows.
+type ChainFundReservationStatusQuerier interface {
+	FundReservationStatus(ctx context.Context, reservationID string) (OperationStatus, bool, error)
+}
+
+// FundReservationQuerier returns the material fund reservation record for
+// callers that must bind a confirmed reservation to the signed-in subject.
+type FundReservationQuerier interface {
+	FundReservation(ctx context.Context, reservationID string) (FundReservation, bool, error)
+}
+
+// ChainReservationConfirmationStatusQuerier groups the reservation finality
+// checks needed by callers that must fail closed until both client-funded and
+// sponsor-funded reservations are finalized on chain.
+type ChainReservationConfirmationStatusQuerier interface {
+	ChainFundReservationStatusQuerier
+	SponsorReservationStatus(ctx context.Context, reservationID string) (OperationStatus, bool, error)
 }
 
 // ChainDeferredReporter is an optional chain-adapter extension for surfacing

@@ -113,6 +113,7 @@ fi
 declare -a REQUIRED_DEFAULT_CHECKS=(
   "scripts/integration_roadmap_next_actions_run.sh"
   "scripts/integration_roadmap_non_blockchain_actionable_run.sh"
+  "scripts/integration_roadmap_progress_report.sh"
   "scripts/integration_vpn_non_blockchain_fastlane.sh"
   "scripts/integration_roadmap_blockchain_actionable_run.sh"
   "scripts/integration_blockchain_fastlane.sh"
@@ -126,9 +127,6 @@ declare -a REQUIRED_DEFAULT_CHECKS=(
   "scripts/integration_easy_node_three_machine_real_host_validation_pack.sh"
   "scripts/integration_roadmap_validation_debt_actionable_run.sh"
 )
-declare -a FORBIDDEN_DEFAULT_CHECKS=(
-  "scripts/integration_roadmap_progress_report.sh"
-)
 if [[ "${#DEFAULT_EXCLUDES[@]}" -ne "${#REQUIRED_DEFAULT_CHECKS[@]}" ]]; then
   echo "default check count mismatch from --print-default-checks output: expected=${#REQUIRED_DEFAULT_CHECKS[@]} actual=${#DEFAULT_EXCLUDES[@]}"
   printf 'default checks were:\n'
@@ -140,14 +138,6 @@ for idx in "${!REQUIRED_DEFAULT_CHECKS[@]}"; do
   actual_default="${DEFAULT_EXCLUDES[$idx]}"
   if [[ "$actual_default" != "$expected_default" ]]; then
     echo "default check order mismatch at index $idx: expected=$expected_default actual=$actual_default"
-    printf 'default checks were:\n'
-    printf '  %s\n' "${DEFAULT_EXCLUDES[@]}"
-    exit 1
-  fi
-done
-for forbidden_default in "${FORBIDDEN_DEFAULT_CHECKS[@]}"; do
-  if printf '%s\n' "${DEFAULT_EXCLUDES[@]}" | grep -Fx -- "$forbidden_default" >/dev/null 2>&1; then
-    echo "forbidden heavyweight check unexpectedly present in --print-default-checks output: $forbidden_default"
     printf 'default checks were:\n'
     printf '  %s\n' "${DEFAULT_EXCLUDES[@]}"
     exit 1

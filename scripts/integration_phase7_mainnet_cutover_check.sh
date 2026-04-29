@@ -279,6 +279,8 @@ PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$PASS_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
   --phase6-handoff-summary-json "$PASS_HANDOFF" \
   --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --mainnet-activation-gate-summary-json "$ACTIVATION_GATE_GO_SUMMARY" \
+  --bootstrap-governance-graduation-gate-summary-json "$BOOTSTRAP_GATE_GO_SUMMARY" \
   --rollback-path-ready 1 \
   --operator-approval-ok 1 \
   --summary-json "$PASS_OUTPUT" \
@@ -308,8 +310,8 @@ if ! jq -e '
   and .policy.require_cosmos_module_coverage_floor_ok == true
   and .policy.require_cosmos_keeper_coverage_floor_ok == true
   and .policy.require_cosmos_app_coverage_floor_ok == true
-  and .policy.require_mainnet_activation_gate_go == false
-  and .policy.require_bootstrap_governance_graduation_gate_go == false
+  and .policy.require_mainnet_activation_gate_go == true
+  and .policy.require_bootstrap_governance_graduation_gate_go == true
   and .policy.require_rollback_path_ready == true
   and .policy.require_operator_approval_ok == false
   and .signals.run_pipeline_ok == true
@@ -322,10 +324,10 @@ if ! jq -e '
   and .signals.cosmos_module_coverage_floor_ok == true
   and .signals.cosmos_keeper_coverage_floor_ok == true
   and .signals.cosmos_app_coverage_floor_ok == true
-  and .signals.mainnet_activation_gate_go == null
-  and .signals.bootstrap_governance_graduation_gate_go == null
-  and .stages.mainnet_activation_gate.status == "missing"
-  and .stages.bootstrap_governance_graduation_gate.status == "missing"
+  and .signals.mainnet_activation_gate_go == true
+  and .signals.bootstrap_governance_graduation_gate_go == true
+  and .stages.mainnet_activation_gate.status == "pass"
+  and .stages.bootstrap_governance_graduation_gate.status == "pass"
   and .stages.cosmos_module_coverage_floor.status == "pass"
   and .stages.cosmos_keeper_coverage_floor.status == "pass"
   and .stages.cosmos_app_coverage_floor.status == "pass"
@@ -379,6 +381,8 @@ PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$RELAXED_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
   --phase6-handoff-summary-json "$FAIL_HANDOFF" \
   --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --mainnet-activation-gate-summary-json "$ACTIVATION_GATE_GO_SUMMARY" \
+  --bootstrap-governance-graduation-gate-summary-json "$BOOTSTRAP_GATE_GO_SUMMARY" \
   --rollback-path-ready 1 \
   --require-module-tx-surface-ok 0 \
   --summary-json "$RELAXED_OUTPUT" \
@@ -402,6 +406,8 @@ PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$DUAL_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
   --phase6-handoff-summary-json "$PASS_HANDOFF" \
   --phase6-contracts-summary-json "$DUAL_STAGE_CONTRACTS" \
+  --mainnet-activation-gate-summary-json "$ACTIVATION_GATE_GO_SUMMARY" \
+  --bootstrap-governance-graduation-gate-summary-json "$BOOTSTRAP_GATE_GO_SUMMARY" \
   --rollback-path-ready 1 \
   --summary-json "$DUAL_OUTPUT" \
   --show-json 0 >"$DUAL_LOG" 2>&1
@@ -459,6 +465,8 @@ PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$APP_FLOOR_RELAXED_CANONICA
 "$SCRIPT_UNDER_TEST" \
   --phase6-handoff-summary-json "$PASS_HANDOFF" \
   --phase6-contracts-summary-json "$APP_FLOOR_FALSE_CONTRACTS" \
+  --mainnet-activation-gate-summary-json "$ACTIVATION_GATE_GO_SUMMARY" \
+  --bootstrap-governance-graduation-gate-summary-json "$BOOTSTRAP_GATE_GO_SUMMARY" \
   --rollback-path-ready 1 \
   --require-cosmos-app-coverage-floor-ok 0 \
   --summary-json "$APP_FLOOR_RELAXED_OUTPUT" \
@@ -483,6 +491,7 @@ PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$ACTIVATION_REQUIRED_GO_CAN
   --phase6-handoff-summary-json "$PASS_HANDOFF" \
   --phase6-contracts-summary-json "$PASS_CONTRACTS" \
   --mainnet-activation-gate-summary-json "$ACTIVATION_GATE_GO_SUMMARY" \
+  --bootstrap-governance-graduation-gate-summary-json "$BOOTSTRAP_GATE_GO_SUMMARY" \
   --require-mainnet-activation-gate-go 1 \
   --rollback-path-ready 1 \
   --summary-json "$ACTIVATION_REQUIRED_GO_OUTPUT" \
@@ -603,6 +612,7 @@ PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$BOOTSTRAP_REQUIRED_GO_CANO
 "$SCRIPT_UNDER_TEST" \
   --phase6-handoff-summary-json "$PASS_HANDOFF" \
   --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --mainnet-activation-gate-summary-json "$ACTIVATION_GATE_GO_SUMMARY" \
   --bootstrap-governance-graduation-gate-summary-json "$BOOTSTRAP_GATE_GO_SUMMARY" \
   --require-bootstrap-governance-graduation-gate-go 1 \
   --rollback-path-ready 1 \
@@ -692,6 +702,7 @@ PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$BOOTSTRAP_RELAXED_FALSE_CA
 "$SCRIPT_UNDER_TEST" \
   --phase6-handoff-summary-json "$PASS_HANDOFF" \
   --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --mainnet-activation-gate-summary-json "$ACTIVATION_GATE_GO_SUMMARY" \
   --bootstrap-governance-graduation-gate-summary-json "$BOOTSTRAP_GATE_STATUS_FAIL_SUMMARY" \
   --require-bootstrap-governance-graduation-gate-go 0 \
   --rollback-path-ready 1 \
@@ -716,6 +727,7 @@ PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$BOOTSTRAP_RELAXED_MISSING_
 "$SCRIPT_UNDER_TEST" \
   --phase6-handoff-summary-json "$PASS_HANDOFF" \
   --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --mainnet-activation-gate-summary-json "$ACTIVATION_GATE_GO_SUMMARY" \
   --require-bootstrap-governance-graduation-gate-go 0 \
   --rollback-path-ready 1 \
   --summary-json "$BOOTSTRAP_RELAXED_MISSING_OUTPUT" \
@@ -739,6 +751,8 @@ PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$OP_DEFAULT_CANONICAL" \
 "$SCRIPT_UNDER_TEST" \
   --phase6-handoff-summary-json "$PASS_HANDOFF" \
   --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --mainnet-activation-gate-summary-json "$ACTIVATION_GATE_GO_SUMMARY" \
+  --bootstrap-governance-graduation-gate-summary-json "$BOOTSTRAP_GATE_GO_SUMMARY" \
   --rollback-path-ready 1 \
   --summary-json "$OP_DEFAULT_OUTPUT" \
   --show-json 0 >"$OP_DEFAULT_LOG" 2>&1

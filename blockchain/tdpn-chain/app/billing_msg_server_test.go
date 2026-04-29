@@ -20,6 +20,7 @@ func TestBillingMsgServer_AccessorAndHappyPath(t *testing.T) {
 		SessionID:     "session-1",
 		AssetDenom:    "utdpn",
 		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
 	}
 	createResp, err := server.CreateReservation(context.Background(), BillingCreateReservationRequest{Record: reservation})
 	if err != nil {
@@ -28,17 +29,18 @@ func TestBillingMsgServer_AccessorAndHappyPath(t *testing.T) {
 	if createResp.Replay {
 		t.Fatal("expected first create reservation call to not be replay")
 	}
-	if createResp.Reservation.Status != chaintypes.ReconciliationPending {
-		t.Fatalf("expected default reservation status %q, got %q", chaintypes.ReconciliationPending, createResp.Reservation.Status)
+	if createResp.Reservation.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected reservation status %q, got %q", chaintypes.ReconciliationConfirmed, createResp.Reservation.Status)
 	}
 
 	finalize := billingtypes.SettlementRecord{
-		SettlementID:  "set-1",
-		ReservationID: reservation.ReservationID,
-		SessionID:     reservation.SessionID,
-		BilledAmount:  50,
-		UsageBytes:    2048,
-		AssetDenom:    "utdpn",
+		SettlementID:   "set-1",
+		ReservationID:  reservation.ReservationID,
+		SessionID:      reservation.SessionID,
+		BilledAmount:   50,
+		UsageBytes:     2048,
+		AssetDenom:     "utdpn",
+		OperationState: chaintypes.ReconciliationConfirmed,
 	}
 	finalizeResp, err := server.FinalizeSettlement(context.Background(), BillingFinalizeSettlementRequest{Record: finalize})
 	if err != nil {
@@ -47,8 +49,8 @@ func TestBillingMsgServer_AccessorAndHappyPath(t *testing.T) {
 	if finalizeResp.Replay {
 		t.Fatal("expected first finalize settlement call to not be replay")
 	}
-	if finalizeResp.Settlement.OperationState != chaintypes.ReconciliationSubmitted {
-		t.Fatalf("expected default settlement status %q, got %q", chaintypes.ReconciliationSubmitted, finalizeResp.Settlement.OperationState)
+	if finalizeResp.Settlement.OperationState != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected settlement status %q, got %q", chaintypes.ReconciliationConfirmed, finalizeResp.Settlement.OperationState)
 	}
 }
 
@@ -111,14 +113,16 @@ func TestBillingMsgServer_FinalizeSettlementReplayAndMissingReservation(t *testi
 
 	reservation := billingtypes.CreditReservation{
 		ReservationID: settlement.ReservationID,
+		SponsorID:     "sponsor-missing-reservation",
 		SessionID:     settlement.SessionID,
 		AssetDenom:    settlement.AssetDenom,
 		Amount:        10,
-		Status:        chaintypes.ReconciliationPending,
+		Status:        chaintypes.ReconciliationConfirmed,
 	}
 	if _, err := server.CreateReservation(context.Background(), BillingCreateReservationRequest{Record: reservation}); err != nil {
 		t.Fatalf("expected reservation create to succeed, got error: %v", err)
 	}
+	settlement.OperationState = chaintypes.ReconciliationConfirmed
 
 	_, err = server.FinalizeSettlement(context.Background(), BillingFinalizeSettlementRequest{Record: settlement})
 	if err != nil {
@@ -173,6 +177,7 @@ func TestBillingMsgServer_CreateReservationHonorsCanceledContext(t *testing.T) {
 		SessionID:     "session-canceled-ctx-1",
 		AssetDenom:    "utdpn",
 		Amount:        10,
+		Status:        chaintypes.ReconciliationConfirmed,
 	}
 
 	canceledCtx, cancel := context.WithCancel(context.Background())
@@ -197,18 +202,20 @@ func TestBillingMsgServer_FinalizeSettlementHonorsCanceledContext(t *testing.T) 
 		SessionID:     "session-canceled-ctx-2",
 		AssetDenom:    "utdpn",
 		Amount:        10,
+		Status:        chaintypes.ReconciliationConfirmed,
 	}
 	if _, err := server.CreateReservation(context.Background(), BillingCreateReservationRequest{Record: reservation}); err != nil {
 		t.Fatalf("expected reservation create to succeed, got error: %v", err)
 	}
 
 	settlement := billingtypes.SettlementRecord{
-		SettlementID:  "set-canceled-ctx-2",
-		ReservationID: reservation.ReservationID,
-		SessionID:     reservation.SessionID,
-		BilledAmount:  5,
-		UsageBytes:    256,
-		AssetDenom:    reservation.AssetDenom,
+		SettlementID:   "set-canceled-ctx-2",
+		ReservationID:  reservation.ReservationID,
+		SessionID:      reservation.SessionID,
+		BilledAmount:   5,
+		UsageBytes:     256,
+		AssetDenom:     reservation.AssetDenom,
+		OperationState: chaintypes.ReconciliationConfirmed,
 	}
 
 	canceledCtx, cancel := context.WithCancel(context.Background())
@@ -226,7 +233,7 @@ func TestBillingMsgServer_FinalizeSettlementHonorsCanceledContext(t *testing.T) 
 	if !ok {
 		t.Fatalf("expected reservation %s to remain present", reservation.ReservationID)
 	}
-	if storedReservation.Status != chaintypes.ReconciliationPending {
-		t.Fatalf("expected reservation status %q to remain unchanged, got %q", chaintypes.ReconciliationPending, storedReservation.Status)
+	if storedReservation.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected reservation status %q to remain unchanged, got %q", chaintypes.ReconciliationConfirmed, storedReservation.Status)
 	}
 }

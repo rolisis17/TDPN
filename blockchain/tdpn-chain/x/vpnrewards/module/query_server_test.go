@@ -24,6 +24,11 @@ func TestQueryServerNilKeeper(t *testing.T) {
 		t.Fatalf("expected ErrNilKeeper for distribution query, got %v", distributionErr)
 	}
 
+	_, proofErr := server.GetProof(GetProofRequest{ProofPath: "proof-nil"})
+	if !errors.Is(proofErr, ErrNilKeeper) {
+		t.Fatalf("expected ErrNilKeeper for proof query, got %v", proofErr)
+	}
+
 	_, listAccrualsErr := server.ListAccruals(ListAccrualsRequest{})
 	if !errors.Is(listAccrualsErr, ErrNilKeeper) {
 		t.Fatalf("expected ErrNilKeeper for list accruals query, got %v", listAccrualsErr)
@@ -50,6 +55,11 @@ func TestQueryServerNotFound(t *testing.T) {
 	if !errors.Is(distributionErr, ErrDistributionNotFound) {
 		t.Fatalf("expected ErrDistributionNotFound, got %v", distributionErr)
 	}
+
+	_, proofErr := server.GetProof(GetProofRequest{ProofPath: "proof-missing"})
+	if !errors.Is(proofErr, ErrProofNotFound) {
+		t.Fatalf("expected ErrProofNotFound, got %v", proofErr)
+	}
 }
 
 func TestQueryServerFound(t *testing.T) {
@@ -67,6 +77,25 @@ func TestQueryServerFound(t *testing.T) {
 	}
 	k.UpsertAccrual(expectedAccrual)
 	k.UpsertDistribution(expectedDistribution)
+	expectedProof := types.RewardProofRecord{
+		ProofPath:         "traffic-proof/query-found-1",
+		TrafficProofRef:   "obj://traffic-proof/query-found-1",
+		TrustContract:     types.RewardProofTrustContractObjectiveTrafficV1,
+		RewardID:          "reward-query-found-1",
+		ProviderSubjectID: "provider-query-found-1",
+		SessionID:         "session-query-found-1",
+		PayoutStartUnix:   1776643200,
+		PayoutEndUnix:     1777248000,
+		RewardMicros:      42,
+		Currency:          "uusdc",
+		IssuedAtUnix:      1777248001,
+		Verified:          true,
+		VerifierID:        "proof-verifier-query",
+		VerifiedAtUnix:    1777248002,
+	}
+	if err := k.UpsertProofWithError(expectedProof); err != nil {
+		t.Fatalf("UpsertProofWithError: %v", err)
+	}
 
 	server := NewQueryServer(&k)
 
@@ -84,6 +113,14 @@ func TestQueryServerFound(t *testing.T) {
 	}
 	if distributionResp.Distribution.DistributionID != expectedDistribution.DistributionID {
 		t.Fatalf("unexpected distribution id: %q", distributionResp.Distribution.DistributionID)
+	}
+
+	proofResp, proofErr := server.GetProof(GetProofRequest{ProofPath: expectedProof.ProofPath})
+	if proofErr != nil {
+		t.Fatalf("expected proof query success, got %v", proofErr)
+	}
+	if proofResp.Proof.ProofPath != expectedProof.ProofPath {
+		t.Fatalf("unexpected proof path: %q", proofResp.Proof.ProofPath)
 	}
 }
 

@@ -91,8 +91,16 @@ case "$cmd" in
       if [[ "$profile" == "speed-1hop" ]]; then
         echo "2026/03/24 12:00:02 client direct-exit mode engaged entry=entry-local-1 exit=exit-local-1"
       fi
+      middle_segment=""
+      if [[ "$profile" == "private" ]]; then
+        middle_segment=" middle=micro-relay-1 middle_op=op-middle"
+      fi
       echo "2026/03/24 12:00:03 client received wg-session config: key_id=test"
-      echo "2026/03/24 12:00:04 client selected entry=entry-local-1 (http://entry) entry_op=op-entry exit=exit-local-1 (http://exit) exit_op=op-exit path_control=http://entry token_exp=1"
+      echo "2026/03/24 12:00:04 client wireguard runtime ready: interface=wgvpn0 key_id=test"
+      echo "2026/03/24 12:00:05 client selected entry=entry-local-1 (http://entry) entry_op=op-entry${middle_segment} exit=exit-local-1 (http://exit) exit_op=op-exit path_control=http://entry token_exp=1"
+      if [[ "$profile" == "private" && "$count" -eq 2 ]]; then
+        echo "2026/03/24 12:00:06 token proof invalid: deterministic m4 quality penalty"
+      fi
     } >"$client_log"
 
     echo "client selection summary: selections=1 entry_ops=1 exit_ops=1 cross_pairs=1 same_ops=0 missing_ops=0"
@@ -159,14 +167,23 @@ if ! jq -e '
   and .summary.selection_policy.path_profile == "2hop"
   and .decision.recommended_default_profile == "balanced"
   and .summary.m4_micro_relay_evidence.available == true
+  and .summary.m4_micro_relay_evidence.middle_selection_count == 2
   and .summary.m4_micro_relay_evidence.micro_relay_quality.available == true
-  and .summary.m4_micro_relay_evidence.micro_relay_quality.sample_runs == 8
-  and (.summary.m4_micro_relay_evidence.micro_relay_quality.quality_score | type == "number")
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.middle_selection_count == 2
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.sample_runs == 2
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.all_executed_runs == 8
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.score_denominator_runs == 2
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.quality_score == 96
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.signals.token_proof_invalid_failures_total == 1
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.signals.m4_token_proof_invalid_failures_total == 1
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.signals.m4_runs_pass == 1
+  and .summary.m4_micro_relay_evidence.micro_relay_quality.signals.m4_runs_fail == 1
   and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.available == true
-  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.demotion_signal_count == 0
-  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.promotion_signal_count == 7
-  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.demotion_candidate == false
-  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.promotion_candidate == true
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.demotion_signal_count == 1
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.promotion_signal_count == 1
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.demotion_candidate == true
+  and .summary.m4_micro_relay_evidence.adaptive_demotion_promotion.promotion_candidate == false
+  and (.summary.m4_micro_relay_evidence.adaptive_demotion_promotion.reason | contains("demotion signals are present"))
   and .summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.present == false
   and (.summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.reason | type == "string")
   and ([.profiles[] | select(.profile == "speed-1hop")][0].direct_exit_forced_runs == 2)

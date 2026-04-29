@@ -20,6 +20,7 @@ if [[ ! -r "$SCRIPT_UNDER_TEST" ]]; then
   echo "script under test is not readable: $SCRIPT_UNDER_TEST"
   exit 2
 fi
+export GPM_BLOCKCHAIN_LOGIC_CHECK_ALLOW_INCLUDE_COMMAND=1
 
 mkdir -p "$ROOT_DIR/.easy-node-logs"
 TMP_DIR="$(mktemp -d "$ROOT_DIR/.easy-node-logs/integration_gpm_blockchain_logic_check_XXXXXX")"
@@ -124,6 +125,8 @@ done
 declare -a REQUIRED_DEFAULT_IDS=(
   "internal_app_tests"
   "settlement_tests"
+  "chain_rewards_billing_slashing_tests"
+  "chain_bridge_app_tests"
   "integration_blockchain_cosmos_only_guardrail"
 )
 for required_default in "${REQUIRED_DEFAULT_IDS[@]}"; do
@@ -464,6 +467,33 @@ assert_file_contains "$MALFORMED_STDOUT" "--include-command must use <check_id>=
 if [[ -f "$MALFORMED_SUMMARY" ]]; then
   echo "unexpected summary artifact for malformed include-command run"
   cat "$MALFORMED_SUMMARY"
+  exit 1
+fi
+
+echo "[gpm-blockchain-logic-check] CI include-command requires trusted override"
+CI_BLOCKED_REPORTS="$TMP_DIR/reports_ci_blocked_include"
+CI_BLOCKED_SUMMARY="$TMP_DIR/summary_ci_blocked_include.json"
+CI_BLOCKED_STDOUT="$TMP_DIR/ci_blocked_include_stdout.log"
+set +e
+(
+  unset GPM_BLOCKCHAIN_LOGIC_CHECK_ALLOW_INCLUDE_COMMAND
+  CI=true bash "$SCRIPT_UNDER_TEST" \
+    --reports-dir "$CI_BLOCKED_REPORTS" \
+    --summary-json "$CI_BLOCKED_SUMMARY" \
+    --print-summary-json 0 \
+    --include-command "forbidden=true"
+) >"$CI_BLOCKED_STDOUT" 2>&1
+ci_blocked_rc=$?
+set -e
+if [[ "$ci_blocked_rc" -ne 2 ]]; then
+  echo "expected CI blocked include-command run to exit 2, got rc=$ci_blocked_rc"
+  cat "$CI_BLOCKED_STDOUT"
+  exit 1
+fi
+assert_file_contains "$CI_BLOCKED_STDOUT" "--include-command is disabled in CI unless GPM_BLOCKCHAIN_LOGIC_CHECK_ALLOW_INCLUDE_COMMAND=1" "CI blocked include-command error output mismatch"
+if [[ -f "$CI_BLOCKED_SUMMARY" ]]; then
+  echo "unexpected summary artifact for CI blocked include-command run"
+  cat "$CI_BLOCKED_SUMMARY"
   exit 1
 fi
 

@@ -132,7 +132,7 @@ wait_client_cfg() {
   local start
   start="$(date +%s)"
   while true; do
-    if rg -q "client received wg-session config:" "$log"; then
+    if rg -q "client wireguard runtime ready:" "$log"; then
       return 0
     fi
     if (( $(date +%s) - start >= timeout_sec )); then

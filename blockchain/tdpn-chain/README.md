@@ -118,7 +118,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 - Phase-1 app wiring exposes module msg servers:
   - `ChainScaffold.BillingMsgServer()` (`CreateReservation`, `FinalizeSettlement`)
   - `ChainScaffold.RewardsMsgServer()` (`CreateAccrual`, `RecordDistribution`)
-  - `ChainScaffold.SlashingMsgServer()` (`SubmitEvidence`, `ApplyPenalty`)
+  - `ChainScaffold.SlashingMsgServer()` (`SubmitEvidence`, `ConfirmEvidence`, `ApplyPenalty`)
   - `ChainScaffold.SponsorMsgServer()` (`CreateAuthorization`, `DelegateCredit`)
 - Runtime scaffold/module ordering now also includes `vpnvalidator` and `vpngovernance`, with state-dir files `vpnvalidator.json` and `vpngovernance.json`.
 - gRPC runtime registration now includes module namespaces `tdpn.vpnvalidator.v1.{Msg,Query}` and `tdpn.vpngovernance.v1.{Msg,Query}`.
@@ -183,7 +183,7 @@ This workspace defines the initial module boundaries for TDPN's VPN-compatible b
 ## Phase-1 stateful milestones
 - `vpnbilling`: `CreateReservation` and `FinalizeSettlement` execute as stateful operations over keeper storage.
 - `vpnrewards`: `CreateAccrual` and `RecordDistribution` execute as stateful operations with accrual-confirmation advancement.
-- `vpnslashing`: `SubmitEvidence` and `ApplyPenalty` execute as stateful operations with evidence-confirmation advancement.
+- `vpnslashing`: `SubmitEvidence`, `ConfirmEvidence`, and `ApplyPenalty` execute as stateful operations with evidence-confirmation advancement exposed through generated Msg gRPC.
 - `vpnsponsor`: `CreateAuthorization` and `DelegateCredit` (proto msg surface: `DelegateSessionCredit`) execute as stateful operations with authorization checks.
 - Replay safety is idempotent by operation key for each module; identical replays are accepted while conflicting duplicate payloads are rejected.
 - Storage posture: in-memory default for lightweight/local runs, optional file-backed state-dir stores for persistence, and a keeper KV-adapter seam for Cosmos SDK KV integration.

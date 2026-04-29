@@ -16,6 +16,10 @@ Purpose:
     3) easy-mode simple prompt budget contract
     4) config-v1 contract
     5) local control API contract
+    6) public/admin split contract
+    7) desktop admin-console contract
+    8) desktop release guardrails contract
+    9) desktop admin-console release guardrails contract
 
 Notes:
   - fail-fast by default
@@ -30,6 +34,10 @@ Notes:
       CI_PHASE0_PROMPT_BUDGET_SCRIPT
       CI_PHASE0_CONFIG_V1_SCRIPT
       CI_PHASE0_LOCAL_CONTROL_API_SCRIPT
+      CI_PHASE0_PUBLIC_ADMIN_SPLIT_SCRIPT
+      CI_PHASE0_DESKTOP_ADMIN_CONSOLE_SCRIPT
+      CI_PHASE0_DESKTOP_RELEASE_GUARDRAILS_SCRIPT
+      CI_PHASE0_DESKTOP_ADMIN_CONSOLE_RELEASE_GUARDRAILS_SCRIPT
       CI_PHASE0_SUMMARY_JSON
 USAGE
 }
@@ -109,14 +117,24 @@ launcher_runtime_script="${CI_PHASE0_LAUNCHER_RUNTIME_SCRIPT:-$ROOT_DIR/scripts/
 prompt_budget_script="${CI_PHASE0_PROMPT_BUDGET_SCRIPT:-$ROOT_DIR/scripts/integration_easy_mode_simple_prompt_budget.sh}"
 config_v1_script="${CI_PHASE0_CONFIG_V1_SCRIPT:-$ROOT_DIR/scripts/integration_easy_node_config_v1.sh}"
 local_control_api_script="${CI_PHASE0_LOCAL_CONTROL_API_SCRIPT:-$ROOT_DIR/scripts/integration_local_control_api_contract.sh}"
+public_admin_split_script="${CI_PHASE0_PUBLIC_ADMIN_SPLIT_SCRIPT:-$ROOT_DIR/scripts/integration_web_portal_contract.sh}"
+desktop_admin_console_script="${CI_PHASE0_DESKTOP_ADMIN_CONSOLE_SCRIPT:-$ROOT_DIR/scripts/integration_desktop_admin_console_contract.sh}"
+desktop_release_guardrails_script="${CI_PHASE0_DESKTOP_RELEASE_GUARDRAILS_SCRIPT:-$ROOT_DIR/scripts/integration_desktop_release_bundle_guardrails.sh}"
+desktop_admin_console_release_guardrails_script="${CI_PHASE0_DESKTOP_ADMIN_CONSOLE_RELEASE_GUARDRAILS_SCRIPT:-$ROOT_DIR/scripts/integration_desktop_admin_console_release_bundle_guardrails.sh}"
+admin_settlement_contract_script="${CI_PHASE0_GPM_ADMIN_SETTLEMENT_CONTRACT_SCRIPT:-$ROOT_DIR/scripts/integration_gpm_admin_settlement_contract.sh}"
 
-step_ids=("launcher_wiring" "launcher_runtime" "prompt_budget" "config_v1" "local_control_api")
+step_ids=("launcher_wiring" "launcher_runtime" "prompt_budget" "config_v1" "local_control_api" "public_admin_split" "desktop_admin_console" "desktop_release_guardrails" "desktop_admin_console_release_guardrails" "gpm_admin_settlement_contract")
 step_labels=(
   "easy-mode launcher wiring integration"
   "easy-mode launcher runtime integration"
   "easy-mode simple prompt budget integration"
   "easy-node config-v1 defaults contract integration"
   "local control API contract integration"
+  "public/admin split contract integration"
+  "desktop admin-console contract integration"
+  "desktop release guardrails integration"
+  "desktop admin-console release guardrails integration"
+  "GPM admin settlement contract integration"
 )
 step_scripts=(
   "$launcher_wiring_script"
@@ -124,9 +142,14 @@ step_scripts=(
   "$prompt_budget_script"
   "$config_v1_script"
   "$local_control_api_script"
+  "$public_admin_split_script"
+  "$desktop_admin_console_script"
+  "$desktop_release_guardrails_script"
+  "$desktop_admin_console_release_guardrails_script"
+  "$admin_settlement_contract_script"
 )
-step_statuses=("pending" "pending" "pending" "pending" "pending")
-step_rcs=("null" "null" "null" "null" "null")
+step_statuses=("pending" "pending" "pending" "pending" "pending" "pending" "pending" "pending" "pending" "pending")
+step_rcs=("null" "null" "null" "null" "null" "null" "null" "null" "null" "null")
 
 set_step_result() {
   local idx="$1"
@@ -306,11 +329,9 @@ if [[ "$dry_run" == "1" ]]; then
   echo "[ci-phase0] dry-run=1"
 fi
 
-run_step 0
-run_step 1
-run_step 2
-run_step 3
-run_step 4
+for (( i=0; i<${#step_ids[@]}; i++ )); do
+  run_step "$i"
+done
 
 if [[ "$dry_run" == "1" ]]; then
   echo "[ci-phase0] dry-run complete"

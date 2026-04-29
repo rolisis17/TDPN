@@ -91,6 +91,27 @@ gpm_vpn_logic_check_load_default_checks() {
     "go_test" \
     "./pkg/relay" \
     "^TestLooksLike"
+
+  append_default_check \
+    "vpn_direct_exit_fallback_contract" \
+    "vpn_direct_exit_fallback_contract" \
+    "go_test" \
+    "./internal/app" \
+    "^Test(BootstrapDirectExitFallback|ValidateRuntimeConfig.*DirectExit|ShouldRetryDirectExitFallback|DirectExitStickyPreference|RankRelayPairsDirectExit)"
+
+  append_default_check \
+    "vpn_entry_middle_route_contract" \
+    "vpn_entry_middle_route_contract" \
+    "go_test" \
+    "./services/entry" \
+    "^Test(ResolveExitRouteFallback|HandlePathOpen.*MiddleRelay|HandlePathOpen.*TransportDowngrade|ValidateClientRouteAssertion|EntryRouteAssertion|ValidateRuntimeConfig.*RequireMiddle)"
+
+  append_default_check \
+    "vpn_exit_route_assertion_contract" \
+    "vpn_exit_route_assertion_contract" \
+    "go_test" \
+    "./services/exit" \
+    "^Test(ValidatePathRouteAssertions|ValidatePathOpenReservation|HandlePathClose|SessionCapacity|ValidateRuntimeConfig)"
 }
 
 gpm_vpn_logic_check_print_default_checks() {

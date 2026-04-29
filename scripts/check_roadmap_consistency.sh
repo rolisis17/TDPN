@@ -280,8 +280,8 @@ check_phase7_mainnet_activation_gate_doc_surface() {
     echo "$label must scope mainnet_activation_gate_go to phase7 check/run/handoff-check/handoff-run contexts"
     exit 1
   fi
-  if ! rg -Fq "optional by default" "$file_path"; then
-    echo "$label must document that mainnet_activation_gate_go enforcement is optional by default"
+  if ! rg -Fq "required by default" "$file_path"; then
+    echo "$label must document that mainnet_activation_gate_go enforcement is required by default"
     exit 1
   fi
 }
@@ -298,8 +298,8 @@ check_phase7_bootstrap_governance_gate_doc_surface() {
     echo "$label must scope bootstrap_governance_graduation_gate_go to phase7 check/run/handoff-check/handoff-run contexts"
     exit 1
   fi
-  if ! rg -Fq "optional by default" "$file_path"; then
-    echo "$label must document that bootstrap_governance_graduation_gate_go enforcement is optional by default"
+  if ! rg -Fq "required by default" "$file_path"; then
+    echo "$label must document that bootstrap_governance_graduation_gate_go enforcement is required by default"
     exit 1
   fi
   if ! rg -Fq -- "--require-bootstrap-governance-graduation-gate-go" "$file_path"; then

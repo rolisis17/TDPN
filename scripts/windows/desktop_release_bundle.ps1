@@ -1,3 +1,4 @@
+[CmdletBinding(PositionalBinding = $false)]
 param(
   [ValidateSet("stable", "beta", "canary")]
   [string]$Channel = "stable",
@@ -22,12 +23,12 @@ function Show-Usage {
   Write-Host "GPM desktop release bundle scaffold (non-production signing flow)"
   Write-Host ""
   Write-Host "Usage:"
-  Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 [-Help] [-Channel stable|beta|canary] [-UpdateFeedUrl URL] [-SummaryJson PATH] [-PrintSummaryJson 0|1] [-SigningIdentity ID] [-SigningCertPath PATH] [-SigningCertPassword VALUE] [-InstallMissing] [-SkipBuild] [-- <tauri args>]"
+  Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 [-Help] [-Channel stable|beta|canary] [-UpdateFeedUrl URL] [-SummaryJson PATH] [-PrintSummaryJson 0|1] [-SigningIdentity ID] [-SigningCertPath PATH] [-SigningCertPassword VALUE] [-InstallMissing] [-SkipBuild] [-TauriArgs <args[]>]"
   Write-Host ""
   Write-Host "Examples:"
   Write-Host "  ./scripts/windows/desktop_release_bundle.ps1"
   Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 -Channel beta -UpdateFeedUrl https://updates.example.invalid/gpm/beta.json"
-  Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 -Channel canary -- --bundles nsis"
+  Write-Host "  ./scripts/windows/desktop_release_bundle.ps1 -Channel canary -TauriArgs '--bundles','nsis'"
   Write-Host ""
   Write-Host "Notes:"
   Write-Host "  - This is scaffold-only and does not implement production signing/secret handling."
@@ -93,6 +94,103 @@ function Validate-UpdateFeedUrl {
   if (-not $isLocalHost -and $parsed.Scheme -ne "https") {
     throw "invalid -UpdateFeedUrl '$CandidateUrl' (non-local update feeds must use https)"
   }
+}
+
+function Assert-PublicTauriArgs {
+  param(
+    [string[]]$CandidateArgs
+  )
+
+  $expectFeaturesValue = $false
+  $expectConfigValue = $false
+  foreach ($argRaw in $CandidateArgs) {
+    $arg = "$argRaw".Trim()
+    if ([string]::IsNullOrWhiteSpace($arg)) {
+      if ($expectConfigValue -or $expectFeaturesValue) {
+        throw "public desktop release bundle refuses empty --features/--config value"
+      }
+      continue
+    }
+    if ($arg -eq "--") {
+      continue
+    }
+    $normalized = $arg.ToLowerInvariant()
+    if ($expectConfigValue) {
+      if ($normalized.StartsWith("--")) {
+        throw "public desktop release bundle refuses missing or flag-like --config value"
+      }
+      if ($normalized.Contains("tauri.admin-console.conf.json") -or $normalized.Contains("admin-console")) {
+        throw "public desktop release bundle refuses Admin Console Tauri config; use the separate Admin Console build command instead"
+      }
+      $expectConfigValue = $false
+      continue
+    }
+    if ($expectFeaturesValue) {
+      if ($normalized.StartsWith("--")) {
+        throw "public desktop release bundle refuses missing or flag-like --features value"
+      }
+      if ($normalized -match "(^|,|\s)admin-console($|,|\s)") {
+        throw "public desktop release bundle refuses admin-console feature flags; use the separate Admin Console build command instead"
+      }
+      $expectFeaturesValue = $false
+      continue
+    }
+    if ($normalized -eq "--all-features") {
+      throw "public desktop release bundle refuses --all-features because it can include admin-console; use the separate Admin Console build command instead"
+    }
+    if ($normalized -eq "--features") {
+      $expectFeaturesValue = $true
+      continue
+    }
+    if ($normalized.StartsWith("--features=")) {
+      if ($normalized -eq "--features=") {
+        throw "public desktop release bundle refuses empty --features value"
+      }
+      if ($normalized.Contains("admin-console")) {
+        throw "public desktop release bundle refuses admin-console feature flags; use the separate Admin Console build command instead"
+      }
+    }
+    if ($normalized -eq "--config") {
+      $expectConfigValue = $true
+      continue
+    }
+    if ($normalized.StartsWith("--config=")) {
+      if ($normalized -eq "--config=") {
+        throw "public desktop release bundle refuses empty --config value"
+      }
+      if ($normalized.Contains("tauri.admin-console.conf.json") -or $normalized.Contains("admin-console")) {
+        throw "public desktop release bundle refuses Admin Console Tauri config; use the separate Admin Console build command instead"
+      }
+    }
+    if ($normalized.Contains("tauri.admin-console.conf.json") -or $normalized.Contains("admin-console")) {
+      throw "public desktop release bundle refuses Admin Console Tauri config; use the separate Admin Console build command instead"
+    }
+  }
+  if ($expectConfigValue) {
+    throw "public desktop release bundle refuses missing --config value"
+  }
+  if ($expectFeaturesValue) {
+    throw "public desktop release bundle refuses missing --features value"
+  }
+}
+
+function Test-AdminConsoleArtifactPath {
+  param(
+    [AllowEmptyString()]
+    [string]$Value
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return $false
+  }
+
+  $normalized = $Value.ToLowerInvariant()
+  $tokenized = ($normalized -replace '[\s_]+', '-')
+  return (
+    $tokenized.Contains("admin-console") -or
+    $tokenized.Contains("gpm-admin") -or
+    $normalized.Contains("tauri.admin-console.conf.json")
+  )
 }
 
 function Validate-SigningPlaceholders {
@@ -646,7 +744,8 @@ function Get-ArtifactKind {
 
 function Get-BundleArtifacts {
   param(
-    [string]$BundleRoot
+    [string]$BundleRoot,
+    [Nullable[DateTime]]$NewerThanUtc = $null
   )
 
   $records = @()
@@ -656,6 +755,9 @@ function Get-BundleArtifacts {
 
   $files = @(Get-ChildItem -LiteralPath $BundleRoot -File -Recurse | Sort-Object -Property FullName)
   foreach ($file in $files) {
+    if ($null -ne $NewerThanUtc -and $file.LastWriteTimeUtc -le $NewerThanUtc.Value) {
+      continue
+    }
     $extension = ""
     if (-not [string]::IsNullOrWhiteSpace($file.Extension)) {
       $extension = $file.Extension.ToLowerInvariant()
@@ -674,6 +776,25 @@ function Get-BundleArtifacts {
   }
 
   return @($records)
+}
+
+function Assert-NoPublicAdminBundleArtifacts {
+  param(
+    [object[]]$Artifacts
+  )
+
+  $adminArtifacts = @()
+  foreach ($artifact in $Artifacts) {
+    $path = [string]$artifact.path
+    $name = [string]$artifact.name
+    $combined = ($path + " " + $name).ToLowerInvariant()
+    if (Test-AdminConsoleArtifactPath -Value $combined) {
+      $adminArtifacts += $path
+    }
+  }
+  if ($adminArtifacts.Count -gt 0) {
+    throw ("public desktop release bundle refuses Admin Console artifacts in shared bundle output; clean the bundle directory or use the separate Admin Console release bundle: {0}" -f ($adminArtifacts -join ", "))
+  }
 }
 
 function Get-ArtifactsByKind {
@@ -701,11 +822,23 @@ function Write-ReleaseBundleSummary {
     [bool]$SkipBuild,
     [bool]$InstallMissingRequested,
     [string]$BundleRoot,
-    [bool]$PrintPayload
+    [bool]$PrintPayload,
+    [Nullable[DateTime]]$BuildStartedAtUtc = $null
   )
 
-  $artifacts = Get-BundleArtifacts -BundleRoot $BundleRoot
+  $allArtifacts = @(Get-BundleArtifacts -BundleRoot $BundleRoot)
+  Assert-NoPublicAdminBundleArtifacts -Artifacts $allArtifacts
+  $artifacts = @(Get-BundleArtifacts -BundleRoot $BundleRoot -NewerThanUtc $BuildStartedAtUtc)
   $artifactsByKind = Get-ArtifactsByKind -Artifacts $artifacts
+  $artifactValidationStatus = "unsigned_scaffold_artifacts"
+  $releaseReady = $false
+  if ($artifacts.Count -eq 0) {
+    if ($SkipBuild) {
+      $artifactValidationStatus = "skipped_no_artifacts"
+    } else {
+      $artifactValidationStatus = "missing"
+    }
+  }
 
   $summary = [ordered]@{
     version = 1
@@ -719,6 +852,9 @@ function Write-ReleaseBundleSummary {
     skip_build = $SkipBuild
     install_missing_requested = $InstallMissingRequested
     bundle_root = $BundleRoot
+    artifact_count = $artifacts.Count
+    artifact_validation_status = $artifactValidationStatus
+    release_ready = $releaseReady
     artifacts = $artifacts
     artifacts_by_kind = $artifactsByKind
     artifact_hint = $BundleRoot
@@ -764,6 +900,7 @@ if ($TauriArgs.Count -gt 0 -and $TauriArgs[0] -eq "--") {
     $TauriArgs = @()
   }
 }
+Assert-PublicTauriArgs -CandidateArgs $TauriArgs
 
 $UpdateFeedUrl = Resolve-UpdateFeedUrl -ParameterValue $UpdateFeedUrl
 Validate-UpdateFeedUrl -CandidateUrl $UpdateFeedUrl
@@ -794,18 +931,26 @@ $scopedEnvNames = @(
   "GPM_DESKTOP_SIGNING_IDENTITY",
   "GPM_DESKTOP_SIGNING_CERT_PATH",
   "GPM_DESKTOP_SIGNING_CERT_PASSWORD",
+  "GPM_DESKTOP_ADMIN_CONSOLE",
+  "GPM_DESKTOP_BUILD_ADMIN_CONSOLE",
+  "VITE_GPM_ADMIN_CONSOLE",
   "TDPN_DESKTOP_UPDATE_CHANNEL",
   "TDPN_DESKTOP_UPDATE_FEED_URL",
   "TDPN_DESKTOP_UPDATE_FEED_CONFIGURED",
   "TDPN_DESKTOP_SIGNING_IDENTITY",
   "TDPN_DESKTOP_SIGNING_CERT_PATH",
-  "TDPN_DESKTOP_SIGNING_CERT_PASSWORD"
+  "TDPN_DESKTOP_SIGNING_CERT_PASSWORD",
+  "TDPN_DESKTOP_ADMIN_CONSOLE"
 )
 $scopedEnvSnapshot = Save-ScopedEnvironment -VariableNames $scopedEnvNames
 
 try {
   $env:GPM_DESKTOP_UPDATE_CHANNEL = $Channel
   $env:TDPN_DESKTOP_UPDATE_CHANNEL = $env:GPM_DESKTOP_UPDATE_CHANNEL
+  $env:GPM_DESKTOP_ADMIN_CONSOLE = "0"
+  $env:GPM_DESKTOP_BUILD_ADMIN_CONSOLE = "0"
+  $env:TDPN_DESKTOP_ADMIN_CONSOLE = "0"
+  $env:VITE_GPM_ADMIN_CONSOLE = "0"
   if ([string]::IsNullOrWhiteSpace($UpdateFeedUrl)) {
     Remove-Item Env:GPM_DESKTOP_UPDATE_FEED_URL -ErrorAction SilentlyContinue
     Remove-Item Env:TDPN_DESKTOP_UPDATE_FEED_URL -ErrorAction SilentlyContinue
@@ -873,6 +1018,8 @@ try {
 
   Ensure-TauriIconScaffold -DesktopDir $desktopDir
 
+  $bundleBuildStartedAtUtc = (Get-Date).ToUniversalTime()
+
   Push-Location $desktopDir
   try {
     $npmArgs = @("run", "tauri", "--", "build")
@@ -893,11 +1040,18 @@ try {
     Pop-Location
   }
 
+  $allArtifacts = @(Get-BundleArtifacts -BundleRoot $bundleRoot)
+  Assert-NoPublicAdminBundleArtifacts -Artifacts $allArtifacts
+  $builtArtifacts = @(Get-BundleArtifacts -BundleRoot $bundleRoot -NewerThanUtc $bundleBuildStartedAtUtc)
+  if ($builtArtifacts.Count -eq 0) {
+    throw "desktop release bundle build produced no artifacts under $bundleRoot"
+  }
+
   $bundleHint = $bundleRoot
   Write-Host "[desktop-release-bundle] status=ok"
   Write-Host "[desktop-release-bundle] artifact_hint=$bundleHint"
   Write-Host "[desktop-release-bundle] note=this is scaffold-only and not a production signing/release pipeline"
-  Write-ReleaseBundleSummary -SummaryPath $summaryJsonPath -Channel $env:GPM_DESKTOP_UPDATE_CHANNEL -UpdateFeedUrl $env:GPM_DESKTOP_UPDATE_FEED_URL -SkipBuild $false -InstallMissingRequested $installMissingRequested -BundleRoot $bundleRoot -PrintPayload $printSummaryJsonPayload
+  Write-ReleaseBundleSummary -SummaryPath $summaryJsonPath -Channel $env:GPM_DESKTOP_UPDATE_CHANNEL -UpdateFeedUrl $env:GPM_DESKTOP_UPDATE_FEED_URL -SkipBuild $false -InstallMissingRequested $installMissingRequested -BundleRoot $bundleRoot -PrintPayload $printSummaryJsonPayload -BuildStartedAtUtc $bundleBuildStartedAtUtc
 } finally {
   Restore-ScopedEnvironment -Snapshot $scopedEnvSnapshot
 }

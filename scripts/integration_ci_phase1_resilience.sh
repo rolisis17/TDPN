@@ -29,6 +29,7 @@ FAIL_LOG="$TMP_DIR/fail.log"
 POLICY_NO_GO_FAIL_CLOSED_LOG="$TMP_DIR/policy_no_go_fail_closed.log"
 POLICY_NO_GO_ALLOWED_LOG="$TMP_DIR/policy_no_go_allowed.log"
 THREE_HOP_ONLY_LOG="$TMP_DIR/three_hop_only.log"
+DEFAULT_THREE_HOP_SCRIPT_LOG="$TMP_DIR/default_three_hop_script.log"
 
 DRY_RUN_REPORTS_DIR="$TMP_DIR/reports_dry_run"
 RESUME_REPORTS_DIR="$TMP_DIR/reports_resume"
@@ -38,6 +39,7 @@ FAIL_REPORTS_DIR="$TMP_DIR/reports_fail"
 POLICY_NO_GO_FAIL_CLOSED_REPORTS_DIR="$TMP_DIR/reports_policy_no_go_fail_closed"
 POLICY_NO_GO_ALLOWED_REPORTS_DIR="$TMP_DIR/reports_policy_no_go_allowed"
 THREE_HOP_ONLY_REPORTS_DIR="$TMP_DIR/reports_three_hop_only"
+DEFAULT_THREE_HOP_SCRIPT_REPORTS_DIR="$TMP_DIR/reports_default_three_hop_script"
 DRY_RUN_SUMMARY_JSON="$TMP_DIR/summary_dry_run.json"
 RESUME_SUMMARY_JSON="$TMP_DIR/summary_resume.json"
 RESUME_FALLBACK_SUMMARY_JSON="$TMP_DIR/summary_resume_fallback.json"
@@ -46,6 +48,7 @@ FAIL_SUMMARY_JSON="$TMP_DIR/summary_fail.json"
 POLICY_NO_GO_FAIL_CLOSED_SUMMARY_JSON="$TMP_DIR/summary_policy_no_go_fail_closed.json"
 POLICY_NO_GO_ALLOWED_SUMMARY_JSON="$TMP_DIR/summary_policy_no_go_allowed.json"
 THREE_HOP_ONLY_SUMMARY_JSON="$TMP_DIR/summary_three_hop_only.json"
+DEFAULT_THREE_HOP_SCRIPT_SUMMARY_JSON="$TMP_DIR/summary_default_three_hop_script.json"
 TIMEOUT_CHILD_PID_FILE="$TMP_DIR/timeout_child.pid"
 
 STAGE_ENV_NAMES=(
@@ -83,6 +86,7 @@ DEFAULT_ENABLED_NON_DRY_STAGE_IDS=(
   "vpn_rc_matrix_path"
   "vpn_rc_resilience_path"
   "session_churn_guard"
+  "three_hop_runtime_integration"
 )
 
 FAKE_STAGE_HELPER="$TMP_DIR/fake_stage_helper.sh"
@@ -404,10 +408,11 @@ if ! jq -e '
   and .steps.session_churn_guard.enabled == true
   and .steps.session_churn_guard.status == "skip"
   and .steps.session_churn_guard.rc == 0
-  and .inputs.run_3hop_runtime_integration == false
-  and .steps.three_hop_runtime_integration.enabled == false
+  and .inputs.run_3hop_runtime_integration == true
+  and .steps.three_hop_runtime_integration.enabled == true
   and .steps.three_hop_runtime_integration.status == "skip"
   and .steps.three_hop_runtime_integration.rc == 0
+  and .steps.three_hop_runtime_integration.reason == "dry-run-not-supported"
 ' "$DRY_RUN_SUMMARY_JSON" >/dev/null; then
   echo "dry-run summary missing expected contract fields"
   cat "$DRY_RUN_SUMMARY_JSON"
@@ -419,14 +424,57 @@ if ! grep -q '\[ci-phase1-resilience\] step=session_churn_guard status=skip reas
   cat "$DRY_RUN_LOG"
   exit 1
 fi
-if ! grep -q '\[ci-phase1-resilience\] step=three_hop_runtime_integration status=skip reason=disabled' "$DRY_RUN_LOG"; then
-  echo "dry-run log missing disabled 3hop runtime signal"
+if ! grep -q '\[ci-phase1-resilience\] step=three_hop_runtime_integration status=skip reason=dry-run-not-supported' "$DRY_RUN_LOG"; then
+  echo "dry-run log missing dry-run 3hop runtime signal"
   cat "$DRY_RUN_LOG"
   exit 1
 fi
 if ! grep -q '\[ci-phase1-resilience\] status=pass rc=0 dry_run=1' "$DRY_RUN_LOG"; then
   echo "dry-run log missing final pass status line"
   cat "$DRY_RUN_LOG"
+  exit 1
+fi
+
+echo "[ci-phase1-resilience] default 3hop runtime script wiring"
+: >"$CAPTURE"
+env -u CI_PHASE1_RESILIENCE_THREE_HOP_RUNTIME_INTEGRATION_SCRIPT \
+  CI_PHASE1_RESILIENCE_CAPTURE_FILE="$CAPTURE" \
+  bash "$GATE_SCRIPT" \
+    --dry-run 1 \
+    --reports-dir "$DEFAULT_THREE_HOP_SCRIPT_REPORTS_DIR" \
+    --summary-json "$DEFAULT_THREE_HOP_SCRIPT_SUMMARY_JSON" \
+    --print-summary-json 0 \
+    --run-three-machine-docker-profile-matrix 0 \
+    --run-profile-compare-docker-matrix 0 \
+    --run-three-machine-docker-profile-matrix-record 0 \
+    --run-vpn-rc-matrix-path 0 \
+    --run-vpn-rc-resilience-path 0 \
+    --run-session-churn-guard 0 >"$DEFAULT_THREE_HOP_SCRIPT_LOG" 2>&1
+
+if [[ -s "$CAPTURE" ]]; then
+  echo "default 3hop dry-run contract should not invoke runtime stage"
+  cat "$CAPTURE"
+  cat "$DEFAULT_THREE_HOP_SCRIPT_LOG"
+  exit 1
+fi
+if [[ ! -f "$DEFAULT_THREE_HOP_SCRIPT_SUMMARY_JSON" ]]; then
+  echo "missing default 3hop script summary json: $DEFAULT_THREE_HOP_SCRIPT_SUMMARY_JSON"
+  cat "$DEFAULT_THREE_HOP_SCRIPT_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.dry_run == true
+  and .inputs.run_3hop_runtime_integration == true
+  and .steps.three_hop_runtime_integration.enabled == true
+  and .steps.three_hop_runtime_integration.status == "skip"
+  and .steps.three_hop_runtime_integration.reason == "dry-run-not-supported"
+  and ((.steps.three_hop_runtime_integration.command // "") | contains("/scripts/integration_client_3hop_runtime.sh"))
+  and (((.steps.three_hop_runtime_integration.command // "") | contains("integration_live_wg_full_path_strict.sh")) | not)
+' "$DEFAULT_THREE_HOP_SCRIPT_SUMMARY_JSON" >/dev/null; then
+  echo "default 3hop script summary missing dedicated runtime script contract"
+  cat "$DEFAULT_THREE_HOP_SCRIPT_SUMMARY_JSON"
   exit 1
 fi
 
@@ -679,13 +727,6 @@ if ! grep -q '^session_churn_guard' "$CAPTURE"; then
   cat "$FAIL_LOG"
   exit 1
 fi
-if grep -q '^three_hop_runtime_integration' "$CAPTURE"; then
-  echo "three_hop_runtime_integration should be disabled by default"
-  cat "$CAPTURE"
-  cat "$FAIL_LOG"
-  exit 1
-fi
-
 if [[ ! -f "$FAIL_SUMMARY_JSON" ]]; then
   echo "missing fail summary json: $FAIL_SUMMARY_JSON"
   cat "$FAIL_LOG"
@@ -709,9 +750,9 @@ if ! jq -e '
   and .steps.session_churn_guard.enabled == true
   and .steps.session_churn_guard.status == "pass"
   and .steps.session_churn_guard.rc == 0
-  and .inputs.run_3hop_runtime_integration == false
-  and .steps.three_hop_runtime_integration.enabled == false
-  and .steps.three_hop_runtime_integration.status == "skip"
+  and .inputs.run_3hop_runtime_integration == true
+  and .steps.three_hop_runtime_integration.enabled == true
+  and .steps.three_hop_runtime_integration.status == "pass"
   and .steps.three_hop_runtime_integration.rc == 0
 ' "$FAIL_SUMMARY_JSON" >/dev/null; then
   echo "fail summary missing expected contract fields"

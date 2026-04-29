@@ -14,10 +14,8 @@ GRPC_PREVIEW_HELPER_FILE=""
 CHAIN_TMP_DIR=""
 TDPND_PID=""
 
-write_bearer_curl_config() {
+validate_bearer_token_literal() {
   local token="$1"
-  local old_umask
-  local cfg_file
   if [[ -z "$token" ]]; then
     echo "refusing empty bearer token for curl auth config" >&2
     return 1
@@ -34,11 +32,39 @@ write_bearer_curl_config() {
     echo "refusing bearer token with unsafe quote/backslash characters for curl auth config" >&2
     return 1
   fi
+}
+
+write_bearer_curl_config() {
+  local token="$1"
+  local old_umask
+  local cfg_file
+  validate_bearer_token_literal "$token"
   old_umask="$(umask)"
   umask 077
   cfg_file="$(mktemp -t tdpnd-settlement-bridge-auth.XXXXXX.cfg)"
   umask "$old_umask"
   printf 'header = "Authorization: Bearer %s"\n' "$token" >"${cfg_file}"
+  printf '%s\n' "${cfg_file}"
+}
+
+write_scoped_bearer_curl_config() {
+  local token="$1"
+  local scoped_header="$2"
+  local scoped_token="$3"
+  local old_umask
+  local cfg_file
+  validate_bearer_token_literal "$token"
+  validate_bearer_token_literal "$scoped_token"
+  if ! [[ "$scoped_header" =~ ^[A-Za-z0-9-]+$ ]]; then
+    echo "refusing unsafe scoped bearer header name" >&2
+    return 1
+  fi
+  old_umask="$(umask)"
+  umask 077
+  cfg_file="$(mktemp -t tdpnd-settlement-bridge-auth.XXXXXX.cfg)"
+  umask "$old_umask"
+  printf 'header = "Authorization: Bearer %s"\n' "$token" >"${cfg_file}"
+  printf 'header = "%s: Bearer %s"\n' "$scoped_header" "$scoped_token" >>"${cfg_file}"
   printf '%s\n' "${cfg_file}"
 }
 
@@ -48,6 +74,23 @@ curl_with_bearer_config() {
   local cfg_file
   local rc
   cfg_file="$(write_bearer_curl_config "$token")"
+  if curl --config "${cfg_file}" "$@"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  rm -f "${cfg_file}"
+  return "${rc}"
+}
+
+curl_with_scoped_bearer_config() {
+  local token="$1"
+  local scoped_header="$2"
+  local scoped_token="$3"
+  shift 3
+  local cfg_file
+  local rc
+  cfg_file="$(write_scoped_bearer_curl_config "$token" "$scoped_header" "$scoped_token")"
   if curl --config "${cfg_file}" "$@"; then
     rc=0
   else
@@ -157,7 +200,7 @@ start_runtime_with_retry() {
     : > "${LOG_FILE}"
     (
       cd blockchain/tdpn-chain
-      go run ./cmd/tdpnd --grpc-listen "127.0.0.1:${GRPC_PORT}" --grpc-auth-token "${TOKEN}" --settlement-http-listen "127.0.0.1:${PORT}" --settlement-http-auth-token "${TOKEN}"
+      go run ./cmd/tdpnd --grpc-listen "127.0.0.1:${GRPC_PORT}" --grpc-auth-token "${TOKEN}" --settlement-http-listen "127.0.0.1:${PORT}" --settlement-http-auth-token "${TOKEN}" --settlement-http-reward-proof-auth-token "${REWARD_PROOF_TOKEN}" --settlement-http-finality-auth-token "${FINALITY_TOKEN}" --settlement-http-reward-proof-verifier-id "bridge-live-smoke"
     ) >"${LOG_FILE}" 2>&1 &
     TDPND_PID=$!
     BASE_URL="http://127.0.0.1:${PORT}"
@@ -202,8 +245,12 @@ post_expect_status() {
   local payload="$2"
   local expected="$3"
   local token="${4:-}"
+  local scoped_header="${5:-}"
+  local scoped_token="${6:-}"
   local code
-  if [[ -n "${token}" ]]; then
+  if [[ -n "${token}" && -n "${scoped_header}" && -n "${scoped_token}" ]]; then
+    code="$(curl_with_scoped_bearer_config "${token}" "${scoped_header}" "${scoped_token}" -sS -m 4 -o "${RESP_FILE}" -w "%{http_code}" -H "Content-Type: application/json" -d "${payload}" "${url}" || true)"
+  elif [[ -n "${token}" ]]; then
     code="$(curl_with_bearer_config "${token}" -sS -m 4 -o "${RESP_FILE}" -w "%{http_code}" -H "Content-Type: application/json" -d "${payload}" "${url}" || true)"
   else
     code="$(curl -sS -m 4 -o "${RESP_FILE}" -w "%{http_code}" -H "Content-Type: application/json" -d "${payload}" "${url}" || true)"
@@ -219,10 +266,36 @@ post_expect_status() {
   fi
 }
 
+patch_expect_status() {
+  local url="$1"
+  local payload="$2"
+  local expected="$3"
+  local token="${4:-}"
+  local scoped_header="${5:-}"
+  local scoped_token="${6:-}"
+  local code
+  if [[ -n "${token}" && -n "${scoped_header}" && -n "${scoped_token}" ]]; then
+    code="$(curl_with_scoped_bearer_config "${token}" "${scoped_header}" "${scoped_token}" -sS -m 4 -o "${RESP_FILE}" -w "%{http_code}" -X PATCH -H "Content-Type: application/json" -d "${payload}" "${url}" || true)"
+  elif [[ -n "${token}" ]]; then
+    code="$(curl_with_bearer_config "${token}" -sS -m 4 -o "${RESP_FILE}" -w "%{http_code}" -X PATCH -H "Content-Type: application/json" -d "${payload}" "${url}" || true)"
+  else
+    code="$(curl -sS -m 4 -o "${RESP_FILE}" -w "%{http_code}" -X PATCH -H "Content-Type: application/json" -d "${payload}" "${url}" || true)"
+  fi
+  if [[ "${code}" != "${expected}" ]]; then
+    echo "unexpected status for ${url}: expected ${expected}, got ${code}"
+    echo "response:"
+    cat "${RESP_FILE}"
+    echo
+    echo "tdpnd log:"
+    cat "${LOG_FILE}"
+    return 1
+  fi
+}
+
 get_expect_status() {
   local url="$1"
   local expected="$2"
-  local token="${3:-}"
+  local token="${3:-${TOKEN:-}}"
   local code
   if [[ -n "${token}" ]]; then
     code="$(curl_with_bearer_config "${token}" -sS -m 4 -o "${RESP_FILE}" -w "%{http_code}" "${url}" || true)"
@@ -241,6 +314,8 @@ get_expect_status() {
 }
 
 TOKEN="bridge-smoke-token"
+REWARD_PROOF_TOKEN="bridge-smoke-proof-token"
+FINALITY_TOKEN="bridge-smoke-finality-token"
 STARTUP_MAX_ATTEMPTS="${TDPND_SETTLEMENT_BRIDGE_LIVE_SMOKE_STARTUP_MAX_ATTEMPTS:-3}"
 if ! [[ "${STARTUP_MAX_ATTEMPTS}" =~ ^[0-9]+$ ]] || (( STARTUP_MAX_ATTEMPTS < 1 )); then
   echo "TDPND_SETTLEMENT_BRIDGE_LIVE_SMOKE_STARTUP_MAX_ATTEMPTS must be an integer >= 1"
@@ -301,6 +376,21 @@ func main() {
 
 	client := vpnslashingpb.NewMsgClient(conn)
 	callCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer "+os.Args[2])
+	confirmResp, err := client.ConfirmEvidence(callCtx, &vpnslashingpb.MsgConfirmEvidenceRequest{
+		EvidenceId: os.Args[3],
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "confirm evidence: %v\n", err)
+		os.Exit(1)
+	}
+	if confirmResp.GetEvidence().GetEvidenceId() != os.Args[3] {
+		fmt.Fprintf(os.Stderr, "unexpected confirmed evidence id %q\n", confirmResp.GetEvidence().GetEvidenceId())
+		os.Exit(1)
+	}
+	if confirmResp.GetEvidence().GetStatus() != vpnslashingpb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED {
+		fmt.Fprintf(os.Stderr, "unexpected confirmed evidence status %s\n", confirmResp.GetEvidence().GetStatus())
+		os.Exit(1)
+	}
 	resp, err := client.RecordPenalty(callCtx, &vpnslashingpb.MsgRecordPenaltyRequest{
 		Penalty: &vpnslashingpb.PenaltyDecision{
 			PenaltyId:       os.Args[4],
@@ -421,7 +511,7 @@ EOF
 start_runtime_with_retry "${STARTUP_MAX_ATTEMPTS}"
 
 post_expect_status "${BASE_URL}/x/vpnbilling/settlements" '{"SettlementID":"set-unauth-1","ReservationID":"bill-res-unauth-1","SessionID":"sess-unauth-1","SubjectID":"subject-unauth-1","ChargedMicros":250,"Currency":"TDPNC","SettledAt":"2026-01-01T00:00:00Z"}' "401"
-post_expect_status "${BASE_URL}/x/vpnrewards/issues" '{"RewardID":"reward-unauth-1","ProviderSubjectID":"provider-unauth-1","SessionID":"sess-unauth-1","RewardMicros":100,"Currency":"TDPNC","IssuedAt":"2026-01-01T00:00:00Z"}' "401"
+post_expect_status "${BASE_URL}/x/vpnrewards/issues" '{"RewardID":"reward-unauth-1","ProviderSubjectID":"provider-unauth-1","SessionID":"sess-unauth-1","TrafficProofRef":"sha256:20e6b1bf7f41d4c1c8522ff2e6f12f2b87daf6f4ee54f5b1ff694c7be808777b","RewardMicros":100,"Currency":"TDPNC","IssuedAt":"2026-01-01T00:00:00Z"}' "401"
 post_expect_status "${BASE_URL}/x/vpnsponsor/reservations" '{"ReservationID":"res-unauth-1","SponsorID":"sponsor-unauth-1","SubjectID":"app-unauth-1","SessionID":"sess-unauth-1","AmountMicros":500,"Currency":"TDPNC","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2026-12-31T00:00:00Z"}' "401"
 post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-unauth-1","SubjectID":"provider-1","SessionID":"sess-1","ViolationType":"double-sign","EvidenceRef":"sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","ObservedAt":"2026-01-01T00:00:00Z"}' "401"
 post_expect_status "${BASE_URL}/x/vpnvalidator/eligibilities" '{"ValidatorID":"val-unauth-1","OperatorAddress":"op-unauth-1","Eligible":true,"PolicyReason":"auth smoke","UpdatedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "401"
@@ -448,10 +538,19 @@ grep -q 'objective format' "${RESP_FILE}"
 post_expect_status "${BASE_URL}/x/vpnvalidator/status-records" '{"StatusID":"status-invalid-ref-obj-space","ValidatorID":"val-unauth-1","ConsensusAddress":"cons-unauth-1","LifecycleStatus":"active","EvidenceHeight":5,"EvidenceRef":"obj://validator/status with-space","RecordedAt":"2026-01-01T00:00:00Z","Status":"submitted"}' "400" "${TOKEN}"
 grep -q 'objective format' "${RESP_FILE}"
 
-post_expect_status "${BASE_URL}/x/vpnbilling/settlements" '{"SettlementID":"set-live-1","ReservationID":"bill-res-live-1","SessionID":"sess-live-1","SubjectID":"subject-live-1","ChargedMicros":250,"Currency":"TDPNC","SettledAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
+post_expect_status "${BASE_URL}/x/vpnbilling/reservations" '{"ReservationID":"bill-res-live-1","SessionID":"sess-live-1","SubjectID":"subject-live-1","AmountMicros":250,"Currency":"TDPNC","CreatedAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
-post_expect_status "${BASE_URL}/x/vpnrewards/issues" '{"RewardID":"reward-live-1","ProviderSubjectID":"provider-live-1","SessionID":"sess-live-1","RewardMicros":100,"Currency":"TDPNC","IssuedAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
+post_expect_status "${BASE_URL}/x/vpnbilling/reservations" '{"ReservationID":"bill-res-live-1","SessionID":"sess-live-1","SubjectID":"subject-live-1","AmountMicros":250,"Currency":"TDPNC","CreatedAt":"2026-01-01T00:00:00Z","Status":"confirmed"}' "200" "${TOKEN}" "X-GPM-Finality-Authorization" "${FINALITY_TOKEN}"
+grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
+
+post_expect_status "${BASE_URL}/x/vpnbilling/settlements" '{"SettlementID":"set-live-1","ReservationID":"bill-res-live-1","SessionID":"sess-live-1","SubjectID":"subject-live-1","ChargedMicros":250,"Currency":"TDPNC","SettledAt":"2026-01-01T00:00:00Z","Status":"confirmed"}' "200" "${TOKEN}" "X-GPM-Finality-Authorization" "${FINALITY_TOKEN}"
+grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
+
+post_expect_status "${BASE_URL}/x/vpnrewards/proofs" '{"ProofPath":"traffic-proof/reward-live-1","TrafficProofRef":"obj://traffic-proof/reward-live-1","TrustContract":"settlement.reward.objective-traffic.v1","RewardID":"reward-live-1","ProviderSubjectID":"provider-live-1","SessionID":"sess-live-1","RewardMicros":100,"Currency":"TDPNC","IssuedAt":"2026-01-01T00:00:00Z","Verified":true,"VerifierID":"bridge-live-smoke","VerifiedAt":"2026-01-01T00:00:01Z"}' "200" "${TOKEN}" "X-GPM-Reward-Proof-Authorization" "${REWARD_PROOF_TOKEN}"
+grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
+
+post_expect_status "${BASE_URL}/x/vpnrewards/issues" '{"RewardID":"reward-live-1","ProviderSubjectID":"provider-live-1","SessionID":"sess-live-1","TrafficProofRef":"obj://traffic-proof/reward-live-1","RewardMicros":100,"Currency":"TDPNC","IssuedAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
 post_expect_status "${BASE_URL}/x/vpnsponsor/reservations" '{"ReservationID":"res-live-1","SponsorID":"sponsor-live-1","SubjectID":"app-live-1","SessionID":"sess-live-1","AmountMicros":500,"Currency":"TDPNC","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2026-12-31T00:00:00Z"}' "200" "${TOKEN}"
@@ -460,11 +559,23 @@ grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 post_expect_status "${BASE_URL}/x/vpnslashing/evidence" '{"EvidenceID":"ev-live-1","SubjectID":"provider-live-1","SessionID":"sess-live-1","ViolationType":"double-sign","EvidenceRef":"sha256:6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090","ObservedAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
+patch_expect_status "${BASE_URL}/x/vpnslashing/evidence/ev-live-1" '{"Status":"confirmed"}' "200" "${TOKEN}" "X-GPM-Finality-Authorization" "${FINALITY_TOKEN}"
+grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
+
 # Canonicalization path coverage: mixed-case and whitespace IDs should persist in canonical form.
-post_expect_status "${BASE_URL}/x/vpnbilling/settlements" '{"SettlementID":"  SET-CANON-LIVE-1  ","ReservationID":"  BILL-RES-CANON-LIVE-1  ","SessionID":"  SESS-CANON-LIVE-1  ","SubjectID":"  SUBJECT-CANON-LIVE-1  ","ChargedMicros":275,"Currency":" TdPnC ","SettledAt":"2026-01-01T00:00:10Z"}' "200" "${TOKEN}"
+post_expect_status "${BASE_URL}/x/vpnbilling/reservations" '{"ReservationID":"  BILL-RES-CANON-LIVE-1  ","SessionID":"  SESS-CANON-LIVE-1  ","SubjectID":"  SUBJECT-CANON-LIVE-1  ","AmountMicros":300,"Currency":" TdPnC ","CreatedAt":"2026-01-01T00:00:09Z","Status":"SUBMITTED"}' "200" "${TOKEN}"
+grep -q '"id"[[:space:]]*:[[:space:]]*"bill-res-canon-live-1"' "${RESP_FILE}"
+
+post_expect_status "${BASE_URL}/x/vpnbilling/reservations" '{"ReservationID":"  BILL-RES-CANON-LIVE-1  ","SessionID":"  SESS-CANON-LIVE-1  ","SubjectID":"  SUBJECT-CANON-LIVE-1  ","AmountMicros":300,"Currency":" TdPnC ","CreatedAt":"2026-01-01T00:00:09Z","Status":"confirmed"}' "200" "${TOKEN}" "X-GPM-Finality-Authorization" "${FINALITY_TOKEN}"
+grep -q '"id"[[:space:]]*:[[:space:]]*"bill-res-canon-live-1"' "${RESP_FILE}"
+
+post_expect_status "${BASE_URL}/x/vpnbilling/settlements" '{"SettlementID":"  SET-CANON-LIVE-1  ","ReservationID":"  BILL-RES-CANON-LIVE-1  ","SessionID":"  SESS-CANON-LIVE-1  ","SubjectID":"  SUBJECT-CANON-LIVE-1  ","ChargedMicros":275,"Currency":" TdPnC ","SettledAt":"2026-01-01T00:00:10Z","Status":"confirmed"}' "200" "${TOKEN}" "X-GPM-Finality-Authorization" "${FINALITY_TOKEN}"
 grep -q '"id"[[:space:]]*:[[:space:]]*"set-canon-live-1"' "${RESP_FILE}"
 
-post_expect_status "${BASE_URL}/x/vpnrewards/issues" '{"RewardID":"  REWARD-CANON-LIVE-1  ","ProviderSubjectID":"  PROVIDER-CANON-LIVE-1  ","SessionID":"  SESS-CANON-LIVE-1  ","RewardMicros":125,"Currency":" TdPnC ","IssuedAt":"2026-01-01T00:00:11Z"}' "200" "${TOKEN}"
+post_expect_status "${BASE_URL}/x/vpnrewards/proofs" '{"ProofPath":"traffic-proof/reward-canon-live-1","TrafficProofRef":"obj://traffic-proof/reward-canon-live-1","TrustContract":"settlement.reward.objective-traffic.v1","RewardID":"  REWARD-CANON-LIVE-1  ","ProviderSubjectID":"  PROVIDER-CANON-LIVE-1  ","SessionID":"  SESS-CANON-LIVE-1  ","RewardMicros":125,"Currency":" TdPnC ","IssuedAt":"2026-01-01T00:00:11Z","Verified":true,"VerifierID":"bridge-live-smoke","VerifiedAt":"2026-01-01T00:00:12Z"}' "200" "${TOKEN}" "X-GPM-Reward-Proof-Authorization" "${REWARD_PROOF_TOKEN}"
+grep -q '"id"[[:space:]]*:[[:space:]]*"traffic-proof/reward-canon-live-1"' "${RESP_FILE}"
+
+post_expect_status "${BASE_URL}/x/vpnrewards/issues" '{"RewardID":"  REWARD-CANON-LIVE-1  ","ProviderSubjectID":"  PROVIDER-CANON-LIVE-1  ","SessionID":"  SESS-CANON-LIVE-1  ","TrafficProofRef":" obj://traffic-proof/reward-canon-live-1 ","RewardMicros":125,"Currency":" TdPnC ","IssuedAt":"2026-01-01T00:00:11Z"}' "200" "${TOKEN}"
 grep -q '"id"[[:space:]]*:[[:space:]]*"dist:reward-canon-live-1"' "${RESP_FILE}"
 
 post_expect_status "${BASE_URL}/x/vpnsponsor/reservations" '{"ReservationID":"  RES-CANON-LIVE-1  ","SponsorID":"  SPONSOR-CANON-LIVE-1  ","SubjectID":"  APP-CANON-LIVE-1  ","SessionID":"  Sess-Canon-Live-1  ","AmountMicros":650,"Currency":" TdPnC ","CreatedAt":"2026-01-01T00:00:12Z","ExpiresAt":"2026-12-31T00:00:00Z"}' "200" "${TOKEN}"
@@ -511,7 +622,7 @@ grep -q '"id"[[:space:]]*:[[:space:]]*"policy-canon-live-1"' "${RESP_FILE}"
 post_expect_status "${BASE_URL}/x/vpngovernance/decisions" '{"DecisionID":"  DECISION-CANON-LIVE-1  ","PolicyID":"  POLICY-CANON-LIVE-1  ","ProposalID":"  PROPOSAL-CANON-LIVE-1  ","Outcome":"  APPROVE  ","Decider":"  BOOTSTRAP-MULTISIG-CANON  ","Reason":"  Canon decision reason  ","DecidedAt":"2026-01-01T00:00:31Z","Status":"CONFIRMED"}' "200" "${TOKEN}"
 grep -q '"id"[[:space:]]*:[[:space:]]*"decision-canon-live-1"' "${RESP_FILE}"
 
-post_expect_status "${BASE_URL}/x/vpngovernance/audit-actions" '{"ActionID":"  ACTION-CANON-LIVE-1  ","Action":"  POLICY.CANON  ","Actor":"  BOOTSTRAP-MULTISIG-CANON  ","Reason":"  Canon audit reason  ","EvidencePointer":" obj://audit/Action-Canon-Live-1 ","Timestamp":"2026-01-01T00:00:32Z"}' "200" "${TOKEN}"
+post_expect_status "${BASE_URL}/x/vpngovernance/audit-actions" '{"ActionID":"  ACTION-CANON-LIVE-1  ","Action":"  ADMIN_SET_POLICY  ","Actor":"  BOOTSTRAP-MULTISIG-CANON  ","Reason":"  Canon audit reason  ","EvidencePointer":" obj://audit/Action-Canon-Live-1 ","Timestamp":"2026-01-01T00:00:32Z"}' "200" "${TOKEN}"
 grep -q '"id"[[:space:]]*:[[:space:]]*"action-canon-live-1"' "${RESP_FILE}"
 
 get_expect_status "${BASE_URL}/x/vpngovernance/policies/policy-canon-live-1" "200"
@@ -530,7 +641,7 @@ grep -q '"Decider"[[:space:]]*:[[:space:]]*"bootstrap-multisig-canon"' "${RESP_F
 
 get_expect_status "${BASE_URL}/x/vpngovernance/audit-actions/action-canon-live-1" "200"
 grep -q '"ActionID"[[:space:]]*:[[:space:]]*"action-canon-live-1"' "${RESP_FILE}"
-grep -q '"Action"[[:space:]]*:[[:space:]]*"policy.canon"' "${RESP_FILE}"
+grep -q '"Action"[[:space:]]*:[[:space:]]*"admin_set_policy"' "${RESP_FILE}"
 grep -q '"Actor"[[:space:]]*:[[:space:]]*"bootstrap-multisig-canon"' "${RESP_FILE}"
 grep -q '"EvidencePointer"[[:space:]]*:[[:space:]]*"obj://audit/Action-Canon-Live-1"' "${RESP_FILE}"
 
@@ -560,7 +671,7 @@ grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 post_expect_status "${BASE_URL}/x/vpngovernance/decisions" '{"DecisionID":"decision-live-1","PolicyID":"policy-live-1","ProposalID":"proposal-live-1","Outcome":"approve","Decider":"bootstrap-multisig","Reason":"smoke decision","DecidedAt":"2026-01-01T00:00:02Z","Status":"confirmed"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
-post_expect_status "${BASE_URL}/x/vpngovernance/audit-actions" '{"ActionID":"action-live-1","Action":"policy.bootstrap","Actor":"bootstrap-multisig","Reason":"smoke audit","EvidencePointer":"obj://audit/action-live-1","Timestamp":"2026-01-01T00:00:03Z"}' "200" "${TOKEN}"
+post_expect_status "${BASE_URL}/x/vpngovernance/audit-actions" '{"ActionID":"action-live-1","Action":"admin_set_policy","Actor":"bootstrap-multisig","Reason":"smoke audit","EvidencePointer":"obj://audit/action-live-1","Timestamp":"2026-01-01T00:00:03Z"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
 # Query-by-id coverage for billing/rewards/sponsor/slashing/validator/governance.

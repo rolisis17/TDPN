@@ -58,16 +58,20 @@ type runtimeDeps struct {
 }
 
 type grpcRuntimeConfig struct {
-	listenAddr  string
-	tlsCertPath string
-	tlsKeyPath  string
-	authToken   string
+	listenAddr        string
+	tlsCertPath       string
+	tlsKeyPath        string
+	authToken         string
+	finalityAuthToken string
 }
 
 type settlementHTTPConfig struct {
-	listenAddr    string
-	authToken     string
-	authPrincipal string
+	listenAddr            string
+	authToken             string
+	authPrincipal         string
+	rewardProofAuthToken  string
+	finalityAuthToken     string
+	rewardProofVerifierID string
 }
 
 type stateDirConfigurableScaffold interface {
@@ -139,6 +143,11 @@ func runTDPND(
 	settlementHTTPAuthToken := flags.String("settlement-http-auth-token", "", "optional bearer token for settlement HTTP POST endpoints")
 	settlementHTTPAuthTokenFile := flags.String("settlement-http-auth-token-file", "", "path to file containing settlement HTTP bearer token")
 	settlementHTTPAuthPrincipal := flags.String("settlement-http-auth-principal", "", "optional caller principal bound to settlement identity fields in authenticated mode")
+	settlementHTTPRewardProofAuthToken := flags.String("settlement-http-reward-proof-auth-token", "", "optional scoped bearer token required in X-GPM-Reward-Proof-Authorization for verified reward proof registration")
+	settlementHTTPRewardProofAuthTokenFile := flags.String("settlement-http-reward-proof-auth-token-file", "", "path to file containing settlement HTTP reward proof bearer token")
+	settlementHTTPFinalityAuthToken := flags.String("settlement-http-finality-auth-token", "", "optional scoped bearer token required in X-GPM-Finality-Authorization for bridge finality assertions")
+	settlementHTTPFinalityAuthTokenFile := flags.String("settlement-http-finality-auth-token-file", "", "path to file containing settlement HTTP finality bearer token")
+	settlementHTTPRewardProofVerifierID := flags.String("settlement-http-reward-proof-verifier-id", "", "trusted verifier id stamped onto bridge-registered objective reward proofs")
 	cometHome := flags.String("comet-home", "", "home directory for CometBFT runtime")
 	cometMoniker := flags.String("comet-moniker", "", "moniker for CometBFT runtime")
 	cometP2PLAddr := flags.String("comet-p2p-laddr", "", "listen address for CometBFT p2p networking")
@@ -233,11 +242,64 @@ func runTDPND(
 	if settlementAuthPrincipal != "" && settlementAuthToken == "" {
 		return errors.New("--settlement-http-auth-principal requires --settlement-http-auth-token, --settlement-http-auth-token-file, or SETTLEMENT_HTTP_AUTH_TOKEN")
 	}
-	settlementCfg := settlementHTTPConfig{
-		listenAddr:    settlementListenAddr,
-		authToken:     settlementAuthToken,
-		authPrincipal: settlementAuthPrincipal,
+	settlementRewardProofAuthToken := strings.TrimSpace(*settlementHTTPRewardProofAuthToken)
+	settlementRewardProofAuthTokenFile := strings.TrimSpace(*settlementHTTPRewardProofAuthTokenFile)
+	if settlementRewardProofAuthToken != "" && settlementRewardProofAuthTokenFile != "" {
+		return errors.New("only one of --settlement-http-reward-proof-auth-token and --settlement-http-reward-proof-auth-token-file may be set")
 	}
+	if settlementRewardProofAuthToken == "" && settlementRewardProofAuthTokenFile != "" {
+		rawToken, err := fsguard.ReadRegularFileBounded(settlementRewardProofAuthTokenFile, maxRuntimeAuthTokenFileBytes)
+		if err != nil {
+			return fmt.Errorf("read --settlement-http-reward-proof-auth-token-file: %w", err)
+		}
+		settlementRewardProofAuthToken = strings.TrimSpace(string(rawToken))
+		if settlementRewardProofAuthToken == "" {
+			return errors.New("--settlement-http-reward-proof-auth-token-file is empty")
+		}
+	}
+	if settlementRewardProofAuthToken == "" {
+		settlementRewardProofAuthToken = strings.TrimSpace(os.Getenv("SETTLEMENT_HTTP_REWARD_PROOF_AUTH_TOKEN"))
+	}
+	if settlementRewardProofAuthToken != "" && settlementAuthToken == "" {
+		return errors.New("--settlement-http-reward-proof-auth-token requires --settlement-http-auth-token, --settlement-http-auth-token-file, or SETTLEMENT_HTTP_AUTH_TOKEN")
+	}
+	settlementFinalityAuthToken := strings.TrimSpace(*settlementHTTPFinalityAuthToken)
+	settlementFinalityAuthTokenFile := strings.TrimSpace(*settlementHTTPFinalityAuthTokenFile)
+	if settlementFinalityAuthToken != "" && settlementFinalityAuthTokenFile != "" {
+		return errors.New("only one of --settlement-http-finality-auth-token and --settlement-http-finality-auth-token-file may be set")
+	}
+	if settlementFinalityAuthToken == "" && settlementFinalityAuthTokenFile != "" {
+		rawToken, err := fsguard.ReadRegularFileBounded(settlementFinalityAuthTokenFile, maxRuntimeAuthTokenFileBytes)
+		if err != nil {
+			return fmt.Errorf("read --settlement-http-finality-auth-token-file: %w", err)
+		}
+		settlementFinalityAuthToken = strings.TrimSpace(string(rawToken))
+		if settlementFinalityAuthToken == "" {
+			return errors.New("--settlement-http-finality-auth-token-file is empty")
+		}
+	}
+	if settlementFinalityAuthToken == "" {
+		settlementFinalityAuthToken = strings.TrimSpace(os.Getenv("SETTLEMENT_HTTP_FINALITY_AUTH_TOKEN"))
+	}
+	if settlementFinalityAuthToken != "" && settlementAuthToken == "" {
+		return errors.New("--settlement-http-finality-auth-token requires --settlement-http-auth-token, --settlement-http-auth-token-file, or SETTLEMENT_HTTP_AUTH_TOKEN")
+	}
+	settlementRewardProofVerifierID := strings.TrimSpace(*settlementHTTPRewardProofVerifierID)
+	if settlementRewardProofVerifierID == "" {
+		settlementRewardProofVerifierID = strings.TrimSpace(os.Getenv("SETTLEMENT_HTTP_REWARD_PROOF_VERIFIER_ID"))
+	}
+	if settlementRewardProofVerifierID != "" && settlementRewardProofAuthToken == "" {
+		return errors.New("--settlement-http-reward-proof-verifier-id requires --settlement-http-reward-proof-auth-token, --settlement-http-reward-proof-auth-token-file, or SETTLEMENT_HTTP_REWARD_PROOF_AUTH_TOKEN")
+	}
+	settlementCfg := settlementHTTPConfig{
+		listenAddr:            settlementListenAddr,
+		authToken:             settlementAuthToken,
+		authPrincipal:         settlementAuthPrincipal,
+		rewardProofAuthToken:  settlementRewardProofAuthToken,
+		finalityAuthToken:     settlementFinalityAuthToken,
+		rewardProofVerifierID: settlementRewardProofVerifierID,
+	}
+	grpcCfg.finalityAuthToken = settlementFinalityAuthToken
 
 	var (
 		grpcEnabled       = grpcCfg.listenAddr != ""
@@ -245,6 +307,12 @@ func runTDPND(
 		grpcOptions       []grpc.ServerOption
 		err               error
 	)
+
+	if tdpndProductionModeEnabled() {
+		if err := validateProductionRuntimeAuthPolicy(grpcCfg, settlementCfg, grpcEnabled, settlementEnabled); err != nil {
+			return err
+		}
+	}
 
 	if err := validateAuthBindPolicy(
 		grpcCfg,
@@ -324,11 +392,48 @@ func runTDPND(
 	)
 }
 
+func tdpndProductionModeEnabled() bool {
+	for _, name := range []string{"GPM_PRODUCTION_MODE", "TDPN_PRODUCTION_MODE"} {
+		raw := strings.TrimSpace(os.Getenv(name))
+		if raw == "" {
+			continue
+		}
+		enabled, err := strconv.ParseBool(raw)
+		return err != nil || enabled
+	}
+	return false
+}
+
 func validateGRPCRuntimeConfig(cfg grpcRuntimeConfig) error {
 	hasCert := cfg.tlsCertPath != ""
 	hasKey := cfg.tlsKeyPath != ""
 	if hasCert != hasKey {
 		return errors.New("both --grpc-tls-cert and --grpc-tls-key must be provided together")
+	}
+	if strings.TrimSpace(cfg.finalityAuthToken) != "" && strings.TrimSpace(cfg.authToken) == "" {
+		return errors.New("--settlement-http-finality-auth-token requires --grpc-auth-token or --grpc-auth-token-file when gRPC is enabled")
+	}
+	return nil
+}
+
+func validateProductionRuntimeAuthPolicy(grpcCfg grpcRuntimeConfig, settlementCfg settlementHTTPConfig, grpcEnabled bool, settlementEnabled bool) error {
+	if grpcEnabled && strings.TrimSpace(grpcCfg.authToken) == "" {
+		return errors.New("production gRPC requires --grpc-auth-token or --grpc-auth-token-file")
+	}
+	if !settlementEnabled {
+		return nil
+	}
+	if strings.TrimSpace(settlementCfg.authToken) == "" {
+		return errors.New("production settlement HTTP requires --settlement-http-auth-token or --settlement-http-auth-token-file")
+	}
+	if strings.TrimSpace(settlementCfg.finalityAuthToken) == "" {
+		return errors.New("production settlement HTTP requires --settlement-http-finality-auth-token or --settlement-http-finality-auth-token-file")
+	}
+	if strings.TrimSpace(settlementCfg.rewardProofAuthToken) == "" {
+		return errors.New("production settlement HTTP requires --settlement-http-reward-proof-auth-token or --settlement-http-reward-proof-auth-token-file")
+	}
+	if strings.TrimSpace(settlementCfg.rewardProofVerifierID) == "" {
+		return errors.New("production settlement HTTP requires --settlement-http-reward-proof-verifier-id")
 	}
 	return nil
 }
@@ -397,6 +502,9 @@ func validateAuthBindPolicy(
 	if !allowDangerousInsecureAuthBind && settlementEnabled && settlementCfg.authToken != "" && !isLoopbackListenAddr(settlementCfg.listenAddr) {
 		return errors.New("--settlement-http-auth-token requires a loopback listener unless --allow-dangerous-insecure-auth-bind is set")
 	}
+	if settlementEnabled && settlementCfg.authToken != "" && !isLoopbackListenAddr(settlementCfg.listenAddr) && strings.TrimSpace(settlementCfg.authPrincipal) == "" {
+		return errors.New("--settlement-http-auth-token on a non-loopback listener requires --settlement-http-auth-principal to bind settlement identity fields")
+	}
 	return nil
 }
 
@@ -448,8 +556,8 @@ func buildGRPCServerOptions(cfg grpcRuntimeConfig) ([]grpc.ServerOption, error) 
 	}
 
 	options = append(options,
-		grpc.UnaryInterceptor(authUnaryInterceptor(cfg.authToken)),
-		grpc.StreamInterceptor(authStreamInterceptor(cfg.authToken)),
+		grpc.UnaryInterceptor(authUnaryInterceptor(cfg.authToken, cfg.finalityAuthToken)),
+		grpc.StreamInterceptor(authStreamInterceptor(cfg.authToken, cfg.finalityAuthToken)),
 	)
 
 	return options, nil
@@ -517,7 +625,7 @@ func runGRPCMode(
 	}
 }
 
-func authUnaryInterceptor(expectedToken string) grpc.UnaryServerInterceptor {
+func authUnaryInterceptor(expectedToken string, expectedFinalityToken string) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if !methodRequiresAuth(info.FullMethod) {
 			if expectedToken != "" && isHealthMethod(info.FullMethod) && !isLoopbackPeer(ctx) && !hasValidBearerToken(ctx, expectedToken) {
@@ -528,11 +636,14 @@ func authUnaryInterceptor(expectedToken string) grpc.UnaryServerInterceptor {
 		if !hasValidBearerToken(ctx, expectedToken) {
 			return nil, status.Error(codes.Unauthenticated, "missing or invalid bearer token")
 		}
+		if err := validateGRPCFinalityAuth(ctx, info.FullMethod, expectedToken, expectedFinalityToken); err != nil {
+			return nil, err
+		}
 		return handler(withRuntimeRequestContext(ctx), req)
 	}
 }
 
-func authStreamInterceptor(expectedToken string) grpc.StreamServerInterceptor {
+func authStreamInterceptor(expectedToken string, expectedFinalityToken string) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		stream := runtimeContextServerStream{
 			ServerStream: ss,
@@ -547,6 +658,9 @@ func authStreamInterceptor(expectedToken string) grpc.StreamServerInterceptor {
 		if !hasValidBearerToken(ss.Context(), expectedToken) {
 			return status.Error(codes.Unauthenticated, "missing or invalid bearer token")
 		}
+		if err := validateGRPCFinalityAuth(ss.Context(), info.FullMethod, expectedToken, expectedFinalityToken); err != nil {
+			return err
+		}
 		return handler(srv, stream)
 	}
 }
@@ -558,6 +672,31 @@ func methodRequiresAuth(fullMethod string) bool {
 	default:
 		return true
 	}
+}
+
+func methodRequiresFinalityAuth(fullMethod string) bool {
+	switch strings.TrimSpace(fullMethod) {
+	case "/tdpn.vpnslashing.v1.Msg/ConfirmEvidence":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateGRPCFinalityAuth(ctx context.Context, fullMethod string, expectedToken string, expectedFinalityToken string) error {
+	if !methodRequiresFinalityAuth(fullMethod) {
+		return nil
+	}
+	if strings.TrimSpace(expectedToken) == "" {
+		return status.Error(codes.FailedPrecondition, "grpc bearer token is required for settlement finality methods")
+	}
+	if strings.TrimSpace(expectedFinalityToken) == "" {
+		return status.Error(codes.FailedPrecondition, "settlement finality bearer token is not configured")
+	}
+	if !hasValidScopedBearerToken(ctx, expectedFinalityToken, finalityAuthorizationHeader) {
+		return status.Error(codes.PermissionDenied, "missing or invalid settlement finality bearer token")
+	}
+	return nil
 }
 
 func isHealthMethod(fullMethod string) bool {
@@ -633,6 +772,10 @@ func normalizeHostForLookup(host string) string {
 }
 
 func hasValidBearerToken(ctx context.Context, expectedToken string) bool {
+	return hasValidScopedBearerToken(ctx, expectedToken, "authorization")
+}
+
+func hasValidScopedBearerToken(ctx context.Context, expectedToken string, headerName string) bool {
 	if expectedToken == "" {
 		return true
 	}
@@ -640,7 +783,11 @@ func hasValidBearerToken(ctx context.Context, expectedToken string) bool {
 	if !ok {
 		return false
 	}
-	values := md.Get("authorization")
+	headerName = strings.ToLower(strings.TrimSpace(headerName))
+	if headerName == "" {
+		return false
+	}
+	values := md.Get(headerName)
 	for _, value := range values {
 		parts := strings.SplitN(strings.TrimSpace(value), " ", 2)
 		if len(parts) != 2 {

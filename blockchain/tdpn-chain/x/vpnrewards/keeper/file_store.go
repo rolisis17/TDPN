@@ -21,6 +21,7 @@ const fileStoreMaxSnapshotBytes int64 = 16 << 20
 type fileStoreState struct {
 	Accruals      map[string]types.RewardAccrual      `json:"accruals"`
 	Distributions map[string]types.DistributionRecord `json:"distributions"`
+	Proofs        map[string]types.RewardProofRecord  `json:"proofs"`
 }
 
 // FileStore persists vpnrewards keeper state to a JSON file.
@@ -29,6 +30,7 @@ type FileStore struct {
 	path          string
 	accruals      map[string]types.RewardAccrual
 	distributions map[string]types.DistributionRecord
+	proofs        map[string]types.RewardProofRecord
 	persistHook   func() error
 }
 
@@ -41,6 +43,7 @@ func NewFileStore(path string) (*FileStore, error) {
 		path:          path,
 		accruals:      make(map[string]types.RewardAccrual),
 		distributions: make(map[string]types.DistributionRecord),
+		proofs:        make(map[string]types.RewardProofRecord),
 	}
 
 	if err := store.load(); err != nil {
@@ -165,6 +168,53 @@ func (s *FileStore) ListDistributions() []types.DistributionRecord {
 	return records
 }
 
+func (s *FileStore) UpsertProof(record types.RewardProofRecord) {
+	_ = s.UpsertProofWithError(record)
+}
+
+func (s *FileStore) UpsertProofWithError(record types.RewardProofRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	previous, hadPrevious := s.proofs[record.ProofPath]
+	if hadPrevious && !proofRecordsEqual(normalizeProof(previous), normalizeProof(record)) {
+		return conflictError("proof", record.ProofPath)
+	}
+	s.proofs[record.ProofPath] = record
+	if err := s.persistLocked(); err != nil {
+		if hadPrevious {
+			s.proofs[record.ProofPath] = previous
+		} else {
+			delete(s.proofs, record.ProofPath)
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *FileStore) GetProof(proofPath string) (types.RewardProofRecord, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	record, ok := s.proofs[proofPath]
+	return record, ok
+}
+
+func (s *FileStore) ListProofs() []types.RewardProofRecord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	records := make([]types.RewardProofRecord, 0, len(s.proofs))
+	for _, record := range s.proofs {
+		records = append(records, record)
+	}
+	return records
+}
+
+func (s *FileStore) ListProofsWithError() ([]types.RewardProofRecord, error) {
+	return s.ListProofs(), nil
+}
+
 func (s *FileStore) load() error {
 	data, err := fsguard.ReadRegularFileBounded(s.path, fileStoreMaxSnapshotBytes)
 	if err != nil {
@@ -196,6 +246,13 @@ func (s *FileStore) load() error {
 		}
 		s.distributions = distributions
 	}
+	if state.Proofs != nil {
+		proofs, err := buildProofSnapshotMap(state.Proofs)
+		if err != nil {
+			return fmt.Errorf("validate proof snapshot: %w", err)
+		}
+		s.proofs = proofs
+	}
 	return nil
 }
 
@@ -215,6 +272,7 @@ func (s *FileStore) persistLocked() error {
 	state := fileStoreState{
 		Accruals:      s.accruals,
 		Distributions: s.distributions,
+		Proofs:        s.proofs,
 	}
 
 	payload, err := json.MarshalIndent(state, "", "  ")
@@ -285,6 +343,13 @@ func buildAccrualSnapshotMap(input map[string]types.RewardAccrual) (map[string]t
 		if existing, ok := loaded[normalized.AccrualID]; ok && !accrualRecordsEqual(existing, normalized) {
 			return nil, fmt.Errorf("conflicting accrual entries for id %q", normalized.AccrualID)
 		}
+		for _, existing := range loaded {
+			if existing.AccrualID != normalized.AccrualID &&
+				existing.ProviderID == normalized.ProviderID &&
+				accrualsConflictOnWeeklyPayoutPeriod(normalized, existing) {
+				return nil, providerWeeklyEpochConflictError(normalized, existing)
+			}
+		}
 		loaded[normalized.AccrualID] = normalized
 	}
 	return loaded, nil
@@ -301,6 +366,28 @@ func buildDistributionSnapshotMap(input map[string]types.DistributionRecord) (ma
 			return nil, fmt.Errorf("conflicting distribution entries for id %q", normalized.DistributionID)
 		}
 		loaded[normalized.DistributionID] = normalized
+	}
+	return loaded, nil
+}
+
+func buildProofSnapshotMap(input map[string]types.RewardProofRecord) (map[string]types.RewardProofRecord, error) {
+	loaded := make(map[string]types.RewardProofRecord, len(input))
+	for key, record := range input {
+		normalized := normalizeProof(record)
+		if err := normalized.ValidateBasic(); err != nil {
+			return nil, fmt.Errorf("invalid proof %q: %w", key, err)
+		}
+		mapKey := normalizeProof(types.RewardProofRecord{ProofPath: key}).ProofPath
+		if mapKey == "" {
+			mapKey = normalized.ProofPath
+		}
+		if mapKey != normalized.ProofPath {
+			return nil, fmt.Errorf("proof key/value path mismatch: key=%q payload=%q", mapKey, normalized.ProofPath)
+		}
+		if existing, ok := loaded[normalized.ProofPath]; ok && !proofRecordsEqual(existing, normalized) {
+			return nil, fmt.Errorf("conflicting proof entries for path %q", normalized.ProofPath)
+		}
+		loaded[normalized.ProofPath] = normalized
 	}
 	return loaded, nil
 }

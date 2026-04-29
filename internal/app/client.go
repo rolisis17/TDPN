@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,93 +32,100 @@ import (
 )
 
 type Client struct {
-	directoryURL             string
-	directoryURLs            []string
-	directoryMinSources      int
-	directoryMinOperators    int
-	directoryMinVotes        int
-	issuerURL                string
-	subject                  string
-	anonCred                 string
-	entryURL                 string
-	exitControlURL           string
-	dataMode                 string
-	clientWGPub              string
-	trustStrict              bool
-	trustTOFU                bool
-	trustFile                string
-	innerSource              string
-	innerUDPAddr             string
-	innerMaxPkts             int
-	opaqueSinkAddr           string
-	opaqueDrainMS            int
-	opaqueSessionSec         int
-	opaqueInitialUpMS        int
-	wgBackend                string
-	wgInterface              string
-	wgPrivateKey             string
-	wgAllowedIPs             string
-	wgInstallRoute           bool
-	wgKernelProxy            bool
-	wgProxyAddr              string
-	wgManager                wg.ClientManager
-	liveWGMode               bool
-	wgOnlyMode               bool
-	disableSynthetic         bool
-	healthCheckEnabled       bool
-	healthCheckTimeout       time.Duration
-	healthCacheTTL           time.Duration
-	preferredExitCountry     string
-	preferredExitRegion      string
-	minGeoConfidence         float64
-	localityFallbackOrder    []string
-	strictExitLocality       bool
-	localitySoftBias         bool
-	localityCountryBias      float64
-	localityRegionBias       float64
-	localityRegionPrefixBias float64
-	maxExitsPerOperator      int
-	requireDistinctOps       bool
-	requireDistinctCountries bool
-	pathProfile              string
-	pathProfileConfigError   string
-	preferMiddleRelay        bool
-	requireMiddleRelay       bool
-	stickyPairSec            int
-	entryRotationSec         int
-	entryRotationJitterPct   int
-	entryRotationSeed        int64
-	lastSelectedEntry        string
-	lastSelectedExit         string
-	lastSelectedAt           time.Time
-	sessionReuse             bool
-	sessionRefreshLeadSec    int
-	sessionMinRefreshSec     int
-	pathOpenMaxAttempts      int
-	maxPairCandidates        int
-	bootstrapInterval        time.Duration
-	bootstrapBackoffMax      time.Duration
-	bootstrapJitterPct       int
-	bootstrapInitialDelay    time.Duration
-	startupSyncTimeout       time.Duration
-	exitExplorationPct       int
-	exitSelectionSeed        int64
-	selectionFeedDisable     bool
-	selectionFeedRequire     bool
-	selectionFeedMinVotes    int
-	trustFeedDisable         bool
-	trustFeedRequire         bool
-	trustFeedMinVotes        int
-	allowUnknownExitFallback bool
-	allowDirectExitFallback  bool
-	forceDirectExit          bool
-	activeSession            clientActiveSession
-	activeMu                 sync.Mutex
-	healthMu                 sync.Mutex
-	healthCache              map[string]healthProbeState
-	httpClient               *http.Client
-	betaStrict               bool
-	prodStrict               bool
+	directoryURL                   string
+	directoryURLs                  []string
+	directoryMinSources            int
+	directoryMinOperators          int
+	directoryMinVotes              int
+	issuerURL                      string
+	subject                        string
+	anonCred                       string
+	entryURL                       string
+	exitControlURL                 string
+	dataMode                       string
+	clientWGPub                    string
+	trustStrict                    bool
+	trustTOFU                      bool
+	trustFile                      string
+	innerSource                    string
+	innerUDPAddr                   string
+	innerMaxPkts                   int
+	opaqueSinkAddr                 string
+	opaqueDrainMS                  int
+	opaqueSessionSec               int
+	opaqueInitialUpMS              int
+	wgBackend                      string
+	wgInterface                    string
+	wgPrivateKey                   string
+	wgAllowedIPs                   string
+	wgInstallRoute                 bool
+	wgKernelProxy                  bool
+	wgProxyAddr                    string
+	wgManager                      wg.ClientManager
+	liveWGMode                     bool
+	wgOnlyMode                     bool
+	disableSynthetic               bool
+	healthCheckEnabled             bool
+	healthCheckTimeout             time.Duration
+	healthCacheTTL                 time.Duration
+	preferredExitCountry           string
+	preferredExitRegion            string
+	minGeoConfidence               float64
+	localityFallbackOrder          []string
+	strictExitLocality             bool
+	localitySoftBias               bool
+	localityCountryBias            float64
+	localityRegionBias             float64
+	localityRegionPrefixBias       float64
+	maxExitsPerOperator            int
+	requireDistinctOps             bool
+	requireDistinctCountries       bool
+	pathProfile                    string
+	pathProfileConfigError         string
+	preferMiddleRelay              bool
+	requireMiddleRelay             bool
+	stickyPairSec                  int
+	entryRotationSec               int
+	entryRotationJitterPct         int
+	entryRotationSeed              int64
+	lastSelectedEntry              string
+	lastSelectedExit               string
+	lastSelectedAt                 time.Time
+	sessionReuse                   bool
+	sessionRefreshLeadSec          int
+	sessionMinRefreshSec           int
+	pathOpenMaxAttempts            int
+	maxPairCandidates              int
+	bootstrapInterval              time.Duration
+	bootstrapBackoffMax            time.Duration
+	bootstrapJitterPct             int
+	bootstrapInitialDelay          time.Duration
+	startupSyncTimeout             time.Duration
+	exitExplorationPct             int
+	exitSelectionSeed              int64
+	selectionFeedDisable           bool
+	selectionFeedRequire           bool
+	selectionFeedMinVotes          int
+	trustFeedDisable               bool
+	trustFeedRequire               bool
+	trustFeedMinVotes              int
+	allowUnknownExitFallback       bool
+	allowDirectExitFallback        bool
+	directExitSupportMode          bool
+	forceDirectExit                bool
+	activeSession                  clientActiveSession
+	clientStatusFile               string
+	clientStatus                   clientVPNStatus
+	activeMu                       sync.Mutex
+	statusMu                       sync.Mutex
+	healthMu                       sync.Mutex
+	healthCache                    map[string]healthProbeState
+	httpClient                     *http.Client
+	betaStrict                     bool
+	prodStrict                     bool
+	settlementReservationID        string
+	settlementReservationSessionID string
+	settlementReservationSubjectID string
 }
 
 type healthProbeState struct {
@@ -133,17 +141,29 @@ type relayPair struct {
 }
 
 type clientActiveSession struct {
-	sessionID       string
-	sessionExp      int64
-	establishedAt   time.Time
-	transport       string
-	entryDataAddr   string
-	entryControlURL string
-	sessionKeyID    string
-	exitInnerPub    string
-	entryRelayID    string
-	middleRelayID   string
-	exitRelayID     string
+	sessionID         string
+	sessionExp        int64
+	establishedAt     time.Time
+	transport         string
+	entryDataAddr     string
+	entryControlURL   string
+	sessionKeyID      string
+	exitInnerPub      string
+	clientInnerPub    string
+	clientInnerIP     string
+	wgAllowedIPs      string
+	wgInstallRoute    bool
+	entryRelayID      string
+	middleRelayID     string
+	exitRelayID       string
+	exitRole          string
+	entryOperatorID   string
+	middleOperatorID  string
+	exitOperatorID    string
+	entryCountryCode  string
+	middleCountryCode string
+	exitCountryCode   string
+	pathMode          string
 }
 
 const (
@@ -301,7 +321,7 @@ func NewClient() *Client {
 	wgPrivateKey := os.Getenv("CLIENT_WG_PRIVATE_KEY_PATH")
 	wgAllowedIPs := strings.TrimSpace(os.Getenv("CLIENT_WG_ALLOWED_IPS"))
 	if wgAllowedIPs == "" {
-		wgAllowedIPs = "0.0.0.0/0"
+		wgAllowedIPs = wg.DefaultFullTunnelAllowedIPs
 	}
 	wgInstallRoute := os.Getenv("CLIENT_WG_INSTALL_ROUTE") == "1"
 	wgKernelProxy := os.Getenv("CLIENT_WG_KERNEL_PROXY") == "1"
@@ -353,8 +373,9 @@ func NewClient() *Client {
 	}
 	preferMiddleRelay := pathProfile == "3hop"
 	requireMiddleRelay := pathProfile == "3hop"
-	if raw := strings.TrimSpace(os.Getenv("CLIENT_REQUIRE_MIDDLE_RELAY")); raw != "" {
-		requireMiddleRelay = raw == "1"
+	requireMiddleRelayOverride := strings.TrimSpace(os.Getenv("CLIENT_REQUIRE_MIDDLE_RELAY"))
+	if requireMiddleRelayOverride != "" && pathProfile != "3hop" {
+		requireMiddleRelay = requireMiddleRelayOverride == "1"
 	}
 	stickyPairSec := 0
 	if v, err := strconv.Atoi(os.Getenv("CLIENT_STICKY_PAIR_SEC")); err == nil && v > 0 {
@@ -439,9 +460,15 @@ func NewClient() *Client {
 	}
 	allowUnknownExitFallback := os.Getenv("CLIENT_ALLOW_UNKNOWN_EXIT_FALLBACK") == "1"
 	allowDirectExitFallback := os.Getenv("CLIENT_ALLOW_DIRECT_EXIT_FALLBACK") == "1"
+	directExitSupportMode := os.Getenv("CLIENT_DIRECT_EXIT_SUPPORT_MODE") == "1"
 	forceDirectExit := os.Getenv("CLIENT_FORCE_DIRECT_EXIT") == "1"
 	if forceDirectExit && pathProfile == "2hop" {
 		pathProfile = "1hop"
+	}
+	preferMiddleRelay = pathProfile == "3hop"
+	requireMiddleRelay = pathProfile == "3hop"
+	if requireMiddleRelayOverride != "" && pathProfile != "3hop" {
+		requireMiddleRelay = requireMiddleRelayOverride == "1"
 	}
 	if forceDirectExit && !allowDirectExitSessionChurn {
 		// One-hop direct-exit mode should keep sessions alive by default to avoid
@@ -493,6 +520,13 @@ func NewClient() *Client {
 	}
 	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("CLIENT_BETA_STRICT") == "1"
 	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("CLIENT_PROD_STRICT") == "1"
+	settlementReservationID := strings.TrimSpace(os.Getenv("GPM_SETTLEMENT_RESERVATION_ID"))
+	settlementReservationSessionID := strings.TrimSpace(os.Getenv("GPM_SETTLEMENT_RESERVATION_SESSION_ID"))
+	settlementReservationSubjectID := strings.TrimSpace(os.Getenv("GPM_SETTLEMENT_WALLET_ADDRESS"))
+	clientStatusFile := strings.TrimSpace(os.Getenv("CLIENT_VPN_STATUS_FILE"))
+	if clientStatusFile == "" {
+		clientStatusFile = strings.TrimSpace(os.Getenv("CLIENT_STATUS_FILE"))
+	}
 	wgOnlyMode := os.Getenv("WG_ONLY_MODE") == "1" || os.Getenv("CLIENT_WG_ONLY_MODE") == "1"
 	if prodStrict {
 		wgOnlyMode = true
@@ -517,87 +551,92 @@ func NewClient() *Client {
 	}
 
 	return &Client{
-		directoryURL:             directoryURL,
-		directoryURLs:            directoryURLs,
-		directoryMinSources:      directoryMinSources,
-		directoryMinOperators:    directoryMinOperators,
-		directoryMinVotes:        directoryMinVotes,
-		issuerURL:                issuerURL,
-		subject:                  subject,
-		anonCred:                 anonCred,
-		entryURL:                 entryURL,
-		exitControlURL:           exitControlURL,
-		dataMode:                 dataMode,
-		clientWGPub:              clientWGPub,
-		trustStrict:              trustStrict,
-		trustTOFU:                trustTOFU,
-		trustFile:                trustFile,
-		innerSource:              innerSource,
-		innerUDPAddr:             innerUDPAddr,
-		innerMaxPkts:             innerMaxPkts,
-		opaqueSinkAddr:           opaqueSinkAddr,
-		opaqueDrainMS:            opaqueDrainMS,
-		opaqueSessionSec:         opaqueSessionSec,
-		opaqueInitialUpMS:        opaqueInitialUpMS,
-		wgBackend:                wgBackend,
-		wgInterface:              wgInterface,
-		wgPrivateKey:             wgPrivateKey,
-		wgAllowedIPs:             wgAllowedIPs,
-		wgInstallRoute:           wgInstallRoute,
-		wgKernelProxy:            wgKernelProxy,
-		wgProxyAddr:              wgProxyAddr,
-		wgManager:                wgManager,
-		liveWGMode:               liveWGMode,
-		wgOnlyMode:               wgOnlyMode,
-		disableSynthetic:         disableSynthetic,
-		healthCheckEnabled:       healthCheckEnabled,
-		healthCheckTimeout:       time.Duration(healthTimeoutMS) * time.Millisecond,
-		healthCacheTTL:           time.Duration(healthCacheSec) * time.Second,
-		preferredExitCountry:     preferredExitCountry,
-		preferredExitRegion:      preferredExitRegion,
-		minGeoConfidence:         minGeoConfidence,
-		localityFallbackOrder:    localityFallbackOrder,
-		strictExitLocality:       strictExitLocality,
-		localitySoftBias:         localitySoftBias,
-		localityCountryBias:      localityCountryBias,
-		localityRegionBias:       localityRegionBias,
-		localityRegionPrefixBias: localityRegionPrefixBias,
-		maxExitsPerOperator:      maxExitsPerOperator,
-		requireDistinctOps:       requireDistinctOps,
-		requireDistinctCountries: requireDistinctCountries,
-		pathProfile:              pathProfile,
-		pathProfileConfigError:   pathProfileConfigError,
-		preferMiddleRelay:        preferMiddleRelay,
-		requireMiddleRelay:       requireMiddleRelay,
-		stickyPairSec:            stickyPairSec,
-		entryRotationSec:         entryRotationSec,
-		entryRotationJitterPct:   entryRotationJitterPct,
-		entryRotationSeed:        entryRotationSeed,
-		sessionReuse:             sessionReuse,
-		sessionRefreshLeadSec:    sessionRefreshLeadSec,
-		sessionMinRefreshSec:     sessionMinRefreshSec,
-		pathOpenMaxAttempts:      pathOpenMaxAttempts,
-		maxPairCandidates:        maxPairCandidates,
-		bootstrapInterval:        time.Duration(bootstrapIntervalSec) * time.Second,
-		bootstrapBackoffMax:      time.Duration(bootstrapBackoffMaxSec) * time.Second,
-		bootstrapJitterPct:       bootstrapJitterPct,
-		bootstrapInitialDelay:    time.Duration(bootstrapInitialDelaySec) * time.Second,
-		startupSyncTimeout:       time.Duration(startupSyncTimeoutSec) * time.Second,
-		exitExplorationPct:       exitExplorationPct,
-		exitSelectionSeed:        exitSelectionSeed,
-		selectionFeedDisable:     selectionFeedDisable,
-		selectionFeedRequire:     selectionFeedRequire,
-		selectionFeedMinVotes:    selectionFeedMinVotes,
-		trustFeedDisable:         trustFeedDisable,
-		trustFeedRequire:         trustFeedRequire,
-		trustFeedMinVotes:        trustFeedMinVotes,
-		allowUnknownExitFallback: allowUnknownExitFallback,
-		allowDirectExitFallback:  allowDirectExitFallback,
-		forceDirectExit:          forceDirectExit,
-		healthCache:              make(map[string]healthProbeState),
-		httpClient:               &http.Client{Timeout: 5 * time.Second},
-		betaStrict:               betaStrict,
-		prodStrict:               prodStrict,
+		directoryURL:                   directoryURL,
+		directoryURLs:                  directoryURLs,
+		directoryMinSources:            directoryMinSources,
+		directoryMinOperators:          directoryMinOperators,
+		directoryMinVotes:              directoryMinVotes,
+		issuerURL:                      issuerURL,
+		subject:                        subject,
+		anonCred:                       anonCred,
+		entryURL:                       entryURL,
+		exitControlURL:                 exitControlURL,
+		dataMode:                       dataMode,
+		clientWGPub:                    clientWGPub,
+		trustStrict:                    trustStrict,
+		trustTOFU:                      trustTOFU,
+		trustFile:                      trustFile,
+		innerSource:                    innerSource,
+		innerUDPAddr:                   innerUDPAddr,
+		innerMaxPkts:                   innerMaxPkts,
+		opaqueSinkAddr:                 opaqueSinkAddr,
+		opaqueDrainMS:                  opaqueDrainMS,
+		opaqueSessionSec:               opaqueSessionSec,
+		opaqueInitialUpMS:              opaqueInitialUpMS,
+		wgBackend:                      wgBackend,
+		wgInterface:                    wgInterface,
+		wgPrivateKey:                   wgPrivateKey,
+		wgAllowedIPs:                   wgAllowedIPs,
+		wgInstallRoute:                 wgInstallRoute,
+		wgKernelProxy:                  wgKernelProxy,
+		wgProxyAddr:                    wgProxyAddr,
+		wgManager:                      wgManager,
+		liveWGMode:                     liveWGMode,
+		wgOnlyMode:                     wgOnlyMode,
+		disableSynthetic:               disableSynthetic,
+		healthCheckEnabled:             healthCheckEnabled,
+		healthCheckTimeout:             time.Duration(healthTimeoutMS) * time.Millisecond,
+		healthCacheTTL:                 time.Duration(healthCacheSec) * time.Second,
+		preferredExitCountry:           preferredExitCountry,
+		preferredExitRegion:            preferredExitRegion,
+		minGeoConfidence:               minGeoConfidence,
+		localityFallbackOrder:          localityFallbackOrder,
+		strictExitLocality:             strictExitLocality,
+		localitySoftBias:               localitySoftBias,
+		localityCountryBias:            localityCountryBias,
+		localityRegionBias:             localityRegionBias,
+		localityRegionPrefixBias:       localityRegionPrefixBias,
+		maxExitsPerOperator:            maxExitsPerOperator,
+		requireDistinctOps:             requireDistinctOps,
+		requireDistinctCountries:       requireDistinctCountries,
+		pathProfile:                    pathProfile,
+		pathProfileConfigError:         pathProfileConfigError,
+		preferMiddleRelay:              preferMiddleRelay,
+		requireMiddleRelay:             requireMiddleRelay,
+		stickyPairSec:                  stickyPairSec,
+		entryRotationSec:               entryRotationSec,
+		entryRotationJitterPct:         entryRotationJitterPct,
+		entryRotationSeed:              entryRotationSeed,
+		sessionReuse:                   sessionReuse,
+		sessionRefreshLeadSec:          sessionRefreshLeadSec,
+		sessionMinRefreshSec:           sessionMinRefreshSec,
+		pathOpenMaxAttempts:            pathOpenMaxAttempts,
+		maxPairCandidates:              maxPairCandidates,
+		bootstrapInterval:              time.Duration(bootstrapIntervalSec) * time.Second,
+		bootstrapBackoffMax:            time.Duration(bootstrapBackoffMaxSec) * time.Second,
+		bootstrapJitterPct:             bootstrapJitterPct,
+		bootstrapInitialDelay:          time.Duration(bootstrapInitialDelaySec) * time.Second,
+		startupSyncTimeout:             time.Duration(startupSyncTimeoutSec) * time.Second,
+		exitExplorationPct:             exitExplorationPct,
+		exitSelectionSeed:              exitSelectionSeed,
+		selectionFeedDisable:           selectionFeedDisable,
+		selectionFeedRequire:           selectionFeedRequire,
+		selectionFeedMinVotes:          selectionFeedMinVotes,
+		trustFeedDisable:               trustFeedDisable,
+		trustFeedRequire:               trustFeedRequire,
+		trustFeedMinVotes:              trustFeedMinVotes,
+		allowUnknownExitFallback:       allowUnknownExitFallback,
+		allowDirectExitFallback:        allowDirectExitFallback,
+		directExitSupportMode:          directExitSupportMode,
+		forceDirectExit:                forceDirectExit,
+		healthCache:                    make(map[string]healthProbeState),
+		httpClient:                     &http.Client{Timeout: 5 * time.Second},
+		betaStrict:                     betaStrict,
+		prodStrict:                     prodStrict,
+		settlementReservationID:        settlementReservationID,
+		settlementReservationSessionID: settlementReservationSessionID,
+		settlementReservationSubjectID: settlementReservationSubjectID,
+		clientStatusFile:               clientStatusFile,
 	}
 }
 
@@ -705,6 +744,9 @@ func (c *Client) Run(ctx context.Context) error {
 func (c *Client) validateRuntimeConfig() error {
 	if strings.TrimSpace(c.pathProfileConfigError) != "" {
 		return fmt.Errorf("%s", c.pathProfileConfigError)
+	}
+	if c.prodStrict && appAllowedIPsIncludeFullTunnel(c.wgAllowedIPs) && !c.wgInstallRoute {
+		return fmt.Errorf("PROD_STRICT_MODE full-tunnel WireGuard requires CLIENT_WG_INSTALL_ROUTE=1")
 	}
 	if securehttp.Enabled() {
 		if err := securehttp.Validate(); err != nil {
@@ -854,7 +896,13 @@ func (c *Client) validateRuntimeConfig() error {
 	if c.pathProfile == "3hop" && c.forceDirectExit {
 		return fmt.Errorf("CLIENT_PATH_PROFILE=3hop is incompatible with CLIENT_FORCE_DIRECT_EXIT=1")
 	}
+	if c.pathProfile == "1hop" && !c.forceDirectExit {
+		return fmt.Errorf("CLIENT_PATH_PROFILE=1hop requires CLIENT_FORCE_DIRECT_EXIT=1")
+	}
 	if c.forceDirectExit {
+		if c.preferMiddleRelay || c.requireMiddleRelay {
+			return fmt.Errorf("CLIENT_FORCE_DIRECT_EXIT is incompatible with middle-relay selection")
+		}
 		if c.wgOnlyMode || c.betaStrict || c.prodStrict {
 			return fmt.Errorf("CLIENT_FORCE_DIRECT_EXIT is not allowed in strict modes")
 		}
@@ -869,11 +917,37 @@ func (c *Client) validateRuntimeConfig() error {
 		if c.wgOnlyMode || c.betaStrict || c.prodStrict {
 			return fmt.Errorf("CLIENT_ALLOW_DIRECT_EXIT_FALLBACK is not allowed in strict modes")
 		}
+		if !c.directExitFallbackExplicitlyAllowed() {
+			return fmt.Errorf("CLIENT_ALLOW_DIRECT_EXIT_FALLBACK requires explicit direct-exit mode (CLIENT_FORCE_DIRECT_EXIT=1, CLIENT_PATH_PROFILE=1hop, or CLIENT_DIRECT_EXIT_SUPPORT_MODE=1); path_profile=%s middle_pref=%t middle_required=%t",
+				c.pathProfile, c.preferMiddleRelay, c.requireMiddleRelay)
+		}
 		if c.requireDistinctOps {
 			return fmt.Errorf("CLIENT_ALLOW_DIRECT_EXIT_FALLBACK requires CLIENT_REQUIRE_DISTINCT_OPERATORS=0")
 		}
 	}
 	return nil
+}
+
+func appAllowedIPsIncludeFullTunnel(raw string) bool {
+	allowedIPs := strings.TrimSpace(raw)
+	if allowedIPs == "" {
+		allowedIPs = wg.DefaultFullTunnelAllowedIPs
+	}
+	for _, part := range strings.Split(allowedIPs, ",") {
+		cidr := strings.TrimSpace(part)
+		if cidr == "" {
+			continue
+		}
+		_, ipNet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		ones, bits := ipNet.Mask.Size()
+		if ones == 0 && (bits == 32 || bits == 128) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) ensureStartupControlPlaneSync(ctx context.Context) error {
@@ -1017,6 +1091,13 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		strictRequireMiddle = true
 	}
 	if len(pairs) == 0 {
+		if c.directExitSelectionMode() {
+			if c.strictExitLocality && (c.preferredExitCountry != "" || c.preferredExitRegion != "") {
+				return fmt.Errorf("no suitable direct-exit relays found for strict locality country=%s region=%s",
+					c.preferredExitCountry, c.preferredExitRegion)
+			}
+			return fmt.Errorf("no suitable direct-exit relays found")
+		}
 		if strictRequireMiddle {
 			return fmt.Errorf("no suitable relay path found: middle-hop relay requirement not met")
 		}
@@ -1036,9 +1117,14 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		pathControlURL  string
 	)
 	_, err = attemptPairs(pairs, c.pathOpenMaxAttempts, func(pair relayPair) error {
-		entryControlURL = c.entryControlURLFor(pair.entry)
 		exitControlURL = c.exitControlURLFor(pair.exit)
-		pathControlURL = entryControlURL
+		if c.forceDirectExit {
+			entryControlURL = ""
+			pathControlURL = exitControlURL
+		} else {
+			entryControlURL = c.entryControlURLFor(pair.entry)
+			pathControlURL = entryControlURL
+		}
 
 		popPub, popPriv, err := crypto.GenerateEd25519Keypair()
 		if err != nil {
@@ -1054,6 +1140,7 @@ func (c *Client) bootstrap(ctx context.Context) error {
 			Subject:   c.subject,
 			TokenType: crypto.TokenTypeClientAccess,
 			PopPubKey: popPubB64,
+			Transport: requestedTransport(c.dataMode),
 			ExitScope: []string{pair.exit.RelayID},
 			AnonCred:  c.anonCred,
 		}
@@ -1063,35 +1150,63 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		}
 
 		openReq := proto.PathOpenRequest{
-			ExitID:          pair.exit.RelayID,
-			Token:           tok.Token,
-			ClientInnerPub:  c.clientWGPub,
-			Transport:       requestedTransport(c.dataMode),
-			RequestedMTU:    1280,
-			RequestedRegion: pair.exit.Region,
+			ExitID:               pair.exit.RelayID,
+			PathProfile:          strings.TrimSpace(c.pathProfile),
+			Token:                tok.Token,
+			ReservationID:        c.settlementReservationID,
+			ReservationSessionID: c.settlementReservationSessionID,
+			ReservationSubjectID: c.settlementReservationSubjectID,
+			SessionID:            c.settlementReservationSessionID,
+			ClientInnerPub:       c.clientWGPub,
+			Transport:            requestedTransport(c.dataMode),
+			RequestedMTU:         1280,
+			RequestedRegion:      pair.exit.Region,
+		}
+		if c.prodStrict {
+			if strings.TrimSpace(openReq.ReservationID) == "" || strings.TrimSpace(openReq.ReservationSessionID) == "" || strings.TrimSpace(openReq.ReservationSubjectID) == "" {
+				return fmt.Errorf("production client requires GPM settlement reservation id, reservation session id, and reservation subject id")
+			}
 		}
 		tokenProofNonce, nonceErr := randomProofNonce()
 		if nonceErr != nil {
 			return fmt.Errorf("generate token proof nonce for exit=%s: %w", pair.exit.RelayID, nonceErr)
 		}
 		openReq.TokenProofNonce = tokenProofNonce
+		if strings.TrimSpace(openReq.SessionID) == "" {
+			generatedSessionID, sidErr := randomSessionIDHex(16)
+			if sidErr != nil {
+				return fmt.Errorf("generate path-open session id for exit=%s: %w", pair.exit.RelayID, sidErr)
+			}
+			openReq.SessionID = generatedSessionID
+		}
 		if pair.hasMiddle {
 			openReq.MiddleRelayID = strings.TrimSpace(pair.middle.RelayID)
 		}
-		tokenProof, err := crypto.SignPathOpenProof(popPriv, crypto.PathOpenProofInput{
-			Token:           openReq.Token,
-			ExitID:          openReq.ExitID,
-			MiddleRelayID:   openReq.MiddleRelayID,
-			TokenProofNonce: openReq.TokenProofNonce,
-			ClientInnerPub:  openReq.ClientInnerPub,
-			Transport:       openReq.Transport,
-			RequestedMTU:    openReq.RequestedMTU,
-			RequestedRegion: openReq.RequestedRegion,
-		})
-		if err != nil {
-			return fmt.Errorf("sign token proof for exit=%s: %w", pair.exit.RelayID, err)
+		openReq.ClientRouteAssertion = clientRouteAssertionForPair(pair, openReq.PathProfile, openReq.MiddleRelayID, openReq.ReservationID, openReq.ReservationSessionID, openReq.ReservationSubjectID)
+		bindClientRouteAssertionToRequest(openReq.ClientRouteAssertion, openReq)
+		signPathOpenRequest := func(req *proto.PathOpenRequest) error {
+			tokenProof, err := crypto.SignPathOpenProof(popPriv, crypto.PathOpenProofInput{
+				Token:                req.Token,
+				ExitID:               req.ExitID,
+				MiddleRelayID:        req.MiddleRelayID,
+				PathProfile:          req.PathProfile,
+				SessionID:            req.SessionID,
+				TokenProofNonce:      req.TokenProofNonce,
+				ReservationID:        req.ReservationID,
+				ReservationSessionID: req.ReservationSessionID,
+				ReservationSubjectID: req.ReservationSubjectID,
+				ClientInnerPub:       req.ClientInnerPub,
+				Transport:            req.Transport,
+				RequestedMTU:         req.RequestedMTU,
+				RequestedRegion:      req.RequestedRegion,
+				ClientRoute:          cryptoPathRouteAssertionInput(req.ClientRouteAssertion),
+			})
+			if err != nil {
+				return err
+			}
+			req.TokenProof = tokenProof
+			return nil
 		}
-		openReq.TokenProof = tokenProof
 
 		var resp proto.PathOpenResponse
 		var openErr error
@@ -1100,12 +1215,11 @@ func (c *Client) bootstrap(ctx context.Context) error {
 			if exitDataAddr == "" {
 				return fmt.Errorf("direct-exit mode missing endpoint for exit=%s", pair.exit.RelayID)
 			}
-			directReq := openReq
-			sessionID, sidErr := randomSessionIDHex(16)
-			if sidErr != nil {
-				return fmt.Errorf("generate direct-exit mode session id for exit=%s: %w", pair.exit.RelayID, sidErr)
+			directReq := directPathOpenRequestForPair(openReq, pair)
+			sessionID := strings.TrimSpace(directReq.SessionID)
+			if err := signPathOpenRequest(&directReq); err != nil {
+				return fmt.Errorf("sign token proof for exit=%s: %w", pair.exit.RelayID, err)
 			}
-			directReq.SessionID = sessionID
 			directResp, directErr := c.openPathWithChallenge(ctx, exitControlURL, directReq)
 			if directErr != nil {
 				return directErr
@@ -1123,18 +1237,20 @@ func (c *Client) bootstrap(ctx context.Context) error {
 			pathControlURL = exitControlURL
 			log.Printf("client direct-exit mode engaged entry=%s exit=%s", pair.entry.RelayID, pair.exit.RelayID)
 		} else {
+			if err := signPathOpenRequest(&openReq); err != nil {
+				return fmt.Errorf("sign token proof for exit=%s: %w", pair.exit.RelayID, err)
+			}
 			resp, openErr = c.openPathWithChallenge(ctx, entryControlURL, openReq)
 			if openErr != nil && c.shouldRetryDirectExitFallback(openErr) {
 				exitDataAddr := strings.TrimSpace(pair.exit.Endpoint)
 				if exitDataAddr == "" {
 					return fmt.Errorf("direct-exit fallback missing endpoint for exit=%s", pair.exit.RelayID)
 				}
-				directReq := openReq
-				sessionID, sidErr := randomSessionIDHex(16)
-				if sidErr != nil {
-					return fmt.Errorf("generate direct-exit fallback session id for exit=%s: %w", pair.exit.RelayID, sidErr)
+				directReq := directPathOpenRequestForPair(openReq, pair)
+				sessionID := strings.TrimSpace(directReq.SessionID)
+				if err := signPathOpenRequest(&directReq); err != nil {
+					return fmt.Errorf("sign token proof for exit=%s: %w", pair.exit.RelayID, err)
 				}
-				directReq.SessionID = sessionID
 				directResp, directErr := c.openPathWithChallenge(ctx, exitControlURL, directReq)
 				if directErr == nil {
 					if strings.TrimSpace(directResp.SessionID) == "" {
@@ -1172,7 +1288,28 @@ func (c *Client) bootstrap(ctx context.Context) error {
 	}
 	c.rememberSelectedPair(selectedPair, time.Now())
 
-	if pathResp.SessionID == "" || pathResp.EntryDataAddr == "" {
+	if pathResp.SessionID == "" {
+		return fmt.Errorf("path open missing session data")
+	}
+	cleanupSession := clientActiveSession{
+		sessionID:       pathResp.SessionID,
+		sessionExp:      pathResp.SessionExp,
+		entryControlURL: pathControlURL,
+		sessionKeyID:    pathResp.SessionKeyID,
+		clientInnerPub:  c.clientWGPub,
+	}
+	cleanupArmed := true
+	defer func() {
+		if !cleanupArmed {
+			return
+		}
+		closeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := c.closeSession(closeCtx, cleanupSession); err != nil {
+			log.Printf("client cleanup failed after incomplete session setup session=%s err=%v", cleanupSession.sessionID, err)
+		}
+	}()
+	if pathResp.EntryDataAddr == "" {
 		return fmt.Errorf("path open missing session data")
 	}
 	if pathResp.Transport != "" && pathResp.Transport != requestedTransport(c.dataMode) {
@@ -1181,6 +1318,8 @@ func (c *Client) bootstrap(ctx context.Context) error {
 	if err := c.validatePathOpenEntryDataAddrBinding(pathControlURL, selectedPair, pathResp.EntryDataAddr); err != nil {
 		return err
 	}
+	openedViaDirectExit := c.pathOpenUsedDirectExit(pathControlURL, selectedPair)
+	openedViaDirectFallback := openedViaDirectExit && !c.directExitSelectionMode()
 	transport := pathResp.Transport
 	if transport == "" {
 		transport = requestedTransport(c.dataMode)
@@ -1189,6 +1328,21 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		if err := validatePathOpenWireGuardFields(pathResp.ExitInnerPub, pathResp.ClientInnerIP, pathResp.EntryDataAddr); err != nil {
 			return err
 		}
+	}
+	cleanupSession.transport = transport
+	cleanupSession.entryDataAddr = pathResp.EntryDataAddr
+	cleanupSession.exitInnerPub = pathResp.ExitInnerPub
+	if transport == "wireguard-udp" {
+		cleanupSession.clientInnerIP = pathResp.ClientInnerIP
+		cleanupSession.wgAllowedIPs = c.wgAllowedIPs
+		cleanupSession.wgInstallRoute = c.wgInstallRoute
+	}
+	pathMode := clientVPNPathModeRelay
+	switch {
+	case openedViaDirectFallback:
+		pathMode = clientVPNPathModeDirectFallback
+	case openedViaDirectExit:
+		pathMode = clientVPNPathModeDirect
 	}
 	var wgKernelProxy *clientWGKernelProxy
 	if transport == "wireguard-udp" && c.wgKernelProxy {
@@ -1227,6 +1381,23 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		if err := c.wgManager.ConfigureClientSession(ctx, cfg); err != nil {
 			return fmt.Errorf("client wg configure failed: %w", err)
 		}
+		if wgKernelProxy != nil {
+			log.Printf("client wg-kernel proxy listening: interface=%s addr=%s allowed_ips=%s install_route=%t session=%s",
+				cfg.Interface,
+				cfg.Endpoint,
+				cfg.AllowedIPs,
+				cfg.InstallRoute,
+				cfg.SessionID,
+			)
+		} else {
+			log.Printf("client wireguard runtime ready: interface=%s endpoint=%s allowed_ips=%s install_route=%t session=%s",
+				cfg.Interface,
+				cfg.Endpoint,
+				cfg.AllowedIPs,
+				cfg.InstallRoute,
+				cfg.SessionID,
+			)
+		}
 	}
 
 	if wgKernelProxy != nil {
@@ -1241,9 +1412,22 @@ func (c *Client) bootstrap(ctx context.Context) error {
 
 	middleRelayID := ""
 	middleOperatorID := ""
+	middleCountryCode := ""
 	if selectedPair.hasMiddle {
 		middleRelayID = selectedPair.middle.RelayID
 		middleOperatorID = strings.TrimSpace(selectedPair.middle.OperatorID)
+		middleCountryCode = normalizeCountryCode(selectedPair.middle.CountryCode)
+	}
+	entryRelayID := selectedPair.entry.RelayID
+	entryOperatorID := strings.TrimSpace(selectedPair.entry.OperatorID)
+	entryCountryCode := normalizeCountryCode(selectedPair.entry.CountryCode)
+	if openedViaDirectExit {
+		entryRelayID = ""
+		entryOperatorID = ""
+		entryCountryCode = ""
+		middleRelayID = ""
+		middleOperatorID = ""
+		middleCountryCode = ""
 	}
 	middleRelayLabel := middleRelayID
 	if middleRelayLabel == "" {
@@ -1263,21 +1447,60 @@ func (c *Client) bootstrap(ctx context.Context) error {
 	)
 	now := time.Now()
 	session := clientActiveSession{
-		sessionID:       pathResp.SessionID,
-		sessionExp:      pathResp.SessionExp,
-		establishedAt:   now,
-		transport:       transport,
-		entryDataAddr:   pathResp.EntryDataAddr,
-		entryControlURL: pathControlURL,
-		sessionKeyID:    pathResp.SessionKeyID,
-		exitInnerPub:    pathResp.ExitInnerPub,
-		entryRelayID:    selectedPair.entry.RelayID,
-		middleRelayID:   middleRelayID,
-		exitRelayID:     selectedPair.exit.RelayID,
+		sessionID:         pathResp.SessionID,
+		sessionExp:        pathResp.SessionExp,
+		establishedAt:     now,
+		transport:         transport,
+		entryDataAddr:     pathResp.EntryDataAddr,
+		entryControlURL:   pathControlURL,
+		sessionKeyID:      pathResp.SessionKeyID,
+		exitInnerPub:      pathResp.ExitInnerPub,
+		clientInnerPub:    c.clientWGPub,
+		clientInnerIP:     pathResp.ClientInnerIP,
+		wgAllowedIPs:      c.wgAllowedIPs,
+		wgInstallRoute:    c.wgInstallRoute,
+		entryRelayID:      entryRelayID,
+		middleRelayID:     middleRelayID,
+		exitRelayID:       selectedPair.exit.RelayID,
+		exitRole:          strings.ToLower(strings.TrimSpace(selectedPair.exit.Role)),
+		entryOperatorID:   entryOperatorID,
+		middleOperatorID:  middleOperatorID,
+		exitOperatorID:    strings.TrimSpace(selectedPair.exit.OperatorID),
+		entryCountryCode:  entryCountryCode,
+		middleCountryCode: middleCountryCode,
+		exitCountryCode:   normalizeCountryCode(selectedPair.exit.CountryCode),
+		pathMode:          pathMode,
 	}
 	previousSession, hadPreviousSession := c.snapshotActiveSession()
 	if c.sessionReuse {
+		if openedViaDirectFallback {
+			log.Printf("client not keeping active session session=%s reason=direct-exit-fallback-not-durable", session.sessionID)
+			if hadPreviousSession && strings.TrimSpace(previousSession.sessionID) != "" && previousSession.sessionID != session.sessionID {
+				c.completeSessionHandoff(previousSession, session)
+			}
+			if err := c.closeSession(ctx, session); err != nil {
+				return err
+			}
+			c.recordClientVPNStatus(session, false)
+			cleanupArmed = false
+			c.clearActiveSession()
+			return nil
+		}
+		if c.activeSessionRequiresKernelProxyRuntime(session) {
+			log.Printf("client not keeping active session session=%s reason=kernel-proxy-runtime-not-durable", session.sessionID)
+			if hadPreviousSession && strings.TrimSpace(previousSession.sessionID) != "" && previousSession.sessionID != session.sessionID {
+				c.completeSessionHandoff(previousSession, session)
+			}
+			if err := c.closeSession(ctx, session); err != nil {
+				return err
+			}
+			c.recordClientVPNStatus(session, false)
+			cleanupArmed = false
+			c.clearActiveSession()
+			return nil
+		}
 		c.storeActiveSession(session)
+		cleanupArmed = false
 		if c.activeSessionNeedsRefresh(session, now) {
 			remaining := int(time.Unix(session.sessionExp, 0).Sub(now) / time.Second)
 			log.Printf("client keeping active session near-expiry session=%s remaining_sec=%d lead_sec=%d",
@@ -1294,6 +1517,8 @@ func (c *Client) bootstrap(ctx context.Context) error {
 	if err := c.closeSession(ctx, session); err != nil {
 		return err
 	}
+	c.recordClientVPNStatus(session, false)
+	cleanupArmed = false
 	c.clearActiveSession()
 	return nil
 }
@@ -1309,9 +1534,92 @@ func (c *Client) shouldRetryDirectExitFallback(err error) bool {
 	if err == nil || !c.allowDirectExitFallback {
 		return false
 	}
+	if !c.directExitFallbackExplicitlyAllowed() {
+		log.Printf("client direct-exit fallback blocked by path policy: path_profile=%s middle_pref=%t middle_required=%t support_mode=%t",
+			c.pathProfile, c.preferMiddleRelay, c.requireMiddleRelay, c.directExitSupportMode)
+		return false
+	}
 	msg := err.Error()
 	return isUnknownExitPathOpenError(err) ||
 		strings.Contains(msg, "path open denied: entry-exit-operator-collision")
+}
+
+func (c *Client) directExitFallbackExplicitlyAllowed() bool {
+	if c.middleRelaySelectionMode() {
+		return false
+	}
+	return c.forceDirectExit || c.pathProfile == "1hop" || c.directExitSupportMode
+}
+
+func (c *Client) middleRelaySelectionMode() bool {
+	return c.pathProfile == "3hop" || c.preferMiddleRelay || c.requireMiddleRelay
+}
+
+func clientRouteAssertionForPair(pair relayPair, pathProfile string, middleRelayID string, reservationID string, reservationSessionID string, reservationSubjectID string) *proto.PathRouteAssertion {
+	return &proto.PathRouteAssertion{
+		PathProfile:          strings.TrimSpace(pathProfile),
+		EntryRelayID:         strings.TrimSpace(pair.entry.RelayID),
+		MiddleRelayID:        strings.TrimSpace(middleRelayID),
+		ExitRelayID:          strings.TrimSpace(pair.exit.RelayID),
+		SessionID:            strings.TrimSpace(reservationSessionID),
+		ReservationID:        strings.TrimSpace(reservationID),
+		ReservationSessionID: strings.TrimSpace(reservationSessionID),
+		ReservationSubjectID: strings.TrimSpace(reservationSubjectID),
+	}
+}
+
+func directPathOpenRequestForPair(req proto.PathOpenRequest, pair relayPair) proto.PathOpenRequest {
+	req.PathProfile = "1hop"
+	req.MiddleRelayID = ""
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(req.ReservationSessionID)
+	}
+	req.SessionID = sessionID
+	req.ClientRouteAssertion = clientRouteAssertionForPair(relayPair{exit: pair.exit}, req.PathProfile, "", req.ReservationID, req.ReservationSessionID, req.ReservationSubjectID)
+	bindClientRouteAssertionToRequest(req.ClientRouteAssertion, req)
+	return req
+}
+
+func bindClientRouteAssertionToRequest(assertion *proto.PathRouteAssertion, req proto.PathOpenRequest) {
+	if assertion == nil {
+		return
+	}
+	assertion.SessionID = strings.TrimSpace(req.SessionID)
+	assertion.TokenProofNonce = strings.TrimSpace(req.TokenProofNonce)
+	assertion.ReservationID = strings.TrimSpace(req.ReservationID)
+	assertion.ReservationSessionID = strings.TrimSpace(req.ReservationSessionID)
+	assertion.ReservationSubjectID = strings.TrimSpace(req.ReservationSubjectID)
+	assertion.ClientInnerPub = strings.TrimSpace(req.ClientInnerPub)
+	assertion.Transport = strings.TrimSpace(req.Transport)
+	assertion.RequestedMTU = req.RequestedMTU
+	assertion.RequestedRegion = strings.TrimSpace(req.RequestedRegion)
+	assertion.TokenSHA256 = crypto.PathRouteAssertionBindingHash(req.Token)
+}
+
+func cryptoPathRouteAssertionInput(assertion *proto.PathRouteAssertion) crypto.PathRouteAssertionInput {
+	if assertion == nil {
+		return crypto.PathRouteAssertionInput{}
+	}
+	return crypto.PathRouteAssertionInput{
+		PathProfile:          assertion.PathProfile,
+		EntryRelayID:         assertion.EntryRelayID,
+		MiddleRelayID:        assertion.MiddleRelayID,
+		ExitRelayID:          assertion.ExitRelayID,
+		SessionID:            assertion.SessionID,
+		TokenProofNonce:      assertion.TokenProofNonce,
+		ReservationID:        assertion.ReservationID,
+		ReservationSessionID: assertion.ReservationSessionID,
+		ReservationSubjectID: assertion.ReservationSubjectID,
+		ClientInnerPub:       assertion.ClientInnerPub,
+		Transport:            assertion.Transport,
+		RequestedMTU:         assertion.RequestedMTU,
+		RequestedRegion:      assertion.RequestedRegion,
+		TokenSHA256:          assertion.TokenSHA256,
+		TokenProofSHA256:     assertion.TokenProofSHA256,
+		SignerPubKey:         assertion.SignerPubKey,
+		Signature:            assertion.Signature,
+	}
 }
 
 func isUnknownExitPathOpenError(err error) bool {
@@ -1370,8 +1678,7 @@ func (c *Client) validatePathOpenEntryDataAddrBinding(pathControlURL string, pai
 	}
 	expected := strings.TrimSpace(pair.entry.Endpoint)
 	mode := "entry"
-	exitControlURL := normalizeControlURL(c.exitControlURLFor(pair.exit))
-	if normalizeControlURL(pathControlURL) != "" && normalizeControlURL(pathControlURL) == exitControlURL {
+	if c.pathOpenUsedDirectExit(pathControlURL, pair) {
 		expected = strings.TrimSpace(pair.exit.Endpoint)
 		mode = "direct-exit"
 	}
@@ -1389,22 +1696,31 @@ func (c *Client) validatePathOpenEntryDataAddrBinding(pathControlURL string, pai
 	return nil
 }
 
+func (c *Client) pathOpenUsedDirectExit(pathControlURL string, pair relayPair) bool {
+	exitControlURL := normalizeControlURL(c.exitControlURLFor(pair.exit))
+	return normalizeControlURL(pathControlURL) != "" && normalizeControlURL(pathControlURL) == exitControlURL
+}
+
 func udpEndpointEqual(expected string, got string) bool {
-	expectedAddr, err := net.ResolveUDPAddr("udp", strings.TrimSpace(expected))
-	if err != nil || expectedAddr == nil {
+	expectedHost, expectedPort, err := net.SplitHostPort(strings.TrimSpace(expected))
+	if err != nil {
 		return false
 	}
-	gotAddr, err := net.ResolveUDPAddr("udp", strings.TrimSpace(got))
-	if err != nil || gotAddr == nil {
+	gotHost, gotPort, err := net.SplitHostPort(strings.TrimSpace(got))
+	if err != nil {
 		return false
 	}
-	if expectedAddr.Port != gotAddr.Port {
+	if expectedPort != gotPort {
 		return false
 	}
-	if expectedAddr.IP == nil || gotAddr.IP == nil {
-		return false
+	expectedHost = strings.TrimSpace(expectedHost)
+	gotHost = strings.TrimSpace(gotHost)
+	expectedIP := net.ParseIP(expectedHost)
+	gotIP := net.ParseIP(gotHost)
+	if expectedIP != nil || gotIP != nil {
+		return expectedIP != nil && gotIP != nil && expectedIP.Equal(gotIP)
 	}
-	return expectedAddr.IP.Equal(gotAddr.IP)
+	return strings.EqualFold(expectedHost, gotHost)
 }
 
 func (c *Client) sendTrafficForTransport(ctx context.Context, transport string, entryDataAddr string, sessionID string) error {
@@ -1412,25 +1728,21 @@ func (c *Client) sendTrafficForTransport(ctx context.Context, transport string, 
 	case "wireguard-udp":
 		return c.sendOpaqueTraffic(ctx, entryDataAddr, sessionID)
 	case "policy-json":
-		firstNonce, firstNonceErr := randomNonce()
-		if firstNonceErr != nil {
-			return firstNonceErr
+		nonceSeq, err := newPacketNonceGenerator()
+		if err != nil {
+			return err
 		}
 		if err := c.sendJSONInnerPacket(entryDataAddr, sessionID, proto.InnerPacket{
 			DestinationPort: 443,
 			Payload:         "hello-over-two-hop",
-			Nonce:           firstNonce,
+			Nonce:           nonceSeq.Next(),
 		}); err != nil {
 			return err
-		}
-		secondNonce, secondNonceErr := randomNonce()
-		if secondNonceErr != nil {
-			return secondNonceErr
 		}
 		if err := c.sendJSONInnerPacket(entryDataAddr, sessionID, proto.InnerPacket{
 			DestinationPort: 25,
 			Payload:         "smtp-probe",
-			Nonce:           secondNonce,
+			Nonce:           nonceSeq.Next(),
 		}); err != nil {
 			return err
 		}
@@ -1531,6 +1843,10 @@ func (c *Client) runWGKernelProxyTraffic(ctx context.Context, proxy *clientWGKer
 	if proxy == nil {
 		return nil
 	}
+	nonceSeq, err := newPacketNonceGenerator()
+	if err != nil {
+		return err
+	}
 	window := c.opaqueBridgeWindow()
 	sessionCtx, cancel := context.WithTimeout(ctx, window)
 	defer cancel()
@@ -1593,12 +1909,7 @@ func (c *Client) runWGKernelProxyTraffic(ctx context.Context, proxy *clientWGKer
 				continue
 			}
 			proxy.setWGPeer(src)
-			nonce, nonceErr := randomNonce()
-			if nonceErr != nil {
-				setErr(nonceErr)
-				return
-			}
-			if err := c.sendOpaqueInnerPacketConn(proxy.outerConn, proxy.sessionID, nonce, payload); err != nil {
+			if err := c.sendOpaqueInnerPacketConn(proxy.outerConn, proxy.sessionID, nonceSeq.Next(), payload); err != nil {
 				setErr(err)
 				return
 			}
@@ -1675,7 +1986,7 @@ func (c *Client) runWGKernelProxyTraffic(ctx context.Context, proxy *clientWGKer
 	workers.Wait()
 
 	errMu.Lock()
-	err := firstErr
+	err = firstErr
 	errMu.Unlock()
 	if err != nil {
 		return err
@@ -1705,6 +2016,10 @@ func (c *Client) sendOpaqueTraffic(ctx context.Context, entryDataAddr string, se
 		return err
 	}
 	defer outerConn.Close()
+	nonceSeq, err := newPacketNonceGenerator()
+	if err != nil {
+		return err
+	}
 
 	var sinkConn *net.UDPConn
 	if c.opaqueSinkAddr != "" {
@@ -1720,11 +2035,7 @@ func (c *Client) sendOpaqueTraffic(ctx context.Context, entryDataAddr string, se
 	}
 
 	sendOpaque := func(payload []byte) error {
-		nonce, nonceErr := randomNonce()
-		if nonceErr != nil {
-			return nonceErr
-		}
-		return c.sendOpaqueInnerPacketConn(outerConn, sessionID, nonce, payload)
+		return c.sendOpaqueInnerPacketConn(outerConn, sessionID, nonceSeq.Next(), payload)
 	}
 	if c.opaqueSessionSec > 0 {
 		return c.runOpaqueSession(ctx, outerConn, sessionID, sinkConn, sendOpaque)
@@ -2115,11 +2426,16 @@ func (c *Client) applyEntryRotation(entries []proto.RelayDescriptor, now time.Ti
 }
 
 func (c *Client) rememberSelectedPair(pair relayPair, now time.Time) {
-	if strings.TrimSpace(pair.entry.RelayID) == "" || strings.TrimSpace(pair.exit.RelayID) == "" {
+	entryID := strings.TrimSpace(pair.entry.RelayID)
+	exitID := strings.TrimSpace(pair.exit.RelayID)
+	if exitID == "" {
 		return
 	}
-	c.lastSelectedEntry = pair.entry.RelayID
-	c.lastSelectedExit = pair.exit.RelayID
+	if entryID == "" && !c.directExitSelectionMode() {
+		return
+	}
+	c.lastSelectedEntry = entryID
+	c.lastSelectedExit = exitID
 	c.lastSelectedAt = now
 }
 
@@ -2127,7 +2443,10 @@ func (c *Client) applyStickyPairPreference(pairs []relayPair, now time.Time) []r
 	if len(pairs) <= 1 || c.stickyPairSec <= 0 {
 		return pairs
 	}
-	if strings.TrimSpace(c.lastSelectedEntry) == "" || strings.TrimSpace(c.lastSelectedExit) == "" || c.lastSelectedAt.IsZero() {
+	if strings.TrimSpace(c.lastSelectedExit) == "" || c.lastSelectedAt.IsZero() {
+		return pairs
+	}
+	if strings.TrimSpace(c.lastSelectedEntry) == "" && !c.directExitSelectionMode() {
 		return pairs
 	}
 	maxAge := time.Duration(c.stickyPairSec) * time.Second
@@ -2140,7 +2459,9 @@ func (c *Client) applyStickyPairPreference(pairs []relayPair, now time.Time) []r
 	}
 	idx := -1
 	for i, pair := range pairs {
-		if pair.entry.RelayID == c.lastSelectedEntry && pair.exit.RelayID == c.lastSelectedExit {
+		entryID := strings.TrimSpace(pair.entry.RelayID)
+		exitID := strings.TrimSpace(pair.exit.RelayID)
+		if entryID == strings.TrimSpace(c.lastSelectedEntry) && exitID == strings.TrimSpace(c.lastSelectedExit) {
 			idx = i
 			break
 		}
@@ -2151,8 +2472,12 @@ func (c *Client) applyStickyPairPreference(pairs []relayPair, now time.Time) []r
 	sticky := pairs[idx]
 	copy(pairs[1:idx+1], pairs[0:idx])
 	pairs[0] = sticky
+	stickyEntry := strings.TrimSpace(sticky.entry.RelayID)
+	if stickyEntry == "" {
+		stickyEntry = "direct"
+	}
 	log.Printf("client sticky pair preference applied entry=%s exit=%s age_sec=%d",
-		sticky.entry.RelayID, sticky.exit.RelayID, int(age/time.Second))
+		stickyEntry, sticky.exit.RelayID, int(age/time.Second))
 	return pairs
 }
 
@@ -2166,6 +2491,7 @@ func (c *Client) storeActiveSession(session clientActiveSession) {
 	c.activeMu.Lock()
 	c.activeSession = session
 	c.activeMu.Unlock()
+	c.recordClientVPNStatus(session, true)
 }
 
 func (c *Client) snapshotActiveSession() (clientActiveSession, bool) {
@@ -2181,6 +2507,15 @@ func (c *Client) clearActiveSession() {
 	c.activeMu.Lock()
 	c.activeSession = clientActiveSession{}
 	c.activeMu.Unlock()
+}
+
+func (c *Client) clearActiveSessionIfCurrent(session clientActiveSession) {
+	c.activeMu.Lock()
+	defer c.activeMu.Unlock()
+	if c.activeSession.sessionID != session.sessionID || c.activeSession.sessionKeyID != session.sessionKeyID {
+		return
+	}
+	c.activeSession = clientActiveSession{}
 }
 
 func (c *Client) sessionRefreshLead() time.Duration {
@@ -2249,11 +2584,184 @@ func (c *Client) activeSessionNeedsRefresh(session clientActiveSession, now time
 	return true
 }
 
+func (c *Client) activeSessionSatisfiesCurrentPathPolicy(session clientActiveSession) (bool, string) {
+	entryID := strings.TrimSpace(session.entryRelayID)
+	middleID := strings.TrimSpace(session.middleRelayID)
+	exitID := strings.TrimSpace(session.exitRelayID)
+	if exitID == "" {
+		return false, "missing-exit"
+	}
+	if c.directExitSelectionMode() {
+		if entryID != "" {
+			return false, "direct-exit-required"
+		}
+		return true, ""
+	}
+	if entryID == "" {
+		return false, "missing-entry"
+	}
+	requireMiddle := c.requireMiddleRelay || c.pathProfile == "3hop"
+	if (c.betaStrict || c.prodStrict) && (c.preferMiddleRelay || c.requireMiddleRelay || c.pathProfile == "3hop") {
+		requireMiddle = true
+	}
+	if requireMiddle && middleID == "" {
+		return false, "middle-required"
+	}
+	if !c.middleRelaySelectionMode() && middleID != "" {
+		return false, "middle-not-allowed"
+	}
+	if c.requireDistinctOps {
+		if ok, reason := activeSessionHasDistinctOperators(session, middleID != ""); !ok {
+			return false, reason
+		}
+	}
+	if c.requireDistinctCountries {
+		if ok, reason := activeSessionHasDistinctCountries(session, middleID != ""); !ok {
+			return false, reason
+		}
+	}
+	return true, ""
+}
+
+func activeSessionHasDistinctOperators(session clientActiveSession, hasMiddle bool) (bool, string) {
+	entryOperator := strings.TrimSpace(session.entryOperatorID)
+	exitOperator := strings.TrimSpace(session.exitOperatorID)
+	if entryOperator == "" || exitOperator == "" {
+		return false, "missing-operator-metadata"
+	}
+	if entryOperator == exitOperator {
+		return false, "operator-conflict"
+	}
+	if hasMiddle {
+		middleOperator := strings.TrimSpace(session.middleOperatorID)
+		if middleOperator == "" {
+			return false, "missing-operator-metadata"
+		}
+		if middleOperator == entryOperator || middleOperator == exitOperator {
+			return false, "operator-conflict"
+		}
+	}
+	return true, ""
+}
+
+func activeSessionHasDistinctCountries(session clientActiveSession, hasMiddle bool) (bool, string) {
+	entryCountry := normalizeCountryCode(session.entryCountryCode)
+	exitCountry := normalizeCountryCode(session.exitCountryCode)
+	if entryCountry == "" || exitCountry == "" {
+		return false, "missing-country-metadata"
+	}
+	if entryCountry == exitCountry {
+		return false, "country-conflict"
+	}
+	if hasMiddle {
+		middleCountry := normalizeCountryCode(session.middleCountryCode)
+		if middleCountry == "" {
+			return false, "missing-country-metadata"
+		}
+		if middleCountry == entryCountry || middleCountry == exitCountry {
+			return false, "country-conflict"
+		}
+	}
+	return true, ""
+}
+
+func (c *Client) activeSessionRequiresFreshRelayValidation(session clientActiveSession) bool {
+	if c.betaStrict || c.prodStrict || c.requireDistinctOps || c.requireDistinctCountries {
+		return true
+	}
+	if c.pathProfile == "3hop" || c.preferMiddleRelay || c.requireMiddleRelay {
+		return true
+	}
+	if strings.TrimSpace(session.middleRelayID) != "" {
+		return true
+	}
+	return strings.ToLower(strings.TrimSpace(session.exitRole)) == "micro-exit"
+}
+
+func (c *Client) activeSessionRequiresKernelProxyRuntime(session clientActiveSession) bool {
+	return c.wgKernelProxy && session.transport == "wireguard-udp"
+}
+
+func (c *Client) activeSessionSatisfiesFreshRelayState(session clientActiveSession, relays []proto.RelayDescriptor, now time.Time) (bool, string) {
+	current := session
+	if entryID := strings.TrimSpace(session.entryRelayID); entryID != "" {
+		entry, ok := findFreshRelayDescriptor(relays, entryID, now, relayDescriptorIsEntry)
+		if !ok {
+			return false, "entry-not-current"
+		}
+		current.entryOperatorID = strings.TrimSpace(entry.OperatorID)
+		current.entryCountryCode = normalizeCountryCode(entry.CountryCode)
+	}
+	if middleID := strings.TrimSpace(session.middleRelayID); middleID != "" {
+		middle, ok := findFreshRelayDescriptor(relays, middleID, now, func(desc proto.RelayDescriptor) bool {
+			return relayEligibleForMiddleHopPolicy(desc, true)
+		})
+		if !ok {
+			return false, "middle-not-current"
+		}
+		current.middleOperatorID = strings.TrimSpace(middle.OperatorID)
+		current.middleCountryCode = normalizeCountryCode(middle.CountryCode)
+	}
+	if exitID := strings.TrimSpace(session.exitRelayID); exitID != "" {
+		exit, ok := findFreshRelayDescriptor(relays, exitID, now, relayDescriptorIsSelectableExit)
+		if !ok {
+			return false, "exit-not-current"
+		}
+		current.exitRole = strings.ToLower(strings.TrimSpace(exit.Role))
+		current.exitOperatorID = strings.TrimSpace(exit.OperatorID)
+		current.exitCountryCode = normalizeCountryCode(exit.CountryCode)
+	} else {
+		return false, "missing-exit"
+	}
+	return c.activeSessionSatisfiesCurrentPathPolicy(current)
+}
+
+func findFreshRelayDescriptor(relays []proto.RelayDescriptor, relayID string, now time.Time, match func(proto.RelayDescriptor) bool) (proto.RelayDescriptor, bool) {
+	relayID = strings.TrimSpace(relayID)
+	if relayID == "" {
+		return proto.RelayDescriptor{}, false
+	}
+	for _, desc := range relays {
+		if strings.TrimSpace(desc.RelayID) != relayID {
+			continue
+		}
+		if !desc.ValidUntil.IsZero() && !now.Before(desc.ValidUntil) {
+			continue
+		}
+		if match != nil && !match(desc) {
+			continue
+		}
+		return desc, true
+	}
+	return proto.RelayDescriptor{}, false
+}
+
+func relayDescriptorIsEntry(desc proto.RelayDescriptor) bool {
+	return strings.ToLower(strings.TrimSpace(desc.Role)) == "entry"
+}
+
+func relayDescriptorIsSelectableExit(desc proto.RelayDescriptor) bool {
+	role := strings.ToLower(strings.TrimSpace(desc.Role))
+	if role == "exit" {
+		return true
+	}
+	return role == "micro-exit" && microExitEligibleForSelection(desc)
+}
+
+type clientSessionCloseOptions struct {
+	skipPathClose       bool
+	skipWireGuardRemove bool
+}
+
 func (c *Client) closeSession(ctx context.Context, session clientActiveSession) error {
+	return c.closeSessionWithOptions(ctx, session, clientSessionCloseOptions{})
+}
+
+func (c *Client) closeSessionWithOptions(ctx context.Context, session clientActiveSession, opts clientSessionCloseOptions) error {
 	if strings.TrimSpace(session.sessionID) == "" {
 		return nil
 	}
-	if strings.TrimSpace(session.entryControlURL) != "" {
+	if !opts.skipPathClose && strings.TrimSpace(session.entryControlURL) != "" {
 		if err := c.closePath(ctx, session.entryControlURL, proto.PathCloseRequest{
 			SessionID:    session.sessionID,
 			SessionKeyID: session.sessionKeyID,
@@ -2261,12 +2769,15 @@ func (c *Client) closeSession(ctx context.Context, session clientActiveSession) 
 			log.Printf("client close-path warning session=%s control=%s err=%v", session.sessionID, session.entryControlURL, err)
 		}
 	}
-	if session.transport == "wireguard-udp" {
+	if !opts.skipWireGuardRemove && session.transport == "wireguard-udp" && c.wgManager != nil {
 		cfg := wg.ClientSessionConfig{
 			SessionID:     session.sessionID,
 			SessionKeyID:  session.sessionKeyID,
 			Interface:     c.wgInterface,
 			ExitPublicKey: session.exitInnerPub,
+			ClientInnerIP: session.clientInnerIP,
+			AllowedIPs:    session.wgAllowedIPs,
+			InstallRoute:  session.wgInstallRoute,
 		}
 		if err := c.wgManager.RemoveClientSession(ctx, cfg); err != nil {
 			return fmt.Errorf("client wg remove failed: %w", err)
@@ -2278,13 +2789,66 @@ func (c *Client) closeSession(ctx context.Context, session clientActiveSession) 
 func (c *Client) completeSessionHandoff(previous clientActiveSession, next clientActiveSession) {
 	closeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := c.closeSession(closeCtx, previous); err != nil {
+	opts := clientSessionCloseOptions{}
+	if c.sessionsShareServerWireGuardPeer(previous, next) {
+		// Exit-side WireGuard peers are keyed by the client pubkey. Closing the
+		// old same-exit session after opening the replacement can remove the peer
+		// that the new session just installed, so let the stale session expire.
+		opts.skipPathClose = true
+	}
+	if c.sessionsShareClientWireGuardPeer(previous, next) {
+		// Client-side WireGuard peers are keyed by the exit pubkey. The refreshed
+		// session has already reconfigured this peer, so do not remove it.
+		opts.skipWireGuardRemove = true
+	}
+	if err := c.closeSessionWithOptions(closeCtx, previous, opts); err != nil {
 		log.Printf("client session handoff close-old failed old_session=%s new_session=%s err=%v",
 			previous.sessionID, next.sessionID, err)
 		return
 	}
-	log.Printf("client session handoff complete old_session=%s new_session=%s old_entry=%s old_middle=%s old_exit=%s new_entry=%s new_middle=%s new_exit=%s",
-		previous.sessionID, next.sessionID, previous.entryRelayID, previous.middleRelayID, previous.exitRelayID, next.entryRelayID, next.middleRelayID, next.exitRelayID)
+	closeMode := "closed-old-session"
+	if opts.skipPathClose {
+		closeMode = "deferred-old-remote-close"
+	}
+	log.Printf("client session handoff cleanup mode=%s old_session=%s new_session=%s old_entry=%s old_middle=%s old_exit=%s new_entry=%s new_middle=%s new_exit=%s",
+		closeMode, previous.sessionID, next.sessionID, previous.entryRelayID, previous.middleRelayID, previous.exitRelayID, next.entryRelayID, next.middleRelayID, next.exitRelayID)
+}
+
+func (c *Client) sessionsShareServerWireGuardPeer(previous clientActiveSession, next clientActiveSession) bool {
+	if previous.transport != "wireguard-udp" || next.transport != "wireguard-udp" {
+		return false
+	}
+	if !sessionsShareExit(previous, next) {
+		return false
+	}
+	previousPub := strings.TrimSpace(previous.clientInnerPub)
+	nextPub := strings.TrimSpace(next.clientInnerPub)
+	if previousPub == "" {
+		previousPub = strings.TrimSpace(c.clientWGPub)
+	}
+	if nextPub == "" {
+		nextPub = strings.TrimSpace(c.clientWGPub)
+	}
+	return previousPub != "" && previousPub == nextPub
+}
+
+func (c *Client) sessionsShareClientWireGuardPeer(previous clientActiveSession, next clientActiveSession) bool {
+	if previous.transport != "wireguard-udp" || next.transport != "wireguard-udp" {
+		return false
+	}
+	return strings.TrimSpace(previous.exitInnerPub) != "" &&
+		strings.TrimSpace(previous.exitInnerPub) == strings.TrimSpace(next.exitInnerPub) &&
+		strings.TrimSpace(c.wgInterface) != ""
+}
+
+func sessionsShareExit(previous clientActiveSession, next clientActiveSession) bool {
+	previousExit := strings.TrimSpace(previous.exitRelayID)
+	nextExit := strings.TrimSpace(next.exitRelayID)
+	if previousExit != "" && nextExit != "" {
+		return previousExit == nextExit
+	}
+	return strings.TrimSpace(previous.exitInnerPub) != "" &&
+		strings.TrimSpace(previous.exitInnerPub) == strings.TrimSpace(next.exitInnerPub)
 }
 
 func (c *Client) closeActiveSession(ctx context.Context, reason string) error {
@@ -2292,10 +2856,11 @@ func (c *Client) closeActiveSession(ctx context.Context, reason string) error {
 	if !ok {
 		return nil
 	}
-	c.clearActiveSession()
 	if err := c.closeSession(ctx, session); err != nil {
 		return err
 	}
+	c.clearActiveSessionIfCurrent(session)
+	c.recordClientVPNStatus(session, false)
 	log.Printf("client closed active session session=%s reason=%s", session.sessionID, reason)
 	return nil
 }
@@ -2328,6 +2893,39 @@ func (c *Client) tryReuseActiveSession(ctx context.Context, now time.Time) bool 
 		}
 		return false
 	}
+	if c.activeSessionRequiresKernelProxyRuntime(session) {
+		log.Printf("client active session refresh required session=%s reason=kernel-proxy-runtime-not-durable", session.sessionID)
+		if err := c.closeActiveSession(ctx, "kernel-proxy-runtime-not-durable"); err != nil {
+			log.Printf("client active session close failed session=%s err=%v", session.sessionID, err)
+		}
+		return false
+	}
+	if ok, reason := c.activeSessionSatisfiesCurrentPathPolicy(session); !ok {
+		log.Printf("client active session refresh required session=%s reason=path-policy-%s path_profile=%s middle_pref=%t middle_required=%t entry=%s middle=%s exit=%s",
+			session.sessionID, reason, c.pathProfile, c.preferMiddleRelay, c.requireMiddleRelay, session.entryRelayID, session.middleRelayID, session.exitRelayID)
+		if err := c.closeActiveSession(ctx, "path-policy-"+reason); err != nil {
+			log.Printf("client active session close failed session=%s err=%v", session.sessionID, err)
+		}
+		return false
+	}
+	if c.activeSessionRequiresFreshRelayValidation(session) {
+		relays, err := c.fetchRelaysFederated(ctx)
+		if err != nil {
+			log.Printf("client active session refresh required session=%s reason=fresh-relay-fetch-failed err=%v", session.sessionID, err)
+			if cerr := c.closeActiveSession(ctx, "fresh-relay-fetch-failed"); cerr != nil {
+				log.Printf("client active session close failed session=%s err=%v", session.sessionID, cerr)
+			}
+			return false
+		}
+		if ok, reason := c.activeSessionSatisfiesFreshRelayState(session, relays, now); !ok {
+			log.Printf("client active session refresh required session=%s reason=fresh-relay-%s path_profile=%s entry=%s middle=%s exit=%s",
+				session.sessionID, reason, c.pathProfile, session.entryRelayID, session.middleRelayID, session.exitRelayID)
+			if cerr := c.closeActiveSession(ctx, "fresh-relay-"+reason); cerr != nil {
+				log.Printf("client active session close failed session=%s err=%v", session.sessionID, cerr)
+			}
+			return false
+		}
+	}
 	if err := c.sendTrafficForTransport(ctx, session.transport, session.entryDataAddr, session.sessionID); err != nil {
 		log.Printf("client active session reuse failed session=%s err=%v", session.sessionID, err)
 		if cerr := c.closeActiveSession(ctx, "reuse-failed"); cerr != nil {
@@ -2341,6 +2939,7 @@ func (c *Client) tryReuseActiveSession(ctx context.Context, now time.Time) bool 
 		hasMiddle: strings.TrimSpace(session.middleRelayID) != "",
 		exit:      proto.RelayDescriptor{RelayID: session.exitRelayID},
 	}, now)
+	c.recordClientVPNStatus(session, true)
 	log.Printf("client reused active session session=%s entry=%s middle=%s exit=%s exp=%d",
 		session.sessionID, session.entryRelayID, session.middleRelayID, session.exitRelayID, session.sessionExp)
 	return true
@@ -2476,6 +3075,37 @@ func randomNonce() (uint64, error) {
 		return 1, nil
 	}
 	return nonce, nil
+}
+
+type packetNonceGenerator struct {
+	mu   sync.Mutex
+	next uint64
+}
+
+func newPacketNonceGenerator() (*packetNonceGenerator, error) {
+	seed, err := randomNonce()
+	if err != nil {
+		return nil, err
+	}
+	return &packetNonceGenerator{next: seed}, nil
+}
+
+func (g *packetNonceGenerator) Next() uint64 {
+	if g == nil {
+		return 1
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	nonce := g.next
+	if nonce == 0 {
+		nonce = 1
+	}
+	if nonce == ^uint64(0) {
+		g.next = 1
+	} else {
+		g.next = nonce + 1
+	}
+	return nonce
 }
 
 func randomProofNonce() (string, error) {
@@ -2807,7 +3437,7 @@ func verifyTrustFeedAny(feed proto.RelayTrustAttestationFeedResponse, pubs []ed2
 }
 
 func (c *Client) fetchDirectoryPubKey(ctx context.Context) (ed25519.PublicKey, error) {
-	pubs, _, err := c.fetchDirectoryPubKeysFrom(ctx, c.directoryURL)
+	pubs, _, _, err := c.fetchDirectoryPubKeysFrom(ctx, c.directoryURL)
 	if err != nil {
 		return nil, err
 	}
@@ -2817,58 +3447,60 @@ func (c *Client) fetchDirectoryPubKey(ctx context.Context) (ed25519.PublicKey, e
 	return pubs[0], nil
 }
 
-func (c *Client) fetchDirectoryPubKeysFrom(ctx context.Context, directoryURL string) ([]ed25519.PublicKey, string, error) {
+func (c *Client) fetchDirectoryPubKeysFrom(ctx context.Context, directoryURL string) ([]ed25519.PublicKey, string, []string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, joinURL(directoryURL, "/v1/pubkeys"), nil)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
 		return c.fetchDirectoryPubKeyLegacy(ctx, directoryURL)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("directory pubkeys status %d", resp.StatusCode)
+		return nil, "", nil, fmt.Errorf("directory pubkeys status %d", resp.StatusCode)
 	}
 	var out proto.DirectoryPubKeysResponse
 	if err := decodeBoundedJSONResponse(resp.Body, clientDirectoryPubKeyResponseMaxBytes, &out); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	pubKeys, keys, err := c.selectTrustedDirectoryPubKeys(out.PubKeys)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
-	return keys, normalizeDirectoryOperator(out.Operator, pubKeys, directoryURL), nil
+	aliases := directoryOperatorAliases(out.Operator, pubKeys, directoryURL)
+	return keys, normalizeDirectoryOperator(out.Operator, pubKeys, directoryURL), aliases, nil
 }
 
-func (c *Client) fetchDirectoryPubKeyLegacy(ctx context.Context, directoryURL string) ([]ed25519.PublicKey, string, error) {
+func (c *Client) fetchDirectoryPubKeyLegacy(ctx context.Context, directoryURL string) ([]ed25519.PublicKey, string, []string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, joinURL(directoryURL, "/v1/pubkey"), nil)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("directory pubkey status %d", resp.StatusCode)
+		return nil, "", nil, fmt.Errorf("directory pubkey status %d", resp.StatusCode)
 	}
 	var out map[string]string
 	if err := decodeBoundedJSONResponse(resp.Body, clientDirectoryPubKeyResponseMaxBytes, &out); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	pubB64, raw, err := validateDirectoryPubKey(out["pub_key"])
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	if err := c.enforceDirectoryTrust(pubB64); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
-	return []ed25519.PublicKey{raw}, normalizeDirectoryOperator("", []string{pubB64}, directoryURL), nil
+	aliases := directoryOperatorAliases("", []string{pubB64}, directoryURL)
+	return []ed25519.PublicKey{raw}, normalizeDirectoryOperator("", []string{pubB64}, directoryURL), aliases, nil
 }
 
 type relayCandidate struct {
@@ -2926,11 +3558,129 @@ type trustScore struct {
 }
 
 func relayCandidateKey(relayID string, role string) string {
-	return relayID + "|" + role
+	return canonicalRelayID(relayID) + "|" + canonicalRelayRole(role)
+}
+
+func relayDescriptorVoteKey(candidateKey string, fingerprint string) string {
+	return candidateKey + "|" + fingerprint
+}
+
+type relayDescriptorFingerprintPayload struct {
+	RelayID        string   `json:"relay_id"`
+	Role           string   `json:"role"`
+	OperatorID     string   `json:"operator_id"`
+	OriginOperator string   `json:"origin_operator"`
+	HopCount       int      `json:"hop_count"`
+	PubKey         string   `json:"pub_key"`
+	Endpoint       string   `json:"endpoint"`
+	ControlURL     string   `json:"control_url"`
+	CountryCode    string   `json:"country_code"`
+	GeoConfidence  float64  `json:"geo_confidence"`
+	Region         string   `json:"region"`
+	Capabilities   []string `json:"capabilities"`
+	HopRoles       []string `json:"hop_roles"`
+}
+
+func relayDescriptorFingerprint(desc proto.RelayDescriptor) (string, error) {
+	payload := relayDescriptorFingerprintPayload{
+		RelayID:        canonicalRelayID(desc.RelayID),
+		Role:           canonicalRelayRole(desc.Role),
+		OperatorID:     strings.TrimSpace(desc.OperatorID),
+		OriginOperator: strings.TrimSpace(desc.OriginOperator),
+		HopCount:       desc.HopCount,
+		PubKey:         strings.TrimSpace(desc.PubKey),
+		Endpoint:       strings.TrimSpace(desc.Endpoint),
+		ControlURL:     strings.TrimSpace(desc.ControlURL),
+		CountryCode:    strings.ToUpper(strings.TrimSpace(desc.CountryCode)),
+		GeoConfidence:  clampUnit(desc.GeoConfidence),
+		Region:         strings.TrimSpace(desc.Region),
+		Capabilities:   normalizeDescriptorStringList(desc.Capabilities),
+		HopRoles:       normalizeDescriptorRoleList(desc.HopRoles),
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func normalizeDescriptorStringList(values []string) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func normalizeDescriptorRoleList(values []string) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = canonicalRelayRole(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func normalizeRelayDescriptorForVoting(desc proto.RelayDescriptor) proto.RelayDescriptor {
+	desc.RelayID = canonicalRelayID(desc.RelayID)
+	desc.Role = canonicalRelayRole(desc.Role)
+	desc.Capabilities = normalizeDescriptorStringList(desc.Capabilities)
+	desc.HopRoles = normalizeDescriptorRoleList(desc.HopRoles)
+	desc.CountryCode = strings.ToUpper(strings.TrimSpace(desc.CountryCode))
+	desc.Region = strings.TrimSpace(desc.Region)
+	desc.OperatorID = strings.TrimSpace(desc.OperatorID)
+	desc.OriginOperator = strings.TrimSpace(desc.OriginOperator)
+	desc.PubKey = strings.TrimSpace(desc.PubKey)
+	desc.Endpoint = strings.TrimSpace(desc.Endpoint)
+	desc.ControlURL = strings.TrimSpace(desc.ControlURL)
+	return desc
+}
+
+func canonicalRelayID(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func canonicalRelayRole(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "entry":
+		return "entry"
+	case "exit":
+		return "exit"
+	case "micro-relay", "micro_relay", "middle", "relay", "transit", "three-hop-middle":
+		return "micro-relay"
+	case "micro-exit", "micro_exit", "client-exit", "contribution-exit":
+		return "micro-exit"
+	default:
+		return strings.ToLower(strings.TrimSpace(raw))
+	}
 }
 
 func markVoter(voterSet map[string]map[string]struct{}, key string, operator string) bool {
-	if strings.TrimSpace(key) == "" || strings.TrimSpace(operator) == "" {
+	return markVoterAliases(voterSet, key, []string{operator})
+}
+
+func markVoterAliases(voterSet map[string]map[string]struct{}, key string, aliases []string) bool {
+	if strings.TrimSpace(key) == "" {
 		return false
 	}
 	ops, ok := voterSet[key]
@@ -2938,31 +3688,105 @@ func markVoter(voterSet map[string]map[string]struct{}, key string, operator str
 		ops = make(map[string]struct{})
 		voterSet[key] = ops
 	}
-	if _, exists := ops[operator]; exists {
-		return false
+	cleanAliases := normalizeDirectoryAliasList(aliases)
+	for _, alias := range cleanAliases {
+		if _, exists := ops[alias]; exists {
+			return false
+		}
 	}
-	ops[operator] = struct{}{}
+	for _, alias := range cleanAliases {
+		ops[alias] = struct{}{}
+	}
 	return true
 }
 
 func normalizeDirectoryOperator(operator string, pubKeys []string, directoryURL string) string {
+	aliases := directoryOperatorAliases(operator, pubKeys, directoryURL)
+	if len(aliases) == 0 {
+		return ""
+	}
+	return aliases[0]
+}
+
+func directoryOperatorAliases(operator string, pubKeys []string, directoryURL string) []string {
+	return normalizeDirectoryOperatorAliases(operator, pubKeys, directoryURL)
+}
+
+func normalizeDirectoryOperatorAliases(operator string, pubKeys []string, directoryURL string) []string {
+	seen := make(map[string]struct{})
+	aliases := make([]string, 0, len(pubKeys)+2)
+	add := func(alias string) {
+		alias = strings.TrimSpace(alias)
+		if alias == "" {
+			return
+		}
+		if _, ok := seen[alias]; ok {
+			return
+		}
+		seen[alias] = struct{}{}
+		aliases = append(aliases, alias)
+	}
 	operator = strings.TrimSpace(operator)
 	if operator != "" {
-		return operator
+		add("operator:" + operator)
 	}
+	canonicalKeys := make([]string, 0, len(pubKeys))
 	for _, key := range pubKeys {
 		key = strings.TrimSpace(key)
 		if key != "" {
-			return "key:" + key
+			canonicalKeys = append(canonicalKeys, key)
 		}
 	}
-	return "url:" + strings.TrimSpace(directoryURL)
+	if len(canonicalKeys) > 0 {
+		sort.Strings(canonicalKeys)
+		for _, key := range canonicalKeys {
+			add("key:" + key)
+		}
+	}
+	if len(aliases) == 0 {
+		add("url:" + strings.TrimSpace(directoryURL))
+	}
+	return aliases
+}
+
+func markDirectoryOperatorAliases(seen map[string]struct{}, aliases []string) bool {
+	cleanAliases := normalizeDirectoryAliasList(aliases)
+	if len(cleanAliases) == 0 {
+		return false
+	}
+	for _, alias := range cleanAliases {
+		if _, ok := seen[alias]; ok {
+			return false
+		}
+	}
+	for _, alias := range cleanAliases {
+		seen[alias] = struct{}{}
+	}
+	return true
+}
+
+func normalizeDirectoryAliasList(aliases []string) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		alias = strings.TrimSpace(alias)
+		if alias == "" {
+			continue
+		}
+		if _, ok := seen[alias]; ok {
+			continue
+		}
+		seen[alias] = struct{}{}
+		out = append(out, alias)
+	}
+	return out
 }
 
 func (c *Client) fetchRelaysFederated(ctx context.Context) ([]proto.RelayDescriptor, error) {
-	candidates := make(map[string]relayCandidate)
+	candidates := make(map[string]map[string]relayCandidate)
 	success := 0
 	successOperators := make(map[string]struct{})
+	successOperatorCount := 0
 	relayVoters := make(map[string]map[string]struct{})
 	feedVoters := make(map[string]map[string]struct{})
 	trustVoters := make(map[string]map[string]struct{})
@@ -2970,7 +3794,7 @@ func (c *Client) fetchRelaysFederated(ctx context.Context) ([]proto.RelayDescrip
 	appealVoters := make(map[string]map[string]struct{})
 	var lastErr error
 	for _, durl := range c.directoryURLs {
-		pubs, sourceOperator, err := c.fetchDirectoryPubKeysFrom(ctx, durl)
+		pubs, _, sourceOperatorAliases, err := c.fetchDirectoryPubKeysFrom(ctx, durl)
 		if err != nil {
 			lastErr = err
 			log.Printf("client directory fetch pubkey failed url=%s err=%v", durl, err)
@@ -3025,17 +3849,31 @@ func (c *Client) fetchRelaysFederated(ctx context.Context) ([]proto.RelayDescrip
 			}
 		}
 		success++
-		successOperators[sourceOperator] = struct{}{}
+		if markDirectoryOperatorAliases(successOperators, sourceOperatorAliases) {
+			successOperatorCount++
+		}
 		seenFromSource := make(map[string]struct{})
 		for _, desc := range relays {
+			desc = normalizeRelayDescriptorForVoting(desc)
 			key := relayCandidateKey(desc.RelayID, desc.Role)
 			if _, ok := seenFromSource[key]; ok {
 				continue
 			}
 			seenFromSource[key] = struct{}{}
-			candidate := candidates[key]
-			if markVoter(relayVoters, key, sourceOperator) {
-				if candidate.votes == 0 {
+			fingerprint, err := relayDescriptorFingerprint(desc)
+			if err != nil {
+				lastErr = err
+				log.Printf("client directory descriptor fingerprint failed url=%s relay=%s role=%s err=%v", durl, desc.RelayID, desc.Role, err)
+				continue
+			}
+			variants, ok := candidates[key]
+			if !ok {
+				variants = make(map[string]relayCandidate)
+				candidates[key] = variants
+			}
+			candidate := variants[fingerprint]
+			if markVoterAliases(relayVoters, relayDescriptorVoteKey(key, fingerprint), sourceOperatorAliases) {
+				if candidate.votes == 0 || desc.ValidUntil.After(candidate.desc.ValidUntil) {
 					candidate.desc = desc
 				}
 				candidate.votes++
@@ -3047,7 +3885,7 @@ func (c *Client) fetchRelaysFederated(ctx context.Context) ([]proto.RelayDescrip
 				candidate.stakeSum += clampUnit(desc.StakeScore)
 				candidate.scoreSamples++
 			}
-			if score, ok := selectionScores[key]; ok && markVoter(feedVoters, key, sourceOperator) {
+			if score, ok := selectionScores[key]; ok && markVoterAliases(feedVoters, key, sourceOperatorAliases) {
 				candidate.feedVotes++
 				candidate.feedRepSum += clampUnit(score.reputation)
 				candidate.feedUptimeSum += clampUnit(score.uptime)
@@ -3056,7 +3894,7 @@ func (c *Client) fetchRelaysFederated(ctx context.Context) ([]proto.RelayDescrip
 				candidate.feedBondSum += clampUnit(score.bondScore)
 				candidate.feedStakeSum += clampUnit(score.stakeScore)
 			}
-			if trust, ok := trustScores[key]; ok && markVoter(trustVoters, key, sourceOperator) {
+			if trust, ok := trustScores[key]; ok && markVoterAliases(trustVoters, key, sourceOperatorAliases) {
 				conf := clampUnit(trust.confidence)
 				if conf <= 0 {
 					conf = 1
@@ -3070,7 +3908,7 @@ func (c *Client) fetchRelaysFederated(ctx context.Context) ([]proto.RelayDescrip
 				candidate.trustBondSum += clampUnit(trust.bondScore) * conf
 				candidate.trustStakeSum += clampUnit(trust.stakeScore) * conf
 				if capTier, until, ok := normalizeDispute(trust.tierCap, trust.disputeUntil, time.Now().Unix()); ok &&
-					markVoter(disputeVoters, key, sourceOperator) {
+					markVoterAliases(disputeVoters, key, sourceOperatorAliases) {
 					candidate.trustDisputeVotes++
 					candidate.trustDisputeCap = minPositiveTier(candidate.trustDisputeCap, capTier)
 					if until > candidate.trustDisputeUntil {
@@ -3078,7 +3916,7 @@ func (c *Client) fetchRelaysFederated(ctx context.Context) ([]proto.RelayDescrip
 					}
 				}
 				if appealUntil := normalizeAppeal(trust.appealUntil, time.Now().Unix()); appealUntil > 0 &&
-					markVoter(appealVoters, key, sourceOperator) {
+					markVoterAliases(appealVoters, key, sourceOperatorAliases) {
 					candidate.trustAppealVotes++
 					if appealUntil > candidate.trustAppealUntil {
 						candidate.trustAppealUntil = appealUntil
@@ -3089,7 +3927,7 @@ func (c *Client) fetchRelaysFederated(ctx context.Context) ([]proto.RelayDescrip
 			if candidate.desc.RelayID == "" {
 				candidate.desc = desc
 			}
-			candidates[key] = candidate
+			variants[fingerprint] = candidate
 		}
 	}
 	if success < c.directoryMinSources {
@@ -3099,60 +3937,79 @@ func (c *Client) fetchRelaysFederated(ctx context.Context) ([]proto.RelayDescrip
 		return nil, fmt.Errorf("directory quorum not met: success=%d required=%d: %w", success, c.directoryMinSources, lastErr)
 	}
 	requiredOperators := maxInt(1, c.directoryMinOperators)
-	if len(successOperators) < requiredOperators {
+	if successOperatorCount < requiredOperators {
 		if lastErr == nil {
 			lastErr = fmt.Errorf("insufficient directory operators")
 		}
-		return nil, fmt.Errorf("directory operator quorum not met: operators=%d required=%d: %w", len(successOperators), requiredOperators, lastErr)
+		return nil, fmt.Errorf("directory operator quorum not met: operators=%d required=%d: %w", successOperatorCount, requiredOperators, lastErr)
 	}
 	out := make([]proto.RelayDescriptor, 0, len(candidates))
-	for _, cand := range candidates {
-		if cand.votes >= c.directoryMinVotes {
-			desc := cand.desc
-			if !c.selectionFeedDisable && cand.feedVotes >= c.selectionFeedMinVotes {
-				n := float64(cand.feedVotes)
-				desc.Reputation = cand.feedRepSum / n
-				desc.Uptime = cand.feedUptimeSum / n
-				desc.Capacity = cand.feedCapSum / n
-				desc.AbusePenalty = cand.feedAbuseSum / n
-				desc.BondScore = cand.feedBondSum / n
-				desc.StakeScore = cand.feedStakeSum / n
-			} else if cand.scoreSamples > 0 {
-				n := float64(cand.scoreSamples)
-				desc.Reputation = cand.reputationSum / n
-				desc.Uptime = cand.uptimeSum / n
-				desc.Capacity = cand.capacitySum / n
-				desc.AbusePenalty = cand.abuseSum / n
-				desc.BondScore = cand.bondSum / n
-				desc.StakeScore = cand.stakeSum / n
+	for key, variants := range candidates {
+		var cand relayCandidate
+		bestVotes := 0
+		bestFingerprint := ""
+		for fingerprint, variant := range variants {
+			if variant.votes < c.directoryMinVotes {
+				continue
 			}
-			if !c.trustFeedDisable && cand.trustVotes >= c.trustFeedMinVotes && cand.trustConfSum > 0 {
-				n := cand.trustConfSum
-				trustRep := cand.trustRepSum / n
-				trustUptime := cand.trustUptimeSum / n
-				trustCap := cand.trustCapSum / n
-				trustAbuse := cand.trustAbuseSum / n
-				trustBond := cand.trustBondSum / n
-				trustStake := cand.trustStakeSum / n
-				conf := clampUnit(cand.trustConfSum / float64(cand.trustVotes))
-				desc.Reputation = clampUnit((1-conf)*desc.Reputation + conf*trustRep)
-				desc.Uptime = clampUnit((1-conf)*desc.Uptime + conf*trustUptime)
-				desc.Capacity = clampUnit((1-conf)*desc.Capacity + conf*trustCap)
-				desc.AbusePenalty = clampUnit((1-conf)*desc.AbusePenalty + conf*trustAbuse)
-				desc.BondScore = clampUnit((1-conf)*desc.BondScore + conf*trustBond)
-				desc.StakeScore = clampUnit((1-conf)*desc.StakeScore + conf*trustStake)
+			if variant.votes > bestVotes ||
+				(variant.votes == bestVotes && variant.desc.ValidUntil.After(cand.desc.ValidUntil)) ||
+				(variant.votes == bestVotes && variant.desc.ValidUntil.Equal(cand.desc.ValidUntil) && (bestFingerprint == "" || fingerprint < bestFingerprint)) {
+				cand = variant
+				bestVotes = variant.votes
+				bestFingerprint = fingerprint
 			}
-			if !c.trustFeedDisable && cand.trustDisputeVotes >= c.trustFeedMinVotes {
-				penalty := disputePenaltyFromTierCap(cand.trustDisputeCap)
-				if cand.trustAppealVotes >= c.trustFeedMinVotes && normalizeAppeal(cand.trustAppealUntil, time.Now().Unix()) > 0 {
-					penalty = clampUnit(penalty * 0.7)
-				}
-				desc.AbusePenalty = clampUnit(maxFloat(desc.AbusePenalty, penalty))
-				desc.Reputation = clampUnit(desc.Reputation * (1 - 0.40*penalty))
-				desc.Capacity = clampUnit(desc.Capacity * (1 - 0.25*penalty))
-			}
-			out = append(out, desc)
 		}
+		if cand.desc.RelayID == "" {
+			if len(variants) > 1 {
+				log.Printf("client directory descriptor conflict unresolved key=%s min_votes=%d variants=%d", key, c.directoryMinVotes, len(variants))
+			}
+			continue
+		}
+		desc := cand.desc
+		if !c.selectionFeedDisable && cand.feedVotes >= c.selectionFeedMinVotes {
+			n := float64(cand.feedVotes)
+			desc.Reputation = cand.feedRepSum / n
+			desc.Uptime = cand.feedUptimeSum / n
+			desc.Capacity = cand.feedCapSum / n
+			desc.AbusePenalty = cand.feedAbuseSum / n
+			desc.BondScore = cand.feedBondSum / n
+			desc.StakeScore = cand.feedStakeSum / n
+		} else if cand.scoreSamples > 0 {
+			n := float64(cand.scoreSamples)
+			desc.Reputation = cand.reputationSum / n
+			desc.Uptime = cand.uptimeSum / n
+			desc.Capacity = cand.capacitySum / n
+			desc.AbusePenalty = cand.abuseSum / n
+			desc.BondScore = cand.bondSum / n
+			desc.StakeScore = cand.stakeSum / n
+		}
+		if !c.trustFeedDisable && cand.trustVotes >= c.trustFeedMinVotes && cand.trustConfSum > 0 {
+			n := cand.trustConfSum
+			trustRep := cand.trustRepSum / n
+			trustUptime := cand.trustUptimeSum / n
+			trustCap := cand.trustCapSum / n
+			trustAbuse := cand.trustAbuseSum / n
+			trustBond := cand.trustBondSum / n
+			trustStake := cand.trustStakeSum / n
+			conf := clampUnit(cand.trustConfSum / float64(cand.trustVotes))
+			desc.Reputation = clampUnit((1-conf)*desc.Reputation + conf*trustRep)
+			desc.Uptime = clampUnit((1-conf)*desc.Uptime + conf*trustUptime)
+			desc.Capacity = clampUnit((1-conf)*desc.Capacity + conf*trustCap)
+			desc.AbusePenalty = clampUnit((1-conf)*desc.AbusePenalty + conf*trustAbuse)
+			desc.BondScore = clampUnit((1-conf)*desc.BondScore + conf*trustBond)
+			desc.StakeScore = clampUnit((1-conf)*desc.StakeScore + conf*trustStake)
+		}
+		if !c.trustFeedDisable && cand.trustDisputeVotes >= c.trustFeedMinVotes {
+			penalty := disputePenaltyFromTierCap(cand.trustDisputeCap)
+			if cand.trustAppealVotes >= c.trustFeedMinVotes && normalizeAppeal(cand.trustAppealUntil, time.Now().Unix()) > 0 {
+				penalty = clampUnit(penalty * 0.7)
+			}
+			desc.AbusePenalty = clampUnit(maxFloat(desc.AbusePenalty, penalty))
+			desc.Reputation = clampUnit(desc.Reputation * (1 - 0.40*penalty))
+			desc.Capacity = clampUnit(desc.Capacity * (1 - 0.25*penalty))
+		}
+		out = append(out, desc)
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no relays met vote threshold: required_votes=%d", c.directoryMinVotes)
@@ -3204,14 +4061,21 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 	entries := make([]proto.RelayDescriptor, 0, len(relays))
 	exits := make([]proto.RelayDescriptor, 0, len(relays))
 	for _, r := range relays {
+		r.Role = canonicalRelayRole(r.Role)
 		switch r.Role {
 		case "entry":
 			entries = append(entries, r)
-		case "exit":
+		case "exit", "micro-exit":
 			exits = append(exits, r)
 		}
 	}
-	if len(entries) == 0 || len(exits) == 0 {
+	if len(exits) == 0 {
+		return nil
+	}
+	if c.directExitSelectionMode() {
+		return c.rankDirectExitPairs(ctx, exits, time.Now())
+	}
+	if len(entries) == 0 {
 		return nil
 	}
 
@@ -3240,6 +4104,11 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 			healthyExits = exits
 		}
 	}
+	healthyExits = filterSelectableExits(healthyExits)
+	if len(healthyExits) == 0 {
+		log.Printf("client exit runtime admission rejected selection: selectable_exits=0 total_exits=%d", len(exits))
+		return nil
+	}
 	now := time.Now()
 	healthyEntries = c.applyEntryRotation(healthyEntries, now)
 	selectedExits, localityMode := c.selectPreferredExits(healthyExits)
@@ -3265,16 +4134,16 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 	if weightedMode != "" {
 		log.Printf("client exit weighted ordering mode=%s candidates=%d exploration_pct=%d", weightedMode, len(selectedExits), c.exitExplorationPct)
 	}
-	middleCandidates := middleRelayCandidates(relays)
-	effectivePreferMiddle := c.preferMiddleRelay
-	effectiveRequireMiddle := c.requireMiddleRelay
+	effectivePreferMiddle := c.preferMiddleRelay || c.pathProfile == "3hop"
+	effectiveRequireMiddle := c.requireMiddleRelay || c.pathProfile == "3hop"
 	// In strict modes, a 3-hop selection policy must fail closed when no valid middle relay is available.
 	if c.betaStrict || c.prodStrict {
-		if c.preferMiddleRelay || c.requireMiddleRelay {
+		if effectivePreferMiddle || effectiveRequireMiddle {
 			effectivePreferMiddle = true
 			effectiveRequireMiddle = true
 		}
 	}
+	middleCandidates := middleRelayCandidates(relays, effectiveRequireMiddle)
 
 	pairs := make([]relayPair, 0, len(healthyEntries)*len(selectedExits))
 	seen := make(map[string]struct{})
@@ -3361,7 +4230,11 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 	if effectivePreferMiddle {
 		pairs = prioritizePairsWithMiddle(pairs)
 		if len(middleCandidates) == 0 {
-			log.Printf("client 3hop profile fallback: no middle-capable relays advertised, using entry+exit path")
+			if effectiveRequireMiddle {
+				log.Printf("client middle-relay selection fail-closed: no middle-capable relays advertised")
+			} else {
+				log.Printf("client 3hop profile fallback: no middle-capable relays advertised, using entry+exit path")
+			}
 		}
 	}
 	pairs = c.applyStickyPairPreference(pairs, now)
@@ -3383,12 +4256,96 @@ func (c *Client) rankRelayPairs(ctx context.Context, relays []proto.RelayDescrip
 	return pairs
 }
 
+func (c *Client) directExitSelectionMode() bool {
+	return c.forceDirectExit || c.pathProfile == "1hop"
+}
+
+func (c *Client) rankDirectExitPairs(ctx context.Context, exits []proto.RelayDescriptor, now time.Time) []relayPair {
+	if len(exits) == 0 {
+		return nil
+	}
+
+	healthyExits := exits
+	strictHealthFailClosed := c.betaStrict || c.prodStrict
+	if c.healthCheckEnabled {
+		healthyExits = filterHealthy(exits, func(r proto.RelayDescriptor) bool {
+			return c.relayHealthy(ctx, c.exitControlURLFor(r))
+		})
+		if len(healthyExits) == 0 {
+			if strictHealthFailClosed {
+				log.Printf("client strict health gating rejected direct-exit selection: healthy_exits=0 total_exits=%d", len(exits))
+				return nil
+			}
+			healthyExits = exits
+		}
+	}
+	healthyExits = filterSelectableExits(healthyExits)
+	if len(healthyExits) == 0 {
+		log.Printf("client direct-exit runtime admission rejected selection: selectable_exits=0 total_exits=%d", len(exits))
+		return nil
+	}
+
+	selectedExits, localityMode := c.selectPreferredExits(healthyExits)
+	if localityMode != "" {
+		log.Printf("client direct-exit locality selection mode=%s candidates=%d", localityMode, len(selectedExits))
+	}
+	if len(selectedExits) == 0 {
+		if c.strictExitLocality {
+			return nil
+		}
+		selectedExits = healthyExits
+	}
+	if c.maxExitsPerOperator > 0 {
+		capped := capExitsPerOperator(selectedExits, c.maxExitsPerOperator)
+		if len(capped) > 0 {
+			if len(capped) != len(selectedExits) {
+				log.Printf("client direct-exit operator cap applied max=%d before=%d after=%d", c.maxExitsPerOperator, len(selectedExits), len(capped))
+			}
+			selectedExits = capped
+		}
+	}
+	selectedExits, weightedMode := c.orderExitsForSelection(selectedExits)
+	if weightedMode != "" {
+		log.Printf("client direct-exit weighted ordering mode=%s candidates=%d exploration_pct=%d", weightedMode, len(selectedExits), c.exitExplorationPct)
+	}
+
+	pairs := make([]relayPair, 0, len(selectedExits))
+	seen := make(map[string]struct{}, len(selectedExits))
+	for _, exit := range selectedExits {
+		key := strings.TrimSpace(exit.RelayID)
+		if key == "" {
+			key = strings.TrimSpace(exit.ControlURL) + "|" + strings.TrimSpace(exit.Endpoint)
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		pairs = append(pairs, relayPair{exit: exit})
+	}
+	pairs = c.applyStickyPairPreference(pairs, now)
+	if c.maxPairCandidates > 0 && len(pairs) > c.maxPairCandidates {
+		pairs = pairs[:c.maxPairCandidates]
+	}
+	return pairs
+}
+
 func filterHealthy(relays []proto.RelayDescriptor, healthy func(proto.RelayDescriptor) bool) []proto.RelayDescriptor {
 	out := make([]proto.RelayDescriptor, 0, len(relays))
 	for _, r := range relays {
 		if healthy(r) {
 			out = append(out, r)
 		}
+	}
+	return out
+}
+
+func filterSelectableExits(exits []proto.RelayDescriptor) []proto.RelayDescriptor {
+	out := make([]proto.RelayDescriptor, 0, len(exits))
+	for _, exit := range exits {
+		if exit.Role == "micro-exit" && !microExitEligibleForSelection(exit) {
+			continue
+		}
+		out = append(out, exit)
 	}
 	return out
 }
@@ -3418,14 +4375,37 @@ func operatorKey(desc proto.RelayDescriptor) string {
 	return "relay:" + desc.RelayID
 }
 
-func middleRelayCandidates(relays []proto.RelayDescriptor) []proto.RelayDescriptor {
+const (
+	clientMiddleRelayMinReputationScore = 0.5
+	clientMiddleRelayMinUptimeScore     = 0.5
+	clientMiddleRelayMinCapacityScore   = 0.5
+	clientMiddleRelayMaxAbusePenalty    = 0.5
+)
+
+func middleRelayCandidates(relays []proto.RelayDescriptor, requireRuntimeEligible bool) []proto.RelayDescriptor {
 	candidates := make([]proto.RelayDescriptor, 0, len(relays))
 	for _, relay := range relays {
-		if relaySupportsMiddleHop(relay) {
+		if relayEligibleForMiddleHopPolicy(relay, requireRuntimeEligible) {
 			candidates = append(candidates, relay)
 		}
 	}
 	return candidates
+}
+
+func relayEligibleForMiddleHopPolicy(relay proto.RelayDescriptor, requireRuntimeEligible bool) bool {
+	if !requireRuntimeEligible {
+		return relaySupportsMiddleHop(relay)
+	}
+	if strings.ToLower(strings.TrimSpace(relay.Role)) != "micro-relay" {
+		return false
+	}
+	if relayHasMalformedMiddleHopMetadata(relay) {
+		return false
+	}
+	if relayHasInvalidMiddleHopRuntimeAdmission(relay) {
+		return false
+	}
+	return true
 }
 
 func relaySupportsMiddleHop(relay proto.RelayDescriptor) bool {
@@ -3445,6 +4425,62 @@ func relaySupportsMiddleHop(relay proto.RelayDescriptor) bool {
 		}
 	}
 	return false
+}
+
+func relayHasMalformedMiddleHopMetadata(relay proto.RelayDescriptor) bool {
+	if hopRoleIsMiddle(relay.Role) {
+		return false
+	}
+	for _, hopRole := range relay.HopRoles {
+		if hopRoleIsMiddle(hopRole) {
+			return true
+		}
+	}
+	for _, capability := range relay.Capabilities {
+		if hopRoleIsMiddle(capability) {
+			return true
+		}
+	}
+	return false
+}
+
+func relayHasInvalidMiddleHopRuntimeAdmission(relay proto.RelayDescriptor) bool {
+	if relay.Reputation < clientMiddleRelayMinReputationScore {
+		return true
+	}
+	if relay.Uptime < clientMiddleRelayMinUptimeScore {
+		return true
+	}
+	if relay.Capacity < clientMiddleRelayMinCapacityScore {
+		return true
+	}
+	if relay.AbusePenalty > clientMiddleRelayMaxAbusePenalty {
+		return true
+	}
+	if !validMiddleRelayEndpoint(relay.Endpoint) {
+		return true
+	}
+	for _, hopRole := range relay.HopRoles {
+		if !hopRoleIsMiddle(hopRole) {
+			return true
+		}
+	}
+	for _, capability := range relay.Capabilities {
+		switch strings.ToLower(strings.TrimSpace(capability)) {
+		case "two-hop", "tiered-policy":
+			return true
+		}
+	}
+	return false
+}
+
+func validMiddleRelayEndpoint(endpoint string) bool {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(endpoint))
+	if err != nil || strings.TrimSpace(host) == "" || strings.TrimSpace(port) == "" {
+		return false
+	}
+	portNum, err := strconv.Atoi(port)
+	return err == nil && portNum >= 1 && portNum <= 65535
 }
 
 func hopRoleIsMiddle(raw string) bool {
@@ -3487,7 +4523,8 @@ func (c *Client) selectMiddleRelayForPair(candidates []proto.RelayDescriptor, en
 	exitRegion := normalizeRegion(exit.Region)
 
 	bestIdx := -1
-	bestScore := -1
+	bestScore := math.Inf(-1)
+	bestRelayID := ""
 	operatorConflict := false
 	countryConflict := false
 	for i, candidate := range candidates {
@@ -3520,17 +4557,18 @@ func (c *Client) selectMiddleRelayForPair(candidates []proto.RelayDescriptor, en
 			}
 		}
 
-		score := 0
+		score := middleRelaySelectionScore(candidate)
 		candidateRegion := normalizeRegion(candidate.Region)
 		if candidateRegion != "" && candidateRegion == entryRegion {
-			score += 2
+			score += 0.03
 		}
 		if candidateRegion != "" && candidateRegion == exitRegion {
-			score++
+			score += 0.015
 		}
-		if bestIdx < 0 || score > bestScore {
+		if bestIdx < 0 || score > bestScore || (score == bestScore && (bestRelayID == "" || candidateID < bestRelayID)) {
 			bestIdx = i
 			bestScore = score
+			bestRelayID = candidateID
 		}
 	}
 	if bestIdx >= 0 {
@@ -3543,6 +4581,14 @@ func (c *Client) selectMiddleRelayForPair(candidates []proto.RelayDescriptor, en
 		return proto.RelayDescriptor{}, middleSelectionCountryConflict
 	}
 	return proto.RelayDescriptor{}, middleSelectionMissing
+}
+
+func middleRelaySelectionScore(desc proto.RelayDescriptor) float64 {
+	score, signaled := exitSelectionScore(desc)
+	if !signaled {
+		return 0
+	}
+	return score
 }
 
 func (c *Client) selectPreferredExits(exits []proto.RelayDescriptor) ([]proto.RelayDescriptor, string) {
@@ -3808,7 +4854,12 @@ func (c *Client) applyLocalityBias(scored []scoredExit) ([]scoredExit, bool) {
 func scoreExits(exits []proto.RelayDescriptor) ([]scoredExit, bool) {
 	scored := make([]scoredExit, 0, len(exits))
 	hasSignals := false
+	filtered := false
 	for _, x := range exits {
+		if x.Role == "micro-exit" && !microExitEligibleForSelection(x) {
+			filtered = true
+			continue
+		}
 		score, signaled := exitSelectionScore(x)
 		if signaled {
 			hasSignals = true
@@ -3819,10 +4870,71 @@ func scoreExits(exits []proto.RelayDescriptor) ([]scoredExit, bool) {
 		}
 		scored = append(scored, scoredExit{desc: x, weight: weight})
 	}
+	if len(scored) == 0 {
+		return scored, filtered
+	}
+	if filtered {
+		return scored, true
+	}
 	if !hasSignals || weightsNearlyEqual(scored) {
 		return nil, false
 	}
 	return scored, true
+}
+
+func microExitEligibleForSelection(desc proto.RelayDescriptor) bool {
+	if strings.ToLower(strings.TrimSpace(desc.Role)) != "micro-exit" {
+		return false
+	}
+	for _, hopRole := range desc.HopRoles {
+		if role := canonicalizeClientPathHopRole(hopRole); role != "" && role != "exit" {
+			return false
+		}
+	}
+	for _, capability := range desc.Capabilities {
+		switch strings.ToLower(strings.TrimSpace(capability)) {
+		case "two-hop", "middle", "relay", "micro-relay", "micro_relay", "transit", "three-hop-middle":
+			return false
+		}
+	}
+	score := proto.RelaySelectionScore{
+		RelayID:      desc.RelayID,
+		Role:         "micro-exit",
+		Reputation:   desc.Reputation,
+		Uptime:       desc.Uptime,
+		Capacity:     desc.Capacity,
+		AbusePenalty: desc.AbusePenalty,
+	}
+	return microRelayScoreEligibleForClient(score)
+}
+
+func microRelayScoreEligibleForClient(score proto.RelaySelectionScore) bool {
+	if score.Reputation < 0.5 {
+		return false
+	}
+	if score.Uptime < 0.5 {
+		return false
+	}
+	if score.Capacity < 0.5 {
+		return false
+	}
+	if score.AbusePenalty > 0.5 {
+		return false
+	}
+	return true
+}
+
+func canonicalizeClientPathHopRole(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "entry", "ingress", "guard":
+		return "entry"
+	case "middle", "relay", "micro-relay", "micro_relay", "transit", "three-hop-middle":
+		return "middle"
+	case "exit", "egress":
+		return "exit"
+	default:
+		return ""
+	}
 }
 
 func weightsNearlyEqual(scored []scoredExit) bool {
@@ -4083,16 +5195,7 @@ func (c *Client) relayHealthy(ctx context.Context, controlURL string) bool {
 		checkCtx, cancel = context.WithTimeout(ctx, c.healthCheckTimeout)
 		defer cancel()
 	}
-	req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, joinURL(controlURL, "/v1/health"), nil)
-	if err != nil {
-		return false
-	}
-	resp, err := c.httpClient.Do(req)
-	ok := err == nil && resp != nil && resp.StatusCode == http.StatusOK
-	if resp != nil {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-	}
+	ok := c.relayReady(checkCtx, controlURL)
 
 	c.healthMu.Lock()
 	if c.healthCache == nil {
@@ -4102,6 +5205,41 @@ func (c *Client) relayHealthy(ctx context.Context, controlURL string) bool {
 	c.healthCache[controlURL] = healthProbeState{ok: ok, checkedAt: now}
 	c.healthMu.Unlock()
 	return ok
+}
+
+func (c *Client) relayReady(ctx context.Context, controlURL string) bool {
+	status, err := c.probeRelayStatus(ctx, controlURL, "/v1/ready")
+	if err == nil && status == http.StatusOK {
+		return true
+	}
+	if err != nil || (status != http.StatusNotFound && status != http.StatusMethodNotAllowed) {
+		return false
+	}
+	status, err = c.probeRelayStatus(ctx, controlURL, "/v1/health")
+	return err == nil && status == http.StatusOK
+}
+
+func (c *Client) probeRelayStatus(ctx context.Context, controlURL string, path string) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, joinURL(controlURL, path), nil)
+	if err != nil {
+		return 0, err
+	}
+	client := c.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if resp != nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		return 0, err
+	}
+	if resp == nil {
+		return 0, fmt.Errorf("empty health probe response")
+	}
+	return resp.StatusCode, nil
 }
 
 func (c *Client) pruneHealthCacheLocked(now time.Time) {
@@ -4207,6 +5345,9 @@ func normalizeControlURL(raw string) string {
 	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return ""
 	}
+	if strictControlURLPathPrefixesDisallowed() && controlURLHasPathPrefix(parsed) {
+		return ""
+	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return ""
 	}
@@ -4218,6 +5359,25 @@ func normalizeControlURL(raw string) string {
 		return ""
 	}
 	return strings.TrimRight(parsed.String(), "/")
+}
+
+func strictControlURLPathPrefixesDisallowed() bool {
+	return clientStrictModeEnabled() || enforceHTTPSControlURL()
+}
+
+func clientStrictModeEnabled() bool {
+	return envEnabled("CLIENT_BETA_STRICT") ||
+		envEnabled("CLIENT_PROD_STRICT") ||
+		envEnabled("BETA_STRICT_MODE") ||
+		envEnabled("PROD_STRICT_MODE")
+}
+
+func controlURLHasPathPrefix(parsed *url.URL) bool {
+	if parsed == nil {
+		return false
+	}
+	path := strings.TrimSpace(parsed.EscapedPath())
+	return path != "" && path != "/"
 }
 
 func enforceHTTPSControlURL() bool {
@@ -4421,7 +5581,21 @@ func isClientDisallowedOutboundDialIP(ip net.IP) bool {
 	if ip == nil {
 		return true
 	}
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
+	return ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		isSharedAddressSpaceCGNATIP(ip) ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsMulticast() ||
+		ip.IsUnspecified()
+}
+
+func isSharedAddressSpaceCGNATIP(ip net.IP) bool {
+	ipv4 := ip.To4()
+	if ipv4 == nil {
+		return false
+	}
+	return ipv4[0] == 100 && ipv4[1]&0xc0 == 0x40
 }
 
 func isLoopbackURLHost(host string) bool {

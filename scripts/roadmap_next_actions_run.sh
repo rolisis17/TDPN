@@ -18,6 +18,7 @@ Usage:
     [--vm-command-source PATH] \
     [--action-timeout-sec N] \
     [--allow-unsafe-shell-commands [0|1]] \
+    [--allow-empty-actions [0|1]] \
     [--refresh-manual-validation [0|1]] \
     [--refresh-single-machine-readiness [0|1]] \
     [--parallel [0|1]] \
@@ -40,6 +41,7 @@ Purpose:
 Defaults:
   --action-timeout-sec 0   (0 = no per-action timeout)
   --allow-unsafe-shell-commands 0
+  --allow-empty-actions 0
   --host-a ""   (precedence: CLI --host-a > ROADMAP_NEXT_ACTIONS_RUN_HOST_A > A_HOST > HOST_A > summary command values)
   --host-b ""   (precedence: CLI --host-b > ROADMAP_NEXT_ACTIONS_RUN_HOST_B > B_HOST > HOST_B > summary command values)
   --campaign-subject ""   (precedence: CLI --campaign-subject > --profile-default-gate-subject > ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_SUBJECT > ROADMAP_NEXT_ACTIONS_RUN_CAMPAIGN_SUBJECT > CAMPAIGN_SUBJECT > INVITE_KEY > summary command values)
@@ -66,7 +68,9 @@ Defaults:
 
 Exit behavior:
   - Runs all selected commands (sequential by default, concurrent when --parallel=1).
-  - Returns rc=0 only when all selected commands pass (or no actions selected).
+  - Returns rc=0 only when all selected commands pass.
+  - Fails closed (rc=4) when no actions are selected unless
+    --allow-empty-actions=1 is explicitly set.
   - Returns first failing action command rc otherwise.
   - Runtime inputs use deterministic precedence: CLI flags > env values > summary command values.
   - Fails closed (rc=3) when selected actions contain duplicate ids with
@@ -1708,6 +1712,7 @@ profile_default_gate_subject_env="${ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GAT
 profile_default_gate_subject="$profile_default_gate_subject_env"
 profile_default_gate_subject_arg_provided="0"
 allow_profile_default_gate_unreachable="${ROADMAP_NEXT_ACTIONS_RUN_ALLOW_PROFILE_DEFAULT_GATE_UNREACHABLE:-0}"
+allow_empty_actions="${ROADMAP_NEXT_ACTIONS_RUN_ALLOW_EMPTY_ACTIONS:-0}"
 include_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_PREFIX:-}"
 exclude_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_ID_PREFIX:-}"
 include_ids_csv="${ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_IDS:-}"
@@ -1842,6 +1847,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --allow-empty-actions)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_empty_actions="${2:-}"
+        shift 2
+      else
+        allow_empty_actions="1"
+        shift
+      fi
+      ;;
     --include-id-prefix)
       require_value_or_die "$1" "${2:-}"
       include_id_prefix="${2:-}"
@@ -1918,6 +1932,7 @@ bool_arg_or_die "--refresh-single-machine-readiness" "$refresh_single_machine_re
 bool_arg_or_die "--parallel" "$parallel"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--allow-profile-default-gate-unreachable" "$allow_profile_default_gate_unreachable"
+bool_arg_or_die "--allow-empty-actions" "$allow_empty_actions"
 bool_arg_or_die "--allow-unsafe-shell-commands" "$allow_unsafe_shell_commands"
 int_arg_or_die "--max-actions" "$max_actions"
 int_arg_or_die "--action-timeout-sec" "$action_timeout_sec"
@@ -2301,12 +2316,17 @@ if [[ -z "$selected_action_ids_csv" ]]; then
 fi
 echo "[roadmap-next-actions-run] selected_actions=$actions_count parallel=$parallel action_timeout_sec=$action_timeout_sec"
 echo "[roadmap-next-actions-run] allow_unsafe_shell_commands=$allow_unsafe_shell_commands"
+echo "[roadmap-next-actions-run] allow_empty_actions=$allow_empty_actions"
 echo "[roadmap-next-actions-run] include_id_prefix=${include_id_prefix:-none} exclude_id_prefix=${exclude_id_prefix:-none}"
 echo "[roadmap-next-actions-run] include_ids=$include_ids_csv_display exclude_ids=$exclude_ids_csv_display"
 echo "[roadmap-next-actions-run] include_id_suffixes=$include_id_suffixes_csv_display exclude_id_suffixes=$exclude_id_suffixes_csv_display"
 echo "[roadmap-next-actions-run] action_ids=$selected_action_ids_csv"
 if (( actions_count == 0 )); then
-  echo "[roadmap-next-actions-run] no actions selected; writing pass summary"
+  if [[ "$allow_empty_actions" == "1" ]]; then
+    echo "[roadmap-next-actions-run] no actions selected; allow_empty_actions=1, writing pass summary"
+  else
+    echo "[roadmap-next-actions-run] no actions selected; failing closed (set --allow-empty-actions 1 to override)"
+  fi
 fi
 
 actions_tmp="$(mktemp)"
@@ -2781,8 +2801,13 @@ done
 
 actions_results_json="$(jq -s '.' "$actions_tmp")"
 if (( actions_count == 0 )); then
-  final_status="pass"
-  final_rc=0
+  if [[ "$allow_empty_actions" == "1" ]]; then
+    final_status="pass"
+    final_rc=0
+  else
+    final_status="fail"
+    final_rc=4
+  fi
 fi
 summary_command_input="./scripts/roadmap_next_actions_run.sh"
 for arg in "$@"; do
@@ -2846,6 +2871,7 @@ jq -n \
   --arg profile_default_gate_subject_redacted "$profile_default_gate_subject_redacted" \
   --argjson profile_default_gate_subject_configured "$profile_default_gate_subject_configured" \
   --argjson allow_profile_default_gate_unreachable "$allow_profile_default_gate_unreachable" \
+  --argjson allow_empty_actions "$allow_empty_actions" \
   --argjson profile_default_gate_default_timeout_sec "$profile_default_gate_default_timeout_sec" \
   --argjson action_timeout_sec "$action_timeout_sec" \
   --argjson allow_unsafe_shell_commands "$allow_unsafe_shell_commands" \
@@ -2886,6 +2912,7 @@ jq -n \
       profile_default_gate_subject: (if $profile_default_gate_subject_configured == 1 then $profile_default_gate_subject_redacted else null end),
       profile_default_gate_subject_configured: ($profile_default_gate_subject_configured == 1),
       allow_profile_default_gate_unreachable: ($allow_profile_default_gate_unreachable == 1),
+      allow_empty_actions: ($allow_empty_actions == 1),
       include_id_prefix: (if $include_id_prefix == "" then null else $include_id_prefix end),
       exclude_id_prefix: (if $exclude_id_prefix == "" then null else $exclude_id_prefix end),
       include_ids: (if ($include_ids | length) == 0 then null else $include_ids end),
@@ -2915,6 +2942,7 @@ jq -n \
     },
     summary: {
       actions_executed: $executed_count,
+      empty_actions_allowed: ($allow_empty_actions == 1),
       pass: $pass_count,
       fail: $fail_count,
       timed_out: $timed_out_count,

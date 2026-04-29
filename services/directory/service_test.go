@@ -151,7 +151,7 @@ func TestParseDNSPeerHintRecordRejectsInvalidURL(t *testing.T) {
 }
 
 func TestStrictControlHostRejectsAmbiguousNumericAliases(t *testing.T) {
-	tests := []string{"127.1", "2130706433", "localhost.", "fe80::1%eth0"}
+	tests := []string{"127.1", "2130706433", "localhost.", "fe80::1%eth0", "100.64.0.1", "100.127.255.254"}
 	for _, host := range tests {
 		if !isDisallowedStrictControlHost(host) {
 			t.Fatalf("expected strict control host %q to be rejected", host)

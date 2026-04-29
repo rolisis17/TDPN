@@ -200,20 +200,20 @@ if ! grep -qiE 'packaged' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
   echo "desktop scaffold contract failed: expected packaged mode marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
   exit 1
 fi
-if ! grep -qF 'GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
-  echo "desktop scaffold contract failed: expected GPM shared auto-install env marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
+if ! grep -qF 'GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected GPM packaged-run auto-install env marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
   exit 1
 fi
-if ! grep -qF 'TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
-  echo "desktop scaffold contract failed: expected TDPN shared auto-install legacy env alias marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
+if ! grep -qF 'TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected TDPN packaged-run auto-install legacy env alias marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
   exit 1
 fi
 if ! rg -q -- '-NoInstallMissing|\$NoInstallMissing' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
   echo "desktop scaffold contract failed: expected -NoInstallMissing override marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
   exit 1
 fi
-if ! rg -q -- '\$installMissingIntent[[:space:]]*=[[:space:]]*\$true|\$\{GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING:-\$\{TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING:-1\}\}|default[^[:alnum:]]*(enable|enabled|true)[^[:alnum:]]*(install|auto[-_ ]?install)[^[:alnum:]]*missing' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
-  echo "desktop scaffold contract failed: expected default-enabled install-intent marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
+if ! rg -q -- '\$installMissingIntent[[:space:]]*=[[:space:]]*\$false|default[^[:alnum:]]*(disable|disabled|false|check-only)[^[:alnum:]]*(install|auto[-_ ]?install|remediation)[^[:alnum:]]*missing|check-only[^[:alnum:]]*(by default|default)' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected default-check-only install-intent marker in $PACKAGED_RUN_POWERSHELL_SCRIPT"
   exit 1
 fi
 if ! rg -q -- 'if[[:space:]]*\(\$(EffectiveInstallMissing|InstallIntent|InstallMissing|installMissingEffective|installMissingIntent)\)' "$PACKAGED_RUN_POWERSHELL_SCRIPT"; then
@@ -251,20 +251,20 @@ if ! grep -qF -- '--desktop-executable-path' "$LINUX_PACKAGED_RUN_SCRIPT"; then
   echo "desktop scaffold contract failed: expected --desktop-executable-path marker in $LINUX_PACKAGED_RUN_SCRIPT"
   exit 1
 fi
-if ! grep -qF 'GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$LINUX_PACKAGED_RUN_SCRIPT"; then
-  echo "desktop scaffold contract failed: expected GPM shared auto-install env marker in $LINUX_PACKAGED_RUN_SCRIPT"
+if ! grep -qF 'GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected GPM packaged-run auto-install env marker in $LINUX_PACKAGED_RUN_SCRIPT"
   exit 1
 fi
-if ! grep -qF 'TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING' "$LINUX_PACKAGED_RUN_SCRIPT"; then
-  echo "desktop scaffold contract failed: expected TDPN shared auto-install legacy env alias marker in $LINUX_PACKAGED_RUN_SCRIPT"
+if ! grep -qF 'TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected TDPN packaged-run auto-install legacy env alias marker in $LINUX_PACKAGED_RUN_SCRIPT"
   exit 1
 fi
 if ! grep -qF -- '--no-install-missing' "$LINUX_PACKAGED_RUN_SCRIPT"; then
   echo "desktop scaffold contract failed: expected --no-install-missing override marker in $LINUX_PACKAGED_RUN_SCRIPT"
   exit 1
 fi
-if ! rg -q -- '\$\{GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING:-\$\{TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING:-1\}\}|install_missing_effective[[:space:]]*=[[:space:]]*"?1"?|(effective_)?install(_missing|_intent)[[:space:]]*=[[:space:]]*"?1"?|default[^[:alnum:]]*(enable|enabled|true)[^[:alnum:]]*(install|auto[-_ ]?install)[^[:alnum:]]*missing' "$LINUX_PACKAGED_RUN_SCRIPT"; then
-  echo "desktop scaffold contract failed: expected default-enabled install-intent marker in $LINUX_PACKAGED_RUN_SCRIPT"
+if ! rg -q -- 'install_missing_effective[[:space:]]*=[[:space:]]*"?0"?|(effective_)?install(_missing|_intent)[[:space:]]*=[[:space:]]*"?0"?|default[^[:alnum:]]*(disable|disabled|false|check-only)[^[:alnum:]]*(install|auto[-_ ]?install|remediation)[^[:alnum:]]*missing|check-only[^[:alnum:]]*(by default|default)' "$LINUX_PACKAGED_RUN_SCRIPT"; then
+  echo "desktop scaffold contract failed: expected default-check-only install-intent marker in $LINUX_PACKAGED_RUN_SCRIPT"
   exit 1
 fi
 if ! rg -q -- 'if[[:space:]]*\[\[[^]]*(effective_install_missing|install_intent|install_missing|auto_install_missing)[^]]*(==|=|-eq)[^]]*("?1"?|true|enabled)[^]]*\]\]|if[[:space:]]*\[\[[^]]*(effective_install_missing|install_intent|install_missing|auto_install_missing)[^]]*\]\]' "$LINUX_PACKAGED_RUN_SCRIPT"; then
@@ -1057,7 +1057,8 @@ if ! grep -qF 'tabServerEl.classList.toggle("locked", !serverTabVisible);' "$JS_
   echo "desktop scaffold contract failed: missing server tab locked-class marker in $JS_FILE"
   exit 1
 fi
-if ! grep -qF 'serverLockHintEl.textContent = computeServerLockHintText();' "$JS_FILE"; then
+if ! grep -qF 'serverLockHintEl.textContent = computeServerLockHintText();' "$JS_FILE" && \
+   ! { grep -qF 'const serverReason = computeServerLockHintText();' "$JS_FILE" && grep -qF 'serverLockHintEl.textContent = serverReason;' "$JS_FILE"; }; then
   echo "desktop scaffold contract failed: missing server lock hint update marker in $JS_FILE"
   exit 1
 fi

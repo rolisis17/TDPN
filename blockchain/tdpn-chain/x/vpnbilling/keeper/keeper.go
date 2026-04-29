@@ -81,6 +81,47 @@ func (k *Keeper) CreateReservation(record types.CreditReservation) (types.Credit
 	return normalized, nil
 }
 
+// ConfirmReservation advances an existing pending/submitted reservation to confirmed
+// without allowing callers to create confirmed reservations from nothing.
+func (k *Keeper) ConfirmReservation(record types.CreditReservation) (types.CreditReservation, bool, error) {
+	normalized := normalizeReservation(record)
+	normalized.Status = chaintypes.ReconciliationConfirmed
+	if err := normalized.ValidateBasic(); err != nil {
+		return types.CreditReservation{}, false, err
+	}
+
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	existing, ok := k.store.GetReservation(normalized.ReservationID)
+	if !ok {
+		return types.CreditReservation{}, false, reservationNotFoundError(normalized.ReservationID)
+	}
+	normalizedExisting := normalizeReservation(existing)
+	if !reservationConfirmationFieldsEqual(normalizedExisting, normalized) {
+		return types.CreditReservation{}, false, conflictError("reservation", normalized.ReservationID)
+	}
+	switch canonicalReservationStatus(normalizedExisting.Status) {
+	case chaintypes.ReconciliationConfirmed:
+		if err := k.upsertReservationLocked(normalizedExisting); err != nil {
+			return types.CreditReservation{}, false, err
+		}
+		return normalizedExisting, true, nil
+	case chaintypes.ReconciliationPending, chaintypes.ReconciliationSubmitted:
+		confirmed := normalizedExisting
+		confirmed.Status = chaintypes.ReconciliationConfirmed
+		if err := k.upsertReservationLocked(confirmed); err != nil {
+			return types.CreditReservation{}, false, err
+		}
+		return confirmed, false, nil
+	default:
+		return types.CreditReservation{}, false, reservationNotFinalizableError(
+			normalized.ReservationID,
+			canonicalReservationStatus(normalizedExisting.Status),
+		)
+	}
+}
+
 func (k *Keeper) GetReservation(reservationID string) (types.CreditReservation, bool) {
 	normalizedReservationID := normalizeReservation(types.CreditReservation{ReservationID: reservationID}).ReservationID
 
@@ -157,6 +198,12 @@ func (k *Keeper) FinalizeSettlement(record types.SettlementRecord) (types.Settle
 	}
 	if normalized.BilledAmount > normalizedReservation.Amount {
 		return types.SettlementRecord{}, overchargeError(normalized.BilledAmount, normalizedReservation.Amount)
+	}
+	if !settlementCanFinalize(normalized) {
+		return types.SettlementRecord{}, settlementNotFinalizableError(
+			normalized.SettlementID,
+			canonicalSettlementOperationState(normalized.OperationState),
+		)
 	}
 
 	existing, ok := k.store.GetSettlement(normalized.SettlementID)
@@ -252,24 +299,22 @@ func (k *Keeper) ListSettlementsWithError() ([]types.SettlementRecord, error) {
 }
 
 func reservationAfterSettlement(record types.CreditReservation) types.CreditReservation {
-	normalized := normalizeReservation(record)
-	status := canonicalReservationStatus(normalized.Status)
-	if status == chaintypes.ReconciliationPending || status == chaintypes.ReconciliationSubmitted {
-		normalized.Status = chaintypes.ReconciliationConfirmed
-	}
-	return normalized
+	return normalizeReservation(record)
 }
 
 func reservationCanAcceptSettlement(record types.CreditReservation) bool {
-	switch canonicalReservationStatus(record.Status) {
-	case chaintypes.ReconciliationPending, chaintypes.ReconciliationSubmitted:
-		return true
-	default:
-		return false
-	}
+	return canonicalReservationStatus(record.Status) == chaintypes.ReconciliationConfirmed
+}
+
+func settlementCanFinalize(record types.SettlementRecord) bool {
+	return canonicalSettlementOperationState(record.OperationState) == chaintypes.ReconciliationConfirmed
 }
 
 func canonicalReservationStatus(status chaintypes.ReconciliationStatus) chaintypes.ReconciliationStatus {
+	return chaintypes.ReconciliationStatus(strings.ToLower(strings.TrimSpace(string(status))))
+}
+
+func canonicalSettlementOperationState(status chaintypes.ReconciliationStatus) chaintypes.ReconciliationStatus {
 	return chaintypes.ReconciliationStatus(strings.ToLower(strings.TrimSpace(string(status))))
 }
 
@@ -344,6 +389,7 @@ func normalizeReservation(record types.CreditReservation) types.CreditReservatio
 
 func normalizeSettlement(record types.SettlementRecord) types.SettlementRecord {
 	record = record.Canonicalize()
+	record.OperationState = canonicalSettlementOperationState(record.OperationState)
 	if record.OperationState == "" {
 		record.OperationState = chaintypes.ReconciliationSubmitted
 	}
@@ -358,6 +404,15 @@ func reservationRecordsEqual(a, b types.CreditReservation) bool {
 		a.Amount == b.Amount &&
 		a.Status == b.Status &&
 		a.CreatedAtUnix == b.CreatedAtUnix
+}
+
+func reservationConfirmationFieldsEqual(existing, requested types.CreditReservation) bool {
+	return existing.ReservationID == requested.ReservationID &&
+		existing.SponsorID == requested.SponsorID &&
+		existing.SessionID == requested.SessionID &&
+		existing.AssetDenom == requested.AssetDenom &&
+		existing.Amount == requested.Amount &&
+		(requested.CreatedAtUnix == 0 || existing.CreatedAtUnix == requested.CreatedAtUnix)
 }
 
 func reservationBusinessKeyEqual(a, b types.CreditReservation) bool {
@@ -403,6 +458,10 @@ func overchargeError(billedAmount, reservedAmount int64) error {
 
 func reservationNotFinalizableError(reservationID string, status chaintypes.ReconciliationStatus) error {
 	return fmt.Errorf("reservation %q has status %q and cannot be settled", reservationID, status)
+}
+
+func settlementNotFinalizableError(settlementID string, status chaintypes.ReconciliationStatus) error {
+	return fmt.Errorf("settlement %q has operation state %q and cannot be finalized", settlementID, status)
 }
 
 func reservationAlreadySettledError(reservationID, settlementID string) error {

@@ -58,6 +58,109 @@ func TestResolveExitRouteFromDirectory(t *testing.T) {
 	}
 }
 
+func TestResolveExitRouteAcceptsHealthyMicroExit(t *testing.T) {
+	durl := "http://directory.local"
+	handlers := make(map[string]func(*http.Request) (*http.Response, error))
+	addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{
+		{
+			RelayID:      "micro-exit-a",
+			Role:         "micro-exit",
+			Endpoint:     "10.0.0.21:51821",
+			ControlURL:   "https://10.0.0.21:8084",
+			Reputation:   0.9,
+			Uptime:       0.9,
+			Capacity:     0.9,
+			AbusePenalty: 0.1,
+		},
+	})
+
+	s := &Service{
+		exitControlURL:      "http://127.0.0.1:8084",
+		exitDataAddr:        "127.0.0.1:51821",
+		directoryURLs:       []string{durl},
+		directoryMinSources: 1,
+		directoryMinVotes:   1,
+		routeTTL:            time.Minute,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		exitRouteCache:      map[string]exitRoute{},
+	}
+	route, err := s.resolveExitRoute(context.Background(), "micro-exit-a")
+	if err != nil {
+		t.Fatalf("resolve micro-exit route failed: %v", err)
+	}
+	if route.controlURL != "https://10.0.0.21:8084" {
+		t.Fatalf("unexpected micro-exit control url: %s", route.controlURL)
+	}
+}
+
+func TestResolveExitRouteRejectsMicroExitRuntimeAdmission(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*proto.RelayDescriptor)
+	}{
+		{
+			name: "weak-score",
+			mutate: func(desc *proto.RelayDescriptor) {
+				desc.Reputation = 0.49
+			},
+		},
+		{
+			name: "middle-hop-role",
+			mutate: func(desc *proto.RelayDescriptor) {
+				desc.HopRoles = []string{"middle"}
+			},
+		},
+		{
+			name: "two-hop-capability",
+			mutate: func(desc *proto.RelayDescriptor) {
+				desc.Capabilities = []string{"two-hop"}
+			},
+		},
+		{
+			name: "middle-capability-alias",
+			mutate: func(desc *proto.RelayDescriptor) {
+				desc.Capabilities = []string{"micro-relay"}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			durl := "http://directory.local"
+			handlers := make(map[string]func(*http.Request) (*http.Response, error))
+			desc := proto.RelayDescriptor{
+				RelayID:      "micro-exit-bad",
+				Role:         "micro-exit",
+				Endpoint:     "10.0.0.22:51821",
+				ControlURL:   "https://10.0.0.22:8084",
+				Reputation:   0.95,
+				Uptime:       0.95,
+				Capacity:     0.95,
+				AbusePenalty: 0.1,
+			}
+			tc.mutate(&desc)
+			addDirectoryFixture(t, handlers, durl, []proto.RelayDescriptor{desc})
+
+			s := &Service{
+				exitControlURL:      "http://127.0.0.1:8084",
+				exitDataAddr:        "127.0.0.1:51821",
+				directoryURLs:       []string{durl},
+				directoryMinSources: 1,
+				directoryMinVotes:   1,
+				routeTTL:            time.Minute,
+				httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+				exitRouteCache:      map[string]exitRoute{},
+			}
+			_, err := s.resolveExitRoute(context.Background(), "micro-exit-bad")
+			if err == nil {
+				t.Fatalf("expected micro-exit to be rejected")
+			}
+			if !strings.Contains(err.Error(), "micro-exit route failed runtime admission") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestResolveExitRouteFallback(t *testing.T) {
 	s := &Service{
 		exitControlURL: "127.0.0.1:8084",

@@ -21,15 +21,23 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 		SessionID:     "session-1",
 		Kind:          EvidenceKindObjective,
 		ProofHash:     validSHA256Lower,
+		SlashAmount:   100,
+		SlashDenom:    "utdpn",
 		ViolationType: "double-sign",
 	}
 
 	tests := []struct {
-		name    string
-		record  SlashEvidence
-		wantErr string
+		name               string
+		record             SlashEvidence
+		wantErr            string
+		preserveSlashValue bool
 	}{
 		{name: "valid sha256 lowercase", record: base},
+		{
+			name:               "valid without typed slash metadata",
+			record:             SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: base.ProofHash, ViolationType: base.ViolationType},
+			preserveSlashValue: true,
+		},
 		{
 			name:   "valid canonicalizable evidence id",
 			record: SlashEvidence{EvidenceID: " \nEVIDENCE-1\t ", Kind: base.Kind, ProofHash: base.ProofHash, ViolationType: base.ViolationType},
@@ -179,6 +187,32 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: "obj://bucket/\tkey", ViolationType: base.ViolationType},
 			wantErr: "proof hash must use objective format (sha256:<value> or obj://<value>)",
 		},
+		{
+			name:    "negative slash amount",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: base.ProofHash, ViolationType: base.ViolationType, SlashAmount: -1, SlashDenom: base.SlashDenom},
+			wantErr: "slash amount cannot be negative",
+		},
+		{
+			name:    "positive slash amount missing denom",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: base.ProofHash, ViolationType: base.ViolationType, SlashAmount: 1, SlashDenom: " \t "},
+			wantErr: "slash denom is required",
+		},
+		{
+			name:    "slash denom rejects whitespace",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: base.ProofHash, ViolationType: base.ViolationType, SlashAmount: 1, SlashDenom: "uu sdc"},
+			wantErr: "slash denom must be a canonical non-empty token",
+		},
+		{
+			name:    "slash denom rejects control characters",
+			record:  SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: base.ProofHash, ViolationType: base.ViolationType, SlashAmount: 1, SlashDenom: "uu\nsdc"},
+			wantErr: "slash denom must be a canonical non-empty token",
+		},
+		{
+			name:               "typed slash denom missing positive amount",
+			record:             SlashEvidence{EvidenceID: base.EvidenceID, Kind: base.Kind, ProofHash: base.ProofHash, ViolationType: base.ViolationType, SlashDenom: base.SlashDenom},
+			wantErr:            "slash amount must be positive",
+			preserveSlashValue: true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -191,6 +225,14 @@ func TestSlashEvidenceValidateBasic(t *testing.T) {
 			}
 			if record.SessionID == "" {
 				record.SessionID = base.SessionID
+			}
+			if !tc.preserveSlashValue {
+				if record.SlashAmount == 0 && tc.wantErr != "slash amount cannot be negative" {
+					record.SlashAmount = base.SlashAmount
+				}
+				if record.SlashDenom == "" && tc.wantErr != "slash denom is required" {
+					record.SlashDenom = base.SlashDenom
+				}
 			}
 
 			err := record.ValidateBasic()
@@ -216,6 +258,8 @@ func TestPenaltyDecisionValidateBasic(t *testing.T) {
 		PenaltyID:       "penalty-1",
 		EvidenceID:      "evidence-1",
 		SlashBasisPoint: 25,
+		SlashAmount:     100,
+		SlashDenom:      "utdpn",
 	}
 
 	tests := []struct {
@@ -257,13 +301,48 @@ func TestPenaltyDecisionValidateBasic(t *testing.T) {
 			record:  PenaltyDecision{PenaltyID: base.PenaltyID, EvidenceID: base.EvidenceID, SlashBasisPoint: 0, Jailed: false},
 			wantErr: "penalty decision must slash or jail",
 		},
+		{
+			name:   "valid legacy basis-point-only penalty",
+			record: PenaltyDecision{PenaltyID: base.PenaltyID, EvidenceID: base.EvidenceID, SlashBasisPoint: base.SlashBasisPoint},
+		},
+		{
+			name:   "valid typed slash only penalty",
+			record: PenaltyDecision{PenaltyID: base.PenaltyID, EvidenceID: base.EvidenceID, SlashAmount: base.SlashAmount, SlashDenom: base.SlashDenom},
+		},
+		{
+			name:    "negative typed slash amount",
+			record:  PenaltyDecision{PenaltyID: base.PenaltyID, EvidenceID: base.EvidenceID, SlashBasisPoint: base.SlashBasisPoint, SlashAmount: -1, SlashDenom: base.SlashDenom},
+			wantErr: "slash amount cannot be negative",
+		},
+		{
+			name:    "typed slash amount missing denom",
+			record:  PenaltyDecision{PenaltyID: base.PenaltyID, EvidenceID: base.EvidenceID, SlashBasisPoint: base.SlashBasisPoint, SlashAmount: 1, SlashDenom: " \t "},
+			wantErr: "slash denom is required",
+		},
+		{
+			name:    "typed slash denom missing positive amount",
+			record:  PenaltyDecision{PenaltyID: base.PenaltyID, EvidenceID: base.EvidenceID, SlashBasisPoint: base.SlashBasisPoint, SlashDenom: base.SlashDenom},
+			wantErr: "slash amount must be positive",
+		},
+		{
+			name:    "typed slash denom rejects whitespace",
+			record:  PenaltyDecision{PenaltyID: base.PenaltyID, EvidenceID: base.EvidenceID, SlashBasisPoint: base.SlashBasisPoint, SlashAmount: 1, SlashDenom: "uu sdc"},
+			wantErr: "slash denom must be a canonical non-empty token",
+		},
 	}
 
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := tc.record.ValidateBasic()
+			record := tc.record
+			if record.SlashBasisPoint > 0 && record.SlashAmount == 0 && tc.wantErr != "slash amount must be positive" {
+				record.SlashAmount = base.SlashAmount
+			}
+			if record.SlashBasisPoint > 0 && record.SlashDenom == "" && tc.wantErr != "slash denom is required" {
+				record.SlashDenom = base.SlashDenom
+			}
+			err := record.ValidateBasic()
 			if tc.wantErr == "" && err != nil {
 				t.Fatalf("expected nil error, got %v", err)
 			}
@@ -287,6 +366,9 @@ func TestNormalizeIDHelpers(t *testing.T) {
 	}
 	if got := NormalizePenaltyID(" \nPENALTY-ABC\t "); got != "penalty-abc" {
 		t.Fatalf("expected normalized penalty id %q, got %q", "penalty-abc", got)
+	}
+	if got := NormalizeSlashDenom(" \nUTDPN\t "); got != "utdpn" {
+		t.Fatalf("expected normalized slash denom %q, got %q", "utdpn", got)
 	}
 }
 
@@ -423,6 +505,19 @@ func TestCanonicalObjectiveEvidenceIdentity(t *testing.T) {
 			"expected canonical identity equality for case/whitespace variants: base=%q variant=%q",
 			CanonicalObjectiveEvidenceIdentity(base),
 			CanonicalObjectiveEvidenceIdentity(caseVariant),
+		)
+	}
+
+	wrappedAmountVariant := base
+	wrappedAmountVariant.EvidenceID = "evidence-identity-wrapped-amount"
+	wrappedAmountVariant.ProofHash = "obj://settlement-slash/evidence-identity-wrapped-amount?currency=uusdc&evidence_ref=obj%3A%2F%2FBucket%2FCase%2FPath&slash_micros=2500"
+	wrappedAmountVariant.SlashAmount = 2500
+	wrappedAmountVariant.SlashDenom = "uusdc"
+	if CanonicalObjectiveEvidenceIdentity(base) != CanonicalObjectiveEvidenceIdentity(wrappedAmountVariant) {
+		t.Fatalf(
+			"expected amount-wrapped proof identity to unwrap to objective evidence ref: base=%q wrapped=%q",
+			CanonicalObjectiveEvidenceIdentity(base),
+			CanonicalObjectiveEvidenceIdentity(wrappedAmountVariant),
 		)
 	}
 

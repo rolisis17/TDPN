@@ -73,7 +73,9 @@ func TestKVStoreMalformedPayloadsFailClosed(t *testing.T) {
 
 	validAccrual := types.RewardAccrual{
 		AccrualID:      "acc-ok",
+		SessionID:      "sess-ok",
 		ProviderID:     "provider-1",
+		AssetDenom:     "uusdc",
 		Amount:         9,
 		OperationState: chaintypes.ReconciliationPending,
 	}
@@ -136,7 +138,9 @@ func TestKVStoreRejectsKeyPayloadIdentityMismatch(t *testing.T) {
 
 	mismatchedAccrual := types.RewardAccrual{
 		AccrualID:      "acc-payload",
+		SessionID:      "sess-identity",
 		ProviderID:     "provider-identity",
+		AssetDenom:     "uusdc",
 		Amount:         10,
 		OperationState: chaintypes.ReconciliationPending,
 	}
@@ -180,7 +184,9 @@ func TestNewKVStoreNilFallbackAndPrefixIsolation(t *testing.T) {
 
 	accrual := types.RewardAccrual{
 		AccrualID:      "acc-fallback",
+		SessionID:      "sess-fallback",
 		ProviderID:     "provider-fallback",
+		AssetDenom:     "uusdc",
 		Amount:         5,
 		OperationState: chaintypes.ReconciliationPending,
 	}

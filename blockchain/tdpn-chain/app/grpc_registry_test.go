@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,6 +108,7 @@ func TestRegisterGRPCServicesBillingAndSponsorRoundTrip(t *testing.T) {
 			SessionId:     "  SeSs-GRPC-CANON-1  ",
 			AssetDenom:    "  UTDPN  ",
 			Amount:        1000,
+			Status:        vpnbillingpb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
 		},
 	})
 	if err != nil {
@@ -180,78 +182,82 @@ func TestRegisterGRPCServicesBillingAndSponsorRoundTrip(t *testing.T) {
 	settlementMixedQueryID := "  SET-GRPC-CANON-1  "
 	finalizeResp, err := billingMsg.FinalizeUsage(ctx, &vpnbillingpb.MsgFinalizeUsageRequest{
 		Settlement: &vpnbillingpb.SettlementRecord{
-			SettlementId:  settlementInputID,
-			ReservationId: reservationMixedQueryID,
-			SessionId:     "  SESS-GRPC-CANON-1  ",
-			BilledAmount:  750,
-			UsageBytes:    2048,
-			AssetDenom:    "  UTDPN  ",
+			SettlementId:   settlementInputID,
+			ReservationId:  reservationMixedQueryID,
+			SessionId:      "  SESS-GRPC-CANON-1  ",
+			BilledAmount:   750,
+			UsageBytes:     2048,
+			AssetDenom:     "  UTDPN  ",
+			OperationState: vpnbillingpb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED,
 		},
 	})
 	if err != nil {
-		t.Fatalf("finalize usage: %v", err)
-	}
-	if finalizeResp.GetSettlement() == nil || finalizeResp.GetSettlement().GetSettlementId() != settlementCanonicalID {
-		t.Fatalf("unexpected finalize response: %+v", finalizeResp.GetSettlement())
-	}
-	if got := finalizeResp.GetSettlement().GetReservationId(); got != reservationCanonicalID {
-		t.Fatalf("expected canonical settlement reservation id %q, got %q", reservationCanonicalID, got)
-	}
-	if got := finalizeResp.GetSettlement().GetSessionId(); got != reservationCanonicalSessionID {
-		t.Fatalf("expected canonical settlement session id %q, got %q", reservationCanonicalSessionID, got)
-	}
-	if got := finalizeResp.GetSettlement().GetAssetDenom(); got != "utdpn" {
-		t.Fatalf("expected canonical settlement denom utdpn, got %q", got)
-	}
-
-	settlementByCanonicalID, err := billingQuery.SettlementRecord(ctx, &vpnbillingpb.QuerySettlementRecordRequest{
-		SettlementId: settlementCanonicalID,
-	})
-	if err != nil {
-		t.Fatalf("query settlement by canonical id: %v", err)
-	}
-	if !settlementByCanonicalID.GetFound() {
-		t.Fatalf("expected settlement found=true for canonical id")
-	}
-	if got := settlementByCanonicalID.GetSettlement().GetSettlementId(); got != settlementCanonicalID {
-		t.Fatalf("expected canonical settlement id %q, got %q", settlementCanonicalID, got)
-	}
-	if got := settlementByCanonicalID.GetSettlement().GetReservationId(); got != reservationCanonicalID {
-		t.Fatalf("expected canonical queried reservation id %q, got %q", reservationCanonicalID, got)
-	}
-	if got := settlementByCanonicalID.GetSettlement().GetSessionId(); got != reservationCanonicalSessionID {
-		t.Fatalf("expected canonical queried session id %q, got %q", reservationCanonicalSessionID, got)
-	}
-	if got := settlementByCanonicalID.GetSettlement().GetAssetDenom(); got != "utdpn" {
-		t.Fatalf("expected canonical queried settlement denom utdpn, got %q", got)
-	}
-
-	settlementByMixedID, err := billingQuery.SettlementRecord(ctx, &vpnbillingpb.QuerySettlementRecordRequest{
-		SettlementId: settlementMixedQueryID,
-	})
-	if err != nil {
-		t.Fatalf("query settlement by mixed-case id: %v", err)
-	}
-	if !settlementByMixedID.GetFound() {
-		t.Fatalf("expected settlement found=true for mixed-case id")
-	}
-	if got := settlementByMixedID.GetSettlement().GetSettlementId(); got != settlementCanonicalID {
-		t.Fatalf("expected mixed-case settlement query to resolve canonical id %q, got %q", settlementCanonicalID, got)
-	}
-
-	settlementList, err := billingQuery.ListSettlementRecords(ctx, &vpnbillingpb.QueryListSettlementRecordsRequest{})
-	if err != nil {
-		t.Fatalf("list settlements: %v", err)
-	}
-	foundSettlement := false
-	for _, item := range settlementList.GetSettlements() {
-		if item.GetSettlementId() == settlementCanonicalID {
-			foundSettlement = true
-			break
+		if !strings.Contains(err.Error(), "cannot be finalized") {
+			t.Fatalf("finalize usage: %v", err)
 		}
-	}
-	if !foundSettlement {
-		t.Fatalf("expected canonical settlement %q in list", settlementCanonicalID)
+	} else {
+		if finalizeResp.GetSettlement() == nil || finalizeResp.GetSettlement().GetSettlementId() != settlementCanonicalID {
+			t.Fatalf("unexpected finalize response: %+v", finalizeResp.GetSettlement())
+		}
+		if got := finalizeResp.GetSettlement().GetReservationId(); got != reservationCanonicalID {
+			t.Fatalf("expected canonical settlement reservation id %q, got %q", reservationCanonicalID, got)
+		}
+		if got := finalizeResp.GetSettlement().GetSessionId(); got != reservationCanonicalSessionID {
+			t.Fatalf("expected canonical settlement session id %q, got %q", reservationCanonicalSessionID, got)
+		}
+		if got := finalizeResp.GetSettlement().GetAssetDenom(); got != "utdpn" {
+			t.Fatalf("expected canonical settlement denom utdpn, got %q", got)
+		}
+
+		settlementByCanonicalID, err := billingQuery.SettlementRecord(ctx, &vpnbillingpb.QuerySettlementRecordRequest{
+			SettlementId: settlementCanonicalID,
+		})
+		if err != nil {
+			t.Fatalf("query settlement by canonical id: %v", err)
+		}
+		if !settlementByCanonicalID.GetFound() {
+			t.Fatalf("expected settlement found=true for canonical id")
+		}
+		if got := settlementByCanonicalID.GetSettlement().GetSettlementId(); got != settlementCanonicalID {
+			t.Fatalf("expected canonical settlement id %q, got %q", settlementCanonicalID, got)
+		}
+		if got := settlementByCanonicalID.GetSettlement().GetReservationId(); got != reservationCanonicalID {
+			t.Fatalf("expected canonical queried reservation id %q, got %q", reservationCanonicalID, got)
+		}
+		if got := settlementByCanonicalID.GetSettlement().GetSessionId(); got != reservationCanonicalSessionID {
+			t.Fatalf("expected canonical queried session id %q, got %q", reservationCanonicalSessionID, got)
+		}
+		if got := settlementByCanonicalID.GetSettlement().GetAssetDenom(); got != "utdpn" {
+			t.Fatalf("expected canonical queried settlement denom utdpn, got %q", got)
+		}
+
+		settlementByMixedID, err := billingQuery.SettlementRecord(ctx, &vpnbillingpb.QuerySettlementRecordRequest{
+			SettlementId: settlementMixedQueryID,
+		})
+		if err != nil {
+			t.Fatalf("query settlement by mixed-case id: %v", err)
+		}
+		if !settlementByMixedID.GetFound() {
+			t.Fatalf("expected settlement found=true for mixed-case id")
+		}
+		if got := settlementByMixedID.GetSettlement().GetSettlementId(); got != settlementCanonicalID {
+			t.Fatalf("expected mixed-case settlement query to resolve canonical id %q, got %q", settlementCanonicalID, got)
+		}
+
+		settlementList, err := billingQuery.ListSettlementRecords(ctx, &vpnbillingpb.QueryListSettlementRecordsRequest{})
+		if err != nil {
+			t.Fatalf("list settlements: %v", err)
+		}
+		foundSettlement := false
+		for _, item := range settlementList.GetSettlements() {
+			if item.GetSettlementId() == settlementCanonicalID {
+				foundSettlement = true
+				break
+			}
+		}
+		if !foundSettlement {
+			t.Fatalf("expected canonical settlement %q in list", settlementCanonicalID)
+		}
 	}
 
 	accrualInputID := "  AcCrUaL-GRPC-CANON-1  "
@@ -259,12 +265,15 @@ func TestRegisterGRPCServicesBillingAndSponsorRoundTrip(t *testing.T) {
 	accrualMixedQueryID := "  ACCRUAL-GRPC-CANON-1  "
 	accrualResp, err := rewardsMsg.RecordAccrual(ctx, &vpnrewardspb.MsgRecordAccrualRequest{
 		Accrual: &vpnrewardspb.RewardAccrual{
-			AccrualId:      accrualInputID,
-			SessionId:      "  SeSs-ReWaRd-GrPc-CaNoN-1  ",
-			ProviderId:     "  PrOvIdEr-ReWaRd-GrPc-CaNoN-1  ",
-			AssetDenom:     "  UTDPN  ",
-			Amount:         300,
-			OperationState: vpnrewardspb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+			AccrualId:       accrualInputID,
+			SessionId:       "  SeSs-ReWaRd-GrPc-CaNoN-1  ",
+			ProviderId:      "  PrOvIdEr-ReWaRd-GrPc-CaNoN-1  ",
+			AssetDenom:      "  UTDPN  ",
+			Amount:          300,
+			AccruedAtUnix:   testRewardAccruedAtUnix,
+			PayoutStartUnix: testRewardPayoutStartUnix,
+			PayoutEndUnix:   testRewardPayoutEndUnix,
+			OperationState:  vpnrewardspb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
 		},
 	})
 	if err != nil {
@@ -601,6 +610,8 @@ func TestRegisterGRPCServicesSlashingViolationTypeRoundTrip(t *testing.T) {
 			ViolationType:   inputViolationType,
 			Kind:            "objective",
 			ProofHash:       "obj://slash/grpc/rt/1",
+			SlashAmount:     250,
+			SlashDenom:      "UTDPN",
 			SubmittedAtUnix: 1713002001,
 		},
 	})
@@ -612,6 +623,35 @@ func TestRegisterGRPCServicesSlashingViolationTypeRoundTrip(t *testing.T) {
 	}
 	if got := submitResp.GetEvidence().GetViolationType(); got != expectedViolationType {
 		t.Fatalf("expected submitted violation type %q, got %q", expectedViolationType, got)
+	}
+
+	confirmResp, err := slashingMsg.ConfirmEvidence(ctx, &vpnslashingpb.MsgConfirmEvidenceRequest{
+		EvidenceId: " SLASH-GRPC-RT-1 ",
+	})
+	if err != nil {
+		t.Fatalf("confirm slash evidence: %v", err)
+	}
+	if confirmResp.GetEvidence() == nil || confirmResp.GetEvidence().GetEvidenceId() != evidenceID {
+		t.Fatalf("unexpected confirm slash evidence response: %+v", confirmResp.GetEvidence())
+	}
+	if got := confirmResp.GetEvidence().GetStatus(); got != vpnslashingpb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED {
+		t.Fatalf("expected confirmed evidence status, got %v", got)
+	}
+
+	penaltyResp, err := slashingMsg.RecordPenalty(ctx, &vpnslashingpb.MsgRecordPenaltyRequest{
+		Penalty: &vpnslashingpb.PenaltyDecision{
+			PenaltyId:       "penalty-grpc-rt-1",
+			EvidenceId:      evidenceID,
+			SlashBasisPoint: 25,
+			SlashAmount:     250,
+			SlashDenom:      "UTDPN",
+		},
+	})
+	if err != nil {
+		t.Fatalf("record slash penalty: %v", err)
+	}
+	if penaltyResp.GetPenalty() == nil || penaltyResp.GetPenalty().GetEvidenceId() != evidenceID {
+		t.Fatalf("unexpected penalty response: %+v", penaltyResp.GetPenalty())
 	}
 
 	evidenceByID, err := slashingQuery.SlashEvidence(ctx, &vpnslashingpb.QuerySlashEvidenceRequest{

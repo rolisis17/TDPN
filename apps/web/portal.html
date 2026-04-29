@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: http://127.0.0.1:*"
+      content="default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* https://globalprivatemesh.net https://*.globalprivatemesh.net"
     />
     <title>Global Private Mesh Portal (GPM)</title>
     <link rel="stylesheet" href="./assets/gpm.css" />
   </head>
-  <body class="page-portal">
+  <body class="page-portal public-portal-mode">
     <header class="topbar">
       <div class="wrap">
         <div class="brand">Global Private Mesh Portal <small>(GPM) Wallet-first onboarding console</small></div>
@@ -26,10 +26,10 @@
         <div class="section-head">
           <div>
             <p class="eyebrow">Console overview</p>
-            <h1>Onboard wallet, register a client, then unlock operator actions.</h1>
+            <h1>Onboard wallet, register a client, and continue into the public portal.</h1>
           </div>
           <p class="section-lead">
-            This portal keeps the sign-in and server workflows in one place so you can move from wallet challenge to operator approval without losing context.
+            This public portal keeps wallet sign-in, client registration, connection controls, and contribution status in one place.
           </p>
         </div>
         <div class="fields">
@@ -118,7 +118,7 @@
             <h2>Sign in, then choose your lane</h2>
           </div>
           <p class="section-lead">
-            Start with wallet sign-in, then continue in the client lane, operator lane, or both based on your role.
+            Start with wallet sign-in, then continue in the public client lane. Admin and operator workflows live in the separate GPM Admin Console.
           </p>
         </div>
         <div class="steps-grid portal-steps">
@@ -131,11 +131,6 @@
             <p class="step-kicker">Step 2</p>
             <h3>Client registration</h3>
             <p>Use the signed-in session to register the client, set the path profile, and optionally provide bootstrap details.</p>
-          </article>
-          <article id="onboarding_step_operator" class="step-card" data-state="idle">
-            <p class="step-kicker">Step 3</p>
-            <h3>Operator workflow</h3>
-            <p>Apply the operator role, check readiness, and approve the server workflow once the application is eligible.</p>
           </article>
         </div>
       </section>
@@ -185,31 +180,6 @@
             <input id="signature" placeholder="wallet signature" />
           </label>
         </div>
-        <div class="fields">
-          <label>
-            Audit limit
-            <input id="audit_limit" type="number" min="1" max="200" step="1" value="25" />
-          </label>
-          <label>
-            Audit offset
-            <input id="audit_offset" type="number" min="0" step="1" value="0" />
-          </label>
-          <label>
-            Audit event (optional)
-            <input id="audit_event" placeholder="auth_verified" />
-          </label>
-          <label>
-            Audit wallet address (optional)
-            <input id="audit_wallet_address" placeholder="cosmos1..." />
-          </label>
-          <label>
-            Audit order
-            <select id="audit_order">
-              <option value="desc" selected>desc (newest first)</option>
-              <option value="asc">asc (oldest first)</option>
-            </select>
-          </label>
-        </div>
         <div class="actions">
           <button class="btn secondary" id="challenge_btn">Request Challenge</button>
           <button class="btn secondary" id="wallet_sign_btn">Sign Challenge (Wallet)</button>
@@ -219,7 +189,6 @@
           <button class="btn secondary" id="session_rotate_btn">Rotate Session</button>
           <button class="btn secondary" id="session_revoke_btn">Sign Out</button>
           <button class="btn secondary" id="manifest_btn">Fetch Manifest</button>
-          <button class="btn secondary" id="audit_recent_btn">Recent Audit</button>
         </div>
         <p id="signin_policy_hint" class="helper-copy">
           Keplr and Leap wallet-extension sign + verify are available now.
@@ -302,134 +271,75 @@
         </div>
       </section>
 
-      <section class="card" id="operator">
+      <section class="card" id="public_contribution_console">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Step 3</p>
-            <h2>Operator workflow</h2>
+            <p class="eyebrow">Public contribution</p>
+            <h2>Contribute spare capacity and track weekly rewards</h2>
           </div>
           <p class="section-lead">
-            This is the server lane. Sign in first, then apply the operator role, check readiness, and approve only when the session is eligible.
+            Signed-in users can check eligibility, opt in or out, and view weekly reward status from their own session token only.
           </p>
         </div>
-        <div id="operator_readiness" class="status-banner operator-readiness" data-kind="warn" role="status" aria-live="polite">
-          <div class="status-banner__label">Operator readiness</div>
-          <div id="operator_readiness_line" class="status warn">
-            <strong>Application status: <span id="operator_readiness_status">Not signed in</span></strong>
-            <span id="operator_readiness_guidance">Sign in first to unlock operator onboarding.</span>
+        <div id="contribution_status" class="status-banner contribution-status" data-kind="warn" role="status" aria-live="polite">
+          <div class="status-banner__label">Contribution status</div>
+          <div id="contribution_status_line" class="status warn">
+            <strong id="contribution_state">Signed out</strong>
+            <span id="contribution_detail">Sign in to check contribution eligibility for this device.</span>
           </div>
-        </div>
-        <div id="endpoint_posture" class="status-banner operator-readiness" data-kind="warn" role="status" aria-live="polite">
-          <div class="status-banner__label">Endpoint trust posture</div>
-          <div id="endpoint_posture_line" class="status warn">
-            <strong>Endpoint posture: <span id="endpoint_posture_status">Unknown</span></strong>
-            <span id="endpoint_posture_guidance">Refresh server status to load endpoint posture and warnings.</span>
-          </div>
-        </div>
-        <div id="operator_unlock_plan" class="status-banner operator-readiness" data-kind="warn" role="status" aria-live="polite">
-          <div class="status-banner__label">Operator unlock plan</div>
-          <div id="operator_unlock_plan_line" class="status warn">
-            <strong id="operator_unlock_plan_title">Server controls locked</strong>
-            <span id="operator_unlock_plan_detail">Sign in, apply as operator, then complete approval to unlock server controls.</span>
-          </div>
-          <div id="operator_lock_reason_line" class="status warn">
-            <strong id="operator_lock_reason_title">Locked reason: no active session</strong>
-            <span id="operator_lock_reason_detail">Start with wallet challenge and verify to establish a session token.</span>
-          </div>
-          <ul id="operator_unlock_steps" class="onboarding-checklist" aria-label="Operator onboarding checklist">
-            <li id="operator_step_session_item" class="onboarding-checklist__item" data-state="blocked">
-              <span id="operator_step_session_pill" class="onboarding-checklist__pill">Blocked</span>
-              <div class="onboarding-checklist__content">
-                <p class="onboarding-checklist__title">Session token</p>
-                <p id="operator_step_session_detail" class="onboarding-checklist__detail">No active session token is loaded.</p>
-              </div>
-            </li>
-            <li id="operator_step_application_item" class="onboarding-checklist__item" data-state="pending">
-              <span id="operator_step_application_pill" class="onboarding-checklist__pill">Pending</span>
-              <div class="onboarding-checklist__content">
-                <p class="onboarding-checklist__title">Operator application</p>
-                <p id="operator_step_application_detail" class="onboarding-checklist__detail">Apply operator role and wait for approval.</p>
-              </div>
-            </li>
-            <li id="operator_step_lifecycle_item" class="onboarding-checklist__item" data-state="pending">
-              <span id="operator_step_lifecycle_pill" class="onboarding-checklist__pill">Pending</span>
-              <div class="onboarding-checklist__content">
-                <p class="onboarding-checklist__title">Server lifecycle unlock</p>
-                <p id="operator_step_lifecycle_detail" class="onboarding-checklist__detail">Lifecycle actions remain locked until readiness policy is satisfied.</p>
-              </div>
-            </li>
-          </ul>
-          <p id="operator_unlock_next_actions" class="helper-copy">
-            Next actions: Request Challenge; Sign + Verify (Wallet); Apply Operator Role.
+          <p id="contribution_eligibility_summary" class="helper-copy">
+            Tier, stake, prepaid balance, and local capacity checks appear after status refresh.
           </p>
         </div>
-        <p class="helper-copy">
-          Use the readiness banner to confirm whether the current session can proceed as an operator or needs another sign-in or approval cycle.
-        </p>
         <div class="fields">
           <label>
-            Chain operator ID
-            <input id="chain_operator_id" placeholder="operator-001" />
-          </label>
-          <label>
-            Selected application updated at
-            <input id="selected_application_updated_at" placeholder="2026-04-19T12:34:56Z" readonly />
-          </label>
-          <label>
-            Server label
-            <input id="server_label" value="portal-operator" />
-          </label>
-          <label>
-            Admin token (if required)
-            <input
-              id="admin_token"
-              type="password"
-              placeholder="approval token (optional)"
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </label>
-          <p id="operator_approval_policy_hint" class="helper-copy">
-            Operator approval auth policy: session token preferred; legacy admin token fallback is allowed only when runtime policy permits it.
-          </p>
-          <label>
-            Moderation reason
-            <input id="operator_reason" placeholder="required for rejection; optional for approval" />
-          </label>
-          <label>
-            Queue status filter
-            <select id="operator_list_status">
-              <option value="" selected>all</option>
-              <option value="pending">pending</option>
-              <option value="approved">approved</option>
-              <option value="rejected">rejected</option>
+            Contribution role
+            <select id="contribution_role">
+              <option value="micro-relay">Micro relay</option>
+              <option value="micro-exit">Micro exit</option>
             </select>
           </label>
-          <label>
-            Queue search (optional)
-            <input id="operator_list_search" placeholder="wallet, operator ID, or label" />
-          </label>
-          <label>
-            Queue limit
-            <input id="operator_list_limit" type="number" min="1" step="1" value="100" />
-          </label>
-          <label>
-            Next page cursor
-            <input id="operator_list_next_cursor" placeholder="set after queue listing" readonly />
-          </label>
         </div>
-        <p class="helper-copy">
-          Apply Operator Role requires a non-empty Chain operator ID for strict chain binding. Approval actions use session token auth by default; admin token is a compatibility fallback. Rejection always requires a moderation reason.
+        <p id="contribution_policy_hint" class="helper-copy">
+          Public contribution actions never send wallet address, review filters, payout actions, or privileged route data. Requests include only your session token and selected contribution role where required.
         </p>
         <div class="actions">
-          <button class="btn secondary" id="apply_operator_btn">Apply Operator Role</button>
-          <button class="btn secondary" id="operator_status_btn">Check Operator Status</button>
-          <button class="btn secondary" id="operator_list_pending_btn">List Pending Operators</button>
-          <button class="btn secondary" id="operator_load_next_pending_btn">Load Next Pending</button>
-          <button class="btn secondary" id="operator_list_all_btn">List Operators</button>
-          <button class="btn secondary" id="operator_list_next_page_btn">Next Page</button>
-          <button class="btn secondary" id="approve_operator_btn">Approve Operator</button>
-          <button class="btn secondary" id="reject_operator_btn">Reject Operator</button>
+          <button class="btn secondary" id="contribution_status_btn">Contribution Status</button>
+          <button class="btn primary" id="contribution_enable_btn">Enable Contribution</button>
+          <button class="btn secondary" id="contribution_disable_btn">Disable Contribution</button>
+          <button class="btn secondary" id="reward_current_week_btn">Current Week Reward</button>
+          <button class="btn secondary" id="reward_history_btn">Reward History</button>
+        </div>
+        <div class="contribution-reward-grid">
+          <article id="contribution_reward_current_week" class="contribution-panel" aria-live="polite">
+            <p class="contribution-panel__label">Current week</p>
+            <h3 id="contribution_reward_week">Not loaded</h3>
+            <dl class="metric-list">
+              <div>
+                <dt>Reward units</dt>
+                <dd id="contribution_reward_units">0</dd>
+              </div>
+              <div>
+                <dt>Status</dt>
+                <dd id="contribution_reward_status">Unknown</dd>
+              </div>
+              <div>
+                <dt>Settlement</dt>
+                <dd id="contribution_reward_settlement">Pending refresh</dd>
+              </div>
+              <div>
+                <dt>Metering</dt>
+                <dd id="contribution_reward_metering">Pending refresh</dd>
+              </div>
+            </dl>
+          </article>
+          <article id="contribution_history" class="contribution-panel" aria-live="polite">
+            <p class="contribution-panel__label">Closed reward history</p>
+            <h3 id="contribution_history_summary">No history loaded</h3>
+            <ul id="contribution_history_list" class="reward-history-list">
+              <li>Run Reward History after sign-in to load closed weekly rewards.</li>
+            </ul>
+          </article>
         </div>
       </section>
 
@@ -437,11 +347,11 @@
         <div class="section-head">
           <div>
             <p class="eyebrow">Connection console</p>
-            <h2>Client and server tabs in one portal window</h2>
+            <h2>Client connection controls in one portal window</h2>
           </div>
           <p class="section-lead">
-            Use the workspace tabs to run local tunnel connect/disconnect/status actions while keeping onboarding context in this page.
-            On first run, use tab lock hints plus a quick readiness check before mutating actions.
+            Run local tunnel connect/disconnect/status actions while keeping onboarding context in this page.
+            Server lifecycle controls are intentionally excluded from the public website.
           </p>
         </div>
         <div id="connection_snapshot" class="status-banner" data-kind="warn" role="status" aria-live="polite">
@@ -459,16 +369,13 @@
           <button id="tab_client" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel_client">
             Client
           </button>
-          <button id="tab_server" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel_server">
-            Server
-          </button>
         </div>
         <p id="tab_lock_hint" class="helper-copy locked tab-lock-hint" hidden aria-live="polite"></p>
         <p id="workspace_first_run_hint" class="helper-copy workspace-first-run-hint">
-          Single-window tabs keep both lanes visible. If a tab is disabled, follow its activation path before retrying.
+          The public portal exposes only the client workspace. Use the separate GPM Admin Console for operator or server lifecycle work.
         </p>
         <p id="workspace_platform_hint" class="helper-copy workspace-first-run-hint">
-          First run: verify local readiness, sign in, run Session, then run Status before Connect. Use Operator Status before server lifecycle actions.
+          First run: verify local readiness, sign in, run Session, then run Status before Connect.
         </p>
         <p id="workspace_next_action_hint" class="helper-copy workspace-first-run-hint">
           Workspace next action: Request Challenge.
@@ -508,10 +415,14 @@
               PROD profile
             </label>
             <label class="check">
-              <input id="connect_install_route" type="checkbox" checked />
-              Install default route
+              <input id="connect_install_route" type="checkbox" aria-describedby="connect_install_route_hint" />
+              Expert full-tunnel route
             </label>
           </div>
+          <p id="connect_install_route_hint" class="helper-copy expert-route-warning">
+            Off by default for safety. Only enable this expert/full-tunnel option when you understand it installs the
+            system default route through GPM and may affect all device traffic.
+          </p>
           <p class="helper-copy">
             Connect requests use Step 2 path profile plus compatibility override fields when policy allows.
           </p>
@@ -519,21 +430,6 @@
             <button class="btn primary" id="connect_btn">Connect</button>
             <button class="btn secondary" id="disconnect_btn">Disconnect</button>
             <button class="btn secondary" id="status_btn">Status</button>
-          </div>
-        </div>
-        <div id="panel_server" class="tab-panel" role="tabpanel" aria-labelledby="tab_server">
-          <p id="server_lock_hint" class="helper-copy">Server tab guidance appears here, including lock reasons and next steps.</p>
-          <p class="helper-copy">
-            Server lifecycle actions use readiness policy from Step 3 and require a signed-in eligible session.
-          </p>
-          <p id="server_lifecycle_hint" class="helper-copy">
-            Refresh session/readiness to confirm lifecycle command availability.
-          </p>
-          <div class="actions">
-            <button class="btn secondary" id="server_start_btn">Start</button>
-            <button class="btn secondary" id="server_stop_btn">Stop</button>
-            <button class="btn secondary" id="server_restart_btn">Restart</button>
-            <button class="btn secondary" id="status_btn_server">Status</button>
           </div>
         </div>
       </section>
@@ -562,7 +458,7 @@
           </p>
         </div>
         <ul class="help-list">
-          <li>Use an absolute API base like <code>http://127.0.0.1:8095</code> or <code>https://api.example.com</code>.</li>
+          <li>Use an absolute API base like <code>http://127.0.0.1:8095</code> or <code>https://api.globalprivatemesh.net</code>.</li>
           <li>Make sure the local GPM API is running before requesting a challenge or refreshing the session.</li>
           <li>If sign-in stalls, request a new challenge, paste the latest signature, then retry verification.</li>
           <li>Session token updates are applied automatically after successful sign-in and client registration.</li>

@@ -3,6 +3,7 @@ package wg
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 
@@ -10,21 +11,27 @@ import (
 )
 
 type preflightDeps struct {
-	lookPath func(string) (string, error)
-	stat     func(string) (os.FileInfo, error)
-	lstat    func(string) (os.FileInfo, error)
-	open     func(string) (*os.File, error)
-	run      func(context.Context, string, ...string) error
+	platform          string
+	lookPath          func(string) (string, error)
+	stat              func(string) (os.FileInfo, error)
+	lstat             func(string) (os.FileInfo, error)
+	open              func(string) (*os.File, error)
+	run               func(context.Context, string, ...string) error
+	interfaceByName   func(string) (*net.Interface, error)
+	validateOwnerOnly func(string, os.FileInfo) error
 }
 
 func defaultPreflightDeps() preflightDeps {
 	r := execRunner{}
 	return preflightDeps{
-		lookPath: exec.LookPath,
-		stat:     os.Stat,
-		lstat:    os.Lstat,
-		open:     os.Open,
-		run:      r.Run,
+		platform:          commandBackendPlatform(),
+		lookPath:          exec.LookPath,
+		stat:              os.Stat,
+		lstat:             os.Lstat,
+		open:              os.Open,
+		run:               r.Run,
+		interfaceByName:   net.InterfaceByName,
+		validateOwnerOnly: fileperm.ValidateOwnerOnly,
 	}
 }
 
@@ -43,16 +50,15 @@ func runPreflight(ctx context.Context, iface string, privateKeyPath string, role
 	if privateKeyPath == "" {
 		return fmt.Errorf("%s wg private key path is required", role)
 	}
+	if err := commandBackendPlatformError(preflightPlatform(deps)); err != nil {
+		return err
+	}
 	wgPath, err := resolveClientBinaryPath("wg", deps.lookPath)
 	if err != nil {
 		return fmt.Errorf("wg binary not found: %w", err)
 	}
-	ipPath, err := resolveClientBinaryPath("ip", deps.lookPath)
-	if err != nil {
-		return fmt.Errorf("ip binary not found: %w", err)
-	}
-	if wgPath == "" || ipPath == "" {
-		return fmt.Errorf("wg/ip binary resolution failed")
+	if wgPath == "" {
+		return fmt.Errorf("wg binary resolution failed")
 	}
 	lstatFn := deps.lstat
 	if lstatFn == nil {
@@ -71,7 +77,11 @@ func runPreflight(ctx context.Context, iface string, privateKeyPath string, role
 	if info.IsDir() {
 		return fmt.Errorf("%s private key path points to directory: %s", role, privateKeyPath)
 	}
-	if err := fileperm.ValidateOwnerOnly(privateKeyPath, info); err != nil {
+	validateOwnerOnly := deps.validateOwnerOnly
+	if validateOwnerOnly == nil {
+		validateOwnerOnly = fileperm.ValidateOwnerOnly
+	}
+	if err := validateOwnerOnly(privateKeyPath, info); err != nil {
 		return fmt.Errorf("%s private key path permissions are too broad (expected owner-only): %w", role, err)
 	}
 	f, err := deps.open(privateKeyPath)
@@ -91,13 +101,36 @@ func runPreflight(ctx context.Context, iface string, privateKeyPath string, role
 		_ = f.Close()
 		return fmt.Errorf("%s private key path changed while opening: %s", role, privateKeyPath)
 	}
-	if err := fileperm.ValidateOwnerOnly(privateKeyPath, openedInfo); err != nil {
+	if err := validateOwnerOnly(privateKeyPath, openedInfo); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("%s private key path permissions are too broad (expected owner-only): %w", role, err)
 	}
 	_ = f.Close()
-	if err := deps.run(ctx, ipPath, "link", "show", "dev", iface); err != nil {
+	if err := runPreflightInterfaceCheck(ctx, iface, deps); err != nil {
 		return fmt.Errorf("wg interface %s unavailable: %w", iface, err)
 	}
 	return nil
+}
+
+func runPreflightInterfaceCheck(ctx context.Context, iface string, deps preflightDeps) error {
+	if preflightPlatform(deps) == "windows" {
+		interfaceByName := deps.interfaceByName
+		if interfaceByName == nil {
+			interfaceByName = net.InterfaceByName
+		}
+		_, err := interfaceByName(iface)
+		return err
+	}
+	ipPath, err := resolveClientBinaryPath("ip", deps.lookPath)
+	if err != nil {
+		return fmt.Errorf("ip binary not found: %w", err)
+	}
+	if ipPath == "" {
+		return fmt.Errorf("ip binary resolution failed")
+	}
+	return deps.run(ctx, ipPath, "link", "show", "dev", iface)
+}
+
+func preflightPlatform(deps preflightDeps) string {
+	return normalizeCommandBackendPlatform(deps.platform)
 }

@@ -10,6 +10,7 @@ import (
 
 var (
 	ErrDistributionNotFound = errors.New("vpnrewards: distribution not found")
+	ErrProofNotFound        = errors.New("vpnrewards: proof not found")
 )
 
 const maxQueryListResults = 1000
@@ -32,6 +33,16 @@ type GetDistributionRequest struct {
 // GetDistributionResponse contains a distribution lookup result.
 type GetDistributionResponse struct {
 	Distribution types.DistributionRecord
+}
+
+// GetProofRequest requests a verified reward proof by proof path.
+type GetProofRequest struct {
+	ProofPath string
+}
+
+// GetProofResponse contains a reward proof lookup result.
+type GetProofResponse struct {
+	Proof types.RewardProofRecord
 }
 
 // ListAccrualsRequest requests all accruals.
@@ -81,6 +92,18 @@ func (s QueryServer) GetDistribution(req GetDistributionRequest) (GetDistributio
 		return GetDistributionResponse{}, fmt.Errorf("%w: distribution_id=%s", ErrDistributionNotFound, req.DistributionID)
 	}
 	return GetDistributionResponse{Distribution: record}, nil
+}
+
+func (s QueryServer) GetProof(req GetProofRequest) (GetProofResponse, error) {
+	if s.keeper == nil {
+		return GetProofResponse{}, ErrNilKeeper
+	}
+
+	record, ok := s.keeper.GetVerifiedProof(req.ProofPath)
+	if !ok {
+		return GetProofResponse{}, fmt.Errorf("%w: proof_path=%s", ErrProofNotFound, req.ProofPath)
+	}
+	return GetProofResponse{Proof: record}, nil
 }
 
 func (s QueryServer) ListAccruals(_ ListAccrualsRequest) (ListAccrualsResponse, error) {

@@ -118,6 +118,14 @@ if [[ "$MISSING_TOOL_COLLECTION_REFERENCE_COUNT" -lt 3 ]]; then
   exit 1
 fi
 
+echo "[desktop-linux-release-bundle-guardrails] static marker: non-skip builds require artifacts"
+run_static_marker_check \
+  "non-skip build artifact assertion" \
+  "assert_release_bundle_artifacts_present"
+run_static_marker_check \
+  "empty artifact failure message" \
+  "desktop release bundle build produced no artifacts"
+
 echo "[desktop-linux-release-bundle-guardrails] https update feed passes"
 run_expect_pass \
   "https_feed_pass" \
@@ -229,6 +237,8 @@ for required_pattern in \
   '"install_missing_requested": false' \
   '"bundle_root": "'"$ROOT_DIR"'/apps/desktop/src-tauri/target/release/bundle"' \
   '"artifact_hint": "'"$ROOT_DIR"'/apps/desktop/src-tauri/target/release/bundle"' \
+  '"artifact_validation_status":' \
+  '"release_ready":' \
   '"artifacts":' \
   '"artifacts_by_kind":'
 do

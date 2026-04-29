@@ -134,7 +134,7 @@ func TestKeeperDelegatesUpsertAndGetToCustomStore(t *testing.T) {
 	}
 }
 
-func TestKeeperCreateAndFinalizeUseCustomStoreWithStatusProgression(t *testing.T) {
+func TestKeeperCreateAndFinalizeUseCustomStoreWithConfirmedReservation(t *testing.T) {
 	t.Parallel()
 
 	store := newTrackingStore()
@@ -145,23 +145,25 @@ func TestKeeperCreateAndFinalizeUseCustomStoreWithStatusProgression(t *testing.T
 		SessionID:     "sess-1",
 		AssetDenom:    "uusdc",
 		Amount:        100,
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 	if err != nil {
 		t.Fatalf("CreateReservation returned unexpected error: %v", err)
 	}
-	if reservation.Status != chaintypes.ReconciliationPending {
-		t.Fatalf("expected reservation status %q, got %q", chaintypes.ReconciliationPending, reservation.Status)
+	if reservation.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected reservation status %q, got %q", chaintypes.ReconciliationConfirmed, reservation.Status)
 	}
 	if store.upsertReservationCalls == 0 || store.getReservationCalls == 0 {
 		t.Fatalf("expected create path to touch custom reservation store, got upsert=%d get=%d", store.upsertReservationCalls, store.getReservationCalls)
 	}
 
 	_, err = k.FinalizeSettlement(types.SettlementRecord{
-		SettlementID:  "set-1",
-		ReservationID: reservation.ReservationID,
-		SessionID:     reservation.SessionID,
-		BilledAmount:  10,
-		AssetDenom:    reservation.AssetDenom,
+		SettlementID:   "set-1",
+		ReservationID:  reservation.ReservationID,
+		SessionID:      reservation.SessionID,
+		BilledAmount:   10,
+		AssetDenom:     reservation.AssetDenom,
+		OperationState: chaintypes.ReconciliationConfirmed,
 	})
 	if err != nil {
 		t.Fatalf("FinalizeSettlement returned unexpected error: %v", err)

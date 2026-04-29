@@ -90,6 +90,8 @@ wait_for_health_ready() {
 }
 
 TOKEN="adapter-signed-tx-roundtrip-token"
+REWARD_PROOF_TOKEN="adapter-signed-tx-proof-token"
+FINALITY_TOKEN="adapter-signed-tx-finality-token"
 ENDPOINT=""
 bind_retry_log_match() {
   grep -Eqi 'address already in use|bind: address already in use|failed to listen on .*address already in use' "${LOG_FILE}" 2>/dev/null
@@ -99,7 +101,7 @@ launch_runtime() {
   local port="$1"
   (
     cd blockchain/tdpn-chain
-    go run ./cmd/tdpnd --settlement-http-listen "127.0.0.1:${port}" --settlement-http-auth-token "${TOKEN}"
+    go run ./cmd/tdpnd --settlement-http-listen "127.0.0.1:${port}" --settlement-http-auth-token "${TOKEN}" --settlement-http-reward-proof-auth-token "${REWARD_PROOF_TOKEN}" --settlement-http-finality-auth-token "${FINALITY_TOKEN}" --settlement-http-reward-proof-verifier-id "adapter-signed-tx-verifier"
   ) >"${LOG_FILE}" 2>&1 &
   TDPND_PID=$!
   ENDPOINT="http://127.0.0.1:${port}"
@@ -183,7 +185,37 @@ func assert(cond bool, msg string) {
 	}
 }
 
-func startSignedTxRelay(targetBaseURL, bearerToken string) (string, func()) {
+func waitForFundReservationStatus(ctx context.Context, adapter *settlement.CosmosAdapter, reservationID string, want settlement.OperationStatus) {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		status, found, err := adapter.FundReservationStatus(ctx, reservationID)
+		must(err)
+		if found && status == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			panic(fmt.Sprintf("reservation %s did not reach %s (found=%t status=%s)", reservationID, want, found, status))
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func waitForSessionSettlementVisible(ctx context.Context, adapter *settlement.CosmosAdapter, settlementID string) {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		found, err := adapter.HasSessionSettlement(ctx, settlementID)
+		must(err)
+		if found {
+			return
+		}
+		if time.Now().After(deadline) {
+			panic(fmt.Sprintf("settlement %s did not become bridge-visible", settlementID))
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func startSignedTxRelay(targetBaseURL, bearerToken string, rewardProofToken string, finalityToken string) (string, func()) {
 	client := &http.Client{Timeout: 2 * time.Second}
 	mux := http.NewServeMux()
 
@@ -206,6 +238,12 @@ func startSignedTxRelay(targetBaseURL, bearerToken string) (string, func()) {
 		if bearerToken != "" && strings.TrimSpace(req.Header.Get("Authorization")) == "" {
 			req.Header.Set("Authorization", "Bearer "+bearerToken)
 		}
+		if path == "/x/vpnrewards/proofs" && rewardProofToken != "" && strings.TrimSpace(req.Header.Get("X-GPM-Reward-Proof-Authorization")) == "" {
+			req.Header.Set("X-GPM-Reward-Proof-Authorization", "Bearer "+rewardProofToken)
+		}
+		if finalityToken != "" && strings.TrimSpace(req.Header.Get("X-GPM-Finality-Authorization")) == "" {
+			req.Header.Set("X-GPM-Finality-Authorization", "Bearer "+finalityToken)
+		}
 		if forceIdempotency != "" {
 			req.Header.Set("Idempotency-Key", forceIdempotency)
 		}
@@ -213,7 +251,9 @@ func startSignedTxRelay(targetBaseURL, bearerToken string) (string, func()) {
 	}
 
 	allowedWritePaths := map[string]struct{}{
+		"/x/vpnbilling/reservations": {},
 		"/x/vpnbilling/settlements":  {},
+		"/x/vpnrewards/proofs":       {},
 		"/x/vpnrewards/issues":       {},
 		"/x/vpnsponsor/reservations": {},
 		"/x/vpnslashing/evidence":    {},
@@ -247,6 +287,13 @@ func startSignedTxRelay(targetBaseURL, bearerToken string) (string, func()) {
 			for _, value := range values {
 				w.Header().Add(key, value)
 			}
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			w.Header().Del("Content-Length")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"tx_response":{"code":0}}`))
+			return
 		}
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)
@@ -298,16 +345,20 @@ func startSignedTxRelay(targetBaseURL, bearerToken string) (string, func()) {
 func main() {
 	tdpndEndpoint := strings.TrimSpace(os.Getenv("TDPND_ENDPOINT"))
 	token := strings.TrimSpace(os.Getenv("TDPND_TOKEN"))
+	rewardProofToken := strings.TrimSpace(os.Getenv("TDPND_REWARD_PROOF_TOKEN"))
+	finalityToken := strings.TrimSpace(os.Getenv("TDPND_FINALITY_TOKEN"))
 	if tdpndEndpoint == "" || token == "" {
 		panic("missing TDPND_ENDPOINT or TDPND_TOKEN")
 	}
 
-	relayEndpoint, stopRelay := startSignedTxRelay(tdpndEndpoint, token)
+	relayEndpoint, stopRelay := startSignedTxRelay(tdpndEndpoint, token, rewardProofToken, finalityToken)
 	defer stopRelay()
 
 	adapter, err := settlement.NewCosmosAdapter(settlement.CosmosAdapterConfig{
 		Endpoint:              relayEndpoint,
 		APIKey:                token,
+		RewardProofAuthToken:  rewardProofToken,
+		FinalityAuthToken:     finalityToken,
 		QueueSize:             32,
 		MaxRetries:            1,
 		BaseBackoff:           10 * time.Millisecond,
@@ -330,39 +381,72 @@ func main() {
 
 	ctx := context.Background()
 	sessionID := "sess-adapter-signed-tx-1"
+	reservationID := "res-" + sessionID
 
-	_, err = svc.ReserveFunds(ctx, settlement.FundReservation{
-		ReservationID: "res-" + sessionID,
+	reservation := settlement.FundReservation{
+		ReservationID: reservationID,
 		SessionID:     sessionID,
 		SubjectID:     "client-signed-tx-1",
 		AmountMicros:  20000,
 		Currency:      "TDPNC",
-	})
+		CreatedAt:     time.Now().UTC(),
+		Status:        settlement.OperationStatusPending,
+	}
+	_, err = adapter.SubmitFundReservation(ctx, reservation)
 	must(err)
+	waitForFundReservationStatus(ctx, adapter, reservation.ReservationID, settlement.OperationStatusPending)
 
-	must(svc.RecordUsage(ctx, settlement.UsageRecord{
-		SessionID:    sessionID,
-		SubjectID:    "client-signed-tx-1",
-		EntryRelayID: "entry-signed-tx-1",
-		ExitRelayID:  "exit-signed-tx-1",
-		BytesIngress: 2 * 1024 * 1024,
-		BytesEgress:  2 * 1024 * 1024,
-		RecordedAt:   time.Now().UTC(),
-	}))
-
-	settlementRecord, err := svc.SettleSession(ctx, sessionID)
+	reservation.Status = settlement.OperationStatusConfirmed
+	_, err = adapter.SubmitFundReservation(ctx, reservation)
 	must(err)
-	assert(settlementRecord.AdapterSubmitted, "expected settlement adapter submission")
-	assert(!settlementRecord.AdapterDeferred, "expected settlement not deferred")
+	waitForFundReservationStatus(ctx, adapter, reservation.ReservationID, settlement.OperationStatusConfirmed)
 
-	reward, err := svc.IssueReward(ctx, settlement.RewardIssue{
+	settlementRecord := settlement.SessionSettlement{
+		SettlementID:  "set-" + sessionID,
+		ReservationID: reservation.ReservationID,
+		SessionID:     sessionID,
+		SubjectID:     reservation.SubjectID,
+		ChargedMicros: 4000,
+		Currency:      reservation.Currency,
+		SettledAt:     time.Now().UTC(),
+		Status:        settlement.OperationStatusConfirmed,
+	}
+	_, err = adapter.SubmitSessionSettlement(ctx, settlementRecord)
+	must(err)
+	waitForSessionSettlementVisible(ctx, adapter, settlementRecord.SettlementID)
+
+	periodStart := time.Date(2025, 12, 29, 0, 0, 0, 0, time.UTC)
+	periodEnd := periodStart.AddDate(0, 0, 7)
+	issuedAt := periodEnd.Add(time.Second)
+	rewardRequest := settlement.RewardIssue{
 		RewardID:          "reward-signed-tx-1",
 		ProviderSubjectID: "provider-signed-tx-1",
 		SessionID:         sessionID,
+		TrafficProofRef:   "obj://traffic-proof/reward-signed-tx-1",
+		PayoutPeriodStart: periodStart,
+		PayoutPeriodEnd:   periodEnd,
 		RewardMicros:      500,
 		Currency:          "TDPNC",
-		IssuedAt:          time.Now().UTC(),
+		IssuedAt:          issuedAt,
+	}
+	_, err = adapter.SubmitRewardProof(ctx, settlement.RewardProofRecord{
+		ProofPath:         "traffic-proof/reward-signed-tx-1",
+		TrafficProofRef:   rewardRequest.TrafficProofRef,
+		TrustContract:     settlement.RewardProofTrustContractObjectiveTrafficV1,
+		RewardID:          rewardRequest.RewardID,
+		ProviderSubjectID: rewardRequest.ProviderSubjectID,
+		SessionID:         rewardRequest.SessionID,
+		PayoutPeriodStart: periodStart,
+		PayoutPeriodEnd:   periodEnd,
+		RewardMicros:      rewardRequest.RewardMicros,
+		Currency:          rewardRequest.Currency,
+		IssuedAt:          rewardRequest.IssuedAt,
+		Verified:          true,
+		VerifierID:        "adapter-signed-tx-verifier",
+		VerifiedAt:        issuedAt.Add(time.Second),
 	})
+	must(err)
+	reward, err := svc.IssueReward(ctx, rewardRequest)
 	must(err)
 	assert(reward.AdapterSubmitted, "expected reward adapter submission")
 	assert(!reward.AdapterDeferred, "expected reward not deferred")
@@ -387,7 +471,7 @@ func main() {
 		SessionID:     sessionID,
 		ViolationType: "double-sign",
 		EvidenceRef:   "sha256:445c7d70c1d8751f5afd8ae43c764b3fc401dbd4274b1c680be7c00206b612ce",
-		SlashMicros:   0,
+		SlashMicros:   2500,
 		Currency:      "TDPNC",
 		ObservedAt:    time.Now().UTC(),
 	})
@@ -395,7 +479,7 @@ func main() {
 	assert(slashEvidence.AdapterSubmitted, "expected slash evidence adapter submission")
 	assert(!slashEvidence.AdapterDeferred, "expected slash evidence not deferred")
 
-	checkVisible := func() bool {
+	checkVisible := func() (bool, string) {
 		settlementVisible, err := adapter.HasSessionSettlement(ctx, settlementRecord.SettlementID)
 		must(err)
 		rewardVisible, err := adapter.HasRewardIssue(ctx, reward.RewardID)
@@ -404,25 +488,27 @@ func main() {
 		must(err)
 		slashVisible, err := adapter.HasSlashEvidence(ctx, slashEvidence.EvidenceID)
 		must(err)
-		return settlementVisible && rewardVisible && sponsorVisible && slashVisible
+		visible := settlementVisible && rewardVisible && sponsorVisible && slashVisible
+		return visible, fmt.Sprintf("settlement=%t reward=%t sponsor=%t slash=%t", settlementVisible, rewardVisible, sponsorVisible, slashVisible)
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		report, err := svc.Reconcile(ctx)
 		must(err)
-		if report.PendingAdapterOperations == 0 && report.ConfirmedOperations >= 4 && checkVisible() {
+		visible, visibility := checkVisible()
+		if report.PendingAdapterOperations == 0 && visible {
 			break
 		}
 		if time.Now().After(deadline) {
-			panic(fmt.Sprintf("signed-tx roundtrip did not reach confirmed visibility (pending=%d confirmed=%d)", report.PendingAdapterOperations, report.ConfirmedOperations))
+			panic(fmt.Sprintf("signed-tx roundtrip did not reach bridge visibility (pending=%d submitted=%d confirmed=%d failed=%d %s)", report.PendingAdapterOperations, report.SubmittedOperations, report.ConfirmedOperations, report.FailedOperations, visibility))
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
 GO
 
-TDPND_ENDPOINT="${ENDPOINT}" TDPND_TOKEN="${TOKEN}" go run "${GO_PROG_FILE}"
+TDPND_ENDPOINT="${ENDPOINT}" TDPND_TOKEN="${TOKEN}" TDPND_REWARD_PROOF_TOKEN="${REWARD_PROOF_TOKEN}" TDPND_FINALITY_TOKEN="${FINALITY_TOKEN}" go run "${GO_PROG_FILE}"
 
 signal_runtime INT
 if ! wait_for_runtime_exit 30; then

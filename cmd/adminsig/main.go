@@ -105,9 +105,22 @@ func runGen(args []string) error {
 		"key_id":     keyID,
 	}
 	if *showPrivateKey {
+		if !allowStdoutPrivateKeys() {
+			return errors.New("--show-private-key requires GPM_ALLOW_STDOUT_PRIVATE_KEYS=1")
+		}
 		out["private_key"] = privB64
 	}
 	return json.NewEncoder(os.Stdout).Encode(out)
+}
+
+func allowStdoutPrivateKeys() bool {
+	for _, name := range []string{"GPM_ALLOW_STDOUT_PRIVATE_KEYS", "GPM_TEST_ALLOW_STDOUT_PRIVATE_KEYS", "TDPN_ALLOW_STDOUT_PRIVATE_KEYS"} {
+		switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+		case "1", "true", "yes", "on":
+			return true
+		}
+	}
+	return false
 }
 
 func runInspect(args []string) error {

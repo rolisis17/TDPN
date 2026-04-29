@@ -106,7 +106,7 @@ node_pid=$!
 
 ready=0
 for _ in $(seq 1 240); do
-  if rg -q "client received wg-session config:" "$LOG_FILE"; then
+  if rg -q "client wireguard runtime ready:" "$LOG_FILE"; then
     ready=1
     break
   fi
@@ -195,7 +195,7 @@ if [[ "$exit_accept_ok" -ne 1 && "$metrics_ok" -ne 1 ]]; then
   exit 1
 fi
 if rg -q "client bootstrap failed:" "$LOG_FILE"; then
-  first_success_line="$(rg -n "client received wg-session config:" "$LOG_FILE" | head -n1 | cut -d: -f1 || true)"
+  first_success_line="$(rg -n "client wireguard runtime ready:" "$LOG_FILE" | head -n1 | cut -d: -f1 || true)"
   post_success_bootstrap_fail=0
   if [[ -n "$first_success_line" && "$first_success_line" =~ ^[0-9]+$ ]]; then
     while IFS=: read -r fail_line _; do

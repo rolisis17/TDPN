@@ -192,6 +192,32 @@ body.page-desktop {
   word-break: break-word;
 }
 
+[hidden],
+body.public-app-mode [data-admin-only] {
+  display: none !important;
+}
+
+body.admin-console-mode [data-admin-only] {
+  display: revert;
+}
+
+body.admin-console-mode .grid[data-admin-only],
+body.admin-console-mode [data-admin-only].grid {
+  display: grid;
+}
+
+body.admin-console-mode .actions[data-admin-only],
+body.admin-console-mode [data-admin-only].actions {
+  display: flex;
+}
+
+.admin-console-fields {
+  border: 1px solid rgba(255, 210, 121, 0.24);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  background: rgba(47, 35, 15, 0.18);
+}
+
 #connection_state,
 #routing_mode,
 #readiness_freshness_state {
@@ -503,6 +529,22 @@ button:disabled {
   cursor: not-allowed;
   transform: none;
   filter: none;
+}
+
+.contribution-card {
+  margin-top: 14px;
+  border: 1px solid rgba(101, 248, 206, 0.24);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  background:
+    linear-gradient(145deg, rgba(8, 36, 46, 0.62), rgba(8, 22, 44, 0.82)),
+    rgba(6, 18, 36, 0.7);
+  display: grid;
+  gap: 12px;
+}
+
+.compact-tile {
+  min-height: 92px;
 }
 
 button.vpn-connected {

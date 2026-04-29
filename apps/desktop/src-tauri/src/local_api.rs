@@ -8,6 +8,11 @@ use std::time::Duration;
 const MAX_LOCAL_API_RESPONSE_BODY_BYTES: usize = 256 * 1024;
 const MAX_LOCAL_API_AUTH_BEARER_BYTES: usize = 4096;
 const MAX_LOCAL_API_ERROR_DETAIL_CHARS: usize = 512;
+const MAX_GPM_AUTH_VERIFY_FIELD_BYTES: usize = 4096;
+const MAX_GPM_AUTH_VERIFY_MESSAGE_BYTES: usize = 16 * 1024;
+const MAX_GPM_AUTH_VERIFY_ENVELOPE_BYTES: usize = 32 * 1024;
+const GPM_PUBLIC_VPN_RESERVATION_AMOUNT_MICROS: u64 = 200_000;
+const GPM_PUBLIC_VPN_RESERVATION_CURRENCY: &str = "TDPNC";
 
 #[derive(Clone, Debug)]
 pub struct LocalApiConfig {
@@ -19,6 +24,7 @@ pub struct LocalApiConfig {
     pub allow_service_mutations: bool,
     pub connect_require_session: bool,
     pub allow_legacy_connect_override: bool,
+    pub admin_console_enabled: bool,
 }
 
 impl LocalApiConfig {
@@ -76,6 +82,16 @@ impl LocalApiConfig {
             Some("TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE"),
         )?
         .unwrap_or(false);
+        let admin_console_enabled = parse_optional_bool_env_any(
+            &[
+                "GPM_DESKTOP_ADMIN_CONSOLE",
+                "GPM_ADMIN_CONSOLE",
+                "TDPN_DESKTOP_ADMIN_CONSOLE",
+            ],
+            "GPM_DESKTOP_ADMIN_CONSOLE",
+            Some("TDPN_DESKTOP_ADMIN_CONSOLE"),
+        )?
+        .unwrap_or_else(|| cfg!(feature = "admin-console"));
 
         let auth_bearer =
             first_non_empty_env(&["GPM_LOCAL_API_AUTH_BEARER", "TDPN_LOCAL_API_AUTH_BEARER"]);
@@ -151,6 +167,7 @@ impl LocalApiConfig {
             allow_service_mutations,
             connect_require_session,
             allow_legacy_connect_override,
+            admin_console_enabled,
         })
     }
 
@@ -235,12 +252,33 @@ impl LocalApiClient {
         self.parse_response(path, response).await
     }
 
+    #[cfg(feature = "admin-console")]
     pub async fn get_json_with_query<T: Serialize + ?Sized>(
         &self,
         path: &str,
         query: &T,
     ) -> Result<Value, String> {
         let request = self.client.get(self.config.endpoint(path)).query(query);
+        let response = self
+            .with_optional_auth(request)
+            .send()
+            .await
+            .map_err(|e| format!("GET {path} failed: {e}"))?;
+        self.parse_response(path, response).await
+    }
+
+    #[cfg(feature = "admin-console")]
+    pub async fn get_json_with_gpm_session_query<T: Serialize + ?Sized>(
+        &self,
+        path: &str,
+        session_token: &str,
+        query: &T,
+    ) -> Result<Value, String> {
+        let request = self
+            .client
+            .get(self.config.endpoint(path))
+            .header("X-GPM-Session-Token", session_token)
+            .query(query);
         let response = self
             .with_optional_auth(request)
             .send()
@@ -346,6 +384,7 @@ fn is_sensitive_error_field_key(key: &str) -> bool {
             | "privatekey"
             | "invite_key"
             | "invitekey"
+            | "compat_subject_hint"
             | "bearer"
             | "api_key"
             | "apikey"
@@ -359,6 +398,7 @@ fn is_sensitive_error_field_key(key: &str) -> bool {
         || normalized.ends_with("_invite_key")
         || normalized.ends_with("_api_key")
         || normalized.ends_with("_signature")
+        || normalized.contains("subject_hint")
         || normalized.contains("private_key")
         || normalized.contains("privatekey")
         || normalized.contains("invite_key")
@@ -602,10 +642,18 @@ fn default_path_profile() -> String {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConnectRequest {
+    #[serde(default)]
     pub bootstrap_directory: String,
+    #[serde(default)]
     pub invite_key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_bootstrap_directory: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reservation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reservation_session_id: Option<String>,
     #[serde(default = "default_path_profile")]
     pub path_profile: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -690,6 +738,16 @@ impl ConnectRequest {
                 );
             }
         }
+        validate_optional_bootstrap_directory(
+            "session_bootstrap_directory",
+            self.session_bootstrap_directory.as_deref(),
+        )?;
+        validate_optional_short_text("reservation_id", self.reservation_id.as_deref(), 256)?;
+        validate_optional_short_text(
+            "reservation_session_id",
+            self.reservation_session_id.as_deref(),
+            256,
+        )?;
 
         let effective_profile = self
             .policy_profile
@@ -713,13 +771,39 @@ impl ConnectRequest {
     }
 }
 
+fn validate_optional_short_text(
+    field: &str,
+    value: Option<&str>,
+    max_len: usize,
+) -> Result<(), String> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(());
+    }
+    if value.len() > max_len {
+        return Err(format!("{field} must be <= {max_len} chars"));
+    }
+    if value.chars().any(|c| c.is_control()) {
+        return Err(format!("{field} contains invalid control characters"));
+    }
+    Ok(())
+}
+
+#[cfg(any(feature = "admin-console", test))]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProfileRequest {
     pub path_profile: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_token: Option<String>,
 }
 
+#[cfg(any(feature = "admin-console", test))]
 impl ProfileRequest {
     pub fn validate(&self) -> Result<(), String> {
+        validate_required_session_token(self.session_token.as_deref())?;
         if !is_valid_path_profile(&self.path_profile) {
             return Err("path_profile must be one of: 1hop, 2hop, 3hop".to_string());
         }
@@ -727,10 +811,77 @@ impl ProfileRequest {
     }
 }
 
+fn validate_required_session_token(session_token: Option<&str>) -> Result<(), String> {
+    let token = session_token.unwrap_or("").trim();
+    if token.is_empty() {
+        return Err("session_token is required".to_string());
+    }
+    if token.chars().any(char::is_whitespace) {
+        return Err("session_token cannot contain whitespace".to_string());
+    }
+    if token.len() > 4096 {
+        return Err("session_token is too long".to_string());
+    }
+    Ok(())
+}
+
+fn validate_optional_bootstrap_directory(field: &str, value: Option<&str>) -> Result<(), String> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(());
+    }
+    if value.len() > 2048 {
+        return Err(format!("{field} must be <= 2048 chars"));
+    }
+    let parsed = reqwest::Url::parse(value)
+        .map_err(|_| format!("{field} must be an absolute URL with http or https scheme"))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        _ => return Err(format!("{field} scheme must be http or https")),
+    }
+    if parsed.host_str().is_none() {
+        return Err(format!("{field} host is required"));
+    }
+    if parsed.scheme() == "http" && !is_literal_loopback_host(&parsed) {
+        return Err(format!(
+            "{field} must use https for non-loopback hosts (http allowed only for literal loopback IPs 127.0.0.1 or ::1)"
+        ));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(format!("{field} userinfo is not allowed"));
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(format!("{field} query/fragment are not allowed"));
+    }
+    Ok(())
+}
+
+fn validate_optional_invite_key(value: Option<&str>) -> Result<(), String> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(());
+    }
+    if value.len() > 512 {
+        return Err("invite_key must be <= 512 chars".to_string());
+    }
+    if value.chars().any(|c| c.is_control()) {
+        return Err("invite_key contains invalid control characters".to_string());
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GPMWalletChallengeRequest {
     pub wallet_address: String,
     pub wallet_provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -739,6 +890,57 @@ pub struct GPMWalletVerifyRequest {
     pub wallet_provider: String,
     pub challenge_id: String,
     pub signature: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_public_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_public_key_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_key_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signed_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_envelope: Option<Value>,
+}
+
+impl GPMWalletVerifyRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_required_auth_verify_field("wallet_address", &self.wallet_address)?;
+        validate_required_auth_verify_field("wallet_provider", &self.wallet_provider)?;
+        validate_required_auth_verify_field("challenge_id", &self.challenge_id)?;
+        validate_required_auth_verify_field("signature", &self.signature)?;
+        validate_optional_auth_verify_field("signature_kind", self.signature_kind.as_deref())?;
+        validate_optional_auth_verify_field(
+            "signature_public_key",
+            self.signature_public_key.as_deref(),
+        )?;
+        validate_optional_auth_verify_field(
+            "signature_public_key_type",
+            self.signature_public_key_type.as_deref(),
+        )?;
+        validate_optional_auth_verify_field("public_key", self.public_key.as_deref())?;
+        validate_optional_auth_verify_field("public_key_type", self.public_key_type.as_deref())?;
+        validate_optional_auth_verify_field("signature_source", self.signature_source.as_deref())?;
+        validate_optional_auth_verify_field("chain_id", self.chain_id.as_deref())?;
+        validate_optional_auth_verify_message("signed_message", self.signed_message.as_deref())?;
+        if let Some(envelope) = &self.signature_envelope {
+            let serialized = serde_json::to_string(envelope)
+                .map_err(|err| format!("signature_envelope must be valid JSON: {err}"))?;
+            if serialized.len() > MAX_GPM_AUTH_VERIFY_ENVELOPE_BYTES {
+                return Err(format!(
+                    "signature_envelope must be <= {MAX_GPM_AUTH_VERIFY_ENVELOPE_BYTES} chars"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -766,8 +968,39 @@ impl GPMSessionStatusRequest {
     }
 }
 
+fn validate_required_auth_verify_field(name: &str, value: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err(format!("{name} is required"));
+    }
+    validate_auth_verify_text_len(name, value, MAX_GPM_AUTH_VERIFY_FIELD_BYTES)
+}
+
+fn validate_optional_auth_verify_field(name: &str, value: Option<&str>) -> Result<(), String> {
+    if let Some(value) = value {
+        validate_auth_verify_text_len(name, value, MAX_GPM_AUTH_VERIFY_FIELD_BYTES)?;
+    }
+    Ok(())
+}
+
+fn validate_optional_auth_verify_message(name: &str, value: Option<&str>) -> Result<(), String> {
+    if let Some(value) = value {
+        validate_auth_verify_text_len(name, value, MAX_GPM_AUTH_VERIFY_MESSAGE_BYTES)?;
+    }
+    Ok(())
+}
+
+fn validate_auth_verify_text_len(name: &str, value: &str, max_len: usize) -> Result<(), String> {
+    if value.len() > max_len {
+        return Err(format!("{name} must be <= {max_len} chars"));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "admin-console")]
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct GPMAuditRecentRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -780,8 +1013,25 @@ pub struct GPMAuditRecentRequest {
     pub order: Option<String>,
 }
 
+#[cfg(feature = "admin-console")]
 impl GPMAuditRecentRequest {
     pub fn sanitize(self) -> Result<Self, String> {
+        let session_token = self
+            .session_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string())
+            .ok_or_else(|| "session_token is required".to_string())?;
+        if session_token.len() > 4096 {
+            return Err("session_token must be <= 4096 chars".to_string());
+        }
+        if session_token
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace())
+        {
+            return Err("session_token contains invalid control/whitespace characters".to_string());
+        }
         let limit = self.limit.unwrap_or(25).clamp(1, 200);
         let offset = self.offset.unwrap_or(0);
         let event = self
@@ -803,6 +1053,7 @@ impl GPMAuditRecentRequest {
             _ => return Err("order must be one of: desc, asc".to_string()),
         };
         Ok(Self {
+            session_token: Some(session_token),
             limit: Some(limit),
             offset: Some(offset),
             event,
@@ -814,12 +1065,16 @@ impl GPMAuditRecentRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GPMClientStatusRequest {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_token: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wallet_address: Option<String>,
+    pub session_token: String,
 }
 
+impl GPMClientStatusRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_required_session_token(Some(&self.session_token))
+    }
+}
+
+#[cfg(feature = "admin-console")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GPMServerStatusRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -839,6 +1094,150 @@ pub struct GPMClientRegisterRequest {
     pub path_profile: Option<String>,
 }
 
+impl GPMClientRegisterRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_required_session_token(Some(&self.session_token))?;
+        validate_optional_bootstrap_directory(
+            "bootstrap_directory",
+            self.bootstrap_directory.as_deref(),
+        )?;
+        validate_optional_invite_key(self.invite_key.as_deref())?;
+        if let Some(path_profile) = self.path_profile.as_deref() {
+            let path_profile = path_profile.trim();
+            if !path_profile.is_empty() && !is_valid_path_profile(path_profile) {
+                return Err("path_profile must be one of: 1hop, 2hop, 3hop".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GPMContributionStatusRequest {
+    pub session_token: String,
+}
+
+impl GPMContributionStatusRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_required_session_token(Some(&self.session_token))
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GPMContributionToggleRequest {
+    pub session_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+}
+
+impl GPMContributionToggleRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_required_session_token(Some(&self.session_token))?;
+        if let Some(role) = self.role.as_deref() {
+            let role = role.trim();
+            if !role.is_empty()
+                && !matches!(
+                    role,
+                    "micro-relay" | "micro-exit" | "micro_relay" | "micro_exit" | "relay" | "exit"
+                )
+            {
+                return Err("role must be one of: micro-relay, micro-exit".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GPMSettlementReserveFundsRequest {
+    pub session_token: String,
+    pub session_id: String,
+    pub amount_micros: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reservation_id: Option<String>,
+}
+
+impl GPMSettlementReserveFundsRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_required_session_token(Some(&self.session_token))?;
+        validate_optional_short_text("session_id", Some(&self.session_id), 256)?;
+        if self.session_id.trim().is_empty() {
+            return Err("session_id is required".to_string());
+        }
+        if self.amount_micros == 0 {
+            return Err("amount_micros must be > 0".to_string());
+        }
+        if self.amount_micros != GPM_PUBLIC_VPN_RESERVATION_AMOUNT_MICROS {
+            return Err(format!(
+                "amount_micros must equal the public VPN reservation amount {}",
+                GPM_PUBLIC_VPN_RESERVATION_AMOUNT_MICROS
+            ));
+        }
+        validate_optional_short_text("currency", self.currency.as_deref(), 32)?;
+        if let Some(currency) = self.currency.as_deref() {
+            if !currency
+                .trim()
+                .eq_ignore_ascii_case(GPM_PUBLIC_VPN_RESERVATION_CURRENCY)
+            {
+                return Err(format!(
+                    "currency must be {GPM_PUBLIC_VPN_RESERVATION_CURRENCY} for public VPN reservations"
+                ));
+            }
+        }
+        validate_optional_short_text("reservation_id", self.reservation_id.as_deref(), 256)?;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "admin-console")]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GPMAdminContributionListRequest {
+    pub session_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+#[cfg(feature = "admin-console")]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GPMAdminRewardReviewRequest {
+    pub session_token: String,
+    pub wallet_address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub week_start_utc: Option<String>,
+}
+
+#[cfg(feature = "admin-console")]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GPMAdminRewardHoldRequest {
+    pub session_token: String,
+    pub wallet_address: String,
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub week_start_utc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[cfg(feature = "admin-console")]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GPMAdminRewardFinalizeRequest {
+    pub session_token: String,
+    pub wallet_address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub week_start_utc: Option<String>,
+}
+
+#[cfg(feature = "admin-console")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GPMOperatorApplyRequest {
     pub session_token: String,
@@ -847,6 +1246,7 @@ pub struct GPMOperatorApplyRequest {
     pub server_label: Option<String>,
 }
 
+#[cfg(feature = "admin-console")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GPMOperatorStatusRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -855,6 +1255,7 @@ pub struct GPMOperatorStatusRequest {
     pub wallet_address: Option<String>,
 }
 
+#[cfg(feature = "admin-console")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GPMOperatorListRequest {
     pub session_token: String,
@@ -868,6 +1269,7 @@ pub struct GPMOperatorListRequest {
     pub cursor: Option<String>,
 }
 
+#[cfg(feature = "admin-console")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GPMOperatorApproveRequest {
     pub wallet_address: String,
@@ -878,8 +1280,6 @@ pub struct GPMOperatorApproveRequest {
     pub if_updated_at_utc: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub admin_token: Option<String>,
 }
 
 fn is_valid_path_profile(path_profile: &str) -> bool {
@@ -1002,6 +1402,9 @@ mod tests {
                 ("GPM_LOCAL_API_CONNECT_REQUIRE_SESSION", None),
                 ("TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE", None),
                 ("GPM_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE", None),
+                ("GPM_DESKTOP_ADMIN_CONSOLE", None),
+                ("GPM_ADMIN_CONSOLE", None),
+                ("TDPN_DESKTOP_ADMIN_CONSOLE", None),
             ],
             || {
                 let cfg = LocalApiConfig::from_env().expect("from_env");
@@ -1013,6 +1416,7 @@ mod tests {
                 assert!(!cfg.allow_service_mutations);
                 assert!(!cfg.connect_require_session);
                 assert!(!cfg.allow_legacy_connect_override);
+                assert_eq!(cfg.admin_console_enabled, cfg!(feature = "admin-console"));
             },
         );
     }
@@ -1118,8 +1522,41 @@ mod tests {
             allow_service_mutations: false,
             connect_require_session: false,
             allow_legacy_connect_override: false,
+            admin_console_enabled: false,
         };
         assert_eq!(cfg.redacted_base_url(), "https://example.com:8443");
+    }
+
+    #[test]
+    fn from_env_enables_admin_console_explicitly() {
+        let _guard = env_lock().lock().expect("env lock");
+        with_env(
+            &[
+                ("GPM_DESKTOP_ADMIN_CONSOLE", Some("1")),
+                ("GPM_ADMIN_CONSOLE", None),
+                ("TDPN_DESKTOP_ADMIN_CONSOLE", None),
+            ],
+            || {
+                let cfg = LocalApiConfig::from_env().expect("from_env");
+                assert!(cfg.admin_console_enabled);
+            },
+        );
+    }
+
+    #[test]
+    fn from_env_admin_console_env_zero_is_kill_switch() {
+        let _guard = env_lock().lock().expect("env lock");
+        with_env(
+            &[
+                ("GPM_DESKTOP_ADMIN_CONSOLE", Some("0")),
+                ("GPM_ADMIN_CONSOLE", None),
+                ("TDPN_DESKTOP_ADMIN_CONSOLE", None),
+            ],
+            || {
+                let cfg = LocalApiConfig::from_env().expect("from_env");
+                assert!(!cfg.admin_console_enabled);
+            },
+        );
     }
 
     #[test]
@@ -1475,6 +1912,9 @@ mod tests {
             bootstrap_directory: "".to_string(),
             invite_key: "".to_string(),
             session_token: None,
+            session_bootstrap_directory: None,
+            reservation_id: None,
+            reservation_session_id: None,
             path_profile: "2hop".to_string(),
             policy_profile: None,
             interface: None,
@@ -1498,11 +1938,154 @@ mod tests {
     }
 
     #[test]
+    fn connect_request_serializes_production_reservation_fields() {
+        let req = ConnectRequest {
+            bootstrap_directory: "".to_string(),
+            invite_key: "".to_string(),
+            session_token: Some("gpm-session-token".to_string()),
+            session_bootstrap_directory: None,
+            reservation_id: Some("res-desktop-1".to_string()),
+            reservation_session_id: Some("gpm-vpn-session-1".to_string()),
+            path_profile: "2hop".to_string(),
+            policy_profile: None,
+            interface: None,
+            discovery_wait_sec: None,
+            ready_timeout_sec: None,
+            run_preflight: None,
+            prod_profile: Some(true),
+            install_route: None,
+        };
+        req.validate()
+            .expect("reservation-bound session connect should validate");
+        let value = serde_json::to_value(&req).expect("serialize request");
+        assert_eq!(value["reservation_id"], "res-desktop-1");
+        assert_eq!(value["reservation_session_id"], "gpm-vpn-session-1");
+    }
+
+    #[test]
+    fn connect_request_deserializes_production_session_payload_without_legacy_fields() {
+        let req: ConnectRequest = serde_json::from_value(serde_json::json!({
+            "session_token": "gpm-session-token",
+            "session_bootstrap_directory": "https://bootstrap-a.globalprivatemesh.net:8081",
+            "reservation_id": "res-desktop-1",
+            "reservation_session_id": "gpm-vpn-session-1",
+            "prod_profile": true
+        }))
+        .expect("deserialize production connect request");
+
+        req.validate()
+            .expect("session-token production connect should not require legacy bootstrap fields");
+        assert!(req.bootstrap_directory.is_empty());
+        assert!(req.invite_key.is_empty());
+        assert_eq!(req.path_profile, "2hop");
+        assert_eq!(
+            req.session_bootstrap_directory.as_deref(),
+            Some("https://bootstrap-a.globalprivatemesh.net:8081")
+        );
+        assert_eq!(req.reservation_id.as_deref(), Some("res-desktop-1"));
+        assert_eq!(
+            req.reservation_session_id.as_deref(),
+            Some("gpm-vpn-session-1")
+        );
+    }
+
+    #[test]
+    fn gpm_settlement_reserve_funds_request_validates_public_app_shape() {
+        let request = GPMSettlementReserveFundsRequest {
+            session_token: "gpm-session-token".to_string(),
+            session_id: "gpm-vpn-session-1".to_string(),
+            amount_micros: 200000,
+            currency: Some("TDPNC".to_string()),
+            reservation_id: Some("res-desktop-1".to_string()),
+        };
+        request
+            .validate()
+            .expect("expected desktop reserve-funds request to validate");
+        let missing_amount = GPMSettlementReserveFundsRequest {
+            amount_micros: 0,
+            ..request.clone()
+        };
+        let err = missing_amount
+            .validate()
+            .expect_err("expected missing amount rejection");
+        assert!(err.contains("amount_micros"), "{err}");
+
+        let wrong_amount = GPMSettlementReserveFundsRequest {
+            amount_micros: 300000,
+            ..request.clone()
+        };
+        let err = wrong_amount
+            .validate()
+            .expect_err("expected fixed amount rejection");
+        assert!(err.contains("public VPN reservation amount"), "{err}");
+
+        let wrong_currency = GPMSettlementReserveFundsRequest {
+            currency: Some("BAD".to_string()),
+            ..request.clone()
+        };
+        let err = wrong_currency
+            .validate()
+            .expect_err("expected fixed currency rejection");
+        assert!(err.contains("currency must be TDPNC"), "{err}");
+    }
+
+    #[test]
+    fn gpm_public_requests_validate_before_daemon_forward() {
+        let register = GPMClientRegisterRequest {
+            session_token: "gpm-session-token".to_string(),
+            bootstrap_directory: Some("https://bootstrap.globalprivatemesh.net".to_string()),
+            invite_key: Some("inv-test".to_string()),
+            path_profile: Some("2hop".to_string()),
+        };
+        register.validate().expect("valid client register");
+
+        let bad_register = GPMClientRegisterRequest {
+            path_profile: Some("private".to_string()),
+            ..register
+        };
+        let err = bad_register
+            .validate()
+            .expect_err("expected invalid path_profile rejection");
+        assert!(err.contains("path_profile"), "{err}");
+
+        let status = GPMContributionStatusRequest {
+            session_token: "gpm-session-token".to_string(),
+        };
+        status.validate().expect("valid contribution status");
+
+        let bad_status = GPMContributionStatusRequest {
+            session_token: " ".to_string(),
+        };
+        let err = bad_status
+            .validate()
+            .expect_err("expected session_token rejection");
+        assert!(err.contains("session_token"), "{err}");
+
+        let toggle = GPMContributionToggleRequest {
+            session_token: "gpm-session-token".to_string(),
+            role: Some("micro-relay".to_string()),
+        };
+        toggle.validate().expect("valid contribution role");
+
+        let bad_toggle = GPMContributionToggleRequest {
+            role: Some("validator".to_string()),
+            ..toggle
+        };
+        let err = bad_toggle
+            .validate()
+            .expect_err("expected role enum rejection");
+        assert!(err.contains("micro-relay"), "{err}");
+    }
+
+    #[test]
     fn path_profile_validation_is_strict() {
         let bad_connect = ConnectRequest {
             bootstrap_directory: "http://127.0.0.1:8081".to_string(),
             invite_key: "inv-test".to_string(),
             session_token: None,
+            session_bootstrap_directory: None,
+            reservation_id: None,
+            reservation_session_id: None,
             path_profile: "private".to_string(),
             policy_profile: None,
             interface: None,
@@ -1517,9 +2100,22 @@ mod tests {
 
         let bad_profile = ProfileRequest {
             path_profile: "balanced".to_string(),
+            session_token: Some("session-123".to_string()),
         };
         let profile_err = bad_profile.validate().expect_err("invalid set_profile");
         assert!(profile_err.contains("1hop, 2hop, 3hop"), "{profile_err}");
+
+        let missing_session_profile = ProfileRequest {
+            path_profile: "2hop".to_string(),
+            session_token: None,
+        };
+        let session_err = missing_session_profile
+            .validate()
+            .expect_err("missing session token");
+        assert!(
+            session_err.contains("session_token is required"),
+            "{session_err}"
+        );
     }
 
     #[test]
@@ -1574,11 +2170,127 @@ mod tests {
     }
 
     #[test]
+    fn gpm_wallet_verify_request_preserves_strict_proof_metadata() {
+        let request = GPMWalletVerifyRequest {
+            wallet_address: "cosmos1wallet".to_string(),
+            wallet_provider: "keplr".to_string(),
+            challenge_id: "challenge-1".to_string(),
+            signature: "MEUCIQDexample".to_string(),
+            signature_kind: Some("sign_arbitrary".to_string()),
+            signature_public_key: Some("Aq1publickey".to_string()),
+            signature_public_key_type: Some("secp256k1".to_string()),
+            public_key: None,
+            public_key_type: None,
+            signature_source: Some("wallet_extension".to_string()),
+            chain_id: Some("gpm-mainnet-1".to_string()),
+            signed_message: Some("Sign in to Global Private Mesh".to_string()),
+            signature_envelope: Some(serde_json::json!({
+                "pub_key": {
+                    "type": "tendermint/PubKeySecp256k1",
+                    "value": "Aq1publickey"
+                }
+            })),
+        };
+
+        request
+            .validate()
+            .expect("expected strict proof metadata to validate");
+        let value = serde_json::to_value(&request).expect("serialize request");
+        assert_eq!(value["signature_kind"], "sign_arbitrary");
+        assert_eq!(value["signature_public_key"], "Aq1publickey");
+        assert_eq!(value["signature_public_key_type"], "secp256k1");
+        assert_eq!(value["signature_source"], "wallet_extension");
+        assert_eq!(value["chain_id"], "gpm-mainnet-1");
+        assert_eq!(value["signed_message"], "Sign in to Global Private Mesh");
+        assert_eq!(
+            value["signature_envelope"]["pub_key"]["type"],
+            "tendermint/PubKeySecp256k1"
+        );
+    }
+
+    #[test]
+    fn gpm_wallet_verify_request_rejects_oversized_signature_envelope() {
+        let request = GPMWalletVerifyRequest {
+            wallet_address: "cosmos1wallet".to_string(),
+            wallet_provider: "keplr".to_string(),
+            challenge_id: "challenge-1".to_string(),
+            signature: "MEUCIQDexample".to_string(),
+            signature_kind: None,
+            signature_public_key: None,
+            signature_public_key_type: None,
+            public_key: None,
+            public_key_type: None,
+            signature_source: None,
+            chain_id: None,
+            signed_message: None,
+            signature_envelope: Some(serde_json::json!({
+                "blob": "x".repeat(MAX_GPM_AUTH_VERIFY_ENVELOPE_BYTES + 1)
+            })),
+        };
+
+        let err = request
+            .validate()
+            .expect_err("expected oversized signature envelope rejection");
+        assert!(err.contains("signature_envelope"), "{err}");
+    }
+
+    #[cfg(feature = "admin-console")]
+    #[test]
+    fn gpm_audit_recent_request_requires_admin_session_token() {
+        let missing = GPMAuditRecentRequest {
+            session_token: None,
+            limit: Some(10),
+            offset: None,
+            event: None,
+            wallet_address: None,
+            order: None,
+        };
+        let err = missing
+            .sanitize()
+            .expect_err("expected missing token error");
+        assert!(err.contains("session_token is required"), "{err}");
+
+        let invalid = GPMAuditRecentRequest {
+            session_token: Some("token with spaces".to_string()),
+            limit: Some(10),
+            offset: None,
+            event: None,
+            wallet_address: None,
+            order: None,
+        };
+        let err = invalid
+            .sanitize()
+            .expect_err("expected invalid token error");
+        assert!(err.contains("session_token contains invalid"), "{err}");
+
+        let request = GPMAuditRecentRequest {
+            session_token: Some("  gpm-admin-token  ".to_string()),
+            limit: Some(999),
+            offset: Some(3),
+            event: Some(" AUTH_VERIFIED ".to_string()),
+            wallet_address: Some(" cosmos1admin ".to_string()),
+            order: Some("ASC".to_string()),
+        }
+        .sanitize()
+        .expect("expected audit request to sanitize");
+
+        assert_eq!(request.session_token.as_deref(), Some("gpm-admin-token"));
+        assert_eq!(request.limit, Some(200));
+        assert_eq!(request.offset, Some(3));
+        assert_eq!(request.event.as_deref(), Some("auth_verified"));
+        assert_eq!(request.wallet_address.as_deref(), Some("cosmos1admin"));
+        assert_eq!(request.order.as_deref(), Some("asc"));
+    }
+
+    #[test]
     fn connect_request_rejects_bootstrap_with_query() {
         let req = ConnectRequest {
             bootstrap_directory: "https://directory.example.invalid:8081/path?debug=1".to_string(),
             invite_key: "inv-test".to_string(),
             session_token: None,
+            session_bootstrap_directory: None,
+            reservation_id: None,
+            reservation_session_id: None,
             path_profile: "2hop".to_string(),
             policy_profile: None,
             interface: None,
@@ -1598,6 +2310,9 @@ mod tests {
             bootstrap_directory: "https://directory.example.invalid:8081".to_string(),
             invite_key: "inv-test".to_string(),
             session_token: None,
+            session_bootstrap_directory: None,
+            reservation_id: None,
+            reservation_session_id: None,
             path_profile: "2hop".to_string(),
             policy_profile: None,
             interface: Some("wg exit 0".to_string()),
@@ -1617,6 +2332,9 @@ mod tests {
             bootstrap_directory: "http://directory.example.invalid:8081".to_string(),
             invite_key: "inv-test".to_string(),
             session_token: None,
+            session_bootstrap_directory: None,
+            reservation_id: None,
+            reservation_session_id: None,
             path_profile: "2hop".to_string(),
             policy_profile: None,
             interface: None,
@@ -1636,6 +2354,9 @@ mod tests {
             bootstrap_directory: "http://localhost:8081".to_string(),
             invite_key: "inv-test".to_string(),
             session_token: None,
+            session_bootstrap_directory: None,
+            reservation_id: None,
+            reservation_session_id: None,
             path_profile: "2hop".to_string(),
             policy_profile: None,
             interface: None,
@@ -1655,6 +2376,9 @@ mod tests {
             bootstrap_directory: "http://127.0.0.1:8081".to_string(),
             invite_key: "inv-test".to_string(),
             session_token: None,
+            session_bootstrap_directory: None,
+            reservation_id: None,
+            reservation_session_id: None,
             path_profile: "2hop".to_string(),
             policy_profile: None,
             interface: None,
@@ -1674,6 +2398,9 @@ mod tests {
             bootstrap_directory: "https://directory.example.invalid:8081".to_string(),
             invite_key: "inv-test".to_string(),
             session_token: None,
+            session_bootstrap_directory: None,
+            reservation_id: None,
+            reservation_session_id: None,
             path_profile: "2hop".to_string(),
             policy_profile: None,
             interface: Some("wg-client_1".to_string()),

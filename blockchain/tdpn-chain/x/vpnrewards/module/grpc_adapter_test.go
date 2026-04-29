@@ -9,7 +9,28 @@ import (
 	chaintypes "github.com/tdpn/tdpn-chain/types"
 	"github.com/tdpn/tdpn-chain/x/vpnrewards/keeper"
 	"github.com/tdpn/tdpn-chain/x/vpnrewards/types"
+	"google.golang.org/protobuf/proto"
 )
+
+const (
+	testAccruedAtUnix   int64 = 1700000000
+	testPayoutStartUnix int64 = 1699833600
+	testPayoutEndUnix   int64 = 1700438400
+)
+
+func TestRewardAccrualOperationStateWireTagRemainsStable(t *testing.T) {
+	t.Parallel()
+
+	// Historical wire format encoded operation_state as field 7. New payout
+	// fields must use new tags so old evidence does not silently lose state.
+	var record pb.RewardAccrual
+	if err := proto.Unmarshal([]byte{0x38, 0x03}, &record); err != nil {
+		t.Fatalf("failed to unmarshal legacy operation_state bytes: %v", err)
+	}
+	if got := record.GetOperationState(); got != pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED {
+		t.Fatalf("expected legacy field 7 to decode as confirmed operation_state, got %v", got)
+	}
+}
 
 func TestGRPCMsgAdapterRecordFlow(t *testing.T) {
 	t.Parallel()
@@ -19,12 +40,15 @@ func TestGRPCMsgAdapterRecordFlow(t *testing.T) {
 
 	accrualResp, err := adapter.RecordAccrual(context.Background(), &pb.MsgRecordAccrualRequest{
 		Accrual: &pb.RewardAccrual{
-			AccrualId:      "acc-grpc-1",
-			SessionId:      "sess-grpc-1",
-			ProviderId:     "provider-grpc-1",
-			AssetDenom:     "uusdc",
-			Amount:         100,
-			OperationState: pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+			AccrualId:       "acc-grpc-1",
+			SessionId:       "sess-grpc-1",
+			ProviderId:      "provider-grpc-1",
+			AssetDenom:      "uusdc",
+			Amount:          100,
+			AccruedAtUnix:   testAccruedAtUnix,
+			PayoutStartUnix: testPayoutStartUnix,
+			PayoutEndUnix:   testPayoutEndUnix,
+			OperationState:  pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
 		},
 	})
 	if err != nil {
@@ -64,12 +88,15 @@ func TestGRPCAdaptersAccrualCanonicalWriteAndMixedCaseQuery(t *testing.T) {
 
 	recordResp, err := msgAdapter.RecordAccrual(context.Background(), &pb.MsgRecordAccrualRequest{
 		Accrual: &pb.RewardAccrual{
-			AccrualId:      "  AcCrUaL-GRPC-Canonical-1  ",
-			SessionId:      "  SeSsIoN-GRPC-Canonical-1  ",
-			ProviderId:     "  PrOvIdEr-GRPC-Canonical-1  ",
-			AssetDenom:     "  UUSDC  ",
-			Amount:         77,
-			OperationState: pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+			AccrualId:       "  AcCrUaL-GRPC-Canonical-1  ",
+			SessionId:       "  SeSsIoN-GRPC-Canonical-1  ",
+			ProviderId:      "  PrOvIdEr-GRPC-Canonical-1  ",
+			AssetDenom:      "  UUSDC  ",
+			Amount:          77,
+			AccruedAtUnix:   testAccruedAtUnix,
+			PayoutStartUnix: testPayoutStartUnix,
+			PayoutEndUnix:   testPayoutEndUnix,
+			OperationState:  pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
 		},
 	})
 	if err != nil {
@@ -126,12 +153,15 @@ func TestGRPCAdaptersDistributionCanonicalWriteAndMixedCaseQuery(t *testing.T) {
 
 	_, err := msgAdapter.RecordAccrual(context.Background(), &pb.MsgRecordAccrualRequest{
 		Accrual: &pb.RewardAccrual{
-			AccrualId:      "  AcCrUaL-DIST-GRPC-Canonical-1  ",
-			SessionId:      "session-dist-grpc-canonical-1",
-			ProviderId:     "provider-dist-grpc-canonical-1",
-			AssetDenom:     "uusdc",
-			Amount:         88,
-			OperationState: pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
+			AccrualId:       "  AcCrUaL-DIST-GRPC-Canonical-1  ",
+			SessionId:       "session-dist-grpc-canonical-1",
+			ProviderId:      "provider-dist-grpc-canonical-1",
+			AssetDenom:      "uusdc",
+			Amount:          88,
+			AccruedAtUnix:   testAccruedAtUnix,
+			PayoutStartUnix: testPayoutStartUnix,
+			PayoutEndUnix:   testPayoutEndUnix,
+			OperationState:  pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED,
 		},
 	})
 	if err != nil {

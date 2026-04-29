@@ -814,7 +814,7 @@ for _ in $(seq 1 300); do
     cat "$client_log"
     fail_step "client_startup" "client process exited before session setup"
   fi
-  if rg -q "client received wg-session config:" "$client_log"; then
+  if rg -q "client wireguard runtime ready:" "$client_log"; then
     ready=1
     break
   fi

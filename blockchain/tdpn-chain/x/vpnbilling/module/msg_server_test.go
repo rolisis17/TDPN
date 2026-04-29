@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	chaintypes "github.com/tdpn/tdpn-chain/types"
 	"github.com/tdpn/tdpn-chain/x/vpnbilling/keeper"
 	"github.com/tdpn/tdpn-chain/x/vpnbilling/types"
 )
@@ -141,6 +142,7 @@ func TestMsgServerFinalizeUsageHappyPath(t *testing.T) {
 			SessionID:     "sess-5",
 			AssetDenom:    "uusdc",
 			Amount:        500,
+			Status:        chaintypes.ReconciliationConfirmed,
 		},
 	}
 	if _, err := server.ReserveCredits(resReq); err != nil {
@@ -187,6 +189,7 @@ func TestMsgServerFinalizeUsageIdempotentReplay(t *testing.T) {
 			SessionID:     "sess-6",
 			AssetDenom:    "uusdc",
 			Amount:        100,
+			Status:        chaintypes.ReconciliationConfirmed,
 		},
 	}); err != nil {
 		t.Fatalf("reserve failed: %v", err)
@@ -194,11 +197,12 @@ func TestMsgServerFinalizeUsageIdempotentReplay(t *testing.T) {
 
 	req := FinalizeUsageRequest{
 		Settlement: types.SettlementRecord{
-			SettlementID:  "set-6",
-			ReservationID: "res-6",
-			SessionID:     "sess-6",
-			BilledAmount:  80,
-			AssetDenom:    "uusdc",
+			SettlementID:   "set-6",
+			ReservationID:  "res-6",
+			SessionID:      "sess-6",
+			BilledAmount:   80,
+			AssetDenom:     "uusdc",
+			OperationState: chaintypes.ReconciliationConfirmed,
 		},
 	}
 	if _, err := server.FinalizeUsage(req); err != nil {
@@ -252,6 +256,7 @@ func TestMsgServerFinalizeUsageConflictPropagation(t *testing.T) {
 			SessionID:     "sess-8",
 			AssetDenom:    "uusdc",
 			Amount:        100,
+			Status:        chaintypes.ReconciliationConfirmed,
 		},
 	}); err != nil {
 		t.Fatalf("reserve failed: %v", err)
@@ -259,11 +264,12 @@ func TestMsgServerFinalizeUsageConflictPropagation(t *testing.T) {
 
 	req := FinalizeUsageRequest{
 		Settlement: types.SettlementRecord{
-			SettlementID:  "set-8",
-			ReservationID: "res-8",
-			SessionID:     "sess-8",
-			BilledAmount:  75,
-			AssetDenom:    "uusdc",
+			SettlementID:   "set-8",
+			ReservationID:  "res-8",
+			SessionID:      "sess-8",
+			BilledAmount:   75,
+			AssetDenom:     "uusdc",
+			OperationState: chaintypes.ReconciliationConfirmed,
 		},
 	}
 	if _, err := server.FinalizeUsage(req); err != nil {

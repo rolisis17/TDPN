@@ -59,12 +59,14 @@ Desktop env overrides (GPM-first, legacy TDPN alias names preserved for compatib
 - `GPM_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_UPDATE_MUTATIONS=1`; opt-in for desktop `control_update` action)
 - `GPM_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_SERVICE_MUTATIONS=1`; opt-in for desktop service start/stop/restart actions)
 - `GPM_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE=1` (legacy alias: `TDPN_LOCAL_API_ALLOW_LEGACY_CONNECT_OVERRIDE=1`; re-enables manual bootstrap/invite compatibility controls in desktop UI for support/dev flows)
+- `GPM_DESKTOP_ADMIN_CONSOLE=1` (or `GPM_ADMIN_CONSOLE=1`; legacy alias: `TDPN_DESKTOP_ADMIN_CONSOLE=1`; enables Admin Console mode only in builds compiled with the `admin-console` Cargo feature; unset/default mode is the public GPM App)
 - `GPM_AUTH_VERIFY_REQUIRE_METADATA=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_METADATA=1`; optional strict auth-verify mode that requires `signature_kind`, `signature_source`, and `signed_message`; default is `false` for compatibility and unmet requirements fail closed at `POST /v1/gpm/auth/verify`)
 - `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE=1`; optional strict auth-verify mode that requires explicit `signature_source=wallet_extension`; default is `false` for compatibility and unmet requirements fail closed at `POST /v1/gpm/auth/verify`)
 - `GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF=1` (legacy alias: `TDPN_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF=1`; strict auth-verify mode that requires cryptographic proof metadata (`signature_public_key`, `signature_public_key_type`, and `signed_message`) and rejects unsupported proofs when verification is available; in production mode this defaults to required when unset, explicit env overrides still win, and unmet requirements fail closed at `POST /v1/gpm/auth/verify`)
 - desktop startup now best-effort probes daemon runtime config (`GET /v1/config` via `control_runtime_config`) and consumes additive policy metadata from both flat and nested payload shapes; when runtime fields are absent it keeps env default behavior for compatibility, including `gpm_auth_verify_require_crypto_proof` and `gpm_auth_verify_require_crypto_proof_policy_source`.
 - Runtime Hints now also surfaces `/v1/config` legacy-alias telemetry (`gpm_legacy_env_aliases_active*`) when `TDPN_*` aliases are active, with explicit migration guidance to equivalent `GPM_*` variables.
 - Client Workspace shows a concise `Connect policy` hint (mode + source) so operators can see when manual bootstrap/invite fields are intentionally locked by production policy; env-source guidance is GPM-first and keeps legacy alias notes only for compatibility (`TDPN_CONNECT_REQUIRE_SESSION`, `TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE`).
+- Production connect forces default-route installation in the desktop payload so release-mode users cannot appear connected while host traffic remains outside GPM; non-production keeps the install-route checkbox as an expert opt-in.
 - Identity & Access now shows a concise `Auth verify policy` hint (metadata/source posture + source) so operators can immediately see strict verify requirements surfaced from runtime config, including when cryptographic proof metadata is required.
 - Desktop now reads additive `/v1/config` production telemetry (`gpm_production_mode`): when enabled, legacy bootstrap/invite compatibility controls are hard-locked/hidden and manual `Sign In` is disabled with explicit `Wallet Sign-In` required guidance; when disabled, existing compatibility behavior remains unchanged. If the field is missing, desktop falls back to existing runtime policy mode/source hints.
 - daemon `GET /v1/config` auth-verify policy hints include `gpm_auth_verify_require_command`, `gpm_auth_verify_require_metadata`, `gpm_auth_verify_require_wallet_extension_source`, and `gpm_auth_verify_require_crypto_proof` for runtime policy visibility.
@@ -77,6 +79,7 @@ Desktop env overrides (GPM-first, legacy TDPN alias names preserved for compatib
 - Desktop readiness parsing is API-contract compatible with both snake_case and camelCase readiness fields (while preserving legacy aliases such as `client_tab_enabled` and `client_lock_hint`).
 - Desktop sign-in now includes wallet-extension one-click flow for `Keplr` and `Leap`; this path requires non-empty `chain_id` (for example `cosmoshub-4`) and uses `signature_source=wallet_extension` with `control_gpm_auth_verify`.
 - Manual sign-in remains a compatibility fallback: request a challenge, paste the wallet signature, and click `Sign In (Manual)` when policy allows manual source; if active auth policy requiring wallet-extension source is in effect (`signature_source=wallet_extension`), desktop locks manual sign-in and keeps `Wallet Sign-In` as the required path. If cryptographic proof metadata is required, the desktop now surfaces that requirement in the policy hint so operators know to supply `signature_public_key`, `signature_public_key_type`, and `signed_message`.
+- `wallet_binding_verified` is only true after the wallet-bound verifier path succeeds. Local proof-only and metadata-blind custom-verifier sessions can authenticate for compatibility diagnostics, but they stay fail-closed for stake/prepaid/admin/operator entitlements.
 - Expected sign-in troubleshooting text:
   - `chain_id is required for wallet-extension one-click sign-in` -> set `chain_id` to the active wallet network and retry.
   - `signature_source must be wallet_extension by policy` or `unsupported signature_source` -> retry with wallet-extension one-click (`Keplr`/`Leap`) or relax strict source policy for manual testing.
@@ -127,6 +130,32 @@ cd apps/desktop
 npm install
 npm run tauri dev
 ```
+
+## Admin Console Mode
+
+Public app mode is the default release posture: the body starts with `public-app-mode`, admin-only renderer controls are pruned from the public build, admin handlers are removed from the public renderer bundle, and the public native build does not register admin/server lifecycle/operator/reward-admin Tauri commands. Launch Admin Console mode only from a trusted operator shell when you need approvals, server lifecycle, policy, slashing, settlement, or payout workflows.
+
+Native build split:
+
+```bash
+cd apps/desktop
+npm run check:public-native
+npm run check:admin-console-native
+npm run build
+npm run build:admin-console
+npm run tauri:admin-console:dev
+```
+
+The public release build uses the default feature set. The separate Admin Console build must be compiled with the `admin-console` feature, for example `npm run tauri:admin-console:build`.
+
+Admin Console dev launcher:
+
+```bash
+cd apps/desktop
+npm run tauri:admin-console:dev
+```
+
+That script sets `GPM_DESKTOP_ADMIN_CONSOLE=1`, enables daemon admin routes for the local dev session, uses `src-tauri/tauri.admin-console.conf.json`, and compiles Tauri with `--features admin-console`. Do not use the generic public desktop dev launchers for Admin Console testing; they intentionally keep public-app guardrails.
 
 Scaffold/non-production note:
 - desktop Windows Tauri builds now preflight the icon pipeline instead of failing late in `tauri-build`.
@@ -336,9 +365,9 @@ Summary field quick guide:
 - the summary artifact is emitted on both pass and fail paths for easier troubleshooting and reruns.
 
 Packaged-run remediation defaults (scaffold/non-production):
-- `desktop_packaged_run` now enables missing dependency remediation by default, equivalent to `-InstallMissing`, unless explicitly disabled.
-- shared env overrides: `GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING` and legacy alias `TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING`.
-- accepted values: `1` / `true` enables, `0` / `false` disables; unset defaults to enabled.
+- `desktop_packaged_run` is check-only by default; it reports missing prerequisites without installing or mutating the host.
+- packaged-run env overrides: `GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING` and legacy alias `TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING`; the broader one-click remediation env is intentionally ignored here so packaged launches cannot inherit repair mode by accident.
+- accepted values: `1` / `true` enables remediation, `0` / `false` keeps check-only mode; unset defaults to check-only.
 - explicit switch precedence for packaged run: `-InstallMissing` explicitly enables remediation.
 - `-NoInstallMissing` is the preferred explicit disable switch.
 - legacy `-InstallMissing:$false` remains supported for compatibility and explicitly disables remediation, even when env would enable it.
@@ -433,9 +462,9 @@ Summary field quick guide:
 - the summary artifact is emitted on both pass and fail paths for easier troubleshooting and reruns.
 
 Linux packaged-run auto-remediation defaults (scaffold/non-production):
-- `desktop_packaged_run.sh` now enables missing dependency remediation by default, equivalent to `--install-missing`, unless explicitly disabled.
-- shared env knobs: `GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING` and legacy alias `TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING`.
-- accepted values: `1` / `true` enables, `0` / `false` disables; unset defaults to enabled.
+- `desktop_packaged_run.sh` is check-only by default; it reports missing prerequisites without installing or mutating the host.
+- packaged-run env knobs: `GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING` and legacy alias `TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING`; the broader one-click remediation env is intentionally ignored here so packaged launches cannot inherit repair mode by accident.
+- accepted values: `1` / `true` enables remediation, `0` / `false` keeps check-only mode; unset defaults to check-only.
 - CLI precedence for Linux packaged-run:
   - `--install-missing` explicitly enables remediation.
   - `--no-install-missing` explicitly disables remediation, even when env would enable it.
@@ -689,6 +718,7 @@ Pass extra Tauri build arguments after `--`:
 Run these from repository root to validate scaffold guardrails without building installers:
 
 ```bash
+bash ./scripts/integration_desktop_admin_console_contract.sh
 bash ./scripts/integration_desktop_scaffold_contract.sh
 bash ./scripts/integration_desktop_release_bundle_guardrails.sh
 bash ./scripts/integration_desktop_linux_release_bundle_guardrails.sh

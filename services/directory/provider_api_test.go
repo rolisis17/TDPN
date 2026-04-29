@@ -280,6 +280,82 @@ func TestHandleProviderRelayUpsertStoresScoresForMicroRelayRole(t *testing.T) {
 	}
 }
 
+func TestHandleProviderRelayUpsertRejectsMicroExitWhenBetaDisabled(t *testing.T) {
+	t.Setenv(allowDangerousProviderTokenBypass, "1")
+
+	dirPub, dirPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("directory keygen: %v", err)
+	}
+	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("issuer keygen: %v", err)
+	}
+	relayPub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("relay keygen: %v", err)
+	}
+	issuerURL := "http://issuer.local"
+	issuerID := "issuer-local"
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		issuerURL + "/v1/pubkeys": jsonResp(proto.IssuerPubKeysResponse{
+			Issuer:  issuerID,
+			PubKeys: []string{base64.RawURLEncoding.EncodeToString(issuerPub)},
+		}),
+	}
+
+	s := &Service{
+		operatorID:          "op-local",
+		pubKey:              dirPub,
+		privKey:             dirPriv,
+		httpClient:          &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+		entryEndpoints:      []string{"127.0.0.1:51820"},
+		endpointRotateSec:   30,
+		providerIssuerURLs:  []string{issuerURL},
+		providerRelayMaxTTL: 3 * time.Minute,
+		providerRelays:      make(map[string]proto.RelayDescriptor),
+	}
+
+	token := signProviderTestToken(t, issuerPriv, crypto.CapabilityClaims{
+		Issuer:     issuerID,
+		Audience:   "provider",
+		Subject:    "provider-op-micro-exit",
+		TokenType:  crypto.TokenTypeProviderRole,
+		Tier:       2,
+		ExpiryUnix: time.Now().Add(5 * time.Minute).Unix(),
+		TokenID:    "provider-token-micro-exit",
+	})
+
+	in := proto.ProviderRelayUpsertRequest{
+		RelayID:      "micro-exit-provider-1",
+		Role:         "micro-exit",
+		PubKey:       base64.RawURLEncoding.EncodeToString(relayPub),
+		Endpoint:     "127.0.0.1:52823",
+		ControlURL:   "http://127.0.0.1:9286",
+		Reputation:   0.82,
+		Uptime:       0.93,
+		Capacity:     0.74,
+		AbusePenalty: 0.08,
+		Capabilities: []string{"wg"},
+		HopRoles:     []string{"exit"},
+	}
+	body, _ := json.Marshal(in)
+	req := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	s.handleProviderRelayUpsert(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for disabled micro-exit beta, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "micro-exit beta is disabled by directory policy") {
+		t.Fatalf("expected micro-exit policy error, got body=%s", rr.Body.String())
+	}
+	if _, ok := s.providerRelays[relayKey("micro-exit-provider-1", "micro-exit")]; ok {
+		t.Fatalf("disabled micro-exit provider relay should not be stored")
+	}
+}
+
 func TestBuildRelayDescriptorsSkipsMicroRelayWithoutOperatorID(t *testing.T) {
 	pub, priv, err := crypto.GenerateEd25519Keypair()
 	if err != nil {
@@ -1102,20 +1178,32 @@ func TestMarkProviderTokenProofReplayCapsEntries(t *testing.T) {
 			t.Fatalf("nonce %d should pass: %v", i, err)
 		}
 	}
-	if err := s.markProviderTokenProofReplay("provider-token-cap", "nonce-overflow", now.Add(time.Duration(total)*time.Millisecond)); err != nil {
-		t.Fatalf("expected overflow nonce to evict oldest and pass: %v", err)
+	err := s.markProviderTokenProofReplay("provider-token-cap", "nonce-overflow", now.Add(time.Duration(total)*time.Millisecond))
+	if err == nil {
+		t.Fatalf("expected overflow nonce to fail closed")
+	}
+	if !strings.Contains(err.Error(), "saturated for token") {
+		t.Fatalf("expected per-token saturation error, got %v", err)
 	}
 
 	s.providerMu.RLock()
-	defer s.providerMu.RUnlock()
-	if got := len(s.providerTokenProofSeen); got != providerRelayUpsertProofReplayMaxPerToken {
+	got := len(s.providerTokenProofSeen)
+	_, oldestPresent := s.providerTokenProofSeen["provider-token-cap:nonce-0"]
+	_, overflowPresent := s.providerTokenProofSeen["provider-token-cap:nonce-overflow"]
+	s.providerMu.RUnlock()
+
+	if got != providerRelayUpsertProofReplayMaxPerToken {
 		t.Fatalf("expected %d replay entries retained, got %d", providerRelayUpsertProofReplayMaxPerToken, got)
 	}
-	if _, ok := s.providerTokenProofSeen["provider-token-cap:nonce-0"]; ok {
-		t.Fatalf("expected oldest nonce to be evicted")
+	if !oldestPresent {
+		t.Fatalf("expected oldest nonce to remain live")
 	}
-	if _, ok := s.providerTokenProofSeen["provider-token-cap:nonce-overflow"]; !ok {
-		t.Fatalf("expected overflow nonce retained after eviction")
+	if overflowPresent {
+		t.Fatalf("overflow nonce should not be retained after saturation")
+	}
+
+	if err := s.markProviderTokenProofReplay("provider-token-cap", "nonce-0", now.Add(time.Duration(total+1)*time.Millisecond)); err == nil || !strings.Contains(err.Error(), "nonce replayed") {
+		t.Fatalf("expected retained oldest nonce to remain replay-protected, got %v", err)
 	}
 }
 
@@ -1124,7 +1212,7 @@ func TestMarkProviderTokenProofReplayCapsGlobalEntries(t *testing.T) {
 		providerTokenProofSeen: make(map[string]time.Time),
 	}
 	now := time.Now()
-	total := providerRelayUpsertProofReplayMaxEntries + 1
+	total := providerRelayUpsertProofReplayMaxEntries
 	for i := 0; i < total; i++ {
 		tokenID := fmt.Sprintf("provider-token-%d", i)
 		nonce := fmt.Sprintf("nonce-%d", i)
@@ -1132,16 +1220,37 @@ func TestMarkProviderTokenProofReplayCapsGlobalEntries(t *testing.T) {
 			t.Fatalf("entry %d should pass: %v", i, err)
 		}
 	}
+	err := s.markProviderTokenProofReplay("provider-token-overflow", "nonce-overflow", now.Add(time.Duration(total)*time.Millisecond))
+	if err == nil {
+		t.Fatalf("expected global overflow nonce to fail closed")
+	}
+	if !strings.Contains(err.Error(), "replay window saturated") {
+		t.Fatalf("expected global saturation error, got %v", err)
+	}
+
 	s.providerMu.RLock()
-	defer s.providerMu.RUnlock()
-	if got := len(s.providerTokenProofSeen); got != providerRelayUpsertProofReplayMaxEntries {
+	got := len(s.providerTokenProofSeen)
+	_, oldestPresent := s.providerTokenProofSeen["provider-token-0:nonce-0"]
+	_, overflowPresent := s.providerTokenProofSeen["provider-token-overflow:nonce-overflow"]
+	newestKey := fmt.Sprintf("provider-token-%d:nonce-%d", total-1, total-1)
+	_, newestPresent := s.providerTokenProofSeen[newestKey]
+	s.providerMu.RUnlock()
+
+	if got != providerRelayUpsertProofReplayMaxEntries {
 		t.Fatalf("expected global replay entries capped at %d, got %d", providerRelayUpsertProofReplayMaxEntries, got)
 	}
-	if _, ok := s.providerTokenProofSeen["provider-token-0:nonce-0"]; ok {
-		t.Fatalf("expected oldest global entry evicted")
+	if !oldestPresent {
+		t.Fatalf("expected oldest global entry to remain live")
 	}
-	if _, ok := s.providerTokenProofSeen[fmt.Sprintf("provider-token-%d:nonce-%d", total-1, total-1)]; !ok {
+	if overflowPresent {
+		t.Fatalf("overflow global entry should not be retained after saturation")
+	}
+	if !newestPresent {
 		t.Fatalf("expected newest global entry retained")
+	}
+
+	if err := s.markProviderTokenProofReplay("provider-token-0", "nonce-0", now.Add(time.Duration(total+1)*time.Millisecond)); err == nil || !strings.Contains(err.Error(), "nonce replayed") {
+		t.Fatalf("expected retained oldest global entry to remain replay-protected, got %v", err)
 	}
 }
 
@@ -1430,7 +1539,7 @@ func TestHandleProviderRelayUpsertAllowsTier1EntryProvider(t *testing.T) {
 	}
 }
 
-func TestHandleProviderRelayUpsertAllowsTier1MicroRelayProvider(t *testing.T) {
+func TestHandleProviderRelayUpsertRejectsTier1MicroRelayProvider(t *testing.T) {
 	t.Setenv(allowDangerousProviderTokenBypass, "1")
 
 	issuerPub, issuerPriv, err := crypto.GenerateEd25519Keypair()
@@ -1486,19 +1595,14 @@ func TestHandleProviderRelayUpsertAllowsTier1MicroRelayProvider(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	rr := httptest.NewRecorder()
 	s.handleProviderRelayUpsert(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 for tier1 micro-relay provider token, got %d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for tier1 micro-relay provider token, got %d body=%s", rr.Code, rr.Body.String())
 	}
-
-	var out proto.ProviderRelayUpsertResponse
-	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
-		t.Fatalf("decode response: %v", err)
+	if !strings.Contains(rr.Body.String(), "provider token tier below minimum for role") {
+		t.Fatalf("expected micro-relay tier floor guidance, got body=%s", rr.Body.String())
 	}
-	if out.Relay.Role != "micro-relay" {
-		t.Fatalf("expected canonical micro-relay role, got %q", out.Relay.Role)
-	}
-	if _, ok := s.providerRelays[relayKey("micro-provider-tier1", "micro-relay")]; !ok {
-		t.Fatalf("expected micro-relay stored under canonical role key")
+	if _, ok := s.providerRelays[relayKey("micro-provider-tier1", "micro-relay")]; ok {
+		t.Fatalf("tier1 micro-relay provider should not be stored")
 	}
 }
 
@@ -1532,7 +1636,7 @@ func TestHandleProviderRelayUpsertCanonicalizesMicroRelayAliases(t *testing.T) {
 		Audience:   "provider",
 		Subject:    "provider-op-alias",
 		TokenType:  crypto.TokenTypeProviderRole,
-		Tier:       1,
+		Tier:       2,
 		ExpiryUnix: time.Now().Add(5 * time.Minute).Unix(),
 		TokenID:    "provider-token-alias",
 	})
@@ -1602,7 +1706,7 @@ func TestHandleProviderRelayUpsertRejectsUnknownRole(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for unknown provider relay role, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "provider relay role must be entry, exit, or micro-relay") {
+	if !strings.Contains(rr.Body.String(), "provider relay role must be entry, exit, micro-relay, or micro-exit") {
 		t.Fatalf("expected clear unknown role validation message, got %q", rr.Body.String())
 	}
 }
@@ -1638,7 +1742,7 @@ func TestHandleProviderRelayUpsertRejectsInvalidMicroRelayScores(t *testing.T) {
 		Audience:   "provider",
 		Subject:    "provider-op-micro-invalid-scores",
 		TokenType:  crypto.TokenTypeProviderRole,
-		Tier:       1,
+		Tier:       2,
 		ExpiryUnix: time.Now().Add(5 * time.Minute).Unix(),
 		TokenID:    "provider-token-micro-invalid-scores",
 	})
@@ -2069,6 +2173,43 @@ func TestHandleProviderRelayUpsertAllowsSameOwnerUpdate(t *testing.T) {
 	}
 }
 
+func TestUpsertProviderRelayAllowsOwnerToShortenValidUntil(t *testing.T) {
+	now := time.Now().UTC()
+	s := &Service{
+		providerRelays: make(map[string]proto.RelayDescriptor),
+	}
+	first := proto.RelayDescriptor{
+		RelayID:    "provider-short-ttl",
+		Role:       "exit",
+		OperatorID: "provider-owner-stable",
+		Endpoint:   "127.0.0.1:52920",
+		ControlURL: "http://127.0.0.1:9383",
+		ValidUntil: now.Add(10 * time.Minute),
+	}
+	if err := s.upsertProviderRelay(first); err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	second := first
+	second.Endpoint = "127.0.0.1:52921"
+	second.ValidUntil = now.Add(30 * time.Second)
+	if err := s.upsertProviderRelay(second); err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	stored, ok := s.providerRelays[relayKey("provider-short-ttl", "exit")]
+	if !ok {
+		t.Fatalf("expected updated relay to remain stored")
+	}
+	if !stored.ValidUntil.Equal(second.ValidUntil) {
+		t.Fatalf("expected owner update to shorten valid_until to %s, got %s", second.ValidUntil, stored.ValidUntil)
+	}
+	if stored.Endpoint != second.Endpoint {
+		t.Fatalf("expected updated endpoint %s, got %s", second.Endpoint, stored.Endpoint)
+	}
+	if relays := s.snapshotProviderRelays(now.Add(31 * time.Second)); len(relays) != 0 {
+		t.Fatalf("expected shortened descriptor to expire, got %d relays", len(relays))
+	}
+}
+
 func TestUpsertProviderRelayRuntimeAdmissionMicroRelayRoleDescriptors(t *testing.T) {
 	baseDesc := proto.RelayDescriptor{
 		RelayID:      "runtime-admission-relay",
@@ -2113,7 +2254,7 @@ func TestUpsertProviderRelayRuntimeAdmissionMicroRelayRoleDescriptors(t *testing
 				d.Role = "bogus-role"
 				return d
 			}(),
-			wantErrPart: "provider relay role must be entry, exit, or micro-relay",
+			wantErrPart: "provider relay role must be entry, exit, micro-relay, or micro-exit",
 		},
 		{
 			name: "malformed micro descriptor with non-middle hop role",
@@ -2258,6 +2399,116 @@ func TestUpsertProviderRelayRuntimeAdmissionNonMicroBackwardCompatible(t *testin
 			}
 			if stored.Role != tc.desc.Role {
 				t.Fatalf("expected stored role %q, got %q", tc.desc.Role, stored.Role)
+			}
+		})
+	}
+}
+
+func TestUpsertProviderRelayRuntimeAdmissionMicroExitDescriptors(t *testing.T) {
+	baseDesc := proto.RelayDescriptor{
+		RelayID:      "runtime-admission-micro-exit",
+		Role:         "micro-exit",
+		OperatorID:   "provider-op-runtime",
+		Endpoint:     "127.0.0.1:52920",
+		ControlURL:   "http://127.0.0.1:9393",
+		Capabilities: []string{"wg"},
+		HopRoles:     []string{"exit"},
+		Reputation:   0.82,
+		Uptime:       0.9,
+		Capacity:     0.86,
+		AbusePenalty: 0.2,
+		ValidUntil:   time.Now().Add(5 * time.Minute),
+	}
+	tests := []struct {
+		name        string
+		desc        proto.RelayDescriptor
+		wantErrPart string
+		wantStored  bool
+	}{
+		{
+			name:       "approved canonical micro-exit descriptor",
+			desc:       baseDesc,
+			wantStored: true,
+		},
+		{
+			name: "approved alias micro-exit descriptor",
+			desc: func() proto.RelayDescriptor {
+				d := baseDesc
+				d.RelayID = "runtime-admission-micro-exit-alias"
+				d.Role = "client-exit"
+				return d
+			}(),
+			wantStored: true,
+		},
+		{
+			name: "malformed micro-exit descriptor with middle hop role",
+			desc: func() proto.RelayDescriptor {
+				d := baseDesc
+				d.RelayID = "runtime-admission-micro-exit-bad-hop"
+				d.HopRoles = []string{"middle"}
+				return d
+			}(),
+			wantErrPart: "provider micro-exit hop_roles must only include exit",
+		},
+		{
+			name: "malformed micro-exit descriptor with entry capability",
+			desc: func() proto.RelayDescriptor {
+				d := baseDesc
+				d.RelayID = "runtime-admission-micro-exit-bad-cap"
+				d.Capabilities = []string{"two-hop"}
+				return d
+			}(),
+			wantErrPart: "provider micro-exit capability \"two-hop\" is not allowed",
+		},
+		{
+			name: "malformed micro-exit descriptor with middle capability alias",
+			desc: func() proto.RelayDescriptor {
+				d := baseDesc
+				d.RelayID = "runtime-admission-micro-exit-bad-middle-cap"
+				d.Capabilities = []string{"micro-relay"}
+				return d
+			}(),
+			wantErrPart: "provider micro-exit capability \"micro-relay\" is not allowed",
+		},
+		{
+			name: "malformed micro-exit descriptor with under-threshold score",
+			desc: func() proto.RelayDescriptor {
+				d := baseDesc
+				d.RelayID = "runtime-admission-micro-exit-under-capacity"
+				d.Capacity = 0.49
+				return d
+			}(),
+			wantErrPart: "provider micro-exit capacity score",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Service{
+				microExitBetaAllowed: true,
+				providerRelays:       make(map[string]proto.RelayDescriptor),
+			}
+			err := s.upsertProviderRelay(tc.desc)
+			if tc.wantErrPart == "" && err != nil {
+				t.Fatalf("expected success, got err=%v", err)
+			}
+			if tc.wantErrPart != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q", tc.wantErrPart)
+				}
+				if !strings.Contains(err.Error(), tc.wantErrPart) {
+					t.Fatalf("expected error containing %q, got %q", tc.wantErrPart, err.Error())
+				}
+			}
+			if tc.wantStored {
+				stored, ok := s.providerRelays[relayKey(tc.desc.RelayID, "micro-exit")]
+				if !ok {
+					t.Fatalf("expected descriptor stored under canonical micro-exit key")
+				}
+				if stored.Role != "micro-exit" {
+					t.Fatalf("expected stored canonical role micro-exit, got %q", stored.Role)
+				}
 			}
 		})
 	}

@@ -24,16 +24,16 @@ Options:
   --print-summary-json 0|1          Print summary JSON payload to stdout.
   --doctor-summary-json PATH        Forwarded to desktop_doctor.sh summary output path.
   --print-doctor-summary-json 0|1   Forwarded to desktop_doctor.sh summary-json print toggle.
+  --allow-dev-fallback              Permit npm/Tauri dev fallback when no packaged executable exists.
   --help                            Show this help message.
 
 Notes:
-  - Auto-remediation is enabled by default.
-  - Env overrides: GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING, TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING.
+  - Auto-remediation is check-only by default; pass --install-missing to repair prerequisites.
+  - Env overrides: GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING, TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING.
   - Runs scripts/linux/desktop_doctor.sh first (check or fix mode).
   - Prefers packaged executable path (explicit or auto-discovered).
   - If scripts/linux/desktop_native_bootstrap.sh exists, delegates launch to it.
-  - If native bootstrap is absent, uses scaffold fallback:
-      packaged executable (if found) or `npm run tauri -- dev` from apps/desktop.
+  - If native bootstrap is absent, launches only a packaged executable unless --allow-dev-fallback is explicit.
 USAGE
 }
 
@@ -47,7 +47,8 @@ to_lower() {
 
 desktop_executable_path=""
 install_missing_cli=""
-install_missing_effective="1"
+install_missing_effective="0"
+allow_dev_fallback="0"
 dry_run="0"
 api_addr="127.0.0.1:8095"
 summary_json="$ROOT_DIR/.easy-node-logs/desktop_packaged_run_linux_summary.json"
@@ -211,15 +212,72 @@ resolve_install_missing_env_override() {
   local raw_value
   local parsed_value
 
-  for env_name in GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING; do
+  for env_name in GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING; do
     raw_value="${!env_name:-}"
+    if [[ -z "$raw_value" ]]; then
+      continue
+    fi
     if parsed_value="$(parse_bool_token "$raw_value")"; then
       printf '%s\n' "$parsed_value"
       return 0
     fi
+    printf '%s\n' "invalid boolean value for $env_name; refusing packaged-run install remediation fallback"
+    return 2
   done
 
   return 1
+}
+
+assert_public_packaged_admin_routes_disabled() {
+  local env_name
+  local raw_value
+  local parsed_value
+
+  for env_name in GPM_LOCAL_API_ADMIN_ROUTES TDPN_LOCAL_API_ADMIN_ROUTES; do
+    raw_value="${!env_name:-}"
+    if [[ -z "$raw_value" ]]; then
+      continue
+    fi
+    if parsed_value="$(parse_bool_token "$raw_value")" && [[ "$parsed_value" == "1" ]]; then
+      fail "public packaged mode refuses daemon admin routes (${env_name}=1); use the separate GPM Admin Console" "admin_routes_guard"
+    fi
+    # New GPM env intentionally shadows the legacy TDPN alias even when false/invalid.
+    return 0
+  done
+}
+
+assert_public_packaged_admin_surface_disabled() {
+  local env_name
+  local raw_value
+  local parsed_value
+
+  assert_public_packaged_admin_routes_disabled
+  for env_name in GPM_DESKTOP_ADMIN_CONSOLE GPM_ADMIN_CONSOLE TDPN_DESKTOP_ADMIN_CONSOLE GPM_DESKTOP_BUILD_ADMIN_CONSOLE VITE_GPM_ADMIN_CONSOLE; do
+    raw_value="${!env_name:-}"
+    if [[ -z "$raw_value" ]]; then
+      continue
+    fi
+    if parsed_value="$(parse_bool_token "$raw_value")" && [[ "$parsed_value" == "0" ]]; then
+      continue
+    fi
+    fail "public packaged mode refuses admin console mode (${env_name}=${raw_value}); use the separate GPM Admin Console" "admin_console_guard"
+  done
+}
+
+assert_public_packaged_executable_not_admin_console() {
+  local executable_path="${1:-}"
+  local base_name
+  if [[ -z "$executable_path" ]]; then
+    return 0
+  fi
+  base_name="$(to_lower "$(basename "$executable_path")")"
+  base_name="${base_name// /-}"
+  base_name="${base_name//_/-}"
+  case "$base_name" in
+    *admin-console*|*gpm-admin*)
+      fail "public packaged mode refuses admin console executable: $executable_path" "admin_console_executable_guard"
+      ;;
+  esac
 }
 
 while [[ $# -gt 0 ]]; do
@@ -241,6 +299,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --dry-run)
       dry_run="1"
+      shift
+      ;;
+    --allow-dev-fallback)
+      allow_dev_fallback="1"
       shift
       ;;
     --api-addr)
@@ -292,9 +354,18 @@ done
 if [[ -n "$install_missing_cli" ]]; then
   install_missing_effective="$install_missing_cli"
 else
-  if env_install_missing="$(resolve_install_missing_env_override)"; then
-    install_missing_effective="$env_install_missing"
-  fi
+  env_install_missing_status="0"
+  env_install_missing="$(resolve_install_missing_env_override)" || env_install_missing_status="$?"
+  case "$env_install_missing_status" in
+    0)
+      install_missing_effective="$env_install_missing"
+      ;;
+    1)
+      ;;
+    *)
+      fail "$env_install_missing" "install_missing_env_guard"
+      ;;
+  esac
 fi
 
 if [[ "$print_summary_json" != "0" && "$print_summary_json" != "1" ]]; then
@@ -305,9 +376,12 @@ if [[ -n "$print_doctor_summary_json" && "$print_doctor_summary_json" != "0" && 
   fail "--print-doctor-summary-json must be 0 or 1" "parse_args"
 fi
 
+assert_public_packaged_admin_surface_disabled
+assert_public_packaged_executable_not_admin_console "$desktop_executable_path"
+
 resolve_auto_packaged_executable() {
   local env_name
-  for env_name in GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE GPM_DESKTOP_PACKAGED_EXE TDPN_DESKTOP_PACKAGED_EXE; do
+  for env_name in GPM_DESKTOP_PACKAGED_EXE GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE TDPN_DESKTOP_PACKAGED_EXE; do
     local value="${!env_name:-}"
     if [[ -z "$value" ]]; then
       continue
@@ -431,6 +505,7 @@ else
 fi
 
 if [[ -n "$resolved_desktop_executable_path" ]]; then
+  assert_public_packaged_executable_not_admin_console "$resolved_desktop_executable_path"
   export GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE="$resolved_desktop_executable_path"
   export GPM_DESKTOP_PACKAGED_EXE="$resolved_desktop_executable_path"
   export TDPN_DESKTOP_PACKAGED_EXE="$resolved_desktop_executable_path"
@@ -442,7 +517,7 @@ native_bootstrap_script="${DESKTOP_LINUX_NATIVE_BOOTSTRAP_SCRIPT_UNDER_TEST:-${D
 if [[ -f "$native_bootstrap_script" ]]; then
   native_bootstrap_args=(
     --mode run-full
-    --desktop-launch-strategy auto
+    --desktop-launch-strategy packaged
     --api-addr "$api_addr"
   )
   if [[ "$install_missing_effective" == "1" ]]; then
@@ -487,6 +562,10 @@ fi
 
 if [[ ! -d "$DESKTOP_DIR" || ! -f "$DESKTOP_DIR/package.json" ]]; then
   fail "desktop project directory missing package.json: $DESKTOP_DIR" "fallback_launch"
+fi
+
+if [[ "$allow_dev_fallback" != "1" ]]; then
+  fail "packaged executable was not found; refusing npm/Tauri dev fallback in packaged run mode (pass --allow-dev-fallback for development only)" "packaged_executable"
 fi
 
 if [[ "$dry_run" == "1" ]]; then

@@ -98,11 +98,11 @@ func readPrivateKeyFileStrict(path string) ([]byte, error) {
 	if !os.SameFile(linfo, finfo) {
 		return nil, fmt.Errorf("private key file %q changed during open", path)
 	}
-	if err := fileperm.ValidateOwnerOnly(path, finfo); err != nil {
-		return nil, err
-	}
 	if finfo.Size() > wgPrivateKeyFileMaxBytes {
 		return nil, fmt.Errorf("private key file %q exceeds max size %d bytes", path, wgPrivateKeyFileMaxBytes)
+	}
+	if err := fileperm.ValidateOwnerOnly(path, finfo); err != nil {
+		return nil, err
 	}
 	b, err := io.ReadAll(io.LimitReader(f, wgPrivateKeyFileMaxBytes+1))
 	if err != nil {

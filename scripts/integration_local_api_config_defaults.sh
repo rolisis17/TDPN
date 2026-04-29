@@ -17,6 +17,8 @@ CALLS_FILE="$TMP_DIR/easy_node_calls.tsv"
 SERVER_LOG="$TMP_DIR/local_api_server.log"
 CFG_A="$TMP_DIR/easy_mode_config_a.conf"
 CFG_B="$TMP_DIR/easy_mode_config_b.conf"
+STATE_STORE="$TMP_DIR/gpm_state.json"
+MANIFEST_CACHE="$TMP_DIR/gpm_manifest_cache.json"
 LOCAL_API_BASE=""
 SERVER_PID=""
 
@@ -115,6 +117,55 @@ wait_for_local_api() {
   return 1
 }
 
+write_gpm_test_state_and_manifest() {
+  local manifest_url="$1/v1/bootstrap/manifest"
+  local now_utc=""
+  local expires_utc=""
+  now_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  expires_utc="$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)"
+
+  cat >"$MANIFEST_CACHE" <<EOF_MANIFEST
+{
+  "version": 1,
+  "fetched_at_utc": "$now_utc",
+  "source_url": "$manifest_url",
+  "signature_verified": false,
+  "manifest": {
+    "version": 1,
+    "generated_at_utc": "$now_utc",
+    "expires_at_utc": "$expires_utc",
+    "bootstrap_directories": ["http://127.0.0.1:8081"]
+  }
+}
+EOF_MANIFEST
+
+  cat >"$STATE_STORE" <<EOF_STATE
+{
+  "version": 1,
+  "generated_at_utc": "$now_utc",
+  "sessions": [
+    {
+      "token": "gpm-config-session-a",
+      "wallet_address": "cosmos1configsessiona",
+      "wallet_provider": "keplr",
+      "role": "client",
+      "wallet_binding_verified": true,
+      "auth_verification_source": "local_wallet",
+      "client_tier": 2,
+      "stake_satisfied": true,
+      "prepaid_balance_satisfied": true,
+      "created_at": "$now_utc",
+      "expires_at": "$expires_utc",
+      "bootstrap_directory": "http://127.0.0.1:8081",
+      "bootstrap_directories": ["http://127.0.0.1:8081"],
+      "invite_key": "inv-config-a"
+    }
+  ],
+  "operators": []
+}
+EOF_STATE
+}
+
 start_local_api() {
   local config_path="$1"
   local port=""
@@ -123,6 +174,7 @@ start_local_api() {
   : >"$SERVER_LOG"
 
   LOCAL_API_BASE="http://127.0.0.1:${port}"
+  write_gpm_test_state_and_manifest "$LOCAL_API_BASE"
   LOCAL_CONTROL_API_ADDR="127.0.0.1:${port}" \
   LOCAL_CONTROL_API_SCRIPT="$FAKE_SCRIPT" \
   LOCAL_CONTROL_API_ALLOW_UPDATE="0" \
@@ -138,6 +190,13 @@ start_local_api() {
   TDPN_CONNECT_REQUIRE_SESSION="0" \
   GPM_ALLOW_LEGACY_CONNECT_OVERRIDE="1" \
   TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE="1" \
+  GPM_MAIN_DOMAIN="$LOCAL_API_BASE" \
+  GPM_BOOTSTRAP_MANIFEST_URL="${LOCAL_API_BASE}/v1/bootstrap/manifest" \
+  GPM_BOOTSTRAP_MANIFEST_CACHE_PATH="$MANIFEST_CACHE" \
+  GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC="0" \
+  GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS="0" \
+  GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE="0" \
+  GPM_STATE_STORE_PATH="$STATE_STORE" \
   SIMPLE_CLIENT_RUN_PREFLIGHT="" \
   SIMPLE_CLIENT_PROD_PROFILE_DEFAULT="" \
   CLIENT_PATH_PROFILE="" \
@@ -237,7 +296,7 @@ assert_service_command_output_line() {
 echo "[local-api-config-defaults] case A: config v1 maps profile/interface/preflight/prod defaults (private->3hop)"
 start_local_api "$CFG_A"
 
-connect_a_json="$(api_post_json "/v1/connect" '{"bootstrap_directory":"http://127.0.0.1:8081","invite_key":"inv-config-a"}')"
+connect_a_json="$(api_post_json "/v1/connect" '{"session_token":"gpm-config-session-a"}')"
 if ! jq -e '.ok == true and .stage == "connect" and .profile == "3hop"' <<<"$connect_a_json" >/dev/null; then
   echo "case A connect response mismatch"
   echo "$connect_a_json"
@@ -255,7 +314,7 @@ assert_line_has_subject_flag "$up_a_call" "inv-config-a" "case A"
 assert_line_has "$up_a_call" $'\t--path-profile\t3hop' "case A missing 3hop profile default from config"
 assert_line_has "$up_a_call" $'\t--interface\twgcfg3' "case A missing interface default from config"
 assert_line_has "$up_a_call" $'\t--prod-profile\t1' "case A missing prod default=1 from config"
-assert_line_has "$up_a_call" $'\t--install-route\t1' "case A unexpected install-route for 3hop"
+assert_line_has "$up_a_call" $'\t--install-route\t0' "case A unexpected install-route for 3hop"
 
 stop_local_api
 

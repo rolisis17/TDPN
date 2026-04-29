@@ -358,19 +358,85 @@ function ConvertTo-NullableBoolean {
 
 function Get-AutoInstallMissingEnvOverride {
   $envVarNames = @(
-    "GPM_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING",
-    "TDPN_DESKTOP_ONE_CLICK_AUTO_INSTALL_MISSING"
+    "GPM_DESKTOP_PACKAGED_RUN_INSTALL_MISSING",
+    "TDPN_DESKTOP_PACKAGED_RUN_INSTALL_MISSING"
   )
 
   foreach ($envVarName in $envVarNames) {
     $rawValue = [Environment]::GetEnvironmentVariable($envVarName)
+    if ([string]::IsNullOrWhiteSpace($rawValue)) {
+      continue
+    }
     $parsedValue = ConvertTo-NullableBoolean -Value $rawValue
     if ($null -ne $parsedValue) {
       return [bool]$parsedValue
     }
+    throw ("invalid boolean value for {0}; refusing packaged-run install remediation fallback" -f $envVarName)
   }
 
   return $null
+}
+
+function Assert-PublicPackagedAdminRoutesDisabled {
+  $envVarNames = @(
+    "GPM_LOCAL_API_ADMIN_ROUTES",
+    "TDPN_LOCAL_API_ADMIN_ROUTES"
+  )
+
+  foreach ($envVarName in $envVarNames) {
+    $rawValue = [Environment]::GetEnvironmentVariable($envVarName, "Process")
+    if ([string]::IsNullOrWhiteSpace($rawValue)) {
+      continue
+    }
+
+    $parsedValue = ConvertTo-NullableBoolean -Value $rawValue
+    if ($null -ne $parsedValue -and [bool]$parsedValue) {
+      throw ("public packaged mode refuses daemon admin routes ({0}=1); use the separate GPM Admin Console" -f $envVarName)
+    }
+
+    # New GPM env intentionally shadows the legacy TDPN alias even when false/invalid.
+    return
+  }
+}
+
+function Assert-PublicPackagedAdminSurfaceDisabled {
+  Assert-PublicPackagedAdminRoutesDisabled
+
+  $adminEnvVarNames = @(
+    "GPM_DESKTOP_ADMIN_CONSOLE",
+    "GPM_ADMIN_CONSOLE",
+    "TDPN_DESKTOP_ADMIN_CONSOLE",
+    "GPM_DESKTOP_BUILD_ADMIN_CONSOLE",
+    "VITE_GPM_ADMIN_CONSOLE"
+  )
+
+  foreach ($envVarName in $adminEnvVarNames) {
+    $rawValue = [Environment]::GetEnvironmentVariable($envVarName, "Process")
+    if ([string]::IsNullOrWhiteSpace($rawValue)) {
+      continue
+    }
+    $parsedValue = ConvertTo-NullableBoolean -Value $rawValue
+    if ($null -ne $parsedValue -and -not [bool]$parsedValue) {
+      continue
+    }
+    throw ("public packaged mode refuses admin console mode ({0}={1}); use the separate GPM Admin Console" -f $envVarName, $rawValue)
+  }
+}
+
+function Assert-PublicPackagedExecutableNotAdminConsole {
+  param(
+    [AllowNull()]
+    [string]$ExecutablePath
+  )
+
+  if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
+    return
+  }
+  $baseName = [System.IO.Path]::GetFileName($ExecutablePath).ToLowerInvariant()
+  $tokenized = ($baseName -replace '[\s_]+', '-')
+  if ($tokenized.Contains("admin-console") -or $tokenized.Contains("gpm-admin")) {
+    throw ("public packaged mode refuses admin console executable: {0}" -f $ExecutablePath)
+  }
 }
 
 $SummaryJson = Resolve-OutputPath -Value $SummaryJson
@@ -400,7 +466,7 @@ if ($installMissingWasSpecified -and $noInstallMissingWasSpecified) {
   throw "conflicting install intent: specify only one of -InstallMissing or -NoInstallMissing"
 }
 
-$installMissingIntent = $true
+$installMissingIntent = $false
 if ($installMissingWasSpecified) {
   $installMissingIntent = [bool]$InstallMissing
 } elseif ($noInstallMissingWasSpecified) {
@@ -411,6 +477,8 @@ if ($installMissingWasSpecified) {
     $installMissingIntent = [bool]$envAutoInstallMissing
   }
 }
+
+Assert-PublicPackagedAdminSurfaceDisabled
 
 $doctorStep = [ordered]@{
   status = "skip"
@@ -425,6 +493,7 @@ $resolvedDesktopExecutablePath = Normalize-PathCandidate -Value $DesktopExecutab
 $resolvedDesktopExecutableSource = "none"
 if (-not [string]::IsNullOrWhiteSpace($resolvedDesktopExecutablePath)) {
   $resolvedDesktopExecutableSource = "override"
+  Assert-PublicPackagedExecutableNotAdminConsole -ExecutablePath $resolvedDesktopExecutablePath
 }
 
 $doctorInvokeArgs = @()
@@ -464,7 +533,7 @@ if ($doctorExitCode -ne 0) {
     -InstallMissingIntent $installMissingIntent `
     -ApiAddress $ApiAddr `
     -Runner $CommandRunner `
-    -PolicyBypassEnabled $true `
+    -PolicyBypassEnabled $shouldEnablePolicyBypass `
     -ResolvedDesktopExecutablePath $resolvedDesktopExecutablePath `
     -ResolvedDesktopExecutableSource $resolvedDesktopExecutableSource `
     -FailureStage $failureStage `
@@ -491,6 +560,7 @@ $bootstrapInvokeArgs = @(
 )
 
 if (-not [string]::IsNullOrWhiteSpace($resolvedDesktopExecutablePath)) {
+  Assert-PublicPackagedExecutableNotAdminConsole -ExecutablePath $resolvedDesktopExecutablePath
   $bootstrapInvokeArgs += @("-DesktopExecutableOverridePath", $resolvedDesktopExecutablePath)
 }
 if ($installMissingIntent) {
@@ -526,7 +596,7 @@ Write-PackagedRunSummary `
   -InstallMissingIntent $installMissingIntent `
   -ApiAddress $ApiAddr `
   -Runner $CommandRunner `
-  -PolicyBypassEnabled $true `
+  -PolicyBypassEnabled $shouldEnablePolicyBypass `
   -ResolvedDesktopExecutablePath $resolvedDesktopExecutablePath `
   -ResolvedDesktopExecutableSource $resolvedDesktopExecutableSource `
   -FailureStage $failureStage `

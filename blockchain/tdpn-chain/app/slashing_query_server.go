@@ -34,7 +34,16 @@ type SlashingGetPenaltyResponse struct {
 	Found   bool
 }
 
-type SlashingListEvidenceRequest struct{}
+type SlashingListEvidenceRequest struct {
+	ProviderID             string
+	SessionID              string
+	ViolationType          string
+	SubmittedAtOrAfterUnix int64
+	SubmittedBeforeUnix    int64
+	IncludeFailed          bool
+	IncludeFailedSet       bool
+	IncludeZeroSubmitted   bool
+}
 
 type SlashingListEvidenceResponse struct {
 	Evidence []slashingtypes.SlashEvidence
@@ -84,8 +93,17 @@ func (m slashingQueryServer) GetPenalty(_ context.Context, req SlashingGetPenalt
 	}, nil
 }
 
-func (m slashingQueryServer) ListEvidence(_ context.Context, _ SlashingListEvidenceRequest) (SlashingListEvidenceResponse, error) {
-	resp, err := m.queryServer.ListEvidence(slashingmodule.ListEvidenceRequest{})
+func (m slashingQueryServer) ListEvidence(_ context.Context, req SlashingListEvidenceRequest) (SlashingListEvidenceResponse, error) {
+	resp, err := m.queryServer.ListEvidence(slashingmodule.ListEvidenceRequest{
+		ProviderID:             req.ProviderID,
+		SessionID:              req.SessionID,
+		ViolationType:          req.ViolationType,
+		SubmittedAtOrAfterUnix: req.SubmittedAtOrAfterUnix,
+		SubmittedBeforeUnix:    req.SubmittedBeforeUnix,
+		IncludeFailed:          req.IncludeFailed,
+		IncludeFailedSet:       req.IncludeFailedSet,
+		IncludeZeroSubmitted:   req.IncludeZeroSubmitted,
+	})
 	if err != nil {
 		if errors.Is(err, slashingmodule.ErrNilKeeper) {
 			return SlashingListEvidenceResponse{}, errSlashingKeeperNotWired

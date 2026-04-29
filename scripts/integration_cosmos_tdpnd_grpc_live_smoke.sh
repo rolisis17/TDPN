@@ -33,6 +33,11 @@ REWARDS_ACCRUAL_QUERY_CANONICAL_PAYLOAD='{"accrual_id":"accrual-live-smoke-rewar
 REWARDS_DISTRIBUTION_WRITE_PAYLOAD='{"distribution":{"distribution_id":"  DiStRiBuTiOn-LIVE-SMOKE-REWARDS-1  ","accrual_id":"  ACCRUAL-LIVE-SMOKE-REWARDS-1  ","payout_ref":"payout-live-smoke-rewards-1"}}'
 REWARDS_DISTRIBUTION_QUERY_MIXED_PAYLOAD='{"distribution_id":"  DISTRIBUTION-LIVE-SMOKE-REWARDS-1  "}'
 REWARDS_DISTRIBUTION_QUERY_CANONICAL_PAYLOAD='{"distribution_id":"distribution-live-smoke-rewards-1"}'
+SLASHING_EVIDENCE_WRITE_PAYLOAD='{"evidence":{"evidence_id":"  Ev-LIVE-SMOKE-SLASHING-1  ","session_id":"  SeSsIoN-LIVE-SMOKE-SLASHING-1  ","provider_id":"  PrOvIdEr-LIVE-SMOKE-SLASHING-1  ","kind":"objective","proof_hash":"sha256:6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090","violation_type":"  DOUBLE-SIGN  ","slash_amount":50,"slash_denom":"  UTDPN  "}}'
+SLASHING_EVIDENCE_CONFIRM_PAYLOAD='{"evidence_id":"  EV-LIVE-SMOKE-SLASHING-1  "}'
+SLASHING_EVIDENCE_QUERY_MIXED_PAYLOAD='{"evidence_id":"  EV-LIVE-SMOKE-SLASHING-1  "}'
+SLASHING_PENALTY_WRITE_PAYLOAD='{"penalty":{"penalty_id":"  PeN-LIVE-SMOKE-SLASHING-1  ","evidence_id":"  EV-LIVE-SMOKE-SLASHING-1  ","slash_basis_point":25,"slash_amount":50,"slash_denom":"  UTDPN  "}}'
+SLASHING_PENALTY_QUERY_MIXED_PAYLOAD='{"penalty_id":"  PEN-LIVE-SMOKE-SLASHING-1  "}'
 SPONSOR_AUTHORIZATION_WRITE_PAYLOAD='{"authorization":{"authorization_id":"  AuTh-LIVE-SMOKE-SPONSOR-1  ","sponsor_id":"  SpOnSoR-LIVE-SMOKE-SPONSOR-1  ","app_id":"  ApP-LIVE-SMOKE-SPONSOR-1  ","max_credits":250,"expires_at_unix":4102444800}}'
 SPONSOR_AUTHORIZATION_QUERY_MIXED_PAYLOAD='{"authorization_id":"  AUTH-LIVE-SMOKE-SPONSOR-1  "}'
 SPONSOR_AUTHORIZATION_QUERY_CANONICAL_PAYLOAD='{"authorization_id":"auth-live-smoke-sponsor-1"}'
@@ -290,6 +295,7 @@ if command -v grpcurl >/dev/null 2>&1; then
   SERVICES="$(grpcurl -plaintext -max-time 2 "127.0.0.1:${PORT}" list 2>/dev/null || true)"
   assert_grpc_services_include "${SERVICES}" "tdpn.vpnbilling.v1.Query"
   assert_grpc_services_include "${SERVICES}" "tdpn.vpnrewards.v1.Query"
+  assert_grpc_services_include "${SERVICES}" "tdpn.vpnslashing.v1.Msg"
   assert_grpc_services_include "${SERVICES}" "tdpn.vpnslashing.v1.Query"
   assert_grpc_services_include "${SERVICES}" "tdpn.vpnsponsor.v1.Query"
   assert_grpc_services_include "${SERVICES}" "tdpn.vpnvalidator.v1.Msg"
@@ -368,6 +374,33 @@ if command -v grpcurl >/dev/null 2>&1; then
   assert_grpc_call_patterns "${PORT}" "tdpn.vpnrewards.v1.Query/DistributionRecord" "${REWARDS_DISTRIBUTION_QUERY_CANONICAL_PAYLOAD}" \
     '"found"[[:space:]]*:[[:space:]]*true' \
     '"distributionId"[[:space:]]*:[[:space:]]*"distribution-live-smoke-rewards-1"'
+
+  # Slashing canonicalization compatibility and lifecycle sequencing.
+  assert_grpc_call_patterns "${PORT}" "tdpn.vpnslashing.v1.Msg/SubmitEvidence" "${SLASHING_EVIDENCE_WRITE_PAYLOAD}" \
+    '"evidence"[[:space:]]*:' \
+    '"evidenceId"[[:space:]]*:[[:space:]]*"ev-live-smoke-slashing-1"' \
+    '"providerId"[[:space:]]*:[[:space:]]*"provider-live-smoke-slashing-1"' \
+    '"sessionId"[[:space:]]*:[[:space:]]*"session-live-smoke-slashing-1"' \
+    '"violationType"[[:space:]]*:[[:space:]]*"double-sign"' \
+    '"slashDenom"[[:space:]]*:[[:space:]]*"utdpn"' \
+    '"status"[[:space:]]*:[[:space:]]*"RECONCILIATION_STATUS_SUBMITTED"'
+  assert_grpc_call_patterns "${PORT}" "tdpn.vpnslashing.v1.Msg/ConfirmEvidence" "${SLASHING_EVIDENCE_CONFIRM_PAYLOAD}" \
+    '"evidence"[[:space:]]*:' \
+    '"evidenceId"[[:space:]]*:[[:space:]]*"ev-live-smoke-slashing-1"' \
+    '"status"[[:space:]]*:[[:space:]]*"RECONCILIATION_STATUS_CONFIRMED"'
+  assert_grpc_call_patterns "${PORT}" "tdpn.vpnslashing.v1.Query/SlashEvidence" "${SLASHING_EVIDENCE_QUERY_MIXED_PAYLOAD}" \
+    '"found"[[:space:]]*:[[:space:]]*true' \
+    '"evidenceId"[[:space:]]*:[[:space:]]*"ev-live-smoke-slashing-1"' \
+    '"status"[[:space:]]*:[[:space:]]*"RECONCILIATION_STATUS_CONFIRMED"'
+  assert_grpc_call_patterns "${PORT}" "tdpn.vpnslashing.v1.Msg/RecordPenalty" "${SLASHING_PENALTY_WRITE_PAYLOAD}" \
+    '"penalty"[[:space:]]*:' \
+    '"penaltyId"[[:space:]]*:[[:space:]]*"pen-live-smoke-slashing-1"' \
+    '"evidenceId"[[:space:]]*:[[:space:]]*"ev-live-smoke-slashing-1"' \
+    '"slashDenom"[[:space:]]*:[[:space:]]*"utdpn"'
+  assert_grpc_call_patterns "${PORT}" "tdpn.vpnslashing.v1.Query/PenaltyDecision" "${SLASHING_PENALTY_QUERY_MIXED_PAYLOAD}" \
+    '"found"[[:space:]]*:[[:space:]]*true' \
+    '"penaltyId"[[:space:]]*:[[:space:]]*"pen-live-smoke-slashing-1"' \
+    '"evidenceId"[[:space:]]*:[[:space:]]*"ev-live-smoke-slashing-1"'
 
   # Sponsor canonicalization compatibility (write mixed-case/whitespace, query mixed-case/canonical).
   assert_grpc_call_patterns "${PORT}" "tdpn.vpnsponsor.v1.Msg/CreateAuthorization" "${SPONSOR_AUTHORIZATION_WRITE_PAYLOAD}" \

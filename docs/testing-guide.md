@@ -557,7 +557,14 @@ Three-machine docker profile matrix recorded rehearsal (phase-1 resilience recei
 ./scripts/integration_client_3hop_runtime.sh
 ```
 
+Middle service contract (local deterministic, no docker):
+
+```bash
+./scripts/integration_middle_service_contract.sh
+```
+
 Notes:
+- `integration_middle_service_contract.sh` validates `go run ./cmd/node --middle` fail-closed static peer configuration, health/ready endpoints, UDP forwarding, rogue-source drops, and stats counters.
 - This runs the machine-C control-plane validate/soak flow against two local
   dockerized operator stacks (`A` + `B`) for fast iteration.
 - It is not a replacement for final true multi-host production signoff.

@@ -29,31 +29,6 @@ const legacyAliasWarningEl = byId("legacy_alias_warning");
 const legacyAliasWarningLineEl = byId("legacy_alias_warning_line");
 const legacyAliasWarningTitleEl = byId("legacy_alias_warning_title");
 const legacyAliasWarningDetailEl = byId("legacy_alias_warning_detail");
-const operatorReadinessEl = byId("operator_readiness");
-const operatorReadinessLineEl = byId("operator_readiness_line");
-const operatorReadinessStatusEl = byId("operator_readiness_status");
-const operatorReadinessGuidanceEl = byId("operator_readiness_guidance");
-const endpointPostureEl = byId("endpoint_posture");
-const endpointPostureLineEl = byId("endpoint_posture_line");
-const endpointPostureStatusEl = byId("endpoint_posture_status");
-const endpointPostureGuidanceEl = byId("endpoint_posture_guidance");
-const operatorUnlockPlanEl = byId("operator_unlock_plan");
-const operatorUnlockPlanLineEl = byId("operator_unlock_plan_line");
-const operatorUnlockPlanTitleEl = byId("operator_unlock_plan_title");
-const operatorUnlockPlanDetailEl = byId("operator_unlock_plan_detail");
-const operatorLockReasonLineEl = byId("operator_lock_reason_line");
-const operatorLockReasonTitleEl = byId("operator_lock_reason_title");
-const operatorLockReasonDetailEl = byId("operator_lock_reason_detail");
-const operatorUnlockNextActionsEl = byId("operator_unlock_next_actions");
-const operatorStepSessionItemEl = byId("operator_step_session_item");
-const operatorStepSessionPillEl = byId("operator_step_session_pill");
-const operatorStepSessionDetailEl = byId("operator_step_session_detail");
-const operatorStepApplicationItemEl = byId("operator_step_application_item");
-const operatorStepApplicationPillEl = byId("operator_step_application_pill");
-const operatorStepApplicationDetailEl = byId("operator_step_application_detail");
-const operatorStepLifecycleItemEl = byId("operator_step_lifecycle_item");
-const operatorStepLifecyclePillEl = byId("operator_step_lifecycle_pill");
-const operatorStepLifecycleDetailEl = byId("operator_step_lifecycle_detail");
 const localApiAuthTokenEl = byId("local_api_auth_token");
 const clientReadinessEl = byId("client_readiness");
 const clientReadinessLineEl = byId("client_readiness_line");
@@ -64,19 +39,26 @@ const bootstrapTrustStatusLineEl = byId("bootstrap_trust_status_line");
 const bootstrapTrustStateEl = byId("bootstrap_trust_state");
 const bootstrapTrustGuidanceEl = byId("bootstrap_trust_guidance");
 const bootstrapTrustSummaryEl = byId("bootstrap_trust_summary");
-const selectedApplicationUpdatedAtEl = byId("selected_application_updated_at");
+const contributionStatusEl = byId("contribution_status");
+const contributionStatusLineEl = byId("contribution_status_line");
+const contributionStateEl = byId("contribution_state");
+const contributionDetailEl = byId("contribution_detail");
+const contributionEligibilitySummaryEl = byId("contribution_eligibility_summary");
+const contributionRoleEl = byId("contribution_role");
+const contributionStatusBtnEl = byId("contribution_status_btn");
+const contributionEnableBtnEl = byId("contribution_enable_btn");
+const contributionDisableBtnEl = byId("contribution_disable_btn");
+const rewardCurrentWeekBtnEl = byId("reward_current_week_btn");
+const rewardHistoryBtnEl = byId("reward_history_btn");
+const contributionRewardWeekEl = byId("contribution_reward_week");
+const contributionRewardUnitsEl = byId("contribution_reward_units");
+const contributionRewardStatusEl = byId("contribution_reward_status");
+const contributionRewardSettlementEl = byId("contribution_reward_settlement");
+const contributionRewardMeteringEl = byId("contribution_reward_metering");
+const contributionHistorySummaryEl = byId("contribution_history_summary");
+const contributionHistoryListEl = byId("contribution_history_list");
 const walletChainIdEl = byId("wallet_chain_id");
 const challengeMessageEl = byId("challenge_message");
-const operatorListStatusEl = byId("operator_list_status");
-const operatorListSearchEl = byId("operator_list_search");
-const operatorListLimitEl = byId("operator_list_limit");
-const operatorListNextCursorEl = byId("operator_list_next_cursor");
-const operatorListNextPageBtnEl = byId("operator_list_next_page_btn");
-const auditLimitEl = byId("audit_limit");
-const auditOffsetEl = byId("audit_offset");
-const auditEventEl = byId("audit_event");
-const auditWalletAddressEl = byId("audit_wallet_address");
-const auditOrderEl = byId("audit_order");
 const compatOverrideSectionEl = document.getElementById("compat_override_section");
 const compatOverrideEl = byId("compat_override");
 const compatOverrideHintEl = byId("compat_override_hint");
@@ -84,11 +66,6 @@ const bootstrapDirectoryEl = byId("bootstrap_directory");
 const sessionBootstrapDirectoryEl = byId("session_bootstrap_directory");
 const inviteKeyEl = byId("invite_key");
 const registerClientBtnEl = byId("register_client_btn");
-const applyOperatorBtnEl = byId("apply_operator_btn");
-const approveOperatorBtnEl = byId("approve_operator_btn");
-const rejectOperatorBtnEl = byId("reject_operator_btn");
-const adminTokenEl = byId("admin_token");
-const operatorApprovalPolicyHintEl = byId("operator_approval_policy_hint");
 const manualSignInBtnEl = byId("signin_btn");
 const signinPolicyHintEl = document.getElementById("signin_policy_hint");
 const walletExtensionHintEl = document.getElementById("wallet_extension_hint");
@@ -100,19 +77,12 @@ const connectionRoutingLineEl = byId("connection_routing_line");
 const connectionRoutingModeEl = byId("connection_routing_mode");
 const connectionRoutingDetailEl = byId("connection_routing_detail");
 const tabClientEl = byId("tab_client");
-const tabServerEl = byId("tab_server");
 const panelClientEl = byId("panel_client");
-const panelServerEl = byId("panel_server");
 const clientLockHintEl = byId("client_lock_hint");
-const serverLockHintEl = byId("server_lock_hint");
 const tabLockHintEl = document.getElementById("tab_lock_hint");
 const workspaceFirstRunHintEl = document.getElementById("workspace_first_run_hint");
 const workspacePlatformHintEl = document.getElementById("workspace_platform_hint");
 const workspaceNextActionHintEl = document.getElementById("workspace_next_action_hint");
-const serverLifecycleHintEl = byId("server_lifecycle_hint");
-const serverStartBtnEl = byId("server_start_btn");
-const serverStopBtnEl = byId("server_stop_btn");
-const serverRestartBtnEl = byId("server_restart_btn");
 const connectBtnEl = byId("connect_btn");
 const connectPolicyHintEl = byId("connect_policy_hint");
 const connectInterfaceEl = byId("connect_interface");
@@ -123,9 +93,7 @@ const connectProdProfileEl = byId("connect_prod_profile");
 const connectInstallRouteEl = byId("connect_install_route");
 const onboardingStepSigninEl = document.getElementById("onboarding_step_signin");
 const onboardingStepClientEl = document.getElementById("onboarding_step_client");
-const onboardingStepOperatorEl = document.getElementById("onboarding_step_operator");
 const actionButtons = Array.from(document.querySelectorAll(".actions button"));
-const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
 const SERVER_ONLY_ROLES = new Set(["server", "server_only"]);
 const CLIENT_REGISTRATION_TRUST_DRIFT_STATUS_KEYS = new Set([
   "trust_drift",
@@ -142,16 +110,7 @@ const CLIENT_REGISTRATION_TRUST_DRIFT_STATUS_KEYS = new Set([
   "reregister_required",
   "re_register_required"
 ]);
-const OPERATOR_LIST_STATUS_FILTERS = new Set(["pending", "approved", "rejected"]);
-const OPERATOR_PENDING_LIST_LIMIT = 25;
-const OPERATOR_LOAD_NEXT_LIMIT = 1;
-const OPERATOR_LIST_ALL_LIMIT = 100;
-const AUDIT_RECENT_DEFAULT_LIMIT = 25;
-const AUDIT_RECENT_MAX_LIMIT = 200;
-const AUDIT_RECENT_DEFAULT_ORDER = "desc";
-const AUDIT_RECENT_ORDERS = new Set(["desc", "asc"]);
-const OPERATOR_DECISION_CONFLICT_GUIDANCE =
-  "Decision conflict detected: the selected application was updated by another reviewer. Reload pending queue with Load Next Pending and retry.";
+const PUBLIC_CONTRIBUTION_ROLES = new Set(["micro-relay", "micro-exit"]);
 const WALLET_EXTENSION_PROVIDERS = new Set(["keplr", "leap"]);
 const CONNECT_POLICY_MODE_SESSION_REQUIRED = "session_required";
 const CONNECT_POLICY_MODE_COMPAT_ALLOWED = "compat_allowed";
@@ -161,7 +120,6 @@ const CONNECT_POLICY_SOURCE_LEGACY_DERIVED = "legacy_payload";
 const CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE = "config_unavailable";
 const LEGACY_ALIAS_ENV_NAME_REGEX = /\bTDPN_[A-Z0-9_]+\b/gi;
 const PORTAL_STORAGE_KEY = "gpm.portal.state.v1";
-const PORTAL_WORKSPACE_TAB_STORAGE_KEY = "gpm.portal.workspace_tab.v1";
 const SESSION_EXPIRING_SOON_MS = 10 * 60 * 1000;
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const CONNECTION_DEFAULT_STATE = "Unknown";
@@ -206,33 +164,24 @@ const CONNECTION_ROUTING_HINT_KEYS = {
     "direct_exit_fallback"
   ]
 };
+const PRODUCTION_CONNECT_RESERVATION_AMOUNT_MICROS = 200000;
+const PRODUCTION_CONNECT_RESERVATION_CURRENCY = "TDPNC";
+const PRODUCTION_CONNECT_RESERVATION_MAX_ATTEMPTS = 6;
+const PRODUCTION_CONNECT_RESERVATION_RETRY_DELAY_MS = 1500;
 const PERSISTED_FIELD_IDS = [
   "api_base",
-  "role",
   "wallet_address",
   "wallet_provider",
   "wallet_chain_id",
-  "chain_operator_id",
-  "selected_application_updated_at",
-  "server_label",
-  "operator_list_status",
-  "operator_list_search",
-  "operator_list_limit",
-  "audit_limit",
-  "audit_offset",
-  "audit_event",
-  "audit_wallet_address",
-  "audit_order",
   "path_profile",
+  "contribution_role",
   "bootstrap_directory",
   "session_bootstrap_directory",
   "connect_interface",
   "connect_discovery_wait_sec",
   "connect_ready_timeout_sec"
 ];
-let operatorApplicationStatus = undefined;
-let selectedApplicationUpdatedAtUtc = "";
-let serverReadiness = null;
+let publicReadiness = null;
 let clientRegistered = false;
 let clientRegistrationTrustDriftDetected = false;
 let clientRegistrationTrustDriftGuidance = "";
@@ -247,19 +196,11 @@ let authVerifyRequireWalletExtensionSource = false;
 let authVerifyRequireWalletExtensionPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 let authVerifyRequireCryptoProof = false;
 let authVerifyRequireCryptoProofPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
-let operatorApprovalRequireSession = false;
-let operatorApprovalRequireSessionPolicySource = CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 let legacyAliasTelemetry = {
   active: false,
   aliases: [],
   migrationHints: []
 };
-let operatorListActiveFilters = {
-  status: "",
-  search: "",
-  limit: OPERATOR_LIST_ALL_LIMIT
-};
-let operatorListNextCursor = "";
 let walletSignatureContext = null;
 let activeWorkspaceTab = "client";
 let connectionState = CONNECTION_DEFAULT_STATE;
@@ -267,6 +208,10 @@ let connectionDetail = CONNECTION_DEFAULT_DETAIL;
 let connectionRoutingMode = CONNECTION_DEFAULT_ROUTING_MODE;
 let connectionRoutingDetail = CONNECTION_DEFAULT_ROUTING_DETAIL;
 let bootstrapTrustTelemetry = null;
+let publicContributionStatusPayload = null;
+let publicContributionCurrentWeekPayload = null;
+let publicContributionHistoryPayload = null;
+let productionConnectReservationCache = null;
 let sessionExpiryAtMs = undefined;
 let sessionExpiryToken = "";
 
@@ -365,25 +310,11 @@ function bindPersistenceListeners() {
 }
 
 function restoreWorkspaceTabPreference() {
-  const store = localStore();
-  if (!store) {
-    activeWorkspaceTab = "client";
-    return;
-  }
-  const persisted = store.getItem(PORTAL_WORKSPACE_TAB_STORAGE_KEY);
-  activeWorkspaceTab = persisted === "server" ? "server" : "client";
+  activeWorkspaceTab = "client";
 }
 
 function persistWorkspaceTabPreference() {
-  const store = localStore();
-  if (!store) {
-    return;
-  }
-  try {
-    store.setItem(PORTAL_WORKSPACE_TAB_STORAGE_KEY, activeWorkspaceTab === "server" ? "server" : "client");
-  } catch {
-    // Best effort only: ignore quota or browser storage errors.
-  }
+  activeWorkspaceTab = "client";
 }
 
 function readConfigObject(payload, candidates) {
@@ -673,36 +604,6 @@ function parseAuthVerifyRequireCryptoProofPolicySourceConfig(payload) {
   return normalizePolicySourceValue(source) || CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
 }
 
-function parseOperatorApprovalRequireSessionConfig(payload) {
-  const scopes = runtimeConfigScopes(payload);
-  const parsed = firstDefined(
-    ...scopes.map((scope) =>
-      readConfigBoolean(scope, [
-        "gpm_operator_approval_require_session",
-        "gpmOperatorApprovalRequireSession",
-        "operator_approval_require_session",
-        "operatorApprovalRequireSession"
-      ])
-    )
-  );
-  return parsed === true;
-}
-
-function parseOperatorApprovalRequireSessionPolicySourceConfig(payload) {
-  const scopes = runtimeConfigScopes(payload);
-  const source = firstDefined(
-    ...scopes.map((scope) =>
-      readConfigString(scope, [
-        "gpm_operator_approval_require_session_policy_source",
-        "gpmOperatorApprovalRequireSessionPolicySource",
-        "operator_approval_require_session_policy_source",
-        "operatorApprovalRequireSessionPolicySource"
-      ])
-    )
-  );
-  return normalizePolicySourceValue(source) || CONNECT_POLICY_SOURCE_LEGACY_DERIVED;
-}
-
 function normalizeLegacyAliasName(value) {
   const text = nonEmptyString(value);
   if (!text) {
@@ -949,11 +850,11 @@ function configEndpointUnavailableFailClosedMode() {
 }
 
 function failClosedMutatingActionGuidance() {
-  return "Restore the daemon config endpoint (/v1/config) first to re-enable Register Client, Connect, Operator Apply/Approve/Reject, and server lifecycle actions.";
+  return "Restore the daemon config endpoint (/v1/config) first to re-enable Register Client and Connect actions.";
 }
 
 function failClosedMutatingActionStatusDetail() {
-  return `Restricted fail-closed mode: /v1/config is unavailable. ${failClosedMutatingActionGuidance()} Read-only status/session/audit actions remain available.`;
+  return `Restricted fail-closed mode: /v1/config is unavailable. ${failClosedMutatingActionGuidance()} Read-only status/session actions remain available.`;
 }
 
 function refreshConfigEndpointHint() {
@@ -965,97 +866,6 @@ function refreshConfigEndpointHint() {
   configEndpointHintEl.textContent =
     "Runtime config endpoint /v1/config is available. Compatibility mode behavior is applied only when runtime config policy explicitly allows it.";
   configEndpointHintEl.classList.remove("locked");
-}
-
-function operatorApprovalAdminTokenFallbackAllowed() {
-  return configEndpointUnavailableFailClosedMode() !== true && operatorApprovalRequireSession !== true;
-}
-
-function refreshOperatorApprovalPolicyHint() {
-  if (!operatorApprovalPolicyHintEl || !adminTokenEl) {
-    return;
-  }
-
-  const isBusy = document.body.classList.contains("is-busy");
-  const configUnavailable = configEndpointUnavailableFailClosedMode();
-  const adminTokenFallbackAllowed = operatorApprovalAdminTokenFallbackAllowed();
-  const strictSessionPolicy = !configUnavailable && !adminTokenFallbackAllowed;
-  const sourceLabel = formatPolicySourceLabel(operatorApprovalRequireSessionPolicySource);
-
-  const lockByPolicy = configUnavailable || strictSessionPolicy;
-  const disabled = isBusy || lockByPolicy;
-  adminTokenEl.disabled = disabled;
-  adminTokenEl.setAttribute("aria-disabled", String(disabled));
-
-  if (configUnavailable) {
-    adminTokenEl.value = "";
-    adminTokenEl.title = failClosedMutatingActionStatusDetail();
-    operatorApprovalPolicyHintEl.classList.add("locked");
-    operatorApprovalPolicyHintEl.textContent =
-      "Operator approval auth policy is unavailable because /v1/config could not be read. Moderation readiness: locked. Approval/rejection mutations remain fail-closed until runtime config is reachable.";
-    return;
-  }
-
-  const role = (serverReadiness?.role || byId("role").value || "client").trim().toLowerCase();
-  const sessionToken = byId("session_token").value.trim();
-  const sessionFreshness = computeSessionFreshnessState();
-  const adminToken = adminTokenEl.value.trim();
-
-  let moderationReadinessLocked = true;
-  let moderationReadinessDetail = "Sign in with an admin session or provide admin token fallback.";
-
-  if (strictSessionPolicy) {
-    adminTokenEl.value = "";
-    adminTokenEl.title = "Legacy admin token fallback is disabled by policy.";
-    if (!sessionToken) {
-      moderationReadinessDetail = "Sign in with an admin session token to approve or reject operators.";
-    } else if (sessionFreshness.state === "expired") {
-      moderationReadinessDetail = sessionFreshness.detail;
-    } else if (sessionFreshness.state === "unknown") {
-      moderationReadinessDetail = `${sessionFreshness.detail} Refresh Session before moderation actions.`;
-    } else if (role !== "admin") {
-      moderationReadinessDetail = `Current session role is ${role || "client"}; admin role is required for approval actions.`;
-    } else if (sessionFreshness.state === "expiring_soon") {
-      moderationReadinessLocked = false;
-      moderationReadinessDetail = `Ready with caution: ${sessionFreshness.detail}`;
-    } else {
-      moderationReadinessLocked = false;
-      moderationReadinessDetail = "Ready: admin session is active for moderation actions.";
-    }
-    operatorApprovalPolicyHintEl.classList.toggle("locked", true);
-    operatorApprovalPolicyHintEl.textContent =
-      `Operator approval auth policy: admin session token required (source: ${sourceLabel}); legacy admin token fallback is disabled. ` +
-      `Moderation readiness: ${moderationReadinessLocked ? "locked" : "ready"}. ${moderationReadinessDetail}`;
-    return;
-  }
-
-  adminTokenEl.removeAttribute("title");
-  if (sessionToken && sessionFreshness.state !== "expired" && role === "admin") {
-    if (sessionFreshness.state === "expiring_soon") {
-      moderationReadinessLocked = false;
-      moderationReadinessDetail = `Ready with caution: ${sessionFreshness.detail}`;
-    } else if (sessionFreshness.state === "unknown") {
-      moderationReadinessLocked = true;
-      moderationReadinessDetail = `${sessionFreshness.detail} Refresh Session before moderation actions.`;
-    } else {
-      moderationReadinessLocked = false;
-      moderationReadinessDetail = "Ready via admin session token.";
-    }
-  } else if (adminToken) {
-    moderationReadinessLocked = false;
-    moderationReadinessDetail = "Ready via admin token fallback.";
-  } else if (sessionToken && sessionFreshness.state === "expired") {
-    moderationReadinessDetail = `${sessionFreshness.detail} Add admin token fallback or sign in with an admin session.`;
-  } else if (sessionToken && role !== "admin") {
-    moderationReadinessDetail =
-      `Current session role is ${role || "client"}; provide admin token fallback or sign in with an admin session.`;
-  } else if (!sessionToken) {
-    moderationReadinessDetail = "No session token loaded. Provide admin token fallback or sign in with an admin session.";
-  }
-  operatorApprovalPolicyHintEl.classList.toggle("locked", moderationReadinessLocked);
-  operatorApprovalPolicyHintEl.textContent =
-    `Operator approval auth policy: session token preferred (source: ${sourceLabel}); legacy admin token fallback is available when needed. ` +
-    `Moderation readiness: ${moderationReadinessLocked ? "locked" : "ready"}. ${moderationReadinessDetail}`;
 }
 
 function refreshConnectPolicyHint() {
@@ -1103,7 +913,6 @@ function refreshPolicyPostureBanner() {
     syncManualSignInAction();
     refreshConnectPolicyHint();
     refreshConfigEndpointHint();
-    refreshOperatorApprovalPolicyHint();
     return;
   }
   policyConnectPolicyEl.textContent = `Connect policy: ${connectMode} (source: ${connectSource}; ${legacyOverride}).`;
@@ -1127,7 +936,6 @@ function refreshPolicyPostureBanner() {
   syncManualSignInAction();
   refreshConnectPolicyHint();
   refreshConfigEndpointHint();
-  refreshOperatorApprovalPolicyHint();
 }
 
 function refreshLegacyAliasWarningBanner() {
@@ -1209,6 +1017,22 @@ function compatibilityOverrideEnabled() {
     compatOverrideEl.checked === true &&
     connectRequireSession !== true
   );
+}
+
+function connectProdProfileRequested() {
+  return gpmProductionMode === true || connectProdProfileEl.checked === true;
+}
+
+function syncConnectRoutePolicy() {
+  const prodRequested = connectProdProfileRequested();
+  if (prodRequested) {
+    connectInstallRouteEl.checked = true;
+  }
+  connectInstallRouteEl.disabled = prodRequested || gpmProductionMode === true;
+  connectInstallRouteEl.setAttribute("aria-disabled", String(connectInstallRouteEl.disabled));
+  connectInstallRouteEl.title = prodRequested
+    ? "Production profile requires default-route installation so host traffic routes through GPM."
+    : "Expert option: install the system default route through GPM.";
 }
 
 function refreshCompatibilityOverrideControls() {
@@ -1296,18 +1120,16 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
     authVerifyRequireWalletExtensionPolicySource = parseAuthVerifyRequireWalletExtensionPolicySourceConfig(config);
     authVerifyRequireCryptoProof = parseAuthVerifyRequireCryptoProofConfig(config);
     authVerifyRequireCryptoProofPolicySource = parseAuthVerifyRequireCryptoProofPolicySourceConfig(config);
-    operatorApprovalRequireSession = parseOperatorApprovalRequireSessionConfig(config);
-    operatorApprovalRequireSessionPolicySource = parseOperatorApprovalRequireSessionPolicySourceConfig(config);
     legacyAliasTelemetry = parseLegacyAliasTelemetryConfig(config, {
       policySources: [
         connectPolicySource,
         authVerifyRequireMetadataPolicySource,
         authVerifyRequireWalletExtensionPolicySource,
-        authVerifyRequireCryptoProofPolicySource,
-        operatorApprovalRequireSessionPolicySource
+        authVerifyRequireCryptoProofPolicySource
       ]
     });
     refreshCompatibilityOverrideControls();
+    syncConnectRoutePolicy();
     refreshPolicyPostureBanner();
     refreshLegacyAliasWarningBanner();
     refreshClientReadiness();
@@ -1325,8 +1147,6 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
     authVerifyRequireWalletExtensionPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
     authVerifyRequireCryptoProof = false;
     authVerifyRequireCryptoProofPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
-    operatorApprovalRequireSession = false;
-    operatorApprovalRequireSessionPolicySource = CONNECT_POLICY_SOURCE_CONFIG_UNAVAILABLE;
     legacyAliasTelemetry = {
       active: false,
       aliases: [],
@@ -1342,21 +1162,6 @@ async function refreshConnectPolicyConfigBestEffort(options = {}) {
     }
     return undefined;
   }
-}
-
-function normalizeOperatorApplicationStatus(value) {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (OPERATOR_APPLICATION_STATUSES.has(normalized)) {
-    return normalized;
-  }
-  return undefined;
-}
-
-function parseOperatorApplicationStatus(payload) {
-  return normalizeOperatorApplicationStatus(payload?.application?.status);
 }
 
 function firstDefined(...values) {
@@ -1445,6 +1250,14 @@ function isLiteralLoopbackHost(hostname) {
   }
   const normalized = hostname.trim().toLowerCase();
   return normalized === "127.0.0.1" || normalized === "::1" || normalized === "[::1]";
+}
+
+function isTrustedRemoteApiHost(hostname) {
+  const normalized = String(hostname || "").trim().toLowerCase();
+  return (
+    normalized === "globalprivatemesh.net" ||
+    normalized.endsWith(".globalprivatemesh.net")
+  );
 }
 
 function nonEmptyString(value) {
@@ -1597,492 +1410,459 @@ function positiveIntegerOrUndefined(value, minimum = 1) {
   return undefined;
 }
 
-function normalizeOperatorListStatusFilter(value, fallback = "") {
-  const normalize = (input) => {
-    if (typeof input !== "string") {
-      return undefined;
-    }
-    const normalized = input.trim().toLowerCase();
-    if (!normalized || normalized === "all") {
-      return "";
-    }
-    if (OPERATOR_LIST_STATUS_FILTERS.has(normalized)) {
-      return normalized;
-    }
-    return undefined;
-  };
-  const parsed = normalize(value);
-  if (parsed !== undefined) {
-    return parsed;
-  }
-  const fallbackParsed = normalize(fallback);
-  return fallbackParsed !== undefined ? fallbackParsed : "";
-}
-
-function normalizeOperatorListSearch(value) {
-  if (typeof value !== "string") {
-    return "";
-  }
-  return value.trim();
-}
-
-function normalizeOperatorListLimit(value, fallback = OPERATOR_LIST_ALL_LIMIT) {
-  const parsed = numberOrUndefined(value);
-  if (parsed !== undefined && parsed >= 1) {
-    return Math.floor(parsed);
-  }
-  const fallbackParsed = numberOrUndefined(fallback);
-  if (fallbackParsed !== undefined && fallbackParsed >= 1) {
-    return Math.floor(fallbackParsed);
-  }
-  return OPERATOR_LIST_ALL_LIMIT;
-}
-
-function normalizeAuditRecentLimit(value, fallback = AUDIT_RECENT_DEFAULT_LIMIT) {
-  const parsed = numberOrUndefined(value);
-  if (parsed !== undefined && parsed >= 1) {
-    return Math.min(Math.floor(parsed), AUDIT_RECENT_MAX_LIMIT);
-  }
-  const fallbackParsed = numberOrUndefined(fallback);
-  if (fallbackParsed !== undefined && fallbackParsed >= 1) {
-    return Math.min(Math.floor(fallbackParsed), AUDIT_RECENT_MAX_LIMIT);
-  }
-  return AUDIT_RECENT_DEFAULT_LIMIT;
-}
-
-function normalizeAuditRecentOffset(value, fallback = 0) {
-  const parsed = numberOrUndefined(value);
-  if (parsed !== undefined && parsed >= 0) {
-    return Math.floor(parsed);
-  }
-  const fallbackParsed = numberOrUndefined(fallback);
-  if (fallbackParsed !== undefined && fallbackParsed >= 0) {
-    return Math.floor(fallbackParsed);
-  }
-  return 0;
-}
-
-function normalizeAuditRecentOrder(value, fallback = AUDIT_RECENT_DEFAULT_ORDER) {
+function normalizePublicContributionRole(value) {
   const normalized = nonEmptyString(value)?.toLowerCase();
-  if (normalized && AUDIT_RECENT_ORDERS.has(normalized)) {
+  if (normalized && PUBLIC_CONTRIBUTION_ROLES.has(normalized)) {
     return normalized;
   }
-  const fallbackNormalized = nonEmptyString(fallback)?.toLowerCase();
-  if (fallbackNormalized && AUDIT_RECENT_ORDERS.has(fallbackNormalized)) {
-    return fallbackNormalized;
-  }
-  return AUDIT_RECENT_DEFAULT_ORDER;
+  return undefined;
 }
 
-function readAuditRecentFilters(options = {}) {
-  return {
-    limit: normalizeAuditRecentLimit(auditLimitEl.value, options.fallbackLimit),
-    offset: normalizeAuditRecentOffset(auditOffsetEl.value, options.fallbackOffset),
-    event: nonEmptyString(auditEventEl.value) || "",
-    walletAddress: nonEmptyString(auditWalletAddressEl.value) || "",
-    order: normalizeAuditRecentOrder(auditOrderEl.value, options.fallbackOrder)
-  };
+function publicContributionRoleLabel(value) {
+  const normalized = normalizePublicContributionRole(value);
+  if (normalized === "micro-exit") {
+    return "Micro exit";
+  }
+  if (normalized === "micro-relay") {
+    return "Micro relay";
+  }
+  return "Contribution";
 }
 
-function buildAuditRecentPath(filters = {}) {
-  const limit = normalizeAuditRecentLimit(filters.limit, AUDIT_RECENT_DEFAULT_LIMIT);
-  const offset = normalizeAuditRecentOffset(filters.offset, 0);
-  const event = nonEmptyString(filters.event) || "";
-  const walletAddress = nonEmptyString(filters.walletAddress) || "";
-  const order = normalizeAuditRecentOrder(filters.order, AUDIT_RECENT_DEFAULT_ORDER);
-  const params = new URLSearchParams();
-  params.set("limit", String(limit));
-  if (offset > 0) {
-    params.set("offset", String(offset));
+function publicContributionSelectedRole() {
+  return normalizePublicContributionRole(contributionRoleEl.value) || "micro-relay";
+}
+
+function publicContributionObjectField(payload, candidates) {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
   }
-  if (event) {
-    params.set("event", event);
-  }
-  if (walletAddress) {
-    params.set("wallet_address", walletAddress);
-  }
-  if (order !== AUDIT_RECENT_DEFAULT_ORDER) {
-    params.set("order", order);
-  }
-  return {
-    path: `/v1/gpm/audit/recent?${params.toString()}`,
-    request: {
-      limit,
-      offset,
-      event,
-      wallet_address: walletAddress,
-      order
+  for (const key of candidates) {
+    const value = payload[key];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value;
     }
-  };
+  }
+  return undefined;
 }
 
-function operatorListStatusLabel(statusValue) {
-  const normalized = normalizeOperatorListStatusFilter(statusValue, "");
-  return normalized || "all";
-}
-
-function readOperatorListFilters(options = {}) {
-  const { fallbackStatus = "", fallbackLimit = OPERATOR_LIST_ALL_LIMIT } = options;
-  return {
-    status: normalizeOperatorListStatusFilter(operatorListStatusEl.value, fallbackStatus),
-    search: normalizeOperatorListSearch(operatorListSearchEl.value),
-    limit: normalizeOperatorListLimit(operatorListLimitEl.value, fallbackLimit)
-  };
-}
-
-function writeOperatorListFilters(filters = {}) {
-  const status = normalizeOperatorListStatusFilter(filters.status, "");
-  const search = normalizeOperatorListSearch(filters.search);
-  const limit = normalizeOperatorListLimit(filters.limit, OPERATOR_LIST_ALL_LIMIT);
-  operatorListStatusEl.value = status;
-  operatorListSearchEl.value = search;
-  operatorListLimitEl.value = String(limit);
-}
-
-function syncOperatorListNextPageAction() {
-  const isBusy = document.body.classList.contains("is-busy");
-  const disabled = isBusy || operatorListNextCursor.length === 0;
-  operatorListNextPageBtnEl.disabled = disabled;
-  operatorListNextPageBtnEl.setAttribute("aria-disabled", String(disabled));
-}
-
-function setOperatorListNextCursor(value) {
-  operatorListNextCursor = normalizeOperatorListSearch(value);
-  operatorListNextCursorEl.value = operatorListNextCursor;
-  syncOperatorListNextPageAction();
-}
-
-function updateOperatorListContext(filters, nextCursor) {
-  operatorListActiveFilters = {
-    status: normalizeOperatorListStatusFilter(filters?.status, ""),
-    search: normalizeOperatorListSearch(filters?.search),
-    limit: normalizeOperatorListLimit(filters?.limit, OPERATOR_LIST_ALL_LIMIT)
-  };
-  writeOperatorListFilters(operatorListActiveFilters);
-  setOperatorListNextCursor(nextCursor);
-}
-
-function operatorModerationReason() {
-  return byId("operator_reason").value.trim();
-}
-
-function extractOperatorListEntries(payload) {
-  const containers = [payload, payload?.data, payload?.result, payload?.queue, payload?.list];
-  for (const container of containers) {
-    if (!container || typeof container !== "object") {
-      continue;
-    }
-    for (const key of ["operators", "items", "results", "entries", "applications", "queue"]) {
-      if (Array.isArray(container[key])) {
-        return container[key];
-      }
+function publicContributionArrayField(payload, candidates) {
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+  for (const key of candidates) {
+    const value = payload[key];
+    if (Array.isArray(value)) {
+      return value;
     }
   }
   return [];
 }
 
-function formatOperatorListItemLabel(entry, index) {
-  if (typeof entry === "string") {
-    return entry.trim() || `item-${index + 1}`;
+function publicContributionValue(payload, candidates) {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
   }
-  if (!entry || typeof entry !== "object") {
-    return `item-${index + 1}`;
-  }
+  return firstDefined(...candidates.map((key) => payload[key]));
+}
+
+function publicContributionNumber(payload, candidates) {
+  const value = publicContributionValue(payload, candidates);
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function publicContributionBoolean(payload, candidates) {
+  return parseBooleanLike(publicContributionValue(payload, candidates));
+}
+
+function publicContributionProfile(payload) {
+  return publicContributionObjectField(payload, ["contribution_profile", "contributionProfile", "profile"]) || {};
+}
+
+function publicContributionReward(payload) {
   return (
-    nonEmptyString(entry.chain_operator_id) ||
-    nonEmptyString(entry.operator_id) ||
-    nonEmptyString(entry.wallet_address) ||
-    nonEmptyString(entry.server_label) ||
-    nonEmptyString(entry.id) ||
-    `item-${index + 1}`
+    publicContributionObjectField(payload, ["reward", "current_week_reward", "currentWeekReward", "summary"]) ||
+    {}
   );
 }
 
-function extractOperatorListPagination(payload, options = {}) {
-  const { fallbackCursor = "" } = options;
-  const cursor = nonEmptyString(
-    firstDefined(
-      payload?.cursor,
-      payload?.request?.cursor,
-      payload?.pagination?.cursor,
-      payload?.pagination?.current_cursor,
-      payload?.meta?.cursor,
-      payload?.meta?.current_cursor,
-      payload?.page?.cursor,
-      fallbackCursor
-    )
-  );
-  const nextCursor = nonEmptyString(
-    firstDefined(
-      payload?.next_cursor,
-      payload?.nextCursor,
-      payload?.pagination?.next_cursor,
-      payload?.pagination?.nextCursor,
-      payload?.pagination?.cursor_next,
-      payload?.meta?.next_cursor,
-      payload?.meta?.nextCursor,
-      payload?.meta?.cursor_next,
-      payload?.queue?.next_cursor,
-      payload?.queue?.nextCursor,
-      payload?.list?.next_cursor,
-      payload?.list?.nextCursor,
-      payload?.data?.next_cursor,
-      payload?.data?.nextCursor,
-      payload?.result?.next_cursor,
-      payload?.result?.nextCursor
-    )
-  );
-  const hasMoreValue = parseBooleanLike(
-    firstDefined(
-      payload?.has_more,
-      payload?.hasMore,
-      payload?.pagination?.has_more,
-      payload?.pagination?.hasMore,
-      payload?.meta?.has_more,
-      payload?.meta?.hasMore
-    )
-  );
-  return {
-    cursor,
-    nextCursor,
-    hasMore: hasMoreValue !== undefined ? hasMoreValue : nextCursor ? true : undefined
-  };
+function publicContributionHistoryRewards(payload) {
+  return publicContributionArrayField(payload, ["rewards", "reward_history", "rewardHistory", "history"]);
 }
 
-function summarizeOperatorList(payload, options = {}) {
-  const {
-    fallbackStatus = "pending",
-    fallbackLimit = OPERATOR_PENDING_LIST_LIMIT,
-    fallbackSearch = "",
-    fallbackCursor = ""
-  } = options;
-  const entries = extractOperatorListEntries(payload);
-  const status =
+function formatPublicContributionNumber(value, digits = 2) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return "0";
+  }
+  const fixed = parsed.toFixed(digits);
+  return fixed.replace(/\.?0+$/, "");
+}
+
+function formatPublicContributionBytes(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let amount = parsed;
+  let unitIndex = 0;
+  while (amount >= 1024 && unitIndex < units.length - 1) {
+    amount /= 1024;
+    unitIndex += 1;
+  }
+  return `${formatPublicContributionNumber(amount, amount >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
+function formatPublicContributionSeconds(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return "0s";
+  }
+  return formatDurationCompact(parsed * 1000);
+}
+
+function formatPublicContributionTimestamp(value) {
+  const raw = nonEmptyString(value);
+  if (!raw) {
+    return "";
+  }
+  const parsed = parseTimestampMs(raw);
+  if (!parsed) {
+    return raw;
+  }
+  return new Date(parsed).toISOString();
+}
+
+function formatPublicContributionWeekRange(reward) {
+  const start = formatPublicContributionTimestamp(
+    publicContributionValue(reward, ["week_start_utc", "weekStartUtc", "week_start", "weekStart"])
+  );
+  const end = formatPublicContributionTimestamp(
+    publicContributionValue(reward, ["week_end_utc", "weekEndUtc", "week_end", "weekEnd"])
+  );
+  if (start && end) {
+    return `${start} to ${end}`;
+  }
+  return start || "Not loaded";
+}
+
+function formatPublicContributionSettlement(reward, payload = {}) {
+  const payoutAllowed = publicContributionBoolean(reward, ["payout_allowed", "payoutAllowed"]);
+  const payloadPayoutAllowed = publicContributionBoolean(payload, ["payout_allowed", "payoutAllowed"]);
+  const settlementState =
     nonEmptyString(
-      firstDefined(
-        payload?.status,
-        payload?.filter?.status,
-        payload?.request?.status,
-        payload?.meta?.status,
-        fallbackStatus
-      )
-    ) || "pending";
-  const limit =
-    numberOrUndefined(
-      firstDefined(
-        payload?.limit,
-        payload?.request?.limit,
-        payload?.meta?.limit,
-        payload?.pagination?.limit,
-        fallbackLimit
-      )
-    ) ?? OPERATOR_PENDING_LIST_LIMIT;
-  const total =
-    numberOrUndefined(
-      firstDefined(
-        payload?.total,
-        payload?.count,
-        payload?.total_count,
-        payload?.pending_total,
-        payload?.meta?.total,
-        payload?.pagination?.total
-      )
-    ) ?? entries.length;
-  const search = normalizeOperatorListSearch(
-    firstDefined(payload?.search, payload?.filter?.search, payload?.request?.search, payload?.meta?.search, fallbackSearch)
-  );
-  const pagination = extractOperatorListPagination(payload, { fallbackCursor });
-  const sample = entries.slice(0, 3).map(formatOperatorListItemLabel);
-  const detailParts = [
-    `status=${operatorListStatusLabel(status)}`,
-    `returned=${entries.length}`,
-    `limit=${limit}`,
-    `total=${total}`
+      publicContributionValue(reward, ["settlement_finalization_state", "settlementFinalizationState"])
+    ) ||
+    nonEmptyString(
+      publicContributionValue(payload, ["settlement_finalization_state", "settlementFinalizationState"])
+    ) ||
+    "pending";
+  const allowed = payoutAllowed !== undefined ? payoutAllowed : payloadPayoutAllowed;
+  const payoutLabel = allowed === true ? "payout allowed" : "payout locked";
+  return `${settlementState.replace(/_/g, " ")} (${payoutLabel})`;
+}
+
+function formatPublicContributionRewardMetering(reward) {
+  const meteredSeconds = publicContributionNumber(reward, ["metered_seconds", "meteredSeconds"]);
+  const validBytes = publicContributionNumber(reward, ["valid_bytes", "validBytes"]);
+  const trafficProof =
+    nonEmptyString(publicContributionValue(reward, ["traffic_proof_status", "trafficProofStatus"])) ||
+    "unknown proof";
+  return `${formatPublicContributionSeconds(meteredSeconds)} metered, ${formatPublicContributionBytes(validBytes)} valid, ${trafficProof.replace(/_/g, " ")}`;
+}
+
+function selectedContributionRoleEligibility(payload, selectedRole) {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  if (selectedRole === "micro-exit") {
+    return publicContributionBoolean(payload, ["can_enable_micro_exit", "canEnableMicroExit"]);
+  }
+  return publicContributionBoolean(payload, ["can_enable_micro_relay", "canEnableMicroRelay"]);
+}
+
+function publicContributionLockReason(payload, selectedRole) {
+  const selectedRoleLabel = publicContributionRoleLabel(selectedRole).toLowerCase();
+  const reason =
+    nonEmptyString(publicContributionValue(payload, ["contribution_lock_reason", "contributionLockReason"])) ||
+    nonEmptyString(publicContributionProfile(payload).lock_reason) ||
+    "";
+  return reason || `${selectedRoleLabel} is not eligible for this session.`;
+}
+
+function publicContributionSummaryText(payload, selectedRole) {
+  if (!payload || typeof payload !== "object") {
+    return "Run Contribution Status after sign-in to load tier, eligibility, capacity, and weekly reward estimates.";
+  }
+  const profile = publicContributionProfile(payload);
+  const tier = publicContributionNumber(payload, ["client_tier", "clientTier"]);
+  const stake = publicContributionBoolean(payload, ["stake_satisfied", "stakeSatisfied"]);
+  const prepaid = publicContributionBoolean(payload, ["prepaid_balance_satisfied", "prepaidBalanceSatisfied"]);
+  const canUse = publicContributionBoolean(payload, ["can_use_micro_relays", "canUseMicroRelays"]);
+  const canEnable = selectedContributionRoleEligibility(payload, selectedRole);
+  const maxSessions = publicContributionNumber(profile, ["max_forwarded_sessions", "maxForwardedSessions"]);
+  const maxMbps = publicContributionNumber(profile, ["max_bandwidth_mbps", "maxBandwidthMbps"]);
+  const capacityScore = publicContributionNumber(profile, ["capacity_score", "capacityScore"]);
+  const healthScore = publicContributionNumber(profile, ["health_score", "healthScore"]);
+  const gates = [
+    `Tier ${tier !== undefined ? tier : "unknown"}`,
+    `stake ${stake === true ? "ok" : "not satisfied"}`,
+    `prepaid ${prepaid === true ? "ok" : "not satisfied"}`,
+    `micro relay use ${canUse === true ? "allowed" : "locked"}`,
+    `${publicContributionRoleLabel(selectedRole).toLowerCase()} opt-in ${canEnable === true ? "eligible" : "locked"}`
   ];
-  if (search) {
-    detailParts.push(`search=${search}`);
+  if (maxSessions !== undefined || maxMbps !== undefined) {
+    gates.push(
+      `caps ${maxSessions !== undefined ? `${maxSessions} sessions` : "sessions unknown"} / ${
+        maxMbps !== undefined ? `${maxMbps} Mbps` : "bandwidth unknown"
+      }`
+    );
   }
-  if (pagination.cursor) {
-    detailParts.push(`cursor=${pagination.cursor}`);
+  if (capacityScore !== undefined || healthScore !== undefined) {
+    gates.push(
+      `scores capacity ${capacityScore !== undefined ? capacityScore : "unknown"} / health ${
+        healthScore !== undefined ? healthScore : "unknown"
+      }`
+    );
   }
-  if (pagination.nextCursor) {
-    detailParts.push(`next_cursor=${pagination.nextCursor}`);
+  return gates.join(" | ");
+}
+
+function setContributionStatus(kind, title, detail, summary) {
+  contributionStatusEl.dataset.kind = kind || "warn";
+  contributionStatusLineEl.classList.remove("good", "warn", "bad");
+  if (kind) {
+    contributionStatusLineEl.classList.add(kind);
   }
-  if (pagination.hasMore !== undefined) {
-    detailParts.push(`has_more=${pagination.hasMore}`);
+  contributionStateEl.textContent = title;
+  contributionDetailEl.textContent = detail;
+  contributionEligibilitySummaryEl.textContent = summary;
+}
+
+function renderPublicContributionStatus() {
+  const selectedRole = publicContributionSelectedRole();
+  const sessionFreshness = computeSessionFreshnessState();
+  if (sessionFreshness.state === "signed_out") {
+    setContributionStatus(
+      "warn",
+      "Signed out",
+      "Sign in to check contribution eligibility for this device.",
+      "Tier, stake, prepaid balance, and local capacity checks appear after status refresh."
+    );
+    syncContributionActionState();
+    return;
   }
-  if (sample.length > 0) {
-    detailParts.push(`sample=${sample.join(", ")}`);
+  if (sessionFreshness.state === "expired") {
+    setContributionStatus(
+      "bad",
+      "Session expired",
+      sessionFreshness.detail,
+      "Refresh sign-in before checking or changing contribution state."
+    );
+    syncContributionActionState();
+    return;
+  }
+  const payload = publicContributionStatusPayload;
+  if (!payload || typeof payload !== "object") {
+    setContributionStatus(
+      "warn",
+      "Status not loaded",
+      "Run Contribution Status to load signed-in contribution eligibility.",
+      "Contribution actions stay locked until status confirms eligibility for the selected role."
+    );
+    syncContributionActionState();
+    return;
+  }
+  const profile = publicContributionProfile(payload);
+  const enabled = publicContributionBoolean(profile, ["enabled"]) === true;
+  const activeRole =
+    normalizePublicContributionRole(publicContributionValue(profile, ["role", "requested_role", "requestedRole"])) ||
+    selectedRole;
+  const canEnable = selectedContributionRoleEligibility(payload, selectedRole) === true;
+  const demotionState =
+    nonEmptyString(publicContributionValue(profile, ["demotion_state", "demotionState"])) || "none";
+  const reward = publicContributionReward(payload);
+  const rewardUnits = publicContributionNumber(reward, ["reward_units", "rewardUnits"]);
+  const summary = publicContributionSummaryText(payload, selectedRole);
+  if (enabled) {
+    setContributionStatus(
+      "good",
+      `${publicContributionRoleLabel(activeRole)} enabled`,
+      `Contribution is active for this signed-in device. Current pending reward units: ${formatPublicContributionNumber(rewardUnits, 3)}.`,
+      summary
+    );
+  } else if (canEnable) {
+    setContributionStatus(
+      "good",
+      `${publicContributionRoleLabel(selectedRole)} eligible`,
+      `Contribution is disabled. You can enable ${publicContributionRoleLabel(selectedRole).toLowerCase()} for this signed-in device.`,
+      summary
+    );
+  } else {
+    setContributionStatus(
+      "bad",
+      "Contribution locked",
+      publicContributionLockReason(payload, selectedRole),
+      demotionState && demotionState !== "none" ? `${summary} | demotion ${demotionState.replace(/_/g, " ")}` : summary
+    );
+  }
+  syncContributionActionState();
+}
+
+function renderPublicCurrentWeekReward(payload = publicContributionCurrentWeekPayload) {
+  const reward = publicContributionReward(payload);
+  if (!reward || Object.keys(reward).length === 0) {
+    contributionRewardWeekEl.textContent = "Not loaded";
+    contributionRewardUnitsEl.textContent = "0";
+    contributionRewardStatusEl.textContent = "Unknown";
+    contributionRewardSettlementEl.textContent = "Pending refresh";
+    contributionRewardMeteringEl.textContent = "Pending refresh";
+    return;
+  }
+  contributionRewardWeekEl.textContent = formatPublicContributionWeekRange(reward);
+  contributionRewardUnitsEl.textContent = formatPublicContributionNumber(
+    publicContributionNumber(reward, ["reward_units", "rewardUnits"]),
+    3
+  );
+  contributionRewardStatusEl.textContent =
+    nonEmptyString(publicContributionValue(reward, ["status"]))?.replace(/_/g, " ") || "pending";
+  contributionRewardSettlementEl.textContent = formatPublicContributionSettlement(reward, payload);
+  contributionRewardMeteringEl.textContent = formatPublicContributionRewardMetering(reward);
+}
+
+function renderPublicRewardHistory(payload = publicContributionHistoryPayload) {
+  const rewards = publicContributionHistoryRewards(payload);
+  const countValue = publicContributionNumber(payload, ["count"]);
+  const count = countValue !== undefined ? countValue : rewards.length;
+  contributionHistorySummaryEl.textContent =
+    count > 0 ? `${count} closed weekly reward${count === 1 ? "" : "s"}` : "No closed weekly rewards yet";
+  contributionHistoryListEl.replaceChildren();
+  if (rewards.length === 0) {
+    const item = document.createElement("li");
+    item.textContent = "Closed weekly rewards appear here after a week rolls over.";
+    contributionHistoryListEl.append(item);
+    return;
+  }
+  for (const reward of rewards.slice(0, 8)) {
+    const item = document.createElement("li");
+    const week = formatPublicContributionWeekRange(reward);
+    const units = formatPublicContributionNumber(
+      publicContributionNumber(reward, ["reward_units", "rewardUnits"]),
+      3
+    );
+    const status =
+      nonEmptyString(publicContributionValue(reward, ["status"]))?.replace(/_/g, " ") || "pending";
+    const settlement = formatPublicContributionSettlement(reward, payload);
+    item.textContent = `${week}: ${units} units, ${status}, ${settlement}`;
+    contributionHistoryListEl.append(item);
+  }
+}
+
+function clearPublicContributionState() {
+  publicContributionStatusPayload = null;
+  publicContributionCurrentWeekPayload = null;
+  publicContributionHistoryPayload = null;
+  renderPublicContributionStatus();
+  renderPublicCurrentWeekReward();
+  renderPublicRewardHistory();
+  syncContributionActionState();
+}
+
+function applyPublicContributionStatusPayload(payload) {
+  publicContributionStatusPayload = payload && typeof payload === "object" ? payload : null;
+  if (publicContributionStatusPayload) {
+    publicContributionCurrentWeekPayload = {
+      ok: true,
+      reward: publicContributionReward(publicContributionStatusPayload),
+      contribution_profile: publicContributionProfile(publicContributionStatusPayload),
+      payout_allowed: publicContributionValue(publicContributionStatusPayload, ["payout_allowed", "payoutAllowed"]),
+      settlement_finalization_state: publicContributionValue(publicContributionReward(publicContributionStatusPayload), [
+        "settlement_finalization_state",
+        "settlementFinalizationState"
+      ])
+    };
+  }
+  renderPublicContributionStatus();
+  renderPublicCurrentWeekReward();
+}
+
+function applyPublicCurrentWeekRewardPayload(payload) {
+  publicContributionCurrentWeekPayload = payload && typeof payload === "object" ? payload : null;
+  renderPublicCurrentWeekReward();
+}
+
+function applyPublicRewardHistoryPayload(payload) {
+  publicContributionHistoryPayload = payload && typeof payload === "object" ? payload : null;
+  renderPublicRewardHistory();
+}
+
+function computeContributionActionState() {
+  const sessionToken = byId("session_token").value.trim();
+  const sessionFreshness = computeSessionFreshnessState();
+  const sessionReady = sessionToken.length > 0 && sessionFreshness.state !== "expired";
+  const isBusy = document.body.classList.contains("is-busy");
+  const statusLoaded = publicContributionStatusPayload && typeof publicContributionStatusPayload === "object";
+  const selectedRole = publicContributionSelectedRole();
+  const canEnable = statusLoaded && selectedContributionRoleEligibility(publicContributionStatusPayload, selectedRole) === true;
+  const profile = statusLoaded ? publicContributionProfile(publicContributionStatusPayload) : {};
+  const enabled = publicContributionBoolean(profile, ["enabled"]) === true;
+  let baseHint = "";
+  if (!sessionToken) {
+    baseHint = "Sign in first to use public contribution and reward controls.";
+  } else if (sessionFreshness.state === "expired") {
+    baseHint = sessionFreshness.detail;
+  } else if (!statusLoaded) {
+    baseHint = "Run Contribution Status first to load signed-in eligibility.";
   }
   return {
-    detail: `Operator queue: ${detailParts.join(" | ")}`,
-    output: {
-      status: operatorListStatusLabel(status),
-      returned: entries.length,
-      limit,
-      total,
-      search,
-      cursor: pagination.cursor || null,
-      next_cursor: pagination.nextCursor || null,
-      has_more: pagination.hasMore,
-      sample
-    }
+    isBusy,
+    sessionReady,
+    statusLoaded,
+    canEnable,
+    enabled,
+    baseHint,
+    selectedRole
   };
 }
 
-function extractAuditRecentEntries(payload) {
-  const containers = [payload, payload?.data, payload?.result, payload?.audit, payload?.recent, payload?.page];
-  for (const container of containers) {
-    if (!container || typeof container !== "object") {
-      continue;
-    }
-    for (const key of ["entries", "items", "records", "results", "events", "logs"]) {
-      if (Array.isArray(container[key])) {
-        return container[key];
-      }
-    }
+function syncContributionActionState() {
+  const state = computeContributionActionState();
+  const readDisabled = state.isBusy || !state.sessionReady;
+  const enableDisabled = state.isBusy || !state.sessionReady || !state.statusLoaded || state.enabled || !state.canEnable;
+  const disableDisabled = state.isBusy || !state.sessionReady || !state.statusLoaded || !state.enabled;
+  contributionStatusBtnEl.disabled = readDisabled;
+  rewardCurrentWeekBtnEl.disabled = readDisabled;
+  rewardHistoryBtnEl.disabled = readDisabled;
+  contributionEnableBtnEl.disabled = enableDisabled;
+  contributionDisableBtnEl.disabled = disableDisabled;
+  contributionRoleEl.disabled = state.isBusy || !state.sessionReady;
+  for (const [button, disabled, fallback] of [
+    [contributionStatusBtnEl, readDisabled, "Sign in first to check contribution status."],
+    [rewardCurrentWeekBtnEl, readDisabled, "Sign in first to load current-week rewards."],
+    [rewardHistoryBtnEl, readDisabled, "Sign in first to load reward history."],
+    [
+      contributionEnableBtnEl,
+      enableDisabled,
+      state.enabled
+        ? "Contribution is already enabled for this signed-in device."
+        : state.canEnable
+          ? `Enable ${publicContributionRoleLabel(state.selectedRole).toLowerCase()} contribution.`
+          : publicContributionLockReason(publicContributionStatusPayload, state.selectedRole)
+    ],
+    [
+      contributionDisableBtnEl,
+      disableDisabled,
+      state.enabled
+        ? "Disable contribution for this signed-in device."
+        : "Contribution is not currently enabled for this signed-in device."
+    ]
+  ]) {
+    button.setAttribute("aria-disabled", String(disabled));
+    button.title = disabled ? state.baseHint || fallback : fallback;
   }
-  return [];
-}
-
-function formatAuditEntryLabel(entry, index) {
-  if (!entry || typeof entry !== "object") {
-    return `entry-${index + 1}`;
-  }
-  const event = nonEmptyString(entry.event);
-  const timestamp = nonEmptyString(firstDefined(entry.timestamp, entry.time, entry.created_at, entry.createdAt));
-  if (event && timestamp) {
-    return `${event}@${timestamp}`;
-  }
-  return event || timestamp || `entry-${index + 1}`;
-}
-
-function summarizeAuditRecent(payload, request = {}) {
-  const entries = extractAuditRecentEntries(payload);
-  const returnedFromPayload = numberOrUndefined(
-    firstDefined(
-      payload?.returned,
-      payload?.result_count,
-      payload?.entries_count,
-      payload?.meta?.returned,
-      payload?.pagination?.returned
-    )
-  );
-  const returnedCountHint = numberOrUndefined(firstDefined(payload?.count, payload?.meta?.count, payload?.pagination?.count));
-  const returned = Math.max(
-    entries.length,
-    Math.floor(returnedFromPayload ?? returnedCountHint ?? entries.length)
-  );
-  const limit = normalizeAuditRecentLimit(
-    firstDefined(
-      payload?.limit,
-      payload?.request?.limit,
-      payload?.meta?.limit,
-      payload?.pagination?.limit,
-      request.limit
-    ),
-    request.limit
-  );
-  const offset = normalizeAuditRecentOffset(
-    firstDefined(
-      payload?.offset,
-      payload?.request?.offset,
-      payload?.meta?.offset,
-      payload?.pagination?.offset,
-      request.offset
-    ),
-    request.offset
-  );
-  const total = numberOrUndefined(
-    firstDefined(payload?.total, payload?.total_count, payload?.meta?.total, payload?.pagination?.total)
-  );
-  const nextOffsetRaw = numberOrUndefined(
-    firstDefined(
-      payload?.next_offset,
-      payload?.nextOffset,
-      payload?.meta?.next_offset,
-      payload?.meta?.nextOffset,
-      payload?.pagination?.next_offset,
-      payload?.pagination?.nextOffset
-    )
-  );
-  const hasMoreRaw = parseBooleanLike(
-    firstDefined(
-      payload?.has_more,
-      payload?.hasMore,
-      payload?.meta?.has_more,
-      payload?.meta?.hasMore,
-      payload?.pagination?.has_more,
-      payload?.pagination?.hasMore
-    )
-  );
-  const hasMore = hasMoreRaw !== undefined ? hasMoreRaw : total !== undefined ? offset + returned < total : undefined;
-  const nextOffset = nextOffsetRaw !== undefined ? Math.floor(nextOffsetRaw) : hasMore ? offset + returned : undefined;
-  const order = normalizeAuditRecentOrder(
-    firstDefined(
-      payload?.order,
-      payload?.request?.order,
-      payload?.meta?.order,
-      payload?.pagination?.order,
-      request.order
-    ),
-    request.order
-  );
-  const event = nonEmptyString(
-    firstDefined(payload?.event, payload?.request?.event, payload?.meta?.event, request.event)
-  );
-  const walletAddress = nonEmptyString(
-    firstDefined(
-      payload?.wallet_address,
-      payload?.request?.wallet_address,
-      payload?.meta?.wallet_address,
-      request.wallet_address
-    )
-  );
-  const sample = entries.slice(0, 3).map(formatAuditEntryLabel);
-  const detailParts = [
-    `returned=${returned}`,
-    `limit=${limit}`,
-    `offset=${offset}`,
-    `order=${order}`
-  ];
-  if (total !== undefined) {
-    detailParts.push(`total=${Math.floor(total)}`);
-  }
-  if (nextOffset !== undefined) {
-    detailParts.push(`next_offset=${nextOffset}`);
-  }
-  if (hasMore !== undefined) {
-    detailParts.push(`has_more=${hasMore}`);
-  }
-  if (event) {
-    detailParts.push(`event=${event}`);
-  }
-  if (walletAddress) {
-    detailParts.push(`wallet_address=${walletAddress}`);
-  }
-  return {
-    detail: `Audit recent: ${detailParts.join(" | ")}`,
-    output: {
-      request: {
-        limit,
-        offset,
-        event: event || null,
-        wallet_address: walletAddress || null,
-        order
-      },
-      pagination: {
-        returned,
-        limit,
-        offset,
-        total: total !== undefined ? Math.floor(total) : null,
-        next_offset: nextOffset !== undefined ? nextOffset : null,
-        has_more: hasMore
-      },
-      sample,
-      entries
-    }
-  };
+  contributionRoleEl.setAttribute("aria-disabled", String(contributionRoleEl.disabled));
 }
 
 function findSessionReconciledHint(payload, depth = 0) {
@@ -2203,107 +1983,6 @@ function appendBootstrapDirectoryFallbackDetail(detail, hintSource) {
     return detail;
   }
   return `${detail} bootstrap_directory fallback=${hint.bootstrapDirectory}.`;
-}
-
-function readOperatorEntryText(entry, candidates) {
-  if (!entry || typeof entry !== "object") {
-    return "";
-  }
-  const scopes = [entry, entry.application, entry.request, entry.profile, entry.operator];
-  for (const scope of scopes) {
-    if (!scope || typeof scope !== "object") {
-      continue;
-    }
-    for (const candidate of candidates) {
-      const value = nonEmptyString(scope[candidate]);
-      if (value) {
-        return value;
-      }
-    }
-  }
-  return "";
-}
-
-function extractOperatorPrefillValues(entry) {
-  if (typeof entry === "string") {
-    const chainOperatorId = entry.trim();
-    return {
-      walletAddress: "",
-      chainOperatorId,
-      selectedApplicationUpdatedAtUtc: ""
-    };
-  }
-  return {
-    walletAddress: readOperatorEntryText(entry, [
-      "wallet_address",
-      "walletAddress",
-      "address",
-      "subject_wallet",
-      "subjectWallet"
-    ]),
-    chainOperatorId: readOperatorEntryText(entry, [
-      "chain_operator_id",
-      "chainOperatorId",
-      "operator_id",
-      "operatorId",
-      "id"
-    ]),
-    selectedApplicationUpdatedAtUtc: readOperatorEntryText(entry, [
-      "updated_at_utc",
-      "updatedAtUtc",
-      "updated_at",
-      "updatedAt",
-      "application_updated_at_utc",
-      "applicationUpdatedAtUtc",
-      "if_updated_at_utc",
-      "ifUpdatedAtUtc"
-    ])
-  };
-}
-
-function setSelectedApplicationUpdatedAt(value, options = {}) {
-  const { persist = true } = options;
-  const normalized = typeof value === "string" ? value.trim() : "";
-  selectedApplicationUpdatedAtUtc = normalized;
-  selectedApplicationUpdatedAtEl.value = normalized;
-  if (persist) {
-    persistPortalState();
-  }
-}
-
-function selectedApplicationUpdatedAt() {
-  return selectedApplicationUpdatedAtUtc || selectedApplicationUpdatedAtEl.value.trim();
-}
-
-function applySelectedOperatorPrefill(values, options = {}) {
-  const { mode = "merge", persist = true } = options;
-  const walletAddress = typeof values?.walletAddress === "string" ? values.walletAddress.trim() : "";
-  const chainOperatorId = typeof values?.chainOperatorId === "string" ? values.chainOperatorId.trim() : "";
-  const selectedUpdatedAtUtc =
-    typeof values?.selectedApplicationUpdatedAtUtc === "string"
-      ? values.selectedApplicationUpdatedAtUtc.trim()
-      : "";
-  if (mode === "replace" || walletAddress) {
-    byId("wallet_address").value = walletAddress;
-  }
-  if (mode === "replace" || chainOperatorId) {
-    byId("chain_operator_id").value = chainOperatorId;
-  }
-  if (mode === "replace" || selectedUpdatedAtUtc) {
-    setSelectedApplicationUpdatedAt(selectedUpdatedAtUtc, { persist: false });
-  }
-  if (persist) {
-    persistPortalState();
-  }
-}
-
-function prefillSelectedOperatorFromListPayload(payload, options = {}) {
-  const entries = extractOperatorListEntries(payload);
-  if (entries.length === 0) {
-    return false;
-  }
-  applySelectedOperatorPrefill(extractOperatorPrefillValues(entries[0]), options);
-  return true;
 }
 
 function parseBooleanLike(value) {
@@ -3210,155 +2889,43 @@ function updateConnectionDashboard(source, payload) {
   applyConnectionRoutingSnapshot(inferConnectionRoutingSnapshot(source, payload, snapshot?.stateKey), snapshot?.stateKey);
 }
 
-function parseServerReadiness(payload) {
-  const readiness = payload?.readiness;
-  if (!readiness || typeof readiness !== "object") {
-    return null;
-  }
-  const unlockActions = Array.isArray(readiness.unlock_actions)
-    ? readiness.unlock_actions
-        .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
-        .filter((entry) => entry.length > 0)
-    : [];
-  const role = typeof readiness.role === "string" ? readiness.role.trim().toLowerCase() : "";
-  const lockReason = nonEmptyString(firstDefined(readiness.lock_reason, readiness.lockReason));
-  const clientLockReason = nonEmptyString(firstDefined(readiness.client_lock_reason, readiness.clientLockReason));
-  const endpointPostureRaw = firstDefined(readiness.endpoint_posture, readiness.endpointPosture);
-  const endpointPosture =
-    endpointPostureRaw && typeof endpointPostureRaw === "object" && !Array.isArray(endpointPostureRaw)
-      ? endpointPostureRaw
-      : nonEmptyString(endpointPostureRaw);
-  const endpointWarnings = parseNonEmptyStringList(
-    firstDefined(readiness.endpoint_warnings, readiness.endpointWarnings)
-  );
-  if (endpointPosture && typeof endpointPosture === "object" && !Array.isArray(endpointPosture)) {
-    for (const warning of parseNonEmptyStringList(
-      firstDefined(
-        endpointPosture.endpoint_warnings,
-        endpointPosture.endpointWarnings,
-        endpointPosture.warnings,
-        endpointPosture.warning
-      )
-    )) {
-      pushUniqueNonEmptyString(endpointWarnings, warning);
-    }
-  }
-  return {
-    role: role || undefined,
-    tabVisible: parseBooleanLike(readiness.tab_visible),
-    clientTabVisible: parseBooleanLike(firstDefined(readiness.client_tab_visible, readiness.clientTabVisible)),
-    lifecycleActionsUnlocked: parseBooleanLike(readiness.lifecycle_actions_unlocked),
-    serviceMutationsConfigured: parseBooleanLike(readiness.service_mutations_configured),
-    operatorApplicationStatus: normalizeOperatorApplicationStatus(readiness.operator_application_status),
-    lockReason: lockReason || undefined,
-    clientLockReason: clientLockReason || undefined,
-    chainBindingStatus: nonEmptyString(firstDefined(readiness.chain_binding_status, readiness.chainBindingStatus)),
-    chainBindingOk: parseBooleanLike(firstDefined(readiness.chain_binding_ok, readiness.chainBindingOk)),
-    chainBindingReason: nonEmptyString(firstDefined(readiness.chain_binding_reason, readiness.chainBindingReason)),
-    endpointPosture: endpointPosture || undefined,
-    endpointWarnings,
-    unlockActions
-  };
-}
-
-function appendChainBindingGuidance(guidanceText, readiness) {
-  const statusRaw = nonEmptyString(readiness?.chainBindingStatus);
-  const statusKey = statusRaw.toLowerCase();
-  const status = statusRaw ? statusRaw.replace(/[_-]+/g, " ") : "";
-  const ok = readiness?.chainBindingOk;
-  const reason = nonEmptyString(readiness?.chainBindingReason);
-  if (!status && ok === undefined && !reason) {
-    return guidanceText;
-  }
-  let bindingHint = "";
-  if (ok === true) {
-    bindingHint =
-      statusKey === "bound"
-        ? "Chain binding: bound. Strict chain binding is satisfied (session/app chain_operator_id match)."
-        : status
-          ? `Chain binding: ${status}. Strict chain binding is satisfied.`
-          : "Chain binding: ready. Strict chain binding is satisfied.";
-  } else if (ok === false) {
-    bindingHint =
-      status
-        ? `Chain binding: ${status}. Strict chain binding requires both session and approved-application chain_operator_id values to be present and matching.`
-        : "Chain binding: not ready. Strict chain binding requires both session and approved-application chain_operator_id values to be present and matching.";
-  } else {
-    bindingHint = status ? `Chain binding: ${status}.` : "Chain binding: unknown.";
-  }
-  if (reason) {
-    bindingHint = `${bindingHint} ${reason}`;
-  }
-  if (statusKey === "mismatch") {
-    bindingHint =
-      `${bindingHint} Next: refresh session to resync chain_operator_id; ` +
-      "if mismatch persists, re-apply and re-approve with the intended chain_operator_id.";
-  } else if (statusKey === "pending_approval" || statusKey === "pending approval") {
-    bindingHint = `${bindingHint} Next: wait for operator approval, then refresh session to lift server lifecycle locks.`;
-  } else if (ok === false) {
-    bindingHint = `${bindingHint} Next: refresh session and operator status to reconcile strict chain binding.`;
-  }
-  return `${guidanceText} ${bindingHint}`;
-}
-
-function setServerReadiness(value) {
-  serverReadiness = value || null;
-  if (serverReadiness?.operatorApplicationStatus !== undefined) {
-    operatorApplicationStatus = serverReadiness.operatorApplicationStatus;
-  }
-  refreshOperatorReadiness();
-}
-
-function isServerRoleUnlocked(roleValue) {
-  const role = String(roleValue || "").trim().toLowerCase();
-  return role === "operator" || role === "admin";
-}
-
 function isServerOnlyRole(roleValue) {
   const role = String(roleValue || "").trim().toLowerCase();
   return SERVER_ONLY_ROLES.has(role);
 }
 
-function isServerTabVisibleRole(roleValue = byId("role").value) {
-  if (serverReadiness && typeof serverReadiness.tabVisible === "boolean") {
-    return serverReadiness.tabVisible;
+function parsePublicReadiness(payload) {
+  const readiness = payload?.readiness;
+  if (!readiness || typeof readiness !== "object") {
+    return null;
   }
-  const role = String(serverReadiness?.role || roleValue || "").trim().toLowerCase();
-  return role === "operator" || role === "admin" || role === "server" || role === "server_only";
+  const role = nonEmptyString(readiness.role);
+  const clientLockReason = nonEmptyString(firstDefined(readiness.client_lock_reason, readiness.clientLockReason));
+  return {
+    role: role ? role.toLowerCase() : undefined,
+    clientTabVisible: parseBooleanLike(firstDefined(readiness.client_tab_visible, readiness.clientTabVisible)),
+    clientLockReason: clientLockReason || undefined
+  };
+}
+
+function setPublicReadiness(value) {
+  publicReadiness = value || null;
+  refreshClientReadiness();
 }
 
 function isClientTabVisibleRole(roleValue = byId("role").value) {
-  if (serverReadiness && typeof serverReadiness.clientTabVisible === "boolean") {
-    return serverReadiness.clientTabVisible;
+  if (publicReadiness && typeof publicReadiness.clientTabVisible === "boolean") {
+    return publicReadiness.clientTabVisible;
   }
-  const role = String(serverReadiness?.role || roleValue || "").trim().toLowerCase();
-  if (role === "server" || role === "server_only") {
+  const role = String(publicReadiness?.role || roleValue || "").trim().toLowerCase();
+  if (isServerOnlyRole(role)) {
     return false;
-  }
-  if (role === "operator" || role === "admin") {
-    return clientRegistered === true;
   }
   return true;
 }
 
-function formatDirectActionGuidance(directPath, requiredConditions) {
-  return `Direct path: ${directPath}. Required conditions: ${requiredConditions}.`;
-}
-
 function computeClientTabLockHintText() {
   const readiness = computeClientReadiness();
-  return readiness.guidanceText;
-}
-
-function computeServerTabLockHintText() {
-  const readiness = computeOperatorReadiness();
-  if (!isServerTabVisibleRole()) {
-    const reason = serverReadiness?.lockReason || "Server tab is locked for the current role.";
-    return `${reason} ${formatDirectActionGuidance(
-      "Use Apply Operator Role, then Check Operator Status and Refresh Session",
-      "active session token, approved operator application, and matching session/application chain_operator_id values"
-    )}`;
-  }
   return readiness.guidanceText;
 }
 
@@ -3377,44 +2944,35 @@ function isWindowsRuntimePlatform() {
   return platform.includes("win");
 }
 
-function formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible) {
-  if (clientTabVisible && serverTabVisible) {
-    return "Both Client and Server tabs are available for this session.";
-  }
-  if (!clientTabVisible && !serverTabVisible) {
-    return "Client and Server tabs are disabled by role/readiness policy. Use the lock message activation paths before retrying.";
-  }
+function formatWorkspaceTabAvailabilityHint(clientTabVisible) {
   if (!clientTabVisible) {
-    return "Client tab is disabled for this session. Use the lock message activation path to finish Step 2 and unlock client actions.";
+    return "Client workspace is disabled by role/readiness policy. Use the lock message activation path before retrying.";
   }
-  return "Server tab is disabled for this session. Use the lock message activation path to finish Step 3 and unlock server actions.";
+  return "Client workspace is available for this session.";
 }
 
-function syncWorkspaceNextActionHint(clientTabVisible, serverTabVisible) {
+function syncWorkspaceNextActionHint(clientTabVisible = isClientTabVisibleRole()) {
   if (!workspaceNextActionHintEl) {
     return;
   }
   const nextAction = ensureSentence(computePortalNextRecommendedAction());
-  const lockContext =
-    !clientTabVisible || !serverTabVisible
-      ? ` ${formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible)}`
-      : "";
+  const lockContext = !clientTabVisible ? ` ${formatWorkspaceTabAvailabilityHint(clientTabVisible)}` : "";
   workspaceNextActionHintEl.textContent = `Workspace next action: ${nextAction}${lockContext}`;
-  workspaceNextActionHintEl.classList.toggle("locked", !clientTabVisible || !serverTabVisible);
+  workspaceNextActionHintEl.classList.toggle("locked", !clientTabVisible);
 }
 
-function syncWorkspaceFirstRunHints(clientTabVisible, serverTabVisible) {
+function syncWorkspaceFirstRunHints(clientTabVisible) {
   if (workspaceFirstRunHintEl) {
     workspaceFirstRunHintEl.textContent =
-      `Single-window tabs keep both lanes visible. ${formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible)}`;
-    workspaceFirstRunHintEl.classList.toggle("locked", !clientTabVisible || !serverTabVisible);
+      `Public portal exposes only the client workspace. ${formatWorkspaceTabAvailabilityHint(clientTabVisible)}`;
+    workspaceFirstRunHintEl.classList.toggle("locked", !clientTabVisible);
   }
   if (workspacePlatformHintEl) {
     workspacePlatformHintEl.textContent = isWindowsRuntimePlatform()
-      ? "Windows-native first run: verify local GPM/WireGuard readiness, sign in, run Session, then run Status before Connect. Use Operator Status before server lifecycle actions."
-      : "First run: verify local GPM readiness, sign in, run Session, then run Status before Connect. Use Operator Status before server lifecycle actions.";
+      ? "Windows-native first run: verify local GPM/WireGuard readiness, sign in, run Session, then run Status before Connect."
+      : "First run: verify local GPM readiness, sign in, run Session, then run Status before Connect.";
   }
-  syncWorkspaceNextActionHint(clientTabVisible, serverTabVisible);
+  syncWorkspaceNextActionHint(clientTabVisible);
 }
 
 function inferWorkspaceTabActivationPathHint(tabName, reason) {
@@ -3430,10 +2988,7 @@ function inferWorkspaceTabActivationPathHint(tabName, reason) {
     }
     return "Register Client to unlock client lane actions";
   }
-  if (!hasSessionToken) {
-    return "Request Challenge, run Sign + Verify (Wallet) or Verify + Create Session, then Apply Operator Role";
-  }
-  return "Apply Operator Role, wait for approval, then refresh Session or Check Operator Status";
+  return "Open the client workspace";
 }
 
 function formatWorkspaceLockedTabMessage(tabName, reason) {
@@ -3442,16 +2997,13 @@ function formatWorkspaceLockedTabMessage(tabName, reason) {
   return `${tabName} tab is disabled for this session. ${normalizedReason} Next step: ${activationPath}`;
 }
 
-function syncWorkspaceTabLockHint(clientTabVisible, serverTabVisible, clientReason, serverReason) {
+function syncWorkspaceTabLockHint(clientTabVisible, clientReason) {
   if (!tabLockHintEl) {
     return;
   }
   const lockMessages = [];
   if (!clientTabVisible && clientReason) {
     lockMessages.push(formatWorkspaceLockedTabMessage("Client", clientReason));
-  }
-  if (!serverTabVisible && serverReason) {
-    lockMessages.push(formatWorkspaceLockedTabMessage("Server", serverReason));
   }
   if (lockMessages.length === 0) {
     tabLockHintEl.textContent = "";
@@ -3463,141 +3015,18 @@ function syncWorkspaceTabLockHint(clientTabVisible, serverTabVisible, clientReas
   tabLockHintEl.hidden = false;
 }
 
-function computeServerLifecycleControlState() {
-  const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
-  const sessionToken = byId("session_token").value.trim();
-  const sessionFreshness = computeSessionFreshnessState();
-  if (!isServerTabVisibleRole(role)) {
-    return {
-      disabled: true,
-      locked: true,
-      hint: computeServerTabLockHintText()
-    };
-  }
-
-  if (configEndpointUnavailableFailClosedMode()) {
-    return {
-      disabled: true,
-      locked: true,
-      hint: failClosedMutatingActionStatusDetail()
-    };
-  }
-
-  if (sessionFreshness.state === "expired") {
-    return {
-      disabled: true,
-      locked: true,
-      hint: `Session expired. ${sessionReauthGuidance()}`
-    };
-  }
-
-  if (serverReadiness?.serviceMutationsConfigured === false) {
-    return {
-      disabled: true,
-      locked: true,
-      hint: appendChainBindingGuidance(
-        "Lifecycle commands are unavailable because service mutations are not configured on this daemon.",
-        serverReadiness
-      )
-    };
-  }
-
-  if (serverReadiness?.lifecycleActionsUnlocked === false) {
-    const reason = serverReadiness.lockReason || "Lifecycle commands are locked by backend readiness policy.";
-    const unlockActions = Array.isArray(serverReadiness.unlockActions) ? serverReadiness.unlockActions : [];
-    const nextActions = unlockActions.length > 0 ? ` Next: ${unlockActions.join("; ")}` : "";
-    return {
-      disabled: true,
-      locked: true,
-      hint: appendChainBindingGuidance(`${reason}${nextActions}`, serverReadiness)
-    };
-  }
-
-  if (serverReadiness?.lifecycleActionsUnlocked === true) {
-    return {
-      disabled: false,
-      locked: false,
-      hint: "Lifecycle commands are unlocked by backend readiness. Use Start, Stop, or Restart to manage the service."
-    };
-  }
-
-  if (!sessionToken) {
-    return {
-      disabled: true,
-      locked: true,
-      hint: "Sign in and refresh server readiness to confirm lifecycle command availability."
-    };
-  }
-
-  if (!serverReadiness || typeof serverReadiness.lifecycleActionsUnlocked !== "boolean") {
-    return {
-      disabled: true,
-      locked: true,
-      hint:
-        "Server readiness is not loaded yet. Run Check Operator Status or Refresh Session to verify approval and strict chain binding before lifecycle commands."
-    };
-  }
-
-  if (!isServerRoleUnlocked(role)) {
-    return {
-      disabled: true,
-      locked: true,
-      hint: "Operator or admin role is required for lifecycle commands."
-    };
-  }
-
-  return {
-    disabled: false,
-    locked: false,
-    hint: "Lifecycle commands are available for this role. Refresh readiness if a command is rejected."
-  };
-}
-
-function syncServerLifecycleActionState() {
-  const isBusy = document.body.classList.contains("is-busy");
-  const state = computeServerLifecycleControlState();
-  const disabled = isBusy || state.disabled;
-  for (const button of [serverStartBtnEl, serverStopBtnEl, serverRestartBtnEl]) {
-    button.disabled = disabled;
-    button.setAttribute("aria-disabled", String(disabled));
-    if (state.locked && state.hint) {
-      button.title = state.hint;
-    } else {
-      button.removeAttribute("title");
-    }
-  }
-  serverLifecycleHintEl.textContent = state.hint;
-  serverLifecycleHintEl.classList.toggle("locked", state.locked);
-}
-
-function activateWorkspaceTab(name) {
-  const wantsClient = name === "client";
-  const clientEnabled = !tabClientEl.disabled;
-  const serverEnabled = !tabServerEl.disabled;
-  let selectedTab = wantsClient ? "client" : "server";
-  if (selectedTab === "client" && !clientEnabled && serverEnabled) {
-    selectedTab = "server";
-  } else if (selectedTab === "server" && !serverEnabled && clientEnabled) {
-    selectedTab = "client";
-  }
-  const isClient = selectedTab === "client";
-  tabClientEl.classList.toggle("active", isClient);
-  tabClientEl.setAttribute("aria-selected", String(isClient));
-  tabServerEl.classList.toggle("active", !isClient);
-  tabServerEl.setAttribute("aria-selected", String(!isClient));
-  panelClientEl.classList.toggle("active", isClient);
-  panelServerEl.classList.toggle("active", !isClient);
-  activeWorkspaceTab = selectedTab;
+function activateWorkspaceTab() {
+  tabClientEl.classList.add("active");
+  tabClientEl.setAttribute("aria-selected", "true");
+  panelClientEl.classList.add("active");
+  activeWorkspaceTab = "client";
   persistWorkspaceTabPreference();
 }
 
 function syncWorkspaceTabLockState() {
   const clientTabVisible = isClientTabVisibleRole();
-  const serverTabVisible = isServerTabVisibleRole();
   const clientReason = computeClientTabLockHintText();
-  const serverReason = computeServerTabLockHintText();
   const clientLockedMessage = formatWorkspaceLockedTabMessage("Client", clientReason);
-  const serverLockedMessage = formatWorkspaceLockedTabMessage("Server", serverReason);
 
   tabClientEl.disabled = !clientTabVisible;
   tabClientEl.classList.toggle("locked", !clientTabVisible);
@@ -3614,55 +3043,12 @@ function syncWorkspaceTabLockState() {
     tabClientEl.removeAttribute("aria-describedby");
   }
 
-  tabServerEl.disabled = !serverTabVisible;
-  tabServerEl.classList.toggle("locked", !serverTabVisible);
-  panelServerEl.classList.toggle("locked", !serverTabVisible);
-  tabServerEl.setAttribute("aria-disabled", serverTabVisible ? "false" : "true");
-  tabServerEl.title = serverTabVisible ? "Open Server workspace." : serverLockedMessage;
-  tabServerEl.setAttribute(
-    "aria-label",
-    serverTabVisible ? "Server workspace tab." : `Server workspace tab locked. ${serverLockedMessage}`
-  );
-  if (!serverTabVisible && tabLockHintEl) {
-    tabServerEl.setAttribute("aria-describedby", "tab_lock_hint");
-  } else {
-    tabServerEl.removeAttribute("aria-describedby");
-  }
-
-  const clientTabActive = tabClientEl.classList.contains("active");
-  const serverTabActive = tabServerEl.classList.contains("active");
-  if ((clientTabActive && !clientTabVisible) || (serverTabActive && !serverTabVisible)) {
-    if (clientTabVisible) {
-      activateWorkspaceTab("client");
-    } else if (serverTabVisible) {
-      activateWorkspaceTab("server");
-    }
-  } else {
-    activateWorkspaceTab(activeWorkspaceTab);
-  }
+  activateWorkspaceTab();
 
   clientLockHintEl.textContent = clientReason;
   clientLockHintEl.classList.toggle("locked", !clientTabVisible);
-  serverLockHintEl.textContent = serverReason;
-  serverLockHintEl.classList.toggle("locked", !serverTabVisible);
-  syncWorkspaceTabLockHint(clientTabVisible, serverTabVisible, clientReason, serverReason);
-  syncWorkspaceFirstRunHints(clientTabVisible, serverTabVisible);
-  syncServerLifecycleActionState();
-}
-
-function formatOperatorApplicationStatusLabel(status) {
-  switch (status) {
-    case "not_submitted":
-      return "Not submitted";
-    case "pending":
-      return "Pending";
-    case "approved":
-      return "Approved";
-    case "rejected":
-      return "Rejected";
-    default:
-      return "Unknown";
-  }
+  syncWorkspaceTabLockHint(clientTabVisible, clientReason);
+  syncWorkspaceFirstRunHints(clientTabVisible);
 }
 
 function setStepState(el, state) {
@@ -3675,17 +3061,10 @@ function setStepState(el, state) {
 function refreshOnboardingSteps() {
   const clientReadiness = computeClientReadiness();
   const hasSession = clientReadiness.state !== "not_signed_in" && clientReadiness.state !== "session_expired";
-  const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase();
-  const backendOperatorStatus = serverReadiness?.operatorApplicationStatus || operatorApplicationStatus;
-  const step3Done =
-    typeof serverReadiness?.lifecycleActionsUnlocked === "boolean"
-      ? serverReadiness.lifecycleActionsUnlocked
-      : role === "admin" || (role === "operator" && backendOperatorStatus === "approved");
 
   if (!hasSession) {
     setStepState(onboardingStepSigninEl, "active");
     setStepState(onboardingStepClientEl, "blocked");
-    setStepState(onboardingStepOperatorEl, "blocked");
     return;
   }
 
@@ -3700,22 +3079,6 @@ function refreshOnboardingSteps() {
   } else {
     setStepState(onboardingStepClientEl, "active");
   }
-  if (step3Done) {
-    setStepState(onboardingStepOperatorEl, "done");
-    return;
-  }
-  if (
-    backendOperatorStatus === "rejected" ||
-    (serverReadiness && serverReadiness.tabVisible === false)
-  ) {
-    setStepState(onboardingStepOperatorEl, "blocked");
-    return;
-  }
-  setStepState(onboardingStepOperatorEl, "active");
-}
-
-function effectivePortalOperatorApplicationStatus() {
-  return normalizeOperatorApplicationStatus(serverReadiness?.operatorApplicationStatus || operatorApplicationStatus);
 }
 
 function computePortalNextRecommendedAction() {
@@ -3747,21 +3110,10 @@ function computePortalNextRecommendedAction() {
     return "Register Client.";
   }
 
-  const operatorStatus = effectivePortalOperatorApplicationStatus();
-  if (operatorStatus === "pending") {
-    return "Wait for operator approval, then refresh Session or Check Operator Status.";
+  if (!publicContributionStatusPayload) {
+    return "Run Contribution Status or Status.";
   }
-  if (operatorStatus === "rejected") {
-    return "Apply Operator Role again after updating operator details.";
-  }
-  const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
-  if (operatorStatus !== "approved" && role !== "admin" && role !== "server" && role !== "server_only") {
-    return "Apply Operator Role.";
-  }
-  if (serverReadiness?.lifecycleActionsUnlocked === false) {
-    return "Check Operator Status and refresh Session to unlock server actions.";
-  }
-  return "Continue in Client or Server tab based on your role.";
+  return "Use Connect, Disconnect, or Status from the client workspace.";
 }
 
 function computePortalOnboardingState() {
@@ -3812,32 +3164,10 @@ function computePortalOnboardingState() {
     };
   }
 
-  const operatorStatus = effectivePortalOperatorApplicationStatus();
-  if (operatorStatus === "pending") {
-    return {
-      kind: "warn",
-      title: "Operator pending",
-      detail: "Session is active and operator approval is pending."
-    };
-  }
-  if (operatorStatus === "approved") {
-    return {
-      kind: "good",
-      title: "Operator approved",
-      detail: "Session is active and operator approval is complete."
-    };
-  }
-  if (operatorStatus === "rejected") {
-    return {
-      kind: "bad",
-      title: "Operator rejected",
-      detail: "Session is active, but operator application was rejected."
-    };
-  }
   return {
     kind: "good",
     title: "Session active",
-    detail: "Session token is active. Continue with client registration and operator onboarding."
+    detail: "Session token is active. Continue with client registration, contribution status, or client connection controls."
   };
 }
 
@@ -3851,7 +3181,7 @@ function syncPortalOnboardingStateBanner() {
   onboardingStateTitleEl.textContent = onboardingState.title;
   onboardingStateDetailEl.textContent = onboardingState.detail;
   onboardingNextActionEl.textContent = `Next recommended action: ${computePortalNextRecommendedAction()}`;
-  syncWorkspaceNextActionHint(isClientTabVisibleRole(), isServerTabVisibleRole());
+  syncWorkspaceNextActionHint(isClientTabVisibleRole());
   syncSessionFreshnessBanner();
 }
 
@@ -4079,417 +3409,6 @@ function applyClientRegistrationPayload(payload) {
   }
 }
 
-function setOperatorReadiness(kind, statusText, guidanceText) {
-  operatorReadinessEl.dataset.kind = kind || "warn";
-  operatorReadinessLineEl.classList.remove("good", "warn", "bad");
-  if (kind) {
-    operatorReadinessLineEl.classList.add(kind);
-  }
-  operatorReadinessStatusEl.textContent = statusText;
-  operatorReadinessGuidanceEl.textContent = guidanceText;
-}
-
-function operatorChecklistStateLabel(state) {
-  switch (state) {
-    case "done":
-      return "Done";
-    case "blocked":
-      return "Blocked";
-    default:
-      return "Pending";
-  }
-}
-
-function setOperatorChecklistStep(itemEl, pillEl, detailEl, state, detail) {
-  const normalized = state === "done" || state === "blocked" ? state : "pending";
-  itemEl.dataset.state = normalized;
-  pillEl.textContent = operatorChecklistStateLabel(normalized);
-  detailEl.textContent = detail;
-}
-
-function computeOperatorUnlockPlanModel() {
-  const token = byId("session_token").value.trim();
-  const sessionFreshness = computeSessionFreshnessState();
-  const hasSession = token.length > 0 && sessionFreshness.state !== "expired";
-  const sessionExpired = token.length > 0 && sessionFreshness.state === "expired";
-  const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
-  const operatorStatus = effectivePortalOperatorApplicationStatus();
-  const readiness = computeOperatorReadiness();
-  const serverTabVisible = isServerTabVisibleRole(role);
-  const lifecycleUnlocked = serverReadiness?.lifecycleActionsUnlocked === true;
-  const lifecycleLocked = serverReadiness?.lifecycleActionsUnlocked === false;
-  const unlockActions = Array.isArray(serverReadiness?.unlockActions) ? serverReadiness.unlockActions : [];
-
-  let planKind = readiness.kind || "warn";
-  let planTitle = lifecycleUnlocked ? "Server controls unlocked" : "Server controls locked";
-  let planDetail = readiness.guidanceText;
-  let lockTitle = "Locked reason: none";
-  let lockDetail = "No lock is active. Continue with server lifecycle actions.";
-
-  if (!lifecycleUnlocked) {
-    if (configEndpointUnavailableFailClosedMode()) {
-      planKind = "bad";
-      lockTitle = "Locked reason: runtime policy unavailable";
-      lockDetail = failClosedMutatingActionStatusDetail();
-    } else if (sessionExpired) {
-      planKind = "bad";
-      lockTitle = "Locked reason: session expired";
-      lockDetail = sessionFreshness.detail;
-    } else if (!hasSession) {
-      lockTitle = "Locked reason: no active session";
-      lockDetail = "Sign in first to establish session_token for operator onboarding.";
-    } else if (!serverTabVisible) {
-      planKind = "bad";
-      lockTitle = "Locked reason: role not eligible";
-      lockDetail =
-        serverReadiness?.lockReason ||
-        "Current role cannot open the Server tab yet. Apply operator role and refresh session after approval.";
-    } else if (operatorStatus === "rejected") {
-      planKind = "bad";
-      lockTitle = "Locked reason: operator application rejected";
-      lockDetail = "Re-apply operator role or update operator details, then request a fresh approval review.";
-    } else if (lifecycleLocked) {
-      lockTitle = "Locked reason: readiness policy";
-      lockDetail =
-        serverReadiness?.lockReason ||
-        "Server lifecycle actions remain locked until approval and strict chain binding are satisfied.";
-    } else {
-      lockTitle = "Locked reason: readiness pending";
-      lockDetail = "Refresh operator/server status to load the latest readiness decision.";
-    }
-  }
-
-  let sessionStepState = "pending";
-  let sessionStepDetail = "Session state pending refresh.";
-  if (!token) {
-    sessionStepState = "blocked";
-    sessionStepDetail = "No active session token. Complete wallet sign-in first.";
-  } else if (sessionFreshness.state === "expired") {
-    sessionStepState = "blocked";
-    sessionStepDetail = sessionFreshness.detail;
-  } else if (sessionFreshness.state === "unknown") {
-    sessionStepState = "pending";
-    sessionStepDetail = sessionFreshness.detail;
-  } else if (sessionFreshness.state === "expiring_soon") {
-    sessionStepState = "done";
-    sessionStepDetail = sessionFreshness.detail;
-  } else {
-    sessionStepState = "done";
-    sessionStepDetail = "Session token is active.";
-  }
-
-  let applicationStepState = "pending";
-  let applicationStepDetail = "Operator application status pending refresh.";
-  if (!hasSession) {
-    applicationStepState = "blocked";
-    applicationStepDetail = "Sign in first to submit or query operator application.";
-  } else if (role === "admin") {
-    applicationStepState = "done";
-    applicationStepDetail = "Admin role active; operator application gating is already satisfied.";
-  } else if (isServerOnlyRole(role)) {
-    applicationStepState = "done";
-    applicationStepDetail = "Server-only role active; operator application flow is managed outside this session.";
-  } else {
-    switch (operatorStatus) {
-      case "approved":
-        applicationStepState = "done";
-        applicationStepDetail = "Operator application is approved.";
-        break;
-      case "pending":
-        applicationStepState = "pending";
-        applicationStepDetail = "Operator application submitted and waiting for approval review.";
-        break;
-      case "rejected":
-        applicationStepState = "blocked";
-        applicationStepDetail = "Operator application was rejected. Re-apply with updated details.";
-        break;
-      case "not_submitted":
-        applicationStepState = "pending";
-        applicationStepDetail = "Operator application has not been submitted yet.";
-        break;
-      default:
-        applicationStepState = "pending";
-        applicationStepDetail = "Run Check Operator Status to load application state.";
-        break;
-    }
-  }
-
-  let lifecycleStepState = "pending";
-  let lifecycleStepDetail = "Lifecycle lock state pending refresh.";
-  if (!token) {
-    lifecycleStepState = "blocked";
-    lifecycleStepDetail = "Lifecycle unlock requires an active session.";
-  } else if (sessionFreshness.state === "expired") {
-    lifecycleStepState = "blocked";
-    lifecycleStepDetail = sessionFreshness.detail;
-  } else if (!serverTabVisible) {
-    lifecycleStepState = "blocked";
-    lifecycleStepDetail =
-      serverReadiness?.lockReason ||
-      "Server tab is locked for this role. Apply and approve operator role first.";
-  } else if (lifecycleUnlocked) {
-    lifecycleStepState = "done";
-    lifecycleStepDetail = "Server lifecycle actions are unlocked.";
-  } else if (operatorStatus === "rejected") {
-    lifecycleStepState = "blocked";
-    lifecycleStepDetail = "Operator rejection blocks lifecycle unlock until re-approval.";
-  } else if (lifecycleLocked) {
-    lifecycleStepState = "pending";
-    lifecycleStepDetail =
-      serverReadiness?.lockReason ||
-      "Approval and strict chain binding are still required before lifecycle actions unlock.";
-  }
-
-  const nextActions = [];
-  if (sessionExpired) {
-    pushUniqueNonEmptyString(nextActions, "Rotate Session");
-    pushUniqueNonEmptyString(nextActions, "Sign + Verify (Wallet)");
-  } else if (!hasSession) {
-    pushUniqueNonEmptyString(nextActions, "Request Challenge");
-    pushUniqueNonEmptyString(nextActions, "Sign + Verify (Wallet)");
-  } else {
-    if (operatorStatus === "not_submitted") {
-      pushUniqueNonEmptyString(nextActions, "Apply Operator Role");
-    } else if (operatorStatus === "pending") {
-      pushUniqueNonEmptyString(nextActions, "Check Operator Status");
-      pushUniqueNonEmptyString(nextActions, "Wait for approval decision");
-    } else if (operatorStatus === "rejected") {
-      pushUniqueNonEmptyString(nextActions, "Re-apply operator role");
-    }
-    if (!lifecycleUnlocked) {
-      pushUniqueNonEmptyString(nextActions, "Refresh Session");
-    }
-  }
-  for (const action of unlockActions) {
-    pushUniqueNonEmptyString(nextActions, action);
-  }
-  if (nextActions.length === 0) {
-    pushUniqueNonEmptyString(nextActions, "Use Server tab Start/Stop/Restart controls");
-  }
-
-  return {
-    planKind,
-    planTitle,
-    planDetail,
-    lockTitle,
-    lockDetail,
-    nextActions,
-    sessionStepState,
-    sessionStepDetail,
-    applicationStepState,
-    applicationStepDetail,
-    lifecycleStepState,
-    lifecycleStepDetail
-  };
-}
-
-function refreshOperatorUnlockPlan() {
-  const model = computeOperatorUnlockPlanModel();
-  operatorUnlockPlanEl.dataset.kind = model.planKind || "warn";
-  operatorUnlockPlanLineEl.classList.remove("good", "warn", "bad");
-  operatorLockReasonLineEl.classList.remove("good", "warn", "bad");
-  if (model.planKind) {
-    operatorUnlockPlanLineEl.classList.add(model.planKind);
-  }
-  const lockKind = model.planKind === "good" ? "good" : model.planKind === "bad" ? "bad" : "warn";
-  operatorLockReasonLineEl.classList.add(lockKind);
-  operatorUnlockPlanTitleEl.textContent = model.planTitle;
-  operatorUnlockPlanDetailEl.textContent = model.planDetail;
-  operatorLockReasonTitleEl.textContent = model.lockTitle;
-  operatorLockReasonDetailEl.textContent = model.lockDetail;
-  setOperatorChecklistStep(
-    operatorStepSessionItemEl,
-    operatorStepSessionPillEl,
-    operatorStepSessionDetailEl,
-    model.sessionStepState,
-    model.sessionStepDetail
-  );
-  setOperatorChecklistStep(
-    operatorStepApplicationItemEl,
-    operatorStepApplicationPillEl,
-    operatorStepApplicationDetailEl,
-    model.applicationStepState,
-    model.applicationStepDetail
-  );
-  setOperatorChecklistStep(
-    operatorStepLifecycleItemEl,
-    operatorStepLifecyclePillEl,
-    operatorStepLifecycleDetailEl,
-    model.lifecycleStepState,
-    model.lifecycleStepDetail
-  );
-  operatorUnlockNextActionsEl.textContent = `Next actions: ${model.nextActions.join("; ")}.`;
-}
-
-function formatEndpointPostureLabel(posture) {
-  const normalized = nonEmptyString(posture);
-  if (!normalized) {
-    return "Unknown";
-  }
-  const compact = normalized.replace(/[_-]+/g, " ").trim();
-  return compact.charAt(0).toUpperCase() + compact.slice(1);
-}
-
-function endpointPostureKind(posture) {
-  const normalized = nonEmptyString(posture)?.toLowerCase().replace(/[\s-]+/g, "_");
-  if (!normalized) {
-    return "warn";
-  }
-  if (
-    normalized.includes("untrusted") ||
-    normalized.includes("invalid") ||
-    normalized.includes("revoked") ||
-    normalized.includes("failed") ||
-    normalized.includes("blocked")
-  ) {
-    return "bad";
-  }
-  if (
-    normalized.includes("trusted") ||
-    normalized.includes("strict") ||
-    normalized.includes("pinned") ||
-    normalized.includes("healthy") ||
-    normalized === "ok" ||
-    normalized === "pass"
-  ) {
-    return "good";
-  }
-  return "warn";
-}
-
-function parseEndpointPostureObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
-}
-
-function endpointPostureCount(value) {
-  const parsed = numberOrUndefined(value);
-  return parsed === undefined ? undefined : Math.floor(parsed);
-}
-
-function formatEndpointPostureCountSummary(posture) {
-  const totalUrls = endpointPostureCount(firstDefined(posture.total_urls, posture.totalUrls));
-  const httpUrls = endpointPostureCount(firstDefined(posture.http_urls, posture.httpUrls));
-  const httpsUrls = endpointPostureCount(firstDefined(posture.https_urls, posture.httpsUrls));
-  if (totalUrls === undefined && httpUrls === undefined && httpsUrls === undefined) {
-    return "";
-  }
-  const totalText = totalUrls !== undefined ? `${totalUrls} total` : "total unknown";
-  const httpsText = httpsUrls !== undefined ? `${httpsUrls} HTTPS` : "HTTPS ?";
-  const httpText = httpUrls !== undefined ? `${httpUrls} HTTP` : "HTTP ?";
-  return `${totalText} (${httpsText} / ${httpText})`;
-}
-
-function endpointPostureKindFromObject(posture, warnings) {
-  const hasRemoteHTTP = parseBooleanLike(firstDefined(posture.has_remote_http, posture.hasRemoteHttp));
-  const mixedScheme = parseBooleanLike(firstDefined(posture.mixed_scheme, posture.mixedScheme));
-  const httpUrls = endpointPostureCount(firstDefined(posture.http_urls, posture.httpUrls));
-  const httpsUrls = endpointPostureCount(firstDefined(posture.https_urls, posture.httpsUrls));
-  if (hasRemoteHTTP === true) {
-    return "bad";
-  }
-  if (mixedScheme === true || warnings.length > 0) {
-    return "warn";
-  }
-  if (httpUrls === 0 && httpsUrls !== undefined && httpsUrls > 0) {
-    return "good";
-  }
-  return "warn";
-}
-
-function endpointPostureGuidanceFromObject(posture, warnings) {
-  const totalUrls = endpointPostureCount(firstDefined(posture.total_urls, posture.totalUrls));
-  const httpUrls = endpointPostureCount(firstDefined(posture.http_urls, posture.httpUrls));
-  const httpsUrls = endpointPostureCount(firstDefined(posture.https_urls, posture.httpsUrls));
-  const mixedScheme = parseBooleanLike(firstDefined(posture.mixed_scheme, posture.mixedScheme));
-  const hasRemoteHTTP = parseBooleanLike(firstDefined(posture.has_remote_http, posture.hasRemoteHttp));
-  const guidanceParts = [];
-  if (totalUrls !== undefined || httpUrls !== undefined || httpsUrls !== undefined) {
-    guidanceParts.push(
-      `URL totals: ${totalUrls ?? "?"} total, ${httpsUrls ?? "?"} HTTPS, ${httpUrls ?? "?"} HTTP.`
-    );
-  }
-  if (mixedScheme === true) {
-    guidanceParts.push("Mixed HTTP/HTTPS endpoint posture detected; prefer HTTPS for issuer and trust endpoints.");
-  } else if (mixedScheme === false && httpUrls === 0 && httpsUrls !== undefined && httpsUrls > 0) {
-    guidanceParts.push("All discovered issuer/trust endpoints are HTTPS.");
-  }
-  if (hasRemoteHTTP === true) {
-    guidanceParts.push("Remote HTTP endpoint detected; migrate remote issuer/trust endpoints to HTTPS.");
-  } else if (hasRemoteHTTP === false && httpUrls !== undefined) {
-    guidanceParts.push("No remote HTTP endpoints detected.");
-  }
-  if (warnings.length > 0) {
-    guidanceParts.push(warnings.join(" "));
-  }
-  if (guidanceParts.length === 0) {
-    return "Endpoint posture object is available. Refresh server status after endpoint changes.";
-  }
-  return guidanceParts.join(" ");
-}
-
-function setEndpointPosture(kind, statusText, guidanceText) {
-  endpointPostureEl.dataset.kind = kind || "warn";
-  endpointPostureLineEl.classList.remove("good", "warn", "bad");
-  if (kind) {
-    endpointPostureLineEl.classList.add(kind);
-  }
-  endpointPostureStatusEl.textContent = statusText;
-  endpointPostureGuidanceEl.textContent = guidanceText;
-}
-
-function refreshEndpointPosture() {
-  const sessionToken = byId("session_token").value.trim();
-  if (!sessionToken && !serverReadiness) {
-    setEndpointPosture(
-      "warn",
-      "Not signed in",
-      "Sign in and refresh server readiness to load endpoint trust posture."
-    );
-    return;
-  }
-
-  if (!serverReadiness) {
-    setEndpointPosture(
-      "warn",
-      "Unknown",
-      "Refresh server readiness to load endpoint trust posture and warnings."
-    );
-    return;
-  }
-
-  const posture = serverReadiness.endpointPosture;
-  const postureObject = parseEndpointPostureObject(posture);
-  const postureText = nonEmptyString(typeof posture === "string" ? posture : undefined);
-  const warnings = Array.isArray(serverReadiness.endpointWarnings)
-    ? serverReadiness.endpointWarnings
-    : [];
-  if (postureObject) {
-    const mode = nonEmptyString(firstDefined(postureObject.server_mode, postureObject.serverMode));
-    const modeText = mode ? `${formatEndpointPostureLabel(mode)} mode` : "Mode unknown";
-    const countSummary = formatEndpointPostureCountSummary(postureObject);
-    const statusText = countSummary ? `${modeText} - ${countSummary}` : modeText;
-    const guidance = endpointPostureGuidanceFromObject(postureObject, warnings);
-    setEndpointPosture(endpointPostureKindFromObject(postureObject, warnings), statusText, guidance);
-    return;
-  }
-
-  if (postureText) {
-    const guidance =
-      warnings.length > 0
-        ? warnings.join(" ")
-        : "No endpoint warnings reported by readiness.";
-    setEndpointPosture(endpointPostureKind(postureText), formatEndpointPostureLabel(postureText), guidance);
-    return;
-  }
-
-  if (warnings.length > 0) {
-    setEndpointPosture("warn", "Warnings reported", warnings.join(" "));
-    return;
-  }
-
-  setEndpointPosture("warn", "Unavailable", "Endpoint posture not provided by readiness payload.");
-}
-
 function setClientReadiness(kind, statusText, guidanceText, state) {
   clientReadinessEl.dataset.kind = kind || "warn";
   clientReadinessEl.dataset.state = state || "unknown";
@@ -4505,42 +3424,20 @@ function syncFailClosedMutatingActionState() {
   const isBusy = document.body.classList.contains("is-busy");
   const lockByFailClosed = configEndpointUnavailableFailClosedMode();
   const sessionFreshness = computeSessionFreshnessState();
-  const lockBySessionExpired = sessionFreshness.state === "expired";
-  const hasChainOperatorID = byId("chain_operator_id").value.trim().length > 0;
-
-  const adminToken = adminTokenEl ? adminTokenEl.value.trim() : "";
-  const moderationCanUseAdminFallback =
-    lockBySessionExpired &&
-    !lockByFailClosed &&
-    operatorApprovalRequireSession !== true &&
-    adminToken.length > 0;
-
-  for (const button of [connectBtnEl, applyOperatorBtnEl, approveOperatorBtnEl, rejectOperatorBtnEl]) {
-    const isModerationAction = button === approveOperatorBtnEl || button === rejectOperatorBtnEl;
-    const lockByExpiredSessionForButton = lockBySessionExpired && !(isModerationAction && moderationCanUseAdminFallback);
-    const lockByMissingChainOperatorID = button === applyOperatorBtnEl && !hasChainOperatorID;
-    const disabled = isBusy || lockByFailClosed || lockByExpiredSessionForButton || lockByMissingChainOperatorID;
-    button.disabled = disabled;
-    button.setAttribute("aria-disabled", String(disabled));
-    if (lockByFailClosed) {
-      button.title = failClosedMutatingActionStatusDetail();
-      continue;
-    }
-    if (lockByExpiredSessionForButton) {
-      button.title = sessionFreshness.detail;
-      continue;
-    }
-    if (lockByMissingChainOperatorID) {
-      button.title = "Chain operator ID is required for operator apply (strict chain binding).";
-      continue;
-    }
-    if (isModerationAction && moderationCanUseAdminFallback) {
-      button.title = "Session expired; admin token fallback is active for this action.";
-      continue;
-    }
-    button.removeAttribute("title");
+  const sessionToken = byId("session_token").value.trim();
+  const lockBySessionExpired = sessionToken.length > 0 && sessionFreshness.state === "expired";
+  const disabled = isBusy || lockByFailClosed || lockBySessionExpired;
+  connectBtnEl.disabled = disabled;
+  connectBtnEl.setAttribute("aria-disabled", String(disabled));
+  if (lockByFailClosed) {
+    connectBtnEl.title = failClosedMutatingActionStatusDetail();
+    return;
   }
-  refreshOperatorApprovalPolicyHint();
+  if (lockBySessionExpired) {
+    connectBtnEl.title = sessionFreshness.detail;
+    return;
+  }
+  connectBtnEl.removeAttribute("title");
 }
 
 function syncClientRegistrationAction(readiness) {
@@ -4591,9 +3488,9 @@ function composeClientRegistrationTrustDriftGuidance() {
 function computeClientReadiness() {
   const token = byId("session_token").value.trim();
   const sessionFreshness = computeSessionFreshnessState();
-  const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
-  const clientTabVisible = serverReadiness?.clientTabVisible;
-  const clientLockReason = serverReadiness?.clientLockReason;
+  const role = (publicReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
+  const clientTabVisible = publicReadiness?.clientTabVisible;
+  const clientLockReason = publicReadiness?.clientLockReason;
 
   if (sessionFreshness.state === "expired") {
     return {
@@ -4613,7 +3510,7 @@ function computeClientReadiness() {
     };
   }
 
-  if (isServerOnlyRole(role) || (clientTabVisible === false && !isServerRoleUnlocked(role))) {
+  if (isServerOnlyRole(role) || clientTabVisible === false) {
     return {
       state: "role_locked",
       kind: "bad",
@@ -4621,7 +3518,7 @@ function computeClientReadiness() {
       guidanceText:
         clientLockReason ||
         (isServerOnlyRole(role)
-          ? "This session is server-only, so the client lane is locked. Continue in Step 3 for server workflow actions."
+          ? "This session is server-only, so the client lane is locked."
           : "Client lane is locked for this role.")
     };
   }
@@ -4644,200 +3541,12 @@ function computeClientReadiness() {
     };
   }
 
-  if (isServerRoleUnlocked(role) && clientTabVisible === false) {
-    return {
-      state: "ready_to_register",
-      kind: "warn",
-      statusText: "Ready to register",
-      guidanceText:
-        `${clientLockReason || "Client registration is required before this operator/admin session can use the client lane."} ` +
-        "Use Register Client to continue."
-    };
-  }
-
   return {
     state: "ready_to_register",
     kind: "warn",
     statusText: "Ready to register",
     guidanceText: "Use Register Client to finish Step 2 and unlock client lane actions."
   };
-}
-
-function computeOperatorReadiness() {
-  const token = byId("session_token").value.trim();
-  const sessionFreshness = computeSessionFreshnessState();
-  const role = (serverReadiness?.role || byId("role").value).trim().toLowerCase() || "client";
-  const statusLabel = formatOperatorApplicationStatusLabel(
-    serverReadiness?.operatorApplicationStatus || operatorApplicationStatus
-  );
-
-  if (sessionFreshness.state === "expired") {
-    return {
-      kind: "bad",
-      statusText: "Session expired",
-      guidanceText: sessionFreshness.detail
-    };
-  }
-
-  if (!token && !serverReadiness) {
-    return {
-      kind: "warn",
-      statusText: "Not signed in",
-      guidanceText: `Sign in first to unlock operator onboarding. ${formatDirectActionGuidance(
-        "Request Challenge, then run Sign + Verify (Wallet) or Verify + Create Session",
-        "active session token"
-      )}`
-    };
-  }
-
-  if (serverReadiness) {
-    if (serverReadiness.lifecycleActionsUnlocked === true) {
-      if (serverReadiness.serviceMutationsConfigured === false) {
-        return {
-          kind: "warn",
-          statusText: statusLabel,
-          guidanceText: appendChainBindingGuidance(
-            "Server role is eligible, but lifecycle commands are not configured on the daemon.",
-            serverReadiness
-          )
-        };
-      }
-      return {
-        kind: "good",
-        statusText: statusLabel,
-        guidanceText: appendChainBindingGuidance(
-          "Server controls are unlocked by backend readiness policy.",
-          serverReadiness
-        )
-      };
-    }
-    const reason = serverReadiness.lockReason || "Server lifecycle actions are locked by backend readiness policy.";
-    const nextActions = serverReadiness.unlockActions.length > 0 ? ` Next: ${serverReadiness.unlockActions.join("; ")}` : "";
-    const requiredConditions =
-      serverReadiness.unlockActions.length > 0
-        ? serverReadiness.unlockActions.join("; ")
-        : "approved operator application and matching session/application chain_operator_id values";
-    return {
-      kind:
-        serverReadiness.operatorApplicationStatus === "rejected" || serverReadiness.tabVisible === false
-          ? "bad"
-          : "warn",
-      statusText: statusLabel,
-      guidanceText: appendChainBindingGuidance(
-        `${reason}${nextActions} ${formatDirectActionGuidance(
-          "Use Apply Operator Role or Check Operator Status, then Refresh Session",
-          requiredConditions
-        )}`,
-        serverReadiness
-      )
-    };
-  }
-
-  if (role === "admin") {
-    return {
-      kind: "good",
-      statusText: statusLabel,
-      guidanceText: "Server controls are eligible for this session role."
-    };
-  }
-
-  if (role === "operator") {
-    switch (operatorApplicationStatus) {
-      case "approved":
-        return {
-          kind: "good",
-          statusText: statusLabel,
-          guidanceText:
-            "Operator application is approved, but server lifecycle unlock still requires strict chain binding (session/app chain_operator_id both present and matching). Refresh readiness/session to confirm."
-        };
-      case "rejected":
-        return {
-          kind: "bad",
-          statusText: statusLabel,
-          guidanceText: `Operator role is not fully eligible. ${formatDirectActionGuidance(
-            "Apply Operator Role again, then Check Operator Status and Refresh Session",
-            "approved operator application and matching session/application chain_operator_id values"
-          )}`
-        };
-      case "pending":
-        return {
-          kind: "warn",
-          statusText: statusLabel,
-          guidanceText: `Operator role is not fully eligible yet. ${formatDirectActionGuidance(
-            "Wait for approval, then Check Operator Status and Refresh Session",
-            "approved operator application and matching session/application chain_operator_id values"
-          )}`
-        };
-      case "not_submitted":
-        return {
-          kind: "warn",
-          statusText: statusLabel,
-          guidanceText: `Operator role is not fully eligible yet. ${formatDirectActionGuidance(
-            "Apply Operator Role",
-            "approved operator application and matching session/application chain_operator_id values"
-          )}`
-        };
-      default:
-        return {
-          kind: "warn",
-          statusText: statusLabel,
-          guidanceText: `Operator role is not fully eligible yet. ${formatDirectActionGuidance(
-            "Check Operator Status and refresh Session",
-            "approved operator application and matching session/application chain_operator_id values"
-          )}`
-        };
-    }
-  }
-
-  switch (operatorApplicationStatus) {
-    case "not_submitted":
-      return {
-        kind: "warn",
-        statusText: statusLabel,
-        guidanceText: `Apply operator role to start server approval. ${formatDirectActionGuidance(
-          "Apply Operator Role",
-          "approved operator application and matching session/application chain_operator_id values"
-        )}`
-      };
-    case "pending":
-      return {
-        kind: "warn",
-        statusText: statusLabel,
-        guidanceText: `Operator application is pending approval. ${formatDirectActionGuidance(
-          "Wait for approval, then Refresh Session",
-          "approved operator application and matching session/application chain_operator_id values"
-        )}`
-      };
-    case "rejected":
-      return {
-        kind: "bad",
-        statusText: statusLabel,
-        guidanceText: `Operator application was rejected. ${formatDirectActionGuidance(
-          "Apply Operator Role again or contact an admin reviewer",
-          "approved operator application and matching session/application chain_operator_id values"
-        )}`
-      };
-    case "approved":
-      return {
-        kind: "warn",
-        statusText: statusLabel,
-        guidanceText: "Approval detected. Refresh or rotate the session to lift role to operator."
-      };
-    default:
-      return {
-        kind: "warn",
-        statusText: statusLabel,
-        guidanceText: "Check operator status to see the next unlock step."
-      };
-  }
-}
-
-function refreshOperatorReadiness() {
-  const readiness = computeOperatorReadiness();
-  setOperatorReadiness(readiness.kind, readiness.statusText, readiness.guidanceText);
-  refreshOperatorUnlockPlan();
-  refreshEndpointPosture();
-  refreshClientReadiness();
 }
 
 function refreshClientReadiness() {
@@ -4851,28 +3560,14 @@ function refreshClientReadiness() {
   syncPortalOnboardingStateBanner();
 }
 
-function setOperatorApplicationStatus(value) {
-  operatorApplicationStatus = normalizeOperatorApplicationStatus(value);
-  refreshOperatorReadiness();
-}
-
 function bindReadinessListeners() {
   byId("session_token").addEventListener("input", () => {
     markSessionFreshnessUnknownForCurrentToken();
-    setServerReadiness(null);
-    setOperatorApplicationStatus(undefined);
-    setSelectedApplicationUpdatedAt("");
+    setPublicReadiness(null);
     clientRegistered = false;
     setClientRegistrationTrustDriftState(false, "");
-    setOperatorListNextCursor("");
+    clearPublicContributionState();
     refreshSessionBootstrapDirectoryControls();
-  });
-  byId("wallet_address").addEventListener("input", () => {
-    setSelectedApplicationUpdatedAt("");
-  });
-  byId("chain_operator_id").addEventListener("input", () => {
-    setSelectedApplicationUpdatedAt("");
-    syncFailClosedMutatingActionState();
   });
   byId("challenge_id").addEventListener("input", () => {
     clearWalletSignatureContext();
@@ -4888,13 +3583,16 @@ function bindReadinessListeners() {
   byId("wallet_provider").addEventListener("change", () => {
     syncWalletExtensionReadinessHint();
   });
-  if (adminTokenEl) {
-    adminTokenEl.addEventListener("input", () => {
-      syncFailClosedMutatingActionState();
-    });
-  }
   walletChainIdEl.addEventListener("input", () => {
     syncWalletExtensionReadinessHint();
+  });
+  contributionRoleEl.addEventListener("change", () => {
+    renderPublicContributionStatus();
+    syncContributionActionState();
+    persistPortalState();
+  });
+  connectProdProfileEl.addEventListener("change", () => {
+    syncConnectRoutePolicy();
   });
 }
 
@@ -4908,24 +3606,14 @@ function bindCompatibilityOverrideListeners() {
   });
 }
 
-function bindOperatorListFilterListeners() {
-  const clearPaginationCursor = () => {
-    operatorListActiveFilters = readOperatorListFilters();
-    setOperatorListNextCursor("");
-  };
-  operatorListStatusEl.addEventListener("change", clearPaginationCursor);
-  operatorListSearchEl.addEventListener("input", clearPaginationCursor);
-  operatorListLimitEl.addEventListener("input", clearPaginationCursor);
-}
-
 function setBusy(isBusy) {
   document.body.classList.toggle("is-busy", isBusy);
   for (const button of actionButtons) {
     button.disabled = isBusy;
     button.setAttribute("aria-disabled", String(isBusy));
   }
-  syncOperatorListNextPageAction();
   syncManualSignInAction();
+  syncContributionActionState();
   if (!isBusy) {
     refreshClientReadiness();
   }
@@ -4974,8 +3662,13 @@ function apiBase() {
   if (parsed.protocol === "http:" && !isLiteralLoopbackHost(parsed.hostname)) {
     throw new Error("HTTP API base URLs are restricted to literal loopback hosts (127.0.0.1 or [::1]).");
   }
-  if (parsed.protocol === "https:" || isLiteralLoopbackHost(parsed.hostname)) {
+  if (
+    isLiteralLoopbackHost(parsed.hostname) ||
+    (parsed.protocol === "https:" && isTrustedRemoteApiHost(parsed.hostname))
+  ) {
     // Allowed.
+  } else if (parsed.protocol === "https:") {
+    throw new Error("Remote API base URLs are restricted to trusted GPM domains.");
   } else {
     throw new Error("Non-loopback API base URLs must use https.");
   }
@@ -4987,6 +3680,14 @@ function localApiAuthToken() {
   return localApiAuthTokenEl.value.trim();
 }
 
+function apiBaseURL() {
+  return new URL(apiBase());
+}
+
+function apiBaseAllowsBearerToken() {
+  return isLiteralLoopbackHost(apiBaseURL().hostname);
+}
+
 function createApiError(response, json) {
   let message =
     (typeof json?.error === "string" && json.error.trim()) || `${response.status} ${response.statusText}`;
@@ -4996,6 +3697,7 @@ function createApiError(response, json) {
   const err = new Error(message);
   err.status = response.status;
   err.statusText = response.statusText;
+  err.payload = json;
   return err;
 }
 
@@ -5013,9 +3715,12 @@ async function post(path, body) {
     "Content-Type": "application/json"
   };
   if (token) {
+    if (!apiBaseAllowsBearerToken()) {
+      throw new Error("Local API bearer token can only be sent to loopback API bases.");
+    }
     headers.Authorization = `Bearer ${token}`;
   }
-  const response = await fetch(`${apiBase()}${path}`, {
+  const response = await fetch(`${apiBaseURL().toString().replace(/\/+$/, "")}${path}`, {
     method: "POST",
     headers,
     body: JSON.stringify(body || {})
@@ -5037,9 +3742,12 @@ async function get(path) {
   const token = localApiAuthToken();
   const headers = {};
   if (token) {
+    if (!apiBaseAllowsBearerToken()) {
+      throw new Error("Local API bearer token can only be sent to loopback API bases.");
+    }
     headers.Authorization = `Bearer ${token}`;
   }
-  const response = await fetch(`${apiBase()}${path}`, {
+  const response = await fetch(`${apiBaseURL().toString().replace(/\/+$/, "")}${path}`, {
     method: "GET",
     headers
   });
@@ -5060,11 +3768,14 @@ function applySession(result) {
   syncSessionDerivedState(result);
   const token = result.session_token || byId("session_token").value.trim();
   byId("session_token").value = token;
-  const role = result.session?.role || result.role || result.profile?.role || "client";
-  byId("role").value = role;
+  const role = result.session?.role || result.role || result.profile?.role;
+  if (typeof role === "string" && role.trim()) {
+    byId("role").value = role.trim();
+  } else if (!byId("role").value.trim()) {
+    byId("role").value = "client";
+  }
   refreshSessionFreshnessFromPayload(result, { tokenOverride: token, clearWhenMissing: true });
   refreshSessionBootstrapDirectoryOptions(result);
-  refreshOperatorReadiness();
   persistPortalState();
 }
 
@@ -5152,10 +3863,28 @@ function challengeIdFromPayload(payload) {
   );
 }
 
+function challengeChainIdFromPayload(payload) {
+  return (
+    nonEmptyString(
+      firstDefined(
+        payload?.chain_id,
+        payload?.chainId,
+        payload?.challenge?.chain_id,
+        payload?.challenge?.chainId
+      )
+    ) || ""
+  );
+}
+
 function applyChallengePayload(payload) {
   const challengeId = challengeIdFromPayload(payload);
   if (challengeId) {
     byId("challenge_id").value = challengeId;
+  }
+  const challengeChainId = challengeChainIdFromPayload(payload);
+  if (challengeChainId) {
+    walletChainIdEl.value = challengeChainId;
+    persistPortalState({ wallet_chain_id: challengeChainId });
   }
   challengeMessageEl.value = challengeMessageFromPayload(payload);
   syncPortalOnboardingStateBanner();
@@ -5164,7 +3893,8 @@ function applyChallengePayload(payload) {
 function readWalletPayload() {
   return {
     wallet_address: byId("wallet_address").value.trim(),
-    wallet_provider: byId("wallet_provider").value
+    wallet_provider: byId("wallet_provider").value,
+    chain_id: walletChainIdEl.value.trim()
   };
 }
 
@@ -5489,13 +4219,11 @@ async function requestAuthVerify(options = {}) {
     Object.assign(request, signatureContext);
   }
   const result = await post("/v1/gpm/auth/verify", request);
-  setOperatorApplicationStatus(undefined);
-  setSelectedApplicationUpdatedAt("");
+  setPublicReadiness(null);
   applySession(result);
   await refreshClientRegistrationStatus({ quiet: true });
-  await refreshOperatorApplicationStatus({ quiet: true });
-  await refreshServerReadinessStatus({ quiet: true });
   await refreshBootstrapTrustStatusBestEffort({ quiet: true });
+  await refreshPublicContributionBestEffort({ quiet: true });
   return result;
 }
 
@@ -5513,19 +4241,6 @@ async function requestSessionLifecycle(action = "status") {
   return post("/v1/gpm/session", { session_token: token, action });
 }
 
-async function requestOperatorStatus() {
-  const walletAddress = byId("wallet_address").value.trim();
-  const sessionToken = optionalFreshSessionToken("Operator status", {
-    allowWalletFallback: true,
-    walletAddress
-  });
-  const request = {
-    session_token: sessionToken,
-    wallet_address: walletAddress || undefined
-  };
-  return post("/v1/gpm/onboarding/operator/status", request);
-}
-
 async function requestClientStatus() {
   const walletAddress = byId("wallet_address").value.trim();
   const sessionToken = optionalFreshSessionToken("Client status", {
@@ -5537,6 +4252,36 @@ async function requestClientStatus() {
     wallet_address: walletAddress || undefined
   };
   return post("/v1/gpm/onboarding/client/status", request);
+}
+
+function publicContributionSessionRequest(actionLabel) {
+  assertSessionFreshForAction(actionLabel, { requireToken: true });
+  return {
+    session_token: byId("session_token").value.trim()
+  };
+}
+
+async function requestPublicContributionStatus() {
+  return post("/v1/gpm/contribution/status", publicContributionSessionRequest("Contribution status"));
+}
+
+async function requestPublicContributionEnable() {
+  const role = publicContributionSelectedRole();
+  const request = publicContributionSessionRequest("Enable contribution");
+  request.role = role;
+  return post("/v1/gpm/contribution/enable", request);
+}
+
+async function requestPublicContributionDisable() {
+  return post("/v1/gpm/contribution/disable", publicContributionSessionRequest("Disable contribution"));
+}
+
+async function requestPublicRewardsCurrentWeek() {
+  return post("/v1/gpm/rewards/current-week", publicContributionSessionRequest("Current week reward"));
+}
+
+async function requestPublicRewardsHistory() {
+  return post("/v1/gpm/rewards/history", publicContributionSessionRequest("Reward history"));
 }
 
 function applyOnboardingOverviewPayload(payload) {
@@ -5552,26 +4297,13 @@ function applyOnboardingOverviewPayload(payload) {
   }
   applyClientRegistrationPayload(payload);
   applyBootstrapTrustStatusPayload(payload);
-  setServerReadiness(parseServerReadiness(payload));
+  setPublicReadiness(parsePublicReadiness(payload));
 }
 
 async function requestOverview() {
   assertSessionFreshForAction("Onboarding overview", { requireToken: true });
   const sessionToken = byId("session_token").value.trim();
   return post("/v1/gpm/onboarding/overview", { session_token: sessionToken });
-}
-
-async function requestServerStatus() {
-  const walletAddress = byId("wallet_address").value.trim();
-  const sessionToken = optionalFreshSessionToken("Server status", {
-    allowWalletFallback: true,
-    walletAddress
-  });
-  const request = {
-    session_token: sessionToken,
-    wallet_address: walletAddress || undefined
-  };
-  return post("/v1/gpm/onboarding/server/status", request);
 }
 
 function connectValidationHint() {
@@ -5593,6 +4325,8 @@ function connectValidationHint() {
 function buildConnectRequest() {
   const pathProfile = byId("path_profile").value;
   const sessionToken = byId("session_token").value.trim();
+  const prodProfile = connectProdProfileRequested();
+  const installRoute = prodProfile || connectInstallRouteEl.checked === true;
   const request = {
     session_token: sessionToken || undefined,
     path_profile: pathProfile,
@@ -5601,9 +4335,11 @@ function buildConnectRequest() {
     discovery_wait_sec: positiveIntegerOrUndefined(connectDiscoveryWaitSecEl.value),
     ready_timeout_sec: positiveIntegerOrUndefined(connectReadyTimeoutSecEl.value),
     run_preflight: connectRunPreflightEl.checked,
-    prod_profile: connectProdProfileEl.checked,
-    install_route: connectInstallRouteEl.checked
+    prod_profile: prodProfile
   };
+  if (installRoute) {
+    request.install_route = true;
+  }
   if (sessionToken && !compatibilityOverrideEnabled()) {
     const bootstrapDirectory = nonEmptyString(sessionBootstrapDirectoryEl.value);
     const bootstrapDirectoryIsRendered =
@@ -5626,73 +4362,148 @@ function buildConnectRequest() {
   return request;
 }
 
+function productionConnectReservationSessionID() {
+  if (window.crypto && typeof window.crypto.randomUUID === "function") {
+    return `gpm-vpn-${window.crypto.randomUUID()}`;
+  }
+  return `gpm-vpn-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function reservationString(payload, key) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  const value = payload[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function reservationPayloadObject(payload) {
+  return payload && typeof payload.reservation === "object" && payload.reservation
+    ? payload.reservation
+    : {};
+}
+
+function productionReservationConfirmed(payload) {
+  const reservation = reservationPayloadObject(payload);
+  const chainStatus = reservationString(payload, "reservation_chain_status").toLowerCase();
+  const stateLabel = reservationString(payload, "reservation_finalization_state").toLowerCase();
+  const reservationStatus = reservationString(reservation, "status").toLowerCase();
+  return (
+    chainStatus === "confirmed" ||
+    chainStatus === "finalized" ||
+    stateLabel === "chain_confirmed" ||
+    stateLabel === "finalized" ||
+    reservationStatus === "confirmed" ||
+    reservationStatus === "finalized"
+  );
+}
+
+function reservationFinalityLabel(payload) {
+  const reservation = reservationPayloadObject(payload);
+  return (
+    reservationString(payload, "reservation_finalization_state") ||
+    reservationString(payload, "reservation_chain_status") ||
+    reservationString(reservation, "status") ||
+    "pending"
+  );
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+async function attachProductionConnectReservation(request) {
+  if (!gpmProductionMode || !request || request.reservation_id || request.reservation_session_id) {
+    return request;
+  }
+  const sessionToken = typeof request.session_token === "string" ? request.session_token.trim() : "";
+  if (!sessionToken) {
+    throw new Error("Production connect requires sign-in before reserving VPN funds.");
+  }
+  let cached =
+    productionConnectReservationCache && productionConnectReservationCache.sessionToken === sessionToken
+      ? productionConnectReservationCache
+      : null;
+  if (!cached) {
+    cached = {
+      sessionToken,
+      sessionID: productionConnectReservationSessionID(),
+      reservationID: ""
+    };
+    productionConnectReservationCache = cached;
+  }
+  let lastResult = null;
+  for (let attempt = 1; attempt <= PRODUCTION_CONNECT_RESERVATION_MAX_ATTEMPTS; attempt += 1) {
+    const reserveRequest = {
+      session_token: sessionToken,
+      session_id: cached.sessionID,
+      amount_micros: PRODUCTION_CONNECT_RESERVATION_AMOUNT_MICROS,
+      currency: PRODUCTION_CONNECT_RESERVATION_CURRENCY
+    };
+    if (cached.reservationID) {
+      reserveRequest.reservation_id = cached.reservationID;
+    }
+    lastResult = await post("/v1/gpm/settlement/reserve-funds", reserveRequest);
+    const reservation = reservationPayloadObject(lastResult);
+    cached.reservationID =
+      reservationString(reservation, "reservation_id") ||
+      reservationString(lastResult, "reservation_id") ||
+      cached.reservationID;
+    cached.sessionID =
+      reservationString(reservation, "session_id") ||
+      reservationString(lastResult, "reservation_session_id") ||
+      cached.sessionID;
+    if (cached.reservationID && cached.sessionID && productionReservationConfirmed(lastResult)) {
+      request.reservation_id = cached.reservationID;
+      request.reservation_session_id = cached.sessionID;
+      return request;
+    }
+    if (attempt < PRODUCTION_CONNECT_RESERVATION_MAX_ATTEMPTS) {
+      await delay(PRODUCTION_CONNECT_RESERVATION_RETRY_DELAY_MS);
+    }
+  }
+  throw new Error(
+    `Production connect fund reservation is not chain-confirmed yet (${reservationFinalityLabel(lastResult)}). Try Connect again in a moment.`
+  );
+}
+
+function confirmExpertInstallRouteRequest(request) {
+  if (!request || request.install_route !== true) {
+    return;
+  }
+  if (connectProdProfileRequested()) {
+    return;
+  }
+  const confirmed = window.confirm(
+    "Expert full-tunnel route confirmation\n\n" +
+      "This will send install_route=true and install the system default route through GPM. " +
+      "Only continue if you intentionally want all device traffic to use the VPN route."
+  );
+  if (!confirmed) {
+    connectInstallRouteEl.checked = false;
+    request.install_route = false;
+    throw new Error("Connect cancelled: expert full-tunnel route was not confirmed.");
+  }
+}
+
 function assertConnectActionAllowed(request) {
   if (configEndpointUnavailableFailClosedMode()) {
     throw new Error(`Connect is unavailable: ${failClosedMutatingActionStatusDetail()}`);
   }
   const sessionToken = typeof request?.session_token === "string" ? request.session_token.trim() : "";
-  if (!sessionToken) {
-    return;
-  }
-  assertSessionFreshForAction("Connect");
   const readiness = computeClientReadiness();
   if (!isClientTabVisibleRole() || readiness.state === "role_locked") {
     throw new Error(`Connect is unavailable: ${readiness.guidanceText}`);
   }
-}
-
-function assertOperatorMutationActionAllowed(actionLabel) {
-  if (configEndpointUnavailableFailClosedMode()) {
-    throw new Error(`${actionLabel} is unavailable: ${failClosedMutatingActionStatusDetail()}`);
-  }
-}
-
-function requiredChainOperatorIDForApply() {
-  const chainOperatorID = byId("chain_operator_id").value.trim();
-  if (!chainOperatorID) {
-    throw new Error(
-      "Operator apply is unavailable: chain_operator_id is required for strict chain binding. Set Chain operator ID and retry."
-    );
-  }
-  return chainOperatorID;
-}
-
-function buildOperatorModerationAuthRequest(actionLabel) {
-  const sessionToken = byId("session_token").value.trim();
-  const adminToken = adminTokenEl.value.trim();
-  const sessionFreshness = computeSessionFreshnessState();
-
-  if (operatorApprovalRequireSession === true) {
-    if (!sessionToken) {
-      throw new Error(
-        `${actionLabel} requires session_token by policy; legacy admin_token fallback is disabled. Sign in with an admin session and retry.`
-      );
+  if (!sessionToken) {
+    if (!compatibilityOverrideEnabled()) {
+      throw new Error(`Connect is unavailable: ${connectValidationHint()}`);
     }
-    if (sessionFreshness.state === "expired") {
-      throw new Error(`${actionLabel} is unavailable: ${sessionFreshness.detail}`);
-    }
-    return {
-      session_token: sessionToken
-    };
+    return;
   }
-
-  if (!sessionToken && !adminToken) {
-    throw new Error(`${actionLabel} requires session_token or admin_token.`);
-  }
-
-  if (sessionToken && sessionFreshness.state === "expired") {
-    if (!adminToken) {
-      throw new Error(`${actionLabel} is unavailable: ${sessionFreshness.detail}`);
-    }
-    return {
-      admin_token: adminToken
-    };
-  }
-
-  return {
-    session_token: sessionToken || undefined,
-    admin_token: adminToken || undefined
-  };
+  assertSessionFreshForAction("Connect");
 }
 
 async function requestConnectControl() {
@@ -5701,6 +4512,8 @@ async function requestConnectControl() {
   if (!request.session_token && (!request.bootstrap_directory || !request.invite_key)) {
     throw new Error(connectValidationHint());
   }
+  confirmExpertInstallRouteRequest(request);
+  await attachProductionConnectReservation(request);
   const result = await post("/v1/connect", request);
   inviteKeyEl.value = "";
   persistPortalState();
@@ -5708,185 +4521,14 @@ async function requestConnectControl() {
 }
 
 async function requestDisconnectControl() {
-  return post("/v1/disconnect", {});
+  const sessionToken = byId("session_token").value.trim();
+  return post("/v1/disconnect", {
+    session_token: sessionToken || undefined
+  });
 }
 
 async function requestConnectionStatus() {
   return get("/v1/status");
-}
-
-async function requestServiceLifecycle(action) {
-  const normalizedAction = nonEmptyString(action)?.toLowerCase();
-  if (!normalizedAction || !["start", "stop", "restart"].includes(normalizedAction)) {
-    throw new Error("service lifecycle action must be start, stop, or restart.");
-  }
-  assertServiceLifecycleActionAllowed(normalizedAction);
-  assertSessionFreshForAction(`Service ${normalizedAction}`, { requireToken: true });
-  const sessionToken = byId("session_token").value.trim();
-  if (!sessionToken) {
-    throw new Error("session_token is required for server lifecycle actions. Sign in first.");
-  }
-  return post(`/v1/gpm/service/${normalizedAction}`, { session_token: sessionToken });
-}
-
-function assertServiceLifecycleActionAllowed(action) {
-  const state = computeServerLifecycleControlState();
-  if (state.disabled) {
-    throw new Error(`${action} is unavailable: ${state.hint || "Server lifecycle controls are locked by policy."}`);
-  }
-}
-
-async function requestAuditRecent() {
-  const filters = readAuditRecentFilters({
-    fallbackLimit: AUDIT_RECENT_DEFAULT_LIMIT,
-    fallbackOffset: 0,
-    fallbackOrder: AUDIT_RECENT_DEFAULT_ORDER
-  });
-  const { path, request } = buildAuditRecentPath(filters);
-  const result = await get(path);
-  return {
-    result,
-    summary: summarizeAuditRecent(result, request)
-  };
-}
-
-async function requestOperatorList(statusOrOptions, limitValue) {
-  assertSessionFreshForAction("Operator list", { requireToken: true });
-  const sessionToken = byId("session_token").value.trim();
-  if (!sessionToken) {
-    throw new Error("session_token is required to list operators. Sign in first.");
-  }
-  let status = statusOrOptions;
-  let limit = limitValue;
-  let search = undefined;
-  let cursor = undefined;
-  if (statusOrOptions && typeof statusOrOptions === "object" && !Array.isArray(statusOrOptions)) {
-    status = statusOrOptions.status;
-    limit = statusOrOptions.limit;
-    search = statusOrOptions.search;
-    cursor = statusOrOptions.cursor;
-  }
-  const request = {
-    session_token: sessionToken
-  };
-  if (status !== undefined) {
-    request.status = typeof status === "string" ? status : String(status);
-  }
-  const normalizedLimit = numberOrUndefined(limit);
-  if (normalizedLimit !== undefined && normalizedLimit >= 1) {
-    request.limit = Math.floor(normalizedLimit);
-  }
-  const normalizedSearch = nonEmptyString(search);
-  if (normalizedSearch) {
-    request.search = normalizedSearch;
-  }
-  const normalizedCursor = nonEmptyString(cursor);
-  if (normalizedCursor) {
-    request.cursor = normalizedCursor;
-  }
-  return post("/v1/gpm/onboarding/operator/list", request);
-}
-
-function operatorListSummaryOptions(request = {}) {
-  return {
-    fallbackStatus: operatorListStatusLabel(request.status),
-    fallbackLimit: normalizeOperatorListLimit(request.limit, OPERATOR_LIST_ALL_LIMIT),
-    fallbackSearch: normalizeOperatorListSearch(request.search),
-    fallbackCursor: normalizeOperatorListSearch(request.cursor)
-  };
-}
-
-async function runOperatorListQuery(request) {
-  const result = await requestOperatorList(request);
-  prefillSelectedOperatorFromListPayload(result, { mode: "merge" });
-  const pagination = extractOperatorListPagination(result, { fallbackCursor: request?.cursor });
-  updateOperatorListContext(
-    {
-      status: request?.status,
-      search: request?.search,
-      limit: request?.limit
-    },
-    pagination.nextCursor || ""
-  );
-  return {
-    result,
-    summary: summarizeOperatorList(result, operatorListSummaryOptions(request))
-  };
-}
-
-async function loadNextPendingOperator() {
-  const listResult = await requestOperatorList("pending", OPERATOR_LOAD_NEXT_LIMIT);
-  const entries = extractOperatorListEntries(listResult);
-  if (entries.length === 0) {
-    return withSessionReconciledHint(
-      {
-        found: false,
-        message: "No pending operator applications are currently queued.",
-        status: "pending",
-        limit: OPERATOR_LOAD_NEXT_LIMIT,
-        returned: 0
-      },
-      listResult
-    );
-  }
-  const nextEntry = entries[0];
-  const { walletAddress, chainOperatorId, selectedApplicationUpdatedAtUtc } = extractOperatorPrefillValues(nextEntry);
-  applySelectedOperatorPrefill(
-    { walletAddress, chainOperatorId, selectedApplicationUpdatedAtUtc },
-    { mode: "replace" }
-  );
-  await refreshServerReadinessStatus({ quiet: true });
-  const message =
-    walletAddress || chainOperatorId
-      ? "Loaded next pending operator into wallet and chain operator fields."
-      : "Loaded next pending queue entry, but wallet/chain operator values were empty.";
-  return withSessionReconciledHint(
-    {
-      found: true,
-      message,
-      wallet_address: walletAddress || null,
-      chain_operator_id: chainOperatorId || null,
-      selected_application_updated_at: selectedApplicationUpdatedAtUtc || null,
-      status: "pending",
-      limit: OPERATOR_LOAD_NEXT_LIMIT,
-      returned: entries.length
-    },
-    listResult
-  );
-}
-
-async function reconcileSessionAfterModerationDecision() {
-  const token = byId("session_token").value.trim();
-  if (!token) {
-    await refreshOperatorApplicationStatus({ quiet: true });
-    await refreshServerReadinessStatus({ quiet: true });
-    return {
-      attempted: false,
-      reason: "session token unavailable"
-    };
-  }
-  try {
-    const result = await requestSessionLifecycle("status");
-    syncSessionDerivedState(result);
-    byId("role").value = sessionRoleFromResult(result);
-    await refreshClientRegistrationStatus({ quiet: true });
-    await refreshOperatorApplicationStatus({ quiet: true });
-    await refreshServerReadinessStatus({ quiet: true });
-    persistPortalState();
-    return {
-      attempted: true,
-      ok: true,
-      session: result
-    };
-  } catch (err) {
-    await refreshOperatorApplicationStatus({ quiet: true });
-    await refreshServerReadinessStatus({ quiet: true });
-    return {
-      attempted: true,
-      ok: false,
-      error: String(err && err.message ? err.message : err)
-    };
-  }
 }
 
 async function refreshClientRegistrationStatus(options = {}) {
@@ -5918,49 +4560,33 @@ async function refreshClientRegistrationStatus(options = {}) {
   }
 }
 
-async function refreshOperatorApplicationStatus(options = {}) {
-  const { quiet = true } = options;
+async function refreshPublicContributionBestEffort(options = {}) {
+  const { quiet = true, includeHistory = false } = options;
   if (!byId("session_token").value.trim()) {
-    setOperatorApplicationStatus(undefined);
+    clearPublicContributionState();
     return undefined;
   }
   try {
-    const result = await requestOperatorStatus();
-    setOperatorApplicationStatus(parseOperatorApplicationStatus(result));
-    applySelectedOperatorPrefill(extractOperatorPrefillValues(result), { mode: "merge" });
-    return result;
-  } catch (err) {
-    if (!quiet) {
-      throw err;
-    }
-    return undefined;
-  }
-}
-
-async function refreshServerReadinessStatus(options = {}) {
-  const { quiet = true } = options;
-  const sessionToken = byId("session_token").value.trim();
-  const walletAddress = byId("wallet_address").value.trim();
-  if (!sessionToken && !walletAddress) {
-    setServerReadiness(null);
-    return undefined;
-  }
-  if (sessionToken) {
+    const status = await requestPublicContributionStatus();
+    applyPublicContributionStatusPayload(status);
     try {
-      const overview = await requestOverview();
-      applyOnboardingOverviewPayload(overview);
-      return overview;
+      const currentWeek = await requestPublicRewardsCurrentWeek();
+      applyPublicCurrentWeekRewardPayload(currentWeek);
     } catch {
-      // Fallback to legacy per-endpoint status refresh for compatibility.
+      // Current-week rewards are additive; keep contribution status usable if this read fails.
     }
-  }
-  try {
-    const result = await requestServerStatus();
-    refreshSessionFreshnessFromPayload(result);
-    setServerReadiness(parseServerReadiness(result));
-    return result;
+    if (includeHistory) {
+      try {
+        const history = await requestPublicRewardsHistory();
+        applyPublicRewardHistoryPayload(history);
+      } catch {
+        // History is non-critical for the status refresh path.
+      }
+    }
+    return status;
   } catch (err) {
-    setServerReadiness(null);
+    publicContributionStatusPayload = null;
+    renderPublicContributionStatus();
     if (!quiet) {
       throw err;
     }
@@ -6002,12 +4628,6 @@ tabClientEl.addEventListener("click", () => {
   }
 });
 
-tabServerEl.addEventListener("click", () => {
-  if (!tabServerEl.disabled) {
-    activateWorkspaceTab("server");
-  }
-});
-
 byId("challenge_btn").addEventListener("click", () =>
   run("auth_challenge", requestAuthChallenge)
 );
@@ -6034,9 +4654,8 @@ byId("session_btn").addEventListener("click", () =>
     const result = await requestSessionLifecycle("status");
     applySession(result);
     await refreshClientRegistrationStatus({ quiet: true });
-    await refreshOperatorApplicationStatus({ quiet: true });
-    await refreshServerReadinessStatus({ quiet: true });
     await refreshBootstrapTrustStatusBestEffort({ quiet: true });
+    await refreshPublicContributionBestEffort({ quiet: true });
     persistPortalState();
     return result;
   })
@@ -6046,12 +4665,10 @@ byId("session_rotate_btn").addEventListener("click", () =>
   run("session_rotate", async () => {
     const result = await requestSessionLifecycle("refresh");
     applySession(result);
-    setOperatorApplicationStatus(undefined);
-    setSelectedApplicationUpdatedAt("");
+    setPublicReadiness(null);
     await refreshClientRegistrationStatus({ quiet: true });
-    await refreshOperatorApplicationStatus({ quiet: true });
-    await refreshServerReadinessStatus({ quiet: true });
     await refreshBootstrapTrustStatusBestEffort({ quiet: true });
+    await refreshPublicContributionBestEffort({ quiet: true });
     persistPortalState();
     return result;
   })
@@ -6065,9 +4682,8 @@ byId("session_revoke_btn").addEventListener("click", () =>
     clearSessionFreshnessTelemetry();
     byId("session_token").value = "";
     byId("role").value = "client";
-    setOperatorApplicationStatus(undefined);
-    setSelectedApplicationUpdatedAt("");
-    setServerReadiness(null);
+    setPublicReadiness(null);
+    clearPublicContributionState();
     persistPortalState();
     await refreshBootstrapTrustStatusBestEffort({ quiet: true });
     return result;
@@ -6076,13 +4692,6 @@ byId("session_revoke_btn").addEventListener("click", () =>
 
 byId("manifest_btn").addEventListener("click", () =>
   run("bootstrap_manifest", requestBootstrapManifest)
-);
-
-byId("audit_recent_btn").addEventListener("click", () =>
-  run("audit_recent", requestAuditRecent, {
-    outputMapper: (result) => result.summary.output,
-    successDetail: (result) => result.summary.detail
-  })
 );
 
 byId("register_client_btn").addEventListener("click", () =>
@@ -6105,8 +4714,8 @@ byId("register_client_btn").addEventListener("click", () =>
     const result = await post("/v1/gpm/onboarding/client/register", request);
     applySession(result);
     await refreshClientRegistrationStatus({ quiet: true });
-    await refreshServerReadinessStatus({ quiet: true });
     await refreshBootstrapTrustStatusBestEffort({ quiet: true });
+    await refreshPublicContributionBestEffort({ quiet: true });
     return result;
   })
 );
@@ -6136,222 +4745,94 @@ byId("overview_status_btn").addEventListener("click", () =>
       return result;
     },
     {
-      successDetail: () => "Onboarding overview refreshed for client and operator lanes."
+      successDetail: () => "Onboarding overview refreshed for the public client lane."
     }
   )
 );
 
-byId("apply_operator_btn").addEventListener("click", () =>
-  run("operator_apply", async () => {
-    assertOperatorMutationActionAllowed("Operator apply");
-    assertSessionFreshForAction("Operator apply", { requireToken: true });
-    const chainOperatorID = requiredChainOperatorIDForApply();
-    const request = {
-      session_token: byId("session_token").value.trim(),
-      chain_operator_id: chainOperatorID,
-      server_label: byId("server_label").value.trim() || undefined
-    };
-    const result = await post("/v1/gpm/onboarding/operator/apply", request);
-    const parsedStatus = parseOperatorApplicationStatus(result);
-    if (parsedStatus) {
-      setOperatorApplicationStatus(parsedStatus);
-    } else {
-      await refreshOperatorApplicationStatus({ quiet: true });
-    }
-    await refreshServerReadinessStatus({ quiet: true });
-    return result;
-  })
-);
-
-byId("operator_status_btn").addEventListener("click", () =>
-  run("operator_status", async () => {
-    const result = await requestOperatorStatus();
-    refreshSessionFreshnessFromPayload(result);
-    setOperatorApplicationStatus(parseOperatorApplicationStatus(result));
-    applySelectedOperatorPrefill(extractOperatorPrefillValues(result), { mode: "merge" });
-    await refreshServerReadinessStatus({ quiet: true });
-    return result;
-  })
-);
-
-byId("operator_list_pending_btn").addEventListener("click", () =>
+contributionStatusBtnEl.addEventListener("click", () =>
   run(
-    "operator_list_pending",
+    "contribution_status",
     async () => {
-      const filters = readOperatorListFilters({
-        fallbackStatus: "pending",
-        fallbackLimit: OPERATOR_PENDING_LIST_LIMIT
-      });
-      return runOperatorListQuery({
-        status: "pending",
-        search: filters.search,
-        limit: OPERATOR_PENDING_LIST_LIMIT
-      });
+      const result = await requestPublicContributionStatus();
+      applyPublicContributionStatusPayload(result);
+      await refreshPublicContributionBestEffort({ quiet: true });
+      return result;
     },
     {
-      outputMapper: (result) => result.summary.output,
-      successDetail: (result) => result.summary.detail
+      successDetail: () => "Contribution eligibility refreshed for the signed-in session."
     }
   )
 );
 
-byId("operator_load_next_pending_btn").addEventListener("click", () =>
-  run("operator_load_next_pending", loadNextPendingOperator, {
-    successDetail: (result) =>
-      result?.message || "No pending operator applications are currently queued."
-  })
-);
-
-byId("operator_list_all_btn").addEventListener("click", () =>
+contributionEnableBtnEl.addEventListener("click", () =>
   run(
-    "operator_list_all",
+    "contribution_enable",
     async () => {
-      return runOperatorListQuery(readOperatorListFilters({ fallbackLimit: OPERATOR_LIST_ALL_LIMIT }));
+      const state = computeContributionActionState();
+      if (!state.statusLoaded) {
+        throw new Error("Enable contribution is unavailable: run Contribution Status first.");
+      }
+      if (!state.canEnable) {
+        throw new Error(`Enable contribution is unavailable: ${publicContributionLockReason(publicContributionStatusPayload, state.selectedRole)}`);
+      }
+      const result = await requestPublicContributionEnable();
+      applyPublicContributionStatusPayload(result);
+      await refreshPublicContributionBestEffort({ quiet: true });
+      return result;
     },
     {
-      outputMapper: (result) => result.summary.output,
-      successDetail: (result) => result.summary.detail
+      successDetail: () => "Contribution enabled for this signed-in device."
     }
   )
 );
 
-byId("operator_list_next_page_btn").addEventListener("click", () =>
+contributionDisableBtnEl.addEventListener("click", () =>
   run(
-    "operator_list_next_page",
+    "contribution_disable",
     async () => {
-      if (!operatorListNextCursor) {
-        throw new Error("No next_cursor is available. Run an operator list query first.");
+      const state = computeContributionActionState();
+      if (!state.enabled) {
+        throw new Error("Disable contribution is unavailable: contribution is not currently enabled.");
       }
-      return runOperatorListQuery({
-        ...operatorListActiveFilters,
-        cursor: operatorListNextCursor
-      });
+      const result = await requestPublicContributionDisable();
+      applyPublicContributionStatusPayload(result);
+      await refreshPublicContributionBestEffort({ quiet: true });
+      return result;
     },
     {
-      outputMapper: (result) => result.summary.output,
-      successDetail: (result) => result.summary.detail
+      successDetail: () => "Contribution disabled for this signed-in device."
     }
   )
 );
 
-byId("approve_operator_btn").addEventListener("click", () =>
+rewardCurrentWeekBtnEl.addEventListener("click", () =>
   run(
-    "operator_approve",
+    "reward_current_week",
     async () => {
-      assertOperatorMutationActionAllowed("Operator approve");
-      const moderationAuth = buildOperatorModerationAuthRequest("Operator approve");
-      const request = {
-        wallet_address: byId("wallet_address").value.trim(),
-        approved: true
-      };
-      if (moderationAuth.session_token) {
-        request.session_token = moderationAuth.session_token;
-      }
-      const ifUpdatedAtUtc = selectedApplicationUpdatedAt();
-      if (ifUpdatedAtUtc) {
-        request.if_updated_at_utc = ifUpdatedAtUtc;
-      }
-      if (moderationAuth.admin_token) {
-        request.admin_token = moderationAuth.admin_token;
-      }
-      const reason = operatorModerationReason();
-      if (reason) {
-        request.reason = reason;
-      }
-      let moderationResult = null;
-      try {
-        moderationResult = await post("/v1/gpm/onboarding/operator/approve", request);
-      } catch (err) {
-        if (isDecisionConflictError(err)) {
-          return {
-            conflict: true,
-            error: String(err && err.message ? err.message : err),
-            guidance: OPERATOR_DECISION_CONFLICT_GUIDANCE
-          };
-        }
-        throw err;
-      }
-      const sessionReconciliation = await reconcileSessionAfterModerationDecision();
-      return {
-        moderation_result: moderationResult,
-        session_reconciliation: sessionReconciliation
-      };
+      const result = await requestPublicRewardsCurrentWeek();
+      applyPublicCurrentWeekRewardPayload(result);
+      return result;
     },
     {
-      successDetail: (result) => {
-        if (result?.conflict) {
-          return result.guidance || OPERATOR_DECISION_CONFLICT_GUIDANCE;
-        }
-        const reconciliation = result?.session_reconciliation;
-        if (reconciliation?.attempted === false) {
-          return "Operator approved. Session status refresh skipped because no session token was available.";
-        }
-        if (reconciliation?.ok === false) {
-          return `Operator approved. Session status refresh failed (${reconciliation.error}).`;
-        }
-        return "Operator approved and session status refreshed.";
-      },
-      successKind: (result) => (result?.conflict ? "warn" : "good")
+      successDetail: () => "Current-week reward summary refreshed for the signed-in session."
     }
   )
 );
 
-byId("reject_operator_btn").addEventListener("click", () =>
+rewardHistoryBtnEl.addEventListener("click", () =>
   run(
-    "operator_reject",
+    "reward_history",
     async () => {
-      assertOperatorMutationActionAllowed("Operator reject");
-      const moderationAuth = buildOperatorModerationAuthRequest("Operator reject");
-      const reason = operatorModerationReason();
-      if (!reason) {
-        throw new Error("moderation reason is required to reject an operator.");
-      }
-      const request = {
-        wallet_address: byId("wallet_address").value.trim(),
-        approved: false,
-        reason
-      };
-      if (moderationAuth.session_token) {
-        request.session_token = moderationAuth.session_token;
-      }
-      if (moderationAuth.admin_token) {
-        request.admin_token = moderationAuth.admin_token;
-      }
-      const ifUpdatedAtUtc = selectedApplicationUpdatedAt();
-      if (ifUpdatedAtUtc) {
-        request.if_updated_at_utc = ifUpdatedAtUtc;
-      }
-      let moderationResult = null;
-      try {
-        moderationResult = await post("/v1/gpm/onboarding/operator/approve", request);
-      } catch (err) {
-        if (isDecisionConflictError(err)) {
-          return {
-            conflict: true,
-            error: String(err && err.message ? err.message : err),
-            guidance: OPERATOR_DECISION_CONFLICT_GUIDANCE
-          };
-        }
-        throw err;
-      }
-      const sessionReconciliation = await reconcileSessionAfterModerationDecision();
-      return {
-        moderation_result: moderationResult,
-        session_reconciliation: sessionReconciliation
-      };
+      const result = await requestPublicRewardsHistory();
+      applyPublicRewardHistoryPayload(result);
+      return result;
     },
     {
-      successDetail: (result) => {
-        if (result?.conflict) {
-          return result.guidance || OPERATOR_DECISION_CONFLICT_GUIDANCE;
-        }
-        const reconciliation = result?.session_reconciliation;
-        if (reconciliation?.ok === false) {
-          return `Operator rejected. Session status refresh failed (${reconciliation.error}).`;
-        }
-        return "Operator rejected and session status refreshed.";
-      },
-      successKind: (result) => (result?.conflict ? "warn" : "good")
+      successDetail: (result) =>
+        `${publicContributionHistoryRewards(result).length} reward history entr${
+          publicContributionHistoryRewards(result).length === 1 ? "y" : "ies"
+        } loaded for the signed-in session.`
     }
   )
 );
@@ -6398,69 +4879,12 @@ byId("status_btn").addEventListener("click", () =>
   )
 );
 
-serverStartBtnEl.addEventListener("click", () =>
-  run(
-    "service_start",
-    async () => {
-      const result = await requestServiceLifecycle("start");
-      await refreshServerReadinessStatus({ quiet: true });
-      return result;
-    },
-    {
-      successDetail: () => "Server start request completed."
-    }
-  )
-);
-
-serverStopBtnEl.addEventListener("click", () =>
-  run(
-    "service_stop",
-    async () => {
-      const result = await requestServiceLifecycle("stop");
-      await refreshServerReadinessStatus({ quiet: true });
-      return result;
-    },
-    {
-      successDetail: () => "Server stop request completed."
-    }
-  )
-);
-
-serverRestartBtnEl.addEventListener("click", () =>
-  run(
-    "service_restart",
-    async () => {
-      const result = await requestServiceLifecycle("restart");
-      await refreshServerReadinessStatus({ quiet: true });
-      return result;
-    },
-    {
-      successDetail: () => "Server restart request completed."
-    }
-  )
-);
-
-byId("status_btn_server").addEventListener("click", () =>
-  run(
-    "status_server",
-    async () => {
-      const result = await requestConnectionStatus();
-      updateConnectionDashboard("status", result);
-      return result;
-    },
-    {
-      successDetail: () => "Connection status refreshed."
-    }
-  )
-);
-
 async function restoreSessionStatusBestEffort() {
   const token = byId("session_token").value.trim();
   if (!token) {
     clearSessionFreshnessTelemetry();
-    setServerReadiness(null);
-    setOperatorApplicationStatus(undefined);
-    setSelectedApplicationUpdatedAt("");
+    setPublicReadiness(null);
+    clearPublicContributionState();
     await refreshBootstrapTrustStatusBestEffort({ quiet: true });
     return;
   }
@@ -6483,9 +4907,8 @@ async function restoreSessionStatusBestEffort() {
     setStatus("warn", "Session check skipped", "Stored session token could not be validated. You can refresh or sign in again.");
   }
   await refreshClientRegistrationStatus({ quiet: true });
-  await refreshOperatorApplicationStatus({ quiet: true });
-  await refreshServerReadinessStatus({ quiet: true });
   await refreshBootstrapTrustStatusBestEffort({ quiet: true });
+  await refreshPublicContributionBestEffort({ quiet: true });
 }
 
 function initializePortal() {
@@ -6498,19 +4921,16 @@ function initializePortal() {
     detail: CONNECTION_DEFAULT_DETAIL
   });
   activateWorkspaceTab(activeWorkspaceTab);
-  setSelectedApplicationUpdatedAt(selectedApplicationUpdatedAtEl.value, { persist: false });
-  operatorListActiveFilters = readOperatorListFilters({ fallbackLimit: OPERATOR_LIST_ALL_LIMIT });
-  writeOperatorListFilters(operatorListActiveFilters);
-  setOperatorListNextCursor("");
   bindPersistenceListeners();
   bindCompatibilityOverrideListeners();
   bindReadinessListeners();
-  bindOperatorListFilterListeners();
   persistPortalState();
   syncWalletExtensionReadinessHint();
-  refreshOperatorReadiness();
+  syncConnectRoutePolicy();
+  refreshClientReadiness();
   refreshPolicyPostureBanner();
   refreshLegacyAliasWarningBanner();
+  clearPublicContributionState();
   setStatus("good", "Portal ready", "Set an absolute API base, then start with a challenge or session refresh.");
   void refreshConnectPolicyConfigBestEffort({ quiet: true });
   void refreshBootstrapTrustStatusBestEffort({ quiet: true });

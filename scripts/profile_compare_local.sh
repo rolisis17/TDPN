@@ -253,6 +253,21 @@ count_matches() {
   printf '%s\n' "$count"
 }
 
+count_non_none_middle_selections() {
+  local file="$1"
+  local count="0"
+  if [[ -n "$file" && -f "$file" ]]; then
+    count="$( (rg -N 'client selected entry=.* middle=[^ ]+' "$file" 2>/dev/null || true) \
+      | sed -nE 's/.* middle=([^ ]+).*/\1/p' \
+      | awk '$1 != "" && $1 != "none" {c++} END {print c+0}' )"
+  fi
+  count="${count:-0}"
+  if ! [[ "$count" =~ ^[0-9]+$ ]]; then
+    count="0"
+  fi
+  printf '%s\n' "$count"
+}
+
 extract_metric_from_line() {
   local line="$1"
   local key="$2"
@@ -772,16 +787,17 @@ append_run_record() {
   local token_proof_invalid_failures="${17}"
   local unknown_exit_failures="${18}"
   local directory_trust_failures="${19}"
-  local direct_exit_forced="${20}"
-  local output_log="${21}"
-  local client_log="${22}"
-  local command="${23}"
-  local skip_reason="${24}"
-  local selection_policy_sticky_pair_sec="${25}"
-  local selection_policy_entry_rotation_sec="${26}"
-  local selection_policy_entry_rotation_jitter_pct="${27}"
-  local selection_policy_exit_exploration_pct="${28}"
-  local selection_policy_path_profile="${29}"
+  local middle_selection_count="${20}"
+  local direct_exit_forced="${21}"
+  local output_log="${22}"
+  local client_log="${23}"
+  local command="${24}"
+  local skip_reason="${25}"
+  local selection_policy_sticky_pair_sec="${26}"
+  local selection_policy_entry_rotation_sec="${27}"
+  local selection_policy_entry_rotation_jitter_pct="${28}"
+  local selection_policy_exit_exploration_pct="${29}"
+  local selection_policy_path_profile="${30}"
 
   jq -n \
     --arg profile "$profile" \
@@ -803,6 +819,7 @@ append_run_record() {
     --argjson token_proof_invalid_failures "$token_proof_invalid_failures" \
     --argjson unknown_exit_failures "$unknown_exit_failures" \
     --argjson directory_trust_failures "$directory_trust_failures" \
+    --argjson middle_selection_count "$middle_selection_count" \
     --arg direct_exit_forced "$direct_exit_forced" \
     --arg output_log "$output_log" \
     --arg client_log "$client_log" \
@@ -833,6 +850,7 @@ append_run_record() {
       token_proof_invalid_failures: $token_proof_invalid_failures,
       unknown_exit_failures: $unknown_exit_failures,
       directory_trust_failures: $directory_trust_failures,
+      middle_selection_count: $middle_selection_count,
       direct_exit_forced: ($direct_exit_forced == "true"),
       output_log: $output_log,
       client_log: $client_log,
@@ -861,7 +879,7 @@ for profile in "${profiles[@]}"; do
     if [[ -n "$skip_reason" ]]; then
       echo "[profile-compare-local] profile=$profile round=$round_idx status=skip reason=$skip_reason" | tee -a "$summary_log"
       skip_policy_path_profile="$(runtime_path_profile_from_compare_profile "$profile")"
-      append_run_record "$profile" "$round_idx" "skip" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "false" "$run_output_log" "" "" "$skip_reason" "0" "0" "0" "0" "$skip_policy_path_profile"
+      append_run_record "$profile" "$round_idx" "skip" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "false" "$run_output_log" "" "" "$skip_reason" "0" "0" "0" "0" "$skip_policy_path_profile"
       continue
     fi
 
@@ -970,13 +988,14 @@ for profile in "${profiles[@]}"; do
     fi
 
     bootstrap_failures="$(count_matches 'client bootstrap (failed|retry failed):' "$parse_log")"
-    wg_session_count="$(count_matches 'client received wg-session config:' "$parse_log")"
+    wg_session_count="$(count_matches 'client wireguard runtime ready:' "$parse_log")"
     direct_exit_mode_events="$(count_matches 'client direct-exit mode engaged' "$parse_log")"
     direct_exit_fallback_events="$(count_matches 'client direct-exit fallback engaged' "$parse_log")"
     transport_mismatch_failures="$(count_matches 'transport must be wireguard-udp in entry live mode' "$parse_log")"
     token_proof_invalid_failures="$(count_matches 'token proof invalid' "$parse_log")"
     unknown_exit_failures="$(count_matches 'path open denied: unknown-exit' "$parse_log")"
     directory_trust_failures="$(count_matches 'directory key is not trusted' "$parse_log")"
+    middle_selection_count="$(count_non_none_middle_selections "$parse_log")"
 
     direct_exit_forced="false"
     startup_line="$(rg -m 1 'client role enabled:' "$parse_log" || true)"
@@ -1032,6 +1051,7 @@ for profile in "${profiles[@]}"; do
       "$same_operator_count" "$missing_operator_count" "$bootstrap_failures" "$wg_session_count" \
       "$direct_exit_mode_events" "$direct_exit_fallback_events" \
       "$transport_mismatch_failures" "$token_proof_invalid_failures" "$unknown_exit_failures" "$directory_trust_failures" \
+      "$middle_selection_count" \
       "$direct_exit_forced" \
       "$run_output_log" "$client_log_path" "$run_cmd_str" "" \
       "$selection_policy_sticky_pair_sec" "$selection_policy_entry_rotation_sec" "$selection_policy_entry_rotation_jitter_pct" "$selection_policy_exit_exploration_pct" "$selection_policy_path_profile"
@@ -1112,10 +1132,18 @@ transport_mismatch_failures_total="$(jq '[.[] | (.transport_mismatch_failures //
 token_proof_invalid_failures_total="$(jq '[.[] | (.token_proof_invalid_failures // 0)] | add // 0' <<<"$runs_json")"
 unknown_exit_failures_total="$(jq '[.[] | (.unknown_exit_failures // 0)] | add // 0' <<<"$runs_json")"
 directory_trust_failures_total="$(jq '[.[] | (.directory_trust_failures // 0)] | add // 0' <<<"$runs_json")"
+m4_sample_runs="$(jq '[.[] | select(.status != "skip" and ((.middle_selection_count // 0) > 0))] | length' <<<"$runs_json")"
+m4_runs_pass="$(jq '[.[] | select(.status == "pass" and ((.middle_selection_count // 0) > 0))] | length' <<<"$runs_json")"
+m4_runs_fail="$(jq '[.[] | select(.status == "fail" and ((.middle_selection_count // 0) > 0))] | length' <<<"$runs_json")"
+m4_transport_mismatch_failures_total="$(jq '[.[] | select(.status != "skip" and ((.middle_selection_count // 0) > 0)) | (.transport_mismatch_failures // 0)] | add // 0' <<<"$runs_json")"
+m4_token_proof_invalid_failures_total="$(jq '[.[] | select(.status != "skip" and ((.middle_selection_count // 0) > 0)) | (.token_proof_invalid_failures // 0)] | add // 0' <<<"$runs_json")"
+m4_unknown_exit_failures_total="$(jq '[.[] | select(.status != "skip" and ((.middle_selection_count // 0) > 0)) | (.unknown_exit_failures // 0)] | add // 0' <<<"$runs_json")"
+m4_directory_trust_failures_total="$(jq '[.[] | select(.status != "skip" and ((.middle_selection_count // 0) > 0)) | (.directory_trust_failures // 0)] | add // 0' <<<"$runs_json")"
 
 m4_logs_scanned=0
 m4_adaptive_wiring_signal_hits=0
 m4_trust_tier_wiring_signal_hits=0
+m4_middle_selection_signal_hits=0
 while IFS= read -r m4_log_path; do
   m4_log_path="$(trim "$m4_log_path")"
   [[ -z "$m4_log_path" ]] && continue
@@ -1123,6 +1151,7 @@ while IFS= read -r m4_log_path; do
     m4_logs_scanned=$((m4_logs_scanned + 1))
     m4_adaptive_wiring_signal_hits=$((m4_adaptive_wiring_signal_hits + $(count_matches 'demotion|promotion|quarantine|eligibility' "$m4_log_path")))
     m4_trust_tier_wiring_signal_hits=$((m4_trust_tier_wiring_signal_hits + $(count_matches 'trust[- ]tier|port[ _-]?unlock|allow[- ]list|tier[[:space:]]*[123]' "$m4_log_path")))
+    m4_middle_selection_signal_hits=$((m4_middle_selection_signal_hits + $(count_non_none_middle_selections "$m4_log_path")))
   fi
 done < <(jq -r '
   [.[] | select(.status != "skip") | (.client_log // ""), (.output_log // "")]
@@ -1133,13 +1162,16 @@ done < <(jq -r '
 m4_quality_score_json="null"
 m4_quality_band=""
 m4_quality_reason="no executed profile runs were available"
-if ((runs_executed > 0)); then
+if ((runs_executed > 0 && m4_middle_selection_signal_hits == 0)); then
+  m4_quality_reason="no non-none middle-hop selections were observed"
+fi
+if ((runs_executed > 0 && m4_sample_runs > 0)); then
   m4_quality_score_json="$(awk \
-    -v tm="$transport_mismatch_failures_total" \
-    -v tp="$token_proof_invalid_failures_total" \
-    -v ue="$unknown_exit_failures_total" \
-    -v dt="$directory_trust_failures_total" \
-    -v runs="$runs_executed" '
+    -v tm="$m4_transport_mismatch_failures_total" \
+    -v tp="$m4_token_proof_invalid_failures_total" \
+    -v ue="$m4_unknown_exit_failures_total" \
+    -v dt="$m4_directory_trust_failures_total" \
+    -v runs="$m4_sample_runs" '
     BEGIN {
       penalty = ((tm * 4.0) + (tp * 8.0) + (ue * 8.0) + (dt * 6.0)) / runs;
       if (penalty < 0) penalty = 0;
@@ -1166,18 +1198,24 @@ if ((runs_executed > 0)); then
   m4_quality_reason=""
 fi
 
-m4_demotion_signal_count=$((transport_mismatch_failures_total + token_proof_invalid_failures_total + unknown_exit_failures_total + directory_trust_failures_total))
-m4_promotion_signal_count="$(jq '[.[] | select(.status == "pass" and ((.transport_mismatch_failures // 0) == 0) and ((.token_proof_invalid_failures // 0) == 0) and ((.unknown_exit_failures // 0) == 0) and ((.directory_trust_failures // 0) == 0))] | length' <<<"$runs_json")"
+m4_demotion_signal_count=$((m4_transport_mismatch_failures_total + m4_token_proof_invalid_failures_total + m4_unknown_exit_failures_total + m4_directory_trust_failures_total))
+m4_promotion_signal_count="$(jq '[.[] | select(.status == "pass" and ((.middle_selection_count // 0) > 0) and ((.transport_mismatch_failures // 0) == 0) and ((.token_proof_invalid_failures // 0) == 0) and ((.unknown_exit_failures // 0) == 0) and ((.directory_trust_failures // 0) == 0))] | length' <<<"$runs_json")"
 
 m4_adaptive_available="false"
 m4_adaptive_reason="adaptive demotion/promotion evidence is unavailable because no runs executed"
 m4_demotion_candidate_json="null"
 m4_promotion_candidate_json="null"
-if ((runs_executed > 0)); then
+if ((runs_executed > 0 && m4_middle_selection_signal_hits == 0)); then
+  m4_adaptive_reason="adaptive demotion/promotion evidence requires at least one non-none middle-hop selection"
+elif ((runs_executed > 0)); then
   m4_adaptive_available="true"
   if ((m4_demotion_signal_count > 0)); then
     m4_adaptive_reason="quality degradations were observed; demotion signals are present"
     m4_demotion_candidate_json="true"
+    m4_promotion_candidate_json="false"
+  elif ((m4_runs_fail > 0)); then
+    m4_adaptive_reason="failed profile runs were observed; promotion is blocked"
+    m4_demotion_candidate_json="false"
     m4_promotion_candidate_json="false"
   elif ((m4_promotion_signal_count > 0)); then
     m4_adaptive_reason="clean pass evidence observed; promotion signals are present"
@@ -1205,10 +1243,18 @@ m4_micro_relay_evidence_json="$(jq -nc \
   --argjson runs_executed "$runs_executed" \
   --argjson runs_pass "$runs_pass" \
   --argjson runs_fail "$runs_fail" \
+  --argjson m4_sample_runs "$m4_sample_runs" \
+  --argjson m4_runs_pass "$m4_runs_pass" \
+  --argjson m4_runs_fail "$m4_runs_fail" \
+  --argjson middle_selection_signal_hits "$m4_middle_selection_signal_hits" \
   --argjson transport_mismatch_failures_total "$transport_mismatch_failures_total" \
   --argjson token_proof_invalid_failures_total "$token_proof_invalid_failures_total" \
   --argjson unknown_exit_failures_total "$unknown_exit_failures_total" \
   --argjson directory_trust_failures_total "$directory_trust_failures_total" \
+  --argjson m4_transport_mismatch_failures_total "$m4_transport_mismatch_failures_total" \
+  --argjson m4_token_proof_invalid_failures_total "$m4_token_proof_invalid_failures_total" \
+  --argjson m4_unknown_exit_failures_total "$m4_unknown_exit_failures_total" \
+  --argjson m4_directory_trust_failures_total "$m4_directory_trust_failures_total" \
   --argjson quality_score "$m4_quality_score_json" \
   --arg quality_band "$m4_quality_band" \
   --arg quality_reason "$m4_quality_reason" \
@@ -1225,22 +1271,36 @@ m4_micro_relay_evidence_json="$(jq -nc \
   --arg trust_tier_reason "$m4_trust_tier_reason" \
   '{
     schema_version: 1,
-    available: ($runs_executed > 0),
-    reason: (if ($runs_executed > 0) then null else "no executed profile runs were available" end),
+    available: ($runs_executed > 0 and $middle_selection_signal_hits > 0),
+    reason: (
+      if ($runs_executed == 0) then "no executed profile runs were available"
+      elif ($middle_selection_signal_hits == 0) then "no non-none middle-hop selections were observed"
+      else null end
+    ),
+    middle_selection_count: $middle_selection_signal_hits,
     micro_relay_quality: {
-      available: ($runs_executed > 0),
-      sample_runs: $runs_executed,
-      quality_score: (if ($runs_executed > 0) then $quality_score else null end),
-      quality_score_avg: (if ($runs_executed > 0) then $quality_score else null end),
-      quality_band: (if ($runs_executed > 0) then (if ($quality_band == "") then null else $quality_band end) else null end),
-      score_formula: "100 - min(100, ((transport*4)+(token*8)+(unknown_exit*8)+(directory_trust*6))/runs_executed)",
+      available: ($m4_sample_runs > 0),
+      sample_runs: $m4_sample_runs,
+      all_executed_runs: $runs_executed,
+      score_denominator_runs: $m4_sample_runs,
+      middle_selection_count: $middle_selection_signal_hits,
+      quality_score: (if ($m4_sample_runs > 0) then $quality_score else null end),
+      quality_score_avg: (if ($m4_sample_runs > 0) then $quality_score else null end),
+      quality_band: (if ($m4_sample_runs > 0) then (if ($quality_band == "") then null else $quality_band end) else null end),
+      score_formula: "100 - min(100, ((transport*4)+(token*8)+(unknown_exit*8)+(directory_trust*6))/middle_selection_sample_runs)",
       signals: {
         runs_pass: $runs_pass,
         runs_fail: $runs_fail,
+        m4_runs_pass: $m4_runs_pass,
+        m4_runs_fail: $m4_runs_fail,
         transport_mismatch_failures_total: $transport_mismatch_failures_total,
         token_proof_invalid_failures_total: $token_proof_invalid_failures_total,
         unknown_exit_failures_total: $unknown_exit_failures_total,
-        directory_trust_failures_total: $directory_trust_failures_total
+        directory_trust_failures_total: $directory_trust_failures_total,
+        m4_transport_mismatch_failures_total: $m4_transport_mismatch_failures_total,
+        m4_token_proof_invalid_failures_total: $m4_token_proof_invalid_failures_total,
+        m4_unknown_exit_failures_total: $m4_unknown_exit_failures_total,
+        m4_directory_trust_failures_total: $m4_directory_trust_failures_total
       },
       reason: (if ($quality_reason == "") then null else $quality_reason end)
     },

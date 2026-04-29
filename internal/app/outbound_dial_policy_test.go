@@ -186,6 +186,16 @@ func TestResolveClientSafeDialAddressBlocksLiteralPrivateIPByDefault(t *testing.
 	}
 }
 
+func TestResolveClientSafeDialAddressBlocksLiteralCGNATIPByDefault(t *testing.T) {
+	_, err := resolveClientSafeDialAddress(context.Background(), nil, "100.64.12.5:443", false, false)
+	if err == nil {
+		t.Fatalf("expected literal CGNAT IP to be blocked by default")
+	}
+	if !strings.Contains(err.Error(), "blocked by outbound dial policy") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestResolveClientSafeDialAddressAllowsPrivateDNSWithDangerousOverride(t *testing.T) {
 	resolver := stubClientOutboundResolver{
 		ips: map[string][]net.IPAddr{
@@ -210,6 +220,21 @@ func TestResolveClientSafeDialAddressStrictModeBlocksPrivateDNSEvenWithDangerous
 	_, err := resolveClientSafeDialAddress(context.Background(), resolver, "example.com:443", true, true)
 	if err == nil {
 		t.Fatalf("expected strict mode to block private DNS resolution even with dangerous override")
+	}
+	if !strings.Contains(err.Error(), "blocked address classes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveClientSafeDialAddressStrictModeBlocksCGNATDNSEvenWithDangerousOverride(t *testing.T) {
+	resolver := stubClientOutboundResolver{
+		ips: map[string][]net.IPAddr{
+			"example.com": {{IP: net.ParseIP("100.100.0.6")}},
+		},
+	}
+	_, err := resolveClientSafeDialAddress(context.Background(), resolver, "example.com:443", true, true)
+	if err == nil {
+		t.Fatalf("expected strict mode to block CGNAT DNS resolution even with dangerous override")
 	}
 	if !strings.Contains(err.Error(), "blocked address classes") {
 		t.Fatalf("unexpected error: %v", err)

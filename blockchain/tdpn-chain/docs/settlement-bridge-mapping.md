@@ -17,10 +17,19 @@ This mapping reflects phase-1 stateful module wiring while keeping chain respons
   - legacy compatibility remains: when `AppID` or `EndUserID` are omitted, mapping falls back to `SubjectID`.
 - optional `tdpnd` settlement HTTP bridge routing:
   - write paths (`POST`):
+    - `POST /x/vpnbilling/reservations` -> `x/vpnbilling`
     - `POST /x/vpnbilling/settlements` -> `x/vpnbilling`
     - `POST /x/vpnrewards/issues` -> `x/vpnrewards`
+      - validation expectation: reject reward issues unless `TrafficProofRef` is an `obj://<proof_path>` locator that resolves to a verified reward proof record bound to the exact reward material.
+      - when `SettlementReferenceID` is supplied, the bridge validates that the settlement exists and matches `SessionID`; the settlement reference is an additional binding check, not a replacement for the verified traffic proof.
+      - when `PayoutPeriodStart`/`PayoutPeriodEnd` are provided, the bridge keys accrual duplicate protection to the Monday 00:00 UTC payout period start rather than mutable `IssuedAt`.
+    - `POST /x/vpnrewards/proofs` -> registers an objective reward proof record before reward issuance.
+      - requires the generic settlement bearer token plus scoped `X-GPM-Reward-Proof-Authorization` when a proof token is configured.
+      - proof records must be verified, use `settlement.reward.objective-traffic.v1`, and bind `obj://<proof_path>` to the exact reward id, provider, session, payout period, amount, currency, and issue time.
     - `POST /x/vpnsponsor/reservations` -> `x/vpnsponsor`
     - `POST /x/vpnslashing/evidence` -> `x/vpnslashing`
+    - `PATCH /x/vpnslashing/evidence/{evidence_id}` with `{"Status":"confirmed"}` -> finalizes objective evidence after trusted bridge/chain finality
+    - `POST /x/vpnslashing/penalties` -> `x/vpnslashing`
     - `POST /x/vpnvalidator/eligibilities` -> `x/vpnvalidator`
     - `POST /x/vpnvalidator/status-records` -> `x/vpnvalidator`
     - `POST /x/vpngovernance/policies` -> `x/vpngovernance`
@@ -32,6 +41,10 @@ This mapping reflects phase-1 stateful module wiring while keeping chain respons
     - `GET /x/vpnbilling/settlements[/{settlement_id}]`
     - `GET /x/vpnrewards/accruals[/{accrual_id}]`
     - `GET /x/vpnrewards/distributions[/{distribution_id}]`
+    - `GET /x/vpnrewards/proofs/{proof_path}` -> read-only objective reward proof registry.
+      - `proof_path` is the escaped path portion of `obj://<proof_path>`.
+      - unknown, unverified, malformed, or path/ref-mismatched proof records return `404`.
+      - proof records are explicit registry entries; the bridge does not synthesize proof records from reward distributions.
     - `GET /x/vpnsponsor/authorizations[/{authorization_id}]`
     - `GET /x/vpnsponsor/delegations[/{reservation_id}]`
     - `GET /x/vpnslashing/evidence[/{evidence_id}]`
@@ -41,20 +54,26 @@ This mapping reflects phase-1 stateful module wiring while keeping chain respons
     - `GET /x/vpngovernance/policies[/{policy_id}]`
     - `GET /x/vpngovernance/decisions[/{decision_id}]`
     - `GET /x/vpngovernance/audit-actions[/{action_id}]`
-  - bridge auth policy: bearer token (when configured) applies to all `POST` writes (including validator/governance write routes); `GET` query routes and `GET /health` remain open.
+  - bridge auth policy: bearer token (when configured) applies to all `POST` writes (including validator/governance write routes); scoped proof/finality headers protect proof registration and trusted finality assertions; `GET` query routes and `GET /health` remain open.
   - optional identity-bound mode: `--settlement-http-auth-principal` (or `SETTLEMENT_HTTP_AUTH_PRINCIPAL`) binds authenticated writes to one canonical caller principal.
     - when configured, `SubjectID` (`/x/vpnbilling/settlements`), `ProviderSubjectID` (`/x/vpnrewards/issues`), `SponsorID` (`/x/vpnsponsor/reservations`), `Decider` (`/x/vpngovernance/decisions`), and `Actor` (`/x/vpngovernance/audit-actions`) must match that principal (case-insensitive); mismatches are rejected (`403`).
     - when configured and those fields are omitted, the bridge auto-fills them from the configured principal.
     - when not configured, legacy behavior is preserved.
 
+## Reservation bridge status
+- `POST /x/vpnbilling/reservations` maps `pkg/settlement` `ReserveFunds` fields to `CreditReservation`, applies the same bridge auth policy as other writes, and rejects conflicting duplicate reservation IDs.
+- Chain-backed `ReserveFunds` must submit this reservation before local settlement can proceed; production paths should fail closed if this write path or adapter capability is unavailable.
+- Remaining release evidence gap: run a live end-to-end proof that exercises `ReserveFunds -> POST /x/vpnbilling/reservations -> POST /x/vpnbilling/settlements -> reward/slash gates` against the target `tdpnd` bridge.
+
 ## Reconciliation contract
 - Records use canonical lifecycle statuses via `types/ReconciliationStatus`: `pending -> submitted -> confirmed`, with explicit `failed` retained for replay/reconciliation.
-- Reconcile can promote settlement/reward/sponsor/slash records from `submitted` to `confirmed` when adapter query surfaces observe corresponding by-id bridge records.
+- Reconcile can promote settlement/sponsor/slash records from `submitted` to `confirmed` when adapter query surfaces observe corresponding by-id bridge records.
+- Rewards reconcile from the distribution record's own terminal status; distribution writes advance accruals to `submitted` by default and do not make a reward final merely by recording the bridge-local accrual side effect.
 - This query-by-id confirmation capability is exposed via optional settlement adapter interface `ChainConfirmationQuerier` (`pkg/settlement/types.go`).
 - Phase-1 app wiring is stateful across all module msg surfaces:
   - `vpnbilling`: reservation create + settlement finalize.
   - `vpnrewards`: accrual create + distribution record.
-  - `vpnslashing`: evidence submit + penalty apply.
+  - `vpnslashing`: evidence submit + explicit evidence confirmation + penalty apply.
   - `vpnsponsor`: authorization create + session-credit delegate.
 - Query surfaces are available for by-id reads across all modules (reservation/settlement, accrual/distribution, evidence/penalty, authorization/delegation).
 - Idempotent replay guarantees are enforced at handler level:

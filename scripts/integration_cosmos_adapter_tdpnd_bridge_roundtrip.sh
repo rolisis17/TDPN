@@ -90,6 +90,8 @@ wait_for_health_ready() {
 }
 
 TOKEN="adapter-roundtrip-token"
+REWARD_PROOF_TOKEN="adapter-roundtrip-proof-token"
+FINALITY_TOKEN="adapter-roundtrip-finality-token"
 ENDPOINT=""
 bind_retry_log_match() {
   grep -Eqi 'address already in use|bind: address already in use|failed to listen on .*address already in use' "${LOG_FILE}" 2>/dev/null
@@ -99,7 +101,7 @@ launch_runtime() {
   local port="$1"
   (
     cd blockchain/tdpn-chain
-    go run ./cmd/tdpnd --settlement-http-listen "127.0.0.1:${port}" --settlement-http-auth-token "${TOKEN}"
+    go run ./cmd/tdpnd --settlement-http-listen "127.0.0.1:${port}" --settlement-http-auth-token "${TOKEN}" --settlement-http-reward-proof-auth-token "${REWARD_PROOF_TOKEN}" --settlement-http-finality-auth-token "${FINALITY_TOKEN}" --settlement-http-reward-proof-verifier-id "adapter-roundtrip-verifier"
   ) >"${LOG_FILE}" 2>&1 &
   TDPND_PID=$!
   ENDPOINT="http://127.0.0.1:${port}"
@@ -176,33 +178,50 @@ func main() {
 	}
 
 	adapter, err := settlement.NewCosmosAdapter(settlement.CosmosAdapterConfig{
-		Endpoint:    endpoint,
-		APIKey:      token,
-		QueueSize:   32,
-		MaxRetries:  1,
-		BaseBackoff: 10 * time.Millisecond,
-		HTTPTimeout: 2 * time.Second,
+		Endpoint:             endpoint,
+		APIKey:               token,
+		TrustedBridgeFinality: true,
+		RewardProofAuthToken: os.Getenv("COSMOS_BRIDGE_REWARD_PROOF_TOKEN"),
+		FinalityAuthToken:    os.Getenv("COSMOS_BRIDGE_FINALITY_TOKEN"),
+		QueueSize:            32,
+		MaxRetries:           1,
+		BaseBackoff:          10 * time.Millisecond,
+		HTTPTimeout:          2 * time.Second,
 	})
 	must(err)
 	defer adapter.Close()
 
 	svc := settlement.NewMemoryService(
 		settlement.WithChainAdapter(adapter),
+		settlement.WithBlockchainMode(true),
 		settlement.WithCurrency("TDPNC"),
 		settlement.WithPricePerMiBMicros(1000),
 	)
 
 	ctx := context.Background()
 	sessionID := "sess-adapter-bridge-1"
+	reservationID := "res-" + sessionID
 
 	_, err = svc.ReserveFunds(ctx, settlement.FundReservation{
-		ReservationID: "res-" + sessionID,
+		ReservationID: reservationID,
 		SessionID:     sessionID,
 		SubjectID:     "client-adapter-1",
 		AmountMicros:  20000,
 		Currency:      "TDPNC",
 	})
 	must(err)
+	reservationDeadline := time.Now().Add(2 * time.Second)
+	for {
+		status, found, err := adapter.FundReservationStatus(ctx, reservationID)
+		must(err)
+		if found && status == settlement.OperationStatusConfirmed {
+			break
+		}
+		if time.Now().After(reservationDeadline) {
+			panic(fmt.Sprintf("reservation %s did not reach confirmed status (found=%t status=%s)", reservationID, found, status))
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 
 	must(svc.RecordUsage(ctx, settlement.UsageRecord{
 		SessionID:    sessionID,
@@ -219,14 +238,38 @@ func main() {
 	assert(settlementRecord.AdapterSubmitted, "expected settlement adapter submission")
 	assert(!settlementRecord.AdapterDeferred, "expected settlement not deferred")
 
-	reward, err := svc.IssueReward(ctx, settlement.RewardIssue{
+	periodStart := time.Date(2025, 12, 29, 0, 0, 0, 0, time.UTC)
+	periodEnd := periodStart.AddDate(0, 0, 7)
+	issuedAt := periodEnd.Add(time.Second)
+	rewardRequest := settlement.RewardIssue{
 		RewardID:          "reward-adapter-1",
 		ProviderSubjectID: "provider-adapter-1",
 		SessionID:         sessionID,
+		TrafficProofRef:   "obj://traffic-proof/reward-adapter-1",
+		PayoutPeriodStart: periodStart,
+		PayoutPeriodEnd:   periodEnd,
 		RewardMicros:      500,
 		Currency:          "TDPNC",
-		IssuedAt:          time.Now().UTC(),
+		IssuedAt:          issuedAt,
+	}
+	_, err = adapter.SubmitRewardProof(ctx, settlement.RewardProofRecord{
+		ProofPath:         "traffic-proof/reward-adapter-1",
+		TrafficProofRef:   rewardRequest.TrafficProofRef,
+		TrustContract:     settlement.RewardProofTrustContractObjectiveTrafficV1,
+		RewardID:          rewardRequest.RewardID,
+		ProviderSubjectID: rewardRequest.ProviderSubjectID,
+		SessionID:         rewardRequest.SessionID,
+		PayoutPeriodStart: periodStart,
+		PayoutPeriodEnd:   periodEnd,
+		RewardMicros:      rewardRequest.RewardMicros,
+		Currency:          rewardRequest.Currency,
+		IssuedAt:          rewardRequest.IssuedAt,
+		Verified:          true,
+		VerifierID:        "adapter-roundtrip-verifier",
+		VerifiedAt:        issuedAt.Add(time.Second),
 	})
+	must(err)
+	reward, err := svc.IssueReward(ctx, rewardRequest)
 	must(err)
 	assert(reward.AdapterSubmitted, "expected reward adapter submission")
 	assert(!reward.AdapterDeferred, "expected reward not deferred")
@@ -251,7 +294,7 @@ func main() {
 		SessionID:     sessionID,
 		ViolationType: "double-sign",
 		EvidenceRef:   "sha256:2935ad7b7d9dec338fd099d83ddcfc1a53c3fc35929197eeb6826db0aa4c684e",
-		SlashMicros:   0,
+		SlashMicros:   2500,
 		Currency:      "TDPNC",
 		ObservedAt:    time.Now().UTC(),
 	})
@@ -275,20 +318,18 @@ func main() {
 	for {
 		report, err := svc.Reconcile(ctx)
 		must(err)
-		if report.PendingAdapterOperations == 0 && report.ConfirmedOperations >= 4 && checkVisible() {
+		if report.PendingAdapterOperations == 0 && checkVisible() {
 			break
 		}
 		if time.Now().After(deadline) {
-			panic(fmt.Sprintf("roundtrip did not reach confirmed visibility (pending=%d confirmed=%d)", report.PendingAdapterOperations, report.ConfirmedOperations))
+			panic(fmt.Sprintf("roundtrip did not reach bridge visibility (pending=%d confirmed=%d)", report.PendingAdapterOperations, report.ConfirmedOperations))
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
 GO
 
-COSMOS_BRIDGE_URL="${ENDPOINT}" COSMOS_BRIDGE_TOKEN="${TOKEN}" go run "${GO_PROG_FILE}"
-
-curl -sS -m 4 "${ENDPOINT}/x/vpnslashing/evidence/evidence-adapter-1" | grep -q '"ViolationType"[[:space:]]*:[[:space:]]*"double-sign"'
+COSMOS_BRIDGE_URL="${ENDPOINT}" COSMOS_BRIDGE_TOKEN="${TOKEN}" COSMOS_BRIDGE_REWARD_PROOF_TOKEN="${REWARD_PROOF_TOKEN}" COSMOS_BRIDGE_FINALITY_TOKEN="${FINALITY_TOKEN}" go run "${GO_PROG_FILE}"
 
 signal_runtime INT
 if ! wait_for_runtime_exit 30; then

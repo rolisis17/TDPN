@@ -5,12 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/build-renderer.mjs",
+    "build:admin-console": "node scripts/build-renderer.mjs --admin-console",
     "preview": "vite preview",
     "check:role-lock": "node scripts/verify-role-lock-contract.mjs",
+    "check:admin-console": "node scripts/verify-admin-console-contract.mjs",
     "check:connect-guardrail": "node scripts/verify-connect-command-guardrails.mjs",
+    "check:public-native": "cd src-tauri && cargo check --no-default-features",
+    "check:admin-console-native": "cd src-tauri && cargo check --features admin-console",
+    "test:public-native": "cd src-tauri && cargo test --no-default-features tests::admin_console_guard_blocks_public_mode_commands -- --exact",
+    "test:admin-console-native": "cd src-tauri && cargo test --features admin-console tests::admin_console_guard_blocks_public_mode_commands -- --exact",
     "generate:windows-icon": "node scripts/ensure-windows-icon.mjs",
     "pretauri": "npm run generate:windows-icon",
+    "tauri:admin-console:dev": "node scripts/run-admin-console.mjs dev",
+    "tauri:admin-console:build": "node scripts/run-admin-console.mjs build",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -18,6 +26,6 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
-    "vite": "^5.4.10"
+    "vite": "^8.0.10"
   }
 }

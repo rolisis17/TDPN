@@ -247,7 +247,8 @@ if ! jq -e '
   and .handoff.dual_write_parity_ok == true
   and .handoff.rollback_path_ready == true
   and .handoff.operator_approval_ok == true
-  and .inputs.requirements.bootstrap_governance_graduation_gate_go == false
+  and .inputs.requirements.mainnet_activation_gate_go == true
+  and .inputs.requirements.bootstrap_governance_graduation_gate_go == true
   and .inputs.requirements.cosmos_module_coverage_floor_ok == true
   and .inputs.requirements.cosmos_keeper_coverage_floor_ok == true
   and .inputs.requirements.cosmos_app_coverage_floor_ok == true
@@ -386,6 +387,7 @@ bash "$SCRIPT_UNDER_TEST" \
   --require-cosmos-app-coverage-floor-ok 0 \
   --require-tdpnd-grpc-auth-live-smoke-ok 0 \
   --require-mainnet-activation-gate-go 0 \
+  --require-bootstrap-governance-graduation-gate-go 0 \
   --show-json 0 >"$RELAXED_LOG" 2>&1
 
 if ! jq -e '

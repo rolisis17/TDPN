@@ -17,9 +17,11 @@ import (
 )
 
 type observedCosmosRequest struct {
-	path    string
-	auth    string
-	payload []byte
+	path         string
+	auth         string
+	finalityAuth string
+	proofAuth    string
+	payload      []byte
 }
 
 func reserveSponsorCreditsForAdapterTest(t *testing.T, svc settlement.Service, reservationID string) settlement.SponsorCreditReservation {
@@ -78,9 +80,11 @@ func TestNewSettlementServiceFromEnvCosmosDefaultSubmitModeHTTP(t *testing.T) {
 		b, _ := io.ReadAll(r.Body)
 		_ = r.Body.Close()
 		reqCh <- observedCosmosRequest{
-			path:    r.URL.Path,
-			auth:    r.Header.Get("Authorization"),
-			payload: b,
+			path:         r.URL.Path,
+			auth:         r.Header.Get("Authorization"),
+			finalityAuth: r.Header.Get("X-GPM-Finality-Authorization"),
+			proofAuth:    r.Header.Get("X-GPM-Reward-Proof-Authorization"),
+			payload:      b,
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -103,6 +107,60 @@ func TestNewSettlementServiceFromEnvCosmosDefaultSubmitModeHTTP(t *testing.T) {
 	}
 	if got.auth != "Bearer api-http" {
 		t.Fatalf("expected auth header to propagate, got %q", got.auth)
+	}
+}
+
+func TestNewSettlementServiceFromEnvCosmosTrustedBridgeFinalityForwardsScopedToken(t *testing.T) {
+	reqCh := make(chan observedCosmosRequest, 2)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		reqCh <- observedCosmosRequest{
+			path:         r.URL.Path,
+			auth:         r.Header.Get("Authorization"),
+			finalityAuth: r.Header.Get("X-GPM-Finality-Authorization"),
+			payload:      b,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	t.Setenv("SETTLEMENT_CHAIN_ADAPTER", "cosmos")
+	t.Setenv("COSMOS_SETTLEMENT_ENDPOINT", ts.URL)
+	t.Setenv("COSMOS_SETTLEMENT_API_KEY", "api-finality")
+	t.Setenv("COSMOS_SETTLEMENT_TRUSTED_BRIDGE_FINALITY", "true")
+	t.Setenv("COSMOS_SETTLEMENT_FINALITY_AUTH_TOKEN", "finality-env-token")
+	t.Setenv("COSMOS_SETTLEMENT_MAX_RETRIES", "0")
+	t.Setenv("COSMOS_SETTLEMENT_HTTP_TIMEOUT_MS", "500")
+
+	svc := newSettlementServiceFromEnv()
+	reservation, err := svc.ReserveFunds(context.Background(), settlement.FundReservation{
+		ReservationID: "res-env-finality",
+		SessionID:     "sess-env-finality",
+		SubjectID:     "subject-env-finality",
+		AmountMicros:  1000,
+		Currency:      "TDPNC",
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	if reservation.Status != settlement.OperationStatusSubmitted {
+		t.Fatalf("expected submitted reservation locally, got %s", reservation.Status)
+	}
+
+	first := waitObservedCosmosRequest(t, reqCh)
+	second := waitObservedCosmosRequest(t, reqCh)
+	if first.path != "/x/vpnbilling/reservations" || second.path != "/x/vpnbilling/reservations" {
+		t.Fatalf("unexpected trusted finality paths: first=%s second=%s", first.path, second.path)
+	}
+	if second.auth != "Bearer api-finality" {
+		t.Fatalf("expected base auth header on finality write, got %q", second.auth)
+	}
+	if second.finalityAuth != "Bearer finality-env-token" {
+		t.Fatalf("expected finality scoped header, got %q", second.finalityAuth)
+	}
+	if !strings.Contains(string(second.payload), `"Status":"confirmed"`) {
+		t.Fatalf("expected confirmed finality payload, got %s", string(second.payload))
 	}
 }
 

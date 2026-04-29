@@ -83,6 +83,10 @@ if ! rg -q 'rpc ListSlashEvidence\(QueryListSlashEvidenceRequest\) returns \(Que
   echo "vpnslashing query proto missing ListSlashEvidence RPC"
   exit 1
 fi
+if ! rg -q 'rpc ConfirmEvidence\(MsgConfirmEvidenceRequest\) returns \(MsgConfirmEvidenceResponse\);' "$PROTO_ROOT/tdpn/vpnslashing/v1/tx.proto"; then
+  echo "vpnslashing tx proto missing ConfirmEvidence RPC"
+  exit 1
+fi
 if ! rg -q 'rpc ListPenaltyDecisions\(QueryListPenaltyDecisionsRequest\) returns \(QueryListPenaltyDecisionsResponse\);' "$PROTO_ROOT/tdpn/vpnslashing/v1/query.proto"; then
   echo "vpnslashing query proto missing ListPenaltyDecisions RPC"
   exit 1

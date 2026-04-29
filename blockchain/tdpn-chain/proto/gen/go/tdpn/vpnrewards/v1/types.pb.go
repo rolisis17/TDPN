@@ -78,16 +78,18 @@ func (ReconciliationStatus) EnumDescriptor() ([]byte, []int) {
 
 // RewardAccrual links settled usage to provider rewards.
 type RewardAccrual struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	AccrualId      string                 `protobuf:"bytes,1,opt,name=accrual_id,json=accrualId,proto3" json:"accrual_id,omitempty"`
-	SessionId      string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	ProviderId     string                 `protobuf:"bytes,3,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
-	AssetDenom     string                 `protobuf:"bytes,4,opt,name=asset_denom,json=assetDenom,proto3" json:"asset_denom,omitempty"`
-	Amount         int64                  `protobuf:"varint,5,opt,name=amount,proto3" json:"amount,omitempty"`
-	AccruedAtUnix  int64                  `protobuf:"varint,6,opt,name=accrued_at_unix,json=accruedAtUnix,proto3" json:"accrued_at_unix,omitempty"`
-	OperationState ReconciliationStatus   `protobuf:"varint,7,opt,name=operation_state,json=operationState,proto3,enum=tdpn.vpnrewards.v1.ReconciliationStatus" json:"operation_state,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	AccrualId       string                 `protobuf:"bytes,1,opt,name=accrual_id,json=accrualId,proto3" json:"accrual_id,omitempty"`
+	SessionId       string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ProviderId      string                 `protobuf:"bytes,3,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	AssetDenom      string                 `protobuf:"bytes,4,opt,name=asset_denom,json=assetDenom,proto3" json:"asset_denom,omitempty"`
+	Amount          int64                  `protobuf:"varint,5,opt,name=amount,proto3" json:"amount,omitempty"`
+	AccruedAtUnix   int64                  `protobuf:"varint,6,opt,name=accrued_at_unix,json=accruedAtUnix,proto3" json:"accrued_at_unix,omitempty"`
+	OperationState  ReconciliationStatus   `protobuf:"varint,7,opt,name=operation_state,json=operationState,proto3,enum=tdpn.vpnrewards.v1.ReconciliationStatus" json:"operation_state,omitempty"`
+	PayoutStartUnix int64                  `protobuf:"varint,8,opt,name=payout_start_unix,json=payoutStartUnix,proto3" json:"payout_start_unix,omitempty"`
+	PayoutEndUnix   int64                  `protobuf:"varint,9,opt,name=payout_end_unix,json=payoutEndUnix,proto3" json:"payout_end_unix,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RewardAccrual) Reset() {
@@ -167,6 +169,20 @@ func (x *RewardAccrual) GetOperationState() ReconciliationStatus {
 		return x.OperationState
 	}
 	return ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED
+}
+
+func (x *RewardAccrual) GetPayoutStartUnix() int64 {
+	if x != nil {
+		return x.PayoutStartUnix
+	}
+	return 0
+}
+
+func (x *RewardAccrual) GetPayoutEndUnix() int64 {
+	if x != nil {
+		return x.PayoutEndUnix
+	}
+	return 0
 }
 
 // DistributionRecord records payout references for accrued rewards.
@@ -250,7 +266,7 @@ var File_tdpn_vpnrewards_v1_types_proto protoreflect.FileDescriptor
 
 const file_tdpn_vpnrewards_v1_types_proto_rawDesc = "" +
 	"\n" +
-	"\x1etdpn/vpnrewards/v1/types.proto\x12\x12tdpn.vpnrewards.v1\"\xa2\x02\n" +
+	"\x1etdpn/vpnrewards/v1/types.proto\x12\x12tdpn.vpnrewards.v1\"\xf6\x02\n" +
 	"\rRewardAccrual\x12\x1d\n" +
 	"\n" +
 	"accrual_id\x18\x01 \x01(\tR\taccrualId\x12\x1d\n" +
@@ -262,7 +278,9 @@ const file_tdpn_vpnrewards_v1_types_proto_rawDesc = "" +
 	"assetDenom\x12\x16\n" +
 	"\x06amount\x18\x05 \x01(\x03R\x06amount\x12&\n" +
 	"\x0faccrued_at_unix\x18\x06 \x01(\x03R\raccruedAtUnix\x12Q\n" +
-	"\x0foperation_state\x18\a \x01(\x0e2(.tdpn.vpnrewards.v1.ReconciliationStatusR\x0eoperationState\"\xe4\x01\n" +
+	"\x0foperation_state\x18\a \x01(\x0e2(.tdpn.vpnrewards.v1.ReconciliationStatusR\x0eoperationState\x12*\n" +
+	"\x11payout_start_unix\x18\b \x01(\x03R\x0fpayoutStartUnix\x12&\n" +
+	"\x0fpayout_end_unix\x18\t \x01(\x03R\rpayoutEndUnix\"\xe4\x01\n" +
 	"\x12DistributionRecord\x12'\n" +
 	"\x0fdistribution_id\x18\x01 \x01(\tR\x0edistributionId\x12\x1d\n" +
 	"\n" +

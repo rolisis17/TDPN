@@ -109,6 +109,94 @@ func (x *MsgSubmitEvidenceResponse) GetEvidence() *SlashEvidence {
 	return nil
 }
 
+type MsgConfirmEvidenceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EvidenceId    string                 `protobuf:"bytes,1,opt,name=evidence_id,json=evidenceId,proto3" json:"evidence_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgConfirmEvidenceRequest) Reset() {
+	*x = MsgConfirmEvidenceRequest{}
+	mi := &file_tdpn_vpnslashing_v1_tx_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgConfirmEvidenceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgConfirmEvidenceRequest) ProtoMessage() {}
+
+func (x *MsgConfirmEvidenceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tdpn_vpnslashing_v1_tx_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgConfirmEvidenceRequest.ProtoReflect.Descriptor instead.
+func (*MsgConfirmEvidenceRequest) Descriptor() ([]byte, []int) {
+	return file_tdpn_vpnslashing_v1_tx_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *MsgConfirmEvidenceRequest) GetEvidenceId() string {
+	if x != nil {
+		return x.EvidenceId
+	}
+	return ""
+}
+
+type MsgConfirmEvidenceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Evidence      *SlashEvidence         `protobuf:"bytes,1,opt,name=evidence,proto3" json:"evidence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgConfirmEvidenceResponse) Reset() {
+	*x = MsgConfirmEvidenceResponse{}
+	mi := &file_tdpn_vpnslashing_v1_tx_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgConfirmEvidenceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgConfirmEvidenceResponse) ProtoMessage() {}
+
+func (x *MsgConfirmEvidenceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tdpn_vpnslashing_v1_tx_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgConfirmEvidenceResponse.ProtoReflect.Descriptor instead.
+func (*MsgConfirmEvidenceResponse) Descriptor() ([]byte, []int) {
+	return file_tdpn_vpnslashing_v1_tx_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *MsgConfirmEvidenceResponse) GetEvidence() *SlashEvidence {
+	if x != nil {
+		return x.Evidence
+	}
+	return nil
+}
+
 type MsgRecordPenaltyRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Penalty       *PenaltyDecision       `protobuf:"bytes,1,opt,name=penalty,proto3" json:"penalty,omitempty"`
@@ -118,7 +206,7 @@ type MsgRecordPenaltyRequest struct {
 
 func (x *MsgRecordPenaltyRequest) Reset() {
 	*x = MsgRecordPenaltyRequest{}
-	mi := &file_tdpn_vpnslashing_v1_tx_proto_msgTypes[2]
+	mi := &file_tdpn_vpnslashing_v1_tx_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -130,7 +218,7 @@ func (x *MsgRecordPenaltyRequest) String() string {
 func (*MsgRecordPenaltyRequest) ProtoMessage() {}
 
 func (x *MsgRecordPenaltyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tdpn_vpnslashing_v1_tx_proto_msgTypes[2]
+	mi := &file_tdpn_vpnslashing_v1_tx_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -143,7 +231,7 @@ func (x *MsgRecordPenaltyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgRecordPenaltyRequest.ProtoReflect.Descriptor instead.
 func (*MsgRecordPenaltyRequest) Descriptor() ([]byte, []int) {
-	return file_tdpn_vpnslashing_v1_tx_proto_rawDescGZIP(), []int{2}
+	return file_tdpn_vpnslashing_v1_tx_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *MsgRecordPenaltyRequest) GetPenalty() *PenaltyDecision {
@@ -162,7 +250,7 @@ type MsgRecordPenaltyResponse struct {
 
 func (x *MsgRecordPenaltyResponse) Reset() {
 	*x = MsgRecordPenaltyResponse{}
-	mi := &file_tdpn_vpnslashing_v1_tx_proto_msgTypes[3]
+	mi := &file_tdpn_vpnslashing_v1_tx_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -174,7 +262,7 @@ func (x *MsgRecordPenaltyResponse) String() string {
 func (*MsgRecordPenaltyResponse) ProtoMessage() {}
 
 func (x *MsgRecordPenaltyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tdpn_vpnslashing_v1_tx_proto_msgTypes[3]
+	mi := &file_tdpn_vpnslashing_v1_tx_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -187,7 +275,7 @@ func (x *MsgRecordPenaltyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgRecordPenaltyResponse.ProtoReflect.Descriptor instead.
 func (*MsgRecordPenaltyResponse) Descriptor() ([]byte, []int) {
-	return file_tdpn_vpnslashing_v1_tx_proto_rawDescGZIP(), []int{3}
+	return file_tdpn_vpnslashing_v1_tx_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *MsgRecordPenaltyResponse) GetPenalty() *PenaltyDecision {
@@ -205,13 +293,19 @@ const file_tdpn_vpnslashing_v1_tx_proto_rawDesc = "" +
 	"\x18MsgSubmitEvidenceRequest\x12>\n" +
 	"\bevidence\x18\x01 \x01(\v2\".tdpn.vpnslashing.v1.SlashEvidenceR\bevidence\"[\n" +
 	"\x19MsgSubmitEvidenceResponse\x12>\n" +
+	"\bevidence\x18\x01 \x01(\v2\".tdpn.vpnslashing.v1.SlashEvidenceR\bevidence\"<\n" +
+	"\x19MsgConfirmEvidenceRequest\x12\x1f\n" +
+	"\vevidence_id\x18\x01 \x01(\tR\n" +
+	"evidenceId\"\\\n" +
+	"\x1aMsgConfirmEvidenceResponse\x12>\n" +
 	"\bevidence\x18\x01 \x01(\v2\".tdpn.vpnslashing.v1.SlashEvidenceR\bevidence\"Y\n" +
 	"\x17MsgRecordPenaltyRequest\x12>\n" +
 	"\apenalty\x18\x01 \x01(\v2$.tdpn.vpnslashing.v1.PenaltyDecisionR\apenalty\"Z\n" +
 	"\x18MsgRecordPenaltyResponse\x12>\n" +
-	"\apenalty\x18\x01 \x01(\v2$.tdpn.vpnslashing.v1.PenaltyDecisionR\apenalty2\xe4\x01\n" +
+	"\apenalty\x18\x01 \x01(\v2$.tdpn.vpnslashing.v1.PenaltyDecisionR\apenalty2\xd8\x02\n" +
 	"\x03Msg\x12o\n" +
-	"\x0eSubmitEvidence\x12-.tdpn.vpnslashing.v1.MsgSubmitEvidenceRequest\x1a..tdpn.vpnslashing.v1.MsgSubmitEvidenceResponse\x12l\n" +
+	"\x0eSubmitEvidence\x12-.tdpn.vpnslashing.v1.MsgSubmitEvidenceRequest\x1a..tdpn.vpnslashing.v1.MsgSubmitEvidenceResponse\x12r\n" +
+	"\x0fConfirmEvidence\x12..tdpn.vpnslashing.v1.MsgConfirmEvidenceRequest\x1a/.tdpn.vpnslashing.v1.MsgConfirmEvidenceResponse\x12l\n" +
 	"\rRecordPenalty\x12,.tdpn.vpnslashing.v1.MsgRecordPenaltyRequest\x1a-.tdpn.vpnslashing.v1.MsgRecordPenaltyResponseB0Z.github.com/tdpn/tdpn-chain/x/vpnslashing/typesb\x06proto3"
 
 var (
@@ -226,29 +320,34 @@ func file_tdpn_vpnslashing_v1_tx_proto_rawDescGZIP() []byte {
 	return file_tdpn_vpnslashing_v1_tx_proto_rawDescData
 }
 
-var file_tdpn_vpnslashing_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_tdpn_vpnslashing_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_tdpn_vpnslashing_v1_tx_proto_goTypes = []any{
-	(*MsgSubmitEvidenceRequest)(nil),  // 0: tdpn.vpnslashing.v1.MsgSubmitEvidenceRequest
-	(*MsgSubmitEvidenceResponse)(nil), // 1: tdpn.vpnslashing.v1.MsgSubmitEvidenceResponse
-	(*MsgRecordPenaltyRequest)(nil),   // 2: tdpn.vpnslashing.v1.MsgRecordPenaltyRequest
-	(*MsgRecordPenaltyResponse)(nil),  // 3: tdpn.vpnslashing.v1.MsgRecordPenaltyResponse
-	(*SlashEvidence)(nil),             // 4: tdpn.vpnslashing.v1.SlashEvidence
-	(*PenaltyDecision)(nil),           // 5: tdpn.vpnslashing.v1.PenaltyDecision
+	(*MsgSubmitEvidenceRequest)(nil),   // 0: tdpn.vpnslashing.v1.MsgSubmitEvidenceRequest
+	(*MsgSubmitEvidenceResponse)(nil),  // 1: tdpn.vpnslashing.v1.MsgSubmitEvidenceResponse
+	(*MsgConfirmEvidenceRequest)(nil),  // 2: tdpn.vpnslashing.v1.MsgConfirmEvidenceRequest
+	(*MsgConfirmEvidenceResponse)(nil), // 3: tdpn.vpnslashing.v1.MsgConfirmEvidenceResponse
+	(*MsgRecordPenaltyRequest)(nil),    // 4: tdpn.vpnslashing.v1.MsgRecordPenaltyRequest
+	(*MsgRecordPenaltyResponse)(nil),   // 5: tdpn.vpnslashing.v1.MsgRecordPenaltyResponse
+	(*SlashEvidence)(nil),              // 6: tdpn.vpnslashing.v1.SlashEvidence
+	(*PenaltyDecision)(nil),            // 7: tdpn.vpnslashing.v1.PenaltyDecision
 }
 var file_tdpn_vpnslashing_v1_tx_proto_depIdxs = []int32{
-	4, // 0: tdpn.vpnslashing.v1.MsgSubmitEvidenceRequest.evidence:type_name -> tdpn.vpnslashing.v1.SlashEvidence
-	4, // 1: tdpn.vpnslashing.v1.MsgSubmitEvidenceResponse.evidence:type_name -> tdpn.vpnslashing.v1.SlashEvidence
-	5, // 2: tdpn.vpnslashing.v1.MsgRecordPenaltyRequest.penalty:type_name -> tdpn.vpnslashing.v1.PenaltyDecision
-	5, // 3: tdpn.vpnslashing.v1.MsgRecordPenaltyResponse.penalty:type_name -> tdpn.vpnslashing.v1.PenaltyDecision
-	0, // 4: tdpn.vpnslashing.v1.Msg.SubmitEvidence:input_type -> tdpn.vpnslashing.v1.MsgSubmitEvidenceRequest
-	2, // 5: tdpn.vpnslashing.v1.Msg.RecordPenalty:input_type -> tdpn.vpnslashing.v1.MsgRecordPenaltyRequest
-	1, // 6: tdpn.vpnslashing.v1.Msg.SubmitEvidence:output_type -> tdpn.vpnslashing.v1.MsgSubmitEvidenceResponse
-	3, // 7: tdpn.vpnslashing.v1.Msg.RecordPenalty:output_type -> tdpn.vpnslashing.v1.MsgRecordPenaltyResponse
-	6, // [6:8] is the sub-list for method output_type
-	4, // [4:6] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	6, // 0: tdpn.vpnslashing.v1.MsgSubmitEvidenceRequest.evidence:type_name -> tdpn.vpnslashing.v1.SlashEvidence
+	6, // 1: tdpn.vpnslashing.v1.MsgSubmitEvidenceResponse.evidence:type_name -> tdpn.vpnslashing.v1.SlashEvidence
+	6, // 2: tdpn.vpnslashing.v1.MsgConfirmEvidenceResponse.evidence:type_name -> tdpn.vpnslashing.v1.SlashEvidence
+	7, // 3: tdpn.vpnslashing.v1.MsgRecordPenaltyRequest.penalty:type_name -> tdpn.vpnslashing.v1.PenaltyDecision
+	7, // 4: tdpn.vpnslashing.v1.MsgRecordPenaltyResponse.penalty:type_name -> tdpn.vpnslashing.v1.PenaltyDecision
+	0, // 5: tdpn.vpnslashing.v1.Msg.SubmitEvidence:input_type -> tdpn.vpnslashing.v1.MsgSubmitEvidenceRequest
+	2, // 6: tdpn.vpnslashing.v1.Msg.ConfirmEvidence:input_type -> tdpn.vpnslashing.v1.MsgConfirmEvidenceRequest
+	4, // 7: tdpn.vpnslashing.v1.Msg.RecordPenalty:input_type -> tdpn.vpnslashing.v1.MsgRecordPenaltyRequest
+	1, // 8: tdpn.vpnslashing.v1.Msg.SubmitEvidence:output_type -> tdpn.vpnslashing.v1.MsgSubmitEvidenceResponse
+	3, // 9: tdpn.vpnslashing.v1.Msg.ConfirmEvidence:output_type -> tdpn.vpnslashing.v1.MsgConfirmEvidenceResponse
+	5, // 10: tdpn.vpnslashing.v1.Msg.RecordPenalty:output_type -> tdpn.vpnslashing.v1.MsgRecordPenaltyResponse
+	8, // [8:11] is the sub-list for method output_type
+	5, // [5:8] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_tdpn_vpnslashing_v1_tx_proto_init() }
@@ -263,7 +362,7 @@ func file_tdpn_vpnslashing_v1_tx_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tdpn_vpnslashing_v1_tx_proto_rawDesc), len(file_tdpn_vpnslashing_v1_tx_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

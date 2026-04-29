@@ -103,6 +103,17 @@ func (s *readErrorPenaltyStore) ListPenaltiesWithError() ([]types.PenaltyDecisio
 	return s.failSafePenaltyStore.ListPenalties(), nil
 }
 
+func confirmPenaltyEvidenceForTest(t *testing.T, k *Keeper, evidenceID string) types.SlashEvidence {
+	t.Helper()
+	evidence, ok := k.GetEvidence(evidenceID)
+	if !ok {
+		t.Fatalf("expected evidence %q to exist before confirming", evidenceID)
+	}
+	evidence.Status = chaintypes.ReconciliationConfirmed
+	k.UpsertEvidence(evidence)
+	return evidence
+}
+
 func TestKeeperEvidenceUpsertAndGet(t *testing.T) {
 	t.Parallel()
 
@@ -311,6 +322,141 @@ func TestSubmitEvidenceDefaultsAndGet(t *testing.T) {
 	}
 }
 
+func TestConfirmEvidenceFinalizesSubmittedEvidence(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	record, err := k.SubmitEvidence(types.SlashEvidence{
+		EvidenceID:    "evidence-confirm-1",
+		ProviderID:    "provider-confirm-1",
+		SessionID:     "session-confirm-1",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-confirm-1"),
+		ViolationType: "double-sign",
+	})
+	if err != nil {
+		t.Fatalf("seed evidence failed: %v", err)
+	}
+	if record.Status != chaintypes.ReconciliationSubmitted {
+		t.Fatalf("seed evidence status=%q want submitted", record.Status)
+	}
+
+	confirmed, err := k.ConfirmEvidence(" EVIDENCE-CONFIRM-1 ")
+	if err != nil {
+		t.Fatalf("confirm evidence failed: %v", err)
+	}
+	if confirmed.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("confirmed status=%q want confirmed", confirmed.Status)
+	}
+
+	replayed, err := k.ConfirmEvidence("evidence-confirm-1")
+	if err != nil {
+		t.Fatalf("confirm evidence replay failed: %v", err)
+	}
+	if replayed != confirmed {
+		t.Fatalf("confirm replay=%+v want confirmed=%+v", replayed, confirmed)
+	}
+}
+
+func TestConfirmEvidenceRejectsFailedEvidence(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	k.UpsertEvidence(types.SlashEvidence{
+		EvidenceID:    "evidence-confirm-failed",
+		ProviderID:    "provider-confirm-failed",
+		SessionID:     "session-confirm-failed",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-confirm-failed"),
+		ViolationType: "double-sign",
+		Status:        chaintypes.ReconciliationFailed,
+	})
+
+	_, err := k.ConfirmEvidence("evidence-confirm-failed")
+	if err == nil {
+		t.Fatal("expected failed evidence confirmation to be rejected")
+	}
+	if !strings.Contains(err.Error(), "cannot be confirmed from failed status") {
+		t.Fatalf("expected failed-status confirmation error, got %v", err)
+	}
+}
+
+func TestSubmitEvidenceTypedSlashValueRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	record, err := k.SubmitEvidence(types.SlashEvidence{
+		EvidenceID:    "evidence-typed-slash-value",
+		ProviderID:    "provider-typed-slash-value",
+		SessionID:     "session-typed-slash-value",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-typed-slash-value"),
+		SlashAmount:   1250,
+		SlashDenom:    " UTDPN ",
+		ViolationType: "double-sign",
+	})
+	if err != nil {
+		t.Fatalf("expected typed slash evidence to succeed, got %v", err)
+	}
+	if record.SlashAmount != 1250 {
+		t.Fatalf("expected slash amount 1250, got %d", record.SlashAmount)
+	}
+	if record.SlashDenom != "utdpn" {
+		t.Fatalf("expected canonical slash denom %q, got %q", "utdpn", record.SlashDenom)
+	}
+
+	stored, ok := k.GetEvidence(record.EvidenceID)
+	if !ok {
+		t.Fatal("expected typed slash evidence to be stored")
+	}
+	if stored != record {
+		t.Fatalf("expected stored evidence %+v to match submitted %+v", stored, record)
+	}
+}
+
+func TestSubmitEvidenceRejectsInvalidTypedSlashValue(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	tests := []struct {
+		name      string
+		amount    int64
+		denom     string
+		wantError string
+	}{
+		{name: "negative amount", amount: -1, denom: "utdpn", wantError: "slash amount cannot be negative"},
+		{name: "missing denom", amount: 1, denom: " \t ", wantError: "slash denom is required"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			evidenceID := "evidence-invalid-typed-slash-" + strings.ReplaceAll(tc.name, " ", "-")
+			_, err := k.SubmitEvidence(types.SlashEvidence{
+				EvidenceID:    evidenceID,
+				ProviderID:    "provider-invalid-typed-slash",
+				SessionID:     "session-invalid-typed-slash",
+				Kind:          types.EvidenceKindObjective,
+				ProofHash:     testSHAProof("proof-invalid-typed-slash-" + tc.name),
+				SlashAmount:   tc.amount,
+				SlashDenom:    tc.denom,
+				ViolationType: "double-sign",
+			})
+			if err == nil {
+				t.Fatal("expected invalid typed slash evidence to fail")
+			}
+			if !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("expected error containing %q, got %v", tc.wantError, err)
+			}
+			if _, ok := k.GetEvidence(evidenceID); ok {
+				t.Fatalf("expected invalid typed slash evidence %q to not be stored", evidenceID)
+			}
+		})
+	}
+}
+
 func TestSubmitEvidenceIdempotentReplay(t *testing.T) {
 	t.Parallel()
 
@@ -380,6 +526,7 @@ func TestSubmitEvidenceAndApplyPenaltyCanonicalizeIDsForIdempotencyAndLookup(t *
 		t.Fatalf("expected canonicalized evidence lookup %+v to match first %+v", lookupEvidence, firstEvidence)
 	}
 
+	confirmPenaltyEvidenceForTest(t, &k, firstEvidence.EvidenceID)
 	firstPenalty, err := k.ApplyPenalty(types.PenaltyDecision{
 		PenaltyID:       " \nPENALTY-APPLY-CANON-1\t ",
 		EvidenceID:      " \tEVIDENCE-SUBMIT-CANON-1\n ",
@@ -467,6 +614,37 @@ func TestSubmitEvidenceRejectsEquivalentIncidentUnderDifferentEvidenceID(t *test
 	}
 	if !strings.Contains(err.Error(), "duplicates already-recorded evidence") {
 		t.Fatalf("expected duplicate incident error, got %v", err)
+	}
+}
+
+func TestSubmitEvidenceRejectsEquivalentAmountWrappedIncident(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	base := types.SlashEvidence{
+		EvidenceID:    "evidence-submit-wrapped-amount-a",
+		Kind:          types.EvidenceKindObjective,
+		ProviderID:    "provider-wrapped-amount",
+		SessionID:     "session-wrapped-amount",
+		ViolationType: "double-sign",
+		ProofHash:     "obj://settlement-slash/evidence-submit-wrapped-amount-a?currency=uusdc&evidence_ref=sha256%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&slash_micros=100",
+		SlashAmount:   100,
+		SlashDenom:    "uusdc",
+	}
+	if _, err := k.SubmitEvidence(base); err != nil {
+		t.Fatalf("seed wrapped evidence failed: %v", err)
+	}
+
+	duplicate := base
+	duplicate.EvidenceID = "evidence-submit-wrapped-amount-b"
+	duplicate.ProofHash = "obj://settlement-slash/evidence-submit-wrapped-amount-b?currency=uusdc&evidence_ref=sha256%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&slash_micros=200"
+	duplicate.SlashAmount = 200
+	_, err := k.SubmitEvidence(duplicate)
+	if err == nil {
+		t.Fatal("expected duplicate amount-wrapped incident submit to fail")
+	}
+	if !strings.Contains(err.Error(), "duplicates already-recorded evidence") {
+		t.Fatalf("expected duplicate amount-wrapped incident error, got %v", err)
 	}
 }
 
@@ -786,22 +964,32 @@ func TestApplyPenaltyDefaultsAndEvidenceAdvance(t *testing.T) {
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-penalty-1"),
 		ViolationType: "double-sign",
-		Status:        chaintypes.ReconciliationPending,
+		SlashAmount:   250,
+		SlashDenom:    "UTDPN",
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 	if err != nil {
 		t.Fatalf("seed evidence failed: %v", err)
 	}
-	if seed.Status != chaintypes.ReconciliationPending {
-		t.Fatalf("expected seed status pending, got %q", seed.Status)
+	if seed.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected seed status confirmed, got %q", seed.Status)
 	}
 
 	decision, err := k.ApplyPenalty(types.PenaltyDecision{
 		PenaltyID:       "penalty-apply-1",
 		EvidenceID:      seed.EvidenceID,
 		SlashBasisPoint: 100,
+		SlashAmount:     250,
+		SlashDenom:      "UTDPN",
 	})
 	if err != nil {
 		t.Fatalf("expected apply penalty to succeed, got %v", err)
+	}
+	if decision.SlashAmount != 250 {
+		t.Fatalf("expected slash amount 250, got %d", decision.SlashAmount)
+	}
+	if decision.SlashDenom != "utdpn" {
+		t.Fatalf("expected canonical slash denom %q, got %q", "utdpn", decision.SlashDenom)
 	}
 	if decision.Status != chaintypes.ReconciliationSubmitted {
 		t.Fatalf("expected default penalty status %q, got %q", chaintypes.ReconciliationSubmitted, decision.Status)
@@ -812,11 +1000,124 @@ func TestApplyPenaltyDefaultsAndEvidenceAdvance(t *testing.T) {
 		t.Fatal("expected evidence to remain available")
 	}
 	if evidenceAfter.Status != chaintypes.ReconciliationConfirmed {
-		t.Fatalf("expected evidence status %q after penalty, got %q", chaintypes.ReconciliationConfirmed, evidenceAfter.Status)
+		t.Fatalf("expected evidence status to remain %q after penalty, got %q", chaintypes.ReconciliationConfirmed, evidenceAfter.Status)
 	}
 }
 
-func TestApplyPenaltyFailsSafeWhenEvidenceAdvanceWriteFails(t *testing.T) {
+func TestApplyPenaltyRejectsFailedEvidence(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name   string
+		status chaintypes.ReconciliationStatus
+	}{
+		{name: "pending", status: chaintypes.ReconciliationPending},
+		{name: "submitted", status: chaintypes.ReconciliationSubmitted},
+		{name: "failed", status: chaintypes.ReconciliationFailed},
+		{name: "unknown", status: chaintypes.ReconciliationStatus("unknown")},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			k := NewKeeper()
+			evidenceID := "evidence-penalty-" + tc.name
+			k.UpsertEvidence(types.SlashEvidence{
+				EvidenceID:    evidenceID,
+				ProviderID:    "provider-penalty-" + tc.name,
+				SessionID:     "session-penalty-" + tc.name,
+				Kind:          types.EvidenceKindObjective,
+				ProofHash:     testSHAProof("proof-penalty-" + tc.name),
+				ViolationType: "double-sign",
+				SlashAmount:   250,
+				SlashDenom:    "utdpn",
+				Status:        tc.status,
+			})
+
+			_, err := k.ApplyPenalty(types.PenaltyDecision{
+				PenaltyID:       "penalty-" + tc.name + "-evidence",
+				EvidenceID:      evidenceID,
+				SlashBasisPoint: 100,
+				SlashAmount:     250,
+				SlashDenom:      "utdpn",
+			})
+			if err == nil {
+				t.Fatalf("expected %s evidence to reject penalty", tc.name)
+			}
+			if !strings.Contains(err.Error(), "non-final evidence") {
+				t.Fatalf("expected non-final evidence rejection, got %v", err)
+			}
+		})
+	}
+}
+
+func TestApplyPenaltyRejectsSlashAmountNotAuthorizedByEvidence(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	seed, err := k.SubmitEvidence(types.SlashEvidence{
+		EvidenceID:    "evidence-penalty-no-amount",
+		ProviderID:    "provider-penalty-no-amount",
+		SessionID:     "session-penalty-no-amount",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-penalty-no-amount"),
+		ViolationType: "double-sign",
+	})
+	if err != nil {
+		t.Fatalf("seed evidence failed: %v", err)
+	}
+	seed = confirmPenaltyEvidenceForTest(t, &k, seed.EvidenceID)
+
+	_, err = k.ApplyPenalty(types.PenaltyDecision{
+		PenaltyID:   "penalty-unauthorized-amount",
+		EvidenceID:  seed.EvidenceID,
+		SlashAmount: 250,
+		SlashDenom:  "utdpn",
+	})
+	if err == nil {
+		t.Fatal("expected slash amount without evidence amount to be rejected")
+	}
+	if !strings.Contains(err.Error(), "not authorized by evidence") {
+		t.Fatalf("expected unauthorized amount error, got %v", err)
+	}
+}
+
+func TestApplyPenaltyRejectsSlashAmountMismatch(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	seed, err := k.SubmitEvidence(types.SlashEvidence{
+		EvidenceID:    "evidence-penalty-amount",
+		ProviderID:    "provider-penalty-amount",
+		SessionID:     "session-penalty-amount",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-penalty-amount"),
+		ViolationType: "double-sign",
+		SlashAmount:   250,
+		SlashDenom:    "utdpn",
+	})
+	if err != nil {
+		t.Fatalf("seed evidence failed: %v", err)
+	}
+	seed = confirmPenaltyEvidenceForTest(t, &k, seed.EvidenceID)
+
+	_, err = k.ApplyPenalty(types.PenaltyDecision{
+		PenaltyID:   "penalty-mismatched-amount",
+		EvidenceID:  seed.EvidenceID,
+		SlashAmount: 500,
+		SlashDenom:  "utdpn",
+	})
+	if err == nil {
+		t.Fatal("expected mismatched slash amount to be rejected")
+	}
+	if !strings.Contains(err.Error(), "does not match evidence") {
+		t.Fatalf("expected mismatch error, got %v", err)
+	}
+}
+
+func TestApplyPenaltyConfirmedEvidenceDoesNotRewriteEvidence(t *testing.T) {
 	t.Parallel()
 
 	store := newFailSafePenaltyStore()
@@ -826,7 +1127,7 @@ func TestApplyPenaltyFailsSafeWhenEvidenceAdvanceWriteFails(t *testing.T) {
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-penalty-failsafe-evidence-write"),
 		ViolationType: "double-sign",
-		Status:        chaintypes.ReconciliationPending,
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 
 	k := NewKeeperWithStore(store)
@@ -837,25 +1138,22 @@ func TestApplyPenaltyFailsSafeWhenEvidenceAdvanceWriteFails(t *testing.T) {
 		EvidenceID:      evidenceID,
 		SlashBasisPoint: 50,
 	})
-	if err == nil {
-		t.Fatal("expected apply penalty to fail when evidence advancement write fails")
-	}
-	if !strings.Contains(err.Error(), "persist evidence") {
-		t.Fatalf("expected evidence persistence failure, got %v", err)
+	if err != nil {
+		t.Fatalf("expected confirmed evidence penalty to skip evidence rewrite, got %v", err)
 	}
 
-	if _, ok := k.GetPenalty("penalty-failsafe-evidence-write"); ok {
-		t.Fatal("expected no penalty to be persisted when evidence advancement write fails")
+	if _, ok := k.GetPenalty("penalty-failsafe-evidence-write"); !ok {
+		t.Fatal("expected penalty to be persisted when confirmed evidence rewrite is skipped")
 	}
 
 	evidenceAfter, ok := k.GetEvidence(evidenceID)
 	if !ok {
 		t.Fatalf("expected evidence %q to remain available", evidenceID)
 	}
-	if evidenceAfter.Status != chaintypes.ReconciliationPending {
+	if evidenceAfter.Status != chaintypes.ReconciliationConfirmed {
 		t.Fatalf(
-			"expected evidence status %q to remain unchanged after failed apply, got %q",
-			chaintypes.ReconciliationPending,
+			"expected evidence status %q to remain unchanged after apply, got %q",
+			chaintypes.ReconciliationConfirmed,
 			evidenceAfter.Status,
 		)
 	}
@@ -871,7 +1169,7 @@ func TestApplyPenaltyRollsBackEvidenceAdvanceWhenPenaltyWriteFails(t *testing.T)
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-penalty-failsafe-penalty-write"),
 		ViolationType: "double-sign",
-		Status:        chaintypes.ReconciliationPending,
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 
 	k := NewKeeperWithStore(store)
@@ -897,10 +1195,10 @@ func TestApplyPenaltyRollsBackEvidenceAdvanceWhenPenaltyWriteFails(t *testing.T)
 	if !ok {
 		t.Fatalf("expected evidence %q to remain available", evidenceID)
 	}
-	if evidenceAfter.Status != chaintypes.ReconciliationPending {
+	if evidenceAfter.Status != chaintypes.ReconciliationConfirmed {
 		t.Fatalf(
 			"expected evidence status %q after rollback, got %q",
-			chaintypes.ReconciliationPending,
+			chaintypes.ReconciliationConfirmed,
 			evidenceAfter.Status,
 		)
 	}
@@ -921,6 +1219,7 @@ func TestApplyPenaltyIdempotentReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed evidence failed: %v", err)
 	}
+	evidence = confirmPenaltyEvidenceForTest(t, &k, evidence.EvidenceID)
 
 	req := types.PenaltyDecision{
 		PenaltyID:       "penalty-apply-2",
@@ -956,6 +1255,7 @@ func TestApplyPenaltyRejectsSecondPenaltyForSameEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed evidence failed: %v", err)
 	}
+	evidence = confirmPenaltyEvidenceForTest(t, &k, evidence.EvidenceID)
 
 	first := types.PenaltyDecision{
 		PenaltyID:       "penalty-apply-2b-a",
@@ -1003,6 +1303,7 @@ func TestApplyPenaltyConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed evidence failed: %v", err)
 	}
+	evidence = confirmPenaltyEvidenceForTest(t, &k, evidence.EvidenceID)
 
 	base := types.PenaltyDecision{
 		PenaltyID:       "penalty-apply-3",
@@ -1035,6 +1336,59 @@ func TestApplyPenaltyInvalid(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected invalid penalty to fail")
+	}
+}
+
+func TestApplyPenaltyRejectsInvalidTypedSlashValue(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	evidence, err := k.SubmitEvidence(types.SlashEvidence{
+		EvidenceID:    "evidence-penalty-invalid-typed-slash",
+		ProviderID:    "provider-penalty-invalid-typed-slash",
+		SessionID:     "session-penalty-invalid-typed-slash",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-penalty-invalid-typed-slash"),
+		ViolationType: "double-sign",
+	})
+	if err != nil {
+		t.Fatalf("seed evidence failed: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		amount    int64
+		denom     string
+		wantError string
+	}{
+		{name: "negative amount", amount: -1, denom: "utdpn", wantError: "slash amount cannot be negative"},
+		{name: "missing denom", amount: 1, denom: " \t ", wantError: "slash denom is required"},
+		{name: "denom without amount", amount: 0, denom: "utdpn", wantError: "slash amount must be positive"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			penaltyID := "penalty-invalid-typed-slash-" + strings.ReplaceAll(tc.name, " ", "-")
+			_, err := k.ApplyPenalty(types.PenaltyDecision{
+				PenaltyID:       penaltyID,
+				EvidenceID:      evidence.EvidenceID,
+				SlashBasisPoint: 100,
+				SlashAmount:     tc.amount,
+				SlashDenom:      tc.denom,
+			})
+			if err == nil {
+				t.Fatal("expected invalid typed slash penalty to fail")
+			}
+			if !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("expected error containing %q, got %v", tc.wantError, err)
+			}
+			if _, ok := k.GetPenalty(penaltyID); ok {
+				t.Fatalf("expected invalid typed slash penalty %q to not be stored", penaltyID)
+			}
+		})
 	}
 }
 
@@ -1142,7 +1496,7 @@ func TestApplyPenaltyFailsClosedWhenPenaltyListReadFails(t *testing.T) {
 		Kind:          types.EvidenceKindObjective,
 		ProofHash:     testSHAProof("proof-penalty-read-fail-closed"),
 		ViolationType: "double-sign",
-		Status:        chaintypes.ReconciliationPending,
+		Status:        chaintypes.ReconciliationConfirmed,
 	})
 	store.penaltyListErr = errors.New("penalty index decode failure")
 	k := NewKeeperWithStore(store)
@@ -1166,7 +1520,7 @@ func TestApplyPenaltyFailsClosedWhenPenaltyListReadFails(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected evidence %q to remain available", evidenceID)
 	}
-	if evidence.Status != chaintypes.ReconciliationPending {
-		t.Fatalf("expected evidence status to remain %q, got %q", chaintypes.ReconciliationPending, evidence.Status)
+	if evidence.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected evidence status to remain %q, got %q", chaintypes.ReconciliationConfirmed, evidence.Status)
 	}
 }
