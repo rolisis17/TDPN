@@ -2,16 +2,16 @@ mod local_api;
 
 use local_api::{
     ConnectRequest, GPMClientRegisterRequest, GPMClientStatusRequest, GPMContributionStatusRequest,
-    GPMContributionToggleRequest, GPMSessionStatusRequest, GPMSettlementReserveFundsRequest,
+    GPMContributionToggleRequest, GPMOperatorApplyRequest, GPMOperatorStatusRequest,
+    GPMSessionStatusRequest, GPMServerStatusRequest, GPMSettlementReserveFundsRequest,
     GPMWalletChallengeRequest, GPMWalletVerifyRequest, LocalApiClient, LocalApiConfig,
     RuntimePolicyConfig,
 };
 #[cfg(feature = "admin-console")]
 use local_api::{
     GPMAdminContributionListRequest, GPMAdminRewardFinalizeRequest, GPMAdminRewardHoldRequest,
-    GPMAdminRewardReviewRequest, GPMAuditRecentRequest, GPMOperatorApplyRequest,
-    GPMOperatorApproveRequest, GPMOperatorListRequest, GPMOperatorStatusRequest,
-    GPMServerStatusRequest, ProfileRequest,
+    GPMAdminRewardReviewRequest, GPMAuditRecentRequest, GPMOperatorApproveRequest,
+    GPMOperatorListRequest, ProfileRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -243,6 +243,13 @@ fn runtime_policy_leaf_key_allowed(normalized: &str) -> bool {
             | "requirewalletextensionsource"
             | "gpmauthverifyrequirewalletextensionsourcepolicysource"
             | "authverifyrequirewalletextensionsourcepolicysource"
+            | "gpmauthexpectedchainid"
+            | "authexpectedchainid"
+            | "expectedchainid"
+            | "chainid"
+            | "gpmauthexpectedchainidsource"
+            | "authexpectedchainidsource"
+            | "expectedchainidsource"
             | "gpmoperatorapprovalrequiresession"
             | "operatorapprovalrequiresession"
             | "approvalrequiresession"
@@ -1019,13 +1026,11 @@ async fn control_gpm_admin_reward_finalize(
         .map(sanitize_desktop_payload)
 }
 
-#[cfg(feature = "admin-console")]
 #[tauri::command]
 async fn control_gpm_server_status(
     state: State<'_, AppState>,
     request: GPMServerStatusRequest,
 ) -> Result<Value, String> {
-    ensure_admin_console_state(&state, "Server Status")?;
     state
         .local_api
         .post_json("/v1/gpm/onboarding/server/status", &request)
@@ -1046,13 +1051,11 @@ async fn control_gpm_onboarding_overview(
         .map(sanitize_desktop_payload)
 }
 
-#[cfg(feature = "admin-console")]
 #[tauri::command]
 async fn control_gpm_operator_apply(
     state: State<'_, AppState>,
     request: GPMOperatorApplyRequest,
 ) -> Result<Value, String> {
-    ensure_admin_console_state(&state, "Apply Operator Role")?;
     state
         .local_api
         .post_json("/v1/gpm/onboarding/operator/apply", &request)
@@ -1060,13 +1063,11 @@ async fn control_gpm_operator_apply(
         .map(sanitize_desktop_payload)
 }
 
-#[cfg(feature = "admin-console")]
 #[tauri::command]
 async fn control_gpm_operator_status(
     state: State<'_, AppState>,
     request: GPMOperatorStatusRequest,
 ) -> Result<Value, String> {
-    ensure_admin_console_state(&state, "Operator Status")?;
     state
         .local_api
         .post_json("/v1/gpm/onboarding/operator/status", &request)
@@ -1493,7 +1494,10 @@ fn main() {
         control_gpm_rewards_current_week,
         control_gpm_rewards_history,
         control_gpm_settlement_reserve_funds,
-        control_gpm_onboarding_overview
+        control_gpm_server_status,
+        control_gpm_onboarding_overview,
+        control_gpm_operator_apply,
+        control_gpm_operator_status
     ]);
 
     builder

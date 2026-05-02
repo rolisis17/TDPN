@@ -13,237 +13,211 @@
   <body class="page-portal public-portal-mode">
     <header class="topbar">
       <div class="wrap">
-        <div class="brand">Global Private Mesh Portal <small>(GPM) Wallet-first onboarding console</small></div>
-        <nav class="nav">
+        <a class="brand-lockup" href="./index.html" aria-label="Global Private Mesh home">
+          <span class="brand-mark" aria-hidden="true">G</span>
+          <span>
+            <span class="brand-name">Global Private Mesh</span>
+            <span class="brand-subtitle">Private network</span>
+          </span>
+        </a>
+        <nav class="nav" aria-label="Portal navigation">
           <a class="btn secondary" href="./index.html">Home</a>
-          <a class="btn primary" href="./portal.html">Portal</a>
+          <a class="btn primary" href="#wallet_signin_btn">Connect Wallet</a>
         </nav>
       </div>
     </header>
 
-    <main class="wrap portal-shell">
-      <section class="card">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">Console overview</p>
-            <h1>Onboard wallet, register a client, and continue into the public portal.</h1>
+    <main class="wrap portal-shell portal-experience">
+      <section class="portal-hero card">
+        <div class="portal-hero__copy">
+          <p class="eyebrow">Start here</p>
+          <h1>Connect your wallet.</h1>
+          <p>Choose Keplr or Leap. GPM handles the account, route, and safety checks.</p>
+        </div>
+
+        <div class="portal-wallet-panel" aria-label="Wallet sign in">
+          <div class="fields wallet-simple-fields">
+            <label>
+              Wallet
+              <select id="wallet_provider">
+                <option value="keplr">Keplr</option>
+                <option value="leap">Leap</option>
+              </select>
+            </label>
           </div>
-          <p class="section-lead">
-            This public portal keeps wallet sign-in, client registration, connection controls, and contribution status in one place.
+          <div class="actions wallet-primary-action">
+            <button class="btn primary" id="wallet_signin_btn">Connect Wallet</button>
+            <button class="btn secondary" id="session_revoke_btn">Sign Out</button>
+          </div>
+          <p id="signin_policy_hint" class="helper-copy">
+            Keplr and Leap wallet-extension sign + verify are available now.
           </p>
+          <p id="wallet_extension_hint" class="helper-copy">
+            Choose a wallet, then press Connect Wallet.
+          </p>
+          <p class="helper-copy">GPM never asks for your seed phrase.</p>
         </div>
-        <div class="fields">
-          <label>
-            API base URL
-            <input id="api_base" value="http://127.0.0.1:8095" spellcheck="false" autocomplete="off" />
-          </label>
-          <label>
-            Local API auth token
-            <input
-              id="local_api_auth_token"
-              type="password"
-              placeholder="bearer token for local API Authorization header"
-              spellcheck="false"
-              autocomplete="off"
-            />
-          </label>
-          <label>
-            Session token
-            <input
-              id="session_token"
-              type="password"
-              placeholder="session token after sign in"
-              spellcheck="false"
-              autocomplete="off"
-            />
-          </label>
-          <label>
-            Current role
-            <input id="role" value="client" readonly />
-          </label>
+
+        <div class="portal-status-strip" aria-label="Account progress">
+          <article id="status_banner" class="status-banner" role="status" aria-live="polite">
+            <div class="status-banner__label">Portal status</div>
+            <div id="status_line" class="status">
+              <strong id="status_title">Ready</strong>
+              <span id="status_detail">Connect a wallet to begin.</span>
+            </div>
+          </article>
+          <article id="onboarding_state_banner" class="status-banner" data-kind="warn" role="status" aria-live="polite">
+            <div class="status-banner__label">Next step</div>
+            <div id="onboarding_state_line" class="status warn">
+              <strong id="onboarding_state_title">Signed out</strong>
+              <span id="onboarding_state_detail">Connect your wallet to begin.</span>
+            </div>
+            <p id="onboarding_next_action" class="helper-copy">Next: Connect Wallet.</p>
+          </article>
+          <article id="session_freshness_banner" class="status-banner" data-kind="warn" role="status" aria-live="polite" data-support-only hidden>
+            <div class="status-banner__label">Session</div>
+            <div id="session_freshness_line" class="status warn">
+              <strong id="session_freshness_title">Signed out</strong>
+              <span id="session_freshness_detail">Signed out.</span>
+            </div>
+          </article>
         </div>
-        <div id="status_banner" class="status-banner" role="status" aria-live="polite">
-          <div class="status-banner__label">Portal status</div>
-          <div id="status_line" class="status">
-            <strong id="status_title">Ready</strong>
-            <span id="status_detail">Set an absolute API base, then request a challenge or refresh the session.</span>
+
+        <details class="advanced support-drawer" data-support-only hidden>
+          <summary>Diagnostics</summary>
+          <div class="fields">
+            <label>
+              API base URL
+              <input id="api_base" value="http://127.0.0.1:8095" spellcheck="false" autocomplete="off" />
+            </label>
+            <label>
+              Local API auth token
+              <input
+                id="local_api_auth_token"
+                type="password"
+                placeholder="bearer token for local API Authorization header"
+                spellcheck="false"
+                autocomplete="off"
+              />
+            </label>
+            <label>
+              Session token
+              <input
+                id="session_token"
+                type="password"
+                placeholder="session token after sign in"
+                spellcheck="false"
+                autocomplete="off"
+              />
+            </label>
+            <label>
+              Current role
+              <input id="role" value="client" readonly />
+            </label>
           </div>
-        </div>
-        <div id="onboarding_state_banner" class="status-banner" data-kind="warn" role="status" aria-live="polite">
-          <div class="status-banner__label">Onboarding state</div>
-          <div id="onboarding_state_line" class="status warn">
-            <strong id="onboarding_state_title">Signed out</strong>
-            <span id="onboarding_state_detail">No active session token. Start with challenge and verify.</span>
+        </details>
+
+        <details class="advanced support-drawer" data-support-only hidden>
+          <summary>Network diagnostics</summary>
+          <div id="policy_posture" class="status-banner" data-kind="warn" role="status" aria-live="polite">
+            <div class="status-banner__label">Network rules</div>
+            <div id="policy_posture_line" class="status warn">
+              <strong id="policy_connect_policy">Loading safe connection rules.</strong>
+              <span id="policy_auth_verify">Waiting for local GPM.</span>
+            </div>
           </div>
-          <p id="onboarding_next_action" class="helper-copy">Next recommended action: Request Challenge.</p>
-        </div>
-        <div id="session_freshness_banner" class="status-banner" data-kind="warn" role="status" aria-live="polite">
-          <div class="status-banner__label">Session freshness</div>
-          <div id="session_freshness_line" class="status warn">
-            <strong id="session_freshness_title">Signed out</strong>
-            <span id="session_freshness_detail">No active session token is loaded.</span>
+          <p id="config_endpoint_hint" class="helper-copy">
+            Support detail: local GPM must be reachable before sensitive actions run.
+          </p>
+          <div id="legacy_alias_warning" class="status-banner" data-kind="warn" role="status" aria-live="polite" hidden>
+            <div class="status-banner__label">Legacy alias compatibility</div>
+            <div id="legacy_alias_warning_line" class="status warn">
+              <strong id="legacy_alias_warning_title">Legacy TDPN_* aliases are active.</strong>
+              <span id="legacy_alias_warning_detail">
+                Migrate to GPM_* env names to keep policy configuration forward-compatible.
+              </span>
+            </div>
           </div>
-        </div>
-        <div id="policy_posture" class="status-banner" data-kind="warn" role="status" aria-live="polite">
-          <div class="status-banner__label">Runtime policy posture</div>
-          <div id="policy_posture_line" class="status warn">
-            <strong id="policy_connect_policy">
-              Connect policy: restricted pending /v1/config policy load.
-            </strong>
-            <span id="policy_auth_verify">
-              Auth verify strictness: waiting for /v1/config. Sensitive mutate actions stay fail-closed until config is available.
-            </span>
-          </div>
-        </div>
-        <p id="config_endpoint_hint" class="helper-copy">
-          Runtime config endpoint <code>/v1/config</code> controls sensitive portal mutations. If it is unavailable, restore the daemon config endpoint first to exit restricted fail-closed mode.
-        </p>
-        <div id="legacy_alias_warning" class="status-banner" data-kind="warn" role="status" aria-live="polite" hidden>
-          <div class="status-banner__label">Legacy alias compatibility</div>
-          <div id="legacy_alias_warning_line" class="status warn">
-            <strong id="legacy_alias_warning_title">
-              Legacy TDPN_* aliases are active.
-            </strong>
-            <span id="legacy_alias_warning_detail">
-              Migrate to GPM_* env names to keep policy configuration forward-compatible.
-            </span>
-          </div>
-        </div>
+        </details>
       </section>
 
-      <section class="card">
+      <section class="card portal-flow-card">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Onboarding steps</p>
-            <h2>Sign in, then choose your lane</h2>
+            <p class="eyebrow">Your path</p>
+            <h2>Three calm steps.</h2>
           </div>
-          <p class="section-lead">
-            Start with wallet sign-in, then continue in the public client lane. Admin and operator workflows live in the separate GPM Admin Console.
-          </p>
+          <p class="section-lead">Wallet. Device. Connect.</p>
         </div>
         <div class="steps-grid portal-steps">
           <article id="onboarding_step_signin" class="step-card" data-state="active">
-            <p class="step-kicker">Step 1</p>
-            <h3>Wallet sign-in</h3>
-            <p>Choose a wallet, request a challenge, then verify with your signature to create or refresh the session.</p>
+            <p class="step-kicker">1</p>
+            <h3>Wallet</h3>
+            <p>Connect Keplr or Leap.</p>
           </article>
           <article id="onboarding_step_client" class="step-card" data-state="idle">
-            <p class="step-kicker">Step 2</p>
-            <h3>Client registration</h3>
-            <p>Use the signed-in session to register the client, set the path profile, and optionally provide bootstrap details.</p>
+            <p class="step-kicker">2</p>
+            <h3>Device</h3>
+            <p>Register this device.</p>
+          </article>
+          <article id="onboarding_step_server" class="step-card" data-state="idle">
+            <p class="step-kicker">Optional</p>
+            <h3>Server</h3>
+            <p>Apply if you want to host.</p>
           </article>
         </div>
       </section>
 
-      <section class="card">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">Step 1</p>
-            <h2>Wallet sign-in</h2>
+      <section class="quick-action-grid" aria-label="Main portal actions">
+        <section class="card action-card action-card--primary">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Register</p>
+              <h2>This device</h2>
+            </div>
+            <p class="section-lead">Add this device before using GPM.</p>
           </div>
-          <p class="section-lead">
-            Start here to generate a challenge, capture the wallet signature, and establish a session both lanes can reuse.
-          </p>
-        </div>
-        <div class="fields">
-          <label>
-            Wallet provider
-            <select id="wallet_provider">
-              <option value="keplr">Keplr</option>
-              <option value="leap">Leap</option>
-            </select>
-          </label>
-          <label>
-            Wallet chain ID
-            <input id="wallet_chain_id" placeholder="cosmoshub-4" spellcheck="false" autocomplete="off" />
-          </label>
-          <label>
-            Wallet address
-            <input id="wallet_address" placeholder="cosmos1..." />
-          </label>
-          <label>
-            Challenge ID
-            <input id="challenge_id" placeholder="gpm-chal-..." />
-          </label>
-          <label>
-            Challenge message
-            <input
-              id="challenge_message"
-              placeholder="request challenge to populate message"
-              readonly
-              spellcheck="false"
-              autocomplete="off"
-            />
-          </label>
-          <label>
-            Signature
-            <input id="signature" placeholder="wallet signature" />
-          </label>
-        </div>
-        <div class="actions">
-          <button class="btn secondary" id="challenge_btn">Request Challenge</button>
-          <button class="btn secondary" id="wallet_sign_btn">Sign Challenge (Wallet)</button>
-          <button class="btn secondary" id="wallet_signin_btn">Sign + Verify (Wallet)</button>
-          <button class="btn primary" id="signin_btn">Verify + Create Session</button>
-          <button class="btn secondary" id="session_btn">Refresh Session</button>
-          <button class="btn secondary" id="session_rotate_btn">Rotate Session</button>
-          <button class="btn secondary" id="session_revoke_btn">Sign Out</button>
-          <button class="btn secondary" id="manifest_btn">Fetch Manifest</button>
-        </div>
-        <p id="signin_policy_hint" class="helper-copy">
-          Keplr and Leap wallet-extension sign + verify are available now.
-        </p>
-        <p id="wallet_extension_hint" class="helper-copy">
-          Wallet extension readiness: select Keplr or Leap, set wallet chain ID, then use Sign + Verify (Wallet).
-        </p>
-        <p class="helper-copy">
-          Manual verify availability follows runtime policy; when locked, use Sign + Verify (Wallet).
-        </p>
-      </section>
+          <div id="client_readiness" class="status-banner client-readiness" data-kind="warn" role="status" aria-live="polite">
+            <div class="status-banner__label">Device status</div>
+            <div id="client_readiness_line" class="status warn">
+              <strong>Client status: <span id="client_readiness_status">Not signed in</span></strong>
+              <span id="client_readiness_guidance">Connect wallet first, then register.</span>
+            </div>
+          </div>
+          <div class="fields">
+            <label>
+              Mode
+              <select id="path_profile">
+                <option value="2hop">Balanced</option>
+                <option value="1hop">Fast</option>
+                <option value="3hop">Private</option>
+              </select>
+            </label>
+          </div>
+          <p id="compat_override_hint" class="helper-copy">Balanced is best for most people.</p>
+          <div class="actions">
+            <button class="btn primary" id="register_client_btn">Register Device</button>
+            <button class="btn secondary" id="client_status_btn">Status</button>
+            <button class="btn secondary" id="overview_status_btn">Refresh</button>
+          </div>
 
-      <section class="card">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">Step 2</p>
-            <h2>Client registration</h2>
-          </div>
-          <p class="section-lead">
-            Register the signed-in client against the selected path profile. Bootstrap directory and invite values stay optional for compatibility.
-          </p>
-        </div>
-        <div id="client_readiness" class="status-banner client-readiness" data-kind="warn" role="status" aria-live="polite">
-          <div class="status-banner__label">Step 2 readiness</div>
-          <div id="client_readiness_line" class="status warn">
-            <strong>Client status: <span id="client_readiness_status">Not signed in</span></strong>
-            <span id="client_readiness_guidance">Sign in first, then register the client profile.</span>
-          </div>
-        </div>
-        <div id="bootstrap_trust_status" class="status-banner client-readiness" data-kind="warn" role="status" aria-live="polite">
-          <div class="status-banner__label">Bootstrap trust status</div>
-          <div id="bootstrap_trust_status_line" class="status warn">
-            <strong>Trust state: <span id="bootstrap_trust_state">Unknown</span></strong>
-            <span id="bootstrap_trust_guidance">Fetch manifest to load bootstrap trust details.</span>
-          </div>
-          <p id="bootstrap_trust_summary" class="helper-copy">
-            Source: unknown | Signature: unknown | Expiry: unknown
-          </p>
-        </div>
-        <p class="helper-copy">
-          The client lane stays visible for every role. If your role is server-only, this banner explains the lock reason and next path.
-        </p>
-        <div class="fields">
-          <label>
-            Path profile
-            <select id="path_profile">
-              <option value="2hop">2hop (balanced)</option>
-              <option value="1hop">1hop (speed)</option>
-              <option value="3hop">3hop (private)</option>
-            </select>
-          </label>
-          <div id="compat_override_section" hidden>
+          <details class="advanced support-drawer" data-support-only hidden>
+            <summary>Network trust</summary>
+            <div id="bootstrap_trust_status" class="status-banner client-readiness" data-kind="warn" role="status" aria-live="polite">
+              <div class="status-banner__label">Bootstrap trust status</div>
+              <div id="bootstrap_trust_status_line" class="status warn">
+                <strong>Trust state: <span id="bootstrap_trust_state">Unknown</span></strong>
+                <span id="bootstrap_trust_guidance">Fetch manifest to load bootstrap trust details.</span>
+              </div>
+              <p id="bootstrap_trust_summary" class="helper-copy">
+                Source: unknown | Signature: unknown | Expiry: unknown
+              </p>
+            </div>
+          </details>
+          <div id="compat_override_section" data-support-only hidden>
             <label>
               <input id="compat_override" type="checkbox" />
-              Enable compatibility override (manual bootstrap/invite)
+              Manual setup override
             </label>
             <label>
               Bootstrap directory (optional)
@@ -260,194 +234,185 @@
               />
             </label>
           </div>
-        </div>
-        <p id="compat_override_hint" class="helper-copy">
-          Compatibility override is off by default. Keep it off for standard session-based registration.
-        </p>
-        <div class="actions">
-          <button class="btn primary" id="register_client_btn">Register Client</button>
-          <button class="btn secondary" id="client_status_btn">Check Client Status</button>
-          <button class="btn secondary" id="overview_status_btn">Refresh Overview</button>
-        </div>
-      </section>
+        </section>
 
-      <section class="card" id="public_contribution_console">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">Public contribution</p>
-            <h2>Contribute spare capacity and track weekly rewards</h2>
+        <section class="card action-card" id="connection_console">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">VPN</p>
+              <h2>Connect</h2>
+            </div>
+            <p class="section-lead">Start or stop GPM on this device.</p>
           </div>
-          <p class="section-lead">
-            Signed-in users can check eligibility, opt in or out, and view weekly reward status from their own session token only.
-          </p>
-        </div>
-        <div id="contribution_status" class="status-banner contribution-status" data-kind="warn" role="status" aria-live="polite">
-          <div class="status-banner__label">Contribution status</div>
-          <div id="contribution_status_line" class="status warn">
-            <strong id="contribution_state">Signed out</strong>
-            <span id="contribution_detail">Sign in to check contribution eligibility for this device.</span>
+          <div id="connection_snapshot" class="status-banner" data-kind="warn" role="status" aria-live="polite">
+            <div class="status-banner__label">Connection</div>
+            <div id="connection_snapshot_line" class="status warn">
+              <strong id="connection_state">Unknown</strong>
+              <span id="connection_detail">Run Status to fetch the current connection state.</span>
+            </div>
+            <div id="connection_routing_line" class="status warn">
+              <strong>Routing mode: <span id="connection_routing_mode">Unknown</span></strong>
+              <span id="connection_routing_detail">Run Status to fetch current routing posture.</span>
+            </div>
           </div>
-          <p id="contribution_eligibility_summary" class="helper-copy">
-            Tier, stake, prepaid balance, and local capacity checks appear after status refresh.
-          </p>
-        </div>
-        <div class="fields">
-          <label>
-            Contribution role
-            <select id="contribution_role">
-              <option value="micro-relay">Micro relay</option>
-              <option value="micro-exit">Micro exit</option>
-            </select>
-          </label>
-        </div>
-        <p id="contribution_policy_hint" class="helper-copy">
-          Public contribution actions never send wallet address, review filters, payout actions, or privileged route data. Requests include only your session token and selected contribution role where required.
-        </p>
-        <div class="actions">
-          <button class="btn secondary" id="contribution_status_btn">Contribution Status</button>
-          <button class="btn primary" id="contribution_enable_btn">Enable Contribution</button>
-          <button class="btn secondary" id="contribution_disable_btn">Disable Contribution</button>
-          <button class="btn secondary" id="reward_current_week_btn">Current Week Reward</button>
-          <button class="btn secondary" id="reward_history_btn">Reward History</button>
-        </div>
-        <div class="contribution-reward-grid">
-          <article id="contribution_reward_current_week" class="contribution-panel" aria-live="polite">
-            <p class="contribution-panel__label">Current week</p>
-            <h3 id="contribution_reward_week">Not loaded</h3>
-            <dl class="metric-list">
-              <div>
-                <dt>Reward units</dt>
-                <dd id="contribution_reward_units">0</dd>
-              </div>
-              <div>
-                <dt>Status</dt>
-                <dd id="contribution_reward_status">Unknown</dd>
-              </div>
-              <div>
-                <dt>Settlement</dt>
-                <dd id="contribution_reward_settlement">Pending refresh</dd>
-              </div>
-              <div>
-                <dt>Metering</dt>
-                <dd id="contribution_reward_metering">Pending refresh</dd>
-              </div>
-            </dl>
-          </article>
-          <article id="contribution_history" class="contribution-panel" aria-live="polite">
-            <p class="contribution-panel__label">Closed reward history</p>
-            <h3 id="contribution_history_summary">No history loaded</h3>
-            <ul id="contribution_history_list" class="reward-history-list">
-              <li>Run Reward History after sign-in to load closed weekly rewards.</li>
-            </ul>
-          </article>
-        </div>
-      </section>
+          <div class="tabs portal-tabs" role="tablist" aria-label="Portal workspaces">
+            <button id="tab_client" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel_client">
+              Client
+            </button>
+          </div>
+          <p id="tab_lock_hint" class="helper-copy locked tab-lock-hint" hidden aria-live="polite"></p>
+          <p id="workspace_first_run_hint" class="helper-copy workspace-first-run-hint">Client controls only.</p>
+          <p id="workspace_platform_hint" class="helper-copy workspace-first-run-hint">First run: connect wallet, register, connect.</p>
+          <p id="workspace_next_action_hint" class="helper-copy workspace-first-run-hint">Next: Connect Wallet.</p>
+          <div id="panel_client" class="tab-panel active" role="tabpanel" aria-labelledby="tab_client">
+            <p id="client_lock_hint" class="helper-copy">Register first, then connect.</p>
+            <p id="connect_policy_hint" class="helper-copy">GPM chooses safe paths automatically.</p>
+            <div class="actions">
+              <button class="btn primary" id="connect_btn">Connect</button>
+              <button class="btn secondary" id="disconnect_btn">Disconnect</button>
+              <button class="btn secondary" id="status_btn">Status</button>
+            </div>
+            <div data-support-only hidden>
+              <label>
+                Interface
+                <input id="connect_interface" value="wgvpn0" spellcheck="false" autocomplete="off" />
+              </label>
+              <label>
+                Bootstrap
+                <select id="session_bootstrap_directory">
+                  <option value="">Auto</option>
+                </select>
+              </label>
+              <label>
+                Discovery wait (sec)
+                <input id="connect_discovery_wait_sec" type="number" min="1" step="1" value="20" />
+              </label>
+              <label>
+                Ready timeout (sec)
+                <input id="connect_ready_timeout_sec" type="number" min="1" step="1" value="35" />
+              </label>
+              <label class="check">
+                <input id="connect_run_preflight" type="checkbox" checked />
+                Run preflight
+              </label>
+              <label class="check">
+                <input id="connect_prod_profile" type="checkbox" />
+                PROD profile
+              </label>
+              <label class="check">
+                <input id="connect_install_route" type="checkbox" aria-describedby="connect_install_route_hint" />
+                Expert full-tunnel route
+              </label>
+              <p id="connect_install_route_hint" class="helper-copy expert-route-warning">
+                Off by default for safety.
+              </p>
+            </div>
+          </div>
+        </section>
 
-      <section class="card" id="connection_console">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">Connection console</p>
-            <h2>Client connection controls in one portal window</h2>
+        <section class="card action-card" id="server_application">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Server</p>
+              <h2>Apply to host</h2>
+            </div>
+            <p class="section-lead">Request server access for this wallet.</p>
           </div>
-          <p class="section-lead">
-            Run local tunnel connect/disconnect/status actions while keeping onboarding context in this page.
-            Server lifecycle controls are intentionally excluded from the public website.
-          </p>
-        </div>
-        <div id="connection_snapshot" class="status-banner" data-kind="warn" role="status" aria-live="polite">
-          <div class="status-banner__label">Connection snapshot</div>
-          <div id="connection_snapshot_line" class="status warn">
-            <strong id="connection_state">Unknown</strong>
-            <span id="connection_detail">Run Status to fetch the current connection state.</span>
+          <div id="server_readiness" class="status-banner client-readiness" data-kind="warn" role="status" aria-live="polite">
+            <div class="status-banner__label">Server application</div>
+            <div id="server_readiness_line" class="status warn">
+              <strong>Server status: <span id="server_application_status">Not checked</span></strong>
+              <span id="server_application_guidance">Connect wallet first, then apply.</span>
+            </div>
           </div>
-          <div id="connection_routing_line" class="status warn">
-            <strong>Routing mode: <span id="connection_routing_mode">Unknown</span></strong>
-            <span id="connection_routing_detail">Run Status to fetch current routing posture.</span>
+          <div class="actions">
+            <button class="btn primary" id="apply_server_btn">Apply</button>
+            <button class="btn secondary" id="server_status_btn">Status</button>
           </div>
-        </div>
-        <div class="tabs portal-tabs" role="tablist" aria-label="Portal workspaces">
-          <button id="tab_client" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel_client">
-            Client
-          </button>
-        </div>
-        <p id="tab_lock_hint" class="helper-copy locked tab-lock-hint" hidden aria-live="polite"></p>
-        <p id="workspace_first_run_hint" class="helper-copy workspace-first-run-hint">
-          The public portal exposes only the client workspace. Use the separate GPM Admin Console for operator or server lifecycle work.
-        </p>
-        <p id="workspace_platform_hint" class="helper-copy workspace-first-run-hint">
-          First run: verify local readiness, sign in, run Session, then run Status before Connect.
-        </p>
-        <p id="workspace_next_action_hint" class="helper-copy workspace-first-run-hint">
-          Workspace next action: Request Challenge.
-        </p>
-        <div id="panel_client" class="tab-panel active" role="tabpanel" aria-labelledby="tab_client">
-          <p id="client_lock_hint" class="helper-copy">Client tab guidance appears here, including lock reasons and next steps.</p>
-          <p id="connect_policy_hint" class="helper-copy">
-            Connect policy: compat from env defaults; the session-trusted bootstrap selector uses the preferred entry; manual bootstrap/invite fields are policy-gated.
-          </p>
+          <p class="helper-copy">Approved hosts manage only their own server.</p>
+        </section>
+
+        <section class="card action-card" id="public_contribution_console">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Optional</p>
+              <h2>Share capacity</h2>
+            </div>
+            <p class="section-lead">If eligible, help the mesh and see weekly earnings.</p>
+          </div>
+          <div id="contribution_status" class="status-banner contribution-status" data-kind="warn" role="status" aria-live="polite">
+            <div class="status-banner__label">Sharing status</div>
+            <div id="contribution_status_line" class="status warn">
+              <strong id="contribution_state">Signed out</strong>
+              <span id="contribution_detail">Sign in to check eligibility.</span>
+            </div>
+            <p id="contribution_eligibility_summary" class="helper-copy">
+              Eligibility appears after status refresh.
+            </p>
+          </div>
           <div class="fields">
             <label>
-              Interface
-              <input id="connect_interface" value="wgvpn0" spellcheck="false" autocomplete="off" />
-            </label>
-            <label>
-              Session bootstrap directory (session-trusted)
-              <select id="session_bootstrap_directory">
-                <option value="">Auto (preferred entry)</option>
+              Share as
+              <select id="contribution_role">
+                <option value="micro-relay">Relay</option>
+                <option value="micro-exit">Exit beta</option>
               </select>
             </label>
-            <label>
-              Discovery wait (sec)
-              <input id="connect_discovery_wait_sec" type="number" min="1" step="1" value="20" />
-            </label>
-            <label>
-              Ready timeout (sec)
-              <input id="connect_ready_timeout_sec" type="number" min="1" step="1" value="35" />
-            </label>
           </div>
-          <div class="checks-row">
-            <label class="check">
-              <input id="connect_run_preflight" type="checkbox" checked />
-              Run preflight
-            </label>
-            <label class="check">
-              <input id="connect_prod_profile" type="checkbox" />
-              PROD profile
-            </label>
-            <label class="check">
-              <input id="connect_install_route" type="checkbox" aria-describedby="connect_install_route_hint" />
-              Expert full-tunnel route
-            </label>
-          </div>
-          <p id="connect_install_route_hint" class="helper-copy expert-route-warning">
-            Off by default for safety. Only enable this expert/full-tunnel option when you understand it installs the
-            system default route through GPM and may affect all device traffic.
-          </p>
-          <p class="helper-copy">
-            Connect requests use Step 2 path profile plus compatibility override fields when policy allows.
-          </p>
+          <p id="contribution_policy_hint" class="helper-copy">Your own VPN traffic stays first.</p>
           <div class="actions">
-            <button class="btn primary" id="connect_btn">Connect</button>
-            <button class="btn secondary" id="disconnect_btn">Disconnect</button>
-            <button class="btn secondary" id="status_btn">Status</button>
+            <button class="btn primary" id="contribution_enable_btn">Start Sharing</button>
+            <button class="btn secondary" id="contribution_disable_btn">Stop Sharing</button>
+            <button class="btn secondary" id="contribution_status_btn">Status</button>
+            <button class="btn secondary" id="reward_current_week_btn">Earnings</button>
+            <button class="btn secondary" id="reward_history_btn">History</button>
           </div>
-        </div>
+          <div class="contribution-reward-grid">
+            <article id="contribution_reward_current_week" class="contribution-panel" aria-live="polite">
+              <p class="contribution-panel__label">Current week</p>
+              <h3 id="contribution_reward_week">Not loaded</h3>
+              <dl class="metric-list">
+                <div>
+                  <dt>Reward units</dt>
+                  <dd id="contribution_reward_units">0</dd>
+                </div>
+                <div>
+                  <dt>Status</dt>
+                  <dd id="contribution_reward_status">Unknown</dd>
+                </div>
+                <div>
+                  <dt>Settlement</dt>
+                  <dd id="contribution_reward_settlement">Pending refresh</dd>
+                </div>
+                <div>
+                  <dt>Metering</dt>
+                  <dd id="contribution_reward_metering">Pending refresh</dd>
+                </div>
+              </dl>
+            </article>
+            <article id="contribution_history" class="contribution-panel" aria-live="polite">
+              <p class="contribution-panel__label">History</p>
+              <h3 id="contribution_history_summary">No history loaded</h3>
+              <ul id="contribution_history_list" class="reward-history-list">
+                <li>Run Reward History after sign-in to load closed weekly rewards.</li>
+              </ul>
+            </article>
+          </div>
+        </section>
       </section>
 
-      <section class="card">
+      <section class="card" data-support-only hidden>
         <div class="section-head">
           <div>
-            <p class="eyebrow">Console output</p>
-            <h2>Output</h2>
+            <p class="eyebrow">Diagnostics</p>
+            <h2>Support log</h2>
           </div>
-          <p class="section-lead">
-            Action results, status updates, and API responses appear here while you move through the onboarding flow.
-          </p>
+          <p class="section-lead">Only open if support asks.</p>
         </div>
         <pre id="output"></pre>
       </section>
 
-      <section class="card help-card">
+      <section class="card help-card" hidden>
         <div class="section-head">
           <div>
             <p class="eyebrow">Help</p>
@@ -464,12 +429,53 @@
           <li>Session token updates are applied automatically after successful sign-in and client registration.</li>
         </ul>
       </section>
+
+      <details class="advanced wallet-troubleshooting" data-support-only hidden>
+        <summary>Wallet diagnostics</summary>
+        <p>
+          Support-only fields. Connect Wallet fills these values automatically.
+        </p>
+        <div class="fields">
+          <label>
+            Wallet chain ID
+            <input id="wallet_chain_id" placeholder="Auto: gpm-mainnet-1" spellcheck="false" autocomplete="off" />
+          </label>
+          <label>
+            Wallet address
+            <input id="wallet_address" placeholder="auto from wallet" />
+          </label>
+          <label>
+            Challenge ID
+            <input id="challenge_id" placeholder="auto from GPM" />
+          </label>
+          <label>
+            Challenge message
+            <input
+              id="challenge_message"
+              placeholder="auto from GPM"
+              readonly
+              spellcheck="false"
+              autocomplete="off"
+            />
+          </label>
+          <label>
+            Signature
+            <input id="signature" placeholder="auto from wallet" />
+          </label>
+        </div>
+        <div class="actions">
+          <button class="btn secondary" id="challenge_btn">New Challenge</button>
+          <button class="btn secondary" id="wallet_sign_btn">Sign Challenge (Wallet)</button>
+          <button class="btn primary" id="signin_btn">Verify + Create Session</button>
+          <button class="btn secondary" id="session_btn">Refresh Session</button>
+          <button class="btn secondary" id="session_rotate_btn">Rotate Session</button>
+          <button class="btn secondary" id="manifest_btn">Fetch Manifest</button>
+        </div>
+      </details>
     </main>
 
     <footer class="footer">
-      <div class="wrap">
-        Portal scaffold for GPM productization milestone. Wallet-extension sign + verify support for Keplr/Leap is available now.
-      </div>
+      <div class="wrap">Global Private Mesh</div>
     </footer>
 
     <script type="module" src="./assets/portal.js"></script>

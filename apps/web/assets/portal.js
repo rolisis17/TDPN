@@ -34,6 +34,10 @@ const clientReadinessEl = byId("client_readiness");
 const clientReadinessLineEl = byId("client_readiness_line");
 const clientReadinessStatusEl = byId("client_readiness_status");
 const clientReadinessGuidanceEl = byId("client_readiness_guidance");
+const serverReadinessEl = byId("server_readiness");
+const serverReadinessLineEl = byId("server_readiness_line");
+const serverApplicationStatusEl = byId("server_application_status");
+const serverApplicationGuidanceEl = byId("server_application_guidance");
 const bootstrapTrustStatusEl = byId("bootstrap_trust_status");
 const bootstrapTrustStatusLineEl = byId("bootstrap_trust_status_line");
 const bootstrapTrustStateEl = byId("bootstrap_trust_state");
@@ -93,6 +97,7 @@ const connectProdProfileEl = byId("connect_prod_profile");
 const connectInstallRouteEl = byId("connect_install_route");
 const onboardingStepSigninEl = document.getElementById("onboarding_step_signin");
 const onboardingStepClientEl = document.getElementById("onboarding_step_client");
+const onboardingStepServerEl = document.getElementById("onboarding_step_server");
 const actionButtons = Array.from(document.querySelectorAll(".actions button"));
 const SERVER_ONLY_ROLES = new Set(["server", "server_only"]);
 const CLIENT_REGISTRATION_TRUST_DRIFT_STATUS_KEYS = new Set([
@@ -112,6 +117,7 @@ const CLIENT_REGISTRATION_TRUST_DRIFT_STATUS_KEYS = new Set([
 ]);
 const PUBLIC_CONTRIBUTION_ROLES = new Set(["micro-relay", "micro-exit"]);
 const WALLET_EXTENSION_PROVIDERS = new Set(["keplr", "leap"]);
+const DEFAULT_GPM_WALLET_CHAIN_ID = "gpm-mainnet-1";
 const CONNECT_POLICY_MODE_SESSION_REQUIRED = "session_required";
 const CONNECT_POLICY_MODE_COMPAT_ALLOWED = "compat_allowed";
 const CONNECT_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
@@ -923,11 +929,11 @@ function refreshPolicyPostureBanner() {
   const cryptoProofRequired = authVerifyRequireCryptoProof ? "required" : "optional";
   const cryptoProofSource = nonEmptyString(authVerifyRequireCryptoProofPolicySource) || "default";
   const manualSignInGuidance = gpmProductionMode
-    ? " Manual Verify + Create Session is disabled in production mode; use Sign + Verify (Wallet)."
+    ? " Manual Verify + Create Session is disabled in production mode; use Connect Wallet."
     : authVerifyRequireWalletExtensionSource
-      ? " Manual Verify + Create Session is disabled; use Sign + Verify (Wallet)."
+      ? " Manual Verify + Create Session is disabled; use Connect Wallet."
       : authVerifyRequireCryptoProof
-        ? " Manual Verify + Create Session is available for compatibility, but cryptographic proof metadata is required by policy; use Sign + Verify (Wallet) when possible."
+        ? " Manual Verify + Create Session is available for compatibility, but cryptographic proof metadata is required by policy; use Connect Wallet when possible."
         : " Manual Verify + Create Session is available for compatibility.";
   policyAuthVerifyEl.textContent =
     `Auth verify strictness: metadata ${metadataRequired} (source: ${metadataSource}); ` +
@@ -989,9 +995,9 @@ function syncManualSignInAction() {
     : "";
   const disabled = isBusy || policyLocked;
   const guidance = productionLocked
-    ? "Manual verify is disabled in production mode. Use Sign + Verify (Wallet)."
+    ? "Manual verify is disabled in production mode. Use Connect Wallet."
     : authPolicyLocked
-      ? "Manual verify is disabled by active auth policy. Use Sign + Verify (Wallet)."
+      ? "Manual verify is disabled by active auth policy. Use Connect Wallet."
       : "Manual verify is available in compatibility mode.";
 
   manualSignInBtnEl.disabled = disabled;
@@ -2067,7 +2073,7 @@ function formatDurationCompact(deltaMs) {
 }
 
 function sessionReauthGuidance() {
-  return "Rotate Session if still valid, otherwise Sign + Verify (Wallet) or Verify + Create Session.";
+  return "Rotate Session if still valid, otherwise Connect Wallet or use advanced Verify + Create Session.";
 }
 
 function extractSessionExpiryMs(payload) {
@@ -2908,6 +2914,46 @@ function parsePublicReadiness(payload) {
   };
 }
 
+function parseServerApplicationStatus(payload) {
+  const value =
+    payload?.application?.status ||
+    payload?.readiness?.operator_application_status ||
+    payload?.readiness?.operatorApplicationStatus ||
+    payload?.status;
+  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : "";
+}
+
+function setServerApplicationStatus(status, guidance = "") {
+  const normalized = typeof status === "string" ? status.trim().toLowerCase() : "";
+  let kind = "warn";
+  let label = "Not checked";
+  let detail = guidance || "Connect wallet first, then apply if you want this device reviewed for server mode.";
+  if (normalized === "approved") {
+    kind = "good";
+    label = "Approved";
+    detail = guidance || "Server access is approved. This device can continue with server setup.";
+  } else if (normalized === "pending") {
+    label = "Pending approval";
+    detail = guidance || "Your server application is waiting for GPM review.";
+  } else if (normalized === "rejected") {
+    kind = "bad";
+    label = "Refused";
+    detail = guidance || "The server application was refused. Update details before applying again.";
+  } else if (normalized === "not_submitted") {
+    label = "Not applied";
+    detail = guidance || "Apply if you want this device reviewed for server mode.";
+  }
+  serverReadinessEl.dataset.kind = kind;
+  serverReadinessEl.dataset.state = normalized || "unknown";
+  serverReadinessLineEl.classList.remove("good", "warn", "bad");
+  serverReadinessLineEl.classList.add(kind);
+  serverApplicationStatusEl.textContent = label;
+  serverApplicationGuidanceEl.textContent = detail;
+  if (onboardingStepServerEl) {
+    setStepState(onboardingStepServerEl, normalized === "approved" ? "done" : normalized === "pending" ? "active" : "idle");
+  }
+}
+
 function setPublicReadiness(value) {
   publicReadiness = value || null;
   refreshClientReadiness();
@@ -2964,13 +3010,13 @@ function syncWorkspaceNextActionHint(clientTabVisible = isClientTabVisibleRole()
 function syncWorkspaceFirstRunHints(clientTabVisible) {
   if (workspaceFirstRunHintEl) {
     workspaceFirstRunHintEl.textContent =
-      `Public portal exposes only the client workspace. ${formatWorkspaceTabAvailabilityHint(clientTabVisible)}`;
+      `Client controls only. ${formatWorkspaceTabAvailabilityHint(clientTabVisible)}`;
     workspaceFirstRunHintEl.classList.toggle("locked", !clientTabVisible);
   }
   if (workspacePlatformHintEl) {
     workspacePlatformHintEl.textContent = isWindowsRuntimePlatform()
-      ? "Windows-native first run: verify local GPM/WireGuard readiness, sign in, run Session, then run Status before Connect."
-      : "First run: verify local GPM readiness, sign in, run Session, then run Status before Connect.";
+      ? "First run: connect wallet, register, connect."
+      : "First run: connect wallet, register, connect.";
   }
   syncWorkspaceNextActionHint(clientTabVisible);
 }
@@ -2984,7 +3030,7 @@ function inferWorkspaceTabActivationPathHint(tabName, reason) {
   const hasSessionToken = byId("session_token").value.trim().length > 0;
   if (tabName === "client") {
     if (!hasSessionToken) {
-      return "Request Challenge, run Sign + Verify (Wallet) or Verify + Create Session, then Register Client";
+      return "Connect Wallet, then Register Device";
     }
     return "Register Client to unlock client lane actions";
   }
@@ -2994,7 +3040,7 @@ function inferWorkspaceTabActivationPathHint(tabName, reason) {
 function formatWorkspaceLockedTabMessage(tabName, reason) {
   const normalizedReason = ensureSentence(reason) || `${tabName} tab is currently locked by role policy.`;
   const activationPath = ensureSentence(inferWorkspaceTabActivationPathHint(tabName.toLowerCase(), normalizedReason));
-  return `${tabName} tab is disabled for this session. ${normalizedReason} Next step: ${activationPath}`;
+  return `${tabName} is locked. ${normalizedReason} Next: ${activationPath}`;
 }
 
 function syncWorkspaceTabLockHint(clientTabVisible, clientReason) {
@@ -3065,10 +3111,12 @@ function refreshOnboardingSteps() {
   if (!hasSession) {
     setStepState(onboardingStepSigninEl, "active");
     setStepState(onboardingStepClientEl, "blocked");
+    setStepState(onboardingStepServerEl, "blocked");
     return;
   }
 
   setStepState(onboardingStepSigninEl, "done");
+  setStepState(onboardingStepServerEl, "idle");
   const clientLaneRoleLocked = clientReadiness.state === "role_locked";
   if (!clientRegistered && !clientLaneRoleLocked) {
     setStepState(onboardingStepClientEl, "active");
@@ -3087,16 +3135,16 @@ function computePortalNextRecommendedAction() {
     const challengeId = byId("challenge_id").value.trim();
     const signature = byId("signature").value.trim();
     if (!challengeId) {
-      return "Request Challenge.";
+      return "Connect Wallet.";
     }
     if (!signature) {
-      return "Sign Challenge (Wallet) or run Sign + Verify (Wallet).";
+      return "Use Connect Wallet, or use advanced Sign Challenge.";
     }
-    return "Verify + Create Session.";
+      return "Use Connect Wallet.";
   }
   const sessionFreshness = computeSessionFreshnessState();
   if (sessionFreshness.state === "expired") {
-    return "Re-authenticate with Sign + Verify (Wallet) or Verify + Create Session.";
+    return "Re-authenticate with Connect Wallet or advanced Verify + Create Session.";
   }
   if (sessionFreshness.state === "expiring_soon") {
     return "Rotate Session.";
@@ -3107,7 +3155,7 @@ function computePortalNextRecommendedAction() {
     clientReadiness.state === "ready_to_register" ||
     clientReadiness.state === "re_registration_required"
   ) {
-    return "Register Client.";
+    return "Register Device.";
   }
 
   if (!publicContributionStatusPayload) {
@@ -3819,20 +3867,18 @@ function syncWalletExtensionReadinessHint() {
   }
   const walletProvider = byId("wallet_provider").value;
   const providerLabel = walletProviderDisplayName(walletProvider);
-  const chainId = walletChainIdEl.value.trim();
+  const chainId = walletChainIdEl.value.trim() || DEFAULT_GPM_WALLET_CHAIN_ID;
   const extensionDetected = walletExtensionDetected(walletProvider);
   const walletPolicyLocked = gpmProductionMode || strictWalletExtensionSourceRequired();
   const requirementSummary = walletPolicyLocked
-    ? "Wallet extension Sign + Verify is required by active policy."
-    : "Wallet extension Sign + Verify is available and recommended.";
+    ? "Connect Wallet is required by active policy."
+    : "Connect Wallet is available and recommended.";
   const extensionSummary = extensionDetected
     ? `${providerLabel} extension detected in this browser.`
     : `${providerLabel} extension not detected in this browser. Install/enable it and reload before signing.`;
-  const chainSummary = chainId
-    ? `Chain: ${chainId}.`
-    : "Set wallet chain ID before signing with wallet extension.";
+  const chainSummary = `Network: ${chainId}. GPM fills this automatically.`;
   walletExtensionHintEl.textContent = `${requirementSummary} ${extensionSummary} ${chainSummary}`;
-  walletExtensionHintEl.classList.toggle("locked", walletPolicyLocked || !extensionDetected || !chainId);
+  walletExtensionHintEl.classList.toggle("locked", walletPolicyLocked || !extensionDetected);
 }
 
 function challengeMessageFromPayload(payload) {
@@ -4137,15 +4183,13 @@ function extractSignArbitrarySignature(payload) {
 async function signChallengeWithWalletExtension() {
   const challengeId = byId("challenge_id").value.trim();
   const challengeMessage = challengeMessageEl.value.trim();
-  const chainId = walletChainIdEl.value.trim();
+  const chainId = walletChainIdEl.value.trim() || DEFAULT_GPM_WALLET_CHAIN_ID;
+  walletChainIdEl.value = chainId;
   if (!challengeId) {
     throw new Error("challenge_id is required. Request challenge first.");
   }
   if (!challengeMessage) {
     throw new Error("challenge_message is required. Request challenge first.");
-  }
-  if (!chainId) {
-    throw new Error("wallet_chain_id is required to sign with wallet extension.");
   }
   const { wallet_provider: walletProvider } = readWalletPayload();
   const { extension, provider } = resolveWalletExtensionClient(walletProvider);
@@ -4156,7 +4200,7 @@ async function signChallengeWithWalletExtension() {
     walletAddress = await resolveWalletAddressFromExtension(extension, chainId);
     if (!walletAddress) {
       throw new Error(
-        `Unable to resolve wallet address from ${walletProviderDisplayName(provider)} extension. Enter wallet_address and retry.`
+        `Unable to resolve wallet address from ${walletProviderDisplayName(provider)} extension. Open Advanced troubleshooting only if support asks you to enter it manually.`
       );
     }
     byId("wallet_address").value = walletAddress;
@@ -4201,12 +4245,12 @@ async function requestAuthVerify(options = {}) {
   const source = nonEmptyString(options?.source)?.toLowerCase() || "manual";
   const manualSource = source !== "wallet_extension";
   if (manualSource && gpmProductionMode) {
-    throw new Error("Manual verify is disabled in production mode. Use Sign + Verify (Wallet).");
+    throw new Error("Manual verify is disabled in production mode. Use Connect Wallet.");
   }
   if (manualSource && strictWalletExtensionSourceRequired()) {
     const policySource = formatPolicySourceLabel(authVerifyRequireWalletExtensionPolicySource);
     throw new Error(
-      `Manual verify is disabled by active auth policy (wallet-extension-source required; source: ${policySource}). Use Sign + Verify (Wallet).`
+      `Manual verify is disabled by active auth policy (wallet-extension-source required; source: ${policySource}). Use Connect Wallet.`
     );
   }
   const request = {
@@ -4228,6 +4272,23 @@ async function requestAuthVerify(options = {}) {
 }
 
 async function requestWalletSignIn() {
+  if (!walletChainIdEl.value.trim()) {
+    walletChainIdEl.value = DEFAULT_GPM_WALLET_CHAIN_ID;
+  }
+  if (!byId("wallet_address").value.trim()) {
+    const { wallet_provider: walletProvider } = readWalletPayload();
+    const { extension } = resolveWalletExtensionClient(walletProvider);
+    const chainId = walletChainIdEl.value.trim();
+    await extension.enable(chainId);
+    const walletAddress = await resolveWalletAddressFromExtension(extension, chainId);
+    if (walletAddress) {
+      byId("wallet_address").value = walletAddress;
+      persistPortalState();
+    }
+  }
+  if (!byId("challenge_id").value.trim() || !challengeMessageEl.value.trim()) {
+    await requestAuthChallenge();
+  }
   await signChallengeWithWalletExtension();
   return requestAuthVerify({ source: "wallet_extension" });
 }
@@ -4252,6 +4313,31 @@ async function requestClientStatus() {
     wallet_address: walletAddress || undefined
   };
   return post("/v1/gpm/onboarding/client/status", request);
+}
+
+function publicServerSessionRequest(actionLabel) {
+  assertSessionFreshForAction(actionLabel, { requireToken: true });
+  const sessionToken = byId("session_token").value.trim();
+  const walletAddress = byId("wallet_address").value.trim();
+  return {
+    session_token: sessionToken,
+    wallet_address: walletAddress || undefined
+  };
+}
+
+async function requestServerStatus() {
+  return post("/v1/gpm/onboarding/server/status", publicServerSessionRequest("Server status"));
+}
+
+async function requestServerApply() {
+  const request = publicServerSessionRequest("Apply to run server");
+  const walletAddress = byId("wallet_address").value.trim();
+  if (!walletAddress) {
+    throw new Error("Connect wallet first so GPM can identify this server application.");
+  }
+  request.chain_operator_id = walletAddress;
+  request.server_label = `gpm-server-${walletAddress.slice(-8) || "device"}`;
+  return post("/v1/gpm/onboarding/operator/apply", request);
 }
 
 function publicContributionSessionRequest(actionLabel) {
@@ -4298,6 +4384,7 @@ function applyOnboardingOverviewPayload(payload) {
   applyClientRegistrationPayload(payload);
   applyBootstrapTrustStatusPayload(payload);
   setPublicReadiness(parsePublicReadiness(payload));
+  setServerApplicationStatus(parseServerApplicationStatus(payload));
 }
 
 async function requestOverview() {
@@ -4641,7 +4728,7 @@ byId("wallet_sign_btn").addEventListener("click", () =>
 
 byId("wallet_signin_btn").addEventListener("click", () =>
   run("wallet_signin", requestWalletSignIn, {
-    successDetail: () => "Challenge signed via wallet extension and session verification completed."
+    successDetail: () => "Wallet connected and session created."
   })
 );
 
@@ -4683,6 +4770,7 @@ byId("session_revoke_btn").addEventListener("click", () =>
     byId("session_token").value = "";
     byId("role").value = "client";
     setPublicReadiness(null);
+    setServerApplicationStatus("not_submitted", "Connect wallet first, then apply if you want this device reviewed for server mode.");
     clearPublicContributionState();
     persistPortalState();
     await refreshBootstrapTrustStatusBestEffort({ quiet: true });
@@ -4746,6 +4834,35 @@ byId("overview_status_btn").addEventListener("click", () =>
     },
     {
       successDetail: () => "Onboarding overview refreshed for the public client lane."
+    }
+  )
+);
+
+byId("apply_server_btn").addEventListener("click", () =>
+  run(
+    "server_apply",
+    async () => {
+      const result = await requestServerApply();
+      setServerApplicationStatus(parseServerApplicationStatus(result), "Server application sent for GPM review.");
+      return result;
+    },
+    {
+      successDetail: () => "Server application submitted. GPM must approve it before server mode is available."
+    }
+  )
+);
+
+byId("server_status_btn").addEventListener("click", () =>
+  run(
+    "server_status",
+    async () => {
+      const result = await requestServerStatus();
+      setServerApplicationStatus(parseServerApplicationStatus(result));
+      setPublicReadiness(parsePublicReadiness(result));
+      return result;
+    },
+    {
+      successDetail: () => "Server application status refreshed."
     }
   )
 );
@@ -4931,7 +5048,7 @@ function initializePortal() {
   refreshPolicyPostureBanner();
   refreshLegacyAliasWarningBanner();
   clearPublicContributionState();
-  setStatus("good", "Portal ready", "Set an absolute API base, then start with a challenge or session refresh.");
+  setStatus("good", "Portal ready", "Connect your wallet to begin.");
   void refreshConnectPolicyConfigBestEffort({ quiet: true });
   void refreshBootstrapTrustStatusBestEffort({ quiet: true });
   void restoreSessionStatusBestEffort();

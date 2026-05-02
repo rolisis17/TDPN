@@ -23,9 +23,6 @@ const ADMIN_BUNDLE_MARKERS = [
   "control_gpm_admin_reward_review",
   "control_gpm_admin_reward_hold",
   "control_gpm_admin_reward_finalize",
-  "control_gpm_server_status",
-  "control_gpm_operator_apply",
-  "control_gpm_operator_status",
   "control_gpm_operator_list",
   "control_gpm_operator_approve"
 ];

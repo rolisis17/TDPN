@@ -1074,7 +1074,6 @@ impl GPMClientStatusRequest {
     }
 }
 
-#[cfg(feature = "admin-console")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GPMServerStatusRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1237,7 +1236,6 @@ pub struct GPMAdminRewardFinalizeRequest {
     pub week_start_utc: Option<String>,
 }
 
-#[cfg(feature = "admin-console")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GPMOperatorApplyRequest {
     pub session_token: String,
@@ -1246,7 +1244,6 @@ pub struct GPMOperatorApplyRequest {
     pub server_label: Option<String>,
 }
 
-#[cfg(feature = "admin-console")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GPMOperatorStatusRequest {
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -1405,7 +1405,8 @@ func (h *settlementBridgeHandler) handleSlashEvidenceFinality(w http.ResponseWri
 	}
 
 	var payload settlementSlashEvidencePayload
-	if err := decodeJSON(r, &payload); err != nil {
+	payloadFields, err := decodeSettlementSlashEvidenceFinalityJSON(r, &payload)
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: err.Error()})
 		return
 	}
@@ -1416,6 +1417,22 @@ func (h *settlementBridgeHandler) handleSlashEvidenceFinality(w http.ResponseWri
 	status, ok := parseBridgeReconciliationStatus(payload.Status)
 	if !ok || status != chaintypes.ReconciliationConfirmed {
 		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: "Status must be confirmed"})
+		return
+	}
+
+	existing, err := h.scaffold.SlashingQueryServer().GetEvidence(r.Context(), app.SlashingGetEvidenceRequest{
+		EvidenceID: evidenceID,
+	})
+	if err != nil {
+		writeBridgeError(w, err)
+		return
+	}
+	if !existing.Found {
+		writeJSON(w, http.StatusNotFound, bridgeEnvelope{OK: false, Error: slashingmodule.ErrEvidenceNotFound.Error()})
+		return
+	}
+	if err := validateSlashEvidenceFinalityMaterial(payload, payloadFields, existing.Evidence); err != nil {
+		writeJSON(w, http.StatusConflict, bridgeEnvelope{OK: false, Error: err.Error()})
 		return
 	}
 
@@ -2744,6 +2761,113 @@ func validateSettlementSlashMetadata(payload settlementSlashEvidencePayload) err
 		}
 	}
 	return nil
+}
+
+func decodeSettlementSlashEvidenceFinalityJSON(r *http.Request, out *settlementSlashEvidencePayload) (map[string]bool, error) {
+	defer r.Body.Close()
+	if r.ContentLength > settlementBridgeMaxJSONBodyBytes {
+		return nil, fmt.Errorf("invalid JSON payload: request body too large (max %d bytes)", settlementBridgeMaxJSONBodyBytes)
+	}
+	limitedBody := &io.LimitedReader{
+		R: r.Body,
+		N: settlementBridgeMaxJSONBodyBytes + 1,
+	}
+	body, err := io.ReadAll(limitedBody)
+	if err != nil {
+		return nil, fmt.Errorf("invalid JSON payload: %w", err)
+	}
+	if limitedBody.N <= 0 {
+		return nil, fmt.Errorf("invalid JSON payload: request body too large (max %d bytes)", settlementBridgeMaxJSONBodyBytes)
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(out); err != nil {
+		return nil, fmt.Errorf("invalid JSON payload: %w", err)
+	}
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("invalid JSON payload: %w", err)
+	}
+	if len(trailing) > 0 {
+		return nil, errors.New("invalid JSON payload: trailing data after JSON value")
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("invalid JSON payload: %w", err)
+	}
+	fields := make(map[string]bool, len(raw))
+	for key := range raw {
+		fields[key] = true
+	}
+	return fields, nil
+}
+
+func slashEvidenceFinalityFieldPresent(fields map[string]bool, names ...string) bool {
+	for _, name := range names {
+		if fields[name] {
+			return true
+		}
+	}
+	return false
+}
+
+func validateSlashEvidenceFinalityMaterial(payload settlementSlashEvidencePayload, fields map[string]bool, existing slashingtypes.SlashEvidence) error {
+	if slashEvidenceFinalityFieldPresent(fields, "SubjectID", "subject_id", "ProviderID", "provider_id") {
+		if got, want := slashingtypes.NormalizeProviderID(payload.SubjectID), existing.ProviderID; got != want {
+			return fmt.Errorf("slash evidence finality material mismatch: subject_id got %q want %q", got, want)
+		}
+	}
+	if slashEvidenceFinalityFieldPresent(fields, "SessionID", "session_id") {
+		if got, want := slashingtypes.NormalizeSessionID(payload.SessionID), existing.SessionID; got != want {
+			return fmt.Errorf("slash evidence finality material mismatch: session_id got %q want %q", got, want)
+		}
+	}
+	if slashEvidenceFinalityFieldPresent(fields, "ViolationType", "violation_type") {
+		got, err := normalizeBridgeObjectiveViolationType(payload.ViolationType)
+		if err != nil {
+			return err
+		}
+		if want := existing.ViolationType; got != want {
+			return fmt.Errorf("slash evidence finality material mismatch: violation_type got %q want %q", got, want)
+		}
+	}
+	if slashEvidenceFinalityFieldPresent(fields, "EvidenceRef", "evidence_ref", "ProofHash", "proof_hash") {
+		got := strings.TrimSpace(payload.EvidenceRef)
+		if err := validateBridgeSlashEvidenceRef(got); err != nil {
+			return err
+		}
+		got = canonicalBridgeSlashEvidenceRef(got)
+		want := canonicalBridgeSlashEvidenceRef(slashingtypes.CanonicalObjectiveEvidenceProofRef(existing.ProofHash))
+		if got != want {
+			return fmt.Errorf("slash evidence finality material mismatch: evidence_ref got %q want %q", got, want)
+		}
+	}
+	if slashEvidenceFinalityFieldPresent(fields, "SlashMicros", "slash_micros") {
+		if payload.SlashMicros != existing.SlashAmount {
+			return fmt.Errorf("slash evidence finality material mismatch: slash_micros got %d want %d", payload.SlashMicros, existing.SlashAmount)
+		}
+	}
+	if slashEvidenceFinalityFieldPresent(fields, "Currency", "currency") {
+		if got, want := slashingtypes.NormalizeSlashDenom(payload.Currency), existing.SlashDenom; got != want {
+			return fmt.Errorf("slash evidence finality material mismatch: currency got %q want %q", got, want)
+		}
+	}
+	if slashEvidenceFinalityFieldPresent(fields, "ObservedAt", "observed_at") {
+		if got, want := unixOrZero(payload.ObservedAt), existing.SubmittedAtUnix; got != want {
+			return fmt.Errorf("slash evidence finality material mismatch: observed_at got %d want %d", got, want)
+		}
+	}
+	return nil
+}
+
+func canonicalBridgeSlashEvidenceRef(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(strings.ToLower(value), "sha256:") {
+		return "sha256:" + strings.ToLower(value[len("sha256:"):])
+	}
+	return value
 }
 
 func settlementSlashProofHash(payload settlementSlashEvidencePayload, proofHash string) string {

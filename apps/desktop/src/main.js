@@ -29,6 +29,12 @@ const currentRoleEl = byId("current_role");
 const sessionTokenEl = byId("session_token");
 const walletProviderEl = byId("wallet_provider");
 const walletAddressEl = byId("wallet_address");
+const walletGateEl = document.getElementById("wallet_gate");
+const walletGateProviderEl = document.getElementById("wallet_gate_provider");
+const walletGateChainIdEl = document.getElementById("wallet_gate_chain_id");
+const walletGateConnectBtnEl = document.getElementById("wallet_gate_connect_btn");
+const walletGateManualBtnEl = document.getElementById("wallet_gate_manual_btn");
+const walletGateHintEl = document.getElementById("wallet_gate_hint");
 const challengeIdEl = byId("challenge_id");
 const walletSignatureEl = byId("wallet_signature");
 const signatureKindEl = byId("signature_kind");
@@ -134,6 +140,8 @@ const READINESS_HEARTBEAT_STALE_MS = 5 * 60 * 1000;
 const READINESS_HEARTBEAT_ERROR_MAX_CHARS = 160;
 const OPERATOR_APPLICATION_STATUSES = new Set(["not_submitted", "pending", "approved", "rejected"]);
 const WALLET_EXTENSION_PROVIDERS = new Set(["keplr", "leap"]);
+const DEFAULT_GPM_WALLET_CHAIN_ID = "gpm-mainnet-1";
+const WALLET_GATE_DISMISSED_KEY = "gpm.desktop.wallet_gate_dismissed";
 const COMPAT_ADVANCED_DEFAULT_HINT = "Optional legacy fields for support-only compatibility flows.";
 const COMPAT_ADVANCED_LOCKED_HINT =
   "Manual bootstrap/invite overrides are locked by policy; connect uses session token only.";
@@ -157,18 +165,18 @@ const BOOTSTRAP_TRUST_POLICY_SOURCE_ENV_DEFAULT = "env_default";
 const BOOTSTRAP_TRUST_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
 const PROFILE_GATE_PROBE_POLICY_SOURCE_ENV_DEFAULT = "env_default";
 const PROFILE_GATE_PROBE_POLICY_SOURCE_RUNTIME_CONFIG = "runtime_config";
-const WALLET_SIGN_IN_LABEL_RECOMMENDED = "Wallet Sign-In (Recommended)";
-const WALLET_SIGN_IN_LABEL_REQUIRED = "Wallet Sign-In (Required)";
+const WALLET_SIGN_IN_LABEL_RECOMMENDED = "Connect Wallet";
+const WALLET_SIGN_IN_LABEL_REQUIRED = "Connect Wallet";
 const MANUAL_SIGN_IN_LABEL = "Sign In (Manual)";
 const MANUAL_SIGN_IN_LABEL_DISABLED = "Sign In (Manual Disabled)";
 const SIGN_IN_POLICY_PRODUCTION_LOCK_HINT =
-  "Production mode is active; Wallet Sign-In is required and manual Sign In is disabled.";
+  "Production mode is active; Connect Wallet is required and manual Sign In is disabled.";
 const SIGN_IN_POLICY_RUNTIME_LOCK_HINT =
-  "Wallet Sign-In is required by active auth policy; manual Sign In is disabled.";
+  "Connect Wallet is required by active auth policy; manual Sign In is disabled.";
 const SIGN_IN_VALIDATION_PRODUCTION_LOCK_HINT =
-  "Manual Sign In is disabled by production mode; use Wallet Sign-In.";
+  "Manual Sign In is disabled by production mode; use Connect Wallet.";
 const SIGN_IN_VALIDATION_RUNTIME_LOCK_HINT =
-  "Manual Sign In is disabled by active auth policy; use Wallet Sign-In (signature_source must be wallet_extension).";
+  "Manual Sign In is disabled by active auth policy; use Connect Wallet (signature_source must be wallet_extension).";
 const PRODUCTION_CONNECT_RESERVATION_AMOUNT_MICROS = 200000;
 const PRODUCTION_CONNECT_RESERVATION_CURRENCY = "TDPNC";
 const PRODUCTION_CONNECT_RESERVATION_MAX_ATTEMPTS = 6;
@@ -229,6 +237,8 @@ const state = {
   authVerifyRequireMetadata: false,
   authVerifyRequireWalletExtensionSource: false,
   authVerifyRequireCryptoProof: false,
+  expectedWalletChainId: "",
+  expectedWalletChainIdSource: "",
   authVerifyRuntimeRequireWalletExtensionSource: false,
   authVerifyPolicySource: AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT,
   operatorApprovalRequireSession: false,
@@ -757,6 +767,71 @@ function walletProviderDisplayName(value) {
   return "Wallet";
 }
 
+function readWalletGateDismissed() {
+  try {
+    return sessionStorage.getItem(WALLET_GATE_DISMISSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setWalletGateDismissed(value) {
+  try {
+    if (value) {
+      sessionStorage.setItem(WALLET_GATE_DISMISSED_KEY, "1");
+    } else {
+      sessionStorage.removeItem(WALLET_GATE_DISMISSED_KEY);
+    }
+  } catch {
+    // Session storage is an ergonomics hint only; never block wallet sign-in.
+  }
+}
+
+function preferredWalletChainId() {
+  return (
+    nonEmptyStringOrUndefined(walletGateChainIdEl?.value) ||
+    nonEmptyStringOrUndefined(signatureChainIdEl.value) ||
+    nonEmptyStringOrUndefined(state.expectedWalletChainId) ||
+    DEFAULT_GPM_WALLET_CHAIN_ID
+  );
+}
+
+function syncWalletGate() {
+  if (!walletGateEl) {
+    return;
+  }
+  const signedIn = !!state.sessionToken;
+  const dismissed = readWalletGateDismissed();
+  const active = !signedIn && !dismissed;
+  document.body.classList.toggle("wallet-gate-active", active);
+  walletGateEl.hidden = !active;
+  if (walletGateProviderEl) {
+    walletGateProviderEl.value = normalizeWalletProviderValue(walletProviderEl.value) || "keplr";
+  }
+  if (walletGateHintEl && !active && signedIn) {
+    walletGateHintEl.textContent = "Wallet connected. GPM is ready.";
+  }
+}
+
+function setWalletGateBusy(busy, detail = "") {
+  if (walletGateConnectBtnEl) {
+    walletGateConnectBtnEl.disabled = busy;
+    walletGateConnectBtnEl.textContent = busy ? "Connecting..." : "Connect Wallet";
+  }
+  if (walletGateManualBtnEl) {
+    walletGateManualBtnEl.disabled = busy;
+  }
+  if (walletGateHintEl && detail) {
+    walletGateHintEl.textContent = detail;
+  }
+}
+
+function setWalletGateHintElText(value) {
+  if (walletGateHintEl) {
+    walletGateHintEl.textContent = value;
+  }
+}
+
 function challengeMessageFromPayload(payload) {
   return (
     nonEmptyStringOrUndefined(
@@ -1061,10 +1136,9 @@ async function completeAuthVerifyFlow(result) {
 }
 
 async function runWalletExtensionSignIn() {
-  const chainId = signatureChainIdEl.value.trim();
-  if (!chainId) {
-    throw new Error("chain_id is required for wallet-extension one-click sign-in.");
-  }
+  const chainId = preferredWalletChainId();
+  signatureChainIdEl.value = chainId;
+  writePersistedValue(STORAGE_KEYS.chainId, chainId);
   const { wallet_provider: walletProvider } = readWalletPayload();
   const { extension, provider } = resolveWalletExtensionClient(walletProvider);
   await extension.enable(chainId);
@@ -1074,7 +1148,7 @@ async function runWalletExtensionSignIn() {
     walletAddress = await resolveWalletAddressFromExtension(extension, chainId);
     if (!walletAddress) {
       throw new Error(
-        `Unable to resolve wallet address from ${walletProviderDisplayName(provider)} extension. Enter wallet_address and retry.`
+        `Unable to resolve wallet address from ${walletProviderDisplayName(provider)} extension. Open Advanced sign-in troubleshooting only if support asks you to enter it manually.`
       );
     }
     walletAddressEl.value = walletAddress;
@@ -1702,6 +1776,7 @@ function applyConnectionSnapshot(snapshot) {
   state.connectionDetail = snapshot?.detail || state.connectionDetail || CONNECTION_DEFAULT_DETAIL;
   state.routingMode = snapshot?.routingMode || state.routingMode || ROUTING_DEFAULT_MODE;
   state.routingDetail = snapshot?.routingDetail || state.routingDetail || ROUTING_DEFAULT_DETAIL;
+  document.body.dataset.connectionState = normalizeConnectionState(state.connectionState) || "unknown";
   if (connectionStateEl) {
     connectionStateEl.textContent = state.connectionState;
   }
@@ -2270,6 +2345,28 @@ function readRuntimeAuthVerifyPolicyMetadata(runtimeCfg) {
       ])
     )
   );
+  const expectedWalletChainId = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigString(scope, [
+        "gpm_auth_expected_chain_id",
+        "auth_expected_chain_id",
+        "expected_chain_id",
+        "expectedChainId",
+        "chain_id",
+        "chainId"
+      ])
+    )
+  );
+  const expectedWalletChainIdSource = firstDefined(
+    ...scopes.map((scope) =>
+      readConfigString(scope, [
+        "gpm_auth_expected_chain_id_source",
+        "auth_expected_chain_id_source",
+        "expected_chain_id_source",
+        "expectedChainIdSource"
+      ])
+    )
+  );
 
   const authVerifyPolicySource = normalizeAuthVerifyPolicySource(
     firstDefined(
@@ -2289,6 +2386,8 @@ function readRuntimeAuthVerifyPolicyMetadata(runtimeCfg) {
     authVerifyRequireWalletExtensionSource,
     authVerifyRequireCryptoProof,
     authVerifyRequireCryptoProofPolicySource,
+    expectedWalletChainId,
+    expectedWalletChainIdSource,
     authVerifyPolicySource
   };
 }
@@ -3714,14 +3813,14 @@ function computeDesktopNextRecommendedAction() {
       return "Request Challenge.";
     }
     if (!signature) {
-      return "Use Wallet Sign-In (Recommended) or provide a manual signature.";
+      return "Use Connect Wallet or provide a manual signature in Advanced troubleshooting.";
     }
     return "Use Sign In to verify and create a session.";
   }
 
   const sessionFreshness = computeSessionFreshnessState();
   if (sessionFreshness.state === "expired") {
-    return "Use Wallet Sign-In (Recommended) or Sign In to re-authenticate.";
+    return "Use Connect Wallet or advanced Sign In to re-authenticate.";
   }
   if (sessionFreshness.state === "expiring_soon") {
     return "Rotate Session.";
@@ -3745,16 +3844,16 @@ function computeDesktopNextRecommendedAction() {
 
   const operatorStatus = effectiveDesktopOperatorApplicationStatus();
   if (operatorStatus === "pending") {
-    return "Wait for operator approval, then run Session or Operator Status.";
+    return "Wait for admin approval, then check server application again.";
   }
   if (operatorStatus === "rejected") {
-    return "Apply Operator Role again after updating operator details.";
+    return "Apply to run a server again after updating your server details.";
   }
   if (operatorStatus !== "approved" && role !== "admin" && role !== "server" && role !== "server_only") {
-    return "Apply Operator Role.";
+    return "Apply to Run Server.";
   }
   if (state.serverReadiness?.lifecycleActionsUnlocked === false) {
-    return "Run Session and Operator Status to refresh Step 3 readiness.";
+    return "Check Server Application to refresh Step 3 readiness.";
   }
   return "Continue in Client or Server controls based on your role.";
 }
@@ -4273,7 +4372,7 @@ function computeServerLockHintText() {
           ? readiness.unlockActions.join("; ")
           : "approved operator application and matching session/application chain_operator_id values";
       hintText = `${reason} ${formatDirectActionGuidance(
-        "Use Apply Operator Role or Operator Status, then refresh Session",
+        "Use Apply to Run Server or Check Server Application, then refresh Session",
         requiredConditions
       )}`;
     }
@@ -4281,7 +4380,7 @@ function computeServerLockHintText() {
   }
   if (!state.sessionToken) {
     return `Sign in first to unlock server onboarding. ${formatDirectActionGuidance(
-      "Request Challenge, then run Wallet Sign-In or Sign In",
+      "Use Connect Wallet, or use advanced Request Challenge / Sign In",
       "an active session token"
     )}`;
   }
@@ -4307,18 +4406,18 @@ function computeServerLockHintText() {
     }
     if (state.operatorApplicationStatus === "rejected") {
       return `Operator application rejected. ${formatDirectActionGuidance(
-        "Apply Operator Role again and refresh Session",
+        "Apply to Run Server again and refresh Session",
         "approved operator application and matching session/application chain_operator_id values"
       )}`;
     }
     if (state.operatorApplicationStatus === "not_submitted") {
       return `Operator role detected with no approved application. ${formatDirectActionGuidance(
-        "Apply Operator Role",
+        "Apply to Run Server",
         "approved operator application and matching session/application chain_operator_id values"
       )}`;
     }
     return `Operator role detected. ${formatDirectActionGuidance(
-      "Check Operator Status, then refresh Session after approval",
+      "Check Server Application, then refresh Session after approval",
       "approved operator application and matching session/application chain_operator_id values"
     )}`;
   }
@@ -4329,7 +4428,7 @@ function computeServerLockHintText() {
     return "Server controls are unlocked for server-only role.";
   }
   return `Server lane is locked for this role. ${formatDirectActionGuidance(
-    "Apply Operator Role",
+    "Apply to Run Server",
     "approved operator application and matching session/application chain_operator_id values"
   )}`;
 }
@@ -4430,13 +4529,13 @@ function syncWorkspaceNextActionHint(clientTabVisible, serverTabVisible) {
 function syncWorkspaceFirstRunHints(clientTabVisible, serverTabVisible) {
   if (workspaceFirstRunHintEl) {
     workspaceFirstRunHintEl.textContent =
-      `Single-window tabs keep both lanes visible. ${formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible)}`;
+      `Client connects. Server applies. ${formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible)}`;
     workspaceFirstRunHintEl.classList.toggle("locked", !clientTabVisible || !serverTabVisible);
   }
   if (workspacePlatformHintEl) {
     workspacePlatformHintEl.textContent = isWindowsRuntimePlatform()
-      ? "Windows-native first run: verify local GPM/WireGuard readiness, sign in, run Session, then run Status before Connect. Use Operator Status and Service Status before server lifecycle actions."
-      : "First run: verify local GPM readiness, sign in, run Session, then run Status before Connect. Use Operator Status and Service Status before server lifecycle actions.";
+      ? "First run: connect wallet, register, connect."
+      : "First run: connect wallet, register, connect.";
   }
   syncWorkspaceNextActionHint(clientTabVisible, serverTabVisible);
 }
@@ -4449,14 +4548,14 @@ function inferTabActivationPathHint(tabName, reason) {
   }
   if (tabName === "client") {
     if (!state.sessionToken) {
-      return "Request Challenge, complete Wallet Sign-In or Sign In, then Register Client";
+      return "Connect Wallet or use advanced Sign In, then Register Client";
     }
-    return "Register Client to unlock client-capable session controls";
+    return "Register this device";
   }
   if (!state.sessionToken) {
-    return "Request Challenge, complete Wallet Sign-In or Sign In, then Apply Operator Role";
+    return "Connect Wallet or use advanced Sign In, then Apply to Run Server";
   }
-  return "Apply Operator Role, wait for approval, then refresh Session or Operator Status";
+  return "Apply and wait for approval";
 }
 
 function formatLockedTabMessage(tabName, reason) {
@@ -4590,6 +4689,10 @@ function setSessionToken(value, options = {}) {
   if (persist) {
     clearLegacySecretStorage();
   }
+  if (state.sessionToken) {
+    setWalletGateDismissed(true);
+  }
+  syncWalletGate();
   syncSessionBootstrapDirectoryOptions();
   syncServerRoleLockState();
   syncOperatorListPaginationControlState();
@@ -4843,14 +4946,14 @@ function syncIdentitySignInPolicyControls() {
     : WALLET_SIGN_IN_LABEL_RECOMMENDED;
   walletSignInBtnEl.title = manualSignInLocked
     ? state.productionMode
-      ? "Production mode requires Wallet Sign-In."
+      ? "Production mode requires Connect Wallet."
       : "Active auth policy requires signature_source=wallet_extension."
     : "Recommended sign-in path.";
   signInBtnEl.disabled = manualSignInLocked;
   signInBtnEl.textContent = manualSignInLocked ? MANUAL_SIGN_IN_LABEL_DISABLED : MANUAL_SIGN_IN_LABEL;
   signInBtnEl.title = manualSignInLocked
     ? state.productionMode
-      ? "Manual Sign In is disabled by production mode; use Wallet Sign-In."
+      ? "Manual Sign In is disabled by production mode; use Connect Wallet."
       : "Manual Sign In is locked by active auth policy requiring signature_source=wallet_extension."
     : "Manual fallback path when policy allows manual source.";
   if (!signInPolicyHintEl) {
@@ -4862,7 +4965,7 @@ function syncIdentitySignInPolicyControls() {
     return;
   }
   signInPolicyHintEl.textContent =
-    "Wallet Sign-In is recommended; manual Sign In remains available when policy allows.";
+    "Connect Wallet is recommended; manual Sign In remains available in Advanced troubleshooting when policy allows.";
   signInPolicyHintEl.classList.remove("locked");
 }
 
@@ -4882,7 +4985,7 @@ function updateAuthVerifyPolicyHint() {
   let postureHint = "signature metadata and signature_source checks are compatibility-optional.";
   if (manualSignInLockedByProductionMode) {
     postureHint =
-      "production mode is active; Wallet Sign-In is required and manual Sign In is disabled.";
+      "production mode is active; Connect Wallet is required and manual Sign In is disabled.";
   } else {
     const requirementHints = [];
     if (state.authVerifyRequireMetadata) {
@@ -4899,7 +5002,7 @@ function updateAuthVerifyPolicyHint() {
     if (requirementHints.length > 0) {
       postureHint = requirementHints.join("; ");
       if (manualSignInLocked) {
-        postureHint = `${postureHint}; use Wallet Sign-In (manual Sign In is disabled).`;
+        postureHint = `${postureHint}; use Connect Wallet (manual Sign In is disabled).`;
       } else if (state.authVerifyRequireCryptoProof) {
         postureHint = `${postureHint}; manual Sign In remains available if it includes the required proof metadata.`;
       } else {
@@ -5021,7 +5124,7 @@ function syncAdminConsoleMode() {
     state.serviceMutationsAllowed = false;
     if (serverLockHintEl) {
       serverLockHintEl.textContent =
-        "Server/admin controls are intentionally absent from the public GPM App. Use the separate GPM Admin Console for approvals, lifecycle, policy, slashing, and payouts.";
+        "Server approval and admin tools are separate. In this app you can only apply for this device and check its own server readiness.";
       serverLockHintEl.classList.add("locked");
     }
   }
@@ -5338,7 +5441,7 @@ function formatDurationCompact(seconds) {
 }
 
 function sessionReauthGuidance() {
-  return "Rotate Session if still valid; otherwise use Wallet Sign-In (Recommended) or Sign In.";
+  return "Rotate Session if still valid; otherwise use Connect Wallet or advanced Sign In.";
 }
 
 function extractSessionExpiryMs(payload) {
@@ -5871,10 +5974,6 @@ async function loadManifest() {
 
 async function refreshOperatorApplicationStatus(options = {}) {
   const { quiet = true } = options;
-  if (!ADMIN_CONSOLE_RENDERER) {
-    setOperatorApplicationStatus(undefined);
-    return undefined;
-  }
   if (!state.sessionToken) {
     setOperatorApplicationStatus(undefined);
     return undefined;
@@ -5892,6 +5991,7 @@ async function refreshOperatorApplicationStatus(options = {}) {
     markReadinessHeartbeatSuccess();
     return result;
   } catch (err) {
+    setOperatorApplicationStatus(undefined);
     if (quiet) {
       return undefined;
     }
@@ -5899,8 +5999,7 @@ async function refreshOperatorApplicationStatus(options = {}) {
   }
 }
 
-const refreshServerReadinessStatus = ADMIN_CONSOLE_RENDERER
-  ? async function refreshServerReadinessStatus(options = {}) {
+async function refreshServerReadinessStatus(options = {}) {
   const { quiet = true } = options;
   const sessionToken = state.sessionToken || undefined;
   const walletAddress = walletAddressEl.value.trim() || undefined;
@@ -5927,10 +6026,6 @@ const refreshServerReadinessStatus = ADMIN_CONSOLE_RENDERER
     throw err;
   }
 }
-  : async function refreshServerReadinessStatus() {
-    setServerReadiness(null);
-    return undefined;
-  };
 
 async function refreshClientRegistrationStatus(options = {}) {
   const { quiet = true } = options;
@@ -6382,7 +6477,53 @@ sessionTokenEl.addEventListener("input", () => {
 walletProviderEl.addEventListener("change", () => {
   writePersistedValue(STORAGE_KEYS.walletProvider, walletProviderEl.value);
   clearWalletSignatureContext();
+  syncWalletGate();
 });
+if (walletGateProviderEl) {
+  walletGateProviderEl.addEventListener("change", () => {
+    walletProviderEl.value = normalizeWalletProviderValue(walletGateProviderEl.value) || "keplr";
+    writePersistedValue(STORAGE_KEYS.walletProvider, walletProviderEl.value);
+    clearWalletSignatureContext();
+  });
+}
+if (walletGateChainIdEl) {
+  walletGateChainIdEl.addEventListener("input", () => {
+    const chainId = walletGateChainIdEl.value.trim();
+    if (chainId) {
+      signatureChainIdEl.value = chainId;
+      writePersistedValue(STORAGE_KEYS.chainId, chainId);
+    }
+    clearWalletSignatureContext();
+  });
+}
+if (walletGateConnectBtnEl) {
+  walletGateConnectBtnEl.addEventListener("click", async () => {
+    walletProviderEl.value = normalizeWalletProviderValue(walletGateProviderEl?.value) || walletProviderEl.value || "keplr";
+    writePersistedValue(STORAGE_KEYS.walletProvider, walletProviderEl.value);
+    setWalletGateBusy(true, `Opening ${walletProviderDisplayName(walletProviderEl.value)}...`);
+    try {
+      await runWalletExtensionSignIn();
+      setWalletGateDismissed(true);
+      syncWalletGate();
+    } catch (err) {
+      setWalletGateHintElText(
+        `Wallet connection failed: ${String(err && err.message ? err.message : err)}`
+      );
+      print("wallet_gate_connect (error)", {
+        error: String(err && err.message ? err.message : err)
+      });
+    } finally {
+      setWalletGateBusy(false);
+    }
+  });
+}
+if (walletGateManualBtnEl) {
+  walletGateManualBtnEl.addEventListener("click", () => {
+    setWalletGateDismissed(true);
+    syncWalletGate();
+    walletSignInBtnEl.focus();
+  });
+}
 walletAddressEl.addEventListener("input", () => {
   writePersistedValue(STORAGE_KEYS.walletAddress, walletAddressEl.value);
   clearWalletSignatureContext();
@@ -6542,33 +6683,30 @@ byId("register_client_btn").addEventListener("click", async () => {
   await refreshContributionStatus({ quiet: true });
 });
 
-if (ADMIN_CONSOLE_RENDERER) {
-  byId("apply_operator_btn").addEventListener("click", async () => {
-    if (!requireAdminConsoleMode("Apply Operator Role")) {
-      return;
-    }
-    if (!state.sessionToken) {
-      print("validation", "session_token is required; sign in first");
-      return;
-    }
-    const request = {
-      session_token: state.sessionToken,
-      chain_operator_id: chainOperatorIdEl.value.trim(),
-      server_label: "desktop-operator"
-    };
-    await call("gpm_operator_apply", "control_gpm_operator_apply", { request });
-    await refreshOperatorApplicationStatus({ quiet: true });
-    await refreshServerReadinessStatus({ quiet: true });
-  });
+byId("apply_operator_btn").addEventListener("click", async () => {
+  if (!state.sessionToken) {
+    print("validation", "session_token is required; connect your wallet first");
+    return;
+  }
+  const walletAddress = walletAddressEl.value.trim();
+  if (!walletAddress) {
+    print("validation", "wallet_address is required; connect your wallet first");
+    return;
+  }
+  const request = {
+    session_token: state.sessionToken,
+    chain_operator_id: walletAddress,
+    server_label: `gpm-server-${walletAddress.slice(-8) || "device"}`
+  };
+  await call("gpm_operator_apply", "control_gpm_operator_apply", { request });
+  await refreshOperatorApplicationStatus({ quiet: true });
+  await refreshServerReadinessStatus({ quiet: true });
+});
 
-  byId("operator_status_btn").addEventListener("click", async () => {
-    if (!requireAdminConsoleMode("Operator Status")) {
-      return;
-    }
-    await refreshOperatorApplicationStatus({ quiet: false });
-    await refreshServerReadinessStatus({ quiet: true });
-  });
-}
+byId("operator_status_btn").addEventListener("click", async () => {
+  await refreshOperatorApplicationStatus({ quiet: false });
+  await refreshServerReadinessStatus({ quiet: true });
+});
 
 contributionRoleEl.addEventListener("change", async () => {
   await refreshContributionStatus({ quiet: true });
@@ -6895,15 +7033,9 @@ byId("status_btn").addEventListener("click", async () => {
   updateConnectionDashboard("status", result);
 });
 
-if (ADMIN_CONSOLE_RENDERER) {
-  byId("status_btn_server").addEventListener("click", async () => {
-    if (!requireAdminConsoleMode("Server Status")) {
-      return;
-    }
-    const result = await call("status_server", "control_status");
-    updateConnectionDashboard("status", result);
-  });
-}
+byId("status_btn_server").addEventListener("click", async () => {
+  await refreshServerReadinessStatus({ quiet: false });
+});
 
 byId("diagnostics_btn").addEventListener("click", async () => {
   await call("diagnostics", "control_get_diagnostics");
@@ -6998,6 +7130,7 @@ if (ADMIN_CONSOLE_RENDERER) {
 async function init() {
   setRole("client", { persist: false });
   restorePersistedSessionErgonomics();
+  syncWalletGate();
   activateTab("client");
   applyConnectModePolicy(false);
   updateAuthVerifyPolicyHint();
@@ -7020,6 +7153,8 @@ async function init() {
     let authVerifyRequireMetadata = meta.authVerifyRequireMetadata;
     let authVerifyRequireWalletExtensionSource = meta.authVerifyRequireWalletExtensionSource;
     let authVerifyRequireCryptoProof = meta.authVerifyRequireCryptoProof;
+    let expectedWalletChainId = "";
+    let expectedWalletChainIdSource = "";
     let authVerifyRuntimeRequireWalletExtensionSource = false;
     let authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
     let operatorApprovalRequireSession = false;
@@ -7079,6 +7214,10 @@ async function init() {
       if (runtimeAuthVerifyPolicy.authVerifyRequireCryptoProof !== undefined) {
         authVerifyRequireCryptoProof = runtimeAuthVerifyPolicy.authVerifyRequireCryptoProof;
       }
+      if (runtimeAuthVerifyPolicy.expectedWalletChainId) {
+        expectedWalletChainId = runtimeAuthVerifyPolicy.expectedWalletChainId;
+        expectedWalletChainIdSource = runtimeAuthVerifyPolicy.expectedWalletChainIdSource || "runtime_config";
+      }
       if (runtimeAuthVerifyPolicy.authVerifyPolicySource) {
         authVerifyPolicySource = runtimeAuthVerifyPolicy.authVerifyPolicySource;
       } else if (
@@ -7135,6 +7274,8 @@ async function init() {
       runtimeConfigUnavailableFailClosed = true;
       authVerifyRuntimeRequireWalletExtensionSource = false;
       authVerifyRequireCryptoProof = false;
+      expectedWalletChainId = "";
+      expectedWalletChainIdSource = "";
       authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
       operatorApprovalRequireSession = false;
       operatorApprovalPolicySource = OPERATOR_APPROVAL_POLICY_SOURCE_ENV_DEFAULT;
@@ -7150,6 +7291,12 @@ async function init() {
     state.authVerifyRequireMetadata = !!authVerifyRequireMetadata;
     state.authVerifyRequireWalletExtensionSource = !!authVerifyRequireWalletExtensionSource;
     state.authVerifyRequireCryptoProof = !!authVerifyRequireCryptoProof;
+    state.expectedWalletChainId = expectedWalletChainId;
+    state.expectedWalletChainIdSource = expectedWalletChainIdSource;
+    if (!signatureChainIdEl.value.trim() && state.expectedWalletChainId) {
+      signatureChainIdEl.value = state.expectedWalletChainId;
+      writePersistedValue(STORAGE_KEYS.chainId, state.expectedWalletChainId);
+    }
     state.authVerifyRuntimeRequireWalletExtensionSource = authVerifyRuntimeRequireWalletExtensionSource;
     state.authVerifyPolicySource = authVerifyPolicySource;
     state.operatorApprovalRequireSession = operatorApprovalRequireSession === true;
@@ -7212,6 +7359,8 @@ async function init() {
     state.authVerifyRequireMetadata = false;
     state.authVerifyRequireWalletExtensionSource = false;
     state.authVerifyRequireCryptoProof = false;
+    state.expectedWalletChainId = "";
+    state.expectedWalletChainIdSource = "";
     state.authVerifyRuntimeRequireWalletExtensionSource = false;
     state.authVerifyPolicySource = AUTH_VERIFY_POLICY_SOURCE_ENV_DEFAULT;
     state.operatorApprovalRequireSession = false;
@@ -7243,6 +7392,7 @@ async function init() {
   }
 
   await refreshSessionOnInit();
+  syncWalletGate();
   bindReadinessHeartbeatListeners();
   startReadinessHeartbeat();
   void runReadinessHeartbeat("init");

@@ -2502,6 +2502,89 @@ func TestSettlementBridgeSlashEvidenceConfirmThenPenaltyPost(t *testing.T) {
 	}
 }
 
+func TestSettlementBridgeSlashEvidenceFinalityRejectsMaterialMismatch(t *testing.T) {
+	scaffold := app.NewChainScaffold()
+	handler := &settlementBridgeHandler{
+		scaffold:          scaffold,
+		authToken:         "bridge-secret",
+		finalityAuthToken: "finality-secret",
+	}
+	server := httptest.NewServer(handler.routes())
+	defer server.Close()
+	authHeaders := map[string]string{"Authorization": "Bearer bridge-secret"}
+	finalityHeaders := map[string]string{"Authorization": "Bearer bridge-secret", finalityAuthorizationHeader: "Bearer finality-secret"}
+
+	cases := []struct {
+		name       string
+		patchField string
+		patchValue string
+	}{
+		{name: "subject", patchField: "SubjectID", patchValue: `"provider-other"`},
+		{name: "session", patchField: "SessionID", patchValue: `"sess-other"`},
+		{name: "violation", patchField: "ViolationType", patchValue: `"downtime-proof"`},
+		{name: "evidence-ref", patchField: "EvidenceRef", patchValue: `"sha256:0000000000000000000000000000000000000000000000000000000000009999"`},
+		{name: "slash-micros", patchField: "SlashMicros", patchValue: `2501`},
+		{name: "currency", patchField: "Currency", patchValue: `"utdpn"`},
+		{name: "observed-at", patchField: "ObservedAt", patchValue: `"2026-04-28T00:00:00Z"`},
+	}
+
+	for idx, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			evidenceID := fmt.Sprintf("ev-finality-mismatch-%d", idx+1)
+			providerID := fmt.Sprintf("provider-finality-mismatch-%d", idx+1)
+			sessionID := fmt.Sprintf("sess-finality-mismatch-%d", idx+1)
+			proofHash := fmt.Sprintf("sha256:%064x", idx+1)
+			observedAt := "2026-04-27T00:00:00Z"
+			evidenceBody := fmt.Sprintf(
+				`{"EvidenceID":%q,"SubjectID":%q,"SessionID":%q,"ViolationType":"double-sign","EvidenceRef":%q,"SlashMicros":2500,"Currency":"uusdc","ObservedAt":%q}`,
+				evidenceID,
+				providerID,
+				sessionID,
+				proofHash,
+				observedAt,
+			)
+			status, payload := doJSONRequest(t, http.MethodPost, server.URL+"/x/vpnslashing/evidence", evidenceBody, authHeaders)
+			if status != http.StatusOK {
+				t.Fatalf("expected slash evidence post to return 200, got %d payload=%v", status, payload)
+			}
+
+			patchBody := fmt.Sprintf(`{"Status":"confirmed","%s":%s}`, tc.patchField, tc.patchValue)
+			status, payload = doJSONRequest(t, http.MethodPatch, server.URL+"/x/vpnslashing/evidence/"+evidenceID, patchBody, finalityHeaders)
+			if status != http.StatusConflict {
+				t.Fatalf("expected material mismatch finality to fail with 409, got %d payload=%v", status, payload)
+			}
+			if got, _ := payload["error"].(string); !strings.Contains(got, "material mismatch") {
+				t.Fatalf("expected material mismatch error, got %q payload=%v", got, payload)
+			}
+
+			evidenceResp, err := scaffold.SlashingQueryServer().GetEvidence(context.Background(), app.SlashingGetEvidenceRequest{
+				EvidenceID: evidenceID,
+			})
+			if err != nil {
+				t.Fatalf("query evidence after rejected finality: %v", err)
+			}
+			if !evidenceResp.Found {
+				t.Fatalf("expected evidence %q to remain queryable", evidenceID)
+			}
+			if evidenceResp.Evidence.Status != chaintypes.ReconciliationSubmitted {
+				t.Fatalf("expected evidence to remain submitted after rejected finality, got %s", evidenceResp.Evidence.Status)
+			}
+		})
+	}
+
+	controlEvidenceID := "ev-finality-material-match-control"
+	controlBody := `{"EvidenceID":"ev-finality-material-match-control","SubjectID":"provider-finality-control","SessionID":"sess-finality-control","ViolationType":"double-sign","EvidenceRef":"sha256:0000000000000000000000000000000000000000000000000000000000000100","SlashMicros":2500,"Currency":"uusdc","ObservedAt":"2026-04-27T00:00:00Z"}`
+	status, payload := doJSONRequest(t, http.MethodPost, server.URL+"/x/vpnslashing/evidence", controlBody, authHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected control slash evidence post to return 200, got %d payload=%v", status, payload)
+	}
+	controlPatch := `{"Status":"confirmed","EvidenceID":"ev-finality-material-match-control","SubjectID":"provider-finality-control","SessionID":"sess-finality-control","ViolationType":"double-sign","EvidenceRef":"sha256:0000000000000000000000000000000000000000000000000000000000000100","SlashMicros":2500,"Currency":"uusdc","ObservedAt":"2026-04-27T00:00:00Z"}`
+	status, payload = doJSONRequest(t, http.MethodPatch, server.URL+"/x/vpnslashing/evidence/"+controlEvidenceID, controlPatch, finalityHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("expected matching material finality to succeed, got %d payload=%v", status, payload)
+	}
+}
+
 func TestSettlementBridgeSlashEvidenceFinalityRequiresAuthenticatedMode(t *testing.T) {
 	scaffold := app.NewChainScaffold()
 	handler := &settlementBridgeHandler{

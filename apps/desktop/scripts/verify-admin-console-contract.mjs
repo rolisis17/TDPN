@@ -44,8 +44,6 @@ const ADMIN_ELEMENT_IDS = new Set([
   "admin_reward_week_start",
   "admin_reward_hold_source",
   "admin_reward_hold_reason",
-  "apply_operator_btn",
-  "operator_status_btn",
   "operator_list_filter_btn",
   "operator_list_pending_btn",
   "operator_load_next_pending_btn",
@@ -61,7 +59,6 @@ const ADMIN_ELEMENT_IDS = new Set([
   "operator_approval_policy_hint",
   "set_profile",
   "set_profile_btn",
-  "status_btn_server",
   "service_status_btn",
   "service_start_btn",
   "service_stop_btn",
@@ -70,8 +67,6 @@ const ADMIN_ELEMENT_IDS = new Set([
 ]);
 
 const ADMIN_ACTION_BUTTON_IDS = [
-  "apply_operator_btn",
-  "operator_status_btn",
   "operator_list_filter_btn",
   "operator_list_pending_btn",
   "operator_load_next_pending_btn",
@@ -84,7 +79,6 @@ const ADMIN_ACTION_BUTTON_IDS = [
   "admin_reward_hold_btn",
   "admin_reward_release_btn",
   "admin_reward_finalize_btn",
-  "status_btn_server",
   "set_profile_btn",
   "update_btn",
   "service_status_btn",
@@ -117,9 +111,6 @@ const ADMIN_TAURI_COMMANDS = [
   "control_gpm_admin_reward_review",
   "control_gpm_admin_reward_hold",
   "control_gpm_admin_reward_finalize",
-  "control_gpm_server_status",
-  "control_gpm_operator_apply",
-  "control_gpm_operator_status",
   "control_gpm_operator_list",
   "control_gpm_operator_approve"
 ];
@@ -145,8 +136,6 @@ const VOID_TAGS = new Set([
 const ADMIN_CONTROL_PATTERNS = [
   { label: "admin wording", pattern: /\badmin\b/i },
   { label: "audit action", pattern: /\brecent\s+audit\b/i },
-  { label: "operator apply", pattern: /\bapply\s+operator\s+role\b/i },
-  { label: "operator status", pattern: /\boperator\s+status\b/i },
   { label: "operator queue", pattern: /\b(list|next|load)\s+(operator\s+queue|pending\s+operators|all\s+operators|next\s+pending)\b/i },
   { label: "operator moderation", pattern: /\b(approve|reject)\s+operator\b/i },
   { label: "contribution/reward review", pattern: /\b(review\s+(contributions?|weekly\s+reward)|contribution\s+(wallet|limit)|reward\s+(week\s+start|hold\s+(source|reason))|hold\s+weekly\s+reward|release\s+reward\s+hold|finalize\s+weekly\s+reward)\b/i },
@@ -568,9 +557,9 @@ function run() {
     failures
   );
   requirePattern(
-    /control_gpm_server_status/,
+    /control_gpm_operator_list/,
     buildRenderer,
-    "build-renderer.mjs public bundle denylist must include server status admin command",
+    "build-renderer.mjs public bundle denylist must include operator queue admin command",
     failures
   );
   requirePattern(

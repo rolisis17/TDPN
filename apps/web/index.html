@@ -13,199 +13,160 @@
   <body class="page-home">
     <header class="topbar">
       <div class="wrap">
-        <div class="brand">Global Private Mesh <small>(GPM)</small></div>
+        <a class="brand-lockup" href="./index.html" aria-label="Global Private Mesh home">
+          <span class="brand-mark" aria-hidden="true">G</span>
+          <span>
+            <span class="brand-name">Global Private Mesh</span>
+            <span class="brand-subtitle">Private network</span>
+          </span>
+        </a>
         <nav class="nav" aria-label="Primary">
-          <a class="btn secondary" href="./index.html">Home</a>
-          <a class="btn secondary" href="./portal.html">Portal</a>
-          <a class="btn primary" href="./portal.html">Sign In</a>
+          <a class="btn secondary" href="#why-gpm">Why GPM</a>
+          <a class="btn secondary" href="#server-hosts">Run a server</a>
+          <a class="btn primary" href="./portal.html">Open Portal</a>
         </nav>
       </div>
     </header>
 
     <main class="home-main">
-      <section class="hero reveal">
-        <div class="wrap">
-          <div class="hero__layout">
-            <div class="hero__inner hero__panel">
-              <span class="tag hero__eyebrow">Private overlay infrastructure</span>
-              <h1 class="hero__title">Premium private networking with clear onboarding lanes.</h1>
-              <p class="hero__lede">
-                Global Private Mesh keeps the client lane self-serve and fast, while the operator lane stays
-                intentionally approval-gated for elevated controls and stronger operational trust posture.
-              </p>
-              <div class="hero-actions" aria-label="Primary actions">
-                <a class="btn primary btn--cta" href="./portal.html">Open Portal and Sign In</a>
-                <a class="btn secondary" href="#onboarding-lanes-heading">Compare onboarding lanes</a>
-              </div>
-              <ul class="hero-highlights" aria-label="Platform highlights">
-                <li class="hero-highlights__item">Wallet-first session authentication</li>
-                <li class="hero-highlights__item">Client lane: self-serve registration</li>
-                <li class="hero-highlights__item">Operator lane: apply, review, approve</li>
-              </ul>
+      <section class="mesh-hero reveal">
+        <div class="wrap mesh-hero__grid">
+          <div class="mesh-hero__copy">
+            <p class="eyebrow">Private VPN, built as a mesh</p>
+            <h1>A private internet without the tech mess.</h1>
+            <p>
+              Connect your wallet. Register once. Press Connect. GPM chooses a safe path for you.
+            </p>
+            <div class="hero-actions" aria-label="Primary actions">
+              <a class="btn primary btn--cta" href="./portal.html">Connect Wallet</a>
+              <a class="btn secondary" href="#why-gpm">See how it feels</a>
             </div>
-
-            <aside class="card hero-trust" aria-label="Trust posture snapshot">
-              <p class="hero-trust__kicker">Trust posture snapshot</p>
-              <h2>Session-first controls stay explicit from bootstrap to operator approval.</h2>
-              <div class="trust-stack">
-                <div class="trust-item">
-                  <span class="trust-item__label">Bootstrap source</span>
-                  <strong class="trust-item__value">Pinned domain with signed-manifest fallback flow</strong>
-                </div>
-                <div class="trust-item">
-                  <span class="trust-item__label">Client lane</span>
-                  <strong class="trust-item__value">Sign in, register, and continue without manual approval delay</strong>
-                </div>
-                <div class="trust-item">
-                  <span class="trust-item__label">Operator lane</span>
-                  <strong class="trust-item__value">Apply and unlock lifecycle actions only after approval</strong>
-                </div>
-              </div>
-              <a class="btn secondary" href="#admin-console-note">Admin Console is separate</a>
-            </aside>
+            <div class="hero-badges" aria-label="Product promises">
+              <span>No server lists</span>
+              <span>No random IPs</span>
+              <span>Wallet access</span>
+            </div>
           </div>
 
-          <div class="home-signal-bar" aria-label="Product signals">
-            <article class="signal-chip">
-              <p class="signal-chip__label">Client lane</p>
-              <strong class="signal-chip__value">Session active to registration with clear next action guidance</strong>
-            </article>
-            <article class="signal-chip">
-              <p class="signal-chip__label">Operator lane</p>
-              <strong class="signal-chip__value">Application status and lock reasons stay visible end-to-end</strong>
-            </article>
-            <article class="signal-chip">
-              <p class="signal-chip__label">Trust posture</p>
-              <strong class="signal-chip__value">Source, signature, and expiry remain observable during onboarding</strong>
-            </article>
-          </div>
+          <aside class="mesh-visual-card" aria-label="GPM connection preview">
+            <div class="mesh-visual-topline">
+              <span class="signal-dot"></span>
+              <span>Protected tunnel</span>
+            </div>
+            <div class="mesh-orb" aria-hidden="true">
+              <div class="mesh-orb__ring"></div>
+              <div class="mesh-orb__core"></div>
+            </div>
+            <div class="mesh-route">
+              <article>
+                <span>Wallet</span>
+                <strong>Connected</strong>
+              </article>
+              <article>
+                <span>Route</span>
+                <strong>Auto mesh</strong>
+              </article>
+              <article>
+                <span>Server</span>
+                <strong>Trusted path</strong>
+              </article>
+            </div>
+            <div class="mesh-pulse-line" aria-hidden="true"></div>
+          </aside>
         </div>
       </section>
 
-      <section
-        class="section section--lanes section--surface reveal reveal--1"
-        aria-labelledby="onboarding-lanes-heading"
-      >
+      <section class="section premium-section reveal reveal--1" id="why-gpm" aria-labelledby="why-gpm-heading">
         <div class="wrap">
           <div class="section__header">
-            <span class="section__eyebrow">Onboarding lanes</span>
-            <h2 id="onboarding-lanes-heading">Choose the path that matches your role and responsibility.</h2>
+            <p class="section__eyebrow">Why people use it</p>
+            <h2 id="why-gpm-heading">It works like a normal VPN, but the network is shared.</h2>
             <p class="section-lead">
-              Both lanes begin with wallet sign-in. Client workflows continue immediately, while operator
-              privileges unlock only after a deliberate application and approval sequence.
+              You do not pick IPs or manage network settings. GPM handles the route and keeps the app calm.
             </p>
           </div>
-          <div class="grid cols-2 lane-grid">
-            <article class="card lane-card lane-card--client">
-              <p class="lane-card__badge">Client self-serve lane</p>
-              <h3>Register quickly, then operate as a trusted client.</h3>
-              <p>
-                Built for users who need immediate onboarding with policy-aware defaults and explicit readiness
-                signals from session creation through registration.
-              </p>
-              <ol class="lane-steps" aria-label="Client self-serve flow">
-                <li><strong>Sign in:</strong> Complete wallet challenge and establish session.</li>
-                <li><strong>Register:</strong> Select profile and submit client onboarding details.</li>
-                <li><strong>Continue:</strong> Move directly into client-capable controls.</li>
-              </ol>
-              <div class="lane-card__actions">
-                <a class="btn primary" href="./portal.html">Open client lane in portal</a>
-              </div>
+          <div class="grid cols-3">
+            <article class="card product-card">
+              <span class="card-icon">01</span>
+              <h3>Open the app</h3>
+              <p>Use Keplr or Leap to prove the account is yours.</p>
             </article>
-
-            <article class="card lane-card lane-card--operator" id="admin-console-note">
-              <p class="lane-card__badge">Operator approval lane</p>
-              <h3>Apply for elevated access and unlock controls after review.</h3>
-              <p>
-                Designed for a separate GPM Admin Console so elevated actions never ship inside the public
-                client portal or release app.
-              </p>
-              <ol class="lane-steps" aria-label="Operator approval flow">
-                <li><strong>Apply:</strong> Submit operator identity and required context.</li>
-                <li><strong>Await review:</strong> Approval posture remains visible while pending.</li>
-                <li><strong>Operate:</strong> Approved sessions unlock operator lifecycle actions.</li>
-              </ol>
-              <div class="lane-card__actions">
-                <a class="btn secondary" href="#admin-console-note">Use the separate Admin Console</a>
-              </div>
+            <article class="card product-card">
+              <span class="card-icon">02</span>
+              <h3>Register this device</h3>
+              <p>Your device gets its profile. The route stays automatic.</p>
+            </article>
+            <article class="card product-card">
+              <span class="card-icon">03</span>
+              <h3>Press Connect</h3>
+              <p>GPM chooses the safe path and shows a clear status.</p>
             </article>
           </div>
         </div>
       </section>
 
-      <section class="section section--surface reveal reveal--2" aria-labelledby="flow-cues-heading">
-        <div class="wrap">
+      <section class="section premium-section reveal reveal--2" id="server-hosts" aria-labelledby="server-hosts-heading">
+        <div class="wrap split-section">
           <div class="section__header">
-            <span class="section__eyebrow">Flow cues</span>
-            <h2 id="flow-cues-heading">Operational expectations stay visible throughout onboarding.</h2>
+            <p class="section__eyebrow">For server hosts</p>
+            <h2 id="server-hosts-heading">Apply, get reviewed, then run your server.</h2>
+            <p class="section-lead">
+              Server access is simple on purpose. You apply from your wallet, GPM reviews it, and approved hosts run only their own server.
+            </p>
+            <div class="hero-actions">
+              <a class="btn secondary" href="./portal.html#server_application">Apply for server access</a>
+            </div>
           </div>
-          <div class="grid cols-2 flow-grid">
-            <article class="card flow-card">
-              <h3>Client lane cues</h3>
-              <ul class="flow-list">
-                <li>Session and registration checkpoints are shown as soon as the portal opens.</li>
-                <li>Recommended next actions progress from challenge to verify to register.</li>
-                <li>Client work does not require operator approval when role conditions are met.</li>
-              </ul>
-            </article>
-            <article class="card flow-card">
-              <h3>Operator lane cues</h3>
-              <ul class="flow-list">
-                <li>Pending, approved, and rejected application states remain explicit.</li>
-                <li>Lock messaging explains required conditions before elevated actions unlock.</li>
-                <li>Lifecycle controls activate only when approval and readiness posture align.</li>
-              </ul>
-            </article>
+          <div class="server-preview-card">
+            <div class="preview-row">
+              <span>Application</span>
+              <strong>Review required</strong>
+            </div>
+            <div class="preview-row">
+              <span>Controls</span>
+              <strong>Your server only</strong>
+            </div>
+            <div class="preview-row">
+              <span>Experience</span>
+              <strong>Simple status + start path</strong>
+            </div>
           </div>
         </div>
       </section>
 
-      <section class="section section--surface reveal reveal--3" aria-labelledby="trust-posture-heading">
+      <section class="section premium-section reveal reveal--3" aria-labelledby="trust-heading">
         <div class="wrap">
-          <div class="section__header">
-            <span class="section__eyebrow">Trust posture</span>
-            <h2 id="trust-posture-heading">Governed trust signals are built into the onboarding surface.</h2>
+          <div class="section__header section__header--center">
+            <p class="section__eyebrow">Designed to feel safe</p>
+            <h2 id="trust-heading">The fewer choices users need to make, the safer the product feels.</h2>
           </div>
           <div class="grid cols-3 posture-grid">
             <article class="card posture-card">
-              <h3>Bootstrap provenance</h3>
-              <p>
-                First-run trust starts from a pinned source strategy, with signed manifest verification and
-                cache fallback awareness surfaced in onboarding UX.
-              </p>
+              <h3>One clear start</h3>
+              <p>The wallet button is the front door.</p>
             </article>
             <article class="card posture-card">
-              <h3>Role-aware enforcement</h3>
-              <p>
-                Client controls remain fast for eligible sessions, while operator controls stay deliberately
-                locked until application and approval requirements are satisfied.
-              </p>
+              <h3>Automatic routes</h3>
+              <p>GPM chooses network paths instead of asking users to guess.</p>
             </article>
             <article class="card posture-card">
-              <h3>Reviewable transitions</h3>
-              <p>
-                Onboarding state, lock reason guidance, and recommended next actions stay visible to reduce
-                confusion for both end users and operators.
-              </p>
+              <h3>Quiet controls</h3>
+              <p>Extra controls stay out of the normal path.</p>
             </article>
           </div>
         </div>
       </section>
 
-      <section class="section section--surface reveal reveal--4" aria-labelledby="portal-cta-heading">
+      <section class="section reveal reveal--4" aria-labelledby="portal-cta-heading">
         <div class="wrap">
           <div class="card cta-panel">
             <div class="section__header section__header--compact">
-              <span class="section__eyebrow">Ready to start</span>
-              <h2 id="portal-cta-heading">Launch the portal and continue in the lane that fits your role.</h2>
+              <p class="section__eyebrow">Ready</p>
+              <h2 id="portal-cta-heading">Start with your wallet.</h2>
             </div>
-            <p class="meta cta-panel__copy">
-              Sign in once, follow the guided next action path, and keep public client onboarding separate from
-              operator governance.
-            </p>
-            <div class="hero-actions" aria-label="Portal actions">
+            <p class="cta-panel__copy">No seed phrase. No IP setup. Just the account you control.</p>
+            <div class="hero-actions">
               <a class="btn primary btn--cta" href="./portal.html">Open Portal</a>
-              <a class="btn secondary" href="#admin-console-note">Admin Console is separate</a>
             </div>
           </div>
         </div>
@@ -213,7 +174,7 @@
     </main>
 
     <footer class="footer">
-      <div class="wrap">Global Private Mesh product surface for wallet-authenticated private networking.</div>
+      <div class="wrap">Global Private Mesh</div>
     </footer>
   </body>
 </html>
