@@ -18,6 +18,7 @@ FAKE_SCRIPT="$TMP_DIR/fake_easy_node.sh"
 CALLS_FILE="$TMP_DIR/easy_node_calls.tsv"
 SERVER_LOG="$TMP_DIR/local_api_server.log"
 MANIFEST_CACHE="$TMP_DIR/gpm_manifest_cache.json"
+AUTH_PROOF_HELPER="$TMP_DIR/gpm_auth_contract_proof.go"
 LOCAL_API_BASE=""
 SERVER_PID=""
 LOCAL_API_AUTH_TOKEN="local-api-contract-token"
@@ -31,6 +32,366 @@ cleanup() {
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
+
+ensure_auth_proof_helper() {
+  if [[ -f "$AUTH_PROOF_HELPER" ]]; then
+    return 0
+  fi
+  cat >"$AUTH_PROOF_HELPER" <<'EOF_GO'
+package main
+
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"math/big"
+	"os"
+	"strings"
+
+	"golang.org/x/crypto/ripemd160"
+)
+
+const bech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+const bech32ChecksumLength = 6
+
+var (
+	bech32Generator = []uint32{0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3}
+	fieldPrime      = mustBigIntFromHex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F")
+	curveOrder      = mustBigIntFromHex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141")
+	generatorX      = mustBigIntFromHex("79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798")
+	generatorY      = mustBigIntFromHex("483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8")
+)
+
+type point struct {
+	x        *big.Int
+	y        *big.Int
+	infinity bool
+}
+
+func mustBigIntFromHex(raw string) *big.Int {
+	value, ok := new(big.Int).SetString(strings.TrimSpace(raw), 16)
+	if !ok {
+		panic(fmt.Sprintf("invalid bigint literal %q", raw))
+	}
+	return value
+}
+
+func pointInfinity() point {
+	return point{infinity: true}
+}
+
+func newPoint(x *big.Int, y *big.Int) point {
+	return point{x: new(big.Int).Set(x), y: new(big.Int).Set(y)}
+}
+
+func pointDouble(p point) point {
+	if p.infinity || p.y.Sign() == 0 {
+		return pointInfinity()
+	}
+	num := new(big.Int).Mul(p.x, p.x)
+	num.Mul(num, big.NewInt(3))
+	num.Mod(num, fieldPrime)
+	den := new(big.Int).Mul(p.y, big.NewInt(2))
+	den.Mod(den, fieldPrime)
+	denInv := new(big.Int).ModInverse(den, fieldPrime)
+	if denInv == nil {
+		return pointInfinity()
+	}
+	lambda := new(big.Int).Mul(num, denInv)
+	lambda.Mod(lambda, fieldPrime)
+	x3 := new(big.Int).Mul(lambda, lambda)
+	x3.Sub(x3, new(big.Int).Mul(p.x, big.NewInt(2)))
+	x3.Mod(x3, fieldPrime)
+	y3 := new(big.Int).Sub(p.x, x3)
+	y3.Mul(lambda, y3)
+	y3.Sub(y3, p.y)
+	y3.Mod(y3, fieldPrime)
+	return point{x: x3, y: y3}
+}
+
+func pointAdd(a point, b point) point {
+	if a.infinity {
+		return b
+	}
+	if b.infinity {
+		return a
+	}
+	if a.x.Cmp(b.x) == 0 {
+		sumY := new(big.Int).Add(a.y, b.y)
+		sumY.Mod(sumY, fieldPrime)
+		if sumY.Sign() == 0 {
+			return pointInfinity()
+		}
+		return pointDouble(a)
+	}
+	num := new(big.Int).Sub(b.y, a.y)
+	num.Mod(num, fieldPrime)
+	den := new(big.Int).Sub(b.x, a.x)
+	den.Mod(den, fieldPrime)
+	denInv := new(big.Int).ModInverse(den, fieldPrime)
+	if denInv == nil {
+		return pointInfinity()
+	}
+	lambda := new(big.Int).Mul(num, denInv)
+	lambda.Mod(lambda, fieldPrime)
+	x3 := new(big.Int).Mul(lambda, lambda)
+	x3.Sub(x3, a.x)
+	x3.Sub(x3, b.x)
+	x3.Mod(x3, fieldPrime)
+	y3 := new(big.Int).Sub(a.x, x3)
+	y3.Mul(lambda, y3)
+	y3.Sub(y3, a.y)
+	y3.Mod(y3, fieldPrime)
+	return point{x: x3, y: y3}
+}
+
+func scalarMult(p point, scalar *big.Int) point {
+	if p.infinity || scalar == nil || scalar.Sign() <= 0 {
+		return pointInfinity()
+	}
+	result := pointInfinity()
+	addend := p
+	for bit := 0; bit < scalar.BitLen(); bit++ {
+		if scalar.Bit(bit) == 1 {
+			result = pointAdd(result, addend)
+		}
+		addend = pointDouble(addend)
+	}
+	return result
+}
+
+func privateKeyScalar() (*big.Int, error) {
+	raw := strings.TrimSpace(os.Getenv("GPM_AUTH_CONTRACT_KEY_SCALAR"))
+	if raw == "" {
+		raw = "1"
+	}
+	value, ok := new(big.Int).SetString(raw, 10)
+	if !ok || value.Sign() <= 0 || value.Cmp(curveOrder) >= 0 {
+		return nil, fmt.Errorf("invalid GPM_AUTH_CONTRACT_KEY_SCALAR %q", raw)
+	}
+	return value, nil
+}
+
+func deterministicSecp256k1Proof(message string) (string, string, error) {
+	privateKey, err := privateKeyScalar()
+	if err != nil {
+		return "", "", err
+	}
+	hash := sha256.Sum256([]byte(message))
+	nonceSeed := sha256.Sum256([]byte("gpm-auth-secp256k1-test-nonce:" + message))
+	maxNonce := new(big.Int).Sub(new(big.Int).Set(curveOrder), big.NewInt(1))
+	nonce := new(big.Int).SetBytes(nonceSeed[:])
+	nonce.Mod(nonce, maxNonce)
+	nonce.Add(nonce, big.NewInt(1))
+	generator := newPoint(generatorX, generatorY)
+
+	var r *big.Int
+	var s *big.Int
+	for attempts := 0; attempts < 8; attempts++ {
+		noncePoint := scalarMult(generator, nonce)
+		if !noncePoint.infinity && noncePoint.x != nil {
+			candidateR := new(big.Int).Mod(noncePoint.x, curveOrder)
+			if candidateR.Sign() != 0 {
+				nonceInv := new(big.Int).ModInverse(nonce, curveOrder)
+				if nonceInv != nil {
+					candidateS := new(big.Int).Mul(candidateR, privateKey)
+					candidateS.Add(candidateS, new(big.Int).SetBytes(hash[:]))
+					candidateS.Mul(candidateS, nonceInv)
+					candidateS.Mod(candidateS, curveOrder)
+					if candidateS.Sign() != 0 {
+						r = candidateR
+						s = candidateS
+						break
+					}
+				}
+			}
+		}
+		nonce.Add(nonce, big.NewInt(1))
+		if nonce.Cmp(curveOrder) >= 0 {
+			nonce.SetInt64(1)
+		}
+	}
+	if r == nil || s == nil {
+		return "", "", errors.New("failed to derive deterministic secp256k1 signature")
+	}
+	publicKeyPoint := scalarMult(generator, privateKey)
+	if publicKeyPoint.infinity || publicKeyPoint.x == nil || publicKeyPoint.y == nil {
+		return "", "", errors.New("failed to derive deterministic secp256k1 public key")
+	}
+	signature := make([]byte, 64)
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+	copy(signature[32-len(rBytes):32], rBytes)
+	copy(signature[64-len(sBytes):], sBytes)
+	publicKey := compressedPublicKey(publicKeyPoint)
+	return base64.StdEncoding.EncodeToString(signature), base64.StdEncoding.EncodeToString(publicKey), nil
+}
+
+func compressedPublicKey(publicKeyPoint point) []byte {
+	publicKey := make([]byte, 33)
+	publicKey[0] = 0x02
+	if publicKeyPoint.y.Bit(0) == 1 {
+		publicKey[0] = 0x03
+	}
+	xBytes := publicKeyPoint.x.Bytes()
+	copy(publicKey[33-len(xBytes):], xBytes)
+	return publicKey
+}
+
+func bech32HRPExpand(hrp string) []byte {
+	expanded := make([]byte, 0, len(hrp)*2+1)
+	for i := 0; i < len(hrp); i++ {
+		expanded = append(expanded, hrp[i]>>5)
+	}
+	expanded = append(expanded, 0)
+	for i := 0; i < len(hrp); i++ {
+		expanded = append(expanded, hrp[i]&31)
+	}
+	return expanded
+}
+
+func bech32Polymod(values []byte) uint32 {
+	chk := uint32(1)
+	for _, value := range values {
+		top := chk >> 25
+		chk = (chk&0x1ffffff)<<5 ^ uint32(value)
+		for i := 0; i < len(bech32Generator); i++ {
+			if ((top >> uint(i)) & 1) != 0 {
+				chk ^= bech32Generator[i]
+			}
+		}
+	}
+	return chk
+}
+
+func bech32CreateChecksum(hrp string, data []byte) []byte {
+	values := append(bech32HRPExpand(hrp), data...)
+	values = append(values, make([]byte, bech32ChecksumLength)...)
+	polymod := bech32Polymod(values) ^ 1
+	checksum := make([]byte, bech32ChecksumLength)
+	for i := 0; i < bech32ChecksumLength; i++ {
+		checksum[i] = byte((polymod >> uint(5*(5-i))) & 31)
+	}
+	return checksum
+}
+
+func bech32ConvertBits(data []byte, fromBits uint, toBits uint, pad bool) ([]byte, error) {
+	acc := uint(0)
+	bits := uint(0)
+	maxv := uint((1 << toBits) - 1)
+	maxAcc := uint((1 << (fromBits + toBits - 1)) - 1)
+	out := make([]byte, 0, len(data)*int(fromBits)/int(toBits))
+	for _, value := range data {
+		v := uint(value)
+		if v>>fromBits != 0 {
+			return nil, errors.New("bech32 data value exceeds bit group size")
+		}
+		acc = ((acc << fromBits) | v) & maxAcc
+		bits += fromBits
+		for bits >= toBits {
+			bits -= toBits
+			out = append(out, byte((acc>>bits)&maxv))
+		}
+	}
+	if pad {
+		if bits > 0 {
+			out = append(out, byte((acc<<(toBits-bits))&maxv))
+		}
+	} else if bits >= fromBits || ((acc<<(toBits-bits))&maxv) != 0 {
+		return nil, errors.New("bech32 data has invalid padding")
+	}
+	return out, nil
+}
+
+func encodeBech32Address(hrp string, payload []byte) (string, error) {
+	data, err := bech32ConvertBits(payload, 8, 5, true)
+	if err != nil {
+		return "", err
+	}
+	combined := append(append([]byte{}, data...), bech32CreateChecksum(hrp, data)...)
+	var b strings.Builder
+	b.Grow(len(hrp) + 1 + len(combined))
+	b.WriteString(hrp)
+	b.WriteByte('1')
+	for _, value := range combined {
+		if int(value) >= len(bech32Charset) {
+			return "", errors.New("bech32 data value out of range")
+		}
+		b.WriteByte(bech32Charset[value])
+	}
+	return b.String(), nil
+}
+
+func deterministicWalletAddress(hrp string) (string, error) {
+	privateKey, err := privateKeyScalar()
+	if err != nil {
+		return "", err
+	}
+	publicKeyPoint := scalarMult(newPoint(generatorX, generatorY), privateKey)
+	publicKey := compressedPublicKey(publicKeyPoint)
+	sha := sha256.Sum256(publicKey)
+	ripemd := ripemd160.New()
+	if _, err := ripemd.Write(sha[:]); err != nil {
+		return "", err
+	}
+	return encodeBech32Address(hrp, ripemd.Sum(nil))
+}
+
+func main() {
+	if len(os.Args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: gpm_auth_contract_proof.go (--address|--proof)")
+		os.Exit(2)
+	}
+	walletAddress, err := deterministicWalletAddress("cosmos")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	switch os.Args[1] {
+	case "--address":
+		fmt.Println(walletAddress)
+	case "--proof":
+		messageBytes, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		message := string(messageBytes)
+		signature, publicKey, err := deterministicSecp256k1Proof(message)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]string{
+			"wallet_address":              walletAddress,
+			"signature":                   signature,
+			"signature_public_key":        publicKey,
+			"signature_public_key_type":   "secp256k1",
+			"signed_message":              message,
+		})
+	default:
+		fmt.Fprintln(os.Stderr, "usage: gpm_auth_contract_proof.go (--address|--proof)")
+		os.Exit(2)
+	}
+}
+EOF_GO
+}
+
+auth_contract_wallet_address() {
+  local scalar="${1:-1}"
+  ensure_auth_proof_helper
+  GPM_AUTH_CONTRACT_KEY_SCALAR="$scalar" go run "$AUTH_PROOF_HELPER" --address
+}
+
+auth_contract_proof_json() {
+  local message="$1"
+  local scalar="${2:-1}"
+  ensure_auth_proof_helper
+  printf '%s' "$message" | GPM_AUTH_CONTRACT_KEY_SCALAR="$scalar" go run "$AUTH_PROOF_HELPER" --proof
+}
 
 cat >"$FAKE_SCRIPT" <<'EOF_FAKE'
 #!/usr/bin/env bash
@@ -153,6 +514,9 @@ start_local_api() {
     LOCAL_CONTROL_API_AUTH_TOKEN="$LOCAL_API_AUTH_TOKEN" \
     GPM_OPERATOR_APPROVAL_TOKEN="$LOCAL_API_OPERATOR_ADMIN_TOKEN" \
     GPM_OPERATOR_APPROVAL_REQUIRE_SESSION="$operator_approval_require_session" \
+    GPM_LOCAL_API_ADMIN_ROUTES="1" \
+    GPM_ADMIN_WALLET_ALLOWLIST="$(auth_contract_wallet_address 2)" \
+    GPM_AUTH_VERIFY_COMMAND="printf gpm-auth-verify-ok" \
     LOCAL_CONTROL_API_SERVICE_START_COMMAND="printf gpm-service-start-ok" \
     LOCAL_CONTROL_API_SERVICE_STOP_COMMAND="printf gpm-service-stop-ok" \
     LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND="printf gpm-service-restart-ok" \
@@ -257,6 +621,53 @@ api_post_json() {
   local path="$1"
   local payload="$2"
   curl -fsS -X POST -H "Authorization: Bearer ${LOCAL_API_AUTH_TOKEN}" -H 'Content-Type: application/json' --data "$payload" "${LOCAL_API_BASE}${path}"
+}
+
+mint_auth_contract_session_json() {
+  local scalar="$1"
+  local expected_role="${2:-}"
+  local wallet_address=""
+  local challenge_body=""
+  local challenge_json=""
+  local challenge_id=""
+  local challenge_message=""
+  local proof_json=""
+  local verify_body=""
+  local verify_json=""
+  wallet_address="$(auth_contract_wallet_address "$scalar")"
+  challenge_body="$(jq -cn --arg wallet_address "$wallet_address" '{wallet_address: $wallet_address, wallet_provider: "keplr"}')"
+  challenge_json="$(api_post_json "/v1/gpm/auth/challenge" "$challenge_body")"
+  if ! jq -e '.ok == true and (.challenge_id | type == "string" and length > 0) and (.message | type == "string" and length > 0)' <<<"$challenge_json" >/dev/null; then
+    echo "auth challenge did not return expected payload" >&2
+    echo "$challenge_json" >&2
+    exit 1
+  fi
+  challenge_id="$(jq -r '.challenge_id // ""' <<<"$challenge_json")"
+  challenge_message="$(jq -r '.message // ""' <<<"$challenge_json")"
+  proof_json="$(auth_contract_proof_json "$challenge_message" "$scalar")"
+  verify_body="$(jq -cn \
+    --arg wallet_address "$wallet_address" \
+    --arg challenge_id "$challenge_id" \
+    --arg signature "$(jq -r '.signature // ""' <<<"$proof_json")" \
+    --arg signature_public_key "$(jq -r '.signature_public_key // ""' <<<"$proof_json")" \
+    --arg signature_public_key_type "$(jq -r '.signature_public_key_type // "secp256k1"' <<<"$proof_json")" \
+    --arg signed_message "$(jq -r '.signed_message // ""' <<<"$proof_json")" \
+    '{
+      wallet_address: $wallet_address,
+      wallet_provider: "keplr",
+      challenge_id: $challenge_id,
+      signature: $signature,
+      signature_public_key: $signature_public_key,
+      signature_public_key_type: $signature_public_key_type,
+      signed_message: $signed_message
+    }')"
+  verify_json="$(api_post_json "/v1/gpm/auth/verify" "$verify_body")"
+  if [[ -n "$expected_role" ]] && ! jq -e --arg wallet_address "$wallet_address" --arg expected_role "$expected_role" '.ok == true and .session.wallet_address == $wallet_address and .session.role == $expected_role and .session.wallet_binding_verified == true and (.session_token | type == "string" and length > 0)' <<<"$verify_json" >/dev/null; then
+    echo "auth verify did not return expected ${expected_role} session payload" >&2
+    echo "$verify_json" >&2
+    exit 1
+  fi
+  printf '%s\n' "$verify_json"
 }
 
 if [[ ! -f "$GPM_API_FILE" ]]; then
@@ -435,7 +846,9 @@ if ! jq -e '.ok == false and (.error | contains("session token is required"))' "
 fi
 
 echo "[local-control-api-contract] onboarding overview returns consolidated session + registration + readiness"
-challenge_json="$(api_post_json "/v1/gpm/auth/challenge" '{"wallet_address":"cosmos1overviewcontract","wallet_provider":"keplr"}')"
+overview_wallet_address="$(auth_contract_wallet_address)"
+challenge_body="$(jq -cn --arg wallet_address "$overview_wallet_address" '{wallet_address: $wallet_address, wallet_provider: "keplr"}')"
+challenge_json="$(api_post_json "/v1/gpm/auth/challenge" "$challenge_body")"
 if ! jq -e '.ok == true and (.challenge_id | type == "string" and length > 0) and (.message | type == "string" and length > 0)' <<<"$challenge_json" >/dev/null; then
   echo "auth challenge did not return expected payload"
   echo "$challenge_json"
@@ -447,8 +860,31 @@ if [[ -z "$challenge_id" ]]; then
   echo "$challenge_json"
   exit 1
 fi
-verify_json="$(api_post_json "/v1/gpm/auth/verify" "{\"wallet_address\":\"cosmos1overviewcontract\",\"wallet_provider\":\"keplr\",\"challenge_id\":\"${challenge_id}\",\"signature\":\"sig-contract-overview-123\"}")"
-if ! jq -e '.ok == true and .session.wallet_address == "cosmos1overviewcontract" and .session.role == "client" and (.session_token | type == "string" and length > 0)' <<<"$verify_json" >/dev/null; then
+challenge_message="$(jq -r '.message // ""' <<<"$challenge_json")"
+if [[ -z "$challenge_message" ]]; then
+  echo "auth challenge missing message"
+  echo "$challenge_json"
+  exit 1
+fi
+proof_json="$(auth_contract_proof_json "$challenge_message" 1)"
+verify_body="$(jq -cn \
+  --arg wallet_address "$overview_wallet_address" \
+  --arg challenge_id "$challenge_id" \
+  --arg signature "$(jq -r '.signature // ""' <<<"$proof_json")" \
+  --arg signature_public_key "$(jq -r '.signature_public_key // ""' <<<"$proof_json")" \
+  --arg signature_public_key_type "$(jq -r '.signature_public_key_type // "secp256k1"' <<<"$proof_json")" \
+  --arg signed_message "$(jq -r '.signed_message // ""' <<<"$proof_json")" \
+  '{
+    wallet_address: $wallet_address,
+    wallet_provider: "keplr",
+    challenge_id: $challenge_id,
+    signature: $signature,
+    signature_public_key: $signature_public_key,
+    signature_public_key_type: $signature_public_key_type,
+    signed_message: $signed_message
+  }')"
+verify_json="$(api_post_json "/v1/gpm/auth/verify" "$verify_body")"
+if ! jq -e --arg wallet_address "$overview_wallet_address" '.ok == true and .session.wallet_address == $wallet_address and .session.role == "client" and .session.wallet_binding_verified == true and (.session_token | type == "string" and length > 0)' <<<"$verify_json" >/dev/null; then
   echo "auth verify did not return expected session payload"
   echo "$verify_json"
   exit 1
@@ -475,7 +911,7 @@ if ! jq -e '.ok == false and (.error | contains("session role")) and (.error | c
 fi
 
 overview_json="$(api_post_json "/v1/gpm/onboarding/overview" "{\"session_token\":\"${overview_session_token}\"}")"
-if ! jq -e '.ok == true and .session.wallet_address == "cosmos1overviewcontract" and .registration.wallet_address == "cosmos1overviewcontract" and .registration.status == "not_registered" and .readiness.role == "client" and .readiness.session_present == true and (.readiness.lifecycle_actions_unlocked | type == "boolean")' <<<"$overview_json" >/dev/null; then
+if ! jq -e --arg wallet_address "$overview_wallet_address" '.ok == true and .session.wallet_address == $wallet_address and .registration.wallet_address == $wallet_address and .registration.status == "not_registered" and .readiness.role == "client" and .readiness.session_present == true and (.readiness.lifecycle_actions_unlocked | type == "boolean")' <<<"$overview_json" >/dev/null; then
   echo "onboarding overview did not return expected consolidated payload"
   echo "$overview_json"
   exit 1
@@ -498,7 +934,8 @@ if ! jq -e '.ok == true and .application.status == "pending" and .application.ch
   echo "$operator_apply_bound_json"
   exit 1
 fi
-operator_approve_bound_json="$(api_post_json "/v1/gpm/onboarding/operator/approve" "{\"wallet_address\":\"cosmos1overviewcontract\",\"approved\":true,\"admin_token\":\"${LOCAL_API_OPERATOR_ADMIN_TOKEN}\"}")"
+operator_approve_bound_body="$(jq -cn --arg wallet_address "$overview_wallet_address" --arg admin_token "$LOCAL_API_OPERATOR_ADMIN_TOKEN" '{wallet_address: $wallet_address, approved: true, admin_token: $admin_token}')"
+operator_approve_bound_json="$(api_post_json "/v1/gpm/onboarding/operator/approve" "$operator_approve_bound_body")"
 if ! jq -e '.ok == true and .decision == "approved" and .decision_auth == "legacy_admin_token" and .application.status == "approved"' <<<"$operator_approve_bound_json" >/dev/null; then
   echo "operator approve (bound setup) did not return expected payload"
   echo "$operator_approve_bound_json"
@@ -566,7 +1003,15 @@ if ! jq -e '.ok == false and ((.error | contains("not approved")) or (.error | c
 fi
 
 echo "[local-control-api-contract] set_profile normalizes alias and forwards config-v1-set-profile"
-set_profile_json="$(api_post_json "/v1/set_profile" '{"path_profile":"private"}')"
+admin_verify_json="$(mint_auth_contract_session_json 2 admin)"
+admin_session_token="$(jq -r '.session_token // ""' <<<"$admin_verify_json")"
+if [[ -z "$admin_session_token" ]]; then
+  echo "admin auth verify missing session_token"
+  echo "$admin_verify_json"
+  exit 1
+fi
+set_profile_body="$(jq -cn --arg session_token "$admin_session_token" '{path_profile: "private", session_token: $session_token}')"
+set_profile_json="$(api_post_json "/v1/set_profile" "$set_profile_body")"
 if ! jq -e '.ok == true and .path_profile == "3hop"' <<<"$set_profile_json" >/dev/null; then
   echo "set_profile endpoint did not normalize to 3hop"
   echo "$set_profile_json"
@@ -692,7 +1137,7 @@ assert_line_has "$up_1hop_call" $'\t--beta-profile\t0' "connect 1hop missing bet
 assert_line_has "$up_1hop_call" $'\t--prod-profile\t0' "connect 1hop missing prod-profile 0"
 assert_line_has "$up_1hop_call" $'\t--install-route\t0' "connect 1hop missing default install-route 0"
 
-echo "[local-control-api-contract] disconnect endpoint forwards client-vpn-down --force-iface-cleanup 1"
+echo "[local-control-api-contract] disconnect endpoint forwards safe public client-vpn-down cleanup"
 disconnect_json="$(api_post_json "/v1/disconnect" '{}')"
 if ! jq -e '.ok == true and .stage == "disconnect"' <<<"$disconnect_json" >/dev/null; then
   echo "disconnect endpoint did not return expected payload"
@@ -700,7 +1145,7 @@ if ! jq -e '.ok == true and .stage == "disconnect"' <<<"$disconnect_json" >/dev/
   exit 1
 fi
 disconnect_call="$(require_last_call "client-vpn-down")"
-assert_line_has "$disconnect_call" $'\t--force-iface-cleanup\t1' "disconnect forwarding missing --force-iface-cleanup 1"
+assert_line_has "$disconnect_call" $'\t--force-iface-cleanup\t0' "disconnect forwarding missing safe --force-iface-cleanup 0"
 
 echo "[local-control-api-contract] update endpoint is fail-closed by default"
 : >"$CALLS_FILE"
@@ -751,7 +1196,15 @@ echo "[local-control-api-contract] start local API (update enabled)"
 start_local_api 1
 
 echo "[local-control-api-contract] update endpoint forwards self-update command form"
-update_enabled_json="$(api_post_json "/v1/update" '{"remote":"origin","branch":"main","allow_dirty":true}')"
+admin_update_verify_json="$(mint_auth_contract_session_json 2 admin)"
+admin_update_session_token="$(jq -r '.session_token // ""' <<<"$admin_update_verify_json")"
+if [[ -z "$admin_update_session_token" ]]; then
+  echo "admin auth verify for update missing session_token"
+  echo "$admin_update_verify_json"
+  exit 1
+fi
+update_enabled_body="$(jq -cn --arg session_token "$admin_update_session_token" '{remote: "origin", branch: "main", allow_dirty: true, session_token: $session_token}')"
+update_enabled_json="$(api_post_json "/v1/update" "$update_enabled_body")"
 if ! jq -e '.ok == true' <<<"$update_enabled_json" >/dev/null; then
   echo "update enabled endpoint did not return success"
   echo "$update_enabled_json"

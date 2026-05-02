@@ -128,7 +128,9 @@ BEGIN {
   inserted_trace_helper = 0
 }
 {
-  if (!inserted_trace_helper && $0 ~ /^std::string readLine\(const std::string &prompt, const std::string &def = ""\) \{$/) {
+  line = $0
+  sub(/\r$/, "", line)
+  if (!inserted_trace_helper && line ~ /^std::string readLine\(const std::string &prompt, const std::string &def = ""\) \{$/) {
     print "void promptBudgetTrace(const std::string &prompt) {"
     print "  const char *traceFile = std::getenv(\"EASY_MODE_PROMPT_TRACE_FILE\");"
     print "  if (!traceFile || *traceFile == '\''\\0'\'') {"
@@ -143,11 +145,11 @@ BEGIN {
     print ""
     inserted_trace_helper = 1
   }
-  print $0
-  if ($0 ~ /^std::string readLine\(const std::string &prompt, const std::string &def = ""\) \{$/) {
+  print line
+  if (line ~ /^std::string readLine\(const std::string &prompt, const std::string &def = ""\) \{$/) {
     print "  promptBudgetTrace(prompt);"
   }
-  if ($0 ~ /^std::string readOptionalLine\(const std::string &prompt, const std::string &suggested = ""\) \{$/) {
+  if (line ~ /^std::string readOptionalLine\(const std::string &prompt, const std::string &suggested = ""\) \{$/) {
     print "  promptBudgetTrace(prompt);"
   }
 }

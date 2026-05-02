@@ -34,9 +34,15 @@ case "$RUN_NATIVE_TESTS" in
     exit 2
     ;;
 esac
-if [[ "$RUN_NATIVE_TESTS" == "1" ]] && ! command -v cargo >/dev/null 2>&1; then
-  echo "desktop admin-console contract failed: missing required command: cargo"
-  exit 2
+if [[ "$RUN_NATIVE_TESTS" == "1" ]]; then
+  if command -v cargo >/dev/null 2>&1; then
+    CARGO_BIN="cargo"
+  elif command -v cargo.exe >/dev/null 2>&1; then
+    CARGO_BIN="cargo.exe"
+  else
+    echo "desktop admin-console contract failed: missing required command: cargo"
+    exit 2
+  fi
 fi
 
 mkdir -p .easy-node-logs
@@ -105,8 +111,8 @@ fi
 if [[ "$RUN_NATIVE_TESTS" == "1" ]]; then
   echo "[desktop-admin-console] native public/admin command guards pass"
   pushd apps/desktop/src-tauri >/dev/null
-  cargo test --no-default-features tests::admin_console_guard_blocks_public_mode_commands -- --exact
-  cargo test --features admin-console tests::admin_console_guard_blocks_public_mode_commands -- --exact
+  "$CARGO_BIN" test --no-default-features tests::admin_console_guard_blocks_public_mode_commands -- --exact
+  "$CARGO_BIN" test --features admin-console tests::admin_console_guard_blocks_public_mode_commands -- --exact
   popd >/dev/null
 else
   echo "[desktop-admin-console] native public/admin command guards skipped"
