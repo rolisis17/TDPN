@@ -56,6 +56,15 @@ mtls_default_zero_count="$(grep -c 'MTLS_ENABLE:.*:-0' "$BASE_COMPOSE" || true)"
 if [[ "$mtls_default_zero_count" != "4" ]]; then
   fail "base compose must default MTLS_ENABLE to 0 for directory, issuer, entry-exit, and client-demo (found $mtls_default_zero_count)"
 fi
+for required_env_passthrough in \
+  DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_PUBLIC_BIND \
+  ISSUER_ALLOW_DANGEROUS_INSECURE_TOKEN_AUTH_PUBLIC_BIND \
+  ISSUER_ALLOW_DANGEROUS_PUBLIC_ISSUE_WITHOUT_PAYMENT_PROOF \
+  ISSUER_REQUIRE_PAYMENT_PROOF; do
+  if ! grep -q "$required_env_passthrough" "$BASE_COMPOSE"; then
+    fail "base compose must pass through $required_env_passthrough"
+  fi
+done
 
 override_entry_block="$(extract_service_block "$PRIV_OVERRIDE_COMPOSE" "entry-exit")"
 [[ -n "$override_entry_block" ]] || fail "privileged override compose is missing services.entry-exit block"
