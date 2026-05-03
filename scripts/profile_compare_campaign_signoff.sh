@@ -324,9 +324,9 @@ endpoint_preflight_probe_path_for_label() {
     directory*|bootstrap|issuer)
       printf '%s' "/v1/pubkeys"
       ;;
-    entry|exit)
-      printf '%s' "/v1/ready"
-      ;;
+	    entry|exit)
+	      printf '%s' "/v1/health"
+	      ;;
     *)
       printf '%s' ""
       ;;

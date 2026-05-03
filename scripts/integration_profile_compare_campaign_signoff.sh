@@ -1017,6 +1017,65 @@ if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.refresh_campaign == t
   exit 1
 fi
 
+echo "[profile-compare-campaign-signoff] remote endpoint preflight uses stable health endpoints"
+: >"$SIGNOFF_CAPTURE"
+PREFLIGHT_HEALTH_REPORTS_DIR="$TMP_DIR/reports_preflight_health"
+PREFLIGHT_HEALTH_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_preflight_health.json"
+PREFLIGHT_HEALTH_CAPTURE="$TMP_DIR/profile_compare_campaign_signoff_preflight_health_urls.log"
+PREFLIGHT_HEALTH_FAKE_BIN="$TMP_DIR/preflight_health_fake_bin"
+mkdir -p "$PREFLIGHT_HEALTH_REPORTS_DIR" "$PREFLIGHT_HEALTH_FAKE_BIN"
+cat >"$PREFLIGHT_HEALTH_FAKE_BIN/curl" <<'EOF_FAKE_CURL_HEALTH'
+#!/usr/bin/env bash
+set -euo pipefail
+for arg in "$@"; do
+  case "$arg" in
+    http://*|https://*)
+      printf '%s\n' "$arg" >>"${PREFLIGHT_HEALTH_CAPTURE:?}"
+      ;;
+  esac
+done
+exit 0
+EOF_FAKE_CURL_HEALTH
+chmod +x "$PREFLIGHT_HEALTH_FAKE_BIN/curl"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+PATH="$PREFLIGHT_HEALTH_FAKE_BIN:$PATH" \
+PREFLIGHT_HEALTH_CAPTURE="$PREFLIGHT_HEALTH_CAPTURE" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$PREFLIGHT_HEALTH_REPORTS_DIR" \
+  --refresh-campaign 1 \
+  --campaign-execution-mode docker \
+  --campaign-endpoint-preflight-timeout-sec 1 \
+  --campaign-directory-urls "http://198.51.100.42:18081,http://198.51.100.43:28081" \
+  --campaign-bootstrap-directory "http://198.51.100.42:18081" \
+  --campaign-issuer-url "http://198.51.100.42:18082" \
+  --campaign-entry-url "http://198.51.100.42:18083" \
+  --campaign-exit-url "http://198.51.100.42:18084" \
+  --summary-json "$PREFLIGHT_HEALTH_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_preflight_health.log 2>&1
+for expected_url in \
+  "http://198.51.100.42:18083/v1/health" \
+  "http://198.51.100.42:18084/v1/health"; do
+  if ! rg -Fq "$expected_url" "$PREFLIGHT_HEALTH_CAPTURE"; then
+    echo "expected endpoint preflight probe: $expected_url"
+    cat "$PREFLIGHT_HEALTH_CAPTURE"
+    exit 1
+  fi
+done
+if rg -Fq "/v1/ready" "$PREFLIGHT_HEALTH_CAPTURE"; then
+  echo "endpoint preflight should not require /v1/ready for entry/exit compatibility"
+  cat "$PREFLIGHT_HEALTH_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_endpoint_preflight.status == "pass" and (.inputs.campaign_endpoint_preflight.candidate_endpoints[] | select(.label == "entry").url) == "http://198.51.100.42:18083/v1/health" and (.inputs.campaign_endpoint_preflight.candidate_endpoints[] | select(.label == "exit").url) == "http://198.51.100.42:18084/v1/health"' "$PREFLIGHT_HEALTH_SUMMARY" >/dev/null 2>&1; then
+  echo "preflight-health summary JSON missing expected endpoint URLs"
+  cat "$PREFLIGHT_HEALTH_SUMMARY"
+  exit 1
+fi
+
 echo "[profile-compare-campaign-signoff] remote endpoint preflight fail-closes campaign stage"
 : >"$SIGNOFF_CAPTURE"
 PREFLIGHT_FAIL_REPORTS_DIR="$TMP_DIR/reports_preflight_fail"
