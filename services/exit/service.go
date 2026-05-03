@@ -795,6 +795,9 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	defer s.closeAllWGKernelSessionProxies()
 	if s.wgBackend == "command" {
+		if err := ensureWGPrivateKeyOwnerOnly(s.wgPrivateKey); err != nil {
+			log.Printf("exit wg private key permission repair skipped: %v", err)
+		}
 		if err := wg.PreflightCommandBackend(ctx, s.wgInterface, s.wgPrivateKey); err != nil {
 			return fmt.Errorf("exit wg preflight failed: %w", err)
 		}
@@ -927,6 +930,31 @@ func (s *Service) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func ensureWGPrivateKeyOwnerOnly(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("private key path must not be a symlink: %s", path)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("private key path must be a regular file: %s", path)
+	}
+	if info.Mode().Perm()&0o077 == 0 {
+		return nil
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return err
+	}
+	log.Printf("exit wg private key permissions repaired to owner-only: %s", path)
+	return nil
 }
 
 func (s *Service) validateRuntimeConfig() error {

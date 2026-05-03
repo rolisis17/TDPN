@@ -5434,6 +5434,39 @@ func TestNewCommandBackendKeepsUnsetWGPubKeyForDerivation(t *testing.T) {
 	}
 }
 
+func TestEnsureWGPrivateKeyOwnerOnlyRepairsBroadPermissions(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "exit.key")
+	if err := os.WriteFile(keyPath, []byte("private-key\n"), 0o644); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+	if err := ensureWGPrivateKeyOwnerOnly(keyPath); err != nil {
+		t.Fatalf("repair key permissions: %v", err)
+	}
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatalf("stat key: %v", err)
+	}
+	if got := info.Mode().Perm(); got&0o077 != 0 {
+		t.Fatalf("expected owner-only key permissions after repair, got %#o", got)
+	}
+}
+
+func TestEnsureWGPrivateKeyOwnerOnlyRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.key")
+	link := filepath.Join(dir, "link.key")
+	if err := os.WriteFile(target, []byte("private-key\n"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	err := ensureWGPrivateKeyOwnerOnly(link)
+	if err == nil || !strings.Contains(err.Error(), "must not be a symlink") {
+		t.Fatalf("expected symlink rejection, got %v", err)
+	}
+}
+
 func TestDecodeBoundedJSONResponseRejectsOversizedBody(t *testing.T) {
 	body := strings.NewReader(`{"value":"` + strings.Repeat("a", int(remoteResponseMaxBodyBytes)+1024) + `"}`)
 	var out map[string]string
