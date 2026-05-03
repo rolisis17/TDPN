@@ -231,6 +231,12 @@ assert_contains "$success_line_sp" "--fail-on-no-go 1" "missing fail-closed fail
 assert_contains "$success_line_sp" "--campaign-timeout-sec 2400" "missing default campaign timeout forwarding"
 assert_contains "$success_line_sp" "--require-selection-policy-present 1" "missing default require-selection-policy-present forwarding"
 assert_contains "$success_line_sp" "--require-selection-policy-valid 1" "missing default require-selection-policy-valid forwarding"
+assert_contains "$success_line_sp" "--require-micro-relay-quality-evidence 0" "missing profile-default M4 quality evidence opt-out"
+assert_contains "$success_line_sp" "--require-micro-relay-quality-status-pass 0" "missing profile-default M4 quality status opt-out"
+assert_contains "$success_line_sp" "--require-micro-relay-demotion-policy 0" "missing profile-default M4 demotion opt-out"
+assert_contains "$success_line_sp" "--require-micro-relay-promotion-policy 0" "missing profile-default M4 promotion opt-out"
+assert_contains "$success_line_sp" "--require-trust-tier-port-unlock-policy 0" "missing profile-default trust-tier port unlock opt-out"
+assert_contains "$success_line_sp" "--require-runtime-actuation-status-pass 0" "missing profile-default runtime actuation opt-out"
 assert_contains "$success_line_sp" "--custom-flag custom value" "missing passthrough forwarding"
 assert_contains "$success_line_sp" "--summary-json $SUCCESS_SUMMARY" "missing explicit summary-json forwarding"
 assert_file_contains "$SUCCESS_LOG" "campaign_timeout_sec=2400" "missing campaign-timeout start marker"
@@ -968,6 +974,7 @@ if [[ -z "$remote_http_probe_opt_in_line" ]]; then
 fi
 remote_http_probe_opt_in_line_sp="${remote_http_probe_opt_in_line//$'\t'/ }"
 assert_contains "$remote_http_probe_opt_in_line_sp" "--campaign-directory-urls http://dir-a.test:8081,https://dir-b.test:8081" "missing forwarded mixed-scheme campaign-directory-urls in remote-http opt-in path"
+assert_contains "$remote_http_probe_opt_in_line_sp" "--campaign-allow-insecure-remote-http 1" "missing forwarded campaign insecure remote HTTP opt-in"
 
 echo "[profile-default-gate-run] invalid --allow-insecure-probe value fails closed"
 : >"$SIGNOFF_CAPTURE"

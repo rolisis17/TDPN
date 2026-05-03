@@ -29,6 +29,7 @@ Usage:
     [--min-sources N] \
     [--beta-profile [0|1]] \
     [--prod-profile [0|1]] \
+    [--allow-insecure-remote-http [0|1]] \
     [--start-local-stack auto|0|1] \
     [--force-stack-reset [0|1]] \
     [--stack-strict-beta [0|1]] \
@@ -354,6 +355,7 @@ anon_cred=""
 min_sources="1"
 beta_profile="0"
 prod_profile="0"
+allow_insecure_remote_http="${PROFILE_COMPARE_LOCAL_ALLOW_INSECURE_REMOTE_HTTP:-0}"
 start_local_stack="auto"
 force_stack_reset="1"
 stack_strict_beta="0"
@@ -437,6 +439,19 @@ while [[ $# -gt 0 ]]; do
         prod_profile="1"
         shift
       fi
+      ;;
+    --allow-insecure-remote-http)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_insecure_remote_http="${2:-}"
+        shift 2
+      else
+        allow_insecure_remote_http="1"
+        shift
+      fi
+      ;;
+    --allow-insecure-remote-http=*)
+      allow_insecure_remote_http="${1#--allow-insecure-remote-http=}"
+      shift
       ;;
     --start-local-stack)
       start_local_stack="${2:-}"
@@ -534,8 +549,13 @@ if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
   echo "--prod-profile must be 0 or 1"
   exit 2
 fi
+bool_arg_or_die "--allow-insecure-remote-http" "$allow_insecure_remote_http"
 if [[ "$prod_profile" == "1" ]]; then
   beta_profile="1"
+fi
+if [[ "$prod_profile" == "1" && "$allow_insecure_remote_http" == "1" ]]; then
+  echo "--allow-insecure-remote-http cannot be used with --prod-profile 1"
+  exit 2
 fi
 
 if ! [[ "$rounds" =~ ^[0-9]+$ ]] || ((rounds < 1)); then
@@ -767,6 +787,11 @@ fi
 runs_file="$(mktemp)"
 trap 'rm -f "$runs_file"; cleanup_local_stack' EXIT INT TERM
 
+client_force_build_pending="0"
+if [[ "$execution_mode" == "docker" && "${PROFILE_COMPARE_LOCAL_FORCE_CLIENT_BUILD_ONCE:-1}" == "1" ]]; then
+  client_force_build_pending="1"
+fi
+
 append_run_record() {
   local profile="$1"
   local round="$2"
@@ -901,6 +926,9 @@ for profile in "${profiles[@]}"; do
       "EASY_NODE_CLIENT_TEST_CONTAINER_ENTRY_URL=$container_entry_url"
       "EASY_NODE_CLIENT_TEST_CONTAINER_EXIT_URL=$container_exit_url"
     )
+    if [[ "$client_force_build_pending" == "1" ]]; then
+      run_cmd_env+=("EASY_NODE_CLIENT_FORCE_BUILD=1")
+    fi
     if [[ "$transport_auto_client_inner_source" == "1" ]]; then
       run_cmd_env+=("CLIENT_INNER_SOURCE=udp")
     fi
@@ -950,6 +978,9 @@ for profile in "${profiles[@]}"; do
       --beta-profile "$beta_profile"
       --prod-profile "$prod_profile"
     )
+    if [[ "$allow_insecure_remote_http" == "1" ]]; then
+      run_cmd+=(--allow-insecure-remote-http 1)
+    fi
 
     run_cmd_str="$(print_cmd "${run_cmd[@]}")"
 
@@ -961,6 +992,7 @@ for profile in "${profiles[@]}"; do
       run_rc=$?
       run_status="fail"
     fi
+    client_force_build_pending="0"
     end_sec="$(date +%s)"
     duration_sec=$((end_sec - start_sec))
 
@@ -1407,6 +1439,7 @@ jq -n \
   --arg min_sources "$min_sources" \
   --arg beta_profile "$beta_profile" \
   --arg prod_profile "$prod_profile" \
+  --arg allow_insecure_remote_http "$allow_insecure_remote_http" \
   --arg transport_auto_client_inner_source "$transport_auto_client_inner_source" \
   --arg transport_auto_disable_synthetic_fallback "$transport_auto_disable_synthetic_fallback" \
   --arg transport_auto_data_plane_mode_opaque "$transport_auto_data_plane_mode_opaque" \
@@ -1460,6 +1493,7 @@ jq -n \
       min_sources: ($min_sources | tonumber),
       beta_profile: ($beta_profile == "1"),
       prod_profile: ($prod_profile == "1"),
+      allow_insecure_remote_http: ($allow_insecure_remote_http == "1"),
       explicit_remote_endpoints: ($explicit_remote_endpoints == "1"),
       transport_auto_defaults: {
         client_inner_source_udp: ($transport_auto_client_inner_source == "1"),

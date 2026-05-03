@@ -25,14 +25,15 @@ cat >"$FAKE_EASY" <<'EOF_FAKE'
 set -euo pipefail
 
 printf '%s\n' "$*" >>"${FAKE_CAPTURE_FILE:?}"
-printf 'env container_directory_urls=%s container_issuer_url=%s container_entry_url=%s container_exit_url=%s client_inner_source=%s disable_synthetic_fallback=%s data_plane_mode=%s\n' \
+printf 'env container_directory_urls=%s container_issuer_url=%s container_entry_url=%s container_exit_url=%s client_inner_source=%s disable_synthetic_fallback=%s data_plane_mode=%s client_force_build=%s\n' \
   "${EASY_NODE_CLIENT_TEST_CONTAINER_DIRECTORY_URLS:-}" \
   "${EASY_NODE_CLIENT_TEST_CONTAINER_ISSUER_URL:-}" \
   "${EASY_NODE_CLIENT_TEST_CONTAINER_ENTRY_URL:-}" \
   "${EASY_NODE_CLIENT_TEST_CONTAINER_EXIT_URL:-}" \
   "${CLIENT_INNER_SOURCE:-}" \
   "${CLIENT_DISABLE_SYNTHETIC_FALLBACK:-}" \
-  "${DATA_PLANE_MODE:-}" >>"${FAKE_CAPTURE_FILE:?}"
+  "${DATA_PLANE_MODE:-}" \
+  "${EASY_NODE_CLIENT_FORCE_BUILD:-}" >>"${FAKE_CAPTURE_FILE:?}"
 cmd="${1:-}"
 shift || true
 
@@ -397,6 +398,40 @@ if grep -F -- 'data_plane_mode=opaque' <<<"$loopback_env_line" >/dev/null; then
   exit 1
 fi
 
+ALLOW_HTTP_SUMMARY_JSON="$TMP_DIR/profile_compare_allow_http_summary.json"
+ALLOW_HTTP_REPORT_MD="$TMP_DIR/profile_compare_allow_http_report.md"
+ALLOW_HTTP_RUN_LOG="$TMP_DIR/profile_compare_allow_http_run.log"
+: >"$CAPTURE"
+
+echo "[profile-compare-local] explicit insecure remote HTTP opt-in forwards to client-test"
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles balanced \
+  --rounds 1 \
+  --execution-mode local \
+  --allow-insecure-remote-http 1 \
+  --directory-urls http://dir-allow-http:8081 \
+  --issuer-url http://issuer-allow-http:8082 \
+  --entry-url http://entry-allow-http:8083 \
+  --exit-url http://exit-allow-http:8084 \
+  --summary-json "$ALLOW_HTTP_SUMMARY_JSON" \
+  --report-md "$ALLOW_HTTP_REPORT_MD" \
+  --print-summary-json 0 >"$ALLOW_HTTP_RUN_LOG"
+
+if ! jq -e '.status == "pass" and .inputs.allow_insecure_remote_http == true' "$ALLOW_HTTP_SUMMARY_JSON" >/dev/null; then
+  echo "allow-insecure-remote-http summary missing expected input marker"
+  cat "$ALLOW_HTTP_SUMMARY_JSON"
+  exit 1
+fi
+if ! grep -F -- '--allow-insecure-remote-http 1' "$CAPTURE" >/dev/null; then
+  echo "profile compare did not forward --allow-insecure-remote-http to client-test"
+  cat "$CAPTURE"
+  exit 1
+fi
+
 OVERRIDE_SUMMARY_JSON="$TMP_DIR/profile_compare_override_summary.json"
 OVERRIDE_REPORT_MD="$TMP_DIR/profile_compare_override_report.md"
 OVERRIDE_RUN_LOG="$TMP_DIR/profile_compare_override_run.log"
@@ -478,7 +513,8 @@ for expected in \
   'container_directory_urls=http://host.docker.internal:18081,http://host.docker.internal:28081' \
   'container_issuer_url=http://host.docker.internal:18082' \
   'container_entry_url=http://host.docker.internal:18083' \
-  'container_exit_url=http://host.docker.internal:18084'
+  'container_exit_url=http://host.docker.internal:18084' \
+  'client_force_build=1'
 do
   if ! grep -F -- "$expected" <<<"$docker_env_line" >/dev/null; then
     echo "docker env rewrite capture missing $expected"

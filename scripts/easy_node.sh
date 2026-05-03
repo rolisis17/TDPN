@@ -459,11 +459,11 @@ Usage:
   ./scripts/easy_node.sh wg-only-stack-selftest [--strict-beta [0|1]] [--base-port N] [--timeout-sec N] [--min-selection-lines N] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]]
   ./scripts/easy_node.sh wg-only-stack-selftest-record [wg-only-stack-selftest args...] [--record-result [0|1]] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh pre-real-host-readiness [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--runtime-fix-prune-wg-only-dir [0|1]] [--strict-beta [0|1]] [--timeout-sec N] [--min-selection-lines N] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--path-profile 1hop|2hop|3hop|speed|speed-1hop|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--force-direct-exit [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
+  ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--path-profile 1hop|2hop|3hop|speed|speed-1hop|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--force-direct-exit [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--allow-insecure-remote-http [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh simple-client-test [--bootstrap-directory URL] [--discovery-wait-sec N] [--subject ID|--anon-cred TOKEN] [--timeout-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--beta-profile [0|1]] [--prod-profile [0|1]]
-  ./scripts/easy_node.sh profile-compare-local [--profiles CSV] [--rounds N] [--timeout-sec N] [--execution-mode docker|local] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--start-local-stack auto|0|1] [--force-stack-reset [0|1]] [--stack-strict-beta [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh profile-compare-local [--profiles CSV] [--rounds N] [--timeout-sec N] [--execution-mode docker|local] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--allow-insecure-remote-http [0|1]] [--start-local-stack auto|0|1] [--force-stack-reset [0|1]] [--stack-strict-beta [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-trend [--compare-summary-json PATH]... [--compare-summary-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--min-profile-runs N] [--min-profile-pass-rate-pct N] [--balanced-latency-margin-pct N] [--fail-on-any-fail [0|1]] [--min-decision-rate-pct N] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh profile-compare-campaign [--campaign-runs N] [--campaign-pause-sec N] [--reports-dir DIR] [--profiles CSV] [--rounds N] [--timeout-sec N] [--execution-mode docker|local] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--start-local-stack auto|0|1] [--force-stack-reset [0|1]] [--stack-strict-beta [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--trend-max-reports N] [--trend-since-hours N] [--trend-min-profile-runs N] [--trend-min-profile-pass-rate-pct N] [--trend-balanced-latency-margin-pct N] [--trend-fail-on-any-fail [0|1]] [--trend-min-decision-rate-pct N] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh profile-compare-campaign [--campaign-runs N] [--campaign-pause-sec N] [--reports-dir DIR] [--profiles CSV] [--rounds N] [--timeout-sec N] [--execution-mode docker|local] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--allow-insecure-remote-http [0|1]] [--start-local-stack auto|0|1] [--force-stack-reset [0|1]] [--stack-strict-beta [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--trend-max-reports N] [--trend-since-hours N] [--trend-min-profile-runs N] [--trend-min-profile-pass-rate-pct N] [--trend-balanced-latency-margin-pct N] [--trend-fail-on-any-fail [0|1]] [--trend-min-decision-rate-pct N] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-docker-matrix [--dry-run [0|1]] [profile-compare-campaign args...]
   ./scripts/easy_node.sh profile-compare-multi-vm-sweep [profile_compare_multi_vm_sweep args...]
   ./scripts/easy_node.sh profile-compare-multi-vm-reducer [profile_compare_multi_vm_reducer args...]
@@ -474,7 +474,7 @@ Usage:
   ./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-check [profile_compare_multi_vm_stability_promotion_check args...]
   ./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-cycle [profile_compare_multi_vm_stability_promotion_cycle args...]
   ./scripts/easy_node.sh profile-compare-campaign-check [--campaign-summary-json PATH] [--trend-summary-json PATH] [--reports-dir DIR] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--require-runtime-actuation-status-pass [0|1]] [--fail-on-no-go [0|1]] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh profile-compare-campaign-signoff [--reports-dir DIR] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-check-summary-json PATH] [--refresh-campaign [0|1]] [--fail-on-no-go [0|1]] [--allow-concurrent [0|1]] [--allow-summary-overwrite [0|1]] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--require-runtime-actuation-status-pass [0|1]] [--campaign-execution-mode docker|local] [--campaign-directory-urls URL[,URL...]] [--campaign-bootstrap-directory URL] [--campaign-discovery-wait-sec N] [--campaign-issuer-url URL] [--campaign-entry-url URL] [--campaign-exit-url URL] [--campaign-subject ID|--subject ID|--campaign-anon-cred TOKEN] [--anon-cred TOKEN (alias for --campaign-anon-cred)] [--campaign-start-local-stack auto|0|1] [--campaign-timeout-sec N] [--campaign-endpoint-preflight-timeout-sec N] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh profile-compare-campaign-signoff [--reports-dir DIR] [--campaign-summary-json PATH] [--campaign-report-md PATH] [--campaign-check-summary-json PATH] [--refresh-campaign [0|1]] [--fail-on-no-go [0|1]] [--allow-concurrent [0|1]] [--allow-summary-overwrite [0|1]] [--require-status-pass [0|1]] [--require-trend-status-pass [0|1]] [--require-min-runs-total N] [--require-max-runs-fail N] [--require-max-runs-warn N] [--require-min-runs-with-summary N] [--require-recommendation-support-rate-pct N] [--require-recommended-profile PROFILE] [--allow-recommended-profiles CSV] [--disallow-experimental-default [0|1]] [--require-trend-source CSV] [--require-runtime-actuation-status-pass [0|1]] [--campaign-execution-mode docker|local] [--campaign-runs N] [--campaign-directory-urls URL[,URL...]] [--campaign-bootstrap-directory URL] [--campaign-discovery-wait-sec N] [--campaign-issuer-url URL] [--campaign-entry-url URL] [--campaign-exit-url URL] [--campaign-subject ID|--subject ID|--campaign-anon-cred TOKEN] [--anon-cred TOKEN (alias for --campaign-anon-cred)] [--campaign-start-local-stack auto|0|1] [--campaign-timeout-sec N] [--campaign-endpoint-preflight-timeout-sec N] [--campaign-allow-insecure-remote-http [0|1]] [--summary-json PATH] [--show-json [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-default-gate-run [--directory-a HOST_OR_URL|--host-a HOST_OR_URL] [--directory-b HOST_OR_URL|--host-b HOST_OR_URL] [--directory-a-port N] [--directory-b-port N] [--endpoint-wait-timeout-sec N] [--endpoint-wait-interval-sec N] [--endpoint-connect-timeout-sec N] [--campaign-subject INVITE_KEY|--subject INVITE_KEY] [--heartbeat-interval-sec N] [--allow-remote-http-probe [0|1]] [profile-compare-campaign-signoff args...]
   ./scripts/easy_node.sh profile-default-gate-live [--host-a HOST|--directory-a HOST_OR_URL|--directory-a-url URL] [--host-b HOST|--directory-b HOST_OR_URL|--directory-b-url URL] [--campaign-subject INVITE_KEY|--subject INVITE_KEY|--key INVITE_KEY|--invite-key INVITE_KEY] [--allow-remote-http-probe [0|1]] [--reports-dir DIR] [--campaign-timeout-sec N] [--heartbeat-interval-sec N] [--summary-json PATH] [--print-summary-json [0|1]] [profile-default-gate-run args...]
 ./scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]
@@ -12726,6 +12726,7 @@ client_test() {
   local client_inner_source="${CLIENT_INNER_SOURCE:-}"
   local client_disable_synthetic_fallback="${CLIENT_DISABLE_SYNTHETIC_FALLBACK:-}"
   local data_plane_mode="${DATA_PLANE_MODE:-}"
+  local allow_insecure_remote_http="${EASY_NODE_CLIENT_ALLOW_INSECURE_REMOTE_HTTP:-0}"
   local beta_profile="${EASY_NODE_BETA_PROFILE:-0}"
   local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
   local bootstrap_directory=""
@@ -12900,6 +12901,19 @@ client_test() {
           shift
         fi
         ;;
+      --allow-insecure-remote-http)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          allow_insecure_remote_http="${2:-}"
+          shift 2
+        else
+          allow_insecure_remote_http="1"
+          shift
+        fi
+        ;;
+      --allow-insecure-remote-http=*)
+        allow_insecure_remote_http="${1#--allow-insecure-remote-http=}"
+        shift
+        ;;
       --beta-profile)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
           beta_profile="${2:-}"
@@ -13013,6 +13027,10 @@ client_test() {
     echo "client-test requires --require-cross-operator-pair to be 0 or 1"
     exit 2
   fi
+  if [[ "$allow_insecure_remote_http" != "0" && "$allow_insecure_remote_http" != "1" ]]; then
+    echo "client-test requires --allow-insecure-remote-http (or EASY_NODE_CLIENT_ALLOW_INSECURE_REMOTE_HTTP) to be 0 or 1"
+    exit 2
+  fi
   if [[ -n "$client_inner_source" && "$client_inner_source" != "udp" && "$client_inner_source" != "synthetic" ]]; then
     echo "client-test requires CLIENT_INNER_SOURCE to be udp or synthetic when set"
     exit 2
@@ -13067,6 +13085,10 @@ client_test() {
   fi
   if [[ "$prod_profile" == "1" ]]; then
     beta_profile="1"
+  fi
+  if [[ "$prod_profile" == "1" && "$allow_insecure_remote_http" == "1" ]]; then
+    echo "client-test does not allow --allow-insecure-remote-http with --prod-profile 1"
+    exit 2
   fi
   if [[ "$speed_onehop_profile" == "1" && ( "$beta_profile" == "1" || "$prod_profile" == "1" ) ]]; then
     echo "client-test --path-profile 1hop/speed-1hop requires --beta-profile 0 and --prod-profile 0"
@@ -13171,17 +13193,19 @@ client_test() {
   issuer_url="$(ensure_url_scheme "$issuer_url" "$client_url_scheme")"
   entry_url="$(ensure_url_scheme "$entry_url" "$client_url_scheme")"
   exit_url="$(ensure_url_scheme "$exit_url" "$client_url_scheme")"
-  if ! require_https_for_remote_csv_urls "$directory_urls" "client-test --directory-urls"; then
-    exit 2
-  fi
-  if ! require_https_for_remote_url "$issuer_url" "client-test --issuer-url"; then
-    exit 2
-  fi
-  if ! require_https_for_remote_url "$entry_url" "client-test --entry-url"; then
-    exit 2
-  fi
-  if ! require_https_for_remote_url "$exit_url" "client-test --exit-url"; then
-    exit 2
+  if [[ "$allow_insecure_remote_http" != "1" ]]; then
+    if ! require_https_for_remote_csv_urls "$directory_urls" "client-test --directory-urls"; then
+      exit 2
+    fi
+    if ! require_https_for_remote_url "$issuer_url" "client-test --issuer-url"; then
+      exit 2
+    fi
+    if ! require_https_for_remote_url "$entry_url" "client-test --entry-url"; then
+      exit 2
+    fi
+    if ! require_https_for_remote_url "$exit_url" "client-test --exit-url"; then
+      exit 2
+    fi
   fi
   if [[ -z "$container_directory_urls" ]]; then
     container_directory_urls="$directory_urls"
@@ -13224,6 +13248,9 @@ CLIENT_ENTRY_ROTATION_SEC=${entry_rotation_sec}
 CLIENT_ENTRY_ROTATION_JITTER_PCT=${entry_rotation_jitter_pct}
 CLIENT_EXIT_EXPLORATION_PCT=${exit_exploration_pct}
 CLIENT_ENTRY_ROTATION_SEED=${entry_rotation_seed}
+# docker compose interpolates every service before running client-demo, even
+# with --no-deps, so provide a non-prod placeholder for the unused server role.
+ENTRY_PUZZLE_SECRET=${ENTRY_PUZZLE_SECRET:-client-test-compose-placeholder-entry-secret-0001}
 EOF_CLIENT
 
   local log_dir
@@ -13261,7 +13288,7 @@ EOF_CLIENT
       echo "client test: building client image (timeout=${build_timeout_sec}s)"
       if ! (
         cd "$DEPLOY_DIR"
-        timeout --foreground -k 15s "${build_timeout_sec}s" env COMPOSE_INTERACTIVE_NO_CLI=1 COMPOSE_MENU=0 docker compose --profile demo build client-demo >"$build_log" 2>&1
+        timeout --foreground -k 15s "${build_timeout_sec}s" env COMPOSE_INTERACTIVE_NO_CLI=1 COMPOSE_MENU=0 ENTRY_PUZZLE_SECRET="${ENTRY_PUZZLE_SECRET:-client-test-compose-placeholder-entry-secret-0001}" docker compose --profile demo build client-demo >"$build_log" 2>&1
       ); then
         echo "client image build failed or timed out"
         echo "client build log: $build_log"
@@ -13327,6 +13354,15 @@ EOF_CLIENT
       -e "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=$allow_direct_exit_fallback"
       -e "CLIENT_FORCE_DIRECT_EXIT=$force_direct_exit"
     )
+    if [[ "$allow_insecure_remote_http" == "1" ]]; then
+      run_cmd+=(
+        -e "CLIENT_REQUIRE_HTTPS_CONTROL_URL=0"
+        -e "CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP=1"
+        -e "CLIENT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1"
+        -e "DIRECTORY_TRUST_STRICT=0"
+        -e "DIRECTORY_TRUST_TOFU=1"
+      )
+    fi
     if [[ -n "$runtime_subject_file" ]]; then
       run_cmd+=(
         -v "${runtime_subject_file}:/tmp/tdpn_client_subject:ro"
@@ -13404,6 +13440,15 @@ EOF_CLIENT
       "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=$allow_direct_exit_fallback"
       "CLIENT_FORCE_DIRECT_EXIT=$force_direct_exit"
     )
+    if [[ "$allow_insecure_remote_http" == "1" ]]; then
+      local_cmd+=(
+        "CLIENT_REQUIRE_HTTPS_CONTROL_URL=0"
+        "CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP=1"
+        "CLIENT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1"
+        "DIRECTORY_TRUST_STRICT=0"
+        "DIRECTORY_TRUST_TOFU=1"
+      )
+    fi
     if [[ -n "$runtime_subject_file" ]]; then
       local_cmd+=("CLIENT_SUBJECT_FILE=$runtime_subject_file")
     fi

@@ -23,6 +23,8 @@ cat >"$FAKE_LOCAL" <<'EOF_LOCAL'
 #!/usr/bin/env bash
 set -euo pipefail
 
+printf 'args=%s\n' "$*" >>"${FAKE_LOCAL_CAPTURE_FILE:?}"
+
 summary_json=""
 report_md=""
 while [[ $# -gt 0 ]]; do
@@ -412,6 +414,7 @@ FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
   --issuer-url http://issuer-a:8082 \
   --entry-url http://entry-a:8083 \
   --exit-url http://exit-a:8084 \
+  --allow-insecure-remote-http 1 \
   --campaign-pause-sec 0 \
   --summary-json "$SUCCESS_JSON" \
   --report-md "$SUCCESS_REPORT" \
@@ -478,6 +481,7 @@ if ! jq -e '
   and (.selected_summaries | length) == 3
   and .trend.status == "pass"
   and .inputs.compare.explicit_remote_endpoints == true
+  and .inputs.compare.allow_insecure_remote_http == true
   and .inputs.compare.transport_auto_defaults.client_inner_source_udp == true
   and .inputs.compare.transport_auto_defaults.disable_synthetic_fallback == true
   and .inputs.compare.transport_auto_defaults.data_plane_mode_opaque == true
@@ -492,6 +496,11 @@ if ! jq -e '
 ' "$SUCCESS_JSON" >/dev/null 2>&1; then
   echo "campaign success summary missing expected fields"
   cat "$SUCCESS_JSON"
+  exit 1
+fi
+if ! rg -q -- '--allow-insecure-remote-http 1' "$LOCAL_CAPTURE"; then
+  echo "campaign did not forward --allow-insecure-remote-http to profile-compare-local"
+  cat "$LOCAL_CAPTURE"
   exit 1
 fi
 

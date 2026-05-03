@@ -164,6 +164,11 @@ if [[ -z "$beta_cleanup_count" || "$beta_cleanup_count" -lt 2 ]]; then
   cat "$BETA_CAPTURE"
   exit 1
 fi
+if ! rg -q '^ENTRY_PUZZLE_SECRET=client-test-compose-placeholder-entry-secret-0001$' "$CLIENT_ENV_FILE"; then
+  echo "client-test env file missing compose-only entry puzzle placeholder"
+  cat "$CLIENT_ENV_FILE"
+  exit 1
+fi
 
 PROD_CAPTURE="$TMP_DIR/prod_capture.log"
 run_client_test_capture "$PROD_CAPTURE" "0" "1"
@@ -198,6 +203,22 @@ if [[ -z "$prod_cleanup_count" || "$prod_cleanup_count" -lt 2 ]]; then
   cat "$PROD_CAPTURE"
   exit 1
 fi
+
+ALLOW_INSECURE_CAPTURE="$TMP_DIR/allow_insecure_capture.log"
+run_client_test_capture "$ALLOW_INSECURE_CAPTURE" "0" "0" --allow-insecure-remote-http 1
+for expected in \
+  "-e CLIENT_REQUIRE_HTTPS_CONTROL_URL=0" \
+  "-e CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP=1" \
+  "-e CLIENT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1" \
+  "-e DIRECTORY_TRUST_STRICT=0" \
+  "-e DIRECTORY_TRUST_TOFU=1"
+do
+  if ! rg -q -- "$expected" "$ALLOW_INSECURE_CAPTURE"; then
+    echo "missing expected insecure remote HTTP runtime override: $expected"
+    cat "$ALLOW_INSECURE_CAPTURE"
+    exit 1
+  fi
+done
 
 PATH_PROFILE_CAPTURE="$TMP_DIR/path_profile_capture.log"
 run_client_test_capture "$PATH_PROFILE_CAPTURE" "0" "0" --path-profile private

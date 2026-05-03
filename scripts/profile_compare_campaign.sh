@@ -33,6 +33,7 @@ Usage:
     [--min-sources N] \
     [--beta-profile [0|1]] \
     [--prod-profile [0|1]] \
+    [--allow-insecure-remote-http [0|1]] \
     [--start-local-stack auto|0|1] \
     [--force-stack-reset [0|1]] \
     [--stack-strict-beta [0|1]] \
@@ -451,6 +452,7 @@ anon_cred=""
 min_sources="1"
 beta_profile="0"
 prod_profile="0"
+allow_insecure_remote_http="${PROFILE_COMPARE_CAMPAIGN_ALLOW_INSECURE_REMOTE_HTTP:-0}"
 start_local_stack="auto"
 force_stack_reset="1"
 stack_strict_beta="0"
@@ -564,6 +566,19 @@ while [[ $# -gt 0 ]]; do
         prod_profile="1"
         shift
       fi
+      ;;
+    --allow-insecure-remote-http)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_insecure_remote_http="${2:-}"
+        shift 2
+      else
+        allow_insecure_remote_http="1"
+        shift
+      fi
+      ;;
+    --allow-insecure-remote-http=*)
+      allow_insecure_remote_http="${1#--allow-insecure-remote-http=}"
+      shift
       ;;
     --start-local-stack)
       start_local_stack="${2:-}"
@@ -687,6 +702,7 @@ bool_arg_or_die "--cleanup-ifaces" "$cleanup_ifaces"
 bool_arg_or_die "--keep-stack" "$keep_stack"
 bool_arg_or_die "--trend-fail-on-any-fail" "$trend_fail_on_any_fail"
 tri_state_or_die "--start-local-stack" "$start_local_stack"
+bool_arg_or_die "--allow-insecure-remote-http" "$allow_insecure_remote_http"
 
 if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
   echo "--beta-profile must be 0 or 1"
@@ -694,6 +710,10 @@ if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
 fi
 if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
   echo "--prod-profile must be 0 or 1"
+  exit 2
+fi
+if [[ "$prod_profile" == "1" && "$allow_insecure_remote_http" == "1" ]]; then
+  echo "--allow-insecure-remote-http cannot be used with --prod-profile 1"
   exit 2
 fi
 if [[ "$execution_mode" != "docker" && "$execution_mode" != "local" ]]; then
@@ -896,6 +916,9 @@ for ((run_idx = 1; run_idx <= campaign_runs; run_idx++)); do
     --report-md "$compare_report"
     --print-summary-json 0
   )
+  if [[ "$allow_insecure_remote_http" == "1" ]]; then
+    compare_cmd+=(--allow-insecure-remote-http 1)
+  fi
 
   if [[ -n "$directory_urls" ]]; then
     compare_cmd+=(--directory-urls "$directory_urls")
@@ -1316,6 +1339,7 @@ jq -n \
   --argjson min_sources "$min_sources" \
   --argjson beta_profile "$beta_profile" \
   --argjson prod_profile "$prod_profile" \
+  --arg allow_insecure_remote_http "$allow_insecure_remote_http" \
   --argjson force_stack_reset "$force_stack_reset" \
   --argjson stack_strict_beta "$stack_strict_beta" \
   --argjson base_port "$base_port" \
@@ -1383,6 +1407,7 @@ jq -n \
         min_sources: $min_sources,
         beta_profile: ($beta_profile == 1),
         prod_profile: ($prod_profile == 1),
+        allow_insecure_remote_http: ($allow_insecure_remote_http == "1"),
         start_local_stack: $start_local_stack,
         force_stack_reset: ($force_stack_reset == 1),
         stack_strict_beta: ($stack_strict_beta == 1),

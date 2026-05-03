@@ -61,6 +61,9 @@ Notes:
     --require-selection-policy-valid 1
     (opt out with --require-selection-policy-present 0 and/or
      --require-selection-policy-valid 0)
+  - This wrapper scopes the gate to profile-default selection. M4/runtime
+    actuation evidence gates default off here and remain covered by the
+    dedicated runtime-actuation promotion evidence commands.
 USAGE
 }
 
@@ -1257,6 +1260,27 @@ if ! array_has_arg_or_equals_prefix "--require-selection-policy-present" "${sign
 fi
 if ! array_has_arg_or_equals_prefix "--require-selection-policy-valid" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--require-selection-policy-valid "$require_selection_policy_valid")
+fi
+if [[ "$allow_remote_http_probe" == "1" ]] && ! array_has_arg_or_equals_prefix "--campaign-allow-insecure-remote-http" "${signoff_passthrough[@]}"; then
+  signoff_passthrough+=(--campaign-allow-insecure-remote-http 1)
+fi
+if ! array_has_arg_or_equals_prefix "--require-micro-relay-quality-evidence" "${signoff_passthrough[@]}"; then
+  signoff_passthrough+=(--require-micro-relay-quality-evidence 0)
+fi
+if ! array_has_arg_or_equals_prefix "--require-micro-relay-quality-status-pass" "${signoff_passthrough[@]}"; then
+  signoff_passthrough+=(--require-micro-relay-quality-status-pass 0)
+fi
+if ! array_has_arg_or_equals_prefix "--require-micro-relay-demotion-policy" "${signoff_passthrough[@]}"; then
+  signoff_passthrough+=(--require-micro-relay-demotion-policy 0)
+fi
+if ! array_has_arg_or_equals_prefix "--require-micro-relay-promotion-policy" "${signoff_passthrough[@]}"; then
+  signoff_passthrough+=(--require-micro-relay-promotion-policy 0)
+fi
+if ! array_has_arg_or_equals_prefix "--require-trust-tier-port-unlock-policy" "${signoff_passthrough[@]}"; then
+  signoff_passthrough+=(--require-trust-tier-port-unlock-policy 0)
+fi
+if ! array_has_arg_or_equals_prefix "--require-runtime-actuation-status-pass" "${signoff_passthrough[@]}"; then
+  signoff_passthrough+=(--require-runtime-actuation-status-pass 0)
 fi
 if ! array_has_arg_or_equals_prefix "--print-summary-json" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--print-summary-json 0)

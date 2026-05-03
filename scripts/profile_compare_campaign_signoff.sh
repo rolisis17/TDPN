@@ -48,8 +48,10 @@ Usage:
     [--campaign-subject ID | --subject ID | --campaign-anon-cred TOKEN] \
     [--key ID | --invite-key ID | --anon-cred TOKEN] \
     [--campaign-start-local-stack auto|0|1] \
+    [--campaign-runs N] \
     [--campaign-timeout-sec N] \
     [--campaign-endpoint-preflight-timeout-sec N] \
+    [--campaign-allow-insecure-remote-http [0|1]] \
     [--allow-insecure-probe [0|1]] \
     [--summary-json PATH] \
     [--show-json [0|1]] \
@@ -616,8 +618,10 @@ summary_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SUMMARY_JSON:-}"
 show_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SHOW_JSON:-0}"
 print_summary_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_PRINT_SUMMARY_JSON:-0}"
 campaign_timeout_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_TIMEOUT_SEC:-0}"
+campaign_runs="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_RUNS:-}"
 campaign_heartbeat_interval_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_HEARTBEAT_INTERVAL_SEC:-15}"
 campaign_endpoint_preflight_timeout_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ENDPOINT_PREFLIGHT_TIMEOUT_SEC:-4}"
+campaign_allow_insecure_remote_http="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_ALLOW_INSECURE_REMOTE_HTTP:-0}"
 allow_insecure_probe="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ALLOW_INSECURE_PROBE:-0}"
 
 require_status_pass="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_STATUS_PASS:-}"
@@ -981,6 +985,10 @@ while [[ $# -gt 0 ]]; do
       campaign_start_local_stack="${2:-}"
       shift 2
       ;;
+    --campaign-runs)
+      campaign_runs="${2:-}"
+      shift 2
+      ;;
     --campaign-timeout-sec)
       campaign_timeout_sec="${2:-}"
       shift 2
@@ -988,6 +996,19 @@ while [[ $# -gt 0 ]]; do
     --campaign-endpoint-preflight-timeout-sec)
       campaign_endpoint_preflight_timeout_sec="${2:-}"
       shift 2
+      ;;
+    --campaign-allow-insecure-remote-http)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        campaign_allow_insecure_remote_http="${2:-}"
+        shift 2
+      else
+        campaign_allow_insecure_remote_http="1"
+        shift
+      fi
+      ;;
+    --campaign-allow-insecure-remote-http=*)
+      campaign_allow_insecure_remote_http="${1#--campaign-allow-insecure-remote-http=}"
+      shift
       ;;
     --allow-insecure-probe)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
@@ -1050,6 +1071,7 @@ optional_bool_arg_or_die "--require-micro-relay-demotion-policy" "$require_micro
 optional_bool_arg_or_die "--require-micro-relay-promotion-policy" "$require_micro_relay_promotion_policy"
 optional_bool_arg_or_die "--require-trust-tier-port-unlock-policy" "$require_trust_tier_port_unlock_policy"
 optional_bool_arg_or_die "--require-runtime-actuation-status-pass" "$require_runtime_actuation_status_pass"
+bool_arg_or_die "--campaign-allow-insecure-remote-http" "$campaign_allow_insecure_remote_http"
 
 for int_arg in "$require_min_runs_total" "$require_max_runs_fail" "$require_max_runs_warn" "$require_min_runs_with_summary"; do
   if [[ -n "$int_arg" && ! "$int_arg" =~ ^[0-9]+$ ]]; then
@@ -1057,6 +1079,14 @@ for int_arg in "$require_min_runs_total" "$require_max_runs_fail" "$require_max_
     exit 2
   fi
 done
+if [[ -n "$campaign_runs" && ! "$campaign_runs" =~ ^[0-9]+$ ]]; then
+  echo "--campaign-runs must be a positive integer"
+  exit 2
+fi
+if [[ -n "$campaign_runs" ]] && ((campaign_runs < 1)); then
+  echo "--campaign-runs must be >= 1"
+  exit 2
+fi
 if [[ -n "$require_recommendation_support_rate_pct" ]] && ! is_non_negative_decimal "$require_recommendation_support_rate_pct"; then
   echo "--require-recommendation-support-rate-pct must be a non-negative number"
   exit 2
@@ -1094,6 +1124,22 @@ if [[ -n "$campaign_start_local_stack" ]]; then
       exit 2
       ;;
   esac
+fi
+campaign_runs_effective="$campaign_runs"
+if [[ -z "$campaign_runs_effective" && "$refresh_campaign" == "1" ]]; then
+  if [[ -n "$require_min_runs_total" ]]; then
+    campaign_runs_effective="$require_min_runs_total"
+  else
+    campaign_runs_effective="${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MIN_RUNS_TOTAL:-5}"
+  fi
+fi
+if [[ -n "$campaign_runs_effective" && ! "$campaign_runs_effective" =~ ^[0-9]+$ ]]; then
+  echo "effective --campaign-runs must be a positive integer"
+  exit 2
+fi
+if [[ -n "$campaign_runs_effective" ]] && ((campaign_runs_effective < 1)); then
+  echo "effective --campaign-runs must be >= 1"
+  exit 2
 fi
 if [[ -n "$subject_alias" && -n "$campaign_subject" && "$subject_alias" != "$campaign_subject" ]]; then
   if [[ "$subject_alias_flag" == "--subject" ]]; then
@@ -1341,6 +1387,9 @@ build_campaign_cmd() {
   if [[ -n "$campaign_execution_mode_effective" ]]; then
     campaign_cmd+=(--execution-mode "$campaign_execution_mode_effective")
   fi
+  if [[ -n "$campaign_runs_effective" ]]; then
+    campaign_cmd+=(--campaign-runs "$campaign_runs_effective")
+  fi
   if [[ -n "$campaign_directory_urls_effective" ]]; then
     campaign_cmd+=(--directory-urls "$campaign_directory_urls_effective")
   fi
@@ -1367,6 +1416,9 @@ build_campaign_cmd() {
   fi
   if [[ -n "$campaign_start_local_stack_effective" ]]; then
     campaign_cmd+=(--start-local-stack "$campaign_start_local_stack_effective")
+  fi
+  if [[ "$campaign_allow_insecure_remote_http" == "1" ]]; then
+    campaign_cmd+=(--allow-insecure-remote-http 1)
   fi
   campaign_cmd_line="$(redact_sensitive_cmd_line "$(quote_cmd "${campaign_cmd[@]}")")"
 }
@@ -1892,6 +1944,9 @@ jq -n \
   --arg campaign_anon_cred_effective_configured "$campaign_anon_cred_effective_configured" \
   --arg campaign_start_local_stack "$campaign_start_local_stack" \
   --arg campaign_start_local_stack_effective "$campaign_start_local_stack_effective" \
+  --arg campaign_runs "$campaign_runs" \
+  --arg campaign_runs_effective "$campaign_runs_effective" \
+  --arg campaign_allow_insecure_remote_http "$campaign_allow_insecure_remote_http" \
   --arg campaign_timeout_sec "$campaign_timeout_sec" \
   --arg campaign_endpoint_preflight_timeout_sec "$campaign_endpoint_preflight_timeout_sec" \
   --arg campaign_heartbeat_interval_sec "$campaign_heartbeat_interval_sec" \
@@ -1978,7 +2033,9 @@ jq -n \
         subject_source: (if $campaign_subject_source == "" then null else $campaign_subject_source end),
         subject_configured: ($campaign_subject_configured == "1"),
         anon_cred_configured: ($campaign_anon_cred_configured == "1"),
-        start_local_stack: (if $campaign_start_local_stack == "" then null else $campaign_start_local_stack end)
+        start_local_stack: (if $campaign_start_local_stack == "" then null else $campaign_start_local_stack end),
+        campaign_runs: (if $campaign_runs == "" then null else ($campaign_runs | tonumber) end),
+        allow_insecure_remote_http: ($campaign_allow_insecure_remote_http == "1")
       },
       campaign_refresh_overrides_effective: {
         execution_mode: (if $campaign_execution_mode_effective == "" then null else $campaign_execution_mode_effective end),
@@ -1990,9 +2047,12 @@ jq -n \
         exit_url: (if $campaign_exit_url_effective == "" then null else $campaign_exit_url_effective end),
         subject_configured: ($campaign_subject_effective_configured == "1"),
         anon_cred_configured: ($campaign_anon_cred_effective_configured == "1"),
-        start_local_stack: (if $campaign_start_local_stack_effective == "" then null else $campaign_start_local_stack_effective end)
+        start_local_stack: (if $campaign_start_local_stack_effective == "" then null else $campaign_start_local_stack_effective end),
+        campaign_runs: (if $campaign_runs_effective == "" then null else ($campaign_runs_effective | tonumber) end),
+        allow_insecure_remote_http: ($campaign_allow_insecure_remote_http == "1")
       },
       campaign_refresh_runtime: {
+        campaign_runs: (if $campaign_runs_effective == "" then null else ($campaign_runs_effective | tonumber) end),
         timeout_sec: ($campaign_timeout_sec | tonumber),
         heartbeat_interval_sec: ($campaign_heartbeat_interval_sec | tonumber)
       },
