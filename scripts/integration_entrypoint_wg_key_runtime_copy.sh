@@ -23,6 +23,16 @@ cmp "$SOURCE_KEY" "$EXIT_WG_PRIVATE_KEY_PATH" >"$CAPTURE_CMP"
 EOF_CAPTURE
 chmod +x "$TMP_DIR/bin/capture-entrypoint-env"
 
+cat >"$TMP_DIR/bin/realpath" <<'EOF_REALPATH'
+#!/usr/bin/env sh
+if [ "${1:-}" = "-m" ]; then
+  echo "realpath: -m: No such file or directory" >&2
+  exit 1
+fi
+exit 127
+EOF_REALPATH
+chmod +x "$TMP_DIR/bin/realpath"
+
 WG_BACKEND=command \
 EXIT_WG_PRIVATE_KEY_PATH="$SOURCE_KEY" \
 EXIT_WG_PRIVATE_KEY_ROOT="$TMP_DIR/data" \
@@ -33,6 +43,7 @@ CAPTURE_PATH="$CAPTURE_PATH" \
 CAPTURE_MODE="$CAPTURE_MODE" \
 CAPTURE_CMP="$CAPTURE_CMP" \
 SOURCE_KEY="$SOURCE_KEY" \
+PATH="$TMP_DIR/bin:$PATH" \
 sh "$ROOT_DIR/deploy/entrypoint.sh" --exit >/tmp/integration_entrypoint_runtime_copy.log 2>&1
 
 runtime_key="$(cat "$CAPTURE_PATH")"
@@ -55,6 +66,11 @@ if ! rg -q 'entrypoint: copied EXIT_WG_PRIVATE_KEY_PATH to owner-only runtime se
   cat /tmp/integration_entrypoint_runtime_copy.log
   exit 1
 fi
+if rg -q 'realpath: -m' /tmp/integration_entrypoint_runtime_copy.log; then
+  echo "entrypoint leaked unsupported realpath -m error instead of using fallback"
+  cat /tmp/integration_entrypoint_runtime_copy.log
+  exit 1
+fi
 
 LINK_KEY="$TMP_DIR/data/link.key"
 ln -s "$SOURCE_KEY" "$LINK_KEY"
@@ -63,6 +79,7 @@ WG_BACKEND=command \
 EXIT_WG_PRIVATE_KEY_PATH="$LINK_KEY" \
 EXIT_WG_PRIVATE_KEY_ROOT="$TMP_DIR/data" \
 PRIVACYNODE_ENTRYPOINT_EXEC="$TMP_DIR/bin/capture-entrypoint-env" \
+PATH="$TMP_DIR/bin:$PATH" \
 sh "$ROOT_DIR/deploy/entrypoint.sh" --exit >/tmp/integration_entrypoint_symlink_reject.log 2>&1
 symlink_rc=$?
 set -e

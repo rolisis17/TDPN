@@ -5,7 +5,7 @@ validate_wg_key_path() {
   key_path="$1"
   allowed_root="${EXIT_WG_PRIVATE_KEY_ROOT:-/app/data}"
 
-  if command -v realpath >/dev/null 2>&1; then
+  if command -v realpath >/dev/null 2>&1 && realpath -m "$allowed_root" >/dev/null 2>&1; then
     resolved_root="$(realpath -m "$allowed_root")"
     resolved_key="$(realpath -m "$key_path")"
     case "$resolved_key" in
@@ -16,10 +16,11 @@ validate_wg_key_path() {
         ;;
     esac
   else
+    allowed_root_clean="${allowed_root%/}"
     case "$key_path" in
-      "$allowed_root"/*) ;;
+      "$allowed_root_clean"/*) ;;
       *)
-        echo "refusing EXIT_WG_PRIVATE_KEY_PATH outside ${allowed_root}: $key_path" >&2
+        echo "refusing EXIT_WG_PRIVATE_KEY_PATH outside ${allowed_root_clean}: $key_path" >&2
         exit 1
         ;;
     esac
