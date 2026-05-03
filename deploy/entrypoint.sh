@@ -1,56 +1,95 @@
 #!/bin/sh
 set -eu
 
-if [ "${WG_BACKEND:-noop}" = "command" ]; then
-  key_path="${EXIT_WG_PRIVATE_KEY_PATH:-}"
-  if [ -n "$key_path" ] && [ ! -s "$key_path" ]; then
-    allowed_root="${EXIT_WG_PRIVATE_KEY_ROOT:-/app/data}"
-    if command -v realpath >/dev/null 2>&1; then
-      resolved_root="$(realpath -m "$allowed_root")"
-      resolved_key="$(realpath -m "$key_path")"
-      case "$resolved_key" in
-        "$resolved_root"/*) ;;
-        *)
-          echo "refusing EXIT_WG_PRIVATE_KEY_PATH outside ${resolved_root}: $key_path" >&2
-          exit 1
-          ;;
-      esac
-    else
-      case "$key_path" in
-        "$allowed_root"/*) ;;
-        *)
-          echo "refusing EXIT_WG_PRIVATE_KEY_PATH outside ${allowed_root}: $key_path" >&2
-          exit 1
-          ;;
-      esac
-    fi
-    case "$key_path" in
-      *".."*)
-        echo "refusing EXIT_WG_PRIVATE_KEY_PATH containing '..': $key_path" >&2
+validate_wg_key_path() {
+  key_path="$1"
+  allowed_root="${EXIT_WG_PRIVATE_KEY_ROOT:-/app/data}"
+
+  if command -v realpath >/dev/null 2>&1; then
+    resolved_root="$(realpath -m "$allowed_root")"
+    resolved_key="$(realpath -m "$key_path")"
+    case "$resolved_key" in
+      "$resolved_root"/*) ;;
+      *)
+        echo "refusing EXIT_WG_PRIVATE_KEY_PATH outside ${resolved_root}: $key_path" >&2
         exit 1
         ;;
     esac
-    if [ -L "$key_path" ]; then
-      echo "refusing EXIT_WG_PRIVATE_KEY_PATH symlink target: $key_path" >&2
+  else
+    case "$key_path" in
+      "$allowed_root"/*) ;;
+      *)
+        echo "refusing EXIT_WG_PRIVATE_KEY_PATH outside ${allowed_root}: $key_path" >&2
+        exit 1
+        ;;
+    esac
+  fi
+
+  case "$key_path" in
+    *".."*)
+      echo "refusing EXIT_WG_PRIVATE_KEY_PATH containing '..': $key_path" >&2
       exit 1
+      ;;
+  esac
+  if [ -L "$key_path" ]; then
+    echo "refusing EXIT_WG_PRIVATE_KEY_PATH symlink target: $key_path" >&2
+    exit 1
+  fi
+  if [ -e "$key_path" ] && [ ! -f "$key_path" ]; then
+    echo "refusing EXIT_WG_PRIVATE_KEY_PATH non-regular file target: $key_path" >&2
+    exit 1
+  fi
+
+  key_dir="$(dirname "$key_path")"
+  mkdir -p "$key_dir"
+  if [ -L "$key_dir" ]; then
+    echo "refusing EXIT_WG_PRIVATE_KEY_PATH parent symlink: $key_dir" >&2
+    exit 1
+  fi
+}
+
+owner_only_mode() {
+  key_path="$1"
+  mode="$(stat -c '%a' "$key_path" 2>/dev/null || true)"
+  case "$mode" in
+    *00) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+copy_wg_key_to_runtime_secret() {
+  key_path="$1"
+  runtime_parent="${EXIT_WG_PRIVATE_KEY_RUNTIME_PARENT:-${TMPDIR:-/tmp}}"
+  runtime_dir="$(mktemp -d "${runtime_parent%/}/privacynode-wg.XXXXXX")"
+  chmod 700 "$runtime_dir" 2>/dev/null || true
+  runtime_key="$runtime_dir/$(basename "$key_path")"
+  cp "$key_path" "$runtime_key"
+  chmod 600 "$runtime_key"
+  if ! owner_only_mode "$runtime_key"; then
+    echo "refusing runtime EXIT_WG_PRIVATE_KEY_PATH with broad permissions: $runtime_key" >&2
+    exit 1
+  fi
+  export EXIT_WG_PRIVATE_KEY_PATH="$runtime_key"
+  echo "entrypoint: copied EXIT_WG_PRIVATE_KEY_PATH to owner-only runtime secret: $runtime_key" >&2
+}
+
+if [ "${WG_BACKEND:-noop}" = "command" ]; then
+  key_path="${EXIT_WG_PRIVATE_KEY_PATH:-}"
+  if [ -n "$key_path" ]; then
+    validate_wg_key_path "$key_path"
+    if [ ! -s "$key_path" ]; then
+      key_dir="$(dirname "$key_path")"
+      tmp_key="$(mktemp "$key_dir/.wgkey.XXXXXX")"
+      trap 'rm -f "${tmp_key:-}"' EXIT
+      umask 077
+      wg genkey >"$tmp_key"
+      mv -f "$tmp_key" "$key_path"
+      tmp_key=""
     fi
-    if [ -e "$key_path" ] && [ ! -f "$key_path" ]; then
-      echo "refusing EXIT_WG_PRIVATE_KEY_PATH non-regular file target: $key_path" >&2
-      exit 1
-    fi
-    key_dir="$(dirname "$key_path")"
-    mkdir -p "$key_dir"
-    if [ -L "$key_dir" ]; then
-      echo "refusing EXIT_WG_PRIVATE_KEY_PATH parent symlink: $key_dir" >&2
-      exit 1
-    fi
-    tmp_key="$(mktemp "$key_dir/.wgkey.XXXXXX")"
-    trap 'rm -f "${tmp_key:-}"' EXIT
-    umask 077
-    wg genkey >"$tmp_key"
-    mv -f "$tmp_key" "$key_path"
-    tmp_key=""
     chmod 600 "$key_path" 2>/dev/null || true
+    if [ "${EXIT_WG_PRIVATE_KEY_FORCE_RUNTIME_COPY:-0}" = "1" ] || ! owner_only_mode "$key_path"; then
+      copy_wg_key_to_runtime_secret "$key_path"
+    fi
   fi
 
   if [ "${EXIT_WG_AUTO_CREATE_INTERFACE:-0}" = "1" ]; then
@@ -61,4 +100,4 @@ if [ "${WG_BACKEND:-noop}" = "command" ]; then
   fi
 fi
 
-exec /usr/local/bin/node "$@"
+exec "${PRIVACYNODE_ENTRYPOINT_EXEC:-/usr/local/bin/node}" "$@"
