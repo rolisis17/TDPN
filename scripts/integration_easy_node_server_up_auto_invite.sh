@@ -120,6 +120,9 @@ if [[ "${FAKE_UPSERT_FAIL:-0}" == "1" && "$url" == *"/v1/admin/subject/upsert" ]
   echo "upsert failed" >&2
   exit 22
 fi
+if [[ -n "${FAKE_CURL_URL_CAPTURE:-}" ]]; then
+  printf '%s\n' "$url" >>"$FAKE_CURL_URL_CAPTURE"
+fi
 payload='{}'
 code="200"
 case "$url" in
@@ -303,6 +306,65 @@ if [[ -s "$AUTH_DOCKER_ENV_CAPTURE" ]] && rg -q '127\.0\.0\.1' "$AUTH_DOCKER_ENV
   cat "$AUTH_DOCKER_ENV_CAPTURE"
   exit 1
 fi
+
+echo "[server-up-auto-invite] authority published bind health targets"
+AUTH_BIND_LOG="$TMP_DIR/authority_published_bind.log"
+AUTH_BIND_CURL_CAPTURE="$TMP_DIR/authority_published_bind_curl_urls.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+FAKE_CURL_URL_CAPTURE="$AUTH_BIND_CURL_CAPTURE" \
+DIRECTORY_PUBLISHED_BIND_ADDR=203.0.113.10 \
+ISSUER_PUBLISHED_BIND_ADDR=203.0.113.10 \
+ENTRY_PUBLISHED_BIND_ADDR=203.0.113.10 \
+EXIT_PUBLISHED_BIND_ADDR=203.0.113.10 \
+ENTRY_UDP_PUBLISHED_BIND_ADDR=203.0.113.10 \
+EXIT_UDP_PUBLISHED_BIND_ADDR=203.0.113.10 \
+./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host 203.0.113.10 \
+  --beta-profile 1 \
+  --prod-profile 0 \
+  --auto-invite 0 >"$AUTH_BIND_LOG" 2>&1
+auth_bind_rc=$?
+set -e
+if [[ "$auth_bind_rc" != "0" ]]; then
+  echo "authority published-bind scenario failed rc=${auth_bind_rc}"
+  cat "$AUTH_BIND_LOG"
+  exit "$auth_bind_rc"
+fi
+for expected_url in \
+  "http://203.0.113.10:8081/v1/relays" \
+  "http://203.0.113.10:8082/v1/pubkeys" \
+  "http://203.0.113.10:8083/v1/health" \
+  "http://203.0.113.10:8084/v1/health"; do
+  if ! rg -Fq "$expected_url" "$AUTH_BIND_CURL_CAPTURE"; then
+    echo "expected published-bind health probe: $expected_url"
+    cat "$AUTH_BIND_CURL_CAPTURE"
+    exit 1
+  fi
+done
+if rg -Fq "http://127.0.0.1:8081/v1/relays" "$AUTH_BIND_CURL_CAPTURE" ||
+  rg -Fq "http://127.0.0.1:8082/v1/pubkeys" "$AUTH_BIND_CURL_CAPTURE" ||
+  rg -Fq "http://127.0.0.1:8083/v1/health" "$AUTH_BIND_CURL_CAPTURE" ||
+  rg -Fq "http://127.0.0.1:8084/v1/health" "$AUTH_BIND_CURL_CAPTURE"; then
+  echo "published-bind server-up should not probe loopback service endpoints"
+  cat "$AUTH_BIND_CURL_CAPTURE"
+  exit 1
+fi
+for expected_bind_env in \
+  DIRECTORY_PUBLISHED_BIND_ADDR \
+  ISSUER_PUBLISHED_BIND_ADDR \
+  ENTRY_PUBLISHED_BIND_ADDR \
+  EXIT_PUBLISHED_BIND_ADDR \
+  ENTRY_UDP_PUBLISHED_BIND_ADDR \
+  EXIT_UDP_PUBLISHED_BIND_ADDR; do
+  if ! rg -q "^${expected_bind_env}=203\\.0\\.113\\.10$" "$AUTH_ENV"; then
+    echo "expected authority env to persist ${expected_bind_env}"
+    cat "$AUTH_ENV"
+    exit 1
+  fi
+done
 
 echo "[server-up-auto-invite] authority federation-wait summary forwarding"
 AUTH_FED_WAIT_LOG="$TMP_DIR/authority_federation_wait.log"

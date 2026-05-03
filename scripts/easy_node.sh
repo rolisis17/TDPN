@@ -1429,6 +1429,13 @@ url_from_host_port() {
   printf 'http://%s:%s' "$(normalize_host_for_endpoint "$host")" "$port"
 }
 
+control_url_from_host_port() {
+  local scheme="$1"
+  local host="$2"
+  local port="$3"
+  printf '%s://%s:%s' "$scheme" "$(normalize_host_for_endpoint "$host")" "$port"
+}
+
 ensure_url_scheme() {
   local raw="$1"
   local scheme="$2"
@@ -3291,6 +3298,41 @@ compose_server() {
   compose_with_env "$AUTHORITY_ENV_FILE" "$@"
 }
 
+published_bind_probe_host() {
+  local var_name="$1"
+  local raw="${!var_name:-}"
+  local normalized
+  raw="$(trim "$raw")"
+  normalized="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+  normalized="${normalized#[}"
+  normalized="${normalized%]}"
+  case "$normalized" in
+    ""|"0.0.0.0"|"::")
+      printf '%s\n' "127.0.0.1"
+      ;;
+    *)
+      printf '%s\n' "$raw"
+      ;;
+  esac
+}
+
+append_published_bind_env_from_process() {
+  local env_file="$1"
+  local bind_var
+  for bind_var in \
+    DIRECTORY_PUBLISHED_BIND_ADDR \
+    ISSUER_PUBLISHED_BIND_ADDR \
+    ENTRY_PUBLISHED_BIND_ADDR \
+    EXIT_PUBLISHED_BIND_ADDR \
+    ENTRY_UDP_PUBLISHED_BIND_ADDR \
+    EXIT_UDP_PUBLISHED_BIND_ADDR; do
+    if [[ -n "${!bind_var+x}" && -n "$(trim "${!bind_var}")" ]]; then
+      validate_env_scalar_or_die "$bind_var" "${!bind_var}"
+      printf '%s=%s\n' "$bind_var" "$(trim "${!bind_var}")" >>"$env_file"
+    fi
+  done
+}
+
 validate_env_scalar_or_die() {
   local name="$1"
   local value="$2"
@@ -5023,18 +5065,28 @@ server_up() {
 
   if [[ "$mode" == "authority" ]]; then
     write_authority_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred" "$prod_profile" "$admin_signers_file_container" "$admin_sign_key_id" "$admin_sign_key_file_local" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey"
+    append_published_bind_env_from_process "$AUTHORITY_ENV_FILE"
     compose_with_env "$AUTHORITY_ENV_FILE" up -d --build directory issuer entry-exit
 
-    local -a local_opts
+    local directory_local_base issuer_local_base entry_local_base exit_local_base
+    local -a directory_local_opts issuer_local_opts entry_local_opts exit_local_opts
     local -a public_opts
-    mapfile -t local_opts < <(curl_tls_opts_for_url "${url_scheme}://127.0.0.1:8081")
+    directory_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host DIRECTORY_PUBLISHED_BIND_ADDR)" 8081)"
+    issuer_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host ISSUER_PUBLISHED_BIND_ADDR)" 8082)"
+    entry_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host ENTRY_PUBLISHED_BIND_ADDR)" 8083)"
+    exit_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host EXIT_PUBLISHED_BIND_ADDR)" 8084)"
+    mapfile -t directory_local_opts < <(curl_tls_opts_for_url "$directory_local_base")
+    mapfile -t issuer_local_opts < <(curl_tls_opts_for_url "$issuer_local_base")
+    mapfile -t entry_local_opts < <(curl_tls_opts_for_url "$entry_local_base")
+    mapfile -t exit_local_opts < <(curl_tls_opts_for_url "$exit_local_base")
     mapfile -t public_opts < <(curl_tls_opts_for_url "${url_scheme}://${public_host}:8081")
 
-    # Always validate local container reachability first.
-    wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8081/v1/relays" "local directory" 40 "${local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=80 directory; exit 1; }
-    wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8082/v1/pubkeys" "local issuer" 40 "${local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=80 issuer; exit 1; }
-    wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8083/v1/health" "local entry" 40 "${local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
-    wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8084/v1/health" "local exit" 40 "${local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+    # Validate the actual published bind target. When bind is wildcard/default,
+    # this remains loopback; when pinned to a Tailscale/LAN IP, loopback would fail.
+    wait_http_ok_with_opts "${directory_local_base}/v1/relays" "local directory" 40 "${directory_local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=80 directory; exit 1; }
+    wait_http_ok_with_opts "${issuer_local_base}/v1/pubkeys" "local issuer" 40 "${issuer_local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=80 issuer; exit 1; }
+    wait_http_ok_with_opts "${entry_local_base}/v1/health" "local entry" 40 "${entry_local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+    wait_http_ok_with_opts "${exit_local_base}/v1/health" "local exit" 40 "${exit_local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
 
     # Optional public endpoint validation (can fail on NAT loopback setups).
     if [[ "${EASY_NODE_VERIFY_PUBLIC:-0}" == "1" ]] && ! host_is_loopback "$public_host"; then
@@ -5095,7 +5147,7 @@ server_up() {
     fi
     if [[ "$auto_invite" == "1" ]]; then
       local auto_invite_issuer_url
-      auto_invite_issuer_url="$(ensure_url_scheme "127.0.0.1:8082" "$url_scheme")"
+      auto_invite_issuer_url="$issuer_local_base"
       echo "auto invite: generating ${auto_invite_count} key(s) tier=${auto_invite_tier} wait=${auto_invite_wait_sec}s"
       local auto_invite_rc=0
       set +e
@@ -5117,18 +5169,25 @@ server_up() {
     fi
   else
     write_provider_env "$public_host" "$operator_id" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey"
+    append_published_bind_env_from_process "$PROVIDER_ENV_FILE"
     compose_with_env "$PROVIDER_ENV_FILE" up -d --build --no-deps directory entry-exit
 
-    local -a local_opts
+    local directory_local_base entry_local_base exit_local_base
+    local -a directory_local_opts entry_local_opts exit_local_opts
     local -a public_opts
     local -a issuer_opts
-    mapfile -t local_opts < <(curl_tls_opts_for_url "${url_scheme}://127.0.0.1:8081")
+    directory_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host DIRECTORY_PUBLISHED_BIND_ADDR)" 8081)"
+    entry_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host ENTRY_PUBLISHED_BIND_ADDR)" 8083)"
+    exit_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host EXIT_PUBLISHED_BIND_ADDR)" 8084)"
+    mapfile -t directory_local_opts < <(curl_tls_opts_for_url "$directory_local_base")
+    mapfile -t entry_local_opts < <(curl_tls_opts_for_url "$entry_local_base")
+    mapfile -t exit_local_opts < <(curl_tls_opts_for_url "$exit_local_base")
     mapfile -t public_opts < <(curl_tls_opts_for_url "${url_scheme}://${public_host}:8081")
     mapfile -t issuer_opts < <(curl_tls_opts_for_url "${authority_issuer}")
 
-    wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8081/v1/relays" "local directory" 40 "${local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=80 directory; exit 1; }
-    wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8083/v1/health" "local entry" 40 "${local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
-    wait_http_ok_with_opts "${url_scheme}://127.0.0.1:8084/v1/health" "local exit" 40 "${local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+    wait_http_ok_with_opts "${directory_local_base}/v1/relays" "local directory" 40 "${directory_local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=80 directory; exit 1; }
+    wait_http_ok_with_opts "${entry_local_base}/v1/health" "local entry" 40 "${entry_local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+    wait_http_ok_with_opts "${exit_local_base}/v1/health" "local exit" 40 "${exit_local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
     wait_http_ok_with_opts "${authority_issuer}/v1/pubkeys" "authority issuer" 20 "${issuer_opts[@]}" || {
       if [[ "$prod_profile" == "1" ]]; then
         print_prod_https_mismatch_hint_for_endpoint "$(trim_url "$authority_issuer")/v1/pubkeys" "authority issuer ${authority_issuer}" 4 || true
@@ -5194,7 +5253,7 @@ server_up() {
       echo "server-up federation wait skipped: no peer directories configured."
     else
       local federation_directory_url
-      federation_directory_url="$(ensure_url_scheme "127.0.0.1:8081" "$url_scheme")"
+      federation_directory_url="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host DIRECTORY_PUBLISHED_BIND_ADDR)" 8081)"
       echo "server-up federation wait: checking local directory federation readiness..."
       if ! server_federation_wait \
         --directory-url "$federation_directory_url" \
