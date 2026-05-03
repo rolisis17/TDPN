@@ -65,6 +65,9 @@ for required_env_passthrough in \
     fail "base compose must pass through $required_env_passthrough"
   fi
 done
+if ! grep -q 'ISSUER_URL:.*ISSUER_URL' "$BASE_COMPOSE"; then
+  fail "base compose entry-exit service must read ISSUER_URL directly so generated env files can pin Docker-internal issuer endpoints"
+fi
 
 override_entry_block="$(extract_service_block "$PRIV_OVERRIDE_COMPOSE" "entry-exit")"
 [[ -n "$override_entry_block" ]] || fail "privileged override compose is missing services.entry-exit block"

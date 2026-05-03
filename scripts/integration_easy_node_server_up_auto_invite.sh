@@ -272,6 +272,11 @@ if ! rg -q '^CORE_DIRECTORY_URL=http://directory:8081$' "$AUTH_ENV" || ! rg -q '
   cat "$AUTH_ENV"
   exit 1
 fi
+if ! rg -q '^ISSUER_URL=http://issuer:8082$' "$AUTH_ENV" || ! rg -q '^ISSUER_URLS=http://issuer:8082$' "$AUTH_ENV"; then
+  echo "expected non-prod authority env to pin exit issuer sync to Docker-internal issuer URL"
+  cat "$AUTH_ENV"
+  exit 1
+fi
 if [[ -s "$AUTH_DOCKER_ENV_CAPTURE" ]] && rg -q '127\.0\.0\.1' "$AUTH_DOCKER_ENV_CAPTURE"; then
   echo "compose invocation leaked ambient host endpoint variables into docker compose"
   cat "$AUTH_DOCKER_ENV_CAPTURE"

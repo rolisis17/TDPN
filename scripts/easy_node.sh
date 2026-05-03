@@ -3419,6 +3419,8 @@ ISSUER_ADMIN_ALLOW_TOKEN=1
 ISSUER_ADMIN_REQUIRE_SIGNED=0
 ISSUER_ALLOW_DANGEROUS_INSECURE_TOKEN_AUTH_PUBLIC_BIND=1
 ISSUER_ALLOW_DANGEROUS_PUBLIC_ISSUE_WITHOUT_PAYMENT_PROOF=1
+ISSUER_URL=${public_scheme}://issuer:8082
+ISSUER_URLS=${public_scheme}://issuer:8082
 EOF_NON_PROD_PUBLIC_BIND
     if [[ "$beta_profile" == "1" ]]; then
       # Keep beta non-prod server-up transport-compatible with client-vpn-up/smoke
@@ -3651,6 +3653,8 @@ EOF_ENV
   if [[ "$prod_profile" != "1" ]]; then
     cat >>"$PROVIDER_ENV_FILE" <<EOF_NON_PROD_PUBLIC_BIND
 DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_PUBLIC_BIND=1
+ISSUER_URL=${authority_issuer}
+ISSUER_URLS=${issuer_urls_csv}
 EOF_NON_PROD_PUBLIC_BIND
     if [[ "$beta_profile" == "1" ]]; then
       # Keep beta non-prod server-up transport-compatible with client-vpn-up/smoke
