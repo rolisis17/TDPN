@@ -3207,7 +3207,13 @@ compose_with_env() {
   # Prevent ambient shell exports from overriding generated easy-node env files.
   # This is especially important for WG key material during server-up.
   for clear_var in \
+    CORE_DIRECTORY_URL \
+    CORE_ISSUER_URL \
     DATA_PLANE_MODE \
+    DIRECTORY_URL \
+    DIRECTORY_URLS \
+    ISSUER_URL \
+    ISSUER_URLS \
     WG_BACKEND \
     EXIT_WG_PRIVATE_KEY_PATH \
     EXIT_WG_PUBKEY \
@@ -3364,6 +3370,8 @@ ENTRY_URL_PUBLIC=${public_scheme}://${public_host}:8083
 EXIT_CONTROL_URL_PUBLIC=${public_scheme}://${public_host}:8084
 ENTRY_ENDPOINT_PUBLIC=${public_host}:51820
 EXIT_ENDPOINT_PUBLIC=${public_host}:51821
+CORE_DIRECTORY_URL=${public_scheme}://directory:8081
+CORE_ISSUER_URL=${public_scheme}://issuer:8082
 DIRECTORY_OPERATOR_ID=${operator_id}
 ENTRY_OPERATOR_ID=${operator_id}
 ENTRY_RELAY_ID=entry-${relay_suffix}

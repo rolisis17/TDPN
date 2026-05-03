@@ -69,6 +69,16 @@ if [[ "${1:-}" == "compose" && "${2:-}" == "version" ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "compose" ]]; then
+  if [[ -n "${FAKE_DOCKER_ENV_CAPTURE:-}" ]]; then
+    {
+      printf 'CORE_DIRECTORY_URL=%s\n' "${CORE_DIRECTORY_URL-}"
+      printf 'CORE_ISSUER_URL=%s\n' "${CORE_ISSUER_URL-}"
+      printf 'DIRECTORY_URL=%s\n' "${DIRECTORY_URL-}"
+      printf 'DIRECTORY_URLS=%s\n' "${DIRECTORY_URLS-}"
+      printf 'ISSUER_URL=%s\n' "${ISSUER_URL-}"
+      printf 'ISSUER_URLS=%s\n' "${ISSUER_URLS-}"
+    } >>"$FAKE_DOCKER_ENV_CAPTURE"
+  fi
   exit 0
 fi
 if [[ "${1:-}" == "--version" ]]; then
@@ -201,8 +211,16 @@ chmod +x "$TMP_BIN/docker" "$TMP_BIN/curl" "$TMP_BIN/wg" "$TMP_BIN/go"
 
 echo "[server-up-auto-invite] authority auto invite success"
 AUTH_OK_LOG="$TMP_DIR/authority_auto_invite_ok.log"
+AUTH_DOCKER_ENV_CAPTURE="$TMP_DIR/authority_auto_invite_docker_env_capture.log"
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \
+FAKE_DOCKER_ENV_CAPTURE="$AUTH_DOCKER_ENV_CAPTURE" \
+CORE_DIRECTORY_URL=http://127.0.0.1:18081 \
+CORE_ISSUER_URL=http://127.0.0.1:18082 \
+DIRECTORY_URL=http://127.0.0.1:28081 \
+DIRECTORY_URLS=http://127.0.0.1:38081 \
+ISSUER_URL=http://127.0.0.1:28082 \
+ISSUER_URLS=http://127.0.0.1:38082 \
 ./scripts/easy_node.sh server-up \
   --mode authority \
   --public-host 203.0.113.10 \
@@ -247,6 +265,16 @@ fi
 if ! rg -q '^ISSUER_ALLOW_DANGEROUS_PUBLIC_ISSUE_WITHOUT_PAYMENT_PROOF=1$' "$AUTH_ENV"; then
   echo "expected non-prod authority env to explicitly allow lab issuer issuance without payment proof"
   cat "$AUTH_ENV"
+  exit 1
+fi
+if ! rg -q '^CORE_DIRECTORY_URL=http://directory:8081$' "$AUTH_ENV" || ! rg -q '^CORE_ISSUER_URL=http://issuer:8082$' "$AUTH_ENV"; then
+  echo "expected authority env to pin Docker-internal core directory/issuer URLs"
+  cat "$AUTH_ENV"
+  exit 1
+fi
+if [[ -s "$AUTH_DOCKER_ENV_CAPTURE" ]] && rg -q '127\.0\.0\.1' "$AUTH_DOCKER_ENV_CAPTURE"; then
+  echo "compose invocation leaked ambient host endpoint variables into docker compose"
+  cat "$AUTH_DOCKER_ENV_CAPTURE"
   exit 1
 fi
 
