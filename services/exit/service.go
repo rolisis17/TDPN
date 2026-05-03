@@ -251,6 +251,9 @@ func New() *Service {
 	}
 	issuerURL := os.Getenv("ISSUER_URL")
 	if issuerURL == "" {
+		issuerURL = os.Getenv("CORE_ISSUER_URL")
+	}
+	if issuerURL == "" {
 		issuerURL = "http://127.0.0.1:8082"
 	}
 	issuerURLs := splitCSV(os.Getenv("ISSUER_URLS"))
@@ -761,8 +764,8 @@ func (s *Service) Run(ctx context.Context) error {
 	s.httpClient = httpClient
 
 	replayMode := s.tokenProofReplayMode()
-	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t token_proof_replay_mode=%s token_proof_replay_lock_timeout_sec=%d peer_rebind_sec=%d startup_sync_timeout_sec=%d issuer_min_sources=%d issuer_min_operators=%d issuer_min_key_votes=%d issuer_require_id=%t wg_only=%t beta_strict=%t settlement_reconcile_sec=%d",
-		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, replayMode, int(s.effectiveTokenProofReplayLockTimeout()/time.Second), int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), s.issuerMinSources, s.issuerMinOperators, s.issuerMinKeyVotes, s.issuerRequireID, s.wgOnlyMode, s.betaStrict, s.settlementReconcileSec)
+	log.Printf("exit wg backend=%s iface=%s listen_port=%d kernel_proxy=%t kernel_proxy_max_sessions=%d kernel_proxy_idle_sec=%d opaque_echo=%t token_proof_replay_guard=%t token_proof_replay_mode=%s token_proof_replay_lock_timeout_sec=%d peer_rebind_sec=%d startup_sync_timeout_sec=%d issuer_urls=%s issuer_min_sources=%d issuer_min_operators=%d issuer_min_key_votes=%d issuer_require_id=%t wg_only=%t beta_strict=%t settlement_reconcile_sec=%d",
+		s.wgBackend, s.wgInterface, s.wgListenPort, s.wgKernelProxy, s.effectiveWGKernelProxyMax(), int(s.wgKernelProxyIdle/time.Second), s.opaqueEcho, s.tokenProofReplayGuard, replayMode, int(s.effectiveTokenProofReplayLockTimeout()/time.Second), int(s.peerRebindAfter/time.Second), int(s.startupSyncTimeout/time.Second), strings.Join(s.issuerURLs, ","), s.issuerMinSources, s.issuerMinOperators, s.issuerMinKeyVotes, s.issuerRequireID, s.wgOnlyMode, s.betaStrict, s.settlementReconcileSec)
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}

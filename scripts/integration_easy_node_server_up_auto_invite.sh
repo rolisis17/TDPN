@@ -212,6 +212,7 @@ chmod +x "$TMP_BIN/docker" "$TMP_BIN/curl" "$TMP_BIN/wg" "$TMP_BIN/go"
 echo "[server-up-auto-invite] authority auto invite success"
 AUTH_OK_LOG="$TMP_DIR/authority_auto_invite_ok.log"
 AUTH_DOCKER_ENV_CAPTURE="$TMP_DIR/authority_auto_invite_docker_env_capture.log"
+set +e
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \
 FAKE_DOCKER_ENV_CAPTURE="$AUTH_DOCKER_ENV_CAPTURE" \
@@ -231,6 +232,13 @@ ISSUER_URLS=http://127.0.0.1:38082 \
   --auto-invite-tier 2 \
   --auto-invite-wait-sec 1 \
   --auto-invite-fail-open 0 >"$AUTH_OK_LOG" 2>&1
+auth_ok_rc=$?
+set -e
+if [[ "$auth_ok_rc" != "0" ]]; then
+  echo "authority auto-invite scenario failed rc=${auth_ok_rc}"
+  cat "$AUTH_OK_LOG"
+  exit "$auth_ok_rc"
+fi
 
 if ! rg -q 'auto invite: generating 1 key\(s\) tier=2 wait=1s' "$AUTH_OK_LOG"; then
   echo "expected authority auto-invite generation banner"
@@ -267,6 +275,19 @@ if ! rg -q '^ISSUER_ALLOW_DANGEROUS_PUBLIC_ISSUE_WITHOUT_PAYMENT_PROOF=1$' "$AUT
   cat "$AUTH_ENV"
   exit 1
 fi
+for expected_lab_env in \
+  DIRECTORY_ALLOW_INSECURE_CONTROL_URL_HTTP \
+  DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS \
+  ENTRY_ALLOW_INSECURE_CONTROL_URL_HTTP \
+  ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS \
+  EXIT_ALLOW_INSECURE_CONTROL_URL_HTTP \
+  EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS; do
+  if ! rg -q "^${expected_lab_env}=1$" "$AUTH_ENV"; then
+    echo "expected non-prod authority env to enable ${expected_lab_env} for Docker/Tailscale lab networking"
+    cat "$AUTH_ENV"
+    exit 1
+  fi
+done
 if ! rg -q '^CORE_DIRECTORY_URL=http://directory:8081$' "$AUTH_ENV" || ! rg -q '^CORE_ISSUER_URL=http://issuer:8082$' "$AUTH_ENV"; then
   echo "expected authority env to pin Docker-internal core directory/issuer URLs"
   cat "$AUTH_ENV"
@@ -487,5 +508,18 @@ if ! rg -q '^DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_PUBLIC_BIND=1$' "$PROVIDER
   cat "$PROVIDER_ENV"
   exit 1
 fi
+for expected_lab_env in \
+  DIRECTORY_ALLOW_INSECURE_CONTROL_URL_HTTP \
+  DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS \
+  ENTRY_ALLOW_INSECURE_CONTROL_URL_HTTP \
+  ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS \
+  EXIT_ALLOW_INSECURE_CONTROL_URL_HTTP \
+  EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS; do
+  if ! rg -q "^${expected_lab_env}=1$" "$PROVIDER_ENV"; then
+    echo "expected non-prod provider env to enable ${expected_lab_env} for Docker/Tailscale lab networking"
+    cat "$PROVIDER_ENV"
+    exit 1
+  fi
+done
 
 echo "easy-node server-up auto-invite integration check ok"

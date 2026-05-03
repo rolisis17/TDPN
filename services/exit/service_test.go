@@ -175,6 +175,33 @@ type verifyingRewardChainAdapter struct {
 	rewardIssues  []settlement.RewardIssue
 }
 
+func TestNewPreservesDockerIssuerURLWhenNonProdHTTPAllowed(t *testing.T) {
+	t.Setenv("ISSUER_URL", "http://issuer:8082")
+	t.Setenv("ISSUER_URLS", "http://issuer:8082")
+	t.Setenv("EXIT_ALLOW_INSECURE_CONTROL_URL_HTTP", "1")
+
+	s := New()
+	if got, want := strings.Join(s.issuerURLs, ","), "http://issuer:8082"; got != want {
+		t.Fatalf("issuerURLs=%q want %q", got, want)
+	}
+	if got, want := s.issuerURL, "http://issuer:8082"; got != want {
+		t.Fatalf("issuerURL=%q want %q", got, want)
+	}
+}
+
+func TestNewUsesCoreIssuerURLFallback(t *testing.T) {
+	t.Setenv("CORE_ISSUER_URL", "http://issuer:8082")
+	t.Setenv("EXIT_ALLOW_INSECURE_CONTROL_URL_HTTP", "1")
+
+	s := New()
+	if got, want := strings.Join(s.issuerURLs, ","), "http://issuer:8082"; got != want {
+		t.Fatalf("issuerURLs=%q want %q", got, want)
+	}
+	if got, want := s.issuerURL, "http://issuer:8082"; got != want {
+		t.Fatalf("issuerURL=%q want %q", got, want)
+	}
+}
+
 func (a *verifyingRewardChainAdapter) RequiresRewardProofReference() bool {
 	return true
 }
