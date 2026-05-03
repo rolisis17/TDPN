@@ -21,6 +21,7 @@ TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
 mkdir -p "$TMP_BIN"
 WG_PUBKEY_FAIL_STATE="$TMP_DIR/wg_pubkey_fail_state"
+REAL_GO="$(command -v go)"
 
 backup_file() {
   local src="$1"
@@ -158,7 +159,45 @@ fi
 exit 0
 EOF_WG
 
-chmod +x "$TMP_BIN/docker" "$TMP_BIN/curl" "$TMP_BIN/wg"
+cat >"$TMP_BIN/go" <<EOF_GO
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "run" && "\${2:-}" == "./cmd/adminsig" ]]; then
+  subcmd="\${3:-}"
+  shift 3
+  case "\$subcmd" in
+    gen)
+      private_key_out=""
+      key_id_out=""
+      while [[ \$# -gt 0 ]]; do
+        case "\$1" in
+          --private-key-out)
+            private_key_out="\${2:-}"
+            shift 2
+            ;;
+          --key-id-out)
+            key_id_out="\${2:-}"
+            shift 2
+            ;;
+          *)
+            shift
+            ;;
+        esac
+      done
+      [[ -n "\$private_key_out" ]] && printf 'test-admin-private-key\n' >"\$private_key_out"
+      [[ -n "\$key_id_out" ]] && printf 'test-admin-key\n' >"\$key_id_out"
+      exit 0
+      ;;
+    inspect)
+      printf '{"key_id":"test-admin-key","public_key":"test-admin-public-key"}\n'
+      exit 0
+      ;;
+  esac
+fi
+exec "$REAL_GO" "\$@"
+EOF_GO
+
+chmod +x "$TMP_BIN/docker" "$TMP_BIN/curl" "$TMP_BIN/wg" "$TMP_BIN/go"
 
 echo "[server-up-auto-invite] authority auto invite success"
 AUTH_OK_LOG="$TMP_DIR/authority_auto_invite_ok.log"
@@ -188,6 +227,26 @@ fi
 if ! rg -q 'invite keys generated: 1 \(issuer=http://127.0.0.1:8082\)' "$AUTH_OK_LOG"; then
   echo "expected authority auto-invite summary output"
   cat "$AUTH_OK_LOG"
+  exit 1
+fi
+if ! rg -q '^DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_PUBLIC_BIND=1$' "$AUTH_ENV"; then
+  echo "expected non-prod authority env to explicitly allow lab HTTP directory admin bind"
+  cat "$AUTH_ENV"
+  exit 1
+fi
+if ! rg -q '^ISSUER_ADMIN_ALLOW_TOKEN=1$' "$AUTH_ENV" || ! rg -q '^ISSUER_ADMIN_REQUIRE_SIGNED=0$' "$AUTH_ENV"; then
+  echo "expected non-prod authority env to use token admin auth instead of signed-only issuer admin"
+  cat "$AUTH_ENV"
+  exit 1
+fi
+if ! rg -q '^ISSUER_ALLOW_DANGEROUS_INSECURE_TOKEN_AUTH_PUBLIC_BIND=1$' "$AUTH_ENV"; then
+  echo "expected non-prod authority env to explicitly allow lab HTTP issuer token auth bind"
+  cat "$AUTH_ENV"
+  exit 1
+fi
+if ! rg -q '^ISSUER_ALLOW_DANGEROUS_PUBLIC_ISSUE_WITHOUT_PAYMENT_PROOF=1$' "$AUTH_ENV"; then
+  echo "expected non-prod authority env to explicitly allow lab issuer issuance without payment proof"
+  cat "$AUTH_ENV"
   exit 1
 fi
 
@@ -366,7 +425,6 @@ if ! rg -q 'fix the file permissions/contents or recreate the key as the current
   cat "$TMP_DIR/authority_exit_key_perm_fail.log"
   exit 1
 fi
-
 echo "[server-up-auto-invite] provider ignores auto invite"
 PROVIDER_LOG="$TMP_DIR/provider_auto_invite_ignored.log"
 PATH="$TMP_BIN:$PATH" \
@@ -389,6 +447,11 @@ fi
 if rg -q 'invite keys generated:' "$PROVIDER_LOG"; then
   echo "provider mode should not generate invite keys"
   cat "$PROVIDER_LOG"
+  exit 1
+fi
+if ! rg -q '^DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_PUBLIC_BIND=1$' "$PROVIDER_ENV"; then
+  echo "expected non-prod provider env to explicitly allow lab HTTP directory admin bind"
+  cat "$PROVIDER_ENV"
   exit 1
 fi
 
