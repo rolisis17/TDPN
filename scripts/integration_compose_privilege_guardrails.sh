@@ -49,6 +49,13 @@ fi
 if grep -q 'ENTRY_EXIT_PRIVILEGED' "$BASE_COMPOSE"; then
   fail "base compose must not reference ENTRY_EXIT_PRIVILEGED"
 fi
+if grep -q 'MTLS_ENABLE:.*:-1' "$BASE_COMPOSE"; then
+  fail "base compose must not default MTLS_ENABLE to 1; non-prod server-up does not generate TLS material"
+fi
+mtls_default_zero_count="$(grep -c 'MTLS_ENABLE:.*:-0' "$BASE_COMPOSE" || true)"
+if [[ "$mtls_default_zero_count" != "4" ]]; then
+  fail "base compose must default MTLS_ENABLE to 0 for directory, issuer, entry-exit, and client-demo (found $mtls_default_zero_count)"
+fi
 
 override_entry_block="$(extract_service_block "$PRIV_OVERRIDE_COMPOSE" "entry-exit")"
 [[ -n "$override_entry_block" ]] || fail "privileged override compose is missing services.entry-exit block"
