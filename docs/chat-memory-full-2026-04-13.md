@@ -1237,3 +1237,29 @@ invite-generate refused insecure remote URL: http://100.113.245.61:8082
 ```
 
 This means A was started with `ISSUER_PUBLISHED_BIND_ADDR` pinned to the Tailscale IP. For non-prod HTTP lab use, bind published ports to `0.0.0.0`, not the specific Tailscale IP, so both remote tests and local loopback admin/invite commands work. The previously pushed auto-bind patch should do this automatically when A has pulled the latest branch and no explicit bind env overrides are present.
+
+### 32.4 Live test result with fresh invite after A invite worked
+A and B health endpoints were reachable:
+
+- A: directory, issuer, entry, exit healthy at `100.113.245.61`
+- B: directory, issuer, entry, exit healthy at `100.64.244.24`
+
+Directory shape at test time:
+
+```text
+A relays: entry-op-a, exit-op-a only
+B relays: entry-op-b, exit-op-b, entry-op-a, exit-op-a
+```
+
+Cross-machine `client-test --beta-profile 1 --path-profile balanced` with both directory URLs and a rebuilt client image failed because A still has not learned B:
+
+```text
+entry-op-a->exit-op-b: path open denied: unknown-exit
+entry-op-b->exit-op-a: path open denied: route assertion incomplete
+```
+
+Interpretation:
+
+- `unknown-exit` is expected while A's directory/entry has no B relays.
+- `route assertion incomplete` in the B-entry to A-exit direction suggests one of the live machines is still running an older/incomplete route-assertion path or env, even though B's directory can see A.
+- Next immediate live-test action is to ensure both machines have pulled `2210dab0` or newer and restarted/rebuilt containers. A also needs either the temporary manual peer workaround or the future provider auto-onboarding implementation before A-entry to B-exit can pass.
