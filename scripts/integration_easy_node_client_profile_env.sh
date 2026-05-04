@@ -148,6 +148,11 @@ if ! rg -q -- "-e CLIENT_DIRECTORY_MIN_OPERATORS=2" "$BETA_CAPTURE"; then
   cat "$BETA_CAPTURE"
   exit 1
 fi
+if ! rg -q -- "-e DATA_PLANE_MODE=opaque" "$BETA_CAPTURE"; then
+  echo "missing expected beta-profile opaque transport env"
+  cat "$BETA_CAPTURE"
+  exit 1
+fi
 if rg -q -- "-e BETA_STRICT_MODE=1" "$BETA_CAPTURE"; then
   echo "unexpected strict-mode env injected for client-test beta profile"
   cat "$BETA_CAPTURE"
@@ -184,6 +189,11 @@ if ! rg -q -- "-e DIRECTORY_TRUST_STRICT=1" "$PROD_CAPTURE"; then
 fi
 if ! rg -q -- "-e DIRECTORY_TRUST_TOFU=0" "$PROD_CAPTURE"; then
   echo "missing expected prod-profile trust tofu disable env"
+  cat "$PROD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- "-e DATA_PLANE_MODE=opaque" "$PROD_CAPTURE"; then
+  echo "missing expected prod-profile opaque transport env"
   cat "$PROD_CAPTURE"
   exit 1
 fi

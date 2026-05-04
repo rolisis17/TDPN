@@ -167,6 +167,7 @@ EASY_NODE_VERIFY_PUBLIC=0 \
 ./scripts/easy_node.sh server-up \
   --mode authority \
   --public-host 203.0.113.10 \
+  --peer-directories http://198.51.100.20:8081 \
   --beta-profile 1 \
   --prod-profile 0 >/tmp/integration_easy_node_prod_server_env_beta.log 2>&1
 
@@ -187,6 +188,7 @@ require_eq "$(env_value "$AUTH_ENV" "EXIT_WG_KERNEL_PROXY")" "1" "beta authority
 require_nonempty "$(env_value "$AUTH_ENV" "EXIT_WG_PUBKEY")" "beta authority EXIT_WG_PUBKEY"
 require_nonempty "$(env_value "$AUTH_ENV" "EXIT_WG_PRIVATE_KEY_PATH")" "beta authority EXIT_WG_PRIVATE_KEY_PATH"
 require_nonempty "$(env_value "$AUTH_ENV" "EXIT_WG_INTERFACE")" "beta authority EXIT_WG_INTERFACE"
+require_eq "$(env_value "$AUTH_ENV" "ISSUER_URLS")" "http://issuer:8082,http://198.51.100.20:8082" "beta authority ISSUER_URLS"
 require_eq "$(env_value "$AUTH_ENV" "ENTRY_EXIT_USER")" "0:0" "beta authority ENTRY_EXIT_USER"
 require_eq "$(env_value "$AUTH_ENV" "ENTRY_EXIT_PRIVILEGED")" "true" "beta authority ENTRY_EXIT_PRIVILEGED"
 
@@ -218,6 +220,7 @@ require_eq "$(env_value "$PROVIDER_ENV" "EXIT_WG_KERNEL_PROXY")" "1" "beta provi
 require_nonempty "$(env_value "$PROVIDER_ENV" "EXIT_WG_PUBKEY")" "beta provider EXIT_WG_PUBKEY"
 require_nonempty "$(env_value "$PROVIDER_ENV" "EXIT_WG_PRIVATE_KEY_PATH")" "beta provider EXIT_WG_PRIVATE_KEY_PATH"
 require_nonempty "$(env_value "$PROVIDER_ENV" "EXIT_WG_INTERFACE")" "beta provider EXIT_WG_INTERFACE"
+require_eq "$(env_value "$PROVIDER_ENV" "ISSUER_URLS")" "http://203.0.113.10:8082" "beta provider ISSUER_URLS"
 require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_EXIT_USER")" "0:0" "beta provider ENTRY_EXIT_USER"
 require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_EXIT_PRIVILEGED")" "true" "beta provider ENTRY_EXIT_PRIVILEGED"
 

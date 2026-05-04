@@ -3545,7 +3545,7 @@ ISSUER_ADMIN_REQUIRE_SIGNED=0
 ISSUER_ALLOW_DANGEROUS_INSECURE_TOKEN_AUTH_PUBLIC_BIND=1
 ISSUER_ALLOW_DANGEROUS_PUBLIC_ISSUE_WITHOUT_PAYMENT_PROOF=1
 ISSUER_URL=${public_scheme}://issuer:8082
-ISSUER_URLS=${public_scheme}://issuer:8082
+ISSUER_URLS=${issuer_urls_csv:-${public_scheme}://issuer:8082}
 EOF_NON_PROD_PUBLIC_BIND
     if [[ "$beta_profile" == "1" ]]; then
       # Keep beta non-prod server-up transport-compatible with client-vpn-up/smoke
@@ -5052,15 +5052,21 @@ server_up() {
   if [[ "$beta_profile" == "1" || "$prod_profile" == "1" ]]; then
     need_beta_or_prod_wg_defaults="1"
   fi
-  if [[ "$prod_profile" == "1" ]]; then
+  if [[ "$beta_profile" == "1" || "$prod_profile" == "1" ]]; then
     local base_issuer_url
     if [[ "$mode" == "authority" ]]; then
-      base_issuer_url="$(url_from_host_port "$public_host" 8082)"
+      if [[ "$prod_profile" == "1" ]]; then
+        base_issuer_url="$(url_from_host_port "$public_host" 8082)"
+      else
+        base_issuer_url="${url_scheme}://issuer:8082"
+      fi
     else
       base_issuer_url="$authority_issuer"
     fi
     issuer_urls_csv="$(build_issuer_urls_csv "$base_issuer_url" "$peer_dirs" "$url_scheme")"
     issuer_urls_count="$(csv_count "$issuer_urls_csv")"
+  fi
+  if [[ "$prod_profile" == "1" ]]; then
     if ((issuer_urls_count < 2)); then
       echo "server-up --prod-profile requires at least 2 issuer URLs for strict quorum."
       echo "current issuer URLs (${issuer_urls_count}): ${issuer_urls_csv:-none}"
@@ -13219,6 +13225,9 @@ client_test() {
   fi
   if [[ "$prod_profile" == "1" ]]; then
     beta_profile="1"
+  fi
+  if [[ -z "$data_plane_mode" && "$beta_profile" == "1" ]]; then
+    data_plane_mode="opaque"
   fi
   if [[ "$prod_profile" == "1" && "$allow_insecure_remote_http" == "1" ]]; then
     echo "client-test does not allow --allow-insecure-remote-http with --prod-profile 1"
