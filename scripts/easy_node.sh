@@ -1654,16 +1654,54 @@ ensure_entry_route_assertion_material() {
   local key_file="$entry_exit_data_dir/entry_route_assertion_${relay_suffix}.key"
   local pub_file="${key_file}.pub"
   local key_file_container="/app/data/$(basename "$key_file")"
+  local keygen_mode="${EASY_NODE_ENTRY_ROUTE_ASSERTION_KEYGEN:-auto}"
   local pub_key
 
   validate_env_scalar_or_die "relay_suffix" "$relay_suffix"
+  case "$keygen_mode" in
+    auto|go|openssl)
+      ;;
+    *)
+      echo "invalid EASY_NODE_ENTRY_ROUTE_ASSERTION_KEYGEN: $keygen_mode (expected auto|go|openssl)"
+      exit 2
+      ;;
+  esac
   mkdir -p "$entry_exit_data_dir"
   if [[ ! -f "$key_file" || ! -f "$pub_file" ]]; then
     rm -f "$key_file" "$pub_file"
-    (
-      cd "$ROOT_DIR"
-      go run ./cmd/adminsig gen --private-key-out "$key_file" --public-key-out "$pub_file" >/dev/null
-    )
+    local go_err=""
+    local go_rc=1
+    go_err="$(mktemp)"
+    if [[ "$keygen_mode" != "openssl" && -n "$(command -v go 2>/dev/null || true)" ]]; then
+      set +e
+      (
+        cd "$ROOT_DIR"
+        go run ./cmd/adminsig gen --private-key-out "$key_file" --public-key-out "$pub_file" >/dev/null
+      ) 2>"$go_err"
+      go_rc=$?
+      set -e
+    fi
+    if [[ "$go_rc" -ne 0 ]]; then
+      rm -f "$key_file" "$pub_file"
+      if [[ "$keygen_mode" == "go" ]]; then
+        cat "$go_err" >&2
+        rm -f "$go_err"
+        echo "entry route assertion key generation failed with go"
+        exit 1
+      fi
+      if [[ -s "$go_err" ]]; then
+        local keygen_log
+        keygen_log="$(prepare_log_dir)/entry_route_assertion_keygen_${relay_suffix}.log"
+        cp "$go_err" "$keygen_log" 2>/dev/null || true
+        echo "note: host Go entry route assertion keygen unavailable; using openssl fallback (log: $keygen_log)"
+      fi
+      if ! generate_entry_route_assertion_material_with_openssl "$key_file" "$pub_file"; then
+        rm -f "$go_err"
+        echo "entry route assertion key generation failed; install openssl or a Go toolchain that can parse this repo's go.mod"
+        exit 1
+      fi
+    fi
+    rm -f "$go_err"
   fi
   secure_file_permissions "$key_file"
 
@@ -1674,6 +1712,60 @@ ensure_entry_route_assertion_material() {
   fi
 
   echo "$key_file|$key_file_container|$pub_key"
+}
+
+base64url_from_file() {
+  local file="$1"
+  openssl base64 -A <"$file" | tr '+/' '-_' | tr -d '=\r\n'
+}
+
+generate_entry_route_assertion_material_with_openssl() {
+  local key_file="$1"
+  local pub_file="$2"
+  local tmp_dir pem_file seed_file pub_raw_file priv_raw_file
+  local seed_size pub_size priv_size
+
+  if ! command -v openssl >/dev/null 2>&1; then
+    echo "missing dependency: openssl" >&2
+    return 1
+  fi
+  tmp_dir="$(mktemp -d)"
+  pem_file="$tmp_dir/entry_route_assertion.pem"
+  seed_file="$tmp_dir/seed.raw"
+  pub_raw_file="$tmp_dir/pub.raw"
+  priv_raw_file="$tmp_dir/private.raw"
+
+  if ! openssl genpkey -algorithm Ed25519 -out "$pem_file" >/dev/null 2>&1; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+  if ! openssl pkey -in "$pem_file" -outform DER 2>/dev/null | tail -c 32 >"$seed_file"; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+  if ! openssl pkey -in "$pem_file" -pubout -outform DER 2>/dev/null | tail -c 32 >"$pub_raw_file"; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+  seed_size="$(wc -c <"$seed_file" | tr -d '[:space:]')"
+  pub_size="$(wc -c <"$pub_raw_file" | tr -d '[:space:]')"
+  if [[ "$seed_size" != "32" || "$pub_size" != "32" ]]; then
+    rm -rf "$tmp_dir"
+    echo "openssl Ed25519 key material had unexpected size (seed=$seed_size pub=$pub_size)" >&2
+    return 1
+  fi
+  cat "$seed_file" "$pub_raw_file" >"$priv_raw_file"
+  priv_size="$(wc -c <"$priv_raw_file" | tr -d '[:space:]')"
+  if [[ "$priv_size" != "64" ]]; then
+    rm -rf "$tmp_dir"
+    echo "openssl Ed25519 private key material had unexpected size (private=$priv_size)" >&2
+    return 1
+  fi
+  (umask 077 && base64url_from_file "$priv_raw_file" >"$key_file")
+  base64url_from_file "$pub_raw_file" >"$pub_file"
+  secure_file_permissions "$key_file"
+  chmod 644 "$pub_file" 2>/dev/null || true
+  rm -rf "$tmp_dir"
 }
 
 resolve_invite_admin_auth() {
@@ -2842,9 +2934,12 @@ check_server_up_dependencies() {
   if [[ "$prod_profile" == "1" || "$beta_profile" == "1" ]]; then
     # server-up writes/derives exit wireguard key material for beta/prod defaults.
     need_cmd wg || ok=0
-    # Two-hop beta/prod paths need entry-signed route assertions and exit trust keys.
-    need_cmd go || ok=0
-    need_cmd jq || ok=0
+    # Two-hop beta/prod paths need entry-signed route assertions; openssl is
+    # enough when the host Go version cannot parse the repo's go.mod.
+    if ! command -v go >/dev/null 2>&1 && ! command -v openssl >/dev/null 2>&1; then
+      echo "missing dependency: openssl (or go)"
+      ok=0
+    fi
   fi
 
   if ! docker compose version >/dev/null 2>&1; then

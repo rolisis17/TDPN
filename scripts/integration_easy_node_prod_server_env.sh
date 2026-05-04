@@ -191,6 +191,7 @@ require_nonempty() {
 
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \
+EASY_NODE_ENTRY_ROUTE_ASSERTION_KEYGEN=openssl \
 ./scripts/easy_node.sh server-up \
   --mode authority \
   --public-host 203.0.113.10 \
@@ -225,6 +226,7 @@ require_eq "$(env_value "$AUTH_ENV" "ENTRY_EXIT_PRIVILEGED")" "true" "beta autho
 
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \
+EASY_NODE_ENTRY_ROUTE_ASSERTION_KEYGEN=openssl \
 ./scripts/easy_node.sh server-up \
   --mode provider \
   --public-host 198.51.100.20 \
