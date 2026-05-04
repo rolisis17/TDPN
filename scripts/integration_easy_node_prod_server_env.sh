@@ -26,6 +26,14 @@ if ! rg -q 'EXIT_WG_PUBKEY: "\$\{EXIT_WG_PUBKEY:-\}"' "$ROOT_DIR/deploy/docker-c
   echo "docker-compose entry-exit environment must forward EXIT_WG_PUBKEY"
   exit 1
 fi
+if [[ "$(rg -c 'ENTRY_RELAY_ID: "\$\{ENTRY_RELAY_ID:-entry-local-1\}"' "$ROOT_DIR/deploy/docker-compose.yml")" -lt 2 ]]; then
+  echo "docker-compose must forward ENTRY_RELAY_ID to directory and entry-exit services"
+  exit 1
+fi
+if [[ "$(rg -c 'EXIT_RELAY_ID: "\$\{EXIT_RELAY_ID:-exit-local-1\}"' "$ROOT_DIR/deploy/docker-compose.yml")" -lt 2 ]]; then
+  echo "docker-compose must forward EXIT_RELAY_ID to directory and entry-exit services"
+  exit 1
+fi
 
 backup_file() {
   local src="$1"

@@ -1263,3 +1263,13 @@ Interpretation:
 - `unknown-exit` is expected while A's directory/entry has no B relays.
 - `route assertion incomplete` in the B-entry to A-exit direction suggests one of the live machines is still running an older/incomplete route-assertion path or env, even though B's directory can see A.
 - Next immediate live-test action is to ensure both machines have pulled `2210dab0` or newer and restarted/rebuilt containers. A also needs either the temporary manual peer workaround or the future provider auto-onboarding implementation before A-entry to B-exit can pass.
+
+### 32.5 Route assertion incomplete root cause
+After A learned B and both directories saw both operators, the cross-machine client test still failed in both directions:
+
+```text
+entry-op-a->exit-op-b: path open denied: route assertion incomplete
+entry-op-b->exit-op-a: path open denied: route assertion incomplete
+```
+
+Root cause found locally: `deploy/docker-compose.yml` forwarded `ENTRY_RELAY_ID` and `EXIT_RELAY_ID` only to the directory service, not the `entry-exit` service. The directory advertised relay IDs correctly, but live entry services had empty `ENTRY_RELAY_ID`, so `entryRouteAssertionForRequest` forwarded an incomplete route assertion to exits. Fix: forward both relay IDs into the `entry-exit` environment and add an integration guard requiring both compose services to contain the relay ID env entries. Both A and B must pull/rebuild/restart after this compose fix.
