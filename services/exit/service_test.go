@@ -3964,6 +3964,60 @@ func TestValidateStrictPathOpenEntryRouteVerifiesTrustedSignatureForNonStrictMul
 	}
 }
 
+func TestValidateStrictPathOpenEntryRouteDiscoversTrustedSignatureFromDirectory(t *testing.T) {
+	pub, priv, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	req := proto.PathOpenRequest{
+		PathProfile:     "2hop",
+		ExitID:          "exit-local-1",
+		SessionID:       "sid-route-directory-trust",
+		Token:           "tok-route-directory-trust",
+		TokenProof:      "proof-route-directory-trust",
+		TokenProofNonce: "nonce-route-directory-trust",
+		ClientInnerPub:  "client-route-directory-trust",
+		Transport:       "policy-json",
+		RequestedMTU:    1280,
+		RequestedRegion: "local",
+		EntryRouteAssertion: &proto.PathRouteAssertion{
+			PathProfile:  "2hop",
+			EntryRelayID: "entry-local-1",
+			ExitRelayID:  "exit-local-1",
+		},
+	}
+	bindEntryRouteAssertionToRequestForTest(req.EntryRouteAssertion, req)
+	assertion, err := crypto.SignPathRouteAssertion(priv, *req.EntryRouteAssertion)
+	if err != nil {
+		t.Fatalf("sign assertion: %v", err)
+	}
+	req.EntryRouteAssertion = &assertion
+
+	dir := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/relays" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(proto.RelayListResponse{Relays: []proto.RelayDescriptor{
+			{
+				RelayID:                   "entry-local-1",
+				Role:                      "entry",
+				EntryRouteAssertionPubKey: crypto.EncodeEd25519PublicKey(pub),
+			},
+		}})
+	}))
+	defer dir.Close()
+
+	svc := &Service{
+		directoryURLs:                     []string{dir.URL},
+		entryRouteAssertionDirectoryTrust: true,
+		httpClient:                        dir.Client(),
+	}
+	if err := svc.validateStrictPathOpenEntryRouteWithContext(context.Background(), req); err != nil {
+		t.Fatalf("expected directory-discovered entry route assertion signature to pass, got %v", err)
+	}
+}
+
 func TestValidateStrictPathOpenEntryRouteRequiresTrustedSignatureInProd(t *testing.T) {
 	strict := &Service{prodStrict: true}
 	req := proto.PathOpenRequest{

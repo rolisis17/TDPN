@@ -117,6 +117,10 @@ type Service struct {
 	verifyRefreshMinInterval          time.Duration
 	exitRelayID                       string
 	trustedEntryRouteAssertionPubs    map[string]ed25519.PublicKey
+	directoryURLs                     []string
+	entryRouteAssertionDirectoryTrust bool
+	entryRouteAssertionTrustRefreshMu sync.Mutex
+	entryRouteAssertionTrustLast      time.Time
 	betaStrict                        bool
 	prodStrict                        bool
 	strictModeParseErr                error
@@ -269,6 +273,14 @@ func New() *Service {
 		issuerURLs = []string{normalizedIssuerURL}
 	}
 	issuerURL = issuerURLs[0]
+	directoryURLs := splitCSV(os.Getenv("DIRECTORY_URLS"))
+	if len(directoryURLs) == 0 {
+		directoryURL := strings.TrimSpace(os.Getenv("DIRECTORY_URL"))
+		if directoryURL != "" {
+			directoryURLs = []string{directoryURL}
+		}
+	}
+	directoryURLs = normalizeHTTPURLs(directoryURLs)
 	issuerMinSources := 1
 	if raw := strings.TrimSpace(os.Getenv("EXIT_ISSUER_MIN_SOURCES")); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
@@ -461,6 +473,7 @@ func New() *Service {
 	if trustedEntryRouteAssertionErr != nil {
 		log.Printf("exit trusted entry route assertion keys ignored: %v", trustedEntryRouteAssertionErr)
 	}
+	entryRouteAssertionDirectoryTrust := envEnabled("EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST")
 	betaStrict, betaStrictErr := envStrictBoolOr("BETA_STRICT_MODE", "EXIT_BETA_STRICT", false)
 	prodStrict, prodStrictErr := envStrictBoolOr("PROD_STRICT_MODE", "EXIT_PROD_STRICT", false)
 	strictModeParseErr := firstEnvParseError(
@@ -550,6 +563,8 @@ func New() *Service {
 		verifyRefreshMinInterval:          verifyRefreshMinInterval,
 		exitRelayID:                       exitRelayID,
 		trustedEntryRouteAssertionPubs:    trustedEntryRouteAssertionPubs,
+		directoryURLs:                     directoryURLs,
+		entryRouteAssertionDirectoryTrust: entryRouteAssertionDirectoryTrust,
 		betaStrict:                        betaStrict,
 		prodStrict:                        prodStrict,
 		strictModeParseErr:                strictModeParseErr,
@@ -1074,6 +1089,9 @@ func (s *Service) validateRuntimeConfig() error {
 		}
 	}
 	if s.betaStrict {
+		if s.entryRouteAssertionDirectoryTrust {
+			return fmt.Errorf("BETA_STRICT_MODE forbids EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST")
+		}
 		if s.dataMode != "opaque" {
 			return fmt.Errorf("BETA_STRICT_MODE requires DATA_PLANE_MODE=opaque")
 		}
@@ -1980,7 +1998,7 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "exit identity mismatch"})
 		return
 	}
-	if err := s.validateStrictPathOpenEntryRoute(req); err != nil {
+	if err := s.validateStrictPathOpenEntryRouteWithContext(r.Context(), req); err != nil {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: err.Error()})
 		return
 	}
@@ -2404,6 +2422,10 @@ func validatePathRouteAssertions(req proto.PathOpenRequest) error {
 }
 
 func (s *Service) validateStrictPathOpenEntryRoute(req proto.PathOpenRequest) error {
+	return s.validateStrictPathOpenEntryRouteWithContext(context.Background(), req)
+}
+
+func (s *Service) validateStrictPathOpenEntryRouteWithContext(ctx context.Context, req proto.PathOpenRequest) error {
 	profile, err := normalizePathRouteAssertionProfile(req.PathProfile)
 	if err != nil {
 		return err
@@ -2422,7 +2444,7 @@ func (s *Service) validateStrictPathOpenEntryRoute(req proto.PathOpenRequest) er
 	if err := validateEntryRouteAssertionRequestBinding(*req.EntryRouteAssertion, req); err != nil {
 		return err
 	}
-	if err := s.verifyEntryRouteAssertionSignature(*req.EntryRouteAssertion); err != nil {
+	if err := s.verifyEntryRouteAssertionSignature(ctx, *req.EntryRouteAssertion); err != nil {
 		return err
 	}
 	return nil
@@ -2470,15 +2492,18 @@ func validateEntryRouteAssertionRequestBinding(assertion proto.PathRouteAssertio
 	return nil
 }
 
-func (s *Service) verifyEntryRouteAssertionSignature(assertion proto.PathRouteAssertion) error {
-	if s == nil || len(s.trustedEntryRouteAssertionPubs) == 0 {
+func (s *Service) verifyEntryRouteAssertionSignature(ctx context.Context, assertion proto.PathRouteAssertion) error {
+	if s == nil {
 		return errors.New("entry route assertion trusted key unavailable")
 	}
 	signer := strings.TrimSpace(assertion.SignerPubKey)
+	pub, ok, trustedCount := s.trustedEntryRouteAssertionPubForSigner(ctx, signer)
+	if trustedCount == 0 {
+		return errors.New("entry route assertion trusted key unavailable")
+	}
 	if signer == "" || strings.TrimSpace(assertion.Signature) == "" {
 		return errors.New("entry route assertion signature required")
 	}
-	pub, ok := s.trustedEntryRouteAssertionPubs[signer]
 	if !ok {
 		return errors.New("entry route assertion signer not trusted")
 	}
@@ -2486,6 +2511,115 @@ func (s *Service) verifyEntryRouteAssertionSignature(assertion proto.PathRouteAs
 		return fmt.Errorf("entry route assertion signature invalid: %w", err)
 	}
 	return nil
+}
+
+func (s *Service) trustedEntryRouteAssertionPubForSigner(ctx context.Context, signer string) (ed25519.PublicKey, bool, int) {
+	if s == nil {
+		return nil, false, 0
+	}
+	signer = strings.TrimSpace(signer)
+	s.mu.RLock()
+	pub, ok := s.trustedEntryRouteAssertionPubs[signer]
+	trustedCount := len(s.trustedEntryRouteAssertionPubs)
+	s.mu.RUnlock()
+	if ok || !s.entryRouteAssertionDirectoryTrust {
+		return pub, ok, trustedCount
+	}
+	_ = s.refreshEntryRouteAssertionTrustFromDirectories(ctx)
+	s.mu.RLock()
+	pub, ok = s.trustedEntryRouteAssertionPubs[signer]
+	trustedCount = len(s.trustedEntryRouteAssertionPubs)
+	s.mu.RUnlock()
+	return pub, ok, trustedCount
+}
+
+func (s *Service) refreshEntryRouteAssertionTrustFromDirectories(ctx context.Context) error {
+	if s == nil || !s.entryRouteAssertionDirectoryTrust || len(s.directoryURLs) == 0 {
+		return nil
+	}
+	s.entryRouteAssertionTrustRefreshMu.Lock()
+	defer s.entryRouteAssertionTrustRefreshMu.Unlock()
+	if !s.entryRouteAssertionTrustLast.IsZero() && time.Since(s.entryRouteAssertionTrustLast) < 2*time.Second {
+		return nil
+	}
+	s.entryRouteAssertionTrustLast = time.Now()
+
+	client := s.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	discovered := make(map[string]ed25519.PublicKey)
+	var lastErr error
+	for _, directoryURL := range s.directoryURLs {
+		directoryURL = normalizeHTTPURL(directoryURL)
+		if directoryURL == "" {
+			continue
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, joinURL(directoryURL, "/v1/relays"), nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, remoteResponseMaxBodyBytes))
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("directory relays status %d", resp.StatusCode)
+			continue
+		}
+		var out proto.RelayListResponse
+		dec := json.NewDecoder(io.LimitReader(resp.Body, remoteResponseMaxBodyBytes))
+		err = dec.Decode(&out)
+		_ = resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		for _, desc := range out.Relays {
+			if !relayDescriptorRoleIsEntry(desc) {
+				continue
+			}
+			key := strings.TrimSpace(desc.EntryRouteAssertionPubKey)
+			if key == "" {
+				continue
+			}
+			pub, err := crypto.ParseEd25519PublicKey(key)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			discovered[crypto.EncodeEd25519PublicKey(pub)] = pub
+		}
+	}
+	if len(discovered) == 0 {
+		return lastErr
+	}
+	s.mu.Lock()
+	if s.trustedEntryRouteAssertionPubs == nil {
+		s.trustedEntryRouteAssertionPubs = make(map[string]ed25519.PublicKey, len(discovered))
+	}
+	for key, pub := range discovered {
+		s.trustedEntryRouteAssertionPubs[key] = pub
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+func relayDescriptorRoleIsEntry(desc proto.RelayDescriptor) bool {
+	role := strings.ToLower(strings.TrimSpace(desc.Role))
+	if role == "entry" {
+		return true
+	}
+	for _, hopRole := range desc.HopRoles {
+		if strings.EqualFold(strings.TrimSpace(hopRole), "entry") {
+			return true
+		}
+	}
+	return false
 }
 
 func validateSinglePathRouteAssertion(source string, assertion *proto.PathRouteAssertion, req proto.PathOpenRequest) (string, error) {

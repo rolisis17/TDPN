@@ -1273,3 +1273,13 @@ entry-op-b->exit-op-a: path open denied: route assertion incomplete
 ```
 
 Root cause found locally: `deploy/docker-compose.yml` forwarded `ENTRY_RELAY_ID` and `EXIT_RELAY_ID` only to the directory service, not the `entry-exit` service. The directory advertised relay IDs correctly, but live entry services had empty `ENTRY_RELAY_ID`, so `entryRouteAssertionForRequest` forwarded an incomplete route assertion to exits. Fix: forward both relay IDs into the `entry-exit` environment and add an integration guard requiring both compose services to contain the relay ID env entries. Both A and B must pull/rebuild/restart after this compose fix.
+
+### 32.6 Entry route assertion trusted-key root cause
+After relay IDs were fixed and both directories showed both operators, the live beta client test moved to:
+
+```text
+entry-op-a->exit-op-b: path open denied: entry route assertion trusted key unavailable
+entry-op-b->exit-op-a: path open denied: entry route assertion trusted key unavailable
+```
+
+Root cause: two-hop path-open requires exits to verify the entry-signed route assertion, but beta `server-up` did not create entry route-assertion signing material, did not publish the entry assertion public key through directory descriptors, and did not let non-prod beta exits learn peer entry assertion keys from the federated directory view. Fix in progress: generate per-operator entry route assertion keys during beta/prod `server-up`, forward the private key to `entry-exit`, publish `entry_route_assertion_pub_key` on entry relay descriptors, and allow only non-prod beta exits to discover those trusted entry assertion public keys from configured directories. Both A and B must pull/rebuild/restart after this fix because older binaries ignore the new signed descriptor field.

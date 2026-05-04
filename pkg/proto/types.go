@@ -8,27 +8,28 @@ const (
 )
 
 type RelayDescriptor struct {
-	RelayID        string    `json:"relay_id"`
-	Role           string    `json:"role"`
-	OperatorID     string    `json:"operator_id,omitempty"`
-	OriginOperator string    `json:"origin_operator,omitempty"`
-	HopCount       int       `json:"hop_count,omitempty"`
-	PubKey         string    `json:"pub_key"`
-	Endpoint       string    `json:"endpoint"`
-	ControlURL     string    `json:"control_url,omitempty"`
-	CountryCode    string    `json:"country_code,omitempty"`
-	GeoConfidence  float64   `json:"geo_confidence,omitempty"`
-	Region         string    `json:"region"`
-	Reputation     float64   `json:"reputation_score,omitempty"`
-	Uptime         float64   `json:"uptime_score,omitempty"`
-	Capacity       float64   `json:"capacity_score,omitempty"`
-	AbusePenalty   float64   `json:"abuse_penalty,omitempty"`
-	BondScore      float64   `json:"bond_score,omitempty"`
-	StakeScore     float64   `json:"stake_score,omitempty"`
-	Capabilities   []string  `json:"capabilities"`
-	HopRoles       []string  `json:"hop_roles,omitempty"`
-	ValidUntil     time.Time `json:"valid_until"`
-	Signature      string    `json:"signature"`
+	RelayID                   string    `json:"relay_id"`
+	Role                      string    `json:"role"`
+	OperatorID                string    `json:"operator_id,omitempty"`
+	OriginOperator            string    `json:"origin_operator,omitempty"`
+	HopCount                  int       `json:"hop_count,omitempty"`
+	PubKey                    string    `json:"pub_key"`
+	EntryRouteAssertionPubKey string    `json:"entry_route_assertion_pub_key,omitempty"`
+	Endpoint                  string    `json:"endpoint"`
+	ControlURL                string    `json:"control_url,omitempty"`
+	CountryCode               string    `json:"country_code,omitempty"`
+	GeoConfidence             float64   `json:"geo_confidence,omitempty"`
+	Region                    string    `json:"region"`
+	Reputation                float64   `json:"reputation_score,omitempty"`
+	Uptime                    float64   `json:"uptime_score,omitempty"`
+	Capacity                  float64   `json:"capacity_score,omitempty"`
+	AbusePenalty              float64   `json:"abuse_penalty,omitempty"`
+	BondScore                 float64   `json:"bond_score,omitempty"`
+	StakeScore                float64   `json:"stake_score,omitempty"`
+	Capabilities              []string  `json:"capabilities"`
+	HopRoles                  []string  `json:"hop_roles,omitempty"`
+	ValidUntil                time.Time `json:"valid_until"`
+	Signature                 string    `json:"signature"`
 }
 
 type PathOpenRequest struct {

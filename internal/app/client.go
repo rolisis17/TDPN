@@ -3566,36 +3566,38 @@ func relayDescriptorVoteKey(candidateKey string, fingerprint string) string {
 }
 
 type relayDescriptorFingerprintPayload struct {
-	RelayID        string   `json:"relay_id"`
-	Role           string   `json:"role"`
-	OperatorID     string   `json:"operator_id"`
-	OriginOperator string   `json:"origin_operator"`
-	HopCount       int      `json:"hop_count"`
-	PubKey         string   `json:"pub_key"`
-	Endpoint       string   `json:"endpoint"`
-	ControlURL     string   `json:"control_url"`
-	CountryCode    string   `json:"country_code"`
-	GeoConfidence  float64  `json:"geo_confidence"`
-	Region         string   `json:"region"`
-	Capabilities   []string `json:"capabilities"`
-	HopRoles       []string `json:"hop_roles"`
+	RelayID                   string   `json:"relay_id"`
+	Role                      string   `json:"role"`
+	OperatorID                string   `json:"operator_id"`
+	OriginOperator            string   `json:"origin_operator"`
+	HopCount                  int      `json:"hop_count"`
+	PubKey                    string   `json:"pub_key"`
+	EntryRouteAssertionPubKey string   `json:"entry_route_assertion_pub_key"`
+	Endpoint                  string   `json:"endpoint"`
+	ControlURL                string   `json:"control_url"`
+	CountryCode               string   `json:"country_code"`
+	GeoConfidence             float64  `json:"geo_confidence"`
+	Region                    string   `json:"region"`
+	Capabilities              []string `json:"capabilities"`
+	HopRoles                  []string `json:"hop_roles"`
 }
 
 func relayDescriptorFingerprint(desc proto.RelayDescriptor) (string, error) {
 	payload := relayDescriptorFingerprintPayload{
-		RelayID:        canonicalRelayID(desc.RelayID),
-		Role:           canonicalRelayRole(desc.Role),
-		OperatorID:     strings.TrimSpace(desc.OperatorID),
-		OriginOperator: strings.TrimSpace(desc.OriginOperator),
-		HopCount:       desc.HopCount,
-		PubKey:         strings.TrimSpace(desc.PubKey),
-		Endpoint:       strings.TrimSpace(desc.Endpoint),
-		ControlURL:     strings.TrimSpace(desc.ControlURL),
-		CountryCode:    strings.ToUpper(strings.TrimSpace(desc.CountryCode)),
-		GeoConfidence:  clampUnit(desc.GeoConfidence),
-		Region:         strings.TrimSpace(desc.Region),
-		Capabilities:   normalizeDescriptorStringList(desc.Capabilities),
-		HopRoles:       normalizeDescriptorRoleList(desc.HopRoles),
+		RelayID:                   canonicalRelayID(desc.RelayID),
+		Role:                      canonicalRelayRole(desc.Role),
+		OperatorID:                strings.TrimSpace(desc.OperatorID),
+		OriginOperator:            strings.TrimSpace(desc.OriginOperator),
+		HopCount:                  desc.HopCount,
+		PubKey:                    strings.TrimSpace(desc.PubKey),
+		EntryRouteAssertionPubKey: strings.TrimSpace(desc.EntryRouteAssertionPubKey),
+		Endpoint:                  strings.TrimSpace(desc.Endpoint),
+		ControlURL:                strings.TrimSpace(desc.ControlURL),
+		CountryCode:               strings.ToUpper(strings.TrimSpace(desc.CountryCode)),
+		GeoConfidence:             clampUnit(desc.GeoConfidence),
+		Region:                    strings.TrimSpace(desc.Region),
+		Capabilities:              normalizeDescriptorStringList(desc.Capabilities),
+		HopRoles:                  normalizeDescriptorRoleList(desc.HopRoles),
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {

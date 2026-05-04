@@ -1648,6 +1648,34 @@ ensure_admin_signing_material() {
   echo "$key_file|$key_id|$signers_file|$signers_file_container"
 }
 
+ensure_entry_route_assertion_material() {
+  local relay_suffix="$1"
+  local entry_exit_data_dir="$DEPLOY_DIR/data/entry-exit"
+  local key_file="$entry_exit_data_dir/entry_route_assertion_${relay_suffix}.key"
+  local pub_file="${key_file}.pub"
+  local key_file_container="/app/data/$(basename "$key_file")"
+  local pub_key
+
+  validate_env_scalar_or_die "relay_suffix" "$relay_suffix"
+  mkdir -p "$entry_exit_data_dir"
+  if [[ ! -f "$key_file" || ! -f "$pub_file" ]]; then
+    rm -f "$key_file" "$pub_file"
+    (
+      cd "$ROOT_DIR"
+      go run ./cmd/adminsig gen --private-key-out "$key_file" --public-key-out "$pub_file" >/dev/null
+    )
+  fi
+  secure_file_permissions "$key_file"
+
+  pub_key="$(tr -d '\r\n[:space:]' <"$pub_file" 2>/dev/null || true)"
+  if [[ -z "$pub_key" || "$pub_key" == "null" ]]; then
+    echo "failed to read entry route assertion public key material"
+    exit 1
+  fi
+
+  echo "$key_file|$key_file_container|$pub_key"
+}
+
 resolve_invite_admin_auth() {
   local cli_token="${1:-}"
   local cli_key_file="${2:-}"
@@ -2814,6 +2842,9 @@ check_server_up_dependencies() {
   if [[ "$prod_profile" == "1" || "$beta_profile" == "1" ]]; then
     # server-up writes/derives exit wireguard key material for beta/prod defaults.
     need_cmd wg || ok=0
+    # Two-hop beta/prod paths need entry-signed route assertions and exit trust keys.
+    need_cmd go || ok=0
+    need_cmd jq || ok=0
   fi
 
   if ! docker compose version >/dev/null 2>&1; then
@@ -3442,6 +3473,8 @@ write_authority_env() {
   local exit_wg_private_key_path="${16:-}"
   local exit_wg_interface="${17:-}"
   local exit_wg_pubkey="${18:-}"
+  local entry_route_assertion_key_path="${19:-}"
+  local entry_route_assertion_pubkey="${20:-}"
   local issuer_admin_token_effective="$issuer_admin_token"
   local public_scheme="http"
   local relay_suffix
@@ -3469,6 +3502,8 @@ write_authority_env() {
   validate_env_scalar_or_die "exit_wg_private_key_path" "$exit_wg_private_key_path"
   validate_env_scalar_or_die "exit_wg_interface" "$exit_wg_interface"
   validate_env_scalar_or_die "exit_wg_pubkey" "$exit_wg_pubkey"
+  validate_env_scalar_or_die "entry_route_assertion_key_path" "$entry_route_assertion_key_path"
+  validate_env_scalar_or_die "entry_route_assertion_pubkey" "$entry_route_assertion_pubkey"
 
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
@@ -3495,6 +3530,9 @@ DIRECTORY_OPERATOR_ID=${operator_id}
 ENTRY_OPERATOR_ID=${operator_id}
 ENTRY_RELAY_ID=entry-${relay_suffix}
 EXIT_RELAY_ID=exit-${relay_suffix}
+ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE=${entry_route_assertion_key_path}
+ENTRY_ROUTE_ASSERTION_PUBLIC_KEY=${entry_route_assertion_pubkey}
+EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS=${entry_route_assertion_pubkey}
 DIRECTORY_PRIVATE_KEY_FILE=/app/data/directory_${relay_suffix}_ed25519.key
 DIRECTORY_PREVIOUS_PUBKEYS_FILE=/app/data/directory_${relay_suffix}_previous_pubkeys.txt
 ISSUER_ID=${issuer_id}
@@ -3570,6 +3608,7 @@ EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:51983
 EXIT_TOKEN_PROOF_REPLAY_GUARD=1
 EXIT_PEER_REBIND_SEC=0
 EXIT_STARTUP_SYNC_TIMEOUT_SEC=30
+EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST=1
 ENTRY_EXIT_USER=0:0
 ENTRY_EXIT_PRIVILEGED=true
 EOF_RUNTIME
@@ -3713,6 +3752,8 @@ write_provider_env() {
   local exit_wg_private_key_path="${10:-}"
   local exit_wg_interface="${11:-}"
   local exit_wg_pubkey="${12:-}"
+  local entry_route_assertion_key_path="${13:-}"
+  local entry_route_assertion_pubkey="${14:-}"
   local public_scheme="http"
   local relay_suffix
   local entry_exit_user_non_prod
@@ -3732,6 +3773,8 @@ write_provider_env() {
   validate_env_scalar_or_die "exit_wg_private_key_path" "$exit_wg_private_key_path"
   validate_env_scalar_or_die "exit_wg_interface" "$exit_wg_interface"
   validate_env_scalar_or_die "exit_wg_pubkey" "$exit_wg_pubkey"
+  validate_env_scalar_or_die "entry_route_assertion_key_path" "$entry_route_assertion_key_path"
+  validate_env_scalar_or_die "entry_route_assertion_pubkey" "$entry_route_assertion_pubkey"
 
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
@@ -3751,6 +3794,9 @@ DIRECTORY_OPERATOR_ID=${operator_id}
 ENTRY_OPERATOR_ID=${operator_id}
 ENTRY_RELAY_ID=entry-${relay_suffix}
 EXIT_RELAY_ID=exit-${relay_suffix}
+ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE=${entry_route_assertion_key_path}
+ENTRY_ROUTE_ASSERTION_PUBLIC_KEY=${entry_route_assertion_pubkey}
+EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS=${entry_route_assertion_pubkey}
 DIRECTORY_PRIVATE_KEY_FILE=/app/data/directory_${relay_suffix}_ed25519.key
 DIRECTORY_PREVIOUS_PUBKEYS_FILE=/app/data/directory_${relay_suffix}_previous_pubkeys.txt
 DIRECTORY_ADMIN_TOKEN=${directory_admin_token}
@@ -3810,6 +3856,7 @@ EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:51983
 EXIT_TOKEN_PROOF_REPLAY_GUARD=1
 EXIT_PEER_REBIND_SEC=0
 EXIT_STARTUP_SYNC_TIMEOUT_SEC=30
+EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST=1
 ENTRY_EXIT_USER=0:0
 ENTRY_EXIT_PRIVILEGED=true
 EOF_RUNTIME
@@ -5048,6 +5095,9 @@ server_up() {
   local exit_wg_private_key_local=""
   local exit_wg_private_key_container=""
   local exit_wg_pubkey=""
+  local entry_route_assertion_key_local=""
+  local entry_route_assertion_key_container=""
+  local entry_route_assertion_pubkey=""
   local need_beta_or_prod_wg_defaults="0"
   if [[ "$beta_profile" == "1" || "$prod_profile" == "1" ]]; then
     need_beta_or_prod_wg_defaults="1"
@@ -5149,11 +5199,22 @@ server_up() {
       :
     fi
   fi
+  if [[ "$need_beta_or_prod_wg_defaults" == "1" ]]; then
+    local route_assertion_material
+    local relay_suffix_for_route_assertion
+    relay_suffix_for_route_assertion="$(sanitize_id_component "$operator_id")"
+    route_assertion_material="$(ensure_entry_route_assertion_material "$relay_suffix_for_route_assertion")"
+    IFS='|' read -r entry_route_assertion_key_local entry_route_assertion_key_container entry_route_assertion_pubkey <<<"$route_assertion_material"
+    if [[ -z "$entry_route_assertion_key_container" || -z "$entry_route_assertion_pubkey" ]]; then
+      echo "server-up failed to initialize entry route assertion key material"
+      exit 1
+    fi
+  fi
 
   write_identity_config "$operator_id" "$issuer_id"
 
   if [[ "$mode" == "authority" ]]; then
-    write_authority_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred" "$prod_profile" "$admin_signers_file_container" "$admin_sign_key_id" "$admin_sign_key_file_local" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey"
+    write_authority_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred" "$prod_profile" "$admin_signers_file_container" "$admin_sign_key_id" "$admin_sign_key_file_local" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey" "$entry_route_assertion_key_container" "$entry_route_assertion_pubkey"
     append_published_bind_env_from_process "$AUTHORITY_ENV_FILE"
     compose_with_env "$AUTHORITY_ENV_FILE" up -d --build directory issuer entry-exit
 
@@ -5257,7 +5318,7 @@ server_up() {
       fi
     fi
   else
-    write_provider_env "$public_host" "$operator_id" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey"
+    write_provider_env "$public_host" "$operator_id" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey" "$entry_route_assertion_key_container" "$entry_route_assertion_pubkey"
     append_published_bind_env_from_process "$PROVIDER_ENV_FILE"
     compose_with_env "$PROVIDER_ENV_FILE" up -d --build --no-deps directory entry-exit
 

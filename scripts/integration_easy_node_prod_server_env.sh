@@ -17,6 +17,7 @@ MODE_FILE="$ROOT_DIR/deploy/data/easy_node_server_mode.conf"
 IDENTITY_FILE="$ROOT_DIR/deploy/data/easy_node_identity.conf"
 TLS_DIR="$ROOT_DIR/deploy/tls"
 ISSUER_ADMIN_DIR="$ROOT_DIR/deploy/data/issuer"
+ENTRY_EXIT_DATA_DIR="$ROOT_DIR/deploy/data/entry-exit"
 HOSTS_FILE="$ROOT_DIR/data/easy_mode_hosts.conf"
 TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
@@ -32,6 +33,22 @@ if [[ "$(rg -c 'ENTRY_RELAY_ID: "\$\{ENTRY_RELAY_ID:-entry-local-1\}"' "$ROOT_DI
 fi
 if [[ "$(rg -c 'EXIT_RELAY_ID: "\$\{EXIT_RELAY_ID:-exit-local-1\}"' "$ROOT_DIR/deploy/docker-compose.yml")" -lt 2 ]]; then
   echo "docker-compose must forward EXIT_RELAY_ID to directory and entry-exit services"
+  exit 1
+fi
+if ! rg -q 'ENTRY_ROUTE_ASSERTION_PUBLIC_KEY: "\$\{ENTRY_ROUTE_ASSERTION_PUBLIC_KEY:-\}"' "$ROOT_DIR/deploy/docker-compose.yml"; then
+  echo "docker-compose directory environment must forward ENTRY_ROUTE_ASSERTION_PUBLIC_KEY"
+  exit 1
+fi
+if ! rg -q 'ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE: "\$\{ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE:-\}"' "$ROOT_DIR/deploy/docker-compose.yml"; then
+  echo "docker-compose entry-exit environment must forward ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE"
+  exit 1
+fi
+if ! rg -q 'EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS: "\$\{EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS:-\}"' "$ROOT_DIR/deploy/docker-compose.yml"; then
+  echo "docker-compose entry-exit environment must forward EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS"
+  exit 1
+fi
+if ! rg -q 'EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST: "\$\{EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST:-0\}"' "$ROOT_DIR/deploy/docker-compose.yml"; then
+  echo "docker-compose entry-exit environment must forward EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST"
   exit 1
 fi
 
@@ -78,6 +95,7 @@ cleanup() {
   restore_file "$HOSTS_FILE" "hosts_file"
   restore_dir "$TLS_DIR" "tls_dir"
   restore_dir "$ISSUER_ADMIN_DIR" "issuer_admin_dir"
+  restore_dir "$ENTRY_EXIT_DATA_DIR" "entry_exit_data_dir"
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
@@ -89,6 +107,7 @@ backup_file "$IDENTITY_FILE" "identity_file"
 backup_file "$HOSTS_FILE" "hosts_file"
 backup_dir "$TLS_DIR" "tls_dir"
 backup_dir "$ISSUER_ADMIN_DIR" "issuer_admin_dir"
+backup_dir "$ENTRY_EXIT_DATA_DIR" "entry_exit_data_dir"
 
 cat >"$TMP_BIN/docker" <<'EOF_DOCKER'
 #!/usr/bin/env bash
@@ -196,6 +215,10 @@ require_eq "$(env_value "$AUTH_ENV" "EXIT_WG_KERNEL_PROXY")" "1" "beta authority
 require_nonempty "$(env_value "$AUTH_ENV" "EXIT_WG_PUBKEY")" "beta authority EXIT_WG_PUBKEY"
 require_nonempty "$(env_value "$AUTH_ENV" "EXIT_WG_PRIVATE_KEY_PATH")" "beta authority EXIT_WG_PRIVATE_KEY_PATH"
 require_nonempty "$(env_value "$AUTH_ENV" "EXIT_WG_INTERFACE")" "beta authority EXIT_WG_INTERFACE"
+require_nonempty "$(env_value "$AUTH_ENV" "ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE")" "beta authority ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE"
+require_nonempty "$(env_value "$AUTH_ENV" "ENTRY_ROUTE_ASSERTION_PUBLIC_KEY")" "beta authority ENTRY_ROUTE_ASSERTION_PUBLIC_KEY"
+require_eq "$(env_value "$AUTH_ENV" "EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS")" "$(env_value "$AUTH_ENV" "ENTRY_ROUTE_ASSERTION_PUBLIC_KEY")" "beta authority EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS"
+require_eq "$(env_value "$AUTH_ENV" "EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST")" "1" "beta authority EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST"
 require_eq "$(env_value "$AUTH_ENV" "ISSUER_URLS")" "http://issuer:8082,http://198.51.100.20:8082" "beta authority ISSUER_URLS"
 require_eq "$(env_value "$AUTH_ENV" "ENTRY_EXIT_USER")" "0:0" "beta authority ENTRY_EXIT_USER"
 require_eq "$(env_value "$AUTH_ENV" "ENTRY_EXIT_PRIVILEGED")" "true" "beta authority ENTRY_EXIT_PRIVILEGED"
@@ -228,6 +251,10 @@ require_eq "$(env_value "$PROVIDER_ENV" "EXIT_WG_KERNEL_PROXY")" "1" "beta provi
 require_nonempty "$(env_value "$PROVIDER_ENV" "EXIT_WG_PUBKEY")" "beta provider EXIT_WG_PUBKEY"
 require_nonempty "$(env_value "$PROVIDER_ENV" "EXIT_WG_PRIVATE_KEY_PATH")" "beta provider EXIT_WG_PRIVATE_KEY_PATH"
 require_nonempty "$(env_value "$PROVIDER_ENV" "EXIT_WG_INTERFACE")" "beta provider EXIT_WG_INTERFACE"
+require_nonempty "$(env_value "$PROVIDER_ENV" "ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE")" "beta provider ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE"
+require_nonempty "$(env_value "$PROVIDER_ENV" "ENTRY_ROUTE_ASSERTION_PUBLIC_KEY")" "beta provider ENTRY_ROUTE_ASSERTION_PUBLIC_KEY"
+require_eq "$(env_value "$PROVIDER_ENV" "EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS")" "$(env_value "$PROVIDER_ENV" "ENTRY_ROUTE_ASSERTION_PUBLIC_KEY")" "beta provider EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS"
+require_eq "$(env_value "$PROVIDER_ENV" "EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST")" "1" "beta provider EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST"
 require_eq "$(env_value "$PROVIDER_ENV" "ISSUER_URLS")" "http://203.0.113.10:8082" "beta provider ISSUER_URLS"
 require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_EXIT_USER")" "0:0" "beta provider ENTRY_EXIT_USER"
 require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_EXIT_PRIVILEGED")" "true" "beta provider ENTRY_EXIT_PRIVILEGED"
@@ -264,6 +291,9 @@ require_eq "$(env_value "$AUTH_ENV" "ENTRY_EXIT_USER")" "0:0" "ENTRY_EXIT_USER"
 require_eq "$(env_value "$AUTH_ENV" "ENTRY_EXIT_PRIVILEGED")" "true" "ENTRY_EXIT_PRIVILEGED"
 require_nonempty "$(env_value "$AUTH_ENV" "EXIT_WG_PRIVATE_KEY_PATH")" "EXIT_WG_PRIVATE_KEY_PATH"
 require_nonempty "$(env_value "$AUTH_ENV" "EXIT_WG_INTERFACE")" "EXIT_WG_INTERFACE"
+require_nonempty "$(env_value "$AUTH_ENV" "ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE")" "ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE"
+require_nonempty "$(env_value "$AUTH_ENV" "ENTRY_ROUTE_ASSERTION_PUBLIC_KEY")" "ENTRY_ROUTE_ASSERTION_PUBLIC_KEY"
+require_eq "$(env_value "$AUTH_ENV" "EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS")" "$(env_value "$AUTH_ENV" "ENTRY_ROUTE_ASSERTION_PUBLIC_KEY")" "EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS"
 require_eq "$(env_value "$AUTH_ENV" "ISSUER_URLS")" "https://203.0.113.10:8082,https://198.51.100.20:8082" "ISSUER_URLS"
 require_eq "$(env_value "$AUTH_ENV" "DIRECTORY_ISSUER_TRUST_URLS")" "https://203.0.113.10:8082,https://198.51.100.20:8082" "DIRECTORY_ISSUER_TRUST_URLS"
 require_eq "$(env_value "$AUTH_ENV" "ENTRY_OPEN_RPS")" "12" "ENTRY_OPEN_RPS"
@@ -317,6 +347,9 @@ require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_EXIT_USER")" "0:0" "provider ENTR
 require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_EXIT_PRIVILEGED")" "true" "provider ENTRY_EXIT_PRIVILEGED"
 require_nonempty "$(env_value "$PROVIDER_ENV" "EXIT_WG_PRIVATE_KEY_PATH")" "provider EXIT_WG_PRIVATE_KEY_PATH"
 require_nonempty "$(env_value "$PROVIDER_ENV" "EXIT_WG_INTERFACE")" "provider EXIT_WG_INTERFACE"
+require_nonempty "$(env_value "$PROVIDER_ENV" "ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE")" "provider ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE"
+require_nonempty "$(env_value "$PROVIDER_ENV" "ENTRY_ROUTE_ASSERTION_PUBLIC_KEY")" "provider ENTRY_ROUTE_ASSERTION_PUBLIC_KEY"
+require_eq "$(env_value "$PROVIDER_ENV" "EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS")" "$(env_value "$PROVIDER_ENV" "ENTRY_ROUTE_ASSERTION_PUBLIC_KEY")" "provider EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS"
 require_eq "$(env_value "$PROVIDER_ENV" "ISSUER_URLS")" "https://203.0.113.10:8082,https://198.51.100.30:8082" "provider ISSUER_URLS"
 require_eq "$(env_value "$PROVIDER_ENV" "DIRECTORY_ISSUER_TRUST_URLS")" "https://203.0.113.10:8082,https://198.51.100.30:8082" "provider DIRECTORY_ISSUER_TRUST_URLS"
 require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_OPEN_RPS")" "12" "provider ENTRY_OPEN_RPS"

@@ -4768,6 +4768,7 @@ func (s *Service) buildRelayDescriptors(now time.Time) []proto.RelayDescriptor {
 	defaultOperator := s.operatorID
 	entryOperator := operatorIDWithDefault("ENTRY_OPERATOR_ID", defaultOperator)
 	exitOperator := operatorIDWithDefault("EXIT_OPERATOR_ID", defaultOperator)
+	entryRouteAssertionPubKey := strings.TrimSpace(os.Getenv("ENTRY_ROUTE_ASSERTION_PUBLIC_KEY"))
 	exitReputation := scoreWithDefault("EXIT_REPUTATION_SCORE", 0)
 	exitUptime := scoreWithDefault("EXIT_UPTIME_SCORE", 0)
 	exitCapacity := scoreWithDefault("EXIT_CAPACITY_SCORE", 0)
@@ -4777,19 +4778,20 @@ func (s *Service) buildRelayDescriptors(now time.Time) []proto.RelayDescriptor {
 
 	local := []proto.RelayDescriptor{
 		{
-			RelayID:        entryRelayID,
-			Role:           "entry",
-			OperatorID:     entryOperator,
-			OriginOperator: entryOperator,
-			HopCount:       0,
-			PubKey:         pubB64,
-			Endpoint:       s.pickEntryEndpoint(now),
-			ControlURL:     endpointWithDefault("ENTRY_URL", "http://127.0.0.1:8083"),
-			CountryCode:    entryCountry,
-			GeoConfidence:  entryGeoConfidence,
-			Region:         entryRegion,
-			Capabilities:   []string{"wg", "two-hop"},
-			ValidUntil:     now.Add(ttl),
+			RelayID:                   entryRelayID,
+			Role:                      "entry",
+			OperatorID:                entryOperator,
+			OriginOperator:            entryOperator,
+			HopCount:                  0,
+			PubKey:                    pubB64,
+			EntryRouteAssertionPubKey: entryRouteAssertionPubKey,
+			Endpoint:                  s.pickEntryEndpoint(now),
+			ControlURL:                endpointWithDefault("ENTRY_URL", "http://127.0.0.1:8083"),
+			CountryCode:               entryCountry,
+			GeoConfidence:             entryGeoConfidence,
+			Region:                    entryRegion,
+			Capabilities:              []string{"wg", "two-hop"},
+			ValidUntil:                now.Add(ttl),
 		},
 		{
 			RelayID:        exitRelayID,
