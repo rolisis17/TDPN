@@ -1204,3 +1204,36 @@ git log -1 --oneline
 - Keep momentum, but be honest about blockers.
 - Use parallel agents when available, and always include a logic-check/review lane for risky work.
 - When touching git, stage/commit only intentional files and avoid destructive commands.
+
+## 32. Continuation Memory Update (2026-05-04)
+
+### 32.1 Do not forget: provider auto-onboarding is required
+The current symmetric `--peer-directories A/B` setup is only a beta/live-test workaround. The intended product shape is:
+
+- Machine A/main authority can start and operate without preconfigured peers.
+- Machine B/provider joins by connecting to A.
+- B self-registers or gossips relay and issuer metadata to A.
+- A learns B dynamically and publishes/syncs the relevant directory/issuer trust state.
+- B learns the authority issuer/trust metadata needed to accept A-issued invites.
+- Users/operators should not have to manually restart A with B as a peer after B appears.
+
+Future implementation work should replace static manual peer wiring with provider join/self-registration and automatic directory/issuer trust refresh. Do not treat symmetric `--peer-directories` as the final GPM UX.
+
+### 32.2 Current pushed fix and live restart requirement
+Latest pushed branch head after this continuation:
+
+```text
+2210dab0 Fix beta cross-machine client wiring
+```
+
+That patch makes beta/prod `client-test` default to opaque/WireGuard transport and makes beta non-prod server env include peer issuer URLs when peer directories are provided. Both A and B need to pull/restart from this commit or newer before cross-operator live testing.
+
+### 32.3 Current Machine A invite-generate issue
+Machine A still hit:
+
+```text
+invite admin hint: local loopback issuer is not reachable because ISSUER_PUBLISHED_BIND_ADDR is pinned to 100.113.245.61.
+invite-generate refused insecure remote URL: http://100.113.245.61:8082
+```
+
+This means A was started with `ISSUER_PUBLISHED_BIND_ADDR` pinned to the Tailscale IP. For non-prod HTTP lab use, bind published ports to `0.0.0.0`, not the specific Tailscale IP, so both remote tests and local loopback admin/invite commands work. The previously pushed auto-bind patch should do this automatically when A has pulled the latest branch and no explicit bind env overrides are present.
