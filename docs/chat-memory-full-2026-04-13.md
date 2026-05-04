@@ -679,3 +679,528 @@ Use this file as:
 ## 30. Closing
 This is the fullest reconstruction I can provide from this chat context in a single `.md` file.
 If you want, I can also generate a second companion file that is purely chronological command-by-command with no commentary, optimized for exact rerun automation.
+
+## 31. Continuation Memory Update (2026-04-17 through 2026-05-03)
+
+Date updated: 2026-05-03
+Reason: user is switching from Codex desktop app back to VS Code Codex because the app has been unstable/frustrating, and needs this file to carry the full project/chat context forward.
+
+### 31.1 New working environment and repo context
+- Current local workspace during this continuation: `C:\Users\dcella-d\TDPN1`
+- WSL path used for commands from DS: `/mnt/c/Users/dcella-d/TDPN1`
+- Main branch used for most active work after merge/branch coordination: `codex/gpm-productization-checkpoint`
+- Remote branch: `origin/codex/gpm-productization-checkpoint`
+- Product/rebrand target chosen by user: `Global Private Mesh (GPM)`
+- Old TDPN names should remain as compatibility aliases where practical, with deprecation hints rather than risky deep internal rename.
+- User wants fast work with parallel agents when available, but after many live-test bugs the most important rule is: do not ask the user to retry live commands until the relevant code path has been inspected and local/focused tests have run.
+
+### 31.2 Profile default gate and live evidence arc from 2026-04-17
+The user ran live profile default gate commands against two remote hosts:
+- Machine A / directory A: `100.113.245.61`
+- Machine B / directory B: `100.64.244.24`
+- Invite keys were shared in chat, but this file keeps them redacted because they are operational secrets.
+
+Early command pattern:
+```bash
+./scripts/easy_node.sh profile-default-gate-live \
+  --host-a "$A_HOST" \
+  --host-b "$B_HOST" \
+  --reports-dir .easy-node-logs \
+  --campaign-timeout-sec 1200 \
+  --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json \
+  --print-summary-json 1 \
+  --campaign-subject "$INVITE_KEY"
+```
+
+Important 2026-04-17 result:
+- Endpoint preflight passed.
+- Campaign refresh ran for a long time and completed.
+- Signoff status was `ok` with `final_rc=0`, but decision was `NO-GO`.
+- Recommended profile was `balanced`.
+- Support rate example observed: `66.67%`.
+- The gate was non-blocking at that stage and still listed as pending in roadmap progress.
+
+Later 2400-second run:
+- Campaign ran for about `1324` seconds.
+- `status=ok`, `final_rc=0`, but decision stayed `NO-GO`.
+- Recommended profile stayed `balanced`.
+- Trend source was `vote_fallback`.
+- No dominant diagnostic failure signal was detected.
+
+### 31.3 Windows native app/testing arc
+The user explicitly wanted the Windows version to be fully native, not WSL/Linux-on-Windows.
+
+Windows script execution problem encountered:
+```powershell
+.\scripts\windows\local_api_session.ps1 : File ... cannot be loaded because running scripts is disabled on this system.
+```
+
+Immediate workaround used:
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+.\scripts\windows\local_api_session.ps1 -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\local_api_session.ps1 -DryRun
+```
+
+The dry run showed:
+```text
+local-api-session (windows-native):
+  api_addr: 127.0.0.1:8095
+  command_runner: C:\Program Files\Git\bin\bash.exe
+  command: go run ./cmd/node --local-api
+```
+
+The real run later succeeded and printed:
+```text
+local control api listening on 127.0.0.1:8095 script=/c/Users/dcella-d/TDPN1/scripts/easy_node.sh runner=C:\Program Files\Git\bin\bash.exe update_enabled=false
+```
+
+Missing tools found on Windows:
+```powershell
+go version
+node -v
+npm -v
+rustc -V
+cargo -V
+```
+Initially Go, Node/npm, rustc, and cargo were not all on PATH. Rustup existed under the user profile and stable MSVC toolchain was selected:
+```powershell
+& "$env:USERPROFILE\.cargo\bin\rustup.exe" default stable-x86_64-pc-windows-msvc
+```
+
+NPM PowerShell shim problem:
+```powershell
+npm : File C:\Program Files\nodejs\npm.ps1 cannot be loaded because running scripts is disabled on this system.
+```
+This reinforced the product requirement: installer/first-run tooling must avoid making normal users fight shell policy.
+
+Tauri build problem:
+```text
+`icons/icon.ico` not found; required for generating a Windows Resource file during tauri-build
+```
+
+User request that came from this:
+- Build a Windows installer with GUI.
+- Build equivalent Linux user-friendly packaging.
+- Add automatic problem solving / first-run diagnostics for common Windows policy/tooling/runtime issues.
+- Keep the actual project runtime native on Windows, not WSL.
+
+### 31.4 GPM Big-Bang Productization Plan accepted by user
+The user accepted a revised plan with these locked decisions:
+- Ship one external release rebranded as `Global Private Mesh (GPM)`.
+- Keep first trusted entry via the main GPM domain.
+- After first entry, use distributed `bootstrap_directory` and peer discovery so clients/servers do not need the main domain every time.
+- Replace dual-window risk with one app window and two role lanes/tabs.
+- Role-ineligible tab/control should be visible but non-clickable, with a clear reason and unlock path.
+- Keep TDPN commands/config keys as aliases for compatibility.
+- Auth V1 is chain-native wallet-only: Keplr + Leap.
+- Website V1 includes marketing homepage plus authenticated portal.
+- Endpoint policy is pinned trusted domain for initial bootstrap and policy/config trust.
+- Routing target is hybrid auto: direct mesh preferred, managed relay fallback.
+- Client onboarding is self-serve.
+- Server onboarding is permissioned and chain-identity bound.
+- Rebrand is product-first now; deep internal rename deferred.
+- Bootstrap fallback is signed-cache fallback when main domain is temporarily unreachable.
+
+Public interface decisions:
+- Add wallet challenge/signature/session endpoints.
+- Add client registration/profile bootstrap endpoints.
+- Add operator application/approval/chain-binding status endpoints.
+- Add signed bootstrap manifest endpoint on main GPM domain.
+- Desktop connect contract should use authenticated session plus selected profile/policy.
+- Raw endpoint/IP entry removed from production UX.
+
+### 31.5 Admin split and public app constraints
+The user clarified strongly:
+- The Admin Console is only for the project admin/owner, not for server operators.
+- Servers must have no admin powers.
+- Server UI/app should only show server status/lifecycle and a few simple actions.
+- Public client/server release apps must have zero admin controls, zero approval tools, and zero server-management powers outside the local role.
+- Any support/debug settings should be hidden from normal users.
+- Public app and website should give users only limited, safe options.
+
+Accepted split:
+- Public GPM App: wallet login, account status, stake/prepaid status, connect/disconnect, diagnostics, optional contribution opt-in/out.
+- Server view/package: local server state and very simple local lifecycle controls only.
+- GPM Admin Console: approvals, policy changes, server/client control from admin side, slashing review, settlement/payout review/finalization.
+
+### 31.6 Contribution, micro-relay, micro-exit, and weekly payouts
+The user revised the contribution plan:
+- Remove KYC for now.
+- Tier 1 cannot use or provide micro-relay/micro-exit.
+- Tier 2 and Tier 3 can use micro-relays.
+- Tier 2 and Tier 3 can opt into micro-relay or micro-exit beta.
+- Micro-exit means a client device can provide public internet exit for other users; this remains beta and should be reviewed later.
+- The user expects tier gating plus slashing to remove abusers from the network.
+- VPN use should require stake plus prepaid balance before use.
+- Micro-relay/micro-exit should require tier eligibility, stake, prepaid balance, policy pass, explicit opt-in, and device checks.
+- Background GPM Agent should measure hardware/network and set safe contribution limits automatically.
+- Better hardware/network should allow higher safe max clients/bandwidth and better contribution rewards.
+- User VPN traffic must be prioritized over contributed traffic.
+- Contribution is measured continuously but settled and paid weekly.
+- Weekly settlement epoch default: Monday 00:00 UTC to Monday 00:00 UTC.
+
+Important contribution fields discussed:
+- `client_tier`
+- `stake_satisfied`
+- `prepaid_balance_satisfied`
+- `can_use_micro_relays`
+- `can_enable_micro_relay`
+- `can_enable_micro_exit`
+- `contribution_lock_reason`
+- `contribution_profile`
+- capacity score, health score, max forwarded sessions, max bandwidth, uptime/reliability, demotion state.
+
+### 31.7 App and website UX direction
+The user reviewed the app/website and gave strong UX direction:
+- The app had improved visually, but still had too much happening.
+- The website was disliked and described as looking like a generic free accounting site.
+- The website should follow the app’s stronger visual language.
+- The user wants consumer-grade, high-budget VPN feel.
+- Minimal explanatory text.
+- Simple words only.
+- Basic buttons and commands.
+- Button placement should consider psychology: users should feel safe, good, guided, and not overwhelmed.
+- Project explanations should be written for clients, not for the developer/admin.
+- Avoid internal/admin/support settings on public website.
+- The app should start with a small centered wallet-connect modal before opening the full app.
+- Wallet connection should be as automated as possible for Cosmos users.
+- The website should have personality and premium product feel, possibly informed by strong blockchain/crypto product sites, but not copied.
+
+### 31.8 Community and investor strategy discussions
+The user asked how to build a community with zero experience.
+Core advice discussed:
+- Start with a clear simple story, not technical overload.
+- Pick a small initial audience and community home.
+- Publish consistent progress and demos.
+- Automate repetitive updates where possible.
+- Keep community calls-to-action simple.
+- Build trust through transparency and proof, not hype alone.
+
+The user also asked how to find investors for a new blockchain/tech project.
+Core themes discussed:
+- Prepare a credible pitch narrative, demo, roadmap, and evidence.
+- Look for crypto-native angels, pre-seed funds, infrastructure/privacy investors, accelerators, hackathons, builder programs, and strategic partners.
+- Warm intros are more effective than cold outreach.
+- Avoid over-disclosing core moat before trust/NDA/investor quality is established.
+- Basic financing can start with smaller angels/grants before larger institutional rounds.
+- Investor materials should explain problem, product, traction/evidence, token/economic model, team execution, risk mitigation, and what funds unlock next.
+
+### 31.9 Repeated “next slice” execution and quality-control preference
+The user repeatedly asked to:
+- Continue through roadmap slices.
+- Use as many parallel agents as necessary.
+- Add one agent to logic-check everything done.
+- Add agents to search for gaps/logic failures in VPN.
+- Add agents to search for blockchain logic issues.
+- Check the entire project line-by-line for gaps, logic errors, vulnerabilities, and anything wrong.
+
+Important collaboration preference:
+- User is comfortable with aggressive parallelism.
+- User does not want repeated questions unless truly necessary.
+- User wants one independent logic-check/review lane for each meaningful implemented block.
+- User values speed, but after live-test frustration, wants best quality and local verification before being asked to run anything.
+
+### 31.10 OpenAI model migration request
+The user wrote:
+```text
+$OPENAI-docs migrate this project to gpt-5.5
+```
+This triggered the OpenAI docs skill requirement in this environment. If continuing that task, use official OpenAI documentation only and update project model references carefully.
+
+### 31.11 Windows launch/user commands
+The user asked how to launch the Windows program.
+Relevant command family:
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+.\scripts\windows\local_api_session.ps1
+```
+For desktop dev:
+```powershell
+cd C:\Users\dcella-d\TDPN1\apps\desktop
+npm.cmd install
+npm.cmd run tauri -- dev
+```
+Use `npm.cmd` instead of `npm` in PowerShell if execution policy blocks `npm.ps1`.
+
+### 31.12 Live A/B testing command runbook as of 2026-05-03
+The user restarted machines A and B for live evidence.
+
+Machine B command used:
+```bash
+./scripts/easy_node.sh server-down || true
+
+A_HOST=100.113.245.61
+B_HOST=100.64.244.24
+
+./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host "$B_HOST" \
+  --operator-id op-b \
+  --issuer-id issuer-b \
+  --peer-directories "http://$A_HOST:8081" \
+  --client-allowlist 0 \
+  --allow-anon-cred 1 \
+  --beta-profile 1 \
+  --peer-identity-strict 0 \
+  --federation-wait 0 \
+  --show-admin-token 0
+
+./scripts/easy_node.sh server-status
+```
+
+Machine A should mirror this with:
+```bash
+./scripts/easy_node.sh server-down || true
+
+A_HOST=100.113.245.61
+B_HOST=100.64.244.24
+
+./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host "$A_HOST" \
+  --operator-id op-a \
+  --issuer-id issuer-a \
+  --peer-directories "http://$B_HOST:8081" \
+  --client-allowlist 0 \
+  --allow-anon-cred 1 \
+  --beta-profile 1 \
+  --peer-identity-strict 0 \
+  --federation-wait 0 \
+  --show-admin-token 0
+
+./scripts/easy_node.sh server-status
+```
+
+DS/WSL health check:
+```bash
+cd /mnt/c/Users/dcella-d/TDPN1
+
+A_HOST=100.113.245.61
+B_HOST=100.64.244.24
+
+for host in "$A_HOST" "$B_HOST"; do
+  echo "checking $host"
+  curl -fsS --connect-timeout 5 "http://$host:8081/v1/pubkeys" >/dev/null && echo "  directory ok"
+  curl -fsS --connect-timeout 5 "http://$host:8082/v1/pubkeys" >/dev/null && echo "  issuer ok"
+  curl -fsS --connect-timeout 5 "http://$host:8083/v1/health" >/dev/null && echo "  entry ok"
+  curl -fsS --connect-timeout 5 "http://$host:8084/v1/health" >/dev/null && echo "  exit ok"
+done
+```
+
+Profile default gate command:
+```bash
+cd /mnt/c/Users/dcella-d/TDPN1
+
+A_HOST=100.113.245.61
+B_HOST=100.64.244.24
+INVITE_KEY='inv-REDACTED'
+
+./scripts/easy_node.sh profile-default-gate-live \
+  --host-a "$A_HOST" \
+  --host-b "$B_HOST" \
+  --allow-remote-http-probe 1 \
+  --reports-dir .easy-node-logs \
+  --campaign-timeout-sec 2400 \
+  --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json \
+  --print-summary-json 1 \
+  --campaign-subject "$INVITE_KEY"
+```
+
+Important: this profile default gate does not require running the blockchain. Blockchain live evidence is separate and should run when testing chain/VPN wiring, validator/reward/slash flows, or settlement.
+
+### 31.13 Live bug chain from May 2026 and fixes made
+The live A/B work exposed several code/runtime bugs. These were not user mistakes.
+
+1. Docker build failed because Dockerfile used Go 1.22 while `go.mod` required Go 1.25:
+```text
+go: go.mod requires go >= 1.25.0 (running go 1.22.12; GOTOOLCHAIN=local)
+```
+Fix: update server Docker build to Go 1.25.
+
+2. Docker build failed because `go.sum` was missing from build context:
+```text
+missing go.sum entry for module providing package github.com/redis/go-redis/v9
+missing go.sum entry for module providing package golang.org/x/crypto/ripemd160
+```
+Fix: copy `go.sum` into server Docker build context.
+
+3. Non-prod mTLS default caused missing cert:
+```text
+directory http tls init: stat MTLS_SERVER_CERT_FILE: lstat /app/tls/node.crt: no such file or directory
+```
+Fix: default non-prod compose mTLS off unless explicitly enabled.
+
+4. Public bind/admin token guard blocked lab public bind:
+```text
+public bind with DIRECTORY_ADMIN_TOKEN requires MTLS_ENABLE=1 or DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_PUBLIC_BIND=1
+```
+Fix: non-prod lab override path added while preserving production fail-closed behavior.
+
+5. Exit startup issuer sync was blocked by outbound literal host policy:
+```text
+exit startup key fetch failed: Get "http://127.0.0.1:8082/v1/pubkeys": outbound literal host "127.0.0.1" is blocked by outbound dial policy
+node stopped: exit startup issuer sync timeout after 30s
+```
+Fix: pin non-prod Docker issuer URLs to service names such as `http://issuer:8082` where appropriate.
+
+6. Campaign endpoint preflight used `/v1/ready` but entry/exit exposed `/v1/health`:
+```text
+endpoint preflight failed for entry (.../v1/ready): curl rc=22: 404
+```
+Fix: use `/v1/health`.
+
+7. Health probes assumed loopback even when services were published on a Tailscale/LAN IP.
+Fix: respect published bind health probes.
+
+8. `profile-default-gate-live --allow-remote-http-probe 1` allowed wrapper probes, but inner client still rejected remote HTTP/private IP control URLs.
+Fix: add/forward non-prod lab allowance through the campaign stack and fail-closed in `--prod-profile 1`.
+
+9. Campaign run count mismatch:
+- Refreshed campaign defaulted to 3 runs.
+- Campaign check required 5 runs.
+Fix: signoff path now defaults refreshed campaign runs to check minimum.
+
+10. Profile default gate was blocked by runtime-actuation/M4 evidence gates that belong to dedicated runtime promotion evidence.
+Fix: profile default gate defaults those M4/runtime requirements off unless explicitly passed.
+
+11. Compose interpolated `ENTRY_PUZZLE_SECRET` for client-demo even when not relevant.
+Fix: non-prod placeholder/build-time env.
+
+12. Machine A entry-exit looped because the exit WG private key on a Windows/NTFS bind mount looked too permissive:
+```text
+exit wg preflight failed: exit private key path permissions are too broad (expected owner-only)
+```
+First fix: repair owner-only permissions in exit service.
+Second fix: copy key into a private Linux runtime secret under `/tmp` and point `EXIT_WG_PRIVATE_KEY_PATH` at that copy.
+Third fix: support Alpine `realpath` without `-m`.
+
+Latest known error before the final fix:
+```text
+entry-exit-1 | realpath: -m: No such file or directory
+```
+Root cause: Alpine `realpath` does not support `-m`.
+
+### 31.14 Latest pushed commits relevant to live A/B fixes
+Expected latest pushed commit at the time of this memory update:
+```text
+dc9e8770 Support Alpine realpath in WG key entrypoint
+```
+
+Recent pushed fix sequence:
+```text
+dc9e8770 Support Alpine realpath in WG key entrypoint
+4e5d8dce Copy WG key to runtime secret on bind mounts
+cf93169c Repair exit WG key permissions at startup
+e980db58 Fix live profile gate remote HTTP path
+5d9d4188 Use health endpoint for campaign preflight
+7efe7c96 Respect published bind health probes
+4301ad59 Fix non-prod Docker issuer control URLs
+e248c1a5 Pin non-prod issuer URLs for exit
+66daee4d Pin authority compose core endpoints
+0689ca55 Pass non-prod lab overrides to compose
+6dfba05e Allow non-prod public bind lab mode
+67241b68 Fix non-prod compose mTLS default
+5410cfe3 Copy go.sum into server Docker build
+6726af44 Update server Docker build to Go 1.25
+```
+
+If the next VS Code Codex session needs to continue live evidence, first ensure both A and B have pulled the latest commit:
+```bash
+git fetch origin
+git checkout codex/gpm-productization-checkpoint
+git pull --ff-only origin codex/gpm-productization-checkpoint
+git log -1 --oneline
+```
+
+Expected branch/commit:
+```text
+codex/gpm-productization-checkpoint
+dc9e8770 Support Alpine realpath in WG key entrypoint
+```
+
+### 31.15 Focused tests that were run for latest fixes
+Relevant focused checks reported/run during this continuation:
+```bash
+bash scripts/integration_entrypoint_wg_key_runtime_copy.sh
+bash scripts/integration_easy_node_server_up_auto_invite.sh
+go test ./pkg/crypto ./pkg/wg ./services/entry ./services/exit ./internal/app
+```
+
+Focused shell/integration checks for profile gate and remote HTTP path:
+```bash
+bash -n scripts/easy_node.sh scripts/profile_compare_local.sh scripts/profile_compare_campaign.sh scripts/profile_compare_campaign_signoff.sh scripts/profile_default_gate_run.sh scripts/integration_easy_node_client_profile_env.sh scripts/integration_profile_compare_local.sh scripts/integration_profile_compare_campaign.sh scripts/integration_profile_compare_campaign_signoff.sh scripts/integration_profile_default_gate_run.sh
+bash scripts/integration_profile_compare_local.sh
+bash scripts/integration_profile_compare_campaign.sh
+bash scripts/integration_profile_compare_campaign_signoff.sh
+bash scripts/integration_profile_default_gate_run.sh
+bash scripts/integration_easy_node_client_profile_env.sh
+go test ./pkg/crypto ./services/entry ./services/exit ./internal/app
+```
+
+### 31.16 Current artifacts/logs to inspect
+Main live signoff summary:
+```text
+.easy-node-logs/profile_compare_campaign_signoff_summary.json
+```
+
+Campaign summary:
+```text
+.easy-node-logs/profile_compare_campaign_summary.json
+```
+
+Campaign check summary:
+```text
+.easy-node-logs/profile_compare_campaign_check_summary.json
+```
+
+Useful diagnostic fragments from this continuation:
+```text
+client-test --directory-urls refused insecure remote URL: http://100.113.245.61:8081
+entrypoint: copied EXIT_WG_PRIVATE_KEY_PATH to owner-only runtime secret: /tmp/...
+exit wg private key permissions repaired to owner-only: /app/data/exit_op-a_wg.key
+exit wg preflight failed: exit private key path permissions are too broad
+realpath: -m: No such file or directory
+```
+
+### 31.17 Best next step after switching to VS Code Codex
+1. Revert/ignore any accidental duplicate context edits outside this chat memory file if present.
+2. Confirm local branch and status:
+```bash
+git status --short
+git branch --show-current
+git log -1 --oneline
+```
+3. Make sure Machine A and B are on `codex/gpm-productization-checkpoint` at `dc9e8770` or newer.
+4. Have the user restart A and B only after code path has been checked locally.
+5. From DS/WSL, run the health loop for both hosts.
+6. If all four endpoints on both hosts are healthy, run `profile-default-gate-live` with `--allow-remote-http-probe 1`.
+7. If profile default gate passes, move to the next live evidence gate.
+8. Do not ask the user to run blockchain yet unless testing chain/VPN wiring or settlement/validator functionality.
+
+### 31.18 Longer-term GPM blocks still missing
+- Production-grade wallet-first app flow with centered wallet modal before main app.
+- Consumer-grade website redesign aligned with app visual language.
+- Admin Console separated completely from public app/server app.
+- Signed bootstrap manifest and signed-cache fallback.
+- Keplr/Leap wallet challenge/signature/session flow.
+- Client self-serve registration/profile bootstrap.
+- Server/operator permissioned application, approval, and chain-binding flow.
+- Production removal of manual endpoint/IP entry.
+- Direct mesh preference plus managed relay fallback with user-facing state.
+- Stake plus prepaid-balance enforcement before VPN use.
+- Tier 2/3 micro-relay and micro-exit eligibility logic.
+- Adaptive GPM Agent capacity scoring and automatic relay/exit caps.
+- Weekly contribution settlement/payout, holds, voids, disputes, slashing linkage.
+- Windows installer, Linux AppImage/DEB/RPM, and first-run auto-remediation.
+- Compatibility alias layer for TDPN legacy commands/config keys.
+
+### 31.19 Collaboration memory for future Codex sessions
+- User is tired of live-test retry loops and wants fixes verified before being asked to try again.
+- User prefers exact commands over menu/flag explanations.
+- User wants direct, practical execution, not broad theory.
+- User wants the app and website to feel premium, simple, safe, and consumer-friendly.
+- User uses strong language when frustrated; treat it as frustration with bugs, not hostility.
+- Keep momentum, but be honest about blockers.
+- Use parallel agents when available, and always include a logic-check/review lane for risky work.
+- When touching git, stage/commit only intentional files and avoid destructive commands.
