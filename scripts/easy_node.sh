@@ -696,6 +696,7 @@ Notes:
   - server-up --mode provider runs directory + entry-exit only (no local issuer/admin token).
   - server-up authority mode can auto-generate invite keys with --auto-invite (useful for quick onboarding).
   - server-up peer identity checks default to strict in beta/prod when peers are configured; in non-prod authority->provider peering, issuer-id strictness auto-relaxes when peer issuers are not reachable. use --peer-identity-strict 0 only for temporary bypass during diagnostics.
+  - server-up auto-binds non-prod private/Tailscale lab hosts to 0.0.0.0 by default so loopback admin commands and remote probes both work; set EASY_NODE_AUTO_PUBLIC_BIND=0 or explicit *_PUBLISHED_BIND_ADDR values to override.
   - rotate-server-secrets rotates local server secret material in env files; use --restart 1 to apply immediately.
   - server-up --prod-profile enables fail-closed production strict mode (requires mTLS + signed issuer-admin auth).
   - admin-signing-status/admin-signing-rotate are authority-only issuer admin signer maintenance tools.
@@ -1291,6 +1292,9 @@ host_is_private_or_loopback() {
   if [[ "$h" == 192.168.* ]]; then
     return 0
   fi
+  if [[ "$h" =~ ^100\.((6[4-9])|([7-9][0-9])|(1[0-1][0-9])|(12[0-7]))\. ]]; then
+    return 0
+  fi
   if [[ "$h" =~ ^172\.([1][6-9]|2[0-9]|3[0-1])\. ]]; then
     return 0
   fi
@@ -1495,6 +1499,15 @@ require_https_for_remote_url() {
   fi
   echo "$context refused insecure remote URL: $raw (use https:// or loopback http://)"
   return 1
+}
+
+host_is_wildcard_bind() {
+  local host="$1"
+  local h
+  h="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  h="${h#[}"
+  h="${h%]}"
+  [[ "$h" == "0.0.0.0" || "$h" == "::" ]]
 }
 
 require_https_for_remote_csv_urls() {
@@ -3333,6 +3346,70 @@ append_published_bind_env_from_process() {
   done
 }
 
+set_default_public_bind_var() {
+  local bind_var="$1"
+  local bind_addr="$2"
+  local current
+  current="${!bind_var-}"
+  if [[ -n "${!bind_var+x}" && -n "$(trim "$current")" ]]; then
+    return 1
+  fi
+  printf -v "$bind_var" '%s' "$bind_addr"
+  export "$bind_var"
+  return 0
+}
+
+apply_server_up_auto_public_binds() {
+  local mode="$1"
+  local public_host="$2"
+  local prod_profile="$3"
+  local auto_public_bind="$4"
+  local bind_addr="0.0.0.0"
+  local applied=0
+  local bind_var
+  local -a bind_vars
+
+  if [[ "$prod_profile" == "1" || -z "$public_host" ]]; then
+    return 0
+  fi
+  if host_is_loopback "$public_host"; then
+    return 0
+  fi
+  case "$auto_public_bind" in
+    0)
+      return 0
+      ;;
+    1)
+      ;;
+    auto)
+      if ! host_is_private_or_loopback "$public_host"; then
+        return 0
+      fi
+      ;;
+  esac
+
+  bind_vars=(
+    DIRECTORY_PUBLISHED_BIND_ADDR
+    ENTRY_PUBLISHED_BIND_ADDR
+    EXIT_PUBLISHED_BIND_ADDR
+    ENTRY_UDP_PUBLISHED_BIND_ADDR
+    EXIT_UDP_PUBLISHED_BIND_ADDR
+  )
+  if [[ "$mode" == "authority" ]]; then
+    bind_vars=(DIRECTORY_PUBLISHED_BIND_ADDR ISSUER_PUBLISHED_BIND_ADDR ENTRY_PUBLISHED_BIND_ADDR EXIT_PUBLISHED_BIND_ADDR ENTRY_UDP_PUBLISHED_BIND_ADDR EXIT_UDP_PUBLISHED_BIND_ADDR)
+  fi
+
+  for bind_var in "${bind_vars[@]}"; do
+    if set_default_public_bind_var "$bind_var" "$bind_addr"; then
+      applied=$((applied + 1))
+    fi
+  done
+  if ((applied > 0)); then
+    echo "server-up auto public bind: using ${bind_addr} for ${applied} published bind(s) on non-prod lab host ${public_host}"
+    echo "server-up auto public bind: set EASY_NODE_AUTO_PUBLIC_BIND=0 or explicit *_PUBLISHED_BIND_ADDR values to override"
+  fi
+}
+
 validate_env_scalar_or_die() {
   local name="$1"
   local value="$2"
@@ -4382,6 +4459,7 @@ server_up() {
   local auto_invite_tier="${EASY_NODE_AUTO_INVITE_TIER:-1}"
   local auto_invite_wait_sec="${EASY_NODE_AUTO_INVITE_WAIT_SEC:-10}"
   local auto_invite_fail_open="${EASY_NODE_AUTO_INVITE_FAIL_OPEN:-1}"
+  local auto_public_bind="${EASY_NODE_AUTO_PUBLIC_BIND:-auto}"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -4688,6 +4766,10 @@ server_up() {
     echo "server-up requires --peer-identity-strict (or EASY_NODE_PEER_IDENTITY_STRICT) to be 0, 1, or auto"
     exit 2
   fi
+  if [[ "$auto_public_bind" != "0" && "$auto_public_bind" != "1" && "$auto_public_bind" != "auto" ]]; then
+    echo "server-up requires EASY_NODE_AUTO_PUBLIC_BIND to be 0, 1, or auto"
+    exit 2
+  fi
 
   clear_runtime_override_env_vars
 
@@ -4766,6 +4848,7 @@ server_up() {
   if [[ -n "$peer_dirs" ]]; then
     peer_dirs="$(filter_peer_dirs_excluding_host "$peer_dirs" "$local_host")"
   fi
+  apply_server_up_auto_public_binds "$mode" "$local_host" "$prod_profile" "$auto_public_bind"
 
   local peer_identity_strict_effective="$peer_identity_strict"
   if [[ "$peer_identity_strict_effective" == "auto" ]]; then
@@ -5284,6 +5367,51 @@ server_status() {
   local env_file
   env_file="$(active_server_env_file)"
   compose_with_env "$env_file" ps
+  server_status_public_bind_warning "$env_file"
+}
+
+server_status_public_bind_warning() {
+  local env_file="$1"
+  [[ -f "$env_file" ]] || return 0
+
+  local mode directory_public_url directory_public_host entry_public_url entry_public_host exit_public_url exit_public_host
+  local warned=0
+  mode="$(identity_value "$env_file" "EASY_NODE_SERVER_MODE")"
+  directory_public_url="$(identity_value "$env_file" "DIRECTORY_PUBLIC_URL")"
+  directory_public_host="$(host_from_url "$directory_public_url")"
+  entry_public_url="$(identity_value "$env_file" "ENTRY_URL_PUBLIC")"
+  entry_public_host="$(host_from_url "$entry_public_url")"
+  exit_public_url="$(identity_value "$env_file" "EXIT_CONTROL_URL_PUBLIC")"
+  exit_public_host="$(host_from_url "$exit_public_url")"
+
+  warn_missing_bind() {
+    local name="$1"
+    local host="$2"
+    local bind_var="$3"
+    local bind_value
+    host="$(trim "$host")"
+    bind_value="$(identity_value "$env_file" "$bind_var")"
+    if [[ -z "$host" ]] || host_is_loopback "$host"; then
+      return 0
+    fi
+    if [[ -n "$bind_value" ]]; then
+      return 0
+    fi
+    if [[ "$warned" == "0" ]]; then
+      echo
+      echo "warning: public URLs advertise a remote host, but one or more Docker ports are using the compose default loopback bind."
+      echo "hint: for lab HTTP, rerun server-up with matching *_PUBLISHED_BIND_ADDR env vars set to 0.0.0.0 so loopback admin commands and remote probes both work."
+      warned=1
+    fi
+    echo "  $name: advertised host $host but $bind_var is not set (default bind is 127.0.0.1)"
+  }
+
+  warn_missing_bind "directory" "$directory_public_host" "DIRECTORY_PUBLISHED_BIND_ADDR"
+  if [[ "$mode" != "provider" ]]; then
+    warn_missing_bind "issuer" "$directory_public_host" "ISSUER_PUBLISHED_BIND_ADDR"
+  fi
+  warn_missing_bind "entry" "$entry_public_host" "ENTRY_PUBLISHED_BIND_ADDR"
+  warn_missing_bind "exit" "$exit_public_host" "EXIT_PUBLISHED_BIND_ADDR"
 }
 
 server_federation_status() {
@@ -11133,6 +11261,7 @@ default_issuer_url_for_invites() {
   local issuer_url=""
   local directory_public_url=""
   local public_host=""
+  local issuer_bind_addr=""
   local scheme="http"
   local local_issuer_url=""
   local -a local_opts
@@ -11148,6 +11277,11 @@ default_issuer_url_for_invites() {
   if curl -fsS --connect-timeout 2 --max-time 6 "${local_opts[@]}" "${local_issuer_url}/v1/pubkeys" >/dev/null 2>&1; then
     echo "$local_issuer_url"
     return
+  fi
+  issuer_bind_addr="$(trim "$(server_env_value "ISSUER_PUBLISHED_BIND_ADDR")")"
+  if [[ -n "$issuer_bind_addr" ]] && ! host_is_loopback "$issuer_bind_addr" && ! host_is_wildcard_bind "$issuer_bind_addr"; then
+    echo "invite admin hint: local loopback issuer is not reachable because ISSUER_PUBLISHED_BIND_ADDR is pinned to $issuer_bind_addr." >&2
+    echo "invite admin hint: use a loopback-capable bind such as ISSUER_PUBLISHED_BIND_ADDR=0.0.0.0 for lab HTTP admin commands, or use HTTPS." >&2
   fi
 
   if [[ -n "$directory_public_url" ]]; then

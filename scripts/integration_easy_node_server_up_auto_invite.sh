@@ -307,6 +307,56 @@ if [[ -s "$AUTH_DOCKER_ENV_CAPTURE" ]] && rg -q '127\.0\.0\.1' "$AUTH_DOCKER_ENV
   exit 1
 fi
 
+echo "[server-up-auto-invite] authority private lab host auto public bind"
+AUTH_AUTO_BIND_LOG="$TMP_DIR/authority_auto_public_bind.log"
+AUTH_AUTO_BIND_CURL_CAPTURE="$TMP_DIR/authority_auto_public_bind_curl_urls.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+FAKE_CURL_URL_CAPTURE="$AUTH_AUTO_BIND_CURL_CAPTURE" \
+./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host 100.64.0.10 \
+  --beta-profile 1 \
+  --prod-profile 0 \
+  --auto-invite 0 >"$AUTH_AUTO_BIND_LOG" 2>&1
+auth_auto_bind_rc=$?
+set -e
+if [[ "$auth_auto_bind_rc" != "0" ]]; then
+  echo "authority auto-public-bind scenario failed rc=${auth_auto_bind_rc}"
+  cat "$AUTH_AUTO_BIND_LOG"
+  exit "$auth_auto_bind_rc"
+fi
+if ! rg -q 'server-up auto public bind: using 0\.0\.0\.0' "$AUTH_AUTO_BIND_LOG"; then
+  echo "expected auto public bind banner for private lab host"
+  cat "$AUTH_AUTO_BIND_LOG"
+  exit 1
+fi
+for expected_bind_env in \
+  DIRECTORY_PUBLISHED_BIND_ADDR \
+  ISSUER_PUBLISHED_BIND_ADDR \
+  ENTRY_PUBLISHED_BIND_ADDR \
+  EXIT_PUBLISHED_BIND_ADDR \
+  ENTRY_UDP_PUBLISHED_BIND_ADDR \
+  EXIT_UDP_PUBLISHED_BIND_ADDR; do
+  if ! rg -q "^${expected_bind_env}=0\\.0\\.0\\.0$" "$AUTH_ENV"; then
+    echo "expected authority env to auto-persist ${expected_bind_env}=0.0.0.0"
+    cat "$AUTH_ENV"
+    exit 1
+  fi
+done
+for expected_url in \
+  "http://127.0.0.1:8081/v1/relays" \
+  "http://127.0.0.1:8082/v1/pubkeys" \
+  "http://127.0.0.1:8083/v1/health" \
+  "http://127.0.0.1:8084/v1/health"; do
+  if ! rg -Fq "$expected_url" "$AUTH_AUTO_BIND_CURL_CAPTURE"; then
+    echo "expected wildcard auto-bind to probe local loopback health target: $expected_url"
+    cat "$AUTH_AUTO_BIND_CURL_CAPTURE"
+    exit 1
+  fi
+done
+
 echo "[server-up-auto-invite] authority published bind health targets"
 AUTH_BIND_LOG="$TMP_DIR/authority_published_bind.log"
 AUTH_BIND_CURL_CAPTURE="$TMP_DIR/authority_published_bind_curl_urls.log"
