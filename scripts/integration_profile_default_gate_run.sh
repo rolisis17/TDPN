@@ -82,6 +82,7 @@ cat >"$TMP_BIN/curl" <<'EOF_FAKE_CURL'
 set -euo pipefail
 counter_file="${PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE:?}"
 fail_attempts="${PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS:-0}"
+error_text="${PROFILE_DEFAULT_GATE_FAKE_CURL_ERROR_TEXT:-}"
 url_capture="${PROFILE_DEFAULT_GATE_FAKE_CURL_URL_CAPTURE_FILE:-}"
 url="${@: -1}"
 
@@ -100,7 +101,11 @@ if [[ -n "$url_capture" ]]; then
 fi
 
 if (( count <= fail_attempts )); then
-  echo "simulated unreachable: $url" >&2
+  if [[ -n "$error_text" ]]; then
+    echo "$error_text" >&2
+  else
+    echo "simulated unreachable: $url" >&2
+  fi
   exit 7
 fi
 exit 0
@@ -188,6 +193,7 @@ CAMPAIGN_SUBJECT="inv-env-success" \
   --endpoint-wait-timeout-sec 6 \
   --endpoint-wait-interval-sec 1 \
   --endpoint-connect-timeout-sec 1 \
+  --allow-remote-http-probe 1 \
   --summary-json "$SUCCESS_SUMMARY" \
   --custom-flag "custom value" >"$SUCCESS_LOG" 2>&1
 success_rc=$?
@@ -228,8 +234,9 @@ assert_not_contains "$success_line_sp" "--campaign-subject inv-env-success" "une
 assert_not_contains "$success_line_sp" "--subject inv-env-success" "unexpected forwarded --subject credential arg"
 assert_not_contains "$success_line_sp" "--key inv-env-success" "unexpected forwarded --key credential arg"
 assert_not_contains "$success_line_sp" "--invite-key inv-env-success" "unexpected forwarded --invite-key credential arg"
-assert_contains "$success_line_sp" "--campaign-directory-urls https://dir-a.test:8081,https://dir-b.test:19081" "missing forwarded directory urls"
-assert_contains "$success_line_sp" "--campaign-bootstrap-directory https://dir-a.test:8081" "missing forwarded bootstrap directory"
+assert_contains "$success_line_sp" "--campaign-directory-urls http://dir-a.test:8081,https://dir-b.test:19081" "missing forwarded directory urls"
+assert_contains "$success_line_sp" "--campaign-bootstrap-directory http://dir-a.test:8081" "missing forwarded bootstrap directory"
+assert_contains "$success_line_sp" "--campaign-allow-insecure-remote-http 1" "missing remote HTTP campaign opt-in forwarding"
 assert_contains "$success_line_sp" "--refresh-campaign 1" "missing default refresh forwarding"
 assert_contains "$success_line_sp" "--campaign-execution-mode docker" "missing docker execution mode default"
 assert_contains "$success_line_sp" "--campaign-start-local-stack 0" "missing start-local-stack default"
@@ -256,6 +263,39 @@ assert_file_contains "$SUCCESS_LOG" "signoff-heartbeat interval_sec=60" "missing
 assert_file_contains "$SUCCESS_LOG" "signoff-progress elapsed_sec=0 state=campaign_start_pending" "missing immediate signoff progress marker"
 assert_file_contains "$SUCCESS_LOG" "signoff-finish rc=0" "missing signoff completion marker"
 
+echo "[profile-default-gate-run] strict host HTTPS mismatch points lab users to live wrapper"
+: >"$SIGNOFF_CAPTURE"
+HTTPS_MISMATCH_LOG="$TMP_DIR/profile_default_gate_run_https_mismatch_hint.log"
+HTTPS_MISMATCH_COUNTER="$TMP_DIR/curl_counter_https_mismatch.txt"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$HTTPS_MISMATCH_COUNTER" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=10 \
+PROFILE_DEFAULT_GATE_FAKE_CURL_ERROR_TEXT="curl: (35) OpenSSL SSL routines::wrong version number" \
+CAMPAIGN_SUBJECT="inv-https-mismatch" \
+"$SCRIPT_UNDER_TEST" \
+  --directory-a "https://dir-a.test:8081" \
+  --host-b "dir-b.test" \
+  --endpoint-wait-timeout-sec 1 \
+  --endpoint-wait-interval-sec 1 \
+  --endpoint-connect-timeout-sec 1 >"$HTTPS_MISMATCH_LOG" 2>&1
+https_mismatch_rc=$?
+set -e
+if [[ "$https_mismatch_rc" -eq 0 ]]; then
+  echo "expected strict host HTTPS mismatch path rc!=0"
+  cat "$HTTPS_MISMATCH_LOG"
+  exit 1
+fi
+assert_file_contains "$HTTPS_MISMATCH_LOG" "HTTPS probe looks like it reached a plain HTTP lab controller" "missing HTTPS mismatch lab hint"
+assert_file_contains "$HTTPS_MISMATCH_LOG" "profile-default-gate-live --host-a <host-a> --host-b <host-b> --allow-remote-http-probe 1" "missing profile-default-gate-live lab HTTP recovery hint"
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "strict host HTTPS mismatch path should not invoke signoff"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+
 echo "[profile-default-gate-run] explicit fail-on-no-go override forwards zero"
 : >"$SIGNOFF_CAPTURE"
 FAIL_ON_NO_GO_OVERRIDE_LOG="$TMP_DIR/profile_default_gate_run_fail_on_no_go_override.log"
@@ -269,6 +309,7 @@ CAMPAIGN_SUBJECT="inv-fail-on-no-go-override" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   --fail-on-no-go 0 >"$FAIL_ON_NO_GO_OVERRIDE_LOG" 2>&1
 fail_on_no_go_override_rc=$?
 set -e
@@ -304,6 +345,7 @@ CAMPAIGN_SUBJECT="inv-env-unbounded-timeout" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   --endpoint-wait-timeout-sec 0 \
   --endpoint-wait-interval-sec 1 \
   --endpoint-connect-timeout-sec 1 \
@@ -349,6 +391,7 @@ CAMPAIGN_SUBJECT="inv-selection-policy-opt-out" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   --require-selection-policy-present 0 \
   --require-selection-policy-valid=0 >"$SELECTION_POLICY_OPT_OUT_LOG" 2>&1
 selection_policy_opt_out_rc=$?
@@ -384,6 +427,7 @@ CAMPAIGN_SUBJECT="inv-heartbeat-override" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   --heartbeat-interval-sec=7 >"$HEARTBEAT_OVERRIDE_LOG" 2>&1
 heartbeat_override_rc=$?
 set -e
@@ -413,7 +457,8 @@ CAMPAIGN_SUBJECT="" \
 INVITE_KEY="" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
-  --host-b "dir-b.test" >"$FILE_FALLBACK_LOG" 2>&1
+  --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 >"$FILE_FALLBACK_LOG" 2>&1
 file_fallback_rc=$?
 set -e
 if [[ "$file_fallback_rc" -ne 0 ]]; then
@@ -446,6 +491,7 @@ INVITE_KEY="" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   --key "inv-key-alias" >"$KEY_ALIAS_LOG" 2>&1
 key_alias_rc=$?
 set -e
@@ -480,6 +526,7 @@ INVITE_KEY="" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   --invite-key "inv-invite-key-alias" >"$INVITE_KEY_ALIAS_LOG" 2>&1
 invite_key_alias_rc=$?
 set -e
@@ -514,6 +561,7 @@ INVITE_KEY="" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   --key=--oops >"$EQUALS_SUBJECT_VALUE_REJECT_LOG" 2>&1
 equals_subject_value_reject_rc=$?
 set -e
@@ -543,6 +591,7 @@ INVITE_KEY="" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   --campaign-subject "inv-campaign-subject" \
   --key "inv-key-mismatch" >"$SUBJECT_CONFLICT_LOG" 2>&1
 subject_conflict_rc=$?
@@ -573,6 +622,7 @@ INVITE_KEY="" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   -- --key "inv-passthrough-key" >"$PASSTHROUGH_KEY_LOG" 2>&1
 passthrough_key_rc=$?
 set -e
@@ -606,6 +656,7 @@ INVITE_KEY="" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   -- --campaign-anon-cred "anon-campaign-token" >"$ANON_CRED_LOG" 2>&1
 anon_cred_rc=$?
 set -e
@@ -642,6 +693,7 @@ INVITE_KEY="" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   --subject "inv-subject-conflict" \
   -- --anon-cred "anon-conflict-token" >"$ANON_SUBJECT_CONFLICT_LOG" 2>&1
 anon_subject_conflict_rc=$?
@@ -672,6 +724,7 @@ INVITE_KEY="" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   -- --campaign-anon-cred --oops --anon-cred "anon-valid-token" >"$ANON_MALFORMED_LOG" 2>&1
 anon_malformed_rc=$?
 set -e
@@ -700,6 +753,7 @@ CAMPAIGN_SUBJECT="inv-env-passthrough-selection-policy" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   -- --require-selection-policy-present 0 --require-selection-policy-valid=0 >"$PASSTHROUGH_SELECTION_POLICY_LOG" 2>&1
 passthrough_selection_policy_rc=$?
 set -e
@@ -765,6 +819,7 @@ INVITE_KEY="inv-placeholder-subject-resolved" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   --subject "INVITE_KEY" >"$PLACEHOLDER_SUBJECT_RESOLVE_LOG" 2>&1
 placeholder_subject_resolve_rc=$?
 set -e
@@ -981,7 +1036,7 @@ if [[ -z "$remote_http_probe_opt_in_line" ]]; then
   exit 1
 fi
 remote_http_probe_opt_in_line_sp="${remote_http_probe_opt_in_line//$'\t'/ }"
-assert_contains "$remote_http_probe_opt_in_line_sp" "--campaign-directory-urls http://dir-a.test:8081,https://dir-b.test:8081" "missing forwarded mixed-scheme campaign-directory-urls in remote-http opt-in path"
+assert_contains "$remote_http_probe_opt_in_line_sp" "--campaign-directory-urls http://dir-a.test:8081,http://dir-b.test:8081" "missing forwarded HTTP campaign-directory-urls in remote-http opt-in path"
 assert_contains "$remote_http_probe_opt_in_line_sp" "--campaign-allow-insecure-remote-http 1" "missing forwarded campaign insecure remote HTTP opt-in"
 
 echo "[profile-default-gate-run] invalid --allow-insecure-probe value fails closed"
@@ -1109,6 +1164,7 @@ CAMPAIGN_SUBJECT="inv-env-unreachable" \
 "$SCRIPT_UNDER_TEST" \
   --host-a "dir-a.test" \
   --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
   --endpoint-wait-timeout-sec 2 \
   --endpoint-wait-interval-sec 1 \
   --endpoint-connect-timeout-sec 1 >"$UNREACHABLE_LOG" 2>&1

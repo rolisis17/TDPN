@@ -262,13 +262,21 @@ extract_url_scheme_01() {
   printf '%s' ""
 }
 
+https_probe_error_looks_plain_http_01() {
+  local error_text normalized
+  error_text="$(trim "${1:-}")"
+  normalized="$(printf '%s' "$error_text" | tr '[:upper:]' '[:lower:]')"
+  case "$normalized" in
+    *wrong\ version\ number*|*server\ gave\ http\ response*|*http\ response\ to\ https*|*plain\ http*|*ssl*|*tls*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 endpoint_scheme_for_host_01() {
   local host="$1"
-  if is_local_host_for_probe_01 "$host"; then
-    printf '%s' "http"
-  else
-    printf '%s' "https"
-  fi
+  printf '%s' "http"
 }
 
 fail_placeholder_directory_input_01() {
@@ -729,6 +737,9 @@ wait_for_directory_endpoint() {
       echo "last_error: $err_text"
       echo "hint: verify endpoint path and host reachability for $probe_url_log"
       echo "hint: confirm service is listening on expected host:port and serving /v1/pubkeys"
+      if [[ "$probe_scheme" == "https" ]] && ! is_local_host_for_probe_01 "$probe_host" && https_probe_error_looks_plain_http_01 "$err_text"; then
+        echo "hint: HTTPS probe looks like it reached a plain HTTP lab controller for $label; use ./scripts/easy_node.sh profile-default-gate-live --host-a <host-a> --host-b <host-b> --allow-remote-http-probe 1, or pass full http://HOST:PORT URLs with --allow-remote-http-probe 1"
+      fi
       echo "hint: if startup is slow, increase --endpoint-wait-timeout-sec (current=$endpoint_wait_timeout_sec)"
       echo "hint: if network handshakes are slow, increase --endpoint-connect-timeout-sec (current=$endpoint_connect_timeout_sec)"
       return 1
