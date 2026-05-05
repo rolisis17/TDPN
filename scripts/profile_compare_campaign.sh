@@ -42,6 +42,7 @@ Usage:
     [--exit-iface IFACE] \
     [--cleanup-ifaces [0|1]] \
     [--keep-stack [0|1]] \
+    [--live-evidence [0|1]] \
     [--trend-max-reports N] \
     [--trend-since-hours N] \
     [--trend-min-profile-runs N] \
@@ -537,6 +538,7 @@ min_sources="1"
 beta_profile="0"
 prod_profile="0"
 allow_insecure_remote_http="${PROFILE_COMPARE_CAMPAIGN_ALLOW_INSECURE_REMOTE_HTTP:-0}"
+live_evidence="${PROFILE_COMPARE_CAMPAIGN_LIVE_EVIDENCE:-0}"
 start_local_stack="auto"
 force_stack_reset="1"
 stack_strict_beta="0"
@@ -552,6 +554,7 @@ trend_min_profile_runs="3"
 trend_min_profile_pass_rate_pct="95"
 trend_balanced_latency_margin_pct="15"
 trend_fail_on_any_fail="0"
+trend_fail_on_any_fail_explicit="0"
 trend_min_decision_rate_pct="0"
 
 summary_json=""
@@ -716,6 +719,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --live-evidence)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        live_evidence="${2:-}"
+        shift 2
+      else
+        live_evidence="1"
+        shift
+      fi
+      ;;
     --trend-max-reports)
       trend_max_reports="${2:-}"
       shift 2
@@ -737,6 +749,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --trend-fail-on-any-fail)
+      trend_fail_on_any_fail_explicit="1"
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         trend_fail_on_any_fail="${2:-}"
         shift 2
@@ -784,9 +797,17 @@ bool_arg_or_die "--force-stack-reset" "$force_stack_reset"
 bool_arg_or_die "--stack-strict-beta" "$stack_strict_beta"
 bool_arg_or_die "--cleanup-ifaces" "$cleanup_ifaces"
 bool_arg_or_die "--keep-stack" "$keep_stack"
+bool_arg_or_die "--live-evidence" "$live_evidence"
 bool_arg_or_die "--trend-fail-on-any-fail" "$trend_fail_on_any_fail"
 tri_state_or_die "--start-local-stack" "$start_local_stack"
 bool_arg_or_die "--allow-insecure-remote-http" "$allow_insecure_remote_http"
+if [[ "$live_evidence" == "1" && "$trend_fail_on_any_fail_explicit" == "0" ]]; then
+  trend_fail_on_any_fail="1"
+fi
+if [[ "$live_evidence" == "1" && "$trend_fail_on_any_fail" != "1" ]]; then
+  echo "--live-evidence requires --trend-fail-on-any-fail 1"
+  exit 2
+fi
 
 if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
   echo "--beta-profile must be 0 or 1"
@@ -917,6 +938,29 @@ if [[ "$explicit_remote_endpoints" == "1" ]]; then
     transport_auto_data_plane_mode_opaque="1"
   fi
 fi
+if [[ "$live_evidence" == "1" ]]; then
+  if [[ -n "${CLIENT_INNER_SOURCE+x}" && "$CLIENT_INNER_SOURCE" != "udp" ]]; then
+    echo "--live-evidence requires CLIENT_INNER_SOURCE=udp when CLIENT_INNER_SOURCE is set"
+    exit 2
+  fi
+  if [[ -n "${CLIENT_DISABLE_SYNTHETIC_FALLBACK+x}" && "$CLIENT_DISABLE_SYNTHETIC_FALLBACK" != "1" ]]; then
+    echo "--live-evidence requires CLIENT_DISABLE_SYNTHETIC_FALLBACK=1 when CLIENT_DISABLE_SYNTHETIC_FALLBACK is set"
+    exit 2
+  fi
+  if [[ -n "${DATA_PLANE_MODE+x}" && "$DATA_PLANE_MODE" != "opaque" ]]; then
+    echo "--live-evidence requires DATA_PLANE_MODE=opaque when DATA_PLANE_MODE is set"
+    exit 2
+  fi
+  if [[ -z "${CLIENT_INNER_SOURCE+x}" ]]; then
+    transport_auto_client_inner_source="1"
+  fi
+  if [[ -z "${CLIENT_DISABLE_SYNTHETIC_FALLBACK+x}" ]]; then
+    transport_auto_disable_synthetic_fallback="1"
+  fi
+  if [[ -z "${DATA_PLANE_MODE+x}" ]]; then
+    transport_auto_data_plane_mode_opaque="1"
+  fi
+fi
 
 local_compare_script="${PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT:-$ROOT_DIR/scripts/profile_compare_local.sh}"
 trend_script="${PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT:-$ROOT_DIR/scripts/profile_compare_trend.sh}"
@@ -996,6 +1040,7 @@ for ((run_idx = 1; run_idx <= campaign_runs; run_idx++)); do
     --exit-iface "$exit_iface"
     --cleanup-ifaces "$cleanup_ifaces"
     --keep-stack "$keep_stack"
+    --live-evidence "$live_evidence"
     --summary-json "$compare_summary"
     --report-md "$compare_report"
     --print-summary-json 0
@@ -1173,11 +1218,14 @@ if [[ -f "$trend_summary_json" ]]; then
   if [[ -n "$selection_policy_json" ]]; then
     trend_selection_policy_source="$(jq -r '.summary.selection_policy_source // ""' "$trend_summary_json" 2>/dev/null || printf '%s' "")"
     case "$trend_selection_policy_source" in
-      fallback-default|synthetic-default|none)
+      *fallback*|*synthetic*|none)
         selection_policy_json=""
         ;;
       *)
         selection_policy_source="trend"
+        if [[ -n "$trend_selection_policy_source" ]]; then
+          selection_policy_source="trend:$trend_selection_policy_source"
+        fi
         ;;
     esac
   fi
@@ -1187,8 +1235,19 @@ if [[ -z "$selection_policy_json" ]]; then
   for selection_policy_source_summary in "${compare_summary_paths[@]}"; do
     selection_policy_json="$(extract_selection_policy_json "$selection_policy_source_summary")"
     if [[ -n "$selection_policy_json" ]]; then
-      selection_policy_source="compare:$selection_policy_source_summary"
-      break
+      compare_selection_policy_source="$(jq -r '.summary.selection_policy_source // .summary.selection_policy.source // ""' "$selection_policy_source_summary" 2>/dev/null || printf '%s' "")"
+      case "$compare_selection_policy_source" in
+        *fallback*|*synthetic*|none)
+          selection_policy_json=""
+          ;;
+        *)
+          selection_policy_source="compare:$selection_policy_source_summary"
+          if [[ -n "$compare_selection_policy_source" ]]; then
+            selection_policy_source="compare:$compare_selection_policy_source:$selection_policy_source_summary"
+          fi
+          break
+          ;;
+      esac
     fi
   done
 fi
@@ -1199,7 +1258,9 @@ if [[ -z "$selection_policy_json" ]]; then
       entry_rotation_sec: 0,
       entry_rotation_jitter_pct: 0,
       exit_exploration_pct: 10,
-      path_profile: "2hop"
+      path_profile: "2hop",
+      source: "fallback-default",
+      observed_from_log: false
     }
   ')"
   selection_policy_source="fallback-default"
@@ -1418,6 +1479,7 @@ jq -n \
   --arg start_local_stack_adjusted "$start_local_stack_adjusted" \
   --arg start_local_stack_adjustment_reason "$start_local_stack_adjustment_reason" \
   --arg explicit_remote_endpoints "$explicit_remote_endpoints" \
+  --arg live_evidence "$live_evidence" \
   --arg transport_auto_client_inner_source "$transport_auto_client_inner_source" \
   --arg transport_auto_disable_synthetic_fallback "$transport_auto_disable_synthetic_fallback" \
   --arg transport_auto_data_plane_mode_opaque "$transport_auto_data_plane_mode_opaque" \
@@ -1484,6 +1546,7 @@ jq -n \
         execution_mode_effective: $execution_mode_effective,
         execution_mode_adjusted: ($execution_mode_adjusted == "1"),
         execution_mode_adjustment_reason: (if $execution_mode_adjustment_reason == "" then null else $execution_mode_adjustment_reason end),
+        live_evidence: ($live_evidence == "1"),
         explicit_remote_endpoints: ($explicit_remote_endpoints == "1"),
         transport_auto_defaults: {
           client_inner_source_udp: ($transport_auto_client_inner_source == "1"),

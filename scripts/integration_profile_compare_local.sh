@@ -196,6 +196,9 @@ if ! jq -e '
   and .summary.selection_policy.entry_rotation_jitter_pct == 15
   and .summary.selection_policy.exit_exploration_pct == 10
   and .summary.selection_policy.path_profile == "2hop"
+  and .summary.selection_policy.source == "partial-log-fallback"
+  and .summary.selection_policy.observed_from_log == false
+  and .summary.selection_policy_source == "partial-log-fallback"
   and .decision.recommended_default_profile == "balanced"
   and .summary.m4_micro_relay_evidence.available == true
   and .summary.m4_micro_relay_evidence.middle_selection_count == 2
@@ -357,6 +360,9 @@ if ! jq -e '
   and .summary.selection_policy.entry_rotation_jitter_pct == 10
   and .summary.selection_policy.exit_exploration_pct == 5
   and .summary.selection_policy.path_profile == "3hop"
+  and .summary.selection_policy.source == "partial-log-fallback"
+  and .summary.selection_policy.observed_from_log == false
+  and .summary.selection_policy_source == "partial-log-fallback"
 ' "$PRIVATE_DEFAULT_SUMMARY_JSON" >/dev/null; then
   echo "private summary json missing expected selection policy defaults"
   cat "$PRIVATE_DEFAULT_SUMMARY_JSON"
@@ -391,6 +397,9 @@ if ! jq -e '
   and .summary.selection_policy.entry_rotation_jitter_pct == 20
   and .summary.selection_policy.exit_exploration_pct == 20
   and .summary.selection_policy.path_profile == "1hop"
+  and .summary.selection_policy.source == "partial-log-fallback"
+  and .summary.selection_policy.observed_from_log == false
+  and .summary.selection_policy_source == "partial-log-fallback"
 ' "$SPEED_1HOP_DEFAULT_SUMMARY_JSON" >/dev/null; then
   echo "speed-1hop summary json missing expected selection policy defaults"
   cat "$SPEED_1HOP_DEFAULT_SUMMARY_JSON"
@@ -512,6 +521,84 @@ fi
 if grep -F -- 'data_plane_mode=opaque' <<<"$loopback_env_line" >/dev/null; then
   echo "loopback run unexpectedly forced opaque data plane mode"
   cat "$CAPTURE"
+  exit 1
+fi
+
+LIVE_LOOPBACK_SUMMARY_JSON="$TMP_DIR/profile_compare_live_loopback_summary.json"
+LIVE_LOOPBACK_REPORT_MD="$TMP_DIR/profile_compare_live_loopback_report.md"
+LIVE_LOOPBACK_RUN_LOG="$TMP_DIR/profile_compare_live_loopback_run.log"
+: >"$CAPTURE"
+
+echo "[profile-compare-local] live evidence forces transport defaults on loopback endpoints"
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles balanced \
+  --rounds 1 \
+  --execution-mode local \
+  --directory-urls http://127.0.0.1:28081 \
+  --issuer-url http://127.0.0.1:28082 \
+  --entry-url http://127.0.0.1:28083 \
+  --exit-url http://127.0.0.1:28084 \
+  --live-evidence 1 \
+  --summary-json "$LIVE_LOOPBACK_SUMMARY_JSON" \
+  --report-md "$LIVE_LOOPBACK_REPORT_MD" \
+  --print-summary-json 0 >"$LIVE_LOOPBACK_RUN_LOG"
+
+if ! jq -e '
+  .status == "pass"
+  and .inputs.live_evidence == true
+  and .inputs.fail_on_run_fail == true
+  and .inputs.explicit_remote_endpoints == false
+  and .inputs.transport_auto_defaults.client_inner_source_udp == true
+  and .inputs.transport_auto_defaults.disable_synthetic_fallback == true
+  and .inputs.transport_auto_defaults.data_plane_mode_opaque == true
+  and .summary.selection_policy.source == "partial-log-fallback"
+  and .summary.selection_policy.observed_from_log == false
+  and .summary.selection_policy_source == "partial-log-fallback"
+' "$LIVE_LOOPBACK_SUMMARY_JSON" >/dev/null; then
+  echo "live loopback summary did not force strict transport defaults"
+  cat "$LIVE_LOOPBACK_SUMMARY_JSON"
+  exit 1
+fi
+live_loopback_env_line="$(rg '^env ' "$CAPTURE" | tail -n 1 || true)"
+for expected in 'client_inner_source=udp' 'disable_synthetic_fallback=1' 'data_plane_mode=opaque'; do
+  if ! grep -F -- "$expected" <<<"$live_loopback_env_line" >/dev/null; then
+    echo "live loopback env missing $expected"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
+
+LIVE_UNSAFE_RUN_LOG="$TMP_DIR/profile_compare_live_unsafe_run.log"
+echo "[profile-compare-local] live evidence rejects unsafe transport overrides"
+set +e
+CLIENT_INNER_SOURCE=synthetic \
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles balanced \
+  --rounds 1 \
+  --execution-mode local \
+  --directory-urls http://127.0.0.1:29081 \
+  --issuer-url http://127.0.0.1:29082 \
+  --entry-url http://127.0.0.1:29083 \
+  --exit-url http://127.0.0.1:29084 \
+  --live-evidence 1 >"$LIVE_UNSAFE_RUN_LOG" 2>&1
+live_unsafe_rc=$?
+set -e
+if [[ "$live_unsafe_rc" -eq 0 ]]; then
+  echo "live evidence should reject CLIENT_INNER_SOURCE=synthetic"
+  cat "$LIVE_UNSAFE_RUN_LOG"
+  exit 1
+fi
+if ! grep -F -- '--live-evidence requires CLIENT_INNER_SOURCE=udp' "$LIVE_UNSAFE_RUN_LOG" >/dev/null; then
+  echo "live evidence unsafe override message missing"
+  cat "$LIVE_UNSAFE_RUN_LOG"
   exit 1
 fi
 

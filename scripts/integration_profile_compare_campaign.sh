@@ -623,6 +623,7 @@ if ! jq -e '
   and .summary.selection_policy.entry_rotation_jitter_pct == 9
   and .summary.selection_policy.exit_exploration_pct == 18
   and .summary.selection_policy.path_profile == "2hop"
+  and (.summary.selection_policy_source | startswith("compare:"))
 ' "$SELECTION_POLICY_FALLBACK_JSON" >/dev/null 2>&1; then
   echo "campaign selection policy fallback summary missing expected local values"
   cat "$SELECTION_POLICY_FALLBACK_JSON"
@@ -792,6 +793,48 @@ if ! jq -e '
 ' "$LOOPBACK_JSON" >/dev/null 2>&1; then
   echo "campaign loopback metadata missing expected transport defaults"
   cat "$LOOPBACK_JSON"
+  exit 1
+fi
+
+echo "[profile-compare-campaign] live evidence forces transport defaults on loopback campaign"
+: >"$LOCAL_CAPTURE"
+: >"$TREND_CAPTURE"
+printf '0\n' >"$LOCAL_COUNTER"
+LIVE_LOOPBACK_JSON="$TMP_DIR/campaign_live_loopback.json"
+PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT="$FAKE_LOCAL" \
+PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT="$FAKE_TREND" \
+FAKE_LOCAL_CAPTURE_FILE="$LOCAL_CAPTURE" \
+FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
+FAKE_LOCAL_FAIL_AT=0 \
+FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
+./scripts/profile_compare_campaign.sh \
+  --campaign-runs 1 \
+  --directory-urls http://127.0.0.1:18081 \
+  --issuer-url http://127.0.0.1:18082 \
+  --entry-url http://127.0.0.1:18083 \
+  --exit-url http://127.0.0.1:18084 \
+  --live-evidence 1 \
+  --summary-json "$LIVE_LOOPBACK_JSON" >/tmp/integration_profile_compare_campaign_live_loopback.log 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .inputs.compare.live_evidence == true
+  and .inputs.compare.explicit_remote_endpoints == false
+  and .inputs.compare.transport_auto_defaults.client_inner_source_udp == true
+  and .inputs.compare.transport_auto_defaults.disable_synthetic_fallback == true
+  and .inputs.compare.transport_auto_defaults.data_plane_mode_opaque == true
+  and .inputs.trend.fail_on_any_fail == true
+' "$LIVE_LOOPBACK_JSON" >/dev/null 2>&1; then
+  echo "campaign live loopback metadata missing expected strict defaults"
+  cat "$LIVE_LOOPBACK_JSON"
+  cat /tmp/integration_profile_compare_campaign_live_loopback.log
+  exit 1
+fi
+if ! rg -q -- '--live-evidence 1' "$LOCAL_CAPTURE"; then
+  echo "campaign live evidence did not forward to local compare"
+  cat "$LOCAL_CAPTURE"
   exit 1
 fi
 

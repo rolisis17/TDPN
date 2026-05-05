@@ -157,6 +157,7 @@ if ! jq -e '
   and .summary.selection_policy.entry_rotation_jitter_pct == 25
   and .summary.selection_policy.exit_exploration_pct == 12
   and .summary.selection_policy.path_profile == "3hop"
+  and .summary.selection_policy_source == "source-summary"
 ' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "baseline summary JSON missing expected fields"
   cat "$SUMMARY_JSON"

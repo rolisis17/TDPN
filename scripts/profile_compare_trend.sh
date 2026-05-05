@@ -375,7 +375,9 @@ selection_policy_summary_json="$(jq '
     entry_rotation_sec: 0,
     entry_rotation_jitter_pct: 0,
     exit_exploration_pct: 10,
-    path_profile: "2hop"
+    path_profile: "2hop",
+    source: "fallback-default",
+    observed_from_log: false
   }
 ' <<<"$reports_json")"
 
@@ -388,14 +390,11 @@ selection_policy_source="$(jq -r '
     and (.exit_exploration_pct | type == "number")
     and (.path_profile | type == "string")
     and ((.path_profile | length) > 0);
-  if ([ .[]
-        | select((.status // "") != "skip")
-        | .summary.selection_policy?
-        | select(valid_selection_policy)
-      ] | length) > 0
-  then "source-summary"
-  else "fallback-default"
-  end
+  ([ .[]
+      | select((.status // "") != "skip")
+      | select(.summary.selection_policy? | valid_selection_policy)
+      | (.summary.selection_policy_source // .summary.selection_policy.source // "source-summary")
+   ] | .[0]) // "fallback-default"
 ' <<<"$reports_json")"
 
 m4_micro_relay_evidence_summary_json="$(jq '

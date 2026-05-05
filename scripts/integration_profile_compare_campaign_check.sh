@@ -71,6 +71,24 @@ cat >"$COMPARE_SUMMARY_POLICY_INVALID_JSON" <<'EOF_COMPARE_POLICY_INVALID'
 }
 EOF_COMPARE_POLICY_INVALID
 
+COMPARE_SUMMARY_POLICY_FALLBACK_JSON="$TMP_DIR/profile_compare_local_summary_policy_fallback.json"
+cat >"$COMPARE_SUMMARY_POLICY_FALLBACK_JSON" <<'EOF_COMPARE_POLICY_FALLBACK'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {
+    "selection_policy_source": "partial-log-fallback",
+    "selection_policy": {
+      "sticky_pair_sec": 300,
+      "entry_rotation_sec": 120,
+      "entry_rotation_jitter_pct": 20,
+      "exit_exploration_pct": 20,
+      "path_profile": "2hop"
+    }
+  }
+}
+EOF_COMPARE_POLICY_FALLBACK
+
 CAMPAIGN_JSON="$TMP_DIR/profile_compare_campaign_summary.json"
 cat >"$CAMPAIGN_JSON" <<EOF_CAMPAIGN
 {
@@ -470,6 +488,57 @@ fi
 if ! rg -q 'selection policy evidence is required to be valid' /tmp/integration_profile_compare_campaign_check_selection_policy_valid_fail.log; then
   echo "expected selection-policy valid failure reason missing"
   cat /tmp/integration_profile_compare_campaign_check_selection_policy_valid_fail.log
+  exit 1
+fi
+
+echo "[profile-compare-campaign-check] selection policy evidence fail-close: fallback source"
+CAMPAIGN_FALLBACK_POLICY_JSON="$TMP_DIR/profile_compare_campaign_summary_fallback_policy.json"
+cat >"$CAMPAIGN_FALLBACK_POLICY_JSON" <<EOF_CAMPAIGN_FALLBACK_POLICY
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "notes": "campaign pass",
+  "summary": {
+    "runs_total": 5,
+    "runs_pass": 5,
+    "runs_warn": 0,
+    "runs_fail": 0,
+    "runs_with_summary": 5
+  },
+  "decision": {
+    "recommended_default_profile": "balanced",
+    "source": "policy_reliability_latency",
+    "rationale": "balanced remains best"
+  },
+  "trend": {
+    "status": "pass",
+    "rc": 0,
+    "notes": "trend pass",
+    "summary_json": "$TREND_JSON"
+  },
+  "selected_summaries": [
+    "$COMPARE_SUMMARY_POLICY_FALLBACK_JSON"
+  ],
+  "runs": []
+}
+EOF_CAMPAIGN_FALLBACK_POLICY
+
+set +e
+./scripts/profile_compare_campaign_check.sh \
+  --campaign-summary-json "$CAMPAIGN_FALLBACK_POLICY_JSON" \
+  --require-selection-policy-valid 1 \
+  --summary-json "$TMP_DIR/campaign_check_selection_policy_fallback_source_fail.json" >/tmp/integration_profile_compare_campaign_check_selection_policy_fallback_source_fail.log 2>&1
+selection_policy_fallback_source_fail_rc=$?
+set -e
+if [[ "$selection_policy_fallback_source_fail_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when selection policy source is fallback"
+  cat /tmp/integration_profile_compare_campaign_check_selection_policy_fallback_source_fail.log
+  exit 1
+fi
+if ! rg -q 'selection policy evidence is required to be valid' /tmp/integration_profile_compare_campaign_check_selection_policy_fallback_source_fail.log; then
+  echo "expected selection-policy fallback-source failure reason missing"
+  cat /tmp/integration_profile_compare_campaign_check_selection_policy_fallback_source_fail.log
   exit 1
 fi
 

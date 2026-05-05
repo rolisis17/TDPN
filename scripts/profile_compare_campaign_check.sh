@@ -981,10 +981,10 @@ fi
 
 campaign_selection_policy_present=0
 campaign_selection_policy_valid=0
-campaign_selection_policy_source="$(jq -r '.summary.selection_policy_source // ""' "$campaign_summary_json" 2>/dev/null || printf '%s' "")"
+campaign_selection_policy_source="$(jq -r '.summary.selection_policy_source // .summary.selection_policy.source // ""' "$campaign_summary_json" 2>/dev/null || printf '%s' "")"
 campaign_selection_policy_synthetic_default=0
 case "$campaign_selection_policy_source" in
-  fallback-default|synthetic-default|none)
+  *fallback*|*synthetic*|none)
     campaign_selection_policy_synthetic_default=1
     ;;
 esac
@@ -1040,6 +1040,13 @@ while IFS= read -r selected_summary_path; do
   if jq -e '.summary.selection_policy | type == "object"' "$selected_summary_path" >/dev/null 2>&1; then
     selection_policy_selected_summaries_present_count=$((selection_policy_selected_summaries_present_count + 1))
   fi
+  selected_summary_selection_policy_source="$(jq -r '.summary.selection_policy_source // .summary.selection_policy.source // ""' "$selected_summary_path" 2>/dev/null || printf '%s' "")"
+  selected_summary_selection_policy_synthetic_default=0
+  case "$selected_summary_selection_policy_source" in
+    *fallback*|*synthetic*|none)
+      selected_summary_selection_policy_synthetic_default=1
+      ;;
+  esac
   if jq -e '
     .summary.selection_policy
     and (.summary.selection_policy.sticky_pair_sec | type == "number")
@@ -1048,7 +1055,9 @@ while IFS= read -r selected_summary_path; do
     and (.summary.selection_policy.exit_exploration_pct | type == "number")
     and (.summary.selection_policy.path_profile | type == "string")
   ' "$selected_summary_path" >/dev/null 2>&1; then
-    selection_policy_selected_summaries_valid_count=$((selection_policy_selected_summaries_valid_count + 1))
+    if ((selected_summary_selection_policy_synthetic_default == 0)); then
+      selection_policy_selected_summaries_valid_count=$((selection_policy_selected_summaries_valid_count + 1))
+    fi
   fi
   read -r m4_selected_quality_present \
     m4_selected_quality_status_pass \

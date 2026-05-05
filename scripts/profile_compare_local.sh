@@ -39,6 +39,7 @@ Usage:
     [--cleanup-ifaces [0|1]] \
     [--keep-stack [0|1]] \
     [--fail-on-run-fail [0|1]] \
+    [--live-evidence [0|1]] \
     [--summary-json PATH] \
     [--report-md PATH] \
     [--print-summary-json [0|1]]
@@ -460,6 +461,8 @@ exit_iface="${PROFILE_COMPARE_LOCAL_EXIT_IFACE:-wgestack0}"
 cleanup_ifaces="1"
 keep_stack="0"
 fail_on_run_fail="0"
+fail_on_run_fail_explicit="0"
+live_evidence="${PROFILE_COMPARE_LOCAL_LIVE_EVIDENCE:-0}"
 summary_json=""
 report_md=""
 print_summary_json="0"
@@ -602,11 +605,21 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --fail-on-run-fail)
+      fail_on_run_fail_explicit="1"
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         fail_on_run_fail="${2:-}"
         shift 2
       else
         fail_on_run_fail="1"
+        shift
+      fi
+      ;;
+    --live-evidence)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        live_evidence="${2:-}"
+        shift 2
+      else
+        live_evidence="1"
         shift
       fi
       ;;
@@ -645,6 +658,7 @@ bool_arg_or_die "--stack-strict-beta" "$stack_strict_beta"
 bool_arg_or_die "--cleanup-ifaces" "$cleanup_ifaces"
 bool_arg_or_die "--keep-stack" "$keep_stack"
 bool_arg_or_die "--fail-on-run-fail" "$fail_on_run_fail"
+bool_arg_or_die "--live-evidence" "$live_evidence"
 tri_state_or_die "--start-local-stack" "$start_local_stack"
 
 if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
@@ -656,6 +670,13 @@ if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
   exit 2
 fi
 bool_arg_or_die "--allow-insecure-remote-http" "$allow_insecure_remote_http"
+if [[ "$live_evidence" == "1" && "$fail_on_run_fail_explicit" == "0" ]]; then
+  fail_on_run_fail="1"
+fi
+if [[ "$live_evidence" == "1" && "$fail_on_run_fail" != "1" ]]; then
+  echo "--live-evidence requires --fail-on-run-fail 1"
+  exit 2
+fi
 if [[ "$prod_profile" == "1" ]]; then
   beta_profile="1"
 fi
@@ -843,6 +864,29 @@ if [[ "$explicit_remote_endpoints" == "1" ]]; then
     transport_auto_data_plane_mode_opaque="1"
   fi
 fi
+if [[ "$live_evidence" == "1" ]]; then
+  if [[ -n "${CLIENT_INNER_SOURCE+x}" && "$CLIENT_INNER_SOURCE" != "udp" ]]; then
+    echo "--live-evidence requires CLIENT_INNER_SOURCE=udp when CLIENT_INNER_SOURCE is set"
+    exit 2
+  fi
+  if [[ -n "${CLIENT_DISABLE_SYNTHETIC_FALLBACK+x}" && "$CLIENT_DISABLE_SYNTHETIC_FALLBACK" != "1" ]]; then
+    echo "--live-evidence requires CLIENT_DISABLE_SYNTHETIC_FALLBACK=1 when CLIENT_DISABLE_SYNTHETIC_FALLBACK is set"
+    exit 2
+  fi
+  if [[ -n "${DATA_PLANE_MODE+x}" && "$DATA_PLANE_MODE" != "opaque" ]]; then
+    echo "--live-evidence requires DATA_PLANE_MODE=opaque when DATA_PLANE_MODE is set"
+    exit 2
+  fi
+  if [[ -z "${CLIENT_INNER_SOURCE+x}" ]]; then
+    transport_auto_client_inner_source="1"
+  fi
+  if [[ -z "${CLIENT_DISABLE_SYNTHETIC_FALLBACK+x}" ]]; then
+    transport_auto_disable_synthetic_fallback="1"
+  fi
+  if [[ -z "${DATA_PLANE_MODE+x}" ]]; then
+    transport_auto_data_plane_mode_opaque="1"
+  fi
+fi
 if [[ "$start_local_stack" == "auto" ]]; then
   if [[ "$explicit_endpoints" == "1" ]]; then
     start_local_stack="0"
@@ -977,6 +1021,7 @@ append_run_record() {
   local selection_policy_entry_rotation_jitter_pct="${28}"
   local selection_policy_exit_exploration_pct="${29}"
   local selection_policy_path_profile="${30}"
+  local selection_policy_source="${31}"
 
   jq -n \
     --arg profile "$profile" \
@@ -1009,6 +1054,7 @@ append_run_record() {
     --argjson selection_policy_entry_rotation_jitter_pct "$selection_policy_entry_rotation_jitter_pct" \
     --argjson selection_policy_exit_exploration_pct "$selection_policy_exit_exploration_pct" \
     --arg selection_policy_path_profile "$selection_policy_path_profile" \
+    --arg selection_policy_source "$selection_policy_source" \
     '{
       profile: $profile,
       round: $round,
@@ -1040,7 +1086,9 @@ append_run_record() {
         entry_rotation_sec: $selection_policy_entry_rotation_sec,
         entry_rotation_jitter_pct: $selection_policy_entry_rotation_jitter_pct,
         exit_exploration_pct: $selection_policy_exit_exploration_pct,
-        path_profile: $selection_policy_path_profile
+        path_profile: $selection_policy_path_profile,
+        source: $selection_policy_source,
+        observed_from_log: ($selection_policy_source == "observed-log")
       }
     }' >>"$runs_file"
 }
@@ -1058,7 +1106,7 @@ for profile in "${profiles[@]}"; do
     if [[ -n "$skip_reason" ]]; then
       echo "[profile-compare-local] profile=$profile round=$round_idx status=skip reason=$skip_reason" | tee -a "$summary_log"
       skip_policy_path_profile="$(runtime_path_profile_from_compare_profile "$profile")"
-      append_run_record "$profile" "$round_idx" "skip" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "false" "$run_output_log" "" "" "$skip_reason" "0" "0" "0" "0" "$skip_policy_path_profile"
+      append_run_record "$profile" "$round_idx" "skip" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "false" "$run_output_log" "" "" "$skip_reason" "0" "0" "0" "0" "$skip_policy_path_profile" "skip"
       continue
     fi
 
@@ -1223,6 +1271,16 @@ for profile in "${profiles[@]}"; do
     selection_policy_entry_rotation_jitter_pct="$(extract_metric_from_line_optional "$startup_line" "entry_rotation_jitter_pct")"
     selection_policy_exit_exploration_pct="$(extract_metric_from_line_optional "$startup_line" "exit_exploration_pct")"
     selection_policy_path_profile="$(extract_text_from_line_optional "$startup_line" "path_profile")"
+    selection_policy_source="observed-log"
+    if [[ -z "$startup_line" ]]; then
+      selection_policy_source="no-startup-line-fallback"
+    elif [[ -z "$selection_policy_sticky_pair_sec" ||
+      -z "$selection_policy_entry_rotation_sec" ||
+      -z "$selection_policy_entry_rotation_jitter_pct" ||
+      -z "$selection_policy_exit_exploration_pct" ||
+      -z "$selection_policy_path_profile" ]]; then
+      selection_policy_source="partial-log-fallback"
+    fi
     if [[ -z "$selection_policy_sticky_pair_sec" ]]; then
       if [[ "$selection_policy_env_sticky_pair_sec_set" == "1" ]]; then
         selection_policy_sticky_pair_sec="$selection_policy_env_sticky_pair_sec"
@@ -1266,7 +1324,7 @@ for profile in "${profiles[@]}"; do
       "$middle_selection_count" \
       "$direct_exit_forced" \
       "$run_output_log" "$client_log_path" "$run_cmd_str" "" \
-      "$selection_policy_sticky_pair_sec" "$selection_policy_entry_rotation_sec" "$selection_policy_entry_rotation_jitter_pct" "$selection_policy_exit_exploration_pct" "$selection_policy_path_profile"
+      "$selection_policy_sticky_pair_sec" "$selection_policy_entry_rotation_sec" "$selection_policy_entry_rotation_jitter_pct" "$selection_policy_exit_exploration_pct" "$selection_policy_path_profile" "$selection_policy_source"
   done
 done
 
@@ -1299,8 +1357,11 @@ selection_policy_summary_json="$(jq \
     entry_rotation_sec: $fallback_entry_rotation_sec,
     entry_rotation_jitter_pct: $fallback_entry_rotation_jitter_pct,
     exit_exploration_pct: $fallback_exit_exploration_pct,
-    path_profile: $fallback_path_profile
+    path_profile: $fallback_path_profile,
+    source: "summary-fallback-default",
+    observed_from_log: false
   }' <<<"$runs_json")"
+selection_policy_source="$(jq -r '.source // "unknown"' <<<"$selection_policy_summary_json")"
 profile_summary_json="$(jq '
   sort_by(.profile)
   | group_by(.profile)
@@ -1630,6 +1691,7 @@ jq -n \
   --arg beta_profile "$beta_profile" \
   --arg prod_profile "$prod_profile" \
   --arg allow_insecure_remote_http "$allow_insecure_remote_http" \
+  --arg live_evidence "$live_evidence" \
   --arg transport_auto_client_inner_source "$transport_auto_client_inner_source" \
   --arg transport_auto_disable_synthetic_fallback "$transport_auto_disable_synthetic_fallback" \
   --arg transport_auto_data_plane_mode_opaque "$transport_auto_data_plane_mode_opaque" \
@@ -1647,6 +1709,7 @@ jq -n \
   --arg recommended_default_profile "$recommended_default_profile" \
   --arg decision_reason "$decision_reason" \
   --arg comparison_policy_note "$comparison_policy_note" \
+  --arg selection_policy_source "$selection_policy_source" \
   --argjson selection_policy "$selection_policy_summary_json" \
   --argjson profiles "$profile_inputs_json" \
   --argjson profiles_summary "$profile_summary_json" \
@@ -1685,6 +1748,7 @@ jq -n \
       beta_profile: ($beta_profile == "1"),
       prod_profile: ($prod_profile == "1"),
       allow_insecure_remote_http: ($allow_insecure_remote_http == "1"),
+      live_evidence: ($live_evidence == "1"),
       explicit_remote_endpoints: ($explicit_remote_endpoints == "1"),
       transport_auto_defaults: {
         client_inner_source_udp: ($transport_auto_client_inner_source == "1"),
@@ -1714,6 +1778,7 @@ jq -n \
       token_proof_invalid_failures_total: $token_proof_invalid_failures_total,
       unknown_exit_failures_total: $unknown_exit_failures_total,
       directory_trust_failures_total: $directory_trust_failures_total,
+      selection_policy_source: $selection_policy_source,
       selection_policy: $selection_policy,
       m4_micro_relay_evidence: $m4_micro_relay_evidence
     },
