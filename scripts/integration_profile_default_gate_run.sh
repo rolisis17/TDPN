@@ -115,6 +115,9 @@ capture_file="${PROFILE_DEFAULT_GATE_CAPTURE_FILE:?}"
 {
   printf 'signoff'
   printf '\tenv_CAMPAIGN_SUBJECT=%s' "${CAMPAIGN_SUBJECT-}"
+  printf '\tenv_CLIENT_INNER_SOURCE=%s' "${CLIENT_INNER_SOURCE-}"
+  printf '\tenv_CLIENT_DISABLE_SYNTHETIC_FALLBACK=%s' "${CLIENT_DISABLE_SYNTHETIC_FALLBACK-}"
+  printf '\tenv_DATA_PLANE_MODE=%s' "${DATA_PLANE_MODE-}"
   for arg in "$@"; do
     printf '\t%s' "$arg"
   done
@@ -218,6 +221,9 @@ if [[ -z "$success_line" ]]; then
 fi
 success_line_sp="${success_line//$'\t'/ }"
 assert_contains "$success_line_sp" "env_CAMPAIGN_SUBJECT=inv-env-success" "missing signoff env CAMPAIGN_SUBJECT marker"
+assert_contains "$success_line_sp" "env_CLIENT_INNER_SOURCE=synthetic" "missing profile-default synthetic client source default"
+assert_contains "$success_line_sp" "env_CLIENT_DISABLE_SYNTHETIC_FALLBACK=0" "missing profile-default synthetic fallback default"
+assert_contains "$success_line_sp" "env_DATA_PLANE_MODE=opaque" "missing profile-default opaque data-plane default"
 assert_not_contains "$success_line_sp" "--campaign-subject inv-env-success" "unexpected forwarded subject credential arg"
 assert_not_contains "$success_line_sp" "--subject inv-env-success" "unexpected forwarded --subject credential arg"
 assert_not_contains "$success_line_sp" "--key inv-env-success" "unexpected forwarded --key credential arg"
@@ -229,6 +235,7 @@ assert_contains "$success_line_sp" "--campaign-execution-mode docker" "missing d
 assert_contains "$success_line_sp" "--campaign-start-local-stack 0" "missing start-local-stack default"
 assert_contains "$success_line_sp" "--fail-on-no-go 1" "missing fail-closed fail-on-no-go default"
 assert_contains "$success_line_sp" "--campaign-timeout-sec 2400" "missing default campaign timeout forwarding"
+assert_contains "$success_line_sp" "--campaign-profiles balanced,speed,speed-1hop" "missing profile-default two-node campaign profiles"
 assert_contains "$success_line_sp" "--require-selection-policy-present 1" "missing default require-selection-policy-present forwarding"
 assert_contains "$success_line_sp" "--require-selection-policy-valid 1" "missing default require-selection-policy-valid forwarding"
 assert_contains "$success_line_sp" "--require-micro-relay-quality-evidence 0" "missing profile-default M4 quality evidence opt-out"
@@ -240,6 +247,7 @@ assert_contains "$success_line_sp" "--require-runtime-actuation-status-pass 0" "
 assert_contains "$success_line_sp" "--custom-flag custom value" "missing passthrough forwarding"
 assert_contains "$success_line_sp" "--summary-json $SUCCESS_SUMMARY" "missing explicit summary-json forwarding"
 assert_file_contains "$SUCCESS_LOG" "campaign_timeout_sec=2400" "missing campaign-timeout start marker"
+assert_file_contains "$SUCCESS_LOG" "campaign_profiles=balanced,speed,speed-1hop client_inner_source=synthetic disable_synthetic_fallback=0 data_plane_mode=opaque" "missing profile-default transport/profile marker"
 assert_file_contains "$SUCCESS_LOG" "campaign-visibility expected_duration_sec=2400" "missing campaign visibility duration marker"
 assert_file_contains "$SUCCESS_LOG" "signoff-startup-hint campaign_timeout_sec=2400" "missing signoff startup hint marker"
 assert_file_contains "$SUCCESS_LOG" "progress_reports_dir=$ROOT_DIR/.easy-node-logs" "missing campaign visibility reports-dir marker"

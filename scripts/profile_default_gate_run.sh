@@ -21,6 +21,7 @@ Usage:
     [--require-selection-policy-present [0|1]] \
     [--require-selection-policy-valid [0|1]] \
     [--campaign-subject INVITE_KEY | --subject INVITE_KEY | --key INVITE_KEY | --invite-key INVITE_KEY | --campaign-anon-cred ANON_CRED | --anon-cred ANON_CRED] \
+    [--campaign-profiles CSV] \
     [profile-compare-campaign-signoff args...]
 
 Purpose:
@@ -64,6 +65,11 @@ Notes:
   - This wrapper scopes the gate to profile-default selection. M4/runtime
     actuation evidence gates default off here and remain covered by the
     dedicated runtime-actuation promotion evidence commands.
+  - For two-node profile-default evidence, this wrapper defaults campaign
+    profiles to balanced,speed,speed-1hop and sets Docker campaign transport
+    env to synthetic opaque payloads. Override with --campaign-profiles or
+    CLIENT_INNER_SOURCE/CLIENT_DISABLE_SYNTHETIC_FALLBACK/DATA_PLANE_MODE when
+    intentionally running a stricter packet-ingress workflow.
 USAGE
 }
 
@@ -757,6 +763,10 @@ campaign_timeout_default_sec="${PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_TIMEOUT_SEC:-2
 heartbeat_interval_sec_raw="${PROFILE_DEFAULT_GATE_RUN_HEARTBEAT_INTERVAL_SEC:-60}"
 require_selection_policy_present="${PROFILE_DEFAULT_GATE_RUN_REQUIRE_SELECTION_POLICY_PRESENT:-1}"
 require_selection_policy_valid="${PROFILE_DEFAULT_GATE_RUN_REQUIRE_SELECTION_POLICY_VALID:-1}"
+campaign_profiles_default="$(trim "${PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_PROFILES:-balanced,speed,speed-1hop}")"
+campaign_client_inner_source_default="$(trim "${PROFILE_DEFAULT_GATE_RUN_CLIENT_INNER_SOURCE:-synthetic}")"
+campaign_disable_synthetic_fallback_default="$(trim "${PROFILE_DEFAULT_GATE_RUN_DISABLE_SYNTHETIC_FALLBACK:-0}")"
+campaign_data_plane_mode_default="$(trim "${PROFILE_DEFAULT_GATE_RUN_DATA_PLANE_MODE:-opaque}")"
 heartbeat_interval_sec_cli=""
 
 campaign_subject_cli=""
@@ -972,6 +982,15 @@ bool_arg_or_die "--allow-remote-http-probe" "$allow_remote_http_probe"
 bool_arg_or_die "--allow-insecure-probe" "$allow_insecure_probe"
 bool_arg_or_die "--require-selection-policy-present" "$require_selection_policy_present"
 bool_arg_or_die "--require-selection-policy-valid" "$require_selection_policy_valid"
+if [[ -n "$campaign_client_inner_source_default" && "$campaign_client_inner_source_default" != "udp" && "$campaign_client_inner_source_default" != "synthetic" ]]; then
+  echo "PROFILE_DEFAULT_GATE_RUN_CLIENT_INNER_SOURCE must be udp or synthetic"
+  exit 2
+fi
+bool_arg_or_die "PROFILE_DEFAULT_GATE_RUN_DISABLE_SYNTHETIC_FALLBACK" "$campaign_disable_synthetic_fallback_default"
+if [[ -n "$campaign_data_plane_mode_default" && "$campaign_data_plane_mode_default" != "json" && "$campaign_data_plane_mode_default" != "opaque" ]]; then
+  echo "PROFILE_DEFAULT_GATE_RUN_DATA_PLANE_MODE must be json or opaque"
+  exit 2
+fi
 int_arg_or_die "PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_TIMEOUT_SEC" "$campaign_timeout_default_sec"
 
 if (( directory_a_port < 1 || directory_a_port > 65535 )); then
@@ -1255,6 +1274,9 @@ fi
 if ! array_has_arg_or_equals_prefix "--campaign-timeout-sec" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--campaign-timeout-sec "$campaign_timeout_default_sec")
 fi
+if [[ -n "$campaign_profiles_default" ]] && ! array_has_arg_or_equals_prefix "--campaign-profiles" "${signoff_passthrough[@]}"; then
+  signoff_passthrough+=(--campaign-profiles "$campaign_profiles_default")
+fi
 if ! array_has_arg_or_equals_prefix "--require-selection-policy-present" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--require-selection-policy-present "$require_selection_policy_present")
 fi
@@ -1312,8 +1334,29 @@ else
   summary_json_effective="$reports_dir_effective/profile_compare_campaign_signoff_summary.json"
 fi
 
+campaign_profiles_effective="$(extract_flag_value --campaign-profiles "${signoff_passthrough[@]}")"
+campaign_profiles_effective="$(trim "$campaign_profiles_effective")"
+if [[ -z "$campaign_profiles_effective" ]]; then
+  echo "profile-default-gate-run failed: --campaign-profiles requires a value"
+  exit 2
+fi
+
+client_inner_source_effective="$(trim "${CLIENT_INNER_SOURCE:-$campaign_client_inner_source_default}")"
+disable_synthetic_fallback_effective="$(trim "${CLIENT_DISABLE_SYNTHETIC_FALLBACK:-$campaign_disable_synthetic_fallback_default}")"
+data_plane_mode_effective="$(trim "${DATA_PLANE_MODE:-$campaign_data_plane_mode_default}")"
+if [[ -n "$client_inner_source_effective" && "$client_inner_source_effective" != "udp" && "$client_inner_source_effective" != "synthetic" ]]; then
+  echo "profile-default-gate-run failed: CLIENT_INNER_SOURCE must be udp or synthetic"
+  exit 2
+fi
+bool_arg_or_die "CLIENT_DISABLE_SYNTHETIC_FALLBACK" "$disable_synthetic_fallback_effective"
+if [[ -n "$data_plane_mode_effective" && "$data_plane_mode_effective" != "json" && "$data_plane_mode_effective" != "opaque" ]]; then
+  echo "profile-default-gate-run failed: DATA_PLANE_MODE must be json or opaque"
+  exit 2
+fi
+
 echo "[profile-default-gate-run] $(timestamp_utc) start subject_source=$subject_source directory_urls=$campaign_directory_urls_effective_log campaign_timeout_sec=$campaign_timeout_effective"
 echo "[profile-default-gate-run] $(timestamp_utc) summary_json=$summary_json_effective"
+echo "[profile-default-gate-run] $(timestamp_utc) campaign_profiles=$campaign_profiles_effective client_inner_source=$client_inner_source_effective disable_synthetic_fallback=$disable_synthetic_fallback_effective data_plane_mode=$data_plane_mode_effective"
 
 if ! wait_for_directory_endpoint "directory_a" "$directory_a_url"; then
   exit 1
@@ -1346,9 +1389,16 @@ heartbeat_pid=""
 heartbeat_pid="$!"
 set +e
 if [[ "$auth_mode" == "subject" ]]; then
-  CAMPAIGN_SUBJECT="$campaign_subject_effective" "$signoff_script" "${signoff_passthrough[@]}"
+  CAMPAIGN_SUBJECT="$campaign_subject_effective" \
+    CLIENT_INNER_SOURCE="$client_inner_source_effective" \
+    CLIENT_DISABLE_SYNTHETIC_FALLBACK="$disable_synthetic_fallback_effective" \
+    DATA_PLANE_MODE="$data_plane_mode_effective" \
+    "$signoff_script" "${signoff_passthrough[@]}"
 else
-  "$signoff_script" "${signoff_passthrough[@]}"
+  CLIENT_INNER_SOURCE="$client_inner_source_effective" \
+    CLIENT_DISABLE_SYNTHETIC_FALLBACK="$disable_synthetic_fallback_effective" \
+    DATA_PLANE_MODE="$data_plane_mode_effective" \
+    "$signoff_script" "${signoff_passthrough[@]}"
 fi
 signoff_rc=$?
 set -e

@@ -967,12 +967,17 @@ for profile in "${profiles[@]}"; do
       run_cmd+=(--anon-cred "$anon_cred")
     fi
 
+    min_entry_operators_required="1"
+    if [[ "$profile" == "speed-1hop" ]]; then
+      min_entry_operators_required="0"
+    fi
+
     run_cmd+=(
       --min-sources "$min_sources"
       --timeout-sec "$timeout_sec"
       --path-profile "$profile"
       --min-selection-lines 1
-      --min-entry-operators 1
+      --min-entry-operators "$min_entry_operators_required"
       --min-exit-operators 1
       --require-cross-operator-pair 0
       --beta-profile "$beta_profile"

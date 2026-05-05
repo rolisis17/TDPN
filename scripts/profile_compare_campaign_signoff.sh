@@ -48,6 +48,7 @@ Usage:
     [--campaign-subject ID | --subject ID | --campaign-anon-cred TOKEN] \
     [--key ID | --invite-key ID | --anon-cred TOKEN] \
     [--campaign-start-local-stack auto|0|1] \
+    [--campaign-profiles CSV] \
     [--campaign-runs N] \
     [--campaign-timeout-sec N] \
     [--campaign-endpoint-preflight-timeout-sec N] \
@@ -659,6 +660,7 @@ campaign_subject_cli_provided="0"
 campaign_subject_canonical_cli_provided="0"
 campaign_subject_source=""
 campaign_start_local_stack="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_START_LOCAL_STACK:-}"
+campaign_profiles="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_PROFILES:-}"
 original_args=("$@")
 
 set_subject_alias_or_die() {
@@ -985,6 +987,15 @@ while [[ $# -gt 0 ]]; do
       campaign_start_local_stack="${2:-}"
       shift 2
       ;;
+    --campaign-profiles)
+      require_flag_value_or_die "$1" "${2:-}"
+      campaign_profiles="$(require_non_empty_value_or_die "$1" "${2:-}")"
+      shift 2
+      ;;
+    --campaign-profiles=*)
+      campaign_profiles="$(require_non_empty_value_or_die "--campaign-profiles" "${1#--campaign-profiles=}")"
+      shift
+      ;;
     --campaign-runs)
       campaign_runs="${2:-}"
       shift 2
@@ -1301,6 +1312,7 @@ campaign_exit_url_effective="$campaign_exit_url"
 campaign_subject_effective="$campaign_subject"
 campaign_anon_cred_effective="$campaign_anon_cred"
 campaign_start_local_stack_effective="$campaign_start_local_stack"
+campaign_profiles_effective="$campaign_profiles"
 
 if [[ "$campaign_refresh_effective" == "1" && -z "$campaign_execution_mode_effective" ]]; then
   if [[ -n "$campaign_directory_urls_effective" || -n "$campaign_bootstrap_directory_effective" || -n "$campaign_issuer_url_effective" || -n "$campaign_entry_url_effective" || -n "$campaign_exit_url_effective" ]]; then
@@ -1389,6 +1401,9 @@ build_campaign_cmd() {
   fi
   if [[ -n "$campaign_runs_effective" ]]; then
     campaign_cmd+=(--campaign-runs "$campaign_runs_effective")
+  fi
+  if [[ -n "$campaign_profiles_effective" ]]; then
+    campaign_cmd+=(--profiles "$campaign_profiles_effective")
   fi
   if [[ -n "$campaign_directory_urls_effective" ]]; then
     campaign_cmd+=(--directory-urls "$campaign_directory_urls_effective")
@@ -1944,6 +1959,8 @@ jq -n \
   --arg campaign_anon_cred_effective_configured "$campaign_anon_cred_effective_configured" \
   --arg campaign_start_local_stack "$campaign_start_local_stack" \
   --arg campaign_start_local_stack_effective "$campaign_start_local_stack_effective" \
+  --arg campaign_profiles "$campaign_profiles" \
+  --arg campaign_profiles_effective "$campaign_profiles_effective" \
   --arg campaign_runs "$campaign_runs" \
   --arg campaign_runs_effective "$campaign_runs_effective" \
   --arg campaign_allow_insecure_remote_http "$campaign_allow_insecure_remote_http" \
@@ -2034,6 +2051,7 @@ jq -n \
         subject_configured: ($campaign_subject_configured == "1"),
         anon_cred_configured: ($campaign_anon_cred_configured == "1"),
         start_local_stack: (if $campaign_start_local_stack == "" then null else $campaign_start_local_stack end),
+        profiles: (if $campaign_profiles == "" then null else $campaign_profiles end),
         campaign_runs: (if $campaign_runs == "" then null else ($campaign_runs | tonumber) end),
         allow_insecure_remote_http: ($campaign_allow_insecure_remote_http == "1")
       },
@@ -2048,6 +2066,7 @@ jq -n \
         subject_configured: ($campaign_subject_effective_configured == "1"),
         anon_cred_configured: ($campaign_anon_cred_effective_configured == "1"),
         start_local_stack: (if $campaign_start_local_stack_effective == "" then null else $campaign_start_local_stack_effective end),
+        profiles: (if $campaign_profiles_effective == "" then null else $campaign_profiles_effective end),
         campaign_runs: (if $campaign_runs_effective == "" then null else ($campaign_runs_effective | tonumber) end),
         allow_insecure_remote_http: ($campaign_allow_insecure_remote_http == "1")
       },

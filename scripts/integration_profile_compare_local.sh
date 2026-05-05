@@ -211,6 +211,16 @@ for expected in 'client_inner_source=udp' 'disable_synthetic_fallback=1' 'data_p
     exit 1
   fi
 done
+if ! rg -q -- 'client-test .*--path-profile speed-1hop .*--min-entry-operators 0' "$CAPTURE"; then
+  echo "speed-1hop profile compare should allow direct-exit selection without an entry operator"
+  cat "$CAPTURE"
+  exit 1
+fi
+if rg -q -- 'client-test .*--path-profile speed-1hop .*--min-entry-operators 1' "$CAPTURE"; then
+  echo "speed-1hop profile compare should not require entry operators"
+  cat "$CAPTURE"
+  exit 1
+fi
 
 PRIVATE_DEFAULT_SUMMARY_JSON="$TMP_DIR/profile_compare_private_default_summary.json"
 PRIVATE_DEFAULT_REPORT_MD="$TMP_DIR/profile_compare_private_default_report.md"
