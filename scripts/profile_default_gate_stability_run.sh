@@ -13,6 +13,7 @@ Usage:
     [--campaign-subject ID | --subject ID] \
     [--runs N] \
     [--campaign-timeout-sec N] \
+    [--allow-remote-http-probe [0|1]] \
     [--sleep-between-sec N] \
     [--reports-dir DIR] \
     [--summary-json PATH] \
@@ -100,6 +101,7 @@ campaign_subject_from_campaign=""
 campaign_subject_from_alias=""
 runs="${PROFILE_DEFAULT_GATE_STABILITY_RUNS:-3}"
 campaign_timeout_sec="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_TIMEOUT_SEC:-2400}"
+allow_remote_http_probe="${PROFILE_DEFAULT_GATE_STABILITY_ALLOW_REMOTE_HTTP_PROBE:-0}"
 sleep_between_sec="${PROFILE_DEFAULT_GATE_STABILITY_SLEEP_BETWEEN_SEC:-5}"
 reports_dir="${PROFILE_DEFAULT_GATE_STABILITY_REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}"
 summary_json="${PROFILE_DEFAULT_GATE_STABILITY_SUMMARY_JSON:-}"
@@ -165,6 +167,19 @@ while [[ $# -gt 0 ]]; do
       ;;
     --campaign-timeout-sec=*)
       campaign_timeout_sec="${1#*=}"
+      shift
+      ;;
+    --allow-remote-http-probe)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_remote_http_probe="${2:-}"
+        shift 2
+      else
+        allow_remote_http_probe="1"
+        shift
+      fi
+      ;;
+    --allow-remote-http-probe=*)
+      allow_remote_http_probe="${1#*=}"
       shift
       ;;
     --sleep-between-sec)
@@ -239,6 +254,7 @@ campaign_subject_from_campaign="$(trim "$campaign_subject_from_campaign")"
 campaign_subject_from_alias="$(trim "$campaign_subject_from_alias")"
 runs="$(trim "$runs")"
 campaign_timeout_sec="$(trim "$campaign_timeout_sec")"
+allow_remote_http_probe="$(trim "$allow_remote_http_probe")"
 sleep_between_sec="$(trim "$sleep_between_sec")"
 reports_dir="$(abs_path "$reports_dir")"
 summary_json="$(trim "$summary_json")"
@@ -272,6 +288,7 @@ int_arg_or_die "--campaign-timeout-sec" "$campaign_timeout_sec"
 int_arg_or_die "--sleep-between-sec" "$sleep_between_sec"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--allow-partial" "$allow_partial"
+bool_arg_or_die "--allow-remote-http-probe" "$allow_remote_http_probe"
 
 if (( runs < 1 )); then
   echo "--runs must be >= 1"
@@ -316,6 +333,7 @@ while (( run_index < runs )); do
     --campaign-subject "$campaign_subject" \
     --reports-dir "$reports_dir" \
     --campaign-timeout-sec "$campaign_timeout_sec" \
+    --allow-remote-http-probe "$allow_remote_http_probe" \
     --summary-json "$run_summary_json" \
     --print-summary-json 0 >"$run_log" 2>&1
   command_rc=$?
@@ -618,7 +636,7 @@ elif [[ "$decision_consensus" != "true" ]]; then
   next_operator_action="Run decisions are mixed; rerun with more samples or adjust thresholds before promotion."
 fi
 
-rerun_command_template="./scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST_A --host-b HOST_B --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --sleep-between-sec ${sleep_between_sec} --reports-dir ${reports_dir} --summary-json ${summary_json} --print-summary-json 1"
+rerun_command_template="./scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST_A --host-b HOST_B --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --reports-dir ${reports_dir} --summary-json ${summary_json} --print-summary-json 1"
 inspect_failures_command_template="jq -r '.runs[] | select(.command_rc != 0 or .summary_exists != true or .completed != true) | .artifacts.run_log' ${summary_json}"
 next_check_command_template="./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json ${summary_json} --print-summary-json 1"
 
@@ -631,6 +649,7 @@ jq -n \
   --arg host_a "$host_a" \
   --arg host_b "$host_b" \
   --arg allow_partial "$allow_partial" \
+  --arg allow_remote_http_probe "$allow_remote_http_probe" \
   --argjson rc "$final_rc" \
   --argjson runs_requested "$runs" \
   --argjson campaign_timeout_sec "$campaign_timeout_sec" \
@@ -674,6 +693,7 @@ jq -n \
       host_b: $host_b,
       runs_requested: $runs_requested,
       campaign_timeout_sec: $campaign_timeout_sec,
+      allow_remote_http_probe: ($allow_remote_http_probe == "1"),
       sleep_between_sec: $sleep_between_sec,
       allow_partial: ($allow_partial == "1"),
       reports_dir: $reports_dir

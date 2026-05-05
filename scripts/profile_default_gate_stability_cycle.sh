@@ -16,6 +16,7 @@ Usage:
     [--campaign-subject ID | --subject ID] \
     [--runs N] \
     [--campaign-timeout-sec N] \
+    [--allow-remote-http-probe [0|1]] \
     [--sleep-between-sec N] \
     [--allow-partial [0|1]] \
     [--reports-dir DIR] \
@@ -291,6 +292,7 @@ runs="${PROFILE_DEFAULT_GATE_STABILITY_RUNS:-3}"
 campaign_timeout_sec="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_TIMEOUT_SEC:-2400}"
 sleep_between_sec="${PROFILE_DEFAULT_GATE_STABILITY_SLEEP_BETWEEN_SEC:-5}"
 allow_partial="${PROFILE_DEFAULT_GATE_STABILITY_ALLOW_PARTIAL:-0}"
+allow_remote_http_probe="${PROFILE_DEFAULT_GATE_STABILITY_ALLOW_REMOTE_HTTP_PROBE:-0}"
 reports_dir="${PROFILE_DEFAULT_GATE_STABILITY_REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}"
 
 run_summary_json="${PROFILE_DEFAULT_GATE_STABILITY_RUN_SUMMARY_JSON:-}"
@@ -373,6 +375,19 @@ while [[ $# -gt 0 ]]; do
       ;;
     --campaign-timeout-sec=*)
       campaign_timeout_sec="${1#*=}"
+      shift
+      ;;
+    --allow-remote-http-probe)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_remote_http_probe="${2:-}"
+        shift 2
+      else
+        allow_remote_http_probe="1"
+        shift
+      fi
+      ;;
+    --allow-remote-http-probe=*)
+      allow_remote_http_probe="${1#*=}"
       shift
       ;;
     --sleep-between-sec)
@@ -648,6 +663,7 @@ runs="$(trim "$runs")"
 campaign_timeout_sec="$(trim "$campaign_timeout_sec")"
 sleep_between_sec="$(trim "$sleep_between_sec")"
 allow_partial="$(trim "$allow_partial")"
+allow_remote_http_probe="$(trim "$allow_remote_http_probe")"
 reports_dir="$(abs_path "$reports_dir")"
 run_summary_json="$(abs_path "$run_summary_json")"
 check_summary_json="$(abs_path "$check_summary_json")"
@@ -707,6 +723,7 @@ int_arg_or_die "--require-min-runs-requested" "$require_min_runs_requested"
 int_arg_or_die "--require-min-runs-completed" "$require_min_runs_completed"
 int_arg_or_die "--require-max-runs-fail" "$require_max_runs_fail"
 bool_arg_or_die "--allow-partial" "$allow_partial"
+bool_arg_or_die "--allow-remote-http-probe" "$allow_remote_http_probe"
 bool_arg_or_die "--require-status-pass" "$require_status_pass"
 bool_arg_or_die "--require-stability-ok" "$require_stability_ok"
 bool_arg_or_die "--require-selection-policy-present-all" "$require_selection_policy_present_all"
@@ -766,6 +783,7 @@ run_cmd=(
   --campaign-subject "$campaign_subject"
   --runs "$runs"
   --campaign-timeout-sec "$campaign_timeout_sec"
+  --allow-remote-http-probe "$allow_remote_http_probe"
   --sleep-between-sec "$sleep_between_sec"
   --allow-partial "$allow_partial"
   --reports-dir "$reports_dir"
@@ -1197,8 +1215,8 @@ elif [[ "$cycle_evidence_state" == "partial" && "$check_decision" != "NO-GO" ]];
   next_operator_action="Cycle evidence is partial; inspect stage logs and rerun cycle before promotion."
 fi
 
-rerun_cycle_command_template="./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${summary_json} --print-summary-json 1"
-rerun_run_command_template="./scripts/easy_node.sh profile-default-gate-stability-run --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${run_summary_json} --print-summary-json 1"
+rerun_cycle_command_template="./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${summary_json} --print-summary-json 1"
+rerun_run_command_template="./scripts/easy_node.sh profile-default-gate-stability-run --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${run_summary_json} --print-summary-json 1"
 rerun_check_command_template="./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json ${run_summary_json} --summary-json ${check_summary_json} --print-summary-json 1"
 
 jq -n \
@@ -1263,6 +1281,7 @@ jq -n \
   --argjson cycle_issues "$cycle_issues_json" \
   --argjson runs "$runs" \
   --argjson campaign_timeout_sec "$campaign_timeout_sec" \
+  --argjson allow_remote_http_probe "$allow_remote_http_probe" \
   --argjson sleep_between_sec "$sleep_between_sec" \
   --argjson allow_partial "$allow_partial" \
   --argjson require_status_pass "$require_status_pass" \
@@ -1298,6 +1317,7 @@ jq -n \
       run: {
         runs: $runs,
         campaign_timeout_sec: $campaign_timeout_sec,
+        allow_remote_http_probe: ($allow_remote_http_probe == 1),
         sleep_between_sec: $sleep_between_sec,
         allow_partial: ($allow_partial == 1)
       },

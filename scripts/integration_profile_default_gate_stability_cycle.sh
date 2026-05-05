@@ -35,6 +35,7 @@ runs=""
 host_a=""
 host_b=""
 campaign_subject=""
+allow_remote_http_probe=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --host-a)
@@ -59,6 +60,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --campaign-subject=*)
       campaign_subject="${1#*=}"
+      shift
+      ;;
+    --allow-remote-http-probe)
+      allow_remote_http_probe="${2:-}"
+      shift 2
+      ;;
+    --allow-remote-http-probe=*)
+      allow_remote_http_probe="${1#*=}"
       shift
       ;;
     --summary-json)
@@ -97,8 +106,8 @@ if [[ -z "$summary_json" ]]; then
 fi
 
 if [[ -n "$capture_file" ]]; then
-  printf 'run\tscenario=%s\thost_a=%s\thost_b=%s\tcampaign_subject=%s\truns=%s\treports_dir=%s\tsummary_json=%s\n' \
-    "$scenario" "$host_a" "$host_b" "$campaign_subject" "$runs" "$reports_dir" "$summary_json" >>"$capture_file"
+  printf 'run\tscenario=%s\thost_a=%s\thost_b=%s\tcampaign_subject=%s\tallow_remote_http_probe=%s\truns=%s\treports_dir=%s\tsummary_json=%s\n' \
+    "$scenario" "$host_a" "$host_b" "$campaign_subject" "$allow_remote_http_probe" "$runs" "$reports_dir" "$summary_json" >>"$capture_file"
 fi
 
 if [[ "$scenario" == "fail" ]]; then
@@ -303,6 +312,7 @@ bash "$SCRIPT_UNDER_TEST" \
   --subject "inv-happy" \
   --runs 3 \
   --campaign-timeout-sec 1200 \
+  --allow-remote-http-probe 1 \
   --sleep-between-sec 0 \
   --require-decision-consensus 1 \
   --require-modal-decision GO \
@@ -346,6 +356,11 @@ if ! jq -e '
 fi
 if ! grep -q '^run' "$FAKE_CAPTURE_FILE"; then
   echo "expected fake run script invocation not captured"
+  cat "$FAKE_CAPTURE_FILE"
+  exit 1
+fi
+if ! grep -q $'run\t.*\tallow_remote_http_probe=1\t' "$FAKE_CAPTURE_FILE"; then
+  echo "expected run-stage allow-remote-http-probe forwarding not captured"
   cat "$FAKE_CAPTURE_FILE"
   exit 1
 fi

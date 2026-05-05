@@ -39,6 +39,7 @@ summary_json=""
 host_a=""
 host_b=""
 campaign_subject=""
+allow_remote_http_probe=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
@@ -71,6 +72,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --campaign-subject=*)
       campaign_subject="${1#*=}"
+      shift
+      ;;
+    --allow-remote-http-probe)
+      allow_remote_http_probe="${2:-}"
+      shift 2
+      ;;
+    --allow-remote-http-probe=*)
+      allow_remote_http_probe="${1#*=}"
       shift
       ;;
     *)
@@ -151,11 +160,12 @@ jq -n \
   }' >"$summary_json"
 
 if [[ -n "$capture_file" ]]; then
-  printf 'profile-default-gate-live\trun=%s\thost_a=%s\thost_b=%s\tsubject=%s\tsummary_json=%s\n' \
+  printf 'profile-default-gate-live\trun=%s\thost_a=%s\thost_b=%s\tsubject=%s\tallow_remote_http_probe=%s\tsummary_json=%s\n' \
     "$run_index" \
     "$host_a" \
     "$host_b" \
     "$campaign_subject" \
+    "$allow_remote_http_probe" \
     "$summary_json" >>"$capture_file"
 fi
 
@@ -179,6 +189,7 @@ bash "$SCRIPT_UNDER_TEST" \
   --campaign-subject "inv-stable" \
   --runs 3 \
   --campaign-timeout-sec 2400 \
+  --allow-remote-http-probe 1 \
   --sleep-between-sec 0 \
   --reports-dir "$STABLE_REPORTS_DIR" \
   --summary-json "$STABLE_SUMMARY" \
@@ -229,6 +240,11 @@ fi
 stable_counter_value="$(cat "$STABLE_COUNTER" 2>/dev/null || echo "0")"
 if [[ "$stable_counter_value" != "3" ]]; then
   echo "expected stable fake easy_node run count to be 3, got: $stable_counter_value"
+  cat "$STABLE_CAPTURE"
+  exit 1
+fi
+if ! grep -q $'allow_remote_http_probe=1' "$STABLE_CAPTURE"; then
+  echo "expected allow-remote-http-probe forwarding in stable path"
   cat "$STABLE_CAPTURE"
   exit 1
 fi

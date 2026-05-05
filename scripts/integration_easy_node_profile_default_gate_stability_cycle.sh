@@ -56,7 +56,7 @@ assert_token() {
 
 echo "[easy-node-profile-default-gate-stability-cycle] help contract"
 bash "$SCRIPT_UNDER_TEST" help >"$HELP_OUT"
-if ! grep -F -- './scripts/easy_node.sh profile-default-gate-stability-cycle --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--sleep-between-sec N] [--reports-dir DIR] [--stability-summary-json PATH] [--stability-check-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]' "$HELP_OUT" >/dev/null 2>&1; then
+if ! grep -F -- './scripts/easy_node.sh profile-default-gate-stability-cycle --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--allow-remote-http-probe [0|1]] [--sleep-between-sec N] [--reports-dir DIR] [--stability-summary-json PATH] [--stability-check-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]] [--fail-on-no-go [0|1]]' "$HELP_OUT" >/dev/null 2>&1; then
   echo "easy_node help missing profile-default-gate-stability-cycle command contract"
   cat "$HELP_OUT"
   exit 1
@@ -72,6 +72,7 @@ bash "$SCRIPT_UNDER_TEST" profile-default-gate-stability-cycle \
   --campaign-subject invite-123 \
   --runs 5 \
   --campaign-timeout-sec 900 \
+  --allow-remote-http-probe 1 \
   --sleep-between-sec 3 \
   --reports-dir .easy-node-logs/stability_cycle_contract \
   --stability-summary-json .easy-node-logs/profile_default_gate_stability_summary.json \
@@ -92,6 +93,7 @@ assert_token "$line" $'\t--host-b\thost-b.example' "missing --host-b forwarding"
 assert_token "$line" $'\t--campaign-subject\tinvite-123' "missing --campaign-subject forwarding"
 assert_token "$line" $'\t--runs\t5' "missing --runs forwarding"
 assert_token "$line" $'\t--campaign-timeout-sec\t900' "missing --campaign-timeout-sec forwarding"
+assert_token "$line" $'\t--allow-remote-http-probe\t1' "missing --allow-remote-http-probe forwarding"
 assert_token "$line" $'\t--sleep-between-sec\t3' "missing --sleep-between-sec forwarding"
 assert_token "$line" $'\t--reports-dir\t.easy-node-logs/stability_cycle_contract' "missing --reports-dir forwarding"
 assert_token "$line" $'\t--stability-summary-json\t.easy-node-logs/profile_default_gate_stability_summary.json' "missing --stability-summary-json forwarding"
