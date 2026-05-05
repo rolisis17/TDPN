@@ -257,11 +257,15 @@ health_check() {
 
 print_topology() {
   section "topology"
-  local url
-  for url in "http://${a_host}:8081/v1/relays" "http://${b_host}:8081/v1/relays"; do
-    echo "$url"
+  local label url
+  for label in "A directory relays" "B directory relays"; do
+    case "$label" in
+      A*) url="http://${a_host}:8081/v1/relays" ;;
+      B*) url="http://${b_host}:8081/v1/relays" ;;
+    esac
+    echo "$label"
     curl -fsS --connect-timeout 3 --max-time 15 "$url" |
-      jq -r '.relays[]? | [.relay_id, .role, (.operator_id // .operator // .origin_operator // ""), .control_url, .endpoint, (if (.entry_route_assertion_pub_key // "") == "" then "no-entry-assertion-key" else "entry-assertion-key" end)] | @tsv'
+      jq -r '.relays[]? | [.relay_id, .role, (.operator_id // .operator // .origin_operator // ""), (if ((.control_url // "") == "") then "no-control-url" else "control-url" end), (if ((.endpoint // "") == "") then "no-endpoint" else "endpoint" end), (if (.entry_route_assertion_pub_key // "") == "" then "no-entry-assertion-key" else "entry-assertion-key" end)] | @tsv'
   done
 }
 
@@ -295,9 +299,13 @@ generate_client_subject() {
 
 client_test() {
   section "client-test"
-  if [[ -z "$subject" ]]; then
-    echo "client-test skipped: pass --subject INVITE or set LIVE_BETA_SUBJECT"
+  if [[ "$skip_client" == "1" ]]; then
+    echo "client-test skipped by LIVE_BETA_SKIP_CLIENT=1"
     return 0
+  fi
+  if [[ -z "$subject" ]]; then
+    echo "client-test failed: pass --subject INVITE, set LIVE_BETA_SUBJECT, or use --generate-subject"
+    return 2
   fi
   (
     cd "$ROOT_DIR"

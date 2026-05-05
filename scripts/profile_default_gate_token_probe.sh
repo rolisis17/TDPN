@@ -77,6 +77,27 @@ normalize_url() {
   printf '%s\n' "$url"
 }
 
+sanitize_url_for_artifact() {
+  local raw scheme remainder
+  raw="$(trim "${1:-}")"
+  if [[ -z "$raw" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$raw" != *"://"* ]]; then
+    printf '%s' "$raw"
+    return
+  fi
+  scheme="${raw%%://*}"
+  remainder="${raw#*://}"
+  remainder="${remainder%%\#*}"
+  remainder="${remainder%%\?*}"
+  if [[ "$remainder" == *@* ]]; then
+    remainder="${remainder#*@}"
+  fi
+  printf '%s' "${scheme}://${remainder}"
+}
+
 url_scheme() {
   python3 - "$1" <<'PY'
 import sys
@@ -126,7 +147,7 @@ require_secure_url_for_remote() {
     exit 2
   fi
   if [[ "$scheme" == "http" ]] && ! is_loopback_host "$host"; then
-    echo "$label must use https:// for non-loopback hosts (got: $raw_url)"
+    echo "$label must use https:// for non-loopback hosts (got: $(sanitize_url_for_artifact "$raw_url"))"
     exit 2
   fi
 }
@@ -365,8 +386,9 @@ if [[ -z "$failure_stage" ]]; then
   issue_body_raw="$(mktemp)"
   cleanup_files+=("$issue_body_raw")
   issue_payload="$(jq -nc \
+    --arg subject "$campaign_subject" \
     --arg pop_pub_key "$generated_pop_pub_key" \
-    '{tier:1,subject:input,token_type:"client_access",pop_pub_key:$pop_pub_key}' <<<"$campaign_subject")"
+    '{tier:1,subject:$subject,token_type:"client_access",pop_pub_key:$pop_pub_key}')"
   token_issue_http_code="$(
     curl -sS \
       --connect-timeout "$connect_timeout_sec" \
@@ -503,6 +525,9 @@ campaign_subject_redacted=""
 if [[ -n "$campaign_subject" ]]; then
   campaign_subject_redacted="[redacted]"
 fi
+directory_url_artifact="$(sanitize_url_for_artifact "$directory_url")"
+issuer_url_artifact="$(sanitize_url_for_artifact "$issuer_url")"
+exit_url_artifact="$(sanitize_url_for_artifact "$exit_url")"
 
 jq -n \
   --arg generated_at_utc "$generated_at_utc" \
@@ -510,9 +535,9 @@ jq -n \
   --arg notes "$notes" \
   --arg failure_stage "$failure_stage" \
   --arg failure_reason "$failure_reason" \
-  --arg directory_url "$directory_url" \
-  --arg issuer_url "$issuer_url" \
-  --arg exit_url "$exit_url" \
+  --arg directory_url "$directory_url_artifact" \
+  --arg issuer_url "$issuer_url_artifact" \
+  --arg exit_url "$exit_url_artifact" \
   --arg campaign_subject "$campaign_subject_redacted" \
   --arg exit_id "$exit_id" \
   --arg exit_region "$exit_region" \

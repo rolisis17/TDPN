@@ -81,6 +81,15 @@ ensure_url_scheme() {
   echo "${scheme}://${raw}"
 }
 
+print_subject_redacted_response() {
+  local response="$1"
+  if printf '%s' "$response" | jq -e . >/dev/null 2>&1; then
+    printf '%s' "$response" | jq 'if type == "object" and has("subject") then .subject = "[redacted]" else . end'
+  else
+    printf '%s\n' "$response"
+  fi
+}
+
 issuer_url="${ISSUER_URL:-http://127.0.0.1:8082}"
 admin_token="${ISSUER_ADMIN_TOKEN:-}"
 admin_token_file="${ISSUER_ADMIN_TOKEN_FILE:-}"
@@ -319,19 +328,19 @@ build_header_config_file "GET" "$request_get" "" local_get_header_cfg
 trap 'rm -f "$tmp_body_file" "$local_upsert_header_cfg" "$local_get_header_cfg"' EXIT
 build_tls_args tls_args
 
-echo "upserting subject profile: subject=${subject} kind=${kind} tier=${tier}"
-curl -fsS -X POST "$request_upsert" \
+echo "upserting subject profile: subject=[redacted] kind=${kind} tier=${tier}"
+upsert_response="$(curl -fsS -X POST "$request_upsert" \
   --connect-timeout 4 \
   --max-time 12 \
   "${tls_args[@]}" \
   --config "$local_upsert_header_cfg" \
   -H "Content-Type: application/json" \
-  --data "$payload"
-echo
+  --data "$payload")"
+print_subject_redacted_response "$upsert_response"
 echo "reading back subject profile:"
-curl -fsS "$request_get" \
+readback_response="$(curl -fsS "$request_get" \
   --connect-timeout 4 \
   --max-time 12 \
   "${tls_args[@]}" \
-  --config "$local_get_header_cfg"
-echo
+  --config "$local_get_header_cfg")"
+print_subject_redacted_response "$readback_response"

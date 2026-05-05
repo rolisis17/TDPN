@@ -1146,6 +1146,73 @@ if ! jq -e '.status == "fail" and .failure_stage == "campaign" and .decision.dec
   exit 1
 fi
 
+echo "[profile-compare-campaign-signoff] endpoint preflight artifacts redact URL credentials"
+: >"$SIGNOFF_CAPTURE"
+PREFLIGHT_REDACTION_REPORTS_DIR="$TMP_DIR/reports_preflight_redaction"
+PREFLIGHT_REDACTION_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_preflight_redaction.json"
+PREFLIGHT_REDACTION_FAKE_BIN="$TMP_DIR/preflight_redaction_fake_bin"
+mkdir -p "$PREFLIGHT_REDACTION_REPORTS_DIR" "$PREFLIGHT_REDACTION_FAKE_BIN"
+cat >"$PREFLIGHT_REDACTION_FAKE_BIN/curl" <<'EOF_FAKE_CURL_REDACTION'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "curl: (7) failed to connect to endpoint" >&2
+exit 7
+EOF_FAKE_CURL_REDACTION
+chmod +x "$PREFLIGHT_REDACTION_FAKE_BIN/curl"
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+PATH="$PREFLIGHT_REDACTION_FAKE_BIN:$PATH" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$PREFLIGHT_REDACTION_REPORTS_DIR" \
+  --refresh-campaign 1 \
+  --campaign-execution-mode docker \
+  --campaign-endpoint-preflight-timeout-sec 1 \
+  --campaign-directory-urls 'http://user:pw-secret@198.51.100.42:18081?token=dir-secret,http://user:pw-secret@198.51.100.43:28081?token=dir-secret-b' \
+  --campaign-bootstrap-directory 'http://user:pw-secret@198.51.100.42:18081?token=bootstrap-secret' \
+  --campaign-issuer-url 'http://user:pw-secret@198.51.100.42:18082?token=issuer-secret' \
+  --campaign-entry-url 'http://user:pw-secret@198.51.100.42:18083?token=entry-secret' \
+  --campaign-exit-url 'http://user:pw-secret@198.51.100.42:18084?token=exit-secret' \
+  --campaign-subject 'inv-signoff-secret-subject' \
+  --summary-json "$PREFLIGHT_REDACTION_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_preflight_redaction.log 2>&1
+rc_preflight_redaction=$?
+set -e
+if [[ "$rc_preflight_redaction" -eq 0 ]]; then
+  echo "expected non-zero rc when redaction preflight fails"
+  cat /tmp/integration_profile_compare_campaign_signoff_preflight_redaction.log
+  exit 1
+fi
+preflight_redaction_log="$(jq -r '.inputs.campaign_endpoint_preflight.log' "$PREFLIGHT_REDACTION_SUMMARY")"
+for forbidden in 'pw-secret' 'token=' 'inv-signoff-secret-subject'; do
+  if grep -F -- "$forbidden" "$PREFLIGHT_REDACTION_SUMMARY" "$preflight_redaction_log" /tmp/integration_profile_compare_campaign_signoff_preflight_redaction.log >/dev/null; then
+    echo "profile compare signoff artifact leaked forbidden value: $forbidden"
+    cat "$PREFLIGHT_REDACTION_SUMMARY"
+    cat "$preflight_redaction_log"
+    cat /tmp/integration_profile_compare_campaign_signoff_preflight_redaction.log
+    exit 1
+  fi
+done
+if ! jq -e '
+  .inputs.campaign_refresh_overrides.directory_urls == "http://198.51.100.42:18081,http://198.51.100.43:28081"
+  and .inputs.campaign_refresh_overrides.bootstrap_directory == "http://198.51.100.42:18081"
+  and .inputs.campaign_refresh_overrides.issuer_url == "http://198.51.100.42:18082"
+  and .inputs.campaign_refresh_overrides.entry_url == "http://198.51.100.42:18083"
+  and .inputs.campaign_refresh_overrides.exit_url == "http://198.51.100.42:18084"
+  and .inputs.campaign_refresh_overrides.subject_configured == true
+  and (.inputs.campaign_endpoint_preflight.failed_endpoints[0].url | contains("pw-secret") | not)
+  and (.inputs.campaign_endpoint_preflight.failed_endpoints[0].url | contains("token=") | not)
+  and (.stages.campaign.command | contains("--subject"))
+  and (.stages.campaign.command | contains("redacted"))
+  and ((.stages.campaign.command | contains("inv-signoff-secret-subject")) | not)
+' "$PREFLIGHT_REDACTION_SUMMARY" >/dev/null 2>&1; then
+  echo "preflight-redaction summary JSON missing expected sanitized fields"
+  cat "$PREFLIGHT_REDACTION_SUMMARY"
+  exit 1
+fi
+
 echo "[profile-compare-campaign-signoff] endpoint preflight can be disabled"
 : >"$SIGNOFF_CAPTURE"
 PREFLIGHT_DISABLED_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_preflight_disabled.json"

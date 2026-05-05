@@ -858,6 +858,61 @@ if ! rg -q 'profile-compare-campaign: status=pass' /tmp/integration_profile_comp
   exit 1
 fi
 
+REDACTION_REPORTS_DIR="$TMP_DIR/campaign_redaction_reports"
+REDACTION_SUMMARY="$REDACTION_REPORTS_DIR/profile_compare_campaign_redaction_summary.json"
+REDACTION_LOG="$TMP_DIR/profile_compare_campaign_redaction.log"
+
+echo "[profile-compare-campaign] artifact redaction"
+PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT="$FAKE_LOCAL" \
+PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT="$FAKE_TREND" \
+FAKE_LOCAL_CAPTURE_FILE="$LOCAL_CAPTURE" \
+FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
+FAKE_LOCAL_FAIL_AT=0 \
+FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
+./scripts/profile_compare_campaign.sh \
+  --campaign-runs 1 \
+  --reports-dir "$REDACTION_REPORTS_DIR" \
+  --profiles balanced \
+  --rounds 1 \
+  --execution-mode local \
+  --directory-urls 'http://user:pw-secret@dir-a:8081?token=dir-secret,http://user:pw-secret@dir-b:8081?token=dir-secret-b' \
+  --bootstrap-directory 'http://user:pw-secret@dir-a:8081?token=bootstrap-secret' \
+  --issuer-url 'http://user:pw-secret@issuer-a:8082?token=issuer-secret' \
+  --entry-url 'http://user:pw-secret@entry-a:8083?token=entry-secret' \
+  --exit-url 'http://user:pw-secret@exit-a:8084?token=exit-secret' \
+  --allow-insecure-remote-http 1 \
+  --subject 'inv-campaign-secret-subject' \
+  --summary-json "$REDACTION_SUMMARY" \
+  --print-summary-json 0 >"$REDACTION_LOG" 2>&1
+
+for forbidden in 'pw-secret' 'token=' 'inv-campaign-secret-subject'; do
+  if grep -F -- "$forbidden" "$REDACTION_SUMMARY" "$REDACTION_REPORTS_DIR/profile_compare_campaign_report.md" >/dev/null; then
+    echo "profile compare campaign artifact leaked forbidden value: $forbidden"
+    cat "$REDACTION_SUMMARY"
+    cat "$REDACTION_REPORTS_DIR/profile_compare_campaign_report.md"
+    exit 1
+  fi
+done
+if ! jq -e '
+  .inputs.compare.directory_urls == "http://dir-a:8081,http://dir-b:8081"
+  and .inputs.compare.bootstrap_directory == "http://dir-a:8081"
+  and .inputs.compare.issuer_url == "http://issuer-a:8082"
+  and .inputs.compare.entry_url == "http://entry-a:8083"
+  and .inputs.compare.exit_url == "http://exit-a:8084"
+  and .inputs.compare.subject == "[redacted]"
+  and (.runs[0].command | contains("--subject"))
+  and (.runs[0].command | contains("redacted"))
+  and ((.runs[0].command | contains("pw-secret")) | not)
+  and ((.runs[0].command | contains("token=")) | not)
+  and ((.command | contains("inv-campaign-secret-subject")) | not)
+' "$REDACTION_SUMMARY" >/dev/null; then
+  echo "profile compare campaign redaction summary missing expected sanitized fields"
+  cat "$REDACTION_SUMMARY"
+  exit 1
+fi
+
 FORWARD_CAPTURE="$TMP_DIR/forward_capture.log"
 FAKE_FORWARD="$TMP_DIR/fake_profile_compare_campaign_forward.sh"
 cat >"$FAKE_FORWARD" <<'EOF_FORWARD'

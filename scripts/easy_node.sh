@@ -1326,6 +1326,47 @@ trim_url() {
   echo "$value"
 }
 
+redact_url_for_log() {
+  local raw scheme remainder
+  raw="$(trim "${1:-}")"
+  if [[ -z "$raw" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$raw" != *"://"* ]]; then
+    printf '%s' "$raw"
+    return
+  fi
+  scheme="${raw%%://*}"
+  remainder="${raw#*://}"
+  remainder="${remainder%%\#*}"
+  remainder="${remainder%%\?*}"
+  if [[ "$remainder" == *@* ]]; then
+    remainder="${remainder#*@}"
+  fi
+  printf '%s' "${scheme}://${remainder}"
+}
+
+redact_csv_urls_for_log() {
+  local csv="$1"
+  local old_ifs="$IFS"
+  local -a parts=()
+  local item redacted=""
+  IFS=',' read -r -a parts <<<"$csv"
+  IFS="$old_ifs"
+  for item in "${parts[@]}"; do
+    item="$(trim "$item")"
+    if [[ -z "$item" ]]; then
+      continue
+    fi
+    if [[ -n "$redacted" ]]; then
+      redacted+=","
+    fi
+    redacted+="$(redact_url_for_log "$item")"
+  done
+  printf '%s' "$redacted"
+}
+
 normalize_path_profile() {
   local profile
   profile="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
@@ -1966,10 +2007,14 @@ build_admin_header_config() {
       return 1
     fi
   else
-    if ! build_admin_token_header_config "$admin_token" header_config; then
-      rm -f "$header_config"
+    local token_header_config=""
+    if ! build_admin_token_header_config "$admin_token" token_header_config; then
+      if [[ -n "${token_header_config:-}" ]]; then
+        rm -f "$token_header_config"
+      fi
       return 1
     fi
+    header_config="$token_header_config"
   fi
 
   local -n _header_out="$out_var"
@@ -11737,7 +11782,7 @@ invite_check() {
   payload="$(curl -fsS --connect-timeout 4 --max-time 12 "${tls_args[@]}" --config "$header_config" "$request_url" 2>/dev/null || true)"
   rm -f "$header_config"
   if [[ -z "$payload" ]]; then
-    echo "invite key not found: $key"
+    echo "invite key not found: key=[redacted]"
     exit 1
   fi
 
@@ -11745,10 +11790,10 @@ invite_check() {
   kind="$(printf '%s\n' "$payload" | rg -o '"kind":"[^"]+"' | head -n 1 | sed -E 's/^"kind":"([^"]+)"$/\1/')"
   tier="$(printf '%s\n' "$payload" | rg -o '"tier":[0-9]+' | head -n 1 | sed -E 's/^"tier":([0-9]+)$/\1/')"
   if [[ "$kind" == "client" && "${tier:-0}" -ge 1 ]]; then
-    echo "invite key valid: key=$key kind=$kind tier=$tier issuer=$issuer_url"
+    echo "invite key valid: key=[redacted] kind=$kind tier=$tier issuer=$(redact_url_for_log "$issuer_url")"
     return 0
   fi
-  echo "invite key not eligible for client use: key=$key kind=${kind:-unknown} tier=${tier:-unknown}"
+  echo "invite key not eligible for client use: key=[redacted] kind=${kind:-unknown} tier=${tier:-unknown}"
   return 1
 }
 
@@ -14231,7 +14276,7 @@ client_vpn_preflight() {
   first_dir="$(first_csv_item "$directory_urls")"
 
   echo "client-vpn preflight:"
-  echo "  directory_urls: $directory_urls"
+  echo "  directory_urls: $(redact_csv_urls_for_log "$directory_urls")"
   echo "  issuer_url: $issuer_url"
   echo "  entry_url: $entry_url"
   echo "  exit_url: $exit_url"
@@ -14246,7 +14291,7 @@ client_vpn_preflight() {
   echo "  middle_relay_min_operators: $middle_relay_min_operators"
   echo "  middle_relay_require_distinct: $middle_relay_require_distinct"
   echo "  issuer_quorum_check: $issuer_quorum_check"
-  echo "  issuer_urls: $issuer_urls"
+  echo "  issuer_urls: $(redact_csv_urls_for_log "$issuer_urls")"
 
   local -a dir_opts issuer_opts entry_opts exit_opts
   mapfile -t dir_opts < <(curl_tls_opts_for_url "$first_dir")
@@ -15093,6 +15138,41 @@ client_vpn_status() {
     interface_state="present"
   fi
 
+  local directory_urls_log issuer_url_log issuer_urls_log entry_url_log exit_url_log client_status_json_log
+  directory_urls_log="$(redact_csv_urls_for_log "${directory_urls:-}")"
+  issuer_url_log="$(redact_url_for_log "${issuer_url:-}")"
+  issuer_urls_log="$(redact_csv_urls_for_log "${issuer_urls:-}")"
+  entry_url_log="$(redact_url_for_log "${entry_url:-}")"
+  exit_url_log="$(redact_url_for_log "${exit_url:-}")"
+  client_status_json_log="$client_status_json"
+  if command -v jq >/dev/null 2>&1; then
+    client_status_json_log="$(printf '%s\n' "$client_status_json" | jq -c '
+      def redact_urlish:
+        if type == "object" then
+          with_entries(
+            if (.key | test("(^|_)(url|urls|endpoint|control_url)$"; "i")) then
+              .value = (
+                if (.value | type) == "array" then
+                  (.value | map(if type == "string" then "[redacted]" else . end))
+                elif (.value | type) == "string" then
+                  "[redacted]"
+                else
+                  .value
+                end
+              )
+            else
+              .value |= redact_urlish
+            end
+          )
+        elif type == "array" then
+          map(redact_urlish)
+        else
+          .
+        end;
+      redact_urlish
+    ' 2>/dev/null || printf '{}')"
+  fi
+
   if [[ "$show_json" == "1" ]]; then
     if command -v jq >/dev/null 2>&1; then
       jq -n \
@@ -15103,7 +15183,7 @@ client_vpn_status() {
         --arg proxy_addr "${proxy_addr:-}" \
         --arg path_profile "${path_profile:-}" \
         --arg status_file "${status_file:-}" \
-        --argjson client_status "$client_status_json" \
+        --argjson client_status "$client_status_json_log" \
         --arg allowed_ips "${allowed_ips:-}" \
         --arg install_route "${install_route:-}" \
         --arg route_mode "${route_mode:-}" \
@@ -15111,11 +15191,11 @@ client_vpn_status() {
         --arg allow_session_churn "${allow_session_churn:-}" \
         --arg beta_profile "${beta_profile:-}" \
         --arg prod_profile "${prod_profile:-}" \
-        --arg directory_urls "${directory_urls:-}" \
-        --arg issuer_url "${issuer_url:-}" \
-        --arg issuer_urls "${issuer_urls:-}" \
-        --arg entry_url "${entry_url:-}" \
-        --arg exit_url "${exit_url:-}" \
+        --arg directory_urls "${directory_urls_log:-}" \
+        --arg issuer_url "${issuer_url_log:-}" \
+        --arg issuer_urls "${issuer_urls_log:-}" \
+        --arg entry_url "${entry_url_log:-}" \
+        --arg exit_url "${exit_url_log:-}" \
         --arg key_file "${key_file:-}" \
         --arg trust_file "${trust_file:-}" \
         --arg trust_scope "${trust_scope:-}" \
@@ -15196,11 +15276,11 @@ client_vpn_status() {
   echo "  allow_session_churn: ${allow_session_churn:-unknown}"
   echo "  beta_profile: ${beta_profile:-0}"
   echo "  prod_profile: ${prod_profile:-0}"
-  echo "  directory_urls: ${directory_urls:-unknown}"
-  echo "  issuer_url: ${issuer_url:-unknown}"
-  echo "  issuer_urls: ${issuer_urls:-unknown}"
-  echo "  entry_url: ${entry_url:-unknown}"
-  echo "  exit_url: ${exit_url:-unknown}"
+  echo "  directory_urls: ${directory_urls_log:-unknown}"
+  echo "  issuer_url: ${issuer_url_log:-unknown}"
+  echo "  issuer_urls: ${issuer_urls_log:-unknown}"
+  echo "  entry_url: ${entry_url_log:-unknown}"
+  echo "  exit_url: ${exit_url_log:-unknown}"
   echo "  key_file: ${key_file:-unknown}"
   echo "  trust_file: ${trust_file:-unknown}"
   echo "  trust_scope: ${trust_scope:-unknown}"

@@ -533,6 +533,56 @@ do
   fi
 done
 
+REDACTION_SUMMARY_JSON="$TMP_DIR/profile_compare_redaction_summary.json"
+REDACTION_REPORT_MD="$TMP_DIR/profile_compare_redaction_report.md"
+REDACTION_RUN_LOG="$TMP_DIR/profile_compare_redaction_run.log"
+
+echo "[profile-compare-local] artifact redaction"
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles balanced \
+  --rounds 1 \
+  --execution-mode local \
+  --directory-urls 'http://user:pw-secret@dir-a:8081?token=dir-secret,http://user:pw-secret@dir-b:8081?token=dir-secret-b' \
+  --bootstrap-directory 'http://user:pw-secret@dir-a:8081?token=bootstrap-secret' \
+  --issuer-url 'http://user:pw-secret@issuer-a:8082?token=issuer-secret' \
+  --entry-url 'http://user:pw-secret@entry-a:8083?token=entry-secret' \
+  --exit-url 'http://user:pw-secret@exit-a:8084?token=exit-secret' \
+  --allow-insecure-remote-http 1 \
+  --subject 'inv-local-secret-subject' \
+  --summary-json "$REDACTION_SUMMARY_JSON" \
+  --report-md "$REDACTION_REPORT_MD" \
+  --print-summary-json 0 >"$REDACTION_RUN_LOG"
+
+for forbidden in 'pw-secret' 'token=' 'inv-local-secret-subject'; do
+  if grep -F -- "$forbidden" "$REDACTION_SUMMARY_JSON" "$REDACTION_REPORT_MD" >/dev/null; then
+    echo "profile compare local artifact leaked forbidden value: $forbidden"
+    cat "$REDACTION_SUMMARY_JSON"
+    cat "$REDACTION_REPORT_MD"
+    exit 1
+  fi
+done
+if ! jq -e '
+  .inputs.directory_urls == "http://dir-a:8081,http://dir-b:8081"
+  and .inputs.bootstrap_directory == "http://dir-a:8081"
+  and .inputs.issuer_url == "http://issuer-a:8082"
+  and .inputs.entry_url == "http://entry-a:8083"
+  and .inputs.exit_url == "http://exit-a:8084"
+  and .inputs.subject == "[redacted]"
+  and (.runs[0].command | contains("--subject"))
+  and (.runs[0].command | contains("redacted"))
+  and ((.runs[0].command | contains("pw-secret")) | not)
+  and ((.runs[0].command | contains("token=")) | not)
+  and ((.command | contains("inv-local-secret-subject")) | not)
+' "$REDACTION_SUMMARY_JSON" >/dev/null; then
+  echo "profile compare local redaction summary missing expected sanitized fields"
+  cat "$REDACTION_SUMMARY_JSON"
+  exit 1
+fi
+
 FORWARD_CAPTURE="$TMP_DIR/forward_capture.log"
 FAKE_FORWARD="$TMP_DIR/fake_profile_compare_forward.sh"
 cat >"$FAKE_FORWARD" <<'EOF_FORWARD'

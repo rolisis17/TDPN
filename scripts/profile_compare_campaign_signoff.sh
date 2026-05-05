@@ -207,6 +207,103 @@ quote_cmd() {
   printf '\n'
 }
 
+sanitize_url_for_artifact() {
+  local raw scheme remainder
+  raw="$(trim "${1:-}")"
+  if [[ -z "$raw" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$raw" != *"://"* ]]; then
+    printf '%s' "$raw"
+    return
+  fi
+  scheme="${raw%%://*}"
+  remainder="${raw#*://}"
+  remainder="${remainder%%\#*}"
+  remainder="${remainder%%\?*}"
+  if [[ "$remainder" == *@* ]]; then
+    remainder="${remainder#*@}"
+  fi
+  printf '%s' "${scheme}://${remainder}"
+}
+
+sanitize_csv_urls_for_artifact() {
+  local csv="$1"
+  local -a parts=()
+  local item sanitized=""
+  IFS=',' read -r -a parts <<<"$csv"
+  for item in "${parts[@]}"; do
+    item="$(trim "$item")"
+    if [[ -z "$item" ]]; then
+      continue
+    fi
+    if [[ -n "$sanitized" ]]; then
+      sanitized+=","
+    fi
+    sanitized+="$(sanitize_url_for_artifact "$item")"
+  done
+  printf '%s' "$sanitized"
+}
+
+sanitize_value_for_artifact() {
+  local value="$1"
+  if [[ "$value" == *"://"* && "$value" == *,* ]]; then
+    sanitize_csv_urls_for_artifact "$value"
+  else
+    sanitize_url_for_artifact "$value"
+  fi
+}
+
+sanitize_arg_for_artifact() {
+  local arg="$1"
+  if [[ "$arg" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*://.*)$ ]]; then
+    printf '%s=%s' "${BASH_REMATCH[1]}" "$(sanitize_value_for_artifact "${BASH_REMATCH[2]}")"
+  else
+    sanitize_value_for_artifact "$arg"
+  fi
+}
+
+sensitive_value_flag() {
+  case "$1" in
+    --campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+quote_redacted_cmd() {
+  local arg flag value redact_next=0
+  for arg in "$@"; do
+    if [[ "$redact_next" == "1" ]]; then
+      printf '%q ' "[redacted]"
+      redact_next=0
+      continue
+    fi
+
+    if [[ "$arg" == --*=* ]]; then
+      flag="${arg%%=*}"
+      value="${arg#*=}"
+      if sensitive_value_flag "$flag"; then
+        printf '%q ' "${flag}=[redacted]"
+      else
+        printf '%q ' "${flag}=$(sanitize_value_for_artifact "$value")"
+      fi
+      continue
+    fi
+
+    if sensitive_value_flag "$arg"; then
+      printf '%q ' "$arg"
+      redact_next=1
+      continue
+    fi
+
+    printf '%q ' "$(sanitize_arg_for_artifact "$arg")"
+  done
+  printf '\n'
+}
+
 redact_sensitive_cmd_line() {
   local line="$1"
   line="$(printf '%s' "$line" | sed -E 's/(--campaign-subject )[^ ]+/\1[redacted]/g; s/(--subject )[^ ]+/\1[redacted]/g; s/(--key )[^ ]+/\1[redacted]/g; s/(--invite-key )[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred )[^ ]+/\1[redacted]/g; s/(--anon-cred )[^ ]+/\1[redacted]/g; s/(--token )[^ ]+/\1[redacted]/g; s/(--auth-token )[^ ]+/\1[redacted]/g; s/(--admin-token )[^ ]+/\1[redacted]/g; s/(--authorization )[^ ]+/\1[redacted]/g; s/(--bearer )[^ ]+/\1[redacted]/g; s/(--campaign-subject=)[^ ]+/\1[redacted]/g; s/(--subject=)[^ ]+/\1[redacted]/g; s/(--key=)[^ ]+/\1[redacted]/g; s/(--invite-key=)[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred=)[^ ]+/\1[redacted]/g; s/(--anon-cred=)[^ ]+/\1[redacted]/g; s/(--token=)[^ ]+/\1[redacted]/g; s/(--auth-token=)[^ ]+/\1[redacted]/g; s/(--admin-token=)[^ ]+/\1[redacted]/g; s/(--authorization=)[^ ]+/\1[redacted]/g; s/(--bearer=)[^ ]+/\1[redacted]/g')"
@@ -218,7 +315,13 @@ json_endpoint_records_from_lines() {
     printf '%s' "[]"
     return
   fi
-  printf '%s\n' "$@" | jq -R 'select(length > 0) | split("\t") | {
+  local line label url host
+  local -a sanitized_records=()
+  for line in "$@"; do
+    IFS=$'\t' read -r label url host <<<"$line"
+    sanitized_records+=("${label}"$'\t'"$(sanitize_url_for_artifact "$url")"$'\t'"${host}")
+  done
+  printf '%s\n' "${sanitized_records[@]}" | jq -R 'select(length > 0) | split("\t") | {
     label: .[0],
     url: .[1],
     host: (if ((.[2] // "") == "") then null else .[2] end)
@@ -230,7 +333,13 @@ json_endpoint_failures_from_lines() {
     printf '%s' "[]"
     return
   fi
-  printf '%s\n' "$@" | jq -R 'select(length > 0) | split("\t") | {
+  local line label url host error
+  local -a sanitized_records=()
+  for line in "$@"; do
+    IFS=$'\t' read -r label url host error <<<"$line"
+    sanitized_records+=("${label}"$'\t'"$(sanitize_url_for_artifact "$url")"$'\t'"${host}"$'\t'"${error}")
+  done
+  printf '%s\n' "${sanitized_records[@]}" | jq -R 'select(length > 0) | split("\t") | {
     label: .[0],
     url: .[1],
     host: (if ((.[2] // "") == "") then null else .[2] end),
@@ -383,7 +492,7 @@ run_campaign_endpoint_preflight() {
   local -a remote_records=()
   local -a failed_records=()
   local -a directory_urls=()
-  local label endpoint endpoint_url host rc err_file err_text idx
+  local label endpoint endpoint_url endpoint_url_log host rc err_file err_text idx
 
   campaign_preflight_attempted="0"
   campaign_preflight_status="skip"
@@ -482,10 +591,11 @@ run_campaign_endpoint_preflight() {
 
   for endpoint in "${remote_records[@]}"; do
     IFS=$'\t' read -r label endpoint_url host <<<"$endpoint"
+    endpoint_url_log="$(sanitize_url_for_artifact "$endpoint_url")"
     printf '[profile-compare-campaign-signoff] %s campaign endpoint preflight checking label=%s url=%s timeout_sec=%s\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       "$label" \
-      "$endpoint_url" \
+      "$endpoint_url_log" \
       "$campaign_endpoint_preflight_timeout_sec" >>"$log_path"
     err_file="$(mktemp "$log_dir/profile_compare_campaign_signoff_${run_stamp}_preflight_err.XXXXXX")"
     local -a curl_opts=(--silent --show-error --fail --noproxy '*' --connect-timeout "$campaign_endpoint_preflight_timeout_sec" --max-time "$campaign_endpoint_preflight_timeout_sec" --output /dev/null)
@@ -496,7 +606,7 @@ run_campaign_endpoint_preflight() {
       printf '[profile-compare-campaign-signoff] %s campaign endpoint preflight pass label=%s url=%s\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         "$label" \
-        "$endpoint_url" >>"$log_path"
+        "$endpoint_url_log" >>"$log_path"
       rm -f "$err_file"
       continue
     else
@@ -514,11 +624,11 @@ run_campaign_endpoint_preflight() {
     campaign_preflight_status="fail"
     campaign_preflight_failed_count="${#failed_records[@]}"
     campaign_preflight_failed_endpoints_json="$(json_endpoint_failures_from_lines "${failed_records[@]}")"
-    campaign_preflight_failure_reason="endpoint preflight failed for ${label} (${endpoint_url}): ${err_text}"
+    campaign_preflight_failure_reason="endpoint preflight failed for ${label} (${endpoint_url_log}): ${err_text}"
     printf '[profile-compare-campaign-signoff] %s campaign endpoint preflight fail label=%s url=%s error=%s\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       "$label" \
-      "$endpoint_url" \
+      "$endpoint_url_log" \
       "$err_text" >>"$log_path"
     return "$rc"
   done
@@ -1228,7 +1338,7 @@ cleanup_signoff_lock() {
 trap cleanup_signoff_lock EXIT
 
 if [[ "$lock_override_enabled" != "1" ]]; then
-  invocation_cmd_line="$(redact_sensitive_cmd_line "$(quote_cmd "$0" "${original_args[@]}")")"
+  invocation_cmd_line="$(quote_redacted_cmd "$0" "${original_args[@]}")"
   invocation_cmd_line="$(printf '%s' "$invocation_cmd_line" | tr '\n' ' ')"
   lock_self_start_time_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   stale_lock_cleaned=0
@@ -1435,7 +1545,7 @@ build_campaign_cmd() {
   if [[ "$campaign_allow_insecure_remote_http" == "1" ]]; then
     campaign_cmd+=(--allow-insecure-remote-http 1)
   fi
-  campaign_cmd_line="$(redact_sensitive_cmd_line "$(quote_cmd "${campaign_cmd[@]}")")"
+  campaign_cmd_line="$(quote_redacted_cmd "${campaign_cmd[@]}")"
 }
 
 build_campaign_cmd
@@ -1607,7 +1717,7 @@ if [[ -n "$require_runtime_actuation_status_pass" ]]; then
   check_cmd+=(--require-runtime-actuation-status-pass "$require_runtime_actuation_status_pass")
 fi
 
-check_cmd_line="$(quote_cmd "${check_cmd[@]}")"
+check_cmd_line="$(quote_redacted_cmd "${check_cmd[@]}")"
 
 if [[ -z "$failure_stage" ]]; then
   check_attempted=1
@@ -1884,6 +1994,17 @@ if [[ -n "$campaign_anon_cred_effective" ]]; then
   campaign_anon_cred_effective_configured="1"
 fi
 
+campaign_directory_urls_artifact="$(sanitize_csv_urls_for_artifact "$campaign_directory_urls")"
+campaign_directory_urls_effective_artifact="$(sanitize_csv_urls_for_artifact "$campaign_directory_urls_effective")"
+campaign_bootstrap_directory_artifact="$(sanitize_url_for_artifact "$campaign_bootstrap_directory")"
+campaign_bootstrap_directory_effective_artifact="$(sanitize_url_for_artifact "$campaign_bootstrap_directory_effective")"
+campaign_issuer_url_artifact="$(sanitize_url_for_artifact "$campaign_issuer_url")"
+campaign_issuer_url_effective_artifact="$(sanitize_url_for_artifact "$campaign_issuer_url_effective")"
+campaign_entry_url_artifact="$(sanitize_url_for_artifact "$campaign_entry_url")"
+campaign_entry_url_effective_artifact="$(sanitize_url_for_artifact "$campaign_entry_url_effective")"
+campaign_exit_url_artifact="$(sanitize_url_for_artifact "$campaign_exit_url")"
+campaign_exit_url_effective_artifact="$(sanitize_url_for_artifact "$campaign_exit_url_effective")"
+
 jq -n \
   --arg generated_at_utc "$generated_at_utc" \
   --arg status "$status" \
@@ -1940,18 +2061,18 @@ jq -n \
   --arg require_runtime_actuation_status_pass "$require_runtime_actuation_status_pass" \
   --arg campaign_execution_mode "$campaign_execution_mode" \
   --arg campaign_execution_mode_effective "$campaign_execution_mode_effective" \
-  --arg campaign_directory_urls "$campaign_directory_urls" \
-  --arg campaign_directory_urls_effective "$campaign_directory_urls_effective" \
-  --arg campaign_bootstrap_directory "$campaign_bootstrap_directory" \
-  --arg campaign_bootstrap_directory_effective "$campaign_bootstrap_directory_effective" \
+  --arg campaign_directory_urls "$campaign_directory_urls_artifact" \
+  --arg campaign_directory_urls_effective "$campaign_directory_urls_effective_artifact" \
+  --arg campaign_bootstrap_directory "$campaign_bootstrap_directory_artifact" \
+  --arg campaign_bootstrap_directory_effective "$campaign_bootstrap_directory_effective_artifact" \
   --arg campaign_discovery_wait_sec "$campaign_discovery_wait_sec" \
   --arg campaign_discovery_wait_sec_effective "$campaign_discovery_wait_sec_effective" \
-  --arg campaign_issuer_url "$campaign_issuer_url" \
-  --arg campaign_issuer_url_effective "$campaign_issuer_url_effective" \
-  --arg campaign_entry_url "$campaign_entry_url" \
-  --arg campaign_entry_url_effective "$campaign_entry_url_effective" \
-  --arg campaign_exit_url "$campaign_exit_url" \
-  --arg campaign_exit_url_effective "$campaign_exit_url_effective" \
+  --arg campaign_issuer_url "$campaign_issuer_url_artifact" \
+  --arg campaign_issuer_url_effective "$campaign_issuer_url_effective_artifact" \
+  --arg campaign_entry_url "$campaign_entry_url_artifact" \
+  --arg campaign_entry_url_effective "$campaign_entry_url_effective_artifact" \
+  --arg campaign_exit_url "$campaign_exit_url_artifact" \
+  --arg campaign_exit_url_effective "$campaign_exit_url_effective_artifact" \
   --arg campaign_subject_configured "$campaign_subject_configured" \
   --arg campaign_subject_source "$campaign_subject_source" \
   --arg campaign_subject_effective_configured "$campaign_subject_effective_configured" \

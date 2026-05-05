@@ -84,14 +84,98 @@ abs_path() {
   fi
 }
 
-print_cmd() {
-  local line=""
-  local arg
-  for arg in "$@"; do
-    line+=$(printf '%q ' "$arg")
+sanitize_url_for_artifact() {
+  local raw scheme remainder
+  raw="$(trim "${1:-}")"
+  if [[ -z "$raw" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$raw" != *"://"* ]]; then
+    printf '%s' "$raw"
+    return
+  fi
+  scheme="${raw%%://*}"
+  remainder="${raw#*://}"
+  remainder="${remainder%%\#*}"
+  remainder="${remainder%%\?*}"
+  if [[ "$remainder" == *@* ]]; then
+    remainder="${remainder#*@}"
+  fi
+  printf '%s' "${scheme}://${remainder}"
+}
+
+sanitize_csv_urls_for_artifact() {
+  local csv="$1"
+  local -a parts=()
+  local item sanitized=""
+  IFS=',' read -r -a parts <<<"$csv"
+  for item in "${parts[@]}"; do
+    item="$(trim "$item")"
+    if [[ -z "$item" ]]; then
+      continue
+    fi
+    if [[ -n "$sanitized" ]]; then
+      sanitized+=","
+    fi
+    sanitized+="$(sanitize_url_for_artifact "$item")"
   done
-  line="$(printf '%s' "$line" | sed -E 's/(--campaign-subject )[^ ]+/\1[redacted]/g; s/(--subject )[^ ]+/\1[redacted]/g; s/(--key )[^ ]+/\1[redacted]/g; s/(--invite-key )[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred )[^ ]+/\1[redacted]/g; s/(--anon-cred )[^ ]+/\1[redacted]/g; s/(--token )[^ ]+/\1[redacted]/g; s/(--auth-token )[^ ]+/\1[redacted]/g; s/(--admin-token )[^ ]+/\1[redacted]/g; s/(--authorization )[^ ]+/\1[redacted]/g; s/(--bearer )[^ ]+/\1[redacted]/g; s/(--campaign-subject=)[^ ]+/\1[redacted]/g; s/(--subject=)[^ ]+/\1[redacted]/g; s/(--key=)[^ ]+/\1[redacted]/g; s/(--invite-key=)[^ ]+/\1[redacted]/g; s/(--campaign-anon-cred=)[^ ]+/\1[redacted]/g; s/(--anon-cred=)[^ ]+/\1[redacted]/g; s/(--token=)[^ ]+/\1[redacted]/g; s/(--auth-token=)[^ ]+/\1[redacted]/g; s/(--admin-token=)[^ ]+/\1[redacted]/g; s/(--authorization=)[^ ]+/\1[redacted]/g; s/(--bearer=)[^ ]+/\1[redacted]/g')"
-  printf '%s\n' "$line"
+  printf '%s' "$sanitized"
+}
+
+sanitize_value_for_artifact() {
+  local value="$1"
+  if [[ "$value" == *"://"* && "$value" == *,* ]]; then
+    sanitize_csv_urls_for_artifact "$value"
+  else
+    sanitize_url_for_artifact "$value"
+  fi
+}
+
+sanitize_arg_for_artifact() {
+  local arg="$1"
+  if [[ "$arg" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*://.*)$ ]]; then
+    printf '%s=%s' "${BASH_REMATCH[1]}" "$(sanitize_value_for_artifact "${BASH_REMATCH[2]}")"
+  else
+    sanitize_value_for_artifact "$arg"
+  fi
+}
+
+sensitive_value_flag() {
+  case "$1" in
+    --campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+print_cmd() {
+  local arg flag value redact_next=0
+  for arg in "$@"; do
+    if [[ "$redact_next" == "1" ]]; then
+      printf '%q ' "[redacted]"
+      redact_next=0
+      continue
+    fi
+    if [[ "$arg" == --*=* ]]; then
+      flag="${arg%%=*}"
+      value="${arg#*=}"
+      if sensitive_value_flag "$flag"; then
+        printf '%q ' "${flag}=[redacted]"
+      else
+        printf '%q ' "${flag}=$(sanitize_value_for_artifact "$value")"
+      fi
+      continue
+    fi
+    if sensitive_value_flag "$arg"; then
+      printf '%q ' "$arg"
+      redact_next=1
+      continue
+    fi
+    printf '%q ' "$(sanitize_arg_for_artifact "$arg")"
+  done
+  printf '\n'
 }
 
 campaign_elapsed_sec() {
@@ -1287,6 +1371,12 @@ if [[ -n "$anon_cred" ]]; then
   anon_cred_present="1"
 fi
 
+directory_urls_artifact="$(sanitize_csv_urls_for_artifact "$directory_urls")"
+bootstrap_directory_artifact="$(sanitize_url_for_artifact "$bootstrap_directory")"
+issuer_url_artifact="$(sanitize_url_for_artifact "$issuer_url")"
+entry_url_artifact="$(sanitize_url_for_artifact "$entry_url")"
+exit_url_artifact="$(sanitize_url_for_artifact "$exit_url")"
+
 jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg status "$status" \
@@ -1310,11 +1400,11 @@ jq -n \
   --arg execution_mode_effective "$execution_mode_effective" \
   --arg execution_mode_adjusted "$execution_mode_adjusted" \
   --arg execution_mode_adjustment_reason "$execution_mode_adjustment_reason" \
-  --arg directory_urls "$directory_urls" \
-  --arg bootstrap_directory "$bootstrap_directory" \
-  --arg issuer_url "$issuer_url" \
-  --arg entry_url "$entry_url" \
-  --arg exit_url "$exit_url" \
+  --arg directory_urls "$directory_urls_artifact" \
+  --arg bootstrap_directory "$bootstrap_directory_artifact" \
+  --arg issuer_url "$issuer_url_artifact" \
+  --arg entry_url "$entry_url_artifact" \
+  --arg exit_url "$exit_url_artifact" \
   --arg subject "$subject_redacted" \
   --arg anon_cred_present "$anon_cred_present" \
   --arg start_local_stack "$start_local_stack" \

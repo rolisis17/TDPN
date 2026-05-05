@@ -15,6 +15,7 @@ MODE_FILE="$ROOT_DIR/deploy/data/easy_node_server_mode.conf"
 AUTH_ENV="$ROOT_DIR/deploy/.env.easy.server"
 backup_mode=""
 backup_env=""
+FAKE_BIN=""
 
 restore() {
   if [[ -n "$backup_mode" && -f "$backup_mode" ]]; then
@@ -28,6 +29,9 @@ restore() {
     rm -f "$backup_env"
   else
     rm -f "$AUTH_ENV"
+  fi
+  if [[ -n "$FAKE_BIN" && -d "$FAKE_BIN" ]]; then
+    rm -rf "$FAKE_BIN"
   fi
 }
 trap restore EXIT
@@ -86,5 +90,38 @@ expect_token_block "invite-disable token path" \
 
 expect_signed_required_on_missing_auth "invite-generate missing auth" \
   ./scripts/easy_node.sh invite-generate --issuer-url http://127.0.0.1:1 --count 1
+
+cat >"$AUTH_ENV" <<'EOF_ENV_ALLOW_TOKEN'
+ISSUER_ADMIN_REQUIRE_SIGNED=0
+ISSUER_ADMIN_ALLOW_TOKEN=1
+EOF_ENV_ALLOW_TOKEN
+
+FAKE_BIN="$(mktemp -d)"
+cat >"$FAKE_BIN/curl" <<'EOF_CURL'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '{"subject":"inv-redaction-secret","kind":"client","tier":1}\n'
+EOF_CURL
+chmod +x "$FAKE_BIN/curl"
+
+invite_check_out="$(
+  PATH="$FAKE_BIN:$PATH" \
+  ./scripts/easy_node.sh invite-check \
+    --issuer-url 'https://user:pw-secret@issuer.example:8082?token=issuer-secret' \
+    --admin-token test \
+    --key inv-redaction-secret 2>&1
+)"
+if ! printf '%s\n' "$invite_check_out" | rg -q 'invite key valid: key=\[redacted\] kind=client tier=1 issuer=https://issuer.example:8082'; then
+  echo "expected invite-check success output to redact key and issuer URL credentials"
+  echo "$invite_check_out"
+  exit 1
+fi
+for forbidden in 'inv-redaction-secret' 'pw-secret' 'token='; do
+  if printf '%s\n' "$invite_check_out" | grep -F -- "$forbidden" >/dev/null; then
+    echo "invite-check output leaked forbidden value: $forbidden"
+    echo "$invite_check_out"
+    exit 1
+  fi
+done
 
 echo "easy-node invite auth policy integration check ok"
