@@ -120,8 +120,10 @@ case "$cmd" in
   "rc": 0,
   "recorded_at_utc": "2026-03-15T12:00:00Z",
   "notes": "Linux root host rerun passed",
+  "root_required": false,
   "selftest": {
     "strict_beta": false,
+    "root_required": false,
     "base_port": 19290,
     "client_iface": "wgctest0",
     "exit_iface": "wgestest0"
@@ -140,8 +142,10 @@ case "$cmd" in
   "rc": 0,
   "recorded_at_utc": "2026-03-15T12:00:00Z",
   "notes": "WG-only validation passed with unsupported schema major",
+  "root_required": false,
   "selftest": {
     "strict_beta": false,
+    "root_required": false,
     "base_port": 19290,
     "client_iface": "wgctest0",
     "exit_iface": "wgestest0"
@@ -160,8 +164,10 @@ case "$cmd" in
   "rc": 1,
   "recorded_at_utc": "2026-03-15T12:00:00Z",
   "notes": "WG-only validation failed",
+  "root_required": false,
   "selftest": {
     "strict_beta": false,
+    "root_required": false,
     "base_port": 19290,
     "client_iface": "wgctest0",
     "exit_iface": "wgestest0"
@@ -182,10 +188,12 @@ case "$cmd" in
   "rc": 0,
   "recorded_at_utc": "2026-03-15T12:00:00Z",
   "notes": "WG-only stack selftest deferred: requires root privileges",
+  "root_required": true,
   "selftest": {
     "strict_beta": false,
     "defer_no_root": true,
     "deferred_no_root": true,
+    "root_required": true,
     "base_port": 19290,
     "client_iface": "wgctest0",
     "exit_iface": "wgestest0"
@@ -204,10 +212,12 @@ case "$cmd" in
   "rc": 1,
   "recorded_at_utc": "2026-03-15T12:00:00Z",
   "notes": "WG-only stack selftest failed: requires root privileges",
+  "root_required": true,
   "selftest": {
     "strict_beta": false,
     "defer_no_root": false,
     "deferred_no_root": false,
+    "root_required": true,
     "base_port": 19290,
     "client_iface": "wgctest0",
     "exit_iface": "wgestest0"

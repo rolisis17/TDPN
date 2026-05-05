@@ -126,6 +126,22 @@ validate_manual_validation_summary_payload() {
   return 0
 }
 
+text_signals_root_required() {
+  local value="${1:-}"
+  local lower_value=""
+  if [[ -z "$value" ]]; then
+    return 1
+  fi
+  lower_value="${value,,}"
+  if [[ "$lower_value" == *"requires root"* ||
+        "$lower_value" == *"root privileges"* ||
+        "$lower_value" == *"run with sudo"* ||
+        "$lower_value" == *"must be root"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
 extract_json_payload() {
   local prefix="$1"
   local text="$2"
@@ -338,6 +354,7 @@ manual_validation_report_status="skipped"
 manual_validation_report_readiness_status=""
 manual_validation_report_next_action_check_id=""
 selftest_deferred_no_root="0"
+selftest_root_required="0"
 
 declare -a selftest_cmd
 selftest_cmd=("$easy_node_script" "wg-only-stack-selftest" "${selftest_args[@]}")
@@ -359,6 +376,7 @@ write_summary_json() {
     --arg defer_no_root "$defer_no_root" \
     --arg effective_uid "$effective_uid" \
     --arg selftest_deferred_no_root "$selftest_deferred_no_root" \
+    --arg selftest_root_required "$selftest_root_required" \
     --argjson selftest_rc "$selftest_rc" \
     --arg manual_validation_report_summary_json "$manual_validation_report_summary_json" \
     --arg manual_validation_report_md "$manual_validation_report_md" \
@@ -378,12 +396,14 @@ write_summary_json() {
       status: $status,
       rc: $selftest_rc,
       notes: $notes,
+      root_required: ($selftest_root_required == "1"),
       command: $command,
       selftest: {
         strict_beta: ($strict_beta == "1"),
         defer_no_root: ($defer_no_root == "1"),
         effective_uid: ($effective_uid | tonumber),
         deferred_no_root: ($selftest_deferred_no_root == "1"),
+        root_required: ($selftest_root_required == "1"),
         base_port: ($base_port | tonumber),
         client_iface: $client_iface,
         exit_iface: $exit_iface
@@ -479,6 +499,7 @@ if [[ "$defer_no_root" == "1" && "$effective_uid" != "0" ]]; then
   selftest_rc=0
   selftest_status="skip"
   selftest_deferred_no_root="1"
+  selftest_root_required="1"
   notes="WG-only stack selftest deferred: requires root privileges"
   printf '%s\n' "[selftest] deferred_no_root effective_uid=$effective_uid" >>"$summary_log"
 else
@@ -489,7 +510,12 @@ else
   else
     selftest_rc=$?
     selftest_status="fail"
-    notes="WG-only stack selftest failed"
+    if text_signals_root_required "$selftest_output"; then
+      selftest_root_required="1"
+      notes="WG-only stack selftest failed: requires root privileges"
+    else
+      notes="WG-only stack selftest failed"
+    fi
   fi
 fi
 

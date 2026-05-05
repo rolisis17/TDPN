@@ -140,10 +140,11 @@ validate_wg_only_summary_payload() {
 
 wg_only_summary_signals_root_required() {
   local notes_value="${1:-}"
-  if [[ -z "$notes_value" ]]; then
-    return 1
+  local payload="${2:-}"
+  if [[ -n "$payload" ]] && jq -e '(.root_required == true) or (.selftest.root_required == true)' >/dev/null 2>&1 <<<"$payload"; then
+    return 0
   fi
-  if printf '%s\n' "$notes_value" | rg -qi 'requires root|root privileges'; then
+  if [[ -n "$notes_value" ]] && printf '%s\n' "$notes_value" | rg -qi 'requires root|root privileges|run with sudo|must be root'; then
     return 0
   fi
   return 1
@@ -556,7 +557,7 @@ else
   wg_only_status="skipped"
 fi
 
-if wg_only_summary_signals_root_required "$wg_only_notes"; then
+if wg_only_summary_signals_root_required "$wg_only_notes" "$wg_only_json_payload"; then
   wg_only_root_required="1"
 fi
 if [[ "$wg_only_status" == "pass" ]]; then

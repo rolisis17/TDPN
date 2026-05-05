@@ -26,7 +26,11 @@ shift || true
 case "$cmd" in
   wg-only-stack-selftest)
     if [[ "${FAKE_WG_ONLY_SELFTEST_FAIL:-0}" == "1" ]]; then
-      echo "wg-only selftest failed"
+      if [[ "${FAKE_WG_ONLY_SELFTEST_ROOT_REQUIRED:-0}" == "1" ]]; then
+        echo "wg-only-stack-selftest requires root privileges (run with sudo)"
+      else
+        echo "wg-only selftest failed"
+      fi
       exit 1
     fi
     echo "wg-only selftest passed"
@@ -118,7 +122,9 @@ if ! jq -e '
   and .schema.major == 1
   and .schema.minor == 0
   and .rc == 0
+  and .root_required == false
   and .selftest.strict_beta == true
+  and .selftest.root_required == false
   and .selftest.base_port == 19290
   and .selftest.client_iface == "wgctest0"
   and .selftest.exit_iface == "wgestest0"
@@ -178,6 +184,8 @@ if ! jq -e '
   and .selftest.defer_no_root == true
   and .selftest.effective_uid == 1000
   and .selftest.deferred_no_root == true
+  and .selftest.root_required == true
+  and .root_required == true
   and .manual_validation_report.status == "ok"
 ' "$no_root_summary_json_path" >/dev/null; then
   echo "defer-no-root summary JSON missing expected fields"
@@ -265,12 +273,57 @@ if ! jq -e '
   and .schema.major == 1
   and .schema.minor == 0
   and .rc == 1
+  and .root_required == false
   and .selftest.strict_beta == false
+  and .selftest.root_required == false
   and .selftest.base_port == 19291
   and .manual_validation_report.status == "ok"
 ' "$fail_summary_json_path" >/dev/null; then
   echo "failure summary JSON missing expected fields"
   cat "$fail_summary_json_path"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[wg-only-stack-selftest-record] root-required failure path"
+if env \
+  FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+  FAKE_WG_ONLY_SELFTEST_FAIL="1" \
+  FAKE_WG_ONLY_SELFTEST_ROOT_REQUIRED="1" \
+  WG_ONLY_STACK_SELFTEST_RECORD_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+  ./scripts/wg_only_stack_selftest_record.sh \
+    --strict-beta 1 \
+    --base-port 19294 \
+    --client-iface wgcroot0 \
+    --exit-iface wgeroot0 >/tmp/integration_wg_only_stack_selftest_record_root_required_fail.log 2>&1; then
+  echo "expected root-required failure path to return non-zero"
+  cat /tmp/integration_wg_only_stack_selftest_record_root_required_fail.log
+  exit 1
+fi
+
+if ! rg -q 'wg-only-stack-selftest-record: status=fail' /tmp/integration_wg_only_stack_selftest_record_root_required_fail.log; then
+  echo "expected fail status for root-required wg-only-stack-selftest-record path"
+  cat /tmp/integration_wg_only_stack_selftest_record_root_required_fail.log
+  exit 1
+fi
+root_required_fail_summary_json_path="$(sed -n 's/^summary_json: //p' /tmp/integration_wg_only_stack_selftest_record_root_required_fail.log | tail -n 1)"
+if [[ -z "$root_required_fail_summary_json_path" || ! -f "$root_required_fail_summary_json_path" ]]; then
+  echo "expected root-required failure summary JSON missing"
+  cat /tmp/integration_wg_only_stack_selftest_record_root_required_fail.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .root_required == true
+  and .selftest.root_required == true
+  and (.notes | test("requires root"; "i"))
+  and .selftest.base_port == 19294
+  and .manual_validation_report.status == "ok"
+' "$root_required_fail_summary_json_path" >/dev/null; then
+  echo "root-required failure summary JSON missing expected fields"
+  cat "$root_required_fail_summary_json_path"
   exit 1
 fi
 
