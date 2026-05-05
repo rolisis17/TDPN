@@ -67,13 +67,22 @@ case "$hard_fail_mode" in
   endpoint_unreachable)
     echo 'dial tcp 100.113.245.61:8081: connect: connection refused'
     echo "could not resolve host: issuer.invalid"
-    ;;
+  ;;
 esac
+
+omit_summary_at="${FAKE_LOCAL_OMIT_SUMMARY_AT:-0}"
+if [[ "$omit_summary_at" =~ ^[0-9]+$ ]] && ((omit_summary_at > 0)) && ((count == omit_summary_at)); then
+  cat >"$report_md" <<EOF_REPORT
+# Fake Local Report $count Without Summary
+EOF_REPORT
+  exit 0
+fi
 
 status="pass"
 rc=0
 notes="fake local pass"
-if [[ "${FAKE_LOCAL_FAIL_AT:-0}" =~ ^[0-9]+$ ]] && ((FAKE_LOCAL_FAIL_AT > 0)) && ((count == FAKE_LOCAL_FAIL_AT)); then
+fail_at="${FAKE_LOCAL_FAIL_AT:-0}"
+if [[ "$fail_at" =~ ^[0-9]+$ ]] && ((fail_at > 0)) && ((count == fail_at)); then
   status="fail"
   rc=1
   notes="fake local forced failure"
@@ -279,6 +288,13 @@ if [[ -z "$summary_json" || -z "$report_md" ]]; then
 fi
 
 printf 'summaries=%s summary_json=%s report_md=%s\n' "${#summaries[@]}" "$summary_json" "$report_md" >>"${FAKE_TREND_CAPTURE_FILE:?}"
+
+if [[ "${FAKE_TREND_OMIT_SUMMARY:-0}" == "1" ]]; then
+  cat >"$report_md" <<EOF_REPORT
+# Fake Trend Report Without Summary
+EOF_REPORT
+  exit 0
+fi
 
 recommended="balanced"
 speed_votes=0
@@ -501,6 +517,85 @@ fi
 if ! rg -q -- '--allow-insecure-remote-http 1' "$LOCAL_CAPTURE"; then
   echo "campaign did not forward --allow-insecure-remote-http to profile-compare-local"
   cat "$LOCAL_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-compare-campaign] compare rc0 without summary is a failed row"
+: >"$LOCAL_CAPTURE"
+: >"$TREND_CAPTURE"
+printf '0\n' >"$LOCAL_COUNTER"
+MISSING_LOCAL_JSON="$TMP_DIR/campaign_missing_local_summary.json"
+PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT="$FAKE_LOCAL" \
+PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT="$FAKE_TREND" \
+FAKE_LOCAL_CAPTURE_FILE="$LOCAL_CAPTURE" \
+FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
+FAKE_LOCAL_OMIT_SUMMARY_AT=1 \
+FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
+./scripts/profile_compare_campaign.sh \
+  --campaign-runs 2 \
+  --directory-urls http://dir-a:8081 \
+  --issuer-url http://issuer-a:8082 \
+  --entry-url http://entry-a:8083 \
+  --exit-url http://exit-a:8084 \
+  --allow-insecure-remote-http 1 \
+  --summary-json "$MISSING_LOCAL_JSON" >/tmp/integration_profile_compare_campaign_missing_local_summary.log 2>&1
+
+if ! jq -e '
+  .status == "warn"
+  and .summary.runs_total == 2
+  and .summary.runs_fail == 1
+  and .summary.runs_with_summary == 1
+  and .summary.runs_missing_summary == 1
+  and ([.runs[] | select(.run_id == "01")][0].status == "fail")
+  and ([.runs[] | select(.run_id == "01")][0].rc == 1)
+  and ([.runs[] | select(.run_id == "01")][0].notes | contains("no valid summary JSON artifact"))
+' "$MISSING_LOCAL_JSON" >/dev/null; then
+  echo "campaign missing local summary did not mark row as failed"
+  cat "$MISSING_LOCAL_JSON"
+  cat /tmp/integration_profile_compare_campaign_missing_local_summary.log
+  exit 1
+fi
+
+echo "[profile-compare-campaign] trend rc0 without summary fails campaign"
+: >"$LOCAL_CAPTURE"
+: >"$TREND_CAPTURE"
+printf '0\n' >"$LOCAL_COUNTER"
+MISSING_TREND_JSON="$TMP_DIR/campaign_missing_trend_summary.json"
+set +e
+PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT="$FAKE_LOCAL" \
+PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT="$FAKE_TREND" \
+FAKE_LOCAL_CAPTURE_FILE="$LOCAL_CAPTURE" \
+FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
+FAKE_LOCAL_OMIT_SUMMARY_AT=0 \
+FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+FAKE_TREND_OMIT_SUMMARY=1 \
+./scripts/profile_compare_campaign.sh \
+  --campaign-runs 1 \
+  --directory-urls http://dir-a:8081 \
+  --issuer-url http://issuer-a:8082 \
+  --entry-url http://entry-a:8083 \
+  --exit-url http://exit-a:8084 \
+  --allow-insecure-remote-http 1 \
+  --summary-json "$MISSING_TREND_JSON" >/tmp/integration_profile_compare_campaign_missing_trend_summary.log 2>&1
+MISSING_TREND_RC=$?
+set -e
+if [[ "$MISSING_TREND_RC" -eq 0 ]]; then
+  echo "missing trend summary should fail campaign"
+  cat /tmp/integration_profile_compare_campaign_missing_trend_summary.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .trend.status == "fail"
+  and .trend.rc == 1
+  and (.trend.notes | contains("no valid summary JSON artifact"))
+' "$MISSING_TREND_JSON" >/dev/null; then
+  echo "campaign missing trend summary did not fail closed"
+  cat "$MISSING_TREND_JSON"
+  cat /tmp/integration_profile_compare_campaign_missing_trend_summary.log
   exit 1
 fi
 

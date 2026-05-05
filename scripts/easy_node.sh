@@ -461,7 +461,7 @@ Usage:
   ./scripts/easy_node.sh pre-real-host-readiness [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--runtime-fix-prune-wg-only-dir [0|1]] [--strict-beta [0|1]] [--timeout-sec N] [--min-selection-lines N] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--path-profile 1hop|2hop|3hop|speed|speed-1hop|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--force-direct-exit [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--allow-insecure-remote-http [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh simple-client-test [--bootstrap-directory URL] [--discovery-wait-sec N] [--subject ID|--anon-cred TOKEN] [--timeout-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--beta-profile [0|1]] [--prod-profile [0|1]]
-  ./scripts/easy_node.sh profile-compare-local [--profiles CSV] [--rounds N] [--timeout-sec N] [--execution-mode docker|local] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--allow-insecure-remote-http [0|1]] [--start-local-stack auto|0|1] [--force-stack-reset [0|1]] [--stack-strict-beta [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh profile-compare-local [--profiles CSV] [--rounds N] [--timeout-sec N] [--execution-mode docker|local] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--allow-insecure-remote-http [0|1]] [--start-local-stack auto|0|1] [--force-stack-reset [0|1]] [--stack-strict-beta [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--fail-on-run-fail [0|1]] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-trend [--compare-summary-json PATH]... [--compare-summary-list FILE] [--reports-dir DIR] [--max-reports N] [--since-hours N] [--min-profile-runs N] [--min-profile-pass-rate-pct N] [--balanced-latency-margin-pct N] [--fail-on-any-fail [0|1]] [--min-decision-rate-pct N] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-campaign [--campaign-runs N] [--campaign-pause-sec N] [--reports-dir DIR] [--profiles CSV] [--rounds N] [--timeout-sec N] [--execution-mode docker|local] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--allow-insecure-remote-http [0|1]] [--start-local-stack auto|0|1] [--force-stack-reset [0|1]] [--stack-strict-beta [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--trend-max-reports N] [--trend-since-hours N] [--trend-min-profile-runs N] [--trend-min-profile-pass-rate-pct N] [--trend-balanced-latency-margin-pct N] [--trend-fail-on-any-fail [0|1]] [--trend-min-decision-rate-pct N] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh profile-compare-docker-matrix [--dry-run [0|1]] [profile-compare-campaign args...]
@@ -7930,9 +7930,11 @@ wg_only_stack_up() {
   )
 
   if [[ "$strict_beta" == "1" ]]; then
+    # Local WG-only selftest uses loopback HTTP and a 2-hop path; keep explicit
+    # trust/operator gates while leaving entry beta strict off.
     env_vars+=(
       "CLIENT_BETA_STRICT=1"
-      "ENTRY_BETA_STRICT=1"
+      "ENTRY_BETA_STRICT=0"
       "EXIT_BETA_STRICT=1"
       "CLIENT_REQUIRE_DISTINCT_OPERATORS=1"
       "ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1"
@@ -8013,6 +8015,11 @@ WG_ONLY_ISSUER_URL=$issuer_url
 WG_ONLY_ENTRY_URL=$entry_url
 WG_ONLY_EXIT_URL=$exit_url
 WG_ONLY_KEY_DIR=$key_dir
+WG_ONLY_CLIENT_WG_PRIVATE_KEY_PATH=$client_key_file
+WG_ONLY_CLIENT_WG_PUBLIC_KEY=$client_wg_pub
+WG_ONLY_CLIENT_WG_INTERFACE=$client_iface
+WG_ONLY_CLIENT_WG_PROXY_ADDR=127.0.0.1:${proxy_port}
+WG_ONLY_CLIENT_STARTUP_SYNC_TIMEOUT_SEC=8
 WG_ONLY_DIRECTORY_TRUST_FILE=$wg_only_trust_file
 WG_ONLY_ENTRY_DIRECTORY_TRUST_FILE=$entry_directory_trust_file
 EOF_STATE
@@ -8400,7 +8407,7 @@ wg_only_stack_selftest() {
   for _ in $(seq 1 140); do
     if [[ "$strict_beta" == "1" ]]; then
       if rg -q "client role enabled: .*mode=opaque .*source=udp .*wg_backend=command .*wg_only=true .*beta_strict=true" "$log_file" &&
-        rg -q "entry route discovery: .*live_wg_mode=true .*wg_only=true .*distinct_exit_operator=true operator_id=op-entry" "$log_file" &&
+        rg -q "entry route discovery: .*live_wg_mode=true .*wg_only=true .*distinct_exit_operator=true .*operator_id=op-entry" "$log_file" &&
         rg -q "exit wg backend=command .*wg_only=true .*beta_strict=true" "$log_file"; then
         strict_log_ok="1"
       fi

@@ -50,6 +50,8 @@ check_pattern 'directory_trust_tofu="0"' \
   "wg-only stack wiring missing strict pinned directory trust switch"
 check_pattern 'entry_directory_trust_tofu="0"' \
   "wg-only stack wiring missing strict pinned entry-directory trust switch"
+check_pattern '"ENTRY_BETA_STRICT=0"' \
+  "wg-only stack wiring must keep local loopback entry out of beta strict route/middle enforcement"
 check_pattern '"DIRECTORY_TRUST_TOFU=\$\{directory_trust_tofu\}"' \
   "wg-only stack wiring missing DIRECTORY_TRUST_TOFU env export"
 check_pattern '"ENTRY_DIRECTORY_TRUST_TOFU=\$\{entry_directory_trust_tofu\}"' \
@@ -76,5 +78,13 @@ check_pattern 'WG_ONLY_ENTRY_DIRECTORY_TRUST_FILE=\$entry_directory_trust_file' 
   "wg-only stack state missing entry directory trust file record"
 check_pattern 'WG_ONLY_KEY_DIR=\$key_dir' \
   "wg-only stack state missing key directory record"
+check_pattern 'WG_ONLY_CLIENT_WG_PRIVATE_KEY_PATH=\$client_key_file' \
+  "wg-only stack state missing client WireGuard key record"
+check_pattern 'WG_ONLY_CLIENT_WG_INTERFACE=\$client_iface' \
+  "wg-only stack state missing client WireGuard interface record"
+check_pattern 'WG_ONLY_CLIENT_WG_PROXY_ADDR=127\.0\.0\.1:\$\{proxy_port\}' \
+  "wg-only stack state missing client WireGuard proxy record"
+check_pattern 'WG_ONLY_CLIENT_STARTUP_SYNC_TIMEOUT_SEC=8' \
+  "wg-only stack state missing client startup sync timeout record"
 
 echo "wg-only stack wiring integration check ok"

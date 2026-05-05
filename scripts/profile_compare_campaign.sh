@@ -1026,6 +1026,7 @@ for ((run_idx = 1; run_idx <= campaign_runs; run_idx++)); do
     compare_cmd+=(--anon-cred "$anon_cred")
   fi
 
+  rm -f "$compare_summary" "$compare_report"
   campaign_log_event "stage=compare-start run_index=$run_idx run_total=$campaign_runs run_id=$run_id elapsed_sec=$(campaign_elapsed_sec "$campaign_started_epoch")"
   start_epoch="$(date +%s)"
   run_rc=0
@@ -1047,8 +1048,9 @@ for ((run_idx = 1; run_idx <= campaign_runs; run_idx++)); do
     compare_summary_paths+=("$compare_summary")
   else
     if [[ "$run_rc" -eq 0 ]]; then
-      run_status="pass"
-      run_notes="compare command succeeded without summary JSON artifact"
+      run_status="fail"
+      run_summary_rc="1"
+      run_notes="compare command succeeded but no valid summary JSON artifact was found"
     else
       run_status="fail"
       run_notes="compare command failed and no valid summary JSON artifact was found"
@@ -1132,6 +1134,7 @@ for summary_path in "${compare_summary_paths[@]}"; do
   trend_cmd+=(--compare-summary-json "$summary_path")
 done
 
+rm -f "$trend_summary_json" "$trend_report_md"
 trend_rc=0
 campaign_log_event "stage=trend-start reports=${#compare_summary_paths[@]} elapsed_sec=$(campaign_elapsed_sec "$campaign_started_epoch")"
 if "${trend_cmd[@]}" >"$trend_log" 2>&1; then
@@ -1154,8 +1157,9 @@ if [[ -f "$trend_summary_json" ]] && jq -e '.version == 1 and (.status | type ==
   decision_rationale="$(jq -r '.decision.rationale // ""' "$trend_summary_json")"
 else
   if [[ "$trend_rc" -eq 0 ]]; then
-    trend_status="pass"
-    trend_notes="trend command succeeded without summary JSON artifact"
+    trend_status="fail"
+    trend_rc=1
+    trend_notes="trend command succeeded but no valid summary JSON artifact was found"
   else
     trend_status="fail"
     trend_notes="trend command failed and no valid summary JSON artifact was found"

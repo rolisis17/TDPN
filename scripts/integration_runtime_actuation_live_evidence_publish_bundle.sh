@@ -27,6 +27,11 @@ cat >"$FAKE_CYCLE_SCRIPT" <<'EOF_FAKE_CYCLE'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -n "${FAKE_CYCLE_CAPTURE_FILE:-}" ]]; then
+  printf '%q ' "$@" >>"$FAKE_CYCLE_CAPTURE_FILE"
+  printf '\n' >>"$FAKE_CYCLE_CAPTURE_FILE"
+fi
+
 summary_json=""
 print_summary_json="0"
 
@@ -326,6 +331,56 @@ if ! jq -e '
 ' "$PASS_SUMMARY" >/dev/null 2>&1; then
   echo "pass path summary mismatch"
   cat "$PASS_SUMMARY"
+  exit 1
+fi
+
+echo "[runtime-actuation-live-evidence-publish-bundle] promotion cycle pass-through forwarding"
+PASSTHROUGH_REPORTS="$TMP_DIR/passthrough_reports"
+PASSTHROUGH_SUMMARY="$TMP_DIR/passthrough_bundle_summary.json"
+PASSTHROUGH_CAPTURE="$TMP_DIR/passthrough_cycle_args.txt"
+set +e
+RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT="$FAKE_CYCLE_SCRIPT" \
+RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_RUNTIME_ACTUATION_PROMOTION_EVIDENCE_PACK_SCRIPT="$FAKE_EVIDENCE_SCRIPT" \
+FAKE_CYCLE_MODE="pass" \
+FAKE_EVIDENCE_MODE="pass" \
+FAKE_CYCLE_CAPTURE_FILE="$PASSTHROUGH_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$PASSTHROUGH_REPORTS" \
+  --cycles 3 \
+  --fail-on-no-go 1 \
+  --summary-json "$PASSTHROUGH_SUMMARY" \
+  --print-summary-json 0 \
+  -- \
+  --campaign-subject secret-subject-value \
+  --campaign-execution-mode local \
+  --campaign-start-local-stack 1 >/tmp/integration_runtime_actuation_live_evidence_publish_bundle_passthrough.log 2>&1
+PASSTHROUGH_RC=$?
+set -e
+if [[ "$PASSTHROUGH_RC" -ne 0 ]]; then
+  echo "expected pass-through path rc=0, got rc=$PASSTHROUGH_RC"
+  cat /tmp/integration_runtime_actuation_live_evidence_publish_bundle_passthrough.log
+  exit 1
+fi
+for expected in '--campaign-subject' 'secret-subject-value' '--campaign-execution-mode' 'local' '--campaign-start-local-stack' '1'; do
+  if ! grep -F -- "$expected" "$PASSTHROUGH_CAPTURE" >/dev/null; then
+    echo "pass-through capture missing $expected"
+    cat "$PASSTHROUGH_CAPTURE"
+    exit 1
+  fi
+done
+if grep -F -- 'secret-subject-value' "$PASSTHROUGH_SUMMARY" >/dev/null; then
+  echo "pass-through summary leaked sensitive subject"
+  cat "$PASSTHROUGH_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and (.stages.runtime_actuation_promotion_cycle.command | contains("--campaign-subject"))
+  and (.stages.runtime_actuation_promotion_cycle.command | contains("redacted"))
+  and (.stages.runtime_actuation_promotion_cycle.command | contains("--campaign-execution-mode"))
+' "$PASSTHROUGH_SUMMARY" >/dev/null 2>&1; then
+  echo "pass-through summary missing redacted forwarded command"
+  cat "$PASSTHROUGH_SUMMARY"
   exit 1
 fi
 

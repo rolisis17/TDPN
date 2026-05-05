@@ -12,7 +12,8 @@ Usage:
     [--cycles N] \
     [--fail-on-no-go [0|1]] \
     [--summary-json PATH] \
-    [--print-summary-json [0|1]]
+    [--print-summary-json [0|1]] \
+    [-- [runtime-actuation-promotion-cycle signoff args...]]
 
 Purpose:
   Deterministically run runtime-actuation live-evidence publish flow:
@@ -23,6 +24,11 @@ Outputs:
   - Bundle summary JSON
   - Bundle report Markdown
   - Stage logs for cycle and evidence-pack steps
+
+Notes:
+  - Arguments after `--` are forwarded to runtime-actuation-promotion-cycle,
+    which forwards campaign/signoff options such as --campaign-subject,
+    --campaign-execution-mode, --campaign-start-local-stack, and policy gates.
 USAGE
 }
 
@@ -105,6 +111,50 @@ render_command() {
   for token in "$@"; do
     if [[ -n "$rendered" ]]; then
       rendered+=" "
+    fi
+    rendered+="$(printf '%q' "$token")"
+  done
+  printf '%s' "$rendered"
+}
+
+sensitive_value_flag_01() {
+  case "$1" in
+    --campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+render_command_redacted() {
+  local rendered=""
+  local token=""
+  local flag=""
+  local value=""
+  local redact_next="0"
+  for token in "$@"; do
+    if [[ -n "$rendered" ]]; then
+      rendered+=" "
+    fi
+    if [[ "$redact_next" == "1" ]]; then
+      rendered+="$(printf '%q' "[redacted]")"
+      redact_next="0"
+      continue
+    fi
+    if [[ "$token" == --*=* ]]; then
+      flag="${token%%=*}"
+      value="${token#*=}"
+      if sensitive_value_flag_01 "$flag"; then
+        rendered+="$(printf '%q' "${flag}=[redacted]")"
+      else
+        rendered+="$(printf '%q' "$token")"
+      fi
+      continue
+    fi
+    if sensitive_value_flag_01 "$token"; then
+      rendered+="$(printf '%q' "$token")"
+      redact_next="1"
+      continue
     fi
     rendered+="$(printf '%q' "$token")"
   done
@@ -240,6 +290,7 @@ cycles="${RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_CYCLES:-3}"
 fail_on_no_go="${RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_FAIL_ON_NO_GO:-1}"
 summary_json="${RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_SUMMARY_JSON:-}"
 print_summary_json="${RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_PRINT_SUMMARY_JSON:-0}"
+declare -a runtime_cycle_passthrough_args=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -300,6 +351,13 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
+    --)
+      shift
+      while [[ $# -gt 0 ]]; do
+        runtime_cycle_passthrough_args+=("$1")
+        shift
+      done
+      ;;
     *)
       echo "unknown argument: $1"
       usage
@@ -341,13 +399,14 @@ runtime_evidence_pack_log="$reports_dir/runtime_actuation_live_evidence_publish_
 
 mkdir -p "$reports_dir" "$(dirname "$summary_json")" "$(dirname "$report_md")"
 
-runtime_cycle_command_rendered="$(render_command \
+runtime_cycle_command_rendered="$(render_command_redacted \
   "$runtime_cycle_script" \
   "--reports-dir" "$reports_dir" \
   "--cycles" "$cycles" \
   "--fail-on-no-go" "$fail_on_no_go" \
   "--summary-json" "$runtime_cycle_summary_json" \
-  "--print-summary-json" "0"
+  "--print-summary-json" "0" \
+  "${runtime_cycle_passthrough_args[@]}"
 )"
 
 runtime_evidence_pack_command_rendered="$(render_command \
@@ -361,13 +420,15 @@ runtime_evidence_pack_command_rendered="$(render_command \
   "--print-report" "0"
 )"
 
-bundle_rerun_command="$(render_command \
+bundle_rerun_command="$(render_command_redacted \
   "./scripts/runtime_actuation_live_evidence_publish_bundle.sh" \
   "--reports-dir" "$reports_dir" \
   "--cycles" "$cycles" \
   "--fail-on-no-go" "$fail_on_no_go" \
   "--summary-json" "$summary_json" \
-  "--print-summary-json" "1"
+  "--print-summary-json" "1" \
+  "--" \
+  "${runtime_cycle_passthrough_args[@]}"
 )"
 
 runtime_cycle_stage_status="skipped"
@@ -424,6 +485,7 @@ set +e
   --fail-on-no-go "$fail_on_no_go" \
   --summary-json "$runtime_cycle_summary_json" \
   --print-summary-json 0 \
+  "${runtime_cycle_passthrough_args[@]}" \
   >"$runtime_cycle_log" 2>&1
 runtime_cycle_runner_rc=$?
 set -e

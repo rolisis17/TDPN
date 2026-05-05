@@ -654,6 +654,7 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	}()
 	route, err := s.resolveExitRoute(r.Context(), req.ExitID)
 	if err != nil {
+		log.Printf("entry exit route resolve failed exit=%s err=%v", strings.TrimSpace(req.ExitID), err)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "unknown-exit"})
 		return

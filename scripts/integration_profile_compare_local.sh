@@ -25,7 +25,7 @@ cat >"$FAKE_EASY" <<'EOF_FAKE'
 set -euo pipefail
 
 printf '%s\n' "$*" >>"${FAKE_CAPTURE_FILE:?}"
-printf 'env container_directory_urls=%s container_issuer_url=%s container_entry_url=%s container_exit_url=%s client_inner_source=%s disable_synthetic_fallback=%s data_plane_mode=%s client_force_build=%s\n' \
+printf 'env container_directory_urls=%s container_issuer_url=%s container_entry_url=%s container_exit_url=%s client_inner_source=%s disable_synthetic_fallback=%s data_plane_mode=%s client_force_build=%s directory_trusted_keys_file=%s wg_only_mode=%s client_live_wg_mode=%s client_wg_backend=%s client_wg_private_key_path=%s client_wg_interface=%s client_wg_kernel_proxy=%s client_wg_proxy_addr=%s startup_sync_timeout_sec=%s\n' \
   "${EASY_NODE_CLIENT_TEST_CONTAINER_DIRECTORY_URLS:-}" \
   "${EASY_NODE_CLIENT_TEST_CONTAINER_ISSUER_URL:-}" \
   "${EASY_NODE_CLIENT_TEST_CONTAINER_ENTRY_URL:-}" \
@@ -33,12 +33,38 @@ printf 'env container_directory_urls=%s container_issuer_url=%s container_entry_
   "${CLIENT_INNER_SOURCE:-}" \
   "${CLIENT_DISABLE_SYNTHETIC_FALLBACK:-}" \
   "${DATA_PLANE_MODE:-}" \
-  "${EASY_NODE_CLIENT_FORCE_BUILD:-}" >>"${FAKE_CAPTURE_FILE:?}"
+  "${EASY_NODE_CLIENT_FORCE_BUILD:-}" \
+  "${DIRECTORY_TRUSTED_KEYS_FILE:-}" \
+  "${WG_ONLY_MODE:-}" \
+  "${CLIENT_LIVE_WG_MODE:-}" \
+  "${CLIENT_WG_BACKEND:-}" \
+  "${CLIENT_WG_PRIVATE_KEY_PATH:-}" \
+  "${CLIENT_WG_INTERFACE:-}" \
+  "${CLIENT_WG_KERNEL_PROXY:-}" \
+  "${CLIENT_WG_PROXY_ADDR:-}" \
+  "${CLIENT_STARTUP_SYNC_TIMEOUT_SEC:-}" >>"${FAKE_CAPTURE_FILE:?}"
 cmd="${1:-}"
 shift || true
 
 case "$cmd" in
-  wg-only-stack-up|wg-only-stack-down)
+  wg-only-stack-up)
+    mkdir -p deploy/data/wg_only
+    printf '%s\n' fake-directory-key >deploy/data/wg_only/fake_trusted_directory_keys.txt
+    printf '%s\n' fake-client-private-key >deploy/data/wg_only/fake_client.key
+    chmod 600 deploy/data/wg_only/fake_client.key
+    cat >deploy/data/wg_only_stack.state <<EOF_STATE
+WG_ONLY_KEY_DIR=$PWD/deploy/data/wg_only
+WG_ONLY_CLIENT_WG_PRIVATE_KEY_PATH=$PWD/deploy/data/wg_only/fake_client.key
+WG_ONLY_CLIENT_WG_INTERFACE=wgcstack0
+WG_ONLY_CLIENT_WG_PROXY_ADDR=127.0.0.1:19383
+WG_ONLY_CLIENT_STARTUP_SYNC_TIMEOUT_SEC=8
+WG_ONLY_DIRECTORY_TRUST_FILE=$PWD/deploy/data/wg_only/fake_trusted_directory_keys.txt
+EOF_STATE
+    echo "fake $cmd ok"
+    exit 0
+    ;;
+  wg-only-stack-down)
+    rm -f deploy/data/wg_only_stack.state deploy/data/wg_only/fake_trusted_directory_keys.txt deploy/data/wg_only/fake_client.key
     echo "fake $cmd ok"
     exit 0
     ;;
@@ -97,7 +123,11 @@ case "$cmd" in
         middle_segment=" middle=micro-relay-1 middle_op=op-middle"
       fi
       echo "2026/03/24 12:00:03 client received wg-session config: key_id=test"
-      echo "2026/03/24 12:00:04 client wireguard runtime ready: interface=wgvpn0 key_id=test"
+      if [[ "${FAKE_CLIENT_KERNEL_PROXY_READY:-0}" == "1" ]]; then
+        echo "2026/03/24 12:00:04 client wg-kernel proxy listening: interface=wgvpn0 addr=127.0.0.1:57970 allowed_ips=0.0.0.0/0 install_route=false session=test"
+      else
+        echo "2026/03/24 12:00:04 client wireguard runtime ready: interface=wgvpn0 key_id=test"
+      fi
       echo "2026/03/24 12:00:05 client selected entry=entry-local-1 (http://entry) entry_op=op-entry${middle_segment} exit=exit-local-1 (http://exit) exit_op=op-exit path_control=http://entry token_exp=1"
       if [[ "$profile" == "private" && "$count" -eq 2 ]]; then
         echo "2026/03/24 12:00:06 token proof invalid: deterministic m4 quality penalty"
@@ -219,6 +249,83 @@ fi
 if rg -q -- 'client-test .*--path-profile speed-1hop .*--min-entry-operators 1' "$CAPTURE"; then
   echo "speed-1hop profile compare should not require entry operators"
   cat "$CAPTURE"
+  exit 1
+fi
+
+STRICT_FAIL_SUMMARY_JSON="$TMP_DIR/profile_compare_strict_fail_summary.json"
+STRICT_FAIL_REPORT_MD="$TMP_DIR/profile_compare_strict_fail_report.md"
+STRICT_FAIL_RUN_LOG="$TMP_DIR/profile_compare_strict_fail_run.log"
+
+echo "[profile-compare-local] fail-on-run-fail escalates partial failures"
+rm -f "$FAKE_COUNTER_DIR"/*.count
+set +e
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles private \
+  --rounds 2 \
+  --execution-mode local \
+  --directory-urls http://dir-strict:8081 \
+  --issuer-url http://issuer-strict:8082 \
+  --entry-url http://entry-strict:8083 \
+  --exit-url http://exit-strict:8084 \
+  --fail-on-run-fail 1 \
+  --summary-json "$STRICT_FAIL_SUMMARY_JSON" \
+  --report-md "$STRICT_FAIL_REPORT_MD" >"$STRICT_FAIL_RUN_LOG" 2>&1
+STRICT_FAIL_RC=$?
+set -e
+if [[ "$STRICT_FAIL_RC" -ne 1 ]]; then
+  echo "expected fail-on-run-fail rc=1"
+  cat "$STRICT_FAIL_RUN_LOG"
+  cat "$STRICT_FAIL_SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .inputs.fail_on_run_fail == true
+  and .summary.runs_pass == 1
+  and .summary.runs_fail == 1
+  and (.notes | contains("--fail-on-run-fail"))
+' "$STRICT_FAIL_SUMMARY_JSON" >/dev/null; then
+  echo "fail-on-run-fail summary did not fail closed"
+  cat "$STRICT_FAIL_RUN_LOG"
+  cat "$STRICT_FAIL_SUMMARY_JSON"
+  exit 1
+fi
+
+KERNEL_PROXY_SUMMARY_JSON="$TMP_DIR/profile_compare_kernel_proxy_summary.json"
+KERNEL_PROXY_REPORT_MD="$TMP_DIR/profile_compare_kernel_proxy_report.md"
+KERNEL_PROXY_RUN_LOG="$TMP_DIR/profile_compare_kernel_proxy_run.log"
+
+echo "[profile-compare-local] kernel proxy readiness counts as wg session evidence"
+rm -f "$FAKE_COUNTER_DIR"/*.count
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+FAKE_CLIENT_KERNEL_PROXY_READY=1 \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles balanced \
+  --rounds 1 \
+  --execution-mode local \
+  --directory-urls http://dir-kernel:8081 \
+  --issuer-url http://issuer-kernel:8082 \
+  --entry-url http://entry-kernel:8083 \
+  --exit-url http://exit-kernel:8084 \
+  --summary-json "$KERNEL_PROXY_SUMMARY_JSON" \
+  --report-md "$KERNEL_PROXY_REPORT_MD" >"$KERNEL_PROXY_RUN_LOG" 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .summary.runs_pass == 1
+  and .runs[0].wg_session_count == 1
+' "$KERNEL_PROXY_SUMMARY_JSON" >/dev/null; then
+  echo "kernel proxy readiness did not count as wg session evidence"
+  cat "$KERNEL_PROXY_RUN_LOG"
+  cat "$KERNEL_PROXY_SUMMARY_JSON"
   exit 1
 fi
 
@@ -407,6 +514,96 @@ if grep -F -- 'data_plane_mode=opaque' <<<"$loopback_env_line" >/dev/null; then
   cat "$CAPTURE"
   exit 1
 fi
+
+DOCKER_LOCAL_STACK_SUMMARY_JSON="$TMP_DIR/profile_compare_docker_local_stack_summary.json"
+DOCKER_LOCAL_STACK_REPORT_MD="$TMP_DIR/profile_compare_docker_local_stack_report.md"
+DOCKER_LOCAL_STACK_RUN_LOG="$TMP_DIR/profile_compare_docker_local_stack_run.log"
+: >"$CAPTURE"
+
+echo "[profile-compare-local] docker local-stack mode fails fast"
+set +e
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles balanced \
+  --rounds 1 \
+  --execution-mode docker \
+  --start-local-stack 1 \
+  --summary-json "$DOCKER_LOCAL_STACK_SUMMARY_JSON" \
+  --report-md "$DOCKER_LOCAL_STACK_REPORT_MD" \
+  --print-summary-json 0 >"$DOCKER_LOCAL_STACK_RUN_LOG" 2>&1
+docker_local_stack_rc=$?
+set -e
+if [[ "$docker_local_stack_rc" -eq 0 ]]; then
+  echo "docker local-stack mode should fail before invoking fake easy helper"
+  cat "$DOCKER_LOCAL_STACK_RUN_LOG"
+  exit 1
+fi
+if ! grep -F -- '--start-local-stack=1 requires --execution-mode local' "$DOCKER_LOCAL_STACK_RUN_LOG" >/dev/null; then
+  echo "docker local-stack failure message missing"
+  cat "$DOCKER_LOCAL_STACK_RUN_LOG"
+  exit 1
+fi
+if [[ -s "$CAPTURE" ]]; then
+  echo "docker local-stack fail-fast should not invoke easy helper"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+LOCAL_STACK_TRUST_SUMMARY_JSON="$TMP_DIR/profile_compare_local_stack_trust_summary.json"
+LOCAL_STACK_TRUST_REPORT_MD="$TMP_DIR/profile_compare_local_stack_trust_report.md"
+LOCAL_STACK_TRUST_RUN_LOG="$TMP_DIR/profile_compare_local_stack_trust_run.log"
+: >"$CAPTURE"
+
+echo "[profile-compare-local] local stack forwards pinned directory trust"
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EFFECTIVE_UID_OVERRIDE=0 \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles balanced \
+  --rounds 1 \
+  --execution-mode local \
+  --start-local-stack 1 \
+  --summary-json "$LOCAL_STACK_TRUST_SUMMARY_JSON" \
+  --report-md "$LOCAL_STACK_TRUST_REPORT_MD" \
+  --print-summary-json 0 >"$LOCAL_STACK_TRUST_RUN_LOG"
+
+local_stack_env_line="$(rg '^env .*directory_trusted_keys_file=[^ ]' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$local_stack_env_line" ]]; then
+  echo "missing local stack env capture line"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! grep -F -- 'directory_trusted_keys_file=' <<<"$local_stack_env_line" >/dev/null ||
+  ! grep -F -- '/deploy/data/wg_only/fake_trusted_directory_keys.txt' <<<"$local_stack_env_line" >/dev/null; then
+  echo "local stack run did not forward the generated directory trust file"
+  cat "$CAPTURE"
+  exit 1
+fi
+for expected in \
+  'client_inner_source=udp' \
+  'disable_synthetic_fallback=1' \
+  'data_plane_mode=opaque' \
+  'wg_only_mode=1' \
+  'client_live_wg_mode=1' \
+  'client_wg_backend=command' \
+  'client_wg_private_key_path=' \
+  '/deploy/data/wg_only/fake_client.key' \
+  'client_wg_interface=wgcstack0' \
+  'client_wg_kernel_proxy=1' \
+  'client_wg_proxy_addr=127.0.0.1:19383' \
+  'startup_sync_timeout_sec=8'
+do
+  if ! grep -F -- "$expected" <<<"$local_stack_env_line" >/dev/null; then
+    echo "local stack run missing live WireGuard client env: $expected"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
 
 ALLOW_HTTP_SUMMARY_JSON="$TMP_DIR/profile_compare_allow_http_summary.json"
 ALLOW_HTTP_REPORT_MD="$TMP_DIR/profile_compare_allow_http_report.md"
@@ -600,6 +797,7 @@ PROFILE_COMPARE_LOCAL_SCRIPT="$FAKE_FORWARD" \
 ./scripts/easy_node.sh profile-compare-local \
   --profiles balanced,speed \
   --rounds 2 \
+  --fail-on-run-fail 1 \
   --summary-json /tmp/profile_compare_test.json \
   --print-summary-json 1
 
@@ -609,7 +807,7 @@ if [[ -z "$forward_line" ]]; then
   cat "$FORWARD_CAPTURE"
   exit 1
 fi
-for expected in '--profiles balanced,speed' '--rounds 2' '--summary-json /tmp/profile_compare_test.json' '--print-summary-json 1'; do
+for expected in '--profiles balanced,speed' '--rounds 2' '--fail-on-run-fail 1' '--summary-json /tmp/profile_compare_test.json' '--print-summary-json 1'; do
   if ! grep -F -- "$expected" <<<"$forward_line" >/dev/null; then
     echo "easy_node forwarding missing $expected"
     cat "$FORWARD_CAPTURE"

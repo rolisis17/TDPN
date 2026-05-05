@@ -38,6 +38,7 @@ Usage:
     [--exit-iface IFACE] \
     [--cleanup-ifaces [0|1]] \
     [--keep-stack [0|1]] \
+    [--fail-on-run-fail [0|1]] \
     [--summary-json PATH] \
     [--report-md PATH] \
     [--print-summary-json [0|1]]
@@ -128,6 +129,16 @@ sanitize_arg_for_artifact() {
   else
     sanitize_value_for_artifact "$arg"
   fi
+}
+
+state_file_value() {
+  local file="$1"
+  local key="$2"
+  awk -F= -v k="$key" '
+    $1 == k {
+      print substr($0, index($0, "=") + 1)
+    }
+  ' "$file" 2>/dev/null | tail -n 1
 }
 
 sensitive_value_flag() {
@@ -448,6 +459,7 @@ client_iface="${PROFILE_COMPARE_LOCAL_CLIENT_IFACE:-wgcstack0}"
 exit_iface="${PROFILE_COMPARE_LOCAL_EXIT_IFACE:-wgestack0}"
 cleanup_ifaces="1"
 keep_stack="0"
+fail_on_run_fail="0"
 summary_json=""
 report_md=""
 print_summary_json="0"
@@ -589,6 +601,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --fail-on-run-fail)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        fail_on_run_fail="${2:-}"
+        shift 2
+      else
+        fail_on_run_fail="1"
+        shift
+      fi
+      ;;
     --summary-json)
       summary_json="${2:-}"
       shift 2
@@ -623,6 +644,7 @@ bool_arg_or_die "--force-stack-reset" "$force_stack_reset"
 bool_arg_or_die "--stack-strict-beta" "$stack_strict_beta"
 bool_arg_or_die "--cleanup-ifaces" "$cleanup_ifaces"
 bool_arg_or_die "--keep-stack" "$keep_stack"
+bool_arg_or_die "--fail-on-run-fail" "$fail_on_run_fail"
 tri_state_or_die "--start-local-stack" "$start_local_stack"
 
 if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
@@ -767,6 +789,12 @@ fi
 
 started_local_stack="0"
 stack_bootstrap_log=""
+local_stack_directory_trust_file=""
+local_stack_client_wg_key_file=""
+local_stack_client_wg_public_key=""
+local_stack_client_wg_interface=""
+local_stack_client_wg_proxy_addr=""
+local_stack_client_startup_sync_timeout_sec=""
 
 cleanup_local_stack() {
   if [[ "$started_local_stack" == "1" && "$keep_stack" == "0" ]]; then
@@ -822,9 +850,14 @@ if [[ "$start_local_stack" == "auto" ]]; then
     start_local_stack="1"
   fi
 fi
+if [[ "$start_local_stack" == "1" && "$execution_mode" == "docker" ]]; then
+  echo "--start-local-stack=1 requires --execution-mode local (live WireGuard stack env is host-local)"
+  exit 2
+fi
 
 if [[ "$start_local_stack" == "1" ]]; then
-  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  effective_uid="${PROFILE_COMPARE_LOCAL_EFFECTIVE_UID_OVERRIDE:-${EUID:-$(id -u)}}"
+  if [[ ! "$effective_uid" =~ ^[0-9]+$ || "$effective_uid" -ne 0 ]]; then
     echo "--start-local-stack=1 requires root (run with sudo)"
     exit 2
   fi
@@ -857,6 +890,43 @@ if [[ "$start_local_stack" == "1" ]]; then
   entry_url="http://127.0.0.1:$((base_port + 3))"
   exit_url="http://127.0.0.1:$((base_port + 4))"
   bootstrap_directory=""
+  state_file=""
+  state_file="$ROOT_DIR/deploy/data/wg_only_stack.state"
+  local_stack_directory_trust_file="$(state_file_value "$state_file" "WG_ONLY_DIRECTORY_TRUST_FILE")"
+  if [[ -z "$local_stack_directory_trust_file" || ! -s "$local_stack_directory_trust_file" ]]; then
+    echo "profile-compare-local failed to resolve local stack directory trust file from $state_file"
+    exit 1
+  fi
+  local_stack_client_wg_key_file="$(state_file_value "$state_file" "WG_ONLY_CLIENT_WG_PRIVATE_KEY_PATH")"
+  if [[ -z "$local_stack_client_wg_key_file" ]]; then
+    local_stack_key_dir="$(state_file_value "$state_file" "WG_ONLY_KEY_DIR")"
+    if [[ -n "$local_stack_key_dir" ]]; then
+      local_stack_client_wg_key_file="$local_stack_key_dir/client_${client_iface}.key"
+    fi
+  fi
+  if [[ -z "$local_stack_client_wg_key_file" || ! -s "$local_stack_client_wg_key_file" ]]; then
+    echo "profile-compare-local failed to resolve local stack client WireGuard key from $state_file"
+    exit 1
+  fi
+  local_stack_client_wg_public_key="$(state_file_value "$state_file" "WG_ONLY_CLIENT_WG_PUBLIC_KEY")"
+  local_stack_client_wg_interface="$(state_file_value "$state_file" "WG_ONLY_CLIENT_WG_INTERFACE")"
+  if [[ -z "$local_stack_client_wg_interface" ]]; then
+    local_stack_client_wg_interface="$(state_file_value "$state_file" "WG_ONLY_CLIENT_IFACE")"
+  fi
+  if [[ -z "$local_stack_client_wg_interface" ]]; then
+    local_stack_client_wg_interface="$client_iface"
+  fi
+  local_stack_client_wg_proxy_addr="$(state_file_value "$state_file" "WG_ONLY_CLIENT_WG_PROXY_ADDR")"
+  if [[ -z "$local_stack_client_wg_proxy_addr" ]]; then
+    local_stack_client_wg_proxy_addr="127.0.0.1:$((base_port + 103))"
+  fi
+  local_stack_client_startup_sync_timeout_sec="$(state_file_value "$state_file" "WG_ONLY_CLIENT_STARTUP_SYNC_TIMEOUT_SEC")"
+  if [[ -z "$local_stack_client_startup_sync_timeout_sec" ]]; then
+    local_stack_client_startup_sync_timeout_sec="8"
+  fi
+  transport_auto_client_inner_source="1"
+  transport_auto_disable_synthetic_fallback="1"
+  transport_auto_data_plane_mode_opaque="1"
 fi
 
 if [[ -z "$directory_urls" && -z "$bootstrap_directory" ]]; then
@@ -1022,6 +1092,27 @@ for profile in "${profiles[@]}"; do
     if [[ "$transport_auto_data_plane_mode_opaque" == "1" ]]; then
       run_cmd_env+=("DATA_PLANE_MODE=opaque")
     fi
+    if [[ -n "$local_stack_directory_trust_file" ]]; then
+      run_cmd_env+=("DIRECTORY_TRUSTED_KEYS_FILE=$local_stack_directory_trust_file")
+    fi
+    if [[ "$started_local_stack" == "1" ]]; then
+      run_cmd_env+=(
+        "WG_ONLY_MODE=1"
+        "CLIENT_WG_ONLY_MODE=1"
+        "CLIENT_LIVE_WG_MODE=1"
+        "CLIENT_WG_BACKEND=command"
+        "WG_BACKEND=command"
+        "CLIENT_WG_PRIVATE_KEY_PATH=$local_stack_client_wg_key_file"
+        "CLIENT_WG_INTERFACE=$local_stack_client_wg_interface"
+        "CLIENT_WG_INSTALL_ROUTE=0"
+        "CLIENT_WG_KERNEL_PROXY=1"
+        "CLIENT_WG_PROXY_ADDR=$local_stack_client_wg_proxy_addr"
+        "CLIENT_STARTUP_SYNC_TIMEOUT_SEC=$local_stack_client_startup_sync_timeout_sec"
+      )
+      if [[ -n "$local_stack_client_wg_public_key" ]]; then
+        run_cmd_env+=("CLIENT_WG_PUBLIC_KEY=$local_stack_client_wg_public_key")
+      fi
+    fi
     run_cmd=(
       env
       "${run_cmd_env[@]}"
@@ -1109,7 +1200,7 @@ for profile in "${profiles[@]}"; do
     fi
 
     bootstrap_failures="$(count_matches 'client bootstrap (failed|retry failed):' "$parse_log")"
-    wg_session_count="$(count_matches 'client wireguard runtime ready:' "$parse_log")"
+    wg_session_count="$(count_matches 'client (wireguard runtime ready:|wg-kernel proxy listening:)' "$parse_log")"
     direct_exit_mode_events="$(count_matches 'client direct-exit mode engaged' "$parse_log")"
     direct_exit_fallback_events="$(count_matches 'client direct-exit fallback engaged' "$parse_log")"
     transport_mismatch_failures="$(count_matches 'transport must be wireguard-udp in entry live mode' "$parse_log")"
@@ -1486,6 +1577,10 @@ elif ((runs_fail == 0)); then
   status="pass"
   final_rc=0
   notes="All executed profile runs passed"
+elif [[ "$fail_on_run_fail" == "1" ]]; then
+  status="fail"
+  final_rc=1
+  notes="One or more profile runs failed and --fail-on-run-fail is enabled"
 elif ((runs_pass > 0)); then
   status="warn"
   final_rc=0
@@ -1548,6 +1643,7 @@ jq -n \
   --arg exit_iface "$exit_iface" \
   --arg cleanup_ifaces "$cleanup_ifaces" \
   --arg keep_stack "$keep_stack" \
+  --arg fail_on_run_fail "$fail_on_run_fail" \
   --arg recommended_default_profile "$recommended_default_profile" \
   --arg decision_reason "$decision_reason" \
   --arg comparison_policy_note "$comparison_policy_note" \
@@ -1604,7 +1700,8 @@ jq -n \
         exit_iface: $exit_iface,
         cleanup_ifaces: ($cleanup_ifaces == "1"),
         keep_stack: ($keep_stack == "1")
-      }
+      },
+      fail_on_run_fail: ($fail_on_run_fail == "1")
     },
     summary: {
       profiles_total: ($profiles | length),
