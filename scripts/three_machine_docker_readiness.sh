@@ -891,6 +891,8 @@ ENTRY_ENDPOINT_PUBLIC=${docker_host_alias}:$stack_a_entry_udp_port
 EXIT_ENDPOINT_PUBLIC=${docker_host_alias}:$stack_a_exit_udp_port
 ENTRY_PUZZLE_SECRET=$entry_puzzle_secret_a
 DATA_PLANE_MODE=$stack_data_plane_mode
+BETA_STRICT_MODE=0
+PROD_STRICT_MODE=0
 ENTRY_EXIT_USER=$entry_exit_user
 EOF_ENV_A
 
@@ -911,6 +913,8 @@ ENTRY_ENDPOINT_PUBLIC=${docker_host_alias}:$stack_b_entry_udp_port
 EXIT_ENDPOINT_PUBLIC=${docker_host_alias}:$stack_b_exit_udp_port
 ENTRY_PUZZLE_SECRET=$entry_puzzle_secret_b
 DATA_PLANE_MODE=$stack_data_plane_mode
+BETA_STRICT_MODE=0
+PROD_STRICT_MODE=0
 ENTRY_EXIT_USER=$entry_exit_user
 EOF_ENV_B
 

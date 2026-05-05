@@ -271,6 +271,10 @@ if [[ -z "$env_a_path" || -z "$env_b_path" ]] ||
 	  ! rg -q '^EXIT_ENDPOINT_PUBLIC=host\.docker\.internal:28121$' "$env_b_path" ||
 	  ! rg -q '^DATA_PLANE_MODE=opaque$' "$env_a_path" ||
 	  ! rg -q '^DATA_PLANE_MODE=opaque$' "$env_b_path" ||
+	  ! rg -q '^BETA_STRICT_MODE=0$' "$env_a_path" ||
+	  ! rg -q '^BETA_STRICT_MODE=0$' "$env_b_path" ||
+	  ! rg -q '^PROD_STRICT_MODE=0$' "$env_a_path" ||
+	  ! rg -q '^PROD_STRICT_MODE=0$' "$env_b_path" ||
 	  ! rg -q '^ENTRY_EXIT_USER=([0-9]+:[0-9]+|nodeuser)$' "$env_a_path" ||
 	  ! rg -q '^ENTRY_EXIT_USER=([0-9]+:[0-9]+|nodeuser)$' "$env_b_path"; then
 	  echo "docker rehearsal env files should include generated secrets and runtime wiring"
