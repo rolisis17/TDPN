@@ -206,15 +206,15 @@ jq -n \
     next_actions: [
       {
         id: "profile_default_gate_evidence_pack",
-        command: ("./scripts/easy_node.sh profile-default-gate-evidence-pack --summary-json " + $p_pack)
+        command: ("./scripts/easy_node.sh profile-default-gate-evidence-pack --summary-json " + ($p_pack | @sh))
       },
       {
         id: "runtime_actuation_promotion_evidence_pack",
-        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + $r_pack)
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + ($r_pack | @sh))
       },
       {
         id: "profile_compare_multi_vm_stability_promotion_evidence_pack",
-        command: ("./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-evidence-pack --summary-json " + $m_pack)
+        command: ("./scripts/easy_node.sh profile-compare-multi-vm-stability-promotion-evidence-pack --summary-json " + ($m_pack | @sh))
       }
     ]
   }' >"$ROADMAP1"
@@ -248,6 +248,75 @@ if ! jq -e --arg summary1 "$SUMMARY1" --arg reports1 "$REPORTS1" --arg archive_r
 ' "$SUMMARY1" >/dev/null; then
   echo "case success/all scope assertions failed"
   cat "$SUMMARY1"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-archive-run] case: next_action summary paths with spaces"
+CASE_SPACE_DIR="$TMP_DIR/case next action spaced paths"
+REPORTS_SPACE="$CASE_SPACE_DIR/reports with spaces"
+ARCHIVE_ROOT_SPACE="$CASE_SPACE_DIR/archive root"
+SUMMARY_SPACE="$CASE_SPACE_DIR/archive summary.json"
+ROADMAP_SPACE="$CASE_SPACE_DIR/roadmap summary.json"
+SPACE_UNQUOTED="$CASE_SPACE_DIR/artifacts unquoted/runtime_actuation_promotion_cycle_latest_summary.json"
+SPACE_ESCAPED="$CASE_SPACE_DIR/artifacts escaped/runtime_actuation_promotion_cycle_latest_summary.json"
+SPACE_QUOTED="$CASE_SPACE_DIR/artifacts quoted/runtime_actuation_promotion_cycle_latest_summary.json"
+mkdir -p "$REPORTS_SPACE" "$ARCHIVE_ROOT_SPACE"
+touch_json "$SPACE_UNQUOTED"
+touch_json "$SPACE_ESCAPED"
+touch_json "$SPACE_QUOTED"
+printf -v SPACE_ESCAPED_ARG '%q' "$SPACE_ESCAPED"
+
+jq -n \
+  --arg unquoted "$SPACE_UNQUOTED" \
+  --arg escaped_arg "$SPACE_ESCAPED_ARG" \
+  --arg quoted "$SPACE_QUOTED" \
+  '{
+    status: "pass",
+    rc: 0,
+    next_actions: [
+      {
+        id: "runtime_actuation_promotion",
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + $unquoted + " --print-summary-json 1")
+      },
+      {
+        id: "runtime_actuation_promotion",
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + $escaped_arg + " --print-summary-json 1")
+      },
+      {
+        id: "runtime_actuation_promotion",
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + ($quoted | @sh) + " --print-summary-json 1")
+      }
+    ]
+  }' >"$ROADMAP_SPACE"
+
+bash ./scripts/roadmap_live_evidence_archive_run.sh \
+  --reports-dir "$REPORTS_SPACE" \
+  --roadmap-summary-json "$ROADMAP_SPACE" \
+  --archive-root "$ARCHIVE_ROOT_SPACE" \
+  --scope runtime-actuation \
+  --summary-json "$SUMMARY_SPACE" \
+  --print-summary-json 0
+
+if ! jq -e \
+  --arg unquoted "$SPACE_UNQUOTED" \
+  --arg escaped "$SPACE_ESCAPED" \
+  --arg quoted "$SPACE_QUOTED" \
+  '
+  .status == "pass"
+  and .rc == 0
+  and .failure_substep == null
+  and .summary.candidate_total == 3
+  and .summary.copied_total == 3
+  and .summary.missing_total == 0
+  and .summary.copy_error_total == 0
+  and .summary.source_path_reject_total == 0
+  and .summary.artifact_contract_error_total == 0
+  and ([.family_results[] | select(.family == "runtime-actuation")][0].candidates | map(.path) | index($unquoted) != null)
+  and ([.family_results[] | select(.family == "runtime-actuation")][0].candidates | map(.path) | index($escaped) != null)
+  and ([.family_results[] | select(.family == "runtime-actuation")][0].candidates | map(.path) | index($quoted) != null)
+' "$SUMMARY_SPACE" >/dev/null; then
+  echo "case next_action summary paths with spaces assertions failed"
+  cat "$SUMMARY_SPACE"
   exit 1
 fi
 
@@ -315,13 +384,13 @@ jq -n '{schema: {id: "runtime_actuation_promotion_cycle_summary"}, status: "pass
 printf '{not-json\n' >"$BAD_JSON_ARTIFACT"
 
 jq -n \
-	  --arg missing_schema "$BAD_MISSING_SCHEMA_ARTIFACT" \
-	  --arg bad_schema "$BAD_SCHEMA_ARTIFACT" \
-	  --arg missing_status "$BAD_MISSING_STATUS_ARTIFACT" \
-	  --arg bad_status "$BAD_STATUS_ARTIFACT" \
-	  --arg missing_rc "$BAD_MISSING_RC_ARTIFACT" \
-	  --arg bad_rc "$BAD_RC_ARTIFACT" \
-	  --arg bad_json "$BAD_JSON_ARTIFACT" \
+  --arg missing_schema "$BAD_MISSING_SCHEMA_ARTIFACT" \
+  --arg bad_schema "$BAD_SCHEMA_ARTIFACT" \
+  --arg missing_status "$BAD_MISSING_STATUS_ARTIFACT" \
+  --arg bad_status "$BAD_STATUS_ARTIFACT" \
+  --arg missing_rc "$BAD_MISSING_RC_ARTIFACT" \
+  --arg bad_rc "$BAD_RC_ARTIFACT" \
+  --arg bad_json "$BAD_JSON_ARTIFACT" \
   '{
     status: "pass",
     rc: 0,
@@ -332,23 +401,23 @@ jq -n \
     next_actions: [
       {
         id: "runtime_actuation_promotion",
-        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + $missing_schema)
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + ($missing_schema | @sh))
       },
       {
         id: "runtime_actuation_promotion",
-        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + $missing_status)
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + ($missing_status | @sh))
       },
       {
         id: "runtime_actuation_promotion",
-        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + $missing_rc)
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + ($missing_rc | @sh))
       },
       {
         id: "runtime_actuation_promotion",
-        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + $bad_rc)
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + ($bad_rc | @sh))
       },
       {
         id: "runtime_actuation_promotion_evidence_pack",
-        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + $bad_json)
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + ($bad_json | @sh))
       }
     ]
   }' >"$ROADMAP_CONTRACT"
@@ -433,13 +502,13 @@ jq -n \
       {
         id: "runtime_actuation_promotion",
         "label": "Runtime actuation promotion",
-        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + $r_promo),
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + ($r_promo | @sh)),
         reason: "refresh runtime evidence"
       },
       {
         id: "runtime_actuation_promotion_evidence_pack",
         "label": "Runtime actuation evidence pack",
-        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + $r_pack),
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + ($r_pack | @sh)),
         reason: "publish runtime evidence pack"
       }
     ]
@@ -549,11 +618,11 @@ jq -n \
     next_actions: [
       {
         id: "profile_default_gate_evidence_pack",
-        command: ("./scripts/easy_node.sh profile-default-gate-evidence-pack --summary-json " + $p_pack)
+        command: ("./scripts/easy_node.sh profile-default-gate-evidence-pack --summary-json " + ($p_pack | @sh))
       },
       {
         id: "runtime_actuation_promotion_evidence_pack",
-        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + $r_pack)
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + ($r_pack | @sh))
       }
     ]
   }' >"$ROADMAP3"
@@ -769,7 +838,7 @@ jq -n \
     next_actions: [
       {
         id: "runtime_actuation_promotion_evidence_pack",
-        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + $r_pack_out_of_scope)
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + ($r_pack_out_of_scope | @sh))
       }
     ]
   }' >"$ROADMAP7"
@@ -916,7 +985,7 @@ jq -n \
     next_actions: [
       {
         id: "runtime_actuation_promotion_evidence_pack",
-        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json=" + $r_pack_out_of_scope)
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json=" + ($r_pack_out_of_scope | @sh))
       }
     ]
   }' >"$ROADMAP9"
@@ -995,7 +1064,7 @@ jq -n \
       {
         id: "runtime_actuation_promotion_evidence_pack",
         "label": "Runtime actuation evidence pack",
-        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + $r_pack_missing + " && echo unsafe"),
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + ($r_pack_missing | @sh) + " && echo unsafe"),
         reason: "publish runtime evidence pack"
       }
     ]

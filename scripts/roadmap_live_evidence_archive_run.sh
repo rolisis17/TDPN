@@ -435,21 +435,165 @@ family_default_hint_command() {
   esac
 }
 
+command_string_to_argv() {
+  local command_text="${1:-}"
+  local length=0
+  local idx=0
+  local ch=""
+  local token=""
+  local quote_mode=""
+  local escaped="0"
+  local token_started="0"
+  COMMAND_STRING_ARGV=()
+  length="${#command_text}"
+
+  while (( idx < length )); do
+    ch="${command_text:idx:1}"
+
+    if [[ "$quote_mode" == "single" ]]; then
+      if [[ "$ch" == "'" ]]; then
+        quote_mode=""
+      else
+        token+="$ch"
+      fi
+      token_started="1"
+      idx=$((idx + 1))
+      continue
+    fi
+
+    if [[ "$quote_mode" == "double" ]]; then
+      if [[ "$escaped" == "1" ]]; then
+        token+="$ch"
+        escaped="0"
+        token_started="1"
+        idx=$((idx + 1))
+        continue
+      fi
+      case "$ch" in
+        "\\")
+          escaped="1"
+          ;;
+        "\"")
+          quote_mode=""
+          ;;
+        *)
+          token+="$ch"
+          token_started="1"
+          ;;
+      esac
+      idx=$((idx + 1))
+      continue
+    fi
+
+    if [[ "$escaped" == "1" ]]; then
+      token+="$ch"
+      escaped="0"
+      token_started="1"
+      idx=$((idx + 1))
+      continue
+    fi
+
+    case "$ch" in
+      [[:space:]])
+        if [[ "$token_started" == "1" ]]; then
+          COMMAND_STRING_ARGV+=("$token")
+          token=""
+          token_started="0"
+        fi
+        ;;
+      "\\")
+        escaped="1"
+        token_started="1"
+        ;;
+      "'")
+        quote_mode="single"
+        token_started="1"
+        ;;
+      "\"")
+        quote_mode="double"
+        token_started="1"
+        ;;
+      *)
+        token+="$ch"
+        token_started="1"
+        ;;
+    esac
+    idx=$((idx + 1))
+  done
+
+  if [[ "$escaped" == "1" || -n "$quote_mode" ]]; then
+    COMMAND_STRING_ARGV=()
+    return 1
+  fi
+
+  if [[ "$token_started" == "1" ]]; then
+    COMMAND_STRING_ARGV+=("$token")
+  fi
+
+  [[ "${#COMMAND_STRING_ARGV[@]}" -gt 0 ]]
+}
+
 extract_summary_paths_from_command() {
   local command
   command="$(trim "${1:-}")"
-  local rest="$command"
-  local match=""
+  if [[ -z "$command" ]]; then
+    return 0
+  fi
+  if next_action_command_has_disallowed_shell_syntax "$command"; then
+    return 0
+  fi
+  if ! command_string_to_argv "$command"; then
+    return 0
+  fi
+
+  local token=""
   local maybe_path=""
-  local summary_path_regex="--(summary-json|canonical-summary-json)([[:space:]]+|=)(\"[^\"]+\"|'[^']+'|[^[:space:]]+)"
-  while [[ "$rest" =~ $summary_path_regex ]]; do
-    match="${BASH_REMATCH[0]}"
-    maybe_path="$(strip_wrapping_quotes "${BASH_REMATCH[3]}")"
+  local next_token=""
+  local i=0
+  local j=0
+  local argc="${#COMMAND_STRING_ARGV[@]}"
+
+  while (( i < argc )); do
+    token="${COMMAND_STRING_ARGV[$i]}"
+    maybe_path=""
+    j=$((i + 1))
+
+    case "$token" in
+      --summary-json|--canonical-summary-json)
+        if (( j >= argc )); then
+          i=$((i + 1))
+          continue
+        fi
+        maybe_path="${COMMAND_STRING_ARGV[$j]}"
+        if [[ "$maybe_path" == --* ]]; then
+          i=$j
+          continue
+        fi
+        j=$((j + 1))
+        ;;
+      --summary-json=*|--canonical-summary-json=*)
+        maybe_path="${token#*=}"
+        ;;
+      *)
+        i=$((i + 1))
+        continue
+        ;;
+    esac
+
+    while (( j < argc )); do
+      next_token="${COMMAND_STRING_ARGV[$j]}"
+      if [[ "$next_token" == --* ]]; then
+        break
+      fi
+      maybe_path+=" $next_token"
+      j=$((j + 1))
+    done
+
     maybe_path="$(trim "$maybe_path")"
     if [[ -n "$maybe_path" ]]; then
       printf '%s\n' "$maybe_path"
     fi
-    rest="${rest#*"$match"}"
+    i=$j
   done
 }
 
@@ -881,6 +1025,9 @@ fi
 
 collect_roadmap_paths_for_family() {
   local family="$1"
+  local action_json=""
+  local action_id=""
+  local action_command=""
   if [[ "$roadmap_summary_valid" != "1" ]]; then
     return 0
   fi
@@ -908,17 +1055,19 @@ collect_roadmap_paths_for_family() {
       ;;
   esac
 
-  while IFS=$'\t' read -r action_id action_command; do
+  while IFS= read -r action_json; do
+    [[ -n "$action_json" ]] || continue
+    action_id="$(printf '%s\n' "$action_json" | jq -r '.id // ""')"
+    action_command="$(printf '%s\n' "$action_json" | jq -r '.command // ""')"
     [[ -z "${action_command:-}" ]] && continue
     while IFS= read -r maybe_path; do
       [[ -z "$maybe_path" ]] && continue
       add_candidate "$family" "$maybe_path" "next_action_command" "next_actions[$action_id]"
     done < <(extract_summary_paths_from_command "$action_command")
-  done < <(jq -r --argjson ids "$(family_action_ids_json "$family")" '
+  done < <(jq -c --argjson ids "$(family_action_ids_json "$family")" '
     (.next_actions // [])[]
     | select((.id // "") as $id | ($ids | index($id)) != null)
-    | [(.id // ""), (.command // "")]
-    | @tsv' "$roadmap_summary_json")
+    | {id: (.id // ""), command: (.command // "")}' "$roadmap_summary_json")
 }
 
 collect_fallback_paths_for_family() {
