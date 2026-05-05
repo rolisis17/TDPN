@@ -46,6 +46,12 @@ Usage:
     [--require-trend-source CSV] \
     [--require-selection-policy-present [0|1]] \
     [--require-selection-policy-valid [0|1]] \
+    [--require-micro-relay-quality-evidence [0|1]] \
+    [--require-micro-relay-quality-status-pass [0|1]] \
+    [--require-micro-relay-demotion-policy [0|1]] \
+    [--require-micro-relay-promotion-policy [0|1]] \
+    [--require-trust-tier-port-unlock-policy [0|1]] \
+    [--require-runtime-actuation-status-pass [0|1]] \
     [--fail-on-no-go [0|1]] \
     [--summary-json PATH] \
     [--show-json [0|1]] \
@@ -265,6 +271,12 @@ disallow_experimental_default="${PROFILE_COMPARE_MULTI_VM_CYCLE_DISALLOW_EXPERIM
 require_trend_source="${PROFILE_COMPARE_MULTI_VM_CYCLE_REQUIRE_TREND_SOURCE:-${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_TREND_SOURCE:-policy_reliability_latency,vote_fallback,safe_default_fallback}}"
 require_selection_policy_present="${PROFILE_COMPARE_MULTI_VM_CYCLE_REQUIRE_SELECTION_POLICY_PRESENT:-${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_SELECTION_POLICY_PRESENT:-0}}"
 require_selection_policy_valid="${PROFILE_COMPARE_MULTI_VM_CYCLE_REQUIRE_SELECTION_POLICY_VALID:-${PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_SELECTION_POLICY_VALID:-0}}"
+require_micro_relay_quality_evidence="${PROFILE_COMPARE_MULTI_VM_CYCLE_REQUIRE_MICRO_RELAY_QUALITY_EVIDENCE:-0}"
+require_micro_relay_quality_status_pass="${PROFILE_COMPARE_MULTI_VM_CYCLE_REQUIRE_MICRO_RELAY_QUALITY_STATUS_PASS:-0}"
+require_micro_relay_demotion_policy="${PROFILE_COMPARE_MULTI_VM_CYCLE_REQUIRE_MICRO_RELAY_DEMOTION_POLICY:-0}"
+require_micro_relay_promotion_policy="${PROFILE_COMPARE_MULTI_VM_CYCLE_REQUIRE_MICRO_RELAY_PROMOTION_POLICY:-0}"
+require_trust_tier_port_unlock_policy="${PROFILE_COMPARE_MULTI_VM_CYCLE_REQUIRE_TRUST_TIER_PORT_UNLOCK_POLICY:-0}"
+require_runtime_actuation_status_pass="${PROFILE_COMPARE_MULTI_VM_CYCLE_REQUIRE_RUNTIME_ACTUATION_STATUS_PASS:-0}"
 fail_on_no_go="${PROFILE_COMPARE_MULTI_VM_CYCLE_FAIL_ON_NO_GO:-${PROFILE_COMPARE_CAMPAIGN_CHECK_FAIL_ON_NO_GO:-1}}"
 
 summary_json="${PROFILE_COMPARE_MULTI_VM_CYCLE_SUMMARY_JSON:-}"
@@ -623,6 +635,84 @@ while [[ $# -gt 0 ]]; do
       require_selection_policy_valid="${1#*=}"
       shift
       ;;
+    --require-micro-relay-quality-evidence)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_micro_relay_quality_evidence="${2:-}"
+        shift 2
+      else
+        require_micro_relay_quality_evidence="1"
+        shift
+      fi
+      ;;
+    --require-micro-relay-quality-evidence=*)
+      require_micro_relay_quality_evidence="${1#*=}"
+      shift
+      ;;
+    --require-micro-relay-quality-status-pass)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_micro_relay_quality_status_pass="${2:-}"
+        shift 2
+      else
+        require_micro_relay_quality_status_pass="1"
+        shift
+      fi
+      ;;
+    --require-micro-relay-quality-status-pass=*)
+      require_micro_relay_quality_status_pass="${1#*=}"
+      shift
+      ;;
+    --require-micro-relay-demotion-policy)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_micro_relay_demotion_policy="${2:-}"
+        shift 2
+      else
+        require_micro_relay_demotion_policy="1"
+        shift
+      fi
+      ;;
+    --require-micro-relay-demotion-policy=*)
+      require_micro_relay_demotion_policy="${1#*=}"
+      shift
+      ;;
+    --require-micro-relay-promotion-policy)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_micro_relay_promotion_policy="${2:-}"
+        shift 2
+      else
+        require_micro_relay_promotion_policy="1"
+        shift
+      fi
+      ;;
+    --require-micro-relay-promotion-policy=*)
+      require_micro_relay_promotion_policy="${1#*=}"
+      shift
+      ;;
+    --require-trust-tier-port-unlock-policy)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_trust_tier_port_unlock_policy="${2:-}"
+        shift 2
+      else
+        require_trust_tier_port_unlock_policy="1"
+        shift
+      fi
+      ;;
+    --require-trust-tier-port-unlock-policy=*)
+      require_trust_tier_port_unlock_policy="${1#*=}"
+      shift
+      ;;
+    --require-runtime-actuation-status-pass)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_runtime_actuation_status_pass="${2:-}"
+        shift 2
+      else
+        require_runtime_actuation_status_pass="1"
+        shift
+      fi
+      ;;
+    --require-runtime-actuation-status-pass=*)
+      require_runtime_actuation_status_pass="${1#*=}"
+      shift
+      ;;
     --fail-on-no-go)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         fail_on_no_go="${2:-}"
@@ -717,6 +807,12 @@ disallow_experimental_default="$(trim "$disallow_experimental_default")"
 require_trend_source="$(trim "$require_trend_source")"
 require_selection_policy_present="$(trim "$require_selection_policy_present")"
 require_selection_policy_valid="$(trim "$require_selection_policy_valid")"
+require_micro_relay_quality_evidence="$(trim "$require_micro_relay_quality_evidence")"
+require_micro_relay_quality_status_pass="$(trim "$require_micro_relay_quality_status_pass")"
+require_micro_relay_demotion_policy="$(trim "$require_micro_relay_demotion_policy")"
+require_micro_relay_promotion_policy="$(trim "$require_micro_relay_promotion_policy")"
+require_trust_tier_port_unlock_policy="$(trim "$require_trust_tier_port_unlock_policy")"
+require_runtime_actuation_status_pass="$(trim "$require_runtime_actuation_status_pass")"
 fail_on_no_go="$(trim "$fail_on_no_go")"
 
 summary_json="$(abs_path "$summary_json")"
@@ -750,6 +846,12 @@ bool_arg_or_die "--require-trend-status-pass" "$require_trend_status_pass"
 bool_arg_or_die "--disallow-experimental-default" "$disallow_experimental_default"
 bool_arg_or_die "--require-selection-policy-present" "$require_selection_policy_present"
 bool_arg_or_die "--require-selection-policy-valid" "$require_selection_policy_valid"
+bool_arg_or_die "--require-micro-relay-quality-evidence" "$require_micro_relay_quality_evidence"
+bool_arg_or_die "--require-micro-relay-quality-status-pass" "$require_micro_relay_quality_status_pass"
+bool_arg_or_die "--require-micro-relay-demotion-policy" "$require_micro_relay_demotion_policy"
+bool_arg_or_die "--require-micro-relay-promotion-policy" "$require_micro_relay_promotion_policy"
+bool_arg_or_die "--require-trust-tier-port-unlock-policy" "$require_trust_tier_port_unlock_policy"
+bool_arg_or_die "--require-runtime-actuation-status-pass" "$require_runtime_actuation_status_pass"
 bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go"
 bool_arg_or_die "--show-json" "$show_json"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
@@ -1403,6 +1505,12 @@ if [[ "$proceed_reducer" == "true" ]]; then
         --disallow-experimental-default "$disallow_experimental_default"
         --require-selection-policy-present "$require_selection_policy_present"
         --require-selection-policy-valid "$require_selection_policy_valid"
+        --require-micro-relay-quality-evidence "$require_micro_relay_quality_evidence"
+        --require-micro-relay-quality-status-pass "$require_micro_relay_quality_status_pass"
+        --require-micro-relay-demotion-policy "$require_micro_relay_demotion_policy"
+        --require-micro-relay-promotion-policy "$require_micro_relay_promotion_policy"
+        --require-trust-tier-port-unlock-policy "$require_trust_tier_port_unlock_policy"
+        --require-runtime-actuation-status-pass "$require_runtime_actuation_status_pass"
         --fail-on-no-go "$fail_on_no_go"
         --summary-json "$check_summary_json"
         --show-json 0
@@ -1770,6 +1878,12 @@ jq -n \
   --arg require_trend_source "$require_trend_source" \
   --argjson require_selection_policy_present "$require_selection_policy_present" \
   --argjson require_selection_policy_valid "$require_selection_policy_valid" \
+  --argjson require_micro_relay_quality_evidence "$require_micro_relay_quality_evidence" \
+  --argjson require_micro_relay_quality_status_pass "$require_micro_relay_quality_status_pass" \
+  --argjson require_micro_relay_demotion_policy "$require_micro_relay_demotion_policy" \
+  --argjson require_micro_relay_promotion_policy "$require_micro_relay_promotion_policy" \
+  --argjson require_trust_tier_port_unlock_policy "$require_trust_tier_port_unlock_policy" \
+  --argjson require_runtime_actuation_status_pass "$require_runtime_actuation_status_pass" \
   --argjson fail_on_no_go "$fail_on_no_go" \
   '{
     version: 1,
@@ -1853,6 +1967,12 @@ jq -n \
           ),
           require_selection_policy_present: ($require_selection_policy_present == 1),
           require_selection_policy_valid: ($require_selection_policy_valid == 1),
+          require_micro_relay_quality_evidence: ($require_micro_relay_quality_evidence == 1),
+          require_micro_relay_quality_status_pass: ($require_micro_relay_quality_status_pass == 1),
+          require_micro_relay_demotion_policy: ($require_micro_relay_demotion_policy == 1),
+          require_micro_relay_promotion_policy: ($require_micro_relay_promotion_policy == 1),
+          require_trust_tier_port_unlock_policy: ($require_trust_tier_port_unlock_policy == 1),
+          require_runtime_actuation_status_pass: ($require_runtime_actuation_status_pass == 1),
           fail_on_no_go: ($fail_on_no_go == 1)
         }
       }

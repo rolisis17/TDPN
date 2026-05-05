@@ -69,6 +69,7 @@ runs=""
 sleep_between_sec=""
 allow_partial=""
 reports_dir=""
+cycle_args=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -112,6 +113,14 @@ while [[ $# -gt 0 ]]; do
       allow_partial="${1#*=}"
       shift
       ;;
+    --cycle-arg)
+      cycle_args+=("${2:-}")
+      shift 2
+      ;;
+    --cycle-arg=*)
+      cycle_args+=("${1#*=}")
+      shift
+      ;;
     *)
       shift
       ;;
@@ -119,8 +128,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -n "$capture_file" ]]; then
-  printf 'run\tscenario=%s\truns=%s\tsleep_between_sec=%s\tallow_partial=%s\treports_dir=%s\tsummary_json=%s\n' \
-    "$scenario" "$runs" "$sleep_between_sec" "$allow_partial" "$reports_dir" "$summary_json" >>"$capture_file"
+  cycle_arg_joined=""
+  if (( ${#cycle_args[@]} > 0 )); then
+    printf -v cycle_arg_joined '%s|' "${cycle_args[@]}"
+    cycle_arg_joined="${cycle_arg_joined%|}"
+  fi
+  printf 'run\tscenario=%s\truns=%s\tsleep_between_sec=%s\tallow_partial=%s\tcycle_args=%s\treports_dir=%s\tsummary_json=%s\n' \
+    "$scenario" "$runs" "$sleep_between_sec" "$allow_partial" "$cycle_arg_joined" "$reports_dir" "$summary_json" >>"$capture_file"
 fi
 
 if [[ "$scenario" == "fail" ]]; then
@@ -456,6 +470,10 @@ bash "$SCRIPT_UNDER_TEST" \
   --runs 3 \
   --sleep-between-sec 0 \
   --allow-partial 1 \
+  --run-cycle-arg --require-min-runs-total \
+  --run-cycle-arg 2 \
+  --run-cycle-arg=--require-min-runs-with-summary \
+  --run-cycle-arg=2 \
   --vm-command "vm_redact::ssh vm-a --subject inv-redact456 --token raw-cycle-secret" \
   --require-status-pass 1 \
   --require-decision-consensus 1 \
@@ -497,6 +515,11 @@ fi
 
 if ! grep -q $'^run\t.*\truns=3\tsleep_between_sec=0\tallow_partial=1\t' "$CAPTURE_FILE"; then
   echo "expected run-stage forwarding capture not found"
+  cat "$CAPTURE_FILE"
+  exit 1
+fi
+if ! grep -q $'^run\t.*\tcycle_args=--require-min-runs-total|2|--require-min-runs-with-summary|2\t' "$CAPTURE_FILE"; then
+  echo "expected run-stage cycle-arg forwarding capture not found"
   cat "$CAPTURE_FILE"
   exit 1
 fi

@@ -19,6 +19,7 @@ Usage:
     [--allow-partial [0|1]] \
     [--vm-command SPEC]... \
     [--vm-command-file PATH]... \
+    [--run-cycle-arg ARG]... \
     [--require-status-pass [0|1]] \
     [--require-min-runs-requested N] \
     [--require-min-runs-completed N] \
@@ -42,6 +43,8 @@ Notes:
   - Stage scripts can be overridden with:
     PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_SCRIPT
     PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_SCRIPT
+  - --run-cycle-arg values are forwarded to the run stage as --cycle-arg
+    values, which lets callers tune the inner multi-VM cycle checks.
 USAGE
 }
 
@@ -327,6 +330,7 @@ sleep_between_sec=""
 allow_partial=""
 declare -a vm_command_specs=()
 declare -a vm_command_files=()
+declare -a run_cycle_args=()
 
 require_status_pass="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_STATUS_PASS:-${REQUIRE_STATUS_PASS:-1}}"
 require_min_runs_requested="${PROFILE_COMPARE_MULTI_VM_STABILITY_CHECK_REQUIRE_MIN_RUNS_REQUESTED:-${REQUIRE_MIN_RUNS_REQUESTED:-3}}"
@@ -437,6 +441,15 @@ while [[ $# -gt 0 ]]; do
       ;;
     --vm-command-file=*)
       vm_command_files+=("${1#*=}")
+      shift
+      ;;
+    --run-cycle-arg|--cycle-arg)
+      require_value_or_die "$1" "$#"
+      run_cycle_args+=("${2:-}")
+      shift 2
+      ;;
+    --run-cycle-arg=*|--cycle-arg=*)
+      run_cycle_args+=("${1#*=}")
       shift
       ;;
     --require-status-pass)
@@ -633,6 +646,12 @@ for i in "${!vm_command_files[@]}"; do
     exit 2
   fi
 done
+for i in "${!run_cycle_args[@]}"; do
+  if [[ -z "${run_cycle_args[$i]}" ]]; then
+    echo "--run-cycle-arg cannot be empty"
+    exit 2
+  fi
+done
 
 if [[ ! -f "$RUN_SCRIPT" ]]; then
   echo "stability run script not found: $RUN_SCRIPT"
@@ -721,6 +740,9 @@ for vm_spec in "${vm_command_specs[@]}"; do
 done
 for vm_file in "${vm_command_files[@]}"; do
   run_cmd+=(--vm-command-file "$vm_file")
+done
+for run_cycle_arg in "${run_cycle_args[@]}"; do
+  run_cmd+=(--cycle-arg "$run_cycle_arg")
 done
 run_command_display="$(quote_cmd_redacted_01 "${run_cmd[@]}")"
 

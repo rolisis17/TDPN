@@ -332,6 +332,12 @@ fail_on_no_go="1"
 require_status_pass=""
 require_recommendation_support_rate_pct=""
 require_selection_policy_valid=""
+require_micro_relay_quality_evidence=""
+require_micro_relay_quality_status_pass=""
+require_micro_relay_demotion_policy=""
+require_micro_relay_promotion_policy=""
+require_trust_tier_port_unlock_policy=""
+require_runtime_actuation_status_pass=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
@@ -390,6 +396,54 @@ while [[ $# -gt 0 ]]; do
       require_selection_policy_valid="${1#*=}"
       shift
       ;;
+    --require-micro-relay-quality-evidence)
+      require_micro_relay_quality_evidence="${2:-}"
+      shift 2
+      ;;
+    --require-micro-relay-quality-evidence=*)
+      require_micro_relay_quality_evidence="${1#*=}"
+      shift
+      ;;
+    --require-micro-relay-quality-status-pass)
+      require_micro_relay_quality_status_pass="${2:-}"
+      shift 2
+      ;;
+    --require-micro-relay-quality-status-pass=*)
+      require_micro_relay_quality_status_pass="${1#*=}"
+      shift
+      ;;
+    --require-micro-relay-demotion-policy)
+      require_micro_relay_demotion_policy="${2:-}"
+      shift 2
+      ;;
+    --require-micro-relay-demotion-policy=*)
+      require_micro_relay_demotion_policy="${1#*=}"
+      shift
+      ;;
+    --require-micro-relay-promotion-policy)
+      require_micro_relay_promotion_policy="${2:-}"
+      shift 2
+      ;;
+    --require-micro-relay-promotion-policy=*)
+      require_micro_relay_promotion_policy="${1#*=}"
+      shift
+      ;;
+    --require-trust-tier-port-unlock-policy)
+      require_trust_tier_port_unlock_policy="${2:-}"
+      shift 2
+      ;;
+    --require-trust-tier-port-unlock-policy=*)
+      require_trust_tier_port_unlock_policy="${1#*=}"
+      shift
+      ;;
+    --require-runtime-actuation-status-pass)
+      require_runtime_actuation_status_pass="${2:-}"
+      shift 2
+      ;;
+    --require-runtime-actuation-status-pass=*)
+      require_runtime_actuation_status_pass="${1#*=}"
+      shift
+      ;;
     *)
       shift
       ;;
@@ -410,8 +464,10 @@ if [[ -z "$trend_summary_json" ]]; then
 fi
 
 if [[ -n "$capture_file" ]]; then
-  printf 'check\tscenario=%s\tfail_on_no_go=%s\trequire_status_pass=%s\trequire_recommendation_support_rate_pct=%s\trequire_selection_policy_valid=%s\tcampaign_summary_json=%s\ttrend_summary_json=%s\tsummary_json=%s\n' \
-    "$scenario" "$fail_on_no_go" "$require_status_pass" "$require_recommendation_support_rate_pct" "$require_selection_policy_valid" "$campaign_summary_json" "$trend_summary_json" "$summary_json" >>"$capture_file"
+  printf 'check\tscenario=%s\tfail_on_no_go=%s\trequire_status_pass=%s\trequire_recommendation_support_rate_pct=%s\trequire_selection_policy_valid=%s\trequire_micro_relay_quality_evidence=%s\trequire_micro_relay_quality_status_pass=%s\trequire_micro_relay_demotion_policy=%s\trequire_micro_relay_promotion_policy=%s\trequire_trust_tier_port_unlock_policy=%s\trequire_runtime_actuation_status_pass=%s\tcampaign_summary_json=%s\ttrend_summary_json=%s\tsummary_json=%s\n' \
+    "$scenario" "$fail_on_no_go" "$require_status_pass" "$require_recommendation_support_rate_pct" "$require_selection_policy_valid" \
+    "$require_micro_relay_quality_evidence" "$require_micro_relay_quality_status_pass" "$require_micro_relay_demotion_policy" "$require_micro_relay_promotion_policy" "$require_trust_tier_port_unlock_policy" "$require_runtime_actuation_status_pass" \
+    "$campaign_summary_json" "$trend_summary_json" "$summary_json" >>"$capture_file"
 fi
 
 mkdir -p "$(dirname "$summary_json")"
@@ -525,6 +581,12 @@ if ! jq -e '
   and .inputs.check.policy.require_status_pass == true
   and .inputs.check.policy.require_recommendation_support_rate_pct == 75
   and .inputs.check.policy.require_selection_policy_valid == true
+  and .inputs.check.policy.require_micro_relay_quality_evidence == false
+  and .inputs.check.policy.require_micro_relay_quality_status_pass == false
+  and .inputs.check.policy.require_micro_relay_demotion_policy == false
+  and .inputs.check.policy.require_micro_relay_promotion_policy == false
+  and .inputs.check.policy.require_trust_tier_port_unlock_policy == false
+  and .inputs.check.policy.require_runtime_actuation_status_pass == false
   and .inputs.reducer.min_support_rate_pct == 66
   and .inputs.sweep.allow_unready_handoff == false
   and .artifacts.sweep_summary_json == .stages.sweep.summary_json
@@ -553,6 +615,98 @@ fi
 if ! grep -q $'^check\t.*\trequire_status_pass=1\trequire_recommendation_support_rate_pct=75\trequire_selection_policy_valid=1\t' "$FAKE_CAPTURE_FILE"; then
   echo "expected check policy forwarding capture not found"
   cat "$FAKE_CAPTURE_FILE"
+  exit 1
+fi
+if ! grep -q $'^check\t.*\trequire_micro_relay_quality_evidence=0\trequire_micro_relay_quality_status_pass=0\trequire_micro_relay_demotion_policy=0\trequire_micro_relay_promotion_policy=0\trequire_trust_tier_port_unlock_policy=0\trequire_runtime_actuation_status_pass=0\t' "$FAKE_CAPTURE_FILE"; then
+  echo "expected profile-default M4/runtime policy opt-out forwarding capture not found"
+  cat "$FAKE_CAPTURE_FILE"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-cycle] campaign-check M4 env defaults do not bleed into profile-default cycle"
+ENV_ISOLATION_SUMMARY="$TMP_DIR/cycle_env_isolation_summary.json"
+ENV_ISOLATION_CAPTURE="$TMP_DIR/capture_env_isolation.log"
+set +e
+PROFILE_COMPARE_MULTI_VM_SWEEP_SCRIPT="$FAKE_SWEEP_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_REDUCER_SCRIPT="$FAKE_REDUCER_SCRIPT" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MICRO_RELAY_QUALITY_EVIDENCE=1 \
+PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MICRO_RELAY_QUALITY_STATUS_PASS=1 \
+PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MICRO_RELAY_DEMOTION_POLICY=1 \
+PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_MICRO_RELAY_PROMOTION_POLICY=1 \
+PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_TRUST_TIER_PORT_UNLOCK_POLICY=1 \
+PROFILE_COMPARE_CAMPAIGN_CHECK_REQUIRE_RUNTIME_ACTUATION_STATUS_PASS=1 \
+FAKE_CYCLE_CAPTURE_FILE="$ENV_ISOLATION_CAPTURE" \
+FAKE_CYCLE_SWEEP_SCENARIO="pass" \
+FAKE_CYCLE_REDUCER_SCENARIO="go" \
+FAKE_CYCLE_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/env_isolation_reports" \
+  --vm-command "vm_arg::echo vm" \
+  --vm-command-file "$VM_COMMAND_FILE" \
+  --summary-json "$ENV_ISOLATION_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_cycle_env_isolation.log 2>&1
+env_isolation_rc=$?
+set -e
+
+if [[ "$env_isolation_rc" -ne 0 ]]; then
+  echo "expected campaign-check env isolation path rc=0, got rc=$env_isolation_rc"
+  cat /tmp/integration_profile_compare_multi_vm_cycle_env_isolation.log
+  exit 1
+fi
+if ! grep -q $'^check\t.*\trequire_micro_relay_quality_evidence=0\trequire_micro_relay_quality_status_pass=0\trequire_micro_relay_demotion_policy=0\trequire_micro_relay_promotion_policy=0\trequire_trust_tier_port_unlock_policy=0\trequire_runtime_actuation_status_pass=0\t' "$ENV_ISOLATION_CAPTURE"; then
+  echo "expected campaign-check M4 env vars to stay opt-out in profile-default cycle"
+  cat "$ENV_ISOLATION_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-cycle] explicit M4/runtime opt-in forwards to campaign check"
+M4_OPT_IN_SUMMARY="$TMP_DIR/cycle_m4_opt_in_summary.json"
+M4_OPT_IN_CAPTURE="$TMP_DIR/capture_m4_opt_in.log"
+set +e
+PROFILE_COMPARE_MULTI_VM_SWEEP_SCRIPT="$FAKE_SWEEP_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_REDUCER_SCRIPT="$FAKE_REDUCER_SCRIPT" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_CYCLE_CAPTURE_FILE="$M4_OPT_IN_CAPTURE" \
+FAKE_CYCLE_SWEEP_SCENARIO="pass" \
+FAKE_CYCLE_REDUCER_SCENARIO="go" \
+FAKE_CYCLE_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/m4_opt_in_reports" \
+  --vm-command "vm_arg::echo vm" \
+  --vm-command-file "$VM_COMMAND_FILE" \
+  --require-micro-relay-quality-evidence 1 \
+  --require-micro-relay-quality-status-pass=1 \
+  --require-micro-relay-demotion-policy \
+  --require-micro-relay-promotion-policy 1 \
+  --require-trust-tier-port-unlock-policy=1 \
+  --require-runtime-actuation-status-pass \
+  --summary-json "$M4_OPT_IN_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_cycle_m4_opt_in.log 2>&1
+m4_opt_in_rc=$?
+set -e
+
+if [[ "$m4_opt_in_rc" -ne 0 ]]; then
+  echo "expected M4/runtime opt-in path rc=0, got rc=$m4_opt_in_rc"
+  cat /tmp/integration_profile_compare_multi_vm_cycle_m4_opt_in.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .inputs.check.policy.require_micro_relay_quality_evidence == true
+  and .inputs.check.policy.require_micro_relay_quality_status_pass == true
+  and .inputs.check.policy.require_micro_relay_demotion_policy == true
+  and .inputs.check.policy.require_micro_relay_promotion_policy == true
+  and .inputs.check.policy.require_trust_tier_port_unlock_policy == true
+  and .inputs.check.policy.require_runtime_actuation_status_pass == true
+' "$M4_OPT_IN_SUMMARY" >/dev/null 2>&1; then
+  echo "M4/runtime opt-in summary mismatch"
+  cat "$M4_OPT_IN_SUMMARY"
+  exit 1
+fi
+if ! grep -q $'^check\t.*\trequire_micro_relay_quality_evidence=1\trequire_micro_relay_quality_status_pass=1\trequire_micro_relay_demotion_policy=1\trequire_micro_relay_promotion_policy=1\trequire_trust_tier_port_unlock_policy=1\trequire_runtime_actuation_status_pass=1\t' "$M4_OPT_IN_CAPTURE"; then
+  echo "expected M4/runtime opt-in forwarding capture not found"
+  cat "$M4_OPT_IN_CAPTURE"
   exit 1
 fi
 
