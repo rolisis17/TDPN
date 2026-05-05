@@ -12,12 +12,17 @@ for cmd in bash jq mktemp chmod grep tail cat mkdir; do
 done
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+PASS_ACTION="$ROOT_DIR/scripts/.integration_easy_node_roadmap_action_pass_$$.sh"
+
+cleanup() {
+  rm -rf "$TMP_DIR"
+  rm -f "$PASS_ACTION"
+}
+trap cleanup EXIT
 
 CAPTURE="$TMP_DIR/capture.tsv"
 HELP_OUT="$TMP_DIR/help.txt"
 FAKE_SCRIPT="$TMP_DIR/fake_roadmap_non_blockchain_actionable_run.sh"
-PASS_ACTION="$TMP_DIR/pass_action.sh"
 FAKE_ROADMAP="$TMP_DIR/fake_roadmap_progress_report.sh"
 
 cat >"$FAKE_SCRIPT" <<'EOF_FAKE'
