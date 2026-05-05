@@ -535,6 +535,254 @@ add_candidate() {
   printf '%s\t%s\t%s\t%s\n' "$family" "$absolute" "$source" "$key" >>"$all_candidates_tsv"
 }
 
+artifact_contract_allows_legacy_no_schema() {
+  local family="$1"
+  local key="$2"
+  case "$family:$key" in
+    profile-default:vpn_track.profile_default_gate.summary_json|\
+    profile-default:vpn_track.profile_default_gate.campaign_check_summary_json_resolved|\
+    profile-default:artifacts.profile_compare_signoff_summary_json|\
+    profile-default:reports_dir.profile_compare_campaign_signoff_summary_json)
+      return 0
+      ;;
+  esac
+  if [[ "$family" == "profile-default" && "$key" == next_actions\[profile_default_gate* ]]; then
+    return 0
+  fi
+  if [[ "$family" == "profile-default" && "$key" == next_actions\[profile_compare_campaign* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+schema_id_matches_one() {
+  local schema_id="$1"
+  shift
+  local expected=""
+  for expected in "$@"; do
+    if [[ "$schema_id" == "$expected" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+artifact_contract_schema_id_is_allowed() {
+  local family="$1"
+  local key="$2"
+  local schema_id="$3"
+  case "$family:$key" in
+    profile-default:vpn_track.profile_default_gate.stability_summary_json|\
+    profile-default:reports_dir.profile_default_gate_stability_summary_json)
+      schema_id_matches_one "$schema_id" "profile_default_gate_stability_summary"
+      return $?
+      ;;
+    profile-default:vpn_track.profile_default_gate.stability_check_summary_json|\
+    profile-default:reports_dir.profile_default_gate_stability_check_summary_json)
+      schema_id_matches_one "$schema_id" "profile_default_gate_stability_check_summary"
+      return $?
+      ;;
+    profile-default:vpn_track.profile_default_gate.cycle_summary_json|\
+    profile-default:reports_dir.profile_default_gate_stability_cycle_summary_json)
+      schema_id_matches_one "$schema_id" "profile_default_gate_stability_cycle_summary"
+      return $?
+      ;;
+    profile-default:artifacts.profile_default_gate_evidence_pack_summary_json|\
+    profile-default:reports_dir.profile_default_gate_evidence_pack_summary_json)
+      schema_id_matches_one "$schema_id" "profile_default_gate_stability_evidence_pack_summary"
+      return $?
+      ;;
+    runtime-actuation:artifacts.runtime_actuation_promotion_evidence_pack_summary_json|\
+    runtime-actuation:reports_dir.runtime_actuation_promotion_evidence_pack_summary_json)
+      schema_id_matches_one "$schema_id" "runtime_actuation_promotion_evidence_pack_summary"
+      return $?
+      ;;
+    runtime-actuation:artifacts.runtime_actuation_promotion_summary_json|\
+    runtime-actuation:reports_dir.runtime_actuation_promotion_cycle_latest_summary_json|\
+    runtime-actuation:reports_dir.runtime_actuation_promotion_summary_json)
+      schema_id_matches_one "$schema_id" \
+        "runtime_actuation_promotion_check_summary" \
+        "runtime_actuation_promotion_summary" \
+        "profile_default_gate_runtime_actuation_promotion_check_summary" \
+        "runtime_actuation_promotion_cycle_summary"
+      return $?
+      ;;
+    multi-vm:vpn_track.multi_vm_stability.input_summary_json|\
+    multi-vm:vpn_track.multi_vm_stability.source_summary_json|\
+    multi-vm:artifacts.profile_compare_multi_vm_stability_summary_json|\
+    multi-vm:reports_dir.profile_compare_multi_vm_stability_check_summary_json|\
+    multi-vm:reports_dir.profile_compare_multi_vm_stability_cycle_summary_json|\
+    multi-vm:reports_dir.profile_compare_multi_vm_stability_summary_json)
+      schema_id_matches_one "$schema_id" \
+        "profile_compare_multi_vm_stability_check_summary" \
+        "profile_compare_multi_vm_stability_cycle_summary" \
+        "profile_compare_multi_vm_stability_summary" \
+        "profile_compare_multi_vm_stability_run_summary"
+      return $?
+      ;;
+    multi-vm:artifacts.profile_compare_multi_vm_stability_promotion_evidence_pack_summary_json|\
+    multi-vm:reports_dir.profile_compare_multi_vm_stability_promotion_evidence_pack_summary_json)
+      schema_id_matches_one "$schema_id" "profile_compare_multi_vm_stability_promotion_evidence_pack_summary"
+      return $?
+      ;;
+    multi-vm:artifacts.profile_compare_multi_vm_stability_promotion_summary_json|\
+    multi-vm:reports_dir.profile_compare_multi_vm_stability_promotion_cycle_summary_json|\
+    multi-vm:reports_dir.profile_compare_multi_vm_stability_promotion_summary_json)
+      schema_id_matches_one "$schema_id" \
+        "profile_compare_multi_vm_stability_promotion_check_summary" \
+        "profile_compare_multi_vm_stability_promotion_summary" \
+        "profile_compare_multi_vm_stability_promotion_cycle_summary"
+      return $?
+      ;;
+  esac
+
+  if [[ "$family" == "profile-default" && "$key" == next_actions\[profile_default_gate_evidence_pack* ]]; then
+    schema_id_matches_one "$schema_id" "profile_default_gate_stability_evidence_pack_summary"
+    return $?
+  fi
+  if [[ "$family" == "runtime-actuation" && "$key" == next_actions\[runtime_actuation_promotion_evidence_pack* ]]; then
+    schema_id_matches_one "$schema_id" "runtime_actuation_promotion_evidence_pack_summary"
+    return $?
+  fi
+  if [[ "$family" == "runtime-actuation" && "$key" == next_actions\[runtime_actuation_promotion* ]]; then
+    schema_id_matches_one "$schema_id" \
+      "runtime_actuation_promotion_check_summary" \
+      "runtime_actuation_promotion_summary" \
+      "profile_default_gate_runtime_actuation_promotion_check_summary" \
+      "runtime_actuation_promotion_cycle_summary"
+    return $?
+  fi
+  if [[ "$family" == "multi-vm" && "$key" == next_actions\[profile_compare_multi_vm_stability_promotion_evidence_pack* ]]; then
+    schema_id_matches_one "$schema_id" "profile_compare_multi_vm_stability_promotion_evidence_pack_summary"
+    return $?
+  fi
+  if [[ "$family" == "multi-vm" && "$key" == next_actions\[profile_compare_multi_vm_stability_promotion* ]]; then
+    schema_id_matches_one "$schema_id" \
+      "profile_compare_multi_vm_stability_promotion_check_summary" \
+      "profile_compare_multi_vm_stability_promotion_summary" \
+      "profile_compare_multi_vm_stability_promotion_cycle_summary"
+    return $?
+  fi
+
+  return 0
+}
+
+artifact_contract_error_reason() {
+  local path="$1"
+  local family="${2:-}"
+  local key="${3:-}"
+  local schema_id=""
+  local status_value=""
+  local rc_value=""
+
+  if ! jq -e . "$path" >/dev/null 2>&1; then
+    printf '%s' "invalid_json"
+    return 0
+  fi
+
+  schema_id="$(jq -r 'if (.schema.id? | type) == "string" then .schema.id else "" end' "$path")"
+  if [[ -z "$schema_id" ]] && ! artifact_contract_allows_legacy_no_schema "$family" "$key"; then
+    printf '%s' "missing_schema_id"
+    return 0
+  fi
+  if [[ -n "$schema_id" ]] && ! artifact_contract_schema_id_is_allowed "$family" "$key" "$schema_id"; then
+    printf '%s' "schema_mismatch"
+    return 0
+  fi
+
+  status_value="$(jq -r 'if (.status? | type) == "string" then .status else "" end' "$path")"
+  case "$status_value" in
+    pass|ok|warn)
+      ;;
+    "")
+      printf '%s' "missing_status"
+      return 0
+      ;;
+    *)
+      printf '%s' "invalid_status"
+      return 0
+      ;;
+  esac
+
+  if jq -e 'has("rc")' "$path" >/dev/null 2>&1; then
+    if ! jq -e '(.rc | type) == "number" and (.rc == (.rc | floor))' "$path" >/dev/null 2>&1; then
+      printf '%s' "rc_not_integer"
+      return 0
+    fi
+    rc_value="$(jq -r '.rc | tostring' "$path")"
+  elif artifact_contract_allows_legacy_no_schema "$family" "$key" && jq -e 'has("final_rc")' "$path" >/dev/null 2>&1; then
+    if ! jq -e '(.final_rc | type) == "number" and (.final_rc == (.final_rc | floor))' "$path" >/dev/null 2>&1; then
+      printf '%s' "rc_not_integer"
+      return 0
+    fi
+    rc_value="$(jq -r '.final_rc | tostring' "$path")"
+  else
+    printf '%s' "missing_rc"
+    return 0
+  fi
+
+  if [[ "$rc_value" != "0" ]]; then
+    printf '%s' "rc_nonzero"
+    return 0
+  fi
+
+  printf '%s' "ok"
+}
+
+artifact_contract_error_json() {
+  local family="$1"
+  local path="$2"
+  local resolved_path="$3"
+  local source="$4"
+  local key="$5"
+  local reason="$6"
+  local schema_id=""
+  local status_value=""
+  local rc_value=""
+  local rc_type=""
+  local final_rc_value=""
+  local final_rc_type=""
+
+  if jq -e . "$path" >/dev/null 2>&1; then
+    schema_id="$(jq -r 'if (.schema.id? | type) == "string" then .schema.id else "" end' "$path" 2>/dev/null || true)"
+    status_value="$(jq -r 'if (.status? | type) == "string" then .status else "" end' "$path" 2>/dev/null || true)"
+    rc_value="$(jq -r 'if has("rc") then (.rc | tostring) else "" end' "$path" 2>/dev/null || true)"
+    rc_type="$(jq -r 'if has("rc") then (.rc | type) else "" end' "$path" 2>/dev/null || true)"
+    final_rc_value="$(jq -r 'if has("final_rc") then (.final_rc | tostring) else "" end' "$path" 2>/dev/null || true)"
+    final_rc_type="$(jq -r 'if has("final_rc") then (.final_rc | type) else "" end' "$path" 2>/dev/null || true)"
+  fi
+
+  jq -nc \
+    --arg family "$family" \
+    --arg path "$path" \
+    --arg resolved_path "$resolved_path" \
+    --arg source "$source" \
+    --arg key "$key" \
+    --arg reason "$reason" \
+    --arg schema_id "$schema_id" \
+    --arg status "$status_value" \
+    --arg rc_value "$rc_value" \
+    --arg rc_type "$rc_type" \
+    --arg final_rc_value "$final_rc_value" \
+    --arg final_rc_type "$final_rc_type" \
+    '{
+      family: $family,
+      path: $path,
+      resolved_path: $resolved_path,
+      source: $source,
+      key: $key,
+      reason: $reason,
+      observed: {
+        schema_id: (if $schema_id == "" then null else $schema_id end),
+        status: (if $status == "" then null else $status end),
+        rc: (if $rc_value == "" then null else $rc_value end),
+        rc_type: (if $rc_type == "" then null else $rc_type end),
+        final_rc: (if $final_rc_value == "" then null else $final_rc_value end),
+        final_rc_type: (if $final_rc_type == "" then null else $final_rc_type end)
+      }
+    }'
+}
+
 roadmap_summary_exists=0
 roadmap_summary_valid=0
 roadmap_summary_contract_state="missing"
@@ -740,6 +988,7 @@ copied_total=0
 missing_total=0
 copy_error_total=0
 source_path_reject_total=0
+artifact_contract_error_total=0
 missing_family_count=0
 included_family_count="${#included_families[@]}"
 
@@ -821,7 +1070,8 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
   family_copied_jsonl="$tmp_dir/family_${family//-/_}_copied.jsonl"
   family_missing_jsonl="$tmp_dir/family_${family//-/_}_missing.jsonl"
   family_copy_errors_jsonl="$tmp_dir/family_${family//-/_}_copy_errors.jsonl"
-  touch "$family_candidates_tsv" "$family_candidates_jsonl" "$family_copied_jsonl" "$family_missing_jsonl" "$family_copy_errors_jsonl"
+  family_artifact_contract_errors_jsonl="$tmp_dir/family_${family//-/_}_artifact_contract_errors.jsonl"
+  touch "$family_candidates_tsv" "$family_candidates_jsonl" "$family_copied_jsonl" "$family_missing_jsonl" "$family_copy_errors_jsonl" "$family_artifact_contract_errors_jsonl"
 
   if [[ "$included_flag" == "1" ]]; then
     awk -F'\t' -v family="$family" '$1 == family { print }' "$dedup_candidates_tsv" >"$family_candidates_tsv"
@@ -832,6 +1082,7 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
   family_missing_count=0
   family_copy_error_count=0
   family_source_path_reject_count=0
+  family_artifact_contract_error_count=0
 
   if [[ "$included_flag" == "1" && -s "$family_candidates_tsv" ]]; then
     family_candidate_count="$(wc -l <"$family_candidates_tsv" | tr -d '[:space:]')"
@@ -876,6 +1127,15 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
           continue
         fi
 
+        artifact_contract_reason="$(artifact_contract_error_reason "$resolved_source_path" "$family" "$key")"
+        if [[ "$artifact_contract_reason" != "ok" ]]; then
+          family_artifact_contract_error_count=$((family_artifact_contract_error_count + 1))
+          artifact_contract_error_total=$((artifact_contract_error_total + 1))
+          echo "[roadmap-live-evidence-archive-run] stage=artifact_contract status=fail family=$family source=$source key=$key path=$path reason=$artifact_contract_reason"
+          artifact_contract_error_json "$family" "$path" "$resolved_source_path" "$source" "$key" "$artifact_contract_reason" >>"$family_artifact_contract_errors_jsonl"
+          continue
+        fi
+
         destination_base="$(basename "$resolved_source_path")"
         destination="$archive_dir/$family/$destination_base"
         if [[ -e "$destination" ]]; then
@@ -917,7 +1177,7 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
     if (( family_copied_count == 0 )); then
       missing_family_count=$((missing_family_count + 1))
     fi
-    if (( family_copied_count == 0 || family_missing_count > 0 || family_copy_error_count > 0 )); then
+    if (( family_copied_count == 0 || family_missing_count > 0 || family_copy_error_count > 0 || family_artifact_contract_error_count > 0 )); then
       family_hints_json="$(build_next_action_hints_json "$family")"
       if [[ "$(printf '%s\n' "$family_hints_json" | jq -r 'length')" != "0" ]]; then
         while IFS= read -r hint_line; do
@@ -930,6 +1190,8 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
   family_status="skipped"
   if [[ "$included_flag" == "1" ]]; then
     if (( family_copied_count == 0 )); then
+      family_status="fail"
+    elif (( family_artifact_contract_error_count > 0 )); then
       family_status="fail"
     elif (( family_copy_error_count > 0 )); then
       family_status="fail"
@@ -953,10 +1215,12 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
     --argjson missing_count "$family_missing_count" \
     --argjson copy_error_count "$family_copy_error_count" \
     --argjson source_path_reject_count "$family_source_path_reject_count" \
+    --argjson artifact_contract_error_count "$family_artifact_contract_error_count" \
     --argjson candidates "$(jsonl_to_array "$family_candidates_jsonl")" \
     --argjson copied "$(jsonl_to_array "$family_copied_jsonl")" \
     --argjson missing "$(jsonl_to_array "$family_missing_jsonl")" \
     --argjson copy_errors "$(jsonl_to_array "$family_copy_errors_jsonl")" \
+    --argjson artifact_contract_errors "$(jsonl_to_array "$family_artifact_contract_errors_jsonl")" \
     --argjson next_action_hints "$family_hints_json" \
     '{
       family: $family,
@@ -967,10 +1231,12 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
       missing_count: $missing_count,
       copy_error_count: $copy_error_count,
       source_path_reject_count: $source_path_reject_count,
+      artifact_contract_error_count: $artifact_contract_error_count,
       candidates: $candidates,
       copied: $copied,
       missing: $missing,
       copy_errors: $copy_errors,
+      artifact_contract_errors: $artifact_contract_errors,
       next_action_hints: $next_action_hints
     }' >>"$family_results_jsonl"
 done
@@ -995,6 +1261,11 @@ elif (( included_family_count == 0 )); then
   final_rc=1
   final_reason="no artifact family was selected for archiving"
   failure_substep="scope_selected_no_families"
+elif (( artifact_contract_error_total > 0 )); then
+  final_status="fail"
+  final_rc=1
+  final_reason="archive candidate artifact contract validation failed"
+  failure_substep="archive_artifact_contract_invalid"
 elif (( copied_total == 0 )); then
   final_status="fail"
   final_rc=1
@@ -1023,7 +1294,7 @@ if [[ -z "$included_families_csv" ]]; then
   included_families_csv="none"
 fi
 
-echo "[roadmap-live-evidence-archive-run] scope=$requested_scope resolved_scope=$resolved_scope included_families=$included_families_csv missing_source_policy=$missing_source_policy candidate_total=$candidate_total copied_total=$copied_total missing_total=$missing_total copy_error_total=$copy_error_total source_path_reject_total=$source_path_reject_total missing_family_count=$missing_family_count status=$final_status failure_substep=${failure_substep:-none}"
+echo "[roadmap-live-evidence-archive-run] scope=$requested_scope resolved_scope=$resolved_scope included_families=$included_families_csv missing_source_policy=$missing_source_policy candidate_total=$candidate_total copied_total=$copied_total missing_total=$missing_total copy_error_total=$copy_error_total source_path_reject_total=$source_path_reject_total artifact_contract_error_total=$artifact_contract_error_total missing_family_count=$missing_family_count status=$final_status failure_substep=${failure_substep:-none}"
 if [[ "$final_status" == "fail" && -n "$failure_substep" ]]; then
   echo "[roadmap-live-evidence-archive-run] fail_substep=$failure_substep reason=$final_reason"
 elif [[ "$final_status" == "warn" ]]; then
@@ -1059,6 +1330,7 @@ jq -n \
   --argjson missing_total "$missing_total" \
   --argjson copy_error_total "$copy_error_total" \
   --argjson source_path_reject_total "$source_path_reject_total" \
+  --argjson artifact_contract_error_total "$artifact_contract_error_total" \
   --argjson missing_family_count "$missing_family_count" \
   --argjson source_path_allowlist "$source_path_allowlist_json" \
   --argjson family_results "$(jsonl_to_array "$family_results_jsonl")" \
@@ -1098,6 +1370,7 @@ jq -n \
       missing_total: $missing_total,
       copy_error_total: $copy_error_total,
       source_path_reject_total: $source_path_reject_total,
+      artifact_contract_error_total: $artifact_contract_error_total,
       missing_family_count: $missing_family_count
     },
     path_safety: {

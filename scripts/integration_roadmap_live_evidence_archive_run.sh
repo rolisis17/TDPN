@@ -14,7 +14,7 @@ unset ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_ROADMAP_SUMMARY_JSON
 unset ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_SCOPE
 unset ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_SUMMARY_JSON
 
-for cmd in bash jq mktemp mkdir rm cat grep ln; do
+for cmd in bash jq mktemp mkdir rm cat grep ln basename; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -25,12 +25,70 @@ mkdir -p "$ROOT_DIR/.easy-node-logs"
 TMP_DIR="$(mktemp -d "$ROOT_DIR/.easy-node-logs/integration_roadmap_live_evidence_archive_run_XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+schema_for_artifact_path() {
+  local path="$1"
+  case "$(basename "$path")" in
+    profile_default_gate_stability_summary.json)
+      printf '%s' "profile_default_gate_stability_summary"
+      ;;
+    profile_default_gate_stability_check_summary.json)
+      printf '%s' "profile_default_gate_stability_check_summary"
+      ;;
+    profile_default_gate_stability_cycle_summary.json)
+      printf '%s' "profile_default_gate_stability_cycle_summary"
+      ;;
+    profile_default_gate_evidence_pack_summary.json)
+      printf '%s' "profile_default_gate_stability_evidence_pack_summary"
+      ;;
+    runtime_actuation_promotion_cycle_latest_summary.json|runtime_actuation_promotion_summary.json)
+      printf '%s' "runtime_actuation_promotion_cycle_summary"
+      ;;
+    runtime_actuation_promotion_evidence_pack_summary.json)
+      printf '%s' "runtime_actuation_promotion_evidence_pack_summary"
+      ;;
+    profile_compare_multi_vm_stability_check_summary.json)
+      printf '%s' "profile_compare_multi_vm_stability_check_summary"
+      ;;
+    profile_compare_multi_vm_stability_cycle_summary.json)
+      printf '%s' "profile_compare_multi_vm_stability_cycle_summary"
+      ;;
+    profile_compare_multi_vm_stability_summary.json)
+      printf '%s' "profile_compare_multi_vm_stability_run_summary"
+      ;;
+    profile_compare_multi_vm_stability_promotion_cycle_summary.json)
+      printf '%s' "profile_compare_multi_vm_stability_promotion_cycle_summary"
+      ;;
+    profile_compare_multi_vm_stability_promotion_summary.json)
+      printf '%s' "profile_compare_multi_vm_stability_promotion_summary"
+      ;;
+    profile_compare_multi_vm_stability_promotion_evidence_pack_summary.json)
+      printf '%s' "profile_compare_multi_vm_stability_promotion_evidence_pack_summary"
+      ;;
+    *)
+      printf '%s' "test_live_evidence_artifact_summary"
+      ;;
+  esac
+}
+
 touch_json() {
   local path="$1"
+  local schema_id="${2:-}"
+  local status="${3:-pass}"
+  local rc="${4:-0}"
+  if [[ -z "$schema_id" ]]; then
+    schema_id="$(schema_for_artifact_path "$path")"
+  fi
   mkdir -p "$(dirname "$path")"
-  cat >"$path" <<'JSON'
-{"ok":true}
-JSON
+  jq -n \
+    --arg schema_id "$schema_id" \
+    --arg status "$status" \
+    --argjson rc "$rc" \
+    '{
+      schema: { id: $schema_id, major: 1, minor: 0 },
+      generated_at_utc: "2026-01-01T00:00:00Z",
+      status: $status,
+      rc: $rc
+    }' >"$path"
 }
 
 to_windows_path_if_supported() {
@@ -179,6 +237,7 @@ if ! jq -e --arg summary1 "$SUMMARY1" --arg reports1 "$REPORTS1" --arg archive_r
   and .summary.copied_total >= 7
   and .summary.missing_total == 0
   and .summary.copy_error_total == 0
+  and .summary.artifact_contract_error_total == 0
   and .summary.missing_family_count == 0
   and .artifacts.summary_json == $summary1
   and .artifacts.reports_dir == $reports1
@@ -189,6 +248,153 @@ if ! jq -e --arg summary1 "$SUMMARY1" --arg reports1 "$REPORTS1" --arg archive_r
 ' "$SUMMARY1" >/dev/null; then
   echo "case success/all scope assertions failed"
   cat "$SUMMARY1"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-archive-run] case: legacy profile signoff without schema remains valid"
+CASE_LEGACY_DIR="$TMP_DIR/case_legacy_profile_signoff"
+REPORTS_LEGACY="$CASE_LEGACY_DIR/reports"
+ARCHIVE_ROOT_LEGACY="$CASE_LEGACY_DIR/archive_root"
+SUMMARY_LEGACY="$CASE_LEGACY_DIR/archive_summary.json"
+ROADMAP_LEGACY="$CASE_LEGACY_DIR/roadmap_summary.json"
+LEGACY_SIGNOFF="$CASE_LEGACY_DIR/artifacts/profile_compare_campaign_signoff_summary.json"
+mkdir -p "$REPORTS_LEGACY" "$ARCHIVE_ROOT_LEGACY" "$(dirname "$LEGACY_SIGNOFF")"
+
+jq -n '{version: 1, generated_at_utc: "2026-01-01T00:00:00Z", status: "ok", final_rc: 0}' >"$LEGACY_SIGNOFF"
+jq -n --arg signoff "$LEGACY_SIGNOFF" '{
+  status: "pass",
+  rc: 0,
+  artifacts: {
+    profile_compare_signoff_summary_json: $signoff
+  }
+}' >"$ROADMAP_LEGACY"
+
+bash ./scripts/roadmap_live_evidence_archive_run.sh \
+  --reports-dir "$REPORTS_LEGACY" \
+  --roadmap-summary-json "$ROADMAP_LEGACY" \
+  --archive-root "$ARCHIVE_ROOT_LEGACY" \
+  --scope profile-default \
+  --summary-json "$SUMMARY_LEGACY" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .failure_substep == null
+  and .summary.copied_total == 1
+  and .summary.artifact_contract_error_total == 0
+  and ([.family_results[] | select(.family == "profile-default")][0].copied | length) == 1
+' "$SUMMARY_LEGACY" >/dev/null; then
+  echo "case legacy profile signoff assertions failed"
+  cat "$SUMMARY_LEGACY"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-archive-run] case: invalid artifact contracts fail closed"
+CASE_CONTRACT_DIR="$TMP_DIR/case_invalid_artifact_contracts"
+REPORTS_CONTRACT="$CASE_CONTRACT_DIR/reports"
+ARCHIVE_ROOT_CONTRACT="$CASE_CONTRACT_DIR/archive_root"
+SUMMARY_CONTRACT="$CASE_CONTRACT_DIR/archive_summary.json"
+ROADMAP_CONTRACT="$CASE_CONTRACT_DIR/roadmap_summary.json"
+mkdir -p "$REPORTS_CONTRACT" "$ARCHIVE_ROOT_CONTRACT" "$CASE_CONTRACT_DIR/artifacts"
+
+BAD_MISSING_SCHEMA_ARTIFACT="$CASE_CONTRACT_DIR/artifacts/runtime_actuation_missing_schema.json"
+BAD_SCHEMA_ARTIFACT="$CASE_CONTRACT_DIR/artifacts/runtime_actuation_bad_schema.json"
+BAD_MISSING_STATUS_ARTIFACT="$CASE_CONTRACT_DIR/artifacts/runtime_actuation_missing_status.json"
+BAD_STATUS_ARTIFACT="$CASE_CONTRACT_DIR/artifacts/runtime_actuation_bad_status.json"
+BAD_MISSING_RC_ARTIFACT="$CASE_CONTRACT_DIR/artifacts/runtime_actuation_missing_rc.json"
+BAD_RC_ARTIFACT="$CASE_CONTRACT_DIR/artifacts/runtime_actuation_bad_rc.json"
+BAD_JSON_ARTIFACT="$CASE_CONTRACT_DIR/artifacts/runtime_actuation_bad_json.json"
+
+jq -n '{status: "pass", rc: 0}' >"$BAD_MISSING_SCHEMA_ARTIFACT"
+jq -n '{schema: {id: "unexpected_runtime_artifact_summary"}, status: "pass", rc: 0}' >"$BAD_SCHEMA_ARTIFACT"
+jq -n '{schema: {id: "runtime_actuation_promotion_cycle_summary"}, rc: 0}' >"$BAD_MISSING_STATUS_ARTIFACT"
+jq -n '{schema: {id: "runtime_actuation_promotion_evidence_pack_summary"}, status: "fail", rc: 0}' >"$BAD_STATUS_ARTIFACT"
+jq -n '{schema: {id: "runtime_actuation_promotion_cycle_summary"}, status: "pass"}' >"$BAD_MISSING_RC_ARTIFACT"
+jq -n '{schema: {id: "runtime_actuation_promotion_cycle_summary"}, status: "pass", rc: 1}' >"$BAD_RC_ARTIFACT"
+printf '{not-json\n' >"$BAD_JSON_ARTIFACT"
+
+jq -n \
+	  --arg missing_schema "$BAD_MISSING_SCHEMA_ARTIFACT" \
+	  --arg bad_schema "$BAD_SCHEMA_ARTIFACT" \
+	  --arg missing_status "$BAD_MISSING_STATUS_ARTIFACT" \
+	  --arg bad_status "$BAD_STATUS_ARTIFACT" \
+	  --arg missing_rc "$BAD_MISSING_RC_ARTIFACT" \
+	  --arg bad_rc "$BAD_RC_ARTIFACT" \
+	  --arg bad_json "$BAD_JSON_ARTIFACT" \
+  '{
+    status: "pass",
+    rc: 0,
+    artifacts: {
+      runtime_actuation_promotion_summary_json: $bad_schema,
+      runtime_actuation_promotion_evidence_pack_summary_json: $bad_status
+    },
+    next_actions: [
+      {
+        id: "runtime_actuation_promotion",
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + $missing_schema)
+      },
+      {
+        id: "runtime_actuation_promotion",
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + $missing_status)
+      },
+      {
+        id: "runtime_actuation_promotion",
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + $missing_rc)
+      },
+      {
+        id: "runtime_actuation_promotion",
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + $bad_rc)
+      },
+      {
+        id: "runtime_actuation_promotion_evidence_pack",
+        command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + $bad_json)
+      }
+    ]
+  }' >"$ROADMAP_CONTRACT"
+
+set +e
+bash ./scripts/roadmap_live_evidence_archive_run.sh \
+  --reports-dir "$REPORTS_CONTRACT" \
+  --roadmap-summary-json "$ROADMAP_CONTRACT" \
+  --archive-root "$ARCHIVE_ROOT_CONTRACT" \
+  --scope runtime-actuation \
+  --summary-json "$SUMMARY_CONTRACT" \
+  --print-summary-json 0
+contract_rc=$?
+set -e
+if [[ "$contract_rc" != "1" ]]; then
+  echo "case invalid artifact contracts expected rc=1, got rc=$contract_rc"
+  cat "$SUMMARY_CONTRACT"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .failure_substep == "archive_artifact_contract_invalid"
+  and (.reason | contains("contract validation failed"))
+  and .summary.candidate_total == 7
+  and .summary.copied_total == 0
+  and .summary.missing_total == 0
+  and .summary.copy_error_total == 0
+  and .summary.artifact_contract_error_total == 7
+  and (
+    [.family_results[] | select(.family == "runtime-actuation")][0].status == "fail"
+  )
+  and (
+    [.family_results[] | select(.family == "runtime-actuation")][0].artifact_contract_error_count == 7
+  )
+  and (
+    ([.family_results[] | select(.family == "runtime-actuation")][0].artifact_contract_errors | map(.reason) | sort)
+    == ["invalid_json","invalid_status","missing_rc","missing_schema_id","missing_status","rc_nonzero","schema_mismatch"]
+  )
+  and (
+    [.family_results[] | select(.family == "runtime-actuation")][0].copied | length
+  ) == 0
+' "$SUMMARY_CONTRACT" >/dev/null; then
+  echo "case invalid artifact contracts assertions failed"
+  cat "$SUMMARY_CONTRACT"
   exit 1
 fi
 
