@@ -13,7 +13,7 @@ a_operator="${LIVE_BETA_A_OPERATOR:-op-a}"
 a_issuer="${LIVE_BETA_A_ISSUER:-issuer-a}"
 b_user="${LIVE_BETA_B_USER:-stella}"
 b_host="${LIVE_BETA_B_HOST:-100.64.244.24}"
-b_port="${LIVE_BETA_B_PORT:-22}"
+b_port="${LIVE_BETA_B_PORT:-2222}"
 b_repo="${LIVE_BETA_B_REPO:-/home/stella/myfirstproject/trust-tiered decentralized privacy network}"
 b_operator="${LIVE_BETA_B_OPERATOR:-op-b}"
 subject="${LIVE_BETA_SUBJECT:-}"
@@ -38,7 +38,7 @@ Usage:
 
 Defaults target the current two-machine Tailscale lab:
   A: stella@100.113.245.61:2222  repo=/mnt/c/Users/Stella/Downloads/TDPN
-  B: stella@100.64.244.24:22     repo=/home/stella/myfirstproject/trust-tiered decentralized privacy network
+  B: stella@100.64.244.24:2222   repo=/home/stella/myfirstproject/trust-tiered decentralized privacy network
 
 Environment overrides:
   LIVE_BETA_SSH_KEY, LIVE_BETA_BRANCH
