@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in perl; do
+for cmd in git perl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -61,6 +61,19 @@ require_pinned_action() {
 
   echo "action in $file is not pinned to a supported ref format: ${action}@${ref}"
   exit 1
+}
+
+require_tracked_shell_scripts_executable() {
+  local non_executable=""
+  non_executable="$(
+    git ls-files -s -- scripts \
+      | perl -ane 'print "$F[0] $F[3]\n" if ($F[3] =~ m{^scripts/.*\.sh$} && $F[0] ne "100755")'
+  )"
+  if [[ -n "$non_executable" ]]; then
+    echo "tracked shell scripts must be executable on native Linux:"
+    printf '%s\n' "$non_executable"
+    exit 1
+  fi
 }
 
 echo "[security-baseline] checking required files"
@@ -121,5 +134,8 @@ require_match "scripts/ci_local.sh" 'integration_release_tag_verify.sh' "ci_loca
 require_match "scripts/beta_preflight.sh" 'integration_release_tag_verify.sh' "beta_preflight includes release tag verify integration"
 require_match "scripts/ci_local.sh" 'integration_release_policy_gate.sh' "ci_local includes release policy gate integration"
 require_match "scripts/beta_preflight.sh" 'integration_release_policy_gate.sh' "beta_preflight includes release policy gate integration"
+
+echo "[security-baseline] checking native Linux script modes"
+require_tracked_shell_scripts_executable
 
 echo "[security-baseline] ok"
