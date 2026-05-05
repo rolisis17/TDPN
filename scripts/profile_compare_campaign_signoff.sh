@@ -322,7 +322,7 @@ json_endpoint_records_from_lines() {
     sanitized_records+=("${label}"$'\t'"$(sanitize_url_for_artifact "$url")"$'\t'"${host}")
   done
   printf '%s\n' "${sanitized_records[@]}" | jq -R 'select(length > 0) | split("\t") | {
-    label: .[0],
+    "label": .[0],
     url: .[1],
     host: (if ((.[2] // "") == "") then null else .[2] end)
   }' | jq -s .
@@ -340,7 +340,7 @@ json_endpoint_failures_from_lines() {
     sanitized_records+=("${label}"$'\t'"$(sanitize_url_for_artifact "$url")"$'\t'"${host}"$'\t'"${error}")
   done
   printf '%s\n' "${sanitized_records[@]}" | jq -R 'select(length > 0) | split("\t") | {
-    label: .[0],
+    "label": .[0],
     url: .[1],
     host: (if ((.[2] // "") == "") then null else .[2] end),
     error: (if ((.[3] // "") == "") then null else .[3] end)

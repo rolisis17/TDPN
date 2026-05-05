@@ -229,7 +229,7 @@ write_summary() {
       '
         $base + {
           ($id): {
-            label: $label,
+            "label": $label,
             script: $script,
             status: $step_status,
             rc: (if $step_rc == "null" then null else ($step_rc | tonumber) end)

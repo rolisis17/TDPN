@@ -482,7 +482,7 @@ for spec in "${artifact_specs[@]}"; do
         id: $id,
         group: $group,
         pattern: $pattern,
-        label: $label,
+        "label": $label,
         reason: $reason
       }')"
     missing_rows+=("$missing_row")
@@ -576,7 +576,7 @@ for spec in "${artifact_specs[@]}"; do
         id: $id,
         group: $group,
         pattern: $pattern,
-        label: $label,
+        "label": $label,
         source_path: $source_path,
         copied_path: $copied_path,
         json_valid: ($json_valid == "1"),
@@ -617,7 +617,7 @@ ensure_group_action() {
     '{
       id: $id,
       group: $group,
-      label: $label,
+      "label": $label,
       command: $command,
       reason: $reason
     }')"

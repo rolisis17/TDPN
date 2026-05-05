@@ -760,7 +760,7 @@ build_next_action_hints_json() {
         | {
             family: $family,
             id: (.id // ""),
-            label: (.label // ""),
+            "label": (.label // ""),
             command: (.command // ""),
             reason: (.reason // "")
           }
@@ -800,7 +800,7 @@ build_next_action_hints_json() {
       {
         family: $family,
         id: "",
-        label: "Default operator action",
+        "label": "Default operator action",
         command: $command,
         reason: $reason
       }

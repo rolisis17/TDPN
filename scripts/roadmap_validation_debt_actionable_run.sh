@@ -534,7 +534,7 @@ if [[ -z "$selection_error" && "$selected_count" -gt 0 ]]; then
         --argjson duration_sec 0 \
         '{
           id: $id,
-          label: $label,
+          "label": $label,
           focus: $focus,
           script_path: $script_path,
           status: $status,
@@ -561,7 +561,7 @@ if [[ -z "$selection_error" && "$selected_count" -gt 0 ]]; then
         --argjson duration_sec 0 \
         '{
           id: $id,
-          label: $label,
+          "label": $label,
           focus: $focus,
           script_path: $script_path,
           status: $status,
@@ -605,7 +605,7 @@ if [[ -z "$selection_error" && "$selected_count" -gt 0 ]]; then
           --argjson duration_sec "$duration_sec" \
           '{
             id: $id,
-            label: $label,
+            "label": $label,
             focus: $focus,
             script_path: $script_path,
             status: $status,
@@ -646,7 +646,7 @@ if [[ -z "$selection_error" && "$selected_count" -gt 0 ]]; then
         --argjson duration_sec "$duration_sec" \
         '{
           id: $id,
-          label: $label,
+          "label": $label,
           focus: $focus,
           script_path: $script_path,
           status: $status,
@@ -692,7 +692,7 @@ if [[ -z "$selection_error" && "$parallel" == "1" ]]; then
           --argjson duration_sec 0 \
           '{
             id: $id,
-            label: $label,
+            "label": $label,
             focus: $focus,
             script_path: $script_path,
             status: $status,
@@ -742,7 +742,7 @@ if [[ -z "$selection_error" ]]; then
         --argjson duration_sec 0 \
         '{
           id: $id,
-          label: $label,
+          "label": $label,
           focus: $focus,
           script_path: $script_path,
           status: $status,
@@ -862,7 +862,7 @@ jq -n \
     checks_catalog: [
       {
         id: "m1_client_3hop_runtime",
-        label: "M1 client 3-hop runtime validation",
+        "label": "M1 client 3-hop runtime validation",
         focus: "m1",
         default_script_rel: $default_client_3hop_rel,
         resolved_script_path: $default_client_3hop_path,
@@ -870,7 +870,7 @@ jq -n \
       },
       {
         id: "m1_roadmap_progress_report_contract",
-        label: "M1 roadmap progress report contract validation",
+        "label": "M1 roadmap progress report contract validation",
         focus: "m1",
         default_script_rel: $default_roadmap_rel,
         resolved_script_path: $default_roadmap_path,
@@ -878,7 +878,7 @@ jq -n \
       },
       {
         id: "m3_micro_relay_operator_floor",
-        label: "M3 micro-relay operator-floor validation",
+        "label": "M3 micro-relay operator-floor validation",
         focus: "m3_micro_relay",
         default_script_rel: $default_micro_relay_rel,
         resolved_script_path: $default_micro_relay_path,
@@ -886,7 +886,7 @@ jq -n \
       },
       {
         id: "m3_three_machine_real_host_validation_pack",
-        label: "M3 three-machine real-host validation pack contract",
+        "label": "M3 three-machine real-host validation pack contract",
         focus: "m3_validation_pack",
         default_script_rel: $default_m3_validation_pack_rel,
         resolved_script_path: $default_m3_validation_pack_path,

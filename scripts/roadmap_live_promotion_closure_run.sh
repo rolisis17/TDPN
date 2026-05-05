@@ -892,7 +892,7 @@ for track_id in "${track_ids[@]}"; do
       --argjson failure_codes "$runtime_failure_codes_json" \
       '{
         track_id: $track_id,
-        label: $label,
+        "label": $label,
         failure_substep: $failure_substep,
         failure_reason: (if $failure_reason == "" then null else $failure_reason end),
         unresolved_required_inputs: $unresolved_required_inputs,
@@ -1219,7 +1219,7 @@ for track_id in "${track_ids[@]}"; do
     --argjson runtime_preflight_failure_codes "$runtime_preflight_failure_codes_json_value" \
     '{
       track_id: $track_id,
-      label: $label,
+      "label": $label,
       status: $status,
       rc: $rc,
       executed: ($executed == 1),

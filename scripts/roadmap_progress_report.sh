@@ -9026,7 +9026,7 @@ pending_real_host_checks_json="$(jq -c '
         | select((.check_id == "machine_c_vpn_smoke" or .check_id == "three_machine_prod_signoff") and (.status != "pass" and .status != "skip"))
         | {
             check_id: .check_id,
-            label: .label,
+            "label": .label,
             status: .status,
             command: .command,
             notes: .notes
@@ -9039,7 +9039,7 @@ pending_real_host_checks_json="$(jq -c '
         | select(. == "machine_c_vpn_smoke" or . == "three_machine_prod_signoff")
         | {
             check_id: .,
-            label: (if . == "machine_c_vpn_smoke" then "Machine C VPN smoke test" else "True 3-machine production signoff" end),
+            "label": (if . == "machine_c_vpn_smoke" then "Machine C VPN smoke test" else "True 3-machine production signoff" end),
             status: "pending",
             command: (
               if . == "machine_c_vpn_smoke" then
@@ -10980,85 +10980,85 @@ non_blockchain_actionable_no_sudo_or_github_json="$(
     '[
       (if $phase0_ci_script_exists and $phase0_product_surface_needs_attention then {
         id: "phase0_product_surface_gate",
-        label: "Phase-0 product surface gate",
+        "label": "Phase-0 product surface gate",
         command: "bash ./scripts/ci_phase0.sh --print-summary-json 1",
         reason: ($phase0_reason + " (status=" + (($phase0_status // "missing") | tostring) + ")")
       } else empty end),
       (if $phase1_handoff_run_script_exists and $phase1_needs_attention then {
         id: "phase1_resilience_handoff_run_dry",
-        label: "Phase-1 resilience handoff (dry-run)",
+        "label": "Phase-1 resilience handoff (dry-run)",
         command: "bash ./scripts/phase1_resilience_handoff_run.sh --dry-run 1 --print-summary-json 1",
         reason: (if (($phase1_reason // "") | tostring) == "" then ("phase1_resilience_handoff status=" + (($phase1_status // "missing") | tostring)) else $phase1_reason end)
       } else empty end),
       (if $phase1_completed and $phase2_handoff_run_script_exists and $phase2_needs_attention then {
         id: "phase2_linux_prod_candidate_handoff_run_dry",
-        label: "Phase-2 Linux prod candidate handoff (dry-run)",
+        "label": "Phase-2 Linux prod candidate handoff (dry-run)",
         command: "bash ./scripts/phase2_linux_prod_candidate_handoff_run.sh --dry-run 1 --print-summary-json 1",
         reason: $phase2_reason
       } else empty end),
       (if $phase2_completed and $phase3_handoff_run_script_exists and $phase3_needs_attention then {
         id: "phase3_windows_client_beta_handoff_run_dry",
-        label: "Phase-3 Windows client beta handoff (dry-run)",
+        "label": "Phase-3 Windows client beta handoff (dry-run)",
         command: "bash ./scripts/phase3_windows_client_beta_handoff_run.sh --dry-run 1 --print-summary-json 1",
         reason: $phase3_reason
       } else empty end),
       (if $phase3_completed and $phase4_handoff_run_script_exists and $phase4_needs_attention then {
         id: "phase4_windows_full_parity_handoff_run_dry",
-        label: "Phase-4 Windows full parity handoff (dry-run)",
+        "label": "Phase-4 Windows full parity handoff (dry-run)",
         command: "bash ./scripts/phase4_windows_full_parity_handoff_run.sh --dry-run 1 --print-summary-json 1",
         reason: $phase4_reason
       } else empty end),
       (if $integration_ci_phase1_resilience_script_exists then {
         id: "integration_ci_phase1_resilience",
-        label: "Phase-1 gate contract",
+        "label": "Phase-1 gate contract",
         command: "bash ./scripts/integration_ci_phase1_resilience.sh",
         reason: "validates non-blockchain Phase-1 wrapper contracts"
       } else empty end),
       (if $integration_phase1_resilience_handoff_check_script_exists then {
         id: "integration_phase1_resilience_handoff_check",
-        label: "Phase-1 handoff check contract",
+        "label": "Phase-1 handoff check contract",
         command: "bash ./scripts/integration_phase1_resilience_handoff_check.sh",
         reason: "validates handoff fail-closed summary contract"
       } else empty end),
       (if $integration_phase1_resilience_handoff_run_script_exists then {
         id: "integration_phase1_resilience_handoff_run",
-        label: "Phase-1 handoff run contract",
+        "label": "Phase-1 handoff run contract",
         command: "bash ./scripts/integration_phase1_resilience_handoff_run.sh",
         reason: "validates run/check orchestration contract"
       } else empty end),
       (if $integration_roadmap_progress_resilience_handoff_script_exists then {
         id: "integration_roadmap_progress_resilience_handoff",
-        label: "Roadmap resilience ingestion contract",
+        "label": "Roadmap resilience ingestion contract",
         command: "bash ./scripts/integration_roadmap_progress_resilience_handoff.sh",
         reason: "validates resilience handoff ingestion in roadmap report"
       } else empty end),
       (if $integration_roadmap_progress_report_script_exists then {
         id: "integration_roadmap_progress_report",
-        label: "Roadmap report contract",
+        "label": "Roadmap report contract",
         command: "bash ./scripts/integration_roadmap_progress_report.sh",
         reason: "validates roadmap summary/report contract end-to-end"
       } else empty end),
       (if $integration_roadmap_non_blockchain_actionable_run_script_exists then {
         id: "integration_roadmap_non_blockchain_actionable_run",
-        label: "Roadmap non-blockchain actionable run contract",
+        "label": "Roadmap non-blockchain actionable run contract",
         command: "bash ./scripts/integration_roadmap_non_blockchain_actionable_run.sh",
         reason: "validates roadmap non-blockchain actionable runner contract"
       } else empty end),
       (if $integration_easy_node_roadmap_non_blockchain_actionable_run_script_exists then {
         id: "integration_easy_node_roadmap_non_blockchain_actionable_run",
-        label: "Easy-node roadmap non-blockchain actionable contract",
+        "label": "Easy-node roadmap non-blockchain actionable contract",
         command: "bash ./scripts/integration_easy_node_roadmap_non_blockchain_actionable_run.sh",
         reason: "validates easy_node roadmap non-blockchain actionable wrapper contract"
       } else empty end),
       (if $integration_roadmap_next_actions_run_script_exists then {
         id: "integration_roadmap_next_actions_run",
-        label: "Roadmap next-actions run contract",
+        "label": "Roadmap next-actions run contract",
         command: "bash ./scripts/integration_roadmap_next_actions_run.sh",
         reason: "validates roadmap next-actions runner contract"
       } else empty end),
       (if $integration_easy_node_roadmap_next_actions_run_script_exists then {
         id: "integration_easy_node_roadmap_next_actions_run",
-        label: "Easy-node roadmap next-actions contract",
+        "label": "Easy-node roadmap next-actions contract",
         command: "bash ./scripts/integration_easy_node_roadmap_next_actions_run.sh",
         reason: "validates easy_node roadmap next-actions wrapper contract"
       } else empty end)
@@ -11317,13 +11317,13 @@ next_actions_candidate_json="$(
   [
     (if ($next_action_command // "") != "" then {
       id: (if ($next_action_check_id // "") != "" then $next_action_check_id else "next_action" end),
-      label: (if ($next_action_label // "") != "" then $next_action_label elif ($next_action_check_id // "") != "" then $next_action_check_id else "Next action" end),
+      "label": (if ($next_action_label // "") != "" then $next_action_label elif ($next_action_check_id // "") != "" then $next_action_check_id else "Next action" end),
       command: $next_action_command,
       reason: "primary roadmap gate"
     } + primary_real_host_metadata else empty end),
     (if ($profile_default_gate_live_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true and ($profile_default_gate_next_command // "") != "") then {
       id: "profile_default_gate",
-      label: "Profile default decision gate",
+      "label": "Profile default decision gate",
       command: $profile_default_gate_next_command,
       reason: (if ($profile_default_gate_next_command_reason // "") != "" then $profile_default_gate_next_command_reason else "non-blocking profile default decision" end),
       placeholder_unresolved: $profile_default_gate_next_command_has_unresolved_placeholders,
@@ -11331,121 +11331,121 @@ next_actions_candidate_json="$(
     } + action_evidence_metadata(["profile-default"]; true; false; ["live-evidence"]) else empty end),
     (if ($multi_vm_stability_live_action_ready == true and ($multi_vm_stability_next_command // "") != "") then {
       id: "profile_compare_multi_vm_stability",
-      label: "Profile compare multi-VM stability cycle",
+      "label": "Profile compare multi-VM stability cycle",
       command: $multi_vm_stability_next_command,
       reason: (if ($multi_vm_stability_next_command_reason // "") != "" then $multi_vm_stability_next_command_reason else "multi-VM stability evidence requires refresh; rerun stability cycle and review check summary" end)
     } + action_evidence_metadata(["multi-vm"]; true; false; ["live-evidence"]) else empty end),
     (if ($multi_vm_stability_promotion_live_action_ready == true and $profile_compare_multi_vm_live_and_pack_bundle_ready != true and ($multi_vm_stability_promotion_next_command // "") != "") then {
       id: "profile_compare_multi_vm_stability_promotion",
-      label: "Profile compare multi-VM stability promotion cycle",
+      "label": "Profile compare multi-VM stability promotion cycle",
       command: $multi_vm_stability_promotion_next_command,
       reason: (if ($multi_vm_stability_promotion_next_command_reason // "") != "" then $multi_vm_stability_promotion_next_command_reason else "multi-VM stability promotion evidence requires refresh; rerun promotion cycle" end)
     } + action_evidence_metadata(["multi-vm"]; true; false; ["live-evidence"]) else empty end),
     (if ($runtime_actuation_promotion_live_action_ready == true and $runtime_actuation_live_and_pack_bundle_ready != true and ($runtime_actuation_promotion_next_command // "") != "") then {
       id: "runtime_actuation_promotion",
-      label: "Runtime-actuation promotion cycle",
+      "label": "Runtime-actuation promotion cycle",
       command: $runtime_actuation_promotion_next_command,
       reason: (if ($runtime_actuation_promotion_next_command_reason // "") != "" then $runtime_actuation_promotion_next_command_reason else "runtime-actuation promotion evidence requires refresh; rerun promotion cycle" end)
     } + action_evidence_metadata(["runtime-actuation"]; true; false; ["live-evidence"]) else empty end),
     (if ($profile_default_gate_live_and_pack_bundle_ready == true) then {
       id: "profile_default_gate_live_evidence_publish_bundle",
-      label: "Profile default live+publish bundle",
+      "label": "Profile default live+publish bundle",
       command: "./scripts/easy_node.sh profile-default-gate-live-evidence-publish-bundle --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "profile-default live gate and evidence-pack publish are both pending; run the bundled orchestrator"
     } + action_evidence_metadata(["profile-default"]; true; false; ["live-evidence","evidence-pack"]) else empty end),
     (if ($runtime_actuation_live_and_pack_bundle_ready == true) then {
       id: "runtime_actuation_live_evidence_publish_bundle",
-      label: "Runtime-actuation live+publish bundle",
+      "label": "Runtime-actuation live+publish bundle",
       command: "./scripts/easy_node.sh runtime-actuation-live-evidence-publish-bundle --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "runtime-actuation live gate and evidence-pack publish are both pending; run the bundled orchestrator"
     } + action_evidence_metadata(["runtime-actuation"]; true; false; ["live-evidence","evidence-pack"]) else empty end),
     (if ($profile_compare_multi_vm_live_and_pack_bundle_ready == true) then {
       id: "profile_compare_multi_vm_live_evidence_publish_bundle",
-      label: "Multi-VM live+publish bundle",
+      "label": "Multi-VM live+publish bundle",
       command: "./scripts/easy_node.sh profile-compare-multi-vm-live-evidence-publish-bundle --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "multi-VM live gate and evidence-pack publish are both pending; run the bundled orchestrator"
     } + action_evidence_metadata(["multi-vm"]; true; false; ["live-evidence","evidence-pack"]) else empty end),
     (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0) then {
       id: "roadmap_live_evidence_actionable_run",
-      label: "Roadmap live-evidence actionable run",
+      "label": "Roadmap live-evidence actionable run",
       command: "./scripts/easy_node.sh roadmap-live-evidence-actionable-run --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "batch-run pending live evidence cycle actions"
     } + action_evidence_metadata(pending_live_evidence_families_after_bundle; true; false; ["live-evidence"]) else empty end),
     (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0 and $live_evidence_cycle_batch_helper_available == true) then {
       id: "roadmap_live_evidence_cycle_batch_run",
-      label: "Roadmap live-evidence cycle-batch run",
+      "label": "Roadmap live-evidence cycle-batch run",
       command: "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "repeat pending live evidence cycles across tracks in one helper run"
     } + action_evidence_metadata(pending_live_evidence_families_after_bundle; true; false; ["live-evidence"]) else empty end),
     (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0 and $live_evidence_archive_helper_available == true) then {
       id: "roadmap_live_evidence_archive_run",
-      label: "Roadmap live-evidence archive run",
+      "label": "Roadmap live-evidence archive run",
       command: "./scripts/easy_node.sh roadmap-live-evidence-archive-run --reports-dir .easy-node-logs --summary-json .easy-node-logs/roadmap_live_evidence_archive_run_summary.json --print-summary-json 1",
       reason: "archive current live evidence artifacts before rerunning cycles"
     } + action_evidence_metadata(pending_live_evidence_families_after_bundle; false; true; ["archive"]) else empty end),
     (if ($three_machine_real_host_validation_pack_signoff_pending == true and $three_machine_real_host_validation_pack_helper_available == true) then {
       id: "three_machine_real_host_validation_pack",
-      label: "Three-machine real-host validation pack",
+      "label": "Three-machine real-host validation pack",
       command: "./scripts/easy_node.sh three-machine-real-host-validation-pack --reports-dir .easy-node-logs --summary-json .easy-node-logs/three_machine_real_host_validation_pack_summary.json --print-summary-json 1",
       reason: "package current three-machine validation evidence while real-host signoff is still pending"
     } + action_evidence_metadata(["three-machine-real-host"]; false; true; ["archive","real-host"]) else empty end),
     (if ($profile_default_gate_evidence_pack_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true and ($profile_default_gate_evidence_pack_next_command // "") != "") then {
       id: "profile_default_gate_evidence_pack",
-      label: "Profile default evidence-pack publish",
+      "label": "Profile default evidence-pack publish",
       command: $profile_default_gate_evidence_pack_next_command,
       reason: (if ($profile_default_gate_evidence_pack_next_command_reason // "") != "" then $profile_default_gate_evidence_pack_next_command_reason else "profile-default evidence-pack requires refresh/publish" end)
     } + action_evidence_metadata(["profile-default"]; false; true; ["evidence-pack"]) else empty end),
     (if ($runtime_actuation_promotion_evidence_pack_action_ready == true and $runtime_actuation_live_and_pack_bundle_ready != true and ($runtime_actuation_promotion_evidence_pack_next_command // "") != "") then {
       id: "runtime_actuation_promotion_evidence_pack",
-      label: "Runtime-actuation evidence-pack publish",
+      "label": "Runtime-actuation evidence-pack publish",
       command: $runtime_actuation_promotion_evidence_pack_next_command,
       reason: (if ($runtime_actuation_promotion_evidence_pack_next_command_reason // "") != "" then $runtime_actuation_promotion_evidence_pack_next_command_reason else "runtime-actuation evidence-pack requires refresh/publish" end)
     } + action_evidence_metadata(["runtime-actuation"]; false; true; ["evidence-pack"]) else empty end),
     (if ($multi_vm_stability_promotion_evidence_pack_action_ready == true and $profile_compare_multi_vm_live_and_pack_bundle_ready != true and ($multi_vm_stability_promotion_evidence_pack_next_command // "") != "") then {
       id: "profile_compare_multi_vm_stability_promotion_evidence_pack",
-      label: "Multi-VM promotion evidence-pack publish",
+      "label": "Multi-VM promotion evidence-pack publish",
       command: $multi_vm_stability_promotion_evidence_pack_next_command,
       reason: (if ($multi_vm_stability_promotion_evidence_pack_next_command_reason // "") != "" then $multi_vm_stability_promotion_evidence_pack_next_command_reason else "multi-VM promotion evidence-pack requires refresh/publish" end)
     } + action_evidence_metadata(["multi-vm"]; false; true; ["evidence-pack"]) else empty end),
     (if ($next_actions_evidence_pack_pending_action_count_after_bundle > 0) then {
       id: "roadmap_evidence_pack_actionable_run",
-      label: "Roadmap evidence-pack actionable run",
+      "label": "Roadmap evidence-pack actionable run",
       command: "./scripts/easy_node.sh roadmap-evidence-pack-actionable-run --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "batch-run pending evidence-pack publish actions"
     } + action_evidence_metadata(pending_evidence_pack_families_after_bundle; false; true; ["evidence-pack"]) else empty end),
     (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0 and $next_actions_evidence_pack_pending_action_count_after_bundle > 0) then {
       id: "roadmap_live_and_pack_actionable_run",
-      label: "Roadmap live+pack actionable run",
+      "label": "Roadmap live+pack actionable run",
       command: "./scripts/easy_node.sh roadmap-live-and-pack-actionable-run --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "live-evidence cycles and evidence-pack publishes are both pending; run the combined orchestrator"
     } + action_evidence_metadata(pending_live_and_pack_families_after_bundle; true; false; ["live-evidence","evidence-pack"]) else empty end),
     (if ($blockchain_mainnet_activation_missing_metrics_action_available == true and (($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") != "" or ($blockchain_mainnet_activation_missing_metrics_action_operator_pack_command // "") != "")) then {
       id: "blockchain_mainnet_activation_missing_metrics",
-      label: (if ($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") != "" then "Blockchain missing-metrics real-evidence run" else "Blockchain missing-metrics operator pack" end),
+      "label": (if ($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") != "" then "Blockchain missing-metrics real-evidence run" else "Blockchain missing-metrics operator pack" end),
       command: (if ($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") != "" then $blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command else $blockchain_mainnet_activation_missing_metrics_action_operator_pack_command end),
       reason: (if ($blockchain_mainnet_activation_missing_metrics_action_reason // "") != "" then $blockchain_mainnet_activation_missing_metrics_action_reason else "mainnet activation metrics evidence is missing/invalid; run the real evidence flow" end)
     } else empty end),
     (if ($blockchain_mainnet_activation_refresh_evidence_available == true and ($blockchain_mainnet_activation_refresh_evidence_command // "") != "") then {
       id: "blockchain_mainnet_activation_refresh_evidence",
-      label: "Blockchain mainnet activation refresh evidence",
+      "label": "Blockchain mainnet activation refresh evidence",
       command: $blockchain_mainnet_activation_refresh_evidence_command,
       reason: (if ($blockchain_mainnet_activation_refresh_evidence_reason // "") != "" then $blockchain_mainnet_activation_refresh_evidence_reason else "stale activation evidence; refresh before trusting the GO signal" end)
     } else empty end),
     (if ($blockchain_mainnet_activation_missing_metrics_action_available == true and ($blockchain_mainnet_activation_missing_metrics_action_prefill_command // "") != "") then {
       id: "blockchain_mainnet_activation_missing_metrics_prefill",
-      label: "Blockchain missing-metrics prefill",
+      "label": "Blockchain missing-metrics prefill",
       command: $blockchain_mainnet_activation_missing_metrics_action_prefill_command,
       reason: (if ($blockchain_mainnet_activation_missing_metrics_action_reason // "") != "" then $blockchain_mainnet_activation_missing_metrics_action_reason else "mainnet activation metrics evidence is missing/invalid; prefill the operator input" end)
     } else empty end),
     (if ((.summary.docker_rehearsal_gate.status // "pending") != "pass" and (.summary.docker_rehearsal_gate.status // "pending") != "skip" and ((.summary.docker_rehearsal_gate.next_command // .summary.docker_rehearsal_gate.command // "") != "")) then {
       id: "three_machine_docker_readiness",
-      label: "One-host docker 3-machine rehearsal",
+      "label": "One-host docker 3-machine rehearsal",
       command: (.summary.docker_rehearsal_gate.next_command // .summary.docker_rehearsal_gate.command // ""),
       reason: "one-host confidence gate"
     } else empty end),
     (if ((.summary.real_wg_privileged_gate.status // "pending") != "pass" and (.summary.real_wg_privileged_gate.status // "pending") != "skip" and ((.summary.real_wg_privileged_gate.next_command // .summary.real_wg_privileged_gate.command // "") != "")) then {
       id: "real_wg_privileged_matrix",
-      label: "Linux root real-WG privileged matrix",
+      "label": "Linux root real-WG privileged matrix",
       command: (.summary.real_wg_privileged_gate.next_command // .summary.real_wg_privileged_gate.command // ""),
       reason: "one-host dataplane confidence gate"
     } else empty end)
@@ -11480,7 +11480,7 @@ next_actions_remediation_json="$(
     [
       (if ($profile_default_gate_placeholder_remediation_available == true and ($profile_default_gate_placeholder_remediation_command // "") != "") then {
         id: "profile_default_gate_placeholder_remediation",
-        label: "Profile default placeholder remediation",
+        "label": "Profile default placeholder remediation",
         remediation_command: $profile_default_gate_placeholder_remediation_command,
         reason: (if ($profile_default_gate_placeholder_remediation_reason // "") != "" then $profile_default_gate_placeholder_remediation_reason else "profile-default next command is blocked by unresolved placeholders" end),
         remediates: "vpn_track.profile_default_gate.next_command",
@@ -12345,7 +12345,7 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
       pending_real_host_checks: $pending_real_host_checks,
       next_action: {
         check_id: $next_action_check_id,
-        label: $next_action_label,
+        "label": $next_action_label,
         command: $next_action_command_raw
       },
       profile_default_gate: {

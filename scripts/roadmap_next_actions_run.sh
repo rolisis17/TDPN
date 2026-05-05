@@ -2474,7 +2474,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       --argjson timeout_sec "$action_timeout_sec_effective" \
       '{
         id: $id,
-        label: $label,
+        "label": $label,
         reason: $reason,
         command: $command,
         status: $status,
@@ -2503,7 +2503,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       --argjson timeout_sec "$action_timeout_sec_effective" \
       '{
         id: $id,
-        label: $label,
+        "label": $label,
         reason: $reason,
         command: $command,
         status: $status,
@@ -2558,7 +2558,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
           --argjson timeout_sec "$action_timeout_sec_effective" \
           '{
             id: $id,
-            label: $label,
+            "label": $label,
             reason: $reason,
             command: $command,
             status: $status,
@@ -2612,7 +2612,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         --argjson timeout_sec "$action_timeout_sec_effective" \
         '{
           id: $id,
-          label: $label,
+          "label": $label,
           reason: $reason,
           command: $command,
           status: $status,
@@ -2660,7 +2660,7 @@ if [[ "$parallel" == "1" ]]; then
           --argjson timeout_sec "$action_timeout_sec_effective" \
           '{
             id: $id,
-            label: $label,
+            "label": $label,
             reason: $reason,
             command: $command,
             status: $status,
@@ -2703,7 +2703,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       --argjson timeout_sec "$action_timeout_sec_effective" \
       '{
         id: $id,
-        label: $label,
+        "label": $label,
         reason: $reason,
         command: $command,
         status: $status,

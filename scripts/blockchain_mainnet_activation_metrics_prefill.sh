@@ -364,7 +364,7 @@ for idx in "${!source_paths[@]}"; do
       --argjson usable "$usable" \
       --arg status "$status" \
       '{
-        label: $label,
+        "label": $label,
         path: $path,
         exists: ($exists == 1),
         valid_json: ($valid_json == 1),

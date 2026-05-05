@@ -226,13 +226,13 @@ jq -n \
     next_actions: [
       {
         id: "runtime_actuation_promotion",
-        label: "Runtime actuation promotion",
+        "label": "Runtime actuation promotion",
         command: ("./scripts/easy_node.sh runtime-actuation-promotion-cycle --summary-json " + $r_promo),
         reason: "refresh runtime evidence"
       },
       {
         id: "runtime_actuation_promotion_evidence_pack",
-        label: "Runtime actuation evidence pack",
+        "label": "Runtime actuation evidence pack",
         command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + $r_pack),
         reason: "publish runtime evidence pack"
       }
@@ -788,7 +788,7 @@ jq -n \
     next_actions: [
       {
         id: "runtime_actuation_promotion_evidence_pack",
-        label: "Runtime actuation evidence pack",
+        "label": "Runtime actuation evidence pack",
         command: ("./scripts/easy_node.sh runtime-actuation-promotion-evidence-pack --summary-json " + $r_pack_missing + " && echo unsafe"),
         reason: "publish runtime evidence pack"
       }

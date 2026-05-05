@@ -506,7 +506,7 @@ build_runtime_hygiene_check_json() {
       --argjson runtime_incident_handoff "$runtime_incident_handoff_json" \
       '{
         check_id: "runtime_hygiene",
-        label: "Runtime hygiene doctor",
+        "label": "Runtime hygiene doctor",
         status: $runtime_status,
         notes: $runtime_notes,
         command: $runtime_command,

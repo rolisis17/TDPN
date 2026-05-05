@@ -813,7 +813,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       --argjson allow_policy_no_go_applied "$action_allow_policy_no_go_applied" \
       '{
         id: $id,
-        label: $label,
+        "label": $label,
         reason: $reason,
         command: $command,
         allow_policy_no_go_applied: $allow_policy_no_go_applied,
@@ -870,7 +870,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
           --argjson allow_policy_no_go_applied "$action_allow_policy_no_go_applied" \
           '{
             id: $id,
-            label: $label,
+            "label": $label,
             reason: $reason,
             command: $command,
             allow_policy_no_go_applied: $allow_policy_no_go_applied,
@@ -926,7 +926,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         --argjson allow_policy_no_go_applied "$action_allow_policy_no_go_applied" \
         '{
           id: $id,
-          label: $label,
+          "label": $label,
           reason: $reason,
           command: $command,
           allow_policy_no_go_applied: $allow_policy_no_go_applied,
@@ -976,7 +976,7 @@ if [[ "$parallel" == "1" ]]; then
           --argjson allow_policy_no_go_applied "$action_allow_policy_no_go_applied" \
           '{
             id: $id,
-            label: $label,
+            "label": $label,
             reason: $reason,
             command: $command,
             allow_policy_no_go_applied: $allow_policy_no_go_applied,
@@ -1021,7 +1021,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       --argjson allow_policy_no_go_applied "$action_allow_policy_no_go_applied" \
       '{
         id: $id,
-        label: $label,
+        "label": $label,
         reason: $reason,
         command: $command,
         allow_policy_no_go_applied: $allow_policy_no_go_applied,
