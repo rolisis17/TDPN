@@ -94,12 +94,115 @@ generate_strong_token() {
   LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48
 }
 
+base64url_from_file() {
+  local file="$1"
+  openssl base64 -A <"$file" | tr '+/' '-_' | tr -d '=\r\n'
+}
+
+generate_entry_route_assertion_key_with_openssl() {
+  local private_file="$1"
+  local public_file="$2"
+  local tmp_dir pem_file seed_file pub_raw_file private_raw_file seed_size pub_size private_size
+
+  if ! command -v openssl >/dev/null 2>&1; then
+    echo "missing dependency: openssl" >&2
+    return 1
+  fi
+
+  tmp_dir="$(mktemp -d)"
+  pem_file="$tmp_dir/entry_route_assertion.pem"
+  seed_file="$tmp_dir/seed.raw"
+  pub_raw_file="$tmp_dir/public.raw"
+  private_raw_file="$tmp_dir/private.raw"
+
+  if ! openssl genpkey -algorithm Ed25519 -out "$pem_file" >/dev/null 2>&1; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+  if ! openssl pkey -in "$pem_file" -outform DER 2>/dev/null | tail -c 32 >"$seed_file"; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+  if ! openssl pkey -in "$pem_file" -pubout -outform DER 2>/dev/null | tail -c 32 >"$pub_raw_file"; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  seed_size="$(wc -c <"$seed_file" | tr -d '[:space:]')"
+  pub_size="$(wc -c <"$pub_raw_file" | tr -d '[:space:]')"
+  if [[ "$seed_size" != "32" || "$pub_size" != "32" ]]; then
+    echo "openssl Ed25519 key material had unexpected size (seed=$seed_size pub=$pub_size)" >&2
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  cat "$seed_file" "$pub_raw_file" >"$private_raw_file"
+  private_size="$(wc -c <"$private_raw_file" | tr -d '[:space:]')"
+  if [[ "$private_size" != "64" ]]; then
+    echo "openssl Ed25519 private key material had unexpected size (private=$private_size)" >&2
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  (umask 077 && base64url_from_file "$private_raw_file" >"$private_file")
+  base64url_from_file "$pub_raw_file" >"$public_file"
+  rm -rf "$tmp_dir"
+}
+
 need_cmd_path_or_die() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
   fi
+}
+
+generate_entry_route_assertion_key() {
+  local private_file="$1"
+  local public_file="$2"
+  local keygen_mode="${THREE_MACHINE_DOCKER_ENTRY_ROUTE_ASSERTION_KEYGEN:-auto}"
+  local go_err go_rc
+
+  case "$keygen_mode" in
+    auto|go|openssl)
+      ;;
+    *)
+      echo "invalid THREE_MACHINE_DOCKER_ENTRY_ROUTE_ASSERTION_KEYGEN: $keygen_mode (expected auto|go|openssl)"
+      exit 2
+      ;;
+  esac
+
+  rm -f "$private_file" "$public_file"
+  go_err="$(mktemp)"
+  go_rc=1
+  if [[ "$keygen_mode" != "openssl" && -n "$(command -v go 2>/dev/null || true)" ]]; then
+    set +e
+    (umask 077 && go run ./cmd/adminsig gen --private-key-out "$private_file" --public-key-out "$public_file" >/dev/null) 2>"$go_err"
+    go_rc=$?
+    set -e
+  fi
+
+  if ((go_rc != 0)); then
+    rm -f "$private_file" "$public_file"
+    if [[ "$keygen_mode" == "go" ]]; then
+      cat "$go_err" >&2
+      rm -f "$go_err"
+      echo "entry route assertion key generation failed with go" >&2
+      exit 1
+    fi
+    if [[ -s "$go_err" ]]; then
+      echo "note: host Go entry route assertion keygen unavailable; using openssl fallback" >&2
+    fi
+    if ! generate_entry_route_assertion_key_with_openssl "$private_file" "$public_file"; then
+      rm -f "$go_err"
+      echo "entry route assertion key generation failed; install openssl or a Go toolchain that can parse this repo's go.mod" >&2
+      exit 1
+    fi
+  fi
+  rm -f "$go_err"
+  chmod 600 "$private_file" 2>/dev/null || true
+  chmod 600 "$public_file" 2>/dev/null || true
+  tr -d '\r\n[:space:]' <"$public_file"
 }
 
 print_cmd() {
@@ -179,6 +282,8 @@ write_stack_override() {
   local docker_host_alias="$8"
   local directory_admin_token="$9"
   local issuer_admin_token="${10}"
+  local entry_route_assertion_pub="${11}"
+  local trusted_entry_route_assertion_pubs="${12}"
 
   local dir_port issuer_port entry_port exit_port entry_udp_port exit_udp_port peer_dir_port peer_issuer_port
   dir_port="$((base_port + 1))"
@@ -200,6 +305,7 @@ services:
       DIRECTORY_OPERATOR_ID: "${operator_id}"
       ENTRY_RELAY_ID: "entry-${stack_id}"
       EXIT_RELAY_ID: "exit-${stack_id}"
+      ENTRY_ROUTE_ASSERTION_PUBLIC_KEY: "${entry_route_assertion_pub}"
       ENTRY_URL: "http://${docker_host_alias}:${entry_port}"
       EXIT_CONTROL_URL: "http://${docker_host_alias}:${exit_port}"
       ENTRY_ENDPOINT: "${docker_host_alias}:${entry_udp_port}"
@@ -213,6 +319,10 @@ services:
       DIRECTORY_MIN_OPERATORS: "1"
       DIRECTORY_MIN_RELAY_VOTES: "1"
       DIRECTORY_ADMIN_TOKEN: "${directory_admin_token}"
+      DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_PUBLIC_BIND: "1"
+      DIRECTORY_ALLOW_INSECURE_CONTROL_URL_HTTP: "1"
+      DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS: "1"
+      DIRECTORY_ALLOW_DANGEROUS_ISSUER_TRUST_WITHOUT_ANCHORS: "1"
     volumes:
       - "${data_root}/${stack_id}/directory:/app/data"
       - ./tls:/app/tls:ro
@@ -223,6 +333,10 @@ services:
     environment:
       ISSUER_ID: "${issuer_id}"
       ISSUER_ADMIN_TOKEN: "${issuer_admin_token}"
+      ISSUER_ADMIN_ALLOW_TOKEN: "1"
+      ISSUER_ADMIN_REQUIRE_SIGNED: "0"
+      ISSUER_ALLOW_DANGEROUS_INSECURE_TOKEN_AUTH_PUBLIC_BIND: "1"
+      ISSUER_ALLOW_DANGEROUS_PUBLIC_ISSUE_WITHOUT_PAYMENT_PROOF: "1"
     volumes:
       - "${data_root}/${stack_id}/issuer:/app/data"
       - ./tls:/app/tls:ro
@@ -237,12 +351,20 @@ services:
       DIRECTORY_MIN_OPERATORS: "1"
       ISSUER_URL: "http://issuer:8082"
       ISSUER_URLS: "http://${docker_host_alias}:${issuer_port},http://${docker_host_alias}:${peer_issuer_port}"
+      ENTRY_RELAY_ID: "entry-${stack_id}"
+      EXIT_RELAY_ID: "exit-${stack_id}"
       ENTRY_OPERATOR_ID: "${operator_id}"
       EXIT_OPERATOR_ID: "${operator_id}"
       ENTRY_LIVE_WG_MODE: "0"
       EXIT_LIVE_WG_MODE: "0"
       WG_BACKEND: "noop"
       ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR: "0"
+      ENTRY_ALLOW_INSECURE_CONTROL_URL_HTTP: "1"
+      EXIT_ALLOW_INSECURE_CONTROL_URL_HTTP: "1"
+      ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS: "1"
+      EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS: "1"
+      ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE: "/app/data/entry_route_assertion.key"
+      EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS: "${trusted_entry_route_assertion_pubs}"
     volumes:
       - "${data_root}/${stack_id}/entry-exit:/app/data"
       - ./tls:/app/tls:ro
@@ -510,7 +632,15 @@ deploy_dir="${THREE_MACHINE_DOCKER_DEPLOY_DIR:-$ROOT_DIR/deploy}"
 compose_file="${THREE_MACHINE_DOCKER_COMPOSE_FILE:-$deploy_dir/docker-compose.yml}"
 project_a="${THREE_MACHINE_DOCKER_PROJECT_A:-pn3a}"
 project_b="${THREE_MACHINE_DOCKER_PROJECT_B:-pn3b}"
-data_root="$(abs_path "${THREE_MACHINE_DOCKER_DATA_ROOT:-$ROOT_DIR/deploy/data/docker_three_machine}")"
+if [[ -n "${THREE_MACHINE_DOCKER_DATA_ROOT:-}" ]]; then
+  data_root="$(abs_path "$THREE_MACHINE_DOCKER_DATA_ROOT")"
+elif [[ -n "${XDG_STATE_HOME:-}" ]]; then
+  data_root="$(abs_path "$XDG_STATE_HOME/privacynode/docker_three_machine")"
+elif [[ -n "${HOME:-}" ]]; then
+  data_root="$(abs_path "$HOME/.local/state/privacynode/docker_three_machine")"
+else
+  data_root="$(abs_path "$ROOT_DIR/deploy/data/docker_three_machine")"
+fi
 compose_up_max_attempts="${THREE_MACHINE_DOCKER_COMPOSE_UP_MAX_ATTEMPTS:-3}"
 compose_up_initial_backoff_sec="${THREE_MACHINE_DOCKER_COMPOSE_UP_INITIAL_BACKOFF_SEC:-2}"
 
@@ -555,6 +685,7 @@ mkdir -p "$(dirname "$summary_json")"
 
 runtime_dir="$log_dir/three_machine_docker_runtime_${run_stamp}"
 mkdir -p "$runtime_dir"
+chmod 700 "$runtime_dir" 2>/dev/null || true
 override_a="$runtime_dir/compose_stack_a.override.yml"
 override_b="$runtime_dir/compose_stack_b.override.yml"
 env_a="$runtime_dir/compose_stack_a.env"
@@ -608,6 +739,26 @@ compose_down_stack() {
   local override_file="$2"
   local env_file="$3"
   compose_cmd "$project" "$override_file" "$env_file" down --remove-orphans
+}
+
+entry_route_assertion_logs_ok() {
+  local project="$1"
+  local override_file="$2"
+  local env_file="$3"
+  local label="$4"
+  local logs
+
+  if ! logs="$(compose_cmd "$project" "$override_file" "$env_file" logs --no-color entry-exit 2>&1)"; then
+    echo "[route-assertion] $label entry-exit logs unavailable"
+    printf '%s\n' "$logs"
+    return 1
+  fi
+  if printf '%s' "$logs" | rg -qi 'entry route assertion signing disabled'; then
+    echo "[route-assertion] $label entry-exit log reports signing disabled"
+    printf '%s\n' "$logs" | rg -ni -C 2 'entry route assertion signing disabled' || true
+    return 1
+  fi
+  return 0
 }
 
 compose_up_retryable_failure() {
@@ -697,27 +848,73 @@ directory_admin_token_a="${THREE_MACHINE_DOCKER_DIRECTORY_ADMIN_TOKEN_A:-$(gener
 directory_admin_token_b="${THREE_MACHINE_DOCKER_DIRECTORY_ADMIN_TOKEN_B:-$(generate_strong_token)}"
 issuer_admin_token_a="${THREE_MACHINE_DOCKER_ISSUER_ADMIN_TOKEN_A:-$(generate_strong_token)}"
 issuer_admin_token_b="${THREE_MACHINE_DOCKER_ISSUER_ADMIN_TOKEN_B:-$(generate_strong_token)}"
+entry_puzzle_secret_a="${THREE_MACHINE_DOCKER_ENTRY_PUZZLE_SECRET_A:-$(generate_strong_token)}"
+entry_puzzle_secret_b="${THREE_MACHINE_DOCKER_ENTRY_PUZZLE_SECRET_B:-$(generate_strong_token)}"
+entry_exit_user="${THREE_MACHINE_DOCKER_ENTRY_EXIT_USER:-}"
+if [[ -z "$entry_exit_user" ]]; then
+  if command -v id >/dev/null 2>&1; then
+    entry_exit_user="$(id -u):$(id -g)"
+  else
+    entry_exit_user="nodeuser"
+  fi
+fi
 
-write_stack_override "$override_a" "a" "op-docker-a" "issuer-docker-a" "$stack_a_base_port" "$stack_b_base_port" "$data_root" "$docker_host_alias" "$directory_admin_token_a" "$issuer_admin_token_a"
-write_stack_override "$override_b" "b" "op-docker-b" "issuer-docker-b" "$stack_b_base_port" "$stack_a_base_port" "$data_root" "$docker_host_alias" "$directory_admin_token_b" "$issuer_admin_token_b"
+entry_route_assertion_key_a="$data_root/a/entry-exit/entry_route_assertion.key"
+entry_route_assertion_key_b="$data_root/b/entry-exit/entry_route_assertion.key"
+entry_route_assertion_pub_file_a="$runtime_dir/entry_route_assertion_a.key.pub"
+entry_route_assertion_pub_file_b="$runtime_dir/entry_route_assertion_b.key.pub"
+entry_route_assertion_pub_a="$(generate_entry_route_assertion_key "$entry_route_assertion_key_a" "$entry_route_assertion_pub_file_a")"
+entry_route_assertion_pub_b="$(generate_entry_route_assertion_key "$entry_route_assertion_key_b" "$entry_route_assertion_pub_file_b")"
+trusted_entry_route_assertion_pubs="${entry_route_assertion_pub_a},${entry_route_assertion_pub_b}"
+stack_data_plane_mode="json"
+if [[ "$beta_profile" == "1" || "$prod_profile" == "1" ]]; then
+  stack_data_plane_mode="opaque"
+fi
+
+write_stack_override "$override_a" "a" "op-docker-a" "issuer-docker-a" "$stack_a_base_port" "$stack_b_base_port" "$data_root" "$docker_host_alias" "$directory_admin_token_a" "$issuer_admin_token_a" "$entry_route_assertion_pub_a" "$trusted_entry_route_assertion_pubs"
+write_stack_override "$override_b" "b" "op-docker-b" "issuer-docker-b" "$stack_b_base_port" "$stack_a_base_port" "$data_root" "$docker_host_alias" "$directory_admin_token_b" "$issuer_admin_token_b" "$entry_route_assertion_pub_b" "$trusted_entry_route_assertion_pubs"
 
 cat >"$env_a" <<EOF_ENV_A
+DIRECTORY_PUBLISHED_BIND_ADDR=0.0.0.0
+ISSUER_PUBLISHED_BIND_ADDR=0.0.0.0
+ENTRY_PUBLISHED_BIND_ADDR=0.0.0.0
+EXIT_PUBLISHED_BIND_ADDR=0.0.0.0
+ENTRY_UDP_PUBLISHED_BIND_ADDR=0.0.0.0
+EXIT_UDP_PUBLISHED_BIND_ADDR=0.0.0.0
 DIRECTORY_PUBLISHED_PORT=$stack_a_dir_port
 ISSUER_PUBLISHED_PORT=$stack_a_issuer_port
 ENTRY_PUBLISHED_PORT=$stack_a_entry_port
 EXIT_PUBLISHED_PORT=$stack_a_exit_port
 ENTRY_UDP_PUBLISHED_PORT=$stack_a_entry_udp_port
 EXIT_UDP_PUBLISHED_PORT=$stack_a_exit_udp_port
+ENTRY_ENDPOINT_PUBLIC=${docker_host_alias}:$stack_a_entry_udp_port
+EXIT_ENDPOINT_PUBLIC=${docker_host_alias}:$stack_a_exit_udp_port
+ENTRY_PUZZLE_SECRET=$entry_puzzle_secret_a
+DATA_PLANE_MODE=$stack_data_plane_mode
+ENTRY_EXIT_USER=$entry_exit_user
 EOF_ENV_A
 
 cat >"$env_b" <<EOF_ENV_B
+DIRECTORY_PUBLISHED_BIND_ADDR=0.0.0.0
+ISSUER_PUBLISHED_BIND_ADDR=0.0.0.0
+ENTRY_PUBLISHED_BIND_ADDR=0.0.0.0
+EXIT_PUBLISHED_BIND_ADDR=0.0.0.0
+ENTRY_UDP_PUBLISHED_BIND_ADDR=0.0.0.0
+EXIT_UDP_PUBLISHED_BIND_ADDR=0.0.0.0
 DIRECTORY_PUBLISHED_PORT=$stack_b_dir_port
 ISSUER_PUBLISHED_PORT=$stack_b_issuer_port
 ENTRY_PUBLISHED_PORT=$stack_b_entry_port
 EXIT_PUBLISHED_PORT=$stack_b_exit_port
 ENTRY_UDP_PUBLISHED_PORT=$stack_b_entry_udp_port
 EXIT_UDP_PUBLISHED_PORT=$stack_b_exit_udp_port
+ENTRY_ENDPOINT_PUBLIC=${docker_host_alias}:$stack_b_entry_udp_port
+EXIT_ENDPOINT_PUBLIC=${docker_host_alias}:$stack_b_exit_udp_port
+ENTRY_PUZZLE_SECRET=$entry_puzzle_secret_b
+DATA_PLANE_MODE=$stack_data_plane_mode
+ENTRY_EXIT_USER=$entry_exit_user
 EOF_ENV_B
+
+chmod 600 "$override_a" "$override_b" "$env_a" "$env_b" "$entry_route_assertion_pub_file_a" "$entry_route_assertion_pub_file_b" 2>/dev/null || true
 
 echo "[three-machine-docker-readiness] starting local docker rehearsal"
 echo "[three-machine-docker-readiness] stack_a directory=$directory_a_url issuer=$issuer_a_url entry=$entry_url exit=$exit_url"
@@ -760,7 +957,15 @@ if [[ "$status" == "pass" ]]; then
     wait_http_ok "$curl_bin" "${issuer_b_url}/v1/pubkeys" "issuer B" 30 &&
     wait_http_ok "$curl_bin" "${entry_url}/v1/health" "entry A" 30 &&
     wait_http_ok "$curl_bin" "${exit_url}/v1/health" "exit A" 30; then
-    record_step "health" "pass" 0
+    if entry_route_assertion_logs_ok "$project_a" "$override_a" "$env_a" "stack A" &&
+      entry_route_assertion_logs_ok "$project_b" "$override_b" "$env_b" "stack B"; then
+      record_step "health" "pass" 0
+    else
+      status="fail"
+      final_rc=1
+      failed_step="health"
+      record_step "health" "fail" 1 "entry route assertion log check failed"
+    fi
   else
     rc=$?
     status="fail"
@@ -804,7 +1009,7 @@ if [[ "$run_validate" == "1" ]]; then
       validate_cmd+=(--bootstrap-directory "$bootstrap_directory" --discovery-wait-sec "$discovery_wait_sec")
     fi
     validate_cmd_print="$(print_cmd "${validate_cmd[@]}")"
-    if THREE_MACHINE_VALIDATE_REWRITE_LOOPBACK_FOR_DOCKER=1 THREE_MACHINE_DOCKER_HOST_ALIAS="$docker_host_alias" "${validate_cmd[@]}"; then
+    if THREE_MACHINE_CLIENT_INNER_SOURCE="${THREE_MACHINE_CLIENT_INNER_SOURCE:-synthetic}" THREE_MACHINE_VALIDATE_REWRITE_LOOPBACK_FOR_DOCKER=1 THREE_MACHINE_DOCKER_HOST_ALIAS="$docker_host_alias" "${validate_cmd[@]}"; then
       record_step "validate" "pass" 0 "" "$validate_cmd_print"
     else
       rc=$?
@@ -931,7 +1136,7 @@ if [[ "$run_soak" == "1" ]]; then
       soak_cmd+=(--bootstrap-directory "$bootstrap_directory" --discovery-wait-sec "$discovery_wait_sec")
     fi
     soak_cmd_print="$(print_cmd "${soak_cmd[@]}")"
-    if THREE_MACHINE_VALIDATE_REWRITE_LOOPBACK_FOR_DOCKER=1 THREE_MACHINE_DOCKER_HOST_ALIAS="$docker_host_alias" "${soak_cmd[@]}"; then
+    if THREE_MACHINE_CLIENT_INNER_SOURCE="${THREE_MACHINE_CLIENT_INNER_SOURCE:-synthetic}" THREE_MACHINE_VALIDATE_REWRITE_LOOPBACK_FOR_DOCKER=1 THREE_MACHINE_DOCKER_HOST_ALIAS="$docker_host_alias" "${soak_cmd[@]}"; then
       record_step "soak" "pass" 0 "" "$soak_cmd_print"
     else
       rc=$?

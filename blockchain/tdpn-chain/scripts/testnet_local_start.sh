@@ -170,6 +170,12 @@ if [[ -n "$RUNTIME_MODE_OVERRIDE" ]]; then
   fi
 fi
 
+TDPND_BIN="$TESTNET_DIR/bin/tdpnd"
+if [[ "$DRY_RUN" != "1" ]]; then
+  mkdir -p "$(dirname "$TDPND_BIN")"
+  go build -o "$TDPND_BIN" ./cmd/tdpnd
+fi
+
 start_node() {
   local node_dir="$1"
   local expected_node_index="$2"
@@ -226,7 +232,7 @@ start_node() {
   fi
 
   local cmd=(
-    go run ./cmd/tdpnd
+    "$TDPND_BIN"
     --grpc-listen "$GRPC_LISTEN"
     --settlement-http-listen "$SETTLEMENT_HTTP_LISTEN"
     --state-dir "$STATE_DIR"
@@ -257,7 +263,7 @@ start_node() {
     fi
 
     cmd=(
-      go run ./cmd/tdpnd
+      "$TDPND_BIN"
       --comet-home "$comet_home_dir"
       --comet-moniker "$NODE_ID"
       --comet-p2p-laddr "$comet_p2p_listen"

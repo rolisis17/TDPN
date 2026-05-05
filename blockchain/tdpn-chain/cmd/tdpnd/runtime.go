@@ -520,6 +520,9 @@ func isLoopbackListenAddrWithLookup(listenAddr string, lookup hostLookupFunc) bo
 	if strings.HasPrefix(addr, "unix:") {
 		return true
 	}
+	if strings.HasPrefix(addr, "tcp://") {
+		addr = strings.TrimPrefix(addr, "tcp://")
+	}
 	// Test harnesses and in-memory transports (for example "bufnet") are local.
 	// Numeric port-only addresses (for example "8080") bind wildcard interfaces and are not loopback-safe.
 	if !strings.Contains(addr, ":") {

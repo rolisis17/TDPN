@@ -33,6 +33,7 @@ var blockedGenericConfigFileEnvKeys = map[string]struct{}{
 	"DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS":  {},
 	"WG_ALLOW_UNTRUSTED_BINARY_PATH":                  {},
 	"CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP":          {},
+	"CLIENT_ALLOW_LAB_CONTROL_PLANE_LITERAL_IPS":      {},
 	"CLIENT_REQUIRE_HTTPS_CONTROL_URL":                {},
 }
 

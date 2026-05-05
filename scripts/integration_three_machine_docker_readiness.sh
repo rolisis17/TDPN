@@ -4,15 +4,32 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq rg mktemp chmod; do
+for cmd in bash jq rg mktemp chmod stat openssl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
   fi
 done
 
+file_mode() {
+  stat -c '%a' "$1" 2>/dev/null || true
+}
+
+require_mode() {
+  local path="$1"
+  local expected="$2"
+  local actual
+  actual="$(file_mode "$path")"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "unexpected permissions for $path: expected $expected got ${actual:-<unknown>}"
+    ls -ld "$path" 2>/dev/null || true
+    exit 1
+  fi
+}
+
 TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
+ORIG_PATH="$PATH"
 mkdir -p "$TMP_BIN"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -25,10 +42,14 @@ DOCKER_STATE_DIR="$TMP_DIR/docker_state"
 SUMMARY_OK="$TMP_DIR/summary_ok.json"
 SUMMARY_RETRY_OK="$TMP_DIR/summary_retry_ok.json"
 SUMMARY_RETRY_EXHAUST="$TMP_DIR/summary_retry_exhaust.json"
+SUMMARY_ROUTE_DISABLED="$TMP_DIR/summary_route_disabled.json"
+SUMMARY_LOGS_UNAVAILABLE="$TMP_DIR/summary_logs_unavailable.json"
 SUMMARY_FAIL="$TMP_DIR/summary_fail.json"
 LOG_OK="$TMP_DIR/run_ok.log"
 LOG_RETRY_OK="$TMP_DIR/run_retry_ok.log"
 LOG_RETRY_EXHAUST="$TMP_DIR/run_retry_exhaust.log"
+LOG_ROUTE_DISABLED="$TMP_DIR/run_route_disabled.log"
+LOG_LOGS_UNAVAILABLE="$TMP_DIR/run_logs_unavailable.log"
 LOG_FAIL="$TMP_DIR/run_fail.log"
 
 mkdir -p "$DOCKER_STATE_DIR"
@@ -37,6 +58,16 @@ cat >"$TMP_BIN/docker" <<'EOF_DOCKER'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"${FAKE_DOCKER_CAPTURE_FILE:?}"
+if [[ "$*" == *" logs --no-color entry-exit"* ]]; then
+  if [[ "${FAKE_DOCKER_LOGS_FAIL:-0}" == "1" ]]; then
+    echo "fake docker logs failure" >&2
+    exit 1
+  fi
+  if [[ "${FAKE_DOCKER_ROUTE_ASSERTION_DISABLED:-0}" == "1" ]]; then
+    echo "entry-exit-1  | 2026/05/05 entry route assertion signing disabled: fake"
+  fi
+  exit 0
+fi
 step_id=""
 fail_attempts=0
 if [[ "$*" == *"-p pn3a"* && "$*" == *" up -d --build directory issuer entry-exit"* ]]; then
@@ -98,11 +129,19 @@ case "$url" in
 esac
 EOF_CURL
 
+cat >"$TMP_BIN/go" <<'EOF_GO'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "fake go cannot parse go.mod" >&2
+exit 2
+EOF_GO
+
 FAKE_VALIDATE="$TMP_DIR/fake_validate.sh"
 cat >"$FAKE_VALIDATE" <<'EOF_VALIDATE'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"${FAKE_VALIDATE_CAPTURE_FILE:?}"
+printf 'env THREE_MACHINE_CLIENT_INNER_SOURCE=%s\n' "${THREE_MACHINE_CLIENT_INNER_SOURCE:-}" >>"${FAKE_VALIDATE_CAPTURE_FILE:?}"
 if [[ "${FAKE_VALIDATE_FAIL:-0}" == "1" ]]; then
   echo "fake validate fail"
   exit 1
@@ -115,6 +154,7 @@ cat >"$FAKE_SOAK" <<'EOF_SOAK'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"${FAKE_SOAK_CAPTURE_FILE:?}"
+printf 'env THREE_MACHINE_CLIENT_INNER_SOURCE=%s\n' "${THREE_MACHINE_CLIENT_INNER_SOURCE:-}" >>"${FAKE_SOAK_CAPTURE_FILE:?}"
 echo "[3machine-soak] ok"
 EOF_SOAK
 
@@ -128,9 +168,12 @@ EOF_FORWARD
 chmod +x \
   "$TMP_BIN/docker" \
   "$TMP_BIN/curl" \
+  "$TMP_BIN/go" \
   "$FAKE_VALIDATE" \
   "$FAKE_SOAK" \
   "$FAKE_FORWARD"
+PATH="$TMP_BIN:$PATH"
+export PATH
 
 echo "[three-machine-docker-readiness] success path"
 FAKE_DOCKER_CAPTURE_FILE="$DOCKER_CAPTURE" \
@@ -138,6 +181,8 @@ FAKE_DOCKER_STATE_DIR="$DOCKER_STATE_DIR" \
 FAKE_CURL_CAPTURE_FILE="$CURL_CAPTURE" \
 FAKE_VALIDATE_CAPTURE_FILE="$VALIDATE_CAPTURE" \
 FAKE_SOAK_CAPTURE_FILE="$SOAK_CAPTURE" \
+EASY_NODE_LOG_DIR="$TMP_DIR/logs_ok" \
+THREE_MACHINE_DOCKER_DATA_ROOT="$TMP_DIR/data_ok" \
 THREE_MACHINE_DOCKER_DOCKER_BIN="$TMP_BIN/docker" \
 THREE_MACHINE_DOCKER_CURL_BIN="$TMP_BIN/curl" \
 THREE_MACHINE_DOCKER_VALIDATE_SCRIPT="$FAKE_VALIDATE" \
@@ -201,8 +246,194 @@ if ! rg -q -- '--exit-url http://127.0.0.1:18084' "$VALIDATE_CAPTURE"; then
   cat "$VALIDATE_CAPTURE"
   exit 1
 fi
+if ! rg -q -- 'env THREE_MACHINE_CLIENT_INNER_SOURCE=synthetic' "$VALIDATE_CAPTURE"; then
+  echo "validate call missing docker synthetic inner traffic default"
+  cat "$VALIDATE_CAPTURE"
+  exit 1
+fi
 if [[ ! -s "$SOAK_CAPTURE" ]]; then
   echo "soak call missing in success path"
+  exit 1
+fi
+if ! rg -q -- 'env THREE_MACHINE_CLIENT_INNER_SOURCE=synthetic' "$SOAK_CAPTURE"; then
+  echo "soak call missing docker synthetic inner traffic default"
+  cat "$SOAK_CAPTURE"
+  exit 1
+fi
+env_a_path="$(jq -r '.artifacts.env_a // ""' "$SUMMARY_OK")"
+env_b_path="$(jq -r '.artifacts.env_b // ""' "$SUMMARY_OK")"
+if [[ -z "$env_a_path" || -z "$env_b_path" ]] ||
+	  ! rg -q '^ENTRY_PUZZLE_SECRET=.{16,}$' "$env_a_path" ||
+	  ! rg -q '^ENTRY_PUZZLE_SECRET=.{16,}$' "$env_b_path" ||
+	  ! rg -q '^ENTRY_ENDPOINT_PUBLIC=host\.docker\.internal:18120$' "$env_a_path" ||
+	  ! rg -q '^ENTRY_ENDPOINT_PUBLIC=host\.docker\.internal:28120$' "$env_b_path" ||
+	  ! rg -q '^EXIT_ENDPOINT_PUBLIC=host\.docker\.internal:18121$' "$env_a_path" ||
+	  ! rg -q '^EXIT_ENDPOINT_PUBLIC=host\.docker\.internal:28121$' "$env_b_path" ||
+	  ! rg -q '^DATA_PLANE_MODE=opaque$' "$env_a_path" ||
+	  ! rg -q '^DATA_PLANE_MODE=opaque$' "$env_b_path" ||
+	  ! rg -q '^ENTRY_EXIT_USER=([0-9]+:[0-9]+|nodeuser)$' "$env_a_path" ||
+	  ! rg -q '^ENTRY_EXIT_USER=([0-9]+:[0-9]+|nodeuser)$' "$env_b_path"; then
+	  echo "docker rehearsal env files should include generated secrets and runtime wiring"
+	  [[ -n "$env_a_path" && -f "$env_a_path" ]] && cat "$env_a_path"
+	  [[ -n "$env_b_path" && -f "$env_b_path" ]] && cat "$env_b_path"
+  exit 1
+fi
+for env_path in "$env_a_path" "$env_b_path"; do
+	if ! rg -q '^DIRECTORY_PUBLISHED_BIND_ADDR=0\.0\.0\.0$' "$env_path" ||
+	    ! rg -q '^ISSUER_PUBLISHED_BIND_ADDR=0\.0\.0\.0$' "$env_path" ||
+	    ! rg -q '^ENTRY_PUBLISHED_BIND_ADDR=0\.0\.0\.0$' "$env_path" ||
+	    ! rg -q '^EXIT_PUBLISHED_BIND_ADDR=0\.0\.0\.0$' "$env_path" ||
+	    ! rg -q '^ENTRY_UDP_PUBLISHED_BIND_ADDR=0\.0\.0\.0$' "$env_path" ||
+	    ! rg -q '^EXIT_UDP_PUBLISHED_BIND_ADDR=0\.0\.0\.0$' "$env_path"; then
+	  echo "docker rehearsal env files should bind published HTTP and UDP ports to host bridge"
+	  cat "$env_path"
+	  exit 1
+	fi
+done
+runtime_dir="$(dirname "$env_a_path")"
+data_root_path="$(jq -r '.artifacts.data_root // ""' "$SUMMARY_OK")"
+require_mode "$runtime_dir" "700"
+for generated_file in \
+  "$env_a_path" \
+  "$env_b_path" \
+  "$runtime_dir/compose_stack_a.override.yml" \
+  "$runtime_dir/compose_stack_b.override.yml" \
+  "$runtime_dir/entry_route_assertion_a.key.pub" \
+  "$runtime_dir/entry_route_assertion_b.key.pub" \
+  "$data_root_path/a/entry-exit/entry_route_assertion.key" \
+  "$data_root_path/b/entry-exit/entry_route_assertion.key"; do
+  if [[ ! -f "$generated_file" ]]; then
+    echo "expected generated runtime artifact missing: $generated_file"
+    exit 1
+  fi
+  require_mode "$generated_file" "600"
+done
+override_a_path="$(jq -r '.artifacts.override_a // ""' "$SUMMARY_OK")"
+override_b_path="$(jq -r '.artifacts.override_b // ""' "$SUMMARY_OK")"
+for override_case in "$override_a_path:a" "$override_b_path:b"; do
+  override_path="${override_case%:*}"
+  stack_id="${override_case##*:}"
+  if [[ -z "$override_path" ]] ||
+    ! rg -q 'DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_PUBLIC_BIND: "1"' "$override_path" ||
+    ! rg -q 'DIRECTORY_ALLOW_INSECURE_CONTROL_URL_HTTP: "1"' "$override_path" ||
+    ! rg -q 'DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS: "1"' "$override_path" ||
+    ! rg -q 'DIRECTORY_ALLOW_DANGEROUS_ISSUER_TRUST_WITHOUT_ANCHORS: "1"' "$override_path" ||
+    ! rg -q 'ISSUER_ADMIN_ALLOW_TOKEN: "1"' "$override_path" ||
+    ! rg -q 'ISSUER_ADMIN_REQUIRE_SIGNED: "0"' "$override_path" ||
+    ! rg -q 'ISSUER_ALLOW_DANGEROUS_INSECURE_TOKEN_AUTH_PUBLIC_BIND: "1"' "$override_path" ||
+    ! rg -q 'ISSUER_ALLOW_DANGEROUS_PUBLIC_ISSUE_WITHOUT_PAYMENT_PROOF: "1"' "$override_path" ||
+    ! rg -q 'ENTRY_ALLOW_INSECURE_CONTROL_URL_HTTP: "1"' "$override_path" ||
+    ! rg -q 'EXIT_ALLOW_INSECURE_CONTROL_URL_HTTP: "1"' "$override_path" ||
+    ! rg -q 'ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS: "1"' "$override_path" ||
+	  ! rg -q 'EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS: "1"' "$override_path" ||
+	  [[ "$(rg -c "ENTRY_RELAY_ID: \"entry-${stack_id}\"" "$override_path")" -lt 2 ]] ||
+	  [[ "$(rg -c "EXIT_RELAY_ID: \"exit-${stack_id}\"" "$override_path")" -lt 2 ]] ||
+	  ! rg -q 'ENTRY_ROUTE_ASSERTION_PUBLIC_KEY: "[A-Za-z0-9_-]+"' "$override_path" ||
+	  ! rg -q 'ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE: "/app/data/entry_route_assertion.key"' "$override_path" ||
+	  ! rg -q 'EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS: "[A-Za-z0-9_-]+,[A-Za-z0-9_-]+"' "$override_path"; then
+    echo "docker rehearsal override should explicitly opt into lab-only insecure public bind and route assertion wiring"
+    [[ -n "$override_path" && -f "$override_path" ]] && cat "$override_path"
+    exit 1
+  fi
+done
+if ! rg -q 'note: host Go entry route assertion keygen unavailable; using openssl fallback' "$LOG_OK"; then
+  echo "success path should exercise the openssl route assertion key fallback when host go fails"
+  cat "$LOG_OK"
+  exit 1
+fi
+
+echo "[three-machine-docker-readiness] route assertion disabled log path"
+: >"$DOCKER_CAPTURE"
+: >"$CURL_CAPTURE"
+: >"$VALIDATE_CAPTURE"
+: >"$SOAK_CAPTURE"
+rm -f "$DOCKER_STATE_DIR"/*.count 2>/dev/null || true
+set +e
+FAKE_DOCKER_CAPTURE_FILE="$DOCKER_CAPTURE" \
+FAKE_DOCKER_STATE_DIR="$DOCKER_STATE_DIR" \
+FAKE_DOCKER_ROUTE_ASSERTION_DISABLED=1 \
+FAKE_CURL_CAPTURE_FILE="$CURL_CAPTURE" \
+FAKE_VALIDATE_CAPTURE_FILE="$VALIDATE_CAPTURE" \
+FAKE_SOAK_CAPTURE_FILE="$SOAK_CAPTURE" \
+EASY_NODE_LOG_DIR="$TMP_DIR/logs_route_disabled" \
+THREE_MACHINE_DOCKER_DATA_ROOT="$TMP_DIR/data_route_disabled" \
+THREE_MACHINE_DOCKER_DOCKER_BIN="$TMP_BIN/docker" \
+THREE_MACHINE_DOCKER_CURL_BIN="$TMP_BIN/curl" \
+THREE_MACHINE_DOCKER_VALIDATE_SCRIPT="$FAKE_VALIDATE" \
+THREE_MACHINE_DOCKER_SOAK_SCRIPT="$FAKE_SOAK" \
+./scripts/three_machine_docker_readiness.sh \
+  --run-validate 0 \
+  --run-soak 0 \
+  --summary-json "$SUMMARY_ROUTE_DISABLED" \
+  --print-summary-json 0 >"$LOG_ROUTE_DISABLED" 2>&1
+rc_route_disabled=$?
+set -e
+if [[ $rc_route_disabled -eq 0 ]]; then
+  echo "route assertion disabled log path should return non-zero"
+  cat "$LOG_ROUTE_DISABLED"
+  cat "$SUMMARY_ROUTE_DISABLED"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .failed_step == "health"
+  and (.steps[] | select(.step_id == "health") | .status == "fail")
+  and (.steps[] | select(.step_id == "health") | (.note | contains("entry route assertion log check failed")))
+' "$SUMMARY_ROUTE_DISABLED" >/dev/null; then
+  echo "route assertion disabled summary missing expected health failure"
+  cat "$SUMMARY_ROUTE_DISABLED"
+  exit 1
+fi
+if ! rg -q '\[route-assertion\] stack A entry-exit log reports signing disabled' "$LOG_ROUTE_DISABLED"; then
+  echo "route assertion disabled log marker missing"
+  cat "$LOG_ROUTE_DISABLED"
+  exit 1
+fi
+
+echo "[three-machine-docker-readiness] route assertion logs unavailable path"
+: >"$DOCKER_CAPTURE"
+: >"$CURL_CAPTURE"
+: >"$VALIDATE_CAPTURE"
+: >"$SOAK_CAPTURE"
+rm -f "$DOCKER_STATE_DIR"/*.count 2>/dev/null || true
+set +e
+FAKE_DOCKER_CAPTURE_FILE="$DOCKER_CAPTURE" \
+FAKE_DOCKER_STATE_DIR="$DOCKER_STATE_DIR" \
+FAKE_DOCKER_LOGS_FAIL=1 \
+FAKE_CURL_CAPTURE_FILE="$CURL_CAPTURE" \
+FAKE_VALIDATE_CAPTURE_FILE="$VALIDATE_CAPTURE" \
+FAKE_SOAK_CAPTURE_FILE="$SOAK_CAPTURE" \
+EASY_NODE_LOG_DIR="$TMP_DIR/logs_unavailable" \
+THREE_MACHINE_DOCKER_DATA_ROOT="$TMP_DIR/data_logs_unavailable" \
+THREE_MACHINE_DOCKER_DOCKER_BIN="$TMP_BIN/docker" \
+THREE_MACHINE_DOCKER_CURL_BIN="$TMP_BIN/curl" \
+THREE_MACHINE_DOCKER_VALIDATE_SCRIPT="$FAKE_VALIDATE" \
+THREE_MACHINE_DOCKER_SOAK_SCRIPT="$FAKE_SOAK" \
+./scripts/three_machine_docker_readiness.sh \
+  --run-validate 0 \
+  --run-soak 0 \
+  --summary-json "$SUMMARY_LOGS_UNAVAILABLE" \
+  --print-summary-json 0 >"$LOG_LOGS_UNAVAILABLE" 2>&1
+rc_logs_unavailable=$?
+set -e
+if [[ $rc_logs_unavailable -eq 0 ]]; then
+  echo "route assertion logs unavailable path should return non-zero"
+  cat "$LOG_LOGS_UNAVAILABLE"
+  cat "$SUMMARY_LOGS_UNAVAILABLE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .failed_step == "health"
+  and (.steps[] | select(.step_id == "health") | .status == "fail")
+' "$SUMMARY_LOGS_UNAVAILABLE" >/dev/null; then
+  echo "logs unavailable summary missing expected health failure"
+  cat "$SUMMARY_LOGS_UNAVAILABLE"
+  exit 1
+fi
+if ! rg -q '\[route-assertion\] stack A entry-exit logs unavailable' "$LOG_LOGS_UNAVAILABLE"; then
+  echo "logs unavailable marker missing"
+  cat "$LOG_LOGS_UNAVAILABLE"
   exit 1
 fi
 
@@ -352,6 +583,8 @@ if ! rg -q -- '-p pn3b .* down --remove-orphans' "$DOCKER_CAPTURE"; then
 fi
 
 echo "[three-machine-docker-readiness] easy_node forwarding"
+PATH="$ORIG_PATH"
+export PATH
 FAKE_FORWARD_CAPTURE_FILE="$FORWARD_CAPTURE" \
 THREE_MACHINE_DOCKER_READINESS_SCRIPT="$FAKE_FORWARD" \
 ./scripts/easy_node.sh three-machine-docker-readiness --run-soak 0 --keep-stacks 1 >/tmp/integration_three_machine_docker_readiness_forward.log 2>&1

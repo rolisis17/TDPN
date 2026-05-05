@@ -50,6 +50,8 @@ check_pattern 'ensure_client_vpn_prod_trust_bootstrap_or_die "\$trusted_keys_fil
   "client-vpn-up missing production trust bootstrap guard"
 check_pattern 'seed_client_vpn_trust_file_if_empty "\$trusted_keys_file" "\$directory_urls"' \
   "client-vpn-up missing non-production first-run trust seed for multi-directory strict mode"
+check_pattern 'DIRECTORY_TRUST_TOFU=\$\(.*prod_profile.*beta_profile.*echo 0' \
+  "client-vpn-up must disable directory TOFU when beta strict mode is enabled"
 check_pattern 'refusing to seed production directory trust from live /v1/pubkeys while DIRECTORY_TRUST_TOFU=0' \
   "client-vpn-up missing production live-pubkeys seeding refusal"
 check_pattern 'GPM_BOOTSTRAP_MANIFEST_URL plus GPM_BOOTSTRAP_MANIFEST_HMAC_KEY or GPM_BOOTSTRAP_MANIFEST_ED25519_PUBLIC_KEY' \

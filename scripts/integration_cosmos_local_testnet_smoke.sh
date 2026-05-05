@@ -102,6 +102,25 @@ port_in_use() {
   (echo >/dev/tcp/"$host"/"$port") >/dev/null 2>&1
 }
 
+assert_test_ports_free() {
+  local label="$1"
+  local i grpc_port settlement_port
+  for i in $(seq 0 $((NODE_COUNT - 1))); do
+    grpc_port=$((BASE_GRPC_PORT + i))
+    settlement_port=$((BASE_SETTLEMENT_PORT + i))
+    if port_in_use "$HOST" "$grpc_port"; then
+      echo "gRPC port still in use after ${label}: $HOST:$grpc_port"
+      print_node_logs
+      return 1
+    fi
+    if port_in_use "$HOST" "$settlement_port"; then
+      echo "settlement port still in use after ${label}: $HOST:$settlement_port"
+      print_node_logs
+      return 1
+    fi
+  done
+}
+
 for i in $(seq 0 $((NODE_COUNT - 1))); do
   grpc_port=$((BASE_GRPC_PORT + i))
   settlement_port=$((BASE_SETTLEMENT_PORT + i))
@@ -199,16 +218,19 @@ wait_for_counts() {
 run_mode_smoke() (
   set -euo pipefail
   local runtime_mode="$1"
+  local tmp_parent
 
-  TMP_DIR="$(mktemp -d -t cosmos-local-testnet-smoke.XXXXXX)"
-  WORK_TESTNET_DIR="$TMP_DIR/testnet"
+  tmp_parent="$(mktemp -d -t cosmos-local-testnet-smoke.XXXXXX)"
+  TMP_DIR="$tmp_parent/work dir"
+  mkdir -p "$TMP_DIR"
+  WORK_TESTNET_DIR="$TMP_DIR/testnet path"
 
   cleanup() {
     set +e
     if [[ -f "$WORK_TESTNET_DIR/manifest.env" ]]; then
       "$STOP_SCRIPT" --testnet-dir "$WORK_TESTNET_DIR" --runtime-mode "$runtime_mode" --wait-seconds "$STOP_GRACE_SECONDS" >/dev/null 2>&1 || true
     fi
-    rm -rf "$TMP_DIR"
+    rm -rf "$tmp_parent"
     set -e
   }
   trap cleanup EXIT
@@ -226,6 +248,7 @@ run_mode_smoke() (
 
   run_step stop "$STOP_SCRIPT" --testnet-dir "$WORK_TESTNET_DIR" --runtime-mode "$runtime_mode" --wait-seconds "$STOP_GRACE_SECONDS"
   wait_for_counts "0" "$NODE_COUNT" "$STOP_WAIT_SECONDS" "stopped_${runtime_mode}"
+  assert_test_ports_free "stop_${runtime_mode}"
 
   echo "cosmos local testnet smoke integration check ok (${runtime_mode})"
 )

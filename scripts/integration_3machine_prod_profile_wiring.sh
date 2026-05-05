@@ -844,6 +844,10 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh client-vpn-preflight --help | 
   echo "easy_node client-vpn-preflight help missing --issuer-quorum-check"
   exit 1
 fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh client-vpn-preflight --help | rg -q -- '--allow-insecure-remote-http'; then
+  echo "easy_node client-vpn-preflight help missing --allow-insecure-remote-http"
+  exit 1
+fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-wg-soak --help | rg -q -- '--max-consecutive-failures'; then
   echo "easy_node prod-wg-soak help missing --max-consecutive-failures"
   exit 1

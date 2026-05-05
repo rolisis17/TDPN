@@ -453,10 +453,10 @@ Usage:
   ./scripts/easy_node.sh wg-only-local-test [--matrix [0|1]] [--strict-beta [0|1]] [--timeout-sec N]
   ./scripts/easy_node.sh real-wg-privileged-matrix [integration_real_wg_privileged_matrix args...]
   ./scripts/easy_node.sh real-wg-privileged-matrix-record [real-wg-privileged-matrix args...] [--record-result [0|1]] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--matrix-summary-json PATH] [--summary-json PATH] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh wg-only-stack-up [--strict-beta [0|1]] [--detach [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--log-file PATH]
+  ./scripts/easy_node.sh wg-only-stack-up [--strict-beta [0|1]] [--detach [0|1]] [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--control-bind-host HOST] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--log-file PATH]
   ./scripts/easy_node.sh wg-only-stack-status
   ./scripts/easy_node.sh wg-only-stack-down [--force-iface-cleanup [0|1]]
-  ./scripts/easy_node.sh wg-only-stack-selftest [--strict-beta [0|1]] [--base-port N] [--timeout-sec N] [--min-selection-lines N] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]]
+  ./scripts/easy_node.sh wg-only-stack-selftest [--strict-beta [0|1]] [--base-port N] [--timeout-sec N] [--min-selection-lines N] [--client-iface IFACE] [--exit-iface IFACE] [--control-bind-host HOST] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]]
   ./scripts/easy_node.sh wg-only-stack-selftest-record [wg-only-stack-selftest args...] [--record-result [0|1]] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh pre-real-host-readiness [--base-port N] [--client-iface IFACE] [--exit-iface IFACE] [--vpn-iface IFACE] [--runtime-fix-prune-wg-only-dir [0|1]] [--strict-beta [0|1]] [--timeout-sec N] [--min-selection-lines N] [--force-iface-reset [0|1]] [--cleanup-ifaces [0|1]] [--keep-stack [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-test [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--exit-country CC] [--exit-region REGION] [--timeout-sec N] [--path-profile 1hop|2hop|3hop|speed|speed-1hop|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--force-direct-exit [0|1]] [--min-selection-lines N] [--min-entry-operators N] [--min-exit-operators N] [--require-cross-operator-pair [0|1]] [--allow-insecure-remote-http [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]]
@@ -494,10 +494,10 @@ Usage:
   ./scripts/easy_node.sh gpm-gap-scan [gpm_gap_scan args...]
   ./scripts/easy_node.sh gpm-logic-check [gpm_logic_check args...]
   ./scripts/easy_node.sh gpm-admin-settlement-live-evidence [gpm_admin_settlement_live_evidence args...]
-  ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
+  ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--allow-insecure-remote-http [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
   ./scripts/easy_node.sh simple-client-vpn-preflight [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--prod-profile [0|1]] [--interface IFACE]
-  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID|--subject-file PATH] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--allow-no-route [0|1]] [--startup-sync-timeout-sec N] [--session-reuse [0|1]] [--allow-session-churn [0|1]] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH] [--status-file PATH]
-  ./scripts/easy_node.sh client-vpn-smoke [client-vpn-up args...] [--run-preflight [0|1]] [--defer-no-root [0|1]] [--status-check [0|1]] [--keep-up [0|1]] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--trust-reset-on-key-mismatch [0|1]] [--trust-reset-scope scoped|global] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-timeout-sec N] [--incident-bundle-dir PATH] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--public-ip-url URL] [--country-url URL] [--curl-timeout-sec N] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh client-vpn-up [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID|--subject-file PATH] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--exit-country CC] [--exit-region REGION] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--allow-insecure-remote-http [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--private-key-file PATH] [--allowed-ips CIDR] [--install-route [0|1]] [--allow-no-route [0|1]] [--startup-sync-timeout-sec N] [--session-reuse [0|1]] [--allow-session-churn [0|1]] [--ready-timeout-sec N] [--force-restart [0|1]] [--foreground [0|1]] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--log-file PATH] [--status-file PATH]
+  ./scripts/easy_node.sh client-vpn-smoke [client-vpn-up args...] [--run-preflight [0|1]] [--defer-no-root [0|1]] [--status-check [0|1]] [--keep-up [0|1]] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-strict-beta [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--trust-reset-on-key-mismatch [0|1]] [--trust-reset-scope scoped|global] [--allow-insecure-remote-http [0|1]] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-timeout-sec N] [--incident-bundle-dir PATH] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--public-ip-url URL] [--country-url URL] [--curl-timeout-sec N] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-vpn-profile-compare [--profiles CSV] [--rounds N] [--pause-sec N] [--min-pass-rate-pct N] [--fail-on-any-fail [0|1]] [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--subject ID|--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--operator-floor-check [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--interface IFACE] [--proxy-addr HOST:PORT] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH] [--run-preflight [0|1]] [--status-check [0|1]] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--trust-reset-on-key-mismatch [0|1]] [--trust-reset-scope scoped|global] [--public-ip-url URL] [--country-url URL] [--summary-json PATH] [--report-md PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh client-vpn-status [--show-json [0|1]]
   ./scripts/easy_node.sh config-v1-show [--path PATH]
@@ -7386,7 +7386,7 @@ wg_only_check() {
     ok=0
   fi
 
-  for cmd in go wg ip timeout rg curl; do
+  for cmd in go wg ip timeout rg curl base64; do
     if command -v "$cmd" >/dev/null 2>&1; then
       echo "  [ok] command: $cmd"
     else
@@ -7714,10 +7714,10 @@ wg_only_stack_up() {
   mapfile -t stack_ports < <(wg_only_port_list "$base_port")
 
   local directory_url issuer_url entry_url exit_url entry_data_addr exit_data_addr
-  directory_url="http://127.0.0.1:${dir_port}"
-  issuer_url="http://127.0.0.1:${issuer_port}"
-  entry_url="http://127.0.0.1:${entry_port}"
-  exit_url="http://127.0.0.1:${exit_port}"
+  directory_url="http://localhost:${dir_port}"
+  issuer_url="http://localhost:${issuer_port}"
+  entry_url="http://localhost:${entry_port}"
+  exit_url="http://localhost:${exit_port}"
   entry_data_addr="127.0.0.1:${entry_data_port}"
   exit_data_addr="127.0.0.1:${exit_data_port}"
 
@@ -7747,15 +7747,27 @@ wg_only_stack_up() {
     exit 1
   fi
 
-  local key_dir client_key_file exit_key_file directory_key_file issuer_key_file
+  local key_dir client_key_file exit_key_file directory_key_file issuer_key_file entry_route_assertion_key_file
   local wg_only_trust_file entry_directory_trust_file
-  local directory_admin_token issuer_admin_token client_wg_pub exit_wg_pub
-  key_dir="$DEPLOY_DIR/data/wg_only"
+  local directory_admin_token issuer_admin_token client_wg_pub exit_wg_pub directory_pubkey entry_route_assertion_pubkey
+  local directory_trust_tofu="1" entry_directory_trust_tofu="1"
+  key_dir="${EASY_NODE_WG_ONLY_STACK_KEY_DIR:-}"
+  if [[ -z "$key_dir" ]]; then
+    case "$DEPLOY_DIR" in
+      /mnt/*)
+        key_dir="${XDG_STATE_HOME:-${HOME:-/tmp}/.local/state}/privacynode/wg_only"
+        ;;
+      *)
+        key_dir="$DEPLOY_DIR/data/wg_only"
+        ;;
+    esac
+  fi
   mkdir -p "$key_dir"
   client_key_file="$key_dir/client_${client_iface}.key"
   exit_key_file="$key_dir/exit_${exit_iface}.key"
   directory_key_file="$key_dir/directory_${base_port}_ed25519.key"
   issuer_key_file="$key_dir/issuer_${base_port}_ed25519.key"
+  entry_route_assertion_key_file="$key_dir/entry_route_assertion_${base_port}_ed25519.key"
   wg_only_trust_file="$key_dir/trusted_directory_keys_${base_port}.txt"
   entry_directory_trust_file="$key_dir/entry_trusted_directory_keys_${base_port}.txt"
   directory_admin_token="wg-only-directory-admin-token-${base_port}"
@@ -7770,6 +7782,73 @@ wg_only_stack_up() {
     (umask 077 && wg genkey >"$exit_key_file")
   fi
   chmod 600 "$client_key_file" "$exit_key_file" 2>/dev/null || true
+  ensure_ed25519_private_key_file() {
+    local key_file="${1:-}"
+    if [[ -z "$key_file" ]]; then
+      return 1
+    fi
+    mkdir -p "$(dirname "$key_file")"
+    if [[ ! -s "$key_file" ]]; then
+      go run ./cmd/adminsig gen --private-key-out "$key_file" >/dev/null
+    fi
+    chmod 600 "$key_file" 2>/dev/null || true
+  }
+  ed25519_public_key_from_private_file() {
+    local key_file="${1:-}"
+    local encoded rem tmp_priv tmp_pub
+    encoded="$(tr -d '[:space:]' <"$key_file" | tr '_-' '/+')"
+    rem=$(( ${#encoded} % 4 ))
+    case "$rem" in
+      0) ;;
+      2) encoded="${encoded}==" ;;
+      3) encoded="${encoded}=" ;;
+      *) return 1 ;;
+    esac
+    tmp_priv="$(mktemp)"
+    tmp_pub="$(mktemp)"
+    if ! printf '%s' "$encoded" | base64 -d >"$tmp_priv" 2>/dev/null; then
+      rm -f "$tmp_priv" "$tmp_pub"
+      return 1
+    fi
+    if [[ "$(wc -c <"$tmp_priv" | tr -d '[:space:]')" != "64" ]]; then
+      rm -f "$tmp_priv" "$tmp_pub"
+      return 1
+    fi
+    tail -c 32 "$tmp_priv" >"$tmp_pub"
+    base64 <"$tmp_pub" | tr '+/' '-_' | tr -d '=\r\n'
+    rm -f "$tmp_priv" "$tmp_pub"
+  }
+  if ! ensure_ed25519_private_key_file "$directory_key_file"; then
+    ip link delete "$client_iface" >/dev/null 2>&1 || true
+    ip link delete "$exit_iface" >/dev/null 2>&1 || true
+    echo "failed to prepare wg-only directory identity key"
+    exit 1
+  fi
+  if ! ensure_ed25519_private_key_file "$entry_route_assertion_key_file"; then
+    ip link delete "$client_iface" >/dev/null 2>&1 || true
+    ip link delete "$exit_iface" >/dev/null 2>&1 || true
+    echo "failed to prepare wg-only entry route assertion key"
+    exit 1
+  fi
+  if ! directory_pubkey="$(ed25519_public_key_from_private_file "$directory_key_file")" || [[ -z "$directory_pubkey" ]]; then
+    ip link delete "$client_iface" >/dev/null 2>&1 || true
+    ip link delete "$exit_iface" >/dev/null 2>&1 || true
+    echo "failed to derive wg-only directory public key"
+    exit 1
+  fi
+  if ! entry_route_assertion_pubkey="$(ed25519_public_key_from_private_file "$entry_route_assertion_key_file")" || [[ -z "$entry_route_assertion_pubkey" ]]; then
+    ip link delete "$client_iface" >/dev/null 2>&1 || true
+    ip link delete "$exit_iface" >/dev/null 2>&1 || true
+    echo "failed to derive wg-only entry route assertion public key"
+    exit 1
+  fi
+  printf '%s\n' "$directory_pubkey" >"$wg_only_trust_file"
+  printf '%s\n' "$directory_pubkey" >"$entry_directory_trust_file"
+  chmod 600 "$wg_only_trust_file" "$entry_directory_trust_file" 2>/dev/null || true
+  if [[ "$strict_beta" == "1" ]]; then
+    directory_trust_tofu="0"
+    entry_directory_trust_tofu="0"
+  fi
   if ! client_wg_pub="$(wg pubkey <"$client_key_file")"; then
     ip link delete "$client_iface" >/dev/null 2>&1 || true
     ip link delete "$exit_iface" >/dev/null 2>&1 || true
@@ -7825,14 +7904,21 @@ wg_only_stack_up() {
     "CLIENT_DISABLE_SYNTHETIC_FALLBACK=1"
     "CLIENT_LIVE_WG_MODE=1"
     "DIRECTORY_TRUST_STRICT=1"
-    "DIRECTORY_TRUST_TOFU=1"
+    "DIRECTORY_TRUST_TOFU=${directory_trust_tofu}"
     "DIRECTORY_TRUSTED_KEYS_FILE=${wg_only_trust_file}"
     "ENTRY_LIVE_WG_MODE=1"
+    "ENTRY_OPERATOR_ID=op-entry"
+    "ENTRY_RELAY_ID=entry-wg-only-${base_port}"
+    "ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE=${entry_route_assertion_key_file}"
+    "ENTRY_ROUTE_ASSERTION_PUBLIC_KEY=${entry_route_assertion_pubkey}"
     "ENTRY_DIRECTORY_TRUST_STRICT=1"
-    "ENTRY_DIRECTORY_TRUST_TOFU=1"
+    "ENTRY_DIRECTORY_TRUST_TOFU=${entry_directory_trust_tofu}"
     "ENTRY_DIRECTORY_TRUSTED_KEYS_FILE=${entry_directory_trust_file}"
     "ENTRY_PUZZLE_DIFFICULTY=1"
     "EXIT_LIVE_WG_MODE=1"
+    "EXIT_OPERATOR_ID=op-exit"
+    "EXIT_RELAY_ID=exit-wg-only-${base_port}"
+    "EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS=${entry_route_assertion_pubkey}"
     "EXIT_TOKEN_PROOF_REPLAY_GUARD=1"
     "EXIT_PEER_REBIND_SEC=0"
     "EXIT_STARTUP_SYNC_TIMEOUT_SEC=8"
@@ -7850,9 +7936,8 @@ wg_only_stack_up() {
       "EXIT_BETA_STRICT=1"
       "CLIENT_REQUIRE_DISTINCT_OPERATORS=1"
       "ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1"
+      "EXIT_EGRESS_BACKEND=command"
       "ENTRY_PUZZLE_SECRET=wg-only-entry-secret-0001"
-      "ENTRY_OPERATOR_ID=op-entry"
-      "EXIT_OPERATOR_ID=op-exit"
       "EXIT_OPAQUE_ECHO=0"
     )
   fi
@@ -7927,6 +8012,7 @@ WG_ONLY_DIRECTORY_URL=$directory_url
 WG_ONLY_ISSUER_URL=$issuer_url
 WG_ONLY_ENTRY_URL=$entry_url
 WG_ONLY_EXIT_URL=$exit_url
+WG_ONLY_KEY_DIR=$key_dir
 WG_ONLY_DIRECTORY_TRUST_FILE=$wg_only_trust_file
 WG_ONLY_ENTRY_DIRECTORY_TRUST_FILE=$entry_directory_trust_file
 EOF_STATE
@@ -8100,6 +8186,7 @@ wg_only_stack_selftest() {
   local keep_stack="${EASY_NODE_WG_ONLY_SELFTEST_KEEP_STACK:-0}"
   local client_iface="${EASY_NODE_WG_ONLY_STACK_CLIENT_IFACE:-wgcstack0}"
   local exit_iface="${EASY_NODE_WG_ONLY_STACK_EXIT_IFACE:-wgestack0}"
+  local control_bind_host="${EASY_NODE_WG_ONLY_SELFTEST_CONTROL_BIND_HOST:-${EASY_NODE_WG_ONLY_STACK_CONTROL_BIND_HOST:-127.0.0.1}}"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -8130,6 +8217,10 @@ wg_only_stack_selftest() {
         ;;
       --exit-iface)
         exit_iface="${2:-}"
+        shift 2
+        ;;
+      --control-bind-host)
+        control_bind_host="${2:-}"
         shift 2
         ;;
       --force-iface-reset)
@@ -8198,6 +8289,10 @@ wg_only_stack_selftest() {
     echo "wg-only-stack-selftest requires non-empty --client-iface and --exit-iface"
     exit 2
   fi
+  if [[ -z "$control_bind_host" ]]; then
+    echo "wg-only-stack-selftest requires non-empty --control-bind-host"
+    exit 2
+  fi
 
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     echo "wg-only-stack-selftest requires root privileges (run with sudo)"
@@ -8223,7 +8318,7 @@ wg_only_stack_selftest() {
     --base-port "$base_port" \
     --client-iface "$client_iface" \
     --exit-iface "$exit_iface" \
-    --control-bind-host "0.0.0.0" \
+    --control-bind-host "$control_bind_host" \
     --force-iface-reset "$force_iface_reset" \
     --cleanup-ifaces "$cleanup_ifaces"
   started="1"
@@ -8254,7 +8349,7 @@ wg_only_stack_selftest() {
     local attempts="${1:-240}"
     local i
     for i in $(seq 1 "$attempts"); do
-      if rg -q "client wireguard runtime ready:" "$log_file"; then
+      if rg -q "client wireguard runtime ready:|client wg-kernel proxy listening:" "$log_file"; then
         return 0
       fi
       sleep 0.2
@@ -8303,10 +8398,18 @@ wg_only_stack_selftest() {
   done
 
   for _ in $(seq 1 140); do
-    if rg -q "client role enabled: .*mode=opaque .*source=udp .*wg_backend=command .*wg_only=true .*beta_strict=true" "$log_file" &&
-      rg -q "entry route discovery: .*live_wg_mode=true .*wg_only=true .*distinct_exit_operator=true operator_id=op-entry" "$log_file" &&
-      rg -q "exit wg backend=command .*wg_only=true .*beta_strict=true" "$log_file"; then
-      strict_log_ok="1"
+    if [[ "$strict_beta" == "1" ]]; then
+      if rg -q "client role enabled: .*mode=opaque .*source=udp .*wg_backend=command .*wg_only=true .*beta_strict=true" "$log_file" &&
+        rg -q "entry route discovery: .*live_wg_mode=true .*wg_only=true .*distinct_exit_operator=true operator_id=op-entry" "$log_file" &&
+        rg -q "exit wg backend=command .*wg_only=true .*beta_strict=true" "$log_file"; then
+        strict_log_ok="1"
+      fi
+    else
+      if rg -q "client role enabled: .*mode=opaque .*source=udp .*wg_backend=command .*wg_only=true .*beta_strict=false" "$log_file" &&
+        rg -q "entry route discovery: .*live_wg_mode=true .*wg_only=true .*operator_id=op-entry" "$log_file" &&
+        rg -q "exit wg backend=command .*wg_only=true .*beta_strict=false" "$log_file"; then
+        strict_log_ok="1"
+      fi
     fi
     if rg -q "exit accepted opaque packet session=.*wg_like=true" "$log_file"; then
       exit_accept_ok="1"
@@ -8330,7 +8433,7 @@ wg_only_stack_selftest() {
     exit 1
   fi
   if [[ "$strict_log_ok" != "1" ]]; then
-    echo "wg-only stack selftest: missing strict live-WG startup log signals"
+    echo "wg-only stack selftest: missing live-WG startup log signals"
     cat "$log_file"
     exit 1
   fi
@@ -13938,7 +14041,7 @@ EOF_CLIENT
     echo "client test: ok"
     echo "client test log: $out"
     echo "key log lines:"
-    rg 'client selected entry=|client received wg-session config|client wireguard runtime ready|bootstrap failed' "$out" || true
+    rg 'client selected entry=|client received wg-session config|client wireguard runtime ready|client wg-kernel proxy listening|bootstrap failed' "$out" || true
     cleanup_client_test_subject_file
     return 0
   fi
@@ -13963,6 +14066,7 @@ client_vpn_preflight() {
   local interface_name="${CLIENT_WG_INTERFACE:-wgvpn0}"
   local timeout_sec="${EASY_NODE_CLIENT_VPN_PREFLIGHT_TIMEOUT_SEC:-12}"
   local require_root="1"
+  local allow_insecure_remote_http="${EASY_NODE_CLIENT_VPN_ALLOW_INSECURE_REMOTE_HTTP:-${EASY_NODE_CLIENT_ALLOW_INSECURE_REMOTE_HTTP:-0}}"
   local operator_floor_check="${EASY_NODE_CLIENT_VPN_OPERATOR_FLOOR_CHECK:-}"
   local operator_min_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_OPERATORS:-2}"
   local operator_min_entry_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_ENTRY_OPERATORS:-}"
@@ -14018,6 +14122,19 @@ client_vpn_preflight() {
           prod_profile="1"
           shift
         fi
+        ;;
+      --allow-insecure-remote-http)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          allow_insecure_remote_http="${2:-}"
+          shift 2
+        else
+          allow_insecure_remote_http="1"
+          shift
+        fi
+        ;;
+      --allow-insecure-remote-http=*)
+        allow_insecure_remote_http="${1#--allow-insecure-remote-http=}"
+        shift
         ;;
       --interface)
         interface_name="${2:-}"
@@ -14121,6 +14238,14 @@ client_vpn_preflight() {
     echo "client-vpn-preflight requires --prod-profile 0 or 1"
     exit 2
   fi
+  if [[ "$allow_insecure_remote_http" != "0" && "$allow_insecure_remote_http" != "1" ]]; then
+    echo "client-vpn-preflight requires --allow-insecure-remote-http (or EASY_NODE_CLIENT_VPN_ALLOW_INSECURE_REMOTE_HTTP) to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$prod_profile" == "1" && "$allow_insecure_remote_http" == "1" ]]; then
+    echo "client-vpn-preflight does not allow --allow-insecure-remote-http with --prod-profile 1"
+    exit 2
+  fi
   if [[ "$require_root" != "0" && "$require_root" != "1" ]]; then
     echo "client-vpn-preflight requires --require-root 0 or 1"
     exit 2
@@ -14216,6 +14341,9 @@ client_vpn_preflight() {
 
   if [[ -n "$bootstrap_directory" ]]; then
     bootstrap_directory="$(ensure_url_scheme "$bootstrap_directory" "$client_url_scheme")"
+    if [[ "$allow_insecure_remote_http" != "1" ]] && ! require_https_for_remote_url "$bootstrap_directory" "client-vpn-preflight --bootstrap-directory"; then
+      exit 2
+    fi
     local discovered
     discovered="$(discover_directory_urls "$bootstrap_directory" "$discovery_wait_sec" 1)"
     if [[ -z "$directory_urls" ]]; then
@@ -14245,17 +14373,19 @@ client_vpn_preflight() {
   issuer_url="$(ensure_url_scheme "$issuer_url" "$client_url_scheme")"
   entry_url="$(ensure_url_scheme "$entry_url" "$client_url_scheme")"
   exit_url="$(ensure_url_scheme "$exit_url" "$client_url_scheme")"
-  if ! require_https_for_remote_csv_urls "$directory_urls" "client-vpn-preflight --directory-urls"; then
-    exit 2
-  fi
-  if ! require_https_for_remote_url "$issuer_url" "client-vpn-preflight --issuer-url"; then
-    exit 2
-  fi
-  if ! require_https_for_remote_url "$entry_url" "client-vpn-preflight --entry-url"; then
-    exit 2
-  fi
-  if ! require_https_for_remote_url "$exit_url" "client-vpn-preflight --exit-url"; then
-    exit 2
+  if [[ "$allow_insecure_remote_http" != "1" ]]; then
+    if ! require_https_for_remote_csv_urls "$directory_urls" "client-vpn-preflight --directory-urls"; then
+      exit 2
+    fi
+    if ! require_https_for_remote_url "$issuer_url" "client-vpn-preflight --issuer-url"; then
+      exit 2
+    fi
+    if ! require_https_for_remote_url "$entry_url" "client-vpn-preflight --entry-url"; then
+      exit 2
+    fi
+    if ! require_https_for_remote_url "$exit_url" "client-vpn-preflight --exit-url"; then
+      exit 2
+    fi
   fi
   if [[ -z "$issuer_urls" ]]; then
     issuer_urls="$issuer_url"
@@ -14282,6 +14412,7 @@ client_vpn_preflight() {
   echo "  exit_url: $exit_url"
   echo "  interface: $interface_name"
   echo "  prod_profile: $prod_profile"
+  echo "  allow_insecure_remote_http: $allow_insecure_remote_http"
   echo "  path_profile: ${normalized_path_profile:-balanced}"
   echo "  operator_floor_check: $operator_floor_check"
   echo "  operator_min_operators: $operator_min_operators"
@@ -16509,6 +16640,7 @@ client_vpn_up() {
   local exit_exploration_pct="${CLIENT_EXIT_EXPLORATION_PCT:-10}"
   local beta_profile="${EASY_NODE_BETA_PROFILE:-1}"
   local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
+  local allow_insecure_remote_http="${EASY_NODE_CLIENT_VPN_ALLOW_INSECURE_REMOTE_HTTP:-${EASY_NODE_CLIENT_ALLOW_INSECURE_REMOTE_HTTP:-0}}"
   local operator_floor_check="${EASY_NODE_CLIENT_VPN_OPERATOR_FLOOR_CHECK:-}"
   local operator_min_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_OPERATORS:-2}"
   local operator_min_entry_operators="${EASY_NODE_CLIENT_VPN_OPERATOR_MIN_ENTRY_OPERATORS:-}"
@@ -16695,6 +16827,19 @@ client_vpn_up() {
           prod_profile="1"
           shift
         fi
+        ;;
+      --allow-insecure-remote-http)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          allow_insecure_remote_http="${2:-}"
+          shift 2
+        else
+          allow_insecure_remote_http="1"
+          shift
+        fi
+        ;;
+      --allow-insecure-remote-http=*)
+        allow_insecure_remote_http="${1#--allow-insecure-remote-http=}"
+        shift
         ;;
       --operator-floor-check)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
@@ -16962,6 +17107,14 @@ client_vpn_up() {
     echo "client-vpn-up requires --prod-profile 0 or 1"
     exit 2
   fi
+  if [[ "$allow_insecure_remote_http" != "0" && "$allow_insecure_remote_http" != "1" ]]; then
+    echo "client-vpn-up requires --allow-insecure-remote-http (or EASY_NODE_CLIENT_VPN_ALLOW_INSECURE_REMOTE_HTTP) to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$prod_profile" == "1" && "$allow_insecure_remote_http" == "1" ]]; then
+    echo "client-vpn-up does not allow --allow-insecure-remote-http with --prod-profile 1"
+    exit 2
+  fi
   if [[ -z "$operator_floor_check" ]]; then
     if [[ "$prod_profile" == "1" ]]; then
       operator_floor_check="1"
@@ -17040,7 +17193,7 @@ client_vpn_up() {
   route_mode="$(client_vpn_route_mode_for "$allowed_ips" "$install_route")"
   if [[ "$route_mode" == "no-route" ]]; then
     if [[ "$prod_profile" == "1" ]]; then
-      echo "client-vpn-up refuses no-route full-tunnel in prod profile: full-tunnel AllowedIPs=$allowed_ips with install_route=0 would not route host traffic through the VPN; set --install-route 1 or disable --prod-profile for controlled diagnostics"
+      echo "client-vpn-up refuses no-route full-tunnel in prod profile: full-tunnel AllowedIPs=$allowed_ips with install_route=0 would not route host traffic through the VPN; set --install-route 1, use split AllowedIPs, or disable --prod-profile for controlled diagnostics"
       exit 2
     fi
     echo "client-vpn-up route mode: no-route (full-tunnel AllowedIPs=$allowed_ips with install_route=0; host traffic will not be routed through the VPN)"
@@ -17137,7 +17290,7 @@ client_vpn_up() {
 
   if [[ -n "$bootstrap_directory" ]]; then
     bootstrap_directory="$(ensure_url_scheme "$bootstrap_directory" "$client_url_scheme")"
-    if ! require_https_for_remote_url "$bootstrap_directory" "client-vpn-up --bootstrap-directory"; then
+    if [[ "$allow_insecure_remote_http" != "1" ]] && ! require_https_for_remote_url "$bootstrap_directory" "client-vpn-up --bootstrap-directory"; then
       exit 2
     fi
     local discovered
@@ -17171,17 +17324,19 @@ client_vpn_up() {
   issuer_url="$(ensure_url_scheme "$issuer_url" "$client_url_scheme")"
   entry_url="$(ensure_url_scheme "$entry_url" "$client_url_scheme")"
   exit_url="$(ensure_url_scheme "$exit_url" "$client_url_scheme")"
-  if ! require_https_for_remote_csv_urls "$directory_urls" "client-vpn-up --directory-urls"; then
-    exit 2
-  fi
-  if ! require_https_for_remote_url "$issuer_url" "client-vpn-up --issuer-url"; then
-    exit 2
-  fi
-  if ! require_https_for_remote_url "$entry_url" "client-vpn-up --entry-url"; then
-    exit 2
-  fi
-  if ! require_https_for_remote_url "$exit_url" "client-vpn-up --exit-url"; then
-    exit 2
+  if [[ "$allow_insecure_remote_http" != "1" ]]; then
+    if ! require_https_for_remote_csv_urls "$directory_urls" "client-vpn-up --directory-urls"; then
+      exit 2
+    fi
+    if ! require_https_for_remote_url "$issuer_url" "client-vpn-up --issuer-url"; then
+      exit 2
+    fi
+    if ! require_https_for_remote_url "$entry_url" "client-vpn-up --entry-url"; then
+      exit 2
+    fi
+    if ! require_https_for_remote_url "$exit_url" "client-vpn-up --exit-url"; then
+      exit 2
+    fi
   fi
   if [[ -z "$issuer_urls" ]]; then
     issuer_urls="$issuer_url"
@@ -17443,7 +17598,7 @@ client_vpn_up() {
     "DIRECTORY_MIN_SOURCES=$min_sources"
     "CLIENT_DIRECTORY_MIN_OPERATORS=$min_operators"
     "DIRECTORY_TRUST_STRICT=1"
-    "DIRECTORY_TRUST_TOFU=$([[ "$prod_profile" == "1" ]] && echo 0 || echo 1)"
+    "DIRECTORY_TRUST_TOFU=$([[ "$prod_profile" == "1" || "$beta_profile" == "1" ]] && echo 0 || echo 1)"
     "DIRECTORY_TRUSTED_KEYS_FILE=$trusted_keys_file"
     "ISSUER_URL=$issuer_url"
     "ENTRY_URL=$entry_url"
@@ -17482,6 +17637,10 @@ client_vpn_up() {
     "BETA_STRICT_MODE=$beta_profile"
     "PROD_STRICT_MODE=$prod_profile"
   )
+	  if [[ "$allow_insecure_remote_http" == "1" ]]; then
+	    env_vars+=("CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP=1")
+	    env_vars+=("CLIENT_ALLOW_LAB_CONTROL_PLANE_LITERAL_IPS=1")
+	  fi
   if [[ -n "$opaque_session_sec" ]]; then
     env_vars+=("CLIENT_OPAQUE_SESSION_SEC=$opaque_session_sec")
   fi
@@ -17583,14 +17742,14 @@ client_vpn_up() {
       cleanup_client_vpn_startup_failure
       exit 1
     fi
-    if rg -q "client wireguard runtime ready:" "$log_file"; then
+    if rg -q "client wireguard runtime ready:|client wg-kernel proxy listening:" "$log_file"; then
       ready=1
       break
     fi
     sleep 1
   done
   if [[ "$ready" -ne 1 ]]; then
-    echo "client-vpn did not receive wg-session config within ${ready_timeout_sec}s as a tunnel-ready signal; wireguard runtime did not become ready"
+    echo "client-vpn did not observe WireGuard runtime readiness within ${ready_timeout_sec}s; wireguard runtime did not become ready"
     echo "log: $log_file"
     tail -n 120 "$log_file" || true
     print_client_vpn_trust_mismatch_hint "$log_file" "$trusted_keys_file" "$trust_scope_mode"

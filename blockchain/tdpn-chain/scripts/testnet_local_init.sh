@@ -53,6 +53,12 @@ need_value() {
   fi
 }
 
+write_env_assignment() {
+  local key="$1"
+  local value="$2"
+  printf '%s=%q\n' "$key" "$value"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --testnet-dir)
@@ -140,14 +146,14 @@ if [[ "$DRY_RUN" == "1" ]]; then
   echo "[dry-run] write $MANIFEST"
 else
   mkdir -p "$TESTNET_DIR"
-  cat > "$MANIFEST" <<EOF
-TESTNET_DIR=$TESTNET_DIR
-NODE_COUNT=$NODE_COUNT
-BASE_GRPC_PORT=$BASE_GRPC_PORT
-BASE_SETTLEMENT_PORT=$BASE_SETTLEMENT_PORT
-HOST=$HOST
-RUNTIME_MODE=$RUNTIME_MODE
-EOF
+  {
+    write_env_assignment TESTNET_DIR "$TESTNET_DIR"
+    write_env_assignment NODE_COUNT "$NODE_COUNT"
+    write_env_assignment BASE_GRPC_PORT "$BASE_GRPC_PORT"
+    write_env_assignment BASE_SETTLEMENT_PORT "$BASE_SETTLEMENT_PORT"
+    write_env_assignment HOST "$HOST"
+    write_env_assignment RUNTIME_MODE "$RUNTIME_MODE"
+  } > "$MANIFEST"
 fi
 
 for i in $(seq 1 "$NODE_COUNT"); do
@@ -176,31 +182,23 @@ for i in $(seq 1 "$NODE_COUNT"); do
     fi
     rm -f "$PID_FILE"
     {
-      cat <<EOF
-NODE_ID=node${i}
-NODE_INDEX=$i
-NODE_DIR=$NODE_DIR
-RUNTIME_MODE=$RUNTIME_MODE
-GRPC_LISTEN=$HOST:$GRPC_PORT
-SETTLEMENT_HTTP_LISTEN=$HOST:$SETTLEMENT_PORT
-EOF
+      write_env_assignment NODE_ID "node${i}"
+      write_env_assignment NODE_INDEX "$i"
+      write_env_assignment NODE_DIR "$NODE_DIR"
+      write_env_assignment RUNTIME_MODE "$RUNTIME_MODE"
+      write_env_assignment GRPC_LISTEN "$HOST:$GRPC_PORT"
+      write_env_assignment SETTLEMENT_HTTP_LISTEN "$HOST:$SETTLEMENT_PORT"
       if [[ "$RUNTIME_MODE" == "comet" ]]; then
-        cat <<EOF
-COMET_P2P_LISTEN=tcp://$HOST:$COMET_P2P_PORT
-COMET_RPC_LISTEN=tcp://$HOST:$COMET_RPC_PORT
-COMET_PROXY_APP=tdpn-local-${i}
-STATE_DIR=$STATE_DIR
-COMET_HOME_DIR=$COMET_HOME_DIR
-EOF
+        write_env_assignment COMET_P2P_LISTEN "tcp://$HOST:$COMET_P2P_PORT"
+        write_env_assignment COMET_RPC_LISTEN "tcp://$HOST:$COMET_RPC_PORT"
+        write_env_assignment COMET_PROXY_APP "tdpn-local-${i}"
+        write_env_assignment STATE_DIR "$STATE_DIR"
+        write_env_assignment COMET_HOME_DIR "$COMET_HOME_DIR"
       else
-        cat <<EOF
-STATE_DIR=$STATE_DIR
-EOF
+        write_env_assignment STATE_DIR "$STATE_DIR"
       fi
-      cat <<EOF
-LOG_FILE=$LOG_FILE
-PID_FILE=$PID_FILE
-EOF
+      write_env_assignment LOG_FILE "$LOG_FILE"
+      write_env_assignment PID_FILE "$PID_FILE"
     } > "$CONFIG_FILE"
   fi
 done

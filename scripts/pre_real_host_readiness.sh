@@ -87,6 +87,11 @@ print_cmd() {
   printf '\n'
 }
 
+redact_sensitive_command_string() {
+  local value="$1"
+  printf '%s' "$value" | sed -E 's/(--(subject|anon-cred|campaign-subject|key|invite-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g'
+}
+
 extract_json_payload() {
   local prefix="$1"
   local text="$2"
@@ -595,6 +600,7 @@ if validate_manual_validation_summary_payload "$report_json_payload"; then
   manual_validation_report_readiness_status="$(printf '%s\n' "$report_json_payload" | jq -r '.report.readiness_status // ""' 2>/dev/null || true)"
   manual_validation_report_next_action_check_id="$(printf '%s\n' "$report_json_payload" | jq -r '.summary.next_action_check_id // ""' 2>/dev/null || true)"
   manual_validation_report_next_action_command="$(printf '%s\n' "$report_json_payload" | jq -r '.summary.pre_machine_c_gate.next_command // .summary.next_action_command // ""' 2>/dev/null || true)"
+  manual_validation_report_next_action_command="$(redact_sensitive_command_string "$manual_validation_report_next_action_command")"
 else
   manual_validation_report_status="fail"
   manual_validation_report_readiness_status=""

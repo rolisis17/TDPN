@@ -94,6 +94,18 @@ func TestResolveSafeDialAddressAllowsLocalhostLoopback(t *testing.T) {
 	}
 }
 
+func TestResolveSafeDialAddressAllowsLiteralLoopback(t *testing.T) {
+	t.Parallel()
+
+	target, err := resolveSafeDialAddress(context.Background(), stubOutboundResolver{}, "127.0.0.1:8082", false, true)
+	if err != nil {
+		t.Fatalf("expected literal loopback to be allowed, got %v", err)
+	}
+	if target != "127.0.0.1:8082" {
+		t.Fatalf("unexpected target: %q", target)
+	}
+}
+
 func TestResolveSafeDialAddressRejectsLocalhostMixedResolution(t *testing.T) {
 	t.Parallel()
 

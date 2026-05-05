@@ -67,7 +67,7 @@ check_pattern 'client_vpn_route_mode_for\(\)' \
   "client-vpn-up missing route mode classifier"
 check_pattern 'client-vpn-up refuses no-route full-tunnel in prod profile' \
   "client-vpn-up must fail closed for prod full-tunnel no-route starts"
-check_pattern 'set --install-route 1, use split AllowedIPs, or explicitly pass --allow-no-route 1' \
+check_pattern 'set --install-route 1, use split AllowedIPs, or disable --prod-profile for controlled diagnostics' \
   "client-vpn-up missing operator remediation hint for prod no-route refusal"
 check_pattern 'client-vpn-up route mode: no-route \(full-tunnel AllowedIPs=\$allowed_ips with install_route=0; host traffic will not be routed through the VPN\)' \
   "client-vpn-up missing explicit no-route warning for full-tunnel AllowedIPs with install_route=0"
@@ -77,13 +77,17 @@ check_pattern 'CLIENT_VPN_ALLOW_NO_ROUTE=\$allow_no_route' \
   "client-vpn-up missing state record for explicit no-route override"
 check_pattern '"CLIENT_WG_ALLOW_NO_ROUTE=\$allow_no_route"' \
   "client-vpn-up missing runtime env record for explicit no-route override"
+check_pattern '"CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP=1"' \
+  "client-vpn-up missing runtime env for explicit lab remote HTTP opt-in"
+check_pattern '"CLIENT_ALLOW_LAB_CONTROL_PLANE_LITERAL_IPS=1"' \
+  "client-vpn-up missing literal lab control-plane IP runtime env for explicit lab remote HTTP opt-in"
 check_pattern 'echo "  route_mode: \$route_mode"' \
   "client-vpn-up output missing route mode visibility"
 check_pattern 'route_warning: full-tunnel AllowedIPs are configured but install_route=0, so host traffic is not routed through the VPN' \
   "client-vpn-up/status missing explicit no-route warning"
 
 echo "[client-vpn-path-profile] wireguard runtime readiness marker"
-check_pattern 'client wireguard runtime ready:' \
+check_pattern 'client wireguard runtime ready:|client wg-kernel proxy listening:' \
   "client-vpn-up must wait for post-WireGuard-config runtime readiness marker"
 check_pattern 'wireguard runtime did not become ready' \
   "client-vpn-up timeout must describe WireGuard runtime readiness"

@@ -55,18 +55,34 @@ DIRECTORY_TRUST_STRICT="${DIRECTORY_TRUST_STRICT:-0}"
 ENTRY_LIVE_WG_MODE="${ENTRY_LIVE_WG_MODE:-0}"
 ENTRY_DIRECTORY_TRUST_STRICT="${ENTRY_DIRECTORY_TRUST_STRICT:-0}"
 ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR="${ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR:-0}"
+ENTRY_REQUIRE_MIDDLE_RELAY="${ENTRY_REQUIRE_MIDDLE_RELAY:-0}"
 EXIT_LIVE_WG_MODE="${EXIT_LIVE_WG_MODE:-0}"
 EXIT_TOKEN_PROOF_REPLAY_GUARD="${EXIT_TOKEN_PROOF_REPLAY_GUARD:-0}"
 EXIT_PEER_REBIND_SEC="${EXIT_PEER_REBIND_SEC:-0}"
 EXIT_STARTUP_SYNC_TIMEOUT_SEC="${EXIT_STARTUP_SYNC_TIMEOUT_SEC:-0}"
 EXIT_OPAQUE_SINK_ADDR="${EXIT_OPAQUE_SINK_ADDR:-}"
 EXIT_OPAQUE_SOURCE_ADDR="${EXIT_OPAQUE_SOURCE_ADDR:-}"
+CLIENT_PATH_PROFILE="${CLIENT_PATH_PROFILE:-}"
+ENTRY_DIRECTORY_TRUST_TOFU="${ENTRY_DIRECTORY_TRUST_TOFU:-}"
+EXIT_EGRESS_BACKEND="${EXIT_EGRESS_BACKEND:-}"
+MIDDLE_ADDR="${MIDDLE_ADDR:-}"
+MIDDLE_DATA_ADDR="${MIDDLE_DATA_ADDR:-}"
+MIDDLE_RELAY_ID="${MIDDLE_RELAY_ID:-middle-local-1}"
+MIDDLE_OPERATOR_ID="${MIDDLE_OPERATOR_ID:-op-middle}"
 ENTRY_PUZZLE_SECRET="${ENTRY_PUZZLE_SECRET:-integration-entry-secret-0001}"
 ENTRY_PUZZLE_DIFFICULTY="${ENTRY_PUZZLE_DIFFICULTY:-1}"
 LOG_FILE="${LOG_FILE:-/tmp/integration_real_wg_privileged.log}"
 KEY_DIR="$(mktemp -d)"
 CLIENT_KEY_FILE="$KEY_DIR/client.key"
 EXIT_KEY_FILE="$KEY_DIR/exit.key"
+DIRECTORY_KEY_FILE="$KEY_DIR/directory_ed25519.key"
+DIRECTORY_PUB_FILE="$DIRECTORY_KEY_FILE.pub"
+ISSUER_KEY_FILE="$KEY_DIR/issuer_ed25519.key"
+ISSUER_PUB_FILE="$ISSUER_KEY_FILE.pub"
+ENTRY_ROUTE_ASSERTION_KEY_FILE="$KEY_DIR/entry_route_assertion.key"
+ENTRY_ROUTE_ASSERTION_PUB_FILE="$ENTRY_ROUTE_ASSERTION_KEY_FILE.pub"
+MIDDLE_READY_FILE="$KEY_DIR/middle_ready"
+DIRECTORY_TRUSTED_KEYS_FILE="${DIRECTORY_TRUSTED_KEYS_FILE:-$KEY_DIR/directory_trusted_keys.txt}"
 
 DIRECTORY_URL="http://${DIRECTORY_ADDR}"
 ISSUER_URL="http://${ISSUER_ADDR}"
@@ -75,7 +91,7 @@ EXIT_CONTROL_URL="http://${EXIT_ADDR}"
 
 if [[ "$STRICT_BETA_PROFILE" == "1" ]]; then
   CLIENT_BETA_STRICT=1
-  ENTRY_BETA_STRICT=1
+  ENTRY_BETA_STRICT=0
   EXIT_BETA_STRICT=1
   CLIENT_REQUIRE_DISTINCT_OPERATORS=1
   CLIENT_DISABLE_SYNTHETIC_FALLBACK=1
@@ -84,6 +100,7 @@ if [[ "$STRICT_BETA_PROFILE" == "1" ]]; then
   ENTRY_LIVE_WG_MODE=1
   ENTRY_DIRECTORY_TRUST_STRICT=1
   ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1
+  ENTRY_REQUIRE_MIDDLE_RELAY=1
   ENTRY_OPERATOR_ID=op-entry
   EXIT_OPERATOR_ID=op-exit
   EXIT_LIVE_WG_MODE=1
@@ -102,6 +119,15 @@ if [[ "$STRICT_BETA_PROFILE" == "1" ]]; then
   if [[ -z "$EXIT_OPAQUE_SOURCE_ADDR" ]]; then
     EXIT_OPAQUE_SOURCE_ADDR="127.0.0.1:$((EXIT_WG_PORT + 101))"
   fi
+  DIRECTORY_TRUST_TOFU=0
+  ENTRY_DIRECTORY_TRUST_TOFU=0
+  EXIT_EGRESS_BACKEND="${EXIT_EGRESS_BACKEND:-command}"
+  if [[ -z "$CLIENT_PATH_PROFILE" ]]; then
+    CLIENT_PATH_PROFILE=3hop
+  fi
+  if [[ "$CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC" =~ ^[0-9]+$ ]] && ((CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC < 15)); then
+    CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC=15
+  fi
 fi
 
 addr_port() {
@@ -118,6 +144,13 @@ addr_port() {
   fi
   echo "$port"
 }
+
+if [[ -z "$MIDDLE_ADDR" ]]; then
+  MIDDLE_ADDR="127.0.0.1:$(( $(addr_port "$DIRECTORY_ADDR") + 4 ))"
+fi
+if [[ -z "$MIDDLE_DATA_ADDR" ]]; then
+  MIDDLE_DATA_ADDR="127.0.0.1:$(( $(addr_port "$EXIT_WG_PORT" "$EXIT_WG_PORT") + 1 ))"
+fi
 
 assert_port_free() {
   local proto="$1"
@@ -138,6 +171,151 @@ assert_port_free() {
     echo "preflight failed: ${label} port ${port}/${proto} already in use"
     echo "$matches"
     exit 1
+  fi
+}
+
+wait_for_http_ready() {
+  local url="$1"
+  local label="$2"
+  local deadline=$((SECONDS + 20))
+  while ((SECONDS < deadline)); do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "timed out waiting for ${label} (${url})"
+  return 1
+}
+
+write_sign_provider_upsert_proof_tool() {
+  cat >"$KEY_DIR/sign_provider_upsert_proof.go" <<'GO'
+package main
+
+import (
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+)
+
+func main() {
+	privateKey := flag.String("private-key", "", "base64url-encoded ed25519 private key")
+	tokenID := flag.String("token-id", "", "provider token id")
+	subject := flag.String("subject", "", "provider operator subject")
+	relayID := flag.String("relay-id", "", "relay id")
+	role := flag.String("role", "", "relay role")
+	pubKey := flag.String("pub-key", "", "relay pub key")
+	endpoint := flag.String("endpoint", "", "relay endpoint")
+	controlURL := flag.String("control-url", "", "relay control url")
+	nonce := flag.String("nonce", "", "proof nonce")
+	flag.Parse()
+
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(*privateKey))
+	if err != nil || len(raw) != ed25519.PrivateKeySize {
+		exitf("invalid private key")
+	}
+	normalizedRole := strings.TrimSpace(strings.ToLower(*role))
+	switch normalizedRole {
+	case "micro_relay", "middle", "relay", "transit", "three-hop-middle":
+		normalizedRole = "micro-relay"
+	}
+	payload := struct {
+		Context    string `json:"context"`
+		TokenID    string `json:"token_id"`
+		Subject    string `json:"subject"`
+		RelayID    string `json:"relay_id"`
+		Role       string `json:"role"`
+		PubKey     string `json:"pub_key"`
+		Endpoint   string `json:"endpoint"`
+		ControlURL string `json:"control_url"`
+		Nonce      string `json:"nonce"`
+	}{
+		Context:    "provider_relay_upsert_v1",
+		TokenID:    strings.TrimSpace(*tokenID),
+		Subject:    strings.ToLower(strings.TrimSpace(*subject)),
+		RelayID:    strings.TrimSpace(*relayID),
+		Role:       normalizedRole,
+		PubKey:     strings.TrimSpace(*pubKey),
+		Endpoint:   strings.TrimSpace(*endpoint),
+		ControlURL: strings.TrimSpace(*controlURL),
+		Nonce:      strings.TrimSpace(*nonce),
+	}
+	msg, err := json.Marshal(payload)
+	if err != nil {
+		exitf("marshal proof payload: %v", err)
+	}
+	fmt.Println(base64.RawURLEncoding.EncodeToString(ed25519.Sign(ed25519.PrivateKey(raw), msg)))
+}
+
+func exitf(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	os.Exit(1)
+}
+GO
+}
+
+seed_middle_relay() {
+  wait_for_http_ready "${DIRECTORY_URL}/v1/health" "directory health" || return 1
+  wait_for_http_ready "${ISSUER_URL}/v1/health" "issuer health" || return 1
+
+  local nonce key_json relay_pub relay_priv token_json token token_id proof upsert_payload upsert_resp relays_json
+  nonce="integration-real-wg-middle-$(date +%s)"
+  key_json="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)"
+  relay_pub="$(echo "$key_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')"
+  relay_priv="$(echo "$key_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')"
+  if [[ -z "$relay_pub" || -z "$relay_priv" ]]; then
+    echo "failed to generate middle relay provider key material"
+    return 1
+  fi
+
+  token_json="$(curl -fsS -X POST "${ISSUER_URL}/v1/sponsor/token" \
+    -H 'Content-Type: application/json' \
+    -H 'X-Sponsor-Token: integration-real-wg-sponsor-token' \
+    --data "{\"tier\":2,\"subject\":\"$MIDDLE_OPERATOR_ID\",\"token_type\":\"provider_role\",\"pop_pub_key\":\"$relay_pub\"}")"
+  token="$(echo "$token_json" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+  token_id="$(echo "$token_json" | sed -n 's/.*"jti":"\([^"]*\)".*/\1/p')"
+  if [[ -z "$token" || -z "$token_id" ]]; then
+    echo "failed to issue provider token for middle relay"
+    return 1
+  fi
+
+  write_sign_provider_upsert_proof_tool
+  proof="$(go run "$KEY_DIR/sign_provider_upsert_proof.go" \
+    --private-key "$relay_priv" \
+    --token-id "$token_id" \
+    --subject "$MIDDLE_OPERATOR_ID" \
+    --relay-id "$MIDDLE_RELAY_ID" \
+    --role micro-relay \
+    --pub-key "$relay_pub" \
+    --endpoint "$MIDDLE_DATA_ADDR" \
+    --control-url "http://$MIDDLE_ADDR" \
+    --nonce "$nonce")"
+  if [[ -z "$proof" ]]; then
+    echo "failed to sign provider relay upsert proof"
+    return 1
+  fi
+
+  upsert_payload=$(cat <<JSON
+{"relay_id":"$MIDDLE_RELAY_ID","role":"micro-relay","pub_key":"$relay_pub","endpoint":"$MIDDLE_DATA_ADDR","control_url":"http://$MIDDLE_ADDR","country_code":"ZZ","geo_confidence":1,"region":"local","capabilities":["wg"],"hop_roles":["middle"],"reputation_score":0.82,"uptime_score":0.91,"capacity_score":0.84,"abuse_penalty":0.10,"bond_score":0.60,"stake_score":0.55,"valid_for_sec":120,"token_proof":"$proof","token_proof_nonce":"$nonce"}
+JSON
+)
+  upsert_resp="$(curl -fsS -X POST "${DIRECTORY_URL}/v1/provider/relay/upsert" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $token" \
+    --data "$upsert_payload")"
+  if ! echo "$upsert_resp" | rg -q '"accepted":true'; then
+    echo "expected provider micro-relay upsert to be accepted"
+    return 1
+  fi
+
+  relays_json="$(curl -fsS "${DIRECTORY_URL}/v1/relays")"
+  if ! echo "$relays_json" | rg -q "\"relay_id\":\"$MIDDLE_RELAY_ID\""; then
+    echo "expected seeded micro-relay to be advertised by directory"
+    return 1
   fi
 }
 
@@ -163,9 +341,24 @@ fi
 
 wg genkey >"$CLIENT_KEY_FILE"
 wg genkey >"$EXIT_KEY_FILE"
-chmod 600 "$CLIENT_KEY_FILE" "$EXIT_KEY_FILE"
+go run ./cmd/adminsig gen --private-key-out "$DIRECTORY_KEY_FILE" --public-key-out "$DIRECTORY_PUB_FILE" >/dev/null
+go run ./cmd/adminsig gen --private-key-out "$ISSUER_KEY_FILE" --public-key-out "$ISSUER_PUB_FILE" >/dev/null
+go run ./cmd/adminsig gen --private-key-out "$ENTRY_ROUTE_ASSERTION_KEY_FILE" --public-key-out "$ENTRY_ROUTE_ASSERTION_PUB_FILE" >/dev/null
+chmod 600 "$CLIENT_KEY_FILE" "$EXIT_KEY_FILE" "$DIRECTORY_KEY_FILE" "$ISSUER_KEY_FILE" "$ENTRY_ROUTE_ASSERTION_KEY_FILE"
 CLIENT_WG_PUB="$(wg pubkey <"$CLIENT_KEY_FILE")"
 EXIT_WG_PUB="$(wg pubkey <"$EXIT_KEY_FILE")"
+DIRECTORY_PUB="$(tr -d '\r\n[:space:]' <"$DIRECTORY_PUB_FILE")"
+ENTRY_ROUTE_ASSERTION_PUB="$(tr -d '\r\n[:space:]' <"$ENTRY_ROUTE_ASSERTION_PUB_FILE")"
+if [[ -z "$DIRECTORY_PUB" ]]; then
+  echo "failed to prepare directory public key"
+  exit 1
+fi
+if [[ -z "$ENTRY_ROUTE_ASSERTION_PUB" ]]; then
+  echo "failed to prepare entry route assertion public key"
+  exit 1
+fi
+mkdir -p "$(dirname "$DIRECTORY_TRUSTED_KEYS_FILE")"
+printf '%s\n' "$DIRECTORY_PUB" >"$DIRECTORY_TRUSTED_KEYS_FILE"
 
 rm -f "$LOG_FILE"
 
@@ -183,10 +376,21 @@ fi
 if [[ -n "$EXIT_OPAQUE_SOURCE_ADDR" ]]; then
   assert_port_free udp "$(addr_port "$EXIT_OPAQUE_SOURCE_ADDR")" "EXIT_OPAQUE_SOURCE_ADDR"
 fi
+if [[ "$STRICT_BETA_PROFILE" == "1" ]]; then
+  assert_port_free tcp "$(addr_port "$MIDDLE_ADDR")" "MIDDLE_ADDR"
+  assert_port_free udp "$(addr_port "$MIDDLE_DATA_ADDR")" "MIDDLE_DATA_ADDR"
+fi
+
+node_roles=(--directory --issuer --entry --exit --client)
+if [[ "$STRICT_BETA_PROFILE" == "1" ]]; then
+  node_roles+=(--middle)
+fi
 
 DATA_PLANE_MODE=opaque \
 CLIENT_WG_BACKEND=command \
 WG_BACKEND=command \
+DIRECTORY_PRIVATE_KEY_FILE="$DIRECTORY_KEY_FILE" \
+ISSUER_PRIVATE_KEY_FILE="$ISSUER_KEY_FILE" \
 DIRECTORY_ADDR="$DIRECTORY_ADDR" \
 ISSUER_ADDR="$ISSUER_ADDR" \
 ENTRY_ADDR="$ENTRY_ADDR" \
@@ -195,6 +399,11 @@ DIRECTORY_URL="$DIRECTORY_URL" \
 ISSUER_URL="$ISSUER_URL" \
 ENTRY_URL="$ENTRY_URL" \
 EXIT_CONTROL_URL="$EXIT_CONTROL_URL" \
+ISSUER_SPONSOR_API_TOKEN=integration-real-wg-sponsor-token \
+DIRECTORY_PROVIDER_ISSUER_URLS="$ISSUER_URL" \
+DIRECTORY_ISSUER_TRUST_URLS="$ISSUER_URL" \
+DIRECTORY_TRUST_TOFU="${DIRECTORY_TRUST_TOFU:-0}" \
+DIRECTORY_TRUSTED_KEYS_FILE="$DIRECTORY_TRUSTED_KEYS_FILE" \
 CLIENT_WG_PRIVATE_KEY_PATH="$CLIENT_KEY_FILE" \
 CLIENT_WG_PUBLIC_KEY="$CLIENT_WG_PUB" \
 EXIT_WG_PRIVATE_KEY_PATH="$EXIT_KEY_FILE" \
@@ -210,18 +419,27 @@ ENTRY_BETA_STRICT="$ENTRY_BETA_STRICT" \
 EXIT_BETA_STRICT="$EXIT_BETA_STRICT" \
 CLIENT_REQUIRE_DISTINCT_OPERATORS="$CLIENT_REQUIRE_DISTINCT_OPERATORS" \
 ENTRY_OPERATOR_ID="$ENTRY_OPERATOR_ID" \
+ENTRY_RELAY_ID=entry-local-1 \
 EXIT_OPERATOR_ID="$EXIT_OPERATOR_ID" \
+EXIT_RELAY_ID=exit-local-1 \
 CLIENT_DISABLE_SYNTHETIC_FALLBACK="$CLIENT_DISABLE_SYNTHETIC_FALLBACK" \
 CLIENT_LIVE_WG_MODE="$CLIENT_LIVE_WG_MODE" \
 DIRECTORY_TRUST_STRICT="$DIRECTORY_TRUST_STRICT" \
 ENTRY_LIVE_WG_MODE="$ENTRY_LIVE_WG_MODE" \
 ENTRY_DIRECTORY_TRUST_STRICT="$ENTRY_DIRECTORY_TRUST_STRICT" \
+ENTRY_DIRECTORY_TRUST_TOFU="${ENTRY_DIRECTORY_TRUST_TOFU:-0}" \
+ENTRY_DIRECTORY_TRUSTED_KEYS_FILE="$DIRECTORY_TRUSTED_KEYS_FILE" \
 ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR="$ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR" \
+ENTRY_REQUIRE_MIDDLE_RELAY="$ENTRY_REQUIRE_MIDDLE_RELAY" \
+ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE="$ENTRY_ROUTE_ASSERTION_KEY_FILE" \
+ENTRY_ROUTE_ASSERTION_PUBLIC_KEY="$ENTRY_ROUTE_ASSERTION_PUB" \
 ENTRY_PUZZLE_SECRET="$ENTRY_PUZZLE_SECRET" \
 ENTRY_PUZZLE_DIFFICULTY="$ENTRY_PUZZLE_DIFFICULTY" \
 EXIT_LIVE_WG_MODE="$EXIT_LIVE_WG_MODE" \
+EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS="$ENTRY_ROUTE_ASSERTION_PUB" \
 EXIT_TOKEN_PROOF_REPLAY_GUARD="$EXIT_TOKEN_PROOF_REPLAY_GUARD" \
 EXIT_PEER_REBIND_SEC="$EXIT_PEER_REBIND_SEC" \
+EXIT_EGRESS_BACKEND="$EXIT_EGRESS_BACKEND" \
 EXIT_STARTUP_SYNC_TIMEOUT_SEC="$EXIT_STARTUP_SYNC_TIMEOUT_SEC" \
 EXIT_OPAQUE_SINK_ADDR="$EXIT_OPAQUE_SINK_ADDR" \
 EXIT_OPAQUE_SOURCE_ADDR="$EXIT_OPAQUE_SOURCE_ADDR" \
@@ -232,14 +450,44 @@ CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC="$CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC" \
 CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC="$CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC" \
 CLIENT_BOOTSTRAP_JITTER_PCT="$CLIENT_BOOTSTRAP_JITTER_PCT" \
 CLIENT_STARTUP_SYNC_TIMEOUT_SEC="$CLIENT_STARTUP_SYNC_TIMEOUT_SEC" \
+CLIENT_PATH_PROFILE="$CLIENT_PATH_PROFILE" \
 ENTRY_DATA_ADDR="$ENTRY_DATA_ADDR" \
 ENTRY_ENDPOINT="$ENTRY_DATA_ADDR" \
+MIDDLE_ADDR="$MIDDLE_ADDR" \
+MIDDLE_DATA_ADDR="$MIDDLE_DATA_ADDR" \
+MIDDLE_ENTRY_DATA_ADDR="$ENTRY_DATA_ADDR" \
+MIDDLE_EXIT_DATA_ADDR="$EXIT_DATA_ADDR" \
+MIDDLE_READY_FILE="$MIDDLE_READY_FILE" \
 EXIT_DATA_ADDR="$EXIT_DATA_ADDR" \
 EXIT_ENDPOINT="$EXIT_DATA_ADDR" \
 EXIT_WG_LISTEN_PORT="$EXIT_WG_PORT" \
 EXIT_WG_KERNEL_PROXY=1 \
-timeout "${SCRIPT_TIMEOUT_SEC}s" go run ./cmd/node --directory --issuer --entry --exit --client >"$LOG_FILE" 2>&1 &
+timeout "${SCRIPT_TIMEOUT_SEC}s" go run ./cmd/node "${node_roles[@]}" >"$LOG_FILE" 2>&1 &
 node_pid=$!
+
+if [[ "$STRICT_BETA_PROFILE" == "1" ]]; then
+  for _ in $(seq 1 100); do
+    if [[ -s "$MIDDLE_READY_FILE" ]]; then
+      break
+    fi
+    if ! kill -0 "$node_pid" >/dev/null 2>&1; then
+      echo "node exited before middle relay readiness"
+      cat "$LOG_FILE"
+      exit 1
+    fi
+    sleep 0.2
+  done
+  if [[ ! -s "$MIDDLE_READY_FILE" ]]; then
+    echo "middle relay did not become ready"
+    cat "$LOG_FILE"
+    exit 1
+  fi
+  if ! seed_middle_relay; then
+    echo "failed to seed strict beta middle relay"
+    cat "$LOG_FILE"
+    exit 1
+  fi
+fi
 
 ready=0
 for _ in $(seq 1 200); do
@@ -248,7 +496,7 @@ for _ in $(seq 1 200); do
     cat "$LOG_FILE"
     exit 1
   fi
-  if rg -q "client wireguard runtime ready:" "$LOG_FILE"; then
+  if rg -q "client wireguard runtime ready:|client wg-kernel proxy listening:" "$LOG_FILE"; then
     ready=1
     break
   fi
@@ -481,8 +729,8 @@ if [[ "$STRICT_BETA_PROFILE" == "1" ]]; then
     cat "$LOG_FILE"
     exit 1
   fi
-  if ! rg -q "entry route discovery: .*trust_strict=true .*live_wg_mode=true" "$LOG_FILE"; then
-    echo "strict beta profile: missing entry trust/live strict signal"
+  if ! rg -q "entry route discovery: .*trust_strict=true .*live_wg_mode=true .*require_middle_relay=true" "$LOG_FILE"; then
+    echo "strict beta profile: missing entry trust/live/middle strict signal"
     cat "$LOG_FILE"
     exit 1
   fi

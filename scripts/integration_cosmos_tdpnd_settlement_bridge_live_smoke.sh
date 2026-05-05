@@ -346,8 +346,8 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 5 {
-		fmt.Fprintf(os.Stderr, "usage: %s <grpc-port> <token> <evidence-id> <penalty-id>\n", os.Args[0])
+	if len(os.Args) != 6 {
+		fmt.Fprintf(os.Stderr, "usage: %s <grpc-port> <token> <finality-token> <evidence-id> <penalty-id>\n", os.Args[0])
 		os.Exit(2)
 	}
 
@@ -375,15 +375,19 @@ func main() {
 	defer conn.Close()
 
 	client := vpnslashingpb.NewMsgClient(conn)
-	callCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer "+os.Args[2])
+	callCtx := metadata.AppendToOutgoingContext(
+		context.Background(),
+		"authorization", "Bearer "+os.Args[2],
+		"x-gpm-finality-authorization", "Bearer "+os.Args[3],
+	)
 	confirmResp, err := client.ConfirmEvidence(callCtx, &vpnslashingpb.MsgConfirmEvidenceRequest{
-		EvidenceId: os.Args[3],
+		EvidenceId: os.Args[4],
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "confirm evidence: %v\n", err)
 		os.Exit(1)
 	}
-	if confirmResp.GetEvidence().GetEvidenceId() != os.Args[3] {
+	if confirmResp.GetEvidence().GetEvidenceId() != os.Args[4] {
 		fmt.Fprintf(os.Stderr, "unexpected confirmed evidence id %q\n", confirmResp.GetEvidence().GetEvidenceId())
 		os.Exit(1)
 	}
@@ -393,8 +397,8 @@ func main() {
 	}
 	resp, err := client.RecordPenalty(callCtx, &vpnslashingpb.MsgRecordPenaltyRequest{
 		Penalty: &vpnslashingpb.PenaltyDecision{
-			PenaltyId:       os.Args[4],
-			EvidenceId:      os.Args[3],
+			PenaltyId:       os.Args[5],
+			EvidenceId:      os.Args[4],
 			SlashBasisPoint: 25,
 			Jailed:          false,
 			AppliedAtUnix:   1735689604,
@@ -404,7 +408,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "record penalty: %v\n", err)
 		os.Exit(1)
 	}
-	if resp.GetPenalty().GetPenaltyId() != os.Args[4] {
+	if resp.GetPenalty().GetPenaltyId() != os.Args[5] {
 		fmt.Fprintf(os.Stderr, "unexpected penalty id %q\n", resp.GetPenalty().GetPenaltyId())
 		os.Exit(1)
 	}
@@ -547,10 +551,10 @@ grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 post_expect_status "${BASE_URL}/x/vpnbilling/settlements" '{"SettlementID":"set-live-1","ReservationID":"bill-res-live-1","SessionID":"sess-live-1","SubjectID":"subject-live-1","ChargedMicros":250,"Currency":"TDPNC","SettledAt":"2026-01-01T00:00:00Z","Status":"confirmed"}' "200" "${TOKEN}" "X-GPM-Finality-Authorization" "${FINALITY_TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
-post_expect_status "${BASE_URL}/x/vpnrewards/proofs" '{"ProofPath":"traffic-proof/reward-live-1","TrafficProofRef":"obj://traffic-proof/reward-live-1","TrustContract":"settlement.reward.objective-traffic.v1","RewardID":"reward-live-1","ProviderSubjectID":"provider-live-1","SessionID":"sess-live-1","RewardMicros":100,"Currency":"TDPNC","IssuedAt":"2026-01-01T00:00:00Z","Verified":true,"VerifierID":"bridge-live-smoke","VerifiedAt":"2026-01-01T00:00:01Z"}' "200" "${TOKEN}" "X-GPM-Reward-Proof-Authorization" "${REWARD_PROOF_TOKEN}"
+post_expect_status "${BASE_URL}/x/vpnrewards/proofs" '{"ProofPath":"traffic-proof/reward-live-1","TrafficProofRef":"obj://traffic-proof/reward-live-1","TrustContract":"settlement.reward.objective-traffic.v1","RewardID":"reward-live-1","ProviderSubjectID":"provider-live-1","SessionID":"sess-live-1","RewardMicros":100,"Currency":"TDPNC","IssuedAt":"2026-01-01T00:00:00Z","PayoutPeriodStart":"2025-12-29T00:00:00Z","PayoutPeriodEnd":"2026-01-05T00:00:00Z","Verified":true,"VerifierID":"bridge-live-smoke","VerifiedAt":"2026-01-01T00:00:01Z"}' "200" "${TOKEN}" "X-GPM-Reward-Proof-Authorization" "${REWARD_PROOF_TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
-post_expect_status "${BASE_URL}/x/vpnrewards/issues" '{"RewardID":"reward-live-1","ProviderSubjectID":"provider-live-1","SessionID":"sess-live-1","TrafficProofRef":"obj://traffic-proof/reward-live-1","RewardMicros":100,"Currency":"TDPNC","IssuedAt":"2026-01-01T00:00:00Z"}' "200" "${TOKEN}"
+post_expect_status "${BASE_URL}/x/vpnrewards/issues" '{"RewardID":"reward-live-1","ProviderSubjectID":"provider-live-1","SessionID":"sess-live-1","TrafficProofRef":"obj://traffic-proof/reward-live-1","RewardMicros":100,"Currency":"TDPNC","IssuedAt":"2026-01-01T00:00:00Z","PayoutPeriodStart":"2025-12-29T00:00:00Z","PayoutPeriodEnd":"2026-01-05T00:00:00Z"}' "200" "${TOKEN}"
 grep -q '"ok"[[:space:]]*:[[:space:]]*true' "${RESP_FILE}"
 
 post_expect_status "${BASE_URL}/x/vpnsponsor/reservations" '{"ReservationID":"res-live-1","SponsorID":"sponsor-live-1","SubjectID":"app-live-1","SessionID":"sess-live-1","AmountMicros":500,"Currency":"TDPNC","CreatedAt":"2026-01-01T00:00:00Z","ExpiresAt":"2026-12-31T00:00:00Z"}' "200" "${TOKEN}"
@@ -572,10 +576,10 @@ grep -q '"id"[[:space:]]*:[[:space:]]*"bill-res-canon-live-1"' "${RESP_FILE}"
 post_expect_status "${BASE_URL}/x/vpnbilling/settlements" '{"SettlementID":"  SET-CANON-LIVE-1  ","ReservationID":"  BILL-RES-CANON-LIVE-1  ","SessionID":"  SESS-CANON-LIVE-1  ","SubjectID":"  SUBJECT-CANON-LIVE-1  ","ChargedMicros":275,"Currency":" TdPnC ","SettledAt":"2026-01-01T00:00:10Z","Status":"confirmed"}' "200" "${TOKEN}" "X-GPM-Finality-Authorization" "${FINALITY_TOKEN}"
 grep -q '"id"[[:space:]]*:[[:space:]]*"set-canon-live-1"' "${RESP_FILE}"
 
-post_expect_status "${BASE_URL}/x/vpnrewards/proofs" '{"ProofPath":"traffic-proof/reward-canon-live-1","TrafficProofRef":"obj://traffic-proof/reward-canon-live-1","TrustContract":"settlement.reward.objective-traffic.v1","RewardID":"  REWARD-CANON-LIVE-1  ","ProviderSubjectID":"  PROVIDER-CANON-LIVE-1  ","SessionID":"  SESS-CANON-LIVE-1  ","RewardMicros":125,"Currency":" TdPnC ","IssuedAt":"2026-01-01T00:00:11Z","Verified":true,"VerifierID":"bridge-live-smoke","VerifiedAt":"2026-01-01T00:00:12Z"}' "200" "${TOKEN}" "X-GPM-Reward-Proof-Authorization" "${REWARD_PROOF_TOKEN}"
+post_expect_status "${BASE_URL}/x/vpnrewards/proofs" '{"ProofPath":"traffic-proof/reward-canon-live-1","TrafficProofRef":"obj://traffic-proof/reward-canon-live-1","TrustContract":"settlement.reward.objective-traffic.v1","RewardID":"  REWARD-CANON-LIVE-1  ","ProviderSubjectID":"  PROVIDER-CANON-LIVE-1  ","SessionID":"  SESS-CANON-LIVE-1  ","RewardMicros":125,"Currency":" TdPnC ","IssuedAt":"2026-01-01T00:00:11Z","PayoutPeriodStart":"2025-12-29T00:00:00Z","PayoutPeriodEnd":"2026-01-05T00:00:00Z","Verified":true,"VerifierID":"bridge-live-smoke","VerifiedAt":"2026-01-01T00:00:12Z"}' "200" "${TOKEN}" "X-GPM-Reward-Proof-Authorization" "${REWARD_PROOF_TOKEN}"
 grep -q '"id"[[:space:]]*:[[:space:]]*"traffic-proof/reward-canon-live-1"' "${RESP_FILE}"
 
-post_expect_status "${BASE_URL}/x/vpnrewards/issues" '{"RewardID":"  REWARD-CANON-LIVE-1  ","ProviderSubjectID":"  PROVIDER-CANON-LIVE-1  ","SessionID":"  SESS-CANON-LIVE-1  ","TrafficProofRef":" obj://traffic-proof/reward-canon-live-1 ","RewardMicros":125,"Currency":" TdPnC ","IssuedAt":"2026-01-01T00:00:11Z"}' "200" "${TOKEN}"
+post_expect_status "${BASE_URL}/x/vpnrewards/issues" '{"RewardID":"  REWARD-CANON-LIVE-1  ","ProviderSubjectID":"  PROVIDER-CANON-LIVE-1  ","SessionID":"  SESS-CANON-LIVE-1  ","TrafficProofRef":" obj://traffic-proof/reward-canon-live-1 ","RewardMicros":125,"Currency":" TdPnC ","IssuedAt":"2026-01-01T00:00:11Z","PayoutPeriodStart":"2025-12-29T00:00:00Z","PayoutPeriodEnd":"2026-01-05T00:00:00Z"}' "200" "${TOKEN}"
 grep -q '"id"[[:space:]]*:[[:space:]]*"dist:reward-canon-live-1"' "${RESP_FILE}"
 
 post_expect_status "${BASE_URL}/x/vpnsponsor/reservations" '{"ReservationID":"  RES-CANON-LIVE-1  ","SponsorID":"  SPONSOR-CANON-LIVE-1  ","SubjectID":"  APP-CANON-LIVE-1  ","SessionID":"  Sess-Canon-Live-1  ","AmountMicros":650,"Currency":" TdPnC ","CreatedAt":"2026-01-01T00:00:12Z","ExpiresAt":"2026-12-31T00:00:00Z"}' "200" "${TOKEN}"
@@ -647,7 +651,7 @@ grep -q '"EvidencePointer"[[:space:]]*:[[:space:]]*"obj://audit/Action-Canon-Liv
 
 (
   cd blockchain/tdpn-chain
-  go run "${GRPC_HELPER_FILE}" "${GRPC_PORT}" "${TOKEN}" "ev-live-1" "pen-live-1"
+  go run "${GRPC_HELPER_FILE}" "${GRPC_PORT}" "${TOKEN}" "${FINALITY_TOKEN}" "ev-live-1" "pen-live-1"
 )
 rm -f "${GRPC_HELPER_FILE}"
 GRPC_HELPER_FILE=""

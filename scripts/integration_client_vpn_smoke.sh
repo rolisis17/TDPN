@@ -413,6 +413,7 @@ CLIENT_VPN_SMOKE_CURL_BIN="$TMP_BIN/curl" \
   --subject inv-test \
   --interface wgvpn9 \
   --pre-real-host-readiness 1 \
+  --allow-insecure-remote-http 1 \
   --public-ip-url https://ip.example \
   --country-url https://country.example \
   --print-summary-json 1 >/tmp/integration_client_vpn_smoke_ok.log 2>&1
@@ -427,8 +428,18 @@ if ! rg -q '^client-vpn-preflight ' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
+if ! rg -q '^client-vpn-preflight .*--allow-insecure-remote-http 1' "$CAPTURE"; then
+  echo "expected preflight call to receive lab remote HTTP opt-in"
+  cat "$CAPTURE"
+  exit 1
+fi
 if ! rg -q '^pre-real-host-readiness ' "$CAPTURE"; then
   echo "expected pre-real-host-readiness call missing"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^pre-real-host-readiness .*--strict-beta 0' "$CAPTURE"; then
+  echo "expected pre-real-host-readiness to default to non-strict local stack mode"
   cat "$CAPTURE"
   exit 1
 fi
@@ -439,6 +450,11 @@ if ! rg -q '^runtime-doctor ' "$CAPTURE"; then
 fi
 if ! rg -q '^client-vpn-up ' "$CAPTURE"; then
   echo "expected up call missing"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q '^client-vpn-up .*--allow-insecure-remote-http 1' "$CAPTURE"; then
+  echo "expected up call to receive lab remote HTTP opt-in"
   cat "$CAPTURE"
   exit 1
 fi
@@ -755,6 +771,12 @@ assert_up_failure_diagnostics_case "control_plane_timeout" \
   "control_plane_timeout" \
   "--ready-timeout-sec"
 
+echo "[client-vpn-smoke] up failure diagnostics: wireguard runtime timeout"
+assert_up_failure_diagnostics_case "wireguard_runtime_timeout" \
+  "client-vpn did not observe WireGuard runtime readiness within 30s; wireguard runtime did not become ready" \
+  "wireguard_runtime_timeout" \
+  "--ready-timeout-sec"
+
 echo "[client-vpn-smoke] up failure diagnostics: trust mismatch"
 assert_up_failure_diagnostics_case "trust_mismatch" \
   "client bootstrap failed: directory quorum not met: success=0 required=1: directory key is not trusted" \
@@ -968,6 +990,8 @@ CLIENT_VPN_SMOKE_SCRIPT="$FAKE_SMOKE" \
   --interface wgvpn11 \
   --defer-no-root 1 \
   --pre-real-host-readiness 1 \
+  --pre-real-host-readiness-strict-beta 1 \
+  --allow-insecure-remote-http 1 \
   --trust-reset-on-key-mismatch 1 \
   --trust-reset-scope global \
   --public-ip-url https://ip.example \
@@ -996,6 +1020,16 @@ if ! rg -q -- '--defer-no-root 1' "$TMP_DIR/smoke_wrapper_calls.log"; then
 fi
 if ! rg -q -- '--pre-real-host-readiness 1' "$TMP_DIR/smoke_wrapper_calls.log"; then
   echo "easy_node client-vpn-smoke forwarding missing pre-real-host-readiness"
+  cat "$TMP_DIR/smoke_wrapper_calls.log"
+  exit 1
+fi
+if ! rg -q -- '--pre-real-host-readiness-strict-beta 1' "$TMP_DIR/smoke_wrapper_calls.log"; then
+  echo "easy_node client-vpn-smoke forwarding missing pre-real-host-readiness-strict-beta"
+  cat "$TMP_DIR/smoke_wrapper_calls.log"
+  exit 1
+fi
+if ! rg -q -- '--allow-insecure-remote-http 1' "$TMP_DIR/smoke_wrapper_calls.log"; then
+  echo "easy_node client-vpn-smoke forwarding missing allow-insecure-remote-http"
   cat "$TMP_DIR/smoke_wrapper_calls.log"
   exit 1
 fi

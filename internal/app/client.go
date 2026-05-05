@@ -176,6 +176,7 @@ const (
 	clientHealthCacheMaxEntries                     = 1024
 	clientMaxPuzzleDifficulty                       = 64
 	clientAllowDangerousOutboundPrivateDNSEnv       = "CLIENT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS"
+	clientAllowLabControlPlaneLiteralIPsEnv         = "CLIENT_ALLOW_LAB_CONTROL_PLANE_LITERAL_IPS"
 )
 
 type middleSelectionStatus int
@@ -650,6 +651,7 @@ func (c *Client) Run(ctx context.Context) error {
 		c.httpClient,
 		strings.TrimSpace(os.Getenv(clientAllowDangerousOutboundPrivateDNSEnv)) == "1",
 		c.betaStrict || c.prodStrict,
+		clientAllowLabControlPlaneLiteralIPs(c.prodStrict),
 	)
 
 	bootstrapInterval := c.bootstrapInterval
@@ -5402,6 +5404,13 @@ func allowDangerousInsecureControlURLHTTP() bool {
 	return raw == "1" || strings.EqualFold(raw, "true")
 }
 
+func clientAllowLabControlPlaneLiteralIPs(prodStrict bool) bool {
+	if prodStrict {
+		return false
+	}
+	return envEnabled(clientAllowLabControlPlaneLiteralIPsEnv)
+}
+
 func envEnabled(name string) bool {
 	value := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
 	switch value {
@@ -5421,6 +5430,7 @@ type clientOutboundPolicyRoundTripper struct {
 	resolver                  clientOutboundIPResolver
 	allowDangerousPrivateDNS  bool
 	strictBlockPrivateLiteral bool
+	allowLabLiteralIPs        bool
 }
 
 func (rt *clientOutboundPolicyRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -5446,6 +5456,7 @@ func (rt *clientOutboundPolicyRoundTripper) RoundTrip(req *http.Request) (*http.
 		address,
 		rt.allowDangerousPrivateDNS,
 		rt.strictBlockPrivateLiteral,
+		rt.allowLabLiteralIPs,
 	); err != nil {
 		return nil, err
 	}
@@ -5456,7 +5467,7 @@ func (rt *clientOutboundPolicyRoundTripper) RoundTrip(req *http.Request) (*http.
 	return inner.RoundTrip(req)
 }
 
-func configureClientOutboundDialPolicy(client *http.Client, allowDangerousPrivateDNS bool, strictBlockPrivateLiteral bool) {
+func configureClientOutboundDialPolicy(client *http.Client, allowDangerousPrivateDNS bool, strictBlockPrivateLiteral bool, allowLabLiteralIPs bool) {
 	if client == nil {
 		return
 	}
@@ -5471,7 +5482,7 @@ func configureClientOutboundDialPolicy(client *http.Client, allowDangerousPrivat
 		KeepAlive: 30 * time.Second,
 	}
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		safeAddress, err := resolveClientSafeDialAddress(ctx, resolver, address, allowDangerousPrivateDNS, strictBlockPrivateLiteral)
+		safeAddress, err := resolveClientSafeDialAddress(ctx, resolver, address, allowDangerousPrivateDNS, strictBlockPrivateLiteral, allowLabLiteralIPs)
 		if err != nil {
 			return nil, err
 		}
@@ -5482,6 +5493,7 @@ func configureClientOutboundDialPolicy(client *http.Client, allowDangerousPrivat
 		resolver:                  resolver,
 		allowDangerousPrivateDNS:  allowDangerousPrivateDNS,
 		strictBlockPrivateLiteral: strictBlockPrivateLiteral,
+		allowLabLiteralIPs:        allowLabLiteralIPs,
 	}
 }
 
@@ -5495,7 +5507,7 @@ func cloneClientHTTPTransport(base http.RoundTripper) *http.Transport {
 	return &http.Transport{}
 }
 
-func resolveClientSafeDialAddress(ctx context.Context, resolver clientOutboundIPResolver, address string, allowDangerousPrivateDNS bool, strictBlockPrivateLiteral bool) (string, error) {
+func resolveClientSafeDialAddress(ctx context.Context, resolver clientOutboundIPResolver, address string, allowDangerousPrivateDNS bool, strictBlockPrivateLiteral bool, allowLabLiteralIPs bool) (string, error) {
 	host, port, err := net.SplitHostPort(strings.TrimSpace(address))
 	if err != nil {
 		return "", fmt.Errorf("invalid outbound address %q: %w", address, err)
@@ -5508,7 +5520,13 @@ func resolveClientSafeDialAddress(ctx context.Context, resolver clientOutboundIP
 		return "", fmt.Errorf("outbound host is required")
 	}
 	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() {
+			return net.JoinHostPort(ip.String(), port), nil
+		}
 		if isClientDisallowedOutboundDialIP(ip) {
+			if allowLabLiteralIPs && isClientLabControlPlaneLiteralIP(ip) {
+				return net.JoinHostPort(ip.String(), port), nil
+			}
 			if strictBlockPrivateLiteral {
 				return "", fmt.Errorf("outbound literal host %q is blocked by outbound dial policy (strict mode)", ip.String())
 			}
@@ -5598,6 +5616,13 @@ func isSharedAddressSpaceCGNATIP(ip net.IP) bool {
 		return false
 	}
 	return ipv4[0] == 100 && ipv4[1]&0xc0 == 0x40
+}
+
+func isClientLabControlPlaneLiteralIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	return ip.IsPrivate() || isSharedAddressSpaceCGNATIP(ip)
 }
 
 func isLoopbackURLHost(host string) bool {

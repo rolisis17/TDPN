@@ -31,7 +31,7 @@ func TestConfigureClientOutboundDialPolicyDisablesProxyByDefault(t *testing.T) {
 	t.Setenv("MTLS_ALLOW_PROXY_FROM_ENV", "")
 
 	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment}}
-	configureClientOutboundDialPolicy(client, false, false)
+	configureClientOutboundDialPolicy(client, false, false, false)
 
 	policyRT, ok := client.Transport.(*clientOutboundPolicyRoundTripper)
 	if !ok || policyRT == nil {
@@ -50,7 +50,7 @@ func TestConfigureClientOutboundDialPolicyAllowsProxyFromEnv(t *testing.T) {
 	t.Setenv("MTLS_ALLOW_PROXY_FROM_ENV", "1")
 
 	client := &http.Client{}
-	configureClientOutboundDialPolicy(client, false, false)
+	configureClientOutboundDialPolicy(client, false, false, false)
 
 	policyRT, ok := client.Transport.(*clientOutboundPolicyRoundTripper)
 	if !ok || policyRT == nil {
@@ -71,7 +71,7 @@ func TestResolveClientSafeDialAddressBlocksPrivateDNS(t *testing.T) {
 			"example.com": {{IP: net.ParseIP("127.0.0.1")}},
 		},
 	}
-	_, err := resolveClientSafeDialAddress(context.Background(), resolver, "example.com:443", false, false)
+	_, err := resolveClientSafeDialAddress(context.Background(), resolver, "example.com:443", false, false, false)
 	if err == nil || !strings.Contains(err.Error(), "blocked address classes") {
 		t.Fatalf("expected blocked address error, got %v", err)
 	}
@@ -83,9 +83,19 @@ func TestResolveClientSafeDialAddressAllowsLocalhostLoopback(t *testing.T) {
 			"localhost": {{IP: net.ParseIP("127.0.0.1")}},
 		},
 	}
-	got, err := resolveClientSafeDialAddress(context.Background(), resolver, "localhost:443", false, false)
+	got, err := resolveClientSafeDialAddress(context.Background(), resolver, "localhost:443", false, false, false)
 	if err != nil {
 		t.Fatalf("expected localhost to be allowed, got %v", err)
+	}
+	if got != "127.0.0.1:443" {
+		t.Fatalf("unexpected dial address: %s", got)
+	}
+}
+
+func TestResolveClientSafeDialAddressAllowsLiteralLoopback(t *testing.T) {
+	got, err := resolveClientSafeDialAddress(context.Background(), nil, "127.0.0.1:443", false, true, false)
+	if err != nil {
+		t.Fatalf("expected literal loopback to be allowed, got %v", err)
 	}
 	if got != "127.0.0.1:443" {
 		t.Fatalf("unexpected dial address: %s", got)
@@ -101,7 +111,7 @@ func TestResolveClientSafeDialAddressAllowsLocalhostAllLoopbackAnswers(t *testin
 			},
 		},
 	}
-	got, err := resolveClientSafeDialAddress(context.Background(), resolver, "localhost:443", false, false)
+	got, err := resolveClientSafeDialAddress(context.Background(), resolver, "localhost:443", false, false, false)
 	if err != nil {
 		t.Fatalf("expected localhost all-loopback resolution to be allowed, got %v", err)
 	}
@@ -119,7 +129,7 @@ func TestResolveClientSafeDialAddressRejectsLocalhostMixedResolution(t *testing.
 			},
 		},
 	}
-	_, err := resolveClientSafeDialAddress(context.Background(), resolver, "localhost:443", false, false)
+	_, err := resolveClientSafeDialAddress(context.Background(), resolver, "localhost:443", false, false, false)
 	if err == nil {
 		t.Fatalf("expected mixed localhost resolution to be rejected")
 	}
@@ -137,7 +147,7 @@ func TestResolveClientSafeDialAddressAllowsLocalhostMixedResolutionWithDangerous
 			},
 		},
 	}
-	got, err := resolveClientSafeDialAddress(context.Background(), resolver, "localhost:443", true, false)
+	got, err := resolveClientSafeDialAddress(context.Background(), resolver, "localhost:443", true, false, false)
 	if err != nil {
 		t.Fatalf("expected dangerous override to allow mixed localhost resolution, got %v", err)
 	}
@@ -152,7 +162,7 @@ func TestResolveClientSafeDialAddressRejectsDotLocalhostLoopbackAlias(t *testing
 			"evil.localhost": {{IP: net.ParseIP("127.0.0.1")}},
 		},
 	}
-	got, err := resolveClientSafeDialAddress(context.Background(), resolver, "evil.localhost:443", false, false)
+	got, err := resolveClientSafeDialAddress(context.Background(), resolver, "evil.localhost:443", false, false, false)
 	if err == nil {
 		t.Fatalf("expected .localhost alias to be blocked, got %q", got)
 	}
@@ -167,7 +177,7 @@ func TestResolveClientSafeDialAddressRejectsDotLocalPublicResolution(t *testing.
 			"entry-dev.local": {{IP: net.ParseIP("198.51.100.24")}},
 		},
 	}
-	_, err := resolveClientSafeDialAddress(context.Background(), resolver, "entry-dev.local:443", false, false)
+	_, err := resolveClientSafeDialAddress(context.Background(), resolver, "entry-dev.local:443", false, false, false)
 	if err == nil {
 		t.Fatalf("expected .local public resolution to be rejected")
 	}
@@ -177,7 +187,7 @@ func TestResolveClientSafeDialAddressRejectsDotLocalPublicResolution(t *testing.
 }
 
 func TestResolveClientSafeDialAddressBlocksLiteralPrivateIPByDefault(t *testing.T) {
-	_, err := resolveClientSafeDialAddress(context.Background(), nil, "10.0.0.5:443", false, false)
+	_, err := resolveClientSafeDialAddress(context.Background(), nil, "10.0.0.5:443", false, false, false)
 	if err == nil {
 		t.Fatalf("expected literal private IP to be blocked by default")
 	}
@@ -187,7 +197,7 @@ func TestResolveClientSafeDialAddressBlocksLiteralPrivateIPByDefault(t *testing.
 }
 
 func TestResolveClientSafeDialAddressBlocksLiteralCGNATIPByDefault(t *testing.T) {
-	_, err := resolveClientSafeDialAddress(context.Background(), nil, "100.64.12.5:443", false, false)
+	_, err := resolveClientSafeDialAddress(context.Background(), nil, "100.64.12.5:443", false, false, false)
 	if err == nil {
 		t.Fatalf("expected literal CGNAT IP to be blocked by default")
 	}
@@ -202,7 +212,7 @@ func TestResolveClientSafeDialAddressAllowsPrivateDNSWithDangerousOverride(t *te
 			"example.com": {{IP: net.ParseIP("10.0.0.6")}},
 		},
 	}
-	got, err := resolveClientSafeDialAddress(context.Background(), resolver, "example.com:443", true, false)
+	got, err := resolveClientSafeDialAddress(context.Background(), resolver, "example.com:443", true, false, false)
 	if err != nil {
 		t.Fatalf("expected dangerous override to allow, got %v", err)
 	}
@@ -217,7 +227,7 @@ func TestResolveClientSafeDialAddressStrictModeBlocksPrivateDNSEvenWithDangerous
 			"example.com": {{IP: net.ParseIP("10.0.0.6")}},
 		},
 	}
-	_, err := resolveClientSafeDialAddress(context.Background(), resolver, "example.com:443", true, true)
+	_, err := resolveClientSafeDialAddress(context.Background(), resolver, "example.com:443", true, true, false)
 	if err == nil {
 		t.Fatalf("expected strict mode to block private DNS resolution even with dangerous override")
 	}
@@ -232,7 +242,7 @@ func TestResolveClientSafeDialAddressStrictModeBlocksCGNATDNSEvenWithDangerousOv
 			"example.com": {{IP: net.ParseIP("100.100.0.6")}},
 		},
 	}
-	_, err := resolveClientSafeDialAddress(context.Background(), resolver, "example.com:443", true, true)
+	_, err := resolveClientSafeDialAddress(context.Background(), resolver, "example.com:443", true, true, false)
 	if err == nil {
 		t.Fatalf("expected strict mode to block CGNAT DNS resolution even with dangerous override")
 	}
@@ -242,14 +252,14 @@ func TestResolveClientSafeDialAddressStrictModeBlocksCGNATDNSEvenWithDangerousOv
 }
 
 func TestResolveClientSafeDialAddressRejectsZoneHost(t *testing.T) {
-	_, err := resolveClientSafeDialAddress(context.Background(), nil, "[fe80::1%eth0]:443", false, false)
+	_, err := resolveClientSafeDialAddress(context.Background(), nil, "[fe80::1%eth0]:443", false, false, false)
 	if err == nil || !strings.Contains(err.Error(), "zone identifier") {
 		t.Fatalf("expected zone identifier rejection, got %v", err)
 	}
 }
 
 func TestResolveClientSafeDialAddressStrictModeBlocksLiteralPrivateIP(t *testing.T) {
-	_, err := resolveClientSafeDialAddress(context.Background(), nil, "10.0.0.5:443", false, true)
+	_, err := resolveClientSafeDialAddress(context.Background(), nil, "10.0.0.5:443", false, true, false)
 	if err == nil {
 		t.Fatalf("expected strict mode to block literal private ip")
 	}
@@ -259,12 +269,57 @@ func TestResolveClientSafeDialAddressStrictModeBlocksLiteralPrivateIP(t *testing
 }
 
 func TestResolveClientSafeDialAddressStrictModeBlocksLiteralPrivateIPEvenWithDangerousOverride(t *testing.T) {
-	_, err := resolveClientSafeDialAddress(context.Background(), nil, "10.0.0.5:443", true, true)
+	_, err := resolveClientSafeDialAddress(context.Background(), nil, "10.0.0.5:443", true, true, false)
 	if err == nil {
 		t.Fatalf("expected strict mode to block literal private ip even with dangerous override")
 	}
 	if !strings.Contains(err.Error(), "blocked by outbound dial policy") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveClientSafeDialAddressAllowsLabLiteralPrivateIPWithExplicitOverride(t *testing.T) {
+	got, err := resolveClientSafeDialAddress(context.Background(), nil, "10.0.0.5:443", false, true, true)
+	if err != nil {
+		t.Fatalf("expected lab literal-IP override to allow private IP, got %v", err)
+	}
+	if got != "10.0.0.5:443" {
+		t.Fatalf("unexpected dial address: %s", got)
+	}
+}
+
+func TestResolveClientSafeDialAddressAllowsLabLiteralCGNATIPWithExplicitOverride(t *testing.T) {
+	got, err := resolveClientSafeDialAddress(context.Background(), nil, "100.113.245.61:8081", false, true, true)
+	if err != nil {
+		t.Fatalf("expected lab literal-IP override to allow CGNAT IP, got %v", err)
+	}
+	if got != "100.113.245.61:8081" {
+		t.Fatalf("unexpected dial address: %s", got)
+	}
+}
+
+func TestResolveClientSafeDialAddressLabLiteralOverrideDoesNotAllowPrivateDNS(t *testing.T) {
+	resolver := stubClientOutboundResolver{
+		ips: map[string][]net.IPAddr{
+			"example.com": {{IP: net.ParseIP("100.113.245.61")}},
+		},
+	}
+	_, err := resolveClientSafeDialAddress(context.Background(), resolver, "example.com:8081", false, true, true)
+	if err == nil {
+		t.Fatalf("expected lab literal-IP override to keep private DNS blocked")
+	}
+	if !strings.Contains(err.Error(), "blocked address classes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestClientAllowLabControlPlaneLiteralIPsIgnoredInProdStrict(t *testing.T) {
+	t.Setenv(clientAllowLabControlPlaneLiteralIPsEnv, "1")
+	if clientAllowLabControlPlaneLiteralIPs(true) {
+		t.Fatalf("expected prod strict mode to ignore lab literal-IP override")
+	}
+	if !clientAllowLabControlPlaneLiteralIPs(false) {
+		t.Fatalf("expected non-prod lab literal-IP override to be honored")
 	}
 }
 
@@ -287,6 +342,7 @@ func TestClientOutboundPolicyRoundTripperBlocksPrivateDestinationBeforeRoundTrip
 		resolver:                  resolver,
 		allowDangerousPrivateDNS:  false,
 		strictBlockPrivateLiteral: false,
+		allowLabLiteralIPs:        false,
 	}
 	req, err := http.NewRequest(http.MethodGet, "https://example.com/v1/health", nil)
 	if err != nil {
@@ -323,6 +379,7 @@ func TestClientOutboundPolicyRoundTripperAllowsDangerousOverride(t *testing.T) {
 		resolver:                  resolver,
 		allowDangerousPrivateDNS:  true,
 		strictBlockPrivateLiteral: false,
+		allowLabLiteralIPs:        false,
 	}
 	req, err := http.NewRequest(http.MethodGet, "https://example.com/v1/health", nil)
 	if err != nil {

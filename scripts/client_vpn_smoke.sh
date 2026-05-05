@@ -36,6 +36,7 @@ Usage:
     [--region-prefix-bias N] \
     [--beta-profile [0|1]] \
     [--prod-profile [0|1]] \
+    [--allow-insecure-remote-http [0|1]] \
     [--operator-floor-check [0|1]] \
     [--issuer-quorum-check [0|1]] \
     [--issuer-min-operators N] \
@@ -55,6 +56,7 @@ Usage:
     [--keep-up [0|1]] \
     [--record-result [0|1]] \
     [--pre-real-host-readiness [0|1]] \
+    [--pre-real-host-readiness-strict-beta [0|1]] \
     [--pre-real-host-readiness-summary-json PATH] \
     [--runtime-doctor [0|1]] \
     [--runtime-fix [0|1]] \
@@ -125,6 +127,39 @@ print_cmd() {
   printf '\n'
 }
 
+redact_sensitive_command_string() {
+  local value="$1"
+  printf '%s' "$value" | sed -E 's/(--(subject|anon-cred|campaign-subject|key|invite-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g'
+}
+
+print_cmd_redacted() {
+  local -a redacted=()
+  local arg
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
+    case "$arg" in
+      --subject|--anon-cred|--campaign-subject|--key|--invite-key)
+        redacted+=("$arg")
+        if [[ $# -ge 2 ]]; then
+          redacted+=("[redacted]")
+          shift 2
+        else
+          shift
+        fi
+        ;;
+      --subject=*|--anon-cred=*|--campaign-subject=*|--key=*|--invite-key=*)
+        redacted+=("${arg%%=*}=[redacted]")
+        shift
+        ;;
+      *)
+        redacted+=("$arg")
+        shift
+        ;;
+    esac
+  done
+  print_cmd "${redacted[@]}"
+}
+
 safe_append_to_array() {
   local array_name="$1"
   shift
@@ -179,6 +214,7 @@ region_bias=""
 region_prefix_bias=""
 beta_profile=""
 prod_profile=""
+allow_insecure_remote_http="${CLIENT_VPN_SMOKE_ALLOW_INSECURE_REMOTE_HTTP:-0}"
 operator_floor_check=""
 issuer_quorum_check=""
 issuer_min_operators=""
@@ -199,6 +235,7 @@ status_check="1"
 keep_up="0"
 record_result="1"
 pre_real_host_readiness_enabled="0"
+pre_real_host_readiness_strict_beta="${CLIENT_VPN_SMOKE_PRE_REAL_HOST_READINESS_STRICT_BETA:-0}"
 pre_real_host_readiness_summary_json=""
 runtime_doctor_enabled="1"
 runtime_fix_on_non_ok="0"
@@ -246,6 +283,19 @@ while [[ $# -gt 0 ]]; do
     --region-prefix-bias) region_prefix_bias="${2:-}"; shift 2 ;;
     --beta-profile) beta_profile="${2:-1}"; shift 2 ;;
     --prod-profile) prod_profile="${2:-1}"; shift 2 ;;
+    --allow-insecure-remote-http)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_insecure_remote_http="${2:-}"
+        shift 2
+      else
+        allow_insecure_remote_http="1"
+        shift
+      fi
+      ;;
+    --allow-insecure-remote-http=*)
+      allow_insecure_remote_http="${1#--allow-insecure-remote-http=}"
+      shift
+      ;;
     --operator-floor-check) operator_floor_check="${2:-1}"; shift 2 ;;
     --issuer-quorum-check) issuer_quorum_check="${2:-1}"; shift 2 ;;
     --issuer-min-operators) issuer_min_operators="${2:-}"; shift 2 ;;
@@ -314,6 +364,15 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --pre-real-host-readiness-summary-json) pre_real_host_readiness_summary_json="${2:-}"; shift 2 ;;
+    --pre-real-host-readiness-strict-beta)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        pre_real_host_readiness_strict_beta="${2:-}"
+        shift 2
+      else
+        pre_real_host_readiness_strict_beta="1"
+        shift
+      fi
+      ;;
     --runtime-doctor)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         runtime_doctor_enabled="${2:-}"
@@ -412,10 +471,12 @@ bool_arg_or_die "--status-check" "$status_check"
 bool_arg_or_die "--keep-up" "$keep_up"
 bool_arg_or_die "--record-result" "$record_result"
 bool_arg_or_die "--pre-real-host-readiness" "$pre_real_host_readiness_enabled"
+bool_arg_or_die "--pre-real-host-readiness-strict-beta" "$pre_real_host_readiness_strict_beta"
 bool_arg_or_die "--runtime-doctor" "$runtime_doctor_enabled"
 bool_arg_or_die "--runtime-fix" "$runtime_fix_on_non_ok"
 bool_arg_or_die "--runtime-fix-prune-wg-only-dir" "$runtime_fix_prune_wg_only_dir"
 bool_arg_or_die "--trust-reset-on-key-mismatch" "$trust_reset_on_key_mismatch"
+bool_arg_or_die "--allow-insecure-remote-http" "$allow_insecure_remote_http"
 bool_arg_or_die "--incident-snapshot-on-fail" "$incident_snapshot_on_fail"
 bool_arg_or_die "--manual-validation-report" "$manual_validation_report_enabled"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
@@ -499,6 +560,7 @@ pre_real_host_readiness_cmd=(
   "--vpn-iface" "$runtime_vpn_iface"
   "--runtime-fix-prune-wg-only-dir" "$runtime_fix_prune_wg_only_dir"
   "--defer-no-root" "$defer_no_root"
+  "--strict-beta" "$pre_real_host_readiness_strict_beta"
   "--summary-json" "$pre_real_host_readiness_summary_json"
   "--manual-validation-report-summary-json" "$manual_validation_report_summary_json"
   "--manual-validation-report-md" "$manual_validation_report_md"
@@ -530,6 +592,9 @@ append_opt preflight_cmd "--issuer-urls" "$issuer_urls"
 append_opt preflight_cmd "--entry-url" "$entry_url"
 append_opt preflight_cmd "--exit-url" "$exit_url"
 append_opt preflight_cmd "--prod-profile" "$prod_profile"
+if [[ "$allow_insecure_remote_http" == "1" ]]; then
+  preflight_cmd+=("--allow-insecure-remote-http" "1")
+fi
 append_opt preflight_cmd "--interface" "$interface_name"
 append_opt preflight_cmd "--operator-floor-check" "$operator_floor_check"
 append_opt preflight_cmd "--issuer-quorum-check" "$issuer_quorum_check"
@@ -560,6 +625,9 @@ append_opt up_cmd "--region-bias" "$region_bias"
 append_opt up_cmd "--region-prefix-bias" "$region_prefix_bias"
 append_opt up_cmd "--beta-profile" "$beta_profile"
 append_opt up_cmd "--prod-profile" "$prod_profile"
+if [[ "$allow_insecure_remote_http" == "1" ]]; then
+  up_cmd+=("--allow-insecure-remote-http" "1")
+fi
 append_opt up_cmd "--operator-floor-check" "$operator_floor_check"
 append_opt up_cmd "--issuer-quorum-check" "$issuer_quorum_check"
 append_opt up_cmd "--issuer-min-operators" "$issuer_min_operators"
@@ -673,14 +741,14 @@ run_and_capture() {
   local tmp rc
   tmp="$(mktemp)"
   if "$@" >"$tmp" 2>&1; then
-    printf '%s\n' "[$stage] command_ok: $(print_cmd "$@")" >>"$summary_log"
+    printf '%s\n' "[$stage] command_ok: $(print_cmd_redacted "$@")" >>"$summary_log"
     cat "$tmp" >>"$summary_log"
     printf -v "$__var_name" '%s' "$(cat "$tmp")"
     rm -f "$tmp"
     return 0
   else
     rc=$?
-    printf '%s\n' "[$stage] command_failed rc=$rc: $(print_cmd "$@")" >>"$summary_log"
+    printf '%s\n' "[$stage] command_failed rc=$rc: $(print_cmd_redacted "$@")" >>"$summary_log"
     cat "$tmp" >>"$summary_log"
     printf -v "$__var_name" '%s' "$(cat "$tmp")"
     rm -f "$tmp"
@@ -759,6 +827,10 @@ derive_up_failure_note() {
     printf '%s' "client-vpn up failed: timed out waiting for wg-session config (control plane did not establish a viable path in time)"
     return 0
   fi
+  if printf '%s\n' "$failed_output" | grep -Eqi 'did not observe WireGuard runtime readiness|wireguard runtime did not become ready'; then
+    printf '%s' "client-vpn up failed: timed out waiting for WireGuard runtime readiness"
+    return 0
+  fi
   if printf '%s\n' "$failed_output" | grep -Eqi 'directory key is not trusted'; then
     printf '%s' "client-vpn up failed: directory key trust mismatch (run client-vpn-trust-reset or enable --trust-reset-on-key-mismatch 1)"
     return 0
@@ -773,7 +845,7 @@ build_smoke_rerun_command() {
   for extra_arg in "$@"; do
     rerun_cmd+=("$extra_arg")
   done
-  print_cmd "${rerun_cmd[@]}"
+  print_cmd_redacted "${rerun_cmd[@]}"
 }
 
 build_trust_reset_command() {
@@ -827,6 +899,17 @@ derive_up_failure_diagnostics() {
     fi
     up_failure_next_command="$(build_smoke_rerun_command --ready-timeout-sec "$suggested_ready_timeout_sec")"
     up_failure_matched_pattern="wg-session timeout"
+    return 0
+  fi
+
+  if printf '%s\n' "$failed_output" | grep -Eqi 'did not observe WireGuard runtime readiness|wireguard runtime did not become ready'; then
+    up_failure_hint_id="wireguard_runtime_timeout"
+    up_failure_hint="timed out waiting for WireGuard runtime readiness"
+    if [[ "$ready_timeout_sec" =~ ^[0-9]+$ ]] && [[ "$ready_timeout_sec" -gt 0 ]]; then
+      suggested_ready_timeout_sec="$((ready_timeout_sec + 60))"
+    fi
+    up_failure_next_command="$(build_smoke_rerun_command --ready-timeout-sec "$suggested_ready_timeout_sec")"
+    up_failure_matched_pattern="wireguard runtime readiness timeout"
     return 0
   fi
 
@@ -1052,6 +1135,7 @@ run_pre_real_host_readiness_gate() {
   pre_real_host_readiness_status="$(printf '%s\n' "$readiness_json" | jq -r '.status // "fail"' 2>/dev/null || printf 'fail')"
   pre_real_host_readiness_machine_c_ready="$(printf '%s\n' "$readiness_json" | jq -r '.machine_c_smoke_gate.ready // false' 2>/dev/null || printf 'false')"
   pre_real_host_readiness_next_command="$(printf '%s\n' "$readiness_json" | jq -r '.machine_c_smoke_gate.next_command // ""' 2>/dev/null || true)"
+  pre_real_host_readiness_next_command="$(redact_sensitive_command_string "$pre_real_host_readiness_next_command")"
   pre_real_host_readiness_readiness_status="$(printf '%s\n' "$readiness_json" | jq -r '.manual_validation_report.readiness_status // ""' 2>/dev/null || true)"
   pre_real_host_readiness_report_summary_json="$(printf '%s\n' "$readiness_json" | jq -r '.manual_validation_report.summary_json // ""' 2>/dev/null || true)"
   pre_real_host_readiness_report_md="$(printf '%s\n' "$readiness_json" | jq -r '.manual_validation_report.report_md // ""' 2>/dev/null || true)"
@@ -1206,7 +1290,7 @@ refresh_manual_validation_report() {
     return 0
   fi
 
-  overlay_command="$(print_cmd "$0" "${original_args[@]}")"
+  overlay_command="$(print_cmd_redacted "$0" "${original_args[@]}")"
   for overlay_artifact in \
     "$summary_log" \
     "$summary_json" \
@@ -1547,7 +1631,7 @@ finish_and_record() {
       --notes "$notes"
       --artifact "$summary_log"
       --artifact "$summary_json"
-      --command "$(print_cmd "$0" "${original_args[@]}")"
+      --command "$(print_cmd_redacted "$0" "${original_args[@]}")"
       --show-json 0
     )
     local runtime_artifact=""

@@ -2552,10 +2552,14 @@ func TestIsLoopbackListenAddrWithLookupRequiresAllResolvedIPsLoopback(t *testing
 		want       bool
 	}{
 		{name: "literal-ipv4-loopback", listenAddr: "127.0.0.1:7000", want: true},
+		{name: "tcp-scheme-literal-ipv4-loopback", listenAddr: "tcp://127.0.0.1:7000", want: true},
 		{name: "literal-ipv6-loopback", listenAddr: "[::1]:7000", want: true},
+		{name: "tcp-scheme-literal-ipv6-loopback", listenAddr: "tcp://[::1]:7000", want: true},
 		{name: "ipv6-zone-loopback", listenAddr: "[::1%lo0]:7000", want: true},
 		{name: "hostname-all-loopback", listenAddr: "loopback.local:7000", want: true},
+		{name: "tcp-scheme-hostname-all-loopback", listenAddr: "tcp://loopback.local:7000", want: true},
 		{name: "hostname-mixed-loopback-and-public", listenAddr: "mixed.local:7000", want: false},
+		{name: "tcp-scheme-hostname-public", listenAddr: "tcp://public.local:7000", want: false},
 		{name: "hostname-public", listenAddr: "public.local:7000", want: false},
 		{name: "hostname-empty-resolution", listenAddr: "empty.local:7000", want: false},
 		{name: "hostname-lookup-error", listenAddr: "missing.local:7000", want: false},

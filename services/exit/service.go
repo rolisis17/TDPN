@@ -4980,6 +4980,9 @@ func resolveSafeDialAddress(ctx context.Context, resolver outboundIPResolver, ad
 		return "", fmt.Errorf("outbound host is required")
 	}
 	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() {
+			return net.JoinHostPort(ip.String(), port), nil
+		}
 		if isDisallowedOutboundDialIP(ip) {
 			if strictBlockPrivateLiteral {
 				return "", fmt.Errorf("outbound literal host %q is blocked by outbound dial policy (strict mode)", ip.String())

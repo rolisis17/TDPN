@@ -46,6 +46,11 @@ Purpose:
   - machine A: directory+issuer+entry+exit
   - machine B: directory+issuer+entry+exit (federated with A)
   - machine C: client-only validation runner
+
+Environment:
+  THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP=1 explicitly allows lab-only
+  remote HTTP control-plane URLs for the client-test step. Production
+  profile rejects this opt-in.
 USAGE
 }
 
@@ -320,6 +325,36 @@ rewrite_url_csv_for_docker() {
   printf '%s\n' "$joined"
 }
 
+url_is_non_loopback_http() {
+  local raw="$1"
+  local scheme hostport host
+
+  scheme="$(url_scheme_from_url "$raw")"
+  if [[ "$scheme" != "http" ]]; then
+    return 1
+  fi
+  hostport="$(hostport_from_url "$raw")"
+  host="$(host_from_hostport "$hostport")"
+  if host_is_loopback "$host"; then
+    return 1
+  fi
+  return 0
+}
+
+csv_has_non_loopback_http_url() {
+  local csv="$1"
+  local item
+  IFS=',' read -r -a items <<<"$csv"
+  for item in "${items[@]}"; do
+    item="${item//[[:space:]]/}"
+    [[ -z "$item" ]] && continue
+    if url_is_non_loopback_http "$item"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 wait_http_ok() {
   local url="$1"
   local name="$2"
@@ -468,6 +503,7 @@ client_disable_synthetic_fallback="${THREE_MACHINE_CLIENT_DISABLE_SYNTHETIC_FALL
 live_host_mode_hint="${THREE_MACHINE_VALIDATE_LIVE_HOST_MODE:-auto}"
 ci_stub_mode="${THREE_MACHINE_VALIDATE_CI_STUB_MODE:-auto}"
 require_issuer_quorum="${THREE_MACHINE_REQUIRE_ISSUER_QUORUM:-}"
+allow_insecure_remote_http="${THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP:-0}"
 path_profile_set=0
 distinct_operators_set=0
 distinct_countries_set=0
@@ -743,6 +779,10 @@ if [[ -n "$require_issuer_quorum" && "$require_issuer_quorum" != "0" && "$requir
   echo "--require-issuer-quorum must be 0 or 1"
   exit 2
 fi
+if [[ "$allow_insecure_remote_http" != "0" && "$allow_insecure_remote_http" != "1" ]]; then
+  echo "THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP must be 0 or 1"
+  exit 2
+fi
 if [[ "$client_inner_source" != "auto" && "$client_inner_source" != "udp" && "$client_inner_source" != "synthetic" ]]; then
   echo "THREE_MACHINE_CLIENT_INNER_SOURCE must be auto, udp or synthetic"
   exit 2
@@ -779,6 +819,10 @@ fi
 
 if [[ "$prod_profile" == "1" ]]; then
   beta_profile="1"
+  if [[ "$allow_insecure_remote_http" == "1" ]]; then
+    echo "THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP=1 is not allowed with --prod-profile 1"
+    exit 2
+  fi
 fi
 
 if [[ -z "$distinct_operators" ]]; then
@@ -1147,6 +1191,7 @@ container_directory_urls="$client_directory_urls"
 container_issuer_url="$issuer_url"
 container_entry_url="$entry_url"
 container_exit_url="$exit_url"
+docker_endpoint_rewritten=0
 if [[ "$rewrite_loopback_for_docker" == "1" ]]; then
   container_directory_urls="$(rewrite_url_csv_for_docker "$client_directory_urls" "$docker_host_alias")"
   container_issuer_url="$(rewrite_loopback_url_for_docker "$issuer_url" "$docker_host_alias")"
@@ -1155,9 +1200,27 @@ if [[ "$rewrite_loopback_for_docker" == "1" ]]; then
 fi
 
 if [[ "$container_directory_urls" != "$client_directory_urls" || "$container_issuer_url" != "$issuer_url" || "$container_entry_url" != "$entry_url" || "$container_exit_url" != "$exit_url" ]]; then
+  docker_endpoint_rewritten=1
   echo "[client-test] docker endpoint rewrite enabled host_alias=$docker_host_alias"
   echo "[client-test] host_urls directory_urls=$client_directory_urls issuer=$issuer_url entry=$entry_url exit=$exit_url"
   echo "[client-test] container_urls directory_urls=$container_directory_urls issuer=$container_issuer_url entry=$container_entry_url exit=$container_exit_url"
+fi
+if [[ "$docker_endpoint_rewritten" == "1" && "$prod_profile" == "1" ]]; then
+  echo "loopback Docker endpoint rewrite is not allowed with --prod-profile 1"
+  exit 2
+fi
+if [[ "$docker_endpoint_rewritten" == "1" && "$prod_profile" != "1" ]]; then
+  if [[ "$allow_insecure_remote_http" != "1" ]] &&
+    (csv_has_non_loopback_http_url "$client_directory_urls" ||
+      url_is_non_loopback_http "$issuer_url" ||
+      url_is_non_loopback_http "$entry_url" ||
+      url_is_non_loopback_http "$exit_url"); then
+    echo "THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP=1 is required when Docker loopback rewrite is combined with non-loopback HTTP endpoints"
+    exit 2
+  fi
+  client_cmd+=(--allow-insecure-remote-http 1)
+elif [[ "$allow_insecure_remote_http" == "1" ]]; then
+  client_cmd+=(--allow-insecure-remote-http 1)
 fi
 
 env_args=(

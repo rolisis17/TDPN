@@ -297,6 +297,7 @@ func TestApplyConfigFileGenericEnvBlocksDangerousLocalAPIKeys(t *testing.T) {
 		"DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1",
 		"WG_ALLOW_UNTRUSTED_BINARY_PATH=1",
 		"CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP=1",
+		"CLIENT_ALLOW_LAB_CONTROL_PLANE_LITERAL_IPS=1",
 		"CLIENT_REQUIRE_HTTPS_CONTROL_URL=0",
 	}, "\n") + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -322,6 +323,7 @@ func TestApplyConfigFileGenericEnvBlocksDangerousLocalAPIKeys(t *testing.T) {
 	t.Setenv("DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS", "")
 	t.Setenv("WG_ALLOW_UNTRUSTED_BINARY_PATH", "")
 	t.Setenv("CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP", "")
+	t.Setenv("CLIENT_ALLOW_LAB_CONTROL_PLANE_LITERAL_IPS", "")
 	t.Setenv("CLIENT_REQUIRE_HTTPS_CONTROL_URL", "")
 	if err := applyConfigFile(path); err != nil {
 		t.Fatalf("applyConfigFile: %v", err)
@@ -385,6 +387,9 @@ func TestApplyConfigFileGenericEnvBlocksDangerousLocalAPIKeys(t *testing.T) {
 	}
 	if got := os.Getenv("CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP"); got != "" {
 		t.Fatalf("CLIENT_ALLOW_INSECURE_CONTROL_URL_HTTP=%q want empty", got)
+	}
+	if got := os.Getenv("CLIENT_ALLOW_LAB_CONTROL_PLANE_LITERAL_IPS"); got != "" {
+		t.Fatalf("CLIENT_ALLOW_LAB_CONTROL_PLANE_LITERAL_IPS=%q want empty", got)
 	}
 	if got := os.Getenv("CLIENT_REQUIRE_HTTPS_CONTROL_URL"); got != "" {
 		t.Fatalf("CLIENT_REQUIRE_HTTPS_CONTROL_URL=%q want empty", got)
