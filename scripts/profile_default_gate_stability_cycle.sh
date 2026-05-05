@@ -255,6 +255,28 @@ quote_cmd() {
   printf '\n'
 }
 
+redact_value_in_text_01() {
+  local text="$1"
+  local secret="$2"
+  if [[ -z "$secret" ]]; then
+    printf '%s' "$text"
+    return
+  fi
+  printf '%s' "${text//"$secret"/[redacted]}"
+}
+
+redacted_subject_display_01() {
+  local value
+  value="$(trim "${1:-}")"
+  if [[ -z "$value" ]]; then
+    printf '%s' ""
+  elif [[ "$(subject_placeholder_token_01 "$value")" == "1" ]]; then
+    printf '%s' "$value"
+  else
+    printf '%s' "[redacted]"
+  fi
+}
+
 json_file_valid_01() {
   local path="$1"
   if [[ -z "$path" || ! -f "$path" ]]; then
@@ -801,7 +823,8 @@ run_cmd=(
   --summary-json "$run_summary_json"
   --print-summary-json 0
 )
-run_command_display="$(quote_cmd "${run_cmd[@]}")"
+campaign_subject_display="$(redacted_subject_display_01 "$campaign_subject")"
+run_command_display="$(redact_value_in_text_01 "$(quote_cmd "${run_cmd[@]}")" "$campaign_subject")"
 
 declare -a check_cmd
 check_cmd=(
@@ -1243,7 +1266,7 @@ jq -n \
   --arg check_command "$check_command_display" \
   --arg host_a "$host_a" \
   --arg host_b "$host_b" \
-  --arg campaign_subject "$campaign_subject" \
+  --arg campaign_subject "$campaign_subject_display" \
   --arg reports_dir "$reports_dir" \
   --arg run_stage_status "$run_stage_status" \
   --arg run_summary_exists "$run_summary_exists" \

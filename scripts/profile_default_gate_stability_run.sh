@@ -331,10 +331,12 @@ while (( run_index < runs )); do
   run_index=$((run_index + 1))
   run_id="$(printf 'run_%02d' "$run_index")"
   run_stamp="$(date -u +%Y%m%d_%H%M%S)_${run_id}"
+  run_reports_dir="$reports_dir/$run_id"
   run_summary_json="$reports_dir/profile_default_gate_live_${run_stamp}_summary.json"
   run_log="$reports_dir/profile_default_gate_live_${run_stamp}.log"
+  mkdir -p "$run_reports_dir"
 
-  echo "[profile-default-gate-stability-run] $(timestamp_utc) run-start run_id=$run_id summary_json=$run_summary_json"
+  echo "[profile-default-gate-stability-run] $(timestamp_utc) run-start run_id=$run_id reports_dir=$run_reports_dir summary_json=$run_summary_json"
 
   run_started_epoch="$(date +%s)"
   set +e
@@ -342,7 +344,7 @@ while (( run_index < runs )); do
     --host-a "$host_a" \
     --host-b "$host_b" \
     --campaign-subject "$campaign_subject" \
-    --reports-dir "$reports_dir" \
+    --reports-dir "$run_reports_dir" \
     --campaign-timeout-sec "$campaign_timeout_sec" \
     --allow-remote-http-probe "$allow_remote_http_probe" \
     --summary-json "$run_summary_json" \
@@ -439,6 +441,7 @@ while (( run_index < runs )); do
 
   jq -n \
     --arg run_id "$run_id" \
+    --arg run_reports_dir "$run_reports_dir" \
     --arg run_summary_json "$run_summary_json" \
     --arg run_log "$run_log" \
     --arg status "$summary_status" \
@@ -470,6 +473,7 @@ while (( run_index < runs )); do
         support_rate_pct: $support_rate_pct
       },
       artifacts: {
+        reports_dir: $run_reports_dir,
         run_summary_json: $run_summary_json,
         run_log: $run_log,
         campaign_summary_json: (if $campaign_summary_json == "" then null else $campaign_summary_json end),

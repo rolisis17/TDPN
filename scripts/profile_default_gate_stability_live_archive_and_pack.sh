@@ -136,6 +136,16 @@ render_command() {
   printf '%s' "$rendered"
 }
 
+redact_value_in_text_01() {
+  local text="$1"
+  local secret="$2"
+  if [[ -z "$secret" ]]; then
+    printf '%s' "$text"
+    return
+  fi
+  printf '%s' "${text//"$secret"/[redacted]}"
+}
+
 json_file_valid_01() {
   local path="$1"
   if [[ -f "$path" ]] && jq -e 'type == "object"' "$path" >/dev/null 2>&1; then
@@ -624,6 +634,7 @@ else
     --fail-on-no-go "$fail_on_no_go" \
     --print-summary-json 0
   )"
+  cycle_stage_command="$(redact_value_in_text_01 "$cycle_stage_command" "$campaign_subject")"
 
   cycle_pre_fp="$(file_fingerprint_01 "$cycle_summary_json")"
   set +e

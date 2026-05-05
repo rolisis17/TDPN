@@ -486,7 +486,10 @@ fi
 if ! jq -e '
   .inputs.host_a == "198.51.100.10"
   and .inputs.host_b == "198.51.100.20"
-  and .inputs.campaign_subject == "inv-placeholder-env"
+  and .inputs.campaign_subject == "[redacted]"
+  and (.stages.run.command | contains("inv-placeholder-env") | not)
+  and (.stages.run.command | contains("--campaign-subject"))
+  and (.stages.run.command | contains("[redacted]"))
 ' "$PLACEHOLDER_RESOLVED_SUMMARY" >/dev/null 2>&1; then
   echo "placeholder env-resolution summary mismatch"
   cat "$PLACEHOLDER_RESOLVED_SUMMARY"

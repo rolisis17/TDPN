@@ -391,11 +391,17 @@ bash "$SCRIPT_UNDER_TEST" \
   --print-summary-json 0
 
 assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '.status == "ok" and .decision == "GO" and .rc == 0'
-assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '(.operator_next_action_command | contains("--host-a 100.64.0.10")) and (.operator_next_action_command | contains("--host-b 100.64.0.11")) and (.operator_next_action_command | contains("--campaign-subject inv-real-subject-01"))'
-assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '.operator_next_action_command_has_unresolved_placeholders == false'
-assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '(.operator_next_action_command_unresolved_placeholder_keys | length) == 0'
-assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '.operator_next_action_command_unresolved_placeholder_reason == null'
-assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '.next_command_reason == "profile-default stability evidence pack is healthy; no action required"'
+assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '(.operator_next_action_command | contains("--host-a 100.64.0.10")) and (.operator_next_action_command | contains("--host-b 100.64.0.11")) and (.operator_next_action_command | contains("--campaign-subject INVITE_KEY"))'
+assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '(.operator_next_action_command | contains("inv-real-subject-01") | not)'
+assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '.operator_next_action_command_has_unresolved_placeholders == true'
+assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '.operator_next_action_command_unresolved_placeholder_keys == ["campaign_subject"]'
+assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '.operator_next_action_command_unresolved_placeholder_reason != null'
+assert_jq "$RESOLVED_GUIDANCE_SUMMARY" '.next_command_reason | contains("next command contains unresolved placeholders (campaign_subject)")'
+if grep -q 'inv-real-subject-01' "$RESOLVED_GUIDANCE_REPORT"; then
+  echo "evidence pack report should not contain concrete invite subjects"
+  cat "$RESOLVED_GUIDANCE_REPORT"
+  exit 1
+fi
 
 INVALID_DIR="$TMP_DIR/invalid_freshness"
 mkdir -p "$INVALID_DIR"

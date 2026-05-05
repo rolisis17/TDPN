@@ -264,6 +264,7 @@ stage="matrix"
 matrix_status="fail"
 matrix_rc=1
 notes=""
+blocker_json="null"
 manual_validation_report_status="skipped"
 manual_validation_report_readiness_status=""
 manual_validation_report_next_action_check_id=""
@@ -272,6 +273,80 @@ matrix_timeout_guard_available="0"
 if command -v timeout >/dev/null 2>&1; then
   matrix_timeout_guard_available="1"
 fi
+
+set_blocker_01() {
+  local code="$1"
+  local category="$2"
+  local summary="$3"
+  local details_json="${4:-}"
+  if [[ -z "$details_json" ]]; then
+    details_json="{}"
+  fi
+  blocker_json="$(jq -n \
+    --arg code "$code" \
+    --arg category "$category" \
+    --arg summary "$summary" \
+    --argjson details "$details_json" \
+    '{code: $code, category: $category, summary: $summary, details: $details}')"
+}
+
+classify_matrix_blocker_01() {
+  local output="$1"
+  local output_lower=""
+  local missing_command=""
+  local label=""
+  local port=""
+  local proto=""
+
+  blocker_json="null"
+  if [[ "$matrix_rc" -eq 0 ]]; then
+    return
+  fi
+
+  if [[ "$matrix_rc" -eq 124 && "$matrix_timeout_sec" -gt 0 && "$matrix_timeout_guard_available" == "1" ]]; then
+    set_blocker_01 \
+      "timeout" \
+      "timeout" \
+      "Linux root real-WG privileged matrix timed out after ${matrix_timeout_sec}s" \
+      "$(jq -n --argjson timeout_sec "$matrix_timeout_sec" '{timeout_sec: $timeout_sec}')"
+    return
+  fi
+
+  output_lower="$(printf '%s' "$output" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$output_lower" == *"run as root"* || "$output_lower" == *"must be run as root"* || "$output_lower" == *"requires root"* || "$output_lower" == *"root required"* ]]; then
+    set_blocker_01 "root_required" "privilege" "Linux root real-WG privileged matrix requires root privileges"
+    return
+  fi
+
+  if [[ "$output" =~ missing[[:space:]]+required[[:space:]]+command:[[:space:]]*([A-Za-z0-9_.+-]+) ]]; then
+    missing_command="${BASH_REMATCH[1]}"
+    set_blocker_01 \
+      "missing_command" \
+      "tooling" \
+      "Linux root real-WG privileged matrix is missing required command: ${missing_command}" \
+      "$(jq -n --arg command "$missing_command" '{command: $command}')"
+    return
+  fi
+
+  if [[ "$output_lower" == *"wireguard kernel support"* || "$output_lower" == *"kernel support available"* || "$output_lower" == *"operation not supported"* ]]; then
+    set_blocker_01 "kernel_missing" "kernel" "Linux root real-WG privileged matrix needs WireGuard kernel support"
+    return
+  fi
+
+  if [[ "$output" =~ ([A-Za-z0-9_]+)[[:space:]]+port[[:space:]]+([0-9]+)/([A-Za-z0-9]+)[[:space:]]+already[[:space:]]+in[[:space:]]+use ]]; then
+    label="${BASH_REMATCH[1]}"
+    port="${BASH_REMATCH[2]}"
+    proto="${BASH_REMATCH[3],,}"
+    set_blocker_01 \
+      "port_occupied" \
+      "network" \
+      "Linux root real-WG privileged matrix needs ${label} ${port}/${proto} to be free" \
+      "$(jq -n --arg label_value "$label" --argjson port "$port" --arg proto "$proto" '{label: $label_value, port: $port, proto: $proto}')"
+    return
+  fi
+
+  set_blocker_01 "unknown" "unknown" "Linux root real-WG privileged matrix failed"
+}
 
 write_matrix_summary_json() {
   jq -n \
@@ -284,6 +359,7 @@ write_matrix_summary_json() {
     --argjson matrix_timeout_sec "$matrix_timeout_sec" \
     --arg matrix_timed_out "$matrix_timed_out" \
     --arg matrix_timeout_guard_available "$matrix_timeout_guard_available" \
+    --argjson blocker "$blocker_json" \
     --argjson rc "$matrix_rc" \
     '{
       version: 1,
@@ -291,6 +367,7 @@ write_matrix_summary_json() {
       status: $status,
       rc: $rc,
       notes: $notes,
+      blocker: $blocker,
       command: $command,
       invocation: {
         timeout_sec: $matrix_timeout_sec,
@@ -317,6 +394,7 @@ write_summary_json() {
     --argjson matrix_timeout_sec "$matrix_timeout_sec" \
     --arg matrix_timed_out "$matrix_timed_out" \
     --arg matrix_timeout_guard_available "$matrix_timeout_guard_available" \
+    --argjson blocker "$blocker_json" \
     --argjson matrix_rc "$matrix_rc" \
     --arg manual_validation_report_summary_json "$manual_validation_report_summary_json" \
     --arg manual_validation_report_md "$manual_validation_report_md" \
@@ -331,10 +409,12 @@ write_summary_json() {
       status: $status,
       rc: $matrix_rc,
       notes: $notes,
+      blocker: $blocker,
       command: $command,
       matrix: {
         status: $status,
         rc: $matrix_rc,
+        blocker: $blocker,
         timeout_sec: $matrix_timeout_sec,
         timed_out: ($matrix_timed_out == "1"),
         timeout_guard_available: ($matrix_timeout_guard_available == "1"),
@@ -437,16 +517,17 @@ persist_artifact_text "$matrix_log" "$matrix_output"
 if [[ "$matrix_rc" -eq 124 ]]; then
   matrix_timed_out="1"
 fi
+classify_matrix_blocker_01 "$matrix_output"
 
 if [[ "$matrix_rc" -eq 0 ]]; then
   matrix_status="pass"
   notes="Linux root real-WG privileged matrix passed"
-elif [[ "$matrix_rc" -eq 124 && "$matrix_timeout_sec" -gt 0 && "$matrix_timeout_guard_available" == "1" ]]; then
+elif [[ "$(jq -r '.code // ""' <<<"$blocker_json")" == "timeout" ]]; then
   matrix_status="fail"
-  notes="Linux root real-WG privileged matrix timed out after ${matrix_timeout_sec}s"
+  notes="$(jq -r '.summary' <<<"$blocker_json")"
 else
   matrix_status="fail"
-  notes="Linux root real-WG privileged matrix failed"
+  notes="$(jq -r '.summary' <<<"$blocker_json")"
 fi
 
 write_matrix_summary_json

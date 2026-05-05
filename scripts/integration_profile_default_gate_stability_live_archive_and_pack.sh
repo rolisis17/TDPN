@@ -407,6 +407,7 @@ if ! grep -q $'cycle\t.*\thost_a=198.51.100.10\thost_b=198.51.100.11\tcampaign_s
   cat "$CAPTURE_FILE"
   exit 1
 fi
+assert_jq "$PASS_SUMMARY" '(.stages.cycle.command | contains("--campaign-subject")) and (.stages.cycle.command | contains("[redacted]")) and (.stages.cycle.command | contains("inv-pass-01") | not)'
 
 echo "[profile-default-gate-stability-live-archive-and-pack] missing artifacts fail closed"
 MISS_DIR="$TMP_DIR/missing_artifacts"

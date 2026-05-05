@@ -766,16 +766,13 @@ fi
 
 operator_host_a="$(resolve_first_concrete_host_01 "PROFILE_DEFAULT_GATE_STABILITY_HOST_A" "A_HOST" "HOST_A")"
 operator_host_b="$(resolve_first_concrete_host_01 "PROFILE_DEFAULT_GATE_STABILITY_HOST_B" "B_HOST" "HOST_B")"
-operator_campaign_subject="$(resolve_first_concrete_subject_01 "PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT" "CAMPAIGN_SUBJECT" "INVITE_KEY")"
 if [[ -z "$operator_host_a" ]]; then
   operator_host_a="HOST_A"
 fi
 if [[ -z "$operator_host_b" ]]; then
   operator_host_b="HOST_B"
 fi
-if [[ -z "$operator_campaign_subject" ]]; then
-  operator_campaign_subject="INVITE_KEY"
-fi
+operator_campaign_subject="INVITE_KEY"
 
 operator_next_action_command="$(render_command \
   "./scripts/easy_node.sh" \

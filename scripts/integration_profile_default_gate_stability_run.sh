@@ -36,6 +36,7 @@ fi
 shift
 
 summary_json=""
+reports_dir=""
 host_a=""
 host_b=""
 campaign_subject=""
@@ -48,6 +49,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --summary-json=*)
       summary_json="${1#*=}"
+      shift
+      ;;
+    --reports-dir)
+      reports_dir="${2:-}"
+      shift 2
+      ;;
+    --reports-dir=*)
+      reports_dir="${1#*=}"
       shift
       ;;
     --host-a)
@@ -92,6 +101,10 @@ if [[ -z "$summary_json" ]]; then
   echo "fake easy_node requires --summary-json" >&2
   exit 2
 fi
+if [[ -z "$reports_dir" ]]; then
+  echo "fake easy_node requires --reports-dir" >&2
+  exit 2
+fi
 
 run_index=0
 if [[ -f "$counter_file" ]]; then
@@ -121,7 +134,7 @@ if [[ "$scenario" == "mixed_decision" && "$run_index" -eq 2 ]]; then
   decision_value="NO-GO"
 fi
 
-campaign_summary_json="${summary_json%.json}_campaign_summary.json"
+campaign_summary_json="$reports_dir/profile_compare_campaign_summary.json"
 mkdir -p "$(dirname "$summary_json")"
 mkdir -p "$(dirname "$campaign_summary_json")"
 
@@ -160,12 +173,13 @@ jq -n \
   }' >"$summary_json"
 
 if [[ -n "$capture_file" ]]; then
-  printf 'profile-default-gate-live\trun=%s\thost_a=%s\thost_b=%s\tsubject=%s\tallow_remote_http_probe=%s\tsummary_json=%s\n' \
+  printf 'profile-default-gate-live\trun=%s\thost_a=%s\thost_b=%s\tsubject=%s\tallow_remote_http_probe=%s\treports_dir=%s\tsummary_json=%s\n' \
     "$run_index" \
     "$host_a" \
     "$host_b" \
     "$campaign_subject" \
     "$allow_remote_http_probe" \
+    "$reports_dir" \
     "$summary_json" >>"$capture_file"
 fi
 
@@ -232,6 +246,10 @@ if ! jq -e '
   and .outcome.evidence_complete == true
   and .outcome.action == "proceed_to_stability_check"
   and (.runs | length) == 3
+  and ([.runs[].artifacts.reports_dir] | unique | length) == 3
+  and ([.runs[].artifacts.campaign_summary_json] | unique | length) == 3
+  and all(.runs[]; (.artifacts.reports_dir | test("/run_[0-9][0-9]$")))
+  and all(.runs[]; .artifacts as $artifacts | ($artifacts.campaign_summary_json | startswith($artifacts.reports_dir + "/")))
 ' "$STABLE_SUMMARY" >/dev/null 2>&1; then
   echo "stable summary JSON missing expected fields"
   cat "$STABLE_SUMMARY"
@@ -245,6 +263,13 @@ if [[ "$stable_counter_value" != "3" ]]; then
 fi
 if ! grep -q $'allow_remote_http_probe=1' "$STABLE_CAPTURE"; then
   echo "expected allow-remote-http-probe forwarding in stable path"
+  cat "$STABLE_CAPTURE"
+  exit 1
+fi
+if ! grep -q $'run=1\t.*\treports_dir=.*/run_01\t' "$STABLE_CAPTURE" \
+  || ! grep -q $'run=2\t.*\treports_dir=.*/run_02\t' "$STABLE_CAPTURE" \
+  || ! grep -q $'run=3\t.*\treports_dir=.*/run_03\t' "$STABLE_CAPTURE"; then
+  echo "expected each stability run to receive its own reports_dir"
   cat "$STABLE_CAPTURE"
   exit 1
 fi
