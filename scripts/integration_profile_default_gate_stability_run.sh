@@ -313,6 +313,42 @@ if ! grep -q 'conflicting subject values' /tmp/integration_profile_default_gate_
   exit 1
 fi
 
+echo "[profile-default-gate-stability-run] short timeout guard"
+SHORT_TIMEOUT_CAPTURE="$TMP_DIR/short_timeout_capture.log"
+set +e
+PROFILE_DEFAULT_GATE_STABILITY_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+FAKE_EASY_NODE_COUNTER_FILE="$TMP_DIR/short_timeout_counter.txt" \
+FAKE_EASY_NODE_CAPTURE_FILE="$SHORT_TIMEOUT_CAPTURE" \
+FAKE_EASY_NODE_SCENARIO="stable" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "host-a.test" \
+  --host-b "host-b.test" \
+  --campaign-subject "inv-short-timeout" \
+  --runs 1 \
+  --campaign-timeout-sec 900 \
+  --sleep-between-sec 0 \
+  --reports-dir "$TMP_DIR/reports_short_timeout" \
+  --summary-json "$TMP_DIR/short_timeout_summary.json" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_run_short_timeout.log 2>&1
+short_timeout_rc=$?
+set -e
+
+if [[ "$short_timeout_rc" -ne 2 ]]; then
+  echo "expected short timeout guard rc=2, got rc=$short_timeout_rc"
+  cat /tmp/integration_profile_default_gate_stability_run_short_timeout.log
+  exit 1
+fi
+if ! grep -q 'below the live stability floor' /tmp/integration_profile_default_gate_stability_run_short_timeout.log; then
+  echo "expected short timeout guard message"
+  cat /tmp/integration_profile_default_gate_stability_run_short_timeout.log
+  exit 1
+fi
+if [[ -s "$SHORT_TIMEOUT_CAPTURE" ]]; then
+  echo "short timeout guard should fail before invoking fake easy_node"
+  cat "$SHORT_TIMEOUT_CAPTURE"
+  exit 1
+fi
+
 echo "[profile-default-gate-stability-run] mismatched policy path"
 MISMATCH_SUMMARY="$TMP_DIR/mismatch_summary.json"
 MISMATCH_REPORTS_DIR="$TMP_DIR/reports_mismatch"

@@ -311,7 +311,7 @@ bash "$SCRIPT_UNDER_TEST" \
   --host-b "b.test" \
   --subject "inv-happy" \
   --runs 3 \
-  --campaign-timeout-sec 1200 \
+  --campaign-timeout-sec 2400 \
   --allow-remote-http-probe 1 \
   --sleep-between-sec 0 \
   --require-decision-consensus 1 \
@@ -372,6 +372,43 @@ fi
 if ! grep -q $'check\t.*\trequire_decision_consensus=1\trequire_modal_decision=GO\trequire_modal_decision_support_rate_pct=70\t' "$FAKE_CAPTURE_FILE"; then
   echo "expected check-stage policy forwarding not captured"
   cat "$FAKE_CAPTURE_FILE"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-cycle] short timeout guard"
+SHORT_TIMEOUT_SUMMARY="$TMP_DIR/cycle_short_timeout_summary.json"
+SHORT_TIMEOUT_CAPTURE="$TMP_DIR/capture_short_timeout.log"
+set +e
+PROFILE_DEFAULT_GATE_STABILITY_RUN_SCRIPT="$FAKE_RUN_SCRIPT" \
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_CYCLE_CAPTURE_FILE="$SHORT_TIMEOUT_CAPTURE" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "a.test" \
+  --host-b "b.test" \
+  --subject "inv-short-timeout" \
+  --runs 1 \
+  --campaign-timeout-sec 900 \
+  --allow-remote-http-probe 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$TMP_DIR/short_timeout_reports" \
+  --summary-json "$SHORT_TIMEOUT_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_cycle_short_timeout.log 2>&1
+short_timeout_rc=$?
+set -e
+
+if [[ "$short_timeout_rc" -ne 2 ]]; then
+  echo "expected short timeout guard rc=2, got rc=$short_timeout_rc"
+  cat /tmp/integration_profile_default_gate_stability_cycle_short_timeout.log
+  exit 1
+fi
+if ! grep -q 'below the live stability floor' /tmp/integration_profile_default_gate_stability_cycle_short_timeout.log; then
+  echo "expected short timeout guard message"
+  cat /tmp/integration_profile_default_gate_stability_cycle_short_timeout.log
+  exit 1
+fi
+if [[ -s "$SHORT_TIMEOUT_CAPTURE" ]]; then
+  echo "short timeout guard should fail before invoking fake stages"
+  cat "$SHORT_TIMEOUT_CAPTURE"
   exit 1
 fi
 

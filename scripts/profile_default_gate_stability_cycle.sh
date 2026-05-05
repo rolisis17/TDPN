@@ -290,6 +290,8 @@ campaign_subject_from_campaign=""
 campaign_subject_from_alias=""
 runs="${PROFILE_DEFAULT_GATE_STABILITY_RUNS:-3}"
 campaign_timeout_sec="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_TIMEOUT_SEC:-2400}"
+min_campaign_timeout_sec="${PROFILE_DEFAULT_GATE_STABILITY_CYCLE_MIN_CAMPAIGN_TIMEOUT_SEC:-${PROFILE_DEFAULT_GATE_STABILITY_MIN_CAMPAIGN_TIMEOUT_SEC:-1800}}"
+allow_short_campaign_timeout="${PROFILE_DEFAULT_GATE_STABILITY_ALLOW_SHORT_CAMPAIGN_TIMEOUT:-0}"
 sleep_between_sec="${PROFILE_DEFAULT_GATE_STABILITY_SLEEP_BETWEEN_SEC:-5}"
 allow_partial="${PROFILE_DEFAULT_GATE_STABILITY_ALLOW_PARTIAL:-0}"
 allow_remote_http_probe="${PROFILE_DEFAULT_GATE_STABILITY_ALLOW_REMOTE_HTTP_PROBE:-0}"
@@ -661,6 +663,8 @@ campaign_subject_from_campaign="$(trim "$campaign_subject_from_campaign")"
 campaign_subject_from_alias="$(trim "$campaign_subject_from_alias")"
 runs="$(trim "$runs")"
 campaign_timeout_sec="$(trim "$campaign_timeout_sec")"
+min_campaign_timeout_sec="$(trim "$min_campaign_timeout_sec")"
+allow_short_campaign_timeout="$(trim "$allow_short_campaign_timeout")"
 sleep_between_sec="$(trim "$sleep_between_sec")"
 allow_partial="$(trim "$allow_partial")"
 allow_remote_http_probe="$(trim "$allow_remote_http_probe")"
@@ -718,6 +722,7 @@ fi
 
 int_arg_or_die "--runs" "$runs"
 int_arg_or_die "--campaign-timeout-sec" "$campaign_timeout_sec"
+int_arg_or_die "PROFILE_DEFAULT_GATE_STABILITY_CYCLE_MIN_CAMPAIGN_TIMEOUT_SEC" "$min_campaign_timeout_sec"
 int_arg_or_die "--sleep-between-sec" "$sleep_between_sec"
 int_arg_or_die "--require-min-runs-requested" "$require_min_runs_requested"
 int_arg_or_die "--require-min-runs-completed" "$require_min_runs_completed"
@@ -732,6 +737,7 @@ bool_arg_or_die "--require-decision-consensus" "$require_decision_consensus"
 bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go"
 bool_arg_or_die "--show-json" "$show_json"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "PROFILE_DEFAULT_GATE_STABILITY_ALLOW_SHORT_CAMPAIGN_TIMEOUT" "$allow_short_campaign_timeout"
 
 if ! is_non_negative_decimal "$require_modal_support_rate_pct"; then
   echo "--require-modal-support-rate-pct must be a non-negative number"
@@ -756,6 +762,11 @@ if (( runs < 1 )); then
 fi
 if (( campaign_timeout_sec < 1 )); then
   echo "--campaign-timeout-sec must be >= 1"
+  exit 2
+fi
+if (( min_campaign_timeout_sec > 0 && campaign_timeout_sec < min_campaign_timeout_sec )) && [[ "$allow_short_campaign_timeout" != "1" ]]; then
+  echo "profile-default-gate-stability-cycle failed: --campaign-timeout-sec $campaign_timeout_sec is below the live stability floor ($min_campaign_timeout_sec)"
+  echo "hint: use --campaign-timeout-sec 2400 for the default live campaign, or set PROFILE_DEFAULT_GATE_STABILITY_ALLOW_SHORT_CAMPAIGN_TIMEOUT=1 for deliberate timeout tests"
   exit 2
 fi
 
