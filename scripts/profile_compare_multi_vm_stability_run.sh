@@ -126,6 +126,53 @@ render_command_line_from_argv_01() {
   printf '%s' "$rendered"
 }
 
+redact_sensitive_text_01() {
+  local text="$1"
+  printf '%s' "$text" | sed -E \
+    -e 's/inv-[A-Za-z0-9]+/[redacted]/g' \
+    -e 's/((INVITE_KEY|CAMPAIGN_SUBJECT|ANON_CRED|ADMIN_TOKEN|TOKEN)=)[^[:space:]]+/\1[redacted]/g' \
+    -e 's/(--(campaign-subject|subject|campaign-anon-cred|anon-cred|admin-token|token|invite-key)=)[^[:space:]]+/\1[redacted]/g' \
+    -e 's/(--(campaign-subject|subject|campaign-anon-cred|anon-cred|admin-token|token|invite-key)[[:space:]]+)[^[:space:]]+/\1[redacted]/g'
+}
+
+sensitive_argv_flag_01() {
+  case "${1:-}" in
+    --campaign-subject|--subject|--campaign-anon-cred|--anon-cred|--admin-token|--token|--invite-key)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+render_redacted_command_line_from_argv_01() {
+  local arg=""
+  local rendered=""
+  local redact_next="0"
+  local rendered_arg=""
+  for arg in "$@"; do
+    if [[ "$redact_next" == "1" ]]; then
+      rendered_arg="[redacted]"
+      redact_next="0"
+    elif sensitive_argv_flag_01 "$arg"; then
+      rendered_arg="$arg"
+      redact_next="1"
+    else
+      case "$arg" in
+        --campaign-subject=*|--subject=*|--campaign-anon-cred=*|--anon-cred=*|--admin-token=*|--token=*|--invite-key=*)
+          rendered_arg="${arg%%=*}=[redacted]"
+          ;;
+        *)
+          rendered_arg="$(redact_sensitive_text_01 "$arg")"
+          ;;
+      esac
+    fi
+    rendered="${rendered}${rendered:+ }$(printf '%q' "$rendered_arg")"
+  done
+  printf '%s' "$rendered"
+}
+
 vm_command_value_has_unresolved_placeholder_01() {
   local value=""
   local angle_placeholder_re='<[A-Z0-9_:-]+>'
@@ -390,7 +437,7 @@ build_profile_compare_stability_run_command_01() {
   cmd+=(--print-summary-json "$print_summary_json")
   cmd+=("$vm_flag" "$vm_value")
 
-  render_command_line_from_argv_01 "${cmd[@]}"
+  render_redacted_command_line_from_argv_01 "${cmd[@]}"
 }
 
 record_vm_command_fallback_diag() {
@@ -589,7 +636,7 @@ fail_vm_command_preflight() {
   rerun_command="$(build_profile_compare_stability_run_command_01 --vm-command "vm_a::ssh vm-a.example" 0)"
   echo "vm command preflight failed: $reason"
   if [[ -n "$spec" ]]; then
-    echo "vm command: $spec"
+    echo "vm command: $(redact_sensitive_text_01 "$spec")"
   fi
   print_vm_command_preflight_diagnostics
   echo "operator_next_action: $rerun_command"

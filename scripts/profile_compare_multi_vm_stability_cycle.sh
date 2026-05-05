@@ -125,6 +125,52 @@ quote_cmd() {
   printf '\n'
 }
 
+redact_sensitive_text_01() {
+  local text="$1"
+  printf '%s' "$text" | sed -E \
+    -e 's/inv-[A-Za-z0-9]+/[redacted]/g' \
+    -e 's/((INVITE_KEY|CAMPAIGN_SUBJECT|ANON_CRED|ADMIN_TOKEN|TOKEN)=)[^[:space:]]+/\1[redacted]/g' \
+    -e 's/(--(campaign-subject|subject|campaign-anon-cred|anon-cred|admin-token|token|invite-key)=)[^[:space:]]+/\1[redacted]/g' \
+    -e 's/(--(campaign-subject|subject|campaign-anon-cred|anon-cred|admin-token|token|invite-key)[[:space:]]+)[^[:space:]]+/\1[redacted]/g'
+}
+
+sensitive_argv_flag_01() {
+  case "${1:-}" in
+    --campaign-subject|--subject|--campaign-anon-cred|--anon-cred|--admin-token|--token|--invite-key)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+quote_cmd_redacted_01() {
+  local arg=""
+  local rendered_arg=""
+  local redact_next="0"
+  for arg in "$@"; do
+    if [[ "$redact_next" == "1" ]]; then
+      rendered_arg="[redacted]"
+      redact_next="0"
+    elif sensitive_argv_flag_01 "$arg"; then
+      rendered_arg="$arg"
+      redact_next="1"
+    else
+      case "$arg" in
+        --campaign-subject=*|--subject=*|--campaign-anon-cred=*|--anon-cred=*|--admin-token=*|--token=*|--invite-key=*)
+          rendered_arg="${arg%%=*}=[redacted]"
+          ;;
+        *)
+          rendered_arg="$(redact_sensitive_text_01 "$arg")"
+          ;;
+      esac
+    fi
+    printf '%q ' "$rendered_arg"
+  done
+  printf '\n'
+}
+
 array_to_json() {
   if (( $# == 0 )); then
     printf '%s' "[]"
@@ -676,7 +722,7 @@ done
 for vm_file in "${vm_command_files[@]}"; do
   run_cmd+=(--vm-command-file "$vm_file")
 done
-run_command_display="$(quote_cmd "${run_cmd[@]}")"
+run_command_display="$(quote_cmd_redacted_01 "${run_cmd[@]}")"
 
 declare -a check_cmd
 check_cmd=(
@@ -704,7 +750,7 @@ fi
 if [[ -n "$allow_recommended_profiles" ]]; then
   check_cmd+=(--allow-recommended-profiles "$allow_recommended_profiles")
 fi
-check_command_display="$(quote_cmd "${check_cmd[@]}")"
+check_command_display="$(quote_cmd_redacted_01 "${check_cmd[@]}")"
 
 run_summary_exists="false"
 run_summary_valid="false"

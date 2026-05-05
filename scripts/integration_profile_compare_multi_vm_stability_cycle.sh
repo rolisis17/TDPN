@@ -456,6 +456,7 @@ bash "$SCRIPT_UNDER_TEST" \
   --runs 3 \
   --sleep-between-sec 0 \
   --allow-partial 1 \
+  --vm-command "vm_redact::ssh vm-a --subject inv-redact456 --token raw-cycle-secret" \
   --require-status-pass 1 \
   --require-decision-consensus 1 \
   --summary-json "$HAPPY_SUMMARY" \
@@ -480,6 +481,9 @@ if ! jq -e '
   and .stages.run.status == "pass"
   and .stages.check.attempted == true
   and .stages.check.status == "pass"
+  and (.stages.run.command | contains("inv-redact456") | not)
+  and (.stages.run.command | contains("raw-cycle-secret") | not)
+  and (.stages.run.command | contains("redacted"))
    and .run.summary_fresh == true
    and .check.summary_fresh == true
   and .check.decision == "GO"

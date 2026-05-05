@@ -698,7 +698,7 @@ bash "$SCRIPT_UNDER_TEST" \
   --sleep-between-sec 0 \
   --reports-dir "$INLINE_PLACEHOLDER_REPORTS_DIR" \
   --summary-json "$INLINE_PLACEHOLDER_SUMMARY" \
-  --vm-command "VM_ID::COMMAND" \
+  --vm-command "VM_ID::COMMAND --subject inv-redact123 --token raw-secret" \
   --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log 2>&1
 inline_placeholder_vm_command_rc=$?
 set -e
@@ -710,6 +710,16 @@ if [[ "$inline_placeholder_vm_command_rc" -eq 0 ]]; then
 fi
 if ! grep -q 'vm command preflight failed: invalid_vm_command_spec_arg_1_unresolved_placeholder_vm_id' /tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log; then
   echo "expected inline placeholder vm-command preflight failure reason"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log
+  exit 1
+fi
+if grep -q 'inv-redact123\\|raw-secret' /tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log; then
+  echo "expected inline placeholder vm-command diagnostics to redact sensitive values"
+  cat /tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log
+  exit 1
+fi
+if ! grep -Fq '[redacted]' /tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log; then
+  echo "expected redacted inline vm-command diagnostic"
   cat /tmp/integration_profile_compare_multi_vm_stability_run_inline_placeholder_vm_command.log
   exit 1
 fi
