@@ -76,7 +76,7 @@ require_tracked_shell_scripts_executable() {
   fi
 }
 
-require_no_unquoted_label_object_keys() {
+require_no_reserved_label_jq_names() {
   local offenders=""
   offenders="$(
     while IFS= read -r -d '' path; do
@@ -86,6 +86,18 @@ require_no_unquoted_label_object_keys() {
   )"
   if [[ -n "$offenders" ]]; then
     echo "jq object keys named label must be quoted for native Linux jq compatibility:"
+    printf '%s\n' "$offenders"
+    exit 1
+  fi
+
+  offenders="$(
+    while IFS= read -r -d '' path; do
+      [[ "$path" == *.sh ]] || continue
+      perl -ne 'print "$ARGV:$.:$_" if /--arg[ \t]+label[ \t]/' "$path"
+    done < <(git ls-files -z -- scripts)
+  )"
+  if [[ -n "$offenders" ]]; then
+    echo "jq variables named label must be avoided for native Linux jq compatibility:"
     printf '%s\n' "$offenders"
     exit 1
   fi
@@ -154,6 +166,6 @@ echo "[security-baseline] checking native Linux script modes"
 require_tracked_shell_scripts_executable
 
 echo "[security-baseline] checking jq label-key portability"
-require_no_unquoted_label_object_keys
+require_no_reserved_label_jq_names
 
 echo "[security-baseline] ok"

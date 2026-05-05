@@ -357,14 +357,14 @@ for idx in "${!source_paths[@]}"; do
 
   candidate_json="$(
     jq -n \
-      --arg label "$source_label" \
+      --arg label_value "$source_label" \
       --arg path "$source_path" \
       --argjson exists "$exists" \
       --argjson valid_json "$valid_json" \
       --argjson usable "$usable" \
       --arg status "$status" \
       '{
-        "label": $label,
+        "label": $label_value,
         path: $path,
         exists: ($exists == 1),
         valid_json: ($valid_json == 1),

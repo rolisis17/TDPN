@@ -883,7 +883,7 @@ for track_id in "${track_ids[@]}"; do
 
     jq -n \
       --arg track_id "$track_id" \
-      --arg label "${track_label[$track_id]}" \
+      --arg label_value "${track_label[$track_id]}" \
       --arg failure_substep "preflight:runtime_inputs_unresolved_or_placeholder" \
       --arg failure_reason "$runtime_failure_reason" \
       --argjson unresolved_required_inputs "$runtime_unresolved_inputs_json" \
@@ -892,7 +892,7 @@ for track_id in "${track_ids[@]}"; do
       --argjson failure_codes "$runtime_failure_codes_json" \
       '{
         track_id: $track_id,
-        "label": $label,
+        "label": $label_value,
         failure_substep: $failure_substep,
         failure_reason: (if $failure_reason == "" then null else $failure_reason end),
         unresolved_required_inputs: $unresolved_required_inputs,
@@ -1184,7 +1184,7 @@ for track_id in "${track_ids[@]}"; do
 
   jq -n \
     --arg track_id "$track_id" \
-    --arg label "${track_label[$track_id]}" \
+    --arg label_value "${track_label[$track_id]}" \
     --arg status "${track_status[$track_id]}" \
     --argjson rc "$track_rc_json" \
     --arg script_path "${track_script[$track_id]}" \
@@ -1219,7 +1219,7 @@ for track_id in "${track_ids[@]}"; do
     --argjson runtime_preflight_failure_codes "$runtime_preflight_failure_codes_json_value" \
     '{
       track_id: $track_id,
-      "label": $label,
+      "label": $label_value,
       status: $status,
       rc: $rc,
       executed: ($executed == 1),

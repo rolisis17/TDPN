@@ -222,14 +222,14 @@ write_summary() {
     steps_json="$(jq -cn \
       --argjson base "$steps_json" \
       --arg id "${step_ids[$i]}" \
-      --arg label "${step_labels[$i]}" \
+      --arg label_value "${step_labels[$i]}" \
       --arg script "${step_scripts[$i]}" \
       --arg step_status "${step_statuses[$i]}" \
       --arg step_rc "$rc_value" \
       '
         $base + {
           ($id): {
-            "label": $label,
+            "label": $label_value,
             script: $script,
             status: $step_status,
             rc: (if $step_rc == "null" then null else ($step_rc | tonumber) end)

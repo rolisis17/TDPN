@@ -523,7 +523,7 @@ if [[ -z "$selection_error" && "$selected_count" -gt 0 ]]; then
     if [[ ! -f "$script_path" ]]; then
       jq -cn \
         --arg id "$check_id" \
-        --arg label "$check_label" \
+        --arg label_value "$check_label" \
         --arg focus "$check_focus_value" \
         --arg script_path "$script_path" \
         --arg status "fail" \
@@ -534,7 +534,7 @@ if [[ -z "$selection_error" && "$selected_count" -gt 0 ]]; then
         --argjson duration_sec 0 \
         '{
           id: $id,
-          "label": $label,
+          "label": $label_value,
           focus: $focus,
           script_path: $script_path,
           status: $status,
@@ -550,7 +550,7 @@ if [[ -z "$selection_error" && "$selected_count" -gt 0 ]]; then
     if [[ ! -r "$script_path" ]]; then
       jq -cn \
         --arg id "$check_id" \
-        --arg label "$check_label" \
+        --arg label_value "$check_label" \
         --arg focus "$check_focus_value" \
         --arg script_path "$script_path" \
         --arg status "fail" \
@@ -561,7 +561,7 @@ if [[ -z "$selection_error" && "$selected_count" -gt 0 ]]; then
         --argjson duration_sec 0 \
         '{
           id: $id,
-          "label": $label,
+          "label": $label_value,
           focus: $focus,
           script_path: $script_path,
           status: $status,
@@ -594,7 +594,7 @@ if [[ -z "$selection_error" && "$selected_count" -gt 0 ]]; then
         fi
         jq -cn \
           --arg id "$check_id" \
-          --arg label "$check_label" \
+          --arg label_value "$check_label" \
           --arg focus "$check_focus_value" \
           --arg script_path "$script_path" \
           --arg status "$check_status" \
@@ -605,7 +605,7 @@ if [[ -z "$selection_error" && "$selected_count" -gt 0 ]]; then
           --argjson duration_sec "$duration_sec" \
           '{
             id: $id,
-            "label": $label,
+            "label": $label_value,
             focus: $focus,
             script_path: $script_path,
             status: $status,
@@ -635,7 +635,7 @@ if [[ -z "$selection_error" && "$selected_count" -gt 0 ]]; then
       fi
       jq -cn \
         --arg id "$check_id" \
-        --arg label "$check_label" \
+        --arg label_value "$check_label" \
         --arg focus "$check_focus_value" \
         --arg script_path "$script_path" \
         --arg status "$check_status" \
@@ -646,7 +646,7 @@ if [[ -z "$selection_error" && "$selected_count" -gt 0 ]]; then
         --argjson duration_sec "$duration_sec" \
         '{
           id: $id,
-          "label": $label,
+          "label": $label_value,
           focus: $focus,
           script_path: $script_path,
           status: $status,
@@ -681,7 +681,7 @@ if [[ -z "$selection_error" && "$parallel" == "1" ]]; then
         result_path="${result_files[$order_idx]}"
         jq -cn \
           --arg id "$check_id" \
-          --arg label "$check_label" \
+          --arg label_value "$check_label" \
           --arg focus "$check_focus_value" \
           --arg script_path "$script_path" \
           --arg status "fail" \
@@ -692,7 +692,7 @@ if [[ -z "$selection_error" && "$parallel" == "1" ]]; then
           --argjson duration_sec 0 \
           '{
             id: $id,
-            "label": $label,
+            "label": $label_value,
             focus: $focus,
             script_path: $script_path,
             status: $status,
@@ -731,7 +731,7 @@ if [[ -z "$selection_error" ]]; then
       log_path="$reports_dir/check_$(printf '%02d' $((order_idx + 1)))_${safe_id}.log"
       jq -cn \
         --arg id "$check_id" \
-        --arg label "$check_label" \
+        --arg label_value "$check_label" \
         --arg focus "$check_focus_value" \
         --arg script_path "$script_path" \
         --arg status "fail" \
@@ -742,7 +742,7 @@ if [[ -z "$selection_error" ]]; then
         --argjson duration_sec 0 \
         '{
           id: $id,
-          "label": $label,
+          "label": $label_value,
           focus: $focus,
           script_path: $script_path,
           status: $status,

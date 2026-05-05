@@ -1119,7 +1119,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
     } >"$action_log"
     jq -cn \
       --arg id "$action_id" \
-      --arg label "$action_label" \
+      --arg label_value "$action_label" \
       --arg reason "$action_reason" \
       --arg command "$action_command_redacted" \
       --arg status "fail" \
@@ -1132,7 +1132,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       --argjson timeout_sec "$action_timeout_sec" \
       '{
         id: $id,
-        "label": $label,
+        "label": $label_value,
         reason: $reason,
         command: $command,
         status: $status,
@@ -1147,7 +1147,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   elif [[ -z "$action_command" ]]; then
     jq -cn \
       --arg id "$action_id" \
-      --arg label "$action_label" \
+      --arg label_value "$action_label" \
       --arg reason "$action_reason" \
       --arg command "$action_command_redacted" \
       --arg status "fail" \
@@ -1160,7 +1160,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       --argjson timeout_sec "$action_timeout_sec" \
       '{
         id: $id,
-        "label": $label,
+        "label": $label_value,
         reason: $reason,
         command: $command,
         status: $status,
@@ -1202,7 +1202,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         fi
         jq -cn \
           --arg id "$action_id" \
-          --arg label "$action_label" \
+          --arg label_value "$action_label" \
           --arg reason "$action_reason" \
           --arg command "$action_command_redacted" \
           --arg status "$action_status" \
@@ -1215,7 +1215,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
           --argjson timeout_sec "$action_timeout_sec" \
           '{
             id: $id,
-            "label": $label,
+            "label": $label_value,
             reason: $reason,
             command: $command,
             status: $status,
@@ -1256,7 +1256,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       fi
       jq -cn \
         --arg id "$action_id" \
-        --arg label "$action_label" \
+        --arg label_value "$action_label" \
         --arg reason "$action_reason" \
         --arg command "$action_command_redacted" \
         --arg status "$action_status" \
@@ -1269,7 +1269,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         --argjson timeout_sec "$action_timeout_sec" \
         '{
           id: $id,
-          "label": $label,
+          "label": $label_value,
           reason: $reason,
           command: $command,
           status: $status,
@@ -1303,7 +1303,7 @@ if [[ "$parallel" == "1" ]]; then
         action_result_file="${action_result_files[$idx]}"
         jq -cn \
           --arg id "$action_id" \
-          --arg label "$action_label" \
+          --arg label_value "$action_label" \
           --arg reason "$action_reason" \
           --arg command "$action_command_redacted" \
           --arg status "fail" \
@@ -1316,7 +1316,7 @@ if [[ "$parallel" == "1" ]]; then
           --argjson timeout_sec "$action_timeout_sec" \
           '{
             id: $id,
-            "label": $label,
+            "label": $label_value,
             reason: $reason,
             command: $command,
             status: $status,
@@ -1345,7 +1345,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   if [[ ! -s "$action_result_file" ]] || ! jq -e . "$action_result_file" >/dev/null 2>&1; then
     jq -cn \
       --arg id "$action_id" \
-      --arg label "$action_label" \
+      --arg label_value "$action_label" \
       --arg reason "$action_reason" \
       --arg command "$action_command_redacted" \
       --arg status "fail" \
@@ -1358,7 +1358,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       --argjson timeout_sec "$action_timeout_sec" \
       '{
         id: $id,
-        "label": $label,
+        "label": $label_value,
         reason: $reason,
         command: $command,
         status: $status,

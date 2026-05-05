@@ -476,13 +476,13 @@ for spec in "${artifact_specs[@]}"; do
       --arg id "$artifact_id" \
       --arg group "$artifact_group" \
       --arg pattern "$artifact_pattern" \
-      --arg label "$artifact_label" \
+      --arg label_value "$artifact_label" \
       --arg reason "missing" \
       '{
         id: $id,
         group: $group,
         pattern: $pattern,
-        "label": $label,
+        "label": $label_value,
         reason: $reason
       }')"
     missing_rows+=("$missing_row")
@@ -555,7 +555,7 @@ for spec in "${artifact_specs[@]}"; do
     --arg id "$artifact_id" \
     --arg group "$artifact_group" \
     --arg pattern "$artifact_pattern" \
-    --arg label "$artifact_label" \
+    --arg label_value "$artifact_label" \
     --arg source_path "$source_path" \
     --arg copied_path "$copied_path" \
     --arg json_valid "$json_valid" \
@@ -576,7 +576,7 @@ for spec in "${artifact_specs[@]}"; do
         id: $id,
         group: $group,
         pattern: $pattern,
-        "label": $label,
+        "label": $label_value,
         source_path: $source_path,
         copied_path: $copied_path,
         json_valid: ($json_valid == "1"),
@@ -611,13 +611,13 @@ ensure_group_action() {
   row="$(jq -n \
     --arg id "$id" \
     --arg group "$group" \
-    --arg label "$label" \
+    --arg label_value "$label" \
     --arg command "$command" \
     --arg reason "$reason" \
     '{
       id: $id,
       group: $group,
-      "label": $label,
+      "label": $label_value,
       command: $command,
       reason: $reason
     }')"
