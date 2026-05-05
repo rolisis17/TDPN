@@ -26,6 +26,23 @@ func strictExitRouteFixture() exitRoute {
 	}
 }
 
+func TestPublishedDataAddrFallsBackToListenAddr(t *testing.T) {
+	s := &Service{dataAddr: "0.0.0.0:51820"}
+	if got := s.publishedDataAddr(); got != "0.0.0.0:51820" {
+		t.Fatalf("publishedDataAddr=%q", got)
+	}
+}
+
+func TestPublishedDataAddrUsesPublicAddr(t *testing.T) {
+	s := &Service{
+		dataAddr:       "0.0.0.0:51820",
+		publicDataAddr: "100.113.245.61:51820",
+	}
+	if got := s.publishedDataAddr(); got != "100.113.245.61:51820" {
+		t.Fatalf("publishedDataAddr=%q", got)
+	}
+}
+
 func TestHandlePathOpenLiveModeRejectsNonWireGuardTransport(t *testing.T) {
 	exitCalls := 0
 	exitSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

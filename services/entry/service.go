@@ -76,6 +76,7 @@ type cachedRelayDescriptor struct {
 type Service struct {
 	addr                  string
 	dataAddr              string
+	publicDataAddr        string
 	liveWGMode            bool
 	wgOnlyMode            bool
 	betaStrict            bool
@@ -164,6 +165,13 @@ func New() *Service {
 	dataAddr := os.Getenv("ENTRY_DATA_ADDR")
 	if dataAddr == "" {
 		dataAddr = "127.0.0.1:51820"
+	}
+	publicDataAddr := strings.TrimSpace(os.Getenv("ENTRY_PUBLIC_DATA_ADDR"))
+	if publicDataAddr == "" {
+		publicDataAddr = strings.TrimSpace(os.Getenv("ENTRY_ENDPOINT"))
+	}
+	if publicDataAddr == "" {
+		publicDataAddr = dataAddr
 	}
 	exitControlURL := os.Getenv("EXIT_CONTROL_URL")
 	if exitControlURL == "" {
@@ -275,6 +283,7 @@ func New() *Service {
 	return &Service{
 		addr:                  addr,
 		dataAddr:              dataAddr,
+		publicDataAddr:        publicDataAddr,
 		liveWGMode:            liveWGMode,
 		wgOnlyMode:            wgOnlyMode,
 		betaStrict:            betaStrict,
@@ -719,13 +728,20 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		})
 		releaseReservation = false
 		resp.SessionID = sessionID
-		resp.EntryDataAddr = s.dataAddr
+		resp.EntryDataAddr = s.publishedDataAddr()
 		resp.SessionExp = expires
 		resp.Transport = transport
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Service) publishedDataAddr() string {
+	if v := strings.TrimSpace(s.publicDataAddr); v != "" {
+		return v
+	}
+	return strings.TrimSpace(s.dataAddr)
 }
 
 func looksLikeTokenProofSignature(raw string) bool {
