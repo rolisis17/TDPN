@@ -1600,6 +1600,9 @@ if [[ -n "$selection_error" ]]; then
 elif (( final_rc == 0 )) && (( executed_tracks == 0 )) && (( ${#selected_track_ids[@]} > 0 )); then
   final_status="fail"
   final_rc=1
+elif (( final_rc == 0 )) && { (( unresolved_required_track_count > 0 )) || (( skipped_unresolved_runtime_input_tracks > 0 )); }; then
+  final_status="fail"
+  final_rc=1
 elif (( final_rc == 0 )); then
   final_status="pass"
 else
@@ -1611,6 +1614,9 @@ failure_reason=""
 if [[ -n "$selection_error" ]]; then
   failure_substep="selection:$selection_error"
   failure_reason="selection failed before execution"
+elif [[ "$final_status" == "fail" ]] && (( first_failure_iteration == 0 )) && { (( unresolved_required_track_count > 0 )) || (( skipped_unresolved_runtime_input_tracks > 0 )); }; then
+  failure_substep="execution:required_runtime_inputs_unresolved"
+  failure_reason="selected required live track(s) skipped because required runtime inputs were unresolved"
 elif [[ "$final_status" == "fail" ]] && (( executed_tracks == 0 )) && (( ${#selected_track_ids[@]} > 0 )); then
   failure_substep="execution:no_tracks_executed"
   failure_reason="no selected tracks executed; required runtime inputs unresolved across all selected tracks"

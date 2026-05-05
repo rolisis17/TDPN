@@ -427,18 +427,18 @@ bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
 placeholder_rc=$?
 set -e
 
-if [[ "$placeholder_rc" != "0" ]]; then
-  echo "expected placeholder diagnostics path rc=0, got rc=$placeholder_rc"
+if [[ "$placeholder_rc" != "1" ]]; then
+  echo "expected placeholder diagnostics path rc=1, got rc=$placeholder_rc"
   cat "$PLACEHOLDER_SUMMARY"
   exit 1
 fi
 
 if ! jq -e '
-  .status == "pass"
-  and .rc == 0
-  and .failure_substep == null
-  and .failure_reason == null
-  and .stages.execution.status == "pass"
+  .status == "fail"
+  and .rc == 1
+  and .failure_substep == "execution:required_runtime_inputs_unresolved"
+  and .failure_reason == "selected required live track(s) skipped because required runtime inputs were unresolved"
+  and .stages.execution.status == "fail"
   and .stages.execution.partial_progress_runtime_input_skips == true
   and .summary.iterations_completed == 1
   and .summary.executed_tracks == 1
@@ -488,6 +488,77 @@ if grep -F "A:" "$EXEC_LOG" >/dev/null || grep -F "B:" "$EXEC_LOG" >/dev/null; t
 fi
 if ! grep -F "C:pass" "$EXEC_LOG" >/dev/null; then
   echo "track C should run in placeholder diagnostics path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-cycle-batch-run] parallel unresolved-input partial-progress fails closed"
+PARALLEL_PLACEHOLDER_SUMMARY="$TMP_DIR/parallel_placeholder_summary.json"
+: >"$EXEC_LOG"
+set +e
+A_HOST=A_HOST B_HOST=B_HOST CAMPAIGN_SUBJECT=CAMPAIGN_SUBJECT INVITE_KEY=INVITE_KEY \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="$VM_COMMAND_FILE" \
+BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
+TRACK_A_BEHAVIOR=pass TRACK_C_BEHAVIOR=pass \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_SCRIPT="$TRACK_C" \
+bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
+  --reports-dir "$TMP_DIR/parallel_placeholder_reports" \
+  --summary-json "$PARALLEL_PLACEHOLDER_SUMMARY" \
+  --iterations 1 \
+  --continue-on-fail 1 \
+  --parallel 1 \
+  --include-track-id profile_default_gate_stability_cycle \
+  --include-track-id profile_compare_multi_vm_stability_promotion_cycle \
+  --print-summary-json 0
+parallel_placeholder_rc=$?
+set -e
+
+if [[ "$parallel_placeholder_rc" != "1" ]]; then
+  echo "expected parallel placeholder diagnostics path rc=1, got rc=$parallel_placeholder_rc"
+  cat "$PARALLEL_PLACEHOLDER_SUMMARY"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .failure_substep == "execution:required_runtime_inputs_unresolved"
+  and .stages.execution.status == "fail"
+  and .stages.execution.partial_progress_runtime_input_skips == true
+  and .summary.iterations_completed == 1
+  and .summary.executed_tracks == 1
+  and .summary.skipped_tracks == 1
+  and .summary.skipped_unresolved_runtime_input_tracks == 1
+  and .selection_accounting.unresolved_required_track_ids == [
+    "profile_default_gate_stability_cycle"
+  ]
+  and .selection_accounting.unresolved_required_track_count == 1
+  and .iterations[0].status == "pass"
+  and .iterations[0].rc == 0
+  and ([.iterations[0].tracks[].status] == ["skipped","pass"])
+  and .iterations[0].tracks[0].track_id == "profile_default_gate_stability_cycle"
+  and .iterations[0].tracks[0].failure_kind == "skipped_unresolved_runtime_inputs"
+  and .iterations[0].tracks[1].track_id == "profile_compare_multi_vm_stability_promotion_cycle"
+  and .iterations[0].tracks[1].status == "pass"
+' "$PARALLEL_PLACEHOLDER_SUMMARY" >/dev/null; then
+  echo "parallel placeholder diagnostics summary mismatch"
+  cat "$PARALLEL_PLACEHOLDER_SUMMARY"
+  exit 1
+fi
+
+if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "1" ]]; then
+  echo "expected 1 execution in parallel placeholder diagnostics path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if grep -F "A:" "$EXEC_LOG" >/dev/null; then
+  echo "track A should not run in parallel placeholder diagnostics path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if ! grep -F "C:pass" "$EXEC_LOG" >/dev/null; then
+  echo "track C should run in parallel placeholder diagnostics path"
   cat "$EXEC_LOG"
   exit 1
 fi
@@ -718,8 +789,8 @@ fi
 if ! jq -e '
   .status == "fail"
   and .rc == 1
-  and .failure_substep == "execution:no_tracks_executed"
-  and .failure_reason == "no selected tracks executed; required runtime inputs unresolved across all selected tracks"
+  and .failure_substep == "execution:required_runtime_inputs_unresolved"
+  and .failure_reason == "selected required live track(s) skipped because required runtime inputs were unresolved"
   and .summary.executed_tracks == 0
   and .summary.skipped_tracks == 2
   and .summary.skipped_unresolved_runtime_input_tracks == 2
@@ -788,9 +859,10 @@ if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "0" ]]; then
   exit 1
 fi
 
-echo "[roadmap-live-evidence-cycle-batch-run] roadmap-summary placeholder subject ignore path"
+echo "[roadmap-live-evidence-cycle-batch-run] roadmap-summary placeholder subject partial-progress fail-closed path"
 ROADMAP_FALLBACK_PLACEHOLDER_SUBJECT_SUMMARY="$TMP_DIR/roadmap_fallback_placeholder_subject_summary.json"
 : >"$EXEC_LOG"
+set +e
 CAMPAIGN_SUBJECT= INVITE_KEY= \
 PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="$VM_COMMAND_FILE" \
 BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
@@ -806,10 +878,22 @@ bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
   --include-track-id runtime_actuation_promotion_cycle \
   --include-track-id profile_compare_multi_vm_stability_promotion_cycle \
   --print-summary-json 0
+roadmap_fallback_placeholder_subject_rc=$?
+set -e
+
+if [[ "$roadmap_fallback_placeholder_subject_rc" != "1" ]]; then
+  echo "expected roadmap-summary placeholder subject fail-closed rc=1, got rc=$roadmap_fallback_placeholder_subject_rc"
+  cat "$ROADMAP_FALLBACK_PLACEHOLDER_SUBJECT_SUMMARY"
+  exit 1
+fi
 
 if ! jq -e '
-  .status == "pass"
-  and .rc == 0
+  .status == "fail"
+  and .rc == 1
+  and .failure_substep == "execution:required_runtime_inputs_unresolved"
+  and .failure_reason == "selected required live track(s) skipped because required runtime inputs were unresolved"
+  and .stages.execution.status == "fail"
+  and .stages.execution.partial_progress_runtime_input_skips == true
   and .summary.executed_tracks == 1
   and .summary.skipped_tracks == 1
   and .summary.skipped_unresolved_runtime_input_tracks == 1
@@ -846,13 +930,13 @@ if ! jq -e '
   and .iterations[0].tracks[1].track_id == "profile_compare_multi_vm_stability_promotion_cycle"
   and .iterations[0].tracks[1].status == "pass"
 ' "$ROADMAP_FALLBACK_PLACEHOLDER_SUBJECT_SUMMARY" >/dev/null; then
-  echo "roadmap-summary placeholder subject ignore summary mismatch"
+  echo "roadmap-summary placeholder subject fail-closed summary mismatch"
   cat "$ROADMAP_FALLBACK_PLACEHOLDER_SUBJECT_SUMMARY"
   exit 1
 fi
 
 if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "1" ]]; then
-  echo "expected 1 execution in roadmap-summary placeholder subject ignore path"
+  echo "expected 1 execution in roadmap-summary placeholder subject fail-closed path"
   cat "$EXEC_LOG"
   exit 1
 fi
@@ -955,17 +1039,18 @@ bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
 m5_unresolved_rc=$?
 set -e
 
-if [[ "$m5_unresolved_rc" != "0" ]]; then
-  echo "expected m5 unresolved partial-progress path rc=0, got rc=$m5_unresolved_rc"
+if [[ "$m5_unresolved_rc" != "1" ]]; then
+  echo "expected m5 unresolved partial-progress path rc=1, got rc=$m5_unresolved_rc"
   cat "$M5_UNRESOLVED_SUMMARY"
   exit 1
 fi
 
 if ! jq -e '
-  .status == "pass"
-  and .rc == 0
-  and .failure_substep == null
-  and .stages.execution.status == "pass"
+  .status == "fail"
+  and .rc == 1
+  and .failure_substep == "execution:required_runtime_inputs_unresolved"
+  and .failure_reason == "selected required live track(s) skipped because required runtime inputs were unresolved"
+  and .stages.execution.status == "fail"
   and .stages.execution.partial_progress_runtime_input_skips == true
   and .summary.iterations_completed == 1
   and .summary.executed_tracks == 2
@@ -1041,8 +1126,8 @@ fi
 if ! jq -e '
   .status == "fail"
   and .rc == 1
-  and .failure_substep == "execution:no_tracks_executed"
-  and .failure_reason == "no selected tracks executed; required runtime inputs unresolved across all selected tracks"
+  and .failure_substep == "execution:required_runtime_inputs_unresolved"
+  and .failure_reason == "selected required live track(s) skipped because required runtime inputs were unresolved"
   and .summary.iterations_requested == 1
   and .summary.iterations_completed == 1
   and .summary.executed_tracks == 0
