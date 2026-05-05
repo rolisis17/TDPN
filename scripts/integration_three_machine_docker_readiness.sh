@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq rg mktemp chmod stat openssl; do
+for cmd in bash id jq rg mktemp chmod stat openssl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -30,6 +30,7 @@ require_mode() {
 TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
 ORIG_PATH="$PATH"
+EXPECTED_ENTRY_EXIT_USER="$(id -u):$(id -g)"
 mkdir -p "$TMP_BIN"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -44,12 +45,14 @@ SUMMARY_RETRY_OK="$TMP_DIR/summary_retry_ok.json"
 SUMMARY_RETRY_EXHAUST="$TMP_DIR/summary_retry_exhaust.json"
 SUMMARY_ROUTE_DISABLED="$TMP_DIR/summary_route_disabled.json"
 SUMMARY_LOGS_UNAVAILABLE="$TMP_DIR/summary_logs_unavailable.json"
+SUMMARY_BAD_ENTRY_EXIT_USER="$TMP_DIR/summary_bad_entry_exit_user.json"
 SUMMARY_FAIL="$TMP_DIR/summary_fail.json"
 LOG_OK="$TMP_DIR/run_ok.log"
 LOG_RETRY_OK="$TMP_DIR/run_retry_ok.log"
 LOG_RETRY_EXHAUST="$TMP_DIR/run_retry_exhaust.log"
 LOG_ROUTE_DISABLED="$TMP_DIR/run_route_disabled.log"
 LOG_LOGS_UNAVAILABLE="$TMP_DIR/run_logs_unavailable.log"
+LOG_BAD_ENTRY_EXIT_USER="$TMP_DIR/run_bad_entry_exit_user.log"
 LOG_FAIL="$TMP_DIR/run_fail.log"
 
 mkdir -p "$DOCKER_STATE_DIR"
@@ -275,8 +278,8 @@ if [[ -z "$env_a_path" || -z "$env_b_path" ]] ||
 	  ! rg -q '^BETA_STRICT_MODE=0$' "$env_b_path" ||
 	  ! rg -q '^PROD_STRICT_MODE=0$' "$env_a_path" ||
 	  ! rg -q '^PROD_STRICT_MODE=0$' "$env_b_path" ||
-	  ! rg -q '^ENTRY_EXIT_USER=([0-9]+:[0-9]+|nodeuser)$' "$env_a_path" ||
-	  ! rg -q '^ENTRY_EXIT_USER=([0-9]+:[0-9]+|nodeuser)$' "$env_b_path"; then
+	  ! rg -q "^ENTRY_EXIT_USER=${EXPECTED_ENTRY_EXIT_USER}$" "$env_a_path" ||
+	  ! rg -q "^ENTRY_EXIT_USER=${EXPECTED_ENTRY_EXIT_USER}$" "$env_b_path"; then
 	  echo "docker rehearsal env files should include generated secrets and runtime wiring"
 	  [[ -n "$env_a_path" && -f "$env_a_path" ]] && cat "$env_a_path"
 	  [[ -n "$env_b_path" && -f "$env_b_path" ]] && cat "$env_b_path"
@@ -343,6 +346,48 @@ done
 if ! rg -q 'note: host Go entry route assertion keygen unavailable; using openssl fallback' "$LOG_OK"; then
   echo "success path should exercise the openssl route assertion key fallback when host go fails"
   cat "$LOG_OK"
+  exit 1
+fi
+
+echo "[three-machine-docker-readiness] invalid entry-exit user path"
+: >"$DOCKER_CAPTURE"
+: >"$CURL_CAPTURE"
+: >"$VALIDATE_CAPTURE"
+: >"$SOAK_CAPTURE"
+rm -f "$DOCKER_STATE_DIR"/*.count 2>/dev/null || true
+set +e
+FAKE_DOCKER_CAPTURE_FILE="$DOCKER_CAPTURE" \
+FAKE_DOCKER_STATE_DIR="$DOCKER_STATE_DIR" \
+FAKE_CURL_CAPTURE_FILE="$CURL_CAPTURE" \
+FAKE_VALIDATE_CAPTURE_FILE="$VALIDATE_CAPTURE" \
+FAKE_SOAK_CAPTURE_FILE="$SOAK_CAPTURE" \
+EASY_NODE_LOG_DIR="$TMP_DIR/logs_bad_entry_exit_user" \
+THREE_MACHINE_DOCKER_DATA_ROOT="$TMP_DIR/data_bad_entry_exit_user" \
+THREE_MACHINE_DOCKER_ENTRY_EXIT_USER=nodeuser \
+THREE_MACHINE_DOCKER_DOCKER_BIN="$TMP_BIN/docker" \
+THREE_MACHINE_DOCKER_CURL_BIN="$TMP_BIN/curl" \
+THREE_MACHINE_DOCKER_VALIDATE_SCRIPT="$FAKE_VALIDATE" \
+THREE_MACHINE_DOCKER_SOAK_SCRIPT="$FAKE_SOAK" \
+./scripts/three_machine_docker_readiness.sh \
+  --run-validate 0 \
+  --run-soak 0 \
+  --summary-json "$SUMMARY_BAD_ENTRY_EXIT_USER" \
+  --print-summary-json 0 >"$LOG_BAD_ENTRY_EXIT_USER" 2>&1
+rc_bad_entry_exit_user=$?
+set -e
+if [[ $rc_bad_entry_exit_user -eq 0 ]]; then
+  echo "named entry-exit user override should return non-zero"
+  cat "$LOG_BAD_ENTRY_EXIT_USER"
+  exit 1
+fi
+if ! rg -q 'THREE_MACHINE_DOCKER_ENTRY_EXIT_USER must be numeric UID:GID' "$LOG_BAD_ENTRY_EXIT_USER"; then
+  echo "named entry-exit user override should explain the numeric UID:GID requirement"
+  cat "$LOG_BAD_ENTRY_EXIT_USER"
+  exit 1
+fi
+if [[ -s "$DOCKER_CAPTURE" ]]; then
+  echo "named entry-exit user override should fail before docker compose is invoked"
+  cat "$DOCKER_CAPTURE"
   exit 1
 fi
 

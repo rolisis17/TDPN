@@ -852,11 +852,15 @@ entry_puzzle_secret_a="${THREE_MACHINE_DOCKER_ENTRY_PUZZLE_SECRET_A:-$(generate_
 entry_puzzle_secret_b="${THREE_MACHINE_DOCKER_ENTRY_PUZZLE_SECRET_B:-$(generate_strong_token)}"
 entry_exit_user="${THREE_MACHINE_DOCKER_ENTRY_EXIT_USER:-}"
 if [[ -z "$entry_exit_user" ]]; then
-  if command -v id >/dev/null 2>&1; then
-    entry_exit_user="$(id -u):$(id -g)"
-  else
-    entry_exit_user="nodeuser"
+  if ! command -v id >/dev/null 2>&1; then
+    echo "missing required command: id"
+    exit 2
   fi
+  entry_exit_user="$(id -u):$(id -g)"
+fi
+if ! [[ "$entry_exit_user" =~ ^[0-9]+:[0-9]+$ ]]; then
+  echo "THREE_MACHINE_DOCKER_ENTRY_EXIT_USER must be numeric UID:GID so the container can read generated route assertion keys"
+  exit 2
 fi
 
 entry_route_assertion_key_a="$data_root/a/entry-exit/entry_route_assertion.key"
