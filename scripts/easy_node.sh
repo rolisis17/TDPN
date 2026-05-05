@@ -13134,6 +13134,14 @@ prod_preflight() {
   return 0
 }
 
+client_image_build_retryable_failure() {
+  local output_file="$1"
+  [[ -f "$output_file" ]] || return 1
+  rg -qi \
+    'server misbehaving|temporary failure in name resolution|tls handshake timeout|i/o timeout|context deadline exceeded|connection reset by peer|failed to do request|request canceled while waiting for connection|failed to resolve source metadata' \
+    "$output_file"
+}
+
 client_test() {
   local directory_urls=""
   local issuer_url=""
@@ -13146,6 +13154,8 @@ client_test() {
   local exit_region=""
   local timeout_sec="35"
   local build_timeout_sec="${EASY_NODE_CLIENT_BUILD_TIMEOUT_SEC:-180}"
+  local build_max_attempts="${EASY_NODE_CLIENT_BUILD_MAX_ATTEMPTS:-3}"
+  local build_initial_backoff_sec="${EASY_NODE_CLIENT_BUILD_RETRY_INITIAL_BACKOFF_SEC:-2}"
   local force_build="${EASY_NODE_CLIENT_FORCE_BUILD:-0}"
   local execution_mode="${EASY_NODE_CLIENT_TEST_MODE:-docker}"
   local path_profile="${EASY_NODE_PATH_PROFILE:-}"
@@ -13527,6 +13537,18 @@ client_test() {
     echo "client-test requires EASY_NODE_CLIENT_TEST_MODE to be docker or local"
     exit 2
   fi
+  if ! [[ "$build_timeout_sec" =~ ^[0-9]+$ ]] || ((build_timeout_sec < 1)); then
+    echo "client-test requires EASY_NODE_CLIENT_BUILD_TIMEOUT_SEC to be an integer >= 1"
+    exit 2
+  fi
+  if ! [[ "$build_max_attempts" =~ ^[0-9]+$ ]] || ((build_max_attempts < 1)); then
+    echo "client-test requires EASY_NODE_CLIENT_BUILD_MAX_ATTEMPTS to be an integer >= 1"
+    exit 2
+  fi
+  if ! [[ "$build_initial_backoff_sec" =~ ^[0-9]+$ ]]; then
+    echo "client-test requires EASY_NODE_CLIENT_BUILD_RETRY_INITIAL_BACKOFF_SEC to be a non-negative integer"
+    exit 2
+  fi
   if [[ "$prod_profile" == "1" ]]; then
     beta_profile="1"
   fi
@@ -13732,16 +13754,36 @@ EOF_CLIENT
     fi
 
     if [[ "$do_build" -eq 1 ]]; then
-      echo "client test: building client image (timeout=${build_timeout_sec}s)"
-      if ! (
-        cd "$DEPLOY_DIR"
-        timeout --foreground -k 15s "${build_timeout_sec}s" env COMPOSE_INTERACTIVE_NO_CLI=1 COMPOSE_MENU=0 ENTRY_PUZZLE_SECRET="${ENTRY_PUZZLE_SECRET:-client-test-compose-placeholder-entry-secret-0001}" docker compose --profile demo build client-demo >"$build_log" 2>&1
-      ); then
+      local build_attempt=1
+      local build_backoff_sec="$build_initial_backoff_sec"
+      local build_rc=1
+      while ((build_attempt <= build_max_attempts)); do
+        echo "client test: building client image attempt=${build_attempt}/${build_max_attempts} (timeout=${build_timeout_sec}s)"
+        : >"$build_log"
+        set +e
+        (
+          cd "$DEPLOY_DIR"
+          timeout --foreground -k 15s "${build_timeout_sec}s" env COMPOSE_INTERACTIVE_NO_CLI=1 COMPOSE_MENU=0 ENTRY_PUZZLE_SECRET="${ENTRY_PUZZLE_SECRET:-client-test-compose-placeholder-entry-secret-0001}" docker compose --profile demo build client-demo >"$build_log" 2>&1
+        )
+        build_rc=$?
+        set -e
+        if ((build_rc == 0)); then
+          break
+        fi
+        if ((build_attempt < build_max_attempts)) && client_image_build_retryable_failure "$build_log"; then
+          echo "client image build failed with retryable error (attempt=${build_attempt}/${build_max_attempts}, rc=$build_rc); retrying after ${build_backoff_sec}s"
+          if ((build_backoff_sec > 0)); then
+            sleep "$build_backoff_sec"
+          fi
+          build_attempt=$((build_attempt + 1))
+          build_backoff_sec=$((build_backoff_sec * 2))
+          continue
+        fi
         echo "client image build failed or timed out"
         echo "client build log: $build_log"
         cat "$build_log"
         return 1
-      fi
+      done
       echo "client test: build done"
     else
       echo "client test: using existing deploy-client-demo:latest image (set EASY_NODE_CLIENT_FORCE_BUILD=1 to rebuild)"

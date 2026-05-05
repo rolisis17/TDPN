@@ -15,7 +15,8 @@ TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
 LOG_DIR="$TMP_DIR/logs"
 CLIENT_ENV_FILE="$TMP_DIR/.env.easy.client"
-mkdir -p "$TMP_BIN" "$LOG_DIR"
+DOCKER_STATE_DIR="$TMP_DIR/docker_state"
+mkdir -p "$TMP_BIN" "$LOG_DIR" "$DOCKER_STATE_DIR"
 
 cleanup() {
   rm -rf "$TMP_DIR"
@@ -37,6 +38,9 @@ if [[ -n "$capture_file" ]]; then
 fi
 
 if [[ "${1:-}" == "image" && "${2:-}" == "inspect" ]]; then
+  if [[ "${FAKE_DOCKER_IMAGE_INSPECT_FAIL:-0}" == "1" ]]; then
+    exit 1
+  fi
   exit 0
 fi
 
@@ -55,6 +59,26 @@ if [[ "${1:-}" == "compose" ]]; then
     exit 0
   fi
   if [[ "$args" == *" build "* ]]; then
+    state_dir="${FAKE_DOCKER_STATE_DIR:?}"
+    mkdir -p "$state_dir"
+    count_file="$state_dir/client_build.count"
+    count=0
+    if [[ -f "$count_file" ]]; then
+      count="$(cat "$count_file" 2>/dev/null || printf '0')"
+    fi
+    if ! [[ "$count" =~ ^[0-9]+$ ]]; then
+      count=0
+    fi
+    fail_attempts="${FAKE_DOCKER_BUILD_FAIL_ATTEMPTS:-0}"
+    if ! [[ "$fail_attempts" =~ ^[0-9]+$ ]]; then
+      fail_attempts=0
+    fi
+    if ((count < fail_attempts)); then
+      count=$((count + 1))
+      printf '%s\n' "$count" >"$count_file"
+      echo 'failed to do request: Head "https://registry-1.docker.io/v2/library/golang/manifests/1.25-alpine": net/http: TLS handshake timeout' >&2
+      exit 1
+    fi
     exit 0
   fi
   if [[ "$args" == *" version "* ]]; then
@@ -87,6 +111,7 @@ run_client_test_capture() {
   EASY_NODE_LOG_DIR="$LOG_DIR" \
   EASY_NODE_CLIENT_ENV_FILE="$CLIENT_ENV_FILE" \
   FAKE_DOCKER_CAPTURE_FILE="$capture_file" \
+  FAKE_DOCKER_STATE_DIR="$DOCKER_STATE_DIR" \
   ./scripts/easy_node.sh client-test \
     --directory-urls "https://dir-a:8081,https://dir-b:8081" \
     --issuer-url "https://issuer-a:8082" \
@@ -113,6 +138,7 @@ run_client_test_expect_fail() {
   EASY_NODE_LOG_DIR="$LOG_DIR" \
   EASY_NODE_CLIENT_ENV_FILE="$CLIENT_ENV_FILE" \
   FAKE_DOCKER_CAPTURE_FILE="$TMP_DIR/fail_capture.log" \
+  FAKE_DOCKER_STATE_DIR="$DOCKER_STATE_DIR" \
   ./scripts/easy_node.sh client-test \
     --directory-urls "https://dir-a:8081,https://dir-b:8081" \
     --issuer-url "https://issuer-a:8082" \
@@ -229,6 +255,45 @@ do
     exit 1
   fi
 done
+
+echo "[easy-node-client-profile-env] retry transient client image build failure"
+BUILD_RETRY_CAPTURE="$TMP_DIR/build_retry_capture.log"
+rm -f "$DOCKER_STATE_DIR"/client_build.count
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_LOG_DIR="$LOG_DIR" \
+EASY_NODE_CLIENT_ENV_FILE="$CLIENT_ENV_FILE" \
+EASY_NODE_CLIENT_FORCE_BUILD=1 \
+EASY_NODE_CLIENT_BUILD_MAX_ATTEMPTS=3 \
+EASY_NODE_CLIENT_BUILD_RETRY_INITIAL_BACKOFF_SEC=0 \
+FAKE_DOCKER_IMAGE_INSPECT_FAIL=1 \
+FAKE_DOCKER_BUILD_FAIL_ATTEMPTS=1 \
+FAKE_DOCKER_CAPTURE_FILE="$BUILD_RETRY_CAPTURE" \
+FAKE_DOCKER_STATE_DIR="$DOCKER_STATE_DIR" \
+./scripts/easy_node.sh client-test \
+  --directory-urls "https://dir-a:8081,https://dir-b:8081" \
+  --issuer-url "https://issuer-a:8082" \
+  --entry-url "https://entry-a:8083" \
+  --exit-url "https://exit-a:8084" \
+  --subject "integration-client" \
+  --min-selection-lines 1 \
+  --min-entry-operators 1 \
+  --min-exit-operators 1 \
+  --require-cross-operator-pair 1 \
+  --timeout-sec 10 \
+  --beta-profile 0 \
+  --prod-profile 0 >"$TMP_DIR/build_retry.log" 2>&1
+build_retry_count="$(rg -c -- 'compose --profile demo build client-demo' "$BUILD_RETRY_CAPTURE" || echo "0")"
+if [[ -z "$build_retry_count" || "$build_retry_count" -ne 2 ]]; then
+  echo "expected client image build to retry once after transient registry failure"
+  cat "$TMP_DIR/build_retry.log"
+  cat "$BUILD_RETRY_CAPTURE"
+  exit 1
+fi
+if ! rg -q 'client image build failed with retryable error' "$TMP_DIR/build_retry.log"; then
+  echo "expected retryable build failure marker"
+  cat "$TMP_DIR/build_retry.log"
+  exit 1
+fi
 
 PATH_PROFILE_CAPTURE="$TMP_DIR/path_profile_capture.log"
 run_client_test_capture "$PATH_PROFILE_CAPTURE" "0" "0" --path-profile private

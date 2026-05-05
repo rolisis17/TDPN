@@ -116,6 +116,29 @@ if ! rg -q 'summary status is not ok' ${TMP_DIR}/integration_prod_pilot_cohort_q
   exit 1
 fi
 
+echo "[prod-pilot-cohort-quick-check] detect malformed summary JSON even when status policy is relaxed"
+cat >"$SUMMARY_JSON" <<'EOF_SUMMARY_INVALID'
+{not-json}
+EOF_SUMMARY_INVALID
+set +e
+./scripts/prod_pilot_cohort_quick_check.sh \
+  --run-report-json "$RUN_REPORT_JSON" \
+  --require-summary-status-ok 0 \
+  --require-incident-snapshot-on-fail 0 \
+  --require-incident-snapshot-artifacts 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_summary_json.log 2>&1
+bad_summary_json_rc=$?
+set -e
+if [[ "$bad_summary_json_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for malformed summary JSON"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_summary_json.log
+  exit 1
+fi
+if ! rg -q 'summary_json is not valid JSON' ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_summary_json.log; then
+  echo "expected malformed summary JSON failure signal not found"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_summary_json.log
+  exit 1
+fi
+
 echo "[prod-pilot-cohort-quick-check] strict cohort signoff policy hook"
 cat >"$SUMMARY_JSON" <<'EOF_SUMMARY_OK'
 {"status":"ok"}

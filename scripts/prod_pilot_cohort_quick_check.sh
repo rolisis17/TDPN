@@ -516,6 +516,8 @@ if [[ "$require_summary_json" == "1" ]]; then
     errors+=("summary_json path missing in run report")
   elif [[ ! -f "$summary_json" ]]; then
     errors+=("summary_json file not found: $summary_json")
+  elif [[ "$summary_valid_json" != "1" ]]; then
+    errors+=("summary_json is not valid JSON: $summary_json")
   fi
 fi
 if [[ "$require_summary_status_ok" == "1" ]]; then
