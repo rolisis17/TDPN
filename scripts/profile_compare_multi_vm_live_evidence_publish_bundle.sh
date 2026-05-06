@@ -15,6 +15,9 @@ Usage:
     [--reports-dir DIR] \
     [--cycles N] \
     [--fail-on-no-go [0|1]] \
+    [--vm-command VM_ID::COMMAND]... \
+    [--vm-command-file PATH]... \
+    [--cycle-arg ARG]... \
     [--summary-json PATH] \
     [--print-summary-json [0|1]]
 
@@ -374,6 +377,38 @@ render_command() {
   quote_cmd "$@"
 }
 
+append_publish_bundle_cycle_input_args() {
+  local -n out_ref="$1"
+  local vm_spec=""
+  local vm_file=""
+  local cycle_arg=""
+  for vm_spec in "${vm_command_specs[@]:-}"; do
+    out_ref+=(--vm-command "$vm_spec")
+  done
+  for vm_file in "${vm_command_files[@]:-}"; do
+    out_ref+=(--vm-command-file "$vm_file")
+  done
+  for cycle_arg in "${cycle_args[@]:-}"; do
+    out_ref+=(--cycle-arg "$cycle_arg")
+  done
+}
+
+append_promotion_cycle_forwarded_input_args() {
+  local -n out_ref="$1"
+  local vm_spec=""
+  local vm_file=""
+  local cycle_arg=""
+  for vm_spec in "${vm_command_specs[@]:-}"; do
+    out_ref+=(--cycle-arg "--vm-command" --cycle-arg "$vm_spec")
+  done
+  for vm_file in "${vm_command_files[@]:-}"; do
+    out_ref+=(--cycle-arg "--vm-command-file" --cycle-arg "$vm_file")
+  done
+  for cycle_arg in "${cycle_args[@]:-}"; do
+    out_ref+=(--cycle-arg "$cycle_arg")
+  done
+}
+
 need_cmd jq
 need_cmd date
 need_cmd bash
@@ -385,6 +420,9 @@ cycles="${PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_CYCLES:-3}"
 fail_on_no_go="${PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_FAIL_ON_NO_GO:-1}"
 summary_json="${PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_SUMMARY_JSON:-}"
 print_summary_json="${PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_PRINT_SUMMARY_JSON:-0}"
+declare -a vm_command_specs=()
+declare -a vm_command_files=()
+declare -a cycle_args=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -417,6 +455,33 @@ while [[ $# -gt 0 ]]; do
       ;;
     --fail-on-no-go=*)
       fail_on_no_go="${1#*=}"
+      shift
+      ;;
+    --vm-command)
+      require_value_or_die "$1" "$#"
+      vm_command_specs+=("${2:-}")
+      shift 2
+      ;;
+    --vm-command=*)
+      vm_command_specs+=("${1#*=}")
+      shift
+      ;;
+    --vm-command-file)
+      require_value_or_die "$1" "$#"
+      vm_command_files+=("${2:-}")
+      shift 2
+      ;;
+    --vm-command-file=*)
+      vm_command_files+=("${1#*=}")
+      shift
+      ;;
+    --cycle-arg)
+      require_value_or_die "$1" "$#"
+      cycle_args+=("${2:-}")
+      shift 2
+      ;;
+    --cycle-arg=*)
+      cycle_args+=("${1#*=}")
       shift
       ;;
     --summary-json)
@@ -461,6 +526,26 @@ print_summary_json="$(trim "$print_summary_json")"
 STABILITY_CYCLE_SCRIPT="$(abs_path "$STABILITY_CYCLE_SCRIPT")"
 PROMOTION_CYCLE_SCRIPT="$(abs_path "$PROMOTION_CYCLE_SCRIPT")"
 PROMOTION_EVIDENCE_PACK_SCRIPT="$(abs_path "$PROMOTION_EVIDENCE_PACK_SCRIPT")"
+for i in "${!vm_command_specs[@]}"; do
+  vm_command_specs[$i]="$(trim "${vm_command_specs[$i]}")"
+  if [[ -z "${vm_command_specs[$i]}" ]]; then
+    echo "--vm-command requires a non-empty value"
+    exit 2
+  fi
+done
+for i in "${!vm_command_files[@]}"; do
+  vm_command_files[$i]="$(abs_path "${vm_command_files[$i]}")"
+  if [[ -z "${vm_command_files[$i]}" ]]; then
+    echo "--vm-command-file requires a non-empty value"
+    exit 2
+  fi
+done
+for i in "${!cycle_args[@]}"; do
+  if [[ -z "$(trim "${cycle_args[$i]}")" ]]; then
+    echo "--cycle-arg requires a non-empty value"
+    exit 2
+  fi
+done
 
 int_arg_or_die "--cycles" "$cycles"
 bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go"
@@ -505,13 +590,22 @@ stability_cycle_log="$archive_root/profile_compare_multi_vm_stability_cycle.log"
 promotion_cycle_log="$archive_root/profile_compare_multi_vm_stability_promotion_cycle.log"
 evidence_pack_log="$archive_root/profile_compare_multi_vm_stability_promotion_evidence_pack.log"
 
-bundle_rerun_command="$(render_command bash ./scripts/profile_compare_multi_vm_live_evidence_publish_bundle.sh --reports-dir "$reports_dir" --cycles "$cycles" --fail-on-no-go "$fail_on_no_go" --summary-json "$summary_json" --print-summary-json 1)"
+bundle_rerun_cmd=(bash ./scripts/profile_compare_multi_vm_live_evidence_publish_bundle.sh --reports-dir "$reports_dir" --cycles "$cycles" --fail-on-no-go "$fail_on_no_go")
+append_publish_bundle_cycle_input_args bundle_rerun_cmd
+bundle_rerun_cmd+=(--summary-json "$summary_json" --print-summary-json 1)
+bundle_rerun_command="$(render_command "${bundle_rerun_cmd[@]}")"
 bundle_rerun_command="$(trim "$bundle_rerun_command")"
 
-stability_cycle_rerun_command="$(render_command bash ./scripts/profile_compare_multi_vm_stability_cycle.sh --reports-dir "$reports_dir" --runs "$cycles" --fail-on-no-go "$fail_on_no_go" --summary-json "$stability_cycle_summary_json" --print-summary-json 1)"
+stability_cycle_rerun_cmd=(bash ./scripts/profile_compare_multi_vm_stability_cycle.sh --reports-dir "$reports_dir" --runs "$cycles" --fail-on-no-go "$fail_on_no_go")
+append_publish_bundle_cycle_input_args stability_cycle_rerun_cmd
+stability_cycle_rerun_cmd+=(--summary-json "$stability_cycle_summary_json" --print-summary-json 1)
+stability_cycle_rerun_command="$(render_command "${stability_cycle_rerun_cmd[@]}")"
 stability_cycle_rerun_command="$(trim "$stability_cycle_rerun_command")"
 
-promotion_cycle_rerun_command="$(render_command bash ./scripts/profile_compare_multi_vm_stability_promotion_cycle.sh --reports-dir "$reports_dir" --cycles "$cycles" --fail-on-no-go "$fail_on_no_go" --cycle-summary-list "$promotion_cycle_summary_list" --promotion-summary-json "$promotion_check_summary_json" --summary-json "$promotion_cycle_summary_json" --print-summary-json 1)"
+promotion_cycle_rerun_cmd=(bash ./scripts/profile_compare_multi_vm_stability_promotion_cycle.sh --reports-dir "$reports_dir" --cycles "$cycles" --fail-on-no-go "$fail_on_no_go" --cycle-summary-list "$promotion_cycle_summary_list" --promotion-summary-json "$promotion_check_summary_json")
+append_promotion_cycle_forwarded_input_args promotion_cycle_rerun_cmd
+promotion_cycle_rerun_cmd+=(--summary-json "$promotion_cycle_summary_json" --print-summary-json 1)
+promotion_cycle_rerun_command="$(render_command "${promotion_cycle_rerun_cmd[@]}")"
 promotion_cycle_rerun_command="$(trim "$promotion_cycle_rerun_command")"
 
 promotion_evidence_pack_rerun_command="$(render_command bash ./scripts/profile_compare_multi_vm_stability_promotion_evidence_pack.sh --reports-dir "$reports_dir" --promotion-cycle-summary-json "$promotion_cycle_summary_json" --fail-on-no-go "$fail_on_no_go" --summary-json "$evidence_pack_summary_json" --report-md "$evidence_pack_report_md" --print-summary-json 1)"
@@ -524,6 +618,9 @@ stability_cycle_cmd=(
   --reports-dir "$reports_dir"
   --runs "$cycles"
   --fail-on-no-go "$fail_on_no_go"
+)
+append_publish_bundle_cycle_input_args stability_cycle_cmd
+stability_cycle_cmd+=(
   --summary-json "$stability_cycle_summary_json"
   --show-json 0
   --print-summary-json 0
@@ -577,6 +674,9 @@ if [[ "$stability_prereq_ready" == "true" ]]; then
     --fail-on-no-go "$fail_on_no_go"
     --cycle-summary-list "$promotion_cycle_summary_list"
     --promotion-summary-json "$promotion_check_summary_json"
+  )
+  append_promotion_cycle_forwarded_input_args promotion_cycle_cmd
+  promotion_cycle_cmd+=(
     --summary-json "$promotion_cycle_summary_json"
     --show-json 0
     --print-summary-json 0

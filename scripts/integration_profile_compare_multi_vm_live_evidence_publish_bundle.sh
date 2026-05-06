@@ -39,6 +39,7 @@ set -euo pipefail
 scenario="${FAKE_M5_STABILITY_SCENARIO:-pass}"
 summary_json=""
 capture_file="${FAKE_M5_CAPTURE_FILE:-}"
+original_args="$*"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,7 +63,7 @@ if [[ -z "$summary_json" ]]; then
 fi
 
 if [[ -n "$capture_file" ]]; then
-  printf 'stability\tscenario=%s\tsummary_json=%s\n' "$scenario" "$summary_json" >>"$capture_file"
+  printf 'stability\tscenario=%s\tsummary_json=%s\targs=%s\n' "$scenario" "$summary_json" "$original_args" >>"$capture_file"
 fi
 
 scenario="$(printf '%s' "$scenario" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
@@ -126,6 +127,7 @@ scenario="${FAKE_M5_PROMOTION_SCENARIO:-pass}"
 summary_json=""
 capture_file="${FAKE_M5_CAPTURE_FILE:-}"
 fail_on_no_go="1"
+original_args="$*"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -157,7 +159,7 @@ if [[ -z "$summary_json" ]]; then
 fi
 
 if [[ -n "$capture_file" ]]; then
-  printf 'promotion\tscenario=%s\tfail_on_no_go=%s\tsummary_json=%s\n' "$scenario" "$fail_on_no_go" "$summary_json" >>"$capture_file"
+  printf 'promotion\tscenario=%s\tfail_on_no_go=%s\tsummary_json=%s\targs=%s\n' "$scenario" "$fail_on_no_go" "$summary_json" "$original_args" >>"$capture_file"
 fi
 
 scenario="$(printf '%s' "$scenario" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
@@ -297,6 +299,8 @@ chmod +x "$FAKE_PACK_SCRIPT"
 echo "[m5-live-evidence-publish-bundle] pass path"
 PASS_SUMMARY="$TMP_DIR/pass_bundle_summary.json"
 PASS_CAPTURE="$TMP_DIR/pass_capture.log"
+PASS_VM_COMMAND_FILE="$TMP_DIR/pass_vm_commands.txt"
+printf '%s\n' 'vm-b::ssh stella@example.invalid ./run-m5.sh' >"$PASS_VM_COMMAND_FILE"
 set +e
 PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_STABILITY_CYCLE_SCRIPT="$FAKE_STABILITY_SCRIPT" \
 PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_PROMOTION_CYCLE_SCRIPT="$FAKE_PROMOTION_SCRIPT" \
@@ -309,6 +313,10 @@ bash "$SCRIPT_UNDER_TEST" \
   --reports-dir "$TMP_DIR/pass_reports" \
   --cycles 2 \
   --fail-on-no-go 1 \
+  --vm-command "vm-a::ssh stella@example.invalid ./run-a.sh" \
+  --vm-command-file "$PASS_VM_COMMAND_FILE" \
+  --cycle-arg "--require-min-sources" \
+  --cycle-arg "2" \
   --summary-json "$PASS_SUMMARY" \
   --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_live_evidence_publish_bundle_pass.log 2>&1
 pass_rc=$?
@@ -332,6 +340,31 @@ assert_jq "$PASS_SUMMARY" '
   and .stages.promotion_evidence_pack_publish.summary.usable == true
   and .next_command == null
 '
+if ! grep -F -- 'stability' "$PASS_CAPTURE" | grep -F -- '--vm-command vm-a::ssh stella@example.invalid ./run-a.sh' >/dev/null; then
+  echo "pass path stability stage did not receive --vm-command"
+  cat "$PASS_CAPTURE"
+  exit 1
+fi
+if ! grep -F -- 'stability' "$PASS_CAPTURE" | grep -F -- "--vm-command-file $PASS_VM_COMMAND_FILE" >/dev/null; then
+  echo "pass path stability stage did not receive --vm-command-file"
+  cat "$PASS_CAPTURE"
+  exit 1
+fi
+if ! grep -F -- 'stability' "$PASS_CAPTURE" | grep -F -- '--cycle-arg --require-min-sources --cycle-arg 2' >/dev/null; then
+  echo "pass path stability stage did not receive --cycle-arg values"
+  cat "$PASS_CAPTURE"
+  exit 1
+fi
+if ! grep -F -- 'promotion' "$PASS_CAPTURE" | grep -F -- '--cycle-arg --vm-command --cycle-arg vm-a::ssh stella@example.invalid ./run-a.sh' >/dev/null; then
+  echo "pass path promotion stage did not forward --vm-command via --cycle-arg"
+  cat "$PASS_CAPTURE"
+  exit 1
+fi
+if ! grep -F -- 'promotion' "$PASS_CAPTURE" | grep -F -- "--cycle-arg --vm-command-file --cycle-arg $PASS_VM_COMMAND_FILE" >/dev/null; then
+  echo "pass path promotion stage did not forward --vm-command-file via --cycle-arg"
+  cat "$PASS_CAPTURE"
+  exit 1
+fi
 
 echo "[m5-live-evidence-publish-bundle] missing prerequisite path"
 MISSING_SUMMARY="$TMP_DIR/missing_bundle_summary.json"
