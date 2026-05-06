@@ -38,6 +38,7 @@ Usage:
     [--require-micro-relay-promotion-policy [0|1]] \
     [--require-trust-tier-port-unlock-policy [0|1]] \
     [--require-runtime-actuation-status-pass [0|1]] \
+    [--require-external-live-evidence [0|1]] \
     [--campaign-execution-mode docker|local] \
     [--campaign-directory-urls URL[,URL...]] \
     [--campaign-bootstrap-directory URL] \
@@ -55,6 +56,7 @@ Usage:
     [--campaign-profiles CSV] \
     [--campaign-runs N] \
     [--campaign-live-evidence [0|1]] \
+    [--campaign-live-evidence-udp-inject [0|1]] \
     [--campaign-timeout-sec N] \
     [--campaign-endpoint-preflight-timeout-sec N] \
     [--campaign-allow-insecure-remote-http [0|1]] \
@@ -759,6 +761,7 @@ require_micro_relay_demotion_policy="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_
 require_micro_relay_promotion_policy="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_MICRO_RELAY_PROMOTION_POLICY:-}"
 require_trust_tier_port_unlock_policy="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_TRUST_TIER_PORT_UNLOCK_POLICY:-}"
 require_runtime_actuation_status_pass="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_RUNTIME_ACTUATION_STATUS_PASS:-}"
+require_external_live_evidence="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_EXTERNAL_LIVE_EVIDENCE:-0}"
 campaign_execution_mode="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_EXECUTION_MODE:-}"
 campaign_directory_urls="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_DIRECTORY_URLS:-}"
 campaign_bootstrap_directory="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_BOOTSTRAP_DIRECTORY:-}"
@@ -781,6 +784,7 @@ campaign_subject_source=""
 campaign_start_local_stack="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_START_LOCAL_STACK:-}"
 campaign_profiles="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_PROFILES:-}"
 campaign_live_evidence="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_LIVE_EVIDENCE:-}"
+campaign_live_evidence_udp_inject="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_LIVE_EVIDENCE_UDP_INJECT:-}"
 original_args=("$@")
 
 set_subject_alias_or_die() {
@@ -1011,6 +1015,19 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-external-live-evidence)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_external_live_evidence="${2:-}"
+        shift 2
+      else
+        require_external_live_evidence="1"
+        shift
+      fi
+      ;;
+    --require-external-live-evidence=*)
+      require_external_live_evidence="${1#--require-external-live-evidence=}"
+      shift
+      ;;
     --campaign-execution-mode)
       campaign_execution_mode="${2:-}"
       shift 2
@@ -1170,6 +1187,19 @@ while [[ $# -gt 0 ]]; do
       campaign_live_evidence="${1#--campaign-live-evidence=}"
       shift
       ;;
+    --campaign-live-evidence-udp-inject)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        campaign_live_evidence_udp_inject="${2:-}"
+        shift 2
+      else
+        campaign_live_evidence_udp_inject="1"
+        shift
+      fi
+      ;;
+    --campaign-live-evidence-udp-inject=*)
+      campaign_live_evidence_udp_inject="${1#--campaign-live-evidence-udp-inject=}"
+      shift
+      ;;
     --campaign-timeout-sec)
       campaign_timeout_sec="${2:-}"
       shift 2
@@ -1252,7 +1282,9 @@ optional_bool_arg_or_die "--require-micro-relay-demotion-policy" "$require_micro
 optional_bool_arg_or_die "--require-micro-relay-promotion-policy" "$require_micro_relay_promotion_policy"
 optional_bool_arg_or_die "--require-trust-tier-port-unlock-policy" "$require_trust_tier_port_unlock_policy"
 optional_bool_arg_or_die "--require-runtime-actuation-status-pass" "$require_runtime_actuation_status_pass"
+bool_arg_or_die "--require-external-live-evidence" "$require_external_live_evidence"
 optional_bool_arg_or_die "--campaign-live-evidence" "$campaign_live_evidence"
+optional_bool_arg_or_die "--campaign-live-evidence-udp-inject" "$campaign_live_evidence_udp_inject"
 optional_bool_arg_or_die "--campaign-require-cross-operator-pair" "$campaign_require_cross_operator_pair"
 bool_arg_or_die "--campaign-allow-insecure-remote-http" "$campaign_allow_insecure_remote_http"
 
@@ -1498,10 +1530,28 @@ campaign_anon_cred_effective="$campaign_anon_cred"
 campaign_start_local_stack_effective="$campaign_start_local_stack"
 campaign_profiles_effective="$campaign_profiles"
 campaign_live_evidence_effective="$campaign_live_evidence"
+campaign_live_evidence_udp_inject_effective="$campaign_live_evidence_udp_inject"
 campaign_min_sources_effective="$campaign_min_sources"
 campaign_min_entry_operators_effective="$campaign_min_entry_operators"
 campaign_min_exit_operators_effective="$campaign_min_exit_operators"
 campaign_require_cross_operator_pair_effective="$campaign_require_cross_operator_pair"
+
+if [[ "$require_external_live_evidence" == "1" ]]; then
+  if [[ "$campaign_live_evidence_effective" == "0" ]]; then
+    echo "--require-external-live-evidence requires --campaign-live-evidence 1"
+    exit 2
+  fi
+  if [[ "$campaign_live_evidence_udp_inject_effective" == "1" ]]; then
+    echo "--require-external-live-evidence requires --campaign-live-evidence-udp-inject 0"
+    exit 2
+  fi
+  if [[ -z "$campaign_live_evidence_effective" ]]; then
+    campaign_live_evidence_effective="1"
+  fi
+  if [[ -z "$campaign_live_evidence_udp_inject_effective" ]]; then
+    campaign_live_evidence_udp_inject_effective="0"
+  fi
+fi
 
 if [[ "$campaign_refresh_effective" == "1" && -z "$campaign_execution_mode_effective" ]]; then
   if [[ -n "$campaign_directory_urls_effective" || -n "$campaign_bootstrap_directory_effective" || -n "$campaign_issuer_url_effective" || -n "$campaign_entry_url_effective" || -n "$campaign_exit_url_effective" ]]; then
@@ -1596,6 +1646,9 @@ build_campaign_cmd() {
   fi
   if [[ -n "$campaign_live_evidence_effective" ]]; then
     campaign_cmd+=(--live-evidence "$campaign_live_evidence_effective")
+  fi
+  if [[ -n "$campaign_live_evidence_udp_inject_effective" ]]; then
+    campaign_cmd+=(--live-evidence-udp-inject "$campaign_live_evidence_udp_inject_effective")
   fi
   if [[ -n "$campaign_min_sources_effective" ]]; then
     campaign_cmd+=(--min-sources "$campaign_min_sources_effective")
@@ -1744,12 +1797,28 @@ else
   fi
 fi
 
-if [[ -z "$failure_stage" && "$campaign_live_evidence_effective" == "1" ]]; then
+if [[ -z "$failure_stage" && ( "$campaign_live_evidence_effective" == "1" || "$require_external_live_evidence" == "1" ) ]]; then
   if ! jq -e '.inputs.compare.live_evidence == true' "$campaign_summary_json" >/dev/null 2>&1; then
     campaign_status="fail"
     campaign_rc=1
-    campaign_failure_reason="campaign live evidence was requested but the campaign summary is not live-evidence derived"
+    if [[ "$require_external_live_evidence" == "1" ]]; then
+      campaign_failure_reason="external live evidence was required but the campaign summary is not live-evidence derived"
+    else
+      campaign_failure_reason="campaign live evidence was requested but the campaign summary is not live-evidence derived"
+    fi
     campaign_stage_primary_failure="live_evidence_mismatch"
+    campaign_stage_primary_failure_count="1"
+    status="fail"
+    final_rc=1
+    failure_stage="campaign"
+  fi
+fi
+if [[ -z "$failure_stage" && "$require_external_live_evidence" == "1" ]]; then
+  if ! jq -e '.inputs.compare.live_evidence_udp_inject == false' "$campaign_summary_json" >/dev/null 2>&1; then
+    campaign_status="fail"
+    campaign_rc=1
+    campaign_failure_reason="external live evidence was required but the campaign summary used harness UDP injection"
+    campaign_stage_primary_failure="external_live_evidence_required"
     campaign_stage_primary_failure_count="1"
     status="fail"
     final_rc=1
@@ -2166,6 +2235,7 @@ jq -n \
   --arg require_micro_relay_promotion_policy "$require_micro_relay_promotion_policy" \
   --arg require_trust_tier_port_unlock_policy "$require_trust_tier_port_unlock_policy" \
   --arg require_runtime_actuation_status_pass "$require_runtime_actuation_status_pass" \
+  --arg require_external_live_evidence "$require_external_live_evidence" \
   --arg campaign_execution_mode "$campaign_execution_mode" \
   --arg campaign_execution_mode_effective "$campaign_execution_mode_effective" \
   --arg campaign_directory_urls "$campaign_directory_urls_artifact" \
@@ -2191,6 +2261,8 @@ jq -n \
   --arg campaign_profiles_effective "$campaign_profiles_effective" \
   --arg campaign_live_evidence "$campaign_live_evidence" \
   --arg campaign_live_evidence_effective "$campaign_live_evidence_effective" \
+  --arg campaign_live_evidence_udp_inject "$campaign_live_evidence_udp_inject" \
+  --arg campaign_live_evidence_udp_inject_effective "$campaign_live_evidence_udp_inject_effective" \
   --arg campaign_min_sources "$campaign_min_sources" \
   --arg campaign_min_sources_effective "$campaign_min_sources_effective" \
   --arg campaign_min_entry_operators "$campaign_min_entry_operators" \
@@ -2275,7 +2347,8 @@ jq -n \
         require_micro_relay_demotion_policy: (if $require_micro_relay_demotion_policy == "" then null else ($require_micro_relay_demotion_policy | tonumber) end),
         require_micro_relay_promotion_policy: (if $require_micro_relay_promotion_policy == "" then null else ($require_micro_relay_promotion_policy | tonumber) end),
         require_trust_tier_port_unlock_policy: (if $require_trust_tier_port_unlock_policy == "" then null else ($require_trust_tier_port_unlock_policy | tonumber) end),
-        require_runtime_actuation_status_pass: (if $require_runtime_actuation_status_pass == "" then null else ($require_runtime_actuation_status_pass | tonumber) end)
+        require_runtime_actuation_status_pass: (if $require_runtime_actuation_status_pass == "" then null else ($require_runtime_actuation_status_pass | tonumber) end),
+        require_external_live_evidence: ($require_external_live_evidence == "1")
       },
       campaign_refresh_overrides: {
         execution_mode: (if $campaign_execution_mode == "" then null else $campaign_execution_mode end),
@@ -2291,6 +2364,7 @@ jq -n \
         start_local_stack: (if $campaign_start_local_stack == "" then null else $campaign_start_local_stack end),
         profiles: (if $campaign_profiles == "" then null else $campaign_profiles end),
         live_evidence: (if $campaign_live_evidence == "" then null else ($campaign_live_evidence == "1") end),
+        live_evidence_udp_inject: (if $campaign_live_evidence_udp_inject == "" then null else ($campaign_live_evidence_udp_inject == "1") end),
         min_sources: (if $campaign_min_sources == "" then null else ($campaign_min_sources | tonumber) end),
         min_entry_operators: (if $campaign_min_entry_operators == "" then null else ($campaign_min_entry_operators | tonumber) end),
         min_exit_operators: (if $campaign_min_exit_operators == "" then null else ($campaign_min_exit_operators | tonumber) end),
@@ -2311,6 +2385,7 @@ jq -n \
         start_local_stack: (if $campaign_start_local_stack_effective == "" then null else $campaign_start_local_stack_effective end),
         profiles: (if $campaign_profiles_effective == "" then null else $campaign_profiles_effective end),
         live_evidence: (if $campaign_live_evidence_effective == "" then null else ($campaign_live_evidence_effective == "1") end),
+        live_evidence_udp_inject: (if $campaign_live_evidence_udp_inject_effective == "" then null else ($campaign_live_evidence_udp_inject_effective == "1") end),
         min_sources: (if $campaign_min_sources_effective == "" then null else ($campaign_min_sources_effective | tonumber) end),
         min_entry_operators: (if $campaign_min_entry_operators_effective == "" then null else ($campaign_min_entry_operators_effective | tonumber) end),
         min_exit_operators: (if $campaign_min_exit_operators_effective == "" then null else ($campaign_min_exit_operators_effective | tonumber) end),

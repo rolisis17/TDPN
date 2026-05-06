@@ -836,6 +836,7 @@ FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
 if ! jq -e '
   .status == "pass"
   and .inputs.compare.live_evidence == true
+  and .inputs.compare.live_evidence_udp_inject == true
   and .inputs.compare.explicit_remote_endpoints == false
   and .inputs.compare.transport_auto_defaults.client_inner_source_udp == true
   and .inputs.compare.transport_auto_defaults.disable_synthetic_fallback == true
@@ -847,11 +848,13 @@ if ! jq -e '
   cat /tmp/integration_profile_compare_campaign_live_loopback.log
   exit 1
 fi
-if ! rg -q -- '--live-evidence 1' "$LOCAL_CAPTURE"; then
-  echo "campaign live evidence did not forward to local compare"
-  cat "$LOCAL_CAPTURE"
-  exit 1
-fi
+for expected in '--live-evidence 1' '--live-evidence-udp-inject 1'; do
+  if ! rg -q -- "$expected" "$LOCAL_CAPTURE"; then
+    echo "campaign live evidence did not forward $expected to local compare"
+    cat "$LOCAL_CAPTURE"
+    exit 1
+  fi
+done
 
 echo "[profile-compare-campaign] live evidence fails on missing compare summary"
 : >"$LOCAL_CAPTURE"

@@ -38,6 +38,7 @@ fi
 summary_json=""
 report_md=""
 live_evidence="0"
+live_evidence_udp_inject=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
@@ -61,11 +62,27 @@ while [[ $# -gt 0 ]]; do
       live_evidence="${1#*=}"
       shift
       ;;
+    --live-evidence-udp-inject)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        live_evidence_udp_inject="${2:-}"
+        shift 2
+      else
+        live_evidence_udp_inject="1"
+        shift
+      fi
+      ;;
+    --live-evidence-udp-inject=*)
+      live_evidence_udp_inject="${1#*=}"
+      shift
+      ;;
     *)
       shift
       ;;
   esac
 done
+if [[ "$live_evidence" == "1" && -z "$live_evidence_udp_inject" ]]; then
+  live_evidence_udp_inject="1"
+fi
 if [[ -n "$summary_json" ]]; then
   mkdir -p "$(dirname "$summary_json")"
   cat >"$summary_json" <<EOF_SUMMARY
@@ -75,7 +92,8 @@ if [[ -n "$summary_json" ]]; then
   "rc": 0,
   "inputs": {
     "compare": {
-      "live_evidence": $(if [[ "$live_evidence" == "1" ]]; then printf 'true'; else printf 'false'; fi)
+      "live_evidence": $(if [[ "$live_evidence" == "1" ]]; then printf 'true'; else printf 'false'; fi),
+      "live_evidence_udp_inject": $(if [[ "$live_evidence_udp_inject" == "1" ]]; then printf 'true'; else printf 'false'; fi)
     }
   },
   "summary": {
@@ -190,12 +208,26 @@ if ! grep -F -- '--campaign-subject ID | --subject ID | --campaign-anon-cred TOK
   cat /tmp/integration_profile_compare_campaign_signoff_help.log
   exit 1
 fi
+for expected in '--require-external-live-evidence [0|1]' '--campaign-live-evidence-udp-inject [0|1]'; do
+  if ! grep -F -- "$expected" /tmp/integration_profile_compare_campaign_signoff_help.log >/dev/null; then
+    echo "expected signoff help to include $expected"
+    cat /tmp/integration_profile_compare_campaign_signoff_help.log
+    exit 1
+  fi
+done
 ./scripts/easy_node.sh --help --expert >/tmp/integration_profile_compare_campaign_signoff_easy_node_help.log 2>&1
 if ! grep -F -- '[--campaign-subject ID|--subject ID|--campaign-anon-cred TOKEN]' /tmp/integration_profile_compare_campaign_signoff_easy_node_help.log >/dev/null; then
   echo "expected easy_node help to include canonical + legacy subject usage"
   cat /tmp/integration_profile_compare_campaign_signoff_easy_node_help.log
   exit 1
 fi
+for expected in '--require-external-live-evidence [0|1]' '--campaign-live-evidence-udp-inject [0|1]'; do
+  if ! grep -F -- "$expected" /tmp/integration_profile_compare_campaign_signoff_easy_node_help.log >/dev/null; then
+    echo "expected easy_node help to include $expected"
+    cat /tmp/integration_profile_compare_campaign_signoff_easy_node_help.log
+    exit 1
+  fi
+done
 
 echo "[profile-compare-campaign-signoff] success path"
 : >"$SIGNOFF_CAPTURE"
@@ -231,6 +263,7 @@ FAKE_CHECK_DECISION=GO \
   --campaign-start-local-stack 0 \
   --campaign-profiles "balanced,speed" \
   --campaign-live-evidence 1 \
+  --campaign-live-evidence-udp-inject 1 \
   --campaign-min-sources 2 \
   --campaign-min-entry-operators 1 \
   --campaign-min-exit-operators 1 \
@@ -258,7 +291,7 @@ if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" an
   cat "$SUCCESS_SUMMARY"
   exit 1
 fi
-if ! jq -e '.inputs.campaign_refresh_overrides.live_evidence == true and .inputs.campaign_refresh_overrides_effective.live_evidence == true' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
+if ! jq -e '.inputs.campaign_refresh_overrides.live_evidence == true and .inputs.campaign_refresh_overrides_effective.live_evidence == true and .inputs.campaign_refresh_overrides.live_evidence_udp_inject == true and .inputs.campaign_refresh_overrides_effective.live_evidence_udp_inject == true' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
   echo "success summary JSON missing live evidence forwarding metadata"
   cat "$SUCCESS_SUMMARY"
   exit 1
@@ -314,6 +347,7 @@ for expected in \
   '--subject inv-signoff-test' \
   '--start-local-stack 0' \
   '--live-evidence 1' \
+  '--live-evidence-udp-inject 1' \
   '--min-sources 2' \
   '--min-entry-operators 1' \
   '--min-exit-operators 1' \
@@ -324,6 +358,134 @@ for expected in \
     exit 1
   fi
 done
+
+echo "[profile-compare-campaign-signoff] external live evidence accepts non-injected summary"
+: >"$SIGNOFF_CAPTURE"
+EXTERNAL_SUCCESS_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_external_success_summary.json"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_external_success" \
+  --refresh-campaign 1 \
+  --require-external-live-evidence 1 \
+  --summary-json "$EXTERNAL_SUCCESS_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_campaign_signoff_external_success.log 2>&1
+
+if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.policy.require_external_live_evidence == true and .inputs.campaign_refresh_overrides.live_evidence == null and .inputs.campaign_refresh_overrides.live_evidence_udp_inject == null and .inputs.campaign_refresh_overrides_effective.live_evidence == true and .inputs.campaign_refresh_overrides_effective.live_evidence_udp_inject == false and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass"' "$EXTERNAL_SUCCESS_SUMMARY" >/dev/null 2>&1; then
+  echo "external live evidence success summary missing expected fields"
+  cat "$EXTERNAL_SUCCESS_SUMMARY"
+  cat /tmp/integration_profile_compare_campaign_signoff_external_success.log
+  exit 1
+fi
+for expected in '--live-evidence 1' '--live-evidence-udp-inject 0'; do
+  if ! rg -q -- "$expected" "$SIGNOFF_CAPTURE"; then
+    echo "external live evidence success did not forward $expected"
+    cat "$SIGNOFF_CAPTURE"
+    exit 1
+  fi
+done
+
+echo "[profile-compare-campaign-signoff] external live evidence rejects contradictory injector input"
+: >"$SIGNOFF_CAPTURE"
+EXTERNAL_CONFLICT_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_external_conflict_summary.json"
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$TMP_DIR/reports_external_conflict" \
+  --refresh-campaign 1 \
+  --require-external-live-evidence 1 \
+  --campaign-live-evidence-udp-inject 1 \
+  --summary-json "$EXTERNAL_CONFLICT_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_campaign_signoff_external_conflict.log 2>&1
+external_conflict_rc=$?
+set -e
+if [[ "$external_conflict_rc" -ne 2 ]]; then
+  echo "expected contradictory external live evidence input to fail with rc=2"
+  cat /tmp/integration_profile_compare_campaign_signoff_external_conflict.log
+  exit 1
+fi
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "external live evidence input conflict should stop before campaign/check"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--require-external-live-evidence requires --campaign-live-evidence-udp-inject 0' /tmp/integration_profile_compare_campaign_signoff_external_conflict.log; then
+  echo "external live evidence input conflict message missing"
+  cat /tmp/integration_profile_compare_campaign_signoff_external_conflict.log
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] external live evidence rejects harness UDP injection"
+: >"$SIGNOFF_CAPTURE"
+EXTERNAL_REJECT_REPORTS="$TMP_DIR/reports_external_reject"
+mkdir -p "$EXTERNAL_REJECT_REPORTS"
+cat >"$EXTERNAL_REJECT_REPORTS/profile_compare_campaign_summary.json" <<'EOF_EXTERNAL_REJECT_SUMMARY'
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "inputs": {
+    "compare": {
+      "live_evidence": true,
+      "live_evidence_udp_inject": true
+    }
+  },
+  "summary": {
+    "runs_total": 5,
+    "runs_pass": 5,
+    "runs_warn": 0,
+    "runs_fail": 0,
+    "runs_with_summary": 5
+  },
+  "decision": {
+    "recommended_default_profile": "balanced",
+    "source": "policy_reliability_latency"
+  },
+  "trend": {
+    "status": "pass",
+    "rc": 0,
+    "summary_json": ""
+  }
+}
+EOF_EXTERNAL_REJECT_SUMMARY
+EXTERNAL_REJECT_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_external_reject_summary.json"
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=0 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$EXTERNAL_REJECT_REPORTS" \
+  --refresh-campaign 0 \
+  --require-external-live-evidence 1 \
+  --summary-json "$EXTERNAL_REJECT_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_campaign_signoff_external_reject.log 2>&1
+external_reject_rc=$?
+set -e
+if [[ "$external_reject_rc" -eq 0 ]]; then
+  echo "expected external live evidence harness rejection to fail"
+  cat /tmp/integration_profile_compare_campaign_signoff_external_reject.log
+  exit 1
+fi
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "external live evidence harness rejection should stop before campaign/check"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .final_rc == 1 and .failure_stage == "campaign" and .inputs.policy.require_external_live_evidence == true and .inputs.campaign_refresh_overrides_effective.live_evidence == true and .inputs.campaign_refresh_overrides_effective.live_evidence_udp_inject == false and .stages.campaign.status == "fail" and .stages.campaign_check.attempted == false and (.stages.campaign.failure_reason | contains("harness UDP injection")) and .decision.diagnostics.likely_primary_failure == "external_live_evidence_required"' "$EXTERNAL_REJECT_SUMMARY" >/dev/null 2>&1; then
+  echo "external live evidence harness rejection summary missing expected fields"
+  cat "$EXTERNAL_REJECT_SUMMARY"
+  cat /tmp/integration_profile_compare_campaign_signoff_external_reject.log
+  exit 1
+fi
 
 echo "[profile-compare-campaign-signoff] alias forwarding works"
 : >"$SIGNOFF_CAPTURE"

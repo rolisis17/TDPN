@@ -779,6 +779,7 @@ heartbeat_interval_sec_raw="${PROFILE_DEFAULT_GATE_RUN_HEARTBEAT_INTERVAL_SEC:-6
 require_selection_policy_present="${PROFILE_DEFAULT_GATE_RUN_REQUIRE_SELECTION_POLICY_PRESENT:-1}"
 require_selection_policy_valid="${PROFILE_DEFAULT_GATE_RUN_REQUIRE_SELECTION_POLICY_VALID:-1}"
 campaign_live_evidence="${PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_LIVE_EVIDENCE:-0}"
+require_external_live_evidence="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_EXTERNAL_LIVE_EVIDENCE:-0}"
 campaign_profiles_default="$(trim "${PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_PROFILES:-balanced,speed,speed-1hop}")"
 campaign_client_inner_source_default="$(trim "${PROFILE_DEFAULT_GATE_RUN_CLIENT_INNER_SOURCE:-synthetic}")"
 campaign_disable_synthetic_fallback_default="$(trim "${PROFILE_DEFAULT_GATE_RUN_DISABLE_SYNTHETIC_FALLBACK:-0}")"
@@ -1327,8 +1328,44 @@ if array_has_arg_or_equals_prefix "--campaign-live-evidence" "${signoff_passthro
 elif [[ "$campaign_live_evidence" == "1" ]]; then
   signoff_passthrough+=(--campaign-live-evidence 1)
 fi
+bool_arg_or_die "PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_EXTERNAL_LIVE_EVIDENCE" "$require_external_live_evidence"
+if array_has_arg_or_equals_prefix "--require-external-live-evidence" "${signoff_passthrough[@]}"; then
+  require_external_live_evidence_passthrough="$(extract_flag_value --require-external-live-evidence "${signoff_passthrough[@]}")"
+  require_external_live_evidence_passthrough="$(trim "$require_external_live_evidence_passthrough")"
+  if [[ -z "$require_external_live_evidence_passthrough" || "$require_external_live_evidence_passthrough" == --* ]]; then
+    require_external_live_evidence_passthrough="1"
+  fi
+  bool_arg_or_die "--require-external-live-evidence" "$require_external_live_evidence_passthrough"
+  require_external_live_evidence="$require_external_live_evidence_passthrough"
+fi
+if [[ "$require_external_live_evidence" == "1" ]]; then
+  campaign_live_evidence_was_passthrough="0"
+  if array_has_arg_or_equals_prefix "--campaign-live-evidence" "${signoff_passthrough[@]}"; then
+    campaign_live_evidence_was_passthrough="1"
+  fi
+  if [[ "$campaign_live_evidence" == "0" && "$campaign_live_evidence_was_passthrough" == "1" ]]; then
+    echo "--require-external-live-evidence requires --campaign-live-evidence 1"
+    exit 2
+  fi
+  campaign_live_evidence="1"
+  if ! array_has_arg_or_equals_prefix "--campaign-live-evidence" "${signoff_passthrough[@]}"; then
+    signoff_passthrough+=(--campaign-live-evidence 1)
+  fi
+fi
 if [[ "$campaign_live_evidence" == "1" ]] && ! array_has_arg_or_equals_prefix "--campaign-min-sources" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--campaign-min-sources 2)
+fi
+if [[ "$campaign_live_evidence" == "1" ]] && ! array_has_arg_or_equals_prefix "--campaign-live-evidence-udp-inject" "${signoff_passthrough[@]}"; then
+  campaign_live_evidence_udp_inject_default="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_LIVE_EVIDENCE_UDP_INJECT:-}"
+  if [[ -z "$campaign_live_evidence_udp_inject_default" ]]; then
+    if [[ "$require_external_live_evidence" == "1" ]]; then
+      campaign_live_evidence_udp_inject_default="0"
+    else
+      campaign_live_evidence_udp_inject_default="1"
+    fi
+  fi
+  bool_arg_or_die "PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_LIVE_EVIDENCE_UDP_INJECT" "$campaign_live_evidence_udp_inject_default"
+  signoff_passthrough+=(--campaign-live-evidence-udp-inject "$campaign_live_evidence_udp_inject_default")
 fi
 if [[ "$campaign_live_evidence" == "1" ]] && ! array_has_arg_or_equals_prefix "--campaign-require-cross-operator-pair" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--campaign-require-cross-operator-pair 1)

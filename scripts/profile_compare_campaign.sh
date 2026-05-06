@@ -46,6 +46,7 @@ Usage:
     [--cleanup-ifaces [0|1]] \
     [--keep-stack [0|1]] \
     [--live-evidence [0|1]] \
+    [--live-evidence-udp-inject [0|1]] \
     [--trend-max-reports N] \
     [--trend-since-hours N] \
     [--trend-min-profile-runs N] \
@@ -545,6 +546,7 @@ beta_profile="0"
 prod_profile="0"
 allow_insecure_remote_http="${PROFILE_COMPARE_CAMPAIGN_ALLOW_INSECURE_REMOTE_HTTP:-0}"
 live_evidence="${PROFILE_COMPARE_CAMPAIGN_LIVE_EVIDENCE:-0}"
+live_evidence_udp_inject="${PROFILE_COMPARE_CAMPAIGN_LIVE_EVIDENCE_UDP_INJECT:-}"
 start_local_stack="auto"
 force_stack_reset="1"
 stack_strict_beta="0"
@@ -755,6 +757,19 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --live-evidence-udp-inject)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        live_evidence_udp_inject="${2:-}"
+        shift 2
+      else
+        live_evidence_udp_inject="1"
+        shift
+      fi
+      ;;
+    --live-evidence-udp-inject=*)
+      live_evidence_udp_inject="${1#--live-evidence-udp-inject=}"
+      shift
+      ;;
     --trend-max-reports)
       trend_max_reports="${2:-}"
       shift 2
@@ -825,6 +840,12 @@ bool_arg_or_die "--stack-strict-beta" "$stack_strict_beta"
 bool_arg_or_die "--cleanup-ifaces" "$cleanup_ifaces"
 bool_arg_or_die "--keep-stack" "$keep_stack"
 bool_arg_or_die "--live-evidence" "$live_evidence"
+if [[ "$live_evidence" == "1" && -z "$live_evidence_udp_inject" ]]; then
+  live_evidence_udp_inject="1"
+fi
+if [[ -n "$live_evidence_udp_inject" ]]; then
+  bool_arg_or_die "--live-evidence-udp-inject" "$live_evidence_udp_inject"
+fi
 bool_arg_or_die "--require-cross-operator-pair" "$require_cross_operator_pair"
 bool_arg_or_die "--trend-fail-on-any-fail" "$trend_fail_on_any_fail"
 tri_state_or_die "--start-local-stack" "$start_local_stack"
@@ -1084,6 +1105,9 @@ for ((run_idx = 1; run_idx <= campaign_runs; run_idx++)); do
     --report-md "$compare_report"
     --print-summary-json 0
   )
+  if [[ -n "$live_evidence_udp_inject" ]]; then
+    compare_cmd+=(--live-evidence-udp-inject "$live_evidence_udp_inject")
+  fi
   if [[ "$allow_insecure_remote_http" == "1" ]]; then
     compare_cmd+=(--allow-insecure-remote-http 1)
   fi
@@ -1525,6 +1549,7 @@ jq -n \
   --arg start_local_stack_adjustment_reason "$start_local_stack_adjustment_reason" \
   --arg explicit_remote_endpoints "$explicit_remote_endpoints" \
   --arg live_evidence "$live_evidence" \
+  --arg live_evidence_udp_inject "$live_evidence_udp_inject" \
   --arg transport_auto_client_inner_source "$transport_auto_client_inner_source" \
   --arg transport_auto_disable_synthetic_fallback "$transport_auto_disable_synthetic_fallback" \
   --arg transport_auto_data_plane_mode_opaque "$transport_auto_data_plane_mode_opaque" \
@@ -1595,6 +1620,7 @@ jq -n \
         execution_mode_adjusted: ($execution_mode_adjusted == "1"),
         execution_mode_adjustment_reason: (if $execution_mode_adjustment_reason == "" then null else $execution_mode_adjustment_reason end),
         live_evidence: ($live_evidence == "1"),
+        live_evidence_udp_inject: ($live_evidence_udp_inject == "1"),
         explicit_remote_endpoints: ($explicit_remote_endpoints == "1"),
         transport_auto_defaults: {
           client_inner_source_udp: ($transport_auto_client_inner_source == "1"),

@@ -123,6 +123,8 @@ capture_file="${PROFILE_DEFAULT_GATE_CAPTURE_FILE:?}"
   printf '\tenv_CLIENT_INNER_SOURCE=%s' "${CLIENT_INNER_SOURCE-}"
   printf '\tenv_CLIENT_DISABLE_SYNTHETIC_FALLBACK=%s' "${CLIENT_DISABLE_SYNTHETIC_FALLBACK-}"
   printf '\tenv_DATA_PLANE_MODE=%s' "${DATA_PLANE_MODE-}"
+  printf '\tenv_REQUIRE_EXTERNAL_LIVE_EVIDENCE=%s' "${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_EXTERNAL_LIVE_EVIDENCE-}"
+  printf '\tenv_CAMPAIGN_LIVE_EVIDENCE_UDP_INJECT=%s' "${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_LIVE_EVIDENCE_UDP_INJECT-}"
   for arg in "$@"; do
     printf '\t%s' "$arg"
   done
@@ -292,9 +294,70 @@ assert_contains "$live_evidence_line_sp" "env_CLIENT_INNER_SOURCE=udp" "live evi
 assert_contains "$live_evidence_line_sp" "env_CLIENT_DISABLE_SYNTHETIC_FALLBACK=1" "live evidence did not disable synthetic fallback"
 assert_contains "$live_evidence_line_sp" "env_DATA_PLANE_MODE=opaque" "live evidence did not force opaque data-plane"
 assert_contains "$live_evidence_line_sp" "--campaign-live-evidence 1" "live evidence did not forward campaign-live-evidence"
+assert_contains "$live_evidence_line_sp" "--campaign-live-evidence-udp-inject 1" "live evidence did not forward harness UDP injection default"
 assert_contains "$live_evidence_line_sp" "--campaign-min-sources 2" "live evidence did not enforce two-source campaign quorum"
 assert_contains "$live_evidence_line_sp" "--campaign-require-cross-operator-pair 1" "live evidence did not enforce cross-operator campaign evidence"
 assert_file_contains "$LIVE_EVIDENCE_LOG" "campaign_live_evidence=1" "live evidence log did not surface campaign_live_evidence"
+
+echo "[profile-default-gate-run] external live evidence implies live no-inject defaults"
+: >"$SIGNOFF_CAPTURE"
+EXTERNAL_LIVE_LOG="$TMP_DIR/profile_default_gate_run_external_live.log"
+EXTERNAL_LIVE_COUNTER="$TMP_DIR/curl_counter_external_live.txt"
+EXTERNAL_LIVE_SUMMARY="$TMP_DIR/profile_default_gate_run_external_live_summary.json"
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$EXTERNAL_LIVE_COUNTER" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-env-external-live" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
+  --require-external-live-evidence 1 \
+  --summary-json "$EXTERNAL_LIVE_SUMMARY" >"$EXTERNAL_LIVE_LOG" 2>&1
+
+external_live_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$external_live_line" ]]; then
+  echo "missing captured signoff invocation in external live evidence path"
+  cat "$EXTERNAL_LIVE_LOG"
+  exit 1
+fi
+external_live_line_sp="${external_live_line//$'\t'/ }"
+assert_contains "$external_live_line_sp" "--require-external-live-evidence 1" "external live evidence did not forward policy"
+assert_contains "$external_live_line_sp" "--campaign-live-evidence 1" "external live evidence did not imply campaign-live-evidence"
+assert_contains "$external_live_line_sp" "--campaign-live-evidence-udp-inject 0" "external live evidence did not disable harness UDP injection"
+assert_contains "$external_live_line_sp" "env_CLIENT_INNER_SOURCE=udp" "external live evidence did not force UDP client source"
+assert_contains "$external_live_line_sp" "env_CLIENT_DISABLE_SYNTHETIC_FALLBACK=1" "external live evidence did not disable synthetic fallback"
+
+echo "[profile-default-gate-run] live evidence respects injector env override"
+: >"$SIGNOFF_CAPTURE"
+LIVE_EVIDENCE_INJECT_ENV_LOG="$TMP_DIR/profile_default_gate_run_live_evidence_inject_env.log"
+LIVE_EVIDENCE_INJECT_ENV_COUNTER="$TMP_DIR/curl_counter_live_evidence_inject_env.txt"
+LIVE_EVIDENCE_INJECT_ENV_SUMMARY="$TMP_DIR/profile_default_gate_run_live_evidence_inject_env_summary.json"
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$LIVE_EVIDENCE_INJECT_ENV_COUNTER" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_LIVE_EVIDENCE_UDP_INJECT=0 \
+CAMPAIGN_SUBJECT="inv-env-live-evidence-inject-env" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
+  --campaign-live-evidence 1 \
+  --summary-json "$LIVE_EVIDENCE_INJECT_ENV_SUMMARY" >"$LIVE_EVIDENCE_INJECT_ENV_LOG" 2>&1
+
+live_evidence_inject_env_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$live_evidence_inject_env_line" ]]; then
+  echo "missing captured signoff invocation in live evidence injector env path"
+  cat "$LIVE_EVIDENCE_INJECT_ENV_LOG"
+  exit 1
+fi
+live_evidence_inject_env_line_sp="${live_evidence_inject_env_line//$'\t'/ }"
+assert_contains "$live_evidence_inject_env_line_sp" "env_CAMPAIGN_LIVE_EVIDENCE_UDP_INJECT=0" "live evidence injector env override was not visible"
+assert_contains "$live_evidence_inject_env_line_sp" "--campaign-live-evidence-udp-inject 0" "live evidence did not respect injector env override"
 
 echo "[profile-default-gate-run] campaign live evidence rejects unsafe transport overrides"
 : >"$SIGNOFF_CAPTURE"
