@@ -1127,18 +1127,19 @@ append_run_record() {
   local token_proof_invalid_failures="${17}"
   local unknown_exit_failures="${18}"
   local directory_trust_failures="${19}"
-  local middle_selection_count="${20}"
-  local direct_exit_forced="${21}"
-  local output_log="${22}"
-  local client_log="${23}"
-  local command="${24}"
-  local skip_reason="${25}"
-  local selection_policy_sticky_pair_sec="${26}"
-  local selection_policy_entry_rotation_sec="${27}"
-  local selection_policy_entry_rotation_jitter_pct="${28}"
-  local selection_policy_exit_exploration_pct="${29}"
-  local selection_policy_path_profile="${30}"
-  local selection_policy_source="${31}"
+  local real_packet_no_udp_failures="${20}"
+  local middle_selection_count="${21}"
+  local direct_exit_forced="${22}"
+  local output_log="${23}"
+  local client_log="${24}"
+  local command="${25}"
+  local skip_reason="${26}"
+  local selection_policy_sticky_pair_sec="${27}"
+  local selection_policy_entry_rotation_sec="${28}"
+  local selection_policy_entry_rotation_jitter_pct="${29}"
+  local selection_policy_exit_exploration_pct="${30}"
+  local selection_policy_path_profile="${31}"
+  local selection_policy_source="${32}"
 
   jq -n \
     --arg profile "$profile" \
@@ -1160,6 +1161,7 @@ append_run_record() {
     --argjson token_proof_invalid_failures "$token_proof_invalid_failures" \
     --argjson unknown_exit_failures "$unknown_exit_failures" \
     --argjson directory_trust_failures "$directory_trust_failures" \
+    --argjson real_packet_no_udp_failures "$real_packet_no_udp_failures" \
     --argjson middle_selection_count "$middle_selection_count" \
     --arg direct_exit_forced "$direct_exit_forced" \
     --arg output_log "$output_log" \
@@ -1192,6 +1194,7 @@ append_run_record() {
       token_proof_invalid_failures: $token_proof_invalid_failures,
       unknown_exit_failures: $unknown_exit_failures,
       directory_trust_failures: $directory_trust_failures,
+      real_packet_no_udp_failures: $real_packet_no_udp_failures,
       middle_selection_count: $middle_selection_count,
       direct_exit_forced: ($direct_exit_forced == "true"),
       output_log: $output_log,
@@ -1223,7 +1226,7 @@ for profile in "${profiles[@]}"; do
     if [[ -n "$skip_reason" ]]; then
       echo "[profile-compare-local] profile=$profile round=$round_idx status=skip reason=$skip_reason" | tee -a "$summary_log"
       skip_policy_path_profile="$(runtime_path_profile_from_compare_profile "$profile")"
-      append_run_record "$profile" "$round_idx" "skip" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "false" "$run_output_log" "" "" "$skip_reason" "0" "0" "0" "0" "$skip_policy_path_profile" "skip"
+      append_run_record "$profile" "$round_idx" "skip" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "0" "false" "$run_output_log" "" "" "$skip_reason" "0" "0" "0" "0" "$skip_policy_path_profile" "skip"
       continue
     fi
 
@@ -1390,6 +1393,7 @@ for profile in "${profiles[@]}"; do
     token_proof_invalid_failures="$(count_matches 'token proof invalid' "$parse_log")"
     unknown_exit_failures="$(count_matches 'path open denied: unknown-exit' "$parse_log")"
     directory_trust_failures="$(count_matches 'directory key is not trusted' "$parse_log")"
+    real_packet_no_udp_failures="$(count_matches 'real-packet mode received no UDP packets' "$parse_log")"
     middle_selection_count="$(count_non_none_middle_selections "$parse_log")"
 
     direct_exit_forced="false"
@@ -1455,7 +1459,7 @@ for profile in "${profiles[@]}"; do
       "$selection_count" "$entry_operator_count" "$exit_operator_count" "$cross_pair_count" \
       "$same_operator_count" "$missing_operator_count" "$bootstrap_failures" "$wg_session_count" \
       "$direct_exit_mode_events" "$direct_exit_fallback_events" \
-      "$transport_mismatch_failures" "$token_proof_invalid_failures" "$unknown_exit_failures" "$directory_trust_failures" \
+      "$transport_mismatch_failures" "$token_proof_invalid_failures" "$unknown_exit_failures" "$directory_trust_failures" "$real_packet_no_udp_failures" \
       "$middle_selection_count" \
       "$direct_exit_forced" \
       "$run_output_log" "$client_log_path" "$run_cmd_str" "" \
@@ -1523,6 +1527,7 @@ profile_summary_json="$(jq '
           avg_token_proof_invalid_failures: (if ($executed | length) == 0 then 0 else (($executed | map(.token_proof_invalid_failures) | add) / ($executed | length)) end),
           avg_unknown_exit_failures: (if ($executed | length) == 0 then 0 else (($executed | map(.unknown_exit_failures) | add) / ($executed | length)) end),
           avg_directory_trust_failures: (if ($executed | length) == 0 then 0 else (($executed | map(.directory_trust_failures) | add) / ($executed | length)) end),
+          avg_real_packet_no_udp_failures: (if ($executed | length) == 0 then 0 else (($executed | map(.real_packet_no_udp_failures) | add) / ($executed | length)) end),
           direct_exit_forced_runs: ($executed | map(select(.direct_exit_forced == true)) | length),
           direct_exit_mode_events: ($executed | map(.direct_exit_mode_events) | add // 0),
           direct_exit_fallback_events: ($executed | map(.direct_exit_fallback_events) | add // 0),
@@ -1540,6 +1545,7 @@ transport_mismatch_failures_total="$(jq '[.[] | (.transport_mismatch_failures //
 token_proof_invalid_failures_total="$(jq '[.[] | (.token_proof_invalid_failures // 0)] | add // 0' <<<"$runs_json")"
 unknown_exit_failures_total="$(jq '[.[] | (.unknown_exit_failures // 0)] | add // 0' <<<"$runs_json")"
 directory_trust_failures_total="$(jq '[.[] | (.directory_trust_failures // 0)] | add // 0' <<<"$runs_json")"
+real_packet_no_udp_failures_total="$(jq '[.[] | (.real_packet_no_udp_failures // 0)] | add // 0' <<<"$runs_json")"
 m4_sample_runs="$(jq '[.[] | select(.status != "skip" and ((.middle_selection_count // 0) > 0))] | length' <<<"$runs_json")"
 m4_runs_pass="$(jq '[.[] | select(.status == "pass" and ((.middle_selection_count // 0) > 0))] | length' <<<"$runs_json")"
 m4_runs_fail="$(jq '[.[] | select(.status == "fail" and ((.middle_selection_count // 0) > 0))] | length' <<<"$runs_json")"
@@ -1862,6 +1868,7 @@ jq -n \
   --argjson token_proof_invalid_failures_total "$token_proof_invalid_failures_total" \
   --argjson unknown_exit_failures_total "$unknown_exit_failures_total" \
   --argjson directory_trust_failures_total "$directory_trust_failures_total" \
+  --argjson real_packet_no_udp_failures_total "$real_packet_no_udp_failures_total" \
   --argjson m4_micro_relay_evidence "$m4_micro_relay_evidence_json" \
   '{
     version: 1,
@@ -1921,6 +1928,7 @@ jq -n \
       token_proof_invalid_failures_total: $token_proof_invalid_failures_total,
       unknown_exit_failures_total: $unknown_exit_failures_total,
       directory_trust_failures_total: $directory_trust_failures_total,
+      real_packet_no_udp_failures_total: $real_packet_no_udp_failures_total,
       selection_policy_source: $selection_policy_source,
       selection_policy: $selection_policy,
       m4_micro_relay_evidence: $m4_micro_relay_evidence

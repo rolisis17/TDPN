@@ -1441,6 +1441,7 @@ transport_mismatch_failures=0
 token_proof_invalid_failures=0
 unknown_exit_failures=0
 directory_trust_failures=0
+real_packet_no_udp_failures=0
 root_required_failures=0
 endpoint_unreachable_failures=0
 for summary_path in "${compare_summary_paths[@]}"; do
@@ -1448,10 +1449,14 @@ for summary_path in "${compare_summary_paths[@]}"; do
   token_proof_invalid_failures=$((token_proof_invalid_failures + $(extract_diagnostic_count "$summary_path" "token_proof_invalid_failures")))
   unknown_exit_failures=$((unknown_exit_failures + $(extract_diagnostic_count "$summary_path" "unknown_exit_failures")))
   directory_trust_failures=$((directory_trust_failures + $(extract_diagnostic_count "$summary_path" "directory_trust_failures")))
+  real_packet_no_udp_failures=$((real_packet_no_udp_failures + $(extract_diagnostic_count "$summary_path" "real_packet_no_udp_failures")))
   root_required_failures=$((root_required_failures + $(extract_diagnostic_count "$summary_path" "root_required_failures")))
   endpoint_unreachable_failures=$((endpoint_unreachable_failures + $(extract_diagnostic_count "$summary_path" "endpoint_unreachable_failures")))
 
   run_log_path="$(trim "$(log_path_for_summary "$summary_path" "$runs_json")")"
+  if ! has_diagnostic_key "$summary_path" "real_packet_no_udp_failures"; then
+    real_packet_no_udp_failures=$((real_packet_no_udp_failures + $(count_log_pattern "$run_log_path" 'real-packet mode received no UDP packets')))
+  fi
   if ! has_diagnostic_key "$summary_path" "root_required_failures"; then
     root_required_failures=$((root_required_failures + $(count_log_pattern "$run_log_path" 'requires root|must be root|run with sudo|permission denied|operation not permitted')))
   fi
@@ -1465,6 +1470,8 @@ if ((token_proof_invalid_failures > 0)); then
   likely_primary_failure="token_proof_invalid"
 elif ((unknown_exit_failures > 0)); then
   likely_primary_failure="unknown_exit"
+elif ((real_packet_no_udp_failures > 0)); then
+  likely_primary_failure="real_packet_no_udp"
 elif ((transport_mismatch_failures > 0)); then
   likely_primary_failure="transport_mismatch"
 elif ((directory_trust_failures > 0)); then
@@ -1484,6 +1491,9 @@ case "$likely_primary_failure" in
     ;;
   transport_mismatch)
     operator_hint="Check live-WG transport requirements: DATA_PLANE_MODE and CLIENT_INNER_SOURCE must match the target environment."
+    ;;
+  real_packet_no_udp)
+    operator_hint="External/no-inject live evidence needs a real packet source or real WireGuard backend; enable command/kernel WireGuard or a live packet source, or explicitly use harness UDP injection for lab-only tests."
     ;;
   directory_trust)
     operator_hint="Check trust reset and runtime trusted-directory key alignment before retrying."
@@ -1597,6 +1607,7 @@ jq -n \
   --argjson token_proof_invalid_failures "$token_proof_invalid_failures" \
   --argjson unknown_exit_failures "$unknown_exit_failures" \
   --argjson directory_trust_failures "$directory_trust_failures" \
+  --argjson real_packet_no_udp_failures "$real_packet_no_udp_failures" \
   --argjson root_required_failures "$root_required_failures" \
   --argjson endpoint_unreachable_failures "$endpoint_unreachable_failures" \
   '{
@@ -1681,6 +1692,7 @@ jq -n \
       token_proof_invalid_failures: $token_proof_invalid_failures,
       unknown_exit_failures: $unknown_exit_failures,
       directory_trust_failures: $directory_trust_failures,
+      real_packet_no_udp_failures: $real_packet_no_udp_failures,
       root_required_failures: $root_required_failures,
       endpoint_unreachable_failures: $endpoint_unreachable_failures
     },

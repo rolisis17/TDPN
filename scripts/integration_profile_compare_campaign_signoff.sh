@@ -83,6 +83,12 @@ done
 if [[ "$live_evidence" == "1" && -z "$live_evidence_udp_inject" ]]; then
   live_evidence_udp_inject="1"
 fi
+real_packet_no_udp_failures="${FAKE_CAMPAIGN_REAL_PACKET_NO_UDP_FAILURES:-0}"
+likely_primary_failure="${FAKE_CAMPAIGN_LIKELY_PRIMARY_FAILURE:-none}"
+if [[ "$likely_primary_failure" == "none" && "$real_packet_no_udp_failures" =~ ^[0-9]+$ && "$real_packet_no_udp_failures" -gt 0 ]]; then
+  likely_primary_failure="real_packet_no_udp"
+fi
+operator_hint="${FAKE_CAMPAIGN_OPERATOR_HINT:-}"
 if [[ -n "$summary_json" ]]; then
   mkdir -p "$(dirname "$summary_json")"
   cat >"$summary_json" <<EOF_SUMMARY
@@ -111,7 +117,18 @@ if [[ -n "$summary_json" ]]; then
     "status": "pass",
     "rc": 0,
     "summary_json": ""
-  }
+  },
+  "aggregated_diagnostics": {
+    "transport_mismatch_failures": 0,
+    "token_proof_invalid_failures": 0,
+    "unknown_exit_failures": 0,
+    "directory_trust_failures": 0,
+    "real_packet_no_udp_failures": $real_packet_no_udp_failures,
+    "root_required_failures": 0,
+    "endpoint_unreachable_failures": 0
+  },
+  "likely_primary_failure": "$likely_primary_failure",
+  "operator_hint": "$operator_hint"
 }
 EOF_SUMMARY
 fi
@@ -1630,6 +1647,41 @@ if ! jq -e '.status == "fail" and .final_rc == 23 and .failure_stage == "campaig
   exit 1
 fi
 
+echo "[profile-compare-campaign-signoff] campaign failure preserves campaign diagnostics"
+: >"$SIGNOFF_CAPTURE"
+CAMPAIGN_FAIL_DIAG_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_campaign_fail_diag.json"
+CAMPAIGN_FAIL_DIAG_REPORTS_DIR="$TMP_DIR/reports_campaign_fail_diag"
+mkdir -p "$CAMPAIGN_FAIL_DIAG_REPORTS_DIR"
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=23 \
+FAKE_CAMPAIGN_REAL_PACKET_NO_UDP_FAILURES=3 \
+FAKE_CAMPAIGN_OPERATOR_HINT="strict external run saw no UDP packets" \
+FAKE_CHECK_RC=0 \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$CAMPAIGN_FAIL_DIAG_REPORTS_DIR" \
+  --refresh-campaign 1 \
+  --summary-json "$CAMPAIGN_FAIL_DIAG_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_campaign_fail_diag.log 2>&1
+rc_campaign_fail_diag=$?
+set -e
+if [[ "$rc_campaign_fail_diag" -ne 23 ]]; then
+  echo "expected rc=23 when diagnostic campaign stage fails"
+  cat /tmp/integration_profile_compare_campaign_signoff_campaign_fail_diag.log
+  exit 1
+fi
+if [[ "$(wc -l < "$SIGNOFF_CAPTURE")" -ne 1 ]]; then
+  echo "campaign-fail diagnostic path should not run check stage"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .final_rc == 23 and .failure_stage == "campaign" and .decision.decision == "NO-GO" and .decision.context == "synthetic_campaign_failure" and .decision.from_campaign_check_summary == false and .decision.next_operator_action == "Provide a real packet source or real WireGuard backend for external/no-inject live evidence, then rerun signoff" and .decision.diagnostics.source_schema == "current" and .decision.diagnostics.likely_primary_failure == "real_packet_no_udp" and .decision.diagnostics.aggregated_diagnostics.real_packet_no_udp_failures == 3 and (.decision.diagnostics.operator_hint | contains("no UDP packets")) and .stages.campaign.status == "fail" and .stages.campaign_check.attempted == false' "$CAMPAIGN_FAIL_DIAG_SUMMARY" >/dev/null 2>&1; then
+  echo "campaign-fail diagnostic summary did not preserve campaign diagnostics"
+  cat "$CAMPAIGN_FAIL_DIAG_SUMMARY"
+  exit 1
+fi
+
 echo "[profile-compare-campaign-signoff] check failure fail-close"
 : >"$SIGNOFF_CAPTURE"
 CHECK_FAIL_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_check_fail.json"
@@ -1921,6 +1973,7 @@ assert_diag_case() {
   local expected_root_required="${9:-0}"
   local expected_endpoint_unreachable="${10:-0}"
   local expected_operator_hint="${11:-}"
+  local expected_real_packet_no_udp="${12:-0}"
   local summary_out="$TMP_DIR/profile_compare_campaign_signoff_diag_${case_name}.json"
   local check_out="$DIAG_REPORTS_DIR/profile_compare_campaign_check_summary_${case_name}.json"
 
@@ -1948,6 +2001,7 @@ assert_diag_case() {
     --argjson expected_directory_trust "$expected_directory_trust" \
     --argjson expected_root_required "$expected_root_required" \
     --argjson expected_endpoint_unreachable "$expected_endpoint_unreachable" \
+    --argjson expected_real_packet_no_udp "$expected_real_packet_no_udp" \
     '
     .status == "ok"
     and .final_rc == 0
@@ -1960,6 +2014,7 @@ assert_diag_case() {
     and .decision.diagnostics.aggregated_diagnostics.token_proof_invalid_failures == $expected_token_invalid
     and .decision.diagnostics.aggregated_diagnostics.unknown_exit_failures == $expected_unknown_exit
     and .decision.diagnostics.aggregated_diagnostics.directory_trust_failures == $expected_directory_trust
+    and .decision.diagnostics.aggregated_diagnostics.real_packet_no_udp_failures == $expected_real_packet_no_udp
     and .decision.diagnostics.aggregated_diagnostics.root_required_failures == $expected_root_required
     and .decision.diagnostics.aggregated_diagnostics.endpoint_unreachable_failures == $expected_endpoint_unreachable
     and (if $expected_source_schema == "legacy" then .decision.diagnostics.legacy != null else true end)
@@ -1994,6 +2049,18 @@ cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_UNKNOWN'
 }
 EOF_DIAG_UNKNOWN
 assert_diag_case "legacy_unknown" "legacy" "unknown_exit" "Use a fresh invite key from active issuer and rerun signoff"
+
+cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_LEGACY_NO_UDP'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {"runs_total": 3},
+  "decision": {"recommended_default_profile": "balanced"},
+  "trend": {"status": "pass"},
+  "diagnostics": {"failure_kinds": ["real_packet_no_udp"]}
+}
+EOF_DIAG_LEGACY_NO_UDP
+assert_diag_case "legacy_real_packet_no_udp" "legacy" "real_packet_no_udp" "Provide a real packet source or real WireGuard backend for external/no-inject live evidence, then rerun signoff"
 
 cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_SUMMARY_TRUST'
 {
@@ -2041,6 +2108,22 @@ cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_LEGACY_SUMMARY_ENDPOINT_COUNT'
 EOF_DIAG_LEGACY_SUMMARY_ENDPOINT_COUNT
 assert_diag_case "legacy_summary_endpoint_counter" "legacy" "endpoint_unreachable" "Verify directory/issuer/entry/exit endpoints are reachable, then rerun signoff" 0 0 0 0 0 2
 
+cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_LEGACY_SUMMARY_NO_UDP_COUNT'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {
+    "runs_total": 3,
+    "diagnostics": {
+      "real_packet_no_udp_failures": 6
+    }
+  },
+  "decision": {"recommended_default_profile": "balanced"},
+  "trend": {"status": "pass"}
+}
+EOF_DIAG_LEGACY_SUMMARY_NO_UDP_COUNT
+assert_diag_case "legacy_summary_real_packet_no_udp_counter" "legacy" "real_packet_no_udp" "Provide a real packet source or real WireGuard backend for external/no-inject live evidence, then rerun signoff" 0 0 0 0 0 0 "" 6
+
 cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_CURRENT_TRANSPORT'
 {
   "version": 1,
@@ -2057,6 +2140,27 @@ cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_CURRENT_TRANSPORT'
 }
 EOF_DIAG_CURRENT_TRANSPORT
 assert_diag_case "current_transport" "current" "transport_mismatch" "Rerun with remote docker campaign and opaque/udp transport defaults" 2 0 0 0
+
+cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_CURRENT_NO_UDP'
+{
+  "version": 1,
+  "status": "pass",
+  "summary": {"runs_total": 3},
+  "decision": {"recommended_default_profile": "balanced"},
+  "trend": {"status": "pass"},
+  "aggregated_diagnostics": {
+    "transport_mismatch_failures": 0,
+    "token_proof_invalid_failures": 0,
+    "unknown_exit_failures": 0,
+    "directory_trust_failures": 0,
+    "real_packet_no_udp_failures": 4,
+    "root_required_failures": 0,
+    "endpoint_unreachable_failures": 0
+  },
+  "operator_hint": "strict external run saw no UDP packets"
+}
+EOF_DIAG_CURRENT_NO_UDP
+assert_diag_case "current_real_packet_no_udp" "current" "real_packet_no_udp" "Provide a real packet source or real WireGuard backend for external/no-inject live evidence, then rerun signoff" 0 0 0 0 0 0 "strict external run saw no UDP packets" 4
 
 cat >"$DIAG_CAMPAIGN_JSON" <<'EOF_DIAG_CURRENT_ROOT'
 {

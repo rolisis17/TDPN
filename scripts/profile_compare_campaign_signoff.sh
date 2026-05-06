@@ -1922,7 +1922,7 @@ support_rate_pct="0"
 trend_source_value=""
 selection_policy_evidence_present="0"
 selection_policy_evidence_valid="0"
-decision_diagnostics_json='{"source_schema":"none","legacy":null,"aggregated_diagnostics":{"transport_mismatch_failures":0,"token_proof_invalid_failures":0,"unknown_exit_failures":0,"directory_trust_failures":0,"root_required_failures":0,"endpoint_unreachable_failures":0},"likely_primary_failure":"none","operator_hint":""}'
+decision_diagnostics_json='{"source_schema":"none","legacy":null,"aggregated_diagnostics":{"transport_mismatch_failures":0,"token_proof_invalid_failures":0,"unknown_exit_failures":0,"directory_trust_failures":0,"real_packet_no_udp_failures":0,"root_required_failures":0,"endpoint_unreachable_failures":0},"likely_primary_failure":"none","operator_hint":""}'
 campaign_check_gate_diagnostics_json='{"runtime_actuation_status_pass":{"available":false,"required":false,"status":"unknown","blocking":false,"source":null,"actionable_reason":null}}'
 next_operator_action=""
 campaign_check_summary_present=0
@@ -1971,7 +1971,7 @@ if [[ "$check_attempted" == "1" && -f "$campaign_check_summary_json" ]] && jq -e
   fi
 fi
 
-if [[ "$check_attempted" == "1" && -f "$campaign_summary_json" ]] && jq -e . "$campaign_summary_json" >/dev/null 2>&1; then
+if [[ -f "$campaign_summary_json" ]] && jq -e . "$campaign_summary_json" >/dev/null 2>&1; then
   diagnostics_ingested="$(jq -c '
     def to_nonneg_int:
       if . == null then 0
@@ -1988,6 +1988,7 @@ if [[ "$check_attempted" == "1" && -f "$campaign_summary_json" ]] && jq -e . "$c
       ($legacy | tostring | ascii_downcase) as $txt
       | if ($txt | contains("token_proof_invalid")) then "token_proof_invalid"
         elif ($txt | contains("unknown_exit")) then "unknown_exit"
+        elif ($txt | contains("real_packet_no_udp") or contains("real-packet mode received no udp packets") or contains("no udp packets")) then "real_packet_no_udp"
         elif ($txt | contains("transport_mismatch")) then "transport_mismatch"
         elif ($txt | contains("directory_trust")) then "directory_trust"
         elif ($txt | contains("root_required")) then "root_required"
@@ -2012,6 +2013,7 @@ if [[ "$check_attempted" == "1" && -f "$campaign_summary_json" ]] && jq -e . "$c
           token_proof_invalid_failures: (($agg_source.token_proof_invalid_failures // 0) | to_nonneg_int),
           unknown_exit_failures: (($agg_source.unknown_exit_failures // 0) | to_nonneg_int),
           directory_trust_failures: (($agg_source.directory_trust_failures // 0) | to_nonneg_int),
+          real_packet_no_udp_failures: (($agg_source.real_packet_no_udp_failures // 0) | to_nonneg_int),
           root_required_failures: (($agg_source.root_required_failures // 0) | to_nonneg_int),
           endpoint_unreachable_failures: (($agg_source.endpoint_unreachable_failures // 0) | to_nonneg_int)
         },
@@ -2020,6 +2022,7 @@ if [[ "$check_attempted" == "1" && -f "$campaign_summary_json" ]] && jq -e . "$c
           | if $explicit != "none" then $explicit
             elif (($agg_source.token_proof_invalid_failures // 0) | to_nonneg_int) > 0 then "token_proof_invalid"
             elif (($agg_source.unknown_exit_failures // 0) | to_nonneg_int) > 0 then "unknown_exit"
+            elif (($agg_source.real_packet_no_udp_failures // 0) | to_nonneg_int) > 0 then "real_packet_no_udp"
             elif (($agg_source.transport_mismatch_failures // 0) | to_nonneg_int) > 0 then "transport_mismatch"
             elif (($agg_source.directory_trust_failures // 0) | to_nonneg_int) > 0 then "directory_trust"
             elif (($agg_source.root_required_failures // 0) | to_nonneg_int) > 0 then "root_required"
@@ -2048,6 +2051,9 @@ case "$diagnostics_primary_failure" in
     ;;
   transport_mismatch)
     next_operator_action="Rerun with remote docker campaign and opaque/udp transport defaults"
+    ;;
+  real_packet_no_udp)
+    next_operator_action="Provide a real packet source or real WireGuard backend for external/no-inject live evidence, then rerun signoff"
     ;;
   directory_trust)
     next_operator_action="Run trust/runtime reset path then rerun"
@@ -2078,6 +2084,9 @@ if ! is_non_negative_decimal "$support_rate_pct"; then
 fi
 if [[ "$failure_stage" == "campaign" ]]; then
   synthetic_failure_kind="${campaign_stage_primary_failure:-campaign_failure}"
+  if [[ "$diagnostics_primary_failure" != "none" ]]; then
+    synthetic_failure_kind="$diagnostics_primary_failure"
+  fi
   synthetic_endpoint_unreachable_failures=0
   if [[ "$synthetic_failure_kind" == "endpoint_unreachable" ]]; then
     if [[ "$campaign_stage_primary_failure_count" =~ ^[0-9]+$ ]] && (( campaign_stage_primary_failure_count > 0 )); then
@@ -2099,35 +2108,38 @@ if [[ "$failure_stage" == "campaign" ]]; then
   else
     decision_reason="campaign stage failed before campaign-check"
   fi
-  case "$synthetic_failure_kind" in
-    campaign_timeout)
-      next_operator_action="Investigate campaign timeout, verify endpoint availability, and rerun signoff"
-      ;;
-    endpoint_unreachable)
-      next_operator_action="Verify directory/issuer/entry/exit endpoints are reachable, then rerun signoff"
-      ;;
-    *)
-      next_operator_action="Inspect campaign log and rerun signoff after fixing campaign-stage failure"
-      ;;
-  esac
-  decision_diagnostics_json="$(jq -nc \
-    --arg synthetic_failure_kind "$synthetic_failure_kind" \
-    --argjson endpoint_unreachable_failures "$synthetic_endpoint_unreachable_failures" \
-    --arg operator_hint "$next_operator_action" \
-    '{
-      source_schema: "synthetic_stage_failure",
-      legacy: null,
-      aggregated_diagnostics: {
-        transport_mismatch_failures: 0,
-        token_proof_invalid_failures: 0,
-        unknown_exit_failures: 0,
-        directory_trust_failures: 0,
-        root_required_failures: 0,
-        endpoint_unreachable_failures: $endpoint_unreachable_failures
-      },
-      likely_primary_failure: $synthetic_failure_kind,
-      operator_hint: $operator_hint
-    }')"
+  if [[ "$diagnostics_primary_failure" == "none" ]]; then
+    case "$synthetic_failure_kind" in
+      campaign_timeout)
+        next_operator_action="Investigate campaign timeout, verify endpoint availability, and rerun signoff"
+        ;;
+      endpoint_unreachable)
+        next_operator_action="Verify directory/issuer/entry/exit endpoints are reachable, then rerun signoff"
+        ;;
+      *)
+        next_operator_action="Inspect campaign log and rerun signoff after fixing campaign-stage failure"
+        ;;
+    esac
+    decision_diagnostics_json="$(jq -nc \
+      --arg synthetic_failure_kind "$synthetic_failure_kind" \
+      --argjson endpoint_unreachable_failures "$synthetic_endpoint_unreachable_failures" \
+      --arg operator_hint "$next_operator_action" \
+      '{
+        source_schema: "synthetic_stage_failure",
+        legacy: null,
+        aggregated_diagnostics: {
+          transport_mismatch_failures: 0,
+          token_proof_invalid_failures: 0,
+          unknown_exit_failures: 0,
+          directory_trust_failures: 0,
+          real_packet_no_udp_failures: 0,
+          root_required_failures: 0,
+          endpoint_unreachable_failures: $endpoint_unreachable_failures
+        },
+        likely_primary_failure: $synthetic_failure_kind,
+        operator_hint: $operator_hint
+      }')"
+  fi
 fi
 if [[ "$decision" == "unknown" && "$failure_stage" == "campaign_check" ]]; then
   decision="NO-GO"

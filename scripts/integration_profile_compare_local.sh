@@ -128,6 +128,9 @@ EOF_STATE
       else
         echo "2026/03/24 12:00:04 client wireguard runtime ready: interface=wgvpn0 key_id=test"
       fi
+      if [[ "${FAKE_CLIENT_REAL_PACKET_NO_UDP:-0}" == "1" ]]; then
+        echo "2026/03/24 12:00:04 client bootstrap failed: real-packet mode received no UDP packets from 127.0.0.1:51900"
+      fi
       echo "2026/03/24 12:00:05 client selected entry=entry-local-1 (http://entry) entry_op=op-entry${middle_segment} exit=exit-local-1 (http://exit) exit_op=op-exit path_control=http://entry token_exp=1"
       if [[ "$profile" == "private" && "$count" -eq 2 ]]; then
         echo "2026/03/24 12:00:06 token proof invalid: deterministic m4 quality penalty"
@@ -482,14 +485,17 @@ if ! jq -e '
   and (.summary.token_proof_invalid_failures_total | type == "number")
   and (.summary.unknown_exit_failures_total | type == "number")
   and (.summary.directory_trust_failures_total | type == "number")
+  and (.summary.real_packet_no_udp_failures_total | type == "number")
   and ([.profiles[] | select(.profile == "balanced")][0].avg_transport_mismatch_failures | type == "number")
   and ([.profiles[] | select(.profile == "balanced")][0].avg_token_proof_invalid_failures | type == "number")
   and ([.profiles[] | select(.profile == "balanced")][0].avg_unknown_exit_failures | type == "number")
   and ([.profiles[] | select(.profile == "balanced")][0].avg_directory_trust_failures | type == "number")
+  and ([.profiles[] | select(.profile == "balanced")][0].avg_real_packet_no_udp_failures | type == "number")
   and ([.runs[] | select(.profile == "balanced")][0].transport_mismatch_failures | type == "number")
   and ([.runs[] | select(.profile == "balanced")][0].token_proof_invalid_failures | type == "number")
   and ([.runs[] | select(.profile == "balanced")][0].unknown_exit_failures | type == "number")
   and ([.runs[] | select(.profile == "balanced")][0].directory_trust_failures | type == "number")
+  and ([.runs[] | select(.profile == "balanced")][0].real_packet_no_udp_failures | type == "number")
 ' "$LOOPBACK_SUMMARY_JSON" >/dev/null; then
   echo "loopback summary did not preserve explicit_remote_endpoints=false"
   cat "$LOOPBACK_SUMMARY_JSON"
@@ -521,6 +527,39 @@ fi
 if grep -F -- 'data_plane_mode=opaque' <<<"$loopback_env_line" >/dev/null; then
   echo "loopback run unexpectedly forced opaque data plane mode"
   cat "$CAPTURE"
+  exit 1
+fi
+
+NO_UDP_SUMMARY_JSON="$TMP_DIR/profile_compare_no_udp_summary.json"
+NO_UDP_REPORT_MD="$TMP_DIR/profile_compare_no_udp_report.md"
+NO_UDP_RUN_LOG="$TMP_DIR/profile_compare_no_udp_run.log"
+: >"$CAPTURE"
+
+echo "[profile-compare-local] counts real-packet no-UDP diagnostics"
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+FAKE_CLIENT_REAL_PACKET_NO_UDP=1 \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles balanced \
+  --rounds 1 \
+  --execution-mode local \
+  --directory-urls http://dir-a:8081 \
+  --issuer-url http://issuer-a:8082 \
+  --entry-url http://entry-a:8083 \
+  --exit-url http://exit-a:8084 \
+  --summary-json "$NO_UDP_SUMMARY_JSON" \
+  --report-md "$NO_UDP_REPORT_MD" \
+  --print-summary-json 0 >"$NO_UDP_RUN_LOG"
+
+if ! jq -e '
+  .summary.real_packet_no_udp_failures_total == 1
+  and ([.profiles[] | select(.profile == "balanced")][0].avg_real_packet_no_udp_failures == 1)
+  and ([.runs[] | select(.profile == "balanced")][0].real_packet_no_udp_failures == 1)
+' "$NO_UDP_SUMMARY_JSON" >/dev/null; then
+  echo "real-packet no-UDP diagnostics were not counted"
+  cat "$NO_UDP_SUMMARY_JSON"
   exit 1
 fi
 

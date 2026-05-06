@@ -68,6 +68,9 @@ case "$hard_fail_mode" in
     echo 'dial tcp 100.113.245.61:8081: connect: connection refused'
     echo "could not resolve host: issuer.invalid"
   ;;
+  real_packet_no_udp)
+    echo "client bootstrap failed: real-packet mode received no UDP packets from 127.0.0.1:51900"
+    ;;
 esac
 
 omit_summary_at="${FAKE_LOCAL_OMIT_SUMMARY_AT:-0}"
@@ -98,6 +101,7 @@ transport_mismatch_failures=0
 token_proof_invalid_failures=0
 unknown_exit_failures=0
 directory_trust_failures=0
+real_packet_no_udp_failures=0
 selection_policy_sticky_pair_sec=300
 selection_policy_entry_rotation_sec=45
 selection_policy_entry_rotation_jitter_pct=9
@@ -114,6 +118,9 @@ case "$diag_mode" in
     ;;
   directory_only)
     directory_trust_failures=7
+    ;;
+  real_packet_no_udp)
+    real_packet_no_udp_failures=5
     ;;
   none)
     ;;
@@ -228,7 +235,8 @@ cat >>"$summary_json" <<EOF_SUMMARY
     "transport_mismatch_failures": $transport_mismatch_failures,
     "token_proof_invalid_failures": $token_proof_invalid_failures,
     "unknown_exit_failures": $unknown_exit_failures,
-    "directory_trust_failures": $directory_trust_failures
+    "directory_trust_failures": $directory_trust_failures,
+    "real_packet_no_udp_failures": $real_packet_no_udp_failures
   },
 EOF_SUMMARY
 fi
@@ -513,6 +521,7 @@ if ! jq -e '
   and .aggregated_diagnostics.token_proof_invalid_failures == 2
   and .aggregated_diagnostics.unknown_exit_failures == 3
   and .aggregated_diagnostics.directory_trust_failures == 0
+  and .aggregated_diagnostics.real_packet_no_udp_failures == 0
   and .aggregated_diagnostics.root_required_failures == 0
   and .aggregated_diagnostics.endpoint_unreachable_failures == 0
   and .likely_primary_failure == "token_proof_invalid"
@@ -700,6 +709,7 @@ if ! jq -e '
   and .aggregated_diagnostics.token_proof_invalid_failures == 0
   and .aggregated_diagnostics.unknown_exit_failures == 0
   and .aggregated_diagnostics.directory_trust_failures == 7
+  and .aggregated_diagnostics.real_packet_no_udp_failures == 0
   and .aggregated_diagnostics.root_required_failures == 0
   and .aggregated_diagnostics.endpoint_unreachable_failures == 0
   and .likely_primary_failure == "directory_trust"
@@ -707,6 +717,40 @@ if ! jq -e '
 ' "$DIRECTORY_DIAG_JSON" >/dev/null 2>&1; then
   echo "campaign diagnostics summary missing expected directory_trust values"
   cat "$DIRECTORY_DIAG_JSON"
+  exit 1
+fi
+
+echo "[profile-compare-campaign] diagnostics precedence and operator hint (real_packet_no_udp)"
+: >"$LOCAL_CAPTURE"
+: >"$TREND_CAPTURE"
+printf '0\n' >"$LOCAL_COUNTER"
+NO_UDP_DIAG_JSON="$TMP_DIR/campaign_no_udp_diag.json"
+PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT="$FAKE_LOCAL" \
+PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT="$FAKE_TREND" \
+FAKE_LOCAL_CAPTURE_FILE="$LOCAL_CAPTURE" \
+FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
+FAKE_LOCAL_FAIL_AT=0 \
+FAKE_LOCAL_DIAG_MODE=real_packet_no_udp \
+FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
+./scripts/profile_compare_campaign.sh \
+  --campaign-runs 1 \
+  --summary-json "$NO_UDP_DIAG_JSON" >/tmp/integration_profile_compare_campaign_no_udp_diag.log 2>&1
+
+if ! jq -e '
+  .aggregated_diagnostics.transport_mismatch_failures == 0
+  and .aggregated_diagnostics.token_proof_invalid_failures == 0
+  and .aggregated_diagnostics.unknown_exit_failures == 0
+  and .aggregated_diagnostics.directory_trust_failures == 0
+  and .aggregated_diagnostics.real_packet_no_udp_failures == 5
+  and .aggregated_diagnostics.root_required_failures == 0
+  and .aggregated_diagnostics.endpoint_unreachable_failures == 0
+  and .likely_primary_failure == "real_packet_no_udp"
+  and (.operator_hint | contains("real packet source"))
+' "$NO_UDP_DIAG_JSON" >/dev/null 2>&1; then
+  echo "campaign diagnostics summary missing expected real_packet_no_udp values"
+  cat "$NO_UDP_DIAG_JSON"
   exit 1
 fi
 
@@ -734,6 +778,7 @@ if ! jq -e '
   and .aggregated_diagnostics.token_proof_invalid_failures == 0
   and .aggregated_diagnostics.unknown_exit_failures == 0
   and .aggregated_diagnostics.directory_trust_failures == 0
+  and .aggregated_diagnostics.real_packet_no_udp_failures == 0
   and .aggregated_diagnostics.root_required_failures > 0
   and .aggregated_diagnostics.endpoint_unreachable_failures == 0
   and .likely_primary_failure == "root_required"
@@ -768,6 +813,7 @@ if ! jq -e '
   and .aggregated_diagnostics.token_proof_invalid_failures == 0
   and .aggregated_diagnostics.unknown_exit_failures == 0
   and .aggregated_diagnostics.directory_trust_failures == 0
+  and .aggregated_diagnostics.real_packet_no_udp_failures == 0
   and .aggregated_diagnostics.root_required_failures == 0
   and .aggregated_diagnostics.endpoint_unreachable_failures > 0
   and .likely_primary_failure == "endpoint_unreachable"
@@ -775,6 +821,41 @@ if ! jq -e '
 ' "$ENDPOINT_FALLBACK_JSON" >/dev/null 2>&1; then
   echo "campaign fallback diagnostics missing expected endpoint_unreachable values"
   cat "$ENDPOINT_FALLBACK_JSON"
+  exit 1
+fi
+
+echo "[profile-compare-campaign] log fallback diagnostics (real_packet_no_udp)"
+: >"$LOCAL_CAPTURE"
+: >"$TREND_CAPTURE"
+printf '0\n' >"$LOCAL_COUNTER"
+NO_UDP_FALLBACK_JSON="$TMP_DIR/campaign_no_udp_fallback_diag.json"
+PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT="$FAKE_LOCAL" \
+PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT="$FAKE_TREND" \
+FAKE_LOCAL_CAPTURE_FILE="$LOCAL_CAPTURE" \
+FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
+FAKE_LOCAL_FAIL_AT=0 \
+FAKE_LOCAL_DIAG_MODE=missing \
+FAKE_LOCAL_HARD_FAIL_MODE=real_packet_no_udp \
+FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
+./scripts/profile_compare_campaign.sh \
+  --campaign-runs 1 \
+  --summary-json "$NO_UDP_FALLBACK_JSON" >/tmp/integration_profile_compare_campaign_no_udp_fallback.log 2>&1
+
+if ! jq -e '
+  .aggregated_diagnostics.transport_mismatch_failures == 0
+  and .aggregated_diagnostics.token_proof_invalid_failures == 0
+  and .aggregated_diagnostics.unknown_exit_failures == 0
+  and .aggregated_diagnostics.directory_trust_failures == 0
+  and .aggregated_diagnostics.real_packet_no_udp_failures > 0
+  and .aggregated_diagnostics.root_required_failures == 0
+  and .aggregated_diagnostics.endpoint_unreachable_failures == 0
+  and .likely_primary_failure == "real_packet_no_udp"
+  and (.operator_hint | contains("real packet source"))
+' "$NO_UDP_FALLBACK_JSON" >/dev/null 2>&1; then
+  echo "campaign fallback diagnostics missing expected real_packet_no_udp values"
+  cat "$NO_UDP_FALLBACK_JSON"
   exit 1
 fi
 
