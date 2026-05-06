@@ -14378,6 +14378,7 @@ client_vpn_preflight() {
   local middle_relay_check="${EASY_NODE_CLIENT_VPN_MIDDLE_RELAY_CHECK:-}"
   local middle_relay_min_operators="${EASY_NODE_CLIENT_VPN_MIDDLE_RELAY_MIN_OPERATORS:-1}"
   local middle_relay_require_distinct="${EASY_NODE_CLIENT_VPN_MIDDLE_RELAY_REQUIRE_DISTINCT:-1}"
+  local require_distinct_countries="${CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY:-}"
   local issuer_quorum_check="${EASY_NODE_CLIENT_VPN_ISSUER_QUORUM_CHECK:-}"
   local issuer_min_operators="${EASY_NODE_CLIENT_VPN_ISSUER_MIN_OPERATORS:-2}"
   local mtls_ca_file="$DEPLOY_DIR/tls/ca.crt"
@@ -14570,6 +14571,19 @@ client_vpn_preflight() {
     echo "client-vpn-preflight requires --path-profile to be one of: 1hop, 2hop, 3hop, speed, balanced, private"
     exit 2
   }
+  if [[ -z "$require_distinct_countries" ]]; then
+    local profile_values profile_distinct profile_distinct_countries
+    profile_values="$(path_profile_values "$normalized_path_profile")" || {
+      echo "client-vpn-preflight requires --path-profile to be one of: 1hop, 2hop, 3hop, speed, balanced, private"
+      exit 2
+    }
+    IFS='|' read -r profile_distinct profile_distinct_countries _ <<<"$profile_values"
+    require_distinct_countries="$profile_distinct_countries"
+  fi
+  if [[ "$require_distinct_countries" != "0" && "$require_distinct_countries" != "1" ]]; then
+    echo "client-vpn-preflight requires CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY to be 0 or 1 when set"
+    exit 2
+  fi
   if [[ -z "$middle_relay_check" ]]; then
     if [[ "$normalized_path_profile" == "privacy" ]]; then
       middle_relay_check="1"

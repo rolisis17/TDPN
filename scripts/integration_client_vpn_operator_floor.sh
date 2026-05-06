@@ -45,7 +45,7 @@ case "$url" in
         printf '{"relays":[{"role":"entry","operator_id":"op-a"},{"role":"exit","operator_id":"op-a"},{"role":"entry","operator_id":"op-b"},{"role":"exit","operator_id":"op-b"}]}\n'
         ;;
       multi_middle)
-        printf '{"relays":[{"role":"entry","operator_id":"op-a"},{"role":"exit","operator_id":"op-a"},{"role":"entry","operator_id":"op-b"},{"role":"exit","operator_id":"op-b"},{"role":"middle","operator_id":"op-c"}]}\n'
+        printf '{"relays":[{"role":"entry","operator_id":"op-a","country_code":"US"},{"role":"exit","operator_id":"op-a","country_code":"US"},{"role":"entry","operator_id":"op-b","country_code":"CA"},{"role":"exit","operator_id":"op-b","country_code":"CA"},{"relay_id":"middle-op-c","role":"micro-relay","operator_id":"op-c","country_code":"MX","endpoint":"mid:51822","reputation_score":0.82,"uptime_score":0.91,"capacity_score":0.84,"abuse_penalty":0.1,"hop_roles":["middle"],"capabilities":["wg"]}]}\n'
         ;;
       *)
         printf '{"relays":[{"role":"entry","operator_id":"op-a"},{"role":"exit","operator_id":"op-a"}]}\n'
@@ -200,14 +200,27 @@ if ! rg -q 'middle-relay operator floor not met' "$OUT_3HOP_FAIL"; then
   exit 1
 fi
 
-OUT_3HOP_OVERRIDE="$TMP_DIR/preflight_3hop_override.log"
+OUT_3HOP_FORCE="$TMP_DIR/preflight_3hop_force.log"
+set +e
 PATH="$TMP_BIN:$PATH" FAKE_RELAY_PROFILE="multi" ./scripts/easy_node.sh client-vpn-preflight "${COMMON_ARGS[@]}" \
   --path-profile 3hop \
   --operator-floor-check 1 \
-  --middle-relay-check 0 >"$OUT_3HOP_OVERRIDE" 2>&1
-if ! rg -q 'client-vpn preflight: OK' "$OUT_3HOP_OVERRIDE"; then
-  echo "expected 3hop preflight success when middle-relay check is explicitly disabled"
-  cat "$OUT_3HOP_OVERRIDE"
+  --middle-relay-check 0 >"$OUT_3HOP_FORCE" 2>&1
+rc_3hop_force=$?
+set -e
+if [[ "$rc_3hop_force" -eq 0 ]]; then
+  echo "expected 3hop preflight to keep middle-relay check fail-closed even when explicitly disabled"
+  cat "$OUT_3HOP_FORCE"
+  exit 1
+fi
+if ! rg -q 'middle_relay_check: 1' "$OUT_3HOP_FORCE"; then
+  echo "expected 3hop preflight to force middle-relay check back on"
+  cat "$OUT_3HOP_FORCE"
+  exit 1
+fi
+if ! rg -q 'middle-relay operator floor not met' "$OUT_3HOP_FORCE"; then
+  echo "missing expected forced middle-relay floor failure for 3hop profile"
+  cat "$OUT_3HOP_FORCE"
   exit 1
 fi
 
