@@ -1327,6 +1327,12 @@ if array_has_arg_or_equals_prefix "--campaign-live-evidence" "${signoff_passthro
 elif [[ "$campaign_live_evidence" == "1" ]]; then
   signoff_passthrough+=(--campaign-live-evidence 1)
 fi
+if [[ "$campaign_live_evidence" == "1" ]] && ! array_has_arg_or_equals_prefix "--campaign-min-sources" "${signoff_passthrough[@]}"; then
+  signoff_passthrough+=(--campaign-min-sources 2)
+fi
+if [[ "$campaign_live_evidence" == "1" ]] && ! array_has_arg_or_equals_prefix "--campaign-require-cross-operator-pair" "${signoff_passthrough[@]}"; then
+  signoff_passthrough+=(--campaign-require-cross-operator-pair 1)
+fi
 if ! array_has_arg_or_equals_prefix "--require-micro-relay-quality-evidence" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--require-micro-relay-quality-evidence 0)
 fi

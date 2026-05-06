@@ -542,6 +542,9 @@ PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
   --issuer-url http://127.0.0.1:28082 \
   --entry-url http://127.0.0.1:28083 \
   --exit-url http://127.0.0.1:28084 \
+  --min-entry-operators 1 \
+  --min-exit-operators 1 \
+  --require-cross-operator-pair 1 \
   --live-evidence 1 \
   --summary-json "$LIVE_LOOPBACK_SUMMARY_JSON" \
   --report-md "$LIVE_LOOPBACK_REPORT_MD" \
@@ -551,6 +554,9 @@ if ! jq -e '
   .status == "pass"
   and .inputs.live_evidence == true
   and .inputs.live_evidence_udp_inject == true
+  and .inputs.min_entry_operators == 1
+  and .inputs.min_exit_operators == 1
+  and .inputs.require_cross_operator_pair == true
   and .inputs.fail_on_run_fail == true
   and .inputs.explicit_remote_endpoints == false
   and .inputs.transport_auto_defaults.client_inner_source_udp == true
@@ -568,6 +574,14 @@ live_loopback_env_line="$(rg '^env ' "$CAPTURE" | tail -n 1 || true)"
 for expected in 'client_inner_source=udp' 'disable_synthetic_fallback=1' 'data_plane_mode=opaque'; do
   if ! grep -F -- "$expected" <<<"$live_loopback_env_line" >/dev/null; then
     echo "live loopback env missing $expected"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
+live_loopback_call_line="$(rg '^client-test ' "$CAPTURE" | tail -n 1 || true)"
+for expected in '--min-entry-operators 1' '--min-exit-operators 1' '--require-cross-operator-pair 1'; do
+  if ! grep -F -- "$expected" <<<"$live_loopback_call_line" >/dev/null; then
+    echo "live loopback client-test args missing $expected"
     cat "$CAPTURE"
     exit 1
   fi

@@ -47,6 +47,10 @@ Usage:
     [--campaign-exit-url URL] \
     [--campaign-subject ID | --subject ID | --campaign-anon-cred TOKEN] \
     [--key ID | --invite-key ID | --anon-cred TOKEN] \
+    [--campaign-min-sources N] \
+    [--campaign-min-entry-operators N] \
+    [--campaign-min-exit-operators N] \
+    [--campaign-require-cross-operator-pair [0|1]] \
     [--campaign-start-local-stack auto|0|1] \
     [--campaign-profiles CSV] \
     [--campaign-runs N] \
@@ -764,6 +768,10 @@ campaign_entry_url="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_ENTRY_URL:-}"
 campaign_exit_url="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_EXIT_URL:-}"
 campaign_subject="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_SUBJECT:-}"
 campaign_anon_cred="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_ANON_CRED:-}"
+campaign_min_sources="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_MIN_SOURCES:-}"
+campaign_min_entry_operators="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_MIN_ENTRY_OPERATORS:-}"
+campaign_min_exit_operators="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_MIN_EXIT_OPERATORS:-}"
+campaign_require_cross_operator_pair="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_REQUIRE_CROSS_OPERATOR_PAIR:-}"
 subject_alias=""
 subject_alias_flag=""
 anon_cred_alias=""
@@ -1095,6 +1103,43 @@ while [[ $# -gt 0 ]]; do
       anon_cred_alias="$(require_non_empty_value_or_die "--anon-cred" "${1#--anon-cred=}")"
       shift
       ;;
+    --campaign-min-sources)
+      campaign_min_sources="${2:-}"
+      shift 2
+      ;;
+    --campaign-min-sources=*)
+      campaign_min_sources="${1#--campaign-min-sources=}"
+      shift
+      ;;
+    --campaign-min-entry-operators)
+      campaign_min_entry_operators="${2:-}"
+      shift 2
+      ;;
+    --campaign-min-entry-operators=*)
+      campaign_min_entry_operators="${1#--campaign-min-entry-operators=}"
+      shift
+      ;;
+    --campaign-min-exit-operators)
+      campaign_min_exit_operators="${2:-}"
+      shift 2
+      ;;
+    --campaign-min-exit-operators=*)
+      campaign_min_exit_operators="${1#--campaign-min-exit-operators=}"
+      shift
+      ;;
+    --campaign-require-cross-operator-pair)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        campaign_require_cross_operator_pair="${2:-}"
+        shift 2
+      else
+        campaign_require_cross_operator_pair="1"
+        shift
+      fi
+      ;;
+    --campaign-require-cross-operator-pair=*)
+      campaign_require_cross_operator_pair="${1#--campaign-require-cross-operator-pair=}"
+      shift
+      ;;
     --campaign-start-local-stack)
       campaign_start_local_stack="${2:-}"
       shift 2
@@ -1208,6 +1253,7 @@ optional_bool_arg_or_die "--require-micro-relay-promotion-policy" "$require_micr
 optional_bool_arg_or_die "--require-trust-tier-port-unlock-policy" "$require_trust_tier_port_unlock_policy"
 optional_bool_arg_or_die "--require-runtime-actuation-status-pass" "$require_runtime_actuation_status_pass"
 optional_bool_arg_or_die "--campaign-live-evidence" "$campaign_live_evidence"
+optional_bool_arg_or_die "--campaign-require-cross-operator-pair" "$campaign_require_cross_operator_pair"
 bool_arg_or_die "--campaign-allow-insecure-remote-http" "$campaign_allow_insecure_remote_http"
 
 for int_arg in "$require_min_runs_total" "$require_max_runs_fail" "$require_max_runs_warn" "$require_min_runs_with_summary"; do
@@ -1222,6 +1268,18 @@ if [[ -n "$campaign_runs" && ! "$campaign_runs" =~ ^[0-9]+$ ]]; then
 fi
 if [[ -n "$campaign_runs" ]] && ((campaign_runs < 1)); then
   echo "--campaign-runs must be >= 1"
+  exit 2
+fi
+if [[ -n "$campaign_min_sources" ]] && { ! [[ "$campaign_min_sources" =~ ^[0-9]+$ ]] || ((campaign_min_sources < 1)); }; then
+  echo "--campaign-min-sources must be >= 1"
+  exit 2
+fi
+if [[ -n "$campaign_min_entry_operators" ]] && ! [[ "$campaign_min_entry_operators" =~ ^[0-9]+$ ]]; then
+  echo "--campaign-min-entry-operators must be a non-negative integer"
+  exit 2
+fi
+if [[ -n "$campaign_min_exit_operators" ]] && { ! [[ "$campaign_min_exit_operators" =~ ^[0-9]+$ ]] || ((campaign_min_exit_operators < 1)); }; then
+  echo "--campaign-min-exit-operators must be >= 1"
   exit 2
 fi
 if [[ -n "$require_recommendation_support_rate_pct" ]] && ! is_non_negative_decimal "$require_recommendation_support_rate_pct"; then
@@ -1440,6 +1498,10 @@ campaign_anon_cred_effective="$campaign_anon_cred"
 campaign_start_local_stack_effective="$campaign_start_local_stack"
 campaign_profiles_effective="$campaign_profiles"
 campaign_live_evidence_effective="$campaign_live_evidence"
+campaign_min_sources_effective="$campaign_min_sources"
+campaign_min_entry_operators_effective="$campaign_min_entry_operators"
+campaign_min_exit_operators_effective="$campaign_min_exit_operators"
+campaign_require_cross_operator_pair_effective="$campaign_require_cross_operator_pair"
 
 if [[ "$campaign_refresh_effective" == "1" && -z "$campaign_execution_mode_effective" ]]; then
   if [[ -n "$campaign_directory_urls_effective" || -n "$campaign_bootstrap_directory_effective" || -n "$campaign_issuer_url_effective" || -n "$campaign_entry_url_effective" || -n "$campaign_exit_url_effective" ]]; then
@@ -1534,6 +1596,18 @@ build_campaign_cmd() {
   fi
   if [[ -n "$campaign_live_evidence_effective" ]]; then
     campaign_cmd+=(--live-evidence "$campaign_live_evidence_effective")
+  fi
+  if [[ -n "$campaign_min_sources_effective" ]]; then
+    campaign_cmd+=(--min-sources "$campaign_min_sources_effective")
+  fi
+  if [[ -n "$campaign_min_entry_operators_effective" ]]; then
+    campaign_cmd+=(--min-entry-operators "$campaign_min_entry_operators_effective")
+  fi
+  if [[ -n "$campaign_min_exit_operators_effective" ]]; then
+    campaign_cmd+=(--min-exit-operators "$campaign_min_exit_operators_effective")
+  fi
+  if [[ -n "$campaign_require_cross_operator_pair_effective" ]]; then
+    campaign_cmd+=(--require-cross-operator-pair "$campaign_require_cross_operator_pair_effective")
   fi
   if [[ -n "$campaign_directory_urls_effective" ]]; then
     campaign_cmd+=(--directory-urls "$campaign_directory_urls_effective")
@@ -2117,6 +2191,14 @@ jq -n \
   --arg campaign_profiles_effective "$campaign_profiles_effective" \
   --arg campaign_live_evidence "$campaign_live_evidence" \
   --arg campaign_live_evidence_effective "$campaign_live_evidence_effective" \
+  --arg campaign_min_sources "$campaign_min_sources" \
+  --arg campaign_min_sources_effective "$campaign_min_sources_effective" \
+  --arg campaign_min_entry_operators "$campaign_min_entry_operators" \
+  --arg campaign_min_entry_operators_effective "$campaign_min_entry_operators_effective" \
+  --arg campaign_min_exit_operators "$campaign_min_exit_operators" \
+  --arg campaign_min_exit_operators_effective "$campaign_min_exit_operators_effective" \
+  --arg campaign_require_cross_operator_pair "$campaign_require_cross_operator_pair" \
+  --arg campaign_require_cross_operator_pair_effective "$campaign_require_cross_operator_pair_effective" \
   --arg campaign_runs "$campaign_runs" \
   --arg campaign_runs_effective "$campaign_runs_effective" \
   --arg campaign_allow_insecure_remote_http "$campaign_allow_insecure_remote_http" \
@@ -2209,6 +2291,10 @@ jq -n \
         start_local_stack: (if $campaign_start_local_stack == "" then null else $campaign_start_local_stack end),
         profiles: (if $campaign_profiles == "" then null else $campaign_profiles end),
         live_evidence: (if $campaign_live_evidence == "" then null else ($campaign_live_evidence == "1") end),
+        min_sources: (if $campaign_min_sources == "" then null else ($campaign_min_sources | tonumber) end),
+        min_entry_operators: (if $campaign_min_entry_operators == "" then null else ($campaign_min_entry_operators | tonumber) end),
+        min_exit_operators: (if $campaign_min_exit_operators == "" then null else ($campaign_min_exit_operators | tonumber) end),
+        require_cross_operator_pair: (if $campaign_require_cross_operator_pair == "" then null else ($campaign_require_cross_operator_pair == "1") end),
         campaign_runs: (if $campaign_runs == "" then null else ($campaign_runs | tonumber) end),
         allow_insecure_remote_http: ($campaign_allow_insecure_remote_http == "1")
       },
@@ -2225,6 +2311,10 @@ jq -n \
         start_local_stack: (if $campaign_start_local_stack_effective == "" then null else $campaign_start_local_stack_effective end),
         profiles: (if $campaign_profiles_effective == "" then null else $campaign_profiles_effective end),
         live_evidence: (if $campaign_live_evidence_effective == "" then null else ($campaign_live_evidence_effective == "1") end),
+        min_sources: (if $campaign_min_sources_effective == "" then null else ($campaign_min_sources_effective | tonumber) end),
+        min_entry_operators: (if $campaign_min_entry_operators_effective == "" then null else ($campaign_min_entry_operators_effective | tonumber) end),
+        min_exit_operators: (if $campaign_min_exit_operators_effective == "" then null else ($campaign_min_exit_operators_effective | tonumber) end),
+        require_cross_operator_pair: (if $campaign_require_cross_operator_pair_effective == "" then null else ($campaign_require_cross_operator_pair_effective == "1") end),
         campaign_runs: (if $campaign_runs_effective == "" then null else ($campaign_runs_effective | tonumber) end),
         allow_insecure_remote_http: ($campaign_allow_insecure_remote_http == "1")
       },

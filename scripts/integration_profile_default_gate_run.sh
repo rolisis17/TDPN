@@ -292,6 +292,8 @@ assert_contains "$live_evidence_line_sp" "env_CLIENT_INNER_SOURCE=udp" "live evi
 assert_contains "$live_evidence_line_sp" "env_CLIENT_DISABLE_SYNTHETIC_FALLBACK=1" "live evidence did not disable synthetic fallback"
 assert_contains "$live_evidence_line_sp" "env_DATA_PLANE_MODE=opaque" "live evidence did not force opaque data-plane"
 assert_contains "$live_evidence_line_sp" "--campaign-live-evidence 1" "live evidence did not forward campaign-live-evidence"
+assert_contains "$live_evidence_line_sp" "--campaign-min-sources 2" "live evidence did not enforce two-source campaign quorum"
+assert_contains "$live_evidence_line_sp" "--campaign-require-cross-operator-pair 1" "live evidence did not enforce cross-operator campaign evidence"
 assert_file_contains "$LIVE_EVIDENCE_LOG" "campaign_live_evidence=1" "live evidence log did not surface campaign_live_evidence"
 
 echo "[profile-default-gate-run] campaign live evidence rejects unsafe transport overrides"
@@ -1319,6 +1321,7 @@ assert_contains "$live_wrapper_line_sp" "--reports-dir $TMP_DIR/live_reports" "m
 assert_contains "$live_wrapper_line_sp" "--campaign-timeout-sec 777" "missing live forwarded --campaign-timeout-sec"
 assert_contains "$live_wrapper_line_sp" "--summary-json $TMP_DIR/easy_node_live_wrapper_summary.json" "missing live forwarded --summary-json"
 assert_contains "$live_wrapper_line_sp" "--print-summary-json 1" "missing live forwarded --print-summary-json"
+assert_contains "$live_wrapper_line_sp" "--campaign-live-evidence 1" "missing live wrapper default --campaign-live-evidence"
 assert_contains "$live_wrapper_line_sp" "--omega 10 value" "missing live forwarded passthrough args"
 
 echo "[profile-default-gate-live] placeholder subject resolves from env INVITE_KEY"

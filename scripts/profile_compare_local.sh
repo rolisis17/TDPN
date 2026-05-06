@@ -27,6 +27,9 @@ Usage:
     [--exit-url URL] \
     [--subject ID | --anon-cred TOKEN] \
     [--min-sources N] \
+    [--min-entry-operators N] \
+    [--min-exit-operators N] \
+    [--require-cross-operator-pair [0|1]] \
     [--beta-profile [0|1]] \
     [--prod-profile [0|1]] \
     [--allow-insecure-remote-http [0|1]] \
@@ -495,6 +498,10 @@ exit_url=""
 subject=""
 anon_cred=""
 min_sources="1"
+min_entry_operators="${PROFILE_COMPARE_LOCAL_MIN_ENTRY_OPERATORS:-1}"
+min_entry_operators_explicit="0"
+min_exit_operators="${PROFILE_COMPARE_LOCAL_MIN_EXIT_OPERATORS:-1}"
+require_cross_operator_pair="${PROFILE_COMPARE_LOCAL_REQUIRE_CROSS_OPERATOR_PAIR:-0}"
 beta_profile="0"
 prod_profile="0"
 allow_insecure_remote_http="${PROFILE_COMPARE_LOCAL_ALLOW_INSECURE_REMOTE_HTTP:-0}"
@@ -567,6 +574,28 @@ while [[ $# -gt 0 ]]; do
     --min-sources)
       min_sources="${2:-}"
       shift 2
+      ;;
+    --min-entry-operators)
+      min_entry_operators="${2:-}"
+      min_entry_operators_explicit="1"
+      shift 2
+      ;;
+    --min-exit-operators)
+      min_exit_operators="${2:-}"
+      shift 2
+      ;;
+    --require-cross-operator-pair)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_cross_operator_pair="${2:-}"
+        shift 2
+      else
+        require_cross_operator_pair="1"
+        shift
+      fi
+      ;;
+    --require-cross-operator-pair=*)
+      require_cross_operator_pair="${1#--require-cross-operator-pair=}"
+      shift
       ;;
     --beta-profile)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
@@ -720,6 +749,7 @@ bool_arg_or_die "--keep-stack" "$keep_stack"
 bool_arg_or_die "--fail-on-run-fail" "$fail_on_run_fail"
 bool_arg_or_die "--live-evidence" "$live_evidence"
 bool_arg_or_die "--live-evidence-udp-inject" "$live_evidence_udp_inject"
+bool_arg_or_die "--require-cross-operator-pair" "$require_cross_operator_pair"
 tri_state_or_die "--start-local-stack" "$start_local_stack"
 
 if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
@@ -760,6 +790,14 @@ if ! [[ "$discovery_wait_sec" =~ ^[0-9]+$ ]] || ((discovery_wait_sec < 1)); then
 fi
 if ! [[ "$min_sources" =~ ^[0-9]+$ ]] || ((min_sources < 1)); then
   echo "--min-sources must be >= 1"
+  exit 2
+fi
+if ! [[ "$min_entry_operators" =~ ^[0-9]+$ ]]; then
+  echo "--min-entry-operators must be a non-negative integer"
+  exit 2
+fi
+if ! [[ "$min_exit_operators" =~ ^[0-9]+$ ]] || ((min_exit_operators < 1)); then
+  echo "--min-exit-operators must be >= 1"
   exit 2
 fi
 if ! [[ "$base_port" =~ ^[0-9]+$ ]] || ((base_port < 1024 || base_port > 65400)); then
@@ -1269,8 +1307,8 @@ for profile in "${profiles[@]}"; do
       run_cmd+=(--anon-cred "$anon_cred")
     fi
 
-    min_entry_operators_required="1"
-    if [[ "$profile" == "speed-1hop" ]]; then
+    min_entry_operators_required="$min_entry_operators"
+    if [[ "$profile" == "speed-1hop" && "$min_entry_operators_explicit" == "0" ]]; then
       min_entry_operators_required="0"
     fi
 
@@ -1280,8 +1318,8 @@ for profile in "${profiles[@]}"; do
       --path-profile "$profile"
       --min-selection-lines 1
       --min-entry-operators "$min_entry_operators_required"
-      --min-exit-operators 1
-      --require-cross-operator-pair 0
+      --min-exit-operators "$min_exit_operators"
+      --require-cross-operator-pair "$require_cross_operator_pair"
       --beta-profile "$beta_profile"
       --prod-profile "$prod_profile"
     )
@@ -1785,6 +1823,9 @@ jq -n \
   --arg subject "$subject_redacted" \
   --arg anon_cred_present "$anon_cred_present" \
   --arg min_sources "$min_sources" \
+  --arg min_entry_operators "$min_entry_operators" \
+  --arg min_exit_operators "$min_exit_operators" \
+  --arg require_cross_operator_pair "$require_cross_operator_pair" \
   --arg beta_profile "$beta_profile" \
   --arg prod_profile "$prod_profile" \
   --arg allow_insecure_remote_http "$allow_insecure_remote_http" \
@@ -1843,6 +1884,9 @@ jq -n \
       subject: $subject,
       anon_cred_present: ($anon_cred_present == "1"),
       min_sources: ($min_sources | tonumber),
+      min_entry_operators: ($min_entry_operators | tonumber),
+      min_exit_operators: ($min_exit_operators | tonumber),
+      require_cross_operator_pair: ($require_cross_operator_pair == "1"),
       beta_profile: ($beta_profile == "1"),
       prod_profile: ($prod_profile == "1"),
       allow_insecure_remote_http: ($allow_insecure_remote_http == "1"),

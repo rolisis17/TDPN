@@ -430,6 +430,10 @@ FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
   --issuer-url http://issuer-a:8082 \
   --entry-url http://entry-a:8083 \
   --exit-url http://exit-a:8084 \
+  --min-sources 2 \
+  --min-entry-operators 1 \
+  --min-exit-operators 1 \
+  --require-cross-operator-pair 1 \
   --allow-insecure-remote-http 1 \
   --campaign-pause-sec 0 \
   --summary-json "$SUCCESS_JSON" \
@@ -497,6 +501,10 @@ if ! jq -e '
   and (.selected_summaries | length) == 3
   and .trend.status == "pass"
   and .inputs.compare.explicit_remote_endpoints == true
+  and .inputs.compare.min_sources == 2
+  and .inputs.compare.min_entry_operators == 1
+  and .inputs.compare.min_exit_operators == 1
+  and .inputs.compare.require_cross_operator_pair == true
   and .inputs.compare.allow_insecure_remote_http == true
   and .inputs.compare.transport_auto_defaults.client_inner_source_udp == true
   and .inputs.compare.transport_auto_defaults.disable_synthetic_fallback == true
@@ -514,11 +522,18 @@ if ! jq -e '
   cat "$SUCCESS_JSON"
   exit 1
 fi
-if ! rg -q -- '--allow-insecure-remote-http 1' "$LOCAL_CAPTURE"; then
-  echo "campaign did not forward --allow-insecure-remote-http to profile-compare-local"
-  cat "$LOCAL_CAPTURE"
-  exit 1
-fi
+for expected in \
+  '--allow-insecure-remote-http 1' \
+  '--min-sources 2' \
+  '--min-entry-operators 1' \
+  '--min-exit-operators 1' \
+  '--require-cross-operator-pair 1'; do
+  if ! rg -q -- "$expected" "$LOCAL_CAPTURE"; then
+    echo "campaign did not forward $expected to profile-compare-local"
+    cat "$LOCAL_CAPTURE"
+    exit 1
+  fi
+done
 
 echo "[profile-compare-campaign] compare rc0 without summary is a failed row"
 : >"$LOCAL_CAPTURE"

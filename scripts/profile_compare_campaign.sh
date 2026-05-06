@@ -31,6 +31,9 @@ Usage:
     [--exit-url URL] \
     [--subject ID | --anon-cred TOKEN] \
     [--min-sources N] \
+    [--min-entry-operators N] \
+    [--min-exit-operators N] \
+    [--require-cross-operator-pair [0|1]] \
     [--beta-profile [0|1]] \
     [--prod-profile [0|1]] \
     [--allow-insecure-remote-http [0|1]] \
@@ -535,6 +538,9 @@ exit_url=""
 subject=""
 anon_cred=""
 min_sources="1"
+min_entry_operators="${PROFILE_COMPARE_CAMPAIGN_MIN_ENTRY_OPERATORS:-1}"
+min_exit_operators="${PROFILE_COMPARE_CAMPAIGN_MIN_EXIT_OPERATORS:-1}"
+require_cross_operator_pair="${PROFILE_COMPARE_CAMPAIGN_REQUIRE_CROSS_OPERATOR_PAIR:-0}"
 beta_profile="0"
 prod_profile="0"
 allow_insecure_remote_http="${PROFILE_COMPARE_CAMPAIGN_ALLOW_INSECURE_REMOTE_HTTP:-0}"
@@ -635,6 +641,27 @@ while [[ $# -gt 0 ]]; do
     --min-sources)
       min_sources="${2:-}"
       shift 2
+      ;;
+    --min-entry-operators)
+      min_entry_operators="${2:-}"
+      shift 2
+      ;;
+    --min-exit-operators)
+      min_exit_operators="${2:-}"
+      shift 2
+      ;;
+    --require-cross-operator-pair)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_cross_operator_pair="${2:-}"
+        shift 2
+      else
+        require_cross_operator_pair="1"
+        shift
+      fi
+      ;;
+    --require-cross-operator-pair=*)
+      require_cross_operator_pair="${1#--require-cross-operator-pair=}"
+      shift
       ;;
     --beta-profile)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
@@ -798,6 +825,7 @@ bool_arg_or_die "--stack-strict-beta" "$stack_strict_beta"
 bool_arg_or_die "--cleanup-ifaces" "$cleanup_ifaces"
 bool_arg_or_die "--keep-stack" "$keep_stack"
 bool_arg_or_die "--live-evidence" "$live_evidence"
+bool_arg_or_die "--require-cross-operator-pair" "$require_cross_operator_pair"
 bool_arg_or_die "--trend-fail-on-any-fail" "$trend_fail_on_any_fail"
 tri_state_or_die "--start-local-stack" "$start_local_stack"
 bool_arg_or_die "--allow-insecure-remote-http" "$allow_insecure_remote_http"
@@ -847,6 +875,14 @@ if ! [[ "$discovery_wait_sec" =~ ^[0-9]+$ ]] || ((discovery_wait_sec < 1)); then
 fi
 if ! [[ "$min_sources" =~ ^[0-9]+$ ]] || ((min_sources < 1)); then
   echo "--min-sources must be >= 1"
+  exit 2
+fi
+if ! [[ "$min_entry_operators" =~ ^[0-9]+$ ]]; then
+  echo "--min-entry-operators must be a non-negative integer"
+  exit 2
+fi
+if ! [[ "$min_exit_operators" =~ ^[0-9]+$ ]] || ((min_exit_operators < 1)); then
+  echo "--min-exit-operators must be >= 1"
   exit 2
 fi
 if ! [[ "$base_port" =~ ^[0-9]+$ ]] || ((base_port < 1)); then
@@ -1030,6 +1066,9 @@ for ((run_idx = 1; run_idx <= campaign_runs; run_idx++)); do
     --execution-mode "$execution_mode_effective"
     --discovery-wait-sec "$discovery_wait_sec"
     --min-sources "$min_sources"
+    --min-entry-operators "$min_entry_operators"
+    --min-exit-operators "$min_exit_operators"
+    --require-cross-operator-pair "$require_cross_operator_pair"
     --beta-profile "$beta_profile"
     --prod-profile "$prod_profile"
     --start-local-stack "$start_local_stack_effective"
@@ -1499,6 +1538,9 @@ jq -n \
   --argjson timeout_sec "$timeout_sec" \
   --argjson discovery_wait_sec "$discovery_wait_sec" \
   --argjson min_sources "$min_sources" \
+  --argjson min_entry_operators "$min_entry_operators" \
+  --argjson min_exit_operators "$min_exit_operators" \
+  --arg require_cross_operator_pair "$require_cross_operator_pair" \
   --argjson beta_profile "$beta_profile" \
   --argjson prod_profile "$prod_profile" \
   --arg allow_insecure_remote_http "$allow_insecure_remote_http" \
@@ -1568,6 +1610,9 @@ jq -n \
         subject: $subject,
         anon_cred_present: ($anon_cred_present == "1"),
         min_sources: $min_sources,
+        min_entry_operators: $min_entry_operators,
+        min_exit_operators: $min_exit_operators,
+        require_cross_operator_pair: ($require_cross_operator_pair == "1"),
         beta_profile: ($beta_profile == 1),
         prod_profile: ($prod_profile == 1),
         allow_insecure_remote_http: ($allow_insecure_remote_http == "1"),

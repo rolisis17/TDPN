@@ -231,6 +231,10 @@ FAKE_CHECK_DECISION=GO \
   --campaign-start-local-stack 0 \
   --campaign-profiles "balanced,speed" \
   --campaign-live-evidence 1 \
+  --campaign-min-sources 2 \
+  --campaign-min-entry-operators 1 \
+  --campaign-min-exit-operators 1 \
+  --campaign-require-cross-operator-pair 1 \
   --summary-json "$SUCCESS_SUMMARY" \
   --print-summary-json 0 >/tmp/integration_profile_compare_campaign_signoff_success.log 2>&1
 
@@ -256,6 +260,11 @@ if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" an
 fi
 if ! jq -e '.inputs.campaign_refresh_overrides.live_evidence == true and .inputs.campaign_refresh_overrides_effective.live_evidence == true' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
   echo "success summary JSON missing live evidence forwarding metadata"
+  cat "$SUCCESS_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.inputs.campaign_refresh_overrides.min_sources == 2 and .inputs.campaign_refresh_overrides_effective.min_sources == 2 and .inputs.campaign_refresh_overrides.min_entry_operators == 1 and .inputs.campaign_refresh_overrides_effective.min_entry_operators == 1 and .inputs.campaign_refresh_overrides.min_exit_operators == 1 and .inputs.campaign_refresh_overrides_effective.min_exit_operators == 1 and .inputs.campaign_refresh_overrides.require_cross_operator_pair == true and .inputs.campaign_refresh_overrides_effective.require_cross_operator_pair == true' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
+  echo "success summary JSON missing campaign source/diversity forwarding metadata"
   cat "$SUCCESS_SUMMARY"
   exit 1
 fi
@@ -304,7 +313,11 @@ for expected in \
   '--allow-insecure-remote-http 1' \
   '--subject inv-signoff-test' \
   '--start-local-stack 0' \
-  '--live-evidence 1'; do
+  '--live-evidence 1' \
+  '--min-sources 2' \
+  '--min-entry-operators 1' \
+  '--min-exit-operators 1' \
+  '--require-cross-operator-pair 1'; do
   if ! rg -q -- "$expected" "$SIGNOFF_CAPTURE"; then
     echo "expected campaign forwarding flag missing: $expected"
     cat "$SIGNOFF_CAPTURE"
