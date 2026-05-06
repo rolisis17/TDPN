@@ -54,7 +54,12 @@ cat >"$TRACK_A" <<'EOF_TRACK_A'
 set -euo pipefail
 exec_log="${BATCH_TRACK_EXEC_LOG:?}"
 behavior="${TRACK_A_BEHAVIOR:-pass}"
-echo "A:$behavior" >>"$exec_log"
+args=" $* "
+if [[ "$args" != *" --campaign-live-evidence 1 "* || "$args" != *" --require-external-live-evidence 1 "* || "$args" != *" --campaign-live-evidence-udp-inject 0 "* ]]; then
+  echo "profile_default_gate_stability_cycle missing strict external live-evidence policy args: $*"
+  exit 64
+fi
+echo "A:$behavior args:$*" >>"$exec_log"
 if [[ "$behavior" == "fail" ]]; then
   exit "${TRACK_A_RC:-17}"
 fi
@@ -67,7 +72,12 @@ cat >"$TRACK_B" <<'EOF_TRACK_B'
 set -euo pipefail
 exec_log="${BATCH_TRACK_EXEC_LOG:?}"
 behavior="${TRACK_B_BEHAVIOR:-pass}"
-echo "B:$behavior" >>"$exec_log"
+args=" $* "
+if [[ "$args" != *" --campaign-live-evidence 1 "* || "$args" != *" --require-external-live-evidence 1 "* || "$args" != *" --campaign-live-evidence-udp-inject 0 "* ]]; then
+  echo "runtime_actuation_promotion_cycle missing strict external live-evidence policy args: $*"
+  exit 64
+fi
+echo "B:$behavior args:$*" >>"$exec_log"
 if [[ "$behavior" == "fail" ]]; then
   echo "runtime_actuation_promotion_cycle failed rc=${TRACK_B_RC:-23}"
   exit "${TRACK_B_RC:-23}"
@@ -221,6 +231,11 @@ bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
   --print-summary-json 0
 
 if ! jq -e '
+  def has_arg_pair($flag; $value):
+    .command_args as $args
+    | any(range(0; (($args | length) - 1)); $args[.] == $flag and $args[. + 1] == $value);
+  def strict_track:
+    (.track_id == "profile_default_gate_stability_cycle" or .track_id == "runtime_actuation_promotion_cycle");
   .status == "pass"
   and .rc == 0
   and .failure_substep == null
@@ -230,6 +245,11 @@ if ! jq -e '
   and .stages.execution.status == "pass"
   and .inputs.iterations == 2
   and .inputs.parallel == true
+  and .inputs.live_evidence_policy == {
+    "campaign_live_evidence": true,
+    "require_external_live_evidence": true,
+    "campaign_live_evidence_udp_inject": false
+  }
   and .inputs.selected_track_ids == [
     "profile_default_gate_stability_cycle",
     "runtime_actuation_promotion_cycle",
@@ -242,6 +262,11 @@ if ! jq -e '
   and .summary.executed_tracks == 6
   and .summary.skipped_tracks == 0
   and .summary.halt_after_iteration == false
+  and all(.iterations[].tracks[]; if strict_track then
+    has_arg_pair("--campaign-live-evidence"; "1")
+    and has_arg_pair("--require-external-live-evidence"; "1")
+    and has_arg_pair("--campaign-live-evidence-udp-inject"; "0")
+  else true end)
   and .selection_accounting.include_track_ids_requested_count == 0
   and .selection_accounting.exclude_track_ids_requested_count == 0
   and .selection_accounting.base_track_count == 3

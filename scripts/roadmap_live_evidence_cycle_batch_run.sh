@@ -30,6 +30,12 @@ Defaults:
   --parallel 0
   --print-summary-json 1
 
+Live-evidence policy:
+  Profile-default and runtime-actuation tracks are executed with:
+    --campaign-live-evidence 1
+    --require-external-live-evidence 1
+    --campaign-live-evidence-udp-inject 0
+
 Track path overrides:
   ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT
   ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT
@@ -238,6 +244,9 @@ parallel="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_PARALLEL:-0}"
 print_summary_json="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_PRINT_SUMMARY_JSON:-1}"
 failure_log_tail_lines="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_FAILURE_LOG_TAIL_LINES:-20}"
 roadmap_progress_summary_json="${ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_ROADMAP_PROGRESS_SUMMARY_JSON:-.easy-node-logs/roadmap_progress_summary.json}"
+batch_campaign_live_evidence="1"
+batch_require_external_live_evidence="1"
+batch_campaign_live_evidence_udp_inject="0"
 
 declare -a include_track_ids=()
 declare -a exclude_track_ids=()
@@ -1030,7 +1039,7 @@ classify_track_failure_json() {
       track_group="m4_runtime_actuation_promotion"
       failure_code="m4_track_failed"
       operator_next_action="Provide a real invite subject credential for M4 (direct arg or CAMPAIGN_SUBJECT/INVITE_KEY) and rerun the runtime-actuation cycle."
-      operator_next_command="CAMPAIGN_SUBJECT='<set-real-invite-key>' ./scripts/easy_node.sh runtime-actuation-promotion-cycle --reports-dir .easy-node-logs --print-summary-json 1"
+      operator_next_command="CAMPAIGN_SUBJECT='<set-real-invite-key>' ./scripts/easy_node.sh runtime-actuation-promotion-cycle --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --reports-dir .easy-node-logs --print-summary-json 1"
       hint_line="$(first_log_match_line_or_empty "$log_path" 'placeholder invite subject|set CAMPAIGN_SUBJECT/INVITE_KEY|requires a non-empty value in signoff passthrough args|requires a value in signoff passthrough args')"
       if [[ -n "$hint_line" ]]; then
         failure_kind="required_runtime_input_unresolved"
@@ -1301,11 +1310,26 @@ execute_track_to_result_file() {
   local result_path="$5"
 
   local started_at ended_at duration_sec rc status
+  local -a track_cmd=()
+  local track_cmd_args_json
   started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local start_epoch end_epoch
   start_epoch="$(date +%s)"
+  track_cmd=(bash "$script_path")
+  case "$track_id" in
+    profile_default_gate_stability_cycle|runtime_actuation_promotion_cycle)
+      track_cmd+=(
+        --campaign-live-evidence "$batch_campaign_live_evidence"
+        --require-external-live-evidence "$batch_require_external_live_evidence"
+        --campaign-live-evidence-udp-inject "$batch_campaign_live_evidence_udp_inject"
+      )
+      ;;
+    *)
+      ;;
+  esac
+  track_cmd_args_json="$(json_array_from_ref track_cmd)"
   set +e
-  bash "$script_path" >"$log_path" 2>&1
+  "${track_cmd[@]}" >"$log_path" 2>&1
   rc=$?
   set -e
   end_epoch="$(date +%s)"
@@ -1321,6 +1345,7 @@ execute_track_to_result_file() {
     --argjson iteration "$iter_idx" \
     --arg track_id "$track_id" \
     --arg script_path "$script_path" \
+    --argjson command_args "$track_cmd_args_json" \
     --arg log "$log_path" \
     --arg started_at_utc "$started_at" \
     --arg ended_at_utc "$ended_at" \
@@ -1331,6 +1356,7 @@ execute_track_to_result_file() {
       iteration: $iteration,
       track_id: $track_id,
       script_path: $script_path,
+      command_args: $command_args,
       log: $log,
       started_at_utc: $started_at_utc,
       ended_at_utc: $ended_at_utc,
@@ -1670,6 +1696,9 @@ jq -n \
   --argjson parallel "$parallel" \
   --argjson print_summary_json "$print_summary_json" \
   --argjson failure_log_tail_lines "$failure_log_tail_lines" \
+  --argjson campaign_live_evidence "$batch_campaign_live_evidence" \
+  --argjson require_external_live_evidence "$batch_require_external_live_evidence" \
+  --argjson campaign_live_evidence_udp_inject "$batch_campaign_live_evidence_udp_inject" \
   --argjson default_track_ids "$default_track_ids_json" \
   --argjson include_track_ids "$include_track_ids_json" \
   --argjson exclude_track_ids "$exclude_track_ids_json" \
@@ -1695,7 +1724,7 @@ jq -n \
   --arg first_failure_track_id "$first_failure_track_id" \
   '{
     version: 1,
-    schema: { id: "roadmap_live_evidence_cycle_batch_run_summary", major: 1, minor: 0 },
+    schema: { id: "roadmap_live_evidence_cycle_batch_run_summary", major: 1, minor: 1 },
     generated_at_utc: $generated_at_utc,
     status: $status,
     rc: $rc,
@@ -1708,6 +1737,11 @@ jq -n \
       parallel: ($parallel == 1),
       print_summary_json: ($print_summary_json == 1),
       failure_log_tail_lines: $failure_log_tail_lines,
+      live_evidence_policy: {
+        campaign_live_evidence: ($campaign_live_evidence == 1),
+        require_external_live_evidence: ($require_external_live_evidence == 1),
+        campaign_live_evidence_udp_inject: ($campaign_live_evidence_udp_inject == 1)
+      },
       default_track_ids: $default_track_ids,
       include_track_ids: $include_track_ids,
       exclude_track_ids: $exclude_track_ids,
