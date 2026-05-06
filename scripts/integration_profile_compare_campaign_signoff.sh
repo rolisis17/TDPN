@@ -279,6 +279,8 @@ FAKE_CHECK_DECISION=GO \
   --campaign-subject "inv-signoff-test" \
   --campaign-start-local-stack 0 \
   --campaign-profiles "balanced,speed" \
+  --campaign-profile-rounds 1 \
+  --campaign-profile-timeout-sec 80 \
   --campaign-live-evidence 1 \
   --campaign-live-evidence-udp-inject 1 \
   --campaign-min-sources 2 \
@@ -303,7 +305,7 @@ if ! rg -q 'campaign refresh completed attempt=initial' /tmp/integration_profile
   cat /tmp/integration_profile_compare_campaign_signoff_success.log
   exit 1
 fi
-if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .decision.selection_policy_evidence.present == true and .decision.selection_policy_evidence.valid == true and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass" and .stages.campaign.attempted == true and .stages.campaign_check.attempted == true and .stages.campaign.timed_out == false and .stages.campaign.timeout_sec == 0 and .inputs.campaign_refresh_runtime.timeout_sec == 0 and .inputs.campaign_refresh_runtime.campaign_runs == 5 and .inputs.campaign_refresh_runtime.heartbeat_interval_sec >= 1 and .inputs.policy.require_selection_policy_present == 1 and .inputs.policy.require_selection_policy_valid == 1 and .inputs.policy.require_micro_relay_quality_evidence == 1 and .inputs.policy.require_micro_relay_quality_status_pass == 1 and .inputs.policy.require_micro_relay_demotion_policy == 1 and .inputs.policy.require_micro_relay_promotion_policy == 1 and .inputs.policy.require_trust_tier_port_unlock_policy == 1 and .inputs.policy.require_runtime_actuation_status_pass == 1 and .inputs.campaign_refresh_overrides.execution_mode == "docker" and .inputs.campaign_refresh_overrides.campaign_runs == null and .inputs.campaign_refresh_overrides.profiles == "balanced,speed" and .inputs.campaign_refresh_overrides.allow_insecure_remote_http == true and .inputs.campaign_refresh_overrides_effective.campaign_runs == 5 and .inputs.campaign_refresh_overrides_effective.profiles == "balanced,speed" and .inputs.campaign_refresh_overrides_effective.allow_insecure_remote_http == true and .inputs.campaign_refresh_overrides.directory_urls == "http://127.0.0.1:18081,http://127.0.0.1:28081" and .inputs.campaign_refresh_overrides.bootstrap_directory == "http://127.0.0.1:18081" and .inputs.campaign_refresh_overrides.discovery_wait_sec == 7 and .inputs.campaign_refresh_overrides.issuer_url == "http://127.0.0.1:18082" and .inputs.campaign_refresh_overrides.entry_url == "http://127.0.0.1:18083" and .inputs.campaign_refresh_overrides.exit_url == "http://127.0.0.1:18084" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides.anon_cred_configured == false and .inputs.campaign_refresh_overrides.start_local_stack == "0" and .inputs.campaign_refresh_overrides_effective.subject_configured == true and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == false and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.available == false and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.status == "unknown"' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
+if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .decision.selection_policy_evidence.present == true and .decision.selection_policy_evidence.valid == true and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass" and .stages.campaign.attempted == true and .stages.campaign_check.attempted == true and .stages.campaign.timed_out == false and .stages.campaign.timeout_sec == 0 and .inputs.campaign_refresh_runtime.timeout_sec == 0 and .inputs.campaign_refresh_runtime.campaign_runs == 5 and .inputs.campaign_refresh_runtime.profile_rounds == 1 and .inputs.campaign_refresh_runtime.profile_timeout_sec == 80 and .inputs.campaign_refresh_runtime.heartbeat_interval_sec >= 1 and .inputs.policy.require_selection_policy_present == 1 and .inputs.policy.require_selection_policy_valid == 1 and .inputs.policy.require_micro_relay_quality_evidence == 1 and .inputs.policy.require_micro_relay_quality_status_pass == 1 and .inputs.policy.require_micro_relay_demotion_policy == 1 and .inputs.policy.require_micro_relay_promotion_policy == 1 and .inputs.policy.require_trust_tier_port_unlock_policy == 1 and .inputs.policy.require_runtime_actuation_status_pass == 1 and .inputs.campaign_refresh_overrides.execution_mode == "docker" and .inputs.campaign_refresh_overrides.campaign_runs == null and .inputs.campaign_refresh_overrides.profile_rounds == 1 and .inputs.campaign_refresh_overrides.profile_timeout_sec == 80 and .inputs.campaign_refresh_overrides.profiles == "balanced,speed" and .inputs.campaign_refresh_overrides.allow_insecure_remote_http == true and .inputs.campaign_refresh_overrides_effective.campaign_runs == 5 and .inputs.campaign_refresh_overrides_effective.profile_rounds == 1 and .inputs.campaign_refresh_overrides_effective.profile_timeout_sec == 80 and .inputs.campaign_refresh_overrides_effective.profiles == "balanced,speed" and .inputs.campaign_refresh_overrides_effective.allow_insecure_remote_http == true and .inputs.campaign_refresh_overrides.directory_urls == "http://127.0.0.1:18081,http://127.0.0.1:28081" and .inputs.campaign_refresh_overrides.bootstrap_directory == "http://127.0.0.1:18081" and .inputs.campaign_refresh_overrides.discovery_wait_sec == 7 and .inputs.campaign_refresh_overrides.issuer_url == "http://127.0.0.1:18082" and .inputs.campaign_refresh_overrides.entry_url == "http://127.0.0.1:18083" and .inputs.campaign_refresh_overrides.exit_url == "http://127.0.0.1:18084" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides.anon_cred_configured == false and .inputs.campaign_refresh_overrides.start_local_stack == "0" and .inputs.campaign_refresh_overrides_effective.subject_configured == true and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == false and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.available == false and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.status == "unknown"' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
   echo "success summary JSON missing expected fields"
   cat "$SUCCESS_SUMMARY"
   exit 1
@@ -353,6 +355,8 @@ done
 for expected in \
   '--execution-mode docker' \
   '--campaign-runs 5' \
+  '--rounds 1' \
+  '--timeout-sec 80' \
   '--profiles balanced,speed' \
   '--directory-urls http://127.0.0.1:18081,http://127.0.0.1:28081' \
   '--bootstrap-directory http://127.0.0.1:18081' \
@@ -2419,6 +2423,27 @@ fi
 if ! rg -q '^--subject requires a value$' /tmp/integration_profile_compare_campaign_signoff_easy_node_missing_subject_value.log; then
   echo "expected easy_node missing --subject value error message not found"
   cat /tmp/integration_profile_compare_campaign_signoff_easy_node_missing_subject_value.log
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] missing --campaign-profile-timeout-sec value fails clearly"
+set +e
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir /tmp/reports-missing-campaign-profile-timeout \
+  --refresh-campaign 1 \
+  --campaign-profile-timeout-sec \
+  --summary-json /tmp/signoff-missing-campaign-profile-timeout.json \
+  >/tmp/integration_profile_compare_campaign_signoff_missing_profile_timeout_value.log 2>&1
+missing_profile_timeout_value_rc=$?
+set -e
+if [[ "$missing_profile_timeout_value_rc" -ne 2 ]]; then
+  echo "expected rc=2 when --campaign-profile-timeout-sec is provided without a value"
+  cat /tmp/integration_profile_compare_campaign_signoff_missing_profile_timeout_value.log
+  exit 1
+fi
+if ! rg -q '^--campaign-profile-timeout-sec requires a value$' /tmp/integration_profile_compare_campaign_signoff_missing_profile_timeout_value.log; then
+  echo "expected missing --campaign-profile-timeout-sec value error message not found"
+  cat /tmp/integration_profile_compare_campaign_signoff_missing_profile_timeout_value.log
   exit 1
 fi
 

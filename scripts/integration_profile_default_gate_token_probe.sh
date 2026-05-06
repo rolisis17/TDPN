@@ -27,6 +27,7 @@ PROFILE_DEFAULT_GATE_TOKEN_PROBE_SCRIPT="$FAKE_SCRIPT" \
   --issuer-url http://100.113.245.61:8082 \
   --exit-url http://100.113.245.61:8084 \
   --campaign-subject inv-test \
+  --allow-insecure-remote-http 1 \
   --reports-dir .easy-node-logs \
   --print-summary-json 1 \
   --show-json 0
@@ -43,6 +44,7 @@ for expected in \
   '--issuer-url http://100.113.245.61:8082' \
   '--exit-url http://100.113.245.61:8084' \
   '--campaign-subject inv-test' \
+  '--allow-insecure-remote-http 1' \
   '--reports-dir .easy-node-logs' \
   '--print-summary-json 1' \
   '--show-json 0'; do
@@ -60,6 +62,10 @@ cat >"$FAKE_BIN/go" <<'EOF_GO'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "$*" == *"cmd/tokenpop gen"* ]]; then
+  if [[ "${GPM_ALLOW_STDOUT_PRIVATE_KEYS:-}" != "1" ]]; then
+    echo "tokenpop gen should opt into stdout private keys" >&2
+    exit 1
+  fi
   printf '{"private_key":"priv-test","public_key":"pub-test"}\n'
   exit 0
 fi
@@ -114,12 +120,41 @@ exit 1
 EOF_CURL
 chmod +x "$FAKE_BIN/go" "$FAKE_BIN/curl"
 
+set +e
 PATH="$FAKE_BIN:$PATH" \
 ./scripts/profile_default_gate_token_probe.sh \
-  --directory-url 'https://user:pw-secret@dir-a.example:8081?token=dir-secret' \
-  --issuer-url 'https://user:pw-secret@issuer-a.example:8082?token=issuer-secret' \
-  --exit-url 'https://user:pw-secret@exit-a.example:8084?token=exit-secret' \
+  --directory-url 'http://dir-a.example:8081' \
+  --issuer-url 'http://issuer-a.example:8082' \
+  --exit-url 'http://exit-a.example:8084' \
   --campaign-subject 'inv-token-probe-secret-subject' \
+  --reports-dir "$TMP_DIR/reports_reject" \
+  --summary-json "$TMP_DIR/reject_remote_http_summary.json" \
+  >"$TMP_DIR/profile_default_gate_token_probe_reject_remote_http.log" 2>&1
+reject_remote_http_rc=$?
+set -e
+if [[ "$reject_remote_http_rc" -ne 2 ]]; then
+  echo "token probe should reject remote http URLs unless explicitly allowed"
+  cat "$TMP_DIR/profile_default_gate_token_probe_reject_remote_http.log"
+  exit 1
+fi
+if ! rg -q 'must use https:// for non-loopback hosts' "$TMP_DIR/profile_default_gate_token_probe_reject_remote_http.log"; then
+  echo "token probe remote-http rejection message missing"
+  cat "$TMP_DIR/profile_default_gate_token_probe_reject_remote_http.log"
+  exit 1
+fi
+if ! rg -q 'pass --allow-insecure-remote-http 1 only for explicit lab HTTP probes' "$TMP_DIR/profile_default_gate_token_probe_reject_remote_http.log"; then
+  echo "token probe remote-http lab opt-in hint missing"
+  cat "$TMP_DIR/profile_default_gate_token_probe_reject_remote_http.log"
+  exit 1
+fi
+
+PATH="$FAKE_BIN:$PATH" \
+./scripts/profile_default_gate_token_probe.sh \
+  --directory-url 'http://user:pw-secret@dir-a.example:8081?token=dir-secret' \
+  --issuer-url 'http://user:pw-secret@issuer-a.example:8082?token=issuer-secret' \
+  --exit-url 'http://user:pw-secret@exit-a.example:8084?token=exit-secret' \
+  --campaign-subject 'inv-token-probe-secret-subject' \
+  --allow-insecure-remote-http 1 \
   --reports-dir "$TMP_DIR/reports" \
   --summary-json "$REAL_SUMMARY" \
   --print-summary-json 1 \
@@ -135,10 +170,11 @@ for forbidden in 'pw-secret' 'token=' 'inv-token-probe-secret-subject'; do
 done
 if ! jq -e '
   .status == "pass"
-  and .inputs.directory_url == "https://dir-a.example:8081"
-  and .inputs.issuer_url == "https://issuer-a.example:8082"
-  and .inputs.exit_url == "https://exit-a.example:8084"
+  and .inputs.directory_url == "http://dir-a.example:8081"
+  and .inputs.issuer_url == "http://issuer-a.example:8082"
+  and .inputs.exit_url == "http://exit-a.example:8084"
   and .inputs.campaign_subject == "[redacted]"
+  and .inputs.allow_insecure_remote_http == true
 ' "$REAL_SUMMARY" >/dev/null; then
   echo "token probe summary missing expected redacted inputs"
   cat "$REAL_SUMMARY"

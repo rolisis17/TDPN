@@ -55,6 +55,8 @@ Usage:
     [--campaign-start-local-stack auto|0|1] \
     [--campaign-profiles CSV] \
     [--campaign-runs N] \
+    [--campaign-profile-rounds N] \
+    [--campaign-profile-timeout-sec N] \
     [--campaign-live-evidence [0|1]] \
     [--campaign-live-evidence-udp-inject [0|1]] \
     [--campaign-timeout-sec N] \
@@ -737,6 +739,8 @@ show_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SHOW_JSON:-0}"
 print_summary_json="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_PRINT_SUMMARY_JSON:-0}"
 campaign_timeout_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_TIMEOUT_SEC:-0}"
 campaign_runs="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_RUNS:-}"
+campaign_profile_rounds="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_PROFILE_ROUNDS:-}"
+campaign_profile_timeout_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_PROFILE_TIMEOUT_SEC:-}"
 campaign_heartbeat_interval_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_HEARTBEAT_INTERVAL_SEC:-15}"
 campaign_endpoint_preflight_timeout_sec="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_ENDPOINT_PREFLIGHT_TIMEOUT_SEC:-4}"
 campaign_allow_insecure_remote_http="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_ALLOW_INSECURE_REMOTE_HTTP:-0}"
@@ -1174,6 +1178,28 @@ while [[ $# -gt 0 ]]; do
       campaign_runs="${2:-}"
       shift 2
       ;;
+    --campaign-runs=*)
+      campaign_runs="${1#--campaign-runs=}"
+      shift
+      ;;
+    --campaign-profile-rounds|--campaign-rounds-per-profile)
+      require_flag_value_or_die "$1" "${2:-}"
+      campaign_profile_rounds="$(require_non_empty_value_or_die "$1" "${2:-}")"
+      shift 2
+      ;;
+    --campaign-profile-rounds=*|--campaign-rounds-per-profile=*)
+      campaign_profile_rounds="$(require_non_empty_value_or_die "${1%%=*}" "${1#*=}")"
+      shift
+      ;;
+    --campaign-profile-timeout-sec|--campaign-run-timeout-sec)
+      require_flag_value_or_die "$1" "${2:-}"
+      campaign_profile_timeout_sec="$(require_non_empty_value_or_die "$1" "${2:-}")"
+      shift 2
+      ;;
+    --campaign-profile-timeout-sec=*|--campaign-run-timeout-sec=*)
+      campaign_profile_timeout_sec="$(require_non_empty_value_or_die "${1%%=*}" "${1#*=}")"
+      shift
+      ;;
     --campaign-live-evidence)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         campaign_live_evidence="${2:-}"
@@ -1300,6 +1326,22 @@ if [[ -n "$campaign_runs" && ! "$campaign_runs" =~ ^[0-9]+$ ]]; then
 fi
 if [[ -n "$campaign_runs" ]] && ((campaign_runs < 1)); then
   echo "--campaign-runs must be >= 1"
+  exit 2
+fi
+if [[ -n "$campaign_profile_rounds" && ! "$campaign_profile_rounds" =~ ^[0-9]+$ ]]; then
+  echo "--campaign-profile-rounds must be a positive integer"
+  exit 2
+fi
+if [[ -n "$campaign_profile_rounds" ]] && ((campaign_profile_rounds < 1)); then
+  echo "--campaign-profile-rounds must be >= 1"
+  exit 2
+fi
+if [[ -n "$campaign_profile_timeout_sec" && ! "$campaign_profile_timeout_sec" =~ ^[0-9]+$ ]]; then
+  echo "--campaign-profile-timeout-sec must be a positive integer"
+  exit 2
+fi
+if [[ -n "$campaign_profile_timeout_sec" ]] && ((campaign_profile_timeout_sec < 1)); then
+  echo "--campaign-profile-timeout-sec must be >= 1"
   exit 2
 fi
 if [[ -n "$campaign_min_sources" ]] && { ! [[ "$campaign_min_sources" =~ ^[0-9]+$ ]] || ((campaign_min_sources < 1)); }; then
@@ -1529,6 +1571,8 @@ campaign_subject_effective="$campaign_subject"
 campaign_anon_cred_effective="$campaign_anon_cred"
 campaign_start_local_stack_effective="$campaign_start_local_stack"
 campaign_profiles_effective="$campaign_profiles"
+campaign_profile_rounds_effective="$campaign_profile_rounds"
+campaign_profile_timeout_sec_effective="$campaign_profile_timeout_sec"
 campaign_live_evidence_effective="$campaign_live_evidence"
 campaign_live_evidence_udp_inject_effective="$campaign_live_evidence_udp_inject"
 campaign_min_sources_effective="$campaign_min_sources"
@@ -1643,6 +1687,12 @@ build_campaign_cmd() {
   fi
   if [[ -n "$campaign_profiles_effective" ]]; then
     campaign_cmd+=(--profiles "$campaign_profiles_effective")
+  fi
+  if [[ -n "$campaign_profile_rounds_effective" ]]; then
+    campaign_cmd+=(--rounds "$campaign_profile_rounds_effective")
+  fi
+  if [[ -n "$campaign_profile_timeout_sec_effective" ]]; then
+    campaign_cmd+=(--timeout-sec "$campaign_profile_timeout_sec_effective")
   fi
   if [[ -n "$campaign_live_evidence_effective" ]]; then
     campaign_cmd+=(--live-evidence "$campaign_live_evidence_effective")
@@ -2275,6 +2325,10 @@ jq -n \
   --arg campaign_start_local_stack_effective "$campaign_start_local_stack_effective" \
   --arg campaign_profiles "$campaign_profiles" \
   --arg campaign_profiles_effective "$campaign_profiles_effective" \
+  --arg campaign_profile_rounds "$campaign_profile_rounds" \
+  --arg campaign_profile_rounds_effective "$campaign_profile_rounds_effective" \
+  --arg campaign_profile_timeout_sec "$campaign_profile_timeout_sec" \
+  --arg campaign_profile_timeout_sec_effective "$campaign_profile_timeout_sec_effective" \
   --arg campaign_live_evidence "$campaign_live_evidence" \
   --arg campaign_live_evidence_effective "$campaign_live_evidence_effective" \
   --arg campaign_live_evidence_udp_inject "$campaign_live_evidence_udp_inject" \
@@ -2379,6 +2433,8 @@ jq -n \
         anon_cred_configured: ($campaign_anon_cred_configured == "1"),
         start_local_stack: (if $campaign_start_local_stack == "" then null else $campaign_start_local_stack end),
         profiles: (if $campaign_profiles == "" then null else $campaign_profiles end),
+        profile_rounds: (if $campaign_profile_rounds == "" then null else ($campaign_profile_rounds | tonumber) end),
+        profile_timeout_sec: (if $campaign_profile_timeout_sec == "" then null else ($campaign_profile_timeout_sec | tonumber) end),
         live_evidence: (if $campaign_live_evidence == "" then null else ($campaign_live_evidence == "1") end),
         live_evidence_udp_inject: (if $campaign_live_evidence_udp_inject == "" then null else ($campaign_live_evidence_udp_inject == "1") end),
         min_sources: (if $campaign_min_sources == "" then null else ($campaign_min_sources | tonumber) end),
@@ -2400,6 +2456,8 @@ jq -n \
         anon_cred_configured: ($campaign_anon_cred_effective_configured == "1"),
         start_local_stack: (if $campaign_start_local_stack_effective == "" then null else $campaign_start_local_stack_effective end),
         profiles: (if $campaign_profiles_effective == "" then null else $campaign_profiles_effective end),
+        profile_rounds: (if $campaign_profile_rounds_effective == "" then null else ($campaign_profile_rounds_effective | tonumber) end),
+        profile_timeout_sec: (if $campaign_profile_timeout_sec_effective == "" then null else ($campaign_profile_timeout_sec_effective | tonumber) end),
         live_evidence: (if $campaign_live_evidence_effective == "" then null else ($campaign_live_evidence_effective == "1") end),
         live_evidence_udp_inject: (if $campaign_live_evidence_udp_inject_effective == "" then null else ($campaign_live_evidence_udp_inject_effective == "1") end),
         min_sources: (if $campaign_min_sources_effective == "" then null else ($campaign_min_sources_effective | tonumber) end),
@@ -2411,6 +2469,8 @@ jq -n \
       },
       campaign_refresh_runtime: {
         campaign_runs: (if $campaign_runs_effective == "" then null else ($campaign_runs_effective | tonumber) end),
+        profile_rounds: (if $campaign_profile_rounds_effective == "" then null else ($campaign_profile_rounds_effective | tonumber) end),
+        profile_timeout_sec: (if $campaign_profile_timeout_sec_effective == "" then null else ($campaign_profile_timeout_sec_effective | tonumber) end),
         timeout_sec: ($campaign_timeout_sec | tonumber),
         heartbeat_interval_sec: ($campaign_heartbeat_interval_sec | tonumber)
       },

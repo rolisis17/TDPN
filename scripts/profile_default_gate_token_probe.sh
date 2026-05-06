@@ -12,6 +12,7 @@ Usage:
     --issuer-url URL \
     --exit-url URL \
     --campaign-subject INVITE_KEY \
+    [--allow-insecure-remote-http [0|1]] \
     [--reports-dir DIR] \
     [--connect-timeout-sec N] \
     [--max-time-sec N] \
@@ -26,6 +27,8 @@ Purpose:
 
 Notes:
   - Probe intentionally omits session_id in path-open request.
+  - Remote http:// URLs fail closed by default; use
+    --allow-insecure-remote-http 1 only for explicit lab HTTP probes.
   - A response reason like "missing session_id" indicates token proof passed.
   - A response reason like "token proof invalid" indicates key-binding mismatch.
 USAGE
@@ -146,8 +149,9 @@ require_secure_url_for_remote() {
     echo "$label must use http:// or https://"
     exit 2
   fi
-  if [[ "$scheme" == "http" ]] && ! is_loopback_host "$host"; then
+  if [[ "$scheme" == "http" ]] && ! is_loopback_host "$host" && [[ "$allow_insecure_remote_http" != "1" ]]; then
     echo "$label must use https:// for non-loopback hosts (got: $(sanitize_url_for_artifact "$raw_url"))"
+    echo "pass --allow-insecure-remote-http 1 only for explicit lab HTTP probes"
     exit 2
   fi
 }
@@ -164,6 +168,7 @@ campaign_subject="${CAMPAIGN_SUBJECT:-${INVITE_KEY:-}}"
 reports_dir="${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}"
 connect_timeout_sec="${PROFILE_DEFAULT_GATE_TOKEN_PROBE_CONNECT_TIMEOUT_SEC:-4}"
 max_time_sec="${PROFILE_DEFAULT_GATE_TOKEN_PROBE_MAX_TIME_SEC:-12}"
+allow_insecure_remote_http="${PROFILE_DEFAULT_GATE_TOKEN_PROBE_ALLOW_INSECURE_REMOTE_HTTP:-0}"
 summary_json=""
 print_summary_json="${PROFILE_DEFAULT_GATE_TOKEN_PROBE_PRINT_SUMMARY_JSON:-0}"
 show_json="${PROFILE_DEFAULT_GATE_TOKEN_PROBE_SHOW_JSON:-0}"
@@ -200,6 +205,19 @@ while [[ $# -gt 0 ]]; do
       ;;
     --campaign-subject=*|--subject=*)
       campaign_subject="${1#*=}"
+      shift
+      ;;
+    --allow-insecure-remote-http|--allow-remote-http-probe)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_insecure_remote_http="${2:-}"
+        shift 2
+      else
+        allow_insecure_remote_http="1"
+        shift
+      fi
+      ;;
+    --allow-insecure-remote-http=*|--allow-remote-http-probe=*)
+      allow_insecure_remote_http="${1#*=}"
       shift
       ;;
     --reports-dir)
@@ -274,6 +292,7 @@ done
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--show-json" "$show_json"
+bool_arg_or_die "--allow-insecure-remote-http" "$allow_insecure_remote_http"
 
 if ! [[ "$connect_timeout_sec" =~ ^[0-9]+$ ]] || ((connect_timeout_sec <= 0)); then
   echo "--connect-timeout-sec must be > 0"
@@ -348,7 +367,7 @@ token_proof_verified=false
 
 generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-key_json="$(go run ./cmd/tokenpop gen --show-private-key)"
+key_json="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)"
 token_proof_priv_key="$(printf '%s' "$key_json" | jq -r '.private_key // empty')"
 generated_pop_pub_key="$(printf '%s' "$key_json" | jq -r '.public_key // empty')"
 token_proof_priv_key_file=""
@@ -539,6 +558,7 @@ jq -n \
   --arg issuer_url "$issuer_url_artifact" \
   --arg exit_url "$exit_url_artifact" \
   --arg campaign_subject "$campaign_subject_redacted" \
+  --argjson allow_insecure_remote_http "$allow_insecure_remote_http" \
   --arg exit_id "$exit_id" \
   --arg exit_region "$exit_region" \
   --argjson rc "$rc" \
@@ -567,6 +587,7 @@ jq -n \
       issuer_url: $issuer_url,
       exit_url: $exit_url,
       campaign_subject: $campaign_subject,
+      allow_insecure_remote_http: ($allow_insecure_remote_http == 1),
       connect_timeout_sec: $connect_timeout_sec,
       max_time_sec: $max_time_sec
     },

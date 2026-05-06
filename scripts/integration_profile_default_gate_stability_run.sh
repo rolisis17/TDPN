@@ -44,6 +44,13 @@ allow_remote_http_probe=""
 campaign_live_evidence=""
 require_external_live_evidence=""
 campaign_live_evidence_udp_inject=""
+campaign_execution_mode=""
+campaign_runs=""
+campaign_profile_rounds=""
+campaign_profile_timeout_sec=""
+require_min_runs_total=""
+require_min_runs_with_summary=""
+require_trend_source=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
@@ -116,6 +123,62 @@ while [[ $# -gt 0 ]]; do
       ;;
     --campaign-live-evidence-udp-inject=*)
       campaign_live_evidence_udp_inject="${1#*=}"
+      shift
+      ;;
+    --campaign-execution-mode)
+      campaign_execution_mode="${2:-}"
+      shift 2
+      ;;
+    --campaign-execution-mode=*)
+      campaign_execution_mode="${1#*=}"
+      shift
+      ;;
+    --campaign-runs)
+      campaign_runs="${2:-}"
+      shift 2
+      ;;
+    --campaign-runs=*)
+      campaign_runs="${1#*=}"
+      shift
+      ;;
+    --campaign-profile-rounds)
+      campaign_profile_rounds="${2:-}"
+      shift 2
+      ;;
+    --campaign-profile-rounds=*)
+      campaign_profile_rounds="${1#*=}"
+      shift
+      ;;
+    --campaign-profile-timeout-sec)
+      campaign_profile_timeout_sec="${2:-}"
+      shift 2
+      ;;
+    --campaign-profile-timeout-sec=*)
+      campaign_profile_timeout_sec="${1#*=}"
+      shift
+      ;;
+    --require-min-runs-total)
+      require_min_runs_total="${2:-}"
+      shift 2
+      ;;
+    --require-min-runs-total=*)
+      require_min_runs_total="${1#*=}"
+      shift
+      ;;
+    --require-min-runs-with-summary)
+      require_min_runs_with_summary="${2:-}"
+      shift 2
+      ;;
+    --require-min-runs-with-summary=*)
+      require_min_runs_with_summary="${1#*=}"
+      shift
+      ;;
+    --require-trend-source)
+      require_trend_source="${2:-}"
+      shift 2
+      ;;
+    --require-trend-source=*)
+      require_trend_source="${1#*=}"
       shift
       ;;
     *)
@@ -200,11 +263,18 @@ jq -n \
   }' >"$summary_json"
 
 if [[ -n "$capture_file" ]]; then
-  printf 'profile-default-gate-live\trun=%s\thost_a=%s\thost_b=%s\tsubject=%s\tallow_remote_http_probe=%s\tcampaign_live_evidence=%s\trequire_external_live_evidence=%s\tcampaign_live_evidence_udp_inject=%s\treports_dir=%s\tsummary_json=%s\n' \
+  printf 'profile-default-gate-live\trun=%s\thost_a=%s\thost_b=%s\tsubject=%s\tcampaign_execution_mode=%s\tcampaign_runs=%s\tcampaign_profile_rounds=%s\tcampaign_profile_timeout_sec=%s\trequire_min_runs_total=%s\trequire_min_runs_with_summary=%s\trequire_trend_source=%s\tallow_remote_http_probe=%s\tcampaign_live_evidence=%s\trequire_external_live_evidence=%s\tcampaign_live_evidence_udp_inject=%s\treports_dir=%s\tsummary_json=%s\n' \
     "$run_index" \
     "$host_a" \
     "$host_b" \
     "$campaign_subject" \
+    "$campaign_execution_mode" \
+    "$campaign_runs" \
+    "$campaign_profile_rounds" \
+    "$campaign_profile_timeout_sec" \
+    "$require_min_runs_total" \
+    "$require_min_runs_with_summary" \
+    "$require_trend_source" \
     "$allow_remote_http_probe" \
     "$campaign_live_evidence" \
     "$require_external_live_evidence" \
@@ -233,6 +303,13 @@ bash "$SCRIPT_UNDER_TEST" \
   --campaign-subject "inv-stable" \
   --runs 3 \
   --campaign-timeout-sec 2400 \
+  --campaign-runs 2 \
+  --campaign-profile-rounds 1 \
+  --campaign-profile-timeout-sec 80 \
+  --campaign-require-min-runs-total 1 \
+  --campaign-require-min-runs-with-summary 1 \
+  --campaign-require-trend-source vote_fallback,policy_reliability_latency \
+  --campaign-execution-mode local \
   --allow-remote-http-probe 1 \
   --sleep-between-sec 0 \
   --reports-dir "$STABLE_REPORTS_DIR" \
@@ -267,6 +344,13 @@ if ! jq -e '
   and .modal_decision_count == 3
   and (.modal_decision_support_rate_pct >= 99.9)
   and .decision_consensus == true
+  and .inputs.campaign_execution_mode == "local"
+  and .inputs.campaign_runs == 2
+  and .inputs.campaign_profile_rounds == 1
+  and .inputs.campaign_profile_timeout_sec == 80
+  and .inputs.campaign_check_policy.require_min_runs_total == 1
+  and .inputs.campaign_check_policy.require_min_runs_with_summary == 1
+  and .inputs.campaign_check_policy.require_trend_source == "vote_fallback,policy_reliability_latency"
   and .inputs.campaign_live_evidence == false
   and .diagnostics.evidence_state == "complete"
   and .diagnostics.selection_policy_state == "consistent"
@@ -286,6 +370,11 @@ if ! jq -e '
   cat "$STABLE_SUMMARY"
   exit 1
 fi
+if ! grep -F $'campaign_runs=2\tcampaign_profile_rounds=1\tcampaign_profile_timeout_sec=80\trequire_min_runs_total=1\trequire_min_runs_with_summary=1\trequire_trend_source=vote_fallback,policy_reliability_latency' "$STABLE_CAPTURE" >/dev/null 2>&1; then
+  echo "expected stable run to forward campaign run/profile/check policy knobs to live gate"
+  cat "$STABLE_CAPTURE"
+  exit 1
+fi
 stable_counter_value="$(cat "$STABLE_COUNTER" 2>/dev/null || echo "0")"
 if [[ "$stable_counter_value" != "3" ]]; then
   echo "expected stable fake easy_node run count to be 3, got: $stable_counter_value"
@@ -294,6 +383,11 @@ if [[ "$stable_counter_value" != "3" ]]; then
 fi
 if ! grep -q $'allow_remote_http_probe=1' "$STABLE_CAPTURE"; then
   echo "expected allow-remote-http-probe forwarding in stable path"
+  cat "$STABLE_CAPTURE"
+  exit 1
+fi
+if ! grep -q $'campaign_execution_mode=local' "$STABLE_CAPTURE"; then
+  echo "expected campaign-execution-mode forwarding in stable path"
   cat "$STABLE_CAPTURE"
   exit 1
 fi

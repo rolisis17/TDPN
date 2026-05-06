@@ -16,6 +16,13 @@ Usage:
     [--campaign-subject ID | --subject ID] \
     [--runs N] \
     [--campaign-timeout-sec N] \
+    [--campaign-runs N] \
+    [--campaign-profile-rounds N] \
+    [--campaign-profile-timeout-sec N] \
+    [--campaign-require-min-runs-total N] \
+    [--campaign-require-min-runs-with-summary N] \
+    [--campaign-require-trend-source CSV] \
+    [--campaign-execution-mode docker|local] \
     [--campaign-live-evidence [0|1]] \
     [--require-external-live-evidence [0|1]] \
     [--campaign-live-evidence-udp-inject [0|1]] \
@@ -315,6 +322,13 @@ campaign_subject_from_campaign=""
 campaign_subject_from_alias=""
 runs="${PROFILE_DEFAULT_GATE_STABILITY_RUNS:-3}"
 campaign_timeout_sec="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_TIMEOUT_SEC:-2400}"
+campaign_runs="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_RUNS:-}"
+campaign_profile_rounds="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_PROFILE_ROUNDS:-}"
+campaign_profile_timeout_sec="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_PROFILE_TIMEOUT_SEC:-}"
+campaign_require_min_runs_total="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_REQUIRE_MIN_RUNS_TOTAL:-${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_MIN_RUNS_TOTAL:-}}"
+campaign_require_min_runs_with_summary="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_REQUIRE_MIN_RUNS_WITH_SUMMARY:-${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_MIN_RUNS_WITH_SUMMARY:-}}"
+campaign_require_trend_source="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_REQUIRE_TREND_SOURCE:-${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_REQUIRE_TREND_SOURCE:-}}"
+campaign_execution_mode="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_EXECUTION_MODE:-}"
 campaign_live_evidence="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_LIVE_EVIDENCE:-0}"
 require_external_live_evidence="${PROFILE_DEFAULT_GATE_STABILITY_REQUIRE_EXTERNAL_LIVE_EVIDENCE:-0}"
 campaign_live_evidence_udp_inject="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_LIVE_EVIDENCE_UDP_INJECT:-}"
@@ -405,6 +419,69 @@ while [[ $# -gt 0 ]]; do
       ;;
     --campaign-timeout-sec=*)
       campaign_timeout_sec="${1#*=}"
+      shift
+      ;;
+    --campaign-runs)
+      require_value_or_die "$1" "$#"
+      campaign_runs="${2:-}"
+      shift 2
+      ;;
+    --campaign-runs=*)
+      campaign_runs="${1#*=}"
+      shift
+      ;;
+    --campaign-profile-rounds|--campaign-rounds-per-profile)
+      require_value_or_die "$1" "$#"
+      campaign_profile_rounds="${2:-}"
+      shift 2
+      ;;
+    --campaign-profile-rounds=*|--campaign-rounds-per-profile=*)
+      campaign_profile_rounds="${1#*=}"
+      shift
+      ;;
+    --campaign-profile-timeout-sec|--campaign-run-timeout-sec)
+      require_value_or_die "$1" "$#"
+      campaign_profile_timeout_sec="${2:-}"
+      shift 2
+      ;;
+    --campaign-profile-timeout-sec=*|--campaign-run-timeout-sec=*)
+      campaign_profile_timeout_sec="${1#*=}"
+      shift
+      ;;
+    --campaign-require-min-runs-total)
+      require_value_or_die "$1" "$#"
+      campaign_require_min_runs_total="${2:-}"
+      shift 2
+      ;;
+    --campaign-require-min-runs-total=*)
+      campaign_require_min_runs_total="${1#*=}"
+      shift
+      ;;
+    --campaign-require-min-runs-with-summary)
+      require_value_or_die "$1" "$#"
+      campaign_require_min_runs_with_summary="${2:-}"
+      shift 2
+      ;;
+    --campaign-require-min-runs-with-summary=*)
+      campaign_require_min_runs_with_summary="${1#*=}"
+      shift
+      ;;
+    --campaign-require-trend-source)
+      require_value_or_die "$1" "$#"
+      campaign_require_trend_source="${2:-}"
+      shift 2
+      ;;
+    --campaign-require-trend-source=*)
+      campaign_require_trend_source="${1#*=}"
+      shift
+      ;;
+    --campaign-execution-mode)
+      require_value_or_die "$1" "$#"
+      campaign_execution_mode="${2:-}"
+      shift 2
+      ;;
+    --campaign-execution-mode=*)
+      campaign_execution_mode="${1#*=}"
       shift
       ;;
     --campaign-live-evidence)
@@ -730,6 +807,13 @@ campaign_subject_from_campaign="$(trim "$campaign_subject_from_campaign")"
 campaign_subject_from_alias="$(trim "$campaign_subject_from_alias")"
 runs="$(trim "$runs")"
 campaign_timeout_sec="$(trim "$campaign_timeout_sec")"
+campaign_runs="$(trim "$campaign_runs")"
+campaign_profile_rounds="$(trim "$campaign_profile_rounds")"
+campaign_profile_timeout_sec="$(trim "$campaign_profile_timeout_sec")"
+campaign_require_min_runs_total="$(trim "$campaign_require_min_runs_total")"
+campaign_require_min_runs_with_summary="$(trim "$campaign_require_min_runs_with_summary")"
+campaign_require_trend_source="$(trim "$campaign_require_trend_source")"
+campaign_execution_mode="$(trim "$campaign_execution_mode")"
 campaign_live_evidence="$(trim "$campaign_live_evidence")"
 require_external_live_evidence="$(trim "$require_external_live_evidence")"
 campaign_live_evidence_udp_inject="$(trim "$campaign_live_evidence_udp_inject")"
@@ -792,6 +876,25 @@ fi
 
 int_arg_or_die "--runs" "$runs"
 int_arg_or_die "--campaign-timeout-sec" "$campaign_timeout_sec"
+if [[ -n "$campaign_runs" ]]; then
+  int_arg_or_die "--campaign-runs" "$campaign_runs"
+fi
+if [[ -n "$campaign_profile_rounds" ]]; then
+  int_arg_or_die "--campaign-profile-rounds" "$campaign_profile_rounds"
+fi
+if [[ -n "$campaign_profile_timeout_sec" ]]; then
+  int_arg_or_die "--campaign-profile-timeout-sec" "$campaign_profile_timeout_sec"
+fi
+if [[ -n "$campaign_require_min_runs_total" ]]; then
+  int_arg_or_die "--campaign-require-min-runs-total" "$campaign_require_min_runs_total"
+fi
+if [[ -n "$campaign_require_min_runs_with_summary" ]]; then
+  int_arg_or_die "--campaign-require-min-runs-with-summary" "$campaign_require_min_runs_with_summary"
+fi
+if [[ -n "$campaign_execution_mode" && "$campaign_execution_mode" != "docker" && "$campaign_execution_mode" != "local" ]]; then
+  echo "--campaign-execution-mode must be docker or local"
+  exit 2
+fi
 bool_arg_or_die "--campaign-live-evidence" "$campaign_live_evidence"
 bool_arg_or_die "--require-external-live-evidence" "$require_external_live_evidence"
 if [[ -n "$campaign_live_evidence_udp_inject" ]]; then
@@ -839,6 +942,26 @@ if (( campaign_timeout_sec < 1 )); then
   echo "--campaign-timeout-sec must be >= 1"
   exit 2
 fi
+if [[ -n "$campaign_runs" ]] && ((campaign_runs < 1)); then
+  echo "--campaign-runs must be >= 1"
+  exit 2
+fi
+if [[ -n "$campaign_profile_rounds" ]] && ((campaign_profile_rounds < 1)); then
+  echo "--campaign-profile-rounds must be >= 1"
+  exit 2
+fi
+if [[ -n "$campaign_profile_timeout_sec" ]] && ((campaign_profile_timeout_sec < 1)); then
+  echo "--campaign-profile-timeout-sec must be >= 1"
+  exit 2
+fi
+if [[ -n "$campaign_require_min_runs_total" ]] && ((campaign_require_min_runs_total < 1)); then
+  echo "--campaign-require-min-runs-total must be >= 1"
+  exit 2
+fi
+if [[ -n "$campaign_require_min_runs_with_summary" ]] && ((campaign_require_min_runs_with_summary < 1)); then
+  echo "--campaign-require-min-runs-with-summary must be >= 1"
+  exit 2
+fi
 if (( min_campaign_timeout_sec > 0 && campaign_timeout_sec < min_campaign_timeout_sec )) && [[ "$allow_short_campaign_timeout" != "1" ]]; then
   echo "profile-default-gate-stability-cycle failed: --campaign-timeout-sec $campaign_timeout_sec is below the live stability floor ($min_campaign_timeout_sec)"
   echo "hint: use --campaign-timeout-sec 2400 for the default live campaign, or set PROFILE_DEFAULT_GATE_STABILITY_ALLOW_SHORT_CAMPAIGN_TIMEOUT=1 for deliberate timeout tests"
@@ -878,6 +1001,27 @@ run_cmd=(
   --summary-json "$run_summary_json"
   --print-summary-json 0
 )
+if [[ -n "$campaign_execution_mode" ]]; then
+  run_cmd+=(--campaign-execution-mode "$campaign_execution_mode")
+fi
+if [[ -n "$campaign_runs" ]]; then
+  run_cmd+=(--campaign-runs "$campaign_runs")
+fi
+if [[ -n "$campaign_profile_rounds" ]]; then
+  run_cmd+=(--campaign-profile-rounds "$campaign_profile_rounds")
+fi
+if [[ -n "$campaign_profile_timeout_sec" ]]; then
+  run_cmd+=(--campaign-profile-timeout-sec "$campaign_profile_timeout_sec")
+fi
+if [[ -n "$campaign_require_min_runs_total" ]]; then
+  run_cmd+=(--campaign-require-min-runs-total "$campaign_require_min_runs_total")
+fi
+if [[ -n "$campaign_require_min_runs_with_summary" ]]; then
+  run_cmd+=(--campaign-require-min-runs-with-summary "$campaign_require_min_runs_with_summary")
+fi
+if [[ -n "$campaign_require_trend_source" ]]; then
+  run_cmd+=(--campaign-require-trend-source "$campaign_require_trend_source")
+fi
 if [[ -n "$campaign_live_evidence_udp_inject" ]]; then
   run_cmd+=(--campaign-live-evidence-udp-inject "$campaign_live_evidence_udp_inject")
 fi
@@ -1311,8 +1455,36 @@ rerun_policy_args_template="--require-external-live-evidence ${require_external_
 if [[ -n "$campaign_live_evidence_udp_inject" ]]; then
   rerun_policy_args_template="$rerun_policy_args_template --campaign-live-evidence-udp-inject ${campaign_live_evidence_udp_inject}"
 fi
-rerun_cycle_command_template="./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --campaign-live-evidence ${campaign_live_evidence} ${rerun_policy_args_template} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${summary_json} --print-summary-json 1"
-rerun_run_command_template="./scripts/easy_node.sh profile-default-gate-stability-run --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --campaign-live-evidence ${campaign_live_evidence} ${rerun_policy_args_template} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${run_summary_json} --print-summary-json 1"
+rerun_execution_mode_arg=""
+if [[ -n "$campaign_execution_mode" ]]; then
+  rerun_execution_mode_arg=" --campaign-execution-mode ${campaign_execution_mode}"
+fi
+rerun_campaign_runs_arg=""
+if [[ -n "$campaign_runs" ]]; then
+  rerun_campaign_runs_arg=" --campaign-runs ${campaign_runs}"
+fi
+rerun_campaign_profile_rounds_arg=""
+if [[ -n "$campaign_profile_rounds" ]]; then
+  rerun_campaign_profile_rounds_arg=" --campaign-profile-rounds ${campaign_profile_rounds}"
+fi
+rerun_campaign_profile_timeout_arg=""
+if [[ -n "$campaign_profile_timeout_sec" ]]; then
+  rerun_campaign_profile_timeout_arg=" --campaign-profile-timeout-sec ${campaign_profile_timeout_sec}"
+fi
+rerun_campaign_require_min_runs_total_arg=""
+if [[ -n "$campaign_require_min_runs_total" ]]; then
+  rerun_campaign_require_min_runs_total_arg=" --campaign-require-min-runs-total ${campaign_require_min_runs_total}"
+fi
+rerun_campaign_require_min_runs_with_summary_arg=""
+if [[ -n "$campaign_require_min_runs_with_summary" ]]; then
+  rerun_campaign_require_min_runs_with_summary_arg=" --campaign-require-min-runs-with-summary ${campaign_require_min_runs_with_summary}"
+fi
+rerun_campaign_require_trend_source_arg=""
+if [[ -n "$campaign_require_trend_source" ]]; then
+  rerun_campaign_require_trend_source_arg=" --campaign-require-trend-source ${campaign_require_trend_source}"
+fi
+rerun_cycle_command_template="./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec}${rerun_campaign_runs_arg}${rerun_campaign_profile_rounds_arg}${rerun_campaign_profile_timeout_arg}${rerun_campaign_require_min_runs_total_arg}${rerun_campaign_require_min_runs_with_summary_arg}${rerun_campaign_require_trend_source_arg}${rerun_execution_mode_arg} --campaign-live-evidence ${campaign_live_evidence} ${rerun_policy_args_template} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${summary_json} --print-summary-json 1"
+rerun_run_command_template="./scripts/easy_node.sh profile-default-gate-stability-run --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec}${rerun_campaign_runs_arg}${rerun_campaign_profile_rounds_arg}${rerun_campaign_profile_timeout_arg}${rerun_campaign_require_min_runs_total_arg}${rerun_campaign_require_min_runs_with_summary_arg}${rerun_campaign_require_trend_source_arg}${rerun_execution_mode_arg} --campaign-live-evidence ${campaign_live_evidence} ${rerun_policy_args_template} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${run_summary_json} --print-summary-json 1"
 rerun_check_command_template="./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json ${run_summary_json} --summary-json ${check_summary_json} --print-summary-json 1"
 
 jq -n \
@@ -1328,6 +1500,13 @@ jq -n \
   --arg check_command "$check_command_display" \
   --arg host_a "$host_a" \
   --arg host_b "$host_b" \
+  --arg campaign_runs "$campaign_runs" \
+  --arg campaign_profile_rounds "$campaign_profile_rounds" \
+  --arg campaign_profile_timeout_sec "$campaign_profile_timeout_sec" \
+  --arg campaign_require_min_runs_total "$campaign_require_min_runs_total" \
+  --arg campaign_require_min_runs_with_summary "$campaign_require_min_runs_with_summary" \
+  --arg campaign_require_trend_source "$campaign_require_trend_source" \
+  --arg campaign_execution_mode "$campaign_execution_mode" \
   --arg campaign_subject "$campaign_subject_display" \
   --arg reports_dir "$reports_dir" \
   --arg run_stage_status "$run_stage_status" \
@@ -1416,6 +1595,15 @@ jq -n \
       run: {
         runs: $runs,
         campaign_timeout_sec: $campaign_timeout_sec,
+        campaign_runs: (if $campaign_runs == "" then null else ($campaign_runs | tonumber) end),
+        campaign_profile_rounds: (if $campaign_profile_rounds == "" then null else ($campaign_profile_rounds | tonumber) end),
+        campaign_profile_timeout_sec: (if $campaign_profile_timeout_sec == "" then null else ($campaign_profile_timeout_sec | tonumber) end),
+        campaign_check_policy: {
+          require_min_runs_total: (if $campaign_require_min_runs_total == "" then null else ($campaign_require_min_runs_total | tonumber) end),
+          require_min_runs_with_summary: (if $campaign_require_min_runs_with_summary == "" then null else ($campaign_require_min_runs_with_summary | tonumber) end),
+          require_trend_source: (if $campaign_require_trend_source == "" then null else $campaign_require_trend_source end)
+        },
+        campaign_execution_mode: (if $campaign_execution_mode == "" then null else $campaign_execution_mode end),
         campaign_live_evidence: ($campaign_live_evidence == 1),
         require_external_live_evidence: ($require_external_live_evidence == 1),
         campaign_live_evidence_udp_inject: (if $campaign_live_evidence_udp_inject == "" then null else ($campaign_live_evidence_udp_inject == "1") end),

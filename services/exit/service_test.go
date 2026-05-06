@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -5489,6 +5490,9 @@ func TestNewCommandBackendKeepsUnsetWGPubKeyForDerivation(t *testing.T) {
 }
 
 func TestEnsureWGPrivateKeyOwnerOnlyRepairsBroadPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX owner-only chmod bits are not reliably observable on Windows")
+	}
 	keyPath := filepath.Join(t.TempDir(), "exit.key")
 	if err := os.WriteFile(keyPath, []byte("private-key\n"), 0o644); err != nil {
 		t.Fatalf("write key: %v", err)

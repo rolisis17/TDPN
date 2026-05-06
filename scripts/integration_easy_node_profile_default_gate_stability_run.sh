@@ -56,7 +56,7 @@ assert_token() {
 
 echo "[easy-node-profile-default-gate-stability-run] help contract"
 bash "$SCRIPT_UNDER_TEST" help >"$HELP_OUT"
-if ! grep -F -- './scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--campaign-live-evidence [0|1]] [--require-external-live-evidence [0|1]] [--campaign-live-evidence-udp-inject [0|1]] [--allow-remote-http-probe [0|1]] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]' "$HELP_OUT" >/dev/null 2>&1; then
+if ! grep -F -- './scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--campaign-runs N] [--campaign-profile-rounds N] [--campaign-profile-timeout-sec N] [--campaign-require-min-runs-total N] [--campaign-require-min-runs-with-summary N] [--campaign-require-trend-source CSV] [--campaign-execution-mode docker|local] [--campaign-live-evidence [0|1]] [--require-external-live-evidence [0|1]] [--campaign-live-evidence-udp-inject [0|1]] [--allow-remote-http-probe [0|1]] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]' "$HELP_OUT" >/dev/null 2>&1; then
   echo "easy_node help missing profile-default-gate-stability-run command contract"
   cat "$HELP_OUT"
   exit 1
@@ -72,6 +72,13 @@ bash "$SCRIPT_UNDER_TEST" profile-default-gate-stability-run \
   --campaign-subject invite-123 \
   --runs 4 \
   --campaign-timeout-sec 900 \
+  --campaign-runs 2 \
+  --campaign-profile-rounds 1 \
+  --campaign-profile-timeout-sec 80 \
+  --campaign-require-min-runs-total 1 \
+  --campaign-require-min-runs-with-summary 1 \
+  --campaign-require-trend-source vote_fallback,policy_reliability_latency \
+  --campaign-execution-mode local \
   --campaign-live-evidence 1 \
   --require-external-live-evidence 1 \
   --campaign-live-evidence-udp-inject 0 \
@@ -94,6 +101,13 @@ assert_token "$line" $'\t--host-b\thost-b.example' "missing --host-b forwarding"
 assert_token "$line" $'\t--campaign-subject\tinvite-123' "missing --campaign-subject forwarding"
 assert_token "$line" $'\t--runs\t4' "missing --runs forwarding"
 assert_token "$line" $'\t--campaign-timeout-sec\t900' "missing --campaign-timeout-sec forwarding"
+assert_token "$line" $'\t--campaign-runs\t2' "missing --campaign-runs forwarding"
+assert_token "$line" $'\t--campaign-profile-rounds\t1' "missing --campaign-profile-rounds forwarding"
+assert_token "$line" $'\t--campaign-profile-timeout-sec\t80' "missing --campaign-profile-timeout-sec forwarding"
+assert_token "$line" $'\t--campaign-require-min-runs-total\t1' "missing --campaign-require-min-runs-total forwarding"
+assert_token "$line" $'\t--campaign-require-min-runs-with-summary\t1' "missing --campaign-require-min-runs-with-summary forwarding"
+assert_token "$line" $'\t--campaign-require-trend-source\tvote_fallback,policy_reliability_latency' "missing --campaign-require-trend-source forwarding"
+assert_token "$line" $'\t--campaign-execution-mode\tlocal' "missing --campaign-execution-mode forwarding"
 assert_token "$line" $'\t--campaign-live-evidence\t1' "missing --campaign-live-evidence forwarding"
 assert_token "$line" $'\t--require-external-live-evidence\t1' "missing --require-external-live-evidence forwarding"
 assert_token "$line" $'\t--campaign-live-evidence-udp-inject\t0' "missing --campaign-live-evidence-udp-inject forwarding"
