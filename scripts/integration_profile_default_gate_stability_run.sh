@@ -41,6 +41,7 @@ host_a=""
 host_b=""
 campaign_subject=""
 allow_remote_http_probe=""
+campaign_live_evidence=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
@@ -89,6 +90,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-remote-http-probe=*)
       allow_remote_http_probe="${1#*=}"
+      shift
+      ;;
+    --campaign-live-evidence)
+      campaign_live_evidence="${2:-}"
+      shift 2
+      ;;
+    --campaign-live-evidence=*)
+      campaign_live_evidence="${1#*=}"
       shift
       ;;
     *)
@@ -173,12 +182,13 @@ jq -n \
   }' >"$summary_json"
 
 if [[ -n "$capture_file" ]]; then
-  printf 'profile-default-gate-live\trun=%s\thost_a=%s\thost_b=%s\tsubject=%s\tallow_remote_http_probe=%s\treports_dir=%s\tsummary_json=%s\n' \
+  printf 'profile-default-gate-live\trun=%s\thost_a=%s\thost_b=%s\tsubject=%s\tallow_remote_http_probe=%s\tcampaign_live_evidence=%s\treports_dir=%s\tsummary_json=%s\n' \
     "$run_index" \
     "$host_a" \
     "$host_b" \
     "$campaign_subject" \
     "$allow_remote_http_probe" \
+    "$campaign_live_evidence" \
     "$reports_dir" \
     "$summary_json" >>"$capture_file"
 fi
@@ -237,6 +247,7 @@ if ! jq -e '
   and .modal_decision_count == 3
   and (.modal_decision_support_rate_pct >= 99.9)
   and .decision_consensus == true
+  and .inputs.campaign_live_evidence == false
   and .diagnostics.evidence_state == "complete"
   and .diagnostics.selection_policy_state == "consistent"
   and .diagnostics.command_failures == 0
@@ -271,6 +282,38 @@ if ! grep -q $'run=1\t.*\treports_dir=.*/run_01\t' "$STABLE_CAPTURE" \
   || ! grep -q $'run=3\t.*\treports_dir=.*/run_03\t' "$STABLE_CAPTURE"; then
   echo "expected each stability run to receive its own reports_dir"
   cat "$STABLE_CAPTURE"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-run] campaign live evidence forwarding"
+LIVE_SUMMARY="$TMP_DIR/live_summary.json"
+LIVE_REPORTS_DIR="$TMP_DIR/reports_live"
+LIVE_COUNTER="$TMP_DIR/live_counter.txt"
+LIVE_CAPTURE="$TMP_DIR/live_capture.log"
+PROFILE_DEFAULT_GATE_STABILITY_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+FAKE_EASY_NODE_COUNTER_FILE="$LIVE_COUNTER" \
+FAKE_EASY_NODE_CAPTURE_FILE="$LIVE_CAPTURE" \
+FAKE_EASY_NODE_SCENARIO="stable" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "host-a.test" \
+  --host-b "host-b.test" \
+  --campaign-subject "inv-live" \
+  --runs 1 \
+  --campaign-timeout-sec 2400 \
+  --campaign-live-evidence 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$LIVE_REPORTS_DIR" \
+  --summary-json "$LIVE_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_run_live.log 2>&1
+
+if ! grep -q $'campaign_live_evidence=1' "$LIVE_CAPTURE"; then
+  echo "expected campaign live evidence forwarding"
+  cat "$LIVE_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.inputs.campaign_live_evidence == true' "$LIVE_SUMMARY" >/dev/null 2>&1; then
+  echo "live summary missing campaign_live_evidence input"
+  cat "$LIVE_SUMMARY"
   exit 1
 fi
 

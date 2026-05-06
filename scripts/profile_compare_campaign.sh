@@ -1347,8 +1347,14 @@ if [[ "$trend_status" == "fail" || "$trend_rc" -ne 0 ]]; then
   rc=1
   notes="trend aggregation failed"
 elif ((runs_fail > 0)); then
-  status="warn"
-  notes="one or more compare runs failed before trend aggregation"
+  if [[ "$live_evidence" == "1" ]]; then
+    status="fail"
+    rc=1
+    notes="live evidence compare run failed or missed a required summary artifact"
+  else
+    status="warn"
+    notes="one or more compare runs failed before trend aggregation"
+  fi
 elif ((runs_warn > 0)) || [[ "$trend_status" == "warn" ]]; then
   status="warn"
   notes="one or more compare/trend runs reported warnings"

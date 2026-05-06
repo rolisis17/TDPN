@@ -118,8 +118,14 @@ render_command() {
 }
 
 sensitive_value_flag_01() {
-  case "$1" in
+  local flag=""
+  flag="${1%%=*}"
+  flag="$(printf '%s' "$flag" | tr '[:upper:]' '[:lower:]')"
+  case "$flag" in
     --campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer)
+      return 0
+      ;;
+    *token*|*auth-token*|*admin-token*|*authorization*|*bearer*|*password*|*passwd*|*secret*|*anon-cred*|*private-key*|*secret-key*|*admin-key*)
       return 0
       ;;
   esac
@@ -131,15 +137,11 @@ render_command_redacted() {
   local token=""
   local flag=""
   local value=""
-  local redact_next="0"
-  for token in "$@"; do
+  while (($# > 0)); do
+    token="$1"
+    shift
     if [[ -n "$rendered" ]]; then
       rendered+=" "
-    fi
-    if [[ "$redact_next" == "1" ]]; then
-      rendered+="$(printf '%q' "[redacted]")"
-      redact_next="0"
-      continue
     fi
     if [[ "$token" == --*=* ]]; then
       flag="${token%%=*}"
@@ -153,12 +155,33 @@ render_command_redacted() {
     fi
     if sensitive_value_flag_01 "$token"; then
       rendered+="$(printf '%q' "$token")"
-      redact_next="1"
+      if (($# > 0)) && [[ "${1:-}" != --* ]]; then
+        shift
+        rendered+=" $(printf '%q' "[redacted]")"
+      fi
       continue
     fi
     rendered+="$(printf '%q' "$token")"
   done
   printf '%s' "$rendered"
+}
+
+command_text_has_sensitive_flag_01() {
+  local cmd=""
+  local token=""
+  local flag=""
+  cmd="$(trim "${1:-}")"
+  for token in $cmd; do
+    if [[ "$token" == --*=* ]]; then
+      flag="${token%%=*}"
+    else
+      flag="$token"
+    fi
+    if [[ "$flag" == --* ]] && sensitive_value_flag_01 "$flag"; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 json_file_valid_01() {
@@ -264,6 +287,9 @@ action_command_is_safe_01() {
       ;;
   esac
   if [[ "$cmd" == *";"* || "$cmd" == *"&&"* || "$cmd" == *"||"* || "$cmd" == *"|"* || "$cmd" == *$'`'* || "$cmd" == *'$('* ]]; then
+    return 1
+  fi
+  if command_text_has_sensitive_flag_01 "$cmd"; then
     return 1
   fi
   return 0
@@ -668,6 +694,11 @@ next_command_source=""
 sanitized_source_next_command="$(sanitize_action_command_01 "$runtime_evidence_pack_source_next_command")"
 sanitized_source_next_command_reason="$(sanitize_guidance_text_01 "$runtime_evidence_pack_source_next_command_reason")"
 sanitized_source_next_operator_action="$(sanitize_guidance_text_01 "$runtime_evidence_pack_source_next_operator_action")"
+if command_text_has_sensitive_flag_01 "$runtime_evidence_pack_source_next_command"; then
+  sanitized_source_next_command=""
+  sanitized_source_next_command_reason=""
+  sanitized_source_next_operator_action=""
+fi
 
 cycle_rerun_command="$(render_command \
   "./scripts/easy_node.sh" \

@@ -76,6 +76,11 @@ campaign_report_md=""
 reports_dir=""
 campaign_subject=""
 campaign_anon_cred=""
+raw_args=""
+
+for raw_arg in "$@"; do
+  raw_args="${raw_args}${raw_args:+ }$(printf '%q' "$raw_arg")"
+done
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -152,8 +157,8 @@ if [[ "$summary_json" =~ _signoff_([0-9]+)\.json$ ]]; then
 fi
 
 if [[ -n "$capture_file" ]]; then
-  printf 'signoff\tscenario=%s\tcycle=%s\treports_dir=%s\tsummary_json=%s\tcampaign_check_summary_json=%s\tcampaign_summary_json=%s\tcampaign_report_md=%s\tcampaign_subject=%s\tcampaign_anon_cred=%s\n' \
-    "$scenario" "$cycle_index" "$reports_dir" "$summary_json" "$campaign_check_summary_json" "$campaign_summary_json" "$campaign_report_md" "$campaign_subject" "$campaign_anon_cred" >>"$capture_file"
+  printf 'signoff\tscenario=%s\tcycle=%s\treports_dir=%s\tsummary_json=%s\tcampaign_check_summary_json=%s\tcampaign_summary_json=%s\tcampaign_report_md=%s\tcampaign_subject=%s\tcampaign_anon_cred=%s\traw_args=%s\n' \
+    "$scenario" "$cycle_index" "$reports_dir" "$summary_json" "$campaign_check_summary_json" "$campaign_summary_json" "$campaign_report_md" "$campaign_subject" "$campaign_anon_cred" "$raw_args" >>"$capture_file"
 fi
 
 if [[ "$scenario" == "fail_cycle2" && "$cycle_index" == "2" ]]; then
@@ -1124,6 +1129,65 @@ fi
 if ! grep -Fq -- '--subject \<set-real-invite-key\>' /tmp/integration_runtime_actuation_promotion_cycle_missing_subject_value.log; then
   echo "expected explicit non-runnable subject template guidance in missing-subject-value path"
   cat /tmp/integration_runtime_actuation_promotion_cycle_missing_subject_value.log
+  exit 1
+fi
+
+echo "[runtime-actuation-promotion-cycle] artifact redaction preserves signoff execution args"
+REDACTION_SUMMARY="$TMP_DIR/redaction_summary.json"
+REDACTION_CAPTURE="$TMP_DIR/redaction_capture.log"
+REDACTION_LOG="/tmp/integration_runtime_actuation_promotion_cycle_redaction.log"
+REDACTION_SUBJECT_VALUE="sensitive-subject-for-test"
+REDACTION_ANON_VALUE="sensitive-anon-for-test"
+REDACTION_TOKEN_VALUE="sensitive-token-for-test"
+set +e
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF_SCRIPT" \
+RUNTIME_ACTUATION_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_CHECK_SCRIPT" \
+FAKE_RUNTIME_ACTUATION_CYCLE_CAPTURE_FILE="$REDACTION_CAPTURE" \
+FAKE_RUNTIME_ACTUATION_CYCLE_SIGNOFF_SCENARIO="pass" \
+FAKE_RUNTIME_ACTUATION_CYCLE_PROMOTION_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --cycles 1 \
+  --reports-dir "$TMP_DIR/redaction_reports" \
+  --subject="$REDACTION_SUBJECT_VALUE" \
+  --anon-cred "$REDACTION_ANON_VALUE" \
+  --issuer-admin-token "$REDACTION_TOKEN_VALUE" \
+  --summary-json "$REDACTION_SUMMARY" \
+  --show-json 1 \
+  --print-summary-json 1 >"$REDACTION_LOG" 2>&1
+redaction_rc=$?
+set -e
+
+if [[ "$redaction_rc" -ne 0 ]]; then
+  echo "expected redaction path rc=0, got rc=$redaction_rc"
+  cat "$REDACTION_LOG"
+  exit 1
+fi
+for expected in "$REDACTION_SUBJECT_VALUE" "$REDACTION_ANON_VALUE" "$REDACTION_TOKEN_VALUE"; do
+  if ! grep -F -- "$expected" "$REDACTION_CAPTURE" >/dev/null; then
+    echo "expected sensitive value to reach fake signoff execution capture"
+    cat "$REDACTION_CAPTURE"
+    exit 1
+  fi
+  if grep -F -- "$expected" "$REDACTION_SUMMARY" >/dev/null || grep -F -- "$expected" "$REDACTION_LOG" >/dev/null; then
+    echo "sensitive value leaked into redacted promotion-cycle artifacts"
+    cat "$REDACTION_SUMMARY"
+    cat "$REDACTION_LOG"
+    exit 1
+  fi
+done
+if ! jq -e '
+  .status == "pass"
+  and (.inputs.signoff_passthrough_args | index("--subject=[redacted]") != null)
+  and (.inputs.signoff_passthrough_args | index("--anon-cred") != null)
+  and (.inputs.signoff_passthrough_args | index("--issuer-admin-token") != null)
+  and ((.inputs.signoff_passthrough_args | map(select(. == "[redacted]")) | length) >= 2)
+  and (.cycles[0].command | contains("--subject="))
+  and (.cycles[0].command | contains("--anon-cred"))
+  and (.cycles[0].command | contains("--issuer-admin-token"))
+  and (.cycles[0].command | contains("redacted"))
+' "$REDACTION_SUMMARY" >/dev/null 2>&1; then
+  echo "redaction summary contract mismatch"
+  cat "$REDACTION_SUMMARY"
   exit 1
 fi
 

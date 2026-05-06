@@ -56,7 +56,7 @@ assert_token() {
 
 echo "[easy-node-profile-default-gate-stability-run] help contract"
 bash "$SCRIPT_UNDER_TEST" help >"$HELP_OUT"
-if ! grep -F -- './scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--allow-remote-http-probe [0|1]] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]' "$HELP_OUT" >/dev/null 2>&1; then
+if ! grep -F -- './scripts/easy_node.sh profile-default-gate-stability-run --host-a HOST --host-b HOST [--campaign-subject ID|--subject ID] [--runs N] [--campaign-timeout-sec N] [--campaign-live-evidence [0|1]] [--allow-remote-http-probe [0|1]] [--sleep-between-sec N] [--reports-dir DIR] [--summary-json PATH] [--print-summary-json [0|1]] [--allow-partial [0|1]]' "$HELP_OUT" >/dev/null 2>&1; then
   echo "easy_node help missing profile-default-gate-stability-run command contract"
   cat "$HELP_OUT"
   exit 1
@@ -72,6 +72,7 @@ bash "$SCRIPT_UNDER_TEST" profile-default-gate-stability-run \
   --campaign-subject invite-123 \
   --runs 4 \
   --campaign-timeout-sec 900 \
+  --campaign-live-evidence 1 \
   --allow-remote-http-probe 1 \
   --sleep-between-sec 3 \
   --reports-dir .easy-node-logs/stability_contract \
@@ -91,6 +92,7 @@ assert_token "$line" $'\t--host-b\thost-b.example' "missing --host-b forwarding"
 assert_token "$line" $'\t--campaign-subject\tinvite-123' "missing --campaign-subject forwarding"
 assert_token "$line" $'\t--runs\t4' "missing --runs forwarding"
 assert_token "$line" $'\t--campaign-timeout-sec\t900' "missing --campaign-timeout-sec forwarding"
+assert_token "$line" $'\t--campaign-live-evidence\t1' "missing --campaign-live-evidence forwarding"
 assert_token "$line" $'\t--allow-remote-http-probe\t1' "missing --allow-remote-http-probe forwarding"
 assert_token "$line" $'\t--sleep-between-sec\t3' "missing --sleep-between-sec forwarding"
 assert_token "$line" $'\t--reports-dir\t.easy-node-logs/stability_contract' "missing --reports-dir forwarding"

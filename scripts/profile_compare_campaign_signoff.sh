@@ -1670,6 +1670,19 @@ else
   fi
 fi
 
+if [[ -z "$failure_stage" && "$campaign_live_evidence_effective" == "1" ]]; then
+  if ! jq -e '.inputs.compare.live_evidence == true' "$campaign_summary_json" >/dev/null 2>&1; then
+    campaign_status="fail"
+    campaign_rc=1
+    campaign_failure_reason="campaign live evidence was requested but the campaign summary is not live-evidence derived"
+    campaign_stage_primary_failure="live_evidence_mismatch"
+    campaign_stage_primary_failure_count="1"
+    status="fail"
+    final_rc=1
+    failure_stage="campaign"
+  fi
+fi
+
 check_cmd=(
   "$CAMPAIGN_CHECK_SCRIPT"
   --campaign-summary-json "$campaign_summary_json"

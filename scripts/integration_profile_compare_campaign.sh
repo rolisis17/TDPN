@@ -838,6 +838,39 @@ if ! rg -q -- '--live-evidence 1' "$LOCAL_CAPTURE"; then
   exit 1
 fi
 
+echo "[profile-compare-campaign] live evidence fails on missing compare summary"
+: >"$LOCAL_CAPTURE"
+: >"$TREND_CAPTURE"
+printf '0\n' >"$LOCAL_COUNTER"
+LIVE_MISSING_SUMMARY_JSON="$TMP_DIR/campaign_live_missing_summary.json"
+set +e
+PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT="$FAKE_LOCAL" \
+PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT="$FAKE_TREND" \
+FAKE_LOCAL_CAPTURE_FILE="$LOCAL_CAPTURE" \
+FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
+FAKE_LOCAL_FAIL_AT=0 \
+FAKE_LOCAL_OMIT_SUMMARY_AT=1 \
+FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
+./scripts/profile_compare_campaign.sh \
+  --campaign-runs 2 \
+  --live-evidence 1 \
+  --summary-json "$LIVE_MISSING_SUMMARY_JSON" >/tmp/integration_profile_compare_campaign_live_missing_summary.log 2>&1
+live_missing_summary_rc=$?
+set -e
+if [[ "$live_missing_summary_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when live evidence compare summary is missing"
+  cat /tmp/integration_profile_compare_campaign_live_missing_summary.log
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .rc == 1 and .summary.runs_fail == 1 and .summary.runs_with_summary == 1 and (.notes | contains("live evidence compare run failed"))' "$LIVE_MISSING_SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "live missing summary did not fail closed"
+  cat "$LIVE_MISSING_SUMMARY_JSON"
+  cat /tmp/integration_profile_compare_campaign_live_missing_summary.log
+  exit 1
+fi
+
 echo "[profile-compare-campaign] warn path from local run failure"
 : >"$LOCAL_CAPTURE"
 : >"$TREND_CAPTURE"

@@ -254,7 +254,7 @@ assert_contains "$success_line_sp" "--require-runtime-actuation-status-pass 0" "
 assert_contains "$success_line_sp" "--custom-flag custom value" "missing passthrough forwarding"
 assert_contains "$success_line_sp" "--summary-json $SUCCESS_SUMMARY" "missing explicit summary-json forwarding"
 assert_file_contains "$SUCCESS_LOG" "campaign_timeout_sec=2400" "missing campaign-timeout start marker"
-assert_file_contains "$SUCCESS_LOG" "campaign_profiles=balanced,speed,speed-1hop client_inner_source=synthetic disable_synthetic_fallback=0 data_plane_mode=opaque" "missing profile-default transport/profile marker"
+assert_file_contains "$SUCCESS_LOG" "campaign_profiles=balanced,speed,speed-1hop campaign_live_evidence=0 client_inner_source=synthetic disable_synthetic_fallback=0 data_plane_mode=opaque" "missing profile-default transport/profile marker"
 assert_file_contains "$SUCCESS_LOG" "campaign-visibility expected_duration_sec=2400" "missing campaign visibility duration marker"
 assert_file_contains "$SUCCESS_LOG" "signoff-startup-hint campaign_timeout_sec=2400" "missing signoff startup hint marker"
 assert_file_contains "$SUCCESS_LOG" "progress_reports_dir=$ROOT_DIR/.easy-node-logs" "missing campaign visibility reports-dir marker"
@@ -262,6 +262,68 @@ assert_file_contains "$SUCCESS_LOG" "progress_summary_json=$SUCCESS_SUMMARY" "mi
 assert_file_contains "$SUCCESS_LOG" "signoff-heartbeat interval_sec=60" "missing signoff heartbeat marker"
 assert_file_contains "$SUCCESS_LOG" "signoff-progress elapsed_sec=0 state=campaign_start_pending" "missing immediate signoff progress marker"
 assert_file_contains "$SUCCESS_LOG" "signoff-finish rc=0" "missing signoff completion marker"
+
+echo "[profile-default-gate-run] campaign live evidence forces strict transport defaults"
+: >"$SIGNOFF_CAPTURE"
+LIVE_EVIDENCE_LOG="$TMP_DIR/profile_default_gate_run_live_evidence.log"
+LIVE_EVIDENCE_COUNTER="$TMP_DIR/curl_counter_live_evidence.txt"
+LIVE_EVIDENCE_SUMMARY="$TMP_DIR/profile_default_gate_run_live_evidence_summary.json"
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$LIVE_EVIDENCE_COUNTER" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CAMPAIGN_SUBJECT="inv-env-live-evidence" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
+  --campaign-live-evidence 1 \
+  --summary-json "$LIVE_EVIDENCE_SUMMARY" >"$LIVE_EVIDENCE_LOG" 2>&1
+
+live_evidence_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+if [[ -z "$live_evidence_line" ]]; then
+  echo "missing captured signoff invocation in live evidence path"
+  cat "$LIVE_EVIDENCE_LOG"
+  exit 1
+fi
+live_evidence_line_sp="${live_evidence_line//$'\t'/ }"
+assert_contains "$live_evidence_line_sp" "env_CLIENT_INNER_SOURCE=udp" "live evidence did not force UDP client source"
+assert_contains "$live_evidence_line_sp" "env_CLIENT_DISABLE_SYNTHETIC_FALLBACK=1" "live evidence did not disable synthetic fallback"
+assert_contains "$live_evidence_line_sp" "env_DATA_PLANE_MODE=opaque" "live evidence did not force opaque data-plane"
+assert_contains "$live_evidence_line_sp" "--campaign-live-evidence 1" "live evidence did not forward campaign-live-evidence"
+assert_file_contains "$LIVE_EVIDENCE_LOG" "campaign_live_evidence=1" "live evidence log did not surface campaign_live_evidence"
+
+echo "[profile-default-gate-run] campaign live evidence rejects unsafe transport overrides"
+: >"$SIGNOFF_CAPTURE"
+LIVE_EVIDENCE_UNSAFE_LOG="$TMP_DIR/profile_default_gate_run_live_evidence_unsafe.log"
+LIVE_EVIDENCE_UNSAFE_COUNTER="$TMP_DIR/curl_counter_live_evidence_unsafe.txt"
+set +e
+PATH="$TMP_BIN:$PATH" \
+PROFILE_DEFAULT_GATE_RUN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
+PROFILE_DEFAULT_GATE_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_COUNTER_FILE="$LIVE_EVIDENCE_UNSAFE_COUNTER" \
+PROFILE_DEFAULT_GATE_FAKE_CURL_FAIL_ATTEMPTS=0 \
+CLIENT_INNER_SOURCE=synthetic \
+CAMPAIGN_SUBJECT="inv-env-live-evidence-unsafe" \
+"$SCRIPT_UNDER_TEST" \
+  --host-a "dir-a.test" \
+  --host-b "dir-b.test" \
+  --allow-remote-http-probe 1 \
+  --campaign-live-evidence 1 >"$LIVE_EVIDENCE_UNSAFE_LOG" 2>&1
+live_evidence_unsafe_rc=$?
+set -e
+if [[ "$live_evidence_unsafe_rc" -ne 2 ]]; then
+  echo "expected live evidence unsafe override rc=2, got rc=$live_evidence_unsafe_rc"
+  cat "$LIVE_EVIDENCE_UNSAFE_LOG"
+  exit 1
+fi
+assert_file_contains "$LIVE_EVIDENCE_UNSAFE_LOG" "--campaign-live-evidence requires CLIENT_INNER_SOURCE=udp" "missing unsafe live evidence override error"
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "unsafe live evidence path should not invoke signoff"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
 
 echo "[profile-default-gate-run] strict host HTTPS mismatch points lab users to live wrapper"
 : >"$SIGNOFF_CAPTURE"

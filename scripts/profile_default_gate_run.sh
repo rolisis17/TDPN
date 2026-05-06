@@ -20,6 +20,7 @@ Usage:
     [--heartbeat-interval-sec N] \
     [--require-selection-policy-present [0|1]] \
     [--require-selection-policy-valid [0|1]] \
+    [--campaign-live-evidence [0|1]] \
     [--campaign-subject INVITE_KEY | --subject INVITE_KEY | --key INVITE_KEY | --invite-key INVITE_KEY | --campaign-anon-cred ANON_CRED | --anon-cred ANON_CRED] \
     [--campaign-profiles CSV] \
     [profile-compare-campaign-signoff args...]
@@ -70,6 +71,9 @@ Notes:
     env to synthetic opaque payloads. Override with --campaign-profiles or
     CLIENT_INNER_SOURCE/CLIENT_DISABLE_SYNTHETIC_FALLBACK/DATA_PLANE_MODE when
     intentionally running a stricter packet-ingress workflow.
+  - --campaign-live-evidence 1 forwards strict live-evidence mode and forces
+    CLIENT_INNER_SOURCE=udp, CLIENT_DISABLE_SYNTHETIC_FALLBACK=1, and
+    DATA_PLANE_MODE=opaque unless those env vars are already set safely.
 USAGE
 }
 
@@ -774,6 +778,7 @@ campaign_timeout_default_sec="${PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_TIMEOUT_SEC:-2
 heartbeat_interval_sec_raw="${PROFILE_DEFAULT_GATE_RUN_HEARTBEAT_INTERVAL_SEC:-60}"
 require_selection_policy_present="${PROFILE_DEFAULT_GATE_RUN_REQUIRE_SELECTION_POLICY_PRESENT:-1}"
 require_selection_policy_valid="${PROFILE_DEFAULT_GATE_RUN_REQUIRE_SELECTION_POLICY_VALID:-1}"
+campaign_live_evidence="${PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_LIVE_EVIDENCE:-0}"
 campaign_profiles_default="$(trim "${PROFILE_DEFAULT_GATE_RUN_CAMPAIGN_PROFILES:-balanced,speed,speed-1hop}")"
 campaign_client_inner_source_default="$(trim "${PROFILE_DEFAULT_GATE_RUN_CLIENT_INNER_SOURCE:-synthetic}")"
 campaign_disable_synthetic_fallback_default="$(trim "${PROFILE_DEFAULT_GATE_RUN_DISABLE_SYNTHETIC_FALLBACK:-0}")"
@@ -917,6 +922,19 @@ while [[ $# -gt 0 ]]; do
       require_selection_policy_valid="${1#--require-selection-policy-valid=}"
       shift
       ;;
+    --campaign-live-evidence)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        campaign_live_evidence="${2:-}"
+        shift 2
+      else
+        campaign_live_evidence="1"
+        shift
+      fi
+      ;;
+    --campaign-live-evidence=*)
+      campaign_live_evidence="${1#--campaign-live-evidence=}"
+      shift
+      ;;
     --campaign-subject)
       require_value_or_die "$1" "$#" "${2:-}"
       campaign_subject_cli="${2:-}"
@@ -993,6 +1011,7 @@ bool_arg_or_die "--allow-remote-http-probe" "$allow_remote_http_probe"
 bool_arg_or_die "--allow-insecure-probe" "$allow_insecure_probe"
 bool_arg_or_die "--require-selection-policy-present" "$require_selection_policy_present"
 bool_arg_or_die "--require-selection-policy-valid" "$require_selection_policy_valid"
+bool_arg_or_die "--campaign-live-evidence" "$campaign_live_evidence"
 if [[ -n "$campaign_client_inner_source_default" && "$campaign_client_inner_source_default" != "udp" && "$campaign_client_inner_source_default" != "synthetic" ]]; then
   echo "PROFILE_DEFAULT_GATE_RUN_CLIENT_INNER_SOURCE must be udp or synthetic"
   exit 2
@@ -1297,6 +1316,17 @@ fi
 if [[ "$allow_remote_http_probe" == "1" ]] && ! array_has_arg_or_equals_prefix "--campaign-allow-insecure-remote-http" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--campaign-allow-insecure-remote-http 1)
 fi
+if array_has_arg_or_equals_prefix "--campaign-live-evidence" "${signoff_passthrough[@]}"; then
+  campaign_live_evidence_passthrough="$(extract_flag_value --campaign-live-evidence "${signoff_passthrough[@]}")"
+  campaign_live_evidence_passthrough="$(trim "$campaign_live_evidence_passthrough")"
+  if [[ -z "$campaign_live_evidence_passthrough" || "$campaign_live_evidence_passthrough" == --* ]]; then
+    campaign_live_evidence_passthrough="1"
+  fi
+  bool_arg_or_die "--campaign-live-evidence" "$campaign_live_evidence_passthrough"
+  campaign_live_evidence="$campaign_live_evidence_passthrough"
+elif [[ "$campaign_live_evidence" == "1" ]]; then
+  signoff_passthrough+=(--campaign-live-evidence 1)
+fi
 if ! array_has_arg_or_equals_prefix "--require-micro-relay-quality-evidence" "${signoff_passthrough[@]}"; then
   signoff_passthrough+=(--require-micro-relay-quality-evidence 0)
 fi
@@ -1352,9 +1382,27 @@ if [[ -z "$campaign_profiles_effective" ]]; then
   exit 2
 fi
 
-client_inner_source_effective="$(trim "${CLIENT_INNER_SOURCE:-$campaign_client_inner_source_default}")"
-disable_synthetic_fallback_effective="$(trim "${CLIENT_DISABLE_SYNTHETIC_FALLBACK:-$campaign_disable_synthetic_fallback_default}")"
-data_plane_mode_effective="$(trim "${DATA_PLANE_MODE:-$campaign_data_plane_mode_default}")"
+if [[ "$campaign_live_evidence" == "1" ]]; then
+  if [[ -n "${CLIENT_INNER_SOURCE+x}" && "$CLIENT_INNER_SOURCE" != "udp" ]]; then
+    echo "profile-default-gate-run failed: --campaign-live-evidence requires CLIENT_INNER_SOURCE=udp when CLIENT_INNER_SOURCE is set"
+    exit 2
+  fi
+  if [[ -n "${CLIENT_DISABLE_SYNTHETIC_FALLBACK+x}" && "$CLIENT_DISABLE_SYNTHETIC_FALLBACK" != "1" ]]; then
+    echo "profile-default-gate-run failed: --campaign-live-evidence requires CLIENT_DISABLE_SYNTHETIC_FALLBACK=1 when CLIENT_DISABLE_SYNTHETIC_FALLBACK is set"
+    exit 2
+  fi
+  if [[ -n "${DATA_PLANE_MODE+x}" && "$DATA_PLANE_MODE" != "opaque" ]]; then
+    echo "profile-default-gate-run failed: --campaign-live-evidence requires DATA_PLANE_MODE=opaque when DATA_PLANE_MODE is set"
+    exit 2
+  fi
+  client_inner_source_effective="$(trim "${CLIENT_INNER_SOURCE:-udp}")"
+  disable_synthetic_fallback_effective="$(trim "${CLIENT_DISABLE_SYNTHETIC_FALLBACK:-1}")"
+  data_plane_mode_effective="$(trim "${DATA_PLANE_MODE:-opaque}")"
+else
+  client_inner_source_effective="$(trim "${CLIENT_INNER_SOURCE:-$campaign_client_inner_source_default}")"
+  disable_synthetic_fallback_effective="$(trim "${CLIENT_DISABLE_SYNTHETIC_FALLBACK:-$campaign_disable_synthetic_fallback_default}")"
+  data_plane_mode_effective="$(trim "${DATA_PLANE_MODE:-$campaign_data_plane_mode_default}")"
+fi
 if [[ -n "$client_inner_source_effective" && "$client_inner_source_effective" != "udp" && "$client_inner_source_effective" != "synthetic" ]]; then
   echo "profile-default-gate-run failed: CLIENT_INNER_SOURCE must be udp or synthetic"
   exit 2
@@ -1367,7 +1415,7 @@ fi
 
 echo "[profile-default-gate-run] $(timestamp_utc) start subject_source=$subject_source directory_urls=$campaign_directory_urls_effective_log campaign_timeout_sec=$campaign_timeout_effective"
 echo "[profile-default-gate-run] $(timestamp_utc) summary_json=$summary_json_effective"
-echo "[profile-default-gate-run] $(timestamp_utc) campaign_profiles=$campaign_profiles_effective client_inner_source=$client_inner_source_effective disable_synthetic_fallback=$disable_synthetic_fallback_effective data_plane_mode=$data_plane_mode_effective"
+echo "[profile-default-gate-run] $(timestamp_utc) campaign_profiles=$campaign_profiles_effective campaign_live_evidence=$campaign_live_evidence client_inner_source=$client_inner_source_effective disable_synthetic_fallback=$disable_synthetic_fallback_effective data_plane_mode=$data_plane_mode_effective"
 
 if ! wait_for_directory_endpoint "directory_a" "$directory_a_url"; then
   exit 1

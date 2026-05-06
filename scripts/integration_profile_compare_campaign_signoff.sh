@@ -37,6 +37,7 @@ if [[ "${FAKE_CAMPAIGN_SLEEP_SEC:-0}" =~ ^[0-9]+$ ]] && [[ "${FAKE_CAMPAIGN_SLEE
 fi
 summary_json=""
 report_md=""
+live_evidence="0"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
@@ -47,6 +48,19 @@ while [[ $# -gt 0 ]]; do
       report_md="${2:-}"
       shift 2
       ;;
+    --live-evidence)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        live_evidence="${2:-}"
+        shift 2
+      else
+        live_evidence="1"
+        shift
+      fi
+      ;;
+    --live-evidence=*)
+      live_evidence="${1#*=}"
+      shift
+      ;;
     *)
       shift
       ;;
@@ -54,11 +68,16 @@ while [[ $# -gt 0 ]]; do
 done
 if [[ -n "$summary_json" ]]; then
   mkdir -p "$(dirname "$summary_json")"
-  cat >"$summary_json" <<'EOF_SUMMARY'
+  cat >"$summary_json" <<EOF_SUMMARY
 {
   "version": 1,
   "status": "pass",
   "rc": 0,
+  "inputs": {
+    "compare": {
+      "live_evidence": $(if [[ "$live_evidence" == "1" ]]; then printf 'true'; else printf 'false'; fi)
+    }
+  },
   "summary": {
     "runs_total": 5,
     "runs_pass": 5,
@@ -949,6 +968,40 @@ fi
 if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.refresh_campaign == false and .inputs.refresh_campaign_effective == false and .inputs.campaign_summary_reused == true and .stages.campaign.status == "skip" and .stages.campaign.attempted == false and .stages.campaign_check.status == "pass" and .stages.campaign_check.attempted == true' "$REUSE_SUMMARY" >/dev/null 2>&1; then
   echo "reuse summary JSON missing expected fields"
   cat "$REUSE_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-campaign-signoff] live evidence cannot reuse non-live campaign summary"
+: >"$SIGNOFF_CAPTURE"
+REUSE_NON_LIVE_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_reuse_non_live_summary.json"
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=99 \
+FAKE_CHECK_RC=0 \
+FAKE_CHECK_DECISION=GO \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$REUSE_REPORTS_DIR" \
+  --refresh-campaign 0 \
+  --campaign-live-evidence 1 \
+  --summary-json "$REUSE_NON_LIVE_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_reuse_non_live.log 2>&1
+reuse_non_live_rc=$?
+set -e
+if [[ "$reuse_non_live_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when live evidence reuses non-live campaign summary"
+  cat /tmp/integration_profile_compare_campaign_signoff_reuse_non_live.log
+  exit 1
+fi
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "non-live reuse mismatch should not run campaign or check"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .final_rc == 1 and .failure_stage == "campaign" and .stages.campaign.status == "fail" and .stages.campaign_check.attempted == false and (.stages.campaign.failure_reason | contains("not live-evidence derived"))' "$REUSE_NON_LIVE_SUMMARY" >/dev/null 2>&1; then
+  echo "reuse non-live summary did not fail closed"
+  cat "$REUSE_NON_LIVE_SUMMARY"
+  cat /tmp/integration_profile_compare_campaign_signoff_reuse_non_live.log
   exit 1
 fi
 

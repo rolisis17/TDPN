@@ -164,6 +164,60 @@ quote_cmd() {
   printf '\n'
 }
 
+sensitive_value_flag_01() {
+  local flag=""
+  flag="${1%%=*}"
+  flag="$(printf '%s' "$flag" | tr '[:upper:]' '[:lower:]')"
+  case "$flag" in
+    --campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer)
+      return 0
+      ;;
+    *token*|*auth-token*|*admin-token*|*authorization*|*bearer*|*password*|*passwd*|*secret*|*anon-cred*|*private-key*|*secret-key*|*admin-key*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+redacted_argv_01() {
+  local token=""
+  local flag=""
+  local next_value=""
+  while (($# > 0)); do
+    token="$1"
+    shift
+    if [[ "$token" == --*=* ]]; then
+      flag="${token%%=*}"
+      if sensitive_value_flag_01 "$flag"; then
+        printf '%s\n' "${flag}=[redacted]"
+      else
+        printf '%s\n' "$token"
+      fi
+      continue
+    fi
+    if sensitive_value_flag_01 "$token"; then
+      printf '%s\n' "$token"
+      if (($# > 0)); then
+        next_value="$1"
+        if [[ "$next_value" != --* ]]; then
+          printf '%s\n' "[redacted]"
+          shift
+        fi
+      fi
+      continue
+    fi
+    printf '%s\n' "$token"
+  done
+}
+
+quote_redacted_cmd() {
+  local -a redacted_args=()
+  if (($# > 0)); then
+    mapfile -t redacted_args < <(redacted_argv_01 "$@")
+  fi
+  quote_cmd "${redacted_args[@]}"
+}
+
 json_file_valid_01() {
   local path="$1"
   if [[ -z "$path" || ! -f "$path" ]]; then
@@ -192,6 +246,16 @@ array_to_json() {
     return
   fi
   printf '%s\n' "$@" | jq -R . | jq -s '.'
+}
+
+array_to_redacted_json() {
+  local -a redacted_args=()
+  if (($# == 0)); then
+    printf '%s' '[]'
+    return
+  fi
+  mapfile -t redacted_args < <(redacted_argv_01 "$@")
+  array_to_json "${redacted_args[@]}"
 }
 
 render_command_line_from_argv_01() {
@@ -764,7 +828,7 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
     --show-json 0
     --print-summary-json 0
   )
-  signoff_command_display="$(quote_cmd "${signoff_cmd[@]}")"
+  signoff_command_display="$(quote_redacted_cmd "${signoff_cmd[@]}")"
 
   echo "[runtime-actuation-promotion-cycle] $(timestamp_utc) signoff-cycle start cycle=$cycle_idx/$cycles summary_json=$signoff_summary_path"
   set +e
@@ -1239,7 +1303,7 @@ if [[ "$decision" == "NO-GO" ]]; then
   fi
 fi
 
-signoff_passthrough_args_json="$(array_to_json "${signoff_passthrough_args[@]}")"
+signoff_passthrough_args_json="$(array_to_redacted_json "${signoff_passthrough_args[@]}")"
 signoff_summary_paths_json="$(array_to_json "${signoff_summary_paths[@]}")"
 signoff_logs_json="$(array_to_json "${signoff_logs[@]}")"
 cycle_stage_errors_json="$(array_to_json "${cycle_stage_errors[@]}")"

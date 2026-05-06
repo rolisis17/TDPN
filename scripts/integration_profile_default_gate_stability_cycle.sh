@@ -36,6 +36,7 @@ host_a=""
 host_b=""
 campaign_subject=""
 allow_remote_http_probe=""
+campaign_live_evidence=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --host-a)
@@ -68,6 +69,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-remote-http-probe=*)
       allow_remote_http_probe="${1#*=}"
+      shift
+      ;;
+    --campaign-live-evidence)
+      campaign_live_evidence="${2:-}"
+      shift 2
+      ;;
+    --campaign-live-evidence=*)
+      campaign_live_evidence="${1#*=}"
       shift
       ;;
     --summary-json)
@@ -106,8 +115,8 @@ if [[ -z "$summary_json" ]]; then
 fi
 
 if [[ -n "$capture_file" ]]; then
-  printf 'run\tscenario=%s\thost_a=%s\thost_b=%s\tcampaign_subject=%s\tallow_remote_http_probe=%s\truns=%s\treports_dir=%s\tsummary_json=%s\n' \
-    "$scenario" "$host_a" "$host_b" "$campaign_subject" "$allow_remote_http_probe" "$runs" "$reports_dir" "$summary_json" >>"$capture_file"
+  printf 'run\tscenario=%s\thost_a=%s\thost_b=%s\tcampaign_subject=%s\tallow_remote_http_probe=%s\tcampaign_live_evidence=%s\truns=%s\treports_dir=%s\tsummary_json=%s\n' \
+    "$scenario" "$host_a" "$host_b" "$campaign_subject" "$allow_remote_http_probe" "$campaign_live_evidence" "$runs" "$reports_dir" "$summary_json" >>"$capture_file"
 fi
 
 if [[ "$scenario" == "fail" ]]; then
@@ -341,6 +350,7 @@ if ! jq -e '
   and .check.summary_schema_valid == true
   and .check.has_usable_decision == true
   and .check.modal_recommended_profile == "balanced"
+  and .inputs.run.campaign_live_evidence == false
   and .inputs.check.policy.require_decision_consensus == true
   and .inputs.check.policy.require_modal_decision == "GO"
   and .inputs.check.policy.require_modal_decision_support_rate_pct == 70
@@ -364,6 +374,38 @@ if ! grep -q $'run\t.*\tallow_remote_http_probe=1\t' "$FAKE_CAPTURE_FILE"; then
   cat "$FAKE_CAPTURE_FILE"
   exit 1
 fi
+
+echo "[profile-default-gate-stability-cycle] campaign live evidence forwarding"
+LIVE_CYCLE_SUMMARY="$TMP_DIR/cycle_live_summary.json"
+LIVE_CYCLE_CAPTURE="$TMP_DIR/capture_live.log"
+PROFILE_DEFAULT_GATE_STABILITY_RUN_SCRIPT="$FAKE_RUN_SCRIPT" \
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_CYCLE_CAPTURE_FILE="$LIVE_CYCLE_CAPTURE" \
+FAKE_CYCLE_RUN_SCENARIO="pass" \
+FAKE_CYCLE_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "a.test" \
+  --host-b "b.test" \
+  --subject "inv-live-cycle" \
+  --runs 1 \
+  --campaign-timeout-sec 2400 \
+  --campaign-live-evidence 1 \
+  --sleep-between-sec 0 \
+  --reports-dir "$TMP_DIR/live_reports" \
+  --summary-json "$LIVE_CYCLE_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_cycle_live.log 2>&1
+
+if ! grep -q $'campaign_live_evidence=1' "$LIVE_CYCLE_CAPTURE"; then
+  echo "expected run-stage campaign-live-evidence forwarding"
+  cat "$LIVE_CYCLE_CAPTURE"
+  exit 1
+fi
+if ! jq -e '.inputs.run.campaign_live_evidence == true and (.stages.run.command | contains("--campaign-live-evidence"))' "$LIVE_CYCLE_SUMMARY" >/dev/null 2>&1; then
+  echo "live cycle summary missing campaign live evidence metadata"
+  cat "$LIVE_CYCLE_SUMMARY"
+  exit 1
+fi
+
 if ! grep -q '^check' "$FAKE_CAPTURE_FILE"; then
   echo "expected fake check script invocation not captured"
   cat "$FAKE_CAPTURE_FILE"

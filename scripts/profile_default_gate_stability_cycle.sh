@@ -16,6 +16,7 @@ Usage:
     [--campaign-subject ID | --subject ID] \
     [--runs N] \
     [--campaign-timeout-sec N] \
+    [--campaign-live-evidence [0|1]] \
     [--allow-remote-http-probe [0|1]] \
     [--sleep-between-sec N] \
     [--allow-partial [0|1]] \
@@ -312,6 +313,7 @@ campaign_subject_from_campaign=""
 campaign_subject_from_alias=""
 runs="${PROFILE_DEFAULT_GATE_STABILITY_RUNS:-3}"
 campaign_timeout_sec="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_TIMEOUT_SEC:-2400}"
+campaign_live_evidence="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_LIVE_EVIDENCE:-0}"
 min_campaign_timeout_sec="${PROFILE_DEFAULT_GATE_STABILITY_CYCLE_MIN_CAMPAIGN_TIMEOUT_SEC:-${PROFILE_DEFAULT_GATE_STABILITY_MIN_CAMPAIGN_TIMEOUT_SEC:-1800}}"
 allow_short_campaign_timeout="${PROFILE_DEFAULT_GATE_STABILITY_ALLOW_SHORT_CAMPAIGN_TIMEOUT:-0}"
 sleep_between_sec="${PROFILE_DEFAULT_GATE_STABILITY_SLEEP_BETWEEN_SEC:-5}"
@@ -399,6 +401,19 @@ while [[ $# -gt 0 ]]; do
       ;;
     --campaign-timeout-sec=*)
       campaign_timeout_sec="${1#*=}"
+      shift
+      ;;
+    --campaign-live-evidence)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        campaign_live_evidence="${2:-}"
+        shift 2
+      else
+        campaign_live_evidence="1"
+        shift
+      fi
+      ;;
+    --campaign-live-evidence=*)
+      campaign_live_evidence="${1#*=}"
       shift
       ;;
     --allow-remote-http-probe)
@@ -685,6 +700,7 @@ campaign_subject_from_campaign="$(trim "$campaign_subject_from_campaign")"
 campaign_subject_from_alias="$(trim "$campaign_subject_from_alias")"
 runs="$(trim "$runs")"
 campaign_timeout_sec="$(trim "$campaign_timeout_sec")"
+campaign_live_evidence="$(trim "$campaign_live_evidence")"
 min_campaign_timeout_sec="$(trim "$min_campaign_timeout_sec")"
 allow_short_campaign_timeout="$(trim "$allow_short_campaign_timeout")"
 sleep_between_sec="$(trim "$sleep_between_sec")"
@@ -744,6 +760,7 @@ fi
 
 int_arg_or_die "--runs" "$runs"
 int_arg_or_die "--campaign-timeout-sec" "$campaign_timeout_sec"
+bool_arg_or_die "--campaign-live-evidence" "$campaign_live_evidence"
 int_arg_or_die "PROFILE_DEFAULT_GATE_STABILITY_CYCLE_MIN_CAMPAIGN_TIMEOUT_SEC" "$min_campaign_timeout_sec"
 int_arg_or_die "--sleep-between-sec" "$sleep_between_sec"
 int_arg_or_die "--require-min-runs-requested" "$require_min_runs_requested"
@@ -816,6 +833,7 @@ run_cmd=(
   --campaign-subject "$campaign_subject"
   --runs "$runs"
   --campaign-timeout-sec "$campaign_timeout_sec"
+  --campaign-live-evidence "$campaign_live_evidence"
   --allow-remote-http-probe "$allow_remote_http_probe"
   --sleep-between-sec "$sleep_between_sec"
   --allow-partial "$allow_partial"
@@ -1249,8 +1267,8 @@ elif [[ "$cycle_evidence_state" == "partial" && "$check_decision" != "NO-GO" ]];
   next_operator_action="Cycle evidence is partial; inspect stage logs and rerun cycle before promotion."
 fi
 
-rerun_cycle_command_template="./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${summary_json} --print-summary-json 1"
-rerun_run_command_template="./scripts/easy_node.sh profile-default-gate-stability-run --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${run_summary_json} --print-summary-json 1"
+rerun_cycle_command_template="./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --campaign-live-evidence ${campaign_live_evidence} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${summary_json} --print-summary-json 1"
+rerun_run_command_template="./scripts/easy_node.sh profile-default-gate-stability-run --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --campaign-live-evidence ${campaign_live_evidence} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${run_summary_json} --print-summary-json 1"
 rerun_check_command_template="./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json ${run_summary_json} --summary-json ${check_summary_json} --print-summary-json 1"
 
 jq -n \
@@ -1315,6 +1333,7 @@ jq -n \
   --argjson cycle_issues "$cycle_issues_json" \
   --argjson runs "$runs" \
   --argjson campaign_timeout_sec "$campaign_timeout_sec" \
+  --argjson campaign_live_evidence "$campaign_live_evidence" \
   --argjson allow_remote_http_probe "$allow_remote_http_probe" \
   --argjson sleep_between_sec "$sleep_between_sec" \
   --argjson allow_partial "$allow_partial" \
@@ -1351,6 +1370,7 @@ jq -n \
       run: {
         runs: $runs,
         campaign_timeout_sec: $campaign_timeout_sec,
+        campaign_live_evidence: ($campaign_live_evidence == 1),
         allow_remote_http_probe: ($allow_remote_http_probe == 1),
         sleep_between_sec: $sleep_between_sec,
         allow_partial: ($allow_partial == 1)
