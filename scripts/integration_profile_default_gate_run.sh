@@ -1385,7 +1385,37 @@ assert_contains "$live_wrapper_line_sp" "--campaign-timeout-sec 777" "missing li
 assert_contains "$live_wrapper_line_sp" "--summary-json $TMP_DIR/easy_node_live_wrapper_summary.json" "missing live forwarded --summary-json"
 assert_contains "$live_wrapper_line_sp" "--print-summary-json 1" "missing live forwarded --print-summary-json"
 assert_contains "$live_wrapper_line_sp" "--campaign-live-evidence 1" "missing live wrapper default --campaign-live-evidence"
+assert_contains "$live_wrapper_line_sp" "--require-external-live-evidence 1" "missing live wrapper default --require-external-live-evidence"
+assert_contains "$live_wrapper_line_sp" "--campaign-live-evidence-udp-inject 0" "missing live wrapper default --campaign-live-evidence-udp-inject"
 assert_contains "$live_wrapper_line_sp" "--omega 10 value" "missing live forwarded passthrough args"
+
+echo "[profile-default-gate-live] explicit lab live-evidence policy overrides are preserved"
+: >"$WRAPPER_CAPTURE"
+EASY_NODE_LIVE_POLICY_OVERRIDE_LOG="$TMP_DIR/easy_node_profile_default_gate_live_policy_override.log"
+PROFILE_DEFAULT_GATE_WRAPPER_CAPTURE_FILE="$WRAPPER_CAPTURE" \
+PROFILE_DEFAULT_GATE_RUN_SCRIPT="$FAKE_WRAPPER" \
+bash "$EASY_NODE_SCRIPT_UNDER_TEST" profile-default-gate-live \
+  --host-a "wrapper-live-policy-a.test" \
+  --host-b "wrapper-live-policy-b.test" \
+  --campaign-subject "inv-live-policy-override" \
+  --campaign-live-evidence 1 \
+  --require-external-live-evidence 0 \
+  --campaign-live-evidence-udp-inject 1 \
+  --reports-dir "$TMP_DIR/live_reports_policy_override" \
+  --summary-json "$TMP_DIR/easy_node_live_wrapper_policy_override_summary.json" >"$EASY_NODE_LIVE_POLICY_OVERRIDE_LOG" 2>&1
+
+live_policy_override_line="$(sed -n '1p' "$WRAPPER_CAPTURE" || true)"
+if [[ -z "$live_policy_override_line" ]]; then
+  echo "missing easy_node live policy override wrapper forwarding capture"
+  cat "$EASY_NODE_LIVE_POLICY_OVERRIDE_LOG"
+  exit 1
+fi
+live_policy_override_line_sp="${live_policy_override_line//$'\t'/ }"
+assert_contains "$live_policy_override_line_sp" "--campaign-live-evidence 1" "missing explicit live wrapper --campaign-live-evidence override"
+assert_contains "$live_policy_override_line_sp" "--require-external-live-evidence 0" "missing explicit live wrapper --require-external-live-evidence override"
+assert_contains "$live_policy_override_line_sp" "--campaign-live-evidence-udp-inject 1" "missing explicit live wrapper --campaign-live-evidence-udp-inject override"
+assert_not_contains "$live_policy_override_line_sp" "--require-external-live-evidence 1" "live wrapper duplicated strict external override"
+assert_not_contains "$live_policy_override_line_sp" "--campaign-live-evidence-udp-inject 0" "live wrapper duplicated UDP injection override"
 
 echo "[profile-default-gate-live] placeholder subject resolves from env INVITE_KEY"
 : >"$WRAPPER_CAPTURE"

@@ -1936,8 +1936,8 @@ cat <<'OUT'
       "decision": "NO-GO",
       "recommended_profile": "balanced",
       "notes": "profile compare campaign signoff pending evidence refresh",
-      "next_command": "./scripts/easy_node.sh profile-default-gate-live --host-a A_HOST --host-b B_HOST --reports-dir .easy-node-logs --campaign-timeout-sec 2400 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
-      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-default-gate-live --host-a A_HOST --host-b B_HOST --reports-dir .easy-node-logs --campaign-timeout-sec 2400 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+      "next_command": "./scripts/easy_node.sh profile-default-gate-live --host-a A_HOST --host-b B_HOST --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --reports-dir .easy-node-logs --campaign-timeout-sec 2400 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+      "next_command_sudo": "sudo ./scripts/easy_node.sh profile-default-gate-live --host-a A_HOST --host-b B_HOST --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --reports-dir .easy-node-logs --campaign-timeout-sec 2400 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
       "next_command_source": "default_non_sudo",
       "artifacts": {}
     },

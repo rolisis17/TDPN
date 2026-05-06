@@ -1010,7 +1010,7 @@ classify_track_failure_json() {
       track_group="m2_profile_default_gate_stability"
       failure_code="m2_track_failed"
       operator_next_action="Set real host/subject inputs for M2 and rerun the profile-default-gate stability cycle."
-      operator_next_command="./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a <host-a> --host-b <host-b> --campaign-subject <invite-key> --reports-dir .easy-node-logs --print-summary-json 1"
+      operator_next_command="./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a <host-a> --host-b <host-b> --campaign-subject <invite-key> --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --reports-dir .easy-node-logs --print-summary-json 1"
       hint_line="$(first_log_match_line_or_empty "$log_path" '--host-a is required|--host-b is required|--campaign-subject or --subject is required|uses placeholder token|conflicting subject values')"
       if [[ -n "$hint_line" ]]; then
         failure_kind="required_runtime_input_unresolved"

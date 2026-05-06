@@ -2661,7 +2661,14 @@ profile_default_gate_command_localhost_run_to_live_wrapper() {
     printf '%s' "$cmd"
     return
   fi
-  rebuilt_argv+=("./scripts/easy_node.sh" "profile-default-gate-live" "--host-a" "$host_a" "--host-b" "$host_b")
+  rebuilt_argv+=(
+    "./scripts/easy_node.sh" "profile-default-gate-live"
+    "--host-a" "$host_a"
+    "--host-b" "$host_b"
+    "--campaign-live-evidence" "1"
+    "--require-external-live-evidence" "1"
+    "--campaign-live-evidence-udp-inject" "0"
+  )
   if [[ -n "$reports_dir" ]]; then
     rebuilt_argv+=("--reports-dir" "$reports_dir")
   fi
@@ -3036,6 +3043,9 @@ build_profile_default_gate_stability_run_next_command() {
     "--host-a" "HOST_A"
     "--host-b" "HOST_B"
     "--campaign-subject" "INVITE_KEY"
+    "--campaign-live-evidence" "1"
+    "--require-external-live-evidence" "1"
+    "--campaign-live-evidence-udp-inject" "0"
     "--reports-dir" "$reports_dir"
     "--summary-json" "$summary_json_path"
     "--print-summary-json" "1"
@@ -3087,6 +3097,9 @@ build_profile_default_gate_stability_cycle_next_command() {
     "--host-a" "HOST_A"
     "--host-b" "HOST_B"
     "--campaign-subject" "INVITE_KEY"
+    "--campaign-live-evidence" "1"
+    "--require-external-live-evidence" "1"
+    "--campaign-live-evidence-udp-inject" "0"
     "--reports-dir" "$reports_dir"
   )
   if [[ -n "$stability_summary_json" ]]; then
@@ -10671,8 +10684,8 @@ if [[ "$profile_default_gate_status" != "pass" && "$profile_default_gate_status"
     printf -v profile_default_gate_command_reports_dir_fallback_arg '%q' "$profile_default_gate_command_reports_dir_fallback"
     printf -v profile_default_gate_command_summary_json_fallback_arg '%q' "$profile_default_gate_command_summary_json_fallback"
     printf -v profile_default_gate_fallback_campaign_timeout_sec_arg '%q' "$profile_default_gate_fallback_campaign_timeout_sec"
-    profile_default_gate_generated_next_command="$(profile_default_gate_command_with_subject_placeholder "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $profile_default_gate_command_reports_dir_fallback_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $profile_default_gate_fallback_campaign_timeout_sec_arg --summary-json $profile_default_gate_command_summary_json_fallback_arg --print-summary-json 1")"
-    profile_default_gate_generated_next_command_sudo="$(profile_default_gate_command_with_subject_placeholder "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $profile_default_gate_command_reports_dir_fallback_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $profile_default_gate_fallback_campaign_timeout_sec_arg --summary-json $profile_default_gate_command_summary_json_fallback_arg --print-summary-json 1")"
+    profile_default_gate_generated_next_command="$(profile_default_gate_command_with_subject_placeholder "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $profile_default_gate_command_reports_dir_fallback_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $profile_default_gate_fallback_campaign_timeout_sec_arg --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --summary-json $profile_default_gate_command_summary_json_fallback_arg --print-summary-json 1")"
+    profile_default_gate_generated_next_command_sudo="$(profile_default_gate_command_with_subject_placeholder "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $profile_default_gate_command_reports_dir_fallback_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $profile_default_gate_fallback_campaign_timeout_sec_arg --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --summary-json $profile_default_gate_command_summary_json_fallback_arg --print-summary-json 1")"
     if [[ -z "$profile_default_gate_next_command" ]]; then
       profile_default_gate_next_command="$profile_default_gate_generated_next_command"
     fi

@@ -421,7 +421,7 @@ family_default_hint_command() {
   local family="$1"
   case "$family" in
     profile-default)
-      printf '%s' "./scripts/easy_node.sh profile-default-gate-live --reports-dir .easy-node-logs --print-summary-json 1"
+      printf '%s' "./scripts/easy_node.sh profile-default-gate-live --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --reports-dir .easy-node-logs --print-summary-json 1"
       ;;
     runtime-actuation)
       printf '%s' "./scripts/easy_node.sh runtime-actuation-promotion-cycle --reports-dir .easy-node-logs --summary-json .easy-node-logs/runtime_actuation_promotion_cycle_latest_summary.json --print-summary-json 1"

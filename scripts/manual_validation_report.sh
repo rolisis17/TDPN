@@ -482,19 +482,19 @@ if [[ -z "$status_json_payload" ]]; then
               insufficient_evidence: false,
               docker_rehearsal_hint_available: false,
               docker_rehearsal_hint_source: null,
-              next_command: "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
-              next_command_sudo: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+              next_command: "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+              next_command_sudo: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
               next_command_source: "default_non_sudo",
               next_command_sudo_only_reason: null,
               next_command_candidates: [
                 {
                   id: "primary",
-                  command: "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+                  command: "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
                   requires_sudo: false
                 },
                 {
                   id: "sudo_fallback",
-                  command: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+                  command: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
                   requires_sudo: true
                 }
               ],
@@ -583,12 +583,12 @@ if ! printf '%s\n' "$status_json_payload" | jq -e . >/dev/null 2>&1; then
               valid_json: false,
               status: "pending",
               notes: "profile compare campaign signoff status unavailable due manual-validation-status timeout",
-              next_command: "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
-              next_command_sudo: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+              next_command: "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
+              next_command_sudo: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY",
               next_command_source: "default_non_sudo",
               next_command_candidates: [
-                { id: "primary", command: "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY", requires_sudo: false },
-                { id: "sudo_fallback", command: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY", requires_sudo: true }
+                { id: "primary", command: "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY", requires_sudo: false },
+                { id: "sudo_fallback", command: "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir .easy-node-logs --refresh-campaign 1 --fail-on-no-go 0 --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --summary-json .easy-node-logs/profile_compare_campaign_signoff_summary.json --print-summary-json 1 --campaign-subject INVITE_KEY", requires_sudo: true }
               ],
               artifacts: {
                 campaign_summary_json: "",

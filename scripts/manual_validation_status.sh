@@ -1144,10 +1144,10 @@ build_profile_default_gate_json() {
   profile_default_gate_stability_cycle_summary_json="$(abs_path "$reports_dir/profile_default_gate_stability_cycle_summary.json")"
   profile_compare_multi_vm_stability_check_summary_json="$(abs_path "$reports_dir/profile_compare_multi_vm_stability_check_summary.json")"
   profile_compare_multi_vm_stability_cycle_summary_json="$(abs_path "$reports_dir/profile_compare_multi_vm_stability_cycle_summary.json")"
-  next_command_default="$(append_profile_gate_subject_placeholder "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1")"
+  next_command_default="$(append_profile_gate_subject_placeholder "./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --summary-json $summary_json_arg --print-summary-json 1")"
   next_command_no_sudo="$next_command_default"
   next_command="$next_command_default"
-  next_command_sudo="$(append_profile_gate_subject_placeholder "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1")"
+  next_command_sudo="$(append_profile_gate_subject_placeholder "sudo ./scripts/easy_node.sh profile-compare-campaign-signoff --reports-dir $reports_dir_arg --refresh-campaign 1 --fail-on-no-go 0 --campaign-timeout-sec $campaign_timeout_sec_arg --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --summary-json $summary_json_arg --print-summary-json 1")"
 
   docker_hint_json="$(build_profile_signoff_docker_hint_json "$signoff_summary_json" "$docker_rehearsal_check_json")"
   docker_hint_available="$(jq -r 'if (.available // false) then "1" else "0" end' <<<"$docker_hint_json" 2>/dev/null || echo 0)"
@@ -1183,8 +1183,8 @@ build_profile_default_gate_json() {
     if [[ "$docker_hint_wrapper_ready" == "1" ]]; then
       printf -v docker_hint_directory_a_arg '%q' "$docker_hint_directory_a"
       printf -v docker_hint_directory_b_arg '%q' "$docker_hint_directory_b"
-      next_command_wrapper="$(append_profile_gate_subject_placeholder "./scripts/easy_node.sh profile-default-gate-run --directory-a $docker_hint_directory_a_arg --directory-b $docker_hint_directory_b_arg --reports-dir $reports_dir_arg --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1")"
-      next_command_wrapper_sudo="$(append_profile_gate_subject_placeholder "sudo ./scripts/easy_node.sh profile-default-gate-run --directory-a $docker_hint_directory_a_arg --directory-b $docker_hint_directory_b_arg --reports-dir $reports_dir_arg --campaign-timeout-sec $campaign_timeout_sec_arg --summary-json $summary_json_arg --print-summary-json 1")"
+      next_command_wrapper="$(append_profile_gate_subject_placeholder "./scripts/easy_node.sh profile-default-gate-run --directory-a $docker_hint_directory_a_arg --directory-b $docker_hint_directory_b_arg --reports-dir $reports_dir_arg --campaign-timeout-sec $campaign_timeout_sec_arg --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --summary-json $summary_json_arg --print-summary-json 1")"
+      next_command_wrapper_sudo="$(append_profile_gate_subject_placeholder "sudo ./scripts/easy_node.sh profile-default-gate-run --directory-a $docker_hint_directory_a_arg --directory-b $docker_hint_directory_b_arg --reports-dir $reports_dir_arg --campaign-timeout-sec $campaign_timeout_sec_arg --campaign-live-evidence 1 --require-external-live-evidence 1 --campaign-live-evidence-udp-inject 0 --summary-json $summary_json_arg --print-summary-json 1")"
       if [[ -n "$docker_hint_issuer_url" ]]; then
         next_command_wrapper="$next_command_wrapper --campaign-issuer-url $docker_hint_issuer_url_arg"
         next_command_wrapper_sudo="$next_command_wrapper_sudo --campaign-issuer-url $docker_hint_issuer_url_arg"
