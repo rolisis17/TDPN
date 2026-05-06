@@ -690,6 +690,43 @@ if ! grep -F -- '--live-evidence requires CLIENT_INNER_SOURCE=udp' "$LIVE_UNSAFE
   exit 1
 fi
 
+DOCKER_LIVE_INJECT_RUN_LOG="$TMP_DIR/profile_compare_docker_live_inject_run.log"
+: >"$CAPTURE"
+
+echo "[profile-compare-local] docker live evidence injector fails fast"
+set +e
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles balanced \
+  --rounds 1 \
+  --execution-mode docker \
+  --directory-urls http://127.0.0.1:29181 \
+  --issuer-url http://127.0.0.1:29182 \
+  --entry-url http://127.0.0.1:29183 \
+  --exit-url http://127.0.0.1:29184 \
+  --live-evidence 1 \
+  --live-evidence-udp-inject 1 >"$DOCKER_LIVE_INJECT_RUN_LOG" 2>&1
+docker_live_inject_rc=$?
+set -e
+if [[ "$docker_live_inject_rc" -ne 2 ]]; then
+  echo "docker live evidence injector should fail before invoking fake easy helper"
+  cat "$DOCKER_LIVE_INJECT_RUN_LOG"
+  exit 1
+fi
+if ! grep -F -- '--live-evidence-udp-inject=1 is unsupported with --execution-mode docker' "$DOCKER_LIVE_INJECT_RUN_LOG" >/dev/null; then
+  echo "docker live injector failure message missing"
+  cat "$DOCKER_LIVE_INJECT_RUN_LOG"
+  exit 1
+fi
+if [[ -s "$CAPTURE" ]]; then
+  echo "docker live injector fail-fast should not invoke easy helper"
+  cat "$CAPTURE"
+  exit 1
+fi
+
 DOCKER_LOCAL_STACK_SUMMARY_JSON="$TMP_DIR/profile_compare_docker_local_stack_summary.json"
 DOCKER_LOCAL_STACK_REPORT_MD="$TMP_DIR/profile_compare_docker_local_stack_report.md"
 DOCKER_LOCAL_STACK_RUN_LOG="$TMP_DIR/profile_compare_docker_local_stack_run.log"

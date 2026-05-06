@@ -1682,6 +1682,38 @@ if ! jq -e '.status == "fail" and .final_rc == 23 and .failure_stage == "campaig
   exit 1
 fi
 
+echo "[profile-compare-campaign-signoff] injected no-packet diagnostics give harness action"
+: >"$SIGNOFF_CAPTURE"
+CAMPAIGN_FAIL_INJECT_DIAG_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_campaign_fail_inject_diag.json"
+CAMPAIGN_FAIL_INJECT_DIAG_REPORTS_DIR="$TMP_DIR/reports_campaign_fail_inject_diag"
+mkdir -p "$CAMPAIGN_FAIL_INJECT_DIAG_REPORTS_DIR"
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+FAKE_CAMPAIGN_RC=23 \
+FAKE_CAMPAIGN_REAL_PACKET_NO_UDP_FAILURES=3 \
+FAKE_CAMPAIGN_OPERATOR_HINT="injected run saw no UDP packets" \
+FAKE_CHECK_RC=0 \
+./scripts/profile_compare_campaign_signoff.sh \
+  --reports-dir "$CAMPAIGN_FAIL_INJECT_DIAG_REPORTS_DIR" \
+  --refresh-campaign 1 \
+  --campaign-live-evidence 1 \
+  --campaign-live-evidence-udp-inject 1 \
+  --summary-json "$CAMPAIGN_FAIL_INJECT_DIAG_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_campaign_fail_inject_diag.log 2>&1
+rc_campaign_fail_inject_diag=$?
+set -e
+if [[ "$rc_campaign_fail_inject_diag" -ne 23 ]]; then
+  echo "expected rc=23 when injected diagnostic campaign stage fails"
+  cat /tmp/integration_profile_compare_campaign_signoff_campaign_fail_inject_diag.log
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .final_rc == 23 and .failure_stage == "campaign" and .decision.decision == "NO-GO" and .decision.next_operator_action == "Injected live evidence saw no UDP packets; rerun with --campaign-execution-mode local and check CLIENT_INNER_UDP_ADDR, or use --campaign-live-evidence-udp-inject 0 with an external packet source" and .decision.diagnostics.source_schema == "current" and .decision.diagnostics.likely_primary_failure == "real_packet_no_udp" and .decision.diagnostics.aggregated_diagnostics.real_packet_no_udp_failures == 3 and (.decision.diagnostics.operator_hint | contains("injected run")) and .inputs.campaign_refresh_overrides.live_evidence == true and .inputs.campaign_refresh_overrides.live_evidence_udp_inject == true and .inputs.campaign_refresh_overrides_effective.live_evidence == true and .inputs.campaign_refresh_overrides_effective.live_evidence_udp_inject == true and .stages.campaign.status == "fail" and .stages.campaign_check.attempted == false' "$CAMPAIGN_FAIL_INJECT_DIAG_SUMMARY" >/dev/null 2>&1; then
+  echo "campaign-fail injected diagnostic summary did not provide expected action"
+  cat "$CAMPAIGN_FAIL_INJECT_DIAG_SUMMARY"
+  exit 1
+fi
+
 echo "[profile-compare-campaign-signoff] check failure fail-close"
 : >"$SIGNOFF_CAPTURE"
 CHECK_FAIL_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_check_fail.json"

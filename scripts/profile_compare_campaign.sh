@@ -530,6 +530,10 @@ profiles_csv="balanced,speed,private,speed-1hop"
 rounds="3"
 timeout_sec="35"
 execution_mode="${PROFILE_COMPARE_LOCAL_CLIENT_TEST_MODE:-local}"
+execution_mode_explicit="0"
+if [[ -n "${PROFILE_COMPARE_LOCAL_CLIENT_TEST_MODE+x}" ]]; then
+  execution_mode_explicit="1"
+fi
 directory_urls=""
 bootstrap_directory=""
 discovery_wait_sec="20"
@@ -606,6 +610,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --execution-mode)
       execution_mode="${2:-}"
+      execution_mode_explicit="1"
       shift 2
       ;;
     --directory-urls)
@@ -947,7 +952,7 @@ execution_mode_adjusted="0"
 execution_mode_adjustment_reason=""
 start_local_stack_adjusted="0"
 start_local_stack_adjustment_reason=""
-if [[ "$execution_mode_effective" == "local" ]] && {
+if [[ "$execution_mode_effective" == "local" && "$execution_mode_explicit" != "1" ]] && {
   [[ -n "$directory_urls" ]] ||
   [[ -n "$bootstrap_directory" ]] ||
   [[ -n "$issuer_url" ]] ||
@@ -1493,7 +1498,13 @@ case "$likely_primary_failure" in
     operator_hint="Check live-WG transport requirements: DATA_PLANE_MODE and CLIENT_INNER_SOURCE must match the target environment."
     ;;
   real_packet_no_udp)
-    operator_hint="External/no-inject live evidence needs a real packet source or real WireGuard backend; enable command/kernel WireGuard or a live packet source, or explicitly use harness UDP injection for lab-only tests."
+    if [[ "$live_evidence_udp_inject" == "1" && "$execution_mode_effective" == "docker" ]]; then
+      operator_hint="Docker-mode injected live evidence cannot use the host loopback UDP injector; use --execution-mode local for lab injection, or use --live-evidence-udp-inject 0 with a real packet source."
+    elif [[ "$live_evidence_udp_inject" == "1" ]]; then
+      operator_hint="Injected live evidence did not reach the client UDP listener; check CLIENT_INNER_UDP_ADDR/listener binding or use a real packet source."
+    else
+      operator_hint="External/no-inject live evidence needs a real packet source or real WireGuard backend; enable command/kernel WireGuard or a live packet source, or explicitly use harness UDP injection for lab-only tests."
+    fi
     ;;
   directory_trust)
     operator_hint="Check trust reset and runtime trusted-directory key alignment before retrying."

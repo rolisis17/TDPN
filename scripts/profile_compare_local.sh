@@ -1004,6 +1004,10 @@ if [[ "$live_evidence" == "1" ]]; then
     transport_auto_data_plane_mode_opaque="1"
   fi
 fi
+if [[ "$live_evidence" == "1" && "$live_evidence_udp_inject" == "1" && "$execution_mode" == "docker" && "${PROFILE_COMPARE_LOCAL_ALLOW_DOCKER_UDP_INJECT:-0}" != "1" ]]; then
+  echo "--live-evidence-udp-inject=1 is unsupported with --execution-mode docker because the host UDP injector cannot reach the client container loopback; use --execution-mode local for injected evidence or --live-evidence-udp-inject 0 with an external packet source"
+  exit 2
+fi
 if [[ "$start_local_stack" == "auto" ]]; then
   if [[ "$explicit_endpoints" == "1" ]]; then
     start_local_stack="0"

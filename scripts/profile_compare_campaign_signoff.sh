@@ -2053,7 +2053,11 @@ case "$diagnostics_primary_failure" in
     next_operator_action="Rerun with remote docker campaign and opaque/udp transport defaults"
     ;;
   real_packet_no_udp)
-    next_operator_action="Provide a real packet source or real WireGuard backend for external/no-inject live evidence, then rerun signoff"
+    if [[ "$campaign_live_evidence_udp_inject_effective" == "1" ]]; then
+      next_operator_action="Injected live evidence saw no UDP packets; rerun with --campaign-execution-mode local and check CLIENT_INNER_UDP_ADDR, or use --campaign-live-evidence-udp-inject 0 with an external packet source"
+    else
+      next_operator_action="Provide a real packet source or real WireGuard backend for external/no-inject live evidence, then rerun signoff"
+    fi
     ;;
   directory_trust)
     next_operator_action="Run trust/runtime reset path then rerun"

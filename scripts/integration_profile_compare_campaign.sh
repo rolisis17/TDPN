@@ -508,6 +508,9 @@ if ! jq -e '
   and .summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.present == false
   and (.selected_summaries | length) == 3
   and .trend.status == "pass"
+  and .inputs.compare.execution_mode == "local"
+  and .inputs.compare.execution_mode_effective == "docker"
+  and .inputs.compare.execution_mode_adjusted == true
   and .inputs.compare.explicit_remote_endpoints == true
   and .inputs.compare.min_sources == 2
   and .inputs.compare.min_entry_operators == 1
@@ -543,6 +546,65 @@ for expected in \
     exit 1
   fi
 done
+
+echo "[profile-compare-campaign] explicit local execution is preserved for remote live evidence"
+: >"$LOCAL_CAPTURE"
+: >"$TREND_CAPTURE"
+printf '0\n' >"$LOCAL_COUNTER"
+EXPLICIT_LOCAL_JSON="$TMP_DIR/campaign_explicit_local_remote_live.json"
+PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT="$FAKE_LOCAL" \
+PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT="$FAKE_TREND" \
+FAKE_LOCAL_CAPTURE_FILE="$LOCAL_CAPTURE" \
+FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
+FAKE_LOCAL_FAIL_AT=0 \
+FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+FAKE_TREND_FORCE_FAIL=0 \
+FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
+./scripts/profile_compare_campaign.sh \
+  --campaign-runs 1 \
+  --execution-mode local \
+  --directory-urls http://dir-a:8081,http://dir-b:8081 \
+  --issuer-url http://issuer-a:8082 \
+  --entry-url http://entry-a:8083 \
+  --exit-url http://exit-a:8084 \
+  --live-evidence 1 \
+  --live-evidence-udp-inject 1 \
+  --allow-insecure-remote-http 1 \
+  --summary-json "$EXPLICIT_LOCAL_JSON" >/tmp/integration_profile_compare_campaign_explicit_local_remote_live.log 2>&1
+
+if ! jq -e '
+  .status == "pass"
+  and .inputs.compare.execution_mode == "local"
+  and .inputs.compare.execution_mode_effective == "local"
+  and .inputs.compare.execution_mode_adjusted == false
+  and .inputs.compare.live_evidence == true
+  and .inputs.compare.live_evidence_udp_inject == true
+  and .inputs.compare.explicit_remote_endpoints == true
+  and .inputs.compare.transport_auto_defaults.client_inner_source_udp == true
+' "$EXPLICIT_LOCAL_JSON" >/dev/null 2>&1; then
+  echo "explicit local remote-live summary missing expected execution metadata"
+  cat "$EXPLICIT_LOCAL_JSON"
+  cat /tmp/integration_profile_compare_campaign_explicit_local_remote_live.log
+  exit 1
+fi
+explicit_local_args_line="$(rg '^args=' "$LOCAL_CAPTURE" | head -n 1 || true)"
+if [[ -z "$explicit_local_args_line" ]]; then
+  echo "explicit local remote-live run did not invoke local compare"
+  cat "$LOCAL_CAPTURE"
+  exit 1
+fi
+for expected in '--execution-mode local' '--live-evidence 1' '--live-evidence-udp-inject 1'; do
+  if ! grep -F -- "$expected" <<<"$explicit_local_args_line" >/dev/null; then
+    echo "explicit local remote-live run missing $expected"
+    cat "$LOCAL_CAPTURE"
+    exit 1
+  fi
+done
+if grep -F -- '--execution-mode docker' <<<"$explicit_local_args_line" >/dev/null; then
+  echo "explicit local remote-live run should not be coerced to docker"
+  cat "$LOCAL_CAPTURE"
+  exit 1
+fi
 
 echo "[profile-compare-campaign] compare rc0 without summary is a failed row"
 : >"$LOCAL_CAPTURE"
