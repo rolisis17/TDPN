@@ -438,6 +438,8 @@ FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
   --issuer-url http://issuer-a:8082 \
   --entry-url http://entry-a:8083 \
   --exit-url http://exit-a:8084 \
+  --exit-country CA \
+  --exit-region ca-west \
   --min-sources 2 \
   --min-entry-operators 1 \
   --min-exit-operators 1 \
@@ -515,6 +517,8 @@ if ! jq -e '
   and .inputs.compare.min_sources == 2
   and .inputs.compare.min_entry_operators == 1
   and .inputs.compare.min_exit_operators == 1
+  and .inputs.compare.exit_country == "CA"
+  and .inputs.compare.exit_region == "ca-west"
   and .inputs.compare.require_cross_operator_pair == true
   and .inputs.compare.allow_insecure_remote_http == true
   and .inputs.compare.transport_auto_defaults.client_inner_source_udp == true
@@ -539,6 +543,8 @@ for expected in \
   '--min-sources 2' \
   '--min-entry-operators 1' \
   '--min-exit-operators 1' \
+  '--exit-country CA' \
+  '--exit-region ca-west' \
   '--require-cross-operator-pair 1'; do
   if ! rg -q -- "$expected" "$LOCAL_CAPTURE"; then
     echo "campaign did not forward $expected to profile-compare-local"

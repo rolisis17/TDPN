@@ -4815,6 +4815,9 @@ func (s *Service) buildRelayDescriptors(now time.Time) []proto.RelayDescriptor {
 			ValidUntil:     now.Add(ttl),
 		},
 	}
+	if middle, ok := s.localMiddleRelayDescriptor(now, pubB64, ttl); ok {
+		local = append(local, middle)
+	}
 	providers := s.snapshotProviderRelays(now)
 	peers := s.snapshotPeerRelays(now)
 	merged := make([]proto.RelayDescriptor, 0, len(local)+len(providers)+len(peers))
@@ -4862,6 +4865,44 @@ func (s *Service) buildRelayDescriptors(now time.Time) []proto.RelayDescriptor {
 		actuated = append(actuated, desc)
 	}
 	return actuated
+}
+
+func (s *Service) localMiddleRelayDescriptor(now time.Time, pubB64 string, ttl time.Duration) (proto.RelayDescriptor, bool) {
+	if !envEnabled("MIDDLE_RELAY_ENABLED") {
+		return proto.RelayDescriptor{}, false
+	}
+	relayID := valueWithDefault("MIDDLE_RELAY_ID", "middle-local-1")
+	operatorID := operatorIDWithDefault("MIDDLE_OPERATOR_ID", s.operatorID)
+	endpoint := strings.TrimSpace(os.Getenv("MIDDLE_ENDPOINT_PUBLIC"))
+	if endpoint == "" {
+		endpoint = strings.TrimSpace(os.Getenv("MIDDLE_DATA_ADDR"))
+	}
+	controlURL := endpointWithDefault("MIDDLE_CONTROL_URL_PUBLIC", "http://127.0.0.1:8085")
+	if relayID == "" || operatorID == "" || endpoint == "" || controlURL == "" {
+		return proto.RelayDescriptor{}, false
+	}
+	return proto.RelayDescriptor{
+		RelayID:        relayID,
+		Role:           "micro-relay",
+		OperatorID:     operatorID,
+		OriginOperator: operatorID,
+		HopCount:       0,
+		PubKey:         pubB64,
+		Endpoint:       endpoint,
+		ControlURL:     controlURL,
+		CountryCode:    countryCodeWithDefault("MIDDLE_COUNTRY_CODE", "ZZ"),
+		GeoConfidence:  scoreWithDefault("MIDDLE_GEO_CONFIDENCE", 1),
+		Region:         valueWithDefault("MIDDLE_REGION", "local"),
+		Capabilities:   []string{"wg"},
+		HopRoles:       []string{"middle"},
+		Reputation:     scoreWithDefault("MIDDLE_REPUTATION_SCORE", 0.82),
+		Uptime:         scoreWithDefault("MIDDLE_UPTIME_SCORE", 0.91),
+		Capacity:       scoreWithDefault("MIDDLE_CAPACITY_SCORE", 0.84),
+		AbusePenalty:   scoreWithDefault("MIDDLE_ABUSE_PENALTY", 0.10),
+		BondScore:      scoreWithDefault("MIDDLE_BOND_SCORE", 0.60),
+		StakeScore:     scoreWithDefault("MIDDLE_STAKE_SCORE", 0.55),
+		ValidUntil:     now.Add(ttl),
+	}, true
 }
 
 func (s *Service) microRelayEligibleForPublication(

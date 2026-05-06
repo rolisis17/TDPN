@@ -438,7 +438,7 @@ Usage:
   ./scripts/easy_node.sh self-update [--remote NAME] [--branch NAME] [--allow-dirty [0|1]] [--show-status [0|1]]
   ./scripts/easy_node.sh server-preflight [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--timeout-sec N] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh simple-server-preflight [--mode authority|provider] [--public-host HOST] [--peer-host HOST] [--prod-profile [0|1]] [--peer-identity-strict 0|1|auto] [--timeout-sec N]
-  ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--directory-admin-token TOKEN] [--entry-puzzle-secret SECRET] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]] [--federation-wait [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--federation-require-configured-healthy [0|1]] [--federation-max-cooling-retry-sec N] [--federation-max-peer-sync-age-sec N] [--federation-max-issuer-sync-age-sec N] [--federation-min-peer-success-sources N] [--federation-min-issuer-success-sources N] [--federation-min-peer-source-operators N] [--federation-min-issuer-source-operators N] [--federation-wait-summary-json PATH] [--federation-wait-print-summary-json [0|1]] [--auto-invite [0|1]] [--auto-invite-count N] [--auto-invite-tier 1|2|3] [--auto-invite-wait-sec N] [--auto-invite-fail-open [0|1]]
+  ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--issuer-sponsor-token TOKEN] [--directory-admin-token TOKEN] [--entry-puzzle-secret SECRET] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--relay-country-code CC] [--entry-country-code CC] [--exit-country-code CC] [--middle-relay [0|1]] [--middle-relay-id ID] [--middle-operator-id ID] [--middle-endpoint-public HOST:PORT] [--middle-control-url-public URL] [--middle-entry-data-addr HOST:PORT] [--middle-exit-data-addr HOST:PORT] [--middle-country-code CC] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]] [--federation-wait [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--federation-require-configured-healthy [0|1]] [--federation-max-cooling-retry-sec N] [--federation-max-peer-sync-age-sec N] [--federation-max-issuer-sync-age-sec N] [--federation-min-peer-success-sources N] [--federation-min-issuer-success-sources N] [--federation-min-peer-source-operators N] [--federation-min-issuer-source-operators N] [--federation-wait-summary-json PATH] [--federation-wait-print-summary-json [0|1]] [--auto-invite [0|1]] [--auto-invite-count N] [--auto-invite-tier 1|2|3] [--auto-invite-wait-sec N] [--auto-invite-fail-open [0|1]]
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-federation-status [--directory-url URL] [--admin-token TOKEN] [--timeout-sec N] [--show-json [0|1]] [--require-configured-healthy [0|1]] [--max-cooling-retry-sec N] [--max-peer-sync-age-sec N] [--max-issuer-sync-age-sec N] [--min-peer-success-sources N] [--min-issuer-success-sources N] [--min-peer-source-operators N] [--min-issuer-source-operators N] [--fail-on-not-ready [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh server-federation-wait [--directory-url URL] [--admin-token TOKEN] [--ready-timeout-sec N] [--poll-sec N] [--timeout-sec N] [--require-configured-healthy [0|1]] [--max-cooling-retry-sec N] [--max-peer-sync-age-sec N] [--max-issuer-sync-age-sec N] [--min-peer-success-sources N] [--min-issuer-success-sources N] [--min-peer-source-operators N] [--min-issuer-source-operators N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
@@ -3508,8 +3508,10 @@ append_published_bind_env_from_process() {
     ISSUER_PUBLISHED_BIND_ADDR \
     ENTRY_PUBLISHED_BIND_ADDR \
     EXIT_PUBLISHED_BIND_ADDR \
+    MIDDLE_PUBLISHED_BIND_ADDR \
     ENTRY_UDP_PUBLISHED_BIND_ADDR \
-    EXIT_UDP_PUBLISHED_BIND_ADDR; do
+    EXIT_UDP_PUBLISHED_BIND_ADDR \
+    MIDDLE_UDP_PUBLISHED_BIND_ADDR; do
     if [[ -n "${!bind_var+x}" && -n "$(trim "${!bind_var}")" ]]; then
       validate_env_scalar_or_die "$bind_var" "${!bind_var}"
       printf '%s=%s\n' "$bind_var" "$(trim "${!bind_var}")" >>"$env_file"
@@ -3563,11 +3565,13 @@ apply_server_up_auto_public_binds() {
     DIRECTORY_PUBLISHED_BIND_ADDR
     ENTRY_PUBLISHED_BIND_ADDR
     EXIT_PUBLISHED_BIND_ADDR
+    MIDDLE_PUBLISHED_BIND_ADDR
     ENTRY_UDP_PUBLISHED_BIND_ADDR
     EXIT_UDP_PUBLISHED_BIND_ADDR
+    MIDDLE_UDP_PUBLISHED_BIND_ADDR
   )
   if [[ "$mode" == "authority" ]]; then
-    bind_vars=(DIRECTORY_PUBLISHED_BIND_ADDR ISSUER_PUBLISHED_BIND_ADDR ENTRY_PUBLISHED_BIND_ADDR EXIT_PUBLISHED_BIND_ADDR ENTRY_UDP_PUBLISHED_BIND_ADDR EXIT_UDP_PUBLISHED_BIND_ADDR)
+    bind_vars=(DIRECTORY_PUBLISHED_BIND_ADDR ISSUER_PUBLISHED_BIND_ADDR ENTRY_PUBLISHED_BIND_ADDR EXIT_PUBLISHED_BIND_ADDR MIDDLE_PUBLISHED_BIND_ADDR ENTRY_UDP_PUBLISHED_BIND_ADDR EXIT_UDP_PUBLISHED_BIND_ADDR MIDDLE_UDP_PUBLISHED_BIND_ADDR)
   fi
 
   for bind_var in "${bind_vars[@]}"; do
@@ -3615,6 +3619,17 @@ write_authority_env() {
   local exit_wg_pubkey="${18:-}"
   local entry_route_assertion_key_path="${19:-}"
   local entry_route_assertion_pubkey="${20:-}"
+  local issuer_sponsor_api_token="${21:-}"
+  local entry_country_code="${22:-}"
+  local exit_country_code="${23:-}"
+  local middle_relay="${24:-0}"
+  local middle_relay_id="${25:-}"
+  local middle_operator_id="${26:-}"
+  local middle_endpoint_public="${27:-}"
+  local middle_control_url_public="${28:-}"
+  local middle_entry_data_addr="${29:-}"
+  local middle_exit_data_addr="${30:-}"
+  local middle_country_code="${31:-}"
   local issuer_admin_token_effective="$issuer_admin_token"
   local public_scheme="http"
   local relay_suffix
@@ -3644,6 +3659,17 @@ write_authority_env() {
   validate_env_scalar_or_die "exit_wg_pubkey" "$exit_wg_pubkey"
   validate_env_scalar_or_die "entry_route_assertion_key_path" "$entry_route_assertion_key_path"
   validate_env_scalar_or_die "entry_route_assertion_pubkey" "$entry_route_assertion_pubkey"
+  validate_env_scalar_or_die "issuer_sponsor_api_token" "$issuer_sponsor_api_token"
+  validate_env_scalar_or_die "entry_country_code" "$entry_country_code"
+  validate_env_scalar_or_die "exit_country_code" "$exit_country_code"
+  validate_env_scalar_or_die "middle_relay" "$middle_relay"
+  validate_env_scalar_or_die "middle_relay_id" "$middle_relay_id"
+  validate_env_scalar_or_die "middle_operator_id" "$middle_operator_id"
+  validate_env_scalar_or_die "middle_endpoint_public" "$middle_endpoint_public"
+  validate_env_scalar_or_die "middle_control_url_public" "$middle_control_url_public"
+  validate_env_scalar_or_die "middle_entry_data_addr" "$middle_entry_data_addr"
+  validate_env_scalar_or_die "middle_exit_data_addr" "$middle_exit_data_addr"
+  validate_env_scalar_or_die "middle_country_code" "$middle_country_code"
 
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
@@ -3664,6 +3690,16 @@ ENTRY_URL_PUBLIC=${public_scheme}://${public_host}:8083
 EXIT_CONTROL_URL_PUBLIC=${public_scheme}://${public_host}:8084
 ENTRY_ENDPOINT_PUBLIC=${public_host}:51820
 EXIT_ENDPOINT_PUBLIC=${public_host}:51821
+ENTRY_COUNTRY_CODE=${entry_country_code:-ZZ}
+EXIT_COUNTRY_CODE=${exit_country_code:-ZZ}
+MIDDLE_RELAY_ENABLED=${middle_relay}
+MIDDLE_RELAY_ID=${middle_relay_id}
+MIDDLE_OPERATOR_ID=${middle_operator_id}
+MIDDLE_ENDPOINT_PUBLIC=${middle_endpoint_public}
+MIDDLE_CONTROL_URL_PUBLIC=${middle_control_url_public}
+MIDDLE_ENTRY_DATA_ADDR=${middle_entry_data_addr}
+MIDDLE_EXIT_DATA_ADDR=${middle_exit_data_addr}
+MIDDLE_COUNTRY_CODE=${middle_country_code:-ZZ}
 CORE_DIRECTORY_URL=${public_scheme}://directory:8081
 CORE_ISSUER_URL=${public_scheme}://issuer:8082
 DIRECTORY_OPERATOR_ID=${operator_id}
@@ -3685,6 +3721,7 @@ ISSUER_ANON_REVOCATIONS_FILE=/app/data/issuer_${issuer_suffix}_anon_revocations.
 ISSUER_ANON_DISPUTES_FILE=/app/data/issuer_${issuer_suffix}_anon_disputes.json
 ISSUER_AUDIT_FILE=/app/data/issuer_${issuer_suffix}_audit.json
 ISSUER_ADMIN_TOKEN=${issuer_admin_token_effective}
+ISSUER_SPONSOR_API_TOKEN=${issuer_sponsor_api_token}
 DIRECTORY_ADMIN_TOKEN=${directory_admin_token}
 ENTRY_PUZZLE_SECRET=${entry_puzzle_secret}
 ISSUER_CLIENT_ALLOWLIST_ONLY=${client_allowlist}
@@ -3894,6 +3931,16 @@ write_provider_env() {
   local exit_wg_pubkey="${12:-}"
   local entry_route_assertion_key_path="${13:-}"
   local entry_route_assertion_pubkey="${14:-}"
+  local entry_country_code="${15:-}"
+  local exit_country_code="${16:-}"
+  local middle_relay="${17:-0}"
+  local middle_relay_id="${18:-}"
+  local middle_operator_id="${19:-}"
+  local middle_endpoint_public="${20:-}"
+  local middle_control_url_public="${21:-}"
+  local middle_entry_data_addr="${22:-}"
+  local middle_exit_data_addr="${23:-}"
+  local middle_country_code="${24:-}"
   local public_scheme="http"
   local relay_suffix
   local entry_exit_user_non_prod
@@ -3915,6 +3962,16 @@ write_provider_env() {
   validate_env_scalar_or_die "exit_wg_pubkey" "$exit_wg_pubkey"
   validate_env_scalar_or_die "entry_route_assertion_key_path" "$entry_route_assertion_key_path"
   validate_env_scalar_or_die "entry_route_assertion_pubkey" "$entry_route_assertion_pubkey"
+  validate_env_scalar_or_die "entry_country_code" "$entry_country_code"
+  validate_env_scalar_or_die "exit_country_code" "$exit_country_code"
+  validate_env_scalar_or_die "middle_relay" "$middle_relay"
+  validate_env_scalar_or_die "middle_relay_id" "$middle_relay_id"
+  validate_env_scalar_or_die "middle_operator_id" "$middle_operator_id"
+  validate_env_scalar_or_die "middle_endpoint_public" "$middle_endpoint_public"
+  validate_env_scalar_or_die "middle_control_url_public" "$middle_control_url_public"
+  validate_env_scalar_or_die "middle_entry_data_addr" "$middle_entry_data_addr"
+  validate_env_scalar_or_die "middle_exit_data_addr" "$middle_exit_data_addr"
+  validate_env_scalar_or_die "middle_country_code" "$middle_country_code"
 
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
@@ -3930,6 +3987,16 @@ ENTRY_URL_PUBLIC=${public_scheme}://${public_host}:8083
 EXIT_CONTROL_URL_PUBLIC=${public_scheme}://${public_host}:8084
 ENTRY_ENDPOINT_PUBLIC=${public_host}:51820
 EXIT_ENDPOINT_PUBLIC=${public_host}:51821
+ENTRY_COUNTRY_CODE=${entry_country_code:-ZZ}
+EXIT_COUNTRY_CODE=${exit_country_code:-ZZ}
+MIDDLE_RELAY_ENABLED=${middle_relay}
+MIDDLE_RELAY_ID=${middle_relay_id}
+MIDDLE_OPERATOR_ID=${middle_operator_id}
+MIDDLE_ENDPOINT_PUBLIC=${middle_endpoint_public}
+MIDDLE_CONTROL_URL_PUBLIC=${middle_control_url_public}
+MIDDLE_ENTRY_DATA_ADDR=${middle_entry_data_addr}
+MIDDLE_EXIT_DATA_ADDR=${middle_exit_data_addr}
+MIDDLE_COUNTRY_CODE=${middle_country_code:-ZZ}
 DIRECTORY_OPERATOR_ID=${operator_id}
 ENTRY_OPERATOR_ID=${operator_id}
 ENTRY_RELAY_ID=entry-${relay_suffix}
@@ -4647,6 +4714,18 @@ server_up() {
   local auto_invite_wait_sec="${EASY_NODE_AUTO_INVITE_WAIT_SEC:-10}"
   local auto_invite_fail_open="${EASY_NODE_AUTO_INVITE_FAIL_OPEN:-1}"
   local auto_public_bind="${EASY_NODE_AUTO_PUBLIC_BIND:-auto}"
+  local issuer_sponsor_api_token="${EASY_NODE_ISSUER_SPONSOR_API_TOKEN:-}"
+  local relay_country_code="${EASY_NODE_RELAY_COUNTRY_CODE:-}"
+  local entry_country_code="${EASY_NODE_ENTRY_COUNTRY_CODE:-${ENTRY_COUNTRY_CODE:-}}"
+  local exit_country_code="${EASY_NODE_EXIT_COUNTRY_CODE:-${EXIT_COUNTRY_CODE:-}}"
+  local middle_relay="${EASY_NODE_MIDDLE_RELAY:-0}"
+  local middle_relay_id="${EASY_NODE_MIDDLE_RELAY_ID:-}"
+  local middle_operator_id="${EASY_NODE_MIDDLE_OPERATOR_ID:-}"
+  local middle_endpoint_public="${EASY_NODE_MIDDLE_ENDPOINT_PUBLIC:-${MIDDLE_ENDPOINT_PUBLIC:-}}"
+  local middle_control_url_public="${EASY_NODE_MIDDLE_CONTROL_URL_PUBLIC:-${MIDDLE_CONTROL_URL_PUBLIC:-}}"
+  local middle_entry_data_addr="${EASY_NODE_MIDDLE_ENTRY_DATA_ADDR:-${MIDDLE_ENTRY_DATA_ADDR:-}}"
+  local middle_exit_data_addr="${EASY_NODE_MIDDLE_EXIT_DATA_ADDR:-${MIDDLE_EXIT_DATA_ADDR:-}}"
+  local middle_country_code="${EASY_NODE_MIDDLE_COUNTRY_CODE:-${MIDDLE_COUNTRY_CODE:-}}"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -4847,6 +4926,59 @@ server_up() {
           shift
         fi
         ;;
+      --issuer-sponsor-token)
+        issuer_sponsor_api_token="${2:-}"
+        shift 2
+        ;;
+      --relay-country-code)
+        relay_country_code="${2:-}"
+        shift 2
+        ;;
+      --entry-country-code)
+        entry_country_code="${2:-}"
+        shift 2
+        ;;
+      --exit-country-code)
+        exit_country_code="${2:-}"
+        shift 2
+        ;;
+      --middle-relay)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+          middle_relay="${2:-}"
+          shift 2
+        else
+          middle_relay="1"
+          shift
+        fi
+        ;;
+      --middle-relay-id)
+        middle_relay_id="${2:-}"
+        shift 2
+        ;;
+      --middle-operator-id)
+        middle_operator_id="${2:-}"
+        shift 2
+        ;;
+      --middle-endpoint-public)
+        middle_endpoint_public="${2:-}"
+        shift 2
+        ;;
+      --middle-control-url-public)
+        middle_control_url_public="${2:-}"
+        shift 2
+        ;;
+      --middle-entry-data-addr|--middle-route-entry-data-addr)
+        middle_entry_data_addr="${2:-}"
+        shift 2
+        ;;
+      --middle-exit-data-addr|--middle-route-exit-data-addr)
+        middle_exit_data_addr="${2:-}"
+        shift 2
+        ;;
+      --middle-country-code)
+        middle_country_code="${2:-}"
+        shift 2
+        ;;
       *)
         echo "unknown arg for server-up: $1"
         exit 2
@@ -4955,6 +5087,14 @@ server_up() {
   fi
   if [[ "$auto_public_bind" != "0" && "$auto_public_bind" != "1" && "$auto_public_bind" != "auto" ]]; then
     echo "server-up requires EASY_NODE_AUTO_PUBLIC_BIND to be 0, 1, or auto"
+    exit 2
+  fi
+  if [[ "$middle_relay" != "0" && "$middle_relay" != "1" ]]; then
+    echo "server-up requires --middle-relay (or EASY_NODE_MIDDLE_RELAY) to be 0 or 1"
+    exit 2
+  fi
+  if [[ "$prod_profile" == "1" && "$middle_relay" == "1" ]]; then
+    echo "server-up --middle-relay is a non-prod lab automation path; disable it for prod-profile"
     exit 2
   fi
 
@@ -5107,6 +5247,65 @@ server_up() {
     fi
   else
     issuer_id="${stored_issuer_id:-}"
+  fi
+
+  if [[ -n "$relay_country_code" ]]; then
+    if [[ -z "$entry_country_code" ]]; then
+      entry_country_code="$relay_country_code"
+    fi
+    if [[ -z "$exit_country_code" ]]; then
+      exit_country_code="$relay_country_code"
+    fi
+  fi
+  entry_country_code="${entry_country_code:-ZZ}"
+  exit_country_code="${exit_country_code:-ZZ}"
+  middle_country_code="${middle_country_code:-ZZ}"
+
+  if [[ "$middle_relay" == "1" ]]; then
+    local middle_suffix middle_peer_host middle_authority_host
+    middle_suffix="$(sanitize_id_component "$operator_id")"
+    if [[ -z "$middle_relay_id" ]]; then
+      middle_relay_id="middle-${middle_suffix}"
+    fi
+    if [[ -z "$middle_operator_id" ]]; then
+      middle_operator_id="op-middle-${middle_suffix}"
+    fi
+    if [[ -z "$middle_endpoint_public" && -n "$local_host" ]]; then
+      middle_endpoint_public="${local_host}:51822"
+    fi
+    if [[ -z "$middle_control_url_public" && -n "$local_host" ]]; then
+      middle_control_url_public="${url_scheme}://${local_host}:8085"
+    fi
+    if [[ -z "$middle_entry_data_addr" || -z "$middle_exit_data_addr" ]]; then
+      middle_peer_host=""
+      middle_authority_host=""
+      if [[ "$mode" == "provider" && -n "$authority_directory" ]]; then
+        middle_authority_host="$(host_from_url "$authority_directory")"
+      elif [[ -n "$peer_dirs" ]]; then
+        middle_peer_host="$(host_from_url "$(first_csv_item "$peer_dirs")")"
+      fi
+      if [[ -z "$middle_entry_data_addr" ]]; then
+        if [[ "$mode" == "provider" && -n "$middle_authority_host" ]]; then
+          middle_entry_data_addr="${middle_authority_host}:51820"
+        elif [[ -n "$local_host" ]]; then
+          middle_entry_data_addr="${local_host}:51820"
+        else
+          middle_entry_data_addr="entry-exit:51820"
+        fi
+      fi
+      if [[ -z "$middle_exit_data_addr" ]]; then
+        if [[ "$mode" == "authority" && -n "$middle_peer_host" ]]; then
+          middle_exit_data_addr="${middle_peer_host}:51821"
+        elif [[ -n "$local_host" ]]; then
+          middle_exit_data_addr="${local_host}:51821"
+        else
+          middle_exit_data_addr="entry-exit:51821"
+        fi
+      fi
+    fi
+    if [[ -z "$issuer_sponsor_api_token" && "$mode" == "authority" ]]; then
+      issuer_sponsor_api_token="$(random_token)"
+    fi
   fi
 
   local admin_sign_key_file_local=""
@@ -5354,21 +5553,27 @@ server_up() {
   write_identity_config "$operator_id" "$issuer_id"
 
   if [[ "$mode" == "authority" ]]; then
-    write_authority_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred" "$prod_profile" "$admin_signers_file_container" "$admin_sign_key_id" "$admin_sign_key_file_local" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey" "$entry_route_assertion_key_container" "$entry_route_assertion_pubkey"
+    write_authority_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred" "$prod_profile" "$admin_signers_file_container" "$admin_sign_key_id" "$admin_sign_key_file_local" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey" "$entry_route_assertion_key_container" "$entry_route_assertion_pubkey" "$issuer_sponsor_api_token" "$entry_country_code" "$exit_country_code" "$middle_relay" "$middle_relay_id" "$middle_operator_id" "$middle_endpoint_public" "$middle_control_url_public" "$middle_entry_data_addr" "$middle_exit_data_addr" "$middle_country_code"
     append_published_bind_env_from_process "$AUTHORITY_ENV_FILE"
-    compose_with_env "$AUTHORITY_ENV_FILE" up -d --build directory issuer entry-exit
+    local -a authority_services=(directory issuer entry-exit)
+    if [[ "$middle_relay" == "1" ]]; then
+      authority_services+=(middle)
+    fi
+    compose_with_env "$AUTHORITY_ENV_FILE" up -d --build "${authority_services[@]}"
 
-    local directory_local_base issuer_local_base entry_local_base exit_local_base
-    local -a directory_local_opts issuer_local_opts entry_local_opts exit_local_opts
+    local directory_local_base issuer_local_base entry_local_base exit_local_base middle_local_base
+    local -a directory_local_opts issuer_local_opts entry_local_opts exit_local_opts middle_local_opts
     local -a public_opts
     directory_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host DIRECTORY_PUBLISHED_BIND_ADDR)" 8081)"
     issuer_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host ISSUER_PUBLISHED_BIND_ADDR)" 8082)"
     entry_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host ENTRY_PUBLISHED_BIND_ADDR)" 8083)"
     exit_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host EXIT_PUBLISHED_BIND_ADDR)" 8084)"
+    middle_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host MIDDLE_PUBLISHED_BIND_ADDR)" 8085)"
     mapfile -t directory_local_opts < <(curl_tls_opts_for_url "$directory_local_base")
     mapfile -t issuer_local_opts < <(curl_tls_opts_for_url "$issuer_local_base")
     mapfile -t entry_local_opts < <(curl_tls_opts_for_url "$entry_local_base")
     mapfile -t exit_local_opts < <(curl_tls_opts_for_url "$exit_local_base")
+    mapfile -t middle_local_opts < <(curl_tls_opts_for_url "$middle_local_base")
     mapfile -t public_opts < <(curl_tls_opts_for_url "${url_scheme}://${public_host}:8081")
 
     # Validate the actual published bind target. When bind is wildcard/default,
@@ -5377,6 +5582,9 @@ server_up() {
     wait_http_ok_with_opts "${issuer_local_base}/v1/pubkeys" "local issuer" 40 "${issuer_local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=80 issuer; exit 1; }
     wait_http_ok_with_opts "${entry_local_base}/v1/health" "local entry" 40 "${entry_local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
     wait_http_ok_with_opts "${exit_local_base}/v1/health" "local exit" 40 "${exit_local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+    if [[ "$middle_relay" == "1" ]]; then
+      wait_http_ok_with_opts "${middle_local_base}/v1/ready" "local middle" 40 "${middle_local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 middle; exit 1; }
+    fi
 
     # Optional public endpoint validation (can fail on NAT loopback setups).
     if [[ "${EASY_NODE_VERIFY_PUBLIC:-0}" == "1" ]] && ! host_is_loopback "$public_host"; then
@@ -5384,6 +5592,9 @@ server_up() {
       wait_http_ok_with_opts "${url_scheme}://${public_host}:8082/v1/pubkeys" "public issuer" 15 "${public_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=80 issuer; exit 1; }
       wait_http_ok_with_opts "${url_scheme}://${public_host}:8083/v1/health" "public entry" 15 "${public_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
       wait_http_ok_with_opts "${url_scheme}://${public_host}:8084/v1/health" "public exit" 15 "${public_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+      if [[ "$middle_relay" == "1" ]]; then
+        wait_http_ok_with_opts "${url_scheme}://${public_host}:8085/v1/ready" "public middle" 15 "${public_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 middle; exit 1; }
+      fi
     fi
     write_server_mode "authority"
 
@@ -5412,6 +5623,9 @@ server_up() {
     fi
     echo "client_allowlist: $client_allowlist"
     echo "allow_anon_cred: $allow_anon_cred"
+    if [[ "$middle_relay" == "1" ]]; then
+      echo "middle_relay: enabled relay_id=$middle_relay_id operator_id=$middle_operator_id endpoint=$middle_endpoint_public route=${middle_entry_data_addr}->${middle_exit_data_addr}"
+    fi
     if [[ "$prod_profile" == "1" ]]; then
       echo "prod profile: enabled (mTLS + signed admin controls enforced)"
       echo "admin_signing_key_id: $admin_sign_key_id"
@@ -5434,6 +5648,9 @@ server_up() {
       echo "  curl ${url_scheme}://${public_host}:8082/v1/pubkeys"
       echo "  curl ${url_scheme}://${public_host}:8083/v1/health"
       echo "  curl ${url_scheme}://${public_host}:8084/v1/health"
+      if [[ "$middle_relay" == "1" ]]; then
+        echo "  curl ${url_scheme}://${public_host}:8085/v1/ready"
+      fi
     fi
     if [[ "$auto_invite" == "1" ]]; then
       local auto_invite_issuer_url
@@ -5458,26 +5675,35 @@ server_up() {
       fi
     fi
   else
-    write_provider_env "$public_host" "$operator_id" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey" "$entry_route_assertion_key_container" "$entry_route_assertion_pubkey"
+    write_provider_env "$public_host" "$operator_id" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey" "$entry_route_assertion_key_container" "$entry_route_assertion_pubkey" "$entry_country_code" "$exit_country_code" "$middle_relay" "$middle_relay_id" "$middle_operator_id" "$middle_endpoint_public" "$middle_control_url_public" "$middle_entry_data_addr" "$middle_exit_data_addr" "$middle_country_code"
     append_published_bind_env_from_process "$PROVIDER_ENV_FILE"
-    compose_with_env "$PROVIDER_ENV_FILE" up -d --build --no-deps directory entry-exit
+    local -a provider_services=(directory entry-exit)
+    if [[ "$middle_relay" == "1" ]]; then
+      provider_services+=(middle)
+    fi
+    compose_with_env "$PROVIDER_ENV_FILE" up -d --build --no-deps "${provider_services[@]}"
 
-    local directory_local_base entry_local_base exit_local_base
-    local -a directory_local_opts entry_local_opts exit_local_opts
+    local directory_local_base entry_local_base exit_local_base middle_local_base
+    local -a directory_local_opts entry_local_opts exit_local_opts middle_local_opts
     local -a public_opts
     local -a issuer_opts
     directory_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host DIRECTORY_PUBLISHED_BIND_ADDR)" 8081)"
     entry_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host ENTRY_PUBLISHED_BIND_ADDR)" 8083)"
     exit_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host EXIT_PUBLISHED_BIND_ADDR)" 8084)"
+    middle_local_base="$(control_url_from_host_port "$url_scheme" "$(published_bind_probe_host MIDDLE_PUBLISHED_BIND_ADDR)" 8085)"
     mapfile -t directory_local_opts < <(curl_tls_opts_for_url "$directory_local_base")
     mapfile -t entry_local_opts < <(curl_tls_opts_for_url "$entry_local_base")
     mapfile -t exit_local_opts < <(curl_tls_opts_for_url "$exit_local_base")
+    mapfile -t middle_local_opts < <(curl_tls_opts_for_url "$middle_local_base")
     mapfile -t public_opts < <(curl_tls_opts_for_url "${url_scheme}://${public_host}:8081")
     mapfile -t issuer_opts < <(curl_tls_opts_for_url "${authority_issuer}")
 
     wait_http_ok_with_opts "${directory_local_base}/v1/relays" "local directory" 40 "${directory_local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=80 directory; exit 1; }
     wait_http_ok_with_opts "${entry_local_base}/v1/health" "local entry" 40 "${entry_local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
     wait_http_ok_with_opts "${exit_local_base}/v1/health" "local exit" 40 "${exit_local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+    if [[ "$middle_relay" == "1" ]]; then
+      wait_http_ok_with_opts "${middle_local_base}/v1/ready" "local middle" 40 "${middle_local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 middle; exit 1; }
+    fi
     wait_http_ok_with_opts "${authority_issuer}/v1/pubkeys" "authority issuer" 20 "${issuer_opts[@]}" || {
       if [[ "$prod_profile" == "1" ]]; then
         print_prod_https_mismatch_hint_for_endpoint "$(trim_url "$authority_issuer")/v1/pubkeys" "authority issuer ${authority_issuer}" 4 || true
@@ -5490,6 +5716,9 @@ server_up() {
       wait_http_ok_with_opts "${url_scheme}://${public_host}:8081/v1/relays" "public directory" 15 "${public_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=80 directory; exit 1; }
       wait_http_ok_with_opts "${url_scheme}://${public_host}:8083/v1/health" "public entry" 15 "${public_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
       wait_http_ok_with_opts "${url_scheme}://${public_host}:8084/v1/health" "public exit" 15 "${public_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
+      if [[ "$middle_relay" == "1" ]]; then
+        wait_http_ok_with_opts "${url_scheme}://${public_host}:8085/v1/ready" "public middle" 15 "${public_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 middle; exit 1; }
+      fi
     fi
     write_server_mode "provider"
 
@@ -5514,6 +5743,9 @@ server_up() {
     fi
     echo "authority_directory: $authority_directory"
     echo "authority_issuer: $authority_issuer"
+    if [[ "$middle_relay" == "1" ]]; then
+      echo "middle_relay: enabled relay_id=$middle_relay_id operator_id=$middle_operator_id endpoint=$middle_endpoint_public route=${middle_entry_data_addr}->${middle_exit_data_addr}"
+    fi
     echo "health checks:"
     if [[ "$prod_profile" == "1" ]]; then
       local mtls_material ca_file cert_file key_file
@@ -5526,6 +5758,9 @@ server_up() {
       echo "  curl ${url_scheme}://${public_host}:8081/v1/relays"
       echo "  curl ${url_scheme}://${public_host}:8083/v1/health"
       echo "  curl ${url_scheme}://${public_host}:8084/v1/health"
+      if [[ "$middle_relay" == "1" ]]; then
+        echo "  curl ${url_scheme}://${public_host}:8085/v1/ready"
+      fi
     fi
   fi
 

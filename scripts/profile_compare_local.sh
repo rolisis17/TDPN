@@ -23,10 +23,12 @@ Usage:
     [--bootstrap-directory URL] \
     [--discovery-wait-sec N] \
     [--issuer-url URL] \
-    [--entry-url URL] \
-    [--exit-url URL] \
-    [--subject ID | --anon-cred TOKEN] \
-    [--min-sources N] \
+	    [--entry-url URL] \
+	    [--exit-url URL] \
+	    [--subject ID | --anon-cred TOKEN] \
+	    [--exit-country CC] \
+	    [--exit-region REGION] \
+	    [--min-sources N] \
     [--min-entry-operators N] \
     [--min-exit-operators N] \
     [--require-cross-operator-pair [0|1]] \
@@ -497,6 +499,8 @@ entry_url=""
 exit_url=""
 subject=""
 anon_cred=""
+exit_country="${PROFILE_COMPARE_LOCAL_EXIT_COUNTRY:-}"
+exit_region="${PROFILE_COMPARE_LOCAL_EXIT_REGION:-}"
 min_sources="1"
 min_entry_operators="${PROFILE_COMPARE_LOCAL_MIN_ENTRY_OPERATORS:-1}"
 min_entry_operators_explicit="0"
@@ -569,6 +573,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --anon-cred)
       anon_cred="${2:-}"
+      shift 2
+      ;;
+    --exit-country)
+      exit_country="${2:-}"
+      shift 2
+      ;;
+    --exit-region)
+      exit_region="${2:-}"
       shift 2
       ;;
     --min-sources)
@@ -1313,6 +1325,12 @@ for profile in "${profiles[@]}"; do
     if [[ -n "$anon_cred" ]]; then
       run_cmd+=(--anon-cred "$anon_cred")
     fi
+    if [[ -n "$exit_country" ]]; then
+      run_cmd+=(--exit-country "$exit_country")
+    fi
+    if [[ -n "$exit_region" ]]; then
+      run_cmd+=(--exit-region "$exit_region")
+    fi
 
     min_entry_operators_required="$min_entry_operators"
     if [[ "$profile" == "speed-1hop" && "$min_entry_operators_explicit" == "0" ]]; then
@@ -1832,6 +1850,8 @@ jq -n \
   --arg exit_url "$exit_url_artifact" \
   --arg subject "$subject_redacted" \
   --arg anon_cred_present "$anon_cred_present" \
+  --arg exit_country "$exit_country" \
+  --arg exit_region "$exit_region" \
   --arg min_sources "$min_sources" \
   --arg min_entry_operators "$min_entry_operators" \
   --arg min_exit_operators "$min_exit_operators" \
@@ -1894,6 +1914,8 @@ jq -n \
       exit_url: $exit_url,
       subject: $subject,
       anon_cred_present: ($anon_cred_present == "1"),
+      exit_country: $exit_country,
+      exit_region: $exit_region,
       min_sources: ($min_sources | tonumber),
       min_entry_operators: ($min_entry_operators | tonumber),
       min_exit_operators: ($min_exit_operators | tonumber),

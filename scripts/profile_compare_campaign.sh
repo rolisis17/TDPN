@@ -27,10 +27,12 @@ Usage:
     [--bootstrap-directory URL] \
     [--discovery-wait-sec N] \
     [--issuer-url URL] \
-    [--entry-url URL] \
-    [--exit-url URL] \
-    [--subject ID | --anon-cred TOKEN] \
-    [--min-sources N] \
+	    [--entry-url URL] \
+	    [--exit-url URL] \
+	    [--subject ID | --anon-cred TOKEN] \
+	    [--exit-country CC] \
+	    [--exit-region REGION] \
+	    [--min-sources N] \
     [--min-entry-operators N] \
     [--min-exit-operators N] \
     [--require-cross-operator-pair [0|1]] \
@@ -542,6 +544,8 @@ entry_url=""
 exit_url=""
 subject=""
 anon_cred=""
+exit_country="${PROFILE_COMPARE_CAMPAIGN_EXIT_COUNTRY:-}"
+exit_region="${PROFILE_COMPARE_CAMPAIGN_EXIT_REGION:-}"
 min_sources="1"
 min_entry_operators="${PROFILE_COMPARE_CAMPAIGN_MIN_ENTRY_OPERATORS:-1}"
 min_exit_operators="${PROFILE_COMPARE_CAMPAIGN_MIN_EXIT_OPERATORS:-1}"
@@ -643,6 +647,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --anon-cred)
       anon_cred="${2:-}"
+      shift 2
+      ;;
+    --exit-country)
+      exit_country="${2:-}"
+      shift 2
+      ;;
+    --exit-region)
+      exit_region="${2:-}"
       shift 2
       ;;
     --min-sources)
@@ -1138,6 +1150,12 @@ for ((run_idx = 1; run_idx <= campaign_runs; run_idx++)); do
   if [[ -n "$anon_cred" ]]; then
     compare_cmd+=(--anon-cred "$anon_cred")
   fi
+  if [[ -n "$exit_country" ]]; then
+    compare_cmd+=(--exit-country "$exit_country")
+  fi
+  if [[ -n "$exit_region" ]]; then
+    compare_cmd+=(--exit-region "$exit_region")
+  fi
 
   rm -f "$compare_summary" "$compare_report"
   campaign_log_event "stage=compare-start run_index=$run_idx run_total=$campaign_runs run_id=$run_id elapsed_sec=$(campaign_elapsed_sec "$campaign_started_epoch")"
@@ -1562,6 +1580,8 @@ jq -n \
   --arg exit_url "$exit_url_artifact" \
   --arg subject "$subject_redacted" \
   --arg anon_cred_present "$anon_cred_present" \
+  --arg exit_country "$exit_country" \
+  --arg exit_region "$exit_region" \
   --arg start_local_stack "$start_local_stack" \
   --arg client_iface "$client_iface" \
   --arg exit_iface "$exit_iface" \
@@ -1657,6 +1677,8 @@ jq -n \
         exit_url: $exit_url,
         subject: $subject,
         anon_cred_present: ($anon_cred_present == "1"),
+        exit_country: $exit_country,
+        exit_region: $exit_region,
         min_sources: $min_sources,
         min_entry_operators: $min_entry_operators,
         min_exit_operators: $min_exit_operators,

@@ -69,6 +69,9 @@ if [[ "${1:-}" == "compose" && "${2:-}" == "version" ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "compose" ]]; then
+  if [[ -n "${FAKE_DOCKER_ARGS_CAPTURE:-}" ]]; then
+    printf '%s\n' "$*" >>"$FAKE_DOCKER_ARGS_CAPTURE"
+  fi
   if [[ -n "${FAKE_DOCKER_ENV_CAPTURE:-}" ]]; then
     {
       printf 'CORE_DIRECTORY_URL=%s\n' "${CORE_DIRECTORY_URL-}"
@@ -182,10 +185,15 @@ if [[ "\${1:-}" == "run" && "\${2:-}" == "./cmd/adminsig" ]]; then
     gen)
       private_key_out=""
       key_id_out=""
+      public_key_out=""
       while [[ \$# -gt 0 ]]; do
         case "\$1" in
           --private-key-out)
             private_key_out="\${2:-}"
+            shift 2
+            ;;
+          --public-key-out)
+            public_key_out="\${2:-}"
             shift 2
             ;;
           --key-id-out)
@@ -198,6 +206,7 @@ if [[ "\${1:-}" == "run" && "\${2:-}" == "./cmd/adminsig" ]]; then
         esac
       done
       [[ -n "\$private_key_out" ]] && printf 'test-admin-private-key\n' >"\$private_key_out"
+      [[ -n "\$public_key_out" ]] && printf 'test-admin-public-key\n' >"\$public_key_out"
       [[ -n "\$key_id_out" ]] && printf 'test-admin-key\n' >"\$key_id_out"
       exit 0
       ;;
@@ -356,6 +365,73 @@ for expected_url in \
     exit 1
   fi
 done
+
+echo "[server-up-auto-invite] authority middle relay lab route"
+AUTH_MIDDLE_LOG="$TMP_DIR/authority_middle_relay.log"
+AUTH_MIDDLE_DOCKER_ARGS_CAPTURE="$TMP_DIR/authority_middle_relay_docker_args.log"
+AUTH_MIDDLE_CURL_CAPTURE="$TMP_DIR/authority_middle_relay_curl_urls.log"
+set +e
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+FAKE_DOCKER_ARGS_CAPTURE="$AUTH_MIDDLE_DOCKER_ARGS_CAPTURE" \
+FAKE_CURL_URL_CAPTURE="$AUTH_MIDDLE_CURL_CAPTURE" \
+./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host 100.64.0.10 \
+  --operator-id opa \
+  --peer-directories http://100.64.0.20:8081 \
+  --peer-identity-strict 0 \
+  --beta-profile 1 \
+  --prod-profile 0 \
+  --auto-invite 0 \
+  --entry-country-code US \
+  --exit-country-code US \
+  --middle-relay 1 \
+  --middle-country-code MX >"$AUTH_MIDDLE_LOG" 2>&1
+auth_middle_rc=$?
+set -e
+if [[ "$auth_middle_rc" != "0" ]]; then
+  echo "authority middle-relay scenario failed rc=${auth_middle_rc}"
+  cat "$AUTH_MIDDLE_LOG"
+  exit "$auth_middle_rc"
+fi
+for expected_middle_env in \
+  'ENTRY_COUNTRY_CODE=US' \
+  'EXIT_COUNTRY_CODE=US' \
+  'MIDDLE_RELAY_ENABLED=1' \
+  'MIDDLE_RELAY_ID=middle-opa' \
+  'MIDDLE_OPERATOR_ID=op-middle-opa' \
+  'MIDDLE_ENDPOINT_PUBLIC=100.64.0.10:51822' \
+  'MIDDLE_CONTROL_URL_PUBLIC=http://100.64.0.10:8085' \
+  'MIDDLE_ENTRY_DATA_ADDR=100.64.0.10:51820' \
+  'MIDDLE_EXIT_DATA_ADDR=100.64.0.20:51821' \
+  'MIDDLE_COUNTRY_CODE=MX'; do
+  if ! rg -Fqx "$expected_middle_env" "$AUTH_ENV"; then
+    echo "expected authority middle env: $expected_middle_env"
+    cat "$AUTH_ENV"
+    exit 1
+  fi
+done
+if ! rg -q '^ISSUER_SPONSOR_API_TOKEN=[0-9a-f]{32}$' "$AUTH_ENV"; then
+  echo "expected authority middle mode to generate a sponsor API token"
+  cat "$AUTH_ENV"
+  exit 1
+fi
+if ! rg -q -- 'up -d --build directory issuer entry-exit middle' "$AUTH_MIDDLE_DOCKER_ARGS_CAPTURE"; then
+  echo "expected authority compose invocation to include middle service"
+  cat "$AUTH_MIDDLE_DOCKER_ARGS_CAPTURE"
+  exit 1
+fi
+if ! rg -Fq 'http://127.0.0.1:8085/v1/ready' "$AUTH_MIDDLE_CURL_CAPTURE"; then
+  echo "expected authority middle local readiness probe"
+  cat "$AUTH_MIDDLE_CURL_CAPTURE"
+  exit 1
+fi
+if ! rg -q 'middle_relay: enabled relay_id=middle-opa operator_id=op-middle-opa endpoint=100\.64\.0\.10:51822 route=100\.64\.0\.10:51820->100\.64\.0\.20:51821' "$AUTH_MIDDLE_LOG"; then
+  echo "expected authority middle summary output"
+  cat "$AUTH_MIDDLE_LOG"
+  exit 1
+fi
 
 echo "[server-up-auto-invite] authority published bind health targets"
 AUTH_BIND_LOG="$TMP_DIR/authority_published_bind.log"
@@ -633,5 +709,61 @@ for expected_lab_env in \
     exit 1
   fi
 done
+
+echo "[server-up-auto-invite] provider middle relay lab route"
+PROVIDER_MIDDLE_LOG="$TMP_DIR/provider_middle_relay.log"
+PROVIDER_MIDDLE_DOCKER_ARGS_CAPTURE="$TMP_DIR/provider_middle_relay_docker_args.log"
+PROVIDER_MIDDLE_CURL_CAPTURE="$TMP_DIR/provider_middle_relay_curl_urls.log"
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+FAKE_DOCKER_ARGS_CAPTURE="$PROVIDER_MIDDLE_DOCKER_ARGS_CAPTURE" \
+FAKE_CURL_URL_CAPTURE="$PROVIDER_MIDDLE_CURL_CAPTURE" \
+./scripts/easy_node.sh server-up \
+  --mode provider \
+  --public-host 100.64.0.20 \
+  --operator-id opb \
+  --authority-directory http://100.64.0.10:8081 \
+  --authority-issuer http://100.64.0.10:8082 \
+  --peer-directories http://100.64.0.10:8081 \
+  --peer-identity-strict 0 \
+  --beta-profile 1 \
+  --prod-profile 0 \
+  --auto-invite 0 \
+  --relay-country-code CA \
+  --middle-relay 1 \
+  --middle-country-code MX >"$PROVIDER_MIDDLE_LOG" 2>&1
+
+for expected_middle_env in \
+  'ENTRY_COUNTRY_CODE=CA' \
+  'EXIT_COUNTRY_CODE=CA' \
+  'MIDDLE_RELAY_ENABLED=1' \
+  'MIDDLE_RELAY_ID=middle-opb' \
+  'MIDDLE_OPERATOR_ID=op-middle-opb' \
+  'MIDDLE_ENDPOINT_PUBLIC=100.64.0.20:51822' \
+  'MIDDLE_CONTROL_URL_PUBLIC=http://100.64.0.20:8085' \
+  'MIDDLE_ENTRY_DATA_ADDR=100.64.0.10:51820' \
+  'MIDDLE_EXIT_DATA_ADDR=100.64.0.20:51821' \
+  'MIDDLE_COUNTRY_CODE=MX'; do
+  if ! rg -Fqx "$expected_middle_env" "$PROVIDER_ENV"; then
+    echo "expected provider middle env: $expected_middle_env"
+    cat "$PROVIDER_ENV"
+    exit 1
+  fi
+done
+if ! rg -q -- 'up -d --build --no-deps directory entry-exit middle' "$PROVIDER_MIDDLE_DOCKER_ARGS_CAPTURE"; then
+  echo "expected provider compose invocation to include middle service"
+  cat "$PROVIDER_MIDDLE_DOCKER_ARGS_CAPTURE"
+  exit 1
+fi
+if ! rg -Fq 'http://127.0.0.1:8085/v1/ready' "$PROVIDER_MIDDLE_CURL_CAPTURE"; then
+  echo "expected provider middle local readiness probe"
+  cat "$PROVIDER_MIDDLE_CURL_CAPTURE"
+  exit 1
+fi
+if ! rg -q 'middle_relay: enabled relay_id=middle-opb operator_id=op-middle-opb endpoint=100\.64\.0\.20:51822 route=100\.64\.0\.10:51820->100\.64\.0\.20:51821' "$PROVIDER_MIDDLE_LOG"; then
+  echo "expected provider middle summary output"
+  cat "$PROVIDER_MIDDLE_LOG"
+  exit 1
+fi
 
 echo "easy-node server-up auto-invite integration check ok"

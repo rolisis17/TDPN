@@ -174,6 +174,8 @@ PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
   --issuer-url http://issuer-a:8082 \
   --entry-url http://entry-a:8083 \
   --exit-url http://exit-a:8084 \
+  --exit-country CA \
+  --exit-region ca-west \
   --summary-json "$SUMMARY_JSON" \
   --report-md "$REPORT_MD" \
   --print-summary-json 1 >"$RUN_LOG"
@@ -224,6 +226,8 @@ if ! jq -e '
   and .summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.present == false
   and (.summary.m4_micro_relay_evidence.trust_tier_port_unlock_wiring.reason | type == "string")
   and ([.profiles[] | select(.profile == "speed-1hop")][0].direct_exit_forced_runs == 2)
+  and .inputs.exit_country == "CA"
+  and .inputs.exit_region == "ca-west"
 ' "$SUMMARY_JSON" >/dev/null; then
   echo "summary json missing expected fields"
   cat "$SUMMARY_JSON"
@@ -234,6 +238,13 @@ if rg -q '^wg-only-stack-up' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
+for expected in '--exit-country CA' '--exit-region ca-west'; do
+  if ! rg -q -- "$expected" "$CAPTURE"; then
+    echo "expected profile compare local to forward $expected"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
 remote_env_line="$(rg '^env ' "$CAPTURE" | tail -n 1 || true)"
 if [[ -z "$remote_env_line" ]]; then
   echo "missing remote env capture line"
