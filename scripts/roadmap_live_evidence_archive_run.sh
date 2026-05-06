@@ -37,6 +37,10 @@ Defaults:
   --missing-source-policy warn
   --summary-json <reports-dir>/roadmap_live_evidence_archive_run_summary.json
   --print-summary-json 1
+
+Fallback safety:
+  ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_FALLBACK_MAX_AGE_SEC controls default
+  fallback artifact freshness (default: 86400 seconds).
 USAGE
 }
 
@@ -45,6 +49,13 @@ trim() {
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s' "$value"
+}
+
+iso8601_to_epoch() {
+  local value
+  value="$(trim "${1:-}")"
+  [[ -n "$value" ]] || return 1
+  jq -nr --arg ts "$value" 'try ($ts | fromdateiso8601) catch empty'
 }
 
 strip_wrapping_quotes() {
@@ -241,6 +252,15 @@ bool_arg_or_die() {
   fi
 }
 
+int_arg_or_die() {
+  local name="$1"
+  local value="$2"
+  if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+    echo "$name must be a non-negative integer"
+    exit 2
+  fi
+}
+
 scope_arg_or_die() {
   local value="$1"
   case "$value" in
@@ -294,6 +314,7 @@ scope="${ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_SCOPE:-auto}"
 missing_source_policy="${ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_MISSING_SOURCE_POLICY:-warn}"
 summary_json="${ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_SUMMARY_JSON:-}"
 print_summary_json="${ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_PRINT_SUMMARY_JSON:-1}"
+fallback_max_age_sec="${ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_FALLBACK_MAX_AGE_SEC:-86400}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -349,6 +370,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+int_arg_or_die "ROADMAP_LIVE_EVIDENCE_ARCHIVE_RUN_FALLBACK_MAX_AGE_SEC" "$fallback_max_age_sec"
 scope_arg_or_die "$scope"
 missing_source_policy_arg_or_die "$missing_source_policy"
 
@@ -811,13 +833,97 @@ artifact_contract_schema_id_is_allowed() {
   return 0
 }
 
+profile_default_fallback_strict_reason() {
+  local path="$1"
+  local key="$2"
+  local generated_at_utc=""
+  local generated_epoch=""
+  local now_epoch=""
+  local age_sec=""
+
+  generated_at_utc="$(jq -r 'if (.generated_at_utc? | type) == "string" then .generated_at_utc else "" end' "$path")"
+  if [[ -z "$generated_at_utc" ]]; then
+    printf '%s' "fallback_generated_at_utc_missing"
+    return 0
+  fi
+  generated_epoch="$(iso8601_to_epoch "$generated_at_utc" || true)"
+  if ! [[ "$generated_epoch" =~ ^[0-9]+$ ]]; then
+    printf '%s' "fallback_generated_at_utc_invalid"
+    return 0
+  fi
+  now_epoch="$(date -u +%s)"
+  if (( generated_epoch > now_epoch )); then
+    printf '%s' "fallback_generated_at_utc_future"
+    return 0
+  fi
+  age_sec="$((now_epoch - generated_epoch))"
+  if (( fallback_max_age_sec > 0 && age_sec > fallback_max_age_sec )); then
+    printf '%s' "fallback_artifact_stale"
+    return 0
+  fi
+
+  case "$key" in
+    reports_dir.profile_compare_campaign_signoff_summary_json)
+      if jq -e '
+        (
+          .policy.require_external_live_evidence == true
+          and .campaign_refresh_overrides_effective.live_evidence == true
+          and .campaign_refresh_overrides_effective.live_evidence_udp_inject == false
+        ) or (
+          .inputs.compare.live_evidence == true
+          and .inputs.compare.live_evidence_udp_inject == false
+        )
+      ' "$path" >/dev/null 2>&1; then
+        printf '%s' "ok"
+        return 0
+      fi
+      printf '%s' "missing_strict_external_live_evidence_provenance"
+      return 0
+      ;;
+    reports_dir.profile_default_gate_stability_summary_json)
+      if jq -e '
+        .inputs.campaign_live_evidence == true
+        and .inputs.require_external_live_evidence == true
+        and .inputs.campaign_live_evidence_udp_inject == false
+      ' "$path" >/dev/null 2>&1; then
+        printf '%s' "ok"
+        return 0
+      fi
+      printf '%s' "missing_strict_external_live_evidence_provenance"
+      return 0
+      ;;
+    reports_dir.profile_default_gate_stability_cycle_summary_json)
+      if jq -e '
+        .inputs.run.campaign_live_evidence == true
+        and .inputs.run.require_external_live_evidence == true
+        and .inputs.run.campaign_live_evidence_udp_inject == false
+      ' "$path" >/dev/null 2>&1; then
+        printf '%s' "ok"
+        return 0
+      fi
+      printf '%s' "missing_strict_external_live_evidence_provenance"
+      return 0
+      ;;
+    reports_dir.profile_default_gate_stability_check_summary_json|reports_dir.profile_default_gate_evidence_pack_summary_json)
+      printf '%s' "missing_strict_external_live_evidence_provenance"
+      return 0
+      ;;
+    *)
+      printf '%s' "ok"
+      return 0
+      ;;
+  esac
+}
+
 artifact_contract_error_reason() {
   local path="$1"
   local family="${2:-}"
   local key="${3:-}"
+  local source="${4:-}"
   local schema_id=""
   local status_value=""
   local rc_value=""
+  local strict_reason=""
 
   if ! jq -e . "$path" >/dev/null 2>&1; then
     printf '%s' "invalid_json"
@@ -868,6 +974,14 @@ artifact_contract_error_reason() {
   if [[ "$rc_value" != "0" ]]; then
     printf '%s' "rc_nonzero"
     return 0
+  fi
+
+  if [[ "$source" == "default_fallback" && "$family" == "profile-default" ]]; then
+    strict_reason="$(profile_default_fallback_strict_reason "$path" "$key")"
+    if [[ "$strict_reason" != "ok" ]]; then
+      printf '%s' "$strict_reason"
+      return 0
+    fi
   fi
 
   printf '%s' "ok"
@@ -1276,7 +1390,7 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
           continue
         fi
 
-        artifact_contract_reason="$(artifact_contract_error_reason "$resolved_source_path" "$family" "$key")"
+        artifact_contract_reason="$(artifact_contract_error_reason "$resolved_source_path" "$family" "$key" "$source")"
         if [[ "$artifact_contract_reason" != "ok" ]]; then
           family_artifact_contract_error_count=$((family_artifact_contract_error_count + 1))
           artifact_contract_error_total=$((artifact_contract_error_total + 1))
@@ -1468,6 +1582,7 @@ jq -n \
   --arg resolved_scope "$resolved_scope" \
   --arg scope_inference_reason "$scope_inference_reason" \
   --arg missing_source_policy "$missing_source_policy" \
+  --argjson fallback_max_age_sec "$fallback_max_age_sec" \
   --argjson roadmap_summary_exists "$roadmap_summary_exists" \
   --argjson roadmap_summary_valid "$roadmap_summary_valid" \
   --arg roadmap_summary_contract_state "$roadmap_summary_contract_state" \
@@ -1486,7 +1601,7 @@ jq -n \
   --argjson next_action_hints "$(jsonl_to_array "$next_action_hints_jsonl")" \
   '{
     version: 1,
-    schema: { id: "roadmap_live_evidence_archive_run_summary", major: 1, minor: 0 },
+    schema: { id: "roadmap_live_evidence_archive_run_summary", major: 1, minor: 1 },
     generated_at_utc: $generated_at_utc,
     status: $status,
     rc: $rc,
@@ -1497,7 +1612,8 @@ jq -n \
       requested_scope: $requested_scope,
       resolved_scope: $resolved_scope,
       scope_inference_reason: $scope_inference_reason,
-      missing_source_policy: $missing_source_policy
+      missing_source_policy: $missing_source_policy,
+      fallback_max_age_sec: $fallback_max_age_sec
     },
     roadmap: {
       summary_json: $roadmap_summary_json,

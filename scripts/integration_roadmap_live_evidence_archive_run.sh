@@ -91,6 +91,31 @@ touch_json() {
     }' >"$path"
 }
 
+touch_profile_default_stability_summary() {
+  local path="$1"
+  local generated_at_utc="$2"
+  local campaign_live_evidence="${3:-1}"
+  local require_external_live_evidence="${4:-1}"
+  local campaign_live_evidence_udp_inject="${5:-0}"
+  mkdir -p "$(dirname "$path")"
+  jq -n \
+    --arg generated_at_utc "$generated_at_utc" \
+    --arg live "$campaign_live_evidence" \
+    --arg require_external "$require_external_live_evidence" \
+    --arg udp_inject "$campaign_live_evidence_udp_inject" \
+    '{
+      schema: { id: "profile_default_gate_stability_summary", major: 1, minor: 0 },
+      generated_at_utc: $generated_at_utc,
+      status: "pass",
+      rc: 0,
+      inputs: {
+        campaign_live_evidence: ($live == "1"),
+        require_external_live_evidence: ($require_external == "1"),
+        campaign_live_evidence_udp_inject: ($udp_inject == "1")
+      }
+    }' >"$path"
+}
+
 to_windows_path_if_supported() {
   local path="$1"
   local candidate=""
@@ -704,6 +729,117 @@ if ! jq -e '
 ' "$SUMMARY4" >/dev/null; then
   echo "case valid missing paths fallback assertions failed"
   cat "$SUMMARY4"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-archive-run] case: stale profile-default fallback artifact fails closed"
+CASE_PROFILE_STALE_DIR="$TMP_DIR/case_profile_default_stale_fallback"
+REPORTS_PROFILE_STALE="$CASE_PROFILE_STALE_DIR/reports"
+ARCHIVE_ROOT_PROFILE_STALE="$CASE_PROFILE_STALE_DIR/archive_root"
+SUMMARY_PROFILE_STALE="$CASE_PROFILE_STALE_DIR/archive_summary.json"
+ROADMAP_PROFILE_STALE="$CASE_PROFILE_STALE_DIR/roadmap_summary.json"
+mkdir -p "$REPORTS_PROFILE_STALE" "$ARCHIVE_ROOT_PROFILE_STALE"
+touch_profile_default_stability_summary "$REPORTS_PROFILE_STALE/profile_default_gate_stability_summary.json" "2026-01-01T00:00:00Z" 1 1 0
+jq -n '{status: "pass", rc: 0, artifacts: {}, next_actions: []}' >"$ROADMAP_PROFILE_STALE"
+
+set +e
+bash ./scripts/roadmap_live_evidence_archive_run.sh \
+  --reports-dir "$REPORTS_PROFILE_STALE" \
+  --roadmap-summary-json "$ROADMAP_PROFILE_STALE" \
+  --archive-root "$ARCHIVE_ROOT_PROFILE_STALE" \
+  --scope profile-default \
+  --summary-json "$SUMMARY_PROFILE_STALE" \
+  --print-summary-json 0
+profile_stale_rc=$?
+set -e
+if [[ "$profile_stale_rc" != "1" ]]; then
+  echo "case stale profile-default fallback expected rc=1, got rc=$profile_stale_rc"
+  cat "$SUMMARY_PROFILE_STALE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .failure_substep == "archive_artifact_contract_invalid"
+  and .summary.copied_total == 0
+  and .summary.artifact_contract_error_total == 1
+  and ([.family_results[] | select(.family == "profile-default")][0].artifact_contract_errors | map(.reason)) == ["fallback_artifact_stale"]
+' "$SUMMARY_PROFILE_STALE" >/dev/null; then
+  echo "case stale profile-default fallback assertions failed"
+  cat "$SUMMARY_PROFILE_STALE"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-archive-run] case: non-strict profile-default fallback artifact fails closed"
+CASE_PROFILE_NONSTRICT_DIR="$TMP_DIR/case_profile_default_nonstrict_fallback"
+REPORTS_PROFILE_NONSTRICT="$CASE_PROFILE_NONSTRICT_DIR/reports"
+ARCHIVE_ROOT_PROFILE_NONSTRICT="$CASE_PROFILE_NONSTRICT_DIR/archive_root"
+SUMMARY_PROFILE_NONSTRICT="$CASE_PROFILE_NONSTRICT_DIR/archive_summary.json"
+ROADMAP_PROFILE_NONSTRICT="$CASE_PROFILE_NONSTRICT_DIR/roadmap_summary.json"
+mkdir -p "$REPORTS_PROFILE_NONSTRICT" "$ARCHIVE_ROOT_PROFILE_NONSTRICT"
+touch_profile_default_stability_summary "$REPORTS_PROFILE_NONSTRICT/profile_default_gate_stability_summary.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" 1 0 0
+jq -n '{status: "pass", rc: 0, artifacts: {}, next_actions: []}' >"$ROADMAP_PROFILE_NONSTRICT"
+
+set +e
+bash ./scripts/roadmap_live_evidence_archive_run.sh \
+  --reports-dir "$REPORTS_PROFILE_NONSTRICT" \
+  --roadmap-summary-json "$ROADMAP_PROFILE_NONSTRICT" \
+  --archive-root "$ARCHIVE_ROOT_PROFILE_NONSTRICT" \
+  --scope profile-default \
+  --summary-json "$SUMMARY_PROFILE_NONSTRICT" \
+  --print-summary-json 0
+profile_nonstrict_rc=$?
+set -e
+if [[ "$profile_nonstrict_rc" != "1" ]]; then
+  echo "case non-strict profile-default fallback expected rc=1, got rc=$profile_nonstrict_rc"
+  cat "$SUMMARY_PROFILE_NONSTRICT"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .failure_substep == "archive_artifact_contract_invalid"
+  and .summary.copied_total == 0
+  and .summary.artifact_contract_error_total == 1
+  and ([.family_results[] | select(.family == "profile-default")][0].artifact_contract_errors | map(.reason)) == ["missing_strict_external_live_evidence_provenance"]
+' "$SUMMARY_PROFILE_NONSTRICT" >/dev/null; then
+  echo "case non-strict profile-default fallback assertions failed"
+  cat "$SUMMARY_PROFILE_NONSTRICT"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-archive-run] case: fresh strict profile-default fallback artifact is usable"
+CASE_PROFILE_STRICT_DIR="$TMP_DIR/case_profile_default_strict_fallback"
+REPORTS_PROFILE_STRICT="$CASE_PROFILE_STRICT_DIR/reports"
+ARCHIVE_ROOT_PROFILE_STRICT="$CASE_PROFILE_STRICT_DIR/archive_root"
+SUMMARY_PROFILE_STRICT="$CASE_PROFILE_STRICT_DIR/archive_summary.json"
+ROADMAP_PROFILE_STRICT="$CASE_PROFILE_STRICT_DIR/roadmap_summary.json"
+mkdir -p "$REPORTS_PROFILE_STRICT" "$ARCHIVE_ROOT_PROFILE_STRICT"
+touch_profile_default_stability_summary "$REPORTS_PROFILE_STRICT/profile_default_gate_stability_summary.json" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" 1 1 0
+jq -n '{status: "pass", rc: 0, artifacts: {}, next_actions: []}' >"$ROADMAP_PROFILE_STRICT"
+
+bash ./scripts/roadmap_live_evidence_archive_run.sh \
+  --reports-dir "$REPORTS_PROFILE_STRICT" \
+  --roadmap-summary-json "$ROADMAP_PROFILE_STRICT" \
+  --archive-root "$ARCHIVE_ROOT_PROFILE_STRICT" \
+  --scope profile-default \
+  --summary-json "$SUMMARY_PROFILE_STRICT" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .failure_substep == null
+  and .summary.copied_total == 1
+  and .summary.artifact_contract_error_total == 0
+  and (
+    [.family_results[] | select(.family == "profile-default")][0].copied
+    | map(select((.source // "") == "default_fallback" and (.key // "") == "reports_dir.profile_default_gate_stability_summary_json"))
+    | length
+  ) == 1
+' "$SUMMARY_PROFILE_STRICT" >/dev/null; then
+  echo "case fresh strict profile-default fallback assertions failed"
+  cat "$SUMMARY_PROFILE_STRICT"
   exit 1
 fi
 
