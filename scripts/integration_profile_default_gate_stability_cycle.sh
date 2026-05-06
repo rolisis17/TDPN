@@ -37,6 +37,8 @@ host_b=""
 campaign_subject=""
 allow_remote_http_probe=""
 campaign_live_evidence=""
+require_external_live_evidence=""
+campaign_live_evidence_udp_inject=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --host-a)
@@ -79,6 +81,22 @@ while [[ $# -gt 0 ]]; do
       campaign_live_evidence="${1#*=}"
       shift
       ;;
+    --require-external-live-evidence)
+      require_external_live_evidence="${2:-}"
+      shift 2
+      ;;
+    --require-external-live-evidence=*)
+      require_external_live_evidence="${1#*=}"
+      shift
+      ;;
+    --campaign-live-evidence-udp-inject)
+      campaign_live_evidence_udp_inject="${2:-}"
+      shift 2
+      ;;
+    --campaign-live-evidence-udp-inject=*)
+      campaign_live_evidence_udp_inject="${1#*=}"
+      shift
+      ;;
     --summary-json)
       summary_json="${2:-}"
       shift 2
@@ -115,8 +133,8 @@ if [[ -z "$summary_json" ]]; then
 fi
 
 if [[ -n "$capture_file" ]]; then
-  printf 'run\tscenario=%s\thost_a=%s\thost_b=%s\tcampaign_subject=%s\tallow_remote_http_probe=%s\tcampaign_live_evidence=%s\truns=%s\treports_dir=%s\tsummary_json=%s\n' \
-    "$scenario" "$host_a" "$host_b" "$campaign_subject" "$allow_remote_http_probe" "$campaign_live_evidence" "$runs" "$reports_dir" "$summary_json" >>"$capture_file"
+  printf 'run\tscenario=%s\thost_a=%s\thost_b=%s\tcampaign_subject=%s\tallow_remote_http_probe=%s\tcampaign_live_evidence=%s\trequire_external_live_evidence=%s\tcampaign_live_evidence_udp_inject=%s\truns=%s\treports_dir=%s\tsummary_json=%s\n' \
+    "$scenario" "$host_a" "$host_b" "$campaign_subject" "$allow_remote_http_probe" "$campaign_live_evidence" "$require_external_live_evidence" "$campaign_live_evidence_udp_inject" "$runs" "$reports_dir" "$summary_json" >>"$capture_file"
 fi
 
 if [[ "$scenario" == "fail" ]]; then
@@ -403,6 +421,41 @@ fi
 if ! jq -e '.inputs.run.campaign_live_evidence == true and (.stages.run.command | contains("--campaign-live-evidence"))' "$LIVE_CYCLE_SUMMARY" >/dev/null 2>&1; then
   echo "live cycle summary missing campaign live evidence metadata"
   cat "$LIVE_CYCLE_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-cycle] external live evidence forwarding"
+EXTERNAL_LIVE_CYCLE_SUMMARY="$TMP_DIR/cycle_external_live_summary.json"
+EXTERNAL_LIVE_CYCLE_CAPTURE="$TMP_DIR/capture_external_live.log"
+PROFILE_DEFAULT_GATE_STABILITY_RUN_SCRIPT="$FAKE_RUN_SCRIPT" \
+PROFILE_DEFAULT_GATE_STABILITY_CHECK_SCRIPT="$FAKE_CHECK_SCRIPT" \
+FAKE_CYCLE_CAPTURE_FILE="$EXTERNAL_LIVE_CYCLE_CAPTURE" \
+FAKE_CYCLE_RUN_SCENARIO="pass" \
+FAKE_CYCLE_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "a.test" \
+  --host-b "b.test" \
+  --subject "inv-external-live-cycle" \
+  --runs 1 \
+  --campaign-timeout-sec 2400 \
+  --campaign-live-evidence 1 \
+  --require-external-live-evidence 1 \
+  --campaign-live-evidence-udp-inject 0 \
+  --sleep-between-sec 0 \
+  --reports-dir "$TMP_DIR/external_live_reports" \
+  --summary-json "$EXTERNAL_LIVE_CYCLE_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_cycle_external_live.log 2>&1
+
+for expected in $'campaign_live_evidence=1' $'require_external_live_evidence=1' $'campaign_live_evidence_udp_inject=0'; do
+  if ! grep -q "$expected" "$EXTERNAL_LIVE_CYCLE_CAPTURE"; then
+    echo "expected run-stage external live evidence forwarding marker: $expected"
+    cat "$EXTERNAL_LIVE_CYCLE_CAPTURE"
+    exit 1
+  fi
+done
+if ! jq -e '.inputs.run.campaign_live_evidence == true and .inputs.run.require_external_live_evidence == true and .inputs.run.campaign_live_evidence_udp_inject == false and (.stages.run.command | contains("--require-external-live-evidence")) and (.stages.run.command | contains("--campaign-live-evidence-udp-inject"))' "$EXTERNAL_LIVE_CYCLE_SUMMARY" >/dev/null 2>&1; then
+  echo "external live cycle summary missing external/no-inject metadata"
+  cat "$EXTERNAL_LIVE_CYCLE_SUMMARY"
   exit 1
 fi
 

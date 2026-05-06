@@ -42,6 +42,8 @@ host_b=""
 campaign_subject=""
 allow_remote_http_probe=""
 campaign_live_evidence=""
+require_external_live_evidence=""
+campaign_live_evidence_udp_inject=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
@@ -98,6 +100,22 @@ while [[ $# -gt 0 ]]; do
       ;;
     --campaign-live-evidence=*)
       campaign_live_evidence="${1#*=}"
+      shift
+      ;;
+    --require-external-live-evidence)
+      require_external_live_evidence="${2:-}"
+      shift 2
+      ;;
+    --require-external-live-evidence=*)
+      require_external_live_evidence="${1#*=}"
+      shift
+      ;;
+    --campaign-live-evidence-udp-inject)
+      campaign_live_evidence_udp_inject="${2:-}"
+      shift 2
+      ;;
+    --campaign-live-evidence-udp-inject=*)
+      campaign_live_evidence_udp_inject="${1#*=}"
       shift
       ;;
     *)
@@ -182,13 +200,15 @@ jq -n \
   }' >"$summary_json"
 
 if [[ -n "$capture_file" ]]; then
-  printf 'profile-default-gate-live\trun=%s\thost_a=%s\thost_b=%s\tsubject=%s\tallow_remote_http_probe=%s\tcampaign_live_evidence=%s\treports_dir=%s\tsummary_json=%s\n' \
+  printf 'profile-default-gate-live\trun=%s\thost_a=%s\thost_b=%s\tsubject=%s\tallow_remote_http_probe=%s\tcampaign_live_evidence=%s\trequire_external_live_evidence=%s\tcampaign_live_evidence_udp_inject=%s\treports_dir=%s\tsummary_json=%s\n' \
     "$run_index" \
     "$host_a" \
     "$host_b" \
     "$campaign_subject" \
     "$allow_remote_http_probe" \
     "$campaign_live_evidence" \
+    "$require_external_live_evidence" \
+    "$campaign_live_evidence_udp_inject" \
     "$reports_dir" \
     "$summary_json" >>"$capture_file"
 fi
@@ -314,6 +334,42 @@ fi
 if ! jq -e '.inputs.campaign_live_evidence == true' "$LIVE_SUMMARY" >/dev/null 2>&1; then
   echo "live summary missing campaign_live_evidence input"
   cat "$LIVE_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-default-gate-stability-run] external live evidence forwarding"
+EXTERNAL_LIVE_SUMMARY="$TMP_DIR/external_live_summary.json"
+EXTERNAL_LIVE_REPORTS_DIR="$TMP_DIR/reports_external_live"
+EXTERNAL_LIVE_COUNTER="$TMP_DIR/external_live_counter.txt"
+EXTERNAL_LIVE_CAPTURE="$TMP_DIR/external_live_capture.log"
+PROFILE_DEFAULT_GATE_STABILITY_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+FAKE_EASY_NODE_COUNTER_FILE="$EXTERNAL_LIVE_COUNTER" \
+FAKE_EASY_NODE_CAPTURE_FILE="$EXTERNAL_LIVE_CAPTURE" \
+FAKE_EASY_NODE_SCENARIO="stable" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "host-a.test" \
+  --host-b "host-b.test" \
+  --campaign-subject "inv-external-live" \
+  --runs 1 \
+  --campaign-timeout-sec 2400 \
+  --campaign-live-evidence 1 \
+  --require-external-live-evidence 1 \
+  --campaign-live-evidence-udp-inject 0 \
+  --sleep-between-sec 0 \
+  --reports-dir "$EXTERNAL_LIVE_REPORTS_DIR" \
+  --summary-json "$EXTERNAL_LIVE_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_run_external_live.log 2>&1
+
+for expected in $'campaign_live_evidence=1' $'require_external_live_evidence=1' $'campaign_live_evidence_udp_inject=0'; do
+  if ! grep -q "$expected" "$EXTERNAL_LIVE_CAPTURE"; then
+    echo "expected external live evidence forwarding marker: $expected"
+    cat "$EXTERNAL_LIVE_CAPTURE"
+    exit 1
+  fi
+done
+if ! jq -e '.inputs.campaign_live_evidence == true and .inputs.require_external_live_evidence == true and .inputs.campaign_live_evidence_udp_inject == false' "$EXTERNAL_LIVE_SUMMARY" >/dev/null 2>&1; then
+  echo "external live summary missing external/no-inject inputs"
+  cat "$EXTERNAL_LIVE_SUMMARY"
   exit 1
 fi
 

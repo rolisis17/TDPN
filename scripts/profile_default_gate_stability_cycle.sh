@@ -17,6 +17,8 @@ Usage:
     [--runs N] \
     [--campaign-timeout-sec N] \
     [--campaign-live-evidence [0|1]] \
+    [--require-external-live-evidence [0|1]] \
+    [--campaign-live-evidence-udp-inject [0|1]] \
     [--allow-remote-http-probe [0|1]] \
     [--sleep-between-sec N] \
     [--allow-partial [0|1]] \
@@ -314,6 +316,8 @@ campaign_subject_from_alias=""
 runs="${PROFILE_DEFAULT_GATE_STABILITY_RUNS:-3}"
 campaign_timeout_sec="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_TIMEOUT_SEC:-2400}"
 campaign_live_evidence="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_LIVE_EVIDENCE:-0}"
+require_external_live_evidence="${PROFILE_DEFAULT_GATE_STABILITY_REQUIRE_EXTERNAL_LIVE_EVIDENCE:-0}"
+campaign_live_evidence_udp_inject="${PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_LIVE_EVIDENCE_UDP_INJECT:-}"
 min_campaign_timeout_sec="${PROFILE_DEFAULT_GATE_STABILITY_CYCLE_MIN_CAMPAIGN_TIMEOUT_SEC:-${PROFILE_DEFAULT_GATE_STABILITY_MIN_CAMPAIGN_TIMEOUT_SEC:-1800}}"
 allow_short_campaign_timeout="${PROFILE_DEFAULT_GATE_STABILITY_ALLOW_SHORT_CAMPAIGN_TIMEOUT:-0}"
 sleep_between_sec="${PROFILE_DEFAULT_GATE_STABILITY_SLEEP_BETWEEN_SEC:-5}"
@@ -414,6 +418,32 @@ while [[ $# -gt 0 ]]; do
       ;;
     --campaign-live-evidence=*)
       campaign_live_evidence="${1#*=}"
+      shift
+      ;;
+    --require-external-live-evidence)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_external_live_evidence="${2:-}"
+        shift 2
+      else
+        require_external_live_evidence="1"
+        shift
+      fi
+      ;;
+    --require-external-live-evidence=*)
+      require_external_live_evidence="${1#*=}"
+      shift
+      ;;
+    --campaign-live-evidence-udp-inject)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        campaign_live_evidence_udp_inject="${2:-}"
+        shift 2
+      else
+        campaign_live_evidence_udp_inject="1"
+        shift
+      fi
+      ;;
+    --campaign-live-evidence-udp-inject=*)
+      campaign_live_evidence_udp_inject="${1#*=}"
       shift
       ;;
     --allow-remote-http-probe)
@@ -701,6 +731,8 @@ campaign_subject_from_alias="$(trim "$campaign_subject_from_alias")"
 runs="$(trim "$runs")"
 campaign_timeout_sec="$(trim "$campaign_timeout_sec")"
 campaign_live_evidence="$(trim "$campaign_live_evidence")"
+require_external_live_evidence="$(trim "$require_external_live_evidence")"
+campaign_live_evidence_udp_inject="$(trim "$campaign_live_evidence_udp_inject")"
 min_campaign_timeout_sec="$(trim "$min_campaign_timeout_sec")"
 allow_short_campaign_timeout="$(trim "$allow_short_campaign_timeout")"
 sleep_between_sec="$(trim "$sleep_between_sec")"
@@ -761,6 +793,10 @@ fi
 int_arg_or_die "--runs" "$runs"
 int_arg_or_die "--campaign-timeout-sec" "$campaign_timeout_sec"
 bool_arg_or_die "--campaign-live-evidence" "$campaign_live_evidence"
+bool_arg_or_die "--require-external-live-evidence" "$require_external_live_evidence"
+if [[ -n "$campaign_live_evidence_udp_inject" ]]; then
+  bool_arg_or_die "--campaign-live-evidence-udp-inject" "$campaign_live_evidence_udp_inject"
+fi
 int_arg_or_die "PROFILE_DEFAULT_GATE_STABILITY_CYCLE_MIN_CAMPAIGN_TIMEOUT_SEC" "$min_campaign_timeout_sec"
 int_arg_or_die "--sleep-between-sec" "$sleep_between_sec"
 int_arg_or_die "--require-min-runs-requested" "$require_min_runs_requested"
@@ -834,6 +870,7 @@ run_cmd=(
   --runs "$runs"
   --campaign-timeout-sec "$campaign_timeout_sec"
   --campaign-live-evidence "$campaign_live_evidence"
+  --require-external-live-evidence "$require_external_live_evidence"
   --allow-remote-http-probe "$allow_remote_http_probe"
   --sleep-between-sec "$sleep_between_sec"
   --allow-partial "$allow_partial"
@@ -841,6 +878,9 @@ run_cmd=(
   --summary-json "$run_summary_json"
   --print-summary-json 0
 )
+if [[ -n "$campaign_live_evidence_udp_inject" ]]; then
+  run_cmd+=(--campaign-live-evidence-udp-inject "$campaign_live_evidence_udp_inject")
+fi
 campaign_subject_display="$(redacted_subject_display_01 "$campaign_subject")"
 run_command_display="$(redact_value_in_text_01 "$(quote_cmd "${run_cmd[@]}")" "$campaign_subject")"
 
@@ -1267,8 +1307,12 @@ elif [[ "$cycle_evidence_state" == "partial" && "$check_decision" != "NO-GO" ]];
   next_operator_action="Cycle evidence is partial; inspect stage logs and rerun cycle before promotion."
 fi
 
-rerun_cycle_command_template="./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --campaign-live-evidence ${campaign_live_evidence} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${summary_json} --print-summary-json 1"
-rerun_run_command_template="./scripts/easy_node.sh profile-default-gate-stability-run --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --campaign-live-evidence ${campaign_live_evidence} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${run_summary_json} --print-summary-json 1"
+rerun_policy_args_template="--require-external-live-evidence ${require_external_live_evidence}"
+if [[ -n "$campaign_live_evidence_udp_inject" ]]; then
+  rerun_policy_args_template="$rerun_policy_args_template --campaign-live-evidence-udp-inject ${campaign_live_evidence_udp_inject}"
+fi
+rerun_cycle_command_template="./scripts/easy_node.sh profile-default-gate-stability-cycle --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --campaign-live-evidence ${campaign_live_evidence} ${rerun_policy_args_template} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${summary_json} --print-summary-json 1"
+rerun_run_command_template="./scripts/easy_node.sh profile-default-gate-stability-run --host-a ${host_a} --host-b ${host_b} --campaign-subject INVITE_KEY --runs ${runs} --campaign-timeout-sec ${campaign_timeout_sec} --campaign-live-evidence ${campaign_live_evidence} ${rerun_policy_args_template} --allow-remote-http-probe ${allow_remote_http_probe} --sleep-between-sec ${sleep_between_sec} --allow-partial ${allow_partial} --reports-dir ${reports_dir} --summary-json ${run_summary_json} --print-summary-json 1"
 rerun_check_command_template="./scripts/easy_node.sh profile-default-gate-stability-check --stability-summary-json ${run_summary_json} --summary-json ${check_summary_json} --print-summary-json 1"
 
 jq -n \
@@ -1334,6 +1378,8 @@ jq -n \
   --argjson runs "$runs" \
   --argjson campaign_timeout_sec "$campaign_timeout_sec" \
   --argjson campaign_live_evidence "$campaign_live_evidence" \
+  --argjson require_external_live_evidence "$require_external_live_evidence" \
+  --arg campaign_live_evidence_udp_inject "$campaign_live_evidence_udp_inject" \
   --argjson allow_remote_http_probe "$allow_remote_http_probe" \
   --argjson sleep_between_sec "$sleep_between_sec" \
   --argjson allow_partial "$allow_partial" \
@@ -1371,6 +1417,8 @@ jq -n \
         runs: $runs,
         campaign_timeout_sec: $campaign_timeout_sec,
         campaign_live_evidence: ($campaign_live_evidence == 1),
+        require_external_live_evidence: ($require_external_live_evidence == 1),
+        campaign_live_evidence_udp_inject: (if $campaign_live_evidence_udp_inject == "" then null else ($campaign_live_evidence_udp_inject == "1") end),
         allow_remote_http_probe: ($allow_remote_http_probe == 1),
         sleep_between_sec: $sleep_between_sec,
         allow_partial: ($allow_partial == 1)
