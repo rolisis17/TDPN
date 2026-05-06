@@ -37,6 +37,8 @@ Notes:
       PROFILE_DEFAULT_GATE_LIVE_EVIDENCE_BUNDLE_LIVE_SCRIPT
       PROFILE_DEFAULT_GATE_LIVE_EVIDENCE_BUNDLE_STABILITY_CYCLE_SCRIPT
       PROFILE_DEFAULT_GATE_LIVE_EVIDENCE_BUNDLE_EVIDENCE_PACK_SCRIPT
+  - This bundle enforces strict external live evidence for profile-default
+    gates: live evidence on, harness UDP injection off.
   - Operator-facing next commands reject unresolved placeholders and never
     include raw invite-subject values.
 USAGE
@@ -279,6 +281,9 @@ build_live_gate_rerun_command_without_subject_01() {
     "--host-b" "$host_b"
     "--reports-dir" "$reports_dir"
     "--fail-on-no-go" "$fail_on_no_go"
+    "--campaign-live-evidence" "$bundle_campaign_live_evidence"
+    "--require-external-live-evidence" "$bundle_require_external_live_evidence"
+    "--campaign-live-evidence-udp-inject" "$bundle_campaign_live_evidence_udp_inject"
     "--summary-json" "$live_summary_json"
     "--print-summary-json" "1"
   )
@@ -295,6 +300,9 @@ build_stability_cycle_rerun_command_without_subject_01() {
     "--stability-check-summary-json" "$stability_check_summary_json"
     "--summary-json" "$stability_cycle_summary_json"
     "--fail-on-no-go" "$fail_on_no_go"
+    "--campaign-live-evidence" "$bundle_campaign_live_evidence"
+    "--require-external-live-evidence" "$bundle_require_external_live_evidence"
+    "--campaign-live-evidence-udp-inject" "$bundle_campaign_live_evidence_udp_inject"
     "--print-summary-json" "1"
   )
   render_command_line_from_argv_01 "${cmd[@]}"
@@ -462,6 +470,9 @@ evidence_pack_summary_json="${PROFILE_DEFAULT_GATE_LIVE_EVIDENCE_BUNDLE_EVIDENCE
 bundle_summary_json="${PROFILE_DEFAULT_GATE_LIVE_EVIDENCE_BUNDLE_SUMMARY_JSON:-}"
 bundle_report_md="${PROFILE_DEFAULT_GATE_LIVE_EVIDENCE_BUNDLE_REPORT_MD:-}"
 print_summary_json="${PROFILE_DEFAULT_GATE_LIVE_EVIDENCE_BUNDLE_PRINT_SUMMARY_JSON:-0}"
+bundle_campaign_live_evidence="1"
+bundle_require_external_live_evidence="1"
+bundle_campaign_live_evidence_udp_inject="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -737,6 +748,9 @@ else
     --campaign-subject "$campaign_subject_effective"
     --reports-dir "$reports_dir"
     --fail-on-no-go "$fail_on_no_go"
+    --campaign-live-evidence "$bundle_campaign_live_evidence"
+    --require-external-live-evidence "$bundle_require_external_live_evidence"
+    --campaign-live-evidence-udp-inject "$bundle_campaign_live_evidence_udp_inject"
     --summary-json "$live_summary_json"
     --print-summary-json 0
   )
@@ -762,6 +776,9 @@ else
       --stability-check-summary-json "$stability_check_summary_json"
       --summary-json "$stability_cycle_summary_json"
       --fail-on-no-go "$fail_on_no_go"
+      --campaign-live-evidence "$bundle_campaign_live_evidence"
+      --require-external-live-evidence "$bundle_require_external_live_evidence"
+      --campaign-live-evidence-udp-inject "$bundle_campaign_live_evidence_udp_inject"
       --print-summary-json 0
     )
     run_stage_01 "stability_cycle" "$stability_log" "$stability_cycle_summary_json" "$campaign_subject_effective" "${stability_cmd[@]}"
@@ -847,6 +864,9 @@ summary_payload="$(jq -n \
   --arg subject_configured "$subject_configured" \
   --arg reports_dir "$reports_dir" \
   --arg fail_on_no_go "$fail_on_no_go" \
+  --arg bundle_campaign_live_evidence "$bundle_campaign_live_evidence" \
+  --arg bundle_require_external_live_evidence "$bundle_require_external_live_evidence" \
+  --arg bundle_campaign_live_evidence_udp_inject "$bundle_campaign_live_evidence_udp_inject" \
   --arg next_command "$next_command" \
   --arg next_command_reason "$next_command_reason" \
   --arg next_command_has_unresolved_placeholders "$next_command_has_unresolved_placeholders" \
@@ -866,10 +886,10 @@ summary_payload="$(jq -n \
   '{
     version: 1,
     schema: {
-      id: "profile_default_gate_live_evidence_publish_bundle_summary",
-      major: 1,
-      minor: 0
-    },
+	      id: "profile_default_gate_live_evidence_publish_bundle_summary",
+	      major: 1,
+	      minor: 1
+	    },
     generated_at_utc: $generated_at_utc,
     status: $status,
     rc: $rc,
@@ -883,7 +903,12 @@ summary_payload="$(jq -n \
       subject_source: (if $subject_source == "" then null else $subject_source end),
       subject_configured: ($subject_configured == "1"),
       reports_dir: $reports_dir,
-      fail_on_no_go: ($fail_on_no_go == "1")
+      fail_on_no_go: ($fail_on_no_go == "1"),
+      live_evidence_policy: {
+        campaign_live_evidence: ($bundle_campaign_live_evidence == "1"),
+        require_external_live_evidence: ($bundle_require_external_live_evidence == "1"),
+        campaign_live_evidence_udp_inject: ($bundle_campaign_live_evidence_udp_inject == "1")
+      }
     },
     preflight: {
       ok: (($preflight_errors | length) == 0),

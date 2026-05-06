@@ -45,6 +45,9 @@ summary_json=""
 subject=""
 host_a=""
 host_b=""
+campaign_live_evidence=""
+require_external_live_evidence=""
+campaign_live_evidence_udp_inject=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
@@ -79,6 +82,30 @@ while [[ $# -gt 0 ]]; do
       host_b="${1#*=}"
       shift
       ;;
+    --campaign-live-evidence)
+      campaign_live_evidence="${2:-}"
+      shift 2
+      ;;
+    --campaign-live-evidence=*)
+      campaign_live_evidence="${1#*=}"
+      shift
+      ;;
+    --require-external-live-evidence)
+      require_external_live_evidence="${2:-}"
+      shift 2
+      ;;
+    --require-external-live-evidence=*)
+      require_external_live_evidence="${1#*=}"
+      shift
+      ;;
+    --campaign-live-evidence-udp-inject)
+      campaign_live_evidence_udp_inject="${2:-}"
+      shift 2
+      ;;
+    --campaign-live-evidence-udp-inject=*)
+      campaign_live_evidence_udp_inject="${1#*=}"
+      shift
+      ;;
     *)
       shift
       ;;
@@ -89,8 +116,8 @@ if [[ -z "$summary_json" ]]; then
   exit 2
 fi
 if [[ -n "$capture_file" ]]; then
-  printf 'live\tscenario=%s\thost_a=%s\thost_b=%s\tsubject=%s\tsummary_json=%s\n' \
-    "$scenario" "$host_a" "$host_b" "$subject" "$summary_json" >>"$capture_file"
+  printf 'live\tscenario=%s\thost_a=%s\thost_b=%s\tsubject=%s\tsummary_json=%s\tcampaign_live_evidence=%s\trequire_external_live_evidence=%s\tcampaign_live_evidence_udp_inject=%s\n' \
+    "$scenario" "$host_a" "$host_b" "$subject" "$summary_json" "$campaign_live_evidence" "$require_external_live_evidence" "$campaign_live_evidence_udp_inject" >>"$capture_file"
 fi
 echo "fake-live subject=$subject host_a=$host_a host_b=$host_b"
 if [[ "$scenario" == "fail" ]]; then
@@ -117,6 +144,9 @@ summary_json=""
 subject=""
 host_a=""
 host_b=""
+campaign_live_evidence=""
+require_external_live_evidence=""
+campaign_live_evidence_udp_inject=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --summary-json)
@@ -151,6 +181,30 @@ while [[ $# -gt 0 ]]; do
       host_b="${1#*=}"
       shift
       ;;
+    --campaign-live-evidence)
+      campaign_live_evidence="${2:-}"
+      shift 2
+      ;;
+    --campaign-live-evidence=*)
+      campaign_live_evidence="${1#*=}"
+      shift
+      ;;
+    --require-external-live-evidence)
+      require_external_live_evidence="${2:-}"
+      shift 2
+      ;;
+    --require-external-live-evidence=*)
+      require_external_live_evidence="${1#*=}"
+      shift
+      ;;
+    --campaign-live-evidence-udp-inject)
+      campaign_live_evidence_udp_inject="${2:-}"
+      shift 2
+      ;;
+    --campaign-live-evidence-udp-inject=*)
+      campaign_live_evidence_udp_inject="${1#*=}"
+      shift
+      ;;
     *)
       shift
       ;;
@@ -161,8 +215,8 @@ if [[ -z "$summary_json" ]]; then
   exit 2
 fi
 if [[ -n "$capture_file" ]]; then
-  printf 'stability\tscenario=%s\thost_a=%s\thost_b=%s\tsubject=%s\tsummary_json=%s\n' \
-    "$scenario" "$host_a" "$host_b" "$subject" "$summary_json" >>"$capture_file"
+  printf 'stability\tscenario=%s\thost_a=%s\thost_b=%s\tsubject=%s\tsummary_json=%s\tcampaign_live_evidence=%s\trequire_external_live_evidence=%s\tcampaign_live_evidence_udp_inject=%s\n' \
+    "$scenario" "$host_a" "$host_b" "$subject" "$summary_json" "$campaign_live_evidence" "$require_external_live_evidence" "$campaign_live_evidence_udp_inject" >>"$capture_file"
 fi
 echo "fake-stability subject=$subject host_a=$host_a host_b=$host_b"
 if [[ "$scenario" == "fail" ]]; then
@@ -265,16 +319,33 @@ assert_jq "$PASS_SUMMARY" '
   and .rc == 0
   and .inputs.subject_source == "explicit:--campaign-subject"
   and .inputs.subject_configured == true
+  and .inputs.live_evidence_policy.campaign_live_evidence == true
+  and .inputs.live_evidence_policy.require_external_live_evidence == true
+  and .inputs.live_evidence_policy.campaign_live_evidence_udp_inject == false
   and .failure_stage == null
   and .failure_substep == null
   and .preflight.ok == true
   and .stages.live_gate.attempted == true
   and .stages.live_gate.status == "pass"
+  and (.stages.live_gate.command_redacted | contains("--campaign-live-evidence 1"))
+  and (.stages.live_gate.command_redacted | contains("--require-external-live-evidence 1"))
+  and (.stages.live_gate.command_redacted | contains("--campaign-live-evidence-udp-inject 0"))
   and .stages.stability_cycle.attempted == true
   and .stages.stability_cycle.status == "pass"
+  and (.stages.stability_cycle.command_redacted | contains("--campaign-live-evidence 1"))
+  and (.stages.stability_cycle.command_redacted | contains("--require-external-live-evidence 1"))
+  and (.stages.stability_cycle.command_redacted | contains("--campaign-live-evidence-udp-inject 0"))
   and .stages.evidence_pack_publish.attempted == true
   and .stages.evidence_pack_publish.status == "pass"
 '
+
+for expected_stage in live stability; do
+  if ! rg -q "^${expected_stage}\t.*\tcampaign_live_evidence=1\trequire_external_live_evidence=1\tcampaign_live_evidence_udp_inject=0" "$CAPTURE_FILE"; then
+    echo "expected strict external/no-inject policy flags for ${expected_stage} stage"
+    cat "$CAPTURE_FILE"
+    exit 1
+  fi
+done
 
 PASS_LIVE_LOG="$(jq -r '.stages.live_gate.log' "$PASS_SUMMARY")"
 PASS_STABILITY_LOG="$(jq -r '.stages.stability_cycle.log' "$PASS_SUMMARY")"
@@ -387,6 +458,9 @@ assert_jq "$FAIL_SUMMARY" '
   .status == "fail"
   and .failure_stage == "stability_cycle"
   and .failure_substep == "stability_cycle_stage_failed"
+  and .inputs.live_evidence_policy.campaign_live_evidence == true
+  and .inputs.live_evidence_policy.require_external_live_evidence == true
+  and .inputs.live_evidence_policy.campaign_live_evidence_udp_inject == false
   and .stages.live_gate.attempted == true
   and .stages.live_gate.status == "pass"
   and .stages.stability_cycle.attempted == true
@@ -441,6 +515,9 @@ assert_jq "$STALE_SUMMARY" '
   .status == "fail"
   and .failure_stage == "stability_cycle"
   and .failure_substep == "stability_cycle_stage_failed"
+  and .inputs.live_evidence_policy.campaign_live_evidence == true
+  and .inputs.live_evidence_policy.require_external_live_evidence == true
+  and .inputs.live_evidence_policy.campaign_live_evidence_udp_inject == false
   and .stages.stability_cycle.attempted == true
   and .stages.stability_cycle.status == "fail"
   and .stages.stability_cycle.rc == 66
