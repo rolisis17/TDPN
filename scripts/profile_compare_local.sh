@@ -477,7 +477,8 @@ start_live_evidence_udp_injector_01() {
   port="$(sed -n '2p' <<<"$host_port")"
   (
     while true; do
-      printf '\001\000\000\000tdpn-live-evidence-packet' >"/dev/udp/${host}/${port}" || true
+      # WireGuard transport-data frame shape: type=4, reserved bytes, 28-byte minimum payload.
+      printf '\004\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000' >"/dev/udp/${host}/${port}" || true
       sleep 0.05
     done
   ) >>"$run_log" 2>&1 &
