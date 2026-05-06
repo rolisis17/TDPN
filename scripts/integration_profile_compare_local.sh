@@ -550,6 +550,7 @@ PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
 if ! jq -e '
   .status == "pass"
   and .inputs.live_evidence == true
+  and .inputs.live_evidence_udp_inject == true
   and .inputs.fail_on_run_fail == true
   and .inputs.explicit_remote_endpoints == false
   and .inputs.transport_auto_defaults.client_inner_source_udp == true
@@ -571,6 +572,40 @@ for expected in 'client_inner_source=udp' 'disable_synthetic_fallback=1' 'data_p
     exit 1
   fi
 done
+
+LIVE_NO_INJECT_SUMMARY_JSON="$TMP_DIR/profile_compare_live_no_inject_summary.json"
+LIVE_NO_INJECT_REPORT_MD="$TMP_DIR/profile_compare_live_no_inject_report.md"
+: >"$CAPTURE"
+
+echo "[profile-compare-local] live evidence UDP injector can be disabled"
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$FAKE_COUNTER_DIR" \
+FAKE_LOG_DIR="$FAKE_LOG_DIR" \
+PROFILE_COMPARE_LOCAL_EASY_NODE_SCRIPT="$FAKE_EASY" \
+./scripts/profile_compare_local.sh \
+  --profiles balanced \
+  --rounds 1 \
+  --execution-mode local \
+  --directory-urls http://127.0.0.1:28181 \
+  --issuer-url http://127.0.0.1:28182 \
+  --entry-url http://127.0.0.1:28183 \
+  --exit-url http://127.0.0.1:28184 \
+  --live-evidence 1 \
+  --live-evidence-udp-inject 0 \
+  --summary-json "$LIVE_NO_INJECT_SUMMARY_JSON" \
+  --report-md "$LIVE_NO_INJECT_REPORT_MD" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_live_no_inject.log
+
+if ! jq -e '
+  .status == "pass"
+  and .inputs.live_evidence == true
+  and .inputs.live_evidence_udp_inject == false
+  and .inputs.transport_auto_defaults.client_inner_source_udp == true
+' "$LIVE_NO_INJECT_SUMMARY_JSON" >/dev/null; then
+  echo "live no-inject summary did not preserve disabled injector metadata"
+  cat "$LIVE_NO_INJECT_SUMMARY_JSON"
+  exit 1
+fi
 
 LIVE_UNSAFE_RUN_LOG="$TMP_DIR/profile_compare_live_unsafe_run.log"
 echo "[profile-compare-local] live evidence rejects unsafe transport overrides"

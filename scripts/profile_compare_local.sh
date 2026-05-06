@@ -40,6 +40,7 @@ Usage:
     [--keep-stack [0|1]] \
     [--fail-on-run-fail [0|1]] \
     [--live-evidence [0|1]] \
+    [--live-evidence-udp-inject [0|1]] \
     [--summary-json PATH] \
     [--report-md PATH] \
     [--print-summary-json [0|1]]
@@ -53,6 +54,8 @@ Notes:
   - `speed-1hop` is experimental and is never recommended as a default.
   - if no endpoint URLs are provided, this wrapper can start a local wg-only
     demo stack (`--start-local-stack auto`, default behavior).
+  - `--live-evidence 1` starts a small local UDP packet producer by default so
+    strict real-packet mode has client-origin ingress without synthetic fallback.
 USAGE
 }
 
@@ -433,6 +436,49 @@ prepare_log_dir() {
   printf '%s\n' "$dir"
 }
 
+parse_udp_addr_host_port_01() {
+  local addr="${1:-}"
+  local host=""
+  local port=""
+  addr="$(trim "$addr")"
+  if [[ "$addr" == \[*\]:* ]]; then
+    host="${addr#\[}"
+    host="${host%%]*}"
+    port="${addr##*:}"
+  else
+    host="${addr%:*}"
+    port="${addr##*:}"
+    if [[ "$host" == "$addr" || "$host" == *:* ]]; then
+      return 1
+    fi
+  fi
+  if [[ -z "$host" || -z "$port" || ! "$port" =~ ^[0-9]+$ || "$port" -lt 1 || "$port" -gt 65535 ]]; then
+    return 1
+  fi
+  printf '%s\n%s\n' "$host" "$port"
+}
+
+start_live_evidence_udp_injector_01() {
+  local run_log="${1:-/dev/null}"
+  local udp_addr="${CLIENT_INNER_UDP_ADDR:-127.0.0.1:51900}"
+  local host_port=""
+  local host=""
+  local port=""
+  if ! host_port="$(parse_udp_addr_host_port_01 "$udp_addr")"; then
+    echo "profile-compare-local: live evidence UDP injector cannot parse CLIENT_INNER_UDP_ADDR=${udp_addr}"
+    return 1
+  fi
+  host="$(sed -n '1p' <<<"$host_port")"
+  port="$(sed -n '2p' <<<"$host_port")"
+  (
+    while true; do
+      printf '\001\000\000\000tdpn-live-evidence-packet' >"/dev/udp/${host}/${port}" || true
+      sleep 0.05
+    done
+  ) >>"$run_log" 2>&1 &
+  printf '%s' "$!"
+}
+
 original_args=("$@")
 
 profiles_csv="balanced,speed,private,speed-1hop"
@@ -463,6 +509,7 @@ keep_stack="0"
 fail_on_run_fail="0"
 fail_on_run_fail_explicit="0"
 live_evidence="${PROFILE_COMPARE_LOCAL_LIVE_EVIDENCE:-0}"
+live_evidence_udp_inject="${PROFILE_COMPARE_LOCAL_LIVE_EVIDENCE_UDP_INJECT:-1}"
 summary_json=""
 report_md=""
 print_summary_json="0"
@@ -623,6 +670,19 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --live-evidence-udp-inject)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        live_evidence_udp_inject="${2:-}"
+        shift 2
+      else
+        live_evidence_udp_inject="1"
+        shift
+      fi
+      ;;
+    --live-evidence-udp-inject=*)
+      live_evidence_udp_inject="${1#--live-evidence-udp-inject=}"
+      shift
+      ;;
     --summary-json)
       summary_json="${2:-}"
       shift 2
@@ -659,6 +719,7 @@ bool_arg_or_die "--cleanup-ifaces" "$cleanup_ifaces"
 bool_arg_or_die "--keep-stack" "$keep_stack"
 bool_arg_or_die "--fail-on-run-fail" "$fail_on_run_fail"
 bool_arg_or_die "--live-evidence" "$live_evidence"
+bool_arg_or_die "--live-evidence-udp-inject" "$live_evidence_udp_inject"
 tri_state_or_die "--start-local-stack" "$start_local_stack"
 
 if [[ "$beta_profile" != "0" && "$beta_profile" != "1" ]]; then
@@ -816,8 +877,26 @@ local_stack_client_wg_public_key=""
 local_stack_client_wg_interface=""
 local_stack_client_wg_proxy_addr=""
 local_stack_client_startup_sync_timeout_sec=""
+declare -a live_evidence_udp_injector_pids=()
+
+stop_live_evidence_udp_injector_01() {
+  local pid="${1:-}"
+  if [[ -n "$pid" ]]; then
+    kill "$pid" >/dev/null 2>&1 || true
+    wait "$pid" >/dev/null 2>&1 || true
+  fi
+}
+
+stop_all_live_evidence_udp_injectors_01() {
+  local pid=""
+  for pid in "${live_evidence_udp_injector_pids[@]:-}"; do
+    stop_live_evidence_udp_injector_01 "$pid"
+  done
+  live_evidence_udp_injector_pids=()
+}
 
 cleanup_local_stack() {
+  stop_all_live_evidence_udp_injectors_01
   if [[ "$started_local_stack" == "1" && "$keep_stack" == "0" ]]; then
     "$easy_node_script" wg-only-stack-down \
       --force-iface-cleanup "$cleanup_ifaces" \
@@ -1212,13 +1291,31 @@ for profile in "${profiles[@]}"; do
 
     run_cmd_str="$(print_cmd "${run_cmd[@]}")"
 
+    run_rc=""
+    run_status=""
+    live_evidence_udp_injector_pid=""
+    if [[ "$live_evidence" == "1" && "$live_evidence_udp_inject" == "1" ]]; then
+      if ! live_evidence_udp_injector_pid="$(start_live_evidence_udp_injector_01 "$run_output_log")"; then
+        run_rc=2
+        run_status="fail"
+        echo "profile-compare-local: failed to start live evidence UDP injector" >>"$run_output_log"
+      else
+        live_evidence_udp_injector_pids+=("$live_evidence_udp_injector_pid")
+      fi
+    fi
+
     start_sec="$(date +%s)"
-    if "${run_cmd[@]}" >"$run_output_log" 2>&1; then
+    if [[ "${run_rc:-}" == "2" ]]; then
+      :
+    elif "${run_cmd[@]}" >>"$run_output_log" 2>&1; then
       run_rc=0
       run_status="pass"
     else
       run_rc=$?
       run_status="fail"
+    fi
+    if [[ -n "$live_evidence_udp_injector_pid" ]]; then
+      stop_live_evidence_udp_injector_01 "$live_evidence_udp_injector_pid"
     fi
     client_force_build_pending="0"
     end_sec="$(date +%s)"
@@ -1692,6 +1789,7 @@ jq -n \
   --arg prod_profile "$prod_profile" \
   --arg allow_insecure_remote_http "$allow_insecure_remote_http" \
   --arg live_evidence "$live_evidence" \
+  --arg live_evidence_udp_inject "$live_evidence_udp_inject" \
   --arg transport_auto_client_inner_source "$transport_auto_client_inner_source" \
   --arg transport_auto_disable_synthetic_fallback "$transport_auto_disable_synthetic_fallback" \
   --arg transport_auto_data_plane_mode_opaque "$transport_auto_data_plane_mode_opaque" \
@@ -1749,6 +1847,7 @@ jq -n \
       prod_profile: ($prod_profile == "1"),
       allow_insecure_remote_http: ($allow_insecure_remote_http == "1"),
       live_evidence: ($live_evidence == "1"),
+      live_evidence_udp_inject: ($live_evidence_udp_inject == "1"),
       explicit_remote_endpoints: ($explicit_remote_endpoints == "1"),
       transport_auto_defaults: {
         client_inner_source_udp: ($transport_auto_client_inner_source == "1"),
