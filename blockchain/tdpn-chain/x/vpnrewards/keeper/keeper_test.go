@@ -26,6 +26,24 @@ func newFailSafeDistributionStore() *failSafeDistributionStore {
 	}
 }
 
+func validRewardProofRecord(proofPath string) types.RewardProofRecord {
+	return types.RewardProofRecord{
+		ProofPath:         proofPath,
+		TrafficProofRef:   "obj://" + proofPath,
+		RewardID:          "reward-" + strings.ReplaceAll(proofPath, "/", "-"),
+		ProviderSubjectID: "provider-proof",
+		SessionID:         "session-proof",
+		PayoutStartUnix:   1776643200,
+		PayoutEndUnix:     1776643200 + weeklyEpochSeconds,
+		RewardMicros:      100,
+		Currency:          "uusdc",
+		IssuedAtUnix:      1777248001,
+		Verified:          true,
+		VerifierID:        "verifier-proof",
+		VerifiedAtUnix:    1777248010,
+	}
+}
+
 func (s *failSafeDistributionStore) UpsertAccrual(record types.RewardAccrual) {
 	s.accruals[record.AccrualID] = record
 }
@@ -233,21 +251,7 @@ func TestKeeperUpsertProofAllowsExactReplayAndRejectsConflict(t *testing.T) {
 
 	k := NewKeeper()
 
-	proof := types.RewardProofRecord{
-		ProofPath:         "traffic/proof-replay-1",
-		TrafficProofRef:   "obj://traffic/proof-replay-1",
-		RewardID:          "reward-proof-replay-1",
-		ProviderSubjectID: "provider-proof-replay-1",
-		SessionID:         "session-proof-replay-1",
-		PayoutStartUnix:   1776643200,
-		PayoutEndUnix:     1776643200 + weeklyEpochSeconds,
-		RewardMicros:      100,
-		Currency:          "uusdc",
-		IssuedAtUnix:      1777248001,
-		Verified:          true,
-		VerifierID:        "verifier-proof-replay-1",
-		VerifiedAtUnix:    1777248010,
-	}
+	proof := validRewardProofRecord("traffic/proof-replay-1")
 	if err := k.UpsertProofWithError(proof); err != nil {
 		t.Fatalf("UpsertProofWithError returned unexpected error: %v", err)
 	}
@@ -274,6 +278,80 @@ func TestKeeperUpsertProofAllowsExactReplayAndRejectsConflict(t *testing.T) {
 	}
 	if got != normalizeProof(proof) {
 		t.Fatalf("expected conflicting upsert to preserve original proof %+v, got %+v", normalizeProof(proof), got)
+	}
+}
+
+func TestKeeperProofReadWriteListAndVerifiedAccess(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+
+	first := validRewardProofRecord("traffic/proof-list-b")
+	second := validRewardProofRecord("traffic/proof-list-a")
+	second.RewardID = "reward-proof-list-a"
+	unverified := validRewardProofRecord("traffic/proof-list-c")
+	unverified.RewardID = "reward-proof-list-c"
+	unverified.Verified = false
+	unverified.VerifierID = ""
+	unverified.VerifiedAtUnix = 0
+
+	k.UpsertProof(first)
+	if err := k.UpsertProofWithError(second); err != nil {
+		t.Fatalf("UpsertProofWithError returned unexpected error: %v", err)
+	}
+	if err := k.UpsertProofWithError(unverified); err != nil {
+		t.Fatalf("UpsertProofWithError unverified proof returned unexpected error: %v", err)
+	}
+
+	got, ok := k.GetVerifiedProof(first.ProofPath)
+	if !ok {
+		t.Fatal("expected verified proof lookup to succeed")
+	}
+	if got != normalizeProof(first) {
+		t.Fatalf("expected verified proof %+v, got %+v", normalizeProof(first), got)
+	}
+	if _, ok := k.GetVerifiedProof(unverified.ProofPath); ok {
+		t.Fatal("expected unverified proof to be hidden from verified lookup")
+	}
+	if _, ok := k.GetVerifiedProof("traffic/missing-proof"); ok {
+		t.Fatal("expected missing proof to be absent from verified lookup")
+	}
+
+	proofs := k.ListProofs()
+	if len(proofs) != 3 {
+		t.Fatalf("expected 3 proofs, got %d", len(proofs))
+	}
+	if proofs[0].ProofPath != second.ProofPath || proofs[1].ProofPath != first.ProofPath || proofs[2].ProofPath != unverified.ProofPath {
+		t.Fatalf("expected sorted proof paths, got [%s %s %s]", proofs[0].ProofPath, proofs[1].ProofPath, proofs[2].ProofPath)
+	}
+
+	proofsWithError, err := k.ListProofsWithError()
+	if err != nil {
+		t.Fatalf("ListProofsWithError returned unexpected error: %v", err)
+	}
+	if len(proofsWithError) != len(proofs) {
+		t.Fatalf("expected ListProofsWithError length %d, got %d", len(proofs), len(proofsWithError))
+	}
+}
+
+func TestKeeperProofStoreUnsupportedFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	store := newTrackingStore()
+	k := NewKeeperWithStore(store)
+
+	err := k.UpsertProofWithError(validRewardProofRecord("traffic/proof-unsupported"))
+	if err == nil {
+		t.Fatal("expected proof write to fail when store lacks proof support")
+	}
+	if !strings.Contains(err.Error(), "proof store is not supported") {
+		t.Fatalf("expected unsupported proof store error, got %v", err)
+	}
+	if _, ok := k.GetProof("traffic/proof-unsupported"); ok {
+		t.Fatal("expected unsupported proof store lookup to fail closed")
+	}
+	if proofs := k.ListProofs(); len(proofs) != 0 {
+		t.Fatalf("expected unsupported proof store list to be empty, got %d", len(proofs))
 	}
 }
 

@@ -35,7 +35,7 @@ func NewGRPCQueryAdapter(query QueryServer) GRPCQueryAdapter {
 }
 
 func (a GRPCMsgAdapter) RecordAccrual(ctx context.Context, req *pb.MsgRecordAccrualRequest) (*pb.MsgRecordAccrualResponse, error) {
-	if err := ctx.Err(); err != nil {
+	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
 	var accrual *pb.RewardAccrual
@@ -56,7 +56,7 @@ func (a GRPCMsgAdapter) RecordAccrual(ctx context.Context, req *pb.MsgRecordAccr
 }
 
 func (a GRPCMsgAdapter) RecordDistribution(ctx context.Context, req *pb.MsgRecordDistributionRequest) (*pb.MsgRecordDistributionResponse, error) {
-	if err := ctx.Err(); err != nil {
+	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
 	var distribution *pb.DistributionRecord
@@ -77,7 +77,7 @@ func (a GRPCMsgAdapter) RecordDistribution(ctx context.Context, req *pb.MsgRecor
 }
 
 func (a GRPCQueryAdapter) RewardAccrual(ctx context.Context, req *pb.QueryRewardAccrualRequest) (*pb.QueryRewardAccrualResponse, error) {
-	if err := ctx.Err(); err != nil {
+	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
 	accrualID := ""
@@ -100,7 +100,7 @@ func (a GRPCQueryAdapter) RewardAccrual(ctx context.Context, req *pb.QueryReward
 }
 
 func (a GRPCQueryAdapter) DistributionRecord(ctx context.Context, req *pb.QueryDistributionRecordRequest) (*pb.QueryDistributionRecordResponse, error) {
-	if err := ctx.Err(); err != nil {
+	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
 	distributionID := ""
@@ -123,7 +123,7 @@ func (a GRPCQueryAdapter) DistributionRecord(ctx context.Context, req *pb.QueryD
 }
 
 func (a GRPCQueryAdapter) ListRewardAccruals(ctx context.Context, _ *pb.QueryListRewardAccrualsRequest) (*pb.QueryListRewardAccrualsResponse, error) {
-	if err := ctx.Err(); err != nil {
+	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
 	resp, err := a.query.ListAccruals(ListAccrualsRequest{})
@@ -142,7 +142,7 @@ func (a GRPCQueryAdapter) ListRewardAccruals(ctx context.Context, _ *pb.QueryLis
 }
 
 func (a GRPCQueryAdapter) ListDistributionRecords(ctx context.Context, _ *pb.QueryListDistributionRecordsRequest) (*pb.QueryListDistributionRecordsResponse, error) {
-	if err := ctx.Err(); err != nil {
+	if err := contextErr(ctx); err != nil {
 		return nil, err
 	}
 	resp, err := a.query.ListDistributions(ListDistributionsRequest{})
@@ -158,6 +158,13 @@ func (a GRPCQueryAdapter) ListDistributionRecords(ctx context.Context, _ *pb.Que
 	return &pb.QueryListDistributionRecordsResponse{
 		Distributions: out,
 	}, nil
+}
+
+func contextErr(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
 }
 
 func moduleAccrualToProto(record modtypes.RewardAccrual) *pb.RewardAccrual {

@@ -307,6 +307,14 @@ func TestRewardsQueryServer_NilScaffold(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	_, err = server.GetProof(context.Background(), RewardsGetProofRequest{ProofPath: "traffic-proof/proof-1"})
+	if err == nil {
+		t.Fatal("expected nil scaffold rewards proof query to fail")
+	}
+	if !strings.Contains(err.Error(), "vpnrewards keeper is not wired") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
 	_, err = server.ListAccruals(context.Background(), RewardsListAccrualsRequest{})
 	if err == nil {
 		t.Fatal("expected nil scaffold rewards accrual list query to fail")

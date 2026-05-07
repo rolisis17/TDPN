@@ -52,7 +52,7 @@ backup_file "$MODE_FILE" "mode_file"
 mkdir -p "$(dirname "$AUTH_ENV")" "$(dirname "$MODE_FILE")"
 cat >"$AUTH_ENV" <<'EOF_ENV'
 EASY_NODE_SERVER_MODE=authority
-DIRECTORY_PUBLIC_URL=http://203.0.113.10:8081
+DIRECTORY_PUBLIC_URL=http://127.0.0.1:8081
 DIRECTORY_ADMIN_TOKEN=test-admin-token
 EOF_ENV
 cat >"$MODE_FILE" <<'EOF_MODE'
@@ -125,6 +125,30 @@ exit 0
 EOF_CURL
 sed -i 's/\r$//' "$TMP_BIN/curl"
 chmod +x "$TMP_BIN/curl"
+
+echo "[server-federation-wait] insecure remote HTTP fails closed"
+INSECURE_REMOTE_LOG="$TMP_DIR/federation_wait_insecure_remote.log"
+if PATH="$TMP_BIN:$PATH" \
+  ./scripts/easy_node.sh server-federation-wait \
+    --directory-url http://100.64.244.24:8081 \
+    --ready-timeout-sec 2 \
+    --poll-sec 1 \
+    --timeout-sec 3 >"$INSECURE_REMOTE_LOG" 2>&1; then
+  echo "expected server-federation-wait to refuse insecure remote HTTP"
+  cat "$INSECURE_REMOTE_LOG"
+  exit 1
+fi
+if ! rg -q 'refused insecure remote URL: http://100\.64\.244\.24:8081' "$INSECURE_REMOTE_LOG"; then
+  echo "expected insecure remote HTTP refusal diagnostic"
+  cat "$INSECURE_REMOTE_LOG"
+  exit 1
+fi
+
+cat >"$AUTH_ENV" <<'EOF_ENV'
+EASY_NODE_SERVER_MODE=authority
+DIRECTORY_PUBLIC_URL=http://127.0.0.1:8081
+DIRECTORY_ADMIN_TOKEN=test-admin-token
+EOF_ENV
 
 echo "[server-federation-wait] default readiness allows discovered fallback"
 READY_LOG="$TMP_DIR/federation_wait_ready.log"

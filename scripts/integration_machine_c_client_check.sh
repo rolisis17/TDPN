@@ -41,6 +41,7 @@ Usage:
     [--region-bias N] \
     [--region-prefix-bias N] \
     [--require-issuer-quorum [0|1]] \
+    [--allow-insecure-remote-http [0|1]] \
     [--beta-profile [0|1]] \
     [--prod-profile [0|1]] \
     [--report-file PATH]

@@ -241,7 +241,7 @@ jq -e --arg reservation_id "${RESERVATION_ID}" --arg sponsor_id "${SPONSOR_ID}" 
   (.expires_at | type == "number" and . > 0)
 ' "${RESP_FILE}" >/dev/null
 
-pop_pub_key="$(go run ./cmd/tokenpop gen --show-private-key | jq -r '.public_key // empty')"
+pop_pub_key="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key | jq -r '.public_key // empty')"
 if [[ -z "${pop_pub_key}" ]]; then
   echo "failed to generate pop public key for sponsor token request"
   cat "${LOG_FILE}"
@@ -346,12 +346,8 @@ if [[ -z "${consumed_at_after_first_issue}" || "${consumed_at_after_first_issue}
 fi
 
 echo "[issuer-sponsor-live-smoke] payment-proof negative path duplicate proof replay"
-post_expect_status "${BASE_URL}/v1/sponsor/token" "${token_payload}" "200" "${SPONSOR_TOKEN}"
-jq -e '
-  (.token | type == "string" and length > 0) and
-  (.expires | type == "number" and . > 0) and
-  (.jti | type == "string" and length > 0)
-' "${RESP_FILE}" >/dev/null
+post_expect_status "${BASE_URL}/v1/sponsor/token" "${token_payload}" "409" "${SPONSOR_TOKEN}"
+assert_response_contains "payment proof already used" "duplicate sponsor token payment proof replay"
 
 get_expect_status "${BASE_URL}/v1/sponsor/status?reservation_id=${RESERVATION_ID}" "200" "${SPONSOR_TOKEN}"
 jq -e --arg reservation_id "${RESERVATION_ID}" --arg sponsor_id "${SPONSOR_ID}" --arg subject "${SUBJECT_ID}" --arg session_id "${SESSION_ID}" '

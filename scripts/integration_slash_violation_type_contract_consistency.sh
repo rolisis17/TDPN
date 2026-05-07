@@ -18,7 +18,7 @@ extract_allowlist_keys() {
       found = 0
     }
     {
-      if (!in_map && $0 ~ ("^[[:space:]]*var[[:space:]]+" variable_name "[[:space:]]*=[[:space:]]*map\\[string\\]struct\\{\\}[[:space:]]*\\{")) {
+      if (!in_map && $0 ~ ("^[[:space:]]*(var[[:space:]]+)?" variable_name "[[:space:]]*=[[:space:]]*map\\[string\\]struct\\{\\}[[:space:]]*\\{")) {
         in_map = 1
         found = 1
         next

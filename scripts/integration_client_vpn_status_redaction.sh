@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in jq mktemp rg; do
+for cmd in chmod grep jq mktemp rg; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -33,6 +33,7 @@ if [[ -f "$STATE_FILE" ]]; then
 fi
 
 STATUS_JSON="$TMP_DIR/client_status.json"
+LOG_FILE="$TMP_DIR/client.log"
 cat >"$STATUS_JSON" <<'JSON'
 {
   "path_mode": "2hop",
@@ -49,11 +50,15 @@ cat >"$STATUS_JSON" <<'JSON'
   }
 }
 JSON
+cat >"$LOG_FILE" <<'LOG'
+client connected to https://user:pw-secret@control.example:8083?token=control-secret
+endpoint=https://user:pw-secret@endpoint.example:8084?token=endpoint-secret
+LOG
 
 cat >"$STATE_FILE" <<EOF_STATE
 CLIENT_VPN_PID=999999
 CLIENT_VPN_IFACE=wgvpn-test
-CLIENT_VPN_LOG_FILE=$TMP_DIR/missing.log
+CLIENT_VPN_LOG_FILE=$LOG_FILE
 CLIENT_VPN_STATUS_FILE=$STATUS_JSON
 CLIENT_VPN_KEY_FILE=$TMP_DIR/client.key
 CLIENT_VPN_TRUST_FILE=$TMP_DIR/trusted.txt
@@ -104,5 +109,73 @@ if ! jq -e '
   cat "$TMP_DIR/status.json"
   exit 1
 fi
+
+TMP_BIN="$TMP_DIR/bin"
+mkdir -p "$TMP_BIN"
+cat >"$TMP_BIN/curl" <<'EOF_CURL'
+#!/usr/bin/env bash
+set -euo pipefail
+url="${@: -1}"
+case "$url" in
+  */v1/pubkeys)
+    printf '{"issuer":"issuer-a","pub_keys":["k1"]}\n'
+    ;;
+  */v1/health)
+    printf '{"ok":true}\n'
+    ;;
+  *)
+    printf '{}\n'
+    ;;
+esac
+EOF_CURL
+cat >"$TMP_BIN/go" <<'EOF_GO'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF_GO
+cat >"$TMP_BIN/wg" <<'EOF_WG'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF_WG
+cat >"$TMP_BIN/ip" <<'EOF_IP'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF_IP
+cat >"$TMP_BIN/timeout" <<'EOF_TIMEOUT'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ $# -gt 0 && "$1" =~ ^[0-9]+$ ]]; then
+  shift
+fi
+"$@"
+EOF_TIMEOUT
+chmod +x "$TMP_BIN/curl" "$TMP_BIN/go" "$TMP_BIN/wg" "$TMP_BIN/ip" "$TMP_BIN/timeout"
+
+echo "[client-vpn-preflight] redacts URL credentials in output"
+PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh client-vpn-preflight \
+  --directory-urls "https://user:pw-secret@dir.example:8081?token=dir-secret" \
+  --issuer-url "https://user:pw-secret@issuer.example:8082?token=issuer-secret" \
+  --entry-url "https://user:pw-secret@entry.example:8083?token=entry-secret" \
+  --exit-url "https://user:pw-secret@exit.example:8084?token=exit-secret" \
+  --require-root 0 \
+  --timeout-sec 1 \
+  --operator-floor-check 0 \
+  --issuer-quorum-check 0 >"$TMP_DIR/preflight.log" 2>&1
+for forbidden in 'pw-secret' 'token='; do
+  if grep -F -- "$forbidden" "$TMP_DIR/preflight.log" >/dev/null; then
+    echo "client-vpn-preflight leaked forbidden value: $forbidden"
+    cat "$TMP_DIR/preflight.log"
+    exit 1
+  fi
+done
+for expected in 'https://dir.example:8081' 'https://issuer.example:8082' 'https://entry.example:8083' 'https://exit.example:8084'; do
+  if ! grep -F -- "$expected" "$TMP_DIR/preflight.log" >/dev/null; then
+    echo "client-vpn-preflight missing expected redacted URL: $expected"
+    cat "$TMP_DIR/preflight.log"
+    exit 1
+  fi
+done
 
 echo "client vpn status redaction integration check ok"

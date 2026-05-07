@@ -17,6 +17,13 @@ done
 ENTRY_ADDR="127.0.0.1:18683"
 ENTRY_DATA_ADDR="127.0.0.1:61983"
 ISSUER_ADDR="127.0.0.1:18682"
+route_assertion_json="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)"
+route_assertion_private_key="$(echo "$route_assertion_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')"
+route_assertion_pubkey="$(echo "$route_assertion_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')"
+if [[ -z "$route_assertion_private_key" || -z "$route_assertion_pubkey" ]]; then
+  echo "failed to generate route assertion keypair"
+  exit 1
+fi
 
 CLIENT_FAIL_LOG="/tmp/integration_beta_strict_roles_client_fail.log"
 CLIENT_INNER_SOURCE_FAIL_LOG="/tmp/integration_beta_strict_roles_client_inner_source_fail.log"
@@ -33,9 +40,13 @@ EXIT_MULTI_ISSUER_OP_FAIL_LOG="/tmp/integration_beta_strict_roles_exit_multi_iss
 EXIT_MULTI_ISSUER_ID_FAIL_LOG="/tmp/integration_beta_strict_roles_exit_multi_issuer_id_fail.log"
 ISSUER_FAIL_LOG="/tmp/integration_beta_strict_roles_issuer_fail.log"
 ISSUER_SHORT_TOKEN_FAIL_LOG="/tmp/integration_beta_strict_roles_issuer_short_token_fail.log"
+ISSUER_ALLOWLIST_FAIL_LOG="/tmp/integration_beta_strict_roles_issuer_allowlist_fail.log"
+ISSUER_ANON_CRED_FAIL_LOG="/tmp/integration_beta_strict_roles_issuer_anon_cred_fail.log"
 ENTRY_OK_LOG="/tmp/integration_beta_strict_roles_entry_ok.log"
 ISSUER_OK_LOG="/tmp/integration_beta_strict_roles_issuer_ok.log"
-rm -f "$CLIENT_FAIL_LOG" "$CLIENT_INNER_SOURCE_FAIL_LOG" "$CLIENT_MULTI_DIR_FAIL_LOG" "$CLIENT_MULTI_DIR_OP_FAIL_LOG" "$ENTRY_FAIL_LOG" "$ENTRY_PUZZLE_FAIL_LOG" "$ENTRY_MULTI_DIR_FAIL_LOG" "$ENTRY_MULTI_DIR_OP_FAIL_LOG" "$EXIT_FAIL_LOG" "$EXIT_REBIND_FAIL_LOG" "$EXIT_MULTI_ISSUER_FAIL_LOG" "$EXIT_MULTI_ISSUER_OP_FAIL_LOG" "$EXIT_MULTI_ISSUER_ID_FAIL_LOG" "$ISSUER_FAIL_LOG" "$ISSUER_SHORT_TOKEN_FAIL_LOG" "$ENTRY_OK_LOG" "$ISSUER_OK_LOG"
+ISSUER_UNKNOWN_SUBJECT_BODY="/tmp/integration_beta_strict_roles_issuer_unknown_subject.body"
+ISSUER_ANON_DISABLED_BODY="/tmp/integration_beta_strict_roles_issuer_anon_disabled.body"
+rm -f "$CLIENT_FAIL_LOG" "$CLIENT_INNER_SOURCE_FAIL_LOG" "$CLIENT_MULTI_DIR_FAIL_LOG" "$CLIENT_MULTI_DIR_OP_FAIL_LOG" "$ENTRY_FAIL_LOG" "$ENTRY_PUZZLE_FAIL_LOG" "$ENTRY_MULTI_DIR_FAIL_LOG" "$ENTRY_MULTI_DIR_OP_FAIL_LOG" "$EXIT_FAIL_LOG" "$EXIT_REBIND_FAIL_LOG" "$EXIT_MULTI_ISSUER_FAIL_LOG" "$EXIT_MULTI_ISSUER_OP_FAIL_LOG" "$EXIT_MULTI_ISSUER_ID_FAIL_LOG" "$ISSUER_FAIL_LOG" "$ISSUER_SHORT_TOKEN_FAIL_LOG" "$ISSUER_ALLOWLIST_FAIL_LOG" "$ISSUER_ANON_CRED_FAIL_LOG" "$ENTRY_OK_LOG" "$ISSUER_OK_LOG" "$ISSUER_UNKNOWN_SUBJECT_BODY" "$ISSUER_ANON_DISABLED_BODY"
 
 if CLIENT_BETA_STRICT=1 timeout 12s go run ./cmd/node --client >"$CLIENT_FAIL_LOG" 2>&1; then
   echo "expected strict client startup failure with default client config"
@@ -198,7 +209,7 @@ if EXIT_BETA_STRICT=1 timeout 12s go run ./cmd/node --exit >"$EXIT_FAIL_LOG" 2>&
   cat "$EXIT_FAIL_LOG"
   exit 1
 fi
-if ! rg -q "BETA_STRICT_MODE requires DATA_PLANE_MODE=opaque" "$EXIT_FAIL_LOG"; then
+if ! rg -q "strict exit identity binding requires EXIT_RELAY_ID" "$EXIT_FAIL_LOG"; then
   echo "missing expected strict exit validation signal"
   cat "$EXIT_FAIL_LOG"
   exit 1
@@ -215,6 +226,7 @@ if EXIT_BETA_STRICT=1 \
   EXIT_OPAQUE_SINK_ADDR=127.0.0.1:53011 \
   EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:53012 \
   EXIT_PEER_REBIND_SEC=5 \
+  EXIT_RELAY_ID=exit-strict \
   timeout 12s go run ./cmd/node --exit >"$EXIT_REBIND_FAIL_LOG" 2>&1; then
   echo "expected strict exit startup failure with peer rebind enabled"
   cat "$EXIT_REBIND_FAIL_LOG"
@@ -237,6 +249,8 @@ if EXIT_BETA_STRICT=1 \
   EXIT_OPAQUE_SINK_ADDR=127.0.0.1:53011 \
   EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:53012 \
   EXIT_PEER_REBIND_SEC=0 \
+  EXIT_RELAY_ID=exit-strict \
+  EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS="$route_assertion_pubkey" \
   EXIT_STARTUP_SYNC_TIMEOUT_SEC=8 \
   ISSUER_URLS=http://127.0.0.1:8082,http://127.0.0.1:8086 \
   EXIT_ISSUER_MIN_SOURCES=1 \
@@ -263,6 +277,8 @@ if EXIT_BETA_STRICT=1 \
   EXIT_OPAQUE_SINK_ADDR=127.0.0.1:53011 \
   EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:53012 \
   EXIT_PEER_REBIND_SEC=0 \
+  EXIT_RELAY_ID=exit-strict \
+  EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS="$route_assertion_pubkey" \
   EXIT_STARTUP_SYNC_TIMEOUT_SEC=8 \
   ISSUER_URLS=http://127.0.0.1:8082,http://127.0.0.1:8086 \
   EXIT_ISSUER_MIN_SOURCES=2 \
@@ -289,10 +305,13 @@ if EXIT_BETA_STRICT=1 \
   EXIT_OPAQUE_SINK_ADDR=127.0.0.1:53011 \
   EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:53012 \
   EXIT_PEER_REBIND_SEC=0 \
+  EXIT_RELAY_ID=exit-strict \
+  EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS="$route_assertion_pubkey" \
   EXIT_STARTUP_SYNC_TIMEOUT_SEC=8 \
   ISSUER_URLS=http://127.0.0.1:8082,http://127.0.0.1:8086 \
   EXIT_ISSUER_MIN_SOURCES=2 \
   EXIT_ISSUER_MIN_OPERATORS=2 \
+  EXIT_ISSUER_MIN_KEY_VOTES=2 \
   EXIT_ISSUER_REQUIRE_ID=0 \
   timeout 12s go run ./cmd/node --exit >"$EXIT_MULTI_ISSUER_ID_FAIL_LOG" 2>&1; then
   echo "expected strict exit startup failure with issuer identity requirement disabled"
@@ -332,6 +351,44 @@ if ! rg -q "BETA_STRICT_MODE requires ISSUER_ADMIN_TOKEN length>=16" "$ISSUER_SH
   exit 1
 fi
 
+if ISSUER_BETA_STRICT=1 \
+  ISSUER_ADMIN_TOKEN=integration-admin-token \
+  ISSUER_REQUIRE_PAYMENT_PROOF=1 \
+  ISSUER_KEY_ROTATE_SEC=60 \
+  ISSUER_TOKEN_TTL_SEC=300 \
+  ISSUER_ANON_CRED_EXPOSE_ID=0 \
+  ISSUER_CLIENT_ALLOWLIST_ONLY=0 \
+  ISSUER_ALLOW_ANON_CRED=0 \
+  timeout 12s go run ./cmd/node --issuer >"$ISSUER_ALLOWLIST_FAIL_LOG" 2>&1; then
+  echo "expected strict issuer startup failure with client allowlist disabled"
+  cat "$ISSUER_ALLOWLIST_FAIL_LOG"
+  exit 1
+fi
+if ! rg -q "BETA_STRICT_MODE requires ISSUER_CLIENT_ALLOWLIST_ONLY=1" "$ISSUER_ALLOWLIST_FAIL_LOG"; then
+  echo "missing expected strict issuer allowlist validation signal"
+  cat "$ISSUER_ALLOWLIST_FAIL_LOG"
+  exit 1
+fi
+
+if ISSUER_BETA_STRICT=1 \
+  ISSUER_ADMIN_TOKEN=integration-admin-token \
+  ISSUER_REQUIRE_PAYMENT_PROOF=1 \
+  ISSUER_KEY_ROTATE_SEC=60 \
+  ISSUER_TOKEN_TTL_SEC=300 \
+  ISSUER_ANON_CRED_EXPOSE_ID=0 \
+  ISSUER_CLIENT_ALLOWLIST_ONLY=1 \
+  ISSUER_ALLOW_ANON_CRED=1 \
+  timeout 12s go run ./cmd/node --issuer >"$ISSUER_ANON_CRED_FAIL_LOG" 2>&1; then
+  echo "expected strict issuer startup failure with anonymous credentials enabled"
+  cat "$ISSUER_ANON_CRED_FAIL_LOG"
+  exit 1
+fi
+if ! rg -q "BETA_STRICT_MODE requires ISSUER_ALLOW_ANON_CRED=0" "$ISSUER_ANON_CRED_FAIL_LOG"; then
+  echo "missing expected strict issuer anonymous credential validation signal"
+  cat "$ISSUER_ANON_CRED_FAIL_LOG"
+  exit 1
+fi
+
 entry_pid=""
 issuer_pid=""
 cleanup() {
@@ -349,6 +406,8 @@ ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1 \
 ENTRY_PUZZLE_SECRET="integration-entry-secret-0001" \
 ENTRY_PUZZLE_DIFFICULTY=1 \
 ENTRY_OPERATOR_ID="op-entry" \
+ENTRY_RELAY_ID="entry-strict" \
+ENTRY_ROUTE_ASSERTION_PRIVATE_KEY="$route_assertion_private_key" \
 timeout 30s go run ./cmd/node --entry >"$ENTRY_OK_LOG" 2>&1 &
 entry_pid=$!
 
@@ -381,9 +440,12 @@ entry_pid=""
 ISSUER_ADDR="$ISSUER_ADDR" \
 ISSUER_BETA_STRICT=1 \
 ISSUER_ADMIN_TOKEN="integration-admin-token" \
+ISSUER_REQUIRE_PAYMENT_PROOF=1 \
 ISSUER_KEY_ROTATE_SEC=60 \
 ISSUER_TOKEN_TTL_SEC=300 \
 ISSUER_ANON_CRED_EXPOSE_ID=0 \
+ISSUER_CLIENT_ALLOWLIST_ONLY=1 \
+ISSUER_ALLOW_ANON_CRED=0 \
 timeout 30s go run ./cmd/node --issuer >"$ISSUER_OK_LOG" 2>&1 &
 issuer_pid=$!
 
@@ -403,6 +465,42 @@ done
 if [[ "$issuer_ready" -ne 1 ]]; then
   echo "strict issuer did not become healthy"
   cat "$ISSUER_OK_LOG"
+  exit 1
+fi
+unknown_subject_http="$(
+  curl -sS -o "$ISSUER_UNKNOWN_SUBJECT_BODY" -w "%{http_code}" \
+    -X POST \
+    -H 'Content-Type: application/json' \
+    --data "{\"tier\":1,\"subject\":\"client-not-allowlisted\",\"token_type\":\"client_access\",\"pop_pub_key\":\"${route_assertion_pubkey}\"}" \
+    "http://${ISSUER_ADDR}/v1/token"
+)"
+if [[ "$unknown_subject_http" != "403" ]]; then
+  echo "expected strict issuer to reject unknown client subject with 403, got $unknown_subject_http"
+  cat "$ISSUER_UNKNOWN_SUBJECT_BODY"
+  cat "$ISSUER_OK_LOG"
+  exit 1
+fi
+if ! rg -q "client subject not allowlisted" "$ISSUER_UNKNOWN_SUBJECT_BODY"; then
+  echo "missing expected unknown client subject rejection body"
+  cat "$ISSUER_UNKNOWN_SUBJECT_BODY"
+  exit 1
+fi
+anon_disabled_http="$(
+  curl -sS -o "$ISSUER_ANON_DISABLED_BODY" -w "%{http_code}" \
+    -X POST \
+    -H 'Content-Type: application/json' \
+    --data "{\"tier\":1,\"token_type\":\"client_access\",\"pop_pub_key\":\"${route_assertion_pubkey}\",\"anon_cred\":\"invalid-anon-credential\"}" \
+    "http://${ISSUER_ADDR}/v1/token"
+)"
+if [[ "$anon_disabled_http" != "403" ]]; then
+  echo "expected strict issuer to reject anonymous credential issuance with 403, got $anon_disabled_http"
+  cat "$ISSUER_ANON_DISABLED_BODY"
+  cat "$ISSUER_OK_LOG"
+  exit 1
+fi
+if ! rg -q "anonymous credential token issuance disabled" "$ISSUER_ANON_DISABLED_BODY"; then
+  echo "missing expected anonymous credential disabled rejection body"
+  cat "$ISSUER_ANON_DISABLED_BODY"
   exit 1
 fi
 if ! rg -q "issuer listening on ${ISSUER_ADDR}" "$ISSUER_OK_LOG"; then

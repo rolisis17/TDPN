@@ -11,6 +11,7 @@ backup_env=""
 backup_provider=""
 backup_mode=""
 live_curl_mock_dir=""
+tls_dir=""
 
 env_value() {
   local file="$1"
@@ -40,6 +41,9 @@ cleanup() {
   if [[ -n "$live_curl_mock_dir" ]]; then
     rm -rf "$live_curl_mock_dir"
   fi
+  if [[ -n "$tls_dir" ]]; then
+    rm -rf "$tls_dir"
+  fi
 }
 trap cleanup EXIT
 
@@ -58,6 +62,7 @@ if [[ -f "$MODE_FILE" ]]; then
 fi
 
 tls_dir="$(mktemp -d)"
+export EASY_NODE_ADMIN_SIGNING_KEY_DIR="$tls_dir/admin_signing"
 "$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$tls_dir/tls" --days 365 >/dev/null
 wg_key_file="$tls_dir/tls/exit_wg.key"
 printf 'test-exit-wg-private-key\n' >"$wg_key_file"

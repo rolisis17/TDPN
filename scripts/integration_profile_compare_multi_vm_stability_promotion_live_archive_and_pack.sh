@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp cat chmod grep; do
+for cmd in bash jq mktemp cat chmod grep date; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -139,10 +139,15 @@ if [[ "$scenario" == "no_go" ]]; then
   status="warn"
   rc=0
 fi
+generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [[ "$scenario" == "stale_timestamp" ]]; then
+  generated_at_utc="2000-01-01T00:00:00Z"
+fi
 
 archive_root="${FAKE_M5_PROMOTION_CYCLE_ARCHIVE_ROOT:-$(dirname "$summary_json")/fake_promotion_archive}"
 
 jq -n \
+  --arg generated_at_utc "$generated_at_utc" \
   --arg decision "$decision" \
   --arg status "$status" \
   --arg archive_root "$archive_root" \
@@ -151,6 +156,7 @@ jq -n \
   '{
     version: 1,
     schema: { id: "profile_compare_multi_vm_stability_promotion_cycle_summary" },
+    generated_at_utc: $generated_at_utc,
     status: $status,
     rc: $rc,
     decision: $decision,
@@ -235,9 +241,13 @@ fi
 decision="GO"
 status="ok"
 rc=0
+generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 next_command="./scripts/profile_compare_multi_vm_stability_promotion_cycle.sh --reports-dir .easy-node-logs --print-summary-json 1"
 operator_next_action_command="$next_command"
 
+if [[ "$scenario" == "stale_timestamp" ]]; then
+  generated_at_utc="2000-01-01T00:00:00Z"
+fi
 if [[ "$scenario" == "no_go_placeholder" ]]; then
   decision="NO-GO"
   status="warn"
@@ -254,6 +264,7 @@ if [[ "$scenario" == "unsafe_command_hint" ]]; then
 fi
 
 jq -n \
+  --arg generated_at_utc "$generated_at_utc" \
   --arg decision "$decision" \
   --arg status "$status" \
   --arg next_command "$next_command" \
@@ -262,6 +273,7 @@ jq -n \
   '{
     version: 1,
     schema: { id: "profile_compare_multi_vm_stability_promotion_evidence_pack_summary" },
+    generated_at_utc: $generated_at_utc,
     status: $status,
     rc: $rc,
     decision: $decision,
@@ -352,6 +364,37 @@ assert_jq "$MISSING_SUMMARY" '
   and (.next_command_reason | test("summary artifact is missing or stale"))
 '
 
+echo "[promotion-live-archive-and-pack] promotion-cycle stale generated_at_utc fails closed"
+STALE_CYCLE_SUMMARY="$TMP_DIR/stale_cycle_summary.json"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_LIVE_ARCHIVE_AND_PACK_PROMOTION_CYCLE_SCRIPT="$FAKE_PROMOTION_CYCLE_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_LIVE_ARCHIVE_AND_PACK_PROMOTION_EVIDENCE_PACK_SCRIPT="$FAKE_PACK_SCRIPT" \
+FAKE_M5_PROMOTION_CYCLE_SCENARIO="stale_timestamp" \
+FAKE_M5_PACK_SCENARIO="pass" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/stale_cycle_reports" \
+  --cycles 2 \
+  --fail-on-no-go 1 \
+  --summary-json "$STALE_CYCLE_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_promotion_live_archive_and_pack_stale_cycle.log 2>&1
+stale_cycle_rc=$?
+set -e
+
+if [[ "$stale_cycle_rc" -eq 0 ]]; then
+  echo "expected stale promotion-cycle timestamp rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_promotion_live_archive_and_pack_stale_cycle.log
+  exit 1
+fi
+assert_jq "$STALE_CYCLE_SUMMARY" '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_reason_code == "promotion_cycle_summary_missing_or_stale"
+  and .stages.promotion_cycle_live_archive.summary.summary_generated_at_utc == "2000-01-01T00:00:00Z"
+  and .stages.promotion_cycle_live_archive.summary.summary_timestamp_current == false
+  and .stages.promotion_cycle_live_archive.summary.summary_signals_stale == true
+  and .stages.promotion_evidence_pack.attempted == false
+'
+
 echo "[promotion-live-archive-and-pack] NO-GO warn-only path with placeholder sanitization"
 NOGO_SUMMARY="$TMP_DIR/nogo_summary.json"
 set +e
@@ -413,6 +456,36 @@ assert_jq "$UNSAFE_SUMMARY" '
   and .rc == 0
   and ((.next_command // "") | contains("rm -rf") | not)
   and ((.next_command // "") | test("profile_compare_multi_vm_stability_promotion_cycle\\.sh|profile_compare_multi_vm_stability_promotion_live_archive_and_pack\\.sh"))
+'
+
+echo "[promotion-live-archive-and-pack] promotion evidence-pack stale generated_at_utc fails closed"
+STALE_PACK_SUMMARY="$TMP_DIR/stale_pack_summary.json"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_LIVE_ARCHIVE_AND_PACK_PROMOTION_CYCLE_SCRIPT="$FAKE_PROMOTION_CYCLE_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_LIVE_ARCHIVE_AND_PACK_PROMOTION_EVIDENCE_PACK_SCRIPT="$FAKE_PACK_SCRIPT" \
+FAKE_M5_PROMOTION_CYCLE_SCENARIO="pass" \
+FAKE_M5_PACK_SCENARIO="stale_timestamp" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/stale_pack_reports" \
+  --cycles 2 \
+  --fail-on-no-go 1 \
+  --summary-json "$STALE_PACK_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_promotion_live_archive_and_pack_stale_pack.log 2>&1
+stale_pack_rc=$?
+set -e
+
+if [[ "$stale_pack_rc" -eq 0 ]]; then
+  echo "expected stale evidence-pack timestamp rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_promotion_live_archive_and_pack_stale_pack.log
+  exit 1
+fi
+assert_jq "$STALE_PACK_SUMMARY" '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_reason_code == "promotion_evidence_pack_summary_missing_or_stale"
+  and .stages.promotion_evidence_pack.summary.summary_generated_at_utc == "2000-01-01T00:00:00Z"
+  and .stages.promotion_evidence_pack.summary.summary_timestamp_current == false
+  and .stages.promotion_evidence_pack.summary.summary_signals_stale == true
 '
 
 echo "[promotion-live-archive-and-pack] unresolved placeholder env VM command source is classified fail-closed"

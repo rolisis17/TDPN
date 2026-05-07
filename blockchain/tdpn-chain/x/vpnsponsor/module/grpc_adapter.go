@@ -26,7 +26,11 @@ func NewGRPCMsgServerAdapter(k *keeper.Keeper) *GRPCMsgServerAdapter {
 	}
 }
 
-func (a *GRPCMsgServerAdapter) CreateAuthorization(_ context.Context, req *sponsorpb.MsgCreateAuthorizationRequest) (*sponsorpb.MsgCreateAuthorizationResponse, error) {
+func (a *GRPCMsgServerAdapter) CreateAuthorization(ctx context.Context, req *sponsorpb.MsgCreateAuthorizationRequest) (*sponsorpb.MsgCreateAuthorizationResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	resp, err := a.server.AuthorizeSponsor(AuthorizeSponsorRequest{
 		Authorization: fromProtoAuthorization(req.GetAuthorization()),
 	})
@@ -74,7 +78,11 @@ func NewGRPCQueryServerAdapter(k *keeper.Keeper) *GRPCQueryServerAdapter {
 	}
 }
 
-func (a *GRPCQueryServerAdapter) SponsorAuthorization(_ context.Context, req *sponsorpb.QuerySponsorAuthorizationRequest) (*sponsorpb.QuerySponsorAuthorizationResponse, error) {
+func (a *GRPCQueryServerAdapter) SponsorAuthorization(ctx context.Context, req *sponsorpb.QuerySponsorAuthorizationRequest) (*sponsorpb.QuerySponsorAuthorizationResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	resp, err := a.server.GetAuthorization(GetAuthorizationRequest{
 		AuthorizationID: req.GetAuthorizationId(),
 	})
@@ -91,7 +99,11 @@ func (a *GRPCQueryServerAdapter) SponsorAuthorization(_ context.Context, req *sp
 	}, nil
 }
 
-func (a *GRPCQueryServerAdapter) DelegatedSessionCredit(_ context.Context, req *sponsorpb.QueryDelegatedSessionCreditRequest) (*sponsorpb.QueryDelegatedSessionCreditResponse, error) {
+func (a *GRPCQueryServerAdapter) DelegatedSessionCredit(ctx context.Context, req *sponsorpb.QueryDelegatedSessionCreditRequest) (*sponsorpb.QueryDelegatedSessionCreditResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	resp, err := a.server.GetDelegation(GetDelegationRequest{
 		ReservationID: req.GetReservationId(),
 	})
@@ -108,7 +120,11 @@ func (a *GRPCQueryServerAdapter) DelegatedSessionCredit(_ context.Context, req *
 	}, nil
 }
 
-func (a *GRPCQueryServerAdapter) ListSponsorAuthorizations(_ context.Context, _ *sponsorpb.QueryListSponsorAuthorizationsRequest) (*sponsorpb.QueryListSponsorAuthorizationsResponse, error) {
+func (a *GRPCQueryServerAdapter) ListSponsorAuthorizations(ctx context.Context, _ *sponsorpb.QueryListSponsorAuthorizationsRequest) (*sponsorpb.QueryListSponsorAuthorizationsResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	resp, err := a.server.ListAuthorizations(ListAuthorizationsRequest{})
 	if err != nil {
 		return nil, err
@@ -123,7 +139,11 @@ func (a *GRPCQueryServerAdapter) ListSponsorAuthorizations(_ context.Context, _ 
 	}, nil
 }
 
-func (a *GRPCQueryServerAdapter) ListDelegatedSessionCredits(_ context.Context, _ *sponsorpb.QueryListDelegatedSessionCreditsRequest) (*sponsorpb.QueryListDelegatedSessionCreditsResponse, error) {
+func (a *GRPCQueryServerAdapter) ListDelegatedSessionCredits(ctx context.Context, _ *sponsorpb.QueryListDelegatedSessionCreditsRequest) (*sponsorpb.QueryListDelegatedSessionCreditsResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	resp, err := a.server.ListDelegations(ListDelegationsRequest{})
 	if err != nil {
 		return nil, err
@@ -136,6 +156,13 @@ func (a *GRPCQueryServerAdapter) ListDelegatedSessionCredits(_ context.Context, 
 	return &sponsorpb.QueryListDelegatedSessionCreditsResponse{
 		Delegations: records,
 	}, nil
+}
+
+func contextErr(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
 }
 
 func fromProtoAuthorization(pb *sponsorpb.SponsorAuthorization) sponsortypes.SponsorAuthorization {

@@ -42,11 +42,44 @@ validate_wg_key_path() {
   fi
 
   key_dir="$(dirname "$key_path")"
+  reject_wg_key_symlink_component "$key_dir" "$allowed_root"
   mkdir -p "$key_dir"
+  reject_wg_key_symlink_component "$key_dir" "$allowed_root"
   if [ -L "$key_dir" ]; then
     echo "refusing EXIT_WG_PRIVATE_KEY_PATH parent symlink: $key_dir" >&2
     exit 1
   fi
+}
+
+reject_wg_key_symlink_component() {
+  check_path="$1"
+  root_path="${2%/}"
+
+  case "$check_path" in
+    "$root_path") return 0 ;;
+    "$root_path"/*) ;;
+    *) return 0 ;;
+  esac
+
+  remaining="${check_path#"$root_path"/}"
+  current="$root_path"
+  while [ -n "$remaining" ]; do
+    component="${remaining%%/*}"
+    if [ "$remaining" = "$component" ]; then
+      remaining=""
+    else
+      remaining="${remaining#*/}"
+    fi
+    [ -z "$component" ] && continue
+    current="${current%/}/$component"
+    if [ -L "$current" ]; then
+      echo "refusing EXIT_WG_PRIVATE_KEY_PATH parent symlink: $current" >&2
+      exit 1
+    fi
+    if [ ! -e "$current" ]; then
+      return 0
+    fi
+  done
 }
 
 owner_only_mode() {
@@ -96,7 +129,10 @@ if [ "${WG_BACKEND:-noop}" = "command" ]; then
   if [ "${EXIT_WG_AUTO_CREATE_INTERFACE:-0}" = "1" ]; then
     iface="${EXIT_WG_INTERFACE:-wg-exit0}"
     if ! ip link show dev "$iface" >/dev/null 2>&1; then
-      ip link add dev "$iface" type wireguard >/dev/null 2>&1 || true
+      if ! ip link add dev "$iface" type wireguard >/dev/null 2>&1; then
+        echo "entrypoint: failed to auto-create EXIT_WG_INTERFACE '$iface' (requires NET_ADMIN/privileged WireGuard-capable runtime)" >&2
+        exit 1
+      fi
     fi
   fi
 fi

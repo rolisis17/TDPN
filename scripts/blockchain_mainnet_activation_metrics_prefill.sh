@@ -148,15 +148,38 @@ extract_numeric_from_source_json() {
   local raw=""
 
   raw="$(jq -r --arg key "$key" '
-    if (.[$key] | type) == "number" then .[$key] else empty end
-  ' "$source_json" 2>/dev/null || true)"
-  if [[ -n "$raw" ]]; then
-    numeric_text_or_empty "$raw"
-    return 0
-  fi
-
-  raw="$(jq -r --arg key "$key" '
-    limit(1; .. | objects | .[$key]? | select(type == "number"))
+    def emit($value):
+      if $value == null then empty else $value end;
+    def grouped:
+      if $key == "measurement_window_weeks" then
+        emit(.pipeline.window[$key]),
+        emit(.window[$key]),
+        emit(.general[$key])
+      elif ($key == "vpn_connect_session_success_slo_pct" or $key == "vpn_recovery_mttr_p95_minutes") then
+        emit(.pipeline.vpn.slo[$key]),
+        emit(.vpn.slo[$key]),
+        emit(.reliability[$key])
+      elif ($key == "paying_users_3mo_min" or $key == "paid_sessions_per_day_30d_avg") then
+        emit(.demand[$key])
+      elif ($key | startswith("validator_")) then
+        emit(.validator[$key]),
+        emit(.validator.supply[$key]),
+        emit(.validator.concentration[$key]),
+        emit(.validator.geo[$key]),
+        emit(.validator_decentralization[$key])
+      elif ($key == "manual_sanctions_reversed_pct_90d" or $key == "abuse_report_to_decision_p95_hours") then
+        emit(.governance[$key])
+      elif ($key == "subsidy_runway_months" or $key == "contribution_margin_3mo") then
+        emit(.economics[$key])
+      else
+        empty
+      end;
+    limit(1;
+      emit(.[$key]),
+      emit(.metrics[$key]),
+      grouped
+    )
+    | if type == "string" then . else tostring end
   ' "$source_json" 2>/dev/null || true)"
   numeric_text_or_empty "$raw"
 }

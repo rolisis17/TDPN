@@ -2302,25 +2302,28 @@ func TestReconcileSettlementToleratesError(t *testing.T) {
 	}
 }
 
-func TestHandleSettlementStatusReturnsReport(t *testing.T) {
+func TestHandleSettlementStatusReturnsCachedReportWithoutReconciling(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
+	report := settlement.ReconcileReport{
+		GeneratedAt:               now,
+		PendingAdapterOperations:  4,
+		ShadowAdapterConfigured:   true,
+		ShadowAttemptedOperations: 9,
+		ShadowSubmittedOperations: 8,
+		ShadowFailedOperations:    1,
+		PendingOperations:         7,
+		SubmittedOperations:       3,
+		ConfirmedOperations:       2,
+		FailedOperations:          1,
+	}
 	stub := &settlementServiceStub{
 		reconcileFn: func(_ context.Context) (settlement.ReconcileReport, error) {
-			return settlement.ReconcileReport{
-				GeneratedAt:               now,
-				PendingAdapterOperations:  4,
-				ShadowAdapterConfigured:   true,
-				ShadowAttemptedOperations: 9,
-				ShadowSubmittedOperations: 8,
-				ShadowFailedOperations:    1,
-				PendingOperations:         7,
-				SubmittedOperations:       3,
-				ConfirmedOperations:       2,
-				FailedOperations:          1,
-			}, nil
+			return report, nil
 		},
 	}
 	s := &Service{settlement: stub}
+	s.settlementStatus.lastReport = report
+	s.settlementStatus.lastCheckedAt = now.Add(time.Second)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
 	rr := httptest.NewRecorder()
@@ -2358,25 +2361,28 @@ func TestHandleSettlementStatusReturnsReport(t *testing.T) {
 	if resp.LastError != "" {
 		t.Fatalf("expected no error on success, got %q", resp.LastError)
 	}
-	if stub.reconcileCalls != 1 {
-		t.Fatalf("expected one reconcile call, got %d", stub.reconcileCalls)
+	if stub.reconcileCalls != 0 {
+		t.Fatalf("expected status endpoint not to trigger reconcile work, got %d calls", stub.reconcileCalls)
 	}
 }
 
 func TestHandleSettlementStatusSurfacesLifecycleCountersWithConfirmedProgress(t *testing.T) {
 	now := time.Unix(1700000200, 0).UTC()
+	report := settlement.ReconcileReport{
+		GeneratedAt:         now,
+		PendingOperations:   0,
+		SubmittedOperations: 4,
+		ConfirmedOperations: 6,
+		FailedOperations:    0,
+	}
 	stub := &settlementServiceStub{
 		reconcileFn: func(_ context.Context) (settlement.ReconcileReport, error) {
-			return settlement.ReconcileReport{
-				GeneratedAt:         now,
-				PendingOperations:   0,
-				SubmittedOperations: 4,
-				ConfirmedOperations: 6,
-				FailedOperations:    0,
-			}, nil
+			return report, nil
 		},
 	}
 	s := &Service{settlement: stub}
+	s.settlementStatus.lastReport = report
+	s.settlementStatus.lastCheckedAt = now.Add(time.Second)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
 	rr := httptest.NewRecorder()
@@ -2398,8 +2404,8 @@ func TestHandleSettlementStatusSurfacesLifecycleCountersWithConfirmedProgress(t 
 	if resp.PendingOperations != 0 || resp.SubmittedOperations != 4 || resp.ConfirmedOperations != 6 || resp.FailedOperations != 0 {
 		t.Fatalf("unexpected lifecycle counters: %+v", resp)
 	}
-	if stub.reconcileCalls != 1 {
-		t.Fatalf("expected one reconcile call, got %d", stub.reconcileCalls)
+	if stub.reconcileCalls != 0 {
+		t.Fatalf("expected status endpoint not to trigger reconcile work, got %d calls", stub.reconcileCalls)
 	}
 }
 
@@ -2421,6 +2427,9 @@ func TestHandleSettlementStatusReconcileErrorIsFailSoft(t *testing.T) {
 		SubmittedOperations:       2,
 		ConfirmedOperations:       1,
 		FailedOperations:          3,
+	}
+	if _, stale, _, lastError, err := s.reconcileSettlementStatus(context.Background()); err == nil || !stale || !strings.Contains(lastError, "temporary reconcile outage") {
+		t.Fatalf("expected reconcile setup to fail stale, stale=%t last_error=%q err=%v", stale, lastError, err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
@@ -2454,7 +2463,7 @@ func TestHandleSettlementStatusReconcileErrorIsFailSoft(t *testing.T) {
 		t.Fatalf("expected cached counters in fail-soft response, got %+v", resp)
 	}
 	if stub.reconcileCalls != 1 {
-		t.Fatalf("expected one reconcile call, got %d", stub.reconcileCalls)
+		t.Fatalf("expected only explicit reconcile setup call, got %d", stub.reconcileCalls)
 	}
 }
 
@@ -2489,6 +2498,9 @@ func TestHandleSettlementStatusStaleClearsAfterRecovery(t *testing.T) {
 		FailedOperations:         2,
 	}
 
+	if _, stale, _, lastError, err := s.reconcileSettlementStatus(context.Background()); err == nil || !stale || !strings.Contains(lastError, "temporary reconcile outage") {
+		t.Fatalf("expected first reconcile setup to fail stale, stale=%t last_error=%q err=%v", stale, lastError, err)
+	}
 	firstReq := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
 	firstRR := httptest.NewRecorder()
 	s.handleSettlementStatus(firstRR, firstReq)
@@ -2506,6 +2518,9 @@ func TestHandleSettlementStatusStaleClearsAfterRecovery(t *testing.T) {
 		t.Fatalf("expected reconcile error in degraded response, got %q", degraded.LastError)
 	}
 
+	if _, stale, _, lastError, err := s.reconcileSettlementStatus(context.Background()); err != nil || stale || lastError != "" {
+		t.Fatalf("expected second reconcile setup to recover, stale=%t last_error=%q err=%v", stale, lastError, err)
+	}
 	secondReq := httptest.NewRequest(http.MethodGet, "/v1/settlement/status", nil)
 	secondRR := httptest.NewRecorder()
 	s.handleSettlementStatus(secondRR, secondReq)
@@ -5403,6 +5418,65 @@ func TestValidateRuntimeConfigProdStrictRejectsInsecureSkipVerify(t *testing.T) 
 	}
 	if !strings.Contains(err.Error(), "MTLS_INSECURE_SKIP_VERIFY") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictRejectsTrustedBridgeFinality(t *testing.T) {
+	t.Setenv("COSMOS_SETTLEMENT_TRUSTED_BRIDGE_FINALITY", "true")
+	s := &Service{prodStrict: true}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected prod strict to reject trusted bridge finality")
+	}
+	if err.Error() != "PROD_STRICT_MODE forbids COSMOS_SETTLEMENT_TRUSTED_BRIDGE_FINALITY" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictRejectsSignedTxSubmitMode(t *testing.T) {
+	t.Setenv("COSMOS_SETTLEMENT_SUBMIT_MODE", settlement.CosmosSubmitModeSignedTx)
+	s := &Service{prodStrict: true}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected prod strict to reject signed-tx submit mode")
+	}
+	if err.Error() != "PROD_STRICT_MODE forbids COSMOS_SETTLEMENT_SUBMIT_MODE=signed-tx" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictRejectsShadowCosmosNonProductionFinalityModes(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		val  string
+		want string
+	}{
+		{
+			name: "trusted bridge finality",
+			key:  "COSMOS_SETTLEMENT_SHADOW_TRUSTED_BRIDGE_FINALITY",
+			val:  "true",
+			want: "PROD_STRICT_MODE forbids COSMOS_SETTLEMENT_SHADOW_TRUSTED_BRIDGE_FINALITY",
+		},
+		{
+			name: "signed tx submit mode",
+			key:  "COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE",
+			val:  settlement.CosmosSubmitModeSignedTx,
+			want: "PROD_STRICT_MODE forbids COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE=signed-tx",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tc.key, tc.val)
+			s := &Service{prodStrict: true}
+			err := s.validateRuntimeConfig()
+			if err == nil {
+				t.Fatalf("expected prod strict to reject %s", tc.key)
+			}
+			if err.Error() != tc.want {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }
 

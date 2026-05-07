@@ -30,10 +30,28 @@ PARTIAL_SUMMARY="$TMP_DIR/metrics_partial_summary.json"
 PARTIAL_CANONICAL="$TMP_DIR/metrics_partial_canonical.json"
 PARTIAL_LOG="$TMP_DIR/partial.log"
 
+SEMANTIC_CLI_SUMMARY="$TMP_DIR/metrics_semantic_cli_summary.json"
+SEMANTIC_CLI_CANONICAL="$TMP_DIR/metrics_semantic_cli_canonical.json"
+SEMANTIC_CLI_LOG="$TMP_DIR/semantic_cli.log"
+
 SOURCE_JSON="$TMP_DIR/metrics_source.json"
 SOURCE_SUMMARY="$TMP_DIR/metrics_source_summary.json"
 SOURCE_CANONICAL="$TMP_DIR/metrics_source_canonical.json"
 SOURCE_LOG="$TMP_DIR/source.log"
+
+SEMANTIC_SOURCE_JSON="$TMP_DIR/metrics_semantic_source.json"
+SEMANTIC_SOURCE_SUMMARY="$TMP_DIR/metrics_semantic_source_summary.json"
+SEMANTIC_SOURCE_CANONICAL="$TMP_DIR/metrics_semantic_source_canonical.json"
+SEMANTIC_SOURCE_LOG="$TMP_DIR/semantic_source.log"
+
+UNUSABLE_SOURCE_MISSING_JSON="$TMP_DIR/metrics_missing_source.json"
+UNUSABLE_SOURCE_INVALID_JSON="$TMP_DIR/metrics_invalid_source.json"
+UNUSABLE_SOURCE_SUMMARY="$TMP_DIR/metrics_unusable_source_summary.json"
+UNUSABLE_SOURCE_CANONICAL="$TMP_DIR/metrics_unusable_source_canonical.json"
+UNUSABLE_SOURCE_LOG="$TMP_DIR/unusable_source.log"
+UNUSABLE_SOURCE_ENFORCE_SUMMARY="$TMP_DIR/metrics_unusable_source_enforce_summary.json"
+UNUSABLE_SOURCE_ENFORCE_CANONICAL="$TMP_DIR/metrics_unusable_source_enforce_canonical.json"
+UNUSABLE_SOURCE_ENFORCE_LOG="$TMP_DIR/unusable_source_enforce.log"
 
 ENV_SOURCE_JSON_A="$TMP_DIR/metrics_env_source_a.json"
 ENV_SOURCE_JSON_B="$TMP_DIR/metrics_env_source_b.json"
@@ -218,6 +236,63 @@ if ! grep -Fq '[blockchain-mainnet-activation-metrics] invalid_metrics=' "$PARTI
   exit 1
 fi
 
+echo "[blockchain-mainnet-activation-metrics] semantic CLI validation path"
+set +e
+"$SCRIPT_UNDER_TEST" \
+  --measurement-window-weeks 12.5 \
+  --vpn-connect-session-success-slo-pct 101 \
+  --vpn-recovery-mttr-p95-minutes -1 \
+  --paying-users-3mo-min 1250 \
+  --paid-sessions-per-day-30d-avg 15000 \
+  --validator-candidate-depth 40 \
+  --validator-independent-operators 14 \
+  --validator-max-operator-seat-share-pct -1 \
+  --validator-max-asn-provider-seat-share-pct 22 \
+  --validator-region-count 4 \
+  --validator-country-count 8 \
+  --manual-sanctions-reversed-pct-90d 4.5 \
+  --abuse-report-to-decision-p95-hours 12 \
+  --subsidy-runway-months 14 \
+  --contribution-margin-3mo 1.25 \
+  --summary-json "$SEMANTIC_CLI_SUMMARY" \
+  --canonical-summary-json "$SEMANTIC_CLI_CANONICAL" \
+  --print-summary-json 0 >"$SEMANTIC_CLI_LOG" 2>&1
+semantic_cli_rc=$?
+set -e
+
+if [[ "$semantic_cli_rc" -ne 0 ]]; then
+  echo "expected semantic CLI validation path to remain fail-soft (exit 0)"
+  cat "$SEMANTIC_CLI_LOG"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "partial"
+  and .rc == 0
+  and .ready_for_gate == false
+  and .counts.required == 15
+  and .counts.provided == 11
+  and .counts.missing == 4
+  and .counts.invalid == 4
+  and .measurement_window_weeks == null
+  and .vpn_connect_session_success_slo_pct == null
+  and .vpn_recovery_mttr_p95_minutes == null
+  and .validator_max_operator_seat_share_pct == null
+  and ((.invalid_metrics // []) | index("measurement_window_weeks")) != null
+  and ((.invalid_metrics // []) | index("vpn_connect_session_success_slo_pct")) != null
+  and ((.invalid_metrics // []) | index("vpn_recovery_mttr_p95_minutes")) != null
+  and ((.invalid_metrics // []) | index("validator_max_operator_seat_share_pct")) != null
+  and .sources.metrics.measurement_window_weeks == "cli_invalid"
+  and .sources.metrics.vpn_connect_session_success_slo_pct == "cli_invalid"
+  and .sources.metrics.vpn_recovery_mttr_p95_minutes == "cli_invalid"
+  and .sources.metrics.validator_max_operator_seat_share_pct == "cli_invalid"
+  ' "$SEMANTIC_CLI_SUMMARY" >/dev/null; then
+  echo "semantic CLI validation contract mismatch"
+  cat "$SEMANTIC_CLI_SUMMARY"
+  cat "$SEMANTIC_CLI_LOG"
+  exit 1
+fi
+
 echo "[blockchain-mainnet-activation-metrics] source-json autopopulation and precedence path"
 cat >"$SOURCE_JSON" <<'EOF_SOURCE'
 {
@@ -326,6 +401,163 @@ fi
 if ! grep -Fq '[blockchain-mainnet-activation-metrics] status=complete' "$SOURCE_LOG"; then
   echo "source-json log missing status line"
   cat "$SOURCE_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-metrics] source-json semantic validation and explicit path filtering"
+cat >"$SEMANTIC_SOURCE_JSON" <<'EOF_SEMANTIC_SOURCE'
+{
+  "metadata": {
+    "debug": {
+      "measurement_window_weeks": 12,
+      "validator_country_count": 8
+    }
+  },
+  "metrics": {
+    "measurement_window_weeks": 12.5
+  },
+  "reliability": {
+    "vpn_connect_session_success_slo_pct": 120,
+    "vpn_recovery_mttr_p95_minutes": 18
+  },
+  "demand": {
+    "paying_users_3mo_min": 1250,
+    "paid_sessions_per_day_30d_avg": 15000
+  },
+  "validator": {
+    "validator_candidate_depth": 40,
+    "validator_independent_operators": 14,
+    "validator_max_operator_seat_share_pct": 18,
+    "validator_max_asn_provider_seat_share_pct": 22,
+    "validator_region_count": 4
+  },
+  "governance": {
+    "manual_sanctions_reversed_pct_90d": 4.5,
+    "abuse_report_to_decision_p95_hours": 12
+  },
+  "economics": {
+    "subsidy_runway_months": 14,
+    "contribution_margin_3mo": 1.25
+  }
+}
+EOF_SEMANTIC_SOURCE
+
+set +e
+"$SCRIPT_UNDER_TEST" \
+  --source-json "$SEMANTIC_SOURCE_JSON" \
+  --summary-json "$SEMANTIC_SOURCE_SUMMARY" \
+  --canonical-summary-json "$SEMANTIC_SOURCE_CANONICAL" \
+  --print-summary-json 0 >"$SEMANTIC_SOURCE_LOG" 2>&1
+semantic_source_rc=$?
+set -e
+
+if [[ "$semantic_source_rc" -ne 0 ]]; then
+  echo "expected semantic source-json validation path to remain fail-soft (exit 0)"
+  cat "$SEMANTIC_SOURCE_LOG"
+  exit 1
+fi
+
+if ! jq -e \
+  --arg semantic_source "$SEMANTIC_SOURCE_JSON" \
+  '
+  .status == "partial"
+  and .rc == 0
+  and .ready_for_gate == false
+  and .counts.required == 15
+  and .counts.provided == 12
+  and .counts.missing == 3
+  and .counts.invalid == 2
+  and ((.sources.usable_source_jsons // []) | index($semantic_source)) != null
+  and .measurement_window_weeks == null
+  and .vpn_connect_session_success_slo_pct == null
+  and .validator_country_count == null
+  and ((.invalid_metrics // []) | index("measurement_window_weeks")) != null
+  and ((.invalid_metrics // []) | index("vpn_connect_session_success_slo_pct")) != null
+  and ((.invalid_metrics // []) | index("validator_country_count")) == null
+  and ((.required_missing_metrics // []) | index("validator_country_count")) != null
+  and .sources.metrics.measurement_window_weeks == "source_json_invalid"
+  and .sources.metrics.vpn_connect_session_success_slo_pct == "source_json_invalid"
+  and .sources.metrics.validator_country_count == "default_null"
+  ' "$SEMANTIC_SOURCE_SUMMARY" >/dev/null; then
+  echo "semantic source-json validation/filtering contract mismatch"
+  cat "$SEMANTIC_SOURCE_SUMMARY"
+  cat "$SEMANTIC_SOURCE_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-metrics] unusable requested source-json accounting path"
+printf '{invalid' >"$UNUSABLE_SOURCE_INVALID_JSON"
+set +e
+"$SCRIPT_UNDER_TEST" \
+  --source-json "$SOURCE_JSON" \
+  --source-json "$UNUSABLE_SOURCE_MISSING_JSON" \
+  --source-json "$UNUSABLE_SOURCE_INVALID_JSON" \
+  --summary-json "$UNUSABLE_SOURCE_SUMMARY" \
+  --canonical-summary-json "$UNUSABLE_SOURCE_CANONICAL" \
+  --print-summary-json 0 >"$UNUSABLE_SOURCE_LOG" 2>&1
+unusable_source_rc=$?
+set -e
+
+if [[ "$unusable_source_rc" -ne 0 ]]; then
+  echo "expected default unusable source-json path to remain diagnostic/fail-soft (exit 0)"
+  cat "$UNUSABLE_SOURCE_LOG"
+  exit 1
+fi
+
+if ! jq -e \
+  --arg usable_source "$SOURCE_JSON" \
+  --arg missing_source "$UNUSABLE_SOURCE_MISSING_JSON" \
+  --arg invalid_source "$UNUSABLE_SOURCE_INVALID_JSON" \
+  '
+  .status == "source_json_unusable"
+  and .rc == 0
+  and .ready_for_gate == false
+  and .enforce_source_jsons == false
+  and .counts.required == 15
+  and .counts.provided == 15
+  and .counts.missing == 0
+  and .counts.invalid == 0
+  and .counts.unusable_source_jsons == 2
+  and ((.sources.usable_source_jsons // []) | index($usable_source)) != null
+  and ((.sources.unusable_source_jsons // []) | index($missing_source)) != null
+  and ((.sources.unusable_source_jsons // []) | index($invalid_source)) != null
+  and ((.sources.unusable_source_json_details // []) | map(select(.path == $missing_source and .reason == "missing")) | length) == 1
+  and ((.sources.unusable_source_json_details // []) | map(select(.path == $invalid_source and .reason == "invalid_json")) | length) == 1
+  ' "$UNUSABLE_SOURCE_SUMMARY" >/dev/null; then
+  echo "unusable requested source-json default contract mismatch"
+  cat "$UNUSABLE_SOURCE_SUMMARY"
+  cat "$UNUSABLE_SOURCE_LOG"
+  exit 1
+fi
+
+set +e
+"$SCRIPT_UNDER_TEST" \
+  --source-json "$SOURCE_JSON" \
+  --source-json "$UNUSABLE_SOURCE_MISSING_JSON" \
+  --source-json "$UNUSABLE_SOURCE_INVALID_JSON" \
+  --enforce-source-jsons 1 \
+  --summary-json "$UNUSABLE_SOURCE_ENFORCE_SUMMARY" \
+  --canonical-summary-json "$UNUSABLE_SOURCE_ENFORCE_CANONICAL" \
+  --print-summary-json 0 >"$UNUSABLE_SOURCE_ENFORCE_LOG" 2>&1
+unusable_source_enforce_rc=$?
+set -e
+
+if [[ "$unusable_source_enforce_rc" -eq 0 ]]; then
+  echo "expected enforce-source-jsons path to fail closed"
+  cat "$UNUSABLE_SOURCE_ENFORCE_LOG"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "source_json_unusable"
+  and .rc == 1
+  and .ready_for_gate == false
+  and .enforce_source_jsons == true
+  and .counts.unusable_source_jsons == 2
+  ' "$UNUSABLE_SOURCE_ENFORCE_SUMMARY" >/dev/null; then
+  echo "unusable requested source-json enforce contract mismatch"
+  cat "$UNUSABLE_SOURCE_ENFORCE_SUMMARY"
+  cat "$UNUSABLE_SOURCE_ENFORCE_LOG"
   exit 1
 fi
 

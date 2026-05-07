@@ -170,11 +170,11 @@ const WALLET_SIGN_IN_LABEL_REQUIRED = "Connect Wallet";
 const MANUAL_SIGN_IN_LABEL = "Sign In (Manual)";
 const MANUAL_SIGN_IN_LABEL_DISABLED = "Sign In (Manual Disabled)";
 const SIGN_IN_POLICY_PRODUCTION_LOCK_HINT =
-  "Production mode is active; Connect Wallet is required and manual Sign In is disabled.";
+  "Production mode is active; Wallet Sign-In is required and manual Sign In is disabled.";
 const SIGN_IN_POLICY_RUNTIME_LOCK_HINT =
   "Connect Wallet is required by active auth policy; manual Sign In is disabled.";
 const SIGN_IN_VALIDATION_PRODUCTION_LOCK_HINT =
-  "Manual Sign In is disabled by production mode; use Connect Wallet.";
+  "Manual Sign In is disabled by production mode; use Wallet Sign-In.";
 const SIGN_IN_VALIDATION_RUNTIME_LOCK_HINT =
   "Manual Sign In is disabled by active auth policy; use Connect Wallet (signature_source must be wallet_extension).";
 const PRODUCTION_CONNECT_RESERVATION_AMOUNT_MICROS = 200000;

@@ -114,6 +114,9 @@ assert_script_marker "recommended_commands"
 assert_script_marker "emit_summary_payload"
 assert_script_marker "write_summary_json_file"
 assert_script_marker "api_health_timeout_sec"
+assert_script_marker 'LOCAL_CONTROL_API_ADDR="$API_ADDR" go run ./cmd/node --local-api'
+assert_script_marker "assert_public_desktop_executable_not_admin_console"
+assert_script_marker "packaged-appimage-glob"
 assert_script_marker "GLOBAL_PRIVATE_MESH_DESKTOP_PACKAGED_EXE"
 assert_script_marker "GPM_DESKTOP_PACKAGED_EXE"
 assert_script_marker "TDPN_DESKTOP_PACKAGED_EXE"
@@ -217,6 +220,32 @@ run_expect_fail_regex \
       --desktop-launch-strategy dev \
       --api-addr 127.0.0.1:8095
 
+FAKE_GO_BIN_DIR="$TMP_DIR/fake-go-bin"
+mkdir -p "$FAKE_GO_BIN_DIR"
+cat >"$FAKE_GO_BIN_DIR/go" <<'EOF'
+#!/bin/sh
+if [ "$LOCAL_CONTROL_API_ADDR" != "$EXPECTED_LOCAL_CONTROL_API_ADDR" ]; then
+  echo "LOCAL_CONTROL_API_ADDR=$LOCAL_CONTROL_API_ADDR want $EXPECTED_LOCAL_CONTROL_API_ADDR" >&2
+  exit 17
+fi
+if [ "$1" != "run" ] || [ "$2" != "./cmd/node" ] || [ "$3" != "--local-api" ]; then
+  echo "unexpected go invocation: $*" >&2
+  exit 18
+fi
+exit 0
+EOF
+chmod +x "$FAKE_GO_BIN_DIR/go"
+
+echo "[linux-desktop-native-bootstrap-guardrails] run-api forwards custom --api-addr into LOCAL_CONTROL_API_ADDR"
+run_expect_pass \
+  "run_api_forwards_custom_api_addr" \
+  env \
+    PATH="$FAKE_GO_BIN_DIR:$PATH" \
+    EXPECTED_LOCAL_CONTROL_API_ADDR="127.0.0.1:19095" \
+    bash "$SCRIPT_UNDER_TEST" \
+      --mode run-api \
+      --api-addr 127.0.0.1:19095
+
 echo "[linux-desktop-native-bootstrap-guardrails] invalid mode fails"
 run_expect_fail_regex \
   "invalid_mode_fail" \
@@ -273,6 +302,10 @@ chmod +x "$FAKE_EXECUTABLE_ENV_TDPN"
 FAKE_EXECUTABLE_OVERRIDE="$TMP_DIR/explicit-override-desktop"
 printf '%s\n' "placeholder executable for explicit override guardrails" >"$FAKE_EXECUTABLE_OVERRIDE"
 chmod +x "$FAKE_EXECUTABLE_OVERRIDE"
+
+FAKE_ADMIN_CONSOLE_OVERRIDE="$TMP_DIR/GPM Admin Console.AppImage"
+printf '%s\n' "placeholder executable for admin console rejection guardrails" >"$FAKE_ADMIN_CONSOLE_OVERRIDE"
+chmod +x "$FAKE_ADMIN_CONSOLE_OVERRIDE"
 
 PACKAGED_RELEASE_DIR="$ROOT_DIR/apps/desktop/src-tauri/target/release"
 FAKE_PACKAGED_DEFAULT="$PACKAGED_RELEASE_DIR/gpm-desktop"
@@ -361,6 +394,16 @@ run_expect_pass \
 assert_summary_json_field_equals "$SUMMARY_OVERRIDE_PATH" "resolved_desktop_launch_strategy" "packaged"
 assert_summary_json_field_equals "$SUMMARY_OVERRIDE_PATH" "resolved_desktop_executable_path" "$FAKE_EXECUTABLE_OVERRIDE"
 assert_summary_json_field_equals "$SUMMARY_OVERRIDE_PATH" "resolved_desktop_executable_source" "override-path"
+
+echo "[linux-desktop-native-bootstrap-guardrails] explicit Admin Console executable is rejected for public desktop bootstrap"
+run_expect_fail_regex \
+  "run_desktop_admin_console_override_fail" \
+  "Admin Console executable|public desktop bootstrap refuses" \
+  bash "$SCRIPT_UNDER_TEST" \
+    --mode run-desktop \
+    --desktop-launch-strategy packaged \
+    --desktop-executable-override-path "$FAKE_ADMIN_CONSOLE_OVERRIDE" \
+    --dry-run
 
 echo "[linux-desktop-native-bootstrap-guardrails] packaged-default source is reported under --dry-run"
 run_expect_pass \

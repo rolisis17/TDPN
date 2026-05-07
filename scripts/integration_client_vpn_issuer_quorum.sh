@@ -41,7 +41,22 @@ case "$url" in
     printf '{"relays":[{"role":"entry","operator_id":"op-a"},{"role":"exit","operator_id":"op-a"},{"role":"entry","operator_id":"op-b"},{"role":"exit","operator_id":"op-b"}]}\n'
     ;;
   */v1/pubkeys)
-    if [[ "${FAKE_ISSUER_PROFILE:-same}" == "multi" ]]; then
+    if [[ "${FAKE_ISSUER_PROFILE:-same}" == "explicit_authority_only" ]]; then
+      case "$url" in
+        http://issuer-a:8082/*)
+          printf '{"issuer":"issuer-a","pub_keys":["k1"]}\n'
+          ;;
+        http://dir-a:8081/*|http://dir-b:8081/*)
+          printf '{"operator":"directory","pub_keys":["d1"]}\n'
+          ;;
+        http://dir-a:8082/*|http://dir-b:8082/*)
+          exit 7
+          ;;
+        *)
+          printf '{"issuer":"issuer-a","pub_keys":["k1"]}\n'
+          ;;
+      esac
+    elif [[ "${FAKE_ISSUER_PROFILE:-same}" == "multi" ]]; then
       case "$url" in
         *issuer-a*|*dir-a*)
           printf '{"issuer":"issuer-a","pub_keys":["k1"]}\n'
@@ -51,6 +66,18 @@ case "$url" in
           ;;
         *)
           printf '{"issuer":"issuer-a","pub_keys":["k1"]}\n'
+          ;;
+      esac
+    elif [[ "${FAKE_ISSUER_PROFILE:-same}" == "same_name_distinct_keys" ]]; then
+      case "$url" in
+        *issuer-a*|*dir-a*)
+          printf '{"issuer":"issuer-shared","pub_keys":["k1"]}\n'
+          ;;
+        *issuer-b*|*dir-b*)
+          printf '{"issuer":"issuer-shared","pub_keys":["k2"]}\n'
+          ;;
+        *)
+          printf '{"issuer":"issuer-shared","pub_keys":["k1"]}\n'
           ;;
       esac
     else
@@ -143,6 +170,30 @@ PATH="$TMP_BIN:$PATH" FAKE_ISSUER_PROFILE="multi" ./scripts/easy_node.sh client-
 if ! rg -q 'client-vpn preflight: OK' "$OUT_OK"; then
   echo "expected preflight success with multi-issuer identity feeds"
   cat "$OUT_OK"
+  exit 1
+fi
+
+OUT_KEY_ANCHORED="$TMP_DIR/preflight_key_anchored.log"
+PATH="$TMP_BIN:$PATH" FAKE_ISSUER_PROFILE="same_name_distinct_keys" ./scripts/easy_node.sh client-vpn-preflight "${COMMON_ARGS[@]}" --issuer-quorum-check 1 --issuer-min-operators 2 >"$OUT_KEY_ANCHORED" 2>&1
+if ! rg -q 'client-vpn preflight: OK' "$OUT_KEY_ANCHORED"; then
+  echo "expected preflight success when shared issuer name has distinct signing keys"
+  cat "$OUT_KEY_ANCHORED"
+  exit 1
+fi
+
+OUT_EXPLICIT="$TMP_DIR/preflight_explicit_authority_only.log"
+PATH="$TMP_BIN:$PATH" FAKE_ISSUER_PROFILE="explicit_authority_only" ./scripts/easy_node.sh client-vpn-preflight "${COMMON_ARGS[@]}" \
+  --issuer-urls "http://issuer-a:8082" \
+  --issuer-quorum-check 1 \
+  --issuer-min-operators 1 >"$OUT_EXPLICIT" 2>&1
+if ! rg -q 'client-vpn preflight: OK' "$OUT_EXPLICIT"; then
+  echo "expected explicit issuer URLs to avoid inferred provider-directory issuer endpoints"
+  cat "$OUT_EXPLICIT"
+  exit 1
+fi
+if rg -q 'dir-b:8082' "$OUT_EXPLICIT"; then
+  echo "explicit issuer URLs should not be augmented with provider directory hosts"
+  cat "$OUT_EXPLICIT"
   exit 1
 fi
 

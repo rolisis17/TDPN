@@ -1137,14 +1137,20 @@ func (c *Client) bootstrap(ctx context.Context) error {
 			return fmt.Errorf("encode token proof key failed")
 		}
 
+		tokenSubject := c.subject
+		paymentProof, tokenSubject, err := c.walletFundPaymentProofForToken(tokenSubject, c.prodStrict, strings.TrimSpace(c.anonCred) != "")
+		if err != nil {
+			return err
+		}
 		tokenReq := proto.IssueTokenRequest{
-			Tier:      1,
-			Subject:   c.subject,
-			TokenType: crypto.TokenTypeClientAccess,
-			PopPubKey: popPubB64,
-			Transport: requestedTransport(c.dataMode),
-			ExitScope: []string{pair.exit.RelayID},
-			AnonCred:  c.anonCred,
+			Tier:         1,
+			Subject:      tokenSubject,
+			TokenType:    crypto.TokenTypeClientAccess,
+			PopPubKey:    popPubB64,
+			Transport:    requestedTransport(c.dataMode),
+			ExitScope:    []string{pair.exit.RelayID},
+			AnonCred:     c.anonCred,
+			PaymentProof: paymentProof,
 		}
 		tok, err := c.issueToken(ctx, tokenReq)
 		if err != nil {
@@ -4019,6 +4025,34 @@ func (c *Client) fetchRelaysFederated(ctx context.Context) ([]proto.RelayDescrip
 		return nil, fmt.Errorf("no relays met vote threshold: required_votes=%d", c.directoryMinVotes)
 	}
 	return out, nil
+}
+
+func (c *Client) walletFundPaymentProofForToken(tokenSubject string, require bool, anonymousToken bool) (*proto.SponsorPaymentProof, string, error) {
+	reservationID := strings.TrimSpace(c.settlementReservationID)
+	sessionID := strings.TrimSpace(c.settlementReservationSessionID)
+	walletAddress := strings.TrimSpace(c.settlementReservationSubjectID)
+	tokenSubject = strings.TrimSpace(tokenSubject)
+	hasAny := reservationID != "" || sessionID != "" || walletAddress != ""
+	if !hasAny {
+		if require {
+			return nil, tokenSubject, fmt.Errorf("production client requires GPM settlement reservation id, reservation session id, and reservation subject id")
+		}
+		return nil, tokenSubject, nil
+	}
+	if reservationID == "" || sessionID == "" || walletAddress == "" {
+		return nil, tokenSubject, fmt.Errorf("client GPM settlement payment proof requires reservation id, reservation session id, and wallet address")
+	}
+	if tokenSubject == "" && !anonymousToken {
+		tokenSubject = walletAddress
+	} else if tokenSubject != "" && tokenSubject != walletAddress {
+		return nil, tokenSubject, fmt.Errorf("client GPM settlement payment proof subject mismatch: token subject %q does not match wallet address %q", tokenSubject, walletAddress)
+	}
+	return &proto.SponsorPaymentProof{
+		Source:        proto.PaymentProofSourceWalletFund,
+		ReservationID: reservationID,
+		Subject:       walletAddress,
+		SessionID:     sessionID,
+	}, tokenSubject, nil
 }
 
 func (c *Client) issueToken(ctx context.Context, in proto.IssueTokenRequest) (proto.IssueTokenResponse, error) {

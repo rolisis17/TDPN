@@ -107,6 +107,15 @@ timestamp_utc() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
+iso8601_to_epoch_01() {
+  local value
+  value="$(trim "${1:-}")"
+  if [[ -z "$value" ]]; then
+    return 1
+  fi
+  date -u -d "$value" +%s 2>/dev/null
+}
+
 quote_cmd() {
   local arg
   for arg in "$@"; do
@@ -605,12 +614,17 @@ evaluate_stage_summary_json() {
   local summary_path="$1"
   local expected_schema_id="$2"
   local pre_fingerprint="$3"
+  local stage_start_epoch="${4:-0}"
 
   local summary_exists="false"
   local summary_valid_json="false"
   local summary_schema_id=""
   local summary_schema_valid="false"
   local summary_written_fresh="false"
+  local summary_timestamp_current="false"
+  local summary_generated_at_utc=""
+  local summary_generated_epoch=""
+  local now_epoch=""
   local summary_signals_stale="false"
   local summary_usable="false"
   local decision_norm=""
@@ -637,6 +651,23 @@ evaluate_stage_summary_json() {
       summary_written_fresh="true"
     elif [[ -n "$post_fingerprint" && "$post_fingerprint" != "$pre_fingerprint" ]]; then
       summary_written_fresh="true"
+    fi
+
+    summary_generated_at_utc="$(jq -r 'if (.generated_at_utc | type) == "string" then .generated_at_utc else "" end' "$summary_path" 2>/dev/null || true)"
+    now_epoch="$(date -u +%s)"
+    if [[ -z "$summary_generated_at_utc" ]]; then
+      summary_signals_stale="true"
+    else
+      summary_generated_epoch="$(iso8601_to_epoch_01 "$summary_generated_at_utc" 2>/dev/null || true)"
+      if ! [[ "$summary_generated_epoch" =~ ^[0-9]+$ ]]; then
+        summary_signals_stale="true"
+      elif (( summary_generated_epoch > now_epoch + 5 )); then
+        summary_signals_stale="true"
+      elif [[ "$stage_start_epoch" =~ ^[0-9]+$ ]] && (( stage_start_epoch > 0 && summary_generated_epoch + 1 < stage_start_epoch )); then
+        summary_signals_stale="true"
+      else
+        summary_timestamp_current="true"
+      fi
     fi
 
     decision_norm="$(jq -r 'if (.decision | type) == "string" then .decision else "" end' "$summary_path" 2>/dev/null || true)"
@@ -677,6 +708,7 @@ evaluate_stage_summary_json() {
     && "$summary_valid_json" == "true" \
     && "$summary_schema_valid" == "true" \
     && "$summary_written_fresh" == "true" \
+    && "$summary_timestamp_current" == "true" \
     && "$summary_signals_stale" != "true" ]]; then
     summary_usable="true"
   fi
@@ -689,6 +721,8 @@ evaluate_stage_summary_json() {
     --arg summary_schema_id "$summary_schema_id" \
     --arg summary_schema_valid "$summary_schema_valid" \
     --arg summary_written_fresh "$summary_written_fresh" \
+    --arg summary_timestamp_current "$summary_timestamp_current" \
+    --arg summary_generated_at_utc "$summary_generated_at_utc" \
     --arg summary_signals_stale "$summary_signals_stale" \
     --arg summary_usable "$summary_usable" \
     --arg decision_norm "$decision_norm" \
@@ -706,6 +740,8 @@ evaluate_stage_summary_json() {
       summary_schema_id: (if $summary_schema_id == "" then null else $summary_schema_id end),
       summary_schema_valid: ($summary_schema_valid == "true"),
       summary_written_fresh: ($summary_written_fresh == "true"),
+      summary_generated_at_utc: (if $summary_generated_at_utc == "" then null else $summary_generated_at_utc end),
+      summary_timestamp_current: ($summary_timestamp_current == "true"),
       summary_signals_stale: ($summary_signals_stale == "true"),
       usable: ($summary_usable == "true"),
       decision: (if $decision_norm == "" then null else $decision_norm end),
@@ -911,12 +947,13 @@ promotion_cycle_cmd=(
 promotion_cycle_command_display="$(quote_cmd "${promotion_cycle_cmd[@]}")"
 promotion_cycle_pre_fingerprint="$(file_fingerprint_01 "$promotion_cycle_summary_json")"
 promotion_cycle_started_at="$(timestamp_utc)"
+promotion_cycle_started_epoch="$(date -u +%s)"
 set +e
 "${promotion_cycle_cmd[@]}" >"$promotion_cycle_log" 2>&1
 promotion_cycle_stage_rc=$?
 set -e
 promotion_cycle_completed_at="$(timestamp_utc)"
-promotion_cycle_eval_json="$(evaluate_stage_summary_json "$promotion_cycle_summary_json" "profile_compare_multi_vm_stability_promotion_cycle_summary" "$promotion_cycle_pre_fingerprint")"
+promotion_cycle_eval_json="$(evaluate_stage_summary_json "$promotion_cycle_summary_json" "profile_compare_multi_vm_stability_promotion_cycle_summary" "$promotion_cycle_pre_fingerprint" "$promotion_cycle_started_epoch")"
 promotion_cycle_archive_root="$(jq -r 'if (.artifacts.archive_root | type) == "string" then .artifacts.archive_root else "" end' "$promotion_cycle_summary_json" 2>/dev/null || true)"
 
 if [[ "$promotion_cycle_stage_rc" -eq 0 && "$(jq -r '.usable' <<<"$promotion_cycle_eval_json")" == "true" ]]; then
@@ -943,12 +980,13 @@ if [[ "$promotion_cycle_stage_rc" -eq 0 && "$(jq -r '.usable' <<<"$promotion_cyc
   promotion_evidence_pack_command_display="$(quote_cmd "${promotion_evidence_pack_cmd[@]}")"
   promotion_evidence_pack_pre_fingerprint="$(file_fingerprint_01 "$promotion_evidence_pack_summary_json")"
   promotion_evidence_pack_started_at="$(timestamp_utc)"
+  promotion_evidence_pack_started_epoch="$(date -u +%s)"
   set +e
   "${promotion_evidence_pack_cmd[@]}" >"$promotion_evidence_pack_log" 2>&1
   promotion_evidence_pack_stage_rc=$?
   set -e
   promotion_evidence_pack_completed_at="$(timestamp_utc)"
-  promotion_evidence_pack_eval_json="$(evaluate_stage_summary_json "$promotion_evidence_pack_summary_json" "profile_compare_multi_vm_stability_promotion_evidence_pack_summary" "$promotion_evidence_pack_pre_fingerprint")"
+  promotion_evidence_pack_eval_json="$(evaluate_stage_summary_json "$promotion_evidence_pack_summary_json" "profile_compare_multi_vm_stability_promotion_evidence_pack_summary" "$promotion_evidence_pack_pre_fingerprint" "$promotion_evidence_pack_started_epoch")"
 
   if [[ "$promotion_evidence_pack_stage_rc" -eq 0 && "$(jq -r '.usable' <<<"$promotion_evidence_pack_eval_json")" == "true" ]]; then
     if [[ "$(jq -r '.decision // ""' <<<"$promotion_evidence_pack_eval_json")" == "NO-GO" ]]; then

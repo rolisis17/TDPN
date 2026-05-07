@@ -96,6 +96,74 @@ echo "[prod-pilot-cohort-bundle-verify] verify by bundle-tar + extraction path"
 ./scripts/prod_pilot_cohort_bundle_verify.sh \
   --bundle-tar "$BUNDLE_TAR" >/tmp/integration_prod_pilot_cohort_bundle_verify_tar.log 2>&1
 
+echo "[prod-pilot-cohort-bundle-verify] detect unsafe tar member path"
+UNSAFE_TAR="$TMP_DIR/cohort_unsafe_path.tar.gz"
+UNSAFE_PAYLOAD="$TMP_DIR/unsafe_payload"
+printf 'unsafe\n' >"$UNSAFE_PAYLOAD"
+tar --transform='s|unsafe_payload|../tdpn_bundle_verify_escape_probe|' \
+  -czf "$UNSAFE_TAR" -C "$TMP_DIR" unsafe_payload
+set +e
+./scripts/prod_pilot_cohort_bundle_verify.sh \
+  --bundle-tar "$UNSAFE_TAR" \
+  --check-tar-sha256 0 >/tmp/integration_prod_pilot_cohort_bundle_verify_unsafe_path.log 2>&1
+unsafe_path_rc=$?
+set -e
+if [[ "$unsafe_path_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for unsafe cohort tar member path"
+  cat /tmp/integration_prod_pilot_cohort_bundle_verify_unsafe_path.log
+  exit 1
+fi
+if ! rg -q 'unsafe bundle tar member path|refusing to extract unsafe bundle tar' /tmp/integration_prod_pilot_cohort_bundle_verify_unsafe_path.log; then
+  echo "expected unsafe tar member path signal not found"
+  cat /tmp/integration_prod_pilot_cohort_bundle_verify_unsafe_path.log
+  exit 1
+fi
+if [[ -e /tmp/tdpn_bundle_verify_escape_probe ]]; then
+  echo "unsafe cohort tar member was extracted outside the temp directory"
+  rm -f /tmp/tdpn_bundle_verify_escape_probe
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-bundle-verify] detect unsafe tar link member"
+UNSAFE_LINK_DIR="$TMP_DIR/cohort_unsafe_link"
+UNSAFE_LINK_TAR="$TMP_DIR/cohort_unsafe_link.tar.gz"
+mkdir -p "$UNSAFE_LINK_DIR/round_1"
+printf 'round log\n' >"$UNSAFE_LINK_DIR/round_1/prod_pilot_round.log"
+printf '%s\n' "$UNSAFE_LINK_DIR/round_1/prod_bundle_run_report.json" >"$UNSAFE_LINK_DIR/run_reports.list"
+printf '{"status":"ok"}\n' >"$UNSAFE_LINK_DIR/round_1/prod_bundle_run_report.json"
+ln -s /tmp "$UNSAFE_LINK_DIR/round_1/unsafe_link"
+cat >"$UNSAFE_LINK_DIR/prod_pilot_cohort_bundle_manifest.json" <<EOF_UNSAFE_LINK_MANIFEST
+{
+  "generated_at": "2026-03-11T00:00:00Z",
+  "reports_dir": "$UNSAFE_LINK_DIR",
+  "report_list_file": "$UNSAFE_LINK_DIR/run_reports.list",
+  "trend_summary_json": "$UNSAFE_LINK_DIR/prod_pilot_cohort_trend.json",
+  "alert_summary_json": "$UNSAFE_LINK_DIR/prod_pilot_cohort_alert.json",
+  "summary_json": "$UNSAFE_LINK_DIR/prod_pilot_cohort_summary.json",
+  "run_reports": ["$UNSAFE_LINK_DIR/round_1/prod_bundle_run_report.json"],
+  "round_results": [
+    {"round":1,"status":"ok","rc":0,"bundle_dir":"$UNSAFE_LINK_DIR/round_1","run_report_json":"$UNSAFE_LINK_DIR/round_1/prod_bundle_run_report.json","log_file":"$UNSAFE_LINK_DIR/round_1/prod_pilot_round.log"}
+  ]
+}
+EOF_UNSAFE_LINK_MANIFEST
+tar -czf "$UNSAFE_LINK_TAR" -C "$(dirname "$UNSAFE_LINK_DIR")" "$(basename "$UNSAFE_LINK_DIR")"
+set +e
+./scripts/prod_pilot_cohort_bundle_verify.sh \
+  --bundle-tar "$UNSAFE_LINK_TAR" \
+  --check-tar-sha256 0 >/tmp/integration_prod_pilot_cohort_bundle_verify_unsafe_link.log 2>&1
+unsafe_link_rc=$?
+set -e
+if [[ "$unsafe_link_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for unsafe cohort tar link member"
+  cat /tmp/integration_prod_pilot_cohort_bundle_verify_unsafe_link.log
+  exit 1
+fi
+if ! rg -q 'unsafe bundle tar link member|refusing to extract unsafe bundle tar' /tmp/integration_prod_pilot_cohort_bundle_verify_unsafe_link.log; then
+  echo "expected unsafe tar link member signal not found"
+  cat /tmp/integration_prod_pilot_cohort_bundle_verify_unsafe_link.log
+  exit 1
+fi
+
 echo "[prod-pilot-cohort-bundle-verify] detect tar checksum tamper"
 TAMPER_TAR="$TMP_DIR/cohort_tamper.tar.gz"
 cp "$BUNDLE_TAR" "$TAMPER_TAR"
@@ -144,6 +212,26 @@ fi
 if ! rg -q 'manifest missing required field' /tmp/integration_prod_pilot_cohort_bundle_verify_bad_manifest.log; then
   echo "expected manifest required-field signal not found"
   cat /tmp/integration_prod_pilot_cohort_bundle_verify_bad_manifest.log
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-bundle-verify] detect manifest count mismatch"
+COUNT_MISMATCH_MANIFEST="$TMP_DIR/count_mismatch_manifest.json"
+jq '.round_results = []' "$MANIFEST_JSON" >"$COUNT_MISMATCH_MANIFEST"
+set +e
+./scripts/prod_pilot_cohort_bundle_verify.sh \
+  --reports-dir "$REPORTS_DIR" \
+  --bundle-manifest-json "$COUNT_MISMATCH_MANIFEST" >/tmp/integration_prod_pilot_cohort_bundle_verify_count_mismatch.log 2>&1
+count_mismatch_rc=$?
+set -e
+if [[ "$count_mismatch_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for cohort manifest count mismatch"
+  cat /tmp/integration_prod_pilot_cohort_bundle_verify_count_mismatch.log
+  exit 1
+fi
+if ! rg -q 'manifest round_results must include at least one result|count must match' /tmp/integration_prod_pilot_cohort_bundle_verify_count_mismatch.log; then
+  echo "expected manifest count mismatch signal not found"
+  cat /tmp/integration_prod_pilot_cohort_bundle_verify_count_mismatch.log
   exit 1
 fi
 

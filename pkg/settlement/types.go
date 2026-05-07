@@ -113,13 +113,20 @@ type SponsorCreditReservation struct {
 }
 
 type PaymentProof struct {
+	Source        string
 	ReservationID string
 	SponsorID     string
 	SubjectID     string
 	SessionID     string
 }
 
+const (
+	PaymentProofSourceSponsor    = "sponsor"
+	PaymentProofSourceWalletFund = "wallet_fund"
+)
+
 type PaymentAuthorization struct {
+	Source           string
 	ReservationID    string
 	SponsorID        string
 	SubjectID        string
@@ -333,6 +340,12 @@ type ChainFundReservationStatusQuerier interface {
 // callers that must bind a confirmed reservation to the signed-in subject.
 type FundReservationQuerier interface {
 	FundReservation(ctx context.Context, reservationID string) (FundReservation, bool, error)
+}
+
+// SponsorReservationQuerier returns the material sponsor reservation record for
+// callers that must bind a payment proof to durable chain state.
+type SponsorReservationQuerier interface {
+	SponsorReservation(ctx context.Context, reservationID string) (SponsorCreditReservation, bool, error)
 }
 
 // ChainReservationConfirmationStatusQuerier groups the reservation finality

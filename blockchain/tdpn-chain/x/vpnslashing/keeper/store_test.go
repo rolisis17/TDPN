@@ -390,6 +390,208 @@ func TestNewFileStoreInvalidPath(t *testing.T) {
 	}
 }
 
+func TestNewFileStoreBlankPath(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewFileStore(" \t\n ")
+	if err == nil {
+		t.Fatal("expected NewFileStore to reject blank path")
+	}
+	if !strings.Contains(err.Error(), "path is required") {
+		t.Fatalf("expected required path error, got %v", err)
+	}
+}
+
+func TestFileStoreAtomicPenaltyEvidenceWritePersistsSnapshot(t *testing.T) {
+	t.Parallel()
+
+	storePath := filepath.Join(t.TempDir(), "state", "vpnslashing.json")
+	store, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("NewFileStore returned unexpected error: %v", err)
+	}
+
+	evidence := types.SlashEvidence{
+		EvidenceID:    "evidence-file-atomic-direct",
+		ProviderID:    "provider-file-atomic-direct",
+		SessionID:     "session-file-atomic-direct",
+		ViolationType: "double-sign",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-file-atomic-direct"),
+		Status:        chaintypes.ReconciliationConfirmed,
+	}
+	penalty := types.PenaltyDecision{
+		PenaltyID:       "penalty-file-atomic-direct",
+		EvidenceID:      evidence.EvidenceID,
+		SlashBasisPoint: 25,
+		Status:          chaintypes.ReconciliationSubmitted,
+	}
+
+	if err := store.UpsertPenaltyAndEvidenceWithError(penalty, evidence); err != nil {
+		t.Fatalf("atomic penalty/evidence write failed: %v", err)
+	}
+
+	reopened, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("reopening file store returned unexpected error: %v", err)
+	}
+
+	gotEvidence, ok := reopened.GetEvidence(evidence.EvidenceID)
+	if !ok {
+		t.Fatal("expected atomically written evidence to be durable")
+	}
+	if gotEvidence != evidence {
+		t.Fatalf("expected evidence %+v, got %+v", evidence, gotEvidence)
+	}
+
+	gotPenalty, ok := reopened.GetPenalty(penalty.PenaltyID)
+	if !ok {
+		t.Fatal("expected atomically written penalty to be durable")
+	}
+	if gotPenalty != penalty {
+		t.Fatalf("expected penalty %+v, got %+v", penalty, gotPenalty)
+	}
+}
+
+func TestFileStoreAtomicPenaltyEvidenceWriteRollsBackNewRecordsOnFailure(t *testing.T) {
+	t.Parallel()
+
+	storePath := filepath.Join(t.TempDir(), "state", "vpnslashing.json")
+	store, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("NewFileStore returned unexpected error: %v", err)
+	}
+
+	evidence := types.SlashEvidence{
+		EvidenceID:    "evidence-file-atomic-new-failure",
+		ProviderID:    "provider-file-atomic-new-failure",
+		SessionID:     "session-file-atomic-new-failure",
+		ViolationType: "double-sign",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-file-atomic-new-failure"),
+		Status:        chaintypes.ReconciliationConfirmed,
+	}
+	penalty := types.PenaltyDecision{
+		PenaltyID:       "penalty-file-atomic-new-failure",
+		EvidenceID:      evidence.EvidenceID,
+		SlashBasisPoint: 25,
+		Status:          chaintypes.ReconciliationSubmitted,
+	}
+
+	store.persistFailureInjector = func() error {
+		return errors.New("forced atomic write failure")
+	}
+	defer func() {
+		store.persistFailureInjector = nil
+	}()
+
+	err = store.UpsertPenaltyAndEvidenceWithError(penalty, evidence)
+	if err == nil {
+		t.Fatal("expected atomic write failure")
+	}
+
+	if _, ok := store.GetEvidence(evidence.EvidenceID); ok {
+		t.Fatal("expected failed atomic write to remove new evidence from memory")
+	}
+	if _, ok := store.GetPenalty(penalty.PenaltyID); ok {
+		t.Fatal("expected failed atomic write to remove new penalty from memory")
+	}
+
+	reopened, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("reopening file store returned unexpected error: %v", err)
+	}
+	if _, ok := reopened.GetEvidence(evidence.EvidenceID); ok {
+		t.Fatal("expected failed atomic write to leave no durable evidence")
+	}
+	if _, ok := reopened.GetPenalty(penalty.PenaltyID); ok {
+		t.Fatal("expected failed atomic write to leave no durable penalty")
+	}
+}
+
+func TestFileStoreAtomicPenaltyEvidenceWriteRestoresExistingRecordsOnFailure(t *testing.T) {
+	t.Parallel()
+
+	storePath := filepath.Join(t.TempDir(), "state", "vpnslashing.json")
+	store, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("NewFileStore returned unexpected error: %v", err)
+	}
+
+	originalEvidence := types.SlashEvidence{
+		EvidenceID:    "evidence-file-atomic-existing-failure",
+		ProviderID:    "provider-file-atomic-existing-failure",
+		SessionID:     "session-file-atomic-existing-failure",
+		ViolationType: "double-sign",
+		Kind:          types.EvidenceKindObjective,
+		ProofHash:     testSHAProof("proof-file-atomic-existing-failure"),
+		Status:        chaintypes.ReconciliationSubmitted,
+	}
+	originalPenalty := types.PenaltyDecision{
+		PenaltyID:       "penalty-file-atomic-existing-failure",
+		EvidenceID:      originalEvidence.EvidenceID,
+		SlashBasisPoint: 10,
+		Status:          chaintypes.ReconciliationSubmitted,
+	}
+	store.UpsertEvidence(originalEvidence)
+	store.UpsertPenalty(originalPenalty)
+
+	updatedEvidence := originalEvidence
+	updatedEvidence.Status = chaintypes.ReconciliationConfirmed
+	updatedPenalty := originalPenalty
+	updatedPenalty.SlashBasisPoint = 15
+
+	store.persistFailureInjector = func() error {
+		return errors.New("forced atomic rewrite failure")
+	}
+	defer func() {
+		store.persistFailureInjector = nil
+	}()
+
+	err = store.UpsertPenaltyAndEvidenceWithError(updatedPenalty, updatedEvidence)
+	if err == nil {
+		t.Fatal("expected atomic rewrite failure")
+	}
+
+	gotEvidence, ok := store.GetEvidence(originalEvidence.EvidenceID)
+	if !ok {
+		t.Fatal("expected original evidence to remain in memory")
+	}
+	if gotEvidence != originalEvidence {
+		t.Fatalf("expected original evidence %+v after rollback, got %+v", originalEvidence, gotEvidence)
+	}
+
+	gotPenalty, ok := store.GetPenalty(originalPenalty.PenaltyID)
+	if !ok {
+		t.Fatal("expected original penalty to remain in memory")
+	}
+	if gotPenalty != originalPenalty {
+		t.Fatalf("expected original penalty %+v after rollback, got %+v", originalPenalty, gotPenalty)
+	}
+
+	store.persistFailureInjector = nil
+	reopened, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("reopening file store returned unexpected error: %v", err)
+	}
+
+	durableEvidence, ok := reopened.GetEvidence(originalEvidence.EvidenceID)
+	if !ok {
+		t.Fatal("expected original evidence to remain durable")
+	}
+	if durableEvidence != originalEvidence {
+		t.Fatalf("expected durable evidence %+v, got %+v", originalEvidence, durableEvidence)
+	}
+
+	durablePenalty, ok := reopened.GetPenalty(originalPenalty.PenaltyID)
+	if !ok {
+		t.Fatal("expected original penalty to remain durable")
+	}
+	if durablePenalty != originalPenalty {
+		t.Fatalf("expected durable penalty %+v, got %+v", originalPenalty, durablePenalty)
+	}
+}
+
 func TestFileStoreListEvidenceAndPenaltiesAcrossReopen(t *testing.T) {
 	t.Parallel()
 

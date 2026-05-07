@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -212,6 +215,132 @@ func TestIssueEndpointsPaymentProofWithExplicitBindingsSucceeds(t *testing.T) {
 				t.Fatalf("unexpected empty token response: %+v", resp)
 			}
 		})
+	}
+}
+
+func TestHandleIssueTokenAcceptsWalletFundPaymentProof(t *testing.T) {
+	s := newSponsorTestService(t)
+	s.requirePaymentProof = true
+	ctx := context.Background()
+	reservation, err := s.settlementService().ReserveFunds(ctx, settlement.FundReservation{
+		ReservationID: "res-wallet-token-1",
+		SessionID:     "sess-wallet-token-1",
+		SubjectID:     "wallet1token",
+		AmountMicros:  1000,
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+
+	reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+		Tier:      1,
+		Subject:   reservation.SubjectID,
+		TokenType: crypto.TokenTypeClientAccess,
+		PopPubKey: sponsorTestPopPubKey(t),
+		PaymentProof: &proto.SponsorPaymentProof{
+			Source:        proto.PaymentProofSourceWalletFund,
+			ReservationID: reservation.ReservationID,
+			Subject:       reservation.SubjectID,
+			SessionID:     reservation.SessionID,
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/token", bytes.NewReader(reqBody))
+	rr := httptest.NewRecorder()
+
+	s.handleIssueToken(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	var resp proto.IssueTokenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode token response: %v", err)
+	}
+	claims, err := crypto.VerifyClaims(resp.Token, s.pubKey)
+	if err != nil {
+		t.Fatalf("verify client token: %v", err)
+	}
+	if claims.Subject != reservation.SubjectID || claims.TokenType != crypto.TokenTypeClientAccess {
+		t.Fatalf("unexpected client claims for wallet fund proof: %+v", claims)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/token", bytes.NewReader(reqBody))
+	secondRR := httptest.NewRecorder()
+	s.handleIssueToken(secondRR, secondReq)
+	if secondRR.Code != http.StatusConflict {
+		t.Fatalf("expected wallet fund replay status=%d got=%d body=%s", http.StatusConflict, secondRR.Code, secondRR.Body.String())
+	}
+	if !strings.Contains(secondRR.Body.String(), "payment proof already used") {
+		t.Fatalf("expected wallet fund replay rejection message, body=%s", secondRR.Body.String())
+	}
+}
+
+func TestPaymentReplayKeySeparatesWalletFundFromSponsorReservations(t *testing.T) {
+	if got := paymentReplayKey("", "res-shared-1"); got != "res-shared-1" {
+		t.Fatalf("unexpected default sponsor replay key: %q", got)
+	}
+	if got := paymentReplayKey(proto.PaymentProofSourceSponsor, "res-shared-1"); got != "res-shared-1" {
+		t.Fatalf("unexpected explicit sponsor replay key: %q", got)
+	}
+	if got := paymentReplayKey(proto.PaymentProofSourceWalletFund, "res-shared-1"); got != "wallet_fund:res-shared-1" {
+		t.Fatalf("unexpected wallet fund replay key: %q", got)
+	}
+}
+
+func TestHandleIssueTokenAcceptsAnonCredentialWalletFundPaymentProof(t *testing.T) {
+	s := newSponsorTestService(t)
+	s.requirePaymentProof = true
+	ctx := context.Background()
+	const credentialID = "cred-wallet-anon-token-1"
+	anonCred, err := signAnonymousCredential(anonymousCredentialClaims{
+		Issuer:       s.issuerID,
+		CredentialID: credentialID,
+		Tier:         2,
+		ExpiryUnix:   time.Now().Add(20 * time.Minute).Unix(),
+	}, s.privKey)
+	if err != nil {
+		t.Fatalf("signAnonymousCredential: %v", err)
+	}
+	reservation, err := s.settlementService().ReserveFunds(ctx, settlement.FundReservation{
+		ReservationID: "res-wallet-anon-token-1",
+		SessionID:     "sess-wallet-anon-token-1",
+		SubjectID:     "wallet1anon",
+		AmountMicros:  1000,
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+
+	reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+		Tier:      1,
+		TokenType: crypto.TokenTypeClientAccess,
+		PopPubKey: sponsorTestPopPubKey(t),
+		AnonCred:  anonCred,
+		PaymentProof: &proto.SponsorPaymentProof{
+			Source:        proto.PaymentProofSourceWalletFund,
+			ReservationID: reservation.ReservationID,
+			Subject:       reservation.SubjectID,
+			SessionID:     reservation.SessionID,
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/token", bytes.NewReader(reqBody))
+	rr := httptest.NewRecorder()
+
+	s.handleIssueToken(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	var resp proto.IssueTokenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode token response: %v", err)
+	}
+	claims, err := crypto.VerifyClaims(resp.Token, s.pubKey)
+	if err != nil {
+		t.Fatalf("verify client token: %v", err)
+	}
+	if claims.Subject != anonymousSubjectAlias(credentialID) || claims.AnonCredID == "" || claims.Subject == reservation.SubjectID {
+		t.Fatalf("unexpected anonymous wallet-funded claims: %+v reservation=%+v", claims, reservation)
 	}
 }
 
@@ -493,6 +622,148 @@ func TestSponsorIssueTokenRequiresPaymentProof(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "payment proof required") {
 		t.Fatalf("expected missing payment proof error, body=%s", rr.Body.String())
+	}
+}
+
+func TestSponsorIssueProviderRoleRequiresRegisteredRelaySubject(t *testing.T) {
+	s := newSponsorTestService(t)
+	reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+		Tier:      2,
+		Subject:   "provider-unknown",
+		TokenType: crypto.TokenTypeProviderRole,
+		PopPubKey: sponsorTestPopPubKey(t),
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/sponsor/token", bytes.NewReader(reqBody))
+	req.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+	rr := httptest.NewRecorder()
+
+	s.handleSponsorIssueToken(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusForbidden, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "provider_role subject not registered") {
+		t.Fatalf("expected provider subject registration error, body=%s", rr.Body.String())
+	}
+}
+
+func TestSponsorIssueProviderRoleRejectsRegisteredClientSubject(t *testing.T) {
+	s := newSponsorTestService(t)
+	s.subjects["client-operator"] = proto.SubjectProfile{
+		Subject: "client-operator",
+		Kind:    proto.SubjectKindClient,
+		Tier:    3,
+	}
+	reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+		Tier:      2,
+		Subject:   "client-operator",
+		TokenType: crypto.TokenTypeProviderRole,
+		PopPubKey: sponsorTestPopPubKey(t),
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/sponsor/token", bytes.NewReader(reqBody))
+	req.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+	rr := httptest.NewRecorder()
+
+	s.handleSponsorIssueToken(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusForbidden, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "provider_role subject is not registered as relay-exit") {
+		t.Fatalf("expected provider subject kind error, body=%s", rr.Body.String())
+	}
+}
+
+func TestSponsorIssueProviderRoleRejectsRegisteredSubjectWithMissingKind(t *testing.T) {
+	s := newSponsorTestService(t)
+	s.subjects["provider-missing-kind"] = proto.SubjectProfile{
+		Subject: "provider-missing-kind",
+		Tier:    3,
+	}
+	reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+		Tier:      2,
+		Subject:   "provider-missing-kind",
+		TokenType: crypto.TokenTypeProviderRole,
+		PopPubKey: sponsorTestPopPubKey(t),
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/sponsor/token", bytes.NewReader(reqBody))
+	req.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+	rr := httptest.NewRecorder()
+
+	s.handleSponsorIssueToken(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusForbidden, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "provider_role subject is not registered as relay-exit") {
+		t.Fatalf("expected provider subject kind error, body=%s", rr.Body.String())
+	}
+}
+
+func TestSponsorIssueProviderRoleRejectsRegisteredSubjectWithUnknownKind(t *testing.T) {
+	s := newSponsorTestService(t)
+	s.subjects["provider-unknown-kind"] = proto.SubjectProfile{
+		Subject: "provider-unknown-kind",
+		Kind:    "operator",
+		Tier:    3,
+	}
+	reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+		Tier:      2,
+		Subject:   "provider-unknown-kind",
+		TokenType: crypto.TokenTypeProviderRole,
+		PopPubKey: sponsorTestPopPubKey(t),
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/sponsor/token", bytes.NewReader(reqBody))
+	req.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+	rr := httptest.NewRecorder()
+
+	s.handleSponsorIssueToken(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusForbidden, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "provider_role subject is not registered as relay-exit") {
+		t.Fatalf("expected provider subject kind error, body=%s", rr.Body.String())
+	}
+}
+
+func TestSponsorIssueProviderRoleAllowsRegisteredRelaySubject(t *testing.T) {
+	s := newSponsorTestService(t)
+	s.subjects["provider-op-1"] = proto.SubjectProfile{
+		Subject:    "provider-op-1",
+		Kind:       proto.SubjectKindRelayExit,
+		Tier:       3,
+		Reputation: 1,
+		Bond:       500,
+	}
+	reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+		Tier:      2,
+		Subject:   "provider-op-1",
+		TokenType: crypto.TokenTypeProviderRole,
+		PopPubKey: sponsorTestPopPubKey(t),
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/sponsor/token", bytes.NewReader(reqBody))
+	req.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+	rr := httptest.NewRecorder()
+
+	s.handleSponsorIssueToken(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	var resp proto.IssueTokenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode token response: %v", err)
+	}
+	claims, err := crypto.VerifyClaims(resp.Token, s.pubKey)
+	if err != nil {
+		t.Fatalf("verify provider token: %v", err)
+	}
+	if claims.Subject != "provider-op-1" || claims.TokenType != crypto.TokenTypeProviderRole || claims.Audience != "provider" {
+		t.Fatalf("unexpected provider claims: %+v", claims)
+	}
+	if claims.Tier != 2 {
+		t.Fatalf("expected requested tier cap 2, got %d", claims.Tier)
 	}
 }
 
@@ -952,6 +1223,66 @@ func TestSponsorIssueTokenFailsClosedWhenPaymentReplayCacheSaturated(t *testing.
 	if !strings.Contains(second.Body.String(), "payment replay cache saturated") {
 		t.Fatalf("expected saturation error message, body=%s", second.Body.String())
 	}
+	unconsumed, err := s.settlementService().GetSponsorReservation(context.Background(), "sres-cache-2")
+	if err != nil {
+		t.Fatalf("GetSponsorReservation for saturated reservation: %v", err)
+	}
+	if !unconsumed.ConsumedAt.IsZero() {
+		t.Fatalf("cache saturation must not consume reservation, got %+v", unconsumed)
+	}
+	if s.hasIssuedPaymentReservation("sres-cache-2") {
+		t.Fatalf("cache saturation must not mark reservation as issued")
+	}
+}
+
+func TestSponsorIssueTokenFailsClosedWithoutConsumingWhenPaymentReplayStoreWriteFails(t *testing.T) {
+	s := newSponsorTestService(t)
+	s.issuedPaymentReplayStoreFile = t.TempDir()
+
+	_, err := s.settlementService().ReserveSponsorCredits(context.Background(), settlement.SponsorCreditReservation{
+		ReservationID: "sres-store-fail-1",
+		SponsorID:     "sponsor-1",
+		SubjectID:     "client-1",
+		SessionID:     "sess-store-fail-1",
+		AmountMicros:  1000,
+		ExpiresAt:     time.Now().UTC().Add(2 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+
+	reqBody, _ := json.Marshal(proto.IssueTokenRequest{
+		Tier:      1,
+		Subject:   "client-1",
+		TokenType: crypto.TokenTypeClientAccess,
+		PopPubKey: sponsorTestPopPubKey(t),
+		PaymentProof: &proto.SponsorPaymentProof{
+			ReservationID: "sres-store-fail-1",
+			SponsorID:     "sponsor-1",
+			Subject:       "client-1",
+			SessionID:     "sess-store-fail-1",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/sponsor/token", bytes.NewReader(reqBody))
+	req.Header.Set("X-Sponsor-Token", "sponsor-secret-token")
+	rr := httptest.NewRecorder()
+	s.handleSponsorIssueToken(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected replay store write failure status=%d got=%d body=%s", http.StatusServiceUnavailable, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "payment replay store write failed") {
+		t.Fatalf("expected replay store write failure message, body=%s", rr.Body.String())
+	}
+	unconsumed, err := s.settlementService().GetSponsorReservation(context.Background(), "sres-store-fail-1")
+	if err != nil {
+		t.Fatalf("GetSponsorReservation: %v", err)
+	}
+	if !unconsumed.ConsumedAt.IsZero() {
+		t.Fatalf("replay store write failure must not consume reservation, got %+v", unconsumed)
+	}
+	if s.hasIssuedPaymentReservation("sres-store-fail-1") {
+		t.Fatalf("replay store write failure must roll back issued replay marker")
+	}
 }
 
 func TestMarkIssuedPaymentReservationPrunesExpiredEntriesBeforeCapacityCheck(t *testing.T) {
@@ -962,12 +1293,115 @@ func TestMarkIssuedPaymentReservationPrunesExpiredEntriesBeforeCapacityCheck(t *
 			"expired": time.Now().Add(-5 * time.Second).Unix(),
 		},
 	}
-	marked, saturated := s.markIssuedPaymentReservation("fresh")
+	marked, saturated, err := s.markIssuedPaymentReservation("fresh")
+	if err != nil {
+		t.Fatalf("markIssuedPaymentReservation: %v", err)
+	}
 	if !marked {
 		t.Fatalf("expected fresh reservation to be marked after prune; saturated=%t", saturated)
 	}
 	if _, exists := s.issuedPaymentReservations["expired"]; exists {
 		t.Fatal("expected expired reservation to be pruned")
+	}
+}
+
+func TestIssuedPaymentReplayStorePersistsAndLoadsReservations(t *testing.T) {
+	storeFile := filepath.Join(t.TempDir(), "payment_replay.json")
+	s := &Service{
+		issuedPaymentReplayStoreFile:  storeFile,
+		issuedPaymentReplayMaxEntries: 8,
+		issuedPaymentReplayTTL:        time.Hour,
+		issuedPaymentReservations:     map[string]int64{},
+	}
+	marked, saturated, err := s.markIssuedPaymentReservation("res-persist-1")
+	if err != nil {
+		t.Fatalf("markIssuedPaymentReservation: %v", err)
+	}
+	if !marked || saturated {
+		t.Fatalf("expected reservation to be marked without saturation, marked=%t saturated=%t", marked, saturated)
+	}
+	b, err := readFileBounded(storeFile, issuerStateFileMaxBytes)
+	if err != nil {
+		t.Fatalf("read replay store: %v", err)
+	}
+	var stored issuedPaymentReplayStore
+	if err := json.Unmarshal(b, &stored); err != nil {
+		t.Fatalf("decode replay store: %v", err)
+	}
+	if stored.Entries["res-persist-1"] == 0 {
+		t.Fatalf("expected replay store to contain reservation, entries=%v", stored.Entries)
+	}
+
+	restored := &Service{
+		issuedPaymentReplayStoreFile:  storeFile,
+		issuedPaymentReplayMaxEntries: 8,
+		issuedPaymentReplayTTL:        time.Hour,
+	}
+	if err := restored.loadIssuedPaymentReplayStore(); err != nil {
+		t.Fatalf("loadIssuedPaymentReplayStore: %v", err)
+	}
+	if !restored.hasIssuedPaymentReservation("res-persist-1") {
+		t.Fatal("expected restored service to reject already issued reservation")
+	}
+	marked, saturated, err = restored.markIssuedPaymentReservation("res-persist-1")
+	if err != nil {
+		t.Fatalf("mark restored reservation: %v", err)
+	}
+	if marked || saturated {
+		t.Fatalf("expected restored reservation to be treated as replay, marked=%t saturated=%t", marked, saturated)
+	}
+}
+
+func TestIssuedPaymentReplayStoreConcurrentMarksPreserveAllReservations(t *testing.T) {
+	storeFile := filepath.Join(t.TempDir(), "payment_replay.json")
+	s := &Service{
+		issuedPaymentReplayStoreFile:  storeFile,
+		issuedPaymentReplayMaxEntries: 64,
+		issuedPaymentReplayTTL:        time.Hour,
+		issuedPaymentReservations:     map[string]int64{},
+	}
+	const count = 20
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errCh := make(chan error, count)
+	for i := 0; i < count; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			marked, saturated, err := s.markIssuedPaymentReservation(fmt.Sprintf("res-concurrent-%02d", i))
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if !marked || saturated {
+				errCh <- fmt.Errorf("unexpected mark result marked=%t saturated=%t", marked, saturated)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("concurrent mark: %v", err)
+		}
+	}
+
+	restored := &Service{
+		issuedPaymentReplayStoreFile:  storeFile,
+		issuedPaymentReplayMaxEntries: 64,
+		issuedPaymentReplayTTL:        time.Hour,
+	}
+	if err := restored.loadIssuedPaymentReplayStore(); err != nil {
+		t.Fatalf("load replay store: %v", err)
+	}
+	for i := 0; i < count; i++ {
+		reservationID := fmt.Sprintf("res-concurrent-%02d", i)
+		if !restored.hasIssuedPaymentReservation(reservationID) {
+			t.Fatalf("replay store lost reservation %s", reservationID)
+		}
 	}
 }
 

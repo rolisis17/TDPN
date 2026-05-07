@@ -262,6 +262,35 @@ if rg -q 'args=.*--allow-insecure-remote-http 1' "$CAPTURE"; then
   exit 1
 fi
 
+echo "[3machine-beta-validate-loopback] explicit lab HTTP CLI opt-in"
+: >"$CAPTURE"
+FAKE_CAPTURE_FILE="$CAPTURE" \
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_SH="$FAKE_EASY" \
+THREE_MACHINE_VALIDATE_REWRITE_LOOPBACK_FOR_DOCKER=0 \
+./scripts/integration_3machine_beta_validate.sh \
+  --directory-a http://100.113.245.61:8081 \
+  --directory-b http://100.64.244.24:8081 \
+  --issuer-url http://100.113.245.61:8082 \
+  --entry-url http://100.113.245.61:8083 \
+  --exit-url http://100.113.245.61:8084 \
+  --min-sources 1 \
+  --min-operators 1 \
+  --federation-timeout-sec 5 \
+  --timeout-sec 5 \
+  --distinct-operators 0 \
+  --require-issuer-quorum 0 \
+  --allow-insecure-remote-http 1 \
+  --beta-profile 1 \
+  --prod-profile 0 >/tmp/integration_3machine_beta_validate_cli_lab_http.log 2>&1
+
+if ! rg -q 'args=.*--allow-insecure-remote-http 1' "$CAPTURE"; then
+  echo "explicit lab HTTP CLI opt-in should opt client-test into insecure remote HTTP"
+  cat "$CAPTURE"
+  cat /tmp/integration_3machine_beta_validate_cli_lab_http.log
+  exit 1
+fi
+
 echo "[3machine-beta-validate-loopback] mixed Docker rewrite and remote HTTP requires explicit opt-in"
 : >"$CAPTURE"
 set +e

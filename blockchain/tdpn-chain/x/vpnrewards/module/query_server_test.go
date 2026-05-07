@@ -2,6 +2,7 @@ package module
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/tdpn/tdpn-chain/x/vpnrewards/keeper"
@@ -171,5 +172,48 @@ func TestQueryServerListNonEmpty(t *testing.T) {
 	}
 	if distributionResp.Distributions[0].DistributionID != "dist-03" || distributionResp.Distributions[1].DistributionID != "dist-20" {
 		t.Fatalf("expected deterministic distribution ordering by ID, got %+v", distributionResp.Distributions)
+	}
+}
+
+func TestQueryServerListClampsLargeResultSets(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	for i := 0; i < maxQueryListResults+5; i++ {
+		accrualID := fmt.Sprintf("acc-clamp-%04d", i)
+		distributionID := fmt.Sprintf("dist-clamp-%04d", i)
+		k.UpsertAccrual(types.RewardAccrual{
+			AccrualID:  accrualID,
+			ProviderID: fmt.Sprintf("provider-clamp-%04d", i),
+			Amount:     int64(i + 1),
+		})
+		k.UpsertDistribution(types.DistributionRecord{
+			DistributionID: distributionID,
+			AccrualID:      accrualID,
+			PayoutRef:      fmt.Sprintf("payout-clamp-%04d", i),
+		})
+	}
+
+	server := NewQueryServer(&k)
+	accrualResp, err := server.ListAccruals(ListAccrualsRequest{})
+	if err != nil {
+		t.Fatalf("expected list accruals success, got %v", err)
+	}
+	if len(accrualResp.Accruals) != maxQueryListResults {
+		t.Fatalf("expected %d clamped accruals, got %d", maxQueryListResults, len(accrualResp.Accruals))
+	}
+	if accrualResp.Accruals[len(accrualResp.Accruals)-1].AccrualID != "acc-clamp-0999" {
+		t.Fatalf("unexpected last accrual after clamp: %q", accrualResp.Accruals[len(accrualResp.Accruals)-1].AccrualID)
+	}
+
+	distributionResp, err := server.ListDistributions(ListDistributionsRequest{})
+	if err != nil {
+		t.Fatalf("expected list distributions success, got %v", err)
+	}
+	if len(distributionResp.Distributions) != maxQueryListResults {
+		t.Fatalf("expected %d clamped distributions, got %d", maxQueryListResults, len(distributionResp.Distributions))
+	}
+	if distributionResp.Distributions[len(distributionResp.Distributions)-1].DistributionID != "dist-clamp-0999" {
+		t.Fatalf("unexpected last distribution after clamp: %q", distributionResp.Distributions[len(distributionResp.Distributions)-1].DistributionID)
 	}
 }

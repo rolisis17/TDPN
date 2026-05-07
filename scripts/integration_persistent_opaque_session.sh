@@ -7,13 +7,73 @@ cd "$ROOT_DIR"
 mkdir -p .gocache
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
-LOG_FILE=/tmp/persistent_opaque_session.log
-rm -f "$LOG_FILE"
+TMP_DIR="$(mktemp -d)"
+LOG_FILE="$TMP_DIR/persistent_opaque_session.log"
+TRUST_FILE="$TMP_DIR/directory_trust.txt"
 
+DIR_PORT=18881
+ISSUER_PORT=18882
+ENTRY_PORT=18883
+EXIT_PORT=18884
+ENTRY_DATA_PORT=19880
+EXIT_DATA_PORT=19881
+EXIT_WG_PORT=19882
+CLIENT_INNER_PORT=19890
+CLIENT_SINK_PORT=19891
+EXIT_SINK_PORT=19892
+EXIT_SOURCE_PORT=19893
+WGIO_FROM_WG_PORT=19900
+WGIO_TO_WG_PORT=19901
+
+route_assertion_json="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)"
+route_assertion_private_key="$(echo "$route_assertion_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')"
+route_assertion_pubkey="$(echo "$route_assertion_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')"
+if [[ -z "$route_assertion_private_key" || -z "$route_assertion_pubkey" ]]; then
+  echo "failed to generate entry route assertion key material"
+  exit 1
+fi
+
+cleanup() {
+  kill "${node_pid:-}" >/dev/null 2>&1 || true
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
+DIRECTORY_ADDR="127.0.0.1:${DIR_PORT}" \
+DIRECTORY_PUBLIC_URL="http://127.0.0.1:${DIR_PORT}" \
+DIRECTORY_URL="http://127.0.0.1:${DIR_PORT}" \
+DIRECTORY_TRUST_TOFU=1 \
+DIRECTORY_TRUSTED_KEYS_FILE="$TRUST_FILE" \
+DIRECTORY_PRIVATE_KEY_FILE="$TMP_DIR/directory.key" \
+DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE="$TMP_DIR/directory_provider_replay.json" \
+ISSUER_ADDR="127.0.0.1:${ISSUER_PORT}" \
+ISSUER_URL="http://127.0.0.1:${ISSUER_PORT}" \
+ISSUER_URLS="http://127.0.0.1:${ISSUER_PORT}" \
+CORE_ISSUER_URL="http://127.0.0.1:${ISSUER_PORT}" \
+ISSUER_PRIVATE_KEY_FILE="$TMP_DIR/issuer.key" \
+ISSUER_SUBJECTS_FILE="$TMP_DIR/issuer_subjects.json" \
+ISSUER_REVOCATIONS_FILE="$TMP_DIR/issuer_revocations.json" \
+ISSUER_ANON_REVOCATIONS_FILE="$TMP_DIR/issuer_anon_revocations.json" \
+ENTRY_ADDR="127.0.0.1:${ENTRY_PORT}" \
+ENTRY_URL="http://127.0.0.1:${ENTRY_PORT}" \
+ENTRY_RELAY_ID="entry-local-1" \
+ENTRY_DATA_ADDR="127.0.0.1:${ENTRY_DATA_PORT}" \
+ENTRY_PUBLIC_DATA_ADDR="127.0.0.1:${ENTRY_DATA_PORT}" \
+ENTRY_ENDPOINT="127.0.0.1:${ENTRY_DATA_PORT}" \
+ENTRY_ROUTE_ASSERTION_PRIVATE_KEY="$route_assertion_private_key" \
+ENTRY_ROUTE_ASSERTION_PUBLIC_KEY="$route_assertion_pubkey" \
+EXIT_ADDR="127.0.0.1:${EXIT_PORT}" \
+EXIT_CONTROL_URL="http://127.0.0.1:${EXIT_PORT}" \
+EXIT_RELAY_ID="exit-local-1" \
+EXIT_DATA_ADDR="127.0.0.1:${EXIT_DATA_PORT}" \
+EXIT_ENDPOINT="127.0.0.1:${EXIT_DATA_PORT}" \
+EXIT_WG_LISTEN_PORT="${EXIT_WG_PORT}" \
+EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS="$route_assertion_pubkey" \
+EXIT_TOKEN_PROOF_REPLAY_STORE_FILE="$TMP_DIR/exit_token_replay.json" \
 DATA_PLANE_MODE=opaque \
 CLIENT_INNER_SOURCE=udp \
-CLIENT_INNER_UDP_ADDR=127.0.0.1:53900 \
-CLIENT_OPAQUE_SINK_ADDR=127.0.0.1:53910 \
+CLIENT_INNER_UDP_ADDR="127.0.0.1:${CLIENT_INNER_PORT}" \
+CLIENT_OPAQUE_SINK_ADDR="127.0.0.1:${CLIENT_SINK_PORT}" \
 CLIENT_OPAQUE_DRAIN_MS=300 \
 CLIENT_OPAQUE_SESSION_SEC=6 \
 CLIENT_OPAQUE_INITIAL_UPLINK_TIMEOUT_MS=1200 \
@@ -21,21 +81,20 @@ CLIENT_BOOTSTRAP_INTERVAL_SEC=2 \
 WG_BACKEND=noop \
 CLIENT_WG_BACKEND=noop \
 EXIT_OPAQUE_ECHO=0 \
-EXIT_OPAQUE_SINK_ADDR=127.0.0.1:53912 \
-EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:53911 \
-WGIO_FROM_WG_ADDR=127.0.0.1:54000 \
-WGIO_TO_CLIENT_ADDR=127.0.0.1:53900 \
-WGIO_FROM_EXIT_ADDR=127.0.0.1:53910 \
-WGIO_TO_WG_ADDR=127.0.0.1:54001 \
-WGIOTAP_ADDR=127.0.0.1:54001 \
-WGIOINJECT_TARGET_ADDR=127.0.0.1:54000 \
+EXIT_OPAQUE_SINK_ADDR="127.0.0.1:${EXIT_SINK_PORT}" \
+EXIT_OPAQUE_SOURCE_ADDR="127.0.0.1:${EXIT_SOURCE_PORT}" \
+WGIO_FROM_WG_ADDR="127.0.0.1:${WGIO_FROM_WG_PORT}" \
+WGIO_TO_CLIENT_ADDR="127.0.0.1:${CLIENT_INNER_PORT}" \
+WGIO_FROM_EXIT_ADDR="127.0.0.1:${CLIENT_SINK_PORT}" \
+WGIO_TO_WG_ADDR="127.0.0.1:${WGIO_TO_WG_PORT}" \
+WGIOTAP_ADDR="127.0.0.1:${WGIO_TO_WG_PORT}" \
+WGIOINJECT_TARGET_ADDR="127.0.0.1:${WGIO_FROM_WG_PORT}" \
 WGIOINJECT_INTERVAL_MS=80 \
 WGIOINJECT_WG_LIKE_PCT=100 \
 timeout 45s go run ./cmd/node \
   --directory --issuer --entry --exit --client --wgio --wgiotap --wgioinject \
   >"$LOG_FILE" 2>&1 &
 node_pid=$!
-trap 'kill $node_pid >/dev/null 2>&1 || true' EXIT
 
 ready=0
 for _ in $(seq 1 140); do
@@ -57,14 +116,14 @@ sleep 2.5
 for i in $(seq 1 30); do
   session_id=$(rg -No "exit accepted opaque packet session=[0-9a-f]+" "$LOG_FILE" | tail -n1 | sed -E 's/.*session=//')
   if [[ -n "${session_id}" ]]; then
-    printf "%s\ndelayed-persistent-probe-%02d" "$session_id" "$i" >/dev/udp/127.0.0.1/53911 || true
+    printf "%s\ndelayed-persistent-probe-%02d" "$session_id" "$i" >/dev/udp/127.0.0.1/"${EXIT_SOURCE_PORT}" || true
   fi
   sleep 0.1
 done
 
 metric_ok=0
 for _ in $(seq 1 40); do
-  if curl -fsS http://127.0.0.1:8084/v1/metrics 2>/dev/null | rg -q '"forwarded_downlink_packets":[1-9][0-9]*'; then
+  if curl -fsS "http://127.0.0.1:${EXIT_PORT}/v1/metrics" 2>/dev/null | rg -q '"forwarded_downlink_packets":[1-9][0-9]*'; then
     metric_ok=1
     break
   fi
@@ -72,7 +131,7 @@ for _ in $(seq 1 40); do
 done
 if [[ "$metric_ok" -ne 1 ]]; then
   echo "expected forwarded_downlink_packets > 0"
-  curl -sS http://127.0.0.1:8084/v1/metrics || true
+  curl -sS "http://127.0.0.1:${EXIT_PORT}/v1/metrics" || true
   cat "$LOG_FILE"
   exit 1
 fi

@@ -72,6 +72,74 @@ if rg -q 'realpath: -m' /tmp/integration_entrypoint_runtime_copy.log; then
   exit 1
 fi
 
+cat >"$TMP_DIR/bin/ip" <<'EOF_IP'
+#!/usr/bin/env sh
+if [ "${1:-}" = "link" ] && [ "${2:-}" = "show" ]; then
+  exit 1
+fi
+if [ "${1:-}" = "link" ] && [ "${2:-}" = "add" ]; then
+  exit 1
+fi
+exit 1
+EOF_IP
+chmod +x "$TMP_DIR/bin/ip"
+
+set +e
+WG_BACKEND=command \
+EXIT_WG_PRIVATE_KEY_PATH="$SOURCE_KEY" \
+EXIT_WG_PRIVATE_KEY_ROOT="$TMP_DIR/data" \
+EXIT_WG_PRIVATE_KEY_RUNTIME_PARENT="$TMP_DIR/runtime" \
+EXIT_WG_AUTO_CREATE_INTERFACE=1 \
+EXIT_WG_INTERFACE=wgfail0 \
+PRIVACYNODE_ENTRYPOINT_EXEC="$TMP_DIR/bin/capture-entrypoint-env" \
+CAPTURE_PATH="$CAPTURE_PATH" \
+CAPTURE_MODE="$CAPTURE_MODE" \
+CAPTURE_CMP="$CAPTURE_CMP" \
+SOURCE_KEY="$SOURCE_KEY" \
+PATH="$TMP_DIR/bin:$PATH" \
+sh "$ROOT_DIR/deploy/entrypoint.sh" --exit >/tmp/integration_entrypoint_auto_iface_fail.log 2>&1
+auto_iface_rc=$?
+set -e
+if [[ "$auto_iface_rc" -eq 0 ]]; then
+  echo "expected entrypoint to fail when auto-created WG interface cannot be created"
+  cat /tmp/integration_entrypoint_auto_iface_fail.log
+  exit 1
+fi
+if ! rg -q "failed to auto-create EXIT_WG_INTERFACE 'wgfail0'" /tmp/integration_entrypoint_auto_iface_fail.log; then
+  echo "expected auto-interface failure diagnostic"
+  cat /tmp/integration_entrypoint_auto_iface_fail.log
+  exit 1
+fi
+
+OUTSIDE_DIR="$TMP_DIR/outside"
+ANCESTOR_LINK="$TMP_DIR/data/ancestor-link"
+mkdir -p "$OUTSIDE_DIR"
+ln -s "$OUTSIDE_DIR" "$ANCESTOR_LINK"
+set +e
+WG_BACKEND=command \
+EXIT_WG_PRIVATE_KEY_PATH="$ANCESTOR_LINK/nested/exit.key" \
+EXIT_WG_PRIVATE_KEY_ROOT="$TMP_DIR/data" \
+PRIVACYNODE_ENTRYPOINT_EXEC="$TMP_DIR/bin/capture-entrypoint-env" \
+PATH="$TMP_DIR/bin:$PATH" \
+sh "$ROOT_DIR/deploy/entrypoint.sh" --exit >/tmp/integration_entrypoint_ancestor_symlink_reject.log 2>&1
+ancestor_symlink_rc=$?
+set -e
+if [[ "$ancestor_symlink_rc" -eq 0 ]]; then
+  echo "expected entrypoint to reject symlink ancestor key path"
+  cat /tmp/integration_entrypoint_ancestor_symlink_reject.log
+  exit 1
+fi
+if ! rg -q 'refusing EXIT_WG_PRIVATE_KEY_PATH parent symlink' /tmp/integration_entrypoint_ancestor_symlink_reject.log; then
+  echo "expected symlink ancestor rejection message"
+  cat /tmp/integration_entrypoint_ancestor_symlink_reject.log
+  exit 1
+fi
+if [[ -e "$OUTSIDE_DIR/nested" ]]; then
+  echo "entrypoint created directories through a rejected symlink ancestor"
+  cat /tmp/integration_entrypoint_ancestor_symlink_reject.log
+  exit 1
+fi
+
 LINK_KEY="$TMP_DIR/data/link.key"
 ln -s "$SOURCE_KEY" "$LINK_KEY"
 set +e

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in go curl jq mktemp date; do
+for cmd in go curl jq mktemp date awk rg; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -14,6 +14,7 @@ done
 TMP_DIR="$(mktemp -d)"
 FAKE_SCRIPT="$TMP_DIR/fake_easy_node.sh"
 AUTH_VERIFY_SCRIPT="$TMP_DIR/fake_auth_verify.sh"
+AUTH_PROOF_HELPER="$TMP_DIR/gpm_auth_contract_proof.go"
 CALLS_FILE="$TMP_DIR/easy_node_calls.tsv"
 SERVER_LOG="$TMP_DIR/local_api_server.log"
 LOCAL_API_BASE=""
@@ -200,22 +201,77 @@ api_get_json() {
   curl -fsS -H "Origin: ${LOCAL_API_BASE}" "${LOCAL_API_BASE}${path}"
 }
 
+ensure_auth_proof_helper() {
+  if [[ -s "$AUTH_PROOF_HELPER" ]]; then
+    return 0
+  fi
+  awk '
+    /^package main$/ { in_block=1 }
+    in_block && /^EOF_GO$/ { exit }
+    in_block { print }
+  ' scripts/integration_local_control_api_contract.sh >"$AUTH_PROOF_HELPER"
+  if ! rg -q '^package main$' "$AUTH_PROOF_HELPER"; then
+    echo "failed to materialize gpm auth proof helper"
+    exit 1
+  fi
+}
+
+auth_contract_wallet_address() {
+  ensure_auth_proof_helper
+  GPM_AUTH_CONTRACT_KEY_SCALAR=1 go run "$AUTH_PROOF_HELPER" --address
+}
+
+auth_contract_proof_json() {
+  local message="$1"
+  ensure_auth_proof_helper
+  printf '%s' "$message" | GPM_AUTH_CONTRACT_KEY_SCALAR=1 go run "$AUTH_PROOF_HELPER" --proof
+}
+
 mint_session_token() {
-  local wallet="$1"
+  local requested_wallet="$1"
+  local wallet=""
   local challenge_json=""
   local challenge_id=""
+  local challenge_message=""
+  local proof_json=""
   local verify_json=""
+  local verify_body=""
   local session_token=""
 
+  wallet="$(auth_contract_wallet_address)"
   challenge_json="$(api_post_json "/v1/gpm/auth/challenge" "{\"wallet_address\":\"${wallet}\",\"wallet_provider\":\"keplr\"}")"
   challenge_id="$(jq -r '.challenge_id // ""' <<<"$challenge_json")"
+  challenge_message="$(jq -r '.message // ""' <<<"$challenge_json")"
   if [[ -z "$challenge_id" ]]; then
     echo "failed to get challenge_id"
     echo "$challenge_json"
     exit 1
   fi
+  if [[ -z "$challenge_message" ]]; then
+    echo "failed to get challenge message for requested wallet ${requested_wallet}"
+    echo "$challenge_json"
+    exit 1
+  fi
 
-  verify_json="$(api_post_json "/v1/gpm/auth/verify" "{\"wallet_address\":\"${wallet}\",\"wallet_provider\":\"keplr\",\"challenge_id\":\"${challenge_id}\",\"signature\":\"sig-contract-0123456789\"}")"
+  proof_json="$(auth_contract_proof_json "$challenge_message")"
+  verify_body="$(jq -cn \
+    --arg wallet_address "$wallet" \
+    --arg challenge_id "$challenge_id" \
+    --arg signature "$(jq -r '.signature // ""' <<<"$proof_json")" \
+    --arg signature_public_key "$(jq -r '.signature_public_key // ""' <<<"$proof_json")" \
+    --arg signature_public_key_type "$(jq -r '.signature_public_key_type // "secp256k1"' <<<"$proof_json")" \
+    --arg signed_message "$challenge_message" \
+    '{
+      wallet_address: $wallet_address,
+      wallet_provider: "keplr",
+      challenge_id: $challenge_id,
+      signature: $signature,
+      signature_public_key: $signature_public_key,
+      signature_public_key_type: $signature_public_key_type,
+      signature_source: "wallet_extension",
+      signed_message: $signed_message
+    }')"
+  verify_json="$(api_post_json "/v1/gpm/auth/verify" "$verify_body")"
   session_token="$(jq -r '.session_token // ""' <<<"$verify_json")"
   if [[ -z "$session_token" ]]; then
     echo "failed to get session_token"
@@ -518,12 +574,12 @@ assert_json_expr \
 stop_local_api
 
 echo "[local-control-api-gpm-manifest-trust] production mode requires manifest signature verifier key for cache fallback"
-prod_sig_manifest_url="https://127.0.0.1:1/v1/bootstrap/manifest"
+prod_sig_manifest_url="https://example.com/v1/bootstrap/manifest"
 prod_sig_bootstrap_directory="https://directory.prod-sig.globalprivatemesh.example:8081"
 prod_sig_cache_path="$TMP_DIR/prod_sig_cache_missing_key.json"
 write_manifest_cache "$prod_sig_cache_path" "$prod_sig_manifest_url" "$prod_sig_bootstrap_directory" true
 start_local_api \
-  "https://127.0.0.1:1" \
+  "https://example.com" \
   "$prod_sig_manifest_url" \
   "$prod_sig_cache_path" \
   0 \

@@ -24,12 +24,22 @@ CAPTURE="$TMP_DIR/stage_calls.tsv"
 HELP_LOG="$TMP_DIR/help.log"
 VALIDATION_LOG="$TMP_DIR/validation.log"
 SUCCESS_LOG="$TMP_DIR/success.log"
+NO_GO_DIAGNOSTIC_LOG="$TMP_DIR/no_go_diagnostic.log"
+NO_GO_LAUNCH_LOG="$TMP_DIR/no_go_launch.log"
 FAIL_LOG="$TMP_DIR/fail.log"
 
 INPUT_JSON="$TMP_DIR/real_metrics_input.json"
 SUCCESS_REPORTS_DIR="$TMP_DIR/reports_success"
 SUCCESS_SUMMARY_JSON="$TMP_DIR/success_summary.json"
 SUCCESS_CANONICAL_SUMMARY_JSON="$TMP_DIR/success_summary_canonical.json"
+
+NO_GO_DIAGNOSTIC_REPORTS_DIR="$TMP_DIR/reports_no_go_diagnostic"
+NO_GO_DIAGNOSTIC_SUMMARY_JSON="$TMP_DIR/no_go_diagnostic_summary.json"
+NO_GO_DIAGNOSTIC_CANONICAL_SUMMARY_JSON="$TMP_DIR/no_go_diagnostic_summary_canonical.json"
+
+NO_GO_LAUNCH_REPORTS_DIR="$TMP_DIR/reports_no_go_launch"
+NO_GO_LAUNCH_SUMMARY_JSON="$TMP_DIR/no_go_launch_summary.json"
+NO_GO_LAUNCH_CANONICAL_SUMMARY_JSON="$TMP_DIR/no_go_launch_summary_canonical.json"
 
 FAIL_REPORTS_DIR="$TMP_DIR/reports_fail"
 FAIL_SUMMARY_JSON="$TMP_DIR/fail_summary.json"
@@ -583,6 +593,16 @@ if ! grep -Fq -- "--operator-pack-summary-json" "$HELP_LOG"; then
   cat "$HELP_LOG"
   exit 1
 fi
+if ! grep -Fq -- "--enforce-launch" "$HELP_LOG"; then
+  echo "help output missing --enforce-launch"
+  cat "$HELP_LOG"
+  exit 1
+fi
+if ! grep -Fq -- "--fail-on-no-go" "$HELP_LOG"; then
+  echo "help output missing --fail-on-no-go"
+  cat "$HELP_LOG"
+  exit 1
+fi
 if ! grep -Fq -- "--print-summary-json" "$HELP_LOG"; then
   echo "help output missing --print-summary-json"
   cat "$HELP_LOG"
@@ -679,6 +699,7 @@ if ! jq -e \
   and .inputs.input_json == $input_json
   and .inputs.reports_dir == $reports_dir
   and .inputs.refresh_roadmap == false
+  and .inputs.fail_on_no_go == false
   and .steps.metrics_input_template.status == "pass"
   and .steps.gate_cycle.status == "pass"
   and .steps.gate_cycle.decision == "GO"
@@ -698,6 +719,78 @@ if ! jq -e \
   echo "success summary contract mismatch"
   cat "$SUCCESS_SUMMARY_JSON"
   cat "$SUCCESS_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-real-evidence] diagnostic NO-GO remains fail-soft"
+: >"$CAPTURE"
+if ! BLOCKCHAIN_MAINNET_ACTIVATION_REAL_EVIDENCE_FAKE_GATE_CYCLE_DECISION=NO-GO \
+run_helper \
+  --input-json "$INPUT_JSON" \
+  --reports-dir "$NO_GO_DIAGNOSTIC_REPORTS_DIR" \
+  --summary-json "$NO_GO_DIAGNOSTIC_SUMMARY_JSON" \
+  --canonical-summary-json "$NO_GO_DIAGNOSTIC_CANONICAL_SUMMARY_JSON" \
+  --print-summary-json 0 >"$NO_GO_DIAGNOSTIC_LOG" 2>&1; then
+  echo "diagnostic NO-GO path must remain fail-soft"
+  cat "$NO_GO_DIAGNOSTIC_LOG"
+  exit 1
+fi
+assert_stage_order "$CAPTURE" "template" "gate_cycle" "missing_checklist" "operator_pack"
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.fail_on_no_go == false
+  and .steps.gate_cycle.status == "pass"
+  and .steps.gate_cycle.decision == "NO-GO"
+  and (.steps.gate_cycle.missing_required_metrics | length) == 2
+  and .steps.missing_metrics_checklist.status == "pass"
+  and .steps.operator_pack.status == "pass"
+' "$NO_GO_DIAGNOSTIC_SUMMARY_JSON" >/dev/null; then
+  echo "diagnostic NO-GO summary contract mismatch"
+  cat "$NO_GO_DIAGNOSTIC_SUMMARY_JSON"
+  cat "$NO_GO_DIAGNOSTIC_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-real-evidence] launch NO-GO fails closed"
+: >"$CAPTURE"
+set +e
+BLOCKCHAIN_MAINNET_ACTIVATION_REAL_EVIDENCE_FAKE_GATE_CYCLE_DECISION=NO-GO \
+run_helper \
+  --input-json "$INPUT_JSON" \
+  --reports-dir "$NO_GO_LAUNCH_REPORTS_DIR" \
+  --summary-json "$NO_GO_LAUNCH_SUMMARY_JSON" \
+  --canonical-summary-json "$NO_GO_LAUNCH_CANONICAL_SUMMARY_JSON" \
+  --enforce-launch \
+  --print-summary-json 0 >"$NO_GO_LAUNCH_LOG" 2>&1
+no_go_launch_rc=$?
+set -e
+if [[ "$no_go_launch_rc" -eq 0 ]]; then
+  echo "expected launch NO-GO path to fail closed"
+  cat "$NO_GO_LAUNCH_LOG"
+  exit 1
+fi
+if [[ "$no_go_launch_rc" -ne 1 ]]; then
+  echo "expected launch NO-GO path rc=1"
+  cat "$NO_GO_LAUNCH_LOG"
+  exit 1
+fi
+assert_stage_order "$CAPTURE" "template" "gate_cycle" "missing_checklist" "operator_pack"
+if ! jq -e '
+  .status == "launch-no-go"
+  and .rc == 1
+  and .inputs.fail_on_no_go == true
+  and .first_runtime_failure.step == null
+  and .first_runtime_failure.rc == null
+  and .steps.gate_cycle.status == "pass"
+  and .steps.gate_cycle.decision == "NO-GO"
+  and (.steps.gate_cycle.missing_required_metrics | length) == 2
+  and .steps.missing_metrics_checklist.status == "pass"
+  and .steps.operator_pack.status == "pass"
+' "$NO_GO_LAUNCH_SUMMARY_JSON" >/dev/null; then
+  echo "launch NO-GO summary contract mismatch"
+  cat "$NO_GO_LAUNCH_SUMMARY_JSON"
+  cat "$NO_GO_LAUNCH_LOG"
   exit 1
 fi
 

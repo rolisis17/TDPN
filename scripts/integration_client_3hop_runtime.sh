@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 mkdir -p .gocache
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
-for cmd in go rg timeout sed curl; do
+for cmd in go rg timeout sed curl python3 setsid; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -17,20 +17,73 @@ done
 umask 077
 TMP_DIR="$(mktemp -d)"
 LOG_FILE="$TMP_DIR/integration_client_3hop_runtime.log"
+MIDDLE_LOG_FILE="$TMP_DIR/integration_client_3hop_middle.log"
 MIDDLE_OBSERVED_FILE="$TMP_DIR/middle_observed"
 MIDDLE_READY_FILE="$TMP_DIR/middle_ready"
-MIDDLE_ENDPOINT="127.0.0.1:52830"
-EXIT_DATA_ENDPOINT="127.0.0.1:51821"
+
+free_tcp_port() {
+  python3 - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.bind(("127.0.0.1", 0))
+    print(s.getsockname()[1])
+PY
+}
+
+free_udp_port_excluding() {
+  python3 - "$@" <<'PY'
+import socket
+import sys
+
+excluded = {int(p) for p in sys.argv[1:] if p}
+for _ in range(100):
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    if port not in excluded:
+        print(port)
+        raise SystemExit(0)
+raise SystemExit("unable to allocate a distinct UDP port")
+PY
+}
+
+DIRECTORY_ADDR="${CLIENT_3HOP_DIRECTORY_ADDR:-127.0.0.1:$(free_tcp_port)}"
+ISSUER_ADDR="${CLIENT_3HOP_ISSUER_ADDR:-127.0.0.1:$(free_tcp_port)}"
+ENTRY_ADDR="${CLIENT_3HOP_ENTRY_ADDR:-127.0.0.1:$(free_tcp_port)}"
+EXIT_ADDR="${CLIENT_3HOP_EXIT_ADDR:-127.0.0.1:$(free_tcp_port)}"
+DIRECTORY_URL="http://${DIRECTORY_ADDR}"
+ISSUER_URL_RUNTIME="http://${ISSUER_ADDR}"
+ENTRY_URL="http://${ENTRY_ADDR}"
+EXIT_CONTROL_URL="http://${EXIT_ADDR}"
+MIDDLE_ADDR="${CLIENT_3HOP_MIDDLE_ADDR:-127.0.0.1:$(free_tcp_port)}"
+middle_udp_port="$(free_udp_port_excluding)"
+entry_udp_port="$(free_udp_port_excluding "$middle_udp_port")"
+exit_udp_port="$(free_udp_port_excluding "$middle_udp_port" "$entry_udp_port")"
+MIDDLE_ENDPOINT="${CLIENT_3HOP_MIDDLE_ENDPOINT:-127.0.0.1:${middle_udp_port}}"
+ENTRY_DATA_ENDPOINT="${CLIENT_3HOP_ENTRY_DATA_ENDPOINT:-127.0.0.1:${entry_udp_port}}"
+EXIT_DATA_ENDPOINT="${CLIENT_3HOP_EXIT_DATA_ENDPOINT:-127.0.0.1:${exit_udp_port}}"
 rm -f "$LOG_FILE"
+rm -f "$MIDDLE_LOG_FILE"
 rm -f "$MIDDLE_OBSERVED_FILE"
 rm -f "$MIDDLE_READY_FILE"
 
+terminate_group() {
+  local pid="${1:-}"
+  if [[ -z "$pid" ]]; then
+    return 0
+  fi
+  kill -TERM -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
+  wait "$pid" >/dev/null 2>&1 || true
+  kill -KILL -- "-$pid" >/dev/null 2>&1 || true
+}
+
 cleanup() {
   if [[ -n "${node_pid:-}" ]]; then
-    kill "$node_pid" >/dev/null 2>&1 || true
+    terminate_group "$node_pid"
   fi
   if [[ -n "${middle_pid:-}" ]]; then
-    kill "$middle_pid" >/dev/null 2>&1 || true
+    terminate_group "$middle_pid"
   fi
   rm -rf "$TMP_DIR"
 }
@@ -131,13 +184,14 @@ start_middle() {
   local endpoint="$1"
   local entry_endpoint="$2"
   local exit_endpoint="$3"
-  MIDDLE_ADDR=127.0.0.1:9285 \
-  MIDDLE_DATA_ADDR="$endpoint" \
-  MIDDLE_ENTRY_DATA_ADDR="$entry_endpoint" \
-  MIDDLE_EXIT_DATA_ADDR="$exit_endpoint" \
-  MIDDLE_OBSERVED_FILE="$MIDDLE_OBSERVED_FILE" \
-  MIDDLE_READY_FILE="$MIDDLE_READY_FILE" \
-  go run ./cmd/node --middle >>"$LOG_FILE" 2>&1 &
+  setsid env \
+    MIDDLE_ADDR="$MIDDLE_ADDR" \
+    MIDDLE_DATA_ADDR="$endpoint" \
+    MIDDLE_ENTRY_DATA_ADDR="$entry_endpoint" \
+    MIDDLE_EXIT_DATA_ADDR="$exit_endpoint" \
+    MIDDLE_OBSERVED_FILE="$MIDDLE_OBSERVED_FILE" \
+    MIDDLE_READY_FILE="$MIDDLE_READY_FILE" \
+    go run ./cmd/node --middle >"$MIDDLE_LOG_FILE" 2>&1 &
   middle_pid=$!
   local deadline=$((SECONDS + 15))
   while ((SECONDS < deadline)); do
@@ -147,27 +201,29 @@ start_middle() {
     if ! kill -0 "$middle_pid" >/dev/null 2>&1; then
       echo "middle relay exited before becoming ready"
       cat "$LOG_FILE"
+      cat "$MIDDLE_LOG_FILE"
       return 1
     fi
     sleep 0.2
   done
   echo "timed out waiting for middle relay readiness"
   cat "$LOG_FILE"
+  cat "$MIDDLE_LOG_FILE"
   return 1
 }
 
 seed_middle_relay() {
-  wait_for_http_ready "http://127.0.0.1:8081/v1/health" "directory health"
-  wait_for_http_ready "http://127.0.0.1:8082/v1/health" "issuer health"
+  wait_for_http_ready "$DIRECTORY_URL/v1/health" "directory health"
+  wait_for_http_ready "$ISSUER_URL_RUNTIME/v1/health" "issuer health"
 
   local provider_operator="provider-op-middle"
   local relay_id="middle-provider-3hop"
   local endpoint="$MIDDLE_ENDPOINT"
-  local control_url="http://127.0.0.1:9285"
+  local control_url="http://${MIDDLE_ADDR}"
   local nonce="integration-client-3hop-middle-$(date +%s)"
 
   local key_json relay_pub relay_priv token_json token token_id proof upsert_payload upsert_resp relays_json
-  key_json="$(go run ./cmd/tokenpop gen --show-private-key)"
+  key_json="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)"
   relay_pub="$(echo "$key_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')"
   relay_priv="$(echo "$key_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')"
   if [[ -z "$relay_pub" || -z "$relay_priv" ]]; then
@@ -176,7 +232,7 @@ seed_middle_relay() {
     return 1
   fi
 
-  token_json="$(curl -fsS -X POST http://127.0.0.1:8082/v1/sponsor/token \
+  token_json="$(curl -fsS -X POST "$ISSUER_URL_RUNTIME/v1/sponsor/token" \
     -H 'Content-Type: application/json' \
     -H 'X-Sponsor-Token: integration-client-3hop-sponsor-token' \
     --data "{\"tier\":2,\"subject\":\"$provider_operator\",\"token_type\":\"provider_role\",\"pop_pub_key\":\"$relay_pub\"}")"
@@ -209,7 +265,7 @@ seed_middle_relay() {
 JSON
 )
 
-  upsert_resp="$(curl -fsS -X POST http://127.0.0.1:8081/v1/provider/relay/upsert \
+  upsert_resp="$(curl -fsS -X POST "$DIRECTORY_URL/v1/provider/relay/upsert" \
     -H 'Content-Type: application/json' \
     -H "Authorization: Bearer $token" \
     --data "$upsert_payload")"
@@ -219,7 +275,7 @@ JSON
     return 1
   fi
 
-  relays_json="$(curl -fsS http://127.0.0.1:8081/v1/relays)"
+  relays_json="$(curl -fsS "$DIRECTORY_URL/v1/relays")"
   if ! echo "$relays_json" | rg -q "\"relay_id\":\"$relay_id\""; then
     echo "expected seeded micro-relay to be advertised by directory"
     echo "$relays_json"
@@ -227,29 +283,65 @@ JSON
   fi
 }
 
-CLIENT_PATH_PROFILE=3hop \
-CLIENT_BOOTSTRAP_INTERVAL_SEC=1 \
-CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC=1 \
-CLIENT_BOOTSTRAP_JITTER_PCT=0 \
-CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC=5 \
-ISSUER_SPONSOR_API_TOKEN=integration-client-3hop-sponsor-token \
-DIRECTORY_PROVIDER_ISSUER_URLS=http://127.0.0.1:8082 \
-DIRECTORY_ISSUER_TRUST_URLS=http://127.0.0.1:8082 \
-DIRECTORY_TRUST_STRICT=0 \
-ENTRY_DIRECTORY_TRUST_STRICT=0 \
-DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1 \
-CLIENT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1 \
-ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1 \
-EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1 \
-ENTRY_RELAY_ID=entry-local-1 \
-EXIT_RELAY_ID=exit-local-1 \
-ENTRY_DATA_ADDR=127.0.0.1:51820 \
-EXIT_DATA_ADDR="$EXIT_DATA_ENDPOINT" \
-timeout 40s go run ./cmd/node --directory --issuer --entry --exit --client >"$LOG_FILE" 2>&1 &
+cat >"$TMP_DIR/issuer_subjects.json" <<'JSON'
+{
+  "provider-op-middle": {
+    "subject": "provider-op-middle",
+    "kind": "relay-exit",
+    "tier": 2,
+    "reputation": 1,
+    "bond": 500
+  }
+}
+JSON
+
+route_assertion_json="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)"
+route_assertion_private_key="$(echo "$route_assertion_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')"
+route_assertion_pubkey="$(echo "$route_assertion_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')"
+if [[ -z "$route_assertion_private_key" || -z "$route_assertion_pubkey" ]]; then
+  echo "failed to generate entry route assertion key material"
+  redact_token_json "$route_assertion_json"
+  exit 1
+fi
+
+setsid env \
+  CLIENT_PATH_PROFILE=3hop \
+  CLIENT_BOOTSTRAP_INTERVAL_SEC=1 \
+  CLIENT_BOOTSTRAP_BACKOFF_MAX_SEC=1 \
+  CLIENT_BOOTSTRAP_JITTER_PCT=0 \
+  CLIENT_BOOTSTRAP_INITIAL_DELAY_SEC=5 \
+  ISSUER_SPONSOR_API_TOKEN=integration-client-3hop-sponsor-token \
+  ISSUER_SUBJECTS_FILE="$TMP_DIR/issuer_subjects.json" \
+  DIRECTORY_ADDR="$DIRECTORY_ADDR" \
+  ISSUER_ADDR="$ISSUER_ADDR" \
+  ENTRY_ADDR="$ENTRY_ADDR" \
+  EXIT_ADDR="$EXIT_ADDR" \
+  DIRECTORY_URL="$DIRECTORY_URL" \
+  ISSUER_URL="$ISSUER_URL_RUNTIME" \
+  ENTRY_URL="$ENTRY_URL" \
+  EXIT_CONTROL_URL="$EXIT_CONTROL_URL" \
+  DIRECTORY_PROVIDER_ISSUER_URLS="$ISSUER_URL_RUNTIME" \
+  DIRECTORY_ISSUER_TRUST_URLS="$ISSUER_URL_RUNTIME" \
+  DIRECTORY_TRUST_STRICT=0 \
+  ENTRY_DIRECTORY_TRUST_STRICT=0 \
+  DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1 \
+  CLIENT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1 \
+  ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1 \
+  EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1 \
+  ENTRY_RELAY_ID=entry-local-1 \
+  EXIT_RELAY_ID=exit-local-1 \
+  ENTRY_DATA_ADDR="$ENTRY_DATA_ENDPOINT" \
+  ENTRY_ENDPOINT="$ENTRY_DATA_ENDPOINT" \
+  EXIT_DATA_ADDR="$EXIT_DATA_ENDPOINT" \
+  EXIT_ENDPOINT="$EXIT_DATA_ENDPOINT" \
+  ENTRY_ROUTE_ASSERTION_PRIVATE_KEY="$route_assertion_private_key" \
+  ENTRY_ROUTE_ASSERTION_PUBLIC_KEY="$route_assertion_pubkey" \
+  EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS="$route_assertion_pubkey" \
+  timeout 40s go run ./cmd/node --directory --issuer --entry --exit --client >"$LOG_FILE" 2>&1 &
 node_pid=$!
 trap cleanup EXIT
 
-start_middle "$MIDDLE_ENDPOINT" "127.0.0.1:51820" "$EXIT_DATA_ENDPOINT"
+start_middle "$MIDDLE_ENDPOINT" "$ENTRY_DATA_ENDPOINT" "$EXIT_DATA_ENDPOINT"
 
 startup_ok=0
 for _ in $(seq 1 200); do

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp grep cat awk sed chmod cmp wc tr; do
+for cmd in bash jq mktemp grep cat awk sed chmod cmp wc tr ln; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -52,6 +52,48 @@ MISSING_METRICS_MISSING_TEMPLATE_CANONICAL_JSON="$TMP_DIR/missing_metrics_missin
 MISSING_METRICS_CHECKLIST_OUTPUT_JSON="$TMP_DIR/missing_metrics_checklist_should_not_exist.json"
 MISSING_METRICS_CHECKLIST_OUTPUT_MD="$TMP_DIR/missing_metrics_checklist_should_not_exist.md"
 MISSING_METRICS_LOG="$TMP_DIR/missing_metrics.log"
+
+MISSING_METRICS_ENFORCE_REPORTS_DIR="$TMP_DIR/reports_missing_metrics_enforce"
+MISSING_METRICS_ENFORCE_SUMMARY_JSON="$MISSING_METRICS_ENFORCE_REPORTS_DIR/missing_metrics_enforce_summary.json"
+MISSING_METRICS_ENFORCE_CANONICAL_SUMMARY_JSON="$MISSING_METRICS_ENFORCE_REPORTS_DIR/missing_metrics_enforce_summary_canonical.json"
+MISSING_METRICS_ENFORCE_LOG="$TMP_DIR/missing_metrics_enforce.log"
+
+INVALID_METRICS_JSON_REPORTS_DIR="$TMP_DIR/reports_invalid_metrics_json"
+INVALID_METRICS_JSON_INPUT_SUMMARY_JSON="$TMP_DIR/invalid_metrics_json_input.json"
+INVALID_METRICS_JSON_SUMMARY_JSON="$TMP_DIR/invalid_metrics_json_summary.json"
+INVALID_METRICS_JSON_CANONICAL_SUMMARY_JSON="$TMP_DIR/invalid_metrics_json_summary_canonical.json"
+INVALID_METRICS_JSON_LOG="$TMP_DIR/invalid_metrics_json.log"
+INVALID_METRICS_JSON_ENFORCE_REPORTS_DIR="$TMP_DIR/reports_invalid_metrics_json_enforce"
+INVALID_METRICS_JSON_ENFORCE_SUMMARY_JSON="$INVALID_METRICS_JSON_ENFORCE_REPORTS_DIR/invalid_metrics_json_enforce_summary.json"
+INVALID_METRICS_JSON_ENFORCE_CANONICAL_SUMMARY_JSON="$INVALID_METRICS_JSON_ENFORCE_REPORTS_DIR/invalid_metrics_json_enforce_summary_canonical.json"
+INVALID_METRICS_JSON_ENFORCE_LOG="$TMP_DIR/invalid_metrics_json_enforce.log"
+
+INVALID_METRICS_VALUES_REPORTS_DIR="$TMP_DIR/reports_invalid_metrics_values"
+INVALID_METRICS_VALUES_INPUT_SUMMARY_JSON="$TMP_DIR/invalid_metrics_values_input.json"
+INVALID_METRICS_VALUES_SUMMARY_JSON="$INVALID_METRICS_VALUES_REPORTS_DIR/invalid_metrics_values_summary.json"
+INVALID_METRICS_VALUES_CANONICAL_SUMMARY_JSON="$INVALID_METRICS_VALUES_REPORTS_DIR/invalid_metrics_values_summary_canonical.json"
+INVALID_METRICS_VALUES_LOG="$TMP_DIR/invalid_metrics_values.log"
+
+MISSING_CHECKLIST_ARTIFACTS_REPORTS_DIR="$TMP_DIR/reports_missing_checklist_artifacts"
+MISSING_CHECKLIST_ARTIFACTS_SUMMARY_JSON="$MISSING_CHECKLIST_ARTIFACTS_REPORTS_DIR/missing_checklist_artifacts_summary.json"
+MISSING_CHECKLIST_ARTIFACTS_CANONICAL_SUMMARY_JSON="$MISSING_CHECKLIST_ARTIFACTS_REPORTS_DIR/missing_checklist_artifacts_summary_canonical.json"
+MISSING_CHECKLIST_ARTIFACTS_METRICS_SUMMARY_JSON="$TMP_DIR/missing_checklist_artifacts_metrics_summary.json"
+MISSING_CHECKLIST_ARTIFACTS_OUTPUT_JSON="$MISSING_CHECKLIST_ARTIFACTS_REPORTS_DIR/missing_checklist_artifacts_checklist.json"
+MISSING_CHECKLIST_ARTIFACTS_OUTPUT_MD="$MISSING_CHECKLIST_ARTIFACTS_REPORTS_DIR/missing_checklist_artifacts_checklist.md"
+MISSING_CHECKLIST_ARTIFACTS_LOG="$TMP_DIR/missing_checklist_artifacts.log"
+
+UNSAFE_ENFORCE_REPORTS_DIR="$TMP_DIR/reports_unsafe_enforce"
+UNSAFE_ENFORCE_SUMMARY_JSON="$TMP_DIR/unsafe_enforce_summary.json"
+UNSAFE_ENFORCE_LOG="$TMP_DIR/unsafe_enforce.log"
+
+UNSAFE_OVERRIDE_REPORTS_DIR="$TMP_DIR/reports_unsafe_override"
+UNSAFE_OVERRIDE_SUMMARY_JSON="$TMP_DIR/unsafe_override_summary.json"
+UNSAFE_OVERRIDE_CANONICAL_SUMMARY_JSON="$TMP_DIR/unsafe_override_summary_canonical.json"
+UNSAFE_OVERRIDE_LOG="$TMP_DIR/unsafe_override.log"
+
+SYMLINK_ESCAPE_REPORTS_DIR="$TMP_DIR/reports_symlink_escape"
+SYMLINK_ESCAPE_OUTSIDE_DIR="$TMP_DIR/outside_symlink_escape"
+SYMLINK_ESCAPE_LOG="$TMP_DIR/symlink_escape.log"
 
 FAKE_TEMPLATE="$TMP_DIR/fake_template.sh"
 cat >"$FAKE_TEMPLATE" <<'EOF_FAKE_TEMPLATE'
@@ -312,6 +354,10 @@ if [[ ! -f "$metrics_summary_json" ]]; then
   exit 8
 fi
 
+if [[ "${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_FAKE_CHECKLIST_SKIP_ARTIFACTS:-0}" == "1" ]]; then
+  exit 0
+fi
+
 mkdir -p "$(dirname "$output_json")" "$(dirname "$output_md")"
 
 jq -n \
@@ -417,6 +463,16 @@ if ! grep -Fq -- "--metrics-summary-json" "$HELP_LOG"; then
   cat "$HELP_LOG"
   exit 1
 fi
+if ! grep -Fq -- "--require-metrics-summary" "$HELP_LOG"; then
+  echo "help output missing --require-metrics-summary"
+  cat "$HELP_LOG"
+  exit 1
+fi
+if ! grep -Fq -- "--enforce-launch" "$HELP_LOG"; then
+  echo "help output missing --enforce-launch"
+  cat "$HELP_LOG"
+  exit 1
+fi
 if ! grep -Fq -- "--template-output-json" "$HELP_LOG"; then
   echo "help output missing --template-output-json"
   cat "$HELP_LOG"
@@ -429,6 +485,11 @@ if ! grep -Fq -- "--missing-input-template-output-json" "$HELP_LOG"; then
 fi
 if ! grep -Fq -- "--checklist-output-json" "$HELP_LOG"; then
   echo "help output missing --checklist-output-json"
+  cat "$HELP_LOG"
+  exit 1
+fi
+if ! grep -Fq -- "--allow-unsafe-artifact-paths" "$HELP_LOG"; then
+  echo "help output missing --allow-unsafe-artifact-paths"
   cat "$HELP_LOG"
   exit 1
 fi
@@ -698,6 +759,337 @@ if ! cmp -s "$MISSING_METRICS_SUMMARY_JSON" "$MISSING_METRICS_CANONICAL_SUMMARY_
   echo "missing-metrics canonical summary does not match summary"
   cat "$MISSING_METRICS_SUMMARY_JSON"
   cat "$MISSING_METRICS_CANONICAL_SUMMARY_JSON"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-operator-pack] enforce-launch fails closed when metrics summary missing"
+: >"$CAPTURE"
+set +e
+run_pack \
+  --reports-dir "$MISSING_METRICS_ENFORCE_REPORTS_DIR" \
+  --summary-json "$MISSING_METRICS_ENFORCE_SUMMARY_JSON" \
+  --canonical-summary-json "$MISSING_METRICS_ENFORCE_CANONICAL_SUMMARY_JSON" \
+  --metrics-summary-json "$MISSING_METRICS_INPUT_SUMMARY_JSON" \
+  --enforce-launch 1 \
+  --print-summary-json 0 >"$MISSING_METRICS_ENFORCE_LOG" 2>&1
+missing_metrics_enforce_rc=$?
+set -e
+
+if [[ "$missing_metrics_enforce_rc" -eq 0 ]]; then
+  echo "enforce-launch missing-metrics operator pack run must fail closed"
+  cat "$MISSING_METRICS_ENFORCE_LOG"
+  exit 1
+fi
+
+assert_stage_order "$CAPTURE" "template"
+if ! jq -e \
+  --arg metrics_summary_json "$MISSING_METRICS_INPUT_SUMMARY_JSON" \
+  '
+  .status == "launch-enforcement-fail"
+  and .rc == 1
+  and .inputs.require_metrics_summary == true
+  and .inputs.metrics_summary_provided == true
+  and .inputs.metrics_summary_exists == false
+  and .inputs.metrics_summary_json == $metrics_summary_json
+  and .launch_enforcement.require_metrics_summary == true
+  and ((.launch_enforcement.reasons // []) | index("metrics-summary-json-missing-file")) != null
+  and .steps.metrics_missing_input_template.status == "skipped"
+  and .steps.metrics_missing_checklist.status == "skipped"
+  ' "$MISSING_METRICS_ENFORCE_SUMMARY_JSON" >/dev/null; then
+  echo "enforce-launch missing-metrics summary contract mismatch"
+  cat "$MISSING_METRICS_ENFORCE_SUMMARY_JSON"
+  cat "$MISSING_METRICS_ENFORCE_LOG"
+  exit 1
+fi
+
+if ! cmp -s "$MISSING_METRICS_ENFORCE_SUMMARY_JSON" "$MISSING_METRICS_ENFORCE_CANONICAL_SUMMARY_JSON"; then
+  echo "enforce-launch missing-metrics canonical summary does not match summary"
+  cat "$MISSING_METRICS_ENFORCE_SUMMARY_JSON"
+  cat "$MISSING_METRICS_ENFORCE_CANONICAL_SUMMARY_JSON"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-operator-pack] invalid metrics summary JSON is fail-soft without enforcement"
+printf '{invalid' >"$INVALID_METRICS_JSON_INPUT_SUMMARY_JSON"
+: >"$CAPTURE"
+if ! run_pack \
+  --reports-dir "$INVALID_METRICS_JSON_REPORTS_DIR" \
+  --summary-json "$INVALID_METRICS_JSON_SUMMARY_JSON" \
+  --canonical-summary-json "$INVALID_METRICS_JSON_CANONICAL_SUMMARY_JSON" \
+  --metrics-summary-json "$INVALID_METRICS_JSON_INPUT_SUMMARY_JSON" \
+  --print-summary-json 0 >"$INVALID_METRICS_JSON_LOG" 2>&1; then
+  echo "invalid metrics JSON operator pack run must remain fail-soft and exit 0"
+  cat "$INVALID_METRICS_JSON_LOG"
+  exit 1
+fi
+
+assert_stage_order "$CAPTURE" "template"
+if ! jq -e \
+  --arg metrics_summary_json "$INVALID_METRICS_JSON_INPUT_SUMMARY_JSON" \
+  '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.metrics_summary_json == $metrics_summary_json
+  and .inputs.metrics_summary_exists == true
+  and .inputs.metrics_summary_valid_json == false
+  and .inputs.metrics_summary_schema_ok == false
+  and .inputs.metrics_summary_state == "invalid_json"
+  and .steps.metrics_missing_input_template.status == "skipped"
+  and .steps.metrics_missing_input_template.skipped_reason == "metrics-summary-json-invalid-json"
+  and .steps.metrics_missing_checklist.status == "skipped"
+  and .steps.metrics_missing_checklist.skipped_reason == "metrics-summary-json-invalid-json"
+  ' "$INVALID_METRICS_JSON_SUMMARY_JSON" >/dev/null; then
+  echo "invalid metrics JSON fail-soft summary contract mismatch"
+  cat "$INVALID_METRICS_JSON_SUMMARY_JSON"
+  cat "$INVALID_METRICS_JSON_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-operator-pack] enforce-launch fails closed on invalid metrics summary JSON"
+: >"$CAPTURE"
+set +e
+run_pack \
+  --reports-dir "$INVALID_METRICS_JSON_ENFORCE_REPORTS_DIR" \
+  --summary-json "$INVALID_METRICS_JSON_ENFORCE_SUMMARY_JSON" \
+  --canonical-summary-json "$INVALID_METRICS_JSON_ENFORCE_CANONICAL_SUMMARY_JSON" \
+  --metrics-summary-json "$INVALID_METRICS_JSON_INPUT_SUMMARY_JSON" \
+  --enforce-launch 1 \
+  --print-summary-json 0 >"$INVALID_METRICS_JSON_ENFORCE_LOG" 2>&1
+invalid_metrics_json_enforce_rc=$?
+set -e
+
+if [[ "$invalid_metrics_json_enforce_rc" -eq 0 ]]; then
+  echo "enforce-launch invalid metrics JSON run must fail closed"
+  cat "$INVALID_METRICS_JSON_ENFORCE_LOG"
+  exit 1
+fi
+
+assert_stage_order "$CAPTURE" "template"
+if ! jq -e '
+  .status == "launch-enforcement-fail"
+  and .rc == 1
+  and .inputs.metrics_summary_valid_json == false
+  and .inputs.metrics_summary_state == "invalid_json"
+  and ((.launch_enforcement.reasons // []) | index("metrics-summary-json-invalid-json")) != null
+  and .steps.metrics_missing_input_template.status == "skipped"
+  and .steps.metrics_missing_checklist.status == "skipped"
+  ' "$INVALID_METRICS_JSON_ENFORCE_SUMMARY_JSON" >/dev/null; then
+  echo "enforce-launch invalid metrics JSON summary contract mismatch"
+  cat "$INVALID_METRICS_JSON_ENFORCE_SUMMARY_JSON"
+  cat "$INVALID_METRICS_JSON_ENFORCE_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-operator-pack] enforce-launch fails closed on invalid metric values"
+cat >"$INVALID_METRICS_VALUES_INPUT_SUMMARY_JSON" <<'EOF_INVALID_METRICS_VALUES'
+{
+  "schema": {"id": "blockchain_mainnet_activation_metrics_summary", "version": "1.0.0"},
+  "status": "partial",
+  "counts": {"invalid": 1},
+  "required_missing_metrics": ["vpn_connect_session_success_slo_pct"],
+  "invalid_metrics": ["vpn_connect_session_success_slo_pct"]
+}
+EOF_INVALID_METRICS_VALUES
+
+: >"$CAPTURE"
+set +e
+run_pack \
+  --reports-dir "$INVALID_METRICS_VALUES_REPORTS_DIR" \
+  --summary-json "$INVALID_METRICS_VALUES_SUMMARY_JSON" \
+  --canonical-summary-json "$INVALID_METRICS_VALUES_CANONICAL_SUMMARY_JSON" \
+  --metrics-summary-json "$INVALID_METRICS_VALUES_INPUT_SUMMARY_JSON" \
+  --enforce-launch 1 \
+  --print-summary-json 0 >"$INVALID_METRICS_VALUES_LOG" 2>&1
+invalid_metrics_values_rc=$?
+set -e
+
+if [[ "$invalid_metrics_values_rc" -eq 0 ]]; then
+  echo "enforce-launch invalid metrics values run must fail closed"
+  cat "$INVALID_METRICS_VALUES_LOG"
+  exit 1
+fi
+
+assert_stage_order "$CAPTURE" "template" "missing_template" "checklist"
+if ! jq -e \
+  --arg metrics_summary_json "$INVALID_METRICS_VALUES_INPUT_SUMMARY_JSON" \
+  '
+  .status == "launch-enforcement-fail"
+  and .rc == 1
+  and .inputs.metrics_summary_json == $metrics_summary_json
+  and .inputs.metrics_summary_valid_json == true
+  and .inputs.metrics_summary_schema_ok == true
+  and .inputs.metrics_summary_invalid_metrics_count == 1
+  and .inputs.metrics_summary_state == "invalid_metrics"
+  and ((.launch_enforcement.reasons // []) | index("metrics-summary-json-invalid-metrics")) != null
+  and .steps.metrics_missing_input_template.status == "pass"
+  and .steps.metrics_missing_checklist.status == "pass"
+  ' "$INVALID_METRICS_VALUES_SUMMARY_JSON" >/dev/null; then
+  echo "enforce-launch invalid metrics values summary contract mismatch"
+  cat "$INVALID_METRICS_VALUES_SUMMARY_JSON"
+  cat "$INVALID_METRICS_VALUES_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-operator-pack] enforce-launch rejects artifact paths outside reports-dir"
+: >"$CAPTURE"
+set +e
+run_pack \
+  --reports-dir "$UNSAFE_ENFORCE_REPORTS_DIR" \
+  --summary-json "$UNSAFE_ENFORCE_SUMMARY_JSON" \
+  --enforce-launch 1 \
+  --print-summary-json 0 >"$UNSAFE_ENFORCE_LOG" 2>&1
+unsafe_enforce_rc=$?
+set -e
+
+if [[ "$unsafe_enforce_rc" -ne 2 ]]; then
+  echo "expected unsafe enforce artifact path to exit 2, got rc=$unsafe_enforce_rc"
+  cat "$UNSAFE_ENFORCE_LOG"
+  exit 1
+fi
+if ! grep -Fq "unsafe artifact path for --summary-json" "$UNSAFE_ENFORCE_LOG"; then
+  echo "unsafe enforce artifact path error message mismatch"
+  cat "$UNSAFE_ENFORCE_LOG"
+  exit 1
+fi
+if [[ -f "$UNSAFE_ENFORCE_SUMMARY_JSON" ]]; then
+  echo "unsafe enforce artifact path should fail before summary emission"
+  cat "$UNSAFE_ENFORCE_SUMMARY_JSON"
+  cat "$UNSAFE_ENFORCE_LOG"
+  exit 1
+fi
+if [[ "$(wc -l <"$CAPTURE" | tr -d ' ')" != "0" ]]; then
+  echo "unsafe enforce artifact path should fail before invoking any stage"
+  cat "$CAPTURE"
+  cat "$UNSAFE_ENFORCE_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-operator-pack] enforce-launch rejects symlink artifact escapes"
+mkdir -p "$SYMLINK_ESCAPE_REPORTS_DIR" "$SYMLINK_ESCAPE_OUTSIDE_DIR"
+ln -s "$SYMLINK_ESCAPE_OUTSIDE_DIR" "$SYMLINK_ESCAPE_REPORTS_DIR/escape"
+: >"$CAPTURE"
+set +e
+run_pack \
+  --reports-dir "$SYMLINK_ESCAPE_REPORTS_DIR" \
+  --summary-json "$SYMLINK_ESCAPE_REPORTS_DIR/escape/summary.json" \
+  --enforce-launch 1 \
+  --print-summary-json 0 >"$SYMLINK_ESCAPE_LOG" 2>&1
+symlink_escape_rc=$?
+set -e
+
+if [[ "$symlink_escape_rc" -ne 2 ]]; then
+  echo "expected symlink artifact escape to exit 2, got rc=$symlink_escape_rc"
+  cat "$SYMLINK_ESCAPE_LOG"
+  exit 1
+fi
+if ! grep -Fq "unsafe artifact path for --summary-json" "$SYMLINK_ESCAPE_LOG"; then
+  echo "symlink artifact escape error message mismatch"
+  cat "$SYMLINK_ESCAPE_LOG"
+  exit 1
+fi
+if [[ -f "$SYMLINK_ESCAPE_OUTSIDE_DIR/summary.json" ]]; then
+  echo "symlink artifact escape should not write outside reports-dir"
+  ls -la "$SYMLINK_ESCAPE_OUTSIDE_DIR"
+  cat "$SYMLINK_ESCAPE_LOG"
+  exit 1
+fi
+if [[ "$(wc -l <"$CAPTURE" | tr -d ' ')" != "0" ]]; then
+  echo "symlink artifact escape should fail before invoking any stage"
+  cat "$CAPTURE"
+  cat "$SYMLINK_ESCAPE_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-operator-pack] unsafe artifact override remains explicit"
+: >"$CAPTURE"
+set +e
+run_pack \
+  --reports-dir "$UNSAFE_OVERRIDE_REPORTS_DIR" \
+  --summary-json "$UNSAFE_OVERRIDE_SUMMARY_JSON" \
+  --canonical-summary-json "$UNSAFE_OVERRIDE_CANONICAL_SUMMARY_JSON" \
+  --metrics-summary-json "$MISSING_METRICS_INPUT_SUMMARY_JSON" \
+  --enforce-launch 1 \
+  --allow-unsafe-artifact-paths 1 \
+  --print-summary-json 0 >"$UNSAFE_OVERRIDE_LOG" 2>&1
+unsafe_override_rc=$?
+set -e
+
+if [[ "$unsafe_override_rc" -eq 0 ]]; then
+  echo "unsafe override run should proceed to launch enforcement and fail on missing metrics"
+  cat "$UNSAFE_OVERRIDE_LOG"
+  exit 1
+fi
+assert_stage_order "$CAPTURE" "template"
+if [[ ! -f "$UNSAFE_OVERRIDE_SUMMARY_JSON" || ! -f "$UNSAFE_OVERRIDE_CANONICAL_SUMMARY_JSON" ]]; then
+  echo "unsafe override run should emit requested outside summary artifacts"
+  ls -la "$TMP_DIR"
+  cat "$UNSAFE_OVERRIDE_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "launch-enforcement-fail"
+  and .rc == 1
+  and ((.launch_enforcement.reasons // []) | index("metrics-summary-json-missing-file")) != null
+' "$UNSAFE_OVERRIDE_SUMMARY_JSON" >/dev/null; then
+  echo "unsafe override summary contract mismatch"
+  cat "$UNSAFE_OVERRIDE_SUMMARY_JSON"
+  cat "$UNSAFE_OVERRIDE_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-operator-pack] require-metrics-summary fails closed when checklist artifacts missing"
+cat >"$MISSING_CHECKLIST_ARTIFACTS_METRICS_SUMMARY_JSON" <<'EOF_MISSING_CHECKLIST_ARTIFACTS_METRICS_SUMMARY'
+{
+  "schema": {"id": "blockchain_mainnet_activation_metrics_summary", "version": "1.0.0"},
+  "status": "partial",
+  "required_missing_metrics": ["paying_users_3mo_min"]
+}
+EOF_MISSING_CHECKLIST_ARTIFACTS_METRICS_SUMMARY
+
+: >"$CAPTURE"
+set +e
+BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_FAKE_CHECKLIST_SKIP_ARTIFACTS=1 \
+  run_pack \
+    --reports-dir "$MISSING_CHECKLIST_ARTIFACTS_REPORTS_DIR" \
+    --summary-json "$MISSING_CHECKLIST_ARTIFACTS_SUMMARY_JSON" \
+    --canonical-summary-json "$MISSING_CHECKLIST_ARTIFACTS_CANONICAL_SUMMARY_JSON" \
+    --metrics-summary-json "$MISSING_CHECKLIST_ARTIFACTS_METRICS_SUMMARY_JSON" \
+    --checklist-output-json "$MISSING_CHECKLIST_ARTIFACTS_OUTPUT_JSON" \
+    --checklist-output-md "$MISSING_CHECKLIST_ARTIFACTS_OUTPUT_MD" \
+    --require-metrics-summary 1 \
+    --print-summary-json 0 >"$MISSING_CHECKLIST_ARTIFACTS_LOG" 2>&1
+missing_checklist_artifacts_rc=$?
+set -e
+
+if [[ "$missing_checklist_artifacts_rc" -eq 0 ]]; then
+  echo "require-metrics-summary missing checklist artifacts run must fail closed"
+  cat "$MISSING_CHECKLIST_ARTIFACTS_LOG"
+  exit 1
+fi
+
+assert_stage_order "$CAPTURE" "template" "missing_template" "checklist"
+if [[ -f "$MISSING_CHECKLIST_ARTIFACTS_OUTPUT_JSON" || -f "$MISSING_CHECKLIST_ARTIFACTS_OUTPUT_MD" ]]; then
+  echo "fake checklist skip-artifacts mode unexpectedly created checklist artifacts"
+  ls -la "$TMP_DIR"
+  cat "$MISSING_CHECKLIST_ARTIFACTS_LOG"
+  exit 1
+fi
+
+if ! jq -e \
+  --arg metrics_summary_json "$MISSING_CHECKLIST_ARTIFACTS_METRICS_SUMMARY_JSON" \
+  '
+  .status == "launch-enforcement-fail"
+  and .rc == 1
+  and .inputs.require_metrics_summary == true
+  and .inputs.metrics_summary_exists == true
+  and .inputs.metrics_summary_json == $metrics_summary_json
+  and .steps.metrics_missing_checklist.status == "pass"
+  and ((.launch_enforcement.reasons // []) | index("checklist-output-json-missing")) != null
+  and ((.launch_enforcement.reasons // []) | index("checklist-output-md-missing")) != null
+  ' "$MISSING_CHECKLIST_ARTIFACTS_SUMMARY_JSON" >/dev/null; then
+  echo "require-metrics-summary missing checklist artifacts summary contract mismatch"
+  cat "$MISSING_CHECKLIST_ARTIFACTS_SUMMARY_JSON"
+  cat "$MISSING_CHECKLIST_ARTIFACTS_LOG"
   exit 1
 fi
 

@@ -74,6 +74,18 @@ done
 if ! grep -q 'ISSUER_URL:.*ISSUER_URL' "$BASE_COMPOSE"; then
   fail "base compose entry-exit service must read ISSUER_URL directly so generated env files can pin Docker-internal issuer endpoints"
 fi
+if ! grep -q 'ISSUER_CLIENT_ALLOWLIST_ONLY:.*:-1' "$BASE_COMPOSE"; then
+  fail "base compose issuer service must default ISSUER_CLIENT_ALLOWLIST_ONLY to 1"
+fi
+if ! grep -q 'ISSUER_ALLOW_ANON_CRED:.*:-0' "$BASE_COMPOSE"; then
+  fail "base compose issuer service must default ISSUER_ALLOW_ANON_CRED to 0"
+fi
+if ! grep -q 'ISSUER_ADMIN_ALLOW_TOKEN:.*:-1' "$BASE_COMPOSE"; then
+  fail "base compose issuer service must default ISSUER_ADMIN_ALLOW_TOKEN to 1 so direct non-prod compose starts without signed key bootstrap"
+fi
+if ! grep -q 'ISSUER_ADMIN_REQUIRE_SIGNED:.*:-0' "$BASE_COMPOSE"; then
+  fail "base compose issuer service must default ISSUER_ADMIN_REQUIRE_SIGNED to 0 so direct non-prod compose does not require missing admin signing keys"
+fi
 
 override_entry_block="$(extract_service_block "$PRIV_OVERRIDE_COMPOSE" "entry-exit")"
 [[ -n "$override_entry_block" ]] || fail "privileged override compose is missing services.entry-exit block"

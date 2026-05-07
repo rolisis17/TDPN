@@ -186,9 +186,11 @@ resolve_summary_bool() {
   printf '%s|%s|%s|%s\n' "$value" "$status" "$resolved" "$source"
 }
 
-resolve_mainnet_activation_gate_go_pair() {
+resolve_gate_summary_go_pair() {
   local path="${1:-}"
   local source="${2:-}"
+  local expected_schema_id="${3:-}"
+  local strict_profile="${4:-generic}"
   local raw value status resolved
 
   value="null"
@@ -200,22 +202,63 @@ resolve_mainnet_activation_gate_go_pair() {
     return
   fi
 
-  raw="$(jq -r '
-    if (.go | type) == "boolean" then
-      (.go | tostring)
-    elif (.decision | type) == "string" then
-      ((.decision // "") | ascii_downcase | gsub("[[:space:]_]"; "")) as $d
-      | if $d == "go" then "true"
-        elif ($d == "no-go" or $d == "nogo") then "false"
-        else "" end
-    elif (.status | type) == "string" then
-      ((.status // "") | ascii_downcase | gsub("[[:space:]_]"; "")) as $s
-      | if ($s == "go" or $s == "pass") then "true"
-        elif ($s == "no-go" or $s == "nogo" or $s == "fail") then "false"
-        else "" end
-    else
-      ""
-    end
+  raw="$(jq -r \
+    --arg expected_schema_id "$expected_schema_id" \
+    --arg strict_profile "$strict_profile" \
+    '
+    def iso_utc:
+      type == "string"
+      and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$");
+    def truthy: . == true or . == 1;
+    def zero: . == 0;
+    def decision_bool:
+      if (.go | type) == "boolean" then
+        (.go | tostring)
+      elif (.decision | type) == "string" then
+        ((.decision // "") | ascii_downcase | gsub("[[:space:]_]"; "")) as $d
+        | if $d == "go" then "true"
+          elif ($d == "no-go" or $d == "nogo") then "false"
+          else "" end
+      elif (.status | type) == "string" then
+        ((.status // "") | ascii_downcase | gsub("[[:space:]_]"; "")) as $s
+        | if ($s == "go" or $s == "pass") then "true"
+          elif ($s == "no-go" or $s == "nogo" or $s == "fail") then "false"
+          else "" end
+      else
+        ""
+      end;
+    def common_go_contract:
+      (.schema.id // "") == $expected_schema_id
+      and (.generated_at | iso_utc)
+      and (.rc | zero)
+      and (.exit_code | zero)
+      and (.input.valid | truthy)
+      and ((.input.state // "") == "available")
+      and (((.counts.fail // 0) | tonumber) == 0)
+      and ((.failed_gate_ids // []) | type == "array" and length == 0)
+      and ((.artifacts.metrics_json // "") | type == "string" and length > 0);
+    def activation_go_contract:
+      common_go_contract
+      and ((.mode // "") == "enforce")
+      and (.fail_close | truthy)
+      and (.require_real_evidence | truthy);
+    def bootstrap_go_contract:
+      common_go_contract
+      and (.fail_close | truthy);
+    decision_bool as $decision
+    | if $decision == "true" then
+        if (($strict_profile == "activation" and activation_go_contract)
+            or ($strict_profile == "bootstrap" and bootstrap_go_contract)
+            or ($strict_profile != "activation" and $strict_profile != "bootstrap" and common_go_contract)) then
+          "true"
+        else
+          "invalid"
+        end
+      elif $decision == "false" then
+        "false"
+      else
+        ""
+      end
   ' "$path" 2>/dev/null || true)"
 
   if [[ "$raw" == "true" ]]; then
@@ -226,9 +269,29 @@ resolve_mainnet_activation_gate_go_pair() {
     value="false"
     status="fail"
     resolved="1"
+  elif [[ "$raw" == "invalid" ]]; then
+    value="null"
+    status="invalid"
+    resolved="0"
   fi
 
   printf '%s|%s|%s|%s\n' "$value" "$status" "$resolved" "$source"
+}
+
+resolve_mainnet_activation_gate_go_pair() {
+  resolve_gate_summary_go_pair \
+    "${1:-}" \
+    "${2:-}" \
+    "blockchain_mainnet_activation_gate_summary" \
+    "activation"
+}
+
+resolve_bootstrap_governance_graduation_gate_go_pair() {
+  resolve_gate_summary_go_pair \
+    "${1:-}" \
+    "${2:-}" \
+    "blockchain_bootstrap_graduation_gate_summary" \
+    "bootstrap"
 }
 
 resolve_manual_bool() {
@@ -257,7 +320,7 @@ check_required_signal() {
   if [[ "$value" == "true" ]]; then
     return
   fi
-  if [[ "$status" == "missing" ]]; then
+  if [[ "$status" == "missing" || "$status" == "invalid" ]]; then
     reasons_ref+=("$signal_name unresolved from provided inputs")
   else
     reasons_ref+=("$signal_name is false")
@@ -574,7 +637,7 @@ cosmos_module_coverage_floor_pair="$(resolve_summary_bool "$phase6_contracts_sum
 cosmos_keeper_coverage_floor_pair="$(resolve_summary_bool "$phase6_contracts_summary_json" "cosmos_keeper_coverage_floor_ok" "phase6_cosmos_keeper_coverage_floor" "phase6_contracts_summary_json")"
 cosmos_app_coverage_floor_pair="$(resolve_summary_bool "$phase6_contracts_summary_json" "cosmos_app_coverage_floor_ok" "phase6_cosmos_app_coverage_floor" "phase6_contracts_summary_json")"
 mainnet_activation_gate_go_pair="$(resolve_mainnet_activation_gate_go_pair "$mainnet_activation_gate_summary_json" "mainnet_activation_gate_summary_json")"
-bootstrap_governance_graduation_gate_go_pair="$(resolve_mainnet_activation_gate_go_pair "$bootstrap_governance_graduation_gate_summary_json" "bootstrap_governance_graduation_gate_summary_json")"
+bootstrap_governance_graduation_gate_go_pair="$(resolve_bootstrap_governance_graduation_gate_go_pair "$bootstrap_governance_graduation_gate_summary_json" "bootstrap_governance_graduation_gate_summary_json")"
 rollback_path_ready_pair="$(resolve_manual_bool "$rollback_path_ready")"
 operator_approval_pair="$(resolve_manual_bool "$operator_approval_ok")"
 

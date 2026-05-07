@@ -43,8 +43,10 @@ cat >"$SUCCESS_SOURCE_A" <<'EOF_A'
   "paying_users_3mo_min": 1650,
   "validator_candidate_depth": 38,
   "manual_sanctions_reversed_pct_90d": 4.2,
-  "nested": {
-    "vpn_recovery_mttr_p95_minutes": 19,
+  "reliability": {
+    "vpn_recovery_mttr_p95_minutes": 19
+  },
+  "demand": {
     "paid_sessions_per_day_30d_avg": 15500
   }
 }
@@ -52,17 +54,17 @@ EOF_A
 
 cat >"$SUCCESS_SOURCE_B" <<'EOF_B'
 {
-  "phase5": {
+  "validator": {
     "validator_independent_operators": 14,
-    "validator_max_operator_seat_share_pct": 18.5
-  },
-  "phase6": {
+    "validator_max_operator_seat_share_pct": 18.5,
     "validator_max_asn_provider_seat_share_pct": 22.0,
     "validator_region_count": 5,
     "validator_country_count": 9
   },
-  "roadmap": {
-    "abuse_report_to_decision_p95_hours": 11,
+  "governance": {
+    "abuse_report_to_decision_p95_hours": 11
+  },
+  "economics": {
     "subsidy_runway_months": 16,
     "contribution_margin_3mo": 0.9
   }
@@ -74,8 +76,10 @@ cat >"$PARTIAL_SOURCE" <<'EOF_P'
   "measurement_window_weeks": 13,
   "vpn_connect_session_success_slo_pct": 99.82,
   "paying_users_3mo_min": 1650,
-  "nested": {
-    "vpn_recovery_mttr_p95_minutes": 19,
+  "reliability": {
+    "vpn_recovery_mttr_p95_minutes": 19
+  },
+  "demand": {
     "paid_sessions_per_day_30d_avg": 15500
   }
 }

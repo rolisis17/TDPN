@@ -227,6 +227,118 @@ func TestKeeperCreateReservationValidation(t *testing.T) {
 	}
 }
 
+func TestKeeperConfirmReservationAdvancesPendingAndIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	k := NewKeeper()
+	reservation, err := k.CreateReservation(types.CreditReservation{
+		ReservationID: "res-confirm",
+		SponsorID:     "sponsor-confirm",
+		SessionID:     "sess-confirm",
+		AssetDenom:    "uusdc",
+		Amount:        100,
+		CreatedAtUnix: 4102444800,
+		Status:        chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("CreateReservation returned unexpected error: %v", err)
+	}
+
+	request := reservation
+	request.Status = ""
+	request.CreatedAtUnix = 0
+	confirmed, idempotent, err := k.ConfirmReservation(request)
+	if err != nil {
+		t.Fatalf("ConfirmReservation returned unexpected error: %v", err)
+	}
+	if idempotent {
+		t.Fatal("expected first confirmation to be non-idempotent")
+	}
+	if confirmed.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected confirmed status, got %q", confirmed.Status)
+	}
+
+	replayed, idempotent, err := k.ConfirmReservation(request)
+	if err != nil {
+		t.Fatalf("ConfirmReservation replay returned unexpected error: %v", err)
+	}
+	if !idempotent {
+		t.Fatal("expected second confirmation to be idempotent")
+	}
+	if replayed != confirmed {
+		t.Fatalf("expected replay to return confirmed reservation, got %+v vs %+v", replayed, confirmed)
+	}
+}
+
+func TestKeeperConfirmReservationRejectsMissingConflictAndTerminalStatus(t *testing.T) {
+	t.Parallel()
+
+	t.Run("missing reservation", func(t *testing.T) {
+		t.Parallel()
+
+		k := NewKeeper()
+		_, _, err := k.ConfirmReservation(types.CreditReservation{
+			ReservationID: "res-missing-confirm",
+			SessionID:     "sess-missing-confirm",
+			AssetDenom:    "uusdc",
+			Amount:        100,
+		})
+		if err == nil {
+			t.Fatal("expected missing reservation confirmation to fail")
+		}
+		if !strings.Contains(err.Error(), "not found") {
+			t.Fatalf("expected not found error, got %v", err)
+		}
+	})
+
+	t.Run("conflicting fields", func(t *testing.T) {
+		t.Parallel()
+
+		k := NewKeeper()
+		reservation, err := k.CreateReservation(types.CreditReservation{
+			ReservationID: "res-confirm-conflict",
+			SessionID:     "sess-confirm-conflict",
+			AssetDenom:    "uusdc",
+			Amount:        100,
+		})
+		if err != nil {
+			t.Fatalf("CreateReservation returned unexpected error: %v", err)
+		}
+		conflict := reservation
+		conflict.Amount = 101
+		_, _, err = k.ConfirmReservation(conflict)
+		if err == nil {
+			t.Fatal("expected conflicting reservation confirmation to fail")
+		}
+		if !strings.Contains(err.Error(), "conflicting fields") {
+			t.Fatalf("expected conflict error, got %v", err)
+		}
+	})
+
+	t.Run("failed status", func(t *testing.T) {
+		t.Parallel()
+
+		k := NewKeeper()
+		reservation, err := k.CreateReservation(types.CreditReservation{
+			ReservationID: "res-confirm-failed",
+			SessionID:     "sess-confirm-failed",
+			AssetDenom:    "uusdc",
+			Amount:        100,
+			Status:        chaintypes.ReconciliationFailed,
+		})
+		if err != nil {
+			t.Fatalf("CreateReservation returned unexpected error: %v", err)
+		}
+		_, _, err = k.ConfirmReservation(reservation)
+		if err == nil {
+			t.Fatal("expected failed reservation confirmation to fail")
+		}
+		if !strings.Contains(err.Error(), `status "failed"`) {
+			t.Fatalf("expected failed status error, got %v", err)
+		}
+	})
+}
+
 func TestKeeperFinalizeSettlementDefaultsAndIdempotency(t *testing.T) {
 	t.Parallel()
 

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash mktemp jq grep awk sed cat chmod cmp wc tr; do
+for cmd in bash mktemp jq grep awk sed cat chmod cmp wc tr ln; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -23,15 +23,15 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 CAPTURE="$TMP_DIR/stage_calls.tsv"
 
 PASS_REPORTS_DIR="$TMP_DIR/reports_pass"
-PASS_SUMMARY_JSON="$TMP_DIR/summary_pass.json"
-PASS_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_pass.json"
-PASS_METRICS_JSON="$TMP_DIR/metrics_pass.json"
-PASS_METRICS_SUMMARY_JSON="$TMP_DIR/metrics_summary_pass.json"
+PASS_SUMMARY_JSON="$PASS_REPORTS_DIR/summary_pass.json"
+PASS_CANONICAL_SUMMARY_JSON="$PASS_REPORTS_DIR/canonical_pass.json"
+PASS_METRICS_JSON="$PASS_REPORTS_DIR/metrics_pass.json"
+PASS_METRICS_SUMMARY_JSON="$PASS_REPORTS_DIR/metrics_summary_pass.json"
 PASS_METRICS_INPUT_JSON="$TMP_DIR/metrics_input_pass.json"
 PASS_METRICS_INPUT_SUMMARY_JSON="$PASS_REPORTS_DIR/blockchain_mainnet_activation_metrics_input_summary.json"
 PASS_METRICS_INPUT_CANONICAL_JSON="$PASS_REPORTS_DIR/blockchain_mainnet_activation_metrics_input.json"
-PASS_ACTIVATION_SUMMARY_JSON="$TMP_DIR/activation_summary_pass.json"
-PASS_BOOTSTRAP_SUMMARY_JSON="$TMP_DIR/bootstrap_summary_pass.json"
+PASS_ACTIVATION_SUMMARY_JSON="$PASS_REPORTS_DIR/activation_summary_pass.json"
+PASS_BOOTSTRAP_SUMMARY_JSON="$PASS_REPORTS_DIR/bootstrap_summary_pass.json"
 PASS_LOG="$TMP_DIR/pass.log"
 
 NO_GO_REPORTS_DIR="$TMP_DIR/reports_no_go"
@@ -41,14 +41,32 @@ NO_GO_ACTIVATION_SUMMARY_JSON="$NO_GO_REPORTS_DIR/blockchain_mainnet_activation_
 NO_GO_BOOTSTRAP_SUMMARY_JSON="$NO_GO_REPORTS_DIR/blockchain_bootstrap_governance_graduation_gate_summary.json"
 NO_GO_LOG="$TMP_DIR/no_go.log"
 
+ENFORCE_NO_GO_REPORTS_DIR="$TMP_DIR/reports_enforce_no_go"
+ENFORCE_NO_GO_SUMMARY_JSON="$ENFORCE_NO_GO_REPORTS_DIR/summary_enforce_no_go.json"
+ENFORCE_NO_GO_CANONICAL_SUMMARY_JSON="$ENFORCE_NO_GO_REPORTS_DIR/canonical_enforce_no_go.json"
+ENFORCE_NO_GO_LOG="$TMP_DIR/enforce_no_go.log"
+
 FAIL_COSMOS_REPORTS_DIR="$TMP_DIR/reports_fail_cosmos"
-FAIL_COSMOS_SUMMARY_JSON="$TMP_DIR/summary_fail_cosmos.json"
-FAIL_COSMOS_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_fail_cosmos.json"
+FAIL_COSMOS_SUMMARY_JSON="$FAIL_COSMOS_REPORTS_DIR/summary_fail_cosmos.json"
+FAIL_COSMOS_CANONICAL_SUMMARY_JSON="$FAIL_COSMOS_REPORTS_DIR/canonical_fail_cosmos.json"
 FAIL_COSMOS_LOG="$TMP_DIR/fail_cosmos.log"
 
 INVALID_SOURCE_REPORTS_DIR="$TMP_DIR/reports_invalid_source"
-INVALID_SOURCE_SUMMARY_JSON="$TMP_DIR/summary_invalid_source.json"
+INVALID_SOURCE_SUMMARY_JSON="$INVALID_SOURCE_REPORTS_DIR/summary_invalid_source.json"
 INVALID_SOURCE_LOG="$TMP_DIR/invalid_source.log"
+
+UNSAFE_ENFORCE_REPORTS_DIR="$TMP_DIR/reports_unsafe_enforce"
+UNSAFE_ENFORCE_SUMMARY_JSON="$TMP_DIR/summary_unsafe_enforce.json"
+UNSAFE_ENFORCE_LOG="$TMP_DIR/unsafe_enforce.log"
+
+UNSAFE_OVERRIDE_REPORTS_DIR="$TMP_DIR/reports_unsafe_override"
+UNSAFE_OVERRIDE_SUMMARY_JSON="$TMP_DIR/summary_unsafe_override.json"
+UNSAFE_OVERRIDE_CANONICAL_SUMMARY_JSON="$TMP_DIR/canonical_unsafe_override.json"
+UNSAFE_OVERRIDE_LOG="$TMP_DIR/unsafe_override.log"
+
+SYMLINK_ESCAPE_REPORTS_DIR="$TMP_DIR/reports_symlink_escape"
+SYMLINK_ESCAPE_OUTSIDE_DIR="$TMP_DIR/outside_symlink_escape"
+SYMLINK_ESCAPE_LOG="$TMP_DIR/symlink_escape.log"
 
 SOURCE_A="$TMP_DIR/source_a.json"
 SOURCE_B="$TMP_DIR/source_b.json"
@@ -259,7 +277,13 @@ jq -n \
 
 activation_rc="${BLOCKCHAIN_GATE_BUNDLE_FAKE_ACTIVATION_RC:-0}"
 if [[ "$activation_rc" =~ ^-?[0-9]+$ ]]; then
+  if [[ "$activation_rc" == "0" && "$decision" == "NO-GO" && "$fail_close" == "1" ]]; then
+    exit 1
+  fi
   exit "$activation_rc"
+fi
+if [[ "$decision" == "NO-GO" && "$fail_close" == "1" ]]; then
+  exit 1
 fi
 exit 0
 EOF_FAKE_ACTIVATION
@@ -447,12 +471,34 @@ assert_generated_at_iso_utc() {
 
 run_bundle() {
   BLOCKCHAIN_GATE_BUNDLE_CAPTURE_FILE="$CAPTURE" \
+  BLOCKCHAIN_GATE_BUNDLE_ALLOW_UNSAFE_SCRIPT_OVERRIDES=1 \
   BLOCKCHAIN_GATE_BUNDLE_COSMOS_ONLY_GUARDRAIL_SCRIPT="$FAKE_COSMOS_ONLY_GUARDRAIL" \
   BLOCKCHAIN_GATE_BUNDLE_METRICS_SCRIPT="$FAKE_METRICS" \
   BLOCKCHAIN_GATE_BUNDLE_ACTIVATION_GATE_SCRIPT="$FAKE_ACTIVATION" \
   BLOCKCHAIN_GATE_BUNDLE_BOOTSTRAP_GATE_SCRIPT="$FAKE_BOOTSTRAP" \
   "$SCRIPT_UNDER_TEST" "$@"
 }
+
+echo "[blockchain-gate-bundle] enforce rejects unsafe script override without test flag"
+set +e
+BLOCKCHAIN_GATE_BUNDLE_CAPTURE_FILE="$CAPTURE" \
+BLOCKCHAIN_GATE_BUNDLE_COSMOS_ONLY_GUARDRAIL_SCRIPT="$FAKE_COSMOS_ONLY_GUARDRAIL" \
+"$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/reports_unsafe_script_override" \
+  --summary-json "$TMP_DIR/summary_unsafe_script_override.json" \
+  --print-summary-json 0 >"$TMP_DIR/unsafe_script_override.log" 2>&1
+unsafe_script_override_rc=$?
+set -e
+if [[ "$unsafe_script_override_rc" -ne 2 ]]; then
+  echo "expected unsafe script override to fail as usage error"
+  cat "$TMP_DIR/unsafe_script_override.log"
+  exit 1
+fi
+if ! grep -Fq "unsafe stage script override rejected" "$TMP_DIR/unsafe_script_override.log"; then
+  echo "expected unsafe script override rejection message"
+  cat "$TMP_DIR/unsafe_script_override.log"
+  exit 1
+fi
 
 echo "[blockchain-gate-bundle] pass path + forwarding"
 : >"$CAPTURE"
@@ -489,11 +535,13 @@ assert_stage_invocation_token_count "$CAPTURE" "metrics" "--source-json" 3
 assert_stage_invocation_contains "$CAPTURE" "activation" \
   "--metrics-json" "$PASS_METRICS_JSON" \
   "--summary-json" "$PASS_ACTIVATION_SUMMARY_JSON" \
-  "--fail-close" "0"
+  "--enforce-launch" \
+  "--fail-close" "1" \
+  "--require-real-evidence" "1"
 assert_stage_invocation_contains "$CAPTURE" "bootstrap" \
   "--metrics-json" "$PASS_METRICS_JSON" \
   "--summary-json" "$PASS_BOOTSTRAP_SUMMARY_JSON" \
-  "--fail-close" "0"
+  "--fail-close" "1"
 
 if [[ ! -f "$PASS_SUMMARY_JSON" || ! -f "$PASS_CANONICAL_SUMMARY_JSON" ]]; then
   echo "missing pass summary artifacts"
@@ -525,6 +573,10 @@ if ! jq -e \
   .status == "pass"
   and .rc == 0
   and .decision == "GO"
+  and .inputs.mode == "enforce"
+  and .inputs.require_real_evidence == 1
+  and .inputs.activation_fail_close == 1
+  and .inputs.bootstrap_fail_close == 1
   and (.missing_required_metrics | length) == 0
   and .steps.cosmos_only_guardrail.status == "pass"
   and .steps.cosmos_only_guardrail.rc == 0
@@ -617,6 +669,7 @@ BLOCKCHAIN_GATE_BUNDLE_FAKE_ACTIVATION_DECISION="NO-GO" \
 BLOCKCHAIN_GATE_BUNDLE_FAKE_BOOTSTRAP_DECISION="GO" \
 BLOCKCHAIN_GATE_BUNDLE_FAKE_METRICS_MISSING_REQUIRED_CSV="vpn_recovery_mttr_p95_minutes,validator_region_count" \
 run_bundle \
+  --report-only \
   --reports-dir "$NO_GO_REPORTS_DIR" \
   --summary-json "$NO_GO_SUMMARY_JSON" \
   --canonical-summary-json "$NO_GO_CANONICAL_SUMMARY_JSON" \
@@ -629,11 +682,21 @@ if [[ "$no_go_rc" -ne 0 ]]; then
   exit 1
 fi
 assert_stage_order "$CAPTURE" "cosmos_only_guardrail" "metrics" "activation" "bootstrap"
+assert_stage_invocation_contains "$CAPTURE" "activation" \
+  "--report-only" \
+  "--fail-close" "0" \
+  "--require-real-evidence" "0"
+assert_stage_invocation_contains "$CAPTURE" "bootstrap" \
+  "--fail-close" "0"
 
 if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .decision == "NO-GO"
+  and .inputs.mode == "report-only"
+  and .inputs.require_real_evidence == 0
+  and .inputs.activation_fail_close == 0
+  and .inputs.bootstrap_fail_close == 0
   and .steps.mainnet_activation_gate.decision == "NO-GO"
   and .steps.bootstrap_graduation_gate.decision == "GO"
   and ((.missing_required_metrics | index("vpn_recovery_mttr_p95_minutes")) != null)
@@ -653,6 +716,143 @@ if ! cmp -s "$NO_GO_SUMMARY_JSON" "$NO_GO_CANONICAL_SUMMARY_JSON"; then
 fi
 assert_generated_at_iso_utc "$NO_GO_ACTIVATION_SUMMARY_JSON" "mainnet activation gate"
 assert_generated_at_iso_utc "$NO_GO_BOOTSTRAP_SUMMARY_JSON" "bootstrap graduation gate"
+
+echo "[blockchain-gate-bundle] enforce mode fails closed on activation NO-GO"
+: >"$CAPTURE"
+set +e
+BLOCKCHAIN_GATE_BUNDLE_FAKE_ACTIVATION_DECISION="NO-GO" \
+BLOCKCHAIN_GATE_BUNDLE_FAKE_BOOTSTRAP_DECISION="GO" \
+run_bundle \
+  --reports-dir "$ENFORCE_NO_GO_REPORTS_DIR" \
+  --summary-json "$ENFORCE_NO_GO_SUMMARY_JSON" \
+  --canonical-summary-json "$ENFORCE_NO_GO_CANONICAL_SUMMARY_JSON" \
+  --print-summary-json 0 >"$ENFORCE_NO_GO_LOG" 2>&1
+enforce_no_go_rc=$?
+set -e
+if [[ "$enforce_no_go_rc" -ne 1 ]]; then
+  echo "expected enforce-mode activation NO-GO to exit 1"
+  cat "$ENFORCE_NO_GO_LOG"
+  exit 1
+fi
+assert_stage_order "$CAPTURE" "cosmos_only_guardrail" "metrics" "activation" "bootstrap"
+assert_stage_invocation_contains "$CAPTURE" "activation" \
+  "--enforce-launch" \
+  "--fail-close" "1" \
+  "--require-real-evidence" "1"
+if ! jq -e '
+  .status == "runtime-fail"
+  and .rc == 1
+  and .decision == "NO-GO"
+  and .inputs.mode == "enforce"
+  and .inputs.require_real_evidence == 1
+  and .inputs.activation_fail_close == 1
+  and .first_runtime_failure.step == "mainnet_activation_gate"
+  and .steps.mainnet_activation_gate.status == "fail"
+  and .steps.mainnet_activation_gate.rc == 1
+  and .steps.mainnet_activation_gate.decision == "NO-GO"
+' "$ENFORCE_NO_GO_SUMMARY_JSON" >/dev/null; then
+  echo "enforce no-go summary contract mismatch"
+  cat "$ENFORCE_NO_GO_SUMMARY_JSON"
+  cat "$ENFORCE_NO_GO_LOG"
+  exit 1
+fi
+
+echo "[blockchain-gate-bundle] enforce mode rejects artifact paths outside reports-dir"
+: >"$CAPTURE"
+set +e
+run_bundle \
+  --reports-dir "$UNSAFE_ENFORCE_REPORTS_DIR" \
+  --summary-json "$UNSAFE_ENFORCE_SUMMARY_JSON" \
+  --print-summary-json 0 >"$UNSAFE_ENFORCE_LOG" 2>&1
+unsafe_enforce_rc=$?
+set -e
+if [[ "$unsafe_enforce_rc" -ne 2 ]]; then
+  echo "expected unsafe enforce artifact path to exit 2, got rc=$unsafe_enforce_rc"
+  cat "$UNSAFE_ENFORCE_LOG"
+  exit 1
+fi
+if ! grep -Fq "unsafe artifact path for --summary-json" "$UNSAFE_ENFORCE_LOG"; then
+  echo "unsafe enforce artifact path error message mismatch"
+  cat "$UNSAFE_ENFORCE_LOG"
+  exit 1
+fi
+if [[ -f "$UNSAFE_ENFORCE_SUMMARY_JSON" ]]; then
+  echo "unsafe enforce artifact path should fail before summary emission"
+  cat "$UNSAFE_ENFORCE_SUMMARY_JSON"
+  cat "$UNSAFE_ENFORCE_LOG"
+  exit 1
+fi
+if [[ "$(wc -l <"$CAPTURE" | tr -d ' ')" != "0" ]]; then
+  echo "unsafe enforce artifact path should fail before invoking any stage"
+  cat "$CAPTURE"
+  cat "$UNSAFE_ENFORCE_LOG"
+  exit 1
+fi
+
+echo "[blockchain-gate-bundle] enforce mode rejects symlink artifact escapes"
+mkdir -p "$SYMLINK_ESCAPE_REPORTS_DIR" "$SYMLINK_ESCAPE_OUTSIDE_DIR"
+ln -s "$SYMLINK_ESCAPE_OUTSIDE_DIR" "$SYMLINK_ESCAPE_REPORTS_DIR/escape"
+: >"$CAPTURE"
+set +e
+run_bundle \
+  --reports-dir "$SYMLINK_ESCAPE_REPORTS_DIR" \
+  --summary-json "$SYMLINK_ESCAPE_REPORTS_DIR/escape/summary.json" \
+  --print-summary-json 0 >"$SYMLINK_ESCAPE_LOG" 2>&1
+symlink_escape_rc=$?
+set -e
+if [[ "$symlink_escape_rc" -ne 2 ]]; then
+  echo "expected symlink artifact escape to exit 2, got rc=$symlink_escape_rc"
+  cat "$SYMLINK_ESCAPE_LOG"
+  exit 1
+fi
+if ! grep -Fq "unsafe artifact path for --summary-json" "$SYMLINK_ESCAPE_LOG"; then
+  echo "symlink artifact escape error message mismatch"
+  cat "$SYMLINK_ESCAPE_LOG"
+  exit 1
+fi
+if [[ -f "$SYMLINK_ESCAPE_OUTSIDE_DIR/summary.json" ]]; then
+  echo "symlink artifact escape should not write outside reports-dir"
+  ls -la "$SYMLINK_ESCAPE_OUTSIDE_DIR"
+  cat "$SYMLINK_ESCAPE_LOG"
+  exit 1
+fi
+if [[ "$(wc -l <"$CAPTURE" | tr -d ' ')" != "0" ]]; then
+  echo "symlink artifact escape should fail before invoking any stage"
+  cat "$CAPTURE"
+  cat "$SYMLINK_ESCAPE_LOG"
+  exit 1
+fi
+
+echo "[blockchain-gate-bundle] unsafe artifact override remains explicit"
+: >"$CAPTURE"
+if ! run_bundle \
+  --reports-dir "$UNSAFE_OVERRIDE_REPORTS_DIR" \
+  --summary-json "$UNSAFE_OVERRIDE_SUMMARY_JSON" \
+  --canonical-summary-json "$UNSAFE_OVERRIDE_CANONICAL_SUMMARY_JSON" \
+  --allow-unsafe-artifact-paths 1 \
+  --print-summary-json 0 >"$UNSAFE_OVERRIDE_LOG" 2>&1; then
+  echo "unsafe override run should complete when explicitly allowed"
+  cat "$UNSAFE_OVERRIDE_LOG"
+  exit 1
+fi
+assert_stage_order "$CAPTURE" "cosmos_only_guardrail" "metrics" "activation" "bootstrap"
+if [[ ! -f "$UNSAFE_OVERRIDE_SUMMARY_JSON" || ! -f "$UNSAFE_OVERRIDE_CANONICAL_SUMMARY_JSON" ]]; then
+  echo "unsafe override run should emit requested outside summary artifacts"
+  ls -la "$TMP_DIR"
+  cat "$UNSAFE_OVERRIDE_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .decision == "GO"
+  and .inputs.mode == "enforce"
+' "$UNSAFE_OVERRIDE_SUMMARY_JSON" >/dev/null; then
+  echo "unsafe override summary contract mismatch"
+  cat "$UNSAFE_OVERRIDE_SUMMARY_JSON"
+  cat "$UNSAFE_OVERRIDE_LOG"
+  exit 1
+fi
 
 echo "[blockchain-gate-bundle] invalid --source-json fails closed before stage execution"
 : >"$CAPTURE"

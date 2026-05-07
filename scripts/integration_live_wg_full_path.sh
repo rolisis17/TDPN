@@ -15,6 +15,7 @@ TMP_BIN_DIR="$TMP_DIR/bin"
 mkdir -p "$TMP_BIN_DIR"
 KEY_EXIT="$TMP_DIR/exit.key"
 KEY_CLIENT="$TMP_DIR/client.key"
+TRUST_FILE="$TMP_DIR/directory_trust.txt"
 
 cleanup() {
   kill "${node_pid:-}" >/dev/null 2>&1 || true
@@ -42,11 +43,20 @@ EOS
 chmod +x "$TMP_BIN_DIR/wg" "$TMP_BIN_DIR/ip"
 printf "fake-exit-key\n" >"$KEY_EXIT"
 printf "fake-client-key\n" >"$KEY_CLIENT"
+chmod 600 "$KEY_EXIT" "$KEY_CLIENT"
 FIXED_WG_PUB="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 CLIENT_PROXY_ADDR="127.0.0.1:59140"
+route_assertion_json="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)"
+route_assertion_private_key="$(echo "$route_assertion_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')"
+route_assertion_pubkey="$(echo "$route_assertion_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')"
+if [[ -z "$route_assertion_private_key" || -z "$route_assertion_pubkey" ]]; then
+  echo "failed to generate entry route assertion key material"
+  exit 1
+fi
 
 DATA_PLANE_MODE=opaque \
 WG_BACKEND=command \
+WG_ALLOW_UNTRUSTED_BINARY_PATH=1 \
 CLIENT_WG_BACKEND=command \
 CLIENT_WG_PRIVATE_KEY_PATH="$KEY_CLIENT" \
 CLIENT_WG_PUBLIC_KEY="$FIXED_WG_PUB" \
@@ -71,21 +81,38 @@ ENTRY_DATA_ADDR=127.0.0.1:53520 \
 ENTRY_ENDPOINT=127.0.0.1:53520 \
 EXIT_DATA_ADDR=127.0.0.1:53521 \
 EXIT_ENDPOINT=127.0.0.1:53521 \
+ENTRY_RELAY_ID=entry-local-1 \
+EXIT_RELAY_ID=exit-local-1 \
+ENTRY_ROUTE_ASSERTION_PRIVATE_KEY="$route_assertion_private_key" \
+ENTRY_ROUTE_ASSERTION_PUBLIC_KEY="$route_assertion_pubkey" \
+EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS="$route_assertion_pubkey" \
 ENTRY_ADDR=127.0.0.1:8353 \
 EXIT_ADDR=127.0.0.1:8354 \
 DIRECTORY_ADDR=127.0.0.1:8351 \
+DIRECTORY_PUBLIC_URL=http://127.0.0.1:8351 \
+DIRECTORY_PRIVATE_KEY_FILE="$TMP_DIR/directory.key" \
+DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE="$TMP_DIR/directory_provider_replay.json" \
+DIRECTORY_TRUST_TOFU=1 \
+DIRECTORY_TRUSTED_KEYS_FILE="$TRUST_FILE" \
 ISSUER_ADDR=127.0.0.1:8352 \
 ISSUER_URL=http://127.0.0.1:8352 \
+ISSUER_URLS=http://127.0.0.1:8352 \
+CORE_ISSUER_URL=http://127.0.0.1:8352 \
+ISSUER_PRIVATE_KEY_FILE="$TMP_DIR/issuer.key" \
+ISSUER_SUBJECTS_FILE="$TMP_DIR/issuer_subjects.json" \
+ISSUER_REVOCATIONS_FILE="$TMP_DIR/issuer_revocations.json" \
+ISSUER_ANON_REVOCATIONS_FILE="$TMP_DIR/issuer_anon_revocations.json" \
 ENTRY_URL=http://127.0.0.1:8353 \
 EXIT_CONTROL_URL=http://127.0.0.1:8354 \
 DIRECTORY_URL=http://127.0.0.1:8351 \
+EXIT_TOKEN_PROOF_REPLAY_STORE_FILE="$TMP_DIR/exit_token_replay.json" \
 PATH="$TMP_BIN_DIR:$PATH" \
 timeout 90s go run ./cmd/node --directory --issuer --entry --exit --client >"$LOG_FILE" 2>&1 &
 node_pid=$!
 
 ready=0
 for _ in $(seq 1 220); do
-  if rg -q "client wireguard runtime ready:" "$LOG_FILE"; then
+  if rg -q "client wireguard runtime ready:|client wg-kernel proxy listening:" "$LOG_FILE"; then
     ready=1
     break
   fi

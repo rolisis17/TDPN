@@ -24,7 +24,11 @@ func NewProtoMsgServerAdapter(k *keeper.Keeper) *ProtoMsgServerAdapter {
 	return &ProtoMsgServerAdapter{msg: NewMsgServer(k)}
 }
 
-func (a *ProtoMsgServerAdapter) CreatePolicy(_ context.Context, req *pb.MsgCreatePolicyRequest) (*pb.MsgCreatePolicyResponse, error) {
+func (a *ProtoMsgServerAdapter) CreatePolicy(ctx context.Context, req *pb.MsgCreatePolicyRequest) (*pb.MsgCreatePolicyResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	record := governtypes.GovernancePolicy{}
 	if req != nil && req.GetPolicy() != nil {
 		record = fromProtoPolicy(req.GetPolicy())
@@ -42,7 +46,11 @@ func (a *ProtoMsgServerAdapter) CreatePolicy(_ context.Context, req *pb.MsgCreat
 	return out, nil
 }
 
-func (a *ProtoMsgServerAdapter) RecordDecision(_ context.Context, req *pb.MsgRecordDecisionRequest) (*pb.MsgRecordDecisionResponse, error) {
+func (a *ProtoMsgServerAdapter) RecordDecision(ctx context.Context, req *pb.MsgRecordDecisionRequest) (*pb.MsgRecordDecisionResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	record := governtypes.GovernanceDecision{}
 	if req != nil && req.GetDecision() != nil {
 		record = fromProtoDecision(req.GetDecision())
@@ -60,7 +68,11 @@ func (a *ProtoMsgServerAdapter) RecordDecision(_ context.Context, req *pb.MsgRec
 	return out, nil
 }
 
-func (a *ProtoMsgServerAdapter) RecordAuditAction(_ context.Context, req *pb.MsgRecordAuditActionRequest) (*pb.MsgRecordAuditActionResponse, error) {
+func (a *ProtoMsgServerAdapter) RecordAuditAction(ctx context.Context, req *pb.MsgRecordAuditActionRequest) (*pb.MsgRecordAuditActionResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	record := governtypes.GovernanceAuditAction{}
 	if req != nil && req.GetAction() != nil {
 		record = fromProtoAuditAction(req.GetAction())
@@ -89,7 +101,11 @@ func NewProtoQueryServerAdapter(k *keeper.Keeper) *ProtoQueryServerAdapter {
 	return &ProtoQueryServerAdapter{query: NewQueryServer(k)}
 }
 
-func (a *ProtoQueryServerAdapter) GovernancePolicy(_ context.Context, req *pb.QueryGovernancePolicyRequest) (*pb.QueryGovernancePolicyResponse, error) {
+func (a *ProtoQueryServerAdapter) GovernancePolicy(ctx context.Context, req *pb.QueryGovernancePolicyRequest) (*pb.QueryGovernancePolicyResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	policyID := ""
 	if req != nil {
 		policyID = req.GetPolicyId()
@@ -106,7 +122,11 @@ func (a *ProtoQueryServerAdapter) GovernancePolicy(_ context.Context, req *pb.Qu
 	return &pb.QueryGovernancePolicyResponse{Policy: toProtoPolicy(resp.Policy), Found: true}, nil
 }
 
-func (a *ProtoQueryServerAdapter) GovernanceDecision(_ context.Context, req *pb.QueryGovernanceDecisionRequest) (*pb.QueryGovernanceDecisionResponse, error) {
+func (a *ProtoQueryServerAdapter) GovernanceDecision(ctx context.Context, req *pb.QueryGovernanceDecisionRequest) (*pb.QueryGovernanceDecisionResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	decisionID := ""
 	if req != nil {
 		decisionID = req.GetDecisionId()
@@ -123,7 +143,11 @@ func (a *ProtoQueryServerAdapter) GovernanceDecision(_ context.Context, req *pb.
 	return &pb.QueryGovernanceDecisionResponse{Decision: toProtoDecision(resp.Decision), Found: true}, nil
 }
 
-func (a *ProtoQueryServerAdapter) GovernanceAuditAction(_ context.Context, req *pb.QueryGovernanceAuditActionRequest) (*pb.QueryGovernanceAuditActionResponse, error) {
+func (a *ProtoQueryServerAdapter) GovernanceAuditAction(ctx context.Context, req *pb.QueryGovernanceAuditActionRequest) (*pb.QueryGovernanceAuditActionResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	actionID := ""
 	if req != nil {
 		actionID = req.GetActionId()
@@ -140,7 +164,11 @@ func (a *ProtoQueryServerAdapter) GovernanceAuditAction(_ context.Context, req *
 	return &pb.QueryGovernanceAuditActionResponse{Action: toProtoAuditAction(resp.Action), Found: true}, nil
 }
 
-func (a *ProtoQueryServerAdapter) ListGovernancePolicies(_ context.Context, _ *pb.QueryListGovernancePoliciesRequest) (*pb.QueryListGovernancePoliciesResponse, error) {
+func (a *ProtoQueryServerAdapter) ListGovernancePolicies(ctx context.Context, _ *pb.QueryListGovernancePoliciesRequest) (*pb.QueryListGovernancePoliciesResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	resp, err := a.query.ListPolicies(ListPoliciesRequest{})
 	if err != nil {
 		return nil, err
@@ -153,7 +181,11 @@ func (a *ProtoQueryServerAdapter) ListGovernancePolicies(_ context.Context, _ *p
 	return &pb.QueryListGovernancePoliciesResponse{Policies: out}, nil
 }
 
-func (a *ProtoQueryServerAdapter) ListGovernanceDecisions(_ context.Context, _ *pb.QueryListGovernanceDecisionsRequest) (*pb.QueryListGovernanceDecisionsResponse, error) {
+func (a *ProtoQueryServerAdapter) ListGovernanceDecisions(ctx context.Context, _ *pb.QueryListGovernanceDecisionsRequest) (*pb.QueryListGovernanceDecisionsResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	resp, err := a.query.ListDecisions(ListDecisionsRequest{})
 	if err != nil {
 		return nil, err
@@ -166,7 +198,11 @@ func (a *ProtoQueryServerAdapter) ListGovernanceDecisions(_ context.Context, _ *
 	return &pb.QueryListGovernanceDecisionsResponse{Decisions: out}, nil
 }
 
-func (a *ProtoQueryServerAdapter) ListGovernanceAuditActions(_ context.Context, _ *pb.QueryListGovernanceAuditActionsRequest) (*pb.QueryListGovernanceAuditActionsResponse, error) {
+func (a *ProtoQueryServerAdapter) ListGovernanceAuditActions(ctx context.Context, _ *pb.QueryListGovernanceAuditActionsRequest) (*pb.QueryListGovernanceAuditActionsResponse, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	resp, err := a.query.ListAuditActions(ListAuditActionsRequest{})
 	if err != nil {
 		return nil, err
@@ -177,6 +213,13 @@ func (a *ProtoQueryServerAdapter) ListGovernanceAuditActions(_ context.Context, 
 		out = append(out, toProtoAuditAction(record))
 	}
 	return &pb.QueryListGovernanceAuditActionsResponse{Actions: out}, nil
+}
+
+func contextErr(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
 }
 
 func fromProtoPolicy(in *pb.GovernancePolicy) governtypes.GovernancePolicy {

@@ -18,9 +18,18 @@ PORT=8581
 ADDR="127.0.0.1:${PORT}"
 RELAYS_URL="http://${ADDR}/v1/relays"
 
-FAIL_LOG=/tmp/integration_directory_beta_strict_fail.log
-OK_LOG=/tmp/integration_directory_beta_strict_ok.log
-rm -f "$FAIL_LOG" "$OK_LOG"
+TMP_DIR="$(mktemp -d /tmp/integration_directory_beta_strict.XXXXXX)"
+FAIL_LOG="$TMP_DIR/fail.log"
+OK_LOG="$TMP_DIR/ok.log"
+ISSUER_TRUST_FILE="$TMP_DIR/issuer_trusted_keys.txt"
+
+issuer_pub_a="$(go run ./cmd/tokenpop gen | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')"
+issuer_pub_b="$(go run ./cmd/tokenpop gen | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')"
+if [[ -z "$issuer_pub_a" || -z "$issuer_pub_b" ]]; then
+  echo "failed to generate issuer trust anchors"
+  exit 1
+fi
+printf '%s\n%s\n' "$issuer_pub_a" "$issuer_pub_b" >"$ISSUER_TRUST_FILE"
 
 if DIRECTORY_ADDR="$ADDR" \
   DIRECTORY_BETA_STRICT=1 \
@@ -45,8 +54,10 @@ DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=1 \
 DIRECTORY_PEER_DISCOVERY_MAX_PER_SOURCE=8 \
 DIRECTORY_PEER_DISCOVERY_MAX_PER_OPERATOR=8 \
 DIRECTORY_PEER_TRUST_STRICT=1 \
-DIRECTORY_PEER_TRUST_TOFU=1 \
+DIRECTORY_PEER_TRUST_TOFU=0 \
+DIRECTORY_PEER_TRUSTED_KEYS_FILE="$TMP_DIR/peer_trusted_keys.txt" \
 DIRECTORY_ISSUER_TRUST_URLS="http://127.0.0.1:9682,http://127.0.0.1:9683" \
+DIRECTORY_ISSUER_TRUSTED_KEYS_FILE="$ISSUER_TRUST_FILE" \
 DIRECTORY_ISSUER_MIN_OPERATORS=2 \
 DIRECTORY_ISSUER_TRUST_MIN_VOTES=2 \
 DIRECTORY_ISSUER_DISPUTE_MIN_VOTES=2 \
@@ -57,11 +68,14 @@ DIRECTORY_FINAL_DISPUTE_MIN_VOTES=2 \
 DIRECTORY_FINAL_APPEAL_MIN_VOTES=2 \
 DIRECTORY_KEY_ROTATE_SEC=60 \
 DIRECTORY_ADMIN_TOKEN=integration-directory-admin-0001 \
+DIRECTORY_PRIVATE_KEY_FILE="$TMP_DIR/directory_ed25519.key" \
+DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE="$TMP_DIR/directory_provider_token_proof_replay.json" \
 timeout 35s go run ./cmd/node --directory >"$OK_LOG" 2>&1 &
 dir_pid=$!
 
 cleanup() {
   kill "${dir_pid:-}" >/dev/null 2>&1 || true
+  rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
 

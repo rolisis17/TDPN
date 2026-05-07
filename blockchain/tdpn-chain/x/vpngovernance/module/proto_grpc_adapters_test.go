@@ -434,6 +434,67 @@ func TestProtoQueryServerAdapterGetAndList(t *testing.T) {
 	}
 }
 
+func TestGovernanceStatusMappingFromAndToProtoCoversExplicitAndDefaultBranches(t *testing.T) {
+	t.Parallel()
+
+	fromProtoCases := []struct {
+		name string
+		in   pb.ReconciliationStatus
+		want chaintypes.ReconciliationStatus
+	}{
+		{name: "pending", in: pb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING, want: chaintypes.ReconciliationPending},
+		{name: "submitted", in: pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED, want: chaintypes.ReconciliationSubmitted},
+		{name: "confirmed", in: pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED, want: chaintypes.ReconciliationConfirmed},
+		{name: "failed", in: pb.ReconciliationStatus_RECONCILIATION_STATUS_FAILED, want: chaintypes.ReconciliationFailed},
+		{name: "unspecified", in: pb.ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED, want: ""},
+	}
+	for _, tc := range fromProtoCases {
+		tc := tc
+		t.Run("from_proto_"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := fromProtoStatus(tc.in); got != tc.want {
+				t.Fatalf("expected %q, got %q", tc.want, got)
+			}
+		})
+	}
+
+	toProtoCases := []struct {
+		name string
+		in   chaintypes.ReconciliationStatus
+		want pb.ReconciliationStatus
+	}{
+		{name: "pending", in: chaintypes.ReconciliationPending, want: pb.ReconciliationStatus_RECONCILIATION_STATUS_PENDING},
+		{name: "submitted", in: chaintypes.ReconciliationSubmitted, want: pb.ReconciliationStatus_RECONCILIATION_STATUS_SUBMITTED},
+		{name: "confirmed", in: chaintypes.ReconciliationConfirmed, want: pb.ReconciliationStatus_RECONCILIATION_STATUS_CONFIRMED},
+		{name: "failed", in: chaintypes.ReconciliationFailed, want: pb.ReconciliationStatus_RECONCILIATION_STATUS_FAILED},
+		{name: "empty", in: "", want: pb.ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED},
+		{name: "unknown", in: chaintypes.ReconciliationStatus("mystery"), want: pb.ReconciliationStatus_RECONCILIATION_STATUS_UNSPECIFIED},
+	}
+	for _, tc := range toProtoCases {
+		tc := tc
+		t.Run("to_proto_"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := toProtoStatus(tc.in); got != tc.want {
+				t.Fatalf("expected %v, got %v", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestGovernanceProtoConversionNilInputsAreZeroValues(t *testing.T) {
+	t.Parallel()
+
+	if got := fromProtoPolicy(nil); got != (types.GovernancePolicy{}) {
+		t.Fatalf("expected zero policy for nil proto input, got %#v", got)
+	}
+	if got := fromProtoDecision(nil); got != (types.GovernanceDecision{}) {
+		t.Fatalf("expected zero decision for nil proto input, got %#v", got)
+	}
+	if got := fromProtoAuditAction(nil); got != (types.GovernanceAuditAction{}) {
+		t.Fatalf("expected zero audit action for nil proto input, got %#v", got)
+	}
+}
+
 func TestProtoAdaptersNilKeeperPropagatesErrNilKeeper(t *testing.T) {
 	t.Parallel()
 

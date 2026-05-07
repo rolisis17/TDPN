@@ -2,6 +2,7 @@ package module
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/tdpn/tdpn-chain/x/vpnbilling/keeper"
@@ -120,5 +121,49 @@ func TestQueryServerListNonEmpty(t *testing.T) {
 	}
 	if settlements.Settlements[0].SettlementID != "set-01" || settlements.Settlements[1].SettlementID != "set-20" {
 		t.Fatalf("expected settlements sorted by id, got %q then %q", settlements.Settlements[0].SettlementID, settlements.Settlements[1].SettlementID)
+	}
+}
+
+func TestQueryServerListClampsLargeResultSets(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	for i := 0; i < maxQueryListResults+5; i++ {
+		reservationID := fmt.Sprintf("res-clamp-%04d", i)
+		settlementID := fmt.Sprintf("set-clamp-%04d", i)
+		k.UpsertReservation(types.CreditReservation{
+			ReservationID: reservationID,
+			SessionID:     fmt.Sprintf("sess-clamp-%04d", i),
+			Amount:        int64(i + 1),
+		})
+		k.UpsertSettlement(types.SettlementRecord{
+			SettlementID:  settlementID,
+			ReservationID: reservationID,
+			SessionID:     fmt.Sprintf("sess-clamp-%04d", i),
+			BilledAmount:  int64(i + 1),
+		})
+	}
+
+	server := NewQueryServer(&k)
+	reservations, err := server.ListReservations(ListReservationsRequest{})
+	if err != nil {
+		t.Fatalf("expected list reservations success, got %v", err)
+	}
+	if len(reservations.Reservations) != maxQueryListResults {
+		t.Fatalf("expected %d clamped reservations, got %d", maxQueryListResults, len(reservations.Reservations))
+	}
+	if reservations.Reservations[len(reservations.Reservations)-1].ReservationID != "res-clamp-0999" {
+		t.Fatalf("unexpected last reservation after clamp: %q", reservations.Reservations[len(reservations.Reservations)-1].ReservationID)
+	}
+
+	settlements, err := server.ListSettlements(ListSettlementsRequest{})
+	if err != nil {
+		t.Fatalf("expected list settlements success, got %v", err)
+	}
+	if len(settlements.Settlements) != maxQueryListResults {
+		t.Fatalf("expected %d clamped settlements, got %d", maxQueryListResults, len(settlements.Settlements))
+	}
+	if settlements.Settlements[len(settlements.Settlements)-1].SettlementID != "set-clamp-0999" {
+		t.Fatalf("unexpected last settlement after clamp: %q", settlements.Settlements[len(settlements.Settlements)-1].SettlementID)
 	}
 }

@@ -11,6 +11,7 @@ Usage:
     [--summary-json PATH] \
     [--canonical-summary-json PATH] \
     [--source-json PATH] \
+    [--enforce-source-jsons [0|1]] \
     [--print-summary-json [0|1]] \
     [--measurement-window-weeks N] \
     [--vpn-connect-session-success-slo-pct N] \
@@ -37,8 +38,12 @@ Notes:
   - Missing/partial inputs are fail-soft: script exits 0 and reports coverage.
   - `--source-json PATH` is repeatable and accepts source artifacts for
     auto-population of missing metrics.
+  - Missing/invalid requested source JSONs are reported in the summary and
+    keep ready_for_gate=false. Use --enforce-source-jsons 1 to also exit
+    non-zero when any requested source JSON is unusable.
   - Source artifact fallback env:
       BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS=path1.json,path2.json
+      BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_ENFORCE_SOURCE_JSONS=0|1
   - Each metric can also be set via environment variable:
       BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_<UPPER_SNAKE_CASE_METRIC_NAME>
     Example:
@@ -113,6 +118,37 @@ numeric_text_or_empty() {
   fi
 }
 
+metric_value_is_valid() {
+  local key="$1"
+  local value="$2"
+
+  case "$key" in
+    measurement_window_weeks|paying_users_3mo_min|paid_sessions_per_day_30d_avg|validator_candidate_depth|validator_independent_operators|validator_region_count|validator_country_count)
+      jq -n -e --argjson value "$value" '
+        ($value | type) == "number"
+        and ($value == ($value | floor))
+        and ($value >= 0)
+      ' >/dev/null 2>&1
+      ;;
+    vpn_connect_session_success_slo_pct|validator_max_operator_seat_share_pct|validator_max_asn_provider_seat_share_pct|manual_sanctions_reversed_pct_90d)
+      jq -n -e --argjson value "$value" '
+        ($value | type) == "number"
+        and ($value >= 0)
+        and ($value <= 100)
+      ' >/dev/null 2>&1
+      ;;
+    vpn_recovery_mttr_p95_minutes|abuse_report_to_decision_p95_hours|subsidy_runway_months|contribution_margin_3mo)
+      jq -n -e --argjson value "$value" '
+        ($value | type) == "number"
+        and ($value >= 0)
+      ' >/dev/null 2>&1
+      ;;
+    *)
+      jq -n -e --argjson value "$value" '($value | type) == "number"' >/dev/null 2>&1
+      ;;
+  esac
+}
+
 array_to_json() {
   local -n arr_ref=$1
   if ((${#arr_ref[@]} == 0)); then
@@ -148,7 +184,6 @@ extract_metric_from_source_json() {
   local source_json="$1"
   local key="$2"
   local raw=""
-  local numeric=""
 
   if [[ -z "$source_json" || ! -f "$source_json" ]]; then
     printf '%s' ""
@@ -156,23 +191,51 @@ extract_metric_from_source_json() {
   fi
 
   raw="$(jq -r --arg key "$key" '
+    def emit($value):
+      if $value == null then empty else $value end;
+    def grouped:
+      if $key == "measurement_window_weeks" then
+        emit(.pipeline.window[$key]),
+        emit(.window[$key]),
+        emit(.general[$key])
+      elif ($key == "vpn_connect_session_success_slo_pct" or $key == "vpn_recovery_mttr_p95_minutes") then
+        emit(.pipeline.vpn.slo[$key]),
+        emit(.vpn.slo[$key]),
+        emit(.reliability[$key])
+      elif ($key == "paying_users_3mo_min" or $key == "paid_sessions_per_day_30d_avg") then
+        emit(.demand[$key])
+      elif ($key | startswith("validator_")) then
+        emit(.validator[$key]),
+        emit(.validator.supply[$key]),
+        emit(.validator.concentration[$key]),
+        emit(.validator.geo[$key]),
+        emit(.validator_decentralization[$key])
+      elif ($key == "manual_sanctions_reversed_pct_90d" or $key == "abuse_report_to_decision_p95_hours") then
+        emit(.governance[$key])
+      elif ($key == "subsidy_runway_months" or $key == "contribution_margin_3mo") then
+        emit(.economics[$key])
+      else
+        empty
+      end;
     limit(1;
-      (
-        (.[$key] | select(type == "number")),
-        (.. | objects | .[$key]? | select(type == "number"))
-      )
+      emit(.[$key]),
+      emit(.metrics[$key]),
+      grouped
     )
+    | if type == "string" then . else tostring end
   ' "$source_json" 2>/dev/null || true)"
-  numeric="$(numeric_text_or_empty "$raw")"
-  printf '%s' "$numeric"
+  printf '%s' "$(trim "$raw")"
 }
 
 need_cmd jq
 need_cmd cp
+need_cmd awk
+need_cmd sha256sum
 
 summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SUMMARY_JSON:-}"
 canonical_summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/blockchain_mainnet_activation_metrics.json}"
 print_summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_PRINT_SUMMARY_JSON:-0}"
+enforce_source_jsons="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_ENFORCE_SOURCE_JSONS:-0}"
 source_jsons_env_csv="${BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SOURCE_JSONS:-}"
 summary_json_source="env"
 canonical_summary_json_source="env"
@@ -181,6 +244,9 @@ declare -a source_jsons_cli=()
 declare -a source_jsons_env=()
 declare -a source_jsons=()
 declare -a usable_source_jsons=()
+declare -a unusable_source_jsons=()
+declare -a unusable_source_json_reasons=()
+declare -A source_json_sha256=()
 
 if [[ -z "$(trim "$summary_json")" ]]; then
   summary_json="$ROOT_DIR/.easy-node-logs/blockchain_mainnet_activation_metrics_summary.json"
@@ -240,12 +306,18 @@ declare -A known_metric=()
 declare -A metric_raw=()
 declare -A metric_source=()
 declare -A metric_json=()
+declare -A metric_binding_source_json=()
+declare -A metric_binding_source_sha256=()
+declare -A metric_binding_value=()
 
 for key in "${metric_keys[@]}"; do
   known_metric["$key"]="1"
   metric_raw["$key"]=""
   metric_source["$key"]="default_null"
   metric_json["$key"]="null"
+  metric_binding_source_json["$key"]=""
+  metric_binding_source_sha256["$key"]=""
+  metric_binding_value["$key"]=""
 done
 
 for key in "${metric_keys[@]}"; do
@@ -289,6 +361,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --enforce-source-jsons)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        enforce_source_jsons="${2:-}"
+        shift 2
+      else
+        enforce_source_jsons="1"
+        shift
+      fi
+      ;;
     --source-json)
       path_arg_or_die "$1" "${2:-}"
       source_jsons_cli+=("${2:-}")
@@ -319,6 +400,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "--enforce-source-jsons" "$enforce_source_jsons"
 
 if ((${#source_jsons_cli[@]} > 0)); then
   source_jsons=("${source_jsons_cli[@]}")
@@ -345,11 +427,17 @@ mkdir -p "$(dirname "$canonical_summary_json")"
 
 for source_json in "${source_jsons[@]}"; do
   if [[ ! -f "$source_json" ]]; then
+    unusable_source_jsons+=("$source_json")
+    unusable_source_json_reasons+=("missing")
     continue
   fi
   if ! jq -e . "$source_json" >/dev/null 2>&1; then
+    unusable_source_jsons+=("$source_json")
+    unusable_source_json_reasons+=("invalid_json")
     continue
   fi
+  source_sha="$(sha256sum "$source_json" | awk '{print $1}')"
+  source_json_sha256["$source_json"]="$source_sha"
   usable_source_jsons+=("$source_json")
   for key in "${metric_keys[@]}"; do
     if metric_locked_by_user "${metric_source[$key]}"; then
@@ -364,8 +452,13 @@ for source_json in "${source_jsons[@]}"; do
     fi
     metric_raw["$key"]="$extracted_value"
     metric_source["$key"]="source_json"
+    metric_binding_source_json["$key"]="$source_json"
+    metric_binding_source_sha256["$key"]="$source_sha"
+    metric_binding_value["$key"]="$extracted_value"
   done
 done
+
+unusable_source_json_count="${#unusable_source_jsons[@]}"
 
 declare -a required_missing_metrics=()
 declare -a required_provided_metrics=()
@@ -395,6 +488,16 @@ for key in "${required_metric_keys[@]}"; do
     continue
   fi
 
+  if ! metric_value_is_valid "$key" "$numeric_value"; then
+    metric_json["$key"]="null"
+    metric_source["$key"]="${metric_source[$key]}_invalid"
+    required_missing_metrics+=("$key")
+    invalid_metrics+=("$key")
+    required_missing_count=$((required_missing_count + 1))
+    required_invalid_count=$((required_invalid_count + 1))
+    continue
+  fi
+
   metric_json["$key"]="$numeric_value"
   required_provided_metrics+=("$key")
   required_provided_count=$((required_provided_count + 1))
@@ -415,6 +518,13 @@ for key in "${optional_metric_keys[@]}"; do
     continue
   fi
 
+  if ! metric_value_is_valid "$key" "$numeric_value"; then
+    metric_json["$key"]="null"
+    metric_source["$key"]="${metric_source[$key]}_invalid"
+    invalid_metrics+=("$key")
+    continue
+  fi
+
   metric_json["$key"]="$numeric_value"
 done
 
@@ -426,8 +536,17 @@ elif (( required_missing_count == 0 && required_invalid_count == 0 )); then
 fi
 
 ready_for_gate="0"
-if [[ "$status" == "complete" ]]; then
+if [[ "$status" == "complete" && "$unusable_source_json_count" -eq 0 ]]; then
   ready_for_gate="1"
+fi
+
+if [[ "$status" == "complete" && "$unusable_source_json_count" -gt 0 ]]; then
+  status="source_json_unusable"
+fi
+
+summary_rc=0
+if [[ "$enforce_source_jsons" == "1" && "$unusable_source_json_count" -gt 0 ]]; then
+  summary_rc=1
 fi
 
 required_metric_keys_json="$(array_to_json required_metric_keys)"
@@ -437,9 +556,27 @@ required_provided_metrics_json="$(array_to_json required_provided_metrics)"
 invalid_metrics_json="$(array_to_json invalid_metrics)"
 source_jsons_json="$(array_to_json source_jsons)"
 usable_source_jsons_json="$(array_to_json usable_source_jsons)"
+unusable_source_jsons_json="$(array_to_json unusable_source_jsons)"
+
+usable_source_json_details_json='[]'
+for source_json in "${usable_source_jsons[@]}"; do
+  usable_source_json_details_json="$(jq -c \
+    --arg path "$source_json" \
+    --arg sha256 "${source_json_sha256[$source_json]:-}" \
+    '. + [{path: $path, sha256: $sha256}]' <<<"$usable_source_json_details_json")"
+done
+
+unusable_source_json_details_json='[]'
+for idx in "${!unusable_source_jsons[@]}"; do
+  unusable_source_json_details_json="$(jq -c \
+    --arg path "${unusable_source_jsons[$idx]}" \
+    --arg reason "${unusable_source_json_reasons[$idx]}" \
+    '. + [{path: $path, reason: $reason}]' <<<"$unusable_source_json_details_json")"
+done
 
 metrics_values_json='{}'
 sources_metrics_json='{}'
+metric_bindings_json='{}'
 for key in "${metric_keys[@]}"; do
   metrics_values_json="$(jq -c \
     --arg key "$key" \
@@ -449,6 +586,20 @@ for key in "${metric_keys[@]}"; do
     --arg key "$key" \
     --arg source "${metric_source[$key]}" \
     '. + {($key): $source}' <<<"$sources_metrics_json")"
+  if [[ -n "${metric_binding_source_json[$key]}" ]]; then
+    binding_value="$(numeric_text_or_empty "${metric_binding_value[$key]}")"
+    if [[ -z "$binding_value" ]]; then
+      binding_value="null"
+    fi
+    metric_bindings_json="$(jq -c \
+      --arg key "$key" \
+      --arg source_json "${metric_binding_source_json[$key]}" \
+      --arg source_sha256 "${metric_binding_source_sha256[$key]}" \
+      --argjson value "$binding_value" \
+      '. + {($key): {source_json: $source_json, source_sha256: $source_sha256, value: $value}}' <<<"$metric_bindings_json")"
+  else
+    metric_bindings_json="$(jq -c --arg key "$key" '. + {($key): null}' <<<"$metric_bindings_json")"
+  fi
 done
 
 summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
@@ -461,12 +612,14 @@ trap cleanup EXIT
 jq -n \
   --arg schema_id "blockchain_mainnet_activation_metrics_summary" \
   --arg status "$status" \
-  --argjson rc 0 \
+  --argjson rc "$summary_rc" \
   --argjson ready_for_gate "$ready_for_gate" \
+  --argjson enforce_source_jsons "$enforce_source_jsons" \
   --argjson required_metric_count "${#required_metric_keys[@]}" \
   --argjson required_provided_count "$required_provided_count" \
   --argjson required_missing_count "$required_missing_count" \
   --argjson required_invalid_count "$required_invalid_count" \
+  --argjson unusable_source_json_count "$unusable_source_json_count" \
   --argjson required_metric_keys "$required_metric_keys_json" \
   --argjson optional_metric_keys "$optional_metric_keys_json" \
   --argjson required_missing_metrics "$required_missing_metrics_json" \
@@ -478,7 +631,11 @@ jq -n \
   --arg canonical_summary_json_source "$canonical_summary_json_source" \
   --argjson source_jsons "$source_jsons_json" \
   --argjson usable_source_jsons "$usable_source_jsons_json" \
+  --argjson unusable_source_jsons "$unusable_source_jsons_json" \
+  --argjson usable_source_json_details "$usable_source_json_details_json" \
+  --argjson unusable_source_json_details "$unusable_source_json_details_json" \
   --argjson sources_metrics "$sources_metrics_json" \
+  --argjson metric_bindings "$metric_bindings_json" \
   --argjson metrics_values "$metrics_values_json" \
   '{
     version: 1,
@@ -486,11 +643,13 @@ jq -n \
     status: $status,
     rc: $rc,
     ready_for_gate: ($ready_for_gate == 1),
+    enforce_source_jsons: ($enforce_source_jsons == 1),
     counts: {
       required: $required_metric_count,
       provided: $required_provided_count,
       missing: $required_missing_count,
-      invalid: $required_invalid_count
+      invalid: $required_invalid_count,
+      unusable_source_jsons: $unusable_source_json_count
     },
     required_metric_keys: $required_metric_keys,
     optional_metric_keys: $optional_metric_keys,
@@ -502,8 +661,13 @@ jq -n \
       canonical_summary_json: $canonical_summary_json_source,
       source_jsons: $source_jsons,
       usable_source_jsons: $usable_source_jsons,
-      metrics: $sources_metrics
+      usable_source_json_details: $usable_source_json_details,
+      unusable_source_jsons: $unusable_source_jsons,
+      unusable_source_json_details: $unusable_source_json_details,
+      metrics: $sources_metrics,
+      metric_bindings: $metric_bindings
     },
+    evidence_bindings: $metric_bindings,
     metrics: $metrics_values,
     artifacts: {
       summary_json: $summary_json,
@@ -520,12 +684,13 @@ else
   mv -f "$canonical_tmp" "$canonical_summary_json"
 fi
 
-echo "[blockchain-mainnet-activation-metrics] status=$status ready_for_gate=$ready_for_gate required_provided=$required_provided_count required_missing=$required_missing_count required_invalid=$required_invalid_count summary_json=$summary_json canonical_summary_json=$canonical_summary_json"
+echo "[blockchain-mainnet-activation-metrics] status=$status ready_for_gate=$ready_for_gate required_provided=$required_provided_count required_missing=$required_missing_count required_invalid=$required_invalid_count unusable_source_jsons=$unusable_source_json_count summary_json=$summary_json canonical_summary_json=$canonical_summary_json"
 echo "[blockchain-mainnet-activation-metrics] required_missing_metrics=$(jq -r '.required_missing_metrics | if length == 0 then "none" else join(",") end' "$summary_json")"
 echo "[blockchain-mainnet-activation-metrics] invalid_metrics=$(jq -r '.invalid_metrics | if length == 0 then "none" else join(",") end' "$summary_json")"
+echo "[blockchain-mainnet-activation-metrics] unusable_source_jsons=$(jq -r '.sources.unusable_source_json_details | if length == 0 then "none" else map(.path + ":" + .reason) | join(",") end' "$summary_json")"
 
 if [[ "$print_summary_json" == "1" ]]; then
   cat "$summary_json"
 fi
 
-exit 0
+exit "$summary_rc"

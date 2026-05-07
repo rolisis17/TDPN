@@ -45,7 +45,7 @@ run_expect_fail \
 
 run_expect_fail \
   "client_prod_implicit" \
-  "WG_ONLY_MODE requires DATA_PLANE_MODE=opaque" \
+  "PROD_STRICT_MODE full-tunnel WireGuard requires CLIENT_WG_INSTALL_ROUTE=1" \
   env PROD_STRICT_MODE=1 BETA_STRICT_MODE=1 timeout 12s go run ./cmd/node --client
 
 echo "wg-only mode integration check ok"

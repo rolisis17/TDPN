@@ -38,6 +38,7 @@ Usage:
     [--region-bias N] \
     [--region-prefix-bias N] \
     [--require-issuer-quorum [0|1]] \
+    [--allow-insecure-remote-http [0|1]] \
     [--beta-profile [0|1]] \
     [--prod-profile [0|1]]
 
@@ -48,9 +49,9 @@ Purpose:
   - machine C: client-only validation runner
 
 Environment:
-  THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP=1 explicitly allows lab-only
-  remote HTTP control-plane URLs for the client-test step. Production
-  profile rejects this opt-in.
+  --allow-insecure-remote-http 1 (or THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP=1)
+  explicitly allows lab-only remote HTTP control-plane URLs for the client-test
+  step. Production profile rejects this opt-in.
 USAGE
 }
 
@@ -705,6 +706,19 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --allow-insecure-remote-http)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        allow_insecure_remote_http="${2:-}"
+        shift 2
+      else
+        allow_insecure_remote_http="1"
+        shift
+      fi
+      ;;
+    --allow-insecure-remote-http=*)
+      allow_insecure_remote_http="${1#--allow-insecure-remote-http=}"
+      shift
+      ;;
     -h|--help|help)
       usage
       exit 0
@@ -780,7 +794,7 @@ if [[ -n "$require_issuer_quorum" && "$require_issuer_quorum" != "0" && "$requir
   exit 2
 fi
 if [[ "$allow_insecure_remote_http" != "0" && "$allow_insecure_remote_http" != "1" ]]; then
-  echo "THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP must be 0 or 1"
+  echo "--allow-insecure-remote-http / THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP must be 0 or 1"
   exit 2
 fi
 if [[ "$client_inner_source" != "auto" && "$client_inner_source" != "udp" && "$client_inner_source" != "synthetic" ]]; then

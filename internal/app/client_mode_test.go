@@ -1167,6 +1167,67 @@ func TestNewClientProdStrictEnablesWGOnly(t *testing.T) {
 	}
 }
 
+func TestWalletFundPaymentProofForTokenBindsGPMReservation(t *testing.T) {
+	c := &Client{
+		settlementReservationID:        "res-wallet-client-1",
+		settlementReservationSessionID: "sess-wallet-client-1",
+		settlementReservationSubjectID: "wallet1client",
+	}
+	proof, subject, err := c.walletFundPaymentProofForToken("", true, false)
+	if err != nil {
+		t.Fatalf("walletFundPaymentProofForToken: %v", err)
+	}
+	if subject != "wallet1client" {
+		t.Fatalf("subject=%q want wallet address", subject)
+	}
+	if proof == nil {
+		t.Fatalf("expected wallet fund payment proof")
+	}
+	if proof.Source != proto.PaymentProofSourceWalletFund || proof.ReservationID != "res-wallet-client-1" || proof.Subject != "wallet1client" || proof.SessionID != "sess-wallet-client-1" || proof.SponsorID != "" {
+		t.Fatalf("unexpected payment proof: %+v", proof)
+	}
+}
+
+func TestWalletFundPaymentProofForTokenRejectsMissingProdBinding(t *testing.T) {
+	c := &Client{
+		settlementReservationID: "res-wallet-client-1",
+	}
+	_, _, err := c.walletFundPaymentProofForToken("wallet1client", true, false)
+	if err == nil || !strings.Contains(err.Error(), "requires reservation id, reservation session id, and wallet address") {
+		t.Fatalf("expected missing GPM binding to fail, got %v", err)
+	}
+}
+
+func TestWalletFundPaymentProofForTokenRejectsSubjectMismatch(t *testing.T) {
+	c := &Client{
+		settlementReservationID:        "res-wallet-client-1",
+		settlementReservationSessionID: "sess-wallet-client-1",
+		settlementReservationSubjectID: "wallet1client",
+	}
+	_, _, err := c.walletFundPaymentProofForToken("wallet1other", true, false)
+	if err == nil || !strings.Contains(err.Error(), "payment proof subject mismatch") {
+		t.Fatalf("expected wallet/token subject mismatch to fail, got %v", err)
+	}
+}
+
+func TestWalletFundPaymentProofForTokenPreservesAnonCredentialEmptySubject(t *testing.T) {
+	c := &Client{
+		settlementReservationID:        "res-wallet-client-1",
+		settlementReservationSessionID: "sess-wallet-client-1",
+		settlementReservationSubjectID: "wallet1client",
+	}
+	proof, subject, err := c.walletFundPaymentProofForToken("", true, true)
+	if err != nil {
+		t.Fatalf("walletFundPaymentProofForToken: %v", err)
+	}
+	if subject != "" {
+		t.Fatalf("subject=%q want empty for anonymous credential token request", subject)
+	}
+	if proof == nil || proof.Subject != "wallet1client" || proof.Source != proto.PaymentProofSourceWalletFund {
+		t.Fatalf("unexpected anonymous wallet fund payment proof: %+v", proof)
+	}
+}
+
 func TestValidateRuntimeConfigForceDirectExitRejectsStrictModes(t *testing.T) {
 	c := &Client{
 		betaStrict:         true,

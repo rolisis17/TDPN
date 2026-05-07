@@ -79,6 +79,15 @@ bool_arg_or_die() {
   fi
 }
 
+script_override_or_die() {
+  local env_name="$1"
+  local stage_label="$2"
+  if [[ -n "${!env_name:-}" && "$allow_unsafe_script_overrides" != "1" ]]; then
+    echo "unsafe stage script override rejected for $stage_label via $env_name; set BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_ALLOW_UNSAFE_SCRIPT_OVERRIDES=1 only in tests/dev"
+    exit 2
+  fi
+}
+
 is_nonempty_iso_utc() {
   local value
   value="$(trim "${1:-}")"
@@ -173,6 +182,7 @@ refresh_roadmap="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_REFRESH_ROADMAP:-1}"
 print_summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_PRINT_SUMMARY_JSON:-1}"
 seed_example_input="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_SEED_EXAMPLE_INPUT:-0}"
 emit_missing_checklist="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_EMIT_MISSING_CHECKLIST:-1}"
+allow_unsafe_script_overrides="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_ALLOW_UNSAFE_SCRIPT_OVERRIDES:-0}"
 missing_checklist_json="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_MISSING_CHECKLIST_JSON:-}"
 missing_checklist_md="${BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_MISSING_CHECKLIST_MD:-}"
 
@@ -272,12 +282,19 @@ bool_arg_or_die "--refresh-roadmap" "$refresh_roadmap"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--seed-example-input" "$seed_example_input"
 bool_arg_or_die "--emit-missing-checklist" "$emit_missing_checklist"
+bool_arg_or_die "BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_ALLOW_UNSAFE_SCRIPT_OVERRIDES" "$allow_unsafe_script_overrides"
 
 if [[ -n "$(trim "$input_json")" ]]; then
   path_arg_or_die "--input-json" "$input_json"
 fi
 path_arg_or_die "--reports-dir" "$reports_dir"
 path_arg_or_die "--canonical-summary-json" "$canonical_summary_json"
+
+script_override_or_die "BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_METRICS_INPUT_SCRIPT" "metrics_input"
+script_override_or_die "BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_METRICS_INPUT_TEMPLATE_SCRIPT" "metrics_input_template"
+script_override_or_die "BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_GATE_BUNDLE_SCRIPT" "gate_bundle"
+script_override_or_die "BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_METRICS_MISSING_CHECKLIST_SCRIPT" "metrics_missing_checklist"
+script_override_or_die "BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_ROADMAP_PROGRESS_REPORT_SCRIPT" "roadmap_refresh"
 
 if [[ ! -x "$metrics_input_script" ]]; then
   echo "missing executable stage script: $metrics_input_script"

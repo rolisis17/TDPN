@@ -3463,6 +3463,20 @@ func TestRunTDPNDSettlementHTTPBillingFinalizeRequiresExistingMatchingReservatio
 		t.Fatalf("error=%q want=reservation not found", got)
 	}
 
+	status, payload = doJSONRequest(
+		t,
+		http.MethodPost,
+		baseURL+"/x/vpnbilling/reservations",
+		`{"ReservationID":"res-invalid-currency-1","SessionID":"sess-invalid-currency-1","SubjectID":"subject-invalid-currency-1","AmountMicros":250,"Currency":"uu sdc","CreatedAt":"2026-01-01T00:00:00Z"}`,
+		headers,
+	)
+	if status != http.StatusBadRequest {
+		t.Fatalf("expected invalid reservation currency to return 400, got %d payload=%v", status, payload)
+	}
+	if got, _ := payload["error"].(string); got != "Currency must be a canonical non-empty token" {
+		t.Fatalf("error=%q want=Currency must be a canonical non-empty token", got)
+	}
+
 	seedBillingReservation(t, scaffold, "res-mismatch-1", "sess-mismatch-1", "subject-mismatch-1", "uusdc", 250)
 	status, payload = doJSONRequest(
 		t,
@@ -3919,6 +3933,7 @@ func TestRunTDPNDSettlementHTTPSponsorReservationCurrencyRoundTrips(t *testing.T
 		t.Fatalf("expected sponsor delegation GET to return 200, got %d payload=%v", status, payload)
 	}
 	expectJSONStringField(t, payload, "delegation", "Currency", "tdpnc")
+	expectJSONIntField(t, payload, "delegation", "ExpiresAtUnix", 1798675200)
 
 	metaResp, err := scaffold.BillingQueryServer().GetReservation(context.Background(), app.BillingGetReservationRequest{
 		ReservationID: sponsorReservationCurrencyMetadataID(reservationID),

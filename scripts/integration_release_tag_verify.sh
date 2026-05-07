@@ -11,6 +11,15 @@ for cmd in rg git; do
   fi
 done
 
+if ! rg -q 'RELEASE_TAG_COMMIT="\$\(git rev-list -n 1 "\$\{GITHUB_REF_NAME\}"\)"' .github/workflows/release.yml; then
+  echo "release workflow must peel annotated release tags to the tagged commit before status-check lookup"
+  exit 1
+fi
+if ! rg -q -- '--sha "\$\{RELEASE_TAG_COMMIT\}"' .github/workflows/release.yml; then
+  echo "release workflow must pass the peeled release tag commit to release_require_status_checks.sh"
+  exit 1
+fi
+
 uniq_suffix="$(date +%s%N)"
 annotated_tag="v0.0.0-int-ann-${uniq_suffix}"
 lightweight_tag="v0.0.0-int-lw-${uniq_suffix}"

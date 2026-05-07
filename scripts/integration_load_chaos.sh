@@ -23,6 +23,7 @@ CORE_ENTRY_URL="${CORE_ENTRY_URL:-http://127.0.0.1:${CORE_ENTRY_PORT}}"
 CORE_EXIT_CONTROL_URL="${CORE_EXIT_CONTROL_URL:-http://127.0.0.1:${CORE_EXIT_PORT}}"
 ENTRY_DATA_PORT="${ENTRY_DATA_PORT:-57820}"
 EXIT_DATA_PORT="${EXIT_DATA_PORT:-57821}"
+EXIT_WG_PORT="${EXIT_WG_PORT:-57822}"
 ENTRY_OPEN_RPS="${ENTRY_OPEN_RPS:-2}"
 ENTRY_PUZZLE_DIFFICULTY="${ENTRY_PUZZLE_DIFFICULTY:-1}"
 ENTRY_BAN_THRESHOLD="${ENTRY_BAN_THRESHOLD:-2}"
@@ -33,6 +34,8 @@ LOAD_OPEN_PARALLEL="${LOAD_OPEN_PARALLEL:-6}"
 LOAD_COUNTRY_CODE="${LOAD_COUNTRY_CODE:-DE}"
 MAIN_OPERATOR_ID="${MAIN_OPERATOR_ID:-op-main}"
 PEER_OPERATOR_ID="${PEER_OPERATOR_ID:-op-peer-${LOAD_COUNTRY_CODE,,}}"
+PEER_ENTRY_RELAY_ID="entry-${LOAD_COUNTRY_CODE,,}-1"
+PEER_EXIT_RELAY_ID="exit-${LOAD_COUNTRY_CODE,,}-1"
 PEER_SYNC_SEC="${PEER_SYNC_SEC:-1}"
 
 make_temp_file() {
@@ -73,12 +76,23 @@ CORE_LOG="$(make_temp_file "/tmp/load_chaos_core_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.l
 PEER_LOG="$(make_temp_file "/tmp/load_chaos_peer_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.log")"
 MAIN_LOG="$(make_temp_file "/tmp/load_chaos_main_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.log")"
 RESPONSES_LOG="$(make_temp_file "/tmp/load_chaos_responses_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.log")"
+STATE_DIR="$(mktemp -d "/tmp/load_chaos_state_${LOAD_CHAOS_TAG_SAFE}.XXXXXX")"
+TRUST_FILE="$STATE_DIR/directory_trust.txt"
+PEER_TRUST_FILE="$STATE_DIR/peer_trust.txt"
 PAYLOAD_FILE="$(make_private_temp_file "/tmp/load_chaos_path_open_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.json")"
 CLIENT_DOWN_LOG="$(make_temp_file "/tmp/load_chaos_client_down_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.log")"
 PEER_RESTART_LOG="$(make_temp_file "/tmp/load_chaos_peer_restart_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.log")"
 CLIENT_RECOVER_LOG="$(make_temp_file "/tmp/load_chaos_client_recover_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.log")"
 POP_PRIV_FILE=""
 TOKEN_FILE=""
+
+route_assertion_json="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)"
+route_assertion_private_key="$(echo "$route_assertion_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')"
+route_assertion_pubkey="$(echo "$route_assertion_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')"
+if [[ -z "$route_assertion_private_key" || -z "$route_assertion_pubkey" ]]; then
+  echo "failed to generate entry route assertion key material"
+  exit 1
+fi
 
 ENTRY_OPEN_RPS="$ENTRY_OPEN_RPS" \
 ENTRY_PUZZLE_DIFFICULTY="$ENTRY_PUZZLE_DIFFICULTY" \
@@ -87,8 +101,14 @@ ENTRY_BAN_SEC="$ENTRY_BAN_SEC" \
 EXIT_STARTUP_SYNC_TIMEOUT_SEC="$EXIT_STARTUP_SYNC_TIMEOUT_SEC" \
 ISSUER_ADDR="127.0.0.1:${CORE_ISSUER_PORT}" \
 ISSUER_URL="http://127.0.0.1:${CORE_ISSUER_PORT}" \
+ISSUER_PRIVATE_KEY_FILE="$STATE_DIR/issuer.key" \
+ISSUER_SUBJECTS_FILE="$STATE_DIR/issuer_subjects.json" \
+ISSUER_REVOCATIONS_FILE="$STATE_DIR/issuer_revocations.json" \
+ISSUER_ANON_REVOCATIONS_FILE="$STATE_DIR/issuer_anon_revocations.json" \
 ENTRY_ADDR="127.0.0.1:${CORE_ENTRY_PORT}" \
 EXIT_ADDR="127.0.0.1:${CORE_EXIT_PORT}" \
+ENTRY_RELAY_ID="$PEER_ENTRY_RELAY_ID" \
+EXIT_RELAY_ID="$PEER_EXIT_RELAY_ID" \
 ENTRY_DATA_ADDR="127.0.0.1:${ENTRY_DATA_PORT}" \
 EXIT_DATA_ADDR="127.0.0.1:${EXIT_DATA_PORT}" \
 ENTRY_ENDPOINT="127.0.0.1:${ENTRY_DATA_PORT}" \
@@ -96,33 +116,56 @@ EXIT_ENDPOINT="127.0.0.1:${EXIT_DATA_PORT}" \
 ENTRY_URL="${CORE_ENTRY_URL}" \
 EXIT_CONTROL_URL="${CORE_EXIT_CONTROL_URL}" \
 DIRECTORY_URL="http://127.0.0.1:${MAIN_DIR_PORT}" \
+DIRECTORY_TRUST_TOFU=1 \
+DIRECTORY_TRUSTED_KEYS_FILE="$TRUST_FILE" \
+ENTRY_LIVE_WG_MODE=0 \
+ENTRY_ROUTE_ASSERTION_PRIVATE_KEY="$route_assertion_private_key" \
+ENTRY_ROUTE_ASSERTION_PUBLIC_KEY="$route_assertion_pubkey" \
+EXIT_WG_LISTEN_PORT="$EXIT_WG_PORT" \
+EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS="$route_assertion_pubkey" \
+EXIT_TOKEN_PROOF_REPLAY_STORE_FILE="$STATE_DIR/exit_token_replay.json" \
 timeout "${CORE_TIMEOUT_SEC}s" go run ./cmd/node --issuer --entry --exit >"${CORE_LOG}" 2>&1 &
 core_pid=$!
 
 DIRECTORY_ADDR="127.0.0.1:${PEER_DIR_PORT}" \
-DIRECTORY_PRIVATE_KEY_FILE=data/load_chaos_peer.key \
+DIRECTORY_PUBLIC_URL="http://127.0.0.1:${PEER_DIR_PORT}" \
+DIRECTORY_PRIVATE_KEY_FILE="$STATE_DIR/load_chaos_peer.key" \
+DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE="$STATE_DIR/peer_provider_replay.json" \
 DIRECTORY_OPERATOR_ID="${PEER_OPERATOR_ID}" \
 ENTRY_ADDR="127.0.0.1:${CORE_ENTRY_PORT}" \
 EXIT_ADDR="127.0.0.1:${CORE_EXIT_PORT}" \
+ENTRY_RELAY_ID="$PEER_ENTRY_RELAY_ID" \
+EXIT_RELAY_ID="$PEER_EXIT_RELAY_ID" \
+ENTRY_COUNTRY_CODE="${LOAD_COUNTRY_CODE}" \
+EXIT_COUNTRY_CODE="${LOAD_COUNTRY_CODE}" \
 ENTRY_ENDPOINT="127.0.0.1:${ENTRY_DATA_PORT}" \
 EXIT_ENDPOINT="127.0.0.1:${EXIT_DATA_PORT}" \
 ENTRY_URL="${CORE_ENTRY_URL}" \
 EXIT_CONTROL_URL="${CORE_EXIT_CONTROL_URL}" \
-ENTRY_RELAY_ID="entry-${LOAD_COUNTRY_CODE,,}-1" \
-EXIT_RELAY_ID="exit-${LOAD_COUNTRY_CODE,,}-1" \
+ENTRY_RELAY_ID="$PEER_ENTRY_RELAY_ID" \
+EXIT_RELAY_ID="$PEER_EXIT_RELAY_ID" \
 ENTRY_COUNTRY_CODE="${LOAD_COUNTRY_CODE}" \
 EXIT_COUNTRY_CODE="${LOAD_COUNTRY_CODE}" \
 timeout "${CORE_TIMEOUT_SEC}s" go run ./cmd/node --directory >"${PEER_LOG}" 2>&1 &
 peer_pid=$!
 
 DIRECTORY_ADDR="127.0.0.1:${MAIN_DIR_PORT}" \
-DIRECTORY_PRIVATE_KEY_FILE=data/load_chaos_main.key \
+DIRECTORY_PUBLIC_URL="http://127.0.0.1:${MAIN_DIR_PORT}" \
+DIRECTORY_PRIVATE_KEY_FILE="$STATE_DIR/load_chaos_main.key" \
+DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE="$STATE_DIR/main_provider_replay.json" \
 DIRECTORY_OPERATOR_ID="${MAIN_OPERATOR_ID}" \
 DIRECTORY_PEERS="http://127.0.0.1:${PEER_DIR_PORT}" \
+DIRECTORY_PEER_TRUST_TOFU=1 \
+DIRECTORY_PEER_TRUSTED_KEYS_FILE="$PEER_TRUST_FILE" \
+DIRECTORY_ALLOW_DANGEROUS_DISCOVERED_PRIVATE_PEERS=1 \
 DIRECTORY_SYNC_SEC="${PEER_SYNC_SEC}" \
 DIRECTORY_PEER_MIN_VOTES=1 \
 ENTRY_ADDR="127.0.0.1:${CORE_ENTRY_PORT}" \
 EXIT_ADDR="127.0.0.1:${CORE_EXIT_PORT}" \
+ENTRY_RELAY_ID="$PEER_ENTRY_RELAY_ID" \
+EXIT_RELAY_ID="$PEER_EXIT_RELAY_ID" \
+ENTRY_COUNTRY_CODE="${LOAD_COUNTRY_CODE}" \
+EXIT_COUNTRY_CODE="${LOAD_COUNTRY_CODE}" \
 ENTRY_ENDPOINT="127.0.0.1:${ENTRY_DATA_PORT}" \
 EXIT_ENDPOINT="127.0.0.1:${EXIT_DATA_PORT}" \
 ENTRY_URL="${CORE_ENTRY_URL}" \
@@ -144,9 +187,10 @@ cleanup() {
     "$MAIN_LOG" \
     "$RESPONSES_LOG" \
     "$PAYLOAD_FILE" \
-    "$CLIENT_DOWN_LOG" \
-    "$PEER_RESTART_LOG" \
-    "$CLIENT_RECOVER_LOG"
+	    "$CLIENT_DOWN_LOG" \
+	    "$PEER_RESTART_LOG" \
+	    "$CLIENT_RECOVER_LOG"
+  rm -rf "$STATE_DIR"
 }
 trap cleanup EXIT
 
@@ -166,7 +210,7 @@ if ! echo "$local_relays_json" | rg -q "\"control_url\":\"${CORE_EXIT_CONTROL_UR
   exit 1
 fi
 
-pop_json=$(go run ./cmd/tokenpop gen --show-private-key)
+pop_json=$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)
 pop_pub=$(echo "$pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 pop_priv=$(echo "$pop_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$pop_pub" || -z "$pop_priv" ]]; then
@@ -176,7 +220,7 @@ if [[ -z "$pop_pub" || -z "$pop_priv" ]]; then
 fi
 
 token_json=$(curl -sS -X POST "http://127.0.0.1:${CORE_ISSUER_PORT}/v1/token" -H 'Content-Type: application/json' \
-  --data "{\"tier\":1,\"subject\":\"client-load-1\",\"token_type\":\"client_access\",\"pop_pub_key\":\"$pop_pub\",\"exit_scope\":[\"exit-local-1\"]}")
+  --data "{\"tier\":1,\"subject\":\"client-load-1\",\"token_type\":\"client_access\",\"pop_pub_key\":\"$pop_pub\",\"exit_scope\":[\"$PEER_EXIT_RELAY_ID\"]}")
 token=$(echo "$token_json" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 if [[ -z "$token" ]]; then
   echo "failed to issue token for load segment"
@@ -187,6 +231,7 @@ fi
 
 client_pub="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 token_proof_nonce="$(date +%s%N)-load-chaos"
+session_id="load-chaos-session-$(date +%s%N)"
 POP_PRIV_FILE="$(make_private_temp_file "/tmp/load_chaos_tokenpop_private_${LOAD_CHAOS_TAG_SAFE}.XXXXXX.key")"
 printf '%s' "$pop_priv" >"$POP_PRIV_FILE"
 chmod 600 "$POP_PRIV_FILE"
@@ -196,7 +241,8 @@ chmod 600 "$TOKEN_FILE"
 token_proof=$(go run ./cmd/tokenpop sign \
   --private-key-file "$POP_PRIV_FILE" \
   --token-file "$TOKEN_FILE" \
-  --exit-id "exit-local-1" \
+  --exit-id "$PEER_EXIT_RELAY_ID" \
+  --session-id "$session_id" \
   --proof-nonce "$token_proof_nonce" \
   --client-inner-pub "$client_pub" \
   --transport "policy-json" \
@@ -208,7 +254,7 @@ if [[ -z "$token_proof" ]]; then
 fi
 
 cat >"$PAYLOAD_FILE" <<JSON
-{"exit_id":"exit-local-1","token":"$token","token_proof":"$token_proof","token_proof_nonce":"$token_proof_nonce","client_inner_pub":"$client_pub","transport":"policy-json","requested_mtu":1280,"requested_region":"local"}
+{"exit_id":"$PEER_EXIT_RELAY_ID","session_id":"$session_id","token":"$token","token_proof":"$token_proof","token_proof_nonce":"$token_proof_nonce","client_inner_pub":"$client_pub","transport":"policy-json","requested_mtu":1280,"requested_region":"local"}
 JSON
 
 : >"$RESPONSES_LOG"
@@ -224,15 +270,20 @@ send_path_open_once() {
 }
 
 active_jobs=0
+open_pids=()
 for _request_idx in $(seq "$LOAD_OPEN_REQUESTS"); do
   send_path_open_once &
+  open_pids+=("$!")
   active_jobs=$((active_jobs + 1))
   if (( active_jobs >= LOAD_OPEN_PARALLEL )); then
-    wait -n || true
+    wait "${open_pids[0]}" || true
+    open_pids=("${open_pids[@]:1}")
     active_jobs=$((active_jobs - 1))
   fi
 done
-wait || true
+for open_pid in "${open_pids[@]}"; do
+  wait "$open_pid" || true
+done
 
 challenge_count=$(rg -c 'challenge-required' "$RESPONSES_LOG" || true)
 blocked_count=$(rg -c 'source-temporarily-blocked|entry-overloaded' "$RESPONSES_LOG" || true)
@@ -249,7 +300,7 @@ fi
 
 synced=0
 for _ in $(seq 1 10); do
-  if curl -sS "http://127.0.0.1:${MAIN_DIR_PORT}/v1/relays" | rg -q "\"relay_id\":\"exit-${LOAD_COUNTRY_CODE,,}-1\""; then
+  if curl -sS "http://127.0.0.1:${MAIN_DIR_PORT}/v1/relays" | rg -q "\"relay_id\":\"${PEER_EXIT_RELAY_ID}\""; then
     synced=1
     break
   fi
@@ -264,9 +315,11 @@ fi
 
 kill "$peer_pid" >/dev/null 2>&1 || true
 sleep 2
-sleep $((ENTRY_BAN_SEC + 1))
+sleep $((ENTRY_BAN_SEC * 2 + 2))
 
 DIRECTORY_URL="http://127.0.0.1:${MAIN_DIR_PORT}" \
+DIRECTORY_TRUST_TOFU=1 \
+DIRECTORY_TRUSTED_KEYS_FILE="$TRUST_FILE" \
 ISSUER_URL="http://127.0.0.1:${CORE_ISSUER_PORT}" \
 CLIENT_EXIT_COUNTRY="${LOAD_COUNTRY_CODE}" \
 CLIENT_EXIT_STRICT_LOCALITY=1 \
@@ -283,7 +336,9 @@ if ! rg -q 'client selected entry=' "${CLIENT_DOWN_LOG}"; then
 fi
 
 DIRECTORY_ADDR="127.0.0.1:${PEER_DIR_PORT}" \
-DIRECTORY_PRIVATE_KEY_FILE=data/load_chaos_peer.key \
+DIRECTORY_PUBLIC_URL="http://127.0.0.1:${PEER_DIR_PORT}" \
+DIRECTORY_PRIVATE_KEY_FILE="$STATE_DIR/load_chaos_peer.key" \
+DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE="$STATE_DIR/peer_provider_replay_restart.json" \
 DIRECTORY_OPERATOR_ID="${PEER_OPERATOR_ID}" \
 ENTRY_ADDR="127.0.0.1:${CORE_ENTRY_PORT}" \
 EXIT_ADDR="127.0.0.1:${CORE_EXIT_PORT}" \
@@ -291,16 +346,19 @@ ENTRY_ENDPOINT="127.0.0.1:${ENTRY_DATA_PORT}" \
 EXIT_ENDPOINT="127.0.0.1:${EXIT_DATA_PORT}" \
 ENTRY_URL="${CORE_ENTRY_URL}" \
 EXIT_CONTROL_URL="${CORE_EXIT_CONTROL_URL}" \
-ENTRY_RELAY_ID="entry-${LOAD_COUNTRY_CODE,,}-1" \
-EXIT_RELAY_ID="exit-${LOAD_COUNTRY_CODE,,}-1" \
+ENTRY_RELAY_ID="$PEER_ENTRY_RELAY_ID" \
+EXIT_RELAY_ID="$PEER_EXIT_RELAY_ID" \
 ENTRY_COUNTRY_CODE="${LOAD_COUNTRY_CODE}" \
 EXIT_COUNTRY_CODE="${LOAD_COUNTRY_CODE}" \
 timeout "${CORE_TIMEOUT_SEC}s" go run ./cmd/node --directory >"${PEER_RESTART_LOG}" 2>&1 &
 peer_pid=$!
 
 sleep 3
+sleep $((ENTRY_BAN_SEC * 2 + 2))
 
 DIRECTORY_URL="http://127.0.0.1:${MAIN_DIR_PORT}" \
+DIRECTORY_TRUST_TOFU=1 \
+DIRECTORY_TRUSTED_KEYS_FILE="$TRUST_FILE" \
 ISSUER_URL="http://127.0.0.1:${CORE_ISSUER_PORT}" \
 CLIENT_EXIT_COUNTRY="${LOAD_COUNTRY_CODE}" \
 CLIENT_EXIT_STRICT_LOCALITY=1 \

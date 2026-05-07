@@ -67,7 +67,13 @@ func runSign(args []string) {
 	token := fs.String("token", "", "signed token string")
 	tokenFile := fs.String("token-file", "", "path to file containing signed token string")
 	exitID := fs.String("exit-id", "", "requested exit id")
+	middleRelayID := fs.String("middle-relay-id", "", "requested middle relay id")
+	pathProfile := fs.String("path-profile", "", "requested path profile")
+	sessionID := fs.String("session-id", "", "path session id")
 	tokenProofNonce := fs.String("proof-nonce", "", "token proof nonce")
+	reservationID := fs.String("reservation-id", "", "reservation id")
+	reservationSessionID := fs.String("reservation-session-id", "", "reservation session id")
+	reservationSubjectID := fs.String("reservation-subject-id", "", "reservation subject id")
 	clientInnerPub := fs.String("client-inner-pub", "", "client inner pubkey")
 	transport := fs.String("transport", "policy-json", "transport type")
 	requestedMTU := fs.Int("requested-mtu", 1280, "requested mtu")
@@ -110,13 +116,19 @@ func runSign(args []string) {
 		exitf("invalid private key: %v", err)
 	}
 	proof, err := crypto.SignPathOpenProof(priv, crypto.PathOpenProofInput{
-		Token:           tokenValue,
-		ExitID:          *exitID,
-		TokenProofNonce: *tokenProofNonce,
-		ClientInnerPub:  *clientInnerPub,
-		Transport:       *transport,
-		RequestedMTU:    *requestedMTU,
-		RequestedRegion: *requestedRegion,
+		Token:                tokenValue,
+		ExitID:               *exitID,
+		MiddleRelayID:        *middleRelayID,
+		PathProfile:          *pathProfile,
+		SessionID:            *sessionID,
+		TokenProofNonce:      *tokenProofNonce,
+		ReservationID:        *reservationID,
+		ReservationSessionID: *reservationSessionID,
+		ReservationSubjectID: *reservationSubjectID,
+		ClientInnerPub:       *clientInnerPub,
+		Transport:            *transport,
+		RequestedMTU:         *requestedMTU,
+		RequestedRegion:      *requestedRegion,
 	})
 	if err != nil {
 		exitf("sign proof failed: %v", err)

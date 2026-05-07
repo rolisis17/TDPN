@@ -13,6 +13,25 @@ import (
 	sponsortypes "github.com/tdpn/tdpn-chain/x/vpnsponsor/types"
 )
 
+func testRewardProofRecord(proofPath string) rewardstypes.RewardProofRecord {
+	return rewardstypes.RewardProofRecord{
+		ProofPath:         proofPath,
+		TrafficProofRef:   "obj://" + proofPath,
+		TrustContract:     rewardstypes.RewardProofTrustContractObjectiveTrafficV1,
+		RewardID:          "reward-" + proofPath,
+		ProviderSubjectID: "provider-" + proofPath,
+		SessionID:         "session-" + proofPath,
+		PayoutStartUnix:   1776643200,
+		PayoutEndUnix:     1777248000,
+		RewardMicros:      55,
+		Currency:          "uusdc",
+		IssuedAtUnix:      1777248001,
+		Verified:          true,
+		VerifierID:        "objective-verifier",
+		VerifiedAtUnix:    1777248002,
+	}
+}
+
 func TestRewardsMsgServer_AccessorAndFlow(t *testing.T) {
 	scaffold := NewChainScaffold()
 	server := scaffold.RewardsMsgServer()
@@ -65,6 +84,63 @@ func TestRewardsMsgServer_AccessorAndFlow(t *testing.T) {
 	}
 	if !replayResp.Replay {
 		t.Fatal("expected replay=true for duplicate distribution")
+	}
+}
+
+func TestRewardsMsgServer_RegisterProofAndQueryFlow(t *testing.T) {
+	scaffold := NewChainScaffold()
+	msgServer := scaffold.RewardsMsgServer()
+	queryServer := scaffold.RewardsQueryServer()
+
+	missingProof, err := queryServer.GetProof(context.Background(), RewardsGetProofRequest{
+		ProofPath: "traffic-proof/app-proof-missing",
+	})
+	if err != nil {
+		t.Fatalf("expected missing proof query to succeed, got %v", err)
+	}
+	if missingProof.Found {
+		t.Fatal("expected missing proof query to return found=false")
+	}
+
+	proof := testRewardProofRecord("traffic-proof/app-proof-1")
+	resp, err := msgServer.RegisterProof(context.Background(), RewardsRegisterProofRequest{Record: proof})
+	if err != nil {
+		t.Fatalf("expected proof registration success, got %v", err)
+	}
+	if resp.Replay {
+		t.Fatal("expected first proof registration to not be replay")
+	}
+	if resp.Proof.ProofPath != proof.ProofPath {
+		t.Fatalf("expected proof path %q, got %q", proof.ProofPath, resp.Proof.ProofPath)
+	}
+
+	foundProof, err := queryServer.GetProof(context.Background(), RewardsGetProofRequest{ProofPath: proof.ProofPath})
+	if err != nil {
+		t.Fatalf("expected proof query success, got %v", err)
+	}
+	if !foundProof.Found {
+		t.Fatal("expected proof query to return found=true")
+	}
+	if foundProof.Proof.VerifierID != proof.VerifierID {
+		t.Fatalf("expected verifier %q, got %q", proof.VerifierID, foundProof.Proof.VerifierID)
+	}
+
+	replayResp, err := msgServer.RegisterProof(context.Background(), RewardsRegisterProofRequest{Record: proof})
+	if err != nil {
+		t.Fatalf("expected proof replay success, got %v", err)
+	}
+	if !replayResp.Replay {
+		t.Fatal("expected duplicate proof registration to report replay=true")
+	}
+
+	conflict := proof
+	conflict.RewardMicros++
+	_, err = msgServer.RegisterProof(context.Background(), RewardsRegisterProofRequest{Record: conflict})
+	if err == nil {
+		t.Fatal("expected conflicting proof registration to fail")
+	}
+	if !strings.Contains(err.Error(), "proof conflict") {
+		t.Fatalf("expected proof conflict error, got %v", err)
 	}
 }
 
@@ -147,6 +223,16 @@ func TestRewardsMsgServer_NilScaffold(t *testing.T) {
 	if !strings.Contains(err.Error(), "vpnrewards keeper is not wired") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
+	_, err = server.RegisterProof(context.Background(), RewardsRegisterProofRequest{
+		Record: testRewardProofRecord("traffic-proof/app-proof-nil"),
+	})
+	if err == nil {
+		t.Fatal("expected nil scaffold rewards proof server error")
+	}
+	if !strings.Contains(err.Error(), "vpnrewards keeper is not wired") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestSlashingMsgServer_AccessorAndFlow(t *testing.T) {
@@ -200,6 +286,56 @@ func TestSlashingMsgServer_AccessorAndFlow(t *testing.T) {
 	}
 }
 
+func TestSlashingMsgServer_ConfirmEvidenceHappyPathAndReplay(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.SlashingMsgServer()
+
+	evidence := slashingtypes.SlashEvidence{
+		EvidenceID:    "evidence-confirm-app-1",
+		ProviderID:    "provider-confirm-app-1",
+		SessionID:     "session-confirm-app-1",
+		Kind:          slashingtypes.EvidenceKindObjective,
+		ViolationType: "double-sign",
+		ProofHash:     "sha256:bd9d56d7a7770f74424085e9b5876c671798f35c987fbf12b3568e0dffb459e0",
+	}
+	if _, err := server.SubmitEvidence(context.Background(), SlashingSubmitEvidenceRequest{Record: evidence}); err != nil {
+		t.Fatalf("expected submit evidence success, got %v", err)
+	}
+
+	resp, err := server.ConfirmEvidence(context.Background(), SlashingConfirmEvidenceRequest{
+		EvidenceID: " EVIDENCE-CONFIRM-APP-1 ",
+	})
+	if err != nil {
+		t.Fatalf("expected confirm evidence success, got %v", err)
+	}
+	if resp.Replay {
+		t.Fatal("expected first evidence confirmation to not be replay")
+	}
+	if resp.Evidence.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected evidence status %q, got %q", chaintypes.ReconciliationConfirmed, resp.Evidence.Status)
+	}
+
+	replayResp, err := server.ConfirmEvidence(context.Background(), SlashingConfirmEvidenceRequest{
+		EvidenceID: evidence.EvidenceID,
+	})
+	if err != nil {
+		t.Fatalf("expected confirm evidence replay success, got %v", err)
+	}
+	if !replayResp.Replay {
+		t.Fatal("expected duplicate evidence confirmation to report replay=true")
+	}
+
+	_, err = server.ConfirmEvidence(context.Background(), SlashingConfirmEvidenceRequest{
+		EvidenceID: "missing-evidence-confirm-app",
+	})
+	if err == nil {
+		t.Fatal("expected missing evidence confirmation to fail")
+	}
+	if !strings.Contains(err.Error(), "evidence not found") {
+		t.Fatalf("expected evidence not found error, got %v", err)
+	}
+}
+
 func TestSlashingMsgServer_NilScaffold(t *testing.T) {
 	var scaffold *ChainScaffold
 	server := scaffold.SlashingMsgServer()
@@ -216,6 +352,16 @@ func TestSlashingMsgServer_NilScaffold(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected nil scaffold slashing server error")
+	}
+	if !strings.Contains(err.Error(), "vpnslashing keeper is not wired") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, err = server.ConfirmEvidence(context.Background(), SlashingConfirmEvidenceRequest{
+		EvidenceID: "evidence-nil-confirm",
+	})
+	if err == nil {
+		t.Fatal("expected nil scaffold slashing confirmation server error")
 	}
 	if !strings.Contains(err.Error(), "vpnslashing keeper is not wired") {
 		t.Fatalf("unexpected error: %v", err)
@@ -542,6 +688,23 @@ func TestRewardsMsgServer_RecordDistributionHonorsCanceledContext(t *testing.T) 
 	}
 }
 
+func TestRewardsMsgServer_RegisterProofHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.RewardsMsgServer()
+
+	proof := testRewardProofRecord("traffic-proof/app-proof-canceled")
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.RegisterProof(canceledCtx, RewardsRegisterProofRequest{Record: proof}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	if _, exists := scaffold.RewardsModule.Keeper.GetProof(proof.ProofPath); exists {
+		t.Fatalf("expected no proof write on canceled context for proof %s", proof.ProofPath)
+	}
+}
+
 func TestSlashingMsgServer_SubmitEvidenceHonorsCanceledContext(t *testing.T) {
 	scaffold := NewChainScaffold()
 	server := scaffold.SlashingMsgServer()
@@ -598,5 +761,37 @@ func TestSlashingMsgServer_ApplyPenaltyHonorsCanceledContext(t *testing.T) {
 
 	if _, exists := scaffold.SlashingModule.Keeper.GetPenalty(penalty.PenaltyID); exists {
 		t.Fatalf("expected no penalty write on canceled context for penalty %s", penalty.PenaltyID)
+	}
+}
+
+func TestSlashingMsgServer_ConfirmEvidenceHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.SlashingMsgServer()
+
+	evidence := slashingtypes.SlashEvidence{
+		EvidenceID:    "evidence-canceled-ctx-confirm",
+		ProviderID:    "provider-canceled-ctx-confirm",
+		SessionID:     "session-canceled-ctx-confirm",
+		Kind:          slashingtypes.EvidenceKindObjective,
+		ViolationType: "double-sign",
+		ProofHash:     "sha256:2207d96eb0dd2a5ef7974ff4d3748f03b697a3b199417aa515e7d53e1d591d32",
+	}
+	if _, err := server.SubmitEvidence(context.Background(), SlashingSubmitEvidenceRequest{Record: evidence}); err != nil {
+		t.Fatalf("expected submit evidence success, got %v", err)
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.ConfirmEvidence(canceledCtx, SlashingConfirmEvidenceRequest{EvidenceID: evidence.EvidenceID}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	storedEvidence, exists := scaffold.SlashingModule.Keeper.GetEvidence(evidence.EvidenceID)
+	if !exists {
+		t.Fatalf("expected evidence %s to remain present", evidence.EvidenceID)
+	}
+	if storedEvidence.Status != chaintypes.ReconciliationSubmitted {
+		t.Fatalf("expected evidence status %q to remain unchanged, got %q", chaintypes.ReconciliationSubmitted, storedEvidence.Status)
 	}
 }

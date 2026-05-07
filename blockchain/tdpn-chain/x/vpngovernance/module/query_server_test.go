@@ -2,6 +2,7 @@ package module
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	kvtypes "github.com/tdpn/tdpn-chain/types/kv"
@@ -282,5 +283,75 @@ func TestQueryServerListNonEmpty(t *testing.T) {
 	}
 	if auditResp.Actions[0].ActionID != "audit-1" || auditResp.Actions[1].ActionID != "audit-2" || auditResp.Actions[2].ActionID != "audit-3" {
 		t.Fatalf("expected sorted audit action ids [audit-1 audit-2 audit-3], got [%s %s %s]", auditResp.Actions[0].ActionID, auditResp.Actions[1].ActionID, auditResp.Actions[2].ActionID)
+	}
+}
+
+func TestQueryServerListClampsLargeResultSets(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	for i := 0; i < maxQueryListResults+5; i++ {
+		policyID := fmt.Sprintf("policy-clamp-%04d", i)
+		decisionID := fmt.Sprintf("decision-clamp-%04d", i)
+		auditID := fmt.Sprintf("audit-clamp-%04d", i)
+		k.UpsertPolicy(types.GovernancePolicy{
+			PolicyID:        policyID,
+			Title:           fmt.Sprintf("Policy Clamp %04d", i),
+			Version:         1,
+			ActivatedAtUnix: int64(4102444800 + i),
+		})
+		k.UpsertDecision(types.GovernanceDecision{
+			DecisionID:    decisionID,
+			PolicyID:      policyID,
+			ProposalID:    fmt.Sprintf("proposal-clamp-%04d", i),
+			Outcome:       types.DecisionOutcomeApprove,
+			Decider:       fmt.Sprintf("council-clamp-%04d", i),
+			DecidedAtUnix: int64(4102444800 + i),
+		})
+		if _, err := k.RecordAuditAction(types.GovernanceAuditAction{
+			ActionID:        auditID,
+			Action:          "admin_disable_validator",
+			Actor:           fmt.Sprintf("admin-clamp-%04d", i),
+			Reason:          "coverage clamp",
+			EvidencePointer: fmt.Sprintf("ipfs://audit-clamp-%04d", i),
+			TimestampUnix:   int64(4102444800 + i),
+		}); err != nil {
+			t.Fatalf("seed audit action %d failed: %v", i, err)
+		}
+	}
+
+	server := NewQueryServer(&k)
+
+	policiesResp, policiesErr := server.ListPolicies(ListPoliciesRequest{})
+	if policiesErr != nil {
+		t.Fatalf("expected list policies success, got %v", policiesErr)
+	}
+	if len(policiesResp.Policies) != maxQueryListResults {
+		t.Fatalf("expected %d policies after clamp, got %d", maxQueryListResults, len(policiesResp.Policies))
+	}
+	if got := policiesResp.Policies[maxQueryListResults-1].PolicyID; got != "policy-clamp-0999" {
+		t.Fatalf("expected final clamped policy id policy-clamp-0999, got %q", got)
+	}
+
+	decisionsResp, decisionsErr := server.ListDecisions(ListDecisionsRequest{})
+	if decisionsErr != nil {
+		t.Fatalf("expected list decisions success, got %v", decisionsErr)
+	}
+	if len(decisionsResp.Decisions) != maxQueryListResults {
+		t.Fatalf("expected %d decisions after clamp, got %d", maxQueryListResults, len(decisionsResp.Decisions))
+	}
+	if got := decisionsResp.Decisions[maxQueryListResults-1].DecisionID; got != "decision-clamp-0999" {
+		t.Fatalf("expected final clamped decision id decision-clamp-0999, got %q", got)
+	}
+
+	auditResp, auditErr := server.ListAuditActions(ListAuditActionsRequest{})
+	if auditErr != nil {
+		t.Fatalf("expected list audit actions success, got %v", auditErr)
+	}
+	if len(auditResp.Actions) != maxQueryListResults {
+		t.Fatalf("expected %d audit actions after clamp, got %d", maxQueryListResults, len(auditResp.Actions))
+	}
+	if got := auditResp.Actions[maxQueryListResults-1].ActionID; got != "audit-clamp-0999" {
+		t.Fatalf("expected final clamped audit action id audit-clamp-0999, got %q", got)
 	}
 }

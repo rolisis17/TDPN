@@ -136,6 +136,30 @@ func TestMsgServerAccrueRewardConflictPropagation(t *testing.T) {
 	}
 }
 
+func TestMsgServerAccrueRewardFillsWeeklyPayoutPeriod(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	resp, err := server.AccrueReward(AccrueRewardRequest{
+		Accrual: types.RewardAccrual{
+			AccrualID:     "acc-weekly-fill",
+			SessionID:     "sess-weekly-fill",
+			ProviderID:    "provider-weekly-fill",
+			AssetDenom:    "uusdc",
+			Amount:        100,
+			AccruedAtUnix: 1700000000,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected weekly payout period fill success, got %v", err)
+	}
+	if resp.Accrual.PayoutStartUnix != testPayoutStartUnix || resp.Accrual.PayoutEndUnix != testPayoutEndUnix {
+		t.Fatalf("unexpected payout window: start=%d end=%d", resp.Accrual.PayoutStartUnix, resp.Accrual.PayoutEndUnix)
+	}
+}
+
 func TestMsgServerAccrueRewardWeeklyProviderConflictPropagation(t *testing.T) {
 	t.Parallel()
 
@@ -414,6 +438,133 @@ func TestMsgServerRegisterProofRequiresVerifiedTimestampedProof(t *testing.T) {
 	}
 }
 
+func TestMsgServerRegisterProofFillsWeeklyPayoutPeriod(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+	proof := types.RewardProofRecord{
+		ProofPath:         "traffic-proof/msg-proof-weekly-fill",
+		TrafficProofRef:   "obj://traffic-proof/msg-proof-weekly-fill",
+		TrustContract:     types.RewardProofTrustContractObjectiveTrafficV1,
+		RewardID:          "rew-msg-proof-weekly-fill",
+		ProviderSubjectID: "provider-msg-proof-weekly-fill",
+		SessionID:         "sess-msg-proof-weekly-fill",
+		RewardMicros:      55,
+		Currency:          "uusdc",
+		IssuedAtUnix:      1700000000,
+		Verified:          true,
+		VerifierID:        "objective-verifier",
+		VerifiedAtUnix:    1700000001,
+	}
+
+	resp, err := server.RegisterProof(RegisterProofRequest{Proof: proof})
+	if err != nil {
+		t.Fatalf("expected weekly payout period proof fill success, got %v", err)
+	}
+	if resp.Proof.PayoutStartUnix != testPayoutStartUnix || resp.Proof.PayoutEndUnix != testPayoutEndUnix {
+		t.Fatalf("unexpected proof payout window: start=%d end=%d", resp.Proof.PayoutStartUnix, resp.Proof.PayoutEndUnix)
+	}
+}
+
+func TestMsgServerRegisterProofIdempotentReplayAndConflict(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+	proof := types.RewardProofRecord{
+		ProofPath:         "traffic-proof/msg-proof-replay",
+		TrafficProofRef:   "obj://traffic-proof/msg-proof-replay",
+		TrustContract:     types.RewardProofTrustContractObjectiveTrafficV1,
+		RewardID:          "rew-msg-proof-replay",
+		ProviderSubjectID: "provider-msg-proof-replay",
+		SessionID:         "sess-msg-proof-replay",
+		PayoutStartUnix:   1776643200,
+		PayoutEndUnix:     1777248000,
+		RewardMicros:      55,
+		Currency:          "uusdc",
+		IssuedAtUnix:      1777248001,
+		Verified:          true,
+		VerifierID:        "objective-verifier",
+		VerifiedAtUnix:    1777248002,
+	}
+
+	if _, err := server.RegisterProof(RegisterProofRequest{Proof: proof}); err != nil {
+		t.Fatalf("first proof registration failed: %v", err)
+	}
+	replay, err := server.RegisterProof(RegisterProofRequest{Proof: proof})
+	if err != nil {
+		t.Fatalf("proof replay failed: %v", err)
+	}
+	if !replay.Existed || !replay.Idempotent {
+		t.Fatalf("expected existing idempotent proof replay, got %+v", replay)
+	}
+
+	conflict := proof
+	conflict.RewardMicros = 56
+	resp, err := server.RegisterProof(RegisterProofRequest{Proof: conflict})
+	if err == nil {
+		t.Fatal("expected proof conflict error")
+	}
+	if !errors.Is(err, ErrProofConflict) {
+		t.Fatalf("expected ErrProofConflict, got %v", err)
+	}
+	if !resp.Existed {
+		t.Fatal("expected existed=true on proof conflict")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false on proof conflict")
+	}
+}
+
+func TestWeeklyPayoutPeriodForUnixRejectsNonPositiveTime(t *testing.T) {
+	t.Parallel()
+
+	start, end, ok := weeklyPayoutPeriodForUnix(0)
+	if ok || start != 0 || end != 0 {
+		t.Fatalf("expected non-positive time to have no payout period, got start=%d end=%d ok=%t", start, end, ok)
+	}
+}
+
+func TestPayoutPeriodFillersKeepNilAndExistingWindows(t *testing.T) {
+	t.Parallel()
+
+	fillAccrualWeeklyPayoutPeriod(nil)
+	fillProofWeeklyPayoutPeriod(nil)
+
+	accrual := types.RewardAccrual{
+		AccruedAtUnix:   1700000000,
+		PayoutStartUnix: 10,
+		PayoutEndUnix:   20,
+		OperationState:  chaintypes.ReconciliationPending,
+	}
+	fillAccrualWeeklyPayoutPeriod(&accrual)
+	if accrual.PayoutStartUnix != 10 || accrual.PayoutEndUnix != 20 {
+		t.Fatalf("expected existing accrual payout window to remain unchanged, got start=%d end=%d", accrual.PayoutStartUnix, accrual.PayoutEndUnix)
+	}
+
+	proof := types.RewardProofRecord{
+		IssuedAtUnix:      1700000000,
+		PayoutStartUnix:   30,
+		PayoutEndUnix:     40,
+		RewardMicros:      1,
+		Verified:          true,
+		VerifiedAtUnix:    1700000001,
+		VerifierID:        "verifier",
+		TrustContract:     types.RewardProofTrustContractObjectiveTrafficV1,
+		TrafficProofRef:   "obj://proof",
+		ProofPath:         "proof",
+		RewardID:          "reward",
+		ProviderSubjectID: "provider",
+		SessionID:         "session",
+		Currency:          "uusdc",
+	}
+	fillProofWeeklyPayoutPeriod(&proof)
+	if proof.PayoutStartUnix != 30 || proof.PayoutEndUnix != 40 {
+		t.Fatalf("expected existing proof payout window to remain unchanged, got start=%d end=%d", proof.PayoutStartUnix, proof.PayoutEndUnix)
+	}
+}
+
 func TestMsgServerDistributeRewardIdempotentReplay(t *testing.T) {
 	t.Parallel()
 
@@ -689,5 +840,14 @@ func TestMsgServerNilKeeper(t *testing.T) {
 	})
 	if !errors.Is(distErr, ErrNilKeeper) {
 		t.Fatalf("expected ErrNilKeeper on distribute, got %v", distErr)
+	}
+
+	_, proofErr := server.RegisterProof(RegisterProofRequest{
+		Proof: types.RewardProofRecord{
+			ProofPath: "traffic-proof/nil-keeper",
+		},
+	})
+	if !errors.Is(proofErr, ErrNilKeeper) {
+		t.Fatalf("expected ErrNilKeeper on proof registration, got %v", proofErr)
 	}
 }

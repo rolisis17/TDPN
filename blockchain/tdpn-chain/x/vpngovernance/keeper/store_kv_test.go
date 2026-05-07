@@ -1,7 +1,9 @@
 package keeper
 
 import (
+	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	chaintypes "github.com/tdpn/tdpn-chain/types"
@@ -79,6 +81,52 @@ func TestKVStoreUpsertGetList(t *testing.T) {
 	}
 }
 
+func TestKVStoreNilBackendAndInvalidUpsertsFailClosed(t *testing.T) {
+	t.Parallel()
+
+	store := NewKVStore(nil)
+
+	validPolicy := types.GovernancePolicy{
+		PolicyID:        "policy-valid",
+		Title:           "Policy Valid",
+		Version:         1,
+		ActivatedAtUnix: 1,
+		Status:          chaintypes.ReconciliationPending,
+	}
+	store.UpsertPolicy(validPolicy)
+	if got, ok := store.GetPolicy(validPolicy.PolicyID); !ok || got != validPolicy {
+		t.Fatalf("expected nil-backend store to persist valid policy, got ok=%v record=%+v", ok, got)
+	}
+
+	store.UpsertPolicy(types.GovernancePolicy{PolicyID: "policy-invalid", Version: 1, ActivatedAtUnix: 1})
+	if _, ok := store.GetPolicy("policy-invalid"); ok {
+		t.Fatal("expected invalid policy upsert to be ignored")
+	}
+
+	store.UpsertDecision(types.GovernanceDecision{
+		DecisionID:    "decision-invalid",
+		PolicyID:      validPolicy.PolicyID,
+		ProposalID:    "proposal-invalid",
+		Outcome:       types.DecisionOutcomeApprove,
+		DecidedAtUnix: 1,
+		Status:        chaintypes.ReconciliationPending,
+	})
+	if _, ok := store.GetDecision("decision-invalid"); ok {
+		t.Fatal("expected invalid decision upsert to be ignored")
+	}
+
+	store.PutAuditAction(types.GovernanceAuditAction{
+		ActionID:        "audit-invalid",
+		Action:          "admin_set_policy",
+		Actor:           "bootstrap-admin",
+		EvidencePointer: "ipfs://evidence/audit-invalid",
+		TimestampUnix:   1,
+	})
+	if _, ok := store.GetAuditAction("audit-invalid"); ok {
+		t.Fatal("expected invalid audit action upsert to be ignored")
+	}
+}
+
 func TestKVStoreListFailClosedOnMalformedEntries(t *testing.T) {
 	t.Parallel()
 
@@ -128,6 +176,65 @@ func TestKVStoreListFailClosedOnMalformedEntries(t *testing.T) {
 	}
 	if _, ok := store.GetAuditAction("bad-json"); ok {
 		t.Fatal("expected malformed audit payload to be rejected by GetAuditAction")
+	}
+}
+
+func TestKVStoreListRejectsNonCanonicalKeys(t *testing.T) {
+	t.Parallel()
+
+	policyPayload, err := json.Marshal(types.GovernancePolicy{
+		PolicyID:        "policy-case",
+		Title:           "Policy Case",
+		Version:         1,
+		ActivatedAtUnix: 1,
+		Status:          chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("marshal policy payload: %v", err)
+	}
+	policyBackend := kvtypes.NewMapStore()
+	policyBackend.Set([]byte("policy/Policy-Case"), policyPayload)
+	policyStore := NewKVStore(policyBackend)
+	if _, err := policyStore.ListPoliciesWithError(); err == nil || !strings.Contains(err.Error(), "not canonical") {
+		t.Fatalf("expected non-canonical policy key error, got %v", err)
+	}
+
+	decisionPayload, err := json.Marshal(types.GovernanceDecision{
+		DecisionID:    "decision-case",
+		PolicyID:      "policy-case",
+		ProposalID:    "proposal-case",
+		Outcome:       types.DecisionOutcomeApprove,
+		Decider:       "council",
+		DecidedAtUnix: 1,
+		Status:        chaintypes.ReconciliationPending,
+	})
+	if err != nil {
+		t.Fatalf("marshal decision payload: %v", err)
+	}
+	decisionBackend := kvtypes.NewMapStore()
+	decisionBackend.Set(policyKey("policy-case"), policyPayload)
+	decisionBackend.Set([]byte("decision/Decision-Case"), decisionPayload)
+	decisionStore := NewKVStore(decisionBackend)
+	if _, err := decisionStore.ListDecisionsWithError(); err == nil || !strings.Contains(err.Error(), "not canonical") {
+		t.Fatalf("expected non-canonical decision key error, got %v", err)
+	}
+
+	auditPayload, err := json.Marshal(types.GovernanceAuditAction{
+		ActionID:        "audit-case",
+		Action:          "admin_set_policy",
+		Actor:           "bootstrap-admin",
+		Reason:          "case-sensitive key guard",
+		EvidencePointer: "ipfs://evidence/audit-case",
+		TimestampUnix:   1,
+	})
+	if err != nil {
+		t.Fatalf("marshal audit payload: %v", err)
+	}
+	auditBackend := kvtypes.NewMapStore()
+	auditBackend.Set([]byte("audit_action/Audit-Case"), auditPayload)
+	auditStore := NewKVStore(auditBackend)
+	if _, err := auditStore.ListAuditActionsWithError(); err == nil || !strings.Contains(err.Error(), "not canonical") {
+		t.Fatalf("expected non-canonical audit action key error, got %v", err)
 	}
 }
 
@@ -192,6 +299,56 @@ func TestKVStoreRejectsKeyPayloadIdentityMismatch(t *testing.T) {
 	}
 	if _, err := store.ListAuditActionsWithError(); err == nil {
 		t.Fatal("expected audit action key/payload mismatch to return decode error")
+	}
+}
+
+func TestKVStoreDecodersRejectEmptyAndOversizedPayloads(t *testing.T) {
+	t.Parallel()
+
+	oversized := bytes.Repeat([]byte("x"), maxKVPayloadBytes+1)
+	tests := []struct {
+		name   string
+		decode func([]byte) error
+	}{
+		{
+			name: "policy",
+			decode: func(payload []byte) error {
+				_, err := decodePolicy(payload)
+				return err
+			},
+		},
+		{
+			name: "decision",
+			decode: func(payload []byte) error {
+				_, err := decodeDecision(payload)
+				return err
+			},
+		},
+		{
+			name: "audit action",
+			decode: func(payload []byte) error {
+				_, err := decodeAuditAction(payload)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name+" empty", func(t *testing.T) {
+			t.Parallel()
+
+			if err := tt.decode(nil); err == nil || !strings.Contains(err.Error(), "payload is empty") {
+				t.Fatalf("expected empty payload error, got %v", err)
+			}
+		})
+		t.Run(tt.name+" oversized", func(t *testing.T) {
+			t.Parallel()
+
+			if err := tt.decode(oversized); err == nil || !strings.Contains(err.Error(), "payload exceeds") {
+				t.Fatalf("expected oversized payload error, got %v", err)
+			}
+		})
 	}
 }
 

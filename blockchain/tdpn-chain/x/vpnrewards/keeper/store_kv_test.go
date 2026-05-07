@@ -63,6 +63,28 @@ func TestKVStoreUpsertGetList(t *testing.T) {
 	if distributions[0] != distribution {
 		t.Fatalf("expected list distribution %+v, got %+v", distribution, distributions[0])
 	}
+
+	proof := validRewardProofRecord("traffic/kv-proof-1")
+	if err := store.UpsertProofWithError(proof); err != nil {
+		t.Fatalf("UpsertProofWithError returned unexpected error: %v", err)
+	}
+	store.UpsertProof(proof)
+
+	gotProof, ok := store.GetProof(proof.ProofPath)
+	if !ok {
+		t.Fatal("expected proof to exist")
+	}
+	if gotProof != normalizeProof(proof) {
+		t.Fatalf("expected proof %+v, got %+v", normalizeProof(proof), gotProof)
+	}
+
+	proofs := store.ListProofs()
+	if len(proofs) != 1 {
+		t.Fatalf("expected 1 proof, got %d", len(proofs))
+	}
+	if proofs[0] != normalizeProof(proof) {
+		t.Fatalf("expected list proof %+v, got %+v", normalizeProof(proof), proofs[0])
+	}
 }
 
 func TestKVStoreMalformedPayloadsFailClosed(t *testing.T) {
@@ -128,6 +150,29 @@ func TestKVStoreMalformedPayloadsFailClosed(t *testing.T) {
 	if _, err := store.ListDistributionsWithError(); err == nil {
 		t.Fatal("expected malformed distribution payload to return list decode error")
 	}
+
+	validProof := validRewardProofRecord("traffic/kv-proof-ok")
+	if err := store.UpsertProofWithError(validProof); err != nil {
+		t.Fatalf("UpsertProofWithError returned unexpected error: %v", err)
+	}
+	backend.Set(proofKey("traffic/kv-proof-bad"), []byte("{"))
+
+	if _, ok := store.GetProof("traffic/kv-proof-bad"); ok {
+		t.Fatal("expected malformed proof payload lookup to fail")
+	}
+	gotProof, ok := store.GetProof(validProof.ProofPath)
+	if !ok {
+		t.Fatal("expected valid proof lookup to succeed")
+	}
+	if gotProof != normalizeProof(validProof) {
+		t.Fatalf("expected valid proof %+v, got %+v", normalizeProof(validProof), gotProof)
+	}
+	if proofs := store.ListProofs(); len(proofs) != 0 {
+		t.Fatalf("expected proof listing to fail closed, got %d records", len(proofs))
+	}
+	if _, err := store.ListProofsWithError(); err == nil {
+		t.Fatal("expected malformed proof payload to return list decode error")
+	}
 }
 
 func TestKVStoreRejectsKeyPayloadIdentityMismatch(t *testing.T) {
@@ -174,6 +219,20 @@ func TestKVStoreRejectsKeyPayloadIdentityMismatch(t *testing.T) {
 	}
 	if _, err := store.ListDistributionsWithError(); err == nil {
 		t.Fatal("expected distribution list key/payload mismatch to return decode error")
+	}
+
+	mismatchedProof := validRewardProofRecord("traffic/kv-proof-payload")
+	proofPayload, err := json.Marshal(mismatchedProof)
+	if err != nil {
+		t.Fatalf("marshal mismatched proof: %v", err)
+	}
+	backend.Set(proofKey("traffic/kv-proof-key"), proofPayload)
+
+	if _, ok := store.GetProof("traffic/kv-proof-key"); ok {
+		t.Fatal("expected proof key/payload mismatch to be rejected")
+	}
+	if _, err := store.ListProofsWithError(); err == nil {
+		t.Fatal("expected proof list key/payload mismatch to return decode error")
 	}
 }
 
@@ -231,5 +290,8 @@ func TestNewKVStoreNilFallbackAndPrefixIsolation(t *testing.T) {
 	}
 	if got := len(shadowKV.ListDistributions()); got != 0 {
 		t.Fatalf("expected no distributions from unrelated prefix, got %d", got)
+	}
+	if got := len(shadowKV.ListProofs()); got != 0 {
+		t.Fatalf("expected no proofs from unrelated prefix, got %d", got)
 	}
 }

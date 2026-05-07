@@ -14,7 +14,7 @@ func TestSaveLoadSubjects(t *testing.T) {
 	file := filepath.Join(dir, "subjects.json")
 
 	s := &Service{subjects: map[string]proto.SubjectProfile{}, subjectsFile: file}
-	s.subjects["alice"] = proto.SubjectProfile{Subject: "alice", Tier: 2, Reputation: 0.9, Bond: 200}
+	s.subjects["alice"] = proto.SubjectProfile{Subject: "alice", Kind: proto.SubjectKindRelayExit, Tier: 2, Reputation: 0.9, Bond: 200}
 	if err := s.saveSubjects(); err != nil {
 		t.Fatalf("save failed: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestSaveLoadSubjects(t *testing.T) {
 	}
 }
 
-func TestLoadSubjectsBackfillsMissingKind(t *testing.T) {
+func TestLoadSubjectsPreservesMissingKindForFailClosedProviderRole(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "subjects.json")
 	raw := `{"legacy":{"subject":"legacy","tier":1,"reputation":0.5,"bond":10}}`
@@ -49,8 +49,8 @@ func TestLoadSubjectsBackfillsMissingKind(t *testing.T) {
 		t.Fatalf("load failed: %v", err)
 	}
 	p := s.subjects["legacy"]
-	if p.Kind != proto.SubjectKindRelayExit {
-		t.Fatalf("expected missing kind backfilled to relay-exit, got %s", p.Kind)
+	if p.Kind != "" {
+		t.Fatalf("expected missing kind to stay untrusted/blank, got %s", p.Kind)
 	}
 }
 

@@ -132,6 +132,11 @@ done
 for marker in \
   'Invoke-DesktopBuildPreflight' \
   'Invoke-ReleaseBundleBuild' \
+  'Test-AdminConsoleInstallerPath' \
+  'Assert-PublicInstallerArtifactNotAdminConsole' \
+  'Assert-PublicLaunchTargetNotAdminConsole' \
+  'public desktop installer refuses Admin Console artifact' \
+  'public desktop installer refuses Admin Console launch target' \
   'function Assert-WindowsNativeNonWsl' \
   'preflight_status' \
   'preflight_summary_json' \
@@ -151,13 +156,19 @@ done
 EXE_INSTALLER="$TMP_DIR/fake_installer.exe"
 MSI_INSTALLER="$TMP_DIR/fake_installer.msi"
 LAUNCH_EXE="$TMP_DIR/fake_installed_desktop.exe"
+ADMIN_EXE_INSTALLER="$TMP_DIR/GPM Admin Console Setup.exe"
+ADMIN_LAUNCH_EXE="$TMP_DIR/GPM Admin Console.exe"
 printf 'fake exe payload\n' >"$EXE_INSTALLER"
 printf 'fake msi payload\n' >"$MSI_INSTALLER"
 printf 'fake launch payload\n' >"$LAUNCH_EXE"
+printf 'fake admin console exe payload\n' >"$ADMIN_EXE_INSTALLER"
+printf 'fake admin console launch payload\n' >"$ADMIN_LAUNCH_EXE"
 
 EXE_INSTALLER_PS="$(to_powershell_path "$EXE_INSTALLER")"
 MSI_INSTALLER_PS="$(to_powershell_path "$MSI_INSTALLER")"
 LAUNCH_EXE_PS="$(to_powershell_path "$LAUNCH_EXE")"
+ADMIN_EXE_INSTALLER_PS="$(to_powershell_path "$ADMIN_EXE_INSTALLER")"
+ADMIN_LAUNCH_EXE_PS="$(to_powershell_path "$ADMIN_LAUNCH_EXE")"
 
 echo "[windows-desktop-installer-guardrails] explicit .exe dry-run emits expected summary"
 EXE_SUMMARY_JSON="$TMP_DIR/exe_summary.json"
@@ -243,6 +254,47 @@ if [[ ! -f "$MISSING_SUMMARY_JSON" ]]; then
 fi
 assert_json_expr "$MISSING_SUMMARY_JSON" '.status == "fail"' "missing installer summary must have status=fail"
 assert_json_expr "$MISSING_SUMMARY_JSON" '.failure_stage == "installer_validate"' "missing installer summary must have failure_stage=installer_validate"
+
+echo "[windows-desktop-installer-guardrails] explicit Admin Console installer artifact is rejected"
+ADMIN_SUMMARY_JSON="$TMP_DIR/admin_console_summary.json"
+ADMIN_SUMMARY_JSON_PS="$(to_powershell_path "$ADMIN_SUMMARY_JSON")"
+run_expect_fail_regex \
+  "explicit_admin_console_installer_fail" \
+  "public desktop installer refuses Admin Console artifact" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -InstallerPath "$ADMIN_EXE_INSTALLER_PS" \
+    -DryRun \
+    -SummaryJson "$ADMIN_SUMMARY_JSON_PS" \
+    -PrintSummaryJson 0
+
+if [[ ! -f "$ADMIN_SUMMARY_JSON" ]]; then
+  echo "windows desktop installer guardrails failed: missing summary json for Admin Console installer rejection"
+  cat "$TMP_DIR/explicit_admin_console_installer_fail.log"
+  exit 1
+fi
+assert_json_expr "$ADMIN_SUMMARY_JSON" '.status == "fail"' "admin console installer summary must have status=fail"
+assert_json_expr "$ADMIN_SUMMARY_JSON" '.failure_stage == "installer_validate"' "admin console installer summary must have failure_stage=installer_validate"
+
+echo "[windows-desktop-installer-guardrails] public installer rejects Admin Console launch target override"
+ADMIN_LAUNCH_SUMMARY_JSON="$TMP_DIR/admin_console_launch_target_summary.json"
+ADMIN_LAUNCH_SUMMARY_JSON_PS="$(to_powershell_path "$ADMIN_LAUNCH_SUMMARY_JSON")"
+run_expect_fail_regex \
+  "explicit_admin_console_launch_target_fail" \
+  "public desktop installer refuses Admin Console launch target" \
+  "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_UNDER_TEST_PS" \
+    -InstallerPath "$EXE_INSTALLER_PS" \
+    -InstalledExecutablePath "$ADMIN_LAUNCH_EXE_PS" \
+    -DryRun \
+    -SummaryJson "$ADMIN_LAUNCH_SUMMARY_JSON_PS" \
+    -PrintSummaryJson 0
+
+if [[ ! -f "$ADMIN_LAUNCH_SUMMARY_JSON" ]]; then
+  echo "windows desktop installer guardrails failed: missing summary json for Admin Console launch target rejection"
+  cat "$TMP_DIR/explicit_admin_console_launch_target_fail.log"
+  exit 1
+fi
+assert_json_expr "$ADMIN_LAUNCH_SUMMARY_JSON" '.status == "fail"' "admin console launch target summary must have status=fail"
+assert_json_expr "$ADMIN_LAUNCH_SUMMARY_JSON" '.failure_stage == "launch_validate"' "admin console launch target summary must have failure_stage=launch_validate"
 
 echo "[windows-desktop-installer-guardrails] build mode rejects explicit installer path"
 BUILD_MODE_EXPLICIT_FAIL_SUMMARY="$TMP_DIR/build_mode_explicit_fail_summary.json"

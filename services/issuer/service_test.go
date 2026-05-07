@@ -3,11 +3,19 @@ package issuer
 import (
 	"context"
 	"crypto/ed25519"
+	cryptorand "crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +24,55 @@ import (
 	"privacynode/pkg/proto"
 	"privacynode/pkg/settlement"
 )
+
+func configureIssuerTestMTLS(t *testing.T) {
+	t.Helper()
+	t.Setenv("MTLS_ENABLE", "1")
+	t.Setenv("MTLS_INSECURE_SKIP_VERIFY", "0")
+	t.Setenv("MTLS_REQUIRE_CLIENT_CERT", "1")
+	t.Setenv("MTLS_MIN_VERSION", "1.3")
+	t.Setenv("COSMOS_SETTLEMENT_TRUSTED_BRIDGE_FINALITY", "0")
+	t.Setenv("COSMOS_SETTLEMENT_SUBMIT_MODE", "http")
+
+	dir := t.TempDir()
+	key, err := rsa.GenerateKey(cryptorand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate mTLS key: %v", err)
+	}
+	tmpl := x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "localhost"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		DNSNames:              []string{"localhost"},
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(cryptorand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("generate mTLS cert: %v", err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	certFile := filepath.Join(dir, "node.crt")
+	keyFile := filepath.Join(dir, "node.key")
+	caFile := filepath.Join(dir, "ca.crt")
+	if err := os.WriteFile(certFile, certPEM, 0o644); err != nil {
+		t.Fatalf("write mTLS cert: %v", err)
+	}
+	if err := os.WriteFile(caFile, certPEM, 0o644); err != nil {
+		t.Fatalf("write mTLS ca: %v", err)
+	}
+	if err := os.WriteFile(keyFile, keyPEM, 0o600); err != nil {
+		t.Fatalf("write mTLS key: %v", err)
+	}
+	restrictIssuerTestSecretFile(t, keyFile)
+	t.Setenv("MTLS_CERT_FILE", certFile)
+	t.Setenv("MTLS_KEY_FILE", keyFile)
+	t.Setenv("MTLS_CA_FILE", caFile)
+}
 
 func TestBaseClaimsForTier1(t *testing.T) {
 	exp := time.Now().Add(10 * time.Minute)
@@ -172,9 +229,53 @@ func TestValidateRuntimeConfigBetaStrict(t *testing.T) {
 		requirePaymentProof: true,
 		keyRotateSec:        60,
 		tokenTTL:            10 * time.Minute,
+		clientAllowlistOnly: true,
+		disableAnonCred:     true,
 	}
 	if err := s.validateRuntimeConfig(); err != nil {
 		t.Fatalf("expected strict config valid, got %v", err)
+	}
+}
+
+func TestNewParsesIssuerStrictModeBooleans(t *testing.T) {
+	t.Setenv("BETA_STRICT_MODE", "true")
+	t.Setenv("ISSUER_PROD_STRICT", "yes")
+
+	s := New()
+	if !s.betaStrict {
+		t.Fatalf("expected BETA_STRICT_MODE=true to enable beta strict")
+	}
+	if !s.prodStrict {
+		t.Fatalf("expected ISSUER_PROD_STRICT=yes to enable prod strict")
+	}
+	if s.strictModeParseErr != nil {
+		t.Fatalf("unexpected strict mode parse error: %v", s.strictModeParseErr)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsMalformedStrictModeEnv(t *testing.T) {
+	t.Setenv("BETA_STRICT_MODE", "definitely")
+
+	s := New()
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode env parse error")
+	}
+	if !strings.Contains(err.Error(), "BETA_STRICT_MODE/ISSUER_BETA_STRICT invalid") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigRejectsEmptyStrictModeAliasEnv(t *testing.T) {
+	t.Setenv("ISSUER_PROD_STRICT", " ")
+
+	s := New()
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict mode env parse error")
+	}
+	if !strings.Contains(err.Error(), "PROD_STRICT_MODE/ISSUER_PROD_STRICT invalid") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -191,6 +292,112 @@ func TestValidateRuntimeConfigProdStrictRejectsInsecureSkipVerify(t *testing.T) 
 	}
 	if err.Error() != "PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY" {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictRejectsTrustedBridgeFinality(t *testing.T) {
+	t.Setenv("COSMOS_SETTLEMENT_TRUSTED_BRIDGE_FINALITY", "true")
+	s := &Service{prodStrict: true}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected prod strict to reject trusted bridge finality")
+	}
+	if err.Error() != "PROD_STRICT_MODE forbids COSMOS_SETTLEMENT_TRUSTED_BRIDGE_FINALITY" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictRejectsSignedTxSubmitMode(t *testing.T) {
+	t.Setenv("COSMOS_SETTLEMENT_SUBMIT_MODE", settlement.CosmosSubmitModeSignedTx)
+	s := &Service{prodStrict: true}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected prod strict to reject signed-tx submit mode")
+	}
+	if err.Error() != "PROD_STRICT_MODE forbids COSMOS_SETTLEMENT_SUBMIT_MODE=signed-tx" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictRejectsShadowCosmosNonProductionFinalityModes(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		val  string
+		want string
+	}{
+		{
+			name: "trusted bridge finality",
+			key:  "COSMOS_SETTLEMENT_SHADOW_TRUSTED_BRIDGE_FINALITY",
+			val:  "true",
+			want: "PROD_STRICT_MODE forbids COSMOS_SETTLEMENT_SHADOW_TRUSTED_BRIDGE_FINALITY",
+		},
+		{
+			name: "signed tx submit mode",
+			key:  "COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE",
+			val:  settlement.CosmosSubmitModeSignedTx,
+			want: "PROD_STRICT_MODE forbids COSMOS_SETTLEMENT_SHADOW_SUBMIT_MODE=signed-tx",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tc.key, tc.val)
+			s := &Service{prodStrict: true}
+			err := s.validateRuntimeConfig()
+			if err == nil {
+				t.Fatalf("expected prod strict to reject %s", tc.key)
+			}
+			if err.Error() != tc.want {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictRequiresPaymentReplayStore(t *testing.T) {
+	configureIssuerTestMTLS(t)
+	s := &Service{
+		prodStrict:            true,
+		betaStrict:            true,
+		adminAllowToken:       false,
+		adminAllowTokenSet:    true,
+		adminRequireSigned:    true,
+		adminPubKeys:          map[string]ed25519.PublicKey{"k1": make(ed25519.PublicKey, ed25519.PublicKeySize)},
+		requirePaymentProof:   true,
+		keyRotateSec:          60,
+		tokenTTL:              10 * time.Minute,
+		clientAllowlistOnly:   true,
+		disableAnonCred:       true,
+		settlementChainBacked: true,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected prod strict config to require durable payment replay store")
+	}
+	if !strings.Contains(err.Error(), "ISSUER_PAYMENT_REPLAY_STORE_FILE") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictAllowsPaymentReplayStore(t *testing.T) {
+	configureIssuerTestMTLS(t)
+	s := &Service{
+		prodStrict:                   true,
+		betaStrict:                   true,
+		adminAllowToken:              false,
+		adminAllowTokenSet:           true,
+		adminRequireSigned:           true,
+		adminPubKeys:                 map[string]ed25519.PublicKey{"k1": make(ed25519.PublicKey, ed25519.PublicKeySize)},
+		requirePaymentProof:          true,
+		keyRotateSec:                 60,
+		tokenTTL:                     10 * time.Minute,
+		clientAllowlistOnly:          true,
+		disableAnonCred:              true,
+		settlementChainBacked:        true,
+		issuedPaymentReplayStoreFile: filepath.Join(t.TempDir(), "payment_replay.json"),
+	}
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected prod strict config with durable replay store to pass, got %v", err)
 	}
 }
 
@@ -235,8 +442,10 @@ func TestValidateRuntimeConfigBetaStrictSignedOnlyAllowsEmptyToken(t *testing.T)
 		adminPubKeys: map[string]ed25519.PublicKey{
 			"k1": make(ed25519.PublicKey, ed25519.PublicKeySize),
 		},
-		keyRotateSec: 60,
-		tokenTTL:     10 * time.Minute,
+		keyRotateSec:        60,
+		tokenTTL:            10 * time.Minute,
+		clientAllowlistOnly: true,
+		disableAnonCred:     true,
 	}
 	if err := s.validateRuntimeConfig(); err != nil {
 		t.Fatalf("expected strict config valid in signed-only mode, got %v", err)
@@ -273,6 +482,42 @@ func TestValidateRuntimeConfigBetaStrictRejectsMissingPaymentProofRequirement(t 
 	}
 }
 
+func TestValidateRuntimeConfigBetaStrictRequiresClientAllowlist(t *testing.T) {
+	s := &Service{
+		betaStrict:          true,
+		adminToken:          "super-secret-admin-token",
+		requirePaymentProof: true,
+		keyRotateSec:        60,
+		tokenTTL:            10 * time.Minute,
+		disableAnonCred:     true,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict config rejection")
+	}
+	if err.Error() != "BETA_STRICT_MODE requires ISSUER_CLIENT_ALLOWLIST_ONLY=1" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigBetaStrictRejectsAnonymousCredentials(t *testing.T) {
+	s := &Service{
+		betaStrict:          true,
+		adminToken:          "super-secret-admin-token",
+		requirePaymentProof: true,
+		keyRotateSec:        60,
+		tokenTTL:            10 * time.Minute,
+		clientAllowlistOnly: true,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected strict config rejection")
+	}
+	if err.Error() != "BETA_STRICT_MODE requires ISSUER_ALLOW_ANON_CRED=0" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestHandleCriticalStartupLoadErrorFailsClosedInStrictMode(t *testing.T) {
 	s := &Service{betaStrict: true}
 	loadErr := errors.New("read failed")
@@ -290,6 +535,24 @@ func TestHandleCriticalStartupLoadErrorWarnsOutsideStrictMode(t *testing.T) {
 	loadErr := errors.New("read failed")
 	if err := s.handleCriticalStartupLoadError("revocations", loadErr); err != nil {
 		t.Fatalf("expected non-strict startup load warning path, got %v", err)
+	}
+}
+
+func TestPaymentReplayStoreLoadFailsClosedWhenPaymentProofsRequireConfiguredStore(t *testing.T) {
+	storeFile := filepath.Join(t.TempDir(), "payment_replay.json")
+	if err := os.WriteFile(storeFile, []byte("{not-json"), 0o600); err != nil {
+		t.Fatalf("write invalid replay store: %v", err)
+	}
+	s := &Service{
+		requirePaymentProof:          true,
+		issuedPaymentReplayStoreFile: storeFile,
+	}
+	err := s.handlePaymentReplayStoreLoadError(s.loadIssuedPaymentReplayStore())
+	if err == nil {
+		t.Fatalf("expected configured payment replay store load failure to fail closed")
+	}
+	if !strings.Contains(err.Error(), "payment replay store load failed") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -529,6 +792,36 @@ func TestRequireAdminSignedModeAllowsExplicitTokenFallback(t *testing.T) {
 	rr := httptest.NewRecorder()
 	if !s.requireAdmin(rr, req) {
 		t.Fatalf("expected explicit signed-admin token fallback to authorize request")
+	}
+}
+
+func TestAdminNonceReplayPersistsAcrossServiceRestart(t *testing.T) {
+	nonceFile := filepath.Join(t.TempDir(), "issuer_admin_nonces.json")
+	now := time.Now().Unix()
+	windowSec := int64(90)
+	first := &Service{
+		adminNonceFile: nonceFile,
+		adminSeenNonce: make(map[string]int64),
+	}
+	if err := first.claimAdminNonce("admin-key-1", "nonce-1", now, windowSec); err != nil {
+		t.Fatalf("first nonce claim failed: %v", err)
+	}
+
+	restarted := &Service{
+		adminNonceFile:    nonceFile,
+		adminSeenNonce:    make(map[string]int64),
+		adminSignedWindow: time.Duration(windowSec) * time.Second,
+	}
+	if err := restarted.loadAdminNonces(); err != nil {
+		t.Fatalf("load admin nonce state: %v", err)
+	}
+	if err := restarted.claimAdminNonce("admin-key-1", "nonce-1", now+1, windowSec); err == nil {
+		t.Fatalf("expected persisted nonce replay to be rejected after restart")
+	} else if !strings.Contains(err.Error(), "replayed admin nonce") {
+		t.Fatalf("expected replay error, got %v", err)
+	}
+	if err := restarted.claimAdminNonce("admin-key-1", "nonce-2", now+2, windowSec); err != nil {
+		t.Fatalf("fresh nonce claim after restart failed: %v", err)
 	}
 }
 

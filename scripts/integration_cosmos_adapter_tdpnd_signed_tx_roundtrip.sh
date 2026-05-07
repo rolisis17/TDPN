@@ -179,11 +179,17 @@ func must(err error) {
 	}
 }
 
-func assert(cond bool, msg string) {
-	if !cond {
-		panic(msg)
+	func assert(cond bool, msg string) {
+		if !cond {
+			panic(msg)
+		}
 	}
-}
+
+	func assertErrorContains(err error, want string) {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			panic(fmt.Sprintf("expected error containing %q, got %v", want, err))
+		}
+	}
 
 func waitForFundReservationStatus(ctx context.Context, adapter *settlement.CosmosAdapter, reservationID string, want settlement.OperationStatus) {
 	deadline := time.Now().Add(2 * time.Second)
@@ -359,6 +365,7 @@ func main() {
 		APIKey:                token,
 		RewardProofAuthToken:  rewardProofToken,
 		FinalityAuthToken:     finalityToken,
+		RewardProofVerifierID: "adapter-signed-tx-verifier",
 		QueueSize:             32,
 		MaxRetries:            1,
 		BaseBackoff:           10 * time.Millisecond,
@@ -398,8 +405,7 @@ func main() {
 
 	reservation.Status = settlement.OperationStatusConfirmed
 	_, err = adapter.SubmitFundReservation(ctx, reservation)
-	must(err)
-	waitForFundReservationStatus(ctx, adapter, reservation.ReservationID, settlement.OperationStatusConfirmed)
+	assertErrorContains(err, "requires trusted bridge finality")
 
 	settlementRecord := settlement.SessionSettlement{
 		SettlementID:  "set-" + sessionID,
@@ -412,8 +418,7 @@ func main() {
 		Status:        settlement.OperationStatusConfirmed,
 	}
 	_, err = adapter.SubmitSessionSettlement(ctx, settlementRecord)
-	must(err)
-	waitForSessionSettlementVisible(ctx, adapter, settlementRecord.SettlementID)
+	assertErrorContains(err, "requires trusted bridge finality")
 
 	periodStart := time.Date(2025, 12, 29, 0, 0, 0, 0, time.UTC)
 	periodEnd := periodStart.AddDate(0, 0, 7)
@@ -480,16 +485,14 @@ func main() {
 	assert(!slashEvidence.AdapterDeferred, "expected slash evidence not deferred")
 
 	checkVisible := func() (bool, string) {
-		settlementVisible, err := adapter.HasSessionSettlement(ctx, settlementRecord.SettlementID)
-		must(err)
 		rewardVisible, err := adapter.HasRewardIssue(ctx, reward.RewardID)
 		must(err)
 		sponsorVisible, err := adapter.HasSponsorReservation(ctx, sponsorReservation.ReservationID)
 		must(err)
 		slashVisible, err := adapter.HasSlashEvidence(ctx, slashEvidence.EvidenceID)
 		must(err)
-		visible := settlementVisible && rewardVisible && sponsorVisible && slashVisible
-		return visible, fmt.Sprintf("settlement=%t reward=%t sponsor=%t slash=%t", settlementVisible, rewardVisible, sponsorVisible, slashVisible)
+		visible := rewardVisible && sponsorVisible && slashVisible
+		return visible, fmt.Sprintf("reward=%t sponsor=%t slash=%t", rewardVisible, sponsorVisible, slashVisible)
 	}
 
 	deadline := time.Now().Add(2 * time.Second)

@@ -3879,6 +3879,72 @@ func TestSyncPeerRelaysDiscoversNewPeerFromPeerFeed(t *testing.T) {
 	}
 }
 
+func TestSyncPeerRelaysDoesNotDoubleCountSourceAfterSelfHint(t *testing.T) {
+	urlA := "http://peer-a.local"
+	urlB := "http://peer-b.local"
+	pubA, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenA: %v", err)
+	}
+	pubB, privB, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("keygenB: %v", err)
+	}
+	now := time.Now().UTC()
+	feedB := proto.DirectoryPeerListResponse{
+		Operator:    "op-b",
+		GeneratedAt: now.Unix(),
+		ExpiresAt:   now.Add(40 * time.Second).Unix(),
+		Peers:       []string{urlB, urlA},
+		PeerHints: []proto.DirectoryPeerHint{
+			{URL: urlB, Operator: "op-b", PubKey: base64.RawURLEncoding.EncodeToString(pubB)},
+			{URL: urlA, Operator: "op-a", PubKey: base64.RawURLEncoding.EncodeToString(pubA)},
+		},
+	}
+	feedBSig, err := signDirectoryPeerList(feedB, privB)
+	if err != nil {
+		t.Fatalf("sign peer feed b: %v", err)
+	}
+	feedB.Signature = feedBSig
+
+	handlers := map[string]func(*http.Request) (*http.Response, error){
+		urlB + "/v1/pubkeys": jsonResp(proto.DirectoryPubKeysResponse{
+			Operator: "op-b",
+			PubKeys:  []string{base64.RawURLEncoding.EncodeToString(pubB)},
+		}),
+		urlB + "/v1/peers":  jsonResp(feedB),
+		urlB + "/v1/relays": jsonResp(proto.RelayListResponse{}),
+	}
+
+	s := &Service{
+		operatorID:            "op-local",
+		localURL:              "http://local-dir",
+		peerURLs:              []string{urlB},
+		peerDiscoveryEnabled:  true,
+		peerDiscoveryTTL:      10 * time.Minute,
+		peerDiscoveryMax:      8,
+		peerDiscoveryMinVotes: 2,
+		peerRelays:            make(map[string]proto.RelayDescriptor),
+		discoveredPeers:       make(map[string]time.Time),
+		discoveredPeerVoters:  make(map[string]map[string]time.Time),
+		peerHintPubKeys:       make(map[string]string),
+		peerHintOperators:     make(map[string]string),
+		peerRelayETags:        make(map[string]string),
+		peerRelayCache:        make(map[string][]proto.RelayDescriptor),
+		httpClient:            &http.Client{Transport: mockRoundTripper{handlers: handlers}},
+	}
+
+	if err := s.syncPeerRelays(context.Background()); err != nil {
+		t.Fatalf("syncPeerRelays first: %v", err)
+	}
+	if err := s.syncPeerRelays(context.Background()); err != nil {
+		t.Fatalf("syncPeerRelays second: %v", err)
+	}
+	if containsString(s.snapshotSyncPeers(time.Now()), urlA) {
+		t.Fatalf("did not expect one peer to satisfy two-source discovery quorum")
+	}
+}
+
 func TestIngestDiscoveredPeersRequiresOperatorVotes(t *testing.T) {
 	now := time.Now().UTC()
 	discoveredURL := "http://peer-new.local"
@@ -4026,6 +4092,45 @@ func TestIngestDiscoveredPeersStoresSourceHintMetadata(t *testing.T) {
 	}
 	if got := s.peerHintPubKey(sourceURL); got != validHintKey {
 		t.Fatalf("expected source hint pubkey persisted, got %q", got)
+	}
+}
+
+func TestIngestDiscoveredPeersStoresDisallowedSourceHintMetadata(t *testing.T) {
+	now := time.Now().UTC()
+	sourceURL := "http://127.0.0.1:9001"
+	discoveredURL := "http://127.0.0.1:9002"
+	validHintKey := base64.RawURLEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))
+	s := &Service{
+		localURL:              "http://local-dir",
+		peerURLs:              []string{sourceURL},
+		peerDiscoveryEnabled:  true,
+		peerDiscoveryTTL:      10 * time.Minute,
+		peerDiscoveryMax:      16,
+		peerDiscoveryMinVotes: 1,
+		discoveredPeers:       make(map[string]time.Time),
+		discoveredPeerVoters:  make(map[string]map[string]time.Time),
+		discoveredPeerHealth:  make(map[string]discoveredPeerHealth),
+		peerHintPubKeys:       make(map[string]string),
+		peerHintOperators:     make(map[string]string),
+	}
+	hints := []proto.DirectoryPeerHint{
+		{URL: sourceURL, Operator: "op-source", PubKey: validHintKey},
+		{URL: discoveredURL, Operator: "op-disallowed", PubKey: validHintKey},
+	}
+	if imported := s.ingestDiscoveredPeers(sourceURL, "op-source", hints, now); imported != 0 {
+		t.Fatalf("expected no private peer admission, got imported=%d", imported)
+	}
+	if got := s.peerHintOperator(sourceURL); got != "op-source" {
+		t.Fatalf("expected disallowed source hint operator persisted, got %q", got)
+	}
+	if got := s.peerHintPubKey(sourceURL); got != validHintKey {
+		t.Fatalf("expected disallowed source hint pubkey persisted, got %q", got)
+	}
+	if got := s.peerHintOperator(discoveredURL); got != "" {
+		t.Fatalf("did not expect disallowed discovered hint operator persisted, got %q", got)
+	}
+	if containsString(s.snapshotSyncPeers(now.Add(time.Second)), discoveredURL) {
+		t.Fatalf("did not expect disallowed discovered peer to be admitted")
 	}
 }
 

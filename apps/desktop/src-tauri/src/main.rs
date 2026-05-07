@@ -3,7 +3,7 @@ mod local_api;
 use local_api::{
     ConnectRequest, GPMClientRegisterRequest, GPMClientStatusRequest, GPMContributionStatusRequest,
     GPMContributionToggleRequest, GPMOperatorApplyRequest, GPMOperatorStatusRequest,
-    GPMSessionStatusRequest, GPMServerStatusRequest, GPMSettlementReserveFundsRequest,
+    GPMServerStatusRequest, GPMSessionStatusRequest, GPMSettlementReserveFundsRequest,
     GPMWalletChallengeRequest, GPMWalletVerifyRequest, LocalApiClient, LocalApiConfig,
     RuntimePolicyConfig,
 };

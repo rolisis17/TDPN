@@ -92,6 +92,15 @@ bool_arg_or_die() {
   fi
 }
 
+script_override_or_die() {
+  local env_name="$1"
+  local stage_label="$2"
+  if [[ -n "${!env_name:-}" && "$allow_unsafe_script_overrides" != "1" ]]; then
+    echo "unsafe stage script override rejected for $stage_label via $env_name; set BLOCKCHAIN_FASTLANE_ALLOW_UNSAFE_SCRIPT_OVERRIDES=1 only in tests/dev"
+    exit 2
+  fi
+}
+
 path_arg_or_die() {
   local name="$1"
   local value="$2"
@@ -189,6 +198,7 @@ summary_json="${BLOCKCHAIN_FASTLANE_SUMMARY_JSON:-}"
 canonical_summary_json="${BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/blockchain_fastlane_summary.json}"
 print_summary_json="${BLOCKCHAIN_FASTLANE_PRINT_SUMMARY_JSON:-1}"
 dry_run="${BLOCKCHAIN_FASTLANE_DRY_RUN:-0}"
+allow_unsafe_script_overrides="${BLOCKCHAIN_FASTLANE_ALLOW_UNSAFE_SCRIPT_OVERRIDES:-0}"
 
 run_ci_phase5_settlement_layer="${BLOCKCHAIN_FASTLANE_RUN_CI_PHASE5_SETTLEMENT_LAYER:-1}"
 run_ci_phase6_cosmos_l1_build_testnet="${BLOCKCHAIN_FASTLANE_RUN_CI_PHASE6_COSMOS_L1_BUILD_TESTNET:-1}"
@@ -385,6 +395,7 @@ done
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--dry-run" "$dry_run"
+bool_arg_or_die "BLOCKCHAIN_FASTLANE_ALLOW_UNSAFE_SCRIPT_OVERRIDES" "$allow_unsafe_script_overrides"
 bool_arg_or_die "--run-ci-phase5-settlement-layer" "$run_ci_phase5_settlement_layer"
 bool_arg_or_die "--run-ci-phase6-cosmos-l1-build-testnet" "$run_ci_phase6_cosmos_l1_build_testnet"
 bool_arg_or_die "--run-ci-phase6-cosmos-l1-contracts" "$run_ci_phase6_cosmos_l1_contracts"
@@ -393,6 +404,19 @@ bool_arg_or_die "--run-blockchain-mainnet-activation-metrics" "$run_blockchain_m
 bool_arg_or_die "--run-blockchain-mainnet-activation-operator-pack" "$run_blockchain_mainnet_activation_operator_pack"
 bool_arg_or_die "--run-blockchain-mainnet-activation-gate" "$run_blockchain_mainnet_activation_gate"
 bool_arg_or_die "--run-blockchain-bootstrap-governance-graduation-gate" "$run_blockchain_bootstrap_governance_graduation_gate"
+
+script_override_or_die "BLOCKCHAIN_FASTLANE_CI_PHASE5_SETTLEMENT_LAYER_SCRIPT" "ci_phase5_settlement_layer"
+script_override_or_die "BLOCKCHAIN_FASTLANE_CI_PHASE6_COSMOS_L1_BUILD_TESTNET_SCRIPT" "ci_phase6_cosmos_l1_build_testnet"
+script_override_or_die "BLOCKCHAIN_FASTLANE_CI_PHASE6_COSMOS_L1_CONTRACTS_SCRIPT" "ci_phase6_cosmos_l1_contracts"
+script_override_or_die "BLOCKCHAIN_FASTLANE_INTEGRATION_SLASH_VIOLATION_TYPE_CONTRACT_CONSISTENCY_SCRIPT" "integration_slash_violation_type_contract_consistency"
+script_override_or_die "BLOCKCHAIN_FASTLANE_INTEGRATION_COSMOS_RECORD_NORMALIZATION_CONTRACT_CONSISTENCY_SCRIPT" "integration_cosmos_record_normalization_contract_consistency"
+script_override_or_die "BLOCKCHAIN_FASTLANE_INTEGRATION_BLOCKCHAIN_COSMOS_ONLY_GUARDRAIL_SCRIPT" "integration_blockchain_cosmos_only_guardrail"
+script_override_or_die "BLOCKCHAIN_FASTLANE_CI_PHASE7_MAINNET_CUTOVER_SCRIPT" "ci_phase7_mainnet_cutover"
+script_override_or_die "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_SCRIPT" "blockchain_mainnet_activation_metrics"
+script_override_or_die "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_SCRIPT" "blockchain_mainnet_activation_metrics_input"
+script_override_or_die "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_SCRIPT" "blockchain_mainnet_activation_operator_pack"
+script_override_or_die "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SCRIPT" "blockchain_mainnet_activation_gate"
+script_override_or_die "BLOCKCHAIN_FASTLANE_BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SCRIPT" "blockchain_bootstrap_governance_graduation_gate"
 
 ci_phase5_settlement_layer_script="${BLOCKCHAIN_FASTLANE_CI_PHASE5_SETTLEMENT_LAYER_SCRIPT:-$ROOT_DIR/scripts/ci_phase5_settlement_layer.sh}"
 ci_phase6_cosmos_l1_build_testnet_script="${BLOCKCHAIN_FASTLANE_CI_PHASE6_COSMOS_L1_BUILD_TESTNET_SCRIPT:-$ROOT_DIR/scripts/ci_phase6_cosmos_l1_build_testnet.sh}"
@@ -739,7 +763,7 @@ for stage_id in "${stage_ids[@]}"; do
       if [[ -n "$blockchain_mainnet_activation_gate_summary_json" ]]; then
         stage_args+=(--summary-json "$blockchain_mainnet_activation_gate_summary_json")
       fi
-      stage_args+=(--fail-close 1)
+      stage_args+=(--enforce-launch --require-real-evidence 1 --fail-close 1)
       ;;
     "blockchain_bootstrap_governance_graduation_gate")
       if [[ -n "$blockchain_activation_gate_metrics_json" ]]; then
@@ -748,7 +772,7 @@ for stage_id in "${stage_ids[@]}"; do
       if [[ -n "$blockchain_bootstrap_governance_graduation_gate_summary_json" ]]; then
         stage_args+=(--summary-json "$blockchain_bootstrap_governance_graduation_gate_summary_json")
       fi
-      stage_args+=(--fail-close 1)
+      stage_args+=(--enforce-launch --require-real-evidence 1 --fail-close 1)
       ;;
   esac
 

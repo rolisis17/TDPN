@@ -14,6 +14,8 @@ Usage:
     [--print-summary-json [0|1]] \
     [--print-output-json [0|1]] \
     [--metrics-summary-json PATH] \
+    [--require-metrics-summary [0|1]] \
+    [--enforce-launch [0|1]] \
     [--template-output-json PATH] \
     [--template-canonical-output-json PATH] \
     [--template-include-example-values [0|1]] \
@@ -21,7 +23,8 @@ Usage:
     [--missing-input-template-canonical-output-json PATH] \
     [--missing-input-template-include-example-values [0|1]] \
     [--checklist-output-json PATH] \
-    [--checklist-output-md PATH]
+    [--checklist-output-md PATH] \
+    [--allow-unsafe-artifact-paths [0|1]]
 
 Purpose:
   Generate operator-ready blockchain mainnet activation artifacts in one run:
@@ -39,6 +42,11 @@ Notes:
     --metrics-summary-json is provided and the file exists at execution time.
   - Missing metrics summary is fail-soft: optional stages are skipped and pack
     still exits 0 when no runtime stage failure occurs.
+  - Use --require-metrics-summary 1 or --enforce-launch 1 to fail closed when
+    the metrics summary or required missing-metrics/checklist artifacts are
+    absent.
+  - In launch enforcement mode, generated artifact paths must stay under
+    --reports-dir unless --allow-unsafe-artifact-paths 1 is passed.
 USAGE
 }
 
@@ -67,6 +75,95 @@ abs_path() {
   else
     printf '%s' "$ROOT_DIR/$path"
   fi
+}
+
+normalize_abs_path() {
+  local path="$1"
+  local old_ifs="$IFS"
+  local part
+  local -a parts=()
+  local -a stack=()
+
+  path="$(abs_path "$path")"
+  IFS='/'
+  read -r -a parts <<<"$path"
+  IFS="$old_ifs"
+
+  for part in "${parts[@]}"; do
+    case "$part" in
+      ""|.)
+        ;;
+      ..)
+        if ((${#stack[@]} > 0)); then
+          stack=("${stack[@]:0:$((${#stack[@]} - 1))}")
+        fi
+        ;;
+      *)
+        stack+=("$part")
+        ;;
+    esac
+  done
+
+  if ((${#stack[@]} == 0)); then
+    printf '%s' "/"
+    return
+  fi
+
+  printf '/%s' "${stack[@]}"
+}
+
+physical_existing_ancestor() {
+  local path="$1"
+  local probe
+  local parent
+
+  path="$(abs_path "$path")"
+  probe="$path"
+  while [[ ! -e "$probe" && ! -L "$probe" ]]; do
+    parent="$(dirname "$probe")"
+    if [[ "$parent" == "$probe" ]]; then
+      break
+    fi
+    probe="$parent"
+  done
+
+  if [[ -d "$probe" ]]; then
+    (cd -P "$probe" && pwd)
+  else
+    parent="$(dirname "$probe")"
+    (cd -P "$parent" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$probe")")
+  fi
+}
+
+artifact_path_under_reports_or_die() {
+  local name="$1"
+  local path="$2"
+  local reports_phys path_parent_phys path_abs path_parent
+
+  if [[ "$enforce_artifact_reports_dir_guard" != "1" || "$allow_unsafe_artifact_paths" == "1" ]]; then
+    return
+  fi
+
+  path="$(trim "$path")"
+  if [[ -z "$path" ]]; then
+    return
+  fi
+
+  path_abs="$(abs_path "$path")"
+  if [[ -L "$path_abs" ]]; then
+    echo "unsafe artifact path for $name: $path must not be a symlink in launch enforcement mode"
+    exit 2
+  fi
+
+  reports_phys="$(physical_existing_ancestor "$reports_dir")"
+  path_parent="$(dirname "$path_abs")"
+  path_parent_phys="$(physical_existing_ancestor "$path_parent")"
+  if [[ "$path_parent_phys" == "$reports_phys" || "$path_parent_phys" == "$reports_phys"/* ]]; then
+    return
+  fi
+
+  echo "unsafe artifact path for $name: $path must stay under --reports-dir ($reports_dir); pass --allow-unsafe-artifact-paths 1 or set BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_ALLOW_UNSAFE_ARTIFACT_PATHS=1 to override"
+  exit 2
 }
 
 bool_arg_or_die() {
@@ -100,6 +197,15 @@ print_cmd() {
     printf '%q ' "$arg"
   done
   printf '\n'
+}
+
+array_to_json() {
+  local -n arr_ref=$1
+  if ((${#arr_ref[@]} == 0)); then
+    printf '%s' "[]"
+    return
+  fi
+  printf '%s\n' "${arr_ref[@]}" | jq -R . | jq -s .
 }
 
 run_step() {
@@ -142,6 +248,12 @@ reports_dir="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_REPORTS_DIR:-$ROOT_DI
 summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_SUMMARY_JSON:-}"
 canonical_summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/blockchain_mainnet_activation_operator_pack_summary.json}"
 print_summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_PRINT_SUMMARY_JSON:-1}"
+require_metrics_summary="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_REQUIRE_METRICS_SUMMARY:-0}"
+allow_unsafe_artifact_paths="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_ALLOW_UNSAFE_ARTIFACT_PATHS:-0}"
+canonical_summary_json_from_user="0"
+if [[ -n "${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_CANONICAL_SUMMARY_JSON:-}" ]]; then
+  canonical_summary_json_from_user="1"
+fi
 
 metrics_summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_OPERATOR_PACK_METRICS_SUMMARY_JSON:-}"
 
@@ -174,6 +286,7 @@ while [[ $# -gt 0 ]]; do
     --canonical-summary-json)
       path_arg_or_die "--canonical-summary-json" "${2:-}"
       canonical_summary_json="${2:-}"
+      canonical_summary_json_from_user="1"
       shift 2
       ;;
     --print-summary-json|--print-output-json)
@@ -189,6 +302,15 @@ while [[ $# -gt 0 ]]; do
       path_arg_or_die "--metrics-summary-json" "${2:-}"
       metrics_summary_json="${2:-}"
       shift 2
+      ;;
+    --require-metrics-summary|--enforce-launch)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_metrics_summary="${2:-}"
+        shift 2
+      else
+        require_metrics_summary="1"
+        shift
+      fi
       ;;
     --template-output-json)
       path_arg_or_die "--template-output-json" "${2:-}"
@@ -238,6 +360,15 @@ while [[ $# -gt 0 ]]; do
       checklist_output_md="${2:-}"
       shift 2
       ;;
+    --allow-unsafe-artifact-paths)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_unsafe_artifact_paths="${2:-}"
+        shift 2
+      else
+        allow_unsafe_artifact_paths="1"
+        shift
+      fi
+      ;;
     -h|--help|help)
       usage
       exit 0
@@ -251,6 +382,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "--require-metrics-summary" "$require_metrics_summary"
+bool_arg_or_die "--allow-unsafe-artifact-paths" "$allow_unsafe_artifact_paths"
 bool_arg_or_die "--template-include-example-values" "$template_include_example_values"
 bool_arg_or_die "--missing-input-template-include-example-values" "$missing_input_template_include_example_values"
 path_arg_or_die "--reports-dir" "$reports_dir"
@@ -292,6 +425,10 @@ if [[ ! -f "$checklist_script" ]]; then
 fi
 
 reports_dir="$(abs_path "$reports_dir")"
+enforce_artifact_reports_dir_guard="$require_metrics_summary"
+if [[ "$enforce_artifact_reports_dir_guard" == "1" && "$canonical_summary_json_from_user" == "0" ]]; then
+  canonical_summary_json="$reports_dir/blockchain_mainnet_activation_operator_pack_summary.canonical.json"
+fi
 canonical_summary_json="$(abs_path "$canonical_summary_json")"
 
 if [[ -z "$(trim "$summary_json")" ]]; then
@@ -334,6 +471,16 @@ if [[ -n "$(trim "$metrics_summary_json")" ]]; then
 fi
 
 mkdir -p "$reports_dir"
+
+artifact_path_under_reports_or_die "--summary-json" "$summary_json"
+artifact_path_under_reports_or_die "--canonical-summary-json" "$canonical_summary_json"
+artifact_path_under_reports_or_die "--template-output-json" "$template_output_json"
+artifact_path_under_reports_or_die "--template-canonical-output-json" "$template_canonical_output_json"
+artifact_path_under_reports_or_die "--missing-input-template-output-json" "$missing_input_template_output_json"
+artifact_path_under_reports_or_die "--missing-input-template-canonical-output-json" "$missing_input_template_canonical_output_json"
+artifact_path_under_reports_or_die "--checklist-output-json" "$checklist_output_json"
+artifact_path_under_reports_or_die "--checklist-output-md" "$checklist_output_md"
+
 mkdir -p "$(dirname "$summary_json")"
 mkdir -p "$(dirname "$canonical_summary_json")"
 mkdir -p "$(dirname "$template_output_json")"
@@ -363,6 +510,10 @@ done
 
 metrics_summary_provided="0"
 metrics_summary_exists="0"
+metrics_summary_valid_json="0"
+metrics_summary_schema_ok="0"
+metrics_summary_invalid_metrics_count="0"
+metrics_summary_state="not_provided"
 missing_input_template_enabled="0"
 missing_input_template_skipped_reason=""
 checklist_enabled="0"
@@ -370,11 +521,34 @@ checklist_skipped_reason=""
 
 if [[ -n "$(trim "$metrics_summary_json")" ]]; then
   metrics_summary_provided="1"
+  metrics_summary_state="missing_file"
 fi
 if [[ "$metrics_summary_provided" == "1" && -f "$metrics_summary_json" ]]; then
   metrics_summary_exists="1"
+  metrics_summary_state="invalid_json"
+  if jq -e . "$metrics_summary_json" >/dev/null 2>&1; then
+    metrics_summary_valid_json="1"
+    metrics_summary_state="wrong_schema"
+    if jq -e '.schema.id == "blockchain_mainnet_activation_metrics_summary"' "$metrics_summary_json" >/dev/null 2>&1; then
+      metrics_summary_schema_ok="1"
+      metrics_summary_state="available"
+      metrics_summary_invalid_metrics_count="$(jq -r '
+        if (.counts.invalid | type) == "number" then
+          .counts.invalid
+        else
+          ((.invalid_metrics // []) | length)
+        end
+      ' "$metrics_summary_json" 2>/dev/null || printf '%s' "0")"
+      if [[ ! "$metrics_summary_invalid_metrics_count" =~ ^[0-9]+$ ]]; then
+        metrics_summary_invalid_metrics_count="0"
+      fi
+      if (( metrics_summary_invalid_metrics_count > 0 )); then
+        metrics_summary_state="invalid_metrics"
+      fi
+    fi
+  fi
 fi
-if [[ "$metrics_summary_provided" == "1" && "$metrics_summary_exists" == "1" ]]; then
+if [[ "$metrics_summary_provided" == "1" && "$metrics_summary_exists" == "1" && "$metrics_summary_valid_json" == "1" && "$metrics_summary_schema_ok" == "1" ]]; then
   missing_input_template_enabled="1"
   checklist_enabled="1"
 fi
@@ -383,8 +557,12 @@ if [[ "$missing_input_template_enabled" == "0" ]]; then
   step_status["metrics_missing_input_template"]="skipped"
   if [[ "$metrics_summary_provided" == "0" ]]; then
     missing_input_template_skipped_reason="metrics-summary-json-not-provided"
-  else
+  elif [[ "$metrics_summary_exists" == "0" ]]; then
     missing_input_template_skipped_reason="metrics-summary-json-missing-file"
+  elif [[ "$metrics_summary_valid_json" == "0" ]]; then
+    missing_input_template_skipped_reason="metrics-summary-json-invalid-json"
+  else
+    missing_input_template_skipped_reason="metrics-summary-json-wrong-schema"
   fi
   step_note["metrics_missing_input_template"]="$missing_input_template_skipped_reason"
 fi
@@ -393,8 +571,12 @@ if [[ "$checklist_enabled" == "0" ]]; then
   step_status["metrics_missing_checklist"]="skipped"
   if [[ "$metrics_summary_provided" == "0" ]]; then
     checklist_skipped_reason="metrics-summary-json-not-provided"
-  else
+  elif [[ "$metrics_summary_exists" == "0" ]]; then
     checklist_skipped_reason="metrics-summary-json-missing-file"
+  elif [[ "$metrics_summary_valid_json" == "0" ]]; then
+    checklist_skipped_reason="metrics-summary-json-invalid-json"
+  else
+    checklist_skipped_reason="metrics-summary-json-wrong-schema"
   fi
   step_note["metrics_missing_checklist"]="$checklist_skipped_reason"
 fi
@@ -463,11 +645,52 @@ for step_id in "${step_ids[@]}"; do
   fi
 done
 
+declare -a enforcement_reasons=()
+if [[ "$require_metrics_summary" == "1" ]]; then
+  if [[ "$metrics_summary_provided" == "0" ]]; then
+    enforcement_reasons+=("metrics-summary-json-not-provided")
+  elif [[ "$metrics_summary_exists" == "0" ]]; then
+    enforcement_reasons+=("metrics-summary-json-missing-file")
+  elif [[ "$metrics_summary_valid_json" == "0" ]]; then
+    enforcement_reasons+=("metrics-summary-json-invalid-json")
+  elif [[ "$metrics_summary_schema_ok" == "0" ]]; then
+    enforcement_reasons+=("metrics-summary-json-wrong-schema")
+  elif (( metrics_summary_invalid_metrics_count > 0 )); then
+    enforcement_reasons+=("metrics-summary-json-invalid-metrics")
+  fi
+
+  if [[ "$metrics_summary_exists" == "1" && "$metrics_summary_valid_json" == "1" && "$metrics_summary_schema_ok" == "1" ]]; then
+    if [[ "${step_status[metrics_missing_input_template]}" != "pass" ]]; then
+      enforcement_reasons+=("metrics-missing-input-template-step-not-pass")
+    fi
+    if [[ "${step_status[metrics_missing_checklist]}" != "pass" ]]; then
+      enforcement_reasons+=("metrics-missing-checklist-step-not-pass")
+    fi
+    if [[ ! -f "$missing_input_template_output_json" ]]; then
+      enforcement_reasons+=("missing-input-template-output-json-missing")
+    fi
+    if [[ ! -f "$missing_input_template_canonical_output_json" ]]; then
+      enforcement_reasons+=("missing-input-template-canonical-output-json-missing")
+    fi
+    if [[ ! -f "$checklist_output_json" ]]; then
+      enforcement_reasons+=("checklist-output-json-missing")
+    fi
+    if [[ ! -f "$checklist_output_md" ]]; then
+      enforcement_reasons+=("checklist-output-md-missing")
+    fi
+  fi
+fi
+enforcement_reason_count="${#enforcement_reasons[@]}"
+enforcement_reasons_json="$(array_to_json enforcement_reasons)"
+
 pack_status="pass"
 pack_rc=0
 if [[ -n "$first_runtime_failure_step" ]]; then
   pack_status="runtime-fail"
   pack_rc="$first_runtime_failure_rc"
+elif (( enforcement_reason_count > 0 )); then
+  pack_status="launch-enforcement-fail"
+  pack_rc=1
 fi
 
 summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
@@ -496,15 +719,22 @@ jq -n \
   --arg missing_input_template_script "$missing_input_template_script" \
   --arg checklist_script "$checklist_script" \
   --argjson print_summary_json "$( [[ "$print_summary_json" == "1" ]] && echo true || echo false )" \
+  --argjson require_metrics_summary "$( [[ "$require_metrics_summary" == "1" ]] && echo true || echo false )" \
   --argjson template_include_example_values "$( [[ "$template_include_example_values" == "1" ]] && echo true || echo false )" \
   --argjson missing_input_template_include_example_values "$( [[ "$missing_input_template_include_example_values" == "1" ]] && echo true || echo false )" \
   --argjson metrics_summary_provided "$( [[ "$metrics_summary_provided" == "1" ]] && echo true || echo false )" \
   --argjson metrics_summary_exists "$( [[ "$metrics_summary_exists" == "1" ]] && echo true || echo false )" \
+  --argjson metrics_summary_valid_json "$( [[ "$metrics_summary_valid_json" == "1" ]] && echo true || echo false )" \
+  --argjson metrics_summary_schema_ok "$( [[ "$metrics_summary_schema_ok" == "1" ]] && echo true || echo false )" \
+  --argjson metrics_summary_invalid_metrics_count "$metrics_summary_invalid_metrics_count" \
+  --arg metrics_summary_state "$metrics_summary_state" \
   --argjson missing_input_template_enabled "$( [[ "$missing_input_template_enabled" == "1" ]] && echo true || echo false )" \
   --arg missing_input_template_skipped_reason "$missing_input_template_skipped_reason" \
   --argjson checklist_enabled "$( [[ "$checklist_enabled" == "1" ]] && echo true || echo false )" \
   --arg checklist_skipped_reason "$checklist_skipped_reason" \
   --argjson duration_sec "$run_duration_sec" \
+  --argjson enforcement_reasons "$enforcement_reasons_json" \
+  --argjson enforcement_reason_count "$enforcement_reason_count" \
   --arg first_runtime_failure_step "$first_runtime_failure_step" \
   --argjson first_runtime_failure_rc "$first_runtime_failure_rc" \
   --arg template_status "${step_status[metrics_input_template]}" \
@@ -541,13 +771,23 @@ jq -n \
       step: (if $first_runtime_failure_step == "" then null else $first_runtime_failure_step end),
       rc: (if $first_runtime_failure_step == "" then null else $first_runtime_failure_rc end)
     },
+    launch_enforcement: {
+      require_metrics_summary: $require_metrics_summary,
+      reason_count: $enforcement_reason_count,
+      reasons: $enforcement_reasons
+    },
     inputs: {
       print_summary_json: $print_summary_json,
+      require_metrics_summary: $require_metrics_summary,
       template_include_example_values: $template_include_example_values,
       missing_input_template_include_example_values: $missing_input_template_include_example_values,
       metrics_summary_json: (if $metrics_summary_json == "" then null else $metrics_summary_json end),
       metrics_summary_provided: $metrics_summary_provided,
       metrics_summary_exists: $metrics_summary_exists,
+      metrics_summary_valid_json: $metrics_summary_valid_json,
+      metrics_summary_schema_ok: $metrics_summary_schema_ok,
+      metrics_summary_invalid_metrics_count: $metrics_summary_invalid_metrics_count,
+      metrics_summary_state: $metrics_summary_state,
       missing_input_template_output_json: $missing_input_template_output_json,
       missing_input_template_canonical_output_json: $missing_input_template_canonical_output_json
     },
@@ -576,7 +816,11 @@ jq -n \
         input: {
           metrics_summary_json: (if $metrics_summary_json == "" then null else $metrics_summary_json end),
           metrics_summary_provided: $metrics_summary_provided,
-          metrics_summary_exists: $metrics_summary_exists
+          metrics_summary_exists: $metrics_summary_exists,
+          metrics_summary_valid_json: $metrics_summary_valid_json,
+          metrics_summary_schema_ok: $metrics_summary_schema_ok,
+          metrics_summary_invalid_metrics_count: $metrics_summary_invalid_metrics_count,
+          metrics_summary_state: $metrics_summary_state
         },
         artifacts: {
           output_json: (if $missing_input_template_enabled then $missing_input_template_output_json else null end),
@@ -595,7 +839,11 @@ jq -n \
         input: {
           metrics_summary_json: (if $metrics_summary_json == "" then null else $metrics_summary_json end),
           metrics_summary_provided: $metrics_summary_provided,
-          metrics_summary_exists: $metrics_summary_exists
+          metrics_summary_exists: $metrics_summary_exists,
+          metrics_summary_valid_json: $metrics_summary_valid_json,
+          metrics_summary_schema_ok: $metrics_summary_schema_ok,
+          metrics_summary_invalid_metrics_count: $metrics_summary_invalid_metrics_count,
+          metrics_summary_state: $metrics_summary_state
         },
         artifacts: {
           output_json: (if $checklist_enabled then $checklist_output_json else null end),
@@ -634,6 +882,7 @@ fi
 echo "[blockchain-mainnet-activation-operator-pack] status=$pack_status rc=$pack_rc"
 echo "[blockchain-mainnet-activation-operator-pack] summary_json=$summary_json canonical_summary_json=$canonical_summary_json"
 echo "[blockchain-mainnet-activation-operator-pack] checklist_enabled=$checklist_enabled skipped_reason=${checklist_skipped_reason:-none}"
+echo "[blockchain-mainnet-activation-operator-pack] launch_enforcement_reasons=$(jq -r '.launch_enforcement.reasons | if length == 0 then "none" else join(",") end' "$summary_json")"
 
 if [[ "$print_summary_json" == "1" ]]; then
   cat "$summary_json"

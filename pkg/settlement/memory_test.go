@@ -204,6 +204,31 @@ func (a *fundReservationMaterialAdapter) mutateSettlement(settlementID string, m
 	}
 }
 
+type sponsorReservationMaterialAdapter struct {
+	fakeAdapter
+	mu           sync.Mutex
+	reservations map[string]SponsorCreditReservation
+	queries      []string
+	err          error
+}
+
+func (a *sponsorReservationMaterialAdapter) SponsorReservation(_ context.Context, reservationID string) (SponsorCreditReservation, bool, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.queries = append(a.queries, reservationID)
+	if a.err != nil {
+		return SponsorCreditReservation{}, false, a.err
+	}
+	reservation, ok := a.reservations[reservationID]
+	return reservation, ok, nil
+}
+
+func (a *sponsorReservationMaterialAdapter) queryLog() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.queries...)
+}
+
 type blockingFundReservationAdapter struct {
 	fakeAdapter
 	started chan struct{}
@@ -662,15 +687,16 @@ func (a *replayConfirmingAdapter) settlementCalls() int {
 }
 
 type multiOperationReplayAdapter struct {
-	mu                 sync.Mutex
-	fail               bool
-	sessionSubmitCalls int
-	rewardSubmitCalls  int
-	sponsorSubmitCalls int
-	slashEvidenceCalls int
-	settlements        map[string]SessionSettlement
-	rewards            map[string]RewardIssue
-	slashEvidence      map[string]SlashEvidence
+	mu                  sync.Mutex
+	fail                bool
+	sessionSubmitCalls  int
+	rewardSubmitCalls   int
+	sponsorSubmitCalls  int
+	slashEvidenceCalls  int
+	settlements         map[string]SessionSettlement
+	rewards             map[string]RewardIssue
+	sponsorReservations map[string]SponsorCreditReservation
+	slashEvidence       map[string]SlashEvidence
 }
 
 func (a *multiOperationReplayAdapter) setFail(v bool) {
@@ -721,6 +747,14 @@ func (a *multiOperationReplayAdapter) SubmitSponsorReservation(_ context.Context
 	a.mu.Lock()
 	a.sponsorSubmitCalls++
 	fail := a.fail
+	if !fail {
+		if a.sponsorReservations == nil {
+			a.sponsorReservations = map[string]SponsorCreditReservation{}
+		}
+		chainReservation := reservation
+		chainReservation.Status = OperationStatusConfirmed
+		a.sponsorReservations[reservation.ReservationID] = chainReservation
+	}
 	a.mu.Unlock()
 	if fail {
 		return "", errFakeAdapter
@@ -813,11 +847,22 @@ func (a *multiOperationReplayAdapter) HasSponsorReservation(_ context.Context, r
 }
 
 func (a *multiOperationReplayAdapter) SponsorReservationStatus(ctx context.Context, reservationID string) (OperationStatus, bool, error) {
-	found, err := a.HasSponsorReservation(ctx, reservationID)
+	reservation, found, err := a.SponsorReservation(ctx, reservationID)
 	if err != nil || !found {
 		return "", found, err
 	}
-	return OperationStatusConfirmed, true, nil
+	return reservation.Status, true, nil
+}
+
+func (a *multiOperationReplayAdapter) SponsorReservation(_ context.Context, reservationID string) (SponsorCreditReservation, bool, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	fail := a.fail
+	if fail || strings.TrimSpace(reservationID) == "" {
+		return SponsorCreditReservation{}, false, nil
+	}
+	reservation, ok := a.sponsorReservations[reservationID]
+	return reservation, ok, nil
 }
 
 func (a *multiOperationReplayAdapter) HasSlashEvidence(_ context.Context, evidenceID string) (bool, error) {
@@ -1136,9 +1181,10 @@ func (a nonFinalStatusAdapter) SlashEvidenceStatus(_ context.Context, evidenceID
 
 type materialSettlementConfirmingAdapter struct {
 	confirmingAdapter
-	settlements   map[string]SessionSettlement
-	rewards       map[string]RewardIssue
-	slashEvidence map[string]SlashEvidence
+	settlements         map[string]SessionSettlement
+	rewards             map[string]RewardIssue
+	sponsorReservations map[string]SponsorCreditReservation
+	slashEvidence       map[string]SlashEvidence
 }
 
 func (a materialSettlementConfirmingAdapter) SessionSettlement(_ context.Context, settlementID string) (SessionSettlement, bool, error) {
@@ -1149,6 +1195,11 @@ func (a materialSettlementConfirmingAdapter) SessionSettlement(_ context.Context
 func (a materialSettlementConfirmingAdapter) RewardIssue(_ context.Context, rewardID string) (RewardIssue, bool, error) {
 	reward, ok := a.rewards[rewardID]
 	return reward, ok, nil
+}
+
+func (a materialSettlementConfirmingAdapter) SponsorReservation(_ context.Context, reservationID string) (SponsorCreditReservation, bool, error) {
+	reservation, ok := a.sponsorReservations[reservationID]
+	return reservation, ok, nil
 }
 
 func (a materialSettlementConfirmingAdapter) SlashEvidence(_ context.Context, evidenceID string) (SlashEvidence, bool, error) {
@@ -3065,7 +3116,7 @@ func TestMemoryServiceBlockchainModeWithoutAdapterFailsClosed(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected authorize payment to fail for pending deferred reservation in blockchain mode")
 	}
-	if err.Error() != "reservation pending chain submission: sres-blockchain-no-adapter-1" {
+	if !strings.Contains(err.Error(), "sponsor reservation chain material querier not configured") {
 		t.Fatalf("unexpected authorize payment error for pending deferred reservation: %v", err)
 	}
 
@@ -3132,8 +3183,14 @@ func TestMemoryServiceBlockchainModeWithoutAdapterFailsClosed(t *testing.T) {
 	}
 }
 
-func TestMemoryServiceAuthorizePaymentRequiresFinalizedStateInBlockchainMode(t *testing.T) {
-	s := NewMemoryService(WithBlockchainMode(true))
+func TestMemoryServiceAuthorizePaymentRequiresFinalizedChainMaterialInBlockchainMode(t *testing.T) {
+	adapter := &sponsorReservationMaterialAdapter{
+		reservations: map[string]SponsorCreditReservation{},
+	}
+	s := NewMemoryService(
+		WithBlockchainMode(true),
+		WithChainAdapter(adapter),
+	)
 	ctx := context.Background()
 
 	reservation, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
@@ -3147,8 +3204,8 @@ func TestMemoryServiceAuthorizePaymentRequiresFinalizedStateInBlockchainMode(t *
 	if err != nil {
 		t.Fatalf("ReserveSponsorCredits: %v", err)
 	}
-	if reservation.Status != OperationStatusPending || !reservation.AdapterDeferred || reservation.AdapterSubmitted {
-		t.Fatalf("expected initial blockchain-mode reservation to be pending+deferred")
+	if reservation.Status != OperationStatusSubmitted || reservation.AdapterDeferred || !reservation.AdapterSubmitted {
+		t.Fatalf("expected initial blockchain-mode reservation to be submitted")
 	}
 
 	proof := PaymentProof{
@@ -3159,63 +3216,53 @@ func TestMemoryServiceAuthorizePaymentRequiresFinalizedStateInBlockchainMode(t *
 	}
 
 	testCases := []struct {
-		name             string
-		status           OperationStatus
-		adapterDeferred  bool
-		adapterSubmitted bool
-		wantErr          string
+		name       string
+		status     OperationStatus
+		consumedAt time.Time
+		wantErr    string
 	}{
 		{
-			name:             "pending deferred",
-			status:           OperationStatusPending,
-			adapterDeferred:  true,
-			adapterSubmitted: false,
-			wantErr:          "reservation pending chain submission: sres-deferred-states-1",
+			name:    "pending",
+			status:  OperationStatusPending,
+			wantErr: "reservation not chain-finalized: sres-deferred-states-1",
 		},
 		{
-			name:             "failed deferred",
-			status:           OperationStatusFailed,
-			adapterDeferred:  true,
-			adapterSubmitted: false,
-			wantErr:          "reservation not chain-finalized: sres-deferred-states-1",
+			name:    "failed",
+			status:  OperationStatusFailed,
+			wantErr: "reservation not chain-finalized: sres-deferred-states-1",
 		},
 		{
-			name:             "submitted deferred",
-			status:           OperationStatusSubmitted,
-			adapterDeferred:  true,
-			adapterSubmitted: true,
-			wantErr:          "reservation not chain-finalized: sres-deferred-states-1",
+			name:    "submitted",
+			status:  OperationStatusSubmitted,
+			wantErr: "reservation not chain-finalized: sres-deferred-states-1",
 		},
 		{
-			name:             "submitted non-deferred",
-			status:           OperationStatusSubmitted,
-			adapterDeferred:  false,
-			adapterSubmitted: true,
-			wantErr:          "reservation not chain-finalized: sres-deferred-states-1",
+			name:       "confirmed consumed on chain",
+			status:     OperationStatusConfirmed,
+			consumedAt: time.Now().UTC(),
+			wantErr:    "reservation already consumed on chain: sres-deferred-states-1",
 		},
 		{
-			name:             "confirmed deferred",
-			status:           OperationStatusConfirmed,
-			adapterDeferred:  true,
-			adapterSubmitted: true,
-			wantErr:          "",
-		},
-		{
-			name:             "confirmed non-deferred",
-			status:           OperationStatusConfirmed,
-			adapterDeferred:  false,
-			adapterSubmitted: true,
-			wantErr:          "",
+			name:    "confirmed",
+			status:  OperationStatusConfirmed,
+			wantErr: "",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			chainReservation := reservation
+			chainReservation.Status = tc.status
+			chainReservation.ConsumedAt = tc.consumedAt
+			adapter.mu.Lock()
+			adapter.reservations[reservation.ReservationID] = chainReservation
+			adapter.mu.Unlock()
+
 			s.mu.Lock()
 			stored := s.sponsorReservationsByID[reservation.ReservationID]
-			stored.Status = tc.status
-			stored.AdapterDeferred = tc.adapterDeferred
-			stored.AdapterSubmitted = tc.adapterSubmitted
+			stored.Status = OperationStatusSubmitted
+			stored.AdapterDeferred = false
+			stored.AdapterSubmitted = true
 			stored.ConsumedAt = time.Time{}
 			s.sponsorReservationsByID[reservation.ReservationID] = stored
 			delete(s.paymentAuthByReservationID, reservation.ReservationID)
@@ -3224,39 +3271,39 @@ func TestMemoryServiceAuthorizePaymentRequiresFinalizedStateInBlockchainMode(t *
 			auth, err := s.AuthorizePayment(ctx, proof)
 			if tc.wantErr != "" {
 				if err == nil {
-					t.Fatalf("expected authorize to fail for status %s", tc.status)
+					t.Fatalf("expected authorize to fail for chain status %s", tc.status)
 				}
 				if err.Error() != tc.wantErr {
-					t.Fatalf("unexpected authorize error for status %s: got %v want %s", tc.status, err, tc.wantErr)
+					t.Fatalf("unexpected authorize error for chain status %s: got %v want %s", tc.status, err, tc.wantErr)
 				}
 				s.mu.Lock()
 				after := s.sponsorReservationsByID[reservation.ReservationID]
 				_, hasAuth := s.paymentAuthByReservationID[reservation.ReservationID]
 				s.mu.Unlock()
 				if !after.ConsumedAt.IsZero() {
-					t.Fatalf("expected reservation to remain unconsumed after failed authorize for status %s", tc.status)
+					t.Fatalf("expected reservation to remain unconsumed after failed authorize for chain status %s", tc.status)
 				}
 				if hasAuth {
-					t.Fatalf("expected no payment authorization record after failed authorize for status %s", tc.status)
+					t.Fatalf("expected no payment authorization record after failed authorize for chain status %s", tc.status)
 				}
 				return
 			}
 
 			if err != nil {
-				t.Fatalf("expected authorize to succeed for status %s, got %v", tc.status, err)
+				t.Fatalf("expected authorize to succeed for chain status %s, got %v", tc.status, err)
 			}
 			if auth.Status != OperationStatusConfirmed {
-				t.Fatalf("expected confirmed authorization status for status %s, got %s", tc.status, auth.Status)
+				t.Fatalf("expected confirmed authorization status for chain status %s, got %s", tc.status, auth.Status)
 			}
 			s.mu.Lock()
 			after := s.sponsorReservationsByID[reservation.ReservationID]
 			_, hasAuth := s.paymentAuthByReservationID[reservation.ReservationID]
 			s.mu.Unlock()
 			if after.ConsumedAt.IsZero() {
-				t.Fatalf("expected reservation to be consumed after successful authorize for status %s", tc.status)
+				t.Fatalf("expected reservation to be consumed after successful authorize for chain status %s", tc.status)
 			}
 			if !hasAuth {
-				t.Fatalf("expected payment authorization record after successful authorize for status %s", tc.status)
+				t.Fatalf("expected payment authorization record after successful authorize for chain status %s", tc.status)
 			}
 		})
 	}
@@ -3965,9 +4012,10 @@ func TestMemoryServiceCosmosAdapterAsyncFailureAfterEnqueueReplaysAndConfirms(t 
 
 func TestMemoryServiceReconcileMarksSubmittedAsConfirmedWhenQueryable(t *testing.T) {
 	adapter := materialSettlementConfirmingAdapter{
-		settlements:   map[string]SessionSettlement{},
-		rewards:       map[string]RewardIssue{},
-		slashEvidence: map[string]SlashEvidence{},
+		settlements:         map[string]SessionSettlement{},
+		rewards:             map[string]RewardIssue{},
+		sponsorReservations: map[string]SponsorCreditReservation{},
+		slashEvidence:       map[string]SlashEvidence{},
 	}
 	s := NewMemoryService(
 		WithPricePerMiBMicros(1024*1024),
@@ -4011,16 +4059,20 @@ func TestMemoryServiceReconcileMarksSubmittedAsConfirmedWhenQueryable(t *testing
 	chainReward := reward
 	chainReward.Status = OperationStatusConfirmed
 	adapter.rewards[reward.RewardID] = chainReward
-	if _, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+	reservation, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
 		ReservationID: "sres-confirm-1",
 		SponsorID:     "sponsor-confirm-1",
 		SubjectID:     "client-confirm-1",
 		SessionID:     "sess-confirm-1",
 		AmountMicros:  100,
 		Currency:      "TDPNC",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("ReserveSponsorCredits: %v", err)
 	}
+	chainReservation := reservation
+	chainReservation.Status = OperationStatusConfirmed
+	adapter.sponsorReservations[reservation.ReservationID] = chainReservation
 	evidence, err := s.SubmitSlashEvidence(ctx, SlashEvidence{
 		EvidenceID:    "ev-confirm-1",
 		SubjectID:     "provider-confirm-1",
@@ -4459,6 +4511,69 @@ func TestMemoryServiceReconcileRequiresScopedSettlementMaterial(t *testing.T) {
 	}
 }
 
+func TestMemoryServiceReconcileRequiresScopedSponsorReservationMaterial(t *testing.T) {
+	local := SponsorCreditReservation{
+		ReservationID:    "sres-scoped-finality-1",
+		SponsorID:        "sponsor-scoped-finality-1",
+		SubjectID:        "client-scoped-finality-1",
+		SessionID:        "sess-scoped-finality-1",
+		AmountMicros:     1234,
+		Currency:         "TDPNC",
+		CreatedAt:        time.Date(2026, 4, 20, 10, 0, 0, 0, time.UTC),
+		ExpiresAt:        time.Date(2026, 4, 20, 11, 0, 0, 0, time.UTC),
+		AdapterSubmitted: true,
+		Status:           OperationStatusSubmitted,
+	}
+	chain := local
+	chain.Status = OperationStatusConfirmed
+
+	for _, tc := range []struct {
+		name         string
+		chain        SponsorCreditReservation
+		wantPromoted bool
+	}{
+		{name: "matching", chain: chain, wantPromoted: true},
+		{name: "sponsor mismatch", chain: func() SponsorCreditReservation { v := chain; v.SponsorID = "sponsor-forged"; return v }()},
+		{name: "subject mismatch", chain: func() SponsorCreditReservation { v := chain; v.SubjectID = "client-forged"; return v }()},
+		{name: "session mismatch", chain: func() SponsorCreditReservation { v := chain; v.SessionID = "sess-forged"; return v }()},
+		{name: "amount mismatch", chain: func() SponsorCreditReservation { v := chain; v.AmountMicros++; return v }()},
+		{name: "currency mismatch", chain: func() SponsorCreditReservation { v := chain; v.Currency = "uusdc"; return v }()},
+		{name: "consumed on chain", chain: func() SponsorCreditReservation {
+			v := chain
+			v.ConsumedAt = time.Date(2026, 4, 20, 10, 30, 0, 0, time.UTC)
+			return v
+		}()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewMemoryService(
+				WithChainAdapter(materialSettlementConfirmingAdapter{
+					sponsorReservations: map[string]SponsorCreditReservation{local.ReservationID: tc.chain},
+				}),
+			)
+			s.mu.Lock()
+			s.sponsorReservationsByID[local.ReservationID] = local
+			s.mu.Unlock()
+
+			if _, err := s.Reconcile(context.Background()); err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+
+			s.mu.Lock()
+			reservation := s.sponsorReservationsByID[local.ReservationID]
+			s.mu.Unlock()
+			if tc.wantPromoted {
+				if reservation.Status != OperationStatusConfirmed {
+					t.Fatalf("expected matching sponsor reservation material to promote, got %+v", reservation)
+				}
+				return
+			}
+			if reservation.Status != OperationStatusSubmitted {
+				t.Fatalf("expected sponsor reservation material mismatch to stay submitted, got %+v", reservation)
+			}
+		})
+	}
+}
+
 func TestMemoryServiceReconcileDoesNotPromoteSettlementFromStatusOnlyFinality(t *testing.T) {
 	s := NewMemoryService(
 		WithBlockchainMode(true),
@@ -4490,6 +4605,41 @@ func TestMemoryServiceReconcileDoesNotPromoteSettlementFromStatusOnlyFinality(t 
 	s.mu.Unlock()
 	if settlement.Status != OperationStatusSubmitted {
 		t.Fatalf("status-only settlement finality promoted submitted settlement: %+v", settlement)
+	}
+}
+
+func TestMemoryServiceReconcileDoesNotPromoteSponsorReservationFromStatusOnlyFinality(t *testing.T) {
+	s := NewMemoryService(
+		WithBlockchainMode(true),
+		WithChainAdapter(confirmingAdapter{}),
+	)
+	s.mu.Lock()
+	s.sponsorReservationsByID["sres-status-only-finality-1"] = SponsorCreditReservation{
+		ReservationID:    "sres-status-only-finality-1",
+		SponsorID:        "sponsor-status-only-finality-1",
+		SubjectID:        "client-status-only-finality-1",
+		SessionID:        "sess-status-only-finality-1",
+		AmountMicros:     1234,
+		Currency:         "TDPNC",
+		CreatedAt:        time.Date(2026, 4, 20, 10, 0, 0, 0, time.UTC),
+		ExpiresAt:        time.Date(2026, 4, 20, 11, 0, 0, 0, time.UTC),
+		AdapterSubmitted: true,
+		Status:           OperationStatusSubmitted,
+	}
+	s.mu.Unlock()
+
+	report, err := s.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if report.ConfirmedOperations != 0 {
+		t.Fatalf("status-only sponsor reservation finality must not confirm operations, report=%+v", report)
+	}
+	s.mu.Lock()
+	reservation := s.sponsorReservationsByID["sres-status-only-finality-1"]
+	s.mu.Unlock()
+	if reservation.Status != OperationStatusSubmitted {
+		t.Fatalf("status-only sponsor reservation finality promoted submitted reservation: %+v", reservation)
 	}
 }
 
@@ -4620,6 +4770,195 @@ func TestMemoryServiceGetSponsorReservationNotFoundReturnsErrorContract(t *testi
 	}
 	if err.Error() != "reservation not found: sres-missing-1" {
 		t.Fatalf("unexpected error for unknown reservation lookup: %v", err)
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentQueriesChainSponsorReservationMaterial(t *testing.T) {
+	now := time.Now().UTC()
+	adapter := &sponsorReservationMaterialAdapter{
+		reservations: map[string]SponsorCreditReservation{
+			"sres-chain-1": {
+				ReservationID: "sres-chain-1",
+				SponsorID:     "sponsor-chain-1",
+				SubjectID:     "client-chain-1",
+				SessionID:     "sess-chain-1",
+				AmountMicros:  1234,
+				Currency:      "TDPNC",
+				CreatedAt:     now,
+				ExpiresAt:     now.Add(time.Hour),
+				Status:        OperationStatusConfirmed,
+			},
+		},
+	}
+	s := NewMemoryService(
+		WithBlockchainMode(true),
+		WithChainAdapter(adapter),
+	)
+
+	auth, err := s.AuthorizePayment(context.Background(), PaymentProof{
+		ReservationID: "sres-chain-1",
+		SponsorID:     "sponsor-chain-1",
+		SubjectID:     "client-chain-1",
+		SessionID:     "sess-chain-1",
+	})
+	if err != nil {
+		t.Fatalf("AuthorizePayment: %v", err)
+	}
+	if auth.ReservationID != "sres-chain-1" || auth.AuthorizedMicros != 1234 || auth.Currency != "TDPNC" {
+		t.Fatalf("unexpected authorization from chain material: %+v", auth)
+	}
+	if got := adapter.queryLog(); len(got) != 1 || got[0] != "sres-chain-1" {
+		t.Fatalf("expected one chain material query for reservation, got %v", got)
+	}
+	stored, err := s.GetSponsorReservation(context.Background(), "sres-chain-1")
+	if err != nil {
+		t.Fatalf("GetSponsorReservation after auth: %v", err)
+	}
+	if stored.ConsumedAt.IsZero() || stored.Status != OperationStatusConfirmed {
+		t.Fatalf("expected consumed confirmed reservation to be cached, got %+v", stored)
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentRejectsCachedSponsorReservationMaterialMismatchInBlockchainMode(t *testing.T) {
+	now := time.Now().UTC()
+	adapter := &sponsorReservationMaterialAdapter{
+		reservations: map[string]SponsorCreditReservation{},
+	}
+	s := NewMemoryService(
+		WithBlockchainMode(true),
+		WithChainAdapter(adapter),
+	)
+	ctx := context.Background()
+	local, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: "sres-chain-mismatch-1",
+		SponsorID:     "sponsor-chain-mismatch-1",
+		SubjectID:     "client-chain-mismatch-1",
+		SessionID:     "sess-chain-mismatch-1",
+		AmountMicros:  1234,
+		Currency:      "TDPNC",
+		CreatedAt:     now,
+		ExpiresAt:     now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+	chainReservation := local
+	chainReservation.Status = OperationStatusConfirmed
+	chainReservation.SubjectID = "client-forged"
+	adapter.mu.Lock()
+	adapter.reservations[local.ReservationID] = chainReservation
+	adapter.mu.Unlock()
+
+	_, err = s.AuthorizePayment(ctx, PaymentProof{
+		ReservationID: local.ReservationID,
+		SponsorID:     local.SponsorID,
+		SubjectID:     local.SubjectID,
+		SessionID:     local.SessionID,
+	})
+	if err == nil {
+		t.Fatalf("expected cached local sponsor reservation to be checked against chain material")
+	}
+	if !strings.Contains(err.Error(), "chain material mismatch") {
+		t.Fatalf("unexpected mismatch error: %v", err)
+	}
+	stored, err := s.GetSponsorReservation(ctx, local.ReservationID)
+	if err != nil {
+		t.Fatalf("GetSponsorReservation: %v", err)
+	}
+	if !stored.ConsumedAt.IsZero() {
+		t.Fatalf("material mismatch must not consume local sponsor reservation: %+v", stored)
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentRejectsInvalidChainSponsorReservationMaterial(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name        string
+		reservation SponsorCreditReservation
+		wantErr     string
+	}{
+		{
+			name: "zero amount",
+			reservation: SponsorCreditReservation{
+				ReservationID: "sres-invalid-1",
+				SponsorID:     "sponsor-invalid-1",
+				SubjectID:     "client-invalid-1",
+				SessionID:     "sess-invalid-1",
+				Currency:      "TDPNC",
+				CreatedAt:     now,
+				ExpiresAt:     now.Add(time.Hour),
+				Status:        OperationStatusConfirmed,
+			},
+			wantErr: "amount_micros > 0",
+		},
+		{
+			name: "id mismatch",
+			reservation: SponsorCreditReservation{
+				ReservationID: "sres-other",
+				SponsorID:     "sponsor-invalid-1",
+				SubjectID:     "client-invalid-1",
+				SessionID:     "sess-invalid-1",
+				AmountMicros:  10,
+				Currency:      "TDPNC",
+				CreatedAt:     now,
+				ExpiresAt:     now.Add(time.Hour),
+				Status:        OperationStatusConfirmed,
+			},
+			wantErr: "id mismatch",
+		},
+		{
+			name: "missing currency",
+			reservation: SponsorCreditReservation{
+				ReservationID: "sres-invalid-1",
+				SponsorID:     "sponsor-invalid-1",
+				SubjectID:     "client-invalid-1",
+				SessionID:     "sess-invalid-1",
+				AmountMicros:  10,
+				CreatedAt:     now,
+				ExpiresAt:     now.Add(time.Hour),
+				Status:        OperationStatusConfirmed,
+			},
+			wantErr: "missing currency",
+		},
+		{
+			name: "missing expires at",
+			reservation: SponsorCreditReservation{
+				ReservationID: "sres-invalid-1",
+				SponsorID:     "sponsor-invalid-1",
+				SubjectID:     "client-invalid-1",
+				SessionID:     "sess-invalid-1",
+				AmountMicros:  10,
+				Currency:      "TDPNC",
+				CreatedAt:     now,
+				Status:        OperationStatusConfirmed,
+			},
+			wantErr: "missing expires_at",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			adapter := &sponsorReservationMaterialAdapter{
+				reservations: map[string]SponsorCreditReservation{
+					"sres-invalid-1": tc.reservation,
+				},
+			}
+			s := NewMemoryService(
+				WithBlockchainMode(true),
+				WithChainAdapter(adapter),
+			)
+			_, err := s.AuthorizePayment(context.Background(), PaymentProof{
+				ReservationID: "sres-invalid-1",
+				SponsorID:     "sponsor-invalid-1",
+				SubjectID:     "client-invalid-1",
+				SessionID:     "sess-invalid-1",
+			})
+			if err == nil {
+				t.Fatalf("expected invalid chain material to fail")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
+			}
+		})
 	}
 }
 
@@ -5520,6 +5859,235 @@ func TestMemoryServiceAuthorizePaymentDuplicateProofReplayRejectsMismatchedProof
 	}
 	if err.Error() != "reservation sponsor mismatch" {
 		t.Fatalf("unexpected error for mismatched duplicate replay: %v", err)
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentAcceptsWalletFundReservation(t *testing.T) {
+	s := NewMemoryService()
+	ctx := context.Background()
+	reservation, err := s.ReserveFunds(ctx, FundReservation{
+		ReservationID: "res-wallet-fund-1",
+		SessionID:     "sess-wallet-fund-1",
+		SubjectID:     "wallet1client",
+		AmountMicros:  1200,
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	auth, err := s.AuthorizePayment(ctx, PaymentProof{
+		Source:        PaymentProofSourceWalletFund,
+		ReservationID: reservation.ReservationID,
+		SubjectID:     reservation.SubjectID,
+		SessionID:     reservation.SessionID,
+	})
+	if err != nil {
+		t.Fatalf("AuthorizePayment wallet fund: %v", err)
+	}
+	if auth.ReservationID != reservation.ReservationID || auth.SponsorID != "" || auth.SubjectID != reservation.SubjectID || auth.SessionID != reservation.SessionID {
+		t.Fatalf("unexpected wallet fund auth: %+v reservation=%+v", auth, reservation)
+	}
+	if auth.AuthorizedMicros != reservation.AmountMicros || auth.Currency != reservation.Currency || auth.Status != OperationStatusConfirmed {
+		t.Fatalf("unexpected wallet fund authorization material: %+v", auth)
+	}
+	replay, err := s.AuthorizePayment(ctx, PaymentProof{
+		Source:        PaymentProofSourceWalletFund,
+		ReservationID: reservation.ReservationID,
+		SubjectID:     reservation.SubjectID,
+		SessionID:     reservation.SessionID,
+	})
+	if err != nil {
+		t.Fatalf("AuthorizePayment wallet fund replay: %v", err)
+	}
+	if !replay.IdempotentReplay {
+		t.Fatalf("expected wallet fund duplicate authorization to be marked idempotent replay: %+v", replay)
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentSeparatesSponsorAndWalletFundReplayKeys(t *testing.T) {
+	s := NewMemoryService()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	const reservationID = "shared-payment-reservation-1"
+
+	sponsorReservation, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: reservationID,
+		SponsorID:     "sponsor-shared-1",
+		SubjectID:     "client-shared-sponsor-1",
+		SessionID:     "sess-shared-sponsor-1",
+		AmountMicros:  1000,
+		Currency:      "TDPNC",
+		CreatedAt:     now,
+		ExpiresAt:     now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+	walletReservation, err := s.ReserveFunds(ctx, FundReservation{
+		ReservationID: reservationID,
+		SessionID:     "sess-shared-wallet-1",
+		SubjectID:     "wallet1shared",
+		AmountMicros:  1000,
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+
+	walletAuth, err := s.AuthorizePayment(ctx, PaymentProof{
+		Source:        PaymentProofSourceWalletFund,
+		ReservationID: walletReservation.ReservationID,
+		SubjectID:     walletReservation.SubjectID,
+		SessionID:     walletReservation.SessionID,
+	})
+	if err != nil {
+		t.Fatalf("AuthorizePayment wallet fund: %v", err)
+	}
+	if walletAuth.Source != PaymentProofSourceWalletFund || walletAuth.IdempotentReplay {
+		t.Fatalf("unexpected wallet auth: %+v", walletAuth)
+	}
+
+	sponsorAuth, err := s.AuthorizePayment(ctx, PaymentProof{
+		ReservationID: sponsorReservation.ReservationID,
+		SponsorID:     sponsorReservation.SponsorID,
+		SubjectID:     sponsorReservation.SubjectID,
+		SessionID:     sponsorReservation.SessionID,
+	})
+	if err != nil {
+		t.Fatalf("AuthorizePayment sponsor after wallet fund same id: %v", err)
+	}
+	if sponsorAuth.Source != PaymentProofSourceSponsor || sponsorAuth.IdempotentReplay {
+		t.Fatalf("unexpected sponsor auth: %+v", sponsorAuth)
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentWalletFundRequiresConfirmedChainMaterial(t *testing.T) {
+	ctx := context.Background()
+	adapter := &fundReservationMaterialAdapter{status: OperationStatusConfirmed}
+	s := NewMemoryService(WithBlockchainMode(true), WithChainAdapter(adapter))
+	reservation, err := s.ReserveFunds(ctx, FundReservation{
+		ReservationID: "res-wallet-chain-1",
+		SessionID:     "sess-wallet-chain-1",
+		SubjectID:     "wallet1chain",
+		AmountMicros:  1300,
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	auth, err := s.AuthorizePayment(ctx, PaymentProof{
+		Source:        PaymentProofSourceWalletFund,
+		ReservationID: reservation.ReservationID,
+		SubjectID:     reservation.SubjectID,
+		SessionID:     reservation.SessionID,
+	})
+	if err != nil {
+		t.Fatalf("AuthorizePayment confirmed chain wallet fund: %v", err)
+	}
+	if auth.ReservationID != reservation.ReservationID || auth.SponsorID != "" {
+		t.Fatalf("unexpected confirmed chain wallet auth: %+v", auth)
+	}
+
+	pendingAdapter := &fundReservationMaterialAdapter{status: OperationStatusSubmitted}
+	pending := NewMemoryService(WithBlockchainMode(true), WithChainAdapter(pendingAdapter))
+	pendingReservation, err := pending.ReserveFunds(ctx, FundReservation{
+		ReservationID: "res-wallet-chain-pending",
+		SessionID:     "sess-wallet-chain-pending",
+		SubjectID:     "wallet1pending",
+		AmountMicros:  1400,
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds pending: %v", err)
+	}
+	_, err = pending.AuthorizePayment(ctx, PaymentProof{
+		Source:        PaymentProofSourceWalletFund,
+		ReservationID: pendingReservation.ReservationID,
+		SubjectID:     pendingReservation.SubjectID,
+		SessionID:     pendingReservation.SessionID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "pending chain submission") {
+		t.Fatalf("expected pending chain wallet fund proof to fail, got %v", err)
+	}
+
+	missingCurrencyAdapter := &fundReservationMaterialAdapter{status: OperationStatusConfirmed}
+	missingCurrency := NewMemoryService(WithBlockchainMode(true), WithChainAdapter(missingCurrencyAdapter))
+	missingCurrencyReservation, err := missingCurrency.ReserveFunds(ctx, FundReservation{
+		ReservationID: "res-wallet-chain-no-currency",
+		SessionID:     "sess-wallet-chain-no-currency",
+		SubjectID:     "wallet1nocurrency",
+		AmountMicros:  1500,
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds missing currency fixture: %v", err)
+	}
+	missingCurrencyAdapter.mutateReservation(missingCurrencyReservation.ReservationID, func(reservation FundReservation) FundReservation {
+		reservation.Currency = ""
+		return reservation
+	})
+	_, err = missingCurrency.AuthorizePayment(ctx, PaymentProof{
+		Source:        PaymentProofSourceWalletFund,
+		ReservationID: missingCurrencyReservation.ReservationID,
+		SubjectID:     missingCurrencyReservation.SubjectID,
+		SessionID:     missingCurrencyReservation.SessionID,
+	})
+	if err == nil || err.Error() != "fund reservation missing currency" {
+		t.Fatalf("expected missing currency chain wallet fund proof to fail, got %v", err)
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentWalletFundRejectsSponsorIDAndMismatches(t *testing.T) {
+	s := NewMemoryService()
+	ctx := context.Background()
+	reservation, err := s.ReserveFunds(ctx, FundReservation{
+		ReservationID: "res-wallet-mismatch-1",
+		SessionID:     "sess-wallet-mismatch-1",
+		SubjectID:     "wallet1mismatch",
+		AmountMicros:  1200,
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	tests := []struct {
+		name    string
+		proof   PaymentProof
+		wantErr string
+	}{
+		{
+			name: "sponsor id not allowed",
+			proof: PaymentProof{
+				Source:        PaymentProofSourceWalletFund,
+				ReservationID: reservation.ReservationID,
+				SponsorID:     "sponsor-1",
+				SubjectID:     reservation.SubjectID,
+				SessionID:     reservation.SessionID,
+			},
+			wantErr: "wallet fund payment proof must not include sponsor_id",
+		},
+		{
+			name: "subject mismatch",
+			proof: PaymentProof{
+				Source:        PaymentProofSourceWalletFund,
+				ReservationID: reservation.ReservationID,
+				SubjectID:     "wallet1other",
+				SessionID:     reservation.SessionID,
+			},
+			wantErr: "reservation subject mismatch",
+		},
+		{
+			name: "session mismatch",
+			proof: PaymentProof{
+				Source:        PaymentProofSourceWalletFund,
+				ReservationID: reservation.ReservationID,
+				SubjectID:     reservation.SubjectID,
+				SessionID:     "sess-wallet-other",
+			},
+			wantErr: "reservation session mismatch",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := s.AuthorizePayment(ctx, tc.proof)
+			if err == nil || err.Error() != tc.wantErr {
+				t.Fatalf("AuthorizePayment error=%v want %s", err, tc.wantErr)
+			}
+		})
 	}
 }
 

@@ -55,6 +55,7 @@ type Service struct {
 	adminSignedWindow             time.Duration
 	adminKeysFile                 string
 	adminKeysInline               string
+	adminNonceFile                string
 	adminPubKeys                  map[string]ed25519.PublicKey
 	adminSeenNonce                map[string]int64
 	adminAuthMu                   sync.Mutex
@@ -63,6 +64,7 @@ type Service struct {
 	anonCredExposeID              bool
 	betaStrict                    bool
 	prodStrict                    bool
+	strictModeParseErr            error
 	settlementReconcileSec        int
 	settlement                    settlement.Service
 	settlementChainBacked         bool
@@ -74,6 +76,8 @@ type Service struct {
 	sponsorMaxCurrencyLen         int
 	sponsorMaxReservationMicros   int64
 	issuedPaymentReservations     map[string]int64
+	issuedPaymentReplayMu         sync.Mutex
+	issuedPaymentReplayStoreFile  string
 	issuedPaymentReplayMaxEntries int
 	issuedPaymentReplayTTL        time.Duration
 	mu                            sync.RWMutex
@@ -138,6 +142,8 @@ const (
 	allowDangerousCosmosAdapterFallback  = "SETTLEMENT_ALLOW_DANGEROUS_COSMOS_INIT_FALLBACK"
 	issuerPrivateKeyFileMaxBytes         = int64(16 * 1024)
 	issuerAdminKeysFileMaxBytes          = int64(1 * 1024 * 1024)
+	issuerAdminNonceFileMaxBytes         = int64(8 * 1024 * 1024)
+	issuerAdminNonceMaxEntries           = 1 << 15
 	issuerPreviousPubKeysFileMaxBytes    = int64(1 * 1024 * 1024)
 	issuerStateFileMaxBytes              = int64(32 * 1024 * 1024)
 	defaultIssuedPaymentReplayMaxEntries = 1 << 17
@@ -178,6 +184,10 @@ func New() *Service {
 	}
 	adminKeysFile := strings.TrimSpace(os.Getenv("ISSUER_ADMIN_SIGNING_KEYS_FILE"))
 	adminKeysInline := strings.TrimSpace(os.Getenv("ISSUER_ADMIN_SIGNING_KEYS"))
+	adminNonceFile := strings.TrimSpace(os.Getenv("ISSUER_ADMIN_NONCES_FILE"))
+	if adminNonceFile == "" {
+		adminNonceFile = "data/issuer_admin_nonces.json"
+	}
 	subjectsFile := os.Getenv("ISSUER_SUBJECTS_FILE")
 	if subjectsFile == "" {
 		subjectsFile = "data/issuer_subjects.json"
@@ -268,8 +278,12 @@ func New() *Service {
 	anonCredExposeID := os.Getenv("ISSUER_ANON_CRED_EXPOSE_ID") == "1"
 	clientAllowlistOnly := os.Getenv("ISSUER_CLIENT_ALLOWLIST_ONLY") == "1"
 	disableAnonCred := os.Getenv("ISSUER_ALLOW_ANON_CRED") == "0"
-	betaStrict := os.Getenv("BETA_STRICT_MODE") == "1" || os.Getenv("ISSUER_BETA_STRICT") == "1"
-	prodStrict := os.Getenv("PROD_STRICT_MODE") == "1" || os.Getenv("ISSUER_PROD_STRICT") == "1"
+	betaStrict, betaStrictErr := envStrictBoolOr("BETA_STRICT_MODE", "ISSUER_BETA_STRICT", false)
+	prodStrict, prodStrictErr := envStrictBoolOr("PROD_STRICT_MODE", "ISSUER_PROD_STRICT", false)
+	strictModeParseErr := firstEnvParseError(
+		annotateEnvParseError("BETA_STRICT_MODE/ISSUER_BETA_STRICT", betaStrictErr),
+		annotateEnvParseError("PROD_STRICT_MODE/ISSUER_PROD_STRICT", prodStrictErr),
+	)
 	settlementReconcileSec := 60
 	if v := strings.TrimSpace(os.Getenv("ISSUER_SETTLEMENT_RECONCILE_SEC")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
@@ -314,6 +328,7 @@ func New() *Service {
 			issuedPaymentReplayTTL = time.Duration(n) * time.Second
 		}
 	}
+	issuedPaymentReplayStoreFile := strings.TrimSpace(os.Getenv("ISSUER_PAYMENT_REPLAY_STORE_FILE"))
 	settlementSvc := newSettlementServiceFromEnv()
 	settlementChainBacked := settlementServiceChainBacked(settlementSvc)
 	return &Service{
@@ -339,6 +354,7 @@ func New() *Service {
 		adminSignedWindow:             adminSignedWindow,
 		adminKeysFile:                 adminKeysFile,
 		adminKeysInline:               adminKeysInline,
+		adminNonceFile:                adminNonceFile,
 		adminPubKeys:                  make(map[string]ed25519.PublicKey),
 		adminSeenNonce:                make(map[string]int64),
 		clientAllowlistOnly:           clientAllowlistOnly,
@@ -346,6 +362,7 @@ func New() *Service {
 		anonCredExposeID:              anonCredExposeID,
 		betaStrict:                    betaStrict,
 		prodStrict:                    prodStrict,
+		strictModeParseErr:            strictModeParseErr,
 		settlementReconcileSec:        settlementReconcileSec,
 		settlement:                    settlementSvc,
 		settlementChainBacked:         settlementChainBacked,
@@ -356,6 +373,7 @@ func New() *Service {
 		sponsorMaxCurrencyLen:         sponsorMaxCurrencyLen,
 		sponsorMaxReservationMicros:   sponsorMaxReservationMicros,
 		issuedPaymentReservations:     make(map[string]int64),
+		issuedPaymentReplayStoreFile:  issuedPaymentReplayStoreFile,
 		issuedPaymentReplayMaxEntries: issuedPaymentReplayMaxEntries,
 		issuedPaymentReplayTTL:        issuedPaymentReplayTTL,
 		subjects:                      make(map[string]proto.SubjectProfile),
@@ -378,6 +396,11 @@ func (s *Service) Run(ctx context.Context) error {
 	if err := s.loadAdminSigningKeys(); err != nil {
 		return fmt.Errorf("issuer admin signing-key init: %w", err)
 	}
+	if s.adminRequireSigned {
+		if err := s.loadAdminNonces(); err != nil {
+			return fmt.Errorf("issuer admin nonce state load failed: %w", err)
+		}
+	}
 	if err := s.validateRuntimeConfig(); err != nil {
 		return err
 	}
@@ -385,6 +408,9 @@ func (s *Service) Run(ctx context.Context) error {
 		log.Printf("issuer subjects load warning: %v", err)
 	}
 	if err := s.handleCriticalStartupLoadError("revocations", s.loadRevocations()); err != nil {
+		return err
+	}
+	if err := s.handlePaymentReplayStoreLoadError(s.loadIssuedPaymentReplayStore()); err != nil {
 		return err
 	}
 	if err := s.loadAnonRevocations(); err != nil {
@@ -499,6 +525,16 @@ func (s *Service) handleCriticalStartupLoadError(component string, loadErr error
 	return nil
 }
 
+func (s *Service) handlePaymentReplayStoreLoadError(loadErr error) error {
+	if loadErr == nil {
+		return nil
+	}
+	if s.betaStrict || s.prodStrict || (s.requirePaymentProof && strings.TrimSpace(s.issuedPaymentReplayStoreFile) != "") {
+		return fmt.Errorf("issuer payment replay store load failed: %w", loadErr)
+	}
+	return s.handleCriticalStartupLoadError("payment replay store", loadErr)
+}
+
 func (s *Service) reconcileSettlement(ctx context.Context) {
 	if s.settlement == nil {
 		return
@@ -551,6 +587,14 @@ func (s *Service) reconcileSettlementStatus(ctx context.Context) (settlement.Rec
 }
 
 func (s *Service) validateRuntimeConfig() error {
+	if s.strictModeParseErr != nil {
+		return s.strictModeParseErr
+	}
+	if s.prodStrict {
+		if err := validateProdStrictCosmosFinalityConfig(); err != nil {
+			return err
+		}
+	}
 	if securehttp.Enabled() {
 		if s.prodStrict && securehttp.InsecureSkipVerifyConfigured() {
 			return fmt.Errorf("PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY")
@@ -606,6 +650,12 @@ func (s *Service) validateRuntimeConfig() error {
 	if s.anonCredExposeID {
 		return fmt.Errorf("BETA_STRICT_MODE requires ISSUER_ANON_CRED_EXPOSE_ID=0")
 	}
+	if !s.clientAllowlistOnly {
+		return fmt.Errorf("BETA_STRICT_MODE requires ISSUER_CLIENT_ALLOWLIST_ONLY=1")
+	}
+	if !s.disableAnonCred {
+		return fmt.Errorf("BETA_STRICT_MODE requires ISSUER_ALLOW_ANON_CRED=0")
+	}
 	if s.prodStrict {
 		if !securehttp.Enabled() {
 			return fmt.Errorf("PROD_STRICT_MODE requires MTLS_ENABLE=1")
@@ -618,6 +668,23 @@ func (s *Service) validateRuntimeConfig() error {
 		}
 		if !s.settlementChainBacked {
 			return fmt.Errorf("PROD_STRICT_MODE requires SETTLEMENT_CHAIN_ADAPTER=cosmos")
+		}
+		if s.requirePaymentProof && strings.TrimSpace(s.issuedPaymentReplayStoreFile) == "" {
+			return fmt.Errorf("PROD_STRICT_MODE requires ISSUER_PAYMENT_REPLAY_STORE_FILE for durable payment-proof replay protection")
+		}
+	}
+	return nil
+}
+
+func validateProdStrictCosmosFinalityConfig() error {
+	for _, prefix := range []string{"COSMOS_SETTLEMENT_", "COSMOS_SETTLEMENT_SHADOW_"} {
+		trustedFinalityKey := prefix + "TRUSTED_BRIDGE_FINALITY"
+		if envEnabled(trustedFinalityKey) {
+			return fmt.Errorf("PROD_STRICT_MODE forbids %s", trustedFinalityKey)
+		}
+		submitModeKey := prefix + "SUBMIT_MODE"
+		if strings.EqualFold(strings.TrimSpace(os.Getenv(submitModeKey)), settlement.CosmosSubmitModeSignedTx) {
+			return fmt.Errorf("PROD_STRICT_MODE forbids %s=signed-tx", submitModeKey)
 		}
 	}
 	return nil
@@ -743,6 +810,7 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 	nowUnix := time.Now().Unix()
 	var claims crypto.CapabilityClaims
 	var paymentAuth settlement.PaymentAuthorization
+	var paymentReplayMarked bool
 	switch tokenType {
 	case crypto.TokenTypeClientAccess:
 		if req.AnonCred != "" {
@@ -772,9 +840,9 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 				effectiveTier = capTier
 			}
 			subject := anonymousSubjectAlias(cred.CredentialID)
-			paymentAuth, err = s.ensureClientPaymentAuthorization(ctx, req, subject, forcePaymentProof)
+			paymentAuth, paymentReplayMarked, err = s.ensureClientPaymentAuthorization(ctx, req, subject, forcePaymentProof)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusPaymentRequired)
+				http.Error(w, err.Error(), paymentAuthorizationHTTPStatus(err))
 				return
 			}
 			claims = baseClaimsForTierWithTransport(s.issuerID, subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, exitScope, req.Transport, tokenTransportEnforcesPortPolicy(req.Transport))
@@ -785,9 +853,9 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 				return
 			}
 			effectiveTier := s.effectiveTierFor(req.Subject, req.Tier)
-			paymentAuth, err = s.ensureClientPaymentAuthorization(ctx, req, req.Subject, forcePaymentProof)
+			paymentAuth, paymentReplayMarked, err = s.ensureClientPaymentAuthorization(ctx, req, req.Subject, forcePaymentProof)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusPaymentRequired)
+				http.Error(w, err.Error(), paymentAuthorizationHTTPStatus(err))
 				return
 			}
 			claims = baseClaimsForTierWithTransport(s.issuerID, req.Subject, keyEpoch, "exit", tokenType, popPubKey, effectiveTier, expires, exitScope, req.Transport, tokenTransportEnforcesPortPolicy(req.Transport))
@@ -797,12 +865,17 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 			http.Error(w, "subject required for provider_role", http.StatusBadRequest)
 			return
 		}
-		claims = baseProviderClaims(s.issuerID, req.Subject, keyEpoch, clampTier(req.Tier), popPubKey, expires)
+		subject, effectiveTier, err := s.providerRoleSubjectForToken(req.Subject, req.Tier)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		claims = baseProviderClaims(s.issuerID, subject, keyEpoch, effectiveTier, popPubKey, expires)
 	default:
 		http.Error(w, "unsupported token_type", http.StatusBadRequest)
 		return
 	}
-	if paymentAuth.ReservationID != "" && paymentAuth.IdempotentReplay && s.hasIssuedPaymentReservation(paymentAuth.ReservationID) {
+	if paymentAuth.ReservationID != "" && paymentAuth.IdempotentReplay && s.hasIssuedPaymentReservation(paymentReplayKey(paymentAuth.Source, paymentAuth.ReservationID)) {
 		http.Error(w, "payment proof already used", http.StatusConflict)
 		return
 	}
@@ -811,8 +884,12 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 		http.Error(w, "failed to sign token", http.StatusInternalServerError)
 		return
 	}
-	if paymentAuth.ReservationID != "" {
-		marked, saturated := s.markIssuedPaymentReservation(paymentAuth.ReservationID)
+	if paymentAuth.ReservationID != "" && !paymentReplayMarked {
+		marked, saturated, markErr := s.markIssuedPaymentReservation(paymentReplayKey(paymentAuth.Source, paymentAuth.ReservationID))
+		if markErr != nil {
+			http.Error(w, "payment replay store write failed", http.StatusServiceUnavailable)
+			return
+		}
 		if !marked {
 			if saturated {
 				http.Error(w, "payment replay cache saturated", http.StatusServiceUnavailable)
@@ -1090,43 +1167,102 @@ func (s *Service) ensureClientPaymentAuthorization(
 	req proto.IssueTokenRequest,
 	defaultSubject string,
 	force bool,
-) (settlement.PaymentAuthorization, error) {
+) (settlement.PaymentAuthorization, bool, error) {
 	if req.TokenType == crypto.TokenTypeProviderRole {
-		return settlement.PaymentAuthorization{}, nil
+		return settlement.PaymentAuthorization{}, false, nil
 	}
 	if !force && !s.requirePaymentProof && req.PaymentProof == nil {
-		return settlement.PaymentAuthorization{}, nil
+		return settlement.PaymentAuthorization{}, false, nil
 	}
 	if req.PaymentProof == nil {
-		return settlement.PaymentAuthorization{}, fmt.Errorf("payment proof required")
+		return settlement.PaymentAuthorization{}, false, fmt.Errorf("payment proof required")
 	}
 	requestSubject := strings.TrimSpace(req.Subject)
 	defaultSubject = strings.TrimSpace(defaultSubject)
 	subject := strings.TrimSpace(req.PaymentProof.Subject)
+	paymentProofSource := strings.TrimSpace(req.PaymentProof.Source)
+	walletFundPaymentProof := paymentProofSource == settlement.PaymentProofSourceWalletFund || paymentProofSource == proto.PaymentProofSourceWalletFund
 	if subject != "" {
 		if requestSubject != "" && subject != requestSubject {
-			return settlement.PaymentAuthorization{}, fmt.Errorf("payment proof invalid: request subject mismatch")
+			return settlement.PaymentAuthorization{}, false, fmt.Errorf("payment proof invalid: request subject mismatch")
 		}
-		if requestSubject == "" && defaultSubject != "" && subject != defaultSubject {
-			return settlement.PaymentAuthorization{}, fmt.Errorf("payment proof invalid: request subject mismatch")
+		if requestSubject == "" && defaultSubject != "" && subject != defaultSubject && !walletFundPaymentProof {
+			return settlement.PaymentAuthorization{}, false, fmt.Errorf("payment proof invalid: request subject mismatch")
 		}
 	}
-	if subject == "" {
+	if subject == "" && !walletFundPaymentProof {
 		subject = defaultSubject
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	reservationID := strings.TrimSpace(req.PaymentProof.ReservationID)
+	replayKey := paymentReplayKey(paymentProofSource, reservationID)
+	replayMarked := false
+	if reservationID != "" {
+		marked, saturated, markErr := s.markIssuedPaymentReservation(replayKey)
+		if markErr != nil {
+			return settlement.PaymentAuthorization{}, false, paymentAuthorizationHTTPError{
+				status:  http.StatusServiceUnavailable,
+				message: "payment replay store write failed",
+			}
+		}
+		if !marked {
+			if saturated {
+				return settlement.PaymentAuthorization{}, false, paymentAuthorizationHTTPError{
+					status:  http.StatusServiceUnavailable,
+					message: "payment replay cache saturated",
+				}
+			}
+			return settlement.PaymentAuthorization{}, false, paymentAuthorizationHTTPError{
+				status:  http.StatusConflict,
+				message: "payment proof already used",
+			}
+		}
+		replayMarked = true
+	}
 	auth, err := s.settlementService().AuthorizePayment(ctx, settlement.PaymentProof{
-		ReservationID: strings.TrimSpace(req.PaymentProof.ReservationID),
+		Source:        paymentProofSource,
+		ReservationID: reservationID,
 		SponsorID:     strings.TrimSpace(req.PaymentProof.SponsorID),
 		SubjectID:     subject,
 		SessionID:     strings.TrimSpace(req.PaymentProof.SessionID),
 	})
 	if err != nil {
-		return settlement.PaymentAuthorization{}, fmt.Errorf("payment proof invalid: %w", err)
+		if replayMarked {
+			_ = s.unmarkIssuedPaymentReservation(replayKey)
+		}
+		return settlement.PaymentAuthorization{}, false, fmt.Errorf("payment proof invalid: %w", err)
 	}
-	return auth, nil
+	return auth, replayMarked, nil
+}
+
+type paymentAuthorizationHTTPError struct {
+	status  int
+	message string
+}
+
+func (e paymentAuthorizationHTTPError) Error() string {
+	return e.message
+}
+
+func paymentReplayKey(source, reservationID string) string {
+	source = strings.TrimSpace(source)
+	reservationID = strings.TrimSpace(reservationID)
+	if source == "" || source == settlement.PaymentProofSourceSponsor || source == proto.PaymentProofSourceSponsor {
+		return reservationID
+	}
+	return source + ":" + reservationID
+}
+
+func paymentAuthorizationHTTPStatus(err error) int {
+	if err == nil {
+		return http.StatusOK
+	}
+	if e, ok := err.(paymentAuthorizationHTTPError); ok && e.status > 0 {
+		return e.status
+	}
+	return http.StatusPaymentRequired
 }
 
 func (s *Service) hasIssuedPaymentReservation(reservationID string) bool {
@@ -1141,27 +1277,60 @@ func (s *Service) hasIssuedPaymentReservation(reservationID string) bool {
 	return ok
 }
 
-func (s *Service) markIssuedPaymentReservation(reservationID string) (bool, bool) {
+func (s *Service) markIssuedPaymentReservation(reservationID string) (bool, bool, error) {
 	reservationID = strings.TrimSpace(reservationID)
 	if reservationID == "" {
-		return true, false
+		return true, false, nil
 	}
+	s.issuedPaymentReplayMu.Lock()
+	defer s.issuedPaymentReplayMu.Unlock()
 	now := time.Now().Unix()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.issuedPaymentReservations == nil {
 		s.issuedPaymentReservations = make(map[string]int64)
 	}
 	s.pruneIssuedPaymentReservationsLocked(now)
 	if _, exists := s.issuedPaymentReservations[reservationID]; exists {
-		return false, false
+		s.mu.Unlock()
+		return false, false, nil
 	}
 	maxEntries := s.issuedPaymentReplayCacheMaxEntries()
 	if maxEntries > 0 && len(s.issuedPaymentReservations) >= maxEntries {
-		return false, true
+		s.mu.Unlock()
+		return false, true, nil
 	}
 	s.issuedPaymentReservations[reservationID] = now
-	return true, false
+	snapshot := cloneIssuedPaymentReservations(s.issuedPaymentReservations)
+	s.mu.Unlock()
+	if err := s.writeIssuedPaymentReplayStoreSnapshot(snapshot); err != nil {
+		s.mu.Lock()
+		delete(s.issuedPaymentReservations, reservationID)
+		s.mu.Unlock()
+		return false, false, err
+	}
+	return true, false, nil
+}
+
+func (s *Service) unmarkIssuedPaymentReservation(reservationID string) error {
+	reservationID = strings.TrimSpace(reservationID)
+	if reservationID == "" {
+		return nil
+	}
+	s.issuedPaymentReplayMu.Lock()
+	defer s.issuedPaymentReplayMu.Unlock()
+	s.mu.Lock()
+	if s.issuedPaymentReservations == nil {
+		s.mu.Unlock()
+		return nil
+	}
+	if _, exists := s.issuedPaymentReservations[reservationID]; !exists {
+		s.mu.Unlock()
+		return nil
+	}
+	delete(s.issuedPaymentReservations, reservationID)
+	snapshot := cloneIssuedPaymentReservations(s.issuedPaymentReservations)
+	s.mu.Unlock()
+	return s.writeIssuedPaymentReplayStoreSnapshot(snapshot)
 }
 
 func (s *Service) issuedPaymentReplayCacheMaxEntries() int {
@@ -1201,6 +1370,91 @@ func (s *Service) pruneIssuedPaymentReservationsLocked(now int64) {
 	}
 }
 
+func cloneIssuedPaymentReservations(src map[string]int64) map[string]int64 {
+	dst := make(map[string]int64, len(src))
+	for reservationID, seenAt := range src {
+		reservationID = strings.TrimSpace(reservationID)
+		if reservationID == "" {
+			continue
+		}
+		dst[reservationID] = seenAt
+	}
+	return dst
+}
+
+func (s *Service) writeIssuedPaymentReplayStoreSnapshot(snapshot map[string]int64) error {
+	path := strings.TrimSpace(s.issuedPaymentReplayStoreFile)
+	if path == "" {
+		return nil
+	}
+	now := time.Now().Unix()
+	cutoff := now - s.issuedPaymentReplayRetentionSec()
+	entries := make(map[string]int64, len(snapshot))
+	for reservationID, seenAt := range snapshot {
+		reservationID = strings.TrimSpace(reservationID)
+		if reservationID == "" || seenAt <= cutoff {
+			continue
+		}
+		entries[reservationID] = seenAt
+	}
+	store := issuedPaymentReplayStore{
+		Version:   1,
+		Entries:   entries,
+		UpdatedAt: now,
+	}
+	data, err := json.MarshalIndent(store, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return writeFileAtomic(path, data, 0o600)
+}
+
+func (s *Service) loadIssuedPaymentReplayStore() error {
+	path := strings.TrimSpace(s.issuedPaymentReplayStoreFile)
+	if path == "" {
+		return nil
+	}
+	b, err := readFileBounded(path, issuerStateFileMaxBytes)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var store issuedPaymentReplayStore
+	if err := json.Unmarshal(b, &store); err != nil || store.Entries == nil {
+		legacy := map[string]int64{}
+		if legacyErr := json.Unmarshal(b, &legacy); legacyErr != nil {
+			if err != nil {
+				return err
+			}
+			return legacyErr
+		}
+		store.Entries = legacy
+	}
+	now := time.Now().Unix()
+	cutoff := now - s.issuedPaymentReplayRetentionSec()
+	maxEntries := s.issuedPaymentReplayCacheMaxEntries()
+	entries := make(map[string]int64, len(store.Entries))
+	for reservationID, seenAt := range store.Entries {
+		reservationID = strings.TrimSpace(reservationID)
+		if reservationID == "" || seenAt <= cutoff {
+			continue
+		}
+		if maxEntries > 0 && len(entries) >= maxEntries {
+			return fmt.Errorf("payment replay store exceeds max entries")
+		}
+		entries[reservationID] = seenAt
+	}
+	s.mu.Lock()
+	s.issuedPaymentReservations = entries
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *Service) settlementService() settlement.Service {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1227,9 +1481,16 @@ func (s *Service) handleUpsertSubject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid subject or tier", http.StatusBadRequest)
 		return
 	}
+	if strings.TrimSpace(req.Kind) != "" && normalizeSubjectKind(req.Kind, "") == "" {
+		http.Error(w, "invalid subject kind", http.StatusBadRequest)
+		return
+	}
 	s.mu.Lock()
 	prev := s.subjects[req.Subject]
 	kind := normalizeSubjectKind(req.Kind, prev.Kind)
+	if kind == "" {
+		kind = proto.SubjectKindRelayExit
+	}
 	s.subjects[req.Subject] = proto.SubjectProfile{
 		Subject:      req.Subject,
 		Kind:         kind,
@@ -2247,6 +2508,76 @@ func envEnabled(name string) bool {
 	}
 }
 
+func parseStrictBool(raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("expected one of: 1|0|true|false|yes|no|on|off")
+	}
+}
+
+func envStrictBoolOr(primary string, fallback string, def bool) (bool, error) {
+	primarySet := false
+	primaryValue := false
+	if raw, ok := os.LookupEnv(primary); ok {
+		primarySet = true
+		if strings.TrimSpace(raw) == "" {
+			return false, fmt.Errorf("value must not be empty")
+		}
+		parsed, err := parseStrictBool(raw)
+		if err != nil {
+			return false, err
+		}
+		primaryValue = parsed
+	}
+
+	fallbackSet := false
+	fallbackValue := false
+	if fallback != "" {
+		if raw, ok := os.LookupEnv(fallback); ok {
+			fallbackSet = true
+			if strings.TrimSpace(raw) == "" {
+				return false, fmt.Errorf("value must not be empty")
+			}
+			parsed, err := parseStrictBool(raw)
+			if err != nil {
+				return false, err
+			}
+			fallbackValue = parsed
+		}
+	}
+
+	if primarySet && fallbackSet {
+		return primaryValue || fallbackValue, nil
+	}
+	if primarySet {
+		return primaryValue, nil
+	}
+	if fallbackSet {
+		return fallbackValue, nil
+	}
+	return def, nil
+}
+
+func annotateEnvParseError(name string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s invalid: %w", name, err)
+}
+
+func firstEnvParseError(errs ...error) error {
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) isAdminTokenAuthEnabled() bool {
 	if s.adminAllowToken {
 		return true
@@ -2269,10 +2600,7 @@ func (s *Service) verifySignedAdminRequest(r *http.Request) error {
 		return fmt.Errorf("admin signed window disabled")
 	}
 	now := time.Now().Unix()
-	windowSec := int64(s.adminSignedWindow / time.Second)
-	if windowSec <= 0 {
-		windowSec = 1
-	}
+	windowSec := s.adminSignedWindowSec()
 	if ts < now-windowSec || ts > now+windowSec {
 		return fmt.Errorf("admin signature timestamp outside allowed window")
 	}
@@ -2294,21 +2622,125 @@ func (s *Service) verifySignedAdminRequest(r *http.Request) error {
 }
 
 func (s *Service) claimAdminNonce(keyID string, nonce string, now int64, windowSec int64) error {
-	nonceKey := keyID + "|" + strings.TrimSpace(nonce)
+	if windowSec <= 0 {
+		windowSec = 1
+	}
+	keyID = strings.TrimSpace(keyID)
+	nonce = strings.TrimSpace(nonce)
+	if keyID == "" || nonce == "" {
+		return fmt.Errorf("admin key id and nonce are required")
+	}
+	nonceKey := keyID + "|" + nonce
 	expireAt := now + windowSec
 	cutoff := now - windowSec
 
 	s.adminAuthMu.Lock()
 	defer s.adminAuthMu.Unlock()
-	for k, v := range s.adminSeenNonce {
-		if v <= cutoff {
-			delete(s.adminSeenNonce, k)
-		}
+	if s.adminSeenNonce == nil {
+		s.adminSeenNonce = make(map[string]int64)
 	}
+	s.pruneAdminNoncesLocked(cutoff)
 	if exp, ok := s.adminSeenNonce[nonceKey]; ok && exp > cutoff {
 		return fmt.Errorf("replayed admin nonce")
 	}
+	if len(s.adminSeenNonce) >= issuerAdminNonceMaxEntries {
+		return fmt.Errorf("admin nonce replay cache saturated")
+	}
 	s.adminSeenNonce[nonceKey] = expireAt
+	if err := s.saveAdminNoncesLocked(now, windowSec); err != nil {
+		delete(s.adminSeenNonce, nonceKey)
+		return fmt.Errorf("persist admin nonce: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) adminSignedWindowSec() int64 {
+	if s == nil {
+		return 1
+	}
+	windowSec := int64(s.adminSignedWindow / time.Second)
+	if windowSec <= 0 {
+		windowSec = 1
+	}
+	return windowSec
+}
+
+func (s *Service) pruneAdminNoncesLocked(cutoff int64) {
+	for k, v := range s.adminSeenNonce {
+		if strings.TrimSpace(k) == "" || v <= cutoff {
+			delete(s.adminSeenNonce, k)
+		}
+	}
+}
+
+func (s *Service) saveAdminNoncesLocked(now int64, windowSec int64) error {
+	path := strings.TrimSpace(s.adminNonceFile)
+	if path == "" {
+		return nil
+	}
+	if s.adminSeenNonce == nil {
+		s.adminSeenNonce = make(map[string]int64)
+	}
+	if windowSec <= 0 {
+		windowSec = 1
+	}
+	s.pruneAdminNoncesLocked(now - windowSec)
+	store := adminNonceStore{
+		Version: 1,
+		Nonces:  make(map[string]int64, len(s.adminSeenNonce)),
+	}
+	for k, v := range s.adminSeenNonce {
+		store.Nonces[k] = v
+	}
+	data, err := json.MarshalIndent(store, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return writeFileAtomic(path, data, 0o600)
+}
+
+func (s *Service) loadAdminNonces() error {
+	path := strings.TrimSpace(s.adminNonceFile)
+	if path == "" {
+		return nil
+	}
+	b, err := readFileBounded(path, issuerAdminNonceFileMaxBytes)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var store adminNonceStore
+	if err := json.Unmarshal(b, &store); err != nil || store.Nonces == nil {
+		legacy := map[string]int64{}
+		if legacyErr := json.Unmarshal(b, &legacy); legacyErr != nil {
+			if err != nil {
+				return err
+			}
+			return legacyErr
+		}
+		store.Nonces = legacy
+	}
+	now := time.Now().Unix()
+	cutoff := now - s.adminSignedWindowSec()
+	seen := make(map[string]int64, len(store.Nonces))
+	for key, exp := range store.Nonces {
+		key = strings.TrimSpace(key)
+		if key == "" || exp <= cutoff {
+			continue
+		}
+		if len(seen) >= issuerAdminNonceMaxEntries {
+			return fmt.Errorf("admin nonce replay cache exceeds max entries")
+		}
+		seen[key] = exp
+	}
+	s.adminAuthMu.Lock()
+	s.adminSeenNonce = seen
+	s.adminAuthMu.Unlock()
 	return nil
 }
 
@@ -2536,6 +2968,39 @@ func (s *Service) subjectEligibleForClientToken(subject string) bool {
 		return false
 	}
 	return normalizeSubjectKind(p.Kind, "") == proto.SubjectKindClient
+}
+
+func (s *Service) providerRoleSubjectForToken(subject string, requested int) (string, int, error) {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return "", 0, fmt.Errorf("subject required for provider_role")
+	}
+	s.mu.RLock()
+	p, ok := s.subjects[subject]
+	s.mu.RUnlock()
+	if !ok {
+		return "", 0, fmt.Errorf("provider_role subject not registered")
+	}
+	profileSubject := strings.TrimSpace(p.Subject)
+	if profileSubject == "" {
+		profileSubject = subject
+	}
+	if profileSubject != subject {
+		return "", 0, fmt.Errorf("provider_role subject profile mismatch")
+	}
+	if normalizeSubjectKind(p.Kind, "") != proto.SubjectKindRelayExit {
+		return "", 0, fmt.Errorf("provider_role subject is not registered as relay-exit")
+	}
+	effectiveTier := recommendedTier(p)
+	nowUnix := time.Now().Unix()
+	if capTier, ok := effectiveTierCapForIssuance(p, nowUnix); ok && effectiveTier > capTier {
+		effectiveTier = capTier
+	}
+	requested = clampTier(requested)
+	if requested < effectiveTier {
+		effectiveTier = requested
+	}
+	return profileSubject, effectiveTier, nil
 }
 
 func (s *Service) handlePubKey(w http.ResponseWriter, r *http.Request) {
@@ -3271,6 +3736,17 @@ type revocationStore struct {
 	Revocations   map[string]int64 `json:"revocations"`
 }
 
+type adminNonceStore struct {
+	Version int              `json:"version"`
+	Nonces  map[string]int64 `json:"nonces"`
+}
+
+type issuedPaymentReplayStore struct {
+	Version   int              `json:"version"`
+	Entries   map[string]int64 `json:"entries"`
+	UpdatedAt int64            `json:"updated_at,omitempty"`
+}
+
 type anonymousCredentialDispute struct {
 	TierCap      int    `json:"tier_cap,omitempty"`
 	DisputeUntil int64  `json:"dispute_until,omitempty"`
@@ -3535,12 +4011,12 @@ func normalizeSubjectKind(kind string, fallback string) string {
 		kind = strings.ToLower(strings.TrimSpace(fallback))
 	}
 	switch kind {
-	case "", proto.SubjectKindRelayExit:
+	case proto.SubjectKindRelayExit:
 		return proto.SubjectKindRelayExit
 	case proto.SubjectKindClient:
 		return proto.SubjectKindClient
 	default:
-		return proto.SubjectKindRelayExit
+		return ""
 	}
 }
 

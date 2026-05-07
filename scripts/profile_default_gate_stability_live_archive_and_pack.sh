@@ -85,6 +85,15 @@ timestamp_utc() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
+iso8601_to_epoch_01() {
+  local value
+  value="$(trim "${1:-}")"
+  if [[ -z "$value" ]]; then
+    return 1
+  fi
+  date -u -d "$value" +%s 2>/dev/null
+}
+
 require_value_or_die() {
   local flag="$1"
   local argc="$2"
@@ -186,12 +195,17 @@ evaluate_summary_json() {
   local expected_schema_id="$2"
   local pre_fingerprint="$3"
   local require_decision="$4"
+  local stage_start_epoch="${5:-0}"
 
   local exists="false"
   local valid_json="false"
   local schema_id=""
   local schema_valid="false"
   local written_fresh="false"
+  local timestamp_current="false"
+  local generated_at_utc=""
+  local generated_epoch=""
+  local now_epoch=""
   local status_raw=""
   local status_norm=""
   local rc_json="null"
@@ -232,6 +246,23 @@ evaluate_summary_json() {
       errors+=("summary file was not refreshed by current run")
     fi
 
+    generated_at_utc="$(jq -r 'if (.generated_at_utc | type) == "string" then .generated_at_utc else "" end' "$summary_path" 2>/dev/null || true)"
+    now_epoch="$(date -u +%s)"
+    if [[ -z "$generated_at_utc" ]]; then
+      errors+=("generated_at_utc missing")
+    else
+      generated_epoch="$(iso8601_to_epoch_01 "$generated_at_utc" 2>/dev/null || true)"
+      if ! [[ "$generated_epoch" =~ ^[0-9]+$ ]]; then
+        errors+=("generated_at_utc invalid ISO-8601 UTC timestamp")
+      elif (( generated_epoch > now_epoch + 5 )); then
+        errors+=("generated_at_utc is in the future")
+      elif [[ "$stage_start_epoch" =~ ^[0-9]+$ ]] && (( stage_start_epoch > 0 && generated_epoch + 1 < stage_start_epoch )); then
+        errors+=("generated_at_utc predates current stage")
+      else
+        timestamp_current="true"
+      fi
+    fi
+
     status_raw="$(jq -r 'if (.status | type) == "string" then .status else "" end' "$summary_path" 2>/dev/null || true)"
     status_norm="$(normalize_status_01 "$status_raw")"
     if [[ -z "$status_norm" ]]; then
@@ -262,7 +293,8 @@ evaluate_summary_json() {
   if [[ "$exists" == "true" \
     && "$valid_json" == "true" \
     && "$schema_valid" == "true" \
-    && "$written_fresh" == "true" ]]; then
+    && "$written_fresh" == "true" \
+    && "$timestamp_current" == "true" ]]; then
     if [[ "$require_decision" == "1" ]]; then
       if [[ "$decision_norm" == "GO" || "$decision_norm" == "NO-GO" ]]; then
         usable="true"
@@ -280,6 +312,8 @@ evaluate_summary_json() {
     --arg schema_id "$schema_id" \
     --arg schema_valid "$schema_valid" \
     --arg written_fresh "$written_fresh" \
+    --arg timestamp_current "$timestamp_current" \
+    --arg generated_at_utc "$generated_at_utc" \
     --arg status_raw "$status_raw" \
     --arg status_norm "$status_norm" \
     --arg decision_raw "$decision_raw" \
@@ -296,6 +330,8 @@ evaluate_summary_json() {
       schema_id: (if $schema_id == "" then null else $schema_id end),
       schema_valid: ($schema_valid == "true"),
       fresh_after_run: ($written_fresh == "true"),
+      generated_at_utc: (if $generated_at_utc == "" then null else $generated_at_utc end),
+      timestamp_current_after_run: ($timestamp_current == "true"),
       status: (if $status_norm == "" then null else $status_norm end),
       status_raw: (if $status_raw == "" then null else $status_raw end),
       rc: (if ($rc | type) == "number" then $rc else null end),
@@ -637,6 +673,7 @@ else
   cycle_stage_command="$(redact_value_in_text_01 "$cycle_stage_command" "$campaign_subject")"
 
   cycle_pre_fp="$(file_fingerprint_01 "$cycle_summary_json")"
+  cycle_stage_started_epoch="$(date -u +%s)"
   set +e
   bash "$CYCLE_SCRIPT" \
     --host-a "$host_a" \
@@ -652,7 +689,7 @@ else
   cycle_stage_rc=$?
   set -e
 
-  cycle_stage_eval="$(evaluate_summary_json "$cycle_summary_json" "profile_default_gate_stability_cycle_summary" "$cycle_pre_fp" "1")"
+  cycle_stage_eval="$(evaluate_summary_json "$cycle_summary_json" "profile_default_gate_stability_cycle_summary" "$cycle_pre_fp" "1" "$cycle_stage_started_epoch")"
   cycle_usable="$(jq -r '.usable' <<<"$cycle_stage_eval")"
   cycle_decision="$(jq -r '.decision // ""' <<<"$cycle_stage_eval")"
   cycle_status_norm="$(jq -r '.status // ""' <<<"$cycle_stage_eval")"
@@ -688,6 +725,7 @@ else
     )"
 
     pack_pre_fp="$(file_fingerprint_01 "$evidence_pack_summary_json")"
+    evidence_pack_stage_started_epoch="$(date -u +%s)"
     set +e
     bash "$EVIDENCE_PACK_SCRIPT" \
       --reports-dir "$reports_dir" \
@@ -702,7 +740,7 @@ else
     evidence_pack_stage_rc=$?
     set -e
 
-    evidence_pack_stage_eval="$(evaluate_summary_json "$evidence_pack_summary_json" "profile_default_gate_stability_evidence_pack_summary" "$pack_pre_fp" "1")"
+    evidence_pack_stage_eval="$(evaluate_summary_json "$evidence_pack_summary_json" "profile_default_gate_stability_evidence_pack_summary" "$pack_pre_fp" "1" "$evidence_pack_stage_started_epoch")"
     pack_usable="$(jq -r '.usable' <<<"$evidence_pack_stage_eval")"
     pack_decision="$(jq -r '.decision // ""' <<<"$evidence_pack_stage_eval")"
     pack_status_norm="$(jq -r '.status // ""' <<<"$evidence_pack_stage_eval")"
@@ -902,6 +940,10 @@ else
   else
     final_decision="NO-GO"
   fi
+fi
+
+if [[ "$final_status" == "fail" ]]; then
+  final_decision="NO-GO"
 fi
 
 missing_prerequisites_json="$(json_array_from_lines "${missing_prerequisites[@]:-}")"

@@ -17,9 +17,14 @@ Usage:
     [--blockchain-mainnet-activation-metrics-input-json PATH] \
     [--blockchain-mainnet-activation-metrics-input-summary-json PATH] \
     [--blockchain-mainnet-activation-metrics-input-canonical-json PATH] \
-    [--activation-summary-json PATH] \
-    [--bootstrap-summary-json PATH] \
-    [--source-json PATH] \
+	    [--activation-summary-json PATH] \
+	    [--bootstrap-summary-json PATH] \
+	    [--mode enforce|report-only] \
+	    [--enforce-launch] \
+	    [--report-only] \
+	    [--require-real-evidence [0|1]] \
+	    [--source-json PATH] \
+	    [--allow-unsafe-artifact-paths [0|1]] \
     [--measurement-window-weeks N] \
     [--vpn-connect-session-success-slo-pct N] \
     [--vpn-recovery-mttr-p95-minutes N] \
@@ -43,20 +48,27 @@ Purpose:
 Execution order:
   1) scripts/integration_blockchain_cosmos_only_guardrail.sh
   2) scripts/blockchain_mainnet_activation_metrics.sh
-  3) scripts/blockchain_mainnet_activation_gate.sh --fail-close 0
-  4) scripts/blockchain_bootstrap_graduation_gate.sh --fail-close 0
+	  3) scripts/blockchain_mainnet_activation_gate.sh --enforce-launch
+	  4) scripts/blockchain_bootstrap_graduation_gate.sh --fail-close 1
 
 Notes:
   - Metrics flags and repeatable --source-json are forwarded to step (1).
-  - Optional --blockchain-mainnet-activation-metrics-input-json is normalized
-    via scripts/blockchain_mainnet_activation_metrics_input.sh and injected as
-    a deterministic --source-json artifact before step (1).
+	  - Optional --blockchain-mainnet-activation-metrics-input-json is normalized
+	    via scripts/blockchain_mainnet_activation_metrics_input.sh and injected as
+	    a deterministic --source-json artifact before step (1).
+	  - Default mode is enforce: activation requires real source-json evidence,
+	    activation/bootstrap gates fail closed, and bundle exits non-zero on a
+	    launch-blocking gate result. Use --enforce-launch to make this explicit.
+	  - Use --report-only for diagnostic/report generation where logical NO-GO
+	    decisions should still emit summaries and exit 0.
+	  - In enforce mode, generated artifact paths must stay under --reports-dir
+	    unless --allow-unsafe-artifact-paths 1 is passed.
   - Helper discoverability: start from scripts/blockchain_mainnet_activation_metrics_input_template.sh
     (easy-node: ./scripts/easy_node.sh blockchain-mainnet-activation-metrics-input-template),
     then run scripts/blockchain_mainnet_activation_gate_cycle.sh for one-command
     normalization + gate cycle (easy-node: ./scripts/easy_node.sh blockchain-mainnet-activation-gate-cycle).
-  - Bundle exits 0 for logical NO-GO decisions; non-zero only for usage/runtime
-    failures in the bundle run (for example a stage command exiting non-zero).
+  - In report-only mode, bundle exits 0 for logical NO-GO decisions; non-zero
+    remains reserved for usage/runtime failures.
 USAGE
 }
 
@@ -87,11 +99,117 @@ abs_path() {
   fi
 }
 
+normalize_abs_path() {
+  local path="$1"
+  local old_ifs="$IFS"
+  local part
+  local -a parts=()
+  local -a stack=()
+
+  path="$(abs_path "$path")"
+  IFS='/'
+  read -r -a parts <<<"$path"
+  IFS="$old_ifs"
+
+  for part in "${parts[@]}"; do
+    case "$part" in
+      ""|.)
+        ;;
+      ..)
+        if ((${#stack[@]} > 0)); then
+          stack=("${stack[@]:0:$((${#stack[@]} - 1))}")
+        fi
+        ;;
+      *)
+        stack+=("$part")
+        ;;
+    esac
+  done
+
+  if ((${#stack[@]} == 0)); then
+    printf '%s' "/"
+    return
+  fi
+
+  printf '/%s' "${stack[@]}"
+}
+
+physical_existing_ancestor() {
+  local path="$1"
+  local probe
+  local parent
+
+  path="$(abs_path "$path")"
+  probe="$path"
+  while [[ ! -e "$probe" && ! -L "$probe" ]]; do
+    parent="$(dirname "$probe")"
+    if [[ "$parent" == "$probe" ]]; then
+      break
+    fi
+    probe="$parent"
+  done
+
+  if [[ -d "$probe" ]]; then
+    (cd -P "$probe" && pwd)
+  else
+    parent="$(dirname "$probe")"
+    (cd -P "$parent" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$probe")")
+  fi
+}
+
+artifact_path_under_reports_or_die() {
+  local name="$1"
+  local path="$2"
+  local reports_phys path_parent_phys path_abs path_parent
+
+  if [[ "$enforce_artifact_reports_dir_guard" != "1" || "$allow_unsafe_artifact_paths" == "1" ]]; then
+    return
+  fi
+
+  path="$(trim "$path")"
+  if [[ -z "$path" ]]; then
+    return
+  fi
+
+  path_abs="$(abs_path "$path")"
+  if [[ -L "$path_abs" ]]; then
+    echo "unsafe artifact path for $name: $path must not be a symlink in launch enforcement mode"
+    exit 2
+  fi
+
+  reports_phys="$(physical_existing_ancestor "$reports_dir")"
+  path_parent="$(dirname "$path_abs")"
+  path_parent_phys="$(physical_existing_ancestor "$path_parent")"
+  if [[ "$path_parent_phys" == "$reports_phys" || "$path_parent_phys" == "$reports_phys"/* ]]; then
+    return
+  fi
+
+  echo "unsafe artifact path for $name: $path must stay under --reports-dir ($reports_dir); pass --allow-unsafe-artifact-paths 1 or set BLOCKCHAIN_GATE_BUNDLE_ALLOW_UNSAFE_ARTIFACT_PATHS=1 to override"
+  exit 2
+}
+
 bool_arg_or_die() {
   local name="$1"
   local value="$2"
   if [[ "$value" != "0" && "$value" != "1" ]]; then
     echo "$name must be 0 or 1"
+    exit 2
+  fi
+}
+
+script_override_or_die() {
+  local env_name="$1"
+  local stage_label="$2"
+  if [[ "$bundle_mode" == "enforce" && -n "${!env_name:-}" && "$allow_unsafe_script_overrides" != "1" ]]; then
+    echo "unsafe stage script override rejected for $stage_label via $env_name; set BLOCKCHAIN_GATE_BUNDLE_ALLOW_UNSAFE_SCRIPT_OVERRIDES=1 only in tests/dev"
+    exit 2
+  fi
+}
+
+mode_arg_or_die() {
+  local value="$1"
+  if [[ "$value" != "enforce" && "$value" != "report-only" ]]; then
+    echo "--mode must be enforce or report-only"
     exit 2
   fi
 }
@@ -270,6 +388,8 @@ reports_dir="${BLOCKCHAIN_GATE_BUNDLE_REPORTS_DIR:-}"
 summary_json="${BLOCKCHAIN_GATE_BUNDLE_SUMMARY_JSON:-}"
 canonical_summary_json="${BLOCKCHAIN_GATE_BUNDLE_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/blockchain_gate_bundle_summary.json}"
 print_summary_json="${BLOCKCHAIN_GATE_BUNDLE_PRINT_SUMMARY_JSON:-1}"
+allow_unsafe_artifact_paths="${BLOCKCHAIN_GATE_BUNDLE_ALLOW_UNSAFE_ARTIFACT_PATHS:-0}"
+allow_unsafe_script_overrides="${BLOCKCHAIN_GATE_BUNDLE_ALLOW_UNSAFE_SCRIPT_OVERRIDES:-0}"
 metrics_json="${BLOCKCHAIN_GATE_BUNDLE_METRICS_JSON:-}"
 metrics_summary_json="${BLOCKCHAIN_GATE_BUNDLE_METRICS_SUMMARY_JSON:-}"
 blockchain_mainnet_activation_metrics_input_json="${BLOCKCHAIN_GATE_BUNDLE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_JSON:-}"
@@ -278,6 +398,12 @@ blockchain_mainnet_activation_metrics_input_canonical_json="${BLOCKCHAIN_GATE_BU
 activation_summary_json="${BLOCKCHAIN_GATE_BUNDLE_ACTIVATION_SUMMARY_JSON:-}"
 bootstrap_summary_json="${BLOCKCHAIN_GATE_BUNDLE_BOOTSTRAP_SUMMARY_JSON:-}"
 source_jsons_env_csv="${BLOCKCHAIN_GATE_BUNDLE_SOURCE_JSONS:-}"
+bundle_mode="${BLOCKCHAIN_GATE_BUNDLE_MODE:-enforce}"
+require_real_evidence="${BLOCKCHAIN_GATE_BUNDLE_REQUIRE_REAL_EVIDENCE:-}"
+canonical_summary_json_from_user="0"
+if [[ -n "${BLOCKCHAIN_GATE_BUNDLE_CANONICAL_SUMMARY_JSON:-}" ]]; then
+  canonical_summary_json_from_user="1"
+fi
 
 metrics_script="${BLOCKCHAIN_GATE_BUNDLE_METRICS_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics.sh}"
 metrics_input_script="${BLOCKCHAIN_GATE_BUNDLE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_SCRIPT:-$ROOT_DIR/scripts/blockchain_mainnet_activation_metrics_input.sh}"
@@ -307,6 +433,7 @@ while [[ $# -gt 0 ]]; do
     --canonical-summary-json)
       path_arg_or_die "--canonical-summary-json" "${2:-}"
       canonical_summary_json="${2:-}"
+      canonical_summary_json_from_user="1"
       shift 2
       ;;
     --print-summary-json)
@@ -348,15 +475,50 @@ while [[ $# -gt 0 ]]; do
       activation_summary_json="${2:-}"
       shift 2
       ;;
-    --bootstrap-summary-json)
-      path_arg_or_die "--bootstrap-summary-json" "${2:-}"
-      bootstrap_summary_json="${2:-}"
-      shift 2
-      ;;
+	    --bootstrap-summary-json)
+	      path_arg_or_die "--bootstrap-summary-json" "${2:-}"
+	      bootstrap_summary_json="${2:-}"
+	      shift 2
+	      ;;
+	    --mode)
+	      if [[ $# -lt 2 ]]; then
+	        echo "--mode requires a value"
+	        exit 2
+	      fi
+	      mode_arg_or_die "${2:-}"
+	      bundle_mode="${2:-}"
+	      shift 2
+	      ;;
+	    --enforce-launch)
+	      bundle_mode="enforce"
+	      shift
+	      ;;
+	    --report-only)
+	      bundle_mode="report-only"
+	      shift
+	      ;;
+	    --require-real-evidence)
+	      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+	        require_real_evidence="${2:-}"
+	        shift 2
+	      else
+	        require_real_evidence="1"
+	        shift
+	      fi
+	      ;;
     --source-json)
       path_arg_or_die "--source-json" "${2:-}"
       append_unique_abs_path source_jsons "${2:-}"
       shift 2
+      ;;
+    --allow-unsafe-artifact-paths)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_unsafe_artifact_paths="${2:-}"
+        shift 2
+      else
+        allow_unsafe_artifact_paths="1"
+        shift
+      fi
       ;;
     --measurement-window-weeks|--vpn-connect-session-success-slo-pct|--vpn-recovery-mttr-p95-minutes|--paying-users-3mo-min|--paid-sessions-per-day-30d-avg|--validator-candidate-depth|--validator-independent-operators|--validator-max-operator-seat-share-pct|--validator-max-asn-provider-seat-share-pct|--validator-region-count|--validator-country-count|--manual-sanctions-reversed-pct-90d|--abuse-report-to-decision-p95-hours|--subsidy-runway-months|--contribution-margin-3mo)
       value_arg_or_die "$1" "${2:-}"
@@ -376,6 +538,26 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "--allow-unsafe-artifact-paths" "$allow_unsafe_artifact_paths"
+bool_arg_or_die "BLOCKCHAIN_GATE_BUNDLE_ALLOW_UNSAFE_SCRIPT_OVERRIDES" "$allow_unsafe_script_overrides"
+mode_arg_or_die "$bundle_mode"
+if [[ -z "$require_real_evidence" ]]; then
+  if [[ "$bundle_mode" == "enforce" ]]; then
+    require_real_evidence="1"
+  else
+    require_real_evidence="0"
+  fi
+fi
+bool_arg_or_die "--require-real-evidence" "$require_real_evidence"
+if [[ "$bundle_mode" == "enforce" && "$require_real_evidence" != "1" ]]; then
+  echo "enforce mode requires --require-real-evidence 1; use --report-only for fail-soft diagnostics"
+  exit 2
+fi
+script_override_or_die "BLOCKCHAIN_GATE_BUNDLE_METRICS_SCRIPT" "metrics"
+script_override_or_die "BLOCKCHAIN_GATE_BUNDLE_BLOCKCHAIN_MAINNET_ACTIVATION_METRICS_INPUT_SCRIPT" "metrics_input"
+script_override_or_die "BLOCKCHAIN_GATE_BUNDLE_ACTIVATION_GATE_SCRIPT" "mainnet_activation_gate"
+script_override_or_die "BLOCKCHAIN_GATE_BUNDLE_BOOTSTRAP_GATE_SCRIPT" "bootstrap_graduation_gate"
+script_override_or_die "BLOCKCHAIN_GATE_BUNDLE_COSMOS_ONLY_GUARDRAIL_SCRIPT" "cosmos_only_guardrail"
 if [[ ! -x "$cosmos_only_guardrail_script" ]]; then
   echo "missing executable stage script: $cosmos_only_guardrail_script"
   exit 2
@@ -392,6 +574,13 @@ if [[ -n "$(trim "$reports_dir")" ]]; then
   path_arg_or_die "--reports-dir" "$reports_dir"
 fi
 reports_dir="$(abs_path "$reports_dir")"
+enforce_artifact_reports_dir_guard="0"
+if [[ "$bundle_mode" == "enforce" ]]; then
+  enforce_artifact_reports_dir_guard="1"
+fi
+if [[ "$enforce_artifact_reports_dir_guard" == "1" && "$canonical_summary_json_from_user" == "0" ]]; then
+  canonical_summary_json="$reports_dir/blockchain_gate_bundle_summary.canonical.json"
+fi
 mkdir -p "$reports_dir"
 
 if [[ -z "$(trim "$summary_json")" ]]; then
@@ -431,6 +620,18 @@ fi
 for path_var in summary_json canonical_summary_json metrics_json metrics_summary_json activation_summary_json bootstrap_summary_json; do
   path_arg_or_die "--${path_var//_/-}" "${!path_var}"
   printf -v "$path_var" '%s' "$(abs_path "${!path_var}")"
+done
+
+artifact_path_under_reports_or_die "--summary-json" "$summary_json"
+artifact_path_under_reports_or_die "--canonical-summary-json" "$canonical_summary_json"
+artifact_path_under_reports_or_die "--metrics-json" "$metrics_json"
+artifact_path_under_reports_or_die "--metrics-summary-json" "$metrics_summary_json"
+artifact_path_under_reports_or_die "--blockchain-mainnet-activation-metrics-input-summary-json" "$blockchain_mainnet_activation_metrics_input_summary_json"
+artifact_path_under_reports_or_die "--blockchain-mainnet-activation-metrics-input-canonical-json" "$blockchain_mainnet_activation_metrics_input_canonical_json"
+artifact_path_under_reports_or_die "--activation-summary-json" "$activation_summary_json"
+artifact_path_under_reports_or_die "--bootstrap-summary-json" "$bootstrap_summary_json"
+
+for path_var in summary_json canonical_summary_json metrics_json metrics_summary_json activation_summary_json bootstrap_summary_json; do
   mkdir -p "$(dirname "${!path_var}")"
 done
 if [[ -n "$blockchain_mainnet_activation_metrics_input_summary_json" ]]; then
@@ -442,6 +643,17 @@ fi
 
 if ((${#source_jsons[@]} > 0)); then
   validate_source_jsons_or_die "${source_jsons[@]}"
+fi
+
+activation_fail_close="1"
+bootstrap_fail_close="1"
+activation_mode_arg="--enforce-launch"
+bootstrap_mode_arg="--enforce-launch"
+if [[ "$bundle_mode" == "report-only" ]]; then
+  activation_fail_close="0"
+  bootstrap_fail_close="0"
+  activation_mode_arg="--report-only"
+  bootstrap_mode_arg="--report-only"
 fi
 
 step_ids=(
@@ -505,18 +717,22 @@ fi
 activation_cmd=(
   bash "$activation_gate_script"
   --metrics-json "$metrics_json"
-  --summary-json "$activation_summary_json"
-  --fail-close 0
-  --print-summary-json 0
-)
+	  --summary-json "$activation_summary_json"
+	  "$activation_mode_arg"
+	  --fail-close "$activation_fail_close"
+	  --require-real-evidence "$require_real_evidence"
+	  --print-summary-json 0
+	)
 
 bootstrap_cmd=(
-  bash "$bootstrap_gate_script"
-  --metrics-json "$metrics_json"
-  --summary-json "$bootstrap_summary_json"
-  --fail-close 0
-  --print-summary-json 0
-)
+	  bash "$bootstrap_gate_script"
+	  --metrics-json "$metrics_json"
+	  --summary-json "$bootstrap_summary_json"
+	  "$bootstrap_mode_arg"
+	  --fail-close "$bootstrap_fail_close"
+	  --require-real-evidence "$require_real_evidence"
+	  --print-summary-json 0
+	)
 
 cosmos_only_guardrail_cmd=(
   bash "$cosmos_only_guardrail_script"
@@ -598,7 +814,11 @@ jq -n \
   --arg metrics_summary_json "$metrics_summary_json" \
   --arg activation_summary_json "$activation_summary_json" \
   --arg bootstrap_summary_json "$bootstrap_summary_json" \
-  --argjson print_summary_json "$( [[ "$print_summary_json" == "1" ]] && echo true || echo false )" \
+	  --argjson print_summary_json "$( [[ "$print_summary_json" == "1" ]] && echo true || echo false )" \
+	  --arg mode "$bundle_mode" \
+	  --argjson require_real_evidence "$require_real_evidence" \
+	  --argjson activation_fail_close "$activation_fail_close" \
+	  --argjson bootstrap_fail_close "$bootstrap_fail_close" \
   --argjson duration_sec "$run_duration_sec" \
   --arg first_runtime_failure_step "$first_runtime_failure_step" \
   --argjson first_runtime_failure_rc "$first_runtime_failure_rc" \
@@ -647,7 +867,11 @@ jq -n \
       rc: (if $first_runtime_failure_step == "" then null else $first_runtime_failure_rc end)
     },
     inputs: {
-      print_summary_json: $print_summary_json,
+	      print_summary_json: $print_summary_json,
+	      mode: $mode,
+	      require_real_evidence: $require_real_evidence,
+	      activation_fail_close: $activation_fail_close,
+	      bootstrap_fail_close: $bootstrap_fail_close,
       blockchain_mainnet_activation_metrics_input_json: (if $blockchain_mainnet_activation_metrics_input_json == "" then null else $blockchain_mainnet_activation_metrics_input_json end),
       blockchain_mainnet_activation_metrics_input_summary_json: (if $blockchain_mainnet_activation_metrics_input_summary_json == "" then null else $blockchain_mainnet_activation_metrics_input_summary_json end),
       blockchain_mainnet_activation_metrics_input_canonical_json: (if $blockchain_mainnet_activation_metrics_input_canonical_json == "" then null else $blockchain_mainnet_activation_metrics_input_canonical_json end),

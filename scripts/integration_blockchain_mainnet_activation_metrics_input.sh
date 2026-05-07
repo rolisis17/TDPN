@@ -38,6 +38,16 @@ PARTIAL_SUMMARY="$TMP_DIR/partial_summary.json"
 PARTIAL_CANONICAL="$TMP_DIR/partial_canonical.json"
 PARTIAL_LOG="$TMP_DIR/partial.log"
 
+INPUT_FRACTIONAL_COUNTS_JSON="$TMP_DIR/input_fractional_counts.json"
+FRACTIONAL_COUNTS_SUMMARY="$TMP_DIR/fractional_counts_summary.json"
+FRACTIONAL_COUNTS_CANONICAL="$TMP_DIR/fractional_counts_canonical.json"
+FRACTIONAL_COUNTS_LOG="$TMP_DIR/fractional_counts.log"
+
+INPUT_UNRELATED_NESTED_JSON="$TMP_DIR/input_unrelated_nested.json"
+UNRELATED_NESTED_SUMMARY="$TMP_DIR/unrelated_nested_summary.json"
+UNRELATED_NESTED_CANONICAL="$TMP_DIR/unrelated_nested_canonical.json"
+UNRELATED_NESTED_LOG="$TMP_DIR/unrelated_nested.log"
+
 MISSING_INPUT_JSON="$TMP_DIR/does_not_exist.json"
 MISSING_SUMMARY="$TMP_DIR/missing_summary.json"
 MISSING_CANONICAL="$TMP_DIR/missing_canonical.json"
@@ -63,6 +73,11 @@ fi
 echo "[blockchain-mainnet-activation-metrics-input] complete normalization path"
 cat >"$INPUT_COMPLETE_JSON" <<'EOF_INPUT_COMPLETE'
 {
+  "evidence": {
+    "mode": "production",
+    "generated_at": "2026-05-06T00:00:00Z",
+    "source_kind": "prod-observability-export"
+  },
   "measurement_window_weeks": 13,
   "reliability": {
     "vpn_connect_session_success_slo_pct": 99.82,
@@ -140,6 +155,9 @@ if ! jq -e \
   and .contribution_margin_3mo == 0.9
   and .sources.metrics.paying_users_3mo_min == "input_json_top_level"
   and .sources.metrics.vpn_connect_session_success_slo_pct == "input_json_nested"
+  and .evidence.mode == "production"
+  and .evidence.generated_at == "2026-05-06T00:00:00Z"
+  and .evidence.source_kind == "prod-observability-export"
   and .artifacts.summary_json == $expected_summary
   and .artifacts.canonical_summary_json == $expected_canonical
   ' "$COMPLETE_SUMMARY" >/dev/null; then
@@ -233,6 +251,129 @@ fi
 if ! grep -Fq '[blockchain-mainnet-activation-metrics-input] invalid_metric_keys=' "$PARTIAL_LOG"; then
   echo "partial log missing invalid_metric_keys line"
   cat "$PARTIAL_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-metrics-input] fractional count/depth validation path"
+cat >"$INPUT_FRACTIONAL_COUNTS_JSON" <<'EOF_INPUT_FRACTIONAL_COUNTS'
+{
+  "measurement_window_weeks": 12,
+  "reliability": {
+    "vpn_connect_session_success_slo_pct": 99.8,
+    "vpn_recovery_mttr_p95_minutes": 18
+  },
+  "demand": {
+    "paying_users_3mo_min": 1000.5,
+    "paid_sessions_per_day_30d_avg": 15000
+  },
+  "validator": {
+    "validator_candidate_depth": 30.1,
+    "validator_independent_operators": 12,
+    "validator_max_operator_seat_share_pct": 20,
+    "validator_max_asn_provider_seat_share_pct": 25,
+    "validator_region_count": 4,
+    "validator_country_count": 8
+  },
+  "governance": {
+    "manual_sanctions_reversed_pct_90d": 4.5,
+    "abuse_report_to_decision_p95_hours": 12
+  },
+  "economics": {
+    "subsidy_runway_months": 14,
+    "contribution_margin_3mo": 0.5
+  }
+}
+EOF_INPUT_FRACTIONAL_COUNTS
+
+set +e
+"$SCRIPT_UNDER_TEST" \
+  --input-json "$INPUT_FRACTIONAL_COUNTS_JSON" \
+  --summary-json "$FRACTIONAL_COUNTS_SUMMARY" \
+  --canonical-summary-json "$FRACTIONAL_COUNTS_CANONICAL" \
+  --print-summary-json 0 >"$FRACTIONAL_COUNTS_LOG" 2>&1
+fractional_counts_rc=$?
+set -e
+if [[ "$fractional_counts_rc" -ne 0 ]]; then
+  echo "expected fractional count/depth validation path to remain fail-soft (exit 0)"
+  cat "$FRACTIONAL_COUNTS_LOG"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "partial"
+  and .rc == 0
+  and .ready_for_metrics_script == false
+  and .counts.required == 15
+  and .counts.provided == 13
+  and .counts.missing == 2
+  and .counts.invalid == 2
+  and .paying_users_3mo_min == null
+  and .validator_candidate_depth == null
+  and ((.missing_metric_keys // []) | index("paying_users_3mo_min")) != null
+  and ((.missing_metric_keys // []) | index("validator_candidate_depth")) != null
+  and ((.invalid_metric_keys // []) | index("paying_users_3mo_min")) != null
+  and ((.invalid_metric_keys // []) | index("validator_candidate_depth")) != null
+  and .sources.metrics.paying_users_3mo_min == "input_json_invalid"
+  and .sources.metrics.validator_candidate_depth == "input_json_invalid"
+  ' "$FRACTIONAL_COUNTS_SUMMARY" >/dev/null; then
+  echo "fractional count/depth validation contract mismatch"
+  cat "$FRACTIONAL_COUNTS_SUMMARY"
+  cat "$FRACTIONAL_COUNTS_LOG"
+  exit 1
+fi
+
+echo "[blockchain-mainnet-activation-metrics-input] unrelated nested canonical keys are ignored"
+cat >"$INPUT_UNRELATED_NESTED_JSON" <<'EOF_INPUT_UNRELATED_NESTED'
+{
+  "metadata": {
+    "debug": {
+      "measurement_window_weeks": 12,
+      "vpn_connect_session_success_slo_pct": 99.9,
+      "validator_country_count": 9
+    }
+  },
+  "previous_run": {
+    "metrics": {
+      "paying_users_3mo_min": 2000,
+      "validator_candidate_depth": 40
+    }
+  }
+}
+EOF_INPUT_UNRELATED_NESTED
+
+set +e
+"$SCRIPT_UNDER_TEST" \
+  --input-json "$INPUT_UNRELATED_NESTED_JSON" \
+  --summary-json "$UNRELATED_NESTED_SUMMARY" \
+  --canonical-summary-json "$UNRELATED_NESTED_CANONICAL" \
+  --print-summary-json 0 >"$UNRELATED_NESTED_LOG" 2>&1
+unrelated_nested_rc=$?
+set -e
+if [[ "$unrelated_nested_rc" -ne 0 ]]; then
+  echo "expected unrelated nested key path to remain fail-soft (exit 0)"
+  cat "$UNRELATED_NESTED_LOG"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "missing"
+  and .rc == 0
+  and .ready_for_metrics_script == false
+  and .counts.required == 15
+  and .counts.provided == 0
+  and .counts.missing == 15
+  and .counts.invalid == 0
+  and .measurement_window_weeks == null
+  and .vpn_connect_session_success_slo_pct == null
+  and .paying_users_3mo_min == null
+  and .validator_candidate_depth == null
+  and .validator_country_count == null
+  and .sources.metrics.measurement_window_weeks == "missing"
+  and .sources.metrics.validator_country_count == "missing"
+  ' "$UNRELATED_NESTED_SUMMARY" >/dev/null; then
+  echo "unrelated nested key filtering contract mismatch"
+  cat "$UNRELATED_NESTED_SUMMARY"
+  cat "$UNRELATED_NESTED_LOG"
   exit 1
 fi
 

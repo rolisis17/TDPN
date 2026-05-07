@@ -21,6 +21,15 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+$LocalControlApiMinRemoteAuthTokenLength = 32
+$LocalControlApiWeakRemoteAuthTokens = @(
+  "token",
+  "default-token",
+  "secret-token",
+  "change-me"
+)
+
 function Set-Or-ClearEnv {
   param(
     [Parameter(Mandatory = $true)]
@@ -230,6 +239,29 @@ function Test-LoopbackHost {
   return $normalized -eq "127.0.0.1" -or $normalized -eq "localhost" -or $normalized -eq "::1"
 }
 
+function Assert-StrongRemoteAuthToken {
+  param(
+    [AllowEmptyString()]
+    [string]$AuthToken
+  )
+
+  if ([string]::IsNullOrWhiteSpace($AuthToken)) {
+    throw "Remote bind requires LOCAL_CONTROL_API_AUTH_TOKEN to be set."
+  }
+
+  $trimmedToken = $AuthToken.Trim()
+  $normalizedToken = $trimmedToken.ToLowerInvariant()
+  if ($LocalControlApiWeakRemoteAuthTokens -contains $normalizedToken) {
+    throw "Remote bind requires LOCAL_CONTROL_API_AUTH_TOKEN to be a unique high-entropy token; weak/default bearer tokens are not allowed."
+  }
+  if ($trimmedToken.Length -lt $LocalControlApiMinRemoteAuthTokenLength) {
+    throw "Remote bind requires LOCAL_CONTROL_API_AUTH_TOKEN to be at least $LocalControlApiMinRemoteAuthTokenLength characters."
+  }
+  if ($trimmedToken -match "[\s\p{Cc}]") {
+    throw "Remote bind requires LOCAL_CONTROL_API_AUTH_TOKEN without whitespace/control characters."
+  }
+}
+
 function Validate-ApiAddrPolicy {
   param(
     [Parameter(Mandatory = $true)]
@@ -249,9 +281,7 @@ function Validate-ApiAddrPolicy {
     if (-not [string]::IsNullOrWhiteSpace($env:LOCAL_CONTROL_API_AUTH_TOKEN)) {
       $authToken = $env:LOCAL_CONTROL_API_AUTH_TOKEN.Trim()
     }
-    if ([string]::IsNullOrWhiteSpace($authToken)) {
-      throw "Remote bind requires LOCAL_CONTROL_API_AUTH_TOKEN to be set."
-    }
+    Assert-StrongRemoteAuthToken -AuthToken $authToken
   }
 }
 

@@ -18,6 +18,7 @@ ENTRY_PORT="${ENTRY_PORT:-8383}"
 EXIT_PORT="${EXIT_PORT:-8384}"
 ENTRY_DATA_PORT="${ENTRY_DATA_PORT:-53820}"
 EXIT_DATA_PORT="${EXIT_DATA_PORT:-53821}"
+EXIT_WG_PORT="${EXIT_WG_PORT:-53822}"
 CHAOS_TIMEOUT_SEC="${CHAOS_TIMEOUT_SEC:-60}"
 READY_ATTEMPTS="${READY_ATTEMPTS:-40}"
 READY_SLEEP_SEC="${READY_SLEEP_SEC:-0.25}"
@@ -81,7 +82,7 @@ emit_redacted_tokenpop_error() {
 
 read_tokenpop_keypair() {
   local tokenpop_output=""
-  if tokenpop_output="$(go run ./cmd/tokenpop gen --show-private-key 2>&1)"; then
+  if tokenpop_output="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key 2>&1)"; then
     :
   else
     local rc=$?
@@ -113,14 +114,37 @@ REVOKE_LOG="$(make_temp_file "/tmp/lifecycle_chaos_revoke_${LIFECYCLE_CHAOS_TAG_
 DISPUTE_LOG="$(make_temp_file "/tmp/lifecycle_chaos_dispute_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.log")"
 RACE_LOG="$(make_temp_file "/tmp/lifecycle_chaos_race_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.log")"
 FRESH_LOG="$(make_temp_file "/tmp/lifecycle_chaos_fresh_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.log")"
+STATE_DIR="$(mktemp -d "/tmp/lifecycle_chaos_state_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX")"
+TRUST_FILE="$STATE_DIR/directory_trust.txt"
+ADMIN_TOKEN="integration-admin-token"
 PAYLOAD_FILE="$(make_private_temp_file "/tmp/lifecycle_chaos_payload_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.json")"
 POP_PRIV_FILE="$(make_private_temp_file "/tmp/lifecycle_chaos_pop_priv_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.key")"
 POP_PRIV_ITER_FILE="$(make_private_temp_file "/tmp/lifecycle_chaos_pop_priv_iter_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.key")"
 TOKEN_FILE="$(make_private_temp_file "/tmp/lifecycle_chaos_token_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.jwt")"
 TOKEN_ITER_FILE="$(make_private_temp_file "/tmp/lifecycle_chaos_token_iter_${LIFECYCLE_CHAOS_TAG_SAFE}.XXXXXX.jwt")"
 
+route_assertion_json="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)"
+route_assertion_private_key="$(echo "$route_assertion_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')"
+route_assertion_pubkey="$(echo "$route_assertion_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')"
+if [[ -z "$route_assertion_private_key" || -z "$route_assertion_pubkey" ]]; then
+  echo "failed to generate entry route assertion key material"
+  exit 1
+fi
+
 DIRECTORY_ADDR="127.0.0.1:${DIR_PORT}" \
+DIRECTORY_PUBLIC_URL="http://127.0.0.1:${DIR_PORT}" \
+DIRECTORY_PRIVATE_KEY_FILE="$STATE_DIR/directory.key" \
+DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE="$STATE_DIR/directory_provider_replay.json" \
+DIRECTORY_TRUST_TOFU=1 \
+DIRECTORY_TRUSTED_KEYS_FILE="$TRUST_FILE" \
 ISSUER_ADDR="127.0.0.1:${ISSUER_PORT}" \
+ISSUER_ADMIN_TOKEN="$ADMIN_TOKEN" \
+ISSUER_PRIVATE_KEY_FILE="$STATE_DIR/issuer.key" \
+ISSUER_SUBJECTS_FILE="$STATE_DIR/issuer_subjects.json" \
+ISSUER_REVOCATIONS_FILE="$STATE_DIR/issuer_revocations.json" \
+ISSUER_ANON_REVOCATIONS_FILE="$STATE_DIR/issuer_anon_revocations.json" \
+ISSUER_ANON_DISPUTES_FILE="$STATE_DIR/issuer_anon_disputes.json" \
+ISSUER_AUDIT_FILE="$STATE_DIR/issuer_audit.json" \
 ENTRY_ADDR="127.0.0.1:${ENTRY_PORT}" \
 EXIT_ADDR="127.0.0.1:${EXIT_PORT}" \
 ENTRY_DATA_ADDR="127.0.0.1:${ENTRY_DATA_PORT}" \
@@ -131,6 +155,12 @@ ENTRY_URL="http://127.0.0.1:${ENTRY_PORT}" \
 EXIT_CONTROL_URL="http://127.0.0.1:${EXIT_PORT}" \
 DIRECTORY_ISSUER_TRUST_URLS="http://127.0.0.1:${ISSUER_PORT}" \
 DIRECTORY_ISSUER_SYNC_SEC=1 \
+ENTRY_LIVE_WG_MODE=0 \
+ENTRY_ROUTE_ASSERTION_PRIVATE_KEY="$route_assertion_private_key" \
+ENTRY_ROUTE_ASSERTION_PUBLIC_KEY="$route_assertion_pubkey" \
+EXIT_WG_LISTEN_PORT="$EXIT_WG_PORT" \
+EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS="$route_assertion_pubkey" \
+EXIT_TOKEN_PROOF_REPLAY_STORE_FILE="$STATE_DIR/exit_token_replay.json" \
 EXIT_REVOCATION_REFRESH_SEC=1 \
 timeout "${CHAOS_TIMEOUT_SEC}s" go run ./cmd/node --directory --issuer --entry --exit >"${NODE_LOG}" 2>&1 &
 node_pid=$!
@@ -148,6 +178,7 @@ cleanup() {
     "$POP_PRIV_ITER_FILE" \
     "$TOKEN_FILE" \
     "$TOKEN_ITER_FILE"
+  rm -rf "$STATE_DIR"
 }
 trap cleanup EXIT
 
@@ -188,10 +219,12 @@ fi
 printf '%s' "$pop_priv" >"$POP_PRIV_FILE"
 printf '%s' "$token" >"$TOKEN_FILE"
 
+seed_session_id="seed-session-${jti}"
 token_proof=$(go run ./cmd/tokenpop sign \
   --private-key-file "$POP_PRIV_FILE" \
   --token-file "$TOKEN_FILE" \
   --exit-id "exit-local-1" \
+  --session-id "$seed_session_id" \
   --proof-nonce "seed-${jti}" \
   --client-inner-pub "$client_pub" \
   --transport "policy-json" \
@@ -203,7 +236,7 @@ if [[ -z "$token_proof" ]]; then
 fi
 
 cat >"$PAYLOAD_FILE" <<JSON
-{"exit_id":"exit-local-1","token":"$token","token_proof":"$token_proof","token_proof_nonce":"seed-${jti}","client_inner_pub":"$client_pub","transport":"policy-json","requested_mtu":1280,"requested_region":"local"}
+{"exit_id":"exit-local-1","session_id":"$seed_session_id","token":"$token","token_proof":"$token_proof","token_proof_nonce":"seed-${jti}","client_inner_pub":"$client_pub","transport":"policy-json","requested_mtu":1280,"requested_region":"local"}
 JSON
 
 : >"${RACE_LOG}"
@@ -222,7 +255,7 @@ race_pid=$!
 sleep 1
 until_ts=$(( $(date +%s) + 180 ))
 curl -sS -X POST "http://127.0.0.1:${ISSUER_PORT}/v1/admin/revoke-token" \
-  -H 'X-Admin-Token: dev-admin-token' \
+  -H "X-Admin-Token: ${ADMIN_TOKEN}" \
   -H 'Content-Type: application/json' \
   --data "{\"jti\":\"$jti\",\"until\":$until_ts}" >"${REVOKE_LOG}"
 
@@ -230,12 +263,12 @@ curl -sS -X POST "http://127.0.0.1:${ISSUER_PORT}/v1/admin/revoke-token" \
   for _ in $(seq 1 "${DISPUTE_LOOPS}"); do
     du=$(( $(date +%s) + 180 ))
     curl -sS -X POST "http://127.0.0.1:${ISSUER_PORT}/v1/admin/subject/dispute" \
-      -H 'X-Admin-Token: dev-admin-token' \
+      -H "X-Admin-Token: ${ADMIN_TOKEN}" \
       -H 'Content-Type: application/json' \
       --data "{\"subject\":\"exit-local-1\",\"tier_cap\":1,\"until\":$du,\"reason\":\"chaos-cycle\"}" >/dev/null || true
     sleep "${DISPUTE_SLEEP_SEC}"
     curl -sS -X POST "http://127.0.0.1:${ISSUER_PORT}/v1/admin/subject/dispute/clear" \
-      -H 'X-Admin-Token: dev-admin-token' \
+      -H "X-Admin-Token: ${ADMIN_TOKEN}" \
       -H 'Content-Type: application/json' \
       --data '{"subject":"exit-local-1","reason":"chaos-cycle-clear"}' >/dev/null || true
     sleep "${DISPUTE_SLEEP_SEC}"
@@ -246,7 +279,7 @@ dispute_pid=$!
 : >"${FRESH_LOG}"
 (
   for _ in $(seq 1 "${FRESH_LOOPS}"); do
-    popj="$(go run ./cmd/tokenpop gen --show-private-key 2>&1 || true)"
+    popj="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key 2>&1 || true)"
     if command -v jq >/dev/null 2>&1; then
       pop_pub_iter="$(printf '%s' "$popj" | jq -er '.public_key // empty' 2>/dev/null || true)"
       pop_priv_iter="$(printf '%s' "$popj" | jq -er '.private_key // empty' 2>/dev/null || true)"
@@ -263,12 +296,14 @@ dispute_pid=$!
     tk=$(echo "$tj" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
     if [[ -n "$tk" ]]; then
       fresh_nonce="fresh-$RANDOM-$(date +%s%N)"
+      fresh_session_id="fresh-session-$RANDOM-$(date +%s%N)"
       printf '%s' "$pop_priv_iter" >"$POP_PRIV_ITER_FILE"
       printf '%s' "$tk" >"$TOKEN_ITER_FILE"
       tp=$(go run ./cmd/tokenpop sign \
         --private-key-file "$POP_PRIV_ITER_FILE" \
         --token-file "$TOKEN_ITER_FILE" \
         --exit-id "exit-local-1" \
+        --session-id "$fresh_session_id" \
         --proof-nonce "$fresh_nonce" \
         --client-inner-pub "$client_pub" \
         --transport "policy-json" \
@@ -279,7 +314,7 @@ dispute_pid=$!
         continue
       fi
       pl=$(cat <<JSON
-{"exit_id":"exit-local-1","token":"$tk","token_proof":"$tp","token_proof_nonce":"$fresh_nonce","client_inner_pub":"$client_pub","transport":"policy-json","requested_mtu":1280,"requested_region":"local"}
+{"exit_id":"exit-local-1","session_id":"$fresh_session_id","token":"$tk","token_proof":"$tp","token_proof_nonce":"$fresh_nonce","client_inner_pub":"$client_pub","transport":"policy-json","requested_mtu":1280,"requested_region":"local"}
 JSON
 )
       curl -sS -X POST "http://127.0.0.1:${ENTRY_PORT}/v1/path/open" -H 'Content-Type: application/json' --data "$pl" >>"${FRESH_LOG}" || true
@@ -332,7 +367,7 @@ if [[ -z "$revoked_drops" || "$revoked_drops" -lt 1 ]]; then
   exit 1
 fi
 
-audit=$(curl -sS "http://127.0.0.1:${ISSUER_PORT}/v1/admin/audit?limit=40" -H 'X-Admin-Token: dev-admin-token')
+audit=$(curl -sS "http://127.0.0.1:${ISSUER_PORT}/v1/admin/audit?limit=40" -H "X-Admin-Token: ${ADMIN_TOKEN}")
 if ! echo "$audit" | rg -q 'subject-dispute-apply'; then
   echo "expected dispute apply events in issuer audit"
   echo "$audit"

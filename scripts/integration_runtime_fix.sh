@@ -192,6 +192,58 @@ if ! extract_json_payload /tmp/integration_runtime_fix_manual_report_invalid.log
   exit 1
 fi
 
+echo "[runtime-fix] non-root stale client state cleanup"
+STALE_STATE_DIR="$TMP_DIR/stale_client_state"
+STALE_CLIENT_STATE="$STALE_STATE_DIR/client_vpn.state"
+mkdir -p "$STALE_STATE_DIR"
+printf 'CLIENT_VPN_PID=999999\n' >"$STALE_CLIENT_STATE"
+STALE_STATE_DOCTOR="$TMP_DIR/fake_doctor_stale_client_state.sh"
+cat >"$STALE_STATE_DOCTOR" <<'EOF_STALE_STATE_DOCTOR'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -f "${STALE_CLIENT_STATE:?}" ]]; then
+  cat <<OUT
+[runtime-doctor] status=WARN findings=1 warnings=1 failures=0
+[runtime-doctor] summary_json_payload:
+{"version":1,"status":"WARN","summary":{"findings_total":1,"warnings_total":1,"failures_total":0},"paths":{"client_vpn_state_file":"${STALE_CLIENT_STATE}","wg_only_dir":"${STALE_STATE_DIR}/wg_only"},"findings":[
+{"severity":"WARN","code":"client_vpn_state_stale","message":"stale client vpn state","remediation":"client-vpn cleanup"}
+]}
+OUT
+else
+  cat <<OUT
+[runtime-doctor] status=OK findings=0 warnings=0 failures=0
+[runtime-doctor] summary_json_payload:
+{"version":1,"status":"OK","summary":{"findings_total":0,"warnings_total":0,"failures_total":0},"paths":{"client_vpn_state_file":"${STALE_CLIENT_STATE}","wg_only_dir":"${STALE_STATE_DIR}/wg_only"},"findings":[]}
+OUT
+fi
+exit 0
+EOF_STALE_STATE_DOCTOR
+chmod +x "$STALE_STATE_DOCTOR"
+
+STALE_CLIENT_STATE="$STALE_CLIENT_STATE" \
+STALE_STATE_DIR="$STALE_STATE_DIR" \
+MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_REPORT" \
+FAKE_MANUAL_VALIDATION_REPORT_CAPTURE_FILE="$REPORT_CAPTURE" \
+RUNTIME_DOCTOR_SCRIPT="$STALE_STATE_DOCTOR" \
+EASY_NODE_RUNTIME_FIX_MUTABLE_PATH_ALLOWLIST="$STALE_STATE_DIR" \
+./scripts/runtime_fix.sh --show-json 1 >/tmp/integration_runtime_fix_stale_state_nonroot.log 2>&1
+
+if [[ -e "$STALE_CLIENT_STATE" ]]; then
+  echo "expected runtime-fix to remove stale client state file without root"
+  cat /tmp/integration_runtime_fix_stale_state_nonroot.log
+  exit 1
+fi
+if ! rg -q '\[runtime-fix\] action=client-vpn stale state cleanup' /tmp/integration_runtime_fix_stale_state_nonroot.log; then
+  echo "expected non-root stale client state cleanup action not found"
+  cat /tmp/integration_runtime_fix_stale_state_nonroot.log
+  exit 1
+fi
+if ! extract_json_payload /tmp/integration_runtime_fix_stale_state_nonroot.log | jq -e '.doctor.before.status == "WARN" and .doctor.after.status == "OK" and (.actions.taken | index("client-vpn stale state cleanup")) != null' >/dev/null 2>&1; then
+  echo "runtime-fix stale client state JSON payload missing expected cleanup summary"
+  cat /tmp/integration_runtime_fix_stale_state_nonroot.log
+  exit 1
+fi
+
 echo "[runtime-fix] cleanup orchestration"
 DOCTOR_STATE_DIR="$TMP_DIR/doctor_state"
 mkdir -p "$DOCTOR_STATE_DIR"
@@ -354,11 +406,11 @@ cat >"$SUDO_DOCTOR" <<EOF_SUDO_DOCTOR
 #!/usr/bin/env bash
 set -euo pipefail
 count=0
-if [[ -f "\${DOCTOR_COUNTER_FILE:?}" ]]; then
-  count="\$(cat "\${DOCTOR_COUNTER_FILE}")"
+if [[ -f "${SUDO_DOCTOR_COUNTER}" ]]; then
+  count="\$(cat "${SUDO_DOCTOR_COUNTER}")"
 fi
 count=\$((count + 1))
-printf '%s\n' "\$count" >"\${DOCTOR_COUNTER_FILE}"
+printf '%s\n' "\$count" >"${SUDO_DOCTOR_COUNTER}"
 if [[ "\$count" -eq 1 ]]; then
   cat <<'OUT'
 [runtime-doctor] status=WARN findings=1 warnings=1 failures=0
@@ -393,11 +445,12 @@ FAKE_RUNUSER_CAPTURE_FILE="$RUNUSER_CAPTURE" \
 FAKE_CHOWN_CAPTURE_FILE="$CHOWN_CAPTURE_SUDO" \
 FAKE_CHMOD_CAPTURE_FILE="$CHMOD_CAPTURE_SUDO" \
 EASY_NODE_RUNTIME_FIX_WG_ONLY_PRUNE_ALLOWLIST="$SUDO_WG_ONLY_DIR" \
+EASY_NODE_RUNTIME_FIX_MUTABLE_PATH_ALLOWLIST="$SUDO_WG_ONLY_DIR" \
 EASY_NODE_RUNTIME_FIX_EUID=0 \
 SUDO_USER="$(id -un)" \
 ./scripts/runtime_fix.sh --prune-wg-only-dir 1 --show-json 1 >/tmp/integration_runtime_fix_sudo_user.log 2>&1
 
-if ! rg -q -- "-u $(id -un) -- ${SUDO_DOCTOR}" "$RUNUSER_CAPTURE"; then
+if ! rg -q -- "-u $(id -un) -- env -i" "$RUNUSER_CAPTURE" || ! rg -q -- "${SUDO_DOCTOR} --base-port" "$RUNUSER_CAPTURE"; then
   echo "expected runtime-fix to run runtime-doctor via runuser for SUDO_USER perspective"
   cat "$RUNUSER_CAPTURE"
   exit 1
@@ -433,11 +486,11 @@ cat >"$OWN_DOCTOR" <<EOF_OWN_DOCTOR
 #!/usr/bin/env bash
 set -euo pipefail
 count=0
-if [[ -f "\${DOCTOR_COUNTER_FILE:?}" ]]; then
-  count="\$(cat "\${DOCTOR_COUNTER_FILE}")"
+if [[ -f "${OWN_DOCTOR_COUNTER}" ]]; then
+  count="\$(cat "${OWN_DOCTOR_COUNTER}")"
 fi
 count=\$((count + 1))
-printf '%s\n' "\$count" >"\${DOCTOR_COUNTER_FILE}"
+printf '%s\n' "\$count" >"${OWN_DOCTOR_COUNTER}"
 if [[ "\$count" -eq 1 ]]; then
   cat <<'OUT'
 [runtime-doctor] status=FAIL findings=5 warnings=1 failures=4
@@ -479,6 +532,7 @@ MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_REPORT" \
 FAKE_MANUAL_VALIDATION_REPORT_CAPTURE_FILE="$REPORT_CAPTURE" \
 FAKE_CHOWN_CAPTURE_FILE="$CHOWN_CAPTURE" \
 FAKE_CHMOD_CAPTURE_FILE="$CHMOD_CAPTURE" \
+EASY_NODE_RUNTIME_FIX_MUTABLE_PATH_ALLOWLIST="$OWN_DIR" \
 EASY_NODE_RUNTIME_FIX_EUID=0 \
 SUDO_USER="$(id -un)" \
 ./scripts/runtime_fix.sh --show-json 1 >/tmp/integration_runtime_fix_ownership.log 2>&1
@@ -555,7 +609,7 @@ cat <<'OUT'
 [runtime-doctor] status=WARN findings=1 warnings=1 failures=0
 [runtime-doctor] summary_json_payload:
 {"version":1,"status":"WARN","summary":{"findings_total":1,"warnings_total":1,"failures_total":0},"paths":{"wg_only_dir":"/tmp/fake_wg_only"},"findings":[
-{"severity":"WARN","code":"wg_only_state_stale","message":"stale wg-only state","remediation":"wg-only cleanup"}
+{"severity":"WARN","code":"wg_only_client_iface_present","message":"wg-only client interface present","remediation":"wg-only cleanup"}
 ]}
 OUT
 exit 0

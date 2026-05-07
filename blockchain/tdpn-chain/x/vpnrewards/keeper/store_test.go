@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -206,9 +207,11 @@ func TestFileStorePersistsAcrossReopen(t *testing.T) {
 		DistributedAt:  1700000001,
 		Status:         chaintypes.ReconciliationConfirmed,
 	}
+	proof := validRewardProofRecord("traffic/file-proof-1")
 
 	store.UpsertAccrual(accrual)
 	store.UpsertDistribution(distribution)
+	store.UpsertProof(proof)
 
 	reopened, err := NewFileStore(storePath)
 	if err != nil {
@@ -229,6 +232,14 @@ func TestFileStorePersistsAcrossReopen(t *testing.T) {
 	}
 	if gotDistribution != distribution {
 		t.Fatalf("expected reopened distribution %+v, got %+v", distribution, gotDistribution)
+	}
+
+	gotProof, ok := reopened.GetProof(proof.ProofPath)
+	if !ok {
+		t.Fatal("expected proof to be loaded from file store")
+	}
+	if gotProof != normalizeProof(proof) {
+		t.Fatalf("expected reopened proof %+v, got %+v", normalizeProof(proof), gotProof)
 	}
 }
 
@@ -283,11 +294,20 @@ func TestFileStoreListAccrualsAndDistributionsAcrossReopen(t *testing.T) {
 		PayoutRef:      "payout-b",
 		Status:         chaintypes.ReconciliationConfirmed,
 	}
+	proofA := validRewardProofRecord("traffic/file-proof-a")
+	proofB := validRewardProofRecord("traffic/file-proof-b")
+	proofB.RewardID = "reward-file-proof-b"
 
 	store.UpsertAccrual(accrualA)
 	store.UpsertAccrual(accrualB)
 	store.UpsertDistribution(distA)
 	store.UpsertDistribution(distB)
+	if err := store.UpsertProofWithError(proofA); err != nil {
+		t.Fatalf("UpsertProofWithError proofA returned unexpected error: %v", err)
+	}
+	if err := store.UpsertProofWithError(proofB); err != nil {
+		t.Fatalf("UpsertProofWithError proofB returned unexpected error: %v", err)
+	}
 
 	reopened, err := NewFileStore(storePath)
 	if err != nil {
@@ -322,6 +342,87 @@ func TestFileStoreListAccrualsAndDistributionsAcrossReopen(t *testing.T) {
 	}
 	if distributionByID[distB.DistributionID] != distB {
 		t.Fatalf("expected distribution %q to round-trip through list", distB.DistributionID)
+	}
+
+	proofs := reopened.ListProofs()
+	if len(proofs) != 2 {
+		t.Fatalf("expected 2 proofs after reopen, got %d", len(proofs))
+	}
+	proofByPath := make(map[string]types.RewardProofRecord, len(proofs))
+	for _, record := range proofs {
+		proofByPath[record.ProofPath] = record
+	}
+	if proofByPath[proofA.ProofPath] != normalizeProof(proofA) {
+		t.Fatalf("expected proof %q to round-trip through list", proofA.ProofPath)
+	}
+	if proofByPath[proofB.ProofPath] != normalizeProof(proofB) {
+		t.Fatalf("expected proof %q to round-trip through list", proofB.ProofPath)
+	}
+
+	proofsWithError, err := reopened.ListProofsWithError()
+	if err != nil {
+		t.Fatalf("ListProofsWithError returned unexpected error: %v", err)
+	}
+	if len(proofsWithError) != len(proofs) {
+		t.Fatalf("expected ListProofsWithError length %d, got %d", len(proofs), len(proofsWithError))
+	}
+}
+
+func TestFileStoreProofConflictAndPersistFailureRollback(t *testing.T) {
+	t.Parallel()
+
+	storePath := filepath.Join(t.TempDir(), "state", "vpnrewards.json")
+	store, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("NewFileStore returned unexpected error: %v", err)
+	}
+
+	proof := validRewardProofRecord("traffic/file-proof-rollback")
+	if err := store.UpsertProofWithError(proof); err != nil {
+		t.Fatalf("UpsertProofWithError returned unexpected error: %v", err)
+	}
+
+	conflict := proof
+	conflict.RewardMicros++
+	err = store.UpsertProofWithError(conflict)
+	if err == nil {
+		t.Fatal("expected conflicting proof to fail")
+	}
+	if !strings.Contains(err.Error(), "conflicting fields") {
+		t.Fatalf("expected conflict error, got %v", err)
+	}
+
+	newProof := validRewardProofRecord("traffic/file-proof-failed-write")
+	failed := false
+	store.persistHook = func() error {
+		if !failed {
+			failed = true
+			return errors.New("forced proof persist failure")
+		}
+		return nil
+	}
+	err = store.UpsertProofWithError(newProof)
+	if err == nil {
+		t.Fatal("expected proof persist failure")
+	}
+	if _, ok := store.GetProof(newProof.ProofPath); ok {
+		t.Fatal("expected failed proof write to roll back in memory")
+	}
+
+	store.persistHook = nil
+	reopened, err := NewFileStore(storePath)
+	if err != nil {
+		t.Fatalf("reopening file store returned unexpected error: %v", err)
+	}
+	if _, ok := reopened.GetProof(newProof.ProofPath); ok {
+		t.Fatal("expected failed proof write to be absent durably")
+	}
+	got, ok := reopened.GetProof(proof.ProofPath)
+	if !ok {
+		t.Fatal("expected original proof to remain durable")
+	}
+	if got != normalizeProof(proof) {
+		t.Fatalf("expected original proof %+v, got %+v", normalizeProof(proof), got)
 	}
 }
 

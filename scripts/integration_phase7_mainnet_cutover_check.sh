@@ -62,14 +62,20 @@ OP_REQUIRED_FALSE_LOG="$TMP_DIR/operator_required_false.log"
 OP_REQUIRED_FALSE_CANONICAL="$TMP_DIR/operator_required_false_canonical_summary.json"
 
 ACTIVATION_GATE_GO_SUMMARY="$TMP_DIR/mainnet_activation_gate_go.json"
+ACTIVATION_GATE_SPOOFED_GO_SUMMARY="$TMP_DIR/mainnet_activation_gate_spoofed_go.json"
 ACTIVATION_GATE_STATUS_FAIL_SUMMARY="$TMP_DIR/mainnet_activation_gate_status_fail.json"
 ACTIVATION_GATE_DECISION_NO_GO_SUMMARY="$TMP_DIR/mainnet_activation_gate_decision_no_go.json"
 BOOTSTRAP_GATE_GO_SUMMARY="$TMP_DIR/bootstrap_governance_graduation_gate_go.json"
+BOOTSTRAP_GATE_SPOOFED_GO_SUMMARY="$TMP_DIR/bootstrap_governance_graduation_gate_spoofed_go.json"
 BOOTSTRAP_GATE_STATUS_FAIL_SUMMARY="$TMP_DIR/bootstrap_governance_graduation_gate_status_fail.json"
 
 ACTIVATION_REQUIRED_GO_OUTPUT="$TMP_DIR/activation_required_go_output.json"
 ACTIVATION_REQUIRED_GO_LOG="$TMP_DIR/activation_required_go.log"
 ACTIVATION_REQUIRED_GO_CANONICAL="$TMP_DIR/activation_required_go_canonical_summary.json"
+
+ACTIVATION_SPOOFED_GO_OUTPUT="$TMP_DIR/activation_spoofed_go_output.json"
+ACTIVATION_SPOOFED_GO_LOG="$TMP_DIR/activation_spoofed_go.log"
+ACTIVATION_SPOOFED_GO_CANONICAL="$TMP_DIR/activation_spoofed_go_canonical_summary.json"
 
 ACTIVATION_REQUIRED_STATUS_FAIL_OUTPUT="$TMP_DIR/activation_required_status_fail_output.json"
 ACTIVATION_REQUIRED_STATUS_FAIL_LOG="$TMP_DIR/activation_required_status_fail.log"
@@ -86,6 +92,10 @@ ACTIVATION_REQUIRED_FALSE_CANONICAL="$TMP_DIR/activation_required_false_canonica
 BOOTSTRAP_REQUIRED_GO_OUTPUT="$TMP_DIR/bootstrap_required_go_output.json"
 BOOTSTRAP_REQUIRED_GO_LOG="$TMP_DIR/bootstrap_required_go.log"
 BOOTSTRAP_REQUIRED_GO_CANONICAL="$TMP_DIR/bootstrap_required_go_canonical_summary.json"
+
+BOOTSTRAP_SPOOFED_GO_OUTPUT="$TMP_DIR/bootstrap_spoofed_go_output.json"
+BOOTSTRAP_SPOOFED_GO_LOG="$TMP_DIR/bootstrap_spoofed_go.log"
+BOOTSTRAP_SPOOFED_GO_CANONICAL="$TMP_DIR/bootstrap_spoofed_go_canonical_summary.json"
 
 BOOTSTRAP_REQUIRED_FALSE_OUTPUT="$TMP_DIR/bootstrap_required_false_output.json"
 BOOTSTRAP_REQUIRED_FALSE_LOG="$TMP_DIR/bootstrap_required_false.log"
@@ -218,11 +228,45 @@ cat >"$ACTIVATION_GATE_GO_SUMMARY" <<'EOF_ACTIVATION_GATE_GO_SUMMARY'
     "major": 1,
     "minor": 0
   },
+  "generated_at": "2026-05-06T00:00:00Z",
+  "decision": "GO",
+  "status": "go",
+  "go": true,
+  "rc": 0,
+  "exit_code": 0,
+  "mode": "enforce",
+  "fail_close": 1,
+  "require_real_evidence": 1,
+  "input": {
+    "state": "available",
+    "valid": true
+  },
+  "counts": {
+    "required": 13,
+    "evaluated": 13,
+    "pass": 13,
+    "fail": 0
+  },
+  "failed_gate_ids": [],
+  "artifacts": {
+    "metrics_json": "/tmp/blockchain-mainnet-activation-metrics-summary.json"
+  }
+}
+EOF_ACTIVATION_GATE_GO_SUMMARY
+
+cat >"$ACTIVATION_GATE_SPOOFED_GO_SUMMARY" <<'EOF_ACTIVATION_GATE_SPOOFED_GO_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_mainnet_activation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
   "decision": "GO",
   "status": "go",
   "go": true
 }
-EOF_ACTIVATION_GATE_GO_SUMMARY
+EOF_ACTIVATION_GATE_SPOOFED_GO_SUMMARY
 
 cat >"$ACTIVATION_GATE_STATUS_FAIL_SUMMARY" <<'EOF_ACTIVATION_GATE_STATUS_FAIL_SUMMARY'
 {
@@ -256,11 +300,43 @@ cat >"$BOOTSTRAP_GATE_GO_SUMMARY" <<'EOF_BOOTSTRAP_GATE_GO_SUMMARY'
     "major": 1,
     "minor": 0
   },
+  "generated_at": "2026-05-06T00:00:00Z",
+  "decision": "GO",
+  "status": "go",
+  "go": true,
+  "rc": 0,
+  "exit_code": 0,
+  "fail_close": 1,
+  "input": {
+    "state": "available",
+    "valid": true
+  },
+  "counts": {
+    "required": 9,
+    "evaluated": 9,
+    "pass": 9,
+    "fail": 0
+  },
+  "failed_gate_ids": [],
+  "artifacts": {
+    "metrics_json": "/tmp/blockchain-bootstrap-graduation-metrics-summary.json"
+  }
+}
+EOF_BOOTSTRAP_GATE_GO_SUMMARY
+
+cat >"$BOOTSTRAP_GATE_SPOOFED_GO_SUMMARY" <<'EOF_BOOTSTRAP_GATE_SPOOFED_GO_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "blockchain_bootstrap_graduation_gate_summary",
+    "major": 1,
+    "minor": 0
+  },
   "decision": "GO",
   "status": "go",
   "go": true
 }
-EOF_BOOTSTRAP_GATE_GO_SUMMARY
+EOF_BOOTSTRAP_GATE_SPOOFED_GO_SUMMARY
 
 cat >"$BOOTSTRAP_GATE_STATUS_FAIL_SUMMARY" <<'EOF_BOOTSTRAP_GATE_STATUS_FAIL_SUMMARY'
 {
@@ -512,6 +588,41 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[phase7-mainnet-cutover-check] spoofed mainnet activation GO is unresolved"
+set +e
+PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$ACTIVATION_SPOOFED_GO_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --phase6-handoff-summary-json "$PASS_HANDOFF" \
+  --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --mainnet-activation-gate-summary-json "$ACTIVATION_GATE_SPOOFED_GO_SUMMARY" \
+  --bootstrap-governance-graduation-gate-summary-json "$BOOTSTRAP_GATE_GO_SUMMARY" \
+  --require-mainnet-activation-gate-go 1 \
+  --rollback-path-ready 1 \
+  --summary-json "$ACTIVATION_SPOOFED_GO_OUTPUT" \
+  --show-json 0 >"$ACTIVATION_SPOOFED_GO_LOG" 2>&1
+activation_spoofed_go_rc=$?
+set -e
+if [[ "$activation_spoofed_go_rc" -ne 1 ]]; then
+  echo "expected rc=1 when activation gate GO lacks enforce/real-evidence contract, got rc=$activation_spoofed_go_rc"
+  cat "$ACTIVATION_SPOOFED_GO_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_mainnet_activation_gate_go == true
+  and .inputs.usable.mainnet_activation_gate_summary_json == true
+  and .signals.mainnet_activation_gate_go == null
+  and .stages.mainnet_activation_gate.status == "invalid"
+  and .stages.mainnet_activation_gate.resolved == false
+  and ((.decision.reasons // []) | any(test("mainnet_activation_gate_go unresolved")))
+' "$ACTIVATION_SPOOFED_GO_OUTPUT" >/dev/null; then
+  echo "activation-spoofed-go summary mismatch"
+  cat "$ACTIVATION_SPOOFED_GO_OUTPUT"
+  cat "$ACTIVATION_SPOOFED_GO_LOG"
+  exit 1
+fi
+
 echo "[phase7-mainnet-cutover-check] mainnet activation gate fail status when required"
 set +e
 PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$ACTIVATION_REQUIRED_STATUS_FAIL_CANONICAL" \
@@ -631,6 +742,41 @@ if ! jq -e '
   echo "bootstrap-required-go summary mismatch"
   cat "$BOOTSTRAP_REQUIRED_GO_OUTPUT"
   cat "$BOOTSTRAP_REQUIRED_GO_LOG"
+  exit 1
+fi
+
+echo "[phase7-mainnet-cutover-check] spoofed bootstrap governance graduation GO is unresolved"
+set +e
+PHASE7_MAINNET_CUTOVER_CHECK_CANONICAL_SUMMARY_JSON="$BOOTSTRAP_SPOOFED_GO_CANONICAL" \
+"$SCRIPT_UNDER_TEST" \
+  --phase6-handoff-summary-json "$PASS_HANDOFF" \
+  --phase6-contracts-summary-json "$PASS_CONTRACTS" \
+  --mainnet-activation-gate-summary-json "$ACTIVATION_GATE_GO_SUMMARY" \
+  --bootstrap-governance-graduation-gate-summary-json "$BOOTSTRAP_GATE_SPOOFED_GO_SUMMARY" \
+  --require-bootstrap-governance-graduation-gate-go 1 \
+  --rollback-path-ready 1 \
+  --summary-json "$BOOTSTRAP_SPOOFED_GO_OUTPUT" \
+  --show-json 0 >"$BOOTSTRAP_SPOOFED_GO_LOG" 2>&1
+bootstrap_spoofed_go_rc=$?
+set -e
+if [[ "$bootstrap_spoofed_go_rc" -ne 1 ]]; then
+  echo "expected rc=1 when bootstrap gate GO lacks fail-closed contract, got rc=$bootstrap_spoofed_go_rc"
+  cat "$BOOTSTRAP_SPOOFED_GO_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .policy.require_bootstrap_governance_graduation_gate_go == true
+  and .inputs.usable.bootstrap_governance_graduation_gate_summary_json == true
+  and .signals.bootstrap_governance_graduation_gate_go == null
+  and .stages.bootstrap_governance_graduation_gate.status == "invalid"
+  and .stages.bootstrap_governance_graduation_gate.resolved == false
+  and ((.decision.reasons // []) | any(test("bootstrap_governance_graduation_gate_go unresolved")))
+' "$BOOTSTRAP_SPOOFED_GO_OUTPUT" >/dev/null; then
+  echo "bootstrap-spoofed-go summary mismatch"
+  cat "$BOOTSTRAP_SPOOFED_GO_OUTPUT"
+  cat "$BOOTSTRAP_SPOOFED_GO_LOG"
   exit 1
 fi
 

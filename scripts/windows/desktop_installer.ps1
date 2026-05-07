@@ -178,6 +178,39 @@ function Resolve-InstallerTypeFromPath {
   }
 }
 
+function Test-AdminConsoleInstallerPath {
+  param(
+    [AllowEmptyString()]
+    [string]$Path
+  )
+
+  $normalized = $Path.ToLowerInvariant()
+  $tokenized = ($normalized -replace '[\s_]+', '-')
+  return ($tokenized.Contains("admin-console") -or $tokenized.Contains("gpm-admin"))
+}
+
+function Assert-PublicInstallerArtifactNotAdminConsole {
+  param(
+    [AllowEmptyString()]
+    [string]$Path
+  )
+
+  if (Test-AdminConsoleInstallerPath -Path $Path) {
+    throw "public desktop installer refuses Admin Console artifact: $Path"
+  }
+}
+
+function Assert-PublicLaunchTargetNotAdminConsole {
+  param(
+    [AllowEmptyString()]
+    [string]$Path
+  )
+
+  if (Test-AdminConsoleInstallerPath -Path $Path) {
+    throw "public desktop installer refuses Admin Console launch target: $Path"
+  }
+}
+
 function Get-PreferredInstallerFile {
   param(
     [Parameter(Mandatory = $true)]
@@ -192,6 +225,7 @@ function Get-PreferredInstallerFile {
 
   $candidates = @(
     Get-ChildItem -LiteralPath $SearchRoot -File -Recurse -Filter $Filter |
+      Where-Object { -not (Test-AdminConsoleInstallerPath -Path $_.FullName) } |
       Sort-Object -Property LastWriteTimeUtc, FullName -Descending
   )
   if ($candidates.Count -eq 0) {
@@ -570,6 +604,7 @@ function Resolve-LaunchExecutableTarget {
   $normalizedOverride = Normalize-PathCandidate -Value $OverridePath
   if (-not [string]::IsNullOrWhiteSpace($normalizedOverride)) {
     $fullPath = [System.IO.Path]::GetFullPath($normalizedOverride)
+    Assert-PublicLaunchTargetNotAdminConsole -Path $fullPath
     return [pscustomobject]@{
       path   = $fullPath
       source = "override"
@@ -754,6 +789,7 @@ try {
     if (-not (Test-Path -LiteralPath $resolvedExplicitPath -PathType Leaf)) {
       throw "explicit installer path does not exist: $resolvedExplicitPath"
     }
+    Assert-PublicInstallerArtifactNotAdminConsole -Path $resolvedExplicitPath
 
     $pathType = Resolve-InstallerTypeFromPath -Path $resolvedExplicitPath
     if ([string]::IsNullOrWhiteSpace($pathType)) {
@@ -913,6 +949,7 @@ try {
       $summary.failure_stage = ""
 
       if ([bool]$LaunchAfterInstall) {
+        $summary.failure_stage = "launch_validate"
         $launchTarget = Resolve-LaunchExecutableTarget -OverridePath $InstalledExecutablePath -RepoRootPath $repoRoot
         $launchPath = [string]$launchTarget.path
         $summary.launched_executable_path = $launchPath
@@ -948,6 +985,7 @@ try {
             }
           }
         }
+        $summary.failure_stage = ""
       } else {
         $summary.launch_status = "disabled"
         $summary.launch_attempted = $false

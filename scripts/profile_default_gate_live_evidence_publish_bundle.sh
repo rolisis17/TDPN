@@ -78,6 +78,15 @@ timestamp_utc() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
+iso8601_to_epoch_01() {
+  local value
+  value="$(trim "${1:-}")"
+  if [[ -z "$value" ]]; then
+    return 1
+  fi
+  date -u -d "$value" +%s 2>/dev/null
+}
+
 require_value_or_die() {
   local flag="$1"
   local argc="$2"
@@ -361,6 +370,8 @@ init_stage_json_01() {
       summary_json: $stage_summary_json,
       summary_valid_after_run: false,
       summary_fresh_after_run: false,
+      summary_timestamp_current_after_run: false,
+      summary_generated_at_utc: null,
       command_redacted: null,
       failure_reason: null
     }'
@@ -384,6 +395,9 @@ run_stage_01() {
   local stage_summary_pre_fingerprint=""
   local stage_summary_post_fingerprint=""
   local stage_summary_fresh="0"
+  local stage_summary_timestamp_current="0"
+  local stage_summary_generated_at_utc=""
+  local stage_summary_generated_epoch=""
   local stage_failure_reason=""
 
   stage_summary_pre_fingerprint="$(file_fingerprint_01 "$stage_summary_json")"
@@ -403,6 +417,15 @@ run_stage_01() {
     elif [[ -n "$stage_summary_post_fingerprint" && "$stage_summary_post_fingerprint" != "$stage_summary_pre_fingerprint" ]]; then
       stage_summary_fresh="1"
     fi
+    stage_summary_generated_at_utc="$(jq -r 'if (.generated_at_utc | type) == "string" then .generated_at_utc else "" end' "$stage_summary_json" 2>/dev/null || true)"
+    if [[ -n "$stage_summary_generated_at_utc" ]]; then
+      stage_summary_generated_epoch="$(iso8601_to_epoch_01 "$stage_summary_generated_at_utc" 2>/dev/null || true)"
+      if [[ "$stage_summary_generated_epoch" =~ ^[0-9]+$ \
+        && "$stage_summary_generated_epoch" -le $((stage_end_epoch + 5)) \
+        && "$stage_summary_generated_epoch" -ge $((stage_start_epoch - 1)) ]]; then
+        stage_summary_timestamp_current="1"
+      fi
+    fi
   fi
   stage_effective_rc="$stage_command_rc"
   command_redacted="$(render_command_line_from_argv_01 "${cmd[@]}")"
@@ -419,6 +442,10 @@ run_stage_01() {
     stage_status="fail"
     stage_effective_rc=66
     stage_failure_reason="stage summary is stale/reused from a previous run: $stage_summary_json"
+  elif [[ "$stage_summary_timestamp_current" != "1" ]]; then
+    stage_status="fail"
+    stage_effective_rc=67
+    stage_failure_reason="stage summary generated_at_utc is missing, invalid, or predates this run: $stage_summary_json"
   fi
 
   RUN_STAGE_JSON="$(jq -n \
@@ -428,6 +455,8 @@ run_stage_01() {
     --arg stage_summary_json "$stage_summary_json" \
     --arg stage_summary_valid "$stage_summary_valid" \
     --arg stage_summary_fresh "$stage_summary_fresh" \
+    --arg stage_summary_timestamp_current "$stage_summary_timestamp_current" \
+    --arg stage_summary_generated_at_utc "$stage_summary_generated_at_utc" \
     --arg command_redacted "$command_redacted" \
     --arg stage_failure_reason "$stage_failure_reason" \
     --argjson stage_command_rc "$stage_command_rc" \
@@ -444,6 +473,12 @@ run_stage_01() {
       summary_json: $stage_summary_json,
       summary_valid_after_run: ($stage_summary_valid == "1"),
       summary_fresh_after_run: ($stage_summary_fresh == "1"),
+      summary_timestamp_current_after_run: ($stage_summary_timestamp_current == "1"),
+      summary_generated_at_utc: (
+        if $stage_summary_generated_at_utc == "" then null
+        else $stage_summary_generated_at_utc
+        end
+      ),
       command_redacted: (if $command_redacted == "" then null else $command_redacted end),
       failure_reason: (if $stage_failure_reason == "" then null else $stage_failure_reason end)
     }')"

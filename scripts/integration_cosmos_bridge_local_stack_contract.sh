@@ -48,10 +48,12 @@ require_contains "${OUTPUT_WITH_AUTH}" "export SETTLEMENT_CHAIN_ADAPTER=cosmos" 
   "contract failed: missing SETTLEMENT_CHAIN_ADAPTER export"
 require_contains "${OUTPUT_WITH_AUTH}" "export COSMOS_SETTLEMENT_ENDPOINT=http://127.0.0.1:18080" \
   "contract failed: missing COSMOS_SETTLEMENT_ENDPOINT export"
-require_contains "${OUTPUT_WITH_AUTH}" "export COSMOS_SETTLEMENT_API_KEY=bridge-contract-token" \
-  "contract failed: missing COSMOS_SETTLEMENT_API_KEY export in auth mode"
-require_contains "${OUTPUT_WITH_AUTH}" "go run ./blockchain/tdpn-chain/cmd/tdpnd --settlement-http-listen 127.0.0.1:18080 --grpc-listen 127.0.0.1:19090 --settlement-http-auth-token bridge-contract-token" \
-  "contract failed: missing expected tdpnd command wiring in auth+grpc mode"
+require_contains "${OUTPUT_WITH_AUTH}" 'export COSMOS_SETTLEMENT_API_KEY="$(head -n1 ' \
+  "contract failed: missing COSMOS_SETTLEMENT_API_KEY file-backed export in auth mode"
+require_contains "${OUTPUT_WITH_AUTH}" "go run ./blockchain/tdpn-chain/cmd/tdpnd --settlement-http-listen 127.0.0.1:18080 --grpc-listen 127.0.0.1:19090 --settlement-http-auth-token-file" \
+  "contract failed: missing expected tdpnd command file-backed auth wiring in auth+grpc mode"
+require_not_contains "${OUTPUT_WITH_AUTH}" "bridge-contract-token" \
+  "contract failed: auth token should not be printed in dry-run output"
 require_contains "${OUTPUT_WITH_AUTH}" "dry-run mode: command not started." \
   "contract failed: helper did not report dry-run mode"
 

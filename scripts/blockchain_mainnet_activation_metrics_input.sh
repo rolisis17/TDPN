@@ -38,6 +38,8 @@ Canonical metric keys:
 Notes:
   - Accepts canonical keys at top-level and/or nested/grouped JSON shapes.
   - Top-level canonical values take precedence over nested values.
+  - Preserves a top-level evidence object so production evidence metadata can
+    flow through metrics normalization into enforce-mode gates.
   - Fail-soft on partial/missing data: exits 0 with status complete|partial|missing.
 USAGE
 }
@@ -113,40 +115,83 @@ array_to_json() {
   printf '%s\n' "${arr_ref[@]}" | jq -R . | jq -s .
 }
 
-extract_top_level_numeric() {
+extract_metric_candidate_json() {
   local input_json="$1"
   local key="$2"
-  local raw=""
-  raw="$(jq -r --arg key "$key" '
-    if (.[$key] | type) == "number" then .[$key] else empty end
-  ' "$input_json" 2>/dev/null || true)"
-  numeric_text_or_empty "$raw"
+  jq -c --arg key "$key" '
+    def emit($source; $value):
+      if $value == null then empty else {source: $source, value: $value} end;
+    def grouped:
+      if $key == "measurement_window_weeks" then
+        emit("input_json_nested"; .pipeline.window[$key]),
+        emit("input_json_nested"; .window[$key]),
+        emit("input_json_nested"; .general[$key])
+      elif ($key == "vpn_connect_session_success_slo_pct" or $key == "vpn_recovery_mttr_p95_minutes") then
+        emit("input_json_nested"; .pipeline.vpn.slo[$key]),
+        emit("input_json_nested"; .vpn.slo[$key]),
+        emit("input_json_nested"; .reliability[$key])
+      elif ($key == "paying_users_3mo_min" or $key == "paid_sessions_per_day_30d_avg") then
+        emit("input_json_nested"; .demand[$key])
+      elif ($key | startswith("validator_")) then
+        emit("input_json_nested"; .validator[$key]),
+        emit("input_json_nested"; .validator.supply[$key]),
+        emit("input_json_nested"; .validator.concentration[$key]),
+        emit("input_json_nested"; .validator.geo[$key]),
+        emit("input_json_nested"; .validator_decentralization[$key])
+      elif ($key == "manual_sanctions_reversed_pct_90d" or $key == "abuse_report_to_decision_p95_hours") then
+        emit("input_json_nested"; .governance[$key])
+      elif ($key == "subsidy_runway_months" or $key == "contribution_margin_3mo") then
+        emit("input_json_nested"; .economics[$key])
+      else
+        empty
+      end;
+    limit(1;
+      emit("input_json_top_level"; .[$key]),
+      emit("input_json_nested"; .metrics[$key]),
+      grouped
+    )
+  ' "$input_json" 2>/dev/null || true
 }
 
-extract_nested_numeric() {
-  local input_json="$1"
-  local key="$2"
-  local raw=""
-  raw="$(jq -r --arg key "$key" '
-    limit(1; .. | objects | .[$key]? | select(type == "number"))
-  ' "$input_json" 2>/dev/null || true)"
-  numeric_text_or_empty "$raw"
+metric_value_is_valid() {
+  local key="$1"
+  local value="$2"
+
+  case "$key" in
+    measurement_window_weeks|paying_users_3mo_min|paid_sessions_per_day_30d_avg|validator_candidate_depth|validator_independent_operators|validator_region_count|validator_country_count)
+      jq -n -e --argjson value "$value" '
+        ($value | type) == "number"
+        and ($value == ($value | floor))
+        and ($value >= 0)
+      ' >/dev/null 2>&1
+      ;;
+    vpn_connect_session_success_slo_pct|validator_max_operator_seat_share_pct|validator_max_asn_provider_seat_share_pct|manual_sanctions_reversed_pct_90d)
+      jq -n -e --argjson value "$value" '
+        ($value | type) == "number"
+        and ($value >= 0)
+        and ($value <= 100)
+      ' >/dev/null 2>&1
+      ;;
+    vpn_recovery_mttr_p95_minutes|abuse_report_to_decision_p95_hours|subsidy_runway_months|contribution_margin_3mo)
+      jq -n -e --argjson value "$value" '
+        ($value | type) == "number"
+        and ($value >= 0)
+      ' >/dev/null 2>&1
+      ;;
+    *)
+      jq -n -e --argjson value "$value" '($value | type) == "number"' >/dev/null 2>&1
+      ;;
+  esac
 }
 
-metric_has_non_numeric_value() {
-  local input_json="$1"
-  local key="$2"
-  local raw=""
-  raw="$(jq -r --arg key "$key" '
-    if ([.. | objects | select(has($key)) | .[$key] | select(type != "number" and type != "null")] | length) > 0
-    then "1"
-    else "0"
-    end
-  ' "$input_json" 2>/dev/null || true)"
-  if [[ "$raw" == "1" ]]; then
-    return 0
-  fi
-  return 1
+mark_metric_invalid() {
+  local key="$1"
+  metric_value_json["$key"]="null"
+  metric_source["$key"]="input_json_invalid"
+  missing_metric_keys+=("$key")
+  invalid_metric_keys+=("$key")
+  missing_count=$((missing_count + 1))
+  invalid_count=$((invalid_count + 1))
 }
 
 need_cmd jq
@@ -305,31 +350,23 @@ invalid_count=0
 
 if [[ "$input_valid" == "1" ]]; then
   for key in "${metric_keys[@]}"; do
-    top_level_numeric="$(extract_top_level_numeric "$input_json" "$key")"
-    if [[ -n "$top_level_numeric" ]]; then
-      metric_value_json["$key"]="$top_level_numeric"
-      metric_source["$key"]="input_json_top_level"
+    candidate_json="$(extract_metric_candidate_json "$input_json" "$key")"
+    if [[ -n "$(trim "$candidate_json")" ]]; then
+      candidate_source="$(jq -r '.source' <<<"$candidate_json")"
+      candidate_raw="$(jq -r '.value | if type == "string" then . else tostring end' <<<"$candidate_json")"
+      candidate_numeric="$(numeric_text_or_empty "$candidate_raw")"
+      if [[ -z "$candidate_numeric" ]]; then
+        mark_metric_invalid "$key"
+        continue
+      fi
+      if ! metric_value_is_valid "$key" "$candidate_numeric"; then
+        mark_metric_invalid "$key"
+        continue
+      fi
+      metric_value_json["$key"]="$candidate_numeric"
+      metric_source["$key"]="$candidate_source"
       provided_metric_keys+=("$key")
       provided_count=$((provided_count + 1))
-      continue
-    fi
-
-    nested_numeric="$(extract_nested_numeric "$input_json" "$key")"
-    if [[ -n "$nested_numeric" ]]; then
-      metric_value_json["$key"]="$nested_numeric"
-      metric_source["$key"]="input_json_nested"
-      provided_metric_keys+=("$key")
-      provided_count=$((provided_count + 1))
-      continue
-    fi
-
-    if metric_has_non_numeric_value "$input_json" "$key"; then
-      metric_value_json["$key"]="null"
-      metric_source["$key"]="input_json_invalid"
-      missing_metric_keys+=("$key")
-      invalid_metric_keys+=("$key")
-      missing_count=$((missing_count + 1))
-      invalid_count=$((invalid_count + 1))
       continue
     fi
 
@@ -383,6 +420,11 @@ for key in "${metric_keys[@]}"; do
     '. + {($key): $value}' <<<"$sources_metrics_json")"
 done
 
+evidence_json='null'
+if [[ "$input_valid" == "1" ]]; then
+  evidence_json="$(jq -c 'if (.evidence | type) == "object" then .evidence else null end' "$input_json" 2>/dev/null || printf '%s' 'null')"
+fi
+
 summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
 canonical_tmp="$(mktemp "${canonical_summary_json}.tmp.XXXXXX")"
 cleanup() {
@@ -420,6 +462,7 @@ jq -n \
   --argjson general_metric_keys "$general_metric_keys_json" \
   --argjson metrics_values "$metrics_values_json" \
   --argjson sources_metrics "$sources_metrics_json" \
+  --argjson evidence "$evidence_json" \
   '{
     version: 1,
     schema: {id: $schema_id, major: 1, minor: 0},
@@ -456,6 +499,7 @@ jq -n \
       canonical_summary_json: $canonical_summary_json_source,
       metrics: $sources_metrics
     },
+    evidence: $evidence,
     metrics: $metrics_values,
     artifacts: {
       input_json: $input_json,

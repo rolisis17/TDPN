@@ -41,6 +41,7 @@ unset BLOCKCHAIN_FASTLANE_RUN_CI_PHASE6_COSMOS_L1_BUILD_TESTNET
 unset BLOCKCHAIN_FASTLANE_RUN_CI_PHASE6_COSMOS_L1_CONTRACTS
 unset BLOCKCHAIN_FASTLANE_RUN_CI_PHASE7_MAINNET_CUTOVER
 unset BLOCKCHAIN_FASTLANE_SUMMARY_JSON
+export BLOCKCHAIN_FASTLANE_ALLOW_UNSAFE_SCRIPT_OVERRIDES=1
 
 for cmd in bash mktemp jq grep sed wc cat chmod cmp date; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -370,6 +371,26 @@ EOF_FAKE_STAGE
   export "$env_name=$fake_stage"
 done
 
+echo "[blockchain-fastlane] rejects unsafe script override without test flag"
+set +e
+env -u BLOCKCHAIN_FASTLANE_ALLOW_UNSAFE_SCRIPT_OVERRIDES \
+  "$GATE_SCRIPT" \
+  --reports-dir "$TMP_DIR/reports_unsafe_script_override" \
+  --summary-json "$TMP_DIR/summary_unsafe_script_override.json" \
+  --print-summary-json 0 >"$TMP_DIR/unsafe_script_override.log" 2>&1
+unsafe_script_override_rc=$?
+set -e
+if [[ "$unsafe_script_override_rc" -ne 2 ]]; then
+  echo "expected unsafe script override to fail as usage error"
+  cat "$TMP_DIR/unsafe_script_override.log"
+  exit 1
+fi
+if ! grep -Fq "unsafe stage script override rejected" "$TMP_DIR/unsafe_script_override.log"; then
+  echo "expected unsafe script override rejection message"
+  cat "$TMP_DIR/unsafe_script_override.log"
+  exit 1
+fi
+
 assert_stage_order() {
   local capture_file="$1"
   shift
@@ -618,6 +639,8 @@ echo "[blockchain-fastlane] success ordering path"
 BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
 BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$SUCCESS_CANONICAL_SUMMARY_JSON" \
 BLOCKCHAIN_FASTLANE_PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON="$PHASE7_ENV_OVERRIDE_JSON" \
+BLOCKCHAIN_MAINNET_ACTIVATION_GATE_MODE=report-only \
+BLOCKCHAIN_MAINNET_ACTIVATION_GATE_REQUIRE_REAL_EVIDENCE=0 \
 "$GATE_SCRIPT" \
   --reports-dir "$SUCCESS_REPORTS_DIR" \
   --summary-json "$SUCCESS_SUMMARY_JSON" \
@@ -630,6 +653,9 @@ BLOCKCHAIN_FASTLANE_PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON="$PHASE7_ENV_OVER
 assert_stage_order "$CAPTURE" "${STAGE_IDS_WITH_OPERATOR_PACK[@]}"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--metrics-json" "$SUCCESS_METRICS_JSON"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--summary-json" "$SUCCESS_GATE_SUMMARY_JSON"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--enforce-launch"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--require-real-evidence" "1"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" "1"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_metrics" "--summary-json" "$SUCCESS_METRICS_SUMMARY_JSON"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_metrics" "--canonical-metrics-json" "$SUCCESS_METRICS_JSON"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_metrics" "--source-json" "$DEFAULT_SOURCE_JSON_PHASE5"
@@ -685,6 +711,8 @@ echo "[blockchain-fastlane] bootstrap governance graduation gate ordering path"
 : >"$CAPTURE"
 BLOCKCHAIN_FASTLANE_CAPTURE_FILE="$CAPTURE" \
 BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$BOOTSTRAP_GATE_CANONICAL_SUMMARY_JSON" \
+BLOCKCHAIN_BOOTSTRAP_GRADUATION_GATE_MODE=report-only \
+BLOCKCHAIN_BOOTSTRAP_GRADUATION_GATE_REQUIRE_REAL_EVIDENCE=0 \
 "$GATE_SCRIPT" \
   --reports-dir "$BOOTSTRAP_GATE_REPORTS_DIR" \
   --summary-json "$BOOTSTRAP_GATE_SUMMARY_JSON" \
@@ -697,6 +725,8 @@ assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_metri
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_metrics" "--canonical-metrics-json" "$BOOTSTRAP_GATE_METRICS_JSON"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_bootstrap_governance_graduation_gate" "--metrics-json" "$BOOTSTRAP_GATE_METRICS_JSON"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_bootstrap_governance_graduation_gate" "--summary-json" "$BOOTSTRAP_GATE_SUMMARY_PATH"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_bootstrap_governance_graduation_gate" "--enforce-launch"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_bootstrap_governance_graduation_gate" "--require-real-evidence" "1"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_bootstrap_governance_graduation_gate" "--fail-close" "1"
 assert_stage_invocation_token_count "$CAPTURE" "blockchain_bootstrap_governance_graduation_gate" "--fail-close" 1
 
@@ -924,6 +954,8 @@ BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$METRICS_INPUT_GATE_FALLBACK_CANONIC
 assert_stage_order "$CAPTURE" "${STAGE_IDS_NO_METRICS_WITH_GATE[@]}"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--metrics-json" "$METRICS_INPUT_GATE_FALLBACK_NORMALIZED_CANONICAL_JSON"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--summary-json" "$METRICS_INPUT_GATE_FALLBACK_GATE_SUMMARY_JSON"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--enforce-launch"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--require-real-evidence" "1"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" "1"
 assert_stage_invocation_token_count "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" 1
 
@@ -980,6 +1012,8 @@ assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_metri
 assert_stage_invocation_token_count "$CAPTURE" "blockchain_mainnet_activation_metrics" "--source-json" 2
 assert_stage_invocation_not_contains "$CAPTURE" "blockchain_mainnet_activation_metrics" "$DEFAULT_SOURCE_JSON_PHASE5"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" "1"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--enforce-launch"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--require-real-evidence" "1"
 assert_stage_invocation_token_count "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" 1
 
 if [[ ! -f "$SOURCE_ENV_SUMMARY_JSON" ]]; then
@@ -1020,6 +1054,8 @@ assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_metri
 assert_stage_invocation_token_count "$CAPTURE" "blockchain_mainnet_activation_metrics" "--source-json" 2
 assert_stage_invocation_not_contains "$CAPTURE" "blockchain_mainnet_activation_metrics" "$DEFAULT_SOURCE_JSON_PHASE5"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" "1"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--enforce-launch"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--require-real-evidence" "1"
 assert_stage_invocation_token_count "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" 1
 
 if [[ ! -f "$SOURCE_CLI_SUMMARY_JSON" ]]; then
@@ -1188,6 +1224,8 @@ BLOCKCHAIN_FASTLANE_CANONICAL_SUMMARY_JSON="$EXPLICIT_GATE_NO_METRICS_CANONICAL_
 
 assert_stage_order "$CAPTURE" "${STAGE_IDS_NO_METRICS_WITH_GATE[@]}"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--summary-json" "$EXPLICIT_GATE_NO_METRICS_GATE_SUMMARY_JSON"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--enforce-launch"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--require-real-evidence" "1"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" "1"
 assert_stage_invocation_not_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--metrics-json"
 assert_stage_invocation_token_count "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" 1
@@ -1339,6 +1377,8 @@ assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_opera
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_operator_pack" "--metrics-summary-json" "$TOGGLE_REPORTS_DIR/blockchain_mainnet_activation_metrics_summary.json"
 assert_stage_invocation_not_contains "$CAPTURE" "blockchain_mainnet_activation_operator_pack" "--canonical-summary-json"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_bootstrap_governance_graduation_gate" "--fail-close" "1"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_bootstrap_governance_graduation_gate" "--enforce-launch"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_bootstrap_governance_graduation_gate" "--require-real-evidence" "1"
 assert_stage_invocation_token_count "$CAPTURE" "blockchain_bootstrap_governance_graduation_gate" "--fail-close" 1
 
 if [[ ! -f "$TOGGLE_SUMMARY_JSON" ]]; then
@@ -1459,6 +1499,8 @@ fi
 
 assert_stage_order "$CAPTURE" "${STAGE_IDS[@]}"
 assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" "1"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--enforce-launch"
+assert_stage_invocation_contains "$CAPTURE" "blockchain_mainnet_activation_gate" "--require-real-evidence" "1"
 assert_stage_invocation_token_count "$CAPTURE" "blockchain_mainnet_activation_gate" "--fail-close" 1
 
 if [[ ! -f "$GATE_FAIL_SUMMARY_JSON" ]]; then

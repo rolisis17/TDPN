@@ -22,6 +22,8 @@ Usage:
     [--operator-pack-reports-dir DIR] \
     [--operator-pack-summary-json PATH] \
     [--operator-pack-canonical-summary-json PATH] \
+    [--enforce-launch] \
+    [--fail-on-no-go [0|1]] \
     [--refresh-roadmap [0|1]] \
     [--print-summary-json [0|1]] \
     [--print-output-json [0|1]]
@@ -37,6 +39,9 @@ Purpose:
 Notes:
   - This helper intentionally requires --input-json and always forwards
     --seed-example-input 0 to gate-cycle.
+  - Default mode is diagnostic/fail-soft for logical NO-GO gate-cycle
+    decisions. Use --enforce-launch or --fail-on-no-go 1 in launch automation
+    to return non-zero unless the gate-cycle decision is GO.
   - Gate thresholds remain unchanged because this helper only orchestrates
     existing scripts and paths.
 USAGE
@@ -164,6 +169,7 @@ summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_REAL_EVIDENCE_SUMMARY_JSON:-}"
 canonical_summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_REAL_EVIDENCE_CANONICAL_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/blockchain_mainnet_activation_real_evidence_summary.json}"
 print_summary_json="${BLOCKCHAIN_MAINNET_ACTIVATION_REAL_EVIDENCE_PRINT_SUMMARY_JSON:-1}"
 refresh_roadmap="${BLOCKCHAIN_MAINNET_ACTIVATION_REAL_EVIDENCE_REFRESH_ROADMAP:-1}"
+fail_on_no_go="${BLOCKCHAIN_MAINNET_ACTIVATION_REAL_EVIDENCE_FAIL_ON_NO_GO:-0}"
 
 template_output_json="${BLOCKCHAIN_MAINNET_ACTIVATION_REAL_EVIDENCE_TEMPLATE_OUTPUT_JSON:-}"
 template_canonical_output_json="${BLOCKCHAIN_MAINNET_ACTIVATION_REAL_EVIDENCE_TEMPLATE_CANONICAL_OUTPUT_JSON:-}"
@@ -255,6 +261,19 @@ while [[ $# -gt 0 ]]; do
       operator_pack_canonical_summary_json="${2:-}"
       shift 2
       ;;
+    --enforce-launch)
+      fail_on_no_go="1"
+      shift
+      ;;
+    --fail-on-no-go)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        fail_on_no_go="${2:-}"
+        shift 2
+      else
+        fail_on_no_go="1"
+        shift
+      fi
+      ;;
     --refresh-roadmap)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         refresh_roadmap="${2:-}"
@@ -296,6 +315,7 @@ path_arg_or_die "--reports-dir" "$reports_dir"
 path_arg_or_die "--canonical-summary-json" "$canonical_summary_json"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--refresh-roadmap" "$refresh_roadmap"
+bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go"
 
 if [[ -n "$(trim "$summary_json")" ]]; then
   path_arg_or_die "--summary-json" "$summary_json"
@@ -527,6 +547,10 @@ if [[ -n "$first_runtime_failure_step" ]]; then
 fi
 
 gate_cycle_decision="$(json_text_or_empty "$gate_cycle_summary_json" '.decision')"
+if [[ "$helper_status" == "pass" && "$fail_on_no_go" == "1" && "$gate_cycle_decision" != "GO" ]]; then
+  helper_status="launch-no-go"
+  helper_rc=1
+fi
 gate_cycle_missing_required_metrics_json="$(
   json_array_or_empty "$gate_cycle_summary_json" '(.steps.gate_bundle.missing_required_metrics // []) | if type == "array" then . else [] end'
 )"
@@ -581,6 +605,7 @@ jq -n \
   --arg missing_checklist_md "$missing_checklist_md" \
   --argjson print_summary_json "$( [[ "$print_summary_json" == "1" ]] && echo true || echo false )" \
   --argjson refresh_roadmap "$( [[ "$refresh_roadmap" == "1" ]] && echo true || echo false )" \
+  --argjson fail_on_no_go "$( [[ "$fail_on_no_go" == "1" ]] && echo true || echo false )" \
   --argjson duration_sec "$run_duration_sec" \
   --arg first_runtime_failure_step "$first_runtime_failure_step" \
   --argjson first_runtime_failure_rc "$first_runtime_failure_rc" \
@@ -639,6 +664,7 @@ jq -n \
       input_json: $input_json,
       reports_dir: $reports_dir,
       refresh_roadmap: $refresh_roadmap,
+      fail_on_no_go: $fail_on_no_go,
       print_summary_json: $print_summary_json
     },
     steps: {

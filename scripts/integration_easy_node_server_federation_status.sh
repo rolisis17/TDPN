@@ -119,6 +119,28 @@ EOF_CURL
 sed -i 's/\r$//' "$TMP_BIN/curl"
 chmod +x "$TMP_BIN/curl"
 
+echo "[server-federation-status] insecure remote HTTP fails closed"
+INSECURE_REMOTE_LOG="$TMP_DIR/federation_status_insecure_remote.log"
+if PATH="$TMP_BIN:$PATH" \
+  ./scripts/easy_node.sh server-federation-status \
+    --directory-url http://203.0.113.10:8081 \
+    --timeout-sec 3 >"$INSECURE_REMOTE_LOG" 2>&1; then
+  echo "expected server-federation-status to refuse insecure remote HTTP"
+  cat "$INSECURE_REMOTE_LOG"
+  exit 1
+fi
+if ! rg -q 'refused insecure remote URL: http://203\.0\.113\.10:8081' "$INSECURE_REMOTE_LOG"; then
+  echo "expected insecure remote HTTP refusal diagnostic"
+  cat "$INSECURE_REMOTE_LOG"
+  exit 1
+fi
+
+cat >"$AUTH_ENV" <<'EOF_ENV'
+EASY_NODE_SERVER_MODE=authority
+DIRECTORY_PUBLIC_URL=http://127.0.0.1:8081
+DIRECTORY_ADMIN_TOKEN=test-admin-token
+EOF_ENV
+
 echo "[server-federation-status] human-readable output includes retry window"
 HUMAN_LOG="$TMP_DIR/federation_status_human.log"
 if ! PATH="$TMP_BIN:$PATH" \

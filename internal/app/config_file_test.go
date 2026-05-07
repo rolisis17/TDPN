@@ -284,6 +284,10 @@ func TestApplyConfigFileGenericEnvBlocksDangerousLocalAPIKeys(t *testing.T) {
 		"LOCAL_CONTROL_API_SCRIPT=/tmp/evil.sh",
 		"LOCAL_CONTROL_API_RUNNER=/tmp/evil-runner",
 		"LOCAL_CONTROL_API_ADDR=0.0.0.0:9999",
+		"LOCAL_CONTROL_API_GIT_BASH_PATH=C:\\Temp\\evil.exe",
+		"LOCAL_CONTROL_API_BRIDGE_COMMAND_RUNNER=C:\\Temp\\bridge-runner.exe",
+		"LOCAL_CONTROL_API_BRIDGE_ALLOW_RUNNER_ENV_OVERRIDE=1",
+		"LOCAL_CONTROL_API_BRIDGE_ALLOW_UNTRUSTED_RUNNER=1",
 		"LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND=echo status",
 		"LOCAL_CONTROL_API_SERVICE_START_COMMAND=echo start",
 		"LOCAL_CONTROL_API_SERVICE_STOP_COMMAND=echo stop",
@@ -310,6 +314,10 @@ func TestApplyConfigFileGenericEnvBlocksDangerousLocalAPIKeys(t *testing.T) {
 	t.Setenv("LOCAL_CONTROL_API_SCRIPT", "")
 	t.Setenv("LOCAL_CONTROL_API_RUNNER", "")
 	t.Setenv("LOCAL_CONTROL_API_ADDR", "")
+	t.Setenv("LOCAL_CONTROL_API_GIT_BASH_PATH", "")
+	t.Setenv("LOCAL_CONTROL_API_BRIDGE_COMMAND_RUNNER", "")
+	t.Setenv("LOCAL_CONTROL_API_BRIDGE_ALLOW_RUNNER_ENV_OVERRIDE", "")
+	t.Setenv("LOCAL_CONTROL_API_BRIDGE_ALLOW_UNTRUSTED_RUNNER", "")
 	t.Setenv("LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND", "")
 	t.Setenv("LOCAL_CONTROL_API_SERVICE_START_COMMAND", "")
 	t.Setenv("LOCAL_CONTROL_API_SERVICE_STOP_COMMAND", "")
@@ -348,6 +356,18 @@ func TestApplyConfigFileGenericEnvBlocksDangerousLocalAPIKeys(t *testing.T) {
 	}
 	if got := os.Getenv("LOCAL_CONTROL_API_ADDR"); got != "" {
 		t.Fatalf("LOCAL_CONTROL_API_ADDR=%q want empty", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_GIT_BASH_PATH"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_GIT_BASH_PATH=%q want empty", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_BRIDGE_COMMAND_RUNNER"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_BRIDGE_COMMAND_RUNNER=%q want empty", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_BRIDGE_ALLOW_RUNNER_ENV_OVERRIDE"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_BRIDGE_ALLOW_RUNNER_ENV_OVERRIDE=%q want empty", got)
+	}
+	if got := os.Getenv("LOCAL_CONTROL_API_BRIDGE_ALLOW_UNTRUSTED_RUNNER"); got != "" {
+		t.Fatalf("LOCAL_CONTROL_API_BRIDGE_ALLOW_UNTRUSTED_RUNNER=%q want empty", got)
 	}
 	if got := os.Getenv("LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND"); got != "" {
 		t.Fatalf("LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND=%q want empty", got)

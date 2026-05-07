@@ -258,6 +258,29 @@ absolute_path() {
   printf '%s/%s\n' "$parent_dir" "$(basename "$candidate")"
 }
 
+to_lower() {
+  printf '%s' "${1,,}"
+}
+
+is_admin_console_executable_path() {
+  local value="${1:-}"
+  local normalized
+  normalized="$(to_lower "$value")"
+  local tokenized="${normalized// /-}"
+  tokenized="${tokenized//_/-}"
+
+  [[ "$tokenized" == *admin-console* || "$tokenized" == *gpm-admin* ]]
+}
+
+assert_public_desktop_executable_not_admin_console() {
+  local executable_path="${1:-}"
+  if is_admin_console_executable_path "$executable_path"; then
+    die "public desktop bootstrap refuses Admin Console executable: $executable_path
+- use the separate GPM Admin Console launcher for admin builds
+- for the public app, pass --desktop-executable-override-path or GPM_DESKTOP_PACKAGED_EXE pointing to GPM Desktop / Global Private Mesh Desktop instead"
+  fi
+}
+
 pkg_config_module_exists() {
   local module_name="$1"
   pkg-config --exists "$module_name" >/dev/null 2>&1
@@ -473,6 +496,7 @@ find_packaged_desktop_executable() {
 - pass --desktop-executable-override-path with a valid packaged desktop executable
 - for local builds, check apps/desktop/src-tauri/target/release"
     fi
+    assert_public_desktop_executable_not_admin_console "$override_path"
     RESOLVED_DESKTOP_EXECUTABLE_SOURCE="override-path"
     RESOLVED_DESKTOP_EXECUTABLE_PATH="$(absolute_path "$override_path")"
     return 0
@@ -485,6 +509,7 @@ find_packaged_desktop_executable() {
       continue
     fi
     if [[ -f "$env_value" ]]; then
+      assert_public_desktop_executable_not_admin_console "$env_value"
       RESOLVED_DESKTOP_EXECUTABLE_SOURCE="env-override:$env_name"
       RESOLVED_DESKTOP_EXECUTABLE_PATH="$(absolute_path "$env_value")"
       return 0
@@ -512,6 +537,9 @@ find_packaged_desktop_executable() {
     for binary_name in "${binary_names[@]}"; do
       candidate="$release_root/$binary_name"
       if [[ -f "$candidate" ]]; then
+        if is_admin_console_executable_path "$candidate"; then
+          continue
+        fi
         RESOLVED_DESKTOP_EXECUTABLE_SOURCE="packaged-default"
         RESOLVED_DESKTOP_EXECUTABLE_PATH="$(absolute_path "$candidate")"
         return 0
@@ -536,6 +564,9 @@ find_packaged_desktop_executable() {
     for appimage_name in "${appimage_names[@]}"; do
       appimage="$release_root/bundle/appimage/$appimage_name"
       if [[ -f "$appimage" ]]; then
+        if is_admin_console_executable_path "$appimage"; then
+          continue
+        fi
         RESOLVED_DESKTOP_EXECUTABLE_SOURCE="packaged-default"
         RESOLVED_DESKTOP_EXECUTABLE_PATH="$(absolute_path "$appimage")"
         return 0
@@ -554,7 +585,11 @@ find_packaged_desktop_executable() {
 
   for appimage in "${appimage_candidates[@]}"; do
     if [[ -f "$appimage" ]]; then
-      absolute_path "$appimage"
+      if is_admin_console_executable_path "$appimage"; then
+        continue
+      fi
+      RESOLVED_DESKTOP_EXECUTABLE_SOURCE="packaged-appimage-glob"
+      RESOLVED_DESKTOP_EXECUTABLE_PATH="$(absolute_path "$appimage")"
       return 0
     fi
   done
@@ -627,13 +662,13 @@ run_linux_desktop_doctor() {
 run_local_api_foreground() {
   resolve_local_api_health_endpoint "$API_ADDR"
   if [[ "$DRY_RUN" == "1" ]]; then
-    log "dry-run: would run local API from repo root: go run ./cmd/node --local-api"
+    log "dry-run: would run local API from repo root: LOCAL_CONTROL_API_ADDR=$API_ADDR go run ./cmd/node --local-api"
     return 0
   fi
 
   assert_go_runtime_prerequisite_for_api
   pushd "$ROOT_DIR" >/dev/null
-  go run ./cmd/node --local-api
+  LOCAL_CONTROL_API_ADDR="$API_ADDR" go run ./cmd/node --local-api
   popd >/dev/null
 }
 
@@ -877,7 +912,7 @@ fi
     fi
 
     if [[ "$DRY_RUN" == "1" ]]; then
-      log "dry-run: would start local API in background from repo root: go run ./cmd/node --local-api"
+      log "dry-run: would start local API in background from repo root: LOCAL_CONTROL_API_ADDR=$API_ADDR go run ./cmd/node --local-api"
       log "dry-run: would wait for health endpoint: $API_HEALTH_ENDPOINT (timeout=${API_HEALTH_TIMEOUT_SEC}s)"
       run_desktop_by_plan
       exit 0
@@ -888,7 +923,7 @@ fi
   trap cleanup_background_api EXIT
   (
     cd "$ROOT_DIR"
-    go run ./cmd/node --local-api
+    LOCAL_CONTROL_API_ADDR="$API_ADDR" go run ./cmd/node --local-api
   ) &
   API_BG_PID="$!"
   log "started local API background process pid=$API_BG_PID"

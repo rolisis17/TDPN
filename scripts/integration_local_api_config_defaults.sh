@@ -19,6 +19,7 @@ CFG_A="$TMP_DIR/easy_mode_config_a.conf"
 CFG_B="$TMP_DIR/easy_mode_config_b.conf"
 STATE_STORE="$TMP_DIR/gpm_state.json"
 MANIFEST_CACHE="$TMP_DIR/gpm_manifest_cache.json"
+AUTH_PROOF_HELPER="$TMP_DIR/gpm_auth_contract_proof.go"
 LOCAL_API_BASE=""
 SERVER_PID=""
 
@@ -30,6 +31,32 @@ cleanup() {
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
+
+ensure_auth_proof_helper() {
+  if [[ -f "$AUTH_PROOF_HELPER" ]]; then
+    return 0
+  fi
+  awk '
+    /^  cat >"\$AUTH_PROOF_HELPER" <<'\''EOF_GO'\''$/ { in_helper = 1; next }
+    /^EOF_GO$/ && in_helper { in_helper = 0; exit }
+    in_helper { print }
+  ' "$ROOT_DIR/scripts/integration_local_control_api_contract.sh" >"$AUTH_PROOF_HELPER"
+  if [[ ! -s "$AUTH_PROOF_HELPER" ]]; then
+    echo "failed to extract auth proof helper"
+    exit 1
+  fi
+}
+
+auth_contract_wallet_address() {
+  ensure_auth_proof_helper
+  GPM_AUTH_CONTRACT_KEY_SCALAR=1 go run "$AUTH_PROOF_HELPER" --address
+}
+
+auth_contract_proof_json() {
+  local message="$1"
+  ensure_auth_proof_helper
+  printf '%s' "$message" | GPM_AUTH_CONTRACT_KEY_SCALAR=1 go run "$AUTH_PROOF_HELPER" --proof
+}
 
 cat >"$FAKE_SCRIPT" <<'EOF_FAKE'
 #!/usr/bin/env bash
@@ -139,28 +166,13 @@ write_gpm_test_state_and_manifest() {
 }
 EOF_MANIFEST
 
+  # Runtime session tokens are intentionally not loadable from the persisted
+  # state store; keep this fixture focused on config default mapping.
   cat >"$STATE_STORE" <<EOF_STATE
 {
   "version": 1,
   "generated_at_utc": "$now_utc",
-  "sessions": [
-    {
-      "token": "gpm-config-session-a",
-      "wallet_address": "cosmos1configsessiona",
-      "wallet_provider": "keplr",
-      "role": "client",
-      "wallet_binding_verified": true,
-      "auth_verification_source": "local_wallet",
-      "client_tier": 2,
-      "stake_satisfied": true,
-      "prepaid_balance_satisfied": true,
-      "created_at": "$now_utc",
-      "expires_at": "$expires_utc",
-      "bootstrap_directory": "http://127.0.0.1:8081",
-      "bootstrap_directories": ["http://127.0.0.1:8081"],
-      "invite_key": "inv-config-a"
-    }
-  ],
+  "sessions": [],
   "operators": []
 }
 EOF_STATE
@@ -197,6 +209,9 @@ start_local_api() {
   GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS="0" \
   GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE="0" \
   GPM_STATE_STORE_PATH="$STATE_STORE" \
+  GPM_DEFAULT_CLIENT_TIER="2" \
+  GPM_DEFAULT_STAKE_SATISFIED="1" \
+  GPM_DEFAULT_PREPAID_BALANCE_SATISFIED="1" \
   SIMPLE_CLIENT_RUN_PREFLIGHT="" \
   SIMPLE_CLIENT_PROD_PROFILE_DEFAULT="" \
   CLIENT_PATH_PROFILE="" \
@@ -224,6 +239,51 @@ api_post_json() {
     -H "Origin: ${LOCAL_API_BASE}" \
     --data "$payload" \
     "${LOCAL_API_BASE}${path}"
+}
+
+mint_config_session_token() {
+  local wallet_address=""
+  local challenge_body=""
+  local challenge_json=""
+  local challenge_id=""
+  local challenge_message=""
+  local proof_json=""
+  local verify_body=""
+  local verify_json=""
+  wallet_address="$(auth_contract_wallet_address)"
+  challenge_body="$(jq -cn --arg wallet_address "$wallet_address" '{wallet_address: $wallet_address, wallet_provider: "keplr"}')"
+  challenge_json="$(api_post_json "/v1/gpm/auth/challenge" "$challenge_body")"
+  challenge_id="$(jq -r '.challenge_id // ""' <<<"$challenge_json")"
+  challenge_message="$(jq -r '.message // ""' <<<"$challenge_json")"
+  if [[ -z "$challenge_id" || -z "$challenge_message" ]]; then
+    echo "auth challenge did not return expected payload"
+    echo "$challenge_json"
+    exit 1
+  fi
+  proof_json="$(auth_contract_proof_json "$challenge_message")"
+  verify_body="$(jq -cn \
+    --arg wallet_address "$wallet_address" \
+    --arg challenge_id "$challenge_id" \
+    --arg signature "$(jq -r '.signature // ""' <<<"$proof_json")" \
+    --arg signature_public_key "$(jq -r '.signature_public_key // ""' <<<"$proof_json")" \
+    --arg signature_public_key_type "$(jq -r '.signature_public_key_type // "secp256k1"' <<<"$proof_json")" \
+    --arg signed_message "$(jq -r '.signed_message // ""' <<<"$proof_json")" \
+    '{
+      wallet_address: $wallet_address,
+      wallet_provider: "keplr",
+      challenge_id: $challenge_id,
+      signature: $signature,
+      signature_public_key: $signature_public_key,
+      signature_public_key_type: $signature_public_key_type,
+      signed_message: $signed_message
+    }')"
+  verify_json="$(api_post_json "/v1/gpm/auth/verify" "$verify_body")"
+  if ! jq -e '.ok == true and .session.wallet_binding_verified == true and .session.client_tier >= 2 and .session.stake_satisfied == true and .session.prepaid_balance_satisfied == true and (.session_token | type == "string" and length > 0)' <<<"$verify_json" >/dev/null; then
+    echo "auth verify did not return expected entitlement-bearing session payload"
+    echo "$verify_json"
+    exit 1
+  fi
+  jq -r '.session_token' <<<"$verify_json"
 }
 
 call_count() {
@@ -296,7 +356,14 @@ assert_service_command_output_line() {
 echo "[local-api-config-defaults] case A: config v1 maps profile/interface/preflight/prod defaults (private->3hop)"
 start_local_api "$CFG_A"
 
-connect_a_json="$(api_post_json "/v1/connect" '{"session_token":"gpm-config-session-a"}')"
+config_session_token="$(mint_config_session_token)"
+register_a_json="$(api_post_json "/v1/gpm/onboarding/client/register" "{\"session_token\":\"${config_session_token}\",\"bootstrap_directory\":\"http://127.0.0.1:8081\",\"invite_key\":\"inv-config-a\",\"path_profile\":\"3hop\"}")"
+if ! jq -e '.ok == true and .profile.path_profile == "3hop" and .session.path_profile == "3hop"' <<<"$register_a_json" >/dev/null; then
+  echo "case A client registration response mismatch"
+  echo "$register_a_json"
+  exit 1
+fi
+connect_a_json="$(api_post_json "/v1/connect" "{\"session_token\":\"${config_session_token}\",\"prod_profile\":false}")"
 if ! jq -e '.ok == true and .stage == "connect" and .profile == "3hop"' <<<"$connect_a_json" >/dev/null; then
   echo "case A connect response mismatch"
   echo "$connect_a_json"
@@ -313,7 +380,7 @@ up_a_call="$(require_last_call "client-vpn-up")"
 assert_line_has_subject_flag "$up_a_call" "inv-config-a" "case A"
 assert_line_has "$up_a_call" $'\t--path-profile\t3hop' "case A missing 3hop profile default from config"
 assert_line_has "$up_a_call" $'\t--interface\twgcfg3' "case A missing interface default from config"
-assert_line_has "$up_a_call" $'\t--prod-profile\t1' "case A missing prod default=1 from config"
+assert_line_has "$up_a_call" $'\t--prod-profile\t0' "case A missing explicit prod_profile=false override for non-settlement fixture"
 assert_line_has "$up_a_call" $'\t--install-route\t0' "case A unexpected install-route for 3hop"
 
 stop_local_api

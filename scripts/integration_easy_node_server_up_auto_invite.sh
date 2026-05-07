@@ -22,6 +22,7 @@ TMP_BIN="$TMP_DIR/bin"
 mkdir -p "$TMP_BIN"
 WG_PUBKEY_FAIL_STATE="$TMP_DIR/wg_pubkey_fail_state"
 REAL_GO="$(command -v go)"
+PROD_ISSUER_TRUST_FILE="$TMP_DIR/prod_issuer_trusted_keys.txt"
 
 backup_file() {
   local src="$1"
@@ -220,6 +221,11 @@ exec "$REAL_GO" "\$@"
 EOF_GO
 
 chmod +x "$TMP_BIN/docker" "$TMP_BIN/curl" "$TMP_BIN/wg" "$TMP_BIN/go"
+
+cat >"$PROD_ISSUER_TRUST_FILE" <<'EOF_PROD_ISSUER_TRUST'
+peer-a AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE
+peer-b AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI
+EOF_PROD_ISSUER_TRUST
 
 echo "[server-up-auto-invite] authority auto invite success"
 AUTH_OK_LOG="$TMP_DIR/authority_auto_invite_ok.log"
@@ -615,6 +621,8 @@ chmod 600 "$EXIT_KEY_FILE"
 PERM_OK_LOG="$TMP_DIR/authority_exit_key_perm_heal.log"
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \
+EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE="$PROD_ISSUER_TRUST_FILE" \
+EASY_NODE_COSMOS_SETTLEMENT_ENDPOINT="https://cosmos.example.test" \
 FAKE_WG_PUBKEY_FAIL_ONCE=1 \
 FAKE_WG_PUBKEY_FAIL_STATE_FILE="$WG_PUBKEY_FAIL_STATE" \
 ./scripts/easy_node.sh server-up \
@@ -641,6 +649,8 @@ rm -f "$WG_PUBKEY_FAIL_STATE"
 set +e
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \
+EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE="$PROD_ISSUER_TRUST_FILE" \
+EASY_NODE_COSMOS_SETTLEMENT_ENDPOINT="https://cosmos.example.test" \
 FAKE_WG_PUBKEY_FAIL_ONCE=1 \
 FAKE_WG_PUBKEY_FAIL_STATE_FILE="$WG_PUBKEY_FAIL_STATE" \
 ./scripts/easy_node.sh server-up \

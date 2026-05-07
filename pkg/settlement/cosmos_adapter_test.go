@@ -2216,7 +2216,7 @@ func TestCosmosAdapterConfirmationQueryPathMappings(t *testing.T) {
 }
 
 func TestCosmosAdapterConfirmationStatusQueriesDecodeFinality(t *testing.T) {
-	seenPathCh := make(chan string, 6)
+	seenPathCh := make(chan string, 7)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seenPathCh <- r.URL.Path
 		switch r.URL.Path {
@@ -2256,6 +2256,13 @@ func TestCosmosAdapterConfirmationStatusQueriesDecodeFinality(t *testing.T) {
 				"ok": true,
 				"delegation": map[string]any{
 					"ReservationID": "sres-1",
+					"SponsorID":     "sponsor-1",
+					"SubjectID":     "client-1",
+					"SessionID":     "sess-1",
+					"AmountMicros":  "202",
+					"Currency":      "uusdc",
+					"CreatedAtUnix": 1771234500,
+					"ExpiresAtUnix": 1771239900,
 					"Status":        "pending",
 				},
 			})
@@ -2328,12 +2335,107 @@ func TestCosmosAdapterConfirmationStatusQueriesDecodeFinality(t *testing.T) {
 	if got := <-seenPathCh; got != "/x/vpnsponsor/delegations/sres-1" {
 		t.Fatalf("unexpected sponsor status query path %q", got)
 	}
+	sponsorReservation, found, err := adapter.SponsorReservation(context.Background(), "sres-1")
+	if err != nil || !found {
+		t.Fatalf("SponsorReservation found=%v err=%v", found, err)
+	}
+	if sponsorReservation.ReservationID != "sres-1" ||
+		sponsorReservation.SponsorID != "sponsor-1" ||
+		sponsorReservation.SubjectID != "client-1" ||
+		sponsorReservation.SessionID != "sess-1" ||
+		sponsorReservation.AmountMicros != 202 ||
+		sponsorReservation.Currency != "UUSDC" ||
+		sponsorReservation.Status != OperationStatusPending ||
+		sponsorReservation.CreatedAt.Unix() != 1771234500 ||
+		sponsorReservation.ExpiresAt.Unix() != 1771239900 {
+		t.Fatalf("unexpected sponsor reservation material: %+v", sponsorReservation)
+	}
+	if got := <-seenPathCh; got != "/x/vpnsponsor/delegations/sres-1" {
+		t.Fatalf("unexpected sponsor material query path %q", got)
+	}
 
 	if status, found, err := adapter.SlashEvidenceStatus(context.Background(), "ev-1"); err != nil || !found || status != OperationStatusConfirmed {
 		t.Fatalf("SlashEvidenceStatus got status=%s found=%v err=%v", status, found, err)
 	}
 	if got := <-seenPathCh; got != "/x/vpnslashing/evidence/ev-1" {
 		t.Fatalf("unexpected slash status query path %q", got)
+	}
+}
+
+func TestCosmosAdapterSponsorReservationMaterialFailsClosedOnInvalidPayload(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    map[string]any
+		wantErr string
+	}{
+		{
+			name: "mismatched id",
+			body: map[string]any{
+				"ReservationID": "sres-other",
+				"SponsorID":     "sponsor-1",
+				"SubjectID":     "client-1",
+				"AmountMicros":  "100",
+				"Currency":      "uusdc",
+				"Status":        "confirmed",
+			},
+			wantErr: "id mismatch",
+		},
+		{
+			name: "missing amount",
+			body: map[string]any{
+				"ReservationID": "sres-invalid",
+				"SponsorID":     "sponsor-1",
+				"SubjectID":     "client-1",
+				"Currency":      "uusdc",
+				"Status":        "confirmed",
+			},
+			wantErr: "amount_micros > 0",
+		},
+		{
+			name: "missing subject",
+			body: map[string]any{
+				"ReservationID": "sres-invalid",
+				"SponsorID":     "sponsor-1",
+				"AmountMicros":  "100",
+				"Currency":      "uusdc",
+				"Status":        "confirmed",
+			},
+			wantErr: "missing sponsor_id or subject_id",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/x/vpnsponsor/delegations/sres-invalid" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"ok":         true,
+					"delegation": tc.body,
+				})
+			}))
+			defer srv.Close()
+
+			adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+				Endpoint:    srv.URL,
+				QueueSize:   8,
+				MaxRetries:  1,
+				BaseBackoff: 5 * time.Millisecond,
+			})
+			if err != nil {
+				t.Fatalf("NewCosmosAdapter: %v", err)
+			}
+			defer adapter.Close()
+
+			_, _, err = adapter.SponsorReservation(context.Background(), "sres-invalid")
+			if err == nil {
+				t.Fatalf("expected invalid sponsor reservation material to fail")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
+			}
+		})
 	}
 }
 
@@ -2587,7 +2689,7 @@ func TestCosmosAdapterFundReservationDecodesBridgeMaterialAliases(t *testing.T) 
 			"reservation": map[string]any{
 				"ReservationID": "res-bridge-material",
 				"SessionID":     "vpn-session-bridge-material",
-				"SponsorID":     "cosmos1bridgematerial",
+				"SubjectID":     "cosmos1bridgematerial",
 				"Amount":        789000,
 				"AssetDenom":    "uusdc",
 				"CreatedAtUnix": createdAtUnix,
@@ -2625,6 +2727,57 @@ func TestCosmosAdapterFundReservationDecodesBridgeMaterialAliases(t *testing.T) 
 	}
 	if want := time.Unix(createdAtUnix, 0).UTC(); !reservation.CreatedAt.Equal(want) {
 		t.Fatalf("CreatedAt=%s want=%s", reservation.CreatedAt, want)
+	}
+}
+
+func TestCosmosAdapterFundReservationRejectsMissingWalletMaterial(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name:    "missing currency",
+			body:    `{"ok":true,"reservation":{"ReservationID":"res-missing-wallet-material","SessionID":"vpn-session-missing-wallet-material","SubjectID":"cosmos1wallet","AmountMicros":123456,"Status":"confirmed"}}`,
+			wantErr: "fund reservation requires currency",
+		},
+		{
+			name:    "sponsor id is not wallet subject",
+			body:    `{"ok":true,"reservation":{"ReservationID":"res-missing-wallet-material","SessionID":"vpn-session-missing-wallet-material","SponsorID":"cosmos1sponsor","AmountMicros":123456,"Currency":"TDPNC","Status":"confirmed"}}`,
+			wantErr: "fund reservation requires subject_id",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/x/vpnbilling/reservations/res-missing-wallet-material" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+
+			adapter, err := NewCosmosAdapter(CosmosAdapterConfig{
+				Endpoint:    srv.URL,
+				QueueSize:   8,
+				MaxRetries:  1,
+				BaseBackoff: 5 * time.Millisecond,
+			})
+			if err != nil {
+				t.Fatalf("NewCosmosAdapter: %v", err)
+			}
+			defer adapter.Close()
+
+			reservation, found, err := adapter.FundReservation(context.Background(), "res-missing-wallet-material")
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("FundReservation error=%v want %q reservation=%+v found=%v", err, tc.wantErr, reservation, found)
+			}
+			if found {
+				t.Fatalf("expected malformed wallet material not to be found")
+			}
+		})
 	}
 }
 

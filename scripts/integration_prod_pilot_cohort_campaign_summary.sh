@@ -336,8 +336,13 @@ if ! rg -q -- '- Decision: GO' "$REPORT_MD"; then
   cat "$REPORT_MD"
   exit 1
 fi
-if ! rg -q -- 'pilot-client' "$REPORT_MD"; then
-  echo "campaign markdown missing subject"
+if ! rg -q -- '- Subject: `\[redacted\]`' "$REPORT_MD"; then
+  echo "campaign markdown missing redacted subject"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if rg -q -- 'pilot-client' "$REPORT_MD"; then
+  echo "campaign markdown leaked raw subject"
   cat "$REPORT_MD"
   exit 1
 fi

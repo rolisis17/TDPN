@@ -8,11 +8,14 @@ use std::time::Duration;
 const MAX_LOCAL_API_RESPONSE_BODY_BYTES: usize = 256 * 1024;
 const MAX_LOCAL_API_AUTH_BEARER_BYTES: usize = 4096;
 const MAX_LOCAL_API_ERROR_DETAIL_CHARS: usize = 512;
+const MIN_REMOTE_LOCAL_API_AUTH_BEARER_BYTES: usize = 32;
 const MAX_GPM_AUTH_VERIFY_FIELD_BYTES: usize = 4096;
 const MAX_GPM_AUTH_VERIFY_MESSAGE_BYTES: usize = 16 * 1024;
 const MAX_GPM_AUTH_VERIFY_ENVELOPE_BYTES: usize = 32 * 1024;
 const GPM_PUBLIC_VPN_RESERVATION_AMOUNT_MICROS: u64 = 200_000;
 const GPM_PUBLIC_VPN_RESERVATION_CURRENCY: &str = "TDPNC";
+const WEAK_REMOTE_LOCAL_API_AUTH_BEARERS: &[&str] =
+    &["token", "default-token", "secret-token", "change-me"];
 
 #[derive(Clone, Debug)]
 pub struct LocalApiConfig {
@@ -150,6 +153,7 @@ impl LocalApiConfig {
                     "GPM_LOCAL_API_BASE_URL '{base_url_display}' must use https when GPM_LOCAL_API_ALLOW_REMOTE=1 targets non-loopback hosts (legacy aliases: TDPN_LOCAL_API_BASE_URL, TDPN_LOCAL_API_ALLOW_REMOTE)"
                 ));
             }
+            validate_remote_auth_bearer_strength(auth_bearer.as_deref().unwrap_or(""))?;
         }
         if (allow_update_mutations || allow_service_mutations) && auth_bearer.is_none() {
             return Err(
@@ -620,6 +624,31 @@ fn validate_auth_bearer(value: &str) -> Result<(), String> {
     if value.chars().any(|c| !is_valid_bearer_token_char(c)) {
         return Err(format!(
             "{display_name} must use only token68 characters [A-Za-z0-9-._~+/=]"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_remote_auth_bearer_strength(value: &str) -> Result<(), String> {
+    let display_name = format_env_with_legacy_alias(
+        "GPM_LOCAL_API_AUTH_BEARER",
+        Some("TDPN_LOCAL_API_AUTH_BEARER"),
+    );
+    let token = value.trim();
+    if token.is_empty() {
+        return Err(format!(
+            "{display_name} is required for non-loopback Local API hosts"
+        ));
+    }
+    let normalized = token.to_ascii_lowercase();
+    if WEAK_REMOTE_LOCAL_API_AUTH_BEARERS.contains(&normalized.as_str()) {
+        return Err(format!(
+            "{display_name} must not use a known weak/default bearer token for non-loopback Local API hosts"
+        ));
+    }
+    if token.len() < MIN_REMOTE_LOCAL_API_AUTH_BEARER_BYTES {
+        return Err(format!(
+            "{display_name} must be at least {MIN_REMOTE_LOCAL_API_AUTH_BEARER_BYTES} chars for non-loopback Local API hosts"
         ));
     }
     Ok(())
@@ -1300,6 +1329,8 @@ mod tests {
     use super::*;
     use std::sync::{Mutex, OnceLock};
 
+    const STRONG_LOCAL_API_AUTH_BEARER: &str = "desktop-localapi-token-1234567890abcdef";
+
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
@@ -1598,6 +1629,37 @@ mod tests {
     }
 
     #[test]
+    fn from_env_rejects_weak_remote_auth_bearer_values() {
+        let _guard = env_lock().lock().expect("env lock");
+        let tests = [
+            ("missing", None, "requires GPM_LOCAL_API_AUTH_BEARER"),
+            ("empty", Some(""), "requires GPM_LOCAL_API_AUTH_BEARER"),
+            ("token", Some("token"), "weak/default"),
+            ("default-token", Some("default-token"), "weak/default"),
+            ("secret-token", Some("secret-token"), "weak/default"),
+            ("change-me", Some("change-me"), "weak/default"),
+            ("short", Some("short-random-token-123"), "at least"),
+        ];
+        for (name, token, want) in tests {
+            with_env(
+                &[
+                    ("GPM_LOCAL_API_BASE_URL", None),
+                    ("TDPN_LOCAL_API_BASE_URL", Some("https://100.64.0.10:8095")),
+                    ("GPM_LOCAL_API_ALLOW_REMOTE", None),
+                    ("TDPN_LOCAL_API_ALLOW_REMOTE", Some("1")),
+                    ("GPM_LOCAL_API_AUTH_BEARER", None),
+                    ("TDPN_LOCAL_API_AUTH_BEARER", token),
+                ],
+                || {
+                    let err = LocalApiConfig::from_env()
+                        .expect_err("expected weak auth bearer rejection");
+                    assert!(err.contains(want), "{name}: {err}");
+                },
+            );
+        }
+    }
+
+    #[test]
     fn from_env_rejects_remote_host_without_https_when_opted_in() {
         let _guard = env_lock().lock().expect("env lock");
         with_env(
@@ -1658,13 +1720,19 @@ mod tests {
             &[
                 ("TDPN_LOCAL_API_BASE_URL", Some("https://100.64.0.10:8095")),
                 ("TDPN_LOCAL_API_ALLOW_REMOTE", Some("1")),
-                ("TDPN_LOCAL_API_AUTH_BEARER", Some("  test-token  ")),
+                (
+                    "TDPN_LOCAL_API_AUTH_BEARER",
+                    Some(STRONG_LOCAL_API_AUTH_BEARER),
+                ),
             ],
             || {
                 let cfg = LocalApiConfig::from_env().expect("from_env");
                 assert_eq!(cfg.base_url, "https://100.64.0.10:8095");
                 assert!(cfg.allow_remote);
-                assert_eq!(cfg.auth_bearer.as_deref(), Some("test-token"));
+                assert_eq!(
+                    cfg.auth_bearer.as_deref(),
+                    Some(STRONG_LOCAL_API_AUTH_BEARER)
+                );
             },
         );
     }
@@ -1749,11 +1817,17 @@ mod tests {
             &[
                 ("TDPN_LOCAL_API_BASE_URL", Some("https://100.64.0.10:8095")),
                 ("TDPN_LOCAL_API_ALLOW_REMOTE", Some("1")),
-                ("TDPN_LOCAL_API_AUTH_BEARER", Some("Abc-._~+/=123")),
+                (
+                    "TDPN_LOCAL_API_AUTH_BEARER",
+                    Some("Abc-._~+/=1234567890abcdefABCDEF"),
+                ),
             ],
             || {
                 let cfg = LocalApiConfig::from_env().expect("from_env");
-                assert_eq!(cfg.auth_bearer.as_deref(), Some("Abc-._~+/=123"));
+                assert_eq!(
+                    cfg.auth_bearer.as_deref(),
+                    Some("Abc-._~+/=1234567890abcdefABCDEF")
+                );
             },
         );
     }

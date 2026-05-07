@@ -47,6 +47,9 @@ case "$url" in
       multi_middle)
         printf '{"relays":[{"role":"entry","operator_id":"op-a","country_code":"US"},{"role":"exit","operator_id":"op-a","country_code":"US"},{"role":"entry","operator_id":"op-b","country_code":"CA"},{"role":"exit","operator_id":"op-b","country_code":"CA"},{"relay_id":"middle-op-c","role":"micro-relay","operator_id":"op-c","country_code":"MX","endpoint":"mid:51822","reputation_score":0.82,"uptime_score":0.91,"capacity_score":0.84,"abuse_penalty":0.1,"hop_roles":["middle"],"capabilities":["wg"]}]}\n'
         ;;
+      middle_collision)
+        printf '{"relays":[{"role":"entry","operator_id":"op-a","country_code":"US"},{"role":"exit","operator_id":"op-b","country_code":"CA"},{"relay_id":"middle-op-a","role":"micro-relay","operator_id":"op-a","country_code":"MX","endpoint":"mid:51822","reputation_score":0.82,"uptime_score":0.91,"capacity_score":0.84,"abuse_penalty":0.1,"hop_roles":["middle"],"capabilities":["wg"]}]}\n'
+        ;;
       *)
         printf '{"relays":[{"role":"entry","operator_id":"op-a"},{"role":"exit","operator_id":"op-a"}]}\n'
         ;;
@@ -221,6 +224,27 @@ fi
 if ! rg -q 'middle-relay operator floor not met' "$OUT_3HOP_FORCE"; then
   echo "missing expected forced middle-relay floor failure for 3hop profile"
   cat "$OUT_3HOP_FORCE"
+  exit 1
+fi
+
+OUT_3HOP_COLLISION="$TMP_DIR/preflight_3hop_middle_collision.log"
+set +e
+PATH="$TMP_BIN:$PATH" FAKE_RELAY_PROFILE="middle_collision" ./scripts/easy_node.sh client-vpn-preflight "${COMMON_ARGS[@]}" \
+  --path-profile 3hop \
+  --operator-floor-check 1 \
+  --operator-min-operators 2 \
+  --operator-min-entry-operators 1 \
+  --operator-min-exit-operators 1 >"$OUT_3HOP_COLLISION" 2>&1
+rc_3hop_collision=$?
+set -e
+if [[ "$rc_3hop_collision" -eq 0 ]]; then
+  echo "expected 3hop preflight to fail when the only middle operator collides with the only selectable entry"
+  cat "$OUT_3HOP_COLLISION"
+  exit 1
+fi
+if ! rg -q 'middle relay diversity: middle_ops=1 eligible_middle_ops=0' "$OUT_3HOP_COLLISION"; then
+  echo "missing expected middle operator collision diagnostics for 3hop profile"
+  cat "$OUT_3HOP_COLLISION"
   exit 1
 fi
 

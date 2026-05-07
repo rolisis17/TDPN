@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash mktemp rg sed; do
+for cmd in bash grep mktemp rg sed; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -47,6 +47,27 @@ if [[ -z "$scoped_target" ]]; then
   cat "$OUT_SCOPED_DRY"
   exit 1
 fi
+OUT_SCOPED_CRED_DRY="$TMP_DIR/scoped_credential_dry.log"
+EASY_NODE_CLIENT_VPN_KEY_DIR="$KEY_DIR" \
+  ./scripts/easy_node.sh client-vpn-trust-reset \
+    --directory-urls "http://user:pw-secret@dir-a:8081?token=dir-secret,http://user:pw-secret@dir-b:8081?token=dir-secret-b" \
+    --trust-scope scoped \
+    --dry-run 1 >"$OUT_SCOPED_CRED_DRY" 2>&1
+scoped_credential_target="$(sed -n 's/^target_file: //p' "$OUT_SCOPED_CRED_DRY" | head -n 1)"
+if [[ "$scoped_credential_target" != "$scoped_target" ]]; then
+  echo "expected scoped target to ignore URL credentials/query parameters"
+  echo "plain target: $scoped_target"
+  echo "credential target: $scoped_credential_target"
+  cat "$OUT_SCOPED_CRED_DRY"
+  exit 1
+fi
+for forbidden in 'pw-secret' 'token='; do
+  if grep -F -- "$forbidden" "$OUT_SCOPED_CRED_DRY" >/dev/null; then
+    echo "client-vpn-trust-reset leaked forbidden value in dry-run output: $forbidden"
+    cat "$OUT_SCOPED_CRED_DRY"
+    exit 1
+  fi
+done
 mkdir -p "$(dirname "$scoped_target")"
 printf 'pinned-key\n' >"$scoped_target"
 OUT_SCOPED="$TMP_DIR/scoped_reset.log"

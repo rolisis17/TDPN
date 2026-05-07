@@ -207,16 +207,51 @@ start_mock_cosmos_runtime() {
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 )
 
 func main() {
 	addr := "127.0.0.1:0"
 	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) != "" {
 		addr = strings.TrimSpace(os.Args[1])
+	}
+	var mu sync.Mutex
+	sponsorReservations := map[string]json.RawMessage{}
+	fieldString := func(raw map[string]json.RawMessage, names ...string) string {
+		for _, name := range names {
+			valueRaw, ok := raw[name]
+			if !ok {
+				continue
+			}
+			var value string
+			if err := json.Unmarshal(valueRaw, &value); err == nil {
+				return strings.TrimSpace(value)
+			}
+		}
+		return ""
+	}
+	storeSponsorReservation := func(payload json.RawMessage) {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(payload, &raw); err != nil {
+			return
+		}
+		reservationID := fieldString(raw, "ReservationID", "reservation_id")
+		if reservationID == "" {
+			return
+		}
+		raw["Status"] = json.RawMessage(`"confirmed"`)
+		normalized, err := json.Marshal(raw)
+		if err != nil {
+			return
+		}
+		mu.Lock()
+		sponsorReservations[reservationID] = normalized
+		mu.Unlock()
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -229,22 +264,58 @@ func main() {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
+			var req struct {
+				Tx struct {
+					MessageType string          `json:"message_type"`
+					Message     json.RawMessage `json:"message"`
+				} `json:"tx"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.Tx.MessageType == "/x/vpnsponsor/reservations" {
+				storeSponsorReservation(req.Tx.Message)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"tx_response":{"code":0,"txhash":"MOCK_SPONSOR_VPN_SESSION_TX"}}`))
-		case strings.HasPrefix(r.URL.Path, "/x/"):
-			switch r.Method {
-			case http.MethodPost:
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"ok":true}`))
-			case http.MethodGet:
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"found":true}`))
-			default:
+		case strings.HasPrefix(r.URL.Path, "/x/vpnsponsor/delegations/"):
+			if r.Method != http.MethodGet {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
 			}
+			reservationID := strings.TrimPrefix(r.URL.Path, "/x/vpnsponsor/delegations/")
+			mu.Lock()
+			reservation, ok := sponsorReservations[reservationID]
+			mu.Unlock()
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"delegation":`))
+			_, _ = w.Write(reservation)
+			_, _ = w.Write([]byte(`}`))
+			case strings.HasPrefix(r.URL.Path, "/x/"):
+				switch r.Method {
+				case http.MethodPost:
+					if r.URL.Path == "/x/vpnsponsor/reservations" {
+						var raw json.RawMessage
+						if err := json.NewDecoder(r.Body).Decode(&raw); err == nil {
+							storeSponsorReservation(raw)
+						}
+					}
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(`{"ok":true}`))
+				case http.MethodGet:
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					switch {
+					default:
+						_, _ = w.Write([]byte(`{"found":true,"Status":"confirmed"}`))
+					}
+				default:
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				}
 		default:
 			http.NotFound(w, r)
 		}
@@ -312,7 +383,7 @@ start_exit_runtime() {
     ISSUER_URL="${issuer_url}" \
     ISSUER_REVOCATIONS_URL="${issuer_url}/v1/revocations" \
     EXIT_STARTUP_SYNC_TIMEOUT_SEC=8 \
-    EXIT_SETTLEMENT_RECONCILE_SEC=0 \
+    EXIT_SETTLEMENT_RECONCILE_SEC=1 \
     SETTLEMENT_CHAIN_ADAPTER=cosmos \
     COSMOS_SETTLEMENT_ENDPOINT="${cosmos_endpoint}" \
     COSMOS_SETTLEMENT_API_KEY="exit-sponsor-vpn-live-smoke" \
@@ -631,10 +702,10 @@ run_mode_scenario() {
     --argjson reserve_amount_micros "${reserve_amount_micros}" \
     '{reservation_id:$reservation_id,sponsor_id:$sponsor_id,subject:$subject_id,session_id:$session_id,amount_micros:$reserve_amount_micros,currency:$reserve_currency}')"
   post_expect_status "${issuer_url}/v1/sponsor/reserve" "${reserve_payload}" "200" "X-Sponsor-Token" "${SPONSOR_TOKEN}"
-  assert_response_jq "mode=${mode} sponsor reserve accepted contract" \
-    --arg reservation_id "${reservation_id}" \
-    --arg sponsor_id "${sponsor_id}" \
-    --arg subject_id "${subject_id}" \
+	  assert_response_jq "mode=${mode} sponsor reserve accepted contract" \
+	    --arg reservation_id "${reservation_id}" \
+	    --arg sponsor_id "${sponsor_id}" \
+	    --arg subject_id "${subject_id}" \
     --arg session_id "${session_id}" \
     --arg reserve_currency "${reserve_currency}" \
     --argjson reserve_amount_micros "${reserve_amount_micros}" '
@@ -648,11 +719,12 @@ run_mode_scenario() {
     (.status | type == "string" and length > 0) and
     (.created_at | type == "number" and . > 0) and
     (.expires_at | type == "number" and . > 0) and
-    (.expires_at >= .created_at)
-  '
+	    (.expires_at >= .created_at)
+	  '
+	  wait_for_settlement_status_available "${issuer_url}/v1/settlement/status" "X-Admin-Token" "${ADMIN_TOKEN}" "${ISSUER_PID}" "issuer"
 
-  local pop_json
-  pop_json="$(go run ./cmd/tokenpop gen --show-private-key)"
+	  local pop_json
+  pop_json="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)"
   local pop_pub_key
   pop_pub_key="$(printf '%s' "${pop_json}" | jq -r '.public_key // empty')"
   local pop_priv_key
@@ -707,11 +779,12 @@ run_mode_scenario() {
   token_file="$(write_secret_file "${token}" "token_${mode_tag}")"
   local token_proof_json
   token_proof_json="$(go run ./cmd/tokenpop sign \
-    --private-key-file "${pop_priv_file}" \
-    --token-file "${token_file}" \
-    --exit-id "${exit_id}" \
-    --proof-nonce "${token_nonce}" \
-    --client-inner-pub "${client_pub}" \
+	    --private-key-file "${pop_priv_file}" \
+	    --token-file "${token_file}" \
+	    --exit-id "${exit_id}" \
+	    --session-id "${session_id}" \
+	    --proof-nonce "${token_nonce}" \
+	    --client-inner-pub "${client_pub}" \
     --transport "policy-json" \
     --requested-mtu 1280 \
     --requested-region "local")"
@@ -744,18 +817,26 @@ run_mode_scenario() {
       requested_region:"local",
       session_id:$session_id
     }')"
-  post_expect_status "${exit_base_url}/v1/path/open" "${open_payload}" "200"
-  assert_response_jq "mode=${mode} path open accepted contract" '
-    .accepted == true and
+	  post_expect_status "${exit_base_url}/v1/path/open" "${open_payload}" "200"
+	  assert_response_jq "mode=${mode} path open accepted contract" '
+	    .accepted == true and
     (.reason | type == "string") and
     (
       ((.session_exp | type == "number") and .session_exp > 0) or
-      true
-    )
-  '
+	      true
+	    )
+	  '
+	  local session_key_id
+	  session_key_id="$(jq -r '.session_key_id // empty' "${RESP_FILE}")"
+	  if [[ -z "${session_key_id}" ]]; then
+	    echo "path open response missing session_key_id for mode=${mode}"
+	    cat "${RESP_FILE}"
+	    dump_logs
+	    return 1
+	  fi
 
-  local close_payload
-  close_payload="$(jq -n --arg session_id "${session_id}" '{session_id:$session_id}')"
+	  local close_payload
+	  close_payload="$(jq -n --arg session_id "${session_id}" --arg session_key_id "${session_key_id}" '{session_id:$session_id,session_key_id:$session_key_id}')"
   post_expect_status "${exit_base_url}/v1/path/close" "${close_payload}" "200"
   assert_response_jq "mode=${mode} path close accepted contract" '
     .closed == true

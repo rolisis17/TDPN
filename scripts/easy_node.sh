@@ -75,6 +75,28 @@ default_client_vpn_key_dir() {
   echo "$dir"
 }
 
+default_admin_signing_key_dir() {
+  local dir="${EASY_NODE_ADMIN_SIGNING_KEY_DIR:-}"
+  if [[ -n "$dir" ]]; then
+    echo "$dir"
+    return
+  fi
+  if [[ "$ROOT_DIR" == /mnt/* ]]; then
+    local scope
+    scope="$(short_hash_for_string "$ROOT_DIR")"
+    if [[ -n "${XDG_STATE_HOME:-}" ]]; then
+      dir="$XDG_STATE_HOME/privacynode/admin_signing/$scope"
+    elif [[ -n "${HOME:-}" ]]; then
+      dir="$HOME/.local/state/privacynode/admin_signing/$scope"
+    else
+      dir="/tmp/privacynode_admin_signing/$scope"
+    fi
+  else
+    dir="$DEPLOY_DIR/data/issuer"
+  fi
+  echo "$dir"
+}
+
 default_client_vpn_trust_file() {
   echo "$(default_client_vpn_key_dir)/trusted_directory_keys.txt"
 }
@@ -101,6 +123,9 @@ normalize_client_vpn_directory_scope_input() {
   for item in "${raw_items[@]}"; do
     item="${item#"${item%%[![:space:]]*}"}"
     item="${item%"${item##*[![:space:]]}"}"
+    if [[ "$item" == *"://"* ]]; then
+      item="$(redact_url_for_log "$item")"
+    fi
     while [[ "$item" == */ ]]; do
       item="${item%/}"
     done
@@ -685,7 +710,7 @@ Usage:
   ./scripts/easy_node.sh bootstrap-mtls [--out-dir DIR] [--public-host HOST] [--san HOST] [--days N] [--rotate-leaf [0|1]] [--rotate-ca [0|1]]
   ./scripts/easy_node.sh machine-a-test [--public-host HOST] [--report-file PATH]
   ./scripts/easy_node.sh machine-b-test --peer-directory-a URL [--public-host HOST] [--min-operators N] [--federation-timeout-sec N] [--report-file PATH]
-  ./scripts/easy_node.sh machine-c-test [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--beta-profile [0|1]] [--prod-profile [0|1]] [--report-file PATH]
+  ./scripts/easy_node.sh machine-c-test [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--exit-country CC] [--exit-region REGION] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--allow-insecure-remote-http [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--report-file PATH]
   ./scripts/easy_node.sh discover-hosts --bootstrap-directory URL [--wait-sec N] [--min-hosts N] [--write-config [0|1]]
 
 Notes:
@@ -697,6 +722,7 @@ Notes:
   - server-up authority mode can auto-generate invite keys with --auto-invite (useful for quick onboarding).
   - server-up peer identity checks default to strict in beta/prod when peers are configured; in non-prod authority->provider peering, issuer-id strictness auto-relaxes when peer issuers are not reachable. use --peer-identity-strict 0 only for temporary bypass during diagnostics.
   - server-up auto-binds non-prod private/Tailscale lab hosts to 0.0.0.0 by default so loopback admin commands and remote probes both work; set EASY_NODE_AUTO_PUBLIC_BIND=0 or explicit *_PUBLISHED_BIND_ADDR values to override.
+  - server-up beta/prod profiles create and validate the entry-exit WireGuard interface automatically; set EASY_NODE_SERVER_WG_RUNTIME_CHECK=0 only for diagnostics.
   - rotate-server-secrets rotates local server secret material in env files; use --restart 1 to apply immediately.
   - server-up --prod-profile enables fail-closed production strict mode (requires mTLS + signed issuer-admin auth).
   - admin-signing-status/admin-signing-rotate are authority-only issuer admin signer maintenance tools.
@@ -1367,6 +1393,38 @@ redact_csv_urls_for_log() {
   printf '%s' "$redacted"
 }
 
+redact_sensitive_text_for_log() {
+  local line="$1"
+  local old_ifs="$IFS"
+  local -a parts=()
+  local token lower redacted=""
+  IFS=' ' read -r -a parts <<<"$line"
+  IFS="$old_ifs"
+  if ((${#parts[@]} == 0)); then
+    printf '%s' ""
+    return
+  fi
+  for token in "${parts[@]}"; do
+    lower="$(printf '%s' "$token" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$token" == *"://"* ]] || [[ "$lower" == *"token="* ]] || [[ "$lower" == *"secret="* ]] || [[ "$lower" == *"password="* ]] || [[ "$lower" == *"passwd="* ]] || [[ "$lower" == *"api_key="* ]] || [[ "$lower" == *"apikey="* ]] || [[ "$lower" == *"access_token="* ]] || [[ "$lower" == *"refresh_token="* ]]; then
+      token="[redacted]"
+    fi
+    if [[ -n "$redacted" ]]; then
+      redacted+=" "
+    fi
+    redacted+="$token"
+  done
+  printf '%s' "$redacted"
+}
+
+redact_sensitive_stream_for_log() {
+  local line
+  while IFS= read -r line; do
+    redact_sensitive_text_for_log "$line"
+    printf '\n'
+  done
+}
+
 normalize_path_profile() {
   local profile
   profile="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
@@ -1626,8 +1684,10 @@ ensure_admin_signing_material() {
   local rotate="${1:-0}"
   local history_raw="${2:-${EASY_NODE_ADMIN_SIGNING_KEY_HISTORY:-3}}"
   local issuer_data_dir="$DEPLOY_DIR/data/issuer"
-  local key_file="$issuer_data_dir/issuer_admin_signer.key"
-  local key_id_file="$issuer_data_dir/issuer_admin_signer.keyid"
+  local key_dir
+  key_dir="$(default_admin_signing_key_dir)"
+  local key_file="$key_dir/issuer_admin_signer.key"
+  local key_id_file="$key_dir/issuer_admin_signer.keyid"
   local signers_file="$issuer_data_dir/issuer_admin_signers.txt"
   local signers_file_container="/app/data/issuer_admin_signers.txt"
   local inspect_json key_id pub_key
@@ -1637,7 +1697,7 @@ ensure_admin_signing_material() {
     key_history="$history_raw"
   fi
 
-  mkdir -p "$issuer_data_dir"
+  mkdir -p "$issuer_data_dir" "$key_dir"
   if [[ "$rotate" == "1" ]]; then
     rm -f "$key_file" "$key_id_file"
   fi
@@ -1753,6 +1813,210 @@ ensure_entry_route_assertion_material() {
   fi
 
   echo "$key_file|$key_file_container|$pub_key"
+}
+
+ensure_issuer_key_material() {
+  local issuer_id="$1"
+  local issuer_data_dir="$DEPLOY_DIR/data/issuer"
+  local issuer_suffix
+  local key_file
+  local pub_file
+  local key_file_container
+  local inspect_json
+  local pub_key
+
+  validate_env_scalar_or_die "issuer_id" "$issuer_id"
+  issuer_suffix="$(sanitize_id_component "$issuer_id")"
+  key_file="$issuer_data_dir/issuer_${issuer_suffix}_ed25519.key"
+  pub_file="${key_file}.pub"
+  key_file_container="/app/data/$(basename "$key_file")"
+
+  mkdir -p "$issuer_data_dir"
+  if [[ ! -s "$key_file" ]]; then
+    (
+      cd "$ROOT_DIR"
+      go run ./cmd/adminsig gen --private-key-out "$key_file" --public-key-out "$pub_file" >/dev/null
+    )
+  fi
+  secure_file_permissions "$key_file"
+
+  if [[ -s "$pub_file" ]]; then
+    pub_key="$(tr -d '[:space:]' <"$pub_file")"
+  elif pub_key="$(ed25519_public_key_from_private_file_base64url "$key_file" 2>/dev/null)"; then
+    printf '%s\n' "$pub_key" >"$pub_file"
+    chmod 644 "$pub_file" 2>/dev/null || true
+  else
+    inspect_json="$(
+      cd "$ROOT_DIR"
+      go run ./cmd/adminsig inspect --private-key-file "$key_file"
+    )"
+    pub_key="$(printf '%s\n' "$inspect_json" | jq -r '.public_key')"
+  fi
+  if [[ -z "$pub_key" || "$pub_key" == "null" ]]; then
+    echo "server-up failed to inspect issuer key material" >&2
+    exit 1
+  fi
+
+  echo "$key_file|$key_file_container|$pub_key"
+}
+
+prod_issuer_trust_input_file() {
+  local input="${EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE:-${EASY_NODE_ISSUER_TRUSTED_KEYS_FILE:-}}"
+  printf '%s\n' "$input"
+}
+
+require_prod_issuer_trust_anchor_input_or_die() {
+  local input_file
+  input_file="$(prod_issuer_trust_input_file)"
+  validate_env_scalar_or_die "EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE" "$input_file"
+  if [[ -z "$input_file" ]]; then
+    echo "server-up --prod-profile requires EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE (or EASY_NODE_ISSUER_TRUSTED_KEYS_FILE)."
+    echo "provide a local file containing pinned issuer public keys from the trusted peer authorities' /v1/pubkeys responses."
+    exit 2
+  fi
+  if [[ ! -s "$input_file" ]]; then
+    echo "server-up --prod-profile issuer trust anchor file is missing or empty: $input_file"
+    exit 2
+  fi
+}
+
+issuer_trust_anchor_line_count() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    echo "0"
+    return 0
+  fi
+  awk '
+    NF == 0 { next }
+    /^[[:space:]]*#/ { next }
+    { count++ }
+    END { print count + 0 }
+  ' "$path"
+}
+
+base64url_decode_to_stdout() {
+  local encoded="${1:-}"
+  local padded rem
+  encoded="$(trim "$encoded")"
+  if [[ -z "$encoded" || ! "$encoded" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    return 1
+  fi
+  padded="$(printf '%s' "$encoded" | tr '_-' '/+')"
+  rem=$((${#padded} % 4))
+  case "$rem" in
+    0) ;;
+    2) padded="${padded}==" ;;
+    3) padded="${padded}=" ;;
+    *) return 1 ;;
+  esac
+  printf '%s' "$padded" | base64 -d 2>/dev/null
+}
+
+ed25519_public_key_base64url_valid() {
+  local key="${1:-}"
+  local tmp_key
+  tmp_key="$(mktemp)"
+  if ! base64url_decode_to_stdout "$key" >"$tmp_key"; then
+    rm -f "$tmp_key"
+    return 1
+  fi
+  if [[ "$(wc -c <"$tmp_key" | tr -d '[:space:]')" != "32" ]]; then
+    rm -f "$tmp_key"
+    return 1
+  fi
+  rm -f "$tmp_key"
+  return 0
+}
+
+ed25519_public_key_from_private_file_base64url() {
+  local key_file="${1:-}"
+  local encoded rem tmp_priv tmp_pub
+  if [[ -z "$key_file" || ! -f "$key_file" ]]; then
+    return 1
+  fi
+  encoded="$(tr -d '[:space:]' <"$key_file")"
+  tmp_priv="$(mktemp)"
+  tmp_pub="$(mktemp)"
+  if ! base64url_decode_to_stdout "$encoded" >"$tmp_priv"; then
+    rm -f "$tmp_priv" "$tmp_pub"
+    return 1
+  fi
+  if [[ "$(wc -c <"$tmp_priv" | tr -d '[:space:]')" != "64" ]]; then
+    rm -f "$tmp_priv" "$tmp_pub"
+    return 1
+  fi
+  tail -c 32 "$tmp_priv" >"$tmp_pub"
+  base64 <"$tmp_pub" | tr '+/' '-_' | tr -d '=\r\n'
+  rm -f "$tmp_priv" "$tmp_pub"
+}
+
+ensure_prod_issuer_trust_anchor_material() {
+  local mode="$1"
+  local local_issuer_pub="$2"
+  local issuer_urls_count="$3"
+  local input_file
+  local directory_data_dir="$DEPLOY_DIR/data/directory"
+  local trusted_keys_file="$directory_data_dir/directory_issuer_trusted_keys.txt"
+  local trusted_keys_container="/app/data/directory_issuer_trusted_keys.txt"
+  local tmp_file
+  local key_count
+  local line key
+
+  validate_env_scalar_or_die "mode" "$mode"
+  validate_env_scalar_or_die "local_issuer_pub" "$local_issuer_pub"
+  validate_env_scalar_or_die "issuer_urls_count" "$issuer_urls_count"
+
+  input_file="$(prod_issuer_trust_input_file)"
+  require_prod_issuer_trust_anchor_input_or_die
+
+  mkdir -p "$directory_data_dir"
+  tmp_file="$(mktemp)"
+  : >"$tmp_file"
+  declare -A seen_issuer_trust_keys=()
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    line="$(trim "$line")"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    key="$(awk '{ print $NF }' <<<"$line")"
+    if ! ed25519_public_key_base64url_valid "$key"; then
+      rm -f "$tmp_file"
+      echo "server-up --prod-profile issuer trust anchor file contains an invalid Ed25519 public key: $input_file" >&2
+      echo "invalid issuer trust anchor key: $key" >&2
+      exit 2
+    fi
+    if [[ -z "${seen_issuer_trust_keys[$key]:-}" ]]; then
+      seen_issuer_trust_keys["$key"]="1"
+      printf '%s\n' "$line" >>"$tmp_file"
+    fi
+  done <"$input_file"
+
+  if [[ "$mode" == "authority" && -n "$local_issuer_pub" ]]; then
+    if ! ed25519_public_key_base64url_valid "$local_issuer_pub"; then
+      rm -f "$tmp_file"
+      echo "server-up --prod-profile generated local issuer public key is invalid" >&2
+      exit 1
+    fi
+    if [[ -z "${seen_issuer_trust_keys[$local_issuer_pub]:-}" ]]; then
+      seen_issuer_trust_keys["$local_issuer_pub"]="1"
+      printf 'local-issuer %s\n' "$local_issuer_pub" >>"$tmp_file"
+    fi
+  fi
+
+  key_count="$(issuer_trust_anchor_line_count "$tmp_file")"
+  if ! [[ "$key_count" =~ ^[0-9]+$ ]]; then
+    key_count=0
+  fi
+  if ((key_count < 2)); then
+    rm -f "$tmp_file"
+    echo "server-up --prod-profile requires at least 2 issuer trust anchor keys for strict issuer quorum." >&2
+    echo "issuer URLs configured: ${issuer_urls_count}; trusted keys found after merge: ${key_count}" >&2
+    echo "trust anchor file: $input_file" >&2
+    exit 2
+  fi
+
+  mv "$tmp_file" "$trusted_keys_file"
+  chmod 644 "$trusted_keys_file" 2>/dev/null || true
+  echo "$trusted_keys_container"
 }
 
 base64url_from_file() {
@@ -3217,6 +3481,7 @@ client_vpn_middle_relay_summary() {
   local directory_urls="$1"
   local timeout_sec="${2:-8}"
   local require_runtime_eligible="${3:-0}"
+  local require_entry_exit_distinct="${4:-1}"
   declare -A middle_ops=()
   declare -A entry_ops=()
   declare -A exit_ops=()
@@ -3308,15 +3573,24 @@ client_vpn_middle_relay_summary() {
 
   declare -A eligible_middle_ops=()
   declare -A country_eligible_middle_ops=()
-  local op
+  local op entry_op exit_op compatible_pair
   for op in "${!middle_ops[@]}"; do
-    if [[ "$require_runtime_eligible" != "1" && ( -n "${entry_ops[$op]+x}" || -n "${exit_ops[$op]+x}" ) ]]; then
-      continue
-    fi
-    if [[ "$require_runtime_eligible" == "1" && "${#entry_exit_ops[@]}" -gt 1 && "${#middle_ops[@]}" -gt 1 && -n "${entry_exit_ops[$op]+x}" ]]; then
-      # Runtime evaluates middle distinctness against the selected entry/exit
-      # pair, not globally against every advertised entry/exit operator. Keep a
-      # conservative fallback only when no alternate middle operator exists.
+    if [[ "$require_runtime_eligible" == "1" ]]; then
+      compatible_pair=0
+      for entry_op in "${!entry_ops[@]}"; do
+        [[ -z "$entry_op" || "$entry_op" == "$op" ]] && continue
+        for exit_op in "${!exit_ops[@]}"; do
+          [[ -z "$exit_op" || "$exit_op" == "$op" ]] && continue
+          if [[ "$require_entry_exit_distinct" == "1" && "$entry_op" == "$exit_op" ]]; then
+            continue
+          fi
+          compatible_pair=1
+          break
+        done
+        [[ "$compatible_pair" == "1" ]] && break
+      done
+      [[ "$compatible_pair" == "1" ]] || continue
+    elif [[ -n "${entry_ops[$op]+x}" || -n "${exit_ops[$op]+x}" ]]; then
       continue
     fi
     eligible_middle_ops["$op"]=1
@@ -3324,6 +3598,7 @@ client_vpn_middle_relay_summary() {
   local middle_country_key middle_country entry_country exit_country
   for middle_country_key in "${!middle_operator_countries[@]}"; do
     op="${middle_country_key%%|*}"
+    [[ -n "${eligible_middle_ops[$op]+x}" ]] || continue
     middle_country="${middle_country_key#*|}"
     for entry_country in "${!entry_countries[@]}"; do
       [[ -z "$entry_country" || "$entry_country" == "$middle_country" ]] && continue
@@ -3349,7 +3624,7 @@ client_vpn_issuer_quorum_summary() {
   local missing_keys=0
   local fetch_fail=0
   local parse_fail=0
-  local issuer_url payload issuer_id key_count
+  local issuer_url payload issuer_id key_count key_material
   local -a tls_opts
 
   while IFS= read -r issuer_url; do
@@ -3367,11 +3642,10 @@ client_vpn_issuer_quorum_summary() {
     fi
 
     issuer_id="$(printf '%s\n' "$payload" | jq -r '(.issuer // "") | tostring' 2>/dev/null || true)"
-    key_count="$(printf '%s\n' "$payload" | jq -r '((.pub_keys // []) | length)' 2>/dev/null || true)"
+    key_count="$(printf '%s\n' "$payload" | jq -r '((.pub_keys // []) | map(tostring | select(length > 0)) | length)' 2>/dev/null || true)"
+    key_material="$(printf '%s\n' "$payload" | jq -r '((.pub_keys // []) | map(tostring | select(length > 0)) | sort | join(","))' 2>/dev/null || true)"
     if [[ -z "$issuer_id" || "$issuer_id" == "null" ]]; then
       missing_issuer=$((missing_issuer + 1))
-    else
-      issuer_ids["$issuer_id"]=1
     fi
     if ! [[ "$key_count" =~ ^[0-9]+$ ]]; then
       parse_fail=$((parse_fail + 1))
@@ -3379,6 +3653,8 @@ client_vpn_issuer_quorum_summary() {
     fi
     if ((key_count < 1)); then
       missing_keys=$((missing_keys + 1))
+    elif [[ -n "$issuer_id" && "$issuer_id" != "null" ]]; then
+      issuer_ids["key:$key_material"]=1
     fi
   done < <(split_csv_lines "$issuer_urls")
 
@@ -3390,6 +3666,7 @@ compose_with_env() {
   shift
   local -a clear_env_args compose_cmd
   local clear_var
+  local env_line env_key
   local entry_exit_privileged_raw=""
   local entry_exit_privileged_norm=""
   local use_privileged_override=0
@@ -3415,11 +3692,33 @@ compose_with_env() {
     EXIT_OPAQUE_ECHO \
     EXIT_OPAQUE_SINK_ADDR \
     EXIT_OPAQUE_SOURCE_ADDR \
+    EXIT_TOKEN_PROOF_REPLAY_STORE_FILE \
+    EXIT_TOKEN_PROOF_REPLAY_REDIS_ADDR \
+    EXIT_EGRESS_BACKEND \
+    EXIT_ISSUER_MIN_KEY_VOTES \
+    DIRECTORY_ISSUER_TRUSTED_KEYS_FILE \
+    DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE \
+    DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE \
+    DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_ADDR \
+    SETTLEMENT_CHAIN_ADAPTER \
+    COSMOS_SETTLEMENT_ENDPOINT \
+    COSMOS_SETTLEMENT_API_KEY \
+    COSMOS_SETTLEMENT_SUBMIT_MODE \
+    COSMOS_SETTLEMENT_TRUSTED_BRIDGE_FINALITY \
+    ISSUER_REQUIRE_PAYMENT_PROOF \
     ENTRY_LIVE_WG_MODE; do
     clear_env_args+=("-u" "$clear_var")
   done
 
   if [[ -f "$env_file" ]]; then
+    while IFS= read -r env_line || [[ -n "$env_line" ]]; do
+      env_line="${env_line%$'\r'}"
+      [[ -z "$env_line" || "$env_line" == \#* || "$env_line" != *=* ]] && continue
+      env_key="${env_line%%=*}"
+      if [[ "$env_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        clear_env_args+=("-u" "$env_key")
+      fi
+    done <"$env_file"
     entry_exit_privileged_raw="$(identity_value "$env_file" "ENTRY_EXIT_PRIVILEGED" || true)"
     entry_exit_privileged_raw="${entry_exit_privileged_raw%\"}"
     entry_exit_privileged_raw="${entry_exit_privileged_raw#\"}"
@@ -3447,6 +3746,63 @@ compose_with_env() {
   (cd "$DEPLOY_DIR" && env "${clear_env_args[@]}" "${compose_cmd[@]}")
 }
 
+server_wg_runtime_check_mode_or_die() {
+  local raw="${1:-auto}"
+  case "$raw" in
+    ""|auto)
+      printf '%s\n' "auto"
+      ;;
+    0|1)
+      printf '%s\n' "$raw"
+      ;;
+    *)
+      echo "server-up requires EASY_NODE_SERVER_WG_RUNTIME_CHECK to be auto, 0, or 1" >&2
+      return 2
+      ;;
+  esac
+}
+
+server_wg_runtime_check() {
+  local env_file="$1"
+  local required="${2:-0}"
+  local wg_backend auto_create iface
+  wg_backend="$(identity_value "$env_file" "WG_BACKEND")"
+  auto_create="$(identity_value "$env_file" "EXIT_WG_AUTO_CREATE_INTERFACE")"
+  iface="$(identity_value "$env_file" "EXIT_WG_INTERFACE")"
+  if [[ "$wg_backend" != "command" || "$auto_create" != "1" ]]; then
+    if [[ "$required" == "1" ]]; then
+      echo "server WG runtime check failed: env does not enable command WG auto-interface lifecycle (WG_BACKEND=${wg_backend:-unset}, EXIT_WG_AUTO_CREATE_INTERFACE=${auto_create:-unset})"
+      return 1
+    fi
+    echo "server WG runtime check: skipped (WG_BACKEND=${wg_backend:-unset}, EXIT_WG_AUTO_CREATE_INTERFACE=${auto_create:-unset})"
+    return 0
+  fi
+  if [[ -z "$iface" ]]; then
+    echo "server WG runtime check failed: EXIT_WG_INTERFACE is empty"
+    return 1
+  fi
+
+  echo "server WG runtime check: verifying container interface '$iface'"
+  if compose_with_env "$env_file" exec -T entry-exit sh -lc '
+    iface="${EXIT_WG_INTERFACE:-wg-exit0}"
+    if ! ip link show dev "$iface" >/dev/null 2>&1; then
+      echo "missing EXIT_WG_INTERFACE: $iface" >&2
+      exit 1
+    fi
+    if ! wg show "$iface" >/dev/null 2>&1; then
+      echo "not a WireGuard interface: $iface" >&2
+      exit 1
+    fi
+  '; then
+    echo "server WG runtime check: ok ($iface)"
+    return 0
+  fi
+  echo "server WG runtime check failed: entry-exit did not expose a usable WireGuard interface '$iface'"
+  echo "hint: beta/prod server-up expects Docker NET_ADMIN/privileged WireGuard support; inspect entry-exit logs below."
+  compose_with_env "$env_file" logs --tail=120 entry-exit || true
+  return 1
+}
+
 clear_runtime_override_env_vars() {
   # Clears known runtime override vars in this process so cleanup/start flows
   # are deterministic even if the caller shell exported stale values.
@@ -3460,11 +3816,25 @@ clear_runtime_override_env_vars() {
     EXIT_WG_AUTO_CREATE_INTERFACE
     EXIT_WG_KERNEL_PROXY
     EXIT_LIVE_WG_MODE
-    EXIT_OPAQUE_ECHO
-    EXIT_OPAQUE_SINK_ADDR
-    EXIT_OPAQUE_SOURCE_ADDR
-    ENTRY_LIVE_WG_MODE
-  )
+	    EXIT_OPAQUE_ECHO
+	    EXIT_OPAQUE_SINK_ADDR
+	    EXIT_OPAQUE_SOURCE_ADDR
+	    EXIT_TOKEN_PROOF_REPLAY_STORE_FILE
+	    EXIT_TOKEN_PROOF_REPLAY_REDIS_ADDR
+	    EXIT_EGRESS_BACKEND
+	    EXIT_ISSUER_MIN_KEY_VOTES
+	    DIRECTORY_ISSUER_TRUSTED_KEYS_FILE
+	    DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE
+	    DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE
+	    DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_ADDR
+	    SETTLEMENT_CHAIN_ADAPTER
+	    COSMOS_SETTLEMENT_ENDPOINT
+	    COSMOS_SETTLEMENT_API_KEY
+	    COSMOS_SETTLEMENT_SUBMIT_MODE
+	    COSMOS_SETTLEMENT_TRUSTED_BRIDGE_FINALITY
+	    ISSUER_REQUIRE_PAYMENT_PROOF
+	    ENTRY_LIVE_WG_MODE
+	  )
   local v
   local cleared=0
   for v in "${runtime_vars[@]}"; do
@@ -3630,6 +4000,9 @@ write_authority_env() {
   local middle_entry_data_addr="${29:-}"
   local middle_exit_data_addr="${30:-}"
   local middle_country_code="${31:-}"
+  local directory_issuer_trusted_keys_file_container="${32:-}"
+  local cosmos_settlement_endpoint="${33:-}"
+  local cosmos_settlement_api_key="${34:-}"
   local issuer_admin_token_effective="$issuer_admin_token"
   local public_scheme="http"
   local relay_suffix
@@ -3670,6 +4043,9 @@ write_authority_env() {
   validate_env_scalar_or_die "middle_entry_data_addr" "$middle_entry_data_addr"
   validate_env_scalar_or_die "middle_exit_data_addr" "$middle_exit_data_addr"
   validate_env_scalar_or_die "middle_country_code" "$middle_country_code"
+  validate_env_scalar_or_die "directory_issuer_trusted_keys_file_container" "$directory_issuer_trusted_keys_file_container"
+  validate_env_scalar_or_die "cosmos_settlement_endpoint" "$cosmos_settlement_endpoint"
+  validate_env_scalar_or_die "cosmos_settlement_api_key" "$cosmos_settlement_api_key"
 
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
@@ -3719,6 +4095,7 @@ ISSUER_SUBJECTS_FILE=/app/data/issuer_${issuer_suffix}_subjects.json
 ISSUER_REVOCATIONS_FILE=/app/data/issuer_${issuer_suffix}_revocations.json
 ISSUER_ANON_REVOCATIONS_FILE=/app/data/issuer_${issuer_suffix}_anon_revocations.json
 ISSUER_ANON_DISPUTES_FILE=/app/data/issuer_${issuer_suffix}_anon_disputes.json
+ISSUER_PAYMENT_REPLAY_STORE_FILE=/app/data/issuer_${issuer_suffix}_payment_replay.json
 ISSUER_AUDIT_FILE=/app/data/issuer_${issuer_suffix}_audit.json
 ISSUER_ADMIN_TOKEN=${issuer_admin_token_effective}
 ISSUER_SPONSOR_API_TOKEN=${issuer_sponsor_api_token}
@@ -3745,6 +4122,9 @@ EOF_ENV
     entry_directory_urls="$(merge_url_csv "$entry_directory_urls" "$peer_dirs")"
   fi
   echo "DIRECTORY_URLS=${entry_directory_urls}" >>"$AUTHORITY_ENV_FILE"
+  if [[ -n "$directory_issuer_trusted_keys_file_container" ]]; then
+    echo "DIRECTORY_ISSUER_TRUSTED_KEYS_FILE=${directory_issuer_trusted_keys_file_container}" >>"$AUTHORITY_ENV_FILE"
+  fi
 
   if [[ "$prod_profile" != "1" ]]; then
     cat >>"$AUTHORITY_ENV_FILE" <<EOF_NON_PROD_PUBLIC_BIND
@@ -3873,7 +4253,14 @@ DIRECTORY_FINAL_APPEAL_MIN_VOTES=2
 DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.67
 DIRECTORY_DISPUTE_MAX_TTL_SEC=259200
 DIRECTORY_APPEAL_MAX_TTL_SEC=259200
-DIRECTORY_KEY_ROTATE_SEC=86400
+DIRECTORY_KEY_ROTATE_SEC=2592000
+DIRECTORY_KEY_HISTORY=12
+DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1
+DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE=/app/data/directory_provider_token_proof_replay.json
+SETTLEMENT_CHAIN_ADAPTER=cosmos
+COSMOS_SETTLEMENT_ENDPOINT=${cosmos_settlement_endpoint}
+COSMOS_SETTLEMENT_API_KEY=${cosmos_settlement_api_key}
+COSMOS_SETTLEMENT_SUBMIT_MODE=http
 ISSUER_URLS=${issuer_urls_csv}
 ENTRY_LIVE_WG_MODE=1
 WG_BACKEND=command
@@ -3891,13 +4278,18 @@ EXIT_OPAQUE_ECHO=0
 EXIT_OPAQUE_SINK_ADDR=127.0.0.1:51982
 EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:51983
 EXIT_TOKEN_PROOF_REPLAY_GUARD=1
+EXIT_TOKEN_PROOF_REPLAY_STORE_FILE=/app/data/exit_token_proof_replay.json
+EXIT_EGRESS_BACKEND=command
 EXIT_PEER_REBIND_SEC=0
 EXIT_STARTUP_SYNC_TIMEOUT_SEC=30
 EXIT_ISSUER_MIN_SOURCES=2
 EXIT_ISSUER_MIN_OPERATORS=2
+EXIT_ISSUER_MIN_KEY_VOTES=2
 EXIT_ISSUER_REQUIRE_ID=1
 ENTRY_PUZZLE_DIFFICULTY=1
-ISSUER_KEY_ROTATE_SEC=86400
+ISSUER_KEY_ROTATE_SEC=2592000
+ISSUER_KEY_HISTORY=12
+ISSUER_REQUIRE_PAYMENT_PROOF=1
 ISSUER_TOKEN_TTL_SEC=300
 ISSUER_ANON_CRED_EXPOSE_ID=0
 ENTRY_EXIT_USER=0:0
@@ -3941,6 +4333,9 @@ write_provider_env() {
   local middle_entry_data_addr="${22:-}"
   local middle_exit_data_addr="${23:-}"
   local middle_country_code="${24:-}"
+  local directory_issuer_trusted_keys_file_container="${25:-}"
+  local cosmos_settlement_endpoint="${26:-}"
+  local cosmos_settlement_api_key="${27:-}"
   local public_scheme="http"
   local relay_suffix
   local entry_exit_user_non_prod
@@ -3972,6 +4367,9 @@ write_provider_env() {
   validate_env_scalar_or_die "middle_entry_data_addr" "$middle_entry_data_addr"
   validate_env_scalar_or_die "middle_exit_data_addr" "$middle_exit_data_addr"
   validate_env_scalar_or_die "middle_country_code" "$middle_country_code"
+  validate_env_scalar_or_die "directory_issuer_trusted_keys_file_container" "$directory_issuer_trusted_keys_file_container"
+  validate_env_scalar_or_die "cosmos_settlement_endpoint" "$cosmos_settlement_endpoint"
+  validate_env_scalar_or_die "cosmos_settlement_api_key" "$cosmos_settlement_api_key"
 
   if [[ "$prod_profile" == "1" ]]; then
     public_scheme="https"
@@ -4027,6 +4425,9 @@ EOF_ENV
     entry_directory_urls="$(merge_url_csv "$entry_directory_urls" "$peer_dirs")"
   fi
   echo "DIRECTORY_URLS=${entry_directory_urls}" >>"$PROVIDER_ENV_FILE"
+  if [[ -n "$directory_issuer_trusted_keys_file_container" ]]; then
+    echo "DIRECTORY_ISSUER_TRUSTED_KEYS_FILE=${directory_issuer_trusted_keys_file_container}" >>"$PROVIDER_ENV_FILE"
+  fi
 
   if [[ "$prod_profile" != "1" ]]; then
     cat >>"$PROVIDER_ENV_FILE" <<EOF_NON_PROD_PUBLIC_BIND
@@ -4148,7 +4549,14 @@ DIRECTORY_FINAL_APPEAL_MIN_VOTES=2
 DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.67
 DIRECTORY_DISPUTE_MAX_TTL_SEC=259200
 DIRECTORY_APPEAL_MAX_TTL_SEC=259200
-DIRECTORY_KEY_ROTATE_SEC=86400
+DIRECTORY_KEY_ROTATE_SEC=2592000
+DIRECTORY_KEY_HISTORY=12
+DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1
+DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE=/app/data/directory_provider_token_proof_replay.json
+SETTLEMENT_CHAIN_ADAPTER=cosmos
+COSMOS_SETTLEMENT_ENDPOINT=${cosmos_settlement_endpoint}
+COSMOS_SETTLEMENT_API_KEY=${cosmos_settlement_api_key}
+COSMOS_SETTLEMENT_SUBMIT_MODE=http
 ISSUER_URLS=${issuer_urls_csv}
 ENTRY_LIVE_WG_MODE=1
 WG_BACKEND=command
@@ -4166,10 +4574,13 @@ EXIT_OPAQUE_ECHO=0
 EXIT_OPAQUE_SINK_ADDR=127.0.0.1:51982
 EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:51983
 EXIT_TOKEN_PROOF_REPLAY_GUARD=1
+EXIT_TOKEN_PROOF_REPLAY_STORE_FILE=/app/data/exit_token_proof_replay.json
+EXIT_EGRESS_BACKEND=command
 EXIT_PEER_REBIND_SEC=0
 EXIT_STARTUP_SYNC_TIMEOUT_SEC=30
 EXIT_ISSUER_MIN_SOURCES=2
 EXIT_ISSUER_MIN_OPERATORS=2
+EXIT_ISSUER_MIN_KEY_VOTES=2
 EXIT_ISSUER_REQUIRE_ID=1
 ENTRY_PUZZLE_DIFFICULTY=1
 ENTRY_EXIT_USER=0:0
@@ -4714,6 +5125,7 @@ server_up() {
   local auto_invite_wait_sec="${EASY_NODE_AUTO_INVITE_WAIT_SEC:-10}"
   local auto_invite_fail_open="${EASY_NODE_AUTO_INVITE_FAIL_OPEN:-1}"
   local auto_public_bind="${EASY_NODE_AUTO_PUBLIC_BIND:-auto}"
+  local server_wg_runtime_check_mode="${EASY_NODE_SERVER_WG_RUNTIME_CHECK:-auto}"
   local issuer_sponsor_api_token="${EASY_NODE_ISSUER_SPONSOR_API_TOKEN:-}"
   local relay_country_code="${EASY_NODE_RELAY_COUNTRY_CODE:-}"
   local entry_country_code="${EASY_NODE_ENTRY_COUNTRY_CODE:-${ENTRY_COUNTRY_CODE:-}}"
@@ -4726,6 +5138,8 @@ server_up() {
   local middle_entry_data_addr="${EASY_NODE_MIDDLE_ENTRY_DATA_ADDR:-${MIDDLE_ENTRY_DATA_ADDR:-}}"
   local middle_exit_data_addr="${EASY_NODE_MIDDLE_EXIT_DATA_ADDR:-${MIDDLE_EXIT_DATA_ADDR:-}}"
   local middle_country_code="${EASY_NODE_MIDDLE_COUNTRY_CODE:-${MIDDLE_COUNTRY_CODE:-}}"
+  local cosmos_settlement_endpoint="${EASY_NODE_COSMOS_SETTLEMENT_ENDPOINT:-${COSMOS_SETTLEMENT_ENDPOINT:-}}"
+  local cosmos_settlement_api_key="${EASY_NODE_COSMOS_SETTLEMENT_API_KEY:-${COSMOS_SETTLEMENT_API_KEY:-}}"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -5001,6 +5415,44 @@ server_up() {
   if [[ "$prod_profile" == "1" ]]; then
     beta_profile="1"
   fi
+  if [[ "$mode" == "authority" && ( "$beta_profile" == "1" || "$prod_profile" == "1" ) ]]; then
+    if [[ "$client_allowlist_explicit" == "0" && -z "${EASY_NODE_CLIENT_ALLOWLIST_ONLY+x}" ]]; then
+      client_allowlist="1"
+    fi
+    if [[ "$allow_anon_cred_explicit" == "0" && -z "${EASY_NODE_ALLOW_ANON_CRED+x}" ]]; then
+      allow_anon_cred="0"
+    fi
+  fi
+  if [[ "$prod_profile" == "1" ]]; then
+    validate_env_scalar_or_die "COSMOS_SETTLEMENT_ENDPOINT" "$cosmos_settlement_endpoint"
+    validate_env_scalar_or_die "COSMOS_SETTLEMENT_API_KEY" "$cosmos_settlement_api_key"
+    if [[ -z "$cosmos_settlement_endpoint" ]]; then
+      echo "server-up --prod-profile requires COSMOS_SETTLEMENT_ENDPOINT (or EASY_NODE_COSMOS_SETTLEMENT_ENDPOINT)."
+      echo "prod services require SETTLEMENT_CHAIN_ADAPTER=cosmos and fail closed without a real settlement endpoint."
+      exit 2
+    fi
+    local trusted_bridge_finality_raw="${COSMOS_SETTLEMENT_TRUSTED_BRIDGE_FINALITY:-}"
+    if [[ -n "$trusted_bridge_finality_raw" ]]; then
+      local trusted_bridge_finality_norm
+      trusted_bridge_finality_norm="$(normalize_config_bool_01 "$trusted_bridge_finality_raw" 2>/dev/null || true)"
+      if [[ -z "$trusted_bridge_finality_norm" ]]; then
+        echo "server-up --prod-profile requires COSMOS_SETTLEMENT_TRUSTED_BRIDGE_FINALITY, when set, to be a boolean."
+        exit 2
+      fi
+      if [[ "$trusted_bridge_finality_norm" == "1" ]]; then
+        echo "server-up --prod-profile forbids COSMOS_SETTLEMENT_TRUSTED_BRIDGE_FINALITY=1."
+        exit 2
+      fi
+    fi
+    local cosmos_submit_mode_norm
+    cosmos_submit_mode_norm="$(trim "${COSMOS_SETTLEMENT_SUBMIT_MODE:-}")"
+    cosmos_submit_mode_norm="$(printf '%s' "$cosmos_submit_mode_norm" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$cosmos_submit_mode_norm" == "signed-tx" ]]; then
+      echo "server-up --prod-profile forbids COSMOS_SETTLEMENT_SUBMIT_MODE=signed-tx."
+      exit 2
+    fi
+    require_prod_issuer_trust_anchor_input_or_die
+  fi
   if [[ "$show_admin_token" != "0" && "$show_admin_token" != "1" ]]; then
     echo "server-up requires --show-admin-token (or EASY_NODE_SHOW_ADMIN_TOKEN) to be 0 or 1"
     exit 2
@@ -5081,6 +5533,16 @@ server_up() {
     echo "server-up requires --allow-anon-cred (or EASY_NODE_ALLOW_ANON_CRED) to be 0 or 1"
     exit 2
   fi
+  if [[ "$mode" == "authority" && ( "$beta_profile" == "1" || "$prod_profile" == "1" ) ]]; then
+    if [[ "$client_allowlist" != "1" ]]; then
+      echo "server-up beta/prod authority profile requires --client-allowlist 1 (or EASY_NODE_CLIENT_ALLOWLIST_ONLY=1)"
+      exit 2
+    fi
+    if [[ "$allow_anon_cred" != "0" ]]; then
+      echo "server-up beta/prod authority profile requires --allow-anon-cred 0 (or EASY_NODE_ALLOW_ANON_CRED=0)"
+      exit 2
+    fi
+  fi
   if [[ "$peer_identity_strict" != "0" && "$peer_identity_strict" != "1" && "$peer_identity_strict" != "auto" ]]; then
     echo "server-up requires --peer-identity-strict (or EASY_NODE_PEER_IDENTITY_STRICT) to be 0, 1, or auto"
     exit 2
@@ -5089,6 +5551,7 @@ server_up() {
     echo "server-up requires EASY_NODE_AUTO_PUBLIC_BIND to be 0, 1, or auto"
     exit 2
   fi
+  server_wg_runtime_check_mode="$(server_wg_runtime_check_mode_or_die "$server_wg_runtime_check_mode")" || exit 2
   if [[ "$middle_relay" != "0" && "$middle_relay" != "1" ]]; then
     echo "server-up requires --middle-relay (or EASY_NODE_MIDDLE_RELAY) to be 0 or 1"
     exit 2
@@ -5437,6 +5900,8 @@ server_up() {
   local entry_route_assertion_key_local=""
   local entry_route_assertion_key_container=""
   local entry_route_assertion_pubkey=""
+  local directory_issuer_trusted_keys_file_container=""
+  local local_issuer_pubkey=""
   local need_beta_or_prod_wg_defaults="0"
   if [[ "$beta_profile" == "1" || "$prod_profile" == "1" ]]; then
     need_beta_or_prod_wg_defaults="1"
@@ -5462,6 +5927,18 @@ server_up() {
       echo "add at least one peer directory from a distinct authority/issuer operator."
       exit 2
     fi
+    if [[ "$mode" == "authority" ]]; then
+      local issuer_key_material
+      local local_issuer_key_file
+      local local_issuer_key_container
+      issuer_key_material="$(ensure_issuer_key_material "$issuer_id")"
+      IFS='|' read -r local_issuer_key_file local_issuer_key_container local_issuer_pubkey <<<"$issuer_key_material"
+      if [[ -z "$local_issuer_key_container" || -z "$local_issuer_pubkey" ]]; then
+        echo "server-up failed to initialize local issuer key material for prod profile"
+        exit 1
+      fi
+    fi
+    directory_issuer_trusted_keys_file_container="$(ensure_prod_issuer_trust_anchor_material "$mode" "$local_issuer_pubkey" "$issuer_urls_count")"
   fi
   if [[ "$need_beta_or_prod_wg_defaults" == "1" ]]; then
     local relay_suffix_for_wg
@@ -5553,7 +6030,7 @@ server_up() {
   write_identity_config "$operator_id" "$issuer_id"
 
   if [[ "$mode" == "authority" ]]; then
-    write_authority_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred" "$prod_profile" "$admin_signers_file_container" "$admin_sign_key_id" "$admin_sign_key_file_local" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey" "$entry_route_assertion_key_container" "$entry_route_assertion_pubkey" "$issuer_sponsor_api_token" "$entry_country_code" "$exit_country_code" "$middle_relay" "$middle_relay_id" "$middle_operator_id" "$middle_endpoint_public" "$middle_control_url_public" "$middle_entry_data_addr" "$middle_exit_data_addr" "$middle_country_code"
+    write_authority_env "$public_host" "$operator_id" "$issuer_id" "$issuer_admin_token" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$client_allowlist" "$allow_anon_cred" "$prod_profile" "$admin_signers_file_container" "$admin_sign_key_id" "$admin_sign_key_file_local" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey" "$entry_route_assertion_key_container" "$entry_route_assertion_pubkey" "$issuer_sponsor_api_token" "$entry_country_code" "$exit_country_code" "$middle_relay" "$middle_relay_id" "$middle_operator_id" "$middle_endpoint_public" "$middle_control_url_public" "$middle_entry_data_addr" "$middle_exit_data_addr" "$middle_country_code" "$directory_issuer_trusted_keys_file_container" "$cosmos_settlement_endpoint" "$cosmos_settlement_api_key"
     append_published_bind_env_from_process "$AUTHORITY_ENV_FILE"
     local -a authority_services=(directory issuer entry-exit)
     if [[ "$middle_relay" == "1" ]]; then
@@ -5595,6 +6072,9 @@ server_up() {
       if [[ "$middle_relay" == "1" ]]; then
         wait_http_ok_with_opts "${url_scheme}://${public_host}:8085/v1/ready" "public middle" 15 "${public_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 middle; exit 1; }
       fi
+    fi
+    if [[ "$server_wg_runtime_check_mode" == "1" || ( "$server_wg_runtime_check_mode" == "auto" && "$need_beta_or_prod_wg_defaults" == "1" ) ]]; then
+      server_wg_runtime_check "$AUTHORITY_ENV_FILE" "$need_beta_or_prod_wg_defaults" || exit 1
     fi
     write_server_mode "authority"
 
@@ -5657,12 +6137,18 @@ server_up() {
       auto_invite_issuer_url="$issuer_local_base"
       echo "auto invite: generating ${auto_invite_count} key(s) tier=${auto_invite_tier} wait=${auto_invite_wait_sec}s"
       local auto_invite_rc=0
-      set +e
-      "$ROOT_DIR/scripts/easy_node.sh" invite-generate \
-        --issuer-url "$auto_invite_issuer_url" \
-        --count "$auto_invite_count" \
-        --tier "$auto_invite_tier" \
+      local -a auto_invite_cmd=(
+        "$ROOT_DIR/scripts/easy_node.sh" invite-generate
+        --issuer-url "$auto_invite_issuer_url"
+        --count "$auto_invite_count"
+        --tier "$auto_invite_tier"
         --wait-sec "$auto_invite_wait_sec"
+      )
+      if [[ -n "$(trim "$issuer_admin_token")" ]]; then
+        auto_invite_cmd+=(--admin-token "$issuer_admin_token")
+      fi
+      set +e
+      "${auto_invite_cmd[@]}"
       auto_invite_rc=$?
       set -e
       if [[ "$auto_invite_rc" -ne 0 ]]; then
@@ -5675,7 +6161,7 @@ server_up() {
       fi
     fi
   else
-    write_provider_env "$public_host" "$operator_id" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey" "$entry_route_assertion_key_container" "$entry_route_assertion_pubkey" "$entry_country_code" "$exit_country_code" "$middle_relay" "$middle_relay_id" "$middle_operator_id" "$middle_endpoint_public" "$middle_control_url_public" "$middle_entry_data_addr" "$middle_exit_data_addr" "$middle_country_code"
+    write_provider_env "$public_host" "$operator_id" "$directory_admin_token" "$entry_puzzle_secret" "$peer_dirs" "$beta_profile" "$authority_issuer" "$prod_profile" "$issuer_urls_csv" "$exit_wg_private_key_container" "$exit_wg_interface" "$exit_wg_pubkey" "$entry_route_assertion_key_container" "$entry_route_assertion_pubkey" "$entry_country_code" "$exit_country_code" "$middle_relay" "$middle_relay_id" "$middle_operator_id" "$middle_endpoint_public" "$middle_control_url_public" "$middle_entry_data_addr" "$middle_exit_data_addr" "$middle_country_code" "$directory_issuer_trusted_keys_file_container" "$cosmos_settlement_endpoint" "$cosmos_settlement_api_key"
     append_published_bind_env_from_process "$PROVIDER_ENV_FILE"
     local -a provider_services=(directory entry-exit)
     if [[ "$middle_relay" == "1" ]]; then
@@ -5719,6 +6205,9 @@ server_up() {
       if [[ "$middle_relay" == "1" ]]; then
         wait_http_ok_with_opts "${url_scheme}://${public_host}:8085/v1/ready" "public middle" 15 "${public_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 middle; exit 1; }
       fi
+    fi
+    if [[ "$server_wg_runtime_check_mode" == "1" || ( "$server_wg_runtime_check_mode" == "auto" && "$need_beta_or_prod_wg_defaults" == "1" ) ]]; then
+      server_wg_runtime_check "$PROVIDER_ENV_FILE" "$need_beta_or_prod_wg_defaults" || exit 1
     fi
     write_server_mode "provider"
 
@@ -12260,7 +12749,7 @@ invite_disable() {
   if [[ $upsert_rc -ne 0 ]]; then
     exit "$upsert_rc"
   fi
-  echo "invite key disabled: $key (issuer=$issuer_url)"
+  echo "invite key disabled: key=[redacted] issuer=$(redact_url_for_log "$issuer_url")"
 }
 
 set_env_kv() {
@@ -12298,7 +12787,7 @@ admin_signing_status() {
   signers_container="$(identity_value "$env_file" "ISSUER_ADMIN_SIGNING_KEYS_FILE")"
 
   if [[ -z "$key_file" ]]; then
-    key_file="$DEPLOY_DIR/data/issuer/issuer_admin_signer.key"
+    key_file="$(default_admin_signing_key_dir)/issuer_admin_signer.key"
   fi
   if [[ -z "$signers_container" ]]; then
     signers_container="/app/data/issuer_admin_signers.txt"
@@ -14361,6 +14850,7 @@ client_vpn_preflight() {
   local directory_urls=""
   local issuer_url=""
   local issuer_urls=""
+  local issuer_urls_explicit=0
   local entry_url=""
   local exit_url=""
   local bootstrap_directory=""
@@ -14378,6 +14868,7 @@ client_vpn_preflight() {
   local middle_relay_check="${EASY_NODE_CLIENT_VPN_MIDDLE_RELAY_CHECK:-}"
   local middle_relay_min_operators="${EASY_NODE_CLIENT_VPN_MIDDLE_RELAY_MIN_OPERATORS:-1}"
   local middle_relay_require_distinct="${EASY_NODE_CLIENT_VPN_MIDDLE_RELAY_REQUIRE_DISTINCT:-1}"
+  local require_distinct_operators="${CLIENT_REQUIRE_DISTINCT_OPERATORS:-}"
   local require_distinct_countries="${CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY:-}"
   local issuer_quorum_check="${EASY_NODE_CLIENT_VPN_ISSUER_QUORUM_CHECK:-}"
   local issuer_min_operators="${EASY_NODE_CLIENT_VPN_ISSUER_MIN_OPERATORS:-2}"
@@ -14409,6 +14900,7 @@ client_vpn_preflight() {
         ;;
       --issuer-urls)
         issuer_urls="${2:-}"
+        issuer_urls_explicit=1
         shift 2
         ;;
       --entry-url)
@@ -14571,14 +15063,21 @@ client_vpn_preflight() {
     echo "client-vpn-preflight requires --path-profile to be one of: 1hop, 2hop, 3hop, speed, balanced, private"
     exit 2
   }
+  local profile_values profile_distinct profile_distinct_countries
+  profile_values="$(path_profile_values "$normalized_path_profile")" || {
+    echo "client-vpn-preflight requires --path-profile to be one of: 1hop, 2hop, 3hop, speed, balanced, private"
+    exit 2
+  }
+  IFS='|' read -r profile_distinct profile_distinct_countries _ <<<"$profile_values"
+  if [[ -z "$require_distinct_operators" ]]; then
+    require_distinct_operators="$profile_distinct"
+  fi
   if [[ -z "$require_distinct_countries" ]]; then
-    local profile_values profile_distinct profile_distinct_countries
-    profile_values="$(path_profile_values "$normalized_path_profile")" || {
-      echo "client-vpn-preflight requires --path-profile to be one of: 1hop, 2hop, 3hop, speed, balanced, private"
-      exit 2
-    }
-    IFS='|' read -r profile_distinct profile_distinct_countries _ <<<"$profile_values"
     require_distinct_countries="$profile_distinct_countries"
+  fi
+  if [[ "$require_distinct_operators" != "0" && "$require_distinct_operators" != "1" ]]; then
+    echo "client-vpn-preflight requires CLIENT_REQUIRE_DISTINCT_OPERATORS to be 0 or 1 when set"
+    exit 2
   fi
   if [[ "$require_distinct_countries" != "0" && "$require_distinct_countries" != "1" ]]; then
     echo "client-vpn-preflight requires CLIENT_REQUIRE_DISTINCT_ENTRY_EXIT_COUNTRY to be 0 or 1 when set"
@@ -14709,14 +15208,16 @@ client_vpn_preflight() {
     issuer_urls="$issuer_url"
   fi
   issuer_urls="$(merge_url_csv "$issuer_urls" "$issuer_url")"
-  local durl dhost
-  while IFS= read -r durl; do
-    [[ -z "$durl" ]] && continue
-    dhost="$(host_from_url "$durl")"
-    if [[ -n "$dhost" ]]; then
-      issuer_urls="$(merge_url_csv "$issuer_urls" "$(url_from_host_port "$dhost" 8082)")"
-    fi
-  done < <(split_csv_lines "$directory_urls")
+  if [[ "$issuer_urls_explicit" != "1" ]]; then
+    local durl dhost
+    while IFS= read -r durl; do
+      [[ -z "$durl" ]] && continue
+      dhost="$(host_from_url "$durl")"
+      if [[ -n "$dhost" ]]; then
+        issuer_urls="$(merge_url_csv "$issuer_urls" "$(url_from_host_port "$dhost" 8082)")"
+      fi
+    done < <(split_csv_lines "$directory_urls")
+  fi
   issuer_urls="$(normalize_url_csv_scheme "$issuer_urls" "$client_url_scheme")"
 
   local fail=0
@@ -14725,9 +15226,9 @@ client_vpn_preflight() {
 
   echo "client-vpn preflight:"
   echo "  directory_urls: $(redact_csv_urls_for_log "$directory_urls")"
-  echo "  issuer_url: $issuer_url"
-  echo "  entry_url: $entry_url"
-  echo "  exit_url: $exit_url"
+  echo "  issuer_url: $(redact_url_for_log "$issuer_url")"
+  echo "  entry_url: $(redact_url_for_log "$entry_url")"
+  echo "  exit_url: $(redact_url_for_log "$exit_url")"
   echo "  interface: $interface_name"
   echo "  prod_profile: $prod_profile"
   echo "  allow_insecure_remote_http: $allow_insecure_remote_http"
@@ -14823,7 +15324,7 @@ client_vpn_preflight() {
       middle_runtime_strict="1"
     fi
     local middle_floor_failed=0
-    IFS='|' read -r middle_ops eligible_middle_ops country_eligible_middle_ops middle_relays missing_middle_ops middle_fetch_fail middle_parse_fail middle_ops_list eligible_middle_ops_list country_eligible_middle_ops_list < <(client_vpn_middle_relay_summary "$directory_urls" "$timeout_sec" "$middle_runtime_strict")
+    IFS='|' read -r middle_ops eligible_middle_ops country_eligible_middle_ops middle_relays missing_middle_ops middle_fetch_fail middle_parse_fail middle_ops_list eligible_middle_ops_list country_eligible_middle_ops_list < <(client_vpn_middle_relay_summary "$directory_urls" "$timeout_sec" "$middle_runtime_strict" "$require_distinct_operators")
     echo "  middle relay diversity: middle_ops=$middle_ops eligible_middle_ops=$eligible_middle_ops country_eligible_middle_ops=$country_eligible_middle_ops middle_relays=$middle_relays runtime_strict=$middle_runtime_strict missing_middle_operator_fields=$missing_middle_ops fetch_failures=$middle_fetch_fail parse_failures=$middle_parse_fail"
     if ((middle_fetch_fail > 0)); then
       echo "  [fail] could not fetch relay set from all configured directories for middle-relay check"
@@ -15748,7 +16249,7 @@ client_vpn_status() {
 
   if [[ -n "$log_file" && -f "$log_file" ]]; then
     echo "  recent log lines:"
-    tail -n 15 "$log_file" || true
+    tail -n 15 "$log_file" | redact_sensitive_stream_for_log || true
   fi
 }
 
@@ -16070,9 +16571,15 @@ client_vpn_trust_reset() {
     active_trust_file="$ROOT_DIR/$active_trust_file"
   fi
 
+  local directory_urls_log
+  directory_urls_log="$(redact_csv_urls_for_log "${directory_urls:-}")"
+  if [[ -z "$directory_urls_log" ]]; then
+    directory_urls_log="none"
+  fi
+
   echo "client-vpn trust reset:"
   echo "  trust_scope: $trust_scope_mode"
-  echo "  directory_urls: ${directory_urls:-none}"
+  echo "  directory_urls: $directory_urls_log"
   echo "  all_scoped: $all_scoped"
   echo "  dry_run: $dry_run"
   echo "  key_dir: $key_dir"
@@ -16558,8 +17065,10 @@ simple_client_vpn_session() {
     operator_min_operators="1"
     issuer_quorum_check="0"
     issuer_min_operators="1"
+    beta_profile="0"
+    prod_profile="0"
     install_route="0"
-    echo "1-hop quick mode: forcing --install-route 0 for stable control-plane connectivity."
+    echo "1-hop quick mode: forcing --beta-profile 0 --prod-profile 0 --install-route 0 for stable control-plane connectivity."
     echo "Use expert option 34 if you want to override route behavior manually."
   fi
 
@@ -16934,6 +17443,7 @@ client_vpn_up() {
   local directory_urls=""
   local issuer_url=""
   local issuer_urls=""
+  local issuer_urls_explicit=0
   local entry_url=""
   local exit_url=""
   local bootstrap_directory=""
@@ -17036,6 +17546,7 @@ client_vpn_up() {
         ;;
       --issuer-urls)
         issuer_urls="${2:-}"
+        issuer_urls_explicit=1
         shift 2
         ;;
       --entry-url)
@@ -17575,6 +18086,10 @@ client_vpn_up() {
     echo "client-vpn-up requires exactly one of --subject or --anon-cred"
     exit 2
   fi
+  if [[ ( "$beta_profile" == "1" || "$prod_profile" == "1" ) && -z "$client_subject" && -z "$client_anon_cred" ]]; then
+    echo "client-vpn-up beta/prod profile requires --subject, --subject-file, or --anon-cred"
+    exit 2
+  fi
   trust_scope_mode="$(printf '%s' "$trust_scope_mode" | tr '[:upper:]' '[:lower:]')"
   if [[ "$trust_scope_mode" != "scoped" && "$trust_scope_mode" != "global" ]]; then
     echo "client-vpn-up requires EASY_NODE_CLIENT_VPN_TRUST_SCOPE to be one of: scoped, global"
@@ -17660,14 +18175,16 @@ client_vpn_up() {
     issuer_urls="$issuer_url"
   fi
   issuer_urls="$(merge_url_csv "$issuer_urls" "$issuer_url")"
-  local durl dhost
-  while IFS= read -r durl; do
-    [[ -z "$durl" ]] && continue
-    dhost="$(host_from_url "$durl")"
-    if [[ -n "$dhost" ]]; then
-      issuer_urls="$(merge_url_csv "$issuer_urls" "$(url_from_host_port "$dhost" 8082)")"
-    fi
-  done < <(split_csv_lines "$directory_urls")
+  if [[ "$issuer_urls_explicit" != "1" ]]; then
+    local durl dhost
+    while IFS= read -r durl; do
+      [[ -z "$durl" ]] && continue
+      dhost="$(host_from_url "$durl")"
+      if [[ -n "$dhost" ]]; then
+        issuer_urls="$(merge_url_csv "$issuer_urls" "$(url_from_host_port "$dhost" 8082)")"
+      fi
+    done < <(split_csv_lines "$directory_urls")
+  fi
   issuer_urls="$(normalize_url_csv_scheme "$issuer_urls" "$client_url_scheme")"
   if [[ "$beta_profile" == "1" ]]; then
     if [[ "$min_sources_set" -eq 0 ]] && [[ "$directory_urls" == *,* ]]; then
@@ -17730,7 +18247,7 @@ client_vpn_up() {
     if [[ "$normalized_path_profile" == "privacy" ]]; then
       middle_runtime_strict="1"
     fi
-    IFS='|' read -r middle_ops eligible_middle_ops country_eligible_middle_ops middle_relays missing_middle_ops middle_fetch_fail middle_parse_fail middle_ops_list eligible_middle_ops_list country_eligible_middle_ops_list < <(client_vpn_middle_relay_summary "$directory_urls" 8 "$middle_runtime_strict")
+    IFS='|' read -r middle_ops eligible_middle_ops country_eligible_middle_ops middle_relays missing_middle_ops middle_fetch_fail middle_parse_fail middle_ops_list eligible_middle_ops_list country_eligible_middle_ops_list < <(client_vpn_middle_relay_summary "$directory_urls" 8 "$middle_runtime_strict" "$require_distinct_operators")
     if ((middle_fetch_fail > 0)); then
       echo "client-vpn-up middle-relay check failed: could not fetch relays from all configured directories (failures=$middle_fetch_fail)"
       exit 1
@@ -18149,12 +18666,12 @@ EOF_STATE
   echo "  path_profile: ${normalized_path_profile:-default}"
   echo "  session_reuse: $session_reuse"
   echo "  allow_session_churn: $allow_session_churn"
-  echo "  directory_urls: $directory_urls"
+  echo "  directory_urls: $(redact_csv_urls_for_log "$directory_urls")"
   echo "  trusted_keys_file: $trusted_keys_file"
   echo "  trust_scope: $trust_scope_mode"
   echo "  operator_floor_check: $operator_floor_check"
   echo "  issuer_quorum_check: $issuer_quorum_check"
-  echo "  issuer_urls: $issuer_urls"
+  echo "  issuer_urls: $(redact_csv_urls_for_log "$issuer_urls")"
   echo "  log: $log_file"
   echo "  status_file: $status_file"
   echo "use './scripts/easy_node.sh client-vpn-status' to inspect"

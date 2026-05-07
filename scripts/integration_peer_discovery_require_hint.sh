@@ -35,6 +35,7 @@ DIRECTORY_PEERS="http://127.0.0.1:${PORT_SEED}" \
 DIRECTORY_SYNC_SEC=1 \
 DIRECTORY_PEER_DISCOVERY=1 \
 DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=0 \
+DIRECTORY_ALLOW_DANGEROUS_DISCOVERED_PRIVATE_PEERS=1 \
 timeout 90s go run ./cmd/node --directory >/tmp/discovery_hint_loose.log 2>&1 &
 loose_pid=$!
 
@@ -77,6 +78,7 @@ DIRECTORY_PEERS="http://127.0.0.1:${PORT_SEED}" \
 DIRECTORY_SYNC_SEC=1 \
 DIRECTORY_PEER_DISCOVERY=1 \
 DIRECTORY_PEER_DISCOVERY_REQUIRE_HINT=1 \
+DIRECTORY_ALLOW_DANGEROUS_DISCOVERED_PRIVATE_PEERS=1 \
 timeout 90s go run ./cmd/node --directory >/tmp/discovery_hint_strict.log 2>&1 &
 strict_pid=$!
 

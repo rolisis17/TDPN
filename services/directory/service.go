@@ -144,6 +144,7 @@ type Service struct {
 	peerTrustStrict                  bool
 	peerTrustTOFU                    bool
 	peerTrustFile                    string
+	allowDiscoveredPrivatePeers      bool
 	betaStrict                       bool
 	prodStrict                       bool
 	strictModeParseErr               error
@@ -191,6 +192,8 @@ const providerRelayUpsertProofReplayDefaultLockTimeout = 5 * time.Second
 const providerRelayUpsertProofReplayLockRetryInterval = 50 * time.Millisecond
 const providerRelayUpsertProofReplayRedisDefaultDialTimeout = 5 * time.Second
 const providerRelayUpsertProofReplayRedisDefaultPrefix = "directory:provider_token_proof_replay:"
+const providerTokenClaimSubjectMaxLen = 128
+const providerTokenClaimIDMaxLen = 256
 const gossipRelaysMaxBodyBytes int64 = 1024 * 1024
 const gossipRelaysMaxDescriptors = 512
 const remoteResponseMaxBodyBytes int64 = 1024 * 1024
@@ -203,6 +206,7 @@ const allowInsecureAdminPublicBind = "DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_P
 const allowDangerousDevAdminTokenFallback = "DIRECTORY_ALLOW_DANGEROUS_DEV_ADMIN_TOKEN_FALLBACK"
 const allowDangerousIssuerTrustWithoutAnchors = "DIRECTORY_ALLOW_DANGEROUS_ISSUER_TRUST_WITHOUT_ANCHORS"
 const allowDangerousOutboundPrivateDNS = "DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS"
+const allowDangerousDiscoveredPrivatePeers = "DIRECTORY_ALLOW_DANGEROUS_DISCOVERED_PRIVATE_PEERS"
 const allowDangerousProviderTokenBypass = "DIRECTORY_ALLOW_DANGEROUS_PROVIDER_RELAY_TOKEN_BYPASS"
 const directoryMicroExitBetaAllowed = "DIRECTORY_MICRO_EXIT_BETA_ALLOWED"
 const defaultIssuerTrustedKeysFile = "data/directory_issuer_trusted_keys.txt"
@@ -506,6 +510,7 @@ func New() *Service {
 	if peerTrustFile == "" {
 		peerTrustFile = "data/directory_peer_trusted_keys.txt"
 	}
+	allowDiscoveredPrivatePeers := envEnabled(allowDangerousDiscoveredPrivatePeers)
 	issuerTrustedKeysFile := strings.TrimSpace(os.Getenv("DIRECTORY_ISSUER_TRUSTED_KEYS_FILE"))
 	if issuerTrustedKeysFile == "" {
 		issuerTrustedKeysFile = defaultIssuerTrustedKeysFile
@@ -642,6 +647,7 @@ func New() *Service {
 		peerTrustStrict:                  peerTrustStrict,
 		peerTrustTOFU:                    peerTrustTOFU,
 		peerTrustFile:                    peerTrustFile,
+		allowDiscoveredPrivatePeers:      allowDiscoveredPrivatePeers,
 		issuerTrustedKeysFile:            issuerTrustedKeysFile,
 		betaStrict:                       betaStrict,
 		prodStrict:                       prodStrict,
@@ -763,6 +769,9 @@ func (s *Service) validateRuntimeConfig() error {
 	if s.strictModeParseErr != nil {
 		return s.strictModeParseErr
 	}
+	if s.prodStrict && !s.providerTokenProofReplaySharedStorageConfigured() {
+		return fmt.Errorf("PROD_STRICT_MODE requires shared provider token proof replay storage (set DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_ADDR or DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1)")
+	}
 	if securehttp.Enabled() {
 		if s.prodStrict && securehttp.InsecureSkipVerifyConfigured() {
 			return fmt.Errorf("PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY")
@@ -837,6 +846,9 @@ func (s *Service) validateRuntimeConfig() error {
 	}
 	if envEnabled(allowDangerousOutboundPrivateDNS) {
 		return fmt.Errorf("BETA_STRICT_MODE forbids %s", allowDangerousOutboundPrivateDNS)
+	}
+	if s.allowDiscoveredPrivatePeers {
+		return fmt.Errorf("BETA_STRICT_MODE forbids %s", allowDangerousDiscoveredPrivatePeers)
 	}
 	if envEnabled(allowDangerousProviderTokenBypass) {
 		return fmt.Errorf("BETA_STRICT_MODE forbids %s", allowDangerousProviderTokenBypass)
@@ -1267,6 +1279,7 @@ func (s *Service) syncPeerRelays(ctx context.Context) (retErr error) {
 			lastErr = peersErr
 		}
 		if len(discoveredPeers) > 0 {
+			sourceOperator = sourceOperatorFromPeerHints(peerURL, sourceOperator, pubs, discoveredPeers)
 			s.ingestDiscoveredPeers(peerURL, sourceOperator, discoveredPeers, time.Now())
 		}
 		relays, err := s.fetchPeerRelaysWithPubs(ctx, peerURL, pubs)
@@ -2701,7 +2714,8 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 		if peerURL == "" {
 			continue
 		}
-		if isDisallowedDiscoveredPeerURL(peerURL) {
+		sourceOrSelfHint := peerURL == self || peerURL == sourceURL
+		if !sourceOrSelfHint && !s.allowDiscoveredPrivatePeers && isDisallowedDiscoveredPeerURL(peerURL) {
 			continue
 		}
 		if operator := normalizeOperatorID(hint.Operator); operator != "" {
@@ -2710,7 +2724,7 @@ func (s *Service) ingestDiscoveredPeers(sourceURL string, sourceOperator string,
 		if key := normalizePeerPubKey(hint.PubKey); key != "" {
 			s.peerHintPubKeys[peerURL] = key
 		}
-		if peerURL == self || peerURL == sourceURL {
+		if sourceOrSelfHint {
 			continue
 		}
 		if requireHint {
@@ -3454,6 +3468,12 @@ func (s *Service) setPeerPubKeyCache(peerURL string, pubs []ed25519.PublicKey, o
 	entry.operatorID = normalizeOperatorID(operatorID)
 	entry.fetchedAt = fetchedAt
 	s.peerPubKeyCache[peerURL] = entry
+	if s.peerHintPubKeys == nil {
+		s.peerHintPubKeys = make(map[string]string)
+	}
+	if len(pubs[0]) == ed25519.PublicKeySize {
+		s.peerHintPubKeys[peerURL] = base64.RawURLEncoding.EncodeToString(pubs[0])
+	}
 }
 
 func (s *Service) peerHintPubKey(peerURL string) string {
@@ -4025,17 +4045,58 @@ func validateProviderTokenClaims(claims crypto.CapabilityClaims, nowUnix int64) 
 	if strings.TrimSpace(claims.TokenType) != crypto.TokenTypeProviderRole {
 		return fmt.Errorf("provider token type invalid")
 	}
-	if strings.TrimSpace(claims.Subject) == "" {
+	subject := strings.TrimSpace(claims.Subject)
+	if subject == "" {
 		return fmt.Errorf("provider token subject missing")
 	}
-	if strings.TrimSpace(claims.TokenID) == "" {
+	if err := validateProviderTokenSubjectClaim(claims.Subject); err != nil {
+		return err
+	}
+	tokenID := strings.TrimSpace(claims.TokenID)
+	if tokenID == "" {
 		return fmt.Errorf("provider token id missing")
+	}
+	if err := validateProviderTokenIDClaim(claims.TokenID); err != nil {
+		return err
 	}
 	if claims.Tier < 1 || claims.Tier > 3 {
 		return fmt.Errorf("provider token tier invalid")
 	}
 	if claims.ExpiryUnix <= 0 || nowUnix >= claims.ExpiryUnix {
 		return fmt.Errorf("provider token expired")
+	}
+	return nil
+}
+
+func validateProviderTokenSubjectClaim(subject string) error {
+	if err := validateProviderTokenClaimIdentifier(subject, providerTokenClaimSubjectMaxLen, false); err != nil {
+		return fmt.Errorf("provider token subject invalid")
+	}
+	return nil
+}
+
+func validateProviderTokenIDClaim(tokenID string) error {
+	if err := validateProviderTokenClaimIdentifier(tokenID, providerTokenClaimIDMaxLen, true); err != nil {
+		return fmt.Errorf("provider token id invalid")
+	}
+	return nil
+}
+
+func validateProviderTokenClaimIdentifier(value string, maxLen int, forbidColon bool) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || trimmed != value {
+		return fmt.Errorf("not canonical")
+	}
+	if len(trimmed) > maxLen {
+		return fmt.Errorf("too long")
+	}
+	for _, r := range trimmed {
+		if r < 33 || r > 126 {
+			return fmt.Errorf("contains unsafe character")
+		}
+		if forbidColon && r == ':' {
+			return fmt.Errorf("contains reserved delimiter")
+		}
 	}
 	return nil
 }
@@ -4447,6 +4508,10 @@ func (s *Service) providerTokenProofReplayRedisEnabled() bool {
 	return strings.TrimSpace(s.providerTokenProofRedisAddr) != ""
 }
 
+func (s *Service) providerTokenProofReplaySharedStorageConfigured() bool {
+	return s.providerTokenProofReplayRedisEnabled() || s.providerTokenProofSharedFileMode
+}
+
 func (s *Service) providerTokenProofReplayRedisKey(tokenID string, nonce string) string {
 	prefix := s.providerTokenProofRedisPrefix
 	if prefix == "" {
@@ -4753,6 +4818,9 @@ func (s *Service) ingestGossipPeerRelays(relays []proto.RelayDescriptor) int {
 func (s *Service) buildRelayDescriptors(now time.Time) []proto.RelayDescriptor {
 	pub, _ := s.currentKeypair()
 	pubB64 := base64.RawURLEncoding.EncodeToString(pub)
+	relayPubB64 := valueWithDefault("RELAY_PUBKEY", pubB64)
+	entryPubB64 := valueWithDefault("ENTRY_RELAY_PUBKEY", relayPubB64)
+	exitPubB64 := valueWithDefault("EXIT_RELAY_PUBKEY", valueWithDefault("EXIT_WG_PUBKEY", relayPubB64))
 	ttl := s.descriptorTTL
 	if ttl <= 0 {
 		ttl = 30 * time.Minute
@@ -4783,7 +4851,7 @@ func (s *Service) buildRelayDescriptors(now time.Time) []proto.RelayDescriptor {
 			OperatorID:                entryOperator,
 			OriginOperator:            entryOperator,
 			HopCount:                  0,
-			PubKey:                    pubB64,
+			PubKey:                    entryPubB64,
 			EntryRouteAssertionPubKey: entryRouteAssertionPubKey,
 			Endpoint:                  s.pickEntryEndpoint(now),
 			ControlURL:                endpointWithDefault("ENTRY_URL", "http://127.0.0.1:8083"),
@@ -4799,7 +4867,7 @@ func (s *Service) buildRelayDescriptors(now time.Time) []proto.RelayDescriptor {
 			OperatorID:     exitOperator,
 			OriginOperator: exitOperator,
 			HopCount:       0,
-			PubKey:         pubB64,
+			PubKey:         exitPubB64,
 			Endpoint:       endpointWithDefault("EXIT_ENDPOINT", "127.0.0.1:51821"),
 			ControlURL:     endpointWithDefault("EXIT_CONTROL_URL", "http://127.0.0.1:8084"),
 			CountryCode:    exitCountry,
@@ -6120,6 +6188,21 @@ func (s *Service) resolveQuorumSourceOperator(sourceURL string, declaredOperator
 		return keySource
 	}
 	return normalizeSourceOperator("", pubKeys, sourceURL)
+}
+
+func sourceOperatorFromPeerHints(sourceURL string, fallback string, pubKeys []ed25519.PublicKey, hints []proto.DirectoryPeerHint) string {
+	sourceURL = normalizePeerURL(sourceURL)
+	for _, hint := range hints {
+		if normalizePeerURL(hint.URL) != sourceURL {
+			continue
+		}
+		operator := normalizeOperatorID(hint.Operator)
+		pubKey := normalizePeerPubKey(hint.PubKey)
+		if sourceOperatorHintAnchoredByPubKey(sourceURL, pubKeys, operator, pubKey) {
+			return operator
+		}
+	}
+	return fallback
 }
 
 func normalizeSourceOperator(operator string, pubKeys []ed25519.PublicKey, sourceURL string) string {

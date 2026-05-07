@@ -51,6 +51,42 @@ if ! rg -q 'EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST: "\$\{EXIT_ENTRY_ROUTE_AS
   echo "docker-compose entry-exit environment must forward EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST"
   exit 1
 fi
+if ! rg -q 'DIRECTORY_ISSUER_TRUSTED_KEYS_FILE: "\$\{DIRECTORY_ISSUER_TRUSTED_KEYS_FILE:-/app/data/directory_issuer_trusted_keys.txt\}"' "$ROOT_DIR/deploy/docker-compose.yml"; then
+  echo "docker-compose directory environment must forward DIRECTORY_ISSUER_TRUSTED_KEYS_FILE"
+  exit 1
+fi
+if ! rg -q 'DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE: "\$\{DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE:-0\}"' "$ROOT_DIR/deploy/docker-compose.yml"; then
+  echo "docker-compose directory environment must forward provider replay shared-file mode"
+  exit 1
+fi
+if ! rg -q 'EXIT_TOKEN_PROOF_REPLAY_STORE_FILE: "\$\{EXIT_TOKEN_PROOF_REPLAY_STORE_FILE:-\}"' "$ROOT_DIR/deploy/docker-compose.yml"; then
+  echo "docker-compose entry-exit environment must forward EXIT_TOKEN_PROOF_REPLAY_STORE_FILE"
+  exit 1
+fi
+if ! rg -q 'ISSUER_PAYMENT_REPLAY_STORE_FILE: "\$\{ISSUER_PAYMENT_REPLAY_STORE_FILE:-/app/data/issuer_payment_replay.json\}"' "$ROOT_DIR/deploy/docker-compose.yml"; then
+  echo "docker-compose issuer environment must forward ISSUER_PAYMENT_REPLAY_STORE_FILE"
+  exit 1
+fi
+if ! rg -q 'ISSUER_CLIENT_ALLOWLIST_ONLY: "\$\{ISSUER_CLIENT_ALLOWLIST_ONLY:-1\}"' "$ROOT_DIR/deploy/docker-compose.yml"; then
+  echo "docker-compose issuer environment must default ISSUER_CLIENT_ALLOWLIST_ONLY to 1"
+  exit 1
+fi
+if ! rg -q 'ISSUER_ALLOW_ANON_CRED: "\$\{ISSUER_ALLOW_ANON_CRED:-0\}"' "$ROOT_DIR/deploy/docker-compose.yml"; then
+  echo "docker-compose issuer environment must default ISSUER_ALLOW_ANON_CRED to 0"
+  exit 1
+fi
+if [[ "$(rg -c 'SETTLEMENT_CHAIN_ADAPTER: "\$\{SETTLEMENT_CHAIN_ADAPTER:-\}"' "$ROOT_DIR/deploy/docker-compose.yml")" -lt 2 ]]; then
+  echo "docker-compose must forward SETTLEMENT_CHAIN_ADAPTER to issuer and entry-exit services"
+  exit 1
+fi
+if [[ "$(rg -c 'COSMOS_SETTLEMENT_ENDPOINT: "\$\{COSMOS_SETTLEMENT_ENDPOINT:-\}"' "$ROOT_DIR/deploy/docker-compose.yml")" -lt 2 ]]; then
+  echo "docker-compose must forward COSMOS_SETTLEMENT_ENDPOINT to issuer and entry-exit services"
+  exit 1
+fi
+if ! rg -q 'EXIT_EGRESS_BACKEND: "\$\{EXIT_EGRESS_BACKEND:-noop\}"' "$ROOT_DIR/deploy/docker-compose.yml"; then
+  echo "docker-compose entry-exit environment must forward EXIT_EGRESS_BACKEND"
+  exit 1
+fi
 
 backup_file() {
   local src="$1"
@@ -117,6 +153,21 @@ if [[ "${1:-}" == "compose" && "${2:-}" == "version" ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "compose" ]]; then
+  for polluted in \
+    "PROD_STRICT_MODE=0" \
+    "BETA_STRICT_MODE=0" \
+    "MTLS_ENABLE=0" \
+    "SETTLEMENT_CHAIN_ADAPTER=ambient-bad" \
+    "COSMOS_SETTLEMENT_ENDPOINT=https://ambient.invalid" \
+    "EXIT_EGRESS_BACKEND=noop" \
+    "DIRECTORY_ISSUER_TRUSTED_KEYS_FILE=/ambient/bad.txt"; do
+    name="${polluted%%=*}"
+    value="${polluted#*=}"
+    if [[ "${!name-}" == "$value" ]]; then
+      echo "compose env leakage: $name=$value" >&2
+      exit 1
+    fi
+  done
   exit 0
 fi
 if [[ "${1:-}" == "--version" ]]; then
@@ -132,6 +183,14 @@ EOF_DOCKER
 cat >"$TMP_BIN/curl" <<'EOF_CURL'
 #!/usr/bin/env bash
 set -euo pipefail
+for arg in "$@"; do
+  case "$arg" in
+    */v1/pubkeys)
+      echo '{"issuer":"issuer-peer","pub_keys":["AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"]}'
+      exit 0
+      ;;
+  esac
+done
 echo "{}"
 EOF_CURL
 
@@ -153,12 +212,84 @@ EOF_WG
 
 chmod +x "$TMP_BIN/docker" "$TMP_BIN/curl" "$TMP_BIN/wg"
 
-if PATH="$TMP_BIN:$PATH" EASY_NODE_VERIFY_PUBLIC=0 ./scripts/easy_node.sh server-up \
+PROD_ISSUER_TRUST_FILE="$TMP_DIR/prod_issuer_trusted_keys.txt"
+cat >"$PROD_ISSUER_TRUST_FILE" <<'EOF_TRUST'
+peer-a AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE
+peer-b AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI
+EOF_TRUST
+
+if PATH="$TMP_BIN:$PATH" EASY_NODE_VERIFY_PUBLIC=0 \
+  EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE="$PROD_ISSUER_TRUST_FILE" \
+  COSMOS_SETTLEMENT_ENDPOINT="https://cosmos.example.test" \
+  ./scripts/easy_node.sh server-up \
   --mode authority \
   --public-host 203.0.113.10 \
   --prod-profile 1 >/tmp/integration_easy_node_prod_server_env_quorum_fail.log 2>&1; then
   echo "expected prod server-up to fail without peer issuer quorum"
   cat /tmp/integration_easy_node_prod_server_env_quorum_fail.log
+  exit 1
+fi
+if ! grep -q "requires at least 2 issuer URLs" /tmp/integration_easy_node_prod_server_env_quorum_fail.log; then
+  echo "expected prod quorum failure to mention strict issuer URL quorum"
+  cat /tmp/integration_easy_node_prod_server_env_quorum_fail.log
+  exit 1
+fi
+
+if PATH="$TMP_BIN:$PATH" EASY_NODE_VERIFY_PUBLIC=0 \
+  EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE="$PROD_ISSUER_TRUST_FILE" \
+  ./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host 203.0.113.10 \
+  --peer-directories https://198.51.100.20:8081 \
+  --prod-profile 1 >/tmp/integration_easy_node_prod_server_env_missing_cosmos.log 2>&1; then
+  echo "expected prod server-up to fail without COSMOS_SETTLEMENT_ENDPOINT"
+  cat /tmp/integration_easy_node_prod_server_env_missing_cosmos.log
+  exit 1
+fi
+if ! grep -q "requires COSMOS_SETTLEMENT_ENDPOINT" /tmp/integration_easy_node_prod_server_env_missing_cosmos.log; then
+  echo "expected missing-cosmos failure to mention COSMOS_SETTLEMENT_ENDPOINT"
+  cat /tmp/integration_easy_node_prod_server_env_missing_cosmos.log
+  exit 1
+fi
+
+if PATH="$TMP_BIN:$PATH" EASY_NODE_VERIFY_PUBLIC=0 \
+  COSMOS_SETTLEMENT_ENDPOINT="https://cosmos.example.test" \
+  ./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host 203.0.113.10 \
+  --peer-directories https://198.51.100.20:8081 \
+  --prod-profile 1 >/tmp/integration_easy_node_prod_server_env_missing_issuer_trust.log 2>&1; then
+  echo "expected prod server-up to fail without issuer trust anchors"
+  cat /tmp/integration_easy_node_prod_server_env_missing_issuer_trust.log
+  exit 1
+fi
+if ! grep -q "requires EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE" /tmp/integration_easy_node_prod_server_env_missing_issuer_trust.log; then
+  echo "expected missing-issuer-trust failure to mention trust anchor file"
+  cat /tmp/integration_easy_node_prod_server_env_missing_issuer_trust.log
+  exit 1
+fi
+
+INVALID_PROD_ISSUER_TRUST_FILE="$TMP_DIR/prod_issuer_trusted_keys_invalid.txt"
+cat >"$INVALID_PROD_ISSUER_TRUST_FILE" <<'EOF_INVALID_TRUST'
+peer-a AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE
+peer-b not-a-valid-ed25519-key
+EOF_INVALID_TRUST
+
+if PATH="$TMP_BIN:$PATH" EASY_NODE_VERIFY_PUBLIC=0 \
+  EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE="$INVALID_PROD_ISSUER_TRUST_FILE" \
+  EASY_NODE_COSMOS_SETTLEMENT_ENDPOINT="https://cosmos.example.test" \
+  ./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host 203.0.113.10 \
+  --peer-directories https://198.51.100.20:8081 \
+  --prod-profile 1 >/tmp/integration_easy_node_prod_server_env_invalid_issuer_trust.log 2>&1; then
+  echo "expected prod server-up to fail on invalid issuer trust anchor key"
+  cat /tmp/integration_easy_node_prod_server_env_invalid_issuer_trust.log
+  exit 1
+fi
+if ! grep -q "invalid Ed25519 public key" /tmp/integration_easy_node_prod_server_env_invalid_issuer_trust.log; then
+  echo "expected invalid-issuer-trust failure to mention invalid Ed25519 public key"
+  cat /tmp/integration_easy_node_prod_server_env_invalid_issuer_trust.log
   exit 1
 fi
 
@@ -185,6 +316,17 @@ require_nonempty() {
   if [[ -z "$got" ]]; then
     echo "missing expected $label"
     cat /tmp/integration_easy_node_prod_server_env.log
+    exit 1
+  fi
+}
+
+require_log_contains() {
+  local log_path="$1"
+  local pattern="$2"
+  local label="$3"
+  if ! rg -q "$pattern" "$log_path"; then
+    echo "missing expected $label"
+    cat "$log_path"
     exit 1
   fi
 }
@@ -221,8 +363,51 @@ require_nonempty "$(env_value "$AUTH_ENV" "ENTRY_ROUTE_ASSERTION_PUBLIC_KEY")" "
 require_eq "$(env_value "$AUTH_ENV" "EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS")" "$(env_value "$AUTH_ENV" "ENTRY_ROUTE_ASSERTION_PUBLIC_KEY")" "beta authority EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS"
 require_eq "$(env_value "$AUTH_ENV" "EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST")" "1" "beta authority EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST"
 require_eq "$(env_value "$AUTH_ENV" "ISSUER_URLS")" "http://issuer:8082,http://198.51.100.20:8082" "beta authority ISSUER_URLS"
+require_eq "$(env_value "$AUTH_ENV" "ISSUER_CLIENT_ALLOWLIST_ONLY")" "1" "beta authority ISSUER_CLIENT_ALLOWLIST_ONLY"
+require_eq "$(env_value "$AUTH_ENV" "ISSUER_ALLOW_ANON_CRED")" "0" "beta authority ISSUER_ALLOW_ANON_CRED"
 require_eq "$(env_value "$AUTH_ENV" "ENTRY_EXIT_USER")" "0:0" "beta authority ENTRY_EXIT_USER"
 require_eq "$(env_value "$AUTH_ENV" "ENTRY_EXIT_PRIVILEGED")" "true" "beta authority ENTRY_EXIT_PRIVILEGED"
+require_log_contains /tmp/integration_easy_node_prod_server_env_beta.log 'server WG runtime check: ok' "beta authority WG runtime check"
+
+if PATH="$TMP_BIN:$PATH" \
+  EASY_NODE_VERIFY_PUBLIC=0 \
+  EASY_NODE_ENTRY_ROUTE_ASSERTION_KEYGEN=openssl \
+  ./scripts/easy_node.sh server-up \
+    --mode authority \
+    --public-host 203.0.113.10 \
+    --peer-directories http://198.51.100.20:8081 \
+    --beta-profile 1 \
+    --prod-profile 0 \
+    --client-allowlist 0 >/tmp/integration_easy_node_prod_server_env_beta_open_allowlist.log 2>&1; then
+  echo "expected beta authority server-up to reject open client allowlist"
+  cat /tmp/integration_easy_node_prod_server_env_beta_open_allowlist.log
+  exit 1
+fi
+if ! rg -q 'requires --client-allowlist 1' /tmp/integration_easy_node_prod_server_env_beta_open_allowlist.log; then
+  echo "missing expected beta allowlist rejection diagnostic"
+  cat /tmp/integration_easy_node_prod_server_env_beta_open_allowlist.log
+  exit 1
+fi
+
+if PATH="$TMP_BIN:$PATH" \
+  EASY_NODE_VERIFY_PUBLIC=0 \
+  EASY_NODE_ENTRY_ROUTE_ASSERTION_KEYGEN=openssl \
+  ./scripts/easy_node.sh server-up \
+    --mode authority \
+    --public-host 203.0.113.10 \
+    --peer-directories http://198.51.100.20:8081 \
+    --beta-profile 1 \
+    --prod-profile 0 \
+    --allow-anon-cred 1 >/tmp/integration_easy_node_prod_server_env_beta_anon_cred.log 2>&1; then
+  echo "expected beta authority server-up to reject anonymous credentials"
+  cat /tmp/integration_easy_node_prod_server_env_beta_anon_cred.log
+  exit 1
+fi
+if ! rg -q 'requires --allow-anon-cred 0' /tmp/integration_easy_node_prod_server_env_beta_anon_cred.log; then
+  echo "missing expected beta anonymous credential rejection diagnostic"
+  cat /tmp/integration_easy_node_prod_server_env_beta_anon_cred.log
+  exit 1
+fi
 
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \
@@ -260,9 +445,19 @@ require_eq "$(env_value "$PROVIDER_ENV" "EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TR
 require_eq "$(env_value "$PROVIDER_ENV" "ISSUER_URLS")" "http://203.0.113.10:8082" "beta provider ISSUER_URLS"
 require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_EXIT_USER")" "0:0" "beta provider ENTRY_EXIT_USER"
 require_eq "$(env_value "$PROVIDER_ENV" "ENTRY_EXIT_PRIVILEGED")" "true" "beta provider ENTRY_EXIT_PRIVILEGED"
+require_log_contains /tmp/integration_easy_node_prod_server_env_provider_beta.log 'server WG runtime check: ok' "beta provider WG runtime check"
 
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \
+EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE="$PROD_ISSUER_TRUST_FILE" \
+EASY_NODE_COSMOS_SETTLEMENT_ENDPOINT="https://cosmos.example.test" \
+PROD_STRICT_MODE=0 \
+BETA_STRICT_MODE=0 \
+MTLS_ENABLE=0 \
+SETTLEMENT_CHAIN_ADAPTER=ambient-bad \
+COSMOS_SETTLEMENT_ENDPOINT="https://ambient.invalid" \
+EXIT_EGRESS_BACKEND=noop \
+DIRECTORY_ISSUER_TRUSTED_KEYS_FILE=/ambient/bad.txt \
 ./scripts/easy_node.sh server-up \
   --mode authority \
   --public-host 203.0.113.10 \
@@ -315,9 +510,37 @@ require_eq "$(env_value "$AUTH_ENV" "DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCES")"
 require_eq "$(env_value "$AUTH_ENV" "DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO")" "0.67" "DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO"
 require_eq "$(env_value "$AUTH_ENV" "DIRECTORY_DISPUTE_MAX_TTL_SEC")" "259200" "DIRECTORY_DISPUTE_MAX_TTL_SEC"
 require_eq "$(env_value "$AUTH_ENV" "DIRECTORY_APPEAL_MAX_TTL_SEC")" "259200" "DIRECTORY_APPEAL_MAX_TTL_SEC"
+require_eq "$(env_value "$AUTH_ENV" "DIRECTORY_KEY_ROTATE_SEC")" "2592000" "DIRECTORY_KEY_ROTATE_SEC"
+require_eq "$(env_value "$AUTH_ENV" "DIRECTORY_KEY_HISTORY")" "12" "DIRECTORY_KEY_HISTORY"
+require_eq "$(env_value "$AUTH_ENV" "DIRECTORY_ISSUER_TRUSTED_KEYS_FILE")" "/app/data/directory_issuer_trusted_keys.txt" "DIRECTORY_ISSUER_TRUSTED_KEYS_FILE"
+require_eq "$(env_value "$AUTH_ENV" "DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE")" "1" "DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE"
+require_eq "$(env_value "$AUTH_ENV" "DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE")" "/app/data/directory_provider_token_proof_replay.json" "DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE"
+require_eq "$(env_value "$AUTH_ENV" "SETTLEMENT_CHAIN_ADAPTER")" "cosmos" "SETTLEMENT_CHAIN_ADAPTER"
+require_eq "$(env_value "$AUTH_ENV" "COSMOS_SETTLEMENT_ENDPOINT")" "https://cosmos.example.test" "COSMOS_SETTLEMENT_ENDPOINT"
+require_eq "$(env_value "$AUTH_ENV" "COSMOS_SETTLEMENT_SUBMIT_MODE")" "http" "COSMOS_SETTLEMENT_SUBMIT_MODE"
+require_eq "$(env_value "$AUTH_ENV" "ISSUER_REQUIRE_PAYMENT_PROOF")" "1" "ISSUER_REQUIRE_PAYMENT_PROOF"
+require_eq "$(env_value "$AUTH_ENV" "ISSUER_CLIENT_ALLOWLIST_ONLY")" "1" "ISSUER_CLIENT_ALLOWLIST_ONLY"
+require_eq "$(env_value "$AUTH_ENV" "ISSUER_ALLOW_ANON_CRED")" "0" "ISSUER_ALLOW_ANON_CRED"
+expected_issuer_replay="/app/data/issuer_$(env_value "$AUTH_ENV" "ISSUER_ID")_payment_replay.json"
+require_eq "$(env_value "$AUTH_ENV" "ISSUER_PAYMENT_REPLAY_STORE_FILE")" "$expected_issuer_replay" "ISSUER_PAYMENT_REPLAY_STORE_FILE"
+require_eq "$(env_value "$AUTH_ENV" "ISSUER_KEY_ROTATE_SEC")" "2592000" "ISSUER_KEY_ROTATE_SEC"
+require_eq "$(env_value "$AUTH_ENV" "ISSUER_KEY_HISTORY")" "12" "ISSUER_KEY_HISTORY"
+require_eq "$(env_value "$AUTH_ENV" "EXIT_TOKEN_PROOF_REPLAY_STORE_FILE")" "/app/data/exit_token_proof_replay.json" "EXIT_TOKEN_PROOF_REPLAY_STORE_FILE"
+require_eq "$(env_value "$AUTH_ENV" "EXIT_EGRESS_BACKEND")" "command" "EXIT_EGRESS_BACKEND"
+require_eq "$(env_value "$AUTH_ENV" "EXIT_ISSUER_MIN_KEY_VOTES")" "2" "EXIT_ISSUER_MIN_KEY_VOTES"
+require_log_contains /tmp/integration_easy_node_prod_server_env.log 'server WG runtime check: ok' "prod authority WG runtime check"
 
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \
+EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE="$PROD_ISSUER_TRUST_FILE" \
+EASY_NODE_COSMOS_SETTLEMENT_ENDPOINT="https://cosmos.example.test" \
+PROD_STRICT_MODE=0 \
+BETA_STRICT_MODE=0 \
+MTLS_ENABLE=0 \
+SETTLEMENT_CHAIN_ADAPTER=ambient-bad \
+COSMOS_SETTLEMENT_ENDPOINT="https://ambient.invalid" \
+EXIT_EGRESS_BACKEND=noop \
+DIRECTORY_ISSUER_TRUSTED_KEYS_FILE=/ambient/bad.txt \
 ./scripts/easy_node.sh server-up \
   --mode provider \
   --public-host 198.51.100.20 \
@@ -371,5 +594,17 @@ require_eq "$(env_value "$PROVIDER_ENV" "DIRECTORY_FINAL_ADJUDICATION_MIN_SOURCE
 require_eq "$(env_value "$PROVIDER_ENV" "DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO")" "0.67" "provider DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO"
 require_eq "$(env_value "$PROVIDER_ENV" "DIRECTORY_DISPUTE_MAX_TTL_SEC")" "259200" "provider DIRECTORY_DISPUTE_MAX_TTL_SEC"
 require_eq "$(env_value "$PROVIDER_ENV" "DIRECTORY_APPEAL_MAX_TTL_SEC")" "259200" "provider DIRECTORY_APPEAL_MAX_TTL_SEC"
+require_eq "$(env_value "$PROVIDER_ENV" "DIRECTORY_KEY_ROTATE_SEC")" "2592000" "provider DIRECTORY_KEY_ROTATE_SEC"
+require_eq "$(env_value "$PROVIDER_ENV" "DIRECTORY_KEY_HISTORY")" "12" "provider DIRECTORY_KEY_HISTORY"
+require_eq "$(env_value "$PROVIDER_ENV" "DIRECTORY_ISSUER_TRUSTED_KEYS_FILE")" "/app/data/directory_issuer_trusted_keys.txt" "provider DIRECTORY_ISSUER_TRUSTED_KEYS_FILE"
+require_eq "$(env_value "$PROVIDER_ENV" "DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE")" "1" "provider DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE"
+require_eq "$(env_value "$PROVIDER_ENV" "DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE")" "/app/data/directory_provider_token_proof_replay.json" "provider DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE"
+require_eq "$(env_value "$PROVIDER_ENV" "SETTLEMENT_CHAIN_ADAPTER")" "cosmos" "provider SETTLEMENT_CHAIN_ADAPTER"
+require_eq "$(env_value "$PROVIDER_ENV" "COSMOS_SETTLEMENT_ENDPOINT")" "https://cosmos.example.test" "provider COSMOS_SETTLEMENT_ENDPOINT"
+require_eq "$(env_value "$PROVIDER_ENV" "COSMOS_SETTLEMENT_SUBMIT_MODE")" "http" "provider COSMOS_SETTLEMENT_SUBMIT_MODE"
+require_eq "$(env_value "$PROVIDER_ENV" "EXIT_TOKEN_PROOF_REPLAY_STORE_FILE")" "/app/data/exit_token_proof_replay.json" "provider EXIT_TOKEN_PROOF_REPLAY_STORE_FILE"
+require_eq "$(env_value "$PROVIDER_ENV" "EXIT_EGRESS_BACKEND")" "command" "provider EXIT_EGRESS_BACKEND"
+require_eq "$(env_value "$PROVIDER_ENV" "EXIT_ISSUER_MIN_KEY_VOTES")" "2" "provider EXIT_ISSUER_MIN_KEY_VOTES"
+require_log_contains /tmp/integration_easy_node_prod_server_env_provider.log 'server WG runtime check: ok' "prod provider WG runtime check"
 
 echo "easy-node prod authority/provider env integration check ok"

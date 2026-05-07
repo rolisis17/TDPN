@@ -157,6 +157,20 @@ do
   fi
 done
 
+echo "[linux-desktop-installer-guardrails] public installer/Admin Console separation markers are present"
+for marker in \
+  "is_admin_console_installer_path()" \
+  "assert_public_installer_artifact_not_admin_console()" \
+  "assert_public_launch_target_not_admin_console()" \
+  "public desktop installer refuses Admin Console artifact" \
+  "public desktop installer refuses Admin Console launch target"
+do
+  if ! grep -Fq -- "$marker" "$SCRIPT_UNDER_TEST"; then
+    echo "linux desktop installer guardrails failed: missing required Admin Console separation marker in script: $marker"
+    exit 1
+  fi
+done
+
 echo "[linux-desktop-installer-guardrails] --help passes and includes usage line"
 run_expect_pass \
   "help_pass" \
@@ -216,6 +230,48 @@ if [[ ! -f "$MISSING_SUMMARY_JSON" ]]; then
 fi
 assert_json_predicate "$MISSING_SUMMARY_JSON" '.status == "fail"' "missing-path status"
 assert_json_predicate "$MISSING_SUMMARY_JSON" '.failure_stage == "resolve"' "missing-path failure_stage"
+
+ADMIN_APPIMAGE_PATH="$TMP_DIR/GPM Admin Console.AppImage"
+ADMIN_SUMMARY_JSON="$TMP_DIR/admin_console_installer_summary.json"
+printf '%s\n' "fake admin console appimage artifact for rejection guardrails" >"$ADMIN_APPIMAGE_PATH"
+echo "[linux-desktop-installer-guardrails] explicit Admin Console installer artifact is rejected"
+run_expect_fail_regex \
+  "explicit_admin_console_installer_fail" \
+  "public desktop installer refuses Admin Console artifact" \
+  "$SCRIPT_UNDER_TEST" \
+    --installer-path "$ADMIN_APPIMAGE_PATH" \
+    --installer-type appimage \
+    --dry-run \
+    --summary-json "$ADMIN_SUMMARY_JSON" \
+    --print-summary-json 0
+if [[ ! -f "$ADMIN_SUMMARY_JSON" ]]; then
+  echo "linux desktop installer guardrails failed: missing summary json for Admin Console artifact rejection"
+  exit 1
+fi
+assert_json_predicate "$ADMIN_SUMMARY_JSON" '.status == "fail"' "admin-console status"
+assert_json_predicate "$ADMIN_SUMMARY_JSON" '.failure_stage == "resolve"' "admin-console failure_stage"
+
+ADMIN_LAUNCH_PATH="$TMP_DIR/GPM Admin Console"
+ADMIN_LAUNCH_SUMMARY_JSON="$TMP_DIR/admin_console_launch_target_summary.json"
+printf '%s\n' "fake admin console executable for launch-target rejection guardrails" >"$ADMIN_LAUNCH_PATH"
+echo "[linux-desktop-installer-guardrails] public installer rejects Admin Console launch target override"
+run_expect_fail_regex \
+  "explicit_admin_console_launch_target_fail" \
+  "public desktop installer refuses Admin Console launch target" \
+  "$SCRIPT_UNDER_TEST" \
+    --installer-path "$FAKE_APPIMAGE_PATH" \
+    --installer-type appimage \
+    --dry-run \
+    --launch-after-install 1 \
+    --installed-executable "$ADMIN_LAUNCH_PATH" \
+    --summary-json "$ADMIN_LAUNCH_SUMMARY_JSON" \
+    --print-summary-json 0
+if [[ ! -f "$ADMIN_LAUNCH_SUMMARY_JSON" ]]; then
+  echo "linux desktop installer guardrails failed: missing summary json for Admin Console launch-target rejection"
+  exit 1
+fi
+assert_json_predicate "$ADMIN_LAUNCH_SUMMARY_JSON" '.status == "fail"' "admin-console launch-target status"
+assert_json_predicate "$ADMIN_LAUNCH_SUMMARY_JSON" '.failure_stage == "resolve"' "admin-console launch-target failure_stage"
 
 INVALID_TYPE_SUMMARY_JSON="$TMP_DIR/invalid_type_summary.json"
 echo "[linux-desktop-installer-guardrails] invalid installer type fails with clear error"

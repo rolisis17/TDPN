@@ -44,17 +44,25 @@ const (
 	hostResolveTimeout      = 2 * time.Second
 	allowUnauthLoopbackEnv  = "LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK"
 	allowInsecureHTTPEnv    = "LOCAL_CONTROL_API_ALLOW_INSECURE_REMOTE_HTTP"
+	authTokenEnv            = "LOCAL_CONTROL_API_AUTH_TOKEN"
 	maxCommandsEnv          = "LOCAL_CONTROL_API_MAX_CONCURRENT_COMMANDS"
 	maxInviteKeyLen         = 512
 	maxGitRemoteNameLen     = 64
 	maxGitBranchNameLen     = 255
 	gpmStaleLaunchStatusTTL = 10 * time.Second
+	minRemoteAuthTokenLen   = 32
 )
 
 var vpnInterfaceNamePattern = regexp.MustCompile(`^wg[a-zA-Z0-9_.-]{0,13}$`)
 var gitRemoteNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$`)
 var errCommandConcurrencySaturated = errors.New("local api command concurrency limit reached")
 var errLifecycleCommandRejected = errors.New("lifecycle command rejected")
+var weakRemoteAuthTokens = map[string]struct{}{
+	"token":         {},
+	"default-token": {},
+	"secret-token":  {},
+	"change-me":     {},
+}
 var evalSymlinksPath = filepath.EvalSymlinks
 var lookupIPAddr = func(ctx context.Context, host string) ([]net.IPAddr, error) {
 	return net.DefaultResolver.LookupIPAddr(ctx, host)
@@ -264,7 +272,7 @@ func New() *Service {
 	allowUpdate := strings.TrimSpace(os.Getenv("LOCAL_CONTROL_API_ALLOW_UPDATE")) == "1"
 	allowUnauthLoopback := parseBoolWithDefault(os.Getenv(allowUnauthLoopbackEnv), false)
 	allowInsecureHTTP := parseBoolWithDefault(os.Getenv(allowInsecureHTTPEnv), false)
-	authToken := strings.TrimSpace(os.Getenv("LOCAL_CONTROL_API_AUTH_TOKEN"))
+	authToken := strings.TrimSpace(os.Getenv(authTokenEnv))
 	serviceStatus := strings.TrimSpace(os.Getenv("LOCAL_CONTROL_API_SERVICE_STATUS_COMMAND"))
 	serviceStart := strings.TrimSpace(os.Getenv("LOCAL_CONTROL_API_SERVICE_START_COMMAND"))
 	serviceStop := strings.TrimSpace(os.Getenv("LOCAL_CONTROL_API_SERVICE_STOP_COMMAND"))
@@ -1116,8 +1124,13 @@ func (s *Service) registerAdminRoutes(mux *http.ServeMux) {
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	if !isLoopbackBindAddr(s.addr) && !s.allowInsecureHTTP {
-		return fmt.Errorf("refusing insecure non-loopback local api bind %q; set %s=1 only for trusted lab environments", s.addr, allowInsecureHTTPEnv)
+	if !isLoopbackBindAddr(s.addr) {
+		if !s.allowInsecureHTTP {
+			return fmt.Errorf("refusing insecure non-loopback local api bind %q; set %s=1 only for trusted lab environments", s.addr, allowInsecureHTTPEnv)
+		}
+		if err := validateRemoteAuthToken(s.authToken); err != nil {
+			return fmt.Errorf("refusing insecure non-loopback local api bind %q: %w", s.addr, err)
+		}
 	}
 
 	srv := &http.Server{
@@ -4479,11 +4492,7 @@ func (s *Service) requireMutationAuth(w http.ResponseWriter, r *http.Request) bo
 		}
 		return true
 	}
-	if expected == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{
-			"ok":    false,
-			"error": "local api auth token not configured (set LOCAL_CONTROL_API_AUTH_TOKEN or LOCAL_CONTROL_API_ALLOW_UNAUTH_LOOPBACK=1 for developer loopback mode)",
-		})
+	if !s.validateConfiguredAuthToken(w, expected) {
 		return false
 	}
 	provided := parseBearerToken(r.Header.Get("Authorization"))
@@ -4504,6 +4513,18 @@ func (s *Service) requireCommandReadAuth(w http.ResponseWriter, r *http.Request)
 		}
 		return true
 	}
+	if !s.validateConfiguredAuthToken(w, expected) {
+		return false
+	}
+	provided := parseBearerToken(r.Header.Get("Authorization"))
+	if !constantTimeTokenEqual(expected, provided) {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "unauthorized"})
+		return false
+	}
+	return true
+}
+
+func (s *Service) validateConfiguredAuthToken(w http.ResponseWriter, expected string) bool {
 	if expected == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{
 			"ok":    false,
@@ -4511,10 +4532,14 @@ func (s *Service) requireCommandReadAuth(w http.ResponseWriter, r *http.Request)
 		})
 		return false
 	}
-	provided := parseBearerToken(r.Header.Get("Authorization"))
-	if !constantTimeTokenEqual(expected, provided) {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "unauthorized"})
-		return false
+	if !isLoopbackBindAddr(s.addr) {
+		if err := validateRemoteAuthToken(expected); err != nil {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{
+				"ok":    false,
+				"error": "local api auth token is too weak for non-loopback bind: " + err.Error(),
+			})
+			return false
+		}
 	}
 	return true
 }
@@ -4570,6 +4595,26 @@ func parseBearerToken(raw string) string {
 		return ""
 	}
 	return strings.TrimSpace(parts[1])
+}
+
+func validateRemoteAuthToken(token string) error {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return fmt.Errorf("%s must be set for non-loopback binds", authTokenEnv)
+	}
+	normalized := strings.ToLower(token)
+	if _, weak := weakRemoteAuthTokens[normalized]; weak {
+		return fmt.Errorf("%s must not use a known weak/default bearer token for non-loopback binds", authTokenEnv)
+	}
+	if len(token) < minRemoteAuthTokenLen {
+		return fmt.Errorf("%s must be at least %d characters for non-loopback binds", authTokenEnv, minRemoteAuthTokenLen)
+	}
+	if strings.ContainsFunc(token, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	}) {
+		return fmt.Errorf("%s must not contain whitespace/control characters", authTokenEnv)
+	}
+	return nil
 }
 
 func gpmSessionTokenFromRequest(r *http.Request, explicit string) string {

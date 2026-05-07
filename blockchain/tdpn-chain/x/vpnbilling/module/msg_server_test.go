@@ -129,6 +129,90 @@ func TestMsgServerReserveCreditsConflictPropagation(t *testing.T) {
 	}
 }
 
+func TestMsgServerConfirmReservationHappyPathAndReplay(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	reservation := types.CreditReservation{
+		ReservationID: "res-confirm-1",
+		SponsorID:     "sponsor-confirm-1",
+		SessionID:     "sess-confirm-1",
+		AssetDenom:    "uusdc",
+		Amount:        150,
+	}
+	if _, err := server.ReserveCredits(ReserveCreditsRequest{Reservation: reservation}); err != nil {
+		t.Fatalf("reserve failed: %v", err)
+	}
+
+	resp, err := server.ConfirmReservation(ConfirmReservationRequest{Reservation: reservation})
+	if err != nil {
+		t.Fatalf("confirm failed: %v", err)
+	}
+	if !resp.Existed {
+		t.Fatal("expected existed=true for seeded reservation")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false on first confirmation")
+	}
+	if resp.Reservation.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected confirmed status, got %q", resp.Reservation.Status)
+	}
+
+	replay, err := server.ConfirmReservation(ConfirmReservationRequest{Reservation: reservation})
+	if err != nil {
+		t.Fatalf("confirm replay failed: %v", err)
+	}
+	if !replay.Existed {
+		t.Fatal("expected existed=true on confirmation replay")
+	}
+	if !replay.Idempotent {
+		t.Fatal("expected idempotent=true on confirmation replay")
+	}
+}
+
+func TestMsgServerConfirmReservationRejectsMissingAndConflictingReservation(t *testing.T) {
+	t.Parallel()
+
+	k := keeper.NewKeeper()
+	server := NewMsgServer(&k)
+
+	missing := types.CreditReservation{
+		ReservationID: "res-confirm-missing",
+		SponsorID:     "sponsor-confirm-missing",
+		SessionID:     "sess-confirm-missing",
+		AssetDenom:    "uusdc",
+		Amount:        10,
+	}
+	if _, err := server.ConfirmReservation(ConfirmReservationRequest{Reservation: missing}); !errors.Is(err, ErrReservationNotFound) {
+		t.Fatalf("expected ErrReservationNotFound, got %v", err)
+	}
+
+	seed := types.CreditReservation{
+		ReservationID: "res-confirm-conflict",
+		SponsorID:     "sponsor-confirm-conflict",
+		SessionID:     "sess-confirm-conflict",
+		AssetDenom:    "uusdc",
+		Amount:        25,
+	}
+	if _, err := server.ReserveCredits(ReserveCreditsRequest{Reservation: seed}); err != nil {
+		t.Fatalf("reserve failed: %v", err)
+	}
+	conflict := seed
+	conflict.Amount = 26
+	resp, err := server.ConfirmReservation(ConfirmReservationRequest{Reservation: conflict})
+	if !errors.Is(err, ErrReservationConflict) {
+		t.Fatalf("expected ErrReservationConflict, got %v", err)
+	}
+	if !resp.Existed {
+		t.Fatal("expected existed=true on confirmation conflict")
+	}
+	if resp.Idempotent {
+		t.Fatal("expected idempotent=false on confirmation conflict")
+	}
+}
+
 func TestMsgServerFinalizeUsageHappyPath(t *testing.T) {
 	t.Parallel()
 

@@ -24,6 +24,8 @@ import (
 	"privacynode/pkg/settlement"
 )
 
+const strongLocalAPIAuthToken = "localapi-test-token-1234567890abcdef"
+
 type fakeFileInfo struct {
 	name string
 	mode os.FileMode
@@ -2190,6 +2192,44 @@ func TestRunRejectsInsecureNonLoopbackBindByDefault(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), allowInsecureHTTPEnv) {
 		t.Fatalf("expected error to mention %s, got %v", allowInsecureHTTPEnv, err)
+	}
+}
+
+func TestRunRejectsWeakRemoteAuthTokensWhenInsecureHTTPAllowed(t *testing.T) {
+	tests := []struct {
+		name      string
+		authToken string
+		wantError string
+	}{
+		{name: "empty", authToken: "", wantError: "must be set"},
+		{name: "token", authToken: "token", wantError: "weak/default"},
+		{name: "default-token", authToken: "default-token", wantError: "weak/default"},
+		{name: "secret-token", authToken: "secret-token", wantError: "weak/default"},
+		{name: "change-me", authToken: "change-me", wantError: "weak/default"},
+		{name: "short", authToken: "short-random-token-123", wantError: "at least"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := newFakeService(t, false)
+			svc.addr = "0.0.0.0:8095"
+			svc.allowInsecureHTTP = true
+			svc.authToken = tc.authToken
+
+			err := svc.Run(context.Background())
+			if err == nil {
+				t.Fatal("expected weak remote auth token to be rejected")
+			}
+			errText := err.Error()
+			if !strings.Contains(errText, "refusing insecure non-loopback local api bind") {
+				t.Fatalf("expected non-loopback bind rejection, got %v", err)
+			}
+			if !strings.Contains(errText, authTokenEnv) {
+				t.Fatalf("expected error to mention %s, got %v", authTokenEnv, err)
+			}
+			if !strings.Contains(errText, tc.wantError) {
+				t.Fatalf("expected error to contain %q, got %v", tc.wantError, err)
+			}
+		})
 	}
 }
 
@@ -5151,7 +5191,7 @@ func TestHandleConfig(t *testing.T) {
 	t.Run("success payload includes expected config hints", func(t *testing.T) {
 		svc, _ := newFakeService(t, true)
 		svc.addr = "0.0.0.0:8095"
-		svc.authToken = "cfg-secret"
+		svc.authToken = strongLocalAPIAuthToken
 		svc.gpmConnectRequireSession = true
 		svc.gpmAllowLegacyConnectOverride = true
 		svc.gpmOperatorApprovalRequireSession = true
@@ -5196,7 +5236,7 @@ func TestHandleConfig(t *testing.T) {
 		svc.commandTimeout = 150 * time.Second
 
 		code, payload := callJSONHandlerWithHeaders(t, svc.handleConfig, http.MethodGet, "/v1/config", "", map[string]string{
-			"Authorization": "Bearer cfg-secret",
+			"Authorization": "Bearer " + strongLocalAPIAuthToken,
 		})
 		if code != http.StatusOK {
 			t.Fatalf("status=%d body=%v", code, payload)
@@ -5514,7 +5554,7 @@ func TestHandleConfig(t *testing.T) {
 	t.Run("auth required semantics match command-read policy", func(t *testing.T) {
 		svc, _ := newFakeService(t, false)
 		svc.addr = "0.0.0.0:8095"
-		svc.authToken = "read-secret"
+		svc.authToken = strongLocalAPIAuthToken
 
 		code, payload := callJSONHandler(t, svc.handleConfig, http.MethodGet, "/v1/config", "")
 		if code != http.StatusUnauthorized {
@@ -5525,7 +5565,7 @@ func TestHandleConfig(t *testing.T) {
 		}
 
 		code, payload = callJSONHandlerWithHeaders(t, svc.handleConfig, http.MethodGet, "/v1/config", "", map[string]string{
-			"Authorization": "Bearer read-secret",
+			"Authorization": "Bearer " + strongLocalAPIAuthToken,
 		})
 		if code != http.StatusOK {
 			t.Fatalf("status=%d body=%v", code, payload)
@@ -5851,7 +5891,7 @@ func TestServiceLifecycleMutationAuthRequired(t *testing.T) {
 	t.Run("valid bearer token allows lifecycle handlers", func(t *testing.T) {
 		svc, _ := newFakeService(t, false)
 		svc.addr = "0.0.0.0:8095"
-		svc.authToken = "service-secret"
+		svc.authToken = strongLocalAPIAuthToken
 		svc.serviceStart = lifecycleSuccessCommand("start-ok")
 		svc.serviceStop = lifecycleSuccessCommand("stop-ok")
 		svc.serviceRestart = lifecycleSuccessCommand("restart-ok")
@@ -5877,7 +5917,7 @@ func TestServiceLifecycleMutationAuthRequired(t *testing.T) {
 				}
 
 				code, payload = callJSONHandlerWithHeaders(t, tc.handler, http.MethodPost, tc.target, "", map[string]string{
-					"Authorization": "Bearer service-secret",
+					"Authorization": "Bearer " + strongLocalAPIAuthToken,
 				})
 				if code != http.StatusOK {
 					t.Fatalf("status=%d body=%v", code, payload)
@@ -6539,10 +6579,37 @@ func TestMutationAuthGuard(t *testing.T) {
 		}
 	})
 
+	t.Run("non-loopback rejects weak configured bearer tokens before mutation", func(t *testing.T) {
+		weakTokens := []string{
+			"token",
+			"default-token",
+			"secret-token",
+			"change-me",
+			"short-random-token-123",
+		}
+		for _, weakToken := range weakTokens {
+			t.Run(weakToken, func(t *testing.T) {
+				svc, _ := newFakeService(t, false)
+				svc.addr = "0.0.0.0:8095"
+				svc.authToken = weakToken
+
+				code, payload := callJSONHandlerWithHeaders(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", "", map[string]string{
+					"Authorization": "Bearer " + weakToken,
+				})
+				if code != http.StatusUnauthorized {
+					t.Fatalf("status=%d body=%v", code, payload)
+				}
+				if got, _ := payload["error"].(string); !strings.Contains(got, "too weak") {
+					t.Fatalf("error=%q want weak-token rejection", got)
+				}
+			})
+		}
+	})
+
 	t.Run("non-loopback rejects missing or invalid bearer token", func(t *testing.T) {
 		svc, _ := newFakeService(t, false)
 		svc.addr = "0.0.0.0:8095"
-		svc.authToken = "secret-token"
+		svc.authToken = strongLocalAPIAuthToken
 
 		code, payload := callJSONHandler(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", "")
 		if code != http.StatusUnauthorized {
@@ -6563,25 +6630,25 @@ func TestMutationAuthGuard(t *testing.T) {
 	t.Run("non-loopback accepts valid bearer token on mutating endpoints", func(t *testing.T) {
 		svc, _ := newFakeService(t, true)
 		svc.addr = "0.0.0.0:8095"
-		svc.authToken = "secret-token"
+		svc.authToken = strongLocalAPIAuthToken
 		adminToken := seedGPMAdminTestSession(t, svc, "gpm-bearer-admin", "cosmos1beareradmin")
 
 		code, payload := callJSONHandlerWithHeaders(t, svc.handleDisconnect, http.MethodPost, "/v1/disconnect", "", map[string]string{
-			"Authorization": "Bearer secret-token",
+			"Authorization": "Bearer " + strongLocalAPIAuthToken,
 		})
 		if code != http.StatusOK {
 			t.Fatalf("disconnect status=%d body=%v", code, payload)
 		}
 
 		code, payload = callJSONHandlerWithHeaders(t, svc.handleSetProfile, http.MethodPost, "/v1/set_profile", `{"path_profile":"2hop","session_token":"`+adminToken+`"}`, map[string]string{
-			"Authorization": "Bearer secret-token",
+			"Authorization": "Bearer " + strongLocalAPIAuthToken,
 		})
 		if code != http.StatusOK {
 			t.Fatalf("set_profile status=%d body=%v", code, payload)
 		}
 
 		code, payload = callJSONHandlerWithHeaders(t, svc.handleUpdate, http.MethodPost, "/v1/update", `{"session_token":"`+adminToken+`"}`, map[string]string{
-			"Authorization": "Bearer secret-token",
+			"Authorization": "Bearer " + strongLocalAPIAuthToken,
 		})
 		if code != http.StatusOK {
 			t.Fatalf("update status=%d body=%v", code, payload)
@@ -6726,7 +6793,7 @@ func TestCommandBackedReadAuthGuard(t *testing.T) {
 	t.Run("valid bearer token allows command-backed reads on non-loopback", func(t *testing.T) {
 		svc, _ := newFakeService(t, false)
 		svc.addr = "0.0.0.0:8095"
-		svc.authToken = "read-secret"
+		svc.authToken = strongLocalAPIAuthToken
 		svc.serviceStatus = "echo service-running"
 
 		cases := []struct {
@@ -6749,7 +6816,7 @@ func TestCommandBackedReadAuthGuard(t *testing.T) {
 				}
 
 				code, payload = callJSONHandlerWithHeaders(t, tc.handler, http.MethodGet, tc.path, "", map[string]string{
-					"Authorization": "Bearer read-secret",
+					"Authorization": "Bearer " + strongLocalAPIAuthToken,
 				})
 				if code != http.StatusOK {
 					t.Fatalf("status=%d body=%v", code, payload)

@@ -183,6 +183,7 @@ func main() {
 		TrustedBridgeFinality: true,
 		RewardProofAuthToken: os.Getenv("COSMOS_BRIDGE_REWARD_PROOF_TOKEN"),
 		FinalityAuthToken:    os.Getenv("COSMOS_BRIDGE_FINALITY_TOKEN"),
+		RewardProofVerifierID: "adapter-roundtrip-verifier",
 		QueueSize:            32,
 		MaxRetries:           1,
 		BaseBackoff:          10 * time.Millisecond,

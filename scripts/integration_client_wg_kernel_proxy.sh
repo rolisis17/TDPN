@@ -11,11 +11,31 @@ LOG_FILE=/tmp/client_wg_kernel_proxy.log
 rm -f "$LOG_FILE"
 
 TMP_BIN_DIR="$(mktemp -d)"
+TMP_STATE_DIR="$(mktemp -d)"
 KEY_FILE="$(mktemp)"
 TRUST_FILE="$(mktemp)"
+
+DIR_PORT=18681
+ISSUER_PORT=18682
+ENTRY_PORT=18683
+EXIT_PORT=18684
+ENTRY_DATA_PORT=19680
+EXIT_DATA_PORT=19681
+EXIT_WG_PORT=19682
+CLIENT_WG_PROXY_PORT=57920
+
+route_assertion_json="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)"
+route_assertion_private_key="$(echo "$route_assertion_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')"
+route_assertion_pubkey="$(echo "$route_assertion_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')"
+if [[ -z "$route_assertion_private_key" || -z "$route_assertion_pubkey" ]]; then
+  echo "failed to generate entry route assertion key material"
+  exit 1
+fi
+
 cleanup() {
   kill "${node_pid:-}" >/dev/null 2>&1 || true
   rm -rf "$TMP_BIN_DIR"
+  rm -rf "$TMP_STATE_DIR"
   rm -f "$KEY_FILE"
   rm -f "$TRUST_FILE"
 }
@@ -42,11 +62,40 @@ chmod +x "$TMP_BIN_DIR/wg" "$TMP_BIN_DIR/ip"
 printf "fake-private-key\n" >"$KEY_FILE"
 
 DATA_PLANE_MODE=opaque \
+DIRECTORY_ADDR="127.0.0.1:${DIR_PORT}" \
+DIRECTORY_PUBLIC_URL="http://127.0.0.1:${DIR_PORT}" \
+DIRECTORY_URL="http://127.0.0.1:${DIR_PORT}" \
+DIRECTORY_PRIVATE_KEY_FILE="$TMP_STATE_DIR/directory.key" \
+DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE="$TMP_STATE_DIR/directory_provider_replay.json" \
+ISSUER_ADDR="127.0.0.1:${ISSUER_PORT}" \
+ISSUER_URL="http://127.0.0.1:${ISSUER_PORT}" \
+ISSUER_URLS="http://127.0.0.1:${ISSUER_PORT}" \
+CORE_ISSUER_URL="http://127.0.0.1:${ISSUER_PORT}" \
+ISSUER_PRIVATE_KEY_FILE="$TMP_STATE_DIR/issuer.key" \
+ISSUER_SUBJECTS_FILE="$TMP_STATE_DIR/issuer_subjects.json" \
+ISSUER_REVOCATIONS_FILE="$TMP_STATE_DIR/issuer_revocations.json" \
+ISSUER_ANON_REVOCATIONS_FILE="$TMP_STATE_DIR/issuer_anon_revocations.json" \
+ENTRY_ADDR="127.0.0.1:${ENTRY_PORT}" \
+ENTRY_URL="http://127.0.0.1:${ENTRY_PORT}" \
+ENTRY_RELAY_ID="entry-local-1" \
+ENTRY_DATA_ADDR="127.0.0.1:${ENTRY_DATA_PORT}" \
+ENTRY_PUBLIC_DATA_ADDR="127.0.0.1:${ENTRY_DATA_PORT}" \
+ENTRY_ENDPOINT="127.0.0.1:${ENTRY_DATA_PORT}" \
+ENTRY_ROUTE_ASSERTION_PRIVATE_KEY="$route_assertion_private_key" \
+ENTRY_ROUTE_ASSERTION_PUBLIC_KEY="$route_assertion_pubkey" \
+EXIT_ADDR="127.0.0.1:${EXIT_PORT}" \
+EXIT_CONTROL_URL="http://127.0.0.1:${EXIT_PORT}" \
+EXIT_RELAY_ID="exit-local-1" \
+EXIT_DATA_ADDR="127.0.0.1:${EXIT_DATA_PORT}" \
+EXIT_ENDPOINT="127.0.0.1:${EXIT_DATA_PORT}" \
+EXIT_WG_LISTEN_PORT="${EXIT_WG_PORT}" \
+EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS="$route_assertion_pubkey" \
+EXIT_TOKEN_PROOF_REPLAY_STORE_FILE="$TMP_STATE_DIR/exit_token_replay.json" \
 CLIENT_WG_BACKEND=command \
 CLIENT_WG_PRIVATE_KEY_PATH="$KEY_FILE" \
 CLIENT_WG_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
 CLIENT_WG_KERNEL_PROXY=1 \
-CLIENT_WG_PROXY_ADDR=127.0.0.1:57920 \
+CLIENT_WG_PROXY_ADDR="127.0.0.1:${CLIENT_WG_PROXY_PORT}" \
 WG_ALLOW_UNTRUSTED_BINARY_PATH=1 \
 CLIENT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1 \
 ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1 \
@@ -92,7 +141,7 @@ for _ in $(seq 1 40); do
       exit(length($buf) > 0 ? 0 : 1);
     }
     exit 1;
-  ' "127.0.0.1:57920"; then
+  ' "127.0.0.1:${CLIENT_WG_PROXY_PORT}"; then
     sent=1
     break
   fi

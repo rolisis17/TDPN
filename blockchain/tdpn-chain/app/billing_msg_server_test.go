@@ -54,6 +54,51 @@ func TestBillingMsgServer_AccessorAndHappyPath(t *testing.T) {
 	}
 }
 
+func TestBillingMsgServer_ConfirmReservationHappyPathAndReplay(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.BillingMsgServer()
+
+	reservation := billingtypes.CreditReservation{
+		ReservationID: "res-confirm-app-1",
+		SponsorID:     "sponsor-confirm-app-1",
+		SessionID:     "session-confirm-app-1",
+		AssetDenom:    "utdpn",
+		Amount:        75,
+	}
+	if _, err := server.CreateReservation(context.Background(), BillingCreateReservationRequest{Record: reservation}); err != nil {
+		t.Fatalf("expected create reservation to succeed, got error: %v", err)
+	}
+
+	resp, err := server.ConfirmReservation(context.Background(), BillingConfirmReservationRequest{Record: reservation})
+	if err != nil {
+		t.Fatalf("expected confirm reservation to succeed, got error: %v", err)
+	}
+	if resp.Replay {
+		t.Fatal("expected first confirm reservation call to not be replay")
+	}
+	if resp.Reservation.Status != chaintypes.ReconciliationConfirmed {
+		t.Fatalf("expected confirmed reservation status %q, got %q", chaintypes.ReconciliationConfirmed, resp.Reservation.Status)
+	}
+
+	replayResp, err := server.ConfirmReservation(context.Background(), BillingConfirmReservationRequest{Record: reservation})
+	if err != nil {
+		t.Fatalf("expected confirm reservation replay to succeed, got error: %v", err)
+	}
+	if !replayResp.Replay {
+		t.Fatal("expected duplicate confirm reservation call to report replay=true")
+	}
+
+	missing := reservation
+	missing.ReservationID = "res-confirm-app-missing"
+	_, err = server.ConfirmReservation(context.Background(), BillingConfirmReservationRequest{Record: missing})
+	if err == nil {
+		t.Fatal("expected missing reservation confirmation to fail")
+	}
+	if !strings.Contains(err.Error(), "reservation not found") {
+		t.Fatalf("expected missing reservation error, got %v", err)
+	}
+}
+
 func TestBillingMsgServer_CreateReservationReplayAndConflict(t *testing.T) {
 	scaffold := NewChainScaffold()
 	server := scaffold.BillingMsgServer()
@@ -165,6 +210,20 @@ func TestBillingMsgServer_NilScaffoldReturnsUnwiredServer(t *testing.T) {
 	if !strings.Contains(err.Error(), "vpnbilling keeper is not wired") {
 		t.Fatalf("expected unwired keeper error, got: %v", err)
 	}
+
+	_, err = server.ConfirmReservation(context.Background(), BillingConfirmReservationRequest{
+		Record: billingtypes.CreditReservation{
+			ReservationID: "res-nil-confirm",
+			SessionID:     "session-nil-confirm",
+			Amount:        1,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected nil scaffold confirm reservation to fail with unwired keeper")
+	}
+	if !strings.Contains(err.Error(), "vpnbilling keeper is not wired") {
+		t.Fatalf("expected unwired keeper error, got: %v", err)
+	}
 }
 
 func TestBillingMsgServer_CreateReservationHonorsCanceledContext(t *testing.T) {
@@ -235,5 +294,36 @@ func TestBillingMsgServer_FinalizeSettlementHonorsCanceledContext(t *testing.T) 
 	}
 	if storedReservation.Status != chaintypes.ReconciliationConfirmed {
 		t.Fatalf("expected reservation status %q to remain unchanged, got %q", chaintypes.ReconciliationConfirmed, storedReservation.Status)
+	}
+}
+
+func TestBillingMsgServer_ConfirmReservationHonorsCanceledContext(t *testing.T) {
+	scaffold := NewChainScaffold()
+	server := scaffold.BillingMsgServer()
+
+	reservation := billingtypes.CreditReservation{
+		ReservationID: "res-canceled-ctx-confirm",
+		SponsorID:     "sponsor-canceled-ctx-confirm",
+		SessionID:     "session-canceled-ctx-confirm",
+		AssetDenom:    "utdpn",
+		Amount:        15,
+	}
+	if _, err := server.CreateReservation(context.Background(), BillingCreateReservationRequest{Record: reservation}); err != nil {
+		t.Fatalf("expected reservation create to succeed, got error: %v", err)
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := server.ConfirmReservation(canceledCtx, BillingConfirmReservationRequest{Record: reservation}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+
+	storedReservation, ok := scaffold.BillingModule.Keeper.GetReservation(reservation.ReservationID)
+	if !ok {
+		t.Fatalf("expected reservation %s to remain present", reservation.ReservationID)
+	}
+	if storedReservation.Status != chaintypes.ReconciliationPending {
+		t.Fatalf("expected reservation status %q to remain unchanged, got %q", chaintypes.ReconciliationPending, storedReservation.Status)
 	}
 }

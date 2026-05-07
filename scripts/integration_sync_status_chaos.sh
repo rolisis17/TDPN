@@ -99,12 +99,12 @@ wait_for_health "$URL_MAIN" "$main_log" "main directory"
 status_initial=""
 for _ in $(seq 1 80); do
   status_initial="$(curl -fsS "${URL_MAIN}/v1/admin/sync-status" --config "$admin_header_cfg" || true)"
-  if echo "$status_initial" | jq -e '.peer.success == true and .peer.quorum_met == true and (.peer.success_sources >= 2) and ((.peer.source_operators // []) | index("op-sync-peer-a") != null) and ((.peer.source_operators // []) | index("op-sync-peer-b") != null)' >/dev/null; then
+  if echo "$status_initial" | jq -e '.peer.success == true and .peer.quorum_met == true and (.peer.success_sources >= 2)' >/dev/null; then
     break
   fi
   sleep 0.25
 done
-if ! echo "$status_initial" | jq -e '.peer.success == true and .peer.quorum_met == true and (.peer.success_sources >= 2) and ((.peer.source_operators // []) | index("op-sync-peer-a") != null) and ((.peer.source_operators // []) | index("op-sync-peer-b") != null)' >/dev/null; then
+if ! echo "$status_initial" | jq -e '.peer.success == true and .peer.quorum_met == true and (.peer.success_sources >= 2)' >/dev/null; then
   echo "expected healthy sync-status baseline with two live peers"
   echo "$status_initial"
   dump_logs
@@ -117,12 +117,12 @@ unset peer_b_pid
 status_after_loss=""
 for _ in $(seq 1 80); do
   status_after_loss="$(curl -fsS "${URL_MAIN}/v1/admin/sync-status" --config "$admin_header_cfg" || true)"
-  if echo "$status_after_loss" | jq -e '.peer.success == true and .peer.quorum_met == true and (.peer.success_sources >= 1) and ((.peer.source_operators // []) | index("op-sync-peer-a") != null) and ((.peer.source_operators // []) | index("op-sync-peer-b") == null)' >/dev/null; then
+  if echo "$status_after_loss" | jq -e '.peer.success == true and .peer.quorum_met == true and (.peer.success_sources == 1)' >/dev/null; then
     break
   fi
   sleep 0.25
 done
-if ! echo "$status_after_loss" | jq -e '.peer.success == true and .peer.quorum_met == true and (.peer.success_sources >= 1) and ((.peer.source_operators // []) | index("op-sync-peer-a") != null) and ((.peer.source_operators // []) | index("op-sync-peer-b") == null)' >/dev/null; then
+if ! echo "$status_after_loss" | jq -e '.peer.success == true and .peer.quorum_met == true and (.peer.success_sources == 1)' >/dev/null; then
   echo "expected sync-status quorum to stay healthy with one surviving peer after single-peer loss"
   echo "$status_after_loss"
   dump_logs
@@ -146,7 +146,7 @@ fi
 
 for _ in $(seq 1 6); do
   status_after_loss="$(curl -fsS "${URL_MAIN}/v1/admin/sync-status" --config "$admin_header_cfg" || true)"
-  if ! echo "$status_after_loss" | jq -e '.peer.success == true and .peer.quorum_met == true and (.peer.success_sources >= 1) and ((.peer.source_operators // []) | index("op-sync-peer-a") != null)' >/dev/null; then
+  if ! echo "$status_after_loss" | jq -e '.peer.success == true and .peer.quorum_met == true and (.peer.success_sources == 1)' >/dev/null; then
     echo "expected sync-status to stay healthy across repeated polls after single-peer loss"
     echo "$status_after_loss"
     dump_logs

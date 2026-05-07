@@ -98,6 +98,7 @@ var _ ChainFundReservationStatusQuerier = (*CosmosAdapter)(nil)
 var _ ChainReservationConfirmationStatusQuerier = (*CosmosAdapter)(nil)
 var _ ChainSlashEvidenceLister = (*CosmosAdapter)(nil)
 var _ FundReservationQuerier = (*CosmosAdapter)(nil)
+var _ SponsorReservationQuerier = (*CosmosAdapter)(nil)
 var _ SessionSettlementQuerier = (*CosmosAdapter)(nil)
 var _ RewardIssueQuerier = (*CosmosAdapter)(nil)
 var _ SlashEvidenceQuerier = (*CosmosAdapter)(nil)
@@ -1312,6 +1313,43 @@ func (a *CosmosAdapter) SponsorReservationStatus(ctx context.Context, reservatio
 	return cosmosHTTPBridgePersistedFinalStatus(status), found, nil
 }
 
+func (a *CosmosAdapter) SponsorReservation(ctx context.Context, reservationID string) (SponsorCreditReservation, bool, error) {
+	reservationID = strings.TrimSpace(reservationID)
+	if reservationID == "" {
+		return SponsorCreditReservation{}, false, fmt.Errorf("reservation id required")
+	}
+	_, found, body, err := a.queryStatusBodyByID(ctx, "/x/vpnsponsor/delegations/"+url.PathEscape(reservationID), "delegation")
+	if err != nil || !found {
+		return SponsorCreditReservation{}, found, err
+	}
+	reservation, ok, err := cosmosSponsorReservationFromQueryBody(body)
+	if err != nil {
+		return SponsorCreditReservation{}, false, err
+	}
+	if !ok {
+		return SponsorCreditReservation{}, false, nil
+	}
+	if strings.TrimSpace(reservation.ReservationID) == "" {
+		reservation.ReservationID = reservationID
+	} else if strings.TrimSpace(reservation.ReservationID) != reservationID {
+		return SponsorCreditReservation{}, false, fmt.Errorf("sponsor reservation id mismatch: requested=%s got=%s", reservationID, strings.TrimSpace(reservation.ReservationID))
+	}
+	reservation.SponsorID = strings.TrimSpace(reservation.SponsorID)
+	reservation.SubjectID = strings.TrimSpace(reservation.SubjectID)
+	reservation.SessionID = strings.TrimSpace(reservation.SessionID)
+	reservation.Currency = normalizeCurrencyCode(reservation.Currency)
+	if reservation.SponsorID == "" || reservation.SubjectID == "" {
+		return SponsorCreditReservation{}, false, fmt.Errorf("sponsor reservation material missing sponsor_id or subject_id: %s", reservationID)
+	}
+	if reservation.AmountMicros <= 0 {
+		return SponsorCreditReservation{}, false, fmt.Errorf("sponsor reservation material requires amount_micros > 0: %s", reservationID)
+	}
+	if reservation.Currency == "" {
+		return SponsorCreditReservation{}, false, fmt.Errorf("sponsor reservation material missing currency: %s", reservationID)
+	}
+	return reservation, true, nil
+}
+
 func (a *CosmosAdapter) HasSlashEvidence(ctx context.Context, evidenceID string) (bool, error) {
 	evidenceID = strings.TrimSpace(evidenceID)
 	if evidenceID == "" {
@@ -2159,7 +2197,7 @@ func cosmosFundReservationFromQueryBody(body []byte) (FundReservation, bool, err
 	}
 	reservationID := cosmosStringFromRawObject(raw, "reservation_id", "ReservationID")
 	sessionID := cosmosStringFromRawObject(raw, "session_id", "SessionID")
-	subjectID := cosmosStringFromRawObject(raw, "subject_id", "SubjectID", "sponsor_id", "SponsorID")
+	subjectID := cosmosStringFromRawObject(raw, "subject_id", "SubjectID")
 	currency := cosmosStringFromRawObject(raw, "currency", "Currency", "asset_denom", "AssetDenom")
 	status, _ := cosmosStatusFromRawObject(raw)
 	amountMicros, err := cosmosInt64FromRawObject(raw, "amount_micros", "AmountMicros", "amount", "Amount")
@@ -2173,6 +2211,12 @@ func cosmosFundReservationFromQueryBody(body []byte) (FundReservation, bool, err
 	if strings.TrimSpace(reservationID) == "" && strings.TrimSpace(sessionID) == "" && strings.TrimSpace(subjectID) == "" {
 		return FundReservation{}, false, nil
 	}
+	if strings.TrimSpace(subjectID) == "" {
+		return FundReservation{}, false, fmt.Errorf("fund reservation requires subject_id")
+	}
+	if strings.TrimSpace(currency) == "" {
+		return FundReservation{}, false, fmt.Errorf("fund reservation requires currency")
+	}
 	return FundReservation{
 		ReservationID: strings.TrimSpace(reservationID),
 		SessionID:     strings.TrimSpace(sessionID),
@@ -2180,6 +2224,59 @@ func cosmosFundReservationFromQueryBody(body []byte) (FundReservation, bool, err
 		AmountMicros:  amountMicros,
 		Currency:      strings.TrimSpace(currency),
 		CreatedAt:     createdAt,
+		Status:        status,
+	}, true, nil
+}
+
+func cosmosSponsorReservationFromQueryBody(body []byte) (SponsorCreditReservation, bool, error) {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return SponsorCreditReservation{}, false, nil
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return SponsorCreditReservation{}, false, fmt.Errorf("decode sponsor reservation body: %w", err)
+	}
+	raw := payload
+	if nested, ok := cosmosNestedRawObject(payload, "delegation"); ok {
+		raw = nested
+	} else if nested, ok := cosmosNestedRawObject(payload, "reservation"); ok {
+		raw = nested
+	}
+	reservationID := cosmosStringFromRawObject(raw, "reservation_id", "ReservationID")
+	sponsorID := cosmosStringFromRawObject(raw, "sponsor_id", "SponsorID")
+	subjectID := cosmosStringFromRawObject(raw, "subject_id", "SubjectID", "end_user_id", "EndUserID", "app_id", "AppID")
+	sessionID := cosmosStringFromRawObject(raw, "session_id", "SessionID")
+	currency := cosmosStringFromRawObject(raw, "currency", "Currency", "asset_denom", "AssetDenom")
+	status, _ := cosmosStatusFromRawObject(raw)
+	amountMicros, err := cosmosInt64FromRawObject(raw, "amount_micros", "AmountMicros", "credits", "Credits", "amount", "Amount")
+	if err != nil {
+		return SponsorCreditReservation{}, false, err
+	}
+	createdAt, err := cosmosTimeFromRawObject(raw, "created_at", "CreatedAt", "created_at_unix", "CreatedAtUnix")
+	if err != nil {
+		return SponsorCreditReservation{}, false, err
+	}
+	expiresAt, err := cosmosTimeFromRawObject(raw, "expires_at", "ExpiresAt", "expires_at_unix", "ExpiresAtUnix")
+	if err != nil {
+		return SponsorCreditReservation{}, false, err
+	}
+	consumedAt, err := cosmosTimeFromRawObject(raw, "consumed_at", "ConsumedAt", "consumed_at_unix", "ConsumedAtUnix")
+	if err != nil {
+		return SponsorCreditReservation{}, false, err
+	}
+	if strings.TrimSpace(reservationID) == "" && strings.TrimSpace(sponsorID) == "" && strings.TrimSpace(subjectID) == "" && strings.TrimSpace(sessionID) == "" {
+		return SponsorCreditReservation{}, false, nil
+	}
+	return SponsorCreditReservation{
+		ReservationID: strings.TrimSpace(reservationID),
+		SponsorID:     strings.TrimSpace(sponsorID),
+		SubjectID:     strings.TrimSpace(subjectID),
+		SessionID:     strings.TrimSpace(sessionID),
+		AmountMicros:  amountMicros,
+		Currency:      strings.TrimSpace(currency),
+		CreatedAt:     createdAt,
+		ExpiresAt:     expiresAt,
+		ConsumedAt:    consumedAt,
 		Status:        status,
 	}, true, nil
 }

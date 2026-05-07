@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp chmod grep; do
+for cmd in bash jq mktemp chmod grep date; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -124,9 +124,14 @@ if [[ "$scenario" == "fail" ]]; then
   exit "${FAKE_BUNDLE_LIVE_FAIL_RC:-31}"
 fi
 mkdir -p "$(dirname "$summary_json")"
-jq -n '{
+now_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [[ "$scenario" == "stale_timestamp" ]]; then
+  now_utc="2000-01-01T00:00:00Z"
+fi
+jq -n --arg generated_at_utc "$now_utc" '{
   version: 1,
   schema: { id: "profile_compare_campaign_signoff_summary" },
+  generated_at_utc: $generated_at_utc,
   status: "ok",
   rc: 0,
   decision: { decision: "GO", go: true, no_go: false }
@@ -227,9 +232,14 @@ if [[ "$scenario" == "reuse_no_write" ]]; then
   exit 0
 fi
 mkdir -p "$(dirname "$summary_json")"
-jq -n '{
+now_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [[ "$scenario" == "stale_timestamp" ]]; then
+  now_utc="2000-01-01T00:00:00Z"
+fi
+jq -n --arg generated_at_utc "$now_utc" '{
   version: 1,
   schema: { id: "profile_default_gate_stability_cycle_summary" },
+  generated_at_utc: $generated_at_utc,
   status: "pass",
   rc: 0,
   decision: "GO"
@@ -271,9 +281,14 @@ if [[ "$scenario" == "fail" ]]; then
   exit "${FAKE_BUNDLE_PUBLISH_FAIL_RC:-53}"
 fi
 mkdir -p "$(dirname "$summary_json")"
-jq -n '{
+now_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [[ "$scenario" == "stale_timestamp" ]]; then
+  now_utc="2000-01-01T00:00:00Z"
+fi
+jq -n --arg generated_at_utc "$now_utc" '{
   version: 1,
   schema: { id: "profile_default_gate_stability_evidence_pack_summary" },
+  generated_at_utc: $generated_at_utc,
   status: "ok",
   rc: 0,
   decision: "GO"
@@ -369,6 +384,47 @@ if ! grep -F -- "[redacted]" "$PASS_STABILITY_LOG" >/dev/null 2>&1; then
   cat "$PASS_STABILITY_LOG"
   exit 1
 fi
+
+echo "[profile-default-gate-live-evidence-publish-bundle] stale generated_at_utc fail-closed path"
+STALE_TS_DIR="$TMP_DIR/stale_timestamp"
+mkdir -p "$STALE_TS_DIR"
+STALE_TS_SUMMARY="$STALE_TS_DIR/bundle_summary.json"
+set +e
+PROFILE_DEFAULT_GATE_LIVE_EVIDENCE_BUNDLE_LIVE_SCRIPT="$FAKE_LIVE" \
+PROFILE_DEFAULT_GATE_LIVE_EVIDENCE_BUNDLE_STABILITY_CYCLE_SCRIPT="$FAKE_STABILITY" \
+PROFILE_DEFAULT_GATE_LIVE_EVIDENCE_BUNDLE_EVIDENCE_PACK_SCRIPT="$FAKE_PUBLISH" \
+FAKE_BUNDLE_CAPTURE_FILE="$CAPTURE_FILE" \
+FAKE_BUNDLE_LIVE_SCENARIO="stale_timestamp" \
+FAKE_BUNDLE_STABILITY_SCENARIO="pass" \
+FAKE_BUNDLE_PUBLISH_SCENARIO="pass" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "100.64.0.12" \
+  --host-b "100.64.0.13" \
+  --campaign-subject "inv-secret-stale-ts" \
+  --reports-dir "$STALE_TS_DIR" \
+  --summary-json "$STALE_TS_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_live_evidence_publish_bundle_stale_timestamp.log 2>&1
+STALE_TS_RC=$?
+set -e
+
+if [[ "$STALE_TS_RC" -ne 67 ]]; then
+  echo "expected stale generated_at_utc rc=67, got rc=$STALE_TS_RC"
+  cat /tmp/integration_profile_default_gate_live_evidence_publish_bundle_stale_timestamp.log
+  exit 1
+fi
+assert_jq "$STALE_TS_SUMMARY" '
+  .status == "fail"
+  and .failure_stage == "live_gate"
+  and .failure_substep == "live_gate_stage_failed"
+  and .stages.live_gate.attempted == true
+  and .stages.live_gate.status == "fail"
+  and .stages.live_gate.rc == 67
+  and .stages.live_gate.summary_valid_after_run == true
+  and .stages.live_gate.summary_fresh_after_run == true
+  and .stages.live_gate.summary_generated_at_utc == "2000-01-01T00:00:00Z"
+  and .stages.live_gate.summary_timestamp_current_after_run == false
+  and .stages.stability_cycle.attempted == false
+'
 
 echo "[profile-default-gate-live-evidence-publish-bundle] missing-subject fail-closed path"
 MISS_DIR="$TMP_DIR/missing_subject"

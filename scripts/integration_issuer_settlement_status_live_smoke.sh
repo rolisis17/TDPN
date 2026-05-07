@@ -268,16 +268,51 @@ start_mock_cosmos_runtime() {
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 )
 
 func main() {
 	addr := "127.0.0.1:0"
 	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) != "" {
 		addr = strings.TrimSpace(os.Args[1])
+	}
+	var mu sync.Mutex
+	sponsorReservations := map[string]json.RawMessage{}
+	fieldString := func(raw map[string]json.RawMessage, names ...string) string {
+		for _, name := range names {
+			valueRaw, ok := raw[name]
+			if !ok {
+				continue
+			}
+			var value string
+			if err := json.Unmarshal(valueRaw, &value); err == nil {
+				return strings.TrimSpace(value)
+			}
+		}
+		return ""
+	}
+	storeSponsorReservation := func(payload json.RawMessage) {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(payload, &raw); err != nil {
+			return
+		}
+		reservationID := fieldString(raw, "ReservationID", "reservation_id")
+		if reservationID == "" {
+			return
+		}
+		raw["Status"] = json.RawMessage(`"confirmed"`)
+		normalized, err := json.Marshal(raw)
+		if err != nil {
+			return
+		}
+		mu.Lock()
+		sponsorReservations[reservationID] = normalized
+		mu.Unlock()
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -290,15 +325,53 @@ func main() {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
+			var req struct {
+				Tx struct {
+					MessageType string          `json:"message_type"`
+					Message     json.RawMessage `json:"message"`
+				} `json:"tx"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.Tx.MessageType == "/x/vpnsponsor/reservations" {
+				storeSponsorReservation(req.Tx.Message)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"tx_response":{"code":0,"txhash":"MOCK_SETTLEMENT_TX"}}`))
+		case strings.HasPrefix(r.URL.Path, "/x/vpnsponsor/delegations/"):
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			reservationID := strings.TrimPrefix(r.URL.Path, "/x/vpnsponsor/delegations/")
+			mu.Lock()
+			reservation, ok := sponsorReservations[reservationID]
+			mu.Unlock()
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"delegation":`))
+			_, _ = w.Write(reservation)
+			_, _ = w.Write([]byte(`}`))
 		case strings.HasPrefix(r.URL.Path, "/x/"):
+			w.Header().Set("Content-Type", "application/json")
+			if r.Method == http.MethodGet {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"status":"confirmed"}`))
+				return
+			}
 			if r.Method != http.MethodPost {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Path == "/x/vpnsponsor/reservations" {
+				var raw json.RawMessage
+				if err := json.NewDecoder(r.Body).Decode(&raw); err == nil {
+					storeSponsorReservation(raw)
+				}
+			}
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"ok":true}`))
 		default:
@@ -491,7 +564,7 @@ run_mode_scenario() {
   wait_for_backlog_status "${base_url}/v1/settlement/status"
 
   local pop_pub_key
-  pop_pub_key="$(go run ./cmd/tokenpop gen --show-private-key | jq -r '.public_key // empty')"
+  pop_pub_key="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key | jq -r '.public_key // empty')"
   if [[ -z "${pop_pub_key}" || "${pop_pub_key}" == "null" ]]; then
     echo "failed to generate pop public key for sponsor token outage check (mode=${mode})"
     dump_logs
@@ -507,16 +580,52 @@ run_mode_scenario() {
     --arg session_id "${session_id}" \
     '{tier:1,subject:$subject,token_type:"client_access",pop_pub_key:$pop_pub_key,payment_proof:{reservation_id:$reservation_id,sponsor_id:$sponsor_id,subject:$subject,session_id:$session_id}}')"
 
-  echo "[issuer-settlement-status-live-smoke] sponsor payment-proof happy path during outage mode=${mode}"
+  echo "[issuer-settlement-status-live-smoke] sponsor payment-proof fail-closed during outage mode=${mode}"
+  post_expect_status "${base_url}/v1/sponsor/token" "${sponsor_token_payload}" "402" "X-Sponsor-Token" "${SPONSOR_TOKEN}"
+  if ! grep -Eq 'reservation (pending chain submission|not chain-finalized|chain material query failed)' "${RESP_FILE}"; then
+    echo "expected chain-finality payment proof rejection while cosmos endpoint is down"
+    echo "response:"
+    cat "${RESP_FILE}"
+    echo
+    dump_logs
+    return 1
+  fi
+
+  get_expect_status "${base_url}/v1/sponsor/status?reservation_id=${reservation_id}" "200" "X-Sponsor-Token" "${SPONSOR_TOKEN}"
+  assert_response_jq "mode=${mode} sponsor reservation remains unconsumed while cosmos endpoint is down" --arg reservation_id "${reservation_id}" --arg sponsor_id "${sponsor_id}" --arg subject "${subject_id}" --arg session_id "${session_id}" '
+    . as $r |
+    $r.accepted == true and
+    $r.reservation_id == $reservation_id and
+    $r.sponsor_id == $sponsor_id and
+    $r.subject == $subject and
+    $r.session_id == $session_id and
+    $r.amount_micros == 150000 and
+    $r.currency == "TDPNC" and
+    ($r.status | type == "string" and length > 0) and
+    ($r.created_at | type == "number" and . > 0) and
+    ($r.expires_at | type == "number" and . > 0) and
+    (($r.consumed_at // 0) | type == "number" and . >= 0) and
+    ($r.expires_at > $r.created_at) and
+    (($r.consumed_at // 0) == 0)
+  '
+
+  start_mock_cosmos_runtime "${cosmos_port}"
+  if ! wait_for_mock_ready "${cosmos_endpoint}/health"; then
+    return 1
+  fi
+
+  wait_for_recovery_status "${base_url}/v1/settlement/status"
+
+  echo "[issuer-settlement-status-live-smoke] sponsor payment-proof happy path after chain recovery mode=${mode}"
   post_expect_status "${base_url}/v1/sponsor/token" "${sponsor_token_payload}" "200" "X-Sponsor-Token" "${SPONSOR_TOKEN}"
-  assert_response_jq "mode=${mode} sponsor token issuance remains available while cosmos endpoint is down" '
+  assert_response_jq "mode=${mode} sponsor token issuance succeeds after chain-finality recovery" '
     (.token | type == "string" and length > 0) and
     (.expires | type == "number" and . > 0) and
     (.jti | type == "string" and length > 0)
   '
 
   get_expect_status "${base_url}/v1/sponsor/status?reservation_id=${reservation_id}" "200" "X-Sponsor-Token" "${SPONSOR_TOKEN}"
-  assert_response_jq "mode=${mode} sponsor reservation consumed metadata while cosmos endpoint is down" --arg reservation_id "${reservation_id}" --arg sponsor_id "${sponsor_id}" --arg subject "${subject_id}" --arg session_id "${session_id}" '
+  assert_response_jq "mode=${mode} sponsor reservation consumed metadata after chain recovery" --arg reservation_id "${reservation_id}" --arg sponsor_id "${sponsor_id}" --arg subject "${subject_id}" --arg session_id "${session_id}" '
     . as $r |
     $r.accepted == true and
     $r.reservation_id == $reservation_id and
@@ -532,13 +641,6 @@ run_mode_scenario() {
     ($r.expires_at > $r.created_at) and
     ($r.consumed_at >= $r.created_at)
   '
-
-  start_mock_cosmos_runtime "${cosmos_port}"
-  if ! wait_for_mock_ready "${cosmos_endpoint}/health"; then
-    return 1
-  fi
-
-  wait_for_recovery_status "${base_url}/v1/settlement/status"
   stop_mock_runtime
   stop_issuer_runtime
   echo "issuer settlement status live smoke scenario ok mode=${mode}"

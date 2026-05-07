@@ -38,22 +38,36 @@ old_umask="$(umask)"
 umask 077
 LOG_FILE="$(mktemp /tmp/integration_anon_credential_dispute.XXXXXX.log)"
 PAYLOAD_TMP="$(mktemp /tmp/integration_anon_credential_dispute_payload.XXXXXX.json)"
+STATE_DIR="$(mktemp -d /tmp/integration_anon_credential_dispute_state.XXXXXX)"
 umask "$old_umask"
 chmod 600 "$PAYLOAD_TMP"
+ADMIN_TOKEN="integration-admin-token"
+ISSUER_PORT=19332
+ISSUER_URL="http://127.0.0.1:${ISSUER_PORT}"
 
-timeout 25s go run ./cmd/node --directory --issuer --entry --exit >"$LOG_FILE" 2>&1 &
+ISSUER_ADDR="127.0.0.1:${ISSUER_PORT}" \
+ISSUER_URL="$ISSUER_URL" \
+ISSUER_ADMIN_TOKEN="$ADMIN_TOKEN" \
+ISSUER_PRIVATE_KEY_FILE="$STATE_DIR/issuer.key" \
+ISSUER_SUBJECTS_FILE="$STATE_DIR/issuer_subjects.json" \
+ISSUER_REVOCATIONS_FILE="$STATE_DIR/issuer_revocations.json" \
+ISSUER_ANON_REVOCATIONS_FILE="$STATE_DIR/issuer_anon_revocations.json" \
+ISSUER_ANON_DISPUTES_FILE="$STATE_DIR/issuer_anon_disputes.json" \
+ISSUER_AUDIT_FILE="$STATE_DIR/issuer_audit.json" \
+timeout 25s go run ./cmd/node --issuer >"$LOG_FILE" 2>&1 &
 node_pid=$!
 cleanup() {
   kill "$node_pid" >/dev/null 2>&1 || true
   rm -f "$PAYLOAD_TMP" "$LOG_FILE"
+  rm -rf "$STATE_DIR"
 }
 trap cleanup EXIT
 
 sleep 2
 
 credential_id="anon-dispute-integration-1"
-issue_json=$(curl -sS -X POST http://127.0.0.1:8082/v1/admin/anon-credential/issue \
-  -H 'X-Admin-Token: dev-admin-token' \
+issue_json=$(curl -sS -X POST "${ISSUER_URL}/v1/admin/anon-credential/issue" \
+  -H "X-Admin-Token: ${ADMIN_TOKEN}" \
   -H 'Content-Type: application/json' \
   --data "{\"credential_id\":\"$credential_id\",\"tier\":3,\"reason\":\"integration-test\"}")
 anon_cred=$(echo "$issue_json" | sed -n 's/.*"credential":"\([^"]*\)".*/\1/p')
@@ -64,7 +78,7 @@ if [[ -z "$anon_cred" ]]; then
   exit 1
 fi
 
-pop_json=$(go run ./cmd/tokenpop gen --show-private-key)
+pop_json=$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)
 pop_pub=$(echo "$pop_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')
 if [[ -z "$pop_pub" ]]; then
   echo "failed to generate token PoP keypair"
@@ -100,7 +114,7 @@ decode_token_tier() {
 
 issue_client_token() {
   local requested_tier="$1"
-  curl -sS -X POST http://127.0.0.1:8082/v1/token -H 'Content-Type: application/json' \
+  curl -sS -X POST "${ISSUER_URL}/v1/token" -H 'Content-Type: application/json' \
     --data "{\"tier\":$requested_tier,\"token_type\":\"client_access\",\"pop_pub_key\":\"$pop_pub\",\"exit_scope\":[\"exit-local-1\"],\"anon_cred\":\"$anon_cred\"}"
 }
 
@@ -121,8 +135,8 @@ if [[ "$baseline_tier" != "3" ]]; then
 fi
 
 dispute_until=$(( $(date +%s) + 180 ))
-dispute_resp=$(curl -sS -X POST http://127.0.0.1:8082/v1/admin/anon-credential/dispute \
-  -H 'X-Admin-Token: dev-admin-token' \
+dispute_resp=$(curl -sS -X POST "${ISSUER_URL}/v1/admin/anon-credential/dispute" \
+  -H "X-Admin-Token: ${ADMIN_TOKEN}" \
   -H 'Content-Type: application/json' \
   --data "{\"credential_id\":\"$credential_id\",\"tier_cap\":1,\"until\":$dispute_until,\"case_id\":\"case-anon-dispute-1\",\"evidence_ref\":\"evidence://anon-dispute-1\",\"reason\":\"integration-test\"}")
 if ! echo "$dispute_resp" | rg -q "\"credential_id\":\"$credential_id\""; then
@@ -131,8 +145,8 @@ if ! echo "$dispute_resp" | rg -q "\"credential_id\":\"$credential_id\""; then
   cat "$LOG_FILE"
   exit 1
 fi
-status_disputed=$(curl -sS -G http://127.0.0.1:8082/v1/admin/anon-credential/get \
-  -H 'X-Admin-Token: dev-admin-token' \
+status_disputed=$(curl -sS -G "${ISSUER_URL}/v1/admin/anon-credential/get" \
+  -H "X-Admin-Token: ${ADMIN_TOKEN}" \
   --data-urlencode "credential_id=$credential_id")
 if ! echo "$status_disputed" | rg -q '"disputed":true'; then
   echo "expected disputed status after anonymous credential dispute apply"
@@ -163,8 +177,8 @@ if [[ "$capped_tier" != "1" ]]; then
   exit 1
 fi
 
-clear_resp=$(curl -sS -X POST http://127.0.0.1:8082/v1/admin/anon-credential/dispute/clear \
-  -H 'X-Admin-Token: dev-admin-token' \
+clear_resp=$(curl -sS -X POST "${ISSUER_URL}/v1/admin/anon-credential/dispute/clear" \
+  -H "X-Admin-Token: ${ADMIN_TOKEN}" \
   -H 'Content-Type: application/json' \
   --data "{\"credential_id\":\"$credential_id\",\"reason\":\"resolved\"}")
 if ! echo "$clear_resp" | rg -q '"cleared":true'; then
@@ -173,8 +187,8 @@ if ! echo "$clear_resp" | rg -q '"cleared":true'; then
   cat "$LOG_FILE"
   exit 1
 fi
-status_cleared=$(curl -sS -G http://127.0.0.1:8082/v1/admin/anon-credential/get \
-  -H 'X-Admin-Token: dev-admin-token' \
+status_cleared=$(curl -sS -G "${ISSUER_URL}/v1/admin/anon-credential/get" \
+  -H "X-Admin-Token: ${ADMIN_TOKEN}" \
   --data-urlencode "credential_id=$credential_id")
 if ! echo "$status_cleared" | rg -q '"disputed":false'; then
   echo "expected disputed=false after anonymous credential dispute clear"

@@ -110,6 +110,70 @@ json_string_field() {
   jq -r "$jq_path // \"\"" "$file" 2>/dev/null || true
 }
 
+tar_member_path_is_safe() {
+  local member
+  member="$(trim "${1:-}")"
+  while [[ "$member" == ./* ]]; do
+    member="${member#./}"
+  done
+  member="${member%/}"
+  if [[ -z "$member" || "$member" == /* ]]; then
+    return 1
+  fi
+
+  local part
+  local -a parts=()
+  local IFS='/'
+  read -r -a parts <<<"$member"
+  for part in "${parts[@]}"; do
+    if [[ -z "$part" || "$part" == "." || "$part" == ".." ]]; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+validate_tar_members_safe() {
+  local tarball="$1"
+  local entries_file
+  local details_file
+  local unsafe=0
+  local entry
+  local line
+
+  entries_file="$(mktemp)"
+  details_file="$(mktemp)"
+  if ! tar -tzf "$tarball" >"$entries_file"; then
+    rm -f "$entries_file" "$details_file"
+    echo "failed to list bundle tar members: $tarball"
+    return 1
+  fi
+  if ! tar -tvzf "$tarball" >"$details_file"; then
+    rm -f "$entries_file" "$details_file"
+    echo "failed to inspect bundle tar member metadata: $tarball"
+    return 1
+  fi
+
+  while IFS= read -r entry || [[ -n "${entry:-}" ]]; do
+    if ! tar_member_path_is_safe "$entry"; then
+      echo "unsafe bundle tar member path: ${entry:-<empty>}"
+      unsafe=1
+    fi
+  done <"$entries_file"
+
+  while IFS= read -r line || [[ -n "${line:-}" ]]; do
+    case "${line:0:1}" in
+      l|h)
+        echo "unsafe bundle tar link member: $line"
+        unsafe=1
+        ;;
+    esac
+  done <"$details_file"
+
+  rm -f "$entries_file" "$details_file"
+  return "$unsafe"
+}
+
 summary_json=""
 reports_dir=""
 bundle_tar=""
@@ -289,24 +353,29 @@ if [[ "$check_manifest" == "1" ]]; then
   fi
 
   if [[ -z "$manifest_path" && -n "$bundle_tar" && -f "$bundle_tar" ]]; then
-    tmp_extract_dir="$(mktemp -d)"
-    if ! tar -xzf "$bundle_tar" -C "$tmp_extract_dir"; then
-      echo "failed to extract bundle tar for manifest validation: $bundle_tar"
+    if ! validate_tar_members_safe "$bundle_tar"; then
+      echo "refusing to extract unsafe bundle tar: $bundle_tar"
       issues=$((issues + 1))
     else
-      while IFS= read -r d; do
-        [[ -z "$d" ]] && continue
-        if [[ -z "$extract_root_dir" ]]; then
-          extract_root_dir="$d"
-        else
-          extract_root_dir=""
-          break
-        fi
-      done < <(find "$tmp_extract_dir" -mindepth 1 -maxdepth 1 -type d | sort)
-      if [[ -n "$extract_root_dir" ]]; then
-        candidate="$extract_root_dir/prod_pilot_cohort_bundle_manifest.json"
-        if [[ -f "$candidate" ]]; then
-          manifest_path="$candidate"
+      tmp_extract_dir="$(mktemp -d)"
+      if ! tar -xzf "$bundle_tar" -C "$tmp_extract_dir"; then
+        echo "failed to extract bundle tar for manifest validation: $bundle_tar"
+        issues=$((issues + 1))
+      else
+        while IFS= read -r d; do
+          [[ -z "$d" ]] && continue
+          if [[ -z "$extract_root_dir" ]]; then
+            extract_root_dir="$d"
+          else
+            extract_root_dir=""
+            break
+          fi
+        done < <(find "$tmp_extract_dir" -mindepth 1 -maxdepth 1 -type d | sort)
+        if [[ -n "$extract_root_dir" ]]; then
+          candidate="$extract_root_dir/prod_pilot_cohort_bundle_manifest.json"
+          if [[ -f "$candidate" ]]; then
+            manifest_path="$candidate"
+          fi
         fi
       fi
     fi
@@ -345,6 +414,34 @@ if [[ "$check_manifest" == "1" ]]; then
       echo "manifest run_reports must include at least one report"
       issues=$((issues + 1))
     fi
+    round_result_count="$(jq -r '.round_results | length' "$manifest_path" 2>/dev/null || echo 0)"
+    if [[ ! "$round_result_count" =~ ^[0-9]+$ ]] || ((round_result_count < 1)); then
+      echo "manifest round_results must include at least one result"
+      issues=$((issues + 1))
+    elif [[ "$rr_count" =~ ^[0-9]+$ && "$rr_count" -ne "$round_result_count" ]]; then
+      echo "manifest run_reports count must match round_results count (run_reports=$rr_count round_results=$round_result_count)"
+      issues=$((issues + 1))
+    fi
+    if ! jq -e '
+      .run_reports
+      | all(type == "string" and length > 0)
+    ' "$manifest_path" >/dev/null 2>&1; then
+      echo "manifest run_reports entries must be non-empty strings"
+      issues=$((issues + 1))
+    fi
+    if ! jq -e '
+      .round_results
+      | all(
+          (.round | type == "number")
+          and (.status | type == "string" and length > 0)
+          and (.rc | type == "number")
+          and (.run_report_json | type == "string" and length > 0)
+          and (.log_file | type == "string" and length > 0)
+        )
+    ' "$manifest_path" >/dev/null 2>&1; then
+      echo "manifest round_results entries missing required round/status/rc/run_report_json/log_file fields"
+      issues=$((issues + 1))
+    fi
   fi
 
   structural_dir=""
@@ -358,10 +455,19 @@ if [[ "$check_manifest" == "1" ]]; then
     if [[ ! -s "$structural_dir/run_reports.list" ]]; then
       echo "cohort run_reports.list missing or empty: $structural_dir/run_reports.list"
       issues=$((issues + 1))
+    elif [[ "${rr_count:-}" =~ ^[0-9]+$ && "$rr_count" -gt 0 ]]; then
+      run_report_line_count="$(awk 'NF>0 {c++} END {print c+0}' "$structural_dir/run_reports.list")"
+      if [[ ! "$run_report_line_count" =~ ^[0-9]+$ ]] || ((run_report_line_count != rr_count)); then
+        echo "cohort run_reports.list count must match manifest run_reports count (list=$run_report_line_count manifest=$rr_count)"
+        issues=$((issues + 1))
+      fi
     fi
     round_dir_count="$(find "$structural_dir" -mindepth 1 -maxdepth 1 -type d -name 'round_*' | wc -l | tr -d ' ')"
     if [[ ! "$round_dir_count" =~ ^[0-9]+$ ]] || ((round_dir_count < 1)); then
       echo "cohort bundle has no round_* directories: $structural_dir"
+      issues=$((issues + 1))
+    elif [[ "${round_result_count:-}" =~ ^[0-9]+$ && "$round_result_count" -gt 0 && "$round_dir_count" -ne "$round_result_count" ]]; then
+      echo "cohort round_* directory count must match manifest round_results count (dirs=$round_dir_count manifest=$round_result_count)"
       issues=$((issues + 1))
     fi
     while IFS= read -r rd; do

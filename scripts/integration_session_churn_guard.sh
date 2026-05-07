@@ -38,10 +38,22 @@ run_scenario() {
   local exit_port=$((base_port + 4))
   local entry_data_port=$((base_port + 20))
   local exit_data_port=$((base_port + 21))
+  local tmp_dir
+  tmp_dir="$(mktemp -d "/tmp/integration_session_churn_guard_${scenario}.XXXXXX")"
 
   local -a env_args=(
     "DIRECTORY_ADDR=127.0.0.1:${dir_port}"
+    "DIRECTORY_PRIVATE_KEY_FILE=$tmp_dir/directory.key"
+    "DIRECTORY_PREVIOUS_PUBKEYS_FILE=$tmp_dir/directory_previous_pubkeys.txt"
+    "DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE=$tmp_dir/directory_provider_replay.json"
+    "DIRECTORY_TRUST_TOFU=1"
+    "DIRECTORY_TRUSTED_KEYS_FILE=$tmp_dir/trusted_directory_keys.txt"
     "ISSUER_ADDR=127.0.0.1:${issuer_port}"
+    "ISSUER_PRIVATE_KEY_FILE=$tmp_dir/issuer.key"
+    "ISSUER_PREVIOUS_PUBKEYS_FILE=$tmp_dir/issuer_previous_pubkeys.txt"
+    "ISSUER_EPOCHS_FILE=$tmp_dir/issuer_epochs.json"
+    "ISSUER_REVOCATIONS_FILE=$tmp_dir/issuer_revocations.json"
+    "ISSUER_ANON_REVOCATIONS_FILE=$tmp_dir/issuer_anon_revocations.json"
     "ENTRY_ADDR=127.0.0.1:${entry_port}"
     "EXIT_ADDR=127.0.0.1:${exit_port}"
     "ENTRY_DATA_ADDR=127.0.0.1:${entry_data_port}"
@@ -52,6 +64,7 @@ run_scenario() {
     "ISSUER_URL=http://127.0.0.1:${issuer_port}"
     "ENTRY_URL=http://127.0.0.1:${entry_port}"
     "EXIT_CONTROL_URL=http://127.0.0.1:${exit_port}"
+    "EXIT_TOKEN_PROOF_REPLAY_STORE_FILE=$tmp_dir/exit_token_replay.json"
     "CLIENT_FORCE_DIRECT_EXIT=1"
     "CLIENT_ALLOW_DIRECT_EXIT_FALLBACK=1"
     "CLIENT_REQUIRE_DISTINCT_OPERATORS=0"
@@ -82,6 +95,7 @@ run_scenario() {
     cat "$log_file"
     exit 1
   fi
+  rm -rf "$tmp_dir"
 }
 
 GUARDED_LOG="/tmp/integration_session_churn_guard_guarded.log"

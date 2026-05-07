@@ -70,6 +70,8 @@ EASY_NODE_DOCTOR_PROVIDER_ENV_FILE="$BASE_DIR/provider.env" \
 EASY_NODE_DOCTOR_WG_ONLY_DIR="$BASE_DIR/wg_only" \
 EASY_NODE_DOCTOR_CLIENT_VPN_KEY_DIR="$BASE_DIR/client_vpn" \
 EASY_NODE_DOCTOR_LOG_DIR="$BASE_DIR/logs" \
+EASY_NODE_DOCTOR_WG_ONLY_STATE_FILE="$BASE_DIR/wg_only.state" \
+EASY_NODE_DOCTOR_CLIENT_VPN_STATE_FILE="$BASE_DIR/client_vpn.state" \
 ./scripts/runtime_doctor.sh --show-json 1 >/tmp/integration_runtime_doctor_ok.log 2>&1
 
 if ! rg -q '\[runtime-doctor\] status=OK' /tmp/integration_runtime_doctor_ok.log; then

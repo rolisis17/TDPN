@@ -236,6 +236,34 @@ infer_type_from_path() {
   esac
 }
 
+to_lower() {
+  printf '%s' "${1,,}"
+}
+
+is_admin_console_installer_path() {
+  local value="${1:-}"
+  local normalized
+  normalized="$(to_lower "$value")"
+  local tokenized="${normalized// /-}"
+  tokenized="${tokenized//_/-}"
+
+  [[ "$tokenized" == *admin-console* || "$tokenized" == *gpm-admin* ]]
+}
+
+assert_public_installer_artifact_not_admin_console() {
+  local artifact_path="${1:-}"
+  if is_admin_console_installer_path "$artifact_path"; then
+    fail "resolve" "public desktop installer refuses Admin Console artifact: $artifact_path"
+  fi
+}
+
+assert_public_launch_target_not_admin_console() {
+  local launch_path="${1:-}"
+  if is_admin_console_installer_path "$launch_path"; then
+    fail "resolve" "public desktop installer refuses Admin Console launch target: $launch_path"
+  fi
+}
+
 validate_path_matches_type() {
   local candidate="$1"
   local expected_type="$2"
@@ -278,10 +306,16 @@ discover_first_artifact_by_type() {
   fi
 
   local first_match=""
-  first_match="$(find "$BUNDLE_ROOT" -type f -name "$name_pattern" 2>/dev/null | sort | head -n 1 || true)"
-  if [[ -n "$first_match" ]]; then
+  while IFS= read -r first_match; do
+    if [[ -z "$first_match" ]]; then
+      continue
+    fi
+    if is_admin_console_installer_path "$first_match"; then
+      continue
+    fi
     printf '%s' "$first_match"
-  fi
+    return 0
+  done < <(find "$BUNDLE_ROOT" -type f -name "$name_pattern" 2>/dev/null | sort || true)
 }
 
 resolve_from_discovery() {
@@ -356,6 +390,7 @@ normalize_installed_executable_override() {
   if [[ "$installed_executable" == */* ]]; then
     if [[ -e "$installed_executable" ]]; then
       resolved_installed_executable="$(resolve_absolute_path "$installed_executable")"
+      assert_public_launch_target_not_admin_console "$resolved_installed_executable"
       return 0
     fi
     if [[ "$installed_executable" == /* ]]; then
@@ -363,10 +398,12 @@ normalize_installed_executable_override() {
     else
       resolved_installed_executable="$ROOT_DIR/$installed_executable"
     fi
+    assert_public_launch_target_not_admin_console "$resolved_installed_executable"
     return 0
   fi
 
   resolved_installed_executable="$installed_executable"
+  assert_public_launch_target_not_admin_console "$resolved_installed_executable"
 }
 
 resolve_launch_candidate() {
@@ -702,6 +739,7 @@ if [[ -n "$installer_path" ]]; then
     fail "resolve" "installer path does not exist: $installer_path"
   fi
   resolved_installer_path="$(resolve_absolute_path "$installer_path")"
+  assert_public_installer_artifact_not_admin_console "$resolved_installer_path"
   installer_source="explicit"
 
   if [[ "$installer_type" == "auto" ]]; then

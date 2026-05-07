@@ -31,7 +31,8 @@ What it can clean:
 
 Notes:
   - Ownership repairs are only attempted when a safe non-root target owner is known.
-  - WG-only, client-VPN, and ownership cleanup requires root; non-root runs report skips.
+  - Non-root runs may clear stale state files inside the runtime allowlist.
+  - Interface cleanup, busy-port cleanup, and ownership cleanup require root.
   - Under sudo, runtime-doctor checks are evaluated as SUDO_USER when possible so
     user-level writability drift is still detected before remediation.
 USAGE
@@ -434,7 +435,7 @@ validate_iface_or_die "--client-iface" "$client_iface"
 validate_iface_or_die "--exit-iface" "$exit_iface"
 validate_iface_or_die "--vpn-iface" "$vpn_iface"
 
-if [[ "$(effective_uid)" == "0" ]]; then
+if [[ "$(effective_uid)" == "0" && -z "${EASY_NODE_RUNTIME_FIX_EUID:-}" ]]; then
   doctor_script="$ROOT_DIR/scripts/runtime_doctor.sh"
   easy_node_script="$ROOT_DIR/scripts/easy_node.sh"
   manual_validation_report_script="$ROOT_DIR/scripts/manual_validation_report.sh"
@@ -589,6 +590,29 @@ repair_ownership_path() {
   fi
 }
 
+remove_stale_state_file() {
+  local action_name="$1"
+  local path="$2"
+
+  if ! validate_mutable_target_path "$path" "$mutable_path_allowlist"; then
+    actions_failed+=("$action_name")
+    echo "[runtime-fix] action_failed=${action_name} path=$path reason=unsafe_path"
+    return
+  fi
+  if [[ ! -e "$path" && ! -L "$path" ]]; then
+    actions_taken+=("$action_name")
+    echo "[runtime-fix] action=${action_name} path=$path reason=already_absent"
+    return
+  fi
+  if rm -f "$path" >/dev/null 2>&1; then
+    actions_taken+=("$action_name")
+    echo "[runtime-fix] action=${action_name} path=$path"
+  else
+    actions_failed+=("$action_name")
+    echo "[runtime-fix] action_failed=${action_name} path=$path"
+  fi
+}
+
 before_doctor_rc=0
 before_json="$(
   if run_doctor; then
@@ -605,6 +629,8 @@ provider_env_file="$(printf '%s\n' "$before_json" | jq -r '.paths.provider_env_f
 wg_only_dir="$(printf '%s\n' "$before_json" | jq -r '.paths.wg_only_dir // ""')"
 client_vpn_key_dir="$(printf '%s\n' "$before_json" | jq -r '.paths.client_vpn_key_dir // ""')"
 log_dir="$(printf '%s\n' "$before_json" | jq -r '.paths.log_dir // ""')"
+wg_only_state_file="$(printf '%s\n' "$before_json" | jq -r '.paths.wg_only_state_file // ""')"
+client_vpn_state_file="$(printf '%s\n' "$before_json" | jq -r '.paths.client_vpn_state_file // ""')"
 
 echo "[runtime-fix] before_status=$before_status findings=$before_findings_total"
 
@@ -617,13 +643,25 @@ if [[ -n "$target_owner_user" && -n "$target_owner_group" ]]; then
 else
   target_owner_spec=""
 fi
-if [[ "$current_uid" == "$root_required_uid" ]]; then
+if [[ "$current_uid" == "$root_required_uid" && -z "${EASY_NODE_RUNTIME_FIX_EUID:-}" ]]; then
   mutable_path_allowlist="$(runtime_fix_default_mutable_allowlist "$target_owner_user")"
 else
   mutable_path_allowlist="${EASY_NODE_RUNTIME_FIX_MUTABLE_PATH_ALLOWLIST:-$(runtime_fix_default_mutable_allowlist "$target_owner_user")}"
 fi
 
-if json_has_code "$before_json" '[.findings[].code | select(. == "wg_only_state_stale" or . == "wg_only_client_iface_present" or . == "wg_only_exit_iface_present" or startswith("wg_only_port_busy_"))] | length > 0'; then
+wg_only_state_stale="0"
+wg_only_needs_privileged_cleanup="0"
+if json_has_code "$before_json" '[.findings[].code | select(. == "wg_only_state_stale")] | length > 0'; then
+  wg_only_state_stale="1"
+fi
+if json_has_code "$before_json" '[.findings[].code | select(. == "wg_only_client_iface_present" or . == "wg_only_exit_iface_present" or startswith("wg_only_port_busy_"))] | length > 0'; then
+  wg_only_needs_privileged_cleanup="1"
+fi
+if [[ "$current_uid" == "$root_required_uid" && "$wg_only_state_stale" == "1" ]]; then
+  wg_only_needs_privileged_cleanup="1"
+fi
+
+if [[ "$wg_only_needs_privileged_cleanup" == "1" ]]; then
   if [[ "$current_uid" == "$root_required_uid" ]]; then
     if "$easy_node_script" wg-only-stack-down --force-iface-cleanup 1 --base-port "$base_port" --client-iface "$client_iface" --exit-iface "$exit_iface" >/dev/null 2>&1; then
       actions_taken+=("wg-only cleanup")
@@ -636,9 +674,23 @@ if json_has_code "$before_json" '[.findings[].code | select(. == "wg_only_state_
     actions_skipped+=("wg-only cleanup (root required)")
     echo "[runtime-fix] action_skipped=wg-only cleanup (root required)"
   fi
+elif [[ "$wg_only_state_stale" == "1" ]]; then
+  remove_stale_state_file "wg-only stale state cleanup" "$wg_only_state_file"
 fi
 
-if json_has_code "$before_json" '[.findings[].code | select(. == "client_vpn_state_stale" or . == "client_vpn_iface_present")] | length > 0'; then
+client_vpn_state_stale="0"
+client_vpn_needs_privileged_cleanup="0"
+if json_has_code "$before_json" '[.findings[].code | select(. == "client_vpn_state_stale")] | length > 0'; then
+  client_vpn_state_stale="1"
+fi
+if json_has_code "$before_json" '[.findings[].code | select(. == "client_vpn_iface_present")] | length > 0'; then
+  client_vpn_needs_privileged_cleanup="1"
+fi
+if [[ "$current_uid" == "$root_required_uid" && "$client_vpn_state_stale" == "1" ]]; then
+  client_vpn_needs_privileged_cleanup="1"
+fi
+
+if [[ "$client_vpn_needs_privileged_cleanup" == "1" ]]; then
   if [[ "$current_uid" == "$root_required_uid" ]]; then
     if "$easy_node_script" client-vpn-down --force-iface-cleanup 1 --iface "$vpn_iface" --keep-key 1 >/dev/null 2>&1; then
       actions_taken+=("client-vpn cleanup")
@@ -651,6 +703,8 @@ if json_has_code "$before_json" '[.findings[].code | select(. == "client_vpn_sta
     actions_skipped+=("client-vpn cleanup (root required)")
     echo "[runtime-fix] action_skipped=client-vpn cleanup (root required)"
   fi
+elif [[ "$client_vpn_state_stale" == "1" ]]; then
+  remove_stale_state_file "client-vpn stale state cleanup" "$client_vpn_state_file"
 fi
 
 if json_has_code "$before_json" '[.findings[].code | select(. == "stale_client_demo_containers")] | length > 0'; then

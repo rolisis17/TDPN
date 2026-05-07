@@ -112,11 +112,17 @@ type IssueTokenResponse struct {
 }
 
 type SponsorPaymentProof struct {
+	Source        string `json:"source,omitempty"`
 	ReservationID string `json:"reservation_id"`
 	SponsorID     string `json:"sponsor_id,omitempty"`
 	Subject       string `json:"subject,omitempty"`
 	SessionID     string `json:"session_id,omitempty"`
 }
+
+const (
+	PaymentProofSourceSponsor    = "sponsor"
+	PaymentProofSourceWalletFund = "wallet_fund"
+)
 
 type SponsorQuoteRequest struct {
 	SponsorID string `json:"sponsor_id,omitempty"`

@@ -11,13 +11,58 @@ func TestValidateRuntimeConfigProdStrictRejectsInsecureSkipVerify(t *testing.T) 
 	t.Setenv("MTLS_INSECURE_SKIP_VERIFY", "1")
 
 	s := &Service{
-		prodStrict: true,
+		prodStrict:                       true,
+		providerTokenProofSharedFileMode: true,
 	}
 	err := s.validateRuntimeConfig()
 	if err == nil {
 		t.Fatalf("expected prod strict to reject MTLS_INSECURE_SKIP_VERIFY")
 	}
 	if err.Error() != "PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictRejectsInstanceLocalProviderTokenReplay(t *testing.T) {
+	s := &Service{
+		prodStrict:                  true,
+		providerTokenProofStoreFile: "data/directory_provider_token_proof_replay.json",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected prod strict to reject instance-local provider token proof replay")
+	}
+	if err.Error() != "PROD_STRICT_MODE requires shared provider token proof replay storage (set DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_ADDR or DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1)" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictAllowsRedisProviderTokenReplayStorage(t *testing.T) {
+	s := &Service{
+		prodStrict:                      true,
+		providerTokenProofRedisAddr:     "127.0.0.1:6379",
+		providerTokenProofRedisPassword: "test",
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected later prod strict validation to fail without beta strict")
+	}
+	if err.Error() != "PROD_STRICT_MODE requires BETA_STRICT_MODE=1" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigProdStrictAllowsSharedFileProviderTokenReplayStorage(t *testing.T) {
+	s := &Service{
+		prodStrict:                       true,
+		providerTokenProofStoreFile:      "data/directory_provider_token_proof_replay.json",
+		providerTokenProofSharedFileMode: true,
+	}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected later prod strict validation to fail without beta strict")
+	}
+	if err.Error() != "PROD_STRICT_MODE requires BETA_STRICT_MODE=1" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

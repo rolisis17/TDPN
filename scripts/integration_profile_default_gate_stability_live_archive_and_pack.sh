@@ -149,6 +149,9 @@ fi
 
 mkdir -p "$(dirname "$run_summary_json")" "$(dirname "$check_summary_json")" "$(dirname "$cycle_summary_json")"
 now_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [[ "$scenario" == "stale_timestamp" ]]; then
+  now_utc="2000-01-01T00:00:00Z"
+fi
 
 if [[ "$scenario" != "missing_artifacts" ]]; then
   jq -n \
@@ -285,6 +288,9 @@ fi
 
 mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
 now_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [[ "$scenario" == "stale_timestamp" ]]; then
+  now_utc="2000-01-01T00:00:00Z"
+fi
 
 if [[ "$scenario" == "warn_no_go" ]]; then
   jq -n \
@@ -455,6 +461,42 @@ assert_jq "$MISS_SUMMARY" '
   and (.stages.archive.missing_required_artifacts | index("run_summary_json")) != null
   and (.stages.archive.missing_required_artifacts | index("check_summary_json")) != null
   and ((.reasons | map(test("^archive: missing required artifact run_summary_json$")) | any) == true)
+'
+
+echo "[profile-default-gate-stability-live-archive-and-pack] stale generated_at_utc fails closed"
+STALE_TS_DIR="$TMP_DIR/stale_timestamp"
+STALE_TS_REPORTS="$STALE_TS_DIR/reports"
+STALE_TS_SUMMARY="$STALE_TS_DIR/bundle_summary.json"
+: >"$CAPTURE_FILE"
+set +e
+PROFILE_DEFAULT_GATE_STABILITY_LIVE_ARCHIVE_AND_PACK_CYCLE_SCRIPT="$FAKE_CYCLE" \
+PROFILE_DEFAULT_GATE_STABILITY_LIVE_ARCHIVE_AND_PACK_EVIDENCE_PACK_SCRIPT="$FAKE_PACK" \
+FAKE_LIVE_ARCHIVE_PACK_CAPTURE_FILE="$CAPTURE_FILE" \
+FAKE_LIVE_ARCHIVE_PACK_CYCLE_SCENARIO="stale_timestamp" \
+FAKE_LIVE_ARCHIVE_PACK_PACK_SCENARIO="pass" \
+bash "$SCRIPT_UNDER_TEST" \
+  --host-a "198.51.100.25" \
+  --host-b "198.51.100.26" \
+  --campaign-subject "inv-stale-ts-01" \
+  --reports-dir "$STALE_TS_REPORTS" \
+  --summary-json "$STALE_TS_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_default_gate_stability_live_archive_and_pack_stale_timestamp.log 2>&1
+stale_ts_rc=$?
+set -e
+if [[ "$stale_ts_rc" -eq 0 ]]; then
+  echo "expected stale-timestamp path rc!=0"
+  cat /tmp/integration_profile_default_gate_stability_live_archive_and_pack_stale_timestamp.log
+  exit 1
+fi
+
+assert_jq "$STALE_TS_SUMMARY" '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_reason_code == "cycle_stage_failed"
+  and .stages.cycle.summary.generated_at_utc == "2000-01-01T00:00:00Z"
+  and .stages.cycle.summary.timestamp_current_after_run == false
+  and (.stages.cycle.summary.errors | index("generated_at_utc predates current stage")) != null
+  and .stages.evidence_pack.attempted == false
 '
 
 echo "[profile-default-gate-stability-live-archive-and-pack] preflight missing-subject fail closed"

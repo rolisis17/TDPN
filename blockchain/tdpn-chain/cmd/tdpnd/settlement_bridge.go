@@ -226,7 +226,8 @@ type settlementSponsorAuthorizationResponse struct {
 
 type settlementSponsorDelegationResponse struct {
 	sponsortypes.DelegatedSessionCredit
-	Currency string `json:"Currency,omitempty"`
+	Currency      string `json:"Currency,omitempty"`
+	ExpiresAtUnix int64  `json:"ExpiresAtUnix,omitempty"`
 }
 
 func runSettlementHTTPMode(
@@ -524,7 +525,7 @@ func (h *settlementBridgeHandler) handleBillingReservations(w http.ResponseWrite
 			}
 			writeJSON(w, http.StatusOK, map[string]any{
 				"ok":          true,
-				"reservation": resp.Reservation,
+				"reservation": bridgeBillingReservationView(resp.Reservation),
 			})
 			return
 		}
@@ -536,7 +537,7 @@ func (h *settlementBridgeHandler) handleBillingReservations(w http.ResponseWrite
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":           true,
-			"reservations": visibleBillingReservations(resp.Reservations),
+			"reservations": visibleBillingReservationViews(resp.Reservations),
 		})
 		return
 	}
@@ -568,12 +569,16 @@ func (h *settlementBridgeHandler) handleBillingReservations(w http.ResponseWrite
 		}
 		subjectID = boundSubjectID
 	}
-	currency := strings.TrimSpace(payload.Currency)
-	if reservationID == "" || sessionID == "" || subjectID == "" || currency == "" {
+	currency, currencyErr := validateBridgeCurrency(payload.Currency)
+	if reservationID == "" || sessionID == "" || subjectID == "" {
 		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{
 			OK:    false,
 			Error: "ReservationID, SessionID, SubjectID, and Currency are required",
 		})
+		return
+	}
+	if currencyErr != nil {
+		writeJSON(w, http.StatusBadRequest, bridgeEnvelope{OK: false, Error: currencyErr.Error()})
 		return
 	}
 	if isSponsorReservationCurrencyMetadataID(reservationID) {
@@ -1113,22 +1118,6 @@ func (h *settlementBridgeHandler) handleSponsorReservation(w http.ResponseWriter
 		writeJSON(w, statusCode, bridgeEnvelope{OK: false, Error: message})
 		return
 	}
-	if err := h.persistSponsorReservationCurrency(r.Context(), settlementSponsorReservationCurrencyRecord{
-		ReservationID: reservationID,
-		SponsorID:     sponsorID,
-		SessionID:     sessionID,
-		Currency:      currency,
-		AmountMicros:  payload.AmountMicros,
-		CreatedAtUnix: createdUnix,
-	}); err != nil {
-		if errors.Is(err, billingmodule.ErrReservationConflict) {
-			writeJSON(w, http.StatusConflict, bridgeEnvelope{OK: false, Error: err.Error()})
-			return
-		}
-		writeBridgeError(w, err)
-		return
-	}
-
 	_, err = h.scaffold.SponsorMsgServer().CreateAuthorization(r.Context(), app.SponsorCreateAuthorizationRequest{
 		Record: authorizationRecord,
 	})
@@ -1147,6 +1136,21 @@ func (h *settlementBridgeHandler) handleSponsorReservation(w http.ResponseWriter
 	})
 	if err != nil {
 		if errors.Is(err, sponsormodule.ErrDelegationConflict) {
+			writeJSON(w, http.StatusConflict, bridgeEnvelope{OK: false, Error: err.Error()})
+			return
+		}
+		writeBridgeError(w, err)
+		return
+	}
+	if err := h.persistSponsorReservationCurrency(r.Context(), settlementSponsorReservationCurrencyRecord{
+		ReservationID: reservationID,
+		SponsorID:     sponsorID,
+		SessionID:     sessionID,
+		Currency:      currency,
+		AmountMicros:  payload.AmountMicros,
+		CreatedAtUnix: createdUnix,
+	}); err != nil {
+		if errors.Is(err, billingmodule.ErrReservationConflict) {
 			writeJSON(w, http.StatusConflict, bridgeEnvelope{OK: false, Error: err.Error()})
 			return
 		}
@@ -2279,6 +2283,17 @@ type settlementSponsorReservationCurrencyRecord struct {
 	CreatedAtUnix int64
 }
 
+type settlementBillingReservationView struct {
+	ReservationID string                          `json:"ReservationID"`
+	SponsorID     string                          `json:"SponsorID"`
+	SubjectID     string                          `json:"SubjectID"`
+	SessionID     string                          `json:"SessionID"`
+	AssetDenom    string                          `json:"AssetDenom"`
+	Amount        int64                           `json:"Amount"`
+	Status        chaintypes.ReconciliationStatus `json:"Status"`
+	CreatedAtUnix int64                           `json:"CreatedAtUnix"`
+}
+
 func validateBridgeCurrency(raw string) (string, error) {
 	currency := strings.ToLower(strings.TrimSpace(raw))
 	if currency == "" {
@@ -2307,6 +2322,28 @@ func visibleBillingReservations(records []billingtypes.CreditReservation) []bill
 		visible = append(visible, record)
 	}
 	return visible
+}
+
+func bridgeBillingReservationView(record billingtypes.CreditReservation) settlementBillingReservationView {
+	return settlementBillingReservationView{
+		ReservationID: record.ReservationID,
+		SponsorID:     record.SponsorID,
+		SubjectID:     record.SponsorID,
+		SessionID:     record.SessionID,
+		AssetDenom:    record.AssetDenom,
+		Amount:        record.Amount,
+		Status:        record.Status,
+		CreatedAtUnix: record.CreatedAtUnix,
+	}
+}
+
+func visibleBillingReservationViews(records []billingtypes.CreditReservation) []settlementBillingReservationView {
+	visible := visibleBillingReservations(records)
+	views := make([]settlementBillingReservationView, 0, len(visible))
+	for _, record := range visible {
+		views = append(views, bridgeBillingReservationView(record))
+	}
+	return views
 }
 
 func (h *settlementBridgeHandler) validateSponsorReservationCurrency(ctx context.Context, reservationID string, currency string) (int, string, error) {
@@ -2459,6 +2496,15 @@ func (h *settlementBridgeHandler) enrichSponsorDelegation(ctx context.Context, r
 	currency, found, err := h.sponsorReservationCurrency(ctx, record.ReservationID)
 	if err == nil && found {
 		enriched.Currency = currency
+	}
+	authorizationID := strings.TrimSpace(record.AuthorizationID)
+	if authorizationID != "" {
+		authResp, err := h.scaffold.SponsorQueryServer().GetAuthorization(ctx, app.SponsorGetAuthorizationRequest{
+			AuthorizationID: authorizationID,
+		})
+		if err == nil && authResp.Found {
+			enriched.ExpiresAtUnix = authResp.Authorization.ExpiresAtUnix
+		}
 	}
 	return enriched
 }

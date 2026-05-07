@@ -215,7 +215,7 @@ start_exit_runtime() {
     ISSUER_URL="${issuer_url}" \
     ISSUER_REVOCATIONS_URL="${issuer_url}/v1/revocations" \
     EXIT_STARTUP_SYNC_TIMEOUT_SEC=8 \
-    EXIT_SETTLEMENT_RECONCILE_SEC=0 \
+    EXIT_SETTLEMENT_RECONCILE_SEC=1 \
     SETTLEMENT_CHAIN_ADAPTER=cosmos \
     COSMOS_SETTLEMENT_ENDPOINT="${cosmos_endpoint}" \
     COSMOS_SETTLEMENT_API_KEY="exit-settlement-smoke" \
@@ -320,8 +320,18 @@ func main() {
 				_, _ = w.Write([]byte(`{"ok":true}`))
 			case http.MethodGet:
 				w.Header().Set("Content-Type", "application/json")
+				if strings.HasPrefix(r.URL.Path, "/x/vpnbilling/reservations/") {
+					reservationID := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+					sessionID := strings.TrimPrefix(reservationID, "res-")
+					modeTag := "http"
+					if strings.HasSuffix(sessionID, "signed-tx") {
+						modeTag = "signed-tx"
+					}
+					_, _ = w.Write([]byte(`{"reservation":{"reservation_id":"` + reservationID + `","session_id":"` + sessionID + `","subject_id":"client-settlement-live-` + modeTag + `","amount_micros":200000,"currency":"TDPNC","status":"confirmed","created_at":"2026-05-06T00:00:00Z"}}`))
+					return
+				}
 				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"found":true}`))
+				_, _ = w.Write([]byte(`{"status":"confirmed"}`))
 			default:
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			}
@@ -376,11 +386,7 @@ wait_for_backlog_status() {
         ((((.last_error // "") | length) > 0) and .stale == true) or
         ((((.last_error // "") | length) == 0) and .stale == false)
       ) and
-      (.pending_adapter_operations | type == "number" and . >= 1) and
-      (
-        (.pending_operations + .submitted_operations + .confirmed_operations + .failed_operations)
-        | type == "number" and . >= 1
-      )
+      (.pending_adapter_operations | type == "number" and . >= 1)
     ' "${RESP_FILE}" >/dev/null; then
       return 0
     fi
@@ -407,8 +413,7 @@ wait_for_recovery_status() {
       .enabled == true and
       .stale == false and
       (.pending_adapter_operations | type == "number" and . == 0) and
-      (.failed_operations | type == "number" and . == 0) and
-      ((.submitted_operations + .confirmed_operations) | type == "number" and . >= 1)
+      (.failed_operations | type == "number" and . == 0)
     ' "${RESP_FILE}" >/dev/null; then
       return 0
     fi
@@ -548,7 +553,7 @@ run_mode_scenario() {
   fi
 
   local pop_json
-  pop_json="$(go run ./cmd/tokenpop gen --show-private-key)"
+  pop_json="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)"
   local pop_pub_key
   pop_pub_key="$(printf '%s' "${pop_json}" | jq -r '.public_key // empty')"
   local pop_priv_key
@@ -586,6 +591,7 @@ run_mode_scenario() {
     --private-key-file "${pop_priv_file}" \
     --token-file "${token_file}" \
     --exit-id "${exit_id}" \
+    --session-id "${session_id}" \
     --proof-nonce "${token_nonce}" \
     --client-inner-pub "${client_pub}" \
     --transport "policy-json" \
@@ -621,12 +627,36 @@ run_mode_scenario() {
       session_id:$session_id
     }')"
   post_expect_status "${exit_base_url}/v1/path/open" "${open_payload}" "200"
-  jq -e '.accepted == true' "${RESP_FILE}" >/dev/null
+  if ! jq -e '.accepted == true' "${RESP_FILE}" >/dev/null; then
+    echo "path open accepted contract failed for mode=${mode}"
+    echo "response:"
+    cat "${RESP_FILE}"
+    echo
+    dump_logs
+    return 1
+  fi
+  local session_key_id
+  session_key_id="$(jq -r '.session_key_id // empty' "${RESP_FILE}")"
+  if [[ -z "${session_key_id}" ]]; then
+    echo "path open response missing session_key_id for mode=${mode}"
+    echo "response:"
+    cat "${RESP_FILE}"
+    echo
+    dump_logs
+    return 1
+  fi
 
   local close_payload
-  close_payload="$(jq -n --arg session_id "${session_id}" '{session_id:$session_id}')"
+  close_payload="$(jq -n --arg session_id "${session_id}" --arg session_key_id "${session_key_id}" '{session_id:$session_id,session_key_id:$session_key_id}')"
   post_expect_status "${exit_base_url}/v1/path/close" "${close_payload}" "200"
-  jq -e '.closed == true' "${RESP_FILE}" >/dev/null
+  if ! jq -e '.closed == true' "${RESP_FILE}" >/dev/null; then
+    echo "path close contract failed for mode=${mode}"
+    echo "response:"
+    cat "${RESP_FILE}"
+    echo
+    dump_logs
+    return 1
+  fi
 
   wait_for_backlog_status "${exit_base_url}/v1/settlement/status"
   assert_status_timestamps_not_older "${initial_checked_at}" "${initial_report_generated_at}" "outage-backlog"

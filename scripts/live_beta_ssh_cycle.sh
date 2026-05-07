@@ -30,11 +30,12 @@ ssh_attempts="${LIVE_BETA_SSH_ATTEMPTS:-3}"
 skip_pull="${LIVE_BETA_SKIP_PULL:-0}"
 skip_up="${LIVE_BETA_SKIP_UP:-0}"
 skip_client="${LIVE_BETA_SKIP_CLIENT:-0}"
+auth_negative_subject="${LIVE_BETA_AUTH_NEGATIVE_SUBJECT:-inv-invalid-live-negative}"
 
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/live_beta_ssh_cycle.sh [--mode ssh-check|pull|up|health|topology|client|full] [--subject INVITE] [--generate-subject]
+  ./scripts/live_beta_ssh_cycle.sh [--mode ssh-check|pull|up|health|topology|auth-negative|client|full] [--subject INVITE] [--generate-subject]
 
 Defaults target the current two-machine Tailscale lab:
   A: stella@100.113.245.61:2222  repo=/mnt/c/Users/Stella/Downloads/TDPN
@@ -45,6 +46,7 @@ Environment overrides:
   LIVE_BETA_A_USER, LIVE_BETA_A_HOST, LIVE_BETA_A_PORT, LIVE_BETA_A_REPO
   LIVE_BETA_B_USER, LIVE_BETA_B_HOST, LIVE_BETA_B_PORT, LIVE_BETA_B_REPO
   LIVE_BETA_SUBJECT, LIVE_BETA_GENERATE_SUBJECT=1, LIVE_BETA_INVITE_PREFIX, LIVE_BETA_INVITE_TIER
+  LIVE_BETA_AUTH_NEGATIVE_SUBJECT
   LIVE_BETA_CLIENT_FORCE_BUILD=0
   LIVE_BETA_SKIP_PULL=1, LIVE_BETA_SKIP_UP=1, LIVE_BETA_SKIP_CLIENT=1
 USAGE
@@ -93,7 +95,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$mode" in
-  ssh-check|pull|up|health|topology|client|full)
+  ssh-check|pull|up|health|topology|auth-negative|client|full)
     ;;
   *)
     echo "invalid --mode: $mode"
@@ -102,7 +104,7 @@ case "$mode" in
     ;;
 esac
 
-for n in timeout_sec client_timeout_sec ssh_connect_timeout_sec ssh_attempts; do
+for n in timeout_sec client_timeout_sec ssh_connect_timeout_sec ssh_attempts a_port b_port; do
   v="${!n}"
   if ! [[ "$v" =~ ^[0-9]+$ ]] || ((v < 1)); then
     echo "$n must be a positive integer"
@@ -135,6 +137,7 @@ need_cmd() {
 
 need_cmd ssh
 need_cmd curl
+need_cmd go
 need_cmd jq
 
 if [[ ! -f "$ssh_key" ]]; then
@@ -161,6 +164,7 @@ ssh_run() {
       -o ServerAliveInterval=15 \
       -o ServerAliveCountMax=4 \
       -o StrictHostKeyChecking=accept-new \
+      -- \
       "${user}@${host}" "$@"
     rc=$?
     set -e
@@ -225,6 +229,8 @@ server_up_hosts() {
       --issuer-id $(quote "$a_issuer") \
       --peer-directories http://$(quote "$b_host"):8081 \
       --beta-profile 1 \
+      --client-allowlist 1 \
+      --allow-anon-cred 0 \
       --prod-profile 0
   "
 }
@@ -267,6 +273,56 @@ print_topology() {
     curl -fsS --connect-timeout 3 --max-time 15 "$url" |
       jq -r '.relays[]? | [.relay_id, .role, (.operator_id // .operator // .origin_operator // ""), (if ((.control_url // "") == "") then "no-control-url" else "control-url" end), (if ((.endpoint // "") == "") then "no-endpoint" else "endpoint" end), (if (.entry_route_assertion_pub_key // "") == "" then "no-entry-assertion-key" else "entry-assertion-key" end)] | @tsv'
   done
+}
+
+auth_negative_check() {
+  section "auth-negative"
+  local token_json pop_pub body_file payload http_code
+  token_json="$(
+    cd "$ROOT_DIR"
+    GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key
+  )"
+  pop_pub="$(printf '%s\n' "$token_json" | jq -r '.public_key // empty')"
+  if [[ -z "$pop_pub" ]]; then
+    echo "auth-negative failed: tokenpop did not produce a public key"
+    return 1
+  fi
+  body_file="$(mktemp)"
+  payload="$(jq -cn --arg subject "$auth_negative_subject" --arg pop "$pop_pub" '{tier:1, subject:$subject, token_type:"client_access", pop_pub_key:$pop}')"
+  set +e
+  http_code="$(
+    curl -sS \
+      --connect-timeout 3 \
+      --max-time 15 \
+      -o "$body_file" \
+      -w "%{http_code}" \
+      -X POST \
+      -H "Content-Type: application/json" \
+      --data "$payload" \
+      "http://${a_host}:8082/v1/token"
+  )"
+  local curl_rc=$?
+  set -e
+  if [[ "$curl_rc" -ne 0 ]]; then
+    echo "auth-negative failed: issuer token request curl rc=$curl_rc"
+    cat "$body_file" || true
+    rm -f "$body_file"
+    return "$curl_rc"
+  fi
+  if [[ "$http_code" != "403" ]]; then
+    echo "auth-negative failed: expected issuer to reject unknown subject with 403, got $http_code"
+    cat "$body_file" || true
+    rm -f "$body_file"
+    return 1
+  fi
+  if ! grep -F -- "client subject not allowlisted" "$body_file" >/dev/null 2>&1; then
+    echo "auth-negative failed: issuer returned 403 without the allowlist rejection body"
+    cat "$body_file" || true
+    rm -f "$body_file"
+    return 1
+  fi
+  rm -f "$body_file"
+  echo "auth-negative ok: unknown client subject was rejected"
 }
 
 generate_client_subject() {
@@ -340,6 +396,9 @@ case "$mode" in
   topology)
     print_topology
     ;;
+  auth-negative)
+    auth_negative_check
+    ;;
   client)
     if [[ "$generate_subject" == "1" ]]; then
       generate_client_subject
@@ -356,6 +415,7 @@ case "$mode" in
     fi
     health_check
     print_topology
+    auth_negative_check
     if [[ "$skip_client" != "1" ]]; then
       if [[ "$generate_subject" == "1" ]]; then
         generate_client_subject

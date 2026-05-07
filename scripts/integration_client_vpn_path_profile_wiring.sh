@@ -137,6 +137,8 @@ check_pattern 'client-vpn-up requires CLIENT_SESSION_REUSE to be 0 or 1' \
   "client-vpn-up missing CLIENT_SESSION_REUSE validation guardrail"
 check_pattern 'client-vpn-up requires CLIENT_SESSION_REFRESH_LEAD_SEC >= 1' \
   "client-vpn-up missing CLIENT_SESSION_REFRESH_LEAD_SEC validation guardrail"
+check_pattern 'client-vpn-up beta/prod profile requires --subject, --subject-file, or --anon-cred' \
+  "client-vpn-up missing beta/prod identity guardrail"
 
 echo "[client-vpn-path-profile] status/state visibility"
 check_pattern 'CLIENT_VPN_PATH_PROFILE=\$normalized_path_profile' \

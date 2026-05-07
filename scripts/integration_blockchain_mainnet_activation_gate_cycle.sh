@@ -629,6 +629,7 @@ assert_nonempty_iso_utc_generated_at() {
 
 run_cycle() {
   BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_CAPTURE_FILE="$CAPTURE" \
+  BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_ALLOW_UNSAFE_SCRIPT_OVERRIDES=1 \
   BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_METRICS_INPUT_TEMPLATE_SCRIPT="$FAKE_METRICS_INPUT_TEMPLATE" \
   BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_METRICS_INPUT_SCRIPT="$FAKE_METRICS_INPUT" \
   BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_GATE_BUNDLE_SCRIPT="$FAKE_GATE_BUNDLE" \
@@ -636,6 +637,28 @@ run_cycle() {
   BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
   "$SCRIPT_UNDER_TEST" "$@"
 }
+
+echo "[blockchain-mainnet-activation-gate-cycle] rejects unsafe script override without test flag"
+set +e
+BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_CAPTURE_FILE="$CAPTURE" \
+BLOCKCHAIN_MAINNET_ACTIVATION_GATE_CYCLE_GATE_BUNDLE_SCRIPT="$FAKE_GATE_BUNDLE" \
+"$SCRIPT_UNDER_TEST" \
+  --input-json "$PASS_INPUT_JSON" \
+  --reports-dir "$TMP_DIR/reports_unsafe_script_override" \
+  --summary-json "$TMP_DIR/summary_unsafe_script_override.json" \
+  --print-output-json 0 >"$TMP_DIR/unsafe_script_override.log" 2>&1
+unsafe_script_override_rc=$?
+set -e
+if [[ "$unsafe_script_override_rc" -ne 2 ]]; then
+  echo "expected unsafe script override to fail as usage error"
+  cat "$TMP_DIR/unsafe_script_override.log"
+  exit 1
+fi
+if ! grep -Fq "unsafe stage script override rejected" "$TMP_DIR/unsafe_script_override.log"; then
+  echo "expected unsafe script override rejection message"
+  cat "$TMP_DIR/unsafe_script_override.log"
+  exit 1
+fi
 
 echo "[blockchain-mainnet-activation-gate-cycle] pass wiring path"
 : >"$CAPTURE"

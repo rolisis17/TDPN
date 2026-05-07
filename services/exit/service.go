@@ -976,6 +976,11 @@ func (s *Service) validateRuntimeConfig() error {
 	if s.strictModeParseErr != nil {
 		return s.strictModeParseErr
 	}
+	if s.prodStrict {
+		if err := validateProdStrictCosmosFinalityConfig(); err != nil {
+			return err
+		}
+	}
 	if s.strictPathOpenExitIdentityBinding() && strings.TrimSpace(s.exitRelayID) == "" {
 		return fmt.Errorf("strict exit identity binding requires EXIT_RELAY_ID")
 	}
@@ -1176,6 +1181,20 @@ func (s *Service) validateRuntimeConfig() error {
 		}
 		if !s.settlementChainBacked {
 			return fmt.Errorf("PROD_STRICT_MODE requires SETTLEMENT_CHAIN_ADAPTER=cosmos")
+		}
+	}
+	return nil
+}
+
+func validateProdStrictCosmosFinalityConfig() error {
+	for _, prefix := range []string{"COSMOS_SETTLEMENT_", "COSMOS_SETTLEMENT_SHADOW_"} {
+		trustedFinalityKey := prefix + "TRUSTED_BRIDGE_FINALITY"
+		if envEnabled(trustedFinalityKey) {
+			return fmt.Errorf("PROD_STRICT_MODE forbids %s", trustedFinalityKey)
+		}
+		submitModeKey := prefix + "SUBMIT_MODE"
+		if strings.EqualFold(strings.TrimSpace(os.Getenv(submitModeKey)), settlement.CosmosSubmitModeSignedTx) {
+			return fmt.Errorf("PROD_STRICT_MODE forbids %s=signed-tx", submitModeKey)
 		}
 	}
 	return nil
@@ -4002,19 +4021,24 @@ func (s *Service) handleSettlementStatus(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	resp := s.currentSettlementStatusResponse()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Service) currentSettlementStatusResponse() settlementStatusResponse {
 	resp := settlementStatusResponse{
 		Enabled: s.settlement != nil,
 	}
 	if s.settlement != nil {
-		reconcileCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		report, stale, checkedAt, lastError, err := s.reconcileSettlementStatus(reconcileCtx)
-		cancel()
-		if err != nil {
-			log.Printf("exit settlement status warning err=%v", err)
-		}
+		s.mu.RLock()
+		report := s.settlementStatus.lastReport
+		checkedAt := s.settlementStatus.lastCheckedAt
+		lastError := s.settlementStatus.lastError
+		s.mu.RUnlock()
 		resp.CheckedAt = checkedAt
 		resp.LastError = lastError
-		resp.Stale = stale
+		resp.Stale = checkedAt.IsZero() || lastError != ""
 		resp.ReportGeneratedAt = report.GeneratedAt
 		resp.PendingAdapterOperations = report.PendingAdapterOperations
 		resp.ShadowAdapterConfigured = report.ShadowAdapterConfigured
@@ -4026,8 +4050,7 @@ func (s *Service) handleSettlementStatus(w http.ResponseWriter, r *http.Request)
 		resp.ConfirmedOperations = report.ConfirmedOperations
 		resp.FailedOperations = report.FailedOperations
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	return resp
 }
 
 func (s *Service) reserveSettlementForSession(ctx context.Context, sessionID string, subjectID string) {

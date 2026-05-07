@@ -549,61 +549,124 @@ func (s *MemoryService) ReserveSponsorCredits(ctx context.Context, reservation S
 	return reservation, nil
 }
 
-func (s *MemoryService) GetSponsorReservation(_ context.Context, reservationID string) (SponsorCreditReservation, error) {
+func (s *MemoryService) GetSponsorReservation(ctx context.Context, reservationID string) (SponsorCreditReservation, error) {
 	reservationID = strings.TrimSpace(reservationID)
 	if reservationID == "" {
 		return SponsorCreditReservation{}, fmt.Errorf("reservation_id required")
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	reservation, ok := s.sponsorReservationsByID[reservationID]
-	if !ok {
-		return SponsorCreditReservation{}, fmt.Errorf("reservation not found: %s", reservationID)
+	s.mu.Unlock()
+	if ok {
+		return reservation, nil
 	}
-	return reservation, nil
+	if reservation, found, err := s.sponsorReservationFromAdapter(ctx, reservationID); err != nil || found {
+		if err != nil {
+			return SponsorCreditReservation{}, err
+		}
+		return reservation, nil
+	}
+	if s.blockchainModeEnabled() {
+		return SponsorCreditReservation{}, fmt.Errorf("sponsor reservation not found on chain: %s", reservationID)
+	}
+	return SponsorCreditReservation{}, fmt.Errorf("reservation not found: %s", reservationID)
 }
 
-func (s *MemoryService) AuthorizePayment(_ context.Context, proof PaymentProof) (PaymentAuthorization, error) {
+func (s *MemoryService) AuthorizePayment(ctx context.Context, proof PaymentProof) (PaymentAuthorization, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	proof.Source = strings.TrimSpace(proof.Source)
 	proof.ReservationID = strings.TrimSpace(proof.ReservationID)
 	proof.SponsorID = strings.TrimSpace(proof.SponsorID)
 	proof.SubjectID = strings.TrimSpace(proof.SubjectID)
 	proof.SessionID = strings.TrimSpace(proof.SessionID)
+	if proof.Source == "" {
+		proof.Source = PaymentProofSourceSponsor
+	}
 	if proof.ReservationID == "" {
 		return PaymentAuthorization{}, fmt.Errorf("authorize payment requires reservation_id")
-	}
-	if proof.SponsorID == "" {
-		return PaymentAuthorization{}, fmt.Errorf("authorize payment requires sponsor_id")
 	}
 	if proof.SubjectID == "" {
 		return PaymentAuthorization{}, fmt.Errorf("authorize payment requires subject_id")
 	}
+	switch proof.Source {
+	case PaymentProofSourceSponsor:
+		return s.authorizeSponsorPayment(ctx, proof)
+	case PaymentProofSourceWalletFund:
+		return s.authorizeWalletFundPayment(ctx, proof)
+	default:
+		return PaymentAuthorization{}, fmt.Errorf("unsupported payment proof source: %s", proof.Source)
+	}
+}
+
+func paymentAuthorizationMapKey(source, reservationID string) string {
+	source = strings.TrimSpace(source)
+	reservationID = strings.TrimSpace(reservationID)
+	if source == "" || source == PaymentProofSourceSponsor {
+		return reservationID
+	}
+	return source + ":" + reservationID
+}
+
+func validatePaymentAuthorizationReplay(proof PaymentProof, existing PaymentAuthorization) error {
+	if existing.Source != "" && proof.Source != existing.Source {
+		return fmt.Errorf("reservation source mismatch")
+	}
+	if proof.SponsorID != existing.SponsorID {
+		return fmt.Errorf("reservation sponsor mismatch")
+	}
+	if proof.SubjectID != existing.SubjectID {
+		return fmt.Errorf("reservation subject mismatch")
+	}
+	if existing.SessionID != "" {
+		if proof.SessionID == "" {
+			return fmt.Errorf("authorize payment requires session_id")
+		}
+		if proof.SessionID != existing.SessionID {
+			return fmt.Errorf("reservation session mismatch")
+		}
+	} else if proof.SessionID != "" {
+		return fmt.Errorf("reservation session mismatch")
+	}
+	return nil
+}
+
+func (s *MemoryService) authorizeSponsorPayment(ctx context.Context, proof PaymentProof) (PaymentAuthorization, error) {
+	if proof.SponsorID == "" {
+		return PaymentAuthorization{}, fmt.Errorf("authorize payment requires sponsor_id")
+	}
 
 	now := time.Now().UTC()
+	authKey := paymentAuthorizationMapKey(proof.Source, proof.ReservationID)
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if existing, ok := s.paymentAuthByReservationID[proof.ReservationID]; ok {
-		if proof.SponsorID != existing.SponsorID {
-			return PaymentAuthorization{}, fmt.Errorf("reservation sponsor mismatch")
-		}
-		if proof.SubjectID != existing.SubjectID {
-			return PaymentAuthorization{}, fmt.Errorf("reservation subject mismatch")
-		}
-		if existing.SessionID != "" {
-			if proof.SessionID == "" {
-				return PaymentAuthorization{}, fmt.Errorf("authorize payment requires session_id")
-			}
-			if proof.SessionID != existing.SessionID {
-				return PaymentAuthorization{}, fmt.Errorf("reservation session mismatch")
-			}
-		} else if proof.SessionID != "" {
-			return PaymentAuthorization{}, fmt.Errorf("reservation session mismatch")
+	if existing, ok := s.paymentAuthByReservationID[authKey]; ok {
+		if err := validatePaymentAuthorizationReplay(proof, existing); err != nil {
+			s.mu.Unlock()
+			return PaymentAuthorization{}, err
 		}
 		existing.IdempotentReplay = true
+		s.mu.Unlock()
 		return existing, nil
 	}
 	reservation, ok := s.sponsorReservationsByID[proof.ReservationID]
+	blockchainMode := s.blockchainMode
+	s.mu.Unlock()
+	if blockchainMode {
+		chainReservation, err := s.confirmedSponsorReservationForPayment(ctx, reservation, ok, proof.ReservationID)
+		if err != nil {
+			return PaymentAuthorization{}, err
+		}
+		reservation = chainReservation
+		ok = true
+	}
 	if !ok {
 		return PaymentAuthorization{}, fmt.Errorf("reservation not found: %s", proof.ReservationID)
+	}
+	var materialErr error
+	reservation, materialErr = validateSponsorPaymentReservationMaterial(reservation, proof.ReservationID)
+	if materialErr != nil {
+		return PaymentAuthorization{}, materialErr
 	}
 	if !reservation.ExpiresAt.IsZero() && now.After(reservation.ExpiresAt) {
 		return PaymentAuthorization{}, fmt.Errorf("reservation expired: %s", proof.ReservationID)
@@ -627,7 +690,7 @@ func (s *MemoryService) AuthorizePayment(_ context.Context, proof PaymentProof) 
 	} else if proof.SessionID != "" {
 		return PaymentAuthorization{}, fmt.Errorf("reservation session mismatch")
 	}
-	if s.blockchainMode {
+	if blockchainMode {
 		if reservation.Status == OperationStatusPending {
 			return PaymentAuthorization{}, fmt.Errorf("reservation pending chain submission: %s", proof.ReservationID)
 		}
@@ -637,6 +700,7 @@ func (s *MemoryService) AuthorizePayment(_ context.Context, proof PaymentProof) 
 	}
 
 	auth := PaymentAuthorization{
+		Source:           PaymentProofSourceSponsor,
 		ReservationID:    reservation.ReservationID,
 		SponsorID:        reservation.SponsorID,
 		SubjectID:        reservation.SubjectID,
@@ -649,9 +713,228 @@ func (s *MemoryService) AuthorizePayment(_ context.Context, proof PaymentProof) 
 
 	reservation.ConsumedAt = now
 	reservation.Status = OperationStatusConfirmed
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sponsorReservationsByID == nil {
+		s.sponsorReservationsByID = map[string]SponsorCreditReservation{}
+	}
+	if s.paymentAuthByReservationID == nil {
+		s.paymentAuthByReservationID = map[string]PaymentAuthorization{}
+	}
+	if existing, ok := s.paymentAuthByReservationID[authKey]; ok {
+		if err := validatePaymentAuthorizationReplay(proof, existing); err != nil {
+			return PaymentAuthorization{}, err
+		}
+		existing.IdempotentReplay = true
+		return existing, nil
+	}
 	s.sponsorReservationsByID[reservation.ReservationID] = reservation
-	s.paymentAuthByReservationID[reservation.ReservationID] = auth
+	s.paymentAuthByReservationID[authKey] = auth
 	return auth, nil
+}
+
+func (s *MemoryService) authorizeWalletFundPayment(ctx context.Context, proof PaymentProof) (PaymentAuthorization, error) {
+	if proof.SponsorID != "" {
+		return PaymentAuthorization{}, fmt.Errorf("wallet fund payment proof must not include sponsor_id")
+	}
+	if proof.SessionID == "" {
+		return PaymentAuthorization{}, fmt.Errorf("authorize payment requires session_id")
+	}
+
+	now := time.Now().UTC()
+	authKey := paymentAuthorizationMapKey(proof.Source, proof.ReservationID)
+	s.mu.Lock()
+	if existing, ok := s.paymentAuthByReservationID[authKey]; ok {
+		if err := validatePaymentAuthorizationReplay(proof, existing); err != nil {
+			s.mu.Unlock()
+			return PaymentAuthorization{}, err
+		}
+		existing.IdempotentReplay = true
+		s.mu.Unlock()
+		return existing, nil
+	}
+	blockchainMode := s.blockchainMode
+	adapter := s.adapter
+	s.mu.Unlock()
+
+	var reservation FundReservation
+	var found bool
+	var err error
+	if blockchainMode {
+		querier, ok := adapter.(FundReservationQuerier)
+		if !ok || querier == nil {
+			return PaymentAuthorization{}, fmt.Errorf("wallet fund payment proof requires chain fund reservation material query for reservation %s", proof.ReservationID)
+		}
+		reservation, found, err = querier.FundReservation(ctx, proof.ReservationID)
+		if err != nil {
+			return PaymentAuthorization{}, fmt.Errorf("wallet fund reservation material check failed for %s: %w", proof.ReservationID, err)
+		}
+	} else {
+		reservation, found, err = s.FundReservation(ctx, proof.ReservationID)
+		if err != nil {
+			return PaymentAuthorization{}, err
+		}
+	}
+	if !found {
+		return PaymentAuthorization{}, fmt.Errorf("fund reservation not found: %s", proof.ReservationID)
+	}
+
+	reservation.ReservationID = strings.TrimSpace(reservation.ReservationID)
+	reservation.SessionID = strings.TrimSpace(reservation.SessionID)
+	reservation.SubjectID = strings.TrimSpace(reservation.SubjectID)
+	reservation.Currency = normalizeCurrencyCode(reservation.Currency)
+	if reservation.ReservationID == "" {
+		reservation.ReservationID = proof.ReservationID
+	}
+	if reservation.ReservationID != proof.ReservationID {
+		return PaymentAuthorization{}, fmt.Errorf("fund reservation id mismatch")
+	}
+	if reservation.SubjectID == "" {
+		return PaymentAuthorization{}, fmt.Errorf("fund reservation missing subject_id")
+	}
+	if reservation.SessionID == "" {
+		return PaymentAuthorization{}, fmt.Errorf("fund reservation missing session_id")
+	}
+	if reservation.AmountMicros <= 0 {
+		return PaymentAuthorization{}, fmt.Errorf("fund reservation amount invalid")
+	}
+	if reservation.Currency == "" {
+		return PaymentAuthorization{}, fmt.Errorf("fund reservation missing currency")
+	}
+	if proof.SubjectID != reservation.SubjectID {
+		return PaymentAuthorization{}, fmt.Errorf("reservation subject mismatch")
+	}
+	if proof.SessionID != reservation.SessionID {
+		return PaymentAuthorization{}, fmt.Errorf("reservation session mismatch")
+	}
+	if reservation.Status == "" && !blockchainMode {
+		reservation.Status = OperationStatusConfirmed
+	}
+	if reservation.Status == OperationStatusPending || reservation.Status == OperationStatusSubmitted {
+		return PaymentAuthorization{}, fmt.Errorf("reservation pending chain submission: %s", proof.ReservationID)
+	}
+	if reservation.Status != OperationStatusConfirmed {
+		return PaymentAuthorization{}, fmt.Errorf("reservation not chain-finalized: %s", proof.ReservationID)
+	}
+
+	auth := PaymentAuthorization{
+		Source:           PaymentProofSourceWalletFund,
+		ReservationID:    reservation.ReservationID,
+		SubjectID:        reservation.SubjectID,
+		SessionID:        reservation.SessionID,
+		AuthorizedMicros: reservation.AmountMicros,
+		Currency:         reservation.Currency,
+		AuthorizedAt:     now,
+		Status:           OperationStatusConfirmed,
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.paymentAuthByReservationID == nil {
+		s.paymentAuthByReservationID = map[string]PaymentAuthorization{}
+	}
+	if existing, ok := s.paymentAuthByReservationID[authKey]; ok {
+		if err := validatePaymentAuthorizationReplay(proof, existing); err != nil {
+			return PaymentAuthorization{}, err
+		}
+		existing.IdempotentReplay = true
+		return existing, nil
+	}
+	if s.reservationSessionByID == nil {
+		s.reservationSessionByID = map[string]string{}
+	}
+	if s.reservationsBySession == nil {
+		s.reservationsBySession = map[string]FundReservation{}
+	}
+	s.reservationSessionByID[reservation.ReservationID] = reservation.SessionID
+	s.reservationsBySession[reservation.SessionID] = reservation
+	s.paymentAuthByReservationID[authKey] = auth
+	return auth, nil
+}
+
+func (s *MemoryService) sponsorReservationFromAdapter(ctx context.Context, reservationID string) (SponsorCreditReservation, bool, error) {
+	reservation, found, err := s.querySponsorReservationFromAdapter(ctx, reservationID)
+	if err != nil || !found {
+		return reservation, found, err
+	}
+	s.mu.Lock()
+	if s.sponsorReservationsByID == nil {
+		s.sponsorReservationsByID = map[string]SponsorCreditReservation{}
+	}
+	s.sponsorReservationsByID[reservationID] = reservation
+	s.mu.Unlock()
+	return reservation, true, nil
+}
+
+func (s *MemoryService) querySponsorReservationFromAdapter(ctx context.Context, reservationID string) (SponsorCreditReservation, bool, error) {
+	adapter := s.currentAdapter()
+	querier, ok := adapter.(SponsorReservationQuerier)
+	if !ok || querier == nil {
+		if s.blockchainModeEnabled() {
+			return SponsorCreditReservation{}, false, fmt.Errorf("sponsor reservation chain material querier not configured")
+		}
+		return SponsorCreditReservation{}, false, nil
+	}
+	reservation, found, err := querier.SponsorReservation(ctx, reservationID)
+	if err != nil || !found {
+		return reservation, found, err
+	}
+	reservation, err = validateSponsorPaymentReservationMaterial(reservation, reservationID)
+	if err != nil {
+		return SponsorCreditReservation{}, false, err
+	}
+	return reservation, true, nil
+}
+
+func (s *MemoryService) confirmedSponsorReservationForPayment(ctx context.Context, local SponsorCreditReservation, localFound bool, reservationID string) (SponsorCreditReservation, error) {
+	chainReservation, found, err := s.querySponsorReservationFromAdapter(ctx, reservationID)
+	if err != nil {
+		return SponsorCreditReservation{}, fmt.Errorf("reservation chain material query failed: %w", err)
+	}
+	if !found {
+		return SponsorCreditReservation{}, fmt.Errorf("reservation not found on chain: %s", reservationID)
+	}
+	if chainReservation.Status != OperationStatusConfirmed {
+		return SponsorCreditReservation{}, fmt.Errorf("reservation not chain-finalized: %s", reservationID)
+	}
+	if chainReservation.ExpiresAt.IsZero() {
+		return SponsorCreditReservation{}, fmt.Errorf("reservation chain material missing expires_at: %s", reservationID)
+	}
+	if !chainReservation.ConsumedAt.IsZero() {
+		return SponsorCreditReservation{}, fmt.Errorf("reservation already consumed on chain: %s", reservationID)
+	}
+	if localFound && !sponsorReservationChainMaterialEqual(local, chainReservation) {
+		return SponsorCreditReservation{}, fmt.Errorf("reservation chain material mismatch for %s", reservationID)
+	}
+	return chainReservation, nil
+}
+
+func validateSponsorPaymentReservationMaterial(reservation SponsorCreditReservation, requestedReservationID string) (SponsorCreditReservation, error) {
+	requestedReservationID = strings.TrimSpace(requestedReservationID)
+	reservation.ReservationID = strings.TrimSpace(reservation.ReservationID)
+	reservation.SponsorID = strings.TrimSpace(reservation.SponsorID)
+	reservation.SubjectID = strings.TrimSpace(reservation.SubjectID)
+	reservation.SessionID = strings.TrimSpace(reservation.SessionID)
+	reservation.Currency = normalizeCurrencyCode(reservation.Currency)
+	if requestedReservationID == "" {
+		return SponsorCreditReservation{}, fmt.Errorf("reservation_id required")
+	}
+	if reservation.ReservationID == "" {
+		reservation.ReservationID = requestedReservationID
+	}
+	if reservation.ReservationID != requestedReservationID {
+		return SponsorCreditReservation{}, fmt.Errorf("reservation chain material id mismatch: requested=%s got=%s", requestedReservationID, reservation.ReservationID)
+	}
+	if reservation.SponsorID == "" || reservation.SubjectID == "" {
+		return SponsorCreditReservation{}, fmt.Errorf("reservation chain material missing sponsor_id or subject_id: %s", requestedReservationID)
+	}
+	if reservation.AmountMicros <= 0 {
+		return SponsorCreditReservation{}, fmt.Errorf("reservation chain material requires amount_micros > 0: %s", requestedReservationID)
+	}
+	if reservation.Currency == "" {
+		return SponsorCreditReservation{}, fmt.Errorf("reservation chain material missing currency: %s", requestedReservationID)
+	}
+	return reservation, nil
 }
 
 func (s *MemoryService) SettleSession(ctx context.Context, sessionID string) (SessionSettlement, error) {
@@ -2016,7 +2299,7 @@ func (s *MemoryService) confirmSubmittedAdapterOperations(ctx context.Context) {
 	if adapter == nil {
 		return
 	}
-	confirmer, ok := adapter.(ChainConfirmationStatusQuerier)
+	_, ok := adapter.(ChainConfirmationStatusQuerier)
 	if !ok {
 		return
 	}
@@ -2031,6 +2314,7 @@ func (s *MemoryService) confirmSubmittedAdapterOperations(ctx context.Context) {
 	}
 	type sponsorSnapshot struct {
 		ReservationID string
+		Reservation   SponsorCreditReservation
 	}
 	type slashSnapshot struct {
 		EvidenceID string
@@ -2063,7 +2347,7 @@ func (s *MemoryService) confirmSubmittedAdapterOperations(ctx context.Context) {
 	sponsorReservations := make([]sponsorSnapshot, 0)
 	for reservationID, reservation := range s.sponsorReservationsByID {
 		if reservation.Status == OperationStatusSubmitted {
-			sponsorReservations = append(sponsorReservations, sponsorSnapshot{ReservationID: reservationID})
+			sponsorReservations = append(sponsorReservations, sponsorSnapshot{ReservationID: reservationID, Reservation: reservation})
 		}
 	}
 	slashEvidence := make([]slashSnapshot, 0)
@@ -2076,6 +2360,7 @@ func (s *MemoryService) confirmSubmittedAdapterOperations(ctx context.Context) {
 
 	settlementQuerier, settlementQueryAvailable := adapter.(SessionSettlementQuerier)
 	rewardQuerier, rewardQueryAvailable := adapter.(RewardIssueQuerier)
+	sponsorQuerier, sponsorQueryAvailable := adapter.(SponsorReservationQuerier)
 	slashQuerier, slashQueryAvailable := adapter.(SlashEvidenceQuerier)
 	for _, snapshot := range settlements {
 		if !settlementQueryAvailable {
@@ -2134,13 +2419,20 @@ func (s *MemoryService) confirmSubmittedAdapterOperations(ctx context.Context) {
 		s.mu.Unlock()
 	}
 	for _, snapshot := range sponsorReservations {
-		status, found, err := confirmer.SponsorReservationStatus(ctx, snapshot.ReservationID)
-		if err != nil || !found || status != OperationStatusConfirmed {
+		if !sponsorQueryAvailable {
+			continue
+		}
+		chainReservation, found, err := sponsorQuerier.SponsorReservation(ctx, snapshot.ReservationID)
+		if err != nil ||
+			!found ||
+			chainReservation.Status != OperationStatusConfirmed ||
+			!chainReservation.ConsumedAt.IsZero() ||
+			!sponsorReservationChainMaterialEqual(snapshot.Reservation, chainReservation) {
 			continue
 		}
 		s.mu.Lock()
 		reservation, ok := s.sponsorReservationsByID[snapshot.ReservationID]
-		if ok && reservation.Status == OperationStatusSubmitted {
+		if ok && reservation.Status == OperationStatusSubmitted && sponsorReservationChainMaterialEqual(reservation, chainReservation) {
 			reservation.Status = OperationStatusConfirmed
 			reservation.AdapterDeferred = false
 			reservation.AdapterSubmitted = true
@@ -2485,6 +2777,25 @@ func sponsorReservationMaterialEqual(a SponsorCreditReservation, b SponsorCredit
 		a.Currency == b.Currency &&
 		a.CreatedAt.Equal(b.CreatedAt) &&
 		a.ExpiresAt.Equal(b.ExpiresAt)
+}
+
+func sponsorReservationChainMaterialEqual(a SponsorCreditReservation, b SponsorCreditReservation) bool {
+	return strings.TrimSpace(a.ReservationID) == strings.TrimSpace(b.ReservationID) &&
+		strings.TrimSpace(a.SponsorID) == strings.TrimSpace(b.SponsorID) &&
+		strings.TrimSpace(a.SubjectID) == strings.TrimSpace(b.SubjectID) &&
+		strings.TrimSpace(a.SessionID) == strings.TrimSpace(b.SessionID) &&
+		a.AmountMicros == b.AmountMicros &&
+		strings.EqualFold(strings.TrimSpace(a.Currency), strings.TrimSpace(b.Currency)) &&
+		chainTimeUnixSecondEqual(a.CreatedAt, b.CreatedAt) &&
+		chainTimeUnixSecondEqual(a.ExpiresAt, b.ExpiresAt) &&
+		chainOptionalTimeUnixSecondEqual(a.ConsumedAt, b.ConsumedAt)
+}
+
+func chainOptionalTimeUnixSecondEqual(a time.Time, b time.Time) bool {
+	if a.IsZero() || b.IsZero() {
+		return a.IsZero() && b.IsZero()
+	}
+	return a.UTC().Unix() == b.UTC().Unix()
 }
 
 func slashEvidenceMaterialEqual(a SlashEvidence, b SlashEvidence) bool {

@@ -89,6 +89,85 @@ func TestVerifyProviderTokenRejectsMissingIssuerWhenIssuerDeclared(t *testing.T)
 	}
 }
 
+func TestValidateProviderTokenClaimsRejectsMalformedSubjectAndTokenID(t *testing.T) {
+	now := time.Now().Unix()
+	base := crypto.CapabilityClaims{
+		Issuer:     "issuer-local",
+		Audience:   "provider",
+		Subject:    "provider-op-claims",
+		TokenType:  crypto.TokenTypeProviderRole,
+		Tier:       2,
+		ExpiryUnix: now + 300,
+		TokenID:    "provider-token-claims",
+	}
+	if err := validateProviderTokenClaims(base, now); err != nil {
+		t.Fatalf("expected baseline provider token claims valid, got %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		mutate      func(*crypto.CapabilityClaims)
+		wantErrPart string
+	}{
+		{
+			name: "subject with leading whitespace",
+			mutate: func(claims *crypto.CapabilityClaims) {
+				claims.Subject = " provider-op-claims"
+			},
+			wantErrPart: "provider token subject invalid",
+		},
+		{
+			name: "subject with embedded whitespace",
+			mutate: func(claims *crypto.CapabilityClaims) {
+				claims.Subject = "provider op claims"
+			},
+			wantErrPart: "provider token subject invalid",
+		},
+		{
+			name: "subject exceeds non-lossy operator id length",
+			mutate: func(claims *crypto.CapabilityClaims) {
+				claims.Subject = strings.Repeat("a", providerTokenClaimSubjectMaxLen+1)
+			},
+			wantErrPart: "provider token subject invalid",
+		},
+		{
+			name: "token id with replay delimiter",
+			mutate: func(claims *crypto.CapabilityClaims) {
+				claims.TokenID = "provider-token:claims"
+			},
+			wantErrPart: "provider token id invalid",
+		},
+		{
+			name: "token id with embedded whitespace",
+			mutate: func(claims *crypto.CapabilityClaims) {
+				claims.TokenID = "provider token claims"
+			},
+			wantErrPart: "provider token id invalid",
+		},
+		{
+			name: "token id too long",
+			mutate: func(claims *crypto.CapabilityClaims) {
+				claims.TokenID = strings.Repeat("t", providerTokenClaimIDMaxLen+1)
+			},
+			wantErrPart: "provider token id invalid",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			claims := base
+			tc.mutate(&claims)
+			err := validateProviderTokenClaims(claims, now)
+			if err == nil {
+				t.Fatalf("expected malformed claims to be rejected")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrPart) {
+				t.Fatalf("expected error containing %q, got %v", tc.wantErrPart, err)
+			}
+		})
+	}
+}
+
 func TestHandleProviderRelayUpsertAcceptsProviderToken(t *testing.T) {
 	t.Setenv(allowDangerousProviderTokenBypass, "1")
 

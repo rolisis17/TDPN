@@ -762,6 +762,14 @@ func TestKeeperDecisionLegacyCompatibilityForCreateGetAndList(t *testing.T) {
 		t.Fatalf("expected canonical status %q, got %q", chaintypes.ReconciliationPending, got.Status)
 	}
 
+	gotRaw, ok := k.GetDecision("DeCiSiOn-Legacy-1")
+	if !ok {
+		t.Fatal("expected raw legacy decision lookup to resolve")
+	}
+	if gotRaw != got {
+		t.Fatalf("expected raw and canonical decision lookups to return the same normalized record, got %+v vs %+v", gotRaw, got)
+	}
+
 	idempotent, err := k.RecordDecision(types.GovernanceDecision{
 		DecisionID:    "decision-legacy-1",
 		PolicyID:      "policy-legacy-decision-1",
@@ -887,6 +895,14 @@ func TestKeeperAuditActionLegacyCompatibilityForCreateGetAndList(t *testing.T) {
 	}
 	if got.EvidencePointer != "ipfs://Evidence/Audit-Legacy-1" {
 		t.Fatalf("expected trimmed evidence pointer, got %q", got.EvidencePointer)
+	}
+
+	gotRaw, ok := k.GetAuditAction("AuDiT-Legacy-1")
+	if !ok {
+		t.Fatal("expected raw legacy audit lookup to resolve")
+	}
+	if gotRaw != got {
+		t.Fatalf("expected raw and canonical audit lookups to return the same normalized record, got %+v vs %+v", gotRaw, got)
 	}
 
 	idempotent, err := k.RecordAuditAction(types.GovernanceAuditAction{
@@ -1231,5 +1247,30 @@ func TestKeeperRecordDecisionFailsClosedOnCorruptDecisionListing(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "load decisions") {
 		t.Fatalf("expected decision load error context, got: %v", err)
+	}
+}
+
+func TestKeeperRecordAuditActionFailsClosedOnCorruptAuditListing(t *testing.T) {
+	t.Parallel()
+
+	backend := kvtypes.NewMapStore()
+	store := NewKVStore(backend)
+	k := NewKeeperWithStore(store)
+
+	backend.Set(auditActionKey("audit-corrupt"), []byte("{"))
+
+	_, err := k.RecordAuditAction(types.GovernanceAuditAction{
+		ActionID:        "audit-new",
+		Action:          "admin_set_policy",
+		Actor:           "bootstrap-admin",
+		Reason:          "reject writes when persisted audit log is corrupt",
+		EvidencePointer: "ipfs://evidence/audit-new",
+		TimestampUnix:   1,
+	})
+	if err == nil {
+		t.Fatal("expected record audit action to fail closed on corrupt listing")
+	}
+	if !strings.Contains(err.Error(), "load audit actions") {
+		t.Fatalf("expected audit load error context, got: %v", err)
 	}
 }
