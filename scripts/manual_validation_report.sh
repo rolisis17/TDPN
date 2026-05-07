@@ -1209,6 +1209,13 @@ roadmap_stage="$(printf '%s\n' "$report_json" | jq -r '.summary.roadmap_stage //
 real_host_gate_ready="$(printf '%s\n' "$report_json" | jq -r '.summary.real_host_gate.ready // false')"
 real_host_gate_blockers="$(printf '%s\n' "$report_json" | jq -r '(.summary.real_host_gate.blockers // []) | if length == 0 then "none" else join(",") end')"
 real_host_gate_next_command="$(printf '%s\n' "$report_json" | jq -r '.summary.real_host_gate.next_command // ""')"
+closed_beta_readiness_status="$(printf '%s\n' "$report_json" | jq -r '.summary.closed_beta_readiness.status // "NOT_READY"')"
+closed_beta_readiness_ready="$(printf '%s\n' "$report_json" | jq -r '.summary.closed_beta_readiness.ready // false')"
+closed_beta_readiness_stage="$(printf '%s\n' "$report_json" | jq -r '.summary.closed_beta_readiness.stage // "CLOSED_BETA_NOT_READY"')"
+closed_beta_readiness_blockers="$(printf '%s\n' "$report_json" | jq -r '(.summary.closed_beta_readiness.blockers // []) | if length == 0 then "none" else join(",") end')"
+closed_beta_pilot_signoff_status="$(printf '%s\n' "$report_json" | jq -r '.summary.closed_beta_readiness.pilot_signoff_status // "pending"')"
+closed_beta_next_command="$(printf '%s\n' "$report_json" | jq -r '.summary.closed_beta_readiness.next_command // ""')"
+closed_beta_mainnet_blockers="$(printf '%s\n' "$report_json" | jq -r '(.summary.closed_beta_readiness.mainnet_signoff_blockers // []) | if length == 0 then "none" else join(",") end')"
 profile_default_gate_status="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.status // ""')"
 profile_default_gate_available="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.available // false')"
 profile_default_gate_decision="$(printf '%s\n' "$report_json" | jq -r '.summary.profile_default_gate.decision // ""')"
@@ -1341,6 +1348,16 @@ report_md_tmp="$(mktemp "${report_md}.tmp.XXXXXX")"
   printf -- '- Real-host blockers: `%s`\n' "$real_host_gate_blockers"
   if [[ -n "$real_host_gate_next_command" ]]; then
     printf -- '- Next real-host command: `%s`\n' "$real_host_gate_next_command"
+  fi
+  printf '\n## Closed Beta Readiness\n\n'
+  printf -- '- Status: `%s`\n' "$closed_beta_readiness_status"
+  printf -- '- Ready: `%s`\n' "$closed_beta_readiness_ready"
+  printf -- '- Stage: `%s`\n' "$closed_beta_readiness_stage"
+  printf -- '- Blockers: `%s`\n' "$closed_beta_readiness_blockers"
+  printf -- '- Pilot signoff status: `%s`\n' "$closed_beta_pilot_signoff_status"
+  printf -- '- Mainnet blockers still allowed: `%s`\n' "$closed_beta_mainnet_blockers"
+  if [[ -n "$closed_beta_next_command" ]]; then
+    printf -- '- Next closed-beta command: `%s`\n' "$closed_beta_next_command"
   fi
   printf '\n## Pre-Machine-C Gate\n\n'
   printf -- '- Machine C smoke ready: `%s`\n' "$machine_c_smoke_ready"
@@ -1547,6 +1564,15 @@ echo "[manual-validation-report] real_host_gate_ready=$real_host_gate_ready"
 echo "[manual-validation-report] real_host_gate_blockers=$real_host_gate_blockers"
 if [[ -n "$real_host_gate_next_command" ]]; then
   echo "[manual-validation-report] real_host_gate_next_command=$real_host_gate_next_command"
+fi
+echo "[manual-validation-report] closed_beta_readiness_status=$closed_beta_readiness_status"
+echo "[manual-validation-report] closed_beta_readiness_ready=$closed_beta_readiness_ready"
+echo "[manual-validation-report] closed_beta_readiness_stage=$closed_beta_readiness_stage"
+echo "[manual-validation-report] closed_beta_readiness_blockers=$closed_beta_readiness_blockers"
+echo "[manual-validation-report] closed_beta_pilot_signoff_status=$closed_beta_pilot_signoff_status"
+echo "[manual-validation-report] closed_beta_mainnet_blockers=$closed_beta_mainnet_blockers"
+if [[ -n "$closed_beta_next_command" ]]; then
+  echo "[manual-validation-report] closed_beta_next_command=$closed_beta_next_command"
 fi
 if [[ -n "$profile_default_gate_status" ]]; then
   echo "[manual-validation-report] profile_default_gate_status=$profile_default_gate_status"

@@ -405,6 +405,9 @@ For controlled lab endpoints that still use remote HTTP, add
 `--allow-insecure-remote-http 1`. Production profile rejects that opt-in.
 For host-based real-packet pilot evidence, also add
 `--client-test-mode local --live-evidence-udp-inject 1`.
+To record the result into the separate closed-beta readiness lane, add
+`--record-result 1 --manual-validation-report 1`. This can make
+`closed_beta_readiness` ready without clearing the true production signoff gate.
 
 Optional client path diversity tuning on machine C:
 

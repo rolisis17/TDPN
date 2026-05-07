@@ -26,6 +26,7 @@ When `single-machine-prod-readiness` runs with `--run-profile-compare-campaign-s
 - `roadmap_stage=READY_FOR_MACHINE_C_SMOKE`: local gates are clean; next external step is machine-C smoke.
 - `roadmap_stage=READY_FOR_3_MACHINE_PROD_SIGNOFF`: machine-C smoke is done; next external step is true 3-machine signoff.
 - `roadmap_stage=PRODUCTION_SIGNOFF_COMPLETE`: all tracked manual checks passed.
+Closed-beta readiness is tracked separately as `closed_beta_readiness`. A passing `closed_beta_pilot_signoff` can report `CLOSED_BETA_READY` while `roadmap_stage` remains `READY_FOR_3_MACHINE_PROD_SIGNOFF` until HTTPS, production issuer quorum, and settlement/blockchain evidence are available.
 `roadmap-progress-report` now adds a VPN RC-done phase signal plus the explicit list of pending real-host checks so the remaining external-only tail is visible at a glance.
 
 Manual readiness interpretation (operator quick guide):

@@ -2141,6 +2141,7 @@ wg_only_check_json="$(build_recorded_check_json "wg_only_stack_selftest" "WG-onl
 docker_rehearsal_check_json="$(build_recorded_check_json "three_machine_docker_readiness" "One-host docker 3-machine rehearsal" "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1")"
 real_wg_privileged_check_json="$(build_recorded_check_json "real_wg_privileged_matrix" "Linux root real-WG privileged matrix" "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1")"
 machine_c_check_json="$(build_recorded_check_json "machine_c_vpn_smoke" "Machine C VPN smoke test" "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country")"
+closed_beta_check_json="$(build_recorded_check_json "closed_beta_pilot_signoff" "Closed-beta pilot signoff" "./scripts/easy_node.sh pilot-runbook --directory-a http://A_HOST:8081 --directory-b http://B_HOST:8081 --issuer-url http://A_HOST:8082 --entry-url http://A_HOST:8083 --exit-url http://A_HOST:8084 --subject INVITE_KEY --path-profile balanced --allow-insecure-remote-http 1 --client-test-mode local --live-evidence-udp-inject 1 --record-result 1")"
 three_machine_check_json="$(build_recorded_check_json "three_machine_prod_signoff" "True 3-machine production signoff" "sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1")"
 profile_default_gate_json="$(build_profile_default_gate_json "$profile_compare_signoff_summary_json" "$docker_rehearsal_check_json")"
 real_wg_host_linux="0"
@@ -2208,6 +2209,7 @@ combined_json="$(
     --argjson docker_rehearsal_check "$docker_rehearsal_check_json" \
     --argjson real_wg_privileged_check "$real_wg_privileged_check_json" \
     --argjson machine_c_check "$machine_c_check_json" \
+    --argjson closed_beta_check "$closed_beta_check_json" \
     --argjson three_machine_check "$three_machine_check_json" \
     --argjson profile_default_gate "$profile_default_gate_json" \
     --arg real_wg_host_linux "$real_wg_host_linux" \
@@ -2241,6 +2243,7 @@ combined_json="$(
           $docker_rehearsal_check,
           $real_wg_privileged_check,
           $machine_c_check,
+          $closed_beta_check,
           $three_machine_check
         ]
       }
@@ -2250,20 +2253,20 @@ combined_json="$(
           warn_checks: ([.checks[] | select(.status == "warn")] | length),
           fail_checks: ([.checks[] | select(.status == "fail")] | length),
           pending_checks: ([.checks[] | select(.status == "pending")] | length),
-          optional_check_ids: ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+          optional_check_ids: ["three_machine_docker_readiness", "real_wg_privileged_matrix", "closed_beta_pilot_signoff"],
           blocking_check_ids: ["runtime_hygiene", "wg_only_stack_selftest", "machine_c_vpn_smoke", "three_machine_prod_signoff"],
-          next_action_check_id: (([.checks[] | select(.check_id != "three_machine_docker_readiness" and .check_id != "real_wg_privileged_matrix" and .status != "pass" and .status != "skip") | .check_id][0]) // ""),
-          next_action_label: (([.checks[] | select(.check_id != "three_machine_docker_readiness" and .check_id != "real_wg_privileged_matrix" and .status != "pass" and .status != "skip") | .label][0]) // ""),
+          next_action_check_id: (([.checks[] as $check | select((["three_machine_docker_readiness", "real_wg_privileged_matrix", "closed_beta_pilot_signoff"] | index($check.check_id) | not) and $check.status != "pass" and $check.status != "skip") | $check.check_id][0]) // ""),
+          next_action_label: (([.checks[] as $check | select((["three_machine_docker_readiness", "real_wg_privileged_matrix", "closed_beta_pilot_signoff"] | index($check.check_id) | not) and $check.status != "pass" and $check.status != "skip") | $check.label][0]) // ""),
           next_action_command: (([
-            .checks[]
-            | select(.check_id != "three_machine_docker_readiness" and .check_id != "real_wg_privileged_matrix" and .status != "pass" and .status != "skip")
-            | (.remediation_command // .command // "")
+            .checks[] as $check
+            | select((["three_machine_docker_readiness", "real_wg_privileged_matrix", "closed_beta_pilot_signoff"] | index($check.check_id) | not) and $check.status != "pass" and $check.status != "skip")
+            | ($check.remediation_command // $check.command // "")
             | select(length > 0)
           ][0]) // ""),
           next_action_remediations: (([
-            .checks[]
-            | select(.check_id != "three_machine_docker_readiness" and .check_id != "real_wg_privileged_matrix" and .status != "pass" and .status != "skip")
-            | (.remediations // [])
+            .checks[] as $check
+            | select((["three_machine_docker_readiness", "real_wg_privileged_matrix", "closed_beta_pilot_signoff"] | index($check.check_id) | not) and $check.status != "pass" and $check.status != "skip")
+            | ($check.remediations // [])
           ][0]) // []),
           latest_failed_incident: (([
             .checks[]
@@ -2352,6 +2355,62 @@ combined_json="$(
         )
       | .summary.profile_default_gate = $profile_default_gate
       | .summary.profile_default_ready = ((.summary.profile_default_gate.status // "") == "pass")
+      | .summary.closed_beta_readiness = (
+          . as $root
+          | (
+              [
+                $root.checks[]
+                | select(
+                    (
+                      .check_id == "runtime_hygiene"
+                      or .check_id == "wg_only_stack_selftest"
+                      or .check_id == "machine_c_vpn_smoke"
+                      or .check_id == "closed_beta_pilot_signoff"
+                    )
+                    and (.status != "pass" and .status != "skip")
+                  )
+                | .check_id
+              ]
+              + (
+                  if (
+                    (($root.summary.profile_default_gate.enabled // true) | not)
+                    or ($root.summary.profile_default_gate.readiness_exception // false)
+                    or (($root.summary.profile_default_gate.status // "") == "pass")
+                  ) then
+                    []
+                  else
+                    ["profile_default_gate"]
+                  end
+                )
+            ) as $blockers
+          | ($blockers[0] // "") as $next
+          | {
+              check_ids: ["runtime_hygiene", "wg_only_stack_selftest", "machine_c_vpn_smoke", "closed_beta_pilot_signoff", "profile_default_gate"],
+              production_signoff_required: false,
+              mainnet_signoff_blockers: ($root.summary.real_host_gate.blockers // []),
+              blockers: $blockers,
+              ready: (($blockers | length) == 0),
+              status: (if (($blockers | length) == 0) then "READY" else "NOT_READY" end),
+              stage: (if (($blockers | length) == 0) then "CLOSED_BETA_READY" else "CLOSED_BETA_NOT_READY" end),
+              pilot_signoff_status: (([$root.checks[] | select(.check_id == "closed_beta_pilot_signoff") | .status][0]) // "pending"),
+              next_check_id: $next,
+              next_label: (
+                if $next == "profile_default_gate" then
+                  "Profile default gate"
+                else
+                  (([$root.checks[] | select(.check_id == $next) | .label][0]) // "")
+                end
+              ),
+              next_command: (
+                if $next == "profile_default_gate" then
+                  ($root.summary.profile_default_gate.next_command // "")
+                else
+                  (([$root.checks[] | select(.check_id == $next) | (.remediation_command // .command // "")][0]) // "")
+                end
+              )
+            }
+        )
+      | .summary.closed_beta_ready = (.summary.closed_beta_readiness.ready // false)
       | . as $summary_root
       | .summary.readiness = (
           ($summary_root.summary.next_action_check_id // "") as $next_action_check_id
@@ -2498,6 +2557,13 @@ roadmap_stage="$(printf '%s\n' "$combined_json" | jq -r '.summary.roadmap_stage 
 real_host_gate_ready="$(printf '%s\n' "$combined_json" | jq -r '.summary.real_host_gate.ready // false')"
 real_host_gate_blockers="$(printf '%s\n' "$combined_json" | jq -r '(.summary.real_host_gate.blockers // []) | if length == 0 then "none" else join(",") end')"
 real_host_gate_next_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.real_host_gate.next_command // ""')"
+closed_beta_readiness_status="$(printf '%s\n' "$combined_json" | jq -r '.summary.closed_beta_readiness.status // "NOT_READY"')"
+closed_beta_readiness_ready="$(printf '%s\n' "$combined_json" | jq -r '.summary.closed_beta_readiness.ready // false')"
+closed_beta_readiness_stage="$(printf '%s\n' "$combined_json" | jq -r '.summary.closed_beta_readiness.stage // "CLOSED_BETA_NOT_READY"')"
+closed_beta_readiness_blockers="$(printf '%s\n' "$combined_json" | jq -r '(.summary.closed_beta_readiness.blockers // []) | if length == 0 then "none" else join(",") end')"
+closed_beta_pilot_signoff_status="$(printf '%s\n' "$combined_json" | jq -r '.summary.closed_beta_readiness.pilot_signoff_status // "pending"')"
+closed_beta_next_command="$(printf '%s\n' "$combined_json" | jq -r '.summary.closed_beta_readiness.next_command // ""')"
+closed_beta_mainnet_blockers="$(printf '%s\n' "$combined_json" | jq -r '(.summary.closed_beta_readiness.mainnet_signoff_blockers // []) | if length == 0 then "none" else join(",") end')"
 profile_default_gate_status="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.status // ""')"
 profile_default_gate_available="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.available // false')"
 profile_default_gate_decision="$(printf '%s\n' "$combined_json" | jq -r '.summary.profile_default_gate.decision // ""')"
@@ -2576,6 +2642,15 @@ echo "[manual-validation-status] real_host_gate_ready=$real_host_gate_ready"
 echo "[manual-validation-status] real_host_gate_blockers=$real_host_gate_blockers"
 if [[ -n "$real_host_gate_next_command" ]]; then
   echo "[manual-validation-status] real_host_gate_next_command=$real_host_gate_next_command"
+fi
+echo "[manual-validation-status] closed_beta_readiness_status=$closed_beta_readiness_status"
+echo "[manual-validation-status] closed_beta_readiness_ready=$closed_beta_readiness_ready"
+echo "[manual-validation-status] closed_beta_readiness_stage=$closed_beta_readiness_stage"
+echo "[manual-validation-status] closed_beta_readiness_blockers=$closed_beta_readiness_blockers"
+echo "[manual-validation-status] closed_beta_pilot_signoff_status=$closed_beta_pilot_signoff_status"
+echo "[manual-validation-status] closed_beta_mainnet_blockers=$closed_beta_mainnet_blockers"
+if [[ -n "$closed_beta_next_command" ]]; then
+  echo "[manual-validation-status] closed_beta_next_command=$closed_beta_next_command"
 fi
 echo "[manual-validation-status] readiness_status=$readiness_status"
 echo "[manual-validation-status] readiness_ready=$readiness_ready"

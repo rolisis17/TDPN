@@ -45,6 +45,7 @@ PROFILE_MULTI_VM_STABILITY_CHECK_VALID_LOG="$TMP_DIR/integration_manual_validati
 PROFILE_MULTI_VM_STABILITY_CYCLE_FALLBACK_LOG="$TMP_DIR/integration_manual_validation_status_profile_multi_vm_stability_cycle_fallback.log"
 PROFILE_MULTI_VM_STABILITY_MISSING_DEFAULT_LOG="$TMP_DIR/integration_manual_validation_status_profile_multi_vm_stability_missing_default.log"
 PROFILE_PENDING_READINESS_DOWNGRADE_LOG="$TMP_DIR/integration_manual_validation_status_profile_pending_readiness_downgrade.log"
+CLOSED_BETA_READY_LOG="$TMP_DIR/integration_manual_validation_status_closed_beta_ready.log"
 INVALID_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_invalid_status_json.log"
 UNREADABLE_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_unreadable_status_json.log"
 LOCK_RECOVER_LOG="$TMP_DIR/integration_manual_validation_record_lock_recover.log"
@@ -1119,6 +1120,93 @@ if ! printf '%s\n' "$profile_pending_readiness_json" | jq -e '
 ' >/dev/null; then
   echo "profile-pending readiness JSON missing fail-closed readiness fields"
   printf '%s\n' "$profile_pending_readiness_json"
+  exit 1
+fi
+
+echo "[manual-validation] closed-beta ready while production signoff remains gated"
+CLOSED_BETA_STATE_DIR="$TMP_DIR/manual-validation-closed-beta-ready-state"
+CLOSED_BETA_PROFILE_PASS_SUMMARY_JSON="$TMP_DIR/profile_compare_campaign_signoff_closed_beta_ready.json"
+mkdir -p "$CLOSED_BETA_STATE_DIR"
+cat >"$CLOSED_BETA_PROFILE_PASS_SUMMARY_JSON" <<'EOF_CLOSED_BETA_PROFILE_PASS'
+{
+  "version": 1,
+  "status": "ok",
+  "final_rc": 0,
+  "decision": {
+    "decision": "GO",
+    "recommended_profile": "balanced"
+  }
+}
+EOF_CLOSED_BETA_PROFILE_PASS
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$CLOSED_BETA_STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id wg_only_stack_selftest \
+  --status pass \
+  --notes "wg-only stack pass for closed-beta readiness test" \
+  --show-json 0 >/dev/null
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$CLOSED_BETA_STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id machine_c_vpn_smoke \
+  --status pass \
+  --notes "machine-c smoke pass for closed-beta readiness test" \
+  --show-json 0 >/dev/null
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$CLOSED_BETA_STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id closed_beta_pilot_signoff \
+  --status pass \
+  --notes "closed-beta pilot pass for readiness test" \
+  --artifact "$CLOSED_BETA_PROFILE_PASS_SUMMARY_JSON" \
+  --show-json 0 >/dev/null
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$CLOSED_BETA_STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$CLOSED_BETA_PROFILE_PASS_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR_OK" \
+./scripts/manual_validation_status.sh --show-json 1 >"$CLOSED_BETA_READY_LOG"
+
+if ! rg -q '\[manual-validation-status\] closed_beta_readiness_status=READY' "$CLOSED_BETA_READY_LOG"; then
+  echo "closed-beta-ready status missing closed_beta_readiness_status=READY"
+  cat "$CLOSED_BETA_READY_LOG"
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] closed_beta_readiness_blockers=none' "$CLOSED_BETA_READY_LOG"; then
+  echo "closed-beta-ready status missing blockers=none"
+  cat "$CLOSED_BETA_READY_LOG"
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] closed_beta_mainnet_blockers=three_machine_prod_signoff' "$CLOSED_BETA_READY_LOG"; then
+  echo "closed-beta-ready status missing production blocker separation"
+  cat "$CLOSED_BETA_READY_LOG"
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] readiness_status=NOT_READY' "$CLOSED_BETA_READY_LOG"; then
+  echo "closed-beta-ready status should leave production readiness NOT_READY"
+  cat "$CLOSED_BETA_READY_LOG"
+  exit 1
+fi
+closed_beta_ready_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' "$CLOSED_BETA_READY_LOG")"
+if [[ -z "$closed_beta_ready_json" ]]; then
+  echo "closed-beta-ready status missing JSON payload"
+  cat "$CLOSED_BETA_READY_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$closed_beta_ready_json" | jq -e '
+  .summary.closed_beta_readiness.status == "READY"
+  and .summary.closed_beta_readiness.ready == true
+  and .summary.closed_beta_readiness.stage == "CLOSED_BETA_READY"
+  and .summary.closed_beta_readiness.blockers == []
+  and .summary.closed_beta_readiness.pilot_signoff_status == "pass"
+  and .summary.closed_beta_readiness.production_signoff_required == false
+  and .summary.closed_beta_readiness.mainnet_signoff_blockers == ["three_machine_prod_signoff"]
+  and .summary.closed_beta_ready == true
+  and .summary.real_host_gate.ready == false
+  and .summary.real_host_gate.blockers == ["three_machine_prod_signoff"]
+  and .summary.next_action_check_id == "three_machine_prod_signoff"
+  and .summary.readiness.status == "NOT_READY"
+  and .summary.roadmap_stage == "READY_FOR_3_MACHINE_PROD_SIGNOFF"
+' >/dev/null; then
+  echo "closed-beta-ready JSON missing expected separated readiness fields"
+  printf '%s\n' "$closed_beta_ready_json"
   exit 1
 fi
 

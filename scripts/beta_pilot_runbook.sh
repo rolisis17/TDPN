@@ -48,7 +48,9 @@ Usage:
     [--live-evidence-udp-inject [0|1]] \
     [--beta-profile [0|1]] \
     [--prod-profile [0|1]] \
-    [--bundle-dir PATH]
+    [--bundle-dir PATH] \
+    [--record-result [0|1]] \
+    [--manual-validation-report [0|1]]
 
 Purpose:
   Single-command closed-beta pilot run from machine C:
@@ -60,6 +62,9 @@ Purpose:
   rejects this opt-in.
   --live-evidence-udp-inject 1 starts a host UDP packet source for each validate
   call. It requires --client-test-mode local.
+  --record-result 1 records closed_beta_pilot_signoff into manual-validation
+  status. --manual-validation-report 1 refreshes the readiness report after the
+  record, which lets closed beta be READY while production signoff stays gated.
 USAGE
 }
 
@@ -274,6 +279,44 @@ snapshot_url() {
   fi
 }
 
+record_closed_beta_result() {
+  local status="$1"
+  local notes="$2"
+  local command_text="${3:-./scripts/easy_node.sh pilot-runbook [redacted]}"
+  if [[ "${record_result:-0}" != "1" ]]; then
+    return 0
+  fi
+
+  local record_cmd=(
+    "$ROOT_DIR/scripts/easy_node.sh" manual-validation-record
+    --check-id closed_beta_pilot_signoff
+    --status "$status"
+    --notes "$notes"
+    --command "$command_text"
+    --show-json 0
+  )
+  [[ -n "${bundle_dir:-}" && -d "$bundle_dir" ]] && record_cmd+=(--artifact "$bundle_dir")
+  [[ -n "${main_log:-}" && -f "$main_log" ]] && record_cmd+=(--artifact "$main_log")
+  [[ -n "${validate_log:-}" && -f "$validate_log" ]] && record_cmd+=(--artifact "$validate_log")
+  [[ -n "${soak_log:-}" && -f "$soak_log" ]] && record_cmd+=(--artifact "$soak_log")
+  [[ -n "${bundle_tar:-}" && -f "$bundle_tar" ]] && record_cmd+=(--artifact "$bundle_tar")
+
+  if "${record_cmd[@]}"; then
+    echo "[pilot-runbook] manual-validation closed_beta_pilot_signoff recorded status=$status"
+  else
+    echo "[pilot-runbook] warn: failed to record closed_beta_pilot_signoff status=$status"
+  fi
+
+  if [[ "${manual_validation_report_enabled:-0}" == "1" ]]; then
+    local report_cmd=("$ROOT_DIR/scripts/easy_node.sh" manual-validation-report --print-report 0 --print-summary-json 0)
+    if "${report_cmd[@]}"; then
+      echo "[pilot-runbook] manual-validation report refreshed"
+    else
+      echo "[pilot-runbook] warn: failed to refresh manual-validation report"
+    fi
+  fi
+}
+
 directory_a=""
 directory_b=""
 issuer_url=""
@@ -308,6 +351,8 @@ require_issuer_quorum="${THREE_MACHINE_REQUIRE_ISSUER_QUORUM:-}"
 allow_insecure_remote_http="${THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP:-0}"
 client_test_mode="${THREE_MACHINE_CLIENT_TEST_MODE:-}"
 live_evidence_udp_inject="${THREE_MACHINE_LIVE_EVIDENCE_UDP_INJECT:-0}"
+record_result="${THREE_MACHINE_PILOT_RECORD_RESULT:-0}"
+manual_validation_report_enabled="${THREE_MACHINE_PILOT_MANUAL_VALIDATION_REPORT:-0}"
 bundle_dir=""
 path_profile_set=0
 distinct_operators_set=0
@@ -544,6 +589,24 @@ while [[ $# -gt 0 ]]; do
       bundle_dir="${2:-}"
       shift 2
       ;;
+    --record-result)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        record_result="${2:-}"
+        shift 2
+      else
+        record_result="1"
+        shift
+      fi
+      ;;
+    --manual-validation-report)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        manual_validation_report_enabled="${2:-}"
+        shift 2
+      else
+        manual_validation_report_enabled="1"
+        shift
+      fi
+      ;;
     -h|--help|help)
       usage
       exit 0
@@ -632,6 +695,14 @@ if [[ "$live_evidence_udp_inject" != "0" && "$live_evidence_udp_inject" != "1" ]
 fi
 if [[ "$live_evidence_udp_inject" == "1" && "${client_test_mode:-docker}" != "local" ]]; then
   echo "--live-evidence-udp-inject 1 requires --client-test-mode local because host loopback UDP cannot reach the client container"
+  exit 2
+fi
+if [[ "$record_result" != "0" && "$record_result" != "1" ]]; then
+  echo "--record-result / THREE_MACHINE_PILOT_RECORD_RESULT must be 0 or 1"
+  exit 2
+fi
+if [[ "$manual_validation_report_enabled" != "0" && "$manual_validation_report_enabled" != "1" ]]; then
+  echo "--manual-validation-report / THREE_MACHINE_PILOT_MANUAL_VALIDATION_REPORT must be 0 or 1"
   exit 2
 fi
 if [[ -n "$client_require_cross_operator_pair" && "$client_require_cross_operator_pair" != "0" && "$client_require_cross_operator_pair" != "1" ]]; then
@@ -793,7 +864,7 @@ exec > >(tee -a "$main_log") 2>&1
 
 echo "[pilot-runbook] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[pilot-runbook] bundle_dir=$bundle_dir"
-echo "[pilot-runbook] path_profile=${normalized_path_profile:-<none>} beta_profile=$beta_profile prod_profile=$prod_profile rounds=$rounds pause_sec=$pause_sec distinct_operators=$distinct_operators distinct_countries=$distinct_countries locality_soft_bias=$locality_soft_bias country_bias=$locality_country_bias region_bias=$locality_region_bias region_prefix_bias=$locality_region_prefix_bias require_issuer_quorum=$require_issuer_quorum allow_insecure_remote_http=$allow_insecure_remote_http client_test_mode=${client_test_mode:-default} live_evidence_udp_inject=$live_evidence_udp_inject"
+echo "[pilot-runbook] path_profile=${normalized_path_profile:-<none>} beta_profile=$beta_profile prod_profile=$prod_profile rounds=$rounds pause_sec=$pause_sec distinct_operators=$distinct_operators distinct_countries=$distinct_countries locality_soft_bias=$locality_soft_bias country_bias=$locality_country_bias region_bias=$locality_region_bias region_prefix_bias=$locality_region_prefix_bias require_issuer_quorum=$require_issuer_quorum allow_insecure_remote_http=$allow_insecure_remote_http client_test_mode=${client_test_mode:-default} live_evidence_udp_inject=$live_evidence_udp_inject record_result=$record_result manual_validation_report=$manual_validation_report_enabled"
 echo "[pilot-runbook] directory_a=$directory_a directory_b=$directory_b issuer_url=$issuer_url entry_url=$entry_url exit_url=$exit_url"
 if [[ -n "$issuer_a_url" || -n "$issuer_b_url" ]]; then
   echo "[pilot-runbook] issuer_a_url=$issuer_a_url issuer_b_url=$issuer_b_url"
@@ -815,6 +886,8 @@ require_issuer_quorum=$require_issuer_quorum
 allow_insecure_remote_http=$allow_insecure_remote_http
 client_test_mode=$client_test_mode
 live_evidence_udp_inject=$live_evidence_udp_inject
+record_result=$record_result
+manual_validation_report=$manual_validation_report_enabled
 directory_a=$directory_a
 directory_b=$directory_b
 issuer_url=$issuer_url
@@ -875,12 +948,14 @@ fi
 
 validate_log="$bundle_dir/validate.log"
 echo "[pilot-runbook] running strict validation"
+pilot_record_command="./scripts/easy_node.sh pilot-runbook [redacted] --bundle-dir $bundle_dir"
 set +e
 "${validate_cmd[@]}" 2>&1 | tee "$validate_log"
 validate_rc=${PIPESTATUS[0]}
 set -e
 if [[ "$validate_rc" -ne 0 ]]; then
   echo "[pilot-runbook] validation failed rc=$validate_rc"
+  record_closed_beta_result "fail" "closed-beta pilot validation failed rc=$validate_rc" "$pilot_record_command"
   exit "$validate_rc"
 fi
 echo "[pilot-runbook] validation ok"
@@ -943,6 +1018,7 @@ soak_rc=$?
 set -e
 if [[ "$soak_rc" -ne 0 ]]; then
   echo "[pilot-runbook] soak failed rc=$soak_rc"
+  record_closed_beta_result "fail" "closed-beta pilot soak failed rc=$soak_rc" "$pilot_record_command"
   exit "$soak_rc"
 fi
 echo "[pilot-runbook] soak ok"
@@ -965,4 +1041,5 @@ fi
 bundle_tar="${bundle_dir}.tar.gz"
 tar -czf "$bundle_tar" -C "$(dirname "$bundle_dir")" "$(basename "$bundle_dir")"
 echo "[pilot-runbook] report bundle ready: $bundle_tar"
+record_closed_beta_result "pass" "closed-beta pilot validation and soak passed; bundle=$bundle_tar" "$pilot_record_command"
 echo "[pilot-runbook] done"
