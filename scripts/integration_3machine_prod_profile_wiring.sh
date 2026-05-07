@@ -2694,7 +2694,7 @@ THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_BUNDLE_GATE" \
   --bundle-dir "$EASY_BUNDLE_PREFLIGHT_FAIL_DIR" \
   --preflight-check 1 \
   --skip-wg 1 \
-  --bootstrap-directory https://dir-a:8081 >/tmp/integration_3machine_prod_profile_wiring_easy_bundle_preflight_fail.log 2>&1
+  --bootstrap-directory http://dir-a:8081 >/tmp/integration_3machine_prod_profile_wiring_easy_bundle_preflight_fail.log 2>&1
 easy_bundle_preflight_fail_rc=$?
 set -e
 if [[ "$easy_bundle_preflight_fail_rc" -ne 23 ]]; then
@@ -2711,6 +2711,11 @@ fi
 if [[ -s "$BUNDLE_CAPTURE" ]]; then
   echo "easy_node prod bundle preflight wiring failed: bundle gate script should not run on preflight failure"
   cat "$BUNDLE_CAPTURE"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_preflight_fail.log
+  exit 1
+fi
+if ! rg -q 'strict prod bundle preflight forces prod-profile HTTPS checks; HTTP lab endpoints cannot pass it' /tmp/integration_3machine_prod_profile_wiring_easy_bundle_preflight_fail.log; then
+  echo "easy_node prod bundle preflight fail path missing HTTP lab hint"
   cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_preflight_fail.log
   exit 1
 fi

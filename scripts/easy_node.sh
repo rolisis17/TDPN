@@ -9772,6 +9772,9 @@ EOF
         fi
         if [[ "$using_https_endpoints" == "1" ]]; then
           echo "hint: verify this host can reach the remote HTTPS control-plane endpoints with the same mTLS trust bundle."
+        elif [[ "$bootstrap_directory" == http://* || "$directory_a" == http://* || "$directory_b" == http://* || "$issuer_url" == http://* || "$entry_url" == http://* || "$exit_url" == http://* ]]; then
+          echo "hint: strict prod bundle preflight forces prod-profile HTTPS checks; HTTP lab endpoints cannot pass it."
+          echo "hint: for non-prod lab evidence, rerun with --preflight-check 0; for production signoff, run A/B with --prod-profile 1 and HTTPS/mTLS endpoints."
         fi
       fi
     fi
