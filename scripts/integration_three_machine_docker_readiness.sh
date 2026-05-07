@@ -202,6 +202,7 @@ fi
 if ! jq -e '
   .status == "pass"
   and .rc == 0
+  and (.steps[] | select(.step_id == "issuer_allowlist") | .status == "pass")
   and (.steps[] | select(.step_id == "validate") | .status == "pass")
   and (.steps[] | select(.step_id == "soak") | .status == "pass")
 ' "$SUMMARY_OK" >/dev/null; then
@@ -249,13 +250,29 @@ if ! rg -q -- '--exit-url http://127.0.0.1:18084' "$VALIDATE_CAPTURE"; then
   cat "$VALIDATE_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--subject docker-rehearsal-client' "$VALIDATE_CAPTURE"; then
+  echo "validate call missing default allowlisted docker rehearsal subject"
+  cat "$VALIDATE_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- 'env THREE_MACHINE_CLIENT_INNER_SOURCE=synthetic' "$VALIDATE_CAPTURE"; then
   echo "validate call missing docker synthetic inner traffic default"
   cat "$VALIDATE_CAPTURE"
   exit 1
 fi
+allowlist_upsert_count="$(rg -c '/v1/admin/subject/upsert' "$CURL_CAPTURE" || true)"
+if [[ "${allowlist_upsert_count:-0}" -lt 2 ]]; then
+  echo "docker rehearsal should upsert the default subject into both issuers"
+  cat "$CURL_CAPTURE"
+  exit 1
+fi
 if [[ ! -s "$SOAK_CAPTURE" ]]; then
   echo "soak call missing in success path"
+  exit 1
+fi
+if ! rg -q -- '--subject docker-rehearsal-client' "$SOAK_CAPTURE"; then
+  echo "soak call missing default allowlisted docker rehearsal subject"
+  cat "$SOAK_CAPTURE"
   exit 1
 fi
 if ! rg -q -- 'env THREE_MACHINE_CLIENT_INNER_SOURCE=synthetic' "$SOAK_CAPTURE"; then

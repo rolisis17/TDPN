@@ -250,6 +250,41 @@ wait_http_ok() {
   return 1
 }
 
+upsert_issuer_subject() {
+  local curl_bin="$1"
+  local issuer_url="$2"
+  local admin_token="$3"
+  local subject="$4"
+  local label="$5"
+  local payload response
+
+  if [[ -z "$subject" ]]; then
+    return 0
+  fi
+  payload="$(
+    jq -cn \
+      --arg subject "$subject" \
+      '{subject:$subject, kind:"client", tier:1, reputation:0, bond:0, stake:0}'
+  )"
+
+  echo "[issuer-allowlist] upserting client subject on $label"
+  if response="$(
+    "$curl_bin" -fsS -X POST "${issuer_url%/}/v1/admin/subject/upsert" \
+      --connect-timeout 2 \
+      --max-time 8 \
+      -H "X-Admin-Token: ${admin_token}" \
+      -H "Content-Type: application/json" \
+      --data "$payload" 2>&1
+  )"; then
+    echo "[issuer-allowlist] $label subject upsert ok"
+    return 0
+  fi
+
+  echo "[issuer-allowlist] $label subject upsert failed"
+  printf '%s\n' "$response"
+  return 1
+}
+
 wait_sync_peer_success_state() {
   local curl_bin="$1"
   local status_url="$2"
@@ -602,6 +637,11 @@ int_arg_or_die "--timeout-sec" "$validate_timeout_sec"
 if [[ -n "$client_subject" && -n "$client_anon_cred" ]]; then
   echo "set only one of --subject or --anon-cred"
   exit 2
+fi
+client_subject="$(trim "$client_subject")"
+client_anon_cred="$(trim "$client_anon_cred")"
+if [[ -z "$client_subject" && -z "$client_anon_cred" ]]; then
+  client_subject="$(trim "${THREE_MACHINE_DOCKER_DEFAULT_SUBJECT:-docker-rehearsal-client}")"
 fi
 if [[ -n "$bootstrap_directory" ]]; then
   bootstrap_directory="$(trim "$bootstrap_directory")"
@@ -980,6 +1020,23 @@ if [[ "$status" == "pass" ]]; then
     final_rc=$rc
     failed_step="health"
     record_step "health" "fail" "$rc" "one or more endpoints failed health checks"
+  fi
+fi
+
+if [[ "$status" == "pass" ]]; then
+  if [[ -n "$client_subject" ]]; then
+    if upsert_issuer_subject "$curl_bin" "$issuer_a_url" "$issuer_admin_token_a" "$client_subject" "issuer A" &&
+      upsert_issuer_subject "$curl_bin" "$issuer_b_url" "$issuer_admin_token_b" "$client_subject" "issuer B"; then
+      record_step "issuer_allowlist" "pass" 0 "client subject allowlisted on both issuers"
+    else
+      rc=$?
+      status="fail"
+      final_rc=$rc
+      failed_step="issuer_allowlist"
+      record_step "issuer_allowlist" "fail" "$rc" "client subject allowlist upsert failed"
+    fi
+  else
+    record_step "issuer_allowlist" "skip" 0 "no client subject configured"
   fi
 fi
 

@@ -57,6 +57,27 @@ write_readiness_summary() {
   }' >"$path"
 }
 
+write_readiness_record_summary() {
+  local path="$1"
+  local generated_at_utc="${2:-$FRESH_GENERATED_AT_UTC}"
+  jq -n --arg generated_at_utc "$generated_at_utc" '{
+    version: 1,
+    schema: { id: "three_machine_docker_readiness_record_summary" },
+    generated_at_utc: $generated_at_utc,
+    status: "pass",
+    rc: 0,
+    rehearsal: {
+      status: "pass",
+      rc: 0,
+      summary: {
+        generated_at_utc: $generated_at_utc,
+        status: "pass",
+        rc: 0
+      }
+    }
+  }' >"$path"
+}
+
 write_real_host_summary() {
   local path="$1"
   local generated_at_utc="${2:-$FRESH_GENERATED_AT_UTC}"
@@ -138,6 +159,28 @@ if [[ ! -d "$PASS_DIR/three_machine_real_host_validation_pack_artifacts" ]]; the
   echo "expected collected artifacts dir missing in pass path"
   exit 1
 fi
+
+echo "[three-machine-real-host-validation-pack] timestamped docker readiness record path"
+RECORD_DIR="$TMP_DIR/record"
+mkdir -p "$RECORD_DIR"
+write_matrix_summary "$RECORD_DIR/three_machine_docker_profile_matrix_summary.json" "$FRESH_GENERATED_AT_UTC"
+write_readiness_record_summary "$RECORD_DIR/three_machine_docker_readiness_record_20260507_110000.json" "$FRESH_GENERATED_AT_UTC"
+write_real_host_summary "$RECORD_DIR/three_machine_prod_signoff_summary.json" "$FRESH_GENERATED_AT_UTC"
+
+RECORD_SUMMARY="$RECORD_DIR/validation_pack_summary.json"
+RECORD_REPORT="$RECORD_DIR/validation_pack_report.md"
+
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$RECORD_DIR" \
+  --summary-json "$RECORD_SUMMARY" \
+  --report-md "$RECORD_REPORT" \
+  --print-summary-json 0
+
+assert_jq "$RECORD_SUMMARY" '.status == "ok"'
+assert_jq "$RECORD_SUMMARY" '.rc == 0'
+assert_jq "$RECORD_SUMMARY" '.decision == "GO"'
+assert_jq "$RECORD_SUMMARY" '.required_groups.docker_readiness.usable == true'
+assert_jq "$RECORD_SUMMARY" '.artifacts | map(select(.id == "docker_readiness_record_summary" and .usable == true)) | length == 1'
 
 echo "[three-machine-real-host-validation-pack] missing real-host fail-closed path"
 FAIL_DIR="$TMP_DIR/fail"

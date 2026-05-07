@@ -429,6 +429,8 @@ declare -a artifact_specs=(
   "docker_readiness_2hop|docker_readiness|three_machine_docker_readiness_2hop.json|Docker readiness 2-hop summary"
   "docker_readiness_3hop|docker_readiness|three_machine_docker_readiness_3hop.json|Docker readiness 3-hop summary"
   "docker_readiness_summary|docker_readiness|three_machine_docker_readiness_summary.json|Docker readiness summary"
+  "docker_readiness_record_summary|docker_readiness|three_machine_docker_readiness_record_????????_??????.json|Docker readiness record summary"
+  "docker_readiness_record_rehearsal|docker_readiness|three_machine_docker_readiness_record_????????_??????_rehearsal.json|Docker readiness record rehearsal summary"
   "real_host_signoff_summary|real_host|three_machine_prod_signoff_summary.json|Real-host signoff summary"
   "real_host_signoff_latest|real_host|three_machine_prod_signoff_latest.json|Real-host signoff latest summary"
   "real_host_signoff_timestamped|real_host|three_machine_prod_signoff_*.json|Real-host signoff timestamped summary"
