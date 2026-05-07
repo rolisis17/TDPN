@@ -6036,7 +6036,7 @@ server_up() {
     if [[ "$middle_relay" == "1" ]]; then
       authority_services+=(middle)
     fi
-    compose_with_env "$AUTHORITY_ENV_FILE" up -d --build "${authority_services[@]}"
+    compose_with_env "$AUTHORITY_ENV_FILE" up -d --build --remove-orphans "${authority_services[@]}"
 
     local directory_local_base issuer_local_base entry_local_base exit_local_base middle_local_base
     local -a directory_local_opts issuer_local_opts entry_local_opts exit_local_opts middle_local_opts
@@ -6167,7 +6167,7 @@ server_up() {
     if [[ "$middle_relay" == "1" ]]; then
       provider_services+=(middle)
     fi
-    compose_with_env "$PROVIDER_ENV_FILE" up -d --build --no-deps "${provider_services[@]}"
+    compose_with_env "$PROVIDER_ENV_FILE" up -d --build --no-deps --remove-orphans "${provider_services[@]}"
 
     local directory_local_base entry_local_base exit_local_base middle_local_base
     local -a directory_local_opts entry_local_opts exit_local_opts middle_local_opts

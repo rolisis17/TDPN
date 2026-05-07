@@ -423,7 +423,7 @@ if ! rg -q '^ISSUER_SPONSOR_API_TOKEN=[0-9a-f]{32}$' "$AUTH_ENV"; then
   cat "$AUTH_ENV"
   exit 1
 fi
-if ! rg -q -- 'up -d --build directory issuer entry-exit middle' "$AUTH_MIDDLE_DOCKER_ARGS_CAPTURE"; then
+if ! rg -q -- 'up -d --build --remove-orphans directory issuer entry-exit middle' "$AUTH_MIDDLE_DOCKER_ARGS_CAPTURE"; then
   echo "expected authority compose invocation to include middle service"
   cat "$AUTH_MIDDLE_DOCKER_ARGS_CAPTURE"
   exit 1
@@ -760,7 +760,7 @@ for expected_middle_env in \
     exit 1
   fi
 done
-if ! rg -q -- 'up -d --build --no-deps directory entry-exit middle' "$PROVIDER_MIDDLE_DOCKER_ARGS_CAPTURE"; then
+if ! rg -q -- 'up -d --build --no-deps --remove-orphans directory entry-exit middle' "$PROVIDER_MIDDLE_DOCKER_ARGS_CAPTURE"; then
   echo "expected provider compose invocation to include middle service"
   cat "$PROVIDER_MIDDLE_DOCKER_ARGS_CAPTURE"
   exit 1
