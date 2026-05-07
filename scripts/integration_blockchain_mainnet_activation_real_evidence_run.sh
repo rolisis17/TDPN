@@ -27,8 +27,10 @@ SUCCESS_LOG="$TMP_DIR/success.log"
 NO_GO_DIAGNOSTIC_LOG="$TMP_DIR/no_go_diagnostic.log"
 NO_GO_LAUNCH_LOG="$TMP_DIR/no_go_launch.log"
 FAIL_LOG="$TMP_DIR/fail.log"
+EXAMPLE_INPUT_LOG="$TMP_DIR/example_input.log"
 
 INPUT_JSON="$TMP_DIR/real_metrics_input.json"
+EXAMPLE_INPUT_JSON="$TMP_DIR/example_metrics_input.json"
 SUCCESS_REPORTS_DIR="$TMP_DIR/reports_success"
 SUCCESS_SUMMARY_JSON="$TMP_DIR/success_summary.json"
 SUCCESS_CANONICAL_SUMMARY_JSON="$TMP_DIR/success_summary_canonical.json"
@@ -44,6 +46,10 @@ NO_GO_LAUNCH_CANONICAL_SUMMARY_JSON="$TMP_DIR/no_go_launch_summary_canonical.jso
 FAIL_REPORTS_DIR="$TMP_DIR/reports_fail"
 FAIL_SUMMARY_JSON="$TMP_DIR/fail_summary.json"
 FAIL_CANONICAL_SUMMARY_JSON="$TMP_DIR/fail_summary_canonical.json"
+
+EXAMPLE_INPUT_REPORTS_DIR="$TMP_DIR/reports_example_input"
+EXAMPLE_INPUT_SUMMARY_JSON="$TMP_DIR/example_input_summary.json"
+EXAMPLE_INPUT_CANONICAL_SUMMARY_JSON="$TMP_DIR/example_input_summary_canonical.json"
 
 VALIDATION_SUMMARY_JSON="$TMP_DIR/validation_should_not_exist.json"
 
@@ -613,6 +619,50 @@ if ! grep -Fq -- "--print-output-json" "$HELP_LOG"; then
   cat "$HELP_LOG"
   exit 1
 fi
+
+echo "[blockchain-mainnet-activation-real-evidence] example-marked input fails fast"
+for example_marker in true '"true"' 1 '"1"'; do
+  jq -n --argjson include_example_values "$example_marker" '{
+    include_example_values: $include_example_values,
+    measurement_window_weeks: 13,
+    vpn_connect_session_success_slo_pct: 99.91,
+    vpn_recovery_mttr_p95_minutes: 16
+  }' >"$EXAMPLE_INPUT_JSON"
+
+  : >"$CAPTURE"
+  rm -rf "$EXAMPLE_INPUT_REPORTS_DIR"
+  rm -f "$EXAMPLE_INPUT_SUMMARY_JSON" "$EXAMPLE_INPUT_CANONICAL_SUMMARY_JSON"
+
+  set +e
+  run_helper \
+    --input-json "$EXAMPLE_INPUT_JSON" \
+    --reports-dir "$EXAMPLE_INPUT_REPORTS_DIR" \
+    --summary-json "$EXAMPLE_INPUT_SUMMARY_JSON" \
+    --canonical-summary-json "$EXAMPLE_INPUT_CANONICAL_SUMMARY_JSON" \
+    --print-summary-json 0 >"$EXAMPLE_INPUT_LOG" 2>&1
+  example_input_rc=$?
+  set -e
+  if [[ "$example_input_rc" -ne 2 ]]; then
+    echo "expected example-marked input validation rc=2 for marker $example_marker"
+    cat "$EXAMPLE_INPUT_LOG"
+    exit 1
+  fi
+  if ! grep -Fq "refuses input with include_example_values=true" "$EXAMPLE_INPUT_LOG"; then
+    echo "example-marked input log missing fail-fast message for marker $example_marker"
+    cat "$EXAMPLE_INPUT_LOG"
+    exit 1
+  fi
+  if [[ "$(wc -l <"$CAPTURE" | tr -d ' ')" -ne 0 ]]; then
+    echo "example-marked input should not invoke stage scripts for marker $example_marker"
+    cat "$CAPTURE"
+    exit 1
+  fi
+  if [[ -e "$EXAMPLE_INPUT_REPORTS_DIR" || -f "$EXAMPLE_INPUT_SUMMARY_JSON" || -f "$EXAMPLE_INPUT_CANONICAL_SUMMARY_JSON" ]]; then
+    echo "example-marked input should not create artifacts for marker $example_marker"
+    cat "$EXAMPLE_INPUT_LOG"
+    exit 1
+  fi
+done
 
 echo "[blockchain-mainnet-activation-real-evidence] success path"
 : >"$CAPTURE"

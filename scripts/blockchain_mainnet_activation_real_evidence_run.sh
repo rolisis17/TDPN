@@ -351,6 +351,19 @@ if [[ -n "$(trim "$operator_pack_canonical_summary_json")" ]]; then
   path_arg_or_die "--operator-pack-canonical-summary-json" "$operator_pack_canonical_summary_json"
 fi
 
+input_json="$(abs_path "$input_json")"
+
+if [[ -f "$input_json" ]] && jq -e '
+  .include_example_values == true
+  or .include_example_values == "true"
+  or .include_example_values == 1
+  or .include_example_values == "1"
+' "$input_json" >/dev/null 2>&1; then
+  echo "blockchain real evidence run refuses input with include_example_values=true: $input_json"
+  echo "generate production evidence JSON with evidence.mode=production and allowlisted evidence.source_kind metadata."
+  exit 2
+fi
+
 if [[ ! -x "$template_script" ]]; then
   echo "missing executable stage script: $template_script"
   exit 2
