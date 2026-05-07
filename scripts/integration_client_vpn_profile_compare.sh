@@ -131,6 +131,7 @@ CLIENT_VPN_PROFILE_COMPARE_SMOKE_SCRIPT="$FAKE_SMOKE" \
   --pause-sec 0 \
   --subject inv-test \
   --bootstrap-directory https://dir-a:8081 \
+  --allow-insecure-remote-http 1 \
   --summary-json "$SUMMARY_JSON" \
   --report-md "$REPORT_MD" \
   --print-summary-json 1 >"$RUN_LOG"
@@ -152,6 +153,7 @@ if ! jq -e '
   and .summary.runs_fail == 1
   and .decision.recommended_default_profile == "2hop"
   and .decision.experimental_non_default_profiles == ["1hop"]
+  and .inputs.allow_insecure_remote_http == true
   and ([.profiles[] | select(.profile == "1hop")][0].trust_reset_attempts == 1)
 ' "$SUMMARY_JSON" >/dev/null; then
   echo "runner summary json missing expected fields"
@@ -159,7 +161,7 @@ if ! jq -e '
   exit 1
 fi
 
-for expected in '--path-profile 1hop' '--path-profile 2hop' '--path-profile 3hop' '--record-result 0' '--manual-validation-report 0' '--incident-snapshot-on-fail 0'; do
+for expected in '--path-profile 1hop' '--path-profile 2hop' '--path-profile 3hop' '--allow-insecure-remote-http 1' '--record-result 0' '--manual-validation-report 0' '--incident-snapshot-on-fail 0'; do
   if ! rg -q -- "$expected" "$CAPTURE"; then
     echo "runner did not forward expected smoke arg: $expected"
     cat "$CAPTURE"
@@ -212,6 +214,7 @@ CLIENT_VPN_PROFILE_COMPARE_SCRIPT="$FAKE_FORWARD" \
 ./scripts/easy_node.sh client-vpn-profile-compare \
   --profiles 1hop,2hop \
   --rounds 2 \
+  --allow-insecure-remote-http 1 \
   --summary-json /tmp/client_vpn_profile_compare_test.json \
   --print-summary-json 1
 
@@ -221,7 +224,7 @@ if [[ -z "$forward_line" ]]; then
   cat "$FORWARD_CAPTURE"
   exit 1
 fi
-for expected in '--profiles 1hop,2hop' '--rounds 2' '--summary-json /tmp/client_vpn_profile_compare_test.json' '--print-summary-json 1'; do
+for expected in '--profiles 1hop,2hop' '--rounds 2' '--allow-insecure-remote-http 1' '--summary-json /tmp/client_vpn_profile_compare_test.json' '--print-summary-json 1'; do
   if ! grep -F -- "$expected" <<<"$forward_line" >/dev/null; then
     echo "easy_node forwarding missing: $expected"
     cat "$FORWARD_CAPTURE"

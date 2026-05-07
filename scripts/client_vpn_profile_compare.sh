@@ -32,6 +32,7 @@ Usage:
     [--min-operators N] \
     [--beta-profile [0|1]] \
     [--prod-profile [0|1]] \
+    [--allow-insecure-remote-http [0|1]] \
     [--operator-floor-check [0|1]] \
     [--issuer-quorum-check [0|1]] \
     [--issuer-min-operators N] \
@@ -259,6 +260,7 @@ min_sources=""
 min_operators=""
 beta_profile="0"
 prod_profile="0"
+allow_insecure_remote_http="${CLIENT_VPN_PROFILE_COMPARE_ALLOW_INSECURE_REMOTE_HTTP:-0}"
 operator_floor_check=""
 issuer_quorum_check=""
 issuer_min_operators=""
@@ -316,6 +318,19 @@ while [[ $# -gt 0 ]]; do
     --min-operators) min_operators="${2:-}"; shift 2 ;;
     --beta-profile) beta_profile="${2:-1}"; shift 2 ;;
     --prod-profile) prod_profile="${2:-1}"; shift 2 ;;
+    --allow-insecure-remote-http)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_insecure_remote_http="${2:-}"
+        shift 2
+      else
+        allow_insecure_remote_http="1"
+        shift
+      fi
+      ;;
+    --allow-insecure-remote-http=*)
+      allow_insecure_remote_http="${1#--allow-insecure-remote-http=}"
+      shift
+      ;;
     --operator-floor-check) operator_floor_check="${2:-1}"; shift 2 ;;
     --issuer-quorum-check) issuer_quorum_check="${2:-1}"; shift 2 ;;
     --issuer-min-operators) issuer_min_operators="${2:-}"; shift 2 ;;
@@ -387,7 +402,12 @@ bool_arg_or_die "--runtime-doctor" "$runtime_doctor"
 bool_arg_or_die "--runtime-fix" "$runtime_fix"
 bool_arg_or_die "--runtime-fix-prune-wg-only-dir" "$runtime_fix_prune_wg_only_dir"
 bool_arg_or_die "--trust-reset-on-key-mismatch" "$trust_reset_on_key_mismatch"
+bool_arg_or_die "--allow-insecure-remote-http" "$allow_insecure_remote_http"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+if [[ "$prod_profile" == "1" && "$allow_insecure_remote_http" == "1" ]]; then
+  echo "client-vpn-profile-compare does not allow --allow-insecure-remote-http with --prod-profile 1"
+  exit 2
+fi
 
 trust_reset_scope="$(trim "$trust_reset_scope" | tr '[:upper:]' '[:lower:]')"
 if [[ "$trust_reset_scope" != "scoped" && "$trust_reset_scope" != "global" ]]; then
@@ -479,6 +499,7 @@ for profile in "${profiles[@]}"; do
     run_cmd+=(--path-profile "$profile")
     append_opt run_cmd "--beta-profile" "$beta_profile"
     append_opt run_cmd "--prod-profile" "$prod_profile"
+    append_opt run_cmd "--allow-insecure-remote-http" "$allow_insecure_remote_http"
     append_opt run_cmd "--operator-floor-check" "$operator_floor_check"
     append_opt run_cmd "--issuer-quorum-check" "$issuer_quorum_check"
     append_opt run_cmd "--issuer-min-operators" "$issuer_min_operators"
@@ -696,6 +717,7 @@ jq -n \
   --arg anon_cred_present "$anon_cred_present" \
   --arg beta_profile "$beta_profile" \
   --arg prod_profile "$prod_profile" \
+  --arg allow_insecure_remote_http "$allow_insecure_remote_http" \
   --argjson profiles "$profile_inputs_json" \
   --arg decision_reason "$decision_reason" \
   --arg recommended_default_profile "$recommended_default_profile" \
@@ -731,7 +753,8 @@ jq -n \
       subject: $subject,
       anon_cred_present: ($anon_cred_present == "1"),
       beta_profile: ($beta_profile == "1"),
-      prod_profile: ($prod_profile == "1")
+      prod_profile: ($prod_profile == "1"),
+      allow_insecure_remote_http: ($allow_insecure_remote_http == "1")
     },
     summary: {
       profiles_total: ($profiles | length),
