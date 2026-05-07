@@ -166,6 +166,11 @@ This runs one strict validation pass, then soak rounds, then collects endpoint s
   --beta-profile 1
 ```
 
+For controlled lab endpoints that still use remote HTTP, add
+`--allow-insecure-remote-http 1`. Production profile rejects that opt-in.
+For host-based real-packet pilot evidence, also add
+`--client-test-mode local --live-evidence-udp-inject 1`.
+
 Optional path diversity tuning on machine C:
 
 ```bash

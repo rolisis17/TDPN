@@ -48,6 +48,9 @@ Usage:
     [--region-bias N] \
     [--region-prefix-bias N] \
     [--require-issuer-quorum [0|1]] \
+    [--allow-insecure-remote-http [0|1]] \
+    [--client-test-mode docker|local] \
+    [--live-evidence-udp-inject [0|1]] \
     [--beta-profile [0|1]] \
     [--prod-profile [0|1]] \
     [--report-file PATH]
@@ -56,6 +59,11 @@ Purpose:
   Run repeated 3-machine beta validation rounds from machine C.
   Optional fault injection can run a shell command every N rounds
   (for example: restart one server role over ssh).
+  --allow-insecure-remote-http 1 (or THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP=1)
+  explicitly allows lab-only remote HTTP control-plane URLs for each validate
+  round. Production profile rejects this opt-in.
+  --live-evidence-udp-inject 1 starts a host UDP packet source in each validate
+  round. It requires --client-test-mode local.
 USAGE
 }
 
@@ -160,6 +168,9 @@ locality_country_bias="${THREE_MACHINE_COUNTRY_BIAS:-1.60}"
 locality_region_bias="${THREE_MACHINE_REGION_BIAS:-1.25}"
 locality_region_prefix_bias="${THREE_MACHINE_REGION_PREFIX_BIAS:-1.10}"
 require_issuer_quorum="${THREE_MACHINE_REQUIRE_ISSUER_QUORUM:-}"
+allow_insecure_remote_http="${THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP:-0}"
+client_test_mode="${THREE_MACHINE_CLIENT_TEST_MODE:-}"
+live_evidence_udp_inject="${THREE_MACHINE_LIVE_EVIDENCE_UDP_INJECT:-0}"
 report_file=""
 path_profile_set=0
 distinct_operators_set=0
@@ -396,6 +407,36 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --allow-insecure-remote-http)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        allow_insecure_remote_http="${2:-}"
+        shift 2
+      else
+        allow_insecure_remote_http="1"
+        shift
+      fi
+      ;;
+    --allow-insecure-remote-http=*)
+      allow_insecure_remote_http="${1#--allow-insecure-remote-http=}"
+      shift
+      ;;
+    --client-test-mode)
+      client_test_mode="${2:-}"
+      shift 2
+      ;;
+    --live-evidence-udp-inject)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        live_evidence_udp_inject="${2:-}"
+        shift 2
+      else
+        live_evidence_udp_inject="1"
+        shift
+      fi
+      ;;
+    --live-evidence-udp-inject=*)
+      live_evidence_udp_inject="${1#--live-evidence-udp-inject=}"
+      shift
+      ;;
     --report-file)
       report_file="${2:-}"
       shift 2
@@ -478,6 +519,22 @@ if [[ -n "$require_issuer_quorum" && "$require_issuer_quorum" != "0" && "$requir
   echo "--require-issuer-quorum must be 0 or 1"
   exit 2
 fi
+if [[ "$allow_insecure_remote_http" != "0" && "$allow_insecure_remote_http" != "1" ]]; then
+  echo "--allow-insecure-remote-http / THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP must be 0 or 1"
+  exit 2
+fi
+if [[ -n "$client_test_mode" && "$client_test_mode" != "docker" && "$client_test_mode" != "local" ]]; then
+  echo "--client-test-mode / THREE_MACHINE_CLIENT_TEST_MODE must be docker or local"
+  exit 2
+fi
+if [[ "$live_evidence_udp_inject" != "0" && "$live_evidence_udp_inject" != "1" ]]; then
+  echo "--live-evidence-udp-inject / THREE_MACHINE_LIVE_EVIDENCE_UDP_INJECT must be 0 or 1"
+  exit 2
+fi
+if [[ "$live_evidence_udp_inject" == "1" && "${client_test_mode:-docker}" != "local" ]]; then
+  echo "--live-evidence-udp-inject 1 requires --client-test-mode local because host loopback UDP cannot reach the client container"
+  exit 2
+fi
 if [[ -n "$client_require_cross_operator_pair" && "$client_require_cross_operator_pair" != "0" && "$client_require_cross_operator_pair" != "1" ]]; then
   echo "--client-require-cross-operator-pair must be 0 or 1"
   exit 2
@@ -514,6 +571,10 @@ fi
 
 if [[ "$prod_profile" == "1" ]]; then
   beta_profile="1"
+  if [[ "$allow_insecure_remote_http" == "1" ]]; then
+    echo "THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP=1 is not allowed with --prod-profile 1"
+    exit 2
+  fi
 fi
 
 if [[ -z "$distinct_operators" ]]; then
@@ -643,6 +704,15 @@ for round in $(seq 1 "$rounds"); do
     --beta-profile "$beta_profile"
     --prod-profile "$prod_profile"
   )
+  if [[ "$allow_insecure_remote_http" == "1" ]]; then
+    cmd+=(--allow-insecure-remote-http 1)
+  fi
+  if [[ -n "$client_test_mode" ]]; then
+    cmd+=(--client-test-mode "$client_test_mode")
+  fi
+  if [[ "$live_evidence_udp_inject" == "1" ]]; then
+    cmd+=(--live-evidence-udp-inject 1)
+  fi
   if [[ -n "$path_profile" ]]; then
     cmd+=(--path-profile "$path_profile")
   elif [[ -n "$normalized_path_profile" ]]; then

@@ -39,6 +39,8 @@ Usage:
     [--region-prefix-bias N] \
     [--require-issuer-quorum [0|1]] \
     [--allow-insecure-remote-http [0|1]] \
+    [--client-test-mode docker|local] \
+    [--live-evidence-udp-inject [0|1]] \
     [--beta-profile [0|1]] \
     [--prod-profile [0|1]]
 
@@ -52,6 +54,8 @@ Environment:
   --allow-insecure-remote-http 1 (or THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP=1)
   explicitly allows lab-only remote HTTP control-plane URLs for the client-test
   step. Production profile rejects this opt-in.
+  --live-evidence-udp-inject 1 starts a short-lived local UDP packet source for
+  strict real-packet client-test mode. It requires --client-test-mode local.
 USAGE
 }
 
@@ -356,6 +360,85 @@ csv_has_non_loopback_http_url() {
   return 1
 }
 
+parse_udp_addr_host_port() {
+  local addr="${1:-}"
+  local host=""
+  local port=""
+  addr="${addr//[[:space:]]/}"
+  if [[ "$addr" == \[*\]:* ]]; then
+    host="${addr#\[}"
+    host="${host%%]*}"
+    port="${addr##*:}"
+  else
+    host="${addr%:*}"
+    port="${addr##*:}"
+    if [[ "$host" == "$addr" || "$host" == *:* ]]; then
+      return 1
+    fi
+  fi
+  if [[ -z "$host" || -z "$port" || ! "$port" =~ ^[0-9]+$ || "$port" -lt 1 || "$port" -gt 65535 ]]; then
+    return 1
+  fi
+  printf '%s\n%s\n' "$host" "$port"
+}
+
+start_live_evidence_udp_injector() {
+  local run_log="${1:-/dev/null}"
+  local udp_addr="${CLIENT_INNER_UDP_ADDR:-127.0.0.1:51900}"
+  local host_port host port
+  if ! host_port="$(parse_udp_addr_host_port "$udp_addr")"; then
+    echo "3-machine validate: live evidence UDP injector cannot parse CLIENT_INNER_UDP_ADDR=${udp_addr}"
+    return 1
+  fi
+  host="$(sed -n '1p' <<<"$host_port")"
+  port="$(sed -n '2p' <<<"$host_port")"
+  (
+    while true; do
+      # WireGuard transport-data frame shape: type=4, reserved bytes, 28-byte minimum payload.
+      printf '\004\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000' >"/dev/udp/${host}/${port}" || true
+      sleep 0.05
+    done
+  ) >>"$run_log" 2>&1 &
+  printf '%s' "$!"
+}
+
+stop_live_evidence_udp_injector() {
+  local pid="${1:-}"
+  if [[ -z "$pid" ]]; then
+    return 0
+  fi
+  kill "$pid" >/dev/null 2>&1 || true
+  wait "$pid" >/dev/null 2>&1 || true
+}
+
+pick_live_evidence_udp_addr() {
+  if [[ -n "${CLIENT_INNER_UDP_ADDR:-}" ]]; then
+    printf '%s\n' "$CLIENT_INNER_UDP_ADDR"
+    return 0
+  fi
+
+  local base="${THREE_MACHINE_LIVE_EVIDENCE_UDP_PORT_BASE:-51900}"
+  if ! [[ "$base" =~ ^[0-9]+$ ]] || ((base < 1024 || base > 65000)); then
+    echo "THREE_MACHINE_LIVE_EVIDENCE_UDP_PORT_BASE must be an integer in range 1024..65000"
+    return 1
+  fi
+
+  local attempt port
+  for attempt in $(seq 1 200); do
+    port=$((base + (RANDOM % 3000) + attempt))
+    if ((port > 65535)); then
+      continue
+    fi
+    if command -v ss >/dev/null 2>&1 && ss -H -lun "sport = :$port" 2>/dev/null | rg -q .; then
+      continue
+    fi
+    printf '127.0.0.1:%s\n' "$port"
+    return 0
+  done
+  echo "could not allocate a free local UDP port for live evidence injection"
+  return 1
+}
+
 wait_http_ok() {
   local url="$1"
   local name="$2"
@@ -505,6 +588,8 @@ live_host_mode_hint="${THREE_MACHINE_VALIDATE_LIVE_HOST_MODE:-auto}"
 ci_stub_mode="${THREE_MACHINE_VALIDATE_CI_STUB_MODE:-auto}"
 require_issuer_quorum="${THREE_MACHINE_REQUIRE_ISSUER_QUORUM:-}"
 allow_insecure_remote_http="${THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP:-0}"
+client_test_mode="${THREE_MACHINE_CLIENT_TEST_MODE:-}"
+live_evidence_udp_inject="${THREE_MACHINE_LIVE_EVIDENCE_UDP_INJECT:-0}"
 path_profile_set=0
 distinct_operators_set=0
 distinct_countries_set=0
@@ -719,6 +804,23 @@ while [[ $# -gt 0 ]]; do
       allow_insecure_remote_http="${1#--allow-insecure-remote-http=}"
       shift
       ;;
+    --client-test-mode)
+      client_test_mode="${2:-}"
+      shift 2
+      ;;
+    --live-evidence-udp-inject)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
+        live_evidence_udp_inject="${2:-}"
+        shift 2
+      else
+        live_evidence_udp_inject="1"
+        shift
+      fi
+      ;;
+    --live-evidence-udp-inject=*)
+      live_evidence_udp_inject="${1#--live-evidence-udp-inject=}"
+      shift
+      ;;
     -h|--help|help)
       usage
       exit 0
@@ -795,6 +897,18 @@ if [[ -n "$require_issuer_quorum" && "$require_issuer_quorum" != "0" && "$requir
 fi
 if [[ "$allow_insecure_remote_http" != "0" && "$allow_insecure_remote_http" != "1" ]]; then
   echo "--allow-insecure-remote-http / THREE_MACHINE_ALLOW_INSECURE_REMOTE_HTTP must be 0 or 1"
+  exit 2
+fi
+if [[ -n "$client_test_mode" && "$client_test_mode" != "docker" && "$client_test_mode" != "local" ]]; then
+  echo "--client-test-mode / THREE_MACHINE_CLIENT_TEST_MODE must be docker or local"
+  exit 2
+fi
+if [[ "$live_evidence_udp_inject" != "0" && "$live_evidence_udp_inject" != "1" ]]; then
+  echo "--live-evidence-udp-inject / THREE_MACHINE_LIVE_EVIDENCE_UDP_INJECT must be 0 or 1"
+  exit 2
+fi
+if [[ "$live_evidence_udp_inject" == "1" && "${client_test_mode:-docker}" != "local" ]]; then
+  echo "--live-evidence-udp-inject 1 requires --client-test-mode local because host loopback UDP cannot reach the client container"
   exit 2
 fi
 if [[ "$client_inner_source" != "auto" && "$client_inner_source" != "udp" && "$client_inner_source" != "synthetic" ]]; then
@@ -1152,7 +1266,7 @@ fi
 
 echo "[client-diversity] thresholds selection_lines>=$client_min_selection_lines entry_ops>=$client_min_entry_operators exit_ops>=$client_min_exit_operators cross_operator_pair=$client_require_cross_operator_pair"
 echo "[client-test] transport policy live_required=$live_transport_required mode_hint=$live_host_mode_hint ci_stub_mode=$ci_stub_mode_effective health_live_mode=$entry_exit_health_live_mode likely_live_hosts=$likely_live_hosts"
-echo "[client-test] source override inner_source=${client_inner_source_effective:-default} disable_synthetic_fallback=${client_disable_synthetic_fallback_effective:-default}"
+echo "[client-test] source override inner_source=${client_inner_source_effective:-default} disable_synthetic_fallback=${client_disable_synthetic_fallback_effective:-default} client_test_mode=${client_test_mode:-default} live_evidence_udp_inject=$live_evidence_udp_inject"
 
 client_cmd=(
   "$EASY_NODE_SH" client-test
@@ -1250,12 +1364,37 @@ fi
 if [[ -n "$client_disable_synthetic_fallback_effective" ]]; then
   env_args+=("CLIENT_DISABLE_SYNTHETIC_FALLBACK=$client_disable_synthetic_fallback_effective")
 fi
+if [[ -n "$client_test_mode" ]]; then
+  env_args+=("EASY_NODE_CLIENT_TEST_MODE=$client_test_mode")
+fi
+live_evidence_udp_addr="${CLIENT_INNER_UDP_ADDR:-}"
+if [[ "$live_evidence_udp_inject" == "1" ]]; then
+  if ! live_evidence_udp_addr="$(pick_live_evidence_udp_addr)"; then
+    exit 1
+  fi
+fi
+if [[ -n "$live_evidence_udp_addr" ]]; then
+  env_args+=("CLIENT_INNER_UDP_ADDR=$live_evidence_udp_addr")
+fi
 env_args+=("${client_cmd[@]}")
 
+live_evidence_udp_injector_pid=""
+if [[ "$live_evidence_udp_inject" == "1" ]]; then
+  live_evidence_udp_injector_log="${THREE_MACHINE_LIVE_EVIDENCE_UDP_INJECT_LOG:-$ROOT_DIR/.easy-node-logs/three_machine_validate_live_evidence_udp_inject_$(date +%Y%m%d_%H%M%S).log}"
+  mkdir -p "$(dirname "$live_evidence_udp_injector_log")"
+  if ! live_evidence_udp_injector_pid="$(CLIENT_INNER_UDP_ADDR="$live_evidence_udp_addr" start_live_evidence_udp_injector "$live_evidence_udp_injector_log")"; then
+    exit 1
+  fi
+  echo "[client-test] live evidence UDP injector started pid=$live_evidence_udp_injector_pid log=$live_evidence_udp_injector_log target=$live_evidence_udp_addr"
+fi
 set +e
 "${env_args[@]}"
 client_rc=$?
 set -e
+if [[ -n "$live_evidence_udp_injector_pid" ]]; then
+  stop_live_evidence_udp_injector "$live_evidence_udp_injector_pid"
+  echo "[client-test] live evidence UDP injector stopped pid=$live_evidence_udp_injector_pid"
+fi
 if ((client_rc != 0)); then
   latest_client_log="$(ls -1t "$ROOT_DIR"/.easy-node-logs/easy_node_client_test_*.log 2>/dev/null | head -n 1 || true)"
   if [[ -n "$latest_client_log" ]] && rg -qi '(transport must be wireguard-udp|transport mismatch|entry live mode|live-WG|live host)' "$latest_client_log"; then

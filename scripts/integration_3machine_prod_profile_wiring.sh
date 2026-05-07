@@ -410,6 +410,9 @@ THREE_MACHINE_VALIDATE_SCRIPT="$FAKE_VALIDATE" \
   --client-min-exit-operators 1 \
   --client-require-cross-operator-pair 0 \
   --require-issuer-quorum 0 \
+  --allow-insecure-remote-http 1 \
+  --client-test-mode local \
+  --live-evidence-udp-inject 1 \
   --beta-profile 1 \
   --prod-profile 0 >/tmp/integration_3machine_prod_profile_wiring_soak_default_profile.log 2>&1
 
@@ -425,6 +428,21 @@ if ! rg -q -- '--locality-soft-bias 1' "$SOAK_DEFAULT_PROFILE_CAPTURE"; then
 fi
 if ! rg -q -- '--country-bias 1.50' "$SOAK_DEFAULT_PROFILE_CAPTURE"; then
   echo "soak default profile wiring failed: expected balanced country-bias 1.50"
+  cat "$SOAK_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--allow-insecure-remote-http 1' "$SOAK_DEFAULT_PROFILE_CAPTURE"; then
+  echo "soak wiring failed: --allow-insecure-remote-http 1 was not forwarded to validate script"
+  cat "$SOAK_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--client-test-mode local' "$SOAK_DEFAULT_PROFILE_CAPTURE"; then
+  echo "soak wiring failed: --client-test-mode local was not forwarded to validate script"
+  cat "$SOAK_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--live-evidence-udp-inject 1' "$SOAK_DEFAULT_PROFILE_CAPTURE"; then
+  echo "soak wiring failed: --live-evidence-udp-inject 1 was not forwarded to validate script"
   cat "$SOAK_DEFAULT_PROFILE_CAPTURE"
   exit 1
 fi
@@ -588,6 +606,9 @@ THREE_MACHINE_SOAK_SCRIPT="$FAKE_RUNBOOK_SOAK" \
   --client-min-entry-operators 1 \
   --client-min-exit-operators 1 \
   --client-require-cross-operator-pair 0 \
+  --allow-insecure-remote-http 1 \
+  --client-test-mode local \
+  --live-evidence-udp-inject 1 \
   --bundle-dir "$RUNBOOK_DEFAULT_PROFILE_BUNDLE" >/tmp/integration_3machine_prod_profile_wiring_runbook_default_profile.log 2>&1
 
 if ! rg -q -- '--distinct-operators 1' "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"; then
@@ -603,6 +624,51 @@ fi
 if ! rg -q -- '--country-bias 1.50' "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"; then
   echo "runbook default profile wiring failed: expected balanced country-bias 1.50 on validate command"
   cat "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--client-min-selection-lines 1' "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"; then
+  echo "runbook default profile wiring failed: explicit client-min-selection-lines should be preserved"
+  cat "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--client-min-entry-operators 1' "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"; then
+  echo "runbook default profile wiring failed: explicit client-min-entry-operators should be preserved"
+  cat "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--client-min-exit-operators 1' "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"; then
+  echo "runbook default profile wiring failed: explicit client-min-exit-operators should be preserved"
+  cat "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--allow-insecure-remote-http 1' "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"; then
+  echo "runbook wiring failed: --allow-insecure-remote-http 1 missing from validate invocation"
+  cat "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--allow-insecure-remote-http 1' "$RUNBOOK_SOAK_DEFAULT_PROFILE_CAPTURE"; then
+  echo "runbook wiring failed: --allow-insecure-remote-http 1 missing from soak invocation"
+  cat "$RUNBOOK_SOAK_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--client-test-mode local' "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"; then
+  echo "runbook wiring failed: --client-test-mode local missing from validate invocation"
+  cat "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--client-test-mode local' "$RUNBOOK_SOAK_DEFAULT_PROFILE_CAPTURE"; then
+  echo "runbook wiring failed: --client-test-mode local missing from soak invocation"
+  cat "$RUNBOOK_SOAK_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--live-evidence-udp-inject 1' "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"; then
+  echo "runbook wiring failed: --live-evidence-udp-inject 1 missing from validate invocation"
+  cat "$RUNBOOK_VALIDATE_DEFAULT_PROFILE_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--live-evidence-udp-inject 1' "$RUNBOOK_SOAK_DEFAULT_PROFILE_CAPTURE"; then
+  echo "runbook wiring failed: --live-evidence-udp-inject 1 missing from soak invocation"
+  cat "$RUNBOOK_SOAK_DEFAULT_PROFILE_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--country-bias 1.60' "$RUNBOOK_SOAK_PATH_PROFILE_CAPTURE"; then
@@ -846,6 +912,30 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh client-vpn-preflight --help | 
 fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh client-vpn-preflight --help | rg -q -- '--allow-insecure-remote-http'; then
   echo "easy_node client-vpn-preflight help missing --allow-insecure-remote-http"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-validate --help | rg -q -- '--live-evidence-udp-inject'; then
+  echo "easy_node three-machine-validate help missing --live-evidence-udp-inject"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-validate --help | rg -q -- '--client-test-mode'; then
+  echo "easy_node three-machine-validate help missing --client-test-mode"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-soak --help | rg -q -- '--allow-insecure-remote-http'; then
+  echo "easy_node three-machine-soak help missing --allow-insecure-remote-http"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh three-machine-soak --help | rg -q -- '--live-evidence-udp-inject'; then
+  echo "easy_node three-machine-soak help missing --live-evidence-udp-inject"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh pilot-runbook --help | rg -q -- '--allow-insecure-remote-http'; then
+  echo "easy_node pilot-runbook help missing --allow-insecure-remote-http"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh pilot-runbook --help | rg -q -- '--live-evidence-udp-inject'; then
+  echo "easy_node pilot-runbook help missing --live-evidence-udp-inject"
   exit 1
 fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-wg-soak --help | rg -q -- '--max-consecutive-failures'; then
