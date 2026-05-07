@@ -1459,6 +1459,7 @@ THREE_MACHINE_PROD_WG_SOAK_SCRIPT="$FAKE_GATE_WG_SOAK" \
   --issuer-url https://issuer-main:8082 \
   --entry-url https://entry-main:8083 \
   --exit-url https://exit-main:8084 \
+  --path-profile private \
   --control-fault-every 2 \
   --control-fault-command test-control-fault \
   --control-continue-on-fail 1 \
@@ -1475,8 +1476,18 @@ if ! rg -q -- '--require-issuer-quorum 1' "$GATE_VALIDATE_CAPTURE"; then
   cat "$GATE_VALIDATE_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--path-profile private' "$GATE_VALIDATE_CAPTURE"; then
+  echo "prod gate wiring failed: validate call missing --path-profile private"
+  cat "$GATE_VALIDATE_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--rounds 2' "$GATE_SOAK_CAPTURE"; then
   echo "prod gate wiring failed: soak call missing --rounds 2"
+  cat "$GATE_SOAK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--path-profile private' "$GATE_SOAK_CAPTURE"; then
+  echo "prod gate wiring failed: control soak call missing --path-profile private"
   cat "$GATE_SOAK_CAPTURE"
   exit 1
 fi
@@ -1498,6 +1509,44 @@ fi
 if [[ -s "$GATE_WG_VALIDATE_CAPTURE" || -s "$GATE_WG_SOAK_CAPTURE" ]]; then
   echo "prod gate wiring failed: WG scripts should not run when --skip-wg 1"
   cat "$GATE_WG_VALIDATE_CAPTURE" "$GATE_WG_SOAK_CAPTURE"
+  exit 1
+fi
+
+echo "[wiring] prod gate script HTTP lab hint on control failure"
+FAKE_GATE_VALIDATE_FAIL="$TMP_DIR/fake_gate_validate_fail.sh"
+cat >"$FAKE_GATE_VALIDATE_FAIL" <<'EOF_FAKE_GATE_VALIDATE_FAIL'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${GATE_VALIDATE_CAPTURE_FILE:?}"
+exit 1
+EOF_FAKE_GATE_VALIDATE_FAIL
+chmod +x "$FAKE_GATE_VALIDATE_FAIL"
+set +e
+PATH="$TMP_BIN:$PATH" \
+GATE_VALIDATE_CAPTURE_FILE="$GATE_VALIDATE_CAPTURE" \
+GATE_SOAK_CAPTURE_FILE="$GATE_SOAK_CAPTURE" \
+THREE_MACHINE_BETA_VALIDATE_SCRIPT="$FAKE_GATE_VALIDATE_FAIL" \
+THREE_MACHINE_BETA_SOAK_SCRIPT="$FAKE_GATE_SOAK" \
+THREE_MACHINE_PROD_WG_VALIDATE_SCRIPT="$FAKE_GATE_WG_VALIDATE" \
+THREE_MACHINE_PROD_WG_SOAK_SCRIPT="$FAKE_GATE_WG_SOAK" \
+./scripts/integration_3machine_prod_gate.sh \
+  --directory-a http://dir-a:8081 \
+  --directory-b http://dir-b:8081 \
+  --issuer-url http://issuer-main:8082 \
+  --entry-url http://entry-main:8083 \
+  --exit-url http://exit-main:8084 \
+  --skip-control-soak 1 \
+  --skip-wg 1 >/tmp/integration_3machine_prod_profile_wiring_prod_gate_http_hint.log 2>&1
+gate_http_hint_rc=$?
+set -e
+if [[ "$gate_http_hint_rc" -ne 1 ]]; then
+  echo "prod gate wiring failed: expected rc=1 on HTTP lab control failure hint path"
+  cat /tmp/integration_3machine_prod_profile_wiring_prod_gate_http_hint.log
+  exit 1
+fi
+if ! rg -q 'HTTP lab endpoints cannot satisfy production HTTPS/mTLS checks' /tmp/integration_3machine_prod_profile_wiring_prod_gate_http_hint.log; then
+  echo "prod gate wiring failed: missing HTTP lab hint on control failure"
+  cat /tmp/integration_3machine_prod_profile_wiring_prod_gate_http_hint.log
   exit 1
 fi
 

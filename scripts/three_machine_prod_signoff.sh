@@ -187,6 +187,8 @@ manual_validation_report_summary_json=""
 manual_validation_report_md=""
 signoff_check_explicit="0"
 signoff_check_value="1"
+prod_profile_value="1"
+beta_profile_value="1"
 declare -a bundle_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -315,6 +317,32 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --prod-profile)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        prod_profile_value="${2:-}"
+        shift 2
+      else
+        prod_profile_value="1"
+        shift
+      fi
+      ;;
+    --prod-profile=*)
+      prod_profile_value="${1#--prod-profile=}"
+      shift
+      ;;
+    --beta-profile)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        beta_profile_value="${2:-}"
+        shift 2
+      else
+        beta_profile_value="1"
+        shift
+      fi
+      ;;
+    --beta-profile=*)
+      beta_profile_value="${1#--beta-profile=}"
+      shift
+      ;;
     -h|--help|help)
       usage
       exit 0
@@ -334,8 +362,18 @@ bool_arg_or_die "--runtime-fix" "$runtime_fix_on_non_ok"
 bool_arg_or_die "--runtime-fix-prune-wg-only-dir" "$runtime_fix_prune_wg_only_dir"
 bool_arg_or_die "--manual-validation-report" "$manual_validation_report_enabled"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "--prod-profile" "$prod_profile_value"
+bool_arg_or_die "--beta-profile" "$beta_profile_value"
 if [[ "$signoff_check_value" != "1" ]]; then
   echo "three-machine-prod-signoff requires --signoff-check 1"
+  exit 2
+fi
+if [[ "$prod_profile_value" != "1" ]]; then
+  echo "three-machine-prod-signoff requires --prod-profile 1; use client-vpn-smoke/client-vpn-profile-compare for beta HTTP lab evidence."
+  exit 2
+fi
+if [[ "$beta_profile_value" != "1" ]]; then
+  echo "three-machine-prod-signoff requires --beta-profile 1 as part of the strict production profile."
   exit 2
 fi
 if ! [[ "$runtime_base_port" =~ ^[0-9]+$ ]]; then

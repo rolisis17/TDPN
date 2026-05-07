@@ -771,6 +771,22 @@ if ! jq -e '.status == "fail" and .stage == "pre-real-host-readiness" and .defer
   exit 1
 fi
 
+echo "[three-machine-prod-signoff] prod-profile fail-close path"
+set +e
+./scripts/three_machine_prod_signoff.sh --prod-profile 0 >/tmp/integration_three_machine_prod_signoff_prod_profile_zero.log 2>&1
+prod_profile_zero_rc=$?
+set -e
+if [[ "$prod_profile_zero_rc" -ne 2 ]]; then
+  echo "expected three-machine-prod-signoff --prod-profile 0 to fail with rc=2"
+  cat /tmp/integration_three_machine_prod_signoff_prod_profile_zero.log
+  exit 1
+fi
+if ! rg -q 'three-machine-prod-signoff requires --prod-profile 1' /tmp/integration_three_machine_prod_signoff_prod_profile_zero.log; then
+  echo "expected clear prod-profile fail-close message"
+  cat /tmp/integration_three_machine_prod_signoff_prod_profile_zero.log
+  exit 1
+fi
+
 echo "[three-machine-prod-signoff] easy_node forwarding"
 cat >"$FAKE_SIGNOFF" <<'EOF_FAKE_SIGNOFF'
 #!/usr/bin/env bash

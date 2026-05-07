@@ -28,6 +28,7 @@ Usage:
     [--anon-cred TOKEN] \
     [--min-sources N] \
     [--min-operators N] \
+    [--path-profile 1hop|2hop|3hop|speed|balanced|private] \
     [--federation-timeout-sec N] \
     [--control-timeout-sec N] \
     [--control-require-issuer-quorum auto|0|1] \
@@ -263,6 +264,11 @@ run_step() {
     gate_failed_step="$step_name"
     gate_failed_rc="$rc"
     echo "[prod-gate] step=$step_name failed rc=$rc (log=$step_log)"
+    if [[ "$step_name" == "control_validate" ]] &&
+       [[ "$bootstrap_directory" == http://* || "$directory_a" == http://* || "$directory_b" == http://* || "$issuer_url" == http://* || "$entry_url" == http://* || "$exit_url" == http://* ]]; then
+      echo "[prod-gate] hint: strict prod gate forces --prod-profile 1; HTTP lab endpoints cannot satisfy production HTTPS/mTLS checks."
+      echo "[prod-gate] hint: use client-vpn-smoke/client-vpn-profile-compare for beta HTTP lab evidence, or run A/B with --prod-profile 1 and HTTPS/mTLS endpoints before true production signoff."
+    fi
     exit "$rc"
   fi
   set_step_status "$step_name" "ok"
@@ -280,6 +286,7 @@ client_subject=""
 client_anon_cred=""
 min_sources="${THREE_MACHINE_MIN_SOURCES:-2}"
 min_operators="${THREE_MACHINE_MIN_OPERATORS:-2}"
+path_profile="${THREE_MACHINE_PATH_PROFILE:-}"
 federation_timeout_sec="${THREE_MACHINE_FEDERATION_TIMEOUT_SEC:-90}"
 control_timeout_sec="${THREE_MACHINE_PROD_GATE_CONTROL_TIMEOUT_SEC:-50}"
 control_require_issuer_quorum="${THREE_MACHINE_PROD_GATE_CONTROL_REQUIRE_ISSUER_QUORUM:-auto}"
@@ -413,6 +420,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --min-operators)
       min_operators="${2:-}"
+      shift 2
+      ;;
+    --path-profile)
+      path_profile="${2:-}"
       shift 2
       ;;
     --federation-timeout-sec)
@@ -930,6 +941,7 @@ on_exit_prod_gate() {
 trap 'on_exit_prod_gate' EXIT
 
 declare -a common_args=()
+declare -a control_profile_args=()
 if [[ -n "$bootstrap_directory" ]]; then
   common_args+=(--bootstrap-directory "$bootstrap_directory")
   common_args+=(--discovery-wait-sec "$discovery_wait_sec")
@@ -956,10 +968,14 @@ fi
 if [[ -n "$client_anon_cred" ]]; then
   common_args+=(--anon-cred "$client_anon_cred")
 fi
+if [[ -n "$path_profile" ]]; then
+  control_profile_args+=(--path-profile "$path_profile")
+fi
 
 run_step "control_validate" "$step_dir/01_control_validate.log" \
   "$BETA_VALIDATE_SCRIPT" \
   "${common_args[@]}" \
+  "${control_profile_args[@]}" \
   --min-sources "$min_sources" \
   --min-operators "$min_operators" \
   --federation-timeout-sec "$federation_timeout_sec" \
@@ -977,6 +993,7 @@ if [[ "$skip_control_soak" == "0" ]]; then
   declare -a control_soak_args=(
     "$BETA_SOAK_SCRIPT"
     "${common_args[@]}"
+    "${control_profile_args[@]}"
     --rounds "$control_soak_rounds"
     --pause-sec "$control_soak_pause_sec"
     --fault-every "$control_fault_every"
