@@ -104,6 +104,34 @@ backup_dir() {
   fi
 }
 
+require_readable_file_for_backup() {
+  local src="$1"
+  if [[ -e "$src" && ! -r "$src" ]]; then
+    echo "integration_easy_node_prod_server_env requires readable deploy artifacts before it can backup/restore safely: $src"
+    echo "fix ownership/permissions or run the integration with matching privileges."
+    exit 2
+  fi
+}
+
+require_readable_tree_for_backup() {
+  local src="$1"
+  local unreadable=""
+  if [[ ! -e "$src" ]]; then
+    return 0
+  fi
+  if [[ ! -r "$src" ]]; then
+    unreadable="$src"
+  else
+    unreadable="$(find "$src" -mindepth 1 ! -readable -print -quit 2>/dev/null || true)"
+  fi
+  if [[ -n "$unreadable" ]]; then
+    echo "integration_easy_node_prod_server_env requires readable deploy artifacts before it can backup/restore safely."
+    echo "unreadable path: $unreadable"
+    echo "fix ownership/permissions or run the integration with matching privileges."
+    exit 2
+  fi
+}
+
 restore_file() {
   local dst="$1"
   local name="$2"
@@ -135,6 +163,15 @@ cleanup() {
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
+
+require_readable_file_for_backup "$AUTH_ENV"
+require_readable_file_for_backup "$PROVIDER_ENV"
+require_readable_file_for_backup "$MODE_FILE"
+require_readable_file_for_backup "$IDENTITY_FILE"
+require_readable_file_for_backup "$HOSTS_FILE"
+require_readable_tree_for_backup "$TLS_DIR"
+require_readable_tree_for_backup "$ISSUER_ADMIN_DIR"
+require_readable_tree_for_backup "$ENTRY_EXIT_DATA_DIR"
 
 backup_file "$AUTH_ENV" "auth_env"
 backup_file "$PROVIDER_ENV" "provider_env"
