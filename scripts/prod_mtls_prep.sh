@@ -268,6 +268,53 @@ json_array_from_values() {
   printf '%s\n' "$@" | jq -R . | jq -s .
 }
 
+safe_file_component() {
+  local value="$1"
+  value="$(printf '%s' "$value" | tr -c 'A-Za-z0-9._-' '_')"
+  value="${value##_}"
+  value="${value%%_}"
+  if [[ -z "$value" ]]; then
+    value="host"
+  fi
+  printf '%s' "$value"
+}
+
+write_host_node_san_config() {
+  local path="$1"
+  local common_name="$2"
+  shift 2
+  local sans=("$@")
+  local dns_i=0
+  local ip_i=0
+  {
+    echo "[req]"
+    echo "default_bits = 2048"
+    echo "prompt = no"
+    echo "default_md = sha256"
+    echo "distinguished_name = dn"
+    echo "req_extensions = req_ext"
+    echo ""
+    echo "[dn]"
+    echo "CN = ${common_name}"
+    echo ""
+    echo "[req_ext]"
+    echo "subjectAltName = @alt_names"
+    echo "extendedKeyUsage = serverAuth,clientAuth"
+    echo ""
+    echo "[alt_names]"
+    local san
+    for san in "${sans[@]}"; do
+      if is_ipv4 "$san" || is_ipv6 "$san"; then
+        ip_i=$((ip_i + 1))
+        echo "IP.${ip_i} = ${san}"
+      else
+        dns_i=$((dns_i + 1))
+        echo "DNS.${dns_i} = ${san}"
+      fi
+    done
+  } >"$path"
+}
+
 timestamp="$(date -u +%Y%m%d_%H%M%S)"
 authority_host=""
 days="365"
@@ -433,10 +480,12 @@ declare -a blockers=()
 host_records_file="$(mktemp)"
 blockers_file="$(mktemp)"
 generated_files_file="$(mktemp)"
-trap 'rm -f "$host_records_file" "$blockers_file" "$generated_files_file"' EXIT
+host_bundles_file="$(mktemp)"
+trap 'rm -f "$host_records_file" "$blockers_file" "$generated_files_file" "$host_bundles_file"' EXIT
 : >"$host_records_file"
 : >"$blockers_file"
 : >"$generated_files_file"
+: >"$host_bundles_file"
 
 append_host_record() {
   local role="$1"
@@ -458,6 +507,62 @@ append_blocker() {
   local message="$2"
   blockers+=("$message")
   jq -n --arg code "$code" --arg message "$message" '{code:$code,message:$message}' >>"$blockers_file"
+}
+
+append_generated_file() {
+  local name="$1"
+  local path="$2"
+  jq -n --arg name "$name" --arg path "$path" '{name:$name,path:$path,exists:true}' >>"$generated_files_file"
+}
+
+generate_host_server_bundle() {
+  local role="$1"
+  local host="$2"
+  local label dir key csr crt cfg ca_crt
+  label="$(safe_file_component "${role}_${host}")"
+  dir="$tls_out_dir/hosts/$label"
+  key="$dir/node.key"
+  csr="$dir/node.csr"
+  crt="$dir/node.crt"
+  cfg="$dir/node_san.cnf"
+  ca_crt="$dir/ca.crt"
+
+  mkdir -p "$dir"
+  cp "$tls_out_dir/ca.crt" "$ca_crt"
+
+  local -a host_sans=()
+  add_unique "$host" host_sans
+  local san_value
+  for san_value in "${extra_sans[@]}"; do
+    add_unique "$san_value" host_sans
+  done
+  add_unique "localhost" host_sans
+  add_unique "127.0.0.1" host_sans
+  add_unique "directory" host_sans
+  add_unique "issuer" host_sans
+  add_unique "entry-exit" host_sans
+
+  write_host_node_san_config "$cfg" "privacynode-${role}-${host}" "${host_sans[@]}"
+  openssl genrsa -out "$key" 2048 >/dev/null 2>&1
+  openssl req -new -key "$key" -out "$csr" -config "$cfg" >/dev/null 2>&1
+  openssl x509 -req -in "$csr" -CA "$tls_out_dir/ca.crt" -CAkey "$tls_out_dir/ca.key" -CAcreateserial \
+    -out "$crt" -days "$days" -sha256 -extfile "$cfg" -extensions req_ext >/dev/null 2>&1
+  rm -f "$csr"
+  chmod 600 "$key" 2>/dev/null || true
+  chmod 644 "$ca_crt" "$crt" "$cfg" 2>/dev/null || true
+
+  append_generated_file "host:${role}:${host}:ca.crt" "$ca_crt"
+  append_generated_file "host:${role}:${host}:node.crt" "$crt"
+  append_generated_file "host:${role}:${host}:node.key" "$key"
+  append_generated_file "host:${role}:${host}:node_san.cnf" "$cfg"
+  jq -n \
+    --arg role "$role" \
+    --arg host "$host" \
+    --arg dir "$dir" \
+    --arg ca_crt "$ca_crt" \
+    --arg node_crt "$crt" \
+    --arg node_key "$key" \
+    '{role:$role,host:$host,dir:$dir,ca_crt:$ca_crt,node_crt:$node_crt,node_key:$node_key,includes_ca_key:false}' >>"$host_bundles_file"
 }
 
 append_host_record "authority" "$authority_host"
@@ -497,7 +602,11 @@ elif [[ "$status" == "pass" && "$generate_certs" == "1" ]]; then
   if "${mtls_cmd[@]}" >"$bootstrap_log" 2>&1; then
     cert_generation_status="ok"
     for file_name in ca.crt ca.key node.crt node.key client.crt client.key; do
-      jq -n --arg name "$file_name" --arg path "$tls_out_dir/$file_name" '{name:$name,path:$path,exists:true}' >>"$generated_files_file"
+      append_generated_file "$file_name" "$tls_out_dir/$file_name"
+    done
+    generate_host_server_bundle "authority" "$authority_host"
+    for provider_host in "${provider_hosts[@]}"; do
+      generate_host_server_bundle "provider" "$provider_host"
     done
   else
     status="fail"
@@ -558,6 +667,20 @@ write_report() {
     echo "- summary_json: ${summary_json}"
     echo "- report_md: ${report_md}"
     echo
+    if [[ -s "$host_bundles_file" ]]; then
+      echo "## Host-Specific Server Bundles"
+      echo
+      echo "Use these per-host bundles for the real multi-machine cutover so each server has its own node.key. The compatibility bundle at tls_dir keeps the older single node.crt/node.key layout for current tooling and tests."
+      echo
+      echo "The host-specific bundles intentionally omit ca.key. Treat them as the safer CA-issued server material for the final install path; do not distribute the CA private key with server bundles."
+      echo
+      echo "| role | host | bundle_dir | includes_ca_key |"
+      echo "| --- | --- | --- | --- |"
+      jq -r '. | "| \(.role) | \(.host) | \(.dir) | \(.includes_ca_key) |"' "$host_bundles_file"
+      echo
+      echo "For final cutover, stage only the matching host bundle on that server as ca.crt, node.crt, and node.key. Keep ca.key offline for true production."
+      echo
+    fi
     echo "## Later Cutover Commands"
     echo
     if [[ "$rehearsal_only" == "1" ]]; then
@@ -590,10 +713,11 @@ write_report() {
 }
 
 write_summary() {
-  local hosts_json blockers_json generated_files_json
+  local hosts_json blockers_json generated_files_json host_bundles_json
   hosts_json="$(jq -s '.' "$host_records_file")"
   blockers_json="$(jq -s '.' "$blockers_file")"
   generated_files_json="$(jq -s '.' "$generated_files_file")"
+  host_bundles_json="$(jq -s '.' "$host_bundles_file")"
   local days_num
   days_num=$((10#$days))
   jq -n \
@@ -627,6 +751,7 @@ write_summary() {
     --argjson hosts "$hosts_json" \
     --argjson blockers "$blockers_json" \
     --argjson generated_files "$generated_files_json" \
+    --argjson host_bundles "$host_bundles_json" \
     '{
       version: $version,
       schema: {id: "prod_mtls_prep_summary", major: 1, minor: 0},
@@ -649,7 +774,9 @@ write_summary() {
       blockers: $blockers,
       certificate_generation: {
         status: $cert_generation_status,
-        generated_files: $generated_files
+        generated_files: $generated_files,
+        host_server_bundles: $host_bundles,
+        compatibility_bundle_shared_node_key: (if ($generated_files | length) > 0 then true else false end)
       },
       artifacts: {
         out_dir: $out_dir,

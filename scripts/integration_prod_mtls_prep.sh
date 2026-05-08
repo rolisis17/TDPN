@@ -114,12 +114,18 @@ handshake_dir="$tmp_dir/handshake"
   --provider-host 127.0.0.2 \
   --allow-private-hosts 1 \
   --out-dir "$handshake_dir" >/tmp/integration_prod_mtls_prep_handshake.log
+handshake_server_bundle="$(jq -r '.certificate_generation.host_server_bundles[] | select(.role=="authority") | .dir' "$handshake_dir/prod_mtls_prep_summary.json")"
+if [[ -z "$handshake_server_bundle" || ! -d "$handshake_server_bundle" ]]; then
+  echo "missing authority host-specific server bundle for handshake test"
+  cat "$handshake_dir/prod_mtls_prep_summary.json"
+  exit 1
+fi
 port=$((24000 + RANDOM % 10000))
 openssl s_server \
   -accept "$port" \
-  -cert "$handshake_dir/tls/node.crt" \
-  -key "$handshake_dir/tls/node.key" \
-  -CAfile "$handshake_dir/tls/ca.crt" \
+  -cert "$handshake_server_bundle/node.crt" \
+  -key "$handshake_server_bundle/node.key" \
+  -CAfile "$handshake_server_bundle/ca.crt" \
   -Verify 1 \
   -tls1_3 \
   -www >"$handshake_dir/s_server.log" 2>&1 &
@@ -138,14 +144,14 @@ if [[ "$server_ready" != "1" ]]; then
   exit 1
 fi
 if curl -fsS --connect-timeout 2 --max-time 4 \
-  --cacert "$handshake_dir/tls/ca.crt" \
+  --cacert "$handshake_server_bundle/ca.crt" \
   "https://127.0.0.1:${port}/" >"$handshake_dir/no_client_cert.out" 2>"$handshake_dir/no_client_cert.err"; then
   echo "expected mTLS endpoint to reject a request without a client certificate"
   cat "$handshake_dir/no_client_cert.out" 2>/dev/null || true
   exit 1
 fi
 curl -fsS --connect-timeout 2 --max-time 4 \
-  --cacert "$handshake_dir/tls/ca.crt" \
+  --cacert "$handshake_server_bundle/ca.crt" \
   --cert "$handshake_dir/tls/client.crt" \
   --key "$handshake_dir/tls/client.key" \
   "https://127.0.0.1:${port}/" >"$handshake_dir/client_cert.out"
@@ -185,6 +191,55 @@ fi
 if ! rg -q "three-machine-prod-signoff" "$public_dir/prod_mtls_prep_report.md"; then
   echo "missing signoff command in report"
   cat "$public_dir/prod_mtls_prep_report.md"
+  exit 1
+fi
+if ! rg -q "do not distribute the CA private key" "$public_dir/prod_mtls_prep_report.md"; then
+  echo "missing CA private-key handling warning in report"
+  cat "$public_dir/prod_mtls_prep_report.md"
+  exit 1
+fi
+if ! jq -e '(.certificate_generation.host_server_bundles | length) == 3' "$public_dir/prod_mtls_prep_summary.json" >/dev/null; then
+  echo "expected host-specific server bundles for authority plus both providers"
+  cat "$public_dir/prod_mtls_prep_summary.json"
+  exit 1
+fi
+authority_bundle="$(jq -r '.certificate_generation.host_server_bundles[] | select(.role=="authority") | .dir' "$public_dir/prod_mtls_prep_summary.json")"
+provider_bundle="$(jq -r '.certificate_generation.host_server_bundles[] | select(.role=="provider" and .host=="198.51.100.11") | .dir' "$public_dir/prod_mtls_prep_summary.json")"
+if [[ -z "$authority_bundle" || -z "$provider_bundle" || ! -d "$authority_bundle" || ! -d "$provider_bundle" ]]; then
+  echo "missing expected public host-specific bundle"
+  cat "$public_dir/prod_mtls_prep_summary.json"
+  exit 1
+fi
+if [[ -e "$authority_bundle/ca.key" || -e "$provider_bundle/ca.key" ]]; then
+  echo "host-specific server bundles must not include ca.key"
+  exit 1
+fi
+if ! openssl verify -CAfile "$public_dir/tls/ca.crt" "$authority_bundle/node.crt" >/tmp/integration_prod_mtls_prep_auth_verify.log 2>&1; then
+  echo "authority host-specific certificate failed CA verification"
+  cat /tmp/integration_prod_mtls_prep_auth_verify.log
+  exit 1
+fi
+if ! openssl verify -CAfile "$public_dir/tls/ca.crt" "$provider_bundle/node.crt" >/tmp/integration_prod_mtls_prep_provider_verify.log 2>&1; then
+  echo "provider host-specific certificate failed CA verification"
+  cat /tmp/integration_prod_mtls_prep_provider_verify.log
+  exit 1
+fi
+auth_key_fp="$(openssl pkey -in "$authority_bundle/node.key" -pubout 2>/dev/null | openssl dgst -sha256 | awk '{print $2}')"
+provider_key_fp="$(openssl pkey -in "$provider_bundle/node.key" -pubout 2>/dev/null | openssl dgst -sha256 | awk '{print $2}')"
+if [[ -z "$auth_key_fp" || -z "$provider_key_fp" || "$auth_key_fp" == "$provider_key_fp" ]]; then
+  echo "expected host-specific server bundles to use distinct node keys"
+  exit 1
+fi
+openssl x509 -in "$authority_bundle/node.crt" -noout -ext subjectAltName >/tmp/integration_prod_mtls_prep_auth_host_san.log
+openssl x509 -in "$provider_bundle/node.crt" -noout -ext subjectAltName >/tmp/integration_prod_mtls_prep_provider_host_san.log
+if ! rg -q "IP Address:203.0.113.10" /tmp/integration_prod_mtls_prep_auth_host_san.log || rg -q "IP Address:198.51.100.11" /tmp/integration_prod_mtls_prep_auth_host_san.log; then
+  echo "authority host-specific SANs are not isolated to the authority host"
+  cat /tmp/integration_prod_mtls_prep_auth_host_san.log
+  exit 1
+fi
+if ! rg -q "IP Address:198.51.100.11" /tmp/integration_prod_mtls_prep_provider_host_san.log || rg -q "IP Address:203.0.113.10" /tmp/integration_prod_mtls_prep_provider_host_san.log; then
+  echo "provider host-specific SANs are not isolated to the provider host"
+  cat /tmp/integration_prod_mtls_prep_provider_host_san.log
   exit 1
 fi
 
