@@ -14,9 +14,18 @@ need_cmd() {
 need_cmd jq
 need_cmd openssl
 need_cmd rg
+need_cmd curl
 
 tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT
+server_pid=""
+cleanup() {
+  if [[ -n "$server_pid" ]]; then
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+  fi
+  rm -rf "$tmp_dir"
+}
+trap cleanup EXIT
 
 invalid_log="$tmp_dir/invalid_host.log"
 if ./scripts/prod_mtls_prep.sh \
@@ -88,6 +97,61 @@ for file_name in ca.crt ca.key node.crt node.key client.crt client.key; do
     exit 1
   fi
 done
+if ! rg -q "rehearsal_only: true" "$rehearsal_dir/prod_mtls_prep_report.md"; then
+  echo "missing rehearsal-only warning in report"
+  cat "$rehearsal_dir/prod_mtls_prep_report.md"
+  exit 1
+fi
+if ! rg -q "Replace private/Tailscale hosts with public DNS/IPs" "$rehearsal_dir/prod_mtls_prep_report.md"; then
+  echo "missing rehearsal cutover warning in report"
+  cat "$rehearsal_dir/prod_mtls_prep_report.md"
+  exit 1
+fi
+
+handshake_dir="$tmp_dir/handshake"
+./scripts/prod_mtls_prep.sh \
+  --authority-host 127.0.0.1 \
+  --provider-host 127.0.0.2 \
+  --allow-private-hosts 1 \
+  --out-dir "$handshake_dir" >/tmp/integration_prod_mtls_prep_handshake.log
+port=$((24000 + RANDOM % 10000))
+openssl s_server \
+  -accept "$port" \
+  -cert "$handshake_dir/tls/node.crt" \
+  -key "$handshake_dir/tls/node.key" \
+  -CAfile "$handshake_dir/tls/ca.crt" \
+  -Verify 1 \
+  -tls1_3 \
+  -www >"$handshake_dir/s_server.log" 2>&1 &
+server_pid=$!
+server_ready=0
+for _ in $(seq 1 50); do
+  if (: >/dev/tcp/127.0.0.1/"$port") >/dev/null 2>&1; then
+    server_ready=1
+    break
+  fi
+  sleep 0.1
+done
+if [[ "$server_ready" != "1" ]]; then
+  echo "mTLS handshake test server did not become ready"
+  cat "$handshake_dir/s_server.log" 2>/dev/null || true
+  exit 1
+fi
+if curl -fsS --connect-timeout 2 --max-time 4 \
+  --cacert "$handshake_dir/tls/ca.crt" \
+  "https://127.0.0.1:${port}/" >"$handshake_dir/no_client_cert.out" 2>"$handshake_dir/no_client_cert.err"; then
+  echo "expected mTLS endpoint to reject a request without a client certificate"
+  cat "$handshake_dir/no_client_cert.out" 2>/dev/null || true
+  exit 1
+fi
+curl -fsS --connect-timeout 2 --max-time 4 \
+  --cacert "$handshake_dir/tls/ca.crt" \
+  --cert "$handshake_dir/tls/client.crt" \
+  --key "$handshake_dir/tls/client.key" \
+  "https://127.0.0.1:${port}/" >"$handshake_dir/client_cert.out"
+kill "$server_pid" 2>/dev/null || true
+wait "$server_pid" 2>/dev/null || true
+server_pid=""
 
 public_dir="$tmp_dir/public"
 ./scripts/easy_node.sh prod-mtls-prep \

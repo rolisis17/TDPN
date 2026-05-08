@@ -560,6 +560,10 @@ write_report() {
     echo
     echo "## Later Cutover Commands"
     echo
+    if [[ "$rehearsal_only" == "1" ]]; then
+      echo "These commands reflect the rehearsal hosts you supplied. Replace private/Tailscale hosts with public DNS/IPs before using them for true production."
+      echo
+    fi
     echo '```bash'
     echo "# Authority"
     echo "$authority_server_cmd"
@@ -619,6 +623,7 @@ write_summary() {
     --arg client_smoke "$client_smoke_cmd" \
     --arg signoff "$signoff_cmd" \
     --arg beta_lab "$beta_lab_cmd" \
+    --arg rehearsal_warning "These commands reflect the rehearsal hosts supplied; replace private/Tailscale hosts with public DNS/IPs before true production." \
     --argjson hosts "$hosts_json" \
     --argjson blockers "$blockers_json" \
     --argjson generated_files "$generated_files_json" \
@@ -659,7 +664,8 @@ write_summary() {
         prod_preflight: $prod_preflight,
         client_vpn_smoke: $client_smoke,
         three_machine_prod_signoff: $signoff,
-        current_beta_http_smoke: $beta_lab
+        current_beta_http_smoke: $beta_lab,
+        warning: (if $rehearsal_only then $rehearsal_warning else "" end)
       }
     }' >"$summary_json"
 }
