@@ -710,6 +710,7 @@ Usage:
   ./scripts/easy_node.sh admin-signing-status
   ./scripts/easy_node.sh admin-signing-rotate [--restart-issuer [0|1]] [--key-history N]
   ./scripts/easy_node.sh prod-mtls-prep --authority-host HOST --provider-host HOST [--allow-private-hosts [0|1]] [--out-dir DIR] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-mtls-bundle-verify --bundle-dir DIR --host HOST [--days-min N] [--allow-ca-key [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-preflight [--days-min N] [--check-live [0|1]] [--timeout-sec N] [--live-require-configured-healthy [0|1]] [--live-max-cooling-retry-sec N] [--live-max-peer-sync-age-sec N] [--live-max-issuer-sync-age-sec N] [--live-min-peer-success-sources N] [--live-min-issuer-success-sources N] [--live-min-peer-source-operators N] [--live-min-issuer-source-operators N]
   ./scripts/easy_node.sh bootstrap-mtls [--out-dir DIR] [--public-host HOST] [--san HOST] [--days N] [--rotate-leaf [0|1]] [--rotate-ca [0|1]]
   ./scripts/easy_node.sh machine-a-test [--public-host HOST] [--report-file PATH]
@@ -731,6 +732,7 @@ Notes:
   - server-up --prod-profile enables fail-closed production strict mode (requires mTLS + signed issuer-admin auth).
   - admin-signing-status/admin-signing-rotate are authority-only issuer admin signer maintenance tools.
   - prod-mtls-prep prepares HTTPS/mTLS artifacts and later cutover commands without editing active env files or restarting servers.
+  - prod-mtls-bundle-verify checks a staged per-host server bundle before cutover and fails if ca.key is present by default.
   - prod-preflight validates strict prod profile wiring (mTLS policy, CA/key/cert fit, public-host SANs, HTTPS URLs, and authority signer config).
   - server-federation-status prints directory peer+sync health (including configured/discovered peer failure streaks), can evaluate strict policy thresholds in one shot, and can emit machine-readable summary JSON for automation/handoff.
   - server-federation-wait blocks until directory peer-sync + issuer-sync quorum and peer-health readiness are met (or timeout), can optionally fail-close on configured-peer degradation/excessive cooldown/stale sync age, and can emit machine-readable summary JSON for automation.
@@ -1689,6 +1691,15 @@ bootstrap_mtls() {
 
 prod_mtls_prep() {
   local script="$ROOT_DIR/scripts/prod_mtls_prep.sh"
+  if [[ ! -x "$script" ]]; then
+    echo "missing helper script: $script"
+    exit 2
+  fi
+  "$script" "$@"
+}
+
+prod_mtls_bundle_verify() {
+  local script="$ROOT_DIR/scripts/prod_mtls_bundle_verify.sh"
   if [[ ! -x "$script" ]]; then
     echo "missing helper script: $script"
     exit 2
@@ -19875,6 +19886,10 @@ main() {
     prod-mtls-prep)
       shift
       prod_mtls_prep "$@"
+      ;;
+    prod-mtls-bundle-verify)
+      shift
+      prod_mtls_bundle_verify "$@"
       ;;
     prod-preflight)
       shift

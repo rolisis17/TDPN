@@ -198,6 +198,11 @@ if ! rg -q "do not distribute the CA private key" "$public_dir/prod_mtls_prep_re
   cat "$public_dir/prod_mtls_prep_report.md"
   exit 1
 fi
+if ! rg -q "prod-mtls-bundle-verify" "$public_dir/prod_mtls_prep_report.md"; then
+  echo "missing host-bundle verify command in report"
+  cat "$public_dir/prod_mtls_prep_report.md"
+  exit 1
+fi
 if ! jq -e '(.certificate_generation.host_server_bundles | length) == 3' "$public_dir/prod_mtls_prep_summary.json" >/dev/null; then
   echo "expected host-specific server bundles for authority plus both providers"
   cat "$public_dir/prod_mtls_prep_summary.json"
@@ -240,6 +245,61 @@ fi
 if ! rg -q "IP Address:198.51.100.11" /tmp/integration_prod_mtls_prep_provider_host_san.log || rg -q "IP Address:203.0.113.10" /tmp/integration_prod_mtls_prep_provider_host_san.log; then
   echo "provider host-specific SANs are not isolated to the provider host"
   cat /tmp/integration_prod_mtls_prep_provider_host_san.log
+  exit 1
+fi
+
+./scripts/easy_node.sh prod-mtls-bundle-verify \
+  --bundle-dir "$authority_bundle" \
+  --host 203.0.113.10 \
+  --summary-json "$tmp_dir/authority_bundle_verify.json" \
+  --print-summary-json 1 >"$tmp_dir/authority_bundle_verify.log"
+if ! jq -e '.status=="pass" and .failures==0 and (.inputs.expected_hosts == ["203.0.113.10"])' "$tmp_dir/authority_bundle_verify.json" >/dev/null; then
+  echo "expected authority host-specific bundle verify to pass"
+  cat "$tmp_dir/authority_bundle_verify.json"
+  exit 1
+fi
+
+./scripts/prod_mtls_bundle_verify.sh \
+  --bundle-dir "$provider_bundle" \
+  --host 198.51.100.11 \
+  --summary-json "$tmp_dir/provider_bundle_verify.json" >"$tmp_dir/provider_bundle_verify.log"
+if ! jq -e '.status=="pass" and .failures==0' "$tmp_dir/provider_bundle_verify.json" >/dev/null; then
+  echo "expected provider host-specific bundle verify to pass"
+  cat "$tmp_dir/provider_bundle_verify.json"
+  exit 1
+fi
+
+wrong_host_log="$tmp_dir/wrong_host_bundle_verify.log"
+if ./scripts/prod_mtls_bundle_verify.sh \
+  --bundle-dir "$authority_bundle" \
+  --host 198.51.100.11 \
+  --summary-json "$tmp_dir/wrong_host_bundle_verify.json" >"$wrong_host_log" 2>&1; then
+  echo "expected bundle verify to fail when host SAN does not match"
+  cat "$wrong_host_log"
+  exit 1
+fi
+if ! jq -e '.status=="fail" and (.blockers[]? | select(.code | startswith("node_cert_san_")))' "$tmp_dir/wrong_host_bundle_verify.json" >/dev/null; then
+  echo "expected wrong-host bundle verify summary to identify SAN mismatch"
+  cat "$tmp_dir/wrong_host_bundle_verify.json"
+  exit 1
+fi
+
+leaky_bundle="$tmp_dir/leaky_authority_bundle"
+mkdir -p "$leaky_bundle"
+cp "$authority_bundle/ca.crt" "$authority_bundle/node.crt" "$authority_bundle/node.key" "$leaky_bundle/"
+cp "$public_dir/tls/ca.key" "$leaky_bundle/ca.key"
+leaky_log="$tmp_dir/leaky_bundle_verify.log"
+if ./scripts/prod_mtls_bundle_verify.sh \
+  --bundle-dir "$leaky_bundle" \
+  --host 203.0.113.10 \
+  --summary-json "$tmp_dir/leaky_bundle_verify.json" >"$leaky_log" 2>&1; then
+  echo "expected bundle verify to fail when ca.key is staged in a server bundle"
+  cat "$leaky_log"
+  exit 1
+fi
+if ! jq -e '.status=="fail" and (.blockers[]? | select(.code=="ca_key_absent"))' "$tmp_dir/leaky_bundle_verify.json" >/dev/null; then
+  echo "expected leaky bundle verify summary to identify ca.key"
+  cat "$tmp_dir/leaky_bundle_verify.json"
   exit 1
 fi
 

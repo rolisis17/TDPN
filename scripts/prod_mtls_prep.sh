@@ -680,6 +680,12 @@ write_report() {
       echo
       echo "For final cutover, stage only the matching host bundle on that server as ca.crt, node.crt, and node.key. Keep ca.key offline for true production."
       echo
+      echo "Verify each staged host bundle before cutover:"
+      echo
+      echo '```bash'
+      jq -r '. | "./scripts/easy_node.sh prod-mtls-bundle-verify --bundle-dir \(.dir) --host \(.host) --print-summary-json 1"' "$host_bundles_file"
+      echo '```'
+      echo
     fi
     echo "## Later Cutover Commands"
     echo
@@ -747,6 +753,7 @@ write_summary() {
     --arg client_smoke "$client_smoke_cmd" \
     --arg signoff "$signoff_cmd" \
     --arg beta_lab "$beta_lab_cmd" \
+    --arg bundle_verify_template "./scripts/easy_node.sh prod-mtls-bundle-verify --bundle-dir HOST_BUNDLE_DIR --host PUBLIC_IP_OR_DNS --print-summary-json 1" \
     --arg rehearsal_warning "These commands reflect the rehearsal hosts supplied; replace private/Tailscale hosts with public DNS/IPs before true production." \
     --argjson hosts "$hosts_json" \
     --argjson blockers "$blockers_json" \
@@ -788,6 +795,7 @@ write_summary() {
       next_commands: {
         authority_server_up: $authority_server,
         provider_server_up: $provider_server,
+        prod_mtls_bundle_verify: $bundle_verify_template,
         prod_preflight: $prod_preflight,
         client_vpn_smoke: $client_smoke,
         three_machine_prod_signoff: $signoff,
