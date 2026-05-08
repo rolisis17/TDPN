@@ -132,6 +132,27 @@ require_readable_tree_for_backup() {
   fi
 }
 
+require_no_live_deploy_stack_for_backup() {
+  if [[ "${EASY_NODE_INTEGRATION_ALLOW_LIVE_DEPLOY:-0}" == "1" ]]; then
+    return 0
+  fi
+  if ! command -v docker >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local running=""
+  running="$(docker ps --filter "label=com.docker.compose.project=deploy" --format '{{.Names}}' 2>/dev/null | head -n 8 || true)"
+  if [[ -z "$running" ]]; then
+    return 0
+  fi
+
+  echo "integration_easy_node_prod_server_env refuses to backup/restore deploy artifacts while live compose services are running."
+  echo "running deploy services:"
+  printf '%s\n' "$running"
+  echo "stop the stack first, or set EASY_NODE_INTEGRATION_ALLOW_LIVE_DEPLOY=1 only for an isolated test host."
+  exit 2
+}
+
 restore_file() {
   local dst="$1"
   local name="$2"
@@ -164,6 +185,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+require_no_live_deploy_stack_for_backup
 require_readable_file_for_backup "$AUTH_ENV"
 require_readable_file_for_backup "$PROVIDER_ENV"
 require_readable_file_for_backup "$MODE_FILE"
