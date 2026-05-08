@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"privacynode/pkg/crypto"
+	"privacynode/pkg/httplimit"
 	"privacynode/pkg/policy"
 	"privacynode/pkg/proto"
 	"privacynode/pkg/relay"
@@ -115,6 +116,8 @@ type Service struct {
 	settlementReconcileSec            int
 	startupSyncTimeout                time.Duration
 	verifyRefreshMinInterval          time.Duration
+	pathOpenRateLimiter               *httplimit.FixedWindowLimiter
+	pathOpenInflightLimiter           *httplimit.InflightLimiter
 	exitRelayID                       string
 	trustedEntryRouteAssertionPubs    map[string]ed25519.PublicKey
 	directoryURLs                     []string
@@ -223,6 +226,7 @@ const defaultTokenProofReplayRedisDialTimeout = 5 * time.Second
 const capabilityTokenMaxBytes = 16 * 1024
 const capabilityTokenPayloadMaxBytes = 8 * 1024
 const serverReadHeaderTimeout = 10 * time.Second
+const allowInsecurePublicBind = "EXIT_ALLOW_DANGEROUS_INSECURE_PUBLIC_BIND"
 const allowDangerousOutboundPrivateDNS = "EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS"
 const serverReadTimeout = 15 * time.Second
 const serverWriteTimeout = 30 * time.Second
@@ -230,6 +234,9 @@ const serverIdleTimeout = 60 * time.Second
 const serverMaxHeaderBytes = 1 << 20
 const remoteResponseMaxBodyBytes int64 = 1 << 20
 const defaultVerifyRefreshMinInterval = 2 * time.Second
+const defaultExitPathOpenRPS = 1024
+const defaultExitPathOpenMaxRateKeys = 65536
+const defaultExitPathOpenMaxInflight = 256
 const allowDangerousIssuerKeysetReplacement = "EXIT_ALLOW_DANGEROUS_ISSUER_KEYSET_REPLACEMENT"
 const allowDangerousCosmosAdapterFallback = "SETTLEMENT_ALLOW_DANGEROUS_COSMOS_INIT_FALLBACK"
 const clientInnerIPFirstOctet uint32 = 2
@@ -468,6 +475,9 @@ func New() *Service {
 			verifyRefreshMinInterval = time.Duration(n) * time.Millisecond
 		}
 	}
+	pathOpenRPS := envPositiveInt("EXIT_PATH_OPEN_RPS", defaultExitPathOpenRPS)
+	pathOpenMaxRateKeys := envPositiveInt("EXIT_PATH_OPEN_MAX_RATE_KEYS", defaultExitPathOpenMaxRateKeys)
+	pathOpenMaxInflight := envPositiveInt("EXIT_PATH_OPEN_MAX_INFLIGHT", defaultExitPathOpenMaxInflight)
 	exitRelayID := strings.TrimSpace(os.Getenv("EXIT_RELAY_ID"))
 	trustedEntryRouteAssertionPubs, trustedEntryRouteAssertionErr := parseTrustedEntryRouteAssertionPubKeys(os.Getenv("EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS"))
 	if trustedEntryRouteAssertionErr != nil {
@@ -561,6 +571,8 @@ func New() *Service {
 		settlementReconcileSec:            settlementReconcileSec,
 		startupSyncTimeout:                startupSyncTimeout,
 		verifyRefreshMinInterval:          verifyRefreshMinInterval,
+		pathOpenRateLimiter:               httplimit.NewFixedWindowLimiter(pathOpenRPS, pathOpenMaxRateKeys),
+		pathOpenInflightLimiter:           httplimit.NewInflightLimiter(pathOpenMaxInflight),
 		exitRelayID:                       exitRelayID,
 		trustedEntryRouteAssertionPubs:    trustedEntryRouteAssertionPubs,
 		directoryURLs:                     directoryURLs,
@@ -984,13 +996,20 @@ func (s *Service) validateRuntimeConfig() error {
 	if s.strictPathOpenExitIdentityBinding() && strings.TrimSpace(s.exitRelayID) == "" {
 		return fmt.Errorf("strict exit identity binding requires EXIT_RELAY_ID")
 	}
+	publicBind := !isLoopbackBindAddr(s.addr)
 	if securehttp.Enabled() {
 		if s.prodStrict && securehttp.InsecureSkipVerifyConfigured() {
 			return fmt.Errorf("PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY")
 		}
+		if (s.prodStrict || publicBind) && !securehttp.RequireClientCertConfigured() {
+			return fmt.Errorf("PROD_STRICT_MODE/public bind requires MTLS_REQUIRE_CLIENT_CERT=1")
+		}
 		if err := securehttp.Validate(); err != nil {
 			return fmt.Errorf("invalid mTLS config: %w", err)
 		}
+	}
+	if publicBind && !securehttp.Enabled() && !envEnabled(allowInsecurePublicBind) {
+		return fmt.Errorf("public bind requires MTLS_ENABLE=1 or %s=1", allowInsecurePublicBind)
 	}
 	if s.startupSyncTimeout < 0 {
 		return fmt.Errorf("EXIT_STARTUP_SYNC_TIMEOUT_SEC must be >=0")
@@ -1965,11 +1984,30 @@ func decodeStrictJSONBody(w http.ResponseWriter, r *http.Request, dst any, maxBy
 	return nil
 }
 
+func (s *Service) acquirePathOpenGate(w http.ResponseWriter, r *http.Request) (func(), bool) {
+	clientIP := remoteIP(r.RemoteAddr)
+	if s.pathOpenRateLimiter != nil && !s.pathOpenRateLimiter.Allow(clientIP, time.Now()) {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+		return nil, false
+	}
+	release, ok := s.pathOpenInflightLimiter.Acquire()
+	if !ok {
+		http.Error(w, "too many in-flight requests", http.StatusTooManyRequests)
+		return nil, false
+	}
+	return release, true
+}
+
 func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	releaseGate, ok := s.acquirePathOpenGate(w, r)
+	if !ok {
+		return
+	}
+	defer releaseGate()
 
 	var req proto.PathOpenRequest
 	if err := decodeStrictJSONBody(w, r, &req, pathControlJSONBodyMaxBytes); err != nil {
@@ -4792,6 +4830,58 @@ func envEnabled(name string) bool {
 	default:
 		return false
 	}
+}
+
+func envPositiveInt(name string, fallback int) int {
+	if raw := strings.TrimSpace(os.Getenv(name)); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			return n
+		}
+	}
+	return fallback
+}
+
+func remoteIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return remoteAddr
+	}
+	return host
+}
+
+func isLoopbackBindAddr(addr string) bool {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return true
+	}
+	host := bindAddrHost(addr)
+	if host == "" {
+		return false
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func bindAddrHost(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ""
+	}
+	if ip := net.ParseIP(strings.Trim(addr, "[]")); ip != nil {
+		return strings.Trim(addr, "[]")
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err == nil {
+		return host
+	}
+	if strings.Contains(addr, ":") {
+		return ""
+	}
+	return addr
 }
 
 func parseStrictBool(raw string) (bool, error) {

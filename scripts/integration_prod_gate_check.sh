@@ -14,9 +14,13 @@ done
 TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
 mkdir -p "$TMP_BIN"
+WIN_PATH_DIR=""
 
 cleanup() {
   rm -rf "$TMP_DIR"
+  if [[ -n "$WIN_PATH_DIR" && "$WIN_PATH_DIR" == "$ROOT_DIR/.easy-node-logs/"* ]]; then
+    rm -rf "$WIN_PATH_DIR"
+  fi
 }
 trap cleanup EXIT
 
@@ -24,6 +28,16 @@ PASS_WG_VALIDATE="$TMP_DIR/wg_validate_ok.json"
 PASS_WG_SOAK="$TMP_DIR/wg_soak_ok.json"
 PASS_GATE="$TMP_DIR/prod_gate_ok.json"
 PASS_RUN_REPORT="$TMP_DIR/prod_bundle_run_report_ok.json"
+GATE_ONLY_RELAX_RUN_REPORT_ARGS=(
+  --require-preflight-ok 0
+  --require-bundle-ok 0
+  --require-integrity-ok 0
+  --require-signoff-ok 0
+  --require-incident-snapshot-on-fail 0
+  --require-incident-snapshot-artifacts 0
+  --incident-snapshot-min-attachment-count 0
+  --incident-snapshot-max-skipped-count -1
+)
 
 cat >"$PASS_WG_VALIDATE" <<'EOF_WG_VALIDATE_OK'
 {
@@ -108,8 +122,21 @@ cat >"$PASS_RUN_REPORT" <<EOF_RUN_REPORT_OK
 EOF_RUN_REPORT_OK
 
 echo "[prod-gate-check] pass baseline"
-./scripts/prod_gate_check.sh --gate-summary-json "$PASS_GATE" --show-json 0 >/tmp/integration_prod_gate_check_pass.log 2>&1
+./scripts/prod_gate_check.sh "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" --gate-summary-json "$PASS_GATE" --show-json 0 >/tmp/integration_prod_gate_check_pass.log 2>&1
 ./scripts/prod_gate_check.sh --run-report-json "$PASS_RUN_REPORT" --show-json 0 >/tmp/integration_prod_gate_check_pass_run_report.log 2>&1
+
+if command -v wslpath >/dev/null 2>&1; then
+  WIN_PATH_DIR="$ROOT_DIR/.easy-node-logs/prod_gate_check_windows_path_test_$$"
+  mkdir -p "$WIN_PATH_DIR"
+  WIN_PASS_GATE="$WIN_PATH_DIR/prod_gate_ok.json"
+  WIN_PASS_RUN_REPORT="$WIN_PATH_DIR/prod_bundle_run_report_ok.json"
+  cp "$PASS_GATE" "$WIN_PASS_GATE"
+  cp "$PASS_RUN_REPORT" "$WIN_PASS_RUN_REPORT"
+
+  echo "[prod-gate-check] Windows absolute input paths normalize under WSL"
+  ./scripts/prod_gate_check.sh "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" --gate-summary-json "$(wslpath -w "$WIN_PASS_GATE")" --show-json 0 >/tmp/integration_prod_gate_check_windows_gate.log 2>&1
+  ./scripts/prod_gate_check.sh --run-report-json "$(wslpath -w "$WIN_PASS_RUN_REPORT")" --show-json 0 >/tmp/integration_prod_gate_check_windows_run_report.log 2>&1
+fi
 
 echo "[prod-gate-check] wg validate evidence checks"
 BAD_VALIDATE_SOURCE="$TMP_DIR/wg_validate_bad_source.json"
@@ -145,6 +172,7 @@ cat >"$BAD_VALIDATE_SOURCE_GATE" <<EOF_GATE_BAD_VALIDATE_SOURCE
 EOF_GATE_BAD_VALIDATE_SOURCE
 set +e
 ./scripts/prod_gate_check.sh \
+  "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" \
   --gate-summary-json "$BAD_VALIDATE_SOURCE_GATE" \
   --require-wg-validate-udp-source 1 \
   --show-json 0 >/tmp/integration_prod_gate_check_validate_source_fail.log 2>&1
@@ -194,6 +222,7 @@ cat >"$BAD_VALIDATE_DISTINCT_GATE" <<EOF_GATE_BAD_VALIDATE_DISTINCT
 EOF_GATE_BAD_VALIDATE_DISTINCT
 set +e
 ./scripts/prod_gate_check.sh \
+  "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" \
   --gate-summary-json "$BAD_VALIDATE_DISTINCT_GATE" \
   --require-wg-validate-strict-distinct 1 \
   --show-json 0 >/tmp/integration_prod_gate_check_validate_distinct_fail.log 2>&1
@@ -248,6 +277,7 @@ cat >"$BAD_SOAK_DIVERSITY_GATE" <<EOF_GATE_BAD_SOAK_DIVERSITY
 EOF_GATE_BAD_SOAK_DIVERSITY
 set +e
 ./scripts/prod_gate_check.sh \
+  "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" \
   --gate-summary-json "$BAD_SOAK_DIVERSITY_GATE" \
   --require-wg-soak-diversity-pass 1 \
   --min-wg-soak-selection-lines 12 \
@@ -274,6 +304,7 @@ if ! rg -q 'selection_lines_total below floor' /tmp/integration_prod_gate_check_
 fi
 
 ./scripts/prod_gate_check.sh \
+  "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" \
   --gate-summary-json "$PASS_GATE" \
   --require-wg-validate-udp-source 1 \
   --require-wg-validate-strict-distinct 1 \
@@ -392,7 +423,7 @@ cat >"$INCIDENT_ARTIFACTS_REPORT_MD" <<'EOF_INCIDENT_REPORT'
 # Incident Snapshot Summary
 EOF_INCIDENT_REPORT
 printf 'attachments/01_runtime_doctor_before.json\tfile\t/tmp/runtime_doctor_before.json\n' >"$INCIDENT_ARTIFACTS_ATTACH_MANIFEST"
-printf '/tmp/runtime_fix.json\tmissing\n' >"$INCIDENT_ARTIFACTS_ATTACH_SKIPPED"
+: >"$INCIDENT_ARTIFACTS_ATTACH_SKIPPED"
 INCIDENT_ARTIFACTS_PASS_RUN_REPORT="$TMP_DIR/prod_bundle_run_report_incident_artifacts_pass.json"
 cat >"$INCIDENT_ARTIFACTS_PASS_RUN_REPORT" <<EOF_RUN_REPORT_INCIDENT_ARTIFACTS_PASS
 {
@@ -421,6 +452,10 @@ EOF_RUN_REPORT_INCIDENT_ARTIFACTS_PASS
   --require-full-sequence 0 \
   --require-wg-validate-ok 0 \
   --require-wg-soak-ok 0 \
+  --require-preflight-ok 0 \
+  --require-bundle-ok 0 \
+  --require-integrity-ok 0 \
+  --require-signoff-ok 0 \
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 1 \
   --show-json 0 >/tmp/integration_prod_gate_check_incident_artifacts_pass.log 2>&1
@@ -442,6 +477,10 @@ set +e
   --require-full-sequence 0 \
   --require-wg-validate-ok 0 \
   --require-wg-soak-ok 0 \
+  --require-preflight-ok 0 \
+  --require-bundle-ok 0 \
+  --require-integrity-ok 0 \
+  --require-signoff-ok 0 \
   --incident-snapshot-min-attachment-count 2 \
   --show-json 0 >/tmp/integration_prod_gate_check_incident_attachment_floor_fail.log 2>&1
 rc=$?
@@ -458,12 +497,17 @@ if ! rg -q 'attachment_count below floor' /tmp/integration_prod_gate_check_incid
 fi
 
 echo "[prod-gate-check] incident skipped-attachment budget policy"
+printf '/tmp/runtime_fix.json\tmissing\n' >"$INCIDENT_ARTIFACTS_ATTACH_SKIPPED"
 set +e
 ./scripts/prod_gate_check.sh \
   --run-report-json "$INCIDENT_ARTIFACTS_PASS_RUN_REPORT" \
   --require-full-sequence 0 \
   --require-wg-validate-ok 0 \
   --require-wg-soak-ok 0 \
+  --require-preflight-ok 0 \
+  --require-bundle-ok 0 \
+  --require-integrity-ok 0 \
+  --require-signoff-ok 0 \
   --incident-snapshot-max-skipped-count 0 \
   --show-json 0 >/tmp/integration_prod_gate_check_incident_skipped_budget_fail.log 2>&1
 rc=$?
@@ -484,6 +528,10 @@ fi
   --require-full-sequence 0 \
   --require-wg-validate-ok 0 \
   --require-wg-soak-ok 0 \
+  --require-preflight-ok 0 \
+  --require-bundle-ok 0 \
+  --require-integrity-ok 0 \
+  --require-signoff-ok 0 \
   --incident-snapshot-min-attachment-count 1 \
   --incident-snapshot-max-skipped-count 1 \
   --show-json 0 >/tmp/integration_prod_gate_check_incident_attachment_policy_pass.log 2>&1
@@ -528,7 +576,7 @@ cat >"$FAIL_GATE_STATUS" <<EOF_GATE_FAIL_STATUS
 }
 EOF_GATE_FAIL_STATUS
 set +e
-./scripts/prod_gate_check.sh --gate-summary-json "$FAIL_GATE_STATUS" >/tmp/integration_prod_gate_check_fail_status.log 2>&1
+./scripts/prod_gate_check.sh "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" --gate-summary-json "$FAIL_GATE_STATUS" >/tmp/integration_prod_gate_check_fail_status.log 2>&1
 rc=$?
 set -e
 if [[ "$rc" -eq 0 ]]; then
@@ -566,7 +614,7 @@ cat >"$SKIP_GATE" <<EOF_GATE_SKIP
 }
 EOF_GATE_SKIP
 set +e
-./scripts/prod_gate_check.sh --gate-summary-json "$SKIP_GATE" --require-full-sequence 1 >/tmp/integration_prod_gate_check_skip_strict.log 2>&1
+./scripts/prod_gate_check.sh "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" --gate-summary-json "$SKIP_GATE" --require-full-sequence 1 >/tmp/integration_prod_gate_check_skip_strict.log 2>&1
 rc=$?
 set -e
 if [[ "$rc" -eq 0 ]]; then
@@ -574,7 +622,7 @@ if [[ "$rc" -eq 0 ]]; then
   cat /tmp/integration_prod_gate_check_skip_strict.log
   exit 1
 fi
-./scripts/prod_gate_check.sh --gate-summary-json "$SKIP_GATE" --require-full-sequence 0 >/tmp/integration_prod_gate_check_skip_relaxed.log 2>&1
+./scripts/prod_gate_check.sh "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" --gate-summary-json "$SKIP_GATE" --require-full-sequence 0 >/tmp/integration_prod_gate_check_skip_relaxed.log 2>&1
 
 echo "[prod-gate-check] soak failed-round budget"
 SOAK_FAILED_GATE="$TMP_DIR/prod_gate_soak_failed_rounds.json"
@@ -600,7 +648,7 @@ cat >"$SOAK_FAILED_GATE" <<EOF_GATE_SOAK_FAILED
 }
 EOF_GATE_SOAK_FAILED
 set +e
-./scripts/prod_gate_check.sh --gate-summary-json "$SOAK_FAILED_GATE" --max-wg-soak-failed-rounds 1 >/tmp/integration_prod_gate_check_soak_budget.log 2>&1
+./scripts/prod_gate_check.sh "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" --gate-summary-json "$SOAK_FAILED_GATE" --max-wg-soak-failed-rounds 1 >/tmp/integration_prod_gate_check_soak_budget.log 2>&1
 rc=$?
 set -e
 if [[ "$rc" -eq 0 ]]; then
@@ -613,7 +661,7 @@ if ! rg -q 'wg_soak_rounds_failed exceeds limit' /tmp/integration_prod_gate_chec
   cat /tmp/integration_prod_gate_check_soak_budget.log
   exit 1
 fi
-./scripts/prod_gate_check.sh --gate-summary-json "$SOAK_FAILED_GATE" --max-wg-soak-failed-rounds 2 >/tmp/integration_prod_gate_check_soak_budget_ok.log 2>&1
+./scripts/prod_gate_check.sh "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" --gate-summary-json "$SOAK_FAILED_GATE" --max-wg-soak-failed-rounds 2 >/tmp/integration_prod_gate_check_soak_budget_ok.log 2>&1
 
 echo "[prod-gate-check] easy_node forwarding"
 FAKE_CHECK="$TMP_DIR/fake_prod_gate_check.sh"

@@ -150,6 +150,7 @@ Script-only easy mode:
 # production-strict profile (HTTPS + mTLS + signed issuer-admin actions)
 ./scripts/easy_node.sh server-up --mode authority --public-host <PUBLIC_IP_OR_DNS> --peer-directories https://<PEER_DIRECTORY_IP_OR_DNS>:8081 --prod-profile 1
 ./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_IP_OR_DNS>
+# bootstrap-mtls SAN values are bare DNS names/IPs only; do not pass https://... or host:port.
 ./scripts/easy_node.sh invite-generate --count 3
 # (invite commands auto-use signed admin auth when prod profile is active)
 ./scripts/easy_node.sh admin-signing-status
@@ -463,6 +464,8 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `prod-wg-validate` now blocks synthetic client ingress by default in real production WG validation (`--client-inner-source synthetic` fails fast unless `--allow-synthetic-ingress 1` is set), while `prod-wg-soak --strict-ingress-rehearsal=1` automatically forwards that explicit override for controlled strict-ingress negative tests.
 - `server-up --prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, enables live command-backend WG dataplane defaults, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
 - `server-up --prod-profile 1` now also applies hardened abuse/adjudication defaults (`ENTRY_OPEN_RPS=12`, `ENTRY_BAN_THRESHOLD=3`, `ENTRY_BAN_SEC=90`, `ENTRY_MAX_CONCURRENT_OPENS=96`, peer+final dispute/appeal vote floors, final operator/source quorum floors, `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.67`, dispute/appeal TTL caps at `259200s`).
+- public production binds fail closed unless mTLS is enabled with required client certificates (`MTLS_ENABLE=1`, `MTLS_REQUIRE_CLIENT_CERT=1`); dangerous plaintext public-bind overrides are lab-only and should not be used for production signoff.
+- issuer public mutation paths, sponsor-token attempts, directory gossip pushes, directory provider relay upserts, and exit `path/open` now have dedicated per-IP and in-flight limiters (`ISSUER_PUBLIC_MUTATION_*`, `DIRECTORY_GOSSIP_PUSH_*`, `DIRECTORY_PROVIDER_RELAY_UPSERT_*`, `EXIT_PATH_OPEN_*`) so public control endpoints have their own flood controls.
 - `server-up --prod-profile 1` requires at least 2 issuer URLs for strict issuer quorum; include at least one peer directory from a distinct authority/issuer operator.
 - in strict prod profile on authority nodes, `ISSUER_ADMIN_TOKEN` is cleared (empty) so token admin auth material is not persisted when signed admin auth is enforced.
 - `client-test --prod-profile 1` applies mTLS + trust-hardening client checks in the container demo path; full strict live-WG fail-closed validation is covered by wg-only/strict integration flows.
@@ -470,7 +473,7 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `invite-generate`, `invite-check`, and `invite-disable` support either token auth (`--admin-token`) or signed auth (`--admin-key-file` + `--admin-key-id`).
 - `admin-signing-status` / `admin-signing-rotate` are authority-only signer maintenance helpers.
 - `admin-signing-rotate --key-history N` preserves recent signer public keys for smoother key transitions.
-- `prod-preflight` validates strict prod wiring (HTTPS URLs, non-private public hosts, mTLS files/cert age, authority signer mapping, secret posture, effective entry puzzle difficulty, and final adjudication policy floors) and can optionally check live endpoints (`--check-live 1`), including live governance policy verification via `GET /v1/admin/governance-status`.
+- `prod-preflight` validates strict prod wiring (HTTPS URLs, non-private public hosts, mTLS policy flags/files/cert age/CA verification/key-pair match/EKU usage/public-host SAN coverage, authority signer mapping, secret posture, effective entry puzzle difficulty, and final adjudication policy floors) and can optionally check live endpoints (`--check-live 1`), including live governance policy verification via `GET /v1/admin/governance-status`.
 
 3-machine test guide:
 - `docs/easy-3-machine-test.md`
@@ -518,6 +521,11 @@ Optional env vars:
 - `ENTRY_ADDR` (default `127.0.0.1:8083`)
 - `EXIT_ADDR` (default `127.0.0.1:8084`)
 - `BETA_STRICT_MODE` (`1` enables strict beta-grade runtime guardrails across client/entry/exit/directory/issuer; client strict mode requires `CLIENT_INNER_SOURCE=udp`)
+- `MTLS_REQUIRE_CLIENT_CERT` (default `1`; public/prod binds require client certificates and reject optional-client-cert mode)
+- `DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_PUBLIC_BIND` (default `0`; lab-only override for public plaintext directory admin-token binds)
+- `ISSUER_ALLOW_DANGEROUS_INSECURE_TOKEN_AUTH_PUBLIC_BIND` (default `0`; lab-only override for public plaintext issuer token/admin-auth binds)
+- `ENTRY_ALLOW_DANGEROUS_INSECURE_PUBLIC_BIND` (default `0`; lab-only override for public plaintext entry binds)
+- `EXIT_ALLOW_DANGEROUS_INSECURE_PUBLIC_BIND` (default `0`; lab-only override for public plaintext exit control binds)
 - `ENTRY_COUNTRY_CODE` (default `ZZ`; directory descriptor metadata for entry locality)
 - `EXIT_COUNTRY_CODE` (default `ZZ`; directory descriptor metadata for exit locality)
 - `ENTRY_REGION` (default `local`; directory descriptor metadata for entry region)
@@ -654,6 +662,9 @@ Optional env vars:
 - `ISSUER_ADMIN_TOKEN` (no default in compose/easy-mode prod; when token-admin auth is enabled it must be non-default and length>=16 for public bind/strict modes)
 - `ISSUER_ALLOW_DANGEROUS_DEV_ADMIN_TOKEN_FALLBACK` (default `0`; when `1` and `ISSUER_ADMIN_TOKEN` is empty, legacy `dev-admin-token` fallback is re-enabled for trusted lab compatibility)
 - `ISSUER_ADMIN_SIGNED_ALLOW_TOKEN_FALLBACK` (default `0`; when `ISSUER_ADMIN_REQUIRE_SIGNED=1`, token-admin fallback is denied unless explicitly enabled)
+- `ISSUER_PUBLIC_MUTATION_RPS` (default `256`; per-IP limiter for public issuer mutation/auth paths)
+- `ISSUER_PUBLIC_MUTATION_MAX_RATE_KEYS` (default `65536`; max tracked issuer public-mutation rate-limit keys)
+- `ISSUER_PUBLIC_MUTATION_MAX_INFLIGHT` (default `128`; max concurrent issuer public-mutation requests)
 - `ISSUER_SUBJECTS_FILE` (default `data/issuer_subjects.json`)
 - `ISSUER_REVOCATIONS_FILE` (default `data/issuer_revocations.json`)
 - `ENTRY_ENDPOINTS` (comma-separated rotating entry endpoints for directory)
@@ -664,6 +675,9 @@ Optional env vars:
 - `DIRECTORY_SYNC_SEC` (default `10`; peer sync interval in seconds)
 - `DIRECTORY_GOSSIP_SEC` (default `0`; when `>0`, periodically push signed relays to peers)
 - `DIRECTORY_GOSSIP_FANOUT` (default `2`; peers targeted per gossip round)
+- `DIRECTORY_GOSSIP_PUSH_RPS` (default `128`; per-IP limiter for inbound directory gossip pushes)
+- `DIRECTORY_GOSSIP_PUSH_MAX_RATE_KEYS` (default `65536`; max tracked directory gossip rate-limit keys)
+- `DIRECTORY_GOSSIP_PUSH_MAX_INFLIGHT` (default `64`; max concurrent inbound directory gossip requests)
 - `DIRECTORY_PEER_LIST_TTL_SEC` (default `45`; signed `/v1/peers` feed TTL)
 - `DIRECTORY_PEER_DISCOVERY` (`1` default; enable seeded dynamic peer discovery from trusted peers)
 - `DIRECTORY_PEER_DISCOVERY_MAX` (default `64`; cap discovered peer set size)
@@ -699,6 +713,9 @@ Optional env vars:
 - `DIRECTORY_PROVIDER_ISSUER_URLS` (comma-separated issuer URLs accepted for provider-role token verification on provider relay upserts; defaults to issuer trust URLs)
 - `DIRECTORY_PROVIDER_ISSUER_PUBKEY_CACHE_SEC` (default `30`; cache TTL for provider-token issuer pubkey fetches to reduce remote fetch amplification on repeated invalid upserts)
 - `DIRECTORY_PROVIDER_RELAY_MAX_TTL_SEC` (default `300`; max provider-advertised relay descriptor TTL)
+- `DIRECTORY_PROVIDER_RELAY_UPSERT_RPS` (default `256`; per-IP limiter for provider relay upsert attempts)
+- `DIRECTORY_PROVIDER_RELAY_UPSERT_MAX_RATE_KEYS` (default `65536`; max tracked provider relay upsert rate-limit keys)
+- `DIRECTORY_PROVIDER_RELAY_UPSERT_MAX_INFLIGHT` (default `1024`; max concurrent provider relay upsert requests)
 - `DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE` (default `data/directory_provider_token_proof_replay.json`; durable replay store for provider relay upsert token-proof nonces)
 - `DIRECTORY_PROVIDER_MAX_RELAYS_PER_OPERATOR` (default `0` disabled; when `>0`, cap active provider-advertised relays per operator across entry+exit roles)
 - `DIRECTORY_ISSUER_SYNC_SEC` (default `10`; issuer trust sync interval in seconds)
@@ -719,6 +736,7 @@ Optional env vars:
 - `EXIT_GEO_CONFIDENCE` (default `1`; descriptor geolocation confidence `0..1` for exit locality metadata)
 - `ENTRY_PUZZLE_ADAPTIVE` (`1` default, adaptive puzzle difficulty under load)
 - `ENTRY_PUZZLE_SECRET` (default `entry-secret-default`; in strict beta/prod modes must be non-default and length>=16)
+- `ENTRY_MAX_PUZZLE_NONCES` (default `65536`; cache size for solved puzzle nonces used to reject replay)
 - `ENTRY_BAN_THRESHOLD` (default `3`; temporary source ban strikes after repeated over-limit opens)
 - `ENTRY_BAN_SEC` (default `45`; temporary source ban duration)
 - `ENTRY_MAX_CONCURRENT_OPENS` (default `128`; max concurrent in-flight path-open handling)
@@ -738,6 +756,9 @@ Optional env vars:
 - `EXIT_REVOCATION_REFRESH_SEC` (default `15`)
 - `EXIT_STARTUP_SYNC_TIMEOUT_SEC` (default `0`, but defaults to `8` automatically when `WG_BACKEND=command`; when `>0`, exit waits for issuer keys + revocation feed readiness before serving; strict beta mode defaults to `30`)
 - `EXIT_MAX_ACTIVE_SESSIONS` (default `4096`; hard cap on concurrently tracked path-open sessions to limit authenticated session-flood memory pressure)
+- `EXIT_PATH_OPEN_RPS` (default `1024`; per-IP limiter for authenticated exit `path/open` requests)
+- `EXIT_PATH_OPEN_MAX_RATE_KEYS` (default `65536`; max tracked exit `path/open` rate-limit keys)
+- `EXIT_PATH_OPEN_MAX_INFLIGHT` (default `256`; max concurrent exit `path/open` requests)
 - `EXIT_VERIFY_ISSUER_REFRESH_MIN_INTERVAL_MS` (default `2000`; minimum interval between verify-triggered issuer key refresh attempts to prevent per-request refresh amplification under invalid-token floods)
 - `EXIT_PEER_REBIND_SEC` (default `0`; when `>0`, allow exit session peer source rebind after inactivity window)
 - `EXIT_TOKEN_PROOF_REPLAY_GUARD` (`1` enables nonce replay guard for `token_proof_nonce` on path open)
@@ -842,8 +863,13 @@ Anti-abuse entry controls:
 - `ENTRY_PUZZLE_DIFFICULTY` (default `0`; set `1..6` to enable challenge puzzle, and strict beta/prod requires `>0`)
 - `ENTRY_PUZZLE_SECRET` (default `entry-secret-default`; strict beta/prod requires non-default value with length>=16)
 - `ENTRY_PUZZLE_ADAPTIVE` (default `1`, increases challenge difficulty with overload)
+- `ENTRY_MAX_PUZZLE_NONCES` (default `65536`) rejects solved challenge replay within the nonce cache window
 - `ENTRY_BAN_THRESHOLD` + `ENTRY_BAN_SEC` add temporary source bans after repeated over-limit opens
 - `ENTRY_MAX_CONCURRENT_OPENS` adds non-blocking in-flight path-open shielding
+- `ISSUER_PUBLIC_MUTATION_RPS` + `ISSUER_PUBLIC_MUTATION_MAX_INFLIGHT` shield public issuer mutation/admin-auth and sponsor-token paths
+- `DIRECTORY_GOSSIP_PUSH_RPS` + `DIRECTORY_GOSSIP_PUSH_MAX_INFLIGHT` shield inbound directory gossip push handling
+- `DIRECTORY_PROVIDER_RELAY_UPSERT_RPS` + `DIRECTORY_PROVIDER_RELAY_UPSERT_MAX_INFLIGHT` shield provider relay upsert handling before token verification work
+- `EXIT_PATH_OPEN_RPS` + `EXIT_PATH_OPEN_MAX_INFLIGHT` shield authenticated exit path-open handling
 - Entry data-plane source locking binds each session to the first client UDP source (prevents source hijack); optional delayed rebind is available via `ENTRY_CLIENT_REBIND_SEC`
 
 CI and tests:

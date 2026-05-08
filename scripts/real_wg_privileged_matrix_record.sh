@@ -76,10 +76,40 @@ prepare_log_dir() {
 
 print_cmd() {
   local arg
+  local redact_next=0
   for arg in "$@"; do
+    if ((redact_next)); then
+      printf '%q ' "[REDACTED]"
+      redact_next=0
+      continue
+    fi
+    case "$arg" in
+      --subject|--anon-cred|--campaign-subject|--campaign-anon-cred|--key|--invite-key|--token|--auth-token|--admin-token|--authorization|--bearer|--password|--secret|--api-key)
+        printf '%q ' "$arg"
+        redact_next=1
+        continue
+        ;;
+      --subject=*|--anon-cred=*|--campaign-subject=*|--campaign-anon-cred=*|--key=*|--invite-key=*|--token=*|--auth-token=*|--admin-token=*|--authorization=*|--bearer=*|--password=*|--secret=*|--api-key=*)
+        printf '%q ' "${arg%%=*}=[REDACTED]"
+        continue
+        ;;
+    esac
     printf '%q ' "$arg"
   done
   printf '\n'
+}
+
+redact_sensitive_output() {
+  sed -E '
+s/(--(subject|anon-cred|campaign-subject|campaign-anon-cred|key|invite-key|token|auth-token|admin-token|authorization|bearer|password|secret|api-key)(=|[[:space:]]+))[^[:space:]]+/\1[REDACTED]/g
+s/((SUBJECT|ANON_CRED|INVITE_KEY|TOKEN|AUTH_TOKEN|ADMIN_TOKEN|AUTHORIZATION|BEARER|PASSWORD|SECRET|API_KEY)=)[^[:space:]]+/\1[REDACTED]/g
+s/((Authorization|X-Admin-Token):[[:space:]]*(Bearer[[:space:]]*)?)[^[:space:]]+/\1[REDACTED]/Ig
+s/inv-[A-Za-z0-9._:-]+/[REDACTED_INVITE]/g
+'
+}
+
+redact_sensitive_text() {
+  printf '%s\n' "${1:-}" | redact_sensitive_output
 }
 
 safe_append_to_array() {
@@ -114,27 +144,24 @@ persist_artifact_text() {
   if [[ -z "$content" ]]; then
     rm -f "$path" 2>/dev/null || true
   else
-    printf '%s\n' "$content" >"$path"
+    redact_sensitive_text "$content" >"$path"
   fi
 }
 
 run_and_capture() {
   local __var_name="$1"
   shift
-  local tmp rc
-  tmp="$(mktemp)"
-  if "$@" >"$tmp" 2>&1; then
+  local output rc
+  if output="$("$@" 2>&1)"; then
     printf '%s\n' "[$stage] command_ok: $(print_cmd "$@")" >>"$summary_log"
-    cat "$tmp" >>"$summary_log"
-    printf -v "$__var_name" '%s' "$(cat "$tmp")"
-    rm -f "$tmp"
+    redact_sensitive_text "$output" >>"$summary_log"
+    printf -v "$__var_name" '%s' "$output"
     return 0
   else
     rc=$?
     printf '%s\n' "[$stage] command_failed rc=$rc: $(print_cmd "$@")" >>"$summary_log"
-    cat "$tmp" >>"$summary_log"
-    printf -v "$__var_name" '%s' "$(cat "$tmp")"
-    rm -f "$tmp"
+    redact_sensitive_text "$output" >>"$summary_log"
+    printf -v "$__var_name" '%s' "$output"
     return "$rc"
   fi
 }
@@ -497,7 +524,7 @@ record_receipt() {
   for receipt_artifact in "$@"; do
     record_cmd+=(--artifact "$receipt_artifact")
   done
-  "${record_cmd[@]}" >>"$summary_log" 2>&1 || true
+  "${record_cmd[@]}" 2>&1 | redact_sensitive_output >>"$summary_log" || true
 }
 
 declare -a matrix_cmd=()

@@ -338,6 +338,44 @@ is_auth_wallet_gap_item() {
   return 1
 }
 
+is_profile_default_subject_gap_item() {
+  local normalized_text="${1:-}"
+  if [[ "$normalized_text" == *"invite_key"* \
+     || "$normalized_text" == *"campaign-subject"* \
+     || "$normalized_text" == *"campaign subject"* \
+     || "$normalized_text" == *"profile-default"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+is_reservation_evidence_gap_item() {
+  local normalized_text="${1:-}"
+  if [[ "$normalized_text" == *"reservation-write"* \
+     || "$normalized_text" == *"reservation write"* \
+     || "$normalized_text" == *"vpnbilling/reservations"* \
+     || "$normalized_text" == *"reserve-and-connect"* \
+     || ( "$normalized_text" == *"reservefunds"* && "$normalized_text" == *"chain"* ) \
+     || ( "$normalized_text" == *"api-to-chain"* && "$normalized_text" == *"reservation"* ) \
+     || ( "$normalized_text" == *"api-to-chain"* && "$normalized_text" == *"reserve"* ) ]]; then
+    return 0
+  fi
+  return 1
+}
+
+is_real_host_validation_gap_item() {
+  local normalized_text="${1:-}"
+  if [[ "$normalized_text" == *"real-host"* \
+     || "$normalized_text" == *"real host"* \
+     || "$normalized_text" == *"live conditions"* \
+     || "$normalized_text" == *"live/published evidence"* \
+     || "$normalized_text" == *"real scheduler"* \
+     || "$normalized_text" == *"end-to-end validation artifacts"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
 infer_item_actionable() {
   local section="${1:-}"
   local normalized_text="${2:-}"
@@ -383,10 +421,7 @@ infer_item_recommended_action() {
     return
   fi
   local reservation_signal="0"
-  if [[ "$normalized_text" == *"reservation-write"* \
-     || "$normalized_text" == *"reservation write"* \
-     || "$normalized_text" == *"vpnbilling/reservations"* \
-     || ( "$normalized_text" == *"reservefunds"* && "$normalized_text" == *"chain"* ) ]]; then
+  if is_reservation_evidence_gap_item "$normalized_text"; then
     reservation_signal="1"
   fi
   local proof_signal="0"
@@ -441,7 +476,9 @@ infer_item_recommended_action() {
   fi
   if [[ "$normalized_text" == *"invite_key"* \
      || "$normalized_text" == *"campaign-subject"* \
-     || "$normalized_text" == *"subject"* ]]; then
+     || "$normalized_text" == *"campaign subject"* \
+     || "$normalized_text" == *"a_host"* \
+     || "$normalized_text" == *"b_host"* ]]; then
     printf '%s' "Populate A_HOST/B_HOST and campaign subject, then rerun profile-default gate cycle."
     return
   fi
@@ -502,13 +539,12 @@ infer_item_closure_mode() {
     printf '%s' "local_only"
     return
   fi
-  if [[ "$normalized_text" == *"real-host"* \
-     || "$normalized_text" == *"real host"* \
-     || "$normalized_text" == *"a_host"* \
+  if [[ "$normalized_text" == *"a_host"* \
      || "$normalized_text" == *"b_host"* \
      || "$normalized_text" == *"vm command"* \
      || "$normalized_text" == *"--vm-command"* \
-     || "$normalized_text" == *"multi-vm"* ]]; then
+     || "$normalized_text" == *"multi-vm"* ]] \
+     || is_real_host_validation_gap_item "$normalized_text"; then
     printf '%s' "real_host_required"
     return
   fi
@@ -546,10 +582,9 @@ infer_item_blocked_by() {
      || "$normalized_text" == *"b_host"* ]]; then
     blockers+=("unresolved_placeholders")
   fi
-  if [[ "$normalized_text" == *"real-host"* \
-     || "$normalized_text" == *"real host"* \
-     || "$normalized_text" == *"a_host"* \
-     || "$normalized_text" == *"b_host"* ]]; then
+  if [[ "$normalized_text" == *"a_host"* \
+     || "$normalized_text" == *"b_host"* ]] \
+     || is_real_host_validation_gap_item "$normalized_text"; then
     blockers+=("real_hosts")
   fi
   if [[ "$normalized_text" == *"vm command"* \
@@ -592,7 +627,9 @@ infer_item_blocked_by() {
   fi
   if [[ "$normalized_text" == *"evidence pack"* \
      || "$normalized_text" == *"evidence-pack"* \
-     || "$normalized_text" == *"capture/publish"* ]]; then
+     || "$normalized_text" == *"capture/publish"* \
+     || "$normalized_text" == *"published evidence"* \
+     || "$normalized_text" == *"validation artifacts"* ]]; then
     blockers+=("evidence_pack_artifacts")
   fi
   if is_auth_wallet_gap_item "$normalized_text"; then
@@ -609,10 +646,7 @@ infer_item_blocked_by() {
      || "$normalized_text" == *"finalize"* ]]; then
     blockers+=("admin_settlement_validation")
   fi
-  if [[ "$normalized_text" == *"reservation-write"* \
-     || "$normalized_text" == *"reservation write"* \
-     || "$normalized_text" == *"vpnbilling/reservations"* \
-     || ( "$normalized_text" == *"reservefunds"* && "$normalized_text" == *"chain"* ) ]]; then
+  if is_reservation_evidence_gap_item "$normalized_text"; then
     blockers+=("local_api_reservation_evidence")
   fi
   if [[ ( "$normalized_text" == *"reward proof"* || "$normalized_text" == *"objective proof"* || "$normalized_text" == *"proof reference"* || "$normalized_text" == *"proof-reference"* || "$normalized_text" == *"proof-validation"* || "$normalized_text" == *"proof verification"* || "$normalized_text" == *"proof-registry"* ) \
@@ -672,12 +706,10 @@ infer_item_suggested_tests() {
     return
   fi
   if is_auth_wallet_gap_item "$normalized_text"; then
+    tests+=("scripts/gpm_wallet_auth_evidence.sh --print-summary-json 1")
     tests+=("go test ./services/localapi -run 'GPM.*Auth|Wallet|Keplr|Leap|Secp' -count=1")
   fi
-  if [[ "$normalized_text" == *"invite_key"* \
-     || "$normalized_text" == *"campaign-subject"* \
-     || "$normalized_text" == *"profile-default"* \
-     || "$normalized_text" == *"subject"* ]]; then
+  if is_profile_default_subject_gap_item "$normalized_text"; then
     tests+=("scripts/integration_client_vpn_path_profile_wiring.sh")
   fi
   if [[ "$normalized_text" == *"vm command"* \
@@ -727,14 +759,12 @@ infer_item_suggested_tests() {
      || "$normalized_text" == *"dispute"* \
      || "$normalized_text" == *"finalization"* \
      || "$normalized_text" == *"finalize"* ]]; then
+    tests+=("scripts/gpm_admin_settlement_live_evidence.sh --start-local-tdpnd 1 --print-summary-json 1")
     tests+=("scripts/integration_gpm_admin_settlement_contract.sh")
     tests+=("go test ./services/localapi -run GPMAdminRewardFinalize -count=1")
     tests+=("go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1")
   fi
-  if [[ "$normalized_text" == *"reservation-write"* \
-     || "$normalized_text" == *"reservation write"* \
-     || "$normalized_text" == *"vpnbilling/reservations"* \
-     || ( "$normalized_text" == *"reservefunds"* && "$normalized_text" == *"chain"* ) ]]; then
+  if is_reservation_evidence_gap_item "$normalized_text"; then
     tests+=("go test ./services/localapi -run 'ReserveFunds|SettlementReservation|GPM.*Reservation' -count=1")
     tests+=("go test ./pkg/settlement -run 'ReserveFunds|CosmosAdapter' -count=1")
     tests+=("go test ./blockchain/tdpn-chain/cmd/tdpnd -run 'Settlement.*Reservation|BillingReservation' -count=1")
@@ -772,6 +802,7 @@ infer_item_suggested_files() {
   fi
   if is_auth_wallet_gap_item "$normalized_text"; then
     files+=("docs/local-control-api.md")
+    files+=("scripts/gpm_wallet_auth_evidence.sh")
     files+=("services/localapi/gpm_api.go")
     files+=("services/localapi/gpm_api_test.go")
   fi
@@ -790,7 +821,8 @@ infer_item_suggested_files() {
   if [[ "$normalized_text" == *"vm command"* \
      || "$normalized_text" == *"--vm-command"* \
      || "$normalized_text" == *"real-host"* \
-     || "$normalized_text" == *"real host"* ]]; then
+     || "$normalized_text" == *"real host"* ]] \
+     || is_real_host_validation_gap_item "$normalized_text"; then
     files+=("scripts/integration_3machine_prod_wg_validate.sh")
   fi
   if [[ "$normalized_text" == *"runtime-actuation"* \
@@ -842,14 +874,12 @@ infer_item_suggested_files() {
      || "$normalized_text" == *"finalization"* \
      || "$normalized_text" == *"finalize"* ]]; then
     files+=("docs/local-control-api.md")
+    files+=("scripts/gpm_admin_settlement_live_evidence.sh")
     files+=("scripts/integration_gpm_admin_settlement_contract.sh")
     files+=("services/localapi/gpm_api.go")
     files+=("pkg/settlement/memory.go")
   fi
-  if [[ "$normalized_text" == *"reservation-write"* \
-     || "$normalized_text" == *"reservation write"* \
-     || "$normalized_text" == *"vpnbilling/reservations"* \
-     || ( "$normalized_text" == *"reservefunds"* && "$normalized_text" == *"chain"* ) ]]; then
+  if is_reservation_evidence_gap_item "$normalized_text"; then
     files+=("services/localapi/service.go")
     files+=("pkg/settlement/types.go")
     files+=("pkg/settlement/cosmos_adapter.go")

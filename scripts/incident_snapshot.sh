@@ -70,6 +70,75 @@ first_csv_value() {
   printf '%s' "$csv" | cut -d',' -f1
 }
 
+redact_sensitive_stream() {
+  sed -E '
+s/(--(subject|anon-cred|campaign-subject|campaign-anon-cred|invite-key|key|token|auth-token|admin-token|authorization|bearer|password|secret|api-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g
+s/((SUBJECT|ANON_CRED|INVITE_KEY|TOKEN|AUTH_TOKEN|ADMIN_TOKEN|AUTHORIZATION|BEARER|PASSWORD|SECRET|API_KEY)=)[^[:space:]]+/\1[redacted]/g
+s/((Authorization|X-Admin-Token):[[:space:]]*(Bearer[[:space:]]*)?)[^[:space:]]+/\1[redacted]/Ig
+s/("(subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|password|secret|auth_token|admin_token|authorization|bearer)"[[:space:]]*:[[:space:]]*")[^"]+(")/\1[redacted]\3/Ig
+s/^([[:space:]]*(subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|password|secret|auth_token|admin_token|authorization|bearer)[[:space:]]*:[[:space:]]*)[^[:space:]]+/\1[redacted]/Ig
+s/(^|[[:space:]])((subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|password|secret|auth_token|admin_token|authorization|bearer)[[:space:]]*:[[:space:]]*)[^[:space:]]+/\1\2[redacted]/Ig
+s~([A-Za-z][A-Za-z0-9+.-]*://)[^/?#@[:space:]]+@~\1[redacted]@~g
+s~([?&#](subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|auth_token|admin_token|authorization|bearer|password|secret)=)[^,&#[:space:]]+~\1[redacted]~Ig
+s/inv-[A-Za-z0-9._:-]+/[redacted-invite]/g
+'
+}
+
+redact_sensitive_text() {
+  printf '%s' "${1:-}" | redact_sensitive_stream
+}
+
+redacted_attachment_source_path() {
+  printf '%s' "[redacted-source-path]"
+}
+
+source_ref_for_path() {
+  local value="$1"
+  local digest=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(printf '%s' "$value" | sha256sum | awk '{print $1}')"
+  elif command -v shasum >/dev/null 2>&1; then
+    digest="$(printf '%s' "$value" | shasum -a 256 | awk '{print $1}')"
+  elif command -v cksum >/dev/null 2>&1; then
+    digest="$(printf '%s' "$value" | cksum | awk '{print $1}')"
+  fi
+  if [[ -z "$digest" ]]; then
+    redacted_attachment_source_path
+  else
+    printf 'source-sha256:%s' "$digest"
+  fi
+}
+
+text_file_for_redaction() {
+  local file="$1"
+  [[ -f "$file" ]] || return 1
+  [[ ! -s "$file" ]] || LC_ALL=C grep -Iq . "$file"
+}
+
+redact_file_in_place() {
+  local file="$1"
+  local tmp_file=""
+  text_file_for_redaction "$file" || return 0
+  tmp_file="${file}.redacted.$$"
+  if redact_sensitive_stream <"$file" >"$tmp_file"; then
+    mv "$tmp_file" "$file"
+  else
+    rm -f "$tmp_file" >/dev/null 2>&1 || true
+  fi
+}
+
+redact_tree_text_files() {
+  local path="$1"
+  if [[ -f "$path" ]]; then
+    redact_file_in_place "$path"
+    return 0
+  fi
+  [[ -d "$path" ]] || return 0
+  while IFS= read -r redact_path; do
+    redact_file_in_place "$redact_path"
+  done < <(find "$path" -type f -print)
+}
+
 snapshot_url() {
   local output="$1"
   local url="$2"
@@ -88,11 +157,12 @@ snapshot_url() {
     rm -f "$output.err"
   else
     {
-      echo "probe_failed: $url"
+      echo "probe_failed: $(redact_sensitive_text "$url")"
       cat "$output.err" 2>/dev/null || true
     } >"$output"
     rm -f "$output.err"
   fi
+  redact_file_in_place "$output"
 }
 
 write_safe_env_summary() {
@@ -122,7 +192,7 @@ write_safe_env_summary() {
   for key in "${keys[@]}"; do
     value="$(env_value "$env_file" "$key")"
     if [[ -n "$value" ]]; then
-      printf '%s=%s\n' "$key" "$value" >>"$output"
+      printf '%s=%s\n' "$key" "$(redact_sensitive_text "$value")" >>"$output"
     fi
   done
 }
@@ -320,10 +390,10 @@ exit_url="$(trim_url "$exit_url")"
   echo "uid=$(id -u 2>/dev/null || echo unknown)"
   echo "mode=$mode"
   echo "env_file=$env_file"
-  echo "directory_url=$directory_url"
-  echo "issuer_url=$issuer_url"
-  echo "entry_url=$entry_url"
-  echo "exit_url=$exit_url"
+  echo "directory_url=$(redact_sensitive_text "$directory_url")"
+  echo "issuer_url=$(redact_sensitive_text "$issuer_url")"
+  echo "entry_url=$(redact_sensitive_text "$entry_url")"
+  echo "exit_url=$(redact_sensitive_text "$exit_url")"
   echo "compose_project=$compose_project"
 } >"$bundle_dir/metadata.txt"
 
@@ -356,9 +426,10 @@ if ((${#attach_artifacts[@]} > 0)); then
     artifact_prefix="$(printf '%02d' "$attachment_index")"
     artifact_dest_rel="attachments/${artifact_prefix}_${artifact_safe_name}"
     artifact_dest_path="$bundle_dir/$artifact_dest_rel"
+    artifact_source_ref="$(source_ref_for_path "$artifact")"
     artifact_type="file"
     if [[ ! -e "$artifact" ]]; then
-      printf '%s\t%s\n' "$artifact" "missing" >>"$attachments_skipped"
+      printf '%s\t%s\n' "$artifact_source_ref" "missing" >>"$attachments_skipped"
       continue
     fi
     if [[ -d "$artifact" ]]; then
@@ -367,9 +438,10 @@ if ((${#attach_artifacts[@]} > 0)); then
       artifact_type="symlink"
     fi
     if cp -R "$artifact" "$artifact_dest_path" 2>/dev/null; then
-      printf '%s\t%s\t%s\n' "$artifact_dest_rel" "$artifact_type" "$artifact" >>"$attachments_manifest"
+      redact_tree_text_files "$artifact_dest_path"
+      printf '%s\t%s\t%s\n' "$artifact_dest_rel" "$artifact_type" "$artifact_source_ref" >>"$attachments_manifest"
     else
-      printf '%s\t%s\n' "$artifact" "copy_failed" >>"$attachments_skipped"
+      printf '%s\t%s\n' "$artifact_source_ref" "copy_failed" >>"$attachments_skipped"
     fi
   done
 fi
@@ -399,6 +471,10 @@ if command -v docker >/dev/null 2>&1; then
 else
   echo "docker command missing" >"$bundle_dir/docker/docker_ps.txt"
 fi
+redact_tree_text_files "$bundle_dir/docker"
+redact_tree_text_files "$bundle_dir/endpoints"
+redact_file_in_place "$bundle_dir/metadata.txt"
+redact_file_in_place "$bundle_dir/system/env_summary.txt"
 
 manifest_file="$bundle_dir/manifest.sha256"
 if hash_file_line "$bundle_dir/metadata.txt" >/dev/null 2>&1; then

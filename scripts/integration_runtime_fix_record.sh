@@ -56,6 +56,12 @@ case "$cmd" in
     printf '%s\n' '{"report":{"readiness_status":"NOT_READY"},"summary":{"next_action_check_id":"machine_c_vpn_smoke"}}' >"$summary_json"
     printf '# fake readiness report\n' >"$report_md"
     printf 'fake report log\n' >"$report_log"
+    if [[ "${FAKE_SECRET_OUTPUT:-0}" == "1" ]]; then
+      echo "TOKEN=secret-auth-123"
+      echo "Authorization: Bearer secret-bearer-789"
+      echo "ADMIN_TOKEN=secret-admin-000"
+      echo "subject inv-secret-leak"
+    fi
     if [[ "${FAKE_RUNTIME_FIX_FAIL:-0}" == "1" ]]; then
       cat <<EOF_RUNTIME_FAIL
 [runtime-fix] before_status=WARN findings=1
@@ -135,6 +141,7 @@ chmod +x "$FAKE_EASY_NODE"
 echo "[runtime-fix-record] success path"
 FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
 PRIVACYNODE_ROOT="$ROOT_DIR" \
+FAKE_SECRET_OUTPUT="1" \
 RUNTIME_FIX_RECORD_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
 ./scripts/runtime_fix_record.sh \
   --base-port 19290 \
@@ -181,6 +188,22 @@ if ! jq -e '
 ' "$summary_json_path" >/dev/null; then
   echo "success summary JSON missing expected fields"
   cat "$summary_json_path"
+  exit 1
+fi
+summary_log_path="$(jq -r '.artifacts.summary_log // ""' "$summary_json_path")"
+if [[ -z "$summary_log_path" || ! -f "$summary_log_path" ]]; then
+  echo "expected success summary log missing"
+  cat "$summary_json_path"
+  exit 1
+fi
+if rg -q 'secret-auth-123|secret-bearer-789|secret-admin-000|inv-secret-leak' "$summary_log_path"; then
+  echo "runtime-fix-record summary log leaked sensitive output"
+  cat "$summary_log_path"
+  exit 1
+fi
+if ! rg -q '\[REDACTED\]|\[REDACTED_INVITE\]' "$summary_log_path"; then
+  echo "runtime-fix-record summary log missing redaction markers"
+  cat "$summary_log_path"
   exit 1
 fi
 

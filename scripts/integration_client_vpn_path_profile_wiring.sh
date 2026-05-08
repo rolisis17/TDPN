@@ -87,12 +87,20 @@ check_pattern 'route_warning: full-tunnel AllowedIPs are configured but install_
   "client-vpn-up/status missing explicit no-route warning"
 
 echo "[client-vpn-path-profile] wireguard runtime readiness marker"
-check_pattern 'client wireguard runtime ready:|client wg-kernel proxy listening:' \
+check_pattern 'client wireguard traffic verified:|client wg-kernel proxy uplink observed:' \
   "client-vpn-up must wait for post-WireGuard-config runtime readiness marker"
 check_pattern 'wireguard runtime did not become ready' \
   "client-vpn-up timeout must describe WireGuard runtime readiness"
 check_absent 'if rg -q "client received wg-session config" "\$log_file"; then' \
   "client-vpn-up still treats session config receipt as tunnel readiness"
+
+echo "[client-vpn-path-profile] background process cleanup"
+check_pattern "nohup setsid bash -c 'exec go run ./cmd/node --client'" \
+  "client-vpn-up must launch background go-run in its own process group when setsid is available"
+check_pattern 'CLIENT_VPN_PROCESS_GROUP=\$process_group' \
+  "client-vpn-up state file missing process group marker"
+check_pattern 'client_vpn_stop_pid "\$pid" "\$process_group"' \
+  "client-vpn-up/down must stop the full recorded process group"
 
 echo "[client-vpn-path-profile] 3-hop middle runtime parity"
 check_pattern 'client_vpn_runtime_middle_relay_eligible\(\)' \

@@ -156,8 +156,7 @@ PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_CAMPAIGN_SIGNOFF" \
   --bootstrap-directory https://dir-a:8081 \
   --subject pilot-client \
   --reports-dir "$WRAPPER_REPORTS_DIR" \
-  --rounds 7 \
-  --bundle-fail-close 0 >/tmp/integration_prod_pilot_cohort_campaign_wrapper.log 2>&1
+  --rounds 7 >/tmp/integration_prod_pilot_cohort_campaign_wrapper.log 2>&1
 
 line="$(sed -n '1p' "$CAPTURE")"
 if [[ -z "$line" ]]; then
@@ -291,8 +290,8 @@ if ! printf '%s\n' "$line" | rg -q -- '--rounds 7'; then
   cat "$CAPTURE"
   exit 1
 fi
-if ! printf '%s\n' "$line" | rg -q -- '--bundle-fail-close 0'; then
-  echo "campaign wrapper missing caller override --bundle-fail-close 0"
+if ! printf '%s\n' "$line" | rg -q -- '--bundle-fail-close 1'; then
+  echo "campaign wrapper missing enforced --bundle-fail-close 1"
   cat "$CAPTURE"
   exit 1
 fi
@@ -473,9 +472,8 @@ if ! rg -q -- '- Decision: GO' "$report_path"; then
   exit 1
 fi
 
-echo "[prod-pilot-cohort-campaign] wrapper campaign incident policy overrides"
-OVERRIDE_REPORTS_DIR="$TMP_DIR/wrapper_reports_override"
-: >"$SIGNOFF_CAPTURE"
+echo "[prod-pilot-cohort-campaign] reject softened operator policy"
+set +e
 CAPTURE_FILE="$CAPTURE" \
 SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
 EASY_NODE_SH="$FAKE_EASY_NODE" \
@@ -483,88 +481,64 @@ PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_CAMPAIGN_SIGNOFF" \
 ./scripts/prod_pilot_cohort_campaign.sh \
   --bootstrap-directory https://dir-a:8081 \
   --subject pilot-client \
-  --reports-dir "$OVERRIDE_REPORTS_DIR" \
-  --campaign-run-report-json "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json" \
-  --campaign-print-run-report 0 \
-  --campaign-run-report-required 0 \
-  --campaign-run-report-json-required 0 \
-  --campaign-signoff-required 0 \
-  --campaign-signoff-summary-json "$OVERRIDE_REPORTS_DIR/custom_campaign_signoff_summary.json" \
-  --campaign-require-incident-snapshot-on-fail 0 \
-  --campaign-require-incident-snapshot-artifacts 0 \
-  --campaign-incident-snapshot-min-attachment-count 2 \
-  --campaign-incident-snapshot-max-skipped-count 3 \
-  --campaign-print-report 0 >/tmp/integration_prod_pilot_cohort_campaign_override.log 2>&1
+  --reports-dir "$TMP_DIR/reject_bundle_fail_close" \
+  --bundle-fail-close 0 >/tmp/integration_prod_pilot_cohort_campaign_reject_bundle.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "campaign wrapper should reject --bundle-fail-close 0"
+  cat /tmp/integration_prod_pilot_cohort_campaign_reject_bundle.log
+  exit 1
+fi
+if ! rg -q -- 'requires --bundle-fail-close 1' /tmp/integration_prod_pilot_cohort_campaign_reject_bundle.log; then
+  echo "campaign wrapper reject message did not mention bundle fail-close policy"
+  cat /tmp/integration_prod_pilot_cohort_campaign_reject_bundle.log
+  exit 1
+fi
 
-if [[ ! -f "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json" ]]; then
-  echo "campaign wrapper override run missing campaign summary artifact"
-  cat /tmp/integration_prod_pilot_cohort_campaign_override.log
+set +e
+CAPTURE_FILE="$CAPTURE" \
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+EASY_NODE_SH="$FAKE_EASY_NODE" \
+PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_CAMPAIGN_SIGNOFF" \
+./scripts/prod_pilot_cohort_campaign.sh \
+  --bootstrap-directory https://dir-a:8081 \
+  --subject pilot-client \
+  --reports-dir "$TMP_DIR/reject_campaign_signoff_required" \
+  --campaign-signoff-required 0 >/tmp/integration_prod_pilot_cohort_campaign_reject_campaign_signoff.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "campaign wrapper should reject --campaign-signoff-required 0"
+  cat /tmp/integration_prod_pilot_cohort_campaign_reject_campaign_signoff.log
   exit 1
 fi
-if [[ "$(jq -r '.fail_policy.require_incident_snapshot_on_fail' "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json")" != "0" ]]; then
-  echo "campaign wrapper did not forward --campaign-require-incident-snapshot-on-fail override"
-  cat "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json"
+if ! rg -q -- 'requires PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_REQUIRED 1' /tmp/integration_prod_pilot_cohort_campaign_reject_campaign_signoff.log; then
+  echo "campaign wrapper reject message did not mention campaign signoff policy"
+  cat /tmp/integration_prod_pilot_cohort_campaign_reject_campaign_signoff.log
   exit 1
 fi
-if [[ "$(jq -r '.fail_policy.require_incident_snapshot_artifacts' "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json")" != "0" ]]; then
-  echo "campaign wrapper did not forward --campaign-require-incident-snapshot-artifacts override"
-  cat "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json"
+
+set +e
+CAPTURE_FILE="$CAPTURE" \
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+EASY_NODE_SH="$FAKE_EASY_NODE" \
+PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_CAMPAIGN_SIGNOFF" \
+./scripts/prod_pilot_cohort_campaign.sh \
+  --bootstrap-directory https://dir-a:8081 \
+  --subject pilot-client \
+  --reports-dir "$TMP_DIR/reject_wg_policy" \
+  --signoff-require-trend-wg-validate-udp-source 0 >/tmp/integration_prod_pilot_cohort_campaign_reject_wg_policy.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "campaign wrapper should reject softened WG signoff policy"
+  cat /tmp/integration_prod_pilot_cohort_campaign_reject_wg_policy.log
   exit 1
 fi
-if [[ "$(jq -r '.fail_policy.incident_snapshot_min_attachment_count' "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json")" != "2" ]]; then
-  echo "campaign wrapper did not forward --campaign-incident-snapshot-min-attachment-count override"
-  cat "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json"
-  exit 1
-fi
-if [[ "$(jq -r '.fail_policy.incident_snapshot_max_skipped_count' "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json")" != "3" ]]; then
-  echo "campaign wrapper did not forward --campaign-incident-snapshot-max-skipped-count override"
-  cat "$OVERRIDE_REPORTS_DIR/prod_pilot_campaign_summary.json"
-  exit 1
-fi
-if [[ ! -f "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json" ]]; then
-  echo "campaign wrapper override run missing custom campaign run report artifact"
-  cat /tmp/integration_prod_pilot_cohort_campaign_override.log
-  exit 1
-fi
-if [[ "$(jq -r '.config.campaign_run_report_required' "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json")" != "0" ]]; then
-  echo "campaign wrapper did not forward --campaign-run-report-required override"
-  cat "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json"
-  exit 1
-fi
-if [[ "$(jq -r '.config.campaign_run_report_json_required' "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json")" != "0" ]]; then
-  echo "campaign wrapper did not forward --campaign-run-report-json-required override"
-  cat "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json"
-  exit 1
-fi
-if [[ "$(jq -r '.config.campaign_signoff_required' "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json")" != "0" ]]; then
-  echo "campaign wrapper did not forward --campaign-signoff-required override"
-  cat "$OVERRIDE_REPORTS_DIR/custom_campaign_run_report.json"
-  exit 1
-fi
-if [[ ! -f "$OVERRIDE_REPORTS_DIR/custom_campaign_signoff_summary.json" ]]; then
-  echo "campaign wrapper override run missing custom campaign signoff summary artifact"
-  cat /tmp/integration_prod_pilot_cohort_campaign_override.log
-  exit 1
-fi
-override_signoff_line="$(tail -n 1 "$SIGNOFF_CAPTURE" || true)"
-if [[ -z "$override_signoff_line" ]]; then
-  echo "campaign wrapper override run did not execute campaign-signoff stage"
-  cat "$SIGNOFF_CAPTURE"
-  exit 1
-fi
-if ! printf '%s\n' "$override_signoff_line" | rg -q -- '--require-campaign-signoff-required 0'; then
-  echo "campaign wrapper override signoff stage missing --require-campaign-signoff-required 0"
-  cat "$SIGNOFF_CAPTURE"
-  exit 1
-fi
-if ! printf '%s\n' "$override_signoff_line" | rg -q -- '--require-campaign-run-report-required 0'; then
-  echo "campaign wrapper override signoff stage missing --require-campaign-run-report-required 0"
-  cat "$SIGNOFF_CAPTURE"
-  exit 1
-fi
-if ! printf '%s\n' "$override_signoff_line" | rg -q -- '--require-campaign-run-report-json-required 0'; then
-  echo "campaign wrapper override signoff stage missing --require-campaign-run-report-json-required 0"
-  cat "$SIGNOFF_CAPTURE"
+if ! rg -q -- 'requires --signoff-require-trend-wg-validate-udp-source 1' /tmp/integration_prod_pilot_cohort_campaign_reject_wg_policy.log; then
+  echo "campaign wrapper reject message did not mention WG signoff policy"
+  cat /tmp/integration_prod_pilot_cohort_campaign_reject_wg_policy.log
   exit 1
 fi
 
@@ -628,8 +602,7 @@ FAKE_CAMPAIGN_SIGNOFF_FAIL_RC=27 \
   --bootstrap-directory https://dir-a:8081 \
   --subject pilot-client \
   --reports-dir "$SIGNOFF_FAIL_REPORTS_DIR" \
-  --campaign-print-report 0 \
-  --campaign-summary-fail-close 0 >/tmp/integration_prod_pilot_cohort_campaign_signoff_fail.log 2>&1
+  --campaign-print-report 0 >/tmp/integration_prod_pilot_cohort_campaign_signoff_fail.log 2>&1
 rc=$?
 set -e
 if [[ "$rc" -ne 27 ]]; then

@@ -24,6 +24,7 @@ import (
 
 	"privacynode/pkg/adminauth"
 	"privacynode/pkg/crypto"
+	"privacynode/pkg/httplimit"
 	"privacynode/pkg/proto"
 	"privacynode/pkg/securehttp"
 	"privacynode/pkg/settlement"
@@ -75,6 +76,8 @@ type Service struct {
 	sponsorMaxIDLen               int
 	sponsorMaxCurrencyLen         int
 	sponsorMaxReservationMicros   int64
+	publicMutationRateLimiter     *httplimit.FixedWindowLimiter
+	publicMutationInflightLimiter *httplimit.InflightLimiter
 	issuedPaymentReservations     map[string]int64
 	issuedPaymentReplayMu         sync.Mutex
 	issuedPaymentReplayStoreFile  string
@@ -123,31 +126,34 @@ type issuerSettlementStatusResponse struct {
 }
 
 const (
-	defaultSponsorMaxSubjectLen          = 128
-	defaultSponsorMaxIDLen               = 128
-	defaultSponsorMaxCurrencyLen         = 16
-	defaultSponsorMaxReservationMicros   = int64(1000000000)
-	adminAuditQueryLimitMax              = 1000
-	issueTokenRequestMaxBytes            = int64(64 * 1024)
-	revokeTokenRequestMaxBytes           = int64(8 * 1024)
-	hostResolveTimeout                   = 2 * time.Second
-	serverReadHeaderTimeout              = 10 * time.Second
-	serverReadTimeout                    = 15 * time.Second
-	serverWriteTimeout                   = 30 * time.Second
-	serverIdleTimeout                    = 60 * time.Second
-	serverMaxHeaderBytes                 = 1 << 20
-	allowInsecureTokenAuthPublicBind     = "ISSUER_ALLOW_DANGEROUS_INSECURE_TOKEN_AUTH_PUBLIC_BIND"
-	allowInsecurePublicIssueNoPayment    = "ISSUER_ALLOW_DANGEROUS_PUBLIC_ISSUE_WITHOUT_PAYMENT_PROOF"
-	allowDangerousDevAdminTokenFallback  = "ISSUER_ALLOW_DANGEROUS_DEV_ADMIN_TOKEN_FALLBACK"
-	allowDangerousCosmosAdapterFallback  = "SETTLEMENT_ALLOW_DANGEROUS_COSMOS_INIT_FALLBACK"
-	issuerPrivateKeyFileMaxBytes         = int64(16 * 1024)
-	issuerAdminKeysFileMaxBytes          = int64(1 * 1024 * 1024)
-	issuerAdminNonceFileMaxBytes         = int64(8 * 1024 * 1024)
-	issuerAdminNonceMaxEntries           = 1 << 15
-	issuerPreviousPubKeysFileMaxBytes    = int64(1 * 1024 * 1024)
-	issuerStateFileMaxBytes              = int64(32 * 1024 * 1024)
-	defaultIssuedPaymentReplayMaxEntries = 1 << 17
-	defaultIssuedPaymentReplayTTL        = 24 * time.Hour
+	defaultSponsorMaxSubjectLen            = 128
+	defaultSponsorMaxIDLen                 = 128
+	defaultSponsorMaxCurrencyLen           = 16
+	defaultSponsorMaxReservationMicros     = int64(1000000000)
+	defaultIssuerPublicMutationRPS         = 256
+	defaultIssuerPublicMutationMaxRateKeys = 65536
+	defaultIssuerPublicMutationMaxInflight = 128
+	adminAuditQueryLimitMax                = 1000
+	issueTokenRequestMaxBytes              = int64(64 * 1024)
+	revokeTokenRequestMaxBytes             = int64(8 * 1024)
+	hostResolveTimeout                     = 2 * time.Second
+	serverReadHeaderTimeout                = 10 * time.Second
+	serverReadTimeout                      = 15 * time.Second
+	serverWriteTimeout                     = 30 * time.Second
+	serverIdleTimeout                      = 60 * time.Second
+	serverMaxHeaderBytes                   = 1 << 20
+	allowInsecureTokenAuthPublicBind       = "ISSUER_ALLOW_DANGEROUS_INSECURE_TOKEN_AUTH_PUBLIC_BIND"
+	allowInsecurePublicIssueNoPayment      = "ISSUER_ALLOW_DANGEROUS_PUBLIC_ISSUE_WITHOUT_PAYMENT_PROOF"
+	allowDangerousDevAdminTokenFallback    = "ISSUER_ALLOW_DANGEROUS_DEV_ADMIN_TOKEN_FALLBACK"
+	allowDangerousCosmosAdapterFallback    = "SETTLEMENT_ALLOW_DANGEROUS_COSMOS_INIT_FALLBACK"
+	issuerPrivateKeyFileMaxBytes           = int64(16 * 1024)
+	issuerAdminKeysFileMaxBytes            = int64(1 * 1024 * 1024)
+	issuerAdminNonceFileMaxBytes           = int64(8 * 1024 * 1024)
+	issuerAdminNonceMaxEntries             = 1 << 15
+	issuerPreviousPubKeysFileMaxBytes      = int64(1 * 1024 * 1024)
+	issuerStateFileMaxBytes                = int64(32 * 1024 * 1024)
+	defaultIssuedPaymentReplayMaxEntries   = 1 << 17
+	defaultIssuedPaymentReplayTTL          = 24 * time.Hour
 )
 
 var lookupIPAddr = func(ctx context.Context, host string) ([]net.IPAddr, error) {
@@ -329,6 +335,9 @@ func New() *Service {
 		}
 	}
 	issuedPaymentReplayStoreFile := strings.TrimSpace(os.Getenv("ISSUER_PAYMENT_REPLAY_STORE_FILE"))
+	publicMutationRPS := envPositiveInt("ISSUER_PUBLIC_MUTATION_RPS", defaultIssuerPublicMutationRPS)
+	publicMutationMaxRateKeys := envPositiveInt("ISSUER_PUBLIC_MUTATION_MAX_RATE_KEYS", defaultIssuerPublicMutationMaxRateKeys)
+	publicMutationMaxInflight := envPositiveInt("ISSUER_PUBLIC_MUTATION_MAX_INFLIGHT", defaultIssuerPublicMutationMaxInflight)
 	settlementSvc := newSettlementServiceFromEnv()
 	settlementChainBacked := settlementServiceChainBacked(settlementSvc)
 	return &Service{
@@ -372,6 +381,8 @@ func New() *Service {
 		sponsorMaxIDLen:               sponsorMaxIDLen,
 		sponsorMaxCurrencyLen:         sponsorMaxCurrencyLen,
 		sponsorMaxReservationMicros:   sponsorMaxReservationMicros,
+		publicMutationRateLimiter:     httplimit.NewFixedWindowLimiter(publicMutationRPS, publicMutationMaxRateKeys),
+		publicMutationInflightLimiter: httplimit.NewInflightLimiter(publicMutationMaxInflight),
 		issuedPaymentReservations:     make(map[string]int64),
 		issuedPaymentReplayStoreFile:  issuedPaymentReplayStoreFile,
 		issuedPaymentReplayMaxEntries: issuedPaymentReplayMaxEntries,
@@ -595,16 +606,19 @@ func (s *Service) validateRuntimeConfig() error {
 			return err
 		}
 	}
+	publicBind := !isLoopbackBindAddr(s.addr)
 	if securehttp.Enabled() {
 		if s.prodStrict && securehttp.InsecureSkipVerifyConfigured() {
 			return fmt.Errorf("PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY")
+		}
+		if (s.prodStrict || publicBind) && !securehttp.RequireClientCertConfigured() {
+			return fmt.Errorf("PROD_STRICT_MODE/public bind requires MTLS_REQUIRE_CLIENT_CERT=1")
 		}
 		if err := securehttp.Validate(); err != nil {
 			return fmt.Errorf("invalid mTLS config: %w", err)
 		}
 	}
 	adminTokenAuthEnabled := s.isAdminTokenAuthEnabled()
-	publicBind := !isLoopbackBindAddr(s.addr)
 	if publicBind && strings.TrimSpace(s.privateKeyPath) == "data/issuer_ed25519.key" {
 		return fmt.Errorf("public bind rejects legacy ISSUER_PRIVATE_KEY_FILE path data/issuer_ed25519.key")
 	}
@@ -746,11 +760,30 @@ func decodeBoundedStrictJSON(w http.ResponseWriter, r *http.Request, dst any, ma
 	return nil
 }
 
+func (s *Service) acquirePublicMutationGate(w http.ResponseWriter, r *http.Request) (func(), bool) {
+	clientIP := remoteIP(r.RemoteAddr)
+	if s.publicMutationRateLimiter != nil && !s.publicMutationRateLimiter.Allow(clientIP, time.Now()) {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+		return nil, false
+	}
+	release, ok := s.publicMutationInflightLimiter.Acquire()
+	if !ok {
+		http.Error(w, "too many in-flight requests", http.StatusTooManyRequests)
+		return nil, false
+	}
+	return release, true
+}
+
 func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	releaseGate, ok := s.acquirePublicMutationGate(w, r)
+	if !ok {
+		return
+	}
+	defer releaseGate()
 
 	var req proto.IssueTokenRequest
 	if err := decodeBoundedStrictJSON(w, r, &req, issueTokenRequestMaxBytes); err != nil {
@@ -761,11 +794,16 @@ func (s *Service) handleIssueToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleSponsorIssueToken(w http.ResponseWriter, r *http.Request) {
-	if !s.requireSponsor(w, r) {
-		return
-	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	releaseGate, ok := s.acquirePublicMutationGate(w, r)
+	if !ok {
+		return
+	}
+	defer releaseGate()
+	if !s.requireSponsor(w, r) {
 		return
 	}
 
@@ -875,7 +913,7 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 		http.Error(w, "unsupported token_type", http.StatusBadRequest)
 		return
 	}
-	if paymentAuth.ReservationID != "" && paymentAuth.IdempotentReplay && s.hasIssuedPaymentReservation(paymentReplayKey(paymentAuth.Source, paymentAuth.ReservationID)) {
+	if paymentAuth.ReservationID != "" && paymentAuth.IdempotentReplay && s.hasIssuedPaymentProofReservation(paymentAuth.Source, paymentAuth.ReservationID) {
 		http.Error(w, "payment proof already used", http.StatusConflict)
 		return
 	}
@@ -885,7 +923,7 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 		return
 	}
 	if paymentAuth.ReservationID != "" && !paymentReplayMarked {
-		marked, saturated, markErr := s.markIssuedPaymentReservation(paymentReplayKey(paymentAuth.Source, paymentAuth.ReservationID))
+		marked, saturated, markErr := s.markIssuedPaymentProofReservation(paymentAuth.Source, paymentAuth.ReservationID)
 		if markErr != nil {
 			http.Error(w, "payment replay store write failed", http.StatusServiceUnavailable)
 			return
@@ -908,11 +946,16 @@ func (s *Service) issueTokenRequest(ctx context.Context, w http.ResponseWriter, 
 }
 
 func (s *Service) handleSponsorQuote(w http.ResponseWriter, r *http.Request) {
-	if !s.requireSponsor(w, r) {
-		return
-	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	releaseGate, ok := s.acquirePublicMutationGate(w, r)
+	if !ok {
+		return
+	}
+	defer releaseGate()
+	if !s.requireSponsor(w, r) {
 		return
 	}
 
@@ -944,11 +987,16 @@ func (s *Service) handleSponsorQuote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleSponsorReserve(w http.ResponseWriter, r *http.Request) {
-	if !s.requireSponsor(w, r) {
-		return
-	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	releaseGate, ok := s.acquirePublicMutationGate(w, r)
+	if !ok {
+		return
+	}
+	defer releaseGate()
+	if !s.requireSponsor(w, r) {
 		return
 	}
 
@@ -989,11 +1037,16 @@ func (s *Service) handleSponsorReserve(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleSponsorStatus(w http.ResponseWriter, r *http.Request) {
-	if !s.requireSponsor(w, r) {
-		return
-	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	releaseGate, ok := s.acquirePublicMutationGate(w, r)
+	if !ok {
+		return
+	}
+	defer releaseGate()
+	if !s.requireSponsor(w, r) {
 		return
 	}
 	reservationID := strings.TrimSpace(r.URL.Query().Get("reservation_id"))
@@ -1013,11 +1066,7 @@ func (s *Service) handleSponsorStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleSettlementStatus(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -1200,7 +1249,7 @@ func (s *Service) ensureClientPaymentAuthorization(
 	replayKey := paymentReplayKey(paymentProofSource, reservationID)
 	replayMarked := false
 	if reservationID != "" {
-		marked, saturated, markErr := s.markIssuedPaymentReservation(replayKey)
+		marked, saturated, markErr := s.markIssuedPaymentReservationWithLegacy(replayKey, legacyPaymentReplayKey(paymentProofSource, reservationID))
 		if markErr != nil {
 			return settlement.PaymentAuthorization{}, false, paymentAuthorizationHTTPError{
 				status:  http.StatusServiceUnavailable,
@@ -1247,12 +1296,33 @@ func (e paymentAuthorizationHTTPError) Error() string {
 }
 
 func paymentReplayKey(source, reservationID string) string {
+	source = normalizedPaymentReplaySource(source)
+	reservationID = strings.TrimSpace(reservationID)
+	if reservationID == "" {
+		return ""
+	}
+	return fmt.Sprintf(
+		"v2:%s:%s",
+		base64.RawURLEncoding.EncodeToString([]byte(source)),
+		base64.RawURLEncoding.EncodeToString([]byte(reservationID)),
+	)
+}
+
+func legacyPaymentReplayKey(source, reservationID string) string {
 	source = strings.TrimSpace(source)
 	reservationID = strings.TrimSpace(reservationID)
 	if source == "" || source == settlement.PaymentProofSourceSponsor || source == proto.PaymentProofSourceSponsor {
 		return reservationID
 	}
 	return source + ":" + reservationID
+}
+
+func normalizedPaymentReplaySource(source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" || source == settlement.PaymentProofSourceSponsor || source == proto.PaymentProofSourceSponsor {
+		return settlement.PaymentProofSourceSponsor
+	}
+	return source
 }
 
 func paymentAuthorizationHTTPStatus(err error) int {
@@ -1277,11 +1347,32 @@ func (s *Service) hasIssuedPaymentReservation(reservationID string) bool {
 	return ok
 }
 
+func (s *Service) hasIssuedPaymentProofReservation(source, reservationID string) bool {
+	replayKey := paymentReplayKey(source, reservationID)
+	if replayKey == "" {
+		return false
+	}
+	if s.hasIssuedPaymentReservation(replayKey) {
+		return true
+	}
+	legacyReplayKey := legacyPaymentReplayKey(source, reservationID)
+	return legacyReplayKey != replayKey && s.hasIssuedPaymentReservation(legacyReplayKey)
+}
+
 func (s *Service) markIssuedPaymentReservation(reservationID string) (bool, bool, error) {
+	return s.markIssuedPaymentReservationWithLegacy(reservationID, "")
+}
+
+func (s *Service) markIssuedPaymentProofReservation(source, reservationID string) (bool, bool, error) {
+	return s.markIssuedPaymentReservationWithLegacy(paymentReplayKey(source, reservationID), legacyPaymentReplayKey(source, reservationID))
+}
+
+func (s *Service) markIssuedPaymentReservationWithLegacy(reservationID string, legacyReservationID string) (bool, bool, error) {
 	reservationID = strings.TrimSpace(reservationID)
 	if reservationID == "" {
 		return true, false, nil
 	}
+	legacyReservationID = strings.TrimSpace(legacyReservationID)
 	s.issuedPaymentReplayMu.Lock()
 	defer s.issuedPaymentReplayMu.Unlock()
 	now := time.Now().Unix()
@@ -1293,6 +1384,12 @@ func (s *Service) markIssuedPaymentReservation(reservationID string) (bool, bool
 	if _, exists := s.issuedPaymentReservations[reservationID]; exists {
 		s.mu.Unlock()
 		return false, false, nil
+	}
+	if legacyReservationID != "" && legacyReservationID != reservationID {
+		if _, exists := s.issuedPaymentReservations[legacyReservationID]; exists {
+			s.mu.Unlock()
+			return false, false, nil
+		}
 	}
 	maxEntries := s.issuedPaymentReplayCacheMaxEntries()
 	if maxEntries > 0 && len(s.issuedPaymentReservations) >= maxEntries {
@@ -1465,11 +1562,7 @@ func (s *Service) settlementService() settlement.Service {
 }
 
 func (s *Service) handleUpsertSubject(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.UpsertSubjectRequest
@@ -1524,11 +1617,7 @@ func (s *Service) handleUpsertSubject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handlePromoteSubject(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.PromoteSubjectRequest
@@ -1565,11 +1654,7 @@ func (s *Service) handlePromoteSubject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleApplyReputation(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.ApplyReputationRequest
@@ -1609,11 +1694,7 @@ func (s *Service) handleApplyReputation(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Service) handleApplyBond(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.ApplyBondRequest
@@ -1653,11 +1734,7 @@ func (s *Service) handleApplyBond(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleApplyStake(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.ApplyStakeRequest
@@ -1697,11 +1774,7 @@ func (s *Service) handleApplyStake(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleRecomputeTier(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.RecomputeTierRequest
@@ -1742,11 +1815,7 @@ func (s *Service) handleRecomputeTier(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleGetSubject(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodGet) {
 		return
 	}
 	sub := r.URL.Query().Get("subject")
@@ -1766,11 +1835,7 @@ func (s *Service) handleGetSubject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleIssueAnonymousCredential(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.IssueAnonymousCredentialRequest
@@ -1813,11 +1878,7 @@ func (s *Service) handleIssueAnonymousCredential(w http.ResponseWriter, r *http.
 }
 
 func (s *Service) handleRevokeAnonymousCredential(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.RevokeAnonymousCredentialRequest
@@ -1855,11 +1916,7 @@ func (s *Service) handleRevokeAnonymousCredential(w http.ResponseWriter, r *http
 }
 
 func (s *Service) handleApplyAnonymousCredentialDispute(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.ApplyAnonymousCredentialDisputeRequest
@@ -1912,11 +1969,7 @@ func (s *Service) handleApplyAnonymousCredentialDispute(w http.ResponseWriter, r
 }
 
 func (s *Service) handleClearAnonymousCredentialDispute(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.ClearAnonymousCredentialDisputeRequest
@@ -1949,11 +2002,7 @@ func (s *Service) handleClearAnonymousCredentialDispute(w http.ResponseWriter, r
 }
 
 func (s *Service) handleGetAnonymousCredentialStatus(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodGet) {
 		return
 	}
 	credentialID := strings.TrimSpace(r.URL.Query().Get("credential_id"))
@@ -1979,11 +2028,7 @@ func (s *Service) handleGetAnonymousCredentialStatus(w http.ResponseWriter, r *h
 }
 
 func (s *Service) handleApplyDispute(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.ApplyDisputeRequest
@@ -2047,11 +2092,7 @@ func (s *Service) handleApplyDispute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleClearDispute(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.ClearDisputeRequest
@@ -2097,11 +2138,7 @@ func (s *Service) handleClearDispute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleOpenAppeal(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.OpenAppealRequest
@@ -2154,11 +2191,7 @@ func (s *Service) handleOpenAppeal(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleResolveAppeal(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.ResolveAppealRequest
@@ -2201,11 +2234,7 @@ func (s *Service) handleResolveAppeal(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleGetAudit(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodGet) {
 		return
 	}
 	subject := strings.TrimSpace(r.URL.Query().Get("subject"))
@@ -2240,11 +2269,7 @@ func (s *Service) handleGetAudit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req proto.RevokeTokenRequest
@@ -2278,11 +2303,7 @@ func (s *Service) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleSubmitSlashEvidence(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdmin(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !s.requireAdminMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -2385,6 +2406,14 @@ func (s *Service) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	}
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 	return false
+}
+
+func (s *Service) requireAdminMethod(w http.ResponseWriter, r *http.Request, method string) bool {
+	if r.Method != method {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return false
+	}
+	return s.requireAdmin(w, r)
 }
 
 func (s *Service) requireSponsor(w http.ResponseWriter, r *http.Request) bool {
@@ -2506,6 +2535,23 @@ func envEnabled(name string) bool {
 	default:
 		return false
 	}
+}
+
+func envPositiveInt(name string, fallback int) int {
+	if raw := strings.TrimSpace(os.Getenv(name)); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			return n
+		}
+	}
+	return fallback
+}
+
+func remoteIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return remoteAddr
+	}
+	return host
 }
 
 func parseStrictBool(raw string) (bool, error) {
@@ -2630,7 +2676,8 @@ func (s *Service) claimAdminNonce(keyID string, nonce string, now int64, windowS
 	if keyID == "" || nonce == "" {
 		return fmt.Errorf("admin key id and nonce are required")
 	}
-	nonceKey := keyID + "|" + nonce
+	nonceKey := adminNonceReplayKey(keyID, nonce)
+	legacyNonceKey := legacyAdminNonceReplayKey(keyID, nonce)
 	expireAt := now + windowSec
 	cutoff := now - windowSec
 
@@ -2643,6 +2690,11 @@ func (s *Service) claimAdminNonce(keyID string, nonce string, now int64, windowS
 	if exp, ok := s.adminSeenNonce[nonceKey]; ok && exp > cutoff {
 		return fmt.Errorf("replayed admin nonce")
 	}
+	if legacyNonceKey != nonceKey {
+		if exp, ok := s.adminSeenNonce[legacyNonceKey]; ok && exp > cutoff {
+			return fmt.Errorf("replayed admin nonce")
+		}
+	}
 	if len(s.adminSeenNonce) >= issuerAdminNonceMaxEntries {
 		return fmt.Errorf("admin nonce replay cache saturated")
 	}
@@ -2652,6 +2704,18 @@ func (s *Service) claimAdminNonce(keyID string, nonce string, now int64, windowS
 		return fmt.Errorf("persist admin nonce: %w", err)
 	}
 	return nil
+}
+
+func adminNonceReplayKey(keyID string, nonce string) string {
+	return fmt.Sprintf(
+		"v2:%s:%s",
+		base64.RawURLEncoding.EncodeToString([]byte(strings.TrimSpace(keyID))),
+		base64.RawURLEncoding.EncodeToString([]byte(strings.TrimSpace(nonce))),
+	)
+}
+
+func legacyAdminNonceReplayKey(keyID string, nonce string) string {
+	return strings.TrimSpace(keyID) + "|" + strings.TrimSpace(nonce)
 }
 
 func (s *Service) adminSignedWindowSec() int64 {

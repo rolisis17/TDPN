@@ -66,6 +66,14 @@ abs_path() {
   path="$(trim "$path")"
   if [[ -z "$path" ]]; then
     printf '%s' ""
+  elif [[ "$path" =~ ^[A-Za-z]:[\\/] ]]; then
+    if command -v wslpath >/dev/null 2>&1; then
+      wslpath -u "$path"
+    elif command -v cygpath >/dev/null 2>&1; then
+      cygpath -u "$path"
+    else
+      printf '%s' "$path"
+    fi
   elif [[ "$path" == /* ]]; then
     printf '%s' "$path"
   else
@@ -80,8 +88,25 @@ prepare_log_dir() {
 }
 
 print_cmd() {
+  local redact_next=0
   local arg
   for arg in "$@"; do
+    if ((redact_next)); then
+      printf '%q ' "[redacted]"
+      redact_next=0
+      continue
+    fi
+    case "$arg" in
+      --subject|--anon-cred|--campaign-subject|--campaign-anon-cred|--key|--invite-key|--token|--auth-token|--admin-token|--authorization|--bearer|--password|--secret|--api-key)
+        printf '%q ' "$arg"
+        redact_next=1
+        continue
+        ;;
+      --subject=*|--anon-cred=*|--campaign-subject=*|--campaign-anon-cred=*|--key=*|--invite-key=*|--token=*|--auth-token=*|--admin-token=*|--authorization=*|--bearer=*|--password=*|--secret=*|--api-key=*)
+        printf '%q ' "${arg%%=*}=[redacted]"
+        continue
+        ;;
+    esac
     printf '%q ' "$arg"
   done
   printf '\n'
@@ -89,7 +114,24 @@ print_cmd() {
 
 redact_sensitive_command_string() {
   local value="$1"
-  printf '%s' "$value" | sed -E 's/(--(subject|anon-cred|campaign-subject|key|invite-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g'
+  printf '%s' "$value" | sed -E '
+s/(--(subject|anon-cred|campaign-subject|campaign-anon-cred|key|invite-key|token|auth-token|admin-token|authorization|bearer|password|secret|api-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g
+s/((Authorization|X-Admin-Token):[[:space:]]*(Bearer[[:space:]]*)?)[^[:space:]]+/\1[redacted]/Ig
+s/inv-[A-Za-z0-9._:-]+/[redacted-invite]/g
+'
+}
+
+redact_sensitive_output() {
+  sed -E '
+s/(--(subject|anon-cred|campaign-subject|campaign-anon-cred|key|invite-key|token|auth-token|admin-token|authorization|bearer|password|secret|api-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g
+s/((SUBJECT|ANON_CRED|INVITE_KEY|TOKEN|AUTH_TOKEN|ADMIN_TOKEN|AUTHORIZATION|BEARER|PASSWORD|SECRET|API_KEY)=)[^[:space:]]+/\1[redacted]/g
+s/((Authorization|X-Admin-Token):[[:space:]]*(Bearer[[:space:]]*)?)[^[:space:]]+/\1[redacted]/Ig
+s/inv-[A-Za-z0-9._:-]+/[redacted-invite]/g
+'
+}
+
+redact_sensitive_text() {
+  printf '%s\n' "${1:-}" | redact_sensitive_output
 }
 
 extract_json_payload() {
@@ -192,7 +234,7 @@ persist_artifact_text() {
   if [[ -z "$content" ]]; then
     rm -f "$path" 2>/dev/null || true
   else
-    printf '%s\n' "$content" >"$path"
+    redact_sensitive_text "$content" >"$path"
   fi
 }
 
@@ -210,20 +252,17 @@ json_array_from_values() {
 run_and_capture() {
   local __var_name="$1"
   shift
-  local tmp rc
-  tmp="$(mktemp)"
-  if "$@" >"$tmp" 2>&1; then
+  local output rc
+  if output="$("$@" 2>&1)"; then
     printf '%s\n' "[$stage] command_ok: $(print_cmd "$@")" >>"$summary_log"
-    cat "$tmp" >>"$summary_log"
-    printf -v "$__var_name" '%s' "$(cat "$tmp")"
-    rm -f "$tmp"
+    redact_sensitive_text "$output" >>"$summary_log"
+    printf -v "$__var_name" '%s' "$output"
     return 0
   else
     rc=$?
     printf '%s\n' "[$stage] command_failed rc=$rc: $(print_cmd "$@")" >>"$summary_log"
-    cat "$tmp" >>"$summary_log"
-    printf -v "$__var_name" '%s' "$(cat "$tmp")"
-    rm -f "$tmp"
+    redact_sensitive_text "$output" >>"$summary_log"
+    printf -v "$__var_name" '%s' "$output"
     return "$rc"
   fi
 }

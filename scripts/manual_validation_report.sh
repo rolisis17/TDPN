@@ -48,6 +48,13 @@ abs_path() {
     printf '%s' ""
     return
   fi
+  if [[ "$path" =~ ^[A-Za-z]:[\\/].* ]]; then
+    if command -v wslpath >/dev/null 2>&1; then
+      path="$(wslpath -u "$path" 2>/dev/null || printf '%s' "$path")"
+    elif command -v cygpath >/dev/null 2>&1; then
+      path="$(cygpath -u "$path" 2>/dev/null || printf '%s' "$path")"
+    fi
+  fi
   if [[ "$path" == /* ]]; then
     printf '%s' "$path"
   else
@@ -512,6 +519,20 @@ if [[ -z "$status_json_payload" ]]; then
               }
             },
             profile_default_ready: false,
+            closed_beta_readiness: {
+              check_ids: ["runtime_hygiene", "wg_only_stack_selftest", "machine_c_vpn_smoke", "closed_beta_pilot_signoff", "profile_default_gate"],
+              production_signoff_required: false,
+              mainnet_signoff_blockers: ["machine_c_vpn_smoke", "three_machine_prod_signoff"],
+              blockers: ["manual_validation_status_timeout"],
+              ready: false,
+              status: "NOT_READY",
+              stage: "CLOSED_BETA_NOT_READY",
+              pilot_signoff_status: "pending",
+              next_check_id: "manual_validation_status_timeout",
+              next_label: "Manual validation status timeout",
+              next_command: "rerun ./scripts/easy_node.sh manual-validation-report --print-summary-json 1"
+            },
+            closed_beta_ready: false,
             docker_rehearsal_gate: {
               check_id: "three_machine_docker_readiness",
               status: "pending",
@@ -604,6 +625,20 @@ if ! printf '%s\n' "$status_json_payload" | jq -e . >/dev/null 2>&1; then
               }
             },
             profile_default_ready: false,
+            closed_beta_readiness: {
+              check_ids: ["runtime_hygiene", "wg_only_stack_selftest", "machine_c_vpn_smoke", "closed_beta_pilot_signoff", "profile_default_gate"],
+              production_signoff_required: false,
+              mainnet_signoff_blockers: ["machine_c_vpn_smoke", "three_machine_prod_signoff"],
+              blockers: ["manual_validation_status_timeout_invalid_json"],
+              ready: false,
+              status: "NOT_READY",
+              stage: "CLOSED_BETA_NOT_READY",
+              pilot_signoff_status: "pending",
+              next_check_id: "manual_validation_status_timeout_invalid_json",
+              next_label: "Manual validation status timeout (invalid payload)",
+              next_command: "rerun ./scripts/easy_node.sh manual-validation-report --print-summary-json 1"
+            },
+            closed_beta_ready: false,
             docker_rehearsal_gate: { check_id: "three_machine_docker_readiness", status: "pending", notes: "status unavailable due manual-validation-status timeout", command: "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1", next_command: "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1", ready: false },
             real_wg_privileged_gate: { check_id: "real_wg_privileged_matrix", status: "pending", notes: "status unavailable due manual-validation-status timeout", command: "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1", next_command: "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1", ready: false },
             single_machine_ready: false,

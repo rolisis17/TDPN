@@ -108,6 +108,34 @@ int_or_die() {
   fi
 }
 
+require_one_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ "$value" != "1" ]]; then
+    echo "prod-pilot-cohort-quick requires $name 1; use prod-pilot-cohort-check/signoff directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+require_int_floor_or_die() {
+  local name="$1"
+  local value="$2"
+  local minimum="$3"
+  if [[ ! "$value" =~ ^[0-9]+$ ]] || ((10#$value < minimum)); then
+    echo "prod-pilot-cohort-quick requires $name >= $minimum; use prod-pilot-cohort-check/signoff directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+require_max_skipped_zero_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^-?[0-9]+$ || "$value" != "0" ]]; then
+    echo "prod-pilot-cohort-quick requires $name 0; use prod-pilot-cohort-check/signoff directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
 is_non_negative_decimal() {
   local value="$1"
   [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]
@@ -152,8 +180,8 @@ signoff_min_trend_wg_soak_exit_operators="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MIN_
 signoff_min_trend_wg_soak_cross_operator_pairs="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MIN_TREND_WG_SOAK_CROSS_OPERATOR_PAIRS:-2}"
 signoff_require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
 signoff_require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
-signoff_incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}}"
-signoff_incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}}"
+signoff_incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}}"
+signoff_incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}}"
 max_round_failures="${PROD_PILOT_COHORT_QUICK_MAX_ROUND_FAILURES:-0}"
 
 declare -a runbook_extra_args=()
@@ -393,6 +421,18 @@ if [[ ! "$signoff_incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((sig
   echo "--signoff-incident-snapshot-max-skipped-count must be an integer >= -1"
   exit 2
 fi
+require_one_or_die "--signoff-require-trend-artifact-policy-match" "$signoff_require_trend_artifact_policy_match"
+require_one_or_die "--signoff-require-trend-wg-validate-udp-source" "$signoff_require_trend_wg_validate_udp_source"
+require_one_or_die "--signoff-require-trend-wg-validate-strict-distinct" "$signoff_require_trend_wg_validate_strict_distinct"
+require_one_or_die "--signoff-require-trend-wg-soak-diversity-pass" "$signoff_require_trend_wg_soak_diversity_pass"
+require_int_floor_or_die "--signoff-min-trend-wg-soak-selection-lines" "$signoff_min_trend_wg_soak_selection_lines" 12
+require_int_floor_or_die "--signoff-min-trend-wg-soak-entry-operators" "$signoff_min_trend_wg_soak_entry_operators" 2
+require_int_floor_or_die "--signoff-min-trend-wg-soak-exit-operators" "$signoff_min_trend_wg_soak_exit_operators" 2
+require_int_floor_or_die "--signoff-min-trend-wg-soak-cross-operator-pairs" "$signoff_min_trend_wg_soak_cross_operator_pairs" 2
+require_one_or_die "--signoff-require-incident-snapshot-on-fail" "$signoff_require_incident_snapshot_on_fail"
+require_one_or_die "--signoff-require-incident-snapshot-artifacts" "$signoff_require_incident_snapshot_artifacts"
+require_int_floor_or_die "--signoff-incident-snapshot-min-attachment-count" "$signoff_incident_snapshot_min_attachment_count" 1
+require_max_skipped_zero_or_die "--signoff-incident-snapshot-max-skipped-count" "$signoff_incident_snapshot_max_skipped_count"
 bool_or_die "--bundle-outputs" "$bundle_outputs"
 bool_or_die "--bundle-fail-close" "$bundle_fail_close"
 

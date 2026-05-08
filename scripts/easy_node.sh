@@ -367,7 +367,9 @@ Usage:
   ./scripts/easy_node.sh gpm-endpoint-posture-remediate [gpm_endpoint_posture_remediate args...]
   ./scripts/easy_node.sh gpm-gap-scan [gpm_gap_scan args...]
   ./scripts/easy_node.sh gpm-logic-check [gpm_logic_check args...]
+  ./scripts/easy_node.sh gpm-wallet-auth-evidence [gpm_wallet_auth_evidence args...]
   ./scripts/easy_node.sh gpm-admin-settlement-live-evidence [gpm_admin_settlement_live_evidence args...]
+  ./scripts/easy_node.sh real-host-ssh-diag --host-a HOST --host-b HOST [real_host_ssh_diag args...]
   ./scripts/easy_node.sh vpn-rc-matrix-path [--reports-dir DIR] [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh vpn-rc-standard-path [--print-report [0|1]] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh vpn-rc-resilience-path [--docker-profile-matrix-timeout-sec N] [--rc-matrix-path-timeout-sec N] [vpn_rc_resilience_path args...]
@@ -518,6 +520,7 @@ Usage:
   ./scripts/easy_node.sh gpm-endpoint-posture-remediate [gpm_endpoint_posture_remediate args...]
   ./scripts/easy_node.sh gpm-gap-scan [gpm_gap_scan args...]
   ./scripts/easy_node.sh gpm-logic-check [gpm_logic_check args...]
+  ./scripts/easy_node.sh gpm-wallet-auth-evidence [gpm_wallet_auth_evidence args...]
   ./scripts/easy_node.sh gpm-admin-settlement-live-evidence [gpm_admin_settlement_live_evidence args...]
   ./scripts/easy_node.sh client-vpn-preflight [--directory-urls URL[,URL...]] [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--issuer-url URL] [--issuer-urls URL[,URL...]] [--entry-url URL] [--exit-url URL] [--prod-profile [0|1]] [--allow-insecure-remote-http [0|1]] [--interface IFACE] [--timeout-sec N] [--require-root [0|1]] [--operator-floor-check [0|1]] [--operator-min-operators N] [--operator-min-entry-operators N] [--operator-min-exit-operators N] [--middle-relay-check [0|1]] [--middle-relay-min-operators N] [--middle-relay-require-distinct [0|1]] [--issuer-quorum-check [0|1]] [--issuer-min-operators N] [--mtls-ca-file PATH] [--mtls-client-cert-file PATH] [--mtls-client-key-file PATH]
   ./scripts/easy_node.sh simple-client-vpn-preflight [--bootstrap-directory URL] [--discovery-wait-sec N] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--prod-profile [0|1]] [--interface IFACE]
@@ -700,7 +703,7 @@ Usage:
   ./scripts/easy_node.sh prod-operator-lifecycle-runbook [--action onboard|offboard] [--mode auto|authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--health-check [0|1]] [--health-timeout-sec N] [--directory-url URL] [--verify-relays [0|1]] [--verify-absent [0|1]] [--verify-relay-timeout-sec N] [--verify-relay-min-count N] [--federation-check [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--federation-timeout-sec N] [--federation-require-configured-healthy [0|1]] [--federation-max-cooling-retry-sec N] [--federation-max-peer-sync-age-sec N] [--federation-max-issuer-sync-age-sec N] [--federation-min-peer-success-sources N] [--federation-min-issuer-success-sources N] [--federation-min-peer-source-operators N] [--federation-min-issuer-source-operators N] [--federation-wait-file PATH] [--federation-wait-file-required [0|1]] [--federation-wait-summary-json PATH] [--federation-wait-print-summary-json [0|1]] [--federation-wait-summary-required [0|1]] [--federation-status-fail-on-not-ready [0|1]] [--federation-status-file PATH] [--federation-status-file-required [0|1]] [--federation-status-summary-json PATH] [--federation-status-summary-required [0|1]] [--onboard-invite [0|1]] [--onboard-invite-count N] [--onboard-invite-tier 1|2|3] [--onboard-invite-wait-sec N] [--onboard-invite-fail-open [0|1]] [--onboard-invite-file PATH] [--rollback-on-fail [0|1]] [--rollback-verify-absent [0|1]] [--rollback-verify-timeout-sec N] [--runtime-doctor-on-fail [0|1]] [--runtime-doctor-base-port N] [--runtime-doctor-client-iface IFACE] [--runtime-doctor-exit-iface IFACE] [--runtime-doctor-vpn-iface IFACE] [--runtime-doctor-file PATH] [--runtime-doctor-file-required [0|1]] [--incident-snapshot-on-fail [0|1]] [--incident-bundle-dir PATH] [--incident-timeout-sec N] [--incident-include-docker-logs [0|1]] [--incident-docker-log-lines N] [--incident-summary-required [0|1]] [--incident-bundle-required [0|1]] [--incident-attachment-manifest-required [0|1]] [--incident-attachment-no-skips-required [0|1]] [--incident-attach-min-count N] [--incident-attachment-manifest-min-count N] [--incident-attach-artifact PATH]... [--report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh incident-snapshot [--bundle-dir PATH] [--mode auto|authority|provider|client] [--env-file PATH] [--directory-url URL] [--issuer-url URL] [--entry-url URL] [--exit-url URL] [--compose-project NAME] [--include-docker-logs [0|1]] [--docker-log-lines N] [--timeout-sec N] [--attach-artifact PATH]...
   ./scripts/easy_node.sh incident-snapshot-summary [--bundle-dir PATH] [--bundle-tar PATH] [--summary-json PATH] [--report-md PATH] [--print-report [0|1]] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh pilot-runbook [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--allow-insecure-remote-http [0|1]] [--client-test-mode docker|local] [--live-evidence-udp-inject [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--bundle-dir PATH] [--record-result [0|1]] [--manual-validation-report [0|1]]
+  ./scripts/easy_node.sh pilot-runbook [--directory-a URL] [--directory-b URL] [--bootstrap-directory URL] [--discovery-wait-sec N] [--issuer-url URL] [--issuer-a-url URL] [--issuer-b-url URL] [--entry-url URL] [--exit-url URL] [--subject ID] [--anon-cred TOKEN] [--rounds N] [--pause-sec N] [--min-sources N] [--min-operators N] [--federation-timeout-sec N] [--timeout-sec N] [--client-min-selection-lines N] [--client-min-entry-operators N] [--client-min-exit-operators N] [--client-require-cross-operator-pair [0|1]] [--path-profile 1hop|2hop|3hop|speed|balanced|private] [--distinct-operators [0|1]] [--distinct-countries [0|1]] [--locality-soft-bias [0|1]] [--country-bias N] [--region-bias N] [--region-prefix-bias N] [--require-issuer-quorum [0|1]] [--allow-insecure-remote-http [0|1]] [--client-test-mode docker|local] [--live-evidence-udp-inject [0|1]] [--beta-profile [0|1]] [--prod-profile [0|1]] [--bundle-dir PATH] [--overwrite-existing-bundle [0|1]] [--record-result [0|1]] [--manual-validation-report [0|1]]
   ./scripts/easy_node.sh invite-generate [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID] [--count N] [--prefix PREFIX] [--tier 1|2|3] [--wait-sec N]
   ./scripts/easy_node.sh invite-check --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
   ./scripts/easy_node.sh invite-disable --key KEY [--issuer-url URL] [--admin-token TOKEN] [--admin-key-file FILE] [--admin-key-id ID]
@@ -726,7 +729,7 @@ Notes:
   - rotate-server-secrets rotates local server secret material in env files; use --restart 1 to apply immediately.
   - server-up --prod-profile enables fail-closed production strict mode (requires mTLS + signed issuer-admin auth).
   - admin-signing-status/admin-signing-rotate are authority-only issuer admin signer maintenance tools.
-  - prod-preflight validates strict prod profile wiring (mTLS material, HTTPS URLs, and authority signer config).
+  - prod-preflight validates strict prod profile wiring (mTLS policy, CA/key/cert fit, public-host SANs, HTTPS URLs, and authority signer config).
   - server-federation-status prints directory peer+sync health (including configured/discovered peer failure streaks), can evaluate strict policy thresholds in one shot, and can emit machine-readable summary JSON for automation/handoff.
   - server-federation-wait blocks until directory peer-sync + issuer-sync quorum and peer-health readiness are met (or timeout), can optionally fail-close on configured-peer degradation/excessive cooldown/stale sync age, and can emit machine-readable summary JSON for automation.
   - client-test runs client-demo with --no-deps (no local server required on the client machine).
@@ -759,7 +762,9 @@ Notes:
   - gpm-endpoint-posture-remediate inspects profile/default gate endpoint posture inputs and prints deterministic remediation commands (report mode by default, apply mode optionally writes idempotent env-file updates and a remediation command script).
   - gpm-gap-scan wraps the GPM gap-scan helper path and preserves pass-through args.
   - gpm-logic-check wraps the GPM logic-check helper path and preserves pass-through args.
+  - gpm-wallet-auth-evidence captures deterministic local Keplr/Leap wallet-auth evidence for secp256k1 binding, alias pubkey types, mismatch rejection, wallet-extension-source policy, and portal wallet-signing contracts.
   - gpm-admin-settlement-live-evidence captures Admin Console settlement evidence against a tdpnd bridge (or local tdpnd with --start-local-tdpnd 1), including objective reward proof, weekly reward finality, reservation/settlement confirmation, and slash-evidence hold/finality guardrails.
+  - real-host-ssh-diag runs layered A/B reachability diagnostics before treating SSH as unreachable: local Tailscale status, Tailscale ping, TCP 2222, SSH key auth, and optional remote repo/docker health.
   - public path-profile contract is `1hop|2hop|3hop` with compatibility aliases `speed|balanced|private` (plus explicit experimental `speed-1hop` alias on non-strict `client-test`/`client-vpn-up` only). Legacy aliases `fast|privacy` are still accepted for compatibility but are deprecated; simple help should surface the preset aliases first and push experimental aliases into expert help.
   - wg-only-local-test runs host real-WireGuard integration checks (Linux + root required).
   - real-wg-privileged-matrix runs the host Linux root real-WG privileged matrix directly.
@@ -4132,8 +4137,10 @@ DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_PUBLIC_BIND=1
 DIRECTORY_ALLOW_INSECURE_CONTROL_URL_HTTP=1
 DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1
 ENTRY_ALLOW_INSECURE_CONTROL_URL_HTTP=1
+ENTRY_ALLOW_DANGEROUS_INSECURE_PUBLIC_BIND=1
 ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1
 EXIT_ALLOW_INSECURE_CONTROL_URL_HTTP=1
+EXIT_ALLOW_DANGEROUS_INSECURE_PUBLIC_BIND=1
 EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1
 ISSUER_ADMIN_ALLOW_TOKEN=1
 ISSUER_ADMIN_REQUIRE_SIGNED=0
@@ -4153,6 +4160,7 @@ ENTRY_OPEN_RPS=12
 ENTRY_BAN_THRESHOLD=3
 ENTRY_BAN_SEC=90
 ENTRY_MAX_CONCURRENT_OPENS=96
+ENTRY_PUZZLE_DIFFICULTY=1
 EXIT_WG_PRIVATE_KEY_PATH=${exit_wg_private_key_path}
 EXIT_WG_PUBKEY=${exit_wg_pubkey}
 EXIT_WG_INTERFACE=${exit_wg_interface}
@@ -4435,8 +4443,10 @@ DIRECTORY_ALLOW_DANGEROUS_INSECURE_ADMIN_PUBLIC_BIND=1
 DIRECTORY_ALLOW_INSECURE_CONTROL_URL_HTTP=1
 DIRECTORY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1
 ENTRY_ALLOW_INSECURE_CONTROL_URL_HTTP=1
+ENTRY_ALLOW_DANGEROUS_INSECURE_PUBLIC_BIND=1
 ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1
 EXIT_ALLOW_INSECURE_CONTROL_URL_HTTP=1
+EXIT_ALLOW_DANGEROUS_INSECURE_PUBLIC_BIND=1
 EXIT_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS=1
 ISSUER_URL=${authority_issuer}
 ISSUER_URLS=${issuer_urls_csv}
@@ -9478,6 +9488,10 @@ three_machine_prod_bundle() {
           shift
         fi
         ;;
+      -h|--help|help)
+        usage || true
+        return 0
+        ;;
       *)
         bundle_args+=("$1")
         shift
@@ -9933,21 +9947,21 @@ prod_gate_signoff() {
   local require_full_sequence="1"
   local require_wg_validate_ok="1"
   local require_wg_soak_ok="1"
-  local require_preflight_ok="0"
-  local require_bundle_ok="0"
-  local require_integrity_ok="0"
-  local require_signoff_ok="0"
-  local require_incident_snapshot_on_fail="0"
-  local require_incident_snapshot_artifacts="0"
-  local incident_snapshot_min_attachment_count="0"
-  local incident_snapshot_max_skipped_count="-1"
-  local require_wg_validate_udp_source="0"
-  local require_wg_validate_strict_distinct="0"
-  local require_wg_soak_diversity_pass="0"
-  local min_wg_soak_selection_lines="0"
-  local min_wg_soak_entry_operators="0"
-  local min_wg_soak_exit_operators="0"
-  local min_wg_soak_cross_operator_pairs="0"
+  local require_preflight_ok="1"
+  local require_bundle_ok="1"
+  local require_integrity_ok="1"
+  local require_signoff_ok="1"
+  local require_incident_snapshot_on_fail="1"
+  local require_incident_snapshot_artifacts="1"
+  local incident_snapshot_min_attachment_count="1"
+  local incident_snapshot_max_skipped_count="0"
+  local require_wg_validate_udp_source="1"
+  local require_wg_validate_strict_distinct="1"
+  local require_wg_soak_diversity_pass="1"
+  local min_wg_soak_selection_lines="12"
+  local min_wg_soak_entry_operators="2"
+  local min_wg_soak_exit_operators="2"
+  local min_wg_soak_cross_operator_pairs="2"
   local max_wg_soak_failed_rounds="0"
   local show_json="0"
 
@@ -11506,8 +11520,18 @@ gpm_logic_check() {
   "$gpm_logic_check_script" "$@"
 }
 
+gpm_wallet_auth_evidence() {
+  local script="${GPM_WALLET_AUTH_EVIDENCE_SCRIPT:-$ROOT_DIR/scripts/gpm_wallet_auth_evidence.sh}"
+  "$script" "$@"
+}
+
 gpm_admin_settlement_live_evidence() {
   local script="${GPM_ADMIN_SETTLEMENT_LIVE_EVIDENCE_SCRIPT:-$ROOT_DIR/scripts/gpm_admin_settlement_live_evidence.sh}"
+  "$script" "$@"
+}
+
+real_host_ssh_diag() {
+  local script="${REAL_HOST_SSH_DIAG_SCRIPT:-$ROOT_DIR/scripts/real_host_ssh_diag.sh}"
   "$script" "$@"
 }
 
@@ -12245,6 +12269,74 @@ cert_not_after_unix() {
     return 1
   fi
   echo "$end_epoch"
+}
+
+cert_public_key_fingerprint() {
+  local cert_file="$1"
+  local fingerprint
+  fingerprint="$(openssl x509 -in "$cert_file" -pubkey -noout 2>/dev/null |
+    openssl pkey -pubin -outform DER 2>/dev/null |
+    openssl dgst -sha256 -r 2>/dev/null |
+    awk '{print $1}')" || return 1
+  [[ -n "$fingerprint" ]] || return 1
+  echo "$fingerprint"
+}
+
+private_key_public_fingerprint() {
+  local key_file="$1"
+  local fingerprint
+  fingerprint="$(openssl pkey -in "$key_file" -pubout -outform DER 2>/dev/null |
+    openssl dgst -sha256 -r 2>/dev/null |
+    awk '{print $1}')" || return 1
+  [[ -n "$fingerprint" ]] || return 1
+  echo "$fingerprint"
+}
+
+cert_matches_private_key() {
+  local cert_file="$1"
+  local key_file="$2"
+  local cert_fp key_fp
+  cert_fp="$(cert_public_key_fingerprint "$cert_file")" || return 1
+  key_fp="$(private_key_public_fingerprint "$key_file")" || return 1
+  [[ "$cert_fp" == "$key_fp" ]]
+}
+
+cert_verifies_with_ca() {
+  local ca_file="$1"
+  local cert_file="$2"
+  openssl verify -CAfile "$ca_file" "$cert_file" >/dev/null 2>&1
+}
+
+cert_verifies_with_purpose() {
+  local ca_file="$1"
+  local cert_file="$2"
+  local purpose="$3"
+  openssl verify -CAfile "$ca_file" -purpose "$purpose" "$cert_file" >/dev/null 2>&1
+}
+
+cert_valid_for_host() {
+  local ca_file="$1"
+  local cert_file="$2"
+  local host="$3"
+  host="${host#[}"
+  host="${host%]}"
+  if [[ -z "$host" ]]; then
+    return 1
+  fi
+  if [[ "$host" == *:* || "$host" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    openssl verify -CAfile "$ca_file" -verify_ip "$host" "$cert_file" >/dev/null 2>&1
+  else
+    openssl verify -CAfile "$ca_file" -verify_hostname "$host" "$cert_file" >/dev/null 2>&1
+  fi
+}
+
+mtls_container_path_to_local() {
+  local path="$1"
+  if [[ "$path" == /app/tls/* ]]; then
+    printf '%s\n' "$DEPLOY_DIR/tls/$(basename "$path")"
+  else
+    printf '%s\n' "$path"
+  fi
 }
 
 file_mode_octal() {
@@ -13073,10 +13165,13 @@ prod_preflight() {
     echo "[fail] $msg"
   }
 
-  local prod_strict beta_strict mtls_enable
+  local prod_strict beta_strict mtls_enable mtls_require_client_cert mtls_min_version mtls_insecure_skip_verify
   prod_strict="$(identity_value "$env_file" "PROD_STRICT_MODE")"
   beta_strict="$(identity_value "$env_file" "BETA_STRICT_MODE")"
   mtls_enable="$(identity_value "$env_file" "MTLS_ENABLE")"
+  mtls_require_client_cert="$(printf '%s' "$(identity_value "$env_file" "MTLS_REQUIRE_CLIENT_CERT")" | tr '[:upper:]' '[:lower:]')"
+  mtls_min_version="$(identity_value "$env_file" "MTLS_MIN_VERSION")"
+  mtls_insecure_skip_verify="$(printf '%s' "$(identity_value "$env_file" "MTLS_INSECURE_SKIP_VERIFY")" | tr '[:upper:]' '[:lower:]')"
   if [[ "$prod_strict" == "1" ]]; then
     check_ok "PROD_STRICT_MODE=1"
   else
@@ -13092,6 +13187,33 @@ prod_preflight() {
   else
     check_fail "MTLS_ENABLE must be 1"
   fi
+  case "$mtls_require_client_cert" in
+    ""|"1"|"true")
+      check_ok "MTLS_REQUIRE_CLIENT_CERT requires client certificates (${mtls_require_client_cert:-default})"
+      ;;
+    *)
+      check_fail "MTLS_REQUIRE_CLIENT_CERT must be 1 or unset in prod profile"
+      ;;
+  esac
+  case "$mtls_min_version" in
+    ""|"1.3")
+      check_ok "MTLS_MIN_VERSION=1.3/default"
+      ;;
+    *)
+      check_fail "MTLS_MIN_VERSION must be 1.3 or unset in prod profile"
+      ;;
+  esac
+  case "$mtls_insecure_skip_verify" in
+    ""|"0"|"false")
+      check_ok "MTLS_INSECURE_SKIP_VERIFY disabled (${mtls_insecure_skip_verify:-default})"
+      ;;
+    "1"|"true")
+      check_fail "MTLS_INSECURE_SKIP_VERIFY must be 0/unset in prod profile"
+      ;;
+    *)
+      check_fail "MTLS_INSECURE_SKIP_VERIFY invalid in prod profile"
+      ;;
+  esac
 
   local public_urls=()
   local directory_public_url entry_public_url exit_public_url
@@ -13120,26 +13242,41 @@ prod_preflight() {
   done
 
   local ca_file cert_file key_file client_cert_file client_key_file
-  ca_file="$(identity_value "$env_file" "EASY_NODE_MTLS_CA_FILE_LOCAL")"
-  cert_file="$(identity_value "$env_file" "MTLS_CERT_FILE")"
-  key_file="$(identity_value "$env_file" "MTLS_KEY_FILE")"
-  client_cert_file="$(identity_value "$env_file" "EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL")"
-  client_key_file="$(identity_value "$env_file" "EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL")"
+  local local_client_cert_file local_client_key_file
+  ca_file="$(identity_value "$env_file" "MTLS_CA_FILE")"
+  [[ -z "$ca_file" ]] && ca_file="$(identity_value "$env_file" "EASY_NODE_MTLS_CA_FILE_LOCAL")"
+  cert_file="$(identity_value "$env_file" "MTLS_SERVER_CERT_FILE")"
+  [[ -z "$cert_file" ]] && cert_file="$(identity_value "$env_file" "MTLS_CERT_FILE")"
+  key_file="$(identity_value "$env_file" "MTLS_SERVER_KEY_FILE")"
+  [[ -z "$key_file" ]] && key_file="$(identity_value "$env_file" "MTLS_KEY_FILE")"
+  client_cert_file="$(identity_value "$env_file" "MTLS_CLIENT_CERT_FILE")"
+  [[ -z "$client_cert_file" ]] && client_cert_file="$(identity_value "$env_file" "MTLS_CERT_FILE")"
+  client_key_file="$(identity_value "$env_file" "MTLS_CLIENT_KEY_FILE")"
+  [[ -z "$client_key_file" ]] && client_key_file="$(identity_value "$env_file" "MTLS_KEY_FILE")"
+  local_client_cert_file="$(identity_value "$env_file" "EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL")"
+  local_client_key_file="$(identity_value "$env_file" "EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL")"
   [[ -z "$ca_file" ]] && ca_file="$DEPLOY_DIR/tls/ca.crt"
-  if [[ -z "$cert_file" ]]; then
-    cert_file="$DEPLOY_DIR/tls/node.crt"
-  elif [[ "$cert_file" == /app/tls/* ]]; then
-    cert_file="$DEPLOY_DIR/tls/$(basename "$cert_file")"
-  fi
-  if [[ -z "$key_file" ]]; then
-    key_file="$DEPLOY_DIR/tls/node.key"
-  elif [[ "$key_file" == /app/tls/* ]]; then
-    key_file="$DEPLOY_DIR/tls/$(basename "$key_file")"
-  fi
+  [[ -z "$cert_file" ]] && cert_file="$DEPLOY_DIR/tls/node.crt"
+  [[ -z "$key_file" ]] && key_file="$DEPLOY_DIR/tls/node.key"
   [[ -z "$client_cert_file" ]] && client_cert_file="$DEPLOY_DIR/tls/client.crt"
   [[ -z "$client_key_file" ]] && client_key_file="$DEPLOY_DIR/tls/client.key"
+  ca_file="$(mtls_container_path_to_local "$ca_file")"
+  cert_file="$(mtls_container_path_to_local "$cert_file")"
+  key_file="$(mtls_container_path_to_local "$key_file")"
+  client_cert_file="$(mtls_container_path_to_local "$client_cert_file")"
+  client_key_file="$(mtls_container_path_to_local "$client_key_file")"
+  [[ -n "$local_client_cert_file" ]] && local_client_cert_file="$(mtls_container_path_to_local "$local_client_cert_file")"
+  [[ -n "$local_client_key_file" ]] && local_client_key_file="$(mtls_container_path_to_local "$local_client_key_file")"
 
-  local required_files=("$ca_file" "$cert_file" "$key_file" "$client_cert_file" "$client_key_file")
+  local required_files=("$ca_file" "$cert_file" "$key_file")
+  [[ "$client_cert_file" != "$cert_file" ]] && required_files+=("$client_cert_file")
+  [[ "$client_key_file" != "$key_file" ]] && required_files+=("$client_key_file")
+  if [[ -n "$local_client_cert_file" || -n "$local_client_key_file" ]]; then
+    [[ -z "$local_client_cert_file" ]] && local_client_cert_file="$DEPLOY_DIR/tls/client.crt"
+    [[ -z "$local_client_key_file" ]] && local_client_key_file="$DEPLOY_DIR/tls/client.key"
+    [[ "$local_client_cert_file" != "$cert_file" && "$local_client_cert_file" != "$client_cert_file" ]] && required_files+=("$local_client_cert_file")
+    [[ "$local_client_key_file" != "$key_file" && "$local_client_key_file" != "$client_key_file" ]] && required_files+=("$local_client_key_file")
+  fi
   local f
   for f in "${required_files[@]}"; do
     if [[ -f "$f" ]]; then
@@ -13148,6 +13285,79 @@ prod_preflight() {
       check_fail "missing file: $f"
     fi
   done
+  if [[ -f "$ca_file" && -f "$cert_file" ]]; then
+    if cert_verifies_with_ca "$ca_file" "$cert_file"; then
+      check_ok "mTLS node certificate verifies against CA"
+    else
+      check_fail "mTLS node certificate does not verify against configured CA"
+    fi
+    if cert_verifies_with_purpose "$ca_file" "$cert_file" "sslserver"; then
+      check_ok "mTLS node certificate allows server authentication"
+    else
+      check_fail "mTLS node certificate missing serverAuth usage"
+    fi
+  fi
+  if [[ -f "$ca_file" && -f "$client_cert_file" ]]; then
+    if cert_verifies_with_ca "$ca_file" "$client_cert_file"; then
+      check_ok "mTLS client certificate verifies against CA"
+    else
+      check_fail "mTLS client certificate does not verify against configured CA"
+    fi
+    if cert_verifies_with_purpose "$ca_file" "$client_cert_file" "sslclient"; then
+      check_ok "mTLS client certificate allows client authentication"
+    else
+      check_fail "mTLS client certificate missing clientAuth usage"
+    fi
+  fi
+  if [[ -f "$cert_file" && -f "$key_file" ]]; then
+    if cert_matches_private_key "$cert_file" "$key_file"; then
+      check_ok "mTLS node certificate matches private key"
+    else
+      check_fail "mTLS node certificate does not match private key"
+    fi
+  fi
+  if [[ -f "$client_cert_file" && -f "$client_key_file" ]]; then
+    if cert_matches_private_key "$client_cert_file" "$client_key_file"; then
+      check_ok "mTLS client certificate matches private key"
+    else
+      check_fail "mTLS client certificate does not match private key"
+    fi
+  fi
+  if [[ -n "$local_client_cert_file" || -n "$local_client_key_file" ]]; then
+    if [[ -f "$ca_file" && -f "$local_client_cert_file" ]]; then
+      if cert_verifies_with_ca "$ca_file" "$local_client_cert_file"; then
+        check_ok "mTLS local client certificate verifies against CA"
+      else
+        check_fail "mTLS local client certificate does not verify against configured CA"
+      fi
+      if cert_verifies_with_purpose "$ca_file" "$local_client_cert_file" "sslclient"; then
+        check_ok "mTLS local client certificate allows client authentication"
+      else
+        check_fail "mTLS local client certificate missing clientAuth usage"
+      fi
+    fi
+    if [[ -f "$local_client_cert_file" && -f "$local_client_key_file" ]]; then
+      if cert_matches_private_key "$local_client_cert_file" "$local_client_key_file"; then
+        check_ok "mTLS local client certificate matches private key"
+      else
+        check_fail "mTLS local client certificate does not match private key"
+      fi
+    fi
+  fi
+  if [[ -f "$ca_file" && -f "$cert_file" ]]; then
+    for u in "${public_urls[@]}"; do
+      local mtls_public_host
+      mtls_public_host="$(host_from_url "$u")"
+      if [[ -z "$mtls_public_host" ]]; then
+        continue
+      fi
+      if cert_valid_for_host "$ca_file" "$cert_file" "$mtls_public_host"; then
+        check_ok "mTLS node certificate SAN covers public host: $mtls_public_host"
+      else
+        check_fail "mTLS node certificate SAN does not cover public host: $mtls_public_host"
+      fi
+    done
+  fi
 
   local directory_admin_token entry_puzzle_secret
   directory_admin_token="$(identity_value "$env_file" "DIRECTORY_ADMIN_TOKEN")"
@@ -13410,7 +13620,9 @@ prod_preflight() {
     check_fail "ENTRY_EXIT_PRIVILEGED must be true/1 in prod profile"
   fi
 
-  local private_files=("$env_file" "$key_file" "$client_key_file")
+  local private_files=("$env_file" "$key_file")
+  [[ "$client_key_file" != "$key_file" ]] && private_files+=("$client_key_file")
+  [[ -n "$local_client_key_file" && "$local_client_key_file" != "$key_file" && "$local_client_key_file" != "$client_key_file" ]] && private_files+=("$local_client_key_file")
   local pf pf_mode
   for pf in "${private_files[@]}"; do
     if [[ ! -f "$pf" ]]; then
@@ -13434,7 +13646,9 @@ prod_preflight() {
   local now_epoch min_epoch
   now_epoch="$(date -u +%s)"
   min_epoch=$((now_epoch + days_min * 86400))
-  local certs_to_check=("$ca_file" "$cert_file" "$client_cert_file")
+  local certs_to_check=("$ca_file" "$cert_file")
+  [[ "$client_cert_file" != "$cert_file" ]] && certs_to_check+=("$client_cert_file")
+  [[ -n "$local_client_cert_file" && "$local_client_cert_file" != "$cert_file" && "$local_client_cert_file" != "$client_cert_file" ]] && certs_to_check+=("$local_client_cert_file")
   for f in "${certs_to_check[@]}"; do
     if [[ ! -f "$f" ]]; then
       continue
@@ -14738,7 +14952,11 @@ EOF_CLIENT
 
     (
       cd "$ROOT_DIR"
-      timeout --foreground -k 10s "${timeout_sec}s" "${local_cmd[@]}" >"$out" 2>&1
+      # Do not use --foreground here: `go run` starts the compiled client as a
+      # child process, and foreground timeout only signals the wrapper. The
+      # default timeout process group handling prevents orphaned client loops
+      # from continuing to open paths after the test round has already passed.
+      timeout -k 10s "${timeout_sec}s" "${local_cmd[@]}" >"$out" 2>&1
     ) || true
   fi
 
@@ -14837,7 +15055,7 @@ EOF_CLIENT
     echo "client test: ok"
     echo "client test log: $out"
     echo "key log lines:"
-    rg 'client selected entry=|client received wg-session config|client wireguard runtime ready|client wg-kernel proxy listening|bootstrap failed' "$out" || true
+    rg 'client selected entry=|client received wg-session config|client wireguard runtime ready|client wireguard traffic verified|client wg-kernel proxy listening|client wg-kernel proxy uplink observed|bootstrap failed' "$out" || true
     cleanup_client_test_subject_file
     return 0
   fi
@@ -16369,28 +16587,19 @@ client_vpn_down() {
 
   local state_file
   state_file="$(client_vpn_state_file)"
-  local pid="" iface="" key_file=""
+  local pid="" iface="" key_file="" process_group="0"
   if [[ -f "$state_file" ]]; then
     pid="$(identity_value "$state_file" "CLIENT_VPN_PID")"
     iface="$(identity_value "$state_file" "CLIENT_VPN_IFACE")"
     key_file="$(identity_value "$state_file" "CLIENT_VPN_KEY_FILE")"
+    process_group="$(identity_value "$state_file" "CLIENT_VPN_PROCESS_GROUP")"
   fi
   if [[ -n "$iface_override" ]]; then
     iface="$iface_override"
   fi
 
-  if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
-    kill "$pid" >/dev/null 2>&1 || true
-    local i
-    for i in $(seq 1 20); do
-      if ! kill -0 "$pid" >/dev/null 2>&1; then
-        break
-      fi
-      sleep 0.2
-    done
-    if kill -0 "$pid" >/dev/null 2>&1; then
-      kill -9 "$pid" >/dev/null 2>&1 || true
-    fi
+  if [[ -n "$pid" ]] && client_vpn_process_alive "$pid" "$process_group"; then
+    client_vpn_stop_pid "$pid" "$process_group"
     echo "client-vpn process stopped (pid=$pid)"
   fi
 
@@ -16410,6 +16619,43 @@ client_vpn_down() {
     rm -f "$key_file"
   fi
   echo "client-vpn state cleared"
+}
+
+client_vpn_process_alive() {
+  local pid="${1:-}" process_group="${2:-0}"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  if [[ "$process_group" == "1" ]] && kill -0 -- "-$pid" >/dev/null 2>&1; then
+    return 0
+  fi
+  kill -0 "$pid" >/dev/null 2>&1
+}
+
+client_vpn_signal_pid() {
+  local pid="${1:-}" process_group="${2:-0}" signal="${3:-TERM}"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  if [[ "$process_group" == "1" ]]; then
+    kill "-$signal" -- "-$pid" >/dev/null 2>&1 || kill "-$signal" "$pid" >/dev/null 2>&1 || return 1
+    return 0
+  fi
+  kill "-$signal" "$pid" >/dev/null 2>&1
+}
+
+client_vpn_stop_pid() {
+  local pid="${1:-}" process_group="${2:-0}"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 0
+  if client_vpn_process_alive "$pid" "$process_group"; then
+    client_vpn_signal_pid "$pid" "$process_group" TERM || true
+    local i
+    for i in $(seq 1 20); do
+      if ! client_vpn_process_alive "$pid" "$process_group"; then
+        break
+      fi
+      sleep 0.2
+    done
+    if client_vpn_process_alive "$pid" "$process_group"; then
+      client_vpn_signal_pid "$pid" "$process_group" KILL || true
+    fi
+  fi
 }
 
 client_vpn_trust_reset() {
@@ -18549,6 +18795,7 @@ client_vpn_up() {
   fi
 
   local pid=""
+  local process_group="0"
   local pid_tmp
   pid_tmp="$(mktemp)"
   (
@@ -18557,13 +18804,21 @@ client_vpn_up() {
     for env_kv in "${env_vars[@]}"; do
       export "$env_kv"
     done
-    nohup go run ./cmd/node --client >"$log_file" 2>&1 &
+    if command -v setsid >/dev/null 2>&1; then
+      process_group="1"
+      nohup setsid bash -c 'exec go run ./cmd/node --client' >"$log_file" 2>&1 &
+    else
+      nohup bash -c 'exec go run ./cmd/node --client' >"$log_file" 2>&1 &
+    fi
     echo "$!" >"$pid_tmp"
+    echo "$process_group" >"${pid_tmp}.pg"
   )
   pid="$(cat "$pid_tmp")"
+  process_group="$(cat "${pid_tmp}.pg" 2>/dev/null || printf '0')"
   rm -f "$pid_tmp"
+  rm -f "${pid_tmp}.pg"
 
-  if [[ -z "$pid" ]] || ! kill -0 "$pid" >/dev/null 2>&1; then
+  if [[ -z "$pid" ]] || ! client_vpn_process_alive "$pid" "$process_group"; then
     echo "client-vpn failed to start; log follows:"
     cat "$log_file"
     cleanup_client_vpn_startup_failure
@@ -18573,14 +18828,14 @@ client_vpn_up() {
   local ready=0
   local i
   for i in $(seq 1 "$ready_timeout_sec"); do
-    if ! kill -0 "$pid" >/dev/null 2>&1; then
+    if ! client_vpn_process_alive "$pid" "$process_group"; then
       echo "client-vpn exited before tunnel became ready"
       cat "$log_file"
       print_client_vpn_trust_mismatch_hint "$log_file" "$trusted_keys_file" "$trust_scope_mode"
       cleanup_client_vpn_startup_failure
       exit 1
     fi
-    if rg -q "client wireguard runtime ready:|client wg-kernel proxy listening:" "$log_file"; then
+    if rg -q "client wireguard traffic verified:|client wg-kernel proxy uplink observed:" "$log_file"; then
       ready=1
       break
     fi
@@ -18591,7 +18846,7 @@ client_vpn_up() {
     echo "log: $log_file"
     tail -n 120 "$log_file" || true
     print_client_vpn_trust_mismatch_hint "$log_file" "$trusted_keys_file" "$trust_scope_mode"
-    kill "$pid" >/dev/null 2>&1 || true
+    client_vpn_stop_pid "$pid" "$process_group"
     wait "$pid" >/dev/null 2>&1 || true
     ip link delete "$interface_name" >/dev/null 2>&1 || true
     cleanup_runtime_subject_file
@@ -18603,7 +18858,7 @@ client_vpn_up() {
   if [[ -z "$exit_wg_pub" ]]; then
     echo "client-vpn could not parse exit wg pubkey from session config"
     tail -n 120 "$log_file" || true
-    kill "$pid" >/dev/null 2>&1 || true
+    client_vpn_stop_pid "$pid" "$process_group"
     wait "$pid" >/dev/null 2>&1 || true
     ip link delete "$interface_name" >/dev/null 2>&1 || true
     cleanup_runtime_subject_file
@@ -18612,7 +18867,7 @@ client_vpn_up() {
   if ! is_valid_wg_public_key "$exit_wg_pub"; then
     echo "client-vpn received invalid exit wg pubkey in session config: $exit_wg_pub"
     tail -n 120 "$log_file" || true
-    kill "$pid" >/dev/null 2>&1 || true
+    client_vpn_stop_pid "$pid" "$process_group"
     wait "$pid" >/dev/null 2>&1 || true
     ip link delete "$interface_name" >/dev/null 2>&1 || true
     cleanup_runtime_subject_file
@@ -18621,7 +18876,7 @@ client_vpn_up() {
 
   if ! ip link show dev "$interface_name" >/dev/null 2>&1; then
     echo "client-vpn missing interface after session config: $interface_name"
-    kill "$pid" >/dev/null 2>&1 || true
+    client_vpn_stop_pid "$pid" "$process_group"
     wait "$pid" >/dev/null 2>&1 || true
     cleanup_runtime_subject_file
     exit 1
@@ -18629,8 +18884,9 @@ client_vpn_up() {
 
   cleanup_runtime_subject_file
 
-  cat >"$state_file" <<EOF_STATE
+cat >"$state_file" <<EOF_STATE
 CLIENT_VPN_PID=$pid
+CLIENT_VPN_PROCESS_GROUP=$process_group
 CLIENT_VPN_IFACE=$interface_name
 CLIENT_VPN_LOG_FILE=$log_file
 CLIENT_VPN_STATUS_FILE=$status_file
@@ -19101,9 +19357,17 @@ main() {
       shift
       gpm_logic_check "$@"
       ;;
+    gpm-wallet-auth-evidence)
+      shift
+      gpm_wallet_auth_evidence "$@"
+      ;;
     gpm-admin-settlement-live-evidence)
       shift
       gpm_admin_settlement_live_evidence "$@"
+      ;;
+    real-host-ssh-diag)
+      shift
+      real_host_ssh_diag "$@"
       ;;
     client-vpn-preflight)
       shift

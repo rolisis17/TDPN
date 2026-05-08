@@ -102,21 +102,35 @@ func (st *gpmRuntimeState) restorePersistent(now time.Time, sessions []gpmSessio
 
 	st.sessions = map[string]gpmSession{}
 	for _, session := range sessions {
-		if strings.TrimSpace(session.Token) == "" {
+		token := strings.TrimSpace(session.Token)
+		if token == "" {
 			continue
 		}
 		if now.After(session.ExpiresAt) {
 			continue
 		}
-		st.sessions[session.Token] = session
+		if gpmSessionMaxEntries > 0 && len(st.sessions) >= gpmSessionMaxEntries {
+			continue
+		}
+		wallet := normalizeWalletAddress(session.WalletAddress)
+		if wallet != "" && gpmSessionMaxEntriesPerWallet > 0 && st.sessionCountForWalletLocked(wallet) >= gpmSessionMaxEntriesPerWallet {
+			continue
+		}
+		session.Token = token
+		session.WalletAddress = wallet
+		st.sessions[token] = session
 	}
 
 	st.operators = map[string]gpmOperatorApplication{}
 	for _, operator := range operators {
-		wallet := strings.TrimSpace(operator.WalletAddress)
+		wallet := normalizeWalletAddress(operator.WalletAddress)
 		if wallet == "" {
 			continue
 		}
+		if gpmOperatorApplicationMaxEntries > 0 && len(st.operators) >= gpmOperatorApplicationMaxEntries {
+			continue
+		}
+		operator.WalletAddress = wallet
 		st.operators[wallet] = operator
 	}
 
@@ -124,6 +138,9 @@ func (st *gpmRuntimeState) restorePersistent(now time.Time, sessions []gpmSessio
 	for _, contribution := range contributions {
 		wallet := normalizeWalletAddress(contribution.WalletAddress)
 		if wallet == "" {
+			continue
+		}
+		if gpmContributionMaxEntries > 0 && len(st.contributions) >= gpmContributionMaxEntries {
 			continue
 		}
 		contribution.WalletAddress = wallet
@@ -136,6 +153,9 @@ func (st *gpmRuntimeState) restorePersistent(now time.Time, sessions []gpmSessio
 		if wallet == "" {
 			continue
 		}
+		if len(st.rewardHistory[wallet]) >= 52 {
+			continue
+		}
 		summary.WalletAddress = wallet
 		st.rewardHistory[wallet] = append(st.rewardHistory[wallet], summary)
 	}
@@ -144,6 +164,9 @@ func (st *gpmRuntimeState) restorePersistent(now time.Time, sessions []gpmSessio
 	for _, hold := range rewardHolds {
 		wallet := normalizeWalletAddress(hold.WalletAddress)
 		if wallet == "" || strings.TrimSpace(hold.WeekStartUTC) == "" {
+			continue
+		}
+		if len(st.rewardHolds[wallet]) >= 256 {
 			continue
 		}
 		hold.WalletAddress = wallet
@@ -173,6 +196,9 @@ func (st *gpmRuntimeState) restorePersistent(now time.Time, sessions []gpmSessio
 		}
 		if status == "pending_launch" && claim.ClaimedAt.IsZero() {
 			status = "launched"
+		}
+		if gpmReservationClaimMaxEntries > 0 && len(st.reservationClaims) >= gpmReservationClaimMaxEntries {
+			continue
 		}
 		claim.ReservationID = reservationID
 		claim.WalletAddress = wallet

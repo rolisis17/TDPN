@@ -18,7 +18,32 @@ if [[ ! -x "$RUNNER" ]]; then
 fi
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+CREATED_DEFAULT_SUMMARY_FILES=()
+cleanup() {
+  rm -rf "$TMP_DIR"
+  local file
+  for file in "${CREATED_DEFAULT_SUMMARY_FILES[@]}"; do
+    rm -f "$file"
+  done
+}
+trap cleanup EXIT
+
+ensure_default_summary_file() {
+  local path="$1"
+  if [[ -f "$path" ]]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "$path")"
+  printf '{"integration_default_summary":true}\n' >"$path"
+  CREATED_DEFAULT_SUMMARY_FILES+=("$path")
+}
+
+DEFAULT_PHASE6_CONTRACTS_SUMMARY="$ROOT_DIR/.easy-node-logs/phase6_cosmos_l1_contracts_summary.json"
+DEFAULT_MAINNET_ACTIVATION_GATE_SUMMARY="$ROOT_DIR/.easy-node-logs/blockchain_mainnet_activation_gate_summary.json"
+DEFAULT_BOOTSTRAP_GRADUATION_GATE_SUMMARY="$ROOT_DIR/.easy-node-logs/blockchain_bootstrap_governance_graduation_gate_summary.json"
+ensure_default_summary_file "$DEFAULT_PHASE6_CONTRACTS_SUMMARY"
+ensure_default_summary_file "$DEFAULT_MAINNET_ACTIVATION_GATE_SUMMARY"
+ensure_default_summary_file "$DEFAULT_BOOTSTRAP_GRADUATION_GATE_SUMMARY"
 
 CAPTURE="$TMP_DIR/stage_capture.tsv"
 PASS_LOG="$TMP_DIR/pass.log"
@@ -180,6 +205,21 @@ assert_single_check_invocation "$CAPTURE"
 check_line="$(grep '^check	' "$CAPTURE" | tail -n 1 || true)"
 if [[ "$check_line" != *"--summary-json $TMP_DIR/check_pass_summary.json"* || "$check_line" != *"--alpha 7"* ]]; then
   echo "pass path forwarding mismatch"
+  echo "$check_line"
+  exit 1
+fi
+if [[ "$check_line" != *"--phase6-contracts-summary-json $DEFAULT_PHASE6_CONTRACTS_SUMMARY"* ]]; then
+  echo "pass path missing default phase6 contracts summary forwarding"
+  echo "$check_line"
+  exit 1
+fi
+if [[ "$check_line" != *"--mainnet-activation-gate-summary-json $DEFAULT_MAINNET_ACTIVATION_GATE_SUMMARY"* ]]; then
+  echo "pass path missing default mainnet activation gate summary forwarding"
+  echo "$check_line"
+  exit 1
+fi
+if [[ "$check_line" != *"--bootstrap-governance-graduation-gate-summary-json $DEFAULT_BOOTSTRAP_GRADUATION_GATE_SUMMARY"* ]]; then
+  echo "pass path missing default bootstrap governance graduation summary forwarding"
   echo "$check_line"
   exit 1
 fi

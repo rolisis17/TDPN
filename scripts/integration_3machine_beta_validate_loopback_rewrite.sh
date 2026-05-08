@@ -99,6 +99,11 @@ if [[ "${FAKE_EASY_REJECT_REMOTE_HTTP_WITHOUT_FLAG:-0}" == "1" && "$allow_insecu
     exit 22
   fi
 fi
+if [[ "${FAKE_EASY_EXIT_AFTER_OK:-0}" == "1" ]]; then
+  echo "client test: ok"
+  echo "client test log: /tmp/fake_easy_node_client_test.log"
+  exit 2
+fi
 exit 0
 EOF_EASY
 
@@ -406,6 +411,41 @@ fi
 if [[ -s "$CAPTURE" ]]; then
   echo "prod rejection should happen before client-test"
   cat "$CAPTURE"
+  exit 1
+fi
+
+echo "[3machine-beta-validate-loopback] client rc after ok is diagnosed"
+: >"$CAPTURE"
+set +e
+FAKE_CAPTURE_FILE="$CAPTURE" \
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_SH="$FAKE_EASY" \
+FAKE_EASY_EXIT_AFTER_OK=1 \
+./scripts/integration_3machine_beta_validate.sh \
+  --directory-a http://127.0.0.1:18081 \
+  --directory-b http://127.0.0.1:28081 \
+  --issuer-url http://127.0.0.1:18082 \
+  --entry-url http://127.0.0.1:18083 \
+  --exit-url http://127.0.0.1:18084 \
+  --min-sources 1 \
+  --min-operators 1 \
+  --federation-timeout-sec 5 \
+  --timeout-sec 5 \
+  --distinct-operators 0 \
+  --require-issuer-quorum 0 \
+  --beta-profile 0 \
+  --prod-profile 0 >/tmp/integration_3machine_beta_validate_client_rc_after_ok.log 2>&1
+client_rc_after_ok=$?
+set -e
+if ((client_rc_after_ok != 2)); then
+  echo "client rc-after-ok scenario should preserve the client rc"
+  cat "$CAPTURE"
+  cat /tmp/integration_3machine_beta_validate_client_rc_after_ok.log
+  exit 1
+fi
+if ! rg -q 'client validation command failed rc=2' /tmp/integration_3machine_beta_validate_client_rc_after_ok.log; then
+  echo "client rc-after-ok scenario should emit the explicit rc diagnostic"
+  cat /tmp/integration_3machine_beta_validate_client_rc_after_ok.log
   exit 1
 fi
 

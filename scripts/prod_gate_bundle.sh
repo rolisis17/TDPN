@@ -48,6 +48,33 @@ json_string_field() {
   sed -nE "s/^[[:space:]]*\"${key}\":[[:space:]]*\"([^\"]*)\".*/\1/p" "$file" | head -n1
 }
 
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+abs_path() {
+  local path="$1"
+  path="$(trim "$path")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+  elif [[ "$path" =~ ^[A-Za-z]:[\\/] ]]; then
+    if command -v wslpath >/dev/null 2>&1; then
+      wslpath -u "$path"
+    elif command -v cygpath >/dev/null 2>&1; then
+      cygpath -u "$path"
+    else
+      printf '%s' "$path"
+    fi
+  elif [[ "$path" == /* ]]; then
+    printf '%s' "$path"
+  else
+    printf '%s' "$ROOT_DIR/$path"
+  fi
+}
+
 bool_arg_or_die() {
   local name="$1"
   local value="$2"
@@ -55,6 +82,17 @@ bool_arg_or_die() {
     echo "$name must be 0 or 1"
     exit 2
   fi
+}
+
+redact_sensitive_stream() {
+  sed -E '
+s/(--(subject|anon-cred|campaign-subject|campaign-anon-cred|invite-key|key|token|auth-token|admin-token|authorization|bearer|password|secret|api-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g
+s/((SUBJECT|ANON_CRED|INVITE_KEY|TOKEN|AUTH_TOKEN|ADMIN_TOKEN|AUTHORIZATION|BEARER|PASSWORD|SECRET|API_KEY)=)[^[:space:]]+/\1[redacted]/g
+s/((Authorization|X-Admin-Token):[[:space:]]*(Bearer[[:space:]]*)?)[^[:space:]]+/\1[redacted]/Ig
+s~([A-Za-z][A-Za-z0-9+.-]*://)[^/?#@[:space:]]+@~\1[redacted]@~g
+s~([?&#](subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|auth_token|admin_token|authorization|bearer|password|secret)=)[^,&#[:space:]]+~\1[redacted]~Ig
+s/inv-[A-Za-z0-9._:-]+/[redacted-invite]/g
+'
 }
 
 sha256_tool=""
@@ -254,10 +292,13 @@ if [[ ! "$signoff_min_wg_soak_cross_operator_pairs" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-for cmd in bash tar cp date tee find sort grep; do
+for cmd in bash tar cp date tee find sort grep sed mv; do
   need_cmd "$cmd"
 done
 detect_sha256_tool
+
+GATE_SCRIPT="$(abs_path "$GATE_SCRIPT")"
+CHECK_SCRIPT="$(abs_path "$CHECK_SCRIPT")"
 
 if [[ ! -x "$GATE_SCRIPT" ]]; then
   echo "missing executable gate script: $GATE_SCRIPT"
@@ -266,12 +307,14 @@ fi
 
 if [[ -z "$bundle_dir" ]]; then
   bundle_dir="$(default_log_dir)/prod_gate_bundle_$(date +%Y%m%d_%H%M%S)"
+else
+  bundle_dir="$(abs_path "$bundle_dir")"
 fi
 mkdir -p "$bundle_dir"
 bundle_dir="$(cd "$bundle_dir" && pwd)"
 
 bundle_log="$bundle_dir/prod_gate_bundle.log"
-exec > >(tee -a "$bundle_log") 2>&1
+exec > >(redact_sensitive_stream | tee -a "$bundle_log") 2>&1
 
 started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 report_file="$bundle_dir/prod_gate.log"
@@ -323,6 +366,15 @@ fi
 if [[ -n "$step_logs_dir" && -d "$step_logs_dir" ]]; then
   mkdir -p "$bundle_dir/step_logs"
   cp -a "$step_logs_dir"/. "$bundle_dir/step_logs/"
+  while IFS= read -r copied_step_log; do
+    [[ -f "$copied_step_log" ]] || continue
+    tmp_redacted_step_log="${copied_step_log}.redacted.$$"
+    if redact_sensitive_stream <"$copied_step_log" >"$tmp_redacted_step_log"; then
+      mv "$tmp_redacted_step_log" "$copied_step_log"
+    else
+      rm -f "$tmp_redacted_step_log" >/dev/null 2>&1 || true
+    fi
+  done < <(find "$bundle_dir/step_logs" -type f -print)
   echo "[prod-gate-bundle] copied step logs from: $step_logs_dir"
 else
   echo "[prod-gate-bundle] note: step logs directory not found (${step_logs_dir:-unset})"

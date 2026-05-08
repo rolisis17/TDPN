@@ -516,7 +516,7 @@ if [[ "$(jq -r '.rounds.stopped_early' "$FAIL_SUMMARY")" != "true" ]]; then
   exit 1
 fi
 
-echo "[prod-pilot-cohort] pre-real-host readiness deferred-no-root continue path"
+echo "[prod-pilot-cohort] pre-real-host readiness deferred-no-root blocks"
 PRE_DEFER_SUMMARY="$TMP_DIR/pre_defer_summary.json"
 PRE_DEFER_REPORTS_DIR="$TMP_DIR/pre_defer_reports"
 : >"$PILOT_CAPTURE"
@@ -524,6 +524,7 @@ PRE_DEFER_REPORTS_DIR="$TMP_DIR/pre_defer_reports"
 : >"$ALERT_CAPTURE"
 : >"$PRE_READINESS_CAPTURE"
 rm -f "$PILOT_COUNTER"
+set +e
 PILOT_CAPTURE_FILE="$PILOT_CAPTURE" \
 TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
@@ -547,13 +548,26 @@ FAKE_PRE_READINESS_NOTES='pre-real-host readiness requires root privileges (reru
   --require-all-rounds-ok 1 \
   --reports-dir "$PRE_DEFER_REPORTS_DIR" \
   --summary-json "$PRE_DEFER_SUMMARY" >/tmp/integration_prod_pilot_cohort_runbook_pre_defer.log 2>&1
+pre_defer_rc=$?
+set -e
+if [[ "$pre_defer_rc" -eq 0 ]]; then
+  echo "prod-pilot-cohort pre-real-host deferred path should fail closed"
+  cat /tmp/integration_prod_pilot_cohort_runbook_pre_defer.log
+  cat "$PRE_DEFER_SUMMARY" 2>/dev/null || true
+  exit 1
+fi
 if [[ ! -f "$PRE_DEFER_SUMMARY" ]]; then
   echo "prod-pilot-cohort pre-real-host deferred path did not produce summary json"
   cat /tmp/integration_prod_pilot_cohort_runbook_pre_defer.log
   exit 1
 fi
-if [[ "$(jq -r '.status' "$PRE_DEFER_SUMMARY")" != "ok" ]]; then
-  echo "prod-pilot-cohort pre-real-host deferred summary expected status=ok"
+if [[ "$(jq -r '.status' "$PRE_DEFER_SUMMARY")" != "fail" ]]; then
+  echo "prod-pilot-cohort pre-real-host deferred summary expected status=fail"
+  cat "$PRE_DEFER_SUMMARY"
+  exit 1
+fi
+if [[ "$(jq -r '.failure_step' "$PRE_DEFER_SUMMARY")" != "pre_real_host_readiness" ]]; then
+  echo "prod-pilot-cohort pre-real-host deferred summary expected failure_step=pre_real_host_readiness"
   cat "$PRE_DEFER_SUMMARY"
   exit 1
 fi
@@ -567,8 +581,8 @@ if [[ "$(jq -r '.pre_real_host_readiness.defer_no_root' "$PRE_DEFER_SUMMARY")" !
   cat "$PRE_DEFER_SUMMARY"
   exit 1
 fi
-if [[ "$(jq -r '.rounds.attempted' "$PRE_DEFER_SUMMARY")" != "2" ]]; then
-  echo "prod-pilot-cohort pre-real-host deferred summary expected rounds.attempted=2"
+if [[ "$(jq -r '.rounds.attempted' "$PRE_DEFER_SUMMARY")" != "0" ]]; then
+  echo "prod-pilot-cohort pre-real-host deferred summary expected rounds.attempted=0"
   cat "$PRE_DEFER_SUMMARY"
   exit 1
 fi
@@ -577,8 +591,9 @@ if [[ "$(rg -c -- '--defer-no-root 1' "$PRE_READINESS_CAPTURE")" -ne 1 ]]; then
   cat "$PRE_READINESS_CAPTURE"
   exit 1
 fi
-if [[ "$(rg -c '^--bundle-dir ' "$PILOT_CAPTURE")" -ne 2 ]]; then
-  echo "prod-pilot-cohort pre-real-host deferred path expected pilot rounds to continue"
+pre_defer_pilot_dispatches="$(rg -c '^--bundle-dir ' "$PILOT_CAPTURE" || true)"
+if [[ "${pre_defer_pilot_dispatches:-0}" -ne 0 ]]; then
+  echo "prod-pilot-cohort pre-real-host deferred path should not continue to pilot rounds"
   cat "$PILOT_CAPTURE"
   exit 1
 fi

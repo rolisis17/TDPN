@@ -470,6 +470,24 @@ if ! jq -e '.status=="fail" and .failure_step=="quick_dashboard"' "${DASH_FAIL_C
   exit 1
 fi
 
+echo "[prod-pilot-cohort-quick-runbook] cohort policy bypass is rejected"
+set +e
+./scripts/prod_pilot_cohort_quick_runbook.sh \
+  --signoff-require-cohort-signoff-policy 0 \
+  --dashboard-enable 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_policy_bypass.log 2>&1
+policy_bypass_rc=$?
+set -e
+if [[ "$policy_bypass_rc" -ne 2 ]]; then
+  echo "expected quick-runbook cohort policy bypass to fail with rc=2, got rc=$policy_bypass_rc"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_policy_bypass.log
+  exit 1
+fi
+if ! rg -q -- 'quick runbook requires --signoff-require-cohort-signoff-policy 1' ${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_policy_bypass.log; then
+  echo "expected quick-runbook cohort policy bypass rejection hint not found"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_policy_bypass.log
+  exit 1
+fi
+
 cat >"$TMP_BIN/docker" <<'EOF_DOCKER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -516,7 +534,7 @@ PROD_PILOT_COHORT_QUICK_RUNBOOK_SCRIPT="$FAKE_RUNBOOK" \
   --bundle-fail-close 0 \
   --signoff-incident-snapshot-min-attachment-count 4 \
   --signoff-incident-snapshot-max-skipped-count 1 \
-  --signoff-require-cohort-signoff-policy 0 \
+  --signoff-require-cohort-signoff-policy 1 \
   --signoff-require-trend-artifact-policy-match 0 \
   --dashboard-fail-close 1 \
   --show-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_easy_node.log 2>&1
@@ -566,7 +584,7 @@ if ! rg -q -- '--dashboard-fail-close 1' "$RUNBOOK_FORWARD_CAPTURE"; then
   cat "$RUNBOOK_FORWARD_CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--signoff-require-cohort-signoff-policy 0' "$RUNBOOK_FORWARD_CAPTURE"; then
+if ! rg -q -- '--signoff-require-cohort-signoff-policy 1' "$RUNBOOK_FORWARD_CAPTURE"; then
   echo "easy_node quick-runbook forwarding failed: missing --signoff-require-cohort-signoff-policy"
   cat "$RUNBOOK_FORWARD_CAPTURE"
   exit 1

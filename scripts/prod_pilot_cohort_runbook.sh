@@ -611,6 +611,7 @@ pre_real_host_readiness_defer_no_root="0"
 pre_real_host_readiness_deferred_no_root="0"
 pre_real_host_readiness_defer_reason=""
 pre_real_host_blocked=0
+pre_real_host_readiness_gate_passed=0
 pilot_pre_real_host_readiness_explicit=0
 
 if [[ "$pre_real_host_readiness_defer_no_root_mode" == "auto" ]]; then
@@ -657,11 +658,14 @@ if [[ "$pre_real_host_readiness" == "1" ]]; then
     pre_real_host_readiness_blockers_json="$(jq -c '.machine_c_smoke_gate.blockers // []' "$pre_real_host_readiness_summary_json" 2>/dev/null || printf '[]')"
   fi
 
-  if [[ "$pre_real_host_readiness_rc" -ne 0 || "$pre_real_host_readiness_machine_c_ready" != "true" ]]; then
+  if [[ "$pre_real_host_readiness_rc" -eq 0 && "$pre_real_host_readiness_machine_c_ready" == "true" ]]; then
+    pre_real_host_readiness_gate_passed=1
+  elif [[ "$pre_real_host_readiness_rc" -ne 0 || "$pre_real_host_readiness_machine_c_ready" != "true" ]]; then
     if [[ "$pre_real_host_readiness_defer_no_root" == "1" ]] && pre_real_host_readiness_failure_requires_root "$readiness_output" "$readiness_json"; then
       pre_real_host_readiness_deferred_no_root="1"
-      pre_real_host_readiness_defer_reason="pre-real-host readiness requires root privileges; continuing cohort runbook with deferred gate"
+      pre_real_host_readiness_defer_reason="pre-real-host readiness requires root privileges; blocking cohort runbook until rerun with sudo"
       echo "[prod-pilot-cohort] $pre_real_host_readiness_defer_reason"
+      pre_real_host_blocked=1
     else
       pre_real_host_blocked=1
       echo "[prod-pilot-cohort] pre-real-host readiness blocked cohort runbook: rc=$pre_real_host_readiness_rc"
@@ -682,7 +686,7 @@ for ((round = 1; round <= rounds; round++)); do
     --bundle-dir "$round_dir"
     --run-report-json "$round_report_json"
   )
-  if [[ "$pilot_pre_real_host_readiness_explicit" != "1" ]]; then
+  if [[ "$pilot_pre_real_host_readiness_explicit" != "1" && "$pre_real_host_readiness_gate_passed" == "1" ]]; then
     cmd+=(--pre-real-host-readiness 0)
   fi
   cmd+=("${pilot_args[@]}")

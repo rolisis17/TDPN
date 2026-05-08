@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"privacynode/pkg/crypto"
+	"privacynode/pkg/httplimit"
 	"privacynode/pkg/proto"
 )
 
@@ -4511,6 +4512,33 @@ func TestHandleGossipRelaysRejectsTrailingJSON(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "invalid json") {
 		t.Fatalf("expected invalid json response, got %q", rr.Body.String())
+	}
+}
+
+func TestHandleGossipRelaysRateLimitsUnknownPeerAttempts(t *testing.T) {
+	s := &Service{
+		gossipPushRateLimiter:     httplimit.NewFixedWindowLimiter(1, 16),
+		gossipPushInflightLimiter: httplimit.NewInflightLimiter(16),
+	}
+	body := []byte(`{"peer_url":"http://peer-a.local","relays":[]}`)
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/gossip/relays", bytes.NewReader(body))
+	firstReq.RemoteAddr = "198.51.100.91:42001"
+	firstRR := httptest.NewRecorder()
+	s.handleGossipRelays(firstRR, firstReq)
+	if firstRR.Code != http.StatusForbidden {
+		t.Fatalf("expected first unknown-peer gossip attempt to reach peer validation, got %d body=%s", firstRR.Code, firstRR.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/gossip/relays", bytes.NewReader(body))
+	secondReq.RemoteAddr = "198.51.100.91:42002"
+	secondRR := httptest.NewRecorder()
+	s.handleGossipRelays(secondRR, secondReq)
+	if secondRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected repeated unknown-peer gossip attempt to be rate limited, got %d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	if !strings.Contains(secondRR.Body.String(), "rate limited") {
+		t.Fatalf("expected rate limit response body, got %q", secondRR.Body.String())
 	}
 }
 

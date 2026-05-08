@@ -33,6 +33,12 @@ case "$cmd" in
       fi
       exit 1
     fi
+    if [[ "${FAKE_SECRET_OUTPUT:-0}" == "1" ]]; then
+      echo "TOKEN=secret-auth-123"
+      echo "Authorization: Bearer secret-bearer-789"
+      echo "ADMIN_TOKEN=secret-admin-000"
+      echo "subject inv-secret-leak"
+    fi
     echo "wg-only selftest passed"
     exit 0
     ;;
@@ -81,6 +87,7 @@ chmod +x "$FAKE_EASY_NODE"
 
 echo "[wg-only-stack-selftest-record] success path"
 FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_SECRET_OUTPUT="1" \
 WG_ONLY_STACK_SELFTEST_RECORD_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
 ./scripts/wg_only_stack_selftest_record.sh \
   --strict-beta 1 \
@@ -134,6 +141,22 @@ if ! jq -e '
 ' "$summary_json_path" >/dev/null; then
   echo "success summary JSON missing expected fields"
   cat "$summary_json_path"
+  exit 1
+fi
+summary_log_path="$(jq -r '.artifacts.summary_log // ""' "$summary_json_path")"
+if [[ -z "$summary_log_path" || ! -f "$summary_log_path" ]]; then
+  echo "expected success summary log missing"
+  cat "$summary_json_path"
+  exit 1
+fi
+if rg -q 'secret-auth-123|secret-bearer-789|secret-admin-000|inv-secret-leak' "$summary_log_path"; then
+  echo "wg-only-stack-selftest-record summary log leaked sensitive output"
+  cat "$summary_log_path"
+  exit 1
+fi
+if ! rg -q '\[REDACTED\]|\[REDACTED_INVITE\]' "$summary_log_path"; then
+  echo "wg-only-stack-selftest-record summary log missing redaction markers"
+  cat "$summary_log_path"
   exit 1
 fi
 

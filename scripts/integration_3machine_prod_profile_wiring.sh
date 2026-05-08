@@ -2485,6 +2485,32 @@ exit "${FAKE_BUNDLE_VERIFY_RC:-0}"
 EOF_FAKE_BUNDLE_VERIFY
 chmod +x "$FAKE_BUNDLE_VERIFY"
 
+echo "[wiring] easy_node -> prod bundle help"
+: >"$BUNDLE_CAPTURE"
+set +e
+PATH="$TMP_BIN:$PATH" \
+BUNDLE_CAPTURE_FILE="$BUNDLE_CAPTURE" \
+THREE_MACHINE_PROD_BUNDLE_SCRIPT="./scripts/prod_gate_bundle.sh" \
+THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_BUNDLE_GATE" \
+./scripts/easy_node.sh three-machine-prod-bundle --help >/tmp/integration_3machine_prod_profile_wiring_easy_bundle_help.log 2>&1
+easy_bundle_help_rc=$?
+set -e
+if [[ "$easy_bundle_help_rc" -ne 0 ]]; then
+  echo "easy_node prod bundle help failed: expected rc=0 (got $easy_bundle_help_rc)"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_help.log
+  exit 1
+fi
+if ! rg -q -- 'three-machine-prod-bundle' /tmp/integration_3machine_prod_profile_wiring_easy_bundle_help.log; then
+  echo "easy_node prod bundle help output missing command name"
+  cat /tmp/integration_3machine_prod_profile_wiring_easy_bundle_help.log
+  exit 1
+fi
+if [[ -s "$BUNDLE_CAPTURE" ]]; then
+  echo "easy_node prod bundle help should not invoke bundle script"
+  cat "$BUNDLE_CAPTURE"
+  exit 1
+fi
+
 echo "[wiring] easy_node -> prod bundle dispatch"
 EASY_BUNDLE_DIR="$TMP_DIR/easy_node_prod_bundle"
 : >"$BUNDLE_VERIFY_CAPTURE"

@@ -113,6 +113,8 @@ export ENTRY_DATA_ADDR="${ENTRY_DATA_ADDR:-127.0.0.1:51820}"
 export EXIT_DATA_ADDR="${EXIT_DATA_ADDR:-127.0.0.1:51821}"
 export ENTRY_ENDPOINT="${ENTRY_ENDPOINT:-$ENTRY_DATA_ADDR}"
 export EXIT_ENDPOINT="${EXIT_ENDPOINT:-$EXIT_DATA_ADDR}"
+export ENTRY_RELAY_ID="${ENTRY_RELAY_ID:-entry-local-1}"
+export EXIT_RELAY_ID="${EXIT_RELAY_ID:-exit-local-1}"
 
 export CLIENT_INNER_UDP_ADDR="${CLIENT_INNER_UDP_ADDR:-127.0.0.1:51900}"
 export CLIENT_OPAQUE_SINK_ADDR="${CLIENT_OPAQUE_SINK_ADDR:-127.0.0.1:51910}"
@@ -131,13 +133,38 @@ export WGIOINJECT_WG_LIKE_PCT="${WGIOINJECT_WG_LIKE_PCT:-90}"
 mkdir -p .gocache
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.gocache}"
 
+if [[ -z "${ENTRY_ROUTE_ASSERTION_PRIVATE_KEY:-}" && -z "${ENTRY_ROUTE_ASSERTION_PRIVATE_KEY_FILE:-}" && -z "${ENTRY_ROUTE_ASSERTION_PUBLIC_KEY:-}" ]]; then
+  route_assertion_json="$(GPM_ALLOW_STDOUT_PRIVATE_KEYS=1 go run ./cmd/tokenpop gen --show-private-key)"
+  route_assertion_private_key="$(printf '%s\n' "$route_assertion_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')"
+  route_assertion_pubkey="$(printf '%s\n' "$route_assertion_json" | sed -n 's/.*"public_key":"\([^"]*\)".*/\1/p')"
+  if [[ -z "$route_assertion_private_key" || -z "$route_assertion_pubkey" ]]; then
+    echo "[demo] failed to generate entry route assertion key material" >&2
+    exit 1
+  fi
+  export ENTRY_ROUTE_ASSERTION_PRIVATE_KEY="$route_assertion_private_key"
+  export ENTRY_ROUTE_ASSERTION_PUBLIC_KEY="$route_assertion_pubkey"
+fi
+if [[ -n "${ENTRY_ROUTE_ASSERTION_PUBLIC_KEY:-}" && -z "${EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS:-}" ]]; then
+  export EXIT_TRUSTED_ENTRY_ROUTE_ASSERTION_PUBKEYS="$ENTRY_ROUTE_ASSERTION_PUBLIC_KEY"
+fi
+
 DURATION="${DEMO_DURATION_SEC:-15}"
+DEMO_RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/privacynode-demo-internal-state.XXXXXX")"
 DEMO_BIN="$(mktemp "${TMPDIR:-/tmp}/privacynode-demo-internal-topology.XXXXXX")"
 
 cleanup() {
   rm -f "$DEMO_BIN"
+  rm -rf "$DEMO_RUNTIME_DIR"
 }
 trap cleanup EXIT
+
+export DIRECTORY_TRUST_TOFU="${DIRECTORY_TRUST_TOFU:-1}"
+export DIRECTORY_TRUSTED_KEYS_FILE="${DIRECTORY_TRUSTED_KEYS_FILE:-$DEMO_RUNTIME_DIR/trusted_directory_keys.txt}"
+export ENTRY_DIRECTORY_TRUSTED_KEYS_FILE="${ENTRY_DIRECTORY_TRUSTED_KEYS_FILE:-$DIRECTORY_TRUSTED_KEYS_FILE}"
+export ISSUER_REVOCATIONS_FILE="${ISSUER_REVOCATIONS_FILE:-$DEMO_RUNTIME_DIR/issuer_revocations.json}"
+export ISSUER_ANON_REVOCATIONS_FILE="${ISSUER_ANON_REVOCATIONS_FILE:-$DEMO_RUNTIME_DIR/issuer_anon_revocations.json}"
+export EXIT_TOKEN_PROOF_REPLAY_STORE_FILE="${EXIT_TOKEN_PROOF_REPLAY_STORE_FILE:-$DEMO_RUNTIME_DIR/exit_token_proof_replay.json}"
+export DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE="${DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_STORE_FILE:-$DEMO_RUNTIME_DIR/directory_provider_token_proof_replay.json}"
 
 echo "[demo] running internal topology for ${DURATION}s"
 echo "[demo] mode=${DATA_PLANE_MODE} source=${CLIENT_INNER_SOURCE} wg_backend=${WG_BACKEND} client_wg_backend=${CLIENT_WG_BACKEND}"
@@ -149,5 +176,9 @@ fi
 
 go build -o "$DEMO_BIN" ./cmd/node
 
+set +e
 timeout "${DURATION}s" "$DEMO_BIN" \
   --directory --issuer --entry --exit --client --wgio --wgiotap --wgioinject
+demo_rc=$?
+set -e
+exit "$demo_rc"

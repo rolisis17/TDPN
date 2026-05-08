@@ -92,6 +92,60 @@ need_cmd() {
   fi
 }
 
+redact_sensitive_command_string() {
+  local value="${1:-}"
+  printf '%s' "$value" | sed -E '
+s/(--(subject|anon-cred|campaign-subject|campaign-anon-cred|invite-key|key|token|auth-token|admin-token|authorization|bearer|password|secret|api-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g
+s/((Authorization|X-Admin-Token):[[:space:]]*(Bearer[[:space:]]*)?)[^[:space:]]+/\1[redacted]/Ig
+s~([A-Za-z][A-Za-z0-9+.-]*://)[^/?#@[:space:]]+@~\1[redacted]@~g
+s~([?&#](subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|auth_token|admin_token|authorization|bearer|password|secret)=)[^,&#[:space:]]+~\1[redacted]~Ig
+'
+}
+
+redact_sensitive_arg_for_log() {
+  redact_sensitive_command_string "${1:-}"
+}
+
+print_cmd_redacted() {
+  local -a redacted=()
+  local arg
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
+    case "$arg" in
+      --subject|--anon-cred|--campaign-subject|--invite-key|--key|--token|--auth-token|--admin-token|--authorization|--bearer)
+        redacted+=("$arg")
+        if [[ $# -ge 2 ]]; then
+          redacted+=("[redacted]")
+          shift 2
+        else
+          shift
+        fi
+        ;;
+      --subject=*|--anon-cred=*|--campaign-subject=*|--invite-key=*|--key=*|--token=*|--auth-token=*|--admin-token=*|--authorization=*|--bearer=*)
+        redacted+=("${arg%%=*}=[redacted]")
+        shift
+        ;;
+      *)
+        redacted+=("$(redact_sensitive_arg_for_log "$arg")")
+        shift
+        ;;
+    esac
+  done
+  printf '%q ' "${redacted[@]}"
+  printf '\n'
+}
+
+redact_sensitive_stream() {
+  sed -E '
+s/(--(subject|anon-cred|campaign-subject|campaign-anon-cred|invite-key|key|token|auth-token|admin-token|authorization|bearer|password|secret|api-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g
+s/((SUBJECT|ANON_CRED|INVITE_KEY|TOKEN|AUTH_TOKEN|ADMIN_TOKEN|AUTHORIZATION|BEARER|PASSWORD|SECRET|API_KEY)=)[^[:space:]]+/\1[redacted]/g
+s/((Authorization|X-Admin-Token):[[:space:]]*(Bearer[[:space:]]*)?)[^[:space:]]+/\1[redacted]/Ig
+s~([A-Za-z][A-Za-z0-9+.-]*://)[^/?#@[:space:]]+@~\1[redacted]@~g
+s~([?&#](subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|auth_token|admin_token|authorization|bearer|password|secret)=)[^,&#[:space:]]+~\1[redacted]~Ig
+s/inv-[A-Za-z0-9._:-]+/[redacted-invite]/g
+'
+}
+
 trim() {
   local value="$1"
   value="${value#"${value%%[![:space:]]*}"}"
@@ -254,9 +308,9 @@ run_step() {
   echo
   echo "[prod-gate] step=$step_name"
   echo "[prod-gate] log=$step_log"
-  echo "[prod-gate] cmd=${cmd[*]}"
+  echo "[prod-gate] cmd=$(print_cmd_redacted "${cmd[@]}")"
   set +e
-  "${cmd[@]}" > >(tee -a "$step_log") 2>&1
+  "${cmd[@]}" 2>&1 | redact_sensitive_stream | tee -a "$step_log"
   local rc=$?
   set -e
   if [[ "$rc" -ne 0 ]]; then
@@ -727,7 +781,7 @@ for script in "$BETA_VALIDATE_SCRIPT" "$BETA_SOAK_SCRIPT" "$PROD_WG_VALIDATE_SCR
   fi
 done
 
-for cmd in bash date tee; do
+for cmd in bash date tee sed; do
   need_cmd "$cmd"
 done
 
@@ -795,7 +849,7 @@ if [[ -z "$report_file" ]]; then
   report_file="$(default_log_dir)/privacynode_3machine_prod_gate_$(date +%Y%m%d_%H%M%S).log"
 fi
 mkdir -p "$(dirname "$report_file")"
-exec > >(tee -a "$report_file") 2>&1
+exec > >(redact_sensitive_stream | tee -a "$report_file") 2>&1
 
 run_id="$(date +%Y%m%d_%H%M%S)"
 step_dir="$(default_log_dir)/prod_gate_steps_${run_id}"
@@ -861,6 +915,7 @@ write_gate_summary_once() {
   local wg_validate_status="" wg_validate_failed_step=""
   local wg_status="" wg_rounds_passed="0" wg_rounds_failed="0" wg_top_class="none" wg_top_count="0"
   local wg_top_pair
+  local issuer_b_probe_url_redacted
 
   if [[ "$gate_summary_written" == "1" ]]; then
     return
@@ -886,6 +941,7 @@ write_gate_summary_once() {
     wg_validate_status="$(json_string_field "$wg_validate_summary_json" "status")"
     wg_validate_failed_step="$(json_string_field "$wg_validate_summary_json" "failed_step")"
   fi
+  issuer_b_probe_url_redacted="$(redact_sensitive_command_string "$issuer_b_probe_url")"
 
   {
     echo "{"
@@ -905,7 +961,7 @@ write_gate_summary_once() {
     echo "  \"control_require_issuer_quorum_requested\": \"$(json_escape "$control_require_issuer_quorum")\","
     echo "  \"control_require_issuer_quorum\": $control_require_issuer_quorum_effective,"
     echo "  \"control_require_issuer_quorum_reason\": \"$(json_escape "$control_require_issuer_quorum_reason")\","
-    echo "  \"issuer_b_probe_url\": \"$(json_escape "$issuer_b_probe_url")\","
+    echo "  \"issuer_b_probe_url\": \"$(json_escape "$issuer_b_probe_url_redacted")\","
     echo "  \"wg_validate_summary_json\": \"$(json_escape "$wg_validate_summary_json")\","
     echo "  \"wg_validate_status\": \"$(json_escape "$wg_validate_status")\","
     echo "  \"wg_validate_failed_step\": \"$(json_escape "$wg_validate_failed_step")\","

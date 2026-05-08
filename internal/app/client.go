@@ -151,6 +151,7 @@ type clientActiveSession struct {
 	exitInnerPub      string
 	clientInnerPub    string
 	clientInnerIP     string
+	wgEndpoint        string
 	wgAllowedIPs      string
 	wgInstallRoute    bool
 	entryRelayID      string
@@ -1353,6 +1354,7 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		pathMode = clientVPNPathModeDirect
 	}
 	var wgKernelProxy *clientWGKernelProxy
+	wgRuntimeEndpoint := ""
 	if transport == "wireguard-udp" && c.wgKernelProxy {
 		proxy, err := c.newWGKernelProxy(pathResp.EntryDataAddr, pathResp.SessionID)
 		if err != nil {
@@ -1386,6 +1388,8 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		if wgKernelProxy != nil {
 			cfg.Endpoint = wgKernelProxy.listenAddr()
 		}
+		cleanupSession.wgEndpoint = cfg.Endpoint
+		wgRuntimeEndpoint = cfg.Endpoint
 		if err := c.wgManager.ConfigureClientSession(ctx, cfg); err != nil {
 			return fmt.Errorf("client wg configure failed: %w", err)
 		}
@@ -1416,6 +1420,9 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		if err := c.sendTrafficForTransport(ctx, transport, pathResp.EntryDataAddr, pathResp.SessionID); err != nil {
 			return err
 		}
+	}
+	if transport == "wireguard-udp" {
+		log.Printf("client wireguard traffic verified: interface=%s endpoint=%s session=%s", c.wgInterface, wgRuntimeEndpoint, pathResp.SessionID)
 	}
 
 	middleRelayID := ""
@@ -1465,6 +1472,7 @@ func (c *Client) bootstrap(ctx context.Context) error {
 		exitInnerPub:      pathResp.ExitInnerPub,
 		clientInnerPub:    c.clientWGPub,
 		clientInnerIP:     pathResp.ClientInnerIP,
+		wgEndpoint:        cleanupSession.wgEndpoint,
 		wgAllowedIPs:      c.wgAllowedIPs,
 		wgInstallRoute:    c.wgInstallRoute,
 		entryRelayID:      entryRelayID,
@@ -1881,6 +1889,7 @@ func (c *Client) runWGKernelProxyTraffic(ctx context.Context, proxy *clientWGKer
 	}
 	markUplink := func() {
 		seenUplink.Do(func() {
+			log.Printf("client wg-kernel proxy uplink observed: interface=%s addr=%s session=%s", c.wgInterface, proxy.listenAddr(), proxy.sessionID)
 			close(seenUplinkCh)
 		})
 	}
@@ -2784,6 +2793,7 @@ func (c *Client) closeSessionWithOptions(ctx context.Context, session clientActi
 			Interface:     c.wgInterface,
 			ExitPublicKey: session.exitInnerPub,
 			ClientInnerIP: session.clientInnerIP,
+			Endpoint:      session.wgEndpoint,
 			AllowedIPs:    session.wgAllowedIPs,
 			InstallRoute:  session.wgInstallRoute,
 		}

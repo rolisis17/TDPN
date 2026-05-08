@@ -16,6 +16,7 @@ Outputs:
 
 Notes:
   - node cert is usable for directory/issuer/entry-exit roles and includes DNS/IP SANs.
+  - --public-host/--san values must be bare DNS names or IP addresses, not URLs or host:port strings.
   - client cert is for control-plane clients (client role/admin tooling).
 USAGE
 }
@@ -36,12 +37,105 @@ trim() {
 
 is_ipv4() {
   local host="$1"
-  [[ "$host" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+  [[ "$host" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  local IFS=.
+  local -a octets=()
+  local octet
+  read -r -a octets <<<"$host"
+  [[ "${#octets[@]}" == "4" ]] || return 1
+  for octet in "${octets[@]}"; do
+    [[ "$octet" =~ ^[0-9]+$ ]] || return 1
+    ((10#$octet <= 255)) || return 1
+  done
 }
 
 is_ipv6() {
   local host="$1"
-  [[ "$host" == *:* ]]
+  [[ "$host" == *:* && "$host" =~ ^[0-9A-Fa-f:]+$ ]] || return 1
+  [[ "$host" != *:::* ]] || return 1
+  [[ "$host" != :* || "$host" == ::* ]] || return 1
+  [[ "$host" != *: || "$host" == *:: ]] || return 1
+
+  local without_double="${host//::/}"
+  local double_count=$(((${#host} - ${#without_double}) / 2))
+  ((double_count <= 1)) || return 1
+
+  local IFS=:
+  local -a parts=()
+  local part
+  local non_empty_parts=0
+  read -r -a parts <<<"$host"
+  for part in "${parts[@]}"; do
+    [[ -z "$part" ]] && continue
+    [[ "$part" =~ ^[0-9A-Fa-f]{1,4}$ ]] || return 1
+    non_empty_parts=$((non_empty_parts + 1))
+  done
+  if ((double_count == 0)); then
+    ((non_empty_parts == 8))
+  else
+    ((non_empty_parts < 8))
+  fi
+}
+
+normalize_san_value() {
+  local raw="$1"
+  local value
+  value="$(trim "$raw")"
+  if [[ -z "$value" ]]; then
+    echo "invalid SAN/public-host: value must not be empty" >&2
+    return 1
+  fi
+  if [[ "$value" == -* ]]; then
+    echo "invalid SAN/public-host '$value': value must not look like an option" >&2
+    return 1
+  fi
+  if [[ "$value" =~ [[:space:]] ]]; then
+    echo "invalid SAN/public-host '$value': whitespace is not allowed" >&2
+    return 1
+  fi
+  if [[ "$value" == *"://"* || "$value" == */* ]]; then
+    echo "invalid SAN/public-host '$value': use a host or IP address, not a URL or path" >&2
+    return 1
+  fi
+  if [[ "$value" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    if ! is_ipv4 "$value"; then
+      echo "invalid IPv4 SAN/public-host '$value': octets must be in range 0..255" >&2
+      return 1
+    fi
+    printf '%s' "$value"
+    return 0
+  fi
+  if [[ "$value" == *:* ]]; then
+    if ! is_ipv6 "$value"; then
+      echo "invalid IPv6 SAN/public-host '$value': use a bare IPv6 address without brackets or port" >&2
+      return 1
+    fi
+    printf '%s' "$value"
+    return 0
+  fi
+  if ((${#value} > 253)); then
+    echo "invalid DNS SAN/public-host '$value': host name is too long" >&2
+    return 1
+  fi
+  if [[ "$value" == .* || "$value" == *. || "$value" == *..* ]]; then
+    echo "invalid DNS SAN/public-host '$value': DNS labels must not be empty" >&2
+    return 1
+  fi
+  local IFS=.
+  local -a labels=()
+  local label
+  read -r -a labels <<<"$value"
+  for label in "${labels[@]}"; do
+    if [[ -z "$label" || ${#label} -gt 63 ]]; then
+      echo "invalid DNS SAN/public-host '$value': DNS labels must be 1..63 characters" >&2
+      return 1
+    fi
+    if ! [[ "$label" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]]; then
+      echo "invalid DNS SAN/public-host '$value': DNS labels may only contain letters, digits, and hyphens" >&2
+      return 1
+    fi
+  done
+  printf '%s' "$value"
 }
 
 add_unique() {
@@ -91,6 +185,47 @@ write_san_config() {
   } >"$path"
 }
 
+cert_has_san() {
+  local cert="$1"
+  local san="$2"
+  local san_text
+  san_text="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null || true)"
+  if [[ -z "$san_text" ]]; then
+    return 1
+  fi
+  local want_a
+  local want_b=""
+  if is_ipv4 "$san" || is_ipv6 "$san"; then
+    want_a="IP Address:${san}"
+    want_b="IP:${san}"
+  else
+    want_a="DNS:${san}"
+  fi
+  local line
+  local entry
+  local IFS=,
+  local -a entries=()
+  while IFS= read -r line; do
+    read -r -a entries <<<"$line"
+    for entry in "${entries[@]}"; do
+      entry="$(trim "$entry")"
+      if [[ "$entry" == "$want_a" || ( -n "$want_b" && "$entry" == "$want_b" ) ]]; then
+        return 0
+      fi
+    done
+  done <<<"$san_text"
+  return 1
+}
+
+cert_has_all_sans() {
+  local cert="$1"
+  shift
+  local san
+  for san in "$@"; do
+    cert_has_san "$cert" "$san" || return 1
+  done
+}
+
 out_dir="deploy/tls"
 days="365"
 rotate_leaf="0"
@@ -101,6 +236,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --out-dir)
       out_dir="${2:-}"
+      if [[ -z "$(trim "$out_dir")" ]]; then
+        echo "missing value for --out-dir"
+        exit 2
+      fi
       shift 2
       ;;
     --public-host|--san)
@@ -108,11 +247,18 @@ while [[ $# -gt 0 ]]; do
         echo "missing value for $1"
         exit 2
       fi
-      add_unique "$(trim "${2:-}")" san_hosts
+      if ! san_value="$(normalize_san_value "${2:-}")"; then
+        exit 2
+      fi
+      add_unique "$san_value" san_hosts
       shift 2
       ;;
     --days)
       days="${2:-}"
+      if [[ -z "$days" ]]; then
+        echo "missing value for --days"
+        exit 2
+      fi
       shift 2
       ;;
     --rotate-leaf)
@@ -165,6 +311,7 @@ client_csr="$out_dir/client.csr"
 client_crt="$out_dir/client.crt"
 san_cfg="$out_dir/node_san.cnf"
 client_cfg="$out_dir/client_ext.cnf"
+ca_regenerated="0"
 
 if [[ "$rotate_ca" == "1" ]]; then
   rm -f "$ca_key" "$ca_crt" "$ca_srl"
@@ -179,6 +326,10 @@ if [[ ! -f "$ca_key" || ! -f "$ca_crt" ]]; then
   openssl req -x509 -new -nodes -key "$ca_key" -sha256 -days "$days" \
     -subj "/CN=privacynode-local-ca" \
     -out "$ca_crt" >/dev/null 2>&1
+  ca_regenerated="1"
+fi
+if [[ "$ca_regenerated" == "1" ]]; then
+  rm -f "$node_csr" "$node_crt" "$client_csr" "$client_crt"
 fi
 
 add_unique "localhost" san_hosts
@@ -187,6 +338,10 @@ add_unique "directory" san_hosts
 add_unique "issuer" san_hosts
 add_unique "entry-exit" san_hosts
 write_san_config "$san_cfg" "${san_hosts[@]}"
+if [[ -f "$node_crt" ]] && ! cert_has_all_sans "$node_crt" "${san_hosts[@]}"; then
+  echo "mTLS node certificate SANs changed; regenerating node certificate" >&2
+  rm -f "$node_csr" "$node_crt"
+fi
 
 if [[ ! -f "$node_key" || ! -f "$node_crt" ]]; then
   openssl genrsa -out "$node_key" 2048 >/dev/null 2>&1

@@ -113,6 +113,52 @@ int_or_die() {
   fi
 }
 
+is_non_negative_decimal() {
+  [[ "${1:-}" =~ ^[0-9]+([.][0-9]+)?$ ]]
+}
+
+require_one_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ "$value" != "1" ]]; then
+    echo "quick runbook requires $name 1; use prod-pilot-cohort-quick-check directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+require_int_floor_or_die() {
+  local name="$1"
+  local value="$2"
+  local minimum="$3"
+  if [[ ! "$value" =~ ^[0-9]+$ ]] || ((10#$value < minimum)); then
+    echo "quick runbook requires $name >= $minimum; use prod-pilot-cohort-quick-check directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+require_decimal_floor_or_die() {
+  local name="$1"
+  local value="$2"
+  local minimum="$3"
+  if ! is_non_negative_decimal "$value"; then
+    echo "quick runbook requires $name to be a decimal >= $minimum; use prod-pilot-cohort-quick-check directly for diagnostic policy bypasses."
+    exit 2
+  fi
+  if awk -v a="$value" -v b="$minimum" 'BEGIN { exit !((a + 0) < (b + 0)) }'; then
+    echo "quick runbook requires $name >= $minimum; use prod-pilot-cohort-quick-check directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+require_max_skipped_zero_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^-?[0-9]+$ || "$value" != "0" ]]; then
+    echo "quick runbook requires $name 0; use prod-pilot-cohort-quick-check directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
 json_string_runbook() {
   local file="$1"
   local expr="$2"
@@ -170,7 +216,7 @@ if [[ $# -gt 0 ]]; then
   esac
 fi
 
-for cmd in bash date jq; do
+for cmd in awk bash date jq; do
   need_cmd "$cmd"
 done
 
@@ -215,8 +261,8 @@ signoff_min_trend_wg_soak_exit_operators="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MIN_
 signoff_min_trend_wg_soak_cross_operator_pairs="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MIN_TREND_WG_SOAK_CROSS_OPERATOR_PAIRS:-2}"
 signoff_require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
 signoff_require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
-signoff_incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}}"
-signoff_incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}}"
+signoff_incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}}"
+signoff_incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}}"
 
 dashboard_enable="${PROD_PILOT_COHORT_QUICK_RUNBOOK_DASHBOARD_ENABLE:-1}"
 dashboard_fail_close="${PROD_PILOT_COHORT_QUICK_RUNBOOK_DASHBOARD_FAIL_CLOSE:-0}"
@@ -522,6 +568,10 @@ bool_or_die "--signoff-require-trend-wg-validate-strict-distinct" "$signoff_requ
 bool_or_die "--signoff-require-trend-wg-soak-diversity-pass" "$signoff_require_trend_wg_soak_diversity_pass"
 bool_or_die "--signoff-require-incident-snapshot-on-fail" "$signoff_require_incident_snapshot_on_fail"
 bool_or_die "--signoff-require-incident-snapshot-artifacts" "$signoff_require_incident_snapshot_artifacts"
+if [[ "$signoff_require_cohort_signoff_policy" != "1" ]]; then
+  echo "quick runbook requires --signoff-require-cohort-signoff-policy 1; use prod-pilot-cohort-quick-check directly for diagnostic policy bypasses."
+  exit 2
+fi
 if [[ ! "$signoff_incident_snapshot_min_attachment_count" =~ ^[0-9]+$ ]]; then
   echo "--signoff-incident-snapshot-min-attachment-count must be an integer >= 0"
   exit 2
@@ -530,6 +580,20 @@ if [[ ! "$signoff_incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((sig
   echo "--signoff-incident-snapshot-max-skipped-count must be an integer >= -1"
   exit 2
 fi
+require_decimal_floor_or_die "--trend-min-go-rate-pct" "$trend_min_go_rate_pct" 95
+require_decimal_floor_or_die "--signoff-min-go-rate-pct" "$signoff_min_go_rate_pct" 95
+require_one_or_die "--signoff-require-trend-artifact-policy-match" "$signoff_require_trend_artifact_policy_match"
+require_one_or_die "--signoff-require-trend-wg-validate-udp-source" "$signoff_require_trend_wg_validate_udp_source"
+require_one_or_die "--signoff-require-trend-wg-validate-strict-distinct" "$signoff_require_trend_wg_validate_strict_distinct"
+require_one_or_die "--signoff-require-trend-wg-soak-diversity-pass" "$signoff_require_trend_wg_soak_diversity_pass"
+require_int_floor_or_die "--signoff-min-trend-wg-soak-selection-lines" "$signoff_min_trend_wg_soak_selection_lines" 12
+require_int_floor_or_die "--signoff-min-trend-wg-soak-entry-operators" "$signoff_min_trend_wg_soak_entry_operators" 2
+require_int_floor_or_die "--signoff-min-trend-wg-soak-exit-operators" "$signoff_min_trend_wg_soak_exit_operators" 2
+require_int_floor_or_die "--signoff-min-trend-wg-soak-cross-operator-pairs" "$signoff_min_trend_wg_soak_cross_operator_pairs" 2
+require_one_or_die "--signoff-require-incident-snapshot-on-fail" "$signoff_require_incident_snapshot_on_fail"
+require_one_or_die "--signoff-require-incident-snapshot-artifacts" "$signoff_require_incident_snapshot_artifacts"
+require_int_floor_or_die "--signoff-incident-snapshot-min-attachment-count" "$signoff_incident_snapshot_min_attachment_count" 1
+require_max_skipped_zero_or_die "--signoff-incident-snapshot-max-skipped-count" "$signoff_incident_snapshot_max_skipped_count"
 bool_or_die "--dashboard-enable" "$dashboard_enable"
 bool_or_die "--dashboard-fail-close" "$dashboard_fail_close"
 bool_or_die "--dashboard-print" "$dashboard_print"
@@ -540,6 +604,10 @@ bool_or_die "--pre-real-host-readiness" "$pre_real_host_readiness"
 max_alert_severity="$(printf '%s' "$max_alert_severity" | tr '[:lower:]' '[:upper:]')"
 if [[ "$max_alert_severity" != "OK" && "$max_alert_severity" != "WARN" && "$max_alert_severity" != "CRITICAL" ]]; then
   echo "--max-alert-severity must be OK, WARN, or CRITICAL"
+  exit 2
+fi
+if [[ "$max_alert_severity" == "CRITICAL" ]]; then
+  echo "quick runbook requires --max-alert-severity no weaker than WARN; use prod-pilot-cohort-quick-check directly for diagnostic policy bypasses."
   exit 2
 fi
 

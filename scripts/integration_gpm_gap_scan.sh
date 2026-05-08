@@ -224,6 +224,60 @@ assert_file_contains "$MISSING_FIELDS_SUMMARY_JSON" 'Roadmap evidence pack profi
 assert_file_contains "$MISSING_FIELDS_SUMMARY_JSON" 'Roadmap evidence pack runtime_actuation_promotion_evidence_pack needs attention (status=missing)' "missing roadmap fields summary missing runtime evidence-pack blocker"
 assert_file_contains "$MISSING_FIELDS_SUMMARY_JSON" 'Roadmap evidence pack profile_compare_multi_vm_stability_promotion_evidence_pack needs attention (status=missing)' "missing roadmap fields summary missing multi-vm evidence-pack blocker"
 
+echo "[gpm-gap-scan] generic profile-default evidence text is not treated as a placeholder"
+PROFILE_DEFAULT_STATUS_DOC="$TMP_DIR/profile_default_status.md"
+PROFILE_DEFAULT_SUMMARY_JSON="$TMP_DIR/profile_default_summary.json"
+PROFILE_DEFAULT_STDOUT="$TMP_DIR/profile_default_stdout.md"
+
+cat >"$PROFILE_DEFAULT_STATUS_DOC" <<'EOF_PROFILE_DEFAULT_STATUS'
+# Profile Default Evidence Fixture
+
+## In-Progress
+- Profile-default evidence gathering is in place, but repeated campaign evidence still needs capture and publish.
+
+## Missing / Next
+- M2: run and archive real-host stability cycles for strict selection-policy defaults, then publish evidence-pack artifacts from those archived outputs.
+EOF_PROFILE_DEFAULT_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$PROFILE_DEFAULT_STATUS_DOC" \
+  --summary-json "$PROFILE_DEFAULT_SUMMARY_JSON" \
+  --print-summary-json 0 >"$PROFILE_DEFAULT_STDOUT"
+
+assert_file_contains "$PROFILE_DEFAULT_SUMMARY_JSON" '"recommended_action": "Generate and publish deterministic evidence-pack artifacts with fail-closed checks."' "profile-default fixture should not imply missing A_HOST/B_HOST placeholders"
+assert_file_contains "$PROFILE_DEFAULT_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/integration_client_vpn_path_profile_wiring.sh\", \"scripts/integration_roadmap_progress_report.sh\"]" "profile-default fixture missing profile/evidence suggested tests"
+if grep -F "Populate A_HOST/B_HOST and campaign subject" "$PROFILE_DEFAULT_SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "generic profile-default evidence text should not use placeholder remediation action"
+  cat "$PROFILE_DEFAULT_SUMMARY_JSON"
+  exit 1
+fi
+
+echo "[gpm-gap-scan] live-condition validation artifacts require real-host evidence"
+LIVE_CONDITIONS_STATUS_DOC="$TMP_DIR/live_conditions_status.md"
+LIVE_CONDITIONS_SUMMARY_JSON="$TMP_DIR/live_conditions_summary.json"
+LIVE_CONDITIONS_STDOUT="$TMP_DIR/live_conditions_stdout.md"
+
+cat >"$LIVE_CONDITIONS_STATUS_DOC" <<'EOF_LIVE_CONDITIONS_STATUS'
+# Live Conditions Fixture
+
+## In-Progress
+- Legacy runtime-admission wave M1 dedicated contribution-role runtime admission is implemented locally.
+
+## Missing / Next
+- Remaining work: real scheduler/path-selection promotion evidence and end-to-end validation artifacts under live conditions.
+EOF_LIVE_CONDITIONS_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$LIVE_CONDITIONS_STATUS_DOC" \
+  --summary-json "$LIVE_CONDITIONS_SUMMARY_JSON" \
+  --print-summary-json 0 >"$LIVE_CONDITIONS_STDOUT"
+
+assert_file_contains "$LIVE_CONDITIONS_SUMMARY_JSON" '"closure_mode": "real_host_required"' "live conditions fixture summary missing real_host_required closure mode"
+assert_file_contains "$LIVE_CONDITIONS_SUMMARY_JSON" '"blocked_by": ["real_hosts", "evidence_pack_artifacts"]' "live conditions fixture summary missing real-host/evidence blockers"
+assert_file_contains "$LIVE_CONDITIONS_SUMMARY_JSON" '"requires_real_hosts": true' "live conditions fixture summary missing requires_real_hosts true"
+assert_file_contains "$LIVE_CONDITIONS_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/integration_client_3hop_runtime.sh\", \"scripts/integration_live_wg_full_path_strict.sh\"]" "live conditions fixture summary missing runtime suggested tests"
+assert_file_contains "$LIVE_CONDITIONS_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/global-privacy-mesh-track.md", "docs/product-roadmap.md", "scripts/integration_3machine_prod_wg_validate.sh"]' "live conditions fixture summary missing real-host suggested files"
+
 echo "[gpm-gap-scan] admin settlement/slashing blockers are classified"
 ADMIN_STATUS_DOC="$TMP_DIR/admin_status.md"
 ADMIN_SUMMARY_JSON="$TMP_DIR/admin_summary.json"
@@ -234,6 +288,7 @@ cat >"$ADMIN_STATUS_DOC" <<'EOF_ADMIN_STATUS'
 
 ## In-Progress
 - Admin Console settlement review remains local-only until live chain proof is archived.
+- Local reservation id/session/subject binding exists, but this subject wording is not a profile-default campaign placeholder.
 
 ## Missing / Next
 - Productization: finish end-to-end Admin Console validation against live chain settlement, slashing holds, dispute/finalization review, and weekly payout release evidence.
@@ -247,8 +302,8 @@ bash "$SCRIPT_UNDER_TEST" \
 assert_file_contains "$ADMIN_SUMMARY_JSON" '"recommended_action": "Run Admin Console settlement/slashing validation, then archive live-chain payout evidence."' "admin fixture summary missing admin settlement action"
 assert_file_contains "$ADMIN_SUMMARY_JSON" '"closure_mode": "network_required"' "admin fixture summary missing network_required closure mode"
 assert_file_contains "$ADMIN_SUMMARY_JSON" '"blocked_by": ["admin_settlement_validation", "live_chain"]' "admin fixture summary missing admin/live-chain blockers"
-assert_file_contains "$ADMIN_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/integration_gpm_admin_settlement_contract.sh\", \"go test ./services/localapi -run GPMAdminRewardFinalize -count=1\", \"go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1\"]" "admin fixture summary missing settlement suggested tests"
-assert_file_contains "$ADMIN_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "scripts/integration_gpm_admin_settlement_contract.sh", "services/localapi/gpm_api.go", "pkg/settlement/memory.go"]' "admin fixture summary missing admin suggested files"
+assert_file_contains "$ADMIN_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/gpm_admin_settlement_live_evidence.sh --start-local-tdpnd 1 --print-summary-json 1\", \"scripts/integration_gpm_admin_settlement_contract.sh\", \"go test ./services/localapi -run GPMAdminRewardFinalize -count=1\", \"go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1\"]" "admin fixture summary missing settlement suggested tests"
+assert_file_contains "$ADMIN_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "scripts/gpm_admin_settlement_live_evidence.sh", "scripts/integration_gpm_admin_settlement_contract.sh", "services/localapi/gpm_api.go", "pkg/settlement/memory.go"]' "admin fixture summary missing admin suggested files"
 
 echo "[gpm-gap-scan] wallet auth hardening blockers stay separate from admin settlement"
 AUTH_STATUS_DOC="$TMP_DIR/auth_status.md"
@@ -272,8 +327,8 @@ bash "$SCRIPT_UNDER_TEST" \
 
 assert_file_contains "$AUTH_SUMMARY_JSON" '"recommended_action": "Archive Keplr/Leap wallet-extension auth evidence for secp256k1 binding and mismatched-wallet rejection."' "auth fixture summary missing wallet evidence action"
 assert_file_contains "$AUTH_SUMMARY_JSON" '"blocked_by": ["wallet_extension_evidence"]' "auth fixture summary should not route to admin settlement blockers"
-assert_file_contains "$AUTH_SUMMARY_JSON" "\"suggested_tests\": [\"go test ./services/localapi -run 'GPM.*Auth|Wallet|Keplr|Leap|Secp' -count=1\"]" "auth fixture summary missing wallet auth suggested tests"
-assert_file_contains "$AUTH_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "services/localapi/gpm_api.go", "services/localapi/gpm_api_test.go"]' "auth fixture summary missing wallet auth suggested files"
+assert_file_contains "$AUTH_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/gpm_wallet_auth_evidence.sh --print-summary-json 1\", \"go test ./services/localapi -run 'GPM.*Auth|Wallet|Keplr|Leap|Secp' -count=1\"]" "auth fixture summary missing wallet auth suggested tests"
+assert_file_contains "$AUTH_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "scripts/gpm_wallet_auth_evidence.sh", "services/localapi/gpm_api.go", "services/localapi/gpm_api_test.go"]' "auth fixture summary missing wallet auth suggested files"
 
 echo "[gpm-gap-scan] reservation write blockers are classified"
 RESERVATION_STATUS_DOC="$TMP_DIR/reservation_status.md"
@@ -297,8 +352,8 @@ bash "$SCRIPT_UNDER_TEST" \
 
 assert_file_contains "$RESERVATION_SUMMARY_JSON" '"recommended_action": "Wire the local GPM ReserveFunds API path, then archive API-to-chain reservation evidence."' "reservation fixture summary missing reservation action"
 assert_file_contains "$RESERVATION_SUMMARY_JSON" '"blocked_by": ["admin_settlement_validation", "local_api_reservation_evidence", "live_chain"]' "reservation fixture summary missing precise reservation blockers"
-assert_file_contains "$RESERVATION_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/integration_gpm_admin_settlement_contract.sh\", \"go test ./services/localapi -run GPMAdminRewardFinalize -count=1\", \"go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1\", \"go test ./services/localapi -run 'ReserveFunds|SettlementReservation|GPM.*Reservation' -count=1\", \"go test ./pkg/settlement -run 'ReserveFunds|CosmosAdapter' -count=1\", \"go test ./blockchain/tdpn-chain/cmd/tdpnd -run 'Settlement.*Reservation|BillingReservation' -count=1\"]" "reservation fixture summary missing reservation suggested tests"
-assert_file_contains "$RESERVATION_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "scripts/integration_gpm_admin_settlement_contract.sh", "services/localapi/gpm_api.go", "pkg/settlement/memory.go", "services/localapi/service.go", "pkg/settlement/types.go", "pkg/settlement/cosmos_adapter.go", "blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge.go", "blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge_test.go"]' "reservation fixture summary missing reservation suggested files"
+assert_file_contains "$RESERVATION_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/gpm_admin_settlement_live_evidence.sh --start-local-tdpnd 1 --print-summary-json 1\", \"scripts/integration_gpm_admin_settlement_contract.sh\", \"go test ./services/localapi -run GPMAdminRewardFinalize -count=1\", \"go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1\", \"go test ./services/localapi -run 'ReserveFunds|SettlementReservation|GPM.*Reservation' -count=1\", \"go test ./pkg/settlement -run 'ReserveFunds|CosmosAdapter' -count=1\", \"go test ./blockchain/tdpn-chain/cmd/tdpnd -run 'Settlement.*Reservation|BillingReservation' -count=1\"]" "reservation fixture summary missing reservation suggested tests"
+assert_file_contains "$RESERVATION_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "scripts/gpm_admin_settlement_live_evidence.sh", "scripts/integration_gpm_admin_settlement_contract.sh", "services/localapi/gpm_api.go", "pkg/settlement/memory.go", "services/localapi/service.go", "pkg/settlement/types.go", "pkg/settlement/cosmos_adapter.go", "blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge.go", "blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge_test.go"]' "reservation fixture summary missing reservation suggested files"
 
 echo "[gpm-gap-scan] wired reservation blockers are classified as evidence work"
 RESERVATION_WIRED_STATUS_DOC="$TMP_DIR/reservation_wired_status.md"
@@ -322,6 +377,31 @@ bash "$SCRIPT_UNDER_TEST" \
 
 assert_file_contains "$RESERVATION_WIRED_SUMMARY_JSON" '"recommended_action": "Archive API-to-chain ReserveFunds reservation evidence, then rerun live bridge reservation/settlement smoke."' "wired reservation fixture summary missing evidence archival action"
 assert_file_contains "$RESERVATION_WIRED_SUMMARY_JSON" '"blocked_by": ["admin_settlement_validation", "local_api_reservation_evidence", "live_chain"]' "wired reservation fixture summary missing evidence/live-chain blockers"
+
+echo "[gpm-gap-scan] reserve-and-connect productization wording maps to reservation evidence"
+RESERVE_CONNECT_STATUS_DOC="$TMP_DIR/reserve_connect_status.md"
+RESERVE_CONNECT_SUMMARY_JSON="$TMP_DIR/reserve_connect_summary.json"
+RESERVE_CONNECT_STDOUT="$TMP_DIR/reserve_connect_stdout.md"
+
+cat >"$RESERVE_CONNECT_STATUS_DOC" <<'EOF_RESERVE_CONNECT_STATUS'
+# Reserve-And-Connect Evidence Fixture
+
+## In-Progress
+- Local reserve-and-connect now binds reservation id/session/subject through client -> entry -> exit path-open proofs.
+
+## Missing / Next
+- Productization: finish API-to-chain evidence for the wallet/session-bound reserve-and-connect path and archive live chain settlement evidence.
+EOF_RESERVE_CONNECT_STATUS
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$RESERVE_CONNECT_STATUS_DOC" \
+  --summary-json "$RESERVE_CONNECT_SUMMARY_JSON" \
+  --print-summary-json 0 >"$RESERVE_CONNECT_STDOUT"
+
+assert_file_contains "$RESERVE_CONNECT_SUMMARY_JSON" '"recommended_action": "Archive API-to-chain ReserveFunds reservation evidence, then rerun live bridge reservation/settlement smoke."' "reserve-and-connect fixture summary missing reservation evidence action"
+assert_file_contains "$RESERVE_CONNECT_SUMMARY_JSON" '"blocked_by": ["admin_settlement_validation", "local_api_reservation_evidence", "live_chain"]' "reserve-and-connect fixture summary missing reservation/live-chain blockers"
+assert_file_contains "$RESERVE_CONNECT_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/gpm_admin_settlement_live_evidence.sh --start-local-tdpnd 1 --print-summary-json 1\", \"scripts/integration_gpm_admin_settlement_contract.sh\", \"go test ./services/localapi -run GPMAdminRewardFinalize -count=1\", \"go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1\", \"go test ./services/localapi -run 'ReserveFunds|SettlementReservation|GPM.*Reservation' -count=1\", \"go test ./pkg/settlement -run 'ReserveFunds|CosmosAdapter' -count=1\", \"go test ./blockchain/tdpn-chain/cmd/tdpnd -run 'Settlement.*Reservation|BillingReservation' -count=1\"]" "reserve-and-connect fixture summary missing reservation suggested tests"
+assert_file_contains "$RESERVE_CONNECT_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "scripts/gpm_admin_settlement_live_evidence.sh", "scripts/integration_gpm_admin_settlement_contract.sh", "services/localapi/gpm_api.go", "pkg/settlement/memory.go", "services/localapi/service.go", "pkg/settlement/types.go", "pkg/settlement/cosmos_adapter.go", "blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge.go", "blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge_test.go"]' "reserve-and-connect fixture summary missing reservation suggested files"
 
 echo "[gpm-gap-scan] route fallback blockers are classified"
 ROUTE_STATUS_DOC="$TMP_DIR/route_status.md"
@@ -420,8 +500,8 @@ bash "$SCRIPT_UNDER_TEST" \
 
 assert_file_contains "$PROOF_SUMMARY_JSON" '"recommended_action": "Promote reward/slashing proof references from shape checks to objective proof registry verification before payout signoff."' "proof fixture summary missing proof-verification action"
 assert_file_contains "$PROOF_SUMMARY_JSON" '"blocked_by": ["admin_settlement_validation", "objective_proof_verification", "live_chain"]' "proof fixture summary missing proof/live-chain blockers"
-assert_file_contains "$PROOF_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/integration_gpm_admin_settlement_contract.sh\", \"go test ./services/localapi -run GPMAdminRewardFinalize -count=1\", \"go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1\", \"go test ./pkg/settlement -run 'IssueReward|Proof|Objective|FinalizeWeekly' -count=1\", \"go test ./services/localapi -run 'GPMAdminRewardFinalize|RewardProof' -count=1\", \"go test ./blockchain/tdpn-chain/cmd/tdpnd -run 'Reward|Proof|Settlement' -count=1\"]" "proof fixture summary missing proof suggested tests"
-assert_file_contains "$PROOF_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "scripts/integration_gpm_admin_settlement_contract.sh", "services/localapi/gpm_api.go", "pkg/settlement/memory.go", "pkg/settlement/reward_proof_trust.md", "blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge.go"]' "proof fixture summary missing proof suggested files"
+assert_file_contains "$PROOF_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/gpm_admin_settlement_live_evidence.sh --start-local-tdpnd 1 --print-summary-json 1\", \"scripts/integration_gpm_admin_settlement_contract.sh\", \"go test ./services/localapi -run GPMAdminRewardFinalize -count=1\", \"go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1\", \"go test ./pkg/settlement -run 'IssueReward|Proof|Objective|FinalizeWeekly' -count=1\", \"go test ./services/localapi -run 'GPMAdminRewardFinalize|RewardProof' -count=1\", \"go test ./blockchain/tdpn-chain/cmd/tdpnd -run 'Reward|Proof|Settlement' -count=1\"]" "proof fixture summary missing proof suggested tests"
+assert_file_contains "$PROOF_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "scripts/gpm_admin_settlement_live_evidence.sh", "scripts/integration_gpm_admin_settlement_contract.sh", "services/localapi/gpm_api.go", "pkg/settlement/memory.go", "pkg/settlement/reward_proof_trust.md", "blockchain/tdpn-chain/cmd/tdpnd/settlement_bridge.go"]' "proof fixture summary missing proof suggested files"
 
 echo "[gpm-gap-scan] settlement confirmation blockers are classified"
 CONFIRM_STATUS_DOC="$TMP_DIR/confirm_status.md"
@@ -445,8 +525,8 @@ bash "$SCRIPT_UNDER_TEST" \
 
 assert_file_contains "$CONFIRM_SUMMARY_JSON" '"recommended_action": "Require finalized chain status during settlement reconciliation; do not promote submitted records from existence alone."' "confirmation fixture summary missing confirmation action"
 assert_file_contains "$CONFIRM_SUMMARY_JSON" '"blocked_by": ["admin_settlement_validation", "chain_confirmation_status"]' "confirmation fixture summary missing confirmation blocker"
-assert_file_contains "$CONFIRM_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/integration_gpm_admin_settlement_contract.sh\", \"go test ./services/localapi -run GPMAdminRewardFinalize -count=1\", \"go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1\", \"go test ./pkg/settlement -run 'Reconcile|Confirmation|Pending|Submitted' -count=1\", \"go test ./services/localapi -run 'Reconcile|RewardFinalize' -count=1\"]" "confirmation fixture summary missing confirmation suggested tests"
-assert_file_contains "$CONFIRM_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "scripts/integration_gpm_admin_settlement_contract.sh", "services/localapi/gpm_api.go", "pkg/settlement/memory.go", "pkg/settlement/types.go", "pkg/settlement/cosmos_adapter.go"]' "confirmation fixture summary missing confirmation suggested files"
+assert_file_contains "$CONFIRM_SUMMARY_JSON" "\"suggested_tests\": [\"scripts/gpm_admin_settlement_live_evidence.sh --start-local-tdpnd 1 --print-summary-json 1\", \"scripts/integration_gpm_admin_settlement_contract.sh\", \"go test ./services/localapi -run GPMAdminRewardFinalize -count=1\", \"go test ./pkg/settlement -run 'IssueReward|SubmitSlashEvidence' -count=1\", \"go test ./pkg/settlement -run 'Reconcile|Confirmation|Pending|Submitted' -count=1\", \"go test ./services/localapi -run 'Reconcile|RewardFinalize' -count=1\"]" "confirmation fixture summary missing confirmation suggested tests"
+assert_file_contains "$CONFIRM_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/local-control-api.md", "scripts/gpm_admin_settlement_live_evidence.sh", "scripts/integration_gpm_admin_settlement_contract.sh", "services/localapi/gpm_api.go", "pkg/settlement/memory.go", "pkg/settlement/types.go", "pkg/settlement/cosmos_adapter.go"]' "confirmation fixture summary missing confirmation suggested files"
 
 echo "[gpm-gap-scan] durable replay guard blockers are classified"
 REPLAY_STATUS_DOC="$TMP_DIR/replay_status.md"

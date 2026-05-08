@@ -66,8 +66,8 @@ printf '%s\n' 'entry-exit log tail' >"$bundle_dir/docker/entry-exit_tail.log"
 
 artifact_one="$TMP_DIR/runtime_doctor_after.json"
 artifact_two="$TMP_DIR/manual_validation_readiness_summary.json"
-printf '%s\n' '{"status":"OK"}' >"$artifact_one"
-printf '%s\n' '{"readiness_status":"NOT_READY"}' >"$artifact_two"
+printf '%s\n' '{"status":"OK","token":"attach-one-secret","subject":"attach-one-subject-secret","url":"http://attach-one-user-secret@attach-one:8081?auth_token=attach-one-query-secret#access_token=attach-one-fragment-secret"}' >"$artifact_one"
+printf '%s\n' 'readiness_status: NOT_READY secret: attach-two-secret inv-attach-two-secret url=http://attach-two-user-secret@attach-two:8081?admin_token=attach-two-admin-query-secret&invite_key=attach-two-invite-query-secret&anon_cred=attach-two-anon-query-secret&subject=attach-two-subject-query-secret#key=attach-two-fragment-secret' >"$artifact_two"
 missing_artifact="$TMP_DIR/missing-artifact.txt"
 
 ./scripts/incident_snapshot_attach_artifacts.sh \
@@ -105,14 +105,29 @@ if [[ -z "$skipped_file" || ! -f "$skipped_file" ]]; then
   cat /tmp/integration_incident_snapshot_attach_first.log
   exit 1
 fi
-if ! rg -q "$artifact_one" "$manifest_file"; then
-  echo "expected manifest to include first artifact source path"
+if rg -q "$artifact_one" "$manifest_file"; then
+  echo "attachment manifest leaked first artifact source path"
   cat "$manifest_file"
   exit 1
 fi
-if ! rg -q "$missing_artifact" "$skipped_file"; then
-  echo "expected skipped file to include missing artifact"
+if ! rg -q 'source-sha256:' "$manifest_file"; then
+  echo "expected manifest to include redacted first artifact source reference"
+  cat "$manifest_file"
+  exit 1
+fi
+if rg -q "$missing_artifact" "$skipped_file"; then
+  echo "skipped attachment file leaked missing artifact source path"
   cat "$skipped_file"
+  exit 1
+fi
+if ! rg -q 'source-sha256:' "$skipped_file"; then
+  echo "expected skipped file to include redacted missing artifact source reference"
+  cat "$skipped_file"
+  exit 1
+fi
+if rg -a -q 'attach-one-secret|attach-one-subject-secret|attach-one-user-secret|attach-one-query-secret|attach-one-fragment-secret' "$bundle_dir/attachments"; then
+  echo "attached artifact content leaked first fake secret"
+  rg -a -n 'attach-one-secret|attach-one-subject-secret|attach-one-user-secret|attach-one-query-secret|attach-one-fragment-secret' "$bundle_dir/attachments" || true
   exit 1
 fi
 
@@ -138,9 +153,14 @@ if [[ "$(wc -l < "$manifest_file")" -ne 2 ]]; then
   cat "$manifest_file"
   exit 1
 fi
-if ! rg -q "$artifact_two" "$manifest_file"; then
-  echo "expected manifest to include second artifact source path"
+if rg -q "$artifact_two" "$manifest_file"; then
+  echo "attachment manifest leaked second artifact source path"
   cat "$manifest_file"
+  exit 1
+fi
+if rg -a -q 'attach-two-secret|inv-attach-two-secret|attach-two-user-secret|attach-two-admin-query-secret|attach-two-invite-query-secret|attach-two-anon-query-secret|attach-two-subject-query-secret|attach-two-fragment-secret' "$bundle_dir/attachments"; then
+  echo "attached artifact content leaked second fake secret"
+  rg -a -n 'attach-two-secret|inv-attach-two-secret|attach-two-user-secret|attach-two-admin-query-secret|attach-two-invite-query-secret|attach-two-anon-query-secret|attach-two-subject-query-secret|attach-two-fragment-secret' "$bundle_dir/attachments" || true
   exit 1
 fi
 
@@ -148,6 +168,10 @@ bundle_tar="$(sed -n 's/^bundle_tar: //p' /tmp/integration_incident_snapshot_att
 if [[ -z "$bundle_tar" || ! -f "$bundle_tar" || ! -f "$bundle_tar.sha256" ]]; then
   echo "expected bundle tarball artifacts missing after second refresh"
   cat /tmp/integration_incident_snapshot_attach_second.log
+  exit 1
+fi
+if tar -xOzf "$bundle_tar" | rg -a -q 'attach-one-secret|attach-one-subject-secret|attach-one-user-secret|attach-one-query-secret|attach-one-fragment-secret|attach-two-secret|inv-attach-two-secret|attach-two-user-secret|attach-two-admin-query-secret|attach-two-invite-query-secret|attach-two-anon-query-secret|attach-two-subject-query-secret|attach-two-fragment-secret'; then
+  echo "attachment refresh bundle tar leaked fake secrets"
   exit 1
 fi
 

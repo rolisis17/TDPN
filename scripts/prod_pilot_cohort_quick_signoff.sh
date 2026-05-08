@@ -187,8 +187,8 @@ require_summary_json="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_SUMMARY_JSON:-${
 require_summary_status_ok="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_SUMMARY_STATUS_OK:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SUMMARY_STATUS_OK:-1}}"
 require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}}"
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}}"
-incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}}"
-incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}}"
+incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}}"
+incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}}"
 max_duration_sec="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MAX_DURATION_SEC:-${PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC:-0}}"
 
 max_reports="${PROD_PILOT_COHORT_QUICK_TREND_MAX_REPORTS:-25}"
@@ -529,6 +529,15 @@ for pair in \
   val="${pair##*:}"
   bool_arg_or_die "$key" "$val"
 done
+
+if [[ "$check_latest" == "0" && "$check_trend" == "0" && "$check_alert" == "0" ]]; then
+  echo "at least one quick signoff check must be enabled"
+  exit 2
+fi
+if [[ "$require_cohort_signoff_policy" != "1" ]]; then
+  echo "quick signoff requires --require-cohort-signoff-policy 1; use prod-pilot-cohort-quick-check directly for diagnostic policy bypasses."
+  exit 2
+fi
 
 if [[ ! "$max_duration_sec" =~ ^[0-9]+$ ]]; then
   echo "--max-duration-sec must be an integer >= 0"

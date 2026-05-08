@@ -57,8 +57,8 @@ PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_CHECK" \
   --require-trend-artifact-policy-match 1 \
   --require-trend-wg-validate-udp-source 1 \
   --min-trend-wg-soak-selection-lines 12 \
-  --require-incident-snapshot-on-fail 0 \
-  --require-incident-snapshot-artifacts 0 \
+  --require-incident-snapshot-on-fail 1 \
+  --require-incident-snapshot-artifacts 1 \
   --incident-snapshot-min-attachment-count 2 \
   --incident-snapshot-max-skipped-count 0 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_signoff_pass.log 2>&1
@@ -83,12 +83,12 @@ if ! rg -q -- '--summary-json /tmp/cohort/summary.json' "$CHECK_CAPTURE"; then
   cat "$CHECK_CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--require-incident-snapshot-on-fail 0' "$CHECK_CAPTURE"; then
+if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$CHECK_CAPTURE"; then
   echo "signoff check forwarding missing --require-incident-snapshot-on-fail"
   cat "$CHECK_CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--require-incident-snapshot-artifacts 0' "$CHECK_CAPTURE"; then
+if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$CHECK_CAPTURE"; then
   echo "signoff check forwarding missing --require-incident-snapshot-artifacts"
   cat "$CHECK_CAPTURE"
   exit 1

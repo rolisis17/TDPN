@@ -2,6 +2,7 @@ package settlement
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"math"
@@ -603,10 +604,14 @@ func (s *MemoryService) AuthorizePayment(ctx context.Context, proof PaymentProof
 func paymentAuthorizationMapKey(source, reservationID string) string {
 	source = strings.TrimSpace(source)
 	reservationID = strings.TrimSpace(reservationID)
-	if source == "" || source == PaymentProofSourceSponsor {
-		return reservationID
+	if source == "" {
+		source = PaymentProofSourceSponsor
 	}
-	return source + ":" + reservationID
+	return fmt.Sprintf(
+		"v2:%s:%s",
+		base64.RawURLEncoding.EncodeToString([]byte(source)),
+		base64.RawURLEncoding.EncodeToString([]byte(reservationID)),
+	)
 }
 
 func validatePaymentAuthorizationReplay(proof PaymentProof, existing PaymentAuthorization) error {

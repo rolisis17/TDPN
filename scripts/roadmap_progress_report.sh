@@ -8999,7 +8999,7 @@ next_action_command="$(
     | if $next_command != "" then
         $next_command
       elif ($id | length) > 0 then
-        ([$checks[] | select((.check_id // "") == $id) | .command][0] // "")
+        ([$checks[] | select((.check_id // "") == $id) | (.remediation_command // .command // "") | select(length > 0)][0] // "")
       else
         ""
       end
@@ -9041,7 +9041,7 @@ pending_real_host_checks_json="$(jq -c '
             check_id: .check_id,
             "label": .label,
             status: .status,
-            command: .command,
+            command: (.remediation_command // .command // ""),
             notes: .notes
           }
       ]
@@ -9059,7 +9059,7 @@ pending_real_host_checks_json="$(jq -c '
                 ($root.summary.real_host_gate.next_command // $root.summary.next_action_command // "")
               else
                 (
-                  [ $checks[] | select(.check_id == "three_machine_prod_signoff") | .command ][0]
+                  [ $checks[] | select(.check_id == "three_machine_prod_signoff") | (.remediation_command // .command // "") | select(length > 0) ][0]
                   // ""
                 )
               end

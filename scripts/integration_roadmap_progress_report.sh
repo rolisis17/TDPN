@@ -3251,6 +3251,77 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] prod-signoff remediation command overrides stale beta HTTP command"
+STALE_PROD_REMEDIATION_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_stale_prod_remediation_summary.json"
+cat >"$STALE_PROD_REMEDIATION_MANUAL_SUMMARY_JSON" <<'EOF_STALE_PROD_REMEDIATION'
+{
+  "version": 1,
+  "checks": [
+    {
+      "check_id": "machine_c_vpn_smoke",
+      "label": "Machine C VPN smoke test",
+      "status": "pass",
+      "command": "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country"
+    },
+    {
+      "check_id": "three_machine_prod_signoff",
+      "label": "True 3-machine production signoff",
+      "status": "fail",
+      "command": "./scripts/three_machine_prod_signoff.sh --directory-a http://A_HOST:8081 --directory-b http://B_HOST:8081 --issuer-url http://A_HOST:8082 --entry-url http://A_HOST:8083 --exit-url http://A_HOST:8084 --prod-profile 0 --subject INVITE_KEY",
+      "remediation_command": "sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1",
+      "notes": "stale beta HTTP prod signoff failure"
+    }
+  ],
+  "summary": {
+    "next_action_check_id": "three_machine_prod_signoff",
+    "next_action_label": "True 3-machine production signoff",
+    "next_action_command": "",
+    "roadmap_stage": "READY_FOR_3_MACHINE_PROD_SIGNOFF",
+    "single_machine_ready": true,
+    "blocking_check_ids": ["three_machine_prod_signoff"],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "real_host_gate": {
+      "ready": false,
+      "blockers": ["three_machine_prod_signoff"],
+      "next_check_id": "three_machine_prod_signoff",
+      "next_label": "True 3-machine production signoff",
+      "next_command": ""
+    },
+    "docker_rehearsal_gate": { "status": "pass" },
+    "real_wg_privileged_gate": { "status": "skip" },
+    "profile_default_gate": { "status": "pass" }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_STALE_PROD_REMEDIATION
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$STALE_PROD_REMEDIATION_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_stale_prod_remediation_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_stale_prod_remediation_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale_prod_remediation.log 2>&1; then
+  echo "expected success for prod-signoff remediation command override"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_stale_prod_remediation.log
+  exit 1
+fi
+if ! jq -e '
+  .vpn_track.next_action.check_id == "three_machine_prod_signoff"
+  and (.vpn_track.next_action.command | contains("--directory-a https://A_HOST:8081"))
+  and (((.vpn_track.next_action.command | contains("--prod-profile 0")) | not))
+  and (.vpn_track.pending_real_host_checks | length) == 1
+  and .vpn_track.pending_real_host_checks[0].check_id == "three_machine_prod_signoff"
+  and (.vpn_track.pending_real_host_checks[0].command | contains("--directory-a https://A_HOST:8081"))
+  and (((.vpn_track.pending_real_host_checks[0].command | contains("--prod-profile 0")) | not))
+' "$TMP_DIR/roadmap_progress_stale_prod_remediation_summary.json" >/dev/null; then
+  echo "stale prod remediation summary did not prefer HTTPS remediation command"
+  cat "$TMP_DIR/roadmap_progress_stale_prod_remediation_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] vpn_rc_done_for_phase follows resilience criteria (fail-closed)"
 READY_SIGNOFF_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_ready_signoff_summary.json"
 cat >"$READY_SIGNOFF_MANUAL_SUMMARY_JSON" <<'EOF_READY_SIGNOFF_MANUAL_SUMMARY'

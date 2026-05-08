@@ -40,6 +40,27 @@ func TestInsecureSkipVerifyConfigured(t *testing.T) {
 	}
 }
 
+func TestRequireClientCertConfigured(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "unset defaults true", want: true},
+		{name: "one enables", raw: "1", want: true},
+		{name: "zero disables", raw: "0", want: false},
+		{name: "false string stays enabled for legacy compatibility", raw: "false", want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MTLS_REQUIRE_CLIENT_CERT", tc.raw)
+			if got := RequireClientCertConfigured(); got != tc.want {
+				t.Fatalf("expected %t for %q, got %t", tc.want, tc.raw, got)
+			}
+		})
+	}
+}
+
 func TestNewClientDisablesRedirectFollowingByDefault(t *testing.T) {
 	t.Setenv("MTLS_ENABLE", "")
 

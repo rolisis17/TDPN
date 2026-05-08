@@ -33,6 +33,36 @@ func TestValidateRuntimeConfigProdStrictRejectsInsecureSkipVerify(t *testing.T) 
 	}
 }
 
+func TestValidateRuntimeConfigPublicBindRequiresMTLSOrDangerousOverride(t *testing.T) {
+	s := &Service{addr: "0.0.0.0:8083"}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected public bind without mTLS to fail closed")
+	}
+	if !strings.Contains(err.Error(), "ENTRY_ALLOW_DANGEROUS_INSECURE_PUBLIC_BIND") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	t.Setenv(allowInsecurePublicBind, "1")
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected explicit dangerous lab override to allow public plaintext bind, got %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigPublicBindRejectsOptionalClientCertMTLS(t *testing.T) {
+	t.Setenv("MTLS_ENABLE", "1")
+	t.Setenv("MTLS_REQUIRE_CLIENT_CERT", "0")
+
+	s := &Service{addr: "0.0.0.0:8083"}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected public mTLS bind to require client certs")
+	}
+	if !strings.Contains(err.Error(), "MTLS_REQUIRE_CLIENT_CERT=1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigBetaStrictRejectsDirectoryTrustTOFU(t *testing.T) {
 	s := &Service{
 		betaStrict:           true,

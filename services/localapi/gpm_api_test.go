@@ -2,6 +2,7 @@ package localapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -131,6 +132,193 @@ func deterministicSecp256k1WalletAddress(t *testing.T, hrp string) string {
 		t.Fatalf("derive wallet address: %v", err)
 	}
 	return walletAddress
+}
+
+func TestGPMRuntimeStateCapsChallengesPerWallet(t *testing.T) {
+	st := newGPMRuntimeState()
+	now := time.Now().UTC()
+	for i := 0; i < gpmChallengeMaxEntriesPerWallet; i++ {
+		ok := st.putChallenge(gpmWalletChallenge{
+			ChallengeID:    fmt.Sprintf("challenge-%d", i),
+			WalletAddress:  "cosmos1walletcap",
+			WalletProvider: "keplr",
+			ExpiresAt:      now.Add(time.Minute),
+		}, now)
+		if !ok {
+			t.Fatalf("challenge %d rejected before per-wallet cap", i)
+		}
+	}
+	if st.putChallenge(gpmWalletChallenge{
+		ChallengeID:    "challenge-over-cap",
+		WalletAddress:  "cosmos1walletcap",
+		WalletProvider: "keplr",
+		ExpiresAt:      now.Add(time.Minute),
+	}, now) {
+		t.Fatalf("expected per-wallet challenge cap rejection")
+	}
+	if !st.putChallenge(gpmWalletChallenge{
+		ChallengeID:    "challenge-other-wallet",
+		WalletAddress:  "cosmos1otherwallet",
+		WalletProvider: "keplr",
+		ExpiresAt:      now.Add(time.Minute),
+	}, now) {
+		t.Fatalf("challenge cap should not block a different wallet")
+	}
+}
+
+func TestGPMRuntimeStateCapsSessionsPerWalletAndPrunesExpired(t *testing.T) {
+	st := newGPMRuntimeState()
+	now := time.Now().UTC()
+	st.sessions["expired-session"] = gpmSession{
+		Token:          "expired-session",
+		WalletAddress:  "cosmos1sessioncap",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now.Add(-2 * time.Hour),
+		ExpiresAt:      now.Add(-time.Hour),
+	}
+	for i := 0; i < gpmSessionMaxEntriesPerWallet; i++ {
+		session := gpmSession{
+			Token:          fmt.Sprintf("session-%d", i),
+			WalletAddress:  "cosmos1sessioncap",
+			WalletProvider: "keplr",
+			Role:           "client",
+			CreatedAt:      now,
+			ExpiresAt:      now.Add(time.Hour),
+		}
+		if !st.putSession(session) {
+			t.Fatalf("session %d rejected before cap", i)
+		}
+	}
+	if st.putSession(gpmSession{
+		Token:          "session-over-cap",
+		WalletAddress:  "cosmos1sessioncap",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	}) {
+		t.Fatalf("expected per-wallet session cap rejection")
+	}
+}
+
+func TestGPMRuntimeStateRejectsExpiredSession(t *testing.T) {
+	st := newGPMRuntimeState()
+	now := time.Now().UTC()
+	if st.putSession(gpmSession{
+		Token:          "expired-session",
+		WalletAddress:  "cosmos1expiredsession",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now.Add(-2 * time.Hour),
+		ExpiresAt:      now.Add(-time.Hour),
+	}) {
+		t.Fatal("expected expired session to be rejected")
+	}
+	if _, ok := st.getSession("expired-session", now); ok {
+		t.Fatal("expired session should not be stored")
+	}
+}
+
+func TestGPMRuntimeStateRestorePersistentNormalizesSessionTokens(t *testing.T) {
+	st := newGPMRuntimeState()
+	now := time.Now().UTC()
+	st.restorePersistent(now, []gpmSession{{
+		Token:          "  persisted-session  ",
+		WalletAddress:  "  COSMOS1PERSISTEDSESSION  ",
+		WalletProvider: "keplr",
+		Role:           "client",
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(time.Hour),
+	}}, nil, nil, nil, nil, nil)
+
+	session, ok := st.getSession("persisted-session", now)
+	if !ok {
+		t.Fatal("expected trimmed session token to be restored")
+	}
+	if session.Token != "persisted-session" {
+		t.Fatalf("restored session token=%q want trimmed token", session.Token)
+	}
+	if session.WalletAddress != "cosmos1persistedsession" {
+		t.Fatalf("restored wallet=%q want normalized wallet", session.WalletAddress)
+	}
+	if _, ok := st.getSession("  persisted-session  ", now); ok {
+		t.Fatal("whitespace-padded session key should not be restored")
+	}
+}
+
+func TestGPMRuntimeStateCapsGlobalApplicationStores(t *testing.T) {
+	st := newGPMRuntimeState()
+	for i := 0; i < gpmOperatorApplicationMaxEntries; i++ {
+		st.operators[fmt.Sprintf("cosmos1operatorcap%d", i)] = gpmOperatorApplication{
+			WalletAddress:   fmt.Sprintf("cosmos1operatorcap%d", i),
+			ChainOperatorID: fmt.Sprintf("operator-%d", i),
+			Status:          "pending",
+		}
+	}
+	if st.upsertOperator(gpmOperatorApplication{
+		WalletAddress:   "cosmos1operatoroverflow",
+		ChainOperatorID: "operator-overflow",
+		Status:          "pending",
+	}) {
+		t.Fatalf("expected operator application cap rejection for new wallet")
+	}
+	if !st.upsertOperator(gpmOperatorApplication{
+		WalletAddress:   "cosmos1operatorcap0",
+		ChainOperatorID: "operator-updated",
+		Status:          "approved",
+	}) {
+		t.Fatalf("expected existing operator application update to be allowed at cap")
+	}
+
+	for i := 0; i < gpmContributionMaxEntries; i++ {
+		st.contributions[fmt.Sprintf("cosmos1contribcap%d", i)] = gpmContributionState{
+			WalletAddress: fmt.Sprintf("cosmos1contribcap%d", i),
+			Role:          "micro-relay",
+		}
+	}
+	if st.upsertContribution(gpmContributionState{
+		WalletAddress: "cosmos1contriboverflow",
+		Role:          "micro-relay",
+	}) {
+		t.Fatalf("expected contribution cap rejection for new wallet")
+	}
+	if !st.upsertContribution(gpmContributionState{
+		WalletAddress: "cosmos1contribcap0",
+		Role:          "micro-exit",
+	}) {
+		t.Fatalf("expected existing contribution update to be allowed at cap")
+	}
+}
+
+func TestGPMAuthVerifyRejectsSaturatedSessionStore(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmAuthVerifyRequireCryptoProof = true
+	walletAddress := deterministicSecp256k1WalletAddress(t, "cosmos")
+	now := time.Now().UTC()
+	for i := 0; i < gpmSessionMaxEntriesPerWallet; i++ {
+		if !svc.gpmState.putSession(gpmSession{
+			Token:          fmt.Sprintf("existing-session-%d", i),
+			WalletAddress:  walletAddress,
+			WalletProvider: "keplr",
+			Role:           "client",
+			CreatedAt:      now,
+			ExpiresAt:      now.Add(time.Hour),
+		}) {
+			t.Fatalf("failed to prefill session %d", i)
+		}
+	}
+
+	code, payload := verifyGPMAuthSecp256k1ProofForWallet(t, svc, walletAddress)
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusServiceUnavailable, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "session store") {
+		t.Fatalf("error=%q want session store saturation payload=%v", errMsg, payload)
+	}
 }
 
 func TestGPMAuthChallengeAndVerifyBindExpectedChainIDAndWalletHRP(t *testing.T) {

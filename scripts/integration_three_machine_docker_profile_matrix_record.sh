@@ -83,6 +83,12 @@ fi
 if [[ "$dry_run" == "1" ]]; then
   echo "three-machine-docker-profile-matrix: dry-run"
 fi
+if [[ "${FAKE_SECRET_OUTPUT:-0}" == "1" ]]; then
+  echo "TOKEN=secret-auth-123"
+  echo "Authorization: Bearer secret-bearer-789"
+  echo "ADMIN_TOKEN=secret-admin-000"
+  echo "subject inv-secret-leak"
+fi
 
 emit_summary="1"
 if [[ "$dry_run" == "1" || "${FAKE_MATRIX_OMIT_SUMMARY:-0}" == "1" ]]; then
@@ -178,6 +184,7 @@ chmod +x "$FAKE_MANUAL_REPORT"
 echo "[three-machine-docker-profile-matrix-record] success path"
 : >"$CAPTURE"
 FAKE_HELPER_CAPTURE_FILE="$CAPTURE" \
+FAKE_SECRET_OUTPUT="1" \
 FAKE_MANUAL_VALIDATION_RECEIPT_JSON="$TMP_DIR/manual_validation_receipt_success.json" \
 THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MATRIX_SCRIPT="$FAKE_MATRIX" \
 THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MANUAL_VALIDATION_RECORD_SCRIPT="$FAKE_MANUAL_RECORD" \
@@ -241,6 +248,22 @@ if ! jq -e '
 ' "$summary_json_path" >/dev/null; then
   echo "success summary JSON missing expected contract fields"
   cat "$summary_json_path"
+  exit 1
+fi
+summary_log_path="$(jq -r '.artifacts.summary_log // ""' "$summary_json_path")"
+if [[ -z "$summary_log_path" || ! -f "$summary_log_path" ]]; then
+  echo "expected success summary log missing"
+  cat "$summary_json_path"
+  exit 1
+fi
+if grep -Eq 'secret-auth-123|secret-bearer-789|secret-admin-000|inv-secret-leak' "$summary_log_path"; then
+  echo "three-machine-docker-profile-matrix-record summary log leaked sensitive output"
+  cat "$summary_log_path"
+  exit 1
+fi
+if ! grep -Eq '\[REDACTED\]|\[REDACTED_INVITE\]' "$summary_log_path"; then
+  echo "three-machine-docker-profile-matrix-record summary log missing redaction markers"
+  cat "$summary_log_path"
   exit 1
 fi
 

@@ -43,6 +43,9 @@ case "$cmd" in
     if [[ "$status" != "OK" ]]; then
       findings_total=1
     fi
+    if [[ "${FAKE_SIGNOFF_RUNTIME_SECRET_OUTPUT:-0}" == "1" ]]; then
+      echo "runtime helper args --auth-token secret-auth-123 AUTH_TOKEN=secret-env-456 Authorization: Bearer secret-bearer-789 X-Admin-Token: secret-admin-000 inv-runtime-secret"
+    fi
     echo "[runtime-doctor] status=$status findings=$findings_total warnings=$findings_total failures=0"
     echo "[runtime-doctor] summary_json_payload:"
     cat <<EOF_DOCTOR
@@ -202,6 +205,9 @@ EOF_PRE_REAL_OK
     wg_validate_summary_json="${bundle_dir}/prod_wg_validate_summary.json"
     wg_soak_summary_json="${bundle_dir}/prod_wg_soak_summary.json"
     touch "$bundle_tar" "$gate_summary_json" "$wg_validate_summary_json" "$wg_soak_summary_json"
+    if [[ "${FAKE_PROD_SIGNOFF_SECRET_OUTPUT:-0}" == "1" ]]; then
+      echo "bundle helper args --auth-token secret-auth-123 AUTH_TOKEN=secret-env-456 Authorization: Bearer secret-bearer-789 X-Admin-Token: secret-admin-000 inv-secret-leak"
+    fi
     if [[ "${FAKE_PROD_SIGNOFF_FAIL:-0}" == "1" ]]; then
       incident_dir="${bundle_dir}/incident_snapshot"
       mkdir -p "$incident_dir"
@@ -382,6 +388,26 @@ if ! grep -F -- '--signoff-check 1' <<<"$line_success" >/dev/null; then
   cat "$CAPTURE"
   exit 1
 fi
+for forced_arg in \
+  '--preflight-check 1' \
+  '--bundle-verify-check 1' \
+  '--signoff-require-full-sequence 1' \
+  '--signoff-require-wg-validate-ok 1' \
+  '--signoff-require-wg-soak-ok 1' \
+  '--signoff-require-wg-validate-udp-source 1' \
+  '--signoff-require-wg-validate-strict-distinct 1' \
+  '--signoff-require-wg-soak-diversity-pass 1' \
+  '--signoff-min-wg-soak-selection-lines 12' \
+  '--signoff-min-wg-soak-entry-operators 2' \
+  '--signoff-min-wg-soak-exit-operators 2' \
+  '--signoff-min-wg-soak-cross-operator-pairs 2' \
+  '--signoff-max-wg-soak-failed-rounds 0'; do
+  if ! grep -F -- "$forced_arg" <<<"$line_success" >/dev/null; then
+    echo "expected wrapper to force $forced_arg"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
 if ! rg -q '^manual-validation-record --check-id three_machine_prod_signoff --status pass ' "$CAPTURE"; then
   echo "expected manual-validation-record pass call missing"
   cat "$CAPTURE"
@@ -437,6 +463,63 @@ fi
 if ! rg -q 'pre_real_host_readiness' "$CAPTURE"; then
   echo "expected success receipt artifacts to include pre-real-host readiness evidence"
   cat "$CAPTURE"
+  exit 1
+fi
+
+echo "[three-machine-prod-signoff] summary log redacts auth material"
+: >"$CAPTURE"
+printf '1\n' >"$runtime_doctor_count"
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+THREE_MACHINE_PROD_SIGNOFF_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+FAKE_PROD_SIGNOFF_SECRET_OUTPUT=1 \
+FAKE_SIGNOFF_RUNTIME_SECRET_OUTPUT=1 \
+./scripts/three_machine_prod_signoff.sh \
+  --directory-a https://198.51.100.10:8081 \
+  --directory-b https://203.0.113.20:8081 \
+  --issuer-url https://198.51.100.10:8082 \
+  --entry-url https://198.51.100.10:8083 \
+  --exit-url https://203.0.113.20:8084 \
+  --subject inv-signoff-redact \
+  --pre-real-host-readiness 1 \
+  --print-summary-json 1 >/tmp/integration_three_machine_prod_signoff_redaction.log 2>&1
+
+redaction_summary_json="$(sed -n 's/^summary_json: //p' /tmp/integration_three_machine_prod_signoff_redaction.log | tail -n 1)"
+if [[ -z "$redaction_summary_json" || ! -f "$redaction_summary_json" ]]; then
+  echo "expected signoff redaction summary json file missing"
+  cat /tmp/integration_three_machine_prod_signoff_redaction.log
+  exit 1
+fi
+redaction_summary_log="$(jq -r '.artifacts.summary_log // ""' "$redaction_summary_json")"
+if [[ -z "$redaction_summary_log" || ! -f "$redaction_summary_log" ]]; then
+  echo "expected signoff redaction summary log artifact missing"
+  cat "$redaction_summary_json"
+  exit 1
+fi
+if rg -q 'secret-auth-123|secret-env-456|secret-bearer-789|secret-admin-000|inv-signoff-redact|inv-secret-leak' "$redaction_summary_log"; then
+  echo "three-machine-prod-signoff summary log leaked sensitive material"
+  cat "$redaction_summary_log"
+  exit 1
+fi
+if ! rg -q '\[REDACTED\]|\[REDACTED_INVITE\]' "$redaction_summary_log"; then
+  echo "three-machine-prod-signoff summary log did not include expected redaction markers"
+  cat "$redaction_summary_log"
+  exit 1
+fi
+redaction_runtime_log="$(jq -r '.runtime_gate.artifacts.doctor_before_log // ""' "$redaction_summary_json")"
+if [[ -z "$redaction_runtime_log" || ! -f "$redaction_runtime_log" ]]; then
+  echo "expected signoff runtime doctor artifact missing"
+  cat "$redaction_summary_json"
+  exit 1
+fi
+if rg -q 'secret-auth-123|secret-env-456|secret-bearer-789|secret-admin-000|inv-runtime-secret|inv-secret-leak' "$redaction_runtime_log"; then
+  echo "three-machine-prod-signoff runtime doctor artifact leaked sensitive material"
+  cat "$redaction_runtime_log"
+  exit 1
+fi
+if ! rg -q '\[REDACTED\]|\[REDACTED_INVITE\]' "$redaction_runtime_log"; then
+  echo "three-machine-prod-signoff runtime doctor artifact did not include expected redaction markers"
+  cat "$redaction_runtime_log"
   exit 1
 fi
 
@@ -679,6 +762,7 @@ fi
 
 echo "[three-machine-prod-signoff] defer-no-root pre-real-host readiness root-required path"
 : >"$CAPTURE"
+set +e
 FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
 FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
 FAKE_PRE_REAL_HOST_FAIL_ROOT_REQUIRED=1 \
@@ -692,7 +776,14 @@ THREE_MACHINE_PROD_SIGNOFF_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
   --defer-no-root 1 \
   --pre-real-host-readiness 1 \
   --print-summary-json 1 >/tmp/integration_three_machine_prod_signoff_pre_readiness_defer_root.log 2>&1
+defer_root_rc=$?
+set -e
 
+if [[ "$defer_root_rc" -ne 1 ]]; then
+  echo "expected defer-no-root root-required production signoff to return non-zero with rc=1"
+  cat /tmp/integration_three_machine_prod_signoff_pre_readiness_defer_root.log
+  exit 1
+fi
 if ! rg -q 'three-machine-prod-signoff: status=skip stage=pre-real-host-readiness' /tmp/integration_three_machine_prod_signoff_pre_readiness_defer_root.log; then
   echo "expected skip status for defer-no-root root-required pre-real-host readiness path"
   cat /tmp/integration_three_machine_prod_signoff_pre_readiness_defer_root.log
@@ -784,6 +875,172 @@ fi
 if ! rg -q 'three-machine-prod-signoff requires --prod-profile 1' /tmp/integration_three_machine_prod_signoff_prod_profile_zero.log; then
   echo "expected clear prod-profile fail-close message"
   cat /tmp/integration_three_machine_prod_signoff_prod_profile_zero.log
+  exit 1
+fi
+
+echo "[three-machine-prod-signoff] preflight bypass fail-close path"
+set +e
+./scripts/three_machine_prod_signoff.sh --preflight-check 0 >/tmp/integration_three_machine_prod_signoff_preflight_zero.log 2>&1
+preflight_zero_rc=$?
+set -e
+if [[ "$preflight_zero_rc" -ne 2 ]]; then
+  echo "expected three-machine-prod-signoff --preflight-check 0 to fail with rc=2"
+  cat /tmp/integration_three_machine_prod_signoff_preflight_zero.log
+  exit 1
+fi
+if ! rg -q 'three-machine-prod-signoff requires --preflight-check 1' /tmp/integration_three_machine_prod_signoff_preflight_zero.log; then
+  echo "expected clear preflight fail-close message"
+  cat /tmp/integration_three_machine_prod_signoff_preflight_zero.log
+  exit 1
+fi
+
+echo "[three-machine-prod-signoff] signoff equals-form bypass fail-close path"
+set +e
+./scripts/three_machine_prod_signoff.sh --signoff-check=0 >/tmp/integration_three_machine_prod_signoff_signoff_equals_zero.log 2>&1
+signoff_equals_zero_rc=$?
+set -e
+if [[ "$signoff_equals_zero_rc" -ne 2 ]]; then
+  echo "expected three-machine-prod-signoff --signoff-check=0 to fail with rc=2"
+  cat /tmp/integration_three_machine_prod_signoff_signoff_equals_zero.log
+  exit 1
+fi
+if ! rg -q 'three-machine-prod-signoff requires --signoff-check 1' /tmp/integration_three_machine_prod_signoff_signoff_equals_zero.log; then
+  echo "expected clear signoff fail-close message for equals-form"
+  cat /tmp/integration_three_machine_prod_signoff_signoff_equals_zero.log
+  exit 1
+fi
+
+echo "[three-machine-prod-signoff] weakened WG/signoff bypass fail-close path"
+set +e
+./scripts/three_machine_prod_signoff.sh \
+  --skip-wg 1 \
+  --signoff-require-full-sequence 0 \
+  --signoff-require-wg-validate-ok 0 \
+  --signoff-require-wg-soak-ok 0 \
+  --signoff-require-wg-validate-udp-source 0 \
+  --signoff-require-wg-validate-strict-distinct 0 \
+  --signoff-require-wg-soak-diversity-pass 0 >/tmp/integration_three_machine_prod_signoff_weakened_wg.log 2>&1
+weakened_wg_rc=$?
+set -e
+if [[ "$weakened_wg_rc" -ne 2 ]]; then
+  echo "expected three-machine-prod-signoff weakened WG/signoff bypass to fail with rc=2"
+  cat /tmp/integration_three_machine_prod_signoff_weakened_wg.log
+  exit 1
+fi
+if ! rg -q 'three-machine-prod-signoff rejects --skip-wg 1|three-machine-prod-signoff requires --signoff-require-full-sequence 1' /tmp/integration_three_machine_prod_signoff_weakened_wg.log; then
+  echo "expected clear weakened WG/signoff fail-close message"
+  cat /tmp/integration_three_machine_prod_signoff_weakened_wg.log
+  exit 1
+fi
+
+echo "[three-machine-prod-signoff] weakened WG floor fail-close path"
+set +e
+./scripts/three_machine_prod_signoff.sh \
+  --signoff-min-wg-soak-selection-lines 11 \
+  --signoff-min-wg-soak-entry-operators 1 \
+  --signoff-min-wg-soak-exit-operators 1 \
+  --signoff-min-wg-soak-cross-operator-pairs 1 \
+  --signoff-max-wg-soak-failed-rounds 1 >/tmp/integration_three_machine_prod_signoff_weakened_wg_floors.log 2>&1
+weakened_wg_floors_rc=$?
+set -e
+if [[ "$weakened_wg_floors_rc" -ne 2 ]]; then
+  echo "expected three-machine-prod-signoff weakened WG floors to fail with rc=2"
+  cat /tmp/integration_three_machine_prod_signoff_weakened_wg_floors.log
+  exit 1
+fi
+if ! rg -q 'three-machine-prod-signoff requires --signoff-min-wg-soak-selection-lines >= 12|three-machine-prod-signoff requires --signoff-max-wg-soak-failed-rounds <= 0' /tmp/integration_three_machine_prod_signoff_weakened_wg_floors.log; then
+  echo "expected clear weakened WG floor fail-close message"
+  cat /tmp/integration_three_machine_prod_signoff_weakened_wg_floors.log
+  exit 1
+fi
+
+echo "[three-machine-prod-signoff] runtime-doctor bypass fail-close path"
+set +e
+./scripts/three_machine_prod_signoff.sh --runtime-doctor 0 >/tmp/integration_three_machine_prod_signoff_runtime_doctor_zero.log 2>&1
+runtime_doctor_zero_rc=$?
+set -e
+if [[ "$runtime_doctor_zero_rc" -ne 2 ]]; then
+  echo "expected three-machine-prod-signoff --runtime-doctor 0 to fail with rc=2"
+  cat /tmp/integration_three_machine_prod_signoff_runtime_doctor_zero.log
+  exit 1
+fi
+if ! rg -q 'three-machine-prod-signoff requires --runtime-doctor 1' /tmp/integration_three_machine_prod_signoff_runtime_doctor_zero.log; then
+  echo "expected clear runtime-doctor fail-close message"
+  cat /tmp/integration_three_machine_prod_signoff_runtime_doctor_zero.log
+  exit 1
+fi
+
+echo "[three-machine-prod-signoff] runtime-doctor equals-form bypass fail-close path"
+set +e
+./scripts/three_machine_prod_signoff.sh --runtime-doctor=0 >/tmp/integration_three_machine_prod_signoff_runtime_doctor_equals_zero.log 2>&1
+runtime_doctor_equals_zero_rc=$?
+set -e
+if [[ "$runtime_doctor_equals_zero_rc" -ne 2 ]]; then
+  echo "expected three-machine-prod-signoff --runtime-doctor=0 to fail with rc=2"
+  cat /tmp/integration_three_machine_prod_signoff_runtime_doctor_equals_zero.log
+  exit 1
+fi
+if ! rg -q 'three-machine-prod-signoff requires --runtime-doctor 1' /tmp/integration_three_machine_prod_signoff_runtime_doctor_equals_zero.log; then
+  echo "expected clear runtime-doctor fail-close message for equals-form"
+  cat /tmp/integration_three_machine_prod_signoff_runtime_doctor_equals_zero.log
+  exit 1
+fi
+
+echo "[three-machine-prod-signoff] stricter WG floors are preserved"
+: >"$CAPTURE"
+printf '1\n' >"$runtime_doctor_count"
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+THREE_MACHINE_PROD_SIGNOFF_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+./scripts/three_machine_prod_signoff.sh \
+  --directory-a https://198.51.100.10:8081 \
+  --directory-b https://203.0.113.20:8081 \
+  --issuer-url https://198.51.100.10:8082 \
+  --entry-url https://198.51.100.10:8083 \
+  --exit-url https://203.0.113.20:8084 \
+  --signoff-min-wg-soak-selection-lines 16 \
+  --signoff-min-wg-soak-cross-operator-pairs 4 >/tmp/integration_three_machine_prod_signoff_stricter_floors.log 2>&1
+stricter_floor_line="$(rg '^three-machine-prod-bundle ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$stricter_floor_line" ]]; then
+  echo "expected bundle call for stricter floor path"
+  cat "$CAPTURE"
+  cat /tmp/integration_three_machine_prod_signoff_stricter_floors.log
+  exit 1
+fi
+if ! grep -F -- '--signoff-min-wg-soak-selection-lines 16' <<<"$stricter_floor_line" >/dev/null; then
+  echo "expected wrapper to preserve stricter selection-lines floor"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! grep -F -- '--signoff-min-wg-soak-cross-operator-pairs 4' <<<"$stricter_floor_line" >/dev/null; then
+  echo "expected wrapper to preserve stricter cross-operator-pairs floor"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+echo "[three-machine-prod-signoff] env preflight bypass is overridden"
+: >"$CAPTURE"
+printf '1\n' >"$runtime_doctor_count"
+EASY_NODE_PROD_BUNDLE_PREFLIGHT_CHECK=0 \
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+THREE_MACHINE_PROD_SIGNOFF_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+./scripts/three_machine_prod_signoff.sh \
+  --directory-a https://198.51.100.10:8081 \
+  --directory-b https://203.0.113.20:8081 \
+  --issuer-url https://198.51.100.10:8082 \
+  --entry-url https://198.51.100.10:8083 \
+  --exit-url https://203.0.113.20:8084 >/tmp/integration_three_machine_prod_signoff_env_preflight.log 2>&1
+env_preflight_line="$(rg '^three-machine-prod-bundle ' "$CAPTURE" | tail -n 1 || true)"
+if [[ -z "$env_preflight_line" ]]; then
+  echo "expected bundle call for env preflight override path"
+  cat "$CAPTURE"
+  cat /tmp/integration_three_machine_prod_signoff_env_preflight.log
+  exit 1
+fi
+if ! grep -F -- '--preflight-check 1' <<<"$env_preflight_line" >/dev/null; then
+  echo "expected wrapper to override EASY_NODE_PROD_BUNDLE_PREFLIGHT_CHECK=0"
+  cat "$CAPTURE"
   exit 1
 fi
 

@@ -364,31 +364,7 @@ echo "[ci] wg-only stack wiring integration"
 ./scripts/integration_wg_only_stack_wiring.sh
 
 echo "[ci] internal topology smoke"
-CI_LOCAL_DEMO_LOG="$(mktemp "${TMPDIR:-/tmp}/ci_demo.XXXXXX.log")"
-set +e
-DEMO_DURATION_SEC="${DEMO_DURATION_SEC:-8}" ./scripts/demo_internal_topology.sh >"$CI_LOCAL_DEMO_LOG" 2>&1
-ci_local_demo_rc=$?
-set -e
-if [[ "$ci_local_demo_rc" -ne 0 && "$ci_local_demo_rc" -ne 124 && "$ci_local_demo_rc" -ne 137 ]]; then
-  echo "[ci] internal topology smoke failed with unexpected exit code: ${ci_local_demo_rc}"
-  cat "$CI_LOCAL_DEMO_LOG"
-  exit "$ci_local_demo_rc"
-fi
-if ! rg -q "exit accepted opaque packet" "$CI_LOCAL_DEMO_LOG"; then
-  echo "[ci] missing expected packet acceptance log"
-  cat "$CI_LOCAL_DEMO_LOG"
-  exit 1
-fi
-if ! rg -q "wgiotap packets=" "$CI_LOCAL_DEMO_LOG"; then
-  echo "[ci] missing expected tap stats log"
-  cat "$CI_LOCAL_DEMO_LOG"
-  exit 1
-fi
-if ! rg -q "(client downlink opaque packets|client forwarded opaque udp packets count=)" "$CI_LOCAL_DEMO_LOG"; then
-  echo "[ci] missing expected client relay/downlink log"
-  cat "$CI_LOCAL_DEMO_LOG"
-  exit 1
-fi
+./scripts/integration_demo_internal_topology.sh
 
 echo "[ci] challenge integration"
 ./scripts/integration_challenge.sh

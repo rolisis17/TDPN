@@ -132,7 +132,6 @@ PROD_PILOT_PRE_REAL_HOST_READINESS_EFFECTIVE_UID_OVERRIDE=1000 \
 ./scripts/prod_pilot_runbook.sh \
   --bootstrap-directory https://dir-a:8081 \
   --subject pilot-client \
-  --signoff-check 0 \
   --wg-slo-profile strict >/tmp/integration_prod_pilot_runbook_wrapper.log 2>&1
 
 if ! rg -q -- '^pre-real-host-readiness' "$CAPTURE"; then
@@ -252,11 +251,6 @@ if ! printf '%s\n' "$bundle_line" | rg -q -- '--subject pilot-client'; then
   cat "$CAPTURE"
   exit 1
 fi
-if ! printf '%s\n' "$bundle_line" | rg -q -- '--signoff-check 0'; then
-  echo "prod-pilot wrapper missing caller override --signoff-check 0"
-  cat "$CAPTURE"
-  exit 1
-fi
 if ! printf '%s\n' "$bundle_line" | rg -q -- '--wg-slo-profile strict'; then
   echo "prod-pilot wrapper missing caller override --wg-slo-profile strict"
   cat "$CAPTURE"
@@ -298,8 +292,88 @@ if ! printf '%s\n' "$dashboard_line" | rg -q -- '--require-wg-soak-diversity-pas
   exit 1
 fi
 
+expect_prod_pilot_reject() {
+  local label="$1"
+  local expected_pattern="$2"
+  shift 2
+  local output="$TMP_DIR/prod_pilot_reject_${label}.log"
+  : >"$CAPTURE"
+  set +e
+  CAPTURE_FILE="$CAPTURE" \
+  EASY_NODE_SH="$FAKE_EASY_NODE" \
+  ./scripts/prod_pilot_runbook.sh "$@" >"$output" 2>&1
+  local rc=$?
+  set -e
+  if [[ "$rc" -ne 2 ]]; then
+    echo "prod-pilot wrapper should reject unsafe args for $label with rc=2, got rc=$rc"
+    cat "$output"
+    cat "$CAPTURE"
+    exit 1
+  fi
+  if ! rg -q -- "$expected_pattern" "$output"; then
+    echo "prod-pilot wrapper rejection for $label did not include expected hint: $expected_pattern"
+    cat "$output"
+    exit 1
+  fi
+  if [[ -s "$CAPTURE" ]]; then
+    echo "prod-pilot wrapper rejection for $label should not dispatch easy-node"
+    cat "$CAPTURE"
+    exit 1
+  fi
+}
+
+echo "[prod-pilot] unsafe policy overrides are rejected"
+expect_prod_pilot_reject signoff_check 'requires --signoff-check 1' --signoff-check 0
+expect_prod_pilot_reject skip_wg 'rejects --skip-wg=1' --skip-wg=1
+expect_prod_pilot_reject lowered_signoff_floor 'requires --signoff-min-wg-soak-selection-lines >= 12' --signoff-min-wg-soak-selection-lines 11
+expect_prod_pilot_reject widened_failure_budget 'requires --signoff-max-wg-soak-failed-rounds <= 0' --signoff-max-wg-soak-failed-rounds 1
+
 : >"$CAPTURE"
-echo "[prod-pilot] root-only deferred pre-real-host readiness continues"
+echo "[prod-pilot] stricter caller floors are preserved"
+CAPTURE_FILE="$CAPTURE" \
+EASY_NODE_SH="$FAKE_EASY_NODE" \
+PROD_PILOT_PRE_REAL_HOST_READINESS=0 \
+PROD_PILOT_SLO_DASHBOARD_ENABLE=0 \
+./scripts/prod_pilot_runbook.sh \
+  --bootstrap-directory https://dir-a:8081 \
+  --signoff-min-wg-soak-selection-lines 16 \
+  --wg-min-cross-operator-pairs 4 >/tmp/integration_prod_pilot_runbook_stricter_floors.log 2>&1
+bundle_line="$(sed -n '1p' "$CAPTURE")"
+if ! printf '%s\n' "$bundle_line" | rg -q -- '--signoff-min-wg-soak-selection-lines 16'; then
+  echo "prod-pilot wrapper did not preserve stricter signoff selection floor"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$bundle_line" | rg -q -- '--wg-min-cross-operator-pairs 4'; then
+  echo "prod-pilot wrapper did not preserve stricter WG cross-operator floor"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+: >"$CAPTURE"
+echo "[prod-pilot] weakened env defaults are overwritten by final strict args"
+CAPTURE_FILE="$CAPTURE" \
+EASY_NODE_SH="$FAKE_EASY_NODE" \
+PROD_PILOT_PRE_REAL_HOST_READINESS=0 \
+PROD_PILOT_SLO_DASHBOARD_ENABLE=0 \
+PROD_PILOT_SIGNOFF_CHECK=0 \
+PROD_PILOT_SKIP_WG=1 \
+./scripts/prod_pilot_runbook.sh \
+  --bootstrap-directory https://dir-a:8081 >/tmp/integration_prod_pilot_runbook_env_weakened.log 2>&1
+bundle_line="$(sed -n '1p' "$CAPTURE")"
+if ! printf '%s\n' "$bundle_line" | rg -q -- '--signoff-check 0 .*--signoff-check 1'; then
+  echo "prod-pilot wrapper did not append final strict --signoff-check 1 after env weakening"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$bundle_line" | rg -q -- '--skip-wg 1 .*--skip-wg 0'; then
+  echo "prod-pilot wrapper did not append final strict --skip-wg 0 after env weakening"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+: >"$CAPTURE"
+echo "[prod-pilot] root-only deferred pre-real-host readiness blocks"
 set +e
 CAPTURE_FILE="$CAPTURE" \
 FAKE_MODE="root-deferred" \
@@ -309,14 +383,14 @@ PROD_PILOT_PRE_REAL_HOST_READINESS_EFFECTIVE_UID_OVERRIDE=1000 \
   --bootstrap-directory https://dir-a:8081 >/tmp/integration_prod_pilot_runbook_root_deferred.log 2>&1
 root_deferred_rc=$?
 set -e
-if [[ "$root_deferred_rc" -ne 0 ]]; then
-  echo "prod-pilot wrapper should continue when pre-real-host readiness reports root-only deferred condition"
+if [[ "$root_deferred_rc" -eq 0 ]]; then
+  echo "prod-pilot wrapper should fail closed when pre-real-host readiness reports root-only deferred condition"
   cat /tmp/integration_prod_pilot_runbook_root_deferred.log
   cat "$CAPTURE"
   exit 1
 fi
-if ! rg -q -- 'warning: pre-real-host readiness reported root-only deferred condition; continuing to bundle flow' /tmp/integration_prod_pilot_runbook_root_deferred.log; then
-  echo "prod-pilot wrapper missing root-only deferred continuation warning"
+if ! rg -q -- 'pre-real-host readiness blocked pilot runbook: root-only checks were deferred; rerun with sudo' /tmp/integration_prod_pilot_runbook_root_deferred.log; then
+  echo "prod-pilot wrapper missing root-only deferred fail-closed hint"
   cat /tmp/integration_prod_pilot_runbook_root_deferred.log
   exit 1
 fi
@@ -325,13 +399,13 @@ if ! rg -q -- '^pre-real-host-readiness .*--defer-no-root 1 ' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
-if ! rg -q -- '^three-machine-prod-bundle' "$CAPTURE"; then
-  echo "prod-pilot wrapper root-deferred run should continue to three-machine-prod-bundle"
+if rg -q -- '^three-machine-prod-bundle' "$CAPTURE"; then
+  echo "prod-pilot wrapper root-deferred run should not continue to three-machine-prod-bundle"
   cat "$CAPTURE"
   exit 1
 fi
-if ! rg -q -- '^prod-gate-slo-dashboard' "$CAPTURE"; then
-  echo "prod-pilot wrapper root-deferred run should continue to prod-gate-slo-dashboard"
+if rg -q -- '^prod-gate-slo-dashboard' "$CAPTURE"; then
+  echo "prod-pilot wrapper root-deferred run should not continue to prod-gate-slo-dashboard"
   cat "$CAPTURE"
   exit 1
 fi

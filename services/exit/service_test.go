@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"privacynode/pkg/crypto"
+	"privacynode/pkg/httplimit"
 	"privacynode/pkg/policy"
 	"privacynode/pkg/proto"
 	"privacynode/pkg/relay"
@@ -1050,6 +1051,53 @@ func TestHandlePathOpenRejectsMalformedJSONBodies(t *testing.T) {
 				t.Fatalf("expected invalid json error body, got %q", rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestHandlePathOpenRateLimitsByRemoteIP(t *testing.T) {
+	s := &Service{
+		pathOpenRateLimiter: httplimit.NewFixedWindowLimiter(1, 16),
+	}
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(`{`))
+	firstReq.RemoteAddr = "203.0.113.9:49152"
+	firstRR := httptest.NewRecorder()
+	s.handlePathOpen(firstRR, firstReq)
+	if firstRR.Code == http.StatusTooManyRequests {
+		t.Fatalf("expected first request to pass limiter, got HTTP %d", firstRR.Code)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(`{`))
+	secondReq.RemoteAddr = "203.0.113.9:49153"
+	secondRR := httptest.NewRecorder()
+	s.handlePathOpen(secondRR, secondReq)
+	if secondRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected second request to be rate limited, got HTTP %d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	if !strings.Contains(secondRR.Body.String(), "rate limited") {
+		t.Fatalf("expected rate limit response body, got %q", secondRR.Body.String())
+	}
+}
+
+func TestHandlePathOpenRejectsWhenInflightLimitFull(t *testing.T) {
+	s := &Service{
+		pathOpenInflightLimiter: httplimit.NewInflightLimiter(1),
+	}
+	release, ok := s.pathOpenInflightLimiter.Acquire()
+	if !ok {
+		t.Fatalf("failed to occupy in-flight limiter")
+	}
+	defer release()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(`{`))
+	req.RemoteAddr = "203.0.113.10:49152"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected in-flight rejection, got HTTP %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "too many in-flight requests") {
+		t.Fatalf("expected in-flight response body, got %q", rr.Body.String())
 	}
 }
 
@@ -5417,6 +5465,36 @@ func TestValidateRuntimeConfigProdStrictRejectsInsecureSkipVerify(t *testing.T) 
 		t.Fatalf("expected strict mode validation failure")
 	}
 	if !strings.Contains(err.Error(), "MTLS_INSECURE_SKIP_VERIFY") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigPublicBindRequiresMTLSOrDangerousOverride(t *testing.T) {
+	s := &Service{addr: "0.0.0.0:8084", wgPubKey: defaultExitWGPubKey}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected public bind without mTLS to fail closed")
+	}
+	if !strings.Contains(err.Error(), "EXIT_ALLOW_DANGEROUS_INSECURE_PUBLIC_BIND") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	t.Setenv(allowInsecurePublicBind, "1")
+	if err := s.validateRuntimeConfig(); err != nil {
+		t.Fatalf("expected explicit dangerous lab override to allow public plaintext bind, got %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigPublicBindRejectsOptionalClientCertMTLS(t *testing.T) {
+	t.Setenv("MTLS_ENABLE", "1")
+	t.Setenv("MTLS_REQUIRE_CLIENT_CERT", "0")
+
+	s := &Service{addr: "0.0.0.0:8084"}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected public mTLS bind to require client certs")
+	}
+	if !strings.Contains(err.Error(), "MTLS_REQUIRE_CLIENT_CERT=1") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

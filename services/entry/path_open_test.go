@@ -1458,6 +1458,118 @@ func TestHandlePathOpenChecksBanBeforeDirectoryFetch(t *testing.T) {
 	}
 }
 
+func TestHandlePathOpenSolvedPuzzleDoesNotAccumulateAbuseStrikeAndRejectsReplay(t *testing.T) {
+	exitCalls := 0
+	exitSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		exitCalls++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{
+			Accepted:   true,
+			SessionID:  "session-ok",
+			SessionExp: time.Now().Add(5 * time.Minute).Unix(),
+			Transport:  "wireguard-udp",
+		})
+	}))
+	defer exitSrv.Close()
+
+	s := &Service{
+		dataAddr:          "127.0.0.1:51820",
+		httpClient:        exitSrv.Client(),
+		sessions:          map[string]sessionState{},
+		exitRouteCache:    map[string]exitRoute{"exit-b": {controlURL: exitSrv.URL, dataAddr: "127.0.0.1:51821", operatorID: "op-exit", fetchedAt: time.Now(), validUntil: time.Now().Add(time.Minute)}},
+		buckets:           map[string]rateBucket{},
+		abuse:             map[string]abuseState{},
+		openRPS:           0,
+		openBanThreshold:  3,
+		openBanDuration:   time.Minute,
+		puzzleDifficulty:  1,
+		puzzleSecret:      "test-puzzle-secret",
+		puzzleAdaptive:    true,
+		puzzleMax:         6,
+		routeTTL:          time.Minute,
+		clientRebindAfter: time.Minute,
+	}
+
+	openReq := proto.PathOpenRequest{
+		ExitID:     "exit-b",
+		Transport:  "wireguard-udp",
+		TokenProof: "proof",
+	}
+	reqBody, err := json.Marshal(openReq)
+	if err != nil {
+		t.Fatalf("marshal challenge request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:41007"
+	rr := httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected challenge status 200, got %d", rr.Code)
+	}
+	var challenge proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&challenge); err != nil {
+		t.Fatalf("decode challenge: %v", err)
+	}
+	if challenge.Accepted || challenge.Reason != "challenge-required" || challenge.Challenge == "" || challenge.Difficulty <= 0 {
+		t.Fatalf("unexpected challenge response: %+v", challenge)
+	}
+
+	nonce, digest, ok := brute(challenge.Challenge, challenge.Difficulty, 100000)
+	if !ok {
+		t.Fatalf("failed to solve issued challenge")
+	}
+	openReq.PuzzleNonce = nonce
+	openReq.PuzzleDigest = digest
+	reqBody, err = json.Marshal(openReq)
+	if err != nil {
+		t.Fatalf("marshal solved request: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:41007"
+	rr = httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected solved status 200, got %d", rr.Code)
+	}
+	var solved proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&solved); err != nil {
+		t.Fatalf("decode solved response: %v", err)
+	}
+	if !solved.Accepted {
+		t.Fatalf("expected solved challenge to open path, got %+v", solved)
+	}
+	if exitCalls != 1 {
+		t.Fatalf("expected one exit call after solved challenge, got %d", exitCalls)
+	}
+	if strikes := s.abuse["127.0.0.1"].strikes; strikes != 1 {
+		t.Fatalf("expected solved retry not to add abuse strike, got strikes=%d", strikes)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/path/open", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:41007"
+	rr = httptest.NewRecorder()
+	s.handlePathOpen(rr, req)
+
+	var replay proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&replay); err != nil {
+		t.Fatalf("decode replay response: %v", err)
+	}
+	if replay.Accepted {
+		t.Fatalf("expected replayed puzzle solution to be rejected")
+	}
+	if replay.Reason != "challenge-required" {
+		t.Fatalf("unexpected replay reason: %q", replay.Reason)
+	}
+	if exitCalls != 1 {
+		t.Fatalf("expected replay to be rejected before exit call, got exitCalls=%d", exitCalls)
+	}
+	if strikes := s.abuse["127.0.0.1"].strikes; strikes != 2 {
+		t.Fatalf("expected replay to add one abuse strike, got strikes=%d", strikes)
+	}
+}
+
 func TestHandlePathOpenRejectsSameOperatorWhenDistinctRequired(t *testing.T) {
 	durl := "http://directory.local"
 	handlers := make(map[string]func(*http.Request) (*http.Response, error))
@@ -3468,6 +3580,25 @@ func TestHandlePathOpenRejectsTrailingJSON(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "invalid json") {
 		t.Fatalf("expected invalid json error body, got %q", rr.Body.String())
+	}
+}
+
+func TestHandlePathOpenChecksInflightBeforeJSONDecode(t *testing.T) {
+	sem := make(chan struct{}, 1)
+	sem <- struct{}{}
+	s := &Service{openInflightSem: sem}
+	req := httptest.NewRequest(http.MethodPost, "/v1/path/open", strings.NewReader(`{`))
+	req.RemoteAddr = "198.51.100.88:41005"
+	rr := httptest.NewRecorder()
+
+	s.handlePathOpen(rr, req)
+
+	var out proto.PathOpenResponse
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v body=%q", err, rr.Body.String())
+	}
+	if out.Accepted || out.Reason != "entry-overloaded" {
+		t.Fatalf("expected entry-overloaded before JSON decode, got accepted=%t reason=%q status=%d", out.Accepted, out.Reason, rr.Code)
 	}
 }
 

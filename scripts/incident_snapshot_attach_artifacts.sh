@@ -32,6 +32,14 @@ abs_path() {
   path="$(trim "$path")"
   if [[ -z "$path" ]]; then
     printf '%s' ""
+  elif [[ "$path" =~ ^[A-Za-z]:[\\/].* ]]; then
+    if command -v wslpath >/dev/null 2>&1; then
+      wslpath -u "$path" 2>/dev/null || printf '%s' "$path"
+    elif command -v cygpath >/dev/null 2>&1; then
+      cygpath -u "$path" 2>/dev/null || printf '%s' "$path"
+    else
+      printf '%s' "$path"
+    fi
   elif [[ "$path" == /* ]]; then
     printf '%s' "$path"
   else
@@ -66,6 +74,67 @@ hash_file_line() {
     return 0
   fi
   return 1
+}
+
+redact_sensitive_stream() {
+  sed -E '
+s/(--(subject|anon-cred|campaign-subject|campaign-anon-cred|invite-key|key|token|auth-token|admin-token|authorization|bearer|password|secret|api-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g
+s/((SUBJECT|ANON_CRED|INVITE_KEY|TOKEN|AUTH_TOKEN|ADMIN_TOKEN|AUTHORIZATION|BEARER|PASSWORD|SECRET|API_KEY)=)[^[:space:]]+/\1[redacted]/g
+s/((Authorization|X-Admin-Token):[[:space:]]*(Bearer[[:space:]]*)?)[^[:space:]]+/\1[redacted]/Ig
+s/("(subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|password|secret|auth_token|admin_token|authorization|bearer)"[[:space:]]*:[[:space:]]*")[^"]+(")/\1[redacted]\3/Ig
+s/^([[:space:]]*(subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|password|secret|auth_token|admin_token|authorization|bearer)[[:space:]]*:[[:space:]]*)[^[:space:]]+/\1[redacted]/Ig
+s/(^|[[:space:]])((subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|password|secret|auth_token|admin_token|authorization|bearer)[[:space:]]*:[[:space:]]*)[^[:space:]]+/\1\2[redacted]/Ig
+s~([A-Za-z][A-Za-z0-9+.-]*://)[^/?#@[:space:]]+@~\1[redacted]@~g
+s~([?&#](subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|auth_token|admin_token|authorization|bearer|password|secret)=)[^,&#[:space:]]+~\1[redacted]~Ig
+s/inv-[A-Za-z0-9._:-]+/[redacted-invite]/g
+'
+}
+
+source_ref_for_path() {
+  local value="$1"
+  local digest=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(printf '%s' "$value" | sha256sum | awk '{print $1}')"
+  elif command -v shasum >/dev/null 2>&1; then
+    digest="$(printf '%s' "$value" | shasum -a 256 | awk '{print $1}')"
+  elif command -v cksum >/dev/null 2>&1; then
+    digest="$(printf '%s' "$value" | cksum | awk '{print $1}')"
+  fi
+  if [[ -z "$digest" ]]; then
+    printf '%s' "[redacted-source-path]"
+  else
+    printf 'source-sha256:%s' "$digest"
+  fi
+}
+
+text_file_for_redaction() {
+  local file="$1"
+  [[ -f "$file" ]] || return 1
+  [[ ! -s "$file" ]] || LC_ALL=C grep -Iq . "$file"
+}
+
+redact_file_in_place() {
+  local file="$1"
+  local tmp_file=""
+  text_file_for_redaction "$file" || return 0
+  tmp_file="${file}.redacted.$$"
+  if redact_sensitive_stream <"$file" >"$tmp_file"; then
+    mv "$tmp_file" "$file"
+  else
+    rm -f "$tmp_file" >/dev/null 2>&1 || true
+  fi
+}
+
+redact_tree_text_files() {
+  local path="$1"
+  if [[ -f "$path" ]]; then
+    redact_file_in_place "$path"
+    return 0
+  fi
+  [[ -d "$path" ]] || return 0
+  while IFS= read -r redact_path; do
+    redact_file_in_place "$redact_path"
+  done < <(find "$path" -type f -print)
 }
 
 refresh_bundle_integrity() {
@@ -108,15 +177,17 @@ sanitize_attachment_name() {
 manifest_has_source() {
   local manifest_file="$1"
   local source_path="$2"
+  local source_ref="$3"
   [[ -f "$manifest_file" ]] || return 1
-  awk -F'\t' -v src="$source_path" '$3 == src {found=1} END {exit found ? 0 : 1}' "$manifest_file"
+  awk -F'\t' -v src="$source_path" -v ref="$source_ref" '$3 == src || $3 == ref {found=1} END {exit found ? 0 : 1}' "$manifest_file"
 }
 
 skipped_has_source() {
   local skipped_file="$1"
   local source_path="$2"
+  local source_ref="$3"
   [[ -f "$skipped_file" ]] || return 1
-  awk -F'\t' -v src="$source_path" '$1 == src {found=1} END {exit found ? 0 : 1}' "$skipped_file"
+  awk -F'\t' -v src="$source_path" -v ref="$source_ref" '$1 == src || $1 == ref {found=1} END {exit found ? 0 : 1}' "$skipped_file"
 }
 
 bundle_dir=""
@@ -169,7 +240,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for cmd in jq tar find sed awk date cp mkdir; do
+for cmd in jq tar find sed awk date cp mkdir mv grep; do
   need_cmd "$cmd"
 done
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
@@ -218,14 +289,15 @@ attachment_index="$(awk 'END {print NR+0}' "$attachments_manifest" 2>/dev/null |
 for artifact in "${attach_artifacts[@]}"; do
   artifact="$(trim "$artifact")"
   [[ -n "$artifact" ]] || continue
+  artifact_source_ref="$(source_ref_for_path "$artifact")"
 
-  if manifest_has_source "$attachments_manifest" "$artifact"; then
+  if manifest_has_source "$attachments_manifest" "$artifact" "$artifact_source_ref"; then
     continue
   fi
 
   if [[ ! -e "$artifact" ]]; then
-    if ! skipped_has_source "$attachments_skipped" "$artifact"; then
-      printf '%s\t%s\n' "$artifact" "missing" >>"$attachments_skipped"
+    if ! skipped_has_source "$attachments_skipped" "$artifact" "$artifact_source_ref"; then
+      printf '%s\t%s\n' "$artifact_source_ref" "missing" >>"$attachments_skipped"
     fi
     continue
   fi
@@ -243,9 +315,10 @@ for artifact in "${attach_artifacts[@]}"; do
   fi
 
   if cp -R "$artifact" "$artifact_dest_path" 2>/dev/null; then
-    printf '%s\t%s\t%s\n' "$artifact_dest_rel" "$artifact_type" "$artifact" >>"$attachments_manifest"
+    redact_tree_text_files "$artifact_dest_path"
+    printf '%s\t%s\t%s\n' "$artifact_dest_rel" "$artifact_type" "$artifact_source_ref" >>"$attachments_manifest"
   else
-    printf '%s\t%s\n' "$artifact" "copy_failed" >>"$attachments_skipped"
+    printf '%s\t%s\n' "$artifact_source_ref" "copy_failed" >>"$attachments_skipped"
   fi
 done
 
@@ -254,6 +327,11 @@ if [[ ! -x "$summary_script" ]]; then
   echo "missing incident summary script: $summary_script"
   exit 2
 fi
+redact_tree_text_files "$attachments_dir"
+redact_tree_text_files "$bundle_dir/docker"
+redact_tree_text_files "$bundle_dir/endpoints"
+redact_file_in_place "$bundle_dir/metadata.txt"
+redact_file_in_place "$bundle_dir/system/env_summary.txt"
 refresh_bundle_integrity "$bundle_dir" "$bundle_tar" "$manifest_file" "$bundle_tar_sha"
 
 "$summary_script" \

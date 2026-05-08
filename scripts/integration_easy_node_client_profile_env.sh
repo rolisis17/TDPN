@@ -19,6 +19,16 @@ DOCKER_STATE_DIR="$TMP_DIR/docker_state"
 mkdir -p "$TMP_BIN" "$LOG_DIR" "$DOCKER_STATE_DIR"
 
 cleanup() {
+  if [[ -d "${TMP_DIR:-}" ]]; then
+    local pid_file pid
+    for pid_file in "$TMP_DIR"/*.pid; do
+      [[ -f "$pid_file" ]] || continue
+      pid="$(cat "$pid_file" 2>/dev/null || true)"
+      if [[ "$pid" =~ ^[0-9]+$ ]]; then
+        kill "$pid" >/dev/null 2>&1 || true
+      fi
+    done
+  fi
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
@@ -99,7 +109,32 @@ fi
 exit 0
 EOF_DOCKER
 
-chmod +x "$TMP_BIN/curl" "$TMP_BIN/docker"
+cat >"$TMP_BIN/go" <<'EOF_GO'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$*" != "run ./cmd/node --client" ]]; then
+  echo "unexpected fake go invocation: $*" >&2
+  exit 19
+fi
+
+marker="${FAKE_GO_CHILD_MARKER:?}"
+pid_file="${FAKE_GO_CHILD_PID_FILE:?}"
+printf '2026/01/01 client selected entry=entry-op-a (http://entry-a) exit=exit-op-b (http://exit-b) entry_op=op-a exit_op=op-b token_exp=1\n'
+(
+  trap 'exit 0' TERM INT
+  trap '' HUP
+  while true; do
+    sleep 2
+    printf 'alive\n' >>"$marker"
+  done
+) &
+child_pid="$!"
+printf '%s\n' "$child_pid" >"$pid_file"
+wait "$child_pid"
+EOF_GO
+
+chmod +x "$TMP_BIN/curl" "$TMP_BIN/docker" "$TMP_BIN/go"
 
 run_client_test_capture() {
   local capture_file="$1"
@@ -292,6 +327,38 @@ fi
 if ! rg -q 'client image build failed with retryable error' "$TMP_DIR/build_retry.log"; then
   echo "expected retryable build failure marker"
   cat "$TMP_DIR/build_retry.log"
+  exit 1
+fi
+
+echo "[easy-node-client-profile-env] local client-test timeout kills go-run child"
+LOCAL_TIMEOUT_LOG="$TMP_DIR/local_timeout.log"
+LOCAL_TIMEOUT_MARKER="$TMP_DIR/local_timeout_child_alive.log"
+LOCAL_TIMEOUT_PID_FILE="$TMP_DIR/local_timeout_child.pid"
+rm -f "$LOCAL_TIMEOUT_LOG" "$LOCAL_TIMEOUT_MARKER" "$LOCAL_TIMEOUT_PID_FILE"
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_LOG_DIR="$LOG_DIR" \
+EASY_NODE_CLIENT_ENV_FILE="$CLIENT_ENV_FILE" \
+EASY_NODE_CLIENT_TEST_MODE=local \
+FAKE_GO_CHILD_MARKER="$LOCAL_TIMEOUT_MARKER" \
+FAKE_GO_CHILD_PID_FILE="$LOCAL_TIMEOUT_PID_FILE" \
+./scripts/easy_node.sh client-test \
+  --directory-urls "https://dir-a:8081,https://dir-b:8081" \
+  --issuer-url "https://issuer-a:8082" \
+  --entry-url "https://entry-a:8083" \
+  --exit-url "https://exit-a:8084" \
+  --subject "integration-client" \
+  --min-selection-lines 1 \
+  --min-entry-operators 1 \
+  --min-exit-operators 1 \
+  --require-cross-operator-pair 1 \
+  --timeout-sec 1 \
+  --beta-profile 0 \
+  --prod-profile 0 >"$LOCAL_TIMEOUT_LOG" 2>&1
+sleep 3
+if [[ -s "$LOCAL_TIMEOUT_MARKER" ]]; then
+  echo "local client-test timeout left go-run child alive"
+  cat "$LOCAL_TIMEOUT_LOG"
+  cat "$LOCAL_TIMEOUT_MARKER"
   exit 1
 fi
 

@@ -604,6 +604,78 @@ if [[ -f "$ALERT_SHOULD_NOT_RUN_2" ]]; then
   exit 1
 fi
 
+echo "[prod-pilot-cohort-quick-signoff] no-op signoff is rejected"
+: >"$SIGNOFF_CAPTURE"
+: >"$CHECK_CAPTURE"
+: >"$TREND_CAPTURE"
+: >"$ALERT_CAPTURE"
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+CHECK_CAPTURE_FILE="$CHECK_CAPTURE" \
+TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
+PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
+PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
+PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
+./scripts/prod_pilot_cohort_quick_signoff.sh \
+  --run-report-json ${TMP_DIR}/quick/report.json \
+  --reports-dir ${TMP_DIR}/quick/reports \
+  --check-latest 0 \
+  --check-trend 0 \
+  --check-alert 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_noop.log 2>&1
+noop_rc=$?
+set -e
+if [[ "$noop_rc" -ne 2 ]]; then
+  echo "expected no-op quick signoff to fail with rc=2, got rc=$noop_rc"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_noop.log
+  exit 1
+fi
+if ! rg -q -- 'at least one quick signoff check must be enabled' ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_noop.log; then
+  echo "expected no-op quick signoff rejection hint not found"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_noop.log
+  exit 1
+fi
+if [[ -s "$SIGNOFF_CAPTURE" || -s "$CHECK_CAPTURE" || -s "$TREND_CAPTURE" || -s "$ALERT_CAPTURE" ]]; then
+  echo "no-op quick signoff should not invoke any quick signoff subprocess"
+  cat "$SIGNOFF_CAPTURE" "$CHECK_CAPTURE" "$TREND_CAPTURE" "$ALERT_CAPTURE"
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-quick-signoff] cohort policy bypass is rejected"
+: >"$SIGNOFF_CAPTURE"
+: >"$CHECK_CAPTURE"
+: >"$TREND_CAPTURE"
+: >"$ALERT_CAPTURE"
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+CHECK_CAPTURE_FILE="$CHECK_CAPTURE" \
+TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
+PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
+PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
+PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
+./scripts/prod_pilot_cohort_quick_signoff.sh \
+  --run-report-json ${TMP_DIR}/quick/report.json \
+  --reports-dir ${TMP_DIR}/quick/reports \
+  --require-cohort-signoff-policy 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_policy_bypass.log 2>&1
+policy_bypass_rc=$?
+set -e
+if [[ "$policy_bypass_rc" -ne 2 ]]; then
+  echo "expected cohort policy bypass to fail with rc=2, got rc=$policy_bypass_rc"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_policy_bypass.log
+  exit 1
+fi
+if ! rg -q -- 'quick signoff requires --require-cohort-signoff-policy 1' ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_policy_bypass.log; then
+  echo "expected cohort policy bypass rejection hint not found"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_policy_bypass.log
+  exit 1
+fi
+if [[ -s "$SIGNOFF_CAPTURE" || -s "$CHECK_CAPTURE" || -s "$TREND_CAPTURE" || -s "$ALERT_CAPTURE" ]]; then
+  echo "cohort policy bypass should not invoke any quick signoff subprocess"
+  cat "$SIGNOFF_CAPTURE" "$CHECK_CAPTURE" "$TREND_CAPTURE" "$ALERT_CAPTURE"
+  exit 1
+fi
+
 cat >"$TMP_BIN/docker" <<'EOF_DOCKER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -641,7 +713,7 @@ SIGNOFF_FORWARD_CAPTURE_FILE="$SIGNOFF_FORWARD_CAPTURE" \
 PROD_PILOT_COHORT_QUICK_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
 ./scripts/easy_node.sh prod-pilot-cohort-quick-signoff \
   --run-report-json ${TMP_DIR}/quick/report.json \
-  --require-cohort-signoff-policy 0 \
+  --require-cohort-signoff-policy 1 \
   --require-trend-artifact-policy-match 0 \
   --incident-snapshot-min-attachment-count 2 \
   --incident-snapshot-max-skipped-count 0 \
@@ -658,7 +730,7 @@ if ! rg -q -- '--max-alert-severity OK' "$SIGNOFF_FORWARD_CAPTURE"; then
   cat "$SIGNOFF_FORWARD_CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--require-cohort-signoff-policy 0' "$SIGNOFF_FORWARD_CAPTURE"; then
+if ! rg -q -- '--require-cohort-signoff-policy 1' "$SIGNOFF_FORWARD_CAPTURE"; then
   echo "easy_node quick-signoff forwarding failed: missing --require-cohort-signoff-policy"
   cat "$SIGNOFF_FORWARD_CAPTURE"
   exit 1

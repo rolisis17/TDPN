@@ -28,6 +28,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"privacynode/pkg/crypto"
+	"privacynode/pkg/httplimit"
 	"privacynode/pkg/proto"
 	"privacynode/pkg/securehttp"
 )
@@ -57,6 +58,8 @@ type Service struct {
 	providerMinExitTier              int
 	providerMaxPerOperator           int
 	providerSplitRoles               bool
+	providerRelayUpsertRateLimiter   *httplimit.FixedWindowLimiter
+	providerRelayUpsertInflightLimit *httplimit.InflightLimiter
 	microExitBetaAllowed             bool
 	issuerTrustURLs                  []string
 	issuerTrustedKeysFile            string
@@ -69,6 +72,8 @@ type Service struct {
 	peerSyncSec                      int
 	gossipSec                        int
 	gossipFanout                     int
+	gossipPushRateLimiter            *httplimit.FixedWindowLimiter
+	gossipPushInflightLimiter        *httplimit.InflightLimiter
 	peerListTTL                      time.Duration
 	peerDiscoveryEnabled             bool
 	peerDiscoveryMax                 int
@@ -183,6 +188,9 @@ type peerPubKeyCacheEntry struct {
 
 const discoveredPeerUnknownOperator = "_unknown"
 const providerRelayUpsertMaxBodyBytes int64 = 128 * 1024
+const defaultDirectoryProviderRelayUpsertRPS = 256
+const defaultDirectoryProviderRelayUpsertMaxRateKeys = 65536
+const defaultDirectoryProviderRelayUpsertMaxInflight = 1024
 const providerRelayUpsertProofContext = "provider_relay_upsert_v1"
 const providerRelayUpsertProofReplayTTL = 15 * time.Minute
 const providerRelayUpsertProofNonceMaxLen = 128
@@ -196,6 +204,9 @@ const providerTokenClaimSubjectMaxLen = 128
 const providerTokenClaimIDMaxLen = 256
 const gossipRelaysMaxBodyBytes int64 = 1024 * 1024
 const gossipRelaysMaxDescriptors = 512
+const defaultDirectoryGossipPushRPS = 128
+const defaultDirectoryGossipPushMaxRateKeys = 65536
+const defaultDirectoryGossipPushMaxInflight = 64
 const remoteResponseMaxBodyBytes int64 = 1024 * 1024
 const serverReadHeaderTimeout = 10 * time.Second
 const serverReadTimeout = 15 * time.Second
@@ -290,6 +301,9 @@ func New() *Service {
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_GOSSIP_FANOUT")); err == nil && v > 0 {
 		gossipFanout = v
 	}
+	gossipPushRPS := envPositiveInt("DIRECTORY_GOSSIP_PUSH_RPS", defaultDirectoryGossipPushRPS)
+	gossipPushMaxRateKeys := envPositiveInt("DIRECTORY_GOSSIP_PUSH_MAX_RATE_KEYS", defaultDirectoryGossipPushMaxRateKeys)
+	gossipPushMaxInflight := envPositiveInt("DIRECTORY_GOSSIP_PUSH_MAX_INFLIGHT", defaultDirectoryGossipPushMaxInflight)
 	peerListTTL := 45 * time.Second
 	if v, err := strconv.Atoi(os.Getenv("DIRECTORY_PEER_LIST_TTL_SEC")); err == nil && v > 0 {
 		peerListTTL = time.Duration(v) * time.Second
@@ -503,6 +517,9 @@ func New() *Service {
 			providerMaxPerOperator = parsed
 		}
 	}
+	providerRelayUpsertRPS := envPositiveInt("DIRECTORY_PROVIDER_RELAY_UPSERT_RPS", defaultDirectoryProviderRelayUpsertRPS)
+	providerRelayUpsertMaxRateKeys := envPositiveInt("DIRECTORY_PROVIDER_RELAY_UPSERT_MAX_RATE_KEYS", defaultDirectoryProviderRelayUpsertMaxRateKeys)
+	providerRelayUpsertMaxInflight := envPositiveInt("DIRECTORY_PROVIDER_RELAY_UPSERT_MAX_INFLIGHT", defaultDirectoryProviderRelayUpsertMaxInflight)
 	providerSplitRoles := os.Getenv("DIRECTORY_PROVIDER_SPLIT_ROLES") == "1"
 	peerTrustStrict, peerTrustStrictErr := envStrictBoolOr("DIRECTORY_PEER_TRUST_STRICT", "", false)
 	peerTrustTOFU, peerTrustTOFUErr := envStrictBoolOr("DIRECTORY_PEER_TRUST_TOFU", "", false)
@@ -570,6 +587,8 @@ func New() *Service {
 		providerMinExitTier:              providerMinExitTier,
 		providerMaxPerOperator:           providerMaxPerOperator,
 		providerSplitRoles:               providerSplitRoles,
+		providerRelayUpsertRateLimiter:   httplimit.NewFixedWindowLimiter(providerRelayUpsertRPS, providerRelayUpsertMaxRateKeys),
+		providerRelayUpsertInflightLimit: httplimit.NewInflightLimiter(providerRelayUpsertMaxInflight),
 		microExitBetaAllowed:             microExitBetaAllowed,
 		issuerTrustURLs:                  issuerTrustURLs,
 		issuerSyncSec:                    issuerSyncSec,
@@ -581,6 +600,8 @@ func New() *Service {
 		peerSyncSec:                      peerSyncSec,
 		gossipSec:                        gossipSec,
 		gossipFanout:                     gossipFanout,
+		gossipPushRateLimiter:            httplimit.NewFixedWindowLimiter(gossipPushRPS, gossipPushMaxRateKeys),
+		gossipPushInflightLimiter:        httplimit.NewInflightLimiter(gossipPushMaxInflight),
 		peerListTTL:                      peerListTTL,
 		peerDiscoveryEnabled:             peerDiscoveryEnabled,
 		peerDiscoveryMax:                 peerDiscoveryMax,
@@ -772,15 +793,18 @@ func (s *Service) validateRuntimeConfig() error {
 	if s.prodStrict && !s.providerTokenProofReplaySharedStorageConfigured() {
 		return fmt.Errorf("PROD_STRICT_MODE requires shared provider token proof replay storage (set DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_REDIS_ADDR or DIRECTORY_PROVIDER_TOKEN_PROOF_REPLAY_SHARED_FILE_MODE=1)")
 	}
+	publicBind := !isLoopbackBindAddr(s.addr)
 	if securehttp.Enabled() {
 		if s.prodStrict && securehttp.InsecureSkipVerifyConfigured() {
 			return fmt.Errorf("PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY")
+		}
+		if (s.prodStrict || publicBind) && !securehttp.RequireClientCertConfigured() {
+			return fmt.Errorf("PROD_STRICT_MODE/public bind requires MTLS_REQUIRE_CLIENT_CERT=1")
 		}
 		if err := securehttp.Validate(); err != nil {
 			return fmt.Errorf("invalid mTLS config: %w", err)
 		}
 	}
-	publicBind := !isLoopbackBindAddr(s.addr)
 	if publicBind && strings.TrimSpace(s.privateKeyPath) == "data/directory_ed25519.key" {
 		return fmt.Errorf("public bind rejects legacy DIRECTORY_PRIVATE_KEY_FILE path data/directory_ed25519.key")
 	}
@@ -979,6 +1003,15 @@ func envEnabled(name string) bool {
 	default:
 		return false
 	}
+}
+
+func envPositiveInt(name string, fallback int) int {
+	if raw := strings.TrimSpace(os.Getenv(name)); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			return n
+		}
+	}
+	return fallback
 }
 
 func parseStrictBool(raw string) (bool, error) {
@@ -3661,11 +3694,31 @@ func (s *Service) handleTrustAttestations(w http.ResponseWriter, r *http.Request
 	}
 }
 
+func (s *Service) acquireGossipPushGate(w http.ResponseWriter, r *http.Request) (func(), bool) {
+	clientIP := remoteIP(r.RemoteAddr)
+	if s.gossipPushRateLimiter != nil && !s.gossipPushRateLimiter.Allow(clientIP, time.Now()) {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+		return nil, false
+	}
+	release, ok := s.gossipPushInflightLimiter.Acquire()
+	if !ok {
+		http.Error(w, "too many in-flight requests", http.StatusTooManyRequests)
+		return nil, false
+	}
+	return release, true
+}
+
 func (s *Service) handleGossipRelays(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	releaseGate, ok := s.acquireGossipPushGate(w, r)
+	if !ok {
+		return
+	}
+	defer releaseGate()
+
 	var req proto.RelayGossipPushRequest
 	if err := decodeStrictJSONBody(w, r, &req, gossipRelaysMaxBodyBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -3755,11 +3808,31 @@ func (s *Service) handlePeers(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Service) acquireProviderRelayUpsertGate(w http.ResponseWriter, r *http.Request) (func(), bool) {
+	clientIP := remoteIP(r.RemoteAddr)
+	if s.providerRelayUpsertRateLimiter != nil && !s.providerRelayUpsertRateLimiter.Allow(clientIP, time.Now()) {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+		return nil, false
+	}
+	release, ok := s.providerRelayUpsertInflightLimit.Acquire()
+	if !ok {
+		http.Error(w, "too many in-flight requests", http.StatusTooManyRequests)
+		return nil, false
+	}
+	return release, true
+}
+
 func (s *Service) handleProviderRelayUpsert(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	releaseGate, ok := s.acquireProviderRelayUpsertGate(w, r)
+	if !ok {
+		return
+	}
+	defer releaseGate()
+
 	var req proto.ProviderRelayUpsertRequest
 	if err := decodeStrictJSONBody(w, r, &req, providerRelayUpsertMaxBodyBytes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -3959,6 +4032,14 @@ func providerTokenFromRequest(r *http.Request, bodyToken string) string {
 	}
 	_ = bodyToken
 	return ""
+}
+
+func remoteIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return remoteAddr
+	}
+	return host
 }
 
 func parseBearerToken(raw string) string {
@@ -4334,13 +4415,21 @@ func providerTokenProofReplaySeenMapMarkAndCheck(seen map[string]time.Time, toke
 			delete(seen, key)
 		}
 	}
-	replayKey := tokenID + ":" + nonce
+	replayKey := providerTokenProofReplaySeenKey(tokenID, nonce)
+	legacyReplayKey := providerTokenProofReplayLegacySeenKey(tokenID, nonce)
 	if seenAt, ok := seen[replayKey]; ok && !seenAt.Before(cutoff) {
 		return fmt.Errorf("provider token proof nonce replayed")
 	}
+	if legacyReplayKey != replayKey {
+		if seenAt, ok := seen[legacyReplayKey]; ok && !seenAt.Before(cutoff) {
+			return fmt.Errorf("provider token proof nonce replayed")
+		}
+	}
 	tokenCount := 0
+	tokenPrefix := providerTokenProofReplaySeenTokenPrefix(tokenID)
+	legacyTokenPrefix := providerTokenProofReplayLegacySeenTokenPrefix(tokenID)
 	for key := range seen {
-		if !strings.HasPrefix(key, tokenID+":") {
+		if !strings.HasPrefix(key, tokenPrefix) && (legacyTokenPrefix == tokenPrefix || !strings.HasPrefix(key, legacyTokenPrefix)) {
 			continue
 		}
 		tokenCount++
@@ -4353,6 +4442,22 @@ func providerTokenProofReplaySeenMapMarkAndCheck(seen map[string]time.Time, toke
 	}
 	seen[replayKey] = now
 	return nil
+}
+
+func providerTokenProofReplaySeenKey(tokenID string, nonce string) string {
+	return providerTokenProofReplaySeenTokenPrefix(tokenID) + base64.RawURLEncoding.EncodeToString([]byte(nonce))
+}
+
+func providerTokenProofReplaySeenTokenPrefix(tokenID string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(tokenID)) + ":"
+}
+
+func providerTokenProofReplayLegacySeenKey(tokenID string, nonce string) string {
+	return tokenID + ":" + nonce
+}
+
+func providerTokenProofReplayLegacySeenTokenPrefix(tokenID string) string {
+	return tokenID + ":"
 }
 
 func acquireProviderTokenProofReplayStoreLock(path string, timeout time.Duration) (func(), error) {
@@ -4517,7 +4622,11 @@ func (s *Service) providerTokenProofReplayRedisKey(tokenID string, nonce string)
 	if prefix == "" {
 		prefix = providerRelayUpsertProofReplayRedisDefaultPrefix
 	}
-	return prefix + tokenID + ":" + nonce
+	parts := []string{
+		base64.RawURLEncoding.EncodeToString([]byte(tokenID)),
+		base64.RawURLEncoding.EncodeToString([]byte(nonce)),
+	}
+	return prefix + strings.Join(parts, ":")
 }
 
 func (s *Service) providerTokenProofReplayRedisClient() (*redis.Client, error) {

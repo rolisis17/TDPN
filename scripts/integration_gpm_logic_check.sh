@@ -117,6 +117,8 @@ declare -a REQUIRED_DEFAULT_CHECKS=(
   "scripts/integration_vpn_non_blockchain_fastlane.sh"
   "scripts/integration_roadmap_blockchain_actionable_run.sh"
   "scripts/integration_blockchain_fastlane.sh"
+  "scripts/integration_gpm_gap_scan.sh"
+  "scripts/integration_gpm_wallet_auth_evidence.sh"
   "scripts/integration_roadmap_evidence_pack_actionable_run.sh"
   "scripts/integration_roadmap_live_evidence_actionable_run.sh"
   "scripts/integration_roadmap_live_evidence_cycle_batch_run.sh"

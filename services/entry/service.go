@@ -115,6 +115,7 @@ type Service struct {
 	maxSessions       int
 	maxBuckets        int
 	maxAbuseEntries   int
+	maxPuzzleNonces   int
 	openInflightSem   chan struct{}
 	clientRebindAfter time.Duration
 	puzzleDifficulty  int
@@ -123,6 +124,7 @@ type Service struct {
 	puzzleSecret      string
 	buckets           map[string]rateBucket
 	abuse             map[string]abuseState
+	usedPuzzles       map[string]int64
 	nextPruneUnix     int64
 }
 
@@ -144,11 +146,14 @@ const serverWriteTimeout = 30 * time.Second
 const serverIdleTimeout = 60 * time.Second
 const serverMaxHeaderBytes = 1 << 20
 const remoteResponseMaxBodyBytes int64 = 1 << 20
+const allowInsecurePublicBind = "ENTRY_ALLOW_DANGEROUS_INSECURE_PUBLIC_BIND"
 const allowDangerousOutboundPrivateDNS = "ENTRY_ALLOW_DANGEROUS_OUTBOUND_PRIVATE_DNS"
 const defaultEntryMaxSessions = 65536
 const defaultEntryMaxRateBuckets = 65536
 const defaultEntryMaxAbuseEntries = 65536
+const defaultEntryMaxPuzzleNonces = 65536
 const rateBucketRetentionSec int64 = 3
+const puzzleNonceRetentionSec int64 = 45
 const trustedDirectoryKeysFileMaxBytes int64 = 1 * 1024 * 1024
 const middleRelayMinReputationScore = 0.5
 const middleRelayMinUptimeScore = 0.5
@@ -262,6 +267,7 @@ func New() *Service {
 	maxSessions := envIntOr("ENTRY_MAX_SESSIONS", "", defaultEntryMaxSessions)
 	maxBuckets := envIntOr("ENTRY_MAX_RATE_BUCKETS", "", defaultEntryMaxRateBuckets)
 	maxAbuseEntries := envIntOr("ENTRY_MAX_ABUSE_ENTRIES", "", defaultEntryMaxAbuseEntries)
+	maxPuzzleNonces := envIntOr("ENTRY_MAX_PUZZLE_NONCES", "", defaultEntryMaxPuzzleNonces)
 	clientRebindAfter := time.Duration(0)
 	if v, err := strconv.Atoi(os.Getenv("ENTRY_CLIENT_REBIND_SEC")); err == nil && v > 0 {
 		clientRebindAfter = time.Duration(v) * time.Second
@@ -317,6 +323,7 @@ func New() *Service {
 		maxSessions:           maxSessions,
 		maxBuckets:            maxBuckets,
 		maxAbuseEntries:       maxAbuseEntries,
+		maxPuzzleNonces:       maxPuzzleNonces,
 		openInflightSem:       openInflightSem,
 		clientRebindAfter:     clientRebindAfter,
 		puzzleDifficulty:      puzzleDifficulty,
@@ -325,6 +332,7 @@ func New() *Service {
 		puzzleSecret:          puzzleSecret,
 		buckets:               make(map[string]rateBucket),
 		abuse:                 make(map[string]abuseState),
+		usedPuzzles:           make(map[string]int64),
 	}
 }
 
@@ -426,13 +434,20 @@ func (s *Service) validateRuntimeConfig() error {
 	if s.prodStrict && !s.betaStrict {
 		return fmt.Errorf("PROD_STRICT_MODE requires BETA_STRICT_MODE=1")
 	}
+	publicBind := !isLoopbackBindAddr(s.addr)
 	if securehttp.Enabled() {
 		if s.prodStrict && securehttp.InsecureSkipVerifyConfigured() {
 			return fmt.Errorf("PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY")
 		}
+		if (s.prodStrict || publicBind) && !securehttp.RequireClientCertConfigured() {
+			return fmt.Errorf("PROD_STRICT_MODE/public bind requires MTLS_REQUIRE_CLIENT_CERT=1")
+		}
 		if err := securehttp.Validate(); err != nil {
 			return fmt.Errorf("invalid mTLS config: %w", err)
 		}
+	}
+	if publicBind && !securehttp.Enabled() && !envEnabled(allowInsecurePublicBind) {
+		return fmt.Errorf("public bind requires MTLS_ENABLE=1 or %s=1", allowInsecurePublicBind)
 	}
 	if s.requireDistinctExitOp && strings.TrimSpace(s.operatorID) == "" {
 		return fmt.Errorf("ENTRY_REQUIRE_DISTINCT_EXIT_OPERATOR=1 requires ENTRY_OPERATOR_ID or DIRECTORY_OPERATOR_ID")
@@ -579,6 +594,20 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	now := time.Now()
+	clientIP := remoteIP(r.RemoteAddr)
+	if s.isBanned(clientIP, now) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "source-temporarily-blocked"})
+		return
+	}
+	releaseSlot, ok := s.acquireOpenSlot()
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "entry-overloaded"})
+		return
+	}
+	defer releaseSlot()
 
 	var req proto.PathOpenRequest
 	if err := decodeStrictRequestJSON(w, r, &req, controlPathRequestMaxBodyBytes); err != nil {
@@ -607,30 +636,17 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "transport must be wireguard-udp in entry live mode"})
 		return
 	}
-	clientIP := remoteIP(r.RemoteAddr)
-	if s.isBanned(clientIP, time.Now()) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "source-temporarily-blocked"})
-		return
-	}
-	releaseSlot, ok := s.acquireOpenSlot()
-	if !ok {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "entry-overloaded"})
-		return
-	}
-	defer releaseSlot()
 
 	count, limited := s.limitOpen(clientIP)
 	if limited {
-		if s.noteAbuse(clientIP, time.Now()) {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "source-temporarily-blocked"})
-			return
-		}
-		ch := s.challengeFor(clientIP, time.Now())
+		ch := s.challengeFor(clientIP, now)
 		diff := s.effectiveDifficulty(count)
-		if diff > 0 && !verifyPuzzle(ch, req.PuzzleNonce, req.PuzzleDigest, diff) {
+		if diff > 0 && (!verifyPuzzle(ch, req.PuzzleNonce, req.PuzzleDigest, diff) || !s.markPuzzleUsed(clientIP, ch, req.PuzzleNonce, req.PuzzleDigest, now)) {
+			if s.noteAbuse(clientIP, now) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "source-temporarily-blocked"})
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{
 				Accepted:   false,
@@ -640,8 +656,13 @@ func (s *Service) handlePathOpen(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if diff <= 0 && s.noteAbuse(clientIP, now) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "source-temporarily-blocked"})
+			return
+		}
 	}
-	if !s.reserveNewSession(time.Now().Unix()) {
+	if !s.reserveNewSession(now.Unix()) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(proto.PathOpenResponse{Accepted: false, Reason: "entry-capacity-exceeded"})
 		return
@@ -901,6 +922,13 @@ func (s *Service) abuseCapacity() int {
 	return defaultEntryMaxAbuseEntries
 }
 
+func (s *Service) puzzleNonceCapacity() int {
+	if s.maxPuzzleNonces > 0 {
+		return s.maxPuzzleNonces
+	}
+	return defaultEntryMaxPuzzleNonces
+}
+
 func (s *Service) pruneStateLocked(nowSec int64) {
 	if nowSec < s.nextPruneUnix {
 		return
@@ -926,6 +954,11 @@ func (s *Service) pruneStateLocked(nowSec int64) {
 			delete(s.abuse, clientIP)
 		}
 	}
+	for key, expiresUnix := range s.usedPuzzles {
+		if expiresUnix <= nowSec {
+			delete(s.usedPuzzles, key)
+		}
+	}
 }
 
 func (s *Service) challengeFor(clientIP string, now time.Time) string {
@@ -946,6 +979,28 @@ func verifyPuzzle(challenge string, nonce string, digest string, difficulty int)
 	}
 	prefix := strings.Repeat("0", difficulty)
 	return strings.HasPrefix(got, prefix)
+}
+
+func (s *Service) markPuzzleUsed(clientIP string, challenge string, nonce string, digest string, now time.Time) bool {
+	if nonce == "" || digest == "" {
+		return false
+	}
+	nowSec := now.Unix()
+	key := clientIP + "|" + challenge + "|" + nonce + "|" + digest
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.usedPuzzles == nil {
+		s.usedPuzzles = make(map[string]int64)
+	}
+	s.pruneStateLocked(nowSec)
+	if _, exists := s.usedPuzzles[key]; exists {
+		return false
+	}
+	if s.puzzleNonceCapacity() > 0 && len(s.usedPuzzles) >= s.puzzleNonceCapacity() {
+		return false
+	}
+	s.usedPuzzles[key] = nowSec + puzzleNonceRetentionSec
+	return true
 }
 
 func (s *Service) effectiveDifficulty(currentCount int) int {
@@ -2899,6 +2954,41 @@ func syncDir(path string) error {
 		return err
 	}
 	return nil
+}
+
+func isLoopbackBindAddr(addr string) bool {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return true
+	}
+	host := bindAddrHost(addr)
+	if host == "" {
+		return false
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func bindAddrHost(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ""
+	}
+	if ip := net.ParseIP(strings.Trim(addr, "[]")); ip != nil {
+		return strings.Trim(addr, "[]")
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err == nil {
+		return host
+	}
+	if strings.Contains(addr, ":") {
+		return ""
+	}
+	return addr
 }
 
 func envIntOr(primary string, fallback string, def int) int {

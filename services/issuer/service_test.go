@@ -16,14 +16,23 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"privacynode/pkg/adminauth"
 	"privacynode/pkg/crypto"
+	"privacynode/pkg/httplimit"
 	"privacynode/pkg/proto"
 	"privacynode/pkg/settlement"
 )
+
+type panicOnRead struct{}
+
+func (panicOnRead) Read([]byte) (int, error) {
+	panic("request body was read")
+}
 
 func configureIssuerTestMTLS(t *testing.T) {
 	t.Helper()
@@ -194,6 +203,106 @@ func TestIssueTokenRequestRejectsPublicProviderRoleIssuance(t *testing.T) {
 	}
 }
 
+func TestHandleIssueTokenRateLimitsByRemoteIP(t *testing.T) {
+	s := &Service{
+		publicMutationRateLimiter: httplimit.NewFixedWindowLimiter(1, 16),
+	}
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/token", strings.NewReader(`{`))
+	firstReq.RemoteAddr = "203.0.113.21:49152"
+	firstRR := httptest.NewRecorder()
+	s.handleIssueToken(firstRR, firstReq)
+	if firstRR.Code == http.StatusTooManyRequests {
+		t.Fatalf("expected first request to pass limiter, got HTTP %d", firstRR.Code)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/token", strings.NewReader(`{`))
+	secondReq.RemoteAddr = "203.0.113.21:49153"
+	secondRR := httptest.NewRecorder()
+	s.handleIssueToken(secondRR, secondReq)
+	if secondRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected second request to be rate limited, got HTTP %d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	if !strings.Contains(secondRR.Body.String(), "rate limited") {
+		t.Fatalf("expected rate limit response body, got %q", secondRR.Body.String())
+	}
+}
+
+func TestHandleIssueTokenRejectsWhenInflightLimitFull(t *testing.T) {
+	s := &Service{
+		publicMutationInflightLimiter: httplimit.NewInflightLimiter(1),
+	}
+	release, ok := s.publicMutationInflightLimiter.Acquire()
+	if !ok {
+		t.Fatalf("failed to occupy in-flight limiter")
+	}
+	defer release()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/token", strings.NewReader(`{`))
+	req.RemoteAddr = "203.0.113.22:49152"
+	rr := httptest.NewRecorder()
+	s.handleIssueToken(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected in-flight rejection, got HTTP %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "too many in-flight requests") {
+		t.Fatalf("expected in-flight response body, got %q", rr.Body.String())
+	}
+}
+
+func TestHandleSponsorQuoteUsesPublicMutationLimiterAfterSponsorAuth(t *testing.T) {
+	s := &Service{
+		sponsorAPIToken:           "strong-sponsor-token",
+		publicMutationRateLimiter: httplimit.NewFixedWindowLimiter(1, 16),
+	}
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/sponsor/quote", strings.NewReader(`{`))
+	firstReq.RemoteAddr = "203.0.113.23:49152"
+	firstReq.Header.Set("X-Sponsor-Token", "strong-sponsor-token")
+	firstRR := httptest.NewRecorder()
+	s.handleSponsorQuote(firstRR, firstReq)
+	if firstRR.Code == http.StatusTooManyRequests {
+		t.Fatalf("expected first sponsor request to pass limiter, got HTTP %d", firstRR.Code)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/sponsor/quote", strings.NewReader(`{`))
+	secondReq.RemoteAddr = "203.0.113.23:49153"
+	secondReq.Header.Set("X-Sponsor-Token", "strong-sponsor-token")
+	secondRR := httptest.NewRecorder()
+	s.handleSponsorQuote(secondRR, secondReq)
+	if secondRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected sponsor request to be rate limited, got HTTP %d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+}
+
+func TestHandleSponsorQuoteRateLimitsUnauthorizedSponsorAttempts(t *testing.T) {
+	s := &Service{
+		sponsorAPIToken:           "strong-sponsor-token",
+		publicMutationRateLimiter: httplimit.NewFixedWindowLimiter(1, 16),
+	}
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/sponsor/quote", strings.NewReader(`{}`))
+	firstReq.RemoteAddr = "203.0.113.24:49152"
+	firstReq.Header.Set("X-Sponsor-Token", "wrong-token")
+	firstRR := httptest.NewRecorder()
+	s.handleSponsorQuote(firstRR, firstReq)
+	if firstRR.Code != http.StatusUnauthorized {
+		t.Fatalf("expected first bad sponsor token to reach auth check, got HTTP %d body=%s", firstRR.Code, firstRR.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/sponsor/quote", strings.NewReader(`{}`))
+	secondReq.RemoteAddr = "203.0.113.24:49153"
+	secondReq.Header.Set("X-Sponsor-Token", "wrong-token")
+	secondRR := httptest.NewRecorder()
+	s.handleSponsorQuote(secondRR, secondReq)
+	if secondRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected repeated bad sponsor token to be rate limited, got HTTP %d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	if !strings.Contains(secondRR.Body.String(), "rate limited") {
+		t.Fatalf("expected rate limit response body, got %q", secondRR.Body.String())
+	}
+}
+
 func TestNewReadsTokenTTLFromEnv(t *testing.T) {
 	t.Setenv("ISSUER_TOKEN_TTL_SEC", "45")
 	svc := New()
@@ -291,6 +400,20 @@ func TestValidateRuntimeConfigProdStrictRejectsInsecureSkipVerify(t *testing.T) 
 		t.Fatalf("expected prod strict to reject MTLS_INSECURE_SKIP_VERIFY")
 	}
 	if err.Error() != "PROD_STRICT_MODE forbids MTLS_INSECURE_SKIP_VERIFY" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRuntimeConfigPublicBindRejectsOptionalClientCertMTLS(t *testing.T) {
+	t.Setenv("MTLS_ENABLE", "1")
+	t.Setenv("MTLS_REQUIRE_CLIENT_CERT", "0")
+
+	s := &Service{addr: "0.0.0.0:8082"}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected public mTLS bind to require client certs")
+	}
+	if !strings.Contains(err.Error(), "MTLS_REQUIRE_CLIENT_CERT=1") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -795,6 +918,30 @@ func TestRequireAdminSignedModeAllowsExplicitTokenFallback(t *testing.T) {
 	}
 }
 
+func TestAdminHandlerRejectsWrongMethodBeforeSignedBodyRead(t *testing.T) {
+	s := &Service{
+		adminAllowToken:    false,
+		adminAllowTokenSet: true,
+		adminRequireSigned: true,
+		adminSignedWindow:  time.Minute,
+		adminPubKeys: map[string]ed25519.PublicKey{
+			"k1": make(ed25519.PublicKey, ed25519.PublicKeySize),
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/admin/subject/upsert", panicOnRead{})
+	req.Header.Set(adminauth.HeaderKeyID, "k1")
+	req.Header.Set(adminauth.HeaderTimestamp, strconv.FormatInt(time.Now().Unix(), 10))
+	req.Header.Set(adminauth.HeaderNonce, "wrong-method-nonce")
+	req.Header.Set(adminauth.HeaderSignature, "bogus-signature")
+	rr := httptest.NewRecorder()
+
+	s.handleUpsertSubject(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("wrong method status=%d want=%d body=%s", rr.Code, http.StatusMethodNotAllowed, rr.Body.String())
+	}
+}
+
 func TestAdminNonceReplayPersistsAcrossServiceRestart(t *testing.T) {
 	nonceFile := filepath.Join(t.TempDir(), "issuer_admin_nonces.json")
 	now := time.Now().Unix()
@@ -822,6 +969,36 @@ func TestAdminNonceReplayPersistsAcrossServiceRestart(t *testing.T) {
 	}
 	if err := restarted.claimAdminNonce("admin-key-1", "nonce-2", now+2, windowSec); err != nil {
 		t.Fatalf("fresh nonce claim after restart failed: %v", err)
+	}
+}
+
+func TestAdminNonceReplayKeyEncodesDelimitedComponents(t *testing.T) {
+	s := &Service{adminSeenNonce: make(map[string]int64)}
+	now := time.Now().Unix()
+	if err := s.claimAdminNonce("admin-key|segment", "nonce-1", now, 90); err != nil {
+		t.Fatalf("first delimiter-bearing nonce failed: %v", err)
+	}
+	if err := s.claimAdminNonce("admin-key", "segment|nonce-1", now+1, 90); err != nil {
+		t.Fatalf("delimiter-bearing nonce components should not collide: %v", err)
+	}
+	if got := len(s.adminSeenNonce); got != 2 {
+		t.Fatalf("expected two encoded nonce entries, got %d entries=%v", got, s.adminSeenNonce)
+	}
+	if _, ok := s.adminSeenNonce[legacyAdminNonceReplayKey("admin-key|segment", "nonce-1")]; ok {
+		t.Fatalf("nonce cache should not store raw delimiter key")
+	}
+}
+
+func TestAdminNonceReplayKeyRejectsLegacyStoredNonce(t *testing.T) {
+	now := time.Now().Unix()
+	s := &Service{
+		adminSeenNonce: map[string]int64{
+			legacyAdminNonceReplayKey("admin-key-legacy", "nonce-legacy"): now + 90,
+		},
+	}
+	err := s.claimAdminNonce("admin-key-legacy", "nonce-legacy", now+1, 90)
+	if err == nil || !strings.Contains(err.Error(), "replayed admin nonce") {
+		t.Fatalf("expected legacy nonce replay rejection, got %v", err)
 	}
 }
 

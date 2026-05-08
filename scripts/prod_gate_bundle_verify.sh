@@ -44,6 +44,33 @@ bool_arg_or_die() {
   fi
 }
 
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+abs_path() {
+  local path="$1"
+  path="$(trim "$path")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+  elif [[ "$path" =~ ^[A-Za-z]:[\\/] ]]; then
+    if command -v wslpath >/dev/null 2>&1; then
+      wslpath -u "$path"
+    elif command -v cygpath >/dev/null 2>&1; then
+      cygpath -u "$path"
+    else
+      printf '%s' "$path"
+    fi
+  elif [[ "$path" == /* ]]; then
+    printf '%s' "$path"
+  else
+    printf '%s' "$ROOT_DIR/$path"
+  fi
+}
+
 json_string_field() {
   local file="$1"
   local key="$2"
@@ -155,6 +182,11 @@ bool_arg_or_die "--check-tar-sha256" "$check_tar_sha256"
 bool_arg_or_die "--check-manifest" "$check_manifest"
 bool_arg_or_die "--show-details" "$show_details"
 
+run_report_json="$(abs_path "$run_report_json")"
+bundle_dir="$(abs_path "$bundle_dir")"
+bundle_tar="$(abs_path "$bundle_tar")"
+bundle_tar_sha256_file="$(abs_path "$bundle_tar_sha256_file")"
+
 if [[ -n "$run_report_json" ]]; then
   if [[ ! -f "$run_report_json" ]]; then
     echo "run report JSON file not found: $run_report_json"
@@ -162,15 +194,18 @@ if [[ -n "$run_report_json" ]]; then
   fi
   if [[ -z "$bundle_dir" ]]; then
     bundle_dir="$(json_string_field "$run_report_json" "bundle_dir")"
+    bundle_dir="$(abs_path "$bundle_dir")"
   fi
   if [[ -z "$bundle_tar" ]]; then
     bundle_tar="$(json_string_field "$run_report_json" "bundle_tar")"
+    bundle_tar="$(abs_path "$bundle_tar")"
     if [[ -n "$bundle_tar" ]]; then
       bundle_tar_explicit=1
     fi
   fi
   if [[ -z "$bundle_tar_sha256_file" ]]; then
     bundle_tar_sha256_file="$(json_string_field "$run_report_json" "bundle_tar_sha256_file")"
+    bundle_tar_sha256_file="$(abs_path "$bundle_tar_sha256_file")"
   fi
 fi
 if [[ -z "$bundle_tar" && -n "$bundle_dir" ]]; then

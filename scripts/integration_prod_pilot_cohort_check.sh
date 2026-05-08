@@ -262,7 +262,7 @@ cat >"$INCIDENT_REPORT_MD" <<'EOF_INCIDENT_REPORT'
 # Incident Snapshot Summary
 EOF_INCIDENT_REPORT
 printf 'attachments/01_runtime_doctor_before.json\tfile\t/tmp/runtime_doctor_before.json\n' >"$INCIDENT_ATTACH_MANIFEST"
-printf '/tmp/runtime_fix.json\tmissing\n' >"$INCIDENT_ATTACH_SKIPPED"
+: >"$INCIDENT_ATTACH_SKIPPED"
 
 PASS_ROUND_REPORT="$REPORTS_DIR/round_2/prod_bundle_run_report.json"
 mkdir -p "$(dirname "$PASS_ROUND_REPORT")"
@@ -320,6 +320,38 @@ if ! rg -q -- "$INCIDENT_ATTACH_MANIFEST" /tmp/integration_prod_pilot_cohort_che
   exit 1
 fi
 
+echo "[prod-pilot-cohort-check] incident snapshot policy fail on non-round failure"
+NON_ROUND_FAIL_SUMMARY="$TMP_DIR/summary_non_round_incident_fail.json"
+jq \
+  '.status="fail"
+   | .failure_step="pre_real_host_readiness"
+   | .final_rc=41
+   | .rounds.failed=0
+   | .rounds.passed=0
+   | .rounds.attempted=0
+   | del(.run_reports)
+   | del(.artifacts.run_reports)' "$SUMMARY_JSON" >"$NON_ROUND_FAIL_SUMMARY"
+set +e
+./scripts/prod_pilot_cohort_check.sh \
+  --summary-json "$NON_ROUND_FAIL_SUMMARY" \
+  --require-status-ok 0 \
+  --require-all-rounds-ok 0 \
+  --require-trend-go 0 \
+  --require-incident-snapshot-on-fail 1 \
+  --require-incident-snapshot-artifacts 1 >/tmp/integration_prod_pilot_cohort_check_non_round_incident_fail.log 2>&1
+non_round_incident_rc=$?
+set -e
+if [[ "$non_round_incident_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when non-round failure lacks incident evidence"
+  cat /tmp/integration_prod_pilot_cohort_check_non_round_incident_fail.log
+  exit 1
+fi
+if ! rg -q 'incident snapshot policy requires run_reports\[\] in cohort summary when cohort failed' /tmp/integration_prod_pilot_cohort_check_non_round_incident_fail.log; then
+  echo "expected non-round incident evidence failure message not found"
+  cat /tmp/integration_prod_pilot_cohort_check_non_round_incident_fail.log
+  exit 1
+fi
+
 echo "[prod-pilot-cohort-check] incident attachment-count floor policy"
 set +e
 ./scripts/prod_pilot_cohort_check.sh \
@@ -341,6 +373,7 @@ if ! rg -q 'attachment_count below floor' /tmp/integration_prod_pilot_cohort_che
 fi
 
 echo "[prod-pilot-cohort-check] incident skipped-attachment budget policy"
+printf '/tmp/runtime_fix.json\tmissing\n' >"$INCIDENT_ATTACH_SKIPPED"
 set +e
 ./scripts/prod_pilot_cohort_check.sh \
   --summary-json "$INCIDENT_PASS_SUMMARY" \

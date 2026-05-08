@@ -276,14 +276,43 @@ func TestHandleIssueTokenAcceptsWalletFundPaymentProof(t *testing.T) {
 }
 
 func TestPaymentReplayKeySeparatesWalletFundFromSponsorReservations(t *testing.T) {
-	if got := paymentReplayKey("", "res-shared-1"); got != "res-shared-1" {
-		t.Fatalf("unexpected default sponsor replay key: %q", got)
+	defaultSponsorKey := paymentReplayKey("", "res-shared-1")
+	explicitSponsorKey := paymentReplayKey(proto.PaymentProofSourceSponsor, "res-shared-1")
+	walletKey := paymentReplayKey(proto.PaymentProofSourceWalletFund, "res-shared-1")
+	if defaultSponsorKey != explicitSponsorKey {
+		t.Fatalf("default and explicit sponsor replay keys differ: default=%q explicit=%q", defaultSponsorKey, explicitSponsorKey)
 	}
-	if got := paymentReplayKey(proto.PaymentProofSourceSponsor, "res-shared-1"); got != "res-shared-1" {
-		t.Fatalf("unexpected explicit sponsor replay key: %q", got)
+	if walletKey == explicitSponsorKey {
+		t.Fatalf("wallet fund replay key collided with sponsor key: %q", walletKey)
 	}
-	if got := paymentReplayKey(proto.PaymentProofSourceWalletFund, "res-shared-1"); got != "wallet_fund:res-shared-1" {
-		t.Fatalf("unexpected wallet fund replay key: %q", got)
+	if strings.Contains(walletKey, "wallet_fund") || strings.Contains(walletKey, "res-shared-1") {
+		t.Fatalf("wallet fund replay key should encode components, got %q", walletKey)
+	}
+
+	collisionSponsorKey := paymentReplayKey(proto.PaymentProofSourceSponsor, "wallet_fund:res-shared-1")
+	collisionWalletKey := paymentReplayKey(proto.PaymentProofSourceWalletFund, "res-shared-1")
+	if collisionSponsorKey == collisionWalletKey {
+		t.Fatalf("delimiter-bearing sponsor reservation collided with wallet key: %q", collisionSponsorKey)
+	}
+}
+
+func TestPaymentReplayKeyRecognizesLegacyWalletFundReservation(t *testing.T) {
+	now := time.Now().Unix()
+	s := &Service{
+		issuedPaymentReservations: map[string]int64{
+			legacyPaymentReplayKey(proto.PaymentProofSourceWalletFund, "res-legacy-wallet"): now,
+		},
+		issuedPaymentReplayTTL: time.Hour,
+	}
+	if !s.hasIssuedPaymentProofReservation(proto.PaymentProofSourceWalletFund, "res-legacy-wallet") {
+		t.Fatalf("expected legacy wallet-fund replay key to be recognized")
+	}
+	marked, saturated, err := s.markIssuedPaymentProofReservation(proto.PaymentProofSourceWalletFund, "res-legacy-wallet")
+	if err != nil {
+		t.Fatalf("mark legacy wallet replay: %v", err)
+	}
+	if marked || saturated {
+		t.Fatalf("expected legacy wallet replay to reject as duplicate, marked=%t saturated=%t", marked, saturated)
 	}
 }
 

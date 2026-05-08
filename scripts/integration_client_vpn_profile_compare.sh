@@ -12,7 +12,14 @@ for cmd in jq rg mktemp; do
 done
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+WIN_PATH_DIR=""
+cleanup() {
+  rm -rf "$TMP_DIR"
+  if [[ -n "$WIN_PATH_DIR" && "$WIN_PATH_DIR" == "$ROOT_DIR/.easy-node-logs/"* ]]; then
+    rm -rf "$WIN_PATH_DIR"
+  fi
+}
+trap cleanup EXIT
 
 CAPTURE="$TMP_DIR/fake_smoke_capture.log"
 COUNTER_DIR="$TMP_DIR/counters"
@@ -120,6 +127,13 @@ chmod +x "$FAKE_SMOKE"
 SUMMARY_JSON="$TMP_DIR/client_vpn_profile_compare_summary.json"
 REPORT_MD="$TMP_DIR/client_vpn_profile_compare_report.md"
 RUN_LOG="$TMP_DIR/client_vpn_profile_compare_run.log"
+URL_USER_SECRET="profile-url-user-secret"
+URL_PASS_SECRET="profile-url-pass-secret"
+URL_USER_ONLY_SECRET="profile-url-user-only-secret"
+QUERY_TOKEN_SECRET="profile-query-token-secret"
+AUTH_TOKEN_SECRET="profile-auth-token-secret"
+ADMIN_TOKEN_SECRET="profile-admin-token-secret"
+FRAGMENT_TOKEN_SECRET="profile-fragment-token-secret"
 
 echo "[client-vpn-profile-compare] script behavior"
 FAKE_CAPTURE_FILE="$CAPTURE" \
@@ -130,7 +144,9 @@ CLIENT_VPN_PROFILE_COMPARE_SMOKE_SCRIPT="$FAKE_SMOKE" \
   --rounds 2 \
   --pause-sec 0 \
   --subject inv-test \
-  --bootstrap-directory https://dir-a:8081 \
+  --directory-urls "https://${URL_USER_ONLY_SECRET}@dir-b:8081/feed?auth_token=${AUTH_TOKEN_SECRET},https://dir-c:8081#access_token=${FRAGMENT_TOKEN_SECRET}" \
+  --bootstrap-directory "https://${URL_USER_SECRET}:${URL_PASS_SECRET}@dir-a:8081/bootstrap?token=${QUERY_TOKEN_SECRET}&ok=1" \
+  --issuer-url "https://issuer-a:8082?admin_token=${ADMIN_TOKEN_SECRET}" \
   --allow-insecure-remote-http 1 \
   --summary-json "$SUMMARY_JSON" \
   --report-md "$REPORT_MD" \
@@ -158,6 +174,121 @@ if ! jq -e '
 ' "$SUMMARY_JSON" >/dev/null; then
   echo "runner summary json missing expected fields"
   cat "$SUMMARY_JSON"
+  exit 1
+fi
+for leaked in "$URL_USER_SECRET" "$URL_PASS_SECRET" "$URL_USER_ONLY_SECRET" "$QUERY_TOKEN_SECRET" "$AUTH_TOKEN_SECRET" "$ADMIN_TOKEN_SECRET" "$FRAGMENT_TOKEN_SECRET" "inv-test"; do
+  for artifact in "$SUMMARY_JSON" "$REPORT_MD" "$RUN_LOG"; do
+    if grep -F -- "$leaked" "$artifact" >/dev/null; then
+      echo "sensitive profile-compare value leaked into artifact: $artifact"
+      echo "leaked marker: $leaked"
+      cat "$artifact"
+      exit 1
+    fi
+  done
+done
+if ! jq -e '
+  .command as $command
+  | ($command | contains("https://\\[redacted\\]@dir-a:8081"))
+  and ($command | contains("https://\\[redacted\\]@dir-b:8081"))
+  and ($command | contains("token=\\[redacted\\]"))
+  and ($command | contains("auth_token=\\[redacted\\]"))
+  and ($command | contains("admin_token=\\[redacted\\]"))
+  and ($command | contains("access_token=\\[redacted\\]"))
+' "$SUMMARY_JSON" >/dev/null; then
+  echo "runner summary command did not redact URL credentials/query secrets"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! jq -e '
+  .inputs as $inputs
+  | .runs as $runs
+  | ($inputs.bootstrap_directory | contains("https://[redacted]@dir-a:8081"))
+  and ($inputs.bootstrap_directory | contains("token=[redacted]"))
+  and ($inputs.directory_urls | contains("auth_token=[redacted]"))
+  and ($inputs.directory_urls | contains("access_token=[redacted]"))
+  and ($inputs.directory_urls | contains("https://dir-c:8081"))
+  and ($inputs.issuer_url | contains("admin_token=[redacted]"))
+  and ([
+    $runs[].command
+    | contains("https://\\[redacted\\]@dir-a:8081")
+      and contains("https://\\[redacted\\]@dir-b:8081")
+      and contains("token=\\[redacted\\]")
+      and contains("auth_token=\\[redacted\\]")
+      and contains("admin_token=\\[redacted\\]")
+      and contains("access_token=\\[redacted\\]")
+    ] | all)
+' "$SUMMARY_JSON" >/dev/null; then
+  echo "runner summary inputs/runs did not redact URL credentials/query secrets"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+
+if command -v wslpath >/dev/null 2>&1; then
+  WIN_PATH_DIR="$ROOT_DIR/.easy-node-logs/client_vpn_profile_compare_windows_path_test_$$"
+  WIN_SUMMARY_UNIX="$WIN_PATH_DIR/client_vpn_profile_compare_windows_summary.json"
+  WIN_REPORT_UNIX="$WIN_PATH_DIR/client_vpn_profile_compare_windows_report.md"
+  WIN_LOG="$TMP_DIR/client_vpn_profile_compare_windows.log"
+  mkdir -p "$WIN_PATH_DIR"
+
+  echo "[client-vpn-profile-compare] Windows absolute output paths normalize under WSL"
+  FAKE_CAPTURE_FILE="$CAPTURE" \
+  FAKE_COUNTER_DIR="$COUNTER_DIR" \
+  CLIENT_VPN_PROFILE_COMPARE_SMOKE_SCRIPT="$FAKE_SMOKE" \
+  ./scripts/client_vpn_profile_compare.sh \
+    --profiles 2hop \
+    --rounds 1 \
+    --pause-sec 0 \
+    --subject inv-test \
+    --bootstrap-directory https://dir-a:8081 \
+    --summary-json "$(wslpath -w "$WIN_SUMMARY_UNIX")" \
+    --report-md "$(wslpath -w "$WIN_REPORT_UNIX")" \
+    --print-summary-json 1 >"$WIN_LOG"
+
+  if [[ ! -f "$WIN_SUMMARY_UNIX" || ! -f "$WIN_REPORT_UNIX" ]]; then
+    echo "Windows absolute paths were not normalized for client-vpn-profile-compare outputs"
+    ls -la "$WIN_PATH_DIR"
+    cat "$WIN_LOG"
+    exit 1
+  fi
+  if find "$ROOT_DIR" -maxdepth 1 \( -name 'C*client_vpn_profile_compare_windows_summary.json' -o -name 'C*client_vpn_profile_compare_windows_report.md' \) | rg -q .; then
+    echo "client-vpn-profile-compare created repo-local artifacts from Windows absolute paths"
+    find "$ROOT_DIR" -maxdepth 1 \( -name 'C*client_vpn_profile_compare_windows_summary.json' -o -name 'C*client_vpn_profile_compare_windows_report.md' \)
+    exit 1
+  fi
+fi
+
+PLACEHOLDER_SUMMARY_JSON="$TMP_DIR/client_vpn_profile_compare_placeholder_summary.json"
+PLACEHOLDER_REPORT_MD="$TMP_DIR/client_vpn_profile_compare_placeholder_report.md"
+PLACEHOLDER_LOG="$TMP_DIR/client_vpn_profile_compare_placeholder.log"
+
+echo "[client-vpn-profile-compare] command placeholders survive redaction"
+FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_COUNTER_DIR="$COUNTER_DIR" \
+CLIENT_VPN_PROFILE_COMPARE_SMOKE_SCRIPT="$FAKE_SMOKE" \
+./scripts/client_vpn_profile_compare.sh \
+  --profiles 2hop \
+  --rounds 1 \
+  --pause-sec 0 \
+  --subject INVITE_KEY \
+  --anon-cred ANON_CRED \
+  --bootstrap-directory https://dir-a:8081 \
+  --summary-json "$PLACEHOLDER_SUMMARY_JSON" \
+  --report-md "$PLACEHOLDER_REPORT_MD" \
+  --print-summary-json 1 >"$PLACEHOLDER_LOG"
+
+if ! jq -e '
+  (.command | contains("--subject INVITE_KEY"))
+  and (.command | contains("--anon-cred ANON_CRED"))
+  and .inputs.subject == "INVITE_KEY"
+  and .inputs.anon_cred_present == true
+' "$PLACEHOLDER_SUMMARY_JSON" >/dev/null; then
+  echo "runner summary command did not preserve safe subject/credential placeholders"
+  cat "$PLACEHOLDER_SUMMARY_JSON"
+  exit 1
+fi
+if rg -q -- '--subject \[redacted\]|--anon-cred \[redacted\]' "$PLACEHOLDER_SUMMARY_JSON" "$PLACEHOLDER_REPORT_MD" "$PLACEHOLDER_LOG"; then
+  echo "runner artifacts redacted safe placeholders"
+  cat "$PLACEHOLDER_SUMMARY_JSON"
   exit 1
 fi
 

@@ -12,7 +12,14 @@ for cmd in jq rg; do
 done
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+WIN_PATH_DIR=""
+cleanup() {
+  rm -rf "$TMP_DIR"
+  if [[ -n "$WIN_PATH_DIR" && "$WIN_PATH_DIR" == "$ROOT_DIR/.easy-node-logs/"* ]]; then
+    rm -rf "$WIN_PATH_DIR"
+  fi
+}
+trap cleanup EXIT
 
 CAPTURE="$TMP_DIR/capture.log"
 FAKE_EASY_NODE="$TMP_DIR/fake_easy_node.sh"
@@ -81,6 +88,9 @@ case "$cmd" in
     "next_action_check_id": "machine_c_vpn_smoke"
   }
 }'
+    if [[ "${FAKE_SECRET_OUTPUT:-0}" == "1" ]]; then
+      echo "runtime helper args --auth-token secret-auth-123 AUTH_TOKEN=secret-env-456 Authorization: Bearer secret-bearer-789 X-Admin-Token: secret-admin-000 inv-secret-leak"
+    fi
     if [[ "$MODE" == "runtime-fail" ]]; then
       summary_payload='{
   "version": 1,
@@ -284,6 +294,7 @@ SUCCESS_REPORT_JSON="$TMP_DIR/manual_validation_readiness_summary.json"
 SUCCESS_REPORT_MD="$TMP_DIR/manual_validation_readiness_report.md"
 
 FAKE_CAPTURE_FILE="$CAPTURE" \
+FAKE_SECRET_OUTPUT=1 \
 PRE_REAL_HOST_READINESS_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
 ./scripts/pre_real_host_readiness.sh \
   --base-port 19290 \
@@ -325,6 +336,38 @@ if ! jq -e --arg report_json "$SUCCESS_REPORT_JSON" --arg report_md "$SUCCESS_RE
 ' "$SUCCESS_SUMMARY_JSON" >/dev/null; then
   echo "pre-real-host readiness success summary missing expected fields"
   cat "$SUCCESS_SUMMARY_JSON"
+  exit 1
+fi
+success_summary_log="$(jq -r '.summary_log // ""' "$SUCCESS_SUMMARY_JSON")"
+if [[ -z "$success_summary_log" || ! -f "$success_summary_log" ]]; then
+  echo "pre-real-host readiness success run missing summary log artifact"
+  cat "$SUCCESS_SUMMARY_JSON"
+  exit 1
+fi
+if rg -q 'secret-auth-123|secret-env-456|secret-bearer-789|secret-admin-000|inv-secret-leak' "$success_summary_log"; then
+  echo "pre-real-host readiness summary log leaked sensitive material"
+  cat "$success_summary_log"
+  exit 1
+fi
+if ! rg -q '\[redacted\]|\[redacted-invite\]' "$success_summary_log"; then
+  echo "pre-real-host readiness summary log did not include expected redaction markers"
+  cat "$success_summary_log"
+  exit 1
+fi
+success_runtime_fix_log="$(jq -r '.runtime_fix.log // ""' "$SUCCESS_SUMMARY_JSON")"
+if [[ -z "$success_runtime_fix_log" || ! -f "$success_runtime_fix_log" ]]; then
+  echo "pre-real-host readiness success run missing runtime-fix log artifact"
+  cat "$SUCCESS_SUMMARY_JSON"
+  exit 1
+fi
+if rg -q 'secret-auth-123|secret-env-456|secret-bearer-789|secret-admin-000|inv-secret-leak' "$success_runtime_fix_log"; then
+  echo "pre-real-host readiness runtime-fix artifact leaked sensitive material"
+  cat "$success_runtime_fix_log"
+  exit 1
+fi
+if ! rg -q '\[redacted\]|\[redacted-invite\]' "$success_runtime_fix_log"; then
+  echo "pre-real-host readiness runtime-fix artifact did not include expected redaction markers"
+  cat "$success_runtime_fix_log"
   exit 1
 fi
 if ! rg -q '^runtime-fix-record .*--base-port 19290 .*--prune-wg-only-dir 1 .*--record-result 1 .*--summary-json .*/pre_real_host_readiness_.*_runtime_fix\.json .*--print-summary-json 1' "$CAPTURE"; then
@@ -671,6 +714,45 @@ if ! rg -q '^manual-validation-report ' "$CAPTURE"; then
   echo "pre-real-host readiness manual-validation schema-version fail run missing manual-validation-report call"
   cat "$CAPTURE"
   exit 1
+fi
+
+if command -v wslpath >/dev/null 2>&1; then
+  : >"$CAPTURE"
+  WIN_PATH_DIR="$ROOT_DIR/.easy-node-logs/pre_real_host_readiness_windows_path_test_$$"
+  WIN_SUMMARY_UNIX="$WIN_PATH_DIR/pre_real_host_readiness_windows_summary.json"
+  WIN_REPORT_JSON_UNIX="$WIN_PATH_DIR/manual_validation_readiness_windows_summary.json"
+  WIN_REPORT_MD_UNIX="$WIN_PATH_DIR/manual_validation_readiness_windows_report.md"
+  mkdir -p "$WIN_PATH_DIR"
+
+  echo "[pre-real-host-readiness] Windows absolute output paths normalize under WSL"
+  FAKE_CAPTURE_FILE="$CAPTURE" \
+  PRE_REAL_HOST_READINESS_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+  ./scripts/pre_real_host_readiness.sh \
+    --base-port 19295 \
+    --client-iface wgcwin0 \
+    --exit-iface wgewin0 \
+    --vpn-iface wgvpnwin0 \
+    --summary-json "$(wslpath -w "$WIN_SUMMARY_UNIX")" \
+    --manual-validation-report-summary-json "$(wslpath -w "$WIN_REPORT_JSON_UNIX")" \
+    --manual-validation-report-md "$(wslpath -w "$WIN_REPORT_MD_UNIX")" \
+    --print-summary-json 0 >/tmp/integration_pre_real_host_readiness_windows_paths.log 2>&1
+
+  if [[ ! -f "$WIN_SUMMARY_UNIX" || ! -f "$WIN_REPORT_JSON_UNIX" || ! -f "$WIN_REPORT_MD_UNIX" ]]; then
+    echo "Windows absolute paths were not normalized for pre-real-host-readiness outputs"
+    ls -la "$WIN_PATH_DIR"
+    cat /tmp/integration_pre_real_host_readiness_windows_paths.log
+    exit 1
+  fi
+  if ! jq -e '.status == "pass" and .stage == "complete"' "$WIN_SUMMARY_UNIX" >/dev/null; then
+    echo "Windows-path pre-real-host-readiness summary missing expected pass status"
+    cat "$WIN_SUMMARY_UNIX"
+    exit 1
+  fi
+  if find "$ROOT_DIR" -maxdepth 1 \( -name 'C*pre_real_host_readiness_windows_summary.json' -o -name 'C*manual_validation_readiness_windows_summary.json' -o -name 'C*manual_validation_readiness_windows_report.md' \) | rg -q .; then
+    echo "pre-real-host-readiness created repo-local artifacts from Windows absolute paths"
+    find "$ROOT_DIR" -maxdepth 1 \( -name 'C*pre_real_host_readiness_windows_summary.json' -o -name 'C*manual_validation_readiness_windows_summary.json' -o -name 'C*manual_validation_readiness_windows_report.md' \)
+    exit 1
+  fi
 fi
 
 echo "pre-real-host readiness integration check ok"

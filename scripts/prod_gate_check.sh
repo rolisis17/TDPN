@@ -41,8 +41,7 @@ Notes:
     - --run-report-json (recommended; from three-machine-prod-bundle)
     - --bundle-dir (contains prod_gate_summary.json)
     - --gate-summary-json
-  - Default policy is strict: full sequence required, WG validate must be ok, WG soak must be ok, and WG soak failed rounds must be 0.
-  - Run-report stage checks, incident-snapshot checks, and real-WG evidence checks are optional and default-off for backwards compatibility.
+  - Default policy is strict: full sequence, run-report stages, incident snapshot evidence, real-WG source/diversity evidence, and zero WG soak failed rounds are required.
 USAGE
 }
 
@@ -60,6 +59,26 @@ trim() {
   printf '%s' "$value"
 }
 
+abs_path() {
+  local path="$1"
+  path="$(trim "$path")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+  elif [[ "$path" =~ ^[A-Za-z]:[\\/] ]]; then
+    if command -v wslpath >/dev/null 2>&1; then
+      wslpath -u "$path"
+    elif command -v cygpath >/dev/null 2>&1; then
+      cygpath -u "$path"
+    else
+      printf '%s' "$path"
+    fi
+  elif [[ "$path" == /* ]]; then
+    printf '%s' "$path"
+  else
+    printf '%s' "$ROOT_DIR/$path"
+  fi
+}
+
 bool_arg_or_die() {
   local name="$1"
   local value="$2"
@@ -75,21 +94,21 @@ gate_summary_json=""
 require_full_sequence="${PROD_GATE_CHECK_REQUIRE_FULL_SEQUENCE:-1}"
 require_wg_validate_ok="${PROD_GATE_CHECK_REQUIRE_WG_VALIDATE_OK:-1}"
 require_wg_soak_ok="${PROD_GATE_CHECK_REQUIRE_WG_SOAK_OK:-1}"
-require_preflight_ok="${PROD_GATE_CHECK_REQUIRE_PREFLIGHT_OK:-0}"
-require_bundle_ok="${PROD_GATE_CHECK_REQUIRE_BUNDLE_OK:-0}"
-require_integrity_ok="${PROD_GATE_CHECK_REQUIRE_INTEGRITY_OK:-0}"
-require_signoff_ok="${PROD_GATE_CHECK_REQUIRE_SIGNOFF_OK:-0}"
-require_incident_snapshot_on_fail="${PROD_GATE_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-0}"
-require_incident_snapshot_artifacts="${PROD_GATE_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-0}"
-incident_snapshot_min_attachment_count="${PROD_GATE_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}"
-incident_snapshot_max_skipped_count="${PROD_GATE_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}"
-require_wg_validate_udp_source="${PROD_GATE_CHECK_REQUIRE_WG_VALIDATE_UDP_SOURCE:-0}"
-require_wg_validate_strict_distinct="${PROD_GATE_CHECK_REQUIRE_WG_VALIDATE_STRICT_DISTINCT:-0}"
-require_wg_soak_diversity_pass="${PROD_GATE_CHECK_REQUIRE_WG_SOAK_DIVERSITY_PASS:-0}"
-min_wg_soak_selection_lines="${PROD_GATE_CHECK_MIN_WG_SOAK_SELECTION_LINES:-0}"
-min_wg_soak_entry_operators="${PROD_GATE_CHECK_MIN_WG_SOAK_ENTRY_OPERATORS:-0}"
-min_wg_soak_exit_operators="${PROD_GATE_CHECK_MIN_WG_SOAK_EXIT_OPERATORS:-0}"
-min_wg_soak_cross_operator_pairs="${PROD_GATE_CHECK_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS:-0}"
+require_preflight_ok="${PROD_GATE_CHECK_REQUIRE_PREFLIGHT_OK:-1}"
+require_bundle_ok="${PROD_GATE_CHECK_REQUIRE_BUNDLE_OK:-1}"
+require_integrity_ok="${PROD_GATE_CHECK_REQUIRE_INTEGRITY_OK:-1}"
+require_signoff_ok="${PROD_GATE_CHECK_REQUIRE_SIGNOFF_OK:-1}"
+require_incident_snapshot_on_fail="${PROD_GATE_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
+require_incident_snapshot_artifacts="${PROD_GATE_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
+incident_snapshot_min_attachment_count="${PROD_GATE_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}"
+incident_snapshot_max_skipped_count="${PROD_GATE_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}"
+require_wg_validate_udp_source="${PROD_GATE_CHECK_REQUIRE_WG_VALIDATE_UDP_SOURCE:-1}"
+require_wg_validate_strict_distinct="${PROD_GATE_CHECK_REQUIRE_WG_VALIDATE_STRICT_DISTINCT:-1}"
+require_wg_soak_diversity_pass="${PROD_GATE_CHECK_REQUIRE_WG_SOAK_DIVERSITY_PASS:-1}"
+min_wg_soak_selection_lines="${PROD_GATE_CHECK_MIN_WG_SOAK_SELECTION_LINES:-12}"
+min_wg_soak_entry_operators="${PROD_GATE_CHECK_MIN_WG_SOAK_ENTRY_OPERATORS:-2}"
+min_wg_soak_exit_operators="${PROD_GATE_CHECK_MIN_WG_SOAK_EXIT_OPERATORS:-2}"
+min_wg_soak_cross_operator_pairs="${PROD_GATE_CHECK_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS:-2}"
 max_wg_soak_failed_rounds="${PROD_GATE_CHECK_MAX_WG_SOAK_FAILED_ROUNDS:-0}"
 show_json="${PROD_GATE_CHECK_SHOW_JSON:-0}"
 
@@ -311,6 +330,9 @@ fi
 bundle_dir="$(trim "$bundle_dir")"
 run_report_json="$(trim "$run_report_json")"
 gate_summary_json="$(trim "$gate_summary_json")"
+bundle_dir="$(abs_path "$bundle_dir")"
+run_report_json="$(abs_path "$run_report_json")"
+gate_summary_json="$(abs_path "$gate_summary_json")"
 if [[ -z "$run_report_json" && -n "$bundle_dir" ]]; then
   candidate_run_report="${bundle_dir%/}/prod_bundle_run_report.json"
   if [[ -f "$candidate_run_report" ]]; then
@@ -329,10 +351,12 @@ if [[ -n "$run_report_json" ]]; then
   if [[ -z "$bundle_dir" ]]; then
     bundle_dir="$(jq -r '.bundle_dir // ""' "$run_report_json" 2>/dev/null || true)"
     bundle_dir="$(trim "$bundle_dir")"
+    bundle_dir="$(abs_path "$bundle_dir")"
   fi
   if [[ -z "$gate_summary_json" ]]; then
     gate_summary_json="$(jq -r '.gate_summary_json // ""' "$run_report_json" 2>/dev/null || true)"
     gate_summary_json="$(trim "$gate_summary_json")"
+    gate_summary_json="$(abs_path "$gate_summary_json")"
   fi
 fi
 if [[ -z "$gate_summary_json" && -n "$bundle_dir" ]]; then

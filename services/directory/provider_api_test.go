@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"privacynode/pkg/crypto"
+	"privacynode/pkg/httplimit"
 	"privacynode/pkg/proto"
 )
 
@@ -1267,8 +1268,8 @@ func TestMarkProviderTokenProofReplayCapsEntries(t *testing.T) {
 
 	s.providerMu.RLock()
 	got := len(s.providerTokenProofSeen)
-	_, oldestPresent := s.providerTokenProofSeen["provider-token-cap:nonce-0"]
-	_, overflowPresent := s.providerTokenProofSeen["provider-token-cap:nonce-overflow"]
+	_, oldestPresent := s.providerTokenProofSeen[providerTokenProofReplaySeenKey("provider-token-cap", "nonce-0")]
+	_, overflowPresent := s.providerTokenProofSeen[providerTokenProofReplaySeenKey("provider-token-cap", "nonce-overflow")]
 	s.providerMu.RUnlock()
 
 	if got != providerRelayUpsertProofReplayMaxPerToken {
@@ -1309,9 +1310,9 @@ func TestMarkProviderTokenProofReplayCapsGlobalEntries(t *testing.T) {
 
 	s.providerMu.RLock()
 	got := len(s.providerTokenProofSeen)
-	_, oldestPresent := s.providerTokenProofSeen["provider-token-0:nonce-0"]
-	_, overflowPresent := s.providerTokenProofSeen["provider-token-overflow:nonce-overflow"]
-	newestKey := fmt.Sprintf("provider-token-%d:nonce-%d", total-1, total-1)
+	_, oldestPresent := s.providerTokenProofSeen[providerTokenProofReplaySeenKey("provider-token-0", "nonce-0")]
+	_, overflowPresent := s.providerTokenProofSeen[providerTokenProofReplaySeenKey("provider-token-overflow", "nonce-overflow")]
+	newestKey := providerTokenProofReplaySeenKey(fmt.Sprintf("provider-token-%d", total-1), fmt.Sprintf("nonce-%d", total-1))
 	_, newestPresent := s.providerTokenProofSeen[newestKey]
 	s.providerMu.RUnlock()
 
@@ -1436,6 +1437,47 @@ func TestHandleProviderRelayUpsertRejectsTrailingJSON(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "invalid json") {
 		t.Fatalf("expected invalid json message, got %q", rr.Body.String())
+	}
+}
+
+func TestHandleProviderRelayUpsertRateLimitsMissingProviderTokenAttempts(t *testing.T) {
+	pub, _, err := crypto.GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatalf("provider keygen: %v", err)
+	}
+	s := &Service{
+		providerRelayUpsertRateLimiter:   httplimit.NewFixedWindowLimiter(1, 16),
+		providerRelayUpsertInflightLimit: httplimit.NewInflightLimiter(16),
+	}
+	in := proto.ProviderRelayUpsertRequest{
+		RelayID:    "provider-rate-limit",
+		Role:       "entry",
+		PubKey:     base64.RawURLEncoding.EncodeToString(pub),
+		Endpoint:   "127.0.0.1:51820",
+		ControlURL: "http://127.0.0.1:8083",
+	}
+	body, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal provider request: %v", err)
+	}
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(body))
+	firstReq.RemoteAddr = "198.51.100.77:10001"
+	firstRR := httptest.NewRecorder()
+	s.handleProviderRelayUpsert(firstRR, firstReq)
+	if firstRR.Code != http.StatusUnauthorized {
+		t.Fatalf("expected first missing-token request to reach provider auth, got HTTP %d body=%s", firstRR.Code, firstRR.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/provider/relay/upsert", bytes.NewReader(body))
+	secondReq.RemoteAddr = "198.51.100.77:10002"
+	secondRR := httptest.NewRecorder()
+	s.handleProviderRelayUpsert(secondRR, secondReq)
+	if secondRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected repeated missing-token request to be rate limited, got HTTP %d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	if !strings.Contains(secondRR.Body.String(), "rate limited") {
+		t.Fatalf("expected rate limit response body, got %q", secondRR.Body.String())
 	}
 }
 

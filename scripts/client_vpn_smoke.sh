@@ -129,30 +129,150 @@ print_cmd() {
 
 redact_sensitive_command_string() {
   local value="$1"
-  printf '%s' "$value" | sed -E 's/(--(subject|anon-cred|campaign-subject|key|invite-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g'
+  value="$(
+    printf '%s' "$value" | sed -E '
+s/--campaign-subject=INVITE_KEY/__TDP_CAMPAIGN_SUBJECT_EQ_INVITE_KEY__/g
+s/--campaign-subject[[:space:]]+INVITE_KEY/__TDP_CAMPAIGN_SUBJECT_SP_INVITE_KEY__/g
+s/--campaign-subject=CAMPAIGN_SUBJECT/__TDP_CAMPAIGN_SUBJECT_EQ_CAMPAIGN_SUBJECT__/g
+s/--campaign-subject[[:space:]]+CAMPAIGN_SUBJECT/__TDP_CAMPAIGN_SUBJECT_SP_CAMPAIGN_SUBJECT__/g
+s/--subject=INVITE_KEY/__TDP_SUBJECT_EQ_INVITE_KEY__/g
+s/--subject[[:space:]]+INVITE_KEY/__TDP_SUBJECT_SP_INVITE_KEY__/g
+s/--subject=CAMPAIGN_SUBJECT/__TDP_SUBJECT_EQ_CAMPAIGN_SUBJECT__/g
+s/--subject[[:space:]]+CAMPAIGN_SUBJECT/__TDP_SUBJECT_SP_CAMPAIGN_SUBJECT__/g
+s/--key=INVITE_KEY/__TDP_KEY_EQ_INVITE_KEY__/g
+s/--key[[:space:]]+INVITE_KEY/__TDP_KEY_SP_INVITE_KEY__/g
+s/--invite-key=INVITE_KEY/__TDP_INVITE_KEY_EQ_INVITE_KEY__/g
+s/--invite-key[[:space:]]+INVITE_KEY/__TDP_INVITE_KEY_SP_INVITE_KEY__/g
+s/--campaign-anon-cred=ANON_CRED/__TDP_CAMPAIGN_ANON_CRED_EQ_ANON_CRED__/g
+s/--campaign-anon-cred[[:space:]]+ANON_CRED/__TDP_CAMPAIGN_ANON_CRED_SP_ANON_CRED__/g
+s/--anon-cred=ANON_CRED/__TDP_ANON_CRED_EQ_ANON_CRED__/g
+s/--anon-cred[[:space:]]+ANON_CRED/__TDP_ANON_CRED_SP_ANON_CRED__/g
+'
+  )"
+  value="$(
+    printf '%s' "$value" | sed -E '
+s/(--(subject|anon-cred|campaign-subject|campaign-anon-cred|key|invite-key|token|auth-token|admin-token|authorization|bearer|password|secret|api-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g
+s/((Authorization|X-Admin-Token):[[:space:]]*(Bearer[[:space:]]*)?)[^[:space:]]+/\1[redacted]/Ig
+s~([A-Za-z][A-Za-z0-9+.-]*://)[^/?#@[:space:]]+@~\1[redacted]@~g
+s~([?&#](subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|auth_token|admin_token|authorization|bearer|password|secret)=)[^,&#[:space:]]+~\1[redacted]~Ig
+'
+  )"
+  printf '%s' "$value" | sed -E '
+s/__TDP_CAMPAIGN_SUBJECT_EQ_INVITE_KEY__/--campaign-subject=INVITE_KEY/g
+s/__TDP_CAMPAIGN_SUBJECT_SP_INVITE_KEY__/--campaign-subject INVITE_KEY/g
+s/__TDP_CAMPAIGN_SUBJECT_EQ_CAMPAIGN_SUBJECT__/--campaign-subject=CAMPAIGN_SUBJECT/g
+s/__TDP_CAMPAIGN_SUBJECT_SP_CAMPAIGN_SUBJECT__/--campaign-subject CAMPAIGN_SUBJECT/g
+s/__TDP_SUBJECT_EQ_INVITE_KEY__/--subject=INVITE_KEY/g
+s/__TDP_SUBJECT_SP_INVITE_KEY__/--subject INVITE_KEY/g
+s/__TDP_SUBJECT_EQ_CAMPAIGN_SUBJECT__/--subject=CAMPAIGN_SUBJECT/g
+s/__TDP_SUBJECT_SP_CAMPAIGN_SUBJECT__/--subject CAMPAIGN_SUBJECT/g
+s/__TDP_KEY_EQ_INVITE_KEY__/--key=INVITE_KEY/g
+s/__TDP_KEY_SP_INVITE_KEY__/--key INVITE_KEY/g
+s/__TDP_INVITE_KEY_EQ_INVITE_KEY__/--invite-key=INVITE_KEY/g
+s/__TDP_INVITE_KEY_SP_INVITE_KEY__/--invite-key INVITE_KEY/g
+s/__TDP_CAMPAIGN_ANON_CRED_EQ_ANON_CRED__/--campaign-anon-cred=ANON_CRED/g
+s/__TDP_CAMPAIGN_ANON_CRED_SP_ANON_CRED__/--campaign-anon-cred ANON_CRED/g
+s/__TDP_ANON_CRED_EQ_ANON_CRED__/--anon-cred=ANON_CRED/g
+s/__TDP_ANON_CRED_SP_ANON_CRED__/--anon-cred ANON_CRED/g
+'
+}
+
+redact_sensitive_output() {
+  sed -E '
+s/--campaign-subject=INVITE_KEY/__TDP_CAMPAIGN_SUBJECT_EQ_INVITE_KEY__/g
+s/--campaign-subject[[:space:]]+INVITE_KEY/__TDP_CAMPAIGN_SUBJECT_SP_INVITE_KEY__/g
+s/--campaign-subject=CAMPAIGN_SUBJECT/__TDP_CAMPAIGN_SUBJECT_EQ_CAMPAIGN_SUBJECT__/g
+s/--campaign-subject[[:space:]]+CAMPAIGN_SUBJECT/__TDP_CAMPAIGN_SUBJECT_SP_CAMPAIGN_SUBJECT__/g
+s/--subject=INVITE_KEY/__TDP_SUBJECT_EQ_INVITE_KEY__/g
+s/--subject[[:space:]]+INVITE_KEY/__TDP_SUBJECT_SP_INVITE_KEY__/g
+s/--subject=CAMPAIGN_SUBJECT/__TDP_SUBJECT_EQ_CAMPAIGN_SUBJECT__/g
+s/--subject[[:space:]]+CAMPAIGN_SUBJECT/__TDP_SUBJECT_SP_CAMPAIGN_SUBJECT__/g
+s/--key=INVITE_KEY/__TDP_KEY_EQ_INVITE_KEY__/g
+s/--key[[:space:]]+INVITE_KEY/__TDP_KEY_SP_INVITE_KEY__/g
+s/--invite-key=INVITE_KEY/__TDP_INVITE_KEY_EQ_INVITE_KEY__/g
+s/--invite-key[[:space:]]+INVITE_KEY/__TDP_INVITE_KEY_SP_INVITE_KEY__/g
+s/--campaign-anon-cred=ANON_CRED/__TDP_CAMPAIGN_ANON_CRED_EQ_ANON_CRED__/g
+s/--campaign-anon-cred[[:space:]]+ANON_CRED/__TDP_CAMPAIGN_ANON_CRED_SP_ANON_CRED__/g
+s/--anon-cred=ANON_CRED/__TDP_ANON_CRED_EQ_ANON_CRED__/g
+s/--anon-cred[[:space:]]+ANON_CRED/__TDP_ANON_CRED_SP_ANON_CRED__/g
+s/(--(subject|anon-cred|campaign-subject|campaign-anon-cred|key|invite-key|token|auth-token|admin-token|authorization|bearer|password|secret|api-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g
+s/((SUBJECT|ANON_CRED|INVITE_KEY|TOKEN|AUTH_TOKEN|ADMIN_TOKEN|AUTHORIZATION|BEARER|PASSWORD|SECRET|API_KEY)=)[^[:space:]]+/\1[redacted]/g
+s/((Authorization|X-Admin-Token):[[:space:]]*(Bearer[[:space:]]*)?)[^[:space:]]+/\1[redacted]/Ig
+s~([A-Za-z][A-Za-z0-9+.-]*://)[^/?#@[:space:]]+@~\1[redacted]@~g
+s~([?&#](subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|auth_token|admin_token|authorization|bearer|password|secret)=)[^,&#[:space:]]+~\1[redacted]~Ig
+s/inv-[A-Za-z0-9._:-]+/[redacted-invite]/g
+s/__TDP_CAMPAIGN_SUBJECT_EQ_INVITE_KEY__/--campaign-subject=INVITE_KEY/g
+s/__TDP_CAMPAIGN_SUBJECT_SP_INVITE_KEY__/--campaign-subject INVITE_KEY/g
+s/__TDP_CAMPAIGN_SUBJECT_EQ_CAMPAIGN_SUBJECT__/--campaign-subject=CAMPAIGN_SUBJECT/g
+s/__TDP_CAMPAIGN_SUBJECT_SP_CAMPAIGN_SUBJECT__/--campaign-subject CAMPAIGN_SUBJECT/g
+s/__TDP_SUBJECT_EQ_INVITE_KEY__/--subject=INVITE_KEY/g
+s/__TDP_SUBJECT_SP_INVITE_KEY__/--subject INVITE_KEY/g
+s/__TDP_SUBJECT_EQ_CAMPAIGN_SUBJECT__/--subject=CAMPAIGN_SUBJECT/g
+s/__TDP_SUBJECT_SP_CAMPAIGN_SUBJECT__/--subject CAMPAIGN_SUBJECT/g
+s/__TDP_KEY_EQ_INVITE_KEY__/--key=INVITE_KEY/g
+s/__TDP_KEY_SP_INVITE_KEY__/--key INVITE_KEY/g
+s/__TDP_INVITE_KEY_EQ_INVITE_KEY__/--invite-key=INVITE_KEY/g
+s/__TDP_INVITE_KEY_SP_INVITE_KEY__/--invite-key INVITE_KEY/g
+s/__TDP_CAMPAIGN_ANON_CRED_EQ_ANON_CRED__/--campaign-anon-cred=ANON_CRED/g
+s/__TDP_CAMPAIGN_ANON_CRED_SP_ANON_CRED__/--campaign-anon-cred ANON_CRED/g
+s/__TDP_ANON_CRED_EQ_ANON_CRED__/--anon-cred=ANON_CRED/g
+s/__TDP_ANON_CRED_SP_ANON_CRED__/--anon-cred ANON_CRED/g
+'
+}
+
+redact_sensitive_text() {
+  printf '%s\n' "${1:-}" | redact_sensitive_output
+}
+
+redact_sensitive_arg_for_log() {
+  redact_sensitive_command_string "${1:-}"
+}
+
+is_sensitive_placeholder_arg() {
+  local flag="$1"
+  local value="$2"
+  case "$flag:$value" in
+    --campaign-subject:INVITE_KEY|--campaign-subject:CAMPAIGN_SUBJECT|--subject:INVITE_KEY|--subject:CAMPAIGN_SUBJECT|--key:INVITE_KEY|--invite-key:INVITE_KEY|--campaign-anon-cred:ANON_CRED|--anon-cred:ANON_CRED)
+      return 0
+      ;;
+  esac
+  return 1
 }
 
 print_cmd_redacted() {
   local -a redacted=()
   local arg
+  local flag
+  local value
   while [[ $# -gt 0 ]]; do
     arg="$1"
     case "$arg" in
-      --subject|--anon-cred|--campaign-subject|--key|--invite-key)
+      --subject|--anon-cred|--campaign-subject|--campaign-anon-cred|--key|--invite-key|--token|--auth-token|--admin-token|--authorization|--bearer|--password|--secret|--api-key)
         redacted+=("$arg")
         if [[ $# -ge 2 ]]; then
-          redacted+=("[redacted]")
+          value="$2"
+          if is_sensitive_placeholder_arg "$arg" "$value"; then
+            redacted+=("$value")
+          else
+            redacted+=("[redacted]")
+          fi
           shift 2
         else
           shift
         fi
         ;;
-      --subject=*|--anon-cred=*|--campaign-subject=*|--key=*|--invite-key=*)
-        redacted+=("${arg%%=*}=[redacted]")
+      --subject=*|--anon-cred=*|--campaign-subject=*|--campaign-anon-cred=*|--key=*|--invite-key=*|--token=*|--auth-token=*|--admin-token=*|--authorization=*|--bearer=*|--password=*|--secret=*|--api-key=*)
+        flag="${arg%%=*}"
+        value="${arg#*=}"
+        if is_sensitive_placeholder_arg "$flag" "$value"; then
+          redacted+=("$arg")
+        else
+          redacted+=("$flag=[redacted]")
+        fi
         shift
         ;;
       *)
-        redacted+=("$arg")
+        redacted+=("$(redact_sensitive_arg_for_log "$arg")")
         shift
         ;;
     esac
@@ -713,7 +833,7 @@ persist_artifact_text() {
   if [[ -z "$content" ]]; then
     rm -f "$path" 2>/dev/null || true
   else
-    printf '%s\n' "$content" >"$path"
+    redact_sensitive_text "$content" >"$path"
   fi
 }
 
@@ -738,20 +858,17 @@ json_array_from_paths() {
 run_and_capture() {
   local __var_name="$1"
   shift
-  local tmp rc
-  tmp="$(mktemp)"
-  if "$@" >"$tmp" 2>&1; then
+  local output rc
+  if output="$("$@" 2>&1)"; then
     printf '%s\n' "[$stage] command_ok: $(print_cmd_redacted "$@")" >>"$summary_log"
-    cat "$tmp" >>"$summary_log"
-    printf -v "$__var_name" '%s' "$(cat "$tmp")"
-    rm -f "$tmp"
+    redact_sensitive_text "$output" >>"$summary_log"
+    printf -v "$__var_name" '%s' "$output"
     return 0
   else
     rc=$?
     printf '%s\n' "[$stage] command_failed rc=$rc: $(print_cmd_redacted "$@")" >>"$summary_log"
-    cat "$tmp" >>"$summary_log"
-    printf -v "$__var_name" '%s' "$(cat "$tmp")"
-    rm -f "$tmp"
+    redact_sensitive_text "$output" >>"$summary_log"
+    printf -v "$__var_name" '%s' "$output"
     return "$rc"
   fi
 }
@@ -854,7 +971,7 @@ build_trust_reset_command() {
   append_opt trust_reset_cmd "--bootstrap-directory" "$bootstrap_directory"
   append_opt trust_reset_cmd "--discovery-wait-sec" "$discovery_wait_sec"
   append_opt trust_reset_cmd "--trust-scope" "$trust_reset_scope"
-  print_cmd "${trust_reset_cmd[@]}"
+  print_cmd_redacted "${trust_reset_cmd[@]}"
 }
 
 build_runtime_fix_command() {
@@ -1019,9 +1136,25 @@ cleanup_down() {
     return 0
   fi
   stage="cleanup"
+  up_succeeded="0"
   local cleanup_output=""
   run_and_capture cleanup_output "${down_cmd[@]}" || true
 }
+
+cleanup_on_exit() {
+  cleanup_down || true
+}
+
+cleanup_on_signal() {
+  local rc="$1"
+  trap - EXIT INT TERM
+  cleanup_down || true
+  exit "$rc"
+}
+
+trap cleanup_on_exit EXIT
+trap 'cleanup_on_signal 130' INT
+trap 'cleanup_on_signal 143' TERM
 
 run_runtime_gate() {
   local doctor_output=""
@@ -1431,12 +1564,14 @@ refresh_failed_incident_snapshot_attachments() {
 }
 
 write_summary_json() {
+  local status_output_redacted
+  status_output_redacted="$(redact_sensitive_text "$status_output")"
   jq -n \
     --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg status "$smoke_status" \
     --arg stage "$result_stage" \
     --arg notes "$notes" \
-    --arg status_output "$status_output" \
+    --arg status_output "$status_output_redacted" \
     --arg public_ip_result "$public_ip_result" \
     --arg country_result "$country_result" \
     --arg pre_real_host_readiness_status "$pre_real_host_readiness_status" \
@@ -1665,7 +1800,7 @@ finish_and_record() {
     for runtime_artifact in "${record_cmd_artifacts[@]}"; do
       record_cmd+=(--artifact "$runtime_artifact")
     done
-    "${record_cmd[@]}" >>"$summary_log" 2>&1 || true
+    "${record_cmd[@]}" 2>&1 | redact_sensitive_output >>"$summary_log" || true
   fi
   if [[ "$smoke_status" == "fail" && "$result_stage" == "up" ]]; then
     echo "client-vpn-smoke: status=$smoke_status stage=$result_stage hint=${up_failure_hint_id:-generic_up_failure} next_command=${up_failure_next_command:-}"

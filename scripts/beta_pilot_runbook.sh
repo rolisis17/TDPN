@@ -49,6 +49,7 @@ Usage:
     [--beta-profile [0|1]] \
     [--prod-profile [0|1]] \
     [--bundle-dir PATH] \
+    [--overwrite-existing-bundle [0|1]] \
     [--record-result [0|1]] \
     [--manual-validation-report [0|1]]
 
@@ -81,6 +82,38 @@ trim_url() {
     value="${value%/}"
   done
   echo "$value"
+}
+
+redact_if_set() {
+  if [[ -n "${1:-}" ]]; then
+    printf '%s\n' "[redacted]"
+  fi
+}
+
+redact_url_for_metadata() {
+  local value="${1:-}"
+  value="${value%%#*}"
+  value="${value%%\?*}"
+  printf '%s\n' "$value" | sed -E 's#^(https?://)[^/@]+@#\1[redacted]@#'
+}
+
+redact_pilot_stream() {
+  PILOT_REDACT_SUBJECT="${client_subject:-}" \
+  PILOT_REDACT_ANON_CRED="${client_anon_cred:-}" \
+    perl -pe '
+      BEGIN {
+        $subject = $ENV{"PILOT_REDACT_SUBJECT"} // "";
+        $anon = $ENV{"PILOT_REDACT_ANON_CRED"} // "";
+      }
+      s/\Q$subject\E/[redacted]/g if length($subject);
+      s/\Q$anon\E/[redacted]/g if length($anon);
+      s{https?://[^\s"'"'"'<>),\]]+}{
+        my $url = $&;
+        $url =~ s#^(https?://)[^/\s@]+@#${1}[redacted]@#;
+        $url =~ s/[?#].*\z//;
+        $url;
+      }eg;
+    '
 }
 
 normalize_path_profile() {
@@ -273,9 +306,9 @@ snapshot_url() {
     return 0
   fi
   if curl -fsS --connect-timeout 4 --max-time 10 "$url" >"$output_path"; then
-    echo "[snapshot] ok $url"
+    echo "[snapshot] ok $(redact_url_for_metadata "$url")"
   else
-    echo "[snapshot] failed $url" | tee -a "$output_path"
+    echo "[snapshot] failed $(redact_url_for_metadata "$url")" | tee -a "$output_path"
   fi
 }
 
@@ -354,6 +387,7 @@ live_evidence_udp_inject="${THREE_MACHINE_LIVE_EVIDENCE_UDP_INJECT:-0}"
 record_result="${THREE_MACHINE_PILOT_RECORD_RESULT:-0}"
 manual_validation_report_enabled="${THREE_MACHINE_PILOT_MANUAL_VALIDATION_REPORT:-0}"
 bundle_dir=""
+overwrite_existing_bundle="${THREE_MACHINE_PILOT_OVERWRITE_BUNDLE:-0}"
 path_profile_set=0
 distinct_operators_set=0
 distinct_countries_set=0
@@ -589,6 +623,10 @@ while [[ $# -gt 0 ]]; do
       bundle_dir="${2:-}"
       shift 2
       ;;
+    --overwrite-existing-bundle)
+      overwrite_existing_bundle="${2:-}"
+      shift 2
+      ;;
     --record-result)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
         record_result="${2:-}"
@@ -705,6 +743,10 @@ if [[ "$manual_validation_report_enabled" != "0" && "$manual_validation_report_e
   echo "--manual-validation-report / THREE_MACHINE_PILOT_MANUAL_VALIDATION_REPORT must be 0 or 1"
   exit 2
 fi
+if [[ "$overwrite_existing_bundle" != "0" && "$overwrite_existing_bundle" != "1" ]]; then
+  echo "--overwrite-existing-bundle / THREE_MACHINE_PILOT_OVERWRITE_BUNDLE must be 0 or 1"
+  exit 2
+fi
 if [[ -n "$client_require_cross_operator_pair" && "$client_require_cross_operator_pair" != "0" && "$client_require_cross_operator_pair" != "1" ]]; then
   echo "--client-require-cross-operator-pair must be 0 or 1"
   exit 2
@@ -793,6 +835,7 @@ need_cmd curl
 need_cmd rg
 need_cmd tar
 need_cmd date
+need_cmd perl
 need_cmd tee
 need_cmd timeout
 if [[ ! -x "$VALIDATE_SCRIPT" ]]; then
@@ -854,7 +897,13 @@ if [[ "$require_issuer_quorum" == "1" ]]; then
 fi
 
 if [[ -z "$bundle_dir" ]]; then
-  bundle_dir="$(default_log_dir)/pilot_bundle_$(date +%Y%m%d_%H%M%S)"
+  mkdir -p "$(default_log_dir)"
+  bundle_dir="$(mktemp -d "$(default_log_dir)/pilot_bundle_$(date +%Y%m%d_%H%M%S).XXXXXX")"
+elif [[ -e "$bundle_dir" && "$overwrite_existing_bundle" != "1" ]]; then
+  if [[ ! -d "$bundle_dir" ]] || find "$bundle_dir" -mindepth 1 -print -quit | grep -q .; then
+    echo "pilot-runbook refused non-empty bundle dir: $bundle_dir (pass --overwrite-existing-bundle 1 to reuse intentionally)" >&2
+    exit 2
+  fi
 fi
 mkdir -p "$bundle_dir"
 bundle_dir="$(cd "$bundle_dir" && pwd)"
@@ -865,9 +914,9 @@ exec > >(tee -a "$main_log") 2>&1
 echo "[pilot-runbook] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[pilot-runbook] bundle_dir=$bundle_dir"
 echo "[pilot-runbook] path_profile=${normalized_path_profile:-<none>} beta_profile=$beta_profile prod_profile=$prod_profile rounds=$rounds pause_sec=$pause_sec distinct_operators=$distinct_operators distinct_countries=$distinct_countries locality_soft_bias=$locality_soft_bias country_bias=$locality_country_bias region_bias=$locality_region_bias region_prefix_bias=$locality_region_prefix_bias require_issuer_quorum=$require_issuer_quorum allow_insecure_remote_http=$allow_insecure_remote_http client_test_mode=${client_test_mode:-default} live_evidence_udp_inject=$live_evidence_udp_inject record_result=$record_result manual_validation_report=$manual_validation_report_enabled"
-echo "[pilot-runbook] directory_a=$directory_a directory_b=$directory_b issuer_url=$issuer_url entry_url=$entry_url exit_url=$exit_url"
+echo "[pilot-runbook] directory_a=$(redact_url_for_metadata "$directory_a") directory_b=$(redact_url_for_metadata "$directory_b") issuer_url=$(redact_url_for_metadata "$issuer_url") entry_url=$(redact_url_for_metadata "$entry_url") exit_url=$(redact_url_for_metadata "$exit_url")"
 if [[ -n "$issuer_a_url" || -n "$issuer_b_url" ]]; then
-  echo "[pilot-runbook] issuer_a_url=$issuer_a_url issuer_b_url=$issuer_b_url"
+  echo "[pilot-runbook] issuer_a_url=$(redact_url_for_metadata "$issuer_a_url") issuer_b_url=$(redact_url_for_metadata "$issuer_b_url")"
 fi
 
 cat >"$bundle_dir/metadata.txt" <<EOF
@@ -888,14 +937,14 @@ client_test_mode=$client_test_mode
 live_evidence_udp_inject=$live_evidence_udp_inject
 record_result=$record_result
 manual_validation_report=$manual_validation_report_enabled
-directory_a=$directory_a
-directory_b=$directory_b
-issuer_url=$issuer_url
-issuer_a_url=$issuer_a_url
-issuer_b_url=$issuer_b_url
-entry_url=$entry_url
-exit_url=$exit_url
-subject=$client_subject
+directory_a=$(redact_url_for_metadata "$directory_a")
+directory_b=$(redact_url_for_metadata "$directory_b")
+issuer_url=$(redact_url_for_metadata "$issuer_url")
+issuer_a_url=$(redact_url_for_metadata "$issuer_a_url")
+issuer_b_url=$(redact_url_for_metadata "$issuer_b_url")
+entry_url=$(redact_url_for_metadata "$entry_url")
+exit_url=$(redact_url_for_metadata "$exit_url")
+subject=$(redact_if_set "$client_subject")
 anon_cred_set=$([[ -n "$client_anon_cred" ]] && echo 1 || echo 0)
 EOF
 
@@ -950,7 +999,7 @@ validate_log="$bundle_dir/validate.log"
 echo "[pilot-runbook] running strict validation"
 pilot_record_command="./scripts/easy_node.sh pilot-runbook [redacted] --bundle-dir $bundle_dir"
 set +e
-"${validate_cmd[@]}" 2>&1 | tee "$validate_log"
+"${validate_cmd[@]}" 2>&1 | redact_pilot_stream | tee "$validate_log"
 validate_rc=${PIPESTATUS[0]}
 set -e
 if [[ "$validate_rc" -ne 0 ]]; then
@@ -987,7 +1036,6 @@ soak_cmd=(
   --require-issuer-quorum "$require_issuer_quorum"
   --beta-profile "$beta_profile"
   --prod-profile "$prod_profile"
-  --report-file "$soak_log"
 )
 if [[ "$allow_insecure_remote_http" == "1" ]]; then
   soak_cmd+=(--allow-insecure-remote-http 1)
@@ -1013,8 +1061,8 @@ fi
 
 echo "[pilot-runbook] running soak rounds"
 set +e
-"${soak_cmd[@]}"
-soak_rc=$?
+"${soak_cmd[@]}" 2>&1 | redact_pilot_stream | tee "$soak_log"
+soak_rc=${PIPESTATUS[0]}
 set -e
 if [[ "$soak_rc" -ne 0 ]]; then
   echo "[pilot-runbook] soak failed rc=$soak_rc"

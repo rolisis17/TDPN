@@ -63,6 +63,14 @@ abs_path() {
   path="$(trim "$path")"
   if [[ -z "$path" ]]; then
     printf '%s' ""
+  elif [[ "$path" =~ ^[A-Za-z]:[\\/].* ]]; then
+    if command -v wslpath >/dev/null 2>&1; then
+      wslpath -u "$path" 2>/dev/null || printf '%s' "$path"
+    elif command -v cygpath >/dev/null 2>&1; then
+      cygpath -u "$path" 2>/dev/null || printf '%s' "$path"
+    else
+      printf '%s' "$path"
+    fi
   elif [[ "$path" = /* ]]; then
     printf '%s' "$path"
   else
@@ -86,12 +94,12 @@ print_cmd() {
       continue
     fi
     case "$arg" in
-      --anon-cred|--invite-key|--campaign-subject|--subject|--token|--auth-token|--admin-token|--authorization|--bearer)
+      --anon-cred|--campaign-anon-cred|--invite-key|--key|--campaign-subject|--subject|--token|--auth-token|--admin-token|--authorization|--bearer|--password|--secret|--api-key)
         printf '%q ' "$arg"
         redact_next=1
         continue
         ;;
-      --anon-cred=*|--invite-key=*|--campaign-subject=*|--subject=*|--token=*|--auth-token=*|--admin-token=*|--authorization=*|--bearer=*)
+      --anon-cred=*|--campaign-anon-cred=*|--invite-key=*|--key=*|--campaign-subject=*|--subject=*|--token=*|--auth-token=*|--admin-token=*|--authorization=*|--bearer=*|--password=*|--secret=*|--api-key=*)
         printf '%q ' "${arg%%=*}=[REDACTED]"
         continue
         ;;
@@ -99,6 +107,169 @@ print_cmd() {
     printf '%q ' "$arg"
   done
   printf '\n'
+}
+
+redact_sensitive_output() {
+  sed -E '
+s/(--(anon-cred|campaign-anon-cred|invite-key|key|campaign-subject|subject|token|auth-token|admin-token|authorization|bearer|password|secret|api-key)(=|[[:space:]]+))[^[:space:]]+/\1[REDACTED]/g
+s/((SUBJECT|ANON_CRED|INVITE_KEY|TOKEN|AUTH_TOKEN|ADMIN_TOKEN|AUTHORIZATION|BEARER|PASSWORD|SECRET|API_KEY)=)[^[:space:]]+/\1[REDACTED]/g
+s/((Authorization|X-Admin-Token):[[:space:]]*(Bearer[[:space:]]*)?)[^[:space:]]+/\1[REDACTED]/Ig
+s/inv-[A-Za-z0-9._:-]+/[REDACTED_INVITE]/g
+'
+}
+
+redact_sensitive_text() {
+  printf '%s\n' "${1:-}" | redact_sensitive_output
+}
+
+strict_signoff_min_wg_soak_selection_lines=12
+strict_signoff_min_wg_soak_entry_operators=2
+strict_signoff_min_wg_soak_exit_operators=2
+strict_signoff_min_wg_soak_cross_operator_pairs=2
+strict_signoff_max_wg_soak_failed_rounds=0
+effective_signoff_min_wg_soak_selection_lines="$strict_signoff_min_wg_soak_selection_lines"
+effective_signoff_min_wg_soak_entry_operators="$strict_signoff_min_wg_soak_entry_operators"
+effective_signoff_min_wg_soak_exit_operators="$strict_signoff_min_wg_soak_exit_operators"
+effective_signoff_min_wg_soak_cross_operator_pairs="$strict_signoff_min_wg_soak_cross_operator_pairs"
+
+reject_signoff_min_floor() {
+  local name="$1"
+  local value="$2"
+  local minimum="$3"
+  local effective_var="$4"
+  if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+    echo "three-machine-prod-signoff requires $name to be an integer >= $minimum; use three-machine-prod-bundle directly for diagnostic policy bypasses."
+    return 1
+  fi
+  if (( 10#$value < minimum )); then
+    echo "three-machine-prod-signoff requires $name >= $minimum; use three-machine-prod-bundle directly for diagnostic policy bypasses."
+    return 1
+  fi
+  local -n effective_ref="$effective_var"
+  if (( 10#$value > effective_ref )); then
+    effective_ref="$value"
+  fi
+  return 0
+}
+
+reject_signoff_max_budget() {
+  local name="$1"
+  local value="$2"
+  local maximum="$3"
+  if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+    echo "three-machine-prod-signoff requires $name to be an integer <= $maximum; use three-machine-prod-bundle directly for diagnostic policy bypasses."
+    return 1
+  fi
+  if (( 10#$value > maximum )); then
+    echo "three-machine-prod-signoff requires $name <= $maximum; use three-machine-prod-bundle directly for diagnostic policy bypasses."
+    return 1
+  fi
+  return 0
+}
+
+reject_prod_signoff_weakening_args() {
+  local arg value
+  while [[ $# -gt 0 ]]; do
+    arg="$1"
+    case "$arg" in
+      --skip-wg|--skip-wg-soak|--skip-control-soak)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          value="${2:-}"
+          shift 2
+        else
+          value="1"
+          shift
+        fi
+        if [[ "$value" == "1" ]]; then
+          echo "three-machine-prod-signoff rejects $arg 1; use three-machine-prod-bundle directly for diagnostic bypasses."
+          return 1
+        fi
+        ;;
+      --skip-wg=*|--skip-wg-soak=*|--skip-control-soak=*)
+        value="${arg#*=}"
+        shift
+        if [[ "$value" == "1" ]]; then
+          echo "three-machine-prod-signoff rejects ${arg%%=*}=1; use three-machine-prod-bundle directly for diagnostic bypasses."
+          return 1
+        fi
+        ;;
+      --signoff-check|--signoff-require-full-sequence|--signoff-require-wg-validate-ok|--signoff-require-wg-soak-ok|--signoff-require-wg-validate-udp-source|--signoff-require-wg-validate-strict-distinct|--signoff-require-wg-soak-diversity-pass|--bundle-verify-check)
+        if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+          value="${2:-}"
+          shift 2
+        else
+          value="1"
+          shift
+        fi
+        if [[ "$value" == "0" ]]; then
+          echo "three-machine-prod-signoff requires ${arg} 1; use three-machine-prod-bundle directly for diagnostic policy bypasses."
+          return 1
+        fi
+        ;;
+      --signoff-check=*|--signoff-require-full-sequence=*|--signoff-require-wg-validate-ok=*|--signoff-require-wg-soak-ok=*|--signoff-require-wg-validate-udp-source=*|--signoff-require-wg-validate-strict-distinct=*|--signoff-require-wg-soak-diversity-pass=*|--bundle-verify-check=*)
+        value="${arg#*=}"
+        shift
+        if [[ "$value" == "0" ]]; then
+          echo "three-machine-prod-signoff requires ${arg%%=*}=1; use three-machine-prod-bundle directly for diagnostic policy bypasses."
+          return 1
+        fi
+        ;;
+      --signoff-min-wg-soak-selection-lines)
+        value="${2:-}"
+        if [[ $# -ge 2 ]]; then shift 2; else shift; fi
+        reject_signoff_min_floor "$arg" "$value" "$strict_signoff_min_wg_soak_selection_lines" effective_signoff_min_wg_soak_selection_lines || return 1
+        ;;
+      --signoff-min-wg-soak-selection-lines=*)
+        value="${arg#*=}"
+        shift
+        reject_signoff_min_floor "${arg%%=*}" "$value" "$strict_signoff_min_wg_soak_selection_lines" effective_signoff_min_wg_soak_selection_lines || return 1
+        ;;
+      --signoff-min-wg-soak-entry-operators)
+        value="${2:-}"
+        if [[ $# -ge 2 ]]; then shift 2; else shift; fi
+        reject_signoff_min_floor "$arg" "$value" "$strict_signoff_min_wg_soak_entry_operators" effective_signoff_min_wg_soak_entry_operators || return 1
+        ;;
+      --signoff-min-wg-soak-entry-operators=*)
+        value="${arg#*=}"
+        shift
+        reject_signoff_min_floor "${arg%%=*}" "$value" "$strict_signoff_min_wg_soak_entry_operators" effective_signoff_min_wg_soak_entry_operators || return 1
+        ;;
+      --signoff-min-wg-soak-exit-operators)
+        value="${2:-}"
+        if [[ $# -ge 2 ]]; then shift 2; else shift; fi
+        reject_signoff_min_floor "$arg" "$value" "$strict_signoff_min_wg_soak_exit_operators" effective_signoff_min_wg_soak_exit_operators || return 1
+        ;;
+      --signoff-min-wg-soak-exit-operators=*)
+        value="${arg#*=}"
+        shift
+        reject_signoff_min_floor "${arg%%=*}" "$value" "$strict_signoff_min_wg_soak_exit_operators" effective_signoff_min_wg_soak_exit_operators || return 1
+        ;;
+      --signoff-min-wg-soak-cross-operator-pairs)
+        value="${2:-}"
+        if [[ $# -ge 2 ]]; then shift 2; else shift; fi
+        reject_signoff_min_floor "$arg" "$value" "$strict_signoff_min_wg_soak_cross_operator_pairs" effective_signoff_min_wg_soak_cross_operator_pairs || return 1
+        ;;
+      --signoff-min-wg-soak-cross-operator-pairs=*)
+        value="${arg#*=}"
+        shift
+        reject_signoff_min_floor "${arg%%=*}" "$value" "$strict_signoff_min_wg_soak_cross_operator_pairs" effective_signoff_min_wg_soak_cross_operator_pairs || return 1
+        ;;
+      --signoff-max-wg-soak-failed-rounds)
+        value="${2:-}"
+        if [[ $# -ge 2 ]]; then shift 2; else shift; fi
+        reject_signoff_max_budget "$arg" "$value" "$strict_signoff_max_wg_soak_failed_rounds" || return 1
+        ;;
+      --signoff-max-wg-soak-failed-rounds=*)
+        value="${arg#*=}"
+        shift
+        reject_signoff_max_budget "${arg%%=*}" "$value" "$strict_signoff_max_wg_soak_failed_rounds" || return 1
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+  return 0
 }
 
 safe_append_to_array() {
@@ -185,8 +356,8 @@ runtime_vpn_iface="${EASY_NODE_DOCTOR_VPN_IFACE:-wgvpn0}"
 manual_validation_report_enabled="1"
 manual_validation_report_summary_json=""
 manual_validation_report_md=""
-signoff_check_explicit="0"
 signoff_check_value="1"
+preflight_check_value="1"
 prod_profile_value="1"
 beta_profile_value="1"
 declare -a bundle_args=()
@@ -245,6 +416,10 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --runtime-doctor=*)
+      runtime_doctor_enabled="${1#--runtime-doctor=}"
+      shift
+      ;;
     --runtime-fix)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         runtime_fix_on_non_ok="${2:-}"
@@ -254,6 +429,10 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --runtime-fix=*)
+      runtime_fix_on_non_ok="${1#--runtime-fix=}"
+      shift
+      ;;
     --runtime-fix-prune-wg-only-dir)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         runtime_fix_prune_wg_only_dir="${2:-}"
@@ -262,6 +441,10 @@ while [[ $# -gt 0 ]]; do
         runtime_fix_prune_wg_only_dir="1"
         shift
       fi
+      ;;
+    --runtime-fix-prune-wg-only-dir=*)
+      runtime_fix_prune_wg_only_dir="${1#--runtime-fix-prune-wg-only-dir=}"
+      shift
       ;;
     --runtime-base-port)
       runtime_base_port="${2:-}"
@@ -306,7 +489,6 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --signoff-check)
-      signoff_check_explicit="1"
       bundle_args+=("$1")
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         signoff_check_value="${2:-}"
@@ -316,6 +498,27 @@ while [[ $# -gt 0 ]]; do
         signoff_check_value="1"
         shift
       fi
+      ;;
+    --signoff-check=*)
+      signoff_check_value="${1#--signoff-check=}"
+      bundle_args+=("$1")
+      shift
+      ;;
+    --preflight-check)
+      bundle_args+=("$1")
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        preflight_check_value="${2:-}"
+        bundle_args+=("${2:-}")
+        shift 2
+      else
+        preflight_check_value="1"
+        shift
+      fi
+      ;;
+    --preflight-check=*)
+      preflight_check_value="${1#--preflight-check=}"
+      bundle_args+=("$1")
+      shift
       ;;
     --prod-profile)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
@@ -364,8 +567,13 @@ bool_arg_or_die "--manual-validation-report" "$manual_validation_report_enabled"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--prod-profile" "$prod_profile_value"
 bool_arg_or_die "--beta-profile" "$beta_profile_value"
+bool_arg_or_die "--preflight-check" "$preflight_check_value"
 if [[ "$signoff_check_value" != "1" ]]; then
   echo "three-machine-prod-signoff requires --signoff-check 1"
+  exit 2
+fi
+if [[ "$preflight_check_value" != "1" ]]; then
+  echo "three-machine-prod-signoff requires --preflight-check 1; use three-machine-prod-bundle directly for diagnostic preflight bypasses."
   exit 2
 fi
 if [[ "$prod_profile_value" != "1" ]]; then
@@ -374,6 +582,13 @@ if [[ "$prod_profile_value" != "1" ]]; then
 fi
 if [[ "$beta_profile_value" != "1" ]]; then
   echo "three-machine-prod-signoff requires --beta-profile 1 as part of the strict production profile."
+  exit 2
+fi
+if [[ "$runtime_doctor_enabled" != "1" ]]; then
+  echo "three-machine-prod-signoff requires --runtime-doctor 1; use three-machine-prod-bundle directly for diagnostic runtime bypasses."
+  exit 2
+fi
+if ! reject_prod_signoff_weakening_args "${bundle_args[@]}"; then
   exit 2
 fi
 if ! [[ "$runtime_base_port" =~ ^[0-9]+$ ]]; then
@@ -467,10 +682,23 @@ runtime_fix_cmd=(
   "--prune-wg-only-dir" "$runtime_fix_prune_wg_only_dir"
   "--show-json" "1"
 )
-if [[ "$signoff_check_explicit" != "1" ]]; then
-  bundle_cmd+=("--signoff-check" "1")
-fi
 bundle_cmd+=("${bundle_args[@]}")
+bundle_cmd+=(
+  "--preflight-check" "1"
+  "--bundle-verify-check" "1"
+  "--signoff-check" "1"
+  "--signoff-require-full-sequence" "1"
+  "--signoff-require-wg-validate-ok" "1"
+  "--signoff-require-wg-soak-ok" "1"
+  "--signoff-require-wg-validate-udp-source" "1"
+  "--signoff-require-wg-validate-strict-distinct" "1"
+  "--signoff-require-wg-soak-diversity-pass" "1"
+  "--signoff-min-wg-soak-selection-lines" "$effective_signoff_min_wg_soak_selection_lines"
+  "--signoff-min-wg-soak-entry-operators" "$effective_signoff_min_wg_soak_entry_operators"
+  "--signoff-min-wg-soak-exit-operators" "$effective_signoff_min_wg_soak_exit_operators"
+  "--signoff-min-wg-soak-cross-operator-pairs" "$effective_signoff_min_wg_soak_cross_operator_pairs"
+  "--signoff-max-wg-soak-failed-rounds" "$strict_signoff_max_wg_soak_failed_rounds"
+)
 
 stage="bundle"
 result_stage="bundle"
@@ -526,27 +754,24 @@ persist_artifact_text() {
   if [[ -z "$content" ]]; then
     rm -f "$path" 2>/dev/null || true
   else
-    printf '%s\n' "$content" >"$path"
+    redact_sensitive_text "$content" >"$path"
   fi
 }
 
 run_and_capture() {
   local __var_name="$1"
   shift
-  local tmp rc
-  tmp="$(mktemp)"
-  if "$@" >"$tmp" 2>&1; then
+  local output rc
+  if output="$("$@" 2>&1)"; then
     printf '%s\n' "[$stage] command_ok: $(print_cmd "$@")" >>"$summary_log"
-    cat "$tmp" >>"$summary_log"
-    printf -v "$__var_name" '%s' "$(cat "$tmp")"
-    rm -f "$tmp"
+    redact_sensitive_text "$output" >>"$summary_log"
+    printf -v "$__var_name" '%s' "$output"
     return 0
   else
     rc=$?
     printf '%s\n' "[$stage] command_failed rc=$rc: $(print_cmd "$@")" >>"$summary_log"
-    cat "$tmp" >>"$summary_log"
-    printf -v "$__var_name" '%s' "$(cat "$tmp")"
-    rm -f "$tmp"
+    redact_sensitive_text "$output" >>"$summary_log"
+    printf -v "$__var_name" '%s' "$output"
     return "$rc"
   fi
 }
@@ -939,7 +1164,7 @@ record_receipt() {
       record_cmd+=(--artifact "$artifact")
     fi
   done
-  "${record_cmd[@]}" >>"$summary_log" 2>&1 || true
+  "${record_cmd[@]}" 2>&1 | redact_sensitive_output >>"$summary_log" || true
 }
 
 write_summary_json() {
@@ -1117,7 +1342,7 @@ else
     cat "$summary_json"
   fi
   if [[ "$pre_real_host_readiness_rc" -eq 2 ]]; then
-    exit 0
+    exit 1
   fi
   exit 1
 fi

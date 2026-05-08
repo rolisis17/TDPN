@@ -3160,7 +3160,7 @@ func TestMemoryServiceBlockchainModeWithoutAdapterFailsClosed(t *testing.T) {
 	if !storedReservation.ConsumedAt.IsZero() {
 		t.Fatalf("expected pending deferred sponsor reservation to remain unconsumed after failed authorize")
 	}
-	if _, ok := s.paymentAuthByReservationID["sres-blockchain-no-adapter-1"]; ok {
+	if _, ok := s.paymentAuthByReservationID[paymentAuthorizationMapKey(PaymentProofSourceSponsor, "sres-blockchain-no-adapter-1")]; ok {
 		t.Fatalf("expected no payment authorization record for pending deferred sponsor reservation")
 	}
 	if _, ok := s.settledBySession["sess-blockchain-no-adapter-1"]; ok {
@@ -3265,7 +3265,7 @@ func TestMemoryServiceAuthorizePaymentRequiresFinalizedChainMaterialInBlockchain
 			stored.AdapterSubmitted = true
 			stored.ConsumedAt = time.Time{}
 			s.sponsorReservationsByID[reservation.ReservationID] = stored
-			delete(s.paymentAuthByReservationID, reservation.ReservationID)
+			delete(s.paymentAuthByReservationID, paymentAuthorizationMapKey(PaymentProofSourceSponsor, reservation.ReservationID))
 			s.mu.Unlock()
 
 			auth, err := s.AuthorizePayment(ctx, proof)
@@ -3278,7 +3278,7 @@ func TestMemoryServiceAuthorizePaymentRequiresFinalizedChainMaterialInBlockchain
 				}
 				s.mu.Lock()
 				after := s.sponsorReservationsByID[reservation.ReservationID]
-				_, hasAuth := s.paymentAuthByReservationID[reservation.ReservationID]
+				_, hasAuth := s.paymentAuthByReservationID[paymentAuthorizationMapKey(PaymentProofSourceSponsor, reservation.ReservationID)]
 				s.mu.Unlock()
 				if !after.ConsumedAt.IsZero() {
 					t.Fatalf("expected reservation to remain unconsumed after failed authorize for chain status %s", tc.status)
@@ -3297,7 +3297,7 @@ func TestMemoryServiceAuthorizePaymentRequiresFinalizedChainMaterialInBlockchain
 			}
 			s.mu.Lock()
 			after := s.sponsorReservationsByID[reservation.ReservationID]
-			_, hasAuth := s.paymentAuthByReservationID[reservation.ReservationID]
+			_, hasAuth := s.paymentAuthByReservationID[paymentAuthorizationMapKey(PaymentProofSourceSponsor, reservation.ReservationID)]
 			s.mu.Unlock()
 			if after.ConsumedAt.IsZero() {
 				t.Fatalf("expected reservation to be consumed after successful authorize for chain status %s", tc.status)
@@ -5807,7 +5807,7 @@ func TestMemoryServiceAuthorizePaymentRejectsConsumedReservationWithoutPriorAuth
 	reservation := s.sponsorReservationsByID["sres-consumed-1"]
 	reservation.ConsumedAt = time.Now().UTC().Add(-time.Minute)
 	s.sponsorReservationsByID["sres-consumed-1"] = reservation
-	delete(s.paymentAuthByReservationID, "sres-consumed-1")
+	delete(s.paymentAuthByReservationID, paymentAuthorizationMapKey(PaymentProofSourceSponsor, "sres-consumed-1"))
 	s.mu.Unlock()
 
 	_, err = s.AuthorizePayment(ctx, PaymentProof{
@@ -5953,6 +5953,63 @@ func TestMemoryServiceAuthorizePaymentSeparatesSponsorAndWalletFundReplayKeys(t 
 	})
 	if err != nil {
 		t.Fatalf("AuthorizePayment sponsor after wallet fund same id: %v", err)
+	}
+	if sponsorAuth.Source != PaymentProofSourceSponsor || sponsorAuth.IdempotentReplay {
+		t.Fatalf("unexpected sponsor auth: %+v", sponsorAuth)
+	}
+}
+
+func TestMemoryServiceAuthorizePaymentReplayKeysAreDelimiterSafe(t *testing.T) {
+	s := NewMemoryService()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	const walletReservationID = "shared-delimited-reservation"
+	const sponsorReservationID = PaymentProofSourceWalletFund + ":" + walletReservationID
+
+	walletReservation, err := s.ReserveFunds(ctx, FundReservation{
+		ReservationID: walletReservationID,
+		SessionID:     "sess-delimited-wallet-1",
+		SubjectID:     "wallet1delimited",
+		AmountMicros:  1000,
+	})
+	if err != nil {
+		t.Fatalf("ReserveFunds: %v", err)
+	}
+	sponsorReservation, err := s.ReserveSponsorCredits(ctx, SponsorCreditReservation{
+		ReservationID: sponsorReservationID,
+		SponsorID:     "sponsor-delimited-1",
+		SubjectID:     "client-delimited-sponsor-1",
+		SessionID:     "sess-delimited-sponsor-1",
+		AmountMicros:  1000,
+		Currency:      "TDPNC",
+		CreatedAt:     now,
+		ExpiresAt:     now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ReserveSponsorCredits: %v", err)
+	}
+
+	walletAuth, err := s.AuthorizePayment(ctx, PaymentProof{
+		Source:        PaymentProofSourceWalletFund,
+		ReservationID: walletReservation.ReservationID,
+		SubjectID:     walletReservation.SubjectID,
+		SessionID:     walletReservation.SessionID,
+	})
+	if err != nil {
+		t.Fatalf("AuthorizePayment wallet fund: %v", err)
+	}
+	if walletAuth.Source != PaymentProofSourceWalletFund || walletAuth.IdempotentReplay {
+		t.Fatalf("unexpected wallet auth: %+v", walletAuth)
+	}
+
+	sponsorAuth, err := s.AuthorizePayment(ctx, PaymentProof{
+		ReservationID: sponsorReservation.ReservationID,
+		SponsorID:     sponsorReservation.SponsorID,
+		SubjectID:     sponsorReservation.SubjectID,
+		SessionID:     sponsorReservation.SessionID,
+	})
+	if err != nil {
+		t.Fatalf("AuthorizePayment sponsor with delimiter-bearing reservation id: %v", err)
 	}
 	if sponsorAuth.Source != PaymentProofSourceSponsor || sponsorAuth.IdempotentReplay {
 		t.Fatalf("unexpected sponsor auth: %+v", sponsorAuth)

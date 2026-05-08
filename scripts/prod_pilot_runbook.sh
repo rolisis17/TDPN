@@ -62,7 +62,9 @@ Examples:
     --bundle-dir .easy-node-logs/prod_pilot_bundle
 
 Notes:
-  - Any flags you pass are appended last and can override defaults.
+  - Endpoint, identity, artifact, and timing flags are forwarded into the bundle.
+    Safety policy flags are forced fail-closed; use three-machine-prod-bundle
+    directly for diagnostic bypasses.
   - pre-real-host readiness runs by default before the bundle flow so runtime
     hygiene and the recorded WG-only selftest stay aligned with machine-C
     operator runbooks. Use --pre-real-host-readiness 0 to skip it.
@@ -89,6 +91,202 @@ int_or_die() {
     echo "$name must be an integer >= 0"
     exit 2
   fi
+}
+
+strict_signoff_min_wg_soak_selection_lines=12
+strict_signoff_min_wg_soak_entry_operators=2
+strict_signoff_min_wg_soak_exit_operators=2
+strict_signoff_min_wg_soak_cross_operator_pairs=2
+strict_signoff_max_wg_soak_failed_rounds=0
+strict_wg_min_selection_lines=12
+strict_wg_min_entry_operators=2
+strict_wg_min_exit_operators=2
+strict_wg_min_cross_operator_pairs=2
+effective_signoff_min_wg_soak_selection_lines="$strict_signoff_min_wg_soak_selection_lines"
+effective_signoff_min_wg_soak_entry_operators="$strict_signoff_min_wg_soak_entry_operators"
+effective_signoff_min_wg_soak_exit_operators="$strict_signoff_min_wg_soak_exit_operators"
+effective_signoff_min_wg_soak_cross_operator_pairs="$strict_signoff_min_wg_soak_cross_operator_pairs"
+effective_wg_min_selection_lines="$strict_wg_min_selection_lines"
+effective_wg_min_entry_operators="$strict_wg_min_entry_operators"
+effective_wg_min_exit_operators="$strict_wg_min_exit_operators"
+effective_wg_min_cross_operator_pairs="$strict_wg_min_cross_operator_pairs"
+
+raise_effective_floor_or_die() {
+  local name="$1"
+  local value="$2"
+  local minimum="$3"
+  local effective_var="$4"
+  if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+    echo "prod-pilot-runbook requires $name to be an integer >= $minimum; use three-machine-prod-bundle directly for diagnostic policy bypasses."
+    exit 2
+  fi
+  if (( 10#$value < minimum )); then
+    echo "prod-pilot-runbook requires $name >= $minimum; use three-machine-prod-bundle directly for diagnostic policy bypasses."
+    exit 2
+  fi
+  local -n effective_ref="$effective_var"
+  if (( 10#$value > effective_ref )); then
+    effective_ref="$value"
+  fi
+}
+
+reject_max_budget_or_die() {
+  local name="$1"
+  local value="$2"
+  local maximum="$3"
+  if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+    echo "prod-pilot-runbook requires $name to be an integer <= $maximum; use three-machine-prod-bundle directly for diagnostic policy bypasses."
+    exit 2
+  fi
+  if (( 10#$value > maximum )); then
+    echo "prod-pilot-runbook requires $name <= $maximum; use three-machine-prod-bundle directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+reject_prod_pilot_weakening_args_or_die() {
+  local idx=0
+  local arg value
+  while ((idx < ${#filtered_user_args[@]})); do
+    arg="${filtered_user_args[idx]}"
+    case "$arg" in
+      --skip-control-soak|--skip-wg|--skip-wg-soak|--control-continue-on-fail|--wg-continue-on-fail)
+        if ((idx + 1 < ${#filtered_user_args[@]})) && [[ "${filtered_user_args[$((idx + 1))]}" =~ ^[01]$ ]]; then
+          value="${filtered_user_args[$((idx + 1))]}"
+          idx=$((idx + 2))
+        else
+          value="1"
+          idx=$((idx + 1))
+        fi
+        if [[ "$value" == "1" ]]; then
+          echo "prod-pilot-runbook rejects $arg 1; use three-machine-prod-bundle directly for diagnostic bypasses."
+          exit 2
+        fi
+        ;;
+      --skip-control-soak=*|--skip-wg=*|--skip-wg-soak=*|--control-continue-on-fail=*|--wg-continue-on-fail=*)
+        value="${arg#*=}"
+        idx=$((idx + 1))
+        if [[ "$value" == "1" ]]; then
+          echo "prod-pilot-runbook rejects ${arg%%=*}=1; use three-machine-prod-bundle directly for diagnostic bypasses."
+          exit 2
+        fi
+        ;;
+      --preflight-check|--preflight-require-root|--bundle-verify-check|--signoff-check|--signoff-require-full-sequence|--signoff-require-wg-validate-ok|--signoff-require-wg-soak-ok|--signoff-require-wg-validate-udp-source|--signoff-require-wg-validate-strict-distinct|--signoff-require-wg-soak-diversity-pass|--strict-distinct|--wg-disallow-unknown-failure-class)
+        if ((idx + 1 < ${#filtered_user_args[@]})) && [[ "${filtered_user_args[$((idx + 1))]}" =~ ^[01]$ ]]; then
+          value="${filtered_user_args[$((idx + 1))]}"
+          idx=$((idx + 2))
+        else
+          value="1"
+          idx=$((idx + 1))
+        fi
+        if [[ "$value" == "0" ]]; then
+          echo "prod-pilot-runbook requires $arg 1; use three-machine-prod-bundle directly for diagnostic policy bypasses."
+          exit 2
+        fi
+        ;;
+      --preflight-check=*|--preflight-require-root=*|--bundle-verify-check=*|--signoff-check=*|--signoff-require-full-sequence=*|--signoff-require-wg-validate-ok=*|--signoff-require-wg-soak-ok=*|--signoff-require-wg-validate-udp-source=*|--signoff-require-wg-validate-strict-distinct=*|--signoff-require-wg-soak-diversity-pass=*|--strict-distinct=*|--wg-disallow-unknown-failure-class=*)
+        value="${arg#*=}"
+        idx=$((idx + 1))
+        if [[ "$value" == "0" ]]; then
+          echo "prod-pilot-runbook requires ${arg%%=*}=1; use three-machine-prod-bundle directly for diagnostic policy bypasses."
+          exit 2
+        fi
+        ;;
+      --signoff-min-wg-soak-selection-lines)
+        value="${filtered_user_args[$((idx + 1))]:-}"
+        idx=$((idx + 2))
+        raise_effective_floor_or_die "$arg" "$value" "$strict_signoff_min_wg_soak_selection_lines" effective_signoff_min_wg_soak_selection_lines
+        ;;
+      --signoff-min-wg-soak-selection-lines=*)
+        value="${arg#*=}"
+        idx=$((idx + 1))
+        raise_effective_floor_or_die "${arg%%=*}" "$value" "$strict_signoff_min_wg_soak_selection_lines" effective_signoff_min_wg_soak_selection_lines
+        ;;
+      --signoff-min-wg-soak-entry-operators)
+        value="${filtered_user_args[$((idx + 1))]:-}"
+        idx=$((idx + 2))
+        raise_effective_floor_or_die "$arg" "$value" "$strict_signoff_min_wg_soak_entry_operators" effective_signoff_min_wg_soak_entry_operators
+        ;;
+      --signoff-min-wg-soak-entry-operators=*)
+        value="${arg#*=}"
+        idx=$((idx + 1))
+        raise_effective_floor_or_die "${arg%%=*}" "$value" "$strict_signoff_min_wg_soak_entry_operators" effective_signoff_min_wg_soak_entry_operators
+        ;;
+      --signoff-min-wg-soak-exit-operators)
+        value="${filtered_user_args[$((idx + 1))]:-}"
+        idx=$((idx + 2))
+        raise_effective_floor_or_die "$arg" "$value" "$strict_signoff_min_wg_soak_exit_operators" effective_signoff_min_wg_soak_exit_operators
+        ;;
+      --signoff-min-wg-soak-exit-operators=*)
+        value="${arg#*=}"
+        idx=$((idx + 1))
+        raise_effective_floor_or_die "${arg%%=*}" "$value" "$strict_signoff_min_wg_soak_exit_operators" effective_signoff_min_wg_soak_exit_operators
+        ;;
+      --signoff-min-wg-soak-cross-operator-pairs)
+        value="${filtered_user_args[$((idx + 1))]:-}"
+        idx=$((idx + 2))
+        raise_effective_floor_or_die "$arg" "$value" "$strict_signoff_min_wg_soak_cross_operator_pairs" effective_signoff_min_wg_soak_cross_operator_pairs
+        ;;
+      --signoff-min-wg-soak-cross-operator-pairs=*)
+        value="${arg#*=}"
+        idx=$((idx + 1))
+        raise_effective_floor_or_die "${arg%%=*}" "$value" "$strict_signoff_min_wg_soak_cross_operator_pairs" effective_signoff_min_wg_soak_cross_operator_pairs
+        ;;
+      --signoff-max-wg-soak-failed-rounds)
+        value="${filtered_user_args[$((idx + 1))]:-}"
+        idx=$((idx + 2))
+        reject_max_budget_or_die "$arg" "$value" "$strict_signoff_max_wg_soak_failed_rounds"
+        ;;
+      --signoff-max-wg-soak-failed-rounds=*)
+        value="${arg#*=}"
+        idx=$((idx + 1))
+        reject_max_budget_or_die "${arg%%=*}" "$value" "$strict_signoff_max_wg_soak_failed_rounds"
+        ;;
+      --wg-min-selection-lines)
+        value="${filtered_user_args[$((idx + 1))]:-}"
+        idx=$((idx + 2))
+        raise_effective_floor_or_die "$arg" "$value" "$strict_wg_min_selection_lines" effective_wg_min_selection_lines
+        ;;
+      --wg-min-selection-lines=*)
+        value="${arg#*=}"
+        idx=$((idx + 1))
+        raise_effective_floor_or_die "${arg%%=*}" "$value" "$strict_wg_min_selection_lines" effective_wg_min_selection_lines
+        ;;
+      --wg-min-entry-operators)
+        value="${filtered_user_args[$((idx + 1))]:-}"
+        idx=$((idx + 2))
+        raise_effective_floor_or_die "$arg" "$value" "$strict_wg_min_entry_operators" effective_wg_min_entry_operators
+        ;;
+      --wg-min-entry-operators=*)
+        value="${arg#*=}"
+        idx=$((idx + 1))
+        raise_effective_floor_or_die "${arg%%=*}" "$value" "$strict_wg_min_entry_operators" effective_wg_min_entry_operators
+        ;;
+      --wg-min-exit-operators)
+        value="${filtered_user_args[$((idx + 1))]:-}"
+        idx=$((idx + 2))
+        raise_effective_floor_or_die "$arg" "$value" "$strict_wg_min_exit_operators" effective_wg_min_exit_operators
+        ;;
+      --wg-min-exit-operators=*)
+        value="${arg#*=}"
+        idx=$((idx + 1))
+        raise_effective_floor_or_die "${arg%%=*}" "$value" "$strict_wg_min_exit_operators" effective_wg_min_exit_operators
+        ;;
+      --wg-min-cross-operator-pairs)
+        value="${filtered_user_args[$((idx + 1))]:-}"
+        idx=$((idx + 2))
+        raise_effective_floor_or_die "$arg" "$value" "$strict_wg_min_cross_operator_pairs" effective_wg_min_cross_operator_pairs
+        ;;
+      --wg-min-cross-operator-pairs=*)
+        value="${arg#*=}"
+        idx=$((idx + 1))
+        raise_effective_floor_or_die "${arg%%=*}" "$value" "$strict_wg_min_cross_operator_pairs" effective_wg_min_cross_operator_pairs
+        ;;
+      *)
+        idx=$((idx + 1))
+        ;;
+    esac
+  done
 }
 
 if [[ $# -gt 0 ]]; then
@@ -154,6 +352,8 @@ while ((idx < ${#user_args[@]})); do
       ;;
   esac
 done
+
+reject_prod_pilot_weakening_args_or_die
 
 preflight_check="${PROD_PILOT_PREFLIGHT_CHECK:-1}"
 preflight_timeout_sec="${PROD_PILOT_PREFLIGHT_TIMEOUT_SEC:-12}"
@@ -305,6 +505,16 @@ if [[ "$wg_slo_profile" != "off" && "$wg_slo_profile" != "recommended" && "$wg_s
   exit 2
 fi
 
+raise_effective_floor_or_die "PROD_PILOT_SIGNOFF_MIN_WG_SOAK_SELECTION_LINES" "$signoff_min_wg_soak_selection_lines" "$strict_signoff_min_wg_soak_selection_lines" effective_signoff_min_wg_soak_selection_lines
+raise_effective_floor_or_die "PROD_PILOT_SIGNOFF_MIN_WG_SOAK_ENTRY_OPERATORS" "$signoff_min_wg_soak_entry_operators" "$strict_signoff_min_wg_soak_entry_operators" effective_signoff_min_wg_soak_entry_operators
+raise_effective_floor_or_die "PROD_PILOT_SIGNOFF_MIN_WG_SOAK_EXIT_OPERATORS" "$signoff_min_wg_soak_exit_operators" "$strict_signoff_min_wg_soak_exit_operators" effective_signoff_min_wg_soak_exit_operators
+raise_effective_floor_or_die "PROD_PILOT_SIGNOFF_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS" "$signoff_min_wg_soak_cross_operator_pairs" "$strict_signoff_min_wg_soak_cross_operator_pairs" effective_signoff_min_wg_soak_cross_operator_pairs
+reject_max_budget_or_die "PROD_PILOT_SIGNOFF_MAX_WG_SOAK_FAILED_ROUNDS" "$signoff_max_wg_soak_failed_rounds" "$strict_signoff_max_wg_soak_failed_rounds"
+raise_effective_floor_or_die "PROD_PILOT_WG_MIN_SELECTION_LINES" "$wg_min_selection_lines" "$strict_wg_min_selection_lines" effective_wg_min_selection_lines
+raise_effective_floor_or_die "PROD_PILOT_WG_MIN_ENTRY_OPERATORS" "$wg_min_entry_operators" "$strict_wg_min_entry_operators" effective_wg_min_entry_operators
+raise_effective_floor_or_die "PROD_PILOT_WG_MIN_EXIT_OPERATORS" "$wg_min_exit_operators" "$strict_wg_min_exit_operators" effective_wg_min_exit_operators
+raise_effective_floor_or_die "PROD_PILOT_WG_MIN_CROSS_OPERATOR_PAIRS" "$wg_min_cross_operator_pairs" "$strict_wg_min_cross_operator_pairs" effective_wg_min_cross_operator_pairs
+
 run_report_json_path=""
 if [[ -n "$user_run_report_json" ]]; then
   run_report_json_path="$user_run_report_json"
@@ -406,6 +616,35 @@ if [[ ${#filtered_user_args[@]} -gt 0 ]]; then
   cmd+=("${filtered_user_args[@]}")
 fi
 
+cmd+=(
+  "--preflight-check" "1"
+  "--preflight-require-root" "1"
+  "--bundle-verify-check" "1"
+  "--signoff-check" "1"
+  "--signoff-require-full-sequence" "1"
+  "--signoff-require-wg-validate-ok" "1"
+  "--signoff-require-wg-soak-ok" "1"
+  "--signoff-require-wg-validate-udp-source" "1"
+  "--signoff-require-wg-validate-strict-distinct" "1"
+  "--signoff-require-wg-soak-diversity-pass" "1"
+  "--signoff-min-wg-soak-selection-lines" "$effective_signoff_min_wg_soak_selection_lines"
+  "--signoff-min-wg-soak-entry-operators" "$effective_signoff_min_wg_soak_entry_operators"
+  "--signoff-min-wg-soak-exit-operators" "$effective_signoff_min_wg_soak_exit_operators"
+  "--signoff-min-wg-soak-cross-operator-pairs" "$effective_signoff_min_wg_soak_cross_operator_pairs"
+  "--signoff-max-wg-soak-failed-rounds" "$strict_signoff_max_wg_soak_failed_rounds"
+  "--wg-disallow-unknown-failure-class" "1"
+  "--wg-min-selection-lines" "$effective_wg_min_selection_lines"
+  "--wg-min-entry-operators" "$effective_wg_min_entry_operators"
+  "--wg-min-exit-operators" "$effective_wg_min_exit_operators"
+  "--wg-min-cross-operator-pairs" "$effective_wg_min_cross_operator_pairs"
+  "--strict-distinct" "1"
+  "--skip-control-soak" "0"
+  "--skip-wg" "0"
+  "--skip-wg-soak" "0"
+  "--control-continue-on-fail" "0"
+  "--wg-continue-on-fail" "0"
+)
+
 if [[ "$pre_real_host_readiness" == "1" ]]; then
   mkdir -p "$(dirname "$pre_real_host_readiness_log_path")" "$(dirname "$(abs_path "$pre_real_host_readiness_summary_json_path")")"
   pre_real_host_readiness_cmd=(
@@ -445,8 +684,8 @@ if [[ "$pre_real_host_readiness" == "1" ]]; then
       )"
     fi
     if [[ "$pre_real_host_readiness_root_only_deferred" == "1" ]]; then
-      echo "[prod-pilot-runbook] warning: pre-real-host readiness reported root-only deferred condition; continuing to bundle flow."
-      echo "[prod-pilot-runbook] warning: rerun pre-real-host readiness with sudo before final production signoff."
+      echo "[prod-pilot-runbook] pre-real-host readiness blocked pilot runbook: root-only checks were deferred; rerun with sudo."
+      exit "$pre_real_host_readiness_rc"
     else
       echo "[prod-pilot-runbook] pre-real-host readiness blocked pilot runbook: rc=$pre_real_host_readiness_rc"
       exit "$pre_real_host_readiness_rc"
@@ -492,21 +731,21 @@ if [[ "$dashboard_enable" == "1" ]]; then
     "$EASY_NODE_SH" "prod-gate-slo-dashboard"
     "--max-reports" "$dashboard_max_reports"
     "--since-hours" "$dashboard_since_hours"
-    "--require-full-sequence" "$signoff_require_full_sequence"
-    "--require-wg-validate-ok" "$signoff_require_wg_validate_ok"
-    "--require-wg-soak-ok" "$signoff_require_wg_soak_ok"
-    "--require-wg-validate-udp-source" "$signoff_require_wg_validate_udp_source"
-    "--require-wg-validate-strict-distinct" "$signoff_require_wg_validate_strict_distinct"
-    "--require-wg-soak-diversity-pass" "$signoff_require_wg_soak_diversity_pass"
-    "--min-wg-soak-selection-lines" "$signoff_min_wg_soak_selection_lines"
-    "--min-wg-soak-entry-operators" "$signoff_min_wg_soak_entry_operators"
-    "--min-wg-soak-exit-operators" "$signoff_min_wg_soak_exit_operators"
-    "--min-wg-soak-cross-operator-pairs" "$signoff_min_wg_soak_cross_operator_pairs"
-    "--max-wg-soak-failed-rounds" "$signoff_max_wg_soak_failed_rounds"
-    "--require-preflight-ok" "$preflight_check"
+    "--require-full-sequence" "1"
+    "--require-wg-validate-ok" "1"
+    "--require-wg-soak-ok" "1"
+    "--require-wg-validate-udp-source" "1"
+    "--require-wg-validate-strict-distinct" "1"
+    "--require-wg-soak-diversity-pass" "1"
+    "--min-wg-soak-selection-lines" "$effective_signoff_min_wg_soak_selection_lines"
+    "--min-wg-soak-entry-operators" "$effective_signoff_min_wg_soak_entry_operators"
+    "--min-wg-soak-exit-operators" "$effective_signoff_min_wg_soak_exit_operators"
+    "--min-wg-soak-cross-operator-pairs" "$effective_signoff_min_wg_soak_cross_operator_pairs"
+    "--max-wg-soak-failed-rounds" "$strict_signoff_max_wg_soak_failed_rounds"
+    "--require-preflight-ok" "1"
     "--require-bundle-ok" "1"
-    "--require-integrity-ok" "$bundle_verify_check"
-    "--require-signoff-ok" "$signoff_check"
+    "--require-integrity-ok" "1"
+    "--require-signoff-ok" "1"
     "--fail-on-any-no-go" "$dashboard_fail_on_any_no_go"
     "--min-go-rate-pct" "$dashboard_min_go_rate_pct"
     "--show-top-reasons" "$dashboard_show_top_reasons"

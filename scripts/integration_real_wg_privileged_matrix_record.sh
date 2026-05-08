@@ -34,6 +34,12 @@ case "$cmd" in
       fi
       exit "${FAKE_REAL_WG_MATRIX_RC:-0}"
     fi
+    if [[ "${FAKE_SECRET_OUTPUT:-0}" == "1" ]]; then
+      echo "TOKEN=secret-auth-123"
+      echo "Authorization: Bearer secret-bearer-789"
+      echo "ADMIN_TOKEN=secret-admin-000"
+      echo "subject inv-secret-leak"
+    fi
     if [[ "${FAKE_REAL_WG_MATRIX_FAIL:-0}" == "1" ]]; then
       echo "real wg privileged matrix integration failed"
       exit 1
@@ -85,6 +91,7 @@ chmod +x "$FAKE_EASY_NODE"
 
 echo "[real-wg-privileged-matrix-record] success path"
 FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_SECRET_OUTPUT="1" \
 REAL_WG_PRIVILEGED_MATRIX_RECORD_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
 ./scripts/real_wg_privileged_matrix_record.sh \
   --print-summary-json 1 >/tmp/integration_real_wg_privileged_matrix_record_ok.log 2>&1
@@ -131,6 +138,22 @@ if ! jq -e '
 ' "$summary_json_path" >/dev/null; then
   echo "success summary JSON missing expected fields"
   cat "$summary_json_path"
+  exit 1
+fi
+summary_log_path="$(jq -r '.artifacts.summary_log // ""' "$summary_json_path")"
+if [[ -z "$summary_log_path" || ! -f "$summary_log_path" ]]; then
+  echo "expected success summary log missing"
+  cat "$summary_json_path"
+  exit 1
+fi
+if rg -q 'secret-auth-123|secret-bearer-789|secret-admin-000|inv-secret-leak' "$summary_log_path"; then
+  echo "real-wg-privileged-matrix-record summary log leaked sensitive output"
+  cat "$summary_log_path"
+  exit 1
+fi
+if ! rg -q '\[REDACTED\]|\[REDACTED_INVITE\]' "$summary_log_path"; then
+  echo "real-wg-privileged-matrix-record summary log missing redaction markers"
+  cat "$summary_log_path"
   exit 1
 fi
 

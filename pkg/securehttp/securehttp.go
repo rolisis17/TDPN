@@ -27,6 +27,11 @@ func InsecureSkipVerifyConfigured() bool {
 	return boolEnv("MTLS_INSECURE_SKIP_VERIFY", false)
 }
 
+func RequireClientCertConfigured() bool {
+	raw := strings.TrimSpace(os.Getenv("MTLS_REQUIRE_CLIENT_CERT"))
+	return raw == "" || raw != "0"
+}
+
 func Validate() error {
 	_, err := loadConfig()
 	return err

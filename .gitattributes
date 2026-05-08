@@ -1,3 +1,6 @@
+/.gitattributes text eol=lf
+*.go text eol=lf
+*.sh text eol=lf
 /.codex* export-ignore
 /User/ export-ignore
 /bin/ export-ignore

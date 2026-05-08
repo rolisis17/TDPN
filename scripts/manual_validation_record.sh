@@ -56,6 +56,14 @@ abs_path() {
   path="$(trim "$path")"
   if [[ -z "$path" ]]; then
     printf '%s' ""
+  elif [[ "$path" =~ ^[A-Za-z]:[\\/].* ]]; then
+    if command -v wslpath >/dev/null 2>&1; then
+      wslpath -u "$path" 2>/dev/null || printf '%s' "$path"
+    elif command -v cygpath >/dev/null 2>&1; then
+      cygpath -u "$path" 2>/dev/null || printf '%s' "$path"
+    else
+      printf '%s' "$path"
+    fi
   elif [[ "$path" = /* ]]; then
     printf '%s' "$path"
   else

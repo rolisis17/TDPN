@@ -63,7 +63,50 @@ fi
 
 tls_dir="$(mktemp -d)"
 export EASY_NODE_ADMIN_SIGNING_KEY_DIR="$tls_dir/admin_signing"
-"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$tls_dir/tls" --days 365 >/dev/null
+for invalid_san in "999.1.1.1" "https://example.com:8081" "example.com:8081" "face:8081" ":::" "2001:::1" "bad..host"; do
+  invalid_san_log="/tmp/integration_bootstrap_mtls_invalid_san.log"
+  if "$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$tls_dir/invalid-tls" --public-host "$invalid_san" >"$invalid_san_log" 2>&1; then
+    echo "expected bootstrap-mtls to reject invalid SAN/public-host: $invalid_san"
+    cat "$invalid_san_log"
+    exit 1
+  fi
+  if ! rg -q "invalid .*SAN/public-host" "$invalid_san_log"; then
+    echo "missing expected invalid SAN/public-host failure signal"
+    cat "$invalid_san_log"
+    exit 1
+  fi
+done
+san_refresh_dir="$tls_dir/san-refresh"
+"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$san_refresh_dir" --public-host old.example >/dev/null
+"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$san_refresh_dir" --public-host new.example >/tmp/integration_bootstrap_mtls_san_refresh.log 2>&1
+if ! openssl x509 -in "$san_refresh_dir/node.crt" -noout -ext subjectAltName | rg -q "DNS:new.example"; then
+  echo "expected bootstrap-mtls to refresh node certificate when SANs change"
+  cat /tmp/integration_bootstrap_mtls_san_refresh.log
+  openssl x509 -in "$san_refresh_dir/node.crt" -noout -ext subjectAltName 2>/dev/null || true
+  exit 1
+fi
+ca_refresh_dir="$tls_dir/ca-refresh"
+"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$ca_refresh_dir" --public-host ca-refresh.example >/dev/null
+rm -f "$ca_refresh_dir/ca.key"
+"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$ca_refresh_dir" --public-host ca-refresh.example >/tmp/integration_bootstrap_mtls_ca_refresh.log 2>&1
+if [[ ! -s "$ca_refresh_dir/node.crt" || ! -s "$ca_refresh_dir/client.crt" ]]; then
+  echo "expected bootstrap-mtls to regenerate leaf certs when CA material is regenerated"
+  cat /tmp/integration_bootstrap_mtls_ca_refresh.log
+  exit 1
+fi
+if ! openssl verify -CAfile "$ca_refresh_dir/ca.crt" "$ca_refresh_dir/node.crt" >/tmp/integration_bootstrap_mtls_ca_refresh_node_verify.log 2>&1; then
+  echo "expected node certificate to verify against regenerated CA"
+  cat /tmp/integration_bootstrap_mtls_ca_refresh.log
+  cat /tmp/integration_bootstrap_mtls_ca_refresh_node_verify.log
+  exit 1
+fi
+if ! openssl verify -CAfile "$ca_refresh_dir/ca.crt" "$ca_refresh_dir/client.crt" >/tmp/integration_bootstrap_mtls_ca_refresh_client_verify.log 2>&1; then
+  echo "expected client certificate to verify against regenerated CA"
+  cat /tmp/integration_bootstrap_mtls_ca_refresh.log
+  cat /tmp/integration_bootstrap_mtls_ca_refresh_client_verify.log
+  exit 1
+fi
+"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$tls_dir/tls" --public-host 203.0.113.10 --san 203.0.113.20 --days 365 >/dev/null
 wg_key_file="$tls_dir/tls/exit_wg.key"
 printf 'test-exit-wg-private-key\n' >"$wg_key_file"
 chmod 600 "$wg_key_file" 2>/dev/null || true
@@ -72,6 +115,10 @@ cat >"$AUTH_ENV" <<EOF_ENV
 PROD_STRICT_MODE=1
 BETA_STRICT_MODE=1
 MTLS_ENABLE=1
+MTLS_REQUIRE_CLIENT_CERT=1
+MTLS_MIN_VERSION=1.3
+MTLS_INSECURE_SKIP_VERIFY=0
+MTLS_CA_FILE=$tls_dir/tls/ca.crt
 DATA_PLANE_MODE=opaque
 DIRECTORY_PUBLIC_URL=https://203.0.113.10:8081
 ENTRY_URL_PUBLIC=https://203.0.113.10:8083
@@ -81,6 +128,8 @@ EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL=$tls_dir/tls/client.crt
 EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL=$tls_dir/tls/client.key
 MTLS_CERT_FILE=$tls_dir/tls/node.crt
 MTLS_KEY_FILE=$tls_dir/tls/node.key
+MTLS_CLIENT_CERT_FILE=$tls_dir/tls/node.crt
+MTLS_CLIENT_KEY_FILE=$tls_dir/tls/node.key
 ENTRY_LIVE_WG_MODE=1
 WG_BACKEND=command
 EXIT_WG_INTERFACE=wgeprod00
@@ -125,6 +174,45 @@ EOF_MODE
 ./scripts/easy_node.sh admin-signing-rotate --restart-issuer 0 --key-history 2 >/tmp/integration_prod_preflight_rotate.log 2>&1
 ./scripts/easy_node.sh admin-signing-status >/tmp/integration_prod_preflight_status.log 2>&1
 ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_ok.log 2>&1
+
+echo "MTLS_SERVER_CERT_FILE=/app/tls/missing-node.crt" >>"$AUTH_ENV"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_mtls_server_cert_override_fail.log 2>&1; then
+  echo "expected prod-preflight to honor MTLS_SERVER_CERT_FILE and fail on missing override"
+  cat /tmp/integration_prod_preflight_mtls_server_cert_override_fail.log
+  exit 1
+fi
+if ! rg -q "missing file: .*/tls/missing-node.crt" /tmp/integration_prod_preflight_mtls_server_cert_override_fail.log; then
+  echo "missing expected MTLS_SERVER_CERT_FILE override failure signal"
+  cat /tmp/integration_prod_preflight_mtls_server_cert_override_fail.log
+  exit 1
+fi
+sed -i -E "s#^MTLS_SERVER_CERT_FILE=.*#MTLS_SERVER_CERT_FILE=$tls_dir/tls/node.crt#" "$AUTH_ENV"
+
+sed -i -E 's#^MTLS_CA_FILE=.*#MTLS_CA_FILE=/app/tls/missing-ca.crt#' "$AUTH_ENV"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_mtls_ca_override_fail.log 2>&1; then
+  echo "expected prod-preflight to honor MTLS_CA_FILE and fail on missing override"
+  cat /tmp/integration_prod_preflight_mtls_ca_override_fail.log
+  exit 1
+fi
+if ! rg -q "missing file: .*/tls/missing-ca.crt" /tmp/integration_prod_preflight_mtls_ca_override_fail.log; then
+  echo "missing expected MTLS_CA_FILE override failure signal"
+  cat /tmp/integration_prod_preflight_mtls_ca_override_fail.log
+  exit 1
+fi
+sed -i -E "s#^MTLS_CA_FILE=.*#MTLS_CA_FILE=$tls_dir/tls/ca.crt#" "$AUTH_ENV"
+
+"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$tls_dir/tls" --public-host wrong.example --rotate-leaf 1 >/tmp/integration_bootstrap_mtls_wrong_san.log 2>&1
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_mtls_san_fail.log 2>&1; then
+  echo "expected prod-preflight to fail when mTLS node certificate lacks public-host SAN"
+  cat /tmp/integration_prod_preflight_mtls_san_fail.log
+  exit 1
+fi
+if ! rg -q "mTLS node certificate SAN does not cover public host: 203.0.113.10" /tmp/integration_prod_preflight_mtls_san_fail.log; then
+  echo "missing expected mTLS SAN coverage failure signal"
+  cat /tmp/integration_prod_preflight_mtls_san_fail.log
+  exit 1
+fi
+"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$tls_dir/tls" --public-host 203.0.113.10 --san 203.0.113.20 --rotate-leaf 1 >/tmp/integration_bootstrap_mtls_restore_san.log 2>&1
 
 if rg -q '^EXIT_WG_PUBKEY=' "$AUTH_ENV"; then
   sed -i -E 's/^EXIT_WG_PUBKEY=.*/EXIT_WG_PUBKEY=invalid-wg-pubkey/' "$AUTH_ENV"
@@ -224,6 +312,50 @@ if ! rg -q "MTLS_ENABLE must be 1" /tmp/integration_prod_preflight_fail.log; the
 fi
 
 sed -i -E 's/^MTLS_ENABLE=.*/MTLS_ENABLE=1/' "$AUTH_ENV"
+
+sed -i -E 's/^MTLS_REQUIRE_CLIENT_CERT=.*/MTLS_REQUIRE_CLIENT_CERT=0/' "$AUTH_ENV"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_mtls_client_cert_required_fail.log 2>&1; then
+  echo "expected prod-preflight to fail when MTLS_REQUIRE_CLIENT_CERT=0"
+  cat /tmp/integration_prod_preflight_mtls_client_cert_required_fail.log
+  exit 1
+fi
+if ! rg -q "MTLS_REQUIRE_CLIENT_CERT must be 1 or unset in prod profile" /tmp/integration_prod_preflight_mtls_client_cert_required_fail.log; then
+  echo "missing expected MTLS_REQUIRE_CLIENT_CERT failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_mtls_client_cert_required_fail.log
+  exit 1
+fi
+sed -i -E 's/^MTLS_REQUIRE_CLIENT_CERT=.*/MTLS_REQUIRE_CLIENT_CERT=1/' "$AUTH_ENV"
+
+sed -i -E 's/^MTLS_MIN_VERSION=.*/MTLS_MIN_VERSION=1.2/' "$AUTH_ENV"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_mtls_min_version_fail.log 2>&1; then
+  echo "expected prod-preflight to fail when MTLS_MIN_VERSION is below 1.3"
+  cat /tmp/integration_prod_preflight_mtls_min_version_fail.log
+  exit 1
+fi
+if ! rg -q "MTLS_MIN_VERSION must be 1.3 or unset in prod profile" /tmp/integration_prod_preflight_mtls_min_version_fail.log; then
+  echo "missing expected MTLS_MIN_VERSION failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_mtls_min_version_fail.log
+  exit 1
+fi
+sed -i -E 's/^MTLS_MIN_VERSION=.*/MTLS_MIN_VERSION=1.3/' "$AUTH_ENV"
+
+if rg -q '^MTLS_INSECURE_SKIP_VERIFY=' "$AUTH_ENV"; then
+  sed -i -E 's/^MTLS_INSECURE_SKIP_VERIFY=.*/MTLS_INSECURE_SKIP_VERIFY=1/' "$AUTH_ENV"
+else
+  echo "MTLS_INSECURE_SKIP_VERIFY=1" >>"$AUTH_ENV"
+fi
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_mtls_insecure_skip_fail.log 2>&1; then
+  echo "expected prod-preflight to fail when MTLS_INSECURE_SKIP_VERIFY=1"
+  cat /tmp/integration_prod_preflight_mtls_insecure_skip_fail.log
+  exit 1
+fi
+if ! rg -q "MTLS_INSECURE_SKIP_VERIFY must be 0/unset in prod profile" /tmp/integration_prod_preflight_mtls_insecure_skip_fail.log; then
+  echo "missing expected MTLS_INSECURE_SKIP_VERIFY failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_mtls_insecure_skip_fail.log
+  exit 1
+fi
+sed -i -E 's/^MTLS_INSECURE_SKIP_VERIFY=.*/MTLS_INSECURE_SKIP_VERIFY=0/' "$AUTH_ENV"
+
 sed -i -E 's/^ENTRY_PUZZLE_SECRET=.*/ENTRY_PUZZLE_SECRET=entry-secret-default/' "$AUTH_ENV"
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_secret_fail.log 2>&1; then
   echo "expected prod-preflight to fail with default ENTRY_PUZZLE_SECRET"
@@ -319,6 +451,88 @@ if ! rg -q "private file permissions too open" /tmp/integration_prod_preflight_p
 fi
 chmod 600 "$tls_dir/tls/client.key" 2>/dev/null || true
 
+cp "$tls_dir/tls/ca.crt" "$tls_dir/tls/ca.crt.good"
+cp "$ca_refresh_dir/ca.crt" "$tls_dir/tls/ca.crt"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_mtls_ca_mismatch_fail.log 2>&1; then
+  echo "expected prod-preflight to fail when mTLS certs do not verify against configured CA"
+  cat /tmp/integration_prod_preflight_mtls_ca_mismatch_fail.log
+  exit 1
+fi
+if ! rg -q "mTLS node certificate does not verify against configured CA" /tmp/integration_prod_preflight_mtls_ca_mismatch_fail.log; then
+  echo "missing expected mTLS CA verification failure signal"
+  cat /tmp/integration_prod_preflight_mtls_ca_mismatch_fail.log
+  exit 1
+fi
+mv "$tls_dir/tls/ca.crt.good" "$tls_dir/tls/ca.crt"
+
+cp "$tls_dir/tls/node.key" "$tls_dir/tls/node.key.good"
+cp "$tls_dir/tls/client.key" "$tls_dir/tls/node.key"
+chmod 600 "$tls_dir/tls/node.key" 2>/dev/null || true
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_mtls_key_mismatch_fail.log 2>&1; then
+  echo "expected prod-preflight to fail when mTLS node certificate and key do not match"
+  cat /tmp/integration_prod_preflight_mtls_key_mismatch_fail.log
+  exit 1
+fi
+if ! rg -q "mTLS node certificate does not match private key" /tmp/integration_prod_preflight_mtls_key_mismatch_fail.log; then
+  echo "missing expected mTLS key mismatch failure signal"
+  cat /tmp/integration_prod_preflight_mtls_key_mismatch_fail.log
+  exit 1
+fi
+mv "$tls_dir/tls/node.key.good" "$tls_dir/tls/node.key"
+chmod 600 "$tls_dir/tls/node.key" 2>/dev/null || true
+
+cp "$tls_dir/tls/node.crt" "$tls_dir/tls/node.crt.good"
+cp "$tls_dir/tls/client.crt" "$tls_dir/tls/node.crt"
+cp "$tls_dir/tls/client.key" "$tls_dir/tls/node.key"
+chmod 600 "$tls_dir/tls/node.key" 2>/dev/null || true
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_mtls_server_usage_fail.log 2>&1; then
+  echo "expected prod-preflight to fail when mTLS node certificate lacks serverAuth usage"
+  cat /tmp/integration_prod_preflight_mtls_server_usage_fail.log
+  exit 1
+fi
+if ! rg -q "mTLS node certificate missing serverAuth usage" /tmp/integration_prod_preflight_mtls_server_usage_fail.log; then
+  echo "missing expected mTLS serverAuth failure signal"
+  cat /tmp/integration_prod_preflight_mtls_server_usage_fail.log
+  exit 1
+fi
+mv "$tls_dir/tls/node.crt.good" "$tls_dir/tls/node.crt"
+"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$tls_dir/tls" --public-host 203.0.113.10 --san 203.0.113.20 --rotate-leaf 1 >/tmp/integration_bootstrap_mtls_restore_server_usage.log 2>&1
+
+server_only_cfg="$tls_dir/server_only_ext.cnf"
+cat >"$server_only_cfg" <<'EOF_SERVER_ONLY'
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+req_extensions = req_ext
+
+[dn]
+CN = privacynode-client
+
+[req_ext]
+extendedKeyUsage = serverAuth
+EOF_SERVER_ONLY
+openssl genrsa -out "$tls_dir/tls/client_server_only.key" 2048 >/dev/null 2>&1
+openssl req -new -key "$tls_dir/tls/client_server_only.key" -out "$tls_dir/client_server_only.csr" -config "$server_only_cfg" >/dev/null 2>&1
+openssl x509 -req -in "$tls_dir/client_server_only.csr" -CA "$tls_dir/tls/ca.crt" -CAkey "$tls_dir/tls/ca.key" -CAcreateserial \
+  -out "$tls_dir/tls/client_server_only.crt" -days 365 -sha256 -extfile "$server_only_cfg" -extensions req_ext >/dev/null 2>&1
+chmod 600 "$tls_dir/tls/client_server_only.key" 2>/dev/null || true
+sed -i -E "s#^MTLS_CLIENT_CERT_FILE=.*#MTLS_CLIENT_CERT_FILE=$tls_dir/tls/client_server_only.crt#" "$AUTH_ENV"
+sed -i -E "s#^MTLS_CLIENT_KEY_FILE=.*#MTLS_CLIENT_KEY_FILE=$tls_dir/tls/client_server_only.key#" "$AUTH_ENV"
+if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_mtls_client_usage_fail.log 2>&1; then
+  echo "expected prod-preflight to fail when mTLS client certificate lacks clientAuth usage"
+  cat /tmp/integration_prod_preflight_mtls_client_usage_fail.log
+  exit 1
+fi
+if ! rg -q "mTLS client certificate missing clientAuth usage" /tmp/integration_prod_preflight_mtls_client_usage_fail.log; then
+  echo "missing expected mTLS clientAuth failure signal"
+  cat /tmp/integration_prod_preflight_mtls_client_usage_fail.log
+  exit 1
+fi
+sed -i -E "s#^MTLS_CLIENT_CERT_FILE=.*#MTLS_CLIENT_CERT_FILE=$tls_dir/tls/node.crt#" "$AUTH_ENV"
+sed -i -E "s#^MTLS_CLIENT_KEY_FILE=.*#MTLS_CLIENT_KEY_FILE=$tls_dir/tls/node.key#" "$AUTH_ENV"
+
 write_provider_env_file() {
   local core_issuer="$1"
   local admin_token="${2:-}"
@@ -328,6 +542,10 @@ write_provider_env_file() {
 PROD_STRICT_MODE=1
 BETA_STRICT_MODE=1
 MTLS_ENABLE=1
+MTLS_REQUIRE_CLIENT_CERT=1
+MTLS_MIN_VERSION=1.3
+MTLS_INSECURE_SKIP_VERIFY=0
+MTLS_CA_FILE=$tls_dir/tls/ca.crt
 DATA_PLANE_MODE=opaque
 DIRECTORY_PUBLIC_URL=https://203.0.113.20:8081
 ENTRY_URL_PUBLIC=https://203.0.113.20:8083
@@ -337,6 +555,8 @@ EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL=$tls_dir/tls/client.crt
 EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL=$tls_dir/tls/client.key
 MTLS_CERT_FILE=$tls_dir/tls/node.crt
 MTLS_KEY_FILE=$tls_dir/tls/node.key
+MTLS_CLIENT_CERT_FILE=$tls_dir/tls/node.crt
+MTLS_CLIENT_KEY_FILE=$tls_dir/tls/node.key
 ENTRY_LIVE_WG_MODE=1
 WG_BACKEND=command
 EXIT_WG_INTERFACE=wgeprod01

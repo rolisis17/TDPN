@@ -37,6 +37,50 @@ trim() {
   printf '%s' "$value"
 }
 
+redact_url_credentials_text() {
+  local value="${1:-}"
+  printf '%s' "$value" | sed -E '
+s~([A-Za-z][A-Za-z0-9+.-]*://)[^/?#@[:space:]]+@~\1[redacted]@~g
+s~([?&#](subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|auth_token|admin_token|authorization|bearer|password|secret)=)[^,&#[:space:]]+~\1[redacted]~Ig
+'
+}
+
+redact_sensitive_command_text() {
+  local value="${1:-}"
+  local redacted
+  redacted="$(
+    printf '%s' "$value" | sed -E '
+s/--campaign-subject=INVITE_KEY/__TDP_CAMPAIGN_SUBJECT_EQ_INVITE_KEY__/g
+s/--campaign-subject[[:space:]]+INVITE_KEY/__TDP_CAMPAIGN_SUBJECT_SP_INVITE_KEY__/g
+s/--subject=INVITE_KEY/__TDP_SUBJECT_EQ_INVITE_KEY__/g
+s/--subject[[:space:]]+INVITE_KEY/__TDP_SUBJECT_SP_INVITE_KEY__/g
+s/--key=INVITE_KEY/__TDP_KEY_EQ_INVITE_KEY__/g
+s/--key[[:space:]]+INVITE_KEY/__TDP_KEY_SP_INVITE_KEY__/g
+s/--invite-key=INVITE_KEY/__TDP_INVITE_KEY_EQ_INVITE_KEY__/g
+s/--invite-key[[:space:]]+INVITE_KEY/__TDP_INVITE_KEY_SP_INVITE_KEY__/g
+s/--campaign-anon-cred=ANON_CRED/__TDP_CAMPAIGN_ANON_CRED_EQ_ANON_CRED__/g
+s/--campaign-anon-cred[[:space:]]+ANON_CRED/__TDP_CAMPAIGN_ANON_CRED_SP_ANON_CRED__/g
+s/--anon-cred=ANON_CRED/__TDP_ANON_CRED_EQ_ANON_CRED__/g
+s/--anon-cred[[:space:]]+ANON_CRED/__TDP_ANON_CRED_SP_ANON_CRED__/g
+s/(--(campaign-subject|subject|key|invite-key|campaign-anon-cred|anon-cred|token|auth-token|admin-token|authorization|bearer|password|secret|api-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g
+s/((Authorization|X-Admin-Token):[[:space:]]*(Bearer[[:space:]]*)?)[^[:space:]]+/\1[redacted]/Ig
+s/__TDP_CAMPAIGN_SUBJECT_EQ_INVITE_KEY__/--campaign-subject=INVITE_KEY/g
+s/__TDP_CAMPAIGN_SUBJECT_SP_INVITE_KEY__/--campaign-subject INVITE_KEY/g
+s/__TDP_SUBJECT_EQ_INVITE_KEY__/--subject=INVITE_KEY/g
+s/__TDP_SUBJECT_SP_INVITE_KEY__/--subject INVITE_KEY/g
+s/__TDP_KEY_EQ_INVITE_KEY__/--key=INVITE_KEY/g
+s/__TDP_KEY_SP_INVITE_KEY__/--key INVITE_KEY/g
+s/__TDP_INVITE_KEY_EQ_INVITE_KEY__/--invite-key=INVITE_KEY/g
+s/__TDP_INVITE_KEY_SP_INVITE_KEY__/--invite-key INVITE_KEY/g
+s/__TDP_CAMPAIGN_ANON_CRED_EQ_ANON_CRED__/--campaign-anon-cred=ANON_CRED/g
+s/__TDP_CAMPAIGN_ANON_CRED_SP_ANON_CRED__/--campaign-anon-cred ANON_CRED/g
+s/__TDP_ANON_CRED_EQ_ANON_CRED__/--anon-cred=ANON_CRED/g
+s/__TDP_ANON_CRED_SP_ANON_CRED__/--anon-cred ANON_CRED/g
+'
+  )"
+  redact_url_credentials_text "$redacted"
+}
+
 bool_arg_or_die() {
   local name="$1"
   local value="$2"
@@ -51,6 +95,14 @@ abs_path() {
   path="$(trim "$path")"
   if [[ -z "$path" ]]; then
     printf '%s' ""
+  elif [[ "$path" =~ ^[A-Za-z]:[\\/].* ]]; then
+    if command -v wslpath >/dev/null 2>&1; then
+      wslpath -u "$path" 2>/dev/null || printf '%s' "$path"
+    elif command -v cygpath >/dev/null 2>&1; then
+      cygpath -u "$path" 2>/dev/null || printf '%s' "$path"
+    else
+      printf '%s' "$path"
+    fi
   elif [[ "$path" == /* ]]; then
     printf '%s' "$path"
   else
@@ -419,6 +471,7 @@ build_recorded_check_json() {
   if [[ -z "$check_command" ]]; then
     check_command="$default_command"
   fi
+  check_command="$(redact_sensitive_command_text "$check_command")"
   check_recorded_at="$(jq -r '.recorded_at_utc // ""' <<<"$check_json")"
   check_receipt_json="$(jq -r '.receipt_json // ""' <<<"$check_json")"
   check_artifacts_json="$(jq -c '.artifacts // []' <<<"$check_json")"
@@ -747,6 +800,11 @@ build_profile_signoff_docker_hint_json() {
   local docker_check_receipt_json=""
   local docker_check_status=""
   local docker_check_command=""
+  local directory_urls_redacted=""
+  local issuer_url_redacted=""
+  local entry_url_redacted=""
+  local exit_url_redacted=""
+  local docker_check_command_redacted=""
   local used_signoff_overrides="0"
   local used_docker_artifacts="0"
   local available="0"
@@ -844,19 +902,25 @@ build_profile_signoff_docker_hint_json() {
     fi
   fi
 
+  directory_urls_redacted="$(redact_url_credentials_text "$directory_urls")"
+  issuer_url_redacted="$(redact_url_credentials_text "$issuer_url")"
+  entry_url_redacted="$(redact_url_credentials_text "$entry_url")"
+  exit_url_redacted="$(redact_url_credentials_text "$exit_url")"
+  docker_check_command_redacted="$(redact_sensitive_command_text "$docker_check_command")"
+
   jq -n \
     --arg source "$source" \
     --arg execution_mode "$execution_mode" \
     --arg start_local_stack "$start_local_stack" \
-    --arg directory_urls "$directory_urls" \
-    --arg issuer_url "$issuer_url" \
-    --arg entry_url "$entry_url" \
-    --arg exit_url "$exit_url" \
+    --arg directory_urls "$directory_urls_redacted" \
+    --arg issuer_url "$issuer_url_redacted" \
+    --arg entry_url "$entry_url_redacted" \
+    --arg exit_url "$exit_url_redacted" \
     --arg matrix_summary_json "$matrix_summary_json" \
     --arg profile_summary_json "$profile_summary_json" \
     --arg docker_check_receipt_json "$docker_check_receipt_json" \
     --arg docker_check_status "$docker_check_status" \
-    --arg docker_check_command "$docker_check_command" \
+    --arg docker_check_command "$docker_check_command_redacted" \
     --argjson available "$available" \
     '{
       available: ($available == 1),
@@ -1532,6 +1596,9 @@ build_profile_default_gate_json() {
       next_command_source="not_required"
     fi
   fi
+  next_command="$(redact_sensitive_command_text "$next_command")"
+  next_command_sudo="$(redact_sensitive_command_text "$next_command_sudo")"
+  docker_hint_command="$(redact_sensitive_command_text "$docker_hint_command")"
 
   jq -n \
     --arg summary_json "$signoff_summary_json" \
@@ -1950,7 +2017,7 @@ fi
 overlay_check_id="$(trim "$overlay_check_id")"
 overlay_status="$(trim "$overlay_status")"
 overlay_notes="$(trim "$overlay_notes")"
-overlay_command="$(trim "$overlay_command")"
+overlay_command="$(redact_sensitive_command_text "$(trim "$overlay_command")")"
 if [[ -n "$overlay_check_id" ]]; then
   if [[ ! "$overlay_check_id" =~ ^[a-z0-9_]+$ ]]; then
     echo "--overlay-check-id must match ^[a-z0-9_]+$"
@@ -2142,7 +2209,30 @@ docker_rehearsal_check_json="$(build_recorded_check_json "three_machine_docker_r
 real_wg_privileged_check_json="$(build_recorded_check_json "real_wg_privileged_matrix" "Linux root real-WG privileged matrix" "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1")"
 machine_c_check_json="$(build_recorded_check_json "machine_c_vpn_smoke" "Machine C VPN smoke test" "sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory http://A_HOST:8081 --subject INVITE_KEY --path-profile balanced --interface wgvpn0 --pre-real-host-readiness 1 --runtime-fix 1 --public-ip-url https://api.ipify.org --country-url https://ipinfo.io/country")"
 closed_beta_check_json="$(build_recorded_check_json "closed_beta_pilot_signoff" "Closed-beta pilot signoff" "./scripts/easy_node.sh pilot-runbook --directory-a http://A_HOST:8081 --directory-b http://B_HOST:8081 --issuer-url http://A_HOST:8082 --entry-url http://A_HOST:8083 --exit-url http://A_HOST:8084 --subject INVITE_KEY --path-profile balanced --allow-insecure-remote-http 1 --client-test-mode local --live-evidence-udp-inject 1 --record-result 1")"
-three_machine_check_json="$(build_recorded_check_json "three_machine_prod_signoff" "True 3-machine production signoff" "sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1")"
+three_machine_prod_signoff_command="sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://A_HOST:8081 --directory-b https://B_HOST:8081 --issuer-url https://A_HOST:8082 --entry-url https://A_HOST:8083 --exit-url https://A_HOST:8084 --pre-real-host-readiness 1 --runtime-fix 1 --print-summary-json 1"
+three_machine_prod_signoff_remediations_json='["run A/B with --prod-profile 1 and HTTPS/mTLS endpoints before true production signoff","use client-vpn-smoke/client-vpn-profile-compare/pilot-runbook for beta HTTP lab evidence"]'
+three_machine_check_json="$(build_recorded_check_json "three_machine_prod_signoff" "True 3-machine production signoff" "$three_machine_prod_signoff_command")"
+three_machine_check_json="$(
+  printf '%s\n' "$three_machine_check_json" | jq -c \
+    --arg prod_command "$three_machine_prod_signoff_command" \
+    --argjson prod_remediations "$three_machine_prod_signoff_remediations_json" '
+      if (.status // "pending") != "pass" then
+        .remediation_command = $prod_command
+        | .remediations = $prod_remediations
+        | .notes = (
+            [
+              (.notes // ""),
+              "true production signoff requires prod HTTPS/mTLS endpoints; beta HTTP lab evidence is tracked by closed-beta gates"
+            ]
+            | map(select(length > 0))
+            | unique
+            | join("; ")
+          )
+      else
+        .
+      end
+    '
+)"
 profile_default_gate_json="$(build_profile_default_gate_json "$profile_compare_signoff_summary_json" "$docker_rehearsal_check_json")"
 real_wg_host_linux="0"
 real_wg_host_root="0"
@@ -2347,7 +2437,8 @@ combined_json="$(
               ([
                 .checks[]
                 | select((.check_id == "machine_c_vpn_smoke" or .check_id == "three_machine_prod_signoff") and (.status != "pass" and .status != "skip"))
-                | .command
+                | (.remediation_command // .command // "")
+                | select(length > 0)
               ][0]) // ""
             )
           }
@@ -2367,7 +2458,7 @@ combined_json="$(
                       or .check_id == "machine_c_vpn_smoke"
                       or .check_id == "closed_beta_pilot_signoff"
                     )
-                    and (.status != "pass" and .status != "skip")
+                    and (.status != "pass")
                   )
                 | .check_id
               ]

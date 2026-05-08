@@ -14,13 +14,18 @@ if [[ -z "$LOAD_CHAOS_TAG_SAFE" ]]; then
 fi
 CORE_TIMEOUT_SEC="${CORE_TIMEOUT_SEC:-90}"
 CLIENT_TIMEOUT_SEC="${CLIENT_TIMEOUT_SEC:-10}"
+load_chaos_ports_preconfigured=0
+for name in MAIN_DIR_PORT PEER_DIR_PORT CORE_ISSUER_PORT CORE_ENTRY_PORT CORE_EXIT_PORT CORE_ENTRY_URL CORE_EXIT_CONTROL_URL ENTRY_DATA_PORT EXIT_DATA_PORT EXIT_WG_PORT; do
+  if [[ -n "${!name+x}" ]]; then
+    load_chaos_ports_preconfigured=1
+    break
+  fi
+done
 MAIN_DIR_PORT="${MAIN_DIR_PORT:-8781}"
 PEER_DIR_PORT="${PEER_DIR_PORT:-8785}"
 CORE_ISSUER_PORT="${CORE_ISSUER_PORT:-8782}"
 CORE_ENTRY_PORT="${CORE_ENTRY_PORT:-8783}"
 CORE_EXIT_PORT="${CORE_EXIT_PORT:-8784}"
-CORE_ENTRY_URL="${CORE_ENTRY_URL:-http://127.0.0.1:${CORE_ENTRY_PORT}}"
-CORE_EXIT_CONTROL_URL="${CORE_EXIT_CONTROL_URL:-http://127.0.0.1:${CORE_EXIT_PORT}}"
 ENTRY_DATA_PORT="${ENTRY_DATA_PORT:-57820}"
 EXIT_DATA_PORT="${EXIT_DATA_PORT:-57821}"
 EXIT_WG_PORT="${EXIT_WG_PORT:-57822}"
@@ -37,6 +42,79 @@ PEER_OPERATOR_ID="${PEER_OPERATOR_ID:-op-peer-${LOAD_COUNTRY_CODE,,}}"
 PEER_ENTRY_RELAY_ID="entry-${LOAD_COUNTRY_CODE,,}-1"
 PEER_EXIT_RELAY_ID="exit-${LOAD_COUNTRY_CODE,,}-1"
 PEER_SYNC_SEC="${PEER_SYNC_SEC:-1}"
+
+port_in_use_01() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    if ss -H -ltnu 2>/dev/null | awk '{print $5}' | grep -Eq "(^|[:.])${port}$"; then
+      return 0
+    fi
+  elif command -v lsof >/dev/null 2>&1; then
+    if lsof -nP -iTCP:"$port" -sTCP:LISTEN -iUDP:"$port" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+load_chaos_assign_auto_ports_01() {
+  local control_base="${LOAD_CHAOS_CONTROL_BASE_PORT:-8781}"
+  local data_base="${LOAD_CHAOS_DATA_BASE_PORT:-57820}"
+  local step="${LOAD_CHAOS_PORT_BLOCK_STEP:-20}"
+  local attempts="${LOAD_CHAOS_PORT_BLOCK_ATTEMPTS:-64}"
+  local attempt=0
+  local control_port=0
+  local data_port=0
+  local port=0
+  local busy=0
+  local -a required_ports=()
+
+  for ((attempt = 0; attempt < attempts; attempt++)); do
+    control_port=$((control_base + attempt * step))
+    data_port=$((data_base + attempt * step))
+    required_ports=(
+      "$control_port"
+      "$((control_port + 1))"
+      "$((control_port + 2))"
+      "$((control_port + 3))"
+      "$((control_port + 4))"
+      "$data_port"
+      "$((data_port + 1))"
+      "$((data_port + 2))"
+    )
+
+    busy=0
+    for port in "${required_ports[@]}"; do
+      if port_in_use_01 "$port"; then
+        busy=1
+        break
+      fi
+    done
+    if ((busy == 0)); then
+      MAIN_DIR_PORT="$control_port"
+      CORE_ISSUER_PORT="$((control_port + 1))"
+      CORE_ENTRY_PORT="$((control_port + 2))"
+      CORE_EXIT_PORT="$((control_port + 3))"
+      PEER_DIR_PORT="$((control_port + 4))"
+      ENTRY_DATA_PORT="$data_port"
+      EXIT_DATA_PORT="$((data_port + 1))"
+      EXIT_WG_PORT="$((data_port + 2))"
+      export LOAD_CHAOS_SELECTED_PORT_OFFSET="$((attempt * step))"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if [[ "${LOAD_CHAOS_AUTO_PORT_SELECT:-1}" == "1" && "$load_chaos_ports_preconfigured" == "0" ]]; then
+  if ! load_chaos_assign_auto_ports_01; then
+    echo "unable to find a free local port block for load/chaos integration"
+    exit 1
+  fi
+fi
+
+CORE_ENTRY_URL="${CORE_ENTRY_URL:-http://127.0.0.1:${CORE_ENTRY_PORT}}"
+CORE_EXIT_CONTROL_URL="${CORE_EXIT_CONTROL_URL:-http://127.0.0.1:${CORE_EXIT_PORT}}"
 
 make_temp_file() {
   mktemp "$1"

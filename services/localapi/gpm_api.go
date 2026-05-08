@@ -37,23 +37,29 @@ import (
 )
 
 const (
-	gpmChallengeTTL                 = 5 * time.Minute
-	gpmSessionTTL                   = 12 * time.Hour
-	gpmReservationPendingClaimTTL   = 15 * time.Minute
-	gpmReservationLaunchClaimTTL    = 15 * time.Minute
-	gpmChallengeMaxEntries          = 4096
-	gpmManifestHTTPTimeout          = 6 * time.Second
-	gpmManifestBodyLimit            = 1 << 20
-	gpmManifestCacheBodyLimit       = 2 << 20
-	gpmManifestCacheFutureSkew      = 2 * time.Minute
-	gpmAuthSignatureMaxLen          = 8 * 1024
-	gpmAuthSignatureEnvelopeMaxLen  = 16 * 1024
-	gpmAuthVerifierOutputLimit      = 8 * 1024
-	gpmGapScanSummaryBodyLimit      = 2 << 20
-	gpmGapSummaryMaxAge             = 24 * time.Hour
-	gpmBech32ChecksumLength         = 6
-	gpmPublicVPNReservationMicros   = 200000
-	gpmPublicVPNReservationCurrency = "TDPNC"
+	gpmChallengeTTL                  = 5 * time.Minute
+	gpmSessionTTL                    = 12 * time.Hour
+	gpmReservationPendingClaimTTL    = 15 * time.Minute
+	gpmReservationLaunchClaimTTL     = 15 * time.Minute
+	gpmChallengeMaxEntries           = 4096
+	gpmChallengeMaxEntriesPerWallet  = 8
+	gpmSessionMaxEntries             = 8192
+	gpmSessionMaxEntriesPerWallet    = 16
+	gpmOperatorApplicationMaxEntries = 16384
+	gpmContributionMaxEntries        = 16384
+	gpmReservationClaimMaxEntries    = 65536
+	gpmManifestHTTPTimeout           = 6 * time.Second
+	gpmManifestBodyLimit             = 1 << 20
+	gpmManifestCacheBodyLimit        = 2 << 20
+	gpmManifestCacheFutureSkew       = 2 * time.Minute
+	gpmAuthSignatureMaxLen           = 8 * 1024
+	gpmAuthSignatureEnvelopeMaxLen   = 16 * 1024
+	gpmAuthVerifierOutputLimit       = 8 * 1024
+	gpmGapScanSummaryBodyLimit       = 2 << 20
+	gpmGapSummaryMaxAge              = 24 * time.Hour
+	gpmBech32ChecksumLength          = 6
+	gpmPublicVPNReservationMicros    = 200000
+	gpmPublicVPNReservationCurrency  = "TDPNC"
 )
 
 var (
@@ -439,9 +445,25 @@ func newGPMRuntimeState() *gpmRuntimeState {
 func (st *gpmRuntimeState) putChallenge(challenge gpmWalletChallenge, now time.Time) bool {
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	if st.challenges == nil {
+		st.challenges = map[string]gpmWalletChallenge{}
+	}
 	st.pruneExpiredChallengesLocked(now)
 	if gpmChallengeMaxEntries > 0 && len(st.challenges) >= gpmChallengeMaxEntries {
 		return false
+	}
+	wallet := normalizeWalletAddress(challenge.WalletAddress)
+	if wallet != "" && gpmChallengeMaxEntriesPerWallet > 0 {
+		walletChallenges := 0
+		for _, existing := range st.challenges {
+			if normalizeWalletAddress(existing.WalletAddress) == wallet {
+				walletChallenges++
+			}
+		}
+		if walletChallenges >= gpmChallengeMaxEntriesPerWallet {
+			return false
+		}
+		challenge.WalletAddress = wallet
 	}
 	st.challenges[challenge.ChallengeID] = challenge
 	return true
@@ -470,10 +492,51 @@ func (st *gpmRuntimeState) popValidChallenge(challengeID string, now time.Time) 
 	return challenge, true
 }
 
-func (st *gpmRuntimeState) putSession(session gpmSession) {
+func (st *gpmRuntimeState) putSession(session gpmSession) bool {
+	token := strings.TrimSpace(session.Token)
+	if token == "" {
+		return false
+	}
+	session.Token = token
+	session.WalletAddress = normalizeWalletAddress(session.WalletAddress)
+	now := time.Now().UTC()
+	if !session.ExpiresAt.IsZero() && now.After(session.ExpiresAt) {
+		return false
+	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	if st.sessions == nil {
+		st.sessions = map[string]gpmSession{}
+	}
+	st.pruneExpiredSessionsLocked(now)
+	if _, exists := st.sessions[session.Token]; !exists {
+		if gpmSessionMaxEntries > 0 && len(st.sessions) >= gpmSessionMaxEntries {
+			return false
+		}
+		if session.WalletAddress != "" && gpmSessionMaxEntriesPerWallet > 0 && st.sessionCountForWalletLocked(session.WalletAddress) >= gpmSessionMaxEntriesPerWallet {
+			return false
+		}
+	}
 	st.sessions[session.Token] = session
+	return true
+}
+
+func (st *gpmRuntimeState) pruneExpiredSessionsLocked(now time.Time) {
+	for token, session := range st.sessions {
+		if now.After(session.ExpiresAt) {
+			delete(st.sessions, token)
+		}
+	}
+}
+
+func (st *gpmRuntimeState) sessionCountForWalletLocked(wallet string) int {
+	count := 0
+	for _, session := range st.sessions {
+		if normalizeWalletAddress(session.WalletAddress) == wallet {
+			count++
+		}
+	}
+	return count
 }
 
 func (st *gpmRuntimeState) getSession(token string, now time.Time) (gpmSession, bool) {
@@ -495,7 +558,15 @@ func (st *gpmRuntimeState) getSession(token string, now time.Time) (gpmSession, 
 func (st *gpmRuntimeState) replaceSessionToken(oldToken string, session gpmSession) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	if st.sessions == nil {
+		st.sessions = map[string]gpmSession{}
+	}
 	delete(st.sessions, oldToken)
+	session.Token = strings.TrimSpace(session.Token)
+	session.WalletAddress = normalizeWalletAddress(session.WalletAddress)
+	if session.Token == "" {
+		return
+	}
 	st.sessions[session.Token] = session
 }
 
@@ -509,10 +580,22 @@ func (st *gpmRuntimeState) deleteSession(token string) bool {
 	return true
 }
 
-func (st *gpmRuntimeState) upsertOperator(app gpmOperatorApplication) {
+func (st *gpmRuntimeState) upsertOperator(app gpmOperatorApplication) bool {
+	wallet := normalizeWalletAddress(app.WalletAddress)
+	if wallet == "" {
+		return false
+	}
+	app.WalletAddress = wallet
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	st.operators[app.WalletAddress] = app
+	if st.operators == nil {
+		st.operators = map[string]gpmOperatorApplication{}
+	}
+	if _, exists := st.operators[wallet]; !exists && gpmOperatorApplicationMaxEntries > 0 && len(st.operators) >= gpmOperatorApplicationMaxEntries {
+		return false
+	}
+	st.operators[wallet] = app
+	return true
 }
 
 func (st *gpmRuntimeState) getOperator(walletAddress string) (gpmOperatorApplication, bool) {
@@ -539,13 +622,22 @@ func (st *gpmRuntimeState) getContribution(walletAddress string) (gpmContributio
 	return state, ok
 }
 
-func (st *gpmRuntimeState) upsertContribution(state gpmContributionState) {
+func (st *gpmRuntimeState) upsertContribution(state gpmContributionState) bool {
+	wallet := normalizeWalletAddress(state.WalletAddress)
+	if wallet == "" {
+		return false
+	}
+	state.WalletAddress = wallet
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.contributions == nil {
 		st.contributions = map[string]gpmContributionState{}
 	}
-	st.contributions[normalizeWalletAddress(state.WalletAddress)] = state
+	if _, exists := st.contributions[wallet]; !exists && gpmContributionMaxEntries > 0 && len(st.contributions) >= gpmContributionMaxEntries {
+		return false
+	}
+	st.contributions[wallet] = state
+	return true
 }
 
 func (st *gpmRuntimeState) listContributions() []gpmContributionState {
@@ -570,6 +662,7 @@ func (st *gpmRuntimeState) claimReservationForConnect(reservationID string, rese
 	if st.reservationClaims == nil {
 		st.reservationClaims = map[string]gpmReservationClaim{}
 	}
+	st.pruneStaleReservationClaimsLocked(now)
 	if existing, ok := st.reservationClaims[reservationID]; ok {
 		existing.Status = strings.TrimSpace(existing.Status)
 		if existing.Status == "" {
@@ -593,6 +686,9 @@ func (st *gpmRuntimeState) claimReservationForConnect(reservationID string, rese
 			return existing, false, "reservation_id has already been used for production VPN connect"
 		}
 	}
+	if gpmReservationClaimMaxEntries > 0 && len(st.reservationClaims) >= gpmReservationClaimMaxEntries {
+		return gpmReservationClaim{}, false, "reservation claim store saturated; retry later"
+	}
 	claim := gpmReservationClaim{
 		ReservationID:        reservationID,
 		ReservationSessionID: reservationSessionID,
@@ -602,6 +698,18 @@ func (st *gpmRuntimeState) claimReservationForConnect(reservationID string, rese
 	}
 	st.reservationClaims[reservationID] = claim
 	return claim, true, ""
+}
+
+func (st *gpmRuntimeState) pruneStaleReservationClaimsLocked(now time.Time) {
+	for reservationID, claim := range st.reservationClaims {
+		status := strings.TrimSpace(claim.Status)
+		switch {
+		case status == "pending_launch" && !claim.ClaimedAt.IsZero() && now.Sub(claim.ClaimedAt) > gpmReservationPendingClaimTTL:
+			delete(st.reservationClaims, reservationID)
+		case status == "launching" && gpmReservationClaimIsStaleLaunching(claim, now):
+			delete(st.reservationClaims, reservationID)
+		}
+	}
 }
 
 func gpmReservationClaimLaunchReferenceTime(claim gpmReservationClaim) time.Time {
@@ -1303,7 +1411,13 @@ func (s *Service) handleGPMAuthVerify(w http.ResponseWriter, r *http.Request) {
 			session.ChainOperatorID = app.ChainOperatorID
 		}
 	}
-	s.gpmState.putSession(session)
+	if !s.gpmState.putSession(session) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"ok":    false,
+			"error": "session store is temporarily saturated; revoke an existing session or retry later",
+		})
+		return
+	}
 	s.persistGPMStateBestEffort("auth_verify")
 	s.appendGPMAudit("auth_verified", map[string]any{
 		"wallet_address":           session.WalletAddress,
@@ -1325,6 +1439,9 @@ func (s *Service) handleGPMSessionStatus(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false, "error": "method not allowed"})
 		return
 	}
+	if !s.requireCommandReadAuth(w, r) {
+		return
+	}
 	var in gpmSessionStatusRequest
 	if err := decodeOptionalJSONBody(r, &in); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json body"})
@@ -1338,11 +1455,7 @@ func (s *Service) handleGPMSessionStatus(w http.ResponseWriter, r *http.Request)
 		})
 		return
 	}
-	if action == "status" {
-		if !s.requireCommandReadAuth(w, r) {
-			return
-		}
-	} else if !s.requireMutationAuth(w, r) {
+	if action != "status" && !s.requireMutationAuth(w, r) {
 		return
 	}
 	token := gpmSessionTokenFromRequest(r, in.SessionToken)
@@ -1655,7 +1768,13 @@ func (s *Service) handleGPMClientRegister(w http.ResponseWriter, r *http.Request
 	session.BootstrapDirectories = normalizeBootstrapDirectories(manifest.BootstrapDirectories)
 	session.InviteKey = inviteKey
 	session.PathProfile = pathProfile
-	s.gpmState.putSession(session)
+	if !s.gpmState.putSession(session) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"ok":    false,
+			"error": "session store is temporarily saturated; sign in again or retry later",
+		})
+		return
+	}
 	s.persistGPMStateBestEffort("client_register")
 	s.appendGPMAudit("client_registered", map[string]any{
 		"wallet_address":      session.WalletAddress,
@@ -1829,7 +1948,13 @@ func (s *Service) handleGPMContributionEnable(w http.ResponseWriter, r *http.Req
 	// Restart metering from opt-in time so disabled time is never counted.
 	state.LastMeteredAt = now
 	state.UpdatedAt = now
-	s.gpmState.upsertContribution(state)
+	if !s.gpmState.upsertContribution(state) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"ok":    false,
+			"error": "contribution store is temporarily saturated; retry later",
+		})
+		return
+	}
 	s.persistGPMStateBestEffort("contribution_enable")
 	s.appendGPMAudit("contribution_enabled", map[string]any{
 		"wallet_address": session.WalletAddress,
@@ -1876,7 +2001,13 @@ func (s *Service) handleGPMContributionDisable(w http.ResponseWriter, r *http.Re
 	state.ExplicitOptIn = false
 	state.DemotionState = "disabled_by_user"
 	state.UpdatedAt = now
-	s.gpmState.upsertContribution(state)
+	if !s.gpmState.upsertContribution(state) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"ok":    false,
+			"error": "contribution store is temporarily saturated; retry later",
+		})
+		return
+	}
 	s.persistGPMStateBestEffort("contribution_disable")
 	s.appendGPMAudit("contribution_disabled", map[string]any{
 		"wallet_address": session.WalletAddress,
@@ -4721,7 +4852,13 @@ func (s *Service) handleGPMOperatorApply(w http.ResponseWriter, r *http.Request)
 		Status:          "pending",
 		UpdatedAt:       time.Now().UTC(),
 	}
-	s.gpmState.upsertOperator(app)
+	if !s.gpmState.upsertOperator(app) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"ok":    false,
+			"error": "operator application store is temporarily saturated; retry later",
+		})
+		return
+	}
 	s.persistGPMStateBestEffort("operator_apply")
 	s.appendGPMAudit("operator_application_submitted", map[string]any{
 		"wallet_address":    app.WalletAddress,

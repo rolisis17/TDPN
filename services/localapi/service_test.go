@@ -10294,7 +10294,7 @@ func TestGPMAuthChallengeFailsClosedWhenChallengeStateSaturated(t *testing.T) {
 	for i := 0; i < gpmChallengeMaxEntries; i++ {
 		ok := svc.gpmState.putChallenge(gpmWalletChallenge{
 			ChallengeID:    fmt.Sprintf("gpm-chal-seed-%d", i),
-			WalletAddress:  "cosmos1challengefill",
+			WalletAddress:  fmt.Sprintf("cosmos1challengefill%d", i),
 			WalletProvider: "keplr",
 			Message:        "seed-challenge",
 			ExpiresAt:      now.Add(gpmChallengeTTL),
@@ -11867,6 +11867,26 @@ func TestGPMSessionRefreshAndRevoke(t *testing.T) {
 	code, payload = callJSONHandler(t, svc.handleGPMSessionStatus, http.MethodPost, "/v1/gpm/session", statusBody)
 	if code != http.StatusNotFound {
 		t.Fatalf("expected revoked token status 404 got=%d payload=%v", code, payload)
+	}
+}
+
+func TestGPMSessionStatusRequiresReadAuthBeforeBodyDecode(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.authToken = strongLocalAPIAuthToken
+
+	code, payload := callJSONHandler(t, svc.handleGPMSessionStatus, http.MethodPost, "/v1/gpm/session", "{")
+	if code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated malformed body status=%d want=%d payload=%v", code, http.StatusUnauthorized, payload)
+	}
+	if got, _ := payload["error"].(string); got != "unauthorized" {
+		t.Fatalf("error=%q want unauthorized payload=%v", got, payload)
+	}
+
+	code, payload = callJSONHandlerWithHeaders(t, svc.handleGPMSessionStatus, http.MethodPost, "/v1/gpm/session", "{", map[string]string{
+		"Authorization": "Bearer " + strongLocalAPIAuthToken,
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("authenticated malformed body status=%d want=%d payload=%v", code, http.StatusBadRequest, payload)
 	}
 }
 

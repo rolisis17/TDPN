@@ -1396,6 +1396,7 @@ if [[ -n "$live_evidence_udp_injector_pid" ]]; then
   echo "[client-test] live evidence UDP injector stopped pid=$live_evidence_udp_injector_pid"
 fi
 if ((client_rc != 0)); then
+  echo "client validation command failed rc=$client_rc"
   latest_client_log="$(ls -1t "$ROOT_DIR"/.easy-node-logs/easy_node_client_test_*.log 2>/dev/null | head -n 1 || true)"
   if [[ -n "$latest_client_log" ]] && rg -qi '(transport must be wireguard-udp|transport mismatch|entry live mode|live-WG|live host)' "$latest_client_log"; then
     echo "client validation failed due transport mismatch against live-WG entry mode."

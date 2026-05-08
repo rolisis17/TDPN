@@ -46,6 +46,7 @@ PROFILE_MULTI_VM_STABILITY_CYCLE_FALLBACK_LOG="$TMP_DIR/integration_manual_valid
 PROFILE_MULTI_VM_STABILITY_MISSING_DEFAULT_LOG="$TMP_DIR/integration_manual_validation_status_profile_multi_vm_stability_missing_default.log"
 PROFILE_PENDING_READINESS_DOWNGRADE_LOG="$TMP_DIR/integration_manual_validation_status_profile_pending_readiness_downgrade.log"
 CLOSED_BETA_READY_LOG="$TMP_DIR/integration_manual_validation_status_closed_beta_ready.log"
+CLOSED_BETA_SKIP_LOG="$TMP_DIR/integration_manual_validation_status_closed_beta_skip.log"
 INVALID_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_invalid_status_json.log"
 UNREADABLE_STATUS_LOG="$TMP_DIR/integration_manual_validation_status_unreadable_status_json.log"
 LOCK_RECOVER_LOG="$TMP_DIR/integration_manual_validation_record_lock_recover.log"
@@ -380,6 +381,47 @@ if ! printf '%s\n' "$baseline_json" | jq -e '
   printf '%s\n' "$baseline_json"
   exit 1
 fi
+
+echo "[manual-validation] overlay command redaction"
+OVERLAY_REDACTION_LOG="$TMP_DIR/integration_manual_validation_status_overlay_redaction.log"
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+./scripts/manual_validation_status.sh \
+  --overlay-check-id machine_c_vpn_smoke \
+  --overlay-status pending \
+  --overlay-command "./scripts/easy_node.sh client-vpn-smoke --subject overlay-subject-secret --anon-cred overlay-anon-secret --public-ip-url https://overlay-user-secret@privacy.example/ip#access_token=overlay-fragment-secret --country-url https://privacy.example/country?auth_token=overlay-auth-secret" \
+  --show-json 1 >"$OVERLAY_REDACTION_LOG"
+overlay_redaction_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' "$OVERLAY_REDACTION_LOG")"
+if [[ -z "$overlay_redaction_json" ]]; then
+  echo "overlay redaction status missing JSON payload"
+  cat "$OVERLAY_REDACTION_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$overlay_redaction_json" | jq -e '
+  (.checks[] | select(.check_id == "machine_c_vpn_smoke") | .command
+    | contains("--subject [redacted]")
+    and contains("--anon-cred [redacted]")
+    and contains("https://[redacted]@privacy.example/ip#access_token=[redacted]")
+    and contains("auth_token=[redacted]")
+  )
+' >/dev/null; then
+  echo "overlay redaction status JSON missing redacted command fields"
+  printf '%s\n' "$overlay_redaction_json"
+  exit 1
+fi
+for leaked in \
+  overlay-subject-secret \
+  overlay-anon-secret \
+  overlay-user-secret \
+  overlay-fragment-secret \
+  overlay-auth-secret; do
+  if grep -F -- "$leaked" "$OVERLAY_REDACTION_LOG" >/dev/null || printf '%s\n' "$overlay_redaction_json" | grep -F -- "$leaked" >/dev/null; then
+    echo "manual-validation status leaked overlay command credential: $leaked"
+    cat "$OVERLAY_REDACTION_LOG"
+    exit 1
+  fi
+done
 
 echo "[manual-validation] invalid runtime-doctor JSON"
 set +e
@@ -1202,11 +1244,132 @@ if ! printf '%s\n' "$closed_beta_ready_json" | jq -e '
   and .summary.real_host_gate.ready == false
   and .summary.real_host_gate.blockers == ["three_machine_prod_signoff"]
   and .summary.next_action_check_id == "three_machine_prod_signoff"
+  and (.summary.next_action_command | contains("three-machine-prod-signoff"))
+  and (.summary.next_action_command | contains("--directory-a https://A_HOST:8081"))
+  and (.summary.next_action_command | contains("--directory-b https://B_HOST:8081"))
   and .summary.readiness.status == "NOT_READY"
   and .summary.roadmap_stage == "READY_FOR_3_MACHINE_PROD_SIGNOFF"
 ' >/dev/null; then
   echo "closed-beta-ready JSON missing expected separated readiness fields"
   printf '%s\n' "$closed_beta_ready_json"
+  exit 1
+fi
+
+echo "[manual-validation] stale beta HTTP prod-signoff command gets prod remediation"
+STALE_PROD_STATE_DIR="$TMP_DIR/manual-validation-stale-prod-command-state"
+mkdir -p "$STALE_PROD_STATE_DIR"
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STALE_PROD_STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id wg_only_stack_selftest \
+  --status pass \
+  --notes "wg-only stack pass for stale prod command test" \
+  --show-json 0 >/dev/null
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STALE_PROD_STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id machine_c_vpn_smoke \
+  --status pass \
+  --notes "machine-c smoke pass for stale prod command test" \
+  --show-json 0 >/dev/null
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STALE_PROD_STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id closed_beta_pilot_signoff \
+  --status pass \
+  --notes "closed-beta pilot pass for stale prod command test" \
+  --artifact "$CLOSED_BETA_PROFILE_PASS_SUMMARY_JSON" \
+  --show-json 0 >/dev/null
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STALE_PROD_STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id three_machine_prod_signoff \
+  --status fail \
+  --notes "stale beta HTTP prod signoff failure" \
+  --command "./scripts/three_machine_prod_signoff.sh --directory-a http://A_HOST:8081 --directory-b http://B_HOST:8081 --issuer-url http://A_HOST:8082 --entry-url http://A_HOST:8083 --exit-url http://A_HOST:8084 --prod-profile 0 --subject INVITE_KEY" \
+  --show-json 0 >/dev/null
+
+STALE_PROD_COMMAND_LOG="$TMP_DIR/manual_validation_status_stale_prod_command.log"
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STALE_PROD_STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$CLOSED_BETA_PROFILE_PASS_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR_OK" \
+./scripts/manual_validation_status.sh --show-json 1 >"$STALE_PROD_COMMAND_LOG"
+
+if ! rg -q '\[manual-validation-status\] next_action_command=sudo \./scripts/easy_node\.sh three-machine-prod-signoff .*--directory-a https://A_HOST:8081 .*--directory-b https://B_HOST:8081' "$STALE_PROD_COMMAND_LOG"; then
+  echo "stale prod command status missing HTTPS/mTLS remediation next_action_command"
+  cat "$STALE_PROD_COMMAND_LOG"
+  exit 1
+fi
+if rg -q '\[manual-validation-status\] next_action_command=.*--prod-profile 0' "$STALE_PROD_COMMAND_LOG"; then
+  echo "stale prod command status leaked stale beta prod-profile command as next action"
+  cat "$STALE_PROD_COMMAND_LOG"
+  exit 1
+fi
+stale_prod_command_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' "$STALE_PROD_COMMAND_LOG")"
+if [[ -z "$stale_prod_command_json" ]]; then
+  echo "stale prod command status missing JSON payload"
+  cat "$STALE_PROD_COMMAND_LOG"
+  exit 1
+fi
+if ! printf '%s\n' "$stale_prod_command_json" | jq -e '
+  (.checks[] | select(.check_id == "three_machine_prod_signoff")) as $prod
+  | ($prod.command | contains("--prod-profile 0"))
+  and ($prod.remediation_command | contains("--directory-a https://A_HOST:8081"))
+  and (($prod.remediations | length) == 2)
+  and ($prod.notes | contains("true production signoff requires prod HTTPS/mTLS endpoints"))
+  and (.summary.next_action_command | contains("--directory-a https://A_HOST:8081"))
+  and (.summary.next_action_command | contains("--entry-url https://A_HOST:8083"))
+  and (.summary.real_host_gate.next_command | contains("--directory-a https://A_HOST:8081"))
+  and (.summary.real_host_gate.next_command | contains("--exit-url https://A_HOST:8084"))
+  and ((.summary.next_action_remediations | length) == 2)
+' >/dev/null; then
+  echo "stale prod command JSON did not preserve evidence while remediating to prod HTTPS/mTLS command"
+  printf '%s\n' "$stale_prod_command_json"
+  exit 1
+fi
+
+echo "[manual-validation] closed-beta pilot skip remains not ready"
+CLOSED_BETA_SKIP_STATE_DIR="$TMP_DIR/manual-validation-closed-beta-skip-state"
+mkdir -p "$CLOSED_BETA_SKIP_STATE_DIR"
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$CLOSED_BETA_SKIP_STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id wg_only_stack_selftest \
+  --status pass \
+  --notes "wg-only stack pass for closed-beta skip test" \
+  --show-json 0 >/dev/null
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$CLOSED_BETA_SKIP_STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id machine_c_vpn_smoke \
+  --status pass \
+  --notes "machine-c smoke pass for closed-beta skip test" \
+  --show-json 0 >/dev/null
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$CLOSED_BETA_SKIP_STATE_DIR" \
+./scripts/manual_validation_record.sh \
+  --check-id closed_beta_pilot_signoff \
+  --status skip \
+  --notes "closed-beta pilot intentionally skipped for readiness test" \
+  --show-json 0 >/dev/null
+
+EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$CLOSED_BETA_SKIP_STATE_DIR" \
+MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$CLOSED_BETA_PROFILE_PASS_SUMMARY_JSON" \
+RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR_OK" \
+./scripts/manual_validation_status.sh --show-json 1 >"$CLOSED_BETA_SKIP_LOG"
+
+if ! rg -q '\[manual-validation-status\] closed_beta_readiness_status=NOT_READY' "$CLOSED_BETA_SKIP_LOG"; then
+  echo "closed-beta skip status should remain NOT_READY"
+  cat "$CLOSED_BETA_SKIP_LOG"
+  exit 1
+fi
+if ! rg -q '\[manual-validation-status\] closed_beta_readiness_blockers=closed_beta_pilot_signoff' "$CLOSED_BETA_SKIP_LOG"; then
+  echo "closed-beta skip status should block on closed_beta_pilot_signoff"
+  cat "$CLOSED_BETA_SKIP_LOG"
+  exit 1
+fi
+closed_beta_skip_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' "$CLOSED_BETA_SKIP_LOG")"
+if ! printf '%s\n' "$closed_beta_skip_json" | jq -e '
+  .summary.closed_beta_readiness.status == "NOT_READY"
+  and .summary.closed_beta_readiness.ready == false
+  and .summary.closed_beta_readiness.blockers == ["closed_beta_pilot_signoff"]
+  and .summary.closed_beta_readiness.pilot_signoff_status == "skip"
+' >/dev/null; then
+  echo "closed-beta skip JSON missing required fail-closed fields"
+  printf '%s\n' "$closed_beta_skip_json"
   exit 1
 fi
 
@@ -1356,11 +1519,11 @@ cat >"$PROFILE_DOCKER_HINT_PROFILE_SUMMARY_JSON" <<'EOF_PROFILE_DOCKER_HINT_PROF
   "version": 1,
   "status": "pass",
   "endpoints": {
-    "directory_a": "http://127.0.0.1:18081",
-    "directory_b": "http://127.0.0.1:28081",
-    "issuer_a": "http://127.0.0.1:18082",
-    "entry": "http://127.0.0.1:18083",
-    "exit": "http://127.0.0.1:18084"
+    "directory_a": "http://127.0.0.1:18081?auth_token=manual-dir-a-auth-secret#access_token=manual-dir-a-fragment-secret",
+    "directory_b": "http://127.0.0.1:28081?admin_token=manual-dir-b-admin-secret#token=manual-dir-b-fragment-secret",
+    "issuer_a": "http://127.0.0.1:18082?bearer=manual-issuer-bearer-secret#authorization=manual-issuer-fragment-secret",
+    "entry": "http://127.0.0.1:18083?invite_key=manual-entry-invite-secret#key=manual-entry-fragment-secret",
+    "exit": "http://127.0.0.1:18084?anon_cred=manual-exit-anon-secret&subject=manual-exit-subject-secret#subject=manual-exit-fragment-secret"
   }
 }
 EOF_PROFILE_DOCKER_HINT_PROFILE
@@ -1386,7 +1549,7 @@ EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
   --notes "docker rehearsal endpoints available" \
   --artifact "$PROFILE_DOCKER_HINT_MATRIX_SUMMARY_JSON" \
   --artifact "$PROFILE_DOCKER_HINT_PROFILE_SUMMARY_JSON" \
-  --command "./scripts/three_machine_docker_profile_matrix_record.sh --print-summary-json 1" \
+  --command "./scripts/three_machine_docker_profile_matrix_record.sh --subject manual-command-subject-secret --anon-cred manual-command-anon-secret --token manual-command-token-secret --probe-url http://manual-command-user-secret@127.0.0.1:18081?auth_token=manual-command-auth-secret#access_token=manual-command-fragment-secret --print-summary-json 1" \
   --show-json 0 >/dev/null
 
 EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$STATE_DIR" \
@@ -1412,6 +1575,12 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e --arg matrix "$PRO
   and (.summary.profile_default_gate.next_command | startswith("./scripts/easy_node.sh profile-default-gate-run"))
   and (.summary.profile_default_gate.next_command | contains("--directory-a http://127.0.0.1:18081"))
   and (.summary.profile_default_gate.next_command | contains("--directory-b http://127.0.0.1:28081"))
+  and (.summary.profile_default_gate.next_command | contains("auth_token=[redacted]"))
+  and (.summary.profile_default_gate.next_command | contains("admin_token=[redacted]"))
+  and (.summary.profile_default_gate.next_command | contains("bearer=[redacted]"))
+  and (.summary.profile_default_gate.next_command | contains("invite_key=[redacted]"))
+  and (.summary.profile_default_gate.next_command | contains("anon_cred=[redacted]"))
+  and (.summary.profile_default_gate.next_command | contains("subject=[redacted]"))
   and (.summary.profile_default_gate.next_command | contains("--campaign-execution-mode docker") | not)
   and (.summary.profile_default_gate.next_command | contains("--campaign-start-local-stack") | not)
   and (.summary.profile_default_gate.next_command | contains("--campaign-directory-urls") | not)
@@ -1428,6 +1597,8 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e --arg matrix "$PRO
   and (.summary.profile_default_gate.next_command_sudo | startswith("sudo ./scripts/easy_node.sh profile-default-gate-run"))
   and (.summary.profile_default_gate.next_command_sudo | contains("--directory-a http://127.0.0.1:18081"))
   and (.summary.profile_default_gate.next_command_sudo | contains("--directory-b http://127.0.0.1:28081"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("auth_token=[redacted]"))
+  and (.summary.profile_default_gate.next_command_sudo | contains("admin_token=[redacted]"))
   and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-execution-mode docker") | not)
   and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-start-local-stack") | not)
   and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-directory-urls") | not)
@@ -1440,6 +1611,12 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e --arg matrix "$PRO
   and (.summary.profile_default_gate.next_command_source | test("docker"))
   and .summary.profile_default_gate.next_command_sudo_only_reason == null
   and .summary.profile_default_gate.docker_rehearsal_hint_available == true
+  and (.summary.profile_default_gate.artifacts.docker_rehearsal_check_command | contains("http://[redacted]@127.0.0.1:18081"))
+  and (.summary.profile_default_gate.artifacts.docker_rehearsal_check_command | contains("auth_token=[redacted]"))
+  and (.summary.profile_default_gate.artifacts.docker_rehearsal_check_command | contains("access_token=[redacted]"))
+  and (.summary.profile_default_gate.artifacts.docker_rehearsal_check_command | contains("--subject [redacted]"))
+  and (.summary.profile_default_gate.artifacts.docker_rehearsal_check_command | contains("--anon-cred [redacted]"))
+  and (.summary.profile_default_gate.artifacts.docker_rehearsal_check_command | contains("--token [redacted]"))
   and .summary.profile_default_gate.artifacts.docker_rehearsal_matrix_summary_json == $matrix
   and .summary.profile_default_gate.artifacts.docker_rehearsal_profile_summary_json == $profile
   and .summary.profile_default_gate.artifacts.campaign_check_summary_json_resolved == "'"$PROFILE_NO_GO_INSUFFICIENT_CHECK_SUMMARY_JSON"'"
@@ -1448,6 +1625,30 @@ if ! printf '%s\n' "$profile_no_go_insufficient_json" | jq -e --arg matrix "$PRO
   printf '%s\n' "$profile_no_go_insufficient_json"
   exit 1
 fi
+for leaked in \
+  manual-dir-a-auth-secret \
+  manual-dir-a-fragment-secret \
+  manual-dir-b-admin-secret \
+  manual-dir-b-fragment-secret \
+  manual-issuer-bearer-secret \
+  manual-issuer-fragment-secret \
+  manual-entry-invite-secret \
+  manual-entry-fragment-secret \
+  manual-exit-anon-secret \
+  manual-exit-subject-secret \
+  manual-exit-fragment-secret \
+  manual-command-user-secret \
+  manual-command-subject-secret \
+  manual-command-anon-secret \
+  manual-command-token-secret \
+  manual-command-auth-secret \
+  manual-command-fragment-secret; do
+  if grep -F -- "$leaked" "$PROFILE_NO_GO_INSUFFICIENT_LOG" >/dev/null || printf '%s\n' "$profile_no_go_insufficient_json" | grep -F -- "$leaked" >/dev/null; then
+    echo "manual-validation status leaked docker hint credential: $leaked"
+    cat "$PROFILE_NO_GO_INSUFFICIENT_LOG"
+    exit 1
+  fi
+done
 
 echo "[manual-validation] profile-default no-go insufficient guidance prefers sudo when docker hint implies local stack"
 cat >"$PROFILE_SIGNOFF_SUMMARY_JSON" <<EOF_PROFILE_SIGNOFF_NO_GO_INSUFFICIENT_DOCKER_STACK

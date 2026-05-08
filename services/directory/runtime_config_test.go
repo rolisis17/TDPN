@@ -23,6 +23,20 @@ func TestValidateRuntimeConfigProdStrictRejectsInsecureSkipVerify(t *testing.T) 
 	}
 }
 
+func TestValidateRuntimeConfigPublicBindRejectsOptionalClientCertMTLS(t *testing.T) {
+	t.Setenv("MTLS_ENABLE", "1")
+	t.Setenv("MTLS_REQUIRE_CLIENT_CERT", "0")
+
+	s := &Service{addr: "0.0.0.0:8081"}
+	err := s.validateRuntimeConfig()
+	if err == nil {
+		t.Fatalf("expected public mTLS bind to require client certs")
+	}
+	if !strings.Contains(err.Error(), "MTLS_REQUIRE_CLIENT_CERT=1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateRuntimeConfigProdStrictRejectsInstanceLocalProviderTokenReplay(t *testing.T) {
 	s := &Service{
 		prodStrict:                  true,

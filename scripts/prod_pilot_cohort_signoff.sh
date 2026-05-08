@@ -47,6 +47,82 @@ Purpose:
 USAGE
 }
 
+bool_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ "$value" != "0" && "$value" != "1" ]]; then
+    echo "$name must be 0 or 1"
+    exit 2
+  fi
+}
+
+int_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    echo "$name must be an integer >= 0"
+    exit 2
+  fi
+}
+
+require_one_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ "$value" != "1" ]]; then
+    echo "prod-pilot-cohort-signoff requires $name 1; use prod-pilot-cohort-check directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+require_zero_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[0-9]+$ || "$value" != "0" ]]; then
+    echo "prod-pilot-cohort-signoff requires $name 0; use prod-pilot-cohort-check directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+require_int_floor_or_die() {
+  local name="$1"
+  local value="$2"
+  local minimum="$3"
+  if [[ ! "$value" =~ ^[0-9]+$ ]] || ((10#$value < minimum)); then
+    echo "prod-pilot-cohort-signoff requires $name >= $minimum; use prod-pilot-cohort-check directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+is_non_negative_decimal() {
+  [[ "${1:-}" =~ ^[0-9]+([.][0-9]+)?$ ]]
+}
+
+require_decimal_floor_or_die() {
+  local name="$1"
+  local value="$2"
+  local minimum="$3"
+  if ! is_non_negative_decimal "$value"; then
+    echo "prod-pilot-cohort-signoff requires $name to be a decimal >= $minimum; use prod-pilot-cohort-check directly for diagnostic policy bypasses."
+    exit 2
+  fi
+  if awk -v a="$value" -v b="$minimum" 'BEGIN { exit !((a + 0) < (b + 0)) }'; then
+    echo "prod-pilot-cohort-signoff requires $name >= $minimum; use prod-pilot-cohort-check directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+require_max_alert_severity_or_die() {
+  max_alert_severity="$(printf '%s' "$max_alert_severity" | tr '[:lower:]' '[:upper:]')"
+  if [[ "$max_alert_severity" != "OK" && "$max_alert_severity" != "WARN" && "$max_alert_severity" != "CRITICAL" ]]; then
+    echo "--max-alert-severity must be OK, WARN, or CRITICAL"
+    exit 2
+  fi
+  if [[ "$max_alert_severity" == "CRITICAL" ]]; then
+    echo "prod-pilot-cohort-signoff requires --max-alert-severity no weaker than WARN; use prod-pilot-cohort-check directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
 summary_json=""
 reports_dir=""
 bundle_tar=""
@@ -74,8 +150,8 @@ require_bundle_created="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_BUNDLE_CREATED:-1}"
 require_bundle_manifest="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_BUNDLE_MANIFEST:-1}"
 require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
-incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}"
-incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}"
+incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}"
+incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}"
 show_json="${PROD_PILOT_COHORT_SIGNOFF_SHOW_JSON:-0}"
 
 while [[ $# -gt 0 ]]; do
@@ -289,6 +365,61 @@ if [[ ! -x "$BUNDLE_VERIFY_SCRIPT" ]]; then
 fi
 if [[ ! -x "$COHORT_CHECK_SCRIPT" ]]; then
   echo "missing executable cohort check script: $COHORT_CHECK_SCRIPT"
+  exit 2
+fi
+
+if ! command -v awk >/dev/null 2>&1; then
+  echo "missing required command: awk"
+  exit 2
+fi
+
+bool_or_die "--check-tar-sha256" "$check_tar_sha256"
+bool_or_die "--check-manifest" "$check_manifest"
+bool_or_die "--show-integrity-details" "$show_integrity_details"
+bool_or_die "--require-status-ok" "$require_status_ok"
+bool_or_die "--require-all-rounds-ok" "$require_all_rounds_ok"
+bool_or_die "--require-trend-go" "$require_trend_go"
+bool_or_die "--require-trend-artifact-policy-match" "$require_trend_artifact_policy_match"
+bool_or_die "--require-trend-wg-validate-udp-source" "$require_trend_wg_validate_udp_source"
+bool_or_die "--require-trend-wg-validate-strict-distinct" "$require_trend_wg_validate_strict_distinct"
+bool_or_die "--require-trend-wg-soak-diversity-pass" "$require_trend_wg_soak_diversity_pass"
+bool_or_die "--require-bundle-created" "$require_bundle_created"
+bool_or_die "--require-bundle-manifest" "$require_bundle_manifest"
+bool_or_die "--require-incident-snapshot-on-fail" "$require_incident_snapshot_on_fail"
+bool_or_die "--require-incident-snapshot-artifacts" "$require_incident_snapshot_artifacts"
+bool_or_die "--show-json" "$show_json"
+int_or_die "--max-round-failures" "$max_round_failures"
+int_or_die "--min-trend-wg-soak-selection-lines" "$min_trend_wg_soak_selection_lines"
+int_or_die "--min-trend-wg-soak-entry-operators" "$min_trend_wg_soak_entry_operators"
+int_or_die "--min-trend-wg-soak-exit-operators" "$min_trend_wg_soak_exit_operators"
+int_or_die "--min-trend-wg-soak-cross-operator-pairs" "$min_trend_wg_soak_cross_operator_pairs"
+int_or_die "--incident-snapshot-min-attachment-count" "$incident_snapshot_min_attachment_count"
+if [[ ! "$incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((incident_snapshot_max_skipped_count < -1)); then
+  echo "--incident-snapshot-max-skipped-count must be an integer >= -1"
+  exit 2
+fi
+
+require_one_or_die "--require-status-ok" "$require_status_ok"
+require_one_or_die "--require-all-rounds-ok" "$require_all_rounds_ok"
+require_zero_or_die "--max-round-failures" "$max_round_failures"
+require_one_or_die "--require-trend-go" "$require_trend_go"
+require_one_or_die "--require-trend-artifact-policy-match" "$require_trend_artifact_policy_match"
+require_one_or_die "--require-trend-wg-validate-udp-source" "$require_trend_wg_validate_udp_source"
+require_one_or_die "--require-trend-wg-validate-strict-distinct" "$require_trend_wg_validate_strict_distinct"
+require_one_or_die "--require-trend-wg-soak-diversity-pass" "$require_trend_wg_soak_diversity_pass"
+require_int_floor_or_die "--min-trend-wg-soak-selection-lines" "$min_trend_wg_soak_selection_lines" 12
+require_int_floor_or_die "--min-trend-wg-soak-entry-operators" "$min_trend_wg_soak_entry_operators" 2
+require_int_floor_or_die "--min-trend-wg-soak-exit-operators" "$min_trend_wg_soak_exit_operators" 2
+require_int_floor_or_die "--min-trend-wg-soak-cross-operator-pairs" "$min_trend_wg_soak_cross_operator_pairs" 2
+require_decimal_floor_or_die "--min-go-rate-pct" "$min_go_rate_pct" 95
+require_max_alert_severity_or_die
+require_one_or_die "--require-bundle-created" "$require_bundle_created"
+require_one_or_die "--require-bundle-manifest" "$require_bundle_manifest"
+require_one_or_die "--require-incident-snapshot-on-fail" "$require_incident_snapshot_on_fail"
+require_one_or_die "--require-incident-snapshot-artifacts" "$require_incident_snapshot_artifacts"
+require_int_floor_or_die "--incident-snapshot-min-attachment-count" "$incident_snapshot_min_attachment_count" 1
+if [[ "$incident_snapshot_max_skipped_count" != "0" ]]; then
+  echo "prod-pilot-cohort-signoff requires --incident-snapshot-max-skipped-count 0; use prod-pilot-cohort-check directly for diagnostic policy bypasses."
   exit 2
 fi
 

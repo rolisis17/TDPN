@@ -67,6 +67,21 @@ trim_url() {
   echo "$value"
 }
 
+redact_sensitive_stream() {
+  sed -E '
+s/(--(subject|anon-cred|campaign-subject|campaign-anon-cred|invite-key|key|token|auth-token|admin-token|authorization|bearer|password|secret|api-key)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g
+s/((SUBJECT|ANON_CRED|INVITE_KEY|TOKEN|AUTH_TOKEN|ADMIN_TOKEN|AUTHORIZATION|BEARER|PASSWORD|SECRET|API_KEY)=)[^[:space:]]+/\1[redacted]/g
+s/((Authorization|X-Admin-Token):[[:space:]]*(Bearer[[:space:]]*)?)[^[:space:]]+/\1[redacted]/Ig
+s~([A-Za-z][A-Za-z0-9+.-]*://)[^/?#@[:space:]]+@~\1[redacted]@~g
+s~([?&#](subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|auth_token|admin_token|authorization|bearer|password|secret)=)[^,&#[:space:]]+~\1[redacted]~Ig
+s/inv-[A-Za-z0-9._:-]+/[redacted-invite]/g
+'
+}
+
+redact_sensitive_text() {
+  printf '%s' "${1:-}" | redact_sensitive_stream
+}
+
 url_scheme_from_url() {
   local value="$1"
   if [[ "$value" == https://* ]]; then
@@ -205,18 +220,20 @@ wait_http_ok() {
   local url="$1"
   local name="$2"
   local attempts="$3"
+  local safe_url
+  safe_url="$(redact_sensitive_text "$url")"
   local i
   for ((i = 1; i <= attempts; i++)); do
     if curl -fsS --connect-timeout 2 --max-time 5 "$url" >/dev/null 2>&1; then
-      echo "[health] $name ok ($url)"
+      echo "[health] $name ok ($safe_url)"
       return 0
     fi
     if ((i == 1 || i % 5 == 0)); then
-      echo "[health] waiting for $name ($url) attempt=$i/$attempts"
+      echo "[health] waiting for $name ($safe_url) attempt=$i/$attempts"
     fi
     sleep 1
   done
-  echo "$name did not become healthy at $url"
+  echo "$name did not become healthy at $safe_url"
   return 1
 }
 
@@ -507,7 +524,7 @@ if [[ -z "$report_file" ]]; then
   report_file="$(default_log_dir)/privacynode_3machine_prod_wg_validate_$(date +%Y%m%d_%H%M%S).log"
 fi
 mkdir -p "$(dirname "$report_file")"
-exec > >(tee -a "$report_file") 2>&1
+exec > >(redact_sensitive_stream | tee -a "$report_file") 2>&1
 
 echo "[3machine-prod-wg] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[3machine-prod-wg] report: $report_file"
@@ -540,7 +557,8 @@ fail_step() {
   local step="$1"
   shift
   validate_failed_step="$step"
-  echo "$*"
+  redact_sensitive_text "$*"
+  echo
   exit 1
 }
 
@@ -574,6 +592,14 @@ write_summary_once() {
   if [[ "$delta_total" -lt 0 ]]; then
     delta_total=0
   fi
+  local directory_a_redacted directory_b_redacted issuer_url_redacted entry_url_redacted exit_url_redacted exit_a_url_redacted exit_b_url_redacted
+  directory_a_redacted="$(redact_sensitive_text "$directory_a")"
+  directory_b_redacted="$(redact_sensitive_text "$directory_b")"
+  issuer_url_redacted="$(redact_sensitive_text "$issuer_url")"
+  entry_url_redacted="$(redact_sensitive_text "$entry_url")"
+  exit_url_redacted="$(redact_sensitive_text "$exit_url")"
+  exit_a_url_redacted="$(redact_sensitive_text "$exit_a_url")"
+  exit_b_url_redacted="$(redact_sensitive_text "$exit_b_url")"
 
   {
     echo "{"
@@ -584,13 +610,13 @@ write_summary_once() {
     echo "  \"report_file\": \"$(json_escape "$report_file")\","
     echo "  \"summary_json\": \"$(json_escape "$summary_json")\","
     echo "  \"client_log\": \"$(json_escape "$client_log")\","
-    echo "  \"directory_a\": \"$(json_escape "$directory_a")\","
-    echo "  \"directory_b\": \"$(json_escape "$directory_b")\","
-    echo "  \"issuer_url\": \"$(json_escape "$issuer_url")\","
-    echo "  \"entry_url\": \"$(json_escape "$entry_url")\","
-    echo "  \"exit_url\": \"$(json_escape "$exit_url")\","
-    echo "  \"exit_a_url\": \"$(json_escape "$exit_a_url")\","
-    echo "  \"exit_b_url\": \"$(json_escape "$exit_b_url")\","
+    echo "  \"directory_a\": \"$(json_escape "$directory_a_redacted")\","
+    echo "  \"directory_b\": \"$(json_escape "$directory_b_redacted")\","
+    echo "  \"issuer_url\": \"$(json_escape "$issuer_url_redacted")\","
+    echo "  \"entry_url\": \"$(json_escape "$entry_url_redacted")\","
+    echo "  \"exit_url\": \"$(json_escape "$exit_url_redacted")\","
+    echo "  \"exit_a_url\": \"$(json_escape "$exit_a_url_redacted")\","
+    echo "  \"exit_b_url\": \"$(json_escape "$exit_b_url_redacted")\","
     echo "  \"strict_distinct\": $strict_distinct,"
     echo "  \"client_inner_source\": \"$(json_escape "$client_inner_source")\","
     echo "  \"allow_synthetic_ingress\": $allow_synthetic_ingress,"

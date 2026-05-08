@@ -56,6 +56,8 @@ run_scenario() {
     "ISSUER_ANON_REVOCATIONS_FILE=$tmp_dir/issuer_anon_revocations.json"
     "ENTRY_ADDR=127.0.0.1:${entry_port}"
     "EXIT_ADDR=127.0.0.1:${exit_port}"
+    "ENTRY_RELAY_ID=entry-local-1"
+    "EXIT_RELAY_ID=exit-local-1"
     "ENTRY_DATA_ADDR=127.0.0.1:${entry_data_port}"
     "EXIT_DATA_ADDR=127.0.0.1:${exit_data_port}"
     "ENTRY_ENDPOINT=127.0.0.1:${entry_data_port}"

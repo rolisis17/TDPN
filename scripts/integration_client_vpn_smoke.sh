@@ -46,6 +46,9 @@ case "$cmd" in
     if [[ "$status" != "OK" ]]; then
       findings_total=1
     fi
+    if [[ "${FAKE_RUNTIME_SECRET_OUTPUT:-0}" == "1" ]]; then
+      echo "runtime helper args --auth-token secret-auth-123 AUTH_TOKEN=secret-env-456 Authorization: Bearer secret-bearer-789 X-Admin-Token: secret-admin-000 inv-runtime-secret"
+    fi
     echo "[runtime-doctor] status=$status findings=$findings_total warnings=$findings_total failures=0"
     echo "[runtime-doctor] summary_json_payload:"
     cat <<EOF_DOCTOR
@@ -347,6 +350,7 @@ assert_up_failure_diagnostics_case() {
   local failure_message="$2"
   local expected_hint_id="$3"
   local expected_next_command_substring="$4"
+  local bootstrap_directory="${5:-http://198.51.100.10:8081}"
   local log_path="$TMP_DIR/integration_client_vpn_smoke_${case_id}.log"
   local summary_path="$TMP_DIR/integration_client_vpn_smoke_${case_id}_summary.json"
 
@@ -357,7 +361,7 @@ assert_up_failure_diagnostics_case() {
     FAKE_VPN_SMOKE_UP_FAILURE_MESSAGE="$failure_message" \
     CLIENT_VPN_SMOKE_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
     ./scripts/client_vpn_smoke.sh \
-      --bootstrap-directory http://198.51.100.10:8081 \
+      --bootstrap-directory "$bootstrap_directory" \
       --subject "inv-${case_id}" \
       --interface "wgvpn-${case_id}" \
       --print-summary-json 1 >"$log_path" 2>&1; then
@@ -395,6 +399,12 @@ assert_up_failure_diagnostics_case() {
       and (.diagnostics.up_failure.matched_pattern | length) > 0
     ' "$summary_path" >/dev/null 2>&1; then
     echo "up failure summary json missing expected diagnostics for case '$case_id'"
+    cat "$summary_path"
+    exit 1
+  fi
+  if jq -r '.diagnostics.up_failure.next_suggested_command // ""' "$summary_path" |
+    rg -q 'user-secret|pass-secret|url-user-only-secret|url-token-secret|url-auth-secret|url-admin-secret|url-bearer-secret|url-fragment-secret'; then
+    echo "up failure next_suggested_command leaked URL credentials for case '$case_id'"
     cat "$summary_path"
     exit 1
   fi
@@ -533,6 +543,48 @@ fi
 if ! rg -q 'runtime_doctor_before' "$CAPTURE"; then
   echo "expected receipt artifacts to include runtime doctor evidence"
   cat "$CAPTURE"
+  exit 1
+fi
+
+echo "[client-vpn-smoke] command placeholders survive redaction"
+: >"$CAPTURE"
+printf '1\n' >"$runtime_doctor_count"
+PLACEHOLDER_SUMMARY_JSON="$TMP_DIR/client_vpn_smoke_placeholder_summary.json"
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_CURL_CAPTURE_FILE="$CURL_CAPTURE" \
+FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+CLIENT_VPN_SMOKE_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+CLIENT_VPN_SMOKE_CURL_BIN="$TMP_BIN/curl" \
+./scripts/client_vpn_smoke.sh \
+  --bootstrap-directory http://198.51.100.10:8081 \
+  --subject INVITE_KEY \
+  --anon-cred ANON_CRED \
+  --interface wgvpn-placeholder \
+  --record-result 0 \
+  --manual-validation-report 0 \
+  --incident-snapshot-on-fail 0 \
+  --summary-json "$PLACEHOLDER_SUMMARY_JSON" \
+  --print-summary-json 0 >/tmp/integration_client_vpn_smoke_placeholder.log 2>&1
+
+PLACEHOLDER_SUMMARY_LOG="$(jq -r '.artifacts.summary_log // ""' "$PLACEHOLDER_SUMMARY_JSON")"
+if [[ -z "$PLACEHOLDER_SUMMARY_LOG" || ! -f "$PLACEHOLDER_SUMMARY_LOG" ]]; then
+  echo "expected placeholder summary log artifact missing"
+  cat "$PLACEHOLDER_SUMMARY_JSON"
+  exit 1
+fi
+if ! rg -q -- '--subject INVITE_KEY' "$PLACEHOLDER_SUMMARY_LOG"; then
+  echo "client-vpn-smoke summary log did not preserve subject placeholder"
+  cat "$PLACEHOLDER_SUMMARY_LOG"
+  exit 1
+fi
+if ! rg -q -- '--anon-cred ANON_CRED' "$PLACEHOLDER_SUMMARY_LOG"; then
+  echo "client-vpn-smoke summary log did not preserve anon credential placeholder"
+  cat "$PLACEHOLDER_SUMMARY_LOG"
+  exit 1
+fi
+if rg -q -- '--subject \[redacted\]|--anon-cred \[redacted\]' "$PLACEHOLDER_SUMMARY_LOG"; then
+  echo "client-vpn-smoke summary log redacted safe placeholders"
+  cat "$PLACEHOLDER_SUMMARY_LOG"
   exit 1
 fi
 
@@ -765,6 +817,63 @@ if ! rg -q 'incident_snapshot' "$CAPTURE"; then
   exit 1
 fi
 
+echo "[client-vpn-smoke] failure log redacts auth material"
+: >"$CAPTURE"
+printf '1\n' >"$runtime_doctor_count"
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+CLIENT_VPN_SMOKE_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+FAKE_RUNTIME_SECRET_OUTPUT=1 \
+FAKE_VPN_SMOKE_UP_FAILURE_MESSAGE="client-vpn up failed --auth-token secret-auth-123 AUTH_TOKEN=secret-env-456 Authorization: Bearer secret-bearer-789 X-Admin-Token: secret-admin-000 inv-secret-leak" \
+./scripts/client_vpn_smoke.sh \
+  --bootstrap-directory http://198.51.100.10:8081 \
+  --subject inv-redact-secret \
+  --interface wgvpn16 \
+  --print-summary-json 1 >/tmp/integration_client_vpn_smoke_redaction.log 2>&1 && {
+    echo "expected redaction failure probe to return non-zero"
+    cat /tmp/integration_client_vpn_smoke_redaction.log
+    exit 1
+  }
+
+redaction_summary_json="$(sed -n 's/^summary_json: //p' /tmp/integration_client_vpn_smoke_redaction.log | tail -n 1)"
+if [[ -z "$redaction_summary_json" || ! -f "$redaction_summary_json" ]]; then
+  echo "expected redaction summary json file missing"
+  cat /tmp/integration_client_vpn_smoke_redaction.log
+  exit 1
+fi
+redaction_summary_log="$(jq -r '.artifacts.summary_log // ""' "$redaction_summary_json")"
+if [[ -z "$redaction_summary_log" || ! -f "$redaction_summary_log" ]]; then
+  echo "expected redaction summary log artifact missing"
+  cat "$redaction_summary_json"
+  exit 1
+fi
+if rg -q 'secret-auth-123|secret-env-456|secret-bearer-789|secret-admin-000|inv-redact-secret|inv-secret-leak' "$redaction_summary_log"; then
+  echo "client-vpn-smoke summary log leaked sensitive material"
+  cat "$redaction_summary_log"
+  exit 1
+fi
+if ! rg -q '\[redacted\]|\[redacted-invite\]' "$redaction_summary_log"; then
+  echo "client-vpn-smoke summary log did not include expected redaction markers"
+  cat "$redaction_summary_log"
+  exit 1
+fi
+redaction_runtime_log="$(jq -r '.runtime_gate.artifacts.doctor_before_log // ""' "$redaction_summary_json")"
+if [[ -z "$redaction_runtime_log" || ! -f "$redaction_runtime_log" ]]; then
+  echo "expected client-vpn-smoke runtime doctor artifact missing"
+  cat "$redaction_summary_json"
+  exit 1
+fi
+if rg -q 'secret-auth-123|secret-env-456|secret-bearer-789|secret-admin-000|inv-runtime-secret|inv-secret-leak' "$redaction_runtime_log"; then
+  echo "client-vpn-smoke runtime doctor artifact leaked sensitive material"
+  cat "$redaction_runtime_log"
+  exit 1
+fi
+if ! rg -q '\[redacted\]|\[redacted-invite\]' "$redaction_runtime_log"; then
+  echo "client-vpn-smoke runtime doctor artifact did not include expected redaction markers"
+  cat "$redaction_runtime_log"
+  exit 1
+fi
+
 echo "[client-vpn-smoke] up failure diagnostics: control-plane timeout"
 assert_up_failure_diagnostics_case "control_plane_timeout" \
   "client-vpn up failed: did not receive wg-session config within 30s" \
@@ -781,7 +890,8 @@ echo "[client-vpn-smoke] up failure diagnostics: trust mismatch"
 assert_up_failure_diagnostics_case "trust_mismatch" \
   "client bootstrap failed: directory quorum not met: success=0 required=1: directory key is not trusted" \
   "trust_mismatch" \
-  "client-vpn-trust-reset"
+  "client-vpn-trust-reset" \
+  "http://url-user-only-secret@198.51.100.10:8081?token=url-token-secret&auth_token=url-auth-secret&admin_token=url-admin-secret&bearer=url-bearer-secret#access_token=url-fragment-secret"
 
 echo "[client-vpn-smoke] up failure diagnostics: auth/invite issue"
 assert_up_failure_diagnostics_case "auth_invite_issue" \

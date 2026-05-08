@@ -502,6 +502,7 @@ func TestCloseSessionPassesWireGuardCleanupMetadata(t *testing.T) {
 		transport:      "wireguard-udp",
 		exitInnerPub:   "exit-public-key",
 		clientInnerIP:  "10.44.0.2/32",
+		wgEndpoint:     "203.0.113.10:51820",
 		wgAllowedIPs:   "0.0.0.0/0,::/0",
 		wgInstallRoute: true,
 	})
@@ -526,6 +527,9 @@ func TestCloseSessionPassesWireGuardCleanupMetadata(t *testing.T) {
 	}
 	if got.ClientInnerIP != "10.44.0.2/32" {
 		t.Fatalf("ClientInnerIP=%q want=10.44.0.2/32", got.ClientInnerIP)
+	}
+	if got.Endpoint != "203.0.113.10:51820" {
+		t.Fatalf("Endpoint=%q want=203.0.113.10:51820", got.Endpoint)
 	}
 	if got.AllowedIPs != "0.0.0.0/0,::/0" {
 		t.Fatalf("AllowedIPs=%q want=0.0.0.0/0,::/0", got.AllowedIPs)

@@ -202,8 +202,8 @@ require_bundle_created="${PROD_PILOT_COHORT_CHECK_REQUIRE_BUNDLE_CREATED:-1}"
 require_bundle_manifest="${PROD_PILOT_COHORT_CHECK_REQUIRE_BUNDLE_MANIFEST:-1}"
 require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL:-1}"
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
-incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}"
-incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}"
+incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}"
+incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}"
 show_json="${PROD_PILOT_COHORT_CHECK_SHOW_JSON:-0}"
 
 while [[ $# -gt 0 ]]; do
@@ -516,13 +516,18 @@ incident_latest_attachment_manifest=""
 incident_latest_attachment_skipped=""
 incident_latest_attachment_count="0"
 incident_latest_attachment_skipped_count="0"
-if [[ "$rounds_failed" -gt 0 && ( "$require_incident_snapshot_on_fail" == "1" || "$require_incident_snapshot_artifacts" == "1" || "$incident_snapshot_min_attachment_count" -gt 0 || "$incident_snapshot_max_skipped_count" -ge 0 ) ]]; then
+cohort_failed_for_incident_policy=0
+if [[ "$status" != "ok" || "$final_rc" -ne 0 || "$rounds_failed" -gt 0 ]]; then
+  cohort_failed_for_incident_policy=1
+fi
+
+if [[ "$cohort_failed_for_incident_policy" == "1" && ( "$require_incident_snapshot_on_fail" == "1" || "$require_incident_snapshot_artifacts" == "1" || "$incident_snapshot_min_attachment_count" -gt 0 || "$incident_snapshot_max_skipped_count" -ge 0 ) ]]; then
   mapfile -t run_report_paths < <(json_string_array "$summary_json" '.run_reports')
   if [[ "${#run_report_paths[@]}" -eq 0 ]]; then
     mapfile -t run_report_paths < <(json_string_array "$summary_json" '.artifacts.run_reports')
   fi
   if [[ "${#run_report_paths[@]}" -eq 0 ]]; then
-    errors+=("incident snapshot policy requires run_reports[] in cohort summary when rounds_failed>0")
+    errors+=("incident snapshot policy requires run_reports[] in cohort summary when cohort failed")
   fi
 
   failed_report_paths_found=0
@@ -673,7 +678,7 @@ if [[ "$rounds_failed" -gt 0 && ( "$require_incident_snapshot_on_fail" == "1" ||
   done
 
   if [[ "$failed_report_paths_found" -eq 0 ]]; then
-    errors+=("incident snapshot policy could not find failed run reports while rounds_failed=$rounds_failed")
+    errors+=("incident snapshot policy could not find failed run reports while cohort failed (status=${status:-unset}, final_rc=$final_rc, rounds_failed=$rounds_failed)")
   fi
 fi
 

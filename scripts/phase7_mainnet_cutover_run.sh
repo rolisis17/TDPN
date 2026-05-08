@@ -22,9 +22,11 @@ Purpose:
 Notes:
   - Wrapper-owned flags are reserved; checker pass-through uses --check-...
   - Dry-run still runs the checker.
-  - When checker pass-through omits --phase6-contracts-summary-json, this
-    wrapper forwards .easy-node-logs/phase6_cosmos_l1_contracts_summary.json
-    when present.
+  - When checker pass-through omits summary paths, this wrapper forwards these
+    canonical .easy-node-logs summaries when present:
+      phase6_cosmos_l1_contracts_summary.json
+      blockchain_mainnet_activation_gate_summary.json
+      blockchain_bootstrap_governance_graduation_gate_summary.json
   - Wrapper defaults rollback-path-ready attestation to 1 unless explicitly
     supplied via --check-rollback-path-ready.
   - Dry-run relaxes manual gating requirements to 0 unless explicitly set:
@@ -289,6 +291,16 @@ default_phase6_contracts_summary_json="$ROOT_DIR/.easy-node-logs/phase6_cosmos_l
 if ! array_has_arg "--phase6-contracts-summary-json" "${check_command_args[@]:1}" \
   && [[ -f "$default_phase6_contracts_summary_json" ]]; then
   check_command_args+=(--phase6-contracts-summary-json "$default_phase6_contracts_summary_json")
+fi
+default_mainnet_activation_gate_summary_json="$ROOT_DIR/.easy-node-logs/blockchain_mainnet_activation_gate_summary.json"
+if ! array_has_arg "--mainnet-activation-gate-summary-json" "${check_command_args[@]:1}" \
+  && [[ -f "$default_mainnet_activation_gate_summary_json" ]]; then
+  check_command_args+=(--mainnet-activation-gate-summary-json "$default_mainnet_activation_gate_summary_json")
+fi
+default_bootstrap_governance_graduation_gate_summary_json="$ROOT_DIR/.easy-node-logs/blockchain_bootstrap_governance_graduation_gate_summary.json"
+if ! array_has_arg "--bootstrap-governance-graduation-gate-summary-json" "${check_command_args[@]:1}" \
+  && [[ -f "$default_bootstrap_governance_graduation_gate_summary_json" ]]; then
+  check_command_args+=(--bootstrap-governance-graduation-gate-summary-json "$default_bootstrap_governance_graduation_gate_summary_json")
 fi
 if ! array_has_arg "--rollback-path-ready" "${check_command_args[@]:1}"; then
   check_command_args+=(--rollback-path-ready 1)

@@ -1818,7 +1818,11 @@ func (s *Service) claimGPMProductionConnectReservation(entitlement gpmProduction
 		if reason == "" {
 			reason = "reservation_id is already claimed for production VPN connect"
 		}
-		return http.StatusConflict, map[string]any{
+		statusCode := http.StatusConflict
+		if strings.Contains(strings.ToLower(reason), "saturated") {
+			statusCode = http.StatusServiceUnavailable
+		}
+		return statusCode, map[string]any{
 			"ok":                              false,
 			"error":                           reason,
 			"connect_allowed":                 false,

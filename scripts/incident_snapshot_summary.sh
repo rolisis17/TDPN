@@ -48,6 +48,13 @@ abs_path() {
     printf '%s' ""
     return
   fi
+  if [[ "$path" =~ ^[A-Za-z]:[\\/].* ]]; then
+    if command -v wslpath >/dev/null 2>&1; then
+      path="$(wslpath -u "$path" 2>/dev/null || printf '%s' "$path")"
+    elif command -v cygpath >/dev/null 2>&1; then
+      path="$(cygpath -u "$path" 2>/dev/null || printf '%s' "$path")"
+    fi
+  fi
   if [[ "$path" == /* ]]; then
     printf '%s' "$path"
   else
@@ -94,6 +101,25 @@ json_int() {
     return
   fi
   printf '%s' "$value"
+}
+
+health_probe_ok() {
+  local file="$1"
+  if [[ ! -f "$file" ]]; then
+    return 1
+  fi
+  if rg -qi '^(ok|ready)[[:space:]]*$' "$file"; then
+    return 0
+  fi
+  jq -e '
+    (.ok == true)
+    or ((.status // "" | ascii_downcase) == "ok")
+    or ((.status // "" | ascii_downcase) == "ready")
+  ' "$file" >/dev/null 2>&1
+}
+
+redacted_attachment_source_path() {
+  printf '%s' "[redacted-source-path]"
 }
 
 probe_status() {
@@ -271,9 +297,12 @@ relay_count="$(json_int "$directory_relays_file" '(.relays // []) | length')"
 peer_count="$(json_int "$directory_peers_file" '(.peers // []) | length')"
 issuer_id="$(json_string "$issuer_pubkeys_file" '.issuer')"
 issuer_pubkey_count="$(json_int "$issuer_pubkeys_file" '(.pub_keys // []) | length')"
-directory_health_ok="$(json_string "$directory_health_file" '.ok')"
-entry_health_ok="$(json_string "$entry_health_file" '.ok')"
-exit_health_ok="$(json_string "$exit_health_file" '.ok')"
+directory_health_ok="false"
+entry_health_ok="false"
+exit_health_ok="false"
+if health_probe_ok "$directory_health_file"; then directory_health_ok="true"; fi
+if health_probe_ok "$entry_health_file"; then entry_health_ok="true"; fi
+if health_probe_ok "$exit_health_file"; then exit_health_ok="true"; fi
 accepted_packets="$(json_int "$exit_metrics_file" '.accepted_packets')"
 wg_proxy_created="$(json_int "$exit_metrics_file" '.wg_proxy_created')"
 
@@ -282,7 +311,7 @@ warning_count=0
 
 if [[ "$directory_health_status" != "ok" || "$directory_health_ok" != "true" ]]; then
   critical_count=$((critical_count + 1))
-  add_finding "$tmp_findings" "Directory health probe failed or did not report ok=true."
+  add_finding "$tmp_findings" "Directory health probe failed or did not report healthy status."
 fi
 if [[ "$issuer_pubkeys_status" != "ok" || "$issuer_pubkey_count" -lt 1 ]]; then
   critical_count=$((critical_count + 1))
@@ -290,11 +319,11 @@ if [[ "$issuer_pubkeys_status" != "ok" || "$issuer_pubkey_count" -lt 1 ]]; then
 fi
 if [[ "$entry_health_status" != "ok" || "$entry_health_ok" != "true" ]]; then
   critical_count=$((critical_count + 1))
-  add_finding "$tmp_findings" "Entry health probe failed or did not report ok=true."
+  add_finding "$tmp_findings" "Entry health probe failed or did not report healthy status."
 fi
 if [[ "$exit_health_status" != "ok" || "$exit_health_ok" != "true" ]]; then
   critical_count=$((critical_count + 1))
-  add_finding "$tmp_findings" "Exit health probe failed or did not report ok=true."
+  add_finding "$tmp_findings" "Exit health probe failed or did not report healthy status."
 fi
 
 if [[ "$directory_relays_status" != "ok" || "$relay_count" -lt 1 ]]; then
@@ -380,12 +409,13 @@ attachments_status="none"
 if [[ -f "$attachments_manifest_file" ]]; then
   while IFS=$'\t' read -r stored_path attachment_type source_path; do
     [[ -n "${stored_path:-}" && -n "${attachment_type:-}" && -n "${source_path:-}" ]] || continue
+    redacted_source_path="$(redacted_attachment_source_path "$source_path")"
     attachments_json="$(
       jq -c \
         --arg stored_path "$stored_path" \
         --arg type "$attachment_type" \
-        --arg source_path "$source_path" \
-        '. + [{stored_path: $stored_path, type: $type, source_path: $source_path}]' \
+        --arg source_path "$redacted_source_path" \
+        '. + [{stored_path: $stored_path, type: $type, source_path: $source_path, source_path_redacted: true}]' \
         <<<"$attachments_json"
     )"
   done <"$attachments_manifest_file"
@@ -394,11 +424,12 @@ fi
 if [[ -f "$attachments_skipped_file" ]]; then
   while IFS=$'\t' read -r source_path reason; do
     [[ -n "${source_path:-}" && -n "${reason:-}" ]] || continue
+    redacted_source_path="$(redacted_attachment_source_path "$source_path")"
     attachments_skipped_json="$(
       jq -c \
-        --arg source_path "$source_path" \
+        --arg source_path "$redacted_source_path" \
         --arg reason "$reason" \
-        '. + [{source_path: $source_path, reason: $reason}]' \
+        '. + [{source_path: $source_path, reason: $reason, source_path_redacted: true}]' \
         <<<"$attachments_skipped_json"
     )"
   done <"$attachments_skipped_file"
@@ -558,7 +589,7 @@ jq -n \
     echo "| --- | --- | --- |"
     while IFS=$'\t' read -r stored_path attachment_type source_path; do
       [[ -n "${stored_path:-}" && -n "${attachment_type:-}" && -n "${source_path:-}" ]] || continue
-      echo "| \`${stored_path}\` | \`${attachment_type}\` | \`${source_path}\` |"
+      echo "| \`${stored_path}\` | \`${attachment_type}\` | \`$(redacted_attachment_source_path "$source_path")\` |"
     done <"$attachments_manifest_file"
   fi
   if ((attachment_skipped_count > 0)); then
@@ -567,7 +598,7 @@ jq -n \
     echo "| --- | --- |"
     while IFS=$'\t' read -r source_path reason; do
       [[ -n "${source_path:-}" && -n "${reason:-}" ]] || continue
-      echo "| \`${source_path}\` | \`${reason}\` |"
+      echo "| \`$(redacted_attachment_source_path "$source_path")\` | \`${reason}\` |"
     done <"$attachments_skipped_file"
   fi
   echo

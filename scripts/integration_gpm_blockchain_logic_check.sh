@@ -127,6 +127,7 @@ declare -a REQUIRED_DEFAULT_IDS=(
   "settlement_tests"
   "chain_rewards_billing_slashing_tests"
   "chain_bridge_app_tests"
+  "integration_gpm_admin_settlement_live_evidence"
   "integration_blockchain_cosmos_only_guardrail"
 )
 for required_default in "${REQUIRED_DEFAULT_IDS[@]}"; do

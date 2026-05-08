@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq rg tar; do
+for cmd in bash jq rg tar cp; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -12,8 +12,12 @@ for cmd in bash jq rg tar; do
 done
 
 TMP_DIR="$(mktemp -d)"
+WIN_PATH_DIR=""
 cleanup() {
   rm -rf "$TMP_DIR"
+  if [[ -n "$WIN_PATH_DIR" && "$WIN_PATH_DIR" == "$ROOT_DIR/.easy-node-logs/incident_summary_windows_path_test_"* ]]; then
+    rm -rf "$WIN_PATH_DIR"
+  fi
 }
 trap cleanup EXIT
 
@@ -42,13 +46,13 @@ cat >"$BUNDLE_DIR/endpoints/directory_peers.json" <<'EOF_PEERS'
 {"peers":[{"url":"http://peer-a:8081"},{"url":"http://peer-b:8081"}]}
 EOF_PEERS
 cat >"$BUNDLE_DIR/endpoints/directory_health.json" <<'EOF_DIR_HEALTH'
-{"ok":true}
+{"status":"ok"}
 EOF_DIR_HEALTH
 cat >"$BUNDLE_DIR/endpoints/issuer_pubkeys.json" <<'EOF_PUBKEYS'
 {"issuer":"issuer-a","pub_keys":["k1","k2"]}
 EOF_PUBKEYS
 cat >"$BUNDLE_DIR/endpoints/entry_health.json" <<'EOF_ENTRY_HEALTH'
-{"ok":true}
+ok
 EOF_ENTRY_HEALTH
 cat >"$BUNDLE_DIR/endpoints/exit_health.json" <<'EOF_EXIT_HEALTH'
 {"ok":true}
@@ -82,9 +86,14 @@ REPORT_MD="$TMP_DIR/incident_report.md"
   --print-report 0 \
   --print-summary-json 0 >/tmp/integration_incident_snapshot_summary_ok.log 2>&1
 
-if ! jq -e '.status == "ok" and .critical_count == 0 and .warning_count == 0 and .endpoints.directory_relays.relay_count == 2 and .endpoints.exit_metrics.accepted_packets == 9 and .attachments.count == 2 and .attachments.skipped_count == 0' "$SUMMARY_JSON" >/dev/null; then
+if ! jq -e '.status == "ok" and .critical_count == 0 and .warning_count == 0 and .endpoints.directory_relays.relay_count == 2 and .endpoints.exit_metrics.accepted_packets == 9 and .attachments.count == 2 and .attachments.skipped_count == 0 and (.attachments.items | all(.source_path == "[redacted-source-path]" and .source_path_redacted == true))' "$SUMMARY_JSON" >/dev/null; then
   echo "incident snapshot summary integration failed: healthy bundle summary incorrect"
   cat "$SUMMARY_JSON"
+  exit 1
+fi
+if rg -q '/tmp/runtime_doctor_before' "$REPORT_MD"; then
+  echo "incident snapshot summary integration failed: healthy report leaked attachment source path"
+  cat "$REPORT_MD"
   exit 1
 fi
 if ! rg -q 'Status: `ok`' "$REPORT_MD"; then
@@ -98,6 +107,39 @@ if ! rg -q 'Attached artifacts: `2`' "$REPORT_MD"; then
   exit 1
 fi
 
+if command -v wslpath >/dev/null 2>&1; then
+  WIN_PATH_DIR="$ROOT_DIR/.easy-node-logs/incident_summary_windows_path_test_$$"
+  WIN_BUNDLE_UNIX="$WIN_PATH_DIR/incident_bundle"
+  mkdir -p "$WIN_PATH_DIR"
+  cp -a "$BUNDLE_DIR" "$WIN_BUNDLE_UNIX"
+  cp "${BUNDLE_DIR}.tar.gz" "$WIN_PATH_DIR/incident_bundle.tar.gz"
+  cp "${BUNDLE_DIR}.tar.gz.sha256" "$WIN_PATH_DIR/incident_bundle.tar.gz.sha256"
+  WIN_BUNDLE_DIR="$(wslpath -w "$WIN_BUNDLE_UNIX")"
+  WIN_SUMMARY_UNIX="$WIN_PATH_DIR/windows_summary.json"
+  WIN_REPORT_UNIX="$WIN_PATH_DIR/windows_report.md"
+  WIN_SUMMARY_JSON="$(wslpath -w "$WIN_SUMMARY_UNIX")"
+  WIN_REPORT_MD="$(wslpath -w "$WIN_REPORT_UNIX")"
+  ./scripts/incident_snapshot_summary.sh \
+    --bundle-dir "$WIN_BUNDLE_DIR" \
+    --summary-json "$WIN_SUMMARY_JSON" \
+    --report-md "$WIN_REPORT_MD" \
+    --print-report 0 \
+    --print-summary-json 0 >/tmp/integration_incident_snapshot_summary_windows_paths.log 2>&1
+
+  if ! jq -e '.status == "ok" and .critical_count == 0' "$WIN_SUMMARY_UNIX" >/dev/null; then
+    echo "incident snapshot summary integration failed: Windows absolute paths were not normalized"
+    cat /tmp/integration_incident_snapshot_summary_windows_paths.log
+    [[ -f "$WIN_SUMMARY_UNIX" ]] && cat "$WIN_SUMMARY_UNIX"
+    exit 1
+  fi
+  if find "$ROOT_DIR" -maxdepth 1 \( -name 'C*windows_summary.json' -o -name 'C*windows_report.md' \) | rg -q .; then
+    echo "incident snapshot summary integration failed: Windows absolute paths created repo-local artifacts"
+    find "$ROOT_DIR" -maxdepth 1 \( -name 'C*windows_summary.json' -o -name 'C*windows_report.md' \)
+    exit 1
+  fi
+  rm -rf "$WIN_PATH_DIR"
+fi
+
 printf 'probe_failed: http://entry-a:8083/v1/health\nconnection refused\n' >"$BUNDLE_DIR/endpoints/entry_health.json"
 printf '/tmp/runtime_fix.json\tmissing\n' >"$BUNDLE_DIR/attachments/skipped.tsv"
 ./scripts/incident_snapshot_summary.sh \
@@ -107,12 +149,17 @@ printf '/tmp/runtime_fix.json\tmissing\n' >"$BUNDLE_DIR/attachments/skipped.tsv"
   --print-report 0 \
   --print-summary-json 0 >/tmp/integration_incident_snapshot_summary_fail.log 2>&1
 
-if ! jq -e '.status == "fail" and .critical_count >= 1 and .attachments.skipped_count == 1 and (.findings | any(. == "Entry health probe failed or did not report ok=true.")) and (.findings | any(. == "One or more requested attached artifacts were missing or could not be copied into the incident bundle."))' "$SUMMARY_JSON" >/dev/null; then
+if ! jq -e '.status == "fail" and .critical_count >= 1 and .attachments.skipped_count == 1 and (.attachments.skipped | all(.source_path == "[redacted-source-path]" and .source_path_redacted == true)) and (.findings | any(. == "Entry health probe failed or did not report healthy status.")) and (.findings | any(. == "One or more requested attached artifacts were missing or could not be copied into the incident bundle."))' "$SUMMARY_JSON" >/dev/null; then
   echo "incident snapshot summary integration failed: failing bundle summary incorrect"
   cat "$SUMMARY_JSON"
   exit 1
 fi
-if ! rg -q 'Entry health probe failed or did not report ok=true' "$REPORT_MD"; then
+if rg -q '/tmp/runtime_fix.json' "$REPORT_MD"; then
+  echo "incident snapshot summary integration failed: failing report leaked skipped attachment source path"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! rg -q 'Entry health probe failed or did not report healthy status' "$REPORT_MD"; then
   echo "incident snapshot summary integration failed: failing report missing entry finding"
   cat "$REPORT_MD"
   exit 1

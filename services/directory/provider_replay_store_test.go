@@ -28,6 +28,45 @@ func TestProviderTokenProofReplayPersistsAcrossReload(t *testing.T) {
 	}
 }
 
+func TestProviderTokenProofReplayRedisKeyEncodesDelimitedComponents(t *testing.T) {
+	s := &Service{providerTokenProofRedisPrefix: "test-prefix:"}
+	keyA := s.providerTokenProofReplayRedisKey("provider-token", "nonce:with-delimiter")
+	keyB := s.providerTokenProofReplayRedisKey("provider-token:nonce", "with-delimiter")
+	if keyA == keyB {
+		t.Fatalf("redis replay keys collided: %q", keyA)
+	}
+	if strings.Contains(keyA, "nonce:with-delimiter") || strings.Contains(keyB, "provider-token:nonce") {
+		t.Fatalf("redis replay key did not encode delimiter-bearing components: keyA=%q keyB=%q", keyA, keyB)
+	}
+}
+
+func TestProviderTokenProofReplaySeenKeyEncodesDelimitedComponents(t *testing.T) {
+	now := time.Now()
+	seen := make(map[string]time.Time)
+	if err := providerTokenProofReplaySeenMapMarkAndCheck(seen, "provider-token", "nonce:with-delimiter", now); err != nil {
+		t.Fatalf("mark first delimiter nonce: %v", err)
+	}
+	if err := providerTokenProofReplaySeenMapMarkAndCheck(seen, "provider-token:nonce", "with-delimiter", now); err != nil {
+		t.Fatalf("delimiter-bearing components should not collide: %v", err)
+	}
+
+	rawCollisionKey := providerTokenProofReplayLegacySeenKey("provider-token", "nonce:with-delimiter")
+	if _, ok := seen[rawCollisionKey]; ok {
+		t.Fatalf("seen map should store delimiter-safe keys, found raw collision key %q", rawCollisionKey)
+	}
+}
+
+func TestProviderTokenProofReplaySeenKeyRejectsLegacyReplayKey(t *testing.T) {
+	now := time.Now()
+	seen := map[string]time.Time{
+		providerTokenProofReplayLegacySeenKey("provider-token-legacy", "nonce-legacy"): now,
+	}
+	err := providerTokenProofReplaySeenMapMarkAndCheck(seen, "provider-token-legacy", "nonce-legacy", now.Add(time.Second))
+	if err == nil || !strings.Contains(err.Error(), "replayed") {
+		t.Fatalf("expected legacy replay key rejection, got %v", err)
+	}
+}
+
 func TestLoadProviderTokenProofReplayStorePrunesExpiredEntries(t *testing.T) {
 	now := time.Now()
 	storePath := filepath.Join(t.TempDir(), "provider_replay_store.json")
@@ -51,7 +90,7 @@ func TestLoadProviderTokenProofReplayStorePrunesExpiredEntries(t *testing.T) {
 	if got := len(loaded.providerTokenProofSeen); got != 1 {
 		t.Fatalf("expected only non-expired replay entry retained, got %d", got)
 	}
-	if _, ok := loaded.providerTokenProofSeen["provider-token-2:nonce-new"]; !ok {
+	if _, ok := loaded.providerTokenProofSeen[providerTokenProofReplaySeenKey("provider-token-2", "nonce-new")]; !ok {
 		t.Fatalf("expected newest replay entry retained")
 	}
 }

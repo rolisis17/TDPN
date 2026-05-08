@@ -69,16 +69,16 @@ FAKE_SIGNOFF_RC=0 \
   --max-round-failures 2 \
   --bundle-outputs 0 \
   --bundle-fail-close 0 \
-  --signoff-require-trend-artifact-policy-match 0 \
-  --signoff-require-trend-wg-validate-udp-source 0 \
-  --signoff-require-trend-wg-validate-strict-distinct 0 \
-  --signoff-require-trend-wg-soak-diversity-pass 0 \
-  --signoff-min-trend-wg-soak-selection-lines 7 \
-  --signoff-min-trend-wg-soak-entry-operators 1 \
-  --signoff-min-trend-wg-soak-exit-operators 1 \
-  --signoff-min-trend-wg-soak-cross-operator-pairs 1 \
-  --signoff-require-incident-snapshot-on-fail 0 \
-  --signoff-require-incident-snapshot-artifacts 0 \
+  --signoff-require-trend-artifact-policy-match 1 \
+  --signoff-require-trend-wg-validate-udp-source 1 \
+  --signoff-require-trend-wg-validate-strict-distinct 1 \
+  --signoff-require-trend-wg-soak-diversity-pass 1 \
+  --signoff-min-trend-wg-soak-selection-lines 12 \
+  --signoff-min-trend-wg-soak-entry-operators 2 \
+  --signoff-min-trend-wg-soak-exit-operators 2 \
+  --signoff-min-trend-wg-soak-cross-operator-pairs 2 \
+  --signoff-require-incident-snapshot-on-fail 1 \
+  --signoff-require-incident-snapshot-artifacts 1 \
   --signoff-incident-snapshot-min-attachment-count 2 \
   --signoff-incident-snapshot-max-skipped-count 0 \
   --reports-dir "$SUCCESS_REPORTS" \
@@ -98,53 +98,53 @@ if ! rg -q 'cmd prod-pilot-cohort-signoff' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--require-trend-artifact-policy-match 0' "$CAPTURE"; then
-  echo "quick forwarding missing --require-trend-artifact-policy-match 0"
+if ! rg -q -- '--require-trend-artifact-policy-match 1' "$CAPTURE"; then
+  echo "quick forwarding missing --require-trend-artifact-policy-match 1"
   cat "$CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--require-trend-wg-validate-udp-source 0' "$CAPTURE"; then
-  echo "quick forwarding missing --require-trend-wg-validate-udp-source 0"
+if ! rg -q -- '--require-trend-wg-validate-udp-source 1' "$CAPTURE"; then
+  echo "quick forwarding missing --require-trend-wg-validate-udp-source 1"
   cat "$CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--require-trend-wg-validate-strict-distinct 0' "$CAPTURE"; then
-  echo "quick forwarding missing --require-trend-wg-validate-strict-distinct 0"
+if ! rg -q -- '--require-trend-wg-validate-strict-distinct 1' "$CAPTURE"; then
+  echo "quick forwarding missing --require-trend-wg-validate-strict-distinct 1"
   cat "$CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--require-trend-wg-soak-diversity-pass 0' "$CAPTURE"; then
-  echo "quick forwarding missing --require-trend-wg-soak-diversity-pass 0"
+if ! rg -q -- '--require-trend-wg-soak-diversity-pass 1' "$CAPTURE"; then
+  echo "quick forwarding missing --require-trend-wg-soak-diversity-pass 1"
   cat "$CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--min-trend-wg-soak-selection-lines 7' "$CAPTURE"; then
-  echo "quick forwarding missing --min-trend-wg-soak-selection-lines 7"
+if ! rg -q -- '--min-trend-wg-soak-selection-lines 12' "$CAPTURE"; then
+  echo "quick forwarding missing --min-trend-wg-soak-selection-lines 12"
   cat "$CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--min-trend-wg-soak-entry-operators 1' "$CAPTURE"; then
-  echo "quick forwarding missing --min-trend-wg-soak-entry-operators 1"
+if ! rg -q -- '--min-trend-wg-soak-entry-operators 2' "$CAPTURE"; then
+  echo "quick forwarding missing --min-trend-wg-soak-entry-operators 2"
   cat "$CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--min-trend-wg-soak-exit-operators 1' "$CAPTURE"; then
-  echo "quick forwarding missing --min-trend-wg-soak-exit-operators 1"
+if ! rg -q -- '--min-trend-wg-soak-exit-operators 2' "$CAPTURE"; then
+  echo "quick forwarding missing --min-trend-wg-soak-exit-operators 2"
   cat "$CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--min-trend-wg-soak-cross-operator-pairs 1' "$CAPTURE"; then
-  echo "quick forwarding missing --min-trend-wg-soak-cross-operator-pairs 1"
+if ! rg -q -- '--min-trend-wg-soak-cross-operator-pairs 2' "$CAPTURE"; then
+  echo "quick forwarding missing --min-trend-wg-soak-cross-operator-pairs 2"
   cat "$CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--require-incident-snapshot-on-fail 0' "$CAPTURE"; then
-  echo "quick forwarding missing --require-incident-snapshot-on-fail 0"
+if ! rg -q -- '--require-incident-snapshot-on-fail 1' "$CAPTURE"; then
+  echo "quick forwarding missing --require-incident-snapshot-on-fail 1"
   cat "$CAPTURE"
   exit 1
 fi
-if ! rg -q -- '--require-incident-snapshot-artifacts 0' "$CAPTURE"; then
-  echo "quick forwarding missing --require-incident-snapshot-artifacts 0"
+if ! rg -q -- '--require-incident-snapshot-artifacts 1' "$CAPTURE"; then
+  echo "quick forwarding missing --require-incident-snapshot-artifacts 1"
   cat "$CAPTURE"
   exit 1
 fi
@@ -212,7 +212,7 @@ if ! jq -e '.status == "ok" and .runbook.rc == 0 and .signoff.rc == 0' "$SUCCESS
   cat "$SUCCESS_RUN_REPORT"
   exit 1
 fi
-if ! jq -e '.config.signoff_require_trend_artifact_policy_match == false and .config.signoff_require_trend_wg_validate_udp_source == false and .config.signoff_require_trend_wg_validate_strict_distinct == false and .config.signoff_require_trend_wg_soak_diversity_pass == false and .config.signoff_min_trend_wg_soak_selection_lines == 7 and .config.signoff_min_trend_wg_soak_entry_operators == 1 and .config.signoff_min_trend_wg_soak_exit_operators == 1 and .config.signoff_min_trend_wg_soak_cross_operator_pairs == 1 and .config.signoff_require_incident_snapshot_on_fail == false and .config.signoff_require_incident_snapshot_artifacts == false and .config.signoff_incident_snapshot_min_attachment_count == 2 and .config.signoff_incident_snapshot_max_skipped_count == 0' "$SUCCESS_RUN_REPORT" >/dev/null; then
+if ! jq -e '.config.signoff_require_trend_artifact_policy_match == true and .config.signoff_require_trend_wg_validate_udp_source == true and .config.signoff_require_trend_wg_validate_strict_distinct == true and .config.signoff_require_trend_wg_soak_diversity_pass == true and .config.signoff_min_trend_wg_soak_selection_lines == 12 and .config.signoff_min_trend_wg_soak_entry_operators == 2 and .config.signoff_min_trend_wg_soak_exit_operators == 2 and .config.signoff_min_trend_wg_soak_cross_operator_pairs == 2 and .config.signoff_require_incident_snapshot_on_fail == true and .config.signoff_require_incident_snapshot_artifacts == true and .config.signoff_incident_snapshot_min_attachment_count == 2 and .config.signoff_incident_snapshot_max_skipped_count == 0' "$SUCCESS_RUN_REPORT" >/dev/null; then
   echo "unexpected signoff config payload in quick run report"
   cat "$SUCCESS_RUN_REPORT"
   exit 1

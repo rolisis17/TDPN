@@ -2121,6 +2121,11 @@ EOF_STATUS_TIMEOUT
     and .summary.next_action_check_id == "manual_validation_status_timeout"
     and .summary.local_gate.next_check_id == "manual_validation_status_timeout"
     and .summary.roadmap_stage == "BLOCKED_LOCAL"
+    and .summary.closed_beta_readiness.status == "NOT_READY"
+    and .summary.closed_beta_readiness.ready == false
+    and .summary.closed_beta_readiness.stage == "CLOSED_BETA_NOT_READY"
+    and .summary.closed_beta_readiness.blockers == ["manual_validation_status_timeout"]
+    and .summary.closed_beta_ready == false
     and (.summary.profile_default_gate.next_command | contains("--campaign-subject INVITE_KEY"))
     and ((.summary.profile_default_gate.next_command | split("--campaign-subject") | length) == 2)
     and (.summary.profile_default_gate.next_command_sudo | contains("--campaign-subject INVITE_KEY"))

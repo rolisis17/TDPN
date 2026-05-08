@@ -50,6 +50,7 @@ cat >"$RUN_REPORT_JSON" <<EOF_RUN_REPORT
 EOF_RUN_REPORT
 
 echo "[prod-pilot-cohort-quick-check] baseline pass"
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_COHORT_SIGNOFF_POLICY=0 \
 ./scripts/prod_pilot_cohort_quick_check.sh \
   --run-report-json "$RUN_REPORT_JSON" >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_pass.log 2>&1
 if ! rg -q -- "\\[prod-pilot-cohort-quick-check] pre_real_host_readiness_summary_json=$PRE_REAL_HOST_READINESS_SUMMARY_JSON" ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_pass.log; then
@@ -62,6 +63,7 @@ echo "[prod-pilot-cohort-quick-check] detect signoff rc failure"
 BAD_SIGNOFF="$TMP_DIR/bad_signoff.json"
 jq '.signoff.rc=3' "$RUN_REPORT_JSON" >"$BAD_SIGNOFF"
 set +e
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_COHORT_SIGNOFF_POLICY=0 \
 ./scripts/prod_pilot_cohort_quick_check.sh \
   --run-report-json "$BAD_SIGNOFF" >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_signoff.log 2>&1
 bad_signoff_rc=$?
@@ -81,6 +83,7 @@ echo "[prod-pilot-cohort-quick-check] detect numeric signoff attempted=false"
 BAD_SIGNOFF_ATTEMPT="$TMP_DIR/bad_signoff_attempt.json"
 jq '.signoff.attempted=0 | .signoff.rc=0' "$RUN_REPORT_JSON" >"$BAD_SIGNOFF_ATTEMPT"
 set +e
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_COHORT_SIGNOFF_POLICY=0 \
 ./scripts/prod_pilot_cohort_quick_check.sh \
   --run-report-json "$BAD_SIGNOFF_ATTEMPT" >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_signoff_attempt.log 2>&1
 bad_signoff_attempt_rc=$?
@@ -101,6 +104,7 @@ cat >"$SUMMARY_JSON" <<'EOF_SUMMARY_BAD'
 {"status":"fail"}
 EOF_SUMMARY_BAD
 set +e
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_COHORT_SIGNOFF_POLICY=0 \
 ./scripts/prod_pilot_cohort_quick_check.sh \
   --run-report-json "$RUN_REPORT_JSON" >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_bad_summary_status.log 2>&1
 bad_summary_rc=$?
@@ -121,6 +125,7 @@ cat >"$SUMMARY_JSON" <<'EOF_SUMMARY_INVALID'
 {not-json}
 EOF_SUMMARY_INVALID
 set +e
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_COHORT_SIGNOFF_POLICY=0 \
 ./scripts/prod_pilot_cohort_quick_check.sh \
   --run-report-json "$RUN_REPORT_JSON" \
   --require-summary-status-ok 0 \
@@ -139,7 +144,7 @@ if ! rg -q 'summary_json is not valid JSON' ${TMP_DIR}/integration_prod_pilot_co
   exit 1
 fi
 
-echo "[prod-pilot-cohort-quick-check] strict cohort signoff policy hook"
+echo "[prod-pilot-cohort-quick-check] default strict cohort signoff policy hook"
 cat >"$SUMMARY_JSON" <<'EOF_SUMMARY_OK'
 {"status":"ok"}
 EOF_SUMMARY_OK
@@ -157,7 +162,6 @@ COHORT_POLICY_CAPTURE_FILE="$COHORT_POLICY_CAPTURE" \
 PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_COHORT_POLICY" \
 ./scripts/prod_pilot_cohort_quick_check.sh \
   --run-report-json "$RUN_REPORT_JSON" \
-  --require-cohort-signoff-policy 1 \
   --require-trend-artifact-policy-match 0 \
   --require-trend-wg-validate-udp-source 0 \
   --require-trend-wg-validate-strict-distinct 0 \

@@ -10,6 +10,7 @@ internal_app_tests|go test ./internal/app -count=1
 settlement_tests|go test ./pkg/settlement -count=1
 chain_rewards_billing_slashing_tests|cd blockchain/tdpn-chain && go test ./x/vpnrewards/keeper ./x/vpnrewards/module ./x/vpnbilling/keeper ./x/vpnbilling/module ./x/vpnslashing/keeper ./x/vpnslashing/module -count=1
 chain_bridge_app_tests|cd blockchain/tdpn-chain && go test ./cmd/tdpnd ./app -count=1
+integration_gpm_admin_settlement_live_evidence|bash ./scripts/integration_gpm_admin_settlement_live_evidence.sh
 integration_blockchain_cosmos_only_guardrail|bash ./scripts/integration_blockchain_cosmos_only_guardrail.sh
 DEFAULT_CHECKS
 }

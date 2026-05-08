@@ -51,6 +51,143 @@ int_or_die() {
   fi
 }
 
+is_non_negative_decimal() {
+  [[ "${1:-}" =~ ^[0-9]+([.][0-9]+)?$ ]]
+}
+
+float_lt() {
+  awk -v a="$1" -v b="$2" 'BEGIN { exit !((a + 0) < (b + 0)) }'
+}
+
+require_bool_one_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ "$value" != "1" ]]; then
+    echo "prod-pilot-cohort-campaign requires $name 1; use prod-pilot-cohort-quick-runbook directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+require_int_floor_or_die() {
+  local name="$1"
+  local value="$2"
+  local minimum="$3"
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    echo "prod-pilot-cohort-campaign requires $name to be an integer >= $minimum; use prod-pilot-cohort-quick-runbook directly for diagnostic policy bypasses."
+    exit 2
+  fi
+  if ((10#$value < minimum)); then
+    echo "prod-pilot-cohort-campaign requires $name >= $minimum; use prod-pilot-cohort-quick-runbook directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+raise_effective_int_floor_or_die() {
+  local name="$1"
+  local value="$2"
+  local minimum="$3"
+  local effective_var="$4"
+  require_int_floor_or_die "$name" "$value" "$minimum"
+  local -n effective_ref="$effective_var"
+  if ((10#$value > 10#$effective_ref)); then
+    effective_ref="$value"
+  fi
+}
+
+require_exact_zero_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    echo "prod-pilot-cohort-campaign requires $name to be 0; use prod-pilot-cohort-quick-runbook directly for diagnostic policy bypasses."
+    exit 2
+  fi
+  if ((10#$value != 0)); then
+    echo "prod-pilot-cohort-campaign requires $name 0; use prod-pilot-cohort-quick-runbook directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+require_max_skipped_zero_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^-?[0-9]+$ ]]; then
+    echo "prod-pilot-cohort-campaign requires $name to be 0; use prod-pilot-cohort-quick-runbook directly for diagnostic policy bypasses."
+    exit 2
+  fi
+  if [[ "$value" != "0" ]]; then
+    echo "prod-pilot-cohort-campaign requires $name 0; use prod-pilot-cohort-quick-runbook directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+require_decimal_floor_or_die() {
+  local name="$1"
+  local value="$2"
+  local minimum="$3"
+  if ! is_non_negative_decimal "$value"; then
+    echo "prod-pilot-cohort-campaign requires $name to be a decimal >= $minimum; use prod-pilot-cohort-quick-runbook directly for diagnostic policy bypasses."
+    exit 2
+  fi
+  if float_lt "$value" "$minimum"; then
+    echo "prod-pilot-cohort-campaign requires $name >= $minimum; use prod-pilot-cohort-quick-runbook directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+raise_effective_decimal_floor_or_die() {
+  local name="$1"
+  local value="$2"
+  local minimum="$3"
+  local effective_var="$4"
+  require_decimal_floor_or_die "$name" "$value" "$minimum"
+  local -n effective_ref="$effective_var"
+  if float_lt "$effective_ref" "$value"; then
+    effective_ref="$value"
+  fi
+}
+
+severity_rank() {
+  case "$(printf '%s' "${1:-}" | tr '[:lower:]' '[:upper:]')" in
+    OK) echo 0 ;;
+    WARN) echo 1 ;;
+    CRITICAL) echo 2 ;;
+    *)
+      echo -1
+      ;;
+  esac
+}
+
+require_max_alert_severity_or_die() {
+  local name="$1"
+  local value="$2"
+  local rank
+  rank="$(severity_rank "$value")"
+  if [[ "$rank" -lt 0 ]]; then
+    echo "prod-pilot-cohort-campaign requires $name to be OK, WARN, or CRITICAL."
+    exit 2
+  fi
+  if [[ "$rank" -gt 1 ]]; then
+    echo "prod-pilot-cohort-campaign requires $name no weaker than WARN; use prod-pilot-cohort-quick-runbook directly for diagnostic policy bypasses."
+    exit 2
+  fi
+}
+
+raise_effective_max_alert_severity_or_die() {
+  local name="$1"
+  local value="$2"
+  local effective_var="$3"
+  require_max_alert_severity_or_die "$name" "$value"
+  local normalized
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  local rank effective_rank
+  rank="$(severity_rank "$normalized")"
+  local -n effective_ref="$effective_var"
+  effective_rank="$(severity_rank "$effective_ref")"
+  if [[ "$rank" -lt "$effective_rank" ]]; then
+    effective_ref="$normalized"
+  fi
+}
+
 require_distinct_paths_or_die() {
   local left_label="$1"
   local left_path="$2"
@@ -60,6 +197,129 @@ require_distinct_paths_or_die() {
     echo "invalid configuration: $left_label and $right_label resolve to the same path: $left_path"
     exit 2
   fi
+}
+
+reject_campaign_quick_weakening_args_or_die() {
+  local idx=0
+  local arg value
+  while ((idx < ${#quick_args[@]})); do
+    arg="${quick_args[idx]}"
+    case "$arg" in
+      --require-all-rounds-ok|--bundle-outputs|--bundle-fail-close|--pre-real-host-readiness|--signoff-require-cohort-signoff-policy|--signoff-require-trend-artifact-policy-match|--signoff-require-trend-wg-validate-udp-source|--signoff-require-trend-wg-validate-strict-distinct|--signoff-require-trend-wg-soak-diversity-pass|--signoff-require-incident-snapshot-on-fail|--signoff-require-incident-snapshot-artifacts)
+        value="${quick_args[$((idx + 1))]:-}"
+        require_bool_one_or_die "$arg" "$value"
+        idx=$((idx + 2))
+        ;;
+      --require-all-rounds-ok=*|--bundle-outputs=*|--bundle-fail-close=*|--pre-real-host-readiness=*|--signoff-require-cohort-signoff-policy=*|--signoff-require-trend-artifact-policy-match=*|--signoff-require-trend-wg-validate-udp-source=*|--signoff-require-trend-wg-validate-strict-distinct=*|--signoff-require-trend-wg-soak-diversity-pass=*|--signoff-require-incident-snapshot-on-fail=*|--signoff-require-incident-snapshot-artifacts=*)
+        value="${arg#*=}"
+        require_bool_one_or_die "${arg%%=*}" "$value"
+        idx=$((idx + 1))
+        ;;
+      --max-round-failures)
+        value="${quick_args[$((idx + 1))]:-}"
+        require_exact_zero_or_die "$arg" "$value"
+        idx=$((idx + 2))
+        ;;
+      --max-round-failures=*)
+        value="${arg#*=}"
+        require_exact_zero_or_die "${arg%%=*}" "$value"
+        idx=$((idx + 1))
+        ;;
+      --trend-min-go-rate-pct)
+        value="${quick_args[$((idx + 1))]:-}"
+        raise_effective_decimal_floor_or_die "$arg" "$value" 95 effective_trend_min_go_rate_pct
+        idx=$((idx + 2))
+        ;;
+      --trend-min-go-rate-pct=*)
+        value="${arg#*=}"
+        raise_effective_decimal_floor_or_die "${arg%%=*}" "$value" 95 effective_trend_min_go_rate_pct
+        idx=$((idx + 1))
+        ;;
+      --signoff-min-go-rate-pct)
+        value="${quick_args[$((idx + 1))]:-}"
+        raise_effective_decimal_floor_or_die "$arg" "$value" 95 effective_signoff_min_go_rate_pct
+        idx=$((idx + 2))
+        ;;
+      --signoff-min-go-rate-pct=*)
+        value="${arg#*=}"
+        raise_effective_decimal_floor_or_die "${arg%%=*}" "$value" 95 effective_signoff_min_go_rate_pct
+        idx=$((idx + 1))
+        ;;
+      --max-alert-severity)
+        value="${quick_args[$((idx + 1))]:-}"
+        raise_effective_max_alert_severity_or_die "$arg" "$value" effective_max_alert_severity
+        idx=$((idx + 2))
+        ;;
+      --max-alert-severity=*)
+        value="${arg#*=}"
+        raise_effective_max_alert_severity_or_die "${arg%%=*}" "$value" effective_max_alert_severity
+        idx=$((idx + 1))
+        ;;
+      --signoff-min-trend-wg-soak-selection-lines)
+        value="${quick_args[$((idx + 1))]:-}"
+        raise_effective_int_floor_or_die "$arg" "$value" 12 effective_signoff_min_trend_wg_soak_selection_lines
+        idx=$((idx + 2))
+        ;;
+      --signoff-min-trend-wg-soak-selection-lines=*)
+        value="${arg#*=}"
+        raise_effective_int_floor_or_die "${arg%%=*}" "$value" 12 effective_signoff_min_trend_wg_soak_selection_lines
+        idx=$((idx + 1))
+        ;;
+      --signoff-min-trend-wg-soak-entry-operators)
+        value="${quick_args[$((idx + 1))]:-}"
+        raise_effective_int_floor_or_die "$arg" "$value" 2 effective_signoff_min_trend_wg_soak_entry_operators
+        idx=$((idx + 2))
+        ;;
+      --signoff-min-trend-wg-soak-entry-operators=*)
+        value="${arg#*=}"
+        raise_effective_int_floor_or_die "${arg%%=*}" "$value" 2 effective_signoff_min_trend_wg_soak_entry_operators
+        idx=$((idx + 1))
+        ;;
+      --signoff-min-trend-wg-soak-exit-operators)
+        value="${quick_args[$((idx + 1))]:-}"
+        raise_effective_int_floor_or_die "$arg" "$value" 2 effective_signoff_min_trend_wg_soak_exit_operators
+        idx=$((idx + 2))
+        ;;
+      --signoff-min-trend-wg-soak-exit-operators=*)
+        value="${arg#*=}"
+        raise_effective_int_floor_or_die "${arg%%=*}" "$value" 2 effective_signoff_min_trend_wg_soak_exit_operators
+        idx=$((idx + 1))
+        ;;
+      --signoff-min-trend-wg-soak-cross-operator-pairs)
+        value="${quick_args[$((idx + 1))]:-}"
+        raise_effective_int_floor_or_die "$arg" "$value" 2 effective_signoff_min_trend_wg_soak_cross_operator_pairs
+        idx=$((idx + 2))
+        ;;
+      --signoff-min-trend-wg-soak-cross-operator-pairs=*)
+        value="${arg#*=}"
+        raise_effective_int_floor_or_die "${arg%%=*}" "$value" 2 effective_signoff_min_trend_wg_soak_cross_operator_pairs
+        idx=$((idx + 1))
+        ;;
+      --signoff-incident-snapshot-min-attachment-count)
+        value="${quick_args[$((idx + 1))]:-}"
+        raise_effective_int_floor_or_die "$arg" "$value" 1 effective_signoff_incident_snapshot_min_attachment_count
+        idx=$((idx + 2))
+        ;;
+      --signoff-incident-snapshot-min-attachment-count=*)
+        value="${arg#*=}"
+        raise_effective_int_floor_or_die "${arg%%=*}" "$value" 1 effective_signoff_incident_snapshot_min_attachment_count
+        idx=$((idx + 1))
+        ;;
+      --signoff-incident-snapshot-max-skipped-count)
+        value="${quick_args[$((idx + 1))]:-}"
+        require_max_skipped_zero_or_die "$arg" "$value"
+        idx=$((idx + 2))
+        ;;
+      --signoff-incident-snapshot-max-skipped-count=*)
+        value="${arg#*=}"
+        require_max_skipped_zero_or_die "${arg%%=*}" "$value"
+        idx=$((idx + 1))
+        ;;
+      *)
+        idx=$((idx + 1))
+        ;;
+    esac
+  done
 }
 
 usage() {
@@ -112,7 +372,7 @@ Examples:
     --show-json 1
 
 Notes:
-  - Quick-runbook flags are appended last and can override defaults.
+  - Operator safety policy is fail-closed; diagnostic policy bypasses should use lower-level scripts directly.
   - Wrapper-only `--campaign-*` flags control the generated handoff report.
   - Set EASY_NODE_SH to point at a custom easy-node wrapper if needed.
   - Inline campaign signoff is enabled by default (`--campaign-signoff-check 1`).
@@ -463,6 +723,15 @@ campaign_report_md_override="${PROD_PILOT_COHORT_CAMPAIGN_CAMPAIGN_REPORT_MD:-}"
 campaign_run_report_json_override="${PROD_PILOT_COHORT_CAMPAIGN_CAMPAIGN_RUN_REPORT_JSON:-}"
 campaign_signoff_summary_json_override="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SUMMARY_JSON:-}"
 
+effective_trend_min_go_rate_pct="$trend_min_go_rate_pct"
+effective_max_alert_severity="$(printf '%s' "$max_alert_severity" | tr '[:lower:]' '[:upper:]')"
+effective_signoff_min_go_rate_pct="$signoff_min_go_rate_pct"
+effective_signoff_min_trend_wg_soak_selection_lines=12
+effective_signoff_min_trend_wg_soak_entry_operators=2
+effective_signoff_min_trend_wg_soak_exit_operators=2
+effective_signoff_min_trend_wg_soak_cross_operator_pairs=2
+effective_signoff_incident_snapshot_min_attachment_count="$signoff_incident_snapshot_min_attachment_count"
+
 int_or_die "PROD_PILOT_COHORT_CAMPAIGN_ROUNDS" "$rounds"
 int_or_die "PROD_PILOT_COHORT_CAMPAIGN_PAUSE_SEC" "$pause_sec"
 int_or_die "PROD_PILOT_COHORT_CAMPAIGN_MAX_ROUND_FAILURES" "$max_round_failures"
@@ -503,6 +772,28 @@ if [[ ! "$campaign_incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((ca
   exit 2
 fi
 
+require_bool_one_or_die "PROD_PILOT_COHORT_CAMPAIGN_REQUIRE_ALL_ROUNDS_OK" "$require_all_rounds_ok"
+require_exact_zero_or_die "PROD_PILOT_COHORT_CAMPAIGN_MAX_ROUND_FAILURES" "$max_round_failures"
+raise_effective_decimal_floor_or_die "PROD_PILOT_COHORT_CAMPAIGN_TREND_MIN_GO_RATE_PCT" "$trend_min_go_rate_pct" 95 effective_trend_min_go_rate_pct
+raise_effective_max_alert_severity_or_die "PROD_PILOT_COHORT_CAMPAIGN_MAX_ALERT_SEVERITY" "$max_alert_severity" effective_max_alert_severity
+require_bool_one_or_die "PROD_PILOT_COHORT_CAMPAIGN_BUNDLE_OUTPUTS" "$bundle_outputs"
+require_bool_one_or_die "PROD_PILOT_COHORT_CAMPAIGN_BUNDLE_FAIL_CLOSE" "$bundle_fail_close"
+require_bool_one_or_die "PROD_PILOT_COHORT_CAMPAIGN_PRE_REAL_HOST_READINESS" "$pre_real_host_readiness"
+raise_effective_decimal_floor_or_die "PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_MIN_GO_RATE_PCT" "$signoff_min_go_rate_pct" 95 effective_signoff_min_go_rate_pct
+raise_effective_int_floor_or_die "PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT" "$signoff_incident_snapshot_min_attachment_count" 1 effective_signoff_incident_snapshot_min_attachment_count
+require_max_skipped_zero_or_die "PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT" "$signoff_incident_snapshot_max_skipped_count"
+require_bool_one_or_die "PROD_PILOT_COHORT_CAMPAIGN_SUMMARY_FAIL_CLOSE" "$campaign_summary_fail_close"
+require_bool_one_or_die "PROD_PILOT_COHORT_CAMPAIGN_RUN_REPORT_REQUIRED" "$campaign_run_report_required"
+require_bool_one_or_die "PROD_PILOT_COHORT_CAMPAIGN_RUN_REPORT_JSON_REQUIRED" "$campaign_run_report_json_required"
+require_bool_one_or_die "PROD_PILOT_COHORT_CAMPAIGN_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL" "$campaign_require_incident_snapshot_on_fail"
+require_bool_one_or_die "PROD_PILOT_COHORT_CAMPAIGN_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS" "$campaign_require_incident_snapshot_artifacts"
+raise_effective_int_floor_or_die "PROD_PILOT_COHORT_CAMPAIGN_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT" "$campaign_incident_snapshot_min_attachment_count" 1 campaign_incident_snapshot_min_attachment_count
+require_max_skipped_zero_or_die "PROD_PILOT_COHORT_CAMPAIGN_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT" "$campaign_incident_snapshot_max_skipped_count"
+require_bool_one_or_die "PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_CHECK" "$campaign_signoff_check"
+require_bool_one_or_die "PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_REQUIRED" "$campaign_signoff_required"
+require_bool_one_or_die "PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SUMMARY_FAIL_ON_NO_GO" "$campaign_signoff_summary_fail_on_no_go"
+reject_campaign_quick_weakening_args_or_die
+
 if [[ -n "$reports_dir_override" ]]; then
   reports_dir="$(abs_path "$reports_dir_override")"
 elif [[ -n "$user_reports_dir" ]]; then
@@ -537,8 +828,8 @@ declare -a cmd=(
   --continue-on-fail "$continue_on_fail"
   --require-all-rounds-ok "$require_all_rounds_ok"
   --max-round-failures "$max_round_failures"
-  --trend-min-go-rate-pct "$trend_min_go_rate_pct"
-  --max-alert-severity "$max_alert_severity"
+  --trend-min-go-rate-pct "$effective_trend_min_go_rate_pct"
+  --max-alert-severity "$effective_max_alert_severity"
   --bundle-outputs "$bundle_outputs"
   --bundle-fail-close "$bundle_fail_close"
   --pre-real-host-readiness "$pre_real_host_readiness"
@@ -553,19 +844,19 @@ declare -a cmd=(
   --signoff-max-reports "$signoff_max_reports"
   --signoff-since-hours "$signoff_since_hours"
   --signoff-fail-on-any-no-go "$signoff_fail_on_any_no_go"
-  --signoff-min-go-rate-pct "$signoff_min_go_rate_pct"
+  --signoff-min-go-rate-pct "$effective_signoff_min_go_rate_pct"
   --signoff-require-cohort-signoff-policy 1
   --signoff-require-trend-artifact-policy-match 1
   --signoff-require-trend-wg-validate-udp-source 1
   --signoff-require-trend-wg-validate-strict-distinct 1
   --signoff-require-trend-wg-soak-diversity-pass 1
-  --signoff-min-trend-wg-soak-selection-lines 12
-  --signoff-min-trend-wg-soak-entry-operators 2
-  --signoff-min-trend-wg-soak-exit-operators 2
-  --signoff-min-trend-wg-soak-cross-operator-pairs 2
+  --signoff-min-trend-wg-soak-selection-lines "$effective_signoff_min_trend_wg_soak_selection_lines"
+  --signoff-min-trend-wg-soak-entry-operators "$effective_signoff_min_trend_wg_soak_entry_operators"
+  --signoff-min-trend-wg-soak-exit-operators "$effective_signoff_min_trend_wg_soak_exit_operators"
+  --signoff-min-trend-wg-soak-cross-operator-pairs "$effective_signoff_min_trend_wg_soak_cross_operator_pairs"
   --signoff-require-incident-snapshot-on-fail 1
   --signoff-require-incident-snapshot-artifacts 1
-  --signoff-incident-snapshot-min-attachment-count "$signoff_incident_snapshot_min_attachment_count"
+  --signoff-incident-snapshot-min-attachment-count "$effective_signoff_incident_snapshot_min_attachment_count"
   --signoff-incident-snapshot-max-skipped-count "$signoff_incident_snapshot_max_skipped_count"
   --dashboard-enable "$dashboard_enable"
   --dashboard-fail-close "$dashboard_fail_close"
@@ -577,6 +868,31 @@ declare -a cmd=(
 if [[ "${#quick_args[@]}" -gt 0 ]]; then
   cmd+=("${quick_args[@]}")
 fi
+
+cmd+=(
+  --require-all-rounds-ok 1
+  --max-round-failures 0
+  --trend-min-go-rate-pct "$effective_trend_min_go_rate_pct"
+  --max-alert-severity "$effective_max_alert_severity"
+  --bundle-outputs 1
+  --bundle-fail-close 1
+  --pre-real-host-readiness 1
+  --pre-real-host-readiness-summary-json "$pre_real_host_readiness_summary_json"
+  --signoff-min-go-rate-pct "$effective_signoff_min_go_rate_pct"
+  --signoff-require-cohort-signoff-policy 1
+  --signoff-require-trend-artifact-policy-match 1
+  --signoff-require-trend-wg-validate-udp-source 1
+  --signoff-require-trend-wg-validate-strict-distinct 1
+  --signoff-require-trend-wg-soak-diversity-pass 1
+  --signoff-min-trend-wg-soak-selection-lines "$effective_signoff_min_trend_wg_soak_selection_lines"
+  --signoff-min-trend-wg-soak-entry-operators "$effective_signoff_min_trend_wg_soak_entry_operators"
+  --signoff-min-trend-wg-soak-exit-operators "$effective_signoff_min_trend_wg_soak_exit_operators"
+  --signoff-min-trend-wg-soak-cross-operator-pairs "$effective_signoff_min_trend_wg_soak_cross_operator_pairs"
+  --signoff-require-incident-snapshot-on-fail 1
+  --signoff-require-incident-snapshot-artifacts 1
+  --signoff-incident-snapshot-min-attachment-count "$effective_signoff_incident_snapshot_min_attachment_count"
+  --signoff-incident-snapshot-max-skipped-count 0
+)
 
 echo "[prod-pilot-cohort-campaign] running sustained pilot campaign"
 echo "[prod-pilot-cohort-campaign] reports_dir=$reports_dir"
