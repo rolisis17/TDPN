@@ -64,6 +64,10 @@ if ! rg -q 'EXIT_TOKEN_PROOF_REPLAY_STORE_FILE: "\$\{EXIT_TOKEN_PROOF_REPLAY_STO
   echo "docker-compose entry-exit environment must forward EXIT_TOKEN_PROOF_REPLAY_STORE_FILE"
   exit 1
 fi
+if [[ "$(rg -c '^EXIT_TOKEN_PROOF_REPLAY_STORE_FILE=/app/data/exit_token_proof_replay.json$' "$ROOT_DIR/scripts/easy_node.sh")" -lt 4 ]]; then
+  echo "easy_node server-up must set durable exit token-proof replay store paths for beta and prod authority/provider envs"
+  exit 1
+fi
 if ! rg -q 'ISSUER_PAYMENT_REPLAY_STORE_FILE: "\$\{ISSUER_PAYMENT_REPLAY_STORE_FILE:-/app/data/issuer_payment_replay.json\}"' "$ROOT_DIR/deploy/docker-compose.yml"; then
   echo "docker-compose issuer environment must forward ISSUER_PAYMENT_REPLAY_STORE_FILE"
   exit 1
@@ -609,6 +613,7 @@ require_eq "$(env_value "$AUTH_ENV" "ISSUER_KEY_HISTORY")" "12" "ISSUER_KEY_HIST
 require_eq "$(env_value "$AUTH_ENV" "EXIT_TOKEN_PROOF_REPLAY_STORE_FILE")" "/app/data/exit_token_proof_replay.json" "EXIT_TOKEN_PROOF_REPLAY_STORE_FILE"
 require_eq "$(env_value "$AUTH_ENV" "EXIT_EGRESS_BACKEND")" "command" "EXIT_EGRESS_BACKEND"
 require_eq "$(env_value "$AUTH_ENV" "EXIT_ISSUER_MIN_KEY_VOTES")" "2" "EXIT_ISSUER_MIN_KEY_VOTES"
+require_log_contains /tmp/integration_easy_node_prod_server_env.log 'server entry-exit runtime data check: ok' "prod authority entry-exit data runtime check"
 require_log_contains /tmp/integration_easy_node_prod_server_env.log 'server WG runtime check: ok' "prod authority WG runtime check"
 
 STAGED_MTLS_PREP="$TMP_DIR/staged_mtls_prep"
@@ -646,6 +651,7 @@ EASY_NODE_COSMOS_SETTLEMENT_ENDPOINT="https://cosmos.example.test" \
   --prod-profile 1 \
   --prod-mtls-mode staged >/tmp/integration_easy_node_prod_server_env_staged.log 2>&1
 require_log_contains /tmp/integration_easy_node_prod_server_env_staged.log 'server-up prod mTLS staged verify: ok' "prod authority staged mTLS verify"
+require_log_contains /tmp/integration_easy_node_prod_server_env_staged.log 'server entry-exit runtime data check: ok' "prod authority staged entry-exit data runtime check"
 require_log_contains /tmp/integration_easy_node_prod_server_env_staged.log 'server WG runtime check: ok' "prod authority staged WG runtime check"
 if [[ -e "$TLS_DIR/ca.key" ]]; then
   echo "server-up --prod-mtls-mode staged must not create ca.key"
@@ -732,6 +738,7 @@ require_eq "$(env_value "$PROVIDER_ENV" "COSMOS_SETTLEMENT_SUBMIT_MODE")" "http"
 require_eq "$(env_value "$PROVIDER_ENV" "EXIT_TOKEN_PROOF_REPLAY_STORE_FILE")" "/app/data/exit_token_proof_replay.json" "provider EXIT_TOKEN_PROOF_REPLAY_STORE_FILE"
 require_eq "$(env_value "$PROVIDER_ENV" "EXIT_EGRESS_BACKEND")" "command" "provider EXIT_EGRESS_BACKEND"
 require_eq "$(env_value "$PROVIDER_ENV" "EXIT_ISSUER_MIN_KEY_VOTES")" "2" "provider EXIT_ISSUER_MIN_KEY_VOTES"
+require_log_contains /tmp/integration_easy_node_prod_server_env_provider.log 'server entry-exit runtime data check: ok' "prod provider entry-exit data runtime check"
 require_log_contains /tmp/integration_easy_node_prod_server_env_provider.log 'server WG runtime check: ok' "prod provider WG runtime check"
 
 echo "easy-node prod authority/provider env integration check ok"

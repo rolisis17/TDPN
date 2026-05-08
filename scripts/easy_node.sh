@@ -3841,6 +3841,77 @@ server_wg_runtime_check() {
   return 1
 }
 
+server_entry_exit_runtime_data_check() {
+  local env_file="$1"
+  local required="${2:-0}"
+  local replay_guard replay_store host_data_dir
+  replay_guard="$(identity_value "$env_file" "EXIT_TOKEN_PROOF_REPLAY_GUARD")"
+  replay_store="$(identity_value "$env_file" "EXIT_TOKEN_PROOF_REPLAY_STORE_FILE")"
+  host_data_dir="$DEPLOY_DIR/data/entry-exit"
+
+  if [[ "$required" != "1" && "$replay_guard" != "1" ]]; then
+    echo "server entry-exit runtime data check: skipped"
+    return 0
+  fi
+  if [[ "$required" == "1" && "$replay_guard" != "1" ]]; then
+    echo "server entry-exit runtime data check failed: EXIT_TOKEN_PROOF_REPLAY_GUARD must be 1 for beta/prod live transport"
+    return 1
+  fi
+  if [[ "$replay_guard" == "1" && -z "$replay_store" ]]; then
+    echo "server entry-exit runtime data check failed: EXIT_TOKEN_PROOF_REPLAY_STORE_FILE is empty while replay guard is enabled"
+    echo "hint: rerun server-up so the generated env points to /app/data/exit_token_proof_replay.json"
+    return 1
+  fi
+  if [[ "$replay_guard" == "1" && "$replay_store" != /app/data/* ]]; then
+    echo "server entry-exit runtime data check failed: EXIT_TOKEN_PROOF_REPLAY_STORE_FILE must live under /app/data (got ${replay_store})"
+    return 1
+  fi
+  if [[ "$required" == "1" && ! -d "$host_data_dir" ]]; then
+    echo "server entry-exit runtime data check failed: missing host bind directory $host_data_dir"
+    echo "hint: rerun server-up to recreate data directories and restart entry-exit with the generated env file"
+    return 1
+  fi
+
+  echo "server entry-exit runtime data check: verifying /app/data and replay store"
+  if compose_with_env "$env_file" exec -T entry-exit sh -lc '
+    guard="${EXIT_TOKEN_PROOF_REPLAY_GUARD:-0}"
+    store="${EXIT_TOKEN_PROOF_REPLAY_STORE_FILE:-}"
+    if [ ! -d /app/data ]; then
+      echo "missing /app/data bind mount" >&2
+      exit 1
+    fi
+    if [ ! -w /app/data ]; then
+      echo "/app/data is not writable by entry-exit" >&2
+      exit 1
+    fi
+    if [ "$guard" = "1" ]; then
+      if [ -z "$store" ]; then
+        echo "EXIT_TOKEN_PROOF_REPLAY_STORE_FILE is empty" >&2
+        exit 1
+      fi
+      case "$store" in
+        /app/data/*) ;;
+        *)
+          echo "EXIT_TOKEN_PROOF_REPLAY_STORE_FILE must be under /app/data: $store" >&2
+          exit 1
+          ;;
+      esac
+    fi
+    tmp="/app/data/.easy-node-runtime-data-check.$$"
+    if ! ( umask 077 && : >"$tmp" ); then
+      echo "failed to write runtime data check file in /app/data" >&2
+      exit 1
+    fi
+    rm -f "$tmp"
+  '; then
+    echo "server entry-exit runtime data check: ok"
+    return 0
+  fi
+  echo "server entry-exit runtime data check failed: entry-exit data mount or replay store is not usable"
+  compose_with_env "$env_file" logs --tail=120 entry-exit || true
+  return 1
+}
+
 clear_runtime_override_env_vars() {
   # Clears known runtime override vars in this process so cleanup/start flows
   # are deterministic even if the caller shell exported stale values.
@@ -4204,6 +4275,7 @@ EXIT_OPAQUE_ECHO=0
 EXIT_OPAQUE_SINK_ADDR=127.0.0.1:51982
 EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:51983
 EXIT_TOKEN_PROOF_REPLAY_GUARD=1
+EXIT_TOKEN_PROOF_REPLAY_STORE_FILE=/app/data/exit_token_proof_replay.json
 EXIT_PEER_REBIND_SEC=0
 EXIT_STARTUP_SYNC_TIMEOUT_SEC=30
 EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST=1
@@ -4505,6 +4577,7 @@ EXIT_OPAQUE_ECHO=0
 EXIT_OPAQUE_SINK_ADDR=127.0.0.1:51982
 EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:51983
 EXIT_TOKEN_PROOF_REPLAY_GUARD=1
+EXIT_TOKEN_PROOF_REPLAY_STORE_FILE=/app/data/exit_token_proof_replay.json
 EXIT_PEER_REBIND_SEC=0
 EXIT_STARTUP_SYNC_TIMEOUT_SEC=30
 EXIT_ENTRY_ROUTE_ASSERTION_DIRECTORY_TRUST=1
@@ -6130,6 +6203,9 @@ server_up() {
     if [[ "$middle_relay" == "1" ]]; then
       wait_http_ok_with_opts "${middle_local_base}/v1/ready" "local middle" 40 "${middle_local_opts[@]}" || { compose_with_env "$AUTHORITY_ENV_FILE" logs --tail=120 middle; exit 1; }
     fi
+    if [[ "$need_beta_or_prod_wg_defaults" == "1" ]]; then
+      server_entry_exit_runtime_data_check "$AUTHORITY_ENV_FILE" "1" || exit 1
+    fi
 
     # Optional public endpoint validation (can fail on NAT loopback setups).
     if [[ "${EASY_NODE_VERIFY_PUBLIC:-0}" == "1" ]] && ! host_is_loopback "$public_host"; then
@@ -6257,6 +6333,9 @@ server_up() {
     wait_http_ok_with_opts "${exit_local_base}/v1/health" "local exit" 40 "${exit_local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 entry-exit; exit 1; }
     if [[ "$middle_relay" == "1" ]]; then
       wait_http_ok_with_opts "${middle_local_base}/v1/ready" "local middle" 40 "${middle_local_opts[@]}" || { compose_with_env "$PROVIDER_ENV_FILE" logs --tail=120 middle; exit 1; }
+    fi
+    if [[ "$need_beta_or_prod_wg_defaults" == "1" ]]; then
+      server_entry_exit_runtime_data_check "$PROVIDER_ENV_FILE" "1" || exit 1
     fi
     wait_http_ok_with_opts "${authority_issuer}/v1/pubkeys" "authority issuer" 20 "${issuer_opts[@]}" || {
       if [[ "$prod_profile" == "1" ]]; then
