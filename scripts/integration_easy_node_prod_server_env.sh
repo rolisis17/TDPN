@@ -11,13 +11,14 @@ for cmd in bash go jq rg; do
   fi
 done
 
-AUTH_ENV="$ROOT_DIR/deploy/.env.easy.server"
-PROVIDER_ENV="$ROOT_DIR/deploy/.env.easy.provider"
-MODE_FILE="$ROOT_DIR/deploy/data/easy_node_server_mode.conf"
-IDENTITY_FILE="$ROOT_DIR/deploy/data/easy_node_identity.conf"
-TLS_DIR="$ROOT_DIR/deploy/tls"
-ISSUER_ADMIN_DIR="$ROOT_DIR/deploy/data/issuer"
-ENTRY_EXIT_DATA_DIR="$ROOT_DIR/deploy/data/entry-exit"
+DEPLOY_DIR="$ROOT_DIR/deploy"
+AUTH_ENV="$DEPLOY_DIR/.env.easy.server"
+PROVIDER_ENV="$DEPLOY_DIR/.env.easy.provider"
+MODE_FILE="$DEPLOY_DIR/data/easy_node_server_mode.conf"
+IDENTITY_FILE="$DEPLOY_DIR/data/easy_node_identity.conf"
+TLS_DIR="$DEPLOY_DIR/tls"
+ISSUER_ADMIN_DIR="$DEPLOY_DIR/data/issuer"
+ENTRY_EXIT_DATA_DIR="$DEPLOY_DIR/data/entry-exit"
 HOSTS_FILE="$ROOT_DIR/data/easy_mode_hosts.conf"
 TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
@@ -140,8 +141,29 @@ require_no_live_deploy_stack_for_backup() {
     return 0
   fi
 
-  local running=""
-  running="$(docker ps --filter "label=com.docker.compose.project=deploy" --format '{{.Names}}' 2>/dev/null | head -n 8 || true)"
+  local running="" docker_ps_output="" docker_ps_rc=0
+  set +e
+  docker_ps_output="$(docker ps \
+    --filter "label=com.docker.compose.project" \
+    --format '{{.Names}}	{{.Label "com.docker.compose.project"}}	{{.Label "com.docker.compose.project.working_dir"}}	{{.Label "com.docker.compose.project.config_files"}}' 2>&1)"
+  docker_ps_rc=$?
+  set -e
+  if [[ "$docker_ps_rc" != "0" ]]; then
+    echo "integration_easy_node_prod_server_env cannot verify whether live compose services are running."
+    echo "docker ps failed:"
+    printf '%s\n' "$docker_ps_output"
+    echo "stop the stack first, fix Docker access, or set EASY_NODE_INTEGRATION_ALLOW_LIVE_DEPLOY=1 only for an isolated test host."
+    exit 2
+  fi
+
+  running="$(
+    printf '%s\n' "$docker_ps_output" |
+      awk -F '\t' -v deploy_dir="$DEPLOY_DIR" '
+        $1 == "" { next }
+        $2 == "deploy" || index($3, deploy_dir) || index($4, deploy_dir "/docker-compose.yml") { print $1 }
+      ' |
+      head -n 8
+  )"
   if [[ -z "$running" ]]; then
     return 0
   fi
@@ -593,6 +615,7 @@ STAGED_MTLS_PREP="$TMP_DIR/staged_mtls_prep"
 ./scripts/easy_node.sh prod-mtls-prep \
   --authority-host 203.0.113.10 \
   --provider-host 198.51.100.20 \
+  --allow-private-hosts 1 \
   --out-dir "$STAGED_MTLS_PREP" >/tmp/integration_easy_node_prod_server_env_staged_prep.log 2>&1
 STAGED_AUTH_BUNDLE="$(jq -r '.certificate_generation.host_server_bundles[] | select(.role=="authority") | .dir' "$STAGED_MTLS_PREP/prod_mtls_prep_summary.json")"
 ./scripts/easy_node.sh prod-mtls-bundle-stage \

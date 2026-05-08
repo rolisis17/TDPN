@@ -15,6 +15,9 @@ Options:
   --public-host HOST          Alias for --host.
   --days-min N                Minimum certificate validity window. Default: 14.
   --allow-ca-key 0|1          Allow ca.key inside the server bundle. Default: 0.
+  --require-client-material 0|1
+                              Require and verify client.crt/client.key in the bundle.
+                              Default: 0.
   --summary-json PATH         Summary JSON path. Default: <bundle-dir>/prod_mtls_bundle_verify_summary.json.
   --print-summary-json 0|1    Print summary JSON after writing it. Default: 0.
 
@@ -260,6 +263,7 @@ cert_not_expiring() {
 bundle_dir=""
 days_min="14"
 allow_ca_key="0"
+require_client_material="0"
 summary_json=""
 print_summary_json="0"
 declare -a expected_hosts=()
@@ -294,6 +298,13 @@ while [[ $# -gt 0 ]]; do
     --allow-ca-key)
       if ! allow_ca_key="$(normalize_bool_01 "${2:-}")"; then
         echo "prod-mtls-bundle-verify requires --allow-ca-key to be 0 or 1" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    --require-client-material)
+      if ! require_client_material="$(normalize_bool_01 "${2:-}")"; then
+        echo "prod-mtls-bundle-verify requires --require-client-material to be 0 or 1" >&2
         exit 2
       fi
       shift 2
@@ -351,6 +362,8 @@ mkdir -p "$(dirname "$summary_json")"
 ca_file="$bundle_dir/ca.crt"
 cert_file="$bundle_dir/node.crt"
 key_file="$bundle_dir/node.key"
+client_cert_file="$bundle_dir/client.crt"
+client_key_file="$bundle_dir/client.key"
 ca_key_file="$bundle_dir/ca.key"
 checks_file="$(mktemp)"
 blockers_file="$(mktemp)"
@@ -407,6 +420,11 @@ if [[ -s "$ca_file" && -s "$cert_file" ]]; then
   else
     record_check "node_cert_server_auth" "fail" "node certificate missing serverAuth usage"
   fi
+  if cert_verifies_with_purpose "$ca_file" "$cert_file" "sslclient"; then
+    record_check "node_cert_client_auth" "ok" "node certificate allows client authentication"
+  else
+    record_check "node_cert_client_auth" "fail" "node certificate missing clientAuth usage"
+  fi
   if cert_not_expiring "$cert_file" "$days_min"; then
     record_check "node_cert_expiry" "ok" "node certificate remains valid for at least ${days_min} day(s)"
   else
@@ -415,6 +433,7 @@ if [[ -s "$ca_file" && -s "$cert_file" ]]; then
 else
   record_check "node_cert_chain" "fail" "cannot verify certificate chain because ca.crt or node.crt is missing"
   record_check "node_cert_server_auth" "fail" "cannot verify serverAuth usage because ca.crt or node.crt is missing"
+  record_check "node_cert_client_auth" "fail" "cannot verify clientAuth usage because ca.crt or node.crt is missing"
   record_check "node_cert_expiry" "fail" "cannot verify expiry because node.crt is missing"
 fi
 
@@ -442,6 +461,62 @@ else
   done
 fi
 
+client_cert_present="0"
+client_key_present="0"
+if [[ -s "$client_cert_file" ]]; then
+  client_cert_present="1"
+fi
+if [[ -s "$client_key_file" ]]; then
+  client_key_present="1"
+fi
+
+if [[ "$require_client_material" == "1" || "$client_cert_present" == "1" || "$client_key_present" == "1" ]]; then
+  if [[ "$client_cert_present" == "1" ]]; then
+    record_check "file_exists_client.crt" "ok" "client certificate exists: $client_cert_file"
+  else
+    record_check "file_exists_client.crt" "fail" "client certificate missing or empty: $client_cert_file"
+  fi
+  if [[ "$client_key_present" == "1" ]]; then
+    record_check "file_exists_client.key" "ok" "client private key exists: $client_key_file"
+  else
+    record_check "file_exists_client.key" "fail" "client private key missing or empty: $client_key_file"
+  fi
+
+  if [[ -s "$ca_file" && "$client_cert_present" == "1" ]]; then
+    if cert_verifies_with_ca "$ca_file" "$client_cert_file"; then
+      record_check "client_cert_chain" "ok" "client certificate verifies against CA"
+    else
+      record_check "client_cert_chain" "fail" "client certificate does not verify against CA"
+    fi
+    if cert_verifies_with_purpose "$ca_file" "$client_cert_file" "sslclient"; then
+      record_check "client_cert_client_auth" "ok" "client certificate allows client authentication"
+    else
+      record_check "client_cert_client_auth" "fail" "client certificate missing clientAuth usage"
+    fi
+    if cert_not_expiring "$client_cert_file" "$days_min"; then
+      record_check "client_cert_expiry" "ok" "client certificate remains valid for at least ${days_min} day(s)"
+    else
+      record_check "client_cert_expiry" "fail" "client certificate expires before ${days_min} day(s)"
+    fi
+  else
+    record_check "client_cert_chain" "fail" "cannot verify client certificate chain because ca.crt or client.crt is missing"
+    record_check "client_cert_client_auth" "fail" "cannot verify clientAuth usage because ca.crt or client.crt is missing"
+    record_check "client_cert_expiry" "fail" "cannot verify client certificate expiry because client.crt is missing"
+  fi
+
+  if [[ "$client_cert_present" == "1" && "$client_key_present" == "1" ]]; then
+    if cert_matches_private_key "$client_cert_file" "$client_key_file"; then
+      record_check "client_cert_key_match" "ok" "client certificate matches client private key"
+    else
+      record_check "client_cert_key_match" "fail" "client certificate does not match client private key"
+    fi
+  else
+    record_check "client_cert_key_match" "fail" "cannot verify client key match because client.crt or client.key is missing"
+  fi
+else
+  record_check "client_material_optional" "ok" "client.crt/client.key are optional for this verification mode"
+fi
+
 status="pass"
 if ((failures > 0)); then
   status="fail"
@@ -460,11 +535,14 @@ jq -n \
   --arg ca_file "$ca_file" \
   --arg cert_file "$cert_file" \
   --arg key_file "$key_file" \
+  --arg client_cert_file "$client_cert_file" \
+  --arg client_key_file "$client_key_file" \
   --arg ca_key_file "$ca_key_file" \
   --arg summary_json "$summary_json" \
   --argjson expected_hosts "$hosts_json" \
   --argjson days_min "$days_min_num" \
   --argjson allow_ca_key "$(json_bool "$allow_ca_key")" \
+  --argjson require_client_material "$(json_bool "$require_client_material")" \
   --argjson checks_total "$checks_total" \
   --argjson failures "$failures" \
   --argjson checks "$checks_json" \
@@ -478,7 +556,8 @@ jq -n \
       bundle_dir: $bundle_dir,
       expected_hosts: $expected_hosts,
       days_min: $days_min,
-      allow_ca_key: $allow_ca_key
+      allow_ca_key: $allow_ca_key,
+      require_client_material: $require_client_material
     },
     checks_total: $checks_total,
     failures: $failures,
@@ -488,6 +567,8 @@ jq -n \
       ca_file: $ca_file,
       node_cert_file: $cert_file,
       node_key_file: $key_file,
+      client_cert_file: $client_cert_file,
+      client_key_file: $client_key_file,
       forbidden_ca_key_file: $ca_key_file,
       summary_json: $summary_json
     },
@@ -497,7 +578,9 @@ jq -n \
       MTLS_MIN_VERSION: "1.3",
       MTLS_CA_FILE: "/app/tls/ca.crt",
       MTLS_SERVER_CERT_FILE: "/app/tls/node.crt",
-      MTLS_SERVER_KEY_FILE: "/app/tls/node.key"
+      MTLS_SERVER_KEY_FILE: "/app/tls/node.key",
+      MTLS_CLIENT_CERT_FILE: "/app/tls/client.crt",
+      MTLS_CLIENT_KEY_FILE: "/app/tls/client.key"
     }
   }' >"$summary_json"
 

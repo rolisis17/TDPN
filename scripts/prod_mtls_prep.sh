@@ -197,7 +197,7 @@ make_abs_path() {
   fi
 }
 
-ipv4_private_or_loopback() {
+ipv4_non_public_for_prod() {
   local host="$1"
   is_ipv4 "$host" || return 1
   local IFS=.
@@ -205,6 +205,7 @@ ipv4_private_or_loopback() {
   read -r -a octets <<<"$host"
   local o1=$((10#${octets[0]}))
   local o2=$((10#${octets[1]}))
+  local o3=$((10#${octets[2]}))
   case "$o1" in
     0|10|127)
       return 0
@@ -217,19 +218,30 @@ ipv4_private_or_loopback() {
       ;;
     192)
       ((o2 == 168)) && return 0
+      ((o2 == 0 && (o3 == 0 || o3 == 2))) && return 0
       ;;
     100)
       ((o2 >= 64 && o2 <= 127)) && return 0
+      ;;
+    198)
+      ((o2 == 18 || o2 == 19)) && return 0
+      ((o2 == 51 && o3 == 100)) && return 0
+      ;;
+    203)
+      ((o2 == 0 && o3 == 113)) && return 0
+      ;;
+    224|225|226|227|228|229|230|231|232|233|234|235|236|237|238|239|240|241|242|243|244|245|246|247|248|249|250|251|252|253|254|255)
+      return 0
       ;;
   esac
   return 1
 }
 
-host_is_private_or_loopback() {
+host_is_non_public_for_prod() {
   local host
   host="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   if is_ipv4 "$host"; then
-    ipv4_private_or_loopback "$host"
+    ipv4_non_public_for_prod "$host"
     return
   fi
   if is_ipv6 "$host"; then
@@ -491,7 +503,7 @@ append_host_record() {
   local role="$1"
   local host="$2"
   local private_flag="0"
-  if host_is_private_or_loopback "$host"; then
+  if host_is_non_public_for_prod "$host"; then
     private_flag="1"
     private_count=$((private_count + 1))
   fi
@@ -578,11 +590,11 @@ if ((private_count > 0)); then
     prod_ready="0"
     rehearsal_only="1"
     notes="mTLS rehearsal bundle generated for private/Tailscale hosts; true prod still needs public HTTPS hosts"
-    append_blocker "rehearsal_only_private_hosts" "private, loopback, link-local, .local, or Tailscale/CGNAT hosts were explicitly allowed for rehearsal only; replace them with public DNS/IPs before true production signoff"
+    append_blocker "rehearsal_only_private_hosts" "private, loopback, link-local, reserved/test, multicast, .local, or Tailscale/CGNAT hosts were explicitly allowed for rehearsal only; replace them with public DNS/IPs before true production signoff"
   else
     status="fail"
     prod_ready="0"
-    append_blocker "private_or_loopback_host" "private, loopback, link-local, .local, or Tailscale/CGNAT hosts are not accepted for true production mTLS prep; rerun with public DNS/IPs or add --allow-private-hosts 1 for rehearsal only"
+    append_blocker "private_or_loopback_host" "private, loopback, link-local, reserved/test, multicast, .local, or Tailscale/CGNAT hosts are not accepted for true production mTLS prep; rerun with public DNS/IPs or add --allow-private-hosts 1 for rehearsal only"
     notes="production mTLS preparation blocked by non-public hosts"
   fi
 fi

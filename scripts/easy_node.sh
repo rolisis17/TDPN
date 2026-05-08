@@ -710,7 +710,7 @@ Usage:
   ./scripts/easy_node.sh admin-signing-status
   ./scripts/easy_node.sh admin-signing-rotate [--restart-issuer [0|1]] [--key-history N]
   ./scripts/easy_node.sh prod-mtls-prep --authority-host HOST --provider-host HOST [--allow-private-hosts [0|1]] [--out-dir DIR] [--print-summary-json [0|1]]
-  ./scripts/easy_node.sh prod-mtls-bundle-verify --bundle-dir DIR --host HOST [--days-min N] [--allow-ca-key [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-mtls-bundle-verify --bundle-dir DIR --host HOST [--days-min N] [--allow-ca-key [0|1]] [--require-client-material [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-mtls-bundle-stage --bundle-dir DIR --host HOST [--target-dir DIR] [--copy-client auto|0|1] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-preflight [--days-min N] [--check-live [0|1]] [--timeout-sec N] [--live-require-configured-healthy [0|1]] [--live-max-cooling-retry-sec N] [--live-max-peer-sync-age-sec N] [--live-max-issuer-sync-age-sec N] [--live-min-peer-success-sources N] [--live-min-issuer-success-sources N] [--live-min-peer-source-operators N] [--live-min-issuer-source-operators N]
   ./scripts/easy_node.sh bootstrap-mtls [--out-dir DIR] [--public-host HOST] [--san HOST] [--days N] [--rotate-leaf [0|1]] [--rotate-ca [0|1]]
@@ -5839,6 +5839,7 @@ server_up() {
       "$ROOT_DIR/scripts/prod_mtls_bundle_verify.sh" \
         --bundle-dir "$DEPLOY_DIR/tls" \
         --host "$local_host" \
+        --require-client-material 1 \
         --summary-json "$staged_verify_json" >/dev/null
       echo "server-up prod mTLS staged verify: ok ($staged_verify_json)"
     else

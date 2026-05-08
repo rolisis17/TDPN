@@ -437,6 +437,9 @@ fi
 
 target_verify_json="$(dirname "$summary_json")/prod_mtls_bundle_stage_target_verify_${timestamp}.json"
 target_verify_args=(--bundle-dir "$target_dir" --summary-json "$target_verify_json")
+if [[ "$client_copied" == "1" ]]; then
+  target_verify_args+=(--require-client-material 1)
+fi
 for host in "${hosts[@]}"; do
   target_verify_args+=(--host "$host")
 done
