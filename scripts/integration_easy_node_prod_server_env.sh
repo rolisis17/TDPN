@@ -22,6 +22,7 @@ ENTRY_EXIT_DATA_DIR="$DEPLOY_DIR/data/entry-exit"
 HOSTS_FILE="$ROOT_DIR/data/easy_mode_hosts.conf"
 TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
+BACKUP_READY=0
 mkdir -p "$TMP_BIN"
 
 if ! rg -q 'EXIT_WG_PUBKEY: "\$\{EXIT_WG_PUBKEY:-\}"' "$ROOT_DIR/deploy/docker-compose.yml"; then
@@ -199,6 +200,10 @@ restore_dir() {
 }
 
 cleanup() {
+  if [[ "$BACKUP_READY" != "1" ]]; then
+    rm -rf "$TMP_DIR"
+    return
+  fi
   restore_file "$AUTH_ENV" "auth_env"
   restore_file "$PROVIDER_ENV" "provider_env"
   restore_file "$MODE_FILE" "mode_file"
@@ -229,6 +234,7 @@ backup_file "$HOSTS_FILE" "hosts_file"
 backup_dir "$TLS_DIR" "tls_dir"
 backup_dir "$ISSUER_ADMIN_DIR" "issuer_admin_dir"
 backup_dir "$ENTRY_EXIT_DATA_DIR" "entry_exit_data_dir"
+BACKUP_READY=1
 
 cat >"$TMP_BIN/docker" <<'EOF_DOCKER'
 #!/usr/bin/env bash
