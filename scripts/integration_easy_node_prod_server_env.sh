@@ -530,6 +530,51 @@ require_eq "$(env_value "$AUTH_ENV" "EXIT_EGRESS_BACKEND")" "command" "EXIT_EGRE
 require_eq "$(env_value "$AUTH_ENV" "EXIT_ISSUER_MIN_KEY_VOTES")" "2" "EXIT_ISSUER_MIN_KEY_VOTES"
 require_log_contains /tmp/integration_easy_node_prod_server_env.log 'server WG runtime check: ok' "prod authority WG runtime check"
 
+STAGED_MTLS_PREP="$TMP_DIR/staged_mtls_prep"
+./scripts/easy_node.sh prod-mtls-prep \
+  --authority-host 203.0.113.10 \
+  --provider-host 198.51.100.20 \
+  --out-dir "$STAGED_MTLS_PREP" >/tmp/integration_easy_node_prod_server_env_staged_prep.log 2>&1
+STAGED_AUTH_BUNDLE="$(jq -r '.certificate_generation.host_server_bundles[] | select(.role=="authority") | .dir' "$STAGED_MTLS_PREP/prod_mtls_prep_summary.json")"
+./scripts/easy_node.sh prod-mtls-bundle-stage \
+  --bundle-dir "$STAGED_AUTH_BUNDLE" \
+  --host 203.0.113.10 \
+  --target-dir "$TLS_DIR" \
+  --summary-json "$TMP_DIR/staged_mtls_stage_summary.json" >/tmp/integration_easy_node_prod_server_env_staged_stage.log 2>&1
+if [[ -e "$TLS_DIR/ca.key" ]]; then
+  echo "staged prod mTLS target must not retain ca.key before server-up"
+  cat "$TMP_DIR/staged_mtls_stage_summary.json"
+  exit 1
+fi
+if ! jq -e '.status=="pass" and .client_material_copied==true' "$TMP_DIR/staged_mtls_stage_summary.json" >/dev/null; then
+  echo "expected staged prod mTLS bundle stage to pass"
+  cat "$TMP_DIR/staged_mtls_stage_summary.json"
+  exit 1
+fi
+
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_VERIFY_PUBLIC=0 \
+EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE="$PROD_ISSUER_TRUST_FILE" \
+EASY_NODE_COSMOS_SETTLEMENT_ENDPOINT="https://cosmos.example.test" \
+./scripts/easy_node.sh server-up \
+  --mode authority \
+  --public-host 203.0.113.10 \
+  --peer-directories https://198.51.100.20:8081 \
+  --beta-profile 1 \
+  --prod-profile 1 \
+  --prod-mtls-mode staged >/tmp/integration_easy_node_prod_server_env_staged.log 2>&1
+require_log_contains /tmp/integration_easy_node_prod_server_env_staged.log 'server-up prod mTLS staged verify: ok' "prod authority staged mTLS verify"
+require_log_contains /tmp/integration_easy_node_prod_server_env_staged.log 'server WG runtime check: ok' "prod authority staged WG runtime check"
+if [[ -e "$TLS_DIR/ca.key" ]]; then
+  echo "server-up --prod-mtls-mode staged must not create ca.key"
+  cat /tmp/integration_easy_node_prod_server_env_staged.log
+  exit 1
+fi
+require_eq "$(env_value "$AUTH_ENV" "PROD_STRICT_MODE")" "1" "staged PROD_STRICT_MODE"
+require_eq "$(env_value "$AUTH_ENV" "MTLS_CA_FILE")" "/app/tls/ca.crt" "staged MTLS_CA_FILE"
+require_eq "$(env_value "$AUTH_ENV" "MTLS_CERT_FILE")" "/app/tls/node.crt" "staged MTLS_CERT_FILE"
+require_eq "$(env_value "$AUTH_ENV" "MTLS_KEY_FILE")" "/app/tls/node.key" "staged MTLS_KEY_FILE"
+
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \
 EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE="$PROD_ISSUER_TRUST_FILE" \

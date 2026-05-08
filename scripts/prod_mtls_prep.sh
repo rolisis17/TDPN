@@ -625,8 +625,8 @@ for provider_host in "${provider_hosts[@]}"; do
 done
 provider_directory_csv="$(IFS=,; printf '%s' "${provider_directory_urls[*]}")"
 
-authority_server_cmd="EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE=/path/to/issuer_trust_keys.txt COSMOS_SETTLEMENT_ENDPOINT=https://SETTLEMENT_ENDPOINT ./scripts/easy_node.sh server-up --mode authority --public-host ${authority_host} --peer-directories ${provider_directory_csv} --prod-profile 1"
-provider_server_cmd="EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE=/path/to/issuer_trust_keys.txt COSMOS_SETTLEMENT_ENDPOINT=https://SETTLEMENT_ENDPOINT ./scripts/easy_node.sh server-up --mode provider --public-host ${primary_provider_host} --authority-directory https://${authority_url_host}:8081 --authority-issuer https://${authority_url_host}:8082 --peer-directories https://${authority_url_host}:8081 --prod-profile 1"
+authority_server_cmd="EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE=/path/to/issuer_trust_keys.txt COSMOS_SETTLEMENT_ENDPOINT=https://SETTLEMENT_ENDPOINT ./scripts/easy_node.sh server-up --mode authority --public-host ${authority_host} --peer-directories ${provider_directory_csv} --prod-profile 1 --prod-mtls-mode staged"
+provider_server_cmd="EASY_NODE_PROD_ISSUER_TRUSTED_KEYS_FILE=/path/to/issuer_trust_keys.txt COSMOS_SETTLEMENT_ENDPOINT=https://SETTLEMENT_ENDPOINT ./scripts/easy_node.sh server-up --mode provider --public-host ${primary_provider_host} --authority-directory https://${authority_url_host}:8081 --authority-issuer https://${authority_url_host}:8082 --peer-directories https://${authority_url_host}:8081 --prod-profile 1 --prod-mtls-mode staged"
 prod_preflight_cmd="./scripts/easy_node.sh prod-preflight --days-min 14 --check-live 1 --timeout-sec 12"
 client_smoke_cmd="sudo ./scripts/easy_node.sh client-vpn-smoke --bootstrap-directory https://${authority_url_host}:8081 --directory-urls https://${authority_url_host}:8081,https://${primary_provider_url_host}:8081 --issuer-url https://${authority_url_host}:8082 --entry-url https://${authority_url_host}:8083 --exit-url https://${authority_url_host}:8084 --subject INVITE_KEY --path-profile balanced --prod-profile 1 --interface wgvpn0 --install-route 1 --pre-real-host-readiness 1 --runtime-fix 1 --mtls-ca-file deploy/tls/ca.crt --mtls-client-cert-file deploy/tls/client.crt --mtls-client-key-file deploy/tls/client.key --print-summary-json 1"
 signoff_cmd="sudo ./scripts/easy_node.sh three-machine-prod-signoff --bundle-dir .easy-node-logs/prod_gate_bundle --directory-a https://${authority_url_host}:8081 --directory-b https://${primary_provider_url_host}:8081 --bootstrap-directory https://${authority_url_host}:8081 --issuer-url https://${authority_url_host}:8082 --entry-url https://${authority_url_host}:8083 --exit-url https://${authority_url_host}:8084 --subject INVITE_KEY --min-sources 2 --min-operators 2 --path-profile balanced --prod-profile 1 --pre-real-host-readiness 1 --runtime-fix 1 --record-result 1 --manual-validation-report 1 --print-summary-json 1"
@@ -684,6 +684,12 @@ write_report() {
       echo
       echo '```bash'
       jq -r '. | "./scripts/easy_node.sh prod-mtls-bundle-verify --bundle-dir \(.dir) --host \(.host) --print-summary-json 1"' "$host_bundles_file"
+      echo '```'
+      echo
+      echo "On each host, stage only that host's verified bundle into deploy/tls before running staged prod server-up:"
+      echo
+      echo '```bash'
+      jq -r '. | "./scripts/easy_node.sh prod-mtls-bundle-stage --bundle-dir \(.dir) --host \(.host) --print-summary-json 1"' "$host_bundles_file"
       echo '```'
       echo
     fi
@@ -754,6 +760,7 @@ write_summary() {
     --arg signoff "$signoff_cmd" \
     --arg beta_lab "$beta_lab_cmd" \
     --arg bundle_verify_template "./scripts/easy_node.sh prod-mtls-bundle-verify --bundle-dir HOST_BUNDLE_DIR --host PUBLIC_IP_OR_DNS --print-summary-json 1" \
+    --arg bundle_stage_template "./scripts/easy_node.sh prod-mtls-bundle-stage --bundle-dir HOST_BUNDLE_DIR --host PUBLIC_IP_OR_DNS --print-summary-json 1" \
     --arg rehearsal_warning "These commands reflect the rehearsal hosts supplied; replace private/Tailscale hosts with public DNS/IPs before true production." \
     --argjson hosts "$hosts_json" \
     --argjson blockers "$blockers_json" \
@@ -796,6 +803,7 @@ write_summary() {
         authority_server_up: $authority_server,
         provider_server_up: $provider_server,
         prod_mtls_bundle_verify: $bundle_verify_template,
+        prod_mtls_bundle_stage: $bundle_stage_template,
         prod_preflight: $prod_preflight,
         client_vpn_smoke: $client_smoke,
         three_machine_prod_signoff: $signoff,

@@ -465,7 +465,7 @@ Usage:
   ./scripts/easy_node.sh self-update [--remote NAME] [--branch NAME] [--allow-dirty [0|1]] [--show-status [0|1]]
   ./scripts/easy_node.sh server-preflight [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--min-peer-operators N] [--timeout-sec N] [--beta-profile [0|1]] [--prod-profile [0|1]]
   ./scripts/easy_node.sh simple-server-preflight [--mode authority|provider] [--public-host HOST] [--peer-host HOST] [--prod-profile [0|1]] [--peer-identity-strict 0|1|auto] [--timeout-sec N]
-  ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--issuer-sponsor-token TOKEN] [--directory-admin-token TOKEN] [--entry-puzzle-secret SECRET] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--relay-country-code CC] [--entry-country-code CC] [--exit-country-code CC] [--middle-relay [0|1]] [--middle-relay-id ID] [--middle-operator-id ID] [--middle-endpoint-public HOST:PORT] [--middle-control-url-public URL] [--middle-entry-data-addr HOST:PORT] [--middle-exit-data-addr HOST:PORT] [--middle-country-code CC] [--beta-profile [0|1]] [--prod-profile [0|1]] [--show-admin-token [0|1]] [--federation-wait [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--federation-require-configured-healthy [0|1]] [--federation-max-cooling-retry-sec N] [--federation-max-peer-sync-age-sec N] [--federation-max-issuer-sync-age-sec N] [--federation-min-peer-success-sources N] [--federation-min-issuer-success-sources N] [--federation-min-peer-source-operators N] [--federation-min-issuer-source-operators N] [--federation-wait-summary-json PATH] [--federation-wait-print-summary-json [0|1]] [--auto-invite [0|1]] [--auto-invite-count N] [--auto-invite-tier 1|2|3] [--auto-invite-wait-sec N] [--auto-invite-fail-open [0|1]]
+  ./scripts/easy_node.sh server-up [--mode authority|provider] [--public-host HOST] [--operator-id ID] [--issuer-id ID] [--issuer-admin-token TOKEN] [--issuer-sponsor-token TOKEN] [--directory-admin-token TOKEN] [--entry-puzzle-secret SECRET] [--authority-directory URL] [--authority-issuer URL] [--peer-directories URLS] [--bootstrap-directory URL] [--peer-identity-strict 0|1|auto] [--client-allowlist [0|1]] [--allow-anon-cred [0|1]] [--relay-country-code CC] [--entry-country-code CC] [--exit-country-code CC] [--middle-relay [0|1]] [--middle-relay-id ID] [--middle-operator-id ID] [--middle-endpoint-public HOST:PORT] [--middle-control-url-public URL] [--middle-entry-data-addr HOST:PORT] [--middle-exit-data-addr HOST:PORT] [--middle-country-code CC] [--beta-profile [0|1]] [--prod-profile [0|1]] [--prod-mtls-mode bootstrap|staged] [--show-admin-token [0|1]] [--federation-wait [0|1]] [--federation-ready-timeout-sec N] [--federation-poll-sec N] [--federation-require-configured-healthy [0|1]] [--federation-max-cooling-retry-sec N] [--federation-max-peer-sync-age-sec N] [--federation-max-issuer-sync-age-sec N] [--federation-min-peer-success-sources N] [--federation-min-issuer-success-sources N] [--federation-min-peer-source-operators N] [--federation-min-issuer-source-operators N] [--federation-wait-summary-json PATH] [--federation-wait-print-summary-json [0|1]] [--auto-invite [0|1]] [--auto-invite-count N] [--auto-invite-tier 1|2|3] [--auto-invite-wait-sec N] [--auto-invite-fail-open [0|1]]
   ./scripts/easy_node.sh server-status
   ./scripts/easy_node.sh server-federation-status [--directory-url URL] [--admin-token TOKEN] [--timeout-sec N] [--show-json [0|1]] [--require-configured-healthy [0|1]] [--max-cooling-retry-sec N] [--max-peer-sync-age-sec N] [--max-issuer-sync-age-sec N] [--min-peer-success-sources N] [--min-issuer-success-sources N] [--min-peer-source-operators N] [--min-issuer-source-operators N] [--fail-on-not-ready [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh server-federation-wait [--directory-url URL] [--admin-token TOKEN] [--ready-timeout-sec N] [--poll-sec N] [--timeout-sec N] [--require-configured-healthy [0|1]] [--max-cooling-retry-sec N] [--max-peer-sync-age-sec N] [--max-issuer-sync-age-sec N] [--min-peer-success-sources N] [--min-issuer-success-sources N] [--min-peer-source-operators N] [--min-issuer-source-operators N] [--summary-json PATH] [--print-summary-json [0|1]] [--show-json [0|1]]
@@ -711,6 +711,7 @@ Usage:
   ./scripts/easy_node.sh admin-signing-rotate [--restart-issuer [0|1]] [--key-history N]
   ./scripts/easy_node.sh prod-mtls-prep --authority-host HOST --provider-host HOST [--allow-private-hosts [0|1]] [--out-dir DIR] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-mtls-bundle-verify --bundle-dir DIR --host HOST [--days-min N] [--allow-ca-key [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/easy_node.sh prod-mtls-bundle-stage --bundle-dir DIR --host HOST [--target-dir DIR] [--copy-client auto|0|1] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh prod-preflight [--days-min N] [--check-live [0|1]] [--timeout-sec N] [--live-require-configured-healthy [0|1]] [--live-max-cooling-retry-sec N] [--live-max-peer-sync-age-sec N] [--live-max-issuer-sync-age-sec N] [--live-min-peer-success-sources N] [--live-min-issuer-success-sources N] [--live-min-peer-source-operators N] [--live-min-issuer-source-operators N]
   ./scripts/easy_node.sh bootstrap-mtls [--out-dir DIR] [--public-host HOST] [--san HOST] [--days N] [--rotate-leaf [0|1]] [--rotate-ca [0|1]]
   ./scripts/easy_node.sh machine-a-test [--public-host HOST] [--report-file PATH]
@@ -733,6 +734,7 @@ Notes:
   - admin-signing-status/admin-signing-rotate are authority-only issuer admin signer maintenance tools.
   - prod-mtls-prep prepares HTTPS/mTLS artifacts and later cutover commands without editing active env files or restarting servers.
   - prod-mtls-bundle-verify checks a staged per-host server bundle before cutover and fails if ca.key is present by default.
+  - prod-mtls-bundle-stage copies a verified per-host server bundle into deploy/tls for later opt-in server-up --prod-mtls-mode staged.
   - prod-preflight validates strict prod profile wiring (mTLS policy, CA/key/cert fit, public-host SANs, HTTPS URLs, and authority signer config).
   - server-federation-status prints directory peer+sync health (including configured/discovered peer failure streaks), can evaluate strict policy thresholds in one shot, and can emit machine-readable summary JSON for automation/handoff.
   - server-federation-wait blocks until directory peer-sync + issuer-sync quorum and peer-health readiness are met (or timeout), can optionally fail-close on configured-peer degradation/excessive cooldown/stale sync age, and can emit machine-readable summary JSON for automation.
@@ -1700,6 +1702,15 @@ prod_mtls_prep() {
 
 prod_mtls_bundle_verify() {
   local script="$ROOT_DIR/scripts/prod_mtls_bundle_verify.sh"
+  if [[ ! -x "$script" ]]; then
+    echo "missing helper script: $script"
+    exit 2
+  fi
+  "$script" "$@"
+}
+
+prod_mtls_bundle_stage() {
+  local script="$ROOT_DIR/scripts/prod_mtls_bundle_stage.sh"
   if [[ ! -x "$script" ]]; then
     echo "missing helper script: $script"
     exit 2
@@ -5137,6 +5148,7 @@ server_up() {
   local allow_anon_cred_explicit="0"
   local beta_profile="${EASY_NODE_BETA_PROFILE:-0}"
   local prod_profile="${EASY_NODE_PROD_PROFILE:-0}"
+  local prod_mtls_mode="${EASY_NODE_PROD_MTLS_MODE:-bootstrap}"
   local show_admin_token="${EASY_NODE_SHOW_ADMIN_TOKEN:-0}"
   local federation_wait="${EASY_NODE_FEDERATION_WAIT:-0}"
   local federation_ready_timeout_sec="${EASY_NODE_FEDERATION_READY_TIMEOUT_SEC:-90}"
@@ -5265,6 +5277,10 @@ server_up() {
           prod_profile="1"
           shift
         fi
+        ;;
+      --prod-mtls-mode)
+        prod_mtls_mode="${2:-}"
+        shift 2
         ;;
       --show-admin-token)
         if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1") ]]; then
@@ -5442,6 +5458,11 @@ server_up() {
   fi
   if [[ "$prod_profile" != "0" && "$prod_profile" != "1" ]]; then
     echo "server-up requires --prod-profile (or EASY_NODE_PROD_PROFILE) to be 0 or 1"
+    exit 2
+  fi
+  prod_mtls_mode="$(printf '%s' "$prod_mtls_mode" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  if [[ "$prod_mtls_mode" != "bootstrap" && "$prod_mtls_mode" != "staged" ]]; then
+    echo "server-up requires --prod-mtls-mode (or EASY_NODE_PROD_MTLS_MODE) to be bootstrap or staged"
     exit 2
   fi
   if [[ "$prod_profile" == "1" ]]; then
@@ -5808,32 +5829,46 @@ server_up() {
   local admin_signers_file_local=""
   local admin_signers_file_container=""
   if [[ "$prod_profile" == "1" ]]; then
-    local -a mtls_args
-    mtls_args=(--out-dir "$DEPLOY_DIR/tls")
-    if [[ -n "$local_host" ]]; then
-      mtls_args+=(--public-host "$local_host")
-    fi
-    if [[ -n "$public_host" && "$public_host" != "$local_host" ]]; then
-      mtls_args+=(--san "$public_host")
-    fi
-    if [[ -n "$peer_dirs" ]]; then
-      local peer_url peer_host
-      while IFS= read -r peer_url; do
-        [[ -z "$peer_url" ]] && continue
-        peer_host="$(host_from_url "$peer_url")"
-        if [[ -n "$peer_host" ]]; then
-          mtls_args+=(--san "$peer_host")
-        fi
-      done < <(split_csv_lines "$peer_dirs")
-    fi
-    if [[ "$mode" == "provider" && -n "$authority_directory" ]]; then
-      local authority_host
-      authority_host="$(host_from_url "$authority_directory")"
-      if [[ -n "$authority_host" ]]; then
-        mtls_args+=(--san "$authority_host")
+    if [[ "$prod_mtls_mode" == "staged" ]]; then
+      local staged_verify_json
+      staged_verify_json="$(prepare_log_dir)/server_up_prod_mtls_staged_verify_$(date -u +%Y%m%d_%H%M%S).json"
+      if [[ -z "$local_host" ]]; then
+        echo "server-up --prod-mtls-mode staged requires a parseable --public-host for SAN verification"
+        exit 2
       fi
+      "$ROOT_DIR/scripts/prod_mtls_bundle_verify.sh" \
+        --bundle-dir "$DEPLOY_DIR/tls" \
+        --host "$local_host" \
+        --summary-json "$staged_verify_json" >/dev/null
+      echo "server-up prod mTLS staged verify: ok ($staged_verify_json)"
+    else
+      local -a mtls_args
+      mtls_args=(--out-dir "$DEPLOY_DIR/tls")
+      if [[ -n "$local_host" ]]; then
+        mtls_args+=(--public-host "$local_host")
+      fi
+      if [[ -n "$public_host" && "$public_host" != "$local_host" ]]; then
+        mtls_args+=(--san "$public_host")
+      fi
+      if [[ -n "$peer_dirs" ]]; then
+        local peer_url peer_host
+        while IFS= read -r peer_url; do
+          [[ -z "$peer_url" ]] && continue
+          peer_host="$(host_from_url "$peer_url")"
+          if [[ -n "$peer_host" ]]; then
+            mtls_args+=(--san "$peer_host")
+          fi
+        done < <(split_csv_lines "$peer_dirs")
+      fi
+      if [[ "$mode" == "provider" && -n "$authority_directory" ]]; then
+        local authority_host
+        authority_host="$(host_from_url "$authority_directory")"
+        if [[ -n "$authority_host" ]]; then
+          mtls_args+=(--san "$authority_host")
+        fi
+      fi
+      bootstrap_mtls "${mtls_args[@]}"
     fi
-    bootstrap_mtls "${mtls_args[@]}"
     if [[ "$mode" == "authority" ]]; then
       local signer_material
       signer_material="$(ensure_admin_signing_material)"
@@ -19890,6 +19925,10 @@ main() {
     prod-mtls-bundle-verify)
       shift
       prod_mtls_bundle_verify "$@"
+      ;;
+    prod-mtls-bundle-stage)
+      shift
+      prod_mtls_bundle_stage "$@"
       ;;
     prod-preflight)
       shift

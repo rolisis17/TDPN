@@ -203,6 +203,11 @@ if ! rg -q "prod-mtls-bundle-verify" "$public_dir/prod_mtls_prep_report.md"; the
   cat "$public_dir/prod_mtls_prep_report.md"
   exit 1
 fi
+if ! rg -q "prod-mtls-bundle-stage" "$public_dir/prod_mtls_prep_report.md"; then
+  echo "missing host-bundle stage command in report"
+  cat "$public_dir/prod_mtls_prep_report.md"
+  exit 1
+fi
 if ! jq -e '(.certificate_generation.host_server_bundles | length) == 3' "$public_dir/prod_mtls_prep_summary.json" >/dev/null; then
   echo "expected host-specific server bundles for authority plus both providers"
   cat "$public_dir/prod_mtls_prep_summary.json"
@@ -300,6 +305,39 @@ fi
 if ! jq -e '.status=="fail" and (.blockers[]? | select(.code=="ca_key_absent"))' "$tmp_dir/leaky_bundle_verify.json" >/dev/null; then
   echo "expected leaky bundle verify summary to identify ca.key"
   cat "$tmp_dir/leaky_bundle_verify.json"
+  exit 1
+fi
+
+stage_target="$tmp_dir/staged_tls"
+./scripts/easy_node.sh prod-mtls-bundle-stage \
+  --bundle-dir "$authority_bundle" \
+  --host 203.0.113.10 \
+  --target-dir "$stage_target" \
+  --summary-json "$tmp_dir/stage_authority_bundle.json" \
+  --print-summary-json 1 >"$tmp_dir/stage_authority_bundle.log"
+if ! jq -e '.status=="pass" and .client_material_copied==true and .restarted_services==false' "$tmp_dir/stage_authority_bundle.json" >/dev/null; then
+  echo "expected authority bundle stage to pass and copy client material"
+  cat "$tmp_dir/stage_authority_bundle.json"
+  exit 1
+fi
+for staged_file in ca.crt node.crt node.key client.crt client.key; do
+  if [[ ! -s "$stage_target/$staged_file" ]]; then
+    echo "missing staged file: $staged_file"
+    cat "$tmp_dir/stage_authority_bundle.json"
+    exit 1
+  fi
+done
+if [[ -e "$stage_target/ca.key" ]]; then
+  echo "staged server target must not contain ca.key"
+  exit 1
+fi
+./scripts/prod_mtls_bundle_verify.sh \
+  --bundle-dir "$stage_target" \
+  --host 203.0.113.10 \
+  --summary-json "$tmp_dir/stage_target_verify.json" >"$tmp_dir/stage_target_verify.log"
+if ! jq -e '.status=="pass" and .failures==0' "$tmp_dir/stage_target_verify.json" >/dev/null; then
+  echo "expected staged target verify to pass"
+  cat "$tmp_dir/stage_target_verify.json"
   exit 1
 fi
 
