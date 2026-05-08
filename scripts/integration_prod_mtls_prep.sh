@@ -33,6 +33,21 @@ if ! rg -q "bare host|not a URL" "$invalid_log"; then
   exit 1
 fi
 
+host_port_log="$tmp_dir/host_port.log"
+if ./scripts/prod_mtls_prep.sh \
+  --authority-host example.com:8081 \
+  --provider-host 198.51.100.20 \
+  --out-dir "$tmp_dir/host-port" >"$host_port_log" 2>&1; then
+  echo "expected prod-mtls-prep to reject host:port values"
+  cat "$host_port_log"
+  exit 1
+fi
+if ! rg -q "not host:port" "$host_port_log"; then
+  echo "missing expected host:port failure signal"
+  cat "$host_port_log"
+  exit 1
+fi
+
 private_dir="$tmp_dir/private"
 private_log="$tmp_dir/private.log"
 if ./scripts/prod_mtls_prep.sh \

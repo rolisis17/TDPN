@@ -123,6 +123,10 @@ normalize_host_value() {
     echo "invalid mTLS host '$value': use a bare host or IP address, not a URL or path" >&2
     return 1
   fi
+  if [[ "$value" == \[* || "$value" == *\] ]]; then
+    echo "invalid mTLS host '$value': use a bare IPv6 address without brackets or port" >&2
+    return 1
+  fi
   if [[ "$value" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
     if ! is_ipv4 "$value"; then
       echo "invalid IPv4 mTLS host '$value': octets must be in range 0..255" >&2
@@ -130,6 +134,14 @@ normalize_host_value() {
     fi
     printf '%s' "$value"
     return 0
+  fi
+  if [[ "$value" == *:* ]]; then
+    local maybe_port="${value##*:}"
+    local host_part="${value%:*}"
+    if [[ "$host_part" != *:* && "$maybe_port" =~ ^[0-9]+$ ]]; then
+      echo "invalid mTLS host '$value': use a bare host or IP address, not host:port" >&2
+      return 1
+    fi
   fi
   if [[ "$value" == *:* ]]; then
     if ! is_ipv6 "$value"; then
