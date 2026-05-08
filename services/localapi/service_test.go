@@ -15276,6 +15276,23 @@ func TestGPMBootstrapManifestResponseIncludesTrustTelemetry(t *testing.T) {
 			"generated_at_utc":      manifestGeneratedAt,
 			"expires_at_utc":        manifestExpiresAt,
 			"bootstrap_directories": []string{bootstrapDirectory},
+			"gateway_mirrors": []map[string]any{
+				{
+					"url":  "https://mirror.telemetry.globalprivatemesh.example/v1/bootstrap/manifest",
+					"kind": "mirror",
+				},
+			},
+			"bridge_hints": []map[string]any{
+				{
+					"bridge_id":        "bridge-telemetry",
+					"operator_id":      "op-bridge-telemetry",
+					"endpoint":         "https://bridge.telemetry.globalprivatemesh.example/bootstrap",
+					"transport":        "https",
+					"ticket_required":  true,
+					"rate_limit_class": "standard",
+					"expires_at_utc":   manifestExpiresAt,
+				},
+			},
 		})
 	}))
 	t.Cleanup(manifestServer.Close)
@@ -15341,6 +15358,21 @@ func TestGPMBootstrapManifestResponseIncludesTrustTelemetry(t *testing.T) {
 	}
 	if gotVersion, _ := manifestPayload["version"].(float64); gotVersion != 1 {
 		t.Fatalf("manifest.version=%v want=1 manifest=%v", gotVersion, manifestPayload)
+	}
+	bridgeHints, ok := manifestPayload["bridge_hints"].([]any)
+	if !ok || len(bridgeHints) != 1 {
+		t.Fatalf("manifest.bridge_hints=%T/%v want one hint manifest=%v", manifestPayload["bridge_hints"], manifestPayload["bridge_hints"], manifestPayload)
+	}
+	bridgeHint, ok := bridgeHints[0].(map[string]any)
+	if !ok {
+		t.Fatalf("manifest.bridge_hints[0]=%T want map manifest=%v", bridgeHints[0], manifestPayload)
+	}
+	if got, _ := bridgeHint["bridge_id"].(string); got != "bridge-telemetry" {
+		t.Fatalf("manifest.bridge_hints[0].bridge_id=%q want bridge-telemetry manifest=%v", got, manifestPayload)
+	}
+	gatewayMirrors, ok := manifestPayload["gateway_mirrors"].([]any)
+	if !ok || len(gatewayMirrors) != 1 {
+		t.Fatalf("manifest.gateway_mirrors=%T/%v want one mirror manifest=%v", manifestPayload["gateway_mirrors"], manifestPayload["gateway_mirrors"], manifestPayload)
 	}
 }
 

@@ -22,6 +22,9 @@
         </a>
         <nav class="nav" aria-label="Primary">
           <a class="btn secondary" href="#why-gpm">Why GPM</a>
+          <a class="btn secondary" href="#network-tiers">Tiers</a>
+          <a class="btn secondary" href="#gpm-places">Places</a>
+          <a class="btn secondary" href="#bootstrap-resilience">Bootstrap</a>
           <a class="btn secondary" href="#server-hosts">Run a server</a>
           <a class="btn primary" href="./portal.html">Open Portal</a>
         </nav>
@@ -105,7 +108,200 @@
         </div>
       </section>
 
-      <section class="section premium-section reveal reveal--2" id="server-hosts" aria-labelledby="server-hosts-heading">
+      <section class="section tier-map-section reveal reveal--2" id="network-tiers" aria-labelledby="network-tiers-heading">
+        <div class="wrap tier-map-band">
+          <div class="tier-map-intro">
+            <div class="section__header">
+              <p class="section__eyebrow">Mental map</p>
+              <h2 id="network-tiers-heading">Four ways to belong to the mesh.</h2>
+              <p class="section-lead">
+                GPM can stay simple on the surface while the network grows in layers: planned
+                community access, standard paid access, reliable contributors, and backbone operators.
+              </p>
+            </div>
+            <div class="credit-loop" aria-label="Tier 0 credit loop">
+              <span>Use</span>
+              <span>Share</span>
+              <span>Earn credits</span>
+              <span>Spend or upgrade</span>
+            </div>
+          </div>
+
+          <div class="tier-map-grid" aria-label="GPM tier model">
+            <article class="tier-node tier-node--community">
+              <p class="tier-node__eyebrow">Tier 0 planned</p>
+              <h3>Community Mode</h3>
+              <p>
+                Free or very low-cost access for people who knowingly help the network as a capped
+                client, relay, and exit.
+              </p>
+              <dl class="tier-node__facts">
+                <div>
+                  <dt>Needs</dt>
+                  <dd>Wallet, device checks, clear consent, and safety education.</dd>
+                </div>
+                <div>
+                  <dt>Gets</dt>
+                  <dd>Internal credits for usage, priority, retries, or upgrade discounts.</dd>
+                </div>
+                <div>
+                  <dt>Limits</dt>
+                  <dd>No cash payout, no stake replacement, strict traffic and abuse guardrails.</dd>
+                </div>
+              </dl>
+            </article>
+
+            <article class="tier-node tier-node--standard">
+              <p class="tier-node__eyebrow">Tier 1</p>
+              <h3>Standard Access</h3>
+              <p>
+                The normal GPM path: pay or stake for access, register the device, and use stable
+                routes without becoming a community exit.
+              </p>
+              <dl class="tier-node__facts">
+                <div>
+                  <dt>Needs</dt>
+                  <dd>Wallet, device registration, and required balance or stake policy.</dd>
+                </div>
+                <div>
+                  <dt>Can do</dt>
+                  <dd>Use the VPN, keep routes automatic, and apply for reviewed server access.</dd>
+                </div>
+                <div>
+                  <dt>Limits</dt>
+                  <dd>No micro-relay or micro-exit contribution until higher trust is earned.</dd>
+                </div>
+              </dl>
+            </article>
+
+            <article class="tier-node tier-node--reliable">
+              <p class="tier-node__eyebrow">Tier 2</p>
+              <h3>Reliable Contributor</h3>
+              <p>
+                A higher-trust account for users or operators with better capacity, uptime, stake,
+                and abuse history.
+              </p>
+              <dl class="tier-node__facts">
+                <div>
+                  <dt>Needs</dt>
+                  <dd>More stake, healthy device checks, capacity score, and clean reputation.</dd>
+                </div>
+                <div>
+                  <dt>Can do</dt>
+                  <dd>Use richer paths and opt into relay or exit beta when policy allows it.</dd>
+                </div>
+                <div>
+                  <dt>Earns</dt>
+                  <dd>Metered weekly rewards with holds, voids, and slashing for abuse.</dd>
+                </div>
+              </dl>
+            </article>
+
+            <article class="tier-node tier-node--backbone">
+              <p class="tier-node__eyebrow">Tier 3</p>
+              <h3>Backbone Operator</h3>
+              <p>
+                The high-trust layer for core infrastructure, high-capacity routes, authority
+                services, and settlement operations.
+              </p>
+              <dl class="tier-node__facts">
+                <div>
+                  <dt>Needs</dt>
+                  <dd>Highest stake, proven uptime, key discipline, mTLS/HTTPS, and approval.</dd>
+                </div>
+                <div>
+                  <dt>Can do</dt>
+                  <dd>Run authority-grade services, backbone relays, exits, and validator paths.</dd>
+                </div>
+                <div>
+                  <dt>Duty</dt>
+                  <dd>Carry the strongest operational, audit, and governance responsibilities.</dd>
+                </div>
+              </dl>
+            </article>
+          </div>
+
+          <div class="tier-rule-grid" aria-label="Network rules">
+            <article>
+              <h3>No hidden exits</h3>
+              <p>Tier 0 exit mode must be explicit, warned, explained, capped, and reversible.</p>
+            </article>
+            <article>
+              <h3>Credits are not stake</h3>
+              <p>Community credits buy network utility; real staking and slashing stay separate.</p>
+            </article>
+            <article>
+              <h3>Abuse handling stays narrow</h3>
+              <p>Track account, session, exit assignment, and abuse events without browsing logs.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section places-section reveal reveal--3" id="gpm-places" aria-labelledby="gpm-places-heading">
+        <div class="wrap places-band">
+          <div class="section__header">
+            <p class="section__eyebrow">GPM Places planned</p>
+            <h2 id="gpm-places-heading">Private access, plus somewhere useful to go.</h2>
+            <p class="section-lead">
+              GPM can grow into a private network of pages, communities, tools, projects, and creator
+              spaces. The first version stays quiet: no public feed, no raw-view payouts, and no cash
+              promises.
+            </p>
+          </div>
+
+          <div class="places-grid" aria-label="GPM Places product map">
+            <article class="place-card">
+              <span class="place-card__label">01</span>
+              <h3>Pages inside the mesh</h3>
+              <p>Profiles, project pages, guides, communities, and small tools can become internal destinations.</p>
+            </article>
+            <article class="place-card">
+              <span class="place-card__label">02</span>
+              <h3>Credits with guardrails</h3>
+              <p>People support useful places with credits. Creator rewards start capped, delayed, and reviewable.</p>
+            </article>
+            <article class="place-card">
+              <span class="place-card__label">03</span>
+              <h3>Discovery before feeds</h3>
+              <p>Curated categories, reports, blocks, and moderation come before any broad social feed.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section places-section bootstrap-section reveal reveal--4" id="bootstrap-resilience" aria-labelledby="bootstrap-resilience-heading">
+        <div class="wrap places-band bootstrap-band">
+          <div class="section__header">
+            <p class="section__eyebrow">Resilient first connection</p>
+            <h2 id="bootstrap-resilience-heading">Many ways in, one trust rule.</h2>
+            <p class="section-lead">
+              A new user should not depend on one static gateway. Official manifests, mirrors,
+              cache, and bridge invites can help discovery, but signed freshness decides trust.
+            </p>
+          </div>
+
+          <div class="places-grid bootstrap-grid" aria-label="GPM bootstrap resilience map">
+            <article class="place-card bootstrap-card">
+              <span class="place-card__label">01</span>
+              <h3>Signed manifest</h3>
+              <p>The app verifies expiry, key policy, HTTPS posture, and trusted directory lists before registering.</p>
+            </article>
+            <article class="place-card bootstrap-card">
+              <span class="place-card__label">02</span>
+              <h3>Mirrors and cache</h3>
+              <p>Alternate sources can carry the same signed material, so outages do not rewrite trust.</p>
+            </article>
+            <article class="place-card bootstrap-card">
+              <span class="place-card__label">03</span>
+              <h3>Insider bridge invite</h3>
+              <p>An existing user can help an outsider discover the network, but cannot become the authority.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section premium-section reveal reveal--5" id="server-hosts" aria-labelledby="server-hosts-heading">
         <div class="wrap split-section">
           <div class="section__header">
             <p class="section__eyebrow">For server hosts</p>
@@ -134,7 +330,7 @@
         </div>
       </section>
 
-      <section class="section premium-section reveal reveal--3" aria-labelledby="trust-heading">
+      <section class="section premium-section reveal reveal--6" aria-labelledby="trust-heading">
         <div class="wrap">
           <div class="section__header section__header--center">
             <p class="section__eyebrow">Designed to feel safe</p>
@@ -157,7 +353,7 @@
         </div>
       </section>
 
-      <section class="section reveal reveal--4" aria-labelledby="portal-cta-heading">
+      <section class="section reveal reveal--7" aria-labelledby="portal-cta-heading">
         <div class="wrap">
           <div class="card cta-panel">
             <div class="section__header section__header--compact">

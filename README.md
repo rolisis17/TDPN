@@ -493,6 +493,8 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `docs/manual-validation-backlog.md` (deferred real-host validation queue)
 - `docs/blockchain-bootstrap-validator-plan.md` (deferred blockchain bootstrap: manual governance phase, validator eligibility formula skeleton, epoch selection policy, and graduation criteria)
 - `docs/global-privacy-mesh-track.md` (micro-relay + 1-hop/2-hop/3-hop planning track, with incremental implementation milestones)
+- `docs/gpm-places-track.md` (private in-mesh pages, communities, creator/project spaces, credits, moderation, and staged social-network direction)
+- `docs/gpm-bootstrap-resilience-track.md` (signed bootstrap manifests, fallback sources, and insider bridge-invite discovery without password-only trust)
 - `docs/exit-node-safety-baseline-v1.md` (minimum safety controls for hardened exit operators)
 - `docs/exit-node-safety-guide.md` (operator-facing practical exit safety workflow)
 - `docs/client-safety-guide.md` (client-side safety defaults and profile tradeoff guidance)

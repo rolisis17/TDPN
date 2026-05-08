@@ -225,11 +225,45 @@ type gpmSlashEvidenceLister interface {
 }
 
 type gpmBootstrapManifest struct {
-	Version              int            `json:"version"`
-	GeneratedAtUTC       string         `json:"generated_at_utc"`
-	ExpiresAtUTC         string         `json:"expires_at_utc"`
-	BootstrapDirectories []string       `json:"bootstrap_directories"`
-	RelayPolicy          map[string]any `json:"relay_policy,omitempty"`
+	Version              int                      `json:"version"`
+	GeneratedAtUTC       string                   `json:"generated_at_utc"`
+	ExpiresAtUTC         string                   `json:"expires_at_utc"`
+	BootstrapDirectories []string                 `json:"bootstrap_directories"`
+	GatewayMirrors       []gpmBootstrapURLHint    `json:"gateway_mirrors,omitempty"`
+	BootstrapSources     []gpmBootstrapURLHint    `json:"bootstrap_sources,omitempty"`
+	RelayHints           []gpmBootstrapRelayHint  `json:"relay_hints,omitempty"`
+	BridgeHints          []gpmBootstrapBridgeHint `json:"bridge_hints,omitempty"`
+	RelayPolicy          map[string]any           `json:"relay_policy,omitempty"`
+}
+
+type gpmBootstrapURLHint struct {
+	URL          string `json:"url"`
+	Kind         string `json:"kind"`
+	OperatorID   string `json:"operator_id,omitempty"`
+	KeyID        string `json:"key_id,omitempty"`
+	ExpiresAtUTC string `json:"expires_at_utc,omitempty"`
+}
+
+type gpmBootstrapRelayHint struct {
+	RelayID      string `json:"relay_id"`
+	OperatorID   string `json:"operator_id"`
+	DirectoryURL string `json:"directory_url,omitempty"`
+	EntryURL     string `json:"entry_url,omitempty"`
+	PublicHost   string `json:"public_host,omitempty"`
+	Country      string `json:"country,omitempty"`
+	Region       string `json:"region,omitempty"`
+	HintSource   string `json:"hint_source"`
+	ExpiresAtUTC string `json:"expires_at_utc,omitempty"`
+}
+
+type gpmBootstrapBridgeHint struct {
+	BridgeID       string `json:"bridge_id"`
+	OperatorID     string `json:"operator_id,omitempty"`
+	Endpoint       string `json:"endpoint"`
+	Transport      string `json:"transport"`
+	TicketRequired bool   `json:"ticket_required"`
+	RateLimitClass string `json:"rate_limit_class,omitempty"`
+	ExpiresAtUTC   string `json:"expires_at_utc,omitempty"`
 }
 
 type gpmBootstrapManifestCacheFile struct {
@@ -6730,12 +6764,194 @@ func validateBootstrapManifest(manifest gpmBootstrapManifest) error {
 			return fmt.Errorf("manifest bootstrap directory invalid: %w", err)
 		}
 	}
+	if err := validateBootstrapURLHints("gateway_mirrors", manifest.GatewayMirrors, 32); err != nil {
+		return err
+	}
+	if err := validateBootstrapURLHints("bootstrap_sources", manifest.BootstrapSources, 64); err != nil {
+		return err
+	}
+	if err := validateBootstrapRelayHints(manifest.RelayHints); err != nil {
+		return err
+	}
+	if err := validateBootstrapBridgeHints(manifest.BridgeHints); err != nil {
+		return err
+	}
 	return nil
 }
 
 func normalizeBootstrapManifest(manifest gpmBootstrapManifest) gpmBootstrapManifest {
 	manifest.BootstrapDirectories = normalizeBootstrapDirectories(manifest.BootstrapDirectories)
+	manifest.GatewayMirrors = normalizeBootstrapURLHints(manifest.GatewayMirrors)
+	manifest.BootstrapSources = normalizeBootstrapURLHints(manifest.BootstrapSources)
+	manifest.RelayHints = normalizeBootstrapRelayHints(manifest.RelayHints)
+	manifest.BridgeHints = normalizeBootstrapBridgeHints(manifest.BridgeHints)
 	return manifest
+}
+
+func validateBootstrapURLHints(field string, hints []gpmBootstrapURLHint, maxItems int) error {
+	if len(hints) > maxItems {
+		return fmt.Errorf("manifest %s has %d items, max %d", field, len(hints), maxItems)
+	}
+	for i, hint := range hints {
+		prefix := fmt.Sprintf("manifest %s[%d]", field, i)
+		if err := validateManifestText(prefix+".url", hint.URL, 240, true); err != nil {
+			return err
+		}
+		if err := validateManifestText(prefix+".kind", hint.Kind, 64, true); err != nil {
+			return err
+		}
+		if err := validateManifestText(prefix+".operator_id", hint.OperatorID, 128, false); err != nil {
+			return err
+		}
+		if err := validateManifestText(prefix+".key_id", hint.KeyID, 160, false); err != nil {
+			return err
+		}
+		if err := validateOptionalManifestTime(prefix+".expires_at_utc", hint.ExpiresAtUTC); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateBootstrapRelayHints(hints []gpmBootstrapRelayHint) error {
+	if len(hints) > 128 {
+		return fmt.Errorf("manifest relay_hints has %d items, max 128", len(hints))
+	}
+	for i, hint := range hints {
+		prefix := fmt.Sprintf("manifest relay_hints[%d]", i)
+		if err := validateManifestText(prefix+".relay_id", hint.RelayID, 128, true); err != nil {
+			return err
+		}
+		if err := validateManifestText(prefix+".operator_id", hint.OperatorID, 128, true); err != nil {
+			return err
+		}
+		if err := validateManifestText(prefix+".directory_url", hint.DirectoryURL, 240, false); err != nil {
+			return err
+		}
+		if strings.TrimSpace(hint.DirectoryURL) != "" {
+			if err := validateBootstrapDirectoryURL(hint.DirectoryURL); err != nil {
+				return fmt.Errorf("%s.directory_url invalid: %w", prefix, err)
+			}
+		}
+		if err := validateManifestText(prefix+".entry_url", hint.EntryURL, 240, false); err != nil {
+			return err
+		}
+		if err := validateManifestText(prefix+".public_host", hint.PublicHost, 180, false); err != nil {
+			return err
+		}
+		if err := validateManifestText(prefix+".country", hint.Country, 2, false); err != nil {
+			return err
+		}
+		if err := validateManifestText(prefix+".region", hint.Region, 80, false); err != nil {
+			return err
+		}
+		if err := validateManifestText(prefix+".hint_source", hint.HintSource, 64, true); err != nil {
+			return err
+		}
+		if err := validateOptionalManifestTime(prefix+".expires_at_utc", hint.ExpiresAtUTC); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateBootstrapBridgeHints(hints []gpmBootstrapBridgeHint) error {
+	if len(hints) > 64 {
+		return fmt.Errorf("manifest bridge_hints has %d items, max 64", len(hints))
+	}
+	for i, hint := range hints {
+		prefix := fmt.Sprintf("manifest bridge_hints[%d]", i)
+		if err := validateManifestText(prefix+".bridge_id", hint.BridgeID, 128, true); err != nil {
+			return err
+		}
+		if err := validateManifestText(prefix+".operator_id", hint.OperatorID, 128, false); err != nil {
+			return err
+		}
+		if err := validateManifestText(prefix+".endpoint", hint.Endpoint, 240, true); err != nil {
+			return err
+		}
+		if err := validateManifestText(prefix+".transport", hint.Transport, 32, true); err != nil {
+			return err
+		}
+		if err := validateManifestText(prefix+".rate_limit_class", hint.RateLimitClass, 32, false); err != nil {
+			return err
+		}
+		if err := validateOptionalManifestTime(prefix+".expires_at_utc", hint.ExpiresAtUTC); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateManifestText(field string, value string, maxLen int, required bool) error {
+	trimmed := strings.TrimSpace(value)
+	if required && trimmed == "" {
+		return fmt.Errorf("%s is required", field)
+	}
+	if maxLen > 0 && len(trimmed) > maxLen {
+		return fmt.Errorf("%s exceeds max length %d", field, maxLen)
+	}
+	for _, r := range trimmed {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("%s contains control characters", field)
+		}
+	}
+	return nil
+}
+
+func validateOptionalManifestTime(field string, value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	if _, err := time.Parse(time.RFC3339, trimmed); err != nil {
+		return fmt.Errorf("%s invalid: %w", field, err)
+	}
+	return nil
+}
+
+func normalizeBootstrapURLHints(hints []gpmBootstrapURLHint) []gpmBootstrapURLHint {
+	out := make([]gpmBootstrapURLHint, 0, len(hints))
+	for _, hint := range hints {
+		hint.URL = strings.TrimSpace(hint.URL)
+		hint.Kind = strings.TrimSpace(hint.Kind)
+		hint.OperatorID = strings.TrimSpace(hint.OperatorID)
+		hint.KeyID = strings.TrimSpace(hint.KeyID)
+		hint.ExpiresAtUTC = strings.TrimSpace(hint.ExpiresAtUTC)
+		out = append(out, hint)
+	}
+	return out
+}
+
+func normalizeBootstrapRelayHints(hints []gpmBootstrapRelayHint) []gpmBootstrapRelayHint {
+	out := make([]gpmBootstrapRelayHint, 0, len(hints))
+	for _, hint := range hints {
+		hint.RelayID = strings.TrimSpace(hint.RelayID)
+		hint.OperatorID = strings.TrimSpace(hint.OperatorID)
+		hint.DirectoryURL = strings.TrimSpace(hint.DirectoryURL)
+		hint.EntryURL = strings.TrimSpace(hint.EntryURL)
+		hint.PublicHost = strings.TrimSpace(hint.PublicHost)
+		hint.Country = strings.ToUpper(strings.TrimSpace(hint.Country))
+		hint.Region = strings.TrimSpace(hint.Region)
+		hint.HintSource = strings.TrimSpace(hint.HintSource)
+		hint.ExpiresAtUTC = strings.TrimSpace(hint.ExpiresAtUTC)
+		out = append(out, hint)
+	}
+	return out
+}
+
+func normalizeBootstrapBridgeHints(hints []gpmBootstrapBridgeHint) []gpmBootstrapBridgeHint {
+	out := make([]gpmBootstrapBridgeHint, 0, len(hints))
+	for _, hint := range hints {
+		hint.BridgeID = strings.TrimSpace(hint.BridgeID)
+		hint.OperatorID = strings.TrimSpace(hint.OperatorID)
+		hint.Endpoint = strings.TrimSpace(hint.Endpoint)
+		hint.Transport = strings.TrimSpace(hint.Transport)
+		hint.RateLimitClass = strings.TrimSpace(hint.RateLimitClass)
+		hint.ExpiresAtUTC = strings.TrimSpace(hint.ExpiresAtUTC)
+		out = append(out, hint)
+	}
+	return out
 }
 
 func normalizeBootstrapDirectories(directories []string) []string {

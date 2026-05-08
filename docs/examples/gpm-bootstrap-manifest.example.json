@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "generated_at_utc": "2099-01-01T00:00:00Z",
+  "expires_at_utc": "2099-01-02T00:00:00Z",
+  "bootstrap_directories": [
+    "https://directory-a.example.gpm:8081",
+    "https://directory-b.example.gpm:8081"
+  ],
+  "gateway_mirrors": [
+    {
+      "url": "https://globalprivatemesh.example/v1/bootstrap/manifest",
+      "kind": "official"
+    }
+  ],
+  "bootstrap_sources": [
+    {
+      "url": "https://mirror-a.example.gpm/bootstrap/manifest.json",
+      "kind": "mirror",
+      "operator_id": "op-mirror-a"
+    }
+  ],
+  "bridge_hints": [
+    {
+      "bridge_id": "bridge-a",
+      "operator_id": "op-bridge-a",
+      "endpoint": "https://bridge-a.example.gpm/bootstrap",
+      "transport": "https",
+      "ticket_required": true,
+      "rate_limit_class": "standard",
+      "expires_at_utc": "2099-01-01T00:30:00Z"
+    }
+  ],
+  "relay_policy": {
+    "min_sources": 2,
+    "min_operators": 2,
+    "first_contact_bridge_scope": "bootstrap-manifest-fetch"
+  }
+}

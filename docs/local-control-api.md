@@ -74,6 +74,12 @@ Defaults:
   - `GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE=1` (legacy alias: `TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE=1`) requires verified manifest signature evidence for both remote fetch and cache fallback
   - default for both flags is `false` in compatibility mode, and `true` by default when `GPM_PRODUCTION_MODE=1` is enabled with no explicit override
   - production manifest fetches use a direct hardened outbound policy and fail closed when the manifest target resolves to private, loopback, link-local, unspecified, or multicast addresses
+- bootstrap resilience planning:
+  - signed bootstrap manifests remain the trust anchor for first contact; see `docs/gpm-bootstrap-resilience-track.md`
+  - manifest schema draft: `docs/schemas/gpm-bootstrap-manifest-v1.schema.json`
+  - bridge-invite schema draft: `docs/schemas/gpm-bootstrap-bridge-invite-v0.schema.json`
+  - `cmd/gpmmanifest` provides local Ed25519 key generation, signing, and verification tooling for manifest operator tests
+  - insider bridge invites are discovery aids only; password/passphrase material is not treated as trust
 
 Runner behavior:
 - Linux/macOS default: execute `LOCAL_CONTROL_API_SCRIPT` directly.

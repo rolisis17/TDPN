@@ -181,6 +181,8 @@ Guardrails:
 
 Track docs:
 - `docs/global-privacy-mesh-track.md`
+- `docs/gpm-places-track.md`
+- `docs/gpm-bootstrap-resilience-track.md`
 - `docs/gpm-productization-status.md`
 - `docs/exit-node-safety-baseline-v1.md`
 - `docs/exit-node-safety-guide.md`
@@ -193,6 +195,78 @@ Exit criteria for this track to affect default behavior:
 - Tier 1/Tier 2/Tier 3 contribution gates verified
 - weekly reward rollup, slashing hold/void behavior, and settlement history verified
 - release/public app verified to contain no admin controls or server-management UI
+
+## Parallel Product Track: GPM Places (Private Network Destinations)
+
+Goal: make GPM more than a transport utility by adding useful destinations inside the mesh:
+profile pages, creator/project pages, communities, documentation, tools, and eventually internal apps.
+
+Product thesis:
+- people come for cheaper and more private access
+- people stay when the network contains useful places, communities, and creators
+- GPM Places should feel like a private web inside the mesh, not a Facebook/TikTok clone
+
+Scope (planning/current):
+- define `GPM Place` as a signed internal destination owned by a wallet/subject
+- define a Place directory/manifest model before building dynamic social features
+- start with static pages, profiles, communities, and project/tool pages
+- keep internal GPM content routed inside the mesh when possible instead of relying on public exits
+- support direct user-to-creator/community support with credits
+- keep early rewards capped, delayed, and credit-only until fraud/legal/compliance review
+- add report, block, quarantine, appeal, and moderation status primitives before broad discovery
+
+Guardrails:
+- no algorithmic public feed in the first phase
+- no raw-view cash rewards
+- no "go viral, earn tokens" launch promise
+- no claim that credits are stake or withdrawable currency
+- no hidden exit obligations tied to content publishing
+- Admin Console owns moderation, reward holds, credit voids, and abuse review
+- Public GPM App exposes only user-owned place controls, reporting, blocking, and support
+
+Staged path:
+1. Product shape: publish `docs/gpm-places-track.md`, align website language, and keep the first draft Place schema at `docs/schemas/gpm-place-manifest-v0.schema.json`.
+2. Static local prototype: signed static Place bundles, local verifier, local directory registration, and portal preview.
+3. Mesh-internal fetch: resolve Places through directory metadata and fetch through approved internal paths/mirrors.
+4. Credits and direct support: user support/tips, capped creator receipts, reward holds/voids.
+5. Discovery and moderation: curated directory categories, reports, quarantine/limited states, appeal records.
+6. Community features: follows, memberships, comments/posts only after moderation primitives are proven.
+7. Larger creator economy: richer support and possible withdrawable payouts only after fraud, legal, tax, and compliance review.
+
+Track doc:
+- `docs/gpm-places-track.md`
+
+## Parallel Architecture Track: Bootstrap Resilience
+
+Goal: make first contact with GPM resilient without weakening trust. New users should be able to use official manifests, mirrors, cached signed bundles, DNS/directory hints, and eventually bridge-assisted insider invites, while the app still verifies signatures, expiry, pinned domain policy, and source freshness.
+
+Product thesis:
+- the first connection must not depend on one static website or gateway IP
+- an existing user can help an outsider discover the network, but cannot become the authority for what the outsider trusts
+- signed manifests and short-lived bridge tickets are the trust boundary; passwords/passphrases are only anti-spam or rate-limit gates
+
+Scope (planning/current):
+- keep production bootstrap anchored in signed manifests and HTTPS/mTLS preparation
+- define ordered fallback source classes for official endpoint, mirrors, cache, DNS/directory hints, bridge invite, and offline bundle
+- define the insider bridge invite shape for 2+ hop in-network requests that produce short-lived outsider bootstrap hints
+- add local manifest key/sign/verify tooling for repeatable operator testing
+
+Guardrails:
+- no password-only bootstrap trust
+- no permanent trust from one insider
+- no hidden full proxy/VPN access before normal onboarding
+- no default downgrade from signed production bootstrap to unsigned emergency recovery
+- no unblockability promise in public copy
+
+Staged path:
+1. Publish `docs/gpm-bootstrap-resilience-track.md`, add signed manifest and bridge-invite schemas, and add local manifest signing/verification CLI.
+2. Add official mirror fallback and source-type telemetry to local API bootstrap manifest resolution.
+3. Add import/verify flow for bridge invite bundles, limited to fetching signed bootstrap material.
+4. Add bridge service role with ticket-bound fetch only, rate limits, abuse reporting, and Admin Console revocation/quarantine.
+5. Add source-diversity policy for production bootstrap when practical.
+
+Track doc:
+- `docs/gpm-bootstrap-resilience-track.md`
 
 ## Phase 3: Cross-Platform Clients (After Linux Beta Stability)
 

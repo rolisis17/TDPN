@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpm.local/schemas/gpm-bootstrap-bridge-invite-v0.schema.json",
+  "title": "GPM Bootstrap Bridge Invite v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "invite_id",
+    "issued_at_utc",
+    "expires_at_utc",
+    "audience",
+    "bootstrap_manifest_key_id",
+    "bridge_hints",
+    "ticket",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 0
+    },
+    "invite_id": {
+      "type": "string",
+      "pattern": "^gpm-bi-[a-zA-Z0-9_-]{12,96}$"
+    },
+    "issued_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "audience": {
+      "type": "string",
+      "enum": ["bootstrap-manifest-fetch"]
+    },
+    "inviter_subject_hint": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "bootstrap_manifest_key_id": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 160
+    },
+    "bootstrap_manifest_public_key": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 256
+    },
+    "bridge_hints": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "$ref": "#/$defs/bridge_hint"
+      }
+    },
+    "secret_mode": {
+      "type": "string",
+      "enum": ["none", "human-passphrase", "qr-secret", "support-code"]
+    },
+    "secret_hint": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "ticket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ticket_id", "nonce", "max_uses", "signature_key_id"],
+      "properties": {
+        "ticket_id": {
+          "type": "string",
+          "pattern": "^bt-[a-zA-Z0-9_-]{12,96}$"
+        },
+        "nonce": {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 160
+        },
+        "max_uses": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "signature_key_id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 160
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alg", "key_id", "sig"],
+      "properties": {
+        "alg": {
+          "type": "string",
+          "enum": ["ed25519"]
+        },
+        "key_id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "sig": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 256
+        }
+      }
+    }
+  },
+  "$defs": {
+    "bridge_hint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bridge_id", "endpoint", "transport"],
+      "properties": {
+        "bridge_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._:-]{2,127}$"
+        },
+        "operator_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._:-]{2,127}$"
+        },
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 240
+        },
+        "transport": {
+          "type": "string",
+          "enum": ["https", "quic", "obfs-https", "offline"]
+        }
+      }
+    }
+  }
+}

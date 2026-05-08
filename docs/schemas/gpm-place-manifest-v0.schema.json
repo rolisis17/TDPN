@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpm.local/schemas/gpm-place-manifest-v0.schema.json",
+  "title": "GPM Place Manifest v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "place_id",
+    "owner_subject_id",
+    "title",
+    "content_kind",
+    "visibility",
+    "content_root",
+    "entry_document",
+    "moderation",
+    "routing",
+    "created_at_utc",
+    "updated_at_utc",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 0
+    },
+    "place_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+    },
+    "owner_subject_id": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 160
+    },
+    "owner_wallet": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 160
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 280
+    },
+    "content_kind": {
+      "type": "string",
+      "enum": ["profile", "creator", "project", "community", "docs", "tool", "static-site"]
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["draft", "unlisted", "public", "limited"]
+    },
+    "tags": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]{1,31}$"
+      },
+      "uniqueItems": true
+    },
+    "content_root": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest", "size_bytes"],
+      "properties": {
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 52428800
+        }
+      }
+    },
+    "entry_document": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._/-]+\\.html$",
+      "maxLength": 160
+    },
+    "assets": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "digest", "media_type", "size_bytes"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "media_type": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 80
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10485760
+          }
+        }
+      }
+    },
+    "moderation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["draft", "pending-review", "published", "limited", "quarantined", "removed", "appealed"]
+        },
+        "labels": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,47}$"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preferred_fetch_mode"],
+      "properties": {
+        "preferred_fetch_mode": {
+          "type": "string",
+          "enum": ["mesh-internal", "mirror", "local-dev"]
+        },
+        "mirrors": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["mirror_id", "endpoint", "signature_key_id"],
+            "properties": {
+              "mirror_id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+              },
+              "endpoint": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 240
+              },
+              "signature_key_id": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 160
+              }
+            }
+          }
+        }
+      }
+    },
+    "created_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alg", "key_id", "sig"],
+      "properties": {
+        "alg": {
+          "type": "string",
+          "enum": ["ed25519"]
+        },
+        "key_id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "sig": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 256
+        }
+      }
+    }
+  }
+}

@@ -95,6 +95,60 @@ func ValidateOwnerOnly(path string, info os.FileInfo) error {
 	return nil
 }
 
+// RestrictOwnerOnly applies a protected owner/System/Administrators-only DACL.
+func RestrictOwnerOnly(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("file path is required")
+	}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return fmt.Errorf("get current user SID: %w", err)
+	}
+	ownerSID := user.User.Sid
+	systemSID, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		return fmt.Errorf("create local system SID: %w", err)
+	}
+	adminSID, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		return fmt.Errorf("create administrators SID: %w", err)
+	}
+	acl, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{
+		ownerOnlyFullControlACE(ownerSID, windows.TRUSTEE_IS_USER),
+		ownerOnlyFullControlACE(systemSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP),
+		ownerOnlyFullControlACE(adminSID, windows.TRUSTEE_IS_ALIAS),
+	}, nil)
+	if err != nil {
+		return fmt.Errorf("build owner-only ACL for %q: %w", path, err)
+	}
+	if err := windows.SetNamedSecurityInfo(
+		path,
+		windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		ownerSID,
+		nil,
+		acl,
+		nil,
+	); err != nil {
+		return fmt.Errorf("apply owner-only ACL for %q: %w", path, err)
+	}
+	return nil
+}
+
+func ownerOnlyFullControlACE(sid *windows.SID, trusteeType windows.TRUSTEE_TYPE) windows.EXPLICIT_ACCESS {
+	return windows.EXPLICIT_ACCESS{
+		AccessPermissions: windows.GENERIC_ALL,
+		AccessMode:        windows.GRANT_ACCESS,
+		Inheritance:       windows.NO_INHERITANCE,
+		Trustee: windows.TRUSTEE{
+			TrusteeForm:  windows.TRUSTEE_IS_SID,
+			TrusteeType:  trusteeType,
+			TrusteeValue: windows.TrusteeValueFromSID(sid),
+		},
+	}
+}
+
 func daclAllowACEsFromSDDL(sddl string) ([]sddlACE, error) {
 	daclSection, err := daclSectionFromSDDL(sddl)
 	if err != nil {
