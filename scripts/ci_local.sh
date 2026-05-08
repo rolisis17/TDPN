@@ -642,6 +642,9 @@ echo "[ci] rotate-server-secrets integration"
 echo "[ci] prod preflight/admin-signing integration"
 ./scripts/integration_prod_preflight_tools.sh
 
+echo "[ci] prod mTLS prep integration"
+./scripts/integration_prod_mtls_prep.sh
+
 echo "[ci] federation integration"
 ./scripts/integration_federation.sh
 

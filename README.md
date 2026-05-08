@@ -148,6 +148,7 @@ Script-only easy mode:
 ./scripts/easy_node.sh invite-disable --key <INVITE_KEY>
 
 # production-strict profile (HTTPS + mTLS + signed issuer-admin actions)
+./scripts/easy_node.sh prod-mtls-prep --authority-host <PUBLIC_IP_OR_DNS> --provider-host <PEER_PUBLIC_IP_OR_DNS> --print-summary-json 1
 ./scripts/easy_node.sh server-up --mode authority --public-host <PUBLIC_IP_OR_DNS> --peer-directories https://<PEER_DIRECTORY_IP_OR_DNS>:8081 --prod-profile 1
 ./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_IP_OR_DNS>
 # bootstrap-mtls SAN values are bare DNS names/IPs only; do not pass https://... or host:port.
@@ -463,6 +464,8 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `prod-gate-check` and `prod-pilot-cohort-check` now also print normalized `incident_handoff` lines with direct incident pointers (`incident_summary.json` / `incident_report.md`) when failed-run incident artifacts are available, so signoff/debug output is actionable without manually unpacking the bundle first.
 - `prod-wg-validate` now blocks synthetic client ingress by default in real production WG validation (`--client-inner-source synthetic` fails fast unless `--allow-synthetic-ingress 1` is set), while `prod-wg-soak --strict-ingress-rehearsal=1` automatically forwards that explicit override for controlled strict-ingress negative tests.
 - `server-up --prod-profile 1` forces strict fail-closed runtime (`BETA_STRICT_MODE=1`, `PROD_STRICT_MODE=1`), enables mTLS, enables live command-backend WG dataplane defaults, and on authority nodes requires signed issuer-admin auth (`ISSUER_ADMIN_REQUIRE_SIGNED=1`, token admin auth disabled).
+- `prod-mtls-prep` is the non-disruptive preparation path for HTTPS/mTLS cutover. It writes a cert bundle, summary JSON, markdown report, and later cutover commands under `.easy-node-logs` by default; it does not edit active env files, does not restart services, and does not make HTTPS mandatory for the current beta HTTP lab.
+- `prod-mtls-prep` refuses private, loopback, link-local, `.local`, and Tailscale/CGNAT hosts by default because true production signoff needs public HTTPS endpoints. Use `--allow-private-hosts 1` only to generate a rehearsal bundle; the summary will mark `rehearsal_only=true` and `prod_ready=false`.
 - `server-up --prod-profile 1` now also applies hardened abuse/adjudication defaults (`ENTRY_OPEN_RPS=12`, `ENTRY_BAN_THRESHOLD=3`, `ENTRY_BAN_SEC=90`, `ENTRY_MAX_CONCURRENT_OPENS=96`, peer+final dispute/appeal vote floors, final operator/source quorum floors, `DIRECTORY_FINAL_ADJUDICATION_MIN_RATIO=0.67`, dispute/appeal TTL caps at `259200s`).
 - public production binds fail closed unless mTLS is enabled with required client certificates (`MTLS_ENABLE=1`, `MTLS_REQUIRE_CLIENT_CERT=1`); dangerous plaintext public-bind overrides are lab-only and should not be used for production signoff.
 - issuer public mutation paths, sponsor-token attempts, directory gossip pushes, directory provider relay upserts, and exit `path/open` now have dedicated per-IP and in-flight limiters (`ISSUER_PUBLIC_MUTATION_*`, `DIRECTORY_GOSSIP_PUSH_*`, `DIRECTORY_PROVIDER_RELAY_UPSERT_*`, `EXIT_PATH_OPEN_*`) so public control endpoints have their own flood controls.

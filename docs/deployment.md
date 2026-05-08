@@ -364,6 +364,8 @@ Invite-only beta option:
 - one-command validation+soak bundle from machine C: `./scripts/beta_pilot_runbook.sh ...` (outputs `.tar.gz` report bundle under `.easy-node-logs`).
 
 Prod strict additions:
+- prepare for HTTPS/mTLS without cutting over: `./scripts/easy_node.sh prod-mtls-prep --authority-host <PUBLIC_IP_OR_DNS> --provider-host <PEER_PUBLIC_IP_OR_DNS> --print-summary-json 1`; this writes a cert bundle, summary JSON, markdown handoff report, and later cutover commands under `.easy-node-logs` by default. It does not edit active `deploy/.env.easy.*`, does not restart Docker, and does not make HTTPS mandatory for the current beta HTTP lab.
+- `prod-mtls-prep` refuses private, loopback, link-local, `.local`, and Tailscale/CGNAT hosts by default because true production signoff needs public HTTPS endpoints. Use `--allow-private-hosts 1` only for rehearsal bundles; those summaries are marked `rehearsal_only=true` and `prod_ready=false`.
 - bootstrap certs: `./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_IP_OR_DNS>`; SAN/public-host values must be bare DNS names or IP addresses, not full URLs or `host:port` strings.
 - run `server-up --prod-profile 1` to enforce fail-closed strict defaults (`PROD_STRICT_MODE=1`) on top of beta strict.
 - prod profile now also enforces hardened abuse/adjudication defaults (entry open-rate/ban/inflight bounds, issuer public-mutation shielding, directory gossip/provider upsert shielding, exit path-open shielding, peer+final dispute/appeal floors, final operator/source quorum floors, and stricter ratio/TTL caps) for safer public operation.
