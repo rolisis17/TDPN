@@ -116,6 +116,8 @@ func main() {
 		err = runBridgeVerify(os.Args[2:])
 	case "bridge-policy":
 		err = runBridgePolicy(os.Args[2:])
+	case "bridge-registry-check":
+		err = runBridgeRegistryCheck(os.Args[2:])
 	case "trust-add":
 		err = runTrustAdd(os.Args[2:])
 	case "trust-list":
@@ -154,6 +156,7 @@ func usage() {
   go run ./cmd/gpmrecover bridge-sign --invite FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
   go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE] [--require-helper-registry 1]
+  go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
   go run ./cmd/gpmrecover trust-add --trust-store FILE --org-id ID --org-name NAME --public-key-file FILE
   go run ./cmd/gpmrecover trust-list --trust-store FILE
   go run ./cmd/gpmrecover trust-remove --trust-store FILE --org-id ID --key-id ID
@@ -665,6 +668,33 @@ func runBridgePolicy(args []string) error {
 	return nil
 }
 
+func runBridgeRegistryCheck(args []string) error {
+	fs := flag.NewFlagSet("bridge-registry-check", flag.ContinueOnError)
+	helperRegistryFile := fs.String("helper-registry", "", "path to bridge helper registry JSON")
+	helperID := fs.String("helper-id", "", "optional helper id filter")
+	orgID := fs.String("org-id", "", "optional organization id filter")
+	requireActive := fs.Bool("require-active", false, "fail if matching helpers are not currently active")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	registry, err := loadBridgeHelperRegistryFile(*helperRegistryFile)
+	if err != nil {
+		return err
+	}
+	report := accesspack.CheckBridgeHelperRegistry(registry, accesspack.BridgeHelperRegistryCheckOptions{
+		HelperID:      *helperID,
+		OrgID:         *orgID,
+		RequireActive: *requireActive,
+	}, time.Now().UTC())
+	if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+		return err
+	}
+	if report.Status != "pass" {
+		return errors.New("bridge helper registry check failed")
+	}
+	return nil
+}
+
 func runCheck(args []string) error {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	packFile := fs.String("pack", "", "path to signed access pack JSON")
@@ -841,6 +871,7 @@ func runDemoBundle(args []string) error {
 			"Import recovery-trust.json as the trust store.",
 			"Import access-pack.signed.json or bridge-invite.signed.json as the signed artifact.",
 			"Or paste/scan the generated GPMREC1 text/QR handoffs.",
+			"Run bridge-registry-check with bridge-helper-registry.json when changing helper status.",
 			"Run bridge-policy with bridge-helper-registry.json before enabling a helper route in a service.",
 		},
 	}

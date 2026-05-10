@@ -143,6 +143,7 @@ First CLI:
 - `go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub`
 - `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --show-paths`
 - `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json`
+- `go run ./cmd/gpmrecover bridge-registry-check --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-perth-1 --org-id freenews-demo --require-active`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub --timeout-sec 8`
 
 Demo bundle flow:
@@ -192,6 +193,7 @@ Bridge-invite rules:
 - `bridge-policy` defaults require at least two helper paths, at least two distinct helper/contact hosts, a helper contact URL, and a manual/external-app fallback path
 - `bridge-policy --helper-registry` additionally requires the helper to be active, registered for the invite organization, inside its active window, and not quarantined or disabled
 - `bridge-policy --require-helper-registry` fails if the helper registry was accidentally omitted from a production policy run
+- `bridge-registry-check` summarizes active/quarantined/disabled helper counts and can fail closed for a specific active helper/org before publishing or using an invite
 - the helper contact and helper paths are shown only after signature, expiry, org id, and trusted-key checks pass
 - the browser gives copy/open actions for the invite id, helper id, helper contact, and verified helper paths
 - the helper registry is the first service-level rotation/quarantine control; a public bridge service still needs online rate limits and abuse reporting before launch
@@ -227,6 +229,7 @@ Do first:
 - CLI sign/verify for packs and bridge invites
 - CLI bridge-invite policy gate for helper/contact diversity
 - CLI bridge helper registry gate for active/quarantined/disabled helpers
+- CLI bridge helper registry summary/check command for operator review
 - CLI reachability check that does not confuse reachable with trusted
 - local trust-store file
 - browser verifier/import screen

@@ -56,6 +56,9 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := writeBridgeHelperRegistryFile(helperRegistry, testCLIBridgeHelperRegistry(server.URL)); err != nil {
 		t.Fatalf("write helper registry: %v", err)
 	}
+	if err := runBridgeRegistryCheck([]string{"--helper-registry", helperRegistry, "--helper-id", "helper-cli", "--org-id", "cli-org", "--require-active"}); err != nil {
+		t.Fatalf("bridge-registry-check: %v", err)
+	}
 	if err := runBridgeVerify([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--show-paths"}); err != nil {
 		t.Fatalf("bridge-verify: %v", err)
 	}
@@ -129,6 +132,9 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}
 	if err := runTextImport([]string{"--text-file", registryEnvelope, "--expect-kind", "bridge-helper-registry", "--out", importedRegistry}); err != nil {
 		t.Fatalf("text-import helper registry: %v", err)
+	}
+	if err := runBridgeRegistryCheck([]string{"--helper-registry", importedRegistry, "--helper-id", "helper-cli", "--require-active"}); err != nil {
+		t.Fatalf("bridge-registry-check imported registry: %v", err)
 	}
 	bridgeEnvelope := filepath.Join(dir, "bridge.txt")
 	importedBridge := filepath.Join(dir, "bridge.imported.json")
@@ -217,6 +223,9 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 	}
 	if err := runBridgePolicy([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"], "--helper-registry", manifest.Files["bridge_helper_registry"]}); err != nil {
 		t.Fatalf("policy generated bridge invite: %v", err)
+	}
+	if err := runBridgeRegistryCheck([]string{"--helper-registry", manifest.Files["bridge_helper_registry"], "--helper-id", "helper-demo", "--org-id", manifest.OrgID, "--require-active"}); err != nil {
+		t.Fatalf("check generated helper registry: %v", err)
 	}
 	for _, key := range []string{"access_pack_qr", "bridge_invite_qr", "bridge_helper_registry_qr"} {
 		qrBody, err := os.ReadFile(manifest.Files[key])

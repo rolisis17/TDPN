@@ -495,6 +495,7 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `docs/access-recovery-toolkit-track.md` (pivot track: signed emergency access packs and trust verification for blocked sites/apps/services)
 - `go run ./cmd/gpmrecover demo-bundle --out-dir .easy-node-logs/access-recovery-demo` (one-command local Access Recovery demo artifacts)
 - `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/access-recovery-demo/bridge-invite.signed.json --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json --helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.json --require-helper-registry` (signed bridge-invite diversity/fallback plus helper allow/quarantine gate)
+- `go run ./cmd/gpmrecover bridge-registry-check --helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.json --helper-id helper-demo --org-id freenews-demo --require-active` (operator check before publishing a helper route)
 - `docs/global-privacy-mesh-track.md` (micro-relay + 1-hop/2-hop/3-hop planning track, with incremental implementation milestones)
 - `docs/gpm-places-track.md` (private in-mesh pages, communities, creator/project spaces, credits, moderation, and staged social-network direction)
 - `docs/gpm-bootstrap-resilience-track.md` (signed bootstrap manifests, fallback sources, and insider bridge-invite discovery without password-only trust)

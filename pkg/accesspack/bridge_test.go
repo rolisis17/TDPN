@@ -174,6 +174,59 @@ func TestBridgeInvitePolicyRequiresHelperRegistryWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestBridgeHelperRegistryCheckSummarizesAndFilters(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	registry := testBridgeHelperRegistry()
+	registry.Helpers = append(registry.Helpers, BridgeHelperRegistration{
+		HelperID:         "helper-quarantined",
+		DisplayName:      "Quarantined Helper",
+		Status:           BridgeHelperStatusQuarantined,
+		OrgIDs:           []string{"demo-org"},
+		ContactURL:       "https://blocked-helper.example/contact",
+		QuarantineReason: "operator disabled during review",
+		UpdatedAtUTC:     "2026-05-10T00:00:00Z",
+	})
+	report := CheckBridgeHelperRegistry(registry, BridgeHelperRegistryCheckOptions{
+		HelperID:      "helper-1",
+		OrgID:         "demo-org",
+		RequireActive: true,
+	}, now)
+	if report.Status != "pass" {
+		t.Fatalf("expected registry check pass, got %+v", report)
+	}
+	if report.HelpersTotal != 2 || report.ActiveCount != 1 || report.QuarantinedCount != 1 || report.MatchedCount != 1 {
+		t.Fatalf("unexpected registry counts: %+v", report)
+	}
+	if report.MatchingHelpers[0].HelperID != "helper-1" {
+		t.Fatalf("unexpected helper match: %+v", report.MatchingHelpers)
+	}
+}
+
+func TestBridgeHelperRegistryCheckRejectsInactiveRequiredHelper(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	registry := testBridgeHelperRegistry()
+	registry.Helpers[0].Status = BridgeHelperStatusDisabled
+	report := CheckBridgeHelperRegistry(registry, BridgeHelperRegistryCheckOptions{
+		HelperID:      "helper-1",
+		RequireActive: true,
+	}, now)
+	if report.Status != "fail" {
+		t.Fatalf("expected registry check fail, got %+v", report)
+	}
+	if !sawBridgeRegistryFinding(report, "bridge_helper_not_active") {
+		t.Fatalf("expected inactive helper finding, got %+v", report.Findings)
+	}
+}
+
+func sawBridgeRegistryFinding(report BridgeHelperRegistryCheckReport, code string) bool {
+	for _, finding := range report.Findings {
+		if finding.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
 func sawBridgePolicyFinding(report BridgeInvitePolicyReport, code string) bool {
 	for _, finding := range report.Findings {
 		if finding.Code == code {
