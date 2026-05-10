@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpm.local/schemas/access-recovery-trust-store-v1.schema.json",
+  "title": "Access Recovery Trust Store v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "trusted_keys"],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "trusted_keys": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "org_id",
+          "org_name",
+          "key_id",
+          "public_key",
+          "added_at_utc"
+        ],
+        "properties": {
+          "org_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "org_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "key_id": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 160
+          },
+          "public_key": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 128
+          },
+          "added_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 180
+          },
+          "notes": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "maxLength": 180
+            }
+          },
+          "disabled": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

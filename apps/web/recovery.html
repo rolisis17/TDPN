@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'"
+    />
+    <title>GPM Recover</title>
+    <link rel="stylesheet" href="./assets/gpm.css" />
+  </head>
+  <body class="page-recover">
+    <header class="topbar">
+      <div class="wrap">
+        <a class="brand-lockup" href="./index.html" aria-label="Global Private Mesh home">
+          <span class="brand-mark" aria-hidden="true">G</span>
+          <span>
+            <span class="brand-name">Global Private Mesh</span>
+            <span class="brand-subtitle">Recover</span>
+          </span>
+        </a>
+        <nav class="nav" aria-label="Recovery navigation">
+          <a class="btn secondary" href="./index.html">Home</a>
+          <a class="btn secondary" href="./portal.html">Portal</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="wrap recover-shell">
+      <section class="recover-tool" aria-labelledby="recover-heading">
+        <div class="recover-tool__header">
+          <p class="eyebrow">Access recovery</p>
+          <h1 id="recover-heading">Verify a signed recovery pack.</h1>
+        </div>
+
+        <div class="recover-grid">
+          <section class="recover-panel" aria-labelledby="pack-heading">
+            <div class="recover-panel__heading">
+              <h2 id="pack-heading">Signed Pack</h2>
+              <label class="file-picker">
+                <span>Import</span>
+                <input id="pack_file" type="file" accept="application/json,.json" />
+              </label>
+            </div>
+            <textarea
+              id="pack_input"
+              spellcheck="false"
+              placeholder='{"schema_version":0,"pack_id":"arp-..."}'
+              aria-label="Signed access recovery pack JSON"
+            ></textarea>
+          </section>
+
+          <section class="recover-panel" aria-labelledby="trust-heading">
+            <div class="recover-panel__heading">
+              <h2 id="trust-heading">Trust Store</h2>
+              <label class="file-picker">
+                <span>Import</span>
+                <input id="trust_file" type="file" accept="application/json,.json" />
+              </label>
+            </div>
+            <div class="trust-builder" aria-label="Build trust store">
+              <div class="fields">
+                <label>
+                  Org ID
+                  <input id="trust_org_id" type="text" autocomplete="off" placeholder="freenews-demo" />
+                </label>
+                <label>
+                  Org name
+                  <input id="trust_org_name" type="text" autocomplete="off" placeholder="FreeNews Demo" />
+                </label>
+              </div>
+              <label>
+                Public key
+                <input id="trust_public_key" type="text" autocomplete="off" placeholder="base64url Ed25519 public key" />
+              </label>
+              <div class="fields">
+                <label>
+                  Key expiry
+                  <input id="trust_expires" type="datetime-local" />
+                </label>
+                <label>
+                  Source note
+                  <input id="trust_source" type="text" autocomplete="off" placeholder="official site, QR, meeting handoff" />
+                </label>
+              </div>
+              <div class="recover-actions trust-actions">
+                <button class="btn secondary" id="trust_add_btn" type="button">Add Trusted Key</button>
+                <button class="btn secondary" id="trust_reset_btn" type="button">Reset Fields</button>
+                <button class="btn secondary" id="trust_copy_btn" type="button">Copy Store</button>
+                <button class="btn secondary" id="trust_download_btn" type="button">Download Store</button>
+              </div>
+              <div id="trust_key_list" class="trust-key-list" aria-live="polite"></div>
+            </div>
+            <textarea
+              id="trust_input"
+              spellcheck="false"
+              placeholder='{"version":1,"trusted_keys":[...]}'
+              aria-label="Access recovery trust store JSON"
+            ></textarea>
+          </section>
+        </div>
+
+        <div class="recover-actions">
+          <button class="btn primary" id="verify_btn">Verify</button>
+          <button class="btn secondary" id="clear_btn">Clear</button>
+        </div>
+      </section>
+
+      <section class="recover-panel handoff-panel" aria-labelledby="handoff-heading">
+        <div class="recover-panel__heading">
+          <h2 id="handoff-heading">Text Handoff</h2>
+          <span class="recover-count">GPMREC1</span>
+        </div>
+        <textarea
+          id="handoff_input"
+          spellcheck="false"
+          placeholder="GPMREC1..."
+          aria-label="GPM recovery text handoff"
+        ></textarea>
+        <div class="qr-preview" id="qr_preview" aria-label="Rendered QR code">
+          <p class="recover-empty">Render a QR from the current GPMREC1 text when you need a visual handoff.</p>
+        </div>
+        <div class="recover-actions">
+          <button class="btn secondary" id="export_pack_text_btn" type="button">Export Pack Text</button>
+          <button class="btn secondary" id="export_store_text_btn" type="button">Export Store Text</button>
+          <button class="btn secondary" id="render_qr_btn" type="button">Render QR</button>
+          <button class="btn secondary" id="download_qr_btn" type="button">Download QR</button>
+          <button class="btn secondary" id="import_text_btn" type="button">Import Text</button>
+          <button class="btn secondary" id="clear_text_btn" type="button">Clear Text</button>
+          <label class="file-picker">
+            <span>QR Image</span>
+            <input id="qr_image_file" type="file" accept="image/*" />
+          </label>
+          <button class="btn secondary" id="scan_qr_btn" type="button">Scan QR</button>
+        </div>
+      </section>
+
+      <section class="recover-status" aria-live="polite" aria-labelledby="status-heading">
+        <div class="recover-status__main" data-state="idle" id="status_card">
+          <p class="status-banner__label">Status</p>
+          <h2 id="status-heading">Waiting for pack</h2>
+          <p id="status_detail">Import or paste a signed pack and a trusted organization key store.</p>
+        </div>
+        <div class="recover-facts" id="facts_grid" aria-label="Verified pack facts"></div>
+      </section>
+
+      <section class="recover-panel recover-results" aria-labelledby="paths-heading">
+        <div class="recover-panel__heading">
+          <h2 id="paths-heading">Trusted Paths</h2>
+          <span id="path_count" class="recover-count">0</span>
+        </div>
+        <div id="paths_list" class="recover-paths" aria-label="Verified access paths"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap">Global Private Mesh Recover</div>
+    </footer>
+
+    <script src="./assets/vendor/qrcode-generator-2.0.4.js"></script>
+    <script src="./assets/vendor/jsqr-1.4.0.js"></script>
+    <script src="./assets/recovery.js"></script>
+  </body>
+</html>

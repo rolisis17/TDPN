@@ -1,0 +1,57 @@
+{
+  "schema_version": 0,
+  "pack_id": "arp-demo-freenews-20260510",
+  "organization": {
+    "org_id": "freenews-demo",
+    "name": "FreeNews Demo",
+    "home_url": "https://freenews.example"
+  },
+  "issued_at_utc": "2026-05-10T00:00:00Z",
+  "expires_at_utc": "2099-01-01T00:00:00Z",
+  "intended_audience": "Demo users testing signed recovery maps.",
+  "sources": [
+    {
+      "source_id": "official-manifest",
+      "kind": "official",
+      "url": "https://freenews.example/.well-known/access-pack.json",
+      "priority": 10,
+      "description": "Normal source when the main site is reachable."
+    },
+    {
+      "source_id": "mirror-manifest",
+      "kind": "mirror",
+      "url": "https://mirror-a.freenews.example/access-pack.json",
+      "priority": 20,
+      "description": "Mirror source for recovery."
+    }
+  ],
+  "access_paths": [
+    {
+      "path_id": "main-site",
+      "kind": "website",
+      "url": "https://freenews.example",
+      "priority": 10,
+      "description": "Primary website."
+    },
+    {
+      "path_id": "mirror-a",
+      "kind": "mirror",
+      "url": "https://mirror-a.freenews.example",
+      "priority": 20,
+      "description": "Signed mirror listed by the organization."
+    },
+    {
+      "path_id": "onion-site",
+      "kind": "tor-onion",
+      "url": "http://freenewsdemo1234567890abcdef.onion",
+      "priority": 30,
+      "requires_external_app": true,
+      "launch_hint": "Open with Tor Browser",
+      "description": "Fallback onion address if public mirrors are blocked."
+    }
+  ],
+  "safety_notes": [
+    "Verify the pack signature before trusting any listed path.",
+    "A reachable path is not automatically trusted unless it is listed in a valid pack."
+  ]
+}

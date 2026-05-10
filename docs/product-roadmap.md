@@ -1,6 +1,6 @@
-# Product Roadmap (VPN First)
+# Product Roadmap (Access Recovery Pivot)
 
-This roadmap keeps the focus on a production-grade decentralized VPN while building Cosmos-first payment/governance foundations in parallel.
+This roadmap now treats the VPN/dVPN work as reusable infrastructure and shifts product discovery toward a narrower access-recovery toolkit: signed recovery maps, trusted fallback paths, bridge-assisted first contact, and operator-grade validation for blocked sites/apps/services.
 
 Canonical source of truth for cross-track sequencing:
 - `docs/full-execution-plan-2026-2027.md` is authoritative.
@@ -119,7 +119,38 @@ What this means for operators:
 Completed in this slice:
 - server preflight/session diagnostics now surface provider/authority endpoint posture and mismatch signals (including HTTPS-vs-HTTP and peer/authority set mismatch) across simple and expert operator paths.
 
-## Phase 1: Stable Linux Beta (Current Priority)
+## Phase 0: Access Recovery Toolkit (Current Priority)
+
+Goal: prove the smallest useful pivot before more tunnel or economy work.
+
+Scope:
+- define signed access recovery packs for one organization/community
+- provide local key/sign/verify tooling
+- provide a local trust-store file for trusted organization public keys
+- import or verify a pack from an untrusted channel
+- expose a browser-local import/verify screen for signed packs and trust stores
+- support portable `GPMREC1` text handoffs for packs, trust stores, and single trusted keys
+- render `GPMREC1` handoffs as QR PNGs from the CLI and browser, and import QR images with native scanning or a bundled browser fallback
+- show official sources, mirrors, bridge hints, helper configs, expiry, and safety notes
+- keep reachability separate from trust: a path can be reachable but untrusted, or trusted but temporarily unreachable
+- run a cautious reachability check over trusted entries without probing `.onion` or external-app paths by default
+
+Exit criteria:
+- one signed access pack can be generated, shared, verified, and inspected locally
+- one organization key can be added to a local trust store and used for verification/checking
+- a browser-local UI can verify a signed pack against a trusted organization key and list trusted paths
+- signed packs and trust material can be exported/imported as text handoffs for chat, email, print, or future QR use
+- a QR PNG can be generated from a `GPMREC1` text handoff in the CLI or browser and scanned back into the browser with native QR detection or bundled fallback scanning
+- unknown, disabled, expired, or wrong-organization keys fail closed
+- trusted entries can be checked for reachable/unreachable/timeout/skipped status
+- malformed, expired, or badly signed packs fail closed
+- docs explain the user flow in non-technical language
+- no VPN tunnel, blockchain, credits, or public-exit requirement is part of the MVP
+
+Track doc:
+- `docs/access-recovery-toolkit-track.md`
+
+## Phase 1: Stable Linux Beta (Infrastructure Reuse)
 
 Goal: reliable real-user beta on Linux servers + Linux clients.
 

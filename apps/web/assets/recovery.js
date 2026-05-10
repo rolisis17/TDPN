@@ -1,0 +1,1124 @@
+(function () {
+  "use strict";
+
+  const els = {
+    packInput: document.getElementById("pack_input"),
+    trustInput: document.getElementById("trust_input"),
+    packFile: document.getElementById("pack_file"),
+    trustFile: document.getElementById("trust_file"),
+    trustOrgID: document.getElementById("trust_org_id"),
+    trustOrgName: document.getElementById("trust_org_name"),
+    trustPublicKey: document.getElementById("trust_public_key"),
+    trustExpires: document.getElementById("trust_expires"),
+    trustSource: document.getElementById("trust_source"),
+    trustAddBtn: document.getElementById("trust_add_btn"),
+    trustResetBtn: document.getElementById("trust_reset_btn"),
+    trustCopyBtn: document.getElementById("trust_copy_btn"),
+    trustDownloadBtn: document.getElementById("trust_download_btn"),
+    trustKeyList: document.getElementById("trust_key_list"),
+    handoffInput: document.getElementById("handoff_input"),
+    exportPackTextBtn: document.getElementById("export_pack_text_btn"),
+    exportStoreTextBtn: document.getElementById("export_store_text_btn"),
+    renderQRBtn: document.getElementById("render_qr_btn"),
+    downloadQRBtn: document.getElementById("download_qr_btn"),
+    importTextBtn: document.getElementById("import_text_btn"),
+    clearTextBtn: document.getElementById("clear_text_btn"),
+    qrPreview: document.getElementById("qr_preview"),
+    qrImageFile: document.getElementById("qr_image_file"),
+    scanQRBtn: document.getElementById("scan_qr_btn"),
+    verifyBtn: document.getElementById("verify_btn"),
+    clearBtn: document.getElementById("clear_btn"),
+    statusCard: document.getElementById("status_card"),
+    statusHeading: document.getElementById("status-heading"),
+    statusDetail: document.getElementById("status_detail"),
+    factsGrid: document.getElementById("facts_grid"),
+    pathsList: document.getElementById("paths_list"),
+    pathCount: document.getElementById("path_count"),
+  };
+  const trustStoreStorageKey = "gpm_recover_trust_store_v1";
+  const textEnvelopePrefix = "GPMREC1";
+
+  function setStatus(state, title, detail) {
+    els.statusCard.dataset.state = state;
+    els.statusHeading.textContent = title;
+    els.statusDetail.textContent = detail;
+  }
+
+  function clearNode(node) {
+    while (node.firstChild) {
+      node.removeChild(node.firstChild);
+    }
+  }
+
+  function resetQRPreview() {
+    clearNode(els.qrPreview);
+    const empty = document.createElement("p");
+    empty.className = "recover-empty";
+    empty.textContent = "Render a QR from the current GPMREC1 text when you need a visual handoff.";
+    els.qrPreview.appendChild(empty);
+  }
+
+  function trimString(value) {
+    return typeof value === "string" ? value.trim() : "";
+  }
+
+  function base64URLToBytes(value, label) {
+    const raw = trimString(value);
+    if (!raw) {
+      throw new Error(`${label} is required`);
+    }
+    const b64 = raw.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    let binary;
+    try {
+      binary = window.atob(padded);
+    } catch (err) {
+      throw new Error(`${label} must be base64url`);
+    }
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  function bytesToBase64URL(bytes) {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 1) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  }
+
+  function encodeTextEnvelope(kind, payload) {
+    if (!["access-pack", "trust-store", "trusted-key"].includes(kind)) {
+      throw new Error(`Unsupported text handoff kind ${kind}`);
+    }
+    const body = new TextEncoder().encode(JSON.stringify({ v: 1, k: kind, p: payload }));
+    return `${textEnvelopePrefix}.${bytesToBase64URL(body)}`;
+  }
+
+  function decodeTextEnvelope(text) {
+    const raw = trimString(text);
+    const prefix = `${textEnvelopePrefix}.`;
+    if (!raw.startsWith(prefix)) {
+      throw new Error(`Text handoff must start with ${prefix}`);
+    }
+    const bytes = base64URLToBytes(raw.slice(prefix.length), "text handoff");
+    let envelope;
+    try {
+      envelope = JSON.parse(new TextDecoder().decode(bytes));
+    } catch (err) {
+      throw new Error("Text handoff is not valid JSON");
+    }
+    if (!envelope || envelope.v !== 1) {
+      throw new Error("Unsupported text handoff version");
+    }
+    if (!["access-pack", "trust-store", "trusted-key"].includes(envelope.k)) {
+      throw new Error(`Unsupported text handoff kind ${envelope.k}`);
+    }
+    if (envelope.p === null || typeof envelope.p !== "object") {
+      throw new Error("Text handoff payload is missing");
+    }
+    return { kind: envelope.k, payload: envelope.p };
+  }
+
+  function renderQRCode() {
+    const text = trimString(els.handoffInput.value);
+    decodeTextEnvelope(text);
+    if (typeof window.qrcode !== "function") {
+      throw new Error("QR renderer is not available");
+    }
+    const qr = window.qrcode(0, "M");
+    qr.addData(text, "Byte");
+    qr.make();
+    const modules = qr.getModuleCount();
+    const margin = 4;
+    const maxCanvas = 640;
+    const cellSize = Math.max(3, Math.floor(maxCanvas / (modules + margin * 2)));
+    const size = (modules + margin * 2) * cellSize;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    canvas.className = "qr-canvas";
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = "#000000";
+    for (let row = 0; row < modules; row += 1) {
+      for (let col = 0; col < modules; col += 1) {
+        if (qr.isDark(row, col)) {
+          ctx.fillRect((col + margin) * cellSize, (row + margin) * cellSize, cellSize, cellSize);
+        }
+      }
+    }
+    clearNode(els.qrPreview);
+    els.qrPreview.appendChild(canvas);
+    const caption = document.createElement("p");
+    caption.className = "recover-empty";
+    caption.textContent = `QR rendered from ${text.length} characters.`;
+    els.qrPreview.appendChild(caption);
+    return canvas;
+  }
+
+  function downloadRenderedQR() {
+    let canvas = els.qrPreview.querySelector("canvas");
+    if (!canvas) {
+      canvas = renderQRCode();
+    }
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        setStatus("bad", "QR download failed", "The browser could not create the QR image.");
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "gpm-recovery-handoff-qr.png";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setStatus("idle", "QR ready", "The current GPMREC1 handoff was rendered as a PNG.");
+    }, "image/png");
+  }
+
+  async function keyIDFromPublicKey(publicKeyBytes) {
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", publicKeyBytes));
+    return Array.from(digest.slice(0, 8))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  function parseJSONInput(value, label) {
+    const raw = trimString(value);
+    if (!raw) {
+      throw new Error(`${label} is required`);
+    }
+    try {
+      return JSON.parse(raw);
+    } catch (err) {
+      throw new Error(`${label} is not valid JSON`);
+    }
+  }
+
+  function readTrustStoreInput() {
+    const raw = trimString(els.trustInput.value);
+    if (!raw) {
+      return { version: 1, trusted_keys: [] };
+    }
+    return parseJSONInput(raw, "Trust store");
+  }
+
+  function writeTrustStore(store) {
+    const normalized = normalizeTrustStore(store);
+    els.trustInput.value = JSON.stringify(normalized, null, 2);
+    try {
+      localStorage.setItem(trustStoreStorageKey, els.trustInput.value);
+    } catch (err) {
+      // Public keys are not secret; storage can still fail in private windows.
+    }
+    renderTrustKeys(normalized);
+  }
+
+  function parseRFC3339(value, label) {
+    const raw = trimString(value);
+    if (!raw) {
+      throw new Error(`${label} is required`);
+    }
+    const date = new Date(raw);
+    if (!Number.isFinite(date.getTime())) {
+      throw new Error(`${label} is not a valid date`);
+    }
+    return date;
+  }
+
+  function trustDateTimeToUTC(value) {
+    const raw = trimString(value);
+    if (!raw) {
+      return "";
+    }
+    const date = new Date(raw);
+    if (!Number.isFinite(date.getTime())) {
+      throw new Error("Key expiry is not a valid date");
+    }
+    return date.toISOString();
+  }
+
+  function normalizeTrustStore(store) {
+    if (!store || typeof store !== "object") {
+      throw new Error("Trust store must be a JSON object");
+    }
+    if (store.version !== 1) {
+      throw new Error(`Unsupported trust store version ${store.version}`);
+    }
+    const keys = Array.isArray(store.trusted_keys) ? store.trusted_keys : [];
+    const normalized = {
+      version: 1,
+      trusted_keys: keys.map(normalizeTrustedKey).sort((a, b) => {
+        if (a.org_id === b.org_id) {
+          return a.key_id.localeCompare(b.key_id);
+        }
+        return a.org_id.localeCompare(b.org_id);
+      }),
+    };
+    return normalized;
+  }
+
+  function normalizeTrustedKey(entry) {
+    const normalized = {
+      org_id: trimString(entry.org_id),
+      org_name: trimString(entry.org_name),
+      key_id: trimString(entry.key_id),
+      public_key: trimString(entry.public_key),
+      added_at_utc: trimString(entry.added_at_utc),
+    };
+    const expires = trimString(entry.expires_at_utc);
+    if (expires) {
+      normalized.expires_at_utc = expires;
+    }
+    const source = trimString(entry.source);
+    if (source) {
+      normalized.source = source;
+    }
+    const notes = Array.isArray(entry.notes) ? entry.notes.map(trimString).filter(Boolean) : [];
+    if (notes.length > 0) {
+      normalized.notes = notes;
+    }
+    if (entry.disabled === true) {
+      normalized.disabled = true;
+    }
+    return normalized;
+  }
+
+  function normalizePack(pack) {
+    const normalized = {
+      schema_version: pack.schema_version,
+      pack_id: trimString(pack.pack_id),
+      organization: {
+        org_id: trimString(pack.organization && pack.organization.org_id),
+        name: trimString(pack.organization && pack.organization.name),
+      },
+      issued_at_utc: trimString(pack.issued_at_utc),
+      expires_at_utc: trimString(pack.expires_at_utc),
+      intended_audience: trimString(pack.intended_audience),
+      sources: Array.isArray(pack.sources) ? pack.sources.map(normalizeSource) : [],
+      access_paths: Array.isArray(pack.access_paths) ? pack.access_paths.map(normalizePath) : [],
+    };
+    const homeURL = trimString(pack.organization && pack.organization.home_url);
+    if (homeURL) {
+      normalized.organization.home_url = homeURL;
+    }
+    const safetyNotes = Array.isArray(pack.safety_notes)
+      ? pack.safety_notes.map(trimString).filter(Boolean)
+      : [];
+    if (safetyNotes.length > 0) {
+      normalized.safety_notes = safetyNotes;
+    }
+    normalized.sources.sort((a, b) => {
+      if ((a.priority || 0) === (b.priority || 0)) {
+        return a.source_id.localeCompare(b.source_id);
+      }
+      return (a.priority || 0) - (b.priority || 0);
+    });
+    normalized.access_paths.sort((a, b) => {
+      if ((a.priority || 0) === (b.priority || 0)) {
+        return a.path_id.localeCompare(b.path_id);
+      }
+      return (a.priority || 0) - (b.priority || 0);
+    });
+    return normalized;
+  }
+
+  function normalizeSource(source) {
+    const normalized = {
+      source_id: trimString(source.source_id),
+      kind: trimString(source.kind),
+      url: trimString(source.url),
+    };
+    if (Number.isFinite(source.priority) && source.priority !== 0) {
+      normalized.priority = source.priority;
+    }
+    const description = trimString(source.description);
+    if (description) {
+      normalized.description = description;
+    }
+    return normalized;
+  }
+
+  function normalizePath(path) {
+    const normalized = {
+      path_id: trimString(path.path_id),
+      kind: trimString(path.kind),
+      url: trimString(path.url),
+    };
+    if (Number.isFinite(path.priority) && path.priority !== 0) {
+      normalized.priority = path.priority;
+    }
+    if (path.requires_external_app === true) {
+      normalized.requires_external_app = true;
+    }
+    const launchHint = trimString(path.launch_hint);
+    if (launchHint) {
+      normalized.launch_hint = launchHint;
+    }
+    const description = trimString(path.description);
+    if (description) {
+      normalized.description = description;
+    }
+    const safetyNotes = Array.isArray(path.safety_notes)
+      ? path.safety_notes.map(trimString).filter(Boolean)
+      : [];
+    if (safetyNotes.length > 0) {
+      normalized.safety_notes = safetyNotes;
+    }
+    return normalized;
+  }
+
+  function goCompatibleJSONString(value) {
+    return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, (char) => {
+      switch (char) {
+        case "<":
+          return "\\u003c";
+        case ">":
+          return "\\u003e";
+        case "&":
+          return "\\u0026";
+        case "\u2028":
+          return "\\u2028";
+        case "\u2029":
+          return "\\u2029";
+        default:
+          return char;
+      }
+    });
+  }
+
+  function canonicalPayload(pack) {
+    return new TextEncoder().encode(goCompatibleJSONString(normalizePack(pack)));
+  }
+
+  function validatePackShape(pack) {
+    if (!pack || typeof pack !== "object") {
+      throw new Error("Pack must be a JSON object");
+    }
+    if (pack.schema_version !== 0) {
+      throw new Error(`Unsupported pack schema_version ${pack.schema_version}`);
+    }
+    if (!pack.signature || typeof pack.signature !== "object") {
+      throw new Error("Pack signature is required");
+    }
+    if (trimString(pack.signature.alg) !== "ed25519") {
+      throw new Error("Unsupported signature algorithm");
+    }
+    if (!trimString(pack.signature.key_id)) {
+      throw new Error("Signature key id is required");
+    }
+    const issuedAt = parseRFC3339(pack.issued_at_utc, "issued_at_utc");
+    const expiresAt = parseRFC3339(pack.expires_at_utc, "expires_at_utc");
+    if (expiresAt <= issuedAt) {
+      throw new Error("Pack expiry must be after issue time");
+    }
+    if (expiresAt <= new Date()) {
+      throw new Error("Pack is expired");
+    }
+    if (!trimString(pack.organization && pack.organization.org_id)) {
+      throw new Error("Organization id is required");
+    }
+    if (!Array.isArray(pack.access_paths) || pack.access_paths.length === 0) {
+      throw new Error("Pack must include access paths");
+    }
+  }
+
+  async function resolveTrustedKey(pack, trustStore) {
+    trustStore = normalizeTrustStore(trustStore);
+    const packKeyID = trimString(pack.signature && pack.signature.key_id);
+    const packOrgID = trimString(pack.organization && pack.organization.org_id);
+    let sawKey = false;
+    let sawWrongOrg = false;
+    let sawDisabled = false;
+    let sawExpired = false;
+
+    for (const entry of trustStore.trusted_keys) {
+      const keyID = trimString(entry.key_id);
+      if (keyID !== packKeyID) {
+        continue;
+      }
+      sawKey = true;
+      if (entry.disabled === true) {
+        sawDisabled = true;
+        continue;
+      }
+      if (trimString(entry.org_id) !== packOrgID) {
+        sawWrongOrg = true;
+        continue;
+      }
+      if (trimString(entry.expires_at_utc)) {
+        const keyExpiry = parseRFC3339(entry.expires_at_utc, "trusted key expires_at_utc");
+        if (keyExpiry <= new Date()) {
+          sawExpired = true;
+          continue;
+        }
+      }
+      const publicKeyBytes = base64URLToBytes(entry.public_key, "trusted public key");
+      if (publicKeyBytes.length !== 32) {
+        throw new Error("Trusted public key has invalid length");
+      }
+      const derivedID = await keyIDFromPublicKey(publicKeyBytes);
+      if (derivedID !== keyID) {
+        throw new Error("Trusted public key does not match key id");
+      }
+      return {
+        entry: {
+          org_id: trimString(entry.org_id),
+          org_name: trimString(entry.org_name),
+          key_id: keyID,
+          public_key: trimString(entry.public_key),
+        },
+        publicKeyBytes,
+      };
+    }
+
+    if (sawDisabled) {
+      throw new Error("Trusted key is disabled");
+    }
+    if (sawWrongOrg) {
+      throw new Error("Trusted key belongs to a different organization");
+    }
+    if (sawExpired) {
+      throw new Error("Trusted key is expired");
+    }
+    if (sawKey) {
+      throw new Error("Trusted key is not usable");
+    }
+    throw new Error("Pack signer is not in the trust store");
+  }
+
+  async function verifySignature(pack, publicKeyBytes) {
+    if (!crypto || !crypto.subtle) {
+      throw new Error("Web Crypto is unavailable in this browser context");
+    }
+    const signatureBytes = base64URLToBytes(pack.signature.sig, "signature");
+    if (signatureBytes.length !== 64) {
+      throw new Error("Signature has invalid length");
+    }
+    let publicKey;
+    try {
+      publicKey = await crypto.subtle.importKey(
+        "raw",
+        publicKeyBytes,
+        { name: "Ed25519" },
+        false,
+        ["verify"],
+      );
+    } catch (err) {
+      throw new Error("This browser does not support Ed25519 verification");
+    }
+    const ok = await crypto.subtle.verify(
+      { name: "Ed25519" },
+      publicKey,
+      signatureBytes,
+      canonicalPayload(pack),
+    );
+    if (!ok) {
+      throw new Error("Pack signature verification failed");
+    }
+  }
+
+  async function buildTrustedKeyEntry(existingStore) {
+    const orgID = trimString(els.trustOrgID.value);
+    const orgName = trimString(els.trustOrgName.value);
+    if (!orgID) {
+      throw new Error("Org ID is required");
+    }
+    if (!orgName) {
+      throw new Error("Org name is required");
+    }
+    const publicKey = trimString(els.trustPublicKey.value);
+    const publicKeyBytes = base64URLToBytes(publicKey, "trusted public key");
+    if (publicKeyBytes.length !== 32) {
+      throw new Error("Trusted public key must be 32 bytes");
+    }
+    const keyID = await keyIDFromPublicKey(publicKeyBytes);
+    const expiresAtUTC = trustDateTimeToUTC(els.trustExpires.value);
+    if (expiresAtUTC && new Date(expiresAtUTC) <= new Date()) {
+      throw new Error("Key expiry must be in the future");
+    }
+    const existing = existingStore.trusted_keys.find((entry) => {
+      return entry.org_id === orgID && entry.key_id === keyID;
+    });
+    const entry = {
+      org_id: orgID,
+      org_name: orgName,
+      key_id: keyID,
+      public_key: publicKey,
+      added_at_utc: existing ? existing.added_at_utc : new Date().toISOString(),
+    };
+    if (expiresAtUTC) {
+      entry.expires_at_utc = expiresAtUTC;
+    }
+    const source = trimString(els.trustSource.value);
+    if (source) {
+      entry.source = source;
+    }
+    return entry;
+  }
+
+  function resetTrustFields() {
+    els.trustOrgID.value = "";
+    els.trustOrgName.value = "";
+    els.trustPublicKey.value = "";
+    els.trustExpires.value = "";
+    els.trustSource.value = "";
+  }
+
+  function renderTrustKeys(store) {
+    clearNode(els.trustKeyList);
+    let normalized;
+    try {
+      normalized = normalizeTrustStore(store || readTrustStoreInput());
+    } catch (err) {
+      const message = document.createElement("p");
+      message.className = "recover-empty";
+      message.textContent = "Trust store JSON is not valid yet.";
+      els.trustKeyList.appendChild(message);
+      return;
+    }
+    if (normalized.trusted_keys.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "recover-empty";
+      empty.textContent = "No trusted keys added.";
+      els.trustKeyList.appendChild(empty);
+      return;
+    }
+    for (const entry of normalized.trusted_keys) {
+      const item = document.createElement("article");
+      item.className = "trust-key-card";
+      const meta = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = entry.org_name || entry.org_id;
+      const detail = document.createElement("span");
+      detail.textContent = `${entry.org_id} / ${entry.key_id}`;
+      meta.append(title, detail);
+      const actions = document.createElement("div");
+      actions.className = "trust-key-card__actions";
+      const fillBtn = document.createElement("button");
+      fillBtn.className = "btn secondary";
+      fillBtn.type = "button";
+      fillBtn.textContent = "Edit";
+      fillBtn.addEventListener("click", () => fillTrustFields(entry));
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "btn secondary";
+      removeBtn.type = "button";
+      removeBtn.textContent = "Remove";
+      removeBtn.addEventListener("click", () => removeTrustedKey(entry.org_id, entry.key_id));
+      const copyTextBtn = document.createElement("button");
+      copyTextBtn.className = "btn secondary";
+      copyTextBtn.type = "button";
+      copyTextBtn.textContent = "Copy Text";
+      copyTextBtn.addEventListener("click", () => exportTrustedKeyText(entry, copyTextBtn));
+      actions.append(fillBtn, copyTextBtn, removeBtn);
+      item.append(meta, actions);
+      els.trustKeyList.appendChild(item);
+    }
+  }
+
+  function fillTrustFields(entry) {
+    els.trustOrgID.value = entry.org_id;
+    els.trustOrgName.value = entry.org_name;
+    els.trustPublicKey.value = entry.public_key;
+    els.trustSource.value = entry.source || "";
+    if (entry.expires_at_utc) {
+      const date = new Date(entry.expires_at_utc);
+      if (Number.isFinite(date.getTime())) {
+        els.trustExpires.value = date.toISOString().slice(0, 16);
+      }
+    } else {
+      els.trustExpires.value = "";
+    }
+  }
+
+  function removeTrustedKey(orgID, keyID) {
+    const store = normalizeTrustStore(readTrustStoreInput());
+    store.trusted_keys = store.trusted_keys.filter((entry) => {
+      return !(entry.org_id === orgID && entry.key_id === keyID);
+    });
+    writeTrustStore(store);
+    setStatus("idle", "Trusted key removed", "The local trust store JSON has been updated.");
+  }
+
+  async function exportTrustedKeyText(entry, button) {
+    const text = encodeTextEnvelope("trusted-key", normalizeTrustedKey(entry));
+    els.handoffInput.value = text;
+    await copyText(text, button);
+    setStatus("idle", "Trusted key text ready", "This GPMREC1 text can be pasted into another recovery page.");
+  }
+
+  function renderFacts(pack, trustedKey) {
+    clearNode(els.factsGrid);
+    const facts = [
+      ["Organization", pack.organization.name || pack.organization.org_id],
+      ["Org ID", pack.organization.org_id],
+      ["Pack ID", pack.pack_id],
+      ["Signer", trustedKey.key_id],
+      ["Expires", pack.expires_at_utc],
+      ["Audience", pack.intended_audience],
+    ];
+    for (const [label, value] of facts) {
+      const item = document.createElement("article");
+      const labelNode = document.createElement("span");
+      const valueNode = document.createElement("strong");
+      labelNode.textContent = label;
+      valueNode.textContent = value || "Not set";
+      item.append(labelNode, valueNode);
+      els.factsGrid.appendChild(item);
+    }
+  }
+
+  function renderPaths(pack) {
+    clearNode(els.pathsList);
+    const paths = normalizePack(pack).access_paths;
+    els.pathCount.textContent = String(paths.length);
+    if (paths.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "recover-empty";
+      empty.textContent = "No access paths in this pack.";
+      els.pathsList.appendChild(empty);
+      return;
+    }
+    for (const path of paths) {
+      const item = document.createElement("article");
+      item.className = "recover-path";
+
+      const head = document.createElement("div");
+      head.className = "recover-path__head";
+      const title = document.createElement("h3");
+      title.textContent = path.description || path.path_id;
+      const badges = document.createElement("div");
+      badges.className = "recover-badges";
+      for (const text of pathBadges(path)) {
+        const badge = document.createElement("span");
+        badge.textContent = text;
+        badges.appendChild(badge);
+      }
+      head.append(title, badges);
+
+      const url = document.createElement("p");
+      url.className = "recover-url";
+      url.textContent = path.url;
+
+      const actions = document.createElement("div");
+      actions.className = "recover-path__actions";
+      const copyBtn = document.createElement("button");
+      copyBtn.className = "btn secondary";
+      copyBtn.type = "button";
+      copyBtn.textContent = "Copy";
+      copyBtn.addEventListener("click", () => copyText(path.url, copyBtn));
+      actions.appendChild(copyBtn);
+      const href = safeHref(path.url);
+      if (href) {
+        const openLink = document.createElement("a");
+        openLink.className = "btn secondary";
+        openLink.href = href;
+        openLink.target = "_blank";
+        openLink.rel = "noreferrer noopener";
+        openLink.textContent = "Open";
+        actions.appendChild(openLink);
+      }
+
+      item.append(head, url, actions);
+      if (Array.isArray(path.safety_notes) && path.safety_notes.length > 0) {
+        const notes = document.createElement("ul");
+        notes.className = "recover-notes";
+        for (const note of path.safety_notes) {
+          const li = document.createElement("li");
+          li.textContent = note;
+          notes.appendChild(li);
+        }
+        item.appendChild(notes);
+      }
+      els.pathsList.appendChild(item);
+    }
+  }
+
+  function pathBadges(path) {
+    const badges = ["Trusted", path.kind || "path"];
+    if (path.requires_external_app) {
+      badges.push("External app");
+    }
+    if (/\.onion$/i.test(URLSafe(path.url).hostname)) {
+      badges.push("Onion");
+    }
+    return badges;
+  }
+
+  function URLSafe(rawURL) {
+    try {
+      return new URL(rawURL);
+    } catch (err) {
+      return { protocol: "", hostname: "" };
+    }
+  }
+
+  function safeHref(rawURL) {
+    const parsed = URLSafe(rawURL);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return rawURL;
+    }
+    return "";
+  }
+
+  async function copyText(value, button) {
+    try {
+      await navigator.clipboard.writeText(value);
+      button.textContent = "Copied";
+      setTimeout(() => {
+        button.textContent = "Copy";
+      }, 1400);
+    } catch (err) {
+      setStatus("warn", "Copy unavailable", "Select the URL text and copy it manually.");
+    }
+  }
+
+  async function verifyCurrentInputs() {
+    clearNode(els.factsGrid);
+    clearNode(els.pathsList);
+    els.pathCount.textContent = "0";
+    setStatus("idle", "Verifying", "Checking trust store, expiry, key id, and signature.");
+    const pack = parseJSONInput(els.packInput.value, "Pack");
+    const trustStore = readTrustStoreInput();
+    validatePackShape(pack);
+    const trusted = await resolveTrustedKey(pack, trustStore);
+    await verifySignature(pack, trusted.publicKeyBytes);
+    const normalized = normalizePack(pack);
+    setStatus(
+      "good",
+      "Trusted pack",
+      `${normalized.organization.name} signed this pack with trusted key ${trusted.entry.key_id}.`,
+    );
+    renderFacts(normalized, trusted.entry);
+    renderPaths(normalized);
+  }
+
+  async function readFileInto(fileInput, target) {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) {
+      return;
+    }
+    target.value = await file.text();
+  }
+
+  async function addTrustedKeyFromFields() {
+    const store = normalizeTrustStore(readTrustStoreInput());
+    const entry = await buildTrustedKeyEntry(store);
+    const nextKeys = store.trusted_keys.filter((existing) => {
+      return !(existing.org_id === entry.org_id && existing.key_id === entry.key_id);
+    });
+    nextKeys.push(entry);
+    writeTrustStore({ version: 1, trusted_keys: nextKeys });
+    resetTrustFields();
+    setStatus("idle", "Trusted key added", `${entry.org_name} is now in this local trust store.`);
+  }
+
+  function exportTextEnvelope(kind) {
+    let payload;
+    if (kind === "access-pack") {
+      payload = normalizePack(parseJSONInput(els.packInput.value, "Pack"));
+    } else if (kind === "trust-store") {
+      payload = normalizeTrustStore(readTrustStoreInput());
+    } else {
+      throw new Error(`Unsupported export kind ${kind}`);
+    }
+    const text = encodeTextEnvelope(kind, payload);
+    els.handoffInput.value = text;
+    return text;
+  }
+
+  function importTextEnvelope() {
+    const decoded = decodeTextEnvelope(els.handoffInput.value);
+    if (decoded.kind === "access-pack") {
+      els.packInput.value = JSON.stringify(decoded.payload, null, 2);
+      setStatus("idle", "Pack text imported", "Verify it against the trust store before using any path.");
+      return;
+    }
+    if (decoded.kind === "trust-store") {
+      writeTrustStore(decoded.payload);
+      setStatus("idle", "Trust store text imported", "The local trust store JSON has been updated.");
+      return;
+    }
+    if (decoded.kind === "trusted-key") {
+      const store = normalizeTrustStore(readTrustStoreInput());
+      const entry = normalizeTrustedKey(decoded.payload);
+      if (!entry.org_id || !entry.org_name || !entry.key_id || !entry.public_key) {
+        throw new Error("Trusted-key handoff is missing required fields");
+      }
+      const nextKeys = store.trusted_keys.filter((existing) => {
+        return !(existing.org_id === entry.org_id && existing.key_id === entry.key_id);
+      });
+      nextKeys.push(entry);
+      writeTrustStore({ version: 1, trusted_keys: nextKeys });
+      setStatus("idle", "Trusted key text imported", `${entry.org_name} is now in this local trust store.`);
+    }
+  }
+
+  async function scanQRCodeWithNativeDetector(file) {
+    const detectorCtor = window.BarcodeDetector;
+    if (!detectorCtor) {
+      return "";
+    }
+    const detector = new detectorCtor({ formats: ["qr_code"] });
+    const bitmap = await createImageBitmap(file);
+    let codes;
+    try {
+      codes = await detector.detect(bitmap);
+    } finally {
+      if (typeof bitmap.close === "function") {
+        bitmap.close();
+      }
+    }
+    if (!codes || codes.length === 0) {
+      return "";
+    }
+    return trimString(codes[0].rawValue);
+  }
+
+  async function imageDataFromFile(file) {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) {
+      throw new Error("Browser canvas support is required for QR scanning");
+    }
+    if (typeof createImageBitmap === "function") {
+      const bitmap = await createImageBitmap(file);
+      try {
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        ctx.drawImage(bitmap, 0, 0);
+        return ctx.getImageData(0, 0, canvas.width, canvas.height);
+      } finally {
+        if (typeof bitmap.close === "function") {
+          bitmap.close();
+        }
+      }
+    }
+    const url = URL.createObjectURL(file);
+    try {
+      const image = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("QR image could not be loaded"));
+        img.src = url;
+      });
+      canvas.width = image.naturalWidth || image.width;
+      canvas.height = image.naturalHeight || image.height;
+      ctx.drawImage(image, 0, 0);
+      return ctx.getImageData(0, 0, canvas.width, canvas.height);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  async function scanQRCodeWithBundledScanner(file) {
+    if (typeof window.jsQR !== "function") {
+      return "";
+    }
+    const imageData = await imageDataFromFile(file);
+    const result = window.jsQR(imageData.data, imageData.width, imageData.height, {
+      inversionAttempts: "attemptBoth",
+    });
+    return result ? trimString(result.data) : "";
+  }
+
+  async function scanQRCodeImage() {
+    const file = els.qrImageFile.files && els.qrImageFile.files[0];
+    if (!file) {
+      throw new Error("Choose a QR image first");
+    }
+    let value = "";
+    try {
+      value = await scanQRCodeWithNativeDetector(file);
+    } catch (err) {
+      // Fall through to bundled jsQR when the native detector is unavailable
+      // for the selected image type or platform.
+    }
+    if (!value) {
+      value = await scanQRCodeWithBundledScanner(file);
+    }
+    if (!value) {
+      throw new Error("No QR code text was found in that image");
+    }
+    els.handoffInput.value = value;
+    importTextEnvelope();
+  }
+
+  els.verifyBtn.addEventListener("click", async () => {
+    els.verifyBtn.disabled = true;
+    try {
+      await verifyCurrentInputs();
+    } catch (err) {
+      setStatus("bad", "Verification failed", err.message || String(err));
+      clearNode(els.factsGrid);
+      clearNode(els.pathsList);
+      els.pathCount.textContent = "0";
+    } finally {
+      els.verifyBtn.disabled = false;
+    }
+  });
+
+  els.clearBtn.addEventListener("click", () => {
+    els.packInput.value = "";
+    els.trustInput.value = "";
+    els.packFile.value = "";
+    els.trustFile.value = "";
+    els.handoffInput.value = "";
+    resetQRPreview();
+    resetTrustFields();
+    try {
+      localStorage.removeItem(trustStoreStorageKey);
+    } catch (err) {
+      // Ignore local storage cleanup errors.
+    }
+    renderTrustKeys({ version: 1, trusted_keys: [] });
+    clearNode(els.factsGrid);
+    clearNode(els.pathsList);
+    els.pathCount.textContent = "0";
+    setStatus("idle", "Waiting for pack", "Import or paste a signed pack and a trusted organization key store.");
+  });
+
+  els.packFile.addEventListener("change", async () => {
+    await readFileInto(els.packFile, els.packInput);
+  });
+
+  els.trustFile.addEventListener("change", async () => {
+    await readFileInto(els.trustFile, els.trustInput);
+    try {
+      writeTrustStore(readTrustStoreInput());
+    } catch (err) {
+      setStatus("bad", "Trust import failed", err.message || String(err));
+    }
+  });
+
+  els.trustInput.addEventListener("input", () => {
+    renderTrustKeys();
+  });
+
+  els.trustAddBtn.addEventListener("click", async () => {
+    els.trustAddBtn.disabled = true;
+    try {
+      await addTrustedKeyFromFields();
+    } catch (err) {
+      setStatus("bad", "Could not add key", err.message || String(err));
+    } finally {
+      els.trustAddBtn.disabled = false;
+    }
+  });
+
+  els.trustResetBtn.addEventListener("click", () => {
+    resetTrustFields();
+  });
+
+  els.trustCopyBtn.addEventListener("click", async () => {
+    try {
+      const store = normalizeTrustStore(readTrustStoreInput());
+      writeTrustStore(store);
+      await copyText(els.trustInput.value, els.trustCopyBtn);
+      setStatus("idle", "Trust store copied", "The current trust store JSON is on the clipboard.");
+    } catch (err) {
+      setStatus("bad", "Copy failed", err.message || String(err));
+    }
+  });
+
+  els.trustDownloadBtn.addEventListener("click", () => {
+    try {
+      const store = normalizeTrustStore(readTrustStoreInput());
+      writeTrustStore(store);
+      const blob = new Blob([els.trustInput.value + "\n"], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "gpm-recovery-trust-store.json";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setStatus("idle", "Trust store ready", "The current trust store JSON was prepared for download.");
+    } catch (err) {
+      setStatus("bad", "Download failed", err.message || String(err));
+    }
+  });
+
+  els.exportPackTextBtn.addEventListener("click", async () => {
+    try {
+      const text = exportTextEnvelope("access-pack");
+      await copyText(text, els.exportPackTextBtn);
+      setStatus("idle", "Pack text ready", "The signed pack handoff text is on the clipboard.");
+    } catch (err) {
+      setStatus("bad", "Pack export failed", err.message || String(err));
+    }
+  });
+
+  els.exportStoreTextBtn.addEventListener("click", async () => {
+    try {
+      const text = exportTextEnvelope("trust-store");
+      await copyText(text, els.exportStoreTextBtn);
+      setStatus("idle", "Trust store text ready", "The trust-store handoff text is on the clipboard.");
+    } catch (err) {
+      setStatus("bad", "Store export failed", err.message || String(err));
+    }
+  });
+
+  els.importTextBtn.addEventListener("click", () => {
+    try {
+      importTextEnvelope();
+    } catch (err) {
+      setStatus("bad", "Text import failed", err.message || String(err));
+    }
+  });
+
+  els.clearTextBtn.addEventListener("click", () => {
+    els.handoffInput.value = "";
+    resetQRPreview();
+  });
+
+  els.renderQRBtn.addEventListener("click", () => {
+    try {
+      renderQRCode();
+      setStatus("idle", "QR rendered", "The current GPMREC1 text is ready as a local QR image.");
+    } catch (err) {
+      setStatus("bad", "QR render failed", err.message || String(err));
+    }
+  });
+
+  els.downloadQRBtn.addEventListener("click", () => {
+    try {
+      downloadRenderedQR();
+    } catch (err) {
+      setStatus("bad", "QR download failed", err.message || String(err));
+    }
+  });
+
+  els.scanQRBtn.addEventListener("click", async () => {
+    els.scanQRBtn.disabled = true;
+    try {
+      await scanQRCodeImage();
+    } catch (err) {
+      setStatus("bad", "QR scan failed", err.message || String(err));
+    } finally {
+      els.scanQRBtn.disabled = false;
+    }
+  });
+
+  try {
+    const savedTrustStore = localStorage.getItem(trustStoreStorageKey);
+    if (savedTrustStore && !trimString(els.trustInput.value)) {
+      els.trustInput.value = savedTrustStore;
+    }
+  } catch (err) {
+    // Ignore local storage availability issues.
+  }
+  if (!trimString(els.trustInput.value)) {
+    writeTrustStore({ version: 1, trusted_keys: [] });
+  } else {
+    renderTrustKeys();
+  }
+})();
