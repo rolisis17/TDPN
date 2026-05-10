@@ -125,6 +125,22 @@ func RemoveTrustedKey(store TrustStore, orgID string, keyID string) (TrustStore,
 }
 
 func ResolveTrustedPublicKey(store TrustStore, pack Pack, now time.Time) (ed25519.PublicKey, TrustedKey, error) {
+	pack = Normalize(pack)
+	if pack.Signature == nil {
+		return nil, TrustedKey{}, errors.New("access pack signature is required")
+	}
+	return resolveTrustedPublicKeyFor(store, pack.Organization.OrgID, pack.Signature.KeyID, "access pack", now)
+}
+
+func ResolveTrustedBridgeInvitePublicKey(store TrustStore, invite BridgeInvite, now time.Time) (ed25519.PublicKey, TrustedKey, error) {
+	invite = NormalizeBridgeInvite(invite)
+	if invite.Signature == nil {
+		return nil, TrustedKey{}, errors.New("bridge invite signature is required")
+	}
+	return resolveTrustedPublicKeyFor(store, invite.Organization.OrgID, invite.Signature.KeyID, "bridge invite", now)
+}
+
+func resolveTrustedPublicKeyFor(store TrustStore, orgID string, keyID string, label string, now time.Time) (ed25519.PublicKey, TrustedKey, error) {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
@@ -132,13 +148,14 @@ func ResolveTrustedPublicKey(store TrustStore, pack Pack, now time.Time) (ed2551
 	if err := ValidateTrustStore(store, time.Time{}); err != nil {
 		return nil, TrustedKey{}, err
 	}
-	pack = Normalize(pack)
-	if pack.Signature == nil {
-		return nil, TrustedKey{}, errors.New("access pack signature is required")
+	orgID = strings.TrimSpace(orgID)
+	keyID = strings.TrimSpace(keyID)
+	label = strings.TrimSpace(label)
+	if label == "" {
+		label = "artifact"
 	}
-	keyID := strings.TrimSpace(pack.Signature.KeyID)
 	if keyID == "" {
-		return nil, TrustedKey{}, errors.New("access pack signature key id is required")
+		return nil, TrustedKey{}, fmt.Errorf("%s signature key id is required", label)
 	}
 	var sawKeyID bool
 	var sawDisabled bool
@@ -154,7 +171,7 @@ func ResolveTrustedPublicKey(store TrustStore, pack Pack, now time.Time) (ed2551
 			sawDisabled = true
 			continue
 		}
-		if entry.OrgID != pack.Organization.OrgID {
+		if entry.OrgID != orgID {
 			sawOrgMismatch = true
 			continue
 		}
@@ -181,7 +198,7 @@ func ResolveTrustedPublicKey(store TrustStore, pack Pack, now time.Time) (ed2551
 	case sawKeyID:
 		return nil, TrustedKey{}, fmt.Errorf("trusted key %q is not usable", keyID)
 	default:
-		return nil, TrustedKey{}, fmt.Errorf("access pack key %q is not trusted", keyID)
+		return nil, TrustedKey{}, fmt.Errorf("%s key %q is not trusted", label, keyID)
 	}
 }
 

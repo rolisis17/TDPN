@@ -127,27 +127,34 @@ But the app trusts it only if:
 
 Draft schema:
 - `docs/schemas/access-recovery-pack-v0.schema.json`
+- `docs/schemas/access-recovery-bridge-invite-v0.schema.json`
 - `docs/schemas/access-recovery-trust-store-v1.schema.json`
 
 Example:
 - `docs/examples/access-recovery-pack.example.json`
+- `docs/examples/access-recovery-bridge-invite.example.json`
 
 First CLI:
 - `go run ./cmd/gpmrecover sign --pack docs/examples/access-recovery-pack.example.json --private-key-file .easy-node-logs/recovery.key --out .easy-node-logs/access-pack.signed.json`
+- `go run ./cmd/gpmrecover bridge-sign --invite docs/examples/access-recovery-bridge-invite.example.json --private-key-file .easy-node-logs/recovery.key --out .easy-node-logs/bridge-invite.signed.json`
 - `go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub`
+- `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --show-paths`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub --timeout-sec 8`
 
 Local trust-store flow:
 - `go run ./cmd/gpmrecover trust-add --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --org-name "FreeNews Demo" --public-key-file .easy-node-logs/recovery.pub --source "demo handoff"`
 - `go run ./cmd/gpmrecover trust-list --trust-store .easy-node-logs/recovery-trust.json`
 - `go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --show-paths`
+- `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --show-paths`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --timeout-sec 8`
 - `go run ./cmd/gpmrecover trust-remove --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID`
 
 Text handoff flow:
 - `go run ./cmd/gpmrecover text-export --kind access-pack --in .easy-node-logs/access-pack.signed.json --out .easy-node-logs/access-pack.txt`
+- `go run ./cmd/gpmrecover text-export --kind bridge-invite --in .easy-node-logs/bridge-invite.signed.json --out .easy-node-logs/bridge-invite.txt`
 - `go run ./cmd/gpmrecover text-export --kind trust-store --in .easy-node-logs/recovery-trust.json --out .easy-node-logs/recovery-trust.txt`
 - `go run ./cmd/gpmrecover text-import --text-file .easy-node-logs/access-pack.txt --expect-kind access-pack --out .easy-node-logs/access-pack.imported.json`
+- `go run ./cmd/gpmrecover text-import --text-file .easy-node-logs/bridge-invite.txt --expect-kind bridge-invite --out .easy-node-logs/bridge-invite.imported.json`
 - `go run ./cmd/gpmrecover text-import --text-file .easy-node-logs/recovery-trust.txt --expect-kind trust-store --out .easy-node-logs/recovery-trust.imported.json`
 - `go run ./cmd/gpmrecover qr-png --text-file .easy-node-logs/access-pack.txt --out .easy-node-logs/access-pack.qr.png --size 768`
 
@@ -155,7 +162,7 @@ The text format starts with `GPMREC1.` and carries compact JSON as base64url. It
 
 Trust-store rules:
 - the public key is stored with an organization id/name and derived key id
-- a pack must be signed by a trusted key whose organization id matches the pack
+- a pack or bridge invite must be signed by a trusted key whose organization id matches the artifact
 - disabled, expired, unknown, or wrong-organization keys fail closed
 - raw `--public-key-file` verification remains available for one-off/operator checks, but beta users should verify through the trust store
 
@@ -168,27 +175,29 @@ Trust-store rules:
 
 First browser surface:
 - `apps/web/recovery.html`
-- runs local pack/trust-store parsing in the browser
+- runs local pack, bridge-invite, and trust-store parsing in the browser
 - lets a tester add/remove trusted organization public keys without hand-editing JSON
 - copies or downloads the current trust store for handoff to another device
-- exports/imports `GPMREC1` text handoffs for signed packs, trust stores, and single trusted keys
+- exports/imports `GPMREC1` text handoffs for signed packs, bridge invites, trust stores, and single trusted keys
 - renders and downloads a local QR PNG from the current `GPMREC1` text handoff
 - can scan a QR image into the text handoff field with native `BarcodeDetector` support or the bundled browser scanner fallback
 - verifies the Ed25519 signature with Web Crypto when the browser supports it
-- lists trusted access paths only after signature, expiry, org id, and trusted-key checks pass
+- lists trusted access/helper paths only after signature, expiry, org id, and trusted-key checks pass
 - does not run network reachability checks yet because browser cross-origin checks are not reliable enough for the beta trust decision
 
 ## MVP Cut
 
 Do first:
 - access-pack schema
+- bridge-invite schema
 - access-pack signing/verification library
-- CLI sign/verify
+- bridge-invite signing/verification library
+- CLI sign/verify for packs and bridge invites
 - CLI reachability check that does not confuse reachable with trusted
 - local trust-store file
 - browser verifier/import screen
 - UI trust-key add/remove flow
-- text handoff export/import for packs, trust stores, and trusted keys
+- text handoff export/import for packs, bridge invites, trust stores, and trusted keys
 - QR PNG export in the CLI
 - QR rendering/download in the browser
 - QR image import in the browser with native scanning or bundled fallback
@@ -196,7 +205,8 @@ Do first:
 - docs explaining how a user visualizes it
 
 Do next:
-- bridge invite verifier
+- helper launch/copy flows for bridge invites
+- bridge invite source-diversity and rotation policy
 
 Do later:
 - bridge service

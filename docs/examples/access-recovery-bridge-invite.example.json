@@ -1,0 +1,44 @@
+{
+  "schema_version": 0,
+  "invite_id": "bri-demo-helper-20260510",
+  "organization": {
+    "org_id": "freenews-demo",
+    "name": "FreeNews Demo",
+    "home_url": "https://freenews.example"
+  },
+  "issued_at_utc": "2026-05-10T00:00:00Z",
+  "expires_at_utc": "2026-05-17T00:00:00Z",
+  "intended_audience": "People who cannot reach the official FreeNews Demo entry points",
+  "helper": {
+    "helper_id": "helper-perth-1",
+    "display_name": "Perth community helper",
+    "contact_url": "https://helper.example/contact/freenews",
+    "description": "Temporary assisted bootstrap helper for blocked users"
+  },
+  "access_paths": [
+    {
+      "path_id": "bridge-helper-web",
+      "kind": "bridge",
+      "url": "https://helper.example/freenews/bootstrap",
+      "priority": 10,
+      "description": "Temporary helper bootstrap page",
+      "safety_notes": [
+        "Use this only while the invite is unexpired.",
+        "Never enter wallet seed phrases or private keys."
+      ]
+    },
+    {
+      "path_id": "bridge-helper-chat",
+      "kind": "instructions",
+      "url": "mailto:bridge-helper@example.com",
+      "priority": 20,
+      "requires_external_app": true,
+      "launch_hint": "Email the helper with the invite id only",
+      "description": "Manual contact fallback"
+    }
+  ],
+  "safety_notes": [
+    "This invite proves the helper route was signed by the organization key.",
+    "It does not make the helper a wallet custodian or support agent."
+  ]
+}

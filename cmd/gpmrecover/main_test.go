@@ -24,6 +24,8 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	publicKey := filepath.Join(dir, "recovery.pub")
 	unsignedPack := filepath.Join(dir, "pack.json")
 	signedPack := filepath.Join(dir, "pack.signed.json")
+	unsignedBridge := filepath.Join(dir, "bridge.json")
+	signedBridge := filepath.Join(dir, "bridge.signed.json")
 	trustStore := filepath.Join(dir, "trust-store.json")
 
 	if err := runGen([]string{"--private-key-out", privateKey, "--public-key-out", publicKey}); err != nil {
@@ -39,6 +41,19 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runSign([]string{"--pack", unsignedPack, "--private-key-file", privateKey, "--out", signedPack}); err != nil {
 		t.Fatalf("sign: %v", err)
 	}
+	bridgeBody, err := json.MarshalIndent(testBridgeInvite(server.URL), "", "  ")
+	if err != nil {
+		t.Fatalf("marshal bridge invite: %v", err)
+	}
+	if err := os.WriteFile(unsignedBridge, bridgeBody, 0o644); err != nil {
+		t.Fatalf("write bridge invite: %v", err)
+	}
+	if err := runBridgeSign([]string{"--invite", unsignedBridge, "--private-key-file", privateKey, "--out", signedBridge}); err != nil {
+		t.Fatalf("bridge-sign: %v", err)
+	}
+	if err := runBridgeVerify([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--show-paths"}); err != nil {
+		t.Fatalf("bridge-verify: %v", err)
+	}
 	if err := runVerify([]string{"--pack", signedPack, "--public-key-file", publicKey, "--show-paths"}); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -53,6 +68,9 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}
 	if err := runVerify([]string{"--pack", signedPack, "--trust-store", trustStore, "--show-paths"}); err != nil {
 		t.Fatalf("verify with trust store: %v", err)
+	}
+	if err := runBridgeVerify([]string{"--invite", signedBridge, "--trust-store", trustStore, "--show-paths"}); err != nil {
+		t.Fatalf("bridge-verify with trust store: %v", err)
 	}
 	if err := runCheck([]string{"--pack", signedPack, "--trust-store", trustStore, "--timeout-sec", "2"}); err != nil {
 		t.Fatalf("check with trust store: %v", err)
@@ -90,6 +108,17 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runVerify([]string{"--pack", signedPack, "--trust-store", importedStore}); err != nil {
 		t.Fatalf("verify imported store: %v", err)
 	}
+	bridgeEnvelope := filepath.Join(dir, "bridge.txt")
+	importedBridge := filepath.Join(dir, "bridge.imported.json")
+	if err := runTextExport([]string{"--kind", "bridge-invite", "--in", signedBridge, "--out", bridgeEnvelope}); err != nil {
+		t.Fatalf("text-export bridge invite: %v", err)
+	}
+	if err := runTextImport([]string{"--text-file", bridgeEnvelope, "--expect-kind", "bridge-invite", "--out", importedBridge}); err != nil {
+		t.Fatalf("text-import bridge invite: %v", err)
+	}
+	if err := runBridgeVerify([]string{"--invite", importedBridge, "--trust-store", importedStore}); err != nil {
+		t.Fatalf("bridge-verify imported bridge invite: %v", err)
+	}
 	pubBody, err := os.ReadFile(publicKey)
 	if err != nil {
 		t.Fatalf("read public key: %v", err)
@@ -104,6 +133,9 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}
 	if err := runVerify([]string{"--pack", signedPack, "--trust-store", trustStore}); err == nil {
 		t.Fatal("expected verify with empty trust store to fail")
+	}
+	if err := runBridgeVerify([]string{"--invite", signedBridge, "--trust-store", trustStore}); err == nil {
+		t.Fatal("expected bridge verify with empty trust store to fail")
 	}
 }
 
@@ -124,6 +156,30 @@ func testRecoveryPack(serverURL string) accesspack.Pack {
 		},
 		AccessPaths: []accesspack.AccessPath{
 			{PathID: "main", Kind: "website", URL: serverURL, Priority: 10},
+		},
+	}
+}
+
+func testBridgeInvite(serverURL string) accesspack.BridgeInvite {
+	return accesspack.BridgeInvite{
+		SchemaVersion: accesspack.SchemaVersion,
+		InviteID:      "bri-test-cli",
+		Organization: accesspack.Organization{
+			OrgID:   "cli-org",
+			Name:    "CLI Org",
+			HomeURL: "https://cli.example",
+		},
+		IssuedAtUTC:      "2026-05-10T00:00:00Z",
+		ExpiresAtUTC:     "2099-01-01T00:00:00Z",
+		IntendedAudience: "CLI test users blocked from the main site",
+		Helper: accesspack.BridgeHelper{
+			HelperID:    "helper-cli",
+			DisplayName: "CLI Helper",
+			ContactURL:  serverURL + "/contact",
+			Description: "Temporary bridge helper",
+		},
+		AccessPaths: []accesspack.AccessPath{
+			{PathID: "bridge-main", Kind: "bridge", URL: serverURL + "/bridge", Priority: 10},
 		},
 	}
 }

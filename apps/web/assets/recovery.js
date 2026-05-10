@@ -37,6 +37,7 @@
   };
   const trustStoreStorageKey = "gpm_recover_trust_store_v1";
   const textEnvelopePrefix = "GPMREC1";
+  const textEnvelopeKinds = ["access-pack", "bridge-invite", "trust-store", "trusted-key"];
 
   function setStatus(state, title, detail) {
     els.statusCard.dataset.state = state;
@@ -91,7 +92,7 @@
   }
 
   function encodeTextEnvelope(kind, payload) {
-    if (!["access-pack", "trust-store", "trusted-key"].includes(kind)) {
+    if (!textEnvelopeKinds.includes(kind)) {
       throw new Error(`Unsupported text handoff kind ${kind}`);
     }
     const body = new TextEncoder().encode(JSON.stringify({ v: 1, k: kind, p: payload }));
@@ -114,7 +115,7 @@
     if (!envelope || envelope.v !== 1) {
       throw new Error("Unsupported text handoff version");
     }
-    if (!["access-pack", "trust-store", "trusted-key"].includes(envelope.k)) {
+    if (!textEnvelopeKinds.includes(envelope.k)) {
       throw new Error(`Unsupported text handoff kind ${envelope.k}`);
     }
     if (envelope.p === null || typeof envelope.p !== "object") {
@@ -330,6 +331,64 @@
     return normalized;
   }
 
+  function normalizeBridgeInvite(invite) {
+    const normalized = {
+      schema_version: invite.schema_version,
+      invite_id: trimString(invite.invite_id),
+      organization: {
+        org_id: trimString(invite.organization && invite.organization.org_id),
+        name: trimString(invite.organization && invite.organization.name),
+      },
+      issued_at_utc: trimString(invite.issued_at_utc),
+      expires_at_utc: trimString(invite.expires_at_utc),
+      intended_audience: trimString(invite.intended_audience),
+      helper: {
+        helper_id: trimString(invite.helper && invite.helper.helper_id),
+        display_name: trimString(invite.helper && invite.helper.display_name),
+      },
+      access_paths: Array.isArray(invite.access_paths) ? invite.access_paths.map(normalizePath) : [],
+    };
+    const homeURL = trimString(invite.organization && invite.organization.home_url);
+    if (homeURL) {
+      normalized.organization.home_url = homeURL;
+    }
+    const contactURL = trimString(invite.helper && invite.helper.contact_url);
+    if (contactURL) {
+      normalized.helper.contact_url = contactURL;
+    }
+    const helperDescription = trimString(invite.helper && invite.helper.description);
+    if (helperDescription) {
+      normalized.helper.description = helperDescription;
+    }
+    const safetyNotes = Array.isArray(invite.safety_notes)
+      ? invite.safety_notes.map(trimString).filter(Boolean)
+      : [];
+    if (safetyNotes.length > 0) {
+      normalized.safety_notes = safetyNotes;
+    }
+    normalized.access_paths.sort((a, b) => {
+      if ((a.priority || 0) === (b.priority || 0)) {
+        return a.path_id.localeCompare(b.path_id);
+      }
+      return (a.priority || 0) - (b.priority || 0);
+    });
+    return normalized;
+  }
+
+  function signedArtifactKind(artifact) {
+    if (artifact && typeof artifact === "object" && Object.prototype.hasOwnProperty.call(artifact, "invite_id")) {
+      return "bridge-invite";
+    }
+    return "access-pack";
+  }
+
+  function normalizeSignedArtifact(artifact) {
+    if (signedArtifactKind(artifact) === "bridge-invite") {
+      return normalizeBridgeInvite(artifact);
+    }
+    return normalizePack(artifact);
+  }
+
   function normalizeSource(source) {
     const normalized = {
       source_id: trimString(source.source_id),
@@ -394,8 +453,8 @@
     });
   }
 
-  function canonicalPayload(pack) {
-    return new TextEncoder().encode(goCompatibleJSONString(normalizePack(pack)));
+  function canonicalPayload(artifact) {
+    return new TextEncoder().encode(goCompatibleJSONString(normalizeSignedArtifact(artifact)));
   }
 
   function validatePackShape(pack) {
@@ -430,10 +489,57 @@
     }
   }
 
-  async function resolveTrustedKey(pack, trustStore) {
+  function validateBridgeInviteShape(invite) {
+    if (!invite || typeof invite !== "object") {
+      throw new Error("Bridge invite must be a JSON object");
+    }
+    if (invite.schema_version !== 0) {
+      throw new Error(`Unsupported bridge invite schema_version ${invite.schema_version}`);
+    }
+    if (!invite.signature || typeof invite.signature !== "object") {
+      throw new Error("Bridge invite signature is required");
+    }
+    if (trimString(invite.signature.alg) !== "ed25519") {
+      throw new Error("Unsupported signature algorithm");
+    }
+    if (!trimString(invite.signature.key_id)) {
+      throw new Error("Signature key id is required");
+    }
+    const issuedAt = parseRFC3339(invite.issued_at_utc, "issued_at_utc");
+    const expiresAt = parseRFC3339(invite.expires_at_utc, "expires_at_utc");
+    if (expiresAt <= issuedAt) {
+      throw new Error("Bridge invite expiry must be after issue time");
+    }
+    if (expiresAt <= new Date()) {
+      throw new Error("Bridge invite is expired");
+    }
+    if (!trimString(invite.organization && invite.organization.org_id)) {
+      throw new Error("Organization id is required");
+    }
+    if (!trimString(invite.helper && invite.helper.helper_id)) {
+      throw new Error("Helper id is required");
+    }
+    if (!trimString(invite.helper && invite.helper.display_name)) {
+      throw new Error("Helper display name is required");
+    }
+    if (!Array.isArray(invite.access_paths) || invite.access_paths.length === 0) {
+      throw new Error("Bridge invite must include access paths");
+    }
+  }
+
+  function validateSignedArtifactShape(artifact) {
+    if (signedArtifactKind(artifact) === "bridge-invite") {
+      validateBridgeInviteShape(artifact);
+      return;
+    }
+    validatePackShape(artifact);
+  }
+
+  async function resolveTrustedKey(artifact, trustStore) {
     trustStore = normalizeTrustStore(trustStore);
-    const packKeyID = trimString(pack.signature && pack.signature.key_id);
-    const packOrgID = trimString(pack.organization && pack.organization.org_id);
+    const artifactKind = signedArtifactKind(artifact);
+    const artifactKeyID = trimString(artifact.signature && artifact.signature.key_id);
+    const artifactOrgID = trimString(artifact.organization && artifact.organization.org_id);
     let sawKey = false;
     let sawWrongOrg = false;
     let sawDisabled = false;
@@ -441,7 +547,7 @@
 
     for (const entry of trustStore.trusted_keys) {
       const keyID = trimString(entry.key_id);
-      if (keyID !== packKeyID) {
+      if (keyID !== artifactKeyID) {
         continue;
       }
       sawKey = true;
@@ -449,7 +555,7 @@
         sawDisabled = true;
         continue;
       }
-      if (trimString(entry.org_id) !== packOrgID) {
+      if (trimString(entry.org_id) !== artifactOrgID) {
         sawWrongOrg = true;
         continue;
       }
@@ -491,14 +597,14 @@
     if (sawKey) {
       throw new Error("Trusted key is not usable");
     }
-    throw new Error("Pack signer is not in the trust store");
+    throw new Error(`${artifactKind === "bridge-invite" ? "Bridge invite" : "Pack"} signer is not in the trust store`);
   }
 
-  async function verifySignature(pack, publicKeyBytes) {
+  async function verifySignature(artifact, publicKeyBytes) {
     if (!crypto || !crypto.subtle) {
       throw new Error("Web Crypto is unavailable in this browser context");
     }
-    const signatureBytes = base64URLToBytes(pack.signature.sig, "signature");
+    const signatureBytes = base64URLToBytes(artifact.signature.sig, "signature");
     if (signatureBytes.length !== 64) {
       throw new Error("Signature has invalid length");
     }
@@ -518,10 +624,10 @@
       { name: "Ed25519" },
       publicKey,
       signatureBytes,
-      canonicalPayload(pack),
+      canonicalPayload(artifact),
     );
     if (!ok) {
-      throw new Error("Pack signature verification failed");
+      throw new Error(`${signedArtifactKind(artifact) === "bridge-invite" ? "Bridge invite" : "Pack"} signature verification failed`);
     }
   }
 
@@ -654,16 +760,22 @@
     setStatus("idle", "Trusted key text ready", "This GPMREC1 text can be pasted into another recovery page.");
   }
 
-  function renderFacts(pack, trustedKey) {
+  function renderFacts(artifact, trustedKey) {
     clearNode(els.factsGrid);
+    const kind = signedArtifactKind(artifact);
+    const normalized = normalizeSignedArtifact(artifact);
     const facts = [
-      ["Organization", pack.organization.name || pack.organization.org_id],
-      ["Org ID", pack.organization.org_id],
-      ["Pack ID", pack.pack_id],
+      ["Type", kind === "bridge-invite" ? "Bridge invite" : "Access pack"],
+      ["Organization", normalized.organization.name || normalized.organization.org_id],
+      ["Org ID", normalized.organization.org_id],
+      [kind === "bridge-invite" ? "Invite ID" : "Pack ID", kind === "bridge-invite" ? normalized.invite_id : normalized.pack_id],
       ["Signer", trustedKey.key_id],
-      ["Expires", pack.expires_at_utc],
-      ["Audience", pack.intended_audience],
+      ["Expires", normalized.expires_at_utc],
+      ["Audience", normalized.intended_audience],
     ];
+    if (kind === "bridge-invite") {
+      facts.push(["Helper", normalized.helper.display_name || normalized.helper.helper_id]);
+    }
     for (const [label, value] of facts) {
       const item = document.createElement("article");
       const labelNode = document.createElement("span");
@@ -675,14 +787,15 @@
     }
   }
 
-  function renderPaths(pack) {
+  function renderPaths(artifact) {
     clearNode(els.pathsList);
-    const paths = normalizePack(pack).access_paths;
+    const kind = signedArtifactKind(artifact);
+    const paths = normalizeSignedArtifact(artifact).access_paths;
     els.pathCount.textContent = String(paths.length);
     if (paths.length === 0) {
       const empty = document.createElement("p");
       empty.className = "recover-empty";
-      empty.textContent = "No access paths in this pack.";
+      empty.textContent = kind === "bridge-invite" ? "No bridge paths in this invite." : "No access paths in this pack.";
       els.pathsList.appendChild(empty);
       return;
     }
@@ -696,7 +809,7 @@
       title.textContent = path.description || path.path_id;
       const badges = document.createElement("div");
       badges.className = "recover-badges";
-      for (const text of pathBadges(path)) {
+      for (const text of pathBadges(path, kind)) {
         const badge = document.createElement("span");
         badge.textContent = text;
         badges.appendChild(badge);
@@ -741,8 +854,8 @@
     }
   }
 
-  function pathBadges(path) {
-    const badges = ["Trusted", path.kind || "path"];
+  function pathBadges(path, artifactKind) {
+    const badges = [artifactKind === "bridge-invite" ? "Signed bridge" : "Trusted", path.kind || "path"];
     if (path.requires_external_app) {
       badges.push("External app");
     }
@@ -785,16 +898,17 @@
     clearNode(els.pathsList);
     els.pathCount.textContent = "0";
     setStatus("idle", "Verifying", "Checking trust store, expiry, key id, and signature.");
-    const pack = parseJSONInput(els.packInput.value, "Pack");
+    const artifact = parseJSONInput(els.packInput.value, "Signed recovery artifact");
     const trustStore = readTrustStoreInput();
-    validatePackShape(pack);
-    const trusted = await resolveTrustedKey(pack, trustStore);
-    await verifySignature(pack, trusted.publicKeyBytes);
-    const normalized = normalizePack(pack);
+    validateSignedArtifactShape(artifact);
+    const trusted = await resolveTrustedKey(artifact, trustStore);
+    await verifySignature(artifact, trusted.publicKeyBytes);
+    const kind = signedArtifactKind(artifact);
+    const normalized = normalizeSignedArtifact(artifact);
     setStatus(
       "good",
-      "Trusted pack",
-      `${normalized.organization.name} signed this pack with trusted key ${trusted.entry.key_id}.`,
+      kind === "bridge-invite" ? "Trusted bridge invite" : "Trusted pack",
+      `${normalized.organization.name} signed this ${kind === "bridge-invite" ? "bridge invite" : "pack"} with trusted key ${trusted.entry.key_id}.`,
     );
     renderFacts(normalized, trusted.entry);
     renderPaths(normalized);
@@ -823,7 +937,9 @@
   function exportTextEnvelope(kind) {
     let payload;
     if (kind === "access-pack") {
-      payload = normalizePack(parseJSONInput(els.packInput.value, "Pack"));
+      const artifact = parseJSONInput(els.packInput.value, "Signed recovery artifact");
+      kind = signedArtifactKind(artifact);
+      payload = normalizeSignedArtifact(artifact);
     } else if (kind === "trust-store") {
       payload = normalizeTrustStore(readTrustStoreInput());
     } else {
@@ -839,6 +955,11 @@
     if (decoded.kind === "access-pack") {
       els.packInput.value = JSON.stringify(decoded.payload, null, 2);
       setStatus("idle", "Pack text imported", "Verify it against the trust store before using any path.");
+      return;
+    }
+    if (decoded.kind === "bridge-invite") {
+      els.packInput.value = JSON.stringify(decoded.payload, null, 2);
+      setStatus("idle", "Bridge invite text imported", "Verify it against the trust store before using any helper path.");
       return;
     }
     if (decoded.kind === "trust-store") {

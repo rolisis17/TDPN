@@ -34,6 +34,31 @@ func TestTextEnvelopeRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTextEnvelopeBridgeInviteRoundTrip(t *testing.T) {
+	payload, err := json.Marshal(testBridgeInvite())
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	text, err := EncodeTextEnvelope(EnvelopeKindBridge, payload)
+	if err != nil {
+		t.Fatalf("encode bridge envelope: %v", err)
+	}
+	envelope, decoded, err := DecodeTextEnvelope(text)
+	if err != nil {
+		t.Fatalf("decode bridge envelope: %v", err)
+	}
+	if envelope.Kind != EnvelopeKindBridge {
+		t.Fatalf("kind mismatch: %q", envelope.Kind)
+	}
+	var invite BridgeInvite
+	if err := json.Unmarshal(decoded, &invite); err != nil {
+		t.Fatalf("decoded payload is not bridge invite json: %v", err)
+	}
+	if invite.InviteID != testBridgeInvite().InviteID {
+		t.Fatalf("invite id mismatch: %q", invite.InviteID)
+	}
+}
+
 func TestTextEnvelopeRejectsUnknownKind(t *testing.T) {
 	_, err := EncodeTextEnvelope("unknown", []byte(`{"ok":true}`))
 	if err == nil {

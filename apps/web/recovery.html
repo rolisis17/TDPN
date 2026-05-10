@@ -31,13 +31,13 @@
       <section class="recover-tool" aria-labelledby="recover-heading">
         <div class="recover-tool__header">
           <p class="eyebrow">Access recovery</p>
-          <h1 id="recover-heading">Verify a signed recovery pack.</h1>
+          <h1 id="recover-heading">Verify a signed recovery artifact.</h1>
         </div>
 
         <div class="recover-grid">
           <section class="recover-panel" aria-labelledby="pack-heading">
             <div class="recover-panel__heading">
-              <h2 id="pack-heading">Signed Pack</h2>
+              <h2 id="pack-heading">Signed Pack / Invite</h2>
               <label class="file-picker">
                 <span>Import</span>
                 <input id="pack_file" type="file" accept="application/json,.json" />
@@ -46,8 +46,8 @@
             <textarea
               id="pack_input"
               spellcheck="false"
-              placeholder='{"schema_version":0,"pack_id":"arp-..."}'
-              aria-label="Signed access recovery pack JSON"
+              placeholder='{"schema_version":0,"pack_id":"arp-..."} or {"schema_version":0,"invite_id":"bri-..."}'
+              aria-label="Signed access recovery pack or bridge invite JSON"
             ></textarea>
           </section>
 
@@ -122,7 +122,7 @@
           <p class="recover-empty">Render a QR from the current GPMREC1 text when you need a visual handoff.</p>
         </div>
         <div class="recover-actions">
-          <button class="btn secondary" id="export_pack_text_btn" type="button">Export Pack Text</button>
+          <button class="btn secondary" id="export_pack_text_btn" type="button">Export Signed Text</button>
           <button class="btn secondary" id="export_store_text_btn" type="button">Export Store Text</button>
           <button class="btn secondary" id="render_qr_btn" type="button">Render QR</button>
           <button class="btn secondary" id="download_qr_btn" type="button">Download QR</button>
@@ -140,7 +140,7 @@
         <div class="recover-status__main" data-state="idle" id="status_card">
           <p class="status-banner__label">Status</p>
           <h2 id="status-heading">Waiting for pack</h2>
-          <p id="status_detail">Import or paste a signed pack and a trusted organization key store.</p>
+          <p id="status_detail">Import or paste a signed pack or bridge invite and a trusted organization key store.</p>
         </div>
         <div class="recover-facts" id="facts_grid" aria-label="Verified pack facts"></div>
       </section>

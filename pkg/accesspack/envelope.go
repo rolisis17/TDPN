@@ -12,6 +12,7 @@ import (
 const (
 	TextEnvelopePrefix = "GPMREC1"
 	EnvelopeKindPack   = "access-pack"
+	EnvelopeKindBridge = "bridge-invite"
 	EnvelopeKindStore  = "trust-store"
 	EnvelopeKindKey    = "trusted-key"
 )
@@ -83,7 +84,7 @@ func DecodeTextEnvelope(text string) (TextEnvelope, []byte, error) {
 
 func ValidateEnvelopeKind(kind string) error {
 	switch strings.TrimSpace(kind) {
-	case EnvelopeKindPack, EnvelopeKindStore, EnvelopeKindKey:
+	case EnvelopeKindPack, EnvelopeKindBridge, EnvelopeKindStore, EnvelopeKindKey:
 		return nil
 	default:
 		return fmt.Errorf("unsupported envelope kind %q", kind)

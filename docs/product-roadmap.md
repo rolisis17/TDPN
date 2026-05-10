@@ -127,9 +127,9 @@ Scope:
 - define signed access recovery packs for one organization/community
 - provide local key/sign/verify tooling
 - provide a local trust-store file for trusted organization public keys
-- import or verify a pack from an untrusted channel
-- expose a browser-local import/verify screen for signed packs and trust stores
-- support portable `GPMREC1` text handoffs for packs, trust stores, and single trusted keys
+- import or verify a pack or bridge invite from an untrusted channel
+- expose a browser-local import/verify screen for signed packs, bridge invites, and trust stores
+- support portable `GPMREC1` text handoffs for packs, bridge invites, trust stores, and single trusted keys
 - render `GPMREC1` handoffs as QR PNGs from the CLI and browser, and import QR images with native scanning or a bundled browser fallback
 - show official sources, mirrors, bridge hints, helper configs, expiry, and safety notes
 - keep reachability separate from trust: a path can be reachable but untrusted, or trusted but temporarily unreachable
@@ -137,13 +137,14 @@ Scope:
 
 Exit criteria:
 - one signed access pack can be generated, shared, verified, and inspected locally
+- one signed bridge invite can be generated, shared, verified, and inspected locally
 - one organization key can be added to a local trust store and used for verification/checking
-- a browser-local UI can verify a signed pack against a trusted organization key and list trusted paths
-- signed packs and trust material can be exported/imported as text handoffs for chat, email, print, or future QR use
+- a browser-local UI can verify a signed pack or bridge invite against a trusted organization key and list trusted paths
+- signed packs, bridge invites, and trust material can be exported/imported as text handoffs for chat, email, print, or future QR use
 - a QR PNG can be generated from a `GPMREC1` text handoff in the CLI or browser and scanned back into the browser with native QR detection or bundled fallback scanning
 - unknown, disabled, expired, or wrong-organization keys fail closed
 - trusted entries can be checked for reachable/unreachable/timeout/skipped status
-- malformed, expired, or badly signed packs fail closed
+- malformed, expired, or badly signed packs/invites fail closed
 - docs explain the user flow in non-technical language
 - no VPN tunnel, blockchain, credits, or public-exit requirement is part of the MVP
 
@@ -279,7 +280,7 @@ Product thesis:
 Scope (planning/current):
 - keep production bootstrap anchored in signed manifests and HTTPS/mTLS preparation
 - define ordered fallback source classes for official endpoint, mirrors, cache, DNS/directory hints, bridge invite, and offline bundle
-- define the insider bridge invite shape for 2+ hop in-network requests that produce short-lived outsider bootstrap hints
+- extend the initial Access Recovery bridge-invite artifact into the 2+ hop in-network request flow that produces short-lived outsider bootstrap hints
 - add local manifest key/sign/verify tooling for repeatable operator testing
 
 Guardrails:
@@ -290,7 +291,7 @@ Guardrails:
 - no unblockability promise in public copy
 
 Staged path:
-1. Publish `docs/gpm-bootstrap-resilience-track.md`, add signed manifest and bridge-invite schemas, and add local manifest signing/verification CLI.
+1. Publish `docs/gpm-bootstrap-resilience-track.md`, add signed manifest schema, reuse the Access Recovery bridge-invite verifier, and add local manifest signing/verification CLI.
 2. Add official mirror fallback and source-type telemetry to local API bootstrap manifest resolution.
 3. Add import/verify flow for bridge invite bundles, limited to fetching signed bootstrap material.
 4. Add bridge service role with ticket-bound fetch only, rate limits, abuse reporting, and Admin Console revocation/quarantine.

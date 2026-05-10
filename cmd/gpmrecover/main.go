@@ -51,6 +51,23 @@ type verifyOutput struct {
 	TrustedAccessPaths []accesspack.AccessPath `json:"trusted_access_paths,omitempty"`
 }
 
+type bridgeVerifyOutput struct {
+	Status             string                  `json:"status"`
+	KeyID              string                  `json:"key_id"`
+	Trusted            bool                    `json:"trusted"`
+	TrustedOrgID       string                  `json:"trusted_org_id,omitempty"`
+	TrustedOrgName     string                  `json:"trusted_org_name,omitempty"`
+	InviteID           string                  `json:"invite_id"`
+	OrganizationID     string                  `json:"organization_id"`
+	OrganizationName   string                  `json:"organization_name"`
+	HelperID           string                  `json:"helper_id"`
+	HelperName         string                  `json:"helper_name"`
+	ExpiresAtUTC       string                  `json:"expires_at_utc"`
+	CanonicalBodySize  int                     `json:"canonical_body_size"`
+	AccessPathsCount   int                     `json:"access_paths_count"`
+	TrustedAccessPaths []accesspack.AccessPath `json:"trusted_access_paths,omitempty"`
+}
+
 type trustAddOutput struct {
 	Status     string `json:"status"`
 	TrustStore string `json:"trust_store"`
@@ -72,6 +89,10 @@ func main() {
 		err = runInspectKey(os.Args[2:])
 	case "sign":
 		err = runSign(os.Args[2:])
+	case "bridge-sign":
+		err = runBridgeSign(os.Args[2:])
+	case "bridge-verify":
+		err = runBridgeVerify(os.Args[2:])
 	case "trust-add":
 		err = runTrustAdd(os.Args[2:])
 	case "trust-list":
@@ -105,10 +126,12 @@ func usage() {
   go run ./cmd/gpmrecover gen [--private-key-out FILE] [--public-key-out FILE]
   go run ./cmd/gpmrecover inspect-key --private-key-file FILE
   go run ./cmd/gpmrecover sign --pack FILE --private-key-file FILE --out FILE [--key-id ID]
+  go run ./cmd/gpmrecover bridge-sign --invite FILE --private-key-file FILE --out FILE [--key-id ID]
+  go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
   go run ./cmd/gpmrecover trust-add --trust-store FILE --org-id ID --org-name NAME --public-key-file FILE
   go run ./cmd/gpmrecover trust-list --trust-store FILE
   go run ./cmd/gpmrecover trust-remove --trust-store FILE --org-id ID --key-id ID
-  go run ./cmd/gpmrecover text-export --kind access-pack|trust-store|trusted-key --in FILE [--out FILE]
+  go run ./cmd/gpmrecover text-export --kind access-pack|bridge-invite|trust-store|trusted-key --in FILE [--out FILE]
   go run ./cmd/gpmrecover text-import --text TEXT --out FILE [--expect-kind KIND]
   go run ./cmd/gpmrecover qr-png --text TEXT --out FILE [--size 768]
   go run ./cmd/gpmrecover verify --pack FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
@@ -208,6 +231,49 @@ func runSign(args []string) error {
 		"status": "ok",
 		"out":    strings.TrimSpace(*outFile),
 		"key_id": signed.Signature.KeyID,
+	})
+}
+
+func runBridgeSign(args []string) error {
+	fs := flag.NewFlagSet("bridge-sign", flag.ContinueOnError)
+	inviteFile := fs.String("invite", "", "path to unsigned bridge invite JSON")
+	privateFile := fs.String("private-key-file", "", "path to private key file")
+	outFile := fs.String("out", "", "path to write signed bridge invite JSON")
+	keyID := fs.String("key-id", "", "explicit key id (optional)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*outFile) == "" {
+		return errors.New("bridge-sign requires --out")
+	}
+	priv, err := readPrivateKeyFile(*privateFile)
+	if err != nil {
+		return err
+	}
+	body, err := readInputFileStrict(*inviteFile, "bridge invite", maxPackFileBytes)
+	if err != nil {
+		return err
+	}
+	invite, err := accesspack.ParseBridgeInvite(body)
+	if err != nil {
+		return err
+	}
+	signed, err := accesspack.SignBridgeInvite(invite, priv, *keyID)
+	if err != nil {
+		return err
+	}
+	out, err := json.MarshalIndent(signed, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := writeFileWithMode(*outFile, append(out, '\n'), 0o644); err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(map[string]string{
+		"status":    "ok",
+		"out":       strings.TrimSpace(*outFile),
+		"invite_id": signed.InviteID,
+		"key_id":    signed.Signature.KeyID,
 	})
 }
 
@@ -459,6 +525,54 @@ func runVerify(args []string) error {
 	return json.NewEncoder(os.Stdout).Encode(out)
 }
 
+func runBridgeVerify(args []string) error {
+	fs := flag.NewFlagSet("bridge-verify", flag.ContinueOnError)
+	inviteFile := fs.String("invite", "", "path to signed bridge invite JSON")
+	publicFile := fs.String("public-key-file", "", "path to public key file for one-off verification")
+	trustStoreFile := fs.String("trust-store", "", "path to access recovery trust store JSON")
+	showPaths := fs.Bool("show-paths", false, "include trusted paths in JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	body, err := readInputFileStrict(*inviteFile, "bridge invite", maxPackFileBytes)
+	if err != nil {
+		return err
+	}
+	invite, err := accesspack.ParseBridgeInvite(body)
+	if err != nil {
+		return err
+	}
+	pub, trustedKey, err := resolveBridgeVerificationKey(invite, *publicFile, *trustStoreFile)
+	if err != nil {
+		return err
+	}
+	verified, err := accesspack.VerifyBridgeInvite(invite, pub, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	out := bridgeVerifyOutput{
+		Status:            "ok",
+		KeyID:             verified.KeyID,
+		Trusted:           trustedKey != nil,
+		InviteID:          verified.Invite.InviteID,
+		OrganizationID:    verified.Invite.Organization.OrgID,
+		OrganizationName:  verified.Invite.Organization.Name,
+		HelperID:          verified.Invite.Helper.HelperID,
+		HelperName:        verified.Invite.Helper.DisplayName,
+		ExpiresAtUTC:      verified.ExpiresAt.Format(time.RFC3339),
+		CanonicalBodySize: verified.CanonicalBodySize,
+		AccessPathsCount:  len(verified.Invite.AccessPaths),
+	}
+	if trustedKey != nil {
+		out.TrustedOrgID = trustedKey.OrgID
+		out.TrustedOrgName = trustedKey.OrgName
+	}
+	if *showPaths {
+		out.TrustedAccessPaths = verified.Invite.AccessPaths
+	}
+	return json.NewEncoder(os.Stdout).Encode(out)
+}
+
 func runCheck(args []string) error {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	packFile := fs.String("pack", "", "path to signed access pack JSON")
@@ -561,6 +675,27 @@ func resolveVerificationKey(pack accesspack.Pack, publicFile string, trustStoreF
 		return pub, nil, err
 	}
 	return nil, nil, errors.New("verification requires --trust-store or --public-key-file")
+}
+
+func resolveBridgeVerificationKey(invite accesspack.BridgeInvite, publicFile string, trustStoreFile string) (ed25519.PublicKey, *accesspack.TrustedKey, error) {
+	publicFile = strings.TrimSpace(publicFile)
+	trustStoreFile = strings.TrimSpace(trustStoreFile)
+	if trustStoreFile != "" {
+		store, err := loadTrustStoreFile(trustStoreFile)
+		if err != nil {
+			return nil, nil, err
+		}
+		pub, entry, err := accesspack.ResolveTrustedBridgeInvitePublicKey(store, invite, time.Now().UTC())
+		if err != nil {
+			return nil, nil, err
+		}
+		return pub, &entry, nil
+	}
+	if publicFile != "" {
+		pub, err := readPublicKeyFile(publicFile)
+		return pub, nil, err
+	}
+	return nil, nil, errors.New("bridge verification requires --trust-store or --public-key-file")
 }
 
 func readTextEnvelopeInput(text string, textFile string) (string, error) {
