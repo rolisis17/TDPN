@@ -164,6 +164,41 @@ async function main() {
   const trustStore = fs.readFileSync(path.join(outDir, "recovery-trust.json"), "utf8");
   const bridgeInvite = fs.readFileSync(path.join(outDir, "bridge-invite.signed.json"), "utf8");
   const signedRegistry = fs.readFileSync(path.join(outDir, "bridge-helper-registry.signed.json"), "utf8");
+  const otherOutDir = fs.mkdtempSync(path.join(os.tmpdir(), "gpm-recovery-browser-smoke-other-"));
+  childProcess.execFileSync(
+    "go",
+    [
+      "run",
+      "./cmd/gpmrecover",
+      "demo-bundle",
+      "--out-dir",
+      otherOutDir,
+      "--org-id",
+      "other-org",
+      "--org-name",
+      "Other Org",
+      "--base-url",
+      "https://other.example",
+      "--helper-id",
+      "helper-other",
+      "--helper-name",
+      "Other Helper",
+      "--helper-url",
+      "https://helper.example/other/bootstrap",
+      "--helper-contact",
+      "mailto:helper-other@example.com",
+    ],
+    { cwd: repoRoot, stdio: "pipe" },
+  );
+  const otherTrustStore = fs.readFileSync(path.join(otherOutDir, "recovery-trust.json"), "utf8");
+  const otherSignedRegistry = fs.readFileSync(path.join(otherOutDir, "bridge-helper-registry.signed.json"), "utf8");
+  const mergedTrustStore = JSON.stringify({
+    version: 1,
+    trusted_keys: [
+      ...JSON.parse(trustStore).trusted_keys,
+      ...JSON.parse(otherTrustStore).trusted_keys,
+    ],
+  });
 
   const ids = [
     "pack_input",
@@ -275,10 +310,27 @@ async function main() {
     throw new Error(`expected helper card plus bridge paths, got ${pathsRendered} rendered item(s)`);
   }
 
+  document.getElementById("trust_input").value = mergedTrustStore;
+  document.getElementById("registry_input").value = otherSignedRegistry;
+  await document.getElementById("verify_registry_btn").click();
+  document.getElementById("pack_input").value = bridgeInvite;
+  await document.getElementById("verify_btn").click();
+
+  const rejectedStatus = document.getElementById("status-heading").textContent;
+  const rejectedDetail = document.getElementById("status_detail").textContent;
+  if (rejectedStatus !== "Verification failed") {
+    throw new Error(`expected cross-org registry to fail closed, got ${rejectedStatus}: ${rejectedDetail}`);
+  }
+  if (!rejectedDetail.includes("does not match bridge invite organization")) {
+    throw new Error(`expected cross-org mismatch detail, got ${rejectedDetail}`);
+  }
+
   console.log(JSON.stringify({
     status: "ok",
     bundle_dir: outDir,
+    cross_org_bundle_dir: otherOutDir,
     browser_status: status,
+    cross_org_rejected: true,
     path_count: Number(pathCount),
     rendered_items: pathsRendered,
   }));
