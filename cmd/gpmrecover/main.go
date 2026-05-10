@@ -485,6 +485,7 @@ func runTrustExportKey(args []string) error {
 		"key_id":      exported.KeyID,
 		"out":         outPath,
 		"text_out":    textOutPath,
+		"trusted_key": exported,
 	})
 }
 
