@@ -2744,6 +2744,10 @@ body.page-recover .topbar .wrap {
   padding: 14px;
 }
 
+.recover-panel--wide {
+  grid-column: 1 / -1;
+}
+
 .recover-panel__heading {
   display: flex;
   align-items: center;
@@ -2860,6 +2864,10 @@ body.page-recover .topbar .wrap {
 
 .handoff-panel textarea {
   min-height: 120px;
+}
+
+.recover-panel--wide textarea {
+  min-height: 170px;
 }
 
 .qr-preview {

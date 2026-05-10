@@ -203,6 +203,7 @@ Bridge-invite rules:
 First browser surface:
 - `apps/web/recovery.html`
 - runs local pack, bridge-invite, and trust-store parsing in the browser
+- imports an optional helper registry and enforces active/quarantined/disabled helper status before showing bridge paths
 - lets a tester add/remove trusted organization public keys without hand-editing JSON
 - copies or downloads the current trust store for handoff to another device
 - exports/imports `GPMREC1` text handoffs for signed packs, bridge invites, trust stores, and single trusted keys

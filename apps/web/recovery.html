@@ -99,6 +99,22 @@
               aria-label="Access recovery trust store JSON"
             ></textarea>
           </section>
+
+          <section class="recover-panel recover-panel--wide" aria-labelledby="registry-heading">
+            <div class="recover-panel__heading">
+              <h2 id="registry-heading">Helper Registry</h2>
+              <label class="file-picker">
+                <span>Import</span>
+                <input id="registry_file" type="file" accept="application/json,.json" />
+              </label>
+            </div>
+            <textarea
+              id="registry_input"
+              spellcheck="false"
+              placeholder='{"version":1,"helpers":[...]}'
+              aria-label="Bridge helper registry JSON"
+            ></textarea>
+          </section>
         </div>
 
         <div class="recover-actions">
