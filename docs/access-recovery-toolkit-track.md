@@ -189,6 +189,7 @@ Local trust-store flow:
 - `go run ./cmd/gpmrecover bridge-service-code-hash --code-file .easy-node-logs/bridge-code.txt --out .easy-node-logs/bridge-code-hash.json`
 - `go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/bridge-service-config.json --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/bridge-abuse.jsonl --access-code-sha256 HASH`
 - `go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/bridge-deploy --access-code-sha256 HASH`
+- `bash ./scripts/integration_access_bridge_service_serve.sh`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --timeout-sec 8`
 - `go run ./cmd/gpmrecover trust-remove --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID`
 
@@ -300,7 +301,7 @@ Do first:
 - docs explaining how a user visualizes it
 
 Do next:
-- bridge-service install smoke script and reverse-proxy guidance for HTTPS/TLS termination
+- reverse-proxy guidance for HTTPS/TLS termination and deployment smoke evidence collection
 
 Do later:
 - Outline/Shadowsocks/Tor/GPM launch helpers
