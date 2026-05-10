@@ -1191,7 +1191,16 @@
       removeBtn.className = "btn secondary";
       removeBtn.type = "button";
       removeBtn.textContent = "Remove";
-      removeBtn.addEventListener("click", () => removeTrustedKey(entry.org_id, entry.key_id));
+      removeBtn.addEventListener("click", async () => {
+        removeBtn.disabled = true;
+        try {
+          await removeTrustedKey(entry.org_id, entry.key_id);
+        } catch (err) {
+          setStatus("bad", "Trusted key removal failed", err.message || String(err));
+        } finally {
+          removeBtn.disabled = false;
+        }
+      });
       const copyTextBtn = document.createElement("button");
       copyTextBtn.className = "btn secondary";
       copyTextBtn.type = "button";
@@ -1344,12 +1353,13 @@
     }
   }
 
-  function removeTrustedKey(orgID, keyID) {
+  async function removeTrustedKey(orgID, keyID) {
     const store = normalizeTrustStore(readTrustStoreInput());
     store.trusted_keys = store.trusted_keys.filter((entry) => {
       return !(entry.org_id === orgID && entry.key_id === keyID);
     });
-    writeTrustStore(store);
+    const validated = await validateTrustStoreKeys(store, { requireUsable: false });
+    writeTrustStore(validated);
     setStatus("idle", "Trusted key removed", "The local trust store JSON has been updated.");
   }
 
@@ -1631,7 +1641,7 @@
   }
 
   async function addTrustedKeyFromFields() {
-    const store = normalizeTrustStore(readTrustStoreInput());
+    const store = await validateTrustStoreKeys(readTrustStoreInput(), { requireUsable: false });
     const entry = await buildTrustedKeyEntry(store);
     const nextKeys = store.trusted_keys.filter((existing) => {
       return !(existing.org_id === entry.org_id && existing.key_id === entry.key_id);
