@@ -201,6 +201,20 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if !bytes.Contains(envBody, []byte("GPM_BRIDGE_ACCESS_CODE_SHA256=")) {
 		t.Fatalf("unexpected bridge deploy env:\n%s", string(envBody))
 	}
+	caddyBody, err := os.ReadFile(filepath.Join(deployDir, "gpm-access-bridge-test.Caddyfile.example"))
+	if err != nil {
+		t.Fatalf("read bridge deploy caddy example: %v", err)
+	}
+	if !bytes.Contains(caddyBody, []byte("Referrer-Policy")) || !bytes.Contains(caddyBody, []byte("reverse_proxy")) {
+		t.Fatalf("unexpected bridge deploy caddy example:\n%s", string(caddyBody))
+	}
+	nginxBody, err := os.ReadFile(filepath.Join(deployDir, "gpm-access-bridge-test.nginx.example.conf"))
+	if err != nil {
+		t.Fatalf("read bridge deploy nginx example: %v", err)
+	}
+	if !bytes.Contains(nginxBody, []byte("proxy_pass")) || !bytes.Contains(nginxBody, []byte("Strict-Transport-Security")) {
+		t.Fatalf("unexpected bridge deploy nginx example:\n%s", string(nginxBody))
+	}
 	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--require-helper-registry"}); err == nil {
 		t.Fatal("expected bridge-policy to fail when helper registry is required but missing")
 	}

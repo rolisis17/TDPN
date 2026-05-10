@@ -240,7 +240,7 @@ func usage() {
   go run ./cmd/gpmrecover bridge-service-check --config FILE [--path-id ID | --url URL] [--out FILE]
   go run ./cmd/gpmrecover bridge-service-serve --config FILE [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] [--access-code-sha256 HEX] [--redirect 0]
   go run ./cmd/gpmrecover bridge-service-code-hash (--code TEXT | --code-file FILE) [--out FILE]
-  go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir DIR [--install-dir /etc/gpm/access-bridge] [--service-name gpm-access-bridge]
+  go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir DIR [--install-dir /etc/gpm/access-bridge] [--service-name gpm-access-bridge] [--public-host bridge.example]
   go run ./cmd/gpmrecover bridge-registry-sign --helper-registry FILE --org-id ID --org-name NAME --private-key-file FILE --out FILE [--registry-id ID] [--lifetime-hours HOURS]
   go run ./cmd/gpmrecover bridge-registry-verify --signed-registry FILE (--trust-store FILE | --public-key-file FILE) [--out-registry FILE] [--show-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
@@ -1127,6 +1127,7 @@ func runBridgeServiceDeployPack(args []string) error {
 	outDir := fs.String("out-dir", "", "directory to write deployment files")
 	installDir := fs.String("install-dir", "/etc/gpm/access-bridge", "target install directory used inside generated unit")
 	serviceName := fs.String("service-name", "gpm-access-bridge", "systemd service name")
+	publicHost := fs.String("public-host", "bridge.example", "public HTTPS host used in reverse-proxy examples")
 	binary := fs.String("binary", "/usr/local/bin/gpmrecover", "installed gpmrecover binary path")
 	configPath := fs.String("config", "/etc/gpm/access-bridge/bridge-service-config.json", "installed bridge service config path")
 	addr := fs.String("addr", "127.0.0.1:18980", "bridge service listen address")
@@ -1153,6 +1154,8 @@ func runBridgeServiceDeployPack(args []string) error {
 	envName := name + ".env"
 	scriptName := "run-" + name + ".sh"
 	unitName := name + ".service"
+	caddyName := name + ".Caddyfile.example"
+	nginxName := name + ".nginx.example.conf"
 	envBody := bridgeServiceEnvFile(map[string]string{
 		"GPM_BRIDGE_BINARY":             *binary,
 		"GPM_BRIDGE_CONFIG":             *configPath,
@@ -1205,12 +1208,44 @@ ReadOnlyPaths=%s
 [Install]
 WantedBy=multi-user.target
 `, *user, *group, strings.TrimRight(*installDir, "/"), envName, strings.TrimRight(*installDir, "/"), scriptName, strings.TrimRight(*installDir, "/"))
+	caddyBody := fmt.Sprintf(`%s {
+  encode zstd gzip
+  reverse_proxy %s
+  header {
+    Cache-Control "no-store"
+    Referrer-Policy "no-referrer"
+    X-Content-Type-Options "nosniff"
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  }
+}
+`, strings.TrimSpace(*publicHost), strings.TrimSpace(*addr))
+	nginxBody := fmt.Sprintf(`server {
+  listen 443 ssl http2;
+  server_name %s;
+
+  # Configure ssl_certificate and ssl_certificate_key for this host before use.
+
+  location / {
+    proxy_pass http://%s;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    add_header Cache-Control "no-store" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+  }
+}
+`, strings.TrimSpace(*publicHost), strings.TrimSpace(*addr))
 	readmeBody := fmt.Sprintf(`# GPM Access Bridge Deployment Pack
 
 Generated files:
 - %s: environment settings
 - %s: command wrapper
 - %s: systemd unit
+- %s: Caddy HTTPS reverse-proxy example
+- %s: nginx HTTPS reverse-proxy example
 
 Install outline:
 1. Create the service user/group named %s:%s.
@@ -1222,7 +1257,7 @@ Install outline:
 Smoke checks:
 - curl -fsS http://%s/health
 - curl -fsS -H 'X-GPM-Bridge-Code: CODE' http://%s/bridge/helper-web
-`, envName, scriptName, unitName, *user, *group, *installDir, unitName, unitName, unitName, *addr, *addr)
+`, envName, scriptName, unitName, caddyName, nginxName, *user, *group, *installDir, unitName, unitName, unitName, *addr, *addr)
 	if err := writeFileWithMode(filepath.Join(*outDir, envName), []byte(envBody), 0o600); err != nil {
 		return err
 	}
@@ -1230,6 +1265,12 @@ Smoke checks:
 		return err
 	}
 	if err := writeFileWithMode(filepath.Join(*outDir, unitName), []byte(unitBody), 0o644); err != nil {
+		return err
+	}
+	if err := writeFileWithMode(filepath.Join(*outDir, caddyName), []byte(caddyBody), 0o644); err != nil {
+		return err
+	}
+	if err := writeFileWithMode(filepath.Join(*outDir, nginxName), []byte(nginxBody), 0o644); err != nil {
 		return err
 	}
 	if err := writeFileWithMode(filepath.Join(*outDir, "README.md"), []byte(readmeBody), 0o644); err != nil {
@@ -1241,6 +1282,8 @@ Smoke checks:
 		"env_file":     filepath.Join(*outDir, envName),
 		"script_file":  filepath.Join(*outDir, scriptName),
 		"service_file": filepath.Join(*outDir, unitName),
+		"caddy_file":   filepath.Join(*outDir, caddyName),
+		"nginx_file":   filepath.Join(*outDir, nginxName),
 		"readme_file":  filepath.Join(*outDir, "README.md"),
 	}
 	return json.NewEncoder(os.Stdout).Encode(out)

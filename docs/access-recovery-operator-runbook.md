@@ -45,7 +45,7 @@ go run ./cmd/gpmrecover bridge-service-config --invite .easy-node-logs/access-re
 go run ./cmd/gpmrecover bridge-service-check --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --path-id helper-web
 go run ./cmd/gpmrecover bridge-service-code-hash --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --out .easy-node-logs/access-recovery-demo/bridge-code-hash.json
 go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/access-recovery-demo/bridge-abuse.jsonl --access-code-sha256 HASH
-go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/access-recovery-demo/bridge-deploy --access-code-sha256 HASH
+go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/access-recovery-demo/bridge-deploy --public-host bridge.example --access-code-sha256 HASH
 ```
 
 4. If testing online publication, upload `public/.well-known/gpm/` and fetch it from another machine before verification:
