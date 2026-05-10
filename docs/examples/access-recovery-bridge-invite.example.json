@@ -6,8 +6,8 @@
     "name": "FreeNews Demo",
     "home_url": "https://freenews.example"
   },
-  "issued_at_utc": "2026-05-10T00:00:00Z",
-  "expires_at_utc": "2026-05-17T00:00:00Z",
+  "issued_at_utc": "2098-12-24T00:00:00Z",
+  "expires_at_utc": "2098-12-31T00:00:00Z",
   "intended_audience": "People who cannot reach the official FreeNews Demo entry points",
   "helper": {
     "helper_id": "helper-perth-1",

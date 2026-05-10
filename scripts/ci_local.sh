@@ -59,6 +59,9 @@ bash ./scripts/integration_recovery_browser_smoke.sh
 echo "[ci] access recovery demo contract integration"
 bash ./scripts/integration_access_recovery_demo_contract.sh
 
+echo "[ci] access recovery examples contract integration"
+bash ./scripts/integration_access_recovery_examples_contract.sh
+
 echo "[ci] secret hygiene integration"
 ./scripts/integration_secret_hygiene.sh
 
