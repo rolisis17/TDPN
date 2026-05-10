@@ -410,6 +410,46 @@
     return normalized;
   }
 
+  async function validateTrustedKeyEntry(entry, options = {}) {
+    const normalized = normalizeTrustedKey(entry);
+    if (!normalized.org_id) {
+      throw new Error("Trusted key org_id is required");
+    }
+    if (!normalized.org_name) {
+      throw new Error("Trusted key org_name is required");
+    }
+    const publicKeyBytes = base64URLToBytes(normalized.public_key, "trusted public key");
+    if (publicKeyBytes.length !== 32) {
+      throw new Error("Trusted public key must be 32 bytes");
+    }
+    const derivedID = await keyIDFromPublicKey(publicKeyBytes);
+    if (normalized.key_id && normalized.key_id !== derivedID) {
+      throw new Error(`Trusted key id does not match public key: got ${normalized.key_id}, expected ${derivedID}`);
+    }
+    normalized.key_id = derivedID;
+    if (!normalized.added_at_utc) {
+      normalized.added_at_utc = new Date().toISOString();
+    } else {
+      parseRFC3339(normalized.added_at_utc, "trusted key added_at_utc");
+    }
+    if (normalized.expires_at_utc) {
+      const expiresAt = parseRFC3339(normalized.expires_at_utc, "trusted key expires_at_utc");
+      if (options.requireUsable !== false && expiresAt <= new Date()) {
+        throw new Error("Trusted key is expired");
+      }
+    }
+    return normalized;
+  }
+
+  async function validateTrustStoreKeys(store, options = {}) {
+    const normalized = normalizeTrustStore(store);
+    const keys = [];
+    for (const entry of normalized.trusted_keys) {
+      keys.push(await validateTrustedKeyEntry(entry, options));
+    }
+    return { version: 1, trusted_keys: keys };
+  }
+
   function normalizeHelperRegistry(registry) {
     if (!registry || typeof registry !== "object") {
       throw new Error("Helper registry must be a JSON object");
@@ -1076,7 +1116,13 @@
       copyTextBtn.className = "btn secondary";
       copyTextBtn.type = "button";
       copyTextBtn.textContent = "Copy Text";
-      copyTextBtn.addEventListener("click", () => exportTrustedKeyText(entry, copyTextBtn));
+      copyTextBtn.addEventListener("click", async () => {
+        try {
+          await exportTrustedKeyText(entry, copyTextBtn);
+        } catch (err) {
+          setStatus("bad", "Trusted key export failed", err.message || String(err));
+        }
+      });
       actions.append(fillBtn, copyTextBtn, removeBtn);
       item.append(meta, actions);
       els.trustKeyList.appendChild(item);
@@ -1228,7 +1274,7 @@
   }
 
   async function exportTrustedKeyText(entry, button) {
-    const text = encodeTextEnvelope("trusted-key", normalizeTrustedKey(entry));
+    const text = encodeTextEnvelope("trusted-key", await validateTrustedKeyEntry(entry));
     els.handoffInput.value = text;
     await copyText(text, button);
     setStatus("idle", "Trusted key text ready", "This GPMREC1 text can be pasted into another recovery page.");
@@ -1516,14 +1562,14 @@
     setStatus("idle", "Trusted key added", `${entry.org_name} is now in this local trust store.`);
   }
 
-  function exportTextEnvelope(kind) {
+  async function exportTextEnvelope(kind) {
     let payload;
     if (kind === "access-pack") {
       const artifact = parseJSONInput(els.packInput.value, "Signed recovery artifact");
       kind = signedArtifactKind(artifact);
       payload = normalizeSignedArtifact(artifact);
     } else if (kind === "trust-store") {
-      payload = normalizeTrustStore(readTrustStoreInput());
+      payload = await validateTrustStoreKeys(readTrustStoreInput(), { requireUsable: false });
     } else if (kind === "bridge-helper-registry") {
       const registry = readHelperRegistryInput();
       if (!registry) {
@@ -1543,7 +1589,7 @@
     return text;
   }
 
-  function importTextEnvelope() {
+  async function importTextEnvelope() {
     const decoded = decodeTextEnvelope(els.handoffInput.value);
     if (decoded.kind === "access-pack") {
       els.packInput.value = JSON.stringify(decoded.payload, null, 2);
@@ -1556,7 +1602,8 @@
       return;
     }
     if (decoded.kind === "trust-store") {
-      writeTrustStore(decoded.payload);
+      const store = await validateTrustStoreKeys(decoded.payload, { requireUsable: false });
+      writeTrustStore(store);
       setStatus("idle", "Trust store text imported", "The local trust store JSON has been updated.");
       return;
     }
@@ -1578,8 +1625,8 @@
       return;
     }
     if (decoded.kind === "trusted-key") {
-      const store = normalizeTrustStore(readTrustStoreInput());
-      const entry = normalizeTrustedKey(decoded.payload);
+      const store = await validateTrustStoreKeys(readTrustStoreInput(), { requireUsable: false });
+      const entry = await validateTrustedKeyEntry(decoded.payload);
       if (!entry.org_id || !entry.org_name || !entry.key_id || !entry.public_key) {
         throw new Error("Trusted-key handoff is missing required fields");
       }
@@ -1679,7 +1726,7 @@
       throw new Error("No QR code text was found in that image");
     }
     els.handoffInput.value = value;
-    importTextEnvelope();
+    await importTextEnvelope();
   }
 
   els.verifyBtn.addEventListener("click", async () => {
@@ -1729,7 +1776,8 @@
   els.trustFile.addEventListener("change", async () => {
     await readFileInto(els.trustFile, els.trustInput);
     try {
-      writeTrustStore(readTrustStoreInput());
+      const store = await validateTrustStoreKeys(readTrustStoreInput(), { requireUsable: false });
+      writeTrustStore(store);
     } catch (err) {
       setStatus("bad", "Trust import failed", err.message || String(err));
     }
@@ -1814,7 +1862,7 @@
 
   els.trustCopyBtn.addEventListener("click", async () => {
     try {
-      const store = normalizeTrustStore(readTrustStoreInput());
+      const store = await validateTrustStoreKeys(readTrustStoreInput(), { requireUsable: false });
       writeTrustStore(store);
       await copyText(els.trustInput.value, els.trustCopyBtn);
       setStatus("idle", "Trust store copied", "The current trust store JSON is on the clipboard.");
@@ -1823,9 +1871,9 @@
     }
   });
 
-  els.trustDownloadBtn.addEventListener("click", () => {
+  els.trustDownloadBtn.addEventListener("click", async () => {
     try {
-      const store = normalizeTrustStore(readTrustStoreInput());
+      const store = await validateTrustStoreKeys(readTrustStoreInput(), { requireUsable: false });
       writeTrustStore(store);
       const blob = new Blob([els.trustInput.value + "\n"], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -1844,7 +1892,7 @@
 
   els.exportPackTextBtn.addEventListener("click", async () => {
     try {
-      const text = exportTextEnvelope("access-pack");
+      const text = await exportTextEnvelope("access-pack");
       await copyText(text, els.exportPackTextBtn);
       setStatus("idle", "Pack text ready", "The signed pack handoff text is on the clipboard.");
     } catch (err) {
@@ -1854,7 +1902,7 @@
 
   els.exportStoreTextBtn.addEventListener("click", async () => {
     try {
-      const text = exportTextEnvelope("trust-store");
+      const text = await exportTextEnvelope("trust-store");
       await copyText(text, els.exportStoreTextBtn);
       setStatus("idle", "Trust store text ready", "The trust-store handoff text is on the clipboard.");
     } catch (err) {
@@ -1864,7 +1912,7 @@
 
   els.exportRegistryTextBtn.addEventListener("click", async () => {
     try {
-      const text = exportTextEnvelope("bridge-helper-registry");
+      const text = await exportTextEnvelope("bridge-helper-registry");
       await copyText(text, els.exportRegistryTextBtn);
       setStatus("idle", "Helper registry text ready", "The helper-registry handoff text is on the clipboard.");
     } catch (err) {
@@ -1872,9 +1920,9 @@
     }
   });
 
-  els.importTextBtn.addEventListener("click", () => {
+  els.importTextBtn.addEventListener("click", async () => {
     try {
-      importTextEnvelope();
+      await importTextEnvelope();
     } catch (err) {
       setStatus("bad", "Text import failed", err.message || String(err));
     }
