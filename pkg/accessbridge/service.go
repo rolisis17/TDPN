@@ -141,12 +141,12 @@ func (s *Service) handleBridge(w http.ResponseWriter, r *http.Request) {
 	}
 	source := s.sourceKey(r)
 	now := s.now()
-	if s.limiter != nil && !s.limiter.Allow(source, now) {
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{"status": "rate_limited"})
-		return
-	}
 	if !s.accessCodeAllowed(r) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"status": "access_code_required"})
+		return
+	}
+	if s.limiter != nil && !s.limiter.Allow(source, now) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"status": "rate_limited"})
 		return
 	}
 	s.recordRequest(source)

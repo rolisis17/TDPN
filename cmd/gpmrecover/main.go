@@ -32,12 +32,14 @@ import (
 )
 
 const (
-	maxPackFileBytes           int64 = 2 * 1024 * 1024
-	maxKeyFileBytes            int64 = 8 * 1024
-	maxTrustFileBytes          int64 = 512 * 1024
-	maxBridgeRegistryFileBytes int64 = 512 * 1024
-	maxPublicationIndexBytes   int64 = 512 * 1024
-	maxPublicationFileBytes    int64 = 2 * 1024 * 1024
+	maxPackFileBytes             int64 = 2 * 1024 * 1024
+	maxKeyFileBytes              int64 = 8 * 1024
+	maxTrustFileBytes            int64 = 512 * 1024
+	maxBridgeRegistryFileBytes   int64 = 512 * 1024
+	maxPublicationIndexBytes     int64 = 512 * 1024
+	maxPublicationFileBytes      int64 = 2 * 1024 * 1024
+	minBridgeAccessCodeLength          = 24
+	defaultBridgeAccessCodeBytes       = 24
 )
 
 type keyOutput struct {
@@ -183,6 +185,8 @@ func main() {
 		err = runBridgeServiceServe(os.Args[2:])
 	case "bridge-service-code-hash":
 		err = runBridgeServiceCodeHash(os.Args[2:])
+	case "bridge-service-code-generate":
+		err = runBridgeServiceCodeGenerate(os.Args[2:])
 	case "bridge-service-deploy-pack":
 		err = runBridgeServiceDeployPack(os.Args[2:])
 	case "bridge-registry-sign":
@@ -239,9 +243,10 @@ func usage() {
   go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE | --signed-helper-registry FILE] [--require-helper-registry 1]
   go run ./cmd/gpmrecover bridge-service-config --invite FILE --signed-helper-registry FILE (--trust-store FILE | --public-key-file FILE) [--out FILE]
   go run ./cmd/gpmrecover bridge-service-check --config FILE [--path-id ID | --url URL] [--out FILE]
-  go run ./cmd/gpmrecover bridge-service-serve --config FILE [--config-sha256 HEX] [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] --access-code-sha256 HEX [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=false] [--redirect=false]
-  go run ./cmd/gpmrecover bridge-service-code-hash (--code TEXT | --code-file FILE) [--out FILE]
-  go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir DIR [--install-dir /etc/gpm/access-bridge] [--service-name gpm-access-bridge] [--public-host bridge.example] --access-code-sha256 HEX [--config-sha256 HEX] [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=true]
+  go run ./cmd/gpmrecover bridge-service-serve --config FILE --config-sha256 HEX [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] --access-code-sha256 HEX [--allow-unpinned-local=false] [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=false] [--redirect=false]
+  go run ./cmd/gpmrecover bridge-service-code-generate (--code-out FILE | --print-code 1) [--hash-out FILE] [--bytes 24]
+  go run ./cmd/gpmrecover bridge-service-code-hash (--code TEXT | --code-file FILE) [--out FILE] [--allow-weak-code=false]
+  go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir DIR [--install-dir /etc/gpm/access-bridge] [--service-name gpm-access-bridge] [--public-host bridge.example] --config-sha256 HEX --access-code-sha256 HEX [--allow-unpinned-config=false] [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=true]
   go run ./cmd/gpmrecover bridge-registry-sign --helper-registry FILE --org-id ID --org-name NAME --private-key-file FILE --out FILE [--registry-id ID] [--lifetime-hours HOURS]
   go run ./cmd/gpmrecover bridge-registry-verify --signed-registry FILE (--trust-store FILE | --public-key-file FILE) [--out-registry FILE] [--show-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
@@ -1049,12 +1054,13 @@ func runBridgeServiceCheck(args []string) error {
 func runBridgeServiceServe(args []string) error {
 	fs := flag.NewFlagSet("bridge-service-serve", flag.ContinueOnError)
 	configFile := fs.String("config", "", "path to bridge service config JSON")
-	configSHA256 := fs.String("config-sha256", "", "optional sha256 hex digest of the bridge service config file")
+	configSHA256 := fs.String("config-sha256", "", "sha256 hex digest of the bridge service config file")
 	addr := fs.String("addr", "127.0.0.1:18980", "HTTP listen address")
 	rps := fs.Int("rps", 2, "fixed-window requests per second per source; 0 disables")
 	maxSources := fs.Int("max-sources", 1024, "maximum tracked sources for rate limiting")
 	abuseLog := fs.String("abuse-log", "", "optional JSONL abuse report log path")
 	accessCodeSHA256 := fs.String("access-code-sha256", "", "optional sha256 hex digest of an out-of-band bridge access code")
+	allowUnpinnedLocal := fs.Bool("allow-unpinned-local", false, "allow missing config hash only for loopback diagnostics")
 	allowUnauthenticatedLocal := fs.Bool("allow-unauthenticated-local", false, "allow no access-code gate only for loopback diagnostics")
 	allowQueryAccessCode := fs.Bool("allow-query-access-code", false, "allow access code in ?code= query parameter; header is preferred")
 	trustProxyHeaders := fs.Bool("trust-proxy-headers", false, "trust X-Forwarded-For only from loopback reverse proxies")
@@ -1068,6 +1074,14 @@ func runBridgeServiceServe(args []string) error {
 		}
 		if !isLoopbackListenAddr(*addr) {
 			return errors.New("--allow-unauthenticated-local requires a loopback --addr")
+		}
+	}
+	if strings.TrimSpace(*configSHA256) == "" {
+		if !*allowUnpinnedLocal {
+			return errors.New("bridge-service-serve requires --config-sha256 unless --allow-unpinned-local is set")
+		}
+		if !isLoopbackListenAddr(*addr) {
+			return errors.New("--allow-unpinned-local requires a loopback --addr")
 		}
 	}
 	body, err := readInputFileStrict(*configFile, "bridge service config", maxPackFileBytes)
@@ -1103,11 +1117,75 @@ func runBridgeServiceServe(args []string) error {
 	return server.ListenAndServe()
 }
 
+func runBridgeServiceCodeGenerate(args []string) error {
+	fs := flag.NewFlagSet("bridge-service-code-generate", flag.ContinueOnError)
+	randomBytes := fs.Int("bytes", defaultBridgeAccessCodeBytes, "random byte count before base64url encoding")
+	codeOutFile := fs.String("code-out", "", "optional path to write the plaintext access code with 0600 permissions")
+	hashOutFile := fs.String("hash-out", "", "optional path to write the access-code hash JSON with 0600 permissions")
+	printCode := fs.Bool("print-code", false, "include the plaintext access code in stdout JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *randomBytes < 16 {
+		return errors.New("bridge-service-code-generate requires --bytes >= 16")
+	}
+	if strings.TrimSpace(*codeOutFile) == "" && !*printCode {
+		return errors.New("bridge-service-code-generate requires --code-out or --print-code 1 so the generated code is not lost")
+	}
+	if sameOutputPath(*codeOutFile, *hashOutFile) {
+		return errors.New("bridge-service-code-generate requires different --code-out and --hash-out paths")
+	}
+	buf := make([]byte, *randomBytes)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Errorf("generate bridge access code: %w", err)
+	}
+	code := base64.RawURLEncoding.EncodeToString(buf)
+	if err := validateBridgeAccessCode(code, false); err != nil {
+		return err
+	}
+	sum := sha256.Sum256([]byte(code))
+	out := struct {
+		Status   string `json:"status"`
+		SHA256   string `json:"sha256"`
+		Length   int    `json:"length"`
+		Bytes    int    `json:"bytes"`
+		Code     string `json:"code,omitempty"`
+		CodeFile string `json:"code_file,omitempty"`
+	}{
+		Status:   "ok",
+		SHA256:   hex.EncodeToString(sum[:]),
+		Length:   len(code),
+		Bytes:    *randomBytes,
+		CodeFile: strings.TrimSpace(*codeOutFile),
+	}
+	if *printCode {
+		out.Code = code
+	}
+	body, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	body = append(body, '\n')
+	if strings.TrimSpace(*codeOutFile) != "" {
+		if err := writeFileWithMode(*codeOutFile, []byte(code+"\n"), 0o600); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(*hashOutFile) != "" {
+		if err := writeFileWithMode(*hashOutFile, body, 0o600); err != nil {
+			return err
+		}
+	}
+	_, err = os.Stdout.Write(body)
+	return err
+}
+
 func runBridgeServiceCodeHash(args []string) error {
 	fs := flag.NewFlagSet("bridge-service-code-hash", flag.ContinueOnError)
 	code := fs.String("code", "", "access code to hash; prefer --code-file to avoid shell history")
 	codeFile := fs.String("code-file", "", "file containing the access code")
 	outFile := fs.String("out", "", "optional output JSON path")
+	allowWeakCode := fs.Bool("allow-weak-code", false, "allow short or whitespace-containing diagnostic codes")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1116,7 +1194,7 @@ func runBridgeServiceCodeHash(args []string) error {
 	}
 	value := strings.TrimSpace(*code)
 	if strings.TrimSpace(*codeFile) != "" {
-		body, err := readInputFileStrict(*codeFile, "bridge access code", maxKeyFileBytes)
+		body, err := readSecretFileStrict(*codeFile, "bridge access code")
 		if err != nil {
 			return err
 		}
@@ -1124,6 +1202,9 @@ func runBridgeServiceCodeHash(args []string) error {
 	}
 	if value == "" {
 		return errors.New("bridge-service-code-hash requires --code or --code-file")
+	}
+	if err := validateBridgeAccessCode(value, *allowWeakCode); err != nil {
+		return err
 	}
 	sum := sha256.Sum256([]byte(value))
 	out := struct {
@@ -1141,6 +1222,38 @@ func runBridgeServiceCodeHash(args []string) error {
 	}
 	_, err = os.Stdout.Write(body)
 	return err
+}
+
+func validateBridgeAccessCode(value string, allowWeak bool) error {
+	if allowWeak {
+		return nil
+	}
+	if len(value) < minBridgeAccessCodeLength {
+		return fmt.Errorf("bridge access code must be at least %d characters; use bridge-service-code-generate or pass --allow-weak-code only for diagnostics", minBridgeAccessCodeLength)
+	}
+	for _, r := range value {
+		if r <= ' ' || r == 0x7f {
+			return errors.New("bridge access code must not contain whitespace or control characters")
+		}
+	}
+	return nil
+}
+
+func sameOutputPath(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA == nil {
+		a = absA
+	}
+	if errB == nil {
+		b = absB
+	}
+	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
 }
 
 func verifyOptionalSHA256(label string, body []byte, expected string) error {
@@ -1170,12 +1283,13 @@ func runBridgeServiceDeployPack(args []string) error {
 	publicHost := fs.String("public-host", "bridge.example", "public HTTPS host used in reverse-proxy examples")
 	binary := fs.String("binary", "/usr/local/bin/gpmrecover", "installed gpmrecover binary path")
 	configPath := fs.String("config", "/etc/gpm/access-bridge/bridge-service-config.json", "installed bridge service config path")
-	configSHA256 := fs.String("config-sha256", "", "optional sha256 hex digest of the installed bridge service config")
+	configSHA256 := fs.String("config-sha256", "", "sha256 hex digest of the installed bridge service config")
 	addr := fs.String("addr", "127.0.0.1:18980", "bridge service listen address")
 	rps := fs.Int("rps", 2, "fixed-window requests per second per source; 0 disables")
 	maxSources := fs.Int("max-sources", 1024, "maximum tracked sources for rate limiting")
 	abuseLog := fs.String("abuse-log", "/var/log/gpm/access-bridge-abuse.jsonl", "JSONL abuse report log path")
 	accessCodeSHA256 := fs.String("access-code-sha256", "", "optional sha256 hex digest of an out-of-band bridge access code")
+	allowUnpinnedConfig := fs.Bool("allow-unpinned-config", false, "allow deploy pack without a config hash only for diagnostics")
 	allowUnauthenticatedLocal := fs.Bool("allow-unauthenticated-local", false, "allow deploy pack without an access-code hash only for local diagnostics")
 	allowQueryAccessCode := fs.Bool("allow-query-access-code", false, "allow access code in ?code= query parameter; header is preferred")
 	trustProxyHeaders := fs.Bool("trust-proxy-headers", true, "trust X-Forwarded-For only from loopback reverse proxies")
@@ -1190,6 +1304,9 @@ func runBridgeServiceDeployPack(args []string) error {
 	}
 	if strings.TrimSpace(*accessCodeSHA256) == "" && !*allowUnauthenticatedLocal {
 		return errors.New("bridge-service-deploy-pack requires --access-code-sha256 unless --allow-unauthenticated-local is set")
+	}
+	if strings.TrimSpace(*configSHA256) == "" && !*allowUnpinnedConfig {
+		return errors.New("bridge-service-deploy-pack requires --config-sha256 unless --allow-unpinned-config is set")
 	}
 	if *rps < 0 || *maxSources < 0 {
 		return errors.New("rps and max-sources must be non-negative")

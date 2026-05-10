@@ -4,6 +4,7 @@ set -euo pipefail
 base_url=""
 path_id="helper-web"
 code=""
+allow_unauthenticated="0"
 summary_json=""
 abuse_message="bridge service smoke"
 expect_helper_id=""
@@ -13,9 +14,10 @@ expect_registry_id=""
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/access_bridge_service_smoke.sh --base-url URL [--path-id helper-web] [--code CODE] [--expect-helper-id ID] [--expect-org-id ID] [--expect-registry-id ID] [--summary-json FILE] [--abuse-message TEXT]
+  scripts/access_bridge_service_smoke.sh --base-url URL [--path-id helper-web] --code CODE [--expect-helper-id ID] [--expect-org-id ID] [--expect-registry-id ID] [--summary-json FILE] [--abuse-message TEXT]
+  scripts/access_bridge_service_smoke.sh --base-url URL [--path-id helper-web] --allow-unauthenticated 1 [diagnostic only]
 
-Checks /health, /bridge/{path_id}, no-store/no-referrer headers, and /abuse logging acceptance.
+Checks /health, access-code-gated /bridge/{path_id}, no-store/no-referrer headers, and /abuse logging acceptance.
 USAGE
 }
 
@@ -31,6 +33,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --code)
       code="${2:-}"
+      shift 2
+      ;;
+    --allow-unauthenticated)
+      allow_unauthenticated="${2:-1}"
       shift 2
       ;;
     --summary-json)
@@ -65,7 +71,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for cmd in curl jq; do
+for cmd in curl date jq; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "access bridge service smoke failed: missing required command: $cmd" >&2
     exit 2
@@ -81,6 +87,14 @@ if [[ -z "$path_id" ]]; then
   echo "access bridge service smoke failed: --path-id is required" >&2
   exit 2
 fi
+if [[ "$allow_unauthenticated" != "0" && "$allow_unauthenticated" != "1" ]]; then
+  echo "access bridge service smoke failed: --allow-unauthenticated must be 0 or 1" >&2
+  exit 2
+fi
+if [[ -z "$code" && "$allow_unauthenticated" != "1" ]]; then
+  echo "access bridge service smoke failed: --code is required unless --allow-unauthenticated 1 is set" >&2
+  exit 2
+fi
 
 tmp_dir="$(mktemp -d)"
 cleanup() {
@@ -91,9 +105,18 @@ trap cleanup EXIT
 health_body="$tmp_dir/health.json"
 bridge_body="$tmp_dir/bridge.json"
 bridge_headers="$tmp_dir/bridge.headers"
+missing_code_body="$tmp_dir/missing-code.json"
+wrong_code_body="$tmp_dir/wrong-code.json"
 abuse_body="$tmp_dir/abuse.json"
 
 health_http="$(curl -sS -o "$health_body" -w '%{http_code}' "${base_url}/health" || true)"
+
+missing_code_http="skipped"
+wrong_code_http="skipped"
+if [[ "$allow_unauthenticated" != "1" ]]; then
+  missing_code_http="$(curl -sS -o "$missing_code_body" -w '%{http_code}' "${base_url}/bridge/${path_id}" || true)"
+  wrong_code_http="$(curl -sS -H "X-GPM-Bridge-Code: wrong-${code}-denied" -o "$wrong_code_body" -w '%{http_code}' "${base_url}/bridge/${path_id}" || true)"
+fi
 
 curl_args=(-sS -D "$bridge_headers" -o "$bridge_body" -w '%{http_code}')
 if [[ -n "$code" ]]; then
@@ -119,6 +142,12 @@ notes="bridge service smoke passed"
 if [[ "$health_http" != "200" || "$health_status" != "ok" ]]; then
   status="fail"
   notes="health check failed"
+elif [[ "$allow_unauthenticated" != "1" && "$missing_code_http" != "401" ]]; then
+  status="fail"
+  notes="missing access-code negative check failed"
+elif [[ "$allow_unauthenticated" != "1" && "$wrong_code_http" != "401" ]]; then
+  status="fail"
+  notes="wrong access-code negative check failed"
 elif [[ "$bridge_http" != "200" || "$bridge_status" != "ok" ]]; then
   status="fail"
   notes="bridge path check failed"
@@ -140,6 +169,7 @@ elif [[ -n "$expect_registry_id" && "$health_registry_id" != "$expect_registry_i
 fi
 
 summary="$(jq -cn \
+  --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg status "$status" \
   --arg notes "$notes" \
   --arg base_url "$base_url" \
@@ -149,11 +179,14 @@ summary="$(jq -cn \
   --arg health_helper_id "$health_helper_id" \
   --arg health_org_id "$health_org_id" \
   --arg health_registry_id "$health_registry_id" \
+  --arg missing_code_http "$missing_code_http" \
+  --arg wrong_code_http "$wrong_code_http" \
   --arg bridge_http "$bridge_http" \
   --arg bridge_status "$bridge_status" \
   --arg abuse_http "$abuse_http" \
   --argjson headers_ok "$headers_ok" \
-  '{version:1,status:$status,notes:$notes,base_url:$base_url,path_id:$path_id,health:{http_status:$health_http,status:$health_status,helper_id:$health_helper_id,organization_id:$health_org_id,registry_id:$health_registry_id},bridge:{http_status:$bridge_http,status:$bridge_status,security_headers_ok:$headers_ok},abuse:{http_status:$abuse_http}}')"
+  --argjson auth_required "$( [[ "$allow_unauthenticated" == "1" ]] && echo false || echo true )" \
+  '{version:1,schema:{id:"access_bridge_service_smoke_summary",major:1,minor:1},generated_at_utc:$generated_at_utc,status:$status,notes:$notes,base_url:$base_url,path_id:$path_id,health:{http_status:$health_http,status:$health_status,helper_id:$health_helper_id,organization_id:$health_org_id,registry_id:$health_registry_id},auth:{required:$auth_required,missing_code_http_status:$missing_code_http,wrong_code_http_status:$wrong_code_http,valid_code_http_status:$bridge_http},bridge:{http_status:$bridge_http,status:$bridge_status,security_headers_ok:$headers_ok},abuse:{http_status:$abuse_http}}')"
 
 if [[ -n "$summary_json" ]]; then
   mkdir -p "$(dirname "$summary_json")"

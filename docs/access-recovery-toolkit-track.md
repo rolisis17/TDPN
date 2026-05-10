@@ -186,6 +186,7 @@ Local trust-store flow:
 - `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json`
 - `go run ./cmd/gpmrecover bridge-service-config --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --out .easy-node-logs/bridge-service-config.json`
 - `go run ./cmd/gpmrecover bridge-service-check --config .easy-node-logs/bridge-service-config.json --path-id helper-web`
+- `go run ./cmd/gpmrecover bridge-service-code-generate --code-out .easy-node-logs/bridge-code.txt --hash-out .easy-node-logs/bridge-code-hash.json`
 - `go run ./cmd/gpmrecover bridge-service-code-hash --code-file .easy-node-logs/bridge-code.txt --out .easy-node-logs/bridge-code-hash.json`
 - `CONFIG_HASH="$(sha256sum .easy-node-logs/bridge-service-config.json | awk '{print $1}')"`
 - `go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/bridge-service-config.json --config-sha256 "$CONFIG_HASH" --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/bridge-abuse.jsonl --access-code-sha256 HASH`
@@ -239,7 +240,8 @@ Bridge-invite rules:
 - `fetch-publication` downloads the static publication index and same-origin referenced artifacts into a local folder, but marks trust as unverified so signature/trust-store verification remains a separate step
 - `bridge-service-config` turns a verified signed invite plus signed helper registry into a fail-closed service config containing the signed invite validity window, helper abuse-report URL, rate-limit policy, active window, registry identity, and verified path hints
 - `bridge-service-check` is the first runtime preflight hook: it rejects unsigned/stale service configs, expired invite/helper windows, missing abuse/rate commitments, unknown paths, and manual/external-app paths before a helper bridge serves traffic
-- `bridge-service-code-hash` derives an out-of-band access-code hash so helpers do not store plaintext invite codes in their service config
+- `bridge-service-code-generate` creates a high-entropy out-of-band access code plus deployable hash so helpers do not invent weak tickets by hand
+- `bridge-service-code-hash` derives an out-of-band access-code hash from an existing strong code; short or whitespace-containing diagnostic codes require `--allow-weak-code`
 - `bridge-service-serve` wraps that preflight in a minimal HTTP service with `/health`, `/bridge/{path_id}`, required `X-GPM-Bridge-Code` ticket gating for normal deploys, optional config-hash pinning, per-source fixed-window limits, optional signed-path redirects, and `/abuse` JSONL logging
 - `bridge-service-serve` emits no-store/no-referrer/nosniff headers so ticket codes and recovery URLs are not cached or leaked through browser referrers
 - `bridge-service-deploy-pack` emits a helper-owned env file, shell wrapper, README, hardened systemd unit template, and Caddy/nginx HTTPS reverse-proxy examples for Linux deployment
@@ -250,7 +252,7 @@ Bridge-invite rules:
 Operator bridge install checklist:
 - generate a service config only from a verified signed bridge invite plus signed helper registry
 - run `bridge-service-check` for each served `path_id` before starting or restarting the service
-- derive an access-code hash out of band and deploy only the hash; plaintext access codes stay out of configs, logs, screenshots, and shared evidence
+- generate a high-entropy access code out of band and deploy only the hash; plaintext access codes stay out of configs, logs, screenshots, and shared evidence
 - pass access codes through the `X-GPM-Bridge-Code` header; query-string `?code=` access is disabled by default and should remain off unless a constrained fallback channel truly needs it
 - use `bridge-service-deploy-pack` for helper-owned env/wrapper/systemd/proxy templates, pin the staged service config with `--config-sha256`, then bind the service to loopback behind Caddy or nginx HTTPS
 - verify helper identity against the signed registry: helper id, contact URL, abuse-report URL, rate-limit policy, active window, and control of the public HTTPS host

@@ -24,8 +24,6 @@ CODE_FILE="$TMP_DIR/bridge-code.txt"
 CODE_HASH_JSON="$TMP_DIR/bridge-code-hash.json"
 SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_check_summary.json"
 
-printf 'host-check-ticket-1234567890\n' >"$CODE_FILE"
-
 go run ./cmd/gpmrecover demo-bundle \
   --out-dir "$BUNDLE_DIR" \
   --org-id host-check-org \
@@ -48,7 +46,7 @@ go run ./cmd/gpmrecover bridge-service-config \
   --out "$SERVICE_CONFIG" >/dev/null
 
 config_sha256="$(sha256sum "$SERVICE_CONFIG" | awk '{print $1}')"
-go run ./cmd/gpmrecover bridge-service-code-hash --code-file "$CODE_FILE" --out "$CODE_HASH_JSON" >/dev/null
+go run ./cmd/gpmrecover bridge-service-code-generate --code-out "$CODE_FILE" --hash-out "$CODE_HASH_JSON" >/dev/null
 code_hash="$(jq -r '.sha256' "$CODE_HASH_JSON")"
 
 go run ./cmd/gpmrecover bridge-service-deploy-pack \
@@ -107,6 +105,29 @@ fi
 if ! jq -e '.status == "fail" and ([.checks[] | select(.id == "query_access_code_disabled" and .status == "fail")] | length == 1)' "$TMP_DIR/bad-query-summary.json" >/dev/null; then
   echo "access bridge host install check integration failed: unsafe query summary mismatch"
   cat "$TMP_DIR/bad-query-summary.json"
+  exit 1
+fi
+
+BAD_HASH_DIR="$TMP_DIR/bad-hash"
+cp -R "$DEPLOY_DIR" "$BAD_HASH_DIR"
+sed -i 's/GPM_BRIDGE_ACCESS_CODE_SHA256="[^"]*"/GPM_BRIDGE_ACCESS_CODE_SHA256="not-a-valid-sha256"/' "$BAD_HASH_DIR/gpm-access-bridge-host-check.env"
+set +e
+./scripts/access_bridge_host_install_check.sh \
+  --deploy-pack-dir "$BAD_HASH_DIR" \
+  --service-name gpm-access-bridge-host-check \
+  --config-json "$SERVICE_CONFIG" \
+  --summary-json "$TMP_DIR/bad-hash-summary.json" \
+  --print-summary-json 0 >/dev/null 2>&1
+bad_hash_rc=$?
+set -e
+if [[ "$bad_hash_rc" -eq 0 ]]; then
+  echo "access bridge host install check integration failed: malformed access-code hash should fail"
+  cat "$TMP_DIR/bad-hash-summary.json"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and ([.checks[] | select(.id == "access_code_gate_configured" and .status == "fail")] | length == 1)' "$TMP_DIR/bad-hash-summary.json" >/dev/null; then
+  echo "access bridge host install check integration failed: bad hash summary mismatch"
+  cat "$TMP_DIR/bad-hash-summary.json"
   exit 1
 fi
 

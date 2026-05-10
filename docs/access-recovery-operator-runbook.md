@@ -43,7 +43,7 @@ go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-recovery-demo/acces
 go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/access-recovery-demo/bridge-invite.signed.json --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --require-helper-registry
 go run ./cmd/gpmrecover bridge-service-config --invite .easy-node-logs/access-recovery-demo/bridge-invite.signed.json --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --out .easy-node-logs/access-recovery-demo/bridge-service-config.json
 go run ./cmd/gpmrecover bridge-service-check --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --path-id helper-web
-go run ./cmd/gpmrecover bridge-service-code-hash --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --out .easy-node-logs/access-recovery-demo/bridge-code-hash.json
+go run ./cmd/gpmrecover bridge-service-code-generate --code-out .easy-node-logs/access-recovery-demo/bridge-code.txt --hash-out .easy-node-logs/access-recovery-demo/bridge-code-hash.json
 CONFIG_HASH="$(sha256sum .easy-node-logs/access-recovery-demo/bridge-service-config.json | awk '{print $1}')"
 go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --config-sha256 "$CONFIG_HASH" --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/access-recovery-demo/bridge-abuse.jsonl --access-code-sha256 HASH
 go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/access-recovery-demo/bridge-deploy --public-host bridge.example --config-sha256 "$CONFIG_HASH" --access-code-sha256 HASH
@@ -75,12 +75,12 @@ go run ./cmd/gpmrecover bridge-service-check \
 CONFIG_HASH="$(sha256sum .easy-node-logs/access-recovery-demo/bridge-service-config.json | awk '{print $1}')"
 ```
 
-2. Create the access-code hash out of band and deploy only the hash. Do not place the plaintext code in config files, shell history, service units, tickets, screenshots, or smoke summaries:
+2. Create a high-entropy access code out of band and deploy only the hash. Do not place the plaintext code in config files, shell history, service units, tickets, screenshots, or smoke summaries:
 
 ```sh
-go run ./cmd/gpmrecover bridge-service-code-hash \
-  --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt \
-  --out .easy-node-logs/access-recovery-demo/bridge-code-hash.json
+go run ./cmd/gpmrecover bridge-service-code-generate \
+  --code-out .easy-node-logs/access-recovery-demo/bridge-code.txt \
+  --hash-out .easy-node-logs/access-recovery-demo/bridge-code-hash.json
 ```
 
 3. Generate the helper deploy pack and install only the generated env, wrapper, service unit, and selected HTTPS reverse-proxy example on the helper host:

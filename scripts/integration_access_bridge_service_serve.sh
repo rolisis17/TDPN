@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in go jq mktemp curl sha256sum; do
+for cmd in go jq mktemp curl sha256sum tr; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "access bridge service serve integration failed: missing required command: $cmd"
     exit 2
@@ -32,8 +32,6 @@ DEPLOY_PACK="$TMP_DIR/bridge-deploy-pack"
 ABUSE_LOG="$TMP_DIR/bridge-abuse.jsonl"
 SERVER_LOG="$TMP_DIR/bridge-service.log"
 
-printf 'ticket-serve-123\n' >"$CODE_FILE"
-
 go run ./cmd/gpmrecover demo-bundle \
   --out-dir "$BUNDLE_DIR" \
   --org-id serve-org \
@@ -55,8 +53,8 @@ go run ./cmd/gpmrecover bridge-service-config \
   --signed-helper-registry "$signed_registry" \
   --out "$SERVICE_CONFIG" >/dev/null
 config_sha256="$(sha256sum "$SERVICE_CONFIG" | awk '{print $1}')"
-
-go run ./cmd/gpmrecover bridge-service-code-hash --code-file "$CODE_FILE" --out "$CODE_HASH_JSON" >/dev/null
+go run ./cmd/gpmrecover bridge-service-code-generate --code-out "$CODE_FILE" --hash-out "$CODE_HASH_JSON" >/dev/null
+code_value="$(tr -d '\r\n' <"$CODE_FILE")"
 code_hash="$(jq -r '.sha256' "$CODE_HASH_JSON")"
 
 go run ./cmd/gpmrecover bridge-service-deploy-pack \
@@ -104,7 +102,7 @@ fi
 
 headers_file="$TMP_DIR/bridge.headers"
 allowed_body="$TMP_DIR/bridge.allowed.json"
-allowed_status="$(curl -sS -D "$headers_file" -H 'X-GPM-Bridge-Code: ticket-serve-123' -o "$allowed_body" -w '%{http_code}' "${BASE_URL}/bridge/helper-web")"
+allowed_status="$(curl -sS -D "$headers_file" -H "X-GPM-Bridge-Code: ${code_value}" -o "$allowed_body" -w '%{http_code}' "${BASE_URL}/bridge/helper-web")"
 if [[ "$allowed_status" != "200" ]]; then
   echo "access bridge service serve integration failed: expected allowed code 200, got $allowed_status"
   cat "$allowed_body"
@@ -136,7 +134,7 @@ fi
 bash ./scripts/access_bridge_service_smoke.sh \
   --base-url "$BASE_URL" \
   --path-id helper-web \
-  --code ticket-serve-123 \
+  --code "$code_value" \
   --expect-helper-id helper-serve \
   --expect-org-id serve-org \
   --expect-registry-id "$(jq -r '.registry_id' "$SERVICE_CONFIG")" \
@@ -151,7 +149,7 @@ fi
 bash ./scripts/access_bridge_deployment_evidence.sh \
   --base-url "$BASE_URL" \
   --path-id helper-web \
-  --code ticket-serve-123 \
+  --code "$code_value" \
   --expect-helper-id helper-serve \
   --expect-org-id serve-org \
   --expect-registry-id "$(jq -r '.registry_id' "$SERVICE_CONFIG")" \

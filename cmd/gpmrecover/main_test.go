@@ -161,11 +161,8 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}
 	codeFile := filepath.Join(dir, "bridge-code.txt")
 	codeHashFile := filepath.Join(dir, "bridge-code-hash.json")
-	if err := os.WriteFile(codeFile, []byte("ticket-123\n"), 0o600); err != nil {
-		t.Fatalf("write bridge code: %v", err)
-	}
-	if err := runBridgeServiceCodeHash([]string{"--code-file", codeFile, "--out", codeHashFile}); err != nil {
-		t.Fatalf("bridge-service-code-hash: %v", err)
+	if err := runBridgeServiceCodeGenerate([]string{"--code-out", codeFile, "--hash-out", codeHashFile}); err != nil {
+		t.Fatalf("bridge-service-code-generate: %v", err)
 	}
 	codeHashBody, err := os.ReadFile(codeHashFile)
 	if err != nil {
@@ -179,6 +176,23 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}
 	if codeHashOut.SHA256 == "" || len(codeHashOut.SHA256) != 64 {
 		t.Fatalf("unexpected bridge code hash: %+v", codeHashOut)
+	}
+	codeHashVerifyFile := filepath.Join(dir, "bridge-code-hash.verify.json")
+	if err := runBridgeServiceCodeHash([]string{"--code-file", codeFile, "--out", codeHashVerifyFile}); err != nil {
+		t.Fatalf("bridge-service-code-hash generated code: %v", err)
+	}
+	codeHashVerifyBody, err := os.ReadFile(codeHashVerifyFile)
+	if err != nil {
+		t.Fatalf("read bridge code hash verify: %v", err)
+	}
+	var codeHashVerifyOut struct {
+		SHA256 string `json:"sha256"`
+	}
+	if err := json.Unmarshal(codeHashVerifyBody, &codeHashVerifyOut); err != nil {
+		t.Fatalf("unmarshal bridge code hash verify: %v", err)
+	}
+	if codeHashVerifyOut.SHA256 != codeHashOut.SHA256 {
+		t.Fatalf("generated code hash mismatch: generate=%s hash=%s", codeHashOut.SHA256, codeHashVerifyOut.SHA256)
 	}
 	serviceConfigSum := sha256.Sum256(serviceConfigBody)
 	serviceConfigHash := hex.EncodeToString(serviceConfigSum[:])
@@ -481,11 +495,66 @@ func TestBridgeServiceCommandsRequireAccessCodeByDefault(t *testing.T) {
 	if err := runBridgeServiceDeployPack([]string{"--out-dir", t.TempDir()}); err == nil || !strings.Contains(err.Error(), "--access-code-sha256") {
 		t.Fatalf("expected deploy pack access-code requirement, got %v", err)
 	}
+	if err := runBridgeServiceDeployPack([]string{"--out-dir", t.TempDir(), "--access-code-sha256", strings.Repeat("0", 64)}); err == nil || !strings.Contains(err.Error(), "--config-sha256") {
+		t.Fatalf("expected deploy pack config hash requirement, got %v", err)
+	}
 	if err := runBridgeServiceServe([]string{"--config", "missing.json"}); err == nil || !strings.Contains(err.Error(), "--access-code-sha256") {
 		t.Fatalf("expected serve access-code requirement, got %v", err)
 	}
+	if err := runBridgeServiceServe([]string{"--config", "missing.json", "--access-code-sha256", strings.Repeat("0", 64)}); err == nil || !strings.Contains(err.Error(), "--config-sha256") {
+		t.Fatalf("expected serve config hash requirement, got %v", err)
+	}
 	if err := runBridgeServiceServe([]string{"--config", "missing.json", "--allow-unauthenticated-local", "--addr", "0.0.0.0:18980"}); err == nil || !strings.Contains(err.Error(), "loopback") {
 		t.Fatalf("expected unauthenticated serve to require loopback, got %v", err)
+	}
+	if err := runBridgeServiceServe([]string{"--config", "missing.json", "--access-code-sha256", strings.Repeat("0", 64), "--allow-unpinned-local", "--addr", "0.0.0.0:18980"}); err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("expected unpinned serve to require loopback, got %v", err)
+	}
+}
+
+func TestBridgeServiceCodeGenerationAndWeakCodePolicy(t *testing.T) {
+	dir := t.TempDir()
+	codeFile := filepath.Join(dir, "bridge-code.txt")
+	hashFile := filepath.Join(dir, "bridge-code-hash.json")
+	if err := runBridgeServiceCodeGenerate([]string{"--code-out", codeFile, "--hash-out", hashFile}); err != nil {
+		t.Fatalf("bridge-service-code-generate: %v", err)
+	}
+	codeBody, err := os.ReadFile(codeFile)
+	if err != nil {
+		t.Fatalf("read generated bridge code: %v", err)
+	}
+	code := strings.TrimSpace(string(codeBody))
+	if len(code) < minBridgeAccessCodeLength || strings.ContainsAny(code, " \t\r\n") {
+		t.Fatalf("generated weak bridge code %q", code)
+	}
+	hashBody, err := os.ReadFile(hashFile)
+	if err != nil {
+		t.Fatalf("read generated bridge hash: %v", err)
+	}
+	var out struct {
+		Status string `json:"status"`
+		SHA256 string `json:"sha256"`
+		Length int    `json:"length"`
+		Code   string `json:"code,omitempty"`
+	}
+	if err := json.Unmarshal(hashBody, &out); err != nil {
+		t.Fatalf("unmarshal generated bridge hash: %v", err)
+	}
+	if out.Status != "ok" || out.SHA256 == "" || out.Length != len(code) || out.Code != "" {
+		t.Fatalf("unexpected generated hash output: %+v", out)
+	}
+	if err := runBridgeServiceCodeHash([]string{"--code", "ticket-123"}); err == nil || !strings.Contains(err.Error(), "at least") {
+		t.Fatalf("expected weak bridge code rejection, got %v", err)
+	}
+	if err := runBridgeServiceCodeHash([]string{"--code", "ticket-123", "--allow-weak-code"}); err != nil {
+		t.Fatalf("expected weak diagnostic code override: %v", err)
+	}
+	if err := runBridgeServiceCodeHash([]string{"--code", strings.Repeat("a", minBridgeAccessCodeLength) + " " + strings.Repeat("b", minBridgeAccessCodeLength)}); err == nil || !strings.Contains(err.Error(), "whitespace") {
+		t.Fatalf("expected whitespace bridge code rejection, got %v", err)
+	}
+	samePath := filepath.Join(dir, "same-output.json")
+	if err := runBridgeServiceCodeGenerate([]string{"--code-out", samePath, "--hash-out", samePath}); err == nil || !strings.Contains(err.Error(), "different") {
+		t.Fatalf("expected bridge code generator to reject colliding output paths, got %v", err)
 	}
 }
 

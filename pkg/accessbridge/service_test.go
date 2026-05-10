@@ -205,6 +205,36 @@ func TestServiceRequiresAccessCodeWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestBadAccessCodesDoNotConsumeBridgeRateLimit(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	sum := sha256.Sum256([]byte("ticket-123"))
+	service, err := NewService(ServiceConfig{
+		BridgeConfig:     testServiceBridgeConfig(now),
+		RPS:              1,
+		AccessCodeSHA256: hex.EncodeToString(sum[:]),
+		Now:              func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	handler := service.Handler()
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil))
+	wrongReq := httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil)
+	wrongReq.Header.Set("X-GPM-Bridge-Code", "wrong-ticket")
+	handler.ServeHTTP(httptest.NewRecorder(), wrongReq)
+
+	allowedRR := httptest.NewRecorder()
+	allowedReq := httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil)
+	allowedReq.Header.Set("X-GPM-Bridge-Code", "ticket-123")
+	handler.ServeHTTP(allowedRR, allowedReq)
+	if allowedRR.Code != http.StatusOK {
+		t.Fatalf("expected valid code to avoid bad-code rate starvation, got %d body=%s", allowedRR.Code, allowedRR.Body.String())
+	}
+	if service.RequestCount("192.0.2.1") != 1 {
+		t.Fatalf("expected only valid bridge request to consume request counter")
+	}
+}
+
 func TestServiceAllowsQueryAccessCodeOnlyWhenConfigured(t *testing.T) {
 	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
 	sum := sha256.Sum256([]byte("ticket-123"))

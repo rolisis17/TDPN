@@ -44,6 +44,10 @@ trim() {
   printf '%s' "$value"
 }
 
+is_sha256_hex() {
+  [[ "${1:-}" =~ ^[A-Fa-f0-9]{64}$ ]]
+}
+
 abs_path() {
   local path
   path="$(trim "${1:-}")"
@@ -237,7 +241,9 @@ if [[ -f "$env_file" ]]; then
   env_trust_proxy_headers="$(env_file_value "$env_file" "GPM_BRIDGE_TRUST_PROXY_HEADERS")"
   env_addr="$(env_file_value "$env_file" "GPM_BRIDGE_ADDR")"
 
-  if [[ -n "$expected_config_sha256" && "$env_config_sha256" == "$expected_config_sha256" ]]; then
+  if [[ -n "$env_config_sha256" ]] && ! is_sha256_hex "$env_config_sha256"; then
+    add_check "config_sha256_matches" "fail" "env config sha256 is not 64 hex characters"
+  elif [[ -n "$expected_config_sha256" && "$env_config_sha256" == "$expected_config_sha256" ]]; then
     add_check "config_sha256_matches" "pass" "env config sha256 matches supplied config"
   elif [[ -n "$expected_config_sha256" ]]; then
     add_check "config_sha256_matches" "fail" "env config sha256 does not match supplied config"
@@ -245,7 +251,9 @@ if [[ -f "$env_file" ]]; then
     add_check "config_sha256_matches" "skip" "no config JSON supplied"
   fi
 
-  if [[ -n "$env_access_code_sha256" || "$env_allow_unauth_local" == "true" ]]; then
+  if [[ -n "$env_access_code_sha256" ]] && ! is_sha256_hex "$env_access_code_sha256"; then
+    add_check "access_code_gate_configured" "fail" "access-code hash is not 64 hex characters"
+  elif [[ -n "$env_access_code_sha256" || "$env_allow_unauth_local" == "true" ]]; then
     add_check "access_code_gate_configured" "pass" "access-code hash is configured or unauthenticated local mode is explicit"
   else
     add_check "access_code_gate_configured" "fail" "access-code hash is missing"

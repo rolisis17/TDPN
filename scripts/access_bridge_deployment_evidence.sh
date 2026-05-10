@@ -17,6 +17,7 @@ expect_org_id=""
 expect_registry_id=""
 summary_json=""
 print_summary_json="1"
+max_smoke_age_sec="${ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_MAX_SMOKE_AGE_SEC:-3600}"
 
 usage() {
   cat <<'USAGE'
@@ -24,7 +25,7 @@ Usage:
   scripts/access_bridge_deployment_evidence.sh \
     (--base-url URL | --smoke-summary-json FILE) \
     [--path-id helper-web] \
-    [--code CODE] \
+    [--code CODE when using --base-url] \
     [--expect-helper-id ID] \
     [--expect-org-id ID] \
     [--expect-registry-id ID] \
@@ -55,6 +56,19 @@ trim() {
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s' "$value"
+}
+
+is_sha256_hex() {
+  [[ "${1:-}" =~ ^[A-Fa-f0-9]{64}$ ]]
+}
+
+smoke_age_seconds() {
+  local generated_at="$1"
+  local now
+  now="$(timestamp_utc)"
+  jq -nr --arg generated_at "$generated_at" --arg now "$now" '
+    try (($now | fromdateiso8601) - ($generated_at | fromdateiso8601) | floor) catch empty
+  '
 }
 
 abs_path() {
@@ -219,6 +233,10 @@ for cmd in bash date jq mktemp; do
   need_cmd "$cmd"
 done
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+if [[ ! "$max_smoke_age_sec" =~ ^[0-9]+$ ]]; then
+  echo "ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_MAX_SMOKE_AGE_SEC must be a non-negative integer" >&2
+  exit 2
+fi
 
 base_url="${base_url%/}"
 path_id="$(trim "$path_id")"
@@ -294,11 +312,41 @@ fi
 
 smoke_status="$(json_string_or_empty "$smoke_summary_json" '.status')"
 smoke_notes="$(json_string_or_empty "$smoke_summary_json" '.notes')"
+smoke_schema_id="$(json_string_or_empty "$smoke_summary_json" '.schema.id')"
+smoke_generated_at_utc="$(json_string_or_empty "$smoke_summary_json" '.generated_at_utc')"
+smoke_age_sec="$(smoke_age_seconds "$smoke_generated_at_utc")"
+smoke_auth_required="$(jq -r '.auth.required // false' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_missing_code_http="$(json_string_or_empty "$smoke_summary_json" '.auth.missing_code_http_status')"
+smoke_wrong_code_http="$(json_string_or_empty "$smoke_summary_json" '.auth.wrong_code_http_status')"
 smoke_base_url="$(json_string_or_empty "$smoke_summary_json" '.base_url')"
 smoke_path_id="$(json_string_or_empty "$smoke_summary_json" '.path_id')"
 actual_helper_id="$(json_string_or_empty "$smoke_summary_json" '.health.helper_id')"
 actual_org_id="$(json_string_or_empty "$smoke_summary_json" '.health.organization_id')"
 actual_registry_id="$(json_string_or_empty "$smoke_summary_json" '.health.registry_id')"
+
+smoke_evidence_status="pass"
+smoke_evidence_reason=""
+if [[ "$smoke_schema_id" != "access_bridge_service_smoke_summary" ]]; then
+  smoke_evidence_status="fail"
+  smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary schema id missing or invalid")"
+fi
+if [[ -z "$smoke_age_sec" ]]; then
+  smoke_evidence_status="fail"
+  smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary generated_at_utc missing or invalid")"
+elif ((smoke_age_sec < -300)); then
+  smoke_evidence_status="fail"
+  smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary generated_at_utc is in the future")"
+elif ((smoke_age_sec > max_smoke_age_sec)); then
+  smoke_evidence_status="fail"
+  smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary is stale")"
+fi
+if [[ "$smoke_auth_required" != "true" ]]; then
+  smoke_evidence_status="fail"
+  smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary did not require access-code auth")"
+elif [[ "$smoke_missing_code_http" != "401" || "$smoke_wrong_code_http" != "401" ]]; then
+  smoke_evidence_status="fail"
+  smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary did not prove missing/wrong access-code rejection")"
+fi
 
 config_status="skip"
 config_exists="false"
@@ -437,6 +485,9 @@ if [[ -n "$deploy_pack_dir" ]]; then
       if [[ -z "$deploy_env_access_code_sha256" && "$deploy_env_allow_unauth_local" != "true" ]]; then
         deploy_status="fail"
         deploy_reason="$(append_reason "$deploy_reason" "deploy env must include an access-code hash unless explicitly local unauthenticated")"
+      elif [[ -n "$deploy_env_access_code_sha256" ]] && ! is_sha256_hex "$deploy_env_access_code_sha256"; then
+        deploy_status="fail"
+        deploy_reason="$(append_reason "$deploy_reason" "deploy env access-code sha256 must be 64 hex characters")"
       fi
       if [[ "$deploy_env_allow_query_code" != "false" ]]; then
         deploy_status="fail"
@@ -446,7 +497,10 @@ if [[ -n "$deploy_pack_dir" ]]; then
         deploy_status="fail"
         deploy_reason="$(append_reason "$deploy_reason" "deploy env must trust loopback proxy headers for per-client rate limits")"
       fi
-      if [[ -n "$config_sha256" && "$deploy_env_config_sha256" != "$config_sha256" ]]; then
+      if [[ -n "$deploy_env_config_sha256" ]] && ! is_sha256_hex "$deploy_env_config_sha256"; then
+        deploy_status="fail"
+        deploy_reason="$(append_reason "$deploy_reason" "deploy env config sha256 must be 64 hex characters")"
+      elif [[ -n "$config_sha256" && "$deploy_env_config_sha256" != "$config_sha256" ]]; then
         deploy_status="fail"
         deploy_reason="$(append_reason "$deploy_reason" "deploy env config sha256 does not match supplied config")"
       fi
@@ -491,6 +545,10 @@ if [[ "$smoke_status" != "pass" ]]; then
   status="fail"
   recommended_action_id="fix_deployed_bridge_smoke"
   recommended_action="Fix the deployed bridge service smoke failure, then rerun this evidence script."
+elif [[ "$smoke_evidence_status" != "pass" ]]; then
+  status="fail"
+  recommended_action_id="refresh_deployed_bridge_smoke"
+  recommended_action="Rerun access_bridge_service_smoke.sh with a valid access code so evidence includes fresh auth-negative checks."
 elif [[ "$identity_status" != "pass" ]]; then
   status="fail"
   recommended_action_id="fix_bridge_identity"
@@ -513,6 +571,14 @@ jq -n \
   --arg smoke_summary_json "$smoke_summary_json" \
   --arg smoke_status "$smoke_status" \
   --arg smoke_notes "$smoke_notes" \
+  --arg smoke_schema_id "$smoke_schema_id" \
+  --arg smoke_generated_at_utc "$smoke_generated_at_utc" \
+  --arg smoke_age_sec "$smoke_age_sec" \
+  --arg smoke_auth_required "$smoke_auth_required" \
+  --arg smoke_missing_code_http "$smoke_missing_code_http" \
+  --arg smoke_wrong_code_http "$smoke_wrong_code_http" \
+  --arg smoke_evidence_status "$smoke_evidence_status" \
+  --arg smoke_evidence_reason "$smoke_evidence_reason" \
   --arg smoke_base_url "$smoke_base_url" \
   --arg smoke_path_id "$smoke_path_id" \
   --arg expect_helper_id "$expect_helper_id" \
@@ -565,6 +631,14 @@ jq -n \
     smoke: {
       status: $smoke_status,
       notes: $smoke_notes,
+      schema_id: $smoke_schema_id,
+      generated_at_utc: $smoke_generated_at_utc,
+      age_sec: (if $smoke_age_sec == "" then null else ($smoke_age_sec | tonumber) end),
+      auth_required: ($smoke_auth_required == "true"),
+      missing_code_http_status: $smoke_missing_code_http,
+      wrong_code_http_status: $smoke_wrong_code_http,
+      evidence_status: $smoke_evidence_status,
+      evidence_reason: $smoke_evidence_reason,
       base_url: $smoke_base_url,
       path_id: $smoke_path_id,
       summary_json: $smoke_summary_json
