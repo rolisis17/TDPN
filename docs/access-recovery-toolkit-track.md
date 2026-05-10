@@ -239,6 +239,7 @@ First browser surface:
 - validates text handoff payloads before browser QR rendering/download so a bad pasted handoff is not turned into a QR
 - can scan a QR image into the text handoff field with native `BarcodeDetector` support or the bundled browser scanner fallback
 - verifies the Ed25519 signature with Web Crypto when the browser supports it
+- labels bridge-invite helper policy results as signed-registry or unsigned-registry so beta users can distinguish verified registry snapshots from local/raw testing inputs
 - lists trusted access/helper paths only after signature, expiry, org id, and trusted-key checks pass
 - shows signed helper contact/copy actions for verified bridge invites
 - does not run network reachability checks yet because browser cross-origin checks are not reliable enough for the beta trust decision

@@ -964,11 +964,16 @@
     if (activeUntil && expiresAt > activeUntil) {
       throw new Error("Bridge invite expires after the helper active window");
     }
+    let signedRegistry = false;
+    if (verifiedHelperRegistryMeta) {
+      const meta = normalizeVerifiedHelperRegistryMeta(verifiedHelperRegistryMeta);
+      signedRegistry = Boolean(meta && meta.org_id === orgID);
+    }
     return {
       status: "pass",
-      label: helper.display_name || "Active",
+      label: `${helper.display_name || "Active"} (${signedRegistry ? "signed registry" : "unsigned registry"})`,
       helper,
-      badges: ["Registry active"],
+      badges: [signedRegistry ? "Signed registry active" : "Unsigned registry active"],
     };
   }
 
