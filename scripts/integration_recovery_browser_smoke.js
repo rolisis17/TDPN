@@ -25,6 +25,8 @@ class Element {
     this.target = "";
     this.rel = "";
     this.download = "";
+    this.width = 0;
+    this.height = 0;
     this.disabled = false;
     this.files = [];
     this._textContent = "";
@@ -87,6 +89,36 @@ class Element {
 
   click() {
     return this.dispatch("click");
+  }
+
+  getContext() {
+    return {
+      fillStyle: "",
+      fillRect() {},
+      drawImage() {},
+      getImageData() {
+        return { data: new Uint8ClampedArray(0) };
+      },
+    };
+  }
+
+  querySelector(selector) {
+    const expected = String(selector || "").toUpperCase();
+    const stack = [...this.children];
+    while (stack.length > 0) {
+      const node = stack.shift();
+      if (node && node.tagName === expected) {
+        return node;
+      }
+      if (node && Array.isArray(node.children)) {
+        stack.push(...node.children);
+      }
+    }
+    return null;
+  }
+
+  toBlob(callback) {
+    callback(new Blob(["stub-png"], { type: "image/png" }));
   }
 }
 
@@ -251,6 +283,18 @@ async function main() {
     btoa(value) {
       return Buffer.from(value, "binary").toString("base64");
     },
+    qrcode() {
+      return {
+        addData() {},
+        make() {},
+        getModuleCount() {
+          return 21;
+        },
+        isDark(row, col) {
+          return (row + col) % 2 === 0;
+        },
+      };
+    },
     jsQR: () => null,
   };
   const context = {
@@ -306,6 +350,15 @@ async function main() {
   }
 
   await importTextHandoff(bridgeInviteText, "Bridge invite text imported");
+  await document.getElementById("render_qr_btn").click();
+  const qrStatus = document.getElementById("status-heading").textContent;
+  if (qrStatus !== "QR rendered") {
+    const qrDetail = document.getElementById("status_detail").textContent;
+    throw new Error(`expected QR rendered, got ${qrStatus}: ${qrDetail}`);
+  }
+  if (!document.getElementById("qr_preview").querySelector("canvas")) {
+    throw new Error("expected QR render to append a canvas");
+  }
   await document.getElementById("verify_btn").click();
 
   const status = document.getElementById("status-heading").textContent;
