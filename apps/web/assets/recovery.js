@@ -38,6 +38,7 @@
   const trustStoreStorageKey = "gpm_recover_trust_store_v1";
   const textEnvelopePrefix = "GPMREC1";
   const textEnvelopeKinds = ["access-pack", "bridge-invite", "trust-store", "trusted-key"];
+  const maxBridgeInviteLifetimeMS = 14 * 24 * 60 * 60 * 1000;
 
   function setStatus(state, title, detail) {
     els.statusCard.dataset.state = state;
@@ -510,6 +511,9 @@
     if (expiresAt <= issuedAt) {
       throw new Error("Bridge invite expiry must be after issue time");
     }
+    if (expiresAt.getTime() - issuedAt.getTime() > maxBridgeInviteLifetimeMS) {
+      throw new Error("Bridge invite lifetime must be 14 days or less");
+    }
     if (expiresAt <= new Date()) {
       throw new Error("Bridge invite is expired");
     }
@@ -790,8 +794,12 @@
   function renderPaths(artifact) {
     clearNode(els.pathsList);
     const kind = signedArtifactKind(artifact);
-    const paths = normalizeSignedArtifact(artifact).access_paths;
+    const normalized = normalizeSignedArtifact(artifact);
+    const paths = normalized.access_paths;
     els.pathCount.textContent = String(paths.length);
+    if (kind === "bridge-invite") {
+      renderBridgeHelperCard(normalized);
+    }
     if (paths.length === 0) {
       const empty = document.createElement("p");
       empty.className = "recover-empty";
@@ -854,6 +862,73 @@
     }
   }
 
+  function renderBridgeHelperCard(invite) {
+    const item = document.createElement("article");
+    item.className = "recover-path recover-path--helper";
+
+    const head = document.createElement("div");
+    head.className = "recover-path__head";
+    const title = document.createElement("h3");
+    title.textContent = invite.helper.display_name || invite.helper.helper_id;
+    const badges = document.createElement("div");
+    badges.className = "recover-badges";
+    for (const text of ["Signed helper", "Org verified"]) {
+      const badge = document.createElement("span");
+      badge.textContent = text;
+      badges.appendChild(badge);
+    }
+    head.append(title, badges);
+
+    const details = document.createElement("p");
+    details.className = "recover-url";
+    details.textContent = invite.helper.description || `Helper ID: ${invite.helper.helper_id}`;
+
+    const actions = document.createElement("div");
+    actions.className = "recover-path__actions";
+    const copyInviteBtn = helperButton("Copy Invite ID", () => copyText(invite.invite_id, copyInviteBtn));
+    const copyHelperBtn = helperButton("Copy Helper ID", () => copyText(invite.helper.helper_id, copyHelperBtn));
+    actions.append(copyInviteBtn, copyHelperBtn);
+
+    if (invite.helper.contact_url) {
+      const copyContactBtn = helperButton("Copy Contact", () => copyText(invite.helper.contact_url, copyContactBtn));
+      actions.appendChild(copyContactBtn);
+      const href = safeHref(invite.helper.contact_url);
+      if (href) {
+        const openLink = document.createElement("a");
+        openLink.className = "btn secondary";
+        openLink.href = href;
+        if (href.startsWith("http")) {
+          openLink.target = "_blank";
+          openLink.rel = "noreferrer noopener";
+        }
+        openLink.textContent = href.startsWith("mailto:") ? "Email" : "Open Contact";
+        actions.appendChild(openLink);
+      }
+    }
+
+    item.append(head, details, actions);
+    if (Array.isArray(invite.safety_notes) && invite.safety_notes.length > 0) {
+      const notes = document.createElement("ul");
+      notes.className = "recover-notes";
+      for (const note of invite.safety_notes) {
+        const li = document.createElement("li");
+        li.textContent = note;
+        notes.appendChild(li);
+      }
+      item.appendChild(notes);
+    }
+    els.pathsList.appendChild(item);
+  }
+
+  function helperButton(text, onClick) {
+    const button = document.createElement("button");
+    button.className = "btn secondary";
+    button.type = "button";
+    button.textContent = text;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
   function pathBadges(path, artifactKind) {
     const badges = [artifactKind === "bridge-invite" ? "Signed bridge" : "Trusted", path.kind || "path"];
     if (path.requires_external_app) {
@@ -875,7 +950,7 @@
 
   function safeHref(rawURL) {
     const parsed = URLSafe(rawURL);
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+    if (parsed.protocol === "http:" || parsed.protocol === "https:" || parsed.protocol === "mailto:") {
       return rawURL;
     }
     return "";

@@ -140,9 +140,11 @@ Exit criteria:
 - one signed bridge invite can be generated, shared, verified, and inspected locally
 - one organization key can be added to a local trust store and used for verification/checking
 - a browser-local UI can verify a signed pack or bridge invite against a trusted organization key and list trusted paths
+- verified bridge invites show helper contact/copy actions only after trust checks pass
 - signed packs, bridge invites, and trust material can be exported/imported as text handoffs for chat, email, print, or future QR use
 - a QR PNG can be generated from a `GPMREC1` text handoff in the CLI or browser and scanned back into the browser with native QR detection or bundled fallback scanning
 - unknown, disabled, expired, or wrong-organization keys fail closed
+- bridge invites must be short-lived, currently max 14 days from issue to expiry
 - trusted entries can be checked for reachable/unreachable/timeout/skipped status
 - malformed, expired, or badly signed packs/invites fail closed
 - docs explain the user flow in non-technical language

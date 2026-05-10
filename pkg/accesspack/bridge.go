@@ -26,6 +26,8 @@ type BridgeInvite struct {
 	Signature        *Signature   `json:"signature,omitempty"`
 }
 
+const MaxBridgeInviteLifetime = 14 * 24 * time.Hour
+
 type BridgeHelper struct {
 	HelperID    string `json:"helper_id"`
 	DisplayName string `json:"display_name"`
@@ -151,6 +153,9 @@ func ValidateBridgeInvite(invite BridgeInvite, now time.Time) error {
 	}
 	if !expiresAt.After(issuedAt) {
 		return errors.New("expires_at_utc must be after issued_at_utc")
+	}
+	if expiresAt.Sub(issuedAt) > MaxBridgeInviteLifetime {
+		return fmt.Errorf("bridge invite lifetime must be %s or less", MaxBridgeInviteLifetime)
 	}
 	if !now.IsZero() && !expiresAt.After(now.UTC()) {
 		return errors.New("bridge invite is expired")

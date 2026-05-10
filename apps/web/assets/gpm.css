@@ -3001,6 +3001,13 @@ body.page-recover .topbar .wrap {
   padding: 14px;
 }
 
+.recover-path--helper {
+  border-color: rgba(246, 195, 106, 0.34);
+  background:
+    linear-gradient(156deg, rgba(246, 195, 106, 0.11), rgba(255, 255, 255, 0.035)),
+    rgba(3, 12, 14, 0.48);
+}
+
 .recover-path__head {
   display: flex;
   align-items: flex-start;

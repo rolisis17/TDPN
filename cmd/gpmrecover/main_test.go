@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"privacynode/pkg/accesspack"
 	"privacynode/pkg/adminauth"
@@ -161,6 +162,7 @@ func testRecoveryPack(serverURL string) accesspack.Pack {
 }
 
 func testBridgeInvite(serverURL string) accesspack.BridgeInvite {
+	issuedAt := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
 	return accesspack.BridgeInvite{
 		SchemaVersion: accesspack.SchemaVersion,
 		InviteID:      "bri-test-cli",
@@ -169,8 +171,8 @@ func testBridgeInvite(serverURL string) accesspack.BridgeInvite {
 			Name:    "CLI Org",
 			HomeURL: "https://cli.example",
 		},
-		IssuedAtUTC:      "2026-05-10T00:00:00Z",
-		ExpiresAtUTC:     "2099-01-01T00:00:00Z",
+		IssuedAtUTC:      issuedAt.Format(time.RFC3339),
+		ExpiresAtUTC:     issuedAt.Add(7 * 24 * time.Hour).Format(time.RFC3339),
 		IntendedAudience: "CLI test users blocked from the main site",
 		Helper: accesspack.BridgeHelper{
 			HelperID:    "helper-cli",

@@ -87,7 +87,7 @@ func testBridgeInvite() BridgeInvite {
 			HomeURL: "https://demo.example",
 		},
 		IssuedAtUTC:      "2026-05-10T00:00:00Z",
-		ExpiresAtUTC:     "2099-01-01T00:00:00Z",
+		ExpiresAtUTC:     "2026-05-17T00:00:00Z",
 		IntendedAudience: "Test users blocked from the main site",
 		Helper: BridgeHelper{
 			HelperID:    "helper-1",

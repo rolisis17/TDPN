@@ -166,6 +166,13 @@ Trust-store rules:
 - disabled, expired, unknown, or wrong-organization keys fail closed
 - raw `--public-key-file` verification remains available for one-off/operator checks, but beta users should verify through the trust store
 
+Bridge-invite rules:
+- bridge invites are helper hints, not new roots of trust
+- bridge invites must expire within 14 days of issue time
+- the helper contact and helper paths are shown only after signature, expiry, org id, and trusted-key checks pass
+- the browser gives copy/open actions for the invite id, helper id, helper contact, and verified helper paths
+- production policy still needs source-diversity and rotation rules before a public bridge service is enabled
+
 `check` keeps trust and reachability separate:
 - it verifies the pack before probing anything
 - it marks listed entries as trusted because they came from a verified pack
@@ -183,6 +190,7 @@ First browser surface:
 - can scan a QR image into the text handoff field with native `BarcodeDetector` support or the bundled browser scanner fallback
 - verifies the Ed25519 signature with Web Crypto when the browser supports it
 - lists trusted access/helper paths only after signature, expiry, org id, and trusted-key checks pass
+- shows signed helper contact/copy actions for verified bridge invites
 - does not run network reachability checks yet because browser cross-origin checks are not reliable enough for the beta trust decision
 
 ## MVP Cut
@@ -201,11 +209,11 @@ Do first:
 - QR PNG export in the CLI
 - QR rendering/download in the browser
 - QR image import in the browser with native scanning or bundled fallback
+- helper launch/copy flows for bridge invites
 - example pack
 - docs explaining how a user visualizes it
 
 Do next:
-- helper launch/copy flows for bridge invites
 - bridge invite source-diversity and rotation policy
 
 Do later:
