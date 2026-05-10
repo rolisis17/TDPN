@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTextEnvelopeRoundTrip(t *testing.T) {
@@ -81,6 +82,33 @@ func TestTextEnvelopeBridgeHelperRegistryRoundTrip(t *testing.T) {
 	}
 	if len(registry.Helpers) != 1 || registry.Helpers[0].HelperID != "helper-1" {
 		t.Fatalf("registry mismatch: %+v", registry)
+	}
+}
+
+func TestTextEnvelopeSignedBridgeHelperRegistryRoundTrip(t *testing.T) {
+	artifact := testBridgeHelperRegistryArtifact(time.Date(2026, 5, 10, 13, 0, 0, 0, time.UTC))
+	artifact.Signature = &Signature{Alg: "ed25519", KeyID: "key-1", Sig: strings.Repeat("a", 86)}
+	payload, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	text, err := EncodeTextEnvelope(EnvelopeKindBridgeHelperRegistrySigned, payload)
+	if err != nil {
+		t.Fatalf("encode signed bridge helper registry envelope: %v", err)
+	}
+	envelope, decoded, err := DecodeTextEnvelope(text)
+	if err != nil {
+		t.Fatalf("decode signed bridge helper registry envelope: %v", err)
+	}
+	if envelope.Kind != EnvelopeKindBridgeHelperRegistrySigned {
+		t.Fatalf("kind mismatch: %q", envelope.Kind)
+	}
+	var decodedArtifact BridgeHelperRegistryArtifact
+	if err := json.Unmarshal(decoded, &decodedArtifact); err != nil {
+		t.Fatalf("decoded payload is not signed bridge helper registry json: %v", err)
+	}
+	if decodedArtifact.RegistryID != artifact.RegistryID || decodedArtifact.Signature == nil {
+		t.Fatalf("signed registry artifact mismatch: %+v", decodedArtifact)
 	}
 }
 

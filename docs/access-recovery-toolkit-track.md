@@ -160,11 +160,11 @@ Demo bundle flow:
   - `recovery-trust.json`
   - `bridge-helper-registry.json`
   - `bridge-helper-registry.signed.json`
-  - `GPMREC1` text handoffs for the pack, bridge invite, trust store, and helper registry
-  - QR PNGs for the pack, bridge invite, and helper registry
+  - `GPMREC1` text handoffs for the pack, bridge invite, trust store, helper registry, and signed helper registry
+  - QR PNGs for the pack, bridge invite, helper registry, and signed helper registry
   - `demo-manifest.json` listing every generated file
 - Open `apps/web/recovery.html`, import `recovery-trust.json`, then import either `access-pack.signed.json` or `bridge-invite.signed.json`.
-- For bridge invites, import `bridge-helper-registry.signed.json` into the Helper Registry panel and click `Verify Signed` to verify/extract the raw helper registry before checking the invite.
+- For bridge invites, import `bridge-helper-registry.signed.json`, paste `bridge-helper-registry.signed.txt`, or scan `bridge-helper-registry.signed.qr.png` into the Helper Registry panel, then click `Verify Signed` to verify/extract the raw helper registry before checking the invite.
 - Alternatively, paste or scan the generated `GPMREC1` text/QR handoffs into the Text Handoff panel.
 
 Local trust-store flow:
@@ -183,10 +183,12 @@ Text handoff flow:
 - `go run ./cmd/gpmrecover text-export --kind bridge-invite --in .easy-node-logs/bridge-invite.signed.json --out .easy-node-logs/bridge-invite.txt`
 - `go run ./cmd/gpmrecover text-export --kind trust-store --in .easy-node-logs/recovery-trust.json --out .easy-node-logs/recovery-trust.txt`
 - `go run ./cmd/gpmrecover text-export --kind bridge-helper-registry --in .easy-node-logs/access-recovery-demo/bridge-helper-registry.json --out .easy-node-logs/bridge-helper-registry.txt`
+- `go run ./cmd/gpmrecover text-export --kind bridge-helper-registry-signed --in .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --out .easy-node-logs/bridge-helper-registry.signed.txt`
 - `go run ./cmd/gpmrecover text-import --text-file .easy-node-logs/access-pack.txt --expect-kind access-pack --out .easy-node-logs/access-pack.imported.json`
 - `go run ./cmd/gpmrecover text-import --text-file .easy-node-logs/bridge-invite.txt --expect-kind bridge-invite --out .easy-node-logs/bridge-invite.imported.json`
 - `go run ./cmd/gpmrecover text-import --text-file .easy-node-logs/recovery-trust.txt --expect-kind trust-store --out .easy-node-logs/recovery-trust.imported.json`
 - `go run ./cmd/gpmrecover text-import --text-file .easy-node-logs/bridge-helper-registry.txt --expect-kind bridge-helper-registry --out .easy-node-logs/bridge-helper-registry.imported.json`
+- `go run ./cmd/gpmrecover text-import --text-file .easy-node-logs/bridge-helper-registry.signed.txt --expect-kind bridge-helper-registry-signed --out .easy-node-logs/bridge-helper-registry.signed.imported.json`
 - `go run ./cmd/gpmrecover qr-png --text-file .easy-node-logs/access-pack.txt --out .easy-node-logs/access-pack.qr.png --size 768`
 
 The text format starts with `GPMREC1.` and carries compact JSON as base64url. It is meant for chat messages, emails, printed handoffs, and QR codes. The CLI can render a text handoff as a PNG, and the browser recovery page can render/download a QR locally from the current text handoff.
@@ -227,7 +229,7 @@ First browser surface:
 - imports a signed helper registry artifact, verifies it against the local trust store, and extracts the raw registry for bridge-invite policy checks
 - lets a tester add/remove trusted organization public keys without hand-editing JSON
 - copies or downloads the current trust store for handoff to another device
-- exports/imports `GPMREC1` text handoffs for signed packs, bridge invites, trust stores, helper registries, and single trusted keys
+- exports/imports `GPMREC1` text handoffs for signed packs, bridge invites, trust stores, helper registries, signed helper registries, and single trusted keys
 - renders and downloads a local QR PNG from the current `GPMREC1` text handoff
 - can scan a QR image into the text handoff field with native `BarcodeDetector` support or the bundled browser scanner fallback
 - verifies the Ed25519 signature with Web Crypto when the browser supports it
@@ -254,7 +256,7 @@ Do first:
 - browser verifier/import screen
 - UI trust-key add/remove flow
 - browser signed helper registry verify/extract flow
-- text handoff export/import for packs, bridge invites, trust stores, and trusted keys
+- text handoff export/import for packs, bridge invites, trust stores, helper registries, signed helper registries, and trusted keys
 - QR PNG export in the CLI
 - QR rendering/download in the browser
 - QR image import in the browser with native scanning or bundled fallback

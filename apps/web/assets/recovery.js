@@ -43,7 +43,14 @@
   const trustStoreStorageKey = "gpm_recover_trust_store_v1";
   const helperRegistryStorageKey = "gpm_recover_helper_registry_v1";
   const textEnvelopePrefix = "GPMREC1";
-  const textEnvelopeKinds = ["access-pack", "bridge-invite", "trust-store", "trusted-key", "bridge-helper-registry"];
+  const textEnvelopeKinds = [
+    "access-pack",
+    "bridge-invite",
+    "trust-store",
+    "trusted-key",
+    "bridge-helper-registry",
+    "bridge-helper-registry-signed",
+  ];
   const maxBridgeInviteLifetimeMS = 14 * 24 * 60 * 60 * 1000;
   const maxBridgeRegistryArtifactLifetimeMS = 30 * 24 * 60 * 60 * 1000;
 
@@ -1439,7 +1446,12 @@
       if (!registry) {
         throw new Error("Helper registry is empty");
       }
-      payload = normalizeHelperRegistry(registry);
+      if (isBridgeHelperRegistryArtifact(registry)) {
+        kind = "bridge-helper-registry-signed";
+        payload = normalizeBridgeHelperRegistryArtifact(registry);
+      } else {
+        payload = normalizeHelperRegistry(registry);
+      }
     } else {
       throw new Error(`Unsupported export kind ${kind}`);
     }
@@ -1468,6 +1480,17 @@
     if (decoded.kind === "bridge-helper-registry") {
       writeHelperRegistry(decoded.payload);
       setStatus("idle", "Helper registry text imported", "Bridge invite verification will enforce helper status.");
+      return;
+    }
+    if (decoded.kind === "bridge-helper-registry-signed") {
+      els.registryInput.value = JSON.stringify(decoded.payload, null, 2);
+      try {
+        localStorage.removeItem(helperRegistryStorageKey);
+      } catch (err) {
+        // Ignore local storage availability issues.
+      }
+      renderHelperRegistrySummary(decoded.payload);
+      setStatus("idle", "Signed helper registry text imported", "Verify it against the trust store before using bridge paths.");
       return;
     }
     if (decoded.kind === "trusted-key") {

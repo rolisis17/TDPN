@@ -4,7 +4,7 @@ This folder provides the first productized web surface for **Global Private Mesh
 
 - `index.html`: public marketing homepage.
 - `portal.html`: authenticated public portal scaffold for wallet sign-in (including Keplr/Leap wallet-extension sign + verify), client onboarding, client connection controls, contribution/reward status, and diagnostics. Public release builds do not ship admin, audit, operator moderation, server lifecycle, slashing, settlement, or payout controls; those workflows belong in the separate GPM Admin Console.
-- `recovery.html`: local signed access-pack and bridge-invite verifier for the Access Recovery beta path. It can build/import/export a local trusted-organization key store, import/export and summarize a helper registry for active/quarantine checks, verify a signed helper-registry artifact before extracting the raw registry, exchange `GPMREC1` text handoffs, render/download QR handoffs locally, scan QR images with native QR detection or bundled fallback scanning, then verifies signature, expiry, organization id, trusted-key match, and helper status before listing recovery/helper paths.
+- `recovery.html`: local signed access-pack and bridge-invite verifier for the Access Recovery beta path. It can build/import/export a local trusted-organization key store, import/export and summarize a helper registry for active/quarantine checks, verify a signed helper-registry artifact before extracting the raw registry, exchange `GPMREC1` text handoffs including signed helper registries, render/download QR handoffs locally, scan QR images with native QR detection or bundled fallback scanning, then verifies signature, expiry, organization id, trusted-key match, and helper status before listing recovery/helper paths.
 
 ## Local Preview
 

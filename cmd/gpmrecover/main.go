@@ -202,7 +202,7 @@ func usage() {
   go run ./cmd/gpmrecover trust-add --trust-store FILE --org-id ID --org-name NAME --public-key-file FILE
   go run ./cmd/gpmrecover trust-list --trust-store FILE
   go run ./cmd/gpmrecover trust-remove --trust-store FILE --org-id ID --key-id ID
-  go run ./cmd/gpmrecover text-export --kind access-pack|bridge-invite|trust-store|trusted-key|bridge-helper-registry --in FILE [--out FILE]
+  go run ./cmd/gpmrecover text-export --kind access-pack|bridge-invite|trust-store|trusted-key|bridge-helper-registry|bridge-helper-registry-signed --in FILE [--out FILE]
   go run ./cmd/gpmrecover text-import (--text TEXT | --text-file FILE) --out FILE [--expect-kind KIND]
   go run ./cmd/gpmrecover qr-png --text TEXT --out FILE [--size 768]
   go run ./cmd/gpmrecover verify --pack FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
@@ -443,7 +443,7 @@ func runTrustRemove(args []string) error {
 
 func runTextExport(args []string) error {
 	fs := flag.NewFlagSet("text-export", flag.ContinueOnError)
-	kind := fs.String("kind", "", "envelope kind: access-pack, bridge-invite, trust-store, trusted-key, or bridge-helper-registry")
+	kind := fs.String("kind", "", "envelope kind: access-pack, bridge-invite, trust-store, trusted-key, bridge-helper-registry, or bridge-helper-registry-signed")
 	inFile := fs.String("in", "", "path to JSON payload file")
 	outFile := fs.String("out", "", "optional path to write text envelope")
 	if err := fs.Parse(args); err != nil {
@@ -1135,6 +1135,9 @@ func runDemoBundle(args []string) error {
 	if err := writeTextAndQR(addFile("bridge_helper_registry_text", "bridge-helper-registry.txt"), addFile("bridge_helper_registry_qr", "bridge-helper-registry.qr.png"), accesspack.EnvelopeKindBridgeHelperRegistry, bridgeHelperRegistry, *qrSize); err != nil {
 		return err
 	}
+	if err := writeTextAndQR(addFile("bridge_helper_registry_signed_text", "bridge-helper-registry.signed.txt"), addFile("bridge_helper_registry_signed_qr", "bridge-helper-registry.signed.qr.png"), accesspack.EnvelopeKindBridgeHelperRegistrySigned, bridgeHelperRegistryArtifact, *qrSize); err != nil {
+		return err
+	}
 	storeBody, err := accesspack.MarshalTrustStore(store)
 	if err != nil {
 		return err
@@ -1160,6 +1163,7 @@ func runDemoBundle(args []string) error {
 			"Open apps/web/recovery.html in the local preview.",
 			"Import recovery-trust.json as the trust store.",
 			"Import access-pack.signed.json or bridge-invite.signed.json as the signed artifact.",
+			"Import bridge-helper-registry.signed.json, or paste/scan bridge-helper-registry.signed.txt/QR, then click Verify Signed before checking bridge invites.",
 			"Or paste/scan the generated GPMREC1 text/QR handoffs.",
 			"Run bridge-registry-verify with bridge-helper-registry.signed.json before publishing a registry snapshot.",
 			"Run bridge-registry-check with bridge-helper-registry.json when changing helper status.",
