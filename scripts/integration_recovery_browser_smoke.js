@@ -378,6 +378,24 @@ async function main() {
     throw new Error(`expected helper card plus bridge paths, got ${pathsRendered} rendered item(s)`);
   }
 
+  const helperRegistryStorageKey = "gpm_recover_helper_registry_v1";
+  const helperRegistryMetaStorageKey = "gpm_recover_helper_registry_meta_v1";
+  if (!context.localStorage.getItem(helperRegistryStorageKey)) {
+    throw new Error("expected verified helper registry to be saved in localStorage");
+  }
+  if (!context.localStorage.getItem(helperRegistryMetaStorageKey)) {
+    throw new Error("expected verified helper registry metadata to be saved in localStorage");
+  }
+  const registryInput = document.getElementById("registry_input");
+  registryInput.value = "{not-json";
+  await registryInput.dispatch("input");
+  if (context.localStorage.getItem(helperRegistryStorageKey)) {
+    throw new Error("expected invalid helper registry edit to clear saved registry");
+  }
+  if (context.localStorage.getItem(helperRegistryMetaStorageKey)) {
+    throw new Error("expected invalid helper registry edit to clear saved registry metadata");
+  }
+
   document.getElementById("trust_input").value = mergedTrustStore;
   document.getElementById("registry_input").value = otherSignedRegistry;
   await document.getElementById("verify_registry_btn").click();

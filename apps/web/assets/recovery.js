@@ -286,6 +286,15 @@
     }
   }
 
+  function clearStoredHelperRegistry() {
+    try {
+      localStorage.removeItem(helperRegistryStorageKey);
+    } catch (err) {
+      // Ignore local storage availability issues.
+    }
+    clearVerifiedHelperRegistryMeta();
+  }
+
   function readRawHelperRegistryForPolicy(invite) {
     const registry = readHelperRegistryInput();
     if (isBridgeHelperRegistryArtifact(registry)) {
@@ -1886,12 +1895,7 @@
     try {
       const registry = readHelperRegistryInput();
       if (isBridgeHelperRegistryArtifact(registry)) {
-        try {
-          localStorage.removeItem(helperRegistryStorageKey);
-        } catch (err) {
-          // Ignore local storage availability issues.
-        }
-        clearVerifiedHelperRegistryMeta();
+        clearStoredHelperRegistry();
         renderHelperRegistrySummary(registry);
         setStatus("idle", "Signed helper registry imported", "Verify it against the trust store before using bridge paths.");
         return;
@@ -1899,6 +1903,7 @@
       writeHelperRegistry(registry);
       setStatus("idle", "Helper registry imported", "Bridge invite verification will enforce helper status.");
     } catch (err) {
+      clearStoredHelperRegistry();
       setStatus("bad", "Registry import failed", err.message || String(err));
     }
   });
@@ -1912,8 +1917,7 @@
       const registry = readHelperRegistryInput();
       if (registry) {
         if (isBridgeHelperRegistryArtifact(registry)) {
-          localStorage.removeItem(helperRegistryStorageKey);
-          clearVerifiedHelperRegistryMeta();
+          clearStoredHelperRegistry();
           renderHelperRegistrySummary(registry);
           return;
         }
@@ -1922,11 +1926,11 @@
         clearVerifiedHelperRegistryMeta();
         renderHelperRegistrySummary(normalized);
       } else {
-        localStorage.removeItem(helperRegistryStorageKey);
-        clearVerifiedHelperRegistryMeta();
+        clearStoredHelperRegistry();
         renderHelperRegistrySummary(null);
       }
     } catch (err) {
+      clearStoredHelperRegistry();
       renderHelperRegistrySummary({});
     }
   });
