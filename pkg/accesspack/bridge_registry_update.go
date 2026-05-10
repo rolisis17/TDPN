@@ -23,14 +23,16 @@ type BridgeHelperRegistryStatusUpdateReport struct {
 }
 
 type BridgeHelperRegistryUpsertOptions struct {
-	HelperID       string   `json:"helper_id,omitempty"`
-	DisplayName    string   `json:"display_name,omitempty"`
-	Status         string   `json:"status,omitempty"`
-	OrgIDs         []string `json:"org_ids,omitempty"`
-	ContactURL     string   `json:"contact_url,omitempty"`
-	ActiveFromUTC  string   `json:"active_from_utc,omitempty"`
-	ActiveUntilUTC string   `json:"active_until_utc,omitempty"`
-	Reason         string   `json:"reason,omitempty"`
+	HelperID        string   `json:"helper_id,omitempty"`
+	DisplayName     string   `json:"display_name,omitempty"`
+	Status          string   `json:"status,omitempty"`
+	OrgIDs          []string `json:"org_ids,omitempty"`
+	ContactURL      string   `json:"contact_url,omitempty"`
+	AbuseReportURL  string   `json:"abuse_report_url,omitempty"`
+	RateLimitPolicy string   `json:"rate_limit_policy,omitempty"`
+	ActiveFromUTC   string   `json:"active_from_utc,omitempty"`
+	ActiveUntilUTC  string   `json:"active_until_utc,omitempty"`
+	Reason          string   `json:"reason,omitempty"`
 }
 
 type BridgeHelperRegistryUpsertReport struct {
@@ -101,6 +103,8 @@ func UpsertBridgeHelperRegistryHelper(registry BridgeHelperRegistry, options Bri
 		Status:           options.Status,
 		OrgIDs:           options.OrgIDs,
 		ContactURL:       options.ContactURL,
+		AbuseReportURL:   options.AbuseReportURL,
+		RateLimitPolicy:  options.RateLimitPolicy,
 		ActiveFromUTC:    options.ActiveFromUTC,
 		ActiveUntilUTC:   options.ActiveUntilUTC,
 		QuarantineReason: options.Reason,
@@ -185,6 +189,8 @@ func normalizeBridgeHelperRegistryUpsertOptions(options BridgeHelperRegistryUpse
 	options.DisplayName = strings.TrimSpace(options.DisplayName)
 	options.Status = strings.ToLower(strings.TrimSpace(options.Status))
 	options.ContactURL = strings.TrimSpace(options.ContactURL)
+	options.AbuseReportURL = strings.TrimSpace(options.AbuseReportURL)
+	options.RateLimitPolicy = strings.TrimSpace(options.RateLimitPolicy)
 	options.ActiveFromUTC = strings.TrimSpace(options.ActiveFromUTC)
 	options.ActiveUntilUTC = strings.TrimSpace(options.ActiveUntilUTC)
 	options.Reason = strings.TrimSpace(options.Reason)
@@ -214,6 +220,12 @@ func applyBridgeHelperRegistryUpsert(helper BridgeHelperRegistration, options Br
 	}
 	if options.ContactURL != "" {
 		helper.ContactURL = options.ContactURL
+	}
+	if options.AbuseReportURL != "" {
+		helper.AbuseReportURL = options.AbuseReportURL
+	}
+	if options.RateLimitPolicy != "" {
+		helper.RateLimitPolicy = options.RateLimitPolicy
 	}
 	if options.ActiveFromUTC != "" {
 		helper.ActiveFromUTC = options.ActiveFromUTC

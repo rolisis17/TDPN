@@ -153,7 +153,7 @@ First CLI:
 - `go run ./cmd/gpmrecover bridge-registry-sign --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --org-id freenews-demo --org-name "FreeNews Demo" --private-key-file .easy-node-logs/recovery.key --out .easy-node-logs/bridge-helper-registry.signed.json`
 - `go run ./cmd/gpmrecover bridge-registry-verify --signed-registry .easy-node-logs/bridge-helper-registry.signed.json --public-key-file .easy-node-logs/recovery.pub --out-registry .easy-node-logs/bridge-helper-registry.verified.json`
 - `go run ./cmd/gpmrecover bridge-registry-check --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-perth-1 --org-id freenews-demo --require-active`
-- `go run ./cmd/gpmrecover bridge-registry-upsert-helper --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-mirror-1 --org-ids freenews-demo --display-name "Mirror helper" --contact-url https://mirror-helper.example/contact --out .easy-node-logs/bridge-helper-registry.updated.json`
+- `go run ./cmd/gpmrecover bridge-registry-upsert-helper --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-mirror-1 --org-ids freenews-demo --display-name "Mirror helper" --contact-url https://mirror-helper.example/contact --abuse-report-url https://mirror-helper.example/abuse --rate-limit-policy "beta cap: per-user and per-source limits enforced" --out .easy-node-logs/bridge-helper-registry.updated.json`
 - `go run ./cmd/gpmrecover bridge-registry-set-status --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-perth-1 --status quarantined --reason "maintenance window" --out .easy-node-logs/bridge-helper-registry.quarantined.json`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub --timeout-sec 8`
 
@@ -217,9 +217,10 @@ Bridge-invite rules:
 - `bridge-registry-check` summarizes active/quarantined/disabled helper counts and can fail closed for a specific active helper/org before publishing or using an invite
 - `bridge-registry-upsert-helper` adds or updates helper registry entries with validation and normalized output
 - `bridge-registry-set-status` changes helper status with validation and a required reason when quarantining or disabling a helper
-- helper registry validation rejects active helpers with stale quarantine reasons and rejects quarantined/disabled helpers without a reason
+- helper policy requires active registry helpers to publish an abuse-report URL and a short rate-limit policy before bridge paths are accepted
+- helper registry validation rejects active helpers missing abuse-report/rate-limit metadata or carrying stale quarantine reasons, and rejects quarantined/disabled helpers without a reason
 - the helper contact and helper paths are shown only after signature, expiry, org id, and trusted-key checks pass
-- the browser gives copy/open actions for the invite id, helper id, helper contact, and verified helper paths
+- the browser gives copy/open actions for the invite id, helper id, helper contact, helper abuse-report URL, and verified helper paths
 - the helper registry is the first service-level rotation/quarantine control; a public bridge service still needs online rate limits and abuse reporting before launch
 
 `check` keeps trust and reachability separate:
@@ -283,7 +284,7 @@ Do first:
 - docs explaining how a user visualizes it
 
 Do next:
-- bridge service rate limits, abuse reports, and online registry publication
+- bridge service online registry publication and enforcement hooks for the signed abuse-report/rate-limit commitments
 
 Do later:
 - bridge service

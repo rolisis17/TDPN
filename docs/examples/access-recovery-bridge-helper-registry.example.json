@@ -7,6 +7,8 @@
       "status": "active",
       "org_ids": ["freenews-demo"],
       "contact_url": "https://helper.example/contact/freenews",
+      "abuse_report_url": "https://helper.example/abuse/freenews",
+      "rate_limit_policy": "beta cap: per-user and per-source limits enforced",
       "active_from_utc": "2026-05-10T00:00:00Z",
       "active_until_utc": "2099-01-01T00:00:00Z",
       "updated_at_utc": "2026-05-10T00:00:00Z"

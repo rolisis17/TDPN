@@ -570,6 +570,20 @@
     if (contactURL) {
       normalized.contact_url = contactURL;
     }
+    const abuseReportURL = trimString(helper.abuse_report_url);
+    if (abuseReportURL) {
+      normalized.abuse_report_url = abuseReportURL;
+    }
+    const rateLimitPolicy = trimString(helper.rate_limit_policy);
+    if (rateLimitPolicy) {
+      normalized.rate_limit_policy = rateLimitPolicy;
+    }
+    if (status === "active" && !normalized.abuse_report_url) {
+      throw new Error("Helper registry abuse_report_url is required when status is active");
+    }
+    if (status === "active" && !normalized.rate_limit_policy) {
+      throw new Error("Helper registry rate_limit_policy is required when status is active");
+    }
     for (const field of ["active_from_utc", "active_until_utc", "updated_at_utc"]) {
       const value = trimString(helper[field]);
       if (value) {
@@ -956,6 +970,12 @@
     if (helper.contact_url && helper.contact_url !== inviteContact) {
       throw new Error("Helper contact does not match the registry");
     }
+    if (!helper.abuse_report_url) {
+      throw new Error("Helper registry must include an abuse report URL");
+    }
+    if (!helper.rate_limit_policy) {
+      throw new Error("Helper registry must include a rate-limit policy");
+    }
     const now = new Date();
     const issuedAt = parseRFC3339(invite.issued_at_utc, "issued_at_utc");
     const expiresAt = parseRFC3339(invite.expires_at_utc, "expires_at_utc");
@@ -1305,6 +1325,11 @@
         reason.textContent = helper.quarantine_reason;
         item.appendChild(reason);
       }
+      if (helper.rate_limit_policy) {
+        const policy = document.createElement("p");
+        policy.textContent = `Rate limits: ${helper.rate_limit_policy}`;
+        item.appendChild(policy);
+      }
       list.appendChild(item);
     }
     els.registrySummary.appendChild(list);
@@ -1513,6 +1538,7 @@
     const copyInviteBtn = helperButton("Copy Invite ID", () => copyText(invite.invite_id, copyInviteBtn));
     const copyHelperBtn = helperButton("Copy Helper ID", () => copyText(invite.helper.helper_id, copyHelperBtn));
     actions.append(copyInviteBtn, copyHelperBtn);
+    let rateLimitDetail = null;
 
     if (invite.helper.contact_url) {
       const copyContactBtn = helperButton("Copy Contact", () => copyText(invite.helper.contact_url, copyContactBtn));
@@ -1530,8 +1556,33 @@
         actions.appendChild(openLink);
       }
     }
+    if (helperPolicy && helperPolicy.helper) {
+      const helper = helperPolicy.helper;
+      if (helper.abuse_report_url) {
+        const copyAbuseBtn = helperButton("Copy Abuse URL", () => copyText(helper.abuse_report_url, copyAbuseBtn));
+        actions.appendChild(copyAbuseBtn);
+        const href = safeHref(helper.abuse_report_url);
+        if (href) {
+          const openLink = document.createElement("a");
+          openLink.className = "btn secondary";
+          openLink.href = href;
+          openLink.target = "_blank";
+          openLink.rel = "noreferrer noopener";
+          openLink.textContent = "Report Abuse";
+          actions.appendChild(openLink);
+        }
+      }
+      if (helper.rate_limit_policy) {
+        rateLimitDetail = document.createElement("p");
+        rateLimitDetail.className = "recover-url";
+        rateLimitDetail.textContent = `Rate limits: ${helper.rate_limit_policy}`;
+      }
+    }
 
     item.append(head, details, actions);
+    if (rateLimitDetail) {
+      item.appendChild(rateLimitDetail);
+    }
     if (Array.isArray(invite.safety_notes) && invite.safety_notes.length > 0) {
       const notes = document.createElement("ul");
       notes.className = "recover-notes";

@@ -129,6 +129,19 @@ class TextNode {
   }
 }
 
+function collectText(node) {
+  if (!node) {
+    return "";
+  }
+  let text = node.textContent || "";
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      text += collectText(child);
+    }
+  }
+  return text;
+}
+
 function makeDocument(ids) {
   const elements = new Map();
   for (const id of ids) {
@@ -376,6 +389,13 @@ async function main() {
   }
   if (pathsRendered < 3) {
     throw new Error(`expected helper card plus bridge paths, got ${pathsRendered} rendered item(s)`);
+  }
+  const pathsText = collectText(document.getElementById("paths_list"));
+  if (!pathsText.includes("Report Abuse")) {
+    throw new Error(`expected helper abuse report action, got rendered text: ${pathsText}`);
+  }
+  if (!pathsText.includes("Rate limits:")) {
+    throw new Error(`expected helper rate-limit detail, got rendered text: ${pathsText}`);
   }
 
   const helperRegistryStorageKey = "gpm_recover_helper_registry_v1";

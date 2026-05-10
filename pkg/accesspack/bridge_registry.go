@@ -27,6 +27,8 @@ type BridgeHelperRegistration struct {
 	Status           string   `json:"status"`
 	OrgIDs           []string `json:"org_ids"`
 	ContactURL       string   `json:"contact_url,omitempty"`
+	AbuseReportURL   string   `json:"abuse_report_url,omitempty"`
+	RateLimitPolicy  string   `json:"rate_limit_policy,omitempty"`
 	ActiveFromUTC    string   `json:"active_from_utc,omitempty"`
 	ActiveUntilUTC   string   `json:"active_until_utc,omitempty"`
 	QuarantineReason string   `json:"quarantine_reason,omitempty"`
@@ -111,6 +113,8 @@ func normalizeBridgeHelperRegistration(helper BridgeHelperRegistration) BridgeHe
 		helper.Status = BridgeHelperStatusActive
 	}
 	helper.ContactURL = strings.TrimSpace(helper.ContactURL)
+	helper.AbuseReportURL = strings.TrimSpace(helper.AbuseReportURL)
+	helper.RateLimitPolicy = strings.TrimSpace(helper.RateLimitPolicy)
 	helper.ActiveFromUTC = strings.TrimSpace(helper.ActiveFromUTC)
 	helper.ActiveUntilUTC = strings.TrimSpace(helper.ActiveUntilUTC)
 	helper.QuarantineReason = strings.TrimSpace(helper.QuarantineReason)
@@ -153,6 +157,18 @@ func validateBridgeHelperRegistration(prefix string, helper BridgeHelperRegistra
 	}
 	if err := validateOptionalURL(prefix+".contact_url", helper.ContactURL); err != nil {
 		return err
+	}
+	if err := validateOptionalURL(prefix+".abuse_report_url", helper.AbuseReportURL); err != nil {
+		return err
+	}
+	if err := validateText(prefix+".rate_limit_policy", helper.RateLimitPolicy, 240, false); err != nil {
+		return err
+	}
+	if helper.Status == BridgeHelperStatusActive && helper.AbuseReportURL == "" {
+		return fmt.Errorf("%s.abuse_report_url is required when status is active", prefix)
+	}
+	if helper.Status == BridgeHelperStatusActive && helper.RateLimitPolicy == "" {
+		return fmt.Errorf("%s.rate_limit_policy is required when status is active", prefix)
 	}
 	activeFrom, err := parseOptionalBridgeRegistryTime(prefix+".active_from_utc", helper.ActiveFromUTC)
 	if err != nil {

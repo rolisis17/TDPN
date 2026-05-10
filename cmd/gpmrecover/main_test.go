@@ -86,6 +86,8 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 		"--org-ids", "cli-org,cli-org-alt",
 		"--display-name", "CLI Helper Two",
 		"--contact-url", server.URL + "/contact-two",
+		"--abuse-report-url", server.URL + "/abuse-two",
+		"--rate-limit-policy", "beta cap: per-user and per-source limits enforced",
 		"--out", upsertedRegistry,
 	}); err != nil {
 		t.Fatalf("bridge-registry-upsert-helper: %v", err)
@@ -550,14 +552,16 @@ func testCLIBridgeHelperRegistry(serverURL string) accesspack.BridgeHelperRegist
 		Version: accesspack.BridgeHelperRegistryVersion,
 		Helpers: []accesspack.BridgeHelperRegistration{
 			{
-				HelperID:       "helper-cli",
-				DisplayName:    "CLI Helper",
-				Status:         accesspack.BridgeHelperStatusActive,
-				OrgIDs:         []string{"cli-org"},
-				ContactURL:     serverURL + "/contact",
-				ActiveFromUTC:  now.Add(-2 * time.Hour).Format(time.RFC3339),
-				ActiveUntilUTC: now.Add(8 * 24 * time.Hour).Format(time.RFC3339),
-				UpdatedAtUTC:   now.Format(time.RFC3339),
+				HelperID:        "helper-cli",
+				DisplayName:     "CLI Helper",
+				Status:          accesspack.BridgeHelperStatusActive,
+				OrgIDs:          []string{"cli-org"},
+				ContactURL:      serverURL + "/contact",
+				AbuseReportURL:  serverURL + "/abuse",
+				RateLimitPolicy: "beta cap: per-user and per-source limits enforced",
+				ActiveFromUTC:   now.Add(-2 * time.Hour).Format(time.RFC3339),
+				ActiveUntilUTC:  now.Add(8 * 24 * time.Hour).Format(time.RFC3339),
+				UpdatedAtUTC:    now.Format(time.RFC3339),
 			},
 		},
 	}

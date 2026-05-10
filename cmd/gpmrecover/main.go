@@ -199,7 +199,7 @@ func usage() {
   go run ./cmd/gpmrecover bridge-registry-sign --helper-registry FILE --org-id ID --org-name NAME --private-key-file FILE --out FILE [--registry-id ID] [--lifetime-hours HOURS]
   go run ./cmd/gpmrecover bridge-registry-verify --signed-registry FILE (--trust-store FILE | --public-key-file FILE) [--out-registry FILE] [--show-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
-  go run ./cmd/gpmrecover bridge-registry-upsert-helper --helper-registry FILE --helper-id ID --org-ids ORG[,ORG...] [--display-name NAME] [--contact-url URL] [--status active|quarantined|disabled] [--reason TEXT] [--out FILE]
+  go run ./cmd/gpmrecover bridge-registry-upsert-helper --helper-registry FILE --helper-id ID --org-ids ORG[,ORG...] [--display-name NAME] [--contact-url URL] [--abuse-report-url URL] [--rate-limit-policy TEXT] [--status active|quarantined|disabled] [--reason TEXT] [--out FILE]
   go run ./cmd/gpmrecover bridge-registry-set-status --helper-registry FILE --helper-id ID --status active|quarantined|disabled [--reason TEXT] [--out FILE]
   go run ./cmd/gpmrecover trust-add --trust-store FILE --org-id ID --org-name NAME --public-key-file FILE
   go run ./cmd/gpmrecover trust-list --trust-store FILE
@@ -1047,6 +1047,8 @@ func runBridgeRegistryUpsertHelper(args []string) error {
 	orgIDs := fs.String("org-ids", "", "comma-separated organization ids this helper may serve")
 	displayName := fs.String("display-name", "", "optional helper display name")
 	contactURL := fs.String("contact-url", "", "optional helper contact URL")
+	abuseReportURL := fs.String("abuse-report-url", "", "abuse report URL for this helper; required for active helpers")
+	rateLimitPolicy := fs.String("rate-limit-policy", "", "short rate-limit policy for this helper; required for active helpers")
 	status := fs.String("status", "", "helper status: active, quarantined, or disabled; defaults to active for new helpers")
 	activeFromUTC := fs.String("active-from-utc", "", "optional helper active window start")
 	activeUntilUTC := fs.String("active-until-utc", "", "optional helper active window end")
@@ -1064,14 +1066,16 @@ func runBridgeRegistryUpsertHelper(args []string) error {
 		outputFile = strings.TrimSpace(*helperRegistryFile)
 	}
 	updatedRegistry, report := accesspack.UpsertBridgeHelperRegistryHelper(registry, accesspack.BridgeHelperRegistryUpsertOptions{
-		HelperID:       *helperID,
-		DisplayName:    *displayName,
-		Status:         *status,
-		OrgIDs:         splitCommaValues(*orgIDs),
-		ContactURL:     *contactURL,
-		ActiveFromUTC:  *activeFromUTC,
-		ActiveUntilUTC: *activeUntilUTC,
-		Reason:         *reason,
+		HelperID:        *helperID,
+		DisplayName:     *displayName,
+		Status:          *status,
+		OrgIDs:          splitCommaValues(*orgIDs),
+		ContactURL:      *contactURL,
+		AbuseReportURL:  *abuseReportURL,
+		RateLimitPolicy: *rateLimitPolicy,
+		ActiveFromUTC:   *activeFromUTC,
+		ActiveUntilUTC:  *activeUntilUTC,
+		Reason:          *reason,
 	}, time.Now().UTC())
 	out := bridgeRegistryUpsertHelperOutput{
 		Status:       report.Status,
@@ -1456,14 +1460,16 @@ func demoBridgeHelperRegistry(orgID string, helperID string, helperName string, 
 		Version: accesspack.BridgeHelperRegistryVersion,
 		Helpers: []accesspack.BridgeHelperRegistration{
 			{
-				HelperID:       helperID,
-				DisplayName:    helperName,
-				Status:         accesspack.BridgeHelperStatusActive,
-				OrgIDs:         []string{orgID},
-				ContactURL:     helperContact,
-				ActiveFromUTC:  now.Add(-1 * time.Hour).Format(time.RFC3339),
-				ActiveUntilUTC: now.Add(8 * 24 * time.Hour).Format(time.RFC3339),
-				UpdatedAtUTC:   now.Format(time.RFC3339),
+				HelperID:        helperID,
+				DisplayName:     helperName,
+				Status:          accesspack.BridgeHelperStatusActive,
+				OrgIDs:          []string{orgID},
+				ContactURL:      helperContact,
+				AbuseReportURL:  strings.TrimRight(helperContact, "/") + "/abuse",
+				RateLimitPolicy: "beta cap: per-user and per-source limits enforced",
+				ActiveFromUTC:   now.Add(-1 * time.Hour).Format(time.RFC3339),
+				ActiveUntilUTC:  now.Add(8 * 24 * time.Hour).Format(time.RFC3339),
+				UpdatedAtUTC:    now.Format(time.RFC3339),
 			},
 		},
 	}

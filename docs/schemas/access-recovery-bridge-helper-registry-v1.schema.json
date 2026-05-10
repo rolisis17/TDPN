@@ -25,6 +25,7 @@
               "required": ["status"]
             },
             "then": {
+              "required": ["abuse_report_url", "rate_limit_policy"],
               "not": {
                 "required": ["quarantine_reason"]
               }
@@ -68,6 +69,15 @@
           "contact_url": {
             "type": "string",
             "format": "uri",
+            "maxLength": 240
+          },
+          "abuse_report_url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 240
+          },
+          "rate_limit_policy": {
+            "type": "string",
             "maxLength": 240
           },
           "active_from_utc": {

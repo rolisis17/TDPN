@@ -192,8 +192,27 @@ func TestBridgeInvitePolicyUsesHelperRegistry(t *testing.T) {
 	if !report.HelperRegistryChecked || !report.HelperRegistered || !report.HelperAllowedOrg || !report.HelperRegistryContactOK {
 		t.Fatalf("expected helper registry pass fields, got %+v", report)
 	}
+	if !report.HelperAbuseReportOK || !report.HelperRateLimitPolicyOK {
+		t.Fatalf("expected helper abuse/rate fields, got %+v", report)
+	}
 	if report.Policy.RequireRegisteredHelper != true {
 		t.Fatalf("expected registered-helper policy to be visible, got %+v", report.Policy)
+	}
+}
+
+func TestBridgeInvitePolicyRejectsHelperMissingAbuseAndRateLimitMetadata(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	registry := testBridgeHelperRegistry()
+	registry.Helpers[0].AbuseReportURL = ""
+	registry.Helpers[0].RateLimitPolicy = ""
+	options := DefaultBridgeInvitePolicyOptions()
+	options.HelperRegistry = &registry
+	report := CheckBridgeInvitePolicy(testBridgeInvite(), options, now)
+	if report.Status != "fail" {
+		t.Fatalf("expected policy fail, got %+v", report)
+	}
+	if !sawBridgePolicyFinding(report, "invalid_bridge_helper_registry") {
+		t.Fatalf("expected invalid helper registry finding, got %+v", report.Findings)
 	}
 }
 
@@ -303,15 +322,30 @@ func TestBridgeHelperRegistryValidationRequiresInactiveReason(t *testing.T) {
 	}
 }
 
+func TestBridgeHelperRegistryValidationRequiresActiveAbuseAndRateLimitMetadata(t *testing.T) {
+	registry := testBridgeHelperRegistry()
+	registry.Helpers[0].AbuseReportURL = ""
+	if err := ValidateBridgeHelperRegistry(registry, time.Time{}); err == nil {
+		t.Fatal("expected active helper missing abuse report url to fail validation")
+	}
+	registry = testBridgeHelperRegistry()
+	registry.Helpers[0].RateLimitPolicy = ""
+	if err := ValidateBridgeHelperRegistry(registry, time.Time{}); err == nil {
+		t.Fatal("expected active helper missing rate limit policy to fail validation")
+	}
+}
+
 func TestBridgeHelperRegistryUpsertCreatesHelper(t *testing.T) {
 	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
 	updated, report := UpsertBridgeHelperRegistryHelper(EmptyBridgeHelperRegistry(), BridgeHelperRegistryUpsertOptions{
-		HelperID:       "helper-new",
-		DisplayName:    "New Helper",
-		Status:         BridgeHelperStatusActive,
-		OrgIDs:         []string{"demo-org"},
-		ContactURL:     "https://new-helper.example/contact",
-		ActiveUntilUTC: "2026-05-20T01:00:00Z",
+		HelperID:        "helper-new",
+		DisplayName:     "New Helper",
+		Status:          BridgeHelperStatusActive,
+		OrgIDs:          []string{"demo-org"},
+		ContactURL:      "https://new-helper.example/contact",
+		AbuseReportURL:  "https://new-helper.example/abuse",
+		RateLimitPolicy: "beta cap: per-user and per-source limits enforced",
+		ActiveUntilUTC:  "2026-05-20T01:00:00Z",
 	}, now)
 	if report.Status != "pass" || !report.Created {
 		t.Fatalf("expected create pass, got %+v", report)
@@ -440,14 +474,16 @@ func testBridgeHelperRegistry() BridgeHelperRegistry {
 		Version: BridgeHelperRegistryVersion,
 		Helpers: []BridgeHelperRegistration{
 			{
-				HelperID:       "helper-1",
-				DisplayName:    "Demo Helper",
-				Status:         BridgeHelperStatusActive,
-				OrgIDs:         []string{"demo-org"},
-				ContactURL:     "https://helper.example/contact",
-				ActiveFromUTC:  "2026-05-09T00:00:00Z",
-				ActiveUntilUTC: "2026-05-18T00:00:00Z",
-				UpdatedAtUTC:   "2026-05-10T00:00:00Z",
+				HelperID:        "helper-1",
+				DisplayName:     "Demo Helper",
+				Status:          BridgeHelperStatusActive,
+				OrgIDs:          []string{"demo-org"},
+				ContactURL:      "https://helper.example/contact",
+				AbuseReportURL:  "https://helper.example/abuse",
+				RateLimitPolicy: "beta cap: per-user and per-source limits enforced",
+				ActiveFromUTC:   "2026-05-09T00:00:00Z",
+				ActiveUntilUTC:  "2026-05-18T00:00:00Z",
+				UpdatedAtUTC:    "2026-05-10T00:00:00Z",
 			},
 		},
 	}

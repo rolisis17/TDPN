@@ -52,7 +52,9 @@ go run ./cmd/gpmrecover bridge-registry-upsert-helper \
   --helper-id helper-1 \
   --org-ids freenews-demo \
   --display-name "Helper 1" \
-  --contact-url https://helper.example/contact
+  --contact-url https://helper.example/contact \
+  --abuse-report-url https://helper.example/abuse \
+  --rate-limit-policy "beta cap: per-user and per-source limits enforced"
 ```
 
 2. Check the helper before signing the registry:
@@ -116,7 +118,7 @@ go run ./cmd/gpmrecover bridge-registry-set-status \
   --reason "operator requested maintenance window"
 ```
 
-Then re-sign and redistribute the helper registry. Existing bridge invites whose helper no longer passes registry policy should fail closed when checked with the updated signed registry.
+Then re-sign and redistribute the helper registry. Existing bridge invites whose helper no longer passes registry policy should fail closed when checked with the updated signed registry. Active helpers must keep an abuse-report URL and a short rate-limit policy in the signed registry, so users and operators can see where abuse reports go and what traffic limits the helper claims to enforce.
 
 Rotate the organization key only when the signing key itself is suspected compromised. Helper failures should normally be handled by registry quarantine, not key rotation.
 
@@ -141,5 +143,5 @@ If a user reports an unsafe or broken recovery path:
 
 - Never ask users to trust an unsigned pack, unsigned bridge invite, or raw helper registry for a beta recovery decision.
 - Never treat reachability as trust. A reachable path can still be unsafe.
-- Do not publish public helper onboarding until abuse reporting, helper ownership checks, and rate limits exist.
+- Do not publish public helper onboarding until the signed abuse-report/rate-limit commitments are backed by live service enforcement and helper ownership checks.
 - Keep the first pilot small enough that every helper can be manually contacted and removed quickly.
