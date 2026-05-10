@@ -243,6 +243,9 @@ First browser surface:
 - shows signed helper contact/copy actions for verified bridge invites
 - does not run network reachability checks yet because browser cross-origin checks are not reliable enough for the beta trust decision
 
+Operator runbook:
+- `docs/access-recovery-operator-runbook.md`
+
 ## MVP Cut
 
 Do first:

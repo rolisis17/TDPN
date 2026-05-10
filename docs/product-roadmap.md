@@ -157,6 +157,7 @@ Exit criteria:
 
 Track doc:
 - `docs/access-recovery-toolkit-track.md`
+- `docs/access-recovery-operator-runbook.md`
 
 ## Phase 1: Stable Linux Beta (Infrastructure Reuse)
 

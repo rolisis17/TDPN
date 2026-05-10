@@ -493,6 +493,7 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `docs/manual-validation-backlog.md` (deferred real-host validation queue)
 - `docs/blockchain-bootstrap-validator-plan.md` (deferred blockchain bootstrap: manual governance phase, validator eligibility formula skeleton, epoch selection policy, and graduation criteria)
 - `docs/access-recovery-toolkit-track.md` (pivot track: signed emergency access packs and trust verification for blocked sites/apps/services)
+- `docs/access-recovery-operator-runbook.md` (first beta operator/helper flow for key handoff, helper onboarding, quarantine, expiry, and incident response)
 - `go run ./cmd/gpmrecover demo-bundle --out-dir .easy-node-logs/access-recovery-demo` (one-command local Access Recovery demo artifacts)
 - `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/access-recovery-demo/bridge-invite.signed.json --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json --helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.json --require-helper-registry` (signed bridge-invite diversity/fallback plus helper allow/quarantine gate)
 - `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/access-recovery-demo/bridge-invite.signed.json --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --require-helper-registry` (same policy gate while verifying the registry snapshot first)
