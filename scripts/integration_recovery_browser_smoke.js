@@ -163,7 +163,9 @@ async function main() {
 
   const trustStore = fs.readFileSync(path.join(outDir, "recovery-trust.json"), "utf8");
   const bridgeInvite = fs.readFileSync(path.join(outDir, "bridge-invite.signed.json"), "utf8");
-  const signedRegistry = fs.readFileSync(path.join(outDir, "bridge-helper-registry.signed.json"), "utf8");
+  const trustStoreText = fs.readFileSync(path.join(outDir, "recovery-trust.txt"), "utf8").trim();
+  const bridgeInviteText = fs.readFileSync(path.join(outDir, "bridge-invite.txt"), "utf8").trim();
+  const signedRegistryText = fs.readFileSync(path.join(outDir, "bridge-helper-registry.signed.txt"), "utf8").trim();
   const otherOutDir = fs.mkdtempSync(path.join(os.tmpdir(), "gpm-recovery-browser-smoke-other-"));
   childProcess.execFileSync(
     "go",
@@ -281,8 +283,18 @@ async function main() {
     filename: "apps/web/assets/recovery.js",
   });
 
-  document.getElementById("trust_input").value = trustStore;
-  document.getElementById("registry_input").value = signedRegistry;
+  async function importTextHandoff(text, expectedStatus) {
+    document.getElementById("handoff_input").value = text;
+    await document.getElementById("import_text_btn").click();
+    const importedStatus = document.getElementById("status-heading").textContent;
+    if (importedStatus !== expectedStatus) {
+      const importedDetail = document.getElementById("status_detail").textContent;
+      throw new Error(`expected ${expectedStatus}, got ${importedStatus}: ${importedDetail}`);
+    }
+  }
+
+  await importTextHandoff(trustStoreText, "Trust store text imported");
+  await importTextHandoff(signedRegistryText, "Signed helper registry text imported");
   await document.getElementById("verify_registry_btn").click();
 
   const registryStatus = document.getElementById("status-heading").textContent;
@@ -290,7 +302,7 @@ async function main() {
     throw new Error(`expected signed registry verification, got ${registryStatus}`);
   }
 
-  document.getElementById("pack_input").value = bridgeInvite;
+  await importTextHandoff(bridgeInviteText, "Bridge invite text imported");
   await document.getElementById("verify_btn").click();
 
   const status = document.getElementById("status-heading").textContent;
