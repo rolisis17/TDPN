@@ -856,12 +856,12 @@ cat >"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_SERVICE_SMO
   "auth": {
     "required": true,
     "missing_code_http_status": "401",
-    "wrong_code_http_status": "403",
-    "valid_code_http_status": "302"
+    "wrong_code_http_status": "401",
+    "valid_code_http_status": "200"
   },
   "bridge": {
-    "http_status": "302",
-    "status": "redirect",
+    "http_status": "200",
+    "status": "ok",
     "security_headers_ok": true
   },
   "abuse": {
@@ -884,6 +884,10 @@ cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLO
     "status": "pass",
     "schema_id": "access_bridge_service_smoke_summary",
     "evidence_status": "pass",
+    "auth_required": true,
+    "missing_code_http_status": "401",
+    "wrong_code_http_status": "401",
+    "config_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "summary_json": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"
   },
   "identity_check": {
@@ -892,7 +896,8 @@ cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLO
   },
   "local_files": {
     "config": {
-      "status": "pass"
+      "status": "pass",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
     "deploy_pack": {
       "status": "pass"
@@ -1031,6 +1036,9 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_host_install.status == "pass"
   and .access_recovery_track.access_bridge_host_install.source_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
   and .access_recovery_track.access_bridge_host_install.details.checks_fail == 0
+  and .access_recovery_track.evidence_binding.ok == true
+  and .access_recovery_track.evidence_binding.helper_id_match == true
+  and .access_recovery_track.evidence_binding.host_config_sha256_match == true
   and .access_recovery_track.recommended_next_action == null
   and .vpn_track.readiness_status == "NOT_READY"
   and .vpn_track.roadmap_stage == "READY_FOR_MACHINE_C_SMOKE"
@@ -1476,6 +1484,151 @@ fi
 if ! grep -Eq '\[roadmap-progress-report\] access_recovery_track_status=evidence-invalid ready=false needs_attention=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_invalid.log; then
   echo "expected Access Recovery invalid track log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_invalid.log
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery service semantic failures block required evidence"
+ACCESS_RECOVERY_BAD_SMOKE_SEMANTIC_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_bad_semantic_summary.json"
+jq '.auth.required = false | .auth.wrong_code_http_status = "403" | .bridge.security_headers_ok = false' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_BAD_SMOKE_SEMANTIC_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_BAD_SMOKE_SEMANTIC_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_semantic_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_semantic_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_bad_smoke_semantic.log 2>&1; then
+  echo "expected failure when required Access Recovery service smoke semantics fail"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_bad_smoke_semantic.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .access_recovery_evidence_required == true
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.access_bridge_service_smoke.status == "fail"
+  and .access_recovery_track.access_bridge_service_smoke.available == false
+  and .access_recovery_track.access_bridge_service_smoke.source_summary_json == null
+  and .access_recovery_track.access_bridge_service_smoke.semantic_ok == false
+  and (.access_recovery_track.access_bridge_service_smoke.notes | contains("semantic evidence checks"))
+  and .access_recovery_track.access_bridge_service_smoke.details.auth_required == false
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
+  and .access_recovery_track.access_bridge_host_install.status == "pass"
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_service_smoke"
+' "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_semantic_summary.json" >/dev/null; then
+  echo "Access Recovery bad service smoke semantic summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_semantic_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery deployment semantic failures block required evidence"
+ACCESS_RECOVERY_BAD_DEPLOYMENT_SEMANTIC_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_bad_semantic_summary.json"
+jq '.identity_check.status = "fail" | .local_files.config.status = "fail"' "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_BAD_DEPLOYMENT_SEMANTIC_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_RECOVERY_BAD_DEPLOYMENT_SEMANTIC_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_bad_deployment_semantic_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_bad_deployment_semantic_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_bad_deployment_semantic.log 2>&1; then
+  echo "expected failure when required Access Recovery deployment evidence semantics fail"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_bad_deployment_semantic.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.access_bridge_service_smoke.status == "pass"
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "fail"
+  and .access_recovery_track.access_bridge_deployment_evidence.available == false
+  and .access_recovery_track.access_bridge_deployment_evidence.semantic_ok == false
+  and .access_recovery_track.access_bridge_deployment_evidence.details.identity_status == "fail"
+  and .access_recovery_track.access_bridge_host_install.status == "pass"
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_deployment_evidence"
+' "$TMP_DIR/roadmap_progress_access_recovery_bad_deployment_semantic_summary.json" >/dev/null; then
+  echo "Access Recovery bad deployment semantic summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_bad_deployment_semantic_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery mixed helper/config evidence blocks required evidence"
+ACCESS_RECOVERY_MIXED_IDENTITY_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_mixed_identity_summary.json"
+jq '.deployed_identity.helper_id = "helper-other"' "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_MIXED_IDENTITY_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_RECOVERY_MIXED_IDENTITY_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_mixed_identity_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_mixed_identity_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_mixed_identity.log 2>&1; then
+  echo "expected failure when required Access Recovery evidence mixes helper identities"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_mixed_identity.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.access_bridge_service_smoke.status == "pass"
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
+  and .access_recovery_track.access_bridge_host_install.status == "pass"
+  and .access_recovery_track.evidence_binding.ok == false
+  and .access_recovery_track.evidence_binding.helper_id_match == false
+  and .access_recovery_track.evidence_binding.organization_id_match == true
+  and .access_recovery_track.evidence_binding.host_config_sha256_match == true
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_deployment_evidence"
+  and (.access_recovery_track.recommended_next_action.reason | contains("same helper/config identity"))
+' "$TMP_DIR/roadmap_progress_access_recovery_mixed_identity_summary.json" >/dev/null; then
+  echo "Access Recovery mixed identity summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_mixed_identity_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery host-install semantic failures block required evidence"
+ACCESS_RECOVERY_BAD_HOST_SEMANTIC_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_bad_semantic_summary.json"
+jq '.summary.checks_fail = 1' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_RECOVERY_BAD_HOST_SEMANTIC_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_RECOVERY_BAD_HOST_SEMANTIC_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_bad_host_semantic_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_bad_host_semantic_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_bad_host_semantic.log 2>&1; then
+  echo "expected failure when required Access Recovery host-install semantics fail"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_bad_host_semantic.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.access_bridge_service_smoke.status == "pass"
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
+  and .access_recovery_track.access_bridge_host_install.status == "fail"
+  and .access_recovery_track.access_bridge_host_install.available == false
+  and .access_recovery_track.access_bridge_host_install.semantic_ok == false
+  and .access_recovery_track.access_bridge_host_install.details.checks_fail == 1
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_host_install"
+' "$TMP_DIR/roadmap_progress_access_recovery_bad_host_semantic_summary.json" >/dev/null; then
+  echo "Access Recovery bad host semantic summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_bad_host_semantic_summary.json"
   exit 1
 fi
 PHASE6_OUTPUT_PRESENT=0

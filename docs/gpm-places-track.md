@@ -335,7 +335,7 @@ Exit criteria:
 
 ## Implementation Guardrails
 
-- VPN beta remains the foundation.
+- Access Recovery remains the first validated wedge; VPN/client-network work is supporting infrastructure until demand proves otherwise.
 - Places must not block the stable 2-hop VPN launch.
 - Internal content and creator rewards must not weaken exit-node safety.
 - Credits start as network utility, not money.

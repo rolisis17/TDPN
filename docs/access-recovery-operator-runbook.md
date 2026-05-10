@@ -4,6 +4,8 @@ This runbook is for the first Access Recovery beta pilot: one organization, a sm
 
 The MVP does not require a VPN tunnel, blockchain, credits, staking, public exits, or a native app. Treat every artifact channel as untrusted until the local trust store verifies the organization key and signature.
 
+Command snippets in this runbook assume a Bash-compatible shell on Linux, WSL, or macOS. On native Windows, run them from WSL/Git Bash or translate the shell variables and line continuations before use.
+
 ## Roles
 
 - Organization operator: owns the recovery signing key, publishes signed packs and bridge invites, and decides helper trust.
@@ -20,8 +22,8 @@ go run ./cmd/gpmrecover demo-bundle \
   --org-id freenews-demo \
   --org-name "FreeNews Demo" \
   --base-url https://freenews.example \
-  --helper-id helper-1 \
-  --helper-name "Helper 1" \
+  --helper-id helper-demo \
+  --helper-name "Demo bridge helper" \
   --helper-url https://helper.example/freenews/bootstrap \
   --helper-contact mailto:bridge-helper@example.com
 ```

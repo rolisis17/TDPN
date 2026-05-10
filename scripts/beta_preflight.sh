@@ -32,6 +32,7 @@ run_step "access bridge pilot evidence bundle" bash ./scripts/integration_access
 run_step "access bridge pilot evidence bundle verifier" bash ./scripts/integration_access_bridge_pilot_evidence_bundle_verify.sh
 run_step "access recovery beta local gate" bash ./scripts/integration_access_recovery_beta_local_gate.sh
 run_step "easy-node access bridge pilot evidence bundle" bash ./scripts/integration_easy_node_access_bridge_pilot_evidence_bundle.sh
+run_step "easy-node access recovery local evidence refresh" bash ./scripts/integration_easy_node_access_recovery_local_evidence_refresh.sh
 run_step "secret hygiene" ./scripts/integration_secret_hygiene.sh
 run_step "openai model policy guard" ./scripts/integration_openai_model_policy_guard.sh
 run_step "security baseline" ./scripts/integration_security_baseline.sh

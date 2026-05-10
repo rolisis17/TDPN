@@ -535,12 +535,12 @@ echo "[web-portal] wallet-extension assisted signing markers are present"
 
 require_absent_regex_marker "$PORTAL_HTML" 'wallet-?extension signing is tracked next' "wallet sign-in roadmap"
 require_absent_regex_marker "$README_FILE" 'wallet-?extension signing is tracked next' "wallet sign-in roadmap"
-if ! grep -qF 'Keplr and Leap wallet-extension sign + verify are available now.' "$PORTAL_HTML"; then
-  echo "web portal contract failed: portal copy must state Keplr/Leap wallet-extension sign + verify availability"
+if ! grep -qF 'Keplr and Leap wallet-extension sign + verify are wired for local beta runtime checks.' "$PORTAL_HTML"; then
+  echo "web portal contract failed: portal copy must state Keplr/Leap wallet-extension sign + verify local beta support"
   exit 1
 fi
-if ! grep -qF 'Wallet sign-in support is available now for Keplr/Leap wallet-extension assisted signing in portal' "$README_FILE"; then
-  echo "web portal contract failed: README must state wallet sign-in support is available now for Keplr/Leap"
+if ! grep -qF 'Wallet sign-in support is wired for Keplr/Leap wallet-extension assisted signing in the local/beta portal' "$README_FILE"; then
+  echo "web portal contract failed: README must state Keplr/Leap wallet sign-in local beta support"
   exit 1
 fi
 echo "[web-portal] wallet-support copy no longer uses tracked-next language"

@@ -58,8 +58,19 @@ jq -n \
   --arg bundle_tar_sha256_file "$BUNDLE_TAR_SHA256_FILE" \
   --arg manifest_sha256 "$BUNDLE_DIR/manifest.sha256" \
   '{
+    version: 1,
     schema: {id: "access_bridge_pilot_evidence_bundle_summary"},
     status: "pass",
+    rc: 0,
+    summary: {
+      steps_total: 3,
+      steps_fail: 0
+    },
+    steps: [
+      {id: "service_smoke", status: "pass", rc: 0},
+      {id: "deployment_evidence", status: "pass", rc: 0},
+      {id: "host_install_check", status: "pass", rc: 0}
+    ],
     artifacts: {
       bundle_dir: $bundle_dir,
       bundle_tar: $bundle_tar,
@@ -71,6 +82,43 @@ jq -n \
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --summary-json "$SUMMARY_JSON" >"$TMP_DIR/verify-summary.log"
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-dir "$BUNDLE_DIR" >"$TMP_DIR/verify-dir.log"
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-tar "$BUNDLE_TAR" >"$TMP_DIR/verify-tar.log"
+
+BAD_SUMMARY_JSON="$TMP_DIR/bad_bundle_summary_contract.json"
+jq '.status = "fail" | .rc = 1 | .summary.steps_fail = 1 | .steps[0].status = "fail" | .steps[0].rc = 1' "$SUMMARY_JSON" >"$BAD_SUMMARY_JSON"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --summary-json "$BAD_SUMMARY_JSON" --check-tar-sha256 0 --check-manifest 0 >"$TMP_DIR/bad-summary-contract.log" 2>&1
+bad_summary_contract_rc=$?
+set -e
+if [[ "$bad_summary_contract_rc" -eq 0 ]] || ! grep -Fq 'bundle summary status is not pass' "$TMP_DIR/bad-summary-contract.log" || ! grep -Fq 'bundle summary steps_fail is not 0' "$TMP_DIR/bad-summary-contract.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: bad summary contract was not rejected"
+  cat "$TMP_DIR/bad-summary-contract.log"
+  exit 1
+fi
+
+MISSING_STEPS_SUMMARY_JSON="$TMP_DIR/missing_steps_bundle_summary_contract.json"
+jq 'del(.steps)' "$SUMMARY_JSON" >"$MISSING_STEPS_SUMMARY_JSON"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --summary-json "$MISSING_STEPS_SUMMARY_JSON" --check-tar-sha256 0 --check-manifest 0 >"$TMP_DIR/missing-steps-summary-contract.log" 2>&1
+missing_steps_summary_contract_rc=$?
+set -e
+if [[ "$missing_steps_summary_contract_rc" -eq 0 ]] || ! grep -Fq 'bundle summary steps array is missing or empty' "$TMP_DIR/missing-steps-summary-contract.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: missing summary steps array was not rejected"
+  cat "$TMP_DIR/missing-steps-summary-contract.log"
+  exit 1
+fi
+
+MANIFEST_UNSAFE_DIR="$TMP_DIR/manifest-unsafe-bundle"
+cp -R "$BUNDLE_DIR" "$MANIFEST_UNSAFE_DIR"
+printf '%s  %s\n' "$(sha256sum "$MANIFEST_UNSAFE_DIR/access_bridge_service_smoke.log" | awk '{print $1}')" '..\escape.txt' >>"$MANIFEST_UNSAFE_DIR/manifest.sha256"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-dir "$MANIFEST_UNSAFE_DIR" --check-tar-sha256 0 >"$TMP_DIR/unsafe-manifest-path.log" 2>&1
+unsafe_manifest_path_rc=$?
+set -e
+if [[ "$unsafe_manifest_path_rc" -eq 0 ]] || ! grep -Fq 'unsafe manifest entry path' "$TMP_DIR/unsafe-manifest-path.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: unsafe manifest path was not rejected"
+  cat "$TMP_DIR/unsafe-manifest-path.log"
+  exit 1
+fi
 
 EXTRA_TOP_LEVEL_ROOT="$TMP_DIR/extra-top-level-root"
 EXTRA_TOP_LEVEL_DIR="$EXTRA_TOP_LEVEL_ROOT/$(basename "$BUNDLE_DIR")"
@@ -141,20 +189,29 @@ fi
 
 UNSAFE_TAR="$TMP_DIR/unsafe-path.tar.gz"
 UNSAFE_SHA="${UNSAFE_TAR}.sha256"
+WINDOWS_UNSAFE_TAR="$TMP_DIR/windows-unsafe-path.tar.gz"
+WINDOWS_UNSAFE_SHA="${WINDOWS_UNSAFE_TAR}.sha256"
 LINK_TAR="$TMP_DIR/unsafe-link.tar.gz"
 LINK_SHA="${LINK_TAR}.sha256"
-"$PYTHON_BIN" - "$UNSAFE_TAR" "$LINK_TAR" <<'PY'
+"$PYTHON_BIN" - "$UNSAFE_TAR" "$WINDOWS_UNSAFE_TAR" "$LINK_TAR" <<'PY'
 import io
 import sys
 import tarfile
 
-unsafe_tar, link_tar = sys.argv[1], sys.argv[2]
+unsafe_tar, windows_unsafe_tar, link_tar = sys.argv[1], sys.argv[2], sys.argv[3]
 
 with tarfile.open(unsafe_tar, "w:gz") as tf:
     payload = b"escape\n"
     info = tarfile.TarInfo("../escape.txt")
     info.size = len(payload)
     tf.addfile(info, io.BytesIO(payload))
+
+with tarfile.open(windows_unsafe_tar, "w:gz") as tf:
+    for name in ("C:/escape.txt", r"bundle\evil.txt"):
+        payload = b"windows escape\n"
+        info = tarfile.TarInfo(name)
+        info.size = len(payload)
+        tf.addfile(info, io.BytesIO(payload))
 
 with tarfile.open(link_tar, "w:gz") as tf:
     payload = b"target\n"
@@ -167,17 +224,25 @@ with tarfile.open(link_tar, "w:gz") as tf:
     tf.addfile(link)
 PY
 printf '%s  %s\n' "$(sha256sum "$UNSAFE_TAR" | awk '{print $1}')" "$(basename "$UNSAFE_TAR")" >"$UNSAFE_SHA"
+printf '%s  %s\n' "$(sha256sum "$WINDOWS_UNSAFE_TAR" | awk '{print $1}')" "$(basename "$WINDOWS_UNSAFE_TAR")" >"$WINDOWS_UNSAFE_SHA"
 printf '%s  %s\n' "$(sha256sum "$LINK_TAR" | awk '{print $1}')" "$(basename "$LINK_TAR")" >"$LINK_SHA"
 
 set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-tar "$UNSAFE_TAR" --bundle-tar-sha256-file "$UNSAFE_SHA" --check-manifest 0 >"$TMP_DIR/unsafe-path.log" 2>&1
 unsafe_path_rc=$?
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-tar "$WINDOWS_UNSAFE_TAR" --bundle-tar-sha256-file "$WINDOWS_UNSAFE_SHA" --check-manifest 0 >"$TMP_DIR/windows-unsafe-path.log" 2>&1
+windows_unsafe_path_rc=$?
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-tar "$LINK_TAR" --bundle-tar-sha256-file "$LINK_SHA" --check-manifest 0 >"$TMP_DIR/unsafe-link.log" 2>&1
 unsafe_link_rc=$?
 set -e
 if [[ "$unsafe_path_rc" -eq 0 ]] || ! grep -Fq 'unsafe bundle tar member path' "$TMP_DIR/unsafe-path.log"; then
   echo "access bridge pilot evidence bundle verifier integration failed: unsafe tar path was not rejected"
   cat "$TMP_DIR/unsafe-path.log"
+  exit 1
+fi
+if [[ "$windows_unsafe_path_rc" -eq 0 ]] || ! grep -Fq 'unsafe bundle tar member path' "$TMP_DIR/windows-unsafe-path.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: Windows-style unsafe tar path was not rejected"
+  cat "$TMP_DIR/windows-unsafe-path.log"
   exit 1
 fi
 if [[ "$unsafe_link_rc" -eq 0 ]] || ! grep -Fq 'unsafe bundle tar link member' "$TMP_DIR/unsafe-link.log"; then

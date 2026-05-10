@@ -1929,6 +1929,39 @@ access_recovery_evidence_json() {
         end;
       def rc_or_null:
         if (.rc | type) == "number" then .rc else null end;
+      def rc_ok:
+        if has("rc") then ((.rc | type) == "number" and .rc == 0) else true end;
+      def str_eq($v; $expected):
+        (($v | type) == "string" and (($v | ascii_downcase) == $expected));
+      def pass_status:
+        status_norm == "pass";
+      def service_smoke_semantic_ok:
+        rc_ok
+        and pass_status
+        and str_eq(.health.status; "ok")
+        and (.auth.required == true)
+        and str_eq(.auth.missing_code_http_status; "401")
+        and str_eq(.auth.wrong_code_http_status; "401")
+        and str_eq(.auth.valid_code_http_status; "200")
+        and str_eq(.bridge.status; "ok")
+        and (.bridge.security_headers_ok == true)
+        and str_eq(.abuse.http_status; "202");
+      def deployment_evidence_semantic_ok:
+        rc_ok
+        and pass_status
+        and str_eq(.smoke.status; "pass")
+        and str_eq(.smoke.evidence_status; "pass")
+        and (.smoke.auth_required == true)
+        and str_eq(.smoke.missing_code_http_status; "401")
+        and str_eq(.smoke.wrong_code_http_status; "401")
+        and str_eq(.identity_check.status; "pass")
+        and str_eq(.local_files.config.status; "pass")
+        and str_eq(.local_files.deploy_pack.status; "pass");
+      def host_install_semantic_ok:
+        rc_ok
+        and pass_status
+        and ((.summary.checks_total | type) == "number" and .summary.checks_total > 0)
+        and ((.summary.checks_fail | type) == "number" and .summary.checks_fail == 0);
       def smoke_details:
         {
           base_url: str_or_null(.base_url),
@@ -1950,9 +1983,14 @@ access_recovery_evidence_json() {
         {
           smoke_status: str_or_null(.smoke.status),
           smoke_evidence_status: str_or_null(.smoke.evidence_status),
+          smoke_auth_required: (if (.smoke.auth_required | type) == "boolean" then .smoke.auth_required else null end),
+          smoke_missing_code_http_status: str_or_null(.smoke.missing_code_http_status),
+          smoke_wrong_code_http_status: str_or_null(.smoke.wrong_code_http_status),
+          smoke_config_sha256: str_or_null(.smoke.config_sha256),
           smoke_summary_json: str_or_null(.smoke.summary_json),
           identity_status: str_or_null(.identity_check.status),
           config_status: str_or_null(.local_files.config.status),
+          config_sha256: str_or_null(.local_files.config.sha256),
           deploy_pack_status: str_or_null(.local_files.deploy_pack.status),
           helper_id: str_or_null(.deployed_identity.helper_id),
           organization_id: str_or_null(.deployed_identity.organization_id),
@@ -1981,15 +2019,24 @@ access_recovery_evidence_json() {
       | (($schema_id == $expected_schema_id) and ($raw_status != "")) as $valid_contract
       | ($valid_contract and ($summary_stale | not)) as $fresh_contract
       | (
+          if $kind == "service_smoke" then service_smoke_semantic_ok
+          elif $kind == "deployment_evidence" then deployment_evidence_semantic_ok
+          elif $kind == "host_install" then host_install_semantic_ok
+          else pass_status and rc_ok
+          end
+        ) as $semantic_ok
+      | ($fresh_contract and $semantic_ok) as $usable_contract
+      | (
           if $valid_contract and $summary_stale then "stale"
+          elif $valid_contract and ($semantic_ok | not) then "fail"
           elif $valid_contract then $raw_status
           else "invalid"
           end
         ) as $state
       | {
-          available: $fresh_contract,
+          available: $usable_contract,
           input_summary_json: $input,
-          source_summary_json: (if $fresh_contract then $input else null end),
+          source_summary_json: (if $usable_contract then $input else null end),
           schema_id: $schema_id,
           expected_schema_id: $expected_schema_id,
           status: $state,
@@ -1997,8 +2044,10 @@ access_recovery_evidence_json() {
           summary_age_sec: $summary_age_sec,
           summary_stale: (if $valid_contract then $summary_stale else null end),
           summary_max_age_sec: $summary_max_age_sec,
+          semantic_ok: (if $fresh_contract then $semantic_ok else null end),
           notes: (
             if $valid_contract and $summary_stale then ($label + " summary is stale or has untrusted freshness metadata")
+            elif $valid_contract and ($semantic_ok | not) then ($label + " summary failed semantic evidence checks")
             elif $valid_contract then str_or_null(.notes)
             elif $schema_id != $expected_schema_id then ($label + " summary schema mismatch")
             else ($label + " summary status is missing")
@@ -2026,10 +2075,23 @@ access_recovery_track_json_from_evidence() {
     --argjson service_smoke "$smoke_json" \
     --argjson deployment_evidence "$deployment_json" \
     --argjson host_install "$host_install_json" '
+      def same_nonempty($a; $b):
+        (($a // "") != "" and ($b // "") != "" and $a == $b);
+      def all_pass:
+        [$service_smoke, $deployment_evidence, $host_install] | all(.status == "pass");
+      def evidence_binding:
+        {
+          helper_id_match: same_nonempty($service_smoke.details.helper_id; $deployment_evidence.details.helper_id),
+          organization_id_match: same_nonempty($service_smoke.details.organization_id; $deployment_evidence.details.organization_id),
+          registry_id_match: same_nonempty($service_smoke.details.registry_id; $deployment_evidence.details.registry_id),
+          smoke_config_sha256_match: same_nonempty($service_smoke.details.config_sha256; $deployment_evidence.details.smoke_config_sha256),
+          host_config_sha256_match: same_nonempty($deployment_evidence.details.config_sha256; $host_install.details.env_config_sha256)
+        }
+        | . + {ok: ([.helper_id_match, .organization_id_match, .registry_id_match, .smoke_config_sha256_match, .host_config_sha256_match] | all(. == true))};
       def first_attention:
         [$service_smoke, $deployment_evidence, $host_install]
         | map(select(.needs_attention == true))
-        | .[0] // null;
+        | .[0] // (if all_pass and ((evidence_binding.ok) | not) then $deployment_evidence else null end);
       def next_command_for($e):
         if $e == null then null
         elif ($e == $service_smoke) then
@@ -2040,7 +2102,8 @@ access_recovery_track_json_from_evidence() {
           "bash ./scripts/access_bridge_host_install_check.sh --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
         end;
       def track_status:
-        if ([$service_smoke, $deployment_evidence, $host_install] | all(.status == "pass")) then "pilot-evidence-ready"
+        if all_pass and evidence_binding.ok then "pilot-evidence-ready"
+        elif all_pass and ((evidence_binding.ok) | not) then "evidence-failed"
         elif ([$service_smoke, $deployment_evidence, $host_install] | any(.status == "invalid")) then "evidence-invalid"
         elif ([$service_smoke, $deployment_evidence, $host_install] | any(.status == "stale")) then "evidence-stale"
         elif ([$service_smoke, $deployment_evidence, $host_install] | any(.status == "fail")) then "evidence-failed"
@@ -2048,6 +2111,7 @@ access_recovery_track_json_from_evidence() {
         else "needs-attention"
         end;
       first_attention as $first_attention
+      | evidence_binding as $evidence_binding
       | track_status as $track_status
       | {
           status: $track_status,
@@ -2064,6 +2128,7 @@ access_recovery_track_json_from_evidence() {
           access_bridge_service_smoke: $service_smoke,
           access_bridge_deployment_evidence: $deployment_evidence,
           access_bridge_host_install: $host_install,
+          evidence_binding: $evidence_binding,
           recommended_next_action: (
             if $first_attention == null then null
             else {
@@ -2073,7 +2138,13 @@ access_recovery_track_json_from_evidence() {
                 else "access_bridge_host_install"
                 end
               ),
-              reason: ($first_attention.notes // "Access Recovery evidence needs attention"),
+              reason: (
+                if all_pass and (($evidence_binding.ok) | not) then
+                  "Access Recovery evidence summaries are not bound to the same helper/config identity"
+                else
+                  ($first_attention.notes // "Access Recovery evidence needs attention")
+                end
+              ),
               command: next_command_for($first_attention)
             }
             end

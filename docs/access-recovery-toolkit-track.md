@@ -140,7 +140,7 @@ Example:
 - `docs/examples/access-recovery-bridge-helper-registry.example.json`
 - `docs/examples/access-recovery-trusted-key.example.json`
 
-First CLI:
+First CLI (demo bundle plus lower-level artifact examples; commands assume Bash/WSL/Linux shell syntax):
 - `go run ./cmd/gpmrecover demo-bundle --out-dir .easy-node-logs/access-recovery-demo --org-id freenews-demo --org-name "FreeNews Demo" --helper-id helper-demo --helper-name "Demo bridge helper"`
 - `bash ./scripts/integration_recovery_browser_smoke.sh`
 - `bash ./scripts/integration_access_recovery_demo_contract.sh`
@@ -150,8 +150,8 @@ First CLI:
 - `go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub`
 - `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --show-paths`
 - `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json`
-- `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --signed-helper-registry .easy-node-logs/bridge-helper-registry.signed.json`
 - `go run ./cmd/gpmrecover bridge-registry-sign --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --org-id freenews-demo --org-name "FreeNews Demo" --private-key-file .easy-node-logs/recovery.key --out .easy-node-logs/bridge-helper-registry.signed.json`
+- `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --signed-helper-registry .easy-node-logs/bridge-helper-registry.signed.json`
 - `go run ./cmd/gpmrecover bridge-registry-verify --signed-registry .easy-node-logs/bridge-helper-registry.signed.json --public-key-file .easy-node-logs/recovery.pub --out-registry .easy-node-logs/bridge-helper-registry.verified.json`
 - `go run ./cmd/gpmrecover bridge-registry-check --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-perth-1 --org-id freenews-demo --require-active`
 - `go run ./cmd/gpmrecover bridge-registry-upsert-helper --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-mirror-1 --org-ids freenews-demo --display-name "Mirror helper" --contact-url https://mirror-helper.example/contact --abuse-report-url https://mirror-helper.example/abuse --rate-limit-policy "beta cap: per-user and per-source limits enforced" --out .easy-node-logs/bridge-helper-registry.updated.json`
@@ -189,8 +189,9 @@ Local trust-store flow:
 - `go run ./cmd/gpmrecover bridge-service-code-generate --code-out .easy-node-logs/bridge-code.txt --hash-out .easy-node-logs/bridge-code-hash.json`
 - `go run ./cmd/gpmrecover bridge-service-code-hash --code-file .easy-node-logs/bridge-code.txt --out .easy-node-logs/bridge-code-hash.json`
 - `CONFIG_HASH="$(sha256sum .easy-node-logs/bridge-service-config.json | awk '{print $1}')"`
-- `go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/bridge-service-config.json --config-sha256 "$CONFIG_HASH" --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/bridge-abuse.jsonl --access-code-sha256 HASH`
-- `go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/bridge-deploy --public-host bridge.example --config-sha256 "$CONFIG_HASH" --access-code-sha256 HASH`
+- `CODE_HASH="$(jq -r '.sha256' .easy-node-logs/bridge-code-hash.json)"`
+- `go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/bridge-service-config.json --config-sha256 "$CONFIG_HASH" --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/bridge-abuse.jsonl --access-code-sha256 "$CODE_HASH"`
+- `go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/bridge-deploy --public-host bridge.example --config-sha256 "$CONFIG_HASH" --access-code-sha256 "$CODE_HASH"`
 - `bash ./scripts/integration_access_bridge_service_serve.sh`
 - `bash ./scripts/access_bridge_service_smoke.sh --base-url https://bridge.example --path-id helper-web --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/bridge-service-smoke.json`
 - `bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/bridge-service-smoke.json --config-json .easy-node-logs/bridge-service-config.json --deploy-pack-dir .easy-node-logs/bridge-deploy --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/bridge-deployment-evidence.json`

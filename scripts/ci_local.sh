@@ -83,6 +83,9 @@ bash ./scripts/integration_access_recovery_beta_local_gate.sh
 echo "[ci] easy-node access bridge pilot evidence bundle integration"
 bash ./scripts/integration_easy_node_access_bridge_pilot_evidence_bundle.sh
 
+echo "[ci] easy-node access recovery local evidence refresh integration"
+bash ./scripts/integration_easy_node_access_recovery_local_evidence_refresh.sh
+
 echo "[ci] secret hygiene integration"
 ./scripts/integration_secret_hygiene.sh
 

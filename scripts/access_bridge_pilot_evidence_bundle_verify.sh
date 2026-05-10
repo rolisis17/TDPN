@@ -14,6 +14,7 @@ Usage:
     [--bundle-tar-sha256-file PATH] \
     [--check-tar-sha256 [0|1]] \
     [--check-manifest [0|1]] \
+    [--summary-contract-check [0|1]] \
     [--show-details [0|1]]
 
 Purpose:
@@ -25,6 +26,8 @@ Purpose:
 Notes:
   - Provide at least one of --summary-json, --bundle-dir, or --bundle-tar.
   - --summary-json can auto-fill bundle_dir, bundle_tar, and checksum sidecar paths.
+  - When --summary-json is supplied, the summary contract is checked by default;
+    set --summary-contract-check 0 only for raw artifact integrity inspection.
 USAGE
 }
 
@@ -112,6 +115,9 @@ rel_path_is_safe() {
   if [[ -z "$rel" || "$rel" == "." || "$rel" == /* ]]; then
     return 1
   fi
+  if [[ "$rel" == *\\* || "$rel" =~ ^[A-Za-z]: || "$rel" == //* ]]; then
+    return 1
+  fi
 
   local part
   local -a parts=()
@@ -168,6 +174,7 @@ bundle_tar=""
 bundle_tar_sha256_file=""
 check_tar_sha256="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_CHECK_TAR_SHA256:-1}"
 check_manifest="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_CHECK_MANIFEST:-1}"
+summary_contract_check="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_CONTRACT_CHECK:-1}"
 show_details="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SHOW_DETAILS:-0}"
 bundle_dir_explicit=0
 bundle_tar_explicit=0
@@ -210,6 +217,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --summary-contract-check)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        summary_contract_check="${2:-}"
+        shift 2
+      else
+        summary_contract_check="1"
+        shift
+      fi
+      ;;
     --show-details)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         show_details="${2:-}"
@@ -237,6 +253,7 @@ done
 detect_sha256_tool
 bool_or_die "--check-tar-sha256" "$check_tar_sha256"
 bool_or_die "--check-manifest" "$check_manifest"
+bool_or_die "--summary-contract-check" "$summary_contract_check"
 bool_or_die "--show-details" "$show_details"
 
 summary_json="$(abs_path "$summary_json")"
@@ -271,8 +288,8 @@ if [[ -z "$summary_json" && -z "$bundle_dir" && -z "$bundle_tar" ]]; then
   echo "missing required input: provide --summary-json, --bundle-dir, and/or --bundle-tar"
   exit 2
 fi
-if [[ "$check_tar_sha256" == "0" && "$check_manifest" == "0" ]]; then
-  echo "no checks enabled (set --check-tar-sha256=1 and/or --check-manifest=1)"
+if [[ "$check_tar_sha256" == "0" && "$check_manifest" == "0" && ( -z "$summary_json" || "$summary_contract_check" == "0" ) ]]; then
+  echo "no checks enabled (set --check-tar-sha256=1, --check-manifest=1, and/or --summary-contract-check=1 with --summary-json)"
   exit 2
 fi
 
@@ -285,6 +302,51 @@ cleanup() {
 trap cleanup EXIT
 
 issues=0
+if [[ -n "$summary_json" && "$summary_contract_check" == "1" ]]; then
+  if ! jq -e . "$summary_json" >/dev/null 2>&1; then
+    echo "summary JSON is not valid JSON: $summary_json"
+    issues=$((issues + 1))
+  else
+    summary_schema_id="$(jq -r '.schema.id // ""' "$summary_json")"
+    summary_status="$(jq -r '.status // ""' "$summary_json" | tr '[:upper:]' '[:lower:]')"
+    summary_rc="$(jq -r 'if has("rc") then (.rc|tostring) else "" end' "$summary_json")"
+    summary_steps_total="$(jq -r 'if (.summary.steps_total|type) == "number" then .summary.steps_total else "" end' "$summary_json")"
+    summary_steps_fail="$(jq -r 'if (.summary.steps_fail|type) == "number" then .summary.steps_fail else "" end' "$summary_json")"
+    summary_steps_len="$(jq -r 'if (.steps|type) == "array" then (.steps|length|tostring) else "" end' "$summary_json")"
+    summary_bad_step_count="$(jq -r '[.steps[]? | select((.status // "" | ascii_downcase) != "pass" or (has("rc") and .rc != 0))] | length' "$summary_json")"
+    if [[ "$summary_schema_id" != "access_bridge_pilot_evidence_bundle_summary" ]]; then
+      echo "bundle summary schema mismatch: expected=access_bridge_pilot_evidence_bundle_summary actual=${summary_schema_id:-<missing>}"
+      issues=$((issues + 1))
+    fi
+    if [[ "$summary_status" != "pass" ]]; then
+      echo "bundle summary status is not pass: ${summary_status:-<missing>}"
+      issues=$((issues + 1))
+    fi
+    if [[ -n "$summary_rc" && "$summary_rc" != "0" ]]; then
+      echo "bundle summary rc is not 0: $summary_rc"
+      issues=$((issues + 1))
+    fi
+    if [[ -z "$summary_steps_total" || "$summary_steps_total" -le 0 ]]; then
+      echo "bundle summary steps_total is missing or zero"
+      issues=$((issues + 1))
+    fi
+    if [[ -z "$summary_steps_len" || "$summary_steps_len" -le 0 ]]; then
+      echo "bundle summary steps array is missing or empty"
+      issues=$((issues + 1))
+    elif [[ -n "$summary_steps_total" && "$summary_steps_len" != "$summary_steps_total" ]]; then
+      echo "bundle summary steps length does not match steps_total: steps_len=$summary_steps_len steps_total=$summary_steps_total"
+      issues=$((issues + 1))
+    fi
+    if [[ "$summary_steps_fail" != "0" ]]; then
+      echo "bundle summary steps_fail is not 0: ${summary_steps_fail:-<missing>}"
+      issues=$((issues + 1))
+    fi
+    if [[ "$summary_bad_step_count" != "0" ]]; then
+      echo "bundle summary contains failing step entries: $summary_bad_step_count"
+      issues=$((issues + 1))
+    fi
+  fi
+fi
 bundle_tar_safe=0
 
 if [[ -n "$bundle_dir" && ! -d "$bundle_dir" ]]; then
