@@ -181,6 +181,26 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runTextExport([]string{"--kind", accesspack.EnvelopeKindBridgeHelperRegistrySigned, "--in", helperRegistry, "--out", filepath.Join(dir, "registry.bad-signed.txt")}); err == nil {
 		t.Fatal("expected text-export to reject raw helper registry mislabeled as signed")
 	}
+	signedRegistryBody, err := os.ReadFile(signedRegistry)
+	if err != nil {
+		t.Fatalf("read signed registry: %v", err)
+	}
+	var badSignedRegistry accesspack.BridgeHelperRegistryArtifact
+	if err := json.Unmarshal(signedRegistryBody, &badSignedRegistry); err != nil {
+		t.Fatalf("unmarshal signed registry: %v", err)
+	}
+	badSignedRegistry.Signature.Sig = "bad"
+	badSignedRegistryFile := filepath.Join(dir, "registry.bad-signature.json")
+	badSignedRegistryBody, err := json.MarshalIndent(badSignedRegistry, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal bad signed registry: %v", err)
+	}
+	if err := os.WriteFile(badSignedRegistryFile, badSignedRegistryBody, 0o644); err != nil {
+		t.Fatalf("write bad signed registry: %v", err)
+	}
+	if err := runTextExport([]string{"--kind", accesspack.EnvelopeKindBridgeHelperRegistrySigned, "--in", badSignedRegistryFile, "--out", filepath.Join(dir, "registry.bad-signature.txt")}); err == nil {
+		t.Fatal("expected text-export to reject malformed signed helper registry signature")
+	}
 	rawRegistryBody, err := os.ReadFile(helperRegistry)
 	if err != nil {
 		t.Fatalf("read helper registry: %v", err)

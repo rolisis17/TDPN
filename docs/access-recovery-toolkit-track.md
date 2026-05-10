@@ -192,7 +192,7 @@ Text handoff flow:
 - `go run ./cmd/gpmrecover qr-png --text-file .easy-node-logs/access-pack.txt --out .easy-node-logs/access-pack.qr.png --size 768`
 
 The text format starts with `GPMREC1.` and carries compact JSON as base64url. It is meant for chat messages, emails, printed handoffs, and QR codes. The CLI can render a text handoff as a PNG, and the browser recovery page can render/download a QR locally from the current text handoff.
-`text-export`, `text-import`, and `qr-png` validate that the payload matches its envelope kind, so a raw helper registry cannot be mislabeled as a signed helper registry handoff.
+`text-export`, `text-import`, and `qr-png` validate that the payload matches its envelope kind and that signed payloads carry a well-formed Ed25519 signature field, so a raw helper registry cannot be mislabeled as a signed helper registry handoff.
 
 Trust-store rules:
 - the public key is stored with an organization id/name and derived key id

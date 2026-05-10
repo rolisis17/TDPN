@@ -524,6 +524,9 @@ func validateTextEnvelopePayload(kind string, body []byte) error {
 		if pack.Signature == nil {
 			return errors.New("access-pack envelope payload must include a signature")
 		}
+		if err := validateEnvelopeSignature(pack.Signature, "access-pack"); err != nil {
+			return err
+		}
 		pack.Signature = nil
 		return accesspack.Validate(pack, time.Time{})
 	case accesspack.EnvelopeKindBridge:
@@ -533,6 +536,9 @@ func validateTextEnvelopePayload(kind string, body []byte) error {
 		}
 		if invite.Signature == nil {
 			return errors.New("bridge-invite envelope payload must include a signature")
+		}
+		if err := validateEnvelopeSignature(invite.Signature, "bridge-invite"); err != nil {
+			return err
 		}
 		invite.Signature = nil
 		return accesspack.ValidateBridgeInvite(invite, time.Time{})
@@ -557,14 +563,34 @@ func validateTextEnvelopePayload(kind string, body []byte) error {
 		if artifact.Signature == nil {
 			return errors.New("bridge-helper-registry-signed envelope payload must include a signature")
 		}
-		if strings.TrimSpace(artifact.Signature.Alg) == "" || strings.TrimSpace(artifact.Signature.KeyID) == "" || strings.TrimSpace(artifact.Signature.Sig) == "" {
-			return errors.New("bridge-helper-registry-signed envelope signature is incomplete")
+		if err := validateEnvelopeSignature(artifact.Signature, "bridge-helper-registry-signed"); err != nil {
+			return err
 		}
 		artifact.Signature = nil
 		return accesspack.ValidateBridgeHelperRegistryArtifact(artifact, time.Time{})
 	default:
 		return accesspack.ValidateEnvelopeKind(kind)
 	}
+}
+
+func validateEnvelopeSignature(signature *accesspack.Signature, label string) error {
+	if signature == nil {
+		return fmt.Errorf("%s envelope payload must include a signature", label)
+	}
+	if strings.TrimSpace(signature.Alg) != "ed25519" {
+		return fmt.Errorf("%s envelope signature algorithm must be ed25519", label)
+	}
+	if strings.TrimSpace(signature.KeyID) == "" {
+		return fmt.Errorf("%s envelope signature key id is required", label)
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(signature.Sig))
+	if err != nil {
+		return fmt.Errorf("%s envelope signature must be base64url: %w", label, err)
+	}
+	if len(sig) != ed25519.SignatureSize {
+		return fmt.Errorf("%s envelope signature has invalid size %d", label, len(sig))
+	}
+	return nil
 }
 
 func runQRPNG(args []string) error {
