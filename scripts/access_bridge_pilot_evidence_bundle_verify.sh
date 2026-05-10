@@ -37,8 +37,9 @@ Notes:
   - Provenance verification is checked by default only when --provenance-json is supplied.
     Use exactly one of --trust-store or --public-key-file when provenance is checked.
   - For pilot/operator handoff, use --require-trusted-provenance 1 with
-    --trust-store. This requires real_helper_https evidence scope and keeps
-    summary, manifest, tar checksum, and provenance checks enabled.
+    --trust-store and --verification-summary-json. This requires real_helper_https
+    evidence scope, keeps summary/manifest/tar/provenance checks enabled, and
+    writes the durable roadmap/operator receipt.
   - When --summary-json is supplied, the summary contract is checked by default;
     set --summary-contract-check 0 only for raw artifact integrity inspection.
   - --verification-summary-json writes a machine-readable verifier result for
@@ -175,6 +176,15 @@ sha256_value() {
     line="$(shasum -a 256 "$file")"
   fi
   printf '%s' "${line%% *}" | tr '[:upper:]' '[:lower:]'
+}
+
+sha256_value_or_empty() {
+  local file="$1"
+  if [[ -n "$file" && -f "$file" ]]; then
+    sha256_value "$file"
+  else
+    printf '%s' ""
+  fi
 }
 
 rel_path_is_safe() {
@@ -392,6 +402,10 @@ if [[ "$require_trusted_provenance" == "1" ]]; then
     echo "--require-trusted-provenance requires --check-provenance 1"
     exit 2
   fi
+  if [[ -z "$(trim "$verification_summary_json")" ]]; then
+    echo "--require-trusted-provenance requires --verification-summary-json"
+    exit 2
+  fi
   if [[ "$check_tar_sha256" != "1" || "$check_manifest" != "1" || "$summary_contract_check" != "1" ]]; then
     echo "--require-trusted-provenance requires tar checksum, manifest, and summary contract checks to remain enabled"
     exit 2
@@ -471,6 +485,9 @@ write_verification_summary() {
   local notes="$3"
   local generated_at_utc check_tar_sha256_json check_manifest_json check_provenance_json require_trusted_json
   local summary_contract_check_json provenance_checked_json provenance_trusted_json provenance_source
+  local source_summary_sha256 source_base_url source_helper_id source_organization_id source_registry_id
+  local source_smoke_summary_json source_deployment_summary_json source_host_summary_json
+  local source_smoke_summary_sha256 source_deployment_summary_sha256 source_host_summary_sha256
 
   [[ -n "$verification_summary_json" ]] || return 0
 
@@ -488,6 +505,30 @@ write_verification_summary() {
     provenance_source="trust_store"
   elif [[ -n "$public_key_file" ]]; then
     provenance_source="public_key_file"
+  fi
+  source_summary_sha256=""
+  source_base_url=""
+  source_helper_id=""
+  source_organization_id=""
+  source_registry_id=""
+  source_smoke_summary_json=""
+  source_deployment_summary_json=""
+  source_host_summary_json=""
+  source_smoke_summary_sha256=""
+  source_deployment_summary_sha256=""
+  source_host_summary_sha256=""
+  if [[ -n "$summary_json" && -f "$summary_json" ]]; then
+    source_summary_sha256="$(sha256_value_or_empty "$summary_json")"
+    source_base_url="$(json_string "$summary_json" '.inputs.base_url')"
+    source_helper_id="$(json_string "$summary_json" '.expected_identity.helper_id')"
+    source_organization_id="$(json_string "$summary_json" '.expected_identity.organization_id')"
+    source_registry_id="$(json_string "$summary_json" '.expected_identity.registry_id')"
+    source_smoke_summary_json="$(abs_path "$(json_string "$summary_json" '.artifacts.smoke_summary_json')")"
+    source_deployment_summary_json="$(abs_path "$(json_string "$summary_json" '.artifacts.deployment_evidence_summary_json')")"
+    source_host_summary_json="$(abs_path "$(json_string "$summary_json" '.artifacts.host_install_check_summary_json')")"
+    source_smoke_summary_sha256="$(sha256_value_or_empty "$source_smoke_summary_json")"
+    source_deployment_summary_sha256="$(sha256_value_or_empty "$source_deployment_summary_json")"
+    source_host_summary_sha256="$(sha256_value_or_empty "$source_host_summary_json")"
   fi
 
   jq -n \
@@ -522,6 +563,17 @@ write_verification_summary() {
     --arg provenance_bundle_tar_name "$provenance_bundle_tar_name" \
     --arg provenance_expires_at_utc "$provenance_expires_at_utc" \
     --arg provenance_source "$provenance_source" \
+    --arg source_summary_sha256 "$source_summary_sha256" \
+    --arg source_base_url "$source_base_url" \
+    --arg source_helper_id "$source_helper_id" \
+    --arg source_organization_id "$source_organization_id" \
+    --arg source_registry_id "$source_registry_id" \
+    --arg source_smoke_summary_json "$source_smoke_summary_json" \
+    --arg source_deployment_summary_json "$source_deployment_summary_json" \
+    --arg source_host_summary_json "$source_host_summary_json" \
+    --arg source_smoke_summary_sha256 "$source_smoke_summary_sha256" \
+    --arg source_deployment_summary_sha256 "$source_deployment_summary_sha256" \
+    --arg source_host_summary_sha256 "$source_host_summary_sha256" \
     --arg verification_summary_json "$verification_summary_json" '
       def null_if_empty($v):
         if ($v | type) == "string" and ($v | length) > 0 then $v else null end;
@@ -580,6 +632,19 @@ write_verification_summary() {
           summary_evidence_scope: null_if_empty($summary_evidence_scope),
           bundle_tar_name: null_if_empty($provenance_bundle_tar_name),
           expires_at_utc: null_if_empty($provenance_expires_at_utc)
+        },
+        evidence_binding: {
+          source_summary_sha256: null_if_empty($source_summary_sha256),
+          base_url: null_if_empty($source_base_url),
+          helper_id: null_if_empty($source_helper_id),
+          organization_id: null_if_empty($source_organization_id),
+          registry_id: null_if_empty($source_registry_id),
+          smoke_summary_json: null_if_empty($source_smoke_summary_json),
+          smoke_summary_sha256: null_if_empty($source_smoke_summary_sha256),
+          deployment_evidence_summary_json: null_if_empty($source_deployment_summary_json),
+          deployment_evidence_summary_sha256: null_if_empty($source_deployment_summary_sha256),
+          host_install_check_summary_json: null_if_empty($source_host_summary_json),
+          host_install_check_summary_sha256: null_if_empty($source_host_summary_sha256)
         },
         artifacts: {
           verification_summary_json: null_if_empty($verification_summary_json),

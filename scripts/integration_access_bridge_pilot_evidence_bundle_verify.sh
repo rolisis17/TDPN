@@ -50,6 +50,9 @@ printf '%s\n' '{"status":"pass"}' >"$BUNDLE_DIR/access_bridge_deployment_evidenc
 printf '%s\n' '{"status":"pass"}' >"$BUNDLE_DIR/access_bridge_host_install_check_summary.json"
 printf '%s\n' 'GPM_BRIDGE_ALLOW_QUERY_CODE="false"' >"$BUNDLE_DIR/bridge-deploy-pack/gpm-access-bridge.env"
 printf '%s\n' '{"helper_id":"helper-pilot"}' >"$BUNDLE_DIR/bridge-service-config.json"
+SMOKE_SUMMARY_SHA256="$(sha256sum "$BUNDLE_DIR/access_bridge_service_smoke_summary.json" | awk '{print $1}')"
+DEPLOYMENT_SUMMARY_SHA256="$(sha256sum "$BUNDLE_DIR/access_bridge_deployment_evidence_summary.json" | awk '{print $1}')"
+HOST_SUMMARY_SHA256="$(sha256sum "$BUNDLE_DIR/access_bridge_host_install_check_summary.json" | awk '{print $1}')"
 
 jq -n \
   --arg bundle_dir "$BUNDLE_DIR" \
@@ -59,6 +62,9 @@ jq -n \
   --arg summary_json "$SUMMARY_JSON" \
   --arg bundled_summary_json "$BUNDLE_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
   --arg provenance_json "$PROVENANCE_JSON" \
+  --arg smoke_summary_json "$BUNDLE_DIR/access_bridge_service_smoke_summary.json" \
+  --arg deployment_summary_json "$BUNDLE_DIR/access_bridge_deployment_evidence_summary.json" \
+  --arg host_summary_json "$BUNDLE_DIR/access_bridge_host_install_check_summary.json" \
   '{
     version: 1,
     schema: {id: "access_bridge_pilot_evidence_bundle_summary"},
@@ -74,6 +80,14 @@ jq -n \
       {id: "deployment_evidence", status: "pass", rc: 0},
       {id: "host_install_check", status: "pass", rc: 0}
     ],
+    inputs: {
+      base_url: "https://recovery-helper.gpm-pilot.net"
+    },
+    expected_identity: {
+      helper_id: "helper-pilot",
+      organization_id: "pilot-org",
+      registry_id: "registry-pilot"
+    },
     artifacts: {
       bundle_dir: $bundle_dir,
       bundle_tar: $bundle_tar,
@@ -81,6 +95,9 @@ jq -n \
       manifest_sha256: $manifest_sha256,
       summary_json: $summary_json,
       bundled_summary_json: $bundled_summary_json,
+      smoke_summary_json: $smoke_summary_json,
+      deployment_evidence_summary_json: $deployment_summary_json,
+      host_install_check_summary_json: $host_summary_json,
       provenance_json: $provenance_json
     },
     provenance: {
@@ -138,10 +155,18 @@ if [[ "$dual_key_source_rc" -eq 0 ]] || ! grep -Fq 'provenance check requires ex
   cat "$TMP_DIR/verify-provenance-dual-key-source.log"
   exit 1
 fi
+set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$SUMMARY_JSON" \
   --require-trusted-provenance 1 \
-  --trust-store "$TRUST_STORE" >"$TMP_DIR/verify-provenance-trusted-policy-autoresolve.log"
+  --trust-store "$TRUST_STORE" >"$TMP_DIR/verify-provenance-trusted-policy-receipt-required.log" 2>&1
+trusted_policy_receipt_required_rc=$?
+set -e
+if [[ "$trusted_policy_receipt_required_rc" -eq 0 ]] || ! grep -Fq -- '--require-trusted-provenance requires --verification-summary-json' "$TMP_DIR/verify-provenance-trusted-policy-receipt-required.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted handoff without verifier receipt"
+  cat "$TMP_DIR/verify-provenance-trusted-policy-receipt-required.log"
+  exit 1
+fi
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$SUMMARY_JSON" \
   --provenance-json "$PROVENANCE_JSON" \
@@ -163,6 +188,13 @@ if ! jq -e '
   and .trusted_provenance.trusted == true
   and .trusted_provenance.evidence_scope == "real_helper_https"
   and .trusted_provenance.summary_evidence_scope == "real_helper_https"
+  and .evidence_binding.base_url == "https://recovery-helper.gpm-pilot.net"
+  and .evidence_binding.helper_id == "helper-pilot"
+  and .evidence_binding.organization_id == "pilot-org"
+  and .evidence_binding.registry_id == "registry-pilot"
+  and .evidence_binding.smoke_summary_sha256 == "'"$SMOKE_SUMMARY_SHA256"'"
+  and .evidence_binding.deployment_evidence_summary_sha256 == "'"$DEPLOYMENT_SUMMARY_SHA256"'"
+  and .evidence_binding.host_install_check_summary_sha256 == "'"$HOST_SUMMARY_SHA256"'"
   and .artifacts.verification_summary_json == "'"$VERIFY_SUMMARY_JSON"'"
   and .artifacts.provenance_json == "'"$PROVENANCE_JSON"'"
 ' "$VERIFY_SUMMARY_JSON" >/dev/null; then
@@ -190,7 +222,8 @@ set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$NO_PROVENANCE_SUMMARY_JSON" \
   --require-trusted-provenance 1 \
-  --trust-store "$TRUST_STORE" >"$TMP_DIR/trusted-policy-missing-provenance.log" 2>&1
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$TMP_DIR/trusted-policy-missing-provenance-summary.json" >"$TMP_DIR/trusted-policy-missing-provenance.log" 2>&1
 missing_provenance_rc=$?
 set -e
 if [[ "$missing_provenance_rc" -eq 0 ]] || ! grep -Fq 'trusted pilot provenance requires external summary artifacts.provenance_json' "$TMP_DIR/trusted-policy-missing-provenance.log"; then
@@ -205,7 +238,8 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$UNSIGNED_SUMMARY_JSON" \
   --provenance-json "$PROVENANCE_JSON" \
   --require-trusted-provenance 1 \
-  --trust-store "$TRUST_STORE" >"$TMP_DIR/trusted-policy-unsigned-summary.log" 2>&1
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$TMP_DIR/trusted-policy-unsigned-summary-summary.json" >"$TMP_DIR/trusted-policy-unsigned-summary.log" 2>&1
 unsigned_summary_rc=$?
 set -e
 if [[ "$unsigned_summary_rc" -eq 0 ]] || ! grep -Fq 'trusted pilot provenance requires external summary provenance.enabled=true' "$TMP_DIR/trusted-policy-unsigned-summary.log"; then
@@ -220,7 +254,8 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$MISMATCHED_PROVENANCE_PATH_SUMMARY_JSON" \
   --provenance-json "$PROVENANCE_JSON" \
   --require-trusted-provenance 1 \
-  --trust-store "$TRUST_STORE" >"$TMP_DIR/trusted-policy-mismatched-provenance-path.log" 2>&1
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$TMP_DIR/trusted-policy-mismatched-provenance-path-summary.json" >"$TMP_DIR/trusted-policy-mismatched-provenance-path.log" 2>&1
 mismatched_provenance_path_rc=$?
 set -e
 if [[ "$mismatched_provenance_path_rc" -eq 0 ]] || ! grep -Fq 'trusted pilot provenance requires matching summary provenance paths' "$TMP_DIR/trusted-policy-mismatched-provenance-path.log"; then
@@ -234,7 +269,8 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$SUMMARY_JSON" \
   --provenance-json "$PROVENANCE_JSON" \
   --require-trusted-provenance 1 \
-  --public-key-file "$PUBLIC_KEY_FILE" >"$TMP_DIR/trusted-policy-public-key.log" 2>&1
+  --public-key-file "$PUBLIC_KEY_FILE" \
+  --verification-summary-json "$TMP_DIR/trusted-policy-public-key-summary.json" >"$TMP_DIR/trusted-policy-public-key.log" 2>&1
 trusted_public_key_rc=$?
 set -e
 if [[ "$trusted_public_key_rc" -eq 0 ]] || ! grep -Fq 'does not accept --public-key-file' "$TMP_DIR/trusted-policy-public-key.log"; then
@@ -256,7 +292,8 @@ set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$LOCAL_SCOPE_SUMMARY_JSON" \
   --require-trusted-provenance 1 \
-  --trust-store "$TRUST_STORE" >"$TMP_DIR/trusted-policy-local-scope.log" 2>&1
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$TMP_DIR/trusted-policy-local-scope-summary.json" >"$TMP_DIR/trusted-policy-local-scope.log" 2>&1
 local_scope_rc=$?
 set -e
 if [[ "$local_scope_rc" -eq 0 ]] || ! grep -Fq 'evidence_scope=real_helper_https' "$TMP_DIR/trusted-policy-local-scope.log"; then

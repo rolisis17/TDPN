@@ -201,6 +201,17 @@ need_cmd() {
   fi
 }
 
+file_sha256_or_empty() {
+  local file="${1:-}"
+  local line=""
+  if [[ -n "$file" && -f "$file" ]]; then
+    line="$(sha256sum "$file" 2>/dev/null || true)"
+    printf '%s' "${line%% *}" | tr '[:upper:]' '[:lower:]'
+  else
+    printf '%s' ""
+  fi
+}
+
 declare -A ROADMAP_JSON_VALID_CACHE=()
 declare -A ROADMAP_BOOL_SIGNAL_CACHE=()
 declare -A ROADMAP_STRING_SIGNAL_CACHE=()
@@ -1845,6 +1856,7 @@ access_recovery_evidence_json() {
   local age_sec=""
   local age_json="null"
   local stale_json="true"
+  local source_summary_sha256=""
 
   if ! [[ "$max_age_sec" =~ ^[0-9]+$ ]]; then
     max_age_sec="86400"
@@ -1912,12 +1924,14 @@ access_recovery_evidence_json() {
   if [[ "$(evidence_pack_summary_stale_01 "$path" "$max_age_sec")" == "0" ]]; then
     stale_json="false"
   fi
+  source_summary_sha256="$(file_sha256_or_empty "$path")"
 
   jq -c \
     --arg input "$path" \
     --arg expected_schema_id "$expected_schema_id" \
     --arg kind "$kind" \
     --arg label "$label" \
+    --arg source_summary_sha256 "$source_summary_sha256" \
     --argjson summary_age_sec "$age_json" \
     --argjson summary_stale "$stale_json" \
     --argjson summary_max_age_sec "$max_age_sec" \
@@ -2076,6 +2090,7 @@ access_recovery_evidence_json() {
           available: $usable_contract,
           input_summary_json: $input,
           source_summary_json: (if $usable_contract then $input else null end),
+          source_summary_sha256: (if $usable_contract then str_or_null($source_summary_sha256) else null end),
           schema_id: $schema_id,
           expected_schema_id: $expected_schema_id,
           status: $state,
@@ -2199,15 +2214,23 @@ access_recovery_verifier_evidence_json() {
         if has("rc") then ((.rc | type) == "number" and .rc == 0) else false end;
       def enabled($path):
         if ($path | type) == "boolean" then $path else false end;
+      def pass_status($path):
+        (($path // "") | tostring | ascii_downcase) == "pass";
       def required_checks_enabled:
         enabled(.checks.summary_contract.enabled)
         and enabled(.checks.tar_sha256.enabled)
         and enabled(.checks.manifest.enabled)
         and enabled(.checks.provenance.enabled);
+      def required_checks_pass:
+        pass_status(.checks.summary_contract.status)
+        and pass_status(.checks.tar_sha256.status)
+        and pass_status(.checks.manifest.status)
+        and pass_status(.checks.provenance.status);
       def trusted_provenance_ready:
         (.trusted_provenance.required == true)
         and (.trusted_provenance.checked == true)
         and (.trusted_provenance.trusted == true)
+        and pass_status(.trusted_provenance.status)
         and ((.trusted_provenance.source // "") == "trust_store")
         and ((.trusted_provenance.evidence_scope // "") == "real_helper_https")
         and ((.trusted_provenance.summary_evidence_scope // "") == "real_helper_https")
@@ -2217,7 +2240,7 @@ access_recovery_verifier_evidence_json() {
       | status_norm as $raw_status
       | (($schema_id == $expected_schema_id) and ($raw_status != "")) as $valid_contract
       | ($valid_contract and ($summary_stale | not)) as $fresh_contract
-      | ($fresh_contract and ($raw_status == "pass") and rc_ok and required_checks_enabled and trusted_provenance_ready) as $semantic_ok
+      | ($fresh_contract and ($raw_status == "pass") and rc_ok and required_checks_enabled and required_checks_pass and trusted_provenance_ready) as $semantic_ok
       | (
           if $valid_contract and $summary_stale then "stale"
           elif $valid_contract and ($semantic_ok | not) then (if $raw_status == "pass" then "fail" else $raw_status end)
@@ -2249,15 +2272,31 @@ access_recovery_verifier_evidence_json() {
           needs_attention: ($semantic_ok | not),
           details: {
             summary_contract_enabled: enabled(.checks.summary_contract.enabled),
+            summary_contract_status: str_or_null(.checks.summary_contract.status),
             tar_sha256_enabled: enabled(.checks.tar_sha256.enabled),
+            tar_sha256_status: str_or_null(.checks.tar_sha256.status),
             manifest_enabled: enabled(.checks.manifest.enabled),
+            manifest_status: str_or_null(.checks.manifest.status),
             provenance_enabled: enabled(.checks.provenance.enabled),
+            provenance_status: str_or_null(.checks.provenance.status),
             trusted_provenance_required: (.trusted_provenance.required // null),
             trusted_provenance_checked: (.trusted_provenance.checked // null),
             trusted_provenance_trusted: (.trusted_provenance.trusted // null),
+            trusted_provenance_status: str_or_null(.trusted_provenance.status),
             trusted_provenance_source: str_or_null(.trusted_provenance.source),
             evidence_scope: str_or_null(.trusted_provenance.evidence_scope),
             summary_evidence_scope: str_or_null(.trusted_provenance.summary_evidence_scope),
+            source_summary_sha256: str_or_null(.evidence_binding.source_summary_sha256),
+            base_url: str_or_null(.evidence_binding.base_url),
+            helper_id: str_or_null(.evidence_binding.helper_id),
+            organization_id: str_or_null(.evidence_binding.organization_id),
+            registry_id: str_or_null(.evidence_binding.registry_id),
+            smoke_summary_json: str_or_null(.evidence_binding.smoke_summary_json),
+            smoke_summary_sha256: str_or_null(.evidence_binding.smoke_summary_sha256),
+            deployment_evidence_summary_json: str_or_null(.evidence_binding.deployment_evidence_summary_json),
+            deployment_evidence_summary_sha256: str_or_null(.evidence_binding.deployment_evidence_summary_sha256),
+            host_install_check_summary_json: str_or_null(.evidence_binding.host_install_check_summary_json),
+            host_install_check_summary_sha256: str_or_null(.evidence_binding.host_install_check_summary_sha256),
             provenance_json: str_or_null(.artifacts.provenance_json),
             source_summary_json: str_or_null(.artifacts.source_summary_json),
             bundle_tar: str_or_null(.artifacts.bundle_tar),
@@ -2292,6 +2331,17 @@ access_recovery_track_json_from_evidence() {
           host_config_sha256_match: same_nonempty($deployment_evidence.details.config_sha256; $host_install.details.env_config_sha256)
         }
         | . + {ok: ([.helper_id_match, .organization_id_match, .registry_id_match, .smoke_config_sha256_match, .host_config_sha256_match] | all(. == true))};
+      def verifier_binding:
+        {
+          base_url_match: same_nonempty($bundle_verify.details.base_url; $service_smoke.details.base_url),
+          helper_id_match: same_nonempty($bundle_verify.details.helper_id; $service_smoke.details.helper_id),
+          organization_id_match: same_nonempty($bundle_verify.details.organization_id; $service_smoke.details.organization_id),
+          registry_id_match: same_nonempty($bundle_verify.details.registry_id; $service_smoke.details.registry_id),
+          smoke_summary_sha256_match: same_nonempty($bundle_verify.details.smoke_summary_sha256; $service_smoke.source_summary_sha256),
+          deployment_evidence_summary_sha256_match: same_nonempty($bundle_verify.details.deployment_evidence_summary_sha256; $deployment_evidence.source_summary_sha256),
+          host_install_check_summary_sha256_match: same_nonempty($bundle_verify.details.host_install_check_summary_sha256; $host_install.source_summary_sha256)
+        }
+        | . + {ok: ([.base_url_match, .helper_id_match, .organization_id_match, .registry_id_match, .smoke_summary_sha256_match, .deployment_evidence_summary_sha256_match, .host_install_check_summary_sha256_match] | all(. == true))};
       def smoke_base_url:
         ($service_smoke.details.base_url // "");
       def first_part($sep):
@@ -2344,7 +2394,8 @@ access_recovery_track_json_from_evidence() {
         and ($bundle_verify.details.trusted_provenance_checked == true)
         and ($bundle_verify.details.trusted_provenance_trusted == true)
         and (($bundle_verify.details.trusted_provenance_source // "") == "trust_store")
-        and (($bundle_verify.details.evidence_scope // "") == "real_helper_https");
+        and (($bundle_verify.details.evidence_scope // "") == "real_helper_https")
+        and (verifier_binding.ok == true);
       def first_attention:
         [$service_smoke, $deployment_evidence, $host_install]
         | map(select(.needs_attention == true))
@@ -2375,6 +2426,7 @@ access_recovery_track_json_from_evidence() {
         end;
       first_attention as $first_attention
       | evidence_binding as $evidence_binding
+      | verifier_binding as $verifier_binding
       | track_status as $track_status
       | {
           status: $track_status,
@@ -2399,6 +2451,7 @@ access_recovery_track_json_from_evidence() {
           access_bridge_host_install: $host_install,
           access_bridge_pilot_evidence_bundle_verify: $bundle_verify,
           evidence_binding: $evidence_binding,
+          trusted_verifier_binding: $verifier_binding,
           trusted_verifier_ready: trusted_verifier_ready,
           evidence_host_policy: {
             base_url: smoke_base_url,
@@ -2411,7 +2464,13 @@ access_recovery_track_json_from_evidence() {
             if $track_status == "pilot-evidence-ready" then null
             elif $track_status == "trusted-provenance-required" then {
               id: "trusted_pilot_evidence_verify",
-              reason: ($bundle_verify.notes // "Trusted real helper HTTPS provenance verification is required before pilot handoff"),
+              reason: (
+                if ($bundle_verify.available == true and ($verifier_binding.ok != true)) then
+                  "Trusted verifier receipt does not match the current smoke, deployment, and host-install evidence"
+                else
+                  ($bundle_verify.notes // "Trusted real helper HTTPS provenance verification is required before pilot handoff")
+                end
+              ),
               command: trusted_verifier_command
             }
             elif $track_status == "local-rehearsal-ready" then {
@@ -7052,7 +7111,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for cmd in jq date mktemp rg; do
+for cmd in jq date mktemp rg sha256sum; do
   need_cmd "$cmd"
 done
 

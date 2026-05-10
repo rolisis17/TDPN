@@ -21,7 +21,7 @@ Next 5 roadmap execution steps:
 1. Freeze the Access Recovery beta contract around signed packs, bridge invites, signed helper registries, trust stores, and `GPMREC1` text/QR handoffs.
 2. Finish the browser-local verification loop for file, text, and QR handoffs, including fail-closed trust-store and helper-registry validation.
 3. Write the first operator/helper runbook for key handoff, helper onboarding, helper quarantine, artifact expiry, and abuse response.
-4. Build one small pilot bundle for a real organization/community and test it with a non-technical user flow before adding network economics.
+4. Build one small pilot bundle for a real organization/community, verify it with a trusted verifier receipt, and test it with a non-technical user flow before adding network economics.
 5. Keep VPN, Windows client, and L1 settlement work parked as reusable infrastructure until the access-recovery wedge has beta demand.
 
 Status update (March 24, 2026):
