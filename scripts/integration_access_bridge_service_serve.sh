@@ -122,4 +122,16 @@ if ! grep -q '"message":"serve smoke"' "$ABUSE_LOG"; then
   exit 1
 fi
 
+bash ./scripts/access_bridge_service_smoke.sh \
+  --base-url "$BASE_URL" \
+  --path-id helper-web \
+  --code ticket-serve-123 \
+  --summary-json "$TMP_DIR/operator-smoke-summary.json" \
+  --abuse-message "operator smoke" >/dev/null
+if [[ "$(jq -r '.status // ""' "$TMP_DIR/operator-smoke-summary.json")" != "pass" ]]; then
+  echo "access bridge service serve integration failed: operator smoke summary not pass"
+  cat "$TMP_DIR/operator-smoke-summary.json"
+  exit 1
+fi
+
 echo "access bridge service serve integration check ok"

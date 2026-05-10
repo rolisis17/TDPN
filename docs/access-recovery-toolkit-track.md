@@ -190,6 +190,7 @@ Local trust-store flow:
 - `go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/bridge-service-config.json --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/bridge-abuse.jsonl --access-code-sha256 HASH`
 - `go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/bridge-deploy --public-host bridge.example --access-code-sha256 HASH`
 - `bash ./scripts/integration_access_bridge_service_serve.sh`
+- `bash ./scripts/access_bridge_service_smoke.sh --base-url https://bridge.example --path-id helper-web --code CODE --summary-json .easy-node-logs/bridge-service-smoke.json`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --timeout-sec 8`
 - `go run ./cmd/gpmrecover trust-remove --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID`
 
@@ -239,6 +240,7 @@ Bridge-invite rules:
 - `bridge-service-serve` wraps that preflight in a minimal HTTP service with `/health`, `/bridge/{path_id}`, optional `X-GPM-Bridge-Code`/`?code=` ticket gating, per-source fixed-window limits, optional signed-path redirects, and `/abuse` JSONL logging
 - `bridge-service-serve` emits no-store/no-referrer/nosniff headers so ticket codes and recovery URLs are not cached or leaked through browser referrers
 - `bridge-service-deploy-pack` emits a helper-owned env file, shell wrapper, README, hardened systemd unit template, and Caddy/nginx HTTPS reverse-proxy examples for Linux deployment
+- `access_bridge_service_smoke.sh` records deployed bridge health, access-code-gated path availability, security headers, and abuse endpoint acceptance into a JSON summary
 
 `check` keeps trust and reachability separate:
 - it verifies the pack before probing anything
@@ -301,7 +303,7 @@ Do first:
 - docs explaining how a user visualizes it
 
 Do next:
-- deployment smoke evidence collection and operator install checklist
+- operator install checklist and bridge helper ownership checks
 
 Do later:
 - Outline/Shadowsocks/Tor/GPM launch helpers
