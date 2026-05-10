@@ -421,6 +421,19 @@ async function main() {
     throw new Error(`expected userinfo URL rejection detail, got ${userinfoInviteDetail}`);
   }
 
+  const unsupportedSchemeInvite = JSON.parse(bridgeInvite);
+  unsupportedSchemeInvite.access_paths[0].url = "ftp://helper.example/smoke/bootstrap";
+  document.getElementById("pack_input").value = JSON.stringify(unsupportedSchemeInvite);
+  await document.getElementById("verify_btn").click();
+  const unsupportedSchemeInviteStatus = document.getElementById("status-heading").textContent;
+  const unsupportedSchemeInviteDetail = document.getElementById("status_detail").textContent;
+  if (unsupportedSchemeInviteStatus !== "Verification failed") {
+    throw new Error(`expected unsupported bridge invite URL scheme rejection, got ${unsupportedSchemeInviteStatus}: ${unsupportedSchemeInviteDetail}`);
+  }
+  if (!unsupportedSchemeInviteDetail.includes("access_paths[].url scheme must be http, https, or mailto")) {
+    throw new Error(`expected unsupported bridge invite URL scheme detail, got ${unsupportedSchemeInviteDetail}`);
+  }
+
   const userinfoRegistry = JSON.parse(unsignedRegistry);
   userinfoRegistry.helpers[0].abuse_report_url = "https://helper-smoke:secret@helper.example/smoke/abuse";
   document.getElementById("registry_input").value = JSON.stringify(userinfoRegistry);
@@ -433,6 +446,20 @@ async function main() {
   }
   if (!userinfoRegistryDetail.includes("helpers[].abuse_report_url userinfo is not allowed")) {
     throw new Error(`expected helper registry userinfo URL rejection detail, got ${userinfoRegistryDetail}`);
+  }
+
+  const unsupportedSchemeRegistry = JSON.parse(unsignedRegistry);
+  unsupportedSchemeRegistry.helpers[0].abuse_report_url = "ssh://helper.example/smoke/abuse";
+  document.getElementById("registry_input").value = JSON.stringify(unsupportedSchemeRegistry);
+  await document.getElementById("registry_input").dispatch("input");
+  await document.getElementById("export_registry_text_btn").click();
+  const unsupportedSchemeRegistryStatus = document.getElementById("status-heading").textContent;
+  const unsupportedSchemeRegistryDetail = document.getElementById("status_detail").textContent;
+  if (unsupportedSchemeRegistryStatus !== "Registry export failed") {
+    throw new Error(`expected unsupported helper registry URL scheme rejection, got ${unsupportedSchemeRegistryStatus}: ${unsupportedSchemeRegistryDetail}`);
+  }
+  if (!unsupportedSchemeRegistryDetail.includes("helpers[].abuse_report_url scheme must be http, https, or mailto")) {
+    throw new Error(`expected unsupported helper registry URL scheme detail, got ${unsupportedSchemeRegistryDetail}`);
   }
 
   const registryInput = document.getElementById("registry_input");

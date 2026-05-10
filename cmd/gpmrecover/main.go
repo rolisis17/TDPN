@@ -2680,6 +2680,9 @@ func readPublicKeyFile(path string) (ed25519.PublicKey, error) {
 func resolveVerificationKey(pack accesspack.Pack, publicFile string, trustStoreFile string) (ed25519.PublicKey, *accesspack.TrustedKey, error) {
 	publicFile = strings.TrimSpace(publicFile)
 	trustStoreFile = strings.TrimSpace(trustStoreFile)
+	if trustStoreFile != "" && publicFile != "" {
+		return nil, nil, errors.New("verification accepts only one of --trust-store or --public-key-file")
+	}
 	if trustStoreFile != "" {
 		store, err := loadTrustStoreFile(trustStoreFile)
 		if err != nil {
@@ -2701,6 +2704,9 @@ func resolveVerificationKey(pack accesspack.Pack, publicFile string, trustStoreF
 func resolveBridgeVerificationKey(invite accesspack.BridgeInvite, publicFile string, trustStoreFile string) (ed25519.PublicKey, *accesspack.TrustedKey, error) {
 	publicFile = strings.TrimSpace(publicFile)
 	trustStoreFile = strings.TrimSpace(trustStoreFile)
+	if trustStoreFile != "" && publicFile != "" {
+		return nil, nil, errors.New("bridge verification accepts only one of --trust-store or --public-key-file")
+	}
 	if trustStoreFile != "" {
 		store, err := loadTrustStoreFile(trustStoreFile)
 		if err != nil {
@@ -2722,6 +2728,9 @@ func resolveBridgeVerificationKey(invite accesspack.BridgeInvite, publicFile str
 func resolveBridgeRegistryVerificationKey(artifact accesspack.BridgeHelperRegistryArtifact, publicFile string, trustStoreFile string) (ed25519.PublicKey, *accesspack.TrustedKey, error) {
 	publicFile = strings.TrimSpace(publicFile)
 	trustStoreFile = strings.TrimSpace(trustStoreFile)
+	if trustStoreFile != "" && publicFile != "" {
+		return nil, nil, errors.New("bridge helper registry verification accepts only one of --trust-store or --public-key-file")
+	}
 	if trustStoreFile != "" {
 		store, err := loadTrustStoreFile(trustStoreFile)
 		if err != nil {

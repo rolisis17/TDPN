@@ -341,5 +341,10 @@ func validateURL(field string, value string) error {
 	if parsed.User != nil {
 		return fmt.Errorf("%s userinfo is not allowed", field)
 	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "mailto":
+	default:
+		return fmt.Errorf("%s scheme must be http, https, or mailto", field)
+	}
 	return nil
 }

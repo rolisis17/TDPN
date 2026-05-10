@@ -67,6 +67,30 @@ func TestVerifyRejectsExpiredPack(t *testing.T) {
 	}
 }
 
+func TestSignRejectsUnsupportedURLSchemes(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	for name, mutate := range map[string]func(*Pack){
+		"source ftp": func(pack *Pack) {
+			pack.Sources[0].URL = "ftp://mirror.example/pack.json"
+		},
+		"access path ssh": func(pack *Pack) {
+			pack.AccessPaths[0].URL = "ssh://demo.example"
+		},
+		"organization javascript": func(pack *Pack) {
+			pack.Organization.HomeURL = "javascript://demo.example/payload"
+		},
+	} {
+		pack := testPack()
+		mutate(&pack)
+		if _, err := Sign(pack, priv, ""); err == nil || !strings.Contains(err.Error(), "scheme must be http, https, or mailto") {
+			t.Fatalf("%s should reject unsupported URL scheme, got %v", name, err)
+		}
+	}
+}
+
 func testPack() Pack {
 	return Pack{
 		SchemaVersion: SchemaVersion,

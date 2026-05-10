@@ -100,6 +100,38 @@ func TestSignVerifyBridgeHelperRegistryArtifact(t *testing.T) {
 	}
 }
 
+func TestBridgeArtifactsRejectUnsupportedURLSchemes(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	for name, run := range map[string]func() error{
+		"bridge invite access path ftp": func() error {
+			invite := testBridgeInvite()
+			invite.AccessPaths[0].URL = "ftp://helper.example/connect"
+			_, err := SignBridgeInvite(invite, priv, "")
+			return err
+		},
+		"bridge invite contact ssh": func() error {
+			invite := testBridgeInvite()
+			invite.Helper.ContactURL = "ssh://helper.example/contact"
+			_, err := SignBridgeInvite(invite, priv, "")
+			return err
+		},
+		"helper registry abuse javascript": func() error {
+			artifact := testBridgeHelperRegistryArtifact(now)
+			artifact.Registry.Helpers[0].AbuseReportURL = "javascript://helper.example/report"
+			_, err := SignBridgeHelperRegistryArtifact(artifact, priv, "")
+			return err
+		},
+	} {
+		if err := run(); err == nil || !strings.Contains(err.Error(), "scheme must be http, https, or mailto") {
+			t.Fatalf("%s should reject unsupported URL scheme, got %v", name, err)
+		}
+	}
+}
+
 func TestBridgeHelperRegistryArtifactRejectsTampering(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

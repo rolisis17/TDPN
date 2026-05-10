@@ -331,6 +331,24 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runCheck([]string{"--pack", signedPack, "--trust-store", trustStore, "--timeout-sec", "2"}); err != nil {
 		t.Fatalf("check with trust store: %v", err)
 	}
+	for name, err := range map[string]error{
+		"verify":        runVerify([]string{"--pack", signedPack, "--trust-store", trustStore, "--public-key-file", publicKey}),
+		"check":         runCheck([]string{"--pack", signedPack, "--trust-store", trustStore, "--public-key-file", publicKey, "--timeout-sec", "2"}),
+		"bridge-verify": runBridgeVerify([]string{"--invite", signedBridge, "--trust-store", trustStore, "--public-key-file", publicKey}),
+		"bridge-policy": runBridgePolicy([]string{"--invite", signedBridge, "--trust-store", trustStore, "--public-key-file", publicKey, "--signed-helper-registry", signedRegistry}),
+		"bridge-service-config": runBridgeServiceConfig([]string{
+			"--invite", signedBridge,
+			"--trust-store", trustStore,
+			"--public-key-file", publicKey,
+			"--signed-helper-registry", signedRegistry,
+			"--out", filepath.Join(dir, "bridge-service-config-dual-key.json"),
+		}),
+		"bridge-registry-verify": runBridgeRegistryVerify([]string{"--signed-registry", signedRegistry, "--trust-store", trustStore, "--public-key-file", publicKey}),
+	} {
+		if err == nil || !strings.Contains(err.Error(), "accepts only one of --trust-store or --public-key-file") {
+			t.Fatalf("%s should reject dual key sources, got %v", name, err)
+		}
+	}
 	packEnvelope := filepath.Join(dir, "pack.txt")
 	importedPack := filepath.Join(dir, "pack.imported.json")
 	if err := runTextExport([]string{"--kind", "access-pack", "--in", signedPack, "--out", packEnvelope}); err != nil {
@@ -656,6 +674,16 @@ func TestGPMRecoverProvenanceSignVerifyRoundTrip(t *testing.T) {
 		"--public-key-file", publicKey,
 	}); err != nil {
 		t.Fatalf("provenance-verify public key: %v", err)
+	}
+	if err := runProvenanceVerify([]string{
+		"--provenance", provenanceJSON,
+		"--summary-json", summaryJSON,
+		"--bundle-tar", bundleTar,
+		"--bundle-tar-sha256-file", sidecar,
+		"--trust-store", trustStore,
+		"--public-key-file", publicKey,
+	}); err == nil || !strings.Contains(err.Error(), "accepts only one of --trust-store or --public-key-file") {
+		t.Fatalf("provenance-verify should reject dual key sources, got %v", err)
 	}
 
 	tamperedSummary := filepath.Join(dir, "tampered-summary.json")

@@ -124,6 +124,19 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$SUMMARY_JSON" \
   --provenance-json "$PROVENANCE_JSON" \
   --trust-store "$TRUST_STORE" >"$TMP_DIR/verify-provenance-trust-store.log"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$SUMMARY_JSON" \
+  --provenance-json "$PROVENANCE_JSON" \
+  --trust-store "$TRUST_STORE" \
+  --public-key-file "$PUBLIC_KEY_FILE" >"$TMP_DIR/verify-provenance-dual-key-source.log" 2>&1
+dual_key_source_rc=$?
+set -e
+if [[ "$dual_key_source_rc" -eq 0 ]] || ! grep -Fq 'provenance check requires exactly one of --trust-store or --public-key-file' "$TMP_DIR/verify-provenance-dual-key-source.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: provenance verification accepted dual key sources"
+  cat "$TMP_DIR/verify-provenance-dual-key-source.log"
+  exit 1
+fi
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$SUMMARY_JSON" \
   --require-trusted-provenance 1 \

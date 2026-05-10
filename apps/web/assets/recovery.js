@@ -107,6 +107,9 @@
     if (parsed.username || parsed.password) {
       throw new Error(`${field} userinfo is not allowed`);
     }
+    if (!["http:", "https:", "mailto:"].includes(parsed.protocol.toLowerCase())) {
+      throw new Error(`${field} scheme must be http, https, or mailto`);
+    }
   }
 
   function base64URLToBytes(value, label) {
