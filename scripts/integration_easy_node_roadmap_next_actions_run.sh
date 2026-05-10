@@ -56,6 +56,7 @@ for token in \
   '--max-actions N' \
   '--action-timeout-sec N' \
   '--parallel [0|1]' \
+  '--local-only [0|1]' \
   '--allow-profile-default-gate-unreachable [0|1]' \
   '--profile-default-gate-subject ID' \
   '--access-recovery-trust-store PATH' \
@@ -82,6 +83,7 @@ ROADMAP_NEXT_ACTIONS_CAPTURE_FILE="$CAPTURE" \
   --max-actions 2 \
   --action-timeout-sec 9 \
   --parallel 1 \
+  --local-only 1 \
   --allow-profile-default-gate-unreachable 1 \
   --profile-default-gate-subject inv-forwarded-subject \
   --access-recovery-trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json \
@@ -104,6 +106,7 @@ fi
 assert_token "$line" $'\t--max-actions\t2' "missing --max-actions forwarding"
 assert_token "$line" $'\t--action-timeout-sec\t9' "missing --action-timeout-sec forwarding"
 assert_token "$line" $'\t--parallel\t1' "missing --parallel forwarding"
+assert_token "$line" $'\t--local-only\t1' "missing --local-only forwarding"
 assert_token "$line" $'\t--allow-profile-default-gate-unreachable\t1' "missing --allow-profile-default-gate-unreachable forwarding"
 assert_token "$line" $'\t--profile-default-gate-subject\tinv-forwarded-subject' "missing --profile-default-gate-subject forwarding"
 assert_token "$line" $'\t--access-recovery-trust-store\t.easy-node-logs/access-recovery-demo/recovery-trust.json' "missing --access-recovery-trust-store forwarding"

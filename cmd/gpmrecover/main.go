@@ -248,7 +248,7 @@ func usage() {
   go run ./cmd/gpmrecover sign --pack FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-sign --invite FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
-  go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--signed-helper-registry FILE | --helper-registry FILE --allow-unsigned-helper-registry] [--require-helper-registry 1]
+  go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) (--signed-helper-registry FILE | --helper-registry FILE --allow-unsigned-helper-registry | --allow-missing-helper-registry)
   go run ./cmd/gpmrecover bridge-service-config --invite FILE --signed-helper-registry FILE (--trust-store FILE | --public-key-file FILE) [--out FILE]
   go run ./cmd/gpmrecover bridge-service-check --config FILE [--path-id ID | --url URL] [--out FILE]
   go run ./cmd/gpmrecover bridge-service-serve --config FILE --config-sha256 HEX [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] --access-code-sha256 HEX [--allow-unpinned-local=false] [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=false] [--redirect=false]
@@ -889,7 +889,8 @@ func runBridgePolicy(args []string) error {
 	helperRegistryFile := fs.String("helper-registry", "", "optional bridge helper registry JSON for active/quarantine policy")
 	signedHelperRegistryFile := fs.String("signed-helper-registry", "", "optional signed bridge helper registry artifact JSON for active/quarantine policy")
 	allowUnsignedHelperRegistry := fs.Bool("allow-unsigned-helper-registry", false, "allow raw unsigned helper registry JSON for local diagnostics only")
-	requireHelperRegistry := fs.Bool("require-helper-registry", false, "fail if no bridge helper registry is provided")
+	allowMissingHelperRegistry := fs.Bool("allow-missing-helper-registry", false, "diagnostic opt-out: allow bridge policy checks without any helper registry")
+	requireHelperRegistry := fs.Bool("require-helper-registry", true, "fail if no bridge helper registry is provided")
 	minPaths := fs.Int("min-paths", 2, "minimum helper access paths")
 	minHosts := fs.Int("min-distinct-hosts", 2, "minimum distinct helper/contact hosts")
 	maxLifetimeHours := fs.Int("max-lifetime-hours", int(accesspack.MaxBridgeInviteLifetime/time.Hour), "maximum invite lifetime in hours")
@@ -941,6 +942,10 @@ func runBridgePolicy(args []string) error {
 		registryTrusted = true
 		registrySource = "signed"
 	}
+	effectiveRequireHelperRegistry := *requireHelperRegistry
+	if *allowMissingHelperRegistry {
+		effectiveRequireHelperRegistry = false
+	}
 	maxLifetime := time.Duration(*maxLifetimeHours) * time.Hour
 	defaultPolicy := accesspack.DefaultBridgeInvitePolicyOptions()
 	report := accesspack.CheckBridgeInvitePolicy(verified.Invite, accesspack.BridgeInvitePolicyOptions{
@@ -949,7 +954,7 @@ func runBridgePolicy(args []string) error {
 		MaxLifetime:                  maxLifetime,
 		RequireHelperContact:         *requireContact,
 		RequireManualFallback:        *requireManualFallback,
-		RequireHelperRegistry:        *requireHelperRegistry,
+		RequireHelperRegistry:        effectiveRequireHelperRegistry,
 		RequireHelperAbuseReport:     defaultPolicy.RequireHelperAbuseReport,
 		RequireHelperRateLimitPolicy: defaultPolicy.RequireHelperRateLimitPolicy,
 		HelperRegistry:               helperRegistry,

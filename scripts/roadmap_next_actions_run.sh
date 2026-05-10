@@ -20,6 +20,8 @@ Usage:
     [--action-timeout-sec N] \
     [--allow-unsafe-shell-commands [0|1]] \
     [--allow-empty-actions [0|1]] \
+    [--local-only [0|1]] \
+    [--exclude-requires-real-hosts [0|1]] \
     [--refresh-manual-validation [0|1]] \
     [--refresh-single-machine-readiness [0|1]] \
     [--parallel [0|1]] \
@@ -43,6 +45,8 @@ Defaults:
   --action-timeout-sec 0   (0 = no per-action timeout)
   --allow-unsafe-shell-commands 0
   --allow-empty-actions 0
+  --local-only 0   (when 1, run only actions explicitly marked local_pack_only=true or requires_real_hosts=false)
+  --exclude-requires-real-hosts 0   (alias for --local-only)
   --host-a ""   (precedence: CLI --host-a > ROADMAP_NEXT_ACTIONS_RUN_HOST_A > A_HOST > HOST_A > summary command values)
   --host-b ""   (precedence: CLI --host-b > ROADMAP_NEXT_ACTIONS_RUN_HOST_B > B_HOST > HOST_B > summary command values)
   --campaign-subject ""   (precedence: CLI --campaign-subject > --profile-default-gate-subject > ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_SUBJECT > ROADMAP_NEXT_ACTIONS_RUN_CAMPAIGN_SUBJECT > CAMPAIGN_SUBJECT > INVITE_KEY > summary command values)
@@ -70,6 +74,8 @@ Defaults:
 
 Exit behavior:
   - Runs all selected commands (sequential by default, concurrent when --parallel=1).
+  - With --local-only, skips live/real-host actions unless the roadmap action is
+    explicitly tagged as local-only or not requiring real hosts.
   - Returns rc=0 only when all selected commands pass.
   - Fails closed (rc=4) when no actions are selected unless
     --allow-empty-actions=1 is explicitly set.
@@ -263,6 +269,9 @@ build_profile_default_gate_subject_operator_command() {
   fi
   if [[ "${allow_unsafe_shell_commands:-0}" == "1" ]]; then
     cmd+=(--allow-unsafe-shell-commands 1)
+  fi
+  if [[ "${local_only:-0}" == "1" ]]; then
+    cmd+=(--local-only 1)
   fi
   if [[ "${allow_profile_default_gate_unreachable:-0}" == "1" ]]; then
     cmd+=(--allow-profile-default-gate-unreachable 1)
@@ -807,6 +816,9 @@ build_multi_vm_stability_vm_command_source_operator_command_01() {
   if [[ "${allow_unsafe_shell_commands:-0}" == "1" ]]; then
     cmd+=(--allow-unsafe-shell-commands 1)
   fi
+  if [[ "${local_only:-0}" == "1" ]]; then
+    cmd+=(--local-only 1)
+  fi
   cmd+=(--include-id "profile_compare_multi_vm_stability")
   cmd+=(--include-id "profile_compare_multi_vm_stability_promotion")
   cmd+=(--vm-command-source "REPLACE_WITH_VM_COMMAND_SOURCE")
@@ -863,6 +875,9 @@ build_access_recovery_trust_store_operator_command_01() {
   fi
   if [[ "${allow_unsafe_shell_commands:-0}" == "1" ]]; then
     cmd+=(--allow-unsafe-shell-commands 1)
+  fi
+  if [[ "${local_only:-0}" == "1" ]]; then
+    cmd+=(--local-only 1)
   fi
   cmd+=(--include-id "trusted_pilot_evidence_verify")
   cmd+=(--access-recovery-trust-store "REPLACE_WITH_TRUST_STORE")
@@ -1912,6 +1927,7 @@ profile_default_gate_subject="$profile_default_gate_subject_env"
 profile_default_gate_subject_arg_provided="0"
 allow_profile_default_gate_unreachable="${ROADMAP_NEXT_ACTIONS_RUN_ALLOW_PROFILE_DEFAULT_GATE_UNREACHABLE:-0}"
 allow_empty_actions="${ROADMAP_NEXT_ACTIONS_RUN_ALLOW_EMPTY_ACTIONS:-0}"
+local_only="${ROADMAP_NEXT_ACTIONS_RUN_LOCAL_ONLY:-0}"
 include_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_PREFIX:-}"
 exclude_id_prefix="${ROADMAP_NEXT_ACTIONS_RUN_EXCLUDE_ID_PREFIX:-}"
 include_ids_csv="${ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_IDS:-}"
@@ -2063,6 +2079,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --local-only|--exclude-requires-real-hosts)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        local_only="${2:-}"
+        shift 2
+      else
+        local_only="1"
+        shift
+      fi
+      ;;
     --include-id-prefix)
       require_value_or_die "$1" "${2:-}"
       include_id_prefix="${2:-}"
@@ -2140,6 +2165,7 @@ bool_arg_or_die "--parallel" "$parallel"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--allow-profile-default-gate-unreachable" "$allow_profile_default_gate_unreachable"
 bool_arg_or_die "--allow-empty-actions" "$allow_empty_actions"
+bool_arg_or_die "--local-only" "$local_only"
 bool_arg_or_die "--allow-unsafe-shell-commands" "$allow_unsafe_shell_commands"
 int_arg_or_die "--max-actions" "$max_actions"
 int_arg_or_die "--action-timeout-sec" "$action_timeout_sec"
@@ -2392,7 +2418,20 @@ if (( ${#exclude_id_suffixes[@]} > 0 )); then
   selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --argjson suffixes "$exclude_id_suffixes_json" '[.[] | select(((((.id // "") | tostring) as $id | any($suffixes[]; . as $suffix | ($id | endswith($suffix)))) | not))]')"
 fi
 after_exclude_suffix_filters_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
-before_dedupe_count="$after_exclude_suffix_filters_count"
+if [[ "$local_only" == "1" ]]; then
+  selected_actions_json="$(
+    printf '%s\n' "$selected_actions_json" | jq -c '
+      [
+        .[]
+        | select(
+            (.local_pack_only == true)
+            or (.requires_real_hosts == false)
+          )
+      ]'
+  )"
+fi
+after_local_only_filters_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
+before_dedupe_count="$after_local_only_filters_count"
 deduped_actions_count=0
 deduped_exact_duplicate_count=0
 deduped_id_command_duplicate_count=0
@@ -2549,6 +2588,7 @@ fi
 echo "[roadmap-next-actions-run] selected_actions=$actions_count parallel=$parallel action_timeout_sec=$action_timeout_sec"
 echo "[roadmap-next-actions-run] allow_unsafe_shell_commands=$allow_unsafe_shell_commands"
 echo "[roadmap-next-actions-run] allow_empty_actions=$allow_empty_actions"
+echo "[roadmap-next-actions-run] local_only=$local_only"
 echo "[roadmap-next-actions-run] include_id_prefix=${include_id_prefix:-none} exclude_id_prefix=${exclude_id_prefix:-none}"
 echo "[roadmap-next-actions-run] include_ids=$include_ids_csv_display exclude_ids=$exclude_ids_csv_display"
 echo "[roadmap-next-actions-run] include_id_suffixes=$include_id_suffixes_csv_display exclude_id_suffixes=$exclude_id_suffixes_csv_display"
@@ -3104,6 +3144,7 @@ jq -n \
   --argjson after_exclude_id_filters_count "$after_exclude_id_filters_count" \
   --argjson after_include_suffix_filters_count "$after_include_suffix_filters_count" \
   --argjson after_exclude_suffix_filters_count "$after_exclude_suffix_filters_count" \
+  --argjson after_local_only_filters_count "$after_local_only_filters_count" \
   --argjson before_dedupe_count "$before_dedupe_count" \
   --argjson deduped_actions_count "$deduped_actions_count" \
   --argjson deduped_exact_duplicate_count "$deduped_exact_duplicate_count" \
@@ -3135,6 +3176,7 @@ jq -n \
   --argjson profile_default_gate_subject_configured "$profile_default_gate_subject_configured" \
   --argjson allow_profile_default_gate_unreachable "$allow_profile_default_gate_unreachable" \
   --argjson allow_empty_actions "$allow_empty_actions" \
+  --argjson local_only "$local_only" \
   --argjson profile_default_gate_default_timeout_sec "$profile_default_gate_default_timeout_sec" \
   --argjson action_timeout_sec "$action_timeout_sec" \
   --argjson allow_unsafe_shell_commands "$allow_unsafe_shell_commands" \
@@ -3179,6 +3221,7 @@ jq -n \
       profile_default_gate_subject_configured: ($profile_default_gate_subject_configured == 1),
       allow_profile_default_gate_unreachable: ($allow_profile_default_gate_unreachable == 1),
       allow_empty_actions: ($allow_empty_actions == 1),
+      local_only: ($local_only == 1),
       include_id_prefix: (if $include_id_prefix == "" then null else $include_id_prefix end),
       exclude_id_prefix: (if $exclude_id_prefix == "" then null else $exclude_id_prefix end),
       include_ids: (if ($include_ids | length) == 0 then null else $include_ids end),
@@ -3197,6 +3240,7 @@ jq -n \
         after_exclude_id_filters_count: $after_exclude_id_filters_count,
         after_include_suffix_filters_count: $after_include_suffix_filters_count,
         after_exclude_suffix_filters_count: $after_exclude_suffix_filters_count,
+        after_local_only_filters_count: $after_local_only_filters_count,
         before_dedupe_count: $before_dedupe_count,
         deduped_actions_count: $deduped_actions_count,
         deduped_exact_duplicate_count: $deduped_exact_duplicate_count,

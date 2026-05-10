@@ -118,6 +118,12 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--signed-helper-registry", signedRegistry, "--require-helper-registry"}); err != nil {
 		t.Fatalf("bridge-policy signed helper registry: %v", err)
 	}
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey}); err == nil {
+		t.Fatal("expected bridge-policy to require helper registry by default")
+	}
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--allow-missing-helper-registry"}); err != nil {
+		t.Fatalf("bridge-policy diagnostic missing helper registry opt-out: %v", err)
+	}
 	serviceConfig := filepath.Join(dir, "bridge-service-config.json")
 	if err := runBridgeServiceConfig([]string{
 		"--invite", signedBridge,

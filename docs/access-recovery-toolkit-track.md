@@ -229,10 +229,10 @@ Trust-store rules:
 Bridge-invite rules:
 - bridge invites are helper hints, not new roots of trust
 - bridge invites must expire within 14 days of issue time
-- `bridge-policy` defaults require at least two helper paths, at least two distinct helper/contact hosts, a helper contact URL, and a manual/external-app fallback path
+- `bridge-policy` defaults require at least two helper paths, at least two distinct helper/contact hosts, a helper contact URL, a manual/external-app fallback path, and a helper registry
 - `bridge-policy --helper-registry` is unsigned diagnostic input and requires `--allow-unsigned-helper-registry`; it can inspect active/quarantine behavior but is not trusted beta policy evidence
 - `bridge-policy --signed-helper-registry` verifies the registry artifact against the same public key/trust store, requires the registry organization to match the bridge invite organization, then applies the helper registry gate
-- `bridge-policy --require-helper-registry` fails if the helper registry was accidentally omitted from a production policy run
+- `bridge-policy --allow-missing-helper-registry` is a diagnostic opt-out only; beta policy runs should use the default helper-registry requirement with `--signed-helper-registry`
 - `bridge-registry-sign` and `bridge-registry-verify` publish helper registries as signed short-lived organization artifacts before extracting raw registry JSON for policy checks
 - `bridge-registry-check` summarizes active/quarantined/disabled helper counts and can fail closed for a specific active helper/org before publishing or using an invite
 - `bridge-registry-upsert-helper` adds or updates helper registry entries with validation and normalized output

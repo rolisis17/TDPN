@@ -42,7 +42,7 @@ go run ./cmd/gpmrecover demo-bundle \
 
 ```sh
 go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-recovery-demo/access-pack.signed.json --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json --show-paths
-go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/access-recovery-demo/bridge-invite.signed.json --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --require-helper-registry
+go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/access-recovery-demo/bridge-invite.signed.json --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json
 go run ./cmd/gpmrecover bridge-service-config --invite .easy-node-logs/access-recovery-demo/bridge-invite.signed.json --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --out .easy-node-logs/access-recovery-demo/bridge-service-config.json
 go run ./cmd/gpmrecover bridge-service-check --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --path-id helper-web
 go run ./cmd/gpmrecover bridge-service-code-generate --code-out .easy-node-logs/access-recovery-demo/bridge-code.txt --hash-out .easy-node-logs/access-recovery-demo/bridge-code-hash.json
@@ -102,7 +102,7 @@ go run ./cmd/gpmrecover bridge-service-deploy-pack \
 5. Before sharing the bridge URL or access code, verify helper identity:
 
 - the helper id, display name, contact URL, abuse-report URL, rate-limit policy, and active window match the signed helper registry
-- `bridge-policy --signed-helper-registry --require-helper-registry` passes for the invite
+- `bridge-policy --signed-helper-registry` passes for the invite; helper registry checking is required by default
 - `bridge-service-check` passes for every served `path_id`
 - the operator can reach the helper through the registry contact path and confirm they control the HTTPS host
 

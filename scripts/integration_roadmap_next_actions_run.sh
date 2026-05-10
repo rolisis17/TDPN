@@ -19,6 +19,7 @@ unset ROADMAP_NEXT_ACTIONS_RUN_HOST_B
 unset ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_IDS
 unset ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_PREFIX
 unset ROADMAP_NEXT_ACTIONS_RUN_INCLUDE_ID_SUFFIXES
+unset ROADMAP_NEXT_ACTIONS_RUN_LOCAL_ONLY
 unset ROADMAP_NEXT_ACTIONS_RUN_MAX_ACTIONS
 unset ROADMAP_NEXT_ACTIONS_RUN_PARALLEL
 unset ROADMAP_NEXT_ACTIONS_RUN_PRE_EXEC_REVALIDATE_DELAY_SEC
@@ -479,6 +480,18 @@ JSON
 }
 JSON
     ;;
+  local_only_mix)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"local_pack_action","label":"Local pack action","command":"bash \"$PASS1\"","reason":"test-local-pack","requires_real_hosts":false,"local_pack_only":true},
+    {"id":"local_no_real_hosts_action","label":"Local no real hosts action","command":"bash \"$PASS2\"","reason":"test-local-no-real-hosts","requires_real_hosts":false,"local_pack_only":false},
+    {"id":"real_host_action","label":"Real host action","command":"bash \"$FAIL1\"","reason":"test-real-host","requires_real_hosts":true,"local_pack_only":false},
+    {"id":"unknown_metadata_action","label":"Unknown metadata action","command":"bash \"$FAIL2\"","reason":"test-unknown-metadata"}
+  ]
+}
+JSON
+    ;;
   access_recovery_trust_store_placeholder)
     cat >"$summary_json" <<JSON
 {
@@ -773,6 +786,14 @@ if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--parallel 
   echo "help output missing --parallel [0|1]"
   exit 1
 fi
+if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--local-only [0|1]" >/dev/null; then
+  echo "help output missing --local-only [0|1]"
+  exit 1
+fi
+if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--exclude-requires-real-hosts [0|1]" >/dev/null; then
+  echo "help output missing --exclude-requires-real-hosts [0|1]"
+  exit 1
+fi
 if ! bash ./scripts/roadmap_next_actions_run.sh --help | grep -F -- "--allow-profile-default-gate-unreachable [0|1]" >/dev/null; then
   echo "help output missing --allow-profile-default-gate-unreachable [0|1]"
   exit 1
@@ -867,6 +888,36 @@ if [[ "$dedupe_run_count" != "1" ]]; then
   if [[ -f "$DEDUP_MARK_COUNT_FILE" ]]; then
     cat "$DEDUP_MARK_COUNT_FILE"
   fi
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] local-only filters out real-host and untagged actions"
+SUMMARY_LOCAL_ONLY="$TMP_DIR/summary_local_only.json"
+REPORTS_LOCAL_ONLY="$TMP_DIR/reports_local_only"
+ROADMAP_NEXT_ACTIONS_SCENARIO=local_only_mix \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_LOCAL_ONLY" \
+  --summary-json "$SUMMARY_LOCAL_ONLY" \
+  --local-only 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.local_only == true
+  and .roadmap.actions_selected_count == 2
+  and .roadmap.selected_action_ids == ["local_pack_action","local_no_real_hosts_action"]
+  and .roadmap.selection_accounting.non_empty_command_count == 4
+  and .roadmap.selection_accounting.after_exclude_suffix_filters_count == 4
+  and .roadmap.selection_accounting.after_local_only_filters_count == 2
+  and .summary.actions_executed == 2
+  and .summary.pass == 2
+  and .summary.fail == 0
+' "$SUMMARY_LOCAL_ONLY" >/dev/null; then
+  echo "local-only summary mismatch"
+  cat "$SUMMARY_LOCAL_ONLY"
   exit 1
 fi
 
