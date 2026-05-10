@@ -2855,6 +2855,83 @@ body.page-recover .topbar .wrap {
   font-size: 0.8rem;
 }
 
+.registry-summary {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.registry-summary__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.registry-summary__count {
+  border: 1px solid rgba(100, 244, 196, 0.22);
+  border-radius: 999px;
+  color: #bcffe8;
+  background: rgba(100, 244, 196, 0.08);
+  padding: 5px 8px;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.registry-summary__count[data-status="quarantined"] {
+  border-color: rgba(246, 195, 106, 0.3);
+  color: #ffe2ac;
+  background: rgba(246, 195, 106, 0.09);
+}
+
+.registry-summary__count[data-status="disabled"] {
+  border-color: rgba(255, 122, 122, 0.28);
+  color: #ffb6b6;
+  background: rgba(255, 122, 122, 0.08);
+}
+
+.registry-helper-list {
+  display: grid;
+  gap: 8px;
+}
+
+.registry-helper-card {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid rgba(218, 255, 242, 0.11);
+  border-radius: 8px;
+  background: rgba(1, 8, 10, 0.38);
+}
+
+.registry-helper-card[data-status="quarantined"] {
+  border-color: rgba(246, 195, 106, 0.28);
+}
+
+.registry-helper-card[data-status="disabled"] {
+  border-color: rgba(255, 122, 122, 0.24);
+}
+
+.registry-helper-card strong {
+  color: #f7fffc;
+  overflow-wrap: anywhere;
+}
+
+.registry-helper-card span,
+.registry-helper-card p {
+  color: #a9bbb5;
+  overflow-wrap: anywhere;
+}
+
+.registry-helper-card p {
+  margin: 0;
+}
+
+.registry-helper-card__status {
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .trust-key-card__actions {
   display: flex;
   flex-wrap: wrap;

@@ -18,6 +18,7 @@
     trustCopyBtn: document.getElementById("trust_copy_btn"),
     trustDownloadBtn: document.getElementById("trust_download_btn"),
     trustKeyList: document.getElementById("trust_key_list"),
+    registrySummary: document.getElementById("registry_summary"),
     handoffInput: document.getElementById("handoff_input"),
     exportPackTextBtn: document.getElementById("export_pack_text_btn"),
     exportStoreTextBtn: document.getElementById("export_store_text_btn"),
@@ -243,6 +244,7 @@
     } catch (err) {
       // Helper registry data is not secret; storage can still fail in private windows.
     }
+    renderHelperRegistrySummary(normalized);
   }
 
   function parseRFC3339(value, label) {
@@ -868,6 +870,82 @@
     }
   }
 
+  function renderHelperRegistrySummary(registry) {
+    clearNode(els.registrySummary);
+    let normalized;
+    try {
+      normalized = registry ? normalizeHelperRegistry(registry) : readHelperRegistryInput();
+      if (!normalized) {
+        const empty = document.createElement("p");
+        empty.className = "recover-empty";
+        empty.textContent = "No helper registry loaded.";
+        els.registrySummary.appendChild(empty);
+        return;
+      }
+      normalized = normalizeHelperRegistry(normalized);
+    } catch (err) {
+      const message = document.createElement("p");
+      message.className = "recover-empty";
+      message.textContent = "Helper registry JSON is not valid yet.";
+      els.registrySummary.appendChild(message);
+      return;
+    }
+    const counts = normalized.helpers.reduce((acc, helper) => {
+      acc[helper.status] = (acc[helper.status] || 0) + 1;
+      return acc;
+    }, { active: 0, quarantined: 0, disabled: 0 });
+    const countRow = document.createElement("div");
+    countRow.className = "registry-summary__counts";
+    for (const status of ["active", "quarantined", "disabled"]) {
+      const badge = document.createElement("span");
+      badge.className = "registry-summary__count";
+      badge.dataset.status = status;
+      badge.textContent = `${formatRegistryStatus(status)} ${counts[status] || 0}`;
+      countRow.appendChild(badge);
+    }
+    els.registrySummary.appendChild(countRow);
+    if (normalized.helpers.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "recover-empty";
+      empty.textContent = "No helpers registered.";
+      els.registrySummary.appendChild(empty);
+      return;
+    }
+    const list = document.createElement("div");
+    list.className = "registry-helper-list";
+    for (const helper of normalized.helpers.slice(0, 6)) {
+      const item = document.createElement("article");
+      item.className = "registry-helper-card";
+      item.dataset.status = helper.status;
+      const title = document.createElement("strong");
+      title.textContent = helper.display_name || helper.helper_id;
+      const detail = document.createElement("span");
+      detail.textContent = `${helper.helper_id} / ${helper.org_ids.join(", ")}`;
+      const status = document.createElement("span");
+      status.className = "registry-helper-card__status";
+      status.textContent = formatRegistryStatus(helper.status);
+      item.append(title, detail, status);
+      if (helper.quarantine_reason) {
+        const reason = document.createElement("p");
+        reason.textContent = helper.quarantine_reason;
+        item.appendChild(reason);
+      }
+      list.appendChild(item);
+    }
+    els.registrySummary.appendChild(list);
+    if (normalized.helpers.length > 6) {
+      const overflow = document.createElement("p");
+      overflow.className = "recover-empty";
+      overflow.textContent = `${normalized.helpers.length - 6} more helper entries are loaded.`;
+      els.registrySummary.appendChild(overflow);
+    }
+  }
+
+  function formatRegistryStatus(status) {
+    const normalized = trimString(status).toLowerCase();
+    return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : "Unknown";
+  }
+
   function fillTrustFields(entry) {
     els.trustOrgID.value = entry.org_id;
     els.trustOrgName.value = entry.org_name;
@@ -1336,6 +1414,7 @@
       // Ignore local storage cleanup errors.
     }
     renderTrustKeys({ version: 1, trusted_keys: [] });
+    renderHelperRegistrySummary(null);
     clearNode(els.factsGrid);
     clearNode(els.pathsList);
     els.pathCount.textContent = "0";
@@ -1373,12 +1452,15 @@
     try {
       const registry = readHelperRegistryInput();
       if (registry) {
-        localStorage.setItem(helperRegistryStorageKey, JSON.stringify(normalizeHelperRegistry(registry), null, 2));
+        const normalized = normalizeHelperRegistry(registry);
+        localStorage.setItem(helperRegistryStorageKey, JSON.stringify(normalized, null, 2));
+        renderHelperRegistrySummary(normalized);
       } else {
         localStorage.removeItem(helperRegistryStorageKey);
+        renderHelperRegistrySummary(null);
       }
     } catch (err) {
-      // Let Verify or file import surface malformed registry details.
+      renderHelperRegistrySummary({});
     }
   });
 
@@ -1515,4 +1597,5 @@
   } else {
     renderTrustKeys();
   }
+  renderHelperRegistrySummary();
 })();
