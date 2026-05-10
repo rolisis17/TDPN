@@ -1606,6 +1606,57 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] Access Recovery forged local verifier receipt cannot promote pilot readiness"
+ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_SHA256="$(sha256sum "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON" | awk '{print $1}')"
+ACCESS_RECOVERY_LOCAL_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_local_forged_summary.json"
+jq \
+  --arg base_url "http://127.0.0.1:19820" \
+  --arg smoke_summary_json "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON" \
+  --arg smoke_summary_sha256 "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_SHA256" \
+  '
+    .evidence_binding.base_url = $base_url
+    | .evidence_binding.smoke_summary_json = $smoke_summary_json
+    | .evidence_binding.smoke_summary_sha256 = $smoke_summary_sha256
+  ' "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_RECOVERY_LOCAL_VERIFY_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_RECOVERY_LOCAL_VERIFY_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_local_forged_verifier_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_local_forged_verifier_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_local_forged_verifier.log 2>&1; then
+  echo "expected failure when required Access Recovery evidence is only local, even with a passing-looking verifier receipt"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_local_forged_verifier.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .current_roadmap_track == "access_recovery"
+  and .access_recovery_evidence_required == true
+  and .access_recovery_track.status == "local-rehearsal-ready"
+  and .access_recovery_track.ready == false
+  and .access_recovery_track.local_rehearsal_ready == true
+  and .access_recovery_track.needs_attention == true
+  and .access_recovery_track.evidence_scope == "local_rehearsal"
+  and .access_recovery_track.evidence_host_policy.real_helper_https_evidence == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "pass"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == true
+  and .access_recovery_track.trusted_verifier_binding.ok == true
+  and .access_recovery_track.trusted_verifier_ready == false
+  and .access_recovery_track.recommended_next_action.id == "real_helper_https_evidence"
+' "$TMP_DIR/roadmap_progress_access_recovery_local_forged_verifier_summary.json" >/dev/null; then
+  echo "Access Recovery forged local verifier summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_local_forged_verifier_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] Access Recovery private HTTPS lab endpoint is not pilot-ready evidence"
 ACCESS_RECOVERY_PRIVATE_HTTPS_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_private_https_summary.json"
 jq '.base_url = "https://192.168.50.10:19820"' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_PRIVATE_HTTPS_SMOKE_SUMMARY_JSON"

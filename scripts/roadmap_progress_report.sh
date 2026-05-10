@@ -2398,7 +2398,8 @@ access_recovery_track_json_from_evidence() {
       def real_helper_https_base_ready:
         all_pass and evidence_binding.ok and real_helper_https_evidence;
       def trusted_verifier_ready:
-        ($bundle_verify.available == true)
+        real_helper_https_base_ready
+        and ($bundle_verify.available == true)
         and ($bundle_verify.status == "pass")
         and ($bundle_verify.semantic_ok == true)
         and ($bundle_verify.details.trusted_provenance_required == true)

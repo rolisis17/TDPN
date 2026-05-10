@@ -20,6 +20,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1377,6 +1378,14 @@ func runBridgeServiceDeployPack(args []string) error {
 	if *rps < 0 || *maxSources < 0 {
 		return errors.New("rps and max-sources must be non-negative")
 	}
+	publicHostValue, err := validateBridgeDeployPublicHost(*publicHost)
+	if err != nil {
+		return err
+	}
+	addrValue, err := validateBridgeDeployListenAddr(*addr)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(*outDir, 0o755); err != nil {
 		return err
 	}
@@ -1390,7 +1399,7 @@ func runBridgeServiceDeployPack(args []string) error {
 		"GPM_BRIDGE_BINARY":              *binary,
 		"GPM_BRIDGE_CONFIG":              *configPath,
 		"GPM_BRIDGE_CONFIG_SHA256":       *configSHA256,
-		"GPM_BRIDGE_ADDR":                *addr,
+		"GPM_BRIDGE_ADDR":                addrValue,
 		"GPM_BRIDGE_RPS":                 fmt.Sprintf("%d", *rps),
 		"GPM_BRIDGE_MAX_SOURCES":         fmt.Sprintf("%d", *maxSources),
 		"GPM_BRIDGE_ABUSE_LOG":           *abuseLog,
@@ -1463,7 +1472,7 @@ WantedBy=multi-user.target
     Strict-Transport-Security "max-age=31536000; includeSubDomains"
   }
 }
-`, strings.TrimSpace(*publicHost), strings.TrimSpace(*addr))
+`, publicHostValue, addrValue)
 	nginxBody := fmt.Sprintf(`server {
   listen 443 ssl http2;
   server_name %s;
@@ -1482,7 +1491,7 @@ WantedBy=multi-user.target
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
   }
 }
-`, strings.TrimSpace(*publicHost), strings.TrimSpace(*addr))
+`, publicHostValue, addrValue)
 	readmeBody := fmt.Sprintf(`# GPM Access Bridge Deployment Pack
 
 Generated files:
@@ -1503,7 +1512,7 @@ Install outline:
 Smoke checks:
 - curl -fsS http://%s/health
 - curl -fsS -H 'X-GPM-Bridge-Code: CODE' http://%s/bridge/helper-web
-`, envName, scriptName, unitName, caddyName, nginxName, *user, *group, *installDir, unitName, unitName, unitName, *addr, *addr)
+`, envName, scriptName, unitName, caddyName, nginxName, *user, *group, *installDir, unitName, unitName, unitName, addrValue, addrValue)
 	if err := writeFileWithMode(filepath.Join(*outDir, envName), []byte(envBody), 0o600); err != nil {
 		return err
 	}
@@ -1554,6 +1563,88 @@ func sanitizeSystemdName(raw string) string {
 		return "gpm-access-bridge"
 	}
 	return b.String()
+}
+
+func validateBridgeDeployPublicHost(raw string) (string, error) {
+	host := strings.TrimSpace(raw)
+	if host == "" {
+		return "", errors.New("bridge-service-deploy-pack requires --public-host")
+	}
+	if strings.Contains(host, "://") || strings.ContainsAny(host, "/\\") {
+		return "", errors.New("--public-host must be a bare DNS name or IPv4 address, not a URL or path")
+	}
+	if strings.Contains(host, ":") {
+		return "", errors.New("--public-host must not include a port or IPv6 literal in generated reverse-proxy examples")
+	}
+	if hasBridgeDeployConfigMeta(host) {
+		return "", errors.New("--public-host contains unsafe reverse-proxy config characters")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.To4() == nil {
+			return "", errors.New("--public-host must use DNS or IPv4 for generated reverse-proxy examples")
+		}
+		return host, nil
+	}
+	if len(host) > 253 {
+		return "", errors.New("--public-host is too long")
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" {
+			return "", errors.New("--public-host contains an empty DNS label")
+		}
+		if len(label) > 63 {
+			return "", errors.New("--public-host DNS labels must be 63 characters or fewer")
+		}
+		for i, r := range label {
+			valid := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-'
+			if !valid {
+				return "", errors.New("--public-host DNS labels may only contain letters, digits, and hyphens")
+			}
+			if (i == 0 || i == len(label)-1) && r == '-' {
+				return "", errors.New("--public-host DNS labels must not start or end with hyphen")
+			}
+		}
+	}
+	return host, nil
+}
+
+func validateBridgeDeployListenAddr(raw string) (string, error) {
+	addr := strings.TrimSpace(raw)
+	if addr == "" {
+		return "", errors.New("bridge-service-deploy-pack requires --addr")
+	}
+	if hasBridgeDeployConfigMeta(addr) {
+		return "", errors.New("--addr contains unsafe reverse-proxy config characters")
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", fmt.Errorf("--addr must be host:port: %w", err)
+	}
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return "", errors.New("--addr host is required")
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return "", errors.New("--addr port must be an integer from 1 to 65535")
+	}
+	if !isLoopbackListenAddr(addr) {
+		return "", errors.New("--addr must use a loopback host for generated reverse-proxy deploy packs")
+	}
+	return net.JoinHostPort(host, port), nil
+}
+
+func hasBridgeDeployConfigMeta(value string) bool {
+	for _, r := range value {
+		if r <= ' ' || r == 0x7f {
+			return true
+		}
+		switch r {
+		case '{', '}', ';', '"', '\'', '`', '$', '(', ')', '<', '>', '|', '&', '#':
+			return true
+		}
+	}
+	return false
 }
 
 func isLoopbackListenAddr(raw string) bool {

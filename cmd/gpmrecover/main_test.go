@@ -299,6 +299,47 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}); err == nil || !strings.Contains(err.Error(), "loopback") {
 		t.Fatalf("expected query-code deploy pack on non-loopback to fail closed, got %v", err)
 	}
+	for _, tc := range []struct {
+		name       string
+		publicHost string
+		want       string
+	}{
+		{name: "url", publicHost: "https://bridge.example", want: "bare DNS name"},
+		{name: "semicolon", publicHost: "bridge.example; root *", want: "unsafe"},
+		{name: "newline", publicHost: "bridge.example\nserver_name evil.example", want: "unsafe"},
+		{name: "port", publicHost: "bridge.example:443", want: "port"},
+	} {
+		err := runBridgeServiceDeployPack([]string{
+			"--out-dir", filepath.Join(dir, "bridge-deploy-bad-public-host-"+tc.name),
+			"--config-sha256", serviceConfigHash,
+			"--access-code-sha256", codeHashOut.SHA256,
+			"--public-host", tc.publicHost,
+		})
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("expected invalid public-host %q to fail with %q, got %v", tc.publicHost, tc.want, err)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		addr string
+		want string
+	}{
+		{name: "missing-port", addr: "127.0.0.1", want: "host:port"},
+		{name: "bad-port", addr: "127.0.0.1:99999", want: "port"},
+		{name: "non-loopback", addr: "0.0.0.0:18980", want: "loopback"},
+		{name: "semicolon", addr: "127.0.0.1:18980; root *", want: "unsafe"},
+		{name: "newline", addr: "127.0.0.1:18980\nproxy_pass evil", want: "unsafe"},
+	} {
+		err := runBridgeServiceDeployPack([]string{
+			"--out-dir", filepath.Join(dir, "bridge-deploy-bad-addr-"+tc.name),
+			"--config-sha256", serviceConfigHash,
+			"--access-code-sha256", codeHashOut.SHA256,
+			"--addr", tc.addr,
+		})
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("expected invalid addr %q to fail with %q, got %v", tc.addr, tc.want, err)
+		}
+	}
 	if err := runBridgeServiceServe([]string{
 		"--config", filepath.Join(dir, "missing-bridge-service-config.json"),
 		"--config-sha256", strings.Repeat("a", 64),
