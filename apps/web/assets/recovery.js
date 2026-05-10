@@ -746,6 +746,19 @@
     return normalizePack(artifact);
   }
 
+  function normalizeSignedArtifactForHandoff(artifact) {
+    const normalized = normalizeSignedArtifact(artifact);
+    if (!artifact || !artifact.signature) {
+      throw new Error("Signed recovery artifact signature is required");
+    }
+    normalized.signature = {
+      alg: trimString(artifact.signature.alg),
+      key_id: trimString(artifact.signature.key_id),
+      sig: trimString(artifact.signature.sig),
+    };
+    return normalized;
+  }
+
   function normalizeSource(source) {
     const normalized = {
       source_id: trimString(source.source_id),
@@ -1621,7 +1634,8 @@
     if (kind === "access-pack") {
       const artifact = parseJSONInput(els.packInput.value, "Signed recovery artifact");
       kind = signedArtifactKind(artifact);
-      payload = normalizeSignedArtifact(artifact);
+      payload = normalizeSignedArtifactForHandoff(artifact);
+      await validateDecodedTextEnvelopePayload({ kind, payload });
     } else if (kind === "trust-store") {
       payload = await validateTrustStoreKeys(readTrustStoreInput(), { requireUsable: false });
     } else if (kind === "bridge-helper-registry") {
@@ -1632,6 +1646,7 @@
       if (isBridgeHelperRegistryArtifact(registry)) {
         kind = "bridge-helper-registry-signed";
         payload = normalizeBridgeHelperRegistryArtifact(registry);
+        await validateDecodedTextEnvelopePayload({ kind, payload });
       } else {
         payload = normalizeHelperRegistry(registry);
       }
