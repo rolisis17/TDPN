@@ -142,11 +142,12 @@ Exit criteria:
 - one organization key can be added to a local trust store and used for verification/checking
 - a browser-local UI can verify a signed pack or bridge invite against a trusted organization key and list trusted paths
 - verified bridge invites show helper contact/copy actions only after trust checks pass
+- bridge invites can be checked against a helper registry so active helpers pass and quarantined, disabled, wrong-organization, or expired helper windows fail closed
 - signed packs, bridge invites, and trust material can be exported/imported as text handoffs for chat, email, print, or future QR use
 - a QR PNG can be generated from a `GPMREC1` text handoff in the CLI or browser and scanned back into the browser with native QR detection or bundled fallback scanning
 - unknown, disabled, expired, or wrong-organization keys fail closed
 - bridge invites must be short-lived, currently max 14 days from issue to expiry
-- bridge invites can be policy-gated for minimum helper paths, distinct helper/contact hosts, helper contact, and manual fallback
+- bridge invites can be policy-gated for minimum helper paths, distinct helper/contact hosts, helper contact, manual fallback, and optional helper registry status
 - trusted entries can be checked for reachable/unreachable/timeout/skipped status
 - malformed, expired, or badly signed packs/invites fail closed
 - docs explain the user flow in non-technical language

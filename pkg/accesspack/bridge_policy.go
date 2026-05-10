@@ -7,35 +7,42 @@ import (
 )
 
 type BridgeInvitePolicyOptions struct {
-	MinAccessPaths        int           `json:"min_access_paths"`
-	MinDistinctHosts      int           `json:"min_distinct_hosts"`
-	MaxLifetime           time.Duration `json:"max_lifetime"`
-	RequireHelperContact  bool          `json:"require_helper_contact"`
-	RequireManualFallback bool          `json:"require_manual_fallback"`
+	MinAccessPaths        int                   `json:"min_access_paths"`
+	MinDistinctHosts      int                   `json:"min_distinct_hosts"`
+	MaxLifetime           time.Duration         `json:"max_lifetime"`
+	RequireHelperContact  bool                  `json:"require_helper_contact"`
+	RequireManualFallback bool                  `json:"require_manual_fallback"`
+	HelperRegistry        *BridgeHelperRegistry `json:"-"`
 }
 
 type BridgeInvitePolicyReport struct {
-	Status             string                `json:"status"`
-	InviteID           string                `json:"invite_id"`
-	OrganizationID     string                `json:"organization_id"`
-	HelperID           string                `json:"helper_id"`
-	AccessPathsCount   int                   `json:"access_paths_count"`
-	DistinctHostsCount int                   `json:"distinct_hosts_count"`
-	DistinctHosts      []string              `json:"distinct_hosts"`
-	LifetimeSeconds    int64                 `json:"lifetime_seconds"`
-	MaxLifetimeSeconds int64                 `json:"max_lifetime_seconds"`
-	HasHelperContact   bool                  `json:"has_helper_contact"`
-	HasManualFallback  bool                  `json:"has_manual_fallback"`
-	Policy             BridgeInvitePolicy    `json:"policy"`
-	Findings           []BridgePolicyFinding `json:"findings"`
+	Status                  string                `json:"status"`
+	InviteID                string                `json:"invite_id"`
+	OrganizationID          string                `json:"organization_id"`
+	HelperID                string                `json:"helper_id"`
+	AccessPathsCount        int                   `json:"access_paths_count"`
+	DistinctHostsCount      int                   `json:"distinct_hosts_count"`
+	DistinctHosts           []string              `json:"distinct_hosts"`
+	LifetimeSeconds         int64                 `json:"lifetime_seconds"`
+	MaxLifetimeSeconds      int64                 `json:"max_lifetime_seconds"`
+	HasHelperContact        bool                  `json:"has_helper_contact"`
+	HasManualFallback       bool                  `json:"has_manual_fallback"`
+	HelperRegistryChecked   bool                  `json:"helper_registry_checked"`
+	HelperRegistered        bool                  `json:"helper_registered"`
+	HelperStatus            string                `json:"helper_status,omitempty"`
+	HelperAllowedOrg        bool                  `json:"helper_allowed_org"`
+	HelperRegistryContactOK bool                  `json:"helper_registry_contact_ok"`
+	Policy                  BridgeInvitePolicy    `json:"policy"`
+	Findings                []BridgePolicyFinding `json:"findings"`
 }
 
 type BridgeInvitePolicy struct {
-	MinAccessPaths        int   `json:"min_access_paths"`
-	MinDistinctHosts      int   `json:"min_distinct_hosts"`
-	MaxLifetimeSeconds    int64 `json:"max_lifetime_seconds"`
-	RequireHelperContact  bool  `json:"require_helper_contact"`
-	RequireManualFallback bool  `json:"require_manual_fallback"`
+	MinAccessPaths          int   `json:"min_access_paths"`
+	MinDistinctHosts        int   `json:"min_distinct_hosts"`
+	MaxLifetimeSeconds      int64 `json:"max_lifetime_seconds"`
+	RequireHelperContact    bool  `json:"require_helper_contact"`
+	RequireManualFallback   bool  `json:"require_manual_fallback"`
+	RequireRegisteredHelper bool  `json:"require_registered_helper"`
 }
 
 type BridgePolicyFinding struct {
@@ -69,11 +76,12 @@ func CheckBridgeInvitePolicy(invite BridgeInvite, options BridgeInvitePolicyOpti
 		HasHelperContact:   strings.TrimSpace(invite.Helper.ContactURL) != "",
 		MaxLifetimeSeconds: int64(options.MaxLifetime.Seconds()),
 		Policy: BridgeInvitePolicy{
-			MinAccessPaths:        options.MinAccessPaths,
-			MinDistinctHosts:      options.MinDistinctHosts,
-			MaxLifetimeSeconds:    int64(options.MaxLifetime.Seconds()),
-			RequireHelperContact:  options.RequireHelperContact,
-			RequireManualFallback: options.RequireManualFallback,
+			MinAccessPaths:          options.MinAccessPaths,
+			MinDistinctHosts:        options.MinDistinctHosts,
+			MaxLifetimeSeconds:      int64(options.MaxLifetime.Seconds()),
+			RequireHelperContact:    options.RequireHelperContact,
+			RequireManualFallback:   options.RequireManualFallback,
+			RequireRegisteredHelper: options.HelperRegistry != nil,
 		},
 	}
 	if err := ValidateBridgeInvite(invite, now); err != nil {
@@ -102,6 +110,9 @@ func CheckBridgeInvitePolicy(invite BridgeInvite, options BridgeInvitePolicyOpti
 	}
 	if options.RequireManualFallback && !report.HasManualFallback {
 		report.addFinding("bridge_invite_missing_manual_fallback", "error", "bridge invite needs a manual or external-app fallback path")
+	}
+	if options.HelperRegistry != nil {
+		checkBridgeHelperRegistryPolicy(invite, options.HelperRegistry, now, issuedAt, expiresAt, &report)
 	}
 	if len(report.Findings) > 0 {
 		report.Status = "fail"
@@ -171,6 +182,92 @@ func bridgeInviteHasManualFallback(invite BridgeInvite) bool {
 		}
 	}
 	return false
+}
+
+func checkBridgeHelperRegistryPolicy(invite BridgeInvite, registry *BridgeHelperRegistry, now time.Time, issuedAt time.Time, expiresAt time.Time, report *BridgeInvitePolicyReport) {
+	report.HelperRegistryChecked = true
+	if registry == nil {
+		return
+	}
+	normalized := NormalizeBridgeHelperRegistry(*registry)
+	if err := ValidateBridgeHelperRegistry(normalized, time.Time{}); err != nil {
+		report.addFinding("invalid_bridge_helper_registry", "error", err.Error())
+		return
+	}
+	helper, ok := findBridgeHelperRegistration(normalized, invite.Helper.HelperID)
+	if !ok {
+		report.addFinding("bridge_helper_not_registered", "error", "bridge invite helper is not present in the helper registry")
+		return
+	}
+	report.HelperRegistered = true
+	report.HelperStatus = helper.Status
+	report.HelperAllowedOrg = bridgeHelperAllowsOrg(helper, invite.Organization.OrgID)
+	report.HelperRegistryContactOK = bridgeHelperContactMatches(helper, invite.Helper.ContactURL)
+	if helper.Status != BridgeHelperStatusActive {
+		message := "bridge helper is not active in the helper registry"
+		if helper.QuarantineReason != "" {
+			message += ": " + helper.QuarantineReason
+		}
+		report.addFinding("bridge_helper_not_active", "error", message)
+	}
+	if !report.HelperAllowedOrg {
+		report.addFinding("bridge_helper_org_not_allowed", "error", "bridge helper is not registered for this organization")
+	}
+	if !report.HelperRegistryContactOK {
+		report.addFinding("bridge_helper_contact_mismatch", "error", "bridge invite helper contact does not match the helper registry")
+	}
+	activeFrom, activeFromErr := parseOptionalBridgeRegistryTime("helper.active_from_utc", helper.ActiveFromUTC)
+	activeUntil, activeUntilErr := parseOptionalBridgeRegistryTime("helper.active_until_utc", helper.ActiveUntilUTC)
+	if activeFromErr != nil {
+		report.addFinding("bridge_helper_active_from_invalid", "error", activeFromErr.Error())
+	}
+	if activeUntilErr != nil {
+		report.addFinding("bridge_helper_active_until_invalid", "error", activeUntilErr.Error())
+	}
+	if !activeFrom.IsZero() {
+		if now.Before(activeFrom) {
+			report.addFinding("bridge_helper_not_active_yet", "error", "bridge helper active window has not started")
+		}
+		if !issuedAt.IsZero() && issuedAt.Before(activeFrom) {
+			report.addFinding("bridge_invite_before_helper_active", "error", "bridge invite was issued before the helper active window")
+		}
+	}
+	if !activeUntil.IsZero() {
+		if !activeUntil.After(now) {
+			report.addFinding("bridge_helper_expired", "error", "bridge helper active window has ended")
+		}
+		if !expiresAt.IsZero() && expiresAt.After(activeUntil) {
+			report.addFinding("bridge_invite_exceeds_helper_window", "error", "bridge invite expires after the helper active window")
+		}
+	}
+}
+
+func findBridgeHelperRegistration(registry BridgeHelperRegistry, helperID string) (BridgeHelperRegistration, bool) {
+	helperID = strings.TrimSpace(helperID)
+	for _, helper := range registry.Helpers {
+		if helper.HelperID == helperID {
+			return helper, true
+		}
+	}
+	return BridgeHelperRegistration{}, false
+}
+
+func bridgeHelperAllowsOrg(helper BridgeHelperRegistration, orgID string) bool {
+	orgID = strings.TrimSpace(orgID)
+	for _, allowedOrgID := range helper.OrgIDs {
+		if strings.TrimSpace(allowedOrgID) == orgID {
+			return true
+		}
+	}
+	return false
+}
+
+func bridgeHelperContactMatches(helper BridgeHelperRegistration, inviteContactURL string) bool {
+	registryContact := strings.TrimSpace(helper.ContactURL)
+	if registryContact == "" {
+		return true
+	}
+	return registryContact == strings.TrimSpace(inviteContactURL)
 }
 
 func (report *BridgeInvitePolicyReport) addFinding(code string, severity string, message string) {

@@ -24,9 +24,10 @@ import (
 )
 
 const (
-	maxPackFileBytes  int64 = 2 * 1024 * 1024
-	maxKeyFileBytes   int64 = 8 * 1024
-	maxTrustFileBytes int64 = 512 * 1024
+	maxPackFileBytes           int64 = 2 * 1024 * 1024
+	maxKeyFileBytes            int64 = 8 * 1024
+	maxTrustFileBytes          int64 = 512 * 1024
+	maxBridgeRegistryFileBytes int64 = 512 * 1024
 )
 
 type keyOutput struct {
@@ -152,7 +153,7 @@ func usage() {
   go run ./cmd/gpmrecover sign --pack FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-sign --invite FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
-  go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE)
+  go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE]
   go run ./cmd/gpmrecover trust-add --trust-store FILE --org-id ID --org-name NAME --public-key-file FILE
   go run ./cmd/gpmrecover trust-list --trust-store FILE
   go run ./cmd/gpmrecover trust-remove --trust-store FILE --org-id ID --key-id ID
@@ -604,6 +605,7 @@ func runBridgePolicy(args []string) error {
 	inviteFile := fs.String("invite", "", "path to signed bridge invite JSON")
 	publicFile := fs.String("public-key-file", "", "path to public key file for one-off verification")
 	trustStoreFile := fs.String("trust-store", "", "path to access recovery trust store JSON")
+	helperRegistryFile := fs.String("helper-registry", "", "optional bridge helper registry JSON for active/quarantine policy")
 	minPaths := fs.Int("min-paths", 2, "minimum helper access paths")
 	minHosts := fs.Int("min-distinct-hosts", 2, "minimum distinct helper/contact hosts")
 	maxLifetimeHours := fs.Int("max-lifetime-hours", int(accesspack.MaxBridgeInviteLifetime/time.Hour), "maximum invite lifetime in hours")
@@ -628,6 +630,14 @@ func runBridgePolicy(args []string) error {
 	if err != nil {
 		return err
 	}
+	var helperRegistry *accesspack.BridgeHelperRegistry
+	if strings.TrimSpace(*helperRegistryFile) != "" {
+		registry, err := loadBridgeHelperRegistryFile(*helperRegistryFile)
+		if err != nil {
+			return err
+		}
+		helperRegistry = &registry
+	}
 	maxLifetime := time.Duration(*maxLifetimeHours) * time.Hour
 	report := accesspack.CheckBridgeInvitePolicy(verified.Invite, accesspack.BridgeInvitePolicyOptions{
 		MinAccessPaths:        *minPaths,
@@ -635,6 +645,7 @@ func runBridgePolicy(args []string) error {
 		MaxLifetime:           maxLifetime,
 		RequireHelperContact:  *requireContact,
 		RequireManualFallback: *requireManualFallback,
+		HelperRegistry:        helperRegistry,
 	}, time.Now().UTC())
 	out := bridgePolicyOutput{
 		Status:   report.Status,
@@ -753,7 +764,10 @@ func runDemoBundle(args []string) error {
 	if _, err := accesspack.VerifyBridgeInvite(signedInvite, pub, now); err != nil {
 		return fmt.Errorf("verify signed demo bridge invite: %w", err)
 	}
-	bridgePolicy := accesspack.CheckBridgeInvitePolicy(signedInvite, accesspack.DefaultBridgeInvitePolicyOptions(), now)
+	bridgeHelperRegistry := demoBridgeHelperRegistry(strings.TrimSpace(*orgID), strings.TrimSpace(*helperContact), now)
+	bridgePolicyOptions := accesspack.DefaultBridgeInvitePolicyOptions()
+	bridgePolicyOptions.HelperRegistry = &bridgeHelperRegistry
+	bridgePolicy := accesspack.CheckBridgeInvitePolicy(signedInvite, bridgePolicyOptions, now)
 	if bridgePolicy.Status != "pass" {
 		return fmt.Errorf("demo bridge invite policy failed: %+v", bridgePolicy.Findings)
 	}
@@ -783,6 +797,9 @@ func runDemoBundle(args []string) error {
 		return err
 	}
 	if err := writeTrustStoreFile(addFile("trust_store", "recovery-trust.json"), store); err != nil {
+		return err
+	}
+	if err := writeBridgeHelperRegistryFile(addFile("bridge_helper_registry", "bridge-helper-registry.json"), bridgeHelperRegistry); err != nil {
 		return err
 	}
 
@@ -818,6 +835,7 @@ func runDemoBundle(args []string) error {
 			"Import recovery-trust.json as the trust store.",
 			"Import access-pack.signed.json or bridge-invite.signed.json as the signed artifact.",
 			"Or paste/scan the generated GPMREC1 text/QR handoffs.",
+			"Run bridge-policy with bridge-helper-registry.json before enabling a helper route in a service.",
 		},
 	}
 	manifestPath := addFile("manifest", "demo-manifest.json")
@@ -898,6 +916,24 @@ func demoBridgeInvite(orgID string, orgName string, baseURL string, helperURL st
 		SafetyNotes: []string{
 			"This invite proves the helper route was signed by the organization key.",
 			"Never share private keys, wallet seed phrases, or passwords with a helper.",
+		},
+	}
+}
+
+func demoBridgeHelperRegistry(orgID string, helperContact string, now time.Time) accesspack.BridgeHelperRegistry {
+	return accesspack.BridgeHelperRegistry{
+		Version: accesspack.BridgeHelperRegistryVersion,
+		Helpers: []accesspack.BridgeHelperRegistration{
+			{
+				HelperID:       "helper-demo",
+				DisplayName:    "Demo bridge helper",
+				Status:         accesspack.BridgeHelperStatusActive,
+				OrgIDs:         []string{orgID},
+				ContactURL:     helperContact,
+				ActiveFromUTC:  now.Add(-1 * time.Hour).Format(time.RFC3339),
+				ActiveUntilUTC: now.Add(8 * 24 * time.Hour).Format(time.RFC3339),
+				UpdatedAtUTC:   now.Format(time.RFC3339),
+			},
 		},
 	}
 }
@@ -1055,6 +1091,30 @@ func writeTrustStoreFile(path string, store accesspack.TrustStore) error {
 		return errors.New("--trust-store is required")
 	}
 	body, err := accesspack.MarshalTrustStore(store)
+	if err != nil {
+		return err
+	}
+	return writeFileWithMode(path, body, 0o644)
+}
+
+func loadBridgeHelperRegistryFile(path string) (accesspack.BridgeHelperRegistry, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return accesspack.BridgeHelperRegistry{}, errors.New("--helper-registry is required")
+	}
+	body, err := readInputFileStrict(path, "bridge helper registry", maxBridgeRegistryFileBytes)
+	if err != nil {
+		return accesspack.BridgeHelperRegistry{}, err
+	}
+	return accesspack.ParseBridgeHelperRegistry(body)
+}
+
+func writeBridgeHelperRegistryFile(path string, registry accesspack.BridgeHelperRegistry) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return errors.New("--helper-registry is required")
+	}
+	body, err := accesspack.MarshalBridgeHelperRegistry(registry)
 	if err != nil {
 		return err
 	}

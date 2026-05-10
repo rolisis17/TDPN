@@ -110,6 +110,81 @@ func TestBridgeInvitePolicyRejectsWeakDiversity(t *testing.T) {
 	}
 }
 
+func TestBridgeInvitePolicyUsesHelperRegistry(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	registry := testBridgeHelperRegistry()
+	options := DefaultBridgeInvitePolicyOptions()
+	options.HelperRegistry = &registry
+	report := CheckBridgeInvitePolicy(testBridgeInvite(), options, now)
+	if report.Status != "pass" {
+		t.Fatalf("expected policy pass, got %+v", report)
+	}
+	if !report.HelperRegistryChecked || !report.HelperRegistered || !report.HelperAllowedOrg || !report.HelperRegistryContactOK {
+		t.Fatalf("expected helper registry pass fields, got %+v", report)
+	}
+	if report.Policy.RequireRegisteredHelper != true {
+		t.Fatalf("expected registered-helper policy to be visible, got %+v", report.Policy)
+	}
+}
+
+func TestBridgeInvitePolicyRejectsQuarantinedHelper(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	registry := testBridgeHelperRegistry()
+	registry.Helpers[0].Status = BridgeHelperStatusQuarantined
+	registry.Helpers[0].QuarantineReason = "abuse report pending review"
+	options := DefaultBridgeInvitePolicyOptions()
+	options.HelperRegistry = &registry
+	report := CheckBridgeInvitePolicy(testBridgeInvite(), options, now)
+	if report.Status != "fail" {
+		t.Fatalf("expected policy fail, got %+v", report)
+	}
+	if !sawBridgePolicyFinding(report, "bridge_helper_not_active") {
+		t.Fatalf("expected quarantined helper finding, got %+v", report.Findings)
+	}
+}
+
+func TestBridgeInvitePolicyRejectsUnregisteredHelper(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	registry := testBridgeHelperRegistry()
+	registry.Helpers = nil
+	options := DefaultBridgeInvitePolicyOptions()
+	options.HelperRegistry = &registry
+	report := CheckBridgeInvitePolicy(testBridgeInvite(), options, now)
+	if report.Status != "fail" {
+		t.Fatalf("expected policy fail, got %+v", report)
+	}
+	if !sawBridgePolicyFinding(report, "bridge_helper_not_registered") {
+		t.Fatalf("expected unregistered helper finding, got %+v", report.Findings)
+	}
+}
+
+func sawBridgePolicyFinding(report BridgeInvitePolicyReport, code string) bool {
+	for _, finding := range report.Findings {
+		if finding.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func testBridgeHelperRegistry() BridgeHelperRegistry {
+	return BridgeHelperRegistry{
+		Version: BridgeHelperRegistryVersion,
+		Helpers: []BridgeHelperRegistration{
+			{
+				HelperID:       "helper-1",
+				DisplayName:    "Demo Helper",
+				Status:         BridgeHelperStatusActive,
+				OrgIDs:         []string{"demo-org"},
+				ContactURL:     "https://helper.example/contact",
+				ActiveFromUTC:  "2026-05-09T00:00:00Z",
+				ActiveUntilUTC: "2026-05-18T00:00:00Z",
+				UpdatedAtUTC:   "2026-05-10T00:00:00Z",
+			},
+		},
+	}
+}
+
 func testBridgeInvite() BridgeInvite {
 	return BridgeInvite{
 		SchemaVersion: SchemaVersion,

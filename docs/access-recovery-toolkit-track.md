@@ -129,10 +129,12 @@ Draft schema:
 - `docs/schemas/access-recovery-pack-v0.schema.json`
 - `docs/schemas/access-recovery-bridge-invite-v0.schema.json`
 - `docs/schemas/access-recovery-trust-store-v1.schema.json`
+- `docs/schemas/access-recovery-bridge-helper-registry-v1.schema.json`
 
 Example:
 - `docs/examples/access-recovery-pack.example.json`
 - `docs/examples/access-recovery-bridge-invite.example.json`
+- `docs/examples/access-recovery-bridge-helper-registry.example.json`
 
 First CLI:
 - `go run ./cmd/gpmrecover demo-bundle --out-dir .easy-node-logs/access-recovery-demo`
@@ -140,7 +142,7 @@ First CLI:
 - `go run ./cmd/gpmrecover bridge-sign --invite docs/examples/access-recovery-bridge-invite.example.json --private-key-file .easy-node-logs/recovery.key --out .easy-node-logs/bridge-invite.signed.json`
 - `go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub`
 - `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --show-paths`
-- `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub`
+- `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub --timeout-sec 8`
 
 Demo bundle flow:
@@ -149,6 +151,7 @@ Demo bundle flow:
   - signed and unsigned access-pack JSON
   - signed and unsigned bridge-invite JSON
   - `recovery-trust.json`
+  - `bridge-helper-registry.json`
   - `GPMREC1` text handoffs for the pack, bridge invite, and trust store
   - QR PNGs for the pack and bridge invite
   - `demo-manifest.json` listing every generated file
@@ -160,7 +163,7 @@ Local trust-store flow:
 - `go run ./cmd/gpmrecover trust-list --trust-store .easy-node-logs/recovery-trust.json`
 - `go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --show-paths`
 - `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --show-paths`
-- `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json`
+- `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.json`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --timeout-sec 8`
 - `go run ./cmd/gpmrecover trust-remove --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID`
 
@@ -185,9 +188,10 @@ Bridge-invite rules:
 - bridge invites are helper hints, not new roots of trust
 - bridge invites must expire within 14 days of issue time
 - `bridge-policy` defaults require at least two helper paths, at least two distinct helper/contact hosts, a helper contact URL, and a manual/external-app fallback path
+- `bridge-policy --helper-registry` additionally requires the helper to be active, registered for the invite organization, inside its active window, and not quarantined or disabled
 - the helper contact and helper paths are shown only after signature, expiry, org id, and trusted-key checks pass
 - the browser gives copy/open actions for the invite id, helper id, helper contact, and verified helper paths
-- production policy still needs service-level rotation rules before a public bridge service is enabled
+- the helper registry is the first service-level rotation/quarantine control; a public bridge service still needs online rate limits and abuse reporting before launch
 
 `check` keeps trust and reachability separate:
 - it verifies the pack before probing anything
@@ -218,6 +222,7 @@ Do first:
 - bridge-invite signing/verification library
 - CLI sign/verify for packs and bridge invites
 - CLI bridge-invite policy gate for helper/contact diversity
+- CLI bridge helper registry gate for active/quarantined/disabled helpers
 - CLI reachability check that does not confuse reachable with trusted
 - local trust-store file
 - browser verifier/import screen
@@ -232,7 +237,7 @@ Do first:
 - docs explaining how a user visualizes it
 
 Do next:
-- bridge service rotation/quarantine policy
+- bridge service rate limits, abuse reports, and online registry publication
 
 Do later:
 - bridge service

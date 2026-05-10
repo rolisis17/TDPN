@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpm.local/schemas/access-recovery-bridge-helper-registry-v1.schema.json",
+  "title": "Access Recovery Bridge Helper Registry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "helpers"],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "helpers": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["helper_id", "status", "org_ids"],
+        "properties": {
+          "helper_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._:-]{2,127}$"
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "quarantined", "disabled"]
+          },
+          "org_ids": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._:-]{2,127}$"
+            }
+          },
+          "contact_url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 240
+          },
+          "active_from_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "active_until_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "quarantine_reason": {
+            "type": "string",
+            "maxLength": 180
+          },
+          "updated_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}

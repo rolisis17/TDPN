@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "helpers": [
+    {
+      "helper_id": "helper-perth-1",
+      "display_name": "Perth community helper",
+      "status": "active",
+      "org_ids": ["freenews-demo"],
+      "contact_url": "https://helper.example/contact/freenews",
+      "active_from_utc": "2026-05-10T00:00:00Z",
+      "active_until_utc": "2099-01-01T00:00:00Z",
+      "updated_at_utc": "2026-05-10T00:00:00Z"
+    },
+    {
+      "helper_id": "helper-old-1",
+      "display_name": "Old helper under review",
+      "status": "quarantined",
+      "org_ids": ["freenews-demo"],
+      "contact_url": "https://old-helper.example/contact/freenews",
+      "quarantine_reason": "Abuse report pending review",
+      "updated_at_utc": "2026-05-10T00:00:00Z"
+    }
+  ]
+}

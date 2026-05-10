@@ -27,6 +27,7 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	signedPack := filepath.Join(dir, "pack.signed.json")
 	unsignedBridge := filepath.Join(dir, "bridge.json")
 	signedBridge := filepath.Join(dir, "bridge.signed.json")
+	helperRegistry := filepath.Join(dir, "bridge-helper-registry.json")
 	trustStore := filepath.Join(dir, "trust-store.json")
 
 	if err := runGen([]string{"--private-key-out", privateKey, "--public-key-out", publicKey}); err != nil {
@@ -52,10 +53,13 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgeSign([]string{"--invite", unsignedBridge, "--private-key-file", privateKey, "--out", signedBridge}); err != nil {
 		t.Fatalf("bridge-sign: %v", err)
 	}
+	if err := writeBridgeHelperRegistryFile(helperRegistry, testCLIBridgeHelperRegistry(server.URL)); err != nil {
+		t.Fatalf("write helper registry: %v", err)
+	}
 	if err := runBridgeVerify([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--show-paths"}); err != nil {
 		t.Fatalf("bridge-verify: %v", err)
 	}
-	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--helper-registry", helperRegistry}); err != nil {
 		t.Fatalf("bridge-policy: %v", err)
 	}
 	if err := runVerify([]string{"--pack", signedPack, "--public-key-file", publicKey, "--show-paths"}); err != nil {
@@ -76,7 +80,7 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgeVerify([]string{"--invite", signedBridge, "--trust-store", trustStore, "--show-paths"}); err != nil {
 		t.Fatalf("bridge-verify with trust store: %v", err)
 	}
-	if err := runBridgePolicy([]string{"--invite", signedBridge, "--trust-store", trustStore}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--trust-store", trustStore, "--helper-registry", helperRegistry}); err != nil {
 		t.Fatalf("bridge-policy with trust store: %v", err)
 	}
 	if err := runCheck([]string{"--pack", signedPack, "--trust-store", trustStore, "--timeout-sec", "2"}); err != nil {
@@ -126,7 +130,7 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgeVerify([]string{"--invite", importedBridge, "--trust-store", importedStore}); err != nil {
 		t.Fatalf("bridge-verify imported bridge invite: %v", err)
 	}
-	if err := runBridgePolicy([]string{"--invite", importedBridge, "--trust-store", importedStore}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", importedBridge, "--trust-store", importedStore, "--helper-registry", helperRegistry}); err != nil {
 		t.Fatalf("bridge-policy imported bridge invite: %v", err)
 	}
 	pubBody, err := os.ReadFile(publicKey)
@@ -180,6 +184,7 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 		"trust_store",
 		"access_pack_signed",
 		"bridge_invite_signed",
+		"bridge_helper_registry",
 		"access_pack_text",
 		"bridge_invite_text",
 		"trust_store_text",
@@ -197,7 +202,7 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 	if err := runBridgeVerify([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"], "--show-paths"}); err != nil {
 		t.Fatalf("verify generated bridge invite: %v", err)
 	}
-	if err := runBridgePolicy([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"]}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"], "--helper-registry", manifest.Files["bridge_helper_registry"]}); err != nil {
 		t.Fatalf("policy generated bridge invite: %v", err)
 	}
 	for _, key := range []string{"access_pack_qr", "bridge_invite_qr"} {
@@ -268,6 +273,25 @@ func testBridgeInvite(serverURL string) accesspack.BridgeInvite {
 		AccessPaths: []accesspack.AccessPath{
 			{PathID: "bridge-main", Kind: "bridge", URL: serverURL + "/bridge", Priority: 10},
 			{PathID: "bridge-contact", Kind: "instructions", URL: "mailto:bridge-helper@example.com", Priority: 20, RequiresExternalApp: true},
+		},
+	}
+}
+
+func testCLIBridgeHelperRegistry(serverURL string) accesspack.BridgeHelperRegistry {
+	now := time.Now().UTC().Truncate(time.Second)
+	return accesspack.BridgeHelperRegistry{
+		Version: accesspack.BridgeHelperRegistryVersion,
+		Helpers: []accesspack.BridgeHelperRegistration{
+			{
+				HelperID:       "helper-cli",
+				DisplayName:    "CLI Helper",
+				Status:         accesspack.BridgeHelperStatusActive,
+				OrgIDs:         []string{"cli-org"},
+				ContactURL:     serverURL + "/contact",
+				ActiveFromUTC:  now.Add(-2 * time.Hour).Format(time.RFC3339),
+				ActiveUntilUTC: now.Add(8 * 24 * time.Hour).Format(time.RFC3339),
+				UpdatedAtUTC:   now.Format(time.RFC3339),
+			},
 		},
 	}
 }
