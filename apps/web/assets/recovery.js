@@ -1864,7 +1864,7 @@
     clearNode(els.factsGrid);
     clearNode(els.pathsList);
     els.pathCount.textContent = "0";
-    setStatus("idle", "Waiting for pack", "Import or paste a signed pack and a trusted organization key store.");
+    setStatus("idle", "Waiting for pack", "Import or paste a signed pack plus a trusted-key handoff or trust store.");
   });
 
   els.packFile.addEventListener("change", async () => {
