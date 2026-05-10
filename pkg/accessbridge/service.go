@@ -105,6 +105,7 @@ func (s *Service) Handler() http.Handler {
 }
 
 func (s *Service) handleHealth(w http.ResponseWriter, r *http.Request) {
+	setBridgeSecurityHeaders(w)
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -120,6 +121,7 @@ func (s *Service) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleBridge(w http.ResponseWriter, r *http.Request) {
+	setBridgeSecurityHeaders(w)
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -166,6 +168,7 @@ func (s *Service) handleBridge(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleAbuse(w http.ResponseWriter, r *http.Request) {
+	setBridgeSecurityHeaders(w)
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -256,9 +259,16 @@ func sourceKey(r *http.Request) string {
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
+	setBridgeSecurityHeaders(w)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func setBridgeSecurityHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 }
 
 func parseAccessCodeHash(raw string) ([]byte, error) {

@@ -188,6 +188,7 @@ Local trust-store flow:
 - `go run ./cmd/gpmrecover bridge-service-check --config .easy-node-logs/bridge-service-config.json --path-id helper-web`
 - `go run ./cmd/gpmrecover bridge-service-code-hash --code-file .easy-node-logs/bridge-code.txt --out .easy-node-logs/bridge-code-hash.json`
 - `go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/bridge-service-config.json --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/bridge-abuse.jsonl --access-code-sha256 HASH`
+- `go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/bridge-deploy --access-code-sha256 HASH`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --timeout-sec 8`
 - `go run ./cmd/gpmrecover trust-remove --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID`
 
@@ -235,6 +236,8 @@ Bridge-invite rules:
 - `bridge-service-check` is the first runtime preflight hook: it rejects unsigned/stale service configs, expired helper windows, missing abuse/rate commitments, unknown paths, and manual/external-app paths before a helper bridge serves traffic
 - `bridge-service-code-hash` derives an out-of-band access-code hash so helpers do not store plaintext invite codes in their service config
 - `bridge-service-serve` wraps that preflight in a minimal HTTP service with `/health`, `/bridge/{path_id}`, optional `X-GPM-Bridge-Code`/`?code=` ticket gating, per-source fixed-window limits, optional signed-path redirects, and `/abuse` JSONL logging
+- `bridge-service-serve` emits no-store/no-referrer/nosniff headers so ticket codes and recovery URLs are not cached or leaked through browser referrers
+- `bridge-service-deploy-pack` emits a helper-owned env file, shell wrapper, README, and hardened systemd unit template for Linux deployment
 
 `check` keeps trust and reachability separate:
 - it verifies the pack before probing anything
@@ -297,7 +300,7 @@ Do first:
 - docs explaining how a user visualizes it
 
 Do next:
-- proxy/redirect mode hardening and operator-owned deployment packaging for bridge services
+- bridge-service install smoke script and reverse-proxy guidance for HTTPS/TLS termination
 
 Do later:
 - Outline/Shadowsocks/Tor/GPM launch helpers

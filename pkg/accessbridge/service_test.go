@@ -37,6 +37,9 @@ func TestServiceAllowsSignedBridgePathAndRateLimits(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected bridge ok, got %d body=%s", rr.Code, rr.Body.String())
 	}
+	if rr.Header().Get("Referrer-Policy") != "no-referrer" || rr.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("expected bridge security headers, got %+v", rr.Header())
+	}
 	var out BridgeResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
 		t.Fatalf("unmarshal bridge response: %v", err)

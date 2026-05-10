@@ -177,6 +177,30 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if codeHashOut.SHA256 == "" || len(codeHashOut.SHA256) != 64 {
 		t.Fatalf("unexpected bridge code hash: %+v", codeHashOut)
 	}
+	deployDir := filepath.Join(dir, "bridge-deploy")
+	if err := runBridgeServiceDeployPack([]string{
+		"--out-dir", deployDir,
+		"--service-name", "gpm-access-bridge-test",
+		"--install-dir", "/etc/gpm/access-bridge-test",
+		"--config", "/etc/gpm/access-bridge-test/bridge-service-config.json",
+		"--access-code-sha256", codeHashOut.SHA256,
+	}); err != nil {
+		t.Fatalf("bridge-service-deploy-pack: %v", err)
+	}
+	unitBody, err := os.ReadFile(filepath.Join(deployDir, "gpm-access-bridge-test.service"))
+	if err != nil {
+		t.Fatalf("read bridge deploy unit: %v", err)
+	}
+	if !bytes.Contains(unitBody, []byte("NoNewPrivileges=true")) || !bytes.Contains(unitBody, []byte("run-gpm-access-bridge-test.sh")) {
+		t.Fatalf("unexpected bridge deploy unit:\n%s", string(unitBody))
+	}
+	envBody, err := os.ReadFile(filepath.Join(deployDir, "gpm-access-bridge-test.env"))
+	if err != nil {
+		t.Fatalf("read bridge deploy env: %v", err)
+	}
+	if !bytes.Contains(envBody, []byte("GPM_BRIDGE_ACCESS_CODE_SHA256=")) {
+		t.Fatalf("unexpected bridge deploy env:\n%s", string(envBody))
+	}
 	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--require-helper-registry"}); err == nil {
 		t.Fatal("expected bridge-policy to fail when helper registry is required but missing")
 	}

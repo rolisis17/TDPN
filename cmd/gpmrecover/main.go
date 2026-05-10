@@ -18,6 +18,7 @@ import (
 	"os"
 	pathpkg "path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -181,6 +182,8 @@ func main() {
 		err = runBridgeServiceServe(os.Args[2:])
 	case "bridge-service-code-hash":
 		err = runBridgeServiceCodeHash(os.Args[2:])
+	case "bridge-service-deploy-pack":
+		err = runBridgeServiceDeployPack(os.Args[2:])
 	case "bridge-registry-sign":
 		err = runBridgeRegistrySign(os.Args[2:])
 	case "bridge-registry-verify":
@@ -237,6 +240,7 @@ func usage() {
   go run ./cmd/gpmrecover bridge-service-check --config FILE [--path-id ID | --url URL] [--out FILE]
   go run ./cmd/gpmrecover bridge-service-serve --config FILE [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] [--access-code-sha256 HEX] [--redirect 0]
   go run ./cmd/gpmrecover bridge-service-code-hash (--code TEXT | --code-file FILE) [--out FILE]
+  go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir DIR [--install-dir /etc/gpm/access-bridge] [--service-name gpm-access-bridge]
   go run ./cmd/gpmrecover bridge-registry-sign --helper-registry FILE --org-id ID --org-name NAME --private-key-file FILE --out FILE [--registry-id ID] [--lifetime-hours HOURS]
   go run ./cmd/gpmrecover bridge-registry-verify --signed-registry FILE (--trust-store FILE | --public-key-file FILE) [--out-registry FILE] [--show-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
@@ -1116,6 +1120,175 @@ func runBridgeServiceCodeHash(args []string) error {
 	}
 	_, err = os.Stdout.Write(body)
 	return err
+}
+
+func runBridgeServiceDeployPack(args []string) error {
+	fs := flag.NewFlagSet("bridge-service-deploy-pack", flag.ContinueOnError)
+	outDir := fs.String("out-dir", "", "directory to write deployment files")
+	installDir := fs.String("install-dir", "/etc/gpm/access-bridge", "target install directory used inside generated unit")
+	serviceName := fs.String("service-name", "gpm-access-bridge", "systemd service name")
+	binary := fs.String("binary", "/usr/local/bin/gpmrecover", "installed gpmrecover binary path")
+	configPath := fs.String("config", "/etc/gpm/access-bridge/bridge-service-config.json", "installed bridge service config path")
+	addr := fs.String("addr", "127.0.0.1:18980", "bridge service listen address")
+	rps := fs.Int("rps", 2, "fixed-window requests per second per source; 0 disables")
+	maxSources := fs.Int("max-sources", 1024, "maximum tracked sources for rate limiting")
+	abuseLog := fs.String("abuse-log", "/var/log/gpm/access-bridge-abuse.jsonl", "JSONL abuse report log path")
+	accessCodeSHA256 := fs.String("access-code-sha256", "", "optional sha256 hex digest of an out-of-band bridge access code")
+	redirect := fs.Bool("redirect", false, "redirect allowed bridge requests to the signed access URL instead of returning JSON")
+	user := fs.String("user", "gpm-bridge", "service user")
+	group := fs.String("group", "gpm-bridge", "service group")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*outDir) == "" {
+		return errors.New("bridge-service-deploy-pack requires --out-dir")
+	}
+	if *rps < 0 || *maxSources < 0 {
+		return errors.New("rps and max-sources must be non-negative")
+	}
+	if err := os.MkdirAll(*outDir, 0o755); err != nil {
+		return err
+	}
+	name := sanitizeSystemdName(*serviceName)
+	envName := name + ".env"
+	scriptName := "run-" + name + ".sh"
+	unitName := name + ".service"
+	envBody := bridgeServiceEnvFile(map[string]string{
+		"GPM_BRIDGE_BINARY":             *binary,
+		"GPM_BRIDGE_CONFIG":             *configPath,
+		"GPM_BRIDGE_ADDR":               *addr,
+		"GPM_BRIDGE_RPS":                fmt.Sprintf("%d", *rps),
+		"GPM_BRIDGE_MAX_SOURCES":        fmt.Sprintf("%d", *maxSources),
+		"GPM_BRIDGE_ABUSE_LOG":          *abuseLog,
+		"GPM_BRIDGE_ACCESS_CODE_SHA256": *accessCodeSHA256,
+		"GPM_BRIDGE_REDIRECT":           fmt.Sprintf("%t", *redirect),
+	})
+	scriptBody := `#!/usr/bin/env sh
+set -eu
+
+set -- "${GPM_BRIDGE_BINARY}" bridge-service-serve \
+  --config "${GPM_BRIDGE_CONFIG}" \
+  --addr "${GPM_BRIDGE_ADDR}" \
+  --rps "${GPM_BRIDGE_RPS}" \
+  --max-sources "${GPM_BRIDGE_MAX_SOURCES}" \
+  --redirect "${GPM_BRIDGE_REDIRECT}"
+
+if [ -n "${GPM_BRIDGE_ABUSE_LOG:-}" ]; then
+  set -- "$@" --abuse-log "${GPM_BRIDGE_ABUSE_LOG}"
+fi
+if [ -n "${GPM_BRIDGE_ACCESS_CODE_SHA256:-}" ]; then
+  set -- "$@" --access-code-sha256 "${GPM_BRIDGE_ACCESS_CODE_SHA256}"
+fi
+
+exec "$@"
+`
+	unitBody := fmt.Sprintf(`[Unit]
+Description=GPM access recovery bridge service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=%s
+Group=%s
+EnvironmentFile=%s/%s
+ExecStart=%s/%s
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/log/gpm
+ReadOnlyPaths=%s
+
+[Install]
+WantedBy=multi-user.target
+`, *user, *group, strings.TrimRight(*installDir, "/"), envName, strings.TrimRight(*installDir, "/"), scriptName, strings.TrimRight(*installDir, "/"))
+	readmeBody := fmt.Sprintf(`# GPM Access Bridge Deployment Pack
+
+Generated files:
+- %s: environment settings
+- %s: command wrapper
+- %s: systemd unit
+
+Install outline:
+1. Create the service user/group named %s:%s.
+2. Copy these files into %s.
+3. Copy bridge-service-config.json into the configured GPM_BRIDGE_CONFIG path.
+4. Install %s as /etc/systemd/system/%s.
+5. Run: systemctl daemon-reload && systemctl enable --now %s
+
+Smoke checks:
+- curl -fsS http://%s/health
+- curl -fsS -H 'X-GPM-Bridge-Code: CODE' http://%s/bridge/helper-web
+`, envName, scriptName, unitName, *user, *group, *installDir, unitName, unitName, unitName, *addr, *addr)
+	if err := writeFileWithMode(filepath.Join(*outDir, envName), []byte(envBody), 0o600); err != nil {
+		return err
+	}
+	if err := writeFileWithMode(filepath.Join(*outDir, scriptName), []byte(scriptBody), 0o755); err != nil {
+		return err
+	}
+	if err := writeFileWithMode(filepath.Join(*outDir, unitName), []byte(unitBody), 0o644); err != nil {
+		return err
+	}
+	if err := writeFileWithMode(filepath.Join(*outDir, "README.md"), []byte(readmeBody), 0o644); err != nil {
+		return err
+	}
+	out := map[string]string{
+		"status":       "ok",
+		"out_dir":      *outDir,
+		"env_file":     filepath.Join(*outDir, envName),
+		"script_file":  filepath.Join(*outDir, scriptName),
+		"service_file": filepath.Join(*outDir, unitName),
+		"readme_file":  filepath.Join(*outDir, "README.md"),
+	}
+	return json.NewEncoder(os.Stdout).Encode(out)
+}
+
+func sanitizeSystemdName(raw string) string {
+	raw = strings.TrimSpace(raw)
+	var b strings.Builder
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "gpm-access-bridge"
+	}
+	return b.String()
+}
+
+func bridgeServiceEnvFile(values map[string]string) string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, key := range keys {
+		b.WriteString(key)
+		b.WriteByte('=')
+		b.WriteString(envQuote(values[key]))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func envQuote(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `"`, `\"`)
+	value = strings.ReplaceAll(value, "\n", "")
+	value = strings.ReplaceAll(value, "\r", "")
+	return `"` + value + `"`
 }
 
 func runBridgeRegistrySign(args []string) error {
