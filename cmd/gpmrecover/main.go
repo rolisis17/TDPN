@@ -77,6 +77,13 @@ type bridgePolicyOutput struct {
 	Policy   accesspack.BridgeInvitePolicyReport `json:"policy"`
 }
 
+type bridgeRegistrySetStatusOutput struct {
+	Status       string                                            `json:"status"`
+	RegistryFile string                                            `json:"registry_file"`
+	OutputFile   string                                            `json:"output_file"`
+	Update       accesspack.BridgeHelperRegistryStatusUpdateReport `json:"update"`
+}
+
 type trustAddOutput struct {
 	Status     string `json:"status"`
 	TrustStore string `json:"trust_store"`
@@ -118,6 +125,8 @@ func main() {
 		err = runBridgePolicy(os.Args[2:])
 	case "bridge-registry-check":
 		err = runBridgeRegistryCheck(os.Args[2:])
+	case "bridge-registry-set-status":
+		err = runBridgeRegistrySetStatus(os.Args[2:])
 	case "trust-add":
 		err = runTrustAdd(os.Args[2:])
 	case "trust-list":
@@ -157,6 +166,7 @@ func usage() {
   go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
   go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE] [--require-helper-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
+  go run ./cmd/gpmrecover bridge-registry-set-status --helper-registry FILE --helper-id ID --status active|quarantined|disabled [--reason TEXT] [--out FILE]
   go run ./cmd/gpmrecover trust-add --trust-store FILE --org-id ID --org-name NAME --public-key-file FILE
   go run ./cmd/gpmrecover trust-list --trust-store FILE
   go run ./cmd/gpmrecover trust-remove --trust-store FILE --org-id ID --key-id ID
@@ -695,6 +705,49 @@ func runBridgeRegistryCheck(args []string) error {
 	return nil
 }
 
+func runBridgeRegistrySetStatus(args []string) error {
+	fs := flag.NewFlagSet("bridge-registry-set-status", flag.ContinueOnError)
+	helperRegistryFile := fs.String("helper-registry", "", "path to bridge helper registry JSON")
+	helperID := fs.String("helper-id", "", "helper id to update")
+	status := fs.String("status", "", "new helper status: active, quarantined, or disabled")
+	reason := fs.String("reason", "", "required reason when quarantining or disabling a helper")
+	outFile := fs.String("out", "", "path to write updated registry JSON; defaults to --helper-registry")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	registry, err := loadBridgeHelperRegistryFile(*helperRegistryFile)
+	if err != nil {
+		return err
+	}
+	outputFile := strings.TrimSpace(*outFile)
+	if outputFile == "" {
+		outputFile = strings.TrimSpace(*helperRegistryFile)
+	}
+	updatedRegistry, report := accesspack.SetBridgeHelperRegistryStatus(registry, accesspack.BridgeHelperRegistryStatusUpdateOptions{
+		HelperID: *helperID,
+		Status:   *status,
+		Reason:   *reason,
+	}, time.Now().UTC())
+	out := bridgeRegistrySetStatusOutput{
+		Status:       report.Status,
+		RegistryFile: strings.TrimSpace(*helperRegistryFile),
+		OutputFile:   outputFile,
+		Update:       report,
+	}
+	if report.Status == "pass" {
+		if err := writeBridgeHelperRegistryFile(outputFile, updatedRegistry); err != nil {
+			return err
+		}
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+		return err
+	}
+	if report.Status != "pass" {
+		return errors.New("bridge helper registry status update failed")
+	}
+	return nil
+}
+
 func runCheck(args []string) error {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	packFile := fs.String("pack", "", "path to signed access pack JSON")
@@ -872,6 +925,7 @@ func runDemoBundle(args []string) error {
 			"Import access-pack.signed.json or bridge-invite.signed.json as the signed artifact.",
 			"Or paste/scan the generated GPMREC1 text/QR handoffs.",
 			"Run bridge-registry-check with bridge-helper-registry.json when changing helper status.",
+			"Use bridge-registry-set-status to quarantine or re-enable helpers without hand-editing registry JSON.",
 			"Run bridge-policy with bridge-helper-registry.json before enabling a helper route in a service.",
 		},
 	}

@@ -59,6 +59,13 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgeRegistryCheck([]string{"--helper-registry", helperRegistry, "--helper-id", "helper-cli", "--org-id", "cli-org", "--require-active"}); err != nil {
 		t.Fatalf("bridge-registry-check: %v", err)
 	}
+	quarantinedRegistry := filepath.Join(dir, "bridge-helper-registry.quarantined.json")
+	if err := runBridgeRegistrySetStatus([]string{"--helper-registry", helperRegistry, "--helper-id", "helper-cli", "--status", "quarantined", "--reason", "maintenance window", "--out", quarantinedRegistry}); err != nil {
+		t.Fatalf("bridge-registry-set-status quarantine: %v", err)
+	}
+	if err := runBridgeRegistryCheck([]string{"--helper-registry", quarantinedRegistry, "--helper-id", "helper-cli", "--require-active"}); err == nil {
+		t.Fatal("expected quarantined helper to fail active registry check")
+	}
 	if err := runBridgeVerify([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--show-paths"}); err != nil {
 		t.Fatalf("bridge-verify: %v", err)
 	}

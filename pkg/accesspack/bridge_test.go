@@ -218,7 +218,56 @@ func TestBridgeHelperRegistryCheckRejectsInactiveRequiredHelper(t *testing.T) {
 	}
 }
 
+func TestBridgeHelperRegistryStatusUpdateQuarantinesHelper(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	registry := testBridgeHelperRegistry()
+	updated, report := SetBridgeHelperRegistryStatus(registry, BridgeHelperRegistryStatusUpdateOptions{
+		HelperID: "helper-1",
+		Status:   BridgeHelperStatusQuarantined,
+		Reason:   "abuse report under review",
+	}, now)
+	if report.Status != "pass" || !report.Updated {
+		t.Fatalf("expected update pass, got %+v", report)
+	}
+	if report.PreviousStatus != BridgeHelperStatusActive || report.NewStatus != BridgeHelperStatusQuarantined {
+		t.Fatalf("unexpected status report: %+v", report)
+	}
+	helper := updated.Helpers[0]
+	if helper.Status != BridgeHelperStatusQuarantined {
+		t.Fatalf("expected helper quarantined, got %+v", helper)
+	}
+	if helper.QuarantineReason != "abuse report under review" {
+		t.Fatalf("expected quarantine reason, got %+v", helper)
+	}
+	if helper.UpdatedAtUTC != now.Format(time.RFC3339) {
+		t.Fatalf("expected updated timestamp, got %+v", helper)
+	}
+}
+
+func TestBridgeHelperRegistryStatusUpdateRequiresReason(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	_, report := SetBridgeHelperRegistryStatus(testBridgeHelperRegistry(), BridgeHelperRegistryStatusUpdateOptions{
+		HelperID: "helper-1",
+		Status:   BridgeHelperStatusDisabled,
+	}, now)
+	if report.Status != "fail" {
+		t.Fatalf("expected update fail, got %+v", report)
+	}
+	if !sawBridgeRegistryUpdateFinding(report, "bridge_helper_status_reason_required") {
+		t.Fatalf("expected reason-required finding, got %+v", report.Findings)
+	}
+}
+
 func sawBridgeRegistryFinding(report BridgeHelperRegistryCheckReport, code string) bool {
+	for _, finding := range report.Findings {
+		if finding.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func sawBridgeRegistryUpdateFinding(report BridgeHelperRegistryStatusUpdateReport, code string) bool {
 	for _, finding := range report.Findings {
 		if finding.Code == code {
 			return true
