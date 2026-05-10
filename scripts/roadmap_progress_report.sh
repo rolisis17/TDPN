@@ -2443,6 +2443,7 @@ access_recovery_track_json_from_evidence() {
       | {
           status: $track_status,
           ready: ($track_status == "pilot-evidence-ready"),
+          pilot_handoff_ready: ($track_status == "pilot-evidence-ready"),
           local_rehearsal_ready: ($track_status == "local-rehearsal-ready"),
           needs_attention: ($track_status != "pilot-evidence-ready"),
           evidence_scope: evidence_scope,
@@ -13031,6 +13032,7 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
     notes: $notes,
     current_roadmap_track: $current_roadmap_track,
     access_recovery_evidence_required: $access_recovery_evidence_required,
+    access_recovery_pilot_handoff_ready: ($access_recovery_track.pilot_handoff_ready == true),
     access_recovery_track: $access_recovery_track,
     vpn_track: {
       readiness_status: $readiness_status,
@@ -13673,6 +13675,7 @@ cat >"$report_tmp" <<EOF_MD
 
 - Status: $(jq -r '.access_recovery_track.status' "$summary_json")
 - Ready: $(jq -r '.access_recovery_track.ready | tostring' "$summary_json")
+- Pilot handoff ready: $(jq -r '.access_recovery_pilot_handoff_ready | tostring' "$summary_json")
 - Needs attention: $(jq -r '.access_recovery_track.needs_attention | tostring' "$summary_json")
 - Policy: $(jq -r '.access_recovery_track.policy' "$summary_json")
 - Recommendation: $(jq -r '.access_recovery_track.recommendation' "$summary_json")

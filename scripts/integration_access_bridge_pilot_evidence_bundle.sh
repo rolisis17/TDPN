@@ -191,6 +191,8 @@ if ! jq -e \
     and .schema.minor == 1
     and .status == "pass"
     and .evidence_scope == "local_rehearsal"
+    and .pilot_handoff_ready == false
+    and .trusted_verifier_receipt_required == true
     and (.notes | contains("local rehearsal evidence"))
     and .evidence_policy.require_https == true
     and .evidence_policy.require_public_host == true

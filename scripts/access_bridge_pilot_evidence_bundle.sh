@@ -760,6 +760,8 @@ jq -n \
     generated_at_utc: $generated_at_utc,
     status: $status,
     evidence_scope: $evidence_scope,
+    pilot_handoff_ready: false,
+    trusted_verifier_receipt_required: true,
     notes: (
       if $status != "pass" then "Access bridge pilot evidence bundle needs operator action"
       elif $evidence_scope == "real_helper_https" and ($provenance_sign == "1") then "Access bridge pilot evidence bundle passed real helper HTTPS checks with signed provenance; trusted verifier receipt is required before operator handoff"

@@ -109,6 +109,10 @@
                 <input id="registry_file" type="file" accept="application/json,.json" />
               </label>
             </div>
+            <p class="recover-panel__hint" id="registry_policy_hint">
+              Bridge invites trust helper paths only after Verify Signed succeeds on a signed helper registry.
+              Unsigned registries are for local inspection only.
+            </p>
             <textarea
               id="registry_input"
               spellcheck="false"
@@ -159,7 +163,10 @@
         <div class="recover-status__main" data-state="idle" id="status_card">
           <p class="status-banner__label">Status</p>
           <h2 id="status-heading">Waiting for pack</h2>
-          <p id="status_detail">Import or paste a signed pack or bridge invite plus a trusted-key handoff or trust store.</p>
+          <p id="status_detail">
+            Import or paste a signed pack or bridge invite plus a trust store. Bridge invites also require a
+            verified signed helper registry before helper paths are trusted.
+          </p>
         </div>
         <div class="recover-facts" id="facts_grid" aria-label="Verified pack facts"></div>
       </section>

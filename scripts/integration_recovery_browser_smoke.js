@@ -8,6 +8,10 @@ const path = require("path");
 const vm = require("vm");
 
 const repoRoot = path.resolve(__dirname, "..");
+const recoveryHtml = fs.readFileSync(path.join(repoRoot, "apps", "web", "recovery.html"), "utf8");
+if (!recoveryHtml.includes("Bridge invites trust helper paths only after Verify Signed succeeds")) {
+  throw new Error("recovery page must disclose signed helper registry policy");
+}
 
 class Element {
   constructor(tagName, id = "") {
@@ -267,6 +271,7 @@ async function main() {
     "trust_download_btn",
     "trust_key_list",
     "verify_registry_btn",
+    "registry_policy_hint",
     "registry_summary",
     "handoff_input",
     "export_pack_text_btn",

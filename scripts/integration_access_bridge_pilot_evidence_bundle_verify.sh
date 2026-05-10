@@ -180,6 +180,8 @@ if ! jq -e '
   .schema.id == "access_bridge_pilot_evidence_bundle_verify_summary"
   and .status == "pass"
   and .rc == 0
+  and .pilot_handoff_ready == false
+  and .trusted_pilot_receipt_ready == true
   and .checks.summary_contract.enabled == true
   and .checks.tar_sha256.enabled == true
   and .checks.manifest.enabled == true
@@ -217,6 +219,8 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
 cp "$ORIGINAL_SMOKE_SUMMARY_COPY" "$BUNDLE_DIR/access_bridge_service_smoke_summary.json"
 if ! jq -e --arg original_sha "$SMOKE_SUMMARY_SHA256" --arg loose_sha "$TAMPERED_LOOSE_SMOKE_SUMMARY_SHA256" '
   .status == "pass"
+  and .pilot_handoff_ready == false
+  and .trusted_pilot_receipt_ready == true
   and .evidence_binding.smoke_summary_sha256 == $original_sha
   and .evidence_binding.smoke_summary_sha256 != $loose_sha
   and (.evidence_binding.smoke_summary_json | contains("/access_bridge_pilot_evidence_bundle/access_bridge_service_smoke_summary.json"))

@@ -133,6 +133,11 @@ if ! jq -e \
     and .smoke.auth_required == true
     and .smoke.missing_code_http_status == "401"
     and .smoke.wrong_code_http_status == "401"
+    and .smoke.valid_code_http_status == "200"
+    and .smoke.bridge_http_status == "200"
+    and .smoke.bridge_status == "ok"
+    and .smoke.bridge_security_headers_ok == true
+    and .smoke.base_host == "bridge.example"
     and .smoke.config_sha256 == $config_sha256
     and .smoke.summary_json == $smoke_summary
     and .expected_identity.helper_id == "helper-evidence"
@@ -154,6 +159,11 @@ if ! jq -e \
     and (.local_files.deploy_pack.env.access_code_sha256 | length == 64)
     and .local_files.deploy_pack.env.allow_query_code == "false"
     and .local_files.deploy_pack.env.trust_proxy_headers == "true"
+    and .local_files.deploy_pack.env.addr == "127.0.0.1:18980"
+    and .local_files.deploy_pack.proxy_examples.caddy_site_host == "bridge.example"
+    and .local_files.deploy_pack.proxy_examples.caddy_reverse_proxy == "127.0.0.1:18980"
+    and .local_files.deploy_pack.proxy_examples.nginx_server_name == "bridge.example"
+    and .local_files.deploy_pack.proxy_examples.nginx_proxy_pass == "127.0.0.1:18980"
     and (.local_files.deploy_pack.required_files | length == 6)
     and ([.local_files.deploy_pack.required_files[].sha256 | length == 64] | all)
     and ([.local_files.deploy_pack.required_files[].exists] | all)
@@ -161,6 +171,48 @@ if ! jq -e \
   ' "$SUMMARY_JSON" >/dev/null; then
   echo "access bridge deployment evidence integration failed: pass summary contract mismatch"
   cat "$SUMMARY_JSON"
+  exit 1
+fi
+
+NO_HEADERS_SMOKE_SUMMARY="$TMP_DIR/access_bridge_service_smoke_no_headers_summary.json"
+jq '.bridge.security_headers_ok = false' "$SMOKE_SUMMARY" >"$NO_HEADERS_SMOKE_SUMMARY"
+NO_HEADERS_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_no_headers_summary.json"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$NO_HEADERS_SMOKE_SUMMARY" \
+  --summary-json "$NO_HEADERS_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/no-headers.log" 2>&1
+no_headers_rc=$?
+set -e
+if [[ "$no_headers_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: missing security headers should fail"
+  cat "$NO_HEADERS_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .smoke.evidence_status == "fail" and .smoke.bridge_security_headers_ok == false and (.smoke.evidence_reason | contains("security headers")) and .recommended_next_action.id == "refresh_deployed_bridge_smoke"' "$NO_HEADERS_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: security headers summary mismatch"
+  cat "$NO_HEADERS_SUMMARY"
+  exit 1
+fi
+
+BAD_VALID_CODE_SMOKE_SUMMARY="$TMP_DIR/access_bridge_service_smoke_bad_valid_code_summary.json"
+jq '.auth.valid_code_http_status = "500"' "$SMOKE_SUMMARY" >"$BAD_VALID_CODE_SMOKE_SUMMARY"
+BAD_VALID_CODE_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_bad_valid_code_summary.json"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$BAD_VALID_CODE_SMOKE_SUMMARY" \
+  --summary-json "$BAD_VALID_CODE_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/bad-valid-code.log" 2>&1
+bad_valid_code_rc=$?
+set -e
+if [[ "$bad_valid_code_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: valid access-code non-200 should fail"
+  cat "$BAD_VALID_CODE_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .smoke.evidence_status == "fail" and .smoke.valid_code_http_status == "500" and (.smoke.evidence_reason | contains("valid access-code acceptance")) and .recommended_next_action.id == "refresh_deployed_bridge_smoke"' "$BAD_VALID_CODE_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: bad valid-code summary mismatch"
+  cat "$BAD_VALID_CODE_SUMMARY"
   exit 1
 fi
 
@@ -229,6 +281,106 @@ fi
 if ! jq -e '.status == "fail" and .local_files.deploy_pack.status == "fail" and .recommended_next_action.id == "stage_bridge_deploy_pack"' "$BAD_HASH_SUMMARY" >/dev/null; then
   echo "access bridge deployment evidence integration failed: malformed deploy hash summary mismatch"
   cat "$BAD_HASH_SUMMARY"
+  exit 1
+fi
+
+BAD_ADDR_DEPLOY_DIR="$TMP_DIR/bad-addr-deploy"
+cp -R "$DEPLOY_DIR" "$BAD_ADDR_DEPLOY_DIR"
+sed -i 's/GPM_BRIDGE_ADDR="127.0.0.1:18980"/GPM_BRIDGE_ADDR="127.evil.example:18980"/' "$BAD_ADDR_DEPLOY_DIR/gpm-access-bridge-evidence.env"
+BAD_ADDR_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_bad_addr_summary.json"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$SMOKE_SUMMARY" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$BAD_ADDR_DEPLOY_DIR" \
+  --service-name gpm-access-bridge-evidence \
+  --summary-json "$BAD_ADDR_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/bad-addr.log" 2>&1
+bad_addr_rc=$?
+set -e
+if [[ "$bad_addr_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: non-loopback deploy addr should fail"
+  cat "$BAD_ADDR_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .local_files.deploy_pack.status == "fail" and .local_files.deploy_pack.env.addr == "127.evil.example:18980" and (.local_files.deploy_pack.reason | contains("loopback host:port")) and .recommended_next_action.id == "stage_bridge_deploy_pack"' "$BAD_ADDR_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: bad deploy addr summary mismatch"
+  cat "$BAD_ADDR_SUMMARY"
+  exit 1
+fi
+
+BAD_CADDY_DEPLOY_DIR="$TMP_DIR/bad-caddy-deploy"
+cp -R "$DEPLOY_DIR" "$BAD_CADDY_DEPLOY_DIR"
+sed -i 's/reverse_proxy 127.0.0.1:18980/reverse_proxy evil.example:80/' "$BAD_CADDY_DEPLOY_DIR/gpm-access-bridge-evidence.Caddyfile.example"
+BAD_CADDY_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_bad_caddy_summary.json"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$SMOKE_SUMMARY" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$BAD_CADDY_DEPLOY_DIR" \
+  --service-name gpm-access-bridge-evidence \
+  --summary-json "$BAD_CADDY_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/bad-caddy.log" 2>&1
+bad_caddy_rc=$?
+set -e
+if [[ "$bad_caddy_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: mismatched Caddy reverse_proxy should fail"
+  cat "$BAD_CADDY_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .local_files.deploy_pack.status == "fail" and .local_files.deploy_pack.proxy_examples.caddy_reverse_proxy == "evil.example:80" and (.local_files.deploy_pack.reason | contains("Caddy example reverse_proxy")) and .recommended_next_action.id == "stage_bridge_deploy_pack"' "$BAD_CADDY_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: bad Caddy target summary mismatch"
+  cat "$BAD_CADDY_SUMMARY"
+  exit 1
+fi
+
+BAD_NGINX_DEPLOY_DIR="$TMP_DIR/bad-nginx-deploy"
+cp -R "$DEPLOY_DIR" "$BAD_NGINX_DEPLOY_DIR"
+sed -i 's#proxy_pass http://127.0.0.1:18980;#proxy_pass http://evil.example:80;#' "$BAD_NGINX_DEPLOY_DIR/gpm-access-bridge-evidence.nginx.example.conf"
+BAD_NGINX_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_bad_nginx_summary.json"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$SMOKE_SUMMARY" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$BAD_NGINX_DEPLOY_DIR" \
+  --service-name gpm-access-bridge-evidence \
+  --summary-json "$BAD_NGINX_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/bad-nginx.log" 2>&1
+bad_nginx_rc=$?
+set -e
+if [[ "$bad_nginx_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: mismatched nginx proxy_pass should fail"
+  cat "$BAD_NGINX_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .local_files.deploy_pack.status == "fail" and .local_files.deploy_pack.proxy_examples.nginx_proxy_pass == "evil.example:80" and (.local_files.deploy_pack.reason | contains("nginx example proxy_pass")) and .recommended_next_action.id == "stage_bridge_deploy_pack"' "$BAD_NGINX_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: bad nginx target summary mismatch"
+  cat "$BAD_NGINX_SUMMARY"
+  exit 1
+fi
+
+BAD_SERVER_NAME_DEPLOY_DIR="$TMP_DIR/bad-server-name-deploy"
+cp -R "$DEPLOY_DIR" "$BAD_SERVER_NAME_DEPLOY_DIR"
+sed -i 's/server_name bridge.example;/server_name other.example;/' "$BAD_SERVER_NAME_DEPLOY_DIR/gpm-access-bridge-evidence.nginx.example.conf"
+BAD_SERVER_NAME_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_bad_server_name_summary.json"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$SMOKE_SUMMARY" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$BAD_SERVER_NAME_DEPLOY_DIR" \
+  --service-name gpm-access-bridge-evidence \
+  --summary-json "$BAD_SERVER_NAME_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/bad-server-name.log" 2>&1
+bad_server_name_rc=$?
+set -e
+if [[ "$bad_server_name_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: nginx server_name mismatch should fail"
+  cat "$BAD_SERVER_NAME_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .local_files.deploy_pack.status == "fail" and .local_files.deploy_pack.proxy_examples.nginx_server_name == "other.example" and (.local_files.deploy_pack.reason | contains("server_name must match smoke base_url host")) and .recommended_next_action.id == "stage_bridge_deploy_pack"' "$BAD_SERVER_NAME_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: bad nginx server_name summary mismatch"
+  cat "$BAD_SERVER_NAME_SUMMARY"
   exit 1
 fi
 

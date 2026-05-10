@@ -63,6 +63,112 @@ is_sha256_hex() {
   [[ "${1:-}" =~ ^[A-Fa-f0-9]{64}$ ]]
 }
 
+has_bridge_deploy_config_meta() {
+  local value="${1:-}"
+  [[ "$value" == *" "* || "$value" == *$'\t'* || "$value" == *$'\n'* || "$value" == *$'\r'* ]] && return 0
+  [[ "$value" == *"{"* || "$value" == *"}"* || "$value" == *";"* || "$value" == *"\""* ]] && return 0
+  [[ "$value" == *"'"* || "$value" == *"\`"* || "$value" == *'$'* || "$value" == *"("* || "$value" == *")"* ]] && return 0
+  [[ "$value" == *"<"* || "$value" == *">"* || "$value" == *"|"* || "$value" == *"&"* || "$value" == *"#"* ]] && return 0
+  return 1
+}
+
+is_ipv4_addr() {
+  local value="${1:-}"
+  local a b c d extra
+  IFS=. read -r a b c d extra <<<"$value"
+  [[ -z "${extra:-}" && "$a" =~ ^[0-9]+$ && "$b" =~ ^[0-9]+$ && "$c" =~ ^[0-9]+$ && "$d" =~ ^[0-9]+$ ]] || return 1
+  ((a >= 0 && a <= 255 && b >= 0 && b <= 255 && c >= 0 && c <= 255 && d >= 0 && d <= 255))
+}
+
+is_loopback_host() {
+  local host="${1:-}"
+  if [[ "${host,,}" == "localhost" || "$host" == "::1" ]]; then
+    return 0
+  fi
+  is_ipv4_addr "$host" && [[ "$host" == 127.* ]]
+}
+
+split_host_port() {
+  local value="${1:-}"
+  local __host_var="$2"
+  local __port_var="$3"
+  local parsed_host="" parsed_port=""
+  if [[ "$value" =~ ^\[([^]]+)\]:([0-9]+)$ ]]; then
+    parsed_host="${BASH_REMATCH[1]}"
+    parsed_port="${BASH_REMATCH[2]}"
+  elif [[ "$value" =~ ^([^:]+):([0-9]+)$ ]]; then
+    parsed_host="${BASH_REMATCH[1]}"
+    parsed_port="${BASH_REMATCH[2]}"
+  else
+    return 1
+  fi
+  [[ -n "$parsed_host" && "$parsed_port" =~ ^[0-9]+$ ]] || return 1
+  ((parsed_port >= 1 && parsed_port <= 65535)) || return 1
+  printf -v "$__host_var" '%s' "$parsed_host"
+  printf -v "$__port_var" '%s' "$parsed_port"
+}
+
+is_loopback_listen_addr() {
+  local value="${1:-}"
+  local host="" port=""
+  has_bridge_deploy_config_meta "$value" && return 1
+  split_host_port "$value" host port || return 1
+  is_loopback_host "$host"
+}
+
+is_bridge_public_host() {
+  local host="${1:-}"
+  local label i ch
+  local -a labels
+  [[ -n "$host" && ${#host} -le 253 ]] || return 1
+  [[ "$host" != *"://"* && "$host" != *":"* && "$host" != *"/"* && "$host" != *"\\"* ]] || return 1
+  has_bridge_deploy_config_meta "$host" && return 1
+  if is_ipv4_addr "$host"; then
+    return 0
+  fi
+  IFS=. read -ra labels <<<"$host"
+  for label in "${labels[@]}"; do
+    [[ -n "$label" && ${#label} -le 63 ]] || return 1
+    [[ "$label" != -* && "$label" != *- ]] || return 1
+    for ((i = 0; i < ${#label}; i++)); do
+      ch="${label:i:1}"
+      [[ "$ch" =~ [A-Za-z0-9-] ]] || return 1
+    done
+  done
+}
+
+host_from_url() {
+  local url="${1:-}"
+  jq -nr --arg url "$url" '
+    $url
+    | sub("^https?://"; "")
+    | split("/")[0]
+    | sub(":[0-9]+$"; "")
+    | sub("^\\["; "")
+    | sub("\\]$"; "")
+  ' 2>/dev/null || true
+}
+
+extract_caddy_site_host() {
+  local file="$1"
+  sed -nE 's/^[[:space:]]*([^[:space:]{}#]+)[[:space:]]*\{[[:space:]]*$/\1/p' "$file" 2>/dev/null | head -n 1
+}
+
+extract_caddy_reverse_proxy() {
+  local file="$1"
+  sed -nE 's/^[[:space:]]*reverse_proxy[[:space:]]+([^[:space:]{}#]+).*/\1/p' "$file" 2>/dev/null | head -n 1
+}
+
+extract_nginx_server_name() {
+  local file="$1"
+  sed -nE 's/^[[:space:]]*server_name[[:space:]]+([^[:space:];]+);.*/\1/p' "$file" 2>/dev/null | head -n 1
+}
+
+extract_nginx_proxy_pass() {
+  local file="$1"
+  sed -nE 's#^[[:space:]]*proxy_pass[[:space:]]+http://([^[:space:];]+);.*#\1#p' "$file" 2>/dev/null | head -n 1
+}
+
 smoke_age_seconds() {
   local generated_at="$1"
   local now
@@ -337,7 +443,16 @@ smoke_age_sec="$(smoke_age_seconds "$smoke_generated_at_utc")"
 smoke_auth_required="$(jq -r '.auth.required // false' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_missing_code_http="$(json_string_or_empty "$smoke_summary_json" '.auth.missing_code_http_status')"
 smoke_wrong_code_http="$(json_string_or_empty "$smoke_summary_json" '.auth.wrong_code_http_status')"
+smoke_valid_code_http="$(json_string_or_empty "$smoke_summary_json" '.auth.valid_code_http_status')"
+smoke_bridge_http_status="$(json_string_or_empty "$smoke_summary_json" '.bridge.http_status')"
+smoke_bridge_status="$(json_string_or_empty "$smoke_summary_json" '.bridge.status')"
+smoke_bridge_security_headers_ok="$(jq -r 'if (.bridge.security_headers_ok // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_base_url="$(json_string_or_empty "$smoke_summary_json" '.base_url')"
+smoke_base_host="$(host_from_url "$smoke_base_url")"
+smoke_base_host_requires_proxy_match="false"
+if [[ -n "$smoke_base_host" ]] && ! is_loopback_host "$smoke_base_host"; then
+  smoke_base_host_requires_proxy_match="true"
+fi
 smoke_path_id="$(json_string_or_empty "$smoke_summary_json" '.path_id')"
 actual_helper_id="$(json_string_or_empty "$smoke_summary_json" '.health.helper_id')"
 actual_org_id="$(json_string_or_empty "$smoke_summary_json" '.health.organization_id')"
@@ -366,6 +481,17 @@ if [[ "$smoke_auth_required" != "true" ]]; then
 elif [[ "$smoke_missing_code_http" != "401" || "$smoke_wrong_code_http" != "401" ]]; then
   smoke_evidence_status="fail"
   smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary did not prove missing/wrong access-code rejection")"
+elif [[ "$smoke_valid_code_http" != "200" ]]; then
+  smoke_evidence_status="fail"
+  smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary did not prove valid access-code acceptance")"
+fi
+if [[ "$smoke_bridge_status" != "ok" || "$smoke_bridge_http_status" != "200" ]]; then
+  smoke_evidence_status="fail"
+  smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary did not prove bridge health is ok over HTTP 200")"
+fi
+if [[ "$smoke_bridge_security_headers_ok" != "true" ]]; then
+  smoke_evidence_status="fail"
+  smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary did not prove bridge security headers")"
 fi
 
 config_status="skip"
@@ -455,6 +581,11 @@ deploy_env_access_code_sha256=""
 deploy_env_allow_unauth_local=""
 deploy_env_allow_query_code=""
 deploy_env_trust_proxy_headers=""
+deploy_env_addr=""
+deploy_caddy_site_host=""
+deploy_caddy_reverse_proxy=""
+deploy_nginx_server_name=""
+deploy_nginx_proxy_pass=""
 if [[ -n "$deploy_pack_dir" ]]; then
   deploy_pack_dir="$(abs_path "$deploy_pack_dir")"
   deploy_status="pass"
@@ -511,6 +642,7 @@ if [[ -n "$deploy_pack_dir" ]]; then
       deploy_env_allow_unauth_local="$(env_file_value "$env_file" "GPM_BRIDGE_ALLOW_UNAUTH_LOCAL")"
       deploy_env_allow_query_code="$(env_file_value "$env_file" "GPM_BRIDGE_ALLOW_QUERY_CODE")"
       deploy_env_trust_proxy_headers="$(env_file_value "$env_file" "GPM_BRIDGE_TRUST_PROXY_HEADERS")"
+      deploy_env_addr="$(env_file_value "$env_file" "GPM_BRIDGE_ADDR")"
       if [[ -z "$deploy_env_access_code_sha256" && "$deploy_env_allow_unauth_local" != "true" ]]; then
         deploy_status="fail"
         deploy_reason="$(append_reason "$deploy_reason" "deploy env must include an access-code hash unless explicitly local unauthenticated")"
@@ -525,6 +657,10 @@ if [[ -n "$deploy_pack_dir" ]]; then
       if [[ "$deploy_env_trust_proxy_headers" != "true" ]]; then
         deploy_status="fail"
         deploy_reason="$(append_reason "$deploy_reason" "deploy env must trust loopback proxy headers for per-client rate limits")"
+      fi
+      if ! is_loopback_listen_addr "$deploy_env_addr"; then
+        deploy_status="fail"
+        deploy_reason="$(append_reason "$deploy_reason" "deploy env bridge addr must be loopback host:port")"
       fi
       if [[ -n "$deploy_env_config_sha256" ]] && ! is_sha256_hex "$deploy_env_config_sha256"; then
         deploy_status="fail"
@@ -553,11 +689,39 @@ if [[ -n "$deploy_pack_dir" ]]; then
         deploy_reason="$(append_reason "$deploy_reason" "systemd unit is missing expected hardening directives")"
       fi
     fi
-    if [[ -f "$caddy_file" ]] && ! grep -Fq 'header_up X-Forwarded-For {remote_host}' "$caddy_file"; then
-      deploy_status="fail"
-      deploy_reason="$(append_reason "$deploy_reason" "Caddy example must overwrite X-Forwarded-For with remote host")"
+    if [[ -f "$caddy_file" ]]; then
+      deploy_caddy_site_host="$(extract_caddy_site_host "$caddy_file")"
+      deploy_caddy_reverse_proxy="$(extract_caddy_reverse_proxy "$caddy_file")"
+      if ! is_bridge_public_host "$deploy_caddy_site_host"; then
+        deploy_status="fail"
+        deploy_reason="$(append_reason "$deploy_reason" "Caddy example site host must be a safe bare public host")"
+      elif [[ "$smoke_base_host_requires_proxy_match" == "true" && "$deploy_caddy_site_host" != "$smoke_base_host" ]]; then
+        deploy_status="fail"
+        deploy_reason="$(append_reason "$deploy_reason" "Caddy example site host must match smoke base_url host")"
+      fi
+      if [[ -z "$deploy_env_addr" || "$deploy_caddy_reverse_proxy" != "$deploy_env_addr" ]]; then
+        deploy_status="fail"
+        deploy_reason="$(append_reason "$deploy_reason" "Caddy example reverse_proxy must match GPM_BRIDGE_ADDR")"
+      fi
+      if ! grep -Fq 'header_up X-Forwarded-For {remote_host}' "$caddy_file"; then
+        deploy_status="fail"
+        deploy_reason="$(append_reason "$deploy_reason" "Caddy example must overwrite X-Forwarded-For with remote host")"
+      fi
     fi
     if [[ -f "$nginx_file" ]]; then
+      deploy_nginx_server_name="$(extract_nginx_server_name "$nginx_file")"
+      deploy_nginx_proxy_pass="$(extract_nginx_proxy_pass "$nginx_file")"
+      if ! is_bridge_public_host "$deploy_nginx_server_name"; then
+        deploy_status="fail"
+        deploy_reason="$(append_reason "$deploy_reason" "nginx example server_name must be a safe bare public host")"
+      elif [[ "$smoke_base_host_requires_proxy_match" == "true" && "$deploy_nginx_server_name" != "$smoke_base_host" ]]; then
+        deploy_status="fail"
+        deploy_reason="$(append_reason "$deploy_reason" "nginx example server_name must match smoke base_url host")"
+      fi
+      if [[ -z "$deploy_env_addr" || "$deploy_nginx_proxy_pass" != "$deploy_env_addr" ]]; then
+        deploy_status="fail"
+        deploy_reason="$(append_reason "$deploy_reason" "nginx example proxy_pass must match GPM_BRIDGE_ADDR")"
+      fi
       if ! grep -Fq 'proxy_set_header X-Forwarded-For $remote_addr;' "$nginx_file" ||
         grep -Fq '$proxy_add_x_forwarded_for' "$nginx_file"; then
         deploy_status="fail"
@@ -606,10 +770,15 @@ jq -n \
   --arg smoke_auth_required "$smoke_auth_required" \
   --arg smoke_missing_code_http "$smoke_missing_code_http" \
   --arg smoke_wrong_code_http "$smoke_wrong_code_http" \
+  --arg smoke_valid_code_http "$smoke_valid_code_http" \
+  --arg smoke_bridge_http_status "$smoke_bridge_http_status" \
+  --arg smoke_bridge_status "$smoke_bridge_status" \
+  --arg smoke_bridge_security_headers_ok "$smoke_bridge_security_headers_ok" \
   --arg smoke_config_sha256 "$smoke_config_sha256" \
   --arg smoke_evidence_status "$smoke_evidence_status" \
   --arg smoke_evidence_reason "$smoke_evidence_reason" \
   --arg smoke_base_url "$smoke_base_url" \
+  --arg smoke_base_host "$smoke_base_host" \
   --arg smoke_path_id "$smoke_path_id" \
   --arg expect_helper_id "$expect_helper_id" \
   --arg expect_org_id "$expect_org_id" \
@@ -635,6 +804,11 @@ jq -n \
   --arg deploy_env_allow_unauth_local "$deploy_env_allow_unauth_local" \
   --arg deploy_env_allow_query_code "$deploy_env_allow_query_code" \
   --arg deploy_env_trust_proxy_headers "$deploy_env_trust_proxy_headers" \
+  --arg deploy_env_addr "$deploy_env_addr" \
+  --arg deploy_caddy_site_host "$deploy_caddy_site_host" \
+  --arg deploy_caddy_reverse_proxy "$deploy_caddy_reverse_proxy" \
+  --arg deploy_nginx_server_name "$deploy_nginx_server_name" \
+  --arg deploy_nginx_proxy_pass "$deploy_nginx_proxy_pass" \
   --arg recommended_action_id "$recommended_action_id" \
   --arg recommended_action "$recommended_action" \
   --argjson config_exists "$config_exists" \
@@ -646,7 +820,7 @@ jq -n \
     schema: {
       id: "access_bridge_deployment_evidence_summary",
       major: 1,
-      minor: 0
+      minor: 1
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -667,10 +841,15 @@ jq -n \
       auth_required: ($smoke_auth_required == "true"),
       missing_code_http_status: $smoke_missing_code_http,
       wrong_code_http_status: $smoke_wrong_code_http,
+      valid_code_http_status: $smoke_valid_code_http,
+      bridge_http_status: $smoke_bridge_http_status,
+      bridge_status: $smoke_bridge_status,
+      bridge_security_headers_ok: ($smoke_bridge_security_headers_ok == "true"),
       config_sha256: $smoke_config_sha256,
       evidence_status: $smoke_evidence_status,
       evidence_reason: $smoke_evidence_reason,
       base_url: $smoke_base_url,
+      base_host: $smoke_base_host,
       path_id: $smoke_path_id,
       summary_json: $smoke_summary_json
     },
@@ -712,7 +891,14 @@ jq -n \
           access_code_sha256: $deploy_env_access_code_sha256,
           allow_unauthenticated_local: $deploy_env_allow_unauth_local,
           allow_query_code: $deploy_env_allow_query_code,
-          trust_proxy_headers: $deploy_env_trust_proxy_headers
+          trust_proxy_headers: $deploy_env_trust_proxy_headers,
+          addr: $deploy_env_addr
+        },
+        proxy_examples: {
+          caddy_site_host: $deploy_caddy_site_host,
+          caddy_reverse_proxy: $deploy_caddy_reverse_proxy,
+          nginx_server_name: $deploy_nginx_server_name,
+          nginx_proxy_pass: $deploy_nginx_proxy_pass
         },
         required_files: $deploy_files
       }

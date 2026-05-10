@@ -48,6 +48,100 @@ is_sha256_hex() {
   [[ "${1:-}" =~ ^[A-Fa-f0-9]{64}$ ]]
 }
 
+has_bridge_deploy_config_meta() {
+  local value="${1:-}"
+  [[ "$value" == *" "* || "$value" == *$'\t'* || "$value" == *$'\n'* || "$value" == *$'\r'* ]] && return 0
+  [[ "$value" == *"{"* || "$value" == *"}"* || "$value" == *";"* || "$value" == *"\""* ]] && return 0
+  [[ "$value" == *"'"* || "$value" == *"\`"* || "$value" == *'$'* || "$value" == *"("* || "$value" == *")"* ]] && return 0
+  [[ "$value" == *"<"* || "$value" == *">"* || "$value" == *"|"* || "$value" == *"&"* || "$value" == *"#"* ]] && return 0
+  return 1
+}
+
+is_ipv4_addr() {
+  local value="${1:-}"
+  local a b c d extra
+  IFS=. read -r a b c d extra <<<"$value"
+  [[ -z "${extra:-}" && "$a" =~ ^[0-9]+$ && "$b" =~ ^[0-9]+$ && "$c" =~ ^[0-9]+$ && "$d" =~ ^[0-9]+$ ]] || return 1
+  ((a >= 0 && a <= 255 && b >= 0 && b <= 255 && c >= 0 && c <= 255 && d >= 0 && d <= 255))
+}
+
+is_loopback_host() {
+  local host="${1:-}"
+  if [[ "${host,,}" == "localhost" || "$host" == "::1" ]]; then
+    return 0
+  fi
+  is_ipv4_addr "$host" && [[ "$host" == 127.* ]]
+}
+
+split_host_port() {
+  local value="${1:-}"
+  local __host_var="$2"
+  local __port_var="$3"
+  local parsed_host="" parsed_port=""
+  if [[ "$value" =~ ^\[([^]]+)\]:([0-9]+)$ ]]; then
+    parsed_host="${BASH_REMATCH[1]}"
+    parsed_port="${BASH_REMATCH[2]}"
+  elif [[ "$value" =~ ^([^:]+):([0-9]+)$ ]]; then
+    parsed_host="${BASH_REMATCH[1]}"
+    parsed_port="${BASH_REMATCH[2]}"
+  else
+    return 1
+  fi
+  [[ -n "$parsed_host" && "$parsed_port" =~ ^[0-9]+$ ]] || return 1
+  ((parsed_port >= 1 && parsed_port <= 65535)) || return 1
+  printf -v "$__host_var" '%s' "$parsed_host"
+  printf -v "$__port_var" '%s' "$parsed_port"
+}
+
+is_loopback_listen_addr() {
+  local value="${1:-}"
+  local host="" port=""
+  has_bridge_deploy_config_meta "$value" && return 1
+  split_host_port "$value" host port || return 1
+  is_loopback_host "$host"
+}
+
+is_bridge_public_host() {
+  local host="${1:-}"
+  local label i ch
+  local -a labels
+  [[ -n "$host" && ${#host} -le 253 ]] || return 1
+  [[ "$host" != *"://"* && "$host" != *":"* && "$host" != *"/"* && "$host" != *"\\"* ]] || return 1
+  has_bridge_deploy_config_meta "$host" && return 1
+  if is_ipv4_addr "$host"; then
+    return 0
+  fi
+  IFS=. read -ra labels <<<"$host"
+  for label in "${labels[@]}"; do
+    [[ -n "$label" && ${#label} -le 63 ]] || return 1
+    [[ "$label" != -* && "$label" != *- ]] || return 1
+    for ((i = 0; i < ${#label}; i++)); do
+      ch="${label:i:1}"
+      [[ "$ch" =~ [A-Za-z0-9-] ]] || return 1
+    done
+  done
+}
+
+extract_caddy_site_host() {
+  local file="$1"
+  sed -nE 's/^[[:space:]]*([^[:space:]{}#]+)[[:space:]]*\{[[:space:]]*$/\1/p' "$file" 2>/dev/null | head -n 1
+}
+
+extract_caddy_reverse_proxy() {
+  local file="$1"
+  sed -nE 's/^[[:space:]]*reverse_proxy[[:space:]]+([^[:space:]{}#]+).*/\1/p' "$file" 2>/dev/null | head -n 1
+}
+
+extract_nginx_server_name() {
+  local file="$1"
+  sed -nE 's/^[[:space:]]*server_name[[:space:]]+([^[:space:];]+);.*/\1/p' "$file" 2>/dev/null | head -n 1
+}
+
+extract_nginx_proxy_pass() {
+  local file="$1"
+  sed -nE 's#^[[:space:]]*proxy_pass[[:space:]]+http://([^[:space:];]+);.*#\1#p' "$file" 2>/dev/null | head -n 1
+}
+
 abs_path() {
   local path
   path="$(trim "${1:-}")"
@@ -234,6 +328,10 @@ env_allow_query_code=""
 env_trust_proxy_headers=""
 env_addr=""
 env_rps=""
+caddy_site_host=""
+caddy_reverse_proxy=""
+nginx_server_name=""
+nginx_proxy_pass=""
 if [[ -f "$env_file" ]]; then
   env_config_sha256="$(env_file_value "$env_file" "GPM_BRIDGE_CONFIG_SHA256")"
   env_access_code_sha256="$(env_file_value "$env_file" "GPM_BRIDGE_ACCESS_CODE_SHA256")"
@@ -270,7 +368,7 @@ if [[ -f "$env_file" ]]; then
   else
     add_check "trusted_proxy_headers_enabled" "fail" "trusted proxy headers should be enabled behind loopback proxy"
   fi
-  if [[ "$env_addr" == 127.* || "$env_addr" == localhost:* || "$env_addr" == "[::1]:"* || "$env_addr" == "::1:"* ]]; then
+  if is_loopback_listen_addr "$env_addr"; then
     add_check "loopback_bind" "pass" "bridge service is configured for loopback bind"
   else
     add_check "loopback_bind" "fail" "bridge service should bind to loopback behind HTTPS proxy"
@@ -306,6 +404,18 @@ if [[ -f "$unit_file" ]]; then
 fi
 
 if [[ -f "$caddy_file" ]]; then
+  caddy_site_host="$(extract_caddy_site_host "$caddy_file")"
+  caddy_reverse_proxy="$(extract_caddy_reverse_proxy "$caddy_file")"
+  if is_bridge_public_host "$caddy_site_host"; then
+    add_check "caddy_public_host_valid" "pass" "Caddy site host is a safe bare public host"
+  else
+    add_check "caddy_public_host_valid" "fail" "Caddy site host must be a safe bare DNS name or IPv4 address"
+  fi
+  if [[ -n "$env_addr" && "$caddy_reverse_proxy" == "$env_addr" ]]; then
+    add_check "caddy_reverse_proxy_target" "pass" "Caddy reverse_proxy target matches GPM_BRIDGE_ADDR"
+  else
+    add_check "caddy_reverse_proxy_target" "fail" "Caddy reverse_proxy target must match GPM_BRIDGE_ADDR"
+  fi
   if grep -Fq 'header_up X-Forwarded-For {remote_host}' "$caddy_file"; then
     add_check "caddy_xff_overwrite" "pass" "Caddy overwrites X-Forwarded-For"
   else
@@ -314,6 +424,18 @@ if [[ -f "$caddy_file" ]]; then
 fi
 
 if [[ -f "$nginx_file" ]]; then
+  nginx_server_name="$(extract_nginx_server_name "$nginx_file")"
+  nginx_proxy_pass="$(extract_nginx_proxy_pass "$nginx_file")"
+  if is_bridge_public_host "$nginx_server_name"; then
+    add_check "nginx_public_host_valid" "pass" "nginx server_name is a safe bare public host"
+  else
+    add_check "nginx_public_host_valid" "fail" "nginx server_name must be a safe bare DNS name or IPv4 address"
+  fi
+  if [[ -n "$env_addr" && "$nginx_proxy_pass" == "$env_addr" ]]; then
+    add_check "nginx_proxy_pass_target" "pass" "nginx proxy_pass target matches GPM_BRIDGE_ADDR"
+  else
+    add_check "nginx_proxy_pass_target" "fail" "nginx proxy_pass target must match GPM_BRIDGE_ADDR"
+  fi
   if grep -Fq 'proxy_set_header X-Forwarded-For $remote_addr;' "$nginx_file" &&
     ! grep -Fq '$proxy_add_x_forwarded_for' "$nginx_file"; then
     add_check "nginx_xff_overwrite" "pass" "nginx overwrites X-Forwarded-For"
@@ -347,6 +469,10 @@ jq -n \
   --arg env_trust_proxy_headers "$env_trust_proxy_headers" \
   --arg env_addr "$env_addr" \
   --arg env_rps "$env_rps" \
+  --arg caddy_site_host "$caddy_site_host" \
+  --arg caddy_reverse_proxy "$caddy_reverse_proxy" \
+  --arg nginx_server_name "$nginx_server_name" \
+  --arg nginx_proxy_pass "$nginx_proxy_pass" \
   --arg recommended_action_id "$recommended_action_id" \
   --arg recommended_action "$recommended_action" \
   --argjson fail_count "$fail_count" \
@@ -356,7 +482,7 @@ jq -n \
     schema: {
       id: "access_bridge_host_install_check_summary",
       major: 1,
-      minor: 1
+      minor: 2
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -374,7 +500,11 @@ jq -n \
       env_allow_query_code: $env_allow_query_code,
       env_trust_proxy_headers: $env_trust_proxy_headers,
       env_addr: $env_addr,
-      env_rps: $env_rps
+      env_rps: $env_rps,
+      caddy_site_host: $caddy_site_host,
+      caddy_reverse_proxy: $caddy_reverse_proxy,
+      nginx_server_name: $nginx_server_name,
+      nginx_proxy_pass: $nginx_proxy_pass
     },
     summary: {
       checks_total: ($checks | length),

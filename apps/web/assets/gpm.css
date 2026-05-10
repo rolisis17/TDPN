@@ -2769,6 +2769,13 @@ body.page-recover .topbar .wrap {
   font-size: 1.15rem;
 }
 
+.recover-panel__hint {
+  margin: -2px 0 2px;
+  color: #a9beb8;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
 .recover-panel textarea {
   min-height: 280px;
   resize: vertical;

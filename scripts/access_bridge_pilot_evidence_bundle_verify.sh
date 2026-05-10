@@ -604,6 +604,17 @@ write_verification_summary() {
     --arg verification_summary_json "$verification_summary_json" '
       def null_if_empty($v):
         if ($v | type) == "string" and ($v | length) > 0 then $v else null end;
+      def trusted_pilot_receipt_ready:
+        $status == "pass"
+        and $require_trusted_provenance
+        and $provenance_checked
+        and $provenance_trusted
+        and $provenance_status == "pass"
+        and $provenance_source == "trust_store"
+        and $provenance_evidence_scope == "real_helper_https"
+        and $summary_evidence_scope == "real_helper_https"
+        and $trust_store != ""
+        and $public_key_file == "";
       {
         version: 1,
         schema: {
@@ -614,6 +625,8 @@ write_verification_summary() {
         generated_at_utc: $generated_at_utc,
         status: $status,
         rc: $rc,
+        pilot_handoff_ready: false,
+        trusted_pilot_receipt_ready: trusted_pilot_receipt_ready,
         notes: $notes,
         inputs: {
           summary_json: null_if_empty($summary_json),

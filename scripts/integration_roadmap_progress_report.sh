@@ -1109,8 +1109,10 @@ if ! jq -e \
   .status == "warn"
   and .rc == 0
   and .current_roadmap_track == "access_recovery"
+  and .access_recovery_pilot_handoff_ready == true
   and .access_recovery_track.status == "pilot-evidence-ready"
   and .access_recovery_track.ready == true
+  and .access_recovery_track.pilot_handoff_ready == true
   and .access_recovery_track.local_rehearsal_ready == false
   and .access_recovery_track.needs_attention == false
   and .access_recovery_track.evidence_scope == "real_helper_https"
@@ -1436,8 +1438,10 @@ if ! jq -e '
   .status == "warn"
   and .rc == 0
   and .current_roadmap_track == "access_recovery"
+  and .access_recovery_pilot_handoff_ready == false
   and .access_recovery_track.status == "trusted-provenance-required"
   and .access_recovery_track.ready == false
+  and .access_recovery_track.pilot_handoff_ready == false
   and .access_recovery_track.needs_attention == true
   and .access_recovery_track.evidence_scope == "real_helper_https"
   and .access_recovery_track.trusted_verifier_ready == false
@@ -1486,8 +1490,10 @@ if ! jq -e '
   .status == "warn"
   and .rc == 0
   and .current_roadmap_track == "access_recovery"
+  and .access_recovery_pilot_handoff_ready == false
   and .access_recovery_track.status == "trusted-provenance-required"
   and .access_recovery_track.ready == false
+  and .access_recovery_track.pilot_handoff_ready == false
   and .access_recovery_track.needs_attention == true
   and .access_recovery_track.evidence_scope == "real_helper_https"
   and .access_recovery_track.trusted_verifier_ready == false
@@ -1533,8 +1539,10 @@ if ! jq -e '
   .status == "warn"
   and .rc == 0
   and .current_roadmap_track == "access_recovery"
+  and .access_recovery_pilot_handoff_ready == false
   and .access_recovery_track.status == "trusted-provenance-required"
   and .access_recovery_track.ready == false
+  and .access_recovery_track.pilot_handoff_ready == false
   and .access_recovery_track.needs_attention == true
   and .access_recovery_track.evidence_scope == "real_helper_https"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == true
@@ -1575,8 +1583,10 @@ if ! jq -e '
   .status == "warn"
   and .rc == 0
   and .current_roadmap_track == "access_recovery"
+  and .access_recovery_pilot_handoff_ready == false
   and .access_recovery_track.status == "local-rehearsal-ready"
   and .access_recovery_track.ready == false
+  and .access_recovery_track.pilot_handoff_ready == false
   and .access_recovery_track.local_rehearsal_ready == true
   and .access_recovery_track.needs_attention == true
   and .access_recovery_track.evidence_scope == "local_rehearsal"
@@ -1639,8 +1649,10 @@ if ! jq -e '
   and .rc == 1
   and .current_roadmap_track == "access_recovery"
   and .access_recovery_evidence_required == true
+  and .access_recovery_pilot_handoff_ready == false
   and .access_recovery_track.status == "local-rehearsal-ready"
   and .access_recovery_track.ready == false
+  and .access_recovery_track.pilot_handoff_ready == false
   and .access_recovery_track.local_rehearsal_ready == true
   and .access_recovery_track.needs_attention == true
   and .access_recovery_track.evidence_scope == "local_rehearsal"
@@ -1679,8 +1691,10 @@ if ! jq -e '
   .status == "warn"
   and .rc == 0
   and .current_roadmap_track == "access_recovery"
+  and .access_recovery_pilot_handoff_ready == false
   and .access_recovery_track.status == "local-rehearsal-ready"
   and .access_recovery_track.ready == false
+  and .access_recovery_track.pilot_handoff_ready == false
   and .access_recovery_track.local_rehearsal_ready == true
   and .access_recovery_track.needs_attention == true
   and .access_recovery_track.evidence_scope == "local_rehearsal"
@@ -1722,6 +1736,7 @@ if ! jq -e '
   and .rc == 0
   and .current_roadmap_track == "access_recovery"
   and .access_recovery_evidence_required == false
+  and .access_recovery_pilot_handoff_ready == false
   and .access_recovery_track.status == "evidence-missing"
   and .access_recovery_track.ready == false
   and .access_recovery_track.needs_attention == true
@@ -1779,6 +1794,7 @@ if ! jq -e '
   and .rc == 1
   and .current_roadmap_track == "access_recovery"
   and .access_recovery_evidence_required == true
+  and .access_recovery_pilot_handoff_ready == false
   and .access_recovery_track.status == "evidence-missing"
   and .access_recovery_track.ready == false
   and .access_recovery_track.needs_attention == true
@@ -1811,6 +1827,7 @@ if ! jq -e '
   and .rc == 0
   and .current_roadmap_track == "access_recovery"
   and .access_recovery_evidence_required == false
+  and .access_recovery_pilot_handoff_ready == false
   and .access_recovery_track.status == "evidence-stale"
   and .access_recovery_track.ready == false
   and .access_recovery_track.needs_attention == true
@@ -1869,6 +1886,7 @@ if ! jq -e '
   and .rc == 0
   and .current_roadmap_track == "access_recovery"
   and .access_recovery_evidence_required == false
+  and .access_recovery_pilot_handoff_ready == false
   and .access_recovery_track.status == "evidence-invalid"
   and .access_recovery_track.ready == false
   and .access_recovery_track.needs_attention == true

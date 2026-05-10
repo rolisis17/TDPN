@@ -437,6 +437,8 @@ jq -n \
     generated_at_utc: $generated_at_utc,
     status: $status,
     rc: (if $status == "pass" then 0 else 1 end),
+    pilot_handoff_ready: false,
+    evidence_scope: "local_rehearsal",
     notes: $notes,
     inputs: {
       base_url: $base_url,

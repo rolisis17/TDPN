@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash chmod grep mktemp sed wc; do
+for cmd in bash chmod curl go grep jq mktemp sed sha256sum tar wc; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "easy node access recovery local evidence refresh integration failed: missing required command: $cmd"
     exit 2
@@ -85,6 +85,32 @@ rc=$?
 set -e
 if [[ "$rc" -ne 9 ]]; then
   echo "expected fake local evidence refresh exit code 9, got $rc"
+  exit 1
+fi
+
+REAL_REPORTS="$TMP_DIR/real-refresh"
+REAL_SUMMARY="$TMP_DIR/real-refresh-summary.json"
+REAL_PORT="$((19880 + (RANDOM % 200)))"
+bash ./scripts/access_recovery_local_evidence_refresh.sh \
+  --reports-dir "$REAL_REPORTS" \
+  --port "$REAL_PORT" \
+  --write-canonical 0 \
+  --refresh-roadmap 0 \
+  --summary-json "$REAL_SUMMARY" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .schema.id == "access_recovery_local_evidence_refresh_summary"
+  and .status == "pass"
+  and .rc == 0
+  and .pilot_handoff_ready == false
+  and .evidence_scope == "local_rehearsal"
+  and .roadmap.refreshed == false
+  and .recommended_next_action.id == "real_helper_https_evidence"
+  and ((.recommended_next_action.reason // "") | contains("Local evidence is only a rehearsal"))
+' "$REAL_SUMMARY" >/dev/null; then
+  echo "easy node access recovery local evidence refresh integration failed: real local summary contract mismatch"
+  cat "$REAL_SUMMARY"
   exit 1
 fi
 
