@@ -129,7 +129,7 @@ Scope:
 - provide a local trust-store file for trusted organization public keys
 - import or verify a pack or bridge invite from an untrusted channel
 - expose a browser-local import/verify screen for signed packs, bridge invites, and trust stores
-- support portable `GPMREC1` text handoffs for packs, bridge invites, trust stores, and single trusted keys
+- support portable `GPMREC1` text handoffs for packs, bridge invites, trust stores, helper registries, and single trusted keys
 - render `GPMREC1` handoffs as QR PNGs from the CLI and browser, and import QR images with native scanning or a bundled browser fallback
 - show official sources, mirrors, bridge hints, helper configs, expiry, and safety notes
 - keep reachability separate from trust: a path can be reachable but untrusted, or trusted but temporarily unreachable
@@ -138,12 +138,12 @@ Scope:
 Exit criteria:
 - one signed access pack can be generated, shared, verified, and inspected locally
 - one signed bridge invite can be generated, shared, verified, and inspected locally
-- one command can generate a complete demo bundle with keys, trust store, signed artifacts, text handoffs, QR PNGs, and a manifest
+- one command can generate a complete demo bundle with keys, trust store, helper registry, signed artifacts, text handoffs, QR PNGs, and a manifest
 - one organization key can be added to a local trust store and used for verification/checking
 - a browser-local UI can verify a signed pack or bridge invite against a trusted organization key and list trusted paths
 - verified bridge invites show helper contact/copy actions only after trust checks pass
 - bridge invites can be checked against a helper registry so active helpers pass and quarantined, disabled, wrong-organization, or expired helper windows fail closed
-- signed packs, bridge invites, and trust material can be exported/imported as text handoffs for chat, email, print, or future QR use
+- signed packs, bridge invites, helper registries, and trust material can be exported/imported as text handoffs for chat, email, print, or future QR use
 - a QR PNG can be generated from a `GPMREC1` text handoff in the CLI or browser and scanned back into the browser with native QR detection or bundled fallback scanning
 - unknown, disabled, expired, or wrong-organization keys fail closed
 - bridge invites must be short-lived, currently max 14 days from issue to expiry

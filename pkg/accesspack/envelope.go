@@ -10,11 +10,12 @@ import (
 )
 
 const (
-	TextEnvelopePrefix = "GPMREC1"
-	EnvelopeKindPack   = "access-pack"
-	EnvelopeKindBridge = "bridge-invite"
-	EnvelopeKindStore  = "trust-store"
-	EnvelopeKindKey    = "trusted-key"
+	TextEnvelopePrefix               = "GPMREC1"
+	EnvelopeKindPack                 = "access-pack"
+	EnvelopeKindBridge               = "bridge-invite"
+	EnvelopeKindStore                = "trust-store"
+	EnvelopeKindKey                  = "trusted-key"
+	EnvelopeKindBridgeHelperRegistry = "bridge-helper-registry"
 )
 
 type TextEnvelope struct {
@@ -84,7 +85,7 @@ func DecodeTextEnvelope(text string) (TextEnvelope, []byte, error) {
 
 func ValidateEnvelopeKind(kind string) error {
 	switch strings.TrimSpace(kind) {
-	case EnvelopeKindPack, EnvelopeKindBridge, EnvelopeKindStore, EnvelopeKindKey:
+	case EnvelopeKindPack, EnvelopeKindBridge, EnvelopeKindStore, EnvelopeKindKey, EnvelopeKindBridgeHelperRegistry:
 		return nil
 	default:
 		return fmt.Errorf("unsupported envelope kind %q", kind)

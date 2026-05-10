@@ -21,6 +21,7 @@
     handoffInput: document.getElementById("handoff_input"),
     exportPackTextBtn: document.getElementById("export_pack_text_btn"),
     exportStoreTextBtn: document.getElementById("export_store_text_btn"),
+    exportRegistryTextBtn: document.getElementById("export_registry_text_btn"),
     renderQRBtn: document.getElementById("render_qr_btn"),
     downloadQRBtn: document.getElementById("download_qr_btn"),
     importTextBtn: document.getElementById("import_text_btn"),
@@ -40,7 +41,7 @@
   const trustStoreStorageKey = "gpm_recover_trust_store_v1";
   const helperRegistryStorageKey = "gpm_recover_helper_registry_v1";
   const textEnvelopePrefix = "GPMREC1";
-  const textEnvelopeKinds = ["access-pack", "bridge-invite", "trust-store", "trusted-key"];
+  const textEnvelopeKinds = ["access-pack", "bridge-invite", "trust-store", "trusted-key", "bridge-helper-registry"];
   const maxBridgeInviteLifetimeMS = 14 * 24 * 60 * 60 * 1000;
 
   function setStatus(state, title, detail) {
@@ -1163,6 +1164,12 @@
       payload = normalizeSignedArtifact(artifact);
     } else if (kind === "trust-store") {
       payload = normalizeTrustStore(readTrustStoreInput());
+    } else if (kind === "bridge-helper-registry") {
+      const registry = readHelperRegistryInput();
+      if (!registry) {
+        throw new Error("Helper registry is empty");
+      }
+      payload = normalizeHelperRegistry(registry);
     } else {
       throw new Error(`Unsupported export kind ${kind}`);
     }
@@ -1186,6 +1193,11 @@
     if (decoded.kind === "trust-store") {
       writeTrustStore(decoded.payload);
       setStatus("idle", "Trust store text imported", "The local trust store JSON has been updated.");
+      return;
+    }
+    if (decoded.kind === "bridge-helper-registry") {
+      writeHelperRegistry(decoded.payload);
+      setStatus("idle", "Helper registry text imported", "Bridge invite verification will enforce helper status.");
       return;
     }
     if (decoded.kind === "trusted-key") {
@@ -1432,6 +1444,16 @@
       setStatus("idle", "Trust store text ready", "The trust-store handoff text is on the clipboard.");
     } catch (err) {
       setStatus("bad", "Store export failed", err.message || String(err));
+    }
+  });
+
+  els.exportRegistryTextBtn.addEventListener("click", async () => {
+    try {
+      const text = exportTextEnvelope("bridge-helper-registry");
+      await copyText(text, els.exportRegistryTextBtn);
+      setStatus("idle", "Helper registry text ready", "The helper-registry handoff text is on the clipboard.");
+    } catch (err) {
+      setStatus("bad", "Registry export failed", err.message || String(err));
     }
   });
 

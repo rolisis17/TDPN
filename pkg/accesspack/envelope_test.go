@@ -59,6 +59,31 @@ func TestTextEnvelopeBridgeInviteRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTextEnvelopeBridgeHelperRegistryRoundTrip(t *testing.T) {
+	payload, err := json.Marshal(testBridgeHelperRegistry())
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	text, err := EncodeTextEnvelope(EnvelopeKindBridgeHelperRegistry, payload)
+	if err != nil {
+		t.Fatalf("encode bridge helper registry envelope: %v", err)
+	}
+	envelope, decoded, err := DecodeTextEnvelope(text)
+	if err != nil {
+		t.Fatalf("decode bridge helper registry envelope: %v", err)
+	}
+	if envelope.Kind != EnvelopeKindBridgeHelperRegistry {
+		t.Fatalf("kind mismatch: %q", envelope.Kind)
+	}
+	var registry BridgeHelperRegistry
+	if err := json.Unmarshal(decoded, &registry); err != nil {
+		t.Fatalf("decoded payload is not bridge helper registry json: %v", err)
+	}
+	if len(registry.Helpers) != 1 || registry.Helpers[0].HelperID != "helper-1" {
+		t.Fatalf("registry mismatch: %+v", registry)
+	}
+}
+
 func TestTextEnvelopeRejectsUnknownKind(t *testing.T) {
 	_, err := EncodeTextEnvelope("unknown", []byte(`{"ok":true}`))
 	if err == nil {

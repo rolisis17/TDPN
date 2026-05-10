@@ -152,8 +152,8 @@ Demo bundle flow:
   - signed and unsigned bridge-invite JSON
   - `recovery-trust.json`
   - `bridge-helper-registry.json`
-  - `GPMREC1` text handoffs for the pack, bridge invite, and trust store
-  - QR PNGs for the pack and bridge invite
+  - `GPMREC1` text handoffs for the pack, bridge invite, trust store, and helper registry
+  - QR PNGs for the pack, bridge invite, and helper registry
   - `demo-manifest.json` listing every generated file
 - Open `apps/web/recovery.html`, import `recovery-trust.json`, then import either `access-pack.signed.json` or `bridge-invite.signed.json`.
 - Alternatively, paste or scan the generated `GPMREC1` text/QR handoffs into the Text Handoff panel.
@@ -171,9 +171,11 @@ Text handoff flow:
 - `go run ./cmd/gpmrecover text-export --kind access-pack --in .easy-node-logs/access-pack.signed.json --out .easy-node-logs/access-pack.txt`
 - `go run ./cmd/gpmrecover text-export --kind bridge-invite --in .easy-node-logs/bridge-invite.signed.json --out .easy-node-logs/bridge-invite.txt`
 - `go run ./cmd/gpmrecover text-export --kind trust-store --in .easy-node-logs/recovery-trust.json --out .easy-node-logs/recovery-trust.txt`
+- `go run ./cmd/gpmrecover text-export --kind bridge-helper-registry --in .easy-node-logs/access-recovery-demo/bridge-helper-registry.json --out .easy-node-logs/bridge-helper-registry.txt`
 - `go run ./cmd/gpmrecover text-import --text-file .easy-node-logs/access-pack.txt --expect-kind access-pack --out .easy-node-logs/access-pack.imported.json`
 - `go run ./cmd/gpmrecover text-import --text-file .easy-node-logs/bridge-invite.txt --expect-kind bridge-invite --out .easy-node-logs/bridge-invite.imported.json`
 - `go run ./cmd/gpmrecover text-import --text-file .easy-node-logs/recovery-trust.txt --expect-kind trust-store --out .easy-node-logs/recovery-trust.imported.json`
+- `go run ./cmd/gpmrecover text-import --text-file .easy-node-logs/bridge-helper-registry.txt --expect-kind bridge-helper-registry --out .easy-node-logs/bridge-helper-registry.imported.json`
 - `go run ./cmd/gpmrecover qr-png --text-file .easy-node-logs/access-pack.txt --out .easy-node-logs/access-pack.qr.png --size 768`
 
 The text format starts with `GPMREC1.` and carries compact JSON as base64url. It is meant for chat messages, emails, printed handoffs, and QR codes. The CLI can render a text handoff as a PNG, and the browser recovery page can render/download a QR locally from the current text handoff.
@@ -206,7 +208,7 @@ First browser surface:
 - imports an optional helper registry and enforces active/quarantined/disabled helper status before showing bridge paths
 - lets a tester add/remove trusted organization public keys without hand-editing JSON
 - copies or downloads the current trust store for handoff to another device
-- exports/imports `GPMREC1` text handoffs for signed packs, bridge invites, trust stores, and single trusted keys
+- exports/imports `GPMREC1` text handoffs for signed packs, bridge invites, trust stores, helper registries, and single trusted keys
 - renders and downloads a local QR PNG from the current `GPMREC1` text handoff
 - can scan a QR image into the text handoff field with native `BarcodeDetector` support or the bundled browser scanner fallback
 - verifies the Ed25519 signature with Web Crypto when the browser supports it

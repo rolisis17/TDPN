@@ -110,6 +110,8 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}
 	storeEnvelope := filepath.Join(dir, "store.txt")
 	importedStore := filepath.Join(dir, "store.imported.json")
+	registryEnvelope := filepath.Join(dir, "registry.txt")
+	importedRegistry := filepath.Join(dir, "registry.imported.json")
 	if err := runTextExport([]string{"--kind", "trust-store", "--in", trustStore, "--out", storeEnvelope}); err != nil {
 		t.Fatalf("text-export store: %v", err)
 	}
@@ -118,6 +120,12 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}
 	if err := runVerify([]string{"--pack", signedPack, "--trust-store", importedStore}); err != nil {
 		t.Fatalf("verify imported store: %v", err)
+	}
+	if err := runTextExport([]string{"--kind", "bridge-helper-registry", "--in", helperRegistry, "--out", registryEnvelope}); err != nil {
+		t.Fatalf("text-export helper registry: %v", err)
+	}
+	if err := runTextImport([]string{"--text-file", registryEnvelope, "--expect-kind", "bridge-helper-registry", "--out", importedRegistry}); err != nil {
+		t.Fatalf("text-import helper registry: %v", err)
 	}
 	bridgeEnvelope := filepath.Join(dir, "bridge.txt")
 	importedBridge := filepath.Join(dir, "bridge.imported.json")
@@ -130,7 +138,7 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgeVerify([]string{"--invite", importedBridge, "--trust-store", importedStore}); err != nil {
 		t.Fatalf("bridge-verify imported bridge invite: %v", err)
 	}
-	if err := runBridgePolicy([]string{"--invite", importedBridge, "--trust-store", importedStore, "--helper-registry", helperRegistry}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", importedBridge, "--trust-store", importedStore, "--helper-registry", importedRegistry}); err != nil {
 		t.Fatalf("bridge-policy imported bridge invite: %v", err)
 	}
 	pubBody, err := os.ReadFile(publicKey)
@@ -187,9 +195,11 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 		"bridge_helper_registry",
 		"access_pack_text",
 		"bridge_invite_text",
+		"bridge_helper_registry_text",
 		"trust_store_text",
 		"access_pack_qr",
 		"bridge_invite_qr",
+		"bridge_helper_registry_qr",
 	} {
 		if manifest.Files[key] == "" {
 			t.Fatalf("manifest missing %s", key)
@@ -205,7 +215,7 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 	if err := runBridgePolicy([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"], "--helper-registry", manifest.Files["bridge_helper_registry"]}); err != nil {
 		t.Fatalf("policy generated bridge invite: %v", err)
 	}
-	for _, key := range []string{"access_pack_qr", "bridge_invite_qr"} {
+	for _, key := range []string{"access_pack_qr", "bridge_invite_qr", "bridge_helper_registry_qr"} {
 		qrBody, err := os.ReadFile(manifest.Files[key])
 		if err != nil {
 			t.Fatalf("read %s: %v", key, err)

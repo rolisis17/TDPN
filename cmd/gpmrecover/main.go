@@ -157,7 +157,7 @@ func usage() {
   go run ./cmd/gpmrecover trust-add --trust-store FILE --org-id ID --org-name NAME --public-key-file FILE
   go run ./cmd/gpmrecover trust-list --trust-store FILE
   go run ./cmd/gpmrecover trust-remove --trust-store FILE --org-id ID --key-id ID
-  go run ./cmd/gpmrecover text-export --kind access-pack|bridge-invite|trust-store|trusted-key --in FILE [--out FILE]
+  go run ./cmd/gpmrecover text-export --kind access-pack|bridge-invite|trust-store|trusted-key|bridge-helper-registry --in FILE [--out FILE]
   go run ./cmd/gpmrecover text-import (--text TEXT | --text-file FILE) --out FILE [--expect-kind KIND]
   go run ./cmd/gpmrecover qr-png --text TEXT --out FILE [--size 768]
   go run ./cmd/gpmrecover verify --pack FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
@@ -398,7 +398,7 @@ func runTrustRemove(args []string) error {
 
 func runTextExport(args []string) error {
 	fs := flag.NewFlagSet("text-export", flag.ContinueOnError)
-	kind := fs.String("kind", "", "envelope kind: access-pack, bridge-invite, trust-store, or trusted-key")
+	kind := fs.String("kind", "", "envelope kind: access-pack, bridge-invite, trust-store, trusted-key, or bridge-helper-registry")
 	inFile := fs.String("in", "", "path to JSON payload file")
 	outFile := fs.String("out", "", "optional path to write text envelope")
 	if err := fs.Parse(args); err != nil {
@@ -807,6 +807,9 @@ func runDemoBundle(args []string) error {
 		return err
 	}
 	if err := writeTextAndQR(addFile("bridge_invite_text", "bridge-invite.txt"), addFile("bridge_invite_qr", "bridge-invite.qr.png"), accesspack.EnvelopeKindBridge, signedInvite, *qrSize); err != nil {
+		return err
+	}
+	if err := writeTextAndQR(addFile("bridge_helper_registry_text", "bridge-helper-registry.txt"), addFile("bridge_helper_registry_qr", "bridge-helper-registry.qr.png"), accesspack.EnvelopeKindBridgeHelperRegistry, bridgeHelperRegistry, *qrSize); err != nil {
 		return err
 	}
 	storeBody, err := accesspack.MarshalTrustStore(store)
