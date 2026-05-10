@@ -141,9 +141,10 @@
     return { kind: envelope.k, payload: envelope.p };
   }
 
-  function renderQRCode() {
+  async function renderQRCode() {
     const text = trimString(els.handoffInput.value);
-    decodeTextEnvelope(text);
+    const decoded = decodeTextEnvelope(text);
+    await validateDecodedTextEnvelopePayload(decoded);
     if (typeof window.qrcode !== "function") {
       throw new Error("QR renderer is not available");
     }
@@ -179,10 +180,10 @@
     return canvas;
   }
 
-  function downloadRenderedQR() {
+  async function downloadRenderedQR() {
     let canvas = els.qrPreview.querySelector("canvas");
     if (!canvas) {
-      canvas = renderQRCode();
+      canvas = await renderQRCode();
     }
     canvas.toBlob((blob) => {
       if (!blob) {
@@ -448,6 +449,59 @@
       keys.push(await validateTrustedKeyEntry(entry, options));
     }
     return { version: 1, trusted_keys: keys };
+  }
+
+  function validateHandoffSignature(signature, label) {
+    if (!signature || typeof signature !== "object") {
+      throw new Error(`${label} signature is required`);
+    }
+    if (trimString(signature.alg) !== "ed25519") {
+      throw new Error(`${label} signature algorithm must be ed25519`);
+    }
+    if (!trimString(signature.key_id)) {
+      throw new Error(`${label} signature key id is required`);
+    }
+    const signatureBytes = base64URLToBytes(signature.sig, `${label} signature`);
+    if (signatureBytes.length !== 64) {
+      throw new Error(`${label} signature has invalid length`);
+    }
+  }
+
+  async function validateDecodedTextEnvelopePayload(decoded) {
+    if (!decoded || typeof decoded !== "object") {
+      throw new Error("Text handoff is not valid");
+    }
+    switch (decoded.kind) {
+      case "access-pack":
+        if (signedArtifactKind(decoded.payload) !== "access-pack") {
+          throw new Error("Access-pack handoff payload is not an access pack");
+        }
+        validatePackShape(decoded.payload);
+        validateHandoffSignature(decoded.payload.signature, "Access pack");
+        return;
+      case "bridge-invite":
+        if (signedArtifactKind(decoded.payload) !== "bridge-invite") {
+          throw new Error("Bridge-invite handoff payload is not a bridge invite");
+        }
+        validateBridgeInviteShape(decoded.payload);
+        validateHandoffSignature(decoded.payload.signature, "Bridge invite");
+        return;
+      case "trust-store":
+        await validateTrustStoreKeys(decoded.payload, { requireUsable: false });
+        return;
+      case "trusted-key":
+        await validateTrustedKeyEntry(decoded.payload);
+        return;
+      case "bridge-helper-registry":
+        normalizeHelperRegistry(decoded.payload);
+        return;
+      case "bridge-helper-registry-signed":
+        validateBridgeRegistryArtifactShape(decoded.payload);
+        validateHandoffSignature(decoded.payload.signature, "Signed helper registry");
+        return;
+      default:
+        throw new Error(`Unsupported text handoff kind ${decoded.kind}`);
+    }
   }
 
   function normalizeHelperRegistry(registry) {
@@ -1591,6 +1645,7 @@
 
   async function importTextEnvelope() {
     const decoded = decodeTextEnvelope(els.handoffInput.value);
+    await validateDecodedTextEnvelopePayload(decoded);
     if (decoded.kind === "access-pack") {
       els.packInput.value = JSON.stringify(decoded.payload, null, 2);
       setStatus("idle", "Pack text imported", "Verify it against the trust store before using any path.");
@@ -1933,18 +1988,18 @@
     resetQRPreview();
   });
 
-  els.renderQRBtn.addEventListener("click", () => {
+  els.renderQRBtn.addEventListener("click", async () => {
     try {
-      renderQRCode();
+      await renderQRCode();
       setStatus("idle", "QR rendered", "The current GPMREC1 text is ready as a local QR image.");
     } catch (err) {
       setStatus("bad", "QR render failed", err.message || String(err));
     }
   });
 
-  els.downloadQRBtn.addEventListener("click", () => {
+  els.downloadQRBtn.addEventListener("click", async () => {
     try {
-      downloadRenderedQR();
+      await downloadRenderedQR();
     } catch (err) {
       setStatus("bad", "QR download failed", err.message || String(err));
     }

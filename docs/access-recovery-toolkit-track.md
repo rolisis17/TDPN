@@ -234,6 +234,7 @@ First browser surface:
 - copies or downloads the current trust store for handoff to another device
 - exports/imports `GPMREC1` text handoffs for signed packs, bridge invites, trust stores, helper registries, signed helper registries, and single trusted keys
 - renders and downloads a local QR PNG from the current `GPMREC1` text handoff
+- validates text handoff payloads before browser QR rendering/download so a bad pasted handoff is not turned into a QR
 - can scan a QR image into the text handoff field with native `BarcodeDetector` support or the bundled browser scanner fallback
 - verifies the Ed25519 signature with Web Crypto when the browser supports it
 - lists trusted access/helper paths only after signature, expiry, org id, and trusted-key checks pass
