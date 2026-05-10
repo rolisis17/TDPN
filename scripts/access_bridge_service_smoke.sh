@@ -154,7 +154,9 @@ health_registry_id="$(jq -r '.decision.registry_id // ""' "$health_body" 2>/dev/
 health_config_sha256="$(jq -r '.config_sha256 // ""' "$health_body" 2>/dev/null || true)"
 bridge_status="$(jq -r '.status // ""' "$bridge_body" 2>/dev/null || true)"
 headers_ok="false"
-if grep -iq '^Referrer-Policy: no-referrer' "$bridge_headers" && grep -iq '^Cache-Control: no-store' "$bridge_headers"; then
+if grep -iq '^Referrer-Policy: no-referrer' "$bridge_headers" &&
+  grep -iq '^Cache-Control: no-store' "$bridge_headers" &&
+  grep -iq '^X-Content-Type-Options: nosniff' "$bridge_headers"; then
   headers_ok="true"
 fi
 

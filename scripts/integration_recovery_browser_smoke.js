@@ -355,6 +355,21 @@ async function main() {
   await importTextHandoff(trustStoreText, "Trust store text imported");
   await document.getElementById("clear_btn").click();
   await importTextHandoff(trustedKeyText, "Trusted key text imported");
+
+  const trustedEntry = JSON.parse(trustStore).trusted_keys[0];
+  document.getElementById("trust_org_id").value = trustedEntry.org_id;
+  document.getElementById("trust_org_name").value = trustedEntry.org_name;
+  document.getElementById("trust_public_key").value = `${trustedEntry.public_key}=`;
+  await document.getElementById("trust_add_btn").click();
+  const paddedKeyStatus = document.getElementById("status-heading").textContent;
+  const paddedKeyDetail = document.getElementById("status_detail").textContent;
+  if (paddedKeyStatus !== "Could not add key") {
+    throw new Error(`expected padded public key rejection, got ${paddedKeyStatus}: ${paddedKeyDetail}`);
+  }
+  if (!paddedKeyDetail.includes("unpadded base64url")) {
+    throw new Error(`expected padded public key base64url detail, got ${paddedKeyDetail}`);
+  }
+
   await importTextHandoff(signedRegistryText, "Signed helper registry text imported");
   await document.getElementById("verify_registry_btn").click();
 
@@ -460,6 +475,34 @@ async function main() {
   }
   if (!unsupportedSchemeRegistryDetail.includes("helpers[].abuse_report_url scheme must be http, https, or mailto")) {
     throw new Error(`expected unsupported helper registry URL scheme detail, got ${unsupportedSchemeRegistryDetail}`);
+  }
+
+  const duplicateHelperRegistry = JSON.parse(unsignedRegistry);
+  duplicateHelperRegistry.helpers.push({ ...duplicateHelperRegistry.helpers[0] });
+  document.getElementById("registry_input").value = JSON.stringify(duplicateHelperRegistry);
+  await document.getElementById("registry_input").dispatch("input");
+  await document.getElementById("export_registry_text_btn").click();
+  const duplicateHelperStatus = document.getElementById("status-heading").textContent;
+  const duplicateHelperDetail = document.getElementById("status_detail").textContent;
+  if (duplicateHelperStatus !== "Registry export failed") {
+    throw new Error(`expected duplicate helper rejection, got ${duplicateHelperStatus}: ${duplicateHelperDetail}`);
+  }
+  if (!duplicateHelperDetail.includes("helper_id duplicates")) {
+    throw new Error(`expected duplicate helper detail, got ${duplicateHelperDetail}`);
+  }
+
+  const duplicateOrgRegistry = JSON.parse(unsignedRegistry);
+  duplicateOrgRegistry.helpers[0].org_ids.push(duplicateOrgRegistry.helpers[0].org_ids[0]);
+  document.getElementById("registry_input").value = JSON.stringify(duplicateOrgRegistry);
+  await document.getElementById("registry_input").dispatch("input");
+  await document.getElementById("export_registry_text_btn").click();
+  const duplicateOrgStatus = document.getElementById("status-heading").textContent;
+  const duplicateOrgDetail = document.getElementById("status_detail").textContent;
+  if (duplicateOrgStatus !== "Registry export failed") {
+    throw new Error(`expected duplicate org rejection, got ${duplicateOrgStatus}: ${duplicateOrgDetail}`);
+  }
+  if (!duplicateOrgDetail.includes("org_ids duplicates")) {
+    throw new Error(`expected duplicate org detail, got ${duplicateOrgDetail}`);
   }
 
   const registryInput = document.getElementById("registry_input");

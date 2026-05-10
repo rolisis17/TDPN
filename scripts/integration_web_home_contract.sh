@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 REQUIRED_FILES=(
   "apps/web/index.html"
   "apps/web/assets/gpm.css"
+  "apps/web/README.md"
 )
 
 for path in "${REQUIRED_FILES[@]}"; do
@@ -19,6 +20,7 @@ echo "[web-home] required files exist"
 
 INDEX_HTML="apps/web/index.html"
 GPM_CSS="apps/web/assets/gpm.css"
+WEB_README="apps/web/README.md"
 
 require_regex_marker() {
   local file="$1"
@@ -49,12 +51,26 @@ HOME_HTML_MARKERS=(
   'class="[^"]*cta-panel'
   'href="./recovery.html"'
   'href="./portal.html"'
+  'trusted verifier receipt'
+  'real helper HTTPS evidence'
+  'current evidence hashes'
 )
 
 for pattern in "${HOME_HTML_MARKERS[@]}"; do
   require_regex_marker "$INDEX_HTML" "$pattern" "homepage structure"
 done
 echo "[web-home] homepage structure markers are present"
+
+README_MARKERS=(
+  'real helper HTTPS evidence'
+  'trusted verifier receipt'
+  'operator handoff'
+)
+
+for pattern in "${README_MARKERS[@]}"; do
+  require_regex_marker "$WEB_README" "$pattern" "homepage README contract"
+done
+echo "[web-home] homepage README contract markers are present"
 
 if grep -qF 'portal.html#operator' "$INDEX_HTML"; then
   echo "web home contract failed: public homepage must not deep-link to hidden operator/admin portal routes"

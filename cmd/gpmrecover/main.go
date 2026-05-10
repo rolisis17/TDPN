@@ -1110,6 +1110,9 @@ func runBridgeServiceServe(args []string) error {
 			return errors.New("--allow-unpinned-local requires a loopback --addr")
 		}
 	}
+	if *allowQueryAccessCode && !isLoopbackListenAddr(*addr) {
+		return errors.New("--allow-query-access-code requires a loopback --addr")
+	}
 	body, err := readInputFileStrict(*configFile, "bridge service config", maxPackFileBytes)
 	if err != nil {
 		return err
@@ -1350,6 +1353,9 @@ func runBridgeServiceDeployPack(args []string) error {
 	}
 	if *allowUnauthenticatedLocal && !isLoopbackListenAddr(*addr) {
 		return errors.New("--allow-unauthenticated-local requires a loopback --addr")
+	}
+	if *allowQueryAccessCode && !isLoopbackListenAddr(*addr) {
+		return errors.New("--allow-query-access-code requires a loopback --addr")
 	}
 	if strings.TrimSpace(*accessCodeSHA256) == "" && !*allowUnauthenticatedLocal {
 		return errors.New("bridge-service-deploy-pack requires --access-code-sha256 unless --allow-unauthenticated-local is set")

@@ -27,7 +27,7 @@ Use this as the change contract for `index.html` (public marketing surface) so r
 
 - Scope: premium styling is intentionally scoped to `.page-home` in `assets/gpm.css`; keep portal UX operational-first and avoid leaking homepage-only polish styles into `portal.html`.
 - Narrative sections: preserve the current high-level order and purpose (`Hero` -> recovery rationale -> beta mental map -> helper bridge paths -> operator evidence -> recovery posture -> recovery CTA) so the first screen stays about trusted access recovery, not generic network access.
-- Beta mental map: keep the public explanation concrete and ordered: trusted key -> signed recovery pack/invite -> browser-local verification -> helper bridge paths -> operator evidence.
+- Beta mental map: keep the public explanation concrete and ordered: trusted key -> signed recovery pack/invite -> browser-local verification -> helper bridge paths -> real helper HTTPS evidence -> trusted verifier receipt -> operator handoff.
 - Trusted-key posture: frame helpers as discovery or bridge participants, never authorities. The signed organization key, expiry, organization binding, and trusted-key match decide whether material is usable.
 - Helper bridge paths: explain direct recovery packs, helper invites, registry status, quarantine/disabled markers, abuse-report commitments, and rate-limit commitments without exposing privileged moderation or operator actions.
 - Operator evidence: describe evidence as narrow verification facts suitable for later review. Do not imply the public homepage is an admin console or that it records unrelated user activity.

@@ -113,7 +113,9 @@ if [[ "$(jq -r '.status // ""' "$allowed_body")" != "ok" ]]; then
   cat "$allowed_body"
   exit 1
 fi
-if ! grep -iq '^Referrer-Policy: no-referrer' "$headers_file" || ! grep -iq '^Cache-Control: no-store' "$headers_file"; then
+if ! grep -iq '^Referrer-Policy: no-referrer' "$headers_file" ||
+  ! grep -iq '^Cache-Control: no-store' "$headers_file" ||
+  ! grep -iq '^X-Content-Type-Options: nosniff' "$headers_file"; then
   echo "access bridge service serve integration failed: security headers missing"
   cat "$headers_file"
   exit 1

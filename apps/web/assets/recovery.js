@@ -117,6 +117,9 @@
     if (!raw) {
       throw new Error(`${label} is required`);
     }
+    if (!/^[A-Za-z0-9_-]+$/.test(raw) || raw.length % 4 === 1) {
+      throw new Error(`${label} must be unpadded base64url`);
+    }
     const b64 = raw.replace(/-/g, "+").replace(/_/g, "/");
     const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
     let binary;
@@ -630,9 +633,20 @@
       throw new Error(`Unsupported helper registry version ${registry.version}`);
     }
     const helpers = Array.isArray(registry.helpers) ? registry.helpers : [];
+    if (helpers.length > 512) {
+      throw new Error(`Helper registry helpers has ${helpers.length} items, max 512`);
+    }
+    const normalizedHelpers = helpers.map(normalizeHelperRegistration);
+    const seenHelpers = new Set();
+    for (const helper of normalizedHelpers) {
+      if (seenHelpers.has(helper.helper_id)) {
+        throw new Error(`Helper registry helper_id duplicates ${helper.helper_id}`);
+      }
+      seenHelpers.add(helper.helper_id);
+    }
     return {
       version: 1,
-      helpers: helpers.map(normalizeHelperRegistration).sort((a, b) => a.helper_id.localeCompare(b.helper_id)),
+      helpers: normalizedHelpers.sort((a, b) => a.helper_id.localeCompare(b.helper_id)),
     };
   }
 
@@ -659,8 +673,18 @@
     if (normalized.org_ids.length === 0) {
       throw new Error("Helper registry org_ids is required");
     }
+    if (normalized.org_ids.length > 32) {
+      throw new Error(`Helper registry org_ids has ${normalized.org_ids.length} items, max 32`);
+    }
     if (normalized.org_ids.some((orgID) => !orgID)) {
       throw new Error("Helper registry org_ids cannot contain empty values");
+    }
+    const seenOrgIDs = new Set();
+    for (const orgID of normalized.org_ids) {
+      if (seenOrgIDs.has(orgID)) {
+        throw new Error(`Helper registry org_ids duplicates ${orgID}`);
+      }
+      seenOrgIDs.add(orgID);
     }
     const contactURL = trimString(helper.contact_url);
     if (contactURL) {

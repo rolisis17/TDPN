@@ -119,7 +119,8 @@
               <p class="section-lead">
                 Access recovery is deliberately narrow: establish the trusted key, inspect a signed
                 recovery pack or invite, verify it in the browser, choose an allowed helper bridge,
-                and preserve operator evidence.
+                and preserve operator evidence. Pilot handoff still requires real helper HTTPS
+                evidence plus a trusted verifier receipt bound to the current evidence hashes.
               </p>
             </div>
             <div class="credit-loop" aria-label="Access recovery beta flow">
@@ -127,7 +128,8 @@
               <span>Signed pack or invite</span>
               <span>Browser-local verification</span>
               <span>Helper bridge paths</span>
-              <span>Operator evidence</span>
+              <span>Real helper HTTPS evidence</span>
+              <span>Trusted verifier receipt</span>
             </div>
           </div>
 
@@ -194,7 +196,7 @@
 
             <article class="tier-node recovery-flow-node">
               <p class="tier-node__eyebrow">Step 05</p>
-              <h3>Operator evidence</h3>
+              <h3>Operator evidence and receipt</h3>
               <p>
                 The result summarizes what was trusted, what was rejected, and which helper path was
                 offered for later operator review.
@@ -202,7 +204,7 @@
               <dl class="tier-node__facts">
                 <div>
                   <dt>Checks</dt>
-                  <dd>Evidence stays reviewable without adding admin actions to the public page.</dd>
+                  <dd>Local rehearsal is not pilot-ready until a trusted verifier receipt binds the real helper HTTPS evidence hashes.</dd>
                 </div>
               </dl>
             </article>

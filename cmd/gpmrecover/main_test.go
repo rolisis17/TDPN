@@ -291,6 +291,24 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 		t.Fatalf("expected unsafe unauthenticated deploy pack to fail closed, got %v", err)
 	}
 	if err := runBridgeServiceDeployPack([]string{
+		"--out-dir", filepath.Join(dir, "bridge-deploy-query-code-non-loopback"),
+		"--config-sha256", serviceConfigHash,
+		"--access-code-sha256", codeHashOut.SHA256,
+		"--allow-query-access-code",
+		"--addr", "0.0.0.0:18980",
+	}); err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("expected query-code deploy pack on non-loopback to fail closed, got %v", err)
+	}
+	if err := runBridgeServiceServe([]string{
+		"--config", filepath.Join(dir, "missing-bridge-service-config.json"),
+		"--config-sha256", strings.Repeat("a", 64),
+		"--access-code-sha256", codeHashOut.SHA256,
+		"--allow-query-access-code",
+		"--addr", "0.0.0.0:18980",
+	}); err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("expected query-code bridge service on non-loopback to fail closed, got %v", err)
+	}
+	if err := runBridgeServiceDeployPack([]string{
 		"--out-dir", filepath.Join(dir, "bridge-deploy-bad-config-hash"),
 		"--config-sha256", "short",
 		"--access-code-sha256", codeHashOut.SHA256,
