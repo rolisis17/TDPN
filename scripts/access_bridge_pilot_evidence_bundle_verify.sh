@@ -340,17 +340,19 @@ if [[ "$check_manifest" == "1" && "$bundle_tar_safe" == "1" ]]; then
     issues=$((issues + 1))
   else
     extracted_dir=""
-    while IFS= read -r d; do
-      [[ -n "$d" ]] || continue
-      if [[ -z "$extracted_dir" ]]; then
-        extracted_dir="$d"
+    extracted_top_level_count=0
+    extracted_top_level_bad=0
+    while IFS= read -r entry; do
+      [[ -n "$entry" ]] || continue
+      extracted_top_level_count=$((extracted_top_level_count + 1))
+      if [[ -d "$entry" && ! -L "$entry" && -z "$extracted_dir" ]]; then
+        extracted_dir="$entry"
       else
-        extracted_dir=""
-        break
+        extracted_top_level_bad=1
       fi
-    done < <(find "$tmp_extract_dir" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort)
-    if [[ -z "$extracted_dir" ]]; then
-      echo "could not determine extracted bundle directory in: $tmp_extract_dir"
+    done < <(find "$tmp_extract_dir" -mindepth 1 -maxdepth 1 -print | LC_ALL=C sort)
+    if ((extracted_top_level_count != 1 || extracted_top_level_bad != 0 || ${#extracted_dir} == 0)); then
+      echo "bundle tar must contain exactly one top-level bundle directory and no sibling files: $bundle_tar"
       issues=$((issues + 1))
     else
       manifest_bundle_dir="$extracted_dir"

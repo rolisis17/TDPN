@@ -72,6 +72,25 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --summary-json "$SU
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-dir "$BUNDLE_DIR" >"$TMP_DIR/verify-dir.log"
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-tar "$BUNDLE_TAR" >"$TMP_DIR/verify-tar.log"
 
+EXTRA_TOP_LEVEL_ROOT="$TMP_DIR/extra-top-level-root"
+EXTRA_TOP_LEVEL_DIR="$EXTRA_TOP_LEVEL_ROOT/$(basename "$BUNDLE_DIR")"
+EXTRA_TOP_LEVEL_TAR="$TMP_DIR/extra-top-level.tar.gz"
+EXTRA_TOP_LEVEL_SHA="${EXTRA_TOP_LEVEL_TAR}.sha256"
+mkdir -p "$EXTRA_TOP_LEVEL_ROOT"
+cp -R "$BUNDLE_DIR" "$EXTRA_TOP_LEVEL_DIR"
+printf '%s\n' 'unmanifested sibling data' >"$EXTRA_TOP_LEVEL_ROOT/extra-secret.txt"
+tar -czf "$EXTRA_TOP_LEVEL_TAR" -C "$EXTRA_TOP_LEVEL_ROOT" "$(basename "$BUNDLE_DIR")" "extra-secret.txt"
+printf '%s  %s\n' "$(sha256sum "$EXTRA_TOP_LEVEL_TAR" | awk '{print $1}')" "$(basename "$EXTRA_TOP_LEVEL_TAR")" >"$EXTRA_TOP_LEVEL_SHA"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-tar "$EXTRA_TOP_LEVEL_TAR" --bundle-tar-sha256-file "$EXTRA_TOP_LEVEL_SHA" >"$TMP_DIR/extra-top-level.log" 2>&1
+extra_top_level_rc=$?
+set -e
+if [[ "$extra_top_level_rc" -eq 0 ]] || ! grep -Fq 'exactly one top-level bundle directory' "$TMP_DIR/extra-top-level.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: extra top-level tar member was not rejected"
+  cat "$TMP_DIR/extra-top-level.log"
+  exit 1
+fi
+
 TAR_TAMPER_ROOT="$TMP_DIR/tar-tamper-root"
 TAR_TAMPER_DIR="$TAR_TAMPER_ROOT/$(basename "$BUNDLE_DIR")"
 TAR_TAMPER="$TMP_DIR/tar-tamper.tar.gz"

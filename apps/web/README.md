@@ -1,8 +1,8 @@
-# Global Private Mesh Web Surface (V1 Scaffold)
+# Global Private Mesh Access Recovery Web Surface (V1 Scaffold)
 
-This folder provides the first productized web surface for **Global Private Mesh (GPM)**:
+This folder provides the first productized public web surface for **Global Private Mesh (GPM)**, now led by the Access Recovery beta:
 
-- `index.html`: public marketing homepage.
+- `index.html`: public Access Recovery homepage focused on trusted keys, signed recovery packs/invites, browser-local verification, helper bridge paths, and operator evidence.
 - `portal.html`: authenticated public portal scaffold for wallet sign-in (including Keplr/Leap wallet-extension sign + verify), client onboarding, client connection controls, contribution/reward status, and diagnostics. Public release builds do not ship admin, audit, operator moderation, server lifecycle, slashing, settlement, or payout controls; those workflows belong in the separate GPM Admin Console.
 - `recovery.html`: local signed access-pack and bridge-invite verifier for the Access Recovery beta path. It can build/import/export a local trusted-organization key store, import single trusted-key handoffs, import/export and summarize a helper registry for active/quarantine checks plus signed abuse-report/rate-limit commitments, verify a signed helper-registry artifact before extracting the raw registry while preserving its organization binding, exchange `GPMREC1` text handoffs including trusted keys and signed helper registries, render/download QR handoffs locally, scan QR images with native QR detection or bundled fallback scanning, then verifies signature, expiry, organization id, trusted-key match, helper status, and helper abuse/rate metadata before listing recovery/helper paths.
 
@@ -21,20 +21,21 @@ Then open:
 - `http://127.0.0.1:8088/portal.html`
 - `http://127.0.0.1:8088/recovery.html`
 
-## Homepage Visual Contract (Premium Surface)
+## Homepage Visual Contract (Access Recovery Surface)
 
 Use this as the change contract for `index.html` (public marketing surface) so refreshes keep the same intent and quality bar.
 
 - Scope: premium styling is intentionally scoped to `.page-home` in `assets/gpm.css`; keep portal UX operational-first and avoid leaking homepage-only polish styles into `portal.html`.
-- Narrative sections: preserve the current high-level order and purpose (`Hero` -> user onboarding -> tier mental map -> GPM Places -> bootstrap resilience -> server host path -> safety posture -> portal CTA) so role-based onboarding context stays obvious before deeper policy details.
-- Tier mental map: keep the public explanation high-level and honest. Tier 0 is a planned community/credit mode with explicit opt-in to capped relay+exit behavior; Tier 1-3 remain the normal stake, reliability, and authority ladder. Do not imply credits are withdrawable currency or stake.
-- GPM Places: frame Places as a planned private-network destination layer for profiles, communities, project pages, tools, and creator spaces. Keep the language conservative: credits are capped internal utility first, direct support is cleaner than raw-view payouts, and broad social-feed/creator-economy claims remain roadmap items.
-- Bootstrap resilience: frame alternate bootstrap paths as discovery help, not weaker trust. Signed manifests, expiry, and key policy remain the authority; insider bridge invites are a planned assisted first-contact flow, not password-only trust.
+- Narrative sections: preserve the current high-level order and purpose (`Hero` -> recovery rationale -> beta mental map -> helper bridge paths -> operator evidence -> recovery posture -> recovery CTA) so the first screen stays about trusted access recovery, not generic network access.
+- Beta mental map: keep the public explanation concrete and ordered: trusted key -> signed recovery pack/invite -> browser-local verification -> helper bridge paths -> operator evidence.
+- Trusted-key posture: frame helpers as discovery or bridge participants, never authorities. The signed organization key, expiry, organization binding, and trusted-key match decide whether material is usable.
+- Helper bridge paths: explain direct recovery packs, helper invites, registry status, quarantine/disabled markers, abuse-report commitments, and rate-limit commitments without exposing privileged moderation or operator actions.
+- Operator evidence: describe evidence as narrow verification facts suitable for later review. Do not imply the public homepage is an admin console or that it records unrelated user activity.
 - Typography direction: keep the humanist/system-forward stack (`"Segoe UI Variable Text"`, `"Aptos"`, `"Segoe UI"`, `"Inter"`, sans-serif), large editorial hero headline with tight tracking, and readable long-form section copy with calmer line-height.
-- Visual tokens: preserve the cool trust-focused palette and token usage (`--bg`, `--panel`, `--text`, `--muted`, `--line`, `--brand`, `--brand-strong`) plus lane differentiation (client blue family vs operator green family); new sections should use these tokens before introducing new colors.
+- Visual tokens: preserve the cool trust-focused palette and token usage (`--bg`, `--panel`, `--text`, `--muted`, `--line`, `--brand`, `--brand-strong`) plus recovery/evidence differentiation; new sections should use these tokens before introducing new colors.
 - Motion expectations: retain staged reveal behavior (`.reveal`, `.reveal--1..5`, `gpm-reveal-up`) and subtle hover lift for cards/buttons; always keep `prefers-reduced-motion` behavior as a first-class fallback (no forced animation).
 - Mobile behavior: preserve responsive intent at `900px` and `640px` breakpoints (stacked top bar, single-column content grids, full-width primary actions, tighter card radii/padding) so copy remains scannable and CTAs remain thumb-friendly.
-- Portal coherence: homepage should remain the narrative front door into public `portal.html` for client registration while pointing operator/admin governance to the separate GPM Admin Console; visual treatments can be richer on homepage, but terminology and lane semantics must stay consistent with the public/admin split.
+- Portal coherence: homepage should primarily drive to `recovery.html` for Access Recovery while keeping `portal.html` available as the authenticated client workspace. Operator/admin governance remains in the separate GPM Admin Console; visual treatments can be richer on homepage, but terminology and lane semantics must stay consistent with the public/admin split.
 
 ## Notes
 

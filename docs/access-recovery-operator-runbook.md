@@ -45,8 +45,9 @@ go run ./cmd/gpmrecover bridge-service-config --invite .easy-node-logs/access-re
 go run ./cmd/gpmrecover bridge-service-check --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --path-id helper-web
 go run ./cmd/gpmrecover bridge-service-code-generate --code-out .easy-node-logs/access-recovery-demo/bridge-code.txt --hash-out .easy-node-logs/access-recovery-demo/bridge-code-hash.json
 CONFIG_HASH="$(sha256sum .easy-node-logs/access-recovery-demo/bridge-service-config.json | awk '{print $1}')"
-go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --config-sha256 "$CONFIG_HASH" --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/access-recovery-demo/bridge-abuse.jsonl --access-code-sha256 HASH
-go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/access-recovery-demo/bridge-deploy --public-host bridge.example --config-sha256 "$CONFIG_HASH" --access-code-sha256 HASH
+CODE_HASH="$(jq -r '.sha256' .easy-node-logs/access-recovery-demo/bridge-code-hash.json)"
+go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --config-sha256 "$CONFIG_HASH" --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/access-recovery-demo/bridge-abuse.jsonl --access-code-sha256 "$CODE_HASH"
+go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/access-recovery-demo/bridge-deploy --public-host bridge.example --config-sha256 "$CONFIG_HASH" --access-code-sha256 "$CODE_HASH"
 ```
 
 4. If testing online publication, upload `public/.well-known/gpm/` and fetch it from another machine before verification:
@@ -81,6 +82,7 @@ CONFIG_HASH="$(sha256sum .easy-node-logs/access-recovery-demo/bridge-service-con
 go run ./cmd/gpmrecover bridge-service-code-generate \
   --code-out .easy-node-logs/access-recovery-demo/bridge-code.txt \
   --hash-out .easy-node-logs/access-recovery-demo/bridge-code-hash.json
+CODE_HASH="$(jq -r '.sha256' .easy-node-logs/access-recovery-demo/bridge-code-hash.json)"
 ```
 
 3. Generate the helper deploy pack and install only the generated env, wrapper, service unit, and selected HTTPS reverse-proxy example on the helper host:
@@ -90,7 +92,7 @@ go run ./cmd/gpmrecover bridge-service-deploy-pack \
   --out-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
   --public-host bridge.example \
   --config-sha256 "$CONFIG_HASH" \
-  --access-code-sha256 HASH
+  --access-code-sha256 "$CODE_HASH"
 ```
 
 4. Bind the bridge service to loopback, for example `127.0.0.1:18980`, and put Caddy or nginx in front of it with HTTPS enabled. The public endpoint must be `https://bridge.example`, proxying only to the local bridge listener. Keep query-string access codes disabled; pass access codes through `X-GPM-Bridge-Code`.

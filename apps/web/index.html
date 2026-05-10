@@ -7,27 +7,26 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'"
     />
-    <title>Global Private Mesh</title>
+    <title>GPM Access Recovery</title>
     <link rel="stylesheet" href="./assets/gpm.css" />
   </head>
   <body class="page-home">
     <header class="topbar">
       <div class="wrap">
-        <a class="brand-lockup" href="./index.html" aria-label="Global Private Mesh home">
+        <a class="brand-lockup" href="./index.html" aria-label="GPM Access Recovery home">
           <span class="brand-mark" aria-hidden="true">G</span>
           <span>
             <span class="brand-name">Global Private Mesh</span>
-            <span class="brand-subtitle">Private network</span>
+            <span class="brand-subtitle">Access recovery</span>
           </span>
         </a>
         <nav class="nav" aria-label="Primary">
-          <a class="btn secondary" href="#why-gpm">Why GPM</a>
-          <a class="btn secondary" href="#network-tiers">Tiers</a>
-          <a class="btn secondary" href="#gpm-places">Places</a>
-          <a class="btn secondary" href="#bootstrap-resilience">Bootstrap</a>
-          <a class="btn secondary" href="./recovery.html">Recover</a>
-          <a class="btn secondary" href="#server-hosts">Run a server</a>
-          <a class="btn primary" href="./portal.html">Open Portal</a>
+          <a class="btn secondary" href="#why-recovery">Why recovery</a>
+          <a class="btn secondary" href="#beta-flow">Beta flow</a>
+          <a class="btn secondary" href="#bridge-paths">Bridge paths</a>
+          <a class="btn secondary" href="#operator-evidence">Evidence</a>
+          <a class="btn secondary" href="./portal.html">Portal</a>
+          <a class="btn primary" href="./recovery.html">Open Recovery</a>
         </nav>
       </div>
     </header>
@@ -36,26 +35,27 @@
       <section class="mesh-hero reveal">
         <div class="wrap mesh-hero__grid">
           <div class="mesh-hero__copy">
-            <p class="eyebrow">Private VPN, built as a mesh</p>
-            <h1>A private internet without the tech mess.</h1>
+            <p class="eyebrow">Trusted access recovery beta</p>
+            <h1>Recover access without handing over trust.</h1>
             <p>
-              Connect your wallet. Register once. Press Connect. GPM chooses a safe path for you.
+              GPM verifies signed recovery packs and helper invites in the browser, using trusted
+              organization keys, local checks, bridge paths, and operator-ready evidence.
             </p>
             <div class="hero-actions" aria-label="Primary actions">
-              <a class="btn primary btn--cta" href="./portal.html">Connect Wallet</a>
-              <a class="btn secondary" href="#why-gpm">See how it feels</a>
+              <a class="btn primary btn--cta" href="./recovery.html">Open Recovery</a>
+              <a class="btn secondary" href="#beta-flow">See the beta flow</a>
             </div>
-            <div class="hero-badges" aria-label="Product promises">
-              <span>No server lists</span>
-              <span>No random IPs</span>
-              <span>Wallet access</span>
+            <div class="hero-badges" aria-label="Access recovery promises">
+              <span>Trusted keys</span>
+              <span>Signed packs</span>
+              <span>Browser-local checks</span>
             </div>
           </div>
 
-          <aside class="mesh-visual-card" aria-label="GPM connection preview">
+          <aside class="mesh-visual-card" aria-label="Access recovery verification preview">
             <div class="mesh-visual-topline">
               <span class="signal-dot"></span>
-              <span>Protected tunnel</span>
+              <span>Recovery verified locally</span>
             </div>
             <div class="mesh-orb" aria-hidden="true">
               <div class="mesh-orb__ring"></div>
@@ -63,307 +63,267 @@
             </div>
             <div class="mesh-route">
               <article>
-                <span>Wallet</span>
-                <strong>Connected</strong>
+                <span>Trust root</span>
+                <strong>Org key</strong>
               </article>
               <article>
-                <span>Route</span>
-                <strong>Auto mesh</strong>
+                <span>Artifact</span>
+                <strong>Signed pack</strong>
               </article>
               <article>
-                <span>Server</span>
-                <strong>Trusted path</strong>
+                <span>Decision</span>
+                <strong>Local verify</strong>
               </article>
             </div>
-            <div class="mesh-pulse-line" aria-hidden="true"></div>
           </aside>
         </div>
       </section>
 
-      <section class="section premium-section reveal reveal--1" id="why-gpm" aria-labelledby="why-gpm-heading">
+      <section class="section premium-section reveal reveal--1" id="why-recovery" aria-labelledby="why-recovery-heading">
         <div class="wrap">
           <div class="section__header">
-            <p class="section__eyebrow">Why people use it</p>
-            <h2 id="why-gpm-heading">It works like a normal VPN, but the network is shared.</h2>
+            <p class="section__eyebrow">Why recovery</p>
+            <h2 id="why-recovery-heading">A recovery path should prove who is helping before it asks the user to continue.</h2>
             <p class="section-lead">
-              You do not pick IPs or manage network settings. GPM handles the route and keeps the app calm.
+              The public surface now starts with access recovery: signed material, trusted keys,
+              explicit helper status, and evidence that operators can inspect without turning the
+              browser into an admin console.
             </p>
           </div>
           <div class="grid cols-3">
             <article class="card product-card">
               <span class="card-icon">01</span>
-              <h3>Open the app</h3>
-              <p>Use Keplr or Leap to prove the account is yours.</p>
+              <h3>Start from a trusted key</h3>
+              <p>Users import or keep an organization key store before accepting recovery material.</p>
             </article>
             <article class="card product-card">
               <span class="card-icon">02</span>
-              <h3>Register this device</h3>
-              <p>Your device gets its profile. The route stays automatic.</p>
+              <h3>Verify before contact</h3>
+              <p>The browser checks signatures, expiry, organization binding, helper status, and abuse metadata.</p>
             </article>
             <article class="card product-card">
               <span class="card-icon">03</span>
-              <h3>Press Connect</h3>
-              <p>GPM chooses the safe path and shows a clear status.</p>
+              <h3>Keep evidence portable</h3>
+              <p>Recovery facts stay clear enough for support and operator review without exposing privileged controls.</p>
             </article>
           </div>
         </div>
       </section>
 
-      <section class="section tier-map-section reveal reveal--2" id="network-tiers" aria-labelledby="network-tiers-heading">
+      <section class="section tier-map-section reveal reveal--2" id="beta-flow" aria-labelledby="beta-flow-heading">
         <div class="wrap tier-map-band">
           <div class="tier-map-intro">
             <div class="section__header">
               <p class="section__eyebrow">Mental map</p>
-              <h2 id="network-tiers-heading">Four ways to belong to the mesh.</h2>
+              <h2 id="beta-flow-heading">The beta flow is one signed chain, checked locally.</h2>
               <p class="section-lead">
-                GPM can stay simple on the surface while the network grows in layers: planned
-                community access, standard paid access, reliable contributors, and backbone operators.
+                Access recovery is deliberately narrow: establish the trusted key, inspect a signed
+                recovery pack or invite, verify it in the browser, choose an allowed helper bridge,
+                and preserve operator evidence.
               </p>
             </div>
-            <div class="credit-loop" aria-label="Tier 0 credit loop">
-              <span>Use</span>
-              <span>Share</span>
-              <span>Earn credits</span>
-              <span>Spend or upgrade</span>
+            <div class="credit-loop" aria-label="Access recovery beta flow">
+              <span>Trusted key</span>
+              <span>Signed pack or invite</span>
+              <span>Browser-local verification</span>
+              <span>Helper bridge paths</span>
+              <span>Operator evidence</span>
             </div>
           </div>
 
-          <div class="tier-map-grid" aria-label="GPM tier model">
-            <article class="tier-node tier-node--community">
-              <p class="tier-node__eyebrow">Tier 0 planned</p>
-              <h3>Community Mode</h3>
+          <div class="recovery-flow-grid" aria-label="Access recovery beta flow details">
+            <article class="tier-node recovery-flow-node">
+              <p class="tier-node__eyebrow">Step 01</p>
+              <h3>Trusted key</h3>
               <p>
-                Free or very low-cost access for people who knowingly help the network as a capped
-                client, relay, and exit.
+                The recovery page starts from an organization key store or a single trusted-key
+                handoff. The key is the authority, not the helper.
               </p>
               <dl class="tier-node__facts">
                 <div>
-                  <dt>Needs</dt>
-                  <dd>Wallet, device checks, clear consent, and safety education.</dd>
-                </div>
-                <div>
-                  <dt>Gets</dt>
-                  <dd>Internal credits for usage, priority, retries, or upgrade discounts.</dd>
-                </div>
-                <div>
-                  <dt>Limits</dt>
-                  <dd>No cash payout, no stake replacement, strict traffic and abuse guardrails.</dd>
+                  <dt>Checks</dt>
+                  <dd>Organization id, key id, public key material, and local trust state.</dd>
                 </div>
               </dl>
             </article>
 
-            <article class="tier-node tier-node--standard">
-              <p class="tier-node__eyebrow">Tier 1</p>
-              <h3>Standard Access</h3>
+            <article class="tier-node recovery-flow-node">
+              <p class="tier-node__eyebrow">Step 02</p>
+              <h3>Signed recovery pack or invite</h3>
               <p>
-                The normal GPM path: pay or stake for access, register the device, and use stable
-                routes without becoming a community exit.
+                A pack or bridge invite carries signed recovery paths, helper hints, expiry, and
+                organization binding.
               </p>
               <dl class="tier-node__facts">
                 <div>
-                  <dt>Needs</dt>
-                  <dd>Wallet, device registration, and required balance or stake policy.</dd>
-                </div>
-                <div>
-                  <dt>Can do</dt>
-                  <dd>Use the VPN, keep routes automatic, and apply for reviewed server access.</dd>
-                </div>
-                <div>
-                  <dt>Limits</dt>
-                  <dd>No micro-relay or micro-exit contribution until higher trust is earned.</dd>
+                  <dt>Checks</dt>
+                  <dd>Signature, expiry, trusted-key match, and artifact scope.</dd>
                 </div>
               </dl>
             </article>
 
-            <article class="tier-node tier-node--reliable">
-              <p class="tier-node__eyebrow">Tier 2</p>
-              <h3>Reliable Contributor</h3>
+            <article class="tier-node recovery-flow-node">
+              <p class="tier-node__eyebrow">Step 03</p>
+              <h3>Browser-local verification</h3>
               <p>
-                A higher-trust account for users or operators with better capacity, uptime, stake,
-                and abuse history.
+                Verification runs on the page before the user follows a path. Imported QR and text
+                handoffs stay inspectable.
               </p>
               <dl class="tier-node__facts">
                 <div>
-                  <dt>Needs</dt>
-                  <dd>More stake, healthy device checks, capacity score, and clean reputation.</dd>
-                </div>
-                <div>
-                  <dt>Can do</dt>
-                  <dd>Use richer paths and opt into relay or exit beta when policy allows it.</dd>
-                </div>
-                <div>
-                  <dt>Earns</dt>
-                  <dd>Metered weekly rewards with holds, voids, and slashing for abuse.</dd>
+                  <dt>Checks</dt>
+                  <dd>No server-side trust shortcut is needed for the first decision.</dd>
                 </div>
               </dl>
             </article>
 
-            <article class="tier-node tier-node--backbone">
-              <p class="tier-node__eyebrow">Tier 3</p>
-              <h3>Backbone Operator</h3>
+            <article class="tier-node recovery-flow-node">
+              <p class="tier-node__eyebrow">Step 04</p>
+              <h3>Helper bridge paths</h3>
               <p>
-                The high-trust layer for core infrastructure, high-capacity routes, authority
-                services, and settlement operations.
+                Active helpers can bridge users toward recovery routes, while quarantined or
+                disabled helpers are visible before action.
               </p>
               <dl class="tier-node__facts">
                 <div>
-                  <dt>Needs</dt>
-                  <dd>Highest stake, proven uptime, key discipline, mTLS/HTTPS, and approval.</dd>
+                  <dt>Checks</dt>
+                  <dd>Helper registry status, abuse commitments, and rate-limit commitments.</dd>
                 </div>
+              </dl>
+            </article>
+
+            <article class="tier-node recovery-flow-node">
+              <p class="tier-node__eyebrow">Step 05</p>
+              <h3>Operator evidence</h3>
+              <p>
+                The result summarizes what was trusted, what was rejected, and which helper path was
+                offered for later operator review.
+              </p>
+              <dl class="tier-node__facts">
                 <div>
-                  <dt>Can do</dt>
-                  <dd>Run authority-grade services, backbone relays, exits, and validator paths.</dd>
-                </div>
-                <div>
-                  <dt>Duty</dt>
-                  <dd>Carry the strongest operational, audit, and governance responsibilities.</dd>
+                  <dt>Checks</dt>
+                  <dd>Evidence stays reviewable without adding admin actions to the public page.</dd>
                 </div>
               </dl>
             </article>
           </div>
 
-          <div class="tier-rule-grid" aria-label="Network rules">
+          <div class="tier-rule-grid" aria-label="Access recovery trust rules">
             <article>
-              <h3>No hidden exits</h3>
-              <p>Tier 0 exit mode must be explicit, warned, explained, capped, and reversible.</p>
+              <h3>Helpers are not authorities</h3>
+              <p>A helper can carry discovery material, but the signed organization key decides trust.</p>
             </article>
             <article>
-              <h3>Credits are not stake</h3>
-              <p>Community credits buy network utility; real staking and slashing stay separate.</p>
+              <h3>Freshness matters</h3>
+              <p>Expired packs and stale registries should fail before the user follows a recovery path.</p>
             </article>
             <article>
-              <h3>Abuse handling stays narrow</h3>
-              <p>Track account, session, exit assignment, and abuse events without browsing logs.</p>
+              <h3>Evidence stays narrow</h3>
+              <p>Record verification facts and helper posture, not unrelated browsing or account history.</p>
             </article>
           </div>
         </div>
       </section>
 
-      <section class="section places-section reveal reveal--3" id="gpm-places" aria-labelledby="gpm-places-heading">
+      <section class="section places-section reveal reveal--3" id="bridge-paths" aria-labelledby="bridge-paths-heading">
         <div class="wrap places-band">
           <div class="section__header">
-            <p class="section__eyebrow">GPM Places planned</p>
-            <h2 id="gpm-places-heading">Private access, plus somewhere useful to go.</h2>
+            <p class="section__eyebrow">Helper bridge paths</p>
+            <h2 id="bridge-paths-heading">A helper can get someone to the door, but cannot change the lock.</h2>
             <p class="section-lead">
-              GPM can grow into a private network of pages, communities, tools, projects, and creator
-              spaces. The first version stays quiet: no public feed, no raw-view payouts, and no cash
-              promises.
+              Bridge paths are designed for assisted first contact and recovery continuity. They
+              expose enough status for users to avoid bad paths while preserving a simple recovery
+              experience.
             </p>
           </div>
 
-          <div class="places-grid" aria-label="GPM Places product map">
+          <div class="places-grid" aria-label="Helper bridge path types">
             <article class="place-card">
               <span class="place-card__label">01</span>
-              <h3>Pages inside the mesh</h3>
-              <p>Profiles, project pages, guides, communities, and small tools can become internal destinations.</p>
+              <h3>Direct recovery pack</h3>
+              <p>A signed pack lists recovery endpoints and verification facts for a known organization.</p>
             </article>
             <article class="place-card">
               <span class="place-card__label">02</span>
-              <h3>Credits with guardrails</h3>
-              <p>People support useful places with credits. Creator rewards start capped, delayed, and reviewable.</p>
+              <h3>Trusted helper invite</h3>
+              <p>An existing helper can pass a handoff, QR, or invite while the page still verifies authority locally.</p>
             </article>
             <article class="place-card">
               <span class="place-card__label">03</span>
-              <h3>Discovery before feeds</h3>
-              <p>Curated categories, reports, blocks, and moderation come before any broad social feed.</p>
+              <h3>Registry-aware routing</h3>
+              <p>Helper status, quarantine markers, rate limits, and abuse-report commitments travel with the flow.</p>
             </article>
           </div>
         </div>
       </section>
 
-      <section class="section places-section bootstrap-section reveal reveal--4" id="bootstrap-resilience" aria-labelledby="bootstrap-resilience-heading">
-        <div class="wrap places-band bootstrap-band">
-          <div class="section__header">
-            <p class="section__eyebrow">Resilient first connection</p>
-            <h2 id="bootstrap-resilience-heading">Many ways in, one trust rule.</h2>
-            <p class="section-lead">
-              A new user should not depend on one static gateway. Official manifests, mirrors,
-              cache, and bridge invites can help discovery, but signed freshness decides trust.
-            </p>
-          </div>
-
-          <div class="places-grid bootstrap-grid" aria-label="GPM bootstrap resilience map">
-            <article class="place-card bootstrap-card">
-              <span class="place-card__label">01</span>
-              <h3>Signed manifest</h3>
-              <p>The app verifies expiry, key policy, HTTPS posture, and trusted directory lists before registering.</p>
-            </article>
-            <article class="place-card bootstrap-card">
-              <span class="place-card__label">02</span>
-              <h3>Mirrors and cache</h3>
-              <p>Alternate sources can carry the same signed material, so outages do not rewrite trust.</p>
-            </article>
-            <article class="place-card bootstrap-card">
-              <span class="place-card__label">03</span>
-              <h3>Insider bridge invite</h3>
-              <p>An existing user can help an outsider discover the network, but cannot become the authority.</p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="section premium-section reveal reveal--5" id="server-hosts" aria-labelledby="server-hosts-heading">
+      <section class="section premium-section reveal reveal--4" id="operator-evidence" aria-labelledby="operator-evidence-heading">
         <div class="wrap split-section">
           <div class="section__header">
-            <p class="section__eyebrow">For server hosts</p>
-            <h2 id="server-hosts-heading">Apply, get reviewed, then run your server.</h2>
+            <p class="section__eyebrow">Operator evidence</p>
+            <h2 id="operator-evidence-heading">Every recovery decision should leave a small, useful trail.</h2>
             <p class="section-lead">
-              Server access is simple on purpose. You apply from your wallet, GPM reviews it, and approved hosts run only their own server.
+              The beta path keeps public recovery separate from operator governance, but it still
+              names the facts operators need: trusted key, signature result, expiry, organization,
+              helper status, and bridge path chosen.
             </p>
             <div class="hero-actions">
-              <a class="btn secondary" href="./portal.html#server_application">Apply for server access</a>
+              <a class="btn secondary" href="./recovery.html">Inspect a recovery handoff</a>
             </div>
           </div>
           <div class="server-preview-card">
             <div class="preview-row">
-              <span>Application</span>
-              <strong>Review required</strong>
+              <span>Trust root</span>
+              <strong>Organization key matched</strong>
             </div>
             <div class="preview-row">
-              <span>Controls</span>
-              <strong>Your server only</strong>
+              <span>Artifact</span>
+              <strong>Signature and expiry checked</strong>
             </div>
             <div class="preview-row">
-              <span>Experience</span>
-              <strong>Simple status + start path</strong>
+              <span>Helper</span>
+              <strong>Status and commitments visible</strong>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="section premium-section reveal reveal--6" aria-labelledby="trust-heading">
+      <section class="section premium-section reveal reveal--5" aria-labelledby="trust-heading">
         <div class="wrap">
           <div class="section__header section__header--center">
-            <p class="section__eyebrow">Designed to feel safe</p>
-            <h2 id="trust-heading">The fewer choices users need to make, the safer the product feels.</h2>
+            <p class="section__eyebrow">Recovery posture</p>
+            <h2 id="trust-heading">The public page stays calm because the trust model is explicit.</h2>
           </div>
           <div class="grid cols-3 posture-grid">
             <article class="card posture-card">
-              <h3>One clear start</h3>
-              <p>The wallet button is the front door.</p>
+              <h3>Local first</h3>
+              <p>Key stores, handoffs, QR scans, and pack verification run in the browser.</p>
             </article>
             <article class="card posture-card">
-              <h3>Automatic routes</h3>
-              <p>GPM chooses network paths instead of asking users to guess.</p>
+              <h3>Signed before useful</h3>
+              <p>Bridge material becomes useful only after the trusted-key and signature checks pass.</p>
             </article>
             <article class="card posture-card">
-              <h3>Quiet controls</h3>
-              <p>Extra controls stay out of the normal path.</p>
+              <h3>Admin-free surface</h3>
+              <p>Public recovery explains evidence and paths without exposing governance controls.</p>
             </article>
           </div>
         </div>
       </section>
 
-      <section class="section reveal reveal--7" aria-labelledby="portal-cta-heading">
+      <section class="section reveal reveal--6" aria-labelledby="recovery-cta-heading">
         <div class="wrap">
           <div class="card cta-panel">
             <div class="section__header section__header--compact">
               <p class="section__eyebrow">Ready</p>
-              <h2 id="portal-cta-heading">Start with your wallet.</h2>
+              <h2 id="recovery-cta-heading">Verify the handoff before you follow it.</h2>
             </div>
-            <p class="cta-panel__copy">No seed phrase. No IP setup. Just the account you control.</p>
+            <p class="cta-panel__copy">
+              Import a trusted key, paste a recovery pack, scan a QR handoff, or inspect a helper registry locally.
+            </p>
             <div class="hero-actions">
-              <a class="btn primary btn--cta" href="./portal.html">Open Portal</a>
+              <a class="btn primary btn--cta" href="./recovery.html">Open Recovery</a>
+              <a class="btn secondary" href="./portal.html">Open Portal</a>
             </div>
           </div>
         </div>
@@ -371,7 +331,7 @@
     </main>
 
     <footer class="footer">
-      <div class="wrap">Global Private Mesh</div>
+      <div class="wrap">Global Private Mesh Access Recovery</div>
     </footer>
   </body>
 </html>

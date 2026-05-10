@@ -1285,7 +1285,7 @@ if ! grep -Eq '\[roadmap-progress-report\] access_recovery_track_status=pilot-ev
   exit 1
 fi
 
-echo "[roadmap-progress-report] Access Recovery evidence missing is fail-soft"
+echo "[roadmap-progress-report] Access Recovery evidence missing is surfaced as warning by default"
 ACCESS_RECOVERY_MISSING_SMOKE_SUMMARY_JSON="$TMP_DIR/missing_access_bridge_service_smoke_summary.json"
 ACCESS_RECOVERY_MISSING_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/missing_access_bridge_deployment_evidence_summary.json"
 ACCESS_RECOVERY_MISSING_HOST_SUMMARY_JSON="$TMP_DIR/missing_access_bridge_host_install_summary.json"
@@ -1305,7 +1305,10 @@ if ! run_roadmap_progress_report \
   exit 1
 fi
 if ! jq -e '
-  .current_roadmap_track == "access_recovery"
+  .status == "warn"
+  and .rc == 0
+  and .current_roadmap_track == "access_recovery"
+  and .access_recovery_evidence_required == false
   and .access_recovery_track.status == "evidence-missing"
   and .access_recovery_track.ready == false
   and .access_recovery_track.needs_attention == true
@@ -1337,7 +1340,36 @@ if ! grep -Eq '\[roadmap-progress-report\] access_bridge_service_smoke_available
   exit 1
 fi
 
-echo "[roadmap-progress-report] Access Recovery stale evidence is fail-soft"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_MISSING_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$TMP_DIR/access_bridge_deployment_evidence_missing_summary.json" \
+  --access-bridge-host-install-summary-json "$TMP_DIR/access_bridge_host_install_missing_summary.json" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_required_missing_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_required_missing_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_required_missing.log 2>&1; then
+  echo "expected failure when Access Recovery evidence is required and missing"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_required_missing.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .current_roadmap_track == "access_recovery"
+  and .access_recovery_evidence_required == true
+  and .access_recovery_track.status == "evidence-missing"
+  and .access_recovery_track.ready == false
+  and .access_recovery_track.needs_attention == true
+' "$TMP_DIR/roadmap_progress_access_recovery_required_missing_summary.json" >/dev/null; then
+  echo "Access Recovery required missing evidence summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_required_missing_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery stale evidence is surfaced as warning by default"
 ACCESS_RECOVERY_STALE_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_stale_summary.json"
 jq '.generated_at_utc = "2020-01-01T00:00:00Z"' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_STALE_SMOKE_SUMMARY_JSON"
 if ! ROADMAP_PROGRESS_ACCESS_RECOVERY_EVIDENCE_MAX_AGE_SEC=60 run_roadmap_progress_report \
@@ -1356,7 +1388,10 @@ if ! ROADMAP_PROGRESS_ACCESS_RECOVERY_EVIDENCE_MAX_AGE_SEC=60 run_roadmap_progre
   exit 1
 fi
 if ! jq -e '
-  .current_roadmap_track == "access_recovery"
+  .status == "warn"
+  and .rc == 0
+  and .current_roadmap_track == "access_recovery"
+  and .access_recovery_evidence_required == false
   and .access_recovery_track.status == "evidence-stale"
   and .access_recovery_track.ready == false
   and .access_recovery_track.needs_attention == true
@@ -1391,7 +1426,7 @@ if ! grep -Eq '\[roadmap-progress-report\] access_recovery_track_status=evidence
   exit 1
 fi
 
-echo "[roadmap-progress-report] Access Recovery invalid evidence is fail-soft"
+echo "[roadmap-progress-report] Access Recovery invalid evidence is surfaced as warning by default"
 ACCESS_RECOVERY_INVALID_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_invalid_summary.json"
 printf '{"version":1,' >"$ACCESS_RECOVERY_INVALID_SMOKE_SUMMARY_JSON"
 if ! run_roadmap_progress_report \
@@ -1410,7 +1445,10 @@ if ! run_roadmap_progress_report \
   exit 1
 fi
 if ! jq -e '
-  .current_roadmap_track == "access_recovery"
+  .status == "warn"
+  and .rc == 0
+  and .current_roadmap_track == "access_recovery"
+  and .access_recovery_evidence_required == false
   and .access_recovery_track.status == "evidence-invalid"
   and .access_recovery_track.ready == false
   and .access_recovery_track.needs_attention == true

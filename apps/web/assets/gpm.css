@@ -1764,9 +1764,9 @@ pre {
   }
 }
 
-/* GPM consumer-grade surface refresh.
-   This layer intentionally follows the desktop app's dark glass visual language
-   and keeps support/debug controls out of the normal user path. */
+/* GPM public surface refresh.
+   This layer keeps the Access Recovery beta calm, signed, and trust-led while
+   keeping support/debug controls out of the normal user path. */
 .page-home,
 .page-portal {
   color-scheme: dark;
@@ -3205,7 +3205,7 @@ body.page-recover .topbar .wrap {
   padding: clamp(36px, 5vw, 70px) 0;
 }
 
-.page-home :where(#why-gpm, #network-tiers, #gpm-places, #bootstrap-resilience, #server-hosts) {
+.page-home :where(#why-recovery, #beta-flow, #bridge-paths, #operator-evidence) {
   scroll-margin-top: 100px;
 }
 
@@ -3223,7 +3223,7 @@ body.page-recover .topbar .wrap {
 
 .page-home .credit-loop {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 8px;
   padding: 10px;
   border: 1px solid rgba(216, 247, 236, 0.14);
@@ -3266,6 +3266,12 @@ body.page-recover .topbar .wrap {
   gap: 12px;
 }
 
+.page-home .recovery-flow-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .page-home .tier-node {
   position: relative;
   min-height: 500px;
@@ -3282,6 +3288,10 @@ body.page-recover .topbar .wrap {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     0 22px 48px rgba(0, 0, 0, 0.22);
+}
+
+.page-home .recovery-flow-node {
+  min-height: 430px;
 }
 
 .page-home .tier-node::before {
@@ -3493,7 +3503,8 @@ body.page-recover .topbar .wrap {
 }
 
 @media (max-width: 1120px) {
-  .page-home .tier-map-grid {
+  .page-home .tier-map-grid,
+  .page-home .recovery-flow-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -3514,7 +3525,7 @@ body.page-recover .topbar .wrap {
     padding: 26px 0 42px;
   }
 
-  .page-home :where(#why-gpm, #network-tiers, #gpm-places, #bootstrap-resilience, #server-hosts) {
+  .page-home :where(#why-recovery, #beta-flow, #bridge-paths, #operator-evidence) {
     scroll-margin-top: 320px;
   }
 
@@ -3576,6 +3587,7 @@ body.page-recover .topbar .wrap {
 
   .page-home .credit-loop,
   .page-home .tier-map-grid,
+  .page-home .recovery-flow-grid,
   .page-home .grid.cols-3,
   .page-home .places-grid {
     grid-template-columns: minmax(0, 1fr);

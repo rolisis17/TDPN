@@ -37,6 +37,7 @@ Usage:
     [--report-md PATH] \
     [--print-report [0|1]] \
     [--print-summary-json [0|1]] \
+    [--require-access-recovery-evidence [0|1]] \
     [--suppress-live-evidence-next-actions-when-batch-helper [0|1]]
 
 Purpose:
@@ -46,7 +47,7 @@ Purpose:
 Notes:
   - This does not replace real machine-C and true 3-machine production signoff.
   - Blockchain/payment track is reported as a Cosmos-first parallel track with VPN dataplane independence.
-  - Access Recovery bridge evidence is fail-soft: missing or invalid summaries are surfaced without failing this report.
+  - Access Recovery bridge evidence is surfaced as a roadmap warning by default; use --require-access-recovery-evidence 1 to fail-close beta readiness automation.
 USAGE
 }
 
@@ -6417,6 +6418,7 @@ manual_refresh_timeout_sec="${ROADMAP_PROGRESS_MANUAL_REFRESH_TIMEOUT_SEC:-900}"
 single_machine_refresh_timeout_sec="${ROADMAP_PROGRESS_SINGLE_MACHINE_REFRESH_TIMEOUT_SEC:-7200}"
 print_report="1"
 print_summary_json="1"
+require_access_recovery_evidence="${ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE:-0}"
 suppress_live_evidence_next_actions_when_batch_helper="${ROADMAP_PROGRESS_SUPPRESS_LIVE_EVIDENCE_NEXT_ACTIONS_WHEN_BATCH_HELPER:-0}"
 
 default_log_dir="${ROADMAP_PROGRESS_LOG_DIR:-${EASY_NODE_LOG_DIR:-$ROOT_DIR/.easy-node-logs}}"
@@ -6650,6 +6652,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-access-recovery-evidence)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_access_recovery_evidence="${2:-}"
+        shift 2
+      else
+        require_access_recovery_evidence="1"
+        shift
+      fi
+      ;;
     --suppress-live-evidence-next-actions-when-batch-helper)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         suppress_live_evidence_next_actions_when_batch_helper="${2:-}"
@@ -6679,7 +6690,9 @@ bool_arg_or_die "--refresh-manual-validation" "$refresh_manual_validation"
 bool_arg_or_die "--refresh-single-machine-readiness" "$refresh_single_machine_readiness"
 bool_arg_or_die "--print-report" "$print_report"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "--require-access-recovery-evidence" "$require_access_recovery_evidence"
 bool_arg_or_die "--suppress-live-evidence-next-actions-when-batch-helper" "$suppress_live_evidence_next_actions_when_batch_helper"
+require_access_recovery_evidence_json="$( [[ "$require_access_recovery_evidence" == "1" ]] && printf 'true' || printf 'false' )"
 suppress_live_evidence_next_actions_when_batch_helper_json="$( [[ "$suppress_live_evidence_next_actions_when_batch_helper" == "1" ]] && printf 'true' || printf 'false' )"
 if ! [[ "$manual_refresh_timeout_sec" =~ ^[0-9]+$ ]]; then
   echo "--manual-refresh-timeout-sec must be an integer >= 0"
@@ -11880,6 +11893,10 @@ elif [[ "$manual_refresh_status" == "fail" || "$single_machine_refresh_status" =
 elif [[ "$manual_refresh_status" == "warn" || "$single_machine_refresh_status" == "warn" ]]; then
   final_status="warn"
   notes="One or more requested refresh steps reported non-blocking transient warnings; latest usable summaries were retained."
+elif [[ "$access_recovery_track_needs_attention_json" == "true" && "$require_access_recovery_evidence" == "1" ]]; then
+  final_status="fail"
+  final_rc=1
+  notes="Access Recovery evidence is required and still needs attention; inspect access_recovery_track.recommended_next_action."
 elif [[ "$readiness_status" != "READY" ]]; then
   final_status="warn"
   notes="VPN production signoff is still pending external real-host gates."
@@ -11898,6 +11915,9 @@ elif [[ "$profile_default_gate_evidence_pack_needs_attention_json" == "true" ]] 
   || [[ "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" == "true" ]]; then
   final_status="warn"
   notes="Core roadmap gates are healthy, but evidence-pack publication gates still need attention."
+elif [[ "$access_recovery_track_needs_attention_json" == "true" ]]; then
+  final_status="warn"
+  notes="Access Recovery evidence still needs attention; inspect access_recovery_track.recommended_next_action."
 fi
 
 next_actions_json_file="$(mktemp)"
@@ -12480,6 +12500,7 @@ summary_payload_jq_args=(
   --argjson next_actions_live_evidence_individual_suppression_applied "$next_actions_live_evidence_individual_suppression_applied_json" \
   --arg current_roadmap_track "$current_roadmap_track" \
   --argjson access_recovery_track "$access_recovery_track_json" \
+  --argjson access_recovery_evidence_required "$require_access_recovery_evidence_json" \
   --arg blockchain_track_status "$blockchain_track_status" \
   --arg blockchain_track_policy "$blockchain_track_policy" \
   --arg blockchain_track_recommendation "$blockchain_track_recommendation" \
@@ -12539,6 +12560,7 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
     rc: (if $status == "fail" then 1 else 0 end),
     notes: $notes,
     current_roadmap_track: $current_roadmap_track,
+    access_recovery_evidence_required: $access_recovery_evidence_required,
     access_recovery_track: $access_recovery_track,
     vpn_track: {
       readiness_status: $readiness_status,

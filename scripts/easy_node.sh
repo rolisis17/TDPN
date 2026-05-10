@@ -295,6 +295,7 @@ Usage:
   ./scripts/easy_node.sh client-vpn-down [--force-iface-cleanup [0|1]]
   ./scripts/easy_node.sh three-machine-reminder
   ./scripts/easy_node.sh three-machine-real-host-validation-pack [three_machine_real_host_validation_pack args...]
+  ./scripts/easy_node.sh access-recovery-beta-local-gate [access_recovery_beta_local_gate args...]
   ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle [access_bridge_pilot_evidence_bundle args...]
   ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify [access_bridge_pilot_evidence_bundle_verify args...]
   ./scripts/easy_node.sh three-machine-docker-profile-matrix [three_machine_docker_profile_matrix args...]
@@ -584,6 +585,7 @@ Usage:
   ./scripts/easy_node.sh three-machine-prod-bundle [--bundle-dir PATH] [--preflight-check [0|1]] [--preflight-timeout-sec N] [--preflight-require-root [0|1]] [--bundle-verify-check [0|1]] [--bundle-verify-show-details [0|1]] [--run-report-json PATH] [--run-report-print [0|1]] [--incident-snapshot-on-fail [0|1]] [--incident-snapshot-include-docker-logs [0|1]] [--incident-snapshot-docker-log-lines N] [--incident-snapshot-timeout-sec N] [--incident-snapshot-compose-project NAME] [--incident-snapshot-attach-artifact PATH]... [--signoff-check [0|1]] [--signoff-require-full-sequence [0|1]] [--signoff-require-wg-validate-ok [0|1]] [--signoff-require-wg-soak-ok [0|1]] [--signoff-require-wg-validate-udp-source [0|1]] [--signoff-require-wg-validate-strict-distinct [0|1]] [--signoff-require-wg-soak-diversity-pass [0|1]] [--signoff-min-wg-soak-selection-lines N] [--signoff-min-wg-soak-entry-operators N] [--signoff-min-wg-soak-exit-operators N] [--signoff-min-wg-soak-cross-operator-pairs N] [--signoff-max-wg-soak-failed-rounds N] [--signoff-show-json [0|1]] [three-machine-prod-gate args...]
   ./scripts/easy_node.sh three-machine-prod-signoff [three-machine-prod-bundle args...] [--bundle-dir PATH] [--run-report-json PATH] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh three-machine-real-host-validation-pack [three_machine_real_host_validation_pack args...]
+  ./scripts/easy_node.sh access-recovery-beta-local-gate [access_recovery_beta_local_gate args...]
   ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle [access_bridge_pilot_evidence_bundle args...]
   ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify [access_bridge_pilot_evidence_bundle_verify args...]
   ./scripts/easy_node.sh three-machine-reminder
@@ -794,6 +796,7 @@ Notes:
   - three-machine-prod-bundle runs strict machine-C preflight by default, then runs the same gate and always produces a shareable diagnostics tarball bundle; disable preflight only for diagnostics with --preflight-check=0, bundle integrity verification is enabled by default (disable only for diagnostics with --bundle-verify-check=0), emit a one-command run report JSON by default (override with --run-report-json), capture an automatic incident snapshot on failed runs by default (disable with --incident-snapshot-on-fail=0), optionally attach extra evidence files into that incident bundle with --incident-snapshot-attach-artifact, and enable fail-close artifact signoff inline with --signoff-check=1.
   - three-machine-prod-signoff wraps three-machine-prod-bundle into one recorded manual-validation step for the final machine-C production signoff rerun, can gate on pre-real-host-readiness and runtime-doctor/runtime-fix first, and refreshes the shared manual-validation report by default.
   - three-machine-real-host-validation-pack wraps the real-host validation pack helper path (override with `THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT`) and preserves pass-through args.
+  - access-recovery-beta-local-gate runs the focused local Access Recovery beta contract gate (demo/examples/browser/bridge/bundle) without the legacy VPN matrix (override with `ACCESS_RECOVERY_BETA_LOCAL_GATE_SCRIPT`).
   - access-bridge-pilot-evidence-bundle wraps deployed bridge smoke, deployment evidence, and host-install checks into one operator handoff bundle (override with `ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT`) and preserves pass-through args.
   - access-bridge-pilot-evidence-bundle-verify validates Access Bridge pilot bundle integrity artifacts (manifest + tarball checksum + safe tar members), recommended input: --summary-json.
   - three-machine-reminder prints the true 3-machine production test checklist.
@@ -9437,6 +9440,15 @@ three_machine_docker_readiness_record() {
 
 three_machine_real_host_validation_pack() {
   local script="${THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT:-$ROOT_DIR/scripts/three_machine_real_host_validation_pack.sh}"
+  if [[ ! -x "$script" ]]; then
+    echo "missing helper script: $script"
+    exit 2
+  fi
+  "$script" "$@"
+}
+
+access_recovery_beta_local_gate() {
+  local script="${ACCESS_RECOVERY_BETA_LOCAL_GATE_SCRIPT:-$ROOT_DIR/scripts/access_recovery_beta_local_gate.sh}"
   if [[ ! -x "$script" ]]; then
     echo "missing helper script: $script"
     exit 2
@@ -19597,6 +19609,10 @@ main() {
     three-machine-real-host-validation-pack)
       shift
       three_machine_real_host_validation_pack "$@"
+      ;;
+    access-recovery-beta-local-gate)
+      shift
+      access_recovery_beta_local_gate "$@"
       ;;
     access-bridge-pilot-evidence-bundle)
       shift
