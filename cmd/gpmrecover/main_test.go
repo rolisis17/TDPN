@@ -281,6 +281,20 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}); err == nil || !strings.Contains(err.Error(), "loopback") {
 		t.Fatalf("expected unsafe unauthenticated deploy pack to fail closed, got %v", err)
 	}
+	if err := runBridgeServiceDeployPack([]string{
+		"--out-dir", filepath.Join(dir, "bridge-deploy-bad-config-hash"),
+		"--config-sha256", "short",
+		"--access-code-sha256", codeHashOut.SHA256,
+	}); err == nil || !strings.Contains(err.Error(), "bridge service config sha256") {
+		t.Fatalf("expected invalid config hash to fail closed, got %v", err)
+	}
+	if err := runBridgeServiceDeployPack([]string{
+		"--out-dir", filepath.Join(dir, "bridge-deploy-bad-code-hash"),
+		"--config-sha256", serviceConfigHash,
+		"--access-code-sha256", strings.Repeat("z", 64),
+	}); err == nil || !strings.Contains(err.Error(), "bridge service access code sha256") {
+		t.Fatalf("expected invalid access-code hash to fail closed, got %v", err)
+	}
 	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--require-helper-registry"}); err == nil {
 		t.Fatal("expected bridge-policy to fail when helper registry is required but missing")
 	}

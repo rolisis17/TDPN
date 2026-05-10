@@ -1839,6 +1839,14 @@ access_recovery_evidence_json() {
   local kind="$3"
   local label="$4"
   local input_json="null"
+  local max_age_sec="${ROADMAP_PROGRESS_ACCESS_RECOVERY_EVIDENCE_MAX_AGE_SEC:-86400}"
+  local age_sec=""
+  local age_json="null"
+  local stale_json="true"
+
+  if ! [[ "$max_age_sec" =~ ^[0-9]+$ ]]; then
+    max_age_sec="86400"
+  fi
 
   if [[ -n "$path" ]]; then
     input_json="$(jq -cn --arg path "$path" '$path')"
@@ -1895,11 +1903,22 @@ access_recovery_evidence_json() {
     return
   fi
 
+  age_sec="$(summary_age_sec_from_path "$path")"
+  if [[ "$age_sec" =~ ^[0-9]+$ ]]; then
+    age_json="$age_sec"
+  fi
+  if [[ "$(evidence_pack_summary_stale_01 "$path" "$max_age_sec")" == "0" ]]; then
+    stale_json="false"
+  fi
+
   jq -c \
     --arg input "$path" \
     --arg expected_schema_id "$expected_schema_id" \
     --arg kind "$kind" \
     --arg label "$label" \
+    --argjson summary_age_sec "$age_json" \
+    --argjson summary_stale "$stale_json" \
+    --argjson summary_max_age_sec "$max_age_sec" \
     '
       def str_or_null($v):
         if ($v | type) == "string" and ($v | length) > 0 then $v else null end;
@@ -1959,17 +1978,27 @@ access_recovery_evidence_json() {
       (.schema.id // null) as $schema_id
       | status_norm as $raw_status
       | (($schema_id == $expected_schema_id) and ($raw_status != "")) as $valid_contract
-      | (if $valid_contract then $raw_status else "invalid" end) as $state
+      | ($valid_contract and ($summary_stale | not)) as $fresh_contract
+      | (
+          if $valid_contract and $summary_stale then "stale"
+          elif $valid_contract then $raw_status
+          else "invalid"
+          end
+        ) as $state
       | {
-          available: $valid_contract,
+          available: $fresh_contract,
           input_summary_json: $input,
-          source_summary_json: (if $valid_contract then $input else null end),
+          source_summary_json: (if $fresh_contract then $input else null end),
           schema_id: $schema_id,
           expected_schema_id: $expected_schema_id,
           status: $state,
           generated_at_utc: str_or_null(.generated_at_utc),
+          summary_age_sec: $summary_age_sec,
+          summary_stale: (if $valid_contract then $summary_stale else null end),
+          summary_max_age_sec: $summary_max_age_sec,
           notes: (
-            if $valid_contract then str_or_null(.notes)
+            if $valid_contract and $summary_stale then ($label + " summary is stale or has untrusted freshness metadata")
+            elif $valid_contract then str_or_null(.notes)
             elif $schema_id != $expected_schema_id then ($label + " summary schema mismatch")
             else ($label + " summary status is missing")
             end
@@ -1977,9 +2006,9 @@ access_recovery_evidence_json() {
           rc: rc_or_null,
           needs_attention: ($state != "pass"),
           details: (
-            if $valid_contract and $kind == "service_smoke" then smoke_details
-            elif $valid_contract and $kind == "deployment_evidence" then deployment_details
-            elif $valid_contract and $kind == "host_install" then host_install_details
+            if $fresh_contract and $kind == "service_smoke" then smoke_details
+            elif $fresh_contract and $kind == "deployment_evidence" then deployment_details
+            elif $fresh_contract and $kind == "host_install" then host_install_details
             else {}
             end
           )
@@ -2012,6 +2041,7 @@ access_recovery_track_json_from_evidence() {
       def track_status:
         if ([$service_smoke, $deployment_evidence, $host_install] | all(.status == "pass")) then "pilot-evidence-ready"
         elif ([$service_smoke, $deployment_evidence, $host_install] | any(.status == "invalid")) then "evidence-invalid"
+        elif ([$service_smoke, $deployment_evidence, $host_install] | any(.status == "stale")) then "evidence-stale"
         elif ([$service_smoke, $deployment_evidence, $host_install] | any(.status == "fail")) then "evidence-failed"
         elif ([$service_smoke, $deployment_evidence, $host_install] | any(.status == "missing")) then "evidence-missing"
         else "needs-attention"

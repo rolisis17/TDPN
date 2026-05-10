@@ -169,6 +169,7 @@ bundle_tar_sha256_file=""
 check_tar_sha256="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_CHECK_TAR_SHA256:-1}"
 check_manifest="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_CHECK_MANIFEST:-1}"
 show_details="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SHOW_DETAILS:-0}"
+bundle_dir_explicit=0
 bundle_tar_explicit=0
 
 while [[ $# -gt 0 ]]; do
@@ -179,6 +180,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --bundle-dir)
       bundle_dir="${2:-}"
+      bundle_dir_explicit=1
       shift 2
       ;;
     --bundle-tar)
@@ -258,7 +260,7 @@ if [[ -n "$summary_json" ]]; then
   fi
 fi
 
-if [[ -z "$bundle_tar" && -n "$bundle_dir" && -f "${bundle_dir}.tar.gz" ]]; then
+if [[ -z "$bundle_tar" && -n "$bundle_dir" && "$bundle_dir_explicit" != "1" && -f "${bundle_dir}.tar.gz" ]]; then
   bundle_tar="${bundle_dir}.tar.gz"
 fi
 if [[ -z "$bundle_tar_sha256_file" && -n "$bundle_tar" ]]; then
@@ -283,6 +285,7 @@ cleanup() {
 trap cleanup EXIT
 
 issues=0
+bundle_tar_safe=0
 
 if [[ -n "$bundle_dir" && ! -d "$bundle_dir" ]]; then
   echo "bundle dir not found: $bundle_dir"
@@ -296,10 +299,13 @@ if [[ -n "$bundle_tar" ]]; then
   elif ! validate_tar_members_safe "$bundle_tar"; then
     echo "refusing unsafe bundle tar: $bundle_tar"
     issues=$((issues + 1))
-  elif [[ "$show_details" == "1" ]]; then
-    echo "bundle tar members safe: $bundle_tar"
+  else
+    bundle_tar_safe=1
+    if [[ "$show_details" == "1" ]]; then
+      echo "bundle tar members safe: $bundle_tar"
+    fi
   fi
-elif [[ "$bundle_tar_explicit" == "1" || "$check_tar_sha256" == "1" ]]; then
+elif [[ "$bundle_tar_explicit" == "1" || ( "$check_tar_sha256" == "1" && "$bundle_dir_explicit" != "1" ) ]]; then
   echo "tarball checksum check requested but bundle tar is not resolved"
   issues=$((issues + 1))
 fi
@@ -326,32 +332,32 @@ if [[ "$check_tar_sha256" == "1" && -n "$bundle_tar" && -f "$bundle_tar" ]]; the
   fi
 fi
 
-manifest_bundle_dir="$bundle_dir"
-if [[ "$check_manifest" == "1" && ( -z "$manifest_bundle_dir" || ! -d "$manifest_bundle_dir" ) && -n "$bundle_tar" && -f "$bundle_tar" ]]; then
-  if validate_tar_members_safe "$bundle_tar"; then
-    tmp_extract_dir="$(mktemp -d)"
-    if ! tar -xzf "$bundle_tar" -C "$tmp_extract_dir"; then
-      echo "failed to extract bundle tar for manifest validation: $bundle_tar"
+manifest_bundle_dir=""
+if [[ "$check_manifest" == "1" && "$bundle_tar_safe" == "1" ]]; then
+  tmp_extract_dir="$(mktemp -d)"
+  if ! tar -xzf "$bundle_tar" -C "$tmp_extract_dir"; then
+    echo "failed to extract bundle tar for manifest validation: $bundle_tar"
+    issues=$((issues + 1))
+  else
+    extracted_dir=""
+    while IFS= read -r d; do
+      [[ -n "$d" ]] || continue
+      if [[ -z "$extracted_dir" ]]; then
+        extracted_dir="$d"
+      else
+        extracted_dir=""
+        break
+      fi
+    done < <(find "$tmp_extract_dir" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort)
+    if [[ -z "$extracted_dir" ]]; then
+      echo "could not determine extracted bundle directory in: $tmp_extract_dir"
       issues=$((issues + 1))
     else
-      extracted_dir=""
-      while IFS= read -r d; do
-        [[ -n "$d" ]] || continue
-        if [[ -z "$extracted_dir" ]]; then
-          extracted_dir="$d"
-        else
-          extracted_dir=""
-          break
-        fi
-      done < <(find "$tmp_extract_dir" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort)
-      if [[ -z "$extracted_dir" ]]; then
-        echo "could not determine extracted bundle directory in: $tmp_extract_dir"
-        issues=$((issues + 1))
-      else
-        manifest_bundle_dir="$extracted_dir"
-      fi
+      manifest_bundle_dir="$extracted_dir"
     fi
   fi
+elif [[ "$check_manifest" == "1" ]]; then
+  manifest_bundle_dir="$bundle_dir"
 fi
 
 if [[ "$check_manifest" == "1" && -n "$manifest_bundle_dir" && -d "$manifest_bundle_dir" ]]; then

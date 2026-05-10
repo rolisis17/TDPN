@@ -407,6 +407,34 @@ async function main() {
   if (!context.localStorage.getItem(helperRegistryMetaStorageKey)) {
     throw new Error("expected verified helper registry metadata to be saved in localStorage");
   }
+
+  const userinfoInvite = JSON.parse(bridgeInvite);
+  userinfoInvite.access_paths[0].url = "https://helper-smoke:secret@helper.example/smoke/bootstrap";
+  document.getElementById("pack_input").value = JSON.stringify(userinfoInvite);
+  await document.getElementById("verify_btn").click();
+  const userinfoInviteStatus = document.getElementById("status-heading").textContent;
+  const userinfoInviteDetail = document.getElementById("status_detail").textContent;
+  if (userinfoInviteStatus !== "Verification failed") {
+    throw new Error(`expected userinfo bridge invite URL rejection, got ${userinfoInviteStatus}: ${userinfoInviteDetail}`);
+  }
+  if (!userinfoInviteDetail.includes("access_paths[].url userinfo is not allowed")) {
+    throw new Error(`expected userinfo URL rejection detail, got ${userinfoInviteDetail}`);
+  }
+
+  const userinfoRegistry = JSON.parse(unsignedRegistry);
+  userinfoRegistry.helpers[0].abuse_report_url = "https://helper-smoke:secret@helper.example/smoke/abuse";
+  document.getElementById("registry_input").value = JSON.stringify(userinfoRegistry);
+  await document.getElementById("registry_input").dispatch("input");
+  await document.getElementById("export_registry_text_btn").click();
+  const userinfoRegistryStatus = document.getElementById("status-heading").textContent;
+  const userinfoRegistryDetail = document.getElementById("status_detail").textContent;
+  if (userinfoRegistryStatus !== "Registry export failed") {
+    throw new Error(`expected userinfo helper registry URL rejection, got ${userinfoRegistryStatus}: ${userinfoRegistryDetail}`);
+  }
+  if (!userinfoRegistryDetail.includes("helpers[].abuse_report_url userinfo is not allowed")) {
+    throw new Error(`expected helper registry userinfo URL rejection detail, got ${userinfoRegistryDetail}`);
+  }
+
   const registryInput = document.getElementById("registry_input");
   registryInput.value = "{not-json";
   await registryInput.dispatch("input");

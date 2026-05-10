@@ -1267,8 +1267,8 @@ func verifyOptionalSHA256(label string, body []byte, expected string) error {
 	if expected == "" {
 		return nil
 	}
-	if len(expected) != sha256.Size*2 {
-		return fmt.Errorf("%s sha256 must be %d hex characters", label, sha256.Size*2)
+	if err := validateSHA256Hex(label, expected); err != nil {
+		return err
 	}
 	expectedBytes, err := hex.DecodeString(expected)
 	if err != nil {
@@ -1277,6 +1277,17 @@ func verifyOptionalSHA256(label string, body []byte, expected string) error {
 	actual := sha256.Sum256(body)
 	if !strings.EqualFold(hex.EncodeToString(actual[:]), hex.EncodeToString(expectedBytes)) {
 		return fmt.Errorf("%s sha256 mismatch", label)
+	}
+	return nil
+}
+
+func validateSHA256Hex(label string, expected string) error {
+	expected = strings.TrimSpace(expected)
+	if len(expected) != sha256.Size*2 {
+		return fmt.Errorf("%s sha256 must be %d hex characters", label, sha256.Size*2)
+	}
+	if _, err := hex.DecodeString(expected); err != nil {
+		return fmt.Errorf("%s sha256 must be hex: %w", label, err)
 	}
 	return nil
 }
@@ -1317,11 +1328,19 @@ func runBridgeServiceDeployPack(args []string) error {
 	if strings.TrimSpace(*accessCodeSHA256) == "" && !*allowUnauthenticatedLocal {
 		return errors.New("bridge-service-deploy-pack requires --access-code-sha256 unless --allow-unauthenticated-local is set")
 	}
+	if strings.TrimSpace(*accessCodeSHA256) != "" {
+		if err := validateSHA256Hex("bridge service access code", *accessCodeSHA256); err != nil {
+			return err
+		}
+	}
 	if *allowUnpinnedConfig {
 		return errors.New("--allow-unpinned-config is not supported for deploy packs; pass --config-sha256")
 	}
 	if strings.TrimSpace(*configSHA256) == "" {
 		return errors.New("bridge-service-deploy-pack requires --config-sha256")
+	}
+	if err := validateSHA256Hex("bridge service config", *configSHA256); err != nil {
+		return err
 	}
 	if *rps < 0 || *maxSources < 0 {
 		return errors.New("rps and max-sources must be non-negative")

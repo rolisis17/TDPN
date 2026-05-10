@@ -80,6 +80,35 @@
     return typeof value === "string" ? value.trim() : "";
   }
 
+  function validateOptionalURL(field, value) {
+    if (!trimString(value)) {
+      return;
+    }
+    validateURL(field, value);
+  }
+
+  function validateURL(field, value) {
+    const raw = trimString(value);
+    if (!raw) {
+      throw new Error(`${field} is required`);
+    }
+    let parsed;
+    try {
+      parsed = new URL(raw);
+    } catch (err) {
+      throw new Error(`${field} invalid`);
+    }
+    if (!parsed.protocol) {
+      throw new Error(`${field} must be absolute`);
+    }
+    if (!parsed.host && parsed.protocol !== "mailto:") {
+      throw new Error(`${field} host is required`);
+    }
+    if (parsed.username || parsed.password) {
+      throw new Error(`${field} userinfo is not allowed`);
+    }
+  }
+
   function base64URLToBytes(value, label) {
     const raw = trimString(value);
     if (!raw) {
@@ -632,10 +661,12 @@
     }
     const contactURL = trimString(helper.contact_url);
     if (contactURL) {
+      validateURL("helpers[].contact_url", contactURL);
       normalized.contact_url = contactURL;
     }
     const abuseReportURL = trimString(helper.abuse_report_url);
     if (abuseReportURL) {
+      validateURL("helpers[].abuse_report_url", abuseReportURL);
       normalized.abuse_report_url = abuseReportURL;
     }
     const rateLimitPolicy = trimString(helper.rate_limit_policy);
@@ -689,6 +720,7 @@
     };
     const homeURL = trimString(artifact && artifact.organization && artifact.organization.home_url);
     if (homeURL) {
+      validateURL("organization.home_url", homeURL);
       normalized.organization.home_url = homeURL;
     }
     if (artifact && artifact.signature) {
@@ -735,6 +767,7 @@
     if (!trimString(artifact.organization && artifact.organization.name)) {
       throw new Error("Signed helper registry organization name is required");
     }
+    validateOptionalURL("organization.home_url", artifact.organization && artifact.organization.home_url);
     const issuedAt = parseRFC3339(artifact.issued_at_utc, "registry issued_at_utc");
     const expiresAt = parseRFC3339(artifact.expires_at_utc, "registry expires_at_utc");
     if (expiresAt <= issuedAt) {
@@ -765,6 +798,7 @@
     };
     const homeURL = trimString(pack.organization && pack.organization.home_url);
     if (homeURL) {
+      validateURL("organization.home_url", homeURL);
       normalized.organization.home_url = homeURL;
     }
     const safetyNotes = Array.isArray(pack.safety_notes)
@@ -807,10 +841,12 @@
     };
     const homeURL = trimString(invite.organization && invite.organization.home_url);
     if (homeURL) {
+      validateURL("organization.home_url", homeURL);
       normalized.organization.home_url = homeURL;
     }
     const contactURL = trimString(invite.helper && invite.helper.contact_url);
     if (contactURL) {
+      validateURL("helper.contact_url", contactURL);
       normalized.helper.contact_url = contactURL;
     }
     const helperDescription = trimString(invite.helper && invite.helper.description);
@@ -860,10 +896,12 @@
   }
 
   function normalizeSource(source) {
+    const url = trimString(source.url);
+    validateURL("sources[].url", url);
     const normalized = {
       source_id: trimString(source.source_id),
       kind: trimString(source.kind),
-      url: trimString(source.url),
+      url,
     };
     if (Number.isFinite(source.priority) && source.priority !== 0) {
       normalized.priority = source.priority;
@@ -876,10 +914,12 @@
   }
 
   function normalizePath(path) {
+    const url = trimString(path.url);
+    validateURL("access_paths[].url", url);
     const normalized = {
       path_id: trimString(path.path_id),
       kind: trimString(path.kind),
-      url: trimString(path.url),
+      url,
     };
     if (Number.isFinite(path.priority) && path.priority !== 0) {
       normalized.priority = path.priority;
@@ -958,8 +998,15 @@
     if (!trimString(pack.organization && pack.organization.org_id)) {
       throw new Error("Organization id is required");
     }
+    validateOptionalURL("organization.home_url", pack.organization && pack.organization.home_url);
     if (!Array.isArray(pack.access_paths) || pack.access_paths.length === 0) {
       throw new Error("Pack must include access paths");
+    }
+    for (const source of Array.isArray(pack.sources) ? pack.sources : []) {
+      validateURL("sources[].url", source && source.url);
+    }
+    for (const path of pack.access_paths) {
+      validateURL("access_paths[].url", path && path.url);
     }
   }
 
@@ -999,8 +1046,13 @@
     if (!trimString(invite.helper && invite.helper.display_name)) {
       throw new Error("Helper display name is required");
     }
+    validateOptionalURL("organization.home_url", invite.organization && invite.organization.home_url);
+    validateOptionalURL("helper.contact_url", invite.helper && invite.helper.contact_url);
     if (!Array.isArray(invite.access_paths) || invite.access_paths.length === 0) {
       throw new Error("Bridge invite must include access paths");
+    }
+    for (const path of invite.access_paths) {
+      validateURL("access_paths[].url", path && path.url);
     }
   }
 

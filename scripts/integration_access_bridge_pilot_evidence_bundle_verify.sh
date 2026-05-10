@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in awk bash find grep jq mktemp sed sha256sum tar; do
+for cmd in awk bash cp find grep jq mktemp sed sha256sum tar; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "access bridge pilot evidence bundle verifier integration failed: missing required command: $cmd"
     exit 2
@@ -71,6 +71,31 @@ jq -n \
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --summary-json "$SUMMARY_JSON" >"$TMP_DIR/verify-summary.log"
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-dir "$BUNDLE_DIR" >"$TMP_DIR/verify-dir.log"
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-tar "$BUNDLE_TAR" >"$TMP_DIR/verify-tar.log"
+
+TAR_TAMPER_ROOT="$TMP_DIR/tar-tamper-root"
+TAR_TAMPER_DIR="$TAR_TAMPER_ROOT/$(basename "$BUNDLE_DIR")"
+TAR_TAMPER="$TMP_DIR/tar-tamper.tar.gz"
+TAR_TAMPER_SHA="${TAR_TAMPER}.sha256"
+TAR_TAMPER_SUMMARY="$TMP_DIR/tar-tamper-summary.json"
+mkdir -p "$TAR_TAMPER_ROOT"
+cp -R "$BUNDLE_DIR" "$TAR_TAMPER_DIR"
+printf '%s\n' 'tampered only inside tar' >>"$TAR_TAMPER_DIR/access_bridge_service_smoke.log"
+tar -czf "$TAR_TAMPER" -C "$TAR_TAMPER_ROOT" "$(basename "$BUNDLE_DIR")"
+printf '%s  %s\n' "$(sha256sum "$TAR_TAMPER" | awk '{print $1}')" "$(basename "$TAR_TAMPER")" >"$TAR_TAMPER_SHA"
+jq \
+  --arg bundle_tar "$TAR_TAMPER" \
+  --arg bundle_tar_sha256_file "$TAR_TAMPER_SHA" \
+  '.artifacts.bundle_tar = $bundle_tar | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file' \
+  "$SUMMARY_JSON" >"$TAR_TAMPER_SUMMARY"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --summary-json "$TAR_TAMPER_SUMMARY" >"$TMP_DIR/tar-tamper.log" 2>&1
+tar_tamper_rc=$?
+set -e
+if [[ "$tar_tamper_rc" -eq 0 ]] || ! grep -Fq 'manifest checksum mismatch' "$TMP_DIR/tar-tamper.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: tar-only tamper was not rejected"
+  cat "$TMP_DIR/tar-tamper.log"
+  exit 1
+fi
 
 printf '%s\n' 'tampered' >>"$BUNDLE_DIR/access_bridge_service_smoke.log"
 set +e

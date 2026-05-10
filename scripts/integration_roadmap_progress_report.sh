@@ -1337,6 +1337,60 @@ if ! grep -Eq '\[roadmap-progress-report\] access_bridge_service_smoke_available
   exit 1
 fi
 
+echo "[roadmap-progress-report] Access Recovery stale evidence is fail-soft"
+ACCESS_RECOVERY_STALE_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_stale_summary.json"
+jq '.generated_at_utc = "2020-01-01T00:00:00Z"' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_STALE_SMOKE_SUMMARY_JSON"
+if ! ROADMAP_PROGRESS_ACCESS_RECOVERY_EVIDENCE_MAX_AGE_SEC=60 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_STALE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_stale_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_stale_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_stale.log 2>&1; then
+  echo "expected success for Access Recovery stale evidence path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_stale.log
+  exit 1
+fi
+if ! jq -e '
+  .current_roadmap_track == "access_recovery"
+  and .access_recovery_track.status == "evidence-stale"
+  and .access_recovery_track.ready == false
+  and .access_recovery_track.needs_attention == true
+  and .access_recovery_track.access_bridge_service_smoke.available == false
+  and .access_recovery_track.access_bridge_service_smoke.status == "stale"
+  and .access_recovery_track.access_bridge_service_smoke.source_summary_json == null
+  and .access_recovery_track.access_bridge_service_smoke.summary_stale == true
+  and .access_recovery_track.access_bridge_service_smoke.summary_max_age_sec == 60
+  and ((.access_recovery_track.access_bridge_service_smoke.summary_age_sec // null) | type) == "number"
+  and (.access_recovery_track.access_bridge_service_smoke.notes | contains("stale"))
+  and .access_recovery_track.access_bridge_deployment_evidence.available == true
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
+  and .access_recovery_track.access_bridge_host_install.available == true
+  and .access_recovery_track.access_bridge_host_install.status == "pass"
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_service_smoke"
+  and .artifacts.access_bridge_service_smoke_summary_json == null
+  and .artifacts.access_bridge_deployment_evidence_summary_json == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"'"
+  and .artifacts.access_bridge_host_install_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
+' "$TMP_DIR/roadmap_progress_access_recovery_stale_summary.json" >/dev/null; then
+  echo "Access Recovery stale evidence summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_stale_summary.json"
+  exit 1
+fi
+if ! grep -Fq 'Access bridge service smoke: available=false, status=stale' "$TMP_DIR/roadmap_progress_access_recovery_stale_report.md"; then
+  echo "Access Recovery stale evidence report mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_stale_report.md"
+  exit 1
+fi
+if ! grep -Eq '\[roadmap-progress-report\] access_recovery_track_status=evidence-stale ready=false needs_attention=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_stale.log; then
+  echo "expected Access Recovery stale track log line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_stale.log
+  exit 1
+fi
+
 echo "[roadmap-progress-report] Access Recovery invalid evidence is fail-soft"
 ACCESS_RECOVERY_INVALID_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_invalid_summary.json"
 printf '{"version":1,' >"$ACCESS_RECOVERY_INVALID_SMOKE_SUMMARY_JSON"
