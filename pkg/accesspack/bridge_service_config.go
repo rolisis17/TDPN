@@ -1,6 +1,7 @@
 package accesspack
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -34,6 +35,9 @@ type BridgeServiceConfig struct {
 	InviteKeyID           string                   `json:"invite_key_id,omitempty"`
 	RegistryKeyID         string                   `json:"registry_key_id,omitempty"`
 	SignedRegistry        bool                     `json:"signed_registry"`
+	InviteSHA256          string                   `json:"invite_sha256,omitempty"`
+	RegistrySHA256        string                   `json:"registry_sha256,omitempty"`
+	AccessPathsSHA256     string                   `json:"access_paths_sha256,omitempty"`
 	AccessPaths           []AccessPath             `json:"access_paths,omitempty"`
 	Policy                BridgeInvitePolicyReport `json:"policy"`
 }
@@ -91,6 +95,9 @@ func BuildBridgeServiceConfig(invite BridgeInvite, registry BridgeHelperRegistry
 		InviteKeyID:          strings.TrimSpace(options.InviteKeyID),
 		RegistryKeyID:        strings.TrimSpace(options.RegistryKeyID),
 		SignedRegistry:       options.SignedRegistry,
+		InviteSHA256:         bridgeServiceInviteSHA256(invite),
+		RegistrySHA256:       bridgeServiceRegistrySHA256(registry),
+		AccessPathsSHA256:    bridgeServiceAccessPathsSHA256(invite.AccessPaths),
 		AccessPaths:          invite.AccessPaths,
 		Policy:               policy,
 	}
@@ -128,6 +135,9 @@ func NormalizeBridgeServiceConfig(config BridgeServiceConfig) BridgeServiceConfi
 	config.RegistryExpiresAtUTC = strings.TrimSpace(config.RegistryExpiresAtUTC)
 	config.InviteKeyID = strings.TrimSpace(config.InviteKeyID)
 	config.RegistryKeyID = strings.TrimSpace(config.RegistryKeyID)
+	config.InviteSHA256 = strings.TrimSpace(config.InviteSHA256)
+	config.RegistrySHA256 = strings.TrimSpace(config.RegistrySHA256)
+	config.AccessPathsSHA256 = strings.TrimSpace(config.AccessPathsSHA256)
 	for i := range config.AccessPaths {
 		config.AccessPaths[i].PathID = strings.TrimSpace(config.AccessPaths[i].PathID)
 		config.AccessPaths[i].Kind = strings.TrimSpace(config.AccessPaths[i].Kind)
@@ -183,6 +193,11 @@ func EvaluateBridgeServiceRequest(config BridgeServiceConfig, request BridgeServ
 	}
 	if len(config.AccessPaths) == 0 {
 		decision.addFinding("bridge_service_no_access_paths", "error", "bridge service config has no access paths")
+	}
+	if config.AccessPathsSHA256 == "" {
+		decision.addFinding("bridge_service_missing_access_paths_hash", "error", "bridge service config is missing access paths hash")
+	} else if actual := bridgeServiceAccessPathsSHA256(config.AccessPaths); actual != config.AccessPathsSHA256 {
+		decision.addFinding("bridge_service_access_paths_hash_mismatch", "error", "bridge service access paths do not match the generated hash")
 	}
 	if config.RegistryExpiresAtUTC != "" {
 		expiresAt, err := time.Parse(time.RFC3339, config.RegistryExpiresAtUTC)
@@ -286,4 +301,28 @@ func (decision *BridgeServiceDecision) addFinding(code string, severity string, 
 		Severity: severity,
 		Message:  message,
 	})
+}
+
+func bridgeServiceInviteSHA256(invite BridgeInvite) string {
+	body, err := CanonicalBridgeInvitePayload(invite)
+	if err != nil {
+		body, _ = json.Marshal(NormalizeBridgeInvite(invite))
+	}
+	return bridgeServiceSHA256(body)
+}
+
+func bridgeServiceRegistrySHA256(registry BridgeHelperRegistry) string {
+	body, _ := json.Marshal(NormalizeBridgeHelperRegistry(registry))
+	return bridgeServiceSHA256(body)
+}
+
+func bridgeServiceAccessPathsSHA256(paths []AccessPath) string {
+	normalized := NormalizeBridgeInvite(BridgeInvite{AccessPaths: append([]AccessPath(nil), paths...)})
+	body, _ := json.Marshal(normalized.AccessPaths)
+	return bridgeServiceSHA256(body)
+}
+
+func bridgeServiceSHA256(body []byte) string {
+	sum := sha256.Sum256(body)
+	return fmt.Sprintf("%x", sum[:])
 }

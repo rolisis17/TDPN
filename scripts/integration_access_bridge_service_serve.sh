@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in go jq mktemp curl; do
+for cmd in go jq mktemp curl sha256sum; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "access bridge service serve integration failed: missing required command: $cmd"
     exit 2
@@ -28,6 +28,7 @@ BASE_URL="http://127.0.0.1:${PORT}"
 CODE_FILE="$TMP_DIR/bridge-code.txt"
 CODE_HASH_JSON="$TMP_DIR/bridge-code-hash.json"
 SERVICE_CONFIG="$TMP_DIR/bridge-service-config.json"
+DEPLOY_PACK="$TMP_DIR/bridge-deploy-pack"
 ABUSE_LOG="$TMP_DIR/bridge-abuse.jsonl"
 SERVER_LOG="$TMP_DIR/bridge-service.log"
 
@@ -53,12 +54,22 @@ go run ./cmd/gpmrecover bridge-service-config \
   --trust-store "$trust_store" \
   --signed-helper-registry "$signed_registry" \
   --out "$SERVICE_CONFIG" >/dev/null
+config_sha256="$(sha256sum "$SERVICE_CONFIG" | awk '{print $1}')"
 
 go run ./cmd/gpmrecover bridge-service-code-hash --code-file "$CODE_FILE" --out "$CODE_HASH_JSON" >/dev/null
 code_hash="$(jq -r '.sha256' "$CODE_HASH_JSON")"
 
+go run ./cmd/gpmrecover bridge-service-deploy-pack \
+  --out-dir "$DEPLOY_PACK" \
+  --service-name gpm-access-bridge-serve \
+  --install-dir /etc/gpm/access-bridge-serve \
+  --config /etc/gpm/access-bridge-serve/bridge-service-config.json \
+  --config-sha256 "$config_sha256" \
+  --access-code-sha256 "$code_hash" >/dev/null
+
 go run ./cmd/gpmrecover bridge-service-serve \
   --config "$SERVICE_CONFIG" \
+  --config-sha256 "$config_sha256" \
   --addr "127.0.0.1:${PORT}" \
   --rps 20 \
   --abuse-log "$ABUSE_LOG" \
@@ -134,6 +145,25 @@ bash ./scripts/access_bridge_service_smoke.sh \
 if [[ "$(jq -r '.status // ""' "$TMP_DIR/operator-smoke-summary.json")" != "pass" ]]; then
   echo "access bridge service serve integration failed: operator smoke summary not pass"
   cat "$TMP_DIR/operator-smoke-summary.json"
+  exit 1
+fi
+
+bash ./scripts/access_bridge_deployment_evidence.sh \
+  --base-url "$BASE_URL" \
+  --path-id helper-web \
+  --code ticket-serve-123 \
+  --expect-helper-id helper-serve \
+  --expect-org-id serve-org \
+  --expect-registry-id "$(jq -r '.registry_id' "$SERVICE_CONFIG")" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_PACK" \
+  --service-name gpm-access-bridge-serve \
+  --summary-json "$TMP_DIR/operator-deployment-evidence-summary.json" \
+  --abuse-message "operator deployment evidence" \
+  --print-summary-json 0 >/dev/null
+if [[ "$(jq -r '.status // ""' "$TMP_DIR/operator-deployment-evidence-summary.json")" != "pass" ]]; then
+  echo "access bridge service serve integration failed: deployment evidence summary not pass"
+  cat "$TMP_DIR/operator-deployment-evidence-summary.json"
   exit 1
 fi
 

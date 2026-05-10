@@ -44,8 +44,9 @@ go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/access-recovery-d
 go run ./cmd/gpmrecover bridge-service-config --invite .easy-node-logs/access-recovery-demo/bridge-invite.signed.json --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --out .easy-node-logs/access-recovery-demo/bridge-service-config.json
 go run ./cmd/gpmrecover bridge-service-check --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --path-id helper-web
 go run ./cmd/gpmrecover bridge-service-code-hash --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --out .easy-node-logs/access-recovery-demo/bridge-code-hash.json
-go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/access-recovery-demo/bridge-abuse.jsonl --access-code-sha256 HASH
-go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/access-recovery-demo/bridge-deploy --public-host bridge.example --access-code-sha256 HASH
+CONFIG_HASH="$(sha256sum .easy-node-logs/access-recovery-demo/bridge-service-config.json | awk '{print $1}')"
+go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --config-sha256 "$CONFIG_HASH" --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/access-recovery-demo/bridge-abuse.jsonl --access-code-sha256 HASH
+go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/access-recovery-demo/bridge-deploy --public-host bridge.example --config-sha256 "$CONFIG_HASH" --access-code-sha256 HASH
 ```
 
 4. If testing online publication, upload `public/.well-known/gpm/` and fetch it from another machine before verification:
@@ -55,6 +56,80 @@ go run ./cmd/gpmrecover fetch-publication \
   --index-url https://freenews.example/.well-known/gpm/recovery-index.json \
   --out-dir .easy-node-logs/access-recovery-fetched
 ```
+
+## Bridge Service Install Checklist
+
+Use this checklist before a helper bridge is announced to users. Keep the bridge service on loopback and expose it only through the helper's HTTPS reverse proxy.
+
+1. Build a fail-closed service config from a verified signed invite and signed helper registry:
+
+```sh
+go run ./cmd/gpmrecover bridge-service-config \
+  --invite .easy-node-logs/access-recovery-demo/bridge-invite.signed.json \
+  --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json \
+  --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json \
+  --out .easy-node-logs/access-recovery-demo/bridge-service-config.json
+go run ./cmd/gpmrecover bridge-service-check \
+  --config .easy-node-logs/access-recovery-demo/bridge-service-config.json \
+  --path-id helper-web
+CONFIG_HASH="$(sha256sum .easy-node-logs/access-recovery-demo/bridge-service-config.json | awk '{print $1}')"
+```
+
+2. Create the access-code hash out of band and deploy only the hash. Do not place the plaintext code in config files, shell history, service units, tickets, screenshots, or smoke summaries:
+
+```sh
+go run ./cmd/gpmrecover bridge-service-code-hash \
+  --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt \
+  --out .easy-node-logs/access-recovery-demo/bridge-code-hash.json
+```
+
+3. Generate the helper deploy pack and install only the generated env, wrapper, service unit, and selected HTTPS reverse-proxy example on the helper host:
+
+```sh
+go run ./cmd/gpmrecover bridge-service-deploy-pack \
+  --out-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
+  --public-host bridge.example \
+  --config-sha256 "$CONFIG_HASH" \
+  --access-code-sha256 HASH
+```
+
+4. Bind the bridge service to loopback, for example `127.0.0.1:18980`, and put Caddy or nginx in front of it with HTTPS enabled. The public endpoint must be `https://bridge.example`, proxying only to the local bridge listener. Keep query-string access codes disabled; pass access codes through `X-GPM-Bridge-Code`.
+
+5. Before sharing the bridge URL or access code, verify helper identity:
+
+- the helper id, display name, contact URL, abuse-report URL, rate-limit policy, and active window match the signed helper registry
+- `bridge-policy --signed-helper-registry --require-helper-registry` passes for the invite
+- `bridge-service-check` passes for every served `path_id`
+- the operator can reach the helper through the registry contact path and confirm they control the HTTPS host
+
+6. Record smoke evidence from a different machine or network path:
+
+```sh
+bash ./scripts/access_bridge_service_smoke.sh \
+  --base-url https://bridge.example \
+  --path-id helper-web \
+  --code CODE \
+  --expect-helper-id helper-demo \
+  --expect-org-id freenews-demo \
+  --summary-json .easy-node-logs/bridge-service-smoke.json
+
+bash ./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json .easy-node-logs/bridge-service-smoke.json \
+  --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \
+  --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
+  --expect-helper-id helper-demo \
+  --expect-org-id freenews-demo \
+  --summary-json .easy-node-logs/bridge-deployment-evidence.json
+```
+
+Keep the smoke JSON, deployment-evidence JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair.
+
+7. Fail closed on rotation or quarantine:
+
+- if the helper contact, HTTPS host, abuse endpoint, rate-limit commitment, or operator identity cannot be verified, stop the service and quarantine the helper in the registry before issuing new invites
+- if a helper is quarantined or disabled, re-sign and redistribute the helper registry; old bridge service configs must be regenerated from the updated signed registry before service resumes
+- rotate the access code whenever it may have reached an untrusted channel; keep the same signed invite only if helper identity and expiry are still valid
+- rotate the organization signing key only when the signing key is suspected compromised, not for ordinary helper quarantine
 
 ## Helper Onboarding
 

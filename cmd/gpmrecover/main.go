@@ -238,9 +238,9 @@ func usage() {
   go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE | --signed-helper-registry FILE] [--require-helper-registry 1]
   go run ./cmd/gpmrecover bridge-service-config --invite FILE --signed-helper-registry FILE (--trust-store FILE | --public-key-file FILE) [--out FILE]
   go run ./cmd/gpmrecover bridge-service-check --config FILE [--path-id ID | --url URL] [--out FILE]
-  go run ./cmd/gpmrecover bridge-service-serve --config FILE [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] [--access-code-sha256 HEX] [--redirect 0]
+  go run ./cmd/gpmrecover bridge-service-serve --config FILE [--config-sha256 HEX] [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] [--access-code-sha256 HEX] [--allow-query-access-code=false] [--trust-proxy-headers=false] [--redirect=false]
   go run ./cmd/gpmrecover bridge-service-code-hash (--code TEXT | --code-file FILE) [--out FILE]
-  go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir DIR [--install-dir /etc/gpm/access-bridge] [--service-name gpm-access-bridge] [--public-host bridge.example]
+  go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir DIR [--install-dir /etc/gpm/access-bridge] [--service-name gpm-access-bridge] [--public-host bridge.example] [--config-sha256 HEX] [--allow-query-access-code=false] [--trust-proxy-headers=true]
   go run ./cmd/gpmrecover bridge-registry-sign --helper-registry FILE --org-id ID --org-name NAME --private-key-file FILE --out FILE [--registry-id ID] [--lifetime-hours HOURS]
   go run ./cmd/gpmrecover bridge-registry-verify --signed-registry FILE (--trust-store FILE | --public-key-file FILE) [--out-registry FILE] [--show-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
@@ -917,14 +917,17 @@ func runBridgePolicy(args []string) error {
 		helperRegistry = &registry
 	}
 	maxLifetime := time.Duration(*maxLifetimeHours) * time.Hour
+	defaultPolicy := accesspack.DefaultBridgeInvitePolicyOptions()
 	report := accesspack.CheckBridgeInvitePolicy(verified.Invite, accesspack.BridgeInvitePolicyOptions{
-		MinAccessPaths:        *minPaths,
-		MinDistinctHosts:      *minHosts,
-		MaxLifetime:           maxLifetime,
-		RequireHelperContact:  *requireContact,
-		RequireManualFallback: *requireManualFallback,
-		RequireHelperRegistry: *requireHelperRegistry,
-		HelperRegistry:        helperRegistry,
+		MinAccessPaths:               *minPaths,
+		MinDistinctHosts:             *minHosts,
+		MaxLifetime:                  maxLifetime,
+		RequireHelperContact:         *requireContact,
+		RequireManualFallback:        *requireManualFallback,
+		RequireHelperRegistry:        *requireHelperRegistry,
+		RequireHelperAbuseReport:     defaultPolicy.RequireHelperAbuseReport,
+		RequireHelperRateLimitPolicy: defaultPolicy.RequireHelperRateLimitPolicy,
+		HelperRegistry:               helperRegistry,
 	}, time.Now().UTC())
 	out := bridgePolicyOutput{
 		Status:   report.Status,
@@ -1045,11 +1048,14 @@ func runBridgeServiceCheck(args []string) error {
 func runBridgeServiceServe(args []string) error {
 	fs := flag.NewFlagSet("bridge-service-serve", flag.ContinueOnError)
 	configFile := fs.String("config", "", "path to bridge service config JSON")
+	configSHA256 := fs.String("config-sha256", "", "optional sha256 hex digest of the bridge service config file")
 	addr := fs.String("addr", "127.0.0.1:18980", "HTTP listen address")
 	rps := fs.Int("rps", 2, "fixed-window requests per second per source; 0 disables")
 	maxSources := fs.Int("max-sources", 1024, "maximum tracked sources for rate limiting")
 	abuseLog := fs.String("abuse-log", "", "optional JSONL abuse report log path")
 	accessCodeSHA256 := fs.String("access-code-sha256", "", "optional sha256 hex digest of an out-of-band bridge access code")
+	allowQueryAccessCode := fs.Bool("allow-query-access-code", false, "allow access code in ?code= query parameter; header is preferred")
+	trustProxyHeaders := fs.Bool("trust-proxy-headers", false, "trust X-Forwarded-For only from loopback reverse proxies")
 	redirect := fs.Bool("redirect", false, "redirect allowed bridge requests to the signed access URL instead of returning JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1058,17 +1064,22 @@ func runBridgeServiceServe(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := verifyOptionalSHA256("bridge service config", body, *configSHA256); err != nil {
+		return err
+	}
 	config, err := accesspack.ParseBridgeServiceConfig(body)
 	if err != nil {
 		return err
 	}
 	service, err := accessbridge.NewService(accessbridge.ServiceConfig{
-		BridgeConfig:     config,
-		RPS:              *rps,
-		MaxSources:       *maxSources,
-		AbuseLogPath:     *abuseLog,
-		AccessCodeSHA256: *accessCodeSHA256,
-		Redirect:         *redirect,
+		BridgeConfig:      config,
+		RPS:               *rps,
+		MaxSources:        *maxSources,
+		AbuseLogPath:      *abuseLog,
+		AccessCodeSHA256:  *accessCodeSHA256,
+		AllowQueryCode:    *allowQueryAccessCode,
+		TrustProxyHeaders: *trustProxyHeaders,
+		Redirect:          *redirect,
 	})
 	if err != nil {
 		return err
@@ -1122,6 +1133,25 @@ func runBridgeServiceCodeHash(args []string) error {
 	return err
 }
 
+func verifyOptionalSHA256(label string, body []byte, expected string) error {
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return nil
+	}
+	if len(expected) != sha256.Size*2 {
+		return fmt.Errorf("%s sha256 must be %d hex characters", label, sha256.Size*2)
+	}
+	expectedBytes, err := hex.DecodeString(expected)
+	if err != nil {
+		return fmt.Errorf("%s sha256 must be hex: %w", label, err)
+	}
+	actual := sha256.Sum256(body)
+	if !strings.EqualFold(hex.EncodeToString(actual[:]), hex.EncodeToString(expectedBytes)) {
+		return fmt.Errorf("%s sha256 mismatch", label)
+	}
+	return nil
+}
+
 func runBridgeServiceDeployPack(args []string) error {
 	fs := flag.NewFlagSet("bridge-service-deploy-pack", flag.ContinueOnError)
 	outDir := fs.String("out-dir", "", "directory to write deployment files")
@@ -1130,11 +1160,14 @@ func runBridgeServiceDeployPack(args []string) error {
 	publicHost := fs.String("public-host", "bridge.example", "public HTTPS host used in reverse-proxy examples")
 	binary := fs.String("binary", "/usr/local/bin/gpmrecover", "installed gpmrecover binary path")
 	configPath := fs.String("config", "/etc/gpm/access-bridge/bridge-service-config.json", "installed bridge service config path")
+	configSHA256 := fs.String("config-sha256", "", "optional sha256 hex digest of the installed bridge service config")
 	addr := fs.String("addr", "127.0.0.1:18980", "bridge service listen address")
 	rps := fs.Int("rps", 2, "fixed-window requests per second per source; 0 disables")
 	maxSources := fs.Int("max-sources", 1024, "maximum tracked sources for rate limiting")
 	abuseLog := fs.String("abuse-log", "/var/log/gpm/access-bridge-abuse.jsonl", "JSONL abuse report log path")
 	accessCodeSHA256 := fs.String("access-code-sha256", "", "optional sha256 hex digest of an out-of-band bridge access code")
+	allowQueryAccessCode := fs.Bool("allow-query-access-code", false, "allow access code in ?code= query parameter; header is preferred")
+	trustProxyHeaders := fs.Bool("trust-proxy-headers", true, "trust X-Forwarded-For only from loopback reverse proxies")
 	redirect := fs.Bool("redirect", false, "redirect allowed bridge requests to the signed access URL instead of returning JSON")
 	user := fs.String("user", "gpm-bridge", "service user")
 	group := fs.String("group", "gpm-bridge", "service group")
@@ -1157,14 +1190,17 @@ func runBridgeServiceDeployPack(args []string) error {
 	caddyName := name + ".Caddyfile.example"
 	nginxName := name + ".nginx.example.conf"
 	envBody := bridgeServiceEnvFile(map[string]string{
-		"GPM_BRIDGE_BINARY":             *binary,
-		"GPM_BRIDGE_CONFIG":             *configPath,
-		"GPM_BRIDGE_ADDR":               *addr,
-		"GPM_BRIDGE_RPS":                fmt.Sprintf("%d", *rps),
-		"GPM_BRIDGE_MAX_SOURCES":        fmt.Sprintf("%d", *maxSources),
-		"GPM_BRIDGE_ABUSE_LOG":          *abuseLog,
-		"GPM_BRIDGE_ACCESS_CODE_SHA256": *accessCodeSHA256,
-		"GPM_BRIDGE_REDIRECT":           fmt.Sprintf("%t", *redirect),
+		"GPM_BRIDGE_BINARY":              *binary,
+		"GPM_BRIDGE_CONFIG":              *configPath,
+		"GPM_BRIDGE_CONFIG_SHA256":       *configSHA256,
+		"GPM_BRIDGE_ADDR":                *addr,
+		"GPM_BRIDGE_RPS":                 fmt.Sprintf("%d", *rps),
+		"GPM_BRIDGE_MAX_SOURCES":         fmt.Sprintf("%d", *maxSources),
+		"GPM_BRIDGE_ABUSE_LOG":           *abuseLog,
+		"GPM_BRIDGE_ACCESS_CODE_SHA256":  *accessCodeSHA256,
+		"GPM_BRIDGE_ALLOW_QUERY_CODE":    fmt.Sprintf("%t", *allowQueryAccessCode),
+		"GPM_BRIDGE_TRUST_PROXY_HEADERS": fmt.Sprintf("%t", *trustProxyHeaders),
+		"GPM_BRIDGE_REDIRECT":            fmt.Sprintf("%t", *redirect),
 	})
 	scriptBody := `#!/usr/bin/env sh
 set -eu
@@ -1174,13 +1210,18 @@ set -- "${GPM_BRIDGE_BINARY}" bridge-service-serve \
   --addr "${GPM_BRIDGE_ADDR}" \
   --rps "${GPM_BRIDGE_RPS}" \
   --max-sources "${GPM_BRIDGE_MAX_SOURCES}" \
-  --redirect "${GPM_BRIDGE_REDIRECT}"
+  --allow-query-access-code="${GPM_BRIDGE_ALLOW_QUERY_CODE}" \
+  --trust-proxy-headers="${GPM_BRIDGE_TRUST_PROXY_HEADERS}" \
+  --redirect="${GPM_BRIDGE_REDIRECT}"
 
 if [ -n "${GPM_BRIDGE_ABUSE_LOG:-}" ]; then
   set -- "$@" --abuse-log "${GPM_BRIDGE_ABUSE_LOG}"
 fi
 if [ -n "${GPM_BRIDGE_ACCESS_CODE_SHA256:-}" ]; then
   set -- "$@" --access-code-sha256 "${GPM_BRIDGE_ACCESS_CODE_SHA256}"
+fi
+if [ -n "${GPM_BRIDGE_CONFIG_SHA256:-}" ]; then
+  set -- "$@" --config-sha256 "${GPM_BRIDGE_CONFIG_SHA256}"
 fi
 
 exec "$@"
@@ -1210,7 +1251,11 @@ WantedBy=multi-user.target
 `, *user, *group, strings.TrimRight(*installDir, "/"), envName, strings.TrimRight(*installDir, "/"), scriptName, strings.TrimRight(*installDir, "/"))
 	caddyBody := fmt.Sprintf(`%s {
   encode zstd gzip
-  reverse_proxy %s
+  reverse_proxy %s {
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto https
+  }
   header {
     Cache-Control "no-store"
     Referrer-Policy "no-referrer"
@@ -1229,7 +1274,7 @@ WantedBy=multi-user.target
     proxy_pass http://%s;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-For $remote_addr;
     proxy_set_header X-Forwarded-Proto https;
     add_header Cache-Control "no-store" always;
     add_header Referrer-Policy "no-referrer" always;
@@ -1251,8 +1296,9 @@ Install outline:
 1. Create the service user/group named %s:%s.
 2. Copy these files into %s.
 3. Copy bridge-service-config.json into the configured GPM_BRIDGE_CONFIG path.
-4. Install %s as /etc/systemd/system/%s.
-5. Run: systemctl daemon-reload && systemctl enable --now %s
+4. Keep GPM_BRIDGE_CONFIG_SHA256 set to the sha256 of the staged config when available.
+5. Install %s as /etc/systemd/system/%s.
+6. Run: systemctl daemon-reload && systemctl enable --now %s
 
 Smoke checks:
 - curl -fsS http://%s/health

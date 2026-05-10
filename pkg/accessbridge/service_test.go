@@ -93,6 +93,87 @@ func TestServiceRejectsManualPathAndLogsAbuseReport(t *testing.T) {
 	}
 }
 
+func TestServiceRateLimitsAbuseReports(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	service, err := NewService(ServiceConfig{
+		BridgeConfig: testServiceBridgeConfig(now),
+		RPS:          1,
+		Now:          func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	handler := service.Handler()
+	req := httptest.NewRequest(http.MethodPost, "/abuse", strings.NewReader(`{"message":"one"}`))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected first abuse report accepted, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	limitedRR := httptest.NewRecorder()
+	handler.ServeHTTP(limitedRR, httptest.NewRequest(http.MethodPost, "/abuse", strings.NewReader(`{"message":"two"}`)))
+	if limitedRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected abuse report rate limit, got %d body=%s", limitedRR.Code, limitedRR.Body.String())
+	}
+}
+
+func TestServiceBridgeLimitDoesNotConsumeAbuseLimit(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	service, err := NewService(ServiceConfig{
+		BridgeConfig: testServiceBridgeConfig(now),
+		RPS:          1,
+		Now:          func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	handler := service.Handler()
+	bridgeRR := httptest.NewRecorder()
+	handler.ServeHTTP(bridgeRR, httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil))
+	if bridgeRR.Code != http.StatusOK {
+		t.Fatalf("expected bridge request accepted, got %d body=%s", bridgeRR.Code, bridgeRR.Body.String())
+	}
+	abuseRR := httptest.NewRecorder()
+	handler.ServeHTTP(abuseRR, httptest.NewRequest(http.MethodPost, "/abuse", strings.NewReader(`{"message":"bridge did not consume abuse bucket"}`)))
+	if abuseRR.Code != http.StatusAccepted {
+		t.Fatalf("expected abuse report accepted after bridge request, got %d body=%s", abuseRR.Code, abuseRR.Body.String())
+	}
+}
+
+func TestServiceTrustsForwardedForOnlyFromLoopback(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	service, err := NewService(ServiceConfig{
+		BridgeConfig:      testServiceBridgeConfig(now),
+		TrustProxyHeaders: true,
+		Now:               func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	loopbackReq := httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil)
+	loopbackReq.RemoteAddr = "127.0.0.1:4321"
+	loopbackReq.Header.Set("X-Forwarded-For", "203.0.113.9, 10.0.0.2")
+	rr := httptest.NewRecorder()
+	service.Handler().ServeHTTP(rr, loopbackReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected loopback proxied request ok, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if service.RequestCount("203.0.113.9") != 1 {
+		t.Fatalf("expected forwarded client source to be counted")
+	}
+	remoteReq := httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil)
+	remoteReq.RemoteAddr = "198.51.100.7:4321"
+	remoteReq.Header.Set("X-Forwarded-For", "203.0.113.10")
+	remoteRR := httptest.NewRecorder()
+	service.Handler().ServeHTTP(remoteRR, remoteReq)
+	if remoteRR.Code != http.StatusOK {
+		t.Fatalf("expected remote request ok, got %d body=%s", remoteRR.Code, remoteRR.Body.String())
+	}
+	if service.RequestCount("198.51.100.7") != 1 {
+		t.Fatalf("expected non-loopback forwarded header to be ignored")
+	}
+}
+
 func TestServiceRequiresAccessCodeWhenConfigured(t *testing.T) {
 	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
 	sum := sha256.Sum256([]byte("ticket-123"))
@@ -116,6 +197,30 @@ func TestServiceRequiresAccessCodeWhenConfigured(t *testing.T) {
 	handler.ServeHTTP(allowedRR, req)
 	if allowedRR.Code != http.StatusOK {
 		t.Fatalf("expected correct code to pass, got %d body=%s", allowedRR.Code, allowedRR.Body.String())
+	}
+	queryRR := httptest.NewRecorder()
+	handler.ServeHTTP(queryRR, httptest.NewRequest(http.MethodGet, "/bridge/helper-web?code=ticket-123", nil))
+	if queryRR.Code != http.StatusUnauthorized {
+		t.Fatalf("expected query code to be disabled by default, got %d body=%s", queryRR.Code, queryRR.Body.String())
+	}
+}
+
+func TestServiceAllowsQueryAccessCodeOnlyWhenConfigured(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	sum := sha256.Sum256([]byte("ticket-123"))
+	service, err := NewService(ServiceConfig{
+		BridgeConfig:     testServiceBridgeConfig(now),
+		AccessCodeSHA256: hex.EncodeToString(sum[:]),
+		AllowQueryCode:   true,
+		Now:              func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	service.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/bridge/helper-web?code=ticket-123", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected query code to pass when enabled, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
 

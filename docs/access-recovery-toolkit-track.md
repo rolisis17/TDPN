@@ -187,10 +187,12 @@ Local trust-store flow:
 - `go run ./cmd/gpmrecover bridge-service-config --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --out .easy-node-logs/bridge-service-config.json`
 - `go run ./cmd/gpmrecover bridge-service-check --config .easy-node-logs/bridge-service-config.json --path-id helper-web`
 - `go run ./cmd/gpmrecover bridge-service-code-hash --code-file .easy-node-logs/bridge-code.txt --out .easy-node-logs/bridge-code-hash.json`
-- `go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/bridge-service-config.json --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/bridge-abuse.jsonl --access-code-sha256 HASH`
-- `go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/bridge-deploy --public-host bridge.example --access-code-sha256 HASH`
+- `CONFIG_HASH="$(sha256sum .easy-node-logs/bridge-service-config.json | awk '{print $1}')"`
+- `go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/bridge-service-config.json --config-sha256 "$CONFIG_HASH" --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/bridge-abuse.jsonl --access-code-sha256 HASH`
+- `go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/bridge-deploy --public-host bridge.example --config-sha256 "$CONFIG_HASH" --access-code-sha256 HASH`
 - `bash ./scripts/integration_access_bridge_service_serve.sh`
 - `bash ./scripts/access_bridge_service_smoke.sh --base-url https://bridge.example --path-id helper-web --code CODE --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/bridge-service-smoke.json`
+- `bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/bridge-service-smoke.json --config-json .easy-node-logs/bridge-service-config.json --deploy-pack-dir .easy-node-logs/bridge-deploy --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/bridge-deployment-evidence.json`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --timeout-sec 8`
 - `go run ./cmd/gpmrecover trust-remove --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID`
 
@@ -237,10 +239,22 @@ Bridge-invite rules:
 - `bridge-service-config` turns a verified signed invite plus signed helper registry into a fail-closed service config containing the helper abuse-report URL, rate-limit policy, active window, registry identity, and verified path hints
 - `bridge-service-check` is the first runtime preflight hook: it rejects unsigned/stale service configs, expired helper windows, missing abuse/rate commitments, unknown paths, and manual/external-app paths before a helper bridge serves traffic
 - `bridge-service-code-hash` derives an out-of-band access-code hash so helpers do not store plaintext invite codes in their service config
-- `bridge-service-serve` wraps that preflight in a minimal HTTP service with `/health`, `/bridge/{path_id}`, optional `X-GPM-Bridge-Code`/`?code=` ticket gating, per-source fixed-window limits, optional signed-path redirects, and `/abuse` JSONL logging
+- `bridge-service-serve` wraps that preflight in a minimal HTTP service with `/health`, `/bridge/{path_id}`, optional `X-GPM-Bridge-Code` ticket gating, optional config-hash pinning, per-source fixed-window limits, optional signed-path redirects, and `/abuse` JSONL logging
 - `bridge-service-serve` emits no-store/no-referrer/nosniff headers so ticket codes and recovery URLs are not cached or leaked through browser referrers
 - `bridge-service-deploy-pack` emits a helper-owned env file, shell wrapper, README, hardened systemd unit template, and Caddy/nginx HTTPS reverse-proxy examples for Linux deployment
 - `access_bridge_service_smoke.sh` records deployed bridge health, access-code-gated path availability, helper/org/registry identity, security headers, and abuse endpoint acceptance into a JSON summary
+- `access_bridge_deployment_evidence.sh` binds smoke output to the staged service config and deploy pack, checks config/deploy file hashes, confirms helper/org/registry identity, and verifies deploy-pack hardening flags plus proxy header overwrite rules
+
+Operator bridge install checklist:
+- generate a service config only from a verified signed bridge invite plus signed helper registry
+- run `bridge-service-check` for each served `path_id` before starting or restarting the service
+- derive an access-code hash out of band and deploy only the hash; plaintext access codes stay out of configs, logs, screenshots, and shared evidence
+- pass access codes through the `X-GPM-Bridge-Code` header; query-string `?code=` access is disabled by default and should remain off unless a constrained fallback channel truly needs it
+- use `bridge-service-deploy-pack` for helper-owned env/wrapper/systemd/proxy templates, pin the staged service config with `--config-sha256`, then bind the service to loopback behind Caddy or nginx HTTPS
+- verify helper identity against the signed registry: helper id, contact URL, abuse-report URL, rate-limit policy, active window, and control of the public HTTPS host
+- record smoke evidence with `access_bridge_service_smoke.sh` from another machine or network path, then run `access_bridge_deployment_evidence.sh` to capture config/deploy hashes, helper/org/registry identity, proxy header behavior, and hardening checks
+- fail closed on helper rotation or quarantine: stop service, mark the helper quarantined/disabled, re-sign the helper registry, redistribute the signed registry, and regenerate configs before resuming
+- rotate access codes after suspected exposure; rotate the organization key only if the signing key is suspected compromised
 
 `check` keeps trust and reachability separate:
 - it verifies the pack before probing anything
@@ -303,7 +317,7 @@ Do first:
 - docs explaining how a user visualizes it
 
 Do next:
-- operator install checklist and deployment evidence bundle
+- remote helper-host install verification against live systemd/Caddy/nginx state
 
 Do later:
 - Outline/Shadowsocks/Tor/GPM launch helpers

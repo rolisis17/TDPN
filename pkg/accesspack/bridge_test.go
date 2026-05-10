@@ -222,6 +222,9 @@ func TestBuildBridgeServiceConfigIncludesSignedHelperControls(t *testing.T) {
 	if config.HelperRateLimitPolicy == "" {
 		t.Fatalf("expected rate limit policy: %+v", config)
 	}
+	if config.InviteSHA256 == "" || config.RegistrySHA256 == "" || config.AccessPathsSHA256 == "" {
+		t.Fatalf("expected source/config hashes: %+v", config)
+	}
 	if len(config.AccessPaths) != 3 {
 		t.Fatalf("expected access paths, got %+v", config.AccessPaths)
 	}
@@ -278,6 +281,23 @@ func TestEvaluateBridgeServiceRequestRejectsExpiredRegistry(t *testing.T) {
 	}
 }
 
+func TestEvaluateBridgeServiceRequestRejectsAccessPathTamper(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	config := BuildBridgeServiceConfig(testBridgeInvite(), testBridgeHelperRegistry(), BridgeServiceConfigOptions{
+		RegistryID:           "registry-demo",
+		RegistryExpiresAtUTC: now.Add(24 * time.Hour).Format(time.RFC3339),
+		SignedRegistry:       true,
+	}, now)
+	config.AccessPaths[0].URL = "https://evil.example/bridge"
+	decision := EvaluateBridgeServiceRequest(config, BridgeServiceRequest{PathID: config.AccessPaths[0].PathID}, now)
+	if decision.Allowed || decision.Status != "fail" {
+		t.Fatalf("expected tampered access path to fail closed: %+v", decision)
+	}
+	if !sawBridgeServiceFinding(decision, "bridge_service_access_paths_hash_mismatch") {
+		t.Fatalf("expected access path hash mismatch, got %+v", decision.Findings)
+	}
+}
+
 func TestBridgeInvitePolicyRejectsHelperMissingAbuseAndRateLimitMetadata(t *testing.T) {
 	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
 	registry := testBridgeHelperRegistry()
@@ -292,6 +312,15 @@ func TestBridgeInvitePolicyRejectsHelperMissingAbuseAndRateLimitMetadata(t *test
 	if !sawBridgePolicyFinding(report, "invalid_bridge_helper_registry") {
 		t.Fatalf("expected invalid helper registry finding, got %+v", report.Findings)
 	}
+}
+
+func sawBridgeServiceFinding(decision BridgeServiceDecision, code string) bool {
+	for _, finding := range decision.Findings {
+		if finding.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBridgeInvitePolicyRejectsQuarantinedHelper(t *testing.T) {

@@ -18,25 +18,30 @@ import (
 )
 
 type ServiceConfig struct {
-	BridgeConfig     accesspack.BridgeServiceConfig
-	RPS              int
-	MaxSources       int
-	AbuseLogPath     string
-	Redirect         bool
-	AccessCodeSHA256 string
-	Now              func() time.Time
+	BridgeConfig      accesspack.BridgeServiceConfig
+	RPS               int
+	MaxSources        int
+	AbuseLogPath      string
+	Redirect          bool
+	AccessCodeSHA256  string
+	AllowQueryCode    bool
+	TrustProxyHeaders bool
+	Now               func() time.Time
 }
 
 type Service struct {
-	config         accesspack.BridgeServiceConfig
-	limiter        *httplimit.FixedWindowLimiter
-	abuseLogPath   string
-	redirect       bool
-	accessCodeHash []byte
-	now            func() time.Time
-	mu             sync.Mutex
-	requests       map[string]int
-	abuseReports   int
+	config            accesspack.BridgeServiceConfig
+	limiter           *httplimit.FixedWindowLimiter
+	abuseLimiter      *httplimit.FixedWindowLimiter
+	abuseLogPath      string
+	redirect          bool
+	accessCodeHash    []byte
+	allowQueryCode    bool
+	trustProxyHeaders bool
+	now               func() time.Time
+	mu                sync.Mutex
+	requests          map[string]int
+	abuseReports      int
 }
 
 type HealthResponse struct {
@@ -78,13 +83,16 @@ func NewService(config ServiceConfig) (*Service, error) {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	service := &Service{
-		config:         accesspack.NormalizeBridgeServiceConfig(config.BridgeConfig),
-		limiter:        httplimit.NewFixedWindowLimiter(config.RPS, config.MaxSources),
-		abuseLogPath:   strings.TrimSpace(config.AbuseLogPath),
-		redirect:       config.Redirect,
-		accessCodeHash: accessCodeHash,
-		now:            now,
-		requests:       map[string]int{},
+		config:            accesspack.NormalizeBridgeServiceConfig(config.BridgeConfig),
+		limiter:           httplimit.NewFixedWindowLimiter(config.RPS, config.MaxSources),
+		abuseLimiter:      httplimit.NewFixedWindowLimiter(config.RPS, config.MaxSources),
+		abuseLogPath:      strings.TrimSpace(config.AbuseLogPath),
+		redirect:          config.Redirect,
+		accessCodeHash:    accessCodeHash,
+		allowQueryCode:    config.AllowQueryCode,
+		trustProxyHeaders: config.TrustProxyHeaders,
+		now:               now,
+		requests:          map[string]int{},
 	}
 	decision := accesspack.EvaluateBridgeServiceRequest(service.config, accesspack.BridgeServiceRequest{}, now())
 	if !decision.Allowed {
@@ -131,7 +139,7 @@ func (s *Service) handleBridge(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing bridge path id", http.StatusBadRequest)
 		return
 	}
-	source := sourceKey(r)
+	source := s.sourceKey(r)
 	now := s.now()
 	if s.limiter != nil && !s.limiter.Allow(source, now) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"status": "rate_limited"})
@@ -173,6 +181,11 @@ func (s *Service) handleAbuse(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	source := s.sourceKey(r)
+	if s.abuseLimiter != nil && !s.abuseLimiter.Allow(source, s.now()) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"status": "rate_limited"})
+		return
+	}
 	defer r.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(r.Body, 16*1024+1))
 	if err != nil {
@@ -192,10 +205,10 @@ func (s *Service) handleAbuse(w http.ResponseWriter, r *http.Request) {
 	}
 	report := AbuseReport{
 		GeneratedAtUTC: s.now().UTC().Format(time.RFC3339),
-		Source:         sourceKey(r),
-		PathID:         strings.TrimSpace(input.PathID),
-		Message:        strings.TrimSpace(input.Message),
-		UserAgent:      strings.TrimSpace(r.UserAgent()),
+		Source:         source,
+		PathID:         limitText(strings.TrimSpace(input.PathID), 128),
+		Message:        limitText(strings.TrimSpace(input.Message), 1024),
+		UserAgent:      limitText(strings.TrimSpace(r.UserAgent()), 240),
 	}
 	if err := s.appendAbuseReport(report); err != nil {
 		http.Error(w, "abuse report log failed", http.StatusInternalServerError)
@@ -244,18 +257,45 @@ func (s *Service) appendAbuseReport(report AbuseReport) error {
 	return nil
 }
 
-func sourceKey(r *http.Request) string {
+func (s *Service) sourceKey(r *http.Request) string {
 	if r == nil {
 		return "unknown"
 	}
 	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
 	if err == nil && host != "" {
+		if s.trustProxyHeaders && isLoopbackIP(host) {
+			if forwarded := firstForwardedFor(r.Header.Get("X-Forwarded-For")); forwarded != "" {
+				return forwarded
+			}
+		}
 		return host
 	}
 	if r.RemoteAddr != "" {
 		return r.RemoteAddr
 	}
 	return "unknown"
+}
+
+func firstForwardedFor(raw string) string {
+	for _, part := range strings.Split(raw, ",") {
+		ip := strings.TrimSpace(part)
+		if parsed := net.ParseIP(ip); parsed != nil {
+			return parsed.String()
+		}
+	}
+	return ""
+}
+
+func isLoopbackIP(raw string) bool {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	return ip != nil && ip.IsLoopback()
+}
+
+func limitText(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return value[:limit]
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -305,7 +345,7 @@ func (s *Service) accessCodeAllowed(r *http.Request) bool {
 		return true
 	}
 	code := strings.TrimSpace(r.Header.Get("X-GPM-Bridge-Code"))
-	if code == "" {
+	if code == "" && s.allowQueryCode {
 		code = strings.TrimSpace(r.URL.Query().Get("code"))
 	}
 	if code == "" {

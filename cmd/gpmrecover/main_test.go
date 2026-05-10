@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -177,12 +180,15 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if codeHashOut.SHA256 == "" || len(codeHashOut.SHA256) != 64 {
 		t.Fatalf("unexpected bridge code hash: %+v", codeHashOut)
 	}
+	serviceConfigSum := sha256.Sum256(serviceConfigBody)
+	serviceConfigHash := hex.EncodeToString(serviceConfigSum[:])
 	deployDir := filepath.Join(dir, "bridge-deploy")
 	if err := runBridgeServiceDeployPack([]string{
 		"--out-dir", deployDir,
 		"--service-name", "gpm-access-bridge-test",
 		"--install-dir", "/etc/gpm/access-bridge-test",
 		"--config", "/etc/gpm/access-bridge-test/bridge-service-config.json",
+		"--config-sha256", serviceConfigHash,
 		"--access-code-sha256", codeHashOut.SHA256,
 	}); err != nil {
 		t.Fatalf("bridge-service-deploy-pack: %v", err)
@@ -198,21 +204,39 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read bridge deploy env: %v", err)
 	}
-	if !bytes.Contains(envBody, []byte("GPM_BRIDGE_ACCESS_CODE_SHA256=")) {
+	if !bytes.Contains(envBody, []byte("GPM_BRIDGE_ACCESS_CODE_SHA256=")) ||
+		!bytes.Contains(envBody, []byte("GPM_BRIDGE_CONFIG_SHA256=\""+serviceConfigHash+"\"")) ||
+		!bytes.Contains(envBody, []byte("GPM_BRIDGE_ALLOW_QUERY_CODE=\"false\"")) ||
+		!bytes.Contains(envBody, []byte("GPM_BRIDGE_TRUST_PROXY_HEADERS=\"true\"")) {
 		t.Fatalf("unexpected bridge deploy env:\n%s", string(envBody))
+	}
+	wrapperBody, err := os.ReadFile(filepath.Join(deployDir, "run-gpm-access-bridge-test.sh"))
+	if err != nil {
+		t.Fatalf("read bridge deploy wrapper: %v", err)
+	}
+	if !bytes.Contains(wrapperBody, []byte("--allow-query-access-code=\"${GPM_BRIDGE_ALLOW_QUERY_CODE}\"")) ||
+		!bytes.Contains(wrapperBody, []byte("--trust-proxy-headers=\"${GPM_BRIDGE_TRUST_PROXY_HEADERS}\"")) ||
+		!bytes.Contains(wrapperBody, []byte("--redirect=\"${GPM_BRIDGE_REDIRECT}\"")) ||
+		!bytes.Contains(wrapperBody, []byte("--config-sha256")) {
+		t.Fatalf("unexpected bridge deploy wrapper:\n%s", string(wrapperBody))
 	}
 	caddyBody, err := os.ReadFile(filepath.Join(deployDir, "gpm-access-bridge-test.Caddyfile.example"))
 	if err != nil {
 		t.Fatalf("read bridge deploy caddy example: %v", err)
 	}
-	if !bytes.Contains(caddyBody, []byte("Referrer-Policy")) || !bytes.Contains(caddyBody, []byte("reverse_proxy")) {
+	if !bytes.Contains(caddyBody, []byte("Referrer-Policy")) ||
+		!bytes.Contains(caddyBody, []byte("reverse_proxy")) ||
+		!bytes.Contains(caddyBody, []byte("header_up X-Forwarded-For {remote_host}")) {
 		t.Fatalf("unexpected bridge deploy caddy example:\n%s", string(caddyBody))
 	}
 	nginxBody, err := os.ReadFile(filepath.Join(deployDir, "gpm-access-bridge-test.nginx.example.conf"))
 	if err != nil {
 		t.Fatalf("read bridge deploy nginx example: %v", err)
 	}
-	if !bytes.Contains(nginxBody, []byte("proxy_pass")) || !bytes.Contains(nginxBody, []byte("Strict-Transport-Security")) {
+	if !bytes.Contains(nginxBody, []byte("proxy_pass")) ||
+		!bytes.Contains(nginxBody, []byte("Strict-Transport-Security")) ||
+		!bytes.Contains(nginxBody, []byte("proxy_set_header X-Forwarded-For $remote_addr;")) ||
+		bytes.Contains(nginxBody, []byte("$proxy_add_x_forwarded_for")) {
 		t.Fatalf("unexpected bridge deploy nginx example:\n%s", string(nginxBody))
 	}
 	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--require-helper-registry"}); err == nil {
@@ -429,6 +453,23 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}
 	if err := runBridgePolicy([]string{"--invite", signedBridge, "--trust-store", trustStore}); err == nil {
 		t.Fatal("expected bridge policy with empty trust store to fail")
+	}
+}
+
+func TestVerifyOptionalSHA256(t *testing.T) {
+	body := []byte(`{"status":"pass"}`)
+	sum := sha256.Sum256(body)
+	if err := verifyOptionalSHA256("test body", body, hex.EncodeToString(sum[:])); err != nil {
+		t.Fatalf("expected matching sha256: %v", err)
+	}
+	if err := verifyOptionalSHA256("test body", body, ""); err != nil {
+		t.Fatalf("expected empty sha256 to skip: %v", err)
+	}
+	if err := verifyOptionalSHA256("test body", body, strings.Repeat("0", 64)); err == nil {
+		t.Fatal("expected sha256 mismatch")
+	}
+	if err := verifyOptionalSHA256("test body", body, "not-hex"); err == nil {
+		t.Fatal("expected invalid sha256 error")
 	}
 }
 
