@@ -158,6 +158,22 @@ func TestBridgeInvitePolicyRejectsUnregisteredHelper(t *testing.T) {
 	}
 }
 
+func TestBridgeInvitePolicyRequiresHelperRegistryWhenConfigured(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	options := DefaultBridgeInvitePolicyOptions()
+	options.RequireHelperRegistry = true
+	report := CheckBridgeInvitePolicy(testBridgeInvite(), options, now)
+	if report.Status != "fail" {
+		t.Fatalf("expected policy fail, got %+v", report)
+	}
+	if !report.Policy.RequireRegisteredHelper {
+		t.Fatalf("expected registered-helper policy to be required, got %+v", report.Policy)
+	}
+	if !sawBridgePolicyFinding(report, "bridge_helper_registry_required") {
+		t.Fatalf("expected helper registry required finding, got %+v", report.Findings)
+	}
+}
+
 func sawBridgePolicyFinding(report BridgeInvitePolicyReport, code string) bool {
 	for _, finding := range report.Findings {
 		if finding.Code == code {

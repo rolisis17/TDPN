@@ -59,8 +59,11 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgeVerify([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--show-paths"}); err != nil {
 		t.Fatalf("bridge-verify: %v", err)
 	}
-	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--helper-registry", helperRegistry}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--helper-registry", helperRegistry, "--require-helper-registry"}); err != nil {
 		t.Fatalf("bridge-policy: %v", err)
+	}
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--require-helper-registry"}); err == nil {
+		t.Fatal("expected bridge-policy to fail when helper registry is required but missing")
 	}
 	if err := runVerify([]string{"--pack", signedPack, "--public-key-file", publicKey, "--show-paths"}); err != nil {
 		t.Fatalf("verify: %v", err)
@@ -80,7 +83,7 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgeVerify([]string{"--invite", signedBridge, "--trust-store", trustStore, "--show-paths"}); err != nil {
 		t.Fatalf("bridge-verify with trust store: %v", err)
 	}
-	if err := runBridgePolicy([]string{"--invite", signedBridge, "--trust-store", trustStore, "--helper-registry", helperRegistry}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--trust-store", trustStore, "--helper-registry", helperRegistry, "--require-helper-registry"}); err != nil {
 		t.Fatalf("bridge-policy with trust store: %v", err)
 	}
 	if err := runCheck([]string{"--pack", signedPack, "--trust-store", trustStore, "--timeout-sec", "2"}); err != nil {

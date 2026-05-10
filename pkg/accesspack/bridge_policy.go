@@ -12,6 +12,7 @@ type BridgeInvitePolicyOptions struct {
 	MaxLifetime           time.Duration         `json:"max_lifetime"`
 	RequireHelperContact  bool                  `json:"require_helper_contact"`
 	RequireManualFallback bool                  `json:"require_manual_fallback"`
+	RequireHelperRegistry bool                  `json:"require_helper_registry"`
 	HelperRegistry        *BridgeHelperRegistry `json:"-"`
 }
 
@@ -42,6 +43,7 @@ type BridgeInvitePolicy struct {
 	MaxLifetimeSeconds      int64 `json:"max_lifetime_seconds"`
 	RequireHelperContact    bool  `json:"require_helper_contact"`
 	RequireManualFallback   bool  `json:"require_manual_fallback"`
+	RequireHelperRegistry   bool  `json:"require_helper_registry"`
 	RequireRegisteredHelper bool  `json:"require_registered_helper"`
 }
 
@@ -81,7 +83,8 @@ func CheckBridgeInvitePolicy(invite BridgeInvite, options BridgeInvitePolicyOpti
 			MaxLifetimeSeconds:      int64(options.MaxLifetime.Seconds()),
 			RequireHelperContact:    options.RequireHelperContact,
 			RequireManualFallback:   options.RequireManualFallback,
-			RequireRegisteredHelper: options.HelperRegistry != nil,
+			RequireHelperRegistry:   options.RequireHelperRegistry,
+			RequireRegisteredHelper: options.RequireHelperRegistry || options.HelperRegistry != nil,
 		},
 	}
 	if err := ValidateBridgeInvite(invite, now); err != nil {
@@ -113,6 +116,8 @@ func CheckBridgeInvitePolicy(invite BridgeInvite, options BridgeInvitePolicyOpti
 	}
 	if options.HelperRegistry != nil {
 		checkBridgeHelperRegistryPolicy(invite, options.HelperRegistry, now, issuedAt, expiresAt, &report)
+	} else if options.RequireHelperRegistry {
+		report.addFinding("bridge_helper_registry_required", "error", "bridge helper registry is required by policy")
 	}
 	if len(report.Findings) > 0 {
 		report.Status = "fail"

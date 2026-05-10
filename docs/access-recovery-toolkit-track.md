@@ -191,6 +191,7 @@ Bridge-invite rules:
 - bridge invites must expire within 14 days of issue time
 - `bridge-policy` defaults require at least two helper paths, at least two distinct helper/contact hosts, a helper contact URL, and a manual/external-app fallback path
 - `bridge-policy --helper-registry` additionally requires the helper to be active, registered for the invite organization, inside its active window, and not quarantined or disabled
+- `bridge-policy --require-helper-registry` fails if the helper registry was accidentally omitted from a production policy run
 - the helper contact and helper paths are shown only after signature, expiry, org id, and trusted-key checks pass
 - the browser gives copy/open actions for the invite id, helper id, helper contact, and verified helper paths
 - the helper registry is the first service-level rotation/quarantine control; a public bridge service still needs online rate limits and abuse reporting before launch

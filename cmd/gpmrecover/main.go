@@ -153,7 +153,7 @@ func usage() {
   go run ./cmd/gpmrecover sign --pack FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-sign --invite FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
-  go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE]
+  go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE] [--require-helper-registry 1]
   go run ./cmd/gpmrecover trust-add --trust-store FILE --org-id ID --org-name NAME --public-key-file FILE
   go run ./cmd/gpmrecover trust-list --trust-store FILE
   go run ./cmd/gpmrecover trust-remove --trust-store FILE --org-id ID --key-id ID
@@ -606,6 +606,7 @@ func runBridgePolicy(args []string) error {
 	publicFile := fs.String("public-key-file", "", "path to public key file for one-off verification")
 	trustStoreFile := fs.String("trust-store", "", "path to access recovery trust store JSON")
 	helperRegistryFile := fs.String("helper-registry", "", "optional bridge helper registry JSON for active/quarantine policy")
+	requireHelperRegistry := fs.Bool("require-helper-registry", false, "fail if no bridge helper registry is provided")
 	minPaths := fs.Int("min-paths", 2, "minimum helper access paths")
 	minHosts := fs.Int("min-distinct-hosts", 2, "minimum distinct helper/contact hosts")
 	maxLifetimeHours := fs.Int("max-lifetime-hours", int(accesspack.MaxBridgeInviteLifetime/time.Hour), "maximum invite lifetime in hours")
@@ -645,6 +646,7 @@ func runBridgePolicy(args []string) error {
 		MaxLifetime:           maxLifetime,
 		RequireHelperContact:  *requireContact,
 		RequireManualFallback: *requireManualFallback,
+		RequireHelperRegistry: *requireHelperRegistry,
 		HelperRegistry:        helperRegistry,
 	}, time.Now().UTC())
 	out := bridgePolicyOutput{
@@ -766,6 +768,7 @@ func runDemoBundle(args []string) error {
 	}
 	bridgeHelperRegistry := demoBridgeHelperRegistry(strings.TrimSpace(*orgID), strings.TrimSpace(*helperContact), now)
 	bridgePolicyOptions := accesspack.DefaultBridgeInvitePolicyOptions()
+	bridgePolicyOptions.RequireHelperRegistry = true
 	bridgePolicyOptions.HelperRegistry = &bridgeHelperRegistry
 	bridgePolicy := accesspack.CheckBridgeInvitePolicy(signedInvite, bridgePolicyOptions, now)
 	if bridgePolicy.Status != "pass" {
