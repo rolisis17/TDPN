@@ -77,6 +77,8 @@ if ! jq -e \
     and (.observed.env_access_code_sha256 | length == 64)
     and .observed.env_allow_query_code == "false"
     and .observed.env_trust_proxy_headers == "true"
+    and .observed.env_rps == "2"
+    and ([.checks[] | select(.id == "rate_limit_configured" and .status == "pass")] | length == 1)
     and .summary.checks_fail == 0
     and .recommended_next_action.id == "record_host_install_evidence"
   ' "$SUMMARY_JSON" >/dev/null; then
@@ -128,6 +130,29 @@ fi
 if ! jq -e '.status == "fail" and ([.checks[] | select(.id == "access_code_gate_configured" and .status == "fail")] | length == 1)' "$TMP_DIR/bad-hash-summary.json" >/dev/null; then
   echo "access bridge host install check integration failed: bad hash summary mismatch"
   cat "$TMP_DIR/bad-hash-summary.json"
+  exit 1
+fi
+
+BAD_RPS_DIR="$TMP_DIR/bad-rps"
+cp -R "$DEPLOY_DIR" "$BAD_RPS_DIR"
+sed -i 's/GPM_BRIDGE_RPS="2"/GPM_BRIDGE_RPS="0"/' "$BAD_RPS_DIR/gpm-access-bridge-host-check.env"
+set +e
+./scripts/access_bridge_host_install_check.sh \
+  --deploy-pack-dir "$BAD_RPS_DIR" \
+  --service-name gpm-access-bridge-host-check \
+  --config-json "$SERVICE_CONFIG" \
+  --summary-json "$TMP_DIR/bad-rps-summary.json" \
+  --print-summary-json 0 >/dev/null 2>&1
+bad_rps_rc=$?
+set -e
+if [[ "$bad_rps_rc" -eq 0 ]]; then
+  echo "access bridge host install check integration failed: disabled rate limit should fail"
+  cat "$TMP_DIR/bad-rps-summary.json"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .observed.env_rps == "0" and ([.checks[] | select(.id == "rate_limit_configured" and .status == "fail")] | length == 1)' "$TMP_DIR/bad-rps-summary.json" >/dev/null; then
+  echo "access bridge host install check integration failed: bad rps summary mismatch"
+  cat "$TMP_DIR/bad-rps-summary.json"
   exit 1
 fi
 

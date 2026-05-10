@@ -35,6 +35,40 @@ EVIDENCE_BUNDLE="$TMP_DIR/pilot-evidence-bundle"
 SUMMARY_JSON="$TMP_DIR/pilot-evidence-summary.json"
 REPORT_MD="$TMP_DIR/pilot-evidence-report.md"
 
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url http://bridge.example \
+  --path-id helper-web \
+  --code test-code \
+  --config-json "$TMP_DIR/missing-config.json" \
+  --deploy-pack-dir "$TMP_DIR/missing-deploy-pack" \
+  --print-summary-json 0 >"$TMP_DIR/public-http-pilot-bundle.log" 2>&1
+public_http_rc=$?
+set -e
+if [[ "$public_http_rc" -eq 0 ]] ||
+  ! grep -Fq -- '--base-url must use HTTPS for non-loopback pilot evidence targets' "$TMP_DIR/public-http-pilot-bundle.log"; then
+  echo "access bridge pilot evidence bundle integration failed: public HTTP base URL was not rejected"
+  cat "$TMP_DIR/public-http-pilot-bundle.log"
+  exit 1
+fi
+
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url https://192.168.50.10 \
+  --path-id helper-web \
+  --code test-code \
+  --config-json "$TMP_DIR/missing-config.json" \
+  --deploy-pack-dir "$TMP_DIR/missing-deploy-pack" \
+  --print-summary-json 0 >"$TMP_DIR/private-https-pilot-bundle.log" 2>&1
+private_https_rc=$?
+set -e
+if [[ "$private_https_rc" -eq 0 ]] ||
+  ! grep -Fq -- '--base-url host must look public-routable for non-loopback pilot evidence targets' "$TMP_DIR/private-https-pilot-bundle.log"; then
+  echo "access bridge pilot evidence bundle integration failed: private HTTPS base URL was not rejected"
+  cat "$TMP_DIR/private-https-pilot-bundle.log"
+  exit 1
+fi
+
 go run ./cmd/gpmrecover demo-bundle \
   --out-dir "$BUNDLE_DIR" \
   --org-id pilot-org \

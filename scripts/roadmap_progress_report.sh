@@ -2011,6 +2011,7 @@ access_recovery_evidence_json() {
           env_allow_query_code: str_or_null(.observed.env_allow_query_code),
           env_trust_proxy_headers: str_or_null(.observed.env_trust_proxy_headers),
           env_addr: str_or_null(.observed.env_addr),
+          env_rps: str_or_null(.observed.env_rps),
           recommended_action_id: str_or_null(.recommended_next_action.id),
           recommended_action_command: str_or_null(.recommended_next_action.command)
         };
@@ -2090,9 +2091,41 @@ access_recovery_track_json_from_evidence() {
         | . + {ok: ([.helper_id_match, .organization_id_match, .registry_id_match, .smoke_config_sha256_match, .host_config_sha256_match] | all(. == true))};
       def smoke_base_url:
         ($service_smoke.details.base_url // "");
+      def first_part($sep):
+        (split($sep) | .[0]) // "";
+      def smoke_host:
+        (smoke_base_url | sub("^[A-Za-z][A-Za-z0-9+.-]*://"; "") | first_part("/") | first_part("?") | first_part("#")) as $authority
+        | if ($authority | startswith("[")) then
+            ($authority | sub("^\\["; "") | sub("\\].*$"; ""))
+          else
+            ($authority | first_part(":"))
+          end
+        | ascii_downcase;
+      def private_or_reserved_helper_host:
+        smoke_host as $host
+        | (
+            ($host == "")
+            or ($host == "localhost")
+            or ($host | test("(^|\\.)(localhost|local|lan|internal|test|invalid|example)$"))
+            or ($host | test("(^|\\.)example\\.(com|net|org)$"))
+            or ($host | test("^127\\."))
+            or ($host | test("^10\\."))
+            or ($host | test("^172\\.(1[6-9]|2[0-9]|3[0-1])\\."))
+            or ($host | test("^192\\.168\\."))
+            or ($host | test("^169\\.254\\."))
+            or ($host | test("^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\."))
+            or ($host | test("^0\\."))
+            or ($host | test("^192\\.0\\.0\\."))
+            or ($host | test("^192\\.0\\.2\\."))
+            or ($host | test("^198\\.(1[89])\\."))
+            or ($host | test("^198\\.51\\.100\\."))
+            or ($host | test("^203\\.0\\.113\\."))
+            or ($host | test("^(22[4-9]|23[0-9]|24[0-9]|25[0-5])\\."))
+            or ($host | test("^(::|::1|fc[0-9a-f]|fd[0-9a-f]|fe80:)"))
+          );
       def real_helper_https_evidence:
         (smoke_base_url | test("^https://"; "i"))
-        and ((smoke_base_url | test("^https://(localhost|127\\.|\\[::1\\])([:/]|$)"; "i")) | not);
+        and ((private_or_reserved_helper_host) | not);
       def evidence_scope:
         if all_pass and evidence_binding.ok and real_helper_https_evidence then "real_helper_https"
         elif all_pass and evidence_binding.ok then "local_rehearsal"
@@ -2107,7 +2140,7 @@ access_recovery_track_json_from_evidence() {
         elif ($e == $service_smoke and (($e.status // "") == "missing" or ($e.status // "") == "stale")) then
           "./scripts/easy_node.sh access-recovery-local-evidence-refresh --write-canonical 1 --refresh-roadmap 1 --print-summary-json 1"
         elif ($e == $service_smoke) then
-          "bash ./scripts/access_bridge_service_smoke.sh --base-url https://bridge.example --path-id helper-web --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/access_bridge_service_smoke_summary.json"
+          "bash ./scripts/access_bridge_service_smoke.sh --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/access_bridge_service_smoke_summary.json"
         elif ($e == $deployment_evidence) then
           "bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/access_bridge_service_smoke_summary.json --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/access_bridge_deployment_evidence_summary.json"
         else
@@ -2146,12 +2179,19 @@ access_recovery_track_json_from_evidence() {
           access_bridge_deployment_evidence: $deployment_evidence,
           access_bridge_host_install: $host_install,
           evidence_binding: $evidence_binding,
+          evidence_host_policy: {
+            base_url: smoke_base_url,
+            host: smoke_host,
+            https: (smoke_base_url | test("^https://"; "i")),
+            public_routable_host: ((private_or_reserved_helper_host) | not),
+            real_helper_https_evidence: real_helper_https_evidence
+          },
           recommended_next_action: (
             if $track_status == "pilot-evidence-ready" then null
             elif $track_status == "local-rehearsal-ready" then {
               id: "real_helper_https_evidence",
               reason: "Local Access Recovery rehearsal evidence cannot substitute for real helper HTTPS deployment evidence",
-              command: "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --base-url https://bridge.example --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_summary.json"
+              command: "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_summary.json"
             }
             elif $first_attention == null then null
             else {

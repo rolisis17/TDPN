@@ -16,6 +16,8 @@ summary_json=""
 report_md=""
 print_summary_json="1"
 max_smoke_age_sec="${ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_MAX_SMOKE_AGE_SEC:-3600}"
+require_https="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_REQUIRE_HTTPS:-1}"
+require_public_host="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_REQUIRE_PUBLIC_HOST:-1}"
 expect_helper_id=""
 expect_org_id=""
 expect_registry_id=""
@@ -33,9 +35,12 @@ Usage:
     [--bundle-dir DIR] \
     [--summary-json FILE] \
     [--report-md FILE] \
+    [--require-https 0|1] \
+    [--require-public-host 0|1] \
     [--print-summary-json 0|1]
 
 Runs deployed bridge smoke, deployment evidence, and host-install evidence into one operator handoff bundle.
+Non-loopback pilot targets must use HTTPS and a public-routable-looking host unless diagnostic overrides are set.
 USAGE
 }
 
@@ -89,6 +94,68 @@ bool_arg_or_die() {
     echo "$name must be 0 or 1" >&2
     exit 2
   fi
+}
+
+url_scheme() {
+  local url="${1:-}"
+  if [[ "$url" == *://* ]]; then
+    printf '%s' "${url%%://*}" | tr '[:upper:]' '[:lower:]'
+  fi
+}
+
+url_host() {
+  local rest="${1:-}"
+  rest="${rest#*://}"
+  rest="${rest%%/*}"
+  if [[ "$rest" == \[*\]* ]]; then
+    rest="${rest#\[}"
+    printf '%s' "${rest%%\]*}" | tr '[:upper:]' '[:lower:]'
+  else
+    rest="${rest%%:*}"
+    printf '%s' "$rest" | tr '[:upper:]' '[:lower:]'
+  fi
+}
+
+base_url_is_loopback() {
+  local host
+  host="$(url_host "$1")"
+  [[ "$host" == "localhost" || "$host" == "::1" || "$host" == 127.* ]]
+}
+
+base_url_host_is_private_or_reserved() {
+  local host
+  host="$(url_host "$1")"
+  if [[ -z "$host" || "$host" == "localhost" ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ (^|\.)(localhost|local|lan|internal|test|invalid|example)$ ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ (^|\.)example\.(com|net|org)$ ]]; then
+    return 0
+  fi
+  if [[ "$host" == 127.* || "$host" == 10.* || "$host" == 192.168.* || "$host" == 169.254.* || "$host" == 0.* ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^192\.0\.(0|2)\. || "$host" =~ ^192\.88\.99\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^198\.(1[89]|51\.100)\. || "$host" =~ ^203\.0\.113\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^(22[4-9]|23[0-9]|24[0-9]|25[0-5])\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^(::|::1|fc[0-9a-f]|fd[0-9a-f]|fe80:) ]]; then
+    return 0
+  fi
+  return 1
 }
 
 json_string_or_empty() {
@@ -244,6 +311,24 @@ while [[ $# -gt 0 ]]; do
       max_smoke_age_sec="${2:-}"
       shift 2
       ;;
+    --require-https)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_https="${2:-}"
+        shift 2
+      else
+        require_https="1"
+        shift
+      fi
+      ;;
+    --require-public-host)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_public_host="${2:-}"
+        shift 2
+      else
+        require_public_host="1"
+        shift
+      fi
+      ;;
     --expect-helper-id)
       expect_helper_id="${2:-}"
       shift 2
@@ -282,6 +367,8 @@ for cmd in bash basename cp date dirname find grep jq mktemp rm sed sort tar tr;
 done
 detect_sha256_tool
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "--require-https" "$require_https"
+bool_arg_or_die "--require-public-host" "$require_public_host"
 if [[ ! "$max_smoke_age_sec" =~ ^[0-9]+$ ]]; then
   echo "access bridge pilot evidence bundle failed: --max-smoke-age-sec must be a non-negative integer" >&2
   exit 2
@@ -312,6 +399,14 @@ if [[ -n "$code" && -n "$code_file" ]]; then
 fi
 if [[ -z "$code" && -z "$code_file" ]]; then
   echo "access bridge pilot evidence bundle failed: --code or --code-file is required" >&2
+  exit 2
+fi
+if [[ "$require_https" == "1" && "$(url_scheme "$base_url")" != "https" ]] && ! base_url_is_loopback "$base_url"; then
+  echo "access bridge pilot evidence bundle failed: --base-url must use HTTPS for non-loopback pilot evidence targets (set --require-https 0 for diagnostics)" >&2
+  exit 2
+fi
+if [[ "$require_public_host" == "1" ]] && ! base_url_is_loopback "$base_url" && base_url_host_is_private_or_reserved "$base_url"; then
+  echo "access bridge pilot evidence bundle failed: --base-url host must look public-routable for non-loopback pilot evidence targets (set --require-public-host 0 for diagnostics)" >&2
   exit 2
 fi
 

@@ -49,7 +49,7 @@ go run ./cmd/gpmrecover bridge-service-code-generate --code-out .easy-node-logs/
 CONFIG_HASH="$(sha256sum .easy-node-logs/access-recovery-demo/bridge-service-config.json | awk '{print $1}')"
 CODE_HASH="$(jq -r '.sha256' .easy-node-logs/access-recovery-demo/bridge-code-hash.json)"
 go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --config-sha256 "$CONFIG_HASH" --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/access-recovery-demo/bridge-abuse.jsonl --access-code-sha256 "$CODE_HASH"
-go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/access-recovery-demo/bridge-deploy --public-host bridge.example --config-sha256 "$CONFIG_HASH" --access-code-sha256 "$CODE_HASH"
+go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/access-recovery-demo/bridge-deploy --public-host HELPER_PUBLIC_DNS --config-sha256 "$CONFIG_HASH" --access-code-sha256 "$CODE_HASH"
 ```
 
 4. If testing online publication, upload `public/.well-known/gpm/` and fetch it from another machine before verification:
@@ -92,12 +92,12 @@ CODE_HASH="$(jq -r '.sha256' .easy-node-logs/access-recovery-demo/bridge-code-ha
 ```sh
 go run ./cmd/gpmrecover bridge-service-deploy-pack \
   --out-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
-  --public-host bridge.example \
+  --public-host HELPER_PUBLIC_DNS \
   --config-sha256 "$CONFIG_HASH" \
   --access-code-sha256 "$CODE_HASH"
 ```
 
-4. Bind the bridge service to loopback, for example `127.0.0.1:18980`, and put Caddy or nginx in front of it with HTTPS enabled. The public endpoint must be `https://bridge.example`, proxying only to the local bridge listener. Keep query-string access codes disabled; pass access codes through `X-GPM-Bridge-Code`.
+4. Bind the bridge service to loopback, for example `127.0.0.1:18980`, and put Caddy or nginx in front of it with HTTPS enabled. The public endpoint must be `https://HELPER_PUBLIC_DNS`, proxying only to the local bridge listener. Keep query-string access codes disabled; pass access codes through `X-GPM-Bridge-Code`.
 
 5. Before sharing the bridge URL or access code, verify helper identity:
 
@@ -110,7 +110,7 @@ go run ./cmd/gpmrecover bridge-service-deploy-pack \
 
 ```sh
 bash ./scripts/access_bridge_service_smoke.sh \
-  --base-url https://bridge.example \
+  --base-url https://HELPER_PUBLIC_DNS \
   --path-id helper-web \
   --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt \
   --expect-helper-id helper-demo \
@@ -131,7 +131,7 @@ bash ./scripts/access_bridge_host_install_check.sh \
   --summary-json .easy-node-logs/bridge-host-install-check.json
 
 ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle \
-  --base-url https://bridge.example \
+  --base-url https://HELPER_PUBLIC_DNS \
   --path-id helper-web \
   --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt \
   --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \

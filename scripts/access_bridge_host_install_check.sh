@@ -233,6 +233,7 @@ env_allow_unauth_local=""
 env_allow_query_code=""
 env_trust_proxy_headers=""
 env_addr=""
+env_rps=""
 if [[ -f "$env_file" ]]; then
   env_config_sha256="$(env_file_value "$env_file" "GPM_BRIDGE_CONFIG_SHA256")"
   env_access_code_sha256="$(env_file_value "$env_file" "GPM_BRIDGE_ACCESS_CODE_SHA256")"
@@ -240,6 +241,7 @@ if [[ -f "$env_file" ]]; then
   env_allow_query_code="$(env_file_value "$env_file" "GPM_BRIDGE_ALLOW_QUERY_CODE")"
   env_trust_proxy_headers="$(env_file_value "$env_file" "GPM_BRIDGE_TRUST_PROXY_HEADERS")"
   env_addr="$(env_file_value "$env_file" "GPM_BRIDGE_ADDR")"
+  env_rps="$(env_file_value "$env_file" "GPM_BRIDGE_RPS")"
 
   if [[ -n "$env_config_sha256" ]] && ! is_sha256_hex "$env_config_sha256"; then
     add_check "config_sha256_matches" "fail" "env config sha256 is not 64 hex characters"
@@ -272,6 +274,11 @@ if [[ -f "$env_file" ]]; then
     add_check "loopback_bind" "pass" "bridge service is configured for loopback bind"
   else
     add_check "loopback_bind" "fail" "bridge service should bind to loopback behind HTTPS proxy"
+  fi
+  if [[ "$env_rps" =~ ^[0-9]+$ && "$env_rps" -gt 0 ]]; then
+    add_check "rate_limit_configured" "pass" "bridge service rate limit is enabled"
+  else
+    add_check "rate_limit_configured" "fail" "GPM_BRIDGE_RPS must be a positive integer for pilot helper hosts"
   fi
 fi
 
@@ -339,6 +346,7 @@ jq -n \
   --arg env_allow_query_code "$env_allow_query_code" \
   --arg env_trust_proxy_headers "$env_trust_proxy_headers" \
   --arg env_addr "$env_addr" \
+  --arg env_rps "$env_rps" \
   --arg recommended_action_id "$recommended_action_id" \
   --arg recommended_action "$recommended_action" \
   --argjson fail_count "$fail_count" \
@@ -348,7 +356,7 @@ jq -n \
     schema: {
       id: "access_bridge_host_install_check_summary",
       major: 1,
-      minor: 0
+      minor: 1
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -365,7 +373,8 @@ jq -n \
       env_allow_unauthenticated_local: $env_allow_unauth_local,
       env_allow_query_code: $env_allow_query_code,
       env_trust_proxy_headers: $env_trust_proxy_headers,
-      env_addr: $env_addr
+      env_addr: $env_addr,
+      env_rps: $env_rps
     },
     summary: {
       checks_total: ($checks | length),
