@@ -185,6 +185,7 @@ Local trust-store flow:
 - `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.json`
 - `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json`
 - `go run ./cmd/gpmrecover bridge-service-config --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --out .easy-node-logs/bridge-service-config.json`
+- `go run ./cmd/gpmrecover bridge-service-check --config .easy-node-logs/bridge-service-config.json --path-id helper-web`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --timeout-sec 8`
 - `go run ./cmd/gpmrecover trust-remove --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID`
 
@@ -229,6 +230,7 @@ Bridge-invite rules:
 - `demo-bundle` emits a static `.well-known/gpm` publish folder so operators can test online artifact publication without inventing filenames by hand
 - `fetch-publication` downloads the static publication index and same-origin referenced artifacts into a local folder, but marks trust as unverified so signature/trust-store verification remains a separate step
 - `bridge-service-config` turns a verified signed invite plus signed helper registry into a fail-closed service config containing the helper abuse-report URL, rate-limit policy, active window, registry identity, and verified path hints
+- `bridge-service-check` is the first runtime preflight hook: it rejects unsigned/stale service configs, expired helper windows, missing abuse/rate commitments, unknown paths, and manual/external-app paths before a helper bridge serves traffic
 
 `check` keeps trust and reachability separate:
 - it verifies the pack before probing anything
@@ -291,10 +293,9 @@ Do first:
 - docs explaining how a user visualizes it
 
 Do next:
-- bridge service runtime that consumes `bridge-service-config` and enforces request limits/reporting
+- bridge HTTP service wrapper around `bridge-service-check`, with real per-source request counters and abuse-report logging
 
 Do later:
-- bridge service
 - Outline/Shadowsocks/Tor/GPM launch helpers
 - organization dashboard
 - source-diversity policy

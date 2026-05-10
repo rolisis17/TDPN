@@ -227,6 +227,57 @@ func TestBuildBridgeServiceConfigIncludesSignedHelperControls(t *testing.T) {
 	}
 }
 
+func TestEvaluateBridgeServiceRequestAllowsSignedBridgePath(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	config := BuildBridgeServiceConfig(testBridgeInvite(), testBridgeHelperRegistry(), BridgeServiceConfigOptions{
+		RegistryID:           "registry-demo",
+		RegistryExpiresAtUTC: now.Add(24 * time.Hour).Format(time.RFC3339),
+		SignedRegistry:       true,
+	}, now)
+	decision := EvaluateBridgeServiceRequest(config, BridgeServiceRequest{PathID: "helper-site"}, now)
+	if !decision.Allowed || decision.Status != "pass" {
+		t.Fatalf("expected bridge service request to pass: %+v", decision)
+	}
+	if decision.MatchedAccessPath == nil || decision.MatchedAccessPath.PathID != "helper-site" {
+		t.Fatalf("expected matched helper-site path: %+v", decision.MatchedAccessPath)
+	}
+	if decision.HelperAbuseReportURL == "" || decision.HelperRateLimitPolicy == "" {
+		t.Fatalf("expected enforcement metadata: %+v", decision)
+	}
+}
+
+func TestEvaluateBridgeServiceRequestRejectsManualPath(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	config := BuildBridgeServiceConfig(testBridgeInvite(), testBridgeHelperRegistry(), BridgeServiceConfigOptions{
+		RegistryID:           "registry-demo",
+		RegistryExpiresAtUTC: now.Add(24 * time.Hour).Format(time.RFC3339),
+		SignedRegistry:       true,
+	}, now)
+	decision := EvaluateBridgeServiceRequest(config, BridgeServiceRequest{PathID: "manual-helper"}, now)
+	if decision.Allowed || decision.Status != "fail" {
+		t.Fatalf("expected manual path to fail closed: %+v", decision)
+	}
+	if len(decision.Findings) == 0 || decision.Findings[0].Code != "bridge_service_access_path_external_app" {
+		t.Fatalf("expected external-app finding: %+v", decision.Findings)
+	}
+}
+
+func TestEvaluateBridgeServiceRequestRejectsExpiredRegistry(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	config := BuildBridgeServiceConfig(testBridgeInvite(), testBridgeHelperRegistry(), BridgeServiceConfigOptions{
+		RegistryID:           "registry-demo",
+		RegistryExpiresAtUTC: now.Add(-1 * time.Minute).Format(time.RFC3339),
+		SignedRegistry:       true,
+	}, now)
+	decision := EvaluateBridgeServiceRequest(config, BridgeServiceRequest{PathID: "helper-site"}, now)
+	if decision.Allowed || decision.Status != "fail" {
+		t.Fatalf("expected expired registry to fail closed: %+v", decision)
+	}
+	if len(decision.Findings) == 0 || decision.Findings[0].Code != "bridge_service_registry_expired" {
+		t.Fatalf("expected registry expiry finding: %+v", decision.Findings)
+	}
+}
+
 func TestBridgeInvitePolicyRejectsHelperMissingAbuseAndRateLimitMetadata(t *testing.T) {
 	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
 	registry := testBridgeHelperRegistry()

@@ -131,6 +131,31 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if serviceConfigOut.Status != "pass" || !serviceConfigOut.SignedRegistry || serviceConfigOut.HelperAbuseReportURL == "" || serviceConfigOut.HelperRateLimitPolicy == "" {
 		t.Fatalf("unexpected bridge service config: %+v", serviceConfigOut)
 	}
+	serviceDecision := filepath.Join(dir, "bridge-service-decision.json")
+	if err := runBridgeServiceCheck([]string{
+		"--config", serviceConfig,
+		"--path-id", "bridge-main",
+		"--out", serviceDecision,
+	}); err != nil {
+		t.Fatalf("bridge-service-check: %v", err)
+	}
+	serviceDecisionBody, err := os.ReadFile(serviceDecision)
+	if err != nil {
+		t.Fatalf("read bridge service decision: %v", err)
+	}
+	var serviceDecisionOut accesspack.BridgeServiceDecision
+	if err := json.Unmarshal(serviceDecisionBody, &serviceDecisionOut); err != nil {
+		t.Fatalf("unmarshal bridge service decision: %v", err)
+	}
+	if !serviceDecisionOut.Allowed || serviceDecisionOut.MatchedAccessPath == nil || serviceDecisionOut.MatchedAccessPath.PathID != "bridge-main" {
+		t.Fatalf("unexpected bridge service decision: %+v", serviceDecisionOut)
+	}
+	if err := runBridgeServiceCheck([]string{
+		"--config", serviceConfig,
+		"--path-id", "bridge-contact",
+	}); err == nil {
+		t.Fatal("expected bridge-service-check to fail closed for manual external-app path")
+	}
 	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--require-helper-registry"}); err == nil {
 		t.Fatal("expected bridge-policy to fail when helper registry is required but missing")
 	}

@@ -138,6 +138,21 @@ if [[ -z "$(jq -r '.helper_abuse_report_url // ""' "$TMP_DIR/bridge-service-conf
   cat "$TMP_DIR/bridge-service-config.json"
   exit 1
 fi
+go run ./cmd/gpmrecover bridge-service-check --config "$TMP_DIR/bridge-service-config.json" --path-id helper-web --out "$TMP_DIR/bridge-service-decision.json" >/dev/null
+if [[ "$(jq -r '.allowed // false' "$TMP_DIR/bridge-service-decision.json")" != "true" ]]; then
+  echo "access recovery demo contract failed: bridge-service-check did not allow helper-web"
+  cat "$TMP_DIR/bridge-service-decision.json"
+  exit 1
+fi
+set +e
+go run ./cmd/gpmrecover bridge-service-check --config "$TMP_DIR/bridge-service-config.json" --path-id helper-contact >"$TMP_DIR/bridge-service-manual-path.log" 2>&1
+manual_path_rc=$?
+set -e
+if [[ "$manual_path_rc" -eq 0 ]]; then
+  echo "access recovery demo contract failed: bridge-service-check allowed manual external-app path"
+  cat "$TMP_DIR/bridge-service-manual-path.log"
+  exit 1
+fi
 
 go run ./cmd/gpmrecover text-import --text-file "$trusted_key_text" --expect-kind trusted-key --out "$TMP_DIR/trusted-key.imported.json" >/dev/null
 go run ./cmd/gpmrecover text-import --text-file "$(jq -r '.files.trust_store_text' "$MANIFEST")" --expect-kind trust-store --out "$TMP_DIR/trust-store.imported.json" >/dev/null

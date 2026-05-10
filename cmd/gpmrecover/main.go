@@ -172,6 +172,8 @@ func main() {
 		err = runBridgePolicy(os.Args[2:])
 	case "bridge-service-config":
 		err = runBridgeServiceConfig(os.Args[2:])
+	case "bridge-service-check":
+		err = runBridgeServiceCheck(os.Args[2:])
 	case "bridge-registry-sign":
 		err = runBridgeRegistrySign(os.Args[2:])
 	case "bridge-registry-verify":
@@ -225,6 +227,7 @@ func usage() {
   go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
   go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE | --signed-helper-registry FILE] [--require-helper-registry 1]
   go run ./cmd/gpmrecover bridge-service-config --invite FILE --signed-helper-registry FILE (--trust-store FILE | --public-key-file FILE) [--out FILE]
+  go run ./cmd/gpmrecover bridge-service-check --config FILE [--path-id ID | --url URL] [--out FILE]
   go run ./cmd/gpmrecover bridge-registry-sign --helper-registry FILE --org-id ID --org-name NAME --private-key-file FILE --out FILE [--registry-id ID] [--lifetime-hours HOURS]
   go run ./cmd/gpmrecover bridge-registry-verify --signed-registry FILE (--trust-store FILE | --public-key-file FILE) [--out-registry FILE] [--show-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
@@ -979,6 +982,49 @@ func runBridgeServiceConfig(args []string) error {
 	}
 	if config.Status != "pass" {
 		return errors.New("bridge service config policy failed")
+	}
+	return nil
+}
+
+func runBridgeServiceCheck(args []string) error {
+	fs := flag.NewFlagSet("bridge-service-check", flag.ContinueOnError)
+	configFile := fs.String("config", "", "path to bridge service config JSON")
+	pathID := fs.String("path-id", "", "optional requested access path id")
+	rawURL := fs.String("url", "", "optional requested access URL")
+	source := fs.String("source", "", "optional caller/source label for logs")
+	outFile := fs.String("out", "", "optional path to write decision JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	body, err := readInputFileStrict(*configFile, "bridge service config", maxPackFileBytes)
+	if err != nil {
+		return err
+	}
+	config, err := accesspack.ParseBridgeServiceConfig(body)
+	if err != nil {
+		return err
+	}
+	decision := accesspack.EvaluateBridgeServiceRequest(config, accesspack.BridgeServiceRequest{
+		PathID: *pathID,
+		URL:    *rawURL,
+		Source: *source,
+	}, time.Now().UTC())
+	body, err = json.MarshalIndent(decision, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal bridge service decision: %w", err)
+	}
+	body = append(body, '\n')
+	if strings.TrimSpace(*outFile) != "" {
+		if err := writeFileWithMode(*outFile, body, 0o644); err != nil {
+			return err
+		}
+	} else {
+		if _, err := os.Stdout.Write(body); err != nil {
+			return err
+		}
+	}
+	if !decision.Allowed {
+		return errors.New("bridge service check failed")
 	}
 	return nil
 }
