@@ -84,7 +84,7 @@ Send users only the minimum needed for the situation:
 - normal recovery: signed access pack plus trust store
 - blocked/bridged recovery: signed bridge invite, signed helper registry, and trust store
 
-Export a single trusted-key handoff from a trust store:
+For non-demo or rotated trust stores, export a single trusted-key handoff from the trust store:
 
 ```sh
 go run ./cmd/gpmrecover trust-export-key \
