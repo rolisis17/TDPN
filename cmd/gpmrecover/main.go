@@ -580,8 +580,11 @@ func runQRPNG(args []string) error {
 	if err != nil {
 		return err
 	}
-	envelope, _, err := accesspack.DecodeTextEnvelope(rawText)
+	envelope, payload, err := accesspack.DecodeTextEnvelope(rawText)
 	if err != nil {
+		return err
+	}
+	if err := validateTextEnvelopePayload(envelope.Kind, payload); err != nil {
 		return err
 	}
 	if strings.TrimSpace(*outFile) == "" {

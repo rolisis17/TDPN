@@ -181,6 +181,21 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runTextExport([]string{"--kind", accesspack.EnvelopeKindBridgeHelperRegistrySigned, "--in", helperRegistry, "--out", filepath.Join(dir, "registry.bad-signed.txt")}); err == nil {
 		t.Fatal("expected text-export to reject raw helper registry mislabeled as signed")
 	}
+	rawRegistryBody, err := os.ReadFile(helperRegistry)
+	if err != nil {
+		t.Fatalf("read helper registry: %v", err)
+	}
+	badRegistryEnvelope, err := accesspack.EncodeTextEnvelope(accesspack.EnvelopeKindBridgeHelperRegistrySigned, rawRegistryBody)
+	if err != nil {
+		t.Fatalf("encode bad signed registry envelope: %v", err)
+	}
+	badRegistryEnvelopeFile := filepath.Join(dir, "registry.bad-signed.txt")
+	if err := os.WriteFile(badRegistryEnvelopeFile, []byte(badRegistryEnvelope+"\n"), 0o644); err != nil {
+		t.Fatalf("write bad signed registry envelope: %v", err)
+	}
+	if err := runQRPNG([]string{"--text-file", badRegistryEnvelopeFile, "--out", filepath.Join(dir, "registry.bad-signed.png")}); err == nil {
+		t.Fatal("expected qr-png to reject raw helper registry mislabeled as signed")
+	}
 	if err := runTextImport([]string{"--text-file", registryEnvelope, "--expect-kind", "bridge-helper-registry", "--out", importedRegistry}); err != nil {
 		t.Fatalf("text-import helper registry: %v", err)
 	}
