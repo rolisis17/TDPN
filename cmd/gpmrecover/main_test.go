@@ -175,6 +175,57 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runVerify([]string{"--pack", signedPack, "--trust-store", importedStore}); err != nil {
 		t.Fatalf("verify imported store: %v", err)
 	}
+	trustStoreBody, err := os.ReadFile(trustStore)
+	if err != nil {
+		t.Fatalf("read trust store: %v", err)
+	}
+	parsedTrustStore, err := accesspack.ParseTrustStore(trustStoreBody)
+	if err != nil {
+		t.Fatalf("parse trust store: %v", err)
+	}
+	if len(parsedTrustStore.TrustedKeys) != 1 {
+		t.Fatalf("expected one trusted key, got %d", len(parsedTrustStore.TrustedKeys))
+	}
+	trustedKeyFile := filepath.Join(dir, "trusted-key.json")
+	trustedKeyBody, err := json.MarshalIndent(parsedTrustStore.TrustedKeys[0], "", "  ")
+	if err != nil {
+		t.Fatalf("marshal trusted key: %v", err)
+	}
+	if err := os.WriteFile(trustedKeyFile, trustedKeyBody, 0o644); err != nil {
+		t.Fatalf("write trusted key: %v", err)
+	}
+	trustedKeyEnvelope := filepath.Join(dir, "trusted-key.txt")
+	importedTrustedKey := filepath.Join(dir, "trusted-key.imported.json")
+	if err := runTextExport([]string{"--kind", accesspack.EnvelopeKindKey, "--in", trustedKeyFile, "--out", trustedKeyEnvelope}); err != nil {
+		t.Fatalf("text-export trusted key: %v", err)
+	}
+	if err := runTextImport([]string{"--text-file", trustedKeyEnvelope, "--expect-kind", accesspack.EnvelopeKindKey, "--out", importedTrustedKey}); err != nil {
+		t.Fatalf("text-import trusted key: %v", err)
+	}
+	disabledKey := parsedTrustStore.TrustedKeys[0]
+	disabledKey.Disabled = true
+	disabledKeyBody, err := json.MarshalIndent(disabledKey, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal disabled trusted key: %v", err)
+	}
+	disabledKeyFile := filepath.Join(dir, "trusted-key.disabled.json")
+	if err := os.WriteFile(disabledKeyFile, disabledKeyBody, 0o644); err != nil {
+		t.Fatalf("write disabled trusted key: %v", err)
+	}
+	if err := runTextExport([]string{"--kind", accesspack.EnvelopeKindKey, "--in", disabledKeyFile, "--out", filepath.Join(dir, "trusted-key.disabled.txt")}); err == nil {
+		t.Fatal("expected text-export to reject disabled trusted-key handoff")
+	}
+	disabledKeyEnvelope, err := accesspack.EncodeTextEnvelope(accesspack.EnvelopeKindKey, disabledKeyBody)
+	if err != nil {
+		t.Fatalf("encode disabled trusted-key envelope: %v", err)
+	}
+	disabledKeyEnvelopeFile := filepath.Join(dir, "trusted-key.disabled.envelope.txt")
+	if err := os.WriteFile(disabledKeyEnvelopeFile, []byte(disabledKeyEnvelope+"\n"), 0o644); err != nil {
+		t.Fatalf("write disabled trusted-key envelope: %v", err)
+	}
+	if err := runTextImport([]string{"--text-file", disabledKeyEnvelopeFile, "--expect-kind", accesspack.EnvelopeKindKey, "--out", filepath.Join(dir, "trusted-key.disabled.imported.json")}); err == nil {
+		t.Fatal("expected text-import to reject disabled trusted-key handoff")
+	}
 	if err := runTextExport([]string{"--kind", "bridge-helper-registry", "--in", helperRegistry, "--out", registryEnvelope}); err != nil {
 		t.Fatalf("text-export helper registry: %v", err)
 	}

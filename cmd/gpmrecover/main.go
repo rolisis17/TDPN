@@ -550,6 +550,9 @@ func validateTextEnvelopePayload(kind string, body []byte) error {
 		if err := json.Unmarshal(body, &entry); err != nil {
 			return fmt.Errorf("invalid trusted-key json: %w", err)
 		}
+		if entry.Disabled {
+			return errors.New("trusted-key envelope payload must not be disabled")
+		}
 		_, _, err := accesspack.AddTrustedKey(accesspack.EmptyTrustStore(), entry, time.Now().UTC())
 		return err
 	case accesspack.EnvelopeKindBridgeHelperRegistry:
