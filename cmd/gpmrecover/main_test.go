@@ -156,6 +156,27 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}); err == nil {
 		t.Fatal("expected bridge-service-check to fail closed for manual external-app path")
 	}
+	codeFile := filepath.Join(dir, "bridge-code.txt")
+	codeHashFile := filepath.Join(dir, "bridge-code-hash.json")
+	if err := os.WriteFile(codeFile, []byte("ticket-123\n"), 0o600); err != nil {
+		t.Fatalf("write bridge code: %v", err)
+	}
+	if err := runBridgeServiceCodeHash([]string{"--code-file", codeFile, "--out", codeHashFile}); err != nil {
+		t.Fatalf("bridge-service-code-hash: %v", err)
+	}
+	codeHashBody, err := os.ReadFile(codeHashFile)
+	if err != nil {
+		t.Fatalf("read bridge code hash: %v", err)
+	}
+	var codeHashOut struct {
+		SHA256 string `json:"sha256"`
+	}
+	if err := json.Unmarshal(codeHashBody, &codeHashOut); err != nil {
+		t.Fatalf("unmarshal bridge code hash: %v", err)
+	}
+	if codeHashOut.SHA256 == "" || len(codeHashOut.SHA256) != 64 {
+		t.Fatalf("unexpected bridge code hash: %+v", codeHashOut)
+	}
 	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--require-helper-registry"}); err == nil {
 		t.Fatal("expected bridge-policy to fail when helper registry is required but missing")
 	}

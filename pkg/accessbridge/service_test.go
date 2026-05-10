@@ -1,6 +1,8 @@
 package accessbridge
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -85,6 +87,32 @@ func TestServiceRejectsManualPathAndLogsAbuseReport(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"message":"spam burst"`) || !strings.Contains(string(body), `"path_id":"helper-web"`) {
 		t.Fatalf("unexpected abuse log: %s", string(body))
+	}
+}
+
+func TestServiceRequiresAccessCodeWhenConfigured(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	sum := sha256.Sum256([]byte("ticket-123"))
+	service, err := NewService(ServiceConfig{
+		BridgeConfig:     testServiceBridgeConfig(now),
+		AccessCodeSHA256: hex.EncodeToString(sum[:]),
+		Now:              func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	handler := service.Handler()
+	deniedRR := httptest.NewRecorder()
+	handler.ServeHTTP(deniedRR, httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil))
+	if deniedRR.Code != http.StatusUnauthorized {
+		t.Fatalf("expected missing code to be unauthorized, got %d body=%s", deniedRR.Code, deniedRR.Body.String())
+	}
+	allowedRR := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil)
+	req.Header.Set("X-GPM-Bridge-Code", "ticket-123")
+	handler.ServeHTTP(allowedRR, req)
+	if allowedRR.Code != http.StatusOK {
+		t.Fatalf("expected correct code to pass, got %d body=%s", allowedRR.Code, allowedRR.Body.String())
 	}
 }
 

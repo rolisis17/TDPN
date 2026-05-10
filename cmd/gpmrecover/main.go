@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -177,6 +179,8 @@ func main() {
 		err = runBridgeServiceCheck(os.Args[2:])
 	case "bridge-service-serve":
 		err = runBridgeServiceServe(os.Args[2:])
+	case "bridge-service-code-hash":
+		err = runBridgeServiceCodeHash(os.Args[2:])
 	case "bridge-registry-sign":
 		err = runBridgeRegistrySign(os.Args[2:])
 	case "bridge-registry-verify":
@@ -231,7 +235,8 @@ func usage() {
   go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE | --signed-helper-registry FILE] [--require-helper-registry 1]
   go run ./cmd/gpmrecover bridge-service-config --invite FILE --signed-helper-registry FILE (--trust-store FILE | --public-key-file FILE) [--out FILE]
   go run ./cmd/gpmrecover bridge-service-check --config FILE [--path-id ID | --url URL] [--out FILE]
-  go run ./cmd/gpmrecover bridge-service-serve --config FILE [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] [--redirect 0]
+  go run ./cmd/gpmrecover bridge-service-serve --config FILE [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] [--access-code-sha256 HEX] [--redirect 0]
+  go run ./cmd/gpmrecover bridge-service-code-hash (--code TEXT | --code-file FILE) [--out FILE]
   go run ./cmd/gpmrecover bridge-registry-sign --helper-registry FILE --org-id ID --org-name NAME --private-key-file FILE --out FILE [--registry-id ID] [--lifetime-hours HOURS]
   go run ./cmd/gpmrecover bridge-registry-verify --signed-registry FILE (--trust-store FILE | --public-key-file FILE) [--out-registry FILE] [--show-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
@@ -1040,6 +1045,7 @@ func runBridgeServiceServe(args []string) error {
 	rps := fs.Int("rps", 2, "fixed-window requests per second per source; 0 disables")
 	maxSources := fs.Int("max-sources", 1024, "maximum tracked sources for rate limiting")
 	abuseLog := fs.String("abuse-log", "", "optional JSONL abuse report log path")
+	accessCodeSHA256 := fs.String("access-code-sha256", "", "optional sha256 hex digest of an out-of-band bridge access code")
 	redirect := fs.Bool("redirect", false, "redirect allowed bridge requests to the signed access URL instead of returning JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1053,11 +1059,12 @@ func runBridgeServiceServe(args []string) error {
 		return err
 	}
 	service, err := accessbridge.NewService(accessbridge.ServiceConfig{
-		BridgeConfig: config,
-		RPS:          *rps,
-		MaxSources:   *maxSources,
-		AbuseLogPath: *abuseLog,
-		Redirect:     *redirect,
+		BridgeConfig:     config,
+		RPS:              *rps,
+		MaxSources:       *maxSources,
+		AbuseLogPath:     *abuseLog,
+		AccessCodeSHA256: *accessCodeSHA256,
+		Redirect:         *redirect,
 	})
 	if err != nil {
 		return err
@@ -1069,6 +1076,46 @@ func runBridgeServiceServe(args []string) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return server.ListenAndServe()
+}
+
+func runBridgeServiceCodeHash(args []string) error {
+	fs := flag.NewFlagSet("bridge-service-code-hash", flag.ContinueOnError)
+	code := fs.String("code", "", "access code to hash; prefer --code-file to avoid shell history")
+	codeFile := fs.String("code-file", "", "file containing the access code")
+	outFile := fs.String("out", "", "optional output JSON path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*code) != "" && strings.TrimSpace(*codeFile) != "" {
+		return errors.New("bridge-service-code-hash accepts only one of --code or --code-file")
+	}
+	value := strings.TrimSpace(*code)
+	if strings.TrimSpace(*codeFile) != "" {
+		body, err := readInputFileStrict(*codeFile, "bridge access code", maxKeyFileBytes)
+		if err != nil {
+			return err
+		}
+		value = strings.TrimSpace(string(body))
+	}
+	if value == "" {
+		return errors.New("bridge-service-code-hash requires --code or --code-file")
+	}
+	sum := sha256.Sum256([]byte(value))
+	out := struct {
+		SHA256 string `json:"sha256"`
+	}{
+		SHA256: hex.EncodeToString(sum[:]),
+	}
+	body, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	body = append(body, '\n')
+	if strings.TrimSpace(*outFile) != "" {
+		return writeFileWithMode(*outFile, body, 0o600)
+	}
+	_, err = os.Stdout.Write(body)
+	return err
 }
 
 func runBridgeRegistrySign(args []string) error {

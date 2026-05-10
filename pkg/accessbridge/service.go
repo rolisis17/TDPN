@@ -1,6 +1,8 @@
 package accessbridge
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,23 +18,25 @@ import (
 )
 
 type ServiceConfig struct {
-	BridgeConfig accesspack.BridgeServiceConfig
-	RPS          int
-	MaxSources   int
-	AbuseLogPath string
-	Redirect     bool
-	Now          func() time.Time
+	BridgeConfig     accesspack.BridgeServiceConfig
+	RPS              int
+	MaxSources       int
+	AbuseLogPath     string
+	Redirect         bool
+	AccessCodeSHA256 string
+	Now              func() time.Time
 }
 
 type Service struct {
-	config       accesspack.BridgeServiceConfig
-	limiter      *httplimit.FixedWindowLimiter
-	abuseLogPath string
-	redirect     bool
-	now          func() time.Time
-	mu           sync.Mutex
-	requests     map[string]int
-	abuseReports int
+	config         accesspack.BridgeServiceConfig
+	limiter        *httplimit.FixedWindowLimiter
+	abuseLogPath   string
+	redirect       bool
+	accessCodeHash []byte
+	now            func() time.Time
+	mu             sync.Mutex
+	requests       map[string]int
+	abuseReports   int
 }
 
 type HealthResponse struct {
@@ -65,17 +69,22 @@ func NewService(config ServiceConfig) (*Service, error) {
 	if config.RPS < 0 {
 		return nil, fmt.Errorf("rps must be non-negative")
 	}
+	accessCodeHash, err := parseAccessCodeHash(config.AccessCodeSHA256)
+	if err != nil {
+		return nil, err
+	}
 	now := config.Now
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	service := &Service{
-		config:       accesspack.NormalizeBridgeServiceConfig(config.BridgeConfig),
-		limiter:      httplimit.NewFixedWindowLimiter(config.RPS, config.MaxSources),
-		abuseLogPath: strings.TrimSpace(config.AbuseLogPath),
-		redirect:     config.Redirect,
-		now:          now,
-		requests:     map[string]int{},
+		config:         accesspack.NormalizeBridgeServiceConfig(config.BridgeConfig),
+		limiter:        httplimit.NewFixedWindowLimiter(config.RPS, config.MaxSources),
+		abuseLogPath:   strings.TrimSpace(config.AbuseLogPath),
+		redirect:       config.Redirect,
+		accessCodeHash: accessCodeHash,
+		now:            now,
+		requests:       map[string]int{},
 	}
 	decision := accesspack.EvaluateBridgeServiceRequest(service.config, accesspack.BridgeServiceRequest{}, now())
 	if !decision.Allowed {
@@ -124,6 +133,10 @@ func (s *Service) handleBridge(w http.ResponseWriter, r *http.Request) {
 	now := s.now()
 	if s.limiter != nil && !s.limiter.Allow(source, now) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"status": "rate_limited"})
+		return
+	}
+	if !s.accessCodeAllowed(r) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"status": "access_code_required"})
 		return
 	}
 	s.recordRequest(source)
@@ -246,6 +259,50 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func parseAccessCodeHash(raw string) ([]byte, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if len(raw) != sha256.Size*2 {
+		return nil, fmt.Errorf("access code sha256 must be %d hex characters", sha256.Size*2)
+	}
+	out := make([]byte, sha256.Size)
+	for i := 0; i < sha256.Size; i++ {
+		var b byte
+		for j := 0; j < 2; j++ {
+			c := raw[i*2+j]
+			switch {
+			case c >= '0' && c <= '9':
+				b = b<<4 | (c - '0')
+			case c >= 'a' && c <= 'f':
+				b = b<<4 | (c - 'a' + 10)
+			case c >= 'A' && c <= 'F':
+				b = b<<4 | (c - 'A' + 10)
+			default:
+				return nil, fmt.Errorf("access code sha256 must be hex")
+			}
+		}
+		out[i] = b
+	}
+	return out, nil
+}
+
+func (s *Service) accessCodeAllowed(r *http.Request) bool {
+	if len(s.accessCodeHash) == 0 {
+		return true
+	}
+	code := strings.TrimSpace(r.Header.Get("X-GPM-Bridge-Code"))
+	if code == "" {
+		code = strings.TrimSpace(r.URL.Query().Get("code"))
+	}
+	if code == "" {
+		return false
+	}
+	sum := sha256.Sum256([]byte(code))
+	return subtle.ConstantTimeCompare(sum[:], s.accessCodeHash) == 1
 }
 
 func hasServiceableBridgePath(config accesspack.BridgeServiceConfig, now time.Time) bool {

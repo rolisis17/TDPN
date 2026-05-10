@@ -43,7 +43,8 @@ go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-recovery-demo/acces
 go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/access-recovery-demo/bridge-invite.signed.json --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --require-helper-registry
 go run ./cmd/gpmrecover bridge-service-config --invite .easy-node-logs/access-recovery-demo/bridge-invite.signed.json --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --out .easy-node-logs/access-recovery-demo/bridge-service-config.json
 go run ./cmd/gpmrecover bridge-service-check --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --path-id helper-web
-go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/access-recovery-demo/bridge-abuse.jsonl
+go run ./cmd/gpmrecover bridge-service-code-hash --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --out .easy-node-logs/access-recovery-demo/bridge-code-hash.json
+go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/access-recovery-demo/bridge-abuse.jsonl --access-code-sha256 HASH
 ```
 
 4. If testing online publication, upload `public/.well-known/gpm/` and fetch it from another machine before verification:
