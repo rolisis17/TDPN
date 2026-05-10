@@ -42,6 +42,7 @@
   };
   const trustStoreStorageKey = "gpm_recover_trust_store_v1";
   const helperRegistryStorageKey = "gpm_recover_helper_registry_v1";
+  const helperRegistryMetaStorageKey = "gpm_recover_helper_registry_meta_v1";
   const textEnvelopePrefix = "GPMREC1";
   const textEnvelopeKinds = [
     "access-pack",
@@ -53,6 +54,7 @@
   ];
   const maxBridgeInviteLifetimeMS = 14 * 24 * 60 * 60 * 1000;
   const maxBridgeRegistryArtifactLifetimeMS = 30 * 24 * 60 * 60 * 1000;
+  let verifiedHelperRegistryMeta = null;
 
   function setStatus(state, title, detail) {
     els.statusCard.dataset.state = state;
@@ -234,10 +236,69 @@
     return parseJSONInput(raw, "Helper registry");
   }
 
-  function readRawHelperRegistryForPolicy() {
+  function normalizeVerifiedHelperRegistryMeta(meta) {
+    if (!meta || typeof meta !== "object") {
+      return null;
+    }
+    const normalized = {
+      source: trimString(meta.source),
+      registry_id: trimString(meta.registry_id),
+      org_id: trimString(meta.org_id),
+      org_name: trimString(meta.org_name),
+      key_id: trimString(meta.key_id),
+      expires_at_utc: trimString(meta.expires_at_utc),
+      verified_at_utc: trimString(meta.verified_at_utc),
+    };
+    if (normalized.source !== "signed" || !normalized.registry_id || !normalized.org_id || !normalized.key_id) {
+      return null;
+    }
+    if (normalized.expires_at_utc) {
+      parseRFC3339(normalized.expires_at_utc, "verified helper registry expires_at_utc");
+    }
+    if (normalized.verified_at_utc) {
+      parseRFC3339(normalized.verified_at_utc, "verified helper registry verified_at_utc");
+    }
+    return normalized;
+  }
+
+  function setVerifiedHelperRegistryMeta(meta) {
+    const normalized = normalizeVerifiedHelperRegistryMeta(meta);
+    verifiedHelperRegistryMeta = normalized;
+    try {
+      if (normalized) {
+        localStorage.setItem(helperRegistryMetaStorageKey, JSON.stringify(normalized, null, 2));
+      } else {
+        localStorage.removeItem(helperRegistryMetaStorageKey);
+      }
+    } catch (err) {
+      // Helper registry provenance is non-secret; storage can still fail in private windows.
+    }
+    return normalized;
+  }
+
+  function clearVerifiedHelperRegistryMeta() {
+    verifiedHelperRegistryMeta = null;
+    try {
+      localStorage.removeItem(helperRegistryMetaStorageKey);
+    } catch (err) {
+      // Ignore local storage availability issues.
+    }
+  }
+
+  function readRawHelperRegistryForPolicy(invite) {
     const registry = readHelperRegistryInput();
     if (isBridgeHelperRegistryArtifact(registry)) {
       throw new Error("Verify the signed helper registry before verifying this bridge invite");
+    }
+    if (registry && verifiedHelperRegistryMeta) {
+      const meta = normalizeVerifiedHelperRegistryMeta(verifiedHelperRegistryMeta);
+      const inviteOrgID = trimString(invite && invite.organization && invite.organization.org_id);
+      if (meta && meta.org_id !== inviteOrgID) {
+        throw new Error(`Signed helper registry organization ${meta.org_id} does not match bridge invite organization ${inviteOrgID}`);
+      }
+      if (meta && meta.expires_at_utc && parseRFC3339(meta.expires_at_utc, "signed helper registry expires_at_utc") <= new Date()) {
+        throw new Error("Signed helper registry is expired");
+      }
     }
     return registry;
   }
@@ -253,13 +314,18 @@
     renderTrustKeys(normalized);
   }
 
-  function writeHelperRegistry(registry) {
+  function writeHelperRegistry(registry, meta) {
     const normalized = normalizeHelperRegistry(registry);
     els.registryInput.value = JSON.stringify(normalized, null, 2);
     try {
       localStorage.setItem(helperRegistryStorageKey, els.registryInput.value);
     } catch (err) {
       // Helper registry data is not secret; storage can still fail in private windows.
+    }
+    if (meta) {
+      setVerifiedHelperRegistryMeta(meta);
+    } else {
+      clearVerifiedHelperRegistryMeta();
     }
     renderHelperRegistrySummary(normalized);
   }
@@ -1055,6 +1121,15 @@
       countRow.appendChild(badge);
     }
     els.registrySummary.appendChild(countRow);
+    if (verifiedHelperRegistryMeta) {
+      const meta = normalizeVerifiedHelperRegistryMeta(verifiedHelperRegistryMeta);
+      if (meta) {
+        const provenance = document.createElement("p");
+        provenance.className = "recover-empty";
+        provenance.textContent = `Verified signed registry ${meta.registry_id} for ${meta.org_name || meta.org_id} with key ${meta.key_id}.`;
+        els.registrySummary.appendChild(provenance);
+      }
+    }
     if (normalized.helpers.length === 0) {
       const empty = document.createElement("p");
       empty.className = "recover-empty";
@@ -1380,7 +1455,7 @@
     await verifySignature(artifact, trusted.publicKeyBytes);
     const kind = signedArtifactKind(artifact);
     const normalized = normalizeSignedArtifact(artifact);
-    const helperPolicy = kind === "bridge-invite" ? evaluateHelperRegistryPolicy(normalized, readRawHelperRegistryForPolicy()) : null;
+    const helperPolicy = kind === "bridge-invite" ? evaluateHelperRegistryPolicy(normalized, readRawHelperRegistryForPolicy(normalized)) : null;
     const helperPolicyDetail = helperPolicy && helperPolicy.status === "pass"
       ? " and an active helper registry entry"
       : "";
@@ -1405,7 +1480,15 @@
     const trusted = await resolveTrustedRegistryKey(artifact, readTrustStoreInput());
     await verifyBridgeRegistryArtifactSignature(artifact, trusted.publicKeyBytes);
     const normalized = normalizeBridgeHelperRegistryArtifact(artifact);
-    writeHelperRegistry(normalized.registry);
+    writeHelperRegistry(normalized.registry, {
+      source: "signed",
+      registry_id: normalized.registry_id,
+      org_id: normalized.organization.org_id,
+      org_name: normalized.organization.name,
+      key_id: trusted.entry.key_id,
+      expires_at_utc: normalized.expires_at_utc,
+      verified_at_utc: new Date().toISOString(),
+    });
     setStatus(
       "good",
       "Trusted helper registry",
@@ -1489,6 +1572,7 @@
       } catch (err) {
         // Ignore local storage availability issues.
       }
+      clearVerifiedHelperRegistryMeta();
       renderHelperRegistrySummary(decoded.payload);
       setStatus("idle", "Signed helper registry text imported", "Verify it against the trust store before using bridge paths.");
       return;
@@ -1625,9 +1709,11 @@
     try {
       localStorage.removeItem(trustStoreStorageKey);
       localStorage.removeItem(helperRegistryStorageKey);
+      localStorage.removeItem(helperRegistryMetaStorageKey);
     } catch (err) {
       // Ignore local storage cleanup errors.
     }
+    verifiedHelperRegistryMeta = null;
     renderTrustKeys({ version: 1, trusted_keys: [] });
     renderHelperRegistrySummary(null);
     clearNode(els.factsGrid);
@@ -1659,6 +1745,7 @@
         } catch (err) {
           // Ignore local storage availability issues.
         }
+        clearVerifiedHelperRegistryMeta();
         renderHelperRegistrySummary(registry);
         setStatus("idle", "Signed helper registry imported", "Verify it against the trust store before using bridge paths.");
         return;
@@ -1680,14 +1767,17 @@
       if (registry) {
         if (isBridgeHelperRegistryArtifact(registry)) {
           localStorage.removeItem(helperRegistryStorageKey);
+          clearVerifiedHelperRegistryMeta();
           renderHelperRegistrySummary(registry);
           return;
         }
         const normalized = normalizeHelperRegistry(registry);
         localStorage.setItem(helperRegistryStorageKey, JSON.stringify(normalized, null, 2));
+        clearVerifiedHelperRegistryMeta();
         renderHelperRegistrySummary(normalized);
       } else {
         localStorage.removeItem(helperRegistryStorageKey);
+        clearVerifiedHelperRegistryMeta();
         renderHelperRegistrySummary(null);
       }
     } catch (err) {
@@ -1831,6 +1921,14 @@
     const savedHelperRegistry = localStorage.getItem(helperRegistryStorageKey);
     if (savedHelperRegistry && !trimString(els.registryInput.value)) {
       els.registryInput.value = savedHelperRegistry;
+    }
+    const savedHelperRegistryMeta = localStorage.getItem(helperRegistryMetaStorageKey);
+    if (savedHelperRegistryMeta) {
+      try {
+        verifiedHelperRegistryMeta = normalizeVerifiedHelperRegistryMeta(JSON.parse(savedHelperRegistryMeta));
+      } catch (err) {
+        clearVerifiedHelperRegistryMeta();
+      }
     }
   } catch (err) {
     // Ignore local storage availability issues.

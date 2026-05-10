@@ -142,6 +142,7 @@ Exit criteria:
 - one organization key can be added to a local trust store and used for verification/checking
 - a browser-local UI can verify a signed pack or bridge invite against a trusted organization key and list trusted paths
 - the browser-local UI can verify a signed helper registry artifact against the trust store before extracting it for bridge-invite checks
+- extracted signed helper registries remain bound to the signer organization during browser bridge-invite checks
 - verified bridge invites show helper contact/copy actions only after trust checks pass
 - bridge invites can be checked against a helper registry so active helpers pass and quarantined, disabled, wrong-organization, or expired helper windows fail closed
 - signed packs, bridge invites, helper registries, signed helper registries, and trust material can be exported/imported as text handoffs for chat, email, print, or future QR use

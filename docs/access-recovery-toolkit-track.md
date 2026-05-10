@@ -227,6 +227,7 @@ First browser surface:
 - runs local pack, bridge-invite, and trust-store parsing in the browser
 - imports an optional helper registry and enforces active/quarantined/disabled helper status before showing bridge paths
 - imports a signed helper registry artifact, verifies it against the local trust store, and extracts the raw registry for bridge-invite policy checks
+- preserves signed helper registry provenance after extraction and rejects bridge invites from a different organization
 - lets a tester add/remove trusted organization public keys without hand-editing JSON
 - copies or downloads the current trust store for handoff to another device
 - exports/imports `GPMREC1` text handoffs for signed packs, bridge invites, trust stores, helper registries, signed helper registries, and single trusted keys
