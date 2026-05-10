@@ -33,6 +33,7 @@ go run ./cmd/gpmrecover demo-bundle \
 - `recovery-trusted-key.json`, `recovery-trusted-key.txt`, or `recovery-trusted-key.qr.png` for first-time trust handoff
 - signed packs and bridge invites
 - signed helper registries
+- `public/.well-known/gpm/` when testing static online publication from a site or mirror
 - `GPMREC1` text/QR handoffs derived from those signed artifacts
 
 3. Verify the bundle before sharing:

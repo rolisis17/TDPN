@@ -66,6 +66,11 @@ required_file_keys=(
   bridge_invite_text
   trust_store_text
   bridge_helper_registry_signed_text
+  publish_access_pack
+  publish_bridge_invite
+  publish_bridge_helper_registry_signed
+  publish_trusted_key
+  publish_index
 )
 
 for key in "${required_file_keys[@]}"; do
@@ -83,6 +88,11 @@ trusted_key_text="$(jq -r '.files.trusted_key_text' "$MANIFEST")"
 access_pack="$(jq -r '.files.access_pack_signed' "$MANIFEST")"
 bridge_invite="$(jq -r '.files.bridge_invite_signed' "$MANIFEST")"
 signed_registry="$(jq -r '.files.bridge_helper_registry_signed' "$MANIFEST")"
+publish_access_pack="$(jq -r '.files.publish_access_pack' "$MANIFEST")"
+publish_bridge_invite="$(jq -r '.files.publish_bridge_invite' "$MANIFEST")"
+publish_signed_registry="$(jq -r '.files.publish_bridge_helper_registry_signed' "$MANIFEST")"
+publish_trusted_key="$(jq -r '.files.publish_trusted_key' "$MANIFEST")"
+publish_index="$(jq -r '.files.publish_index' "$MANIFEST")"
 verified_registry="$TMP_DIR/bridge-helper-registry.verified.json"
 
 manifest_key_id="$(jq -r '.key_id' "$MANIFEST")"
@@ -90,6 +100,26 @@ trusted_key_id="$(jq -r '.key_id // ""' "$trusted_key")"
 if [[ "$trusted_key_id" != "$manifest_key_id" ]]; then
   echo "access recovery demo contract failed: trusted-key key_id mismatch"
   echo "manifest=$manifest_key_id trusted_key=$trusted_key_id"
+  exit 1
+fi
+
+for pair in \
+  "$access_pack:$publish_access_pack" \
+  "$bridge_invite:$publish_bridge_invite" \
+  "$signed_registry:$publish_signed_registry" \
+  "$trusted_key:$publish_trusted_key"; do
+  src="${pair%%:*}"
+  dst="${pair#*:}"
+  if ! cmp -s "$src" "$dst"; then
+    echo "access recovery demo contract failed: published artifact mismatch"
+    echo "src=$src"
+    echo "dst=$dst"
+    exit 1
+  fi
+done
+if [[ "$(jq -r '.files.access_pack // ""' "$publish_index")" != "access-pack.json" ]]; then
+  echo "access recovery demo contract failed: publish index missing access-pack.json"
+  cat "$publish_index"
   exit 1
 fi
 

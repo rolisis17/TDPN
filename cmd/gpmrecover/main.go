@@ -1351,6 +1351,40 @@ func runDemoBundle(args []string) error {
 		return err
 	}
 
+	publishDir := filepath.Join("public", ".well-known", "gpm")
+	if err := writeJSONFile(addFile("publish_access_pack", filepath.Join(publishDir, "access-pack.json")), signedPack); err != nil {
+		return err
+	}
+	if err := writeJSONFile(addFile("publish_bridge_invite", filepath.Join(publishDir, "bridge-invite.json")), signedInvite); err != nil {
+		return err
+	}
+	if err := writeJSONFile(addFile("publish_bridge_helper_registry_signed", filepath.Join(publishDir, "bridge-helper-registry.signed.json")), bridgeHelperRegistryArtifact); err != nil {
+		return err
+	}
+	if err := writeJSONFile(addFile("publish_trusted_key", filepath.Join(publishDir, "recovery-trusted-key.json")), trustedEntry); err != nil {
+		return err
+	}
+	publishIndex := map[string]any{
+		"version":          1,
+		"generated_at_utc": now.Format(time.RFC3339),
+		"org_id":           strings.TrimSpace(*orgID),
+		"org_name":         strings.TrimSpace(*orgName),
+		"key_id":           keyID,
+		"files": map[string]string{
+			"access_pack":                   "access-pack.json",
+			"bridge_invite":                 "bridge-invite.json",
+			"bridge_helper_registry_signed": "bridge-helper-registry.signed.json",
+			"trusted_key":                   "recovery-trusted-key.json",
+		},
+		"notes": []string{
+			"Upload this folder to /.well-known/gpm/ on the organization site or mirror.",
+			"Users must still verify signatures and trust keys locally before using any recovery path.",
+		},
+	}
+	if err := writeJSONFile(addFile("publish_index", filepath.Join(publishDir, "recovery-index.json")), publishIndex); err != nil {
+		return err
+	}
+
 	out := demoBundleOutput{
 		Status:         "ok",
 		GeneratedAtUTC: now.Format(time.RFC3339),
@@ -1366,6 +1400,7 @@ func runDemoBundle(args []string) error {
 			"Import access-pack.signed.json or bridge-invite.signed.json as the signed artifact.",
 			"Import bridge-helper-registry.signed.json, or paste/scan bridge-helper-registry.signed.txt/QR, then click Verify Signed before checking bridge invites.",
 			"Or paste/scan the generated GPMREC1 text/QR handoffs.",
+			"Upload public/.well-known/gpm/ to a site or mirror when testing static online publication.",
 			"Run bridge-registry-verify with bridge-helper-registry.signed.json before publishing a registry snapshot.",
 			"Run bridge-registry-check with bridge-helper-registry.json when changing helper status.",
 			"Use bridge-registry-upsert-helper to add or update helper registry entries without hand-editing JSON.",

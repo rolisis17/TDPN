@@ -167,6 +167,7 @@ Demo bundle flow:
   - `bridge-helper-registry.signed.json`
   - `GPMREC1` text handoffs for the pack, bridge invite, trust store, trusted key, helper registry, and signed helper registry
   - QR PNGs for the pack, bridge invite, trusted key, helper registry, and signed helper registry
+  - `public/.well-known/gpm/` static publication copies for `access-pack.json`, `bridge-invite.json`, `bridge-helper-registry.signed.json`, `recovery-trusted-key.json`, and `recovery-index.json`
   - `demo-manifest.json` listing every generated file
 - Open `apps/web/recovery.html`, import `recovery-trusted-key.txt`/QR or `recovery-trust.json`, then import either `access-pack.signed.json` or `bridge-invite.signed.json`.
 - For bridge invites, import `bridge-helper-registry.signed.json`, paste `bridge-helper-registry.signed.txt`, or scan `bridge-helper-registry.signed.qr.png` into the Helper Registry panel, then click `Verify Signed` to verify/extract the raw helper registry before checking the invite.
@@ -221,7 +222,8 @@ Bridge-invite rules:
 - helper registry validation rejects active helpers missing abuse-report/rate-limit metadata or carrying stale quarantine reasons, and rejects quarantined/disabled helpers without a reason
 - the helper contact and helper paths are shown only after signature, expiry, org id, and trusted-key checks pass
 - the browser gives copy/open actions for the invite id, helper id, helper contact, helper abuse-report URL, and verified helper paths
-- the helper registry is the first service-level rotation/quarantine control; a public bridge service still needs online rate limits and abuse reporting before launch
+- the helper registry is the first service-level rotation/quarantine control; a public bridge service still needs live rate-limit and abuse-report enforcement before launch
+- `demo-bundle` emits a static `.well-known/gpm` publish folder so operators can test online artifact publication without inventing filenames by hand
 
 `check` keeps trust and reachability separate:
 - it verifies the pack before probing anything
@@ -284,7 +286,7 @@ Do first:
 - docs explaining how a user visualizes it
 
 Do next:
-- bridge service online registry publication and enforcement hooks for the signed abuse-report/rate-limit commitments
+- bridge service enforcement hooks for the signed abuse-report/rate-limit commitments
 
 Do later:
 - bridge service
