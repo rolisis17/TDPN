@@ -14,6 +14,10 @@ Usage:
     [--bundle-tar-sha256-file PATH] \
     [--check-tar-sha256 [0|1]] \
     [--check-manifest [0|1]] \
+    [--provenance-json PATH] \
+    [--check-provenance [0|1]] \
+    [--trust-store PATH] \
+    [--public-key-file PATH] \
     [--summary-contract-check [0|1]] \
     [--show-details [0|1]]
 
@@ -21,11 +25,14 @@ Purpose:
   Verify Access Bridge pilot evidence bundle integrity artifacts:
   - tarball checksum sidecar (<bundle>.tar.gz.sha256)
   - in-bundle manifest.sha256
+  - optional external provenance JSON sidecar
   - tar member safety before extraction (no absolute/parent paths, symlinks, or hardlinks)
 
 Notes:
   - Provide at least one of --summary-json, --bundle-dir, or --bundle-tar.
   - --summary-json can auto-fill bundle_dir, bundle_tar, and checksum sidecar paths.
+  - Provenance verification is checked by default only when --provenance-json is supplied.
+    Use exactly one of --trust-store or --public-key-file when provenance is checked.
   - When --summary-json is supplied, the summary contract is checked by default;
     set --summary-contract-check 0 only for raw artifact integrity inspection.
 USAGE
@@ -231,6 +238,10 @@ bundle_tar=""
 bundle_tar_sha256_file=""
 check_tar_sha256="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_CHECK_TAR_SHA256:-1}"
 check_manifest="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_CHECK_MANIFEST:-1}"
+check_provenance="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_CHECK_PROVENANCE:-}"
+provenance_json=""
+trust_store=""
+public_key_file=""
 summary_contract_check="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_CONTRACT_CHECK:-1}"
 show_details="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SHOW_DETAILS:-0}"
 bundle_dir_explicit=0
@@ -274,6 +285,27 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --provenance-json)
+      provenance_json="${2:-}"
+      shift 2
+      ;;
+    --check-provenance)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        check_provenance="${2:-}"
+        shift 2
+      else
+        check_provenance="1"
+        shift
+      fi
+      ;;
+    --trust-store)
+      trust_store="${2:-}"
+      shift 2
+      ;;
+    --public-key-file)
+      public_key_file="${2:-}"
+      shift 2
+      ;;
     --summary-contract-check)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         summary_contract_check="${2:-}"
@@ -308,8 +340,16 @@ for cmd in bash basename cmp dirname find grep head jq mktemp sed sort tar tr; d
   need_cmd "$cmd"
 done
 detect_sha256_tool
+if [[ -z "$check_provenance" ]]; then
+  if [[ -n "$provenance_json" ]]; then
+    check_provenance="1"
+  else
+    check_provenance="0"
+  fi
+fi
 bool_or_die "--check-tar-sha256" "$check_tar_sha256"
 bool_or_die "--check-manifest" "$check_manifest"
+bool_or_die "--check-provenance" "$check_provenance"
 bool_or_die "--summary-contract-check" "$summary_contract_check"
 bool_or_die "--show-details" "$show_details"
 
@@ -317,6 +357,9 @@ summary_json="$(abs_path "$summary_json")"
 bundle_dir="$(abs_path "$bundle_dir")"
 bundle_tar="$(abs_path "$bundle_tar")"
 bundle_tar_sha256_file="$(abs_path "$bundle_tar_sha256_file")"
+provenance_json="$(abs_path "$provenance_json")"
+trust_store="$(abs_path "$trust_store")"
+public_key_file="$(abs_path "$public_key_file")"
 
 if [[ -n "$summary_json" ]]; then
   if [[ ! -f "$summary_json" ]]; then
@@ -332,6 +375,9 @@ if [[ -n "$summary_json" ]]; then
   if [[ -z "$bundle_tar_sha256_file" ]]; then
     bundle_tar_sha256_file="$(abs_path "$(json_string "$summary_json" '.artifacts.bundle_tar_sha256_file')")"
   fi
+  if [[ -z "$provenance_json" && "$check_provenance" == "1" ]]; then
+    provenance_json="$(abs_path "$(json_string "$summary_json" '.artifacts.provenance_json')")"
+  fi
 fi
 
 if [[ -z "$bundle_tar" && -n "$bundle_dir" && "$bundle_dir_explicit" != "1" && -f "${bundle_dir}.tar.gz" ]]; then
@@ -345,8 +391,8 @@ if [[ -z "$summary_json" && -z "$bundle_dir" && -z "$bundle_tar" ]]; then
   echo "missing required input: provide --summary-json, --bundle-dir, and/or --bundle-tar"
   exit 2
 fi
-if [[ "$check_tar_sha256" == "0" && "$check_manifest" == "0" && ( -z "$summary_json" || "$summary_contract_check" == "0" ) ]]; then
-  echo "no checks enabled (set --check-tar-sha256=1, --check-manifest=1, and/or --summary-contract-check=1 with --summary-json)"
+if [[ "$check_tar_sha256" == "0" && "$check_manifest" == "0" && "$check_provenance" == "0" && ( -z "$summary_json" || "$summary_contract_check" == "0" ) ]]; then
+  echo "no checks enabled (set --check-tar-sha256=1, --check-manifest=1, --check-provenance=1, and/or --summary-contract-check=1 with --summary-json)"
   exit 2
 fi
 
@@ -531,6 +577,73 @@ elif [[ "$check_manifest" == "1" ]]; then
   issues=$((issues + 1))
 fi
 
+if [[ "$check_provenance" == "1" ]]; then
+  if ! command -v go >/dev/null 2>&1; then
+    echo "missing required command for provenance verification: go"
+    issues=$((issues + 1))
+  fi
+  if [[ -z "$provenance_json" ]]; then
+    echo "provenance check requested but provenance JSON is not resolved"
+    issues=$((issues + 1))
+  elif [[ ! -f "$provenance_json" ]]; then
+    echo "provenance JSON not found: $provenance_json"
+    issues=$((issues + 1))
+  fi
+  if [[ -z "$summary_json" || ! -f "$summary_json" ]]; then
+    echo "provenance check requires --summary-json"
+    issues=$((issues + 1))
+  fi
+  if [[ -z "$bundle_tar" || ! -f "$bundle_tar" ]]; then
+    echo "provenance check requires --bundle-tar"
+    issues=$((issues + 1))
+  fi
+  if [[ -z "$bundle_tar_sha256_file" || ! -f "$bundle_tar_sha256_file" ]]; then
+    echo "provenance check requires --bundle-tar-sha256-file"
+    issues=$((issues + 1))
+  fi
+  if [[ -n "$trust_store" && -n "$public_key_file" ]]; then
+    echo "provenance check requires exactly one of --trust-store or --public-key-file, not both"
+    issues=$((issues + 1))
+  elif [[ -z "$trust_store" && -z "$public_key_file" ]]; then
+    echo "provenance check requires --trust-store or --public-key-file"
+    issues=$((issues + 1))
+  elif [[ -n "$trust_store" && ! -f "$trust_store" ]]; then
+    echo "trust store not found: $trust_store"
+    issues=$((issues + 1))
+  elif [[ -n "$public_key_file" && ! -f "$public_key_file" ]]; then
+    echo "public key file not found: $public_key_file"
+    issues=$((issues + 1))
+  fi
+
+  if ((issues == 0)); then
+    provenance_verify_args=(
+      go run ./cmd/gpmrecover provenance-verify
+      --provenance "$provenance_json"
+      --summary-json "$summary_json"
+      --bundle-tar "$bundle_tar"
+      --bundle-tar-sha256-file "$bundle_tar_sha256_file"
+    )
+    if [[ -n "$trust_store" ]]; then
+      provenance_verify_args+=(--trust-store "$trust_store")
+    else
+      provenance_verify_args+=(--public-key-file "$public_key_file")
+    fi
+    provenance_verify_log="$(mktemp)"
+    set +e
+    "${provenance_verify_args[@]}" >"$provenance_verify_log" 2>&1
+    provenance_verify_rc=$?
+    set -e
+    if [[ "$provenance_verify_rc" -ne 0 ]]; then
+      echo "provenance verification failed: $provenance_json"
+      sed 's/^/  /' "$provenance_verify_log"
+      issues=$((issues + 1))
+    elif [[ "$show_details" == "1" ]]; then
+      echo "provenance verification ok: $provenance_json"
+    fi
+    rm -f "$provenance_verify_log"
+  fi
+fi
+
 if ((issues > 0)); then
   echo "[access-bridge-pilot-evidence-bundle-verify] failed (issues=$issues)"
   exit 1
@@ -545,4 +658,7 @@ if [[ -n "$manifest_bundle_dir" ]]; then
 fi
 if [[ -n "$bundle_tar" ]]; then
   echo "[access-bridge-pilot-evidence-bundle-verify] bundle_tar=$bundle_tar"
+fi
+if [[ "$check_provenance" == "1" && -n "$provenance_json" ]]; then
+  echo "[access-bridge-pilot-evidence-bundle-verify] provenance_json=$provenance_json"
 fi

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash curl go jq mktemp rg sha256sum tar tr; do
+for cmd in awk bash cat chmod curl go jq mkdir mktemp rg sha256sum tar tr; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "access bridge pilot evidence bundle integration failed: missing required command: $cmd"
     exit 2
@@ -34,6 +34,12 @@ SERVER_LOG="$TMP_DIR/bridge-service.log"
 EVIDENCE_BUNDLE="$TMP_DIR/pilot-evidence-bundle"
 SUMMARY_JSON="$TMP_DIR/pilot-evidence-summary.json"
 REPORT_MD="$TMP_DIR/pilot-evidence-report.md"
+PROVENANCE_JSON="$TMP_DIR/pilot-evidence-bundle.provenance.json"
+PROVENANCE_PRIVATE_KEY="$TMP_DIR/provenance-private.key"
+PROVENANCE_PUBLIC_KEY="$TMP_DIR/provenance-public.key"
+
+go run ./cmd/gpmrecover gen --private-key-out "$PROVENANCE_PRIVATE_KEY" --public-key-out "$PROVENANCE_PUBLIC_KEY" >/dev/null
+PROVENANCE_KEY_ID="$(go run ./cmd/gpmrecover inspect-key --private-key-file "$PROVENANCE_PRIVATE_KEY" | jq -r '.key_id')"
 
 set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
@@ -143,6 +149,13 @@ bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
   --bundle-dir "$EVIDENCE_BUNDLE" \
   --summary-json "$SUMMARY_JSON" \
   --report-md "$REPORT_MD" \
+  --provenance-sign 1 \
+  --provenance-private-key-file "$PROVENANCE_PRIVATE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --provenance-key-id "$PROVENANCE_KEY_ID" \
+  --provenance-lifetime-hours 24 \
+  --provenance-out "$PROVENANCE_JSON" \
   --print-summary-json 1 >"$TMP_DIR/pilot-bundle.log"
 
 if [[ ! -f "$SUMMARY_JSON" || ! -f "$REPORT_MD" ]]; then
@@ -155,6 +168,7 @@ if ! jq -e \
   --arg bundle_dir "$EVIDENCE_BUNDLE" \
   --arg base_url "$BASE_URL" \
   --arg registry_id "$registry_id" \
+  --arg provenance_json "$PROVENANCE_JSON" \
   '
     .schema.id == "access_bridge_pilot_evidence_bundle_summary"
     and .schema.minor == 1
@@ -182,6 +196,11 @@ if ! jq -e \
     and (.artifacts.bundle_tar_sha256_file | length > 0)
     and (.artifacts.bundled_summary_json | length > 0)
     and (.artifacts.deploy_pack_skipped_secrets | length > 0)
+    and .artifacts.provenance_json == $provenance_json
+    and .provenance.enabled == true
+    and .provenance.sidecar_json == $provenance_json
+    and .provenance.key_id == "'"$PROVENANCE_KEY_ID"'"
+    and .provenance.lifetime_hours == 24
     and .recommended_next_action.id == "capture_real_helper_https_evidence"
   ' "$SUMMARY_JSON" >/dev/null; then
   echo "access bridge pilot evidence bundle integration failed: pass summary contract mismatch"
@@ -196,21 +215,60 @@ if [[ ! -f "$EVIDENCE_BUNDLE/access_bridge_service_smoke_summary.json" ||
   ! -f "$EVIDENCE_BUNDLE/bridge-deploy-pack/gpm-access-bridge-pilot.env" ||
   ! -f "$EVIDENCE_BUNDLE/manifest.sha256" ||
   ! -f "${EVIDENCE_BUNDLE}.tar.gz" ||
-  ! -f "${EVIDENCE_BUNDLE}.tar.gz.sha256" ]]; then
+  ! -f "${EVIDENCE_BUNDLE}.tar.gz.sha256" ||
+  ! -f "$PROVENANCE_JSON" ]]; then
   echo "access bridge pilot evidence bundle integration failed: expected bundle artifacts missing"
   find "$EVIDENCE_BUNDLE" -maxdepth 3 -type f -print | sort
   exit 1
 fi
 
-bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --summary-json "$SUMMARY_JSON" --show-details 1 >"$TMP_DIR/pilot-bundle-verify.log"
+if ! jq -e \
+  --arg summary_sha256 "$(sha256sum "$SUMMARY_JSON" | awk '{print $1}')" \
+  --arg bundle_tar_sha256 "$(sha256sum "${EVIDENCE_BUNDLE}.tar.gz" | awk '{print $1}')" \
+  --arg bundle_tar_sha256_file_sha256 "$(sha256sum "${EVIDENCE_BUNDLE}.tar.gz.sha256" | awk '{print $1}')" \
+  --arg key_id "$PROVENANCE_KEY_ID" \
+  --arg bundle_tar_name "$(basename "${EVIDENCE_BUNDLE}.tar.gz")" \
+  '.schema_version == 1
+    and .organization.org_id == "pilot-org"
+    and .organization.name == "Pilot Org"
+    and .subject.kind == "access_bridge_pilot_evidence_bundle"
+    and .subject.evidence_scope == "local_rehearsal"
+    and .subject.summary_json_sha256 == $summary_sha256
+    and .subject.bundle_tar_sha256 == $bundle_tar_sha256
+    and .subject.bundle_tar_sha256_sidecar_sha256 == $bundle_tar_sha256_file_sha256
+    and .subject.bundle_tar_name == $bundle_tar_name
+    and .signature.alg == "ed25519"
+    and .signature.key_id == $key_id
+    and (.signature.sig | length) > 0' \
+  "$PROVENANCE_JSON" >/dev/null; then
+  echo "access bridge pilot evidence bundle integration failed: provenance sidecar contract mismatch"
+  cat "$PROVENANCE_JSON"
+  exit 1
+fi
+
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$SUMMARY_JSON" \
+  --provenance-json "$PROVENANCE_JSON" \
+  --public-key-file "$PROVENANCE_PUBLIC_KEY" \
+  --show-details 1 >"$TMP_DIR/pilot-bundle-verify.log"
 
 if ! tar -tzf "${EVIDENCE_BUNDLE}.tar.gz" | grep -Fq "$(basename "$EVIDENCE_BUNDLE")/manifest.sha256"; then
   echo "access bridge pilot evidence bundle integration failed: tar missing manifest"
   tar -tzf "${EVIDENCE_BUNDLE}.tar.gz"
   exit 1
 fi
+if tar -tzf "${EVIDENCE_BUNDLE}.tar.gz" | grep -Fq "$(basename "$PROVENANCE_JSON")"; then
+  echo "access bridge pilot evidence bundle integration failed: provenance sidecar was included in evidence tar"
+  tar -tzf "${EVIDENCE_BUNDLE}.tar.gz"
+  exit 1
+fi
+if grep -Fq "$(basename "$PROVENANCE_JSON")" "$EVIDENCE_BUNDLE/manifest.sha256"; then
+  echo "access bridge pilot evidence bundle integration failed: provenance sidecar was included in manifest"
+  cat "$EVIDENCE_BUNDLE/manifest.sha256"
+  exit 1
+fi
 
-if rg -Fq "$code_value" "$EVIDENCE_BUNDLE" "$SUMMARY_JSON" "$REPORT_MD"; then
+if rg -Fq -- "$code_value" "$EVIDENCE_BUNDLE" "$SUMMARY_JSON" "$REPORT_MD"; then
   echo "access bridge pilot evidence bundle integration failed: plaintext access code leaked into evidence"
   exit 1
 fi

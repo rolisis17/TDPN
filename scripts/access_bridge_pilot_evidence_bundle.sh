@@ -21,6 +21,13 @@ require_public_host="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_REQUIRE_PUBLIC_HOST:-
 expect_helper_id=""
 expect_org_id=""
 expect_registry_id=""
+provenance_sign="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_PROVENANCE_SIGN:-0}"
+provenance_private_key_file=""
+provenance_org_id=""
+provenance_org_name=""
+provenance_key_id=""
+provenance_lifetime_hours=""
+provenance_out=""
 
 usage() {
   cat <<'USAGE'
@@ -37,10 +44,18 @@ Usage:
     [--report-md FILE] \
     [--require-https 0|1] \
     [--require-public-host 0|1] \
+    [--provenance-sign 0|1] \
+    [--provenance-private-key-file FILE] \
+    [--provenance-org-id ID] \
+    [--provenance-org-name NAME] \
+    [--provenance-key-id ID] \
+    [--provenance-lifetime-hours HOURS] \
+    [--provenance-out FILE] \
     [--print-summary-json 0|1]
 
 Runs deployed bridge smoke, deployment evidence, and host-install evidence into one operator handoff bundle.
 Non-loopback pilot targets must use HTTPS and a public-routable-looking host unless diagnostic overrides are set.
+When --provenance-sign 1 is set, writes an external provenance sidecar after the tarball and checksum sidecar are finalized.
 USAGE
 }
 
@@ -94,6 +109,12 @@ bool_arg_or_die() {
     echo "$name must be 0 or 1" >&2
     exit 2
   fi
+}
+
+path_is_inside_dir() {
+  local path="$1"
+  local dir="$2"
+  [[ "$path" == "$dir" || "$path" == "$dir/"* ]]
 }
 
 url_scheme() {
@@ -341,6 +362,39 @@ while [[ $# -gt 0 ]]; do
       expect_registry_id="${2:-}"
       shift 2
       ;;
+    --provenance-sign)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        provenance_sign="${2:-}"
+        shift 2
+      else
+        provenance_sign="1"
+        shift
+      fi
+      ;;
+    --provenance-private-key-file)
+      provenance_private_key_file="${2:-}"
+      shift 2
+      ;;
+    --provenance-org-id)
+      provenance_org_id="${2:-}"
+      shift 2
+      ;;
+    --provenance-org-name)
+      provenance_org_name="${2:-}"
+      shift 2
+      ;;
+    --provenance-key-id)
+      provenance_key_id="${2:-}"
+      shift 2
+      ;;
+    --provenance-lifetime-hours)
+      provenance_lifetime_hours="${2:-}"
+      shift 2
+      ;;
+    --provenance-out)
+      provenance_out="${2:-}"
+      shift 2
+      ;;
     --print-summary-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         print_summary_json="${2:-}"
@@ -369,8 +423,13 @@ detect_sha256_tool
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--require-https" "$require_https"
 bool_arg_or_die "--require-public-host" "$require_public_host"
+bool_arg_or_die "--provenance-sign" "$provenance_sign"
 if [[ ! "$max_smoke_age_sec" =~ ^[0-9]+$ ]]; then
   echo "access bridge pilot evidence bundle failed: --max-smoke-age-sec must be a non-negative integer" >&2
+  exit 2
+fi
+if [[ -n "$provenance_lifetime_hours" && ( ! "$provenance_lifetime_hours" =~ ^[0-9]+$ || "$provenance_lifetime_hours" -le 0 ) ]]; then
+  echo "access bridge pilot evidence bundle failed: --provenance-lifetime-hours must be a positive integer" >&2
   exit 2
 fi
 
@@ -401,6 +460,21 @@ if [[ -z "$code" && -z "$code_file" ]]; then
   echo "access bridge pilot evidence bundle failed: --code or --code-file is required" >&2
   exit 2
 fi
+if [[ "$provenance_sign" == "1" ]]; then
+  need_cmd go
+  if [[ -z "$provenance_private_key_file" ]]; then
+    echo "access bridge pilot evidence bundle failed: --provenance-private-key-file is required when --provenance-sign 1" >&2
+    exit 2
+  fi
+  if [[ -z "$provenance_org_id" ]]; then
+    echo "access bridge pilot evidence bundle failed: --provenance-org-id is required when --provenance-sign 1" >&2
+    exit 2
+  fi
+  if [[ -z "$provenance_org_name" ]]; then
+    echo "access bridge pilot evidence bundle failed: --provenance-org-name is required when --provenance-sign 1" >&2
+    exit 2
+  fi
+fi
 if [[ "$require_https" == "1" && "$(url_scheme "$base_url")" != "https" ]] && ! base_url_is_loopback "$base_url"; then
   echo "access bridge pilot evidence bundle failed: --base-url must use HTTPS for non-loopback pilot evidence targets (set --require-https 0 for diagnostics)" >&2
   exit 2
@@ -424,6 +498,13 @@ if [[ -n "$code_file" ]]; then
   code_file="$(abs_path "$code_file")"
   if [[ ! -f "$code_file" ]]; then
     echo "access bridge pilot evidence bundle failed: code file not found: $code_file" >&2
+    exit 2
+  fi
+fi
+if [[ "$provenance_sign" == "1" ]]; then
+  provenance_private_key_file="$(abs_path "$provenance_private_key_file")"
+  if [[ ! -f "$provenance_private_key_file" ]]; then
+    echo "access bridge pilot evidence bundle failed: provenance private key file not found: $provenance_private_key_file" >&2
     exit 2
   fi
 fi
@@ -586,6 +667,18 @@ bundle_tar="${bundle_dir}.tar.gz"
 bundle_tar_sha256_file="${bundle_tar}.sha256"
 manifest_sha256="$bundle_dir/manifest.sha256"
 bundled_summary_json="$bundle_dir/access_bridge_pilot_evidence_bundle_summary.json"
+if [[ "$provenance_sign" == "1" ]]; then
+  if [[ -z "$provenance_out" ]]; then
+    provenance_out="${bundle_tar}.provenance.json"
+  else
+    provenance_out="$(abs_path "$provenance_out")"
+  fi
+  if path_is_inside_dir "$provenance_out" "$bundle_dir"; then
+    echo "access bridge pilot evidence bundle failed: --provenance-out must be outside the bundle directory so it is not included in the tar or manifest" >&2
+    exit 2
+  fi
+  mkdir -p "$(dirname "$provenance_out")"
+fi
 
 cat >"$report_md" <<REPORT
 # Access Bridge Pilot Evidence Bundle
@@ -636,6 +729,10 @@ jq -n \
   --arg deployment_log "$deployment_log" \
   --arg host_summary "$host_summary" \
   --arg host_log "$host_log" \
+  --arg provenance_sign "$provenance_sign" \
+  --arg provenance_out "$provenance_out" \
+  --arg provenance_key_id "$provenance_key_id" \
+  --arg provenance_lifetime_hours "$provenance_lifetime_hours" \
   --arg recommended_action_id "$recommended_action_id" \
   --arg recommended_action "$recommended_action" \
   --argjson fail_count "$fail_count" \
@@ -697,9 +794,20 @@ jq -n \
       deployment_evidence_log: $deployment_log,
       host_install_check_summary_json: $host_summary,
       host_install_check_log: $host_log,
+      provenance_json: $provenance_out,
       config_copy: $config_copy,
       deploy_pack_copy: $deploy_pack_copy,
       deploy_pack_skipped_secrets: $deploy_pack_skipped_secrets
+    },
+    provenance: {
+      enabled: ($provenance_sign == "1"),
+      sidecar_json: $provenance_out,
+      key_id: $provenance_key_id,
+      lifetime_hours: (
+        if $provenance_lifetime_hours == "" then null
+        else ($provenance_lifetime_hours | tonumber)
+        end
+      )
     },
     recommended_next_action: {
       id: $recommended_action_id,
@@ -728,12 +836,35 @@ tar -czf "$bundle_tar" -C "$(dirname "$bundle_dir")" "$(basename "$bundle_dir")"
 write_sha256_line "$bundle_tar" "$(basename "$bundle_tar")" >"$bundle_tar_sha256_file"
 bundle_tar_sha256="$(sha256_value "$bundle_tar")"
 
+if [[ "$provenance_sign" == "1" ]]; then
+  provenance_args=(
+    go run ./cmd/gpmrecover provenance-sign
+    --summary-json "$summary_json"
+    --bundle-tar "$bundle_tar"
+    --bundle-tar-sha256-file "$bundle_tar_sha256_file"
+    --private-key-file "$provenance_private_key_file"
+    --org-id "$provenance_org_id"
+    --org-name "$provenance_org_name"
+    --out "$provenance_out"
+  )
+  if [[ -n "$provenance_key_id" ]]; then
+    provenance_args+=(--key-id "$provenance_key_id")
+  fi
+  if [[ -n "$provenance_lifetime_hours" ]]; then
+    provenance_args+=(--lifetime-hours "$provenance_lifetime_hours")
+  fi
+  "${provenance_args[@]}"
+fi
+
 echo "access-bridge-pilot-evidence-bundle: status=$status"
 echo "bundle_dir: $bundle_dir"
 echo "manifest_sha256: $manifest_sha256 entries=$manifest_entries"
 echo "bundle_tar: $bundle_tar"
 echo "bundle_tar_sha256_file: $bundle_tar_sha256_file"
 echo "bundle_tar_sha256: $bundle_tar_sha256"
+if [[ "$provenance_sign" == "1" ]]; then
+  echo "provenance_json: $provenance_out"
+fi
 echo "summary_json: $summary_json"
 echo "report_md: $report_md"
 if [[ "$print_summary_json" == "1" ]]; then

@@ -599,6 +599,94 @@ func TestBridgeServiceCodeGenerationAndWeakCodePolicy(t *testing.T) {
 	}
 }
 
+func TestGPMRecoverProvenanceSignVerifyRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	privateKey := filepath.Join(dir, "recovery.key")
+	publicKey := filepath.Join(dir, "recovery.pub")
+	trustStore := filepath.Join(dir, "recovery-trust.json")
+	summaryJSON := filepath.Join(dir, "access_bridge_pilot_evidence_bundle_summary.json")
+	bundleTar := filepath.Join(dir, "access_bridge_pilot_evidence_bundle.tar.gz")
+	sidecar := bundleTar + ".sha256"
+	provenanceJSON := filepath.Join(dir, "access_bridge_pilot_evidence_bundle.tar.gz.provenance.json")
+
+	if err := runGen([]string{"--private-key-out", privateKey, "--public-key-out", publicKey}); err != nil {
+		t.Fatalf("gen: %v", err)
+	}
+	if err := runTrustAdd([]string{"--trust-store", trustStore, "--org-id", "pilot-org", "--org-name", "Pilot Org", "--public-key-file", publicKey}); err != nil {
+		t.Fatalf("trust-add: %v", err)
+	}
+	if err := os.WriteFile(summaryJSON, []byte(`{"schema":{"id":"access_bridge_pilot_evidence_bundle_summary"},"status":"pass","evidence_scope":"real_helper_https"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write summary: %v", err)
+	}
+	tarBody := []byte("fake tar bytes for provenance cli test")
+	if err := os.WriteFile(bundleTar, tarBody, 0o644); err != nil {
+		t.Fatalf("write tar: %v", err)
+	}
+	tarSum := sha256.Sum256(tarBody)
+	if err := os.WriteFile(sidecar, []byte(hex.EncodeToString(tarSum[:])+"  "+filepath.Base(bundleTar)+"\n"), 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	if err := runProvenanceSign([]string{
+		"--summary-json", summaryJSON,
+		"--bundle-tar", bundleTar,
+		"--bundle-tar-sha256-file", sidecar,
+		"--private-key-file", privateKey,
+		"--org-id", "pilot-org",
+		"--org-name", "Pilot Org",
+		"--out", provenanceJSON,
+		"--lifetime-hours", "24",
+	}); err != nil {
+		t.Fatalf("provenance-sign: %v", err)
+	}
+	if err := runProvenanceVerify([]string{
+		"--provenance", provenanceJSON,
+		"--summary-json", summaryJSON,
+		"--bundle-tar", bundleTar,
+		"--bundle-tar-sha256-file", sidecar,
+		"--trust-store", trustStore,
+	}); err != nil {
+		t.Fatalf("provenance-verify trust store: %v", err)
+	}
+	if err := runProvenanceVerify([]string{
+		"--provenance", provenanceJSON,
+		"--summary-json", summaryJSON,
+		"--bundle-tar", bundleTar,
+		"--bundle-tar-sha256-file", sidecar,
+		"--public-key-file", publicKey,
+	}); err != nil {
+		t.Fatalf("provenance-verify public key: %v", err)
+	}
+
+	tamperedSummary := filepath.Join(dir, "tampered-summary.json")
+	if err := os.WriteFile(tamperedSummary, []byte(`{"status":"pass","evidence_scope":"diagnostic"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write tampered summary: %v", err)
+	}
+	if err := runProvenanceVerify([]string{
+		"--provenance", provenanceJSON,
+		"--summary-json", tamperedSummary,
+		"--bundle-tar", bundleTar,
+		"--bundle-tar-sha256-file", sidecar,
+		"--trust-store", trustStore,
+	}); err == nil {
+		t.Fatal("expected provenance verify to reject tampered summary")
+	}
+
+	wrongTrustStore := filepath.Join(dir, "wrong-trust.json")
+	if err := runTrustAdd([]string{"--trust-store", wrongTrustStore, "--org-id", "other-org", "--org-name", "Other Org", "--public-key-file", publicKey}); err != nil {
+		t.Fatalf("wrong trust-add: %v", err)
+	}
+	if err := runProvenanceVerify([]string{
+		"--provenance", provenanceJSON,
+		"--summary-json", summaryJSON,
+		"--bundle-tar", bundleTar,
+		"--bundle-tar-sha256-file", sidecar,
+		"--trust-store", wrongTrustStore,
+	}); err == nil {
+		t.Fatal("expected provenance verify to reject wrong trust-store org pin")
+	}
+}
+
 func TestGPMRecoverDemoBundle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

@@ -38,6 +38,8 @@ const (
 	maxBridgeRegistryFileBytes   int64 = 512 * 1024
 	maxPublicationIndexBytes     int64 = 512 * 1024
 	maxPublicationFileBytes      int64 = 2 * 1024 * 1024
+	maxEvidenceBundleFileBytes   int64 = 64 * 1024 * 1024
+	maxEvidenceProvenanceBytes   int64 = 512 * 1024
 	minBridgeAccessCodeLength          = 24
 	defaultBridgeAccessCodeBytes       = 24
 )
@@ -221,6 +223,10 @@ func main() {
 		err = runCheck(os.Args[2:])
 	case "demo-bundle":
 		err = runDemoBundle(os.Args[2:])
+	case "provenance-sign":
+		err = runProvenanceSign(os.Args[2:])
+	case "provenance-verify":
+		err = runProvenanceVerify(os.Args[2:])
 	case "fetch-publication":
 		err = runFetchPublication(os.Args[2:])
 	case "-h", "--help", "help":
@@ -264,6 +270,8 @@ func usage() {
   go run ./cmd/gpmrecover verify --pack FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
   go run ./cmd/gpmrecover check --pack FILE (--trust-store FILE | --public-key-file FILE) [--timeout-sec 8]
   go run ./cmd/gpmrecover demo-bundle [--out-dir DIR] [--org-id ID] [--org-name NAME] [--base-url URL] [--helper-id ID] [--helper-name NAME]
+  go run ./cmd/gpmrecover provenance-sign --summary-json FILE --bundle-tar FILE --bundle-tar-sha256-file FILE --private-key-file FILE --org-id ID --org-name NAME --out FILE [--lifetime-hours 720] [--key-id ID]
+  go run ./cmd/gpmrecover provenance-verify --provenance FILE --summary-json FILE --bundle-tar FILE --bundle-tar-sha256-file FILE (--trust-store FILE | --public-key-file FILE)
   go run ./cmd/gpmrecover fetch-publication --index-url URL --out-dir DIR [--timeout-sec 10]
 
 This verifies signed access recovery artifacts. It does not tunnel traffic.`)
@@ -1816,6 +1824,180 @@ func runBridgeRegistrySetStatus(args []string) error {
 		return errors.New("bridge helper registry status update failed")
 	}
 	return nil
+}
+
+func runProvenanceSign(args []string) error {
+	fs := flag.NewFlagSet("provenance-sign", flag.ContinueOnError)
+	summaryFile := fs.String("summary-json", "", "path to access bridge pilot evidence bundle summary JSON")
+	bundleTarFile := fs.String("bundle-tar", "", "path to access bridge pilot evidence bundle tarball")
+	sidecarFile := fs.String("bundle-tar-sha256-file", "", "path to bundle tar sha256 sidecar")
+	privateFile := fs.String("private-key-file", "", "path to private key file")
+	orgID := fs.String("org-id", "", "signing organization id")
+	orgName := fs.String("org-name", "", "signing organization name")
+	orgHomeURL := fs.String("org-home-url", "", "optional organization home URL")
+	outFile := fs.String("out", "", "path to write provenance JSON")
+	keyID := fs.String("key-id", "", "optional key id; must match the private key")
+	lifetimeHours := fs.Int("lifetime-hours", 30*24, "provenance lifetime in hours")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*outFile) == "" {
+		return errors.New("provenance-sign requires --out")
+	}
+	if *lifetimeHours <= 0 {
+		return errors.New("provenance-sign requires --lifetime-hours greater than zero")
+	}
+	priv, err := readPrivateKeyFile(*privateFile)
+	if err != nil {
+		return err
+	}
+	derivedKeyID := adminauth.KeyIDFromPublicKey(priv.Public().(ed25519.PublicKey))
+	if strings.TrimSpace(*keyID) != "" && strings.TrimSpace(*keyID) != derivedKeyID {
+		return fmt.Errorf("provenance-sign --key-id mismatch: got %q, derived %q from private key", strings.TrimSpace(*keyID), derivedKeyID)
+	}
+	summaryBytes, err := readInputFileStrict(*summaryFile, "evidence bundle summary", maxEvidenceProvenanceBytes)
+	if err != nil {
+		return err
+	}
+	bundleTarBytes, err := readInputFileStrict(*bundleTarFile, "evidence bundle tar", maxEvidenceBundleFileBytes)
+	if err != nil {
+		return err
+	}
+	sidecarBytes, err := readInputFileStrict(*sidecarFile, "evidence bundle tar sha256 sidecar", maxKeyFileBytes)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	prov, err := accesspack.SignEvidenceBundleProvenance(accesspack.EvidenceBundleProvenanceInput{
+		Organization: accesspack.Organization{
+			OrgID:   strings.TrimSpace(*orgID),
+			Name:    strings.TrimSpace(*orgName),
+			HomeURL: strings.TrimSpace(*orgHomeURL),
+		},
+		IssuedAtUTC:    now.Format(time.RFC3339),
+		ExpiresAtUTC:   now.Add(time.Duration(*lifetimeHours) * time.Hour).Format(time.RFC3339),
+		EvidenceScope:  evidenceScopeFromSummary(summaryBytes),
+		BundleTarName:  filepath.Base(strings.TrimSpace(*bundleTarFile)),
+		SummaryBytes:   summaryBytes,
+		BundleTarBytes: bundleTarBytes,
+		SidecarBytes:   sidecarBytes,
+	}, priv)
+	if err != nil {
+		return err
+	}
+	out, err := json.MarshalIndent(prov, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal provenance: %w", err)
+	}
+	if err := writeFileWithMode(*outFile, append(out, '\n'), 0o644); err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{
+		"status":          "ok",
+		"out":             strings.TrimSpace(*outFile),
+		"organization_id": prov.Organization.OrgID,
+		"key_id":          prov.Signature.KeyID,
+		"evidence_scope":  prov.Subject.EvidenceScope,
+		"bundle_tar_name": prov.Subject.BundleTarName,
+		"expires_at":      prov.ExpiresAtUTC,
+	})
+}
+
+func runProvenanceVerify(args []string) error {
+	fs := flag.NewFlagSet("provenance-verify", flag.ContinueOnError)
+	provenanceFile := fs.String("provenance", "", "path to evidence bundle provenance JSON")
+	summaryFile := fs.String("summary-json", "", "path to access bridge pilot evidence bundle summary JSON")
+	bundleTarFile := fs.String("bundle-tar", "", "path to access bridge pilot evidence bundle tarball")
+	sidecarFile := fs.String("bundle-tar-sha256-file", "", "path to bundle tar sha256 sidecar")
+	publicFile := fs.String("public-key-file", "", "path to public key file for one-off diagnostic verification")
+	trustStoreFile := fs.String("trust-store", "", "path to access recovery trust store JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*publicFile) != "" && strings.TrimSpace(*trustStoreFile) != "" {
+		return errors.New("provenance-verify accepts only one of --trust-store or --public-key-file")
+	}
+	if strings.TrimSpace(*publicFile) == "" && strings.TrimSpace(*trustStoreFile) == "" {
+		return errors.New("provenance-verify requires --trust-store or --public-key-file")
+	}
+	body, err := readInputFileStrict(*provenanceFile, "evidence bundle provenance", maxEvidenceProvenanceBytes)
+	if err != nil {
+		return err
+	}
+	var prov accesspack.EvidenceBundleProvenance
+	if err := json.Unmarshal(body, &prov); err != nil {
+		return fmt.Errorf("invalid evidence bundle provenance json: %w", err)
+	}
+	summaryBytes, err := readInputFileStrict(*summaryFile, "evidence bundle summary", maxEvidenceProvenanceBytes)
+	if err != nil {
+		return err
+	}
+	bundleTarBytes, err := readInputFileStrict(*bundleTarFile, "evidence bundle tar", maxEvidenceBundleFileBytes)
+	if err != nil {
+		return err
+	}
+	sidecarBytes, err := readInputFileStrict(*sidecarFile, "evidence bundle tar sha256 sidecar", maxKeyFileBytes)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	var (
+		verified   accesspack.VerifiedEvidenceBundleProvenance
+		trustedKey *accesspack.TrustedKey
+		trusted    bool
+	)
+	if strings.TrimSpace(*trustStoreFile) != "" {
+		store, err := loadTrustStoreFile(*trustStoreFile)
+		if err != nil {
+			return err
+		}
+		var entry accesspack.TrustedKey
+		verified, entry, err = accesspack.VerifyEvidenceBundleProvenanceWithTrustStore(store, prov, summaryBytes, bundleTarBytes, sidecarBytes, now)
+		if err != nil {
+			return err
+		}
+		trustedKey = &entry
+		trusted = true
+	} else {
+		pub, err := readPublicKeyFile(*publicFile)
+		if err != nil {
+			return err
+		}
+		verified, err = accesspack.VerifyEvidenceBundleProvenance(prov, summaryBytes, bundleTarBytes, sidecarBytes, pub, now)
+		if err != nil {
+			return err
+		}
+	}
+	out := map[string]any{
+		"status":              "ok",
+		"trusted":             trusted,
+		"key_id":              verified.KeyID,
+		"organization_id":     verified.Provenance.Organization.OrgID,
+		"organization_name":   verified.Provenance.Organization.Name,
+		"evidence_scope":      verified.Provenance.Subject.EvidenceScope,
+		"bundle_tar_name":     verified.Provenance.Subject.BundleTarName,
+		"expires_at_utc":      verified.ExpiresAt.Format(time.RFC3339),
+		"canonical_body_size": verified.CanonicalBodySize,
+	}
+	if trustedKey != nil {
+		out["trusted_org_id"] = trustedKey.OrgID
+		out["trusted_org_name"] = trustedKey.OrgName
+	}
+	return json.NewEncoder(os.Stdout).Encode(out)
+}
+
+func evidenceScopeFromSummary(body []byte) string {
+	var summary struct {
+		EvidenceScope string `json:"evidence_scope"`
+	}
+	if err := json.Unmarshal(body, &summary); err != nil {
+		return "incomplete"
+	}
+	scope := strings.TrimSpace(summary.EvidenceScope)
+	if scope == "" {
+		return "incomplete"
+	}
+	return scope
 }
 
 func runCheck(args []string) error {

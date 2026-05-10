@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in awk bash cp find grep jq mktemp sed sha256sum tar; do
+for cmd in awk bash cat chmod cp find go grep jq mkdir mktemp sed sha256sum tar; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "access bridge pilot evidence bundle verifier integration failed: missing required command: $cmd"
     exit 2
@@ -30,7 +30,14 @@ BUNDLE_DIR="$TMP_DIR/access_bridge_pilot_evidence_bundle"
 SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_summary.json"
 BUNDLE_TAR="${BUNDLE_DIR}.tar.gz"
 BUNDLE_TAR_SHA256_FILE="${BUNDLE_TAR}.sha256"
+PROVENANCE_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle.provenance.json"
+BAD_PROVENANCE_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_bad.provenance.json"
+PRIVATE_KEY_FILE="$TMP_DIR/provenance-private.key"
+PUBLIC_KEY_FILE="$TMP_DIR/provenance-public.key"
+TRUST_STORE="$TMP_DIR/provenance-trust-store.json"
 mkdir -p "$BUNDLE_DIR/bridge-deploy-pack"
+go run ./cmd/gpmrecover gen --private-key-out "$PRIVATE_KEY_FILE" --public-key-out "$PUBLIC_KEY_FILE" >/dev/null
+go run ./cmd/gpmrecover trust-add --trust-store "$TRUST_STORE" --org-id pilot-org --org-name "Pilot Org" --public-key-file "$PUBLIC_KEY_FILE" >/dev/null
 printf '%s\n' '{"status":"pass"}' >"$BUNDLE_DIR/access_bridge_service_smoke_summary.json"
 printf '%s\n' 'smoke ok' >"$BUNDLE_DIR/access_bridge_service_smoke.log"
 printf '%s\n' '{"status":"pass"}' >"$BUNDLE_DIR/access_bridge_deployment_evidence_summary.json"
@@ -83,10 +90,40 @@ cp "$SUMMARY_JSON" "$BUNDLE_DIR/access_bridge_pilot_evidence_bundle_summary.json
 
 tar -czf "$BUNDLE_TAR" -C "$TMP_DIR" "$(basename "$BUNDLE_DIR")"
 printf '%s  %s\n' "$(sha256sum "$BUNDLE_TAR" | awk '{print $1}')" "$(basename "$BUNDLE_TAR")" >"$BUNDLE_TAR_SHA256_FILE"
+go run ./cmd/gpmrecover provenance-sign \
+  --summary-json "$SUMMARY_JSON" \
+  --bundle-tar "$BUNDLE_TAR" \
+  --bundle-tar-sha256-file "$BUNDLE_TAR_SHA256_FILE" \
+  --private-key-file "$PRIVATE_KEY_FILE" \
+  --org-id pilot-org \
+  --org-name "Pilot Org" \
+  --out "$PROVENANCE_JSON" >/dev/null
 
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --summary-json "$SUMMARY_JSON" >"$TMP_DIR/verify-summary.log"
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-dir "$BUNDLE_DIR" >"$TMP_DIR/verify-dir.log"
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-tar "$BUNDLE_TAR" >"$TMP_DIR/verify-tar.log"
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$SUMMARY_JSON" \
+  --provenance-json "$PROVENANCE_JSON" \
+  --public-key-file "$PUBLIC_KEY_FILE" >"$TMP_DIR/verify-provenance-public-key.log"
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$SUMMARY_JSON" \
+  --provenance-json "$PROVENANCE_JSON" \
+  --trust-store "$TRUST_STORE" >"$TMP_DIR/verify-provenance-trust-store.log"
+
+jq '.subject.summary_json_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"' "$PROVENANCE_JSON" >"$BAD_PROVENANCE_JSON"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$SUMMARY_JSON" \
+  --provenance-json "$BAD_PROVENANCE_JSON" \
+  --public-key-file "$PUBLIC_KEY_FILE" >"$TMP_DIR/bad-provenance.log" 2>&1
+bad_provenance_rc=$?
+set -e
+if [[ "$bad_provenance_rc" -eq 0 ]] || ! grep -Fq 'provenance verification failed' "$TMP_DIR/bad-provenance.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: bad provenance was not rejected"
+  cat "$TMP_DIR/bad-provenance.log"
+  exit 1
+fi
 
 MISMATCH_ROOT="$TMP_DIR/bundled-summary-mismatch-root"
 MISMATCH_DIR="$MISMATCH_ROOT/$(basename "$BUNDLE_DIR")"

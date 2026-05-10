@@ -148,6 +148,10 @@ func ResolveTrustedBridgeHelperRegistryPublicKey(store TrustStore, artifact Brid
 	return resolveTrustedPublicKeyFor(store, artifact.Organization.OrgID, artifact.Signature.KeyID, "bridge helper registry", now)
 }
 
+func ResolveTrustedPublicKeyForSignature(store TrustStore, orgID, keyID, label string, now time.Time) (ed25519.PublicKey, TrustedKey, error) {
+	return resolveTrustedPublicKeyFor(store, orgID, keyID, label, now)
+}
+
 func resolveTrustedPublicKeyFor(store TrustStore, orgID string, keyID string, label string, now time.Time) (ed25519.PublicKey, TrustedKey, error) {
 	if now.IsZero() {
 		now = time.Now().UTC()
