@@ -199,7 +199,8 @@ Local trust-store flow:
 - `bash ./scripts/access_bridge_host_install_check.sh --deploy-pack-dir .easy-node-logs/bridge-deploy --config-json .easy-node-logs/bridge-service-config.json --summary-json .easy-node-logs/bridge-host-install-check.json`
 - `./scripts/easy_node.sh access-recovery-local-evidence-refresh --write-canonical 1 --refresh-roadmap 1 --print-summary-json 1` (local loopback rehearsal; useful for roadmap/dev evidence but not a substitute for real helper HTTPS evidence)
 - `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --config-json .easy-node-logs/bridge-service-config.json --deploy-pack-dir .easy-node-logs/bridge-deploy --summary-json .easy-node-logs/access-bridge-pilot-evidence-summary.json`
-- `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify --summary-json .easy-node-logs/access-bridge-pilot-evidence-summary.json`
+- `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify --summary-json .easy-node-logs/access-bridge-pilot-evidence-summary.json` (local integrity-only verification; unsigned provenance is acceptable for dev evidence)
+- `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify --summary-json .easy-node-logs/access-bridge-pilot-evidence-summary.json --provenance-json PROVENANCE_JSON --trust-store TRUST_STORE --require-trusted-provenance 1` (pilot/operator handoff verification)
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --timeout-sec 8`
 - `go run ./cmd/gpmrecover trust-remove --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID`
 

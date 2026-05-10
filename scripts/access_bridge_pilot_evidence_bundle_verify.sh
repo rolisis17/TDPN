@@ -16,6 +16,7 @@ Usage:
     [--check-manifest [0|1]] \
     [--provenance-json PATH] \
     [--check-provenance [0|1]] \
+    [--require-trusted-provenance [0|1]] \
     [--trust-store PATH] \
     [--public-key-file PATH] \
     [--summary-contract-check [0|1]] \
@@ -33,6 +34,9 @@ Notes:
   - --summary-json can auto-fill bundle_dir, bundle_tar, and checksum sidecar paths.
   - Provenance verification is checked by default only when --provenance-json is supplied.
     Use exactly one of --trust-store or --public-key-file when provenance is checked.
+  - For pilot/operator handoff, use --require-trusted-provenance 1 with
+    --trust-store. This requires real_helper_https evidence scope and keeps
+    summary, manifest, tar checksum, and provenance checks enabled.
   - When --summary-json is supplied, the summary contract is checked by default;
     set --summary-contract-check 0 only for raw artifact integrity inspection.
 USAGE
@@ -239,6 +243,7 @@ bundle_tar_sha256_file=""
 check_tar_sha256="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_CHECK_TAR_SHA256:-1}"
 check_manifest="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_CHECK_MANIFEST:-1}"
 check_provenance="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_CHECK_PROVENANCE:-}"
+require_trusted_provenance="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_REQUIRE_TRUSTED_PROVENANCE:-0}"
 provenance_json=""
 trust_store=""
 public_key_file=""
@@ -298,6 +303,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --require-trusted-provenance)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_trusted_provenance="${2:-}"
+        shift 2
+      else
+        require_trusted_provenance="1"
+        shift
+      fi
+      ;;
     --trust-store)
       trust_store="${2:-}"
       shift 2
@@ -341,7 +355,7 @@ for cmd in bash basename cmp dirname find grep head jq mktemp sed sort tar tr; d
 done
 detect_sha256_tool
 if [[ -z "$check_provenance" ]]; then
-  if [[ -n "$provenance_json" ]]; then
+  if [[ "$require_trusted_provenance" == "1" || -n "$provenance_json" ]]; then
     check_provenance="1"
   else
     check_provenance="0"
@@ -350,8 +364,19 @@ fi
 bool_or_die "--check-tar-sha256" "$check_tar_sha256"
 bool_or_die "--check-manifest" "$check_manifest"
 bool_or_die "--check-provenance" "$check_provenance"
+bool_or_die "--require-trusted-provenance" "$require_trusted_provenance"
 bool_or_die "--summary-contract-check" "$summary_contract_check"
 bool_or_die "--show-details" "$show_details"
+if [[ "$require_trusted_provenance" == "1" ]]; then
+  if [[ "$check_provenance" != "1" ]]; then
+    echo "--require-trusted-provenance requires --check-provenance 1"
+    exit 2
+  fi
+  if [[ "$check_tar_sha256" != "1" || "$check_manifest" != "1" || "$summary_contract_check" != "1" ]]; then
+    echo "--require-trusted-provenance requires tar checksum, manifest, and summary contract checks to remain enabled"
+    exit 2
+  fi
+fi
 
 summary_json="$(abs_path "$summary_json")"
 bundle_dir="$(abs_path "$bundle_dir")"
@@ -405,9 +430,32 @@ cleanup() {
 trap cleanup EXIT
 
 issues=0
+summary_evidence_scope=""
 if [[ -n "$summary_json" && "$summary_contract_check" == "1" ]]; then
+  summary_evidence_scope="$(json_string "$summary_json" '.evidence_scope')"
   if ! validate_bundle_summary_contract "$summary_json" "external bundle summary"; then
     issues=$((issues + 1))
+  fi
+  if [[ "$require_trusted_provenance" == "1" && "$summary_evidence_scope" != "real_helper_https" ]]; then
+    echo "trusted pilot provenance requires external summary evidence_scope=real_helper_https: actual=${summary_evidence_scope:-<missing>}"
+    issues=$((issues + 1))
+  fi
+  if [[ "$require_trusted_provenance" == "1" ]]; then
+    summary_provenance_enabled="$(jq -r 'if (.provenance.enabled // false) == true then "true" else "false" end' "$summary_json" 2>/dev/null || printf '%s' "false")"
+    summary_provenance_sidecar="$(json_string "$summary_json" '.provenance.sidecar_json')"
+    summary_artifact_provenance="$(json_string "$summary_json" '.artifacts.provenance_json')"
+    if [[ "$summary_provenance_enabled" != "true" ]]; then
+      echo "trusted pilot provenance requires external summary provenance.enabled=true"
+      issues=$((issues + 1))
+    fi
+    if [[ -z "$summary_provenance_sidecar" ]]; then
+      echo "trusted pilot provenance requires external summary provenance.sidecar_json"
+      issues=$((issues + 1))
+    fi
+    if [[ -z "$summary_artifact_provenance" ]]; then
+      echo "trusted pilot provenance requires external summary artifacts.provenance_json"
+      issues=$((issues + 1))
+    fi
   fi
 fi
 bundle_tar_safe=0
@@ -601,18 +649,32 @@ if [[ "$check_provenance" == "1" ]]; then
     echo "provenance check requires --bundle-tar-sha256-file"
     issues=$((issues + 1))
   fi
-  if [[ -n "$trust_store" && -n "$public_key_file" ]]; then
-    echo "provenance check requires exactly one of --trust-store or --public-key-file, not both"
-    issues=$((issues + 1))
-  elif [[ -z "$trust_store" && -z "$public_key_file" ]]; then
-    echo "provenance check requires --trust-store or --public-key-file"
-    issues=$((issues + 1))
-  elif [[ -n "$trust_store" && ! -f "$trust_store" ]]; then
-    echo "trust store not found: $trust_store"
-    issues=$((issues + 1))
-  elif [[ -n "$public_key_file" && ! -f "$public_key_file" ]]; then
-    echo "public key file not found: $public_key_file"
-    issues=$((issues + 1))
+  if [[ "$require_trusted_provenance" == "1" ]]; then
+    if [[ -n "$public_key_file" ]]; then
+      echo "trusted pilot provenance requires --trust-store and does not accept --public-key-file"
+      issues=$((issues + 1))
+    fi
+    if [[ -z "$trust_store" ]]; then
+      echo "trusted pilot provenance requires --trust-store"
+      issues=$((issues + 1))
+    elif [[ ! -f "$trust_store" ]]; then
+      echo "trust store not found: $trust_store"
+      issues=$((issues + 1))
+    fi
+  else
+    if [[ -n "$trust_store" && -n "$public_key_file" ]]; then
+      echo "provenance check requires exactly one of --trust-store or --public-key-file, not both"
+      issues=$((issues + 1))
+    elif [[ -z "$trust_store" && -z "$public_key_file" ]]; then
+      echo "provenance check requires --trust-store or --public-key-file"
+      issues=$((issues + 1))
+    elif [[ -n "$trust_store" && ! -f "$trust_store" ]]; then
+      echo "trust store not found: $trust_store"
+      issues=$((issues + 1))
+    elif [[ -n "$public_key_file" && ! -f "$public_key_file" ]]; then
+      echo "public key file not found: $public_key_file"
+      issues=$((issues + 1))
+    fi
   fi
 
   if ((issues == 0)); then
@@ -637,8 +699,26 @@ if [[ "$check_provenance" == "1" ]]; then
       echo "provenance verification failed: $provenance_json"
       sed 's/^/  /' "$provenance_verify_log"
       issues=$((issues + 1))
-    elif [[ "$show_details" == "1" ]]; then
-      echo "provenance verification ok: $provenance_json"
+    else
+      provenance_trusted="$(jq -r 'if (.trusted // false) == true then "true" else "false" end' "$provenance_verify_log" 2>/dev/null || printf '%s' "false")"
+      provenance_evidence_scope="$(jq -r '.evidence_scope // ""' "$provenance_verify_log" 2>/dev/null || true)"
+      if [[ -n "$summary_evidence_scope" && -n "$provenance_evidence_scope" && "$summary_evidence_scope" != "$provenance_evidence_scope" ]]; then
+        echo "provenance evidence_scope does not match summary: summary=$summary_evidence_scope provenance=$provenance_evidence_scope"
+        issues=$((issues + 1))
+      fi
+      if [[ "$require_trusted_provenance" == "1" ]]; then
+        if [[ "$provenance_trusted" != "true" ]]; then
+          echo "trusted pilot provenance requires trust-store verified provenance"
+          issues=$((issues + 1))
+        fi
+        if [[ "$provenance_evidence_scope" != "real_helper_https" ]]; then
+          echo "trusted pilot provenance requires provenance evidence_scope=real_helper_https: actual=${provenance_evidence_scope:-<missing>}"
+          issues=$((issues + 1))
+        fi
+      fi
+      if [[ "$show_details" == "1" ]]; then
+        echo "provenance verification ok: $provenance_json"
+      fi
     fi
     rm -f "$provenance_verify_log"
   fi

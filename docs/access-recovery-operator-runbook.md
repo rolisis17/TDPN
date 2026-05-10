@@ -141,10 +141,13 @@ bash ./scripts/access_bridge_host_install_check.sh \
   --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json
 
 ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify \
-  --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json
+  --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json \
+  --provenance-json PROVENANCE_JSON \
+  --trust-store TRUST_STORE \
+  --require-trusted-provenance 1
 ```
 
-Keep the smoke JSON, deployment-evidence JSON, host-install-check JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, `manifest.sha256`, `<bundle>.tar.gz`, `<bundle>.tar.gz.sha256`, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair; the bundle skips access-code/private-key-looking deploy-pack files and the verifier rejects manifest tamper, tar checksum mismatch, unsafe tar paths, and tar links.
+Keep the smoke JSON, deployment-evidence JSON, host-install-check JSON, trusted provenance JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, `manifest.sha256`, `<bundle>.tar.gz`, `<bundle>.tar.gz.sha256`, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair; the bundle skips access-code/private-key-looking deploy-pack files. Local integrity checks may be unsigned, but pilot/operator handoff verification must require trusted provenance and reject manifest tamper, tar checksum mismatch, unsafe tar paths, tar links, and untrusted provenance.
 
 7. Fail closed on rotation or quarantine:
 
