@@ -161,10 +161,10 @@ Demo bundle flow:
   - `recovery-trust.json`
   - `bridge-helper-registry.json`
   - `bridge-helper-registry.signed.json`
-  - `GPMREC1` text handoffs for the pack, bridge invite, trust store, helper registry, and signed helper registry
-  - QR PNGs for the pack, bridge invite, helper registry, and signed helper registry
+  - `GPMREC1` text handoffs for the pack, bridge invite, trust store, trusted key, helper registry, and signed helper registry
+  - QR PNGs for the pack, bridge invite, trusted key, helper registry, and signed helper registry
   - `demo-manifest.json` listing every generated file
-- Open `apps/web/recovery.html`, import `recovery-trust.json`, then import either `access-pack.signed.json` or `bridge-invite.signed.json`.
+- Open `apps/web/recovery.html`, import `recovery-trusted-key.txt`/QR or `recovery-trust.json`, then import either `access-pack.signed.json` or `bridge-invite.signed.json`.
 - For bridge invites, import `bridge-helper-registry.signed.json`, paste `bridge-helper-registry.signed.txt`, or scan `bridge-helper-registry.signed.qr.png` into the Helper Registry panel, then click `Verify Signed` to verify/extract the raw helper registry before checking the invite.
 - Alternatively, paste or scan the generated `GPMREC1` text/QR handoffs into the Text Handoff panel.
 

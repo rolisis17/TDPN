@@ -1229,7 +1229,7 @@ func runDemoBundle(args []string) error {
 	if err != nil {
 		return fmt.Errorf("sign demo bridge invite: %w", err)
 	}
-	store, _, err := accesspack.AddTrustedKey(accesspack.EmptyTrustStore(), accesspack.TrustedKey{
+	store, trustedEntry, err := accesspack.AddTrustedKey(accesspack.EmptyTrustStore(), accesspack.TrustedKey{
 		OrgID:     strings.TrimSpace(*orgID),
 		OrgName:   strings.TrimSpace(*orgName),
 		PublicKey: pubText,
@@ -1307,6 +1307,9 @@ func runDemoBundle(args []string) error {
 	if err := writeTrustStoreFile(addFile("trust_store", "recovery-trust.json"), store); err != nil {
 		return err
 	}
+	if err := writeJSONFile(addFile("trusted_key", "recovery-trusted-key.json"), trustedEntry); err != nil {
+		return err
+	}
 	if err := writeBridgeHelperRegistryFile(addFile("bridge_helper_registry", "bridge-helper-registry.json"), bridgeHelperRegistry); err != nil {
 		return err
 	}
@@ -1324,6 +1327,9 @@ func runDemoBundle(args []string) error {
 		return err
 	}
 	if err := writeTextAndQR(addFile("bridge_helper_registry_signed_text", "bridge-helper-registry.signed.txt"), addFile("bridge_helper_registry_signed_qr", "bridge-helper-registry.signed.qr.png"), accesspack.EnvelopeKindBridgeHelperRegistrySigned, bridgeHelperRegistryArtifact, *qrSize); err != nil {
+		return err
+	}
+	if err := writeTextAndQR(addFile("trusted_key_text", "recovery-trusted-key.txt"), addFile("trusted_key_qr", "recovery-trusted-key.qr.png"), accesspack.EnvelopeKindKey, trustedEntry, *qrSize); err != nil {
 		return err
 	}
 	storeBody, err := accesspack.MarshalTrustStore(store)
@@ -1352,7 +1358,7 @@ func runDemoBundle(args []string) error {
 		BridgePolicy:   bridgePolicy,
 		NextSteps: []string{
 			"Open apps/web/recovery.html in the local preview.",
-			"Import recovery-trust.json as the trust store.",
+			"Import recovery-trusted-key.json/text/QR as the first-time trusted organization key, or import recovery-trust.json as the full trust store.",
 			"Import access-pack.signed.json or bridge-invite.signed.json as the signed artifact.",
 			"Import bridge-helper-registry.signed.json, or paste/scan bridge-helper-registry.signed.txt/QR, then click Verify Signed before checking bridge invites.",
 			"Or paste/scan the generated GPMREC1 text/QR handoffs.",

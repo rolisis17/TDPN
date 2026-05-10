@@ -30,6 +30,7 @@ go run ./cmd/gpmrecover demo-bundle \
 
 - `recovery.pub`
 - `recovery-trust.json`
+- `recovery-trusted-key.json`, `recovery-trusted-key.txt`, or `recovery-trusted-key.qr.png` for first-time trust handoff
 - signed packs and bridge invites
 - signed helper registries
 - `GPMREC1` text/QR handoffs derived from those signed artifacts
@@ -79,7 +80,7 @@ go run ./cmd/gpmrecover bridge-registry-sign \
 
 Send users only the minimum needed for the situation:
 
-- first-time trust: `recovery-trust.json` or a `trusted-key` text/QR handoff from a known-safe channel
+- first-time trust: `recovery-trusted-key.json`, `recovery-trusted-key.txt`, `recovery-trusted-key.qr.png`, or a full `recovery-trust.json` from a known-safe channel
 - normal recovery: signed access pack plus trust store
 - blocked/bridged recovery: signed bridge invite, signed helper registry, and trust store
 
