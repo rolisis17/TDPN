@@ -207,7 +207,7 @@ func usage() {
   go run ./cmd/gpmrecover qr-png --text TEXT --out FILE [--size 768]
   go run ./cmd/gpmrecover verify --pack FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
   go run ./cmd/gpmrecover check --pack FILE (--trust-store FILE | --public-key-file FILE) [--timeout-sec 8]
-  go run ./cmd/gpmrecover demo-bundle [--out-dir DIR] [--org-id ID] [--org-name NAME] [--base-url URL]
+  go run ./cmd/gpmrecover demo-bundle [--out-dir DIR] [--org-id ID] [--org-name NAME] [--base-url URL] [--helper-id ID] [--helper-name NAME]
 
 This verifies signed access recovery artifacts. It does not tunnel traffic.`)
 }
@@ -1104,6 +1104,10 @@ func runDemoBundle(args []string) error {
 	baseURL := fs.String("base-url", "https://freenews.example", "primary demo access URL")
 	helperURL := fs.String("helper-url", "https://helper.example/freenews/bootstrap", "demo bridge helper URL")
 	helperContact := fs.String("helper-contact", "mailto:bridge-helper@example.com", "demo helper contact URL")
+	helperID := fs.String("helper-id", "helper-demo", "demo bridge helper id")
+	helperName := fs.String("helper-name", "Demo bridge helper", "demo bridge helper display name")
+	packAudience := fs.String("pack-audience", "Demo users validating the GPM access recovery flow", "signed access-pack intended audience")
+	inviteAudience := fs.String("invite-audience", "Demo users validating a signed helper bootstrap route", "signed bridge-invite intended audience")
 	qrSize := fs.Int("qr-size", 768, "QR image size in pixels")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1124,12 +1128,22 @@ func runDemoBundle(args []string) error {
 	privText := base64.RawURLEncoding.EncodeToString(priv)
 	keyID := adminauth.KeyIDFromPublicKey(pub)
 
-	pack := demoAccessPack(strings.TrimSpace(*orgID), strings.TrimSpace(*orgName), strings.TrimSpace(*baseURL), now)
+	pack := demoAccessPack(strings.TrimSpace(*orgID), strings.TrimSpace(*orgName), strings.TrimSpace(*baseURL), strings.TrimSpace(*packAudience), now)
 	signedPack, err := accesspack.Sign(pack, priv, "")
 	if err != nil {
 		return fmt.Errorf("sign demo access pack: %w", err)
 	}
-	invite := demoBridgeInvite(strings.TrimSpace(*orgID), strings.TrimSpace(*orgName), strings.TrimSpace(*baseURL), strings.TrimSpace(*helperURL), strings.TrimSpace(*helperContact), now)
+	invite := demoBridgeInvite(
+		strings.TrimSpace(*orgID),
+		strings.TrimSpace(*orgName),
+		strings.TrimSpace(*baseURL),
+		strings.TrimSpace(*helperID),
+		strings.TrimSpace(*helperName),
+		strings.TrimSpace(*helperURL),
+		strings.TrimSpace(*helperContact),
+		strings.TrimSpace(*inviteAudience),
+		now,
+	)
 	signedInvite, err := accesspack.SignBridgeInvite(invite, priv, "")
 	if err != nil {
 		return fmt.Errorf("sign demo bridge invite: %w", err)
@@ -1156,7 +1170,7 @@ func runDemoBundle(args []string) error {
 	if _, err := accesspack.VerifyBridgeInvite(signedInvite, pub, now); err != nil {
 		return fmt.Errorf("verify signed demo bridge invite: %w", err)
 	}
-	bridgeHelperRegistry := demoBridgeHelperRegistry(strings.TrimSpace(*orgID), strings.TrimSpace(*helperContact), now)
+	bridgeHelperRegistry := demoBridgeHelperRegistry(strings.TrimSpace(*orgID), strings.TrimSpace(*helperID), strings.TrimSpace(*helperName), strings.TrimSpace(*helperContact), now)
 	bridgeHelperRegistryArtifact, err := accesspack.SignBridgeHelperRegistryArtifact(accesspack.BridgeHelperRegistryArtifact{
 		SchemaVersion: accesspack.BridgeHelperRegistryArtifactSchemaVersion,
 		RegistryID:    "reg-demo-" + now.Format("20060102-150405"),
@@ -1297,7 +1311,7 @@ func ensureDemoOutputDir(dir string) error {
 	return os.MkdirAll(dir, 0o755)
 }
 
-func demoAccessPack(orgID string, orgName string, baseURL string, now time.Time) accesspack.Pack {
+func demoAccessPack(orgID string, orgName string, baseURL string, audience string, now time.Time) accesspack.Pack {
 	return accesspack.Pack{
 		SchemaVersion: accesspack.SchemaVersion,
 		PackID:        "arp-demo-" + now.Format("20060102-150405"),
@@ -1308,7 +1322,7 @@ func demoAccessPack(orgID string, orgName string, baseURL string, now time.Time)
 		},
 		IssuedAtUTC:      now.Format(time.RFC3339),
 		ExpiresAtUTC:     now.Add(30 * 24 * time.Hour).Format(time.RFC3339),
-		IntendedAudience: "Demo users validating the GPM access recovery flow",
+		IntendedAudience: audience,
 		Sources: []accesspack.Source{
 			{SourceID: "official", Kind: "official", URL: baseURL + "/.well-known/gpm/access-pack.json", Priority: 10, Description: "Official signed recovery pack"},
 			{SourceID: "mirror", Kind: "mirror", URL: baseURL + "/mirror/access-pack.json", Priority: 20, Description: "Demo mirror source"},
@@ -1321,7 +1335,7 @@ func demoAccessPack(orgID string, orgName string, baseURL string, now time.Time)
 	}
 }
 
-func demoBridgeInvite(orgID string, orgName string, baseURL string, helperURL string, helperContact string, now time.Time) accesspack.BridgeInvite {
+func demoBridgeInvite(orgID string, orgName string, baseURL string, helperID string, helperName string, helperURL string, helperContact string, audience string, now time.Time) accesspack.BridgeInvite {
 	return accesspack.BridgeInvite{
 		SchemaVersion: accesspack.SchemaVersion,
 		InviteID:      "bri-demo-" + now.Format("20060102-150405"),
@@ -1332,10 +1346,10 @@ func demoBridgeInvite(orgID string, orgName string, baseURL string, helperURL st
 		},
 		IssuedAtUTC:      now.Format(time.RFC3339),
 		ExpiresAtUTC:     now.Add(7 * 24 * time.Hour).Format(time.RFC3339),
-		IntendedAudience: "Demo users validating a signed helper bootstrap route",
+		IntendedAudience: audience,
 		Helper: accesspack.BridgeHelper{
-			HelperID:    "helper-demo",
-			DisplayName: "Demo bridge helper",
+			HelperID:    helperID,
+			DisplayName: helperName,
 			ContactURL:  helperContact,
 			Description: "Temporary helper route for access recovery testing",
 		},
@@ -1350,13 +1364,13 @@ func demoBridgeInvite(orgID string, orgName string, baseURL string, helperURL st
 	}
 }
 
-func demoBridgeHelperRegistry(orgID string, helperContact string, now time.Time) accesspack.BridgeHelperRegistry {
+func demoBridgeHelperRegistry(orgID string, helperID string, helperName string, helperContact string, now time.Time) accesspack.BridgeHelperRegistry {
 	return accesspack.BridgeHelperRegistry{
 		Version: accesspack.BridgeHelperRegistryVersion,
 		Helpers: []accesspack.BridgeHelperRegistration{
 			{
-				HelperID:       "helper-demo",
-				DisplayName:    "Demo bridge helper",
+				HelperID:       helperID,
+				DisplayName:    helperName,
 				Status:         accesspack.BridgeHelperStatusActive,
 				OrgIDs:         []string{orgID},
 				ContactURL:     helperContact,

@@ -15,7 +15,15 @@ The MVP does not require a VPN tunnel, blockchain, credits, staking, public exit
 1. Generate a local demo or pilot bundle:
 
 ```sh
-go run ./cmd/gpmrecover demo-bundle --out-dir .easy-node-logs/access-recovery-demo
+go run ./cmd/gpmrecover demo-bundle \
+  --out-dir .easy-node-logs/access-recovery-demo \
+  --org-id freenews-demo \
+  --org-name "FreeNews Demo" \
+  --base-url https://freenews.example \
+  --helper-id helper-1 \
+  --helper-name "Helper 1" \
+  --helper-url https://helper.example/freenews/bootstrap \
+  --helper-contact mailto:bridge-helper@example.com
 ```
 
 2. Keep `recovery.key` offline or in a controlled operator machine. Share only:

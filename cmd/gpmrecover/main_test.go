@@ -319,7 +319,15 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	dir := filepath.Join(t.TempDir(), "demo")
-	if err := runDemoBundle([]string{"--out-dir", dir, "--base-url", server.URL, "--helper-url", server.URL + "/bridge"}); err != nil {
+	if err := runDemoBundle([]string{
+		"--out-dir", dir,
+		"--base-url", server.URL,
+		"--helper-url", server.URL + "/bridge",
+		"--helper-id", "helper-pilot",
+		"--helper-name", "Pilot Helper",
+		"--pack-audience", "Pilot pack users",
+		"--invite-audience", "Pilot invite users",
+	}); err != nil {
 		t.Fatalf("demo-bundle: %v", err)
 	}
 	manifestPath := filepath.Join(dir, "demo-manifest.json")
@@ -379,7 +387,7 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 	if err := runBridgePolicy([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"], "--signed-helper-registry", manifest.Files["bridge_helper_registry_signed"]}); err != nil {
 		t.Fatalf("policy generated bridge invite with signed registry: %v", err)
 	}
-	if err := runBridgeRegistryCheck([]string{"--helper-registry", manifest.Files["bridge_helper_registry"], "--helper-id", "helper-demo", "--org-id", manifest.OrgID, "--require-active"}); err != nil {
+	if err := runBridgeRegistryCheck([]string{"--helper-registry", manifest.Files["bridge_helper_registry"], "--helper-id", "helper-pilot", "--org-id", manifest.OrgID, "--require-active"}); err != nil {
 		t.Fatalf("check generated helper registry: %v", err)
 	}
 	for _, key := range []string{"access_pack_qr", "bridge_invite_qr", "bridge_helper_registry_qr", "bridge_helper_registry_signed_qr"} {
