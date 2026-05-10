@@ -131,11 +131,13 @@ Draft schema:
 - `docs/schemas/access-recovery-trust-store-v1.schema.json`
 - `docs/schemas/access-recovery-bridge-helper-registry-v1.schema.json`
 - `docs/schemas/access-recovery-bridge-helper-registry-artifact-v1.schema.json`
+- `docs/schemas/access-recovery-trusted-key-v1.schema.json`
 
 Example:
 - `docs/examples/access-recovery-pack.example.json`
 - `docs/examples/access-recovery-bridge-invite.example.json`
 - `docs/examples/access-recovery-bridge-helper-registry.example.json`
+- `docs/examples/access-recovery-trusted-key.example.json`
 
 First CLI:
 - `go run ./cmd/gpmrecover demo-bundle --out-dir .easy-node-logs/access-recovery-demo --org-id freenews-demo --org-name "FreeNews Demo" --helper-id helper-demo --helper-name "Demo bridge helper"`

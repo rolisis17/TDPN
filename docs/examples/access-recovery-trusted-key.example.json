@@ -1,0 +1,11 @@
+{
+  "org_id": "freenews-demo",
+  "org_name": "FreeNews Demo",
+  "key_id": "c0ffee1234abcd00",
+  "public_key": "7dQ5QFUP8zC8a8y9V3l6M2Oq7nJpT0rS1uVwXyZaBcD",
+  "added_at_utc": "2026-05-10T00:00:00Z",
+  "source": "known-safe demo handoff",
+  "notes": [
+    "Example trusted-key handoff shape only; use demo-bundle or trust-export-key for real key material."
+  ]
+}
