@@ -196,6 +196,7 @@ Bridge-invite rules:
 - `bridge-policy --require-helper-registry` fails if the helper registry was accidentally omitted from a production policy run
 - `bridge-registry-check` summarizes active/quarantined/disabled helper counts and can fail closed for a specific active helper/org before publishing or using an invite
 - `bridge-registry-set-status` changes helper status with validation and a required reason when quarantining or disabling a helper
+- helper registry validation rejects active helpers with stale quarantine reasons and rejects quarantined/disabled helpers without a reason
 - the helper contact and helper paths are shown only after signature, expiry, org id, and trusted-key checks pass
 - the browser gives copy/open actions for the invite id, helper id, helper contact, and verified helper paths
 - the helper registry is the first service-level rotation/quarantine control; a public bridge service still needs online rate limits and abuse reporting before launch

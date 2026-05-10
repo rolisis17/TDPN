@@ -168,6 +168,12 @@ func validateBridgeHelperRegistration(prefix string, helper BridgeHelperRegistra
 	if err := validateText(prefix+".quarantine_reason", helper.QuarantineReason, 180, false); err != nil {
 		return err
 	}
+	if helper.Status == BridgeHelperStatusActive && helper.QuarantineReason != "" {
+		return fmt.Errorf("%s.quarantine_reason must be empty when status is active", prefix)
+	}
+	if helper.Status != BridgeHelperStatusActive && helper.QuarantineReason == "" {
+		return fmt.Errorf("%s.quarantine_reason is required when status is quarantined or disabled", prefix)
+	}
 	if _, err := parseOptionalBridgeRegistryTime(prefix+".updated_at_utc", helper.UpdatedAtUTC); err != nil {
 		return err
 	}

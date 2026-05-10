@@ -16,6 +16,32 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["helper_id", "status", "org_ids"],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": { "const": "active" }
+              },
+              "required": ["status"]
+            },
+            "then": {
+              "not": {
+                "required": ["quarantine_reason"]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": { "enum": ["quarantined", "disabled"] }
+              },
+              "required": ["status"]
+            },
+            "then": {
+              "required": ["quarantine_reason"]
+            }
+          }
+        ],
         "properties": {
           "helper_id": {
             "type": "string",

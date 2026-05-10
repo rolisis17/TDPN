@@ -373,6 +373,12 @@
       }
     }
     const quarantineReason = trimString(helper.quarantine_reason);
+    if (status !== "active" && !quarantineReason) {
+      throw new Error("Helper registry quarantine_reason is required unless status is active");
+    }
+    if (status === "active" && quarantineReason) {
+      throw new Error("Helper registry quarantine_reason must be empty when status is active");
+    }
     if (quarantineReason) {
       normalized.quarantine_reason = quarantineReason;
     }

@@ -206,6 +206,7 @@ func TestBridgeHelperRegistryCheckRejectsInactiveRequiredHelper(t *testing.T) {
 	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
 	registry := testBridgeHelperRegistry()
 	registry.Helpers[0].Status = BridgeHelperStatusDisabled
+	registry.Helpers[0].QuarantineReason = "operator disabled during review"
 	report := CheckBridgeHelperRegistry(registry, BridgeHelperRegistryCheckOptions{
 		HelperID:      "helper-1",
 		RequireActive: true,
@@ -215,6 +216,20 @@ func TestBridgeHelperRegistryCheckRejectsInactiveRequiredHelper(t *testing.T) {
 	}
 	if !sawBridgeRegistryFinding(report, "bridge_helper_not_active") {
 		t.Fatalf("expected inactive helper finding, got %+v", report.Findings)
+	}
+}
+
+func TestBridgeHelperRegistryValidationRequiresInactiveReason(t *testing.T) {
+	registry := testBridgeHelperRegistry()
+	registry.Helpers[0].Status = BridgeHelperStatusQuarantined
+	registry.Helpers[0].QuarantineReason = ""
+	if err := ValidateBridgeHelperRegistry(registry, time.Time{}); err == nil {
+		t.Fatal("expected missing quarantine reason to fail validation")
+	}
+	registry = testBridgeHelperRegistry()
+	registry.Helpers[0].QuarantineReason = "old incident"
+	if err := ValidateBridgeHelperRegistry(registry, time.Time{}); err == nil {
+		t.Fatal("expected active helper quarantine reason to fail validation")
 	}
 }
 
