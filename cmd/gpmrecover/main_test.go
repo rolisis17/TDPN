@@ -254,10 +254,12 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 		"access_pack_text",
 		"bridge_invite_text",
 		"bridge_helper_registry_text",
+		"bridge_helper_registry_signed_text",
 		"trust_store_text",
 		"access_pack_qr",
 		"bridge_invite_qr",
 		"bridge_helper_registry_qr",
+		"bridge_helper_registry_signed_qr",
 	} {
 		if manifest.Files[key] == "" {
 			t.Fatalf("manifest missing %s", key)
@@ -273,6 +275,13 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 	if err := runBridgeRegistryVerify([]string{"--signed-registry", manifest.Files["bridge_helper_registry_signed"], "--trust-store", manifest.Files["trust_store"], "--out-registry", filepath.Join(dir, "bridge-helper-registry.verified.json")}); err != nil {
 		t.Fatalf("verify generated bridge helper registry: %v", err)
 	}
+	importedSignedRegistry := filepath.Join(dir, "bridge-helper-registry.signed.imported.json")
+	if err := runTextImport([]string{"--text-file", manifest.Files["bridge_helper_registry_signed_text"], "--expect-kind", accesspack.EnvelopeKindBridgeHelperRegistrySigned, "--out", importedSignedRegistry}); err != nil {
+		t.Fatalf("import generated signed bridge helper registry text: %v", err)
+	}
+	if err := runBridgeRegistryVerify([]string{"--signed-registry", importedSignedRegistry, "--trust-store", manifest.Files["trust_store"], "--out-registry", filepath.Join(dir, "bridge-helper-registry.imported.verified.json")}); err != nil {
+		t.Fatalf("verify imported bridge helper registry: %v", err)
+	}
 	if err := runBridgePolicy([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"], "--helper-registry", manifest.Files["bridge_helper_registry"]}); err != nil {
 		t.Fatalf("policy generated bridge invite: %v", err)
 	}
@@ -282,7 +291,7 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 	if err := runBridgeRegistryCheck([]string{"--helper-registry", manifest.Files["bridge_helper_registry"], "--helper-id", "helper-demo", "--org-id", manifest.OrgID, "--require-active"}); err != nil {
 		t.Fatalf("check generated helper registry: %v", err)
 	}
-	for _, key := range []string{"access_pack_qr", "bridge_invite_qr", "bridge_helper_registry_qr"} {
+	for _, key := range []string{"access_pack_qr", "bridge_invite_qr", "bridge_helper_registry_qr", "bridge_helper_registry_signed_qr"} {
 		qrBody, err := os.ReadFile(manifest.Files[key])
 		if err != nil {
 			t.Fatalf("read %s: %v", key, err)
