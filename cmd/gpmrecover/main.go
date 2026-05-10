@@ -160,6 +160,8 @@ func main() {
 		err = runTrustAdd(os.Args[2:])
 	case "trust-list":
 		err = runTrustList(os.Args[2:])
+	case "trust-export-key":
+		err = runTrustExportKey(os.Args[2:])
 	case "trust-remove":
 		err = runTrustRemove(os.Args[2:])
 	case "text-export":
@@ -201,6 +203,7 @@ func usage() {
   go run ./cmd/gpmrecover bridge-registry-set-status --helper-registry FILE --helper-id ID --status active|quarantined|disabled [--reason TEXT] [--out FILE]
   go run ./cmd/gpmrecover trust-add --trust-store FILE --org-id ID --org-name NAME --public-key-file FILE
   go run ./cmd/gpmrecover trust-list --trust-store FILE
+  go run ./cmd/gpmrecover trust-export-key --trust-store FILE --org-id ID --key-id ID [--out FILE] [--text-out FILE]
   go run ./cmd/gpmrecover trust-remove --trust-store FILE --org-id ID --key-id ID
   go run ./cmd/gpmrecover text-export --kind access-pack|bridge-invite|trust-store|trusted-key|bridge-helper-registry|bridge-helper-registry-signed --in FILE [--out FILE]
   go run ./cmd/gpmrecover text-import (--text TEXT | --text-file FILE) --out FILE [--expect-kind KIND]
@@ -406,6 +409,83 @@ func runTrustList(args []string) error {
 		return err
 	}
 	return json.NewEncoder(os.Stdout).Encode(store)
+}
+
+func runTrustExportKey(args []string) error {
+	fs := flag.NewFlagSet("trust-export-key", flag.ContinueOnError)
+	trustStoreFile := fs.String("trust-store", "", "path to access recovery trust store JSON")
+	orgID := fs.String("org-id", "", "trusted organization id")
+	keyID := fs.String("key-id", "", "trusted key id")
+	outFile := fs.String("out", "", "optional path to write trusted-key JSON")
+	textOutFile := fs.String("text-out", "", "optional path to write trusted-key GPMREC1 text")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	orgIDValue := strings.TrimSpace(*orgID)
+	keyIDValue := strings.TrimSpace(*keyID)
+	if orgIDValue == "" {
+		return errors.New("--org-id is required")
+	}
+	if keyIDValue == "" {
+		return errors.New("--key-id is required")
+	}
+	store, err := loadTrustStoreFile(*trustStoreFile)
+	if err != nil {
+		return err
+	}
+	store = accesspack.NormalizeTrustStore(store)
+	var found accesspack.TrustedKey
+	var matched bool
+	for _, entry := range store.TrustedKeys {
+		if strings.TrimSpace(entry.OrgID) == orgIDValue && strings.TrimSpace(entry.KeyID) == keyIDValue {
+			found = entry
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return fmt.Errorf("trusted key not found for org_id=%q key_id=%q", orgIDValue, keyIDValue)
+	}
+	if found.Disabled {
+		return errors.New("trusted key is disabled")
+	}
+	_, exported, err := accesspack.AddTrustedKey(accesspack.EmptyTrustStore(), found, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	body, err := json.MarshalIndent(exported, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal trusted key: %w", err)
+	}
+	body = append(body, '\n')
+	outPath := strings.TrimSpace(*outFile)
+	if outPath != "" {
+		if err := writeFileWithMode(outPath, body, 0o644); err != nil {
+			return err
+		}
+	}
+	textOutPath := strings.TrimSpace(*textOutFile)
+	if textOutPath != "" {
+		if err := validateTextEnvelopePayload(accesspack.EnvelopeKindKey, body); err != nil {
+			return err
+		}
+		text, err := accesspack.EncodeTextEnvelope(accesspack.EnvelopeKindKey, body)
+		if err != nil {
+			return err
+		}
+		if err := writeFileWithMode(textOutPath, []byte(text+"\n"), 0o644); err != nil {
+			return err
+		}
+	}
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{
+		"status":      "ok",
+		"trust_store": strings.TrimSpace(*trustStoreFile),
+		"org_id":      exported.OrgID,
+		"org_name":    exported.OrgName,
+		"key_id":      exported.KeyID,
+		"out":         outPath,
+		"text_out":    textOutPath,
+	})
 }
 
 func runTrustRemove(args []string) error {

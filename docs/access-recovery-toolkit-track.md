@@ -170,6 +170,7 @@ Demo bundle flow:
 Local trust-store flow:
 - `go run ./cmd/gpmrecover trust-add --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --org-name "FreeNews Demo" --public-key-file .easy-node-logs/recovery.pub --source "demo handoff"`
 - `go run ./cmd/gpmrecover trust-list --trust-store .easy-node-logs/recovery-trust.json`
+- `go run ./cmd/gpmrecover trust-export-key --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID --out .easy-node-logs/recovery-trusted-key.json --text-out .easy-node-logs/recovery-trusted-key.txt`
 - `go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --show-paths`
 - `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --show-paths`
 - `go run ./cmd/gpmrecover bridge-registry-verify --signed-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --trust-store .easy-node-logs/recovery-trust.json --out-registry .easy-node-logs/bridge-helper-registry.verified.json`

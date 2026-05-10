@@ -188,6 +188,20 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if len(parsedTrustStore.TrustedKeys) != 1 {
 		t.Fatalf("expected one trusted key, got %d", len(parsedTrustStore.TrustedKeys))
 	}
+	exportedKeyFile := filepath.Join(dir, "trusted-key.exported.json")
+	exportedKeyText := filepath.Join(dir, "trusted-key.exported.txt")
+	if err := runTrustExportKey([]string{
+		"--trust-store", trustStore,
+		"--org-id", "cli-org",
+		"--key-id", parsedTrustStore.TrustedKeys[0].KeyID,
+		"--out", exportedKeyFile,
+		"--text-out", exportedKeyText,
+	}); err != nil {
+		t.Fatalf("trust-export-key: %v", err)
+	}
+	if err := runTextImport([]string{"--text-file", exportedKeyText, "--expect-kind", accesspack.EnvelopeKindKey, "--out", filepath.Join(dir, "trusted-key.exported.imported.json")}); err != nil {
+		t.Fatalf("text-import exported trusted key: %v", err)
+	}
 	trustedKeyFile := filepath.Join(dir, "trusted-key.json")
 	trustedKeyBody, err := json.MarshalIndent(parsedTrustStore.TrustedKeys[0], "", "  ")
 	if err != nil {

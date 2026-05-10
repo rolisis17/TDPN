@@ -83,6 +83,17 @@ Send users only the minimum needed for the situation:
 - normal recovery: signed access pack plus trust store
 - blocked/bridged recovery: signed bridge invite, signed helper registry, and trust store
 
+Export a single trusted-key handoff from a trust store:
+
+```sh
+go run ./cmd/gpmrecover trust-export-key \
+  --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json \
+  --org-id freenews-demo \
+  --key-id KEY_ID \
+  --out .easy-node-logs/access-recovery-demo/recovery-trusted-key.json \
+  --text-out .easy-node-logs/access-recovery-demo/recovery-trusted-key.txt
+```
+
 User flow:
 
 1. Open `apps/web/recovery.html`.
