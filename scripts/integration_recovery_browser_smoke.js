@@ -166,6 +166,29 @@ async function main() {
   const trustStoreText = fs.readFileSync(path.join(outDir, "recovery-trust.txt"), "utf8").trim();
   const bridgeInviteText = fs.readFileSync(path.join(outDir, "bridge-invite.txt"), "utf8").trim();
   const signedRegistryText = fs.readFileSync(path.join(outDir, "bridge-helper-registry.signed.txt"), "utf8").trim();
+  const trustedKey = JSON.parse(trustStore).trusted_keys[0];
+  if (!trustedKey || !trustedKey.org_id || !trustedKey.key_id) {
+    throw new Error("demo trust store did not include an exportable trusted key");
+  }
+  const trustedKeyTextFile = path.join(outDir, "recovery-trusted-key.txt");
+  childProcess.execFileSync(
+    "go",
+    [
+      "run",
+      "./cmd/gpmrecover",
+      "trust-export-key",
+      "--trust-store",
+      path.join(outDir, "recovery-trust.json"),
+      "--org-id",
+      trustedKey.org_id,
+      "--key-id",
+      trustedKey.key_id,
+      "--text-out",
+      trustedKeyTextFile,
+    ],
+    { cwd: repoRoot, stdio: "pipe" },
+  );
+  const trustedKeyText = fs.readFileSync(trustedKeyTextFile, "utf8").trim();
   const otherOutDir = fs.mkdtempSync(path.join(os.tmpdir(), "gpm-recovery-browser-smoke-other-"));
   childProcess.execFileSync(
     "go",
@@ -294,6 +317,8 @@ async function main() {
   }
 
   await importTextHandoff(trustStoreText, "Trust store text imported");
+  await document.getElementById("clear_btn").click();
+  await importTextHandoff(trustedKeyText, "Trusted key text imported");
   await importTextHandoff(signedRegistryText, "Signed helper registry text imported");
   await document.getElementById("verify_registry_btn").click();
 
