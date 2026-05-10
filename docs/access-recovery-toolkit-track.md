@@ -144,6 +144,7 @@ First CLI:
 - `go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub`
 - `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --show-paths`
 - `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json`
+- `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --signed-helper-registry .easy-node-logs/bridge-helper-registry.signed.json`
 - `go run ./cmd/gpmrecover bridge-registry-sign --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --org-id freenews-demo --org-name "FreeNews Demo" --private-key-file .easy-node-logs/recovery.key --out .easy-node-logs/bridge-helper-registry.signed.json`
 - `go run ./cmd/gpmrecover bridge-registry-verify --signed-registry .easy-node-logs/bridge-helper-registry.signed.json --public-key-file .easy-node-logs/recovery.pub --out-registry .easy-node-logs/bridge-helper-registry.verified.json`
 - `go run ./cmd/gpmrecover bridge-registry-check --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-perth-1 --org-id freenews-demo --require-active`
@@ -172,6 +173,7 @@ Local trust-store flow:
 - `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --show-paths`
 - `go run ./cmd/gpmrecover bridge-registry-verify --signed-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --trust-store .easy-node-logs/recovery-trust.json --out-registry .easy-node-logs/bridge-helper-registry.verified.json`
 - `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.json`
+- `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --timeout-sec 8`
 - `go run ./cmd/gpmrecover trust-remove --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID`
 
@@ -199,6 +201,7 @@ Bridge-invite rules:
 - bridge invites must expire within 14 days of issue time
 - `bridge-policy` defaults require at least two helper paths, at least two distinct helper/contact hosts, a helper contact URL, and a manual/external-app fallback path
 - `bridge-policy --helper-registry` additionally requires the helper to be active, registered for the invite organization, inside its active window, and not quarantined or disabled
+- `bridge-policy --signed-helper-registry` verifies the registry artifact against the same public key/trust store, requires the registry organization to match the bridge invite organization, then applies the helper registry gate
 - `bridge-policy --require-helper-registry` fails if the helper registry was accidentally omitted from a production policy run
 - `bridge-registry-sign` and `bridge-registry-verify` publish helper registries as signed short-lived organization artifacts before extracting raw registry JSON for policy checks
 - `bridge-registry-check` summarizes active/quarantined/disabled helper counts and can fail closed for a specific active helper/org before publishing or using an invite

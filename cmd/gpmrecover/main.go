@@ -193,7 +193,7 @@ func usage() {
   go run ./cmd/gpmrecover sign --pack FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-sign --invite FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
-  go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE] [--require-helper-registry 1]
+  go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE | --signed-helper-registry FILE] [--require-helper-registry 1]
   go run ./cmd/gpmrecover bridge-registry-sign --helper-registry FILE --org-id ID --org-name NAME --private-key-file FILE --out FILE [--registry-id ID] [--lifetime-hours HOURS]
   go run ./cmd/gpmrecover bridge-registry-verify --signed-registry FILE (--trust-store FILE | --public-key-file FILE) [--out-registry FILE] [--show-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
@@ -651,6 +651,7 @@ func runBridgePolicy(args []string) error {
 	publicFile := fs.String("public-key-file", "", "path to public key file for one-off verification")
 	trustStoreFile := fs.String("trust-store", "", "path to access recovery trust store JSON")
 	helperRegistryFile := fs.String("helper-registry", "", "optional bridge helper registry JSON for active/quarantine policy")
+	signedHelperRegistryFile := fs.String("signed-helper-registry", "", "optional signed bridge helper registry artifact JSON for active/quarantine policy")
 	requireHelperRegistry := fs.Bool("require-helper-registry", false, "fail if no bridge helper registry is provided")
 	minPaths := fs.Int("min-paths", 2, "minimum helper access paths")
 	minHosts := fs.Int("min-distinct-hosts", 2, "minimum distinct helper/contact hosts")
@@ -682,6 +683,17 @@ func runBridgePolicy(args []string) error {
 		if err != nil {
 			return err
 		}
+		helperRegistry = &registry
+	}
+	if strings.TrimSpace(*signedHelperRegistryFile) != "" {
+		if helperRegistry != nil {
+			return errors.New("use either --helper-registry or --signed-helper-registry, not both")
+		}
+		verifiedRegistry, err := verifyBridgeHelperRegistryArtifactFile(*signedHelperRegistryFile, verified.Invite.Organization.OrgID, *publicFile, *trustStoreFile)
+		if err != nil {
+			return err
+		}
+		registry := verifiedRegistry.Artifact.Registry
 		helperRegistry = &registry
 	}
 	maxLifetime := time.Duration(*maxLifetimeHours) * time.Hour
@@ -1392,6 +1404,26 @@ func resolveBridgeRegistryVerificationKey(artifact accesspack.BridgeHelperRegist
 		return pub, nil, err
 	}
 	return nil, nil, errors.New("bridge helper registry verification requires --trust-store or --public-key-file")
+}
+
+func verifyBridgeHelperRegistryArtifactFile(path string, expectedOrgID string, publicFile string, trustStoreFile string) (accesspack.VerifiedBridgeHelperRegistryArtifact, error) {
+	body, err := readInputFileStrict(path, "signed bridge helper registry", maxBridgeRegistryFileBytes)
+	if err != nil {
+		return accesspack.VerifiedBridgeHelperRegistryArtifact{}, err
+	}
+	artifact, err := accesspack.ParseBridgeHelperRegistryArtifact(body)
+	if err != nil {
+		return accesspack.VerifiedBridgeHelperRegistryArtifact{}, err
+	}
+	artifact = accesspack.NormalizeBridgeHelperRegistryArtifact(artifact)
+	if artifact.Organization.OrgID != strings.TrimSpace(expectedOrgID) {
+		return accesspack.VerifiedBridgeHelperRegistryArtifact{}, fmt.Errorf("signed helper registry organization %q does not match bridge invite organization %q", artifact.Organization.OrgID, strings.TrimSpace(expectedOrgID))
+	}
+	pub, _, err := resolveBridgeRegistryVerificationKey(artifact, publicFile, trustStoreFile)
+	if err != nil {
+		return accesspack.VerifiedBridgeHelperRegistryArtifact{}, err
+	}
+	return accesspack.VerifyBridgeHelperRegistryArtifact(artifact, pub, time.Now().UTC())
 }
 
 func readTextEnvelopeInput(text string, textFile string) (string, error) {
