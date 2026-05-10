@@ -120,9 +120,14 @@ bash ./scripts/access_bridge_deployment_evidence.sh \
   --expect-helper-id helper-demo \
   --expect-org-id freenews-demo \
   --summary-json .easy-node-logs/bridge-deployment-evidence.json
+
+bash ./scripts/access_bridge_host_install_check.sh \
+  --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
+  --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \
+  --summary-json .easy-node-logs/bridge-host-install-check.json
 ```
 
-Keep the smoke JSON, deployment-evidence JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair.
+Keep the smoke JSON, deployment-evidence JSON, host-install-check JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair.
 
 7. Fail closed on rotation or quarantine:
 

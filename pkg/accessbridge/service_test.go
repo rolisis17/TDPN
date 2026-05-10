@@ -236,6 +236,18 @@ func TestNewServiceRejectsExpiredRegistryConfig(t *testing.T) {
 	}
 }
 
+func TestNewServiceRejectsExpiredInviteConfig(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	config := testServiceBridgeConfig(now)
+	expiredNow := now.Add(7*24*time.Hour + time.Minute)
+	if _, err := NewService(ServiceConfig{
+		BridgeConfig: config,
+		Now:          func() time.Time { return expiredNow },
+	}); err == nil {
+		t.Fatal("expected expired invite config to fail preflight")
+	}
+}
+
 func TestNewServiceRejectsConfigWithoutServiceablePath(t *testing.T) {
 	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
 	config := testServiceBridgeConfig(now)

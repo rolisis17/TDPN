@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -238,9 +239,9 @@ func usage() {
   go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE | --signed-helper-registry FILE] [--require-helper-registry 1]
   go run ./cmd/gpmrecover bridge-service-config --invite FILE --signed-helper-registry FILE (--trust-store FILE | --public-key-file FILE) [--out FILE]
   go run ./cmd/gpmrecover bridge-service-check --config FILE [--path-id ID | --url URL] [--out FILE]
-  go run ./cmd/gpmrecover bridge-service-serve --config FILE [--config-sha256 HEX] [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] [--access-code-sha256 HEX] [--allow-query-access-code=false] [--trust-proxy-headers=false] [--redirect=false]
+  go run ./cmd/gpmrecover bridge-service-serve --config FILE [--config-sha256 HEX] [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] --access-code-sha256 HEX [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=false] [--redirect=false]
   go run ./cmd/gpmrecover bridge-service-code-hash (--code TEXT | --code-file FILE) [--out FILE]
-  go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir DIR [--install-dir /etc/gpm/access-bridge] [--service-name gpm-access-bridge] [--public-host bridge.example] [--config-sha256 HEX] [--allow-query-access-code=false] [--trust-proxy-headers=true]
+  go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir DIR [--install-dir /etc/gpm/access-bridge] [--service-name gpm-access-bridge] [--public-host bridge.example] --access-code-sha256 HEX [--config-sha256 HEX] [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=true]
   go run ./cmd/gpmrecover bridge-registry-sign --helper-registry FILE --org-id ID --org-name NAME --private-key-file FILE --out FILE [--registry-id ID] [--lifetime-hours HOURS]
   go run ./cmd/gpmrecover bridge-registry-verify --signed-registry FILE (--trust-store FILE | --public-key-file FILE) [--out-registry FILE] [--show-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
@@ -1054,11 +1055,20 @@ func runBridgeServiceServe(args []string) error {
 	maxSources := fs.Int("max-sources", 1024, "maximum tracked sources for rate limiting")
 	abuseLog := fs.String("abuse-log", "", "optional JSONL abuse report log path")
 	accessCodeSHA256 := fs.String("access-code-sha256", "", "optional sha256 hex digest of an out-of-band bridge access code")
+	allowUnauthenticatedLocal := fs.Bool("allow-unauthenticated-local", false, "allow no access-code gate only for loopback diagnostics")
 	allowQueryAccessCode := fs.Bool("allow-query-access-code", false, "allow access code in ?code= query parameter; header is preferred")
 	trustProxyHeaders := fs.Bool("trust-proxy-headers", false, "trust X-Forwarded-For only from loopback reverse proxies")
 	redirect := fs.Bool("redirect", false, "redirect allowed bridge requests to the signed access URL instead of returning JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if strings.TrimSpace(*accessCodeSHA256) == "" {
+		if !*allowUnauthenticatedLocal {
+			return errors.New("bridge-service-serve requires --access-code-sha256 unless --allow-unauthenticated-local is set")
+		}
+		if !isLoopbackListenAddr(*addr) {
+			return errors.New("--allow-unauthenticated-local requires a loopback --addr")
+		}
 	}
 	body, err := readInputFileStrict(*configFile, "bridge service config", maxPackFileBytes)
 	if err != nil {
@@ -1166,6 +1176,7 @@ func runBridgeServiceDeployPack(args []string) error {
 	maxSources := fs.Int("max-sources", 1024, "maximum tracked sources for rate limiting")
 	abuseLog := fs.String("abuse-log", "/var/log/gpm/access-bridge-abuse.jsonl", "JSONL abuse report log path")
 	accessCodeSHA256 := fs.String("access-code-sha256", "", "optional sha256 hex digest of an out-of-band bridge access code")
+	allowUnauthenticatedLocal := fs.Bool("allow-unauthenticated-local", false, "allow deploy pack without an access-code hash only for local diagnostics")
 	allowQueryAccessCode := fs.Bool("allow-query-access-code", false, "allow access code in ?code= query parameter; header is preferred")
 	trustProxyHeaders := fs.Bool("trust-proxy-headers", true, "trust X-Forwarded-For only from loopback reverse proxies")
 	redirect := fs.Bool("redirect", false, "redirect allowed bridge requests to the signed access URL instead of returning JSON")
@@ -1176,6 +1187,9 @@ func runBridgeServiceDeployPack(args []string) error {
 	}
 	if strings.TrimSpace(*outDir) == "" {
 		return errors.New("bridge-service-deploy-pack requires --out-dir")
+	}
+	if strings.TrimSpace(*accessCodeSHA256) == "" && !*allowUnauthenticatedLocal {
+		return errors.New("bridge-service-deploy-pack requires --access-code-sha256 unless --allow-unauthenticated-local is set")
 	}
 	if *rps < 0 || *maxSources < 0 {
 		return errors.New("rps and max-sources must be non-negative")
@@ -1198,6 +1212,7 @@ func runBridgeServiceDeployPack(args []string) error {
 		"GPM_BRIDGE_MAX_SOURCES":         fmt.Sprintf("%d", *maxSources),
 		"GPM_BRIDGE_ABUSE_LOG":           *abuseLog,
 		"GPM_BRIDGE_ACCESS_CODE_SHA256":  *accessCodeSHA256,
+		"GPM_BRIDGE_ALLOW_UNAUTH_LOCAL":  fmt.Sprintf("%t", *allowUnauthenticatedLocal),
 		"GPM_BRIDGE_ALLOW_QUERY_CODE":    fmt.Sprintf("%t", *allowQueryAccessCode),
 		"GPM_BRIDGE_TRUST_PROXY_HEADERS": fmt.Sprintf("%t", *trustProxyHeaders),
 		"GPM_BRIDGE_REDIRECT":            fmt.Sprintf("%t", *redirect),
@@ -1210,6 +1225,7 @@ set -- "${GPM_BRIDGE_BINARY}" bridge-service-serve \
   --addr "${GPM_BRIDGE_ADDR}" \
   --rps "${GPM_BRIDGE_RPS}" \
   --max-sources "${GPM_BRIDGE_MAX_SOURCES}" \
+  --allow-unauthenticated-local="${GPM_BRIDGE_ALLOW_UNAUTH_LOCAL}" \
   --allow-query-access-code="${GPM_BRIDGE_ALLOW_QUERY_CODE}" \
   --trust-proxy-headers="${GPM_BRIDGE_TRUST_PROXY_HEADERS}" \
   --redirect="${GPM_BRIDGE_REDIRECT}"
@@ -1244,6 +1260,7 @@ PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
 ReadWritePaths=/var/log/gpm
+LogsDirectory=gpm
 ReadOnlyPaths=%s
 
 [Install]
@@ -1354,6 +1371,19 @@ func sanitizeSystemdName(raw string) string {
 		return "gpm-access-bridge"
 	}
 	return b.String()
+}
+
+func isLoopbackListenAddr(raw string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	host = strings.TrimSpace(host)
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func bridgeServiceEnvFile(values map[string]string) string {

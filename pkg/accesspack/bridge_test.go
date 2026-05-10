@@ -222,6 +222,9 @@ func TestBuildBridgeServiceConfigIncludesSignedHelperControls(t *testing.T) {
 	if config.HelperRateLimitPolicy == "" {
 		t.Fatalf("expected rate limit policy: %+v", config)
 	}
+	if config.InviteIssuedAtUTC == "" || config.InviteExpiresAtUTC == "" {
+		t.Fatalf("expected invite validity window: %+v", config)
+	}
 	if config.InviteSHA256 == "" || config.RegistrySHA256 == "" || config.AccessPathsSHA256 == "" {
 		t.Fatalf("expected source/config hashes: %+v", config)
 	}
@@ -278,6 +281,22 @@ func TestEvaluateBridgeServiceRequestRejectsExpiredRegistry(t *testing.T) {
 	}
 	if len(decision.Findings) == 0 || decision.Findings[0].Code != "bridge_service_registry_expired" {
 		t.Fatalf("expected registry expiry finding: %+v", decision.Findings)
+	}
+}
+
+func TestEvaluateBridgeServiceRequestRejectsExpiredInviteWindow(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	config := BuildBridgeServiceConfig(testBridgeInvite(), testBridgeHelperRegistry(), BridgeServiceConfigOptions{
+		RegistryID:           "registry-demo",
+		RegistryExpiresAtUTC: now.Add(24 * time.Hour).Format(time.RFC3339),
+		SignedRegistry:       true,
+	}, now)
+	decision := EvaluateBridgeServiceRequest(config, BridgeServiceRequest{PathID: "helper-site"}, now.Add(15*24*time.Hour))
+	if decision.Allowed || decision.Status != "fail" {
+		t.Fatalf("expected expired invite window to fail closed: %+v", decision)
+	}
+	if !sawBridgeServiceFinding(decision, "bridge_service_invite_expired") {
+		t.Fatalf("expected invite expiry finding, got %+v", decision.Findings)
 	}
 }
 

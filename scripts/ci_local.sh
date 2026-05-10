@@ -62,6 +62,15 @@ bash ./scripts/integration_access_recovery_demo_contract.sh
 echo "[ci] access recovery examples contract integration"
 bash ./scripts/integration_access_recovery_examples_contract.sh
 
+echo "[ci] access bridge service serve integration"
+bash ./scripts/integration_access_bridge_service_serve.sh
+
+echo "[ci] access bridge deployment evidence integration"
+bash ./scripts/integration_access_bridge_deployment_evidence.sh
+
+echo "[ci] access bridge host install check integration"
+bash ./scripts/integration_access_bridge_host_install_check.sh
+
 echo "[ci] secret hygiene integration"
 ./scripts/integration_secret_hygiene.sh
 

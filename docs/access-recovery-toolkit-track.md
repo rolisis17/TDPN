@@ -193,6 +193,7 @@ Local trust-store flow:
 - `bash ./scripts/integration_access_bridge_service_serve.sh`
 - `bash ./scripts/access_bridge_service_smoke.sh --base-url https://bridge.example --path-id helper-web --code CODE --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/bridge-service-smoke.json`
 - `bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/bridge-service-smoke.json --config-json .easy-node-logs/bridge-service-config.json --deploy-pack-dir .easy-node-logs/bridge-deploy --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/bridge-deployment-evidence.json`
+- `bash ./scripts/access_bridge_host_install_check.sh --deploy-pack-dir .easy-node-logs/bridge-deploy --config-json .easy-node-logs/bridge-service-config.json --summary-json .easy-node-logs/bridge-host-install-check.json`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --timeout-sec 8`
 - `go run ./cmd/gpmrecover trust-remove --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID`
 
@@ -236,14 +237,15 @@ Bridge-invite rules:
 - the helper registry is the first service-level rotation/quarantine control; a public bridge service still needs live rate-limit and abuse-report enforcement before launch
 - `demo-bundle` emits a static `.well-known/gpm` publish folder so operators can test online artifact publication without inventing filenames by hand
 - `fetch-publication` downloads the static publication index and same-origin referenced artifacts into a local folder, but marks trust as unverified so signature/trust-store verification remains a separate step
-- `bridge-service-config` turns a verified signed invite plus signed helper registry into a fail-closed service config containing the helper abuse-report URL, rate-limit policy, active window, registry identity, and verified path hints
-- `bridge-service-check` is the first runtime preflight hook: it rejects unsigned/stale service configs, expired helper windows, missing abuse/rate commitments, unknown paths, and manual/external-app paths before a helper bridge serves traffic
+- `bridge-service-config` turns a verified signed invite plus signed helper registry into a fail-closed service config containing the signed invite validity window, helper abuse-report URL, rate-limit policy, active window, registry identity, and verified path hints
+- `bridge-service-check` is the first runtime preflight hook: it rejects unsigned/stale service configs, expired invite/helper windows, missing abuse/rate commitments, unknown paths, and manual/external-app paths before a helper bridge serves traffic
 - `bridge-service-code-hash` derives an out-of-band access-code hash so helpers do not store plaintext invite codes in their service config
-- `bridge-service-serve` wraps that preflight in a minimal HTTP service with `/health`, `/bridge/{path_id}`, optional `X-GPM-Bridge-Code` ticket gating, optional config-hash pinning, per-source fixed-window limits, optional signed-path redirects, and `/abuse` JSONL logging
+- `bridge-service-serve` wraps that preflight in a minimal HTTP service with `/health`, `/bridge/{path_id}`, required `X-GPM-Bridge-Code` ticket gating for normal deploys, optional config-hash pinning, per-source fixed-window limits, optional signed-path redirects, and `/abuse` JSONL logging
 - `bridge-service-serve` emits no-store/no-referrer/nosniff headers so ticket codes and recovery URLs are not cached or leaked through browser referrers
 - `bridge-service-deploy-pack` emits a helper-owned env file, shell wrapper, README, hardened systemd unit template, and Caddy/nginx HTTPS reverse-proxy examples for Linux deployment
 - `access_bridge_service_smoke.sh` records deployed bridge health, access-code-gated path availability, helper/org/registry identity, security headers, and abuse endpoint acceptance into a JSON summary
 - `access_bridge_deployment_evidence.sh` binds smoke output to the staged service config and deploy pack, checks config/deploy file hashes, confirms helper/org/registry identity, and verifies deploy-pack hardening flags plus proxy header overwrite rules
+- `access_bridge_host_install_check.sh` records the staged/installed host file checks for env, wrapper, systemd hardening, config hash, access-code gate, loopback bind, and proxy X-Forwarded-For overwrite behavior
 
 Operator bridge install checklist:
 - generate a service config only from a verified signed bridge invite plus signed helper registry
@@ -253,6 +255,7 @@ Operator bridge install checklist:
 - use `bridge-service-deploy-pack` for helper-owned env/wrapper/systemd/proxy templates, pin the staged service config with `--config-sha256`, then bind the service to loopback behind Caddy or nginx HTTPS
 - verify helper identity against the signed registry: helper id, contact URL, abuse-report URL, rate-limit policy, active window, and control of the public HTTPS host
 - record smoke evidence with `access_bridge_service_smoke.sh` from another machine or network path, then run `access_bridge_deployment_evidence.sh` to capture config/deploy hashes, helper/org/registry identity, proxy header behavior, and hardening checks
+- record host install evidence with `access_bridge_host_install_check.sh` before public handoff
 - fail closed on helper rotation or quarantine: stop service, mark the helper quarantined/disabled, re-sign the helper registry, redistribute the signed registry, and regenerate configs before resuming
 - rotate access codes after suspected exposure; rotate the organization key only if the signing key is suspected compromised
 
@@ -317,7 +320,7 @@ Do first:
 - docs explaining how a user visualizes it
 
 Do next:
-- remote helper-host install verification against live systemd/Caddy/nginx state
+- run host install checks plus bridge smoke against a real helper host and record the evidence bundle
 
 Do later:
 - Outline/Shadowsocks/Tor/GPM launch helpers

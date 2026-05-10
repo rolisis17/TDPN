@@ -374,6 +374,8 @@ deploy_exists="false"
 deploy_reason="not supplied"
 deploy_files_json='[]'
 deploy_env_config_sha256=""
+deploy_env_access_code_sha256=""
+deploy_env_allow_unauth_local=""
 deploy_env_allow_query_code=""
 deploy_env_trust_proxy_headers=""
 if [[ -n "$deploy_pack_dir" ]]; then
@@ -428,8 +430,14 @@ if [[ -n "$deploy_pack_dir" ]]; then
     nginx_file="$deploy_pack_dir/${service_name}.nginx.example.conf"
     if [[ -f "$env_file" ]]; then
       deploy_env_config_sha256="$(env_file_value "$env_file" "GPM_BRIDGE_CONFIG_SHA256")"
+      deploy_env_access_code_sha256="$(env_file_value "$env_file" "GPM_BRIDGE_ACCESS_CODE_SHA256")"
+      deploy_env_allow_unauth_local="$(env_file_value "$env_file" "GPM_BRIDGE_ALLOW_UNAUTH_LOCAL")"
       deploy_env_allow_query_code="$(env_file_value "$env_file" "GPM_BRIDGE_ALLOW_QUERY_CODE")"
       deploy_env_trust_proxy_headers="$(env_file_value "$env_file" "GPM_BRIDGE_TRUST_PROXY_HEADERS")"
+      if [[ -z "$deploy_env_access_code_sha256" && "$deploy_env_allow_unauth_local" != "true" ]]; then
+        deploy_status="fail"
+        deploy_reason="$(append_reason "$deploy_reason" "deploy env must include an access-code hash unless explicitly local unauthenticated")"
+      fi
       if [[ "$deploy_env_allow_query_code" != "false" ]]; then
         deploy_status="fail"
         deploy_reason="$(append_reason "$deploy_reason" "deploy env must keep query access codes disabled by default")"
@@ -444,7 +452,8 @@ if [[ -n "$deploy_pack_dir" ]]; then
       fi
     fi
     if [[ -f "$wrapper_file" ]]; then
-      if ! grep -Fq -- '--allow-query-access-code="${GPM_BRIDGE_ALLOW_QUERY_CODE}"' "$wrapper_file" ||
+      if ! grep -Fq -- '--allow-unauthenticated-local="${GPM_BRIDGE_ALLOW_UNAUTH_LOCAL}"' "$wrapper_file" ||
+        ! grep -Fq -- '--allow-query-access-code="${GPM_BRIDGE_ALLOW_QUERY_CODE}"' "$wrapper_file" ||
         ! grep -Fq -- '--trust-proxy-headers="${GPM_BRIDGE_TRUST_PROXY_HEADERS}"' "$wrapper_file" ||
         ! grep -Fq -- '--redirect="${GPM_BRIDGE_REDIRECT}"' "$wrapper_file" ||
         ! grep -Fq -- '--config-sha256' "$wrapper_file"; then
@@ -455,7 +464,8 @@ if [[ -n "$deploy_pack_dir" ]]; then
     if [[ -f "$unit_file" ]]; then
       if ! grep -q '^NoNewPrivileges=true$' "$unit_file" ||
         ! grep -q '^PrivateTmp=true$' "$unit_file" ||
-        ! grep -q '^ProtectSystem=strict$' "$unit_file"; then
+        ! grep -q '^ProtectSystem=strict$' "$unit_file" ||
+        ! grep -q '^LogsDirectory=gpm$' "$unit_file"; then
         deploy_status="fail"
         deploy_reason="$(append_reason "$deploy_reason" "systemd unit is missing expected hardening directives")"
       fi
@@ -525,6 +535,8 @@ jq -n \
   --arg deploy_status "$deploy_status" \
   --arg deploy_reason "$deploy_reason" \
   --arg deploy_env_config_sha256 "$deploy_env_config_sha256" \
+  --arg deploy_env_access_code_sha256 "$deploy_env_access_code_sha256" \
+  --arg deploy_env_allow_unauth_local "$deploy_env_allow_unauth_local" \
   --arg deploy_env_allow_query_code "$deploy_env_allow_query_code" \
   --arg deploy_env_trust_proxy_headers "$deploy_env_trust_proxy_headers" \
   --arg recommended_action_id "$recommended_action_id" \
@@ -592,6 +604,8 @@ jq -n \
         exists: $deploy_exists,
         env: {
           config_sha256: $deploy_env_config_sha256,
+          access_code_sha256: $deploy_env_access_code_sha256,
+          allow_unauthenticated_local: $deploy_env_allow_unauth_local,
           allow_query_code: $deploy_env_allow_query_code,
           trust_proxy_headers: $deploy_env_trust_proxy_headers
         },

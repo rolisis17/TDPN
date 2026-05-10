@@ -20,9 +20,13 @@ trap cleanup EXIT
 BUNDLE_DIR="$TMP_DIR/access-recovery-demo"
 SERVICE_CONFIG="$TMP_DIR/bridge-service-config.json"
 DEPLOY_DIR="$TMP_DIR/bridge-deploy"
+CODE_FILE="$TMP_DIR/bridge-code.txt"
+CODE_HASH_JSON="$TMP_DIR/bridge-code-hash.json"
 SMOKE_SUMMARY="$TMP_DIR/access_bridge_service_smoke_summary.json"
 SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_summary.json"
 RUN_LOG="$TMP_DIR/run.log"
+
+printf 'evidence-ticket-1234567890\n' >"$CODE_FILE"
 
 go run ./cmd/gpmrecover demo-bundle \
   --out-dir "$BUNDLE_DIR" \
@@ -47,6 +51,8 @@ go run ./cmd/gpmrecover bridge-service-config \
 
 registry_id="$(jq -r '.registry_id' "$SERVICE_CONFIG")"
 config_sha256="$(sha256sum "$SERVICE_CONFIG" | awk '{print $1}')"
+go run ./cmd/gpmrecover bridge-service-code-hash --code-file "$CODE_FILE" --out "$CODE_HASH_JSON" >/dev/null
+code_hash="$(jq -r '.sha256' "$CODE_HASH_JSON")"
 
 go run ./cmd/gpmrecover bridge-service-deploy-pack \
   --out-dir "$DEPLOY_DIR" \
@@ -54,6 +60,7 @@ go run ./cmd/gpmrecover bridge-service-deploy-pack \
   --install-dir /etc/gpm/access-bridge-evidence \
   --config /etc/gpm/access-bridge-evidence/bridge-service-config.json \
   --config-sha256 "$config_sha256" \
+  --access-code-sha256 "$code_hash" \
   >/dev/null
 
 jq -n \
@@ -125,6 +132,7 @@ if ! jq -e \
     and .local_files.deploy_pack.dir == $deploy_dir
     and .local_files.deploy_pack.exists == true
     and .local_files.deploy_pack.env.config_sha256 == $config_sha256
+    and (.local_files.deploy_pack.env.access_code_sha256 | length == 64)
     and .local_files.deploy_pack.env.allow_query_code == "false"
     and .local_files.deploy_pack.env.trust_proxy_headers == "true"
     and (.local_files.deploy_pack.required_files | length == 6)

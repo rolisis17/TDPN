@@ -197,7 +197,9 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read bridge deploy unit: %v", err)
 	}
-	if !bytes.Contains(unitBody, []byte("NoNewPrivileges=true")) || !bytes.Contains(unitBody, []byte("run-gpm-access-bridge-test.sh")) {
+	if !bytes.Contains(unitBody, []byte("NoNewPrivileges=true")) ||
+		!bytes.Contains(unitBody, []byte("LogsDirectory=gpm")) ||
+		!bytes.Contains(unitBody, []byte("run-gpm-access-bridge-test.sh")) {
 		t.Fatalf("unexpected bridge deploy unit:\n%s", string(unitBody))
 	}
 	envBody, err := os.ReadFile(filepath.Join(deployDir, "gpm-access-bridge-test.env"))
@@ -205,6 +207,7 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 		t.Fatalf("read bridge deploy env: %v", err)
 	}
 	if !bytes.Contains(envBody, []byte("GPM_BRIDGE_ACCESS_CODE_SHA256=")) ||
+		!bytes.Contains(envBody, []byte("GPM_BRIDGE_ALLOW_UNAUTH_LOCAL=\"false\"")) ||
 		!bytes.Contains(envBody, []byte("GPM_BRIDGE_CONFIG_SHA256=\""+serviceConfigHash+"\"")) ||
 		!bytes.Contains(envBody, []byte("GPM_BRIDGE_ALLOW_QUERY_CODE=\"false\"")) ||
 		!bytes.Contains(envBody, []byte("GPM_BRIDGE_TRUST_PROXY_HEADERS=\"true\"")) {
@@ -215,6 +218,7 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 		t.Fatalf("read bridge deploy wrapper: %v", err)
 	}
 	if !bytes.Contains(wrapperBody, []byte("--allow-query-access-code=\"${GPM_BRIDGE_ALLOW_QUERY_CODE}\"")) ||
+		!bytes.Contains(wrapperBody, []byte("--allow-unauthenticated-local=\"${GPM_BRIDGE_ALLOW_UNAUTH_LOCAL}\"")) ||
 		!bytes.Contains(wrapperBody, []byte("--trust-proxy-headers=\"${GPM_BRIDGE_TRUST_PROXY_HEADERS}\"")) ||
 		!bytes.Contains(wrapperBody, []byte("--redirect=\"${GPM_BRIDGE_REDIRECT}\"")) ||
 		!bytes.Contains(wrapperBody, []byte("--config-sha256")) {
@@ -470,6 +474,18 @@ func TestVerifyOptionalSHA256(t *testing.T) {
 	}
 	if err := verifyOptionalSHA256("test body", body, "not-hex"); err == nil {
 		t.Fatal("expected invalid sha256 error")
+	}
+}
+
+func TestBridgeServiceCommandsRequireAccessCodeByDefault(t *testing.T) {
+	if err := runBridgeServiceDeployPack([]string{"--out-dir", t.TempDir()}); err == nil || !strings.Contains(err.Error(), "--access-code-sha256") {
+		t.Fatalf("expected deploy pack access-code requirement, got %v", err)
+	}
+	if err := runBridgeServiceServe([]string{"--config", "missing.json"}); err == nil || !strings.Contains(err.Error(), "--access-code-sha256") {
+		t.Fatalf("expected serve access-code requirement, got %v", err)
+	}
+	if err := runBridgeServiceServe([]string{"--config", "missing.json", "--allow-unauthenticated-local", "--addr", "0.0.0.0:18980"}); err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("expected unauthenticated serve to require loopback, got %v", err)
 	}
 }
 

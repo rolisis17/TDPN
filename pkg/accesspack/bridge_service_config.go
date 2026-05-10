@@ -21,6 +21,8 @@ type BridgeServiceConfig struct {
 	Status                string                   `json:"status"`
 	GeneratedAtUTC        string                   `json:"generated_at_utc"`
 	InviteID              string                   `json:"invite_id"`
+	InviteIssuedAtUTC     string                   `json:"invite_issued_at_utc,omitempty"`
+	InviteExpiresAtUTC    string                   `json:"invite_expires_at_utc,omitempty"`
 	OrganizationID        string                   `json:"organization_id"`
 	OrganizationName      string                   `json:"organization_name"`
 	HelperID              string                   `json:"helper_id"`
@@ -85,6 +87,8 @@ func BuildBridgeServiceConfig(invite BridgeInvite, registry BridgeHelperRegistry
 		Status:               policy.Status,
 		GeneratedAtUTC:       now.Format(time.RFC3339),
 		InviteID:             invite.InviteID,
+		InviteIssuedAtUTC:    invite.IssuedAtUTC,
+		InviteExpiresAtUTC:   invite.ExpiresAtUTC,
 		OrganizationID:       invite.Organization.OrgID,
 		OrganizationName:     invite.Organization.Name,
 		HelperID:             invite.Helper.HelperID,
@@ -122,6 +126,8 @@ func NormalizeBridgeServiceConfig(config BridgeServiceConfig) BridgeServiceConfi
 	config.Status = strings.TrimSpace(config.Status)
 	config.GeneratedAtUTC = strings.TrimSpace(config.GeneratedAtUTC)
 	config.InviteID = strings.TrimSpace(config.InviteID)
+	config.InviteIssuedAtUTC = strings.TrimSpace(config.InviteIssuedAtUTC)
+	config.InviteExpiresAtUTC = strings.TrimSpace(config.InviteExpiresAtUTC)
 	config.OrganizationID = strings.TrimSpace(config.OrganizationID)
 	config.OrganizationName = strings.TrimSpace(config.OrganizationName)
 	config.HelperID = strings.TrimSpace(config.HelperID)
@@ -184,6 +190,24 @@ func EvaluateBridgeServiceRequest(config BridgeServiceConfig, request BridgeServ
 	}
 	if config.InviteID == "" || config.OrganizationID == "" || config.HelperID == "" {
 		decision.addFinding("bridge_service_missing_identity", "error", "bridge service config is missing invite, organization, or helper identity")
+	}
+	if config.InviteIssuedAtUTC == "" || config.InviteExpiresAtUTC == "" {
+		decision.addFinding("bridge_service_missing_invite_window", "error", "bridge service config is missing signed invite issue or expiry time")
+	} else {
+		inviteIssuedAt, issuedErr := time.Parse(time.RFC3339, config.InviteIssuedAtUTC)
+		inviteExpiresAt, expiresErr := time.Parse(time.RFC3339, config.InviteExpiresAtUTC)
+		switch {
+		case issuedErr != nil:
+			decision.addFinding("bridge_service_invite_issued_at_invalid", "error", "bridge service invite issue time is invalid")
+		case expiresErr != nil:
+			decision.addFinding("bridge_service_invite_expires_at_invalid", "error", "bridge service invite expiry time is invalid")
+		case !inviteExpiresAt.After(inviteIssuedAt):
+			decision.addFinding("bridge_service_invite_window_invalid", "error", "bridge service invite expiry must be after issue time")
+		case inviteExpiresAt.Sub(inviteIssuedAt) > MaxBridgeInviteLifetime:
+			decision.addFinding("bridge_service_invite_lifetime_too_long", "error", "bridge service invite lifetime exceeds maximum")
+		case !inviteExpiresAt.After(now):
+			decision.addFinding("bridge_service_invite_expired", "error", "bridge service invite has expired")
+		}
 	}
 	if config.HelperAbuseReportURL == "" {
 		decision.addFinding("bridge_service_missing_abuse_report", "error", "bridge service config is missing helper abuse-report URL")
