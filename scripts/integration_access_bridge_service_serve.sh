@@ -126,6 +126,9 @@ bash ./scripts/access_bridge_service_smoke.sh \
   --base-url "$BASE_URL" \
   --path-id helper-web \
   --code ticket-serve-123 \
+  --expect-helper-id helper-serve \
+  --expect-org-id serve-org \
+  --expect-registry-id "$(jq -r '.registry_id' "$SERVICE_CONFIG")" \
   --summary-json "$TMP_DIR/operator-smoke-summary.json" \
   --abuse-message "operator smoke" >/dev/null
 if [[ "$(jq -r '.status // ""' "$TMP_DIR/operator-smoke-summary.json")" != "pass" ]]; then

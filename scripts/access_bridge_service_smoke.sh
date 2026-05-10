@@ -6,11 +6,14 @@ path_id="helper-web"
 code=""
 summary_json=""
 abuse_message="bridge service smoke"
+expect_helper_id=""
+expect_org_id=""
+expect_registry_id=""
 
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/access_bridge_service_smoke.sh --base-url URL [--path-id helper-web] [--code CODE] [--summary-json FILE] [--abuse-message TEXT]
+  scripts/access_bridge_service_smoke.sh --base-url URL [--path-id helper-web] [--code CODE] [--expect-helper-id ID] [--expect-org-id ID] [--expect-registry-id ID] [--summary-json FILE] [--abuse-message TEXT]
 
 Checks /health, /bridge/{path_id}, no-store/no-referrer headers, and /abuse logging acceptance.
 USAGE
@@ -36,6 +39,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --abuse-message)
       abuse_message="${2:-}"
+      shift 2
+      ;;
+    --expect-helper-id)
+      expect_helper_id="${2:-}"
+      shift 2
+      ;;
+    --expect-org-id)
+      expect_org_id="${2:-}"
+      shift 2
+      ;;
+    --expect-registry-id)
+      expect_registry_id="${2:-}"
       shift 2
       ;;
     -h|--help)
@@ -90,6 +105,9 @@ abuse_payload="$(jq -cn --arg path_id "$path_id" --arg message "$abuse_message" 
 abuse_http="$(curl -sS -X POST -H 'Content-Type: application/json' -d "$abuse_payload" -o "$abuse_body" -w '%{http_code}' "${base_url}/abuse" || true)"
 
 health_status="$(jq -r '.status // ""' "$health_body" 2>/dev/null || true)"
+health_helper_id="$(jq -r '.decision.helper_id // ""' "$health_body" 2>/dev/null || true)"
+health_org_id="$(jq -r '.decision.organization_id // ""' "$health_body" 2>/dev/null || true)"
+health_registry_id="$(jq -r '.decision.registry_id // ""' "$health_body" 2>/dev/null || true)"
 bridge_status="$(jq -r '.status // ""' "$bridge_body" 2>/dev/null || true)"
 headers_ok="false"
 if grep -iq '^Referrer-Policy: no-referrer' "$bridge_headers" && grep -iq '^Cache-Control: no-store' "$bridge_headers"; then
@@ -110,6 +128,15 @@ elif [[ "$headers_ok" != "true" ]]; then
 elif [[ "$abuse_http" != "202" ]]; then
   status="fail"
   notes="abuse report check failed"
+elif [[ -n "$expect_helper_id" && "$health_helper_id" != "$expect_helper_id" ]]; then
+  status="fail"
+  notes="helper id mismatch"
+elif [[ -n "$expect_org_id" && "$health_org_id" != "$expect_org_id" ]]; then
+  status="fail"
+  notes="organization id mismatch"
+elif [[ -n "$expect_registry_id" && "$health_registry_id" != "$expect_registry_id" ]]; then
+  status="fail"
+  notes="registry id mismatch"
 fi
 
 summary="$(jq -cn \
@@ -119,11 +146,14 @@ summary="$(jq -cn \
   --arg path_id "$path_id" \
   --arg health_http "$health_http" \
   --arg health_status "$health_status" \
+  --arg health_helper_id "$health_helper_id" \
+  --arg health_org_id "$health_org_id" \
+  --arg health_registry_id "$health_registry_id" \
   --arg bridge_http "$bridge_http" \
   --arg bridge_status "$bridge_status" \
   --arg abuse_http "$abuse_http" \
   --argjson headers_ok "$headers_ok" \
-  '{version:1,status:$status,notes:$notes,base_url:$base_url,path_id:$path_id,health:{http_status:$health_http,status:$health_status},bridge:{http_status:$bridge_http,status:$bridge_status,security_headers_ok:$headers_ok},abuse:{http_status:$abuse_http}}')"
+  '{version:1,status:$status,notes:$notes,base_url:$base_url,path_id:$path_id,health:{http_status:$health_http,status:$health_status,helper_id:$health_helper_id,organization_id:$health_org_id,registry_id:$health_registry_id},bridge:{http_status:$bridge_http,status:$bridge_status,security_headers_ok:$headers_ok},abuse:{http_status:$abuse_http}}')"
 
 if [[ -n "$summary_json" ]]; then
   mkdir -p "$(dirname "$summary_json")"
