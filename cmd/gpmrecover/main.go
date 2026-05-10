@@ -1235,6 +1235,9 @@ func runDemoBundle(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateTextEnvelopePayload(accesspack.EnvelopeKindStore, storeBody); err != nil {
+		return err
+	}
 	storeText, err := accesspack.EncodeTextEnvelope(accesspack.EnvelopeKindStore, storeBody)
 	if err != nil {
 		return err
@@ -1377,6 +1380,9 @@ func writeTextAndQR(textPath string, qrPath string, kind string, payload any, qr
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal %s envelope payload: %w", kind, err)
+	}
+	if err := validateTextEnvelopePayload(kind, body); err != nil {
+		return err
 	}
 	text, err := accesspack.EncodeTextEnvelope(kind, body)
 	if err != nil {
