@@ -178,6 +178,9 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runTextExport([]string{"--kind", "bridge-helper-registry", "--in", helperRegistry, "--out", registryEnvelope}); err != nil {
 		t.Fatalf("text-export helper registry: %v", err)
 	}
+	if err := runTextExport([]string{"--kind", accesspack.EnvelopeKindBridgeHelperRegistrySigned, "--in", helperRegistry, "--out", filepath.Join(dir, "registry.bad-signed.txt")}); err == nil {
+		t.Fatal("expected text-export to reject raw helper registry mislabeled as signed")
+	}
 	if err := runTextImport([]string{"--text-file", registryEnvelope, "--expect-kind", "bridge-helper-registry", "--out", importedRegistry}); err != nil {
 		t.Fatalf("text-import helper registry: %v", err)
 	}

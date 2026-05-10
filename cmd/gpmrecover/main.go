@@ -453,6 +453,9 @@ func runTextExport(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateTextEnvelopePayload(*kind, body); err != nil {
+		return err
+	}
 	text, err := accesspack.EncodeTextEnvelope(*kind, body)
 	if err != nil {
 		return err
@@ -494,6 +497,9 @@ func runTextImport(args []string) error {
 	if strings.TrimSpace(*expectKind) != "" && strings.TrimSpace(*expectKind) != envelope.Kind {
 		return fmt.Errorf("envelope kind %q does not match expected %q", envelope.Kind, strings.TrimSpace(*expectKind))
 	}
+	if err := validateTextEnvelopePayload(envelope.Kind, payload); err != nil {
+		return err
+	}
 	if strings.TrimSpace(*outFile) != "" {
 		if err := writeFileWithMode(*outFile, append(payload, '\n'), 0o644); err != nil {
 			return err
@@ -505,6 +511,60 @@ func runTextImport(args []string) error {
 		"out":    strings.TrimSpace(*outFile),
 		"bytes":  len(payload),
 	})
+}
+
+func validateTextEnvelopePayload(kind string, body []byte) error {
+	kind = strings.TrimSpace(kind)
+	switch kind {
+	case accesspack.EnvelopeKindPack:
+		pack, err := accesspack.Parse(body)
+		if err != nil {
+			return err
+		}
+		if pack.Signature == nil {
+			return errors.New("access-pack envelope payload must include a signature")
+		}
+		pack.Signature = nil
+		return accesspack.Validate(pack, time.Time{})
+	case accesspack.EnvelopeKindBridge:
+		invite, err := accesspack.ParseBridgeInvite(body)
+		if err != nil {
+			return err
+		}
+		if invite.Signature == nil {
+			return errors.New("bridge-invite envelope payload must include a signature")
+		}
+		invite.Signature = nil
+		return accesspack.ValidateBridgeInvite(invite, time.Time{})
+	case accesspack.EnvelopeKindStore:
+		_, err := accesspack.ParseTrustStore(body)
+		return err
+	case accesspack.EnvelopeKindKey:
+		var entry accesspack.TrustedKey
+		if err := json.Unmarshal(body, &entry); err != nil {
+			return fmt.Errorf("invalid trusted-key json: %w", err)
+		}
+		_, _, err := accesspack.AddTrustedKey(accesspack.EmptyTrustStore(), entry, time.Now().UTC())
+		return err
+	case accesspack.EnvelopeKindBridgeHelperRegistry:
+		_, err := accesspack.ParseBridgeHelperRegistry(body)
+		return err
+	case accesspack.EnvelopeKindBridgeHelperRegistrySigned:
+		artifact, err := accesspack.ParseBridgeHelperRegistryArtifact(body)
+		if err != nil {
+			return err
+		}
+		if artifact.Signature == nil {
+			return errors.New("bridge-helper-registry-signed envelope payload must include a signature")
+		}
+		if strings.TrimSpace(artifact.Signature.Alg) == "" || strings.TrimSpace(artifact.Signature.KeyID) == "" || strings.TrimSpace(artifact.Signature.Sig) == "" {
+			return errors.New("bridge-helper-registry-signed envelope signature is incomplete")
+		}
+		artifact.Signature = nil
+		return accesspack.ValidateBridgeHelperRegistryArtifact(artifact, time.Time{})
+	default:
+		return accesspack.ValidateEnvelopeKind(kind)
+	}
 }
 
 func runQRPNG(args []string) error {
