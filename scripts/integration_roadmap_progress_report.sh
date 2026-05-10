@@ -1354,12 +1354,16 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_service_smoke.details.base_url == "http://127.0.0.1:19820"
   and .access_recovery_track.recommended_next_action.id == "real_helper_https_evidence"
   and ((.access_recovery_track.recommended_next_action.command // "") | test("access-bridge-pilot-evidence-bundle"))
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("--provenance-sign 1"))
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("--provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE"))
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("--provenance-out"))
   and ((.next_actions // []) | any(
     .id == "real_helper_https_evidence"
     and .requires_real_hosts == true
     and .local_pack_only == false
     and .missing_evidence_family == "access-recovery"
     and .missing_evidence_action_kind == "real-helper-https"
+    and ((.command // "") | test("--provenance-sign 1"))
   ))
   and .artifacts.access_bridge_service_smoke_summary_json == "'"$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON"'"
 ' "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_summary.json" >/dev/null; then
@@ -1402,6 +1406,7 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_service_smoke.available == true
   and .access_recovery_track.access_bridge_service_smoke.details.base_url == "https://192.168.50.10:19820"
   and .access_recovery_track.recommended_next_action.id == "real_helper_https_evidence"
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("--provenance-sign 1"))
 ' "$TMP_DIR/roadmap_progress_access_recovery_private_https_summary.json" >/dev/null; then
   echo "Access Recovery private HTTPS summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_private_https_summary.json"

@@ -2228,7 +2228,7 @@ access_recovery_track_json_from_evidence() {
             elif $track_status == "local-rehearsal-ready" then {
               id: "real_helper_https_evidence",
               reason: "Local Access Recovery rehearsal evidence cannot substitute for real helper HTTPS deployment evidence",
-              command: "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_summary.json"
+              command: "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_summary.json --provenance-sign 1 --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --provenance-out .easy-node-logs/access_bridge_pilot_evidence_bundle.provenance.json"
             }
             elif $first_attention == null then null
             else {

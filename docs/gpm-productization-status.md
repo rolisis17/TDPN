@@ -9,7 +9,7 @@ Scope:
 Current pivot:
 - Access Recovery is the active roadmap track. The launchable wedge is signed emergency access packs, signed bridge invites, trusted organization keys, signed helper registries, browser-local verification, and operator evidence bundles for helper bridges.
 - Local rehearsal evidence can be refreshed with `./scripts/easy_node.sh access-recovery-local-evidence-refresh --write-canonical 1 --refresh-roadmap 1 --print-summary-json 1`; it proves the loopback flow and writes canonical roadmap summaries, but it is not real pilot handoff evidence.
-- Pilot handoff still requires real helper HTTPS evidence through `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle ...` plus `access-bridge-pilot-evidence-bundle-verify`.
+- Pilot handoff still requires real helper HTTPS evidence through `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle ... --provenance-sign 1 ...` plus `access-bridge-pilot-evidence-bundle-verify --require-trusted-provenance 1`.
 
 Compatibility note:
 - legacy TDPN path aliases are retained for backward compatibility.

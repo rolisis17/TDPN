@@ -36,6 +36,7 @@ LOCAL_SCOPE_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_local_sco
 LOCAL_SCOPE_PROVENANCE_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_local_scope.provenance.json"
 NO_PROVENANCE_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_no_provenance_summary.json"
 UNSIGNED_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_unsigned_summary.json"
+MISMATCHED_PROVENANCE_PATH_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_mismatched_provenance_path_summary.json"
 PRIVATE_KEY_FILE="$TMP_DIR/provenance-private.key"
 PUBLIC_KEY_FILE="$TMP_DIR/provenance-public.key"
 TRUST_STORE="$TMP_DIR/provenance-trust-store.json"
@@ -173,6 +174,21 @@ set -e
 if [[ "$unsigned_summary_rc" -eq 0 ]] || ! grep -Fq 'trusted pilot provenance requires external summary provenance.enabled=true' "$TMP_DIR/trusted-policy-unsigned-summary.log"; then
   echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted unsigned summary metadata"
   cat "$TMP_DIR/trusted-policy-unsigned-summary.log"
+  exit 1
+fi
+
+jq --arg other_provenance "$TMP_DIR/other.provenance.json" '.provenance.sidecar_json = $other_provenance' "$SUMMARY_JSON" >"$MISMATCHED_PROVENANCE_PATH_SUMMARY_JSON"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$MISMATCHED_PROVENANCE_PATH_SUMMARY_JSON" \
+  --provenance-json "$PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$TRUST_STORE" >"$TMP_DIR/trusted-policy-mismatched-provenance-path.log" 2>&1
+mismatched_provenance_path_rc=$?
+set -e
+if [[ "$mismatched_provenance_path_rc" -eq 0 ]] || ! grep -Fq 'trusted pilot provenance requires matching summary provenance paths' "$TMP_DIR/trusted-policy-mismatched-provenance-path.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted mismatched provenance path metadata"
+  cat "$TMP_DIR/trusted-policy-mismatched-provenance-path.log"
   exit 1
 fi
 
@@ -371,6 +387,18 @@ set -e
 if [[ "$bad_sha_rc" -eq 0 ]] || ! grep -Fq 'bundle tar checksum mismatch' "$TMP_DIR/bad-sha.log"; then
   echo "access bridge pilot evidence bundle verifier integration failed: tar checksum mismatch was not rejected"
   cat "$TMP_DIR/bad-sha.log"
+  exit 1
+fi
+
+WRONG_SHA_NAME="$TMP_DIR/wrong-name.tar.gz.sha256"
+printf '%s  %s\n' "$(sha256sum "$BUNDLE_TAR" | awk '{print $1}')" "wrong-bundle-name.tar.gz" >"$WRONG_SHA_NAME"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-tar "$BUNDLE_TAR" --bundle-tar-sha256-file "$WRONG_SHA_NAME" --check-manifest 0 >"$TMP_DIR/wrong-sha-name.log" 2>&1
+wrong_sha_name_rc=$?
+set -e
+if [[ "$wrong_sha_name_rc" -eq 0 ]] || ! grep -Fq 'bundle tar checksum sidecar filename mismatch' "$TMP_DIR/wrong-sha-name.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: tar checksum sidecar filename mismatch was not rejected"
+  cat "$TMP_DIR/wrong-sha-name.log"
   exit 1
 fi
 

@@ -75,6 +75,23 @@ if [[ "$private_https_rc" -eq 0 ]] ||
   exit 1
 fi
 
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url https://recovery-helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code test-code \
+  --config-json "$TMP_DIR/missing-config.json" \
+  --deploy-pack-dir "$TMP_DIR/missing-deploy-pack" \
+  --print-summary-json 0 >"$TMP_DIR/public-https-unsigned-pilot-bundle.log" 2>&1
+public_https_unsigned_rc=$?
+set -e
+if [[ "$public_https_unsigned_rc" -eq 0 ]] ||
+  ! grep -Fq -- 'real helper HTTPS pilot handoff requires --provenance-sign 1' "$TMP_DIR/public-https-unsigned-pilot-bundle.log"; then
+  echo "access bridge pilot evidence bundle integration failed: unsigned public HTTPS handoff was not rejected"
+  cat "$TMP_DIR/public-https-unsigned-pilot-bundle.log"
+  exit 1
+fi
+
 go run ./cmd/gpmrecover demo-bundle \
   --out-dir "$BUNDLE_DIR" \
   --org-id pilot-org \

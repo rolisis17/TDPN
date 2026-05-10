@@ -456,6 +456,14 @@ if [[ -n "$summary_json" && "$summary_contract_check" == "1" ]]; then
       echo "trusted pilot provenance requires external summary artifacts.provenance_json"
       issues=$((issues + 1))
     fi
+    if [[ -n "$summary_provenance_sidecar" && -n "$summary_artifact_provenance" ]]; then
+      summary_provenance_sidecar_abs="$(abs_path "$summary_provenance_sidecar")"
+      summary_artifact_provenance_abs="$(abs_path "$summary_artifact_provenance")"
+      if [[ "$summary_provenance_sidecar_abs" != "$summary_artifact_provenance_abs" ]]; then
+        echo "trusted pilot provenance requires matching summary provenance paths: provenance.sidecar_json=$summary_provenance_sidecar artifacts.provenance_json=$summary_artifact_provenance"
+        issues=$((issues + 1))
+      fi
+    fi
   fi
 fi
 bundle_tar_safe=0
@@ -491,8 +499,13 @@ if [[ "$check_tar_sha256" == "1" && -n "$bundle_tar" && -f "$bundle_tar" ]]; the
     line="$(head -n1 "$bundle_tar_sha256_file" || true)"
     if [[ "$line" =~ ^([A-Fa-f0-9]{64})[[:space:]][[:space:]](.+)$ ]]; then
       expected="${BASH_REMATCH[1],,}"
+      sidecar_tar_name="${BASH_REMATCH[2]}"
+      expected_tar_name="$(basename "$bundle_tar")"
       actual="$(sha256_value "$bundle_tar")"
-      if [[ "$actual" != "$expected" ]]; then
+      if [[ "$sidecar_tar_name" != "$expected_tar_name" ]]; then
+        echo "bundle tar checksum sidecar filename mismatch: expected=$expected_tar_name actual=$sidecar_tar_name"
+        issues=$((issues + 1))
+      elif [[ "$actual" != "$expected" ]]; then
         echo "bundle tar checksum mismatch: expected=$expected actual=$actual"
         issues=$((issues + 1))
       elif [[ "$show_details" == "1" ]]; then

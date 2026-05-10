@@ -138,11 +138,16 @@ bash ./scripts/access_bridge_host_install_check.sh \
   --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
   --expect-helper-id helper-demo \
   --expect-org-id freenews-demo \
-  --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json
+  --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json \
+  --provenance-sign 1 \
+  --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE \
+  --provenance-org-id ORG_ID \
+  --provenance-org-name ORG_NAME \
+  --provenance-out .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence.provenance.json
 
 ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify \
   --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json \
-  --provenance-json PROVENANCE_JSON \
+  --provenance-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence.provenance.json \
   --trust-store TRUST_STORE \
   --require-trusted-provenance 1
 ```

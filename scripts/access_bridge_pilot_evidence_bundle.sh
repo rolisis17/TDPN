@@ -483,6 +483,13 @@ if [[ "$require_public_host" == "1" ]] && ! base_url_is_loopback "$base_url" && 
   echo "access bridge pilot evidence bundle failed: --base-url host must look public-routable for non-loopback pilot evidence targets (set --require-public-host 0 for diagnostics)" >&2
   exit 2
 fi
+if [[ "$provenance_sign" != "1" && "$require_https" == "1" && "$require_public_host" == "1" ]] &&
+  ! base_url_is_loopback "$base_url" &&
+  [[ "$(url_scheme "$base_url")" == "https" ]] &&
+  ! base_url_host_is_private_or_reserved "$base_url"; then
+  echo "access bridge pilot evidence bundle failed: real helper HTTPS pilot handoff requires --provenance-sign 1" >&2
+  exit 2
+fi
 
 config_json="$(abs_path "$config_json")"
 deploy_pack_dir="$(abs_path "$deploy_pack_dir")"
@@ -658,7 +665,10 @@ if [[ "$status" == "pass" ]]; then
     evidence_scope="diagnostic"
   fi
 fi
-if [[ "$status" == "pass" && "$evidence_scope" != "real_helper_https" ]]; then
+if [[ "$status" == "pass" && "$evidence_scope" == "real_helper_https" && "$provenance_sign" != "1" ]]; then
+  recommended_action_id="sign_and_verify_access_bridge_pilot_evidence"
+  recommended_action="Sign this real helper HTTPS bundle with provenance and verify it with --require-trusted-provenance 1 before operator handoff."
+elif [[ "$status" == "pass" && "$evidence_scope" != "real_helper_https" ]]; then
   recommended_action_id="capture_real_helper_https_evidence"
   recommended_action="Capture the same bundle against a public HTTPS helper host before operator handoff."
 fi
@@ -749,7 +759,8 @@ jq -n \
     evidence_scope: $evidence_scope,
     notes: (
       if $status != "pass" then "Access bridge pilot evidence bundle needs operator action"
-      elif $evidence_scope == "real_helper_https" then "Access bridge pilot evidence bundle is ready for operator handoff"
+      elif $evidence_scope == "real_helper_https" and ($provenance_sign == "1") then "Access bridge pilot evidence bundle is ready for operator handoff"
+      elif $evidence_scope == "real_helper_https" then "Access bridge pilot evidence bundle passed real helper HTTPS checks; signed provenance is required before operator handoff"
       elif $evidence_scope == "local_rehearsal" then "Access bridge pilot evidence bundle passed as local rehearsal evidence; capture real helper HTTPS evidence before operator handoff"
       else "Access bridge pilot evidence bundle passed as diagnostic evidence; capture real helper HTTPS evidence before operator handoff"
       end
