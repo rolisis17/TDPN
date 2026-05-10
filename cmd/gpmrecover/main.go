@@ -68,6 +68,14 @@ type bridgeVerifyOutput struct {
 	TrustedAccessPaths []accesspack.AccessPath `json:"trusted_access_paths,omitempty"`
 }
 
+type bridgePolicyOutput struct {
+	Status   string                              `json:"status"`
+	Verified bool                                `json:"verified"`
+	Trusted  bool                                `json:"trusted"`
+	KeyID    string                              `json:"key_id"`
+	Policy   accesspack.BridgeInvitePolicyReport `json:"policy"`
+}
+
 type trustAddOutput struct {
 	Status     string `json:"status"`
 	TrustStore string `json:"trust_store"`
@@ -77,14 +85,15 @@ type trustAddOutput struct {
 }
 
 type demoBundleOutput struct {
-	Status         string            `json:"status"`
-	GeneratedAtUTC string            `json:"generated_at_utc"`
-	OutDir         string            `json:"out_dir"`
-	OrgID          string            `json:"org_id"`
-	OrgName        string            `json:"org_name"`
-	KeyID          string            `json:"key_id"`
-	Files          map[string]string `json:"files"`
-	NextSteps      []string          `json:"next_steps"`
+	Status         string                              `json:"status"`
+	GeneratedAtUTC string                              `json:"generated_at_utc"`
+	OutDir         string                              `json:"out_dir"`
+	OrgID          string                              `json:"org_id"`
+	OrgName        string                              `json:"org_name"`
+	KeyID          string                              `json:"key_id"`
+	Files          map[string]string                   `json:"files"`
+	BridgePolicy   accesspack.BridgeInvitePolicyReport `json:"bridge_policy"`
+	NextSteps      []string                            `json:"next_steps"`
 }
 
 func main() {
@@ -104,6 +113,8 @@ func main() {
 		err = runBridgeSign(os.Args[2:])
 	case "bridge-verify":
 		err = runBridgeVerify(os.Args[2:])
+	case "bridge-policy":
+		err = runBridgePolicy(os.Args[2:])
 	case "trust-add":
 		err = runTrustAdd(os.Args[2:])
 	case "trust-list":
@@ -141,6 +152,7 @@ func usage() {
   go run ./cmd/gpmrecover sign --pack FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-sign --invite FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
+  go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE)
   go run ./cmd/gpmrecover trust-add --trust-store FILE --org-id ID --org-name NAME --public-key-file FILE
   go run ./cmd/gpmrecover trust-list --trust-store FILE
   go run ./cmd/gpmrecover trust-remove --trust-store FILE --org-id ID --key-id ID
@@ -587,6 +599,59 @@ func runBridgeVerify(args []string) error {
 	return json.NewEncoder(os.Stdout).Encode(out)
 }
 
+func runBridgePolicy(args []string) error {
+	fs := flag.NewFlagSet("bridge-policy", flag.ContinueOnError)
+	inviteFile := fs.String("invite", "", "path to signed bridge invite JSON")
+	publicFile := fs.String("public-key-file", "", "path to public key file for one-off verification")
+	trustStoreFile := fs.String("trust-store", "", "path to access recovery trust store JSON")
+	minPaths := fs.Int("min-paths", 2, "minimum helper access paths")
+	minHosts := fs.Int("min-distinct-hosts", 2, "minimum distinct helper/contact hosts")
+	maxLifetimeHours := fs.Int("max-lifetime-hours", int(accesspack.MaxBridgeInviteLifetime/time.Hour), "maximum invite lifetime in hours")
+	requireContact := fs.Bool("require-contact", true, "require helper contact URL")
+	requireManualFallback := fs.Bool("require-manual-fallback", true, "require manual/external-app fallback path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	body, err := readInputFileStrict(*inviteFile, "bridge invite", maxPackFileBytes)
+	if err != nil {
+		return err
+	}
+	invite, err := accesspack.ParseBridgeInvite(body)
+	if err != nil {
+		return err
+	}
+	pub, trustedKey, err := resolveBridgeVerificationKey(invite, *publicFile, *trustStoreFile)
+	if err != nil {
+		return err
+	}
+	verified, err := accesspack.VerifyBridgeInvite(invite, pub, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	maxLifetime := time.Duration(*maxLifetimeHours) * time.Hour
+	report := accesspack.CheckBridgeInvitePolicy(verified.Invite, accesspack.BridgeInvitePolicyOptions{
+		MinAccessPaths:        *minPaths,
+		MinDistinctHosts:      *minHosts,
+		MaxLifetime:           maxLifetime,
+		RequireHelperContact:  *requireContact,
+		RequireManualFallback: *requireManualFallback,
+	}, time.Now().UTC())
+	out := bridgePolicyOutput{
+		Status:   report.Status,
+		Verified: true,
+		Trusted:  trustedKey != nil,
+		KeyID:    verified.KeyID,
+		Policy:   report,
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+		return err
+	}
+	if report.Status != "pass" {
+		return errors.New("bridge invite policy failed")
+	}
+	return nil
+}
+
 func runCheck(args []string) error {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	packFile := fs.String("pack", "", "path to signed access pack JSON")
@@ -688,6 +753,10 @@ func runDemoBundle(args []string) error {
 	if _, err := accesspack.VerifyBridgeInvite(signedInvite, pub, now); err != nil {
 		return fmt.Errorf("verify signed demo bridge invite: %w", err)
 	}
+	bridgePolicy := accesspack.CheckBridgeInvitePolicy(signedInvite, accesspack.DefaultBridgeInvitePolicyOptions(), now)
+	if bridgePolicy.Status != "pass" {
+		return fmt.Errorf("demo bridge invite policy failed: %+v", bridgePolicy.Findings)
+	}
 
 	files := map[string]string{}
 	addFile := func(key string, name string) string {
@@ -743,6 +812,7 @@ func runDemoBundle(args []string) error {
 		OrgName:        strings.TrimSpace(*orgName),
 		KeyID:          keyID,
 		Files:          files,
+		BridgePolicy:   bridgePolicy,
 		NextSteps: []string{
 			"Open apps/web/recovery.html in the local preview.",
 			"Import recovery-trust.json as the trust store.",

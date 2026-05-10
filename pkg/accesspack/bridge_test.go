@@ -77,6 +77,39 @@ func TestBridgeInviteTrustStoreResolution(t *testing.T) {
 	}
 }
 
+func TestBridgeInvitePolicyPassesDefault(t *testing.T) {
+	report := CheckBridgeInvitePolicy(testBridgeInvite(), DefaultBridgeInvitePolicyOptions(), time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC))
+	if report.Status != "pass" {
+		t.Fatalf("expected policy pass, got %+v", report)
+	}
+	if report.DistinctHostsCount != 3 {
+		t.Fatalf("expected 3 distinct hosts, got %+v", report.DistinctHosts)
+	}
+}
+
+func TestBridgeInvitePolicyRejectsWeakDiversity(t *testing.T) {
+	invite := testBridgeInvite()
+	invite.Helper.ContactURL = ""
+	invite.AccessPaths = invite.AccessPaths[:1]
+	report := CheckBridgeInvitePolicy(invite, DefaultBridgeInvitePolicyOptions(), time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC))
+	if report.Status != "fail" {
+		t.Fatalf("expected policy fail, got %+v", report)
+	}
+	var sawPaths bool
+	var sawContact bool
+	for _, finding := range report.Findings {
+		if finding.Code == "bridge_invite_too_few_paths" {
+			sawPaths = true
+		}
+		if finding.Code == "bridge_invite_missing_helper_contact" {
+			sawContact = true
+		}
+	}
+	if !sawPaths || !sawContact {
+		t.Fatalf("expected path/contact findings, got %+v", report.Findings)
+	}
+}
+
 func testBridgeInvite() BridgeInvite {
 	return BridgeInvite{
 		SchemaVersion: SchemaVersion,
@@ -98,6 +131,7 @@ func testBridgeInvite() BridgeInvite {
 		AccessPaths: []AccessPath{
 			{PathID: "backup-helper", Kind: "bridge", URL: "https://backup-helper.example/connect", Priority: 20},
 			{PathID: "helper-site", Kind: "bridge", URL: "https://helper.example/connect", Priority: 10},
+			{PathID: "manual-helper", Kind: "instructions", URL: "mailto:bridge@helpermail.example", Priority: 30, RequiresExternalApp: true},
 		},
 		SafetyNotes: []string{"Use only while this invite is unexpired."},
 	}

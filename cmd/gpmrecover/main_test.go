@@ -55,6 +55,9 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgeVerify([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--show-paths"}); err != nil {
 		t.Fatalf("bridge-verify: %v", err)
 	}
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey}); err != nil {
+		t.Fatalf("bridge-policy: %v", err)
+	}
 	if err := runVerify([]string{"--pack", signedPack, "--public-key-file", publicKey, "--show-paths"}); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -72,6 +75,9 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}
 	if err := runBridgeVerify([]string{"--invite", signedBridge, "--trust-store", trustStore, "--show-paths"}); err != nil {
 		t.Fatalf("bridge-verify with trust store: %v", err)
+	}
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--trust-store", trustStore}); err != nil {
+		t.Fatalf("bridge-policy with trust store: %v", err)
 	}
 	if err := runCheck([]string{"--pack", signedPack, "--trust-store", trustStore, "--timeout-sec", "2"}); err != nil {
 		t.Fatalf("check with trust store: %v", err)
@@ -120,6 +126,9 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgeVerify([]string{"--invite", importedBridge, "--trust-store", importedStore}); err != nil {
 		t.Fatalf("bridge-verify imported bridge invite: %v", err)
 	}
+	if err := runBridgePolicy([]string{"--invite", importedBridge, "--trust-store", importedStore}); err != nil {
+		t.Fatalf("bridge-policy imported bridge invite: %v", err)
+	}
 	pubBody, err := os.ReadFile(publicKey)
 	if err != nil {
 		t.Fatalf("read public key: %v", err)
@@ -137,6 +146,9 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}
 	if err := runBridgeVerify([]string{"--invite", signedBridge, "--trust-store", trustStore}); err == nil {
 		t.Fatal("expected bridge verify with empty trust store to fail")
+	}
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--trust-store", trustStore}); err == nil {
+		t.Fatal("expected bridge policy with empty trust store to fail")
 	}
 }
 
@@ -158,6 +170,9 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 	var manifest demoBundleOutput
 	if err := json.Unmarshal(body, &manifest); err != nil {
 		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	if manifest.BridgePolicy.Status != "pass" {
+		t.Fatalf("expected manifest bridge policy pass, got %+v", manifest.BridgePolicy)
 	}
 	for _, key := range []string{
 		"private_key",
@@ -181,6 +196,9 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 	}
 	if err := runBridgeVerify([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"], "--show-paths"}); err != nil {
 		t.Fatalf("verify generated bridge invite: %v", err)
+	}
+	if err := runBridgePolicy([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"]}); err != nil {
+		t.Fatalf("policy generated bridge invite: %v", err)
 	}
 	for _, key := range []string{"access_pack_qr", "bridge_invite_qr"} {
 		qrBody, err := os.ReadFile(manifest.Files[key])
@@ -249,6 +267,7 @@ func testBridgeInvite(serverURL string) accesspack.BridgeInvite {
 		},
 		AccessPaths: []accesspack.AccessPath{
 			{PathID: "bridge-main", Kind: "bridge", URL: serverURL + "/bridge", Priority: 10},
+			{PathID: "bridge-contact", Kind: "instructions", URL: "mailto:bridge-helper@example.com", Priority: 20, RequiresExternalApp: true},
 		},
 	}
 }

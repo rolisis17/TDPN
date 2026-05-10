@@ -140,6 +140,7 @@ First CLI:
 - `go run ./cmd/gpmrecover bridge-sign --invite docs/examples/access-recovery-bridge-invite.example.json --private-key-file .easy-node-logs/recovery.key --out .easy-node-logs/bridge-invite.signed.json`
 - `go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub`
 - `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --show-paths`
+- `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub --timeout-sec 8`
 
 Demo bundle flow:
@@ -159,6 +160,7 @@ Local trust-store flow:
 - `go run ./cmd/gpmrecover trust-list --trust-store .easy-node-logs/recovery-trust.json`
 - `go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --show-paths`
 - `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --show-paths`
+- `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --timeout-sec 8`
 - `go run ./cmd/gpmrecover trust-remove --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID`
 
@@ -182,9 +184,10 @@ Trust-store rules:
 Bridge-invite rules:
 - bridge invites are helper hints, not new roots of trust
 - bridge invites must expire within 14 days of issue time
+- `bridge-policy` defaults require at least two helper paths, at least two distinct helper/contact hosts, a helper contact URL, and a manual/external-app fallback path
 - the helper contact and helper paths are shown only after signature, expiry, org id, and trusted-key checks pass
 - the browser gives copy/open actions for the invite id, helper id, helper contact, and verified helper paths
-- production policy still needs source-diversity and rotation rules before a public bridge service is enabled
+- production policy still needs service-level rotation rules before a public bridge service is enabled
 
 `check` keeps trust and reachability separate:
 - it verifies the pack before probing anything
@@ -214,6 +217,7 @@ Do first:
 - access-pack signing/verification library
 - bridge-invite signing/verification library
 - CLI sign/verify for packs and bridge invites
+- CLI bridge-invite policy gate for helper/contact diversity
 - CLI reachability check that does not confuse reachable with trusted
 - local trust-store file
 - browser verifier/import screen
@@ -228,7 +232,7 @@ Do first:
 - docs explaining how a user visualizes it
 
 Do next:
-- bridge invite source-diversity and rotation policy
+- bridge service rotation/quarantine policy
 
 Do later:
 - bridge service
