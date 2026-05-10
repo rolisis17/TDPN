@@ -82,11 +82,25 @@ go run ./cmd/gpmrecover bridge-registry-verify \
   --out-registry "$verified_registry" \
   >/dev/null
 
+set +e
 go run ./cmd/gpmrecover bridge-policy \
   --invite "$signed_invite" \
   --trust-store "$trust_store" \
   --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json \
   --require-helper-registry \
+  >"$TMP_DIR/unsigned-registry-policy.log" 2>&1
+unsigned_registry_policy_rc=$?
+set -e
+if [[ "$unsigned_registry_policy_rc" -eq 0 ]]; then
+  echo "access recovery examples contract failed: unsigned helper registry policy succeeded without diagnostic opt-in"
+  cat "$TMP_DIR/unsigned-registry-policy.log"
+  exit 1
+fi
+go run ./cmd/gpmrecover bridge-policy \
+  --invite "$signed_invite" \
+  --trust-store "$trust_store" \
+  --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json \
+  --allow-unsigned-helper-registry \
   >/dev/null
 go run ./cmd/gpmrecover bridge-policy \
   --invite "$signed_invite" \

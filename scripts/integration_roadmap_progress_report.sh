@@ -1020,7 +1020,9 @@ if ! jq -e \
   and .current_roadmap_track == "access_recovery"
   and .access_recovery_track.status == "pilot-evidence-ready"
   and .access_recovery_track.ready == true
+  and .access_recovery_track.local_rehearsal_ready == false
   and .access_recovery_track.needs_attention == false
+  and .access_recovery_track.evidence_scope == "real_helper_https"
   and .access_recovery_track.access_bridge_service_smoke.available == true
   and .access_recovery_track.access_bridge_service_smoke.status == "pass"
   and .access_recovery_track.access_bridge_service_smoke.source_summary_json == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"'"
@@ -1293,6 +1295,51 @@ if ! grep -Eq '\[roadmap-progress-report\] access_recovery_track_status=pilot-ev
   exit 1
 fi
 
+echo "[roadmap-progress-report] Access Recovery local rehearsal is not pilot-ready evidence"
+ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_local_summary.json"
+jq '.base_url = "http://127.0.0.1:19820"' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_local_rehearsal.log 2>&1; then
+  echo "expected success for Access Recovery local rehearsal path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_local_rehearsal.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .current_roadmap_track == "access_recovery"
+  and .access_recovery_track.status == "local-rehearsal-ready"
+  and .access_recovery_track.ready == false
+  and .access_recovery_track.local_rehearsal_ready == true
+  and .access_recovery_track.needs_attention == true
+  and .access_recovery_track.evidence_scope == "local_rehearsal"
+  and .access_recovery_track.access_bridge_service_smoke.available == true
+  and .access_recovery_track.access_bridge_service_smoke.details.base_url == "http://127.0.0.1:19820"
+  and .access_recovery_track.recommended_next_action.id == "real_helper_https_evidence"
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("access-bridge-pilot-evidence-bundle"))
+  and ((.next_actions // []) | any(
+    .id == "real_helper_https_evidence"
+    and .requires_real_hosts == true
+    and .local_pack_only == false
+    and .missing_evidence_family == "access-recovery"
+    and .missing_evidence_action_kind == "real-helper-https"
+  ))
+  and .artifacts.access_bridge_service_smoke_summary_json == "'"$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON"'"
+' "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_summary.json" >/dev/null; then
+  echo "Access Recovery local rehearsal summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] Access Recovery evidence missing is surfaced as warning by default"
 ACCESS_RECOVERY_MISSING_SMOKE_SUMMARY_JSON="$TMP_DIR/missing_access_bridge_service_smoke_summary.json"
 ACCESS_RECOVERY_MISSING_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/missing_access_bridge_deployment_evidence_summary.json"
@@ -1328,7 +1375,13 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_host_install.available == false
   and .access_recovery_track.access_bridge_host_install.status == "missing"
   and .access_recovery_track.recommended_next_action.id == "access_bridge_service_smoke"
-  and ((.access_recovery_track.recommended_next_action.command // "") | test("access_bridge_service_smoke"))
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("access-recovery-local-evidence-refresh"))
+  and ((.next_actions // []) | any(
+    .id == "access_bridge_service_smoke"
+    and .missing_evidence_family == "access-recovery"
+    and .missing_evidence_action_kind == "local-evidence"
+    and ((.command // "") | test("access-recovery-local-evidence-refresh"))
+  ))
   and .artifacts.access_bridge_service_smoke_summary_json == null
   and .artifacts.access_bridge_deployment_evidence_summary_json == null
   and .artifacts.access_bridge_host_install_summary_json == null
@@ -1415,6 +1468,7 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_host_install.available == true
   and .access_recovery_track.access_bridge_host_install.status == "pass"
   and .access_recovery_track.recommended_next_action.id == "access_bridge_service_smoke"
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("access-recovery-local-evidence-refresh"))
   and .artifacts.access_bridge_service_smoke_summary_json == null
   and .artifacts.access_bridge_deployment_evidence_summary_json == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"'"
   and .artifacts.access_bridge_host_install_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"

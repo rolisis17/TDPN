@@ -381,7 +381,7 @@ if [[ "$refresh_roadmap" == "1" ]]; then
   bash ./scripts/easy_node.sh roadmap-progress-report \
     --refresh-manual-validation 0 \
     --refresh-single-machine-readiness 0 \
-    --require-access-recovery-evidence 1 \
+    --require-access-recovery-evidence 0 \
     --access-bridge-service-smoke-summary-json "$service_smoke_summary_json" \
     --access-bridge-deployment-evidence-summary-json "$deployment_evidence_summary_json" \
     --access-bridge-host-install-summary-json "$host_install_summary_json" \

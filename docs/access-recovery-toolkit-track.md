@@ -79,8 +79,9 @@ MVP jobs:
    - warn when a pack is signed by an unknown key
 
 2. Access pack import
-   - import JSON file first
-   - later support QR/text/deep-link import
+   - import signed JSON files
+   - import `GPMREC1` text handoffs and QR images for signed packs, bridge invites, trusted keys, trust stores, and signed helper registries
+   - later support deep-link import
    - reject malformed, expired, or badly signed packs
 
 3. Access path listing
@@ -149,9 +150,9 @@ First CLI (demo bundle plus lower-level artifact examples; commands assume Bash/
 - `go run ./cmd/gpmrecover bridge-sign --invite docs/examples/access-recovery-bridge-invite.example.json --private-key-file .easy-node-logs/recovery.key --out .easy-node-logs/bridge-invite.signed.json`
 - `go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub`
 - `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --show-paths`
-- `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json`
 - `go run ./cmd/gpmrecover bridge-registry-sign --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --org-id freenews-demo --org-name "FreeNews Demo" --private-key-file .easy-node-logs/recovery.key --out .easy-node-logs/bridge-helper-registry.signed.json`
 - `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --signed-helper-registry .easy-node-logs/bridge-helper-registry.signed.json`
+- `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --allow-unsigned-helper-registry` (diagnostic/raw-registry inspection only)
 - `go run ./cmd/gpmrecover bridge-registry-verify --signed-registry .easy-node-logs/bridge-helper-registry.signed.json --public-key-file .easy-node-logs/recovery.pub --out-registry .easy-node-logs/bridge-helper-registry.verified.json`
 - `go run ./cmd/gpmrecover bridge-registry-check --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-perth-1 --org-id freenews-demo --require-active`
 - `go run ./cmd/gpmrecover bridge-registry-upsert-helper --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-mirror-1 --org-ids freenews-demo --display-name "Mirror helper" --contact-url https://mirror-helper.example/contact --abuse-report-url https://mirror-helper.example/abuse --rate-limit-policy "beta cap: per-user and per-source limits enforced" --out .easy-node-logs/bridge-helper-registry.updated.json`
@@ -182,8 +183,8 @@ Local trust-store flow:
 - `go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --show-paths`
 - `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --show-paths`
 - `go run ./cmd/gpmrecover bridge-registry-verify --signed-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --trust-store .easy-node-logs/recovery-trust.json --out-registry .easy-node-logs/bridge-helper-registry.verified.json`
-- `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.json`
 - `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json`
+- `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.json --allow-unsigned-helper-registry` (diagnostic/raw-registry inspection only)
 - `go run ./cmd/gpmrecover bridge-service-config --invite .easy-node-logs/bridge-invite.signed.json --trust-store .easy-node-logs/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --out .easy-node-logs/bridge-service-config.json`
 - `go run ./cmd/gpmrecover bridge-service-check --config .easy-node-logs/bridge-service-config.json --path-id helper-web`
 - `go run ./cmd/gpmrecover bridge-service-code-generate --code-out .easy-node-logs/bridge-code.txt --hash-out .easy-node-logs/bridge-code-hash.json`
@@ -196,6 +197,7 @@ Local trust-store flow:
 - `bash ./scripts/access_bridge_service_smoke.sh --base-url https://bridge.example --path-id helper-web --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/bridge-service-smoke.json`
 - `bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/bridge-service-smoke.json --config-json .easy-node-logs/bridge-service-config.json --deploy-pack-dir .easy-node-logs/bridge-deploy --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/bridge-deployment-evidence.json`
 - `bash ./scripts/access_bridge_host_install_check.sh --deploy-pack-dir .easy-node-logs/bridge-deploy --config-json .easy-node-logs/bridge-service-config.json --summary-json .easy-node-logs/bridge-host-install-check.json`
+- `./scripts/easy_node.sh access-recovery-local-evidence-refresh --write-canonical 1 --refresh-roadmap 1 --print-summary-json 1` (local loopback rehearsal; useful for roadmap/dev evidence but not a substitute for real helper HTTPS evidence)
 - `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --base-url https://bridge.example --path-id helper-web --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --config-json .easy-node-logs/bridge-service-config.json --deploy-pack-dir .easy-node-logs/bridge-deploy --summary-json .easy-node-logs/access-bridge-pilot-evidence-summary.json`
 - `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify --summary-json .easy-node-logs/access-bridge-pilot-evidence-summary.json`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --timeout-sec 8`
@@ -227,7 +229,7 @@ Bridge-invite rules:
 - bridge invites are helper hints, not new roots of trust
 - bridge invites must expire within 14 days of issue time
 - `bridge-policy` defaults require at least two helper paths, at least two distinct helper/contact hosts, a helper contact URL, and a manual/external-app fallback path
-- `bridge-policy --helper-registry` additionally requires the helper to be active, registered for the invite organization, inside its active window, and not quarantined or disabled
+- `bridge-policy --helper-registry` is unsigned diagnostic input and requires `--allow-unsigned-helper-registry`; it can inspect active/quarantine behavior but is not trusted beta policy evidence
 - `bridge-policy --signed-helper-registry` verifies the registry artifact against the same public key/trust store, requires the registry organization to match the bridge invite organization, then applies the helper registry gate
 - `bridge-policy --require-helper-registry` fails if the helper registry was accidentally omitted from a production policy run
 - `bridge-registry-sign` and `bridge-registry-verify` publish helper registries as signed short-lived organization artifacts before extracting raw registry JSON for policy checks
@@ -277,8 +279,8 @@ First browser surface:
 - `apps/web/recovery.html`
 - browser-local bridge-invite verification has a deterministic Node/VM smoke check in `scripts/integration_recovery_browser_smoke.js`
 - runs local pack, bridge-invite, and trust-store parsing in the browser
-- imports an optional helper registry and enforces active/quarantined/disabled helper status before showing bridge paths
-- imports a signed helper registry artifact, verifies it against the local trust store, and extracts the raw registry for bridge-invite policy checks
+- treats raw helper registry import/export as local inspection or operator editing material only
+- imports a signed helper registry artifact, verifies it against the local trust store, and extracts the raw registry for bridge-invite policy checks before showing bridge paths
 - preserves signed helper registry provenance after extraction and rejects bridge invites from a different organization
 - lets a tester add/remove trusted organization public keys without hand-editing JSON
 - validates trusted-key handoffs, imported trust stores, and browser trust-store add/remove writes before persisting them locally, including public-key length, derived key-id matching, duplicate org/key rejection, and disabled single-key handoff rejection
@@ -290,7 +292,7 @@ First browser surface:
 - validates text handoff payloads before browser QR rendering/download so a bad pasted handoff is not turned into a QR
 - can scan a QR image into the text handoff field with native `BarcodeDetector` support or the bundled browser scanner fallback
 - verifies the Ed25519 signature with Web Crypto when the browser supports it
-- labels bridge-invite helper policy results as signed-registry or unsigned-registry so beta users can distinguish verified registry snapshots from local/raw testing inputs
+- labels bridge-invite helper policy results from verified signed registries; local/raw registry material remains inspection-only for beta users
 - lists trusted access/helper paths only after signature, expiry, org id, and trusted-key checks pass
 - shows signed helper contact/copy actions for verified bridge invites
 - does not run network reachability checks yet because browser cross-origin checks are not reliable enough for the beta trust decision

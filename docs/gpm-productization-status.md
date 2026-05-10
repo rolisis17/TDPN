@@ -1,10 +1,15 @@
 # GPM Productization Status Tracker
 
-Last updated: 2026-04-26
+Last updated: 2026-05-11
 
 Scope:
-- Global Private Mesh (GPM) track only.
+- Current productization focus is the Access Recovery beta pivot, with the legacy GPM/VPN track retained as supporting infrastructure and validation debt.
 - Status labels below are based on repository evidence, not intent.
+
+Current pivot:
+- Access Recovery is the active roadmap track. The launchable wedge is signed emergency access packs, signed bridge invites, trusted organization keys, signed helper registries, browser-local verification, and operator evidence bundles for helper bridges.
+- Local rehearsal evidence can be refreshed with `./scripts/easy_node.sh access-recovery-local-evidence-refresh --write-canonical 1 --refresh-roadmap 1 --print-summary-json 1`; it proves the loopback flow and writes canonical roadmap summaries, but it is not real pilot handoff evidence.
+- Pilot handoff still requires real helper HTTPS evidence through `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle ...` plus `access-bridge-pilot-evidence-bundle-verify`.
 
 Compatibility note:
 - legacy TDPN path aliases are retained for backward compatibility.

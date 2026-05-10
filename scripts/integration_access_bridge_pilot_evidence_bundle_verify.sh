@@ -38,25 +38,13 @@ printf '%s\n' '{"status":"pass"}' >"$BUNDLE_DIR/access_bridge_host_install_check
 printf '%s\n' 'GPM_BRIDGE_ALLOW_QUERY_CODE="false"' >"$BUNDLE_DIR/bridge-deploy-pack/gpm-access-bridge.env"
 printf '%s\n' '{"helper_id":"helper-pilot"}' >"$BUNDLE_DIR/bridge-service-config.json"
 
-(
-  cd "$BUNDLE_DIR"
-  find . -type f -print \
-    | sed 's|^\./||' \
-    | grep -v '^manifest\.sha256$' \
-    | LC_ALL=C sort \
-    | while IFS= read -r rel; do
-        sha256sum "$rel"
-      done
-) >"$BUNDLE_DIR/manifest.sha256"
-
-tar -czf "$BUNDLE_TAR" -C "$TMP_DIR" "$(basename "$BUNDLE_DIR")"
-printf '%s  %s\n' "$(sha256sum "$BUNDLE_TAR" | awk '{print $1}')" "$(basename "$BUNDLE_TAR")" >"$BUNDLE_TAR_SHA256_FILE"
-
 jq -n \
   --arg bundle_dir "$BUNDLE_DIR" \
   --arg bundle_tar "$BUNDLE_TAR" \
   --arg bundle_tar_sha256_file "$BUNDLE_TAR_SHA256_FILE" \
   --arg manifest_sha256 "$BUNDLE_DIR/manifest.sha256" \
+  --arg summary_json "$SUMMARY_JSON" \
+  --arg bundled_summary_json "$BUNDLE_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
   '{
     version: 1,
     schema: {id: "access_bridge_pilot_evidence_bundle_summary"},
@@ -75,13 +63,74 @@ jq -n \
       bundle_dir: $bundle_dir,
       bundle_tar: $bundle_tar,
       bundle_tar_sha256_file: $bundle_tar_sha256_file,
-      manifest_sha256: $manifest_sha256
+      manifest_sha256: $manifest_sha256,
+      summary_json: $summary_json,
+      bundled_summary_json: $bundled_summary_json
     }
   }' >"$SUMMARY_JSON"
+cp "$SUMMARY_JSON" "$BUNDLE_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+
+(
+  cd "$BUNDLE_DIR"
+  find . -type f -print \
+    | sed 's|^\./||' \
+    | grep -v '^manifest\.sha256$' \
+    | LC_ALL=C sort \
+    | while IFS= read -r rel; do
+        sha256sum "$rel"
+      done
+) >"$BUNDLE_DIR/manifest.sha256"
+
+tar -czf "$BUNDLE_TAR" -C "$TMP_DIR" "$(basename "$BUNDLE_DIR")"
+printf '%s  %s\n' "$(sha256sum "$BUNDLE_TAR" | awk '{print $1}')" "$(basename "$BUNDLE_TAR")" >"$BUNDLE_TAR_SHA256_FILE"
 
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --summary-json "$SUMMARY_JSON" >"$TMP_DIR/verify-summary.log"
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-dir "$BUNDLE_DIR" >"$TMP_DIR/verify-dir.log"
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-tar "$BUNDLE_TAR" >"$TMP_DIR/verify-tar.log"
+
+MISMATCH_ROOT="$TMP_DIR/bundled-summary-mismatch-root"
+MISMATCH_DIR="$MISMATCH_ROOT/$(basename "$BUNDLE_DIR")"
+MISMATCH_TAR="$TMP_DIR/bundled-summary-mismatch.tar.gz"
+MISMATCH_SHA="${MISMATCH_TAR}.sha256"
+MISMATCH_EXTERNAL_SUMMARY="$TMP_DIR/bundled-summary-mismatch-external.json"
+mkdir -p "$MISMATCH_ROOT"
+cp -R "$BUNDLE_DIR" "$MISMATCH_DIR"
+jq '.status = "fail" | .rc = 1 | .summary.steps_fail = 1 | .steps[0].status = "fail" | .steps[0].rc = 1' \
+  "$MISMATCH_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
+  >"$MISMATCH_DIR/access_bridge_pilot_evidence_bundle_summary.json.tmp"
+mv "$MISMATCH_DIR/access_bridge_pilot_evidence_bundle_summary.json.tmp" "$MISMATCH_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+(
+  cd "$MISMATCH_DIR"
+  find . -type f -print \
+    | sed 's|^\./||' \
+    | grep -v '^manifest\.sha256$' \
+    | LC_ALL=C sort \
+    | while IFS= read -r rel; do
+        sha256sum "$rel"
+      done
+) >"$MISMATCH_DIR/manifest.sha256"
+tar -czf "$MISMATCH_TAR" -C "$MISMATCH_ROOT" "$(basename "$BUNDLE_DIR")"
+printf '%s  %s\n' "$(sha256sum "$MISMATCH_TAR" | awk '{print $1}')" "$(basename "$MISMATCH_TAR")" >"$MISMATCH_SHA"
+jq \
+  --arg bundle_dir "$MISMATCH_DIR" \
+  --arg bundle_tar "$MISMATCH_TAR" \
+  --arg bundle_tar_sha256_file "$MISMATCH_SHA" \
+  --arg manifest_sha256 "$MISMATCH_DIR/manifest.sha256" \
+  '.artifacts.bundle_dir = $bundle_dir
+    | .artifacts.bundle_tar = $bundle_tar
+    | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file
+    | .artifacts.manifest_sha256 = $manifest_sha256' \
+  "$SUMMARY_JSON" >"$MISMATCH_EXTERNAL_SUMMARY"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --summary-json "$MISMATCH_EXTERNAL_SUMMARY" >"$TMP_DIR/bundled-summary-mismatch.log" 2>&1
+bundled_summary_mismatch_rc=$?
+set -e
+if [[ "$bundled_summary_mismatch_rc" -eq 0 ]] ||
+  ! grep -Eq 'bundled bundle summary status is not pass|external summary does not match bundled summary' "$TMP_DIR/bundled-summary-mismatch.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: mismatched failing bundled summary was not rejected"
+  cat "$TMP_DIR/bundled-summary-mismatch.log"
+  exit 1
+fi
 
 BAD_SUMMARY_JSON="$TMP_DIR/bad_bundle_summary_contract.json"
 jq '.status = "fail" | .rc = 1 | .summary.steps_fail = 1 | .steps[0].status = "fail" | .steps[0].rc = 1' "$SUMMARY_JSON" >"$BAD_SUMMARY_JSON"

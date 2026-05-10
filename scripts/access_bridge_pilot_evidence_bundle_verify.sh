@@ -80,6 +80,63 @@ json_string() {
   jq -r "$filter // \"\"" "$file" 2>/dev/null || true
 }
 
+validate_bundle_summary_contract() {
+  local file="$1"
+  local label="$2"
+  local local_issues=0
+  local summary_schema_id summary_status summary_rc summary_steps_total summary_steps_fail summary_steps_len summary_bad_step_count
+
+  if [[ ! -f "$file" ]]; then
+    echo "$label not found: $file"
+    return 1
+  fi
+  if ! jq -e . "$file" >/dev/null 2>&1; then
+    echo "$label JSON is not valid JSON: $file"
+    return 1
+  fi
+
+  summary_schema_id="$(jq -r '.schema.id // ""' "$file")"
+  summary_status="$(jq -r '.status // ""' "$file" | tr '[:upper:]' '[:lower:]')"
+  summary_rc="$(jq -r 'if has("rc") then (.rc|tostring) else "" end' "$file")"
+  summary_steps_total="$(jq -r 'if (.summary.steps_total|type) == "number" then .summary.steps_total else "" end' "$file")"
+  summary_steps_fail="$(jq -r 'if (.summary.steps_fail|type) == "number" then .summary.steps_fail else "" end' "$file")"
+  summary_steps_len="$(jq -r 'if (.steps|type) == "array" then (.steps|length|tostring) else "" end' "$file")"
+  summary_bad_step_count="$(jq -r '[.steps[]? | select((.status // "" | ascii_downcase) != "pass" or (has("rc") and .rc != 0))] | length' "$file")"
+  if [[ "$summary_schema_id" != "access_bridge_pilot_evidence_bundle_summary" ]]; then
+    echo "$label schema mismatch: expected=access_bridge_pilot_evidence_bundle_summary actual=${summary_schema_id:-<missing>}"
+    local_issues=$((local_issues + 1))
+  fi
+  if [[ "$summary_status" != "pass" ]]; then
+    echo "$label status is not pass: ${summary_status:-<missing>}"
+    local_issues=$((local_issues + 1))
+  fi
+  if [[ -n "$summary_rc" && "$summary_rc" != "0" ]]; then
+    echo "$label rc is not 0: $summary_rc"
+    local_issues=$((local_issues + 1))
+  fi
+  if [[ -z "$summary_steps_total" || "$summary_steps_total" -le 0 ]]; then
+    echo "$label steps_total is missing or zero"
+    local_issues=$((local_issues + 1))
+  fi
+  if [[ -z "$summary_steps_len" || "$summary_steps_len" -le 0 ]]; then
+    echo "$label steps array is missing or empty"
+    local_issues=$((local_issues + 1))
+  elif [[ -n "$summary_steps_total" && "$summary_steps_len" != "$summary_steps_total" ]]; then
+    echo "$label steps length does not match steps_total: steps_len=$summary_steps_len steps_total=$summary_steps_total"
+    local_issues=$((local_issues + 1))
+  fi
+  if [[ "$summary_steps_fail" != "0" ]]; then
+    echo "$label steps_fail is not 0: ${summary_steps_fail:-<missing>}"
+    local_issues=$((local_issues + 1))
+  fi
+  if [[ "$summary_bad_step_count" != "0" ]]; then
+    echo "$label contains failing step entries: $summary_bad_step_count"
+    local_issues=$((local_issues + 1))
+  fi
+
+  ((local_issues == 0))
+}
+
 sha256_tool=""
 detect_sha256_tool() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -247,7 +304,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for cmd in bash basename dirname find grep head jq mktemp sed sort tar tr; do
+for cmd in bash basename cmp dirname find grep head jq mktemp sed sort tar tr; do
   need_cmd "$cmd"
 done
 detect_sha256_tool
@@ -303,48 +360,8 @@ trap cleanup EXIT
 
 issues=0
 if [[ -n "$summary_json" && "$summary_contract_check" == "1" ]]; then
-  if ! jq -e . "$summary_json" >/dev/null 2>&1; then
-    echo "summary JSON is not valid JSON: $summary_json"
+  if ! validate_bundle_summary_contract "$summary_json" "external bundle summary"; then
     issues=$((issues + 1))
-  else
-    summary_schema_id="$(jq -r '.schema.id // ""' "$summary_json")"
-    summary_status="$(jq -r '.status // ""' "$summary_json" | tr '[:upper:]' '[:lower:]')"
-    summary_rc="$(jq -r 'if has("rc") then (.rc|tostring) else "" end' "$summary_json")"
-    summary_steps_total="$(jq -r 'if (.summary.steps_total|type) == "number" then .summary.steps_total else "" end' "$summary_json")"
-    summary_steps_fail="$(jq -r 'if (.summary.steps_fail|type) == "number" then .summary.steps_fail else "" end' "$summary_json")"
-    summary_steps_len="$(jq -r 'if (.steps|type) == "array" then (.steps|length|tostring) else "" end' "$summary_json")"
-    summary_bad_step_count="$(jq -r '[.steps[]? | select((.status // "" | ascii_downcase) != "pass" or (has("rc") and .rc != 0))] | length' "$summary_json")"
-    if [[ "$summary_schema_id" != "access_bridge_pilot_evidence_bundle_summary" ]]; then
-      echo "bundle summary schema mismatch: expected=access_bridge_pilot_evidence_bundle_summary actual=${summary_schema_id:-<missing>}"
-      issues=$((issues + 1))
-    fi
-    if [[ "$summary_status" != "pass" ]]; then
-      echo "bundle summary status is not pass: ${summary_status:-<missing>}"
-      issues=$((issues + 1))
-    fi
-    if [[ -n "$summary_rc" && "$summary_rc" != "0" ]]; then
-      echo "bundle summary rc is not 0: $summary_rc"
-      issues=$((issues + 1))
-    fi
-    if [[ -z "$summary_steps_total" || "$summary_steps_total" -le 0 ]]; then
-      echo "bundle summary steps_total is missing or zero"
-      issues=$((issues + 1))
-    fi
-    if [[ -z "$summary_steps_len" || "$summary_steps_len" -le 0 ]]; then
-      echo "bundle summary steps array is missing or empty"
-      issues=$((issues + 1))
-    elif [[ -n "$summary_steps_total" && "$summary_steps_len" != "$summary_steps_total" ]]; then
-      echo "bundle summary steps length does not match steps_total: steps_len=$summary_steps_len steps_total=$summary_steps_total"
-      issues=$((issues + 1))
-    fi
-    if [[ "$summary_steps_fail" != "0" ]]; then
-      echo "bundle summary steps_fail is not 0: ${summary_steps_fail:-<missing>}"
-      issues=$((issues + 1))
-    fi
-    if [[ "$summary_bad_step_count" != "0" ]]; then
-      echo "bundle summary contains failing step entries: $summary_bad_step_count"
-      issues=$((issues + 1))
-    fi
   fi
 fi
 bundle_tar_safe=0
@@ -426,6 +443,21 @@ fi
 
 if [[ "$check_manifest" == "1" && -n "$manifest_bundle_dir" && -d "$manifest_bundle_dir" ]]; then
   manifest_file="$manifest_bundle_dir/manifest.sha256"
+  bundled_summary_json="$manifest_bundle_dir/access_bridge_pilot_evidence_bundle_summary.json"
+  if [[ ! -f "$bundled_summary_json" ]]; then
+    echo "bundled summary not found: $bundled_summary_json"
+    issues=$((issues + 1))
+  else
+    if ! validate_bundle_summary_contract "$bundled_summary_json" "bundled bundle summary"; then
+      issues=$((issues + 1))
+    fi
+    if [[ -n "$summary_json" && -f "$summary_json" ]] && ! cmp -s "$summary_json" "$bundled_summary_json"; then
+      echo "external summary does not match bundled summary: external=$summary_json bundled=$bundled_summary_json"
+      issues=$((issues + 1))
+    elif [[ "$show_details" == "1" ]]; then
+      echo "bundled summary ok: $bundled_summary_json"
+    fi
+  fi
   if [[ ! -f "$manifest_file" ]]; then
     echo "manifest not found: $manifest_file"
     issues=$((issues + 1))

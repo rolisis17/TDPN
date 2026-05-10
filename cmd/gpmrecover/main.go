@@ -82,11 +82,13 @@ type bridgeVerifyOutput struct {
 }
 
 type bridgePolicyOutput struct {
-	Status   string                              `json:"status"`
-	Verified bool                                `json:"verified"`
-	Trusted  bool                                `json:"trusted"`
-	KeyID    string                              `json:"key_id"`
-	Policy   accesspack.BridgeInvitePolicyReport `json:"policy"`
+	Status          string                              `json:"status"`
+	Verified        bool                                `json:"verified"`
+	Trusted         bool                                `json:"trusted"`
+	KeyID           string                              `json:"key_id"`
+	RegistryTrusted bool                                `json:"registry_trusted"`
+	RegistrySource  string                              `json:"registry_source"`
+	Policy          accesspack.BridgeInvitePolicyReport `json:"policy"`
 }
 
 type bridgeRegistrySetStatusOutput struct {
@@ -240,7 +242,7 @@ func usage() {
   go run ./cmd/gpmrecover sign --pack FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-sign --invite FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
-  go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE | --signed-helper-registry FILE] [--require-helper-registry 1]
+  go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--signed-helper-registry FILE | --helper-registry FILE --allow-unsigned-helper-registry] [--require-helper-registry 1]
   go run ./cmd/gpmrecover bridge-service-config --invite FILE --signed-helper-registry FILE (--trust-store FILE | --public-key-file FILE) [--out FILE]
   go run ./cmd/gpmrecover bridge-service-check --config FILE [--path-id ID | --url URL] [--out FILE]
   go run ./cmd/gpmrecover bridge-service-serve --config FILE --config-sha256 HEX [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] --access-code-sha256 HEX [--allow-unpinned-local=false] [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=false] [--redirect=false]
@@ -878,6 +880,7 @@ func runBridgePolicy(args []string) error {
 	trustStoreFile := fs.String("trust-store", "", "path to access recovery trust store JSON")
 	helperRegistryFile := fs.String("helper-registry", "", "optional bridge helper registry JSON for active/quarantine policy")
 	signedHelperRegistryFile := fs.String("signed-helper-registry", "", "optional signed bridge helper registry artifact JSON for active/quarantine policy")
+	allowUnsignedHelperRegistry := fs.Bool("allow-unsigned-helper-registry", false, "allow raw unsigned helper registry JSON for local diagnostics only")
 	requireHelperRegistry := fs.Bool("require-helper-registry", false, "fail if no bridge helper registry is provided")
 	minPaths := fs.Int("min-paths", 2, "minimum helper access paths")
 	minHosts := fs.Int("min-distinct-hosts", 2, "minimum distinct helper/contact hosts")
@@ -904,12 +907,18 @@ func runBridgePolicy(args []string) error {
 		return err
 	}
 	var helperRegistry *accesspack.BridgeHelperRegistry
+	registryTrusted := false
+	registrySource := "none"
 	if strings.TrimSpace(*helperRegistryFile) != "" {
+		if !*allowUnsignedHelperRegistry {
+			return errors.New("--helper-registry is unsigned diagnostic input; use --signed-helper-registry for trusted policy evidence or pass --allow-unsigned-helper-registry for local testing")
+		}
 		registry, err := loadBridgeHelperRegistryFile(*helperRegistryFile)
 		if err != nil {
 			return err
 		}
 		helperRegistry = &registry
+		registrySource = "unsigned"
 	}
 	if strings.TrimSpace(*signedHelperRegistryFile) != "" {
 		if helperRegistry != nil {
@@ -921,6 +930,8 @@ func runBridgePolicy(args []string) error {
 		}
 		registry := verifiedRegistry.Artifact.Registry
 		helperRegistry = &registry
+		registryTrusted = true
+		registrySource = "signed"
 	}
 	maxLifetime := time.Duration(*maxLifetimeHours) * time.Hour
 	defaultPolicy := accesspack.DefaultBridgeInvitePolicyOptions()
@@ -936,11 +947,13 @@ func runBridgePolicy(args []string) error {
 		HelperRegistry:               helperRegistry,
 	}, time.Now().UTC())
 	out := bridgePolicyOutput{
-		Status:   report.Status,
-		Verified: true,
-		Trusted:  trustedKey != nil,
-		KeyID:    verified.KeyID,
-		Policy:   report,
+		Status:          report.Status,
+		Verified:        true,
+		Trusted:         trustedKey != nil,
+		KeyID:           verified.KeyID,
+		RegistryTrusted: registryTrusted,
+		RegistrySource:  registrySource,
+		Policy:          report,
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
 		return err
@@ -2070,7 +2083,7 @@ func runDemoBundle(args []string) error {
 			"Run bridge-registry-check with bridge-helper-registry.json when changing helper status.",
 			"Use bridge-registry-upsert-helper to add or update helper registry entries without hand-editing JSON.",
 			"Use bridge-registry-set-status to quarantine or re-enable helpers without hand-editing registry JSON.",
-			"Run bridge-policy with bridge-helper-registry.json before enabling a helper route in a service.",
+			"Run bridge-policy with bridge-helper-registry.signed.json before enabling a helper route in a service; raw registries are diagnostic-only.",
 		},
 	}
 	manifestPath := addFile("manifest", "demo-manifest.json")
