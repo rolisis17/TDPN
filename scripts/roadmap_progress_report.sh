@@ -1958,17 +1958,24 @@ access_recovery_evidence_json() {
         and str_eq(.auth.missing_code_http_status; "401")
         and str_eq(.auth.wrong_code_http_status; "401")
         and str_eq(.auth.valid_code_http_status; "200")
+        and str_eq(.bridge.http_status; "200")
         and str_eq(.bridge.status; "ok")
         and (.bridge.security_headers_ok == true)
         and str_eq(.abuse.http_status; "202");
       def deployment_evidence_semantic_ok:
         rc_ok
         and pass_status
+        and ((.schema.major | type) == "number" and .schema.major == 1)
+        and ((.schema.minor | type) == "number" and .schema.minor >= 1)
         and str_eq(.smoke.status; "pass")
         and str_eq(.smoke.evidence_status; "pass")
         and (.smoke.auth_required == true)
         and str_eq(.smoke.missing_code_http_status; "401")
         and str_eq(.smoke.wrong_code_http_status; "401")
+        and str_eq(.smoke.valid_code_http_status; "200")
+        and str_eq(.smoke.bridge_http_status; "200")
+        and str_eq(.smoke.bridge_status; "ok")
+        and (.smoke.bridge_security_headers_ok == true)
         and str_eq(.identity_check.status; "pass")
         and str_eq(.local_files.config.status; "pass")
         and str_eq(.local_files.deploy_pack.status; "pass");
@@ -1995,7 +2002,11 @@ access_recovery_evidence_json() {
           "wrapper_hardened_flags",
           "systemd_hardening",
           "caddy_xff_overwrite",
-          "nginx_xff_overwrite"
+          "nginx_xff_overwrite",
+          "caddy_public_host_valid",
+          "caddy_reverse_proxy_target",
+          "nginx_public_host_valid",
+          "nginx_proxy_pass_target"
         ];
       def required_host_checks_pass:
         . as $summary
@@ -2027,6 +2038,7 @@ access_recovery_evidence_json() {
           missing_code_http_status: str_or_null(.auth.missing_code_http_status),
           wrong_code_http_status: str_or_null(.auth.wrong_code_http_status),
           valid_code_http_status: str_or_null(.auth.valid_code_http_status),
+          bridge_http_status: str_or_null(.bridge.http_status),
           bridge_status: str_or_null(.bridge.status),
           bridge_security_headers_ok: (if (.bridge.security_headers_ok | type) == "boolean" then .bridge.security_headers_ok else null end),
           abuse_http_status: str_or_null(.abuse.http_status)
@@ -2038,6 +2050,10 @@ access_recovery_evidence_json() {
           smoke_auth_required: (if (.smoke.auth_required | type) == "boolean" then .smoke.auth_required else null end),
           smoke_missing_code_http_status: str_or_null(.smoke.missing_code_http_status),
           smoke_wrong_code_http_status: str_or_null(.smoke.wrong_code_http_status),
+          smoke_valid_code_http_status: str_or_null(.smoke.valid_code_http_status),
+          smoke_bridge_http_status: str_or_null(.smoke.bridge_http_status),
+          smoke_bridge_status: str_or_null(.smoke.bridge_status),
+          smoke_bridge_security_headers_ok: (if (.smoke.bridge_security_headers_ok | type) == "boolean" then .smoke.bridge_security_headers_ok else null end),
           smoke_config_sha256: str_or_null(.smoke.config_sha256),
           smoke_summary_json: str_or_null(.smoke.summary_json),
           identity_status: str_or_null(.identity_check.status),
@@ -2236,6 +2252,11 @@ access_recovery_verifier_evidence_json() {
         and ((.trusted_provenance.summary_evidence_scope // "") == "real_helper_https")
         and ((.inputs.trust_store // "") != "")
         and ((.inputs.public_key_file // null) == null);
+      def trusted_pilot_receipt_ready:
+        (.trusted_pilot_receipt_ready == true)
+        and trusted_provenance_ready;
+      def pilot_handoff_ready:
+        .pilot_handoff_ready == true;
       def generated_at_ready:
         (.generated_at_utc | type) == "string" and ((.generated_at_utc | length) > 0);
       def evidence_binding_ready:
@@ -2247,7 +2268,7 @@ access_recovery_verifier_evidence_json() {
       | status_norm as $raw_status
       | (($schema_id == $expected_schema_id) and ($raw_status != "")) as $valid_contract
       | ($valid_contract and ($summary_stale | not)) as $fresh_contract
-      | ($fresh_contract and ($raw_status == "pass") and rc_ok and generated_at_ready and required_checks_enabled and required_checks_pass and trusted_provenance_ready and evidence_binding_ready) as $semantic_ok
+      | ($fresh_contract and ($raw_status == "pass") and rc_ok and generated_at_ready and required_checks_enabled and required_checks_pass and trusted_pilot_receipt_ready and evidence_binding_ready) as $semantic_ok
       | (
           if $valid_contract and $summary_stale then "stale"
           elif $valid_contract and ($semantic_ok | not) then (if $raw_status == "pass" then "fail" else $raw_status end)
@@ -2293,6 +2314,8 @@ access_recovery_verifier_evidence_json() {
             trusted_provenance_trusted: (.trusted_provenance.trusted // null),
             trusted_provenance_status: str_or_null(.trusted_provenance.status),
             trusted_provenance_source: str_or_null(.trusted_provenance.source),
+            trusted_pilot_receipt_ready: (if (.trusted_pilot_receipt_ready | type) == "boolean" then .trusted_pilot_receipt_ready else null end),
+            pilot_handoff_ready: (if (.pilot_handoff_ready | type) == "boolean" then .pilot_handoff_ready else null end),
             evidence_scope: str_or_null(.trusted_provenance.evidence_scope),
             summary_evidence_scope: str_or_null(.trusted_provenance.summary_evidence_scope),
             generated_at_utc_present: generated_at_ready,
@@ -2397,7 +2420,7 @@ access_recovery_track_json_from_evidence() {
         end;
       def real_helper_https_base_ready:
         all_pass and evidence_binding.ok and real_helper_https_evidence;
-      def trusted_verifier_ready:
+      def trusted_pilot_receipt_ready:
         real_helper_https_base_ready
         and ($bundle_verify.available == true)
         and ($bundle_verify.status == "pass")
@@ -2408,6 +2431,11 @@ access_recovery_track_json_from_evidence() {
         and (($bundle_verify.details.trusted_provenance_source // "") == "trust_store")
         and (($bundle_verify.details.evidence_scope // "") == "real_helper_https")
         and (verifier_binding.ok == true);
+      def verifier_pilot_handoff_ready:
+        $bundle_verify.details.pilot_handoff_ready == true;
+      def pilot_handoff_ready:
+        trusted_pilot_receipt_ready
+        and verifier_pilot_handoff_ready;
       def first_attention:
         [$service_smoke, $deployment_evidence, $host_install]
         | map(select(.needs_attention == true))
@@ -2426,7 +2454,8 @@ access_recovery_track_json_from_evidence() {
           "bash ./scripts/access_bridge_host_install_check.sh --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
         end;
       def track_status:
-        if real_helper_https_base_ready and trusted_verifier_ready then "pilot-evidence-ready"
+        if real_helper_https_base_ready and pilot_handoff_ready then "pilot-evidence-ready"
+        elif real_helper_https_base_ready and trusted_pilot_receipt_ready then "pilot-handoff-not-ready"
         elif real_helper_https_base_ready then "trusted-provenance-required"
         elif all_pass and evidence_binding.ok then "local-rehearsal-ready"
         elif all_pass and ((evidence_binding.ok) | not) then "evidence-failed"
@@ -2443,7 +2472,7 @@ access_recovery_track_json_from_evidence() {
       | {
           status: $track_status,
           ready: ($track_status == "pilot-evidence-ready"),
-          pilot_handoff_ready: ($track_status == "pilot-evidence-ready"),
+          pilot_handoff_ready: pilot_handoff_ready,
           local_rehearsal_ready: ($track_status == "local-rehearsal-ready"),
           needs_attention: ($track_status != "pilot-evidence-ready"),
           evidence_scope: evidence_scope,
@@ -2451,6 +2480,8 @@ access_recovery_track_json_from_evidence() {
           recommendation: (
             if $track_status == "pilot-evidence-ready" then
               "Access Recovery bridge pilot evidence is ready for operator handoff."
+            elif $track_status == "pilot-handoff-not-ready" then
+              "Access Recovery trusted verifier receipt is valid, but pilot_handoff_ready is false; complete handoff readiness before operator handoff."
             elif $track_status == "trusted-provenance-required" then
               "Access Recovery real helper HTTPS evidence is present; run the trusted provenance verifier before pilot handoff."
             elif $track_status == "local-rehearsal-ready" then
@@ -2465,7 +2496,9 @@ access_recovery_track_json_from_evidence() {
           access_bridge_pilot_evidence_bundle_verify: $bundle_verify,
           evidence_binding: $evidence_binding,
           trusted_verifier_binding: $verifier_binding,
-          trusted_verifier_ready: trusted_verifier_ready,
+          trusted_verifier_ready: trusted_pilot_receipt_ready,
+          trusted_pilot_receipt_ready: trusted_pilot_receipt_ready,
+          verifier_pilot_handoff_ready: verifier_pilot_handoff_ready,
           evidence_host_policy: {
             base_url: smoke_base_url,
             host: smoke_host,
@@ -2484,6 +2517,11 @@ access_recovery_track_json_from_evidence() {
                   ($bundle_verify.notes // "Trusted real helper HTTPS provenance verification is required before pilot handoff")
                 end
               ),
+              command: trusted_verifier_command
+            }
+            elif $track_status == "pilot-handoff-not-ready" then {
+              id: "trusted_pilot_evidence_verify",
+              reason: ($bundle_verify.notes // "Trusted verifier receipt is present, but pilot_handoff_ready is false"),
               command: trusted_verifier_command
             }
             elif $track_status == "local-rehearsal-ready" then {
@@ -11983,6 +12021,8 @@ access_recovery_track_json="$(
 access_recovery_track_status_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r '.status // "unknown"')"
 access_recovery_track_ready_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r 'if (.ready | type) == "boolean" then .ready else false end')"
 access_recovery_track_needs_attention_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r 'if (.needs_attention | type) == "boolean" then .needs_attention else true end')"
+access_recovery_track_recommendation="$(printf '%s\n' "$access_recovery_track_json" | jq -r '.recommendation // "Access Recovery evidence needs attention."')"
+access_recovery_track_recommended_next_action_id="$(printf '%s\n' "$access_recovery_track_json" | jq -r '.recommended_next_action.id // "none"')"
 access_bridge_service_smoke_available_json="$(printf '%s\n' "$access_bridge_service_smoke_evidence_json" | jq -r 'if (.available | type) == "boolean" then .available else false end')"
 access_bridge_service_smoke_status_json="$(printf '%s\n' "$access_bridge_service_smoke_evidence_json" | jq -r '.status // "unknown"')"
 access_bridge_service_smoke_source_summary_json="$(printf '%s\n' "$access_bridge_service_smoke_evidence_json" | jq -r '.source_summary_json // ""')"
@@ -12367,7 +12407,10 @@ elif [[ "$manual_refresh_status" == "warn" || "$single_machine_refresh_status" =
 elif [[ "$access_recovery_track_needs_attention_json" == "true" && "$require_access_recovery_evidence" == "1" ]]; then
   final_status="fail"
   final_rc=1
-  notes="Access Recovery evidence is required and still needs attention; inspect access_recovery_track.recommended_next_action."
+  notes="Access Recovery evidence is required and still needs attention: $access_recovery_track_recommendation Next action: access_recovery_track.recommended_next_action.id=$access_recovery_track_recommended_next_action_id."
+elif [[ "$current_roadmap_track" == "access_recovery" && "$access_recovery_track_needs_attention_json" == "true" ]]; then
+  final_status="warn"
+  notes="Access Recovery evidence still needs attention: $access_recovery_track_recommendation Next action: access_recovery_track.recommended_next_action.id=$access_recovery_track_recommended_next_action_id."
 elif [[ "$readiness_status" != "READY" ]]; then
   final_status="warn"
   notes="VPN production signoff is still pending external real-host gates."
@@ -12386,9 +12429,6 @@ elif [[ "$profile_default_gate_evidence_pack_needs_attention_json" == "true" ]] 
   || [[ "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" == "true" ]]; then
   final_status="warn"
   notes="Core roadmap gates are healthy, but evidence-pack publication gates still need attention."
-elif [[ "$access_recovery_track_needs_attention_json" == "true" ]]; then
-  final_status="warn"
-  notes="Access Recovery evidence still needs attention; inspect access_recovery_track.recommended_next_action."
 fi
 
 next_actions_json_file="$(mktemp)"

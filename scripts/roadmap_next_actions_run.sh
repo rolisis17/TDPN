@@ -1594,6 +1594,50 @@ log_has_failure_kind_marker() {
   grep -E -q "failure_kind[=:]\"?${marker}\"?([[:space:],]|$)" "$log_path"
 }
 
+classify_action_failure_from_log() {
+  local action_id="${1:-}"
+  local log_path="${2:-}"
+  local current_failure_kind="${3:-command_failed}"
+  local marker_line=""
+  local marker=""
+
+  CLASSIFIED_ACTION_FAILURE_KIND="$current_failure_kind"
+  CLASSIFIED_ACTION_FAILURE_NOTES=""
+
+  [[ -f "$log_path" ]] || return 1
+
+  marker_line="$(grep -E -m1 'failure_kind[=:]"?[A-Za-z0-9_.:-]+' "$log_path" || true)"
+  if [[ -n "$marker_line" ]]; then
+    marker="$(printf '%s\n' "$marker_line" | sed -E 's/.*failure_kind[=:]"?([A-Za-z0-9_.:-]+).*/\1/')"
+    if [[ -n "$marker" && "$marker" != "none" ]]; then
+      CLASSIFIED_ACTION_FAILURE_KIND="$marker"
+      CLASSIFIED_ACTION_FAILURE_NOTES="command failed; action log reported failure_kind=$marker"
+      return 0
+    fi
+  fi
+
+  if grep -E -i -q 'stale[[:space:]_-]+(prerequisite[[:space:]_-]+)?evidence|evidence[[:space:]_-]+is[[:space:]_-]+stale|generated_at(_utc)?[^[:cntrl:]]*(too[[:space:]_-]+old|stale)|evidence[^[:cntrl:]]*(expired|too[[:space:]_-]+old)' "$log_path"; then
+    CLASSIFIED_ACTION_FAILURE_KIND="stale_prerequisite_evidence"
+    CLASSIFIED_ACTION_FAILURE_NOTES="command failed because prerequisite evidence is stale"
+    return 0
+  fi
+
+  if [[ "$action_id" =~ (three_machine|real_host|prod_signoff|production_signoff) ]] \
+     || grep -E -i -q 'three[- ]machine[^[:cntrl:]]*(prod|production)?[^[:cntrl:]]*signoff|required[^[:cntrl:]]*real[- ]host|real[- ]host[^[:cntrl:]]*signoff|required[^[:cntrl:]]*production[[:space:]_-]+signoff|pilot[[:space:]_-]+handoff[^[:cntrl:]]*requires|real[[:space:]_-]+helper[[:space:]_-]+HTTPS[^[:cntrl:]]*required' "$log_path"; then
+    CLASSIFIED_ACTION_FAILURE_KIND="real_host_signoff_required"
+    CLASSIFIED_ACTION_FAILURE_NOTES="command failed because real-host signoff evidence is required"
+    return 0
+  fi
+
+  if grep -E -i -q 'missing[^[:cntrl:]]*(live[[:space:]_-]+)?evidence|live[[:space:]_-]+evidence[^[:cntrl:]]*(missing|not[[:space:]_-]+found|required)|required[^[:cntrl:]]*(summary|summary_json)[^[:cntrl:]]*(missing|not[[:space:]_-]+found)|summary(_json)?[^[:cntrl:]]*(missing|not[[:space:]_-]+found|No such file)|No such file or directory[^[:cntrl:]]*(summary|evidence)|no[[:space:]_-]+current[[:space:]_-]+evidence' "$log_path"; then
+    CLASSIFIED_ACTION_FAILURE_KIND="missing_live_evidence_prerequisite"
+    CLASSIFIED_ACTION_FAILURE_NOTES="command failed because required live evidence is missing"
+    return 0
+  fi
+
+  return 1
+}
+
 command_requires_shell_execution() {
   local command_text="${1:-}"
   if [[ -z "$command_text" ]]; then
@@ -2418,7 +2462,19 @@ if (( ${#exclude_id_suffixes[@]} > 0 )); then
   selected_actions_json="$(printf '%s\n' "$selected_actions_json" | jq -c --argjson suffixes "$exclude_id_suffixes_json" '[.[] | select(((((.id // "") | tostring) as $id | any($suffixes[]; . as $suffix | ($id | endswith($suffix)))) | not))]')"
 fi
 after_exclude_suffix_filters_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
+local_only_skipped_real_host_action_ids_json="[]"
+local_only_skipped_real_host_actions_count=0
 if [[ "$local_only" == "1" ]]; then
+  local_only_skipped_real_host_action_ids_json="$(
+    printf '%s\n' "$selected_actions_json" | jq -c '
+      [
+        .[]
+        | select((.requires_real_hosts == true) and (.local_pack_only != true))
+        | ((.id // "") | tostring)
+        | select(length > 0)
+      ]'
+  )"
+  local_only_skipped_real_host_actions_count="$(printf '%s\n' "$local_only_skipped_real_host_action_ids_json" | jq -r 'length')"
   selected_actions_json="$(
     printf '%s\n' "$selected_actions_json" | jq -c '
       [
@@ -2841,6 +2897,9 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
             action_timed_out="true"
             action_failure_kind="timed_out"
             action_notes="action timed out after ${action_timeout_sec_effective}s"
+          elif classify_action_failure_from_log "$action_id" "$action_log" "$action_failure_kind"; then
+            action_failure_kind="$CLASSIFIED_ACTION_FAILURE_KIND"
+            action_notes="$CLASSIFIED_ACTION_FAILURE_NOTES"
           fi
         fi
         jq -cn \
@@ -2895,6 +2954,9 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
           action_timed_out="true"
           action_failure_kind="timed_out"
           action_notes="action timed out after ${action_timeout_sec_effective}s"
+        elif classify_action_failure_from_log "$action_id" "$action_log" "$action_failure_kind"; then
+          action_failure_kind="$CLASSIFIED_ACTION_FAILURE_KIND"
+          action_notes="$CLASSIFIED_ACTION_FAILURE_NOTES"
         fi
       fi
       jq -cn \
@@ -3145,6 +3207,8 @@ jq -n \
   --argjson after_include_suffix_filters_count "$after_include_suffix_filters_count" \
   --argjson after_exclude_suffix_filters_count "$after_exclude_suffix_filters_count" \
   --argjson after_local_only_filters_count "$after_local_only_filters_count" \
+  --argjson local_only_skipped_real_host_actions_count "$local_only_skipped_real_host_actions_count" \
+  --argjson local_only_skipped_real_host_action_ids "$local_only_skipped_real_host_action_ids_json" \
   --argjson before_dedupe_count "$before_dedupe_count" \
   --argjson deduped_actions_count "$deduped_actions_count" \
   --argjson deduped_exact_duplicate_count "$deduped_exact_duplicate_count" \
@@ -3241,6 +3305,8 @@ jq -n \
         after_include_suffix_filters_count: $after_include_suffix_filters_count,
         after_exclude_suffix_filters_count: $after_exclude_suffix_filters_count,
         after_local_only_filters_count: $after_local_only_filters_count,
+        local_only_skipped_real_host_actions_count: $local_only_skipped_real_host_actions_count,
+        local_only_skipped_real_host_action_ids: $local_only_skipped_real_host_action_ids,
         before_dedupe_count: $before_dedupe_count,
         deduped_actions_count: $deduped_actions_count,
         deduped_exact_duplicate_count: $deduped_exact_duplicate_count,

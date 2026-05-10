@@ -175,6 +175,9 @@ To turn a passing pilot bundle into tracked closed-beta readiness, add
 `closed_beta_pilot_signoff` separately from true production signoff, so the
 readiness handoff can report `CLOSED_BETA_READY` while mainnet production
 remains gated on HTTPS, issuer quorum, and settlement metrics.
+`CLOSED_BETA_READY` is legacy VPN closed-beta readiness only. It is not Access
+Recovery pilot handoff and does not replace real helper HTTPS evidence, signed
+provenance, or trusted verification.
 
 Optional path diversity tuning on machine C:
 

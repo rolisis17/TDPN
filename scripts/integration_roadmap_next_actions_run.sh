@@ -65,6 +65,9 @@ FAIL1="$ACTION_TMP_DIR/fail_action_1.sh"
 FAIL2="$ACTION_TMP_DIR/fail_action_2.sh"
 SLOW1="$ACTION_TMP_DIR/slow_action_1.sh"
 SLOW2="$ACTION_TMP_DIR/slow_action_2.sh"
+MISSING_LIVE_EVIDENCE_PREREQ="$ACTION_TMP_DIR/missing_live_evidence_prereq.sh"
+STALE_PREREQ_EVIDENCE="$ACTION_TMP_DIR/stale_prereq_evidence.sh"
+REAL_HOST_SIGNOFF_REQUIRED="$ACTION_TMP_DIR/real_host_signoff_required.sh"
 UNREACHABLE_PROFILE="$ACTION_TMP_DIR/profile_unreachable.sh"
 MISSING_SUBJECT_PROFILE="$ACTION_TMP_DIR/profile_missing_subject.sh"
 MISSING_SUBJECT_PROFILE_LIVE="$ACTION_TMP_DIR/profile_missing_subject_live.sh"
@@ -170,6 +173,30 @@ sleep 4
 echo "slow action 2 done"
 EOF_SLOW2
 chmod +x "$SLOW2"
+
+cat >"$MISSING_LIVE_EVIDENCE_PREREQ" <<'EOF_MISSING_LIVE_EVIDENCE_PREREQ'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "missing required live evidence summary_json: .easy-node-logs/profile-default-gate-live-summary.json not found"
+exit 6
+EOF_MISSING_LIVE_EVIDENCE_PREREQ
+chmod +x "$MISSING_LIVE_EVIDENCE_PREREQ"
+
+cat >"$STALE_PREREQ_EVIDENCE" <<'EOF_STALE_PREREQ_EVIDENCE'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "prerequisite evidence is stale: generated_at_utc is too old for promotion"
+exit 6
+EOF_STALE_PREREQ_EVIDENCE
+chmod +x "$STALE_PREREQ_EVIDENCE"
+
+cat >"$REAL_HOST_SIGNOFF_REQUIRED" <<'EOF_REAL_HOST_SIGNOFF_REQUIRED'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "three-machine production signoff requires current real-host evidence before pilot handoff"
+exit 6
+EOF_REAL_HOST_SIGNOFF_REQUIRED
+chmod +x "$REAL_HOST_SIGNOFF_REQUIRED"
 
 cat >"$UNREACHABLE_PROFILE" <<'EOF_UNREACHABLE_PROFILE'
 #!/usr/bin/env bash
@@ -488,6 +515,42 @@ JSON
     {"id":"local_no_real_hosts_action","label":"Local no real hosts action","command":"bash \"$PASS2\"","reason":"test-local-no-real-hosts","requires_real_hosts":false,"local_pack_only":false},
     {"id":"real_host_action","label":"Real host action","command":"bash \"$FAIL1\"","reason":"test-real-host","requires_real_hosts":true,"local_pack_only":false},
     {"id":"unknown_metadata_action","label":"Unknown metadata action","command":"bash \"$FAIL2\"","reason":"test-unknown-metadata"}
+  ]
+}
+JSON
+    ;;
+  local_pack_missing_live_prereq)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"profile_default_gate_evidence_pack","label":"Profile default evidence-pack publish","command":"bash \"$MISSING_LIVE_EVIDENCE_PREREQ\"","reason":"test-missing-live-prereq","requires_real_hosts":false,"local_pack_only":true}
+  ]
+}
+JSON
+    ;;
+  local_pack_stale_prereq)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"runtime_actuation_promotion_evidence_pack","label":"Runtime-actuation evidence-pack publish","command":"bash \"$STALE_PREREQ_EVIDENCE\"","reason":"test-stale-prereq","requires_real_hosts":false,"local_pack_only":true}
+  ]
+}
+JSON
+    ;;
+  local_pack_real_host_signoff_required)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"three_machine_real_host_validation_pack","label":"Three-machine real-host validation pack","command":"bash \"$REAL_HOST_SIGNOFF_REQUIRED\"","reason":"test-real-host-signoff-required","requires_real_hosts":false,"local_pack_only":true}
+  ]
+}
+JSON
+    ;;
+  real_helper_https_only)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"real_helper_https_evidence","label":"Real helper HTTPS evidence","command":"bash \"$FAIL1\"","reason":"test-real-helper-required","requires_real_hosts":true,"local_pack_only":false}
   ]
 }
 JSON
@@ -912,12 +975,140 @@ if ! jq -e '
   and .roadmap.selection_accounting.non_empty_command_count == 4
   and .roadmap.selection_accounting.after_exclude_suffix_filters_count == 4
   and .roadmap.selection_accounting.after_local_only_filters_count == 2
+  and .roadmap.selection_accounting.local_only_skipped_real_host_actions_count == 1
+  and .roadmap.selection_accounting.local_only_skipped_real_host_action_ids == ["real_host_action"]
   and .summary.actions_executed == 2
   and .summary.pass == 2
   and .summary.fail == 0
 ' "$SUMMARY_LOCAL_ONLY" >/dev/null; then
   echo "local-only summary mismatch"
   cat "$SUMMARY_LOCAL_ONLY"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] local-only empty pass records skipped real-host blockers"
+SUMMARY_LOCAL_ONLY_REAL_HELPER_ONLY="$TMP_DIR/summary_local_only_real_helper_only.json"
+REPORTS_LOCAL_ONLY_REAL_HELPER_ONLY="$TMP_DIR/reports_local_only_real_helper_only"
+ROADMAP_NEXT_ACTIONS_SCENARIO=real_helper_https_only \
+FAIL1="$FAIL1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_LOCAL_ONLY_REAL_HELPER_ONLY" \
+  --summary-json "$SUMMARY_LOCAL_ONLY_REAL_HELPER_ONLY" \
+  --local-only 1 \
+  --allow-empty-actions 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.local_only == true
+  and .inputs.allow_empty_actions == true
+  and .roadmap.actions_selected_count == 0
+  and .roadmap.selection_accounting.non_empty_command_count == 1
+  and .roadmap.selection_accounting.after_local_only_filters_count == 0
+  and .roadmap.selection_accounting.local_only_skipped_real_host_actions_count == 1
+  and .roadmap.selection_accounting.local_only_skipped_real_host_action_ids == ["real_helper_https_evidence"]
+  and .summary.actions_executed == 0
+' "$SUMMARY_LOCAL_ONLY_REAL_HELPER_ONLY" >/dev/null; then
+  echo "local-only real-helper-only skipped blocker summary mismatch"
+  cat "$SUMMARY_LOCAL_ONLY_REAL_HELPER_ONLY"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] classifies missing live evidence prerequisite action failures"
+SUMMARY_LOCAL_PACK_MISSING_LIVE="$TMP_DIR/summary_local_pack_missing_live.json"
+REPORTS_LOCAL_PACK_MISSING_LIVE="$TMP_DIR/reports_local_pack_missing_live"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=local_pack_missing_live_prereq \
+MISSING_LIVE_EVIDENCE_PREREQ="$MISSING_LIVE_EVIDENCE_PREREQ" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_LOCAL_PACK_MISSING_LIVE" \
+  --summary-json "$SUMMARY_LOCAL_PACK_MISSING_LIVE" \
+  --local-only 1 \
+  --print-summary-json 0 >"$TMP_DIR/local_pack_missing_live.log" 2>&1
+local_pack_missing_live_rc=$?
+set -e
+if [[ "$local_pack_missing_live_rc" != "6" ]]; then
+  echo "expected missing live evidence prerequisite rc=6, got rc=$local_pack_missing_live_rc"
+  cat "$TMP_DIR/local_pack_missing_live.log"
+  cat "$SUMMARY_LOCAL_PACK_MISSING_LIVE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .actions[0].id == "profile_default_gate_evidence_pack"
+  and .actions[0].failure_kind == "missing_live_evidence_prerequisite"
+  and (.actions[0].notes | contains("required live evidence is missing"))
+' "$SUMMARY_LOCAL_PACK_MISSING_LIVE" >/dev/null; then
+  echo "missing live evidence prerequisite classification mismatch"
+  cat "$SUMMARY_LOCAL_PACK_MISSING_LIVE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] classifies stale prerequisite evidence action failures"
+SUMMARY_LOCAL_PACK_STALE="$TMP_DIR/summary_local_pack_stale.json"
+REPORTS_LOCAL_PACK_STALE="$TMP_DIR/reports_local_pack_stale"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=local_pack_stale_prereq \
+STALE_PREREQ_EVIDENCE="$STALE_PREREQ_EVIDENCE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_LOCAL_PACK_STALE" \
+  --summary-json "$SUMMARY_LOCAL_PACK_STALE" \
+  --local-only 1 \
+  --print-summary-json 0 >"$TMP_DIR/local_pack_stale.log" 2>&1
+local_pack_stale_rc=$?
+set -e
+if [[ "$local_pack_stale_rc" != "6" ]]; then
+  echo "expected stale prerequisite evidence rc=6, got rc=$local_pack_stale_rc"
+  cat "$TMP_DIR/local_pack_stale.log"
+  cat "$SUMMARY_LOCAL_PACK_STALE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .actions[0].id == "runtime_actuation_promotion_evidence_pack"
+  and .actions[0].failure_kind == "stale_prerequisite_evidence"
+  and (.actions[0].notes | contains("prerequisite evidence is stale"))
+' "$SUMMARY_LOCAL_PACK_STALE" >/dev/null; then
+  echo "stale prerequisite evidence classification mismatch"
+  cat "$SUMMARY_LOCAL_PACK_STALE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] classifies real-host signoff prerequisite action failures"
+SUMMARY_REAL_HOST_SIGNOFF_REQUIRED="$TMP_DIR/summary_real_host_signoff_required.json"
+REPORTS_REAL_HOST_SIGNOFF_REQUIRED="$TMP_DIR/reports_real_host_signoff_required"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=local_pack_real_host_signoff_required \
+REAL_HOST_SIGNOFF_REQUIRED="$REAL_HOST_SIGNOFF_REQUIRED" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_REAL_HOST_SIGNOFF_REQUIRED" \
+  --summary-json "$SUMMARY_REAL_HOST_SIGNOFF_REQUIRED" \
+  --local-only 1 \
+  --print-summary-json 0 >"$TMP_DIR/real_host_signoff_required.log" 2>&1
+real_host_signoff_required_rc=$?
+set -e
+if [[ "$real_host_signoff_required_rc" != "6" ]]; then
+  echo "expected real-host signoff required rc=6, got rc=$real_host_signoff_required_rc"
+  cat "$TMP_DIR/real_host_signoff_required.log"
+  cat "$SUMMARY_REAL_HOST_SIGNOFF_REQUIRED"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 6
+  and .actions[0].id == "three_machine_real_host_validation_pack"
+  and .actions[0].failure_kind == "real_host_signoff_required"
+  and (.actions[0].notes | contains("real-host signoff evidence is required"))
+' "$SUMMARY_REAL_HOST_SIGNOFF_REQUIRED" >/dev/null; then
+  echo "real-host signoff required classification mismatch"
+  cat "$SUMMARY_REAL_HOST_SIGNOFF_REQUIRED"
   exit 1
 fi
 

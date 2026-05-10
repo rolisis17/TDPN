@@ -108,6 +108,10 @@ go run ./cmd/gpmrecover bridge-service-deploy-pack \
 
 6. Record smoke evidence from a different machine or network path:
 
+Smoke evidence for pilot handoff must target the real helper HTTPS host from
+outside the helper machine. Loopback/local rehearsal output is useful for
+development, but it is not Access Recovery pilot handoff evidence.
+
 ```sh
 bash ./scripts/access_bridge_service_smoke.sh \
   --base-url https://HELPER_PUBLIC_DNS \

@@ -876,7 +876,7 @@ cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLO
   "schema": {
     "id": "access_bridge_deployment_evidence_summary",
     "major": 1,
-    "minor": 0
+    "minor": 1
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
@@ -888,6 +888,10 @@ cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLO
     "auth_required": true,
     "missing_code_http_status": "401",
     "wrong_code_http_status": "401",
+    "valid_code_http_status": "200",
+    "bridge_http_status": "200",
+    "bridge_status": "ok",
+    "bridge_security_headers_ok": true,
     "config_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "summary_json": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"
   },
@@ -941,7 +945,7 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
     "env_rps": "2"
   },
   "summary": {
-    "checks_total": 17,
+    "checks_total": 21,
     "checks_fail": 0
   },
   "checks": [
@@ -961,7 +965,11 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
     {"id": "wrapper_hardened_flags", "status": "pass", "message": "wrapper propagates hardened flags"},
     {"id": "systemd_hardening", "status": "pass", "message": "systemd unit contains expected hardening"},
     {"id": "caddy_xff_overwrite", "status": "pass", "message": "Caddy overwrites X-Forwarded-For"},
-    {"id": "nginx_xff_overwrite", "status": "pass", "message": "nginx overwrites X-Forwarded-For"}
+    {"id": "nginx_xff_overwrite", "status": "pass", "message": "nginx overwrites X-Forwarded-For"},
+    {"id": "caddy_public_host_valid", "status": "pass", "message": "Caddy uses the public helper host"},
+    {"id": "caddy_reverse_proxy_target", "status": "pass", "message": "Caddy reverse_proxy targets the loopback bridge"},
+    {"id": "nginx_public_host_valid", "status": "pass", "message": "nginx uses the public helper host"},
+    {"id": "nginx_proxy_pass_target", "status": "pass", "message": "nginx proxy_pass targets the loopback bridge"}
   ],
   "recommended_next_action": {
     "id": "record_access_bridge_pilot_evidence_bundle",
@@ -983,6 +991,8 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
   "rc": 0,
+  "pilot_handoff_ready": true,
+  "trusted_pilot_receipt_ready": true,
   "notes": "Access Bridge pilot evidence bundle verification passed",
   "inputs": {
     "summary_json": ".easy-node-logs/access_bridge_pilot_evidence_bundle_summary.json",
@@ -1126,11 +1136,18 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_service_smoke.details.helper_id == "helper-demo"
   and .access_recovery_track.access_bridge_service_smoke.details.organization_id == "freenews-demo"
   and .access_recovery_track.access_bridge_service_smoke.details.auth_required == true
+  and .access_recovery_track.access_bridge_service_smoke.details.valid_code_http_status == "200"
+  and .access_recovery_track.access_bridge_service_smoke.details.bridge_http_status == "200"
+  and .access_recovery_track.access_bridge_service_smoke.details.bridge_status == "ok"
   and .access_recovery_track.access_bridge_service_smoke.details.bridge_security_headers_ok == true
   and .access_recovery_track.access_bridge_deployment_evidence.available == true
   and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
   and .access_recovery_track.access_bridge_deployment_evidence.source_summary_json == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"'"
   and .access_recovery_track.access_bridge_deployment_evidence.details.identity_status == "pass"
+  and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_valid_code_http_status == "200"
+  and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_bridge_http_status == "200"
+  and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_bridge_status == "ok"
+  and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_bridge_security_headers_ok == true
   and .access_recovery_track.access_bridge_host_install.available == true
   and .access_recovery_track.access_bridge_host_install.status == "pass"
   and .access_recovery_track.access_bridge_host_install.source_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
@@ -1159,6 +1176,8 @@ if ! jq -e \
   and .access_recovery_track.trusted_verifier_binding.deployment_evidence_summary_sha256_match == true
   and .access_recovery_track.trusted_verifier_binding.host_install_check_summary_sha256_match == true
   and .access_recovery_track.trusted_verifier_ready == true
+  and .access_recovery_track.trusted_pilot_receipt_ready == true
+  and .access_recovery_track.verifier_pilot_handoff_ready == true
   and .access_recovery_track.evidence_binding.ok == true
   and .access_recovery_track.evidence_binding.helper_id_match == true
   and .access_recovery_track.evidence_binding.host_config_sha256_match == true
@@ -1437,6 +1456,9 @@ fi
 if ! jq -e '
   .status == "warn"
   and .rc == 0
+  and (.notes | contains("Access Recovery evidence still needs attention"))
+  and (.notes | contains("Access Recovery real helper HTTPS evidence is present"))
+  and (.notes | contains("access_recovery_track.recommended_next_action.id=trusted_pilot_evidence_verify"))
   and .current_roadmap_track == "access_recovery"
   and .access_recovery_pilot_handoff_ready == false
   and .access_recovery_track.status == "trusted-provenance-required"
@@ -1558,6 +1580,56 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_wrong_binding_summary.json" >/dev/null; then
   echo "Access Recovery mismatched verifier receipt summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_wrong_binding_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery trusted verifier receipt cannot override pilot_handoff_ready=false"
+ACCESS_BRIDGE_FALSE_HANDOFF_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_false_handoff_summary.json"
+jq '
+  .pilot_handoff_ready = false
+  | .trusted_pilot_receipt_ready = true
+' "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_FALSE_HANDOFF_VERIFY_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_FALSE_HANDOFF_VERIFY_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_false_handoff_verifier_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_false_handoff_verifier_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_false_handoff_verifier.log 2>&1; then
+  echo "expected success with warning for trusted verifier receipt whose pilot_handoff_ready is false"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_false_handoff_verifier.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and (.notes | contains("Access Recovery evidence still needs attention"))
+  and (.notes | contains("pilot_handoff_ready is false"))
+  and .current_roadmap_track == "access_recovery"
+  and .access_recovery_pilot_handoff_ready == false
+  and .access_recovery_track.status == "pilot-handoff-not-ready"
+  and .access_recovery_track.ready == false
+  and .access_recovery_track.pilot_handoff_ready == false
+  and .access_recovery_track.needs_attention == true
+  and .access_recovery_track.evidence_scope == "real_helper_https"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "pass"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.trusted_pilot_receipt_ready == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_ready == false
+  and .access_recovery_track.trusted_verifier_binding.ok == true
+  and .access_recovery_track.trusted_verifier_ready == true
+  and .access_recovery_track.trusted_pilot_receipt_ready == true
+  and .access_recovery_track.verifier_pilot_handoff_ready == false
+  and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
+' "$TMP_DIR/roadmap_progress_access_recovery_false_handoff_verifier_summary.json" >/dev/null; then
+  echo "Access Recovery false handoff verifier summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_false_handoff_verifier_summary.json"
   exit 1
 fi
 
@@ -1990,6 +2062,50 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] Access Recovery deployment evidence must carry hardened smoke proof fields"
+ACCESS_RECOVERY_OLD_DEPLOYMENT_SEMANTIC_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_old_schema_missing_hardened_smoke_summary.json"
+jq '
+  .schema.minor = 0
+  | del(.smoke.valid_code_http_status)
+  | del(.smoke.bridge_http_status)
+  | del(.smoke.bridge_status)
+  | del(.smoke.bridge_security_headers_ok)
+' "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_OLD_DEPLOYMENT_SEMANTIC_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_RECOVERY_OLD_DEPLOYMENT_SEMANTIC_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_old_deployment_hardened_smoke_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_old_deployment_hardened_smoke_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_old_deployment_hardened_smoke.log 2>&1; then
+  echo "expected failure when required Access Recovery deployment evidence lacks hardened smoke proof fields"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_old_deployment_hardened_smoke.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.access_bridge_service_smoke.status == "pass"
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "fail"
+  and .access_recovery_track.access_bridge_deployment_evidence.available == false
+  and .access_recovery_track.access_bridge_deployment_evidence.semantic_ok == false
+  and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_valid_code_http_status == null
+  and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_bridge_http_status == null
+  and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_bridge_status == null
+  and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_bridge_security_headers_ok == null
+  and .access_recovery_track.access_bridge_host_install.status == "pass"
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_deployment_evidence"
+' "$TMP_DIR/roadmap_progress_access_recovery_old_deployment_hardened_smoke_summary.json" >/dev/null; then
+  echo "Access Recovery old deployment hardened smoke summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_old_deployment_hardened_smoke_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] Access Recovery mixed helper/config evidence blocks required evidence"
 ACCESS_RECOVERY_MIXED_IDENTITY_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_mixed_identity_summary.json"
 jq '.deployed_identity.helper_id = "helper-other"' "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_MIXED_IDENTITY_SUMMARY_JSON"
@@ -2094,6 +2210,50 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_access_recovery_forged_host_summary.json" >/dev/null; then
   echo "Access Recovery forged host-install summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_forged_host_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery host-install proxy/public-host checks are required"
+ACCESS_RECOVERY_MISSING_PROXY_HOST_INSTALL_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_missing_proxy_public_host_summary.json"
+jq '
+  .checks = [
+    .checks[]
+    | .id as $id
+    | select((["caddy_public_host_valid", "caddy_reverse_proxy_target", "nginx_public_host_valid", "nginx_proxy_pass_target"] | index($id)) == null)
+  ]
+  | .summary.checks_total = 21
+  | .summary.checks_fail = 0
+' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_RECOVERY_MISSING_PROXY_HOST_INSTALL_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_RECOVERY_MISSING_PROXY_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_missing_proxy_host_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_missing_proxy_host_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_missing_proxy_host.log 2>&1; then
+  echo "expected failure when required Access Recovery host-install proxy/public-host checks are missing"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_missing_proxy_host.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.access_bridge_service_smoke.status == "pass"
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
+  and .access_recovery_track.access_bridge_host_install.status == "fail"
+  and .access_recovery_track.access_bridge_host_install.available == false
+  and .access_recovery_track.access_bridge_host_install.semantic_ok == false
+  and .access_recovery_track.access_bridge_host_install.details.checks_total == 21
+  and .access_recovery_track.access_bridge_host_install.details.checks_fail == 0
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_host_install"
+' "$TMP_DIR/roadmap_progress_access_recovery_missing_proxy_host_summary.json" >/dev/null; then
+  echo "Access Recovery missing proxy/public-host summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_missing_proxy_host_summary.json"
   exit 1
 fi
 
@@ -4573,7 +4733,8 @@ if ! jq -e '
   and .vpn_track.readiness_status == "READY"
   and .vpn_track.optional_gate_status.profile_default_gate == "pending"
   and .vpn_track.profile_default_gate.needs_attention == true
-  and ((.notes // "") | test("optional profile-default.*still need[s]? attention"))
+  and ((.notes // "") | contains("Access Recovery evidence still needs attention"))
+  and ((.notes // "") | contains("access_recovery_track.recommended_next_action.id=access_bridge_service_smoke"))
   and (
     (
       .vpn_track.profile_default_gate.next_command_has_unresolved_placeholders == true
