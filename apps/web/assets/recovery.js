@@ -439,14 +439,27 @@
         throw new Error("Trusted key is expired");
       }
     }
+    if (normalized.disabled === true && options.requireUsable !== false) {
+      throw new Error("Trusted key is disabled");
+    }
     return normalized;
   }
 
   async function validateTrustStoreKeys(store, options = {}) {
     const normalized = normalizeTrustStore(store);
+    if (normalized.trusted_keys.length > 256) {
+      throw new Error(`Trust store has ${normalized.trusted_keys.length} trusted keys, max 256`);
+    }
     const keys = [];
+    const seen = new Set();
     for (const entry of normalized.trusted_keys) {
-      keys.push(await validateTrustedKeyEntry(entry, options));
+      const trustedKey = await validateTrustedKeyEntry(entry, options);
+      const duplicateKey = `${trustedKey.org_id}\u0000${trustedKey.key_id}`;
+      if (seen.has(duplicateKey)) {
+        throw new Error(`Trust store duplicates org/key ${trustedKey.org_id}/${trustedKey.key_id}`);
+      }
+      seen.add(duplicateKey);
+      keys.push(trustedKey);
     }
     return { version: 1, trusted_keys: keys };
   }
