@@ -801,7 +801,7 @@ Notes:
   - access-recovery-beta-local-gate runs the focused local Access Recovery beta contract gate (demo/examples/browser/bridge/bundle) without the legacy VPN matrix (override with `ACCESS_RECOVERY_BETA_LOCAL_GATE_SCRIPT`).
   - access-recovery-local-evidence-refresh runs a loopback Access Recovery helper rehearsal and writes canonical evidence summaries for roadmap ingestion (override with `ACCESS_RECOVERY_LOCAL_EVIDENCE_REFRESH_SCRIPT`).
   - access-bridge-pilot-evidence-bundle wraps deployed bridge smoke, deployment evidence, and host-install checks into one operator handoff bundle (override with `ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT`) and preserves pass-through args.
-  - access-bridge-pilot-evidence-bundle-verify validates Access Bridge pilot bundle integrity artifacts (manifest + tarball checksum + safe tar members). Local integrity checks can be unsigned; pilot/operator handoff should add --provenance-json PROVENANCE_JSON --trust-store TRUST_STORE --require-trusted-provenance 1.
+  - access-bridge-pilot-evidence-bundle-verify validates Access Bridge pilot bundle integrity artifacts (manifest + tarball checksum + safe tar members). Local integrity checks can be unsigned; pilot/operator handoff should add --provenance-json PROVENANCE_JSON --trust-store TRUST_STORE --require-trusted-provenance 1 --verification-summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_verify_summary.json.
   - three-machine-reminder prints the true 3-machine production test checklist.
   - three-machine-docker-profile-matrix wraps the three-machine docker profile matrix helper script with pass-through args.
   - three-machine-docker-profile-matrix-record wraps the three-machine docker profile matrix record helper script with pass-through args.

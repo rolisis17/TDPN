@@ -31,6 +31,7 @@ SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_summary.json"
 BUNDLE_TAR="${BUNDLE_DIR}.tar.gz"
 BUNDLE_TAR_SHA256_FILE="${BUNDLE_TAR}.sha256"
 PROVENANCE_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle.provenance.json"
+VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_summary.json"
 BAD_PROVENANCE_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_bad.provenance.json"
 LOCAL_SCOPE_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_local_scope_summary.json"
 LOCAL_SCOPE_PROVENANCE_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_local_scope.provenance.json"
@@ -145,7 +146,30 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$SUMMARY_JSON" \
   --provenance-json "$PROVENANCE_JSON" \
   --require-trusted-provenance 1 \
-  --trust-store "$TRUST_STORE" >"$TMP_DIR/verify-provenance-trusted-policy-explicit.log"
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$VERIFY_SUMMARY_JSON" \
+  --print-verification-summary-json 1 >"$TMP_DIR/verify-provenance-trusted-policy-explicit.log"
+if ! jq -e '
+  .schema.id == "access_bridge_pilot_evidence_bundle_verify_summary"
+  and .status == "pass"
+  and .rc == 0
+  and .checks.summary_contract.enabled == true
+  and .checks.tar_sha256.enabled == true
+  and .checks.manifest.enabled == true
+  and .checks.provenance.enabled == true
+  and .trusted_provenance.required == true
+  and .trusted_provenance.checked == true
+  and .trusted_provenance.source == "trust_store"
+  and .trusted_provenance.trusted == true
+  and .trusted_provenance.evidence_scope == "real_helper_https"
+  and .trusted_provenance.summary_evidence_scope == "real_helper_https"
+  and .artifacts.verification_summary_json == "'"$VERIFY_SUMMARY_JSON"'"
+  and .artifacts.provenance_json == "'"$PROVENANCE_JSON"'"
+' "$VERIFY_SUMMARY_JSON" >/dev/null; then
+  echo "access bridge pilot evidence bundle verifier integration failed: verification summary did not prove trusted provenance"
+  cat "$VERIFY_SUMMARY_JSON"
+  exit 1
+fi
 
 set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \

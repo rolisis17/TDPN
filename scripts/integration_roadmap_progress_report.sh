@@ -831,6 +831,7 @@ printf '{"version":1,' >"$PHASE7_MAINNET_CUTOVER_INVALID_SUMMARY_REPORT_JSON"
 ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_summary.json"
 ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_summary.json"
 ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_check_summary.json"
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_summary.json"
 ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 cat >"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY
 {
@@ -968,6 +969,60 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
   }
 }
 EOF_ACCESS_BRIDGE_HOST_INSTALL_SUMMARY
+cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_BUNDLE_VERIFY_SUMMARY
+{
+  "version": 1,
+  "schema": {
+    "id": "access_bridge_pilot_evidence_bundle_verify_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
+  "status": "pass",
+  "rc": 0,
+  "notes": "Access Bridge pilot evidence bundle verification passed",
+  "inputs": {
+    "summary_json": ".easy-node-logs/access_bridge_pilot_evidence_bundle_summary.json",
+    "bundle_dir": ".easy-node-logs/access_bridge_pilot_evidence_bundle",
+    "bundle_tar": ".easy-node-logs/access_bridge_pilot_evidence_bundle.tar.gz",
+    "bundle_tar_sha256_file": ".easy-node-logs/access_bridge_pilot_evidence_bundle.tar.gz.sha256",
+    "provenance_json": ".easy-node-logs/access_bridge_pilot_evidence_bundle.provenance.json",
+    "trust_store": ".easy-node-logs/access-recovery-demo/provenance-trust-store.json",
+    "public_key_file": null
+  },
+  "checks": {
+    "summary_contract": {"enabled": true, "status": "pass"},
+    "tar_sha256": {"enabled": true, "status": "pass"},
+    "manifest": {"enabled": true, "status": "pass"},
+    "provenance": {"enabled": true, "required_trusted": true, "status": "pass"}
+  },
+  "trusted_provenance": {
+    "required": true,
+    "checked": true,
+    "source": "trust_store",
+    "trusted": true,
+    "status": "pass",
+    "rc": 0,
+    "key_id": "pilot-key",
+    "organization_id": "freenews-demo",
+    "organization_name": "FreeNews Demo",
+    "trusted_org_id": "freenews-demo",
+    "trusted_org_name": "FreeNews Demo",
+    "evidence_scope": "real_helper_https",
+    "summary_evidence_scope": "real_helper_https",
+    "bundle_tar_name": "access_bridge_pilot_evidence_bundle.tar.gz",
+    "expires_at_utc": null
+  },
+  "artifacts": {
+    "verification_summary_json": "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON",
+    "source_summary_json": ".easy-node-logs/access_bridge_pilot_evidence_bundle_summary.json",
+    "bundle_dir": ".easy-node-logs/access_bridge_pilot_evidence_bundle",
+    "bundle_tar": ".easy-node-logs/access_bridge_pilot_evidence_bundle.tar.gz",
+    "bundle_tar_sha256_file": ".easy-node-logs/access_bridge_pilot_evidence_bundle.tar.gz.sha256",
+    "provenance_json": ".easy-node-logs/access_bridge_pilot_evidence_bundle.provenance.json"
+  }
+}
+EOF_ACCESS_BRIDGE_BUNDLE_VERIFY_SUMMARY
 
 if ! FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
 ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL" \
@@ -983,6 +1038,7 @@ run_roadmap_progress_report \
   --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
   --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
   --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" \
   --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
   --summary-json "$SUMMARY_JSON" \
   --report-md "$REPORT_MD" \
@@ -1062,6 +1118,13 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_host_install.source_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
   and .access_recovery_track.access_bridge_host_install.details.checks_fail == 0
   and .access_recovery_track.access_bridge_host_install.details.env_rps == "2"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "pass"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.source_summary_json == "'"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON"'"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.trusted_provenance_source == "trust_store"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.trusted_provenance_trusted == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.evidence_scope == "real_helper_https"
+  and .access_recovery_track.trusted_verifier_ready == true
   and .access_recovery_track.evidence_binding.ok == true
   and .access_recovery_track.evidence_binding.helper_id_match == true
   and .access_recovery_track.evidence_binding.host_config_sha256_match == true
@@ -1291,6 +1354,7 @@ if ! jq -e \
   and .artifacts.access_bridge_service_smoke_summary_json == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"'"
   and .artifacts.access_bridge_deployment_evidence_summary_json == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"'"
   and .artifacts.access_bridge_host_install_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
+  and .artifacts.access_bridge_pilot_evidence_bundle_verify_summary_json == "'"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON"'"
   and .artifacts.manual_validation_summary_json == "'"$TEST_LOG_DIR/manual_validation_readiness_summary.json"'"
   and .artifacts.manual_validation_report_md == "'"$TEST_LOG_DIR/manual_validation_readiness_report.md"'"
 ' "$SUMMARY_JSON" >/dev/null; then
@@ -1316,6 +1380,51 @@ fi
 if ! grep -Eq '\[roadmap-progress-report\] access_recovery_track_status=pilot-evidence-ready ready=true needs_attention=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected Access Recovery pass log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery real helper HTTPS evidence still requires trusted verifier receipt"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$TMP_DIR/missing_access_bridge_pilot_evidence_bundle_verify_summary.json" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_missing_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_missing_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_trusted_verifier_missing.log 2>&1; then
+  echo "expected success with warning for missing trusted verifier receipt"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_trusted_verifier_missing.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .current_roadmap_track == "access_recovery"
+  and .access_recovery_track.status == "trusted-provenance-required"
+  and .access_recovery_track.ready == false
+  and .access_recovery_track.needs_attention == true
+  and .access_recovery_track.evidence_scope == "real_helper_https"
+  and .access_recovery_track.trusted_verifier_ready == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "missing"
+  and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("access-bridge-pilot-evidence-bundle-verify"))
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("--require-trusted-provenance 1"))
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("--trust-store TRUST_STORE"))
+  and ((.next_actions // []) | any(
+    .id == "trusted_pilot_evidence_verify"
+    and .requires_real_hosts == false
+    and .local_pack_only == false
+    and .missing_evidence_family == "access-recovery"
+    and .missing_evidence_action_kind == "trusted-provenance"
+  ))
+' "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_missing_summary.json" >/dev/null; then
+  echo "Access Recovery missing trusted verifier summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_missing_summary.json"
   exit 1
 fi
 

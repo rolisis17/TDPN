@@ -149,7 +149,9 @@ bash ./scripts/access_bridge_host_install_check.sh \
   --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json \
   --provenance-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence.provenance.json \
   --trust-store TRUST_STORE \
-  --require-trusted-provenance 1
+  --require-trusted-provenance 1 \
+  --verification-summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_verify_summary.json \
+  --print-verification-summary-json 1
 ```
 
 Keep the smoke JSON, deployment-evidence JSON, host-install-check JSON, trusted provenance JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, `manifest.sha256`, `<bundle>.tar.gz`, `<bundle>.tar.gz.sha256`, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair; the bundle skips access-code/private-key-looking deploy-pack files. Local integrity checks may be unsigned, but pilot/operator handoff verification must require trusted provenance and reject manifest tamper, tar checksum mismatch, unsafe tar paths, tar links, and untrusted provenance.

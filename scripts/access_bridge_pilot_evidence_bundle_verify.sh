@@ -20,6 +20,8 @@ Usage:
     [--trust-store PATH] \
     [--public-key-file PATH] \
     [--summary-contract-check [0|1]] \
+    [--verification-summary-json PATH] \
+    [--print-verification-summary-json [0|1]] \
     [--show-details [0|1]]
 
 Purpose:
@@ -39,6 +41,8 @@ Notes:
     summary, manifest, tar checksum, and provenance checks enabled.
   - When --summary-json is supplied, the summary contract is checked by default;
     set --summary-contract-check 0 only for raw artifact integrity inspection.
+  - --verification-summary-json writes a machine-readable verifier result for
+    roadmap/pilot gates; --print-verification-summary-json also prints it.
 USAGE
 }
 
@@ -248,6 +252,8 @@ provenance_json=""
 trust_store=""
 public_key_file=""
 summary_contract_check="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_CONTRACT_CHECK:-1}"
+verification_summary_json="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_VERIFICATION_SUMMARY_JSON:-}"
+print_verification_summary_json="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_PRINT_VERIFICATION_SUMMARY_JSON:-0}"
 show_details="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SHOW_DETAILS:-0}"
 bundle_dir_explicit=0
 bundle_tar_explicit=0
@@ -329,6 +335,19 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --verification-summary-json)
+      verification_summary_json="${2:-}"
+      shift 2
+      ;;
+    --print-verification-summary-json)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        print_verification_summary_json="${2:-}"
+        shift 2
+      else
+        print_verification_summary_json="1"
+        shift
+      fi
+      ;;
     --show-details)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         show_details="${2:-}"
@@ -350,7 +369,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for cmd in bash basename cmp dirname find grep head jq mktemp sed sort tar tr; do
+for cmd in bash basename cmp date dirname find grep head jq mkdir mktemp sed sort tar tr; do
   need_cmd "$cmd"
 done
 detect_sha256_tool
@@ -366,6 +385,7 @@ bool_or_die "--check-manifest" "$check_manifest"
 bool_or_die "--check-provenance" "$check_provenance"
 bool_or_die "--require-trusted-provenance" "$require_trusted_provenance"
 bool_or_die "--summary-contract-check" "$summary_contract_check"
+bool_or_die "--print-verification-summary-json" "$print_verification_summary_json"
 bool_or_die "--show-details" "$show_details"
 if [[ "$require_trusted_provenance" == "1" ]]; then
   if [[ "$check_provenance" != "1" ]]; then
@@ -385,6 +405,7 @@ bundle_tar_sha256_file="$(abs_path "$bundle_tar_sha256_file")"
 provenance_json="$(abs_path "$provenance_json")"
 trust_store="$(abs_path "$trust_store")"
 public_key_file="$(abs_path "$public_key_file")"
+verification_summary_json="$(abs_path "$verification_summary_json")"
 
 if [[ -n "$summary_json" ]]; then
   if [[ ! -f "$summary_json" ]]; then
@@ -431,6 +452,151 @@ trap cleanup EXIT
 
 issues=0
 summary_evidence_scope=""
+provenance_verify_checked="false"
+provenance_verify_status="skipped"
+provenance_verify_rc_json="null"
+provenance_trusted="false"
+provenance_key_id=""
+provenance_organization_id=""
+provenance_organization_name=""
+provenance_trusted_org_id=""
+provenance_trusted_org_name=""
+provenance_evidence_scope=""
+provenance_bundle_tar_name=""
+provenance_expires_at_utc=""
+
+write_verification_summary() {
+  local status="$1"
+  local rc="$2"
+  local notes="$3"
+  local generated_at_utc check_tar_sha256_json check_manifest_json check_provenance_json require_trusted_json
+  local summary_contract_check_json provenance_checked_json provenance_trusted_json provenance_source
+
+  [[ -n "$verification_summary_json" ]] || return 0
+
+  mkdir -p "$(dirname "$verification_summary_json")"
+  generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  check_tar_sha256_json="$( [[ "$check_tar_sha256" == "1" ]] && printf 'true' || printf 'false' )"
+  check_manifest_json="$( [[ "$check_manifest" == "1" ]] && printf 'true' || printf 'false' )"
+  check_provenance_json="$( [[ "$check_provenance" == "1" ]] && printf 'true' || printf 'false' )"
+  require_trusted_json="$( [[ "$require_trusted_provenance" == "1" ]] && printf 'true' || printf 'false' )"
+  summary_contract_check_json="$( [[ "$summary_contract_check" == "1" ]] && printf 'true' || printf 'false' )"
+  provenance_checked_json="$( [[ "$provenance_verify_checked" == "true" ]] && printf 'true' || printf 'false' )"
+  provenance_trusted_json="$( [[ "$provenance_trusted" == "true" ]] && printf 'true' || printf 'false' )"
+  provenance_source="none"
+  if [[ -n "$trust_store" ]]; then
+    provenance_source="trust_store"
+  elif [[ -n "$public_key_file" ]]; then
+    provenance_source="public_key_file"
+  fi
+
+  jq -n \
+    --arg generated_at_utc "$generated_at_utc" \
+    --arg status "$status" \
+    --argjson rc "$rc" \
+    --arg notes "$notes" \
+    --arg summary_json "$summary_json" \
+    --arg bundle_dir "$bundle_dir" \
+    --arg manifest_bundle_dir "$manifest_bundle_dir" \
+    --arg bundle_tar "$bundle_tar" \
+    --arg bundle_tar_sha256_file "$bundle_tar_sha256_file" \
+    --arg provenance_json "$provenance_json" \
+    --arg trust_store "$trust_store" \
+    --arg public_key_file "$public_key_file" \
+    --arg summary_evidence_scope "$summary_evidence_scope" \
+    --argjson check_tar_sha256 "$check_tar_sha256_json" \
+    --argjson check_manifest "$check_manifest_json" \
+    --argjson check_provenance "$check_provenance_json" \
+    --argjson require_trusted_provenance "$require_trusted_json" \
+    --argjson summary_contract_check "$summary_contract_check_json" \
+    --argjson provenance_checked "$provenance_checked_json" \
+    --arg provenance_status "$provenance_verify_status" \
+    --argjson provenance_rc "$provenance_verify_rc_json" \
+    --argjson provenance_trusted "$provenance_trusted_json" \
+    --arg provenance_key_id "$provenance_key_id" \
+    --arg provenance_organization_id "$provenance_organization_id" \
+    --arg provenance_organization_name "$provenance_organization_name" \
+    --arg provenance_trusted_org_id "$provenance_trusted_org_id" \
+    --arg provenance_trusted_org_name "$provenance_trusted_org_name" \
+    --arg provenance_evidence_scope "$provenance_evidence_scope" \
+    --arg provenance_bundle_tar_name "$provenance_bundle_tar_name" \
+    --arg provenance_expires_at_utc "$provenance_expires_at_utc" \
+    --arg provenance_source "$provenance_source" \
+    --arg verification_summary_json "$verification_summary_json" '
+      def null_if_empty($v):
+        if ($v | type) == "string" and ($v | length) > 0 then $v else null end;
+      {
+        version: 1,
+        schema: {
+          id: "access_bridge_pilot_evidence_bundle_verify_summary",
+          major: 1,
+          minor: 0
+        },
+        generated_at_utc: $generated_at_utc,
+        status: $status,
+        rc: $rc,
+        notes: $notes,
+        inputs: {
+          summary_json: null_if_empty($summary_json),
+          bundle_dir: null_if_empty($bundle_dir),
+          bundle_tar: null_if_empty($bundle_tar),
+          bundle_tar_sha256_file: null_if_empty($bundle_tar_sha256_file),
+          provenance_json: null_if_empty($provenance_json),
+          trust_store: null_if_empty($trust_store),
+          public_key_file: null_if_empty($public_key_file)
+        },
+        checks: {
+          summary_contract: {
+            enabled: $summary_contract_check,
+            status: (if $summary_contract_check then $status else "skipped" end)
+          },
+          tar_sha256: {
+            enabled: $check_tar_sha256,
+            status: (if $check_tar_sha256 then $status else "skipped" end)
+          },
+          manifest: {
+            enabled: $check_manifest,
+            status: (if $check_manifest then $status else "skipped" end)
+          },
+          provenance: {
+            enabled: $check_provenance,
+            required_trusted: $require_trusted_provenance,
+            status: $provenance_status
+          }
+        },
+        trusted_provenance: {
+          required: $require_trusted_provenance,
+          checked: $provenance_checked,
+          source: $provenance_source,
+          trusted: $provenance_trusted,
+          status: $provenance_status,
+          rc: $provenance_rc,
+          key_id: null_if_empty($provenance_key_id),
+          organization_id: null_if_empty($provenance_organization_id),
+          organization_name: null_if_empty($provenance_organization_name),
+          trusted_org_id: null_if_empty($provenance_trusted_org_id),
+          trusted_org_name: null_if_empty($provenance_trusted_org_name),
+          evidence_scope: null_if_empty($provenance_evidence_scope),
+          summary_evidence_scope: null_if_empty($summary_evidence_scope),
+          bundle_tar_name: null_if_empty($provenance_bundle_tar_name),
+          expires_at_utc: null_if_empty($provenance_expires_at_utc)
+        },
+        artifacts: {
+          verification_summary_json: null_if_empty($verification_summary_json),
+          source_summary_json: null_if_empty($summary_json),
+          bundle_dir: null_if_empty(if $manifest_bundle_dir != "" then $manifest_bundle_dir else $bundle_dir end),
+          bundle_tar: null_if_empty($bundle_tar),
+          bundle_tar_sha256_file: null_if_empty($bundle_tar_sha256_file),
+          provenance_json: null_if_empty($provenance_json)
+        }
+      }
+    ' >"$verification_summary_json"
+
+  if [[ "$print_verification_summary_json" == "1" ]]; then
+    cat "$verification_summary_json"
+  fi
+}
+
 if [[ -n "$summary_json" && "$summary_contract_check" == "1" ]]; then
   summary_evidence_scope="$(json_string "$summary_json" '.evidence_scope')"
   if ! validate_bundle_summary_contract "$summary_json" "external bundle summary"; then
@@ -704,17 +870,28 @@ if [[ "$check_provenance" == "1" ]]; then
       provenance_verify_args+=(--public-key-file "$public_key_file")
     fi
     provenance_verify_log="$(mktemp)"
+    provenance_verify_checked="true"
     set +e
     "${provenance_verify_args[@]}" >"$provenance_verify_log" 2>&1
     provenance_verify_rc=$?
+    provenance_verify_rc_json="$provenance_verify_rc"
     set -e
     if [[ "$provenance_verify_rc" -ne 0 ]]; then
+      provenance_verify_status="fail"
       echo "provenance verification failed: $provenance_json"
       sed 's/^/  /' "$provenance_verify_log"
       issues=$((issues + 1))
     else
+      provenance_verify_status="pass"
       provenance_trusted="$(jq -r 'if (.trusted // false) == true then "true" else "false" end' "$provenance_verify_log" 2>/dev/null || printf '%s' "false")"
       provenance_evidence_scope="$(jq -r '.evidence_scope // ""' "$provenance_verify_log" 2>/dev/null || true)"
+      provenance_key_id="$(jq -r '.key_id // ""' "$provenance_verify_log" 2>/dev/null || true)"
+      provenance_organization_id="$(jq -r '.organization_id // ""' "$provenance_verify_log" 2>/dev/null || true)"
+      provenance_organization_name="$(jq -r '.organization_name // ""' "$provenance_verify_log" 2>/dev/null || true)"
+      provenance_trusted_org_id="$(jq -r '.trusted_org_id // ""' "$provenance_verify_log" 2>/dev/null || true)"
+      provenance_trusted_org_name="$(jq -r '.trusted_org_name // ""' "$provenance_verify_log" 2>/dev/null || true)"
+      provenance_bundle_tar_name="$(jq -r '.bundle_tar_name // ""' "$provenance_verify_log" 2>/dev/null || true)"
+      provenance_expires_at_utc="$(jq -r '.expires_at_utc // ""' "$provenance_verify_log" 2>/dev/null || true)"
       if [[ -n "$summary_evidence_scope" && -n "$provenance_evidence_scope" && "$summary_evidence_scope" != "$provenance_evidence_scope" ]]; then
         echo "provenance evidence_scope does not match summary: summary=$summary_evidence_scope provenance=$provenance_evidence_scope"
         issues=$((issues + 1))
@@ -738,10 +915,12 @@ if [[ "$check_provenance" == "1" ]]; then
 fi
 
 if ((issues > 0)); then
+  write_verification_summary "fail" 1 "Access Bridge pilot evidence bundle verification failed"
   echo "[access-bridge-pilot-evidence-bundle-verify] failed (issues=$issues)"
   exit 1
 fi
 
+write_verification_summary "pass" 0 "Access Bridge pilot evidence bundle verification passed"
 echo "[access-bridge-pilot-evidence-bundle-verify] ok"
 if [[ -n "$summary_json" ]]; then
   echo "[access-bridge-pilot-evidence-bundle-verify] summary_json=$summary_json"

@@ -33,6 +33,7 @@ Usage:
     [--access-bridge-service-smoke-summary-json PATH] \
     [--access-bridge-deployment-evidence-summary-json PATH] \
     [--access-bridge-host-install-summary-json PATH] \
+    [--access-bridge-pilot-evidence-bundle-verify-summary-json PATH] \
     [--summary-json PATH] \
     [--report-md PATH] \
     [--print-report [0|1]] \
@@ -2104,15 +2105,180 @@ access_recovery_evidence_json() {
     ' "$path"
 }
 
+access_recovery_verifier_evidence_json() {
+  local path="$1"
+  local expected_schema_id="access_bridge_pilot_evidence_bundle_verify_summary"
+  local input_json="null"
+  local max_age_sec="${ROADMAP_PROGRESS_ACCESS_RECOVERY_EVIDENCE_MAX_AGE_SEC:-86400}"
+  local age_sec=""
+  local age_json="null"
+  local stale_json="true"
+
+  if ! [[ "$max_age_sec" =~ ^[0-9]+$ ]]; then
+    max_age_sec="86400"
+  fi
+  if [[ -n "$path" ]]; then
+    input_json="$(jq -cn --arg path "$path" '$path')"
+  fi
+
+  if [[ -z "$path" ]]; then
+    jq -cn --arg expected_schema_id "$expected_schema_id" '{
+      available: false,
+      input_summary_json: null,
+      source_summary_json: null,
+      schema_id: null,
+      expected_schema_id: $expected_schema_id,
+      status: "missing",
+      generated_at_utc: null,
+      notes: "Access bridge pilot evidence verifier summary path is missing",
+      rc: null,
+      needs_attention: true,
+      semantic_ok: null,
+      details: {}
+    }'
+    return
+  fi
+
+  if [[ ! -f "$path" ]]; then
+    jq -cn --argjson input "$input_json" --arg expected_schema_id "$expected_schema_id" '{
+      available: false,
+      input_summary_json: $input,
+      source_summary_json: null,
+      schema_id: null,
+      expected_schema_id: $expected_schema_id,
+      status: "missing",
+      generated_at_utc: null,
+      notes: "Access bridge pilot evidence verifier summary file is missing",
+      rc: null,
+      needs_attention: true,
+      semantic_ok: null,
+      details: {}
+    }'
+    return
+  fi
+
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    jq -cn --argjson input "$input_json" --arg expected_schema_id "$expected_schema_id" '{
+      available: false,
+      input_summary_json: $input,
+      source_summary_json: null,
+      schema_id: null,
+      expected_schema_id: $expected_schema_id,
+      status: "invalid",
+      generated_at_utc: null,
+      notes: "Access bridge pilot evidence verifier summary is not valid JSON",
+      rc: null,
+      needs_attention: true,
+      semantic_ok: null,
+      details: {}
+    }'
+    return
+  fi
+
+  age_sec="$(summary_age_sec_from_path "$path")"
+  if [[ "$age_sec" =~ ^[0-9]+$ ]]; then
+    age_json="$age_sec"
+  fi
+  if [[ "$(evidence_pack_summary_stale_01 "$path" "$max_age_sec")" == "0" ]]; then
+    stale_json="false"
+  fi
+
+  jq -c \
+    --arg input "$path" \
+    --arg expected_schema_id "$expected_schema_id" \
+    --argjson summary_age_sec "$age_json" \
+    --argjson summary_stale "$stale_json" \
+    --argjson summary_max_age_sec "$max_age_sec" '
+      def str_or_null($v):
+        if ($v | type) == "string" and ($v | length) > 0 then $v else null end;
+      def status_norm:
+        if (.status | type) == "string" and ((.status | length) > 0) then (.status | ascii_downcase)
+        else ""
+        end;
+      def rc_ok:
+        if has("rc") then ((.rc | type) == "number" and .rc == 0) else false end;
+      def enabled($path):
+        if ($path | type) == "boolean" then $path else false end;
+      def required_checks_enabled:
+        enabled(.checks.summary_contract.enabled)
+        and enabled(.checks.tar_sha256.enabled)
+        and enabled(.checks.manifest.enabled)
+        and enabled(.checks.provenance.enabled);
+      def trusted_provenance_ready:
+        (.trusted_provenance.required == true)
+        and (.trusted_provenance.checked == true)
+        and (.trusted_provenance.trusted == true)
+        and ((.trusted_provenance.source // "") == "trust_store")
+        and ((.trusted_provenance.evidence_scope // "") == "real_helper_https")
+        and ((.trusted_provenance.summary_evidence_scope // "") == "real_helper_https")
+        and ((.inputs.trust_store // "") != "")
+        and ((.inputs.public_key_file // null) == null);
+      (.schema.id // null) as $schema_id
+      | status_norm as $raw_status
+      | (($schema_id == $expected_schema_id) and ($raw_status != "")) as $valid_contract
+      | ($valid_contract and ($summary_stale | not)) as $fresh_contract
+      | ($fresh_contract and ($raw_status == "pass") and rc_ok and required_checks_enabled and trusted_provenance_ready) as $semantic_ok
+      | (
+          if $valid_contract and $summary_stale then "stale"
+          elif $valid_contract and ($semantic_ok | not) then (if $raw_status == "pass" then "fail" else $raw_status end)
+          elif $valid_contract then $raw_status
+          else "invalid"
+          end
+        ) as $state
+      | {
+          available: $semantic_ok,
+          input_summary_json: $input,
+          source_summary_json: (if $semantic_ok then $input else null end),
+          schema_id: $schema_id,
+          expected_schema_id: $expected_schema_id,
+          status: $state,
+          generated_at_utc: str_or_null(.generated_at_utc),
+          summary_age_sec: $summary_age_sec,
+          summary_stale: (if $valid_contract then $summary_stale else null end),
+          summary_max_age_sec: $summary_max_age_sec,
+          semantic_ok: (if $fresh_contract then $semantic_ok else null end),
+          notes: (
+            if $valid_contract and $summary_stale then "Access bridge pilot evidence verifier summary is stale or has untrusted freshness metadata"
+            elif $valid_contract and ($semantic_ok | not) then "Access bridge pilot evidence verifier did not prove trusted real-helper HTTPS provenance"
+            elif $valid_contract then str_or_null(.notes)
+            elif $schema_id != $expected_schema_id then "Access bridge pilot evidence verifier summary schema mismatch"
+            else "Access bridge pilot evidence verifier summary status is missing"
+            end
+          ),
+          rc: (if (.rc | type) == "number" then .rc else null end),
+          needs_attention: ($semantic_ok | not),
+          details: {
+            summary_contract_enabled: enabled(.checks.summary_contract.enabled),
+            tar_sha256_enabled: enabled(.checks.tar_sha256.enabled),
+            manifest_enabled: enabled(.checks.manifest.enabled),
+            provenance_enabled: enabled(.checks.provenance.enabled),
+            trusted_provenance_required: (.trusted_provenance.required // null),
+            trusted_provenance_checked: (.trusted_provenance.checked // null),
+            trusted_provenance_trusted: (.trusted_provenance.trusted // null),
+            trusted_provenance_source: str_or_null(.trusted_provenance.source),
+            evidence_scope: str_or_null(.trusted_provenance.evidence_scope),
+            summary_evidence_scope: str_or_null(.trusted_provenance.summary_evidence_scope),
+            provenance_json: str_or_null(.artifacts.provenance_json),
+            source_summary_json: str_or_null(.artifacts.source_summary_json),
+            bundle_tar: str_or_null(.artifacts.bundle_tar),
+            trust_store: str_or_null(.inputs.trust_store),
+            public_key_file: str_or_null(.inputs.public_key_file)
+          }
+        }
+    ' "$path"
+}
+
 access_recovery_track_json_from_evidence() {
   local smoke_json="$1"
   local deployment_json="$2"
   local host_install_json="$3"
+  local bundle_verify_json="$4"
 
   jq -cn \
     --argjson service_smoke "$smoke_json" \
     --argjson deployment_evidence "$deployment_json" \
-    --argjson host_install "$host_install_json" '
+    --argjson host_install "$host_install_json" \
+    --argjson bundle_verify "$bundle_verify_json" '
       def same_nonempty($a; $b):
         (($a // "") != "" and ($b // "") != "" and $a == $b);
       def all_pass:
@@ -2168,10 +2334,23 @@ access_recovery_track_json_from_evidence() {
         elif all_pass and evidence_binding.ok then "local_rehearsal"
         else "incomplete"
         end;
+      def real_helper_https_base_ready:
+        all_pass and evidence_binding.ok and real_helper_https_evidence;
+      def trusted_verifier_ready:
+        ($bundle_verify.available == true)
+        and ($bundle_verify.status == "pass")
+        and ($bundle_verify.semantic_ok == true)
+        and ($bundle_verify.details.trusted_provenance_required == true)
+        and ($bundle_verify.details.trusted_provenance_checked == true)
+        and ($bundle_verify.details.trusted_provenance_trusted == true)
+        and (($bundle_verify.details.trusted_provenance_source // "") == "trust_store")
+        and (($bundle_verify.details.evidence_scope // "") == "real_helper_https");
       def first_attention:
         [$service_smoke, $deployment_evidence, $host_install]
         | map(select(.needs_attention == true))
         | .[0] // (if all_pass and ((evidence_binding.ok) | not) then $deployment_evidence else null end);
+      def trusted_verifier_command:
+        "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify --summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_summary.json --provenance-json .easy-node-logs/access_bridge_pilot_evidence_bundle.provenance.json --trust-store TRUST_STORE --require-trusted-provenance 1 --verification-summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_verify_summary.json --print-verification-summary-json 1";
       def next_command_for($e):
         if $e == null then null
         elif ($e == $service_smoke and (($e.status // "") == "missing" or ($e.status // "") == "stale")) then
@@ -2184,7 +2363,8 @@ access_recovery_track_json_from_evidence() {
           "bash ./scripts/access_bridge_host_install_check.sh --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
         end;
       def track_status:
-        if all_pass and evidence_binding.ok and real_helper_https_evidence then "pilot-evidence-ready"
+        if real_helper_https_base_ready and trusted_verifier_ready then "pilot-evidence-ready"
+        elif real_helper_https_base_ready then "trusted-provenance-required"
         elif all_pass and evidence_binding.ok then "local-rehearsal-ready"
         elif all_pass and ((evidence_binding.ok) | not) then "evidence-failed"
         elif ([$service_smoke, $deployment_evidence, $host_install] | any(.status == "invalid")) then "evidence-invalid"
@@ -2206,6 +2386,8 @@ access_recovery_track_json_from_evidence() {
           recommendation: (
             if $track_status == "pilot-evidence-ready" then
               "Access Recovery bridge pilot evidence is ready for operator handoff."
+            elif $track_status == "trusted-provenance-required" then
+              "Access Recovery real helper HTTPS evidence is present; run the trusted provenance verifier before pilot handoff."
             elif $track_status == "local-rehearsal-ready" then
               "Access Recovery local rehearsal evidence is ready; capture real helper HTTPS evidence before pilot handoff."
             else
@@ -2215,7 +2397,9 @@ access_recovery_track_json_from_evidence() {
           access_bridge_service_smoke: $service_smoke,
           access_bridge_deployment_evidence: $deployment_evidence,
           access_bridge_host_install: $host_install,
+          access_bridge_pilot_evidence_bundle_verify: $bundle_verify,
           evidence_binding: $evidence_binding,
+          trusted_verifier_ready: trusted_verifier_ready,
           evidence_host_policy: {
             base_url: smoke_base_url,
             host: smoke_host,
@@ -2225,6 +2409,11 @@ access_recovery_track_json_from_evidence() {
           },
           recommended_next_action: (
             if $track_status == "pilot-evidence-ready" then null
+            elif $track_status == "trusted-provenance-required" then {
+              id: "trusted_pilot_evidence_verify",
+              reason: ($bundle_verify.notes // "Trusted real helper HTTPS provenance verification is required before pilot handoff"),
+              command: trusted_verifier_command
+            }
             elif $track_status == "local-rehearsal-ready" then {
               id: "real_helper_https_evidence",
               reason: "Local Access Recovery rehearsal evidence cannot substitute for real helper HTTPS deployment evidence",
@@ -6658,6 +6847,11 @@ if [[ -n "$(trim "$access_bridge_host_install_summary_json")" ]]; then
   path_arg_or_die "--access-bridge-host-install-summary-json" "$access_bridge_host_install_summary_json"
 fi
 access_bridge_host_install_summary_json="$(abs_path "$access_bridge_host_install_summary_json")"
+access_bridge_pilot_evidence_bundle_verify_summary_json="${ROADMAP_PROGRESS_ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON:-$default_log_dir/access_bridge_pilot_evidence_bundle_verify_summary.json}"
+if [[ -n "$(trim "$access_bridge_pilot_evidence_bundle_verify_summary_json")" ]]; then
+  path_arg_or_die "--access-bridge-pilot-evidence-bundle-verify-summary-json" "$access_bridge_pilot_evidence_bundle_verify_summary_json"
+fi
+access_bridge_pilot_evidence_bundle_verify_summary_json="$(abs_path "$access_bridge_pilot_evidence_bundle_verify_summary_json")"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -6793,6 +6987,11 @@ while [[ $# -gt 0 ]]; do
     --access-bridge-host-install-summary-json)
       optional_path_arg_or_die "--access-bridge-host-install-summary-json" "$#" "${2:-}"
       access_bridge_host_install_summary_json="$(abs_path "${2:-}")"
+      shift 2
+      ;;
+    --access-bridge-pilot-evidence-bundle-verify-summary-json)
+      optional_path_arg_or_die "--access-bridge-pilot-evidence-bundle-verify-summary-json" "$#" "${2:-}"
+      access_bridge_pilot_evidence_bundle_verify_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --summary-json)
@@ -11698,11 +11897,16 @@ access_bridge_host_install_evidence_json="$(
     "host_install" \
     "Access bridge host install"
 )"
+access_bridge_pilot_evidence_bundle_verify_evidence_json="$(
+  access_recovery_verifier_evidence_json \
+    "$access_bridge_pilot_evidence_bundle_verify_summary_json"
+)"
 access_recovery_track_json="$(
   access_recovery_track_json_from_evidence \
     "$access_bridge_service_smoke_evidence_json" \
     "$access_bridge_deployment_evidence_json" \
-    "$access_bridge_host_install_evidence_json"
+    "$access_bridge_host_install_evidence_json" \
+    "$access_bridge_pilot_evidence_bundle_verify_evidence_json"
 )"
 access_recovery_track_status_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r '.status // "unknown"')"
 access_recovery_track_ready_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r 'if (.ready | type) == "boolean" then .ready else false end')"
@@ -11716,6 +11920,9 @@ access_bridge_deployment_evidence_source_summary_json="$(printf '%s\n' "$access_
 access_bridge_host_install_available_json="$(printf '%s\n' "$access_bridge_host_install_evidence_json" | jq -r 'if (.available | type) == "boolean" then .available else false end')"
 access_bridge_host_install_status_json="$(printf '%s\n' "$access_bridge_host_install_evidence_json" | jq -r '.status // "unknown"')"
 access_bridge_host_install_source_summary_json="$(printf '%s\n' "$access_bridge_host_install_evidence_json" | jq -r '.source_summary_json // ""')"
+access_bridge_pilot_evidence_bundle_verify_available_json="$(printf '%s\n' "$access_bridge_pilot_evidence_bundle_verify_evidence_json" | jq -r 'if (.available | type) == "boolean" then .available else false end')"
+access_bridge_pilot_evidence_bundle_verify_status_json="$(printf '%s\n' "$access_bridge_pilot_evidence_bundle_verify_evidence_json" | jq -r '.status // "unknown"')"
+access_bridge_pilot_evidence_bundle_verify_source_summary_json="$(printf '%s\n' "$access_bridge_pilot_evidence_bundle_verify_evidence_json" | jq -r '.source_summary_json // ""')"
 
 next_actions_candidate_json="$(
   jq -c \
@@ -11839,6 +12046,8 @@ next_actions_candidate_json="$(
   def access_recovery_action_metadata($id):
     if $id == "real_helper_https_evidence" then
       action_evidence_metadata(["access-recovery"]; true; false; ["real-helper-https"])
+    elif $id == "trusted_pilot_evidence_verify" then
+      action_evidence_metadata(["access-recovery"]; false; false; ["trusted-provenance"])
     else
       action_evidence_metadata(["access-recovery"]; false; true; ["local-evidence"])
     end;
@@ -13345,6 +13554,7 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
       access_bridge_service_smoke_summary_json: $access_recovery_track.access_bridge_service_smoke.source_summary_json,
       access_bridge_deployment_evidence_summary_json: $access_recovery_track.access_bridge_deployment_evidence.source_summary_json,
       access_bridge_host_install_summary_json: $access_recovery_track.access_bridge_host_install.source_summary_json,
+      access_bridge_pilot_evidence_bundle_verify_summary_json: $access_recovery_track.access_bridge_pilot_evidence_bundle_verify.source_summary_json,
       vpn_rc_resilience_summary_json: (if $resilience_handoff_source_summary_json == "" then null else $resilience_handoff_source_summary_json end),
       summary_json: $summary_json_path,
       report_md: $report_md_path
@@ -13398,6 +13608,7 @@ cat >"$report_tmp" <<EOF_MD
 - Access bridge service smoke: available=$(jq -r '.access_recovery_track.access_bridge_service_smoke.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_service_smoke.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_service_smoke.source_summary_json // "none"' "$summary_json")
 - Access bridge deployment evidence: available=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.source_summary_json // "none"' "$summary_json")
 - Access bridge host install: available=$(jq -r '.access_recovery_track.access_bridge_host_install.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_host_install.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_host_install.source_summary_json // "none"' "$summary_json")
+- Access bridge trusted bundle verifier: available=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.source_summary_json // "none"' "$summary_json")
 - Access Recovery next action: $(jq -r '.access_recovery_track.recommended_next_action.command // "none"' "$summary_json")
 - Access Recovery next action reason: $(jq -r '.access_recovery_track.recommended_next_action.reason // "none"' "$summary_json")
 
@@ -13745,6 +13956,7 @@ $non_blockchain_actionable_no_sudo_or_github_md
 - Access bridge service smoke summary source: $(jq -r '.artifacts.access_bridge_service_smoke_summary_json // "none"' "$summary_json")
 - Access bridge deployment evidence summary source: $(jq -r '.artifacts.access_bridge_deployment_evidence_summary_json // "none"' "$summary_json")
 - Access bridge host install summary source: $(jq -r '.artifacts.access_bridge_host_install_summary_json // "none"' "$summary_json")
+- Access bridge trusted bundle verifier summary source: $(jq -r '.artifacts.access_bridge_pilot_evidence_bundle_verify_summary_json // "none"' "$summary_json")
 - VPN RC resilience summary: $(jq -r '.artifacts.vpn_rc_resilience_summary_json // "none"' "$summary_json")
 EOF_MD
 mv -f "$report_tmp" "$report_md"
@@ -13757,6 +13969,7 @@ echo "[roadmap-progress-report] access_recovery_track_status=$access_recovery_tr
 echo "[roadmap-progress-report] access_bridge_service_smoke_available=$access_bridge_service_smoke_available_json status=$access_bridge_service_smoke_status_json source_summary_json=${access_bridge_service_smoke_source_summary_json:-}"
 echo "[roadmap-progress-report] access_bridge_deployment_evidence_available=$access_bridge_deployment_evidence_available_json status=$access_bridge_deployment_evidence_status_json source_summary_json=${access_bridge_deployment_evidence_source_summary_json:-}"
 echo "[roadmap-progress-report] access_bridge_host_install_available=$access_bridge_host_install_available_json status=$access_bridge_host_install_status_json source_summary_json=${access_bridge_host_install_source_summary_json:-}"
+echo "[roadmap-progress-report] access_bridge_pilot_evidence_bundle_verify_available=$access_bridge_pilot_evidence_bundle_verify_available_json status=$access_bridge_pilot_evidence_bundle_verify_status_json source_summary_json=${access_bridge_pilot_evidence_bundle_verify_source_summary_json:-}"
 echo "[roadmap-progress-report] next_action_check_id=${next_action_check_id:-}"
 echo "[roadmap-progress-report] next_action_command=${next_action_command:-}"
 echo "[roadmap-progress-report] manual_validation_refresh_status=$manual_refresh_status rc=$manual_refresh_rc"
