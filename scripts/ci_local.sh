@@ -53,6 +53,9 @@ trap ci_local_restore_tracked_state EXIT
 echo "[ci] unit tests"
 go test ./...
 
+echo "[ci] access recovery browser smoke integration"
+bash ./scripts/integration_recovery_browser_smoke.sh
+
 echo "[ci] secret hygiene integration"
 ./scripts/integration_secret_hygiene.sh
 

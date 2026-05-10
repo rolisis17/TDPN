@@ -22,6 +22,7 @@ run_step() {
 }
 
 run_step "unit tests" go test ./...
+run_step "access recovery browser smoke" bash ./scripts/integration_recovery_browser_smoke.sh
 run_step "secret hygiene" ./scripts/integration_secret_hygiene.sh
 run_step "openai model policy guard" ./scripts/integration_openai_model_policy_guard.sh
 run_step "security baseline" ./scripts/integration_security_baseline.sh
