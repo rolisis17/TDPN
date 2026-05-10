@@ -170,6 +170,8 @@ func main() {
 		err = runBridgeVerify(os.Args[2:])
 	case "bridge-policy":
 		err = runBridgePolicy(os.Args[2:])
+	case "bridge-service-config":
+		err = runBridgeServiceConfig(os.Args[2:])
 	case "bridge-registry-sign":
 		err = runBridgeRegistrySign(os.Args[2:])
 	case "bridge-registry-verify":
@@ -222,6 +224,7 @@ func usage() {
   go run ./cmd/gpmrecover bridge-sign --invite FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
   go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE | --signed-helper-registry FILE] [--require-helper-registry 1]
+  go run ./cmd/gpmrecover bridge-service-config --invite FILE --signed-helper-registry FILE (--trust-store FILE | --public-key-file FILE) [--out FILE]
   go run ./cmd/gpmrecover bridge-registry-sign --helper-registry FILE --org-id ID --org-name NAME --private-key-file FILE --out FILE [--registry-id ID] [--lifetime-hours HOURS]
   go run ./cmd/gpmrecover bridge-registry-verify --signed-registry FILE (--trust-store FILE | --public-key-file FILE) [--out-registry FILE] [--show-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
@@ -919,6 +922,63 @@ func runBridgePolicy(args []string) error {
 	}
 	if report.Status != "pass" {
 		return errors.New("bridge invite policy failed")
+	}
+	return nil
+}
+
+func runBridgeServiceConfig(args []string) error {
+	fs := flag.NewFlagSet("bridge-service-config", flag.ContinueOnError)
+	inviteFile := fs.String("invite", "", "path to signed bridge invite JSON")
+	signedHelperRegistryFile := fs.String("signed-helper-registry", "", "path to signed bridge helper registry artifact JSON")
+	publicFile := fs.String("public-key-file", "", "path to public key file for one-off verification")
+	trustStoreFile := fs.String("trust-store", "", "path to access recovery trust store JSON")
+	outFile := fs.String("out", "", "optional path to write bridge service config JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	body, err := readInputFileStrict(*inviteFile, "bridge invite", maxPackFileBytes)
+	if err != nil {
+		return err
+	}
+	invite, err := accesspack.ParseBridgeInvite(body)
+	if err != nil {
+		return err
+	}
+	pub, _, err := resolveBridgeVerificationKey(invite, *publicFile, *trustStoreFile)
+	if err != nil {
+		return err
+	}
+	verified, err := accesspack.VerifyBridgeInvite(invite, pub, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	verifiedRegistry, err := verifyBridgeHelperRegistryArtifactFile(*signedHelperRegistryFile, verified.Invite.Organization.OrgID, *publicFile, *trustStoreFile)
+	if err != nil {
+		return err
+	}
+	config := accesspack.BuildBridgeServiceConfig(verified.Invite, verifiedRegistry.Artifact.Registry, accesspack.BridgeServiceConfigOptions{
+		RegistryID:           verifiedRegistry.Artifact.RegistryID,
+		RegistryExpiresAtUTC: verifiedRegistry.Artifact.ExpiresAtUTC,
+		InviteKeyID:          verified.KeyID,
+		RegistryKeyID:        verifiedRegistry.KeyID,
+		SignedRegistry:       true,
+	}, time.Now().UTC())
+	body, err = json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal bridge service config: %w", err)
+	}
+	body = append(body, '\n')
+	if strings.TrimSpace(*outFile) != "" {
+		if err := writeFileWithMode(*outFile, body, 0o644); err != nil {
+			return err
+		}
+	} else {
+		if _, err := os.Stdout.Write(body); err != nil {
+			return err
+		}
+	}
+	if config.Status != "pass" {
+		return errors.New("bridge service config policy failed")
 	}
 	return nil
 }

@@ -127,6 +127,17 @@ go run ./cmd/gpmrecover verify --pack "$access_pack" --trust-store "$trust_store
 go run ./cmd/gpmrecover bridge-verify --invite "$bridge_invite" --trust-store "$trust_store" --show-paths >/dev/null
 go run ./cmd/gpmrecover bridge-registry-verify --signed-registry "$signed_registry" --trust-store "$trust_store" --out-registry "$verified_registry" >/dev/null
 go run ./cmd/gpmrecover bridge-policy --invite "$bridge_invite" --trust-store "$trust_store" --signed-helper-registry "$signed_registry" --require-helper-registry >/dev/null
+go run ./cmd/gpmrecover bridge-service-config --invite "$bridge_invite" --trust-store "$trust_store" --signed-helper-registry "$signed_registry" --out "$TMP_DIR/bridge-service-config.json" >/dev/null
+if [[ "$(jq -r '.status // ""' "$TMP_DIR/bridge-service-config.json")" != "pass" ]]; then
+  echo "access recovery demo contract failed: bridge-service-config status is not pass"
+  cat "$TMP_DIR/bridge-service-config.json"
+  exit 1
+fi
+if [[ -z "$(jq -r '.helper_abuse_report_url // ""' "$TMP_DIR/bridge-service-config.json")" || -z "$(jq -r '.helper_rate_limit_policy // ""' "$TMP_DIR/bridge-service-config.json")" ]]; then
+  echo "access recovery demo contract failed: bridge-service-config missing helper abuse/rate fields"
+  cat "$TMP_DIR/bridge-service-config.json"
+  exit 1
+fi
 
 go run ./cmd/gpmrecover text-import --text-file "$trusted_key_text" --expect-kind trusted-key --out "$TMP_DIR/trusted-key.imported.json" >/dev/null
 go run ./cmd/gpmrecover text-import --text-file "$(jq -r '.files.trust_store_text' "$MANIFEST")" --expect-kind trust-store --out "$TMP_DIR/trust-store.imported.json" >/dev/null

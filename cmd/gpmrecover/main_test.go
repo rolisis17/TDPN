@@ -111,6 +111,26 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--signed-helper-registry", signedRegistry, "--require-helper-registry"}); err != nil {
 		t.Fatalf("bridge-policy signed helper registry: %v", err)
 	}
+	serviceConfig := filepath.Join(dir, "bridge-service-config.json")
+	if err := runBridgeServiceConfig([]string{
+		"--invite", signedBridge,
+		"--public-key-file", publicKey,
+		"--signed-helper-registry", signedRegistry,
+		"--out", serviceConfig,
+	}); err != nil {
+		t.Fatalf("bridge-service-config: %v", err)
+	}
+	serviceConfigBody, err := os.ReadFile(serviceConfig)
+	if err != nil {
+		t.Fatalf("read bridge service config: %v", err)
+	}
+	var serviceConfigOut accesspack.BridgeServiceConfig
+	if err := json.Unmarshal(serviceConfigBody, &serviceConfigOut); err != nil {
+		t.Fatalf("unmarshal bridge service config: %v", err)
+	}
+	if serviceConfigOut.Status != "pass" || !serviceConfigOut.SignedRegistry || serviceConfigOut.HelperAbuseReportURL == "" || serviceConfigOut.HelperRateLimitPolicy == "" {
+		t.Fatalf("unexpected bridge service config: %+v", serviceConfigOut)
+	}
 	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--require-helper-registry"}); err == nil {
 		t.Fatal("expected bridge-policy to fail when helper registry is required but missing")
 	}

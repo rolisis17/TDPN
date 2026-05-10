@@ -200,6 +200,33 @@ func TestBridgeInvitePolicyUsesHelperRegistry(t *testing.T) {
 	}
 }
 
+func TestBuildBridgeServiceConfigIncludesSignedHelperControls(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	registry := testBridgeHelperRegistry()
+	config := BuildBridgeServiceConfig(testBridgeInvite(), registry, BridgeServiceConfigOptions{
+		RegistryID:           "registry-demo",
+		RegistryExpiresAtUTC: "2026-05-17T01:00:00Z",
+		InviteKeyID:          "invite-key",
+		RegistryKeyID:        "registry-key",
+		SignedRegistry:       true,
+	}, now)
+	if config.Status != "pass" {
+		t.Fatalf("expected service config pass, got %+v", config.Policy.Findings)
+	}
+	if !config.SignedRegistry || config.RegistryID != "registry-demo" || config.RegistryKeyID != "registry-key" {
+		t.Fatalf("expected signed registry metadata, got %+v", config)
+	}
+	if config.HelperAbuseReportURL != "https://helper.example/abuse" {
+		t.Fatalf("unexpected abuse report url: %+v", config)
+	}
+	if config.HelperRateLimitPolicy == "" {
+		t.Fatalf("expected rate limit policy: %+v", config)
+	}
+	if len(config.AccessPaths) != 3 {
+		t.Fatalf("expected access paths, got %+v", config.AccessPaths)
+	}
+}
+
 func TestBridgeInvitePolicyRejectsHelperMissingAbuseAndRateLimitMetadata(t *testing.T) {
 	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
 	registry := testBridgeHelperRegistry()
