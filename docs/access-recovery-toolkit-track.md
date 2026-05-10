@@ -135,11 +135,24 @@ Example:
 - `docs/examples/access-recovery-bridge-invite.example.json`
 
 First CLI:
+- `go run ./cmd/gpmrecover demo-bundle --out-dir .easy-node-logs/access-recovery-demo`
 - `go run ./cmd/gpmrecover sign --pack docs/examples/access-recovery-pack.example.json --private-key-file .easy-node-logs/recovery.key --out .easy-node-logs/access-pack.signed.json`
 - `go run ./cmd/gpmrecover bridge-sign --invite docs/examples/access-recovery-bridge-invite.example.json --private-key-file .easy-node-logs/recovery.key --out .easy-node-logs/bridge-invite.signed.json`
 - `go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub`
 - `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --show-paths`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub --timeout-sec 8`
+
+Demo bundle flow:
+- `demo-bundle` creates a self-contained beta demo folder with:
+  - `recovery.key` and `recovery.pub`
+  - signed and unsigned access-pack JSON
+  - signed and unsigned bridge-invite JSON
+  - `recovery-trust.json`
+  - `GPMREC1` text handoffs for the pack, bridge invite, and trust store
+  - QR PNGs for the pack and bridge invite
+  - `demo-manifest.json` listing every generated file
+- Open `apps/web/recovery.html`, import `recovery-trust.json`, then import either `access-pack.signed.json` or `bridge-invite.signed.json`.
+- Alternatively, paste or scan the generated `GPMREC1` text/QR handoffs into the Text Handoff panel.
 
 Local trust-store flow:
 - `go run ./cmd/gpmrecover trust-add --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --org-name "FreeNews Demo" --public-key-file .easy-node-logs/recovery.pub --source "demo handoff"`
@@ -210,6 +223,7 @@ Do first:
 - QR rendering/download in the browser
 - QR image import in the browser with native scanning or bundled fallback
 - helper launch/copy flows for bridge invites
+- one-command end-to-end demo bundle
 - example pack
 - docs explaining how a user visualizes it
 

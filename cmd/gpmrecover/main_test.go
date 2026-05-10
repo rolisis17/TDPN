@@ -140,6 +140,73 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGPMRecoverDemoBundle(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+
+	dir := filepath.Join(t.TempDir(), "demo")
+	if err := runDemoBundle([]string{"--out-dir", dir, "--base-url", server.URL, "--helper-url", server.URL + "/bridge"}); err != nil {
+		t.Fatalf("demo-bundle: %v", err)
+	}
+	manifestPath := filepath.Join(dir, "demo-manifest.json")
+	body, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest demoBundleOutput
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	for _, key := range []string{
+		"private_key",
+		"public_key",
+		"trust_store",
+		"access_pack_signed",
+		"bridge_invite_signed",
+		"access_pack_text",
+		"bridge_invite_text",
+		"trust_store_text",
+		"access_pack_qr",
+		"bridge_invite_qr",
+	} {
+		if manifest.Files[key] == "" {
+			t.Fatalf("manifest missing %s", key)
+		}
+		assertFileExists(t, manifest.Files[key])
+	}
+	if err := runVerify([]string{"--pack", manifest.Files["access_pack_signed"], "--trust-store", manifest.Files["trust_store"], "--show-paths"}); err != nil {
+		t.Fatalf("verify generated pack: %v", err)
+	}
+	if err := runBridgeVerify([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"], "--show-paths"}); err != nil {
+		t.Fatalf("verify generated bridge invite: %v", err)
+	}
+	for _, key := range []string{"access_pack_qr", "bridge_invite_qr"} {
+		qrBody, err := os.ReadFile(manifest.Files[key])
+		if err != nil {
+			t.Fatalf("read %s: %v", key, err)
+		}
+		if !bytes.HasPrefix(qrBody, []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}) {
+			t.Fatalf("%s is not a png", key)
+		}
+	}
+}
+
+func assertFileExists(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("%s is not a regular file", path)
+	}
+	if info.Size() == 0 {
+		t.Fatalf("%s is empty", path)
+	}
+}
+
 func testRecoveryPack(serverURL string) accesspack.Pack {
 	return accesspack.Pack{
 		SchemaVersion: accesspack.SchemaVersion,

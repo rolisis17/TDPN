@@ -76,6 +76,17 @@ type trustAddOutput struct {
 	KeyID      string `json:"key_id"`
 }
 
+type demoBundleOutput struct {
+	Status         string            `json:"status"`
+	GeneratedAtUTC string            `json:"generated_at_utc"`
+	OutDir         string            `json:"out_dir"`
+	OrgID          string            `json:"org_id"`
+	OrgName        string            `json:"org_name"`
+	KeyID          string            `json:"key_id"`
+	Files          map[string]string `json:"files"`
+	NextSteps      []string          `json:"next_steps"`
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -109,6 +120,8 @@ func main() {
 		err = runVerify(os.Args[2:])
 	case "check":
 		err = runCheck(os.Args[2:])
+	case "demo-bundle":
+		err = runDemoBundle(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -132,12 +145,13 @@ func usage() {
   go run ./cmd/gpmrecover trust-list --trust-store FILE
   go run ./cmd/gpmrecover trust-remove --trust-store FILE --org-id ID --key-id ID
   go run ./cmd/gpmrecover text-export --kind access-pack|bridge-invite|trust-store|trusted-key --in FILE [--out FILE]
-  go run ./cmd/gpmrecover text-import --text TEXT --out FILE [--expect-kind KIND]
+  go run ./cmd/gpmrecover text-import (--text TEXT | --text-file FILE) --out FILE [--expect-kind KIND]
   go run ./cmd/gpmrecover qr-png --text TEXT --out FILE [--size 768]
   go run ./cmd/gpmrecover verify --pack FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
   go run ./cmd/gpmrecover check --pack FILE (--trust-store FILE | --public-key-file FILE) [--timeout-sec 8]
+  go run ./cmd/gpmrecover demo-bundle [--out-dir DIR] [--org-id ID] [--org-name NAME] [--base-url URL]
 
-This verifies signed access recovery packs. It does not tunnel traffic.`)
+This verifies signed access recovery artifacts. It does not tunnel traffic.`)
 }
 
 func runGen(args []string) error {
@@ -371,7 +385,7 @@ func runTrustRemove(args []string) error {
 
 func runTextExport(args []string) error {
 	fs := flag.NewFlagSet("text-export", flag.ContinueOnError)
-	kind := fs.String("kind", "", "envelope kind: access-pack, trust-store, or trusted-key")
+	kind := fs.String("kind", "", "envelope kind: access-pack, bridge-invite, trust-store, or trusted-key")
 	inFile := fs.String("in", "", "path to JSON payload file")
 	outFile := fs.String("out", "", "optional path to write text envelope")
 	if err := fs.Parse(args); err != nil {
@@ -612,6 +626,243 @@ func runCheck(args []string) error {
 		AllowOnionProbe: *allowOnionProbe,
 	})
 	return json.NewEncoder(os.Stdout).Encode(report)
+}
+
+func runDemoBundle(args []string) error {
+	fs := flag.NewFlagSet("demo-bundle", flag.ContinueOnError)
+	outDir := fs.String("out-dir", "", "directory to write the demo bundle")
+	orgID := fs.String("org-id", "freenews-demo", "demo organization id")
+	orgName := fs.String("org-name", "FreeNews Demo", "demo organization name")
+	baseURL := fs.String("base-url", "https://freenews.example", "primary demo access URL")
+	helperURL := fs.String("helper-url", "https://helper.example/freenews/bootstrap", "demo bridge helper URL")
+	helperContact := fs.String("helper-contact", "mailto:bridge-helper@example.com", "demo helper contact URL")
+	qrSize := fs.Int("qr-size", 768, "QR image size in pixels")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	dir := strings.TrimSpace(*outDir)
+	if dir == "" {
+		dir = filepath.Join(".easy-node-logs", "access-recovery-demo-"+now.Format("20060102_150405"))
+	}
+	if err := ensureDemoOutputDir(dir); err != nil {
+		return err
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return fmt.Errorf("generate demo keypair: %w", err)
+	}
+	pubText := adminauth.EncodePublicKey(pub)
+	privText := base64.RawURLEncoding.EncodeToString(priv)
+	keyID := adminauth.KeyIDFromPublicKey(pub)
+
+	pack := demoAccessPack(strings.TrimSpace(*orgID), strings.TrimSpace(*orgName), strings.TrimSpace(*baseURL), now)
+	signedPack, err := accesspack.Sign(pack, priv, "")
+	if err != nil {
+		return fmt.Errorf("sign demo access pack: %w", err)
+	}
+	invite := demoBridgeInvite(strings.TrimSpace(*orgID), strings.TrimSpace(*orgName), strings.TrimSpace(*baseURL), strings.TrimSpace(*helperURL), strings.TrimSpace(*helperContact), now)
+	signedInvite, err := accesspack.SignBridgeInvite(invite, priv, "")
+	if err != nil {
+		return fmt.Errorf("sign demo bridge invite: %w", err)
+	}
+	store, _, err := accesspack.AddTrustedKey(accesspack.EmptyTrustStore(), accesspack.TrustedKey{
+		OrgID:     strings.TrimSpace(*orgID),
+		OrgName:   strings.TrimSpace(*orgName),
+		PublicKey: pubText,
+		Source:    "generated demo bundle",
+		Notes:     []string{"Demo key for local access-recovery testing only."},
+	}, now)
+	if err != nil {
+		return fmt.Errorf("create demo trust store: %w", err)
+	}
+	if _, _, err := accesspack.ResolveTrustedPublicKey(store, signedPack, now); err != nil {
+		return fmt.Errorf("verify demo trust store against pack: %w", err)
+	}
+	if _, _, err := accesspack.ResolveTrustedBridgeInvitePublicKey(store, signedInvite, now); err != nil {
+		return fmt.Errorf("verify demo trust store against bridge invite: %w", err)
+	}
+	if _, err := accesspack.Verify(signedPack, pub, now); err != nil {
+		return fmt.Errorf("verify signed demo access pack: %w", err)
+	}
+	if _, err := accesspack.VerifyBridgeInvite(signedInvite, pub, now); err != nil {
+		return fmt.Errorf("verify signed demo bridge invite: %w", err)
+	}
+
+	files := map[string]string{}
+	addFile := func(key string, name string) string {
+		path := filepath.Join(dir, name)
+		files[key] = path
+		return path
+	}
+	if err := writeFileWithMode(addFile("private_key", "recovery.key"), []byte(privText+"\n"), 0o600); err != nil {
+		return err
+	}
+	if err := writeFileWithMode(addFile("public_key", "recovery.pub"), []byte(pubText+"\n"), 0o644); err != nil {
+		return err
+	}
+	if err := writeJSONFile(addFile("access_pack_unsigned", "access-pack.unsigned.json"), pack); err != nil {
+		return err
+	}
+	if err := writeJSONFile(addFile("access_pack_signed", "access-pack.signed.json"), signedPack); err != nil {
+		return err
+	}
+	if err := writeJSONFile(addFile("bridge_invite_unsigned", "bridge-invite.unsigned.json"), invite); err != nil {
+		return err
+	}
+	if err := writeJSONFile(addFile("bridge_invite_signed", "bridge-invite.signed.json"), signedInvite); err != nil {
+		return err
+	}
+	if err := writeTrustStoreFile(addFile("trust_store", "recovery-trust.json"), store); err != nil {
+		return err
+	}
+
+	if err := writeTextAndQR(addFile("access_pack_text", "access-pack.txt"), addFile("access_pack_qr", "access-pack.qr.png"), accesspack.EnvelopeKindPack, signedPack, *qrSize); err != nil {
+		return err
+	}
+	if err := writeTextAndQR(addFile("bridge_invite_text", "bridge-invite.txt"), addFile("bridge_invite_qr", "bridge-invite.qr.png"), accesspack.EnvelopeKindBridge, signedInvite, *qrSize); err != nil {
+		return err
+	}
+	storeBody, err := accesspack.MarshalTrustStore(store)
+	if err != nil {
+		return err
+	}
+	storeText, err := accesspack.EncodeTextEnvelope(accesspack.EnvelopeKindStore, storeBody)
+	if err != nil {
+		return err
+	}
+	if err := writeFileWithMode(addFile("trust_store_text", "recovery-trust.txt"), []byte(storeText+"\n"), 0o644); err != nil {
+		return err
+	}
+
+	out := demoBundleOutput{
+		Status:         "ok",
+		GeneratedAtUTC: now.Format(time.RFC3339),
+		OutDir:         dir,
+		OrgID:          strings.TrimSpace(*orgID),
+		OrgName:        strings.TrimSpace(*orgName),
+		KeyID:          keyID,
+		Files:          files,
+		NextSteps: []string{
+			"Open apps/web/recovery.html in the local preview.",
+			"Import recovery-trust.json as the trust store.",
+			"Import access-pack.signed.json or bridge-invite.signed.json as the signed artifact.",
+			"Or paste/scan the generated GPMREC1 text/QR handoffs.",
+		},
+	}
+	manifestPath := addFile("manifest", "demo-manifest.json")
+	if err := writeJSONFile(manifestPath, out); err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(out)
+}
+
+func ensureDemoOutputDir(dir string) error {
+	if strings.TrimSpace(dir) == "" {
+		return errors.New("--out-dir is required")
+	}
+	if info, err := os.Lstat(dir); err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("demo output path %q is not a directory", dir)
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return fmt.Errorf("read demo output dir: %w", err)
+		}
+		if len(entries) > 0 {
+			return fmt.Errorf("demo output dir %q is not empty", dir)
+		}
+		return nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("stat demo output dir: %w", err)
+	}
+	return os.MkdirAll(dir, 0o755)
+}
+
+func demoAccessPack(orgID string, orgName string, baseURL string, now time.Time) accesspack.Pack {
+	return accesspack.Pack{
+		SchemaVersion: accesspack.SchemaVersion,
+		PackID:        "arp-demo-" + now.Format("20060102-150405"),
+		Organization: accesspack.Organization{
+			OrgID:   orgID,
+			Name:    orgName,
+			HomeURL: baseURL,
+		},
+		IssuedAtUTC:      now.Format(time.RFC3339),
+		ExpiresAtUTC:     now.Add(30 * 24 * time.Hour).Format(time.RFC3339),
+		IntendedAudience: "Demo users validating the GPM access recovery flow",
+		Sources: []accesspack.Source{
+			{SourceID: "official", Kind: "official", URL: baseURL + "/.well-known/gpm/access-pack.json", Priority: 10, Description: "Official signed recovery pack"},
+			{SourceID: "mirror", Kind: "mirror", URL: baseURL + "/mirror/access-pack.json", Priority: 20, Description: "Demo mirror source"},
+		},
+		AccessPaths: []accesspack.AccessPath{
+			{PathID: "main-site", Kind: "website", URL: baseURL, Priority: 10, Description: "Primary site"},
+			{PathID: "mirror-site", Kind: "mirror", URL: baseURL + "/mirror", Priority: 20, Description: "Demo mirror"},
+		},
+		SafetyNotes: []string{"Verify this pack before using any listed path."},
+	}
+}
+
+func demoBridgeInvite(orgID string, orgName string, baseURL string, helperURL string, helperContact string, now time.Time) accesspack.BridgeInvite {
+	return accesspack.BridgeInvite{
+		SchemaVersion: accesspack.SchemaVersion,
+		InviteID:      "bri-demo-" + now.Format("20060102-150405"),
+		Organization: accesspack.Organization{
+			OrgID:   orgID,
+			Name:    orgName,
+			HomeURL: baseURL,
+		},
+		IssuedAtUTC:      now.Format(time.RFC3339),
+		ExpiresAtUTC:     now.Add(7 * 24 * time.Hour).Format(time.RFC3339),
+		IntendedAudience: "Demo users validating a signed helper bootstrap route",
+		Helper: accesspack.BridgeHelper{
+			HelperID:    "helper-demo",
+			DisplayName: "Demo bridge helper",
+			ContactURL:  helperContact,
+			Description: "Temporary helper route for access recovery testing",
+		},
+		AccessPaths: []accesspack.AccessPath{
+			{PathID: "helper-web", Kind: "bridge", URL: helperURL, Priority: 10, Description: "Signed helper bootstrap page"},
+			{PathID: "helper-contact", Kind: "instructions", URL: helperContact, Priority: 20, RequiresExternalApp: true, LaunchHint: "Contact the helper with the invite id only", Description: "Manual contact fallback"},
+		},
+		SafetyNotes: []string{
+			"This invite proves the helper route was signed by the organization key.",
+			"Never share private keys, wallet seed phrases, or passwords with a helper.",
+		},
+	}
+}
+
+func writeJSONFile(path string, value any) error {
+	body, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal %s: %w", path, err)
+	}
+	return writeFileWithMode(path, append(body, '\n'), 0o644)
+}
+
+func writeTextAndQR(textPath string, qrPath string, kind string, payload any, qrSize int) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal %s envelope payload: %w", kind, err)
+	}
+	text, err := accesspack.EncodeTextEnvelope(kind, body)
+	if err != nil {
+		return err
+	}
+	if err := writeFileWithMode(textPath, []byte(text+"\n"), 0o644); err != nil {
+		return err
+	}
+	if qrSize < 128 {
+		qrSize = 128
+	}
+	if qrSize > 4096 {
+		qrSize = 4096
+	}
+	qr, err := qrcode.Encode(text, qrcode.Medium, qrSize)
+	if err != nil {
+		return fmt.Errorf("encode %s qr png: %w", kind, err)
+	}
+	return writeFileWithMode(qrPath, qr, 0o644)
 }
 
 func allowStdoutPrivateKeys() bool {

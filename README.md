@@ -493,6 +493,7 @@ sudo ./scripts/easy_node.sh prod-wg-strict-ingress-rehearsal \
 - `docs/manual-validation-backlog.md` (deferred real-host validation queue)
 - `docs/blockchain-bootstrap-validator-plan.md` (deferred blockchain bootstrap: manual governance phase, validator eligibility formula skeleton, epoch selection policy, and graduation criteria)
 - `docs/access-recovery-toolkit-track.md` (pivot track: signed emergency access packs and trust verification for blocked sites/apps/services)
+- `go run ./cmd/gpmrecover demo-bundle --out-dir .easy-node-logs/access-recovery-demo` (one-command local Access Recovery demo artifacts)
 - `docs/global-privacy-mesh-track.md` (micro-relay + 1-hop/2-hop/3-hop planning track, with incremental implementation milestones)
 - `docs/gpm-places-track.md` (private in-mesh pages, communities, creator/project spaces, credits, moderation, and staged social-network direction)
 - `docs/gpm-bootstrap-resilience-track.md` (signed bootstrap manifests, fallback sources, and insider bridge-invite discovery without password-only trust)

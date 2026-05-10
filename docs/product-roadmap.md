@@ -138,6 +138,7 @@ Scope:
 Exit criteria:
 - one signed access pack can be generated, shared, verified, and inspected locally
 - one signed bridge invite can be generated, shared, verified, and inspected locally
+- one command can generate a complete demo bundle with keys, trust store, signed artifacts, text handoffs, QR PNGs, and a manifest
 - one organization key can be added to a local trust store and used for verification/checking
 - a browser-local UI can verify a signed pack or bridge invite against a trusted organization key and list trusted paths
 - verified bridge invites show helper contact/copy actions only after trust checks pass
