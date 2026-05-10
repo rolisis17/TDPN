@@ -84,6 +84,13 @@ type bridgeRegistrySetStatusOutput struct {
 	Update       accesspack.BridgeHelperRegistryStatusUpdateReport `json:"update"`
 }
 
+type bridgeRegistryUpsertHelperOutput struct {
+	Status       string                                      `json:"status"`
+	RegistryFile string                                      `json:"registry_file"`
+	OutputFile   string                                      `json:"output_file"`
+	Upsert       accesspack.BridgeHelperRegistryUpsertReport `json:"upsert"`
+}
+
 type trustAddOutput struct {
 	Status     string `json:"status"`
 	TrustStore string `json:"trust_store"`
@@ -125,6 +132,8 @@ func main() {
 		err = runBridgePolicy(os.Args[2:])
 	case "bridge-registry-check":
 		err = runBridgeRegistryCheck(os.Args[2:])
+	case "bridge-registry-upsert-helper":
+		err = runBridgeRegistryUpsertHelper(os.Args[2:])
 	case "bridge-registry-set-status":
 		err = runBridgeRegistrySetStatus(os.Args[2:])
 	case "trust-add":
@@ -166,6 +175,7 @@ func usage() {
   go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
   go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE] [--require-helper-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
+  go run ./cmd/gpmrecover bridge-registry-upsert-helper --helper-registry FILE --helper-id ID --org-ids ORG[,ORG...] [--display-name NAME] [--contact-url URL] [--status active|quarantined|disabled] [--reason TEXT] [--out FILE]
   go run ./cmd/gpmrecover bridge-registry-set-status --helper-registry FILE --helper-id ID --status active|quarantined|disabled [--reason TEXT] [--out FILE]
   go run ./cmd/gpmrecover trust-add --trust-store FILE --org-id ID --org-name NAME --public-key-file FILE
   go run ./cmd/gpmrecover trust-list --trust-store FILE
@@ -705,6 +715,59 @@ func runBridgeRegistryCheck(args []string) error {
 	return nil
 }
 
+func runBridgeRegistryUpsertHelper(args []string) error {
+	fs := flag.NewFlagSet("bridge-registry-upsert-helper", flag.ContinueOnError)
+	helperRegistryFile := fs.String("helper-registry", "", "path to bridge helper registry JSON")
+	helperID := fs.String("helper-id", "", "helper id to add or update")
+	orgIDs := fs.String("org-ids", "", "comma-separated organization ids this helper may serve")
+	displayName := fs.String("display-name", "", "optional helper display name")
+	contactURL := fs.String("contact-url", "", "optional helper contact URL")
+	status := fs.String("status", "", "helper status: active, quarantined, or disabled; defaults to active for new helpers")
+	activeFromUTC := fs.String("active-from-utc", "", "optional helper active window start")
+	activeUntilUTC := fs.String("active-until-utc", "", "optional helper active window end")
+	reason := fs.String("reason", "", "required reason when adding or updating a quarantined/disabled helper")
+	outFile := fs.String("out", "", "path to write updated registry JSON; defaults to --helper-registry")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	registry, err := loadBridgeHelperRegistryFile(*helperRegistryFile)
+	if err != nil {
+		return err
+	}
+	outputFile := strings.TrimSpace(*outFile)
+	if outputFile == "" {
+		outputFile = strings.TrimSpace(*helperRegistryFile)
+	}
+	updatedRegistry, report := accesspack.UpsertBridgeHelperRegistryHelper(registry, accesspack.BridgeHelperRegistryUpsertOptions{
+		HelperID:       *helperID,
+		DisplayName:    *displayName,
+		Status:         *status,
+		OrgIDs:         splitCommaValues(*orgIDs),
+		ContactURL:     *contactURL,
+		ActiveFromUTC:  *activeFromUTC,
+		ActiveUntilUTC: *activeUntilUTC,
+		Reason:         *reason,
+	}, time.Now().UTC())
+	out := bridgeRegistryUpsertHelperOutput{
+		Status:       report.Status,
+		RegistryFile: strings.TrimSpace(*helperRegistryFile),
+		OutputFile:   outputFile,
+		Upsert:       report,
+	}
+	if report.Status == "pass" {
+		if err := writeBridgeHelperRegistryFile(outputFile, updatedRegistry); err != nil {
+			return err
+		}
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+		return err
+	}
+	if report.Status != "pass" {
+		return errors.New("bridge helper registry helper upsert failed")
+	}
+	return nil
+}
+
 func runBridgeRegistrySetStatus(args []string) error {
 	fs := flag.NewFlagSet("bridge-registry-set-status", flag.ContinueOnError)
 	helperRegistryFile := fs.String("helper-registry", "", "path to bridge helper registry JSON")
@@ -925,6 +988,7 @@ func runDemoBundle(args []string) error {
 			"Import access-pack.signed.json or bridge-invite.signed.json as the signed artifact.",
 			"Or paste/scan the generated GPMREC1 text/QR handoffs.",
 			"Run bridge-registry-check with bridge-helper-registry.json when changing helper status.",
+			"Use bridge-registry-upsert-helper to add or update helper registry entries without hand-editing JSON.",
 			"Use bridge-registry-set-status to quarantine or re-enable helpers without hand-editing registry JSON.",
 			"Run bridge-policy with bridge-helper-registry.json before enabling a helper route in a service.",
 		},
@@ -1210,6 +1274,20 @@ func writeBridgeHelperRegistryFile(path string, registry accesspack.BridgeHelper
 		return err
 	}
 	return writeFileWithMode(path, body, 0o644)
+}
+
+func splitCommaValues(raw string) []string {
+	var values []string
+	seen := map[string]bool{}
+	for _, part := range strings.Split(raw, ",") {
+		value := strings.TrimSpace(part)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		values = append(values, value)
+	}
+	return values
 }
 
 func decodeBase64URLFixed(raw string, expectedLen int, label string) ([]byte, error) {

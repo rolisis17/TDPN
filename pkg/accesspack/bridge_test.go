@@ -233,6 +233,62 @@ func TestBridgeHelperRegistryValidationRequiresInactiveReason(t *testing.T) {
 	}
 }
 
+func TestBridgeHelperRegistryUpsertCreatesHelper(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	updated, report := UpsertBridgeHelperRegistryHelper(EmptyBridgeHelperRegistry(), BridgeHelperRegistryUpsertOptions{
+		HelperID:       "helper-new",
+		DisplayName:    "New Helper",
+		Status:         BridgeHelperStatusActive,
+		OrgIDs:         []string{"demo-org"},
+		ContactURL:     "https://new-helper.example/contact",
+		ActiveUntilUTC: "2026-05-20T01:00:00Z",
+	}, now)
+	if report.Status != "pass" || !report.Created {
+		t.Fatalf("expected create pass, got %+v", report)
+	}
+	if len(updated.Helpers) != 1 {
+		t.Fatalf("expected one helper, got %+v", updated.Helpers)
+	}
+	helper := updated.Helpers[0]
+	if helper.HelperID != "helper-new" || helper.Status != BridgeHelperStatusActive || helper.UpdatedAtUTC != now.Format(time.RFC3339) {
+		t.Fatalf("unexpected helper: %+v", helper)
+	}
+}
+
+func TestBridgeHelperRegistryUpsertUpdatesExistingHelper(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	updated, report := UpsertBridgeHelperRegistryHelper(testBridgeHelperRegistry(), BridgeHelperRegistryUpsertOptions{
+		HelperID:    "helper-1",
+		DisplayName: "Renamed Helper",
+		OrgIDs:      []string{"demo-org", "alt-org"},
+		ContactURL:  "https://helper.example/new-contact",
+	}, now)
+	if report.Status != "pass" || !report.Updated || report.Created {
+		t.Fatalf("expected update pass, got %+v", report)
+	}
+	helper := updated.Helpers[0]
+	if helper.DisplayName != "Renamed Helper" || helper.ContactURL != "https://helper.example/new-contact" {
+		t.Fatalf("unexpected helper update: %+v", helper)
+	}
+	if len(helper.OrgIDs) != 2 || helper.OrgIDs[0] != "alt-org" || helper.OrgIDs[1] != "demo-org" {
+		t.Fatalf("unexpected org ids: %+v", helper.OrgIDs)
+	}
+}
+
+func TestBridgeHelperRegistryUpsertRequiresOrgForNewHelper(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	_, report := UpsertBridgeHelperRegistryHelper(EmptyBridgeHelperRegistry(), BridgeHelperRegistryUpsertOptions{
+		HelperID: "helper-new",
+		Status:   BridgeHelperStatusActive,
+	}, now)
+	if report.Status != "fail" {
+		t.Fatalf("expected upsert fail, got %+v", report)
+	}
+	if !sawBridgeRegistryUpsertFinding(report, "bridge_helper_org_ids_required") {
+		t.Fatalf("expected org ids finding, got %+v", report.Findings)
+	}
+}
+
 func TestBridgeHelperRegistryStatusUpdateQuarantinesHelper(t *testing.T) {
 	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
 	registry := testBridgeHelperRegistry()
@@ -283,6 +339,15 @@ func sawBridgeRegistryFinding(report BridgeHelperRegistryCheckReport, code strin
 }
 
 func sawBridgeRegistryUpdateFinding(report BridgeHelperRegistryStatusUpdateReport, code string) bool {
+	for _, finding := range report.Findings {
+		if finding.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func sawBridgeRegistryUpsertFinding(report BridgeHelperRegistryUpsertReport, code string) bool {
 	for _, finding := range report.Findings {
 		if finding.Code == code {
 			return true

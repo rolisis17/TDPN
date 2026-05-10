@@ -144,6 +144,7 @@ First CLI:
 - `go run ./cmd/gpmrecover bridge-verify --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --show-paths`
 - `go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/bridge-invite.signed.json --public-key-file .easy-node-logs/recovery.pub --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json`
 - `go run ./cmd/gpmrecover bridge-registry-check --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-perth-1 --org-id freenews-demo --require-active`
+- `go run ./cmd/gpmrecover bridge-registry-upsert-helper --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-mirror-1 --org-ids freenews-demo --display-name "Mirror helper" --contact-url https://mirror-helper.example/contact --out .easy-node-logs/bridge-helper-registry.updated.json`
 - `go run ./cmd/gpmrecover bridge-registry-set-status --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-perth-1 --status quarantined --reason "maintenance window" --out .easy-node-logs/bridge-helper-registry.quarantined.json`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub --timeout-sec 8`
 
@@ -195,6 +196,7 @@ Bridge-invite rules:
 - `bridge-policy --helper-registry` additionally requires the helper to be active, registered for the invite organization, inside its active window, and not quarantined or disabled
 - `bridge-policy --require-helper-registry` fails if the helper registry was accidentally omitted from a production policy run
 - `bridge-registry-check` summarizes active/quarantined/disabled helper counts and can fail closed for a specific active helper/org before publishing or using an invite
+- `bridge-registry-upsert-helper` adds or updates helper registry entries with validation and normalized output
 - `bridge-registry-set-status` changes helper status with validation and a required reason when quarantining or disabling a helper
 - helper registry validation rejects active helpers with stale quarantine reasons and rejects quarantined/disabled helpers without a reason
 - the helper contact and helper paths are shown only after signature, expiry, org id, and trusted-key checks pass
@@ -233,6 +235,7 @@ Do first:
 - CLI bridge-invite policy gate for helper/contact diversity
 - CLI bridge helper registry gate for active/quarantined/disabled helpers
 - CLI bridge helper registry summary/check command for operator review
+- CLI bridge helper registry add/update command for helper onboarding
 - CLI bridge helper registry status-change command for quarantine/re-enable workflows
 - CLI reachability check that does not confuse reachable with trusted
 - local trust-store file

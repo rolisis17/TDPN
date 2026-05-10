@@ -59,6 +59,20 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgeRegistryCheck([]string{"--helper-registry", helperRegistry, "--helper-id", "helper-cli", "--org-id", "cli-org", "--require-active"}); err != nil {
 		t.Fatalf("bridge-registry-check: %v", err)
 	}
+	upsertedRegistry := filepath.Join(dir, "bridge-helper-registry.upserted.json")
+	if err := runBridgeRegistryUpsertHelper([]string{
+		"--helper-registry", helperRegistry,
+		"--helper-id", "helper-cli-2",
+		"--org-ids", "cli-org,cli-org-alt",
+		"--display-name", "CLI Helper Two",
+		"--contact-url", server.URL + "/contact-two",
+		"--out", upsertedRegistry,
+	}); err != nil {
+		t.Fatalf("bridge-registry-upsert-helper: %v", err)
+	}
+	if err := runBridgeRegistryCheck([]string{"--helper-registry", upsertedRegistry, "--helper-id", "helper-cli-2", "--org-id", "cli-org-alt", "--require-active"}); err != nil {
+		t.Fatalf("bridge-registry-check upserted helper: %v", err)
+	}
 	quarantinedRegistry := filepath.Join(dir, "bridge-helper-registry.quarantined.json")
 	if err := runBridgeRegistrySetStatus([]string{"--helper-registry", helperRegistry, "--helper-id", "helper-cli", "--status", "quarantined", "--reason", "maintenance window", "--out", quarantinedRegistry}); err != nil {
 		t.Fatalf("bridge-registry-set-status quarantine: %v", err)
