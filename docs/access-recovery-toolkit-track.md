@@ -231,6 +231,7 @@ First browser surface:
 - preserves signed helper registry provenance after extraction and rejects bridge invites from a different organization
 - lets a tester add/remove trusted organization public keys without hand-editing JSON
 - validates trusted-key handoffs, imported trust stores, and browser trust-store add/remove writes before persisting them locally, including public-key length, derived key-id matching, duplicate org/key rejection, and disabled single-key handoff rejection
+- validates the current browser trust store again during pack, bridge-invite, and signed helper-registry verification so manual JSON edits cannot bypass duplicate-key or malformed-key checks
 - copies or downloads the current trust store for handoff to another device
 - exports/imports `GPMREC1` text handoffs for signed packs, bridge invites, trust stores, helper registries, signed helper registries, and single trusted keys
 - browser pack/bridge text export preserves the original signature field instead of exporting canonical unsigned payloads

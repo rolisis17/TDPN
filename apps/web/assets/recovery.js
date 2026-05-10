@@ -973,7 +973,7 @@
   }
 
   async function resolveTrustedKeyForArtifact(trustStore, artifactOrgID, artifactKeyID, label) {
-    trustStore = normalizeTrustStore(trustStore);
+    trustStore = await validateTrustStoreKeys(trustStore, { requireUsable: false });
     artifactOrgID = trimString(artifactOrgID);
     artifactKeyID = trimString(artifactKeyID);
     label = trimString(label) || "Artifact";
