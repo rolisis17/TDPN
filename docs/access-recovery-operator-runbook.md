@@ -108,7 +108,7 @@ go run ./cmd/gpmrecover bridge-service-deploy-pack \
 bash ./scripts/access_bridge_service_smoke.sh \
   --base-url https://bridge.example \
   --path-id helper-web \
-  --code CODE \
+  --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt \
   --expect-helper-id helper-demo \
   --expect-org-id freenews-demo \
   --summary-json .easy-node-logs/bridge-service-smoke.json
@@ -125,6 +125,16 @@ bash ./scripts/access_bridge_host_install_check.sh \
   --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
   --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \
   --summary-json .easy-node-logs/bridge-host-install-check.json
+
+./scripts/easy_node.sh access-bridge-pilot-evidence-bundle \
+  --base-url https://bridge.example \
+  --path-id helper-web \
+  --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt \
+  --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \
+  --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
+  --expect-helper-id helper-demo \
+  --expect-org-id freenews-demo \
+  --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json
 ```
 
 Keep the smoke JSON, deployment-evidence JSON, host-install-check JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair.

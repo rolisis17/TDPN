@@ -64,6 +64,7 @@ go run ./cmd/gpmrecover bridge-service-deploy-pack \
 jq -n \
   --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg registry_id "$registry_id" \
+  --arg config_sha256 "$config_sha256" \
   '{
     version: 1,
     schema: {
@@ -81,7 +82,8 @@ jq -n \
       status: "ok",
       helper_id: "helper-evidence",
       organization_id: "evidence-org",
-      registry_id: $registry_id
+      registry_id: $registry_id,
+      config_sha256: $config_sha256
     },
     bridge: {
       http_status: "200",
@@ -131,6 +133,7 @@ if ! jq -e \
     and .smoke.auth_required == true
     and .smoke.missing_code_http_status == "401"
     and .smoke.wrong_code_http_status == "401"
+    and .smoke.config_sha256 == $config_sha256
     and .smoke.summary_json == $smoke_summary
     and .expected_identity.helper_id == "helper-evidence"
     and .expected_identity.organization_id == "evidence-org"

@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 base_url=""
 path_id="helper-web"
 code=""
+code_file=""
 abuse_message="deployment evidence smoke"
 smoke_summary_json=""
 config_json=""
@@ -25,7 +26,7 @@ Usage:
   scripts/access_bridge_deployment_evidence.sh \
     (--base-url URL | --smoke-summary-json FILE) \
     [--path-id helper-web] \
-    [--code CODE when using --base-url] \
+    [(--code CODE | --code-file FILE) when using --base-url] \
     [--expect-helper-id ID] \
     [--expect-org-id ID] \
     [--expect-registry-id ID] \
@@ -172,6 +173,10 @@ while [[ $# -gt 0 ]]; do
       code="${2:-}"
       shift 2
       ;;
+    --code-file)
+      code_file="${2:-}"
+      shift 2
+      ;;
     --abuse-message)
       abuse_message="${2:-}"
       shift 2
@@ -252,6 +257,17 @@ if [[ -z "$base_url" && -z "$smoke_summary_json" ]]; then
   echo "access bridge deployment evidence failed: --base-url or --smoke-summary-json is required" >&2
   exit 2
 fi
+if [[ -n "$code" && -n "$code_file" ]]; then
+  echo "access bridge deployment evidence failed: use either --code or --code-file, not both" >&2
+  exit 2
+fi
+if [[ -n "$code_file" ]]; then
+  code_file="$(abs_path "$code_file")"
+  if [[ ! -f "$code_file" ]]; then
+    echo "access bridge deployment evidence failed: code file not found: $code_file" >&2
+    exit 2
+  fi
+fi
 
 tmp_dir="$(mktemp -d)"
 cleanup() {
@@ -284,6 +300,9 @@ else
   )
   if [[ -n "$code" ]]; then
     smoke_args+=(--code "$code")
+  fi
+  if [[ -n "$code_file" ]]; then
+    smoke_args+=(--code-file "$code_file")
   fi
   if [[ -n "$expect_helper_id" ]]; then
     smoke_args+=(--expect-helper-id "$expect_helper_id")
@@ -323,6 +342,7 @@ smoke_path_id="$(json_string_or_empty "$smoke_summary_json" '.path_id')"
 actual_helper_id="$(json_string_or_empty "$smoke_summary_json" '.health.helper_id')"
 actual_org_id="$(json_string_or_empty "$smoke_summary_json" '.health.organization_id')"
 actual_registry_id="$(json_string_or_empty "$smoke_summary_json" '.health.registry_id')"
+smoke_config_sha256="$(json_string_or_empty "$smoke_summary_json" '.health.config_sha256')"
 
 smoke_evidence_status="pass"
 smoke_evidence_reason=""
@@ -398,6 +418,15 @@ if [[ -n "$config_json" ]]; then
   else
     config_status="fail"
     config_reason="config json is missing"
+  fi
+fi
+if [[ "$config_status" == "pass" ]]; then
+  if [[ -z "$smoke_config_sha256" ]]; then
+    smoke_evidence_status="fail"
+    smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary did not include live config sha256")"
+  elif [[ "$smoke_config_sha256" != "$config_sha256" ]]; then
+    smoke_evidence_status="fail"
+    smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "live config sha256 does not match supplied config")"
   fi
 fi
 
@@ -577,6 +606,7 @@ jq -n \
   --arg smoke_auth_required "$smoke_auth_required" \
   --arg smoke_missing_code_http "$smoke_missing_code_http" \
   --arg smoke_wrong_code_http "$smoke_wrong_code_http" \
+  --arg smoke_config_sha256 "$smoke_config_sha256" \
   --arg smoke_evidence_status "$smoke_evidence_status" \
   --arg smoke_evidence_reason "$smoke_evidence_reason" \
   --arg smoke_base_url "$smoke_base_url" \
@@ -637,6 +667,7 @@ jq -n \
       auth_required: ($smoke_auth_required == "true"),
       missing_code_http_status: $smoke_missing_code_http,
       wrong_code_http_status: $smoke_wrong_code_http,
+      config_sha256: $smoke_config_sha256,
       evidence_status: $smoke_evidence_status,
       evidence_reason: $smoke_evidence_reason,
       base_url: $smoke_base_url,

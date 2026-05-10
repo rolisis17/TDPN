@@ -208,6 +208,7 @@ async function main() {
 
   const trustStore = fs.readFileSync(path.join(outDir, "recovery-trust.json"), "utf8");
   const bridgeInvite = fs.readFileSync(path.join(outDir, "bridge-invite.signed.json"), "utf8");
+  const unsignedRegistry = fs.readFileSync(path.join(outDir, "bridge-helper-registry.json"), "utf8");
   const trustStoreText = fs.readFileSync(path.join(outDir, "recovery-trust.txt"), "utf8").trim();
   const bridgeInviteText = fs.readFileSync(path.join(outDir, "bridge-invite.txt"), "utf8").trim();
   const signedRegistryText = fs.readFileSync(path.join(outDir, "bridge-helper-registry.signed.txt"), "utf8").trim();
@@ -415,6 +416,36 @@ async function main() {
   if (context.localStorage.getItem(helperRegistryMetaStorageKey)) {
     throw new Error("expected invalid helper registry edit to clear saved registry metadata");
   }
+
+  async function expectBridgeInviteRejected(expectedDetail) {
+    document.getElementById("pack_input").value = bridgeInvite;
+    await document.getElementById("verify_btn").click();
+    const failedStatus = document.getElementById("status-heading").textContent;
+    const failedDetail = document.getElementById("status_detail").textContent;
+    if (failedStatus !== "Verification failed") {
+      throw new Error(`expected bridge invite rejection, got ${failedStatus}: ${failedDetail}`);
+    }
+    if (!failedDetail.includes(expectedDetail)) {
+      throw new Error(`expected rejection detail to include ${expectedDetail}, got ${failedDetail}`);
+    }
+  }
+
+  document.getElementById("registry_input").value = "";
+  await expectBridgeInviteRejected("Verify a signed helper registry");
+
+  const registryInputForUnsigned = document.getElementById("registry_input");
+  registryInputForUnsigned.value = unsignedRegistry;
+  await registryInputForUnsigned.dispatch("input");
+  await expectBridgeInviteRejected("Verify a signed helper registry");
+
+  await importTextHandoff(signedRegistryText, "Signed helper registry text imported");
+  await document.getElementById("verify_registry_btn").click();
+  const verifiedRegistry = JSON.parse(context.localStorage.getItem(helperRegistryStorageKey));
+  verifiedRegistry.helpers[0].display_name = `${verifiedRegistry.helpers[0].display_name} tampered`;
+  const tamperedRegistry = JSON.stringify(verifiedRegistry, null, 2);
+  context.localStorage.setItem(helperRegistryStorageKey, tamperedRegistry);
+  document.getElementById("registry_input").value = tamperedRegistry;
+  await expectBridgeInviteRejected("metadata does not match the current registry content");
 
   document.getElementById("trust_input").value = mergedTrustStore;
   document.getElementById("registry_input").value = otherSignedRegistry;

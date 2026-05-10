@@ -71,6 +71,12 @@ bash ./scripts/integration_access_bridge_deployment_evidence.sh
 echo "[ci] access bridge host install check integration"
 bash ./scripts/integration_access_bridge_host_install_check.sh
 
+echo "[ci] access bridge pilot evidence bundle integration"
+bash ./scripts/integration_access_bridge_pilot_evidence_bundle.sh
+
+echo "[ci] easy-node access bridge pilot evidence bundle integration"
+bash ./scripts/integration_easy_node_access_bridge_pilot_evidence_bundle.sh
+
 echo "[ci] secret hygiene integration"
 ./scripts/integration_secret_hygiene.sh
 

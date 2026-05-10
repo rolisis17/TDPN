@@ -134,7 +134,7 @@ fi
 bash ./scripts/access_bridge_service_smoke.sh \
   --base-url "$BASE_URL" \
   --path-id helper-web \
-  --code "$code_value" \
+  --code-file "$CODE_FILE" \
   --expect-helper-id helper-serve \
   --expect-org-id serve-org \
   --expect-registry-id "$(jq -r '.registry_id' "$SERVICE_CONFIG")" \
@@ -149,7 +149,7 @@ fi
 bash ./scripts/access_bridge_deployment_evidence.sh \
   --base-url "$BASE_URL" \
   --path-id helper-web \
-  --code "$code_value" \
+  --code-file "$CODE_FILE" \
   --expect-helper-id helper-serve \
   --expect-org-id serve-org \
   --expect-registry-id "$(jq -r '.registry_id' "$SERVICE_CONFIG")" \

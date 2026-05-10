@@ -218,10 +218,18 @@ func TestBadAccessCodesDoNotConsumeBridgeRateLimit(t *testing.T) {
 		t.Fatalf("new service: %v", err)
 	}
 	handler := service.Handler()
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil))
+	missingRR := httptest.NewRecorder()
+	handler.ServeHTTP(missingRR, httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil))
+	if missingRR.Code != http.StatusUnauthorized {
+		t.Fatalf("expected first bad access-code attempt unauthorized, got %d body=%s", missingRR.Code, missingRR.Body.String())
+	}
 	wrongReq := httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil)
 	wrongReq.Header.Set("X-GPM-Bridge-Code", "wrong-ticket")
-	handler.ServeHTTP(httptest.NewRecorder(), wrongReq)
+	wrongRR := httptest.NewRecorder()
+	handler.ServeHTTP(wrongRR, wrongReq)
+	if wrongRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected bad access-code attempts to be rate limited, got %d body=%s", wrongRR.Code, wrongRR.Body.String())
+	}
 
 	allowedRR := httptest.NewRecorder()
 	allowedReq := httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil)
@@ -232,6 +240,30 @@ func TestBadAccessCodesDoNotConsumeBridgeRateLimit(t *testing.T) {
 	}
 	if service.RequestCount("192.0.2.1") != 1 {
 		t.Fatalf("expected only valid bridge request to consume request counter")
+	}
+}
+
+func TestServiceHealthIncludesPinnedConfigHash(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	service, err := NewService(ServiceConfig{
+		BridgeConfig: testServiceBridgeConfig(now),
+		ConfigSHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		Now:          func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	service.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected health ok, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var out HealthResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal health response: %v", err)
+	}
+	if out.ConfigSHA256 != "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" {
+		t.Fatalf("expected config sha256 in health response, got %+v", out)
 	}
 }
 

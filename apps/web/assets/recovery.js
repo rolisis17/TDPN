@@ -108,6 +108,13 @@
     return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
   }
 
+  async function sha256Base64URL(bytes) {
+    if (!crypto || !crypto.subtle) {
+      throw new Error("Web Crypto is unavailable in this browser context");
+    }
+    return bytesToBase64URL(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+  }
+
   function encodeTextEnvelope(kind, payload) {
     if (!textEnvelopeKinds.includes(kind)) {
       throw new Error(`Unsupported text handoff kind ${kind}`);
@@ -247,10 +254,20 @@
       org_id: trimString(meta.org_id),
       org_name: trimString(meta.org_name),
       key_id: trimString(meta.key_id),
+      registry_hash: trimString(meta.registry_hash),
       expires_at_utc: trimString(meta.expires_at_utc),
       verified_at_utc: trimString(meta.verified_at_utc),
     };
-    if (normalized.source !== "signed" || !normalized.registry_id || !normalized.org_id || !normalized.key_id) {
+    if (
+      normalized.source !== "signed"
+      || !normalized.registry_id
+      || !normalized.org_id
+      || !normalized.key_id
+      || !normalized.registry_hash
+    ) {
+      return null;
+    }
+    if (!/^sha256:[A-Za-z0-9_-]+$/.test(normalized.registry_hash)) {
       return null;
     }
     if (normalized.expires_at_utc) {
@@ -295,20 +312,67 @@
     clearVerifiedHelperRegistryMeta();
   }
 
-  function readRawHelperRegistryForPolicy(invite) {
+  async function restoreVerifiedHelperRegistryMeta(savedMeta) {
+    let meta;
+    try {
+      meta = normalizeVerifiedHelperRegistryMeta(JSON.parse(savedMeta));
+    } catch (err) {
+      clearVerifiedHelperRegistryMeta();
+      return;
+    }
+    if (!meta) {
+      clearVerifiedHelperRegistryMeta();
+      return;
+    }
+    let registry;
+    try {
+      registry = readHelperRegistryInput();
+    } catch (err) {
+      clearVerifiedHelperRegistryMeta();
+      return;
+    }
+    if (!registry || isBridgeHelperRegistryArtifact(registry)) {
+      clearVerifiedHelperRegistryMeta();
+      return;
+    }
+    try {
+      const currentHash = await helperRegistryContentHash(registry);
+      if (meta.registry_hash !== currentHash) {
+        clearVerifiedHelperRegistryMeta();
+        return;
+      }
+      verifiedHelperRegistryMeta = meta;
+    } catch (err) {
+      clearVerifiedHelperRegistryMeta();
+    }
+  }
+
+  async function helperRegistryContentHash(registry) {
+    return `sha256:${await sha256Base64URL(new TextEncoder().encode(serializeHelperRegistry(registry)))}`;
+  }
+
+  async function readVerifiedHelperRegistryForPolicy(invite) {
     const registry = readHelperRegistryInput();
+    const inviteOrgID = trimString(invite && invite.organization && invite.organization.org_id);
+    if (!registry) {
+      throw new Error("Verify a signed helper registry before verifying this bridge invite");
+    }
     if (isBridgeHelperRegistryArtifact(registry)) {
       throw new Error("Verify the signed helper registry before verifying this bridge invite");
     }
-    if (registry && verifiedHelperRegistryMeta) {
-      const meta = normalizeVerifiedHelperRegistryMeta(verifiedHelperRegistryMeta);
-      const inviteOrgID = trimString(invite && invite.organization && invite.organization.org_id);
-      if (meta && meta.org_id !== inviteOrgID) {
-        throw new Error(`Signed helper registry organization ${meta.org_id} does not match bridge invite organization ${inviteOrgID}`);
-      }
-      if (meta && meta.expires_at_utc && parseRFC3339(meta.expires_at_utc, "signed helper registry expires_at_utc") <= new Date()) {
-        throw new Error("Signed helper registry is expired");
-      }
+    const meta = normalizeVerifiedHelperRegistryMeta(verifiedHelperRegistryMeta);
+    if (!meta) {
+      throw new Error("Verify a signed helper registry before verifying this bridge invite");
+    }
+    if (meta.org_id !== inviteOrgID) {
+      throw new Error(`Signed helper registry organization ${meta.org_id} does not match bridge invite organization ${inviteOrgID}`);
+    }
+    if (meta.expires_at_utc && parseRFC3339(meta.expires_at_utc, "signed helper registry expires_at_utc") <= new Date()) {
+      throw new Error("Signed helper registry is expired");
+    }
+    const currentHash = await helperRegistryContentHash(registry);
+    if (meta.registry_hash !== currentHash) {
+      throw new Error("Signed helper registry metadata does not match the current registry content");
     }
     return registry;
   }
@@ -326,7 +390,7 @@
 
   function writeHelperRegistry(registry, meta) {
     const normalized = normalizeHelperRegistry(registry);
-    els.registryInput.value = JSON.stringify(normalized, null, 2);
+    els.registryInput.value = serializeHelperRegistry(normalized);
     try {
       localStorage.setItem(helperRegistryStorageKey, els.registryInput.value);
     } catch (err) {
@@ -863,6 +927,10 @@
     return new TextEncoder().encode(goCompatibleJSONString(normalizeSignedArtifact(artifact)));
   }
 
+  function serializeHelperRegistry(registry) {
+    return JSON.stringify(normalizeHelperRegistry(registry), null, 2);
+  }
+
   function validatePackShape(pack) {
     if (!pack || typeof pack !== "object") {
       throw new Error("Pack must be a JSON object");
@@ -946,11 +1014,7 @@
 
   function evaluateHelperRegistryPolicy(invite, registry) {
     if (!registry) {
-      return {
-        status: "skipped",
-        label: "Not loaded",
-        badges: ["Registry not loaded"],
-      };
+      throw new Error("Verify a signed helper registry before verifying this bridge invite");
     }
     const normalizedRegistry = normalizeHelperRegistry(registry);
     const helperID = trimString(invite.helper && invite.helper.helper_id);
@@ -993,16 +1057,15 @@
     if (activeUntil && expiresAt > activeUntil) {
       throw new Error("Bridge invite expires after the helper active window");
     }
-    let signedRegistry = false;
-    if (verifiedHelperRegistryMeta) {
-      const meta = normalizeVerifiedHelperRegistryMeta(verifiedHelperRegistryMeta);
-      signedRegistry = Boolean(meta && meta.org_id === orgID);
+    const meta = normalizeVerifiedHelperRegistryMeta(verifiedHelperRegistryMeta);
+    if (!meta || meta.org_id !== orgID) {
+      throw new Error("Verify a signed helper registry before verifying this bridge invite");
     }
     return {
       status: "pass",
-      label: `${helper.display_name || "Active"} (${signedRegistry ? "signed registry" : "unsigned registry"})`,
+      label: `${helper.display_name || "Active"} (signed registry)`,
       helper,
-      badges: [signedRegistry ? "Signed registry active" : "Unsigned registry active"],
+      badges: ["Signed registry active"],
     };
   }
 
@@ -1656,17 +1719,16 @@
     await verifySignature(artifact, trusted.publicKeyBytes);
     const kind = signedArtifactKind(artifact);
     const normalized = normalizeSignedArtifact(artifact);
-    const helperPolicy = kind === "bridge-invite" ? evaluateHelperRegistryPolicy(normalized, readRawHelperRegistryForPolicy(normalized)) : null;
+    const helperPolicy = kind === "bridge-invite"
+      ? evaluateHelperRegistryPolicy(normalized, await readVerifiedHelperRegistryForPolicy(normalized))
+      : null;
     const helperPolicyDetail = helperPolicy && helperPolicy.status === "pass"
       ? " and an active helper registry entry"
-      : "";
-    const helperRegistryMissing = helperPolicy && helperPolicy.status === "skipped"
-      ? " Helper registry was not loaded."
       : "";
     setStatus(
       "good",
       kind === "bridge-invite" ? "Trusted bridge invite" : "Trusted pack",
-      `${normalized.organization.name} signed this ${kind === "bridge-invite" ? "bridge invite" : "pack"} with trusted key ${trusted.entry.key_id}${helperPolicyDetail}.${helperRegistryMissing}`,
+      `${normalized.organization.name} signed this ${kind === "bridge-invite" ? "bridge invite" : "pack"} with trusted key ${trusted.entry.key_id}${helperPolicyDetail}.`,
     );
     renderFacts(normalized, trusted.entry, helperPolicy);
     renderPaths(normalized, helperPolicy);
@@ -1681,12 +1743,14 @@
     const trusted = await resolveTrustedRegistryKey(artifact, readTrustStoreInput());
     await verifyBridgeRegistryArtifactSignature(artifact, trusted.publicKeyBytes);
     const normalized = normalizeBridgeHelperRegistryArtifact(artifact);
+    const registryHash = await helperRegistryContentHash(normalized.registry);
     writeHelperRegistry(normalized.registry, {
       source: "signed",
       registry_id: normalized.registry_id,
       org_id: normalized.organization.org_id,
       org_name: normalized.organization.name,
       key_id: trusted.entry.key_id,
+      registry_hash: registryHash,
       expires_at_utc: normalized.expires_at_utc,
       verified_at_utc: new Date().toISOString(),
     });
@@ -1973,7 +2037,7 @@
           return;
         }
         const normalized = normalizeHelperRegistry(registry);
-        localStorage.setItem(helperRegistryStorageKey, JSON.stringify(normalized, null, 2));
+        localStorage.setItem(helperRegistryStorageKey, serializeHelperRegistry(normalized));
         clearVerifiedHelperRegistryMeta();
         renderHelperRegistrySummary(normalized);
       } else {
@@ -2114,6 +2178,7 @@
     }
   });
 
+  let restoreHelperRegistryMetaPromise = null;
   try {
     const savedTrustStore = localStorage.getItem(trustStoreStorageKey);
     if (savedTrustStore && !trimString(els.trustInput.value)) {
@@ -2125,11 +2190,7 @@
     }
     const savedHelperRegistryMeta = localStorage.getItem(helperRegistryMetaStorageKey);
     if (savedHelperRegistryMeta) {
-      try {
-        verifiedHelperRegistryMeta = normalizeVerifiedHelperRegistryMeta(JSON.parse(savedHelperRegistryMeta));
-      } catch (err) {
-        clearVerifiedHelperRegistryMeta();
-      }
+      restoreHelperRegistryMetaPromise = restoreVerifiedHelperRegistryMeta(savedHelperRegistryMeta);
     }
   } catch (err) {
     // Ignore local storage availability issues.
@@ -2140,4 +2201,9 @@
     renderTrustKeys();
   }
   renderHelperRegistrySummary();
+  if (restoreHelperRegistryMetaPromise) {
+    restoreHelperRegistryMetaPromise.then(() => {
+      renderHelperRegistrySummary();
+    });
+  }
 })();

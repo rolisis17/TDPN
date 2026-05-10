@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -661,10 +662,10 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 
 func TestGPMRecoverFetchPublication(t *testing.T) {
 	files := map[string]string{
-		"/.well-known/gpm/access-pack.json":                   `{"kind":"pack"}`,
-		"/.well-known/gpm/bridge-invite.json":                 `{"kind":"bridge"}`,
-		"/.well-known/gpm/bridge-helper-registry.signed.json": `{"kind":"registry"}`,
-		"/.well-known/gpm/recovery-trusted-key.json":          `{"kind":"key"}`,
+		"/.well-known/gpm/access-pack.json":                     `{"kind":"pack"}`,
+		"/.well-known/gpm/bridge-invite.json":                   `{"kind":"bridge"}`,
+		"/.well-known/gpm/bridge-helper-registry.signed.json":   `{"kind":"registry"}`,
+		"/.well-known/gpm/redirected/recovery-trusted-key.json": `{"kind":"key"}`,
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/.well-known/gpm/recovery-index.json" {
@@ -677,6 +678,10 @@ func TestGPMRecoverFetchPublication(t *testing.T) {
 					"trusted_key":                   "recovery-trusted-key.json",
 				},
 			})
+			return
+		}
+		if r.URL.Path == "/.well-known/gpm/recovery-trusted-key.json" {
+			http.Redirect(w, r, "/.well-known/gpm/redirected/recovery-trusted-key.json", http.StatusFound)
 			return
 		}
 		if body, ok := files[r.URL.Path]; ok {
@@ -704,6 +709,15 @@ func TestGPMRecoverFetchPublication(t *testing.T) {
 	}
 }
 
+func TestGPMRecoverFetchPublicationRejectsRemoteHTTPIndex(t *testing.T) {
+	if _, err := parsePublicationIndexURL("http://example.com/.well-known/gpm/recovery-index.json"); err == nil {
+		t.Fatal("expected remote http publication index to be rejected")
+	}
+	if _, err := parsePublicationIndexURL("http://127.0.0.1:18980/.well-known/gpm/recovery-index.json"); err != nil {
+		t.Fatalf("expected loopback http publication index to remain available: %v", err)
+	}
+}
+
 func TestGPMRecoverFetchPublicationRejectsCrossOriginFiles(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(recoveryPublicationIndex{
@@ -724,6 +738,71 @@ func TestGPMRecoverFetchPublicationRejectsCrossOriginFiles(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected cross-origin publication file to be rejected")
+	}
+}
+
+func TestGPMRecoverFetchPublicationRejectsCrossOriginRedirect(t *testing.T) {
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"kind":"key"}`))
+	}))
+	t.Cleanup(attacker.Close)
+
+	files := map[string]string{
+		"/.well-known/gpm/access-pack.json":                   `{"kind":"pack"}`,
+		"/.well-known/gpm/bridge-invite.json":                 `{"kind":"bridge"}`,
+		"/.well-known/gpm/bridge-helper-registry.signed.json": `{"kind":"registry"}`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/gpm/recovery-index.json" {
+			_ = json.NewEncoder(w).Encode(recoveryPublicationIndex{
+				Version: 1,
+				Files: map[string]string{
+					"access_pack":                   "access-pack.json",
+					"bridge_invite":                 "bridge-invite.json",
+					"bridge_helper_registry_signed": "bridge-helper-registry.signed.json",
+					"trusted_key":                   "recovery-trusted-key.json",
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/.well-known/gpm/recovery-trusted-key.json" {
+			http.Redirect(w, r, attacker.URL+"/recovery-trusted-key.json", http.StatusFound)
+			return
+		}
+		if body, ok := files[r.URL.Path]; ok {
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	err := runFetchPublication([]string{
+		"--index-url", server.URL + "/.well-known/gpm/recovery-index.json",
+		"--out-dir", filepath.Join(t.TempDir(), "fetched"),
+	})
+	if err == nil {
+		t.Fatal("expected cross-origin redirect to be rejected")
+	}
+	if !strings.Contains(err.Error(), "redirects must stay") {
+		t.Fatalf("expected redirect policy error, got %v", err)
+	}
+}
+
+func TestGPMRecoverFetchPublicationRejectsSchemeDowngradeRedirect(t *testing.T) {
+	indexURL, err := url.Parse("https://example.com/.well-known/gpm/recovery-index.json")
+	if err != nil {
+		t.Fatalf("parse index URL: %v", err)
+	}
+	downgradedURL, err := url.Parse("http://example.com/.well-known/gpm/recovery-trusted-key.json")
+	if err != nil {
+		t.Fatalf("parse redirect URL: %v", err)
+	}
+
+	client := newPublicationHTTPClient(indexURL, time.Second)
+	err = client.CheckRedirect(&http.Request{URL: downgradedURL}, []*http.Request{{URL: indexURL}})
+	if err == nil {
+		t.Fatal("expected scheme downgrade redirect to be rejected")
 	}
 }
 

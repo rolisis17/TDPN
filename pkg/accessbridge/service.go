@@ -19,6 +19,7 @@ import (
 
 type ServiceConfig struct {
 	BridgeConfig      accesspack.BridgeServiceConfig
+	ConfigSHA256      string
 	RPS               int
 	MaxSources        int
 	AbuseLogPath      string
@@ -30,23 +31,26 @@ type ServiceConfig struct {
 }
 
 type Service struct {
-	config            accesspack.BridgeServiceConfig
-	limiter           *httplimit.FixedWindowLimiter
-	abuseLimiter      *httplimit.FixedWindowLimiter
-	abuseLogPath      string
-	redirect          bool
-	accessCodeHash    []byte
-	allowQueryCode    bool
-	trustProxyHeaders bool
-	now               func() time.Time
-	mu                sync.Mutex
-	requests          map[string]int
-	abuseReports      int
+	config             accesspack.BridgeServiceConfig
+	configSHA256       string
+	limiter            *httplimit.FixedWindowLimiter
+	authFailureLimiter *httplimit.FixedWindowLimiter
+	abuseLimiter       *httplimit.FixedWindowLimiter
+	abuseLogPath       string
+	redirect           bool
+	accessCodeHash     []byte
+	allowQueryCode     bool
+	trustProxyHeaders  bool
+	now                func() time.Time
+	mu                 sync.Mutex
+	requests           map[string]int
+	abuseReports       int
 }
 
 type HealthResponse struct {
-	Status   string                           `json:"status"`
-	Decision accesspack.BridgeServiceDecision `json:"decision"`
+	Status       string                           `json:"status"`
+	ConfigSHA256 string                           `json:"config_sha256,omitempty"`
+	Decision     accesspack.BridgeServiceDecision `json:"decision"`
 }
 
 type BridgeResponse struct {
@@ -83,16 +87,18 @@ func NewService(config ServiceConfig) (*Service, error) {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	service := &Service{
-		config:            accesspack.NormalizeBridgeServiceConfig(config.BridgeConfig),
-		limiter:           httplimit.NewFixedWindowLimiter(config.RPS, config.MaxSources),
-		abuseLimiter:      httplimit.NewFixedWindowLimiter(config.RPS, config.MaxSources),
-		abuseLogPath:      strings.TrimSpace(config.AbuseLogPath),
-		redirect:          config.Redirect,
-		accessCodeHash:    accessCodeHash,
-		allowQueryCode:    config.AllowQueryCode,
-		trustProxyHeaders: config.TrustProxyHeaders,
-		now:               now,
-		requests:          map[string]int{},
+		config:             accesspack.NormalizeBridgeServiceConfig(config.BridgeConfig),
+		configSHA256:       strings.TrimSpace(config.ConfigSHA256),
+		limiter:            httplimit.NewFixedWindowLimiter(config.RPS, config.MaxSources),
+		authFailureLimiter: httplimit.NewFixedWindowLimiter(config.RPS, config.MaxSources),
+		abuseLimiter:       httplimit.NewFixedWindowLimiter(config.RPS, config.MaxSources),
+		abuseLogPath:       strings.TrimSpace(config.AbuseLogPath),
+		redirect:           config.Redirect,
+		accessCodeHash:     accessCodeHash,
+		allowQueryCode:     config.AllowQueryCode,
+		trustProxyHeaders:  config.TrustProxyHeaders,
+		now:                now,
+		requests:           map[string]int{},
 	}
 	decision := accesspack.EvaluateBridgeServiceRequest(service.config, accesspack.BridgeServiceRequest{}, now())
 	if !decision.Allowed {
@@ -125,7 +131,7 @@ func (s *Service) handleHealth(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 		outStatus = "fail"
 	}
-	writeJSON(w, status, HealthResponse{Status: outStatus, Decision: decision})
+	writeJSON(w, status, HealthResponse{Status: outStatus, ConfigSHA256: s.configSHA256, Decision: decision})
 }
 
 func (s *Service) handleBridge(w http.ResponseWriter, r *http.Request) {
@@ -142,6 +148,10 @@ func (s *Service) handleBridge(w http.ResponseWriter, r *http.Request) {
 	source := s.sourceKey(r)
 	now := s.now()
 	if !s.accessCodeAllowed(r) {
+		if s.authFailureLimiter != nil && !s.authFailureLimiter.Allow(source, now) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"status": "rate_limited"})
+			return
+		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"status": "access_code_required"})
 		return
 	}

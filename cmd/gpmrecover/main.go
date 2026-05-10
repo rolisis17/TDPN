@@ -1091,12 +1091,15 @@ func runBridgeServiceServe(args []string) error {
 	if err := verifyOptionalSHA256("bridge service config", body, *configSHA256); err != nil {
 		return err
 	}
+	actualConfigSHA256 := sha256.Sum256(body)
+	actualConfigSHA256Hex := hex.EncodeToString(actualConfigSHA256[:])
 	config, err := accesspack.ParseBridgeServiceConfig(body)
 	if err != nil {
 		return err
 	}
 	service, err := accessbridge.NewService(accessbridge.ServiceConfig{
 		BridgeConfig:      config,
+		ConfigSHA256:      actualConfigSHA256Hex,
 		RPS:               *rps,
 		MaxSources:        *maxSources,
 		AbuseLogPath:      *abuseLog,
@@ -2066,7 +2069,7 @@ func runFetchPublication(args []string) error {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-	client := &http.Client{Timeout: timeout}
+	client := newPublicationHTTPClient(parsedIndexURL, timeout)
 	indexBody, err := fetchPublicationURL(client, parsedIndexURL.String(), maxPublicationIndexBytes)
 	if err != nil {
 		return err
@@ -2146,6 +2149,9 @@ func parsePublicationIndexURL(raw string) (*url.URL, error) {
 	if strings.TrimSpace(parsed.Host) == "" {
 		return nil, errors.New("--index-url must include a host")
 	}
+	if parsed.Scheme == "http" && !isLoopbackPublicationHost(parsed.Hostname()) {
+		return nil, errors.New("--index-url must use https:// for remote publication hosts")
+	}
 	return parsed, nil
 }
 
@@ -2211,6 +2217,59 @@ func resolvePublicationFileURL(indexURL *url.URL, rel string) (string, error) {
 		return "", errors.New("publication file must resolve to the same origin as the index")
 	}
 	return resolved.String(), nil
+}
+
+func newPublicationHTTPClient(indexURL *url.URL, timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("publication redirect limit exceeded")
+			}
+			if indexURL == nil || req == nil || req.URL == nil {
+				return errors.New("publication redirect target is invalid")
+			}
+			if !samePublicationOrigin(indexURL, req.URL) {
+				return errors.New("publication redirects must stay on the index origin and scheme")
+			}
+			return nil
+		},
+	}
+}
+
+func samePublicationOrigin(indexURL *url.URL, candidate *url.URL) bool {
+	if indexURL == nil || candidate == nil {
+		return false
+	}
+	return candidate.Scheme == indexURL.Scheme &&
+		strings.EqualFold(candidate.Hostname(), indexURL.Hostname()) &&
+		publicationURLPort(candidate) == publicationURLPort(indexURL)
+}
+
+func publicationURLPort(raw *url.URL) string {
+	if raw == nil {
+		return ""
+	}
+	if port := raw.Port(); port != "" {
+		return port
+	}
+	switch raw.Scheme {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
+}
+
+func isLoopbackPublicationHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func fetchPublicationURL(client *http.Client, rawURL string, maxBytes int64) ([]byte, error) {
