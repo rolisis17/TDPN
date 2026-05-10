@@ -895,7 +895,7 @@ Anti-abuse entry controls:
 - Entry data-plane source locking binds each session to the first client UDP source (prevents source hijack); optional delayed rebind is available via `ENTRY_CLIENT_REBIND_SEC`
 
 CI and tests:
-- `./scripts/ci_local.sh` (unit tests + internal topology assertions)
+- `./scripts/ci_local.sh` (unit tests + access-recovery gates + internal topology assertions)
 - set `CI_LOCAL_INCLUDE_LOAD_CHAOS_MATRIX=1` to include `integration_load_chaos_matrix.sh` in local CI runs
 - `.github/workflows/ci.yml` runs the local CI script on push/PR
 - `./scripts/load_path_open.sh` (basic entry path-open load script)
@@ -918,6 +918,9 @@ CI and tests:
 - `./scripts/integration_release_tag_verify.sh` (tag verification regression guard for missing/lightweight/signed/head-mismatch paths)
 - `./scripts/release_policy_gate.sh --version vX.Y.Z --release-dir dist/vX.Y.Z --require-tag-exists 1 --require-tag-notes 1` (release artifact/note policy enforcement gate)
 - `./scripts/integration_release_policy_gate.sh` (release policy gate regression guard for missing artifacts/checksum tamper/tag-note policy)
+- `./scripts/integration_recovery_browser_smoke.sh` (browser-local Access Recovery trust/registry/invite/text/QR smoke)
+- `./scripts/integration_access_recovery_demo_contract.sh` (generated Access Recovery demo bundle contract: trusted-key handoffs, signed registry policy, text imports)
+- `./scripts/integration_access_recovery_examples_contract.sh` (checked-in Access Recovery examples contract: sign/verify/policy/text-handoff coverage)
 - `./scripts/integration_federation.sh` (multi-directory quorum/vote integration check)
 - `./scripts/integration_operator_quorum.sh` (distinct-directory-operator quorum enforcement check)
 - `./scripts/integration_sync_status_chaos.sh` (directory sync-status failure/recovery observability under peer churn)
