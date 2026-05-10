@@ -1,6 +1,6 @@
-# Global Private Mesh (GPM) Full Execution Plan (VPN -> Windows Native -> Cosmos L1)
+# Global Private Mesh (GPM) Full Execution Plan (Access Recovery Pivot)
 
-Last updated: 2026-04-16
+Last updated: 2026-05-10
 
 This is the implementation baseline for the next stages of Global Private Mesh (GPM).
 
@@ -13,13 +13,32 @@ Compatibility note:
 
 ## Priority Lock
 
-1. VPN production hardening
-2. Windows native app/parity
-3. Payment/L1 rollout
+1. Access Recovery Toolkit beta: signed recovery packs, bridge invites, helper registries, trust stores, text/QR handoffs, and browser-local verification.
+2. Operator/helper safety: short-lived artifacts, helper quarantine/rotation, trust-store validation, and abuse-response runbooks for blocked-site/app recovery use cases.
+3. Reuse VPN/bridge infrastructure only where it directly supports access recovery, bootstrap resilience, or future helper routing.
+4. Windows/native clients and payment/L1 work are deferred until the access-recovery product has a validated beta reason to exist.
 
 ## Phase Map
 
+### Phase A0 (current): Access Recovery Toolkit Beta
+- Freeze the local CLI/browser contract for signed packs, bridge invites, signed helper registries, trust stores, and `GPMREC1` handoffs.
+- Keep all verification local-first: untrusted channels may deliver artifacts, but trust comes only from organization keys in the local trust store.
+- Fail closed on malformed, expired, disabled, wrong-organization, duplicated, or badly signed material.
+- Ship a one-command demo bundle and browser-local recovery page that can be used without running a VPN tunnel, blockchain node, or public exit.
+
+Exit gate:
+- one signed pack and one signed bridge invite can be generated, shared by text/QR/file, verified locally, and inspected in the browser
+- signed helper registries must be verified before extraction and remain organization-bound during bridge-invite checks
+- helper registry policy can quarantine/disable helpers without changing the organization signing key
+- docs explain the non-technical user flow and the operator flow clearly enough for a first beta cohort
+
+### Phase A1: Helper/Bootstrap Pilot
+- Add beta operator runbooks for helper onboarding, helper quarantine, recovery artifact expiry, and incident response.
+- Pilot with one organization/community and a small helper set before building public network economics.
+- Defer public dVPN, tier economics, staking/slashing, and L1 settlement until the access-recovery wedge shows demand.
+
 ### Phase 0 (in progress): Product Surface Simplification
+- Legacy infrastructure track retained for reuse; no longer the top-level product priority.
 - Keep simple launcher flows minimal (profile + required connection fields) and document advanced flags separately.
 - Route non-essential switches into expert mode, not the simple path.
 - Use one versioned config contract: `deploy/config/easy_mode_config_v1.conf`.

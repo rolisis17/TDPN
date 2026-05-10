@@ -18,11 +18,11 @@ We agreed to simplify the operator and user experience while keeping strong test
 - choose long-term defaults based on measured latency/reliability/privacy tradeoff data, not assumptions
 
 Next 5 roadmap execution steps:
-1. Freeze a minimal public CLI/UI contract around profiles.
-2. Route advanced policy switches into internal defaults and expert-only help, not the simple path.
-3. Ship and benchmark `Speed` (2-hop latency-tuned).
-4. Implement experimental `speed-1hop` with clear safety/privacy labeling.
-5. Run comparative pilot metrics and decide default behavior from results.
+1. Freeze the Access Recovery beta contract around signed packs, bridge invites, signed helper registries, trust stores, and `GPMREC1` text/QR handoffs.
+2. Finish the browser-local verification loop for file, text, and QR handoffs, including fail-closed trust-store and helper-registry validation.
+3. Write the first operator/helper runbook for key handoff, helper onboarding, helper quarantine, artifact expiry, and abuse response.
+4. Build one small pilot bundle for a real organization/community and test it with a non-technical user flow before adding network economics.
+5. Keep VPN, Windows client, and L1 settlement work parked as reusable infrastructure until the access-recovery wedge has beta demand.
 
 Status update (March 24, 2026):
 - simple launcher defaults are now sourced from a versioned config contract (`deploy/config/easy_mode_config_v1.conf`) with command support in `easy_node.sh` (`config-v1-show`, `config-v1-init`, `config-v1-set-profile`).
