@@ -72,7 +72,7 @@
     },
     "safety_notes": {
       "type": "array",
-      "maxItems": 12,
+      "maxItems": 8,
       "items": {
         "type": "string",
         "maxLength": 240
