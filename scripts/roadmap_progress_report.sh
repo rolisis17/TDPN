@@ -2236,11 +2236,18 @@ access_recovery_verifier_evidence_json() {
         and ((.trusted_provenance.summary_evidence_scope // "") == "real_helper_https")
         and ((.inputs.trust_store // "") != "")
         and ((.inputs.public_key_file // null) == null);
+      def generated_at_ready:
+        (.generated_at_utc | type) == "string" and ((.generated_at_utc | length) > 0);
+      def evidence_binding_ready:
+        ((.evidence_binding.source_summary_sha256 // "") != "")
+        and ((.evidence_binding.smoke_summary_sha256 // "") != "")
+        and ((.evidence_binding.deployment_evidence_summary_sha256 // "") != "")
+        and ((.evidence_binding.host_install_check_summary_sha256 // "") != "");
       (.schema.id // null) as $schema_id
       | status_norm as $raw_status
       | (($schema_id == $expected_schema_id) and ($raw_status != "")) as $valid_contract
       | ($valid_contract and ($summary_stale | not)) as $fresh_contract
-      | ($fresh_contract and ($raw_status == "pass") and rc_ok and required_checks_enabled and required_checks_pass and trusted_provenance_ready) as $semantic_ok
+      | ($fresh_contract and ($raw_status == "pass") and rc_ok and generated_at_ready and required_checks_enabled and required_checks_pass and trusted_provenance_ready and evidence_binding_ready) as $semantic_ok
       | (
           if $valid_contract and $summary_stale then "stale"
           elif $valid_contract and ($semantic_ok | not) then (if $raw_status == "pass" then "fail" else $raw_status end)
@@ -2262,6 +2269,8 @@ access_recovery_verifier_evidence_json() {
           semantic_ok: (if $fresh_contract then $semantic_ok else null end),
           notes: (
             if $valid_contract and $summary_stale then "Access bridge pilot evidence verifier summary is stale or has untrusted freshness metadata"
+            elif $valid_contract and (generated_at_ready | not) then "Access bridge pilot evidence verifier receipt is missing generated_at_utc"
+            elif $valid_contract and (evidence_binding_ready | not) then "Access bridge pilot evidence verifier receipt is missing required evidence binding hashes"
             elif $valid_contract and ($semantic_ok | not) then "Access bridge pilot evidence verifier did not prove trusted real-helper HTTPS provenance"
             elif $valid_contract then str_or_null(.notes)
             elif $schema_id != $expected_schema_id then "Access bridge pilot evidence verifier summary schema mismatch"
@@ -2286,6 +2295,8 @@ access_recovery_verifier_evidence_json() {
             trusted_provenance_source: str_or_null(.trusted_provenance.source),
             evidence_scope: str_or_null(.trusted_provenance.evidence_scope),
             summary_evidence_scope: str_or_null(.trusted_provenance.summary_evidence_scope),
+            generated_at_utc_present: generated_at_ready,
+            evidence_binding_hashes_present: evidence_binding_ready,
             source_summary_sha256: str_or_null(.evidence_binding.source_summary_sha256),
             base_url: str_or_null(.evidence_binding.base_url),
             helper_id: str_or_null(.evidence_binding.helper_id),

@@ -488,6 +488,7 @@ write_verification_summary() {
   local source_summary_sha256 source_base_url source_helper_id source_organization_id source_registry_id
   local source_smoke_summary_json source_deployment_summary_json source_host_summary_json
   local source_smoke_summary_sha256 source_deployment_summary_sha256 source_host_summary_sha256
+  local bundled_source_summary_json bundled_smoke_summary_json bundled_deployment_summary_json bundled_host_summary_json
 
   [[ -n "$verification_summary_json" ]] || return 0
 
@@ -517,15 +518,41 @@ write_verification_summary() {
   source_smoke_summary_sha256=""
   source_deployment_summary_sha256=""
   source_host_summary_sha256=""
+  bundled_source_summary_json=""
+  bundled_smoke_summary_json=""
+  bundled_deployment_summary_json=""
+  bundled_host_summary_json=""
+  if [[ -n "$manifest_bundle_dir" && -d "$manifest_bundle_dir" ]]; then
+    bundled_source_summary_json="$manifest_bundle_dir/access_bridge_pilot_evidence_bundle_summary.json"
+    bundled_smoke_summary_json="$manifest_bundle_dir/access_bridge_service_smoke_summary.json"
+    bundled_deployment_summary_json="$manifest_bundle_dir/access_bridge_deployment_evidence_summary.json"
+    bundled_host_summary_json="$manifest_bundle_dir/access_bridge_host_install_check_summary.json"
+  fi
   if [[ -n "$summary_json" && -f "$summary_json" ]]; then
-    source_summary_sha256="$(sha256_value_or_empty "$summary_json")"
+    if [[ -f "$bundled_source_summary_json" ]]; then
+      source_summary_sha256="$(sha256_value_or_empty "$bundled_source_summary_json")"
+    else
+      source_summary_sha256="$(sha256_value_or_empty "$summary_json")"
+    fi
     source_base_url="$(json_string "$summary_json" '.inputs.base_url')"
     source_helper_id="$(json_string "$summary_json" '.expected_identity.helper_id')"
     source_organization_id="$(json_string "$summary_json" '.expected_identity.organization_id')"
     source_registry_id="$(json_string "$summary_json" '.expected_identity.registry_id')"
-    source_smoke_summary_json="$(abs_path "$(json_string "$summary_json" '.artifacts.smoke_summary_json')")"
-    source_deployment_summary_json="$(abs_path "$(json_string "$summary_json" '.artifacts.deployment_evidence_summary_json')")"
-    source_host_summary_json="$(abs_path "$(json_string "$summary_json" '.artifacts.host_install_check_summary_json')")"
+    if [[ -f "$bundled_smoke_summary_json" ]]; then
+      source_smoke_summary_json="$bundled_smoke_summary_json"
+    else
+      source_smoke_summary_json="$(abs_path "$(json_string "$summary_json" '.artifacts.smoke_summary_json')")"
+    fi
+    if [[ -f "$bundled_deployment_summary_json" ]]; then
+      source_deployment_summary_json="$bundled_deployment_summary_json"
+    else
+      source_deployment_summary_json="$(abs_path "$(json_string "$summary_json" '.artifacts.deployment_evidence_summary_json')")"
+    fi
+    if [[ -f "$bundled_host_summary_json" ]]; then
+      source_host_summary_json="$bundled_host_summary_json"
+    else
+      source_host_summary_json="$(abs_path "$(json_string "$summary_json" '.artifacts.host_install_check_summary_json')")"
+    fi
     source_smoke_summary_sha256="$(sha256_value_or_empty "$source_smoke_summary_json")"
     source_deployment_summary_sha256="$(sha256_value_or_empty "$source_deployment_summary_json")"
     source_host_summary_sha256="$(sha256_value_or_empty "$source_host_summary_json")"
@@ -867,6 +894,25 @@ if [[ "$check_manifest" == "1" && -n "$manifest_bundle_dir" && -d "$manifest_bun
 elif [[ "$check_manifest" == "1" ]]; then
   echo "manifest check requested but bundle dir is not resolved"
   issues=$((issues + 1))
+fi
+
+if [[ "$require_trusted_provenance" == "1" ]]; then
+  if [[ -z "$manifest_bundle_dir" || ! -d "$manifest_bundle_dir" ]]; then
+    echo "trusted pilot provenance requires a verified bundle directory for evidence binding"
+    issues=$((issues + 1))
+  else
+    for required_binding_file in \
+      access_bridge_pilot_evidence_bundle_summary.json \
+      access_bridge_service_smoke_summary.json \
+      access_bridge_deployment_evidence_summary.json \
+      access_bridge_host_install_check_summary.json
+    do
+      if [[ ! -f "$manifest_bundle_dir/$required_binding_file" ]]; then
+        echo "trusted pilot provenance requires bundled evidence binding file: $required_binding_file"
+        issues=$((issues + 1))
+      fi
+    done
+  fi
 fi
 
 if [[ "$check_provenance" == "1" ]]; then

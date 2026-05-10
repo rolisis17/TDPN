@@ -45,6 +45,8 @@ mkdir -p "$BUNDLE_DIR/bridge-deploy-pack"
 go run ./cmd/gpmrecover gen --private-key-out "$PRIVATE_KEY_FILE" --public-key-out "$PUBLIC_KEY_FILE" >/dev/null
 go run ./cmd/gpmrecover trust-add --trust-store "$TRUST_STORE" --org-id pilot-org --org-name "Pilot Org" --public-key-file "$PUBLIC_KEY_FILE" >/dev/null
 printf '%s\n' '{"status":"pass"}' >"$BUNDLE_DIR/access_bridge_service_smoke_summary.json"
+ORIGINAL_SMOKE_SUMMARY_COPY="$TMP_DIR/original_access_bridge_service_smoke_summary.json"
+cp "$BUNDLE_DIR/access_bridge_service_smoke_summary.json" "$ORIGINAL_SMOKE_SUMMARY_COPY"
 printf '%s\n' 'smoke ok' >"$BUNDLE_DIR/access_bridge_service_smoke.log"
 printf '%s\n' '{"status":"pass"}' >"$BUNDLE_DIR/access_bridge_deployment_evidence_summary.json"
 printf '%s\n' '{"status":"pass"}' >"$BUNDLE_DIR/access_bridge_host_install_check_summary.json"
@@ -200,6 +202,27 @@ if ! jq -e '
 ' "$VERIFY_SUMMARY_JSON" >/dev/null; then
   echo "access bridge pilot evidence bundle verifier integration failed: verification summary did not prove trusted provenance"
   cat "$VERIFY_SUMMARY_JSON"
+  exit 1
+fi
+
+TAMPERED_LOOSE_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_tampered_loose_summary.json"
+printf '%s\n' '{"status":"pass","tampered_loose_file":true}' >"$BUNDLE_DIR/access_bridge_service_smoke_summary.json"
+TAMPERED_LOOSE_SMOKE_SUMMARY_SHA256="$(sha256sum "$BUNDLE_DIR/access_bridge_service_smoke_summary.json" | awk '{print $1}')"
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$SUMMARY_JSON" \
+  --provenance-json "$PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$TAMPERED_LOOSE_VERIFY_SUMMARY_JSON" >"$TMP_DIR/verify-provenance-trusted-policy-tampered-loose.log"
+cp "$ORIGINAL_SMOKE_SUMMARY_COPY" "$BUNDLE_DIR/access_bridge_service_smoke_summary.json"
+if ! jq -e --arg original_sha "$SMOKE_SUMMARY_SHA256" --arg loose_sha "$TAMPERED_LOOSE_SMOKE_SUMMARY_SHA256" '
+  .status == "pass"
+  and .evidence_binding.smoke_summary_sha256 == $original_sha
+  and .evidence_binding.smoke_summary_sha256 != $loose_sha
+  and (.evidence_binding.smoke_summary_json | contains("/access_bridge_pilot_evidence_bundle/access_bridge_service_smoke_summary.json"))
+' "$TAMPERED_LOOSE_VERIFY_SUMMARY_JSON" >/dev/null; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted receipt did not bind to verified bundle contents"
+  cat "$TAMPERED_LOOSE_VERIFY_SUMMARY_JSON"
   exit 1
 fi
 

@@ -16,6 +16,7 @@ Usage:
     [--host-b HOST] \
     [--campaign-subject ID] \
     [--vm-command-source PATH] \
+    [--access-recovery-trust-store PATH] \
     [--action-timeout-sec N] \
     [--allow-unsafe-shell-commands [0|1]] \
     [--allow-empty-actions [0|1]] \
@@ -46,6 +47,7 @@ Defaults:
   --host-b ""   (precedence: CLI --host-b > ROADMAP_NEXT_ACTIONS_RUN_HOST_B > B_HOST > HOST_B > summary command values)
   --campaign-subject ""   (precedence: CLI --campaign-subject > --profile-default-gate-subject > ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_SUBJECT > ROADMAP_NEXT_ACTIONS_RUN_CAMPAIGN_SUBJECT > CAMPAIGN_SUBJECT > INVITE_KEY > summary command values)
   --vm-command-source ""   (precedence: CLI --vm-command-source > ROADMAP_NEXT_ACTIONS_RUN_VM_COMMAND_SOURCE > VM_COMMAND_SOURCE > summary command values)
+  --access-recovery-trust-store ""   (operator supplied only; precedence: CLI --access-recovery-trust-store > ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE > ACCESS_RECOVERY_TRUST_STORE > TRUST_STORE)
   profile_default_gate default timeout sec: 2400
     (env ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC)
   --refresh-manual-validation 0
@@ -330,6 +332,12 @@ action_id_is_multi_vm_stability_action_01() {
   [[ "$action_id" == "profile_compare_multi_vm_stability" || "$action_id" == "profile_compare_multi_vm_stability_promotion" ]]
 }
 
+action_id_is_access_recovery_trusted_verify_01() {
+  local action_id
+  action_id="$(trim "${1:-}")"
+  [[ "$action_id" == "trusted_pilot_evidence_verify" ]]
+}
+
 strip_optional_wrapping_quotes() {
   local value="${1:-}"
   local first_char=""
@@ -418,6 +426,23 @@ vm_command_source_value_looks_placeholder_01() {
   return 1
 }
 
+access_recovery_trust_store_value_looks_placeholder_01() {
+  local value
+  value="$(trim "${1:-}")"
+  for token in TRUST_STORE ACCESS_RECOVERY_TRUST_STORE PROVENANCE_TRUST_STORE; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
+  value="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$value" in
+    "<TRUST-STORE>"|"<SET-TRUST-STORE>"|REPLACE_WITH_TRUST_STORE|REPLACE_WITH_ACCESS_RECOVERY_TRUST_STORE)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 command_has_vm_command_source_placeholder_01() {
   local command_text normalized token key value idx token_count
   command_text="${1:-}"
@@ -471,6 +496,60 @@ command_has_vm_command_source_placeholder_01() {
      || [[ "$normalized" == *"<SET-VM-COMMAND-SOURCE>"* ]] \
      || [[ "$normalized" == *"REPLACE_WITH_VM_COMMAND_SOURCE"* ]] \
      || [[ "$normalized" == *"REPLACE_WITH_VM_COMMAND_FILE"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+command_has_access_recovery_trust_store_placeholder_01() {
+  local command_text normalized token key value idx token_count
+  command_text="${1:-}"
+  if [[ -z "$command_text" ]]; then
+    return 1
+  fi
+
+  if command_string_to_argv "$command_text"; then
+    token_count="${#COMMAND_STRING_ARGV[@]}"
+    idx=0
+    while (( idx < token_count )); do
+      token="${COMMAND_STRING_ARGV[$idx]}"
+      case "$token" in
+        --trust-store)
+          if (( idx + 1 >= token_count )); then
+            return 0
+          fi
+          value="${COMMAND_STRING_ARGV[$((idx + 1))]}"
+          if [[ -z "$value" ]] || access_recovery_trust_store_value_looks_placeholder_01 "$value"; then
+            return 0
+          fi
+          idx=$((idx + 2))
+          continue
+          ;;
+        --trust-store=*)
+          value="${token#*=}"
+          if [[ -z "$value" ]] || access_recovery_trust_store_value_looks_placeholder_01 "$value"; then
+            return 0
+          fi
+          idx=$((idx + 1))
+          continue
+          ;;
+      esac
+      if access_recovery_trust_store_value_looks_placeholder_01 "$token"; then
+        return 0
+      fi
+      idx=$((idx + 1))
+    done
+    return 1
+  fi
+
+  normalized="$(printf '%s' "$command_text" | tr '[:lower:]' '[:upper:]')"
+  if [[ "$normalized" =~ \$\{?(TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_TRUST_STORE)\}? ]]; then
+    return 0
+  fi
+  if [[ "$normalized" =~ (^|[^A-Z0-9_])(REPLACE_WITH_TRUST_STORE|REPLACE_WITH_ACCESS_RECOVERY_TRUST_STORE|TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_TRUST_STORE)([^A-Z0-9_]|$) ]]; then
+    return 0
+  fi
+  if [[ "$normalized" == *"<TRUST-STORE>"* ]] || [[ "$normalized" == *"<SET-TRUST-STORE>"* ]]; then
     return 0
   fi
   return 1
@@ -758,6 +837,61 @@ write_multi_vm_stability_vm_command_source_precondition_log_01() {
     fi
     echo "operator_next_action: $next_operator_action"
     echo "operator_next_action: VM_COMMAND_SOURCE=/absolute/path/to/vm_command.txt ./scripts/roadmap_next_actions_run.sh --reports-dir $reports_dir --summary-json $summary_json --include-id profile_compare_multi_vm_stability --vm-command-source /absolute/path/to/vm_command.txt --print-summary-json ${print_summary_json:-1}"
+  } >"$log_path"
+}
+
+build_access_recovery_trust_store_operator_command_01() {
+  local -a cmd=("./scripts/roadmap_next_actions_run.sh")
+
+  if [[ -n "${reports_dir:-}" ]]; then
+    cmd+=(--reports-dir "$reports_dir")
+  fi
+  if [[ -n "${summary_json:-}" ]]; then
+    cmd+=(--summary-json "$summary_json")
+  fi
+  if [[ -n "${roadmap_summary_json:-}" ]]; then
+    cmd+=(--roadmap-summary-json "$roadmap_summary_json")
+  fi
+  if [[ -n "${roadmap_report_md:-}" ]]; then
+    cmd+=(--roadmap-report-md "$roadmap_report_md")
+  fi
+  if [[ "${parallel:-0}" == "1" ]]; then
+    cmd+=(--parallel 1)
+  fi
+  if [[ "${action_timeout_sec:-0}" != "0" ]]; then
+    cmd+=(--action-timeout-sec "$action_timeout_sec")
+  fi
+  if [[ "${allow_unsafe_shell_commands:-0}" == "1" ]]; then
+    cmd+=(--allow-unsafe-shell-commands 1)
+  fi
+  cmd+=(--include-id "trusted_pilot_evidence_verify")
+  cmd+=(--access-recovery-trust-store "REPLACE_WITH_TRUST_STORE")
+  cmd+=(--print-summary-json "${print_summary_json:-1}")
+  render_command_line_from_argv "${cmd[@]}"
+}
+
+write_access_recovery_trust_store_precondition_log_01() {
+  local log_path="${1:-}"
+  local command_redacted="${2:-}"
+  local notes="${3:-}"
+  local next_operator_action="${4:-}"
+
+  if [[ -z "$log_path" ]]; then
+    return
+  fi
+  if [[ -z "$next_operator_action" ]]; then
+    next_operator_action="$(build_access_recovery_trust_store_operator_command_01)"
+  fi
+  {
+    echo "failure_kind=missing_access_recovery_trust_store_precondition"
+    echo "Access Recovery trusted verifier trust-store precondition failed before execution"
+    if [[ -n "$notes" ]]; then
+      echo "$notes"
+    fi
+    if [[ -n "$command_redacted" ]]; then
+      echo "command=$command_redacted"
+    fi
+    echo "operator_next_action: $next_operator_action"
   } >"$log_path"
 }
 
@@ -1374,6 +1508,70 @@ multi_vm_stability_command_apply_vm_command_source_override_01() {
   profile_default_gate_command_from_argv "${out_argv[@]}"
 }
 
+access_recovery_command_apply_trust_store_override_01() {
+  local cmd trust_store
+  local token=""
+  local key=""
+  local idx=0
+  local token_count=0
+  local has_trust_store="0"
+  local -a in_argv=()
+  local -a out_argv=()
+
+  cmd="$(trim "${1:-}")"
+  trust_store="$(trim "${2:-}")"
+  if [[ -z "$cmd" || -z "$trust_store" ]]; then
+    printf '%s' "$cmd"
+    return
+  fi
+  if ! command_string_to_argv "$cmd"; then
+    cmd="${cmd//ACCESS_RECOVERY_TRUST_STORE/$trust_store}"
+    cmd="${cmd//TRUST_STORE/$trust_store}"
+    if [[ ! "$cmd" =~ (^|[[:space:]])--trust-store([[:space:]=]|$) ]]; then
+      cmd="${cmd} --trust-store $(printf '%q' "$trust_store")"
+    fi
+    printf '%s' "$cmd"
+    return
+  fi
+
+  in_argv=("${COMMAND_STRING_ARGV[@]}")
+  token_count="${#in_argv[@]}"
+  while (( idx < token_count )); do
+    token="${in_argv[$idx]}"
+    case "$token" in
+      --trust-store)
+        has_trust_store="1"
+        out_argv+=("--trust-store")
+        if (( idx + 1 < token_count )); then
+          out_argv+=("$trust_store")
+          idx=$((idx + 2))
+        else
+          out_argv+=("$trust_store")
+          idx=$((idx + 1))
+        fi
+        continue
+        ;;
+      --trust-store=*)
+        has_trust_store="1"
+        key="${token%%=*}"
+        out_argv+=("${key}=${trust_store}")
+        idx=$((idx + 1))
+        continue
+        ;;
+    esac
+
+    token="${token//ACCESS_RECOVERY_TRUST_STORE/$trust_store}"
+    token="${token//TRUST_STORE/$trust_store}"
+    out_argv+=("$token")
+    idx=$((idx + 1))
+  done
+
+  if [[ "$has_trust_store" != "1" ]]; then
+    out_argv+=("--trust-store" "$trust_store")
+  fi
+  profile_default_gate_command_from_argv "${out_argv[@]}"
+}
+
 log_has_failure_kind_marker() {
   local log_path="${1:-}"
   local marker="${2:-}"
@@ -1704,6 +1902,7 @@ host_a_override_env="${ROADMAP_NEXT_ACTIONS_RUN_HOST_A:-}"
 host_b_override_env="${ROADMAP_NEXT_ACTIONS_RUN_HOST_B:-}"
 campaign_subject_override_env="${ROADMAP_NEXT_ACTIONS_RUN_CAMPAIGN_SUBJECT:-}"
 vm_command_source_override_env="${ROADMAP_NEXT_ACTIONS_RUN_VM_COMMAND_SOURCE:-${VM_COMMAND_SOURCE:-}}"
+access_recovery_trust_store_override_env="${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE:-${ACCESS_RECOVERY_TRUST_STORE:-${TRUST_STORE:-}}}"
 refresh_manual_validation="${ROADMAP_NEXT_ACTIONS_RUN_REFRESH_MANUAL_VALIDATION:-0}"
 refresh_single_machine_readiness="${ROADMAP_NEXT_ACTIONS_RUN_REFRESH_SINGLE_MACHINE_READINESS:-0}"
 parallel="${ROADMAP_NEXT_ACTIONS_RUN_PARALLEL:-0}"
@@ -1727,10 +1926,12 @@ host_a_override_arg=""
 host_b_override_arg=""
 campaign_subject_override_arg=""
 vm_command_source_override_arg=""
+access_recovery_trust_store_override_arg=""
 host_a_override_arg_provided="0"
 host_b_override_arg_provided="0"
 campaign_subject_override_arg_provided="0"
 vm_command_source_override_arg_provided="0"
+access_recovery_trust_store_override_arg_provided="0"
 declare -a include_ids=()
 declare -a exclude_ids=()
 declare -a include_id_suffixes=()
@@ -1784,6 +1985,12 @@ while [[ $# -gt 0 ]]; do
       require_value_or_die "$1" "${2:-}"
       vm_command_source_override_arg="${2:-}"
       vm_command_source_override_arg_provided="1"
+      shift 2
+      ;;
+    --access-recovery-trust-store)
+      require_value_or_die "$1" "${2:-}"
+      access_recovery_trust_store_override_arg="${2:-}"
+      access_recovery_trust_store_override_arg_provided="1"
       shift 2
       ;;
     --action-timeout-sec)
@@ -1954,6 +2161,9 @@ runtime_campaign_subject_configured="0"
 runtime_vm_command_source=""
 runtime_vm_command_source_source="summary_command"
 runtime_vm_command_source_configured="0"
+runtime_access_recovery_trust_store=""
+runtime_access_recovery_trust_store_source=""
+runtime_access_recovery_trust_store_configured="0"
 
 runtime_value_candidate="$(trim "$host_a_override_arg")"
 if [[ "$host_a_override_arg_provided" == "1" ]]; then
@@ -2050,6 +2260,29 @@ elif [[ -n "$(trim "$vm_command_source_override_env")" ]] && ! vm_command_source
   runtime_vm_command_source="$(trim "$vm_command_source_override_env")"
   runtime_vm_command_source_source="env:ROADMAP_NEXT_ACTIONS_RUN_VM_COMMAND_SOURCE"
   runtime_vm_command_source_configured="1"
+fi
+
+runtime_value_candidate="$(trim "$access_recovery_trust_store_override_arg")"
+if [[ "$access_recovery_trust_store_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! access_recovery_trust_store_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_trust_store="$runtime_value_candidate"
+    runtime_access_recovery_trust_store_source="cli:--access-recovery-trust-store"
+    runtime_access_recovery_trust_store_configured="1"
+  else
+    runtime_access_recovery_trust_store_source="cli:--access-recovery-trust-store=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE:-}")" ]] && ! access_recovery_trust_store_value_looks_placeholder_01 "${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE:-}"; then
+  runtime_access_recovery_trust_store="$(trim "${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE:-}")"
+  runtime_access_recovery_trust_store_source="env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE"
+  runtime_access_recovery_trust_store_configured="1"
+elif [[ -n "$(trim "${ACCESS_RECOVERY_TRUST_STORE:-}")" ]] && ! access_recovery_trust_store_value_looks_placeholder_01 "${ACCESS_RECOVERY_TRUST_STORE:-}"; then
+  runtime_access_recovery_trust_store="$(trim "${ACCESS_RECOVERY_TRUST_STORE:-}")"
+  runtime_access_recovery_trust_store_source="env:ACCESS_RECOVERY_TRUST_STORE"
+  runtime_access_recovery_trust_store_configured="1"
+elif [[ -n "$(trim "${TRUST_STORE:-}")" ]] && ! access_recovery_trust_store_value_looks_placeholder_01 "${TRUST_STORE:-}"; then
+  runtime_access_recovery_trust_store="$(trim "${TRUST_STORE:-}")"
+  runtime_access_recovery_trust_store_source="env:TRUST_STORE"
+  runtime_access_recovery_trust_store_configured="1"
 fi
 
 if (( action_timeout_sec > 0 )); then
@@ -2298,7 +2531,6 @@ if [[ "$runtime_vm_command_source_configured" != "1" ]]; then
     runtime_vm_command_source_configured="1"
   fi
 fi
-
 selected_has_profile_default_gate="$(printf '%s\n' "$selected_actions_json" | jq -r 'any(.[]; (.id // "") == "profile_default_gate")')"
 if [[ "$selected_has_profile_default_gate" == "true" && "$action_timeout_sec" == "0" ]]; then
   need_cmd timeout
@@ -2402,11 +2634,32 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         "$runtime_vm_command_source"
     )"
   fi
+  if action_id_is_access_recovery_trusted_verify_01 "$action_id" \
+     && [[ -n "$action_command" ]] \
+     && [[ "$runtime_access_recovery_trust_store_configured" != "1" ]]; then
+    action_preflight_failure_kind="missing_access_recovery_trust_store_precondition"
+    action_preflight_notes="Access Recovery trusted verifier requires an operator-supplied trust store"
+  fi
+  if action_id_is_access_recovery_trusted_verify_01 "$action_id" \
+     && [[ -n "$action_command" ]] \
+     && [[ "$runtime_access_recovery_trust_store_configured" == "1" ]]; then
+    action_command="$(
+      access_recovery_command_apply_trust_store_override_01 \
+        "$action_command" \
+        "$runtime_access_recovery_trust_store"
+    )"
+  fi
   if action_id_is_multi_vm_stability_action_01 "$action_id" \
      && [[ -n "$action_command" ]] \
      && command_has_vm_command_source_placeholder_01 "$action_command"; then
     action_preflight_failure_kind="missing_vm_command_source_precondition"
     action_preflight_notes="multi-vm stability vm command source placeholder token unresolved"
+  fi
+  if action_id_is_access_recovery_trusted_verify_01 "$action_id" \
+     && [[ -n "$action_command" ]] \
+     && command_has_access_recovery_trust_store_placeholder_01 "$action_command"; then
+    action_preflight_failure_kind="missing_access_recovery_trust_store_precondition"
+    action_preflight_notes="Access Recovery trusted verifier trust-store placeholder token unresolved"
   fi
   if action_id_is_profile_default_family "$action_id" && [[ -n "$action_command" ]]; then
     if command_has_profile_subject_placeholder_invite_key "$action_command"; then
@@ -2445,6 +2698,13 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
     if [[ "$action_preflight_failure_kind" == "missing_vm_command_source_precondition" ]]; then
       action_preflight_next_operator_action="$(build_multi_vm_stability_vm_command_source_operator_command_01)"
       write_multi_vm_stability_vm_command_source_precondition_log_01 \
+        "$action_log" \
+        "$action_command_redacted" \
+        "$action_preflight_notes" \
+        "$action_preflight_next_operator_action"
+    elif [[ "$action_preflight_failure_kind" == "missing_access_recovery_trust_store_precondition" ]]; then
+      action_preflight_next_operator_action="$(build_access_recovery_trust_store_operator_command_01)"
+      write_access_recovery_trust_store_precondition_log_01 \
         "$action_log" \
         "$action_command_redacted" \
         "$action_preflight_notes" \
@@ -2868,6 +3128,9 @@ jq -n \
   --arg runtime_vm_command_source "$runtime_vm_command_source" \
   --arg runtime_vm_command_source_source "$runtime_vm_command_source_source" \
   --argjson runtime_vm_command_source_configured "$runtime_vm_command_source_configured" \
+  --arg runtime_access_recovery_trust_store "$runtime_access_recovery_trust_store" \
+  --arg runtime_access_recovery_trust_store_source "$runtime_access_recovery_trust_store_source" \
+  --argjson runtime_access_recovery_trust_store_configured "$runtime_access_recovery_trust_store_configured" \
   --arg profile_default_gate_subject_redacted "$profile_default_gate_subject_redacted" \
   --argjson profile_default_gate_subject_configured "$profile_default_gate_subject_configured" \
   --argjson allow_profile_default_gate_unreachable "$allow_profile_default_gate_unreachable" \
@@ -2908,6 +3171,9 @@ jq -n \
       vm_command_source: (if $runtime_vm_command_source_configured == 1 then $runtime_vm_command_source else null end),
       vm_command_source_configured: ($runtime_vm_command_source_configured == 1),
       vm_command_source_source: (if $runtime_vm_command_source_source == "" then null else $runtime_vm_command_source_source end),
+      access_recovery_trust_store: (if $runtime_access_recovery_trust_store_configured == 1 then $runtime_access_recovery_trust_store else null end),
+      access_recovery_trust_store_configured: ($runtime_access_recovery_trust_store_configured == 1),
+      access_recovery_trust_store_source: (if $runtime_access_recovery_trust_store_source == "" then null else $runtime_access_recovery_trust_store_source end),
       profile_default_gate_default_timeout_sec: $profile_default_gate_default_timeout_sec,
       profile_default_gate_subject: (if $profile_default_gate_subject_configured == 1 then $profile_default_gate_subject_redacted else null end),
       profile_default_gate_subject_configured: ($profile_default_gate_subject_configured == 1),

@@ -254,8 +254,8 @@ Bridge-invite rules:
 - `access_bridge_service_smoke.sh` records deployed bridge health, access-code-gated path availability, helper/org/registry identity, security headers, and abuse endpoint acceptance into a JSON summary
 - `access_bridge_deployment_evidence.sh` binds smoke output to the staged service config and deploy pack, checks config/deploy file hashes, confirms helper/org/registry identity, and verifies deploy-pack hardening flags plus proxy header overwrite rules
 - `access_bridge_host_install_check.sh` records the staged/installed host file checks for env, wrapper, systemd hardening, config hash, access-code gate, loopback bind, and proxy X-Forwarded-For overwrite behavior
-- `access_bridge_pilot_evidence_bundle.sh` runs the bridge smoke, deployment evidence, and host-install checks into one shareable pilot handoff bundle while keeping plaintext access codes and private-key-looking deploy-pack files out of evidence artifacts
-- `access_bridge_pilot_evidence_bundle_verify.sh` validates the pilot bundle `manifest.sha256`, `<bundle>.tar.gz.sha256` sidecar, tar member safety, and trusted provenance before import or handoff, and can write the roadmap verifier receipt with `--verification-summary-json` bound to the verified smoke/deployment/host evidence hashes
+- `access_bridge_pilot_evidence_bundle.sh` runs the bridge smoke, deployment evidence, and host-install checks into one candidate pilot evidence bundle while keeping plaintext access codes and private-key-looking deploy-pack files out of evidence artifacts
+- `access_bridge_pilot_evidence_bundle_verify.sh` validates the pilot bundle `manifest.sha256`, `<bundle>.tar.gz.sha256` sidecar, tar member safety, and trusted provenance before import or handoff; pilot/operator handoff requires the roadmap verifier receipt from `--verification-summary-json`, bound to the verified bundle smoke/deployment/host evidence hashes
 
 Operator bridge install checklist:
 - generate a service config only from a verified signed bridge invite plus signed helper registry

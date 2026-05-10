@@ -53,7 +53,7 @@ Usage:
     [--provenance-out FILE] \
     [--print-summary-json 0|1]
 
-Runs deployed bridge smoke, deployment evidence, and host-install evidence into one operator handoff bundle.
+Runs deployed bridge smoke, deployment evidence, and host-install evidence into one candidate pilot evidence bundle.
 Non-loopback pilot targets must use HTTPS and a public-routable-looking host unless diagnostic overrides are set.
 When --provenance-sign 1 is set, writes an external provenance sidecar after the tarball and checksum sidecar are finalized.
 USAGE

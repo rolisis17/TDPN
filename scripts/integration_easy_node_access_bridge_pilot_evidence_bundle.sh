@@ -110,6 +110,11 @@ ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_CAPTURE_FILE="$CAPTURE" \
   --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json \
   --bundle-dir .easy-node-logs/access-recovery-demo/pilot-evidence-bundle \
   --bundle-tar .easy-node-logs/access-recovery-demo/pilot-evidence-bundle.tar.gz \
+  --provenance-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence.provenance.json \
+  --trust-store .easy-node-logs/access-recovery-demo/provenance-trust-store.json \
+  --require-trusted-provenance 1 \
+  --verification-summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_verify_summary.json \
+  --print-verification-summary-json 1 \
   --show-details 1
 
 if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "1" ]]; then
@@ -122,6 +127,11 @@ for token in \
   $'\t--summary-json\t.easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json' \
   $'\t--bundle-dir\t.easy-node-logs/access-recovery-demo/pilot-evidence-bundle' \
   $'\t--bundle-tar\t.easy-node-logs/access-recovery-demo/pilot-evidence-bundle.tar.gz' \
+  $'\t--provenance-json\t.easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence.provenance.json' \
+  $'\t--trust-store\t.easy-node-logs/access-recovery-demo/provenance-trust-store.json' \
+  $'\t--require-trusted-provenance\t1' \
+  $'\t--verification-summary-json\t.easy-node-logs/access_bridge_pilot_evidence_bundle_verify_summary.json' \
+  $'\t--print-verification-summary-json\t1' \
   $'\t--show-details\t1'
 do
   if [[ "$line" != *"$token"* ]]; then

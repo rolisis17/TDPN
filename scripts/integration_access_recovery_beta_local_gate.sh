@@ -73,10 +73,15 @@ if ! jq -e '
   and .summary.steps_fail == 0
   and .summary.first_failed_step == null
   and .recommended_next_action.id == "real_helper_bridge_evidence"
-  and (.recommended_next_action.reason | contains("trusted provenance") or contains("provenance"))
+  and (.recommended_next_action.reason | contains("trusted provenance") or contains("provenance") or contains("verifier receipt"))
   and ((.recommended_next_action.command // "") | test("--provenance-sign 1"))
   and ((.recommended_next_action.command // "") | test("--provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE"))
   and ((.recommended_next_action.command // "") | test("--provenance-out"))
+  and ((.recommended_next_action.command // "") | test("access-bridge-pilot-evidence-bundle-verify"))
+  and ((.recommended_next_action.command // "") | test("--trust-store TRUST_STORE"))
+  and ((.recommended_next_action.command // "") | test("--require-trusted-provenance 1"))
+  and ((.recommended_next_action.command // "") | test("--verification-summary-json"))
+  and ((.recommended_next_action.command // "") | test("--print-verification-summary-json 1"))
   and ([.steps[].id] == [
     "demo_contract",
     "examples_contract",
