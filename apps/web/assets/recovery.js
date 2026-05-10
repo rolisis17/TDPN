@@ -18,6 +18,7 @@
     trustCopyBtn: document.getElementById("trust_copy_btn"),
     trustDownloadBtn: document.getElementById("trust_download_btn"),
     trustKeyList: document.getElementById("trust_key_list"),
+    verifyRegistryBtn: document.getElementById("verify_registry_btn"),
     registrySummary: document.getElementById("registry_summary"),
     handoffInput: document.getElementById("handoff_input"),
     exportPackTextBtn: document.getElementById("export_pack_text_btn"),
@@ -44,6 +45,7 @@
   const textEnvelopePrefix = "GPMREC1";
   const textEnvelopeKinds = ["access-pack", "bridge-invite", "trust-store", "trusted-key", "bridge-helper-registry"];
   const maxBridgeInviteLifetimeMS = 14 * 24 * 60 * 60 * 1000;
+  const maxBridgeRegistryArtifactLifetimeMS = 30 * 24 * 60 * 60 * 1000;
 
   function setStatus(state, title, detail) {
     els.statusCard.dataset.state = state;
@@ -225,6 +227,14 @@
     return parseJSONInput(raw, "Helper registry");
   }
 
+  function readRawHelperRegistryForPolicy() {
+    const registry = readHelperRegistryInput();
+    if (isBridgeHelperRegistryArtifact(registry)) {
+      throw new Error("Verify the signed helper registry before verifying this bridge invite");
+    }
+    return registry;
+  }
+
   function writeTrustStore(store) {
     const normalized = normalizeTrustStore(store);
     els.trustInput.value = JSON.stringify(normalized, null, 2);
@@ -245,6 +255,16 @@
       // Helper registry data is not secret; storage can still fail in private windows.
     }
     renderHelperRegistrySummary(normalized);
+  }
+
+  function isBridgeHelperRegistryArtifact(value) {
+    return Boolean(
+      value
+      && typeof value === "object"
+      && Object.prototype.hasOwnProperty.call(value, "registry_id")
+      && Object.prototype.hasOwnProperty.call(value, "registry")
+      && Object.prototype.hasOwnProperty.call(value, "signature"),
+    );
   }
 
   function parseRFC3339(value, label) {
@@ -337,22 +357,25 @@
       throw new Error("Helper registry status must be active, quarantined, or disabled");
     }
     const orgIDs = Array.isArray(helper.org_ids)
-      ? Array.from(new Set(helper.org_ids.map(trimString).filter(Boolean))).sort()
+      ? helper.org_ids.map(trimString).sort()
       : [];
     const normalized = {
       helper_id: trimString(helper.helper_id),
-      status,
-      org_ids: orgIDs,
     };
     if (!normalized.helper_id) {
       throw new Error("Helper registry helper_id is required");
     }
-    if (normalized.org_ids.length === 0) {
-      throw new Error("Helper registry org_ids is required");
-    }
     const displayName = trimString(helper.display_name);
     if (displayName) {
       normalized.display_name = displayName;
+    }
+    normalized.status = status;
+    normalized.org_ids = orgIDs;
+    if (normalized.org_ids.length === 0) {
+      throw new Error("Helper registry org_ids is required");
+    }
+    if (normalized.org_ids.some((orgID) => !orgID)) {
+      throw new Error("Helper registry org_ids cannot contain empty values");
     }
     const contactURL = trimString(helper.contact_url);
     if (contactURL) {
@@ -383,6 +406,80 @@
       normalized.quarantine_reason = quarantineReason;
     }
     return normalized;
+  }
+
+  function normalizeBridgeHelperRegistryArtifact(artifact) {
+    const normalized = {
+      schema_version: artifact && artifact.schema_version,
+      registry_id: trimString(artifact && artifact.registry_id),
+      organization: {
+        org_id: trimString(artifact && artifact.organization && artifact.organization.org_id),
+        name: trimString(artifact && artifact.organization && artifact.organization.name),
+      },
+      issued_at_utc: trimString(artifact && artifact.issued_at_utc),
+      expires_at_utc: trimString(artifact && artifact.expires_at_utc),
+      registry: normalizeHelperRegistry(artifact && artifact.registry),
+    };
+    const homeURL = trimString(artifact && artifact.organization && artifact.organization.home_url);
+    if (homeURL) {
+      normalized.organization.home_url = homeURL;
+    }
+    if (artifact && artifact.signature) {
+      normalized.signature = {
+        alg: trimString(artifact.signature.alg),
+        key_id: trimString(artifact.signature.key_id),
+        sig: trimString(artifact.signature.sig),
+      };
+    }
+    return normalized;
+  }
+
+  function bridgeRegistryArtifactCanonicalPayload(artifact) {
+    const normalized = normalizeBridgeHelperRegistryArtifact(artifact);
+    delete normalized.signature;
+    return new TextEncoder().encode(goCompatibleJSONString(normalized));
+  }
+
+  function validateBridgeRegistryArtifactShape(artifact) {
+    if (!isBridgeHelperRegistryArtifact(artifact)) {
+      throw new Error("Signed helper registry must be a JSON artifact with registry_id, registry, and signature");
+    }
+    if (artifact.schema_version !== 1) {
+      throw new Error(`Unsupported helper registry artifact schema_version ${artifact.schema_version}`);
+    }
+    if (!trimString(artifact.registry_id)) {
+      throw new Error("Signed helper registry id is required");
+    }
+    if (!artifact.signature || typeof artifact.signature !== "object") {
+      throw new Error("Signed helper registry signature is required");
+    }
+    if (trimString(artifact.signature.alg) !== "ed25519") {
+      throw new Error("Unsupported helper registry signature algorithm");
+    }
+    if (!trimString(artifact.signature.key_id)) {
+      throw new Error("Signed helper registry key id is required");
+    }
+    if (!trimString(artifact.signature.sig)) {
+      throw new Error("Signed helper registry signature value is required");
+    }
+    if (!trimString(artifact.organization && artifact.organization.org_id)) {
+      throw new Error("Signed helper registry organization id is required");
+    }
+    if (!trimString(artifact.organization && artifact.organization.name)) {
+      throw new Error("Signed helper registry organization name is required");
+    }
+    const issuedAt = parseRFC3339(artifact.issued_at_utc, "registry issued_at_utc");
+    const expiresAt = parseRFC3339(artifact.expires_at_utc, "registry expires_at_utc");
+    if (expiresAt <= issuedAt) {
+      throw new Error("Signed helper registry expiry must be after issue time");
+    }
+    if (expiresAt.getTime() - issuedAt.getTime() > maxBridgeRegistryArtifactLifetimeMS) {
+      throw new Error("Signed helper registry lifetime must be 30 days or less");
+    }
+    if (expiresAt <= new Date()) {
+      throw new Error("Signed helper registry is expired");
+    }
+    normalizeHelperRegistry(artifact.registry);
   }
 
   function normalizePack(pack) {
@@ -682,11 +779,14 @@
     };
   }
 
-  async function resolveTrustedKey(artifact, trustStore) {
+  async function resolveTrustedKeyForArtifact(trustStore, artifactOrgID, artifactKeyID, label) {
     trustStore = normalizeTrustStore(trustStore);
-    const artifactKind = signedArtifactKind(artifact);
-    const artifactKeyID = trimString(artifact.signature && artifact.signature.key_id);
-    const artifactOrgID = trimString(artifact.organization && artifact.organization.org_id);
+    artifactOrgID = trimString(artifactOrgID);
+    artifactKeyID = trimString(artifactKeyID);
+    label = trimString(label) || "Artifact";
+    if (!artifactKeyID) {
+      throw new Error(`${label} signature key id is required`);
+    }
     let sawKey = false;
     let sawWrongOrg = false;
     let sawDisabled = false;
@@ -744,14 +844,34 @@
     if (sawKey) {
       throw new Error("Trusted key is not usable");
     }
-    throw new Error(`${artifactKind === "bridge-invite" ? "Bridge invite" : "Pack"} signer is not in the trust store`);
+    throw new Error(`${label} signer is not in the trust store`);
   }
 
-  async function verifySignature(artifact, publicKeyBytes) {
+  async function resolveTrustedKey(artifact, trustStore) {
+    const artifactKind = signedArtifactKind(artifact);
+    const label = artifactKind === "bridge-invite" ? "Bridge invite" : "Pack";
+    return resolveTrustedKeyForArtifact(
+      trustStore,
+      artifact.organization && artifact.organization.org_id,
+      artifact.signature && artifact.signature.key_id,
+      label,
+    );
+  }
+
+  async function resolveTrustedRegistryKey(artifact, trustStore) {
+    return resolveTrustedKeyForArtifact(
+      trustStore,
+      artifact.organization && artifact.organization.org_id,
+      artifact.signature && artifact.signature.key_id,
+      "Signed helper registry",
+    );
+  }
+
+  async function verifySignaturePayload(signature, publicKeyBytes, payloadBytes, label) {
     if (!crypto || !crypto.subtle) {
       throw new Error("Web Crypto is unavailable in this browser context");
     }
-    const signatureBytes = base64URLToBytes(artifact.signature.sig, "signature");
+    const signatureBytes = base64URLToBytes(signature && signature.sig, "signature");
     if (signatureBytes.length !== 64) {
       throw new Error("Signature has invalid length");
     }
@@ -771,11 +891,25 @@
       { name: "Ed25519" },
       publicKey,
       signatureBytes,
-      canonicalPayload(artifact),
+      payloadBytes,
     );
     if (!ok) {
-      throw new Error(`${signedArtifactKind(artifact) === "bridge-invite" ? "Bridge invite" : "Pack"} signature verification failed`);
+      throw new Error(`${label} signature verification failed`);
     }
+  }
+
+  async function verifySignature(artifact, publicKeyBytes) {
+    const label = signedArtifactKind(artifact) === "bridge-invite" ? "Bridge invite" : "Pack";
+    await verifySignaturePayload(artifact.signature, publicKeyBytes, canonicalPayload(artifact), label);
+  }
+
+  async function verifyBridgeRegistryArtifactSignature(artifact, publicKeyBytes) {
+    await verifySignaturePayload(
+      artifact.signature,
+      publicKeyBytes,
+      bridgeRegistryArtifactCanonicalPayload(artifact),
+      "Signed helper registry",
+    );
   }
 
   async function buildTrustedKeyEntry(existingStore) {
@@ -880,12 +1014,16 @@
     clearNode(els.registrySummary);
     let normalized;
     try {
-      normalized = registry ? normalizeHelperRegistry(registry) : readHelperRegistryInput();
+      normalized = registry || readHelperRegistryInput();
       if (!normalized) {
         const empty = document.createElement("p");
         empty.className = "recover-empty";
         empty.textContent = "No helper registry loaded.";
         els.registrySummary.appendChild(empty);
+        return;
+      }
+      if (isBridgeHelperRegistryArtifact(normalized)) {
+        renderSignedHelperRegistryPending(normalized);
         return;
       }
       normalized = normalizeHelperRegistry(normalized);
@@ -945,6 +1083,37 @@
       overflow.textContent = `${normalized.helpers.length - 6} more helper entries are loaded.`;
       els.registrySummary.appendChild(overflow);
     }
+  }
+
+  function renderSignedHelperRegistryPending(artifact) {
+    let normalizedArtifact;
+    try {
+      normalizedArtifact = normalizeBridgeHelperRegistryArtifact(artifact);
+    } catch (err) {
+      const message = document.createElement("p");
+      message.className = "recover-empty";
+      message.textContent = "Signed helper registry JSON is not valid yet.";
+      els.registrySummary.appendChild(message);
+      return;
+    }
+    const pending = document.createElement("p");
+    pending.className = "recover-empty";
+    pending.textContent = `${normalizedArtifact.organization.name || normalizedArtifact.organization.org_id} signed registry ${normalizedArtifact.registry_id}. Verify it before using bridge paths.`;
+    els.registrySummary.appendChild(pending);
+    const counts = normalizedArtifact.registry.helpers.reduce((acc, helper) => {
+      acc[helper.status] = (acc[helper.status] || 0) + 1;
+      return acc;
+    }, { active: 0, quarantined: 0, disabled: 0 });
+    const countRow = document.createElement("div");
+    countRow.className = "registry-summary__counts";
+    for (const status of ["active", "quarantined", "disabled"]) {
+      const badge = document.createElement("span");
+      badge.className = "registry-summary__count";
+      badge.dataset.status = status;
+      badge.textContent = `${formatRegistryStatus(status)} ${counts[status] || 0}`;
+      countRow.appendChild(badge);
+    }
+    els.registrySummary.appendChild(countRow);
   }
 
   function formatRegistryStatus(status) {
@@ -1204,7 +1373,7 @@
     await verifySignature(artifact, trusted.publicKeyBytes);
     const kind = signedArtifactKind(artifact);
     const normalized = normalizeSignedArtifact(artifact);
-    const helperPolicy = kind === "bridge-invite" ? evaluateHelperRegistryPolicy(normalized, readHelperRegistryInput()) : null;
+    const helperPolicy = kind === "bridge-invite" ? evaluateHelperRegistryPolicy(normalized, readRawHelperRegistryForPolicy()) : null;
     const helperPolicyDetail = helperPolicy && helperPolicy.status === "pass"
       ? " and an active helper registry entry"
       : "";
@@ -1218,6 +1387,23 @@
     );
     renderFacts(normalized, trusted.entry, helperPolicy);
     renderPaths(normalized, helperPolicy);
+  }
+
+  async function verifySignedHelperRegistryInput() {
+    const artifact = parseJSONInput(els.registryInput.value, "Signed helper registry");
+    if (!isBridgeHelperRegistryArtifact(artifact)) {
+      throw new Error("Paste or import a signed helper registry artifact first");
+    }
+    validateBridgeRegistryArtifactShape(artifact);
+    const trusted = await resolveTrustedRegistryKey(artifact, readTrustStoreInput());
+    await verifyBridgeRegistryArtifactSignature(artifact, trusted.publicKeyBytes);
+    const normalized = normalizeBridgeHelperRegistryArtifact(artifact);
+    writeHelperRegistry(normalized.registry);
+    setStatus(
+      "good",
+      "Trusted helper registry",
+      `${normalized.organization.name} signed helper registry ${normalized.registry_id} with trusted key ${trusted.entry.key_id}.`,
+    );
   }
 
   async function readFileInto(fileInput, target) {
@@ -1443,7 +1629,18 @@
   els.registryFile.addEventListener("change", async () => {
     await readFileInto(els.registryFile, els.registryInput);
     try {
-      writeHelperRegistry(readHelperRegistryInput());
+      const registry = readHelperRegistryInput();
+      if (isBridgeHelperRegistryArtifact(registry)) {
+        try {
+          localStorage.removeItem(helperRegistryStorageKey);
+        } catch (err) {
+          // Ignore local storage availability issues.
+        }
+        renderHelperRegistrySummary(registry);
+        setStatus("idle", "Signed helper registry imported", "Verify it against the trust store before using bridge paths.");
+        return;
+      }
+      writeHelperRegistry(registry);
       setStatus("idle", "Helper registry imported", "Bridge invite verification will enforce helper status.");
     } catch (err) {
       setStatus("bad", "Registry import failed", err.message || String(err));
@@ -1458,6 +1655,11 @@
     try {
       const registry = readHelperRegistryInput();
       if (registry) {
+        if (isBridgeHelperRegistryArtifact(registry)) {
+          localStorage.removeItem(helperRegistryStorageKey);
+          renderHelperRegistrySummary(registry);
+          return;
+        }
         const normalized = normalizeHelperRegistry(registry);
         localStorage.setItem(helperRegistryStorageKey, JSON.stringify(normalized, null, 2));
         renderHelperRegistrySummary(normalized);
@@ -1467,6 +1669,18 @@
       }
     } catch (err) {
       renderHelperRegistrySummary({});
+    }
+  });
+
+  els.verifyRegistryBtn.addEventListener("click", async () => {
+    els.verifyRegistryBtn.disabled = true;
+    try {
+      setStatus("idle", "Verifying helper registry", "Checking registry signer, expiry, trusted key, and signature.");
+      await verifySignedHelperRegistryInput();
+    } catch (err) {
+      setStatus("bad", "Registry verification failed", err.message || String(err));
+    } finally {
+      els.verifyRegistryBtn.disabled = false;
     }
   });
 

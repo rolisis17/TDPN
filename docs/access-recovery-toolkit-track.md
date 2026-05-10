@@ -164,6 +164,7 @@ Demo bundle flow:
   - QR PNGs for the pack, bridge invite, and helper registry
   - `demo-manifest.json` listing every generated file
 - Open `apps/web/recovery.html`, import `recovery-trust.json`, then import either `access-pack.signed.json` or `bridge-invite.signed.json`.
+- For bridge invites, import `bridge-helper-registry.signed.json` into the Helper Registry panel and click `Verify Signed` to verify/extract the raw helper registry before checking the invite.
 - Alternatively, paste or scan the generated `GPMREC1` text/QR handoffs into the Text Handoff panel.
 
 Local trust-store flow:
@@ -223,6 +224,7 @@ First browser surface:
 - `apps/web/recovery.html`
 - runs local pack, bridge-invite, and trust-store parsing in the browser
 - imports an optional helper registry and enforces active/quarantined/disabled helper status before showing bridge paths
+- imports a signed helper registry artifact, verifies it against the local trust store, and extracts the raw registry for bridge-invite policy checks
 - lets a tester add/remove trusted organization public keys without hand-editing JSON
 - copies or downloads the current trust store for handoff to another device
 - exports/imports `GPMREC1` text handoffs for signed packs, bridge invites, trust stores, helper registries, and single trusted keys
@@ -251,6 +253,7 @@ Do first:
 - local trust-store file
 - browser verifier/import screen
 - UI trust-key add/remove flow
+- browser signed helper registry verify/extract flow
 - text handoff export/import for packs, bridge invites, trust stores, and trusted keys
 - QR PNG export in the CLI
 - QR rendering/download in the browser
