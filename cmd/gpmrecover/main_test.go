@@ -258,6 +258,29 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 		bytes.Contains(nginxBody, []byte("$proxy_add_x_forwarded_for")) {
 		t.Fatalf("unexpected bridge deploy nginx example:\n%s", string(nginxBody))
 	}
+	if err := runBridgeServiceDeployPack([]string{
+		"--out-dir", filepath.Join(dir, "bridge-deploy-redirect"),
+		"--config-sha256", serviceConfigHash,
+		"--access-code-sha256", codeHashOut.SHA256,
+		"--redirect",
+	}); err == nil || !strings.Contains(err.Error(), "redirect mode") {
+		t.Fatalf("expected redirect deploy pack to fail closed, got %v", err)
+	}
+	if err := runBridgeServiceDeployPack([]string{
+		"--out-dir", filepath.Join(dir, "bridge-deploy-unpinned"),
+		"--access-code-sha256", codeHashOut.SHA256,
+		"--allow-unpinned-config",
+	}); err == nil || !strings.Contains(err.Error(), "allow-unpinned-config") {
+		t.Fatalf("expected unpinned deploy pack to fail closed, got %v", err)
+	}
+	if err := runBridgeServiceDeployPack([]string{
+		"--out-dir", filepath.Join(dir, "bridge-deploy-unsafe-unauth"),
+		"--config-sha256", serviceConfigHash,
+		"--allow-unauthenticated-local",
+		"--addr", "0.0.0.0:18980",
+	}); err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("expected unsafe unauthenticated deploy pack to fail closed, got %v", err)
+	}
 	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--require-helper-registry"}); err == nil {
 		t.Fatal("expected bridge-policy to fail when helper registry is required but missing")
 	}

@@ -196,6 +196,7 @@ Local trust-store flow:
 - `bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/bridge-service-smoke.json --config-json .easy-node-logs/bridge-service-config.json --deploy-pack-dir .easy-node-logs/bridge-deploy --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/bridge-deployment-evidence.json`
 - `bash ./scripts/access_bridge_host_install_check.sh --deploy-pack-dir .easy-node-logs/bridge-deploy --config-json .easy-node-logs/bridge-service-config.json --summary-json .easy-node-logs/bridge-host-install-check.json`
 - `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --base-url https://bridge.example --path-id helper-web --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --config-json .easy-node-logs/bridge-service-config.json --deploy-pack-dir .easy-node-logs/bridge-deploy --summary-json .easy-node-logs/access-bridge-pilot-evidence-summary.json`
+- `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify --summary-json .easy-node-logs/access-bridge-pilot-evidence-summary.json`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --timeout-sec 8`
 - `go run ./cmd/gpmrecover trust-remove --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID`
 
@@ -249,7 +250,8 @@ Bridge-invite rules:
 - `access_bridge_service_smoke.sh` records deployed bridge health, access-code-gated path availability, helper/org/registry identity, security headers, and abuse endpoint acceptance into a JSON summary
 - `access_bridge_deployment_evidence.sh` binds smoke output to the staged service config and deploy pack, checks config/deploy file hashes, confirms helper/org/registry identity, and verifies deploy-pack hardening flags plus proxy header overwrite rules
 - `access_bridge_host_install_check.sh` records the staged/installed host file checks for env, wrapper, systemd hardening, config hash, access-code gate, loopback bind, and proxy X-Forwarded-For overwrite behavior
-- `access_bridge_pilot_evidence_bundle.sh` runs the bridge smoke, deployment evidence, and host-install checks into one shareable pilot handoff bundle while keeping plaintext access codes out of evidence artifacts
+- `access_bridge_pilot_evidence_bundle.sh` runs the bridge smoke, deployment evidence, and host-install checks into one shareable pilot handoff bundle while keeping plaintext access codes and private-key-looking deploy-pack files out of evidence artifacts
+- `access_bridge_pilot_evidence_bundle_verify.sh` validates the pilot bundle `manifest.sha256`, `<bundle>.tar.gz.sha256` sidecar, and tar member safety before import or handoff
 
 Operator bridge install checklist:
 - generate a service config only from a verified signed bridge invite plus signed helper registry

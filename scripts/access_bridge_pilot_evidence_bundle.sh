@@ -97,6 +97,71 @@ json_string_or_empty() {
   jq -r "$filter // \"\"" "$file" 2>/dev/null || true
 }
 
+sha256_tool=""
+detect_sha256_tool() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256_tool="sha256sum"
+    return
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    sha256_tool="shasum"
+    return
+  fi
+  echo "access bridge pilot evidence bundle failed: missing required command: sha256sum or shasum" >&2
+  exit 2
+}
+
+sha256_value() {
+  local file="$1"
+  local line
+  if [[ "$sha256_tool" == "sha256sum" ]]; then
+    line="$(sha256sum "$file")"
+  else
+    line="$(shasum -a 256 "$file")"
+  fi
+  printf '%s' "${line%% *}"
+}
+
+write_sha256_line() {
+  local file="$1"
+  local label="$2"
+  printf '%s  %s\n' "$(sha256_value "$file")" "$label"
+}
+
+deploy_pack_rel_path_is_secret() {
+  local rel="$1"
+  local lower
+  lower="$(printf '%s' "$rel" | tr '[:upper:]' '[:lower:]')"
+  case "$lower" in
+    bridge-code.txt|*/bridge-code.txt|recovery.key|*/recovery.key|*.key|*private-key*|*access-code*|*secret*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+copy_public_deploy_pack() {
+  local src="$1"
+  local dst="$2"
+  local skipped_file="$3"
+  local file rel target
+
+  rm -rf "$dst"
+  mkdir -p "$dst"
+  : >"$skipped_file"
+  while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    rel="${file#$src/}"
+    if deploy_pack_rel_path_is_secret "$rel"; then
+      printf '%s\n' "$rel" >>"$skipped_file"
+      continue
+    fi
+    target="$dst/$rel"
+    mkdir -p "$(dirname "$target")"
+    cp -p "$file" "$target"
+  done < <(find "$src" -type f -print | LC_ALL=C sort)
+}
+
 append_step() {
   local id="$1"
   local status="$2"
@@ -212,9 +277,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for cmd in bash cp date jq mktemp; do
+for cmd in bash basename cp date dirname find grep jq mktemp rm sed sort tar tr; do
   need_cmd "$cmd"
 done
+detect_sha256_tool
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 if [[ ! "$max_smoke_age_sec" =~ ^[0-9]+$ ]]; then
   echo "access bridge pilot evidence bundle failed: --max-smoke-age-sec must be a non-negative integer" >&2
@@ -311,10 +377,9 @@ fi
 
 config_copy="$bundle_dir/bridge-service-config.json"
 deploy_pack_copy="$bundle_dir/bridge-deploy-pack"
+deploy_pack_skipped_secrets="$bundle_dir/deploy-pack-skipped-secrets.txt"
 cp "$config_json" "$config_copy"
-rm -rf "$deploy_pack_copy"
-mkdir -p "$deploy_pack_copy"
-cp -R "$deploy_pack_dir"/. "$deploy_pack_copy"/
+copy_public_deploy_pack "$deploy_pack_dir" "$deploy_pack_copy" "$deploy_pack_skipped_secrets"
 
 smoke_summary="$bundle_dir/access_bridge_service_smoke_summary.json"
 smoke_log="$bundle_dir/access_bridge_service_smoke.log"
@@ -398,6 +463,11 @@ if [[ "$fail_count" != "0" ]]; then
   esac
 fi
 
+bundle_tar="${bundle_dir}.tar.gz"
+bundle_tar_sha256_file="${bundle_tar}.sha256"
+manifest_sha256="$bundle_dir/manifest.sha256"
+bundled_summary_json="$bundle_dir/access_bridge_pilot_evidence_bundle_summary.json"
+
 cat >"$report_md" <<REPORT
 # Access Bridge Pilot Evidence Bundle
 
@@ -416,7 +486,11 @@ jq -n \
   --arg generated_at_utc "$(timestamp_utc)" \
   --arg status "$status" \
   --arg bundle_dir "$bundle_dir" \
+  --arg bundle_tar "$bundle_tar" \
+  --arg bundle_tar_sha256_file "$bundle_tar_sha256_file" \
+  --arg manifest_sha256 "$manifest_sha256" \
   --arg summary_json "$summary_json" \
+  --arg bundled_summary_json "$bundled_summary_json" \
   --arg report_md "$report_md" \
   --arg base_url "$base_url" \
   --arg path_id "$path_id" \
@@ -425,6 +499,7 @@ jq -n \
   --arg deploy_pack_dir "$deploy_pack_dir" \
   --arg config_copy "$config_copy" \
   --arg deploy_pack_copy "$deploy_pack_copy" \
+  --arg deploy_pack_skipped_secrets "$deploy_pack_skipped_secrets" \
   --arg code_source "$(if [[ -n "$code_file" ]]; then printf '%s' "code_file"; else printf '%s' "inline_code_transient_file"; fi)" \
   --arg expect_helper_id "$expect_helper_id" \
   --arg expect_org_id "$expect_org_id" \
@@ -470,7 +545,11 @@ jq -n \
     steps: $steps,
     artifacts: {
       bundle_dir: $bundle_dir,
+      bundle_tar: $bundle_tar,
+      bundle_tar_sha256_file: $bundle_tar_sha256_file,
+      manifest_sha256: $manifest_sha256,
       summary_json: $summary_json,
+      bundled_summary_json: $bundled_summary_json,
       report_md: $report_md,
       smoke_summary_json: $smoke_summary,
       smoke_log: $smoke_log,
@@ -479,16 +558,42 @@ jq -n \
       host_install_check_summary_json: $host_summary,
       host_install_check_log: $host_log,
       config_copy: $config_copy,
-      deploy_pack_copy: $deploy_pack_copy
+      deploy_pack_copy: $deploy_pack_copy,
+      deploy_pack_skipped_secrets: $deploy_pack_skipped_secrets
     },
     recommended_next_action: {
       id: $recommended_action_id,
       command: $recommended_action
     }
   }' >"$summary_json"
+if [[ "$summary_json" != "$bundled_summary_json" ]]; then
+  cp "$summary_json" "$bundled_summary_json"
+fi
+
+: >"$manifest_sha256"
+manifest_entries=0
+while IFS= read -r rel_file; do
+  [[ -n "$rel_file" ]] || continue
+  write_sha256_line "$bundle_dir/$rel_file" "$rel_file" >>"$manifest_sha256"
+  manifest_entries=$((manifest_entries + 1))
+done < <(
+  cd "$bundle_dir"
+  find . -type f -print \
+    | sed 's|^\./||' \
+    | grep -v '^manifest\.sha256$' \
+    | LC_ALL=C sort
+)
+
+tar -czf "$bundle_tar" -C "$(dirname "$bundle_dir")" "$(basename "$bundle_dir")"
+write_sha256_line "$bundle_tar" "$(basename "$bundle_tar")" >"$bundle_tar_sha256_file"
+bundle_tar_sha256="$(sha256_value "$bundle_tar")"
 
 echo "access-bridge-pilot-evidence-bundle: status=$status"
 echo "bundle_dir: $bundle_dir"
+echo "manifest_sha256: $manifest_sha256 entries=$manifest_entries"
+echo "bundle_tar: $bundle_tar"
+echo "bundle_tar_sha256_file: $bundle_tar_sha256_file"
+echo "bundle_tar_sha256: $bundle_tar_sha256"
 echo "summary_json: $summary_json"
 echo "report_md: $report_md"
 if [[ "$print_summary_json" == "1" ]]; then

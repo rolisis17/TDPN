@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash curl go jq mktemp rg sha256sum tr; do
+for cmd in bash curl go jq mktemp rg sha256sum tar tr; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "access bridge pilot evidence bundle integration failed: missing required command: $cmd"
     exit 2
@@ -68,6 +68,8 @@ go run ./cmd/gpmrecover bridge-service-deploy-pack \
   --config /etc/gpm/access-bridge-pilot/bridge-service-config.json \
   --config-sha256 "$config_sha256" \
   --access-code-sha256 "$code_hash" >/dev/null
+printf '%s\n' 'should-not-copy-private-key' >"$DEPLOY_PACK/recovery.key"
+printf '%s\n' "$code_value" >"$DEPLOY_PACK/bridge-code.txt"
 
 go run ./cmd/gpmrecover bridge-service-serve \
   --config "$SERVICE_CONFIG" \
@@ -134,6 +136,11 @@ if ! jq -e \
     and (.artifacts.smoke_summary_json | length > 0)
     and (.artifacts.deployment_evidence_summary_json | length > 0)
     and (.artifacts.host_install_check_summary_json | length > 0)
+    and (.artifacts.manifest_sha256 | length > 0)
+    and (.artifacts.bundle_tar | length > 0)
+    and (.artifacts.bundle_tar_sha256_file | length > 0)
+    and (.artifacts.bundled_summary_json | length > 0)
+    and (.artifacts.deploy_pack_skipped_secrets | length > 0)
     and .recommended_next_action.id == "record_access_bridge_pilot_evidence_bundle"
   ' "$SUMMARY_JSON" >/dev/null; then
   echo "access bridge pilot evidence bundle integration failed: pass summary contract mismatch"
@@ -145,9 +152,20 @@ if [[ ! -f "$EVIDENCE_BUNDLE/access_bridge_service_smoke_summary.json" ||
   ! -f "$EVIDENCE_BUNDLE/access_bridge_deployment_evidence_summary.json" ||
   ! -f "$EVIDENCE_BUNDLE/access_bridge_host_install_check_summary.json" ||
   ! -f "$EVIDENCE_BUNDLE/bridge-service-config.json" ||
-  ! -f "$EVIDENCE_BUNDLE/bridge-deploy-pack/gpm-access-bridge-pilot.env" ]]; then
+  ! -f "$EVIDENCE_BUNDLE/bridge-deploy-pack/gpm-access-bridge-pilot.env" ||
+  ! -f "$EVIDENCE_BUNDLE/manifest.sha256" ||
+  ! -f "${EVIDENCE_BUNDLE}.tar.gz" ||
+  ! -f "${EVIDENCE_BUNDLE}.tar.gz.sha256" ]]; then
   echo "access bridge pilot evidence bundle integration failed: expected bundle artifacts missing"
   find "$EVIDENCE_BUNDLE" -maxdepth 3 -type f -print | sort
+  exit 1
+fi
+
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --summary-json "$SUMMARY_JSON" --show-details 1 >"$TMP_DIR/pilot-bundle-verify.log"
+
+if ! tar -tzf "${EVIDENCE_BUNDLE}.tar.gz" | grep -Fq "$(basename "$EVIDENCE_BUNDLE")/manifest.sha256"; then
+  echo "access bridge pilot evidence bundle integration failed: tar missing manifest"
+  tar -tzf "${EVIDENCE_BUNDLE}.tar.gz"
   exit 1
 fi
 
@@ -161,6 +179,17 @@ if find "$EVIDENCE_BUNDLE" -type f -name 'bridge-code.txt' -print -quit | grep -
 fi
 if find "$EVIDENCE_BUNDLE" -type f -name 'recovery.key' -print -quit | grep -q .; then
   echo "access bridge pilot evidence bundle integration failed: recovery private key copied into evidence bundle"
+  exit 1
+fi
+if tar -tzf "${EVIDENCE_BUNDLE}.tar.gz" | grep -Eq '(^|/)(bridge-code\.txt|recovery\.key)$'; then
+  echo "access bridge pilot evidence bundle integration failed: secret file copied into evidence tar"
+  tar -tzf "${EVIDENCE_BUNDLE}.tar.gz"
+  exit 1
+fi
+if ! grep -Fxq 'recovery.key' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt" ||
+  ! grep -Fxq 'bridge-code.txt' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt"; then
+  echo "access bridge pilot evidence bundle integration failed: skipped secret list mismatch"
+  cat "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt"
   exit 1
 fi
 

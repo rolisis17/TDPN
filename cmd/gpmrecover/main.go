@@ -1116,6 +1116,9 @@ func runBridgeServiceServe(args []string) error {
 		Addr:              strings.TrimSpace(*addr),
 		Handler:           service.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	return server.ListenAndServe()
 }
@@ -1292,7 +1295,7 @@ func runBridgeServiceDeployPack(args []string) error {
 	maxSources := fs.Int("max-sources", 1024, "maximum tracked sources for rate limiting")
 	abuseLog := fs.String("abuse-log", "/var/log/gpm/access-bridge-abuse.jsonl", "JSONL abuse report log path")
 	accessCodeSHA256 := fs.String("access-code-sha256", "", "optional sha256 hex digest of an out-of-band bridge access code")
-	allowUnpinnedConfig := fs.Bool("allow-unpinned-config", false, "allow deploy pack without a config hash only for diagnostics")
+	allowUnpinnedConfig := fs.Bool("allow-unpinned-config", false, "reserved diagnostic flag; deploy packs require config hashes")
 	allowUnauthenticatedLocal := fs.Bool("allow-unauthenticated-local", false, "allow deploy pack without an access-code hash only for local diagnostics")
 	allowQueryAccessCode := fs.Bool("allow-query-access-code", false, "allow access code in ?code= query parameter; header is preferred")
 	trustProxyHeaders := fs.Bool("trust-proxy-headers", true, "trust X-Forwarded-For only from loopback reverse proxies")
@@ -1305,11 +1308,20 @@ func runBridgeServiceDeployPack(args []string) error {
 	if strings.TrimSpace(*outDir) == "" {
 		return errors.New("bridge-service-deploy-pack requires --out-dir")
 	}
+	if *redirect {
+		return errors.New("bridge-service-deploy-pack redirect mode is not supported by the current smoke/evidence path")
+	}
+	if *allowUnauthenticatedLocal && !isLoopbackListenAddr(*addr) {
+		return errors.New("--allow-unauthenticated-local requires a loopback --addr")
+	}
 	if strings.TrimSpace(*accessCodeSHA256) == "" && !*allowUnauthenticatedLocal {
 		return errors.New("bridge-service-deploy-pack requires --access-code-sha256 unless --allow-unauthenticated-local is set")
 	}
-	if strings.TrimSpace(*configSHA256) == "" && !*allowUnpinnedConfig {
-		return errors.New("bridge-service-deploy-pack requires --config-sha256 unless --allow-unpinned-config is set")
+	if *allowUnpinnedConfig {
+		return errors.New("--allow-unpinned-config is not supported for deploy packs; pass --config-sha256")
+	}
+	if strings.TrimSpace(*configSHA256) == "" {
+		return errors.New("bridge-service-deploy-pack requires --config-sha256")
 	}
 	if *rps < 0 || *maxSources < 0 {
 		return errors.New("rps and max-sources must be non-negative")

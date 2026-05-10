@@ -135,9 +135,12 @@ bash ./scripts/access_bridge_host_install_check.sh \
   --expect-helper-id helper-demo \
   --expect-org-id freenews-demo \
   --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json
+
+./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify \
+  --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json
 ```
 
-Keep the smoke JSON, deployment-evidence JSON, host-install-check JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair.
+Keep the smoke JSON, deployment-evidence JSON, host-install-check JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, `manifest.sha256`, `<bundle>.tar.gz`, `<bundle>.tar.gz.sha256`, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair; the bundle skips access-code/private-key-looking deploy-pack files and the verifier rejects manifest tamper, tar checksum mismatch, unsafe tar paths, and tar links.
 
 7. Fail closed on rotation or quarantine:
 

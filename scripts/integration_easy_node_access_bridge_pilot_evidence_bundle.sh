@@ -16,6 +16,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 CAPTURE="$TMP_DIR/capture.tsv"
 FAKE_SCRIPT="$TMP_DIR/fake_access_bridge_pilot_evidence_bundle.sh"
+FAKE_VERIFY_SCRIPT="$TMP_DIR/fake_access_bridge_pilot_evidence_bundle_verify.sh"
 HELP_OUT="$TMP_DIR/help.txt"
 
 cat >"$FAKE_SCRIPT" <<'EOF_FAKE'
@@ -33,14 +34,38 @@ exit "${FAKE_ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_RC:-0}"
 EOF_FAKE
 chmod +x "$FAKE_SCRIPT"
 
+cat >"$FAKE_VERIFY_SCRIPT" <<'EOF_FAKE_VERIFY'
+#!/usr/bin/env bash
+set -euo pipefail
+capture_file="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_CAPTURE_FILE:?}"
+{
+  printf 'access_bridge_pilot_evidence_bundle_verify'
+  for arg in "$@"; do
+    printf '\t%s' "$arg"
+  done
+  printf '\n'
+} >>"$capture_file"
+exit "${FAKE_ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_RC:-0}"
+EOF_FAKE_VERIFY
+chmod +x "$FAKE_VERIFY_SCRIPT"
+
 ./scripts/easy_node.sh help >"$HELP_OUT"
 if ! grep -Fq -- './scripts/easy_node.sh access-bridge-pilot-evidence-bundle' "$HELP_OUT"; then
   echo "easy_node help missing access-bridge-pilot-evidence-bundle command"
   cat "$HELP_OUT"
   exit 1
 fi
+if ! grep -Fq -- './scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify' "$HELP_OUT"; then
+  echo "easy_node help missing access-bridge-pilot-evidence-bundle-verify command"
+  cat "$HELP_OUT"
+  exit 1
+fi
 if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'access-bridge-pilot-evidence-bundle wraps deployed bridge smoke'; then
   echo "easy_node expert help missing access bridge pilot evidence bundle note"
+  exit 1
+fi
+if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'access-bridge-pilot-evidence-bundle-verify validates Access Bridge pilot bundle integrity artifacts'; then
+  echo "easy_node expert help missing access bridge pilot evidence bundle verifier note"
   exit 1
 fi
 
@@ -78,6 +103,34 @@ do
   fi
 done
 
+: >"$CAPTURE"
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY_SCRIPT" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify \
+  --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json \
+  --bundle-dir .easy-node-logs/access-recovery-demo/pilot-evidence-bundle \
+  --bundle-tar .easy-node-logs/access-recovery-demo/pilot-evidence-bundle.tar.gz \
+  --show-details 1
+
+if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "1" ]]; then
+  echo "expected exactly one forwarded verifier invocation"
+  cat "$CAPTURE"
+  exit 1
+fi
+line="$(sed -n '1p' "$CAPTURE")"
+for token in \
+  $'\t--summary-json\t.easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json' \
+  $'\t--bundle-dir\t.easy-node-logs/access-recovery-demo/pilot-evidence-bundle' \
+  $'\t--bundle-tar\t.easy-node-logs/access-recovery-demo/pilot-evidence-bundle.tar.gz' \
+  $'\t--show-details\t1'
+do
+  if [[ "$line" != *"$token"* ]]; then
+    echo "missing forwarded verifier token: $token"
+    echo "$line"
+    exit 1
+  fi
+done
+
 set +e
 ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_SCRIPT" \
 ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_CAPTURE_FILE="$CAPTURE" \
@@ -87,6 +140,18 @@ rc=$?
 set -e
 if [[ "$rc" -ne 7 ]]; then
   echo "expected fake wrapper exit code 7, got $rc"
+  exit 1
+fi
+
+set +e
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY_SCRIPT" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_CAPTURE_FILE="$CAPTURE" \
+FAKE_ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_RC=8 \
+./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify --sample boom >/dev/null 2>&1
+rc=$?
+set -e
+if [[ "$rc" -ne 8 ]]; then
+  echo "expected fake verifier exit code 8, got $rc"
   exit 1
 fi
 

@@ -828,6 +828,122 @@ BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_INVALID_SUMMARY_JSON="$TMP_DIR/b
 printf '{"version":1,' >"$BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_INVALID_SUMMARY_JSON"
 PHASE7_MAINNET_CUTOVER_INVALID_SUMMARY_REPORT_JSON="$TMP_DIR/phase7_mainnet_cutover_invalid_summary_report.json"
 printf '{"version":1,' >"$PHASE7_MAINNET_CUTOVER_INVALID_SUMMARY_REPORT_JSON"
+ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_summary.json"
+ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_summary.json"
+ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_check_summary.json"
+ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+cat >"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY
+{
+  "version": 1,
+  "schema": {
+    "id": "access_bridge_service_smoke_summary",
+    "major": 1,
+    "minor": 2
+  },
+  "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
+  "status": "pass",
+  "notes": "bridge smoke passed",
+  "base_url": "https://bridge.example",
+  "path_id": "helper-web",
+  "health": {
+    "http_status": "200",
+    "status": "ok",
+    "helper_id": "helper-demo",
+    "organization_id": "freenews-demo",
+    "registry_id": "registry-demo",
+    "config_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "auth": {
+    "required": true,
+    "missing_code_http_status": "401",
+    "wrong_code_http_status": "403",
+    "valid_code_http_status": "302"
+  },
+  "bridge": {
+    "http_status": "302",
+    "status": "redirect",
+    "security_headers_ok": true
+  },
+  "abuse": {
+    "http_status": "202"
+  }
+}
+EOF_ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY
+cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY
+{
+  "version": 1,
+  "schema": {
+    "id": "access_bridge_deployment_evidence_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
+  "status": "pass",
+  "notes": "Access bridge deployment evidence is ready for operator handoff",
+  "smoke": {
+    "status": "pass",
+    "schema_id": "access_bridge_service_smoke_summary",
+    "evidence_status": "pass",
+    "summary_json": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"
+  },
+  "identity_check": {
+    "status": "pass",
+    "reason": ""
+  },
+  "local_files": {
+    "config": {
+      "status": "pass"
+    },
+    "deploy_pack": {
+      "status": "pass"
+    }
+  },
+  "deployed_identity": {
+    "helper_id": "helper-demo",
+    "organization_id": "freenews-demo",
+    "registry_id": "registry-demo"
+  },
+  "recommended_next_action": {
+    "id": "record_access_bridge_pilot_evidence_bundle",
+    "command": "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json"
+  }
+}
+EOF_ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY
+cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL_SUMMARY
+{
+  "version": 1,
+  "schema": {
+    "id": "access_bridge_host_install_check_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
+  "status": "pass",
+  "notes": "Access bridge host install checks passed",
+  "inputs": {
+    "deploy_pack_dir": ".easy-node-logs/access-recovery-demo/bridge-deploy",
+    "service_name": "gpm-access-bridge",
+    "config_json": ".easy-node-logs/access-recovery-demo/bridge-service-config.json"
+  },
+  "observed": {
+    "env_config_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "env_access_code_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "env_allow_unauthenticated_local": "false",
+    "env_allow_query_code": "false",
+    "env_trust_proxy_headers": "true",
+    "env_addr": "127.0.0.1:18980"
+  },
+  "summary": {
+    "checks_total": 6,
+    "checks_fail": 0
+  },
+  "checks": [],
+  "recommended_next_action": {
+    "id": "record_access_bridge_pilot_evidence_bundle",
+    "command": "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json"
+  }
+}
+EOF_ACCESS_BRIDGE_HOST_INSTALL_SUMMARY
 
 if ! FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
 ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL" \
@@ -840,6 +956,9 @@ run_roadmap_progress_report \
   --phase7-mainnet-cutover-summary-json "$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" \
   --blockchain-mainnet-activation-gate-summary-json "$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" \
   --blockchain-bootstrap-governance-graduation-gate-summary-json "$BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
   --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
   --summary-json "$SUMMARY_JSON" \
   --report-md "$REPORT_MD" \
@@ -893,6 +1012,26 @@ if ! jq -e \
   --argjson expect_profile_compare_multi_vm_live_evidence_publish_bundle_helper "$PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" '
   .status == "warn"
   and .rc == 0
+  and .current_roadmap_track == "access_recovery"
+  and .access_recovery_track.status == "pilot-evidence-ready"
+  and .access_recovery_track.ready == true
+  and .access_recovery_track.needs_attention == false
+  and .access_recovery_track.access_bridge_service_smoke.available == true
+  and .access_recovery_track.access_bridge_service_smoke.status == "pass"
+  and .access_recovery_track.access_bridge_service_smoke.source_summary_json == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"'"
+  and .access_recovery_track.access_bridge_service_smoke.details.helper_id == "helper-demo"
+  and .access_recovery_track.access_bridge_service_smoke.details.organization_id == "freenews-demo"
+  and .access_recovery_track.access_bridge_service_smoke.details.auth_required == true
+  and .access_recovery_track.access_bridge_service_smoke.details.bridge_security_headers_ok == true
+  and .access_recovery_track.access_bridge_deployment_evidence.available == true
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
+  and .access_recovery_track.access_bridge_deployment_evidence.source_summary_json == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"'"
+  and .access_recovery_track.access_bridge_deployment_evidence.details.identity_status == "pass"
+  and .access_recovery_track.access_bridge_host_install.available == true
+  and .access_recovery_track.access_bridge_host_install.status == "pass"
+  and .access_recovery_track.access_bridge_host_install.source_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
+  and .access_recovery_track.access_bridge_host_install.details.checks_fail == 0
+  and .access_recovery_track.recommended_next_action == null
   and .vpn_track.readiness_status == "NOT_READY"
   and .vpn_track.roadmap_stage == "READY_FOR_MACHINE_C_SMOKE"
   and .vpn_track.vpn_rc_done_for_phase == false
@@ -1115,11 +1254,136 @@ if ! jq -e \
          and (((.next_actions // []) | any(.id == "three_machine_real_host_validation_pack")) | not)
        end)
   and .artifacts.phase0_summary_json == "'"$PHASE0_SUMMARY_JSON"'"
+  and .artifacts.access_bridge_service_smoke_summary_json == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"'"
+  and .artifacts.access_bridge_deployment_evidence_summary_json == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"'"
+  and .artifacts.access_bridge_host_install_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
   and .artifacts.manual_validation_summary_json == "'"$TEST_LOG_DIR/manual_validation_readiness_summary.json"'"
   and .artifacts.manual_validation_report_md == "'"$TEST_LOG_DIR/manual_validation_readiness_report.md"'"
 ' "$SUMMARY_JSON" >/dev/null; then
   echo "summary JSON missing expected fields"
   cat "$SUMMARY_JSON"
+  exit 1
+fi
+if ! grep -Fq '## Access Recovery Track' "$REPORT_MD"; then
+  echo "report missing Access Recovery track section"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! grep -Fq 'Access bridge service smoke: available=true, status=pass' "$REPORT_MD"; then
+  echo "report missing Access Recovery smoke status line"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! grep -Eq '\[roadmap-progress-report\] current_roadmap_track=access_recovery' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  echo "expected current roadmap track log line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
+  exit 1
+fi
+if ! grep -Eq '\[roadmap-progress-report\] access_recovery_track_status=pilot-evidence-ready ready=true needs_attention=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  echo "expected Access Recovery pass log line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery evidence missing is fail-soft"
+ACCESS_RECOVERY_MISSING_SMOKE_SUMMARY_JSON="$TMP_DIR/missing_access_bridge_service_smoke_summary.json"
+ACCESS_RECOVERY_MISSING_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/missing_access_bridge_deployment_evidence_summary.json"
+ACCESS_RECOVERY_MISSING_HOST_SUMMARY_JSON="$TMP_DIR/missing_access_bridge_host_install_summary.json"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_MISSING_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_RECOVERY_MISSING_DEPLOYMENT_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_RECOVERY_MISSING_HOST_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_missing_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_missing_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_missing.log 2>&1; then
+  echo "expected success for Access Recovery missing evidence path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_missing.log
+  exit 1
+fi
+if ! jq -e '
+  .current_roadmap_track == "access_recovery"
+  and .access_recovery_track.status == "evidence-missing"
+  and .access_recovery_track.ready == false
+  and .access_recovery_track.needs_attention == true
+  and .access_recovery_track.access_bridge_service_smoke.available == false
+  and .access_recovery_track.access_bridge_service_smoke.status == "missing"
+  and .access_recovery_track.access_bridge_service_smoke.input_summary_json == "'"$ACCESS_RECOVERY_MISSING_SMOKE_SUMMARY_JSON"'"
+  and .access_recovery_track.access_bridge_deployment_evidence.available == false
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "missing"
+  and .access_recovery_track.access_bridge_host_install.available == false
+  and .access_recovery_track.access_bridge_host_install.status == "missing"
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_service_smoke"
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("access_bridge_service_smoke"))
+  and .artifacts.access_bridge_service_smoke_summary_json == null
+  and .artifacts.access_bridge_deployment_evidence_summary_json == null
+  and .artifacts.access_bridge_host_install_summary_json == null
+' "$TMP_DIR/roadmap_progress_access_recovery_missing_summary.json" >/dev/null; then
+  echo "Access Recovery missing evidence summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_missing_summary.json"
+  exit 1
+fi
+if ! grep -Fq 'Access bridge service smoke: available=false, status=missing' "$TMP_DIR/roadmap_progress_access_recovery_missing_report.md"; then
+  echo "Access Recovery missing evidence report mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_missing_report.md"
+  exit 1
+fi
+if ! grep -Eq '\[roadmap-progress-report\] access_bridge_service_smoke_available=false status=missing' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_missing.log; then
+  echo "expected Access Recovery missing smoke log line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_missing.log
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery invalid evidence is fail-soft"
+ACCESS_RECOVERY_INVALID_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_invalid_summary.json"
+printf '{"version":1,' >"$ACCESS_RECOVERY_INVALID_SMOKE_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_INVALID_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_invalid_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_invalid_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_invalid.log 2>&1; then
+  echo "expected success for Access Recovery invalid evidence path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_invalid.log
+  exit 1
+fi
+if ! jq -e '
+  .current_roadmap_track == "access_recovery"
+  and .access_recovery_track.status == "evidence-invalid"
+  and .access_recovery_track.ready == false
+  and .access_recovery_track.needs_attention == true
+  and .access_recovery_track.access_bridge_service_smoke.available == false
+  and .access_recovery_track.access_bridge_service_smoke.status == "invalid"
+  and .access_recovery_track.access_bridge_service_smoke.source_summary_json == null
+  and .access_recovery_track.access_bridge_deployment_evidence.available == true
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
+  and .access_recovery_track.access_bridge_host_install.available == true
+  and .access_recovery_track.access_bridge_host_install.status == "pass"
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_service_smoke"
+  and .artifacts.access_bridge_service_smoke_summary_json == null
+  and .artifacts.access_bridge_deployment_evidence_summary_json == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"'"
+  and .artifacts.access_bridge_host_install_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
+' "$TMP_DIR/roadmap_progress_access_recovery_invalid_summary.json" >/dev/null; then
+  echo "Access Recovery invalid evidence summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_invalid_summary.json"
+  exit 1
+fi
+if ! grep -Fq 'Access bridge service smoke: available=false, status=invalid' "$TMP_DIR/roadmap_progress_access_recovery_invalid_report.md"; then
+  echo "Access Recovery invalid evidence report mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_invalid_report.md"
+  exit 1
+fi
+if ! grep -Eq '\[roadmap-progress-report\] access_recovery_track_status=evidence-invalid ready=false needs_attention=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_invalid.log; then
+  echo "expected Access Recovery invalid track log line"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_invalid.log
   exit 1
 fi
 PHASE6_OUTPUT_PRESENT=0

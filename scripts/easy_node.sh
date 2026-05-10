@@ -296,6 +296,7 @@ Usage:
   ./scripts/easy_node.sh three-machine-reminder
   ./scripts/easy_node.sh three-machine-real-host-validation-pack [three_machine_real_host_validation_pack args...]
   ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle [access_bridge_pilot_evidence_bundle args...]
+  ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify [access_bridge_pilot_evidence_bundle_verify args...]
   ./scripts/easy_node.sh three-machine-docker-profile-matrix [three_machine_docker_profile_matrix args...]
   ./scripts/easy_node.sh three-machine-docker-profile-matrix-record [three_machine_docker_profile_matrix_record args...]
   ./scripts/easy_node.sh manual-validation-backlog
@@ -584,6 +585,7 @@ Usage:
   ./scripts/easy_node.sh three-machine-prod-signoff [three-machine-prod-bundle args...] [--bundle-dir PATH] [--run-report-json PATH] [--record-result [0|1]] [--pre-real-host-readiness [0|1]] [--pre-real-host-readiness-summary-json PATH] [--runtime-doctor [0|1]] [--runtime-fix [0|1]] [--runtime-fix-prune-wg-only-dir [0|1]] [--runtime-base-port N] [--runtime-client-iface IFACE] [--runtime-exit-iface IFACE] [--runtime-vpn-iface IFACE] [--manual-validation-report [0|1]] [--manual-validation-report-summary-json PATH] [--manual-validation-report-md PATH] [--summary-json PATH] [--print-summary-json [0|1]]
   ./scripts/easy_node.sh three-machine-real-host-validation-pack [three_machine_real_host_validation_pack args...]
   ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle [access_bridge_pilot_evidence_bundle args...]
+  ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify [access_bridge_pilot_evidence_bundle_verify args...]
   ./scripts/easy_node.sh three-machine-reminder
   ./scripts/easy_node.sh three-machine-docker-profile-matrix [three_machine_docker_profile_matrix args...]
   ./scripts/easy_node.sh three-machine-docker-profile-matrix-record [three_machine_docker_profile_matrix_record args...]
@@ -793,6 +795,7 @@ Notes:
   - three-machine-prod-signoff wraps three-machine-prod-bundle into one recorded manual-validation step for the final machine-C production signoff rerun, can gate on pre-real-host-readiness and runtime-doctor/runtime-fix first, and refreshes the shared manual-validation report by default.
   - three-machine-real-host-validation-pack wraps the real-host validation pack helper path (override with `THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT`) and preserves pass-through args.
   - access-bridge-pilot-evidence-bundle wraps deployed bridge smoke, deployment evidence, and host-install checks into one operator handoff bundle (override with `ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT`) and preserves pass-through args.
+  - access-bridge-pilot-evidence-bundle-verify validates Access Bridge pilot bundle integrity artifacts (manifest + tarball checksum + safe tar members), recommended input: --summary-json.
   - three-machine-reminder prints the true 3-machine production test checklist.
   - three-machine-docker-profile-matrix wraps the three-machine docker profile matrix helper script with pass-through args.
   - three-machine-docker-profile-matrix-record wraps the three-machine docker profile matrix record helper script with pass-through args.
@@ -9443,6 +9446,15 @@ three_machine_real_host_validation_pack() {
 
 access_bridge_pilot_evidence_bundle() {
   local script="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT:-$ROOT_DIR/scripts/access_bridge_pilot_evidence_bundle.sh}"
+  if [[ ! -x "$script" ]]; then
+    echo "missing helper script: $script"
+    exit 2
+  fi
+  "$script" "$@"
+}
+
+access_bridge_pilot_evidence_bundle_verify() {
+  local script="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT:-$ROOT_DIR/scripts/access_bridge_pilot_evidence_bundle_verify.sh}"
   if [[ ! -x "$script" ]]; then
     echo "missing helper script: $script"
     exit 2
@@ -19589,6 +19601,10 @@ main() {
     access-bridge-pilot-evidence-bundle)
       shift
       access_bridge_pilot_evidence_bundle "$@"
+      ;;
+    access-bridge-pilot-evidence-bundle-verify)
+      shift
+      access_bridge_pilot_evidence_bundle_verify "$@"
       ;;
     three-machine-reminder)
       shift

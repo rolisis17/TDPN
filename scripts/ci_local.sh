@@ -74,6 +74,9 @@ bash ./scripts/integration_access_bridge_host_install_check.sh
 echo "[ci] access bridge pilot evidence bundle integration"
 bash ./scripts/integration_access_bridge_pilot_evidence_bundle.sh
 
+echo "[ci] access bridge pilot evidence bundle verifier integration"
+bash ./scripts/integration_access_bridge_pilot_evidence_bundle_verify.sh
+
 echo "[ci] easy-node access bridge pilot evidence bundle integration"
 bash ./scripts/integration_easy_node_access_bridge_pilot_evidence_bundle.sh
 

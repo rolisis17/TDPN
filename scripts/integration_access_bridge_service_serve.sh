@@ -145,6 +145,11 @@ if [[ "$(jq -r '.status // ""' "$TMP_DIR/operator-smoke-summary.json")" != "pass
   cat "$TMP_DIR/operator-smoke-summary.json"
   exit 1
 fi
+if [[ "$(jq -r '.health.config_sha256 // ""' "$TMP_DIR/operator-smoke-summary.json")" != "$config_sha256" ]]; then
+  echo "access bridge service serve integration failed: operator smoke did not capture live config sha256"
+  cat "$TMP_DIR/operator-smoke-summary.json"
+  exit 1
+fi
 
 bash ./scripts/access_bridge_deployment_evidence.sh \
   --base-url "$BASE_URL" \

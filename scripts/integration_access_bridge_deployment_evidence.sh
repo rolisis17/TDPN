@@ -185,6 +185,28 @@ if ! jq -e '.status == "fail" and .smoke.evidence_status == "fail" and .recommen
   exit 1
 fi
 
+MISMATCH_SMOKE_SUMMARY="$TMP_DIR/access_bridge_service_smoke_config_mismatch_summary.json"
+jq '.health.config_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' "$SMOKE_SUMMARY" >"$MISMATCH_SMOKE_SUMMARY"
+MISMATCH_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_config_mismatch_summary.json"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$MISMATCH_SMOKE_SUMMARY" \
+  --config-json "$SERVICE_CONFIG" \
+  --summary-json "$MISMATCH_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/config-mismatch.log" 2>&1
+mismatch_rc=$?
+set -e
+if [[ "$mismatch_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: live/staged config sha mismatch should fail"
+  cat "$MISMATCH_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .smoke.evidence_status == "fail" and (.smoke.evidence_reason | contains("live config sha256 does not match supplied config")) and .recommended_next_action.id == "refresh_deployed_bridge_smoke"' "$MISMATCH_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: config mismatch summary contract mismatch"
+  cat "$MISMATCH_SUMMARY"
+  exit 1
+fi
+
 BAD_HASH_DEPLOY_DIR="$TMP_DIR/bad-hash-deploy"
 cp -R "$DEPLOY_DIR" "$BAD_HASH_DEPLOY_DIR"
 sed -i 's/GPM_BRIDGE_ACCESS_CODE_SHA256="[^"]*"/GPM_BRIDGE_ACCESS_CODE_SHA256="short"/' "$BAD_HASH_DEPLOY_DIR/gpm-access-bridge-evidence.env"

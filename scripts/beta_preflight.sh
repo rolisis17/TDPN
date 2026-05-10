@@ -29,6 +29,7 @@ run_step "access bridge service serve" bash ./scripts/integration_access_bridge_
 run_step "access bridge deployment evidence" bash ./scripts/integration_access_bridge_deployment_evidence.sh
 run_step "access bridge host install check" bash ./scripts/integration_access_bridge_host_install_check.sh
 run_step "access bridge pilot evidence bundle" bash ./scripts/integration_access_bridge_pilot_evidence_bundle.sh
+run_step "access bridge pilot evidence bundle verifier" bash ./scripts/integration_access_bridge_pilot_evidence_bundle_verify.sh
 run_step "easy-node access bridge pilot evidence bundle" bash ./scripts/integration_easy_node_access_bridge_pilot_evidence_bundle.sh
 run_step "secret hygiene" ./scripts/integration_secret_hygiene.sh
 run_step "openai model policy guard" ./scripts/integration_openai_model_policy_guard.sh

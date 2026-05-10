@@ -30,6 +30,9 @@ Usage:
     [--phase7-mainnet-cutover-summary-json PATH] \
     [--blockchain-mainnet-activation-gate-summary-json PATH] \
     [--blockchain-bootstrap-governance-graduation-gate-summary-json PATH] \
+    [--access-bridge-service-smoke-summary-json PATH] \
+    [--access-bridge-deployment-evidence-summary-json PATH] \
+    [--access-bridge-host-install-summary-json PATH] \
     [--summary-json PATH] \
     [--report-md PATH] \
     [--print-report [0|1]] \
@@ -43,6 +46,7 @@ Purpose:
 Notes:
   - This does not replace real machine-C and true 3-machine production signoff.
   - Blockchain/payment track is reported as a Cosmos-first parallel track with VPN dataplane independence.
+  - Access Recovery bridge evidence is fail-soft: missing or invalid summaries are surfaced without failing this report.
 USAGE
 }
 
@@ -1827,6 +1831,224 @@ evidence_pack_summary_stale_01() {
     return
   fi
   printf '0'
+}
+
+access_recovery_evidence_json() {
+  local path="$1"
+  local expected_schema_id="$2"
+  local kind="$3"
+  local label="$4"
+  local input_json="null"
+
+  if [[ -n "$path" ]]; then
+    input_json="$(jq -cn --arg path "$path" '$path')"
+  fi
+
+  if [[ -z "$path" ]]; then
+    jq -cn --arg label "$label" --arg expected_schema_id "$expected_schema_id" '{
+      available: false,
+      input_summary_json: null,
+      source_summary_json: null,
+      schema_id: null,
+      expected_schema_id: $expected_schema_id,
+      status: "missing",
+      generated_at_utc: null,
+      notes: ($label + " summary path is missing"),
+      rc: null,
+      needs_attention: true,
+      details: {}
+    }'
+    return
+  fi
+
+  if [[ ! -f "$path" ]]; then
+    jq -cn --argjson input "$input_json" --arg label "$label" --arg expected_schema_id "$expected_schema_id" '{
+      available: false,
+      input_summary_json: $input,
+      source_summary_json: null,
+      schema_id: null,
+      expected_schema_id: $expected_schema_id,
+      status: "missing",
+      generated_at_utc: null,
+      notes: ($label + " summary file is missing"),
+      rc: null,
+      needs_attention: true,
+      details: {}
+    }'
+    return
+  fi
+
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    jq -cn --argjson input "$input_json" --arg label "$label" --arg expected_schema_id "$expected_schema_id" '{
+      available: false,
+      input_summary_json: $input,
+      source_summary_json: null,
+      schema_id: null,
+      expected_schema_id: $expected_schema_id,
+      status: "invalid",
+      generated_at_utc: null,
+      notes: ($label + " summary is not valid JSON"),
+      rc: null,
+      needs_attention: true,
+      details: {}
+    }'
+    return
+  fi
+
+  jq -c \
+    --arg input "$path" \
+    --arg expected_schema_id "$expected_schema_id" \
+    --arg kind "$kind" \
+    --arg label "$label" \
+    '
+      def str_or_null($v):
+        if ($v | type) == "string" and ($v | length) > 0 then $v else null end;
+      def status_norm:
+        if (.status | type) == "string" and ((.status | length) > 0) then (.status | ascii_downcase)
+        else ""
+        end;
+      def rc_or_null:
+        if (.rc | type) == "number" then .rc else null end;
+      def smoke_details:
+        {
+          base_url: str_or_null(.base_url),
+          path_id: str_or_null(.path_id),
+          health_status: str_or_null(.health.status),
+          helper_id: str_or_null(.health.helper_id),
+          organization_id: str_or_null(.health.organization_id),
+          registry_id: str_or_null(.health.registry_id),
+          config_sha256: str_or_null(.health.config_sha256),
+          auth_required: (if (.auth.required | type) == "boolean" then .auth.required else null end),
+          missing_code_http_status: str_or_null(.auth.missing_code_http_status),
+          wrong_code_http_status: str_or_null(.auth.wrong_code_http_status),
+          valid_code_http_status: str_or_null(.auth.valid_code_http_status),
+          bridge_status: str_or_null(.bridge.status),
+          bridge_security_headers_ok: (if (.bridge.security_headers_ok | type) == "boolean" then .bridge.security_headers_ok else null end),
+          abuse_http_status: str_or_null(.abuse.http_status)
+        };
+      def deployment_details:
+        {
+          smoke_status: str_or_null(.smoke.status),
+          smoke_evidence_status: str_or_null(.smoke.evidence_status),
+          smoke_summary_json: str_or_null(.smoke.summary_json),
+          identity_status: str_or_null(.identity_check.status),
+          config_status: str_or_null(.local_files.config.status),
+          deploy_pack_status: str_or_null(.local_files.deploy_pack.status),
+          helper_id: str_or_null(.deployed_identity.helper_id),
+          organization_id: str_or_null(.deployed_identity.organization_id),
+          registry_id: str_or_null(.deployed_identity.registry_id),
+          recommended_action_id: str_or_null(.recommended_next_action.id),
+          recommended_action_command: str_or_null(.recommended_next_action.command)
+        };
+      def host_install_details:
+        {
+          checks_total: (if (.summary.checks_total | type) == "number" then .summary.checks_total else null end),
+          checks_fail: (if (.summary.checks_fail | type) == "number" then .summary.checks_fail else null end),
+          deploy_pack_dir: str_or_null(.inputs.deploy_pack_dir),
+          service_name: str_or_null(.inputs.service_name),
+          config_json: str_or_null(.inputs.config_json),
+          env_config_sha256: str_or_null(.observed.env_config_sha256),
+          env_access_code_sha256: str_or_null(.observed.env_access_code_sha256),
+          env_allow_unauthenticated_local: str_or_null(.observed.env_allow_unauthenticated_local),
+          env_allow_query_code: str_or_null(.observed.env_allow_query_code),
+          env_trust_proxy_headers: str_or_null(.observed.env_trust_proxy_headers),
+          env_addr: str_or_null(.observed.env_addr),
+          recommended_action_id: str_or_null(.recommended_next_action.id),
+          recommended_action_command: str_or_null(.recommended_next_action.command)
+        };
+      (.schema.id // null) as $schema_id
+      | status_norm as $raw_status
+      | (($schema_id == $expected_schema_id) and ($raw_status != "")) as $valid_contract
+      | (if $valid_contract then $raw_status else "invalid" end) as $state
+      | {
+          available: $valid_contract,
+          input_summary_json: $input,
+          source_summary_json: (if $valid_contract then $input else null end),
+          schema_id: $schema_id,
+          expected_schema_id: $expected_schema_id,
+          status: $state,
+          generated_at_utc: str_or_null(.generated_at_utc),
+          notes: (
+            if $valid_contract then str_or_null(.notes)
+            elif $schema_id != $expected_schema_id then ($label + " summary schema mismatch")
+            else ($label + " summary status is missing")
+            end
+          ),
+          rc: rc_or_null,
+          needs_attention: ($state != "pass"),
+          details: (
+            if $valid_contract and $kind == "service_smoke" then smoke_details
+            elif $valid_contract and $kind == "deployment_evidence" then deployment_details
+            elif $valid_contract and $kind == "host_install" then host_install_details
+            else {}
+            end
+          )
+        }
+    ' "$path"
+}
+
+access_recovery_track_json_from_evidence() {
+  local smoke_json="$1"
+  local deployment_json="$2"
+  local host_install_json="$3"
+
+  jq -cn \
+    --argjson service_smoke "$smoke_json" \
+    --argjson deployment_evidence "$deployment_json" \
+    --argjson host_install "$host_install_json" '
+      def first_attention:
+        [$service_smoke, $deployment_evidence, $host_install]
+        | map(select(.needs_attention == true))
+        | .[0] // null;
+      def next_command_for($e):
+        if $e == null then null
+        elif ($e == $service_smoke) then
+          "bash ./scripts/access_bridge_service_smoke.sh --base-url https://bridge.example --path-id helper-web --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/access_bridge_service_smoke_summary.json"
+        elif ($e == $deployment_evidence) then
+          "bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/access_bridge_service_smoke_summary.json --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/access_bridge_deployment_evidence_summary.json"
+        else
+          "bash ./scripts/access_bridge_host_install_check.sh --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
+        end;
+      def track_status:
+        if ([$service_smoke, $deployment_evidence, $host_install] | all(.status == "pass")) then "pilot-evidence-ready"
+        elif ([$service_smoke, $deployment_evidence, $host_install] | any(.status == "invalid")) then "evidence-invalid"
+        elif ([$service_smoke, $deployment_evidence, $host_install] | any(.status == "fail")) then "evidence-failed"
+        elif ([$service_smoke, $deployment_evidence, $host_install] | any(.status == "missing")) then "evidence-missing"
+        else "needs-attention"
+        end;
+      first_attention as $first_attention
+      | track_status as $track_status
+      | {
+          status: $track_status,
+          ready: ($track_status == "pilot-evidence-ready"),
+          needs_attention: ($track_status != "pilot-evidence-ready"),
+          policy: "docs/access-recovery-toolkit-track.md",
+          recommendation: (
+            if $track_status == "pilot-evidence-ready" then
+              "Access Recovery bridge pilot evidence is ready for operator handoff."
+            else
+              "Record fresh access bridge smoke, deployment evidence, and host-install summaries before pilot handoff."
+            end
+          ),
+          access_bridge_service_smoke: $service_smoke,
+          access_bridge_deployment_evidence: $deployment_evidence,
+          access_bridge_host_install: $host_install,
+          recommended_next_action: (
+            if $first_attention == null then null
+            else {
+              id: (
+                if $first_attention == $service_smoke then "access_bridge_service_smoke"
+                elif $first_attention == $deployment_evidence then "access_bridge_deployment_evidence"
+                else "access_bridge_host_install"
+                end
+              ),
+              reason: ($first_attention.notes // "Access Recovery evidence needs attention"),
+              command: next_command_for($first_attention)
+            }
+            end
+          )
+        }
+    '
 }
 
 runtime_actuation_promotion_evidence_pack_preferred_candidate_path() {
@@ -6218,6 +6440,21 @@ if [[ -n "$(trim "$blockchain_bootstrap_governance_graduation_gate_summary_json"
   path_arg_or_die "--blockchain-bootstrap-governance-graduation-gate-summary-json" "$blockchain_bootstrap_governance_graduation_gate_summary_json"
 fi
 blockchain_bootstrap_governance_graduation_gate_summary_json="$(abs_path "$blockchain_bootstrap_governance_graduation_gate_summary_json")"
+access_bridge_service_smoke_summary_json="${ROADMAP_PROGRESS_ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON:-$default_log_dir/access_bridge_service_smoke_summary.json}"
+if [[ -n "$(trim "$access_bridge_service_smoke_summary_json")" ]]; then
+  path_arg_or_die "--access-bridge-service-smoke-summary-json" "$access_bridge_service_smoke_summary_json"
+fi
+access_bridge_service_smoke_summary_json="$(abs_path "$access_bridge_service_smoke_summary_json")"
+access_bridge_deployment_evidence_summary_json="${ROADMAP_PROGRESS_ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON:-$default_log_dir/access_bridge_deployment_evidence_summary.json}"
+if [[ -n "$(trim "$access_bridge_deployment_evidence_summary_json")" ]]; then
+  path_arg_or_die "--access-bridge-deployment-evidence-summary-json" "$access_bridge_deployment_evidence_summary_json"
+fi
+access_bridge_deployment_evidence_summary_json="$(abs_path "$access_bridge_deployment_evidence_summary_json")"
+access_bridge_host_install_summary_json="${ROADMAP_PROGRESS_ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON:-$default_log_dir/access_bridge_host_install_check_summary.json}"
+if [[ -n "$(trim "$access_bridge_host_install_summary_json")" ]]; then
+  path_arg_or_die "--access-bridge-host-install-summary-json" "$access_bridge_host_install_summary_json"
+fi
+access_bridge_host_install_summary_json="$(abs_path "$access_bridge_host_install_summary_json")"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -6338,6 +6575,21 @@ while [[ $# -gt 0 ]]; do
     --blockchain-bootstrap-governance-graduation-gate-summary-json)
       optional_path_arg_or_die "--blockchain-bootstrap-governance-graduation-gate-summary-json" "$#" "${2:-}"
       blockchain_bootstrap_governance_graduation_gate_summary_json="$(abs_path "${2:-}")"
+      shift 2
+      ;;
+    --access-bridge-service-smoke-summary-json)
+      optional_path_arg_or_die "--access-bridge-service-smoke-summary-json" "$#" "${2:-}"
+      access_bridge_service_smoke_summary_json="$(abs_path "${2:-}")"
+      shift 2
+      ;;
+    --access-bridge-deployment-evidence-summary-json)
+      optional_path_arg_or_die "--access-bridge-deployment-evidence-summary-json" "$#" "${2:-}"
+      access_bridge_deployment_evidence_summary_json="$(abs_path "${2:-}")"
+      shift 2
+      ;;
+    --access-bridge-host-install-summary-json)
+      optional_path_arg_or_die "--access-bridge-host-install-summary-json" "$#" "${2:-}"
+      access_bridge_host_install_summary_json="$(abs_path "${2:-}")"
       shift 2
       ;;
     --summary-json)
@@ -11543,6 +11795,46 @@ blockchain_track_recommendation="Cosmos-first blockchain track: keep VPN datapla
 if [[ ! -f "$product_roadmap_doc" ]]; then
   blockchain_track_policy="roadmap file missing"
 fi
+current_roadmap_track="access_recovery"
+access_bridge_service_smoke_evidence_json="$(
+  access_recovery_evidence_json \
+    "$access_bridge_service_smoke_summary_json" \
+    "access_bridge_service_smoke_summary" \
+    "service_smoke" \
+    "Access bridge service smoke"
+)"
+access_bridge_deployment_evidence_json="$(
+  access_recovery_evidence_json \
+    "$access_bridge_deployment_evidence_summary_json" \
+    "access_bridge_deployment_evidence_summary" \
+    "deployment_evidence" \
+    "Access bridge deployment evidence"
+)"
+access_bridge_host_install_evidence_json="$(
+  access_recovery_evidence_json \
+    "$access_bridge_host_install_summary_json" \
+    "access_bridge_host_install_check_summary" \
+    "host_install" \
+    "Access bridge host install"
+)"
+access_recovery_track_json="$(
+  access_recovery_track_json_from_evidence \
+    "$access_bridge_service_smoke_evidence_json" \
+    "$access_bridge_deployment_evidence_json" \
+    "$access_bridge_host_install_evidence_json"
+)"
+access_recovery_track_status_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r '.status // "unknown"')"
+access_recovery_track_ready_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r 'if (.ready | type) == "boolean" then .ready else false end')"
+access_recovery_track_needs_attention_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r 'if (.needs_attention | type) == "boolean" then .needs_attention else true end')"
+access_bridge_service_smoke_available_json="$(printf '%s\n' "$access_bridge_service_smoke_evidence_json" | jq -r 'if (.available | type) == "boolean" then .available else false end')"
+access_bridge_service_smoke_status_json="$(printf '%s\n' "$access_bridge_service_smoke_evidence_json" | jq -r '.status // "unknown"')"
+access_bridge_service_smoke_source_summary_json="$(printf '%s\n' "$access_bridge_service_smoke_evidence_json" | jq -r '.source_summary_json // ""')"
+access_bridge_deployment_evidence_available_json="$(printf '%s\n' "$access_bridge_deployment_evidence_json" | jq -r 'if (.available | type) == "boolean" then .available else false end')"
+access_bridge_deployment_evidence_status_json="$(printf '%s\n' "$access_bridge_deployment_evidence_json" | jq -r '.status // "unknown"')"
+access_bridge_deployment_evidence_source_summary_json="$(printf '%s\n' "$access_bridge_deployment_evidence_json" | jq -r '.source_summary_json // ""')"
+access_bridge_host_install_available_json="$(printf '%s\n' "$access_bridge_host_install_evidence_json" | jq -r 'if (.available | type) == "boolean" then .available else false end')"
+access_bridge_host_install_status_json="$(printf '%s\n' "$access_bridge_host_install_evidence_json" | jq -r '.status // "unknown"')"
+access_bridge_host_install_source_summary_json="$(printf '%s\n' "$access_bridge_host_install_evidence_json" | jq -r '.source_summary_json // ""')"
 
 final_status="ok"
 final_rc=0
@@ -12156,6 +12448,8 @@ summary_payload_jq_args=(
   --argjson next_actions_live_and_pack_batch_helper_count "$next_actions_live_and_pack_batch_helper_count_json" \
   --argjson next_actions_live_evidence_individual_suppression_mode "$suppress_live_evidence_next_actions_when_batch_helper_json" \
   --argjson next_actions_live_evidence_individual_suppression_applied "$next_actions_live_evidence_individual_suppression_applied_json" \
+  --arg current_roadmap_track "$current_roadmap_track" \
+  --argjson access_recovery_track "$access_recovery_track_json" \
   --arg blockchain_track_status "$blockchain_track_status" \
   --arg blockchain_track_policy "$blockchain_track_policy" \
   --arg blockchain_track_recommendation "$blockchain_track_recommendation" \
@@ -12214,6 +12508,8 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
     status: $status,
     rc: (if $status == "fail" then 1 else 0 end),
     notes: $notes,
+    current_roadmap_track: $current_roadmap_track,
+    access_recovery_track: $access_recovery_track,
     vpn_track: {
       readiness_status: $readiness_status,
       roadmap_stage: $roadmap_stage,
@@ -12804,6 +13100,9 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
       phase5_settlement_layer_summary_json: (if $phase5_settlement_layer_handoff_source_summary_json == "" then null else $phase5_settlement_layer_handoff_source_summary_json end),
       phase6_cosmos_l1_summary_json: (if $phase6_cosmos_l1_handoff_source_summary_json == "" then null else $phase6_cosmos_l1_handoff_source_summary_json end),
       phase7_mainnet_cutover_summary_json: (if $phase7_mainnet_cutover_summary_source_summary_json == "" then null else $phase7_mainnet_cutover_summary_source_summary_json end),
+      access_bridge_service_smoke_summary_json: $access_recovery_track.access_bridge_service_smoke.source_summary_json,
+      access_bridge_deployment_evidence_summary_json: $access_recovery_track.access_bridge_deployment_evidence.source_summary_json,
+      access_bridge_host_install_summary_json: $access_recovery_track.access_bridge_host_install.source_summary_json,
       vpn_rc_resilience_summary_json: (if $resilience_handoff_source_summary_json == "" then null else $resilience_handoff_source_summary_json end),
       summary_json: $summary_json_path,
       report_md: $report_md_path
@@ -12845,6 +13144,20 @@ cat >"$report_tmp" <<EOF_MD
 - Generated at (UTC): $(jq -r '.generated_at_utc' "$summary_json")
 - Status: $(jq -r '.status' "$summary_json")
 - Notes: $(jq -r '.notes' "$summary_json")
+- Current roadmap track: $(jq -r '.current_roadmap_track' "$summary_json")
+
+## Access Recovery Track
+
+- Status: $(jq -r '.access_recovery_track.status' "$summary_json")
+- Ready: $(jq -r '.access_recovery_track.ready | tostring' "$summary_json")
+- Needs attention: $(jq -r '.access_recovery_track.needs_attention | tostring' "$summary_json")
+- Policy: $(jq -r '.access_recovery_track.policy' "$summary_json")
+- Recommendation: $(jq -r '.access_recovery_track.recommendation' "$summary_json")
+- Access bridge service smoke: available=$(jq -r '.access_recovery_track.access_bridge_service_smoke.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_service_smoke.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_service_smoke.source_summary_json // "none"' "$summary_json")
+- Access bridge deployment evidence: available=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.source_summary_json // "none"' "$summary_json")
+- Access bridge host install: available=$(jq -r '.access_recovery_track.access_bridge_host_install.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_host_install.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_host_install.source_summary_json // "none"' "$summary_json")
+- Access Recovery next action: $(jq -r '.access_recovery_track.recommended_next_action.command // "none"' "$summary_json")
+- Access Recovery next action reason: $(jq -r '.access_recovery_track.recommended_next_action.reason // "none"' "$summary_json")
 
 ## VPN Track
 
@@ -13187,6 +13500,9 @@ $non_blockchain_actionable_no_sudo_or_github_md
 - Phase-5 settlement layer summary source: $(jq -r '.artifacts.phase5_settlement_layer_summary_json // "none"' "$summary_json")
 - Phase-6 Cosmos L1 summary source: $(jq -r '.artifacts.phase6_cosmos_l1_summary_json // "none"' "$summary_json")
 - Phase-7 mainnet cutover summary source: $(jq -r '.artifacts.phase7_mainnet_cutover_summary_json // "none"' "$summary_json")
+- Access bridge service smoke summary source: $(jq -r '.artifacts.access_bridge_service_smoke_summary_json // "none"' "$summary_json")
+- Access bridge deployment evidence summary source: $(jq -r '.artifacts.access_bridge_deployment_evidence_summary_json // "none"' "$summary_json")
+- Access bridge host install summary source: $(jq -r '.artifacts.access_bridge_host_install_summary_json // "none"' "$summary_json")
 - VPN RC resilience summary: $(jq -r '.artifacts.vpn_rc_resilience_summary_json // "none"' "$summary_json")
 EOF_MD
 mv -f "$report_tmp" "$report_md"
@@ -13194,6 +13510,11 @@ mv -f "$report_tmp" "$report_md"
 echo "[roadmap-progress-report] status=$final_status rc=$final_rc"
 echo "[roadmap-progress-report] readiness_status=$readiness_status"
 echo "[roadmap-progress-report] roadmap_stage=$roadmap_stage"
+echo "[roadmap-progress-report] current_roadmap_track=$current_roadmap_track"
+echo "[roadmap-progress-report] access_recovery_track_status=$access_recovery_track_status_json ready=$access_recovery_track_ready_json needs_attention=$access_recovery_track_needs_attention_json"
+echo "[roadmap-progress-report] access_bridge_service_smoke_available=$access_bridge_service_smoke_available_json status=$access_bridge_service_smoke_status_json source_summary_json=${access_bridge_service_smoke_source_summary_json:-}"
+echo "[roadmap-progress-report] access_bridge_deployment_evidence_available=$access_bridge_deployment_evidence_available_json status=$access_bridge_deployment_evidence_status_json source_summary_json=${access_bridge_deployment_evidence_source_summary_json:-}"
+echo "[roadmap-progress-report] access_bridge_host_install_available=$access_bridge_host_install_available_json status=$access_bridge_host_install_status_json source_summary_json=${access_bridge_host_install_source_summary_json:-}"
 echo "[roadmap-progress-report] next_action_check_id=${next_action_check_id:-}"
 echo "[roadmap-progress-report] next_action_command=${next_action_command:-}"
 echo "[roadmap-progress-report] manual_validation_refresh_status=$manual_refresh_status rc=$manual_refresh_rc"
