@@ -132,6 +132,7 @@ Draft schema:
 - `docs/schemas/access-recovery-bridge-helper-registry-v1.schema.json`
 - `docs/schemas/access-recovery-bridge-helper-registry-artifact-v1.schema.json`
 - `docs/schemas/access-recovery-trusted-key-v1.schema.json`
+- `docs/schemas/access-recovery-publication-index-v1.schema.json`
 
 Example:
 - `docs/examples/access-recovery-pack.example.json`
@@ -156,6 +157,7 @@ First CLI:
 - `go run ./cmd/gpmrecover bridge-registry-upsert-helper --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-mirror-1 --org-ids freenews-demo --display-name "Mirror helper" --contact-url https://mirror-helper.example/contact --abuse-report-url https://mirror-helper.example/abuse --rate-limit-policy "beta cap: per-user and per-source limits enforced" --out .easy-node-logs/bridge-helper-registry.updated.json`
 - `go run ./cmd/gpmrecover bridge-registry-set-status --helper-registry docs/examples/access-recovery-bridge-helper-registry.example.json --helper-id helper-perth-1 --status quarantined --reason "maintenance window" --out .easy-node-logs/bridge-helper-registry.quarantined.json`
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub --timeout-sec 8`
+- `go run ./cmd/gpmrecover fetch-publication --index-url https://freenews.example/.well-known/gpm/recovery-index.json --out-dir .easy-node-logs/access-recovery-fetched`
 
 Demo bundle flow:
 - `demo-bundle` creates a self-contained beta demo folder with:
@@ -224,6 +226,7 @@ Bridge-invite rules:
 - the browser gives copy/open actions for the invite id, helper id, helper contact, helper abuse-report URL, and verified helper paths
 - the helper registry is the first service-level rotation/quarantine control; a public bridge service still needs live rate-limit and abuse-report enforcement before launch
 - `demo-bundle` emits a static `.well-known/gpm` publish folder so operators can test online artifact publication without inventing filenames by hand
+- `fetch-publication` downloads the static publication index and same-origin referenced artifacts into a local folder, but marks trust as unverified so signature/trust-store verification remains a separate step
 
 `check` keeps trust and reachability separate:
 - it verifies the pack before probing anything

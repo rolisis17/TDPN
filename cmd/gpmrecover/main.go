@@ -11,7 +11,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
+	"net/url"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -28,6 +31,8 @@ const (
 	maxKeyFileBytes            int64 = 8 * 1024
 	maxTrustFileBytes          int64 = 512 * 1024
 	maxBridgeRegistryFileBytes int64 = 512 * 1024
+	maxPublicationIndexBytes   int64 = 512 * 1024
+	maxPublicationFileBytes    int64 = 2 * 1024 * 1024
 )
 
 type keyOutput struct {
@@ -127,6 +132,25 @@ type demoBundleOutput struct {
 	NextSteps      []string                            `json:"next_steps"`
 }
 
+type recoveryPublicationIndex struct {
+	Version        int               `json:"version"`
+	GeneratedAtUTC string            `json:"generated_at_utc,omitempty"`
+	OrgID          string            `json:"org_id,omitempty"`
+	OrgName        string            `json:"org_name,omitempty"`
+	KeyID          string            `json:"key_id,omitempty"`
+	Files          map[string]string `json:"files"`
+	Notes          []string          `json:"notes,omitempty"`
+}
+
+type fetchPublicationOutput struct {
+	Status        string            `json:"status"`
+	IndexURL      string            `json:"index_url"`
+	OutDir        string            `json:"out_dir"`
+	Files         map[string]string `json:"files"`
+	TrustVerified bool              `json:"trust_verified"`
+	NextStep      string            `json:"next_step"`
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -176,6 +200,8 @@ func main() {
 		err = runCheck(os.Args[2:])
 	case "demo-bundle":
 		err = runDemoBundle(os.Args[2:])
+	case "fetch-publication":
+		err = runFetchPublication(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -211,6 +237,7 @@ func usage() {
   go run ./cmd/gpmrecover verify --pack FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
   go run ./cmd/gpmrecover check --pack FILE (--trust-store FILE | --public-key-file FILE) [--timeout-sec 8]
   go run ./cmd/gpmrecover demo-bundle [--out-dir DIR] [--org-id ID] [--org-name NAME] [--base-url URL] [--helper-id ID] [--helper-name NAME]
+  go run ./cmd/gpmrecover fetch-publication --index-url URL --out-dir DIR [--timeout-sec 10]
 
 This verifies signed access recovery artifacts. It does not tunnel traffic.`)
 }
@@ -1364,19 +1391,19 @@ func runDemoBundle(args []string) error {
 	if err := writeJSONFile(addFile("publish_trusted_key", filepath.Join(publishDir, "recovery-trusted-key.json")), trustedEntry); err != nil {
 		return err
 	}
-	publishIndex := map[string]any{
-		"version":          1,
-		"generated_at_utc": now.Format(time.RFC3339),
-		"org_id":           strings.TrimSpace(*orgID),
-		"org_name":         strings.TrimSpace(*orgName),
-		"key_id":           keyID,
-		"files": map[string]string{
+	publishIndex := recoveryPublicationIndex{
+		Version:        1,
+		GeneratedAtUTC: now.Format(time.RFC3339),
+		OrgID:          strings.TrimSpace(*orgID),
+		OrgName:        strings.TrimSpace(*orgName),
+		KeyID:          keyID,
+		Files: map[string]string{
 			"access_pack":                   "access-pack.json",
 			"bridge_invite":                 "bridge-invite.json",
 			"bridge_helper_registry_signed": "bridge-helper-registry.signed.json",
 			"trusted_key":                   "recovery-trusted-key.json",
 		},
-		"notes": []string{
+		Notes: []string{
 			"Upload this folder to /.well-known/gpm/ on the organization site or mirror.",
 			"Users must still verify signatures and trust keys locally before using any recovery path.",
 		},
@@ -1415,6 +1442,69 @@ func runDemoBundle(args []string) error {
 	return json.NewEncoder(os.Stdout).Encode(out)
 }
 
+func runFetchPublication(args []string) error {
+	fs := flag.NewFlagSet("fetch-publication", flag.ContinueOnError)
+	indexURL := fs.String("index-url", "", "URL to /.well-known/gpm/recovery-index.json")
+	outDir := fs.String("out-dir", "", "empty directory to write fetched publication artifacts")
+	timeoutSec := fs.Int("timeout-sec", 10, "HTTP timeout in seconds")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	parsedIndexURL, err := parsePublicationIndexURL(*indexURL)
+	if err != nil {
+		return err
+	}
+	dir := strings.TrimSpace(*outDir)
+	if err := ensureDemoOutputDir(dir); err != nil {
+		return err
+	}
+	timeout := time.Duration(*timeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
+	indexBody, err := fetchPublicationURL(client, parsedIndexURL.String(), maxPublicationIndexBytes)
+	if err != nil {
+		return err
+	}
+	var index recoveryPublicationIndex
+	if err := json.Unmarshal(indexBody, &index); err != nil {
+		return fmt.Errorf("invalid recovery publication index json: %w", err)
+	}
+	if err := validateRecoveryPublicationIndex(index); err != nil {
+		return err
+	}
+	written := map[string]string{}
+	for _, key := range requiredPublicationFileKeys() {
+		rel, err := cleanPublicationRelativePath(index.Files[key])
+		if err != nil {
+			return fmt.Errorf("publication file %s: %w", key, err)
+		}
+		fileURL, err := resolvePublicationFileURL(parsedIndexURL, rel)
+		if err != nil {
+			return fmt.Errorf("publication file %s: %w", key, err)
+		}
+		body, err := fetchPublicationURL(client, fileURL, maxPublicationFileBytes)
+		if err != nil {
+			return fmt.Errorf("fetch publication file %s: %w", key, err)
+		}
+		outPath := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := writeFileWithMode(outPath, body, 0o644); err != nil {
+			return err
+		}
+		written[key] = outPath
+	}
+	out := fetchPublicationOutput{
+		Status:        "ok",
+		IndexURL:      parsedIndexURL.String(),
+		OutDir:        dir,
+		Files:         written,
+		TrustVerified: false,
+		NextStep:      "Verify downloaded artifacts with the local trust store before using any recovery path.",
+	}
+	return json.NewEncoder(os.Stdout).Encode(out)
+}
+
 func ensureDemoOutputDir(dir string) error {
 	if strings.TrimSpace(dir) == "" {
 		return errors.New("--out-dir is required")
@@ -1435,6 +1525,116 @@ func ensureDemoOutputDir(dir string) error {
 		return fmt.Errorf("stat demo output dir: %w", err)
 	}
 	return os.MkdirAll(dir, 0o755)
+}
+
+func parsePublicationIndexURL(raw string) (*url.URL, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil, errors.New("--index-url is required")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid --index-url: %w", err)
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return nil, errors.New("--index-url must use https:// or http://")
+	}
+	if strings.TrimSpace(parsed.Host) == "" {
+		return nil, errors.New("--index-url must include a host")
+	}
+	return parsed, nil
+}
+
+func validateRecoveryPublicationIndex(index recoveryPublicationIndex) error {
+	if index.Version != 1 {
+		return fmt.Errorf("unsupported recovery publication index version %d", index.Version)
+	}
+	if index.Files == nil {
+		return errors.New("recovery publication index files is required")
+	}
+	for _, key := range requiredPublicationFileKeys() {
+		if strings.TrimSpace(index.Files[key]) == "" {
+			return fmt.Errorf("recovery publication index files.%s is required", key)
+		}
+	}
+	return nil
+}
+
+func requiredPublicationFileKeys() []string {
+	return []string{
+		"access_pack",
+		"bridge_invite",
+		"bridge_helper_registry_signed",
+		"trusted_key",
+	}
+}
+
+func cleanPublicationRelativePath(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", errors.New("path is required")
+	}
+	if strings.Contains(value, "\\") {
+		return "", errors.New("path must use forward slashes")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+	if parsed.IsAbs() || parsed.Host != "" {
+		return "", errors.New("path must be relative to the publication index")
+	}
+	if strings.TrimSpace(parsed.RawQuery) != "" || strings.TrimSpace(parsed.Fragment) != "" {
+		return "", errors.New("path must not include query or fragment")
+	}
+	clean := pathpkg.Clean(parsed.Path)
+	if clean == "." || clean == "/" || pathpkg.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", errors.New("path must stay inside the publication directory")
+	}
+	return clean, nil
+}
+
+func resolvePublicationFileURL(indexURL *url.URL, rel string) (string, error) {
+	if indexURL == nil {
+		return "", errors.New("index URL is required")
+	}
+	relURL, err := url.Parse(rel)
+	if err != nil {
+		return "", fmt.Errorf("invalid relative URL: %w", err)
+	}
+	resolved := indexURL.ResolveReference(relURL)
+	if resolved.Scheme != indexURL.Scheme || !strings.EqualFold(resolved.Host, indexURL.Host) {
+		return "", errors.New("publication file must resolve to the same origin as the index")
+	}
+	return resolved.String(), nil
+}
+
+func fetchPublicationURL(client *http.Client, rawURL string, maxBytes int64) ([]byte, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "gpmrecover/0 access-recovery-fetch")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("unexpected HTTP status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBytes {
+		return nil, fmt.Errorf("response exceeds max size %d bytes", maxBytes)
+	}
+	return body, nil
 }
 
 func demoAccessPack(orgID string, orgName string, baseURL string, audience string, now time.Time) accesspack.Pack {

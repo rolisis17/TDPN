@@ -43,6 +43,14 @@ go run ./cmd/gpmrecover verify --pack .easy-node-logs/access-recovery-demo/acces
 go run ./cmd/gpmrecover bridge-policy --invite .easy-node-logs/access-recovery-demo/bridge-invite.signed.json --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json --require-helper-registry
 ```
 
+4. If testing online publication, upload `public/.well-known/gpm/` and fetch it from another machine before verification:
+
+```sh
+go run ./cmd/gpmrecover fetch-publication \
+  --index-url https://freenews.example/.well-known/gpm/recovery-index.json \
+  --out-dir .easy-node-logs/access-recovery-fetched
+```
+
 ## Helper Onboarding
 
 1. Add or update a helper entry without hand-editing JSON:

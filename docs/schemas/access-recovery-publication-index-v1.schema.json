@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpm.local/schemas/access-recovery-publication-index-v1.schema.json",
+  "title": "Access Recovery Static Publication Index v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "files"],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "generated_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "org_id": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "org_name": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "key_id": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "access_pack",
+        "bridge_invite",
+        "bridge_helper_registry_signed",
+        "trusted_key"
+      ],
+      "properties": {
+        "access_pack": {
+          "$ref": "#/$defs/relative_file"
+        },
+        "bridge_invite": {
+          "$ref": "#/$defs/relative_file"
+        },
+        "bridge_helper_registry_signed": {
+          "$ref": "#/$defs/relative_file"
+        },
+        "trusted_key": {
+          "$ref": "#/$defs/relative_file"
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "string",
+        "maxLength": 240
+      }
+    }
+  },
+  "$defs": {
+    "relative_file": {
+      "type": "string",
+      "maxLength": 240,
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))(?!.*[?#\\\\])[A-Za-z0-9._/-]+$"
+    }
+  }
+}

@@ -429,6 +429,74 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 	}
 }
 
+func TestGPMRecoverFetchPublication(t *testing.T) {
+	files := map[string]string{
+		"/.well-known/gpm/access-pack.json":                   `{"kind":"pack"}`,
+		"/.well-known/gpm/bridge-invite.json":                 `{"kind":"bridge"}`,
+		"/.well-known/gpm/bridge-helper-registry.signed.json": `{"kind":"registry"}`,
+		"/.well-known/gpm/recovery-trusted-key.json":          `{"kind":"key"}`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/gpm/recovery-index.json" {
+			_ = json.NewEncoder(w).Encode(recoveryPublicationIndex{
+				Version: 1,
+				Files: map[string]string{
+					"access_pack":                   "access-pack.json",
+					"bridge_invite":                 "bridge-invite.json",
+					"bridge_helper_registry_signed": "bridge-helper-registry.signed.json",
+					"trusted_key":                   "recovery-trusted-key.json",
+				},
+			})
+			return
+		}
+		if body, ok := files[r.URL.Path]; ok {
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	outDir := filepath.Join(t.TempDir(), "fetched")
+	if err := runFetchPublication([]string{
+		"--index-url", server.URL + "/.well-known/gpm/recovery-index.json",
+		"--out-dir", outDir,
+	}); err != nil {
+		t.Fatalf("fetch-publication: %v", err)
+	}
+	for _, name := range []string{
+		"access-pack.json",
+		"bridge-invite.json",
+		"bridge-helper-registry.signed.json",
+		"recovery-trusted-key.json",
+	} {
+		assertFileExists(t, filepath.Join(outDir, name))
+	}
+}
+
+func TestGPMRecoverFetchPublicationRejectsCrossOriginFiles(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(recoveryPublicationIndex{
+			Version: 1,
+			Files: map[string]string{
+				"access_pack":                   "https://evil.example/access-pack.json",
+				"bridge_invite":                 "bridge-invite.json",
+				"bridge_helper_registry_signed": "bridge-helper-registry.signed.json",
+				"trusted_key":                   "recovery-trusted-key.json",
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	err := runFetchPublication([]string{
+		"--index-url", server.URL + "/.well-known/gpm/recovery-index.json",
+		"--out-dir", filepath.Join(t.TempDir(), "fetched"),
+	})
+	if err == nil {
+		t.Fatal("expected cross-origin publication file to be rejected")
+	}
+}
+
 func TestTextEnvelopePayloadRejectsExpiredSignedArtifacts(t *testing.T) {
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
