@@ -515,6 +515,7 @@ func runTextImport(args []string) error {
 
 func validateTextEnvelopePayload(kind string, body []byte) error {
 	kind = strings.TrimSpace(kind)
+	now := time.Now().UTC()
 	switch kind {
 	case accesspack.EnvelopeKindPack:
 		pack, err := accesspack.Parse(body)
@@ -528,7 +529,7 @@ func validateTextEnvelopePayload(kind string, body []byte) error {
 			return err
 		}
 		pack.Signature = nil
-		return accesspack.Validate(pack, time.Time{})
+		return accesspack.Validate(pack, now)
 	case accesspack.EnvelopeKindBridge:
 		invite, err := accesspack.ParseBridgeInvite(body)
 		if err != nil {
@@ -541,7 +542,7 @@ func validateTextEnvelopePayload(kind string, body []byte) error {
 			return err
 		}
 		invite.Signature = nil
-		return accesspack.ValidateBridgeInvite(invite, time.Time{})
+		return accesspack.ValidateBridgeInvite(invite, now)
 	case accesspack.EnvelopeKindStore:
 		_, err := accesspack.ParseTrustStore(body)
 		return err
@@ -570,7 +571,7 @@ func validateTextEnvelopePayload(kind string, body []byte) error {
 			return err
 		}
 		artifact.Signature = nil
-		return accesspack.ValidateBridgeHelperRegistryArtifact(artifact, time.Time{})
+		return accesspack.ValidateBridgeHelperRegistryArtifact(artifact, now)
 	default:
 		return accesspack.ValidateEnvelopeKind(kind)
 	}

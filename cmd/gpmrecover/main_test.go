@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -388,6 +390,67 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 		if !bytes.HasPrefix(qrBody, []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}) {
 			t.Fatalf("%s is not a png", key)
 		}
+	}
+}
+
+func TestTextEnvelopePayloadRejectsExpiredSignedArtifacts(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+
+	pack := testRecoveryPack("https://example.com")
+	pack.IssuedAtUTC = now.Add(-48 * time.Hour).Format(time.RFC3339)
+	pack.ExpiresAtUTC = now.Add(-24 * time.Hour).Format(time.RFC3339)
+	signedPack, err := accesspack.Sign(pack, priv, "")
+	if err != nil {
+		t.Fatalf("sign expired pack: %v", err)
+	}
+	packBody, err := json.Marshal(signedPack)
+	if err != nil {
+		t.Fatalf("marshal expired pack: %v", err)
+	}
+	if err := validateTextEnvelopePayload(accesspack.EnvelopeKindPack, packBody); err == nil {
+		t.Fatal("expected expired access-pack handoff payload to fail")
+	}
+
+	invite := testBridgeInvite("https://example.com")
+	invite.IssuedAtUTC = now.Add(-48 * time.Hour).Format(time.RFC3339)
+	invite.ExpiresAtUTC = now.Add(-24 * time.Hour).Format(time.RFC3339)
+	signedInvite, err := accesspack.SignBridgeInvite(invite, priv, "")
+	if err != nil {
+		t.Fatalf("sign expired bridge invite: %v", err)
+	}
+	inviteBody, err := json.Marshal(signedInvite)
+	if err != nil {
+		t.Fatalf("marshal expired bridge invite: %v", err)
+	}
+	if err := validateTextEnvelopePayload(accesspack.EnvelopeKindBridge, inviteBody); err == nil {
+		t.Fatal("expected expired bridge-invite handoff payload to fail")
+	}
+
+	artifact := accesspack.BridgeHelperRegistryArtifact{
+		SchemaVersion: accesspack.BridgeHelperRegistryArtifactSchemaVersion,
+		RegistryID:    "expired-registry",
+		Organization: accesspack.Organization{
+			OrgID: "cli-org",
+			Name:  "CLI Org",
+		},
+		IssuedAtUTC:  now.Add(-48 * time.Hour).Format(time.RFC3339),
+		ExpiresAtUTC: now.Add(-24 * time.Hour).Format(time.RFC3339),
+		Registry:     testCLIBridgeHelperRegistry("https://example.com"),
+	}
+	signedArtifact, err := accesspack.SignBridgeHelperRegistryArtifact(artifact, priv, "")
+	if err != nil {
+		t.Fatalf("sign expired helper registry artifact: %v", err)
+	}
+	artifactBody, err := json.Marshal(signedArtifact)
+	if err != nil {
+		t.Fatalf("marshal expired helper registry artifact: %v", err)
+	}
+	if err := validateTextEnvelopePayload(accesspack.EnvelopeKindBridgeHelperRegistrySigned, artifactBody); err == nil {
+		t.Fatal("expected expired signed helper registry handoff payload to fail")
 	}
 }
 
