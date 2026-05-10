@@ -28,6 +28,8 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	unsignedBridge := filepath.Join(dir, "bridge.json")
 	signedBridge := filepath.Join(dir, "bridge.signed.json")
 	helperRegistry := filepath.Join(dir, "bridge-helper-registry.json")
+	signedRegistry := filepath.Join(dir, "bridge-helper-registry.signed.json")
+	verifiedRegistry := filepath.Join(dir, "bridge-helper-registry.verified.json")
 	trustStore := filepath.Join(dir, "trust-store.json")
 
 	if err := runGen([]string{"--private-key-out", privateKey, "--public-key-out", publicKey}); err != nil {
@@ -55,6 +57,22 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}
 	if err := writeBridgeHelperRegistryFile(helperRegistry, testCLIBridgeHelperRegistry(server.URL)); err != nil {
 		t.Fatalf("write helper registry: %v", err)
+	}
+	if err := runBridgeRegistrySign([]string{
+		"--helper-registry", helperRegistry,
+		"--org-id", "cli-org",
+		"--org-name", "CLI Org",
+		"--private-key-file", privateKey,
+		"--registry-id", "cli-registry",
+		"--out", signedRegistry,
+	}); err != nil {
+		t.Fatalf("bridge-registry-sign: %v", err)
+	}
+	if err := runBridgeRegistryVerify([]string{"--signed-registry", signedRegistry, "--public-key-file", publicKey, "--out-registry", verifiedRegistry, "--show-registry"}); err != nil {
+		t.Fatalf("bridge-registry-verify: %v", err)
+	}
+	if err := runBridgeRegistryCheck([]string{"--helper-registry", verifiedRegistry, "--helper-id", "helper-cli", "--org-id", "cli-org", "--require-active"}); err != nil {
+		t.Fatalf("bridge-registry-check verified registry: %v", err)
 	}
 	if err := runBridgeRegistryCheck([]string{"--helper-registry", helperRegistry, "--helper-id", "helper-cli", "--org-id", "cli-org", "--require-active"}); err != nil {
 		t.Fatalf("bridge-registry-check: %v", err)
@@ -106,6 +124,9 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}
 	if err := runBridgeVerify([]string{"--invite", signedBridge, "--trust-store", trustStore, "--show-paths"}); err != nil {
 		t.Fatalf("bridge-verify with trust store: %v", err)
+	}
+	if err := runBridgeRegistryVerify([]string{"--signed-registry", signedRegistry, "--trust-store", trustStore}); err != nil {
+		t.Fatalf("bridge-registry-verify with trust store: %v", err)
 	}
 	if err := runBridgePolicy([]string{"--invite", signedBridge, "--trust-store", trustStore, "--helper-registry", helperRegistry, "--require-helper-registry"}); err != nil {
 		t.Fatalf("bridge-policy with trust store: %v", err)
@@ -223,6 +244,7 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 		"access_pack_signed",
 		"bridge_invite_signed",
 		"bridge_helper_registry",
+		"bridge_helper_registry_signed",
 		"access_pack_text",
 		"bridge_invite_text",
 		"bridge_helper_registry_text",
@@ -241,6 +263,9 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 	}
 	if err := runBridgeVerify([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"], "--show-paths"}); err != nil {
 		t.Fatalf("verify generated bridge invite: %v", err)
+	}
+	if err := runBridgeRegistryVerify([]string{"--signed-registry", manifest.Files["bridge_helper_registry_signed"], "--trust-store", manifest.Files["trust_store"], "--out-registry", filepath.Join(dir, "bridge-helper-registry.verified.json")}); err != nil {
+		t.Fatalf("verify generated bridge helper registry: %v", err)
 	}
 	if err := runBridgePolicy([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"], "--helper-registry", manifest.Files["bridge_helper_registry"]}); err != nil {
 		t.Fatalf("policy generated bridge invite: %v", err)

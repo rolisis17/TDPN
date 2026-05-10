@@ -77,6 +77,76 @@ func TestBridgeInviteTrustStoreResolution(t *testing.T) {
 	}
 }
 
+func TestSignVerifyBridgeHelperRegistryArtifact(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	artifact := testBridgeHelperRegistryArtifact(now)
+	signed, err := SignBridgeHelperRegistryArtifact(artifact, priv, "")
+	if err != nil {
+		t.Fatalf("sign helper registry: %v", err)
+	}
+	verified, err := VerifyBridgeHelperRegistryArtifact(signed, pub, now)
+	if err != nil {
+		t.Fatalf("verify helper registry: %v", err)
+	}
+	if verified.Artifact.Signature == nil {
+		t.Fatalf("signature missing after verify")
+	}
+	if verified.Artifact.Registry.Helpers[0].HelperID != "helper-1" {
+		t.Fatalf("registry not normalized: %+v", verified.Artifact.Registry.Helpers)
+	}
+}
+
+func TestBridgeHelperRegistryArtifactRejectsTampering(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	signed, err := SignBridgeHelperRegistryArtifact(testBridgeHelperRegistryArtifact(now), priv, "")
+	if err != nil {
+		t.Fatalf("sign helper registry: %v", err)
+	}
+	signed.Registry.Helpers[0].ContactURL = "https://evil.example/contact"
+	_, err = VerifyBridgeHelperRegistryArtifact(signed, pub, now)
+	if err == nil {
+		t.Fatalf("expected tampered helper registry to fail verification")
+	}
+	if !strings.Contains(err.Error(), "signature verification failed") {
+		t.Fatalf("expected signature verification error, got %v", err)
+	}
+}
+
+func TestBridgeHelperRegistryArtifactTrustStoreResolution(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	signed, err := SignBridgeHelperRegistryArtifact(testBridgeHelperRegistryArtifact(now), priv, "")
+	if err != nil {
+		t.Fatalf("sign helper registry: %v", err)
+	}
+	store, _, err := AddTrustedKey(EmptyTrustStore(), TrustedKey{
+		OrgID:     "demo-org",
+		OrgName:   "Demo Org",
+		PublicKey: adminauth.EncodePublicKey(pub),
+	}, now)
+	if err != nil {
+		t.Fatalf("add trusted key: %v", err)
+	}
+	resolved, _, err := ResolveTrustedBridgeHelperRegistryPublicKey(store, signed, now)
+	if err != nil {
+		t.Fatalf("resolve helper registry key: %v", err)
+	}
+	if !bytes.Equal(resolved, pub) {
+		t.Fatalf("resolved wrong public key")
+	}
+}
+
 func TestBridgeInvitePolicyPassesDefault(t *testing.T) {
 	report := CheckBridgeInvitePolicy(testBridgeInvite(), DefaultBridgeInvitePolicyOptions(), time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC))
 	if report.Status != "pass" {
@@ -380,6 +450,21 @@ func testBridgeHelperRegistry() BridgeHelperRegistry {
 				UpdatedAtUTC:   "2026-05-10T00:00:00Z",
 			},
 		},
+	}
+}
+
+func testBridgeHelperRegistryArtifact(now time.Time) BridgeHelperRegistryArtifact {
+	return BridgeHelperRegistryArtifact{
+		SchemaVersion: BridgeHelperRegistryArtifactSchemaVersion,
+		RegistryID:    "registry-demo",
+		Organization: Organization{
+			OrgID:   "demo-org",
+			Name:    "Demo Org",
+			HomeURL: "https://demo.example",
+		},
+		IssuedAtUTC:  now.Format(time.RFC3339),
+		ExpiresAtUTC: now.Add(7 * 24 * time.Hour).Format(time.RFC3339),
+		Registry:     testBridgeHelperRegistry(),
 	}
 }
 

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpm.local/schemas/access-recovery-bridge-helper-registry-artifact-v1.schema.json",
+  "title": "Signed Access Recovery Bridge Helper Registry Artifact v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "registry_id",
+    "organization",
+    "issued_at_utc",
+    "expires_at_utc",
+    "registry",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "registry_id": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "organization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["org_id", "name"],
+      "properties": {
+        "org_id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "home_url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 240
+        }
+      }
+    },
+    "issued_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "registry": {
+      "$ref": "access-recovery-bridge-helper-registry-v1.schema.json"
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alg", "key_id", "sig"],
+      "properties": {
+        "alg": {
+          "const": "ed25519"
+        },
+        "key_id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "sig": {
+          "type": "string",
+          "maxLength": 128
+        }
+      }
+    }
+  }
+}

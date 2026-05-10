@@ -140,6 +140,14 @@ func ResolveTrustedBridgeInvitePublicKey(store TrustStore, invite BridgeInvite, 
 	return resolveTrustedPublicKeyFor(store, invite.Organization.OrgID, invite.Signature.KeyID, "bridge invite", now)
 }
 
+func ResolveTrustedBridgeHelperRegistryPublicKey(store TrustStore, artifact BridgeHelperRegistryArtifact, now time.Time) (ed25519.PublicKey, TrustedKey, error) {
+	artifact = NormalizeBridgeHelperRegistryArtifact(artifact)
+	if artifact.Signature == nil {
+		return nil, TrustedKey{}, errors.New("bridge helper registry signature is required")
+	}
+	return resolveTrustedPublicKeyFor(store, artifact.Organization.OrgID, artifact.Signature.KeyID, "bridge helper registry", now)
+}
+
 func resolveTrustedPublicKeyFor(store TrustStore, orgID string, keyID string, label string, now time.Time) (ed25519.PublicKey, TrustedKey, error) {
 	if now.IsZero() {
 		now = time.Now().UTC()

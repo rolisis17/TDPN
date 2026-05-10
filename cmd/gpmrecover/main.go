@@ -91,6 +91,22 @@ type bridgeRegistryUpsertHelperOutput struct {
 	Upsert       accesspack.BridgeHelperRegistryUpsertReport `json:"upsert"`
 }
 
+type bridgeRegistryVerifyOutput struct {
+	Status            string                           `json:"status"`
+	KeyID             string                           `json:"key_id"`
+	Trusted           bool                             `json:"trusted"`
+	TrustedOrgID      string                           `json:"trusted_org_id,omitempty"`
+	TrustedOrgName    string                           `json:"trusted_org_name,omitempty"`
+	RegistryID        string                           `json:"registry_id"`
+	OrganizationID    string                           `json:"organization_id"`
+	OrganizationName  string                           `json:"organization_name"`
+	ExpiresAtUTC      string                           `json:"expires_at_utc"`
+	CanonicalBodySize int                              `json:"canonical_body_size"`
+	HelpersCount      int                              `json:"helpers_count"`
+	Registry          *accesspack.BridgeHelperRegistry `json:"registry,omitempty"`
+	OutputRegistry    string                           `json:"output_registry,omitempty"`
+}
+
 type trustAddOutput struct {
 	Status     string `json:"status"`
 	TrustStore string `json:"trust_store"`
@@ -130,6 +146,10 @@ func main() {
 		err = runBridgeVerify(os.Args[2:])
 	case "bridge-policy":
 		err = runBridgePolicy(os.Args[2:])
+	case "bridge-registry-sign":
+		err = runBridgeRegistrySign(os.Args[2:])
+	case "bridge-registry-verify":
+		err = runBridgeRegistryVerify(os.Args[2:])
 	case "bridge-registry-check":
 		err = runBridgeRegistryCheck(os.Args[2:])
 	case "bridge-registry-upsert-helper":
@@ -174,6 +194,8 @@ func usage() {
   go run ./cmd/gpmrecover bridge-sign --invite FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
   go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE] [--require-helper-registry 1]
+  go run ./cmd/gpmrecover bridge-registry-sign --helper-registry FILE --org-id ID --org-name NAME --private-key-file FILE --out FILE [--registry-id ID] [--lifetime-hours HOURS]
+  go run ./cmd/gpmrecover bridge-registry-verify --signed-registry FILE (--trust-store FILE | --public-key-file FILE) [--out-registry FILE] [--show-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
   go run ./cmd/gpmrecover bridge-registry-upsert-helper --helper-registry FILE --helper-id ID --org-ids ORG[,ORG...] [--display-name NAME] [--contact-url URL] [--status active|quarantined|disabled] [--reason TEXT] [--out FILE]
   go run ./cmd/gpmrecover bridge-registry-set-status --helper-registry FILE --helper-id ID --status active|quarantined|disabled [--reason TEXT] [--out FILE]
@@ -688,6 +710,123 @@ func runBridgePolicy(args []string) error {
 	return nil
 }
 
+func runBridgeRegistrySign(args []string) error {
+	fs := flag.NewFlagSet("bridge-registry-sign", flag.ContinueOnError)
+	helperRegistryFile := fs.String("helper-registry", "", "path to unsigned bridge helper registry JSON")
+	privateFile := fs.String("private-key-file", "", "path to private key file")
+	outFile := fs.String("out", "", "path to write signed bridge helper registry artifact JSON")
+	registryID := fs.String("registry-id", "", "optional registry id; defaults to bridge-registry-YYYYMMDD-HHMMSS")
+	orgID := fs.String("org-id", "", "organization id")
+	orgName := fs.String("org-name", "", "organization name")
+	orgHomeURL := fs.String("org-home-url", "", "optional organization home URL")
+	lifetimeHours := fs.Int("lifetime-hours", 7*24, "signed registry lifetime in hours")
+	keyID := fs.String("key-id", "", "explicit key id (optional)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*outFile) == "" {
+		return errors.New("bridge-registry-sign requires --out")
+	}
+	priv, err := readPrivateKeyFile(*privateFile)
+	if err != nil {
+		return err
+	}
+	registry, err := loadBridgeHelperRegistryFile(*helperRegistryFile)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	id := strings.TrimSpace(*registryID)
+	if id == "" {
+		id = "bridge-registry-" + now.Format("20060102-150405")
+	}
+	lifetime := time.Duration(*lifetimeHours) * time.Hour
+	artifact := accesspack.BridgeHelperRegistryArtifact{
+		SchemaVersion: accesspack.BridgeHelperRegistryArtifactSchemaVersion,
+		RegistryID:    id,
+		Organization: accesspack.Organization{
+			OrgID:   strings.TrimSpace(*orgID),
+			Name:    strings.TrimSpace(*orgName),
+			HomeURL: strings.TrimSpace(*orgHomeURL),
+		},
+		IssuedAtUTC:  now.Format(time.RFC3339),
+		ExpiresAtUTC: now.Add(lifetime).Format(time.RFC3339),
+		Registry:     registry,
+	}
+	signed, err := accesspack.SignBridgeHelperRegistryArtifact(artifact, priv, *keyID)
+	if err != nil {
+		return err
+	}
+	out, err := json.MarshalIndent(signed, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := writeFileWithMode(*outFile, append(out, '\n'), 0o644); err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{
+		"status":      "ok",
+		"out":         strings.TrimSpace(*outFile),
+		"registry_id": signed.RegistryID,
+		"key_id":      signed.Signature.KeyID,
+		"expires_at":  signed.ExpiresAtUTC,
+	})
+}
+
+func runBridgeRegistryVerify(args []string) error {
+	fs := flag.NewFlagSet("bridge-registry-verify", flag.ContinueOnError)
+	signedRegistryFile := fs.String("signed-registry", "", "path to signed bridge helper registry artifact JSON")
+	publicFile := fs.String("public-key-file", "", "path to public key file for one-off verification")
+	trustStoreFile := fs.String("trust-store", "", "path to access recovery trust store JSON")
+	outRegistryFile := fs.String("out-registry", "", "optional path to write verified raw helper registry JSON")
+	showRegistry := fs.Bool("show-registry", false, "include verified raw helper registry in JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	body, err := readInputFileStrict(*signedRegistryFile, "signed bridge helper registry", maxBridgeRegistryFileBytes)
+	if err != nil {
+		return err
+	}
+	artifact, err := accesspack.ParseBridgeHelperRegistryArtifact(body)
+	if err != nil {
+		return err
+	}
+	pub, trustedKey, err := resolveBridgeRegistryVerificationKey(artifact, *publicFile, *trustStoreFile)
+	if err != nil {
+		return err
+	}
+	verified, err := accesspack.VerifyBridgeHelperRegistryArtifact(artifact, pub, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(*outRegistryFile) != "" {
+		if err := writeBridgeHelperRegistryFile(*outRegistryFile, verified.Artifact.Registry); err != nil {
+			return err
+		}
+	}
+	out := bridgeRegistryVerifyOutput{
+		Status:            "ok",
+		KeyID:             verified.KeyID,
+		Trusted:           trustedKey != nil,
+		RegistryID:        verified.Artifact.RegistryID,
+		OrganizationID:    verified.Artifact.Organization.OrgID,
+		OrganizationName:  verified.Artifact.Organization.Name,
+		ExpiresAtUTC:      verified.ExpiresAt.Format(time.RFC3339),
+		CanonicalBodySize: verified.CanonicalBodySize,
+		HelpersCount:      len(verified.Artifact.Registry.Helpers),
+		OutputRegistry:    strings.TrimSpace(*outRegistryFile),
+	}
+	if trustedKey != nil {
+		out.TrustedOrgID = trustedKey.OrgID
+		out.TrustedOrgName = trustedKey.OrgName
+	}
+	if *showRegistry {
+		registry := verified.Artifact.Registry
+		out.Registry = &registry
+	}
+	return json.NewEncoder(os.Stdout).Encode(out)
+}
+
 func runBridgeRegistryCheck(args []string) error {
 	fs := flag.NewFlagSet("bridge-registry-check", flag.ContinueOnError)
 	helperRegistryFile := fs.String("helper-registry", "", "path to bridge helper registry JSON")
@@ -913,6 +1052,26 @@ func runDemoBundle(args []string) error {
 		return fmt.Errorf("verify signed demo bridge invite: %w", err)
 	}
 	bridgeHelperRegistry := demoBridgeHelperRegistry(strings.TrimSpace(*orgID), strings.TrimSpace(*helperContact), now)
+	bridgeHelperRegistryArtifact, err := accesspack.SignBridgeHelperRegistryArtifact(accesspack.BridgeHelperRegistryArtifact{
+		SchemaVersion: accesspack.BridgeHelperRegistryArtifactSchemaVersion,
+		RegistryID:    "reg-demo-" + now.Format("20060102-150405"),
+		Organization: accesspack.Organization{
+			OrgID: strings.TrimSpace(*orgID),
+			Name:  strings.TrimSpace(*orgName),
+		},
+		IssuedAtUTC:  now.Format(time.RFC3339),
+		ExpiresAtUTC: now.Add(7 * 24 * time.Hour).Format(time.RFC3339),
+		Registry:     bridgeHelperRegistry,
+	}, priv, "")
+	if err != nil {
+		return fmt.Errorf("sign demo bridge helper registry: %w", err)
+	}
+	if _, _, err := accesspack.ResolveTrustedBridgeHelperRegistryPublicKey(store, bridgeHelperRegistryArtifact, now); err != nil {
+		return fmt.Errorf("verify demo trust store against helper registry: %w", err)
+	}
+	if _, err := accesspack.VerifyBridgeHelperRegistryArtifact(bridgeHelperRegistryArtifact, pub, now); err != nil {
+		return fmt.Errorf("verify signed demo bridge helper registry: %w", err)
+	}
 	bridgePolicyOptions := accesspack.DefaultBridgeInvitePolicyOptions()
 	bridgePolicyOptions.RequireHelperRegistry = true
 	bridgePolicyOptions.HelperRegistry = &bridgeHelperRegistry
@@ -951,6 +1110,9 @@ func runDemoBundle(args []string) error {
 	if err := writeBridgeHelperRegistryFile(addFile("bridge_helper_registry", "bridge-helper-registry.json"), bridgeHelperRegistry); err != nil {
 		return err
 	}
+	if err := writeJSONFile(addFile("bridge_helper_registry_signed", "bridge-helper-registry.signed.json"), bridgeHelperRegistryArtifact); err != nil {
+		return err
+	}
 
 	if err := writeTextAndQR(addFile("access_pack_text", "access-pack.txt"), addFile("access_pack_qr", "access-pack.qr.png"), accesspack.EnvelopeKindPack, signedPack, *qrSize); err != nil {
 		return err
@@ -987,6 +1149,7 @@ func runDemoBundle(args []string) error {
 			"Import recovery-trust.json as the trust store.",
 			"Import access-pack.signed.json or bridge-invite.signed.json as the signed artifact.",
 			"Or paste/scan the generated GPMREC1 text/QR handoffs.",
+			"Run bridge-registry-verify with bridge-helper-registry.signed.json before publishing a registry snapshot.",
 			"Run bridge-registry-check with bridge-helper-registry.json when changing helper status.",
 			"Use bridge-registry-upsert-helper to add or update helper registry entries without hand-editing JSON.",
 			"Use bridge-registry-set-status to quarantine or re-enable helpers without hand-editing registry JSON.",
@@ -1208,6 +1371,27 @@ func resolveBridgeVerificationKey(invite accesspack.BridgeInvite, publicFile str
 		return pub, nil, err
 	}
 	return nil, nil, errors.New("bridge verification requires --trust-store or --public-key-file")
+}
+
+func resolveBridgeRegistryVerificationKey(artifact accesspack.BridgeHelperRegistryArtifact, publicFile string, trustStoreFile string) (ed25519.PublicKey, *accesspack.TrustedKey, error) {
+	publicFile = strings.TrimSpace(publicFile)
+	trustStoreFile = strings.TrimSpace(trustStoreFile)
+	if trustStoreFile != "" {
+		store, err := loadTrustStoreFile(trustStoreFile)
+		if err != nil {
+			return nil, nil, err
+		}
+		pub, entry, err := accesspack.ResolveTrustedBridgeHelperRegistryPublicKey(store, artifact, time.Now().UTC())
+		if err != nil {
+			return nil, nil, err
+		}
+		return pub, &entry, nil
+	}
+	if publicFile != "" {
+		pub, err := readPublicKeyFile(publicFile)
+		return pub, nil, err
+	}
+	return nil, nil, errors.New("bridge helper registry verification requires --trust-store or --public-key-file")
 }
 
 func readTextEnvelopeInput(text string, textFile string) (string, error) {
