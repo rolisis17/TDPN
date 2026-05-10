@@ -22,6 +22,7 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 
 	"privacynode/internal/fileperm"
+	"privacynode/pkg/accessbridge"
 	"privacynode/pkg/accesspack"
 	"privacynode/pkg/adminauth"
 )
@@ -174,6 +175,8 @@ func main() {
 		err = runBridgeServiceConfig(os.Args[2:])
 	case "bridge-service-check":
 		err = runBridgeServiceCheck(os.Args[2:])
+	case "bridge-service-serve":
+		err = runBridgeServiceServe(os.Args[2:])
 	case "bridge-registry-sign":
 		err = runBridgeRegistrySign(os.Args[2:])
 	case "bridge-registry-verify":
@@ -228,6 +231,7 @@ func usage() {
   go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) [--helper-registry FILE | --signed-helper-registry FILE] [--require-helper-registry 1]
   go run ./cmd/gpmrecover bridge-service-config --invite FILE --signed-helper-registry FILE (--trust-store FILE | --public-key-file FILE) [--out FILE]
   go run ./cmd/gpmrecover bridge-service-check --config FILE [--path-id ID | --url URL] [--out FILE]
+  go run ./cmd/gpmrecover bridge-service-serve --config FILE [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] [--redirect 0]
   go run ./cmd/gpmrecover bridge-registry-sign --helper-registry FILE --org-id ID --org-name NAME --private-key-file FILE --out FILE [--registry-id ID] [--lifetime-hours HOURS]
   go run ./cmd/gpmrecover bridge-registry-verify --signed-registry FILE (--trust-store FILE | --public-key-file FILE) [--out-registry FILE] [--show-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
@@ -1027,6 +1031,44 @@ func runBridgeServiceCheck(args []string) error {
 		return errors.New("bridge service check failed")
 	}
 	return nil
+}
+
+func runBridgeServiceServe(args []string) error {
+	fs := flag.NewFlagSet("bridge-service-serve", flag.ContinueOnError)
+	configFile := fs.String("config", "", "path to bridge service config JSON")
+	addr := fs.String("addr", "127.0.0.1:18980", "HTTP listen address")
+	rps := fs.Int("rps", 2, "fixed-window requests per second per source; 0 disables")
+	maxSources := fs.Int("max-sources", 1024, "maximum tracked sources for rate limiting")
+	abuseLog := fs.String("abuse-log", "", "optional JSONL abuse report log path")
+	redirect := fs.Bool("redirect", false, "redirect allowed bridge requests to the signed access URL instead of returning JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	body, err := readInputFileStrict(*configFile, "bridge service config", maxPackFileBytes)
+	if err != nil {
+		return err
+	}
+	config, err := accesspack.ParseBridgeServiceConfig(body)
+	if err != nil {
+		return err
+	}
+	service, err := accessbridge.NewService(accessbridge.ServiceConfig{
+		BridgeConfig: config,
+		RPS:          *rps,
+		MaxSources:   *maxSources,
+		AbuseLogPath: *abuseLog,
+		Redirect:     *redirect,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "bridge service listening on http://%s\n", strings.TrimSpace(*addr))
+	server := &http.Server{
+		Addr:              strings.TrimSpace(*addr),
+		Handler:           service.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	return server.ListenAndServe()
 }
 
 func runBridgeRegistrySign(args []string) error {
