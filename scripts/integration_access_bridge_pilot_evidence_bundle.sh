@@ -157,7 +157,14 @@ if ! jq -e \
   --arg registry_id "$registry_id" \
   '
     .schema.id == "access_bridge_pilot_evidence_bundle_summary"
+    and .schema.minor == 1
     and .status == "pass"
+    and .evidence_scope == "local_rehearsal"
+    and (.notes | contains("local rehearsal evidence"))
+    and .evidence_policy.require_https == true
+    and .evidence_policy.require_public_host == true
+    and .evidence_policy.base_url_loopback == true
+    and .evidence_policy.base_url_private_or_reserved == true
     and .inputs.base_url == $base_url
     and .inputs.access_code_redacted == true
     and .expected_identity.helper_id == "helper-pilot"
@@ -175,7 +182,7 @@ if ! jq -e \
     and (.artifacts.bundle_tar_sha256_file | length > 0)
     and (.artifacts.bundled_summary_json | length > 0)
     and (.artifacts.deploy_pack_skipped_secrets | length > 0)
-    and .recommended_next_action.id == "record_access_bridge_pilot_evidence_bundle"
+    and .recommended_next_action.id == "capture_real_helper_https_evidence"
   ' "$SUMMARY_JSON" >/dev/null; then
   echo "access bridge pilot evidence bundle integration failed: pass summary contract mismatch"
   cat "$SUMMARY_JSON"

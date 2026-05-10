@@ -1957,11 +1957,48 @@ access_recovery_evidence_json() {
         and str_eq(.identity_check.status; "pass")
         and str_eq(.local_files.config.status; "pass")
         and str_eq(.local_files.deploy_pack.status; "pass");
+      def positive_bounded_rps:
+        ((.observed.env_rps | type) == "string")
+        and (.observed.env_rps | test("^[0-9]+$"))
+        and ((.observed.env_rps | tonumber) >= 1)
+        and ((.observed.env_rps | tonumber) <= 20);
+      def required_host_check_ids:
+        [
+          "deploy_pack_dir_exists",
+          "env_file_exists",
+          "wrapper_file_exists",
+          "systemd_unit_exists",
+          "caddy_example_exists",
+          "nginx_example_exists",
+          "config_json_exists",
+          "config_sha256_matches",
+          "access_code_gate_configured",
+          "query_access_code_disabled",
+          "trusted_proxy_headers_enabled",
+          "loopback_bind",
+          "rate_limit_configured",
+          "wrapper_hardened_flags",
+          "systemd_hardening",
+          "caddy_xff_overwrite",
+          "nginx_xff_overwrite"
+        ];
+      def required_host_checks_pass:
+        . as $summary
+        | required_host_check_ids as $ids
+        | all(
+            $ids[];
+            . as $id
+            | ([ $summary.checks[]? | select((.id // "") == $id and (((.status // "") | tostring | ascii_downcase) == "pass"))] | length) == 1
+          );
       def host_install_semantic_ok:
         rc_ok
         and pass_status
-        and ((.summary.checks_total | type) == "number" and .summary.checks_total > 0)
-        and ((.summary.checks_fail | type) == "number" and .summary.checks_fail == 0);
+        and ((.schema.major | type) == "number" and .schema.major == 1)
+        and ((.schema.minor | type) == "number" and .schema.minor >= 1)
+        and ((.summary.checks_total | type) == "number" and .summary.checks_total >= (required_host_check_ids | length))
+        and ((.summary.checks_fail | type) == "number" and .summary.checks_fail == 0)
+        and positive_bounded_rps
+        and required_host_checks_pass;
       def smoke_details:
         {
           base_url: str_or_null(.base_url),

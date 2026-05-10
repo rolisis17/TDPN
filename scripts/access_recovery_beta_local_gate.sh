@@ -265,7 +265,7 @@ jq -n \
     recommended_next_action: (
       if $status == "pass" then {
         id: "real_helper_bridge_evidence",
-        command: "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --base-url https://bridge.example --path-id helper-web --code-file PATH --config-json PATH --deploy-pack-dir PATH --summary-json .easy-node-logs/access-recovery-pilot/access-bridge-pilot-evidence-summary.json",
+        command: "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PATH --config-json PATH --deploy-pack-dir PATH --summary-json .easy-node-logs/access-recovery-pilot/access-bridge-pilot-evidence-summary.json",
         reason: "Local beta contracts are green; next blocker is real helper HTTPS deployment evidence."
       } else {
         id: "fix_access_recovery_local_gate",

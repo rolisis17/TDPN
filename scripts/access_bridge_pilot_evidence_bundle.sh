@@ -558,6 +558,30 @@ if [[ "$fail_count" != "0" ]]; then
   esac
 fi
 
+base_url_host="$(url_host "$base_url")"
+base_url_loopback="0"
+if base_url_is_loopback "$base_url"; then
+  base_url_loopback="1"
+fi
+base_url_private_or_reserved="0"
+if base_url_host_is_private_or_reserved "$base_url"; then
+  base_url_private_or_reserved="1"
+fi
+evidence_scope="incomplete"
+if [[ "$status" == "pass" ]]; then
+  if [[ "$base_url_loopback" == "1" ]]; then
+    evidence_scope="local_rehearsal"
+  elif [[ "$require_https" == "1" && "$require_public_host" == "1" ]]; then
+    evidence_scope="real_helper_https"
+  else
+    evidence_scope="diagnostic"
+  fi
+fi
+if [[ "$status" == "pass" && "$evidence_scope" != "real_helper_https" ]]; then
+  recommended_action_id="capture_real_helper_https_evidence"
+  recommended_action="Capture the same bundle against a public HTTPS helper host before operator handoff."
+fi
+
 bundle_tar="${bundle_dir}.tar.gz"
 bundle_tar_sha256_file="${bundle_tar}.sha256"
 manifest_sha256="$bundle_dir/manifest.sha256"
@@ -567,6 +591,7 @@ cat >"$report_md" <<REPORT
 # Access Bridge Pilot Evidence Bundle
 
 - Status: ${status}
+- Evidence scope: ${evidence_scope}
 - Base URL: ${base_url}
 - Path ID: ${path_id}
 - Service name: ${service_name}
@@ -580,6 +605,7 @@ REPORT
 jq -n \
   --arg generated_at_utc "$(timestamp_utc)" \
   --arg status "$status" \
+  --arg evidence_scope "$evidence_scope" \
   --arg bundle_dir "$bundle_dir" \
   --arg bundle_tar "$bundle_tar" \
   --arg bundle_tar_sha256_file "$bundle_tar_sha256_file" \
@@ -588,6 +614,11 @@ jq -n \
   --arg bundled_summary_json "$bundled_summary_json" \
   --arg report_md "$report_md" \
   --arg base_url "$base_url" \
+  --arg base_url_host "$base_url_host" \
+  --arg base_url_loopback "$base_url_loopback" \
+  --arg base_url_private_or_reserved "$base_url_private_or_reserved" \
+  --arg require_https "$require_https" \
+  --arg require_public_host "$require_public_host" \
   --arg path_id "$path_id" \
   --arg service_name "$service_name" \
   --arg config_json "$config_json" \
@@ -614,11 +645,25 @@ jq -n \
     schema: {
       id: "access_bridge_pilot_evidence_bundle_summary",
       major: 1,
-      minor: 0
+      minor: 1
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
-    notes: (if $status == "pass" then "Access bridge pilot evidence bundle is ready for operator handoff" else "Access bridge pilot evidence bundle needs operator action" end),
+    evidence_scope: $evidence_scope,
+    notes: (
+      if $status != "pass" then "Access bridge pilot evidence bundle needs operator action"
+      elif $evidence_scope == "real_helper_https" then "Access bridge pilot evidence bundle is ready for operator handoff"
+      elif $evidence_scope == "local_rehearsal" then "Access bridge pilot evidence bundle passed as local rehearsal evidence; capture real helper HTTPS evidence before operator handoff"
+      else "Access bridge pilot evidence bundle passed as diagnostic evidence; capture real helper HTTPS evidence before operator handoff"
+      end
+    ),
+    evidence_policy: {
+      require_https: ($require_https == "1"),
+      require_public_host: ($require_public_host == "1"),
+      base_url_host: $base_url_host,
+      base_url_loopback: ($base_url_loopback == "1"),
+      base_url_private_or_reserved: ($base_url_private_or_reserved == "1")
+    },
     inputs: {
       base_url: $base_url,
       path_id: $path_id,

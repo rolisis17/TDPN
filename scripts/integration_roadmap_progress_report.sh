@@ -920,7 +920,7 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
   "schema": {
     "id": "access_bridge_host_install_check_summary",
     "major": 1,
-    "minor": 0
+    "minor": 1
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
@@ -936,13 +936,32 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
     "env_allow_unauthenticated_local": "false",
     "env_allow_query_code": "false",
     "env_trust_proxy_headers": "true",
-    "env_addr": "127.0.0.1:18980"
+    "env_addr": "127.0.0.1:18980",
+    "env_rps": "2"
   },
   "summary": {
-    "checks_total": 6,
+    "checks_total": 17,
     "checks_fail": 0
   },
-  "checks": [],
+  "checks": [
+    {"id": "deploy_pack_dir_exists", "status": "pass", "message": "deploy pack directory exists"},
+    {"id": "env_file_exists", "status": "pass", "message": "env file exists"},
+    {"id": "wrapper_file_exists", "status": "pass", "message": "wrapper file exists"},
+    {"id": "systemd_unit_exists", "status": "pass", "message": "systemd unit exists"},
+    {"id": "caddy_example_exists", "status": "pass", "message": "Caddy example exists"},
+    {"id": "nginx_example_exists", "status": "pass", "message": "nginx example exists"},
+    {"id": "config_json_exists", "status": "pass", "message": "config JSON exists"},
+    {"id": "config_sha256_matches", "status": "pass", "message": "env config sha256 matches supplied config"},
+    {"id": "access_code_gate_configured", "status": "pass", "message": "access-code hash is configured"},
+    {"id": "query_access_code_disabled", "status": "pass", "message": "query-string access codes disabled"},
+    {"id": "trusted_proxy_headers_enabled", "status": "pass", "message": "trusted proxy headers enabled"},
+    {"id": "loopback_bind", "status": "pass", "message": "bridge service is configured for loopback bind"},
+    {"id": "rate_limit_configured", "status": "pass", "message": "bridge service rate limit is enabled"},
+    {"id": "wrapper_hardened_flags", "status": "pass", "message": "wrapper propagates hardened flags"},
+    {"id": "systemd_hardening", "status": "pass", "message": "systemd unit contains expected hardening"},
+    {"id": "caddy_xff_overwrite", "status": "pass", "message": "Caddy overwrites X-Forwarded-For"},
+    {"id": "nginx_xff_overwrite", "status": "pass", "message": "nginx overwrites X-Forwarded-For"}
+  ],
   "recommended_next_action": {
     "id": "record_access_bridge_pilot_evidence_bundle",
     "command": "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json"
@@ -1042,6 +1061,7 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_host_install.status == "pass"
   and .access_recovery_track.access_bridge_host_install.source_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
   and .access_recovery_track.access_bridge_host_install.details.checks_fail == 0
+  and .access_recovery_track.access_bridge_host_install.details.env_rps == "2"
   and .access_recovery_track.evidence_binding.ok == true
   and .access_recovery_track.evidence_binding.helper_id_match == true
   and .access_recovery_track.evidence_binding.host_config_sha256_match == true
@@ -1731,6 +1751,76 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_access_recovery_bad_host_semantic_summary.json" >/dev/null; then
   echo "Access Recovery bad host semantic summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_bad_host_semantic_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery forged current host-install summaries without hardening checks block required evidence"
+ACCESS_RECOVERY_FORGED_HOST_INSTALL_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_forged_current_summary.json"
+jq '.summary.checks_total = 1 | .summary.checks_fail = 0 | .checks = [{"id":"rate_limit_configured","status":"pass","message":"bridge service rate limit is enabled"}]' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_RECOVERY_FORGED_HOST_INSTALL_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_RECOVERY_FORGED_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_forged_host_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_forged_host_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_forged_host.log 2>&1; then
+  echo "expected failure when required Access Recovery host-install hardening evidence is missing"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_forged_host.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.access_bridge_service_smoke.status == "pass"
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
+  and .access_recovery_track.access_bridge_host_install.status == "fail"
+  and .access_recovery_track.access_bridge_host_install.available == false
+  and .access_recovery_track.access_bridge_host_install.semantic_ok == false
+  and .access_recovery_track.access_bridge_host_install.details.env_rps == "2"
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_host_install"
+' "$TMP_DIR/roadmap_progress_access_recovery_forged_host_summary.json" >/dev/null; then
+  echo "Access Recovery forged host-install summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_forged_host_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery old host-install summaries without rate-limit evidence block required evidence"
+ACCESS_RECOVERY_OLD_HOST_INSTALL_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_old_without_rps_summary.json"
+jq 'del(.observed.env_rps) | .schema.minor = 0 | .summary.checks_total = 1 | .summary.checks_fail = 0 | .checks = []' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_RECOVERY_OLD_HOST_INSTALL_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_RECOVERY_OLD_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_old_host_without_rps_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_old_host_without_rps_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_old_host_without_rps.log 2>&1; then
+  echo "expected failure when required Access Recovery host-install rate-limit evidence is missing"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_old_host_without_rps.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.access_bridge_service_smoke.status == "pass"
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
+  and .access_recovery_track.access_bridge_host_install.status == "fail"
+  and .access_recovery_track.access_bridge_host_install.available == false
+  and .access_recovery_track.access_bridge_host_install.semantic_ok == false
+  and .access_recovery_track.access_bridge_host_install.details.env_rps == null
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_host_install"
+' "$TMP_DIR/roadmap_progress_access_recovery_old_host_without_rps_summary.json" >/dev/null; then
+  echo "Access Recovery old host-install summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_old_host_without_rps_summary.json"
   exit 1
 fi
 PHASE6_OUTPUT_PRESENT=0
