@@ -218,6 +218,15 @@ host_looks_non_public_for_real_helper() {
       return 0
       ;;
   esac
+  if [[ "$host" =~ ^192\.0\.(0|2)\. || "$host" =~ ^192\.88\.99\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^198\.(1[89]|51\.100)\. || "$host" =~ ^203\.0\.113\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^(22[4-9]|23[0-9]|24[0-9]|25[0-5])\. ]]; then
+    return 0
+  fi
   [[ "$host" != *.* ]] && return 0
   return 1
 }
@@ -436,6 +445,8 @@ summary_json="$(abs_path "$(first_nonempty "$summary_json" "$reports_dir/access_
 report_md="$(abs_path "$(first_nonempty "$report_md" "$reports_dir/access_recovery_real_helper_evidence_run_${run_id}.md")")"
 
 bundle_log="$reports_dir/access_recovery_real_helper_evidence_run_${run_id}_bundle.log"
+host_install_check_summary_json="$reports_dir/access_bridge_host_install_check_${run_id}.json"
+host_install_check_log="$reports_dir/access_recovery_real_helper_evidence_run_${run_id}_host_install_check.log"
 verify_log="$reports_dir/access_recovery_real_helper_evidence_run_${run_id}_verify.log"
 roadmap_log="$reports_dir/access_recovery_real_helper_evidence_run_${run_id}_roadmap.log"
 
@@ -454,13 +465,18 @@ write_summary() {
   local stage="$3"
   local notes="$4"
   local generated_at_utc
-  local bundle_obj verify_obj roadmap_obj pilot_ready roadmap_ready evidence_scope verifier_scope
+  local host_install_obj bundle_obj verify_obj roadmap_obj pilot_ready roadmap_ready evidence_scope verifier_scope
   local code_present_json code_file_present_json
   local roadmap_refresh_json
   generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  host_install_obj="$(json_file_or_null "$host_install_check_summary_json")"
   bundle_obj="$(json_file_or_null "$bundle_summary_json")"
   verify_obj="$(json_file_or_null "$verification_summary_json")"
-  roadmap_obj="$(json_file_or_null "$roadmap_summary_json")"
+  if [[ "$roadmap_refresh" == "1" ]]; then
+    roadmap_obj="$(json_file_or_null "$roadmap_summary_json")"
+  else
+    roadmap_obj="null"
+  fi
   pilot_ready="$(printf '%s\n' "$verify_obj" | jq -r 'if type == "object" then (.pilot_handoff_ready // false | tostring) else "false" end')"
   roadmap_ready="$(printf '%s\n' "$roadmap_obj" | jq -r 'if type == "object" then (.access_recovery_pilot_handoff_ready // false | tostring) else "false" end')"
   evidence_scope="$(printf '%s\n' "$bundle_obj" | jq -r 'if type == "object" then (.evidence_scope // "") else "" end')"
@@ -490,6 +506,8 @@ write_summary() {
     --arg base_url "$base_url" \
     --arg path_id "$path_id" \
     --arg reports_dir "$reports_dir" \
+    --arg host_install_check_summary_json "$host_install_check_summary_json" \
+    --arg host_install_check_log "$host_install_check_log" \
     --arg bundle_summary_json "$bundle_summary_json" \
     --arg bundle_log "$bundle_log" \
     --arg provenance_json "$provenance_out" \
@@ -507,12 +525,13 @@ write_summary() {
     --argjson pilot_handoff_ready "$pilot_ready" \
     --argjson roadmap_ready "$roadmap_ready" \
     --argjson roadmap_refresh "$roadmap_refresh_json" \
+    --argjson host_install_check "$host_install_obj" \
     --argjson bundle "$bundle_obj" \
     --argjson verifier "$verify_obj" \
     --argjson roadmap "$roadmap_obj" \
     '{
       version: 1,
-      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 0},
+      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 1},
       generated_at_utc: $generated_at_utc,
       status: $status,
       rc: $rc,
@@ -532,12 +551,15 @@ write_summary() {
         roadmap_access_recovery_pilot_handoff_ready: $roadmap_ready
       },
       child_summaries: {
+        host_install_check: $host_install_check,
         bundle: $bundle,
         verifier: $verifier,
         roadmap: $roadmap
       },
       artifacts: {
         reports_dir: $reports_dir,
+        host_install_check_summary_json: $host_install_check_summary_json,
+        host_install_check_log: $host_install_check_log,
         bundle_summary_json: $bundle_summary_json,
         bundle_log: $bundle_log,
         provenance_json: $provenance_json,
@@ -558,6 +580,7 @@ write_summary() {
 - Stage: ${stage}
 - Notes: ${notes}
 - Base URL: ${base_url}
+- Host install check: ${host_install_check_summary_json}
 - Bundle summary: ${bundle_summary_json}
 - Verifier receipt: ${verification_summary_json}
 - Roadmap summary: ${roadmap_summary_json}
@@ -625,13 +648,36 @@ if [[ -n "$client_cert" && -z "$client_key" || -z "$client_cert" && -n "$client_
   fail_preflight "--client-cert and --client-key must be supplied together"
 fi
 
+host_install_check_script="${ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT:-$ROOT_DIR/scripts/access_bridge_host_install_check.sh}"
 bundle_script="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT:-$ROOT_DIR/scripts/access_bridge_pilot_evidence_bundle.sh}"
 verify_script="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT:-$ROOT_DIR/scripts/access_bridge_pilot_evidence_bundle_verify.sh}"
 roadmap_script="${ROADMAP_PROGRESS_REPORT_SCRIPT:-$ROOT_DIR/scripts/roadmap_progress_report.sh}"
+[[ -x "$host_install_check_script" ]] || fail_preflight "missing executable host install check script: $host_install_check_script"
 [[ -x "$bundle_script" ]] || fail_preflight "missing executable bundle script: $bundle_script"
 [[ -x "$verify_script" ]] || fail_preflight "missing executable verifier script: $verify_script"
 if [[ "$roadmap_refresh" == "1" && ! -x "$roadmap_script" ]]; then
   fail_preflight "missing executable roadmap script: $roadmap_script"
+fi
+
+host_install_check_args=(
+  --deploy-pack-dir "$deploy_pack_dir"
+  --service-name "$service_name"
+  --config-json "$config_json"
+  --expected-base-url "$base_url"
+  --summary-json "$host_install_check_summary_json"
+  --print-summary-json "$print_child_json"
+)
+set +e
+"$host_install_check_script" "${host_install_check_args[@]}" >"$host_install_check_log" 2>&1
+host_install_check_rc=$?
+set -e
+if [[ "$host_install_check_rc" -ne 0 ]]; then
+  write_summary "fail" "$host_install_check_rc" "host_install_check" "Access bridge deploy pack host install check failed"
+  print_failure_log_tail "host-install-check" "$host_install_check_log"
+  echo "access-recovery-real-helper-evidence-run: status=fail stage=host_install_check"
+  echo "summary_json: $summary_json"
+  [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
+  exit "$host_install_check_rc"
 fi
 
 bundle_args=(

@@ -100,6 +100,12 @@ go run ./cmd/gpmrecover bridge-service-deploy-pack \
   --public-host HELPER_PUBLIC_DNS \
   --config-sha256 "$CONFIG_HASH" \
   --access-code-sha256 "$CODE_HASH"
+
+bash ./scripts/access_bridge_host_install_check.sh \
+  --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
+  --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \
+  --expected-base-url https://HELPER_PUBLIC_DNS \
+  --summary-json .easy-node-logs/access-recovery-demo/bridge-host-install-check.json
 ```
 
 4. Bind the bridge service to loopback, for example `127.0.0.1:18980`, and put Caddy or nginx in front of it with HTTPS enabled. The public endpoint must be `https://HELPER_PUBLIC_DNS`, proxying only to the local bridge listener. Keep query-string access codes disabled; pass access codes through `X-GPM-Bridge-Code`.

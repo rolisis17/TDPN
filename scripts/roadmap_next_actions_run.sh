@@ -853,6 +853,7 @@ write_multi_vm_stability_vm_command_source_precondition_log_01() {
 }
 
 build_access_recovery_trust_store_operator_command_01() {
+  local action_id="${1:-trusted_pilot_evidence_verify}"
   local -a cmd=("./scripts/roadmap_next_actions_run.sh")
 
   if [[ -n "${reports_dir:-}" ]]; then
@@ -879,7 +880,7 @@ build_access_recovery_trust_store_operator_command_01() {
   if [[ "${local_only:-0}" == "1" ]]; then
     cmd+=(--local-only 1)
   fi
-  cmd+=(--include-id "trusted_pilot_evidence_verify")
+  cmd+=(--include-id "$action_id")
   cmd+=(--access-recovery-trust-store "REPLACE_WITH_TRUST_STORE")
   cmd+=(--print-summary-json "${print_summary_json:-1}")
   render_command_line_from_argv "${cmd[@]}"
@@ -2799,7 +2800,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         "$action_preflight_notes" \
         "$action_preflight_next_operator_action"
     elif [[ "$action_preflight_failure_kind" == "missing_access_recovery_trust_store_precondition" ]]; then
-      action_preflight_next_operator_action="$(build_access_recovery_trust_store_operator_command_01)"
+      action_preflight_next_operator_action="$(build_access_recovery_trust_store_operator_command_01 "$action_id")"
       write_access_recovery_trust_store_precondition_log_01 \
         "$action_log" \
         "$action_command_redacted" \

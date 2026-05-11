@@ -7,6 +7,9 @@ cd "$ROOT_DIR"
 deploy_pack_dir=""
 service_name="gpm-access-bridge"
 config_json=""
+expected_base_url=""
+expected_public_host=""
+expected_host=""
 summary_json=""
 print_summary_json="1"
 
@@ -17,6 +20,8 @@ Usage:
     --deploy-pack-dir DIR \
     [--service-name gpm-access-bridge] \
     [--config-json FILE] \
+    [--expected-base-url https://HELPER_PUBLIC_DNS] \
+    [--expected-public-host HELPER_PUBLIC_DNS] \
     [--summary-json FILE] \
     [--print-summary-json 0|1]
 
@@ -72,6 +77,22 @@ normalize_bridge_host() {
     host="${host%.}"
   done
   printf '%s' "$host"
+}
+
+url_host() {
+  local rest="${1:-}"
+  rest="${rest#*://}"
+  rest="${rest%%/*}"
+  rest="${rest%%\?*}"
+  rest="${rest%%#*}"
+  rest="${rest##*@}"
+  if [[ "$rest" == \[*\]* ]]; then
+    rest="${rest#\[}"
+    normalize_bridge_host "${rest%%\]*}"
+  else
+    rest="${rest%%:*}"
+    normalize_bridge_host "$rest"
+  fi
 }
 
 is_private_or_reserved_ipv4_addr() {
@@ -282,6 +303,14 @@ while [[ $# -gt 0 ]]; do
       config_json="${2:-}"
       shift 2
       ;;
+    --expected-base-url)
+      expected_base_url="${2:-}"
+      shift 2
+      ;;
+    --expected-public-host)
+      expected_public_host="${2:-}"
+      shift 2
+      ;;
     --summary-json)
       summary_json="${2:-}"
       shift 2
@@ -321,6 +350,29 @@ deploy_pack_dir="$(abs_path "$deploy_pack_dir")"
 service_name="$(sanitize_systemd_name "$service_name")"
 if [[ -n "$config_json" ]]; then
   config_json="$(abs_path "$config_json")"
+fi
+if [[ -n "$expected_base_url" ]]; then
+  expected_host="$(url_host "$expected_base_url")"
+  if [[ -z "$expected_host" ]]; then
+    echo "access bridge host install check failed: --expected-base-url must include a host" >&2
+    exit 2
+  fi
+fi
+if [[ -n "$expected_public_host" ]]; then
+  expected_public_host="$(normalize_bridge_host "$expected_public_host")"
+  if [[ "$expected_public_host" == *"://"* || "$expected_public_host" == *"/"* || "$expected_public_host" == *":"* ]]; then
+    echo "access bridge host install check failed: --expected-public-host must be a bare host" >&2
+    exit 2
+  fi
+  if [[ -n "$expected_host" && "$expected_host" != "$expected_public_host" ]]; then
+    echo "access bridge host install check failed: --expected-base-url and --expected-public-host disagree" >&2
+    exit 2
+  fi
+  expected_host="$expected_public_host"
+fi
+if [[ -n "$expected_host" ]] && ! is_bridge_public_host "$expected_host"; then
+  echo "access bridge host install check failed: expected helper host must be a safe public host: $expected_host" >&2
+  exit 2
 fi
 if [[ -z "$summary_json" ]]; then
   summary_json="$ROOT_DIR/.easy-node-logs/access_bridge_host_install_check_summary.json"
@@ -473,6 +525,13 @@ if [[ -f "$caddy_file" ]]; then
   else
     add_check "caddy_public_host_valid" "fail" "Caddy site host must be a safe bare DNS name or IPv4 address"
   fi
+  if [[ -z "$expected_host" ]]; then
+    add_check "caddy_public_host_matches_expected" "skip" "no expected helper host supplied"
+  elif [[ "$(normalize_bridge_host "$caddy_site_host")" == "$expected_host" ]]; then
+    add_check "caddy_public_host_matches_expected" "pass" "Caddy site host matches expected helper host"
+  else
+    add_check "caddy_public_host_matches_expected" "fail" "Caddy site host does not match expected helper host"
+  fi
   if [[ -n "$env_addr" && "$caddy_reverse_proxy" == "$env_addr" ]]; then
     add_check "caddy_reverse_proxy_target" "pass" "Caddy reverse_proxy target matches GPM_BRIDGE_ADDR"
   else
@@ -492,6 +551,13 @@ if [[ -f "$nginx_file" ]]; then
     add_check "nginx_public_host_valid" "pass" "nginx server_name is a safe bare public host"
   else
     add_check "nginx_public_host_valid" "fail" "nginx server_name must be a safe bare DNS name or IPv4 address"
+  fi
+  if [[ -z "$expected_host" ]]; then
+    add_check "nginx_public_host_matches_expected" "skip" "no expected helper host supplied"
+  elif [[ "$(normalize_bridge_host "$nginx_server_name")" == "$expected_host" ]]; then
+    add_check "nginx_public_host_matches_expected" "pass" "nginx server_name matches expected helper host"
+  else
+    add_check "nginx_public_host_matches_expected" "fail" "nginx server_name does not match expected helper host"
   fi
   if [[ -n "$env_addr" && "$nginx_proxy_pass" == "$env_addr" ]]; then
     add_check "nginx_proxy_pass_target" "pass" "nginx proxy_pass target matches GPM_BRIDGE_ADDR"
@@ -523,6 +589,8 @@ jq -n \
   --arg deploy_pack_dir "$deploy_pack_dir" \
   --arg service_name "$service_name" \
   --arg config_json "$config_json" \
+  --arg expected_base_url "$expected_base_url" \
+  --arg expected_host "$expected_host" \
   --arg expected_config_sha256 "$expected_config_sha256" \
   --arg config_allow_local_access_paths "$config_allow_local_access_paths" \
   --arg env_config_sha256 "$env_config_sha256" \
@@ -546,7 +614,7 @@ jq -n \
     schema: {
       id: "access_bridge_host_install_check_summary",
       major: 1,
-      minor: 3
+      minor: 4
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -554,9 +622,12 @@ jq -n \
     inputs: {
       deploy_pack_dir: $deploy_pack_dir,
       service_name: $service_name,
-      config_json: $config_json
+      config_json: $config_json,
+      expected_base_url: $expected_base_url,
+      expected_public_host: $expected_host
     },
     observed: {
+      expected_public_host: $expected_host,
       expected_config_sha256: $expected_config_sha256,
       config_allow_local_access_paths: $config_allow_local_access_paths,
       env_config_sha256: $env_config_sha256,

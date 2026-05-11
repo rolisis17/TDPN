@@ -82,6 +82,7 @@ done
   --deploy-pack-dir "$DEPLOY_DIR" \
   --service-name gpm-access-bridge-host-check \
   --config-json "$SERVICE_CONFIG" \
+  --expected-base-url https://recovery-helper.gpm-pilot.net/bootstrap \
   --summary-json "$SUMMARY_JSON" \
   --print-summary-json 0
 
@@ -92,6 +93,9 @@ if ! jq -e \
     .schema.id == "access_bridge_host_install_check_summary"
     and .status == "pass"
     and .inputs.deploy_pack_dir == $deploy_dir
+    and .inputs.expected_base_url == "https://recovery-helper.gpm-pilot.net/bootstrap"
+    and .inputs.expected_public_host == "recovery-helper.gpm-pilot.net"
+    and .observed.expected_public_host == "recovery-helper.gpm-pilot.net"
     and .observed.expected_config_sha256 == $config_sha256
     and .observed.config_allow_local_access_paths == "false"
     and .observed.env_config_sha256 == $config_sha256
@@ -109,6 +113,8 @@ if ! jq -e \
     and ([.checks[] | select(.id == "rate_limit_source_cap_configured" and .status == "pass")] | length == 1)
     and ([.checks[] | select(.id == "config_local_access_paths_disabled" and .status == "pass")] | length == 1)
     and ([.checks[] | select(.id == "loopback_bind" and .status == "pass")] | length == 1)
+    and ([.checks[] | select(.id == "caddy_public_host_matches_expected" and .status == "pass")] | length == 1)
+    and ([.checks[] | select(.id == "nginx_public_host_matches_expected" and .status == "pass")] | length == 1)
     and ([.checks[] | select(.id == "caddy_reverse_proxy_target" and .status == "pass")] | length == 1)
     and ([.checks[] | select(.id == "nginx_proxy_pass_target" and .status == "pass")] | length == 1)
     and .summary.checks_fail == 0
@@ -116,6 +122,35 @@ if ! jq -e \
   ' "$SUMMARY_JSON" >/dev/null; then
   echo "access bridge host install check integration failed: pass summary mismatch"
   cat "$SUMMARY_JSON"
+  exit 1
+fi
+
+set +e
+./scripts/access_bridge_host_install_check.sh \
+  --deploy-pack-dir "$DEPLOY_DIR" \
+  --service-name gpm-access-bridge-host-check \
+  --config-json "$SERVICE_CONFIG" \
+  --expected-base-url https://wrong-helper.gpm-pilot.net/bootstrap \
+  --summary-json "$TMP_DIR/bad-expected-host-summary.json" \
+  --print-summary-json 0 >/dev/null 2>&1
+bad_expected_host_rc=$?
+set -e
+if [[ "$bad_expected_host_rc" -eq 0 ]]; then
+  echo "access bridge host install check integration failed: mismatched expected helper host should fail"
+  cat "$TMP_DIR/bad-expected-host-summary.json"
+  exit 1
+fi
+if ! jq -e \
+  '
+    .status == "fail"
+    and .observed.expected_public_host == "wrong-helper.gpm-pilot.net"
+    and .observed.caddy_site_host == "recovery-helper.gpm-pilot.net"
+    and .observed.nginx_server_name == "recovery-helper.gpm-pilot.net"
+    and ([.checks[] | select(.id == "caddy_public_host_matches_expected" and .status == "fail")] | length == 1)
+    and ([.checks[] | select(.id == "nginx_public_host_matches_expected" and .status == "fail")] | length == 1)
+  ' "$TMP_DIR/bad-expected-host-summary.json" >/dev/null; then
+  echo "access bridge host install check integration failed: mismatched expected helper host summary mismatch"
+  cat "$TMP_DIR/bad-expected-host-summary.json"
   exit 1
 fi
 
@@ -160,6 +195,8 @@ bad_public_hosts=(
   "example.com"
   "example.net"
   "example.org"
+  "ts.net"
+  "tailscale.net"
   "helper.tailnet.ts.net"
   "helper.tailscale.net"
   "user@public.tdpn.net"

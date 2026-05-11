@@ -709,13 +709,18 @@ run_json_step "deployment_evidence" "$deployment_summary" "$deployment_log" "${d
 
 host_summary="$bundle_dir/access_bridge_host_install_check_summary.json"
 host_log="$bundle_dir/access_bridge_host_install_check.log"
-run_json_step "host_install_check" "$host_summary" "$host_log" \
-  bash ./scripts/access_bridge_host_install_check.sh \
-    --deploy-pack-dir "$deploy_pack_dir" \
-    --config-json "$config_json" \
-    --service-name "$service_name" \
-    --summary-json "$host_summary" \
-    --print-summary-json 0
+host_install_args=(
+  bash ./scripts/access_bridge_host_install_check.sh
+  --deploy-pack-dir "$deploy_pack_dir"
+  --config-json "$config_json"
+  --service-name "$service_name"
+  --summary-json "$host_summary"
+  --print-summary-json 0
+)
+if [[ "$require_public_host" == "1" ]] && ! base_url_host_is_private_or_reserved "$base_url"; then
+  host_install_args+=(--expected-base-url "$base_url")
+fi
+run_json_step "host_install_check" "$host_summary" "$host_log" "${host_install_args[@]}"
 
 steps_json="$(jq -s '.' "$steps_jsonl")"
 fail_count="$(jq -s '[.[] | select(.status != "pass" or .rc != 0)] | length' "$steps_jsonl")"

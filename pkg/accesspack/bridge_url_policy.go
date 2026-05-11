@@ -127,6 +127,9 @@ func bridgeAccessPathDNSNameLooksReserved(host string) bool {
 	if host == "example.com" || host == "example.net" || host == "example.org" {
 		return true
 	}
+	if host == "ts.net" || host == "tailscale.net" {
+		return true
+	}
 	for _, suffix := range []string{".localhost", ".local", ".lan", ".internal", ".test", ".invalid", ".example", ".example.com", ".example.net", ".example.org", ".ts.net", ".tailscale.net"} {
 		if strings.HasSuffix(host, suffix) {
 			return true

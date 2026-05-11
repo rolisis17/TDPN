@@ -564,6 +564,15 @@ JSON
 }
 JSON
     ;;
+  access_recovery_real_helper_trust_store_placeholder)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"real_helper_https_evidence","label":"Real helper HTTPS evidence","command":"./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://helper.gpm-pilot.net --path-id helper-web --code-file /tmp/bridge-code.txt --config-json /tmp/bridge-service-config.json --deploy-pack-dir /tmp/bridge-deploy --provenance-private-key-file /tmp/provenance.key --provenance-org-id freenews-demo --provenance-org-name Demo --trust-store TRUST_STORE --reports-dir /tmp/access-recovery-pilot","reason":"test-real-helper-trust-store","requires_real_hosts":true}
+  ]
+}
+JSON
+    ;;
   access_recovery_trust_store_concrete)
     cat >"$summary_json" <<JSON
 {
@@ -1216,6 +1225,43 @@ if ! jq -e '
 ' "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_MISSING" >/dev/null; then
   echo "Access Recovery missing trust-store precondition summary mismatch"
   cat "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_MISSING"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery real-helper action reports its own trust-store remediation id"
+SUMMARY_ACCESS_RECOVERY_REAL_HELPER_TRUST_STORE_MISSING="$TMP_DIR/summary_access_recovery_real_helper_trust_store_missing.json"
+REPORTS_ACCESS_RECOVERY_REAL_HELPER_TRUST_STORE_MISSING="$TMP_DIR/reports_access_recovery_real_helper_trust_store_missing"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_real_helper_trust_store_placeholder \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_REAL_HELPER_TRUST_STORE_MISSING" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_REAL_HELPER_TRUST_STORE_MISSING" \
+  --include-id real_helper_https_evidence \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_real_helper_trust_store_missing.log" 2>&1
+access_recovery_real_helper_trust_store_missing_rc=$?
+set -e
+if [[ "$access_recovery_real_helper_trust_store_missing_rc" != "2" ]]; then
+  echo "expected real-helper Access Recovery trust-store hard-fail rc=2, got rc=$access_recovery_real_helper_trust_store_missing_rc"
+  cat "$TMP_DIR/access_recovery_real_helper_trust_store_missing.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_REAL_HELPER_TRUST_STORE_MISSING" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_REAL_HELPER_TRUST_STORE_MISSING"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .inputs.access_recovery_trust_store_configured == false
+  and .actions[0].id == "real_helper_https_evidence"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_trust_store_precondition"
+  and (.actions[0].next_operator_action | contains("--include-id real_helper_https_evidence"))
+  and ((.actions[0].next_operator_action | contains("--include-id trusted_pilot_evidence_verify")) | not)
+  and (.actions[0].next_operator_action | contains("--access-recovery-trust-store REPLACE_WITH_TRUST_STORE"))
+' "$SUMMARY_ACCESS_RECOVERY_REAL_HELPER_TRUST_STORE_MISSING" >/dev/null; then
+  echo "Access Recovery real-helper missing trust-store precondition summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_REAL_HELPER_TRUST_STORE_MISSING"
   exit 1
 fi
 

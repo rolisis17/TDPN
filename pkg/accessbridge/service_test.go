@@ -333,9 +333,19 @@ func TestNewServiceRejectsUnsafeServiceablePathHosts(t *testing.T) {
 	}{
 		{name: "plain-http", url: "http://helper.gpm-pilot.net/bridge"},
 		{name: "private-ip", url: "https://10.0.0.5/bridge"},
+		{name: "loopback-ip", url: "https://127.0.0.1/bridge"},
+		{name: "link-local-ip", url: "https://169.254.1.1/bridge"},
+		{name: "cgnat-ip", url: "https://100.64.0.10/bridge"},
+		{name: "ipv6-loopback", url: "https://[::1]/bridge"},
+		{name: "ipv6-link-local", url: "https://[fe80::1]/bridge"},
+		{name: "ipv6-ula-fc", url: "https://[fc00::1]/bridge"},
+		{name: "ipv6-ula-fd", url: "https://[fd00::1]/bridge"},
+		{name: "ipv6-documentation", url: "https://[2001:db8::1]/bridge"},
 		{name: "reserved-domain", url: "https://reserved-helper.example/bridge"},
 		{name: "tailscale-overlay", url: "https://helper.tailnet.ts.net/bridge"},
+		{name: "tailscale-apex-ts-net", url: "https://ts.net/bridge"},
 		{name: "tailscale-domain", url: "https://helper.tailscale.net/bridge"},
+		{name: "tailscale-apex-domain", url: "https://tailscale.net/bridge"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := NewService(ServiceConfig{

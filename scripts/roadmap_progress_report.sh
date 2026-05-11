@@ -2541,7 +2541,7 @@ access_recovery_track_json_from_evidence() {
         elif ($e == $deployment_evidence) then
           "bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/access_bridge_service_smoke_summary.json --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/access_bridge_deployment_evidence_summary.json"
         else
-          "bash ./scripts/access_bridge_host_install_check.sh --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
+          "bash ./scripts/access_bridge_host_install_check.sh --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
         end;
       def track_status:
         if real_helper_https_base_ready and pilot_handoff_ready then "pilot-evidence-ready"

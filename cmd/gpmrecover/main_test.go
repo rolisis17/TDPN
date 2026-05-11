@@ -623,6 +623,46 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	}
 }
 
+func TestBridgeCLIDefaultRejectsUnsafeHelperServicePaths(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		baseURL string
+	}{
+		{name: "loopback-ip", baseURL: "https://127.0.0.1:18980"},
+		{name: "link-local-ip", baseURL: "https://169.254.1.1"},
+		{name: "cgnat-ip", baseURL: "https://100.64.0.10"},
+		{name: "ipv6-loopback", baseURL: "https://[::1]:18980"},
+		{name: "ipv6-link-local", baseURL: "https://[fe80::1]"},
+		{name: "ipv6-ula", baseURL: "https://[fd00::1]"},
+		{name: "ipv6-documentation", baseURL: "https://[2001:db8::1]"},
+		{name: "tailscale-apex-ts-net", baseURL: "https://ts.net"},
+		{name: "tailscale-apex-domain", baseURL: "https://tailscale.net"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			privateKey := filepath.Join(dir, "recovery.key")
+			publicKey := filepath.Join(dir, "recovery.pub")
+			signedBridge, signedRegistry := writeSignedCLIBridgeArtifacts(t, dir, tc.baseURL, privateKey, publicKey)
+
+			if err := runBridgePolicy([]string{
+				"--invite", signedBridge,
+				"--public-key-file", publicKey,
+				"--signed-helper-registry", signedRegistry,
+			}); err == nil {
+				t.Fatal("expected bridge-policy to reject unsafe helper service path by default")
+			}
+			if err := runBridgeServiceConfig([]string{
+				"--invite", signedBridge,
+				"--public-key-file", publicKey,
+				"--signed-helper-registry", signedRegistry,
+				"--out", filepath.Join(dir, "bridge-service-config.json"),
+			}); err == nil {
+				t.Fatal("expected bridge-service-config to reject unsafe helper service path by default")
+			}
+		})
+	}
+}
+
 func TestVerifyOptionalSHA256(t *testing.T) {
 	body := []byte(`{"status":"pass"}`)
 	sum := sha256.Sum256(body)
@@ -1131,6 +1171,42 @@ func assertFileExists(t *testing.T, path string) {
 	if info.Size() == 0 {
 		t.Fatalf("%s is empty", path)
 	}
+}
+
+func writeSignedCLIBridgeArtifacts(t *testing.T, dir, serverURL, privateKey, publicKey string) (string, string) {
+	t.Helper()
+	unsignedBridge := filepath.Join(dir, "bridge.json")
+	signedBridge := filepath.Join(dir, "bridge.signed.json")
+	helperRegistry := filepath.Join(dir, "bridge-helper-registry.json")
+	signedRegistry := filepath.Join(dir, "bridge-helper-registry.signed.json")
+
+	if err := runGen([]string{"--private-key-out", privateKey, "--public-key-out", publicKey}); err != nil {
+		t.Fatalf("gen: %v", err)
+	}
+	bridgeBody, err := json.MarshalIndent(testBridgeInvite(serverURL), "", "  ")
+	if err != nil {
+		t.Fatalf("marshal bridge invite: %v", err)
+	}
+	if err := os.WriteFile(unsignedBridge, bridgeBody, 0o644); err != nil {
+		t.Fatalf("write bridge invite: %v", err)
+	}
+	if err := runBridgeSign([]string{"--invite", unsignedBridge, "--private-key-file", privateKey, "--out", signedBridge}); err != nil {
+		t.Fatalf("bridge-sign: %v", err)
+	}
+	if err := writeBridgeHelperRegistryFile(helperRegistry, testCLIBridgeHelperRegistry(serverURL)); err != nil {
+		t.Fatalf("write helper registry: %v", err)
+	}
+	if err := runBridgeRegistrySign([]string{
+		"--helper-registry", helperRegistry,
+		"--org-id", "cli-org",
+		"--org-name", "CLI Org",
+		"--private-key-file", privateKey,
+		"--registry-id", "cli-registry",
+		"--out", signedRegistry,
+	}); err != nil {
+		t.Fatalf("bridge-registry-sign: %v", err)
+	}
+	return signedBridge, signedRegistry
 }
 
 func testRecoveryPack(serverURL string) accesspack.Pack {

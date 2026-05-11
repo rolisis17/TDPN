@@ -358,9 +358,19 @@ func TestEvaluateBridgeServiceRequestRejectsUnsafeHelperURLs(t *testing.T) {
 	}{
 		{name: "plain-http", url: "http://helper.gpm-pilot.net/connect", code: "bridge_service_access_path_plain_http"},
 		{name: "private-ip", url: "https://10.0.0.5/connect", code: "bridge_service_access_path_private_host"},
+		{name: "loopback-ip", url: "https://127.0.0.1/connect", code: "bridge_service_access_path_private_host"},
+		{name: "link-local-ip", url: "https://169.254.1.1/connect", code: "bridge_service_access_path_private_host"},
+		{name: "cgnat-ip", url: "https://100.64.0.10/connect", code: "bridge_service_access_path_private_host"},
+		{name: "ipv6-loopback", url: "https://[::1]/connect", code: "bridge_service_access_path_private_host"},
+		{name: "ipv6-link-local", url: "https://[fe80::1]/connect", code: "bridge_service_access_path_private_host"},
+		{name: "ipv6-ula-fc", url: "https://[fc00::1]/connect", code: "bridge_service_access_path_private_host"},
+		{name: "ipv6-ula-fd", url: "https://[fd00::1]/connect", code: "bridge_service_access_path_private_host"},
+		{name: "ipv6-documentation", url: "https://[2001:db8::1]/connect", code: "bridge_service_access_path_private_host"},
 		{name: "reserved-domain", url: "https://reserved-helper.example/connect", code: "bridge_service_access_path_private_host"},
 		{name: "tailscale-overlay", url: "https://helper.tailnet.ts.net/connect", code: "bridge_service_access_path_private_host"},
+		{name: "tailscale-apex-ts-net", url: "https://ts.net/connect", code: "bridge_service_access_path_private_host"},
 		{name: "tailscale-domain", url: "https://helper.tailscale.net/connect", code: "bridge_service_access_path_private_host"},
+		{name: "tailscale-apex-domain", url: "https://tailscale.net/connect", code: "bridge_service_access_path_private_host"},
 		{name: "single-label", url: "https://helper/connect", code: "bridge_service_access_path_private_host"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -429,7 +439,19 @@ func TestBridgeInvitePolicyRejectsUnsafeServiceableHelperURLs(t *testing.T) {
 	}{
 		{name: "plain-http", url: "http://helper.gpm-pilot.net/connect", code: "bridge_invite_access_path_plain_http"},
 		{name: "private-ip", url: "https://10.0.0.5/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "loopback-ip", url: "https://127.0.0.1/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "link-local-ip", url: "https://169.254.1.1/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "cgnat-ip", url: "https://100.64.0.10/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "ipv6-loopback", url: "https://[::1]/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "ipv6-link-local", url: "https://[fe80::1]/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "ipv6-ula-fc", url: "https://[fc00::1]/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "ipv6-ula-fd", url: "https://[fd00::1]/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "ipv6-documentation", url: "https://[2001:db8::1]/connect", code: "bridge_invite_access_path_private_host"},
 		{name: "reserved-domain", url: "https://reserved-helper.example/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "tailscale-overlay", url: "https://helper.tailnet.ts.net/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "tailscale-apex-ts-net", url: "https://ts.net/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "tailscale-domain", url: "https://helper.tailscale.net/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "tailscale-apex-domain", url: "https://tailscale.net/connect", code: "bridge_invite_access_path_private_host"},
 		{name: "single-label", url: "https://helper/connect", code: "bridge_invite_access_path_private_host"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -502,7 +524,7 @@ func TestBridgeInvitePolicyRequiresServiceableHTTPSPath(t *testing.T) {
 }
 
 func TestBridgeAccessPathPublicIPv4ReservedRanges(t *testing.T) {
-	for _, host := range []string{"192.0.0.10", "192.0.2.10"} {
+	for _, host := range []string{"127.0.0.1", "169.254.1.1", "100.64.0.10", "192.0.0.10", "192.0.2.10"} {
 		if bridgeAccessPathHostLooksPublic(host) {
 			t.Fatalf("expected reserved IPv4 host %s to be rejected", host)
 		}
@@ -512,10 +534,21 @@ func TestBridgeAccessPathPublicIPv4ReservedRanges(t *testing.T) {
 	}
 }
 
-func TestBridgeAccessPathRejectsSingleLabelDNSHost(t *testing.T) {
-	for _, host := range []string{"helper", "com"} {
+func TestBridgeAccessPathPublicIPv6ReservedRanges(t *testing.T) {
+	for _, host := range []string{"::1", "fe80::1", "fc00::1", "fd00::1", "2001:db8::1"} {
 		if bridgeAccessPathHostLooksPublic(host) {
-			t.Fatalf("expected single-label DNS host %s to be rejected", host)
+			t.Fatalf("expected reserved IPv6 host %s to be rejected", host)
+		}
+	}
+	if !bridgeAccessPathHostLooksPublic("2606:4700:4700::1111") {
+		t.Fatalf("expected public-looking IPv6 host to pass")
+	}
+}
+
+func TestBridgeAccessPathRejectsSingleLabelDNSHost(t *testing.T) {
+	for _, host := range []string{"helper", "com", "ts.net", "tailscale.net"} {
+		if bridgeAccessPathHostLooksPublic(host) {
+			t.Fatalf("expected single-label or reserved DNS host %s to be rejected", host)
 		}
 	}
 	if !bridgeAccessPathHostLooksPublic("helper.gpm-pilot.net") {

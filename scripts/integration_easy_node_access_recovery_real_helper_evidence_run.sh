@@ -15,6 +15,7 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 CAPTURE="$TMP_DIR/capture.tsv"
+FAKE_HOST_CHECK="$TMP_DIR/fake_access_bridge_host_install_check.sh"
 FAKE_BUNDLE="$TMP_DIR/fake_access_bridge_pilot_evidence_bundle.sh"
 FAKE_VERIFY="$TMP_DIR/fake_access_bridge_pilot_evidence_bundle_verify.sh"
 FAKE_ROADMAP="$TMP_DIR/fake_roadmap_progress_report.sh"
@@ -31,6 +32,47 @@ printf '%s\n' '{"status":"pass"}' >"$CONFIG_JSON"
 printf '%s\n' 'test-access-code' >"$CODE_FILE"
 printf '%s\n' '{"version":1,"keys":[]}' >"$TRUST_STORE"
 printf '%s\n' 'test-provenance-key' >"$PROVENANCE_KEY"
+
+cat >"$FAKE_HOST_CHECK" <<'EOF_FAKE_HOST_CHECK'
+#!/usr/bin/env bash
+set -euo pipefail
+capture_file="${ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE:?}"
+summary_json=""
+{
+  printf 'host-check'
+  for arg in "$@"; do
+    printf '\t%s' "$arg"
+  done
+  printf '\n'
+} >>"$capture_file"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+mkdir -p "$(dirname "$summary_json")"
+cat >"$summary_json" <<JSON
+{
+  "version": 1,
+  "schema": {"id": "access_bridge_host_install_check_summary", "major": 1, "minor": 4},
+  "status": "pass",
+  "rc": 0,
+  "observed": {
+    "expected_public_host": "helper.gpm-pilot.net",
+    "caddy_site_host": "helper.gpm-pilot.net",
+    "nginx_server_name": "helper.gpm-pilot.net"
+  }
+}
+JSON
+exit "${FAKE_ACCESS_RECOVERY_REAL_HELPER_HOST_CHECK_RC:-0}"
+EOF_FAKE_HOST_CHECK
+chmod +x "$FAKE_HOST_CHECK"
 
 cat >"$FAKE_BUNDLE" <<'EOF_FAKE_BUNDLE'
 #!/usr/bin/env bash
@@ -88,6 +130,7 @@ cat >"$FAKE_VERIFY" <<'EOF_FAKE_VERIFY'
 set -euo pipefail
 capture_file="${ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE:?}"
 verification_summary_json=""
+pilot_handoff_ready="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_READY:-true}"
 {
   printf 'verify'
   for arg in "$@"; do
@@ -113,7 +156,7 @@ cat >"$verification_summary_json" <<JSON
   "schema": {"id": "access_bridge_pilot_evidence_bundle_verification_summary", "major": 1, "minor": 0},
   "status": "pass",
   "rc": 0,
-  "pilot_handoff_ready": true,
+  "pilot_handoff_ready": $pilot_handoff_ready,
   "details": {
     "evidence_scope": "real_helper_https",
     "summary_evidence_scope": "real_helper_https"
@@ -135,6 +178,7 @@ set -euo pipefail
 capture_file="${ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE:?}"
 summary_json=""
 report_md=""
+roadmap_ready="${FAKE_ACCESS_RECOVERY_REAL_HELPER_ROADMAP_READY:-true}"
 {
   printf 'roadmap'
   for arg in "$@"; do
@@ -162,10 +206,10 @@ cat >"$summary_json" <<JSON
 {
   "version": 1,
   "current_roadmap_track": "access_recovery",
-  "access_recovery_pilot_handoff_ready": true,
+  "access_recovery_pilot_handoff_ready": $roadmap_ready,
   "access_recovery_track": {
     "status": "pilot-evidence-ready",
-    "pilot_handoff_ready": true,
+    "pilot_handoff_ready": $roadmap_ready,
     "evidence_scope": "real_helper_https"
   }
 }
@@ -186,8 +230,56 @@ if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'access-recovery-real-he
   exit 1
 fi
 
+bad_real_helper_urls=(
+  "https://198.51.100.10"
+  "https://203.0.113.10"
+  "https://192.0.2.10"
+  "https://224.0.0.1"
+  "https://helper.tailnet.ts.net"
+  "https://ts.net"
+  "https://tailscale.net"
+  "https://[2001:db8::1]"
+)
+bad_real_helper_index=0
+for bad_url in "${bad_real_helper_urls[@]}"; do
+  bad_real_helper_index=$((bad_real_helper_index + 1))
+  : >"$CAPTURE"
+  set +e
+  ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+  ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+  ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+  ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+    --base-url "$bad_url" \
+    --code-file "$CODE_FILE" \
+    --config-json "$CONFIG_JSON" \
+    --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+    --provenance-private-key-file "$PROVENANCE_KEY" \
+    --provenance-org-id freenews-demo \
+    --provenance-org-name "FreeNews Demo" \
+    --trust-store "$TRUST_STORE" \
+    --summary-json "$TMP_DIR/bad-url-$bad_real_helper_index-summary.json" \
+    --print-summary-json 0 >"$TMP_DIR/bad-url-$bad_real_helper_index.log" 2>&1
+  bad_url_rc=$?
+  set -e
+  if [[ "$bad_url_rc" -ne 2 ]] ||
+    ! grep -Fq -- "--base-url host must look public-routable for real helper evidence" "$TMP_DIR/bad-url-$bad_real_helper_index.log"; then
+    echo "expected non-public real-helper URL to fail preflight: $bad_url"
+    cat "$TMP_DIR/bad-url-$bad_real_helper_index.log"
+    exit 1
+  fi
+  if [[ -s "$CAPTURE" ]]; then
+    echo "non-public real-helper URL should not invoke child scripts: $bad_url"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
+
 : >"$CAPTURE"
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
 ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
 ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
 ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
@@ -207,13 +299,26 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --report-md "$TMP_DIR/run-report.md" \
   --print-summary-json 0
 
-if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
-  echo "expected bundle, verifier, and roadmap invocations"
+if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "4" ]]; then
+  echo "expected host-check, bundle, verifier, and roadmap invocations"
   cat "$CAPTURE"
   exit 1
 fi
 
-bundle_line="$(sed -n '1p' "$CAPTURE")"
+host_check_line="$(sed -n '1p' "$CAPTURE")"
+for token in \
+  $'\t--deploy-pack-dir\t'"$DEPLOY_PACK_DIR" \
+  $'\t--config-json\t'"$CONFIG_JSON" \
+  $'\t--expected-base-url\thttps://helper.gpm-pilot.net'
+do
+  if [[ "$host_check_line" != *"$token"* ]]; then
+    echo "missing forwarded host-check token: $token"
+    echo "$host_check_line"
+    exit 1
+  fi
+done
+
+bundle_line="$(sed -n '2p' "$CAPTURE")"
 for token in \
   $'\t--base-url\thttps://helper.gpm-pilot.net' \
   $'\t--path-id\thelper-web' \
@@ -231,7 +336,7 @@ do
   fi
 done
 
-verify_line="$(sed -n '2p' "$CAPTURE")"
+verify_line="$(sed -n '3p' "$CAPTURE")"
 for token in \
   $'\t--provenance-json\t' \
   $'\t--trust-store\t'"$TRUST_STORE" \
@@ -245,7 +350,7 @@ do
   fi
 done
 
-roadmap_line="$(sed -n '3p' "$CAPTURE")"
+roadmap_line="$(sed -n '4p' "$CAPTURE")"
 if [[ "$roadmap_line" != *$'\t--access-bridge-pilot-evidence-bundle-verify-summary-json\t'* ]]; then
   echo "missing roadmap verifier summary token"
   echo "$roadmap_line"
@@ -256,6 +361,7 @@ jq -e '
   .schema.id == "access_recovery_real_helper_evidence_run_summary"
   and .status == "pass"
   and .stage == "complete"
+  and .child_summaries.host_install_check.status == "pass"
   and .readiness.trusted_verifier_pilot_handoff_ready == true
   and .readiness.roadmap_access_recovery_pilot_handoff_ready == true
 ' "$TMP_DIR/run-summary.json" >/dev/null
@@ -263,6 +369,107 @@ jq -e '
 : >"$CAPTURE"
 set +e
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_READY=false \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/verifier-not-ready-summary.json" \
+  --print-summary-json 0 >/dev/null 2>&1
+verifier_not_ready_rc=$?
+set -e
+if [[ "$verifier_not_ready_rc" -eq 0 ]]; then
+  echo "expected verifier pilot_handoff_ready=false to fail"
+  cat "$TMP_DIR/verifier-not-ready-summary.json"
+  exit 1
+fi
+if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
+  echo "expected host-check, bundle, and verifier only when verifier is not ready"
+  cat "$CAPTURE"
+  exit 1
+fi
+jq -e '.status == "fail" and .stage == "verify" and .readiness.trusted_verifier_pilot_handoff_ready == false' "$TMP_DIR/verifier-not-ready-summary.json" >/dev/null
+
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_ROADMAP_READY=false \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/roadmap-not-ready-summary.json" \
+  --print-summary-json 0 >/dev/null 2>&1
+roadmap_not_ready_rc=$?
+set -e
+if [[ "$roadmap_not_ready_rc" -eq 0 ]]; then
+  echo "expected roadmap access_recovery_pilot_handoff_ready=false to fail"
+  cat "$TMP_DIR/roadmap-not-ready-summary.json"
+  exit 1
+fi
+if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "4" ]]; then
+  echo "expected host-check, bundle, verifier, and roadmap when roadmap is not ready"
+  cat "$CAPTURE"
+  exit 1
+fi
+jq -e '.status == "fail" and .stage == "roadmap" and .readiness.trusted_verifier_pilot_handoff_ready == true and .readiness.roadmap_access_recovery_pilot_handoff_ready == false' "$TMP_DIR/roadmap-not-ready-summary.json" >/dev/null
+
+: >"$CAPTURE"
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --roadmap-refresh 0 \
+  --summary-json "$TMP_DIR/no-roadmap-refresh-summary.json" \
+  --print-summary-json 0
+if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
+  echo "expected no roadmap invocation when --roadmap-refresh 0"
+  cat "$CAPTURE"
+  exit 1
+fi
+jq -e '.status == "pass" and .stage == "complete" and .inputs.roadmap_refresh == false and .readiness.trusted_verifier_pilot_handoff_ready == true and .readiness.roadmap_access_recovery_pilot_handoff_ready == false and .child_summaries.roadmap == null' "$TMP_DIR/no-roadmap-refresh-summary.json" >/dev/null
+
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
 ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
 ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
 ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
