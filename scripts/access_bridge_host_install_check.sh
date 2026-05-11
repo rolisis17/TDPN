@@ -65,9 +65,43 @@ is_ipv4_addr() {
   ((a >= 0 && a <= 255 && b >= 0 && b <= 255 && c >= 0 && c <= 255 && d >= 0 && d <= 255))
 }
 
-is_loopback_host() {
+normalize_bridge_host() {
   local host="${1:-}"
-  if [[ "${host,,}" == "localhost" || "$host" == "::1" ]]; then
+  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  while [[ "$host" == *. ]]; do
+    host="${host%.}"
+  done
+  printf '%s' "$host"
+}
+
+is_private_or_reserved_ipv4_addr() {
+  local host="${1:-}"
+  is_ipv4_addr "$host" || return 1
+  if [[ "$host" == 0.* || "$host" == 10.* || "$host" == 127.* || "$host" == 169.254.* || "$host" == 192.168.* ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^192\.0\.(0|2)\. || "$host" =~ ^192\.88\.99\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^198\.(1[89]|51\.100)\. || "$host" =~ ^203\.0\.113\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^(22[4-9]|23[0-9]|24[0-9]|25[0-5])\. ]]; then
+    return 0
+  fi
+  return 1
+}
+
+is_loopback_host() {
+  local host
+  host="$(normalize_bridge_host "${1:-}")"
+  if [[ "$host" == "localhost" || "$host" == "::1" ]]; then
     return 0
   fi
   is_ipv4_addr "$host" && [[ "$host" == 127.* ]]
@@ -102,16 +136,24 @@ is_loopback_listen_addr() {
 }
 
 is_bridge_public_host() {
-  local host="${1:-}"
+  local raw="${1:-}"
+  local host
   local label i ch
   local -a labels
+  [[ "$raw" != *. ]] || return 1
+  host="$(normalize_bridge_host "$raw")"
   [[ -n "$host" && ${#host} -le 253 ]] || return 1
-  [[ "$host" != *"://"* && "$host" != *":"* && "$host" != *"/"* && "$host" != *"\\"* ]] || return 1
+  [[ "$host" != *"://"* && "$host" != *":"* && "$host" != *"/"* && "$host" != *"\\"* && "$host" != *@* ]] || return 1
   has_bridge_deploy_config_meta "$host" && return 1
   if is_ipv4_addr "$host"; then
-    return 0
+    ! is_private_or_reserved_ipv4_addr "$host"
+    return $?
   fi
+  [[ "$host" == "localhost" || "$host" == *.localhost ]] && return 1
+  [[ "$host" =~ (^|\.)(local|lan|internal|test|invalid|example)$ ]] && return 1
+  [[ "$host" =~ (^|\.)example\.(com|net|org)$ ]] && return 1
   IFS=. read -ra labels <<<"$host"
+  ((${#labels[@]} >= 2)) || return 1
   for label in "${labels[@]}"; do
     [[ -n "$label" && ${#label} -le 63 ]] || return 1
     [[ "$label" != -* && "$label" != *- ]] || return 1
@@ -312,10 +354,22 @@ file_exists_check "caddy_example_exists" "$caddy_file"
 file_exists_check "nginx_example_exists" "$nginx_file"
 
 expected_config_sha256=""
+config_allow_local_access_paths=""
 if [[ -n "$config_json" ]]; then
   if [[ -f "$config_json" ]]; then
     expected_config_sha256="$(file_sha256 "$config_json")"
     add_check "config_json_exists" "pass" "config JSON exists"
+    if jq -e . "$config_json" >/dev/null 2>&1; then
+      add_check "config_json_valid" "pass" "config JSON is valid"
+      config_allow_local_access_paths="$(jq -r 'if has("allow_local_access_paths") then (.allow_local_access_paths | tostring) else "false" end' "$config_json")"
+      if [[ "$config_allow_local_access_paths" == "true" ]]; then
+        add_check "config_local_access_paths_disabled" "fail" "deployable config must not allow local diagnostic access paths"
+      else
+        add_check "config_local_access_paths_disabled" "pass" "deployable config does not allow local diagnostic access paths"
+      fi
+    else
+      add_check "config_json_valid" "fail" "config JSON is invalid"
+    fi
   else
     add_check "config_json_exists" "fail" "config JSON is missing"
   fi
@@ -462,6 +516,7 @@ jq -n \
   --arg service_name "$service_name" \
   --arg config_json "$config_json" \
   --arg expected_config_sha256 "$expected_config_sha256" \
+  --arg config_allow_local_access_paths "$config_allow_local_access_paths" \
   --arg env_config_sha256 "$env_config_sha256" \
   --arg env_access_code_sha256 "$env_access_code_sha256" \
   --arg env_allow_unauth_local "$env_allow_unauth_local" \
@@ -494,6 +549,7 @@ jq -n \
     },
     observed: {
       expected_config_sha256: $expected_config_sha256,
+      config_allow_local_access_paths: $config_allow_local_access_paths,
       env_config_sha256: $env_config_sha256,
       env_access_code_sha256: $env_access_code_sha256,
       env_allow_unauthenticated_local: $env_allow_unauth_local,

@@ -15,6 +15,7 @@ type BridgeInvitePolicyOptions struct {
 	RequireHelperRegistry        bool                  `json:"require_helper_registry"`
 	RequireHelperAbuseReport     bool                  `json:"require_helper_abuse_report"`
 	RequireHelperRateLimitPolicy bool                  `json:"require_helper_rate_limit_policy"`
+	AllowLocalAccessPaths        bool                  `json:"allow_local_access_paths"`
 	HelperRegistry               *BridgeHelperRegistry `json:"-"`
 }
 
@@ -51,6 +52,7 @@ type BridgeInvitePolicy struct {
 	RequireRegisteredHelper      bool  `json:"require_registered_helper"`
 	RequireHelperAbuseReport     bool  `json:"require_helper_abuse_report"`
 	RequireHelperRateLimitPolicy bool  `json:"require_helper_rate_limit_policy"`
+	AllowLocalAccessPaths        bool  `json:"allow_local_access_paths"`
 }
 
 type BridgePolicyFinding struct {
@@ -95,6 +97,7 @@ func CheckBridgeInvitePolicy(invite BridgeInvite, options BridgeInvitePolicyOpti
 			RequireRegisteredHelper:      options.RequireHelperRegistry || options.HelperRegistry != nil,
 			RequireHelperAbuseReport:     options.RequireHelperAbuseReport,
 			RequireHelperRateLimitPolicy: options.RequireHelperRateLimitPolicy,
+			AllowLocalAccessPaths:        options.AllowLocalAccessPaths,
 		},
 	}
 	if err := ValidateBridgeInvite(invite, now); err != nil {
@@ -116,6 +119,24 @@ func CheckBridgeInvitePolicy(invite BridgeInvite, options BridgeInvitePolicyOpti
 	report.DistinctHostsCount = len(hosts)
 	if len(hosts) < options.MinDistinctHosts {
 		report.addFinding("bridge_invite_insufficient_host_diversity", "error", "bridge invite has fewer distinct helper/contact hosts than policy requires")
+	}
+	serviceablePaths := 0
+	for _, path := range invite.AccessPaths {
+		if bridgeAccessPathIsManualFallback(path) {
+			continue
+		}
+		if code, message, bad := bridgeAccessPathServiceURLIssue(path); bad {
+			if options.AllowLocalAccessPaths && bridgeAccessPathLocalDiagnosticIssueAllowed(code, path) {
+				serviceablePaths++
+				continue
+			}
+			report.addFinding("bridge_invite_access_path_"+code, "error", message)
+			continue
+		}
+		serviceablePaths++
+	}
+	if serviceablePaths == 0 {
+		report.addFinding("bridge_invite_no_serviceable_https_path", "error", "bridge invite needs at least one public HTTPS bridge access path")
 	}
 	report.HasManualFallback = bridgeInviteHasManualFallback(invite)
 	if options.RequireHelperContact && !report.HasHelperContact {

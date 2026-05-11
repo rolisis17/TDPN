@@ -112,16 +112,16 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--helper-registry", helperRegistry, "--require-helper-registry"}); err == nil {
 		t.Fatal("expected bridge-policy to reject unsigned helper registry without diagnostic opt-in")
 	}
-	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--helper-registry", helperRegistry, "--allow-unsigned-helper-registry", "--require-helper-registry"}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--helper-registry", helperRegistry, "--allow-unsigned-helper-registry", "--allow-local-access-paths", "--require-helper-registry"}); err != nil {
 		t.Fatalf("bridge-policy unsigned diagnostic: %v", err)
 	}
-	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--signed-helper-registry", signedRegistry, "--require-helper-registry"}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--signed-helper-registry", signedRegistry, "--allow-local-access-paths", "--require-helper-registry"}); err != nil {
 		t.Fatalf("bridge-policy signed helper registry: %v", err)
 	}
 	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey}); err == nil {
 		t.Fatal("expected bridge-policy to require helper registry by default")
 	}
-	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--allow-missing-helper-registry"}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--public-key-file", publicKey, "--allow-missing-helper-registry", "--allow-local-access-paths"}); err != nil {
 		t.Fatalf("bridge-policy diagnostic missing helper registry opt-out: %v", err)
 	}
 	serviceConfig := filepath.Join(dir, "bridge-service-config.json")
@@ -129,6 +129,7 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 		"--invite", signedBridge,
 		"--public-key-file", publicKey,
 		"--signed-helper-registry", signedRegistry,
+		"--allow-local-access-paths",
 		"--out", serviceConfig,
 	}); err != nil {
 		t.Fatalf("bridge-service-config: %v", err)
@@ -308,6 +309,21 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 		{name: "semicolon", publicHost: "bridge.example; root *", want: "unsafe"},
 		{name: "newline", publicHost: "bridge.example\nserver_name evil.example", want: "unsafe"},
 		{name: "port", publicHost: "bridge.example:443", want: "port"},
+		{name: "localhost", publicHost: "localhost", want: "public DNS"},
+		{name: "dot-local", publicHost: "bridge.local", want: "public DNS"},
+		{name: "dot-internal", publicHost: "bridge.internal", want: "public DNS"},
+		{name: "dot-test", publicHost: "bridge.test", want: "public DNS"},
+		{name: "dot-example", publicHost: "bridge.example", want: "public DNS"},
+		{name: "example-com", publicHost: "example.com", want: "public DNS"},
+		{name: "loopback-ip", publicHost: "127.0.0.1", want: "public-routable"},
+		{name: "private-ip", publicHost: "10.1.2.3", want: "public-routable"},
+		{name: "cgnat-ip", publicHost: "100.64.0.10", want: "public-routable"},
+		{name: "link-local-ip", publicHost: "169.254.1.1", want: "public-routable"},
+		{name: "ietf-protocol-ip", publicHost: "192.0.0.10", want: "public-routable"},
+		{name: "documentation-192-ip", publicHost: "192.0.2.10", want: "public-routable"},
+		{name: "documentation-203-ip", publicHost: "203.0.113.10", want: "public-routable"},
+		{name: "benchmark-ip", publicHost: "198.19.0.10", want: "public-routable"},
+		{name: "multicast-ip", publicHost: "224.0.0.1", want: "public-routable"},
 	} {
 		err := runBridgeServiceDeployPack([]string{
 			"--out-dir", filepath.Join(dir, "bridge-deploy-bad-public-host-"+tc.name),
@@ -318,6 +334,14 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Fatalf("expected invalid public-host %q to fail with %q, got %v", tc.publicHost, tc.want, err)
 		}
+	}
+	if err := runBridgeServiceDeployPack([]string{
+		"--out-dir", filepath.Join(dir, "bridge-deploy-public-192-0-3"),
+		"--config-sha256", serviceConfigHash,
+		"--access-code-sha256", codeHashOut.SHA256,
+		"--public-host", "192.0.3.10",
+	}); err != nil {
+		t.Fatalf("expected non-reserved 192.0.3.10 public-host to pass, got %v", err)
 	}
 	for _, tc := range []struct {
 		name string
@@ -387,10 +411,10 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgeRegistryVerify([]string{"--signed-registry", signedRegistry, "--trust-store", trustStore}); err != nil {
 		t.Fatalf("bridge-registry-verify with trust store: %v", err)
 	}
-	if err := runBridgePolicy([]string{"--invite", signedBridge, "--trust-store", trustStore, "--helper-registry", helperRegistry, "--allow-unsigned-helper-registry", "--require-helper-registry"}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--trust-store", trustStore, "--helper-registry", helperRegistry, "--allow-unsigned-helper-registry", "--allow-local-access-paths", "--require-helper-registry"}); err != nil {
 		t.Fatalf("bridge-policy unsigned diagnostic with trust store: %v", err)
 	}
-	if err := runBridgePolicy([]string{"--invite", signedBridge, "--trust-store", trustStore, "--signed-helper-registry", signedRegistry, "--require-helper-registry"}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", signedBridge, "--trust-store", trustStore, "--signed-helper-registry", signedRegistry, "--allow-local-access-paths", "--require-helper-registry"}); err != nil {
 		t.Fatalf("bridge-policy signed helper registry with trust store: %v", err)
 	}
 	if err := runCheck([]string{"--pack", signedPack, "--trust-store", trustStore, "--timeout-sec", "2"}); err != nil {
@@ -572,7 +596,7 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 	if err := runBridgeVerify([]string{"--invite", importedBridge, "--trust-store", importedStore}); err != nil {
 		t.Fatalf("bridge-verify imported bridge invite: %v", err)
 	}
-	if err := runBridgePolicy([]string{"--invite", importedBridge, "--trust-store", importedStore, "--helper-registry", importedRegistry, "--allow-unsigned-helper-registry"}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", importedBridge, "--trust-store", importedStore, "--helper-registry", importedRegistry, "--allow-unsigned-helper-registry", "--allow-local-access-paths"}); err != nil {
 		t.Fatalf("bridge-policy imported bridge invite: %v", err)
 	}
 	pubBody, err := os.ReadFile(publicKey)
@@ -861,10 +885,10 @@ func TestGPMRecoverDemoBundle(t *testing.T) {
 	if err := runBridgeRegistryVerify([]string{"--signed-registry", importedSignedRegistry, "--trust-store", manifest.Files["trust_store"], "--out-registry", filepath.Join(dir, "bridge-helper-registry.imported.verified.json")}); err != nil {
 		t.Fatalf("verify imported bridge helper registry: %v", err)
 	}
-	if err := runBridgePolicy([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"], "--helper-registry", manifest.Files["bridge_helper_registry"], "--allow-unsigned-helper-registry"}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"], "--helper-registry", manifest.Files["bridge_helper_registry"], "--allow-unsigned-helper-registry", "--allow-local-access-paths"}); err != nil {
 		t.Fatalf("policy generated bridge invite with unsigned diagnostic registry: %v", err)
 	}
-	if err := runBridgePolicy([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"], "--signed-helper-registry", manifest.Files["bridge_helper_registry_signed"]}); err != nil {
+	if err := runBridgePolicy([]string{"--invite", manifest.Files["bridge_invite_signed"], "--trust-store", manifest.Files["trust_store"], "--signed-helper-registry", manifest.Files["bridge_helper_registry_signed"], "--allow-local-access-paths"}); err != nil {
 		t.Fatalf("policy generated bridge invite with signed registry: %v", err)
 	}
 	if err := runBridgeRegistryCheck([]string{"--helper-registry", manifest.Files["bridge_helper_registry"], "--helper-id", "helper-pilot", "--org-id", manifest.OrgID, "--require-active"}); err != nil {

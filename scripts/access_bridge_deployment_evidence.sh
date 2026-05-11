@@ -80,9 +80,43 @@ is_ipv4_addr() {
   ((a >= 0 && a <= 255 && b >= 0 && b <= 255 && c >= 0 && c <= 255 && d >= 0 && d <= 255))
 }
 
-is_loopback_host() {
+normalize_bridge_host() {
   local host="${1:-}"
-  if [[ "${host,,}" == "localhost" || "$host" == "::1" ]]; then
+  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  while [[ "$host" == *. ]]; do
+    host="${host%.}"
+  done
+  printf '%s' "$host"
+}
+
+is_private_or_reserved_ipv4_addr() {
+  local host="${1:-}"
+  is_ipv4_addr "$host" || return 1
+  if [[ "$host" == 0.* || "$host" == 10.* || "$host" == 127.* || "$host" == 169.254.* || "$host" == 192.168.* ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^192\.0\.(0|2)\. || "$host" =~ ^192\.88\.99\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^198\.(1[89]|51\.100)\. || "$host" =~ ^203\.0\.113\. ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ ^(22[4-9]|23[0-9]|24[0-9]|25[0-5])\. ]]; then
+    return 0
+  fi
+  return 1
+}
+
+is_loopback_host() {
+  local host
+  host="$(normalize_bridge_host "${1:-}")"
+  if [[ "$host" == "localhost" || "$host" == "::1" ]]; then
     return 0
   fi
   is_ipv4_addr "$host" && [[ "$host" == 127.* ]]
@@ -117,16 +151,24 @@ is_loopback_listen_addr() {
 }
 
 is_bridge_public_host() {
-  local host="${1:-}"
+  local raw="${1:-}"
+  local host
   local label i ch
   local -a labels
+  [[ "$raw" != *. ]] || return 1
+  host="$(normalize_bridge_host "$raw")"
   [[ -n "$host" && ${#host} -le 253 ]] || return 1
-  [[ "$host" != *"://"* && "$host" != *":"* && "$host" != *"/"* && "$host" != *"\\"* ]] || return 1
+  [[ "$host" != *"://"* && "$host" != *":"* && "$host" != *"/"* && "$host" != *"\\"* && "$host" != *@* ]] || return 1
   has_bridge_deploy_config_meta "$host" && return 1
   if is_ipv4_addr "$host"; then
-    return 0
+    ! is_private_or_reserved_ipv4_addr "$host"
+    return $?
   fi
+  [[ "$host" == "localhost" || "$host" == *.localhost ]] && return 1
+  [[ "$host" =~ (^|\.)(local|lan|internal|test|invalid|example)$ ]] && return 1
+  [[ "$host" =~ (^|\.)example\.(com|net|org)$ ]] && return 1
   IFS=. read -ra labels <<<"$host"
+  ((${#labels[@]} >= 2)) || return 1
   for label in "${labels[@]}"; do
     [[ -n "$label" && ${#label} -le 63 ]] || return 1
     [[ "$label" != -* && "$label" != *- ]] || return 1
@@ -146,6 +188,7 @@ host_from_url() {
     | sub(":[0-9]+$"; "")
     | sub("^\\["; "")
     | sub("\\]$"; "")
+    | ascii_downcase
   ' 2>/dev/null || true
 }
 
@@ -493,6 +536,10 @@ if [[ "$smoke_bridge_security_headers_ok" != "true" ]]; then
   smoke_evidence_status="fail"
   smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary did not prove bridge security headers")"
 fi
+if ! { is_ipv4_addr "$smoke_base_host" && is_loopback_host "$smoke_base_host"; } && ! is_bridge_public_host "$smoke_base_host"; then
+  smoke_evidence_status="fail"
+  smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary base_url host must be a safe public helper host")"
+fi
 
 config_status="skip"
 config_exists="false"
@@ -501,6 +548,7 @@ config_helper_id=""
 config_org_id=""
 config_registry_id=""
 config_sha256=""
+config_allow_local_access_paths="false"
 config_reason="not supplied"
 if [[ -n "$config_json" ]]; then
   config_json="$(abs_path "$config_json")"
@@ -518,6 +566,7 @@ if [[ -n "$config_json" ]]; then
       config_helper_id="$(json_string_or_empty "$config_json" '.helper_id')"
       config_org_id="$(json_string_or_empty "$config_json" '.organization_id')"
       config_registry_id="$(json_string_or_empty "$config_json" '.registry_id')"
+      config_allow_local_access_paths="$(jq -r 'if has("allow_local_access_paths") then (.allow_local_access_paths | tostring) else "false" end' "$config_json")"
       if [[ -z "$expect_helper_id" ]]; then
         expect_helper_id="$config_helper_id"
       fi
@@ -536,6 +585,9 @@ if [[ -n "$config_json" ]]; then
       elif [[ -n "$expect_registry_id" && "$config_registry_id" != "$expect_registry_id" ]]; then
         config_status="fail"
         config_reason="config registry id mismatch"
+      elif [[ "$config_allow_local_access_paths" == "true" ]]; then
+        config_status="fail"
+        config_reason="config enables local diagnostic access paths"
       fi
     else
       config_status="fail"
@@ -795,6 +847,7 @@ jq -n \
   --arg config_org_id "$config_org_id" \
   --arg config_registry_id "$config_registry_id" \
   --arg config_sha256 "$config_sha256" \
+  --arg config_allow_local_access_paths "$config_allow_local_access_paths" \
   --arg deploy_pack_dir "$deploy_pack_dir" \
   --arg service_name "$service_name" \
   --arg deploy_status "$deploy_status" \
@@ -878,7 +931,8 @@ jq -n \
         sha256: $config_sha256,
         helper_id: $config_helper_id,
         organization_id: $config_org_id,
-        registry_id: $config_registry_id
+        registry_id: $config_registry_id,
+        allow_local_access_paths: $config_allow_local_access_paths
       },
       deploy_pack: {
         supplied: ($deploy_pack_dir != ""),

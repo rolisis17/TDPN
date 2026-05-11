@@ -109,19 +109,19 @@ func TestBridgeArtifactsRejectUnsupportedURLSchemes(t *testing.T) {
 	for name, run := range map[string]func() error{
 		"bridge invite access path ftp": func() error {
 			invite := testBridgeInvite()
-			invite.AccessPaths[0].URL = "ftp://helper.example/connect"
+			invite.AccessPaths[0].URL = "ftp://helper.gpm-pilot.net/connect"
 			_, err := SignBridgeInvite(invite, priv, "")
 			return err
 		},
 		"bridge invite contact ssh": func() error {
 			invite := testBridgeInvite()
-			invite.Helper.ContactURL = "ssh://helper.example/contact"
+			invite.Helper.ContactURL = "ssh://helper.gpm-pilot.net/contact"
 			_, err := SignBridgeInvite(invite, priv, "")
 			return err
 		},
 		"helper registry abuse javascript": func() error {
 			artifact := testBridgeHelperRegistryArtifact(now)
-			artifact.Registry.Helpers[0].AbuseReportURL = "javascript://helper.example/report"
+			artifact.Registry.Helpers[0].AbuseReportURL = "javascript://helper.gpm-pilot.net/report"
 			_, err := SignBridgeHelperRegistryArtifact(artifact, priv, "")
 			return err
 		},
@@ -248,7 +248,7 @@ func TestBuildBridgeServiceConfigIncludesSignedHelperControls(t *testing.T) {
 	if !config.SignedRegistry || config.RegistryID != "registry-demo" || config.RegistryKeyID != "registry-key" {
 		t.Fatalf("expected signed registry metadata, got %+v", config)
 	}
-	if config.HelperAbuseReportURL != "https://helper.example/abuse" {
+	if config.HelperAbuseReportURL != "https://helper.gpm-pilot.net/abuse" {
 		t.Fatalf("unexpected abuse report url: %+v", config)
 	}
 	if config.HelperRateLimitPolicy == "" {
@@ -349,6 +349,165 @@ func TestEvaluateBridgeServiceRequestRejectsAccessPathTamper(t *testing.T) {
 	}
 }
 
+func TestEvaluateBridgeServiceRequestRejectsUnsafeHelperURLs(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		url  string
+		code string
+	}{
+		{name: "plain-http", url: "http://helper.gpm-pilot.net/connect", code: "bridge_service_access_path_plain_http"},
+		{name: "private-ip", url: "https://10.0.0.5/connect", code: "bridge_service_access_path_private_host"},
+		{name: "reserved-domain", url: "https://reserved-helper.example/connect", code: "bridge_service_access_path_private_host"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := BuildBridgeServiceConfig(testBridgeInvite(), testBridgeHelperRegistry(), BridgeServiceConfigOptions{
+				RegistryID:           "registry-demo",
+				RegistryExpiresAtUTC: now.Add(24 * time.Hour).Format(time.RFC3339),
+				SignedRegistry:       true,
+			}, now)
+			for i := range config.AccessPaths {
+				if config.AccessPaths[i].PathID == "helper-site" {
+					config.AccessPaths[i].URL = tc.url
+				}
+			}
+			config.AccessPathsSHA256 = bridgeServiceAccessPathsSHA256(config.AccessPaths)
+			decision := EvaluateBridgeServiceRequest(config, BridgeServiceRequest{PathID: "helper-site"}, now)
+			if decision.Allowed || decision.Status != "fail" {
+				t.Fatalf("expected unsafe helper URL to fail closed: %+v", decision)
+			}
+			if !sawBridgeServiceFinding(decision, tc.code) {
+				t.Fatalf("expected %s finding, got %+v", tc.code, decision.Findings)
+			}
+		})
+	}
+}
+
+func TestEvaluateBridgeServiceRequestAllowLocalAccessPathsOnlyForLoopback(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	config := BuildBridgeServiceConfig(testBridgeInvite(), testBridgeHelperRegistry(), BridgeServiceConfigOptions{
+		RegistryID:            "registry-demo",
+		RegistryExpiresAtUTC:  now.Add(24 * time.Hour).Format(time.RFC3339),
+		SignedRegistry:        true,
+		AllowLocalAccessPaths: true,
+	}, now)
+	for i := range config.AccessPaths {
+		if config.AccessPaths[i].PathID == "helper-site" {
+			config.AccessPaths[i].URL = "http://127.0.0.1:18980/connect"
+		}
+	}
+	config.AccessPathsSHA256 = bridgeServiceAccessPathsSHA256(config.AccessPaths)
+	decision := EvaluateBridgeServiceRequest(config, BridgeServiceRequest{PathID: "helper-site"}, now)
+	if !decision.Allowed || decision.Status != "pass" {
+		t.Fatalf("expected loopback diagnostic path to pass, got %+v", decision)
+	}
+
+	for i := range config.AccessPaths {
+		if config.AccessPaths[i].PathID == "helper-site" {
+			config.AccessPaths[i].URL = "http://10.0.0.5/connect"
+		}
+	}
+	config.AccessPathsSHA256 = bridgeServiceAccessPathsSHA256(config.AccessPaths)
+	decision = EvaluateBridgeServiceRequest(config, BridgeServiceRequest{PathID: "helper-site"}, now)
+	if decision.Allowed || decision.Status != "fail" {
+		t.Fatalf("expected private diagnostic path to fail, got %+v", decision)
+	}
+	if !sawBridgeServiceFinding(decision, "bridge_service_access_path_plain_http") {
+		t.Fatalf("expected plain-http finding, got %+v", decision.Findings)
+	}
+}
+
+func TestBridgeInvitePolicyRejectsUnsafeServiceableHelperURLs(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		url  string
+		code string
+	}{
+		{name: "plain-http", url: "http://helper.gpm-pilot.net/connect", code: "bridge_invite_access_path_plain_http"},
+		{name: "private-ip", url: "https://10.0.0.5/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "reserved-domain", url: "https://reserved-helper.example/connect", code: "bridge_invite_access_path_private_host"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			invite := testBridgeInvite()
+			for i := range invite.AccessPaths {
+				if invite.AccessPaths[i].PathID == "helper-site" {
+					invite.AccessPaths[i].URL = tc.url
+				}
+			}
+			registry := testBridgeHelperRegistry()
+			options := DefaultBridgeInvitePolicyOptions()
+			options.HelperRegistry = &registry
+			report := CheckBridgeInvitePolicy(invite, options, now)
+			if report.Status != "fail" {
+				t.Fatalf("expected policy fail, got %+v", report)
+			}
+			if !sawBridgePolicyFinding(report, tc.code) {
+				t.Fatalf("expected %s finding, got %+v", tc.code, report.Findings)
+			}
+		})
+	}
+}
+
+func TestBridgeInvitePolicyAllowLocalAccessPathsOnlyForLoopback(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	invite := testBridgeInvite()
+	for i := range invite.AccessPaths {
+		if invite.AccessPaths[i].PathID == "helper-site" {
+			invite.AccessPaths[i].URL = "http://localhost:18980/connect"
+		}
+	}
+	options := DefaultBridgeInvitePolicyOptions()
+	options.AllowLocalAccessPaths = true
+	report := CheckBridgeInvitePolicy(invite, options, now)
+	if report.Status != "pass" {
+		t.Fatalf("expected loopback diagnostic policy pass, got %+v", report)
+	}
+
+	for i := range invite.AccessPaths {
+		if invite.AccessPaths[i].PathID == "helper-site" {
+			invite.AccessPaths[i].URL = "https://helper.internal/connect"
+		}
+	}
+	report = CheckBridgeInvitePolicy(invite, options, now)
+	if report.Status != "fail" {
+		t.Fatalf("expected private diagnostic policy fail, got %+v", report)
+	}
+	if !sawBridgePolicyFinding(report, "bridge_invite_access_path_private_host") {
+		t.Fatalf("expected private-host finding, got %+v", report.Findings)
+	}
+}
+
+func TestBridgeInvitePolicyRequiresServiceableHTTPSPath(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	invite := testBridgeInvite()
+	invite.AccessPaths = []AccessPath{
+		{PathID: "manual-a", Kind: "instructions", URL: "mailto:a@helpermail.example", Priority: 10, RequiresExternalApp: true},
+		{PathID: "manual-b", Kind: "instructions", URL: "mailto:b@helpermail2.example", Priority: 20, RequiresExternalApp: true},
+	}
+	registry := testBridgeHelperRegistry()
+	options := DefaultBridgeInvitePolicyOptions()
+	options.HelperRegistry = &registry
+	report := CheckBridgeInvitePolicy(invite, options, now)
+	if report.Status != "fail" {
+		t.Fatalf("expected policy fail, got %+v", report)
+	}
+	if !sawBridgePolicyFinding(report, "bridge_invite_no_serviceable_https_path") {
+		t.Fatalf("expected no serviceable path finding, got %+v", report.Findings)
+	}
+}
+
+func TestBridgeAccessPathPublicIPv4ReservedRanges(t *testing.T) {
+	for _, host := range []string{"192.0.0.10", "192.0.2.10"} {
+		if bridgeAccessPathHostLooksPublic(host) {
+			t.Fatalf("expected reserved IPv4 host %s to be rejected", host)
+		}
+	}
+	if !bridgeAccessPathHostLooksPublic("192.0.3.10") {
+		t.Fatalf("expected non-reserved 192.0.3.10 to remain public-looking")
+	}
+}
+
 func TestBridgeInvitePolicyRejectsHelperMissingAbuseAndRateLimitMetadata(t *testing.T) {
 	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
 	registry := testBridgeHelperRegistry()
@@ -429,7 +588,7 @@ func TestBridgeHelperRegistryCheckSummarizesAndFilters(t *testing.T) {
 		DisplayName:      "Quarantined Helper",
 		Status:           BridgeHelperStatusQuarantined,
 		OrgIDs:           []string{"demo-org"},
-		ContactURL:       "https://blocked-helper.example/contact",
+		ContactURL:       "https://blocked-helper.gpm-pilot.net/contact",
 		QuarantineReason: "operator disabled during review",
 		UpdatedAtUTC:     "2026-05-10T00:00:00Z",
 	})
@@ -500,8 +659,8 @@ func TestBridgeHelperRegistryUpsertCreatesHelper(t *testing.T) {
 		DisplayName:     "New Helper",
 		Status:          BridgeHelperStatusActive,
 		OrgIDs:          []string{"demo-org"},
-		ContactURL:      "https://new-helper.example/contact",
-		AbuseReportURL:  "https://new-helper.example/abuse",
+		ContactURL:      "https://new-helper.gpm-pilot.net/contact",
+		AbuseReportURL:  "https://new-helper.gpm-pilot.net/abuse",
 		RateLimitPolicy: "beta cap: per-user and per-source limits enforced",
 		ActiveUntilUTC:  "2026-05-20T01:00:00Z",
 	}, now)
@@ -523,13 +682,13 @@ func TestBridgeHelperRegistryUpsertUpdatesExistingHelper(t *testing.T) {
 		HelperID:    "helper-1",
 		DisplayName: "Renamed Helper",
 		OrgIDs:      []string{"demo-org", "alt-org"},
-		ContactURL:  "https://helper.example/new-contact",
+		ContactURL:  "https://helper.gpm-pilot.net/new-contact",
 	}, now)
 	if report.Status != "pass" || !report.Updated || report.Created {
 		t.Fatalf("expected update pass, got %+v", report)
 	}
 	helper := updated.Helpers[0]
-	if helper.DisplayName != "Renamed Helper" || helper.ContactURL != "https://helper.example/new-contact" {
+	if helper.DisplayName != "Renamed Helper" || helper.ContactURL != "https://helper.gpm-pilot.net/new-contact" {
 		t.Fatalf("unexpected helper update: %+v", helper)
 	}
 	if len(helper.OrgIDs) != 2 || helper.OrgIDs[0] != "alt-org" || helper.OrgIDs[1] != "demo-org" {
@@ -636,8 +795,8 @@ func testBridgeHelperRegistry() BridgeHelperRegistry {
 				DisplayName:     "Demo Helper",
 				Status:          BridgeHelperStatusActive,
 				OrgIDs:          []string{"demo-org"},
-				ContactURL:      "https://helper.example/contact",
-				AbuseReportURL:  "https://helper.example/abuse",
+				ContactURL:      "https://helper.gpm-pilot.net/contact",
+				AbuseReportURL:  "https://helper.gpm-pilot.net/abuse",
 				RateLimitPolicy: "beta cap: per-user and per-source limits enforced",
 				ActiveFromUTC:   "2026-05-09T00:00:00Z",
 				ActiveUntilUTC:  "2026-05-18T00:00:00Z",
@@ -677,12 +836,12 @@ func testBridgeInvite() BridgeInvite {
 		Helper: BridgeHelper{
 			HelperID:    "helper-1",
 			DisplayName: "Demo Helper",
-			ContactURL:  "https://helper.example/contact",
+			ContactURL:  "https://helper.gpm-pilot.net/contact",
 			Description: "Temporary assisted bootstrap helper",
 		},
 		AccessPaths: []AccessPath{
-			{PathID: "backup-helper", Kind: "bridge", URL: "https://backup-helper.example/connect", Priority: 20},
-			{PathID: "helper-site", Kind: "bridge", URL: "https://helper.example/connect", Priority: 10},
+			{PathID: "backup-helper", Kind: "bridge", URL: "https://backup-helper.gpm-pilot.net/connect", Priority: 20},
+			{PathID: "helper-site", Kind: "bridge", URL: "https://helper.gpm-pilot.net/connect", Priority: 10},
 			{PathID: "manual-helper", Kind: "instructions", URL: "mailto:bridge@helpermail.example", Priority: 30, RequiresExternalApp: true},
 		},
 		SafetyNotes: []string{"Use only while this invite is unexpired."},

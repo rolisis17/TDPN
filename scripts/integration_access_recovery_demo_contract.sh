@@ -22,10 +22,10 @@ go run ./cmd/gpmrecover demo-bundle \
   --out-dir "$BUNDLE_DIR" \
   --org-id contract-org \
   --org-name "Contract Org" \
-  --base-url https://contract.example \
+  --base-url https://contract.gpm-pilot.net \
   --helper-id helper-contract \
   --helper-name "Contract Helper" \
-  --helper-url https://helper.example/contract/bootstrap \
+  --helper-url https://helper.gpm-pilot.net/contract/bootstrap \
   --helper-contact mailto:helper-contract@example.com \
   >"$TMP_DIR/demo-bundle.stdout.json"
 

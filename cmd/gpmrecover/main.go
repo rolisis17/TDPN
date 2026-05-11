@@ -249,13 +249,13 @@ func usage() {
   go run ./cmd/gpmrecover sign --pack FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-sign --invite FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
-  go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) (--signed-helper-registry FILE | --helper-registry FILE --allow-unsigned-helper-registry | --allow-missing-helper-registry)
-  go run ./cmd/gpmrecover bridge-service-config --invite FILE --signed-helper-registry FILE (--trust-store FILE | --public-key-file FILE) [--out FILE]
+  go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) (--signed-helper-registry FILE | --helper-registry FILE --allow-unsigned-helper-registry | --allow-missing-helper-registry) [--allow-local-access-paths]
+  go run ./cmd/gpmrecover bridge-service-config --invite FILE --signed-helper-registry FILE (--trust-store FILE | --public-key-file FILE) [--out FILE] [--allow-local-access-paths]
   go run ./cmd/gpmrecover bridge-service-check --config FILE [--path-id ID | --url URL] [--out FILE]
   go run ./cmd/gpmrecover bridge-service-serve --config FILE --config-sha256 HEX [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] --access-code-sha256 HEX [--allow-unpinned-local=false] [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=false] [--redirect=false]
   go run ./cmd/gpmrecover bridge-service-code-generate (--code-out FILE | --print-code 1) [--hash-out FILE] [--bytes 24]
   go run ./cmd/gpmrecover bridge-service-code-hash (--code TEXT | --code-file FILE) [--out FILE] [--allow-weak-code=false]
-  go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir DIR [--install-dir /etc/gpm/access-bridge] [--service-name gpm-access-bridge] [--public-host bridge.example] --config-sha256 HEX --access-code-sha256 HEX [--allow-unpinned-config=false] [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=true]
+  go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir DIR [--install-dir /etc/gpm/access-bridge] [--service-name gpm-access-bridge] [--public-host recovery-helper.gpm-pilot.net] --config-sha256 HEX --access-code-sha256 HEX [--allow-unpinned-config=false] [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=true]
   go run ./cmd/gpmrecover bridge-registry-sign --helper-registry FILE --org-id ID --org-name NAME --private-key-file FILE --out FILE [--registry-id ID] [--lifetime-hours HOURS]
   go run ./cmd/gpmrecover bridge-registry-verify --signed-registry FILE (--trust-store FILE | --public-key-file FILE) [--out-registry FILE] [--show-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
@@ -892,6 +892,7 @@ func runBridgePolicy(args []string) error {
 	allowUnsignedHelperRegistry := fs.Bool("allow-unsigned-helper-registry", false, "allow raw unsigned helper registry JSON for local diagnostics only")
 	allowMissingHelperRegistry := fs.Bool("allow-missing-helper-registry", false, "diagnostic opt-out: allow bridge policy checks without any helper registry")
 	requireHelperRegistry := fs.Bool("require-helper-registry", true, "fail if no bridge helper registry is provided")
+	allowLocalAccessPaths := fs.Bool("allow-local-access-paths", false, "diagnostic opt-out: allow plain-http/private bridge access paths for local rehearsal only")
 	minPaths := fs.Int("min-paths", 2, "minimum helper access paths")
 	minHosts := fs.Int("min-distinct-hosts", 2, "minimum distinct helper/contact hosts")
 	maxLifetimeHours := fs.Int("max-lifetime-hours", int(accesspack.MaxBridgeInviteLifetime/time.Hour), "maximum invite lifetime in hours")
@@ -958,6 +959,7 @@ func runBridgePolicy(args []string) error {
 		RequireHelperRegistry:        effectiveRequireHelperRegistry,
 		RequireHelperAbuseReport:     defaultPolicy.RequireHelperAbuseReport,
 		RequireHelperRateLimitPolicy: defaultPolicy.RequireHelperRateLimitPolicy,
+		AllowLocalAccessPaths:        *allowLocalAccessPaths,
 		HelperRegistry:               helperRegistry,
 	}, time.Now().UTC())
 	out := bridgePolicyOutput{
@@ -985,6 +987,7 @@ func runBridgeServiceConfig(args []string) error {
 	publicFile := fs.String("public-key-file", "", "path to public key file for one-off verification")
 	trustStoreFile := fs.String("trust-store", "", "path to access recovery trust store JSON")
 	outFile := fs.String("out", "", "optional path to write bridge service config JSON")
+	allowLocalAccessPaths := fs.Bool("allow-local-access-paths", false, "diagnostic opt-out: allow plain-http/private bridge access paths for local rehearsal only")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1009,11 +1012,12 @@ func runBridgeServiceConfig(args []string) error {
 		return err
 	}
 	config := accesspack.BuildBridgeServiceConfig(verified.Invite, verifiedRegistry.Artifact.Registry, accesspack.BridgeServiceConfigOptions{
-		RegistryID:           verifiedRegistry.Artifact.RegistryID,
-		RegistryExpiresAtUTC: verifiedRegistry.Artifact.ExpiresAtUTC,
-		InviteKeyID:          verified.KeyID,
-		RegistryKeyID:        verifiedRegistry.KeyID,
-		SignedRegistry:       true,
+		RegistryID:            verifiedRegistry.Artifact.RegistryID,
+		RegistryExpiresAtUTC:  verifiedRegistry.Artifact.ExpiresAtUTC,
+		InviteKeyID:           verified.KeyID,
+		RegistryKeyID:         verifiedRegistry.KeyID,
+		SignedRegistry:        true,
+		AllowLocalAccessPaths: *allowLocalAccessPaths,
 	}, time.Now().UTC())
 	body, err = json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -1327,7 +1331,7 @@ func runBridgeServiceDeployPack(args []string) error {
 	outDir := fs.String("out-dir", "", "directory to write deployment files")
 	installDir := fs.String("install-dir", "/etc/gpm/access-bridge", "target install directory used inside generated unit")
 	serviceName := fs.String("service-name", "gpm-access-bridge", "systemd service name")
-	publicHost := fs.String("public-host", "bridge.example", "public HTTPS host used in reverse-proxy examples")
+	publicHost := fs.String("public-host", "recovery-helper.gpm-pilot.net", "public HTTPS host used in reverse-proxy examples")
 	binary := fs.String("binary", "/usr/local/bin/gpmrecover", "installed gpmrecover binary path")
 	configPath := fs.String("config", "/etc/gpm/access-bridge/bridge-service-config.json", "installed bridge service config path")
 	configSHA256 := fs.String("config-sha256", "", "sha256 hex digest of the installed bridge service config")
@@ -1580,11 +1584,16 @@ func validateBridgeDeployPublicHost(raw string) (string, error) {
 		return "", errors.New("--public-host contains unsafe reverse-proxy config characters")
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		if ip.To4() == nil {
+		ipv4 := ip.To4()
+		if ipv4 == nil {
 			return "", errors.New("--public-host must use DNS or IPv4 for generated reverse-proxy examples")
+		}
+		if !bridgeDeployIPv4LooksPublic(ipv4) {
+			return "", errors.New("--public-host must be public-routable, not private, loopback, link-local, documentation, multicast, or reserved")
 		}
 		return host, nil
 	}
+	lowerHost := strings.ToLower(host)
 	if len(host) > 253 {
 		return "", errors.New("--public-host is too long")
 	}
@@ -1605,7 +1614,50 @@ func validateBridgeDeployPublicHost(raw string) (string, error) {
 			}
 		}
 	}
+	if bridgeDeployDNSNameLooksReserved(lowerHost) {
+		return "", errors.New("--public-host must use a public DNS name, not localhost or reserved/internal/test domains")
+	}
 	return host, nil
+}
+
+func bridgeDeployIPv4LooksPublic(ip net.IP) bool {
+	if len(ip) != net.IPv4len {
+		return false
+	}
+	first, second := ip[0], ip[1]
+	switch {
+	case first == 0:
+	case first == 10:
+	case first == 127:
+	case first == 169 && second == 254:
+	case first == 172 && second >= 16 && second <= 31:
+	case first == 192 && second == 168:
+	case first == 100 && second >= 64 && second <= 127:
+	case first == 192 && second == 0 && (ip[2] == 0 || ip[2] == 2):
+	case first == 192 && second == 88 && ip[2] == 99:
+	case first == 198 && (second == 18 || second == 19):
+	case first == 198 && second == 51 && ip[2] == 100:
+	case first == 203 && second == 0 && ip[2] == 113:
+	case first >= 224:
+	default:
+		return true
+	}
+	return false
+}
+
+func bridgeDeployDNSNameLooksReserved(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	if host == "example.com" || host == "example.net" || host == "example.org" {
+		return true
+	}
+	for _, suffix := range []string{".localhost", ".local", ".lan", ".internal", ".test", ".invalid", ".example", ".example.com", ".example.net", ".example.org"} {
+		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateBridgeDeployListenAddr(raw string) (string, error) {
@@ -2148,9 +2200,9 @@ func runDemoBundle(args []string) error {
 	outDir := fs.String("out-dir", "", "directory to write the demo bundle")
 	orgID := fs.String("org-id", "freenews-demo", "demo organization id")
 	orgName := fs.String("org-name", "FreeNews Demo", "demo organization name")
-	baseURL := fs.String("base-url", "https://freenews.example", "primary demo access URL")
-	helperURL := fs.String("helper-url", "https://helper.example/freenews/bootstrap", "demo bridge helper URL")
-	helperContact := fs.String("helper-contact", "mailto:bridge-helper@example.com", "demo helper contact URL")
+	baseURL := fs.String("base-url", "https://freenews.gpm-pilot.net", "primary demo access URL")
+	helperURL := fs.String("helper-url", "https://helper.gpm-pilot.net/freenews/bootstrap", "demo bridge helper URL")
+	helperContact := fs.String("helper-contact", "mailto:bridge-helper@gpm-pilot.net", "demo helper contact URL")
 	helperID := fs.String("helper-id", "helper-demo", "demo bridge helper id")
 	helperName := fs.String("helper-name", "Demo bridge helper", "demo bridge helper display name")
 	packAudience := fs.String("pack-audience", "Demo users validating the GPM access recovery flow", "signed access-pack intended audience")
@@ -2240,6 +2292,7 @@ func runDemoBundle(args []string) error {
 	}
 	bridgePolicyOptions := accesspack.DefaultBridgeInvitePolicyOptions()
 	bridgePolicyOptions.RequireHelperRegistry = true
+	bridgePolicyOptions.AllowLocalAccessPaths = bridgeDemoBundleUsesLocalAccessPaths(*baseURL, *helperURL)
 	bridgePolicyOptions.HelperRegistry = &bridgeHelperRegistry
 	bridgePolicy := accesspack.CheckBridgeInvitePolicy(signedInvite, bridgePolicyOptions, now)
 	if bridgePolicy.Status != "pass" {
@@ -2626,6 +2679,31 @@ func fetchPublicationURL(client *http.Client, rawURL string, maxBytes int64) ([]
 		return nil, fmt.Errorf("response exceeds max size %d bytes", maxBytes)
 	}
 	return body, nil
+}
+
+func bridgeDemoBundleUsesLocalAccessPaths(rawURLs ...string) bool {
+	for _, raw := range rawURLs {
+		parsed, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil {
+			continue
+		}
+		if bridgeDemoBundleHostLooksLocal(parsed.Hostname()) {
+			return true
+		}
+	}
+	return false
+}
+
+func bridgeDemoBundleHostLooksLocal(raw string) bool {
+	host := strings.ToLower(strings.TrimSpace(raw))
+	if host == "" {
+		return false
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func demoAccessPack(orgID string, orgName string, baseURL string, audience string, now time.Time) accesspack.Pack {

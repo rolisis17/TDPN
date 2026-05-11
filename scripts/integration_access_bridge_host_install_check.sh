@@ -28,10 +28,10 @@ go run ./cmd/gpmrecover demo-bundle \
   --out-dir "$BUNDLE_DIR" \
   --org-id host-check-org \
   --org-name "Host Check Org" \
-  --base-url https://host-check.example \
+  --base-url https://host-check.gpm-pilot.net \
   --helper-id helper-host-check \
   --helper-name "Host Check Helper" \
-  --helper-url https://helper.example/host-check/bootstrap \
+  --helper-url https://helper.gpm-pilot.net/host-check/bootstrap \
   --helper-contact mailto:helper-host-check@example.com \
   >"$TMP_DIR/demo-bundle.stdout.json"
 
@@ -73,17 +73,19 @@ if ! jq -e \
     and .status == "pass"
     and .inputs.deploy_pack_dir == $deploy_dir
     and .observed.expected_config_sha256 == $config_sha256
+    and .observed.config_allow_local_access_paths == "false"
     and .observed.env_config_sha256 == $config_sha256
     and (.observed.env_access_code_sha256 | length == 64)
     and .observed.env_allow_query_code == "false"
     and .observed.env_trust_proxy_headers == "true"
     and .observed.env_addr == "127.0.0.1:18980"
     and .observed.env_rps == "2"
-    and .observed.caddy_site_host == "bridge.example"
+    and .observed.caddy_site_host == "recovery-helper.gpm-pilot.net"
     and .observed.caddy_reverse_proxy == "127.0.0.1:18980"
-    and .observed.nginx_server_name == "bridge.example"
+    and .observed.nginx_server_name == "recovery-helper.gpm-pilot.net"
     and .observed.nginx_proxy_pass == "127.0.0.1:18980"
     and ([.checks[] | select(.id == "rate_limit_configured" and .status == "pass")] | length == 1)
+    and ([.checks[] | select(.id == "config_local_access_paths_disabled" and .status == "pass")] | length == 1)
     and ([.checks[] | select(.id == "loopback_bind" and .status == "pass")] | length == 1)
     and ([.checks[] | select(.id == "caddy_reverse_proxy_target" and .status == "pass")] | length == 1)
     and ([.checks[] | select(.id == "nginx_proxy_pass_target" and .status == "pass")] | length == 1)
@@ -94,6 +96,84 @@ if ! jq -e \
   cat "$SUMMARY_JSON"
   exit 1
 fi
+
+BAD_LOCAL_CONFIG="$TMP_DIR/bridge-service-config-local-diagnostic.json"
+jq '.allow_local_access_paths = true' "$SERVICE_CONFIG" >"$BAD_LOCAL_CONFIG"
+set +e
+./scripts/access_bridge_host_install_check.sh \
+  --deploy-pack-dir "$DEPLOY_DIR" \
+  --service-name gpm-access-bridge-host-check \
+  --config-json "$BAD_LOCAL_CONFIG" \
+  --summary-json "$TMP_DIR/bad-local-config-summary.json" \
+  --print-summary-json 0 >/dev/null 2>&1
+bad_local_config_rc=$?
+set -e
+if [[ "$bad_local_config_rc" -eq 0 ]]; then
+  echo "access bridge host install check integration failed: local-diagnostic service config should fail"
+  cat "$TMP_DIR/bad-local-config-summary.json"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .observed.config_allow_local_access_paths == "true" and ([.checks[] | select(.id == "config_local_access_paths_disabled" and .status == "fail")] | length == 1)' "$TMP_DIR/bad-local-config-summary.json" >/dev/null; then
+  echo "access bridge host install check integration failed: local-diagnostic service config summary mismatch"
+  cat "$TMP_DIR/bad-local-config-summary.json"
+  exit 1
+fi
+
+bad_public_hosts=(
+  "localhost"
+  "10.0.0.8"
+  "100.64.0.1"
+  "169.254.1.1"
+  "192.0.0.10"
+  "192.0.2.10"
+  "224.0.0.1"
+  "helper.local"
+  "helper.lan"
+  "helper.internal"
+  "helper.test"
+  "helper.invalid"
+  "helper.example"
+  "example.com"
+  "example.net"
+  "example.org"
+  "user@public.tdpn.net"
+  "public.tdpn.net."
+)
+bad_public_host_index=0
+for bad_public_host in "${bad_public_hosts[@]}"; do
+  bad_public_host_index=$((bad_public_host_index + 1))
+  BAD_PUBLIC_HOST_DIR="$TMP_DIR/bad-public-host-$bad_public_host_index"
+  cp -R "$DEPLOY_DIR" "$BAD_PUBLIC_HOST_DIR"
+  sed -i "s/^recovery-helper.gpm-pilot.net {/$bad_public_host {/" "$BAD_PUBLIC_HOST_DIR/gpm-access-bridge-host-check.Caddyfile.example"
+  sed -i "s/server_name recovery-helper.gpm-pilot.net;/server_name $bad_public_host;/" "$BAD_PUBLIC_HOST_DIR/gpm-access-bridge-host-check.nginx.example.conf"
+  set +e
+  ./scripts/access_bridge_host_install_check.sh \
+    --deploy-pack-dir "$BAD_PUBLIC_HOST_DIR" \
+    --service-name gpm-access-bridge-host-check \
+    --config-json "$SERVICE_CONFIG" \
+    --summary-json "$TMP_DIR/bad-public-host-$bad_public_host_index-summary.json" \
+    --print-summary-json 0 >/dev/null 2>&1
+  bad_public_host_rc=$?
+  set -e
+  if [[ "$bad_public_host_rc" -eq 0 ]]; then
+    echo "access bridge host install check integration failed: unsafe public host should fail: $bad_public_host"
+    cat "$TMP_DIR/bad-public-host-$bad_public_host_index-summary.json"
+    exit 1
+  fi
+  if ! jq -e \
+    --arg host "$bad_public_host" \
+    '
+      .status == "fail"
+      and .observed.caddy_site_host == $host
+      and .observed.nginx_server_name == $host
+      and ([.checks[] | select(.id == "caddy_public_host_valid" and .status == "fail")] | length == 1)
+      and ([.checks[] | select(.id == "nginx_public_host_valid" and .status == "fail")] | length == 1)
+    ' "$TMP_DIR/bad-public-host-$bad_public_host_index-summary.json" >/dev/null; then
+    echo "access bridge host install check integration failed: unsafe public host summary mismatch: $bad_public_host"
+    cat "$TMP_DIR/bad-public-host-$bad_public_host_index-summary.json"
+    exit 1
+  fi
+done
 
 BAD_ADDR_DIR="$TMP_DIR/bad-addr"
 cp -R "$DEPLOY_DIR" "$BAD_ADDR_DIR"

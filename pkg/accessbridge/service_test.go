@@ -44,7 +44,7 @@ func TestServiceAllowsSignedBridgePathAndRateLimits(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
 		t.Fatalf("unmarshal bridge response: %v", err)
 	}
-	if out.AccessURL != "https://helper.example/bridge" || !out.Decision.Allowed {
+	if out.AccessURL != "https://helper.gpm-pilot.net/bridge" || !out.Decision.Allowed {
 		t.Fatalf("unexpected bridge response: %+v", out)
 	}
 	if service.RequestCount("192.0.2.1") != 1 {
@@ -325,7 +325,32 @@ func TestNewServiceRejectsConfigWithoutServiceablePath(t *testing.T) {
 	}
 }
 
+func TestNewServiceRejectsUnsafeServiceablePathHosts(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{name: "plain-http", url: "http://helper.gpm-pilot.net/bridge"},
+		{name: "private-ip", url: "https://10.0.0.5/bridge"},
+		{name: "reserved-domain", url: "https://reserved-helper.example/bridge"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := NewService(ServiceConfig{
+				BridgeConfig: testServiceBridgeConfigWithBridgeURL(now, tc.url),
+				Now:          func() time.Time { return now },
+			}); err == nil {
+				t.Fatal("expected unsafe serviceable bridge path to fail preflight")
+			}
+		})
+	}
+}
+
 func testServiceBridgeConfig(now time.Time) accesspack.BridgeServiceConfig {
+	return testServiceBridgeConfigWithBridgeURL(now, "https://helper.gpm-pilot.net/bridge")
+}
+
+func testServiceBridgeConfigWithBridgeURL(now time.Time, bridgeURL string) accesspack.BridgeServiceConfig {
 	invite := accesspack.BridgeInvite{
 		SchemaVersion: accesspack.SchemaVersion,
 		InviteID:      "bri-service-test",
@@ -340,10 +365,10 @@ func testServiceBridgeConfig(now time.Time) accesspack.BridgeServiceConfig {
 		Helper: accesspack.BridgeHelper{
 			HelperID:    "helper-service",
 			DisplayName: "Service Helper",
-			ContactURL:  "https://helper.example/contact",
+			ContactURL:  "https://helper.gpm-pilot.net/contact",
 		},
 		AccessPaths: []accesspack.AccessPath{
-			{PathID: "helper-web", Kind: "bridge", URL: "https://helper.example/bridge", Priority: 10},
+			{PathID: "helper-web", Kind: "bridge", URL: bridgeURL, Priority: 10},
 			{PathID: "helper-contact", Kind: "instructions", URL: "mailto:bridge@helpermail.example", Priority: 20, RequiresExternalApp: true},
 		},
 	}
@@ -355,8 +380,8 @@ func testServiceBridgeConfig(now time.Time) accesspack.BridgeServiceConfig {
 				DisplayName:     "Service Helper",
 				Status:          accesspack.BridgeHelperStatusActive,
 				OrgIDs:          []string{"service-org"},
-				ContactURL:      "https://helper.example/contact",
-				AbuseReportURL:  "https://helper.example/abuse",
+				ContactURL:      "https://helper.gpm-pilot.net/contact",
+				AbuseReportURL:  "https://helper.gpm-pilot.net/abuse",
 				RateLimitPolicy: "beta cap: per-source limits enforced",
 				ActiveFromUTC:   now.Add(-2 * time.Hour).Format(time.RFC3339),
 				ActiveUntilUTC:  now.Add(8 * 24 * time.Hour).Format(time.RFC3339),

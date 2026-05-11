@@ -10,11 +10,12 @@ import (
 )
 
 type BridgeServiceConfigOptions struct {
-	RegistryID           string `json:"registry_id,omitempty"`
-	RegistryExpiresAtUTC string `json:"registry_expires_at_utc,omitempty"`
-	InviteKeyID          string `json:"invite_key_id,omitempty"`
-	RegistryKeyID        string `json:"registry_key_id,omitempty"`
-	SignedRegistry       bool   `json:"signed_registry"`
+	RegistryID            string `json:"registry_id,omitempty"`
+	RegistryExpiresAtUTC  string `json:"registry_expires_at_utc,omitempty"`
+	InviteKeyID           string `json:"invite_key_id,omitempty"`
+	RegistryKeyID         string `json:"registry_key_id,omitempty"`
+	SignedRegistry        bool   `json:"signed_registry"`
+	AllowLocalAccessPaths bool   `json:"allow_local_access_paths"`
 }
 
 type BridgeServiceConfig struct {
@@ -37,6 +38,7 @@ type BridgeServiceConfig struct {
 	InviteKeyID           string                   `json:"invite_key_id,omitempty"`
 	RegistryKeyID         string                   `json:"registry_key_id,omitempty"`
 	SignedRegistry        bool                     `json:"signed_registry"`
+	AllowLocalAccessPaths bool                     `json:"allow_local_access_paths,omitempty"`
 	InviteSHA256          string                   `json:"invite_sha256,omitempty"`
 	RegistrySHA256        string                   `json:"registry_sha256,omitempty"`
 	AccessPathsSHA256     string                   `json:"access_paths_sha256,omitempty"`
@@ -82,28 +84,30 @@ func BuildBridgeServiceConfig(invite BridgeInvite, registry BridgeHelperRegistry
 	policyOptions := DefaultBridgeInvitePolicyOptions()
 	policyOptions.RequireHelperRegistry = true
 	policyOptions.HelperRegistry = &registry
+	policyOptions.AllowLocalAccessPaths = options.AllowLocalAccessPaths
 	policy := CheckBridgeInvitePolicy(invite, policyOptions, now)
 	config := BridgeServiceConfig{
-		Status:               policy.Status,
-		GeneratedAtUTC:       now.Format(time.RFC3339),
-		InviteID:             invite.InviteID,
-		InviteIssuedAtUTC:    invite.IssuedAtUTC,
-		InviteExpiresAtUTC:   invite.ExpiresAtUTC,
-		OrganizationID:       invite.Organization.OrgID,
-		OrganizationName:     invite.Organization.Name,
-		HelperID:             invite.Helper.HelperID,
-		HelperName:           invite.Helper.DisplayName,
-		HelperContactURL:     invite.Helper.ContactURL,
-		RegistryID:           strings.TrimSpace(options.RegistryID),
-		RegistryExpiresAtUTC: strings.TrimSpace(options.RegistryExpiresAtUTC),
-		InviteKeyID:          strings.TrimSpace(options.InviteKeyID),
-		RegistryKeyID:        strings.TrimSpace(options.RegistryKeyID),
-		SignedRegistry:       options.SignedRegistry,
-		InviteSHA256:         bridgeServiceInviteSHA256(invite),
-		RegistrySHA256:       bridgeServiceRegistrySHA256(registry),
-		AccessPathsSHA256:    bridgeServiceAccessPathsSHA256(invite.AccessPaths),
-		AccessPaths:          invite.AccessPaths,
-		Policy:               policy,
+		Status:                policy.Status,
+		GeneratedAtUTC:        now.Format(time.RFC3339),
+		InviteID:              invite.InviteID,
+		InviteIssuedAtUTC:     invite.IssuedAtUTC,
+		InviteExpiresAtUTC:    invite.ExpiresAtUTC,
+		OrganizationID:        invite.Organization.OrgID,
+		OrganizationName:      invite.Organization.Name,
+		HelperID:              invite.Helper.HelperID,
+		HelperName:            invite.Helper.DisplayName,
+		HelperContactURL:      invite.Helper.ContactURL,
+		RegistryID:            strings.TrimSpace(options.RegistryID),
+		RegistryExpiresAtUTC:  strings.TrimSpace(options.RegistryExpiresAtUTC),
+		InviteKeyID:           strings.TrimSpace(options.InviteKeyID),
+		RegistryKeyID:         strings.TrimSpace(options.RegistryKeyID),
+		SignedRegistry:        options.SignedRegistry,
+		AllowLocalAccessPaths: options.AllowLocalAccessPaths,
+		InviteSHA256:          bridgeServiceInviteSHA256(invite),
+		RegistrySHA256:        bridgeServiceRegistrySHA256(registry),
+		AccessPathsSHA256:     bridgeServiceAccessPathsSHA256(invite.AccessPaths),
+		AccessPaths:           invite.AccessPaths,
+		Policy:                policy,
 	}
 	if helper, ok := findBridgeHelperRegistration(registry, invite.Helper.HelperID); ok {
 		config.HelperAbuseReportURL = helper.AbuseReportURL
@@ -252,8 +256,10 @@ func EvaluateBridgeServiceRequest(config BridgeServiceConfig, request BridgeServ
 			if path.RequiresExternalApp {
 				decision.addFinding("bridge_service_access_path_external_app", "error", "requested access path requires an external app and cannot be served by the bridge service")
 			}
-			if !bridgeServicePathIsHTTP(path) {
-				decision.addFinding("bridge_service_access_path_unserviceable_scheme", "error", "requested access path is not an HTTP(S) bridge service URL")
+			if code, message, bad := bridgeAccessPathServiceURLIssue(path); bad {
+				if !(config.AllowLocalAccessPaths && bridgeAccessPathLocalDiagnosticIssueAllowed(code, path)) {
+					decision.addFinding("bridge_service_access_path_"+code, "error", message)
+				}
 			}
 			if request.URL != "" && !bridgeServiceSameURL(path.URL, request.URL) {
 				decision.addFinding("bridge_service_access_path_url_mismatch", "error", "requested URL does not match the signed access path URL")
@@ -285,15 +291,6 @@ func findBridgeServiceAccessPath(config BridgeServiceConfig, request BridgeServi
 		}
 	}
 	return AccessPath{}, false
-}
-
-func bridgeServicePathIsHTTP(path AccessPath) bool {
-	parsed, err := url.Parse(strings.TrimSpace(path.URL))
-	if err != nil {
-		return false
-	}
-	scheme := strings.ToLower(parsed.Scheme)
-	return scheme == "http" || scheme == "https"
 }
 
 func bridgeServiceSameURL(left string, right string) bool {

@@ -30,10 +30,10 @@ go run ./cmd/gpmrecover demo-bundle \
   --out-dir "$BUNDLE_DIR" \
   --org-id evidence-org \
   --org-name "Evidence Org" \
-  --base-url https://evidence.example \
+  --base-url https://evidence.gpm-pilot.net \
   --helper-id helper-evidence \
   --helper-name "Evidence Helper" \
-  --helper-url https://helper.example/evidence/bootstrap \
+  --helper-url https://helper.gpm-pilot.net/evidence/bootstrap \
   --helper-contact mailto:helper-evidence@example.com \
   >"$TMP_DIR/demo-bundle.stdout.json"
 
@@ -75,7 +75,7 @@ jq -n \
     generated_at_utc: $generated_at_utc,
     status: "pass",
     notes: "bridge service smoke passed",
-    base_url: "https://bridge.example",
+    base_url: "https://recovery-helper.gpm-pilot.net",
     path_id: "helper-web",
     health: {
       http_status: "200",
@@ -137,7 +137,7 @@ if ! jq -e \
     and .smoke.bridge_http_status == "200"
     and .smoke.bridge_status == "ok"
     and .smoke.bridge_security_headers_ok == true
-    and .smoke.base_host == "bridge.example"
+    and .smoke.base_host == "recovery-helper.gpm-pilot.net"
     and .smoke.config_sha256 == $config_sha256
     and .smoke.summary_json == $smoke_summary
     and .expected_identity.helper_id == "helper-evidence"
@@ -152,6 +152,7 @@ if ! jq -e \
     and .local_files.config.exists == true
     and .local_files.config.valid_json == true
     and .local_files.config.sha256 == $config_sha256
+    and .local_files.config.allow_local_access_paths == "false"
     and .local_files.deploy_pack.status == "pass"
     and .local_files.deploy_pack.dir == $deploy_dir
     and .local_files.deploy_pack.exists == true
@@ -160,9 +161,9 @@ if ! jq -e \
     and .local_files.deploy_pack.env.allow_query_code == "false"
     and .local_files.deploy_pack.env.trust_proxy_headers == "true"
     and .local_files.deploy_pack.env.addr == "127.0.0.1:18980"
-    and .local_files.deploy_pack.proxy_examples.caddy_site_host == "bridge.example"
+    and .local_files.deploy_pack.proxy_examples.caddy_site_host == "recovery-helper.gpm-pilot.net"
     and .local_files.deploy_pack.proxy_examples.caddy_reverse_proxy == "127.0.0.1:18980"
-    and .local_files.deploy_pack.proxy_examples.nginx_server_name == "bridge.example"
+    and .local_files.deploy_pack.proxy_examples.nginx_server_name == "recovery-helper.gpm-pilot.net"
     and .local_files.deploy_pack.proxy_examples.nginx_proxy_pass == "127.0.0.1:18980"
     and (.local_files.deploy_pack.required_files | length == 6)
     and ([.local_files.deploy_pack.required_files[].sha256 | length == 64] | all)
@@ -173,6 +174,149 @@ if ! jq -e \
   cat "$SUMMARY_JSON"
   exit 1
 fi
+
+BAD_LOCAL_CONFIG="$TMP_DIR/bridge-service-config-local-diagnostic.json"
+jq '.allow_local_access_paths = true' "$SERVICE_CONFIG" >"$BAD_LOCAL_CONFIG"
+bad_local_config_sha256="$(sha256sum "$BAD_LOCAL_CONFIG" | awk '{print $1}')"
+BAD_LOCAL_CONFIG_SMOKE="$TMP_DIR/access_bridge_service_smoke_local_diagnostic_config.json"
+jq --arg config_sha256 "$bad_local_config_sha256" '.health.config_sha256 = $config_sha256' "$SMOKE_SUMMARY" >"$BAD_LOCAL_CONFIG_SMOKE"
+BAD_LOCAL_CONFIG_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_local_diagnostic_config.json"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$BAD_LOCAL_CONFIG_SMOKE" \
+  --config-json "$BAD_LOCAL_CONFIG" \
+  --summary-json "$BAD_LOCAL_CONFIG_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/bad-local-config.log" 2>&1
+bad_local_config_rc=$?
+set -e
+if [[ "$bad_local_config_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: local-diagnostic service config should fail"
+  cat "$BAD_LOCAL_CONFIG_SUMMARY"
+  exit 1
+fi
+if ! jq -e \
+  '
+    .status == "fail"
+    and .local_files.config.status == "fail"
+    and .local_files.config.allow_local_access_paths == "true"
+    and (.local_files.config.reason | contains("local diagnostic access paths"))
+    and .recommended_next_action.id == "stage_bridge_service_config"
+  ' "$BAD_LOCAL_CONFIG_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: local-diagnostic service config summary mismatch"
+  cat "$BAD_LOCAL_CONFIG_SUMMARY"
+  exit 1
+fi
+
+bad_public_hosts=(
+  "localhost"
+  "10.0.0.8"
+  "100.64.0.1"
+  "169.254.1.1"
+  "192.0.0.10"
+  "192.0.2.10"
+  "224.0.0.1"
+  "helper.local"
+  "helper.lan"
+  "helper.internal"
+  "helper.test"
+  "helper.invalid"
+  "helper.example"
+  "example.com"
+  "example.net"
+  "example.org"
+  "user@public.tdpn.net"
+  "public.tdpn.net."
+)
+bad_public_host_index=0
+for bad_public_host in "${bad_public_hosts[@]}"; do
+  bad_public_host_index=$((bad_public_host_index + 1))
+  BAD_PUBLIC_HOST_DEPLOY_DIR="$TMP_DIR/bad-public-host-deploy-$bad_public_host_index"
+  cp -R "$DEPLOY_DIR" "$BAD_PUBLIC_HOST_DEPLOY_DIR"
+  sed -i "s/^recovery-helper.gpm-pilot.net {/$bad_public_host {/" "$BAD_PUBLIC_HOST_DEPLOY_DIR/gpm-access-bridge-evidence.Caddyfile.example"
+  sed -i "s/server_name recovery-helper.gpm-pilot.net;/server_name $bad_public_host;/" "$BAD_PUBLIC_HOST_DEPLOY_DIR/gpm-access-bridge-evidence.nginx.example.conf"
+  BAD_PUBLIC_HOST_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_bad_public_host_$bad_public_host_index.json"
+  set +e
+  ./scripts/access_bridge_deployment_evidence.sh \
+    --smoke-summary-json "$SMOKE_SUMMARY" \
+    --config-json "$SERVICE_CONFIG" \
+    --deploy-pack-dir "$BAD_PUBLIC_HOST_DEPLOY_DIR" \
+    --service-name gpm-access-bridge-evidence \
+    --summary-json "$BAD_PUBLIC_HOST_SUMMARY" \
+    --print-summary-json 0 >"$TMP_DIR/bad-public-host-$bad_public_host_index.log" 2>&1
+  bad_public_host_rc=$?
+  set -e
+  if [[ "$bad_public_host_rc" -eq 0 ]]; then
+    echo "access bridge deployment evidence integration failed: unsafe proxy public host should fail: $bad_public_host"
+    cat "$BAD_PUBLIC_HOST_SUMMARY"
+    exit 1
+  fi
+  if ! jq -e \
+    --arg host "$bad_public_host" \
+    '
+      .status == "fail"
+      and .local_files.deploy_pack.status == "fail"
+      and .local_files.deploy_pack.proxy_examples.caddy_site_host == $host
+      and .local_files.deploy_pack.proxy_examples.nginx_server_name == $host
+      and (.local_files.deploy_pack.reason | contains("safe bare public host"))
+      and .recommended_next_action.id == "stage_bridge_deploy_pack"
+    ' "$BAD_PUBLIC_HOST_SUMMARY" >/dev/null; then
+    echo "access bridge deployment evidence integration failed: unsafe proxy public host summary mismatch: $bad_public_host"
+    cat "$BAD_PUBLIC_HOST_SUMMARY"
+    exit 1
+  fi
+done
+
+bad_smoke_base_urls=(
+  "https://localhost"
+  "https://10.0.0.8"
+  "https://100.64.0.1"
+  "https://169.254.1.1"
+  "https://192.0.0.10"
+  "https://192.0.2.10"
+  "https://224.0.0.1"
+  "https://helper.local"
+  "https://helper.lan"
+  "https://helper.internal"
+  "https://helper.test"
+  "https://helper.invalid"
+  "https://helper.example"
+  "https://example.com"
+  "https://example.net"
+  "https://example.org"
+  "https://user:pass@public.tdpn.net"
+  "https://public.tdpn.net."
+  "https://[::ffff:10.0.0.8]"
+)
+bad_smoke_index=0
+for bad_smoke_base_url in "${bad_smoke_base_urls[@]}"; do
+  bad_smoke_index=$((bad_smoke_index + 1))
+  BAD_SMOKE_PUBLIC_HOST_SUMMARY="$TMP_DIR/access_bridge_service_smoke_bad_public_host_$bad_smoke_index.json"
+  jq --arg base_url "$bad_smoke_base_url" '.base_url = $base_url' "$SMOKE_SUMMARY" >"$BAD_SMOKE_PUBLIC_HOST_SUMMARY"
+  BAD_SMOKE_EVIDENCE_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_bad_smoke_public_host_$bad_smoke_index.json"
+  set +e
+  ./scripts/access_bridge_deployment_evidence.sh \
+    --smoke-summary-json "$BAD_SMOKE_PUBLIC_HOST_SUMMARY" \
+    --summary-json "$BAD_SMOKE_EVIDENCE_SUMMARY" \
+    --print-summary-json 0 >"$TMP_DIR/bad-smoke-public-host-$bad_smoke_index.log" 2>&1
+  bad_smoke_public_host_rc=$?
+  set -e
+  if [[ "$bad_smoke_public_host_rc" -eq 0 ]]; then
+    echo "access bridge deployment evidence integration failed: unsafe smoke base_url host should fail: $bad_smoke_base_url"
+    cat "$BAD_SMOKE_EVIDENCE_SUMMARY"
+    exit 1
+  fi
+  if ! jq -e \
+    '
+      .status == "fail"
+      and .smoke.evidence_status == "fail"
+      and (.smoke.evidence_reason | contains("safe public helper host"))
+      and .recommended_next_action.id == "refresh_deployed_bridge_smoke"
+    ' "$BAD_SMOKE_EVIDENCE_SUMMARY" >/dev/null; then
+    echo "access bridge deployment evidence integration failed: unsafe smoke base_url summary mismatch: $bad_smoke_base_url"
+    cat "$BAD_SMOKE_EVIDENCE_SUMMARY"
+    exit 1
+  fi
+done
 
 NO_HEADERS_SMOKE_SUMMARY="$TMP_DIR/access_bridge_service_smoke_no_headers_summary.json"
 jq '.bridge.security_headers_ok = false' "$SMOKE_SUMMARY" >"$NO_HEADERS_SMOKE_SUMMARY"
@@ -361,7 +505,7 @@ fi
 
 BAD_SERVER_NAME_DEPLOY_DIR="$TMP_DIR/bad-server-name-deploy"
 cp -R "$DEPLOY_DIR" "$BAD_SERVER_NAME_DEPLOY_DIR"
-sed -i 's/server_name bridge.example;/server_name other.example;/' "$BAD_SERVER_NAME_DEPLOY_DIR/gpm-access-bridge-evidence.nginx.example.conf"
+sed -i 's/server_name recovery-helper.gpm-pilot.net;/server_name other.public.tdpn.net;/' "$BAD_SERVER_NAME_DEPLOY_DIR/gpm-access-bridge-evidence.nginx.example.conf"
 BAD_SERVER_NAME_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_bad_server_name_summary.json"
 set +e
 ./scripts/access_bridge_deployment_evidence.sh \
@@ -378,7 +522,7 @@ if [[ "$bad_server_name_rc" -eq 0 ]]; then
   cat "$BAD_SERVER_NAME_SUMMARY"
   exit 1
 fi
-if ! jq -e '.status == "fail" and .local_files.deploy_pack.status == "fail" and .local_files.deploy_pack.proxy_examples.nginx_server_name == "other.example" and (.local_files.deploy_pack.reason | contains("server_name must match smoke base_url host")) and .recommended_next_action.id == "stage_bridge_deploy_pack"' "$BAD_SERVER_NAME_SUMMARY" >/dev/null; then
+if ! jq -e '.status == "fail" and .local_files.deploy_pack.status == "fail" and .local_files.deploy_pack.proxy_examples.nginx_server_name == "other.public.tdpn.net" and (.local_files.deploy_pack.reason | contains("server_name must match smoke base_url host")) and .recommended_next_action.id == "stage_bridge_deploy_pack"' "$BAD_SERVER_NAME_SUMMARY" >/dev/null; then
   echo "access bridge deployment evidence integration failed: bad nginx server_name summary mismatch"
   cat "$BAD_SERVER_NAME_SUMMARY"
   exit 1

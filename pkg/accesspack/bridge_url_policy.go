@@ -1,0 +1,136 @@
+package accesspack
+
+import (
+	"net"
+	"net/url"
+	"strings"
+)
+
+func bridgeAccessPathIsManualFallback(path AccessPath) bool {
+	kind := strings.ToLower(strings.TrimSpace(path.Kind))
+	if path.RequiresExternalApp || kind == "instructions" {
+		return true
+	}
+	parsed, err := url.Parse(strings.TrimSpace(path.URL))
+	return err == nil && strings.EqualFold(parsed.Scheme, "mailto")
+}
+
+func bridgeAccessPathServiceURLIssue(path AccessPath) (string, string, bool) {
+	if bridgeAccessPathIsManualFallback(path) {
+		return "manual_path", "requested access path is a manual or external helper path and cannot be served by the bridge service", true
+	}
+	parsed, err := url.Parse(strings.TrimSpace(path.URL))
+	if err != nil || parsed.Scheme == "" {
+		return "invalid_url", "requested access path URL is invalid", true
+	}
+	if parsed.User != nil {
+		return "userinfo", "requested access path URL must not include userinfo", true
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme == "http" {
+		return "plain_http", "serviceable bridge access paths must use https", true
+	}
+	if scheme != "https" {
+		return "unserviceable_scheme", "requested access path is not an HTTPS bridge service URL", true
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return "missing_host", "requested access path URL host is required", true
+	}
+	if !bridgeAccessPathHostLooksPublic(host) {
+		return "private_host", "serviceable bridge access path host must be public-routable", true
+	}
+	return "", "", false
+}
+
+func bridgeAccessPathLocalDiagnosticIssueAllowed(code string, path AccessPath) bool {
+	switch code {
+	case "plain_http", "private_host":
+		parsed, err := url.Parse(strings.TrimSpace(path.URL))
+		if err != nil {
+			return false
+		}
+		return bridgeAccessPathHostLooksLocalDiagnostic(parsed.Hostname())
+	default:
+		return false
+	}
+}
+
+func bridgeAccessPathHostLooksLocalDiagnostic(raw string) bool {
+	host := strings.ToLower(strings.TrimSpace(raw))
+	if host == "" {
+		return false
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func bridgeAccessPathHostLooksPublic(raw string) bool {
+	host := strings.ToLower(strings.TrimSpace(raw))
+	if host == "" {
+		return false
+	}
+	if strings.HasSuffix(host, ".") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			return bridgeAccessPathIPv4LooksPublic(ipv4)
+		}
+		ip16 := ip.To16()
+		if ip16 == nil {
+			return false
+		}
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+			return false
+		}
+		if ip16[0] == 0x20 && ip16[1] == 0x01 && ip16[2] == 0x0d && ip16[3] == 0xb8 {
+			return false
+		}
+		return true
+	}
+	return !bridgeAccessPathDNSNameLooksReserved(host)
+}
+
+func bridgeAccessPathIPv4LooksPublic(ip net.IP) bool {
+	if len(ip) != net.IPv4len {
+		return false
+	}
+	first, second := ip[0], ip[1]
+	switch {
+	case first == 0:
+	case first == 10:
+	case first == 127:
+	case first == 169 && second == 254:
+	case first == 172 && second >= 16 && second <= 31:
+	case first == 192 && second == 168:
+	case first == 100 && second >= 64 && second <= 127:
+	case first == 192 && second == 0 && (ip[2] == 0 || ip[2] == 2):
+	case first == 192 && second == 88 && ip[2] == 99:
+	case first == 198 && (second == 18 || second == 19):
+	case first == 198 && second == 51 && ip[2] == 100:
+	case first == 203 && second == 0 && ip[2] == 113:
+	case first >= 224:
+	default:
+		return true
+	}
+	return false
+}
+
+func bridgeAccessPathDNSNameLooksReserved(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	if host == "example.com" || host == "example.net" || host == "example.org" {
+		return true
+	}
+	for _, suffix := range []string{".localhost", ".local", ".lan", ".internal", ".test", ".invalid", ".example", ".example.com", ".example.net", ".example.org"} {
+		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	return false
+}

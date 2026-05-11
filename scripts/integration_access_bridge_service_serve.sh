@@ -36,10 +36,10 @@ go run ./cmd/gpmrecover demo-bundle \
   --out-dir "$BUNDLE_DIR" \
   --org-id serve-org \
   --org-name "Serve Org" \
-  --base-url https://serve.example \
+  --base-url https://serve.gpm-pilot.net \
   --helper-id helper-serve \
   --helper-name "Serve Helper" \
-  --helper-url https://helper.example/serve/bootstrap \
+  --helper-url https://helper.gpm-pilot.net/serve/bootstrap \
   --helper-contact mailto:helper-serve@example.com \
   >"$TMP_DIR/demo-bundle.stdout.json"
 

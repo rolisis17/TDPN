@@ -276,11 +276,11 @@ go run ./cmd/gpmrecover demo-bundle \
   --out-dir "$demo_dir" \
   --org-id "$org_id" \
   --org-name "$org_name" \
-  --base-url "https://${org_id}.example" \
+  --base-url "https://${org_id}.gpm-pilot.net" \
   --helper-id "$helper_id" \
   --helper-name "$helper_name" \
-  --helper-url "https://${helper_id}.example/bootstrap" \
-  --helper-contact "mailto:${helper_id}@example.com" \
+  --helper-url "https://${helper_id}.gpm-pilot.net/bootstrap" \
+  --helper-contact "mailto:${helper_id}@gpm-pilot.net" \
   >"$reports_dir/demo-bundle.stdout.json"
 
 trust_store="$(jq -r '.files.trust_store' "$demo_dir/demo-manifest.json")"
