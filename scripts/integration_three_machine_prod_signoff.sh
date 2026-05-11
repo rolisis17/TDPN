@@ -204,7 +204,23 @@ EOF_PRE_REAL_OK
     gate_summary_json="${bundle_dir}/prod_gate_summary.json"
     wg_validate_summary_json="${bundle_dir}/prod_wg_validate_summary.json"
     wg_soak_summary_json="${bundle_dir}/prod_wg_soak_summary.json"
-    touch "$bundle_tar" "$gate_summary_json" "$wg_validate_summary_json" "$wg_soak_summary_json"
+    if [[ "${FAKE_PROD_SIGNOFF_EMPTY_ARTIFACTS:-0}" == "1" ]]; then
+      : >"$bundle_tar"
+      : >"$gate_summary_json"
+      : >"$wg_validate_summary_json"
+      : >"$wg_soak_summary_json"
+    else
+      printf '%s\n' 'fake prod bundle tar' >"$bundle_tar"
+      cat >"$gate_summary_json" <<'EOF_PROD_GATE_SUMMARY'
+{"version":1,"status":"pass","rc":0,"decision":"GO"}
+EOF_PROD_GATE_SUMMARY
+      cat >"$wg_validate_summary_json" <<'EOF_WG_VALIDATE_SUMMARY'
+{"version":1,"status":"pass","rc":0,"decision":"GO"}
+EOF_WG_VALIDATE_SUMMARY
+      cat >"$wg_soak_summary_json" <<'EOF_WG_SOAK_SUMMARY'
+{"version":1,"status":"pass","rc":0,"decision":"GO"}
+EOF_WG_SOAK_SUMMARY
+    fi
     if [[ "${FAKE_PROD_SIGNOFF_SECRET_OUTPUT:-0}" == "1" ]]; then
       echo "bundle helper args --auth-token secret-auth-123 AUTH_TOKEN=secret-env-456 Authorization: Bearer secret-bearer-789 X-Admin-Token: secret-admin-000 inv-secret-leak"
     fi
@@ -429,6 +445,11 @@ if ! jq -e '.status == "pass" and .outputs.run_report_status == "ok" and .incide
   cat "$success_summary_json"
   exit 1
 fi
+if ! jq -e '.outputs.bundle_evidence_validation.status == "pass" and (.outputs.bundle_evidence_validation.failures | length) == 0' "$success_summary_json" >/dev/null 2>&1; then
+  echo "success summary JSON missing production evidence validation pass"
+  cat "$success_summary_json"
+  exit 1
+fi
 if ! jq -e '.pre_real_host_readiness.enabled == true and .pre_real_host_readiness.status == "pass" and .pre_real_host_readiness.machine_c_smoke_ready == true and (.pre_real_host_readiness.summary_json | length) > 0' "$success_summary_json" >/dev/null 2>&1; then
   echo "success summary JSON missing pre-real-host readiness data"
   cat "$success_summary_json"
@@ -462,6 +483,58 @@ if ! rg -q 'manual_validation_readiness_report\.md' "$CAPTURE"; then
 fi
 if ! rg -q 'pre_real_host_readiness' "$CAPTURE"; then
   echo "expected success receipt artifacts to include pre-real-host readiness evidence"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+echo "[three-machine-prod-signoff] empty production evidence artifacts fail closed"
+: >"$CAPTURE"
+runtime_doctor_count="$TMP_DIR/runtime_doctor_empty_artifacts_count.txt"
+printf '1\n' >"$runtime_doctor_count"
+set +e
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_RUNTIME_DOCTOR_COUNT_FILE="$runtime_doctor_count" \
+FAKE_PROD_SIGNOFF_EMPTY_ARTIFACTS=1 \
+THREE_MACHINE_PROD_SIGNOFF_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+./scripts/three_machine_prod_signoff.sh \
+  --directory-a https://198.51.100.10:8081 \
+  --directory-b https://203.0.113.20:8081 \
+  --issuer-url https://198.51.100.10:8082 \
+  --entry-url https://198.51.100.10:8083 \
+  --exit-url https://203.0.113.20:8084 \
+  --pre-real-host-readiness 1 \
+  --print-summary-json 1 >/tmp/integration_three_machine_prod_signoff_empty_artifacts.log 2>&1
+empty_artifacts_rc=$?
+set -e
+if [[ "$empty_artifacts_rc" -eq 0 ]]; then
+  echo "expected empty production evidence artifacts to fail closed"
+  cat /tmp/integration_three_machine_prod_signoff_empty_artifacts.log
+  exit 1
+fi
+if ! rg -q 'three-machine-prod-signoff: status=fail stage=bundle' /tmp/integration_three_machine_prod_signoff_empty_artifacts.log; then
+  echo "expected fail status for empty production evidence artifacts"
+  cat /tmp/integration_three_machine_prod_signoff_empty_artifacts.log
+  exit 1
+fi
+empty_artifacts_summary_json="$(sed -n 's/^summary_json: //p' /tmp/integration_three_machine_prod_signoff_empty_artifacts.log | tail -n 1)"
+if [[ -z "$empty_artifacts_summary_json" || ! -f "$empty_artifacts_summary_json" ]]; then
+  echo "expected empty-artifacts summary json file missing"
+  cat /tmp/integration_three_machine_prod_signoff_empty_artifacts.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .outputs.run_report_status == "ok"
+  and .outputs.bundle_evidence_validation.status == "fail"
+  and (.outputs.bundle_evidence_validation.failure | contains("file is empty"))
+  and (.outputs.bundle_evidence_validation.failures | length) >= 1
+' "$empty_artifacts_summary_json" >/dev/null 2>&1; then
+  echo "empty-artifacts summary JSON missing expected fail-closed evidence validation"
+  cat "$empty_artifacts_summary_json"
+  exit 1
+fi
+if ! rg -q '^manual-validation-record --check-id three_machine_prod_signoff --status fail ' "$CAPTURE"; then
+  echo "expected manual-validation-record fail call for empty production evidence artifacts"
   cat "$CAPTURE"
   exit 1
 fi

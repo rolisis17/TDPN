@@ -291,6 +291,98 @@ append_existing_artifact() {
   fi
 }
 
+json_array_from_args() {
+  if [[ "$#" -eq 0 ]]; then
+    printf '%s\n' "[]"
+    return 0
+  fi
+  printf '%s\n' "$@" | jq -R . | jq -s .
+}
+
+refresh_bundle_evidence_failures_json() {
+  bundle_evidence_validation_failures_json="$(json_array_from_args "${bundle_evidence_failures[@]}")"
+  if ((${#bundle_evidence_failures[@]} > 0)); then
+    bundle_evidence_validation_failure="${bundle_evidence_failures[0]}"
+  else
+    bundle_evidence_validation_failure=""
+  fi
+}
+
+add_bundle_evidence_failure() {
+  bundle_evidence_failures+=("$1")
+  refresh_bundle_evidence_failures_json
+}
+
+validate_required_prod_file() {
+  local label="$1"
+  local path="$2"
+  if [[ -z "$path" ]]; then
+    add_bundle_evidence_failure "$label path is missing"
+    return 1
+  fi
+  if [[ ! -f "$path" ]]; then
+    add_bundle_evidence_failure "$label file is missing: $path"
+    return 1
+  fi
+  if [[ ! -s "$path" ]]; then
+    add_bundle_evidence_failure "$label file is empty: $path"
+    return 1
+  fi
+  return 0
+}
+
+validate_required_prod_summary() {
+  local label="$1"
+  local path="$2"
+  local status_value=""
+  local rc_value=""
+  local decision_value=""
+
+  validate_required_prod_file "$label summary" "$path" || return 1
+  if ! jq -e . "$path" >/dev/null 2>&1; then
+    add_bundle_evidence_failure "$label summary is not valid JSON: $path"
+    return 1
+  fi
+
+  status_value="$(jq -r 'if (.status | type) == "string" then (.status | ascii_downcase) else "" end' "$path" 2>/dev/null || true)"
+  if [[ "$status_value" != "pass" && "$status_value" != "ok" ]]; then
+    add_bundle_evidence_failure "$label summary status is not pass/ok: ${status_value:-<missing>}"
+    return 1
+  fi
+
+  rc_value="$(jq -r 'if (.rc | type) == "number" then .rc elif (.final_rc | type) == "number" then .final_rc else 0 end' "$path" 2>/dev/null || printf '%s' "1")"
+  if [[ "$rc_value" != "0" ]]; then
+    add_bundle_evidence_failure "$label summary rc/final_rc is non-zero: $rc_value"
+    return 1
+  fi
+
+  decision_value="$(jq -r 'if (.decision.decision | type) == "string" then .decision.decision elif (.decision | type) == "string" then .decision else "" end' "$path" 2>/dev/null | tr '[:lower:]' '[:upper:]' || true)"
+  if [[ -n "$decision_value" && "$decision_value" != "GO" ]]; then
+    add_bundle_evidence_failure "$label summary decision is not GO: $decision_value"
+    return 1
+  fi
+
+  return 0
+}
+
+validate_prod_bundle_evidence() {
+  bundle_evidence_failures=()
+  refresh_bundle_evidence_failures_json
+  bundle_evidence_validation_status="pass"
+
+  validate_required_prod_summary "prod bundle run report" "$run_report_json" || true
+  validate_required_prod_file "prod bundle tar" "$bundle_tar" || true
+  validate_required_prod_summary "prod gate" "$gate_summary_json" || true
+  validate_required_prod_summary "prod WG validate" "$wg_validate_summary_json" || true
+  validate_required_prod_summary "prod WG soak" "$wg_soak_summary_json" || true
+
+  if ((${#bundle_evidence_failures[@]} > 0)); then
+    bundle_evidence_validation_status="fail"
+    return 1
+  fi
+  return 0
+}
+
 validate_manual_validation_summary_payload() {
   local payload="$1"
   local schema_id=""
@@ -739,6 +831,10 @@ runtime_gate_failure_note=""
 manual_validation_report_status="skipped"
 manual_validation_report_readiness_status=""
 manual_validation_report_next_action_check_id=""
+bundle_evidence_validation_status="skipped"
+bundle_evidence_validation_failure=""
+bundle_evidence_validation_failures_json="[]"
+declare -a bundle_evidence_failures=()
 signoff_deferred_no_root="0"
 
 extract_json_payload() {
@@ -1183,6 +1279,9 @@ write_summary_json() {
     --arg gate_summary_json "$gate_summary_json" \
     --arg wg_validate_summary_json "$wg_validate_summary_json" \
     --arg wg_soak_summary_json "$wg_soak_summary_json" \
+    --arg bundle_evidence_validation_status "$bundle_evidence_validation_status" \
+    --arg bundle_evidence_validation_failure "$bundle_evidence_validation_failure" \
+    --argjson bundle_evidence_validation_failures "$bundle_evidence_validation_failures_json" \
     --arg pre_real_host_readiness_status "$pre_real_host_readiness_status" \
     --arg pre_real_host_readiness_summary_json "$pre_real_host_readiness_summary_json" \
     --arg pre_real_host_readiness_log "$pre_real_host_readiness_log" \
@@ -1278,7 +1377,12 @@ write_summary_json() {
         bundle_tar: $bundle_tar,
         gate_summary_json: $gate_summary_json,
         wg_validate_summary_json: $wg_validate_summary_json,
-        wg_soak_summary_json: $wg_soak_summary_json
+        wg_soak_summary_json: $wg_soak_summary_json,
+        bundle_evidence_validation: {
+          status: $bundle_evidence_validation_status,
+          failure: (if $bundle_evidence_validation_failure == "" then null else $bundle_evidence_validation_failure end),
+          failures: $bundle_evidence_validation_failures
+        }
       },
       incident_snapshot: {
         status: $incident_snapshot_status,
@@ -1419,9 +1523,16 @@ if [[ -f "$run_report_json" ]] && jq -e . "$run_report_json" >/dev/null 2>&1; th
   incident_snapshot_attachment_count="$(jq -r '.incident_snapshot.attachment_count // 0' "$run_report_json")"
 fi
 
+if [[ "${bundle_rc:-1}" == "0" ]] && ! validate_prod_bundle_evidence; then
+  bundle_rc=1
+fi
+
 if [[ "${bundle_rc:-1}" == "0" ]]; then
   signoff_status="pass"
   notes="three-machine production signoff completed successfully"
+elif [[ "$bundle_evidence_validation_status" == "fail" ]]; then
+  signoff_status="fail"
+  notes="three-machine production signoff failed: invalid production evidence artifacts. ${bundle_evidence_validation_failure:-Inspect bundle outputs and rerun signoff.}"
 else
   signoff_status="fail"
   notes="$(derive_bundle_failure_notes "three-machine production signoff failed")"
