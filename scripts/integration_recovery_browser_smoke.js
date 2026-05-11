@@ -428,6 +428,26 @@ async function main() {
     throw new Error("expected verified helper registry metadata to be saved in localStorage");
   }
 
+  async function expectUnsafeBridgeInviteRejected(mutator, expectedDetail, label) {
+    const invite = JSON.parse(bridgeInvite);
+    mutator(invite);
+    document.getElementById("pack_input").value = JSON.stringify(invite);
+    await document.getElementById("verify_btn").click();
+    const rejectedStatus = document.getElementById("status-heading").textContent;
+    const rejectedDetail = document.getElementById("status_detail").textContent;
+    const rejectedPathCount = document.getElementById("path_count").textContent;
+    const rejectedPathsRendered = document.getElementById("paths_list").children.length;
+    if (rejectedStatus !== "Verification failed") {
+      throw new Error(`expected ${label} bridge invite rejection, got ${rejectedStatus}: ${rejectedDetail}`);
+    }
+    if (!rejectedDetail.includes(expectedDetail)) {
+      throw new Error(`expected ${label} bridge invite detail ${expectedDetail}, got ${rejectedDetail}`);
+    }
+    if (rejectedPathCount !== "0" || rejectedPathsRendered !== 0) {
+      throw new Error(`expected rejected ${label} bridge invite to render no paths, got count=${rejectedPathCount} rendered=${rejectedPathsRendered}`);
+    }
+  }
+
   const userinfoInvite = JSON.parse(bridgeInvite);
   userinfoInvite.access_paths[0].url = "https://helper-smoke:secret@helper.example/smoke/bootstrap";
   document.getElementById("pack_input").value = JSON.stringify(userinfoInvite);
@@ -454,23 +474,124 @@ async function main() {
     throw new Error(`expected unsupported bridge invite URL scheme detail, got ${unsupportedSchemeInviteDetail}`);
   }
 
-  const homeArpaInvite = JSON.parse(bridgeInvite);
-  homeArpaInvite.access_paths[0].url = "https://helper.home.arpa/smoke/bootstrap";
-  document.getElementById("pack_input").value = JSON.stringify(homeArpaInvite);
-  await document.getElementById("verify_btn").click();
-  const homeArpaInviteStatus = document.getElementById("status-heading").textContent;
-  const homeArpaInviteDetail = document.getElementById("status_detail").textContent;
-  const homeArpaPathCount = document.getElementById("path_count").textContent;
-  const homeArpaPathsRendered = document.getElementById("paths_list").children.length;
-  if (homeArpaInviteStatus !== "Verification failed") {
-    throw new Error(`expected home.arpa bridge invite URL rejection, got ${homeArpaInviteStatus}: ${homeArpaInviteDetail}`);
-  }
-  if (!homeArpaInviteDetail.includes("access_paths[].url host must be public-routable")) {
-    throw new Error(`expected home.arpa public-host rejection detail, got ${homeArpaInviteDetail}`);
-  }
-  if (homeArpaPathCount !== "0" || homeArpaPathsRendered !== 0) {
-    throw new Error(`expected unsafe bridge invite to render no paths, got count=${homeArpaPathCount} rendered=${homeArpaPathsRendered}`);
-  }
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => { invite.access_paths[0].url = "http://helper.gpm-pilot.net/smoke/bootstrap"; },
+    "access_paths[].url serviceable bridge access paths must use https",
+    "plain-http",
+  );
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => { invite.access_paths[0].url = "https://10.0.0.5/smoke/bootstrap"; },
+    "access_paths[].url host must be public-routable",
+    "private-ip",
+  );
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => { invite.access_paths[0].url = "https://100.64.0.10/smoke/bootstrap"; },
+    "access_paths[].url host must be public-routable",
+    "cgnat-ip",
+  );
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => { invite.access_paths[0].url = "https://[::ffff:7f00:1]/smoke/bootstrap"; },
+    "access_paths[].url host must be public-routable",
+    "ipv4-mapped-loopback",
+  );
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => { invite.access_paths[0].url = "https://[::ffff:a00:5]/smoke/bootstrap"; },
+    "access_paths[].url host must be public-routable",
+    "ipv4-mapped-private",
+  );
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => { invite.access_paths[0].url = "https://[::ffff:6440:a]/smoke/bootstrap"; },
+    "access_paths[].url host must be public-routable",
+    "ipv4-mapped-cgnat",
+  );
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => { invite.access_paths[0].url = "https://[::ffff:c0a8:101]/smoke/bootstrap"; },
+    "access_paths[].url host must be public-routable",
+    "ipv4-mapped-rfc1918",
+  );
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => { invite.access_paths[0].url = "https://helper.home.arpa/smoke/bootstrap"; },
+    "access_paths[].url host must be public-routable",
+    "home.arpa",
+  );
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => { invite.access_paths[0].url = "https://helper.tailnet.ts.net/smoke/bootstrap"; },
+    "access_paths[].url host must be public-routable",
+    "tailscale",
+  );
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => {
+      invite.access_paths = [
+        {
+          path_id: "manual-helper",
+          kind: "instructions",
+          url: "mailto:helper-smoke@gpm-pilot.net",
+          priority: 10,
+          requires_external_app: true,
+        },
+      ];
+    },
+    "Bridge invite needs at least one public HTTPS bridge access path",
+    "manual-only",
+  );
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => {
+      invite.access_paths = [
+        invite.access_paths[0],
+        {
+          path_id: "manual-helper-private",
+          kind: "instructions",
+          url: "https://127.0.0.1/smoke/bootstrap",
+          priority: 20,
+          requires_external_app: true,
+        },
+      ];
+    },
+    "access_paths[].url host must be public-routable",
+    "manual-private-with-service-path",
+  );
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => {
+      invite.access_paths = [
+        invite.access_paths[0],
+        {
+          path_id: "manual-helper-http",
+          kind: "instructions",
+          url: "http://helper.gpm-pilot.net/smoke/bootstrap",
+          priority: 20,
+          requires_external_app: true,
+        },
+      ];
+    },
+    "access_paths[].url serviceable bridge access paths must use https",
+    "manual-http-with-service-path",
+  );
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => {
+      invite.access_paths = [
+        invite.access_paths[0],
+        {
+          path_id: "manual-helper-tailnet",
+          kind: "instructions",
+          url: "https://helper.tailnet.ts.net/smoke/bootstrap",
+          priority: 20,
+          requires_external_app: true,
+        },
+      ];
+    },
+    "access_paths[].url host must be public-routable",
+    "manual-tailnet-with-service-path",
+  );
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => { invite.helper.contact_url = "https://127.0.0.1/support"; },
+    "helper.contact_url host must be public-routable",
+    "invite-private-contact-url",
+  );
+  await expectUnsafeBridgeInviteRejected(
+    (invite) => { invite.helper.contact_url = "http://helper.gpm-pilot.net/support"; },
+    "helper.contact_url must use https or mailto",
+    "invite-http-contact-url",
+  );
 
   const userinfoRegistry = JSON.parse(unsignedRegistry);
   userinfoRegistry.helpers[0].abuse_report_url = "https://helper-smoke:secret@helper.example/smoke/abuse";
@@ -499,6 +620,43 @@ async function main() {
   if (!unsupportedSchemeRegistryDetail.includes("helpers[].abuse_report_url scheme must be http, https, or mailto")) {
     throw new Error(`expected unsupported helper registry URL scheme detail, got ${unsupportedSchemeRegistryDetail}`);
   }
+
+  async function expectRegistryExportRejected(mutator, expectedDetail, label) {
+    const registry = JSON.parse(unsignedRegistry);
+    mutator(registry);
+    document.getElementById("registry_input").value = JSON.stringify(registry);
+    await document.getElementById("registry_input").dispatch("input");
+    await document.getElementById("export_registry_text_btn").click();
+    const registryStatus = document.getElementById("status-heading").textContent;
+    const registryDetail = document.getElementById("status_detail").textContent;
+    if (registryStatus !== "Registry export failed") {
+      throw new Error(`expected ${label} helper registry rejection, got ${registryStatus}: ${registryDetail}`);
+    }
+    if (!registryDetail.includes(expectedDetail)) {
+      throw new Error(`expected ${label} helper registry detail ${expectedDetail}, got ${registryDetail}`);
+    }
+  }
+
+  await expectRegistryExportRejected(
+    (registry) => { registry.helpers[0].contact_url = "https://10.0.0.5/support"; },
+    "helpers[].contact_url host must be public-routable",
+    "private-contact-url",
+  );
+  await expectRegistryExportRejected(
+    (registry) => { registry.helpers[0].contact_url = "http://helper.gpm-pilot.net/support"; },
+    "helpers[].contact_url must use https or mailto",
+    "http-contact-url",
+  );
+  await expectRegistryExportRejected(
+    (registry) => { registry.helpers[0].abuse_report_url = "https://helper.home.arpa/abuse"; },
+    "helpers[].abuse_report_url host must be public-routable",
+    "home-arpa-abuse-url",
+  );
+  await expectRegistryExportRejected(
+    (registry) => { registry.helpers[0].abuse_report_url = "https://helper.tailnet.ts.net/abuse"; },
+    "helpers[].abuse_report_url host must be public-routable",
+    "tailnet-abuse-url",
+  );
 
   const duplicateHelperRegistry = JSON.parse(unsignedRegistry);
   duplicateHelperRegistry.helpers.push({ ...duplicateHelperRegistry.helpers[0] });

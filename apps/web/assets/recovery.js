@@ -155,11 +155,38 @@
     if (!host.includes(":")) {
       return null;
     }
+    const mappedIPv4 = ipv4MappedIPv6ToDotted(host);
+    if (mappedIPv4) {
+      return ipv4HostLooksPublic(mappedIPv4);
+    }
     if (host === "::" || host === "::1") return false;
     if (host.startsWith("fe80:") || host.startsWith("fc") || host.startsWith("fd")) return false;
     if (host.startsWith("ff")) return false;
     if (host.startsWith("2001:db8:") || host.startsWith("2001:0db8:") || host === "2001:db8::1") return false;
     return true;
+  }
+
+  function ipv4MappedIPv6ToDotted(host) {
+    const value = normalizeURLHostname(host);
+    if (!value.startsWith("::ffff:")) {
+      return "";
+    }
+    const tail = value.slice("::ffff:".length);
+    if (ipv4HostLooksPublic(tail) !== null) {
+      return tail;
+    }
+    const groups = tail.split(":");
+    if (groups.length !== 2 || !groups.every((group) => /^[0-9a-f]{1,4}$/.test(group))) {
+      return "";
+    }
+    const high = parseInt(groups[0], 16);
+    const low = parseInt(groups[1], 16);
+    return [
+      (high >> 8) & 255,
+      high & 255,
+      (low >> 8) & 255,
+      low & 255,
+    ].join(".");
   }
 
   function dnsNameLooksReserved(host) {
@@ -198,12 +225,50 @@
     return dnsNameLooksPublic(host);
   }
 
-  function validateBridgeAccessPathURL(field, value) {
-    const parsed = validateURL(field, value);
+  function bridgeAccessPathIsManualFallback(path, parsed) {
+    const kind = trimString(path && path.kind).toLowerCase();
+    return (path && path.requires_external_app === true) || kind === "instructions" || parsed.protocol.toLowerCase() === "mailto:";
+  }
+
+  function validateBridgeAccessPathURL(field, path) {
+    const parsed = validateURL(field, path && path.url);
     const scheme = parsed.protocol.toLowerCase();
-    if ((scheme === "http:" || scheme === "https:") && !bridgeAccessPathHostLooksPublic(parsed.hostname)) {
+    if (scheme === "mailto:") {
+      return false;
+    }
+    if (scheme === "http:") {
+      throw new Error(`${field} serviceable bridge access paths must use https`);
+    }
+    if (scheme !== "https:") {
+      throw new Error(`${field} serviceable bridge access paths must use https`);
+    }
+    if (!bridgeAccessPathHostLooksPublic(parsed.hostname)) {
       throw new Error(`${field} host must be public-routable`);
     }
+    return !bridgeAccessPathIsManualFallback(path, parsed);
+  }
+
+  function validatePublicContactURL(field, value) {
+    const parsed = validateURL(field, value);
+    const scheme = parsed.protocol.toLowerCase();
+    if (scheme === "mailto:") {
+      return parsed;
+    }
+    if (scheme !== "https:") {
+      throw new Error(`${field} must use https or mailto`);
+    }
+    if (!bridgeAccessPathHostLooksPublic(parsed.hostname)) {
+      throw new Error(`${field} host must be public-routable`);
+    }
+    return parsed;
+  }
+
+  function validateOptionalPublicContactURL(field, value) {
+    const raw = trimString(value);
+    if (!raw) {
+      return null;
+    }
+    return validatePublicContactURL(field, raw);
   }
 
   function base64URLToBytes(value, label) {
@@ -782,12 +847,12 @@
     }
     const contactURL = trimString(helper.contact_url);
     if (contactURL) {
-      validateURL("helpers[].contact_url", contactURL);
+      validatePublicContactURL("helpers[].contact_url", contactURL);
       normalized.contact_url = contactURL;
     }
     const abuseReportURL = trimString(helper.abuse_report_url);
     if (abuseReportURL) {
-      validateURL("helpers[].abuse_report_url", abuseReportURL);
+      validatePublicContactURL("helpers[].abuse_report_url", abuseReportURL);
       normalized.abuse_report_url = abuseReportURL;
     }
     const rateLimitPolicy = trimString(helper.rate_limit_policy);
@@ -967,7 +1032,7 @@
     }
     const contactURL = trimString(invite.helper && invite.helper.contact_url);
     if (contactURL) {
-      validateURL("helper.contact_url", contactURL);
+      validatePublicContactURL("helper.contact_url", contactURL);
       normalized.helper.contact_url = contactURL;
     }
     const helperDescription = trimString(invite.helper && invite.helper.description);
@@ -1168,12 +1233,18 @@
       throw new Error("Helper display name is required");
     }
     validateOptionalURL("organization.home_url", invite.organization && invite.organization.home_url);
-    validateOptionalURL("helper.contact_url", invite.helper && invite.helper.contact_url);
+    validateOptionalPublicContactURL("helper.contact_url", invite.helper && invite.helper.contact_url);
     if (!Array.isArray(invite.access_paths) || invite.access_paths.length === 0) {
       throw new Error("Bridge invite must include access paths");
     }
+    let serviceablePathCount = 0;
     for (const path of invite.access_paths) {
-      validateBridgeAccessPathURL("access_paths[].url", path && path.url);
+      if (validateBridgeAccessPathURL("access_paths[].url", path)) {
+        serviceablePathCount += 1;
+      }
+    }
+    if (serviceablePathCount === 0) {
+      throw new Error("Bridge invite needs at least one public HTTPS bridge access path");
     }
   }
 

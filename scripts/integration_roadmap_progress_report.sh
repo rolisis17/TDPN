@@ -2067,6 +2067,7 @@ userinfo|https://public.example@127.0.0.1:19820|127.0.0.1
 localhost_dot|https://localhost.:19820|localhost
 doc_ipv6|https://[2001:db8::1]:19820|2001:db8::1
 mapped_private_ipv6|https://[::ffff:192.168.50.10]:19820|::ffff:192.168.50.10
+home_arpa|https://helper.home.arpa|helper.home.arpa
 tailnet_overlay|https://helper.tailnet.ts.net|helper.tailnet.ts.net
 tailscale_overlay|https://helper.tailscale.net|helper.tailscale.net
 EOF_NONCANONICAL_ACCESS_RECOVERY

@@ -34,8 +34,10 @@ type Service struct {
 	config             accesspack.BridgeServiceConfig
 	configSHA256       string
 	limiter            *httplimit.FixedWindowLimiter
+	surfaceLimiter     *httplimit.FixedWindowLimiter
 	authFailureLimiter *httplimit.FixedWindowLimiter
 	abuseLimiter       *httplimit.FixedWindowLimiter
+	maxSources         int
 	abuseLogPath       string
 	redirect           bool
 	accessCodeHash     []byte
@@ -90,8 +92,10 @@ func NewService(config ServiceConfig) (*Service, error) {
 		config:             accesspack.NormalizeBridgeServiceConfig(config.BridgeConfig),
 		configSHA256:       strings.TrimSpace(config.ConfigSHA256),
 		limiter:            httplimit.NewFixedWindowLimiter(config.RPS, config.MaxSources),
+		surfaceLimiter:     httplimit.NewFixedWindowLimiter(config.RPS, config.MaxSources),
 		authFailureLimiter: httplimit.NewFixedWindowLimiter(config.RPS, config.MaxSources),
 		abuseLimiter:       httplimit.NewFixedWindowLimiter(config.RPS, config.MaxSources),
+		maxSources:         config.MaxSources,
 		abuseLogPath:       strings.TrimSpace(config.AbuseLogPath),
 		redirect:           config.Redirect,
 		accessCodeHash:     accessCodeHash,
@@ -111,15 +115,25 @@ func NewService(config ServiceConfig) (*Service, error) {
 }
 
 func (s *Service) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", s.handleHealth)
-	mux.HandleFunc("/bridge/", s.handleBridge)
-	mux.HandleFunc("/abuse", s.handleAbuse)
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/health":
+			s.handleHealth(w, r)
+		case r.URL.Path == "/bridge" || strings.HasPrefix(r.URL.Path, "/bridge/"):
+			s.handleBridge(w, r)
+		case r.URL.Path == "/abuse":
+			s.handleAbuse(w, r)
+		default:
+			s.handleUnknown(w, r)
+		}
+	})
 }
 
 func (s *Service) handleHealth(w http.ResponseWriter, r *http.Request) {
 	setBridgeSecurityHeaders(w)
+	if !s.allowSurface(w, r) {
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -137,11 +151,20 @@ func (s *Service) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleBridge(w http.ResponseWriter, r *http.Request) {
 	setBridgeSecurityHeaders(w)
 	if r.Method != http.MethodGet {
+		if !s.allowSurface(w, r) {
+			return
+		}
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	pathID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/bridge/"), "/")
+	pathID := ""
+	if strings.HasPrefix(r.URL.Path, "/bridge/") {
+		pathID = strings.Trim(strings.TrimPrefix(r.URL.Path, "/bridge/"), "/")
+	}
 	if pathID == "" {
+		if !s.allowSurface(w, r) {
+			return
+		}
 		http.Error(w, "missing bridge path id", http.StatusBadRequest)
 		return
 	}
@@ -188,6 +211,9 @@ func (s *Service) handleBridge(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleAbuse(w http.ResponseWriter, r *http.Request) {
 	setBridgeSecurityHeaders(w)
 	if r.Method != http.MethodPost {
+		if !s.allowSurface(w, r) {
+			return
+		}
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -227,6 +253,14 @@ func (s *Service) handleAbuse(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }
 
+func (s *Service) handleUnknown(w http.ResponseWriter, r *http.Request) {
+	setBridgeSecurityHeaders(w)
+	if !s.allowSurface(w, r) {
+		return
+	}
+	http.NotFound(w, r)
+}
+
 func (s *Service) RequestCount(source string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -242,7 +276,20 @@ func (s *Service) AbuseReportCount() int {
 func (s *Service) recordRequest(source string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.maxSources > 0 {
+		if _, ok := s.requests[source]; !ok && len(s.requests) >= s.maxSources {
+			return
+		}
+	}
 	s.requests[source]++
+}
+
+func (s *Service) allowSurface(w http.ResponseWriter, r *http.Request) bool {
+	if s.surfaceLimiter == nil || s.surfaceLimiter.Allow(s.sourceKey(r), s.now()) {
+		return true
+	}
+	writeJSON(w, http.StatusTooManyRequests, map[string]string{"status": "rate_limited"})
+	return false
 }
 
 func (s *Service) appendAbuseReport(report AbuseReport) error {

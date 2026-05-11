@@ -2491,6 +2491,8 @@ access_recovery_track_json_from_evidence() {
             or ($host == "localhost")
             or ($host | test("(^|\\.)(localhost|local|lan|internal|test|invalid|example)$"))
             or ($host | test("(^|\\.)example\\.(com|net|org)$"))
+            or ($host == "home.arpa")
+            or ($host | endswith(".home.arpa"))
             or ($host == "ts.net")
             or ($host | endswith(".ts.net"))
             or ($host == "tailscale.net")

@@ -117,6 +117,112 @@ func TestServiceRateLimitsAbuseReports(t *testing.T) {
 	}
 }
 
+func TestServiceRateLimitsHealthBySource(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	service, err := NewService(ServiceConfig{
+		BridgeConfig: testServiceBridgeConfig(now),
+		RPS:          1,
+		MaxSources:   16,
+		Now:          func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	handler := service.Handler()
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected first health ok, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	limitedRR := httptest.NewRecorder()
+	handler.ServeHTTP(limitedRR, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if limitedRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected health rate limit, got %d body=%s", limitedRR.Code, limitedRR.Body.String())
+	}
+}
+
+func TestServiceHealthMaxSourcesCap(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	service, err := NewService(ServiceConfig{
+		BridgeConfig: testServiceBridgeConfig(now),
+		RPS:          1,
+		MaxSources:   1,
+		Now:          func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	handler := service.Handler()
+	firstReq := httptest.NewRequest(http.MethodGet, "/health", nil)
+	firstReq.RemoteAddr = "192.0.2.1:1234"
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, firstReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected first source health ok, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	secondReq := httptest.NewRequest(http.MethodGet, "/health", nil)
+	secondReq.RemoteAddr = "198.51.100.9:1234"
+	limitedRR := httptest.NewRecorder()
+	handler.ServeHTTP(limitedRR, secondReq)
+	if limitedRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected second source to hit health max-sources cap, got %d body=%s", limitedRR.Code, limitedRR.Body.String())
+	}
+}
+
+func TestServiceLimitsBridgeErrorSurfaces(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	service, err := NewService(ServiceConfig{
+		BridgeConfig: testServiceBridgeConfig(now),
+		RPS:          1,
+		MaxSources:   16,
+		Now:          func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	handler := service.Handler()
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/bridge/", nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected malformed bridge path rejected, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	limitedRR := httptest.NewRecorder()
+	handler.ServeHTTP(limitedRR, httptest.NewRequest(http.MethodPost, "/bridge/helper-web", nil))
+	if limitedRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected bridge method/error surface rate limit, got %d body=%s", limitedRR.Code, limitedRR.Body.String())
+	}
+}
+
+func TestServiceLimitsUnknownPathsAndSetsSecurityHeaders(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	service, err := NewService(ServiceConfig{
+		BridgeConfig: testServiceBridgeConfig(now),
+		RPS:          1,
+		MaxSources:   16,
+		Now:          func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	handler := service.Handler()
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/missing", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected unknown path not found, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Referrer-Policy") != "no-referrer" || rr.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("expected unknown path security headers, got %+v", rr.Header())
+	}
+	limitedRR := httptest.NewRecorder()
+	handler.ServeHTTP(limitedRR, httptest.NewRequest(http.MethodGet, "/still-missing", nil))
+	if limitedRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected unknown path rate limit, got %d body=%s", limitedRR.Code, limitedRR.Body.String())
+	}
+	if limitedRR.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("expected rate-limited unknown path security headers, got %+v", limitedRR.Header())
+	}
+}
+
 func TestServiceBridgeLimitDoesNotConsumeAbuseLimit(t *testing.T) {
 	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
 	service, err := NewService(ServiceConfig{
@@ -240,6 +346,39 @@ func TestBadAccessCodesDoNotConsumeBridgeRateLimit(t *testing.T) {
 	}
 	if service.RequestCount("192.0.2.1") != 1 {
 		t.Fatalf("expected only valid bridge request to consume request counter")
+	}
+}
+
+func TestServiceRequestTrackingHonorsMaxSources(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	service, err := NewService(ServiceConfig{
+		BridgeConfig: testServiceBridgeConfig(now),
+		MaxSources:   1,
+		Now:          func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	handler := service.Handler()
+	firstReq := httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil)
+	firstReq.RemoteAddr = "192.0.2.1:1234"
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, firstReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected first bridge source ok, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	secondReq := httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil)
+	secondReq.RemoteAddr = "198.51.100.9:1234"
+	secondRR := httptest.NewRecorder()
+	handler.ServeHTTP(secondRR, secondReq)
+	if secondRR.Code != http.StatusOK {
+		t.Fatalf("expected second bridge source ok with disabled rps limiter, got %d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	if service.RequestCount("192.0.2.1") != 1 {
+		t.Fatalf("expected first source to be tracked")
+	}
+	if service.RequestCount("198.51.100.9") != 0 {
+		t.Fatalf("expected request tracking to honor max sources cap")
 	}
 }
 
