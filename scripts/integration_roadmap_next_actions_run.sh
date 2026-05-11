@@ -7,6 +7,9 @@ cd "$ROOT_DIR"
 # Keep this integration hermetic: ambient ROADMAP_NEXT_ACTIONS_RUN_* overrides
 # can relax fail-closed behavior or mutate selection/routing inputs.
 unset ROADMAP_NEXT_ACTIONS_RUN_ACTION_TIMEOUT_SEC
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CA
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_CERT
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_KEY
 unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE
 unset ROADMAP_NEXT_ACTIONS_RUN_ALLOW_PROFILE_DEFAULT_GATE_UNREACHABLE
 unset ROADMAP_NEXT_ACTIONS_RUN_ALLOW_UNSAFE_SHELL_COMMANDS
@@ -36,9 +39,15 @@ unset ROADMAP_NEXT_ACTIONS_RUN_SUMMARY_JSON
 unset ROADMAP_NEXT_ACTIONS_RUN_VM_COMMAND_SOURCE
 # Keep placeholder-subject precondition checks deterministic.
 unset ACCESS_RECOVERY_TRUST_STORE
+unset ACCESS_RECOVERY_MTLS_CA
+unset ACCESS_RECOVERY_MTLS_CLIENT_CERT
+unset ACCESS_RECOVERY_MTLS_CLIENT_KEY
 unset ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_PLAN_ONLY
 unset CAMPAIGN_SUBJECT
 unset INVITE_KEY
+unset MTLS_CA_FILE
+unset MTLS_CLIENT_CERT_FILE
+unset MTLS_CLIENT_KEY_FILE
 unset TRUST_STORE
 
 for cmd in bash jq mktemp chmod mkdir cat grep timeout date ln; do
@@ -1464,6 +1473,12 @@ fi
 
 ACCESS_RECOVERY_TRUST_STORE_FILE="$TMP_DIR/access_recovery_trust_store.json"
 printf '{"trusted_keys":[]}\n' >"$ACCESS_RECOVERY_TRUST_STORE_FILE"
+ACCESS_RECOVERY_MTLS_CA_FILE="$TMP_DIR/access_recovery_mtls_ca.pem"
+ACCESS_RECOVERY_MTLS_CLIENT_CERT_FILE="$TMP_DIR/access_recovery_mtls_client_cert.pem"
+ACCESS_RECOVERY_MTLS_CLIENT_KEY_FILE="$TMP_DIR/access_recovery_mtls_client_key.pem"
+printf 'test ca\n' >"$ACCESS_RECOVERY_MTLS_CA_FILE"
+printf 'test cert\n' >"$ACCESS_RECOVERY_MTLS_CLIENT_CERT_FILE"
+printf 'test key\n' >"$ACCESS_RECOVERY_MTLS_CLIENT_KEY_FILE"
 
 echo "[roadmap-next-actions-run] Access Recovery real-helper actions ignore ambient plan-only override"
 SUMMARY_ACCESS_RECOVERY_PLAN_ENV_ISOLATION="$TMP_DIR/summary_access_recovery_plan_env_isolation.json"
@@ -1675,6 +1690,52 @@ if ! jq -e '
 ' "$SUMMARY_ACCESS_RECOVERY_MTLS_PLACEHOLDERS" >/dev/null; then
   echo "Access Recovery unresolved mTLS placeholder precondition summary mismatch"
   cat "$SUMMARY_ACCESS_RECOVERY_MTLS_PLACEHOLDERS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery required-mTLS placeholders use configured cert inputs"
+SUMMARY_ACCESS_RECOVERY_MTLS_OVERRIDE="$TMP_DIR/summary_access_recovery_mtls_override.json"
+REPORTS_ACCESS_RECOVERY_MTLS_OVERRIDE="$TMP_DIR/reports_access_recovery_mtls_override"
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_mtls_operator_placeholders \
+PASS1="$PASS1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_MTLS_OVERRIDE" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_MTLS_OVERRIDE" \
+  --include-id access_bridge_service_smoke \
+  --access-recovery-mtls-ca "$ACCESS_RECOVERY_MTLS_CA_FILE" \
+  --access-recovery-mtls-client-cert "$ACCESS_RECOVERY_MTLS_CLIENT_CERT_FILE" \
+  --access-recovery-mtls-client-key "$ACCESS_RECOVERY_MTLS_CLIENT_KEY_FILE" \
+  --print-summary-json 0
+
+if ! jq -e \
+  --arg mtls_ca "$ACCESS_RECOVERY_MTLS_CA_FILE" \
+  --arg mtls_cert "$ACCESS_RECOVERY_MTLS_CLIENT_CERT_FILE" \
+  --arg mtls_key "$ACCESS_RECOVERY_MTLS_CLIENT_KEY_FILE" \
+  '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.access_recovery_mtls_ca == $mtls_ca
+  and .inputs.access_recovery_mtls_ca_configured == true
+  and .inputs.access_recovery_mtls_ca_source == "cli:--access-recovery-mtls-ca"
+  and .inputs.access_recovery_mtls_client_cert == $mtls_cert
+  and .inputs.access_recovery_mtls_client_cert_configured == true
+  and .inputs.access_recovery_mtls_client_cert_source == "cli:--access-recovery-mtls-client-cert"
+  and .inputs.access_recovery_mtls_client_key == $mtls_key
+  and .inputs.access_recovery_mtls_client_key_configured == true
+  and .inputs.access_recovery_mtls_client_key_source == "cli:--access-recovery-mtls-client-key"
+  and .actions[0].id == "access_bridge_service_smoke"
+  and .actions[0].status == "pass"
+  and (.actions[0].command | contains("--require-mtls 1"))
+  and (.actions[0].command | contains("--cacert " + $mtls_ca))
+  and (.actions[0].command | contains("--client-cert " + $mtls_cert))
+  and (.actions[0].command | contains("--client-key " + $mtls_key))
+  and ((.actions[0].command | contains("MTLS_CA_FILE")) | not)
+  and ((.actions[0].command | contains("MTLS_CLIENT_CERT_FILE")) | not)
+  and ((.actions[0].command | contains("MTLS_CLIENT_KEY_FILE")) | not)
+' "$SUMMARY_ACCESS_RECOVERY_MTLS_OVERRIDE" >/dev/null; then
+  echo "Access Recovery mTLS cert override summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_MTLS_OVERRIDE"
   exit 1
 fi
 

@@ -17,6 +17,9 @@ Usage:
     [--campaign-subject ID] \
     [--vm-command-source PATH] \
     [--access-recovery-trust-store PATH] \
+    [--access-recovery-mtls-ca PATH] \
+    [--access-recovery-mtls-client-cert PATH] \
+    [--access-recovery-mtls-client-key PATH] \
     [--action-timeout-sec N] \
     [--allow-unsafe-shell-commands [0|1]] \
     [--allow-empty-actions [0|1]] \
@@ -52,6 +55,9 @@ Defaults:
   --campaign-subject ""   (precedence: CLI --campaign-subject > --profile-default-gate-subject > ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_SUBJECT > ROADMAP_NEXT_ACTIONS_RUN_CAMPAIGN_SUBJECT > CAMPAIGN_SUBJECT > INVITE_KEY > summary command values)
   --vm-command-source ""   (precedence: CLI --vm-command-source > ROADMAP_NEXT_ACTIONS_RUN_VM_COMMAND_SOURCE > VM_COMMAND_SOURCE > summary command values)
   --access-recovery-trust-store ""   (operator supplied only; precedence: CLI --access-recovery-trust-store > ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE > ACCESS_RECOVERY_TRUST_STORE > TRUST_STORE)
+  --access-recovery-mtls-ca ""   (operator supplied only; precedence: CLI > ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CA > ACCESS_RECOVERY_MTLS_CA > MTLS_CA_FILE)
+  --access-recovery-mtls-client-cert ""   (operator supplied only; precedence: CLI > ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_CERT > ACCESS_RECOVERY_MTLS_CLIENT_CERT > MTLS_CLIENT_CERT_FILE)
+  --access-recovery-mtls-client-key ""   (operator supplied only; precedence: CLI > ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_KEY > ACCESS_RECOVERY_MTLS_CLIENT_KEY > MTLS_CLIENT_KEY_FILE)
   profile_default_gate default timeout sec: 2400
     (env ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC)
   --refresh-manual-validation 0
@@ -81,6 +87,8 @@ Exit behavior:
     --allow-empty-actions=1 is explicitly set.
   - Returns first failing action command rc otherwise.
   - Runtime inputs use deterministic precedence: CLI flags > env values > summary command values.
+  - Access Recovery mTLS inputs rewrite only `--cacert`, `--client-cert`, and `--client-key`
+    values in selected Access Recovery commands; unresolved placeholders still fail closed.
   - Fails closed (rc=3) when selected actions contain duplicate ids with
     conflicting commands after dedupe/filtering, to avoid stale ambiguous runs.
   - With --profile-default-gate-subject, profile_default_gate actions append
@@ -351,7 +359,7 @@ action_id_is_access_recovery_action_01() {
   local action_id
   action_id="$(trim "${1:-}")"
   case "$action_id" in
-    access_recovery_evidence|trusted_pilot_evidence_verify|real_helper_https_evidence|access_bridge_service_smoke|access_bridge_deployment_evidence|access_bridge_host_install)
+    access_recovery_evidence|trusted_pilot_evidence_verify|real_helper_https_evidence|access_bridge_service_smoke|access_bridge_deployment_evidence|access_bridge_host_install|access_bridge_pilot_evidence_bundle)
       return 0
       ;;
   esac
@@ -457,6 +465,25 @@ access_recovery_trust_store_value_looks_placeholder_01() {
   value="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
   case "$value" in
     "<TRUST-STORE>"|"<SET-TRUST-STORE>"|REPLACE_WITH_TRUST_STORE|REPLACE_WITH_ACCESS_RECOVERY_TRUST_STORE)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+access_recovery_mtls_file_value_looks_placeholder_01() {
+  local value normalized
+  value="$(trim "${1:-}")"
+  value="$(strip_optional_wrapping_quotes "$value")"
+  for token in MTLS_CA_FILE MTLS_CLIENT_CERT_FILE MTLS_CLIENT_KEY_FILE; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    "<MTLS_CA_FILE>"|"<MTLS_CLIENT_CERT_FILE>"|"<MTLS_CLIENT_KEY_FILE>"|\
+    "REPLACE_WITH_MTLS_CA_FILE"|"REPLACE_WITH_MTLS_CLIENT_CERT_FILE"|"REPLACE_WITH_MTLS_CLIENT_KEY_FILE")
       return 0
       ;;
   esac
@@ -1082,8 +1109,23 @@ build_access_recovery_operator_inputs_operator_command_01() {
   else
     cmd+=(--access-recovery-trust-store "REPLACE_WITH_TRUST_STORE")
   fi
+  if [[ -n "${runtime_access_recovery_mtls_ca:-}" ]]; then
+    cmd+=(--access-recovery-mtls-ca "$runtime_access_recovery_mtls_ca")
+  else
+    cmd+=(--access-recovery-mtls-ca "REPLACE_WITH_MTLS_CA_FILE")
+  fi
+  if [[ -n "${runtime_access_recovery_mtls_client_cert:-}" ]]; then
+    cmd+=(--access-recovery-mtls-client-cert "$runtime_access_recovery_mtls_client_cert")
+  else
+    cmd+=(--access-recovery-mtls-client-cert "REPLACE_WITH_MTLS_CLIENT_CERT_FILE")
+  fi
+  if [[ -n "${runtime_access_recovery_mtls_client_key:-}" ]]; then
+    cmd+=(--access-recovery-mtls-client-key "$runtime_access_recovery_mtls_client_key")
+  else
+    cmd+=(--access-recovery-mtls-client-key "REPLACE_WITH_MTLS_CLIENT_KEY_FILE")
+  fi
   cmd+=(--print-summary-json "${print_summary_json:-1}")
-  printf '%s # replace Access Recovery placeholders with concrete operator values: HELPER_PUBLIC_DNS PRIVATE_CODE_FILE BRIDGE_SERVICE_CONFIG BRIDGE_DEPLOY_PACK PROVENANCE_PRIVATE_KEY_FILE ORG_ID ORG_NAME' \
+  printf '%s # replace Access Recovery placeholders with concrete operator values: HELPER_PUBLIC_DNS PRIVATE_CODE_FILE BRIDGE_SERVICE_CONFIG BRIDGE_DEPLOY_PACK PROVENANCE_PRIVATE_KEY_FILE ORG_ID ORG_NAME MTLS_CA_FILE MTLS_CLIENT_CERT_FILE MTLS_CLIENT_KEY_FILE' \
     "$(render_command_line_from_argv "${cmd[@]}")"
 }
 
@@ -1785,6 +1827,123 @@ access_recovery_command_apply_trust_store_override_01() {
   profile_default_gate_command_from_argv "${out_argv[@]}"
 }
 
+access_recovery_command_apply_mtls_overrides_01() {
+  local cmd mtls_ca mtls_client_cert mtls_client_key
+  local token=""
+  local key=""
+  local idx=0
+  local token_count=0
+  local -a in_argv=()
+  local -a out_argv=()
+
+  cmd="$(trim "${1:-}")"
+  mtls_ca="$(trim "${2:-}")"
+  mtls_client_cert="$(trim "${3:-}")"
+  mtls_client_key="$(trim "${4:-}")"
+  if [[ -z "$cmd" || ( -z "$mtls_ca" && -z "$mtls_client_cert" && -z "$mtls_client_key" ) ]]; then
+    printf '%s' "$cmd"
+    return
+  fi
+  if ! command_string_to_argv "$cmd"; then
+    printf '%s' "$cmd"
+    return
+  fi
+
+  in_argv=("${COMMAND_STRING_ARGV[@]}")
+  token_count="${#in_argv[@]}"
+  while (( idx < token_count )); do
+    token="${in_argv[$idx]}"
+    case "$token" in
+      --cacert)
+        out_argv+=("--cacert")
+        if (( idx + 1 < token_count )); then
+          if [[ -n "$mtls_ca" ]]; then
+            out_argv+=("$mtls_ca")
+          else
+            out_argv+=("${in_argv[$((idx + 1))]}")
+          fi
+          idx=$((idx + 2))
+        else
+          if [[ -n "$mtls_ca" ]]; then
+            out_argv+=("$mtls_ca")
+          fi
+          idx=$((idx + 1))
+        fi
+        continue
+        ;;
+      --client-cert)
+        out_argv+=("--client-cert")
+        if (( idx + 1 < token_count )); then
+          if [[ -n "$mtls_client_cert" ]]; then
+            out_argv+=("$mtls_client_cert")
+          else
+            out_argv+=("${in_argv[$((idx + 1))]}")
+          fi
+          idx=$((idx + 2))
+        else
+          if [[ -n "$mtls_client_cert" ]]; then
+            out_argv+=("$mtls_client_cert")
+          fi
+          idx=$((idx + 1))
+        fi
+        continue
+        ;;
+      --client-key)
+        out_argv+=("--client-key")
+        if (( idx + 1 < token_count )); then
+          if [[ -n "$mtls_client_key" ]]; then
+            out_argv+=("$mtls_client_key")
+          else
+            out_argv+=("${in_argv[$((idx + 1))]}")
+          fi
+          idx=$((idx + 2))
+        else
+          if [[ -n "$mtls_client_key" ]]; then
+            out_argv+=("$mtls_client_key")
+          fi
+          idx=$((idx + 1))
+        fi
+        continue
+        ;;
+      --cacert=*)
+        key="${token%%=*}"
+        if [[ -n "$mtls_ca" ]]; then
+          out_argv+=("${key}=${mtls_ca}")
+        else
+          out_argv+=("$token")
+        fi
+        idx=$((idx + 1))
+        continue
+        ;;
+      --client-cert=*)
+        key="${token%%=*}"
+        if [[ -n "$mtls_client_cert" ]]; then
+          out_argv+=("${key}=${mtls_client_cert}")
+        else
+          out_argv+=("$token")
+        fi
+        idx=$((idx + 1))
+        continue
+        ;;
+      --client-key=*)
+        key="${token%%=*}"
+        if [[ -n "$mtls_client_key" ]]; then
+          out_argv+=("${key}=${mtls_client_key}")
+        else
+          out_argv+=("$token")
+        fi
+        idx=$((idx + 1))
+        continue
+        ;;
+    esac
+
+    out_argv+=("$token")
+    idx=$((idx + 1))
+  done
+
+  profile_default_gate_command_from_argv "${out_argv[@]}"
+}
+
 log_has_failure_kind_marker() {
   local log_path="${1:-}"
   local marker="${2:-}"
@@ -2160,6 +2319,9 @@ host_b_override_env="${ROADMAP_NEXT_ACTIONS_RUN_HOST_B:-}"
 campaign_subject_override_env="${ROADMAP_NEXT_ACTIONS_RUN_CAMPAIGN_SUBJECT:-}"
 vm_command_source_override_env="${ROADMAP_NEXT_ACTIONS_RUN_VM_COMMAND_SOURCE:-${VM_COMMAND_SOURCE:-}}"
 access_recovery_trust_store_override_env="${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE:-${ACCESS_RECOVERY_TRUST_STORE:-${TRUST_STORE:-}}}"
+access_recovery_mtls_ca_override_env="${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CA:-${ACCESS_RECOVERY_MTLS_CA:-${MTLS_CA_FILE:-}}}"
+access_recovery_mtls_client_cert_override_env="${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_CERT:-${ACCESS_RECOVERY_MTLS_CLIENT_CERT:-${MTLS_CLIENT_CERT_FILE:-}}}"
+access_recovery_mtls_client_key_override_env="${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_KEY:-${ACCESS_RECOVERY_MTLS_CLIENT_KEY:-${MTLS_CLIENT_KEY_FILE:-}}}"
 refresh_manual_validation="${ROADMAP_NEXT_ACTIONS_RUN_REFRESH_MANUAL_VALIDATION:-0}"
 refresh_single_machine_readiness="${ROADMAP_NEXT_ACTIONS_RUN_REFRESH_SINGLE_MACHINE_READINESS:-0}"
 parallel="${ROADMAP_NEXT_ACTIONS_RUN_PARALLEL:-0}"
@@ -2189,11 +2351,17 @@ host_b_override_arg=""
 campaign_subject_override_arg=""
 vm_command_source_override_arg=""
 access_recovery_trust_store_override_arg=""
+access_recovery_mtls_ca_override_arg=""
+access_recovery_mtls_client_cert_override_arg=""
+access_recovery_mtls_client_key_override_arg=""
 host_a_override_arg_provided="0"
 host_b_override_arg_provided="0"
 campaign_subject_override_arg_provided="0"
 vm_command_source_override_arg_provided="0"
 access_recovery_trust_store_override_arg_provided="0"
+access_recovery_mtls_ca_override_arg_provided="0"
+access_recovery_mtls_client_cert_override_arg_provided="0"
+access_recovery_mtls_client_key_override_arg_provided="0"
 declare -a include_ids=()
 declare -a exclude_ids=()
 declare -a include_id_suffixes=()
@@ -2253,6 +2421,24 @@ while [[ $# -gt 0 ]]; do
       require_value_or_die "$1" "${2:-}"
       access_recovery_trust_store_override_arg="${2:-}"
       access_recovery_trust_store_override_arg_provided="1"
+      shift 2
+      ;;
+    --access-recovery-mtls-ca)
+      require_value_or_die "$1" "${2:-}"
+      access_recovery_mtls_ca_override_arg="${2:-}"
+      access_recovery_mtls_ca_override_arg_provided="1"
+      shift 2
+      ;;
+    --access-recovery-mtls-client-cert)
+      require_value_or_die "$1" "${2:-}"
+      access_recovery_mtls_client_cert_override_arg="${2:-}"
+      access_recovery_mtls_client_cert_override_arg_provided="1"
+      shift 2
+      ;;
+    --access-recovery-mtls-client-key)
+      require_value_or_die "$1" "${2:-}"
+      access_recovery_mtls_client_key_override_arg="${2:-}"
+      access_recovery_mtls_client_key_override_arg_provided="1"
       shift 2
       ;;
     --action-timeout-sec)
@@ -2436,6 +2622,15 @@ runtime_vm_command_source_configured="0"
 runtime_access_recovery_trust_store=""
 runtime_access_recovery_trust_store_source=""
 runtime_access_recovery_trust_store_configured="0"
+runtime_access_recovery_mtls_ca=""
+runtime_access_recovery_mtls_ca_source=""
+runtime_access_recovery_mtls_ca_configured="0"
+runtime_access_recovery_mtls_client_cert=""
+runtime_access_recovery_mtls_client_cert_source=""
+runtime_access_recovery_mtls_client_cert_configured="0"
+runtime_access_recovery_mtls_client_key=""
+runtime_access_recovery_mtls_client_key_source=""
+runtime_access_recovery_mtls_client_key_configured="0"
 
 runtime_value_candidate="$(trim "$host_a_override_arg")"
 if [[ "$host_a_override_arg_provided" == "1" ]]; then
@@ -2568,6 +2763,66 @@ elif [[ "$runtime_access_recovery_trust_store_configured" == "1" ]] \
    && access_recovery_trust_store_content_is_dev_01 "$runtime_access_recovery_trust_store"; then
   runtime_access_recovery_trust_store_configured="0"
   runtime_access_recovery_trust_store_source="${runtime_access_recovery_trust_store_source}:demo_marked"
+fi
+
+runtime_value_candidate="$(trim "$access_recovery_mtls_ca_override_arg")"
+if [[ "$access_recovery_mtls_ca_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! access_recovery_mtls_file_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_mtls_ca="$runtime_value_candidate"
+    runtime_access_recovery_mtls_ca_source="cli:--access-recovery-mtls-ca"
+    runtime_access_recovery_mtls_ca_configured="1"
+  else
+    runtime_access_recovery_mtls_ca_source="cli:--access-recovery-mtls-ca=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$access_recovery_mtls_ca_override_env")" ]] && ! access_recovery_mtls_file_value_looks_placeholder_01 "$access_recovery_mtls_ca_override_env"; then
+  runtime_access_recovery_mtls_ca="$(trim "$access_recovery_mtls_ca_override_env")"
+  runtime_access_recovery_mtls_ca_source="env:ACCESS_RECOVERY_MTLS_CA"
+  runtime_access_recovery_mtls_ca_configured="1"
+fi
+if [[ "$runtime_access_recovery_mtls_ca_configured" == "1" ]] \
+   && { [[ ! -f "$runtime_access_recovery_mtls_ca" ]] || [[ ! -r "$runtime_access_recovery_mtls_ca" ]]; }; then
+  runtime_access_recovery_mtls_ca_configured="0"
+  runtime_access_recovery_mtls_ca_source="${runtime_access_recovery_mtls_ca_source}:missing_or_unreadable"
+fi
+
+runtime_value_candidate="$(trim "$access_recovery_mtls_client_cert_override_arg")"
+if [[ "$access_recovery_mtls_client_cert_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! access_recovery_mtls_file_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_mtls_client_cert="$runtime_value_candidate"
+    runtime_access_recovery_mtls_client_cert_source="cli:--access-recovery-mtls-client-cert"
+    runtime_access_recovery_mtls_client_cert_configured="1"
+  else
+    runtime_access_recovery_mtls_client_cert_source="cli:--access-recovery-mtls-client-cert=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$access_recovery_mtls_client_cert_override_env")" ]] && ! access_recovery_mtls_file_value_looks_placeholder_01 "$access_recovery_mtls_client_cert_override_env"; then
+  runtime_access_recovery_mtls_client_cert="$(trim "$access_recovery_mtls_client_cert_override_env")"
+  runtime_access_recovery_mtls_client_cert_source="env:ACCESS_RECOVERY_MTLS_CLIENT_CERT"
+  runtime_access_recovery_mtls_client_cert_configured="1"
+fi
+if [[ "$runtime_access_recovery_mtls_client_cert_configured" == "1" ]] \
+   && { [[ ! -f "$runtime_access_recovery_mtls_client_cert" ]] || [[ ! -r "$runtime_access_recovery_mtls_client_cert" ]]; }; then
+  runtime_access_recovery_mtls_client_cert_configured="0"
+  runtime_access_recovery_mtls_client_cert_source="${runtime_access_recovery_mtls_client_cert_source}:missing_or_unreadable"
+fi
+
+runtime_value_candidate="$(trim "$access_recovery_mtls_client_key_override_arg")"
+if [[ "$access_recovery_mtls_client_key_override_arg_provided" == "1" ]]; then
+  if [[ -n "$runtime_value_candidate" ]] && ! access_recovery_mtls_file_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_mtls_client_key="$runtime_value_candidate"
+    runtime_access_recovery_mtls_client_key_source="cli:--access-recovery-mtls-client-key"
+    runtime_access_recovery_mtls_client_key_configured="1"
+  else
+    runtime_access_recovery_mtls_client_key_source="cli:--access-recovery-mtls-client-key=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "$access_recovery_mtls_client_key_override_env")" ]] && ! access_recovery_mtls_file_value_looks_placeholder_01 "$access_recovery_mtls_client_key_override_env"; then
+  runtime_access_recovery_mtls_client_key="$(trim "$access_recovery_mtls_client_key_override_env")"
+  runtime_access_recovery_mtls_client_key_source="env:ACCESS_RECOVERY_MTLS_CLIENT_KEY"
+  runtime_access_recovery_mtls_client_key_configured="1"
+fi
+if [[ "$runtime_access_recovery_mtls_client_key_configured" == "1" ]] \
+   && { [[ ! -f "$runtime_access_recovery_mtls_client_key" ]] || [[ ! -r "$runtime_access_recovery_mtls_client_key" ]]; }; then
+  runtime_access_recovery_mtls_client_key_configured="0"
+  runtime_access_recovery_mtls_client_key_source="${runtime_access_recovery_mtls_client_key_source}:missing_or_unreadable"
 fi
 
 if (( action_timeout_sec > 0 )); then
@@ -2958,6 +3213,19 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       access_recovery_command_apply_trust_store_override_01 \
         "$action_command" \
         "$runtime_access_recovery_trust_store"
+    )"
+  fi
+  if action_id_is_access_recovery_action_01 "$action_id" \
+     && [[ -n "$action_command" ]] \
+     && { [[ "$runtime_access_recovery_mtls_ca_configured" == "1" ]] \
+       || [[ "$runtime_access_recovery_mtls_client_cert_configured" == "1" ]] \
+       || [[ "$runtime_access_recovery_mtls_client_key_configured" == "1" ]]; }; then
+    action_command="$(
+      access_recovery_command_apply_mtls_overrides_01 \
+        "$action_command" \
+        "$runtime_access_recovery_mtls_ca" \
+        "$runtime_access_recovery_mtls_client_cert" \
+        "$runtime_access_recovery_mtls_client_key"
     )"
   fi
   if action_id_is_access_recovery_trusted_verify_01 "$action_id" \
@@ -3471,6 +3739,15 @@ jq -n \
   --arg runtime_access_recovery_trust_store "$runtime_access_recovery_trust_store" \
   --arg runtime_access_recovery_trust_store_source "$runtime_access_recovery_trust_store_source" \
   --argjson runtime_access_recovery_trust_store_configured "$runtime_access_recovery_trust_store_configured" \
+  --arg runtime_access_recovery_mtls_ca "$runtime_access_recovery_mtls_ca" \
+  --arg runtime_access_recovery_mtls_ca_source "$runtime_access_recovery_mtls_ca_source" \
+  --argjson runtime_access_recovery_mtls_ca_configured "$runtime_access_recovery_mtls_ca_configured" \
+  --arg runtime_access_recovery_mtls_client_cert "$runtime_access_recovery_mtls_client_cert" \
+  --arg runtime_access_recovery_mtls_client_cert_source "$runtime_access_recovery_mtls_client_cert_source" \
+  --argjson runtime_access_recovery_mtls_client_cert_configured "$runtime_access_recovery_mtls_client_cert_configured" \
+  --arg runtime_access_recovery_mtls_client_key "$runtime_access_recovery_mtls_client_key" \
+  --arg runtime_access_recovery_mtls_client_key_source "$runtime_access_recovery_mtls_client_key_source" \
+  --argjson runtime_access_recovery_mtls_client_key_configured "$runtime_access_recovery_mtls_client_key_configured" \
   --arg profile_default_gate_subject_redacted "$profile_default_gate_subject_redacted" \
   --argjson profile_default_gate_subject_configured "$profile_default_gate_subject_configured" \
   --argjson allow_profile_default_gate_unreachable "$allow_profile_default_gate_unreachable" \
@@ -3515,6 +3792,15 @@ jq -n \
       access_recovery_trust_store: (if $runtime_access_recovery_trust_store_configured == 1 then $runtime_access_recovery_trust_store else null end),
       access_recovery_trust_store_configured: ($runtime_access_recovery_trust_store_configured == 1),
       access_recovery_trust_store_source: (if $runtime_access_recovery_trust_store_source == "" then null else $runtime_access_recovery_trust_store_source end),
+      access_recovery_mtls_ca: (if $runtime_access_recovery_mtls_ca_configured == 1 then $runtime_access_recovery_mtls_ca else null end),
+      access_recovery_mtls_ca_configured: ($runtime_access_recovery_mtls_ca_configured == 1),
+      access_recovery_mtls_ca_source: (if $runtime_access_recovery_mtls_ca_source == "" then null else $runtime_access_recovery_mtls_ca_source end),
+      access_recovery_mtls_client_cert: (if $runtime_access_recovery_mtls_client_cert_configured == 1 then $runtime_access_recovery_mtls_client_cert else null end),
+      access_recovery_mtls_client_cert_configured: ($runtime_access_recovery_mtls_client_cert_configured == 1),
+      access_recovery_mtls_client_cert_source: (if $runtime_access_recovery_mtls_client_cert_source == "" then null else $runtime_access_recovery_mtls_client_cert_source end),
+      access_recovery_mtls_client_key: (if $runtime_access_recovery_mtls_client_key_configured == 1 then $runtime_access_recovery_mtls_client_key else null end),
+      access_recovery_mtls_client_key_configured: ($runtime_access_recovery_mtls_client_key_configured == 1),
+      access_recovery_mtls_client_key_source: (if $runtime_access_recovery_mtls_client_key_source == "" then null else $runtime_access_recovery_mtls_client_key_source end),
       profile_default_gate_default_timeout_sec: $profile_default_gate_default_timeout_sec,
       profile_default_gate_subject: (if $profile_default_gate_subject_configured == 1 then $profile_default_gate_subject_redacted else null end),
       profile_default_gate_subject_configured: ($profile_default_gate_subject_configured == 1),

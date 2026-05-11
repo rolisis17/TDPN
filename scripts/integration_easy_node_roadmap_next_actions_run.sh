@@ -60,6 +60,9 @@ for token in \
   '--allow-profile-default-gate-unreachable [0|1]' \
   '--profile-default-gate-subject ID' \
   '--access-recovery-trust-store PATH' \
+  '--access-recovery-mtls-ca PATH' \
+  '--access-recovery-mtls-client-cert PATH' \
+  '--access-recovery-mtls-client-key PATH' \
   '--include-id ID' \
   '--exclude-id ID' \
   '--include-id-prefix PREFIX' \
@@ -87,6 +90,9 @@ ROADMAP_NEXT_ACTIONS_CAPTURE_FILE="$CAPTURE" \
   --allow-profile-default-gate-unreachable 1 \
   --profile-default-gate-subject inv-forwarded-subject \
   --access-recovery-trust-store .easy-node-logs/operator-trust/recovery-trust.json \
+  --access-recovery-mtls-ca .easy-node-logs/operator-mtls/ca.pem \
+  --access-recovery-mtls-client-cert .easy-node-logs/operator-mtls/client.pem \
+  --access-recovery-mtls-client-key .easy-node-logs/operator-mtls/client.key \
   --include-id blockchain_mainnet_activation_refresh_evidence \
   --exclude-id profile_default_gate \
   --include-id-prefix blockchain_ \
@@ -110,6 +116,9 @@ assert_token "$line" $'\t--local-only\t1' "missing --local-only forwarding"
 assert_token "$line" $'\t--allow-profile-default-gate-unreachable\t1' "missing --allow-profile-default-gate-unreachable forwarding"
 assert_token "$line" $'\t--profile-default-gate-subject\tinv-forwarded-subject' "missing --profile-default-gate-subject forwarding"
 assert_token "$line" $'\t--access-recovery-trust-store\t.easy-node-logs/operator-trust/recovery-trust.json' "missing --access-recovery-trust-store forwarding"
+assert_token "$line" $'\t--access-recovery-mtls-ca\t.easy-node-logs/operator-mtls/ca.pem' "missing --access-recovery-mtls-ca forwarding"
+assert_token "$line" $'\t--access-recovery-mtls-client-cert\t.easy-node-logs/operator-mtls/client.pem' "missing --access-recovery-mtls-client-cert forwarding"
+assert_token "$line" $'\t--access-recovery-mtls-client-key\t.easy-node-logs/operator-mtls/client.key' "missing --access-recovery-mtls-client-key forwarding"
 assert_token "$line" $'\t--include-id\tblockchain_mainnet_activation_refresh_evidence' "missing --include-id forwarding"
 assert_token "$line" $'\t--exclude-id\tprofile_default_gate' "missing --exclude-id forwarding"
 assert_token "$line" $'\t--include-id-prefix\tblockchain_' "missing --include-id-prefix forwarding"
