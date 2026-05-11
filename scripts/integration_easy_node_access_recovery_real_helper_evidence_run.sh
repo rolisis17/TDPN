@@ -112,6 +112,9 @@ cat >"$summary_json" <<JSON
   "evidence_scope": "real_helper_https",
   "pilot_handoff_ready": false,
   "artifacts": {
+    "smoke_summary_json": "$(dirname "$summary_json")/bundle/access_bridge_service_smoke_summary.json",
+    "deployment_evidence_summary_json": "$(dirname "$summary_json")/bundle/access_bridge_deployment_evidence_summary.json",
+    "host_install_check_summary_json": "$(dirname "$summary_json")/bundle/access_bridge_host_install_check_summary.json",
     "bundle_dir": "$(dirname "$summary_json")/bundle",
     "bundle_tar": "$(dirname "$summary_json")/bundle.tar.gz",
     "bundle_tar_sha256_file": "$(dirname "$summary_json")/bundle.tar.gz.sha256"
@@ -324,6 +327,7 @@ for token in \
   $'\t--path-id\thelper-web' \
   $'\t--require-https\t1' \
   $'\t--require-public-host\t1' \
+  $'\t--expected-public-host\thelper.gpm-pilot.net' \
   $'\t--provenance-sign\t1' \
   $'\t--provenance-private-key-file\t'"$PROVENANCE_KEY" \
   $'\t--provenance-org-id\tfreenews-demo' \
@@ -351,17 +355,27 @@ do
 done
 
 roadmap_line="$(sed -n '4p' "$CAPTURE")"
-if [[ "$roadmap_line" != *$'\t--access-bridge-pilot-evidence-bundle-verify-summary-json\t'* ]]; then
-  echo "missing roadmap verifier summary token"
-  echo "$roadmap_line"
-  exit 1
-fi
+for token in \
+  $'\t--access-bridge-service-smoke-summary-json\t'"$REPORTS_DIR/bundle/access_bridge_service_smoke_summary.json" \
+  $'\t--access-bridge-deployment-evidence-summary-json\t'"$REPORTS_DIR/bundle/access_bridge_deployment_evidence_summary.json" \
+  $'\t--access-bridge-host-install-summary-json\t'"$REPORTS_DIR/bundle/access_bridge_host_install_check_summary.json" \
+  $'\t--access-bridge-pilot-evidence-bundle-verify-summary-json\t'
+do
+  if [[ "$roadmap_line" != *"$token"* ]]; then
+    echo "missing forwarded roadmap token: $token"
+    echo "$roadmap_line"
+    exit 1
+  fi
+done
 
 jq -e '
   .schema.id == "access_recovery_real_helper_evidence_run_summary"
   and .status == "pass"
   and .stage == "complete"
   and .child_summaries.host_install_check.status == "pass"
+  and (.artifacts.bundle_service_smoke_summary_json | endswith("/bundle/access_bridge_service_smoke_summary.json"))
+  and (.artifacts.bundle_deployment_evidence_summary_json | endswith("/bundle/access_bridge_deployment_evidence_summary.json"))
+  and (.artifacts.bundle_host_install_check_summary_json | endswith("/bundle/access_bridge_host_install_check_summary.json"))
   and .readiness.trusted_verifier_pilot_handoff_ready == true
   and .readiness.roadmap_access_recovery_pilot_handoff_ready == true
 ' "$TMP_DIR/run-summary.json" >/dev/null

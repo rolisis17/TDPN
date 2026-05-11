@@ -449,6 +449,9 @@ host_install_check_summary_json="$reports_dir/access_bridge_host_install_check_$
 host_install_check_log="$reports_dir/access_recovery_real_helper_evidence_run_${run_id}_host_install_check.log"
 verify_log="$reports_dir/access_recovery_real_helper_evidence_run_${run_id}_verify.log"
 roadmap_log="$reports_dir/access_recovery_real_helper_evidence_run_${run_id}_roadmap.log"
+bundle_service_smoke_summary_json=""
+bundle_deployment_evidence_summary_json=""
+bundle_host_install_check_summary_json=""
 
 config_json="$(abs_path "$config_json")"
 deploy_pack_dir="$(abs_path "$deploy_pack_dir")"
@@ -509,6 +512,9 @@ write_summary() {
     --arg host_install_check_summary_json "$host_install_check_summary_json" \
     --arg host_install_check_log "$host_install_check_log" \
     --arg bundle_summary_json "$bundle_summary_json" \
+    --arg bundle_service_smoke_summary_json "$bundle_service_smoke_summary_json" \
+    --arg bundle_deployment_evidence_summary_json "$bundle_deployment_evidence_summary_json" \
+    --arg bundle_host_install_check_summary_json "$bundle_host_install_check_summary_json" \
     --arg bundle_log "$bundle_log" \
     --arg provenance_json "$provenance_out" \
     --arg verification_summary_json "$verification_summary_json" \
@@ -561,6 +567,9 @@ write_summary() {
         host_install_check_summary_json: $host_install_check_summary_json,
         host_install_check_log: $host_install_check_log,
         bundle_summary_json: $bundle_summary_json,
+        bundle_service_smoke_summary_json: (if $bundle_service_smoke_summary_json == "" then null else $bundle_service_smoke_summary_json end),
+        bundle_deployment_evidence_summary_json: (if $bundle_deployment_evidence_summary_json == "" then null else $bundle_deployment_evidence_summary_json end),
+        bundle_host_install_check_summary_json: (if $bundle_host_install_check_summary_json == "" then null else $bundle_host_install_check_summary_json end),
         bundle_log: $bundle_log,
         provenance_json: $provenance_json,
         verification_summary_json: $verification_summary_json,
@@ -694,6 +703,7 @@ bundle_args=(
   --provenance-out "$provenance_out"
   --require-https 1
   --require-public-host 1
+  --expected-public-host "$host"
   --print-summary-json "$print_child_json"
 )
 if [[ -n "$code_file" ]]; then
@@ -721,6 +731,16 @@ if [[ "$bundle_rc" -ne 0 ]]; then
   echo "summary_json: $summary_json"
   [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
   exit "$bundle_rc"
+fi
+bundle_service_smoke_summary_json="$(jq -r 'if (.artifacts.smoke_summary_json | type) == "string" then .artifacts.smoke_summary_json else "" end' "$bundle_summary_json" 2>/dev/null || printf '%s' "")"
+bundle_deployment_evidence_summary_json="$(jq -r 'if (.artifacts.deployment_evidence_summary_json | type) == "string" then .artifacts.deployment_evidence_summary_json else "" end' "$bundle_summary_json" 2>/dev/null || printf '%s' "")"
+bundle_host_install_check_summary_json="$(jq -r 'if (.artifacts.host_install_check_summary_json | type) == "string" then .artifacts.host_install_check_summary_json else "" end' "$bundle_summary_json" 2>/dev/null || printf '%s' "")"
+if [[ -z "$bundle_service_smoke_summary_json" || -z "$bundle_deployment_evidence_summary_json" || -z "$bundle_host_install_check_summary_json" ]]; then
+  write_summary "fail" 1 "bundle" "Access bridge pilot evidence bundle summary is missing child evidence paths required for roadmap binding"
+  echo "access-recovery-real-helper-evidence-run: status=fail stage=bundle"
+  echo "summary_json: $summary_json"
+  [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
+  exit 1
 fi
 
 verify_args=(
@@ -758,6 +778,9 @@ if [[ "$roadmap_refresh" == "1" ]]; then
   roadmap_args=(
     --refresh-manual-validation 0
     --refresh-single-machine-readiness 0
+    --access-bridge-service-smoke-summary-json "$bundle_service_smoke_summary_json"
+    --access-bridge-deployment-evidence-summary-json "$bundle_deployment_evidence_summary_json"
+    --access-bridge-host-install-summary-json "$bundle_host_install_check_summary_json"
     --access-bridge-pilot-evidence-bundle-verify-summary-json "$verification_summary_json"
     --summary-json "$roadmap_summary_json"
     --report-md "$roadmap_report_md"
