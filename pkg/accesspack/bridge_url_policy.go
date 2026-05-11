@@ -16,17 +16,21 @@ func bridgeAccessPathIsManualFallback(path AccessPath) bool {
 }
 
 func bridgeAccessPathServiceURLIssue(path AccessPath) (string, string, bool) {
-	if bridgeAccessPathIsManualFallback(path) {
-		return "manual_path", "requested access path is a manual or external helper path and cannot be served by the bridge service", true
-	}
+	manualFallback := bridgeAccessPathIsManualFallback(path)
 	parsed, err := url.Parse(strings.TrimSpace(path.URL))
 	if err != nil || parsed.Scheme == "" {
+		if manualFallback {
+			return "manual_path", "requested access path is a manual or external helper path and cannot be served by the bridge service", true
+		}
 		return "invalid_url", "requested access path URL is invalid", true
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if manualFallback && scheme != "http" && scheme != "https" {
+		return "manual_path", "requested access path is a manual or external helper path and cannot be served by the bridge service", true
 	}
 	if parsed.User != nil {
 		return "userinfo", "requested access path URL must not include userinfo", true
 	}
-	scheme := strings.ToLower(parsed.Scheme)
 	if scheme == "http" {
 		return "plain_http", "serviceable bridge access paths must use https", true
 	}
@@ -39,6 +43,9 @@ func bridgeAccessPathServiceURLIssue(path AccessPath) (string, string, bool) {
 	}
 	if !bridgeAccessPathHostLooksPublic(host) {
 		return "private_host", "serviceable bridge access path host must be public-routable", true
+	}
+	if manualFallback {
+		return "manual_path", "requested access path is a manual or external helper path and cannot be served by the bridge service", true
 	}
 	return "", "", false
 }

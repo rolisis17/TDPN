@@ -1083,6 +1083,30 @@ func TestGPMRecoverFetchPublicationRejectsRemoteHTTPIndex(t *testing.T) {
 	}
 }
 
+func TestGPMRecoverFetchPublicationRejectsUnsafeRemoteIndexHosts(t *testing.T) {
+	for _, raw := range []string{
+		"https://user:pass@gpm-pilot.net/.well-known/gpm/recovery-index.json",
+		"https://10.0.0.5/.well-known/gpm/recovery-index.json",
+		"https://100.64.0.10/.well-known/gpm/recovery-index.json",
+		"https://helper.home.arpa/.well-known/gpm/recovery-index.json",
+		"https://helper.tailnet.ts.net/.well-known/gpm/recovery-index.json",
+		"https://[::ffff:10.0.0.5]/.well-known/gpm/recovery-index.json",
+		"https://[2001:db8::1]/.well-known/gpm/recovery-index.json",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			if _, err := parsePublicationIndexURL(raw); err == nil {
+				t.Fatalf("expected unsafe publication index URL to be rejected: %s", raw)
+			}
+		})
+	}
+	if _, err := parsePublicationIndexURL("https://[2606:4700:4700::1111]/.well-known/gpm/recovery-index.json"); err != nil {
+		t.Fatalf("expected public IPv6 publication index URL to remain available: %v", err)
+	}
+	if _, err := parsePublicationIndexURL("https://recovery.globalprivatemesh.net/.well-known/gpm/recovery-index.json"); err != nil {
+		t.Fatalf("expected public DNS publication index URL to remain available: %v", err)
+	}
+}
+
 func TestGPMRecoverFetchPublicationRejectsCrossOriginFiles(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(recoveryPublicationIndex{

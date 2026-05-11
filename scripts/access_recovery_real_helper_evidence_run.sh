@@ -178,6 +178,12 @@ url_host() {
   fi
 }
 
+url_authority_has_userinfo() {
+  local rest
+  rest="$(url_authority "$1")"
+  [[ "$rest" == *@* ]]
+}
+
 ipv4_mapped_host_to_ipv4() {
   local host="${1:-}" mapped="" high="" low=""
   if [[ "$host" == ::ffff:* ]]; then
@@ -640,6 +646,9 @@ if value_looks_placeholder "$base_url"; then
 fi
 if [[ "$(printf '%s' "$base_url" | tr '[:upper:]' '[:lower:]')" != https://* ]]; then
   fail_preflight "--base-url must use https:// for real helper evidence"
+fi
+if url_authority_has_userinfo "$base_url"; then
+  fail_preflight "--base-url must not include userinfo"
 fi
 host="$(url_host "$base_url")"
 if host_looks_non_public_for_real_helper "$host"; then

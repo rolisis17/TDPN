@@ -477,6 +477,67 @@ func TestBridgeInvitePolicyRejectsUnsafeServiceableHelperURLs(t *testing.T) {
 	}
 }
 
+func TestBridgeInvitePolicyRejectsUnsafeManualHTTPFallbackURLs(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		url  string
+		code string
+	}{
+		{name: "plain-http", url: "http://helper.gpm-pilot.net/manual", code: "bridge_invite_access_path_plain_http"},
+		{name: "loopback-ip", url: "https://127.0.0.1/manual", code: "bridge_invite_access_path_private_host"},
+		{name: "private-ip", url: "https://10.0.0.5/manual", code: "bridge_invite_access_path_private_host"},
+		{name: "cgnat-ip", url: "https://100.64.0.10/manual", code: "bridge_invite_access_path_private_host"},
+		{name: "home-arpa", url: "https://helper.home.arpa/manual", code: "bridge_invite_access_path_private_host"},
+		{name: "tailscale-overlay", url: "https://helper.tailnet.ts.net/manual", code: "bridge_invite_access_path_private_host"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			invite := testBridgeInvite()
+			invite.AccessPaths = append(invite.AccessPaths, AccessPath{
+				PathID:              "manual-web",
+				Kind:                "instructions",
+				URL:                 tc.url,
+				Priority:            30,
+				RequiresExternalApp: true,
+			})
+			report := CheckBridgeInvitePolicy(invite, BridgeInvitePolicyOptions{
+				MinAccessPaths:        1,
+				MinDistinctHosts:      1,
+				RequireHelperRegistry: false,
+				MaxLifetime:           MaxBridgeInviteLifetime,
+			}, now)
+			if report.Status != "fail" {
+				t.Fatalf("expected unsafe manual HTTP(S) fallback to fail policy, got %+v", report)
+			}
+			if !sawBridgePolicyFinding(report, tc.code) {
+				t.Fatalf("expected finding %s, got %+v", tc.code, report.Findings)
+			}
+		})
+	}
+}
+
+func TestBridgeAccessPathServiceURLIssueTreatsNonWebManualFallbackAsManual(t *testing.T) {
+	for _, rawURL := range []string{
+		"mailto:bridge-helper@example.com",
+		"tel:+15550101010",
+		"signal:bridge-helper",
+		"manual contact instructions",
+	} {
+		t.Run(rawURL, func(t *testing.T) {
+			code, _, bad := bridgeAccessPathServiceURLIssue(AccessPath{
+				PathID:              "manual-contact",
+				Kind:                "instructions",
+				URL:                 rawURL,
+				Priority:            30,
+				RequiresExternalApp: true,
+			})
+			if !bad || code != "manual_path" {
+				t.Fatalf("expected non-web manual fallback to be classified as manual_path, got code=%q bad=%v", code, bad)
+			}
+		})
+	}
+}
+
 func TestBridgeInvitePolicyAllowLocalAccessPathsOnlyForLoopback(t *testing.T) {
 	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
 	invite := testBridgeInvite()

@@ -122,15 +122,21 @@ func CheckBridgeInvitePolicy(invite BridgeInvite, options BridgeInvitePolicyOpti
 	}
 	serviceablePaths := 0
 	for _, path := range invite.AccessPaths {
-		if bridgeAccessPathIsManualFallback(path) {
-			continue
-		}
+		manualFallback := bridgeAccessPathIsManualFallback(path)
 		if code, message, bad := bridgeAccessPathServiceURLIssue(path); bad {
+			if code == "manual_path" {
+				continue
+			}
 			if options.AllowLocalAccessPaths && bridgeAccessPathLocalDiagnosticIssueAllowed(code, path) {
-				serviceablePaths++
+				if !manualFallback {
+					serviceablePaths++
+				}
 				continue
 			}
 			report.addFinding("bridge_invite_access_path_"+code, "error", message)
+			continue
+		}
+		if manualFallback {
 			continue
 		}
 		serviceablePaths++

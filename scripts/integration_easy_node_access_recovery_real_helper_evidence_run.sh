@@ -233,6 +233,38 @@ if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'access-recovery-real-he
   exit 1
 fi
 
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url "https://token@helper.gpm-pilot.net" \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$TRUST_STORE" \
+  --summary-json "$TMP_DIR/userinfo-url-summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/userinfo-url.log" 2>&1
+userinfo_url_rc=$?
+set -e
+if [[ "$userinfo_url_rc" -ne 2 ]] ||
+  ! grep -Fq -- "--base-url must not include userinfo" "$TMP_DIR/userinfo-url.log"; then
+  echo "expected userinfo real-helper URL to fail preflight"
+  cat "$TMP_DIR/userinfo-url.log"
+  exit 1
+fi
+if grep -Fq -- "token@helper" "$TMP_DIR/userinfo-url.log"; then
+  echo "userinfo real-helper URL leaked into preflight log"
+  cat "$TMP_DIR/userinfo-url.log"
+  exit 1
+fi
+
 bad_real_helper_urls=(
   "https://198.51.100.10"
   "https://203.0.113.10"

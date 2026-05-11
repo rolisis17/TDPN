@@ -444,6 +444,15 @@ case "$scenario" in
 }
 JSON
     ;;
+  secret_redaction_extended_flags)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"secret_redaction_extended","label":"Secret redaction extended","command":"bash \"$PASS1\" --password pass-secret --api-key=api-secret --private-key-file /tmp/private.key --provenance-private-key-file /tmp/provenance.key --admin-key 'admin secret' --secret \"quoted secret\" --token legacy-token","reason":"test-secret-redaction"}
+  ]
+}
+JSON
+    ;;
   filter_mix)
     cat >"$summary_json" <<JSON
 {
@@ -918,6 +927,47 @@ if ! jq -e '
 ' "$SUMMARY_PASS" >/dev/null; then
   echo "success path summary mismatch"
   cat "$SUMMARY_PASS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] redacts extended secret-bearing flags from action summaries"
+SUMMARY_REDACTION_EXTENDED="$TMP_DIR/summary_redaction_extended.json"
+REPORTS_REDACTION_EXTENDED="$TMP_DIR/reports_redaction_extended"
+ROADMAP_NEXT_ACTIONS_SCENARIO=secret_redaction_extended_flags \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_REDACTION_EXTENDED" \
+  --summary-json "$SUMMARY_REDACTION_EXTENDED" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["secret_redaction_extended"]
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and ((.actions // []) | length == 1)
+  and .actions[0].id == "secret_redaction_extended"
+  and .actions[0].status == "pass"
+  and ((.actions[0].command // "") | contains("--password [redacted]"))
+  and ((.actions[0].command // "") | contains("--api-key=[redacted]"))
+  and ((.actions[0].command // "") | contains("--private-key-file [redacted]"))
+  and ((.actions[0].command // "") | contains("--provenance-private-key-file [redacted]"))
+  and ((.actions[0].command // "") | contains("--admin-key [redacted]"))
+  and ((.actions[0].command // "") | contains("--secret [redacted]"))
+  and ((.actions[0].command // "") | contains("--token [redacted]"))
+  and (((.actions[0].command // "") | contains("pass-secret")) | not)
+  and (((.actions[0].command // "") | contains("api-secret")) | not)
+  and (((.actions[0].command // "") | contains("/tmp/private.key")) | not)
+  and (((.actions[0].command // "") | contains("/tmp/provenance.key")) | not)
+  and (((.actions[0].command // "") | contains("admin secret")) | not)
+  and (((.actions[0].command // "") | contains("quoted secret")) | not)
+  and (((.actions[0].command // "") | contains("legacy-token")) | not)
+' "$SUMMARY_REDACTION_EXTENDED" >/dev/null; then
+  echo "extended secret redaction summary mismatch"
+  cat "$SUMMARY_REDACTION_EXTENDED"
   exit 1
 fi
 

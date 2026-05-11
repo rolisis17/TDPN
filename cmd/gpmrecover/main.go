@@ -2550,8 +2550,14 @@ func parsePublicationIndexURL(raw string) (*url.URL, error) {
 	if strings.TrimSpace(parsed.Host) == "" {
 		return nil, errors.New("--index-url must include a host")
 	}
+	if parsed.User != nil {
+		return nil, errors.New("--index-url must not include userinfo")
+	}
 	if parsed.Scheme == "http" && !isLoopbackPublicationHost(parsed.Hostname()) {
 		return nil, errors.New("--index-url must use https:// for remote publication hosts")
+	}
+	if !isLoopbackPublicationHost(parsed.Hostname()) && !publicationIndexHostLooksPublic(parsed.Hostname()) {
+		return nil, errors.New("--index-url host must be public-routable for remote publication hosts")
 	}
 	return parsed, nil
 }
@@ -2671,6 +2677,48 @@ func isLoopbackPublicationHost(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func publicationIndexHostLooksPublic(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" || strings.HasSuffix(host, ".") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			return bridgeDeployIPv4LooksPublic(ipv4)
+		}
+		ip16 := ip.To16()
+		if ip16 == nil {
+			return false
+		}
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+			return false
+		}
+		if ip16[0] == 0x20 && ip16[1] == 0x01 && ip16[2] == 0x0d && ip16[3] == 0xb8 {
+			return false
+		}
+		return true
+	}
+	if bridgeDeployDNSNameLooksReserved(host) {
+		return false
+	}
+	labels := strings.Split(host, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels {
+		if label == "" || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return false
+		}
+		for _, r := range label {
+			valid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-'
+			if !valid {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func fetchPublicationURL(client *http.Client, rawURL string, maxBytes int64) ([]byte, error) {
