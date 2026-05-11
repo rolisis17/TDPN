@@ -138,6 +138,24 @@ go run ./cmd/gpmrecover provenance-sign \
 
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --summary-json "$SUMMARY_JSON" >"$TMP_DIR/verify-summary.log"
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-dir "$BUNDLE_DIR" >"$TMP_DIR/verify-dir.log"
+DIR_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_dir_summary.json"
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --bundle-dir "$BUNDLE_DIR" \
+  --verification-summary-json "$DIR_VERIFY_SUMMARY_JSON" >"$TMP_DIR/verify-dir-summary.log"
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .pilot_handoff_ready == false
+  and .checks.tar_sha256.enabled == true
+  and .checks.tar_sha256.checked == false
+  and .checks.tar_sha256.status == "skipped"
+  and .checks.manifest.enabled == true
+  and .checks.manifest.status == "pass"
+' "$DIR_VERIFY_SUMMARY_JSON" >/dev/null; then
+  echo "access bridge pilot evidence bundle verifier integration failed: bundle-dir receipt implied tar checksum was verified"
+  cat "$DIR_VERIFY_SUMMARY_JSON"
+  exit 1
+fi
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh --bundle-tar "$BUNDLE_TAR" >"$TMP_DIR/verify-tar.log"
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$SUMMARY_JSON" \
@@ -191,6 +209,7 @@ if ! jq -e '
   and .pilot_handoff_criteria.trust_store_sha256_present == true
   and .checks.summary_contract.enabled == true
   and .checks.tar_sha256.enabled == true
+  and .checks.tar_sha256.checked == true
   and .checks.manifest.enabled == true
   and .checks.provenance.enabled == true
   and .trusted_provenance.required == true

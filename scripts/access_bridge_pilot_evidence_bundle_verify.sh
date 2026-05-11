@@ -528,12 +528,13 @@ provenance_trusted_org_name=""
 provenance_evidence_scope=""
 provenance_bundle_tar_name=""
 provenance_expires_at_utc=""
+tar_sha256_checked="0"
 
 write_verification_summary() {
   local status="$1"
   local rc="$2"
   local notes="$3"
-  local generated_at_utc check_tar_sha256_json check_manifest_json check_provenance_json require_trusted_json
+  local generated_at_utc check_tar_sha256_json tar_sha256_checked_json check_manifest_json check_provenance_json require_trusted_json
   local summary_contract_check_json provenance_checked_json provenance_trusted_json provenance_source
   local allow_dev_trust_store_json trust_store_sha256
   local source_summary_sha256 source_base_url source_helper_id source_organization_id source_registry_id
@@ -546,6 +547,7 @@ write_verification_summary() {
   mkdir -p "$(dirname "$verification_summary_json")"
   generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   check_tar_sha256_json="$( [[ "$check_tar_sha256" == "1" ]] && printf 'true' || printf 'false' )"
+  tar_sha256_checked_json="$( [[ "$tar_sha256_checked" == "1" ]] && printf 'true' || printf 'false' )"
   check_manifest_json="$( [[ "$check_manifest" == "1" ]] && printf 'true' || printf 'false' )"
   check_provenance_json="$( [[ "$check_provenance" == "1" ]] && printf 'true' || printf 'false' )"
   require_trusted_json="$( [[ "$require_trusted_provenance" == "1" ]] && printf 'true' || printf 'false' )"
@@ -627,6 +629,7 @@ write_verification_summary() {
     --arg trust_store_sha256 "$trust_store_sha256" \
     --arg summary_evidence_scope "$summary_evidence_scope" \
     --argjson check_tar_sha256 "$check_tar_sha256_json" \
+    --argjson tar_sha256_checked "$tar_sha256_checked_json" \
     --argjson check_manifest "$check_manifest_json" \
     --argjson check_provenance "$check_provenance_json" \
     --argjson require_trusted_provenance "$require_trusted_json" \
@@ -668,6 +671,7 @@ write_verification_summary() {
         and $provenance_source == "trust_store"
         and $provenance_evidence_scope == "real_helper_https"
         and $summary_evidence_scope == "real_helper_https"
+        and $tar_sha256_checked
         and $trust_store != ""
         and $public_key_file == ""
         and ($allow_dev_trust_store | not);
@@ -719,7 +723,8 @@ write_verification_summary() {
           },
           tar_sha256: {
             enabled: $check_tar_sha256,
-            status: (if $check_tar_sha256 then $status else "skipped" end)
+            checked: $tar_sha256_checked,
+            status: (if ($check_tar_sha256 | not) then "skipped" elif $tar_sha256_checked then $status elif $status == "pass" then "skipped" else $status end)
           },
           manifest: {
             enabled: $check_manifest,
@@ -854,14 +859,22 @@ if [[ "$check_tar_sha256" == "1" && -n "$bundle_tar" && -f "$bundle_tar" ]]; the
       elif [[ "$actual" != "$expected" ]]; then
         echo "bundle tar checksum mismatch: expected=$expected actual=$actual"
         issues=$((issues + 1))
-      elif [[ "$show_details" == "1" ]]; then
-        echo "bundle tar checksum ok: $bundle_tar"
+      else
+        tar_sha256_checked=1
+        if [[ "$show_details" == "1" ]]; then
+          echo "bundle tar checksum ok: $bundle_tar"
+        fi
       fi
     else
       echo "invalid bundle tar checksum sidecar format: $bundle_tar_sha256_file"
       issues=$((issues + 1))
     fi
   fi
+fi
+
+if [[ "$require_trusted_provenance" == "1" && "$tar_sha256_checked" != "1" ]]; then
+  echo "trusted pilot provenance requires verified bundle tar checksum"
+  issues=$((issues + 1))
 fi
 
 manifest_bundle_dir=""

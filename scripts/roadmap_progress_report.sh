@@ -2405,18 +2405,26 @@ access_recovery_track_json_from_evidence() {
         ($service_smoke.details.base_url // "");
       def first_part($sep):
         (split($sep) | .[0]) // "";
+      def trim_trailing_dots:
+        gsub("\\.+$"; "");
+      def smoke_authority:
+        (smoke_base_url | sub("^[A-Za-z][A-Za-z0-9+.-]*://"; "") | first_part("/") | first_part("?") | first_part("#"));
+      def smoke_authority_has_userinfo:
+        smoke_authority | contains("@");
       def smoke_host:
-        (smoke_base_url | sub("^[A-Za-z][A-Za-z0-9+.-]*://"; "") | first_part("/") | first_part("?") | first_part("#")) as $authority
+        ((smoke_authority | split("@") | .[-1]) // "") as $authority
         | if ($authority | startswith("[")) then
             ($authority | sub("^\\["; "") | sub("\\].*$"; ""))
           else
             ($authority | first_part(":"))
           end
-        | ascii_downcase;
+        | ascii_downcase
+        | trim_trailing_dots;
       def private_or_reserved_helper_host:
         smoke_host as $host
         | (
-            ($host == "")
+            smoke_authority_has_userinfo
+            or ($host == "")
             or ($host == "localhost")
             or ($host | test("(^|\\.)(localhost|local|lan|internal|test|invalid|example)$"))
             or ($host | test("(^|\\.)example\\.(com|net|org)$"))
@@ -2433,7 +2441,9 @@ access_recovery_track_json_from_evidence() {
             or ($host | test("^198\\.51\\.100\\."))
             or ($host | test("^203\\.0\\.113\\."))
             or ($host | test("^(22[4-9]|23[0-9]|24[0-9]|25[0-5])\\."))
-            or ($host | test("^(::|::1|fc[0-9a-f]|fd[0-9a-f]|fe80:)"))
+            or ($host | test("^(::|::1|fc[0-9a-f]|fd[0-9a-f]|fe80:|2001:db8:)"))
+            or ($host | test("^::ffff:(127|10|192\\.168|169\\.254|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])|172\\.(1[6-9]|2[0-9]|3[0-1])|192\\.0\\.(0|2)|192\\.88\\.99|198\\.(1[89]|51\\.100)|203\\.0\\.113|22[4-9]|23[0-9]|24[0-9]|25[0-5]|0)\\."))
+            or ($host | test("^0:0:0:0:0:ffff:(127|10|192\\.168|169\\.254|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])|172\\.(1[6-9]|2[0-9]|3[0-1])|192\\.0\\.(0|2)|192\\.88\\.99|198\\.(1[89]|51\\.100)|203\\.0\\.113|22[4-9]|23[0-9]|24[0-9]|25[0-5]|0)\\."))
           );
       def real_helper_https_evidence:
         (smoke_base_url | test("^https://"; "i"))

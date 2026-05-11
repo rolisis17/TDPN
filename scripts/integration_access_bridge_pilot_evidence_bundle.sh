@@ -227,6 +227,33 @@ if ! jq -e \
   exit 1
 fi
 
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url "https://public.example@127.0.0.1:19820" \
+  --path-id helper-web >"$TMP_DIR/pilot-bundle-userinfo-url.log" 2>&1
+userinfo_url_rc=$?
+set -e
+if [[ "$userinfo_url_rc" -eq 0 ]] || ! grep -Fq -- "--base-url must not include userinfo" "$TMP_DIR/pilot-bundle-userinfo-url.log"; then
+  echo "access bridge pilot evidence bundle integration failed: userinfo URL was not rejected before pilot evidence classification"
+  cat "$TMP_DIR/pilot-bundle-userinfo-url.log"
+  exit 1
+fi
+
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url "https://[2001:db8::1]:19820" \
+  --path-id helper-web \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_PACK" \
+  --code-file "$CODE_FILE" >"$TMP_DIR/pilot-bundle-doc-ipv6-url.log" 2>&1
+doc_ipv6_url_rc=$?
+set -e
+if [[ "$doc_ipv6_url_rc" -eq 0 ]] || ! grep -Fq -- "--base-url host must look public-routable" "$TMP_DIR/pilot-bundle-doc-ipv6-url.log"; then
+  echo "access bridge pilot evidence bundle integration failed: documentation IPv6 URL was not rejected as non-public"
+  cat "$TMP_DIR/pilot-bundle-doc-ipv6-url.log"
+  exit 1
+fi
+
 if [[ ! -f "$EVIDENCE_BUNDLE/access_bridge_service_smoke_summary.json" ||
   ! -f "$EVIDENCE_BUNDLE/access_bridge_deployment_evidence_summary.json" ||
   ! -f "$EVIDENCE_BUNDLE/access_bridge_host_install_check_summary.json" ||

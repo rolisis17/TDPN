@@ -1892,6 +1892,58 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] Access Recovery non-canonical helper authorities are not pilot-ready evidence"
+while IFS='|' read -r case_id case_base_url expected_host; do
+  ACCESS_RECOVERY_NONCANONICAL_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_${case_id}_summary.json"
+  jq --arg base_url "$case_base_url" '.base_url = $base_url' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_NONCANONICAL_SMOKE_SUMMARY_JSON"
+  if ! run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+    --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_NONCANONICAL_SMOKE_SUMMARY_JSON" \
+    --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+    --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+    --summary-json "$TMP_DIR/roadmap_progress_access_recovery_${case_id}_summary.json" \
+    --report-md "$TMP_DIR/roadmap_progress_access_recovery_${case_id}_report.md" \
+    --print-report 0 \
+    --print-summary-json 0 >"${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_${case_id}.log" 2>&1; then
+    echo "expected success for Access Recovery non-canonical helper authority case: $case_id"
+    cat "${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_${case_id}.log"
+    exit 1
+  fi
+  if ! jq -e \
+    --arg base_url "$case_base_url" \
+    --arg expected_host "$expected_host" \
+    '
+      .status == "warn"
+      and .rc == 0
+      and .current_roadmap_track == "access_recovery"
+      and .access_recovery_pilot_handoff_ready == false
+      and .access_recovery_track.status == "local-rehearsal-ready"
+      and .access_recovery_track.ready == false
+      and .access_recovery_track.pilot_handoff_ready == false
+      and .access_recovery_track.local_rehearsal_ready == true
+      and .access_recovery_track.needs_attention == true
+      and .access_recovery_track.evidence_scope == "local_rehearsal"
+      and .access_recovery_track.evidence_host_policy.host == $expected_host
+      and .access_recovery_track.evidence_host_policy.https == true
+      and .access_recovery_track.evidence_host_policy.public_routable_host == false
+      and .access_recovery_track.evidence_host_policy.real_helper_https_evidence == false
+      and .access_recovery_track.access_bridge_service_smoke.details.base_url == $base_url
+      and .access_recovery_track.recommended_next_action.id == "real_helper_https_evidence"
+      and ((.access_recovery_track.recommended_next_action.command // "") | test("--provenance-sign 1"))
+    ' "$TMP_DIR/roadmap_progress_access_recovery_${case_id}_summary.json" >/dev/null; then
+    echo "Access Recovery non-canonical helper authority summary mismatch: $case_id"
+    cat "$TMP_DIR/roadmap_progress_access_recovery_${case_id}_summary.json"
+    exit 1
+  fi
+done <<'EOF_NONCANONICAL_ACCESS_RECOVERY'
+userinfo|https://public.example@127.0.0.1:19820|127.0.0.1
+localhost_dot|https://localhost.:19820|localhost
+doc_ipv6|https://[2001:db8::1]:19820|2001:db8::1
+mapped_private_ipv6|https://[::ffff:192.168.50.10]:19820|::ffff:192.168.50.10
+EOF_NONCANONICAL_ACCESS_RECOVERY
+
 echo "[roadmap-progress-report] Access Recovery evidence missing is surfaced as warning by default"
 ACCESS_RECOVERY_MISSING_SMOKE_SUMMARY_JSON="$TMP_DIR/missing_access_bridge_service_smoke_summary.json"
 ACCESS_RECOVERY_MISSING_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/missing_access_bridge_deployment_evidence_summary.json"

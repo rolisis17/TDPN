@@ -124,37 +124,51 @@ url_scheme() {
   fi
 }
 
-url_host() {
+url_authority() {
   local rest="${1:-}"
   rest="${rest#*://}"
   rest="${rest%%/*}"
+  rest="${rest%%\?*}"
+  rest="${rest%%#*}"
+  printf '%s' "$rest"
+}
+
+url_authority_has_userinfo() {
+  local authority
+  authority="$(url_authority "$1")"
+  [[ "$authority" == *@* ]]
+}
+
+normalize_host() {
+  local host="${1:-}"
+  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  while [[ "$host" == *. ]]; do
+    host="${host%.}"
+  done
+  printf '%s' "$host"
+}
+
+url_host() {
+  local rest
+  rest="$(url_authority "$1")"
+  rest="${rest##*@}"
   if [[ "$rest" == \[*\]* ]]; then
     rest="${rest#\[}"
-    printf '%s' "${rest%%\]*}" | tr '[:upper:]' '[:lower:]'
+    normalize_host "${rest%%\]*}"
   else
     rest="${rest%%:*}"
-    printf '%s' "$rest" | tr '[:upper:]' '[:lower:]'
+    normalize_host "$rest"
   fi
 }
 
 base_url_is_loopback() {
   local host
   host="$(url_host "$1")"
-  [[ "$host" == "localhost" || "$host" == "::1" || "$host" == 127.* ]]
+  [[ "$host" == "localhost" || "$host" == "::1" || "$host" == 127.* || "$host" == "::ffff:127."* || "$host" == "0:0:0:0:0:ffff:127."* ]]
 }
 
-base_url_host_is_private_or_reserved() {
-  local host
-  host="$(url_host "$1")"
-  if [[ -z "$host" || "$host" == "localhost" ]]; then
-    return 0
-  fi
-  if [[ "$host" =~ (^|\.)(localhost|local|lan|internal|test|invalid|example)$ ]]; then
-    return 0
-  fi
-  if [[ "$host" =~ (^|\.)example\.(com|net|org)$ ]]; then
-    return 0
-  fi
+ipv4_host_is_private_or_reserved() {
+  local host="${1:-}"
   if [[ "$host" == 127.* || "$host" == 10.* || "$host" == 192.168.* || "$host" == 169.254.* || "$host" == 0.* ]]; then
     return 0
   fi
@@ -173,7 +187,37 @@ base_url_host_is_private_or_reserved() {
   if [[ "$host" =~ ^(22[4-9]|23[0-9]|24[0-9]|25[0-5])\. ]]; then
     return 0
   fi
-  if [[ "$host" =~ ^(::|::1|fc[0-9a-f]|fd[0-9a-f]|fe80:) ]]; then
+  return 1
+}
+
+base_url_host_is_private_or_reserved() {
+  local host mapped_ipv4
+  if url_authority_has_userinfo "$1"; then
+    return 0
+  fi
+  host="$(url_host "$1")"
+  if [[ -z "$host" || "$host" == "localhost" ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ (^|\.)(localhost|local|lan|internal|test|invalid|example)$ ]]; then
+    return 0
+  fi
+  if [[ "$host" =~ (^|\.)example\.(com|net|org)$ ]]; then
+    return 0
+  fi
+  if ipv4_host_is_private_or_reserved "$host"; then
+    return 0
+  fi
+  if [[ "$host" =~ ^(::|::1|fc[0-9a-f]|fd[0-9a-f]|fe80:|2001:db8:) ]]; then
+    return 0
+  fi
+  mapped_ipv4=""
+  if [[ "$host" == ::ffff:* ]]; then
+    mapped_ipv4="${host#::ffff:}"
+  elif [[ "$host" == 0:0:0:0:0:ffff:* ]]; then
+    mapped_ipv4="${host#0:0:0:0:0:ffff:}"
+  fi
+  if [[ -n "$mapped_ipv4" ]] && ipv4_host_is_private_or_reserved "$mapped_ipv4"; then
     return 0
   fi
   return 1
@@ -438,6 +482,10 @@ path_id="$(trim "$path_id")"
 service_name="$(trim "$service_name")"
 if [[ -z "$base_url" ]]; then
   echo "access bridge pilot evidence bundle failed: --base-url is required" >&2
+  exit 2
+fi
+if [[ "$require_public_host" == "1" ]] && url_authority_has_userinfo "$base_url"; then
+  echo "access bridge pilot evidence bundle failed: --base-url must not include userinfo for pilot evidence targets (set --require-public-host 0 for diagnostics)" >&2
   exit 2
 fi
 if [[ -z "$path_id" ]]; then
