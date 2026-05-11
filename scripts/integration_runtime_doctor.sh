@@ -14,9 +14,14 @@ done
 TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
 mkdir -p "$TMP_BIN"
+EXTRA_CLEANUP_PATHS=()
 
 cleanup() {
   rm -rf "$TMP_DIR"
+  local path
+  for path in "${EXTRA_CLEANUP_PATHS[@]}"; do
+    rm -f "$path"
+  done
 }
 trap cleanup EXIT
 
@@ -114,6 +119,46 @@ fi
 if ! extract_json_payload /tmp/integration_runtime_doctor_ok.log | jq -e '.status == "OK" and .summary.findings_total == 0' >/dev/null 2>&1; then
   echo "runtime doctor OK JSON payload missing expected fields"
   cat /tmp/integration_runtime_doctor_ok.log
+  exit 1
+fi
+
+echo "[runtime-doctor] normal prod container env refs resolve to mounted host files"
+PROD_REF_DIR="$TMP_DIR/prod_refs"
+mkdir -p "$PROD_REF_DIR/logs" "$PROD_REF_DIR/client_vpn" "$PROD_REF_DIR/wg_only" "$ROOT_DIR/deploy/tls" "$ROOT_DIR/deploy/data/entry-exit"
+PROD_CA_BASENAME="integration_runtime_doctor_ca.crt"
+PROD_CERT_BASENAME="integration_runtime_doctor_node.crt"
+PROD_EXIT_WG_BASENAME="integration_runtime_doctor_exit_wg.key"
+PROD_CA_PATH="$ROOT_DIR/deploy/tls/$PROD_CA_BASENAME"
+PROD_CERT_PATH="$ROOT_DIR/deploy/tls/$PROD_CERT_BASENAME"
+PROD_EXIT_WG_PATH="$ROOT_DIR/deploy/data/entry-exit/$PROD_EXIT_WG_BASENAME"
+EXTRA_CLEANUP_PATHS+=("$PROD_CA_PATH" "$PROD_CERT_PATH" "$PROD_EXIT_WG_PATH")
+touch "$PROD_CA_PATH" "$PROD_CERT_PATH" "$PROD_EXIT_WG_PATH"
+touch "$PROD_REF_DIR/client.env" "$PROD_REF_DIR/provider.env"
+cat >"$PROD_REF_DIR/server.env" <<EOF_PROD_REF
+MTLS_CA_FILE=/app/tls/$PROD_CA_BASENAME
+MTLS_SERVER_CERT_FILE=/app/tls/$PROD_CERT_BASENAME
+EXIT_WG_PRIVATE_KEY_PATH=/app/data/$PROD_EXIT_WG_BASENAME
+EOF_PROD_REF
+
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_DOCTOR_CLIENT_ENV_FILE="$PROD_REF_DIR/client.env" \
+EASY_NODE_DOCTOR_AUTHORITY_ENV_FILE="$PROD_REF_DIR/server.env" \
+EASY_NODE_DOCTOR_PROVIDER_ENV_FILE="$PROD_REF_DIR/provider.env" \
+EASY_NODE_DOCTOR_WG_ONLY_DIR="$PROD_REF_DIR/wg_only" \
+EASY_NODE_DOCTOR_CLIENT_VPN_KEY_DIR="$PROD_REF_DIR/client_vpn" \
+EASY_NODE_DOCTOR_LOG_DIR="$PROD_REF_DIR/logs" \
+EASY_NODE_DOCTOR_WG_ONLY_STATE_FILE="$PROD_REF_DIR/wg_only.state" \
+EASY_NODE_DOCTOR_CLIENT_VPN_STATE_FILE="$PROD_REF_DIR/client_vpn.state" \
+./scripts/runtime_doctor.sh --show-json 1 >/tmp/integration_runtime_doctor_prod_refs.log 2>&1
+
+if ! rg -q '\[runtime-doctor\] status=OK' /tmp/integration_runtime_doctor_prod_refs.log; then
+  echo "expected OK status for normal prod container env refs"
+  cat /tmp/integration_runtime_doctor_prod_refs.log
+  exit 1
+fi
+if ! extract_json_payload /tmp/integration_runtime_doctor_prod_refs.log | jq -e '.status == "OK" and .summary.findings_total == 0' >/dev/null 2>&1; then
+  echo "runtime doctor normal prod env ref JSON payload missing expected OK fields"
+  cat /tmp/integration_runtime_doctor_prod_refs.log
   exit 1
 fi
 

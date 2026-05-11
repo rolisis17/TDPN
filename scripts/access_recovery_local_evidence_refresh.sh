@@ -256,6 +256,7 @@ deploy_pack_dir="$reports_dir/bridge-deploy"
 abuse_log="$reports_dir/bridge-abuse.jsonl"
 server_log="$reports_dir/bridge-service.log"
 base_url="http://127.0.0.1:${port}"
+rehearsal_public_host="${helper_id}.gpm-pilot.net"
 pilot_bundle_dir="$reports_dir/access-bridge-pilot-evidence-bundle"
 pilot_summary_json="$reports_dir/access_bridge_pilot_evidence_bundle_summary.json"
 pilot_report_md="$reports_dir/access_bridge_pilot_evidence_bundle_report.md"
@@ -304,6 +305,7 @@ code_hash="$(jq -r '.sha256' "$code_hash_json")"
 go run ./cmd/gpmrecover bridge-service-deploy-pack \
   --out-dir "$deploy_pack_dir" \
   --service-name "$service_name" \
+  --public-host "$rehearsal_public_host" \
   --install-dir "/etc/gpm/${service_name}" \
   --config "/etc/gpm/${service_name}/bridge-service-config.json" \
   --config-sha256 "$config_sha256" \
@@ -343,6 +345,7 @@ bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
   --config-json "$service_config" \
   --deploy-pack-dir "$deploy_pack_dir" \
   --service-name "$service_name" \
+  --expected-public-host "$rehearsal_public_host" \
   --expect-helper-id "$helper_id" \
   --expect-org-id "$org_id" \
   --expect-registry-id "$registry_id" \
@@ -418,6 +421,7 @@ jq -n \
   --arg notes "$summary_notes" \
   --arg reports_dir "$reports_dir" \
   --arg base_url "$base_url" \
+  --arg rehearsal_public_host "$rehearsal_public_host" \
   --arg org_id "$org_id" \
   --arg helper_id "$helper_id" \
   --arg registry_id "$registry_id" \
@@ -442,7 +446,7 @@ jq -n \
   --argjson refresh_roadmap "$( [[ "$refresh_roadmap" == "1" ]] && printf 'true' || printf 'false' )" \
   '{
     version: 1,
-    schema: {id: "access_recovery_local_evidence_refresh_summary", major: 1, minor: 0},
+    schema: {id: "access_recovery_local_evidence_refresh_summary", major: 1, minor: 1},
     generated_at_utc: $generated_at_utc,
     status: $status,
     rc: (if $status == "pass" then 0 else 1 end),
@@ -451,6 +455,7 @@ jq -n \
     notes: $notes,
     inputs: {
       base_url: $base_url,
+      rehearsal_public_host: $rehearsal_public_host,
       org_id: $org_id,
       helper_id: $helper_id,
       registry_id: $registry_id,

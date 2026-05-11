@@ -21,6 +21,7 @@ print_summary_json="1"
 max_smoke_age_sec="${ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_MAX_SMOKE_AGE_SEC:-3600}"
 require_https="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_REQUIRE_HTTPS:-1}"
 require_public_host="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_REQUIRE_PUBLIC_HOST:-1}"
+expected_public_host=""
 expect_helper_id=""
 expect_org_id=""
 expect_registry_id=""
@@ -49,6 +50,7 @@ Usage:
     [--report-md FILE] \
     [--require-https 0|1] \
     [--require-public-host 0|1] \
+    [--expected-public-host HELPER_PUBLIC_DNS] \
     [--provenance-sign 0|1] \
     [--provenance-private-key-file FILE] \
     [--provenance-org-id ID] \
@@ -414,6 +416,10 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --expected-public-host)
+      expected_public_host="${2:-}"
+      shift 2
+      ;;
     --expect-helper-id)
       expect_helper_id="${2:-}"
       shift 2
@@ -717,7 +723,9 @@ host_install_args=(
   --summary-json "$host_summary"
   --print-summary-json 0
 )
-if [[ "$require_public_host" == "1" ]] && ! base_url_host_is_private_or_reserved "$base_url"; then
+if [[ -n "$expected_public_host" ]]; then
+  host_install_args+=(--expected-public-host "$expected_public_host")
+elif [[ "$require_public_host" == "1" ]] && ! base_url_host_is_private_or_reserved "$base_url"; then
   host_install_args+=(--expected-base-url "$base_url")
 fi
 run_json_step "host_install_check" "$host_summary" "$host_log" "${host_install_args[@]}"
@@ -834,6 +842,7 @@ jq -n \
   --arg base_url_private_or_reserved "$base_url_private_or_reserved" \
   --arg require_https "$require_https" \
   --arg require_public_host "$require_public_host" \
+  --arg expected_public_host "$expected_public_host" \
   --arg transport_status "$transport_status" \
   --arg transport_https "$transport_https" \
   --arg transport_tls_verified "$transport_tls_verified" \
@@ -869,7 +878,7 @@ jq -n \
     schema: {
       id: "access_bridge_pilot_evidence_bundle_summary",
       major: 1,
-      minor: 2
+      minor: 3
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -898,6 +907,7 @@ jq -n \
       service_name: $service_name,
       config_json: $config_json,
       deploy_pack_dir: $deploy_pack_dir,
+      expected_public_host: (if $expected_public_host == "" then null else $expected_public_host end),
       code_source: $code_source,
       access_code_redacted: true
     },

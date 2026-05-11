@@ -95,7 +95,7 @@ bash ./scripts/access_recovery_local_evidence_refresh.sh \
   --reports-dir "$REAL_REPORTS" \
   --port "$REAL_PORT" \
   --write-canonical 0 \
-  --refresh-roadmap 0 \
+  --refresh-roadmap 1 \
   --summary-json "$REAL_SUMMARY" \
   --print-summary-json 0
 
@@ -105,8 +105,12 @@ if ! jq -e '
   and .rc == 0
   and .pilot_handoff_ready == false
   and .evidence_scope == "local_rehearsal"
-  and .roadmap.refreshed == false
+  and (.inputs.rehearsal_public_host | test("^helper-local[.]gpm-pilot[.]net$"))
+  and .roadmap.refreshed == true
+  and .roadmap.rc == 0
   and (.artifacts.pilot_verify_summary_json | length > 0)
+  and (.artifacts.host_install_summary_json | length > 0)
+  and (.artifacts.roadmap_summary_json | length > 0)
   and .recommended_next_action.id == "real_helper_https_evidence"
   and ((.recommended_next_action.reason // "") | contains("Local evidence is only a rehearsal"))
 ' "$REAL_SUMMARY" >/dev/null; then
@@ -125,6 +129,34 @@ if ! jq -e '
 ' "$VERIFY_SUMMARY" >/dev/null; then
   echo "easy node access recovery local evidence refresh integration failed: local verifier summary mismatch"
   cat "$VERIFY_SUMMARY"
+  exit 1
+fi
+HOST_INSTALL_SUMMARY="$(jq -r '.artifacts.host_install_summary_json' "$REAL_SUMMARY")"
+if ! jq -e '
+  .schema.id == "access_bridge_host_install_check_summary"
+  and .schema.minor >= 4
+  and .status == "pass"
+  and .observed.expected_public_host == "helper-local.gpm-pilot.net"
+  and .summary.checks_total >= 26
+  and (([.checks[] | select(.id == "caddy_public_host_matches_expected" and .status == "pass")] | length) == 1)
+  and (([.checks[] | select(.id == "nginx_public_host_matches_expected" and .status == "pass")] | length) == 1)
+' "$HOST_INSTALL_SUMMARY" >/dev/null; then
+  echo "easy node access recovery local evidence refresh integration failed: local host install summary mismatch"
+  cat "$HOST_INSTALL_SUMMARY"
+  exit 1
+fi
+ROADMAP_SUMMARY="$(jq -r '.artifacts.roadmap_summary_json' "$REAL_SUMMARY")"
+if ! jq -e '
+  .access_recovery_track.status == "local-rehearsal-ready"
+  and .access_recovery_track.local_rehearsal_ready == true
+  and .access_recovery_track.pilot_handoff_ready == false
+  and .access_recovery_track.access_bridge_host_install.available == true
+  and .access_recovery_track.access_bridge_host_install.status == "pass"
+  and .access_recovery_track.access_bridge_host_install.details.checks_total >= 26
+  and .access_recovery_track.evidence_host_policy.real_helper_https_evidence == false
+' "$ROADMAP_SUMMARY" >/dev/null; then
+  echo "easy node access recovery local evidence refresh integration failed: roadmap local rehearsal summary mismatch"
+  cat "$ROADMAP_SUMMARY"
   exit 1
 fi
 

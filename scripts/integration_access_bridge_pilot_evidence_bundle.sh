@@ -37,6 +37,7 @@ REPORT_MD="$TMP_DIR/pilot-evidence-report.md"
 PROVENANCE_JSON="$TMP_DIR/pilot-evidence-bundle.provenance.json"
 PROVENANCE_PRIVATE_KEY="$TMP_DIR/provenance-private.key"
 PROVENANCE_PUBLIC_KEY="$TMP_DIR/provenance-public.key"
+PILOT_PUBLIC_HOST="helper.gpm-pilot.net"
 
 go run ./cmd/gpmrecover gen --private-key-out "$PROVENANCE_PRIVATE_KEY" --public-key-out "$PROVENANCE_PUBLIC_KEY" >/dev/null
 PROVENANCE_KEY_ID="$(go run ./cmd/gpmrecover inspect-key --private-key-file "$PROVENANCE_PRIVATE_KEY" | jq -r '.key_id')"
@@ -172,6 +173,7 @@ code_hash="$(jq -r '.sha256' "$CODE_HASH_JSON")"
 go run ./cmd/gpmrecover bridge-service-deploy-pack \
   --out-dir "$DEPLOY_PACK" \
   --service-name gpm-access-bridge-pilot \
+  --public-host "$PILOT_PUBLIC_HOST" \
   --install-dir /etc/gpm/access-bridge-pilot \
   --config /etc/gpm/access-bridge-pilot/bridge-service-config.json \
   --config-sha256 "$config_sha256" \
@@ -214,6 +216,7 @@ bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
   --config-json "$SERVICE_CONFIG" \
   --deploy-pack-dir "$DEPLOY_PACK" \
   --service-name gpm-access-bridge-pilot \
+  --expected-public-host "$PILOT_PUBLIC_HOST" \
   --bundle-dir "$EVIDENCE_BUNDLE" \
   --summary-json "$SUMMARY_JSON" \
   --report-md "$REPORT_MD" \
@@ -237,9 +240,10 @@ if ! jq -e \
   --arg base_url "$BASE_URL" \
   --arg registry_id "$registry_id" \
   --arg provenance_json "$PROVENANCE_JSON" \
+  --arg pilot_public_host "$PILOT_PUBLIC_HOST" \
   '
     .schema.id == "access_bridge_pilot_evidence_bundle_summary"
-    and .schema.minor == 2
+    and .schema.minor >= 3
     and .status == "pass"
     and .evidence_scope == "local_rehearsal"
     and .pilot_handoff_ready == false
@@ -255,6 +259,7 @@ if ! jq -e \
     and .transport.tls_verified == false
     and .transport.smoke_summary_json == .artifacts.smoke_summary_json
     and .inputs.base_url == $base_url
+    and .inputs.expected_public_host == $pilot_public_host
     and .inputs.access_code_redacted == true
     and .expected_identity.helper_id == "helper-pilot"
     and .expected_identity.organization_id == "pilot-org"
@@ -280,6 +285,23 @@ if ! jq -e \
   ' "$SUMMARY_JSON" >/dev/null; then
   echo "access bridge pilot evidence bundle integration failed: pass summary contract mismatch"
   cat "$SUMMARY_JSON"
+  exit 1
+fi
+
+HOST_INSTALL_SUMMARY="$(jq -r '.artifacts.host_install_check_summary_json' "$SUMMARY_JSON")"
+if ! jq -e \
+  --arg pilot_public_host "$PILOT_PUBLIC_HOST" \
+  '
+    .schema.id == "access_bridge_host_install_check_summary"
+    and .schema.minor >= 4
+    and .status == "pass"
+    and .observed.expected_public_host == $pilot_public_host
+    and .summary.checks_total >= 26
+    and (([.checks[] | select(.id == "caddy_public_host_matches_expected" and .status == "pass")] | length) == 1)
+    and (([.checks[] | select(.id == "nginx_public_host_matches_expected" and .status == "pass")] | length) == 1)
+  ' "$HOST_INSTALL_SUMMARY" >/dev/null; then
+  echo "access bridge pilot evidence bundle integration failed: expected public host install summary mismatch"
+  cat "$HOST_INSTALL_SUMMARY"
   exit 1
 fi
 
