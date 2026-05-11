@@ -16,6 +16,11 @@ client_cert=""
 client_key=""
 config_json=""
 deploy_pack_dir=""
+host_install_evidence_mode="deploy-pack"
+install_dir=""
+systemd_unit_file=""
+proxy_kind=""
+proxy_config_file=""
 service_name="gpm-access-bridge"
 expect_helper_id=""
 expect_org_id=""
@@ -47,6 +52,11 @@ Usage:
     --config-json FILE \
     --deploy-pack-dir DIR \
     (--code CODE | --code-file FILE) \
+    [--host-install-evidence-mode deploy-pack|installed-host] \
+    [--install-dir DIR] \
+    [--systemd-unit-file FILE] \
+    [--proxy-kind caddy|nginx] \
+    [--proxy-config-file FILE] \
     --provenance-private-key-file FILE \
     --provenance-org-id ORG_ID \
     --provenance-org-name ORG_NAME \
@@ -161,11 +171,11 @@ value_looks_placeholder() {
   value="$(trim "${1:-}")"
   [[ -z "$value" ]] && return 0
   case "$value" in
-    PATH|FILE|DIR|URL|HELPER_PUBLIC_DNS|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|REPLACE_WITH_*|"<"*">")
+    PATH|FILE|DIR|URL|HELPER_PUBLIC_DNS|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|INSTALL_DIR|SYSTEMD_UNIT_FILE|PROXY_KIND|PROXY_CONFIG_FILE|TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|REPLACE_WITH_*|"<"*">")
       return 0
       ;;
   esac
-  if [[ "$value" == *HELPER_PUBLIC_DNS* || "$value" == *PRIVATE_CODE_FILE* || "$value" == *BRIDGE_SERVICE_CONFIG* || "$value" == *BRIDGE_DEPLOY_PACK* || "$value" == *REPLACE_WITH_* || "$value" == *PROVENANCE_PRIVATE_KEY_FILE* || "$value" == *TRUST_STORE* ]]; then
+  if [[ "$value" == *HELPER_PUBLIC_DNS* || "$value" == *PRIVATE_CODE_FILE* || "$value" == *BRIDGE_SERVICE_CONFIG* || "$value" == *BRIDGE_DEPLOY_PACK* || "$value" == *INSTALL_DIR* || "$value" == *SYSTEMD_UNIT_FILE* || "$value" == *PROXY_CONFIG_FILE* || "$value" == *REPLACE_WITH_* || "$value" == *PROVENANCE_PRIVATE_KEY_FILE* || "$value" == *TRUST_STORE* ]]; then
     return 0
   fi
   return 1
@@ -514,6 +524,31 @@ while [[ $# -gt 0 ]]; do
       deploy_pack_dir="$2"
       shift 2
       ;;
+    --host-install-evidence-mode|--evidence-mode)
+      require_value_or_die "$1" "${2:-}"
+      host_install_evidence_mode="$2"
+      shift 2
+      ;;
+    --install-dir)
+      require_value_or_die "$1" "${2:-}"
+      install_dir="$2"
+      shift 2
+      ;;
+    --systemd-unit-file)
+      require_value_or_die "$1" "${2:-}"
+      systemd_unit_file="$2"
+      shift 2
+      ;;
+    --proxy-kind)
+      require_value_or_die "$1" "${2:-}"
+      proxy_kind="$2"
+      shift 2
+      ;;
+    --proxy-config-file)
+      require_value_or_die "$1" "${2:-}"
+      proxy_config_file="$2"
+      shift 2
+      ;;
     --service-name)
       require_value_or_die "$1" "${2:-}"
       service_name="$2"
@@ -675,6 +710,15 @@ planned_artifacts_json="{}"
 
 config_json="$(abs_path "$config_json")"
 deploy_pack_dir="$(abs_path "$deploy_pack_dir")"
+if [[ -n "$install_dir" ]]; then
+  install_dir="$(abs_path "$install_dir")"
+fi
+if [[ -n "$systemd_unit_file" ]]; then
+  systemd_unit_file="$(abs_path "$systemd_unit_file")"
+fi
+if [[ -n "$proxy_config_file" ]]; then
+  proxy_config_file="$(abs_path "$proxy_config_file")"
+fi
 code_file="$(abs_path "$code_file")"
 cacert="$(abs_path "$cacert")"
 client_cert="$(abs_path "$client_cert")"
@@ -734,6 +778,11 @@ write_summary() {
     --arg notes "$notes" \
     --arg base_url "$base_url" \
     --arg path_id "$path_id" \
+    --arg host_install_evidence_mode "$host_install_evidence_mode" \
+    --arg install_dir "$install_dir" \
+    --arg systemd_unit_file "$systemd_unit_file" \
+    --arg proxy_kind "$proxy_kind" \
+    --arg proxy_config_file "$proxy_config_file" \
     --arg reports_dir "$reports_dir" \
     --arg host_install_check_summary_json "$host_install_check_summary_json" \
     --arg host_install_check_log "$host_install_check_log" \
@@ -779,6 +828,11 @@ write_summary() {
       inputs: {
         base_url: $base_url,
         path_id: $path_id,
+        host_install_evidence_mode: $host_install_evidence_mode,
+        install_dir: (if $install_dir == "" then null else $install_dir end),
+        systemd_unit_file: (if $systemd_unit_file == "" then null else $systemd_unit_file end),
+        proxy_kind: (if $proxy_kind == "" then null else $proxy_kind end),
+        proxy_config_file: (if $proxy_config_file == "" then null else $proxy_config_file end),
         code_present: $code_present,
         code_file_present: $code_file_present,
         roadmap_refresh: $roadmap_refresh
@@ -912,6 +966,35 @@ fi
 if [[ ! -d "$deploy_pack_dir" ]]; then
   fail_preflight "--deploy-pack-dir not found: $deploy_pack_dir"
 fi
+host_install_evidence_mode="$(printf '%s' "$host_install_evidence_mode" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+if [[ "$host_install_evidence_mode" != "deploy-pack" && "$host_install_evidence_mode" != "installed-host" ]]; then
+  fail_preflight "--host-install-evidence-mode must be deploy-pack or installed-host"
+fi
+if [[ "$host_install_evidence_mode" == "installed-host" ]]; then
+  if value_looks_placeholder "$install_dir"; then
+    fail_preflight "--install-dir must point to the active installed bridge directory, not an unreplaced placeholder"
+  fi
+  if [[ ! -d "$install_dir" ]]; then
+    fail_preflight "--install-dir not found: $install_dir"
+  fi
+  if value_looks_placeholder "$systemd_unit_file"; then
+    fail_preflight "--systemd-unit-file must point to the active systemd unit, not an unreplaced placeholder"
+  fi
+  if [[ ! -f "$systemd_unit_file" ]]; then
+    fail_preflight "--systemd-unit-file not found: $systemd_unit_file"
+  fi
+  if [[ "$proxy_kind" != "caddy" && "$proxy_kind" != "nginx" ]]; then
+    fail_preflight "--proxy-kind must be caddy or nginx when --host-install-evidence-mode installed-host"
+  fi
+  if value_looks_placeholder "$proxy_config_file"; then
+    fail_preflight "--proxy-config-file must point to the active proxy config, not an unreplaced placeholder"
+  fi
+  if [[ ! -f "$proxy_config_file" ]]; then
+    fail_preflight "--proxy-config-file not found: $proxy_config_file"
+  fi
+elif [[ -n "$proxy_kind" && "$proxy_kind" != "caddy" && "$proxy_kind" != "nginx" ]]; then
+  fail_preflight "--proxy-kind must be caddy or nginx"
+fi
 if value_looks_placeholder "$provenance_private_key_file" || [[ ! -f "$provenance_private_key_file" ]]; then
   fail_preflight "--provenance-private-key-file must point to a real signing key"
 fi
@@ -969,6 +1052,7 @@ planned_bundle_deployment_evidence_summary_json="$planned_bundle_dir/access_brid
 planned_bundle_host_install_check_summary_json="$planned_bundle_dir/access_bridge_host_install_check_summary.json"
 
 host_install_check_args=(
+  --evidence-mode "$host_install_evidence_mode"
   --deploy-pack-dir "$deploy_pack_dir"
   --service-name "$service_name"
   --config-json "$config_json"
@@ -976,6 +1060,14 @@ host_install_check_args=(
   --summary-json "$host_install_check_summary_json"
   --print-summary-json "$print_child_json"
 )
+if [[ "$host_install_evidence_mode" == "installed-host" ]]; then
+  host_install_check_args+=(
+    --install-dir "$install_dir"
+    --systemd-unit-file "$systemd_unit_file"
+    --proxy-kind "$proxy_kind"
+    --proxy-config-file "$proxy_config_file"
+  )
+fi
 
 bundle_args=(
   --base-url "$base_url"
@@ -983,6 +1075,7 @@ bundle_args=(
   --config-json "$config_json"
   --deploy-pack-dir "$deploy_pack_dir"
   --service-name "$service_name"
+  --host-install-evidence-mode "$host_install_evidence_mode"
   --bundle-dir "$planned_bundle_dir"
   --summary-json "$bundle_summary_json"
   --provenance-sign 1
@@ -995,6 +1088,14 @@ bundle_args=(
   --expected-public-host "$host"
   --print-summary-json "$print_child_json"
 )
+if [[ "$host_install_evidence_mode" == "installed-host" ]]; then
+  bundle_args+=(
+    --install-dir "$install_dir"
+    --systemd-unit-file "$systemd_unit_file"
+    --proxy-kind "$proxy_kind"
+    --proxy-config-file "$proxy_config_file"
+  )
+fi
 if [[ -n "$code_file" ]]; then
   bundle_args+=(--code-file "$code_file")
 else
@@ -1101,7 +1202,7 @@ set +e
 host_install_check_rc=$?
 set -e
 if [[ "$host_install_check_rc" -ne 0 ]]; then
-  write_summary "fail" "$host_install_check_rc" "host_install_check" "Access bridge deploy pack host install check failed"
+  write_summary "fail" "$host_install_check_rc" "host_install_check" "Access bridge host install check failed"
   print_failure_log_tail "host-install-check" "$host_install_check_log"
   echo "access-recovery-real-helper-evidence-run: status=fail stage=host_install_check"
   echo "summary_json: $summary_json"

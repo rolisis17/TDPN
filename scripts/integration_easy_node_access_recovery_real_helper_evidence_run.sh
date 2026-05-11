@@ -23,12 +23,17 @@ HELP_OUT="$TMP_DIR/help.txt"
 REPORTS_DIR="$TMP_DIR/reports"
 CONFIG_JSON="$TMP_DIR/bridge-service-config.json"
 DEPLOY_PACK_DIR="$TMP_DIR/deploy-pack"
+INSTALL_DIR="$TMP_DIR/installed-host"
+SYSTEMD_UNIT_FILE="$TMP_DIR/gpm-access-bridge.service"
+PROXY_CONFIG_FILE="$TMP_DIR/gpm-access-bridge.caddy"
 CODE_FILE="$TMP_DIR/code.txt"
 TRUST_STORE="$TMP_DIR/trust-store.json"
 PROVENANCE_KEY="$TMP_DIR/provenance.key"
 
-mkdir -p "$DEPLOY_PACK_DIR" "$REPORTS_DIR"
+mkdir -p "$DEPLOY_PACK_DIR" "$INSTALL_DIR" "$REPORTS_DIR"
 printf '%s\n' '{"status":"pass"}' >"$CONFIG_JSON"
+printf '%s\n' '[Service]' 'EnvironmentFile='"$INSTALL_DIR/gpm-access-bridge.env" 'ExecStart='"$INSTALL_DIR/run-gpm-access-bridge.sh" >"$SYSTEMD_UNIT_FILE"
+printf '%s\n' 'helper.gpm-pilot.net {' '  reverse_proxy 127.0.0.1:8791 {' '    header_up X-Forwarded-For {remote_host}' '  }' '}' >"$PROXY_CONFIG_FILE"
 printf '%s\n' 'test-access-code' >"$CODE_FILE"
 printf '%s\n' '{"version":1,"keys":[]}' >"$TRUST_STORE"
 printf '%s\n' 'test-provenance-key' >"$PROVENANCE_KEY"
@@ -408,8 +413,17 @@ if ! grep -Fq -- './scripts/easy_node.sh access-recovery-real-helper-evidence-ru
   cat "$HELP_OUT"
   exit 1
 fi
+if ! grep -Fq -- './scripts/easy_node.sh access-bridge-host-install-check' "$HELP_OUT"; then
+  echo "easy_node help missing access-bridge-host-install-check command"
+  cat "$HELP_OUT"
+  exit 1
+fi
 if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'access-recovery-real-helper-evidence-run runs the real public helper HTTPS evidence flow'; then
   echo "easy_node expert help missing real helper evidence run note"
+  exit 1
+fi
+if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'access-bridge-host-install-check records host-install evidence directly'; then
+  echo "easy_node expert help missing host-install check note"
   exit 1
 fi
 
@@ -587,6 +601,60 @@ if ! grep -Fq -- "Planned Child Commands" "$TMP_DIR/plan-only-report.md" ||
   cat "$TMP_DIR/plan-only-report.md"
   exit 1
 fi
+
+: >"$CAPTURE"
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --plan-only \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --host-install-evidence-mode installed-host \
+  --install-dir "$INSTALL_DIR" \
+  --systemd-unit-file "$SYSTEMD_UNIT_FILE" \
+  --proxy-kind caddy \
+  --proxy-config-file "$PROXY_CONFIG_FILE" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/plan-only-installed-host-summary.json" \
+  --print-summary-json 0
+if [[ -s "$CAPTURE" ]]; then
+  echo "installed-host plan-only should not invoke child scripts"
+  cat "$CAPTURE"
+  exit 1
+fi
+jq -e \
+  --arg install_dir "$INSTALL_DIR" \
+  --arg systemd_unit_file "$SYSTEMD_UNIT_FILE" \
+  --arg proxy_config_file "$PROXY_CONFIG_FILE" '
+  .status == "pass"
+  and .stage == "plan"
+  and .inputs.host_install_evidence_mode == "installed-host"
+  and (.planned_child_commands.host_install_check.args | index("--evidence-mode") != null)
+  and (.planned_child_commands.host_install_check.args | index("installed-host") != null)
+  and (.planned_child_commands.host_install_check.args | index("--install-dir") != null)
+  and (.planned_child_commands.host_install_check.args | index($install_dir) != null)
+  and (.planned_child_commands.host_install_check.args | index("--systemd-unit-file") != null)
+  and (.planned_child_commands.host_install_check.args | index($systemd_unit_file) != null)
+  and (.planned_child_commands.host_install_check.args | index("--proxy-kind") != null)
+  and (.planned_child_commands.host_install_check.args | index("caddy") != null)
+  and (.planned_child_commands.host_install_check.args | index("--proxy-config-file") != null)
+  and (.planned_child_commands.host_install_check.args | index($proxy_config_file) != null)
+  and (.planned_child_commands.bundle.args | index("--host-install-evidence-mode") != null)
+  and (.planned_child_commands.bundle.args | index("installed-host") != null)
+  and (.planned_child_commands.bundle.args | index("--install-dir") != null)
+  and (.planned_child_commands.bundle.args | index($install_dir) != null)
+' "$TMP_DIR/plan-only-installed-host-summary.json" >/dev/null
 
 plan_only_reject_cases=(
   "private-url|--base-url|https://10.1.2.3|--base-url host must look public-routable for real helper evidence"
@@ -836,6 +904,71 @@ jq -e '
   and .readiness.trusted_verifier_pilot_handoff_ready == true
   and .readiness.roadmap_access_recovery_pilot_handoff_ready == true
 ' "$TMP_DIR/run-summary.json" >/dev/null
+
+: >"$CAPTURE"
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --host-install-evidence-mode installed-host \
+  --install-dir "$INSTALL_DIR" \
+  --systemd-unit-file "$SYSTEMD_UNIT_FILE" \
+  --proxy-kind caddy \
+  --proxy-config-file "$PROXY_CONFIG_FILE" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/installed-host-run-summary.json" \
+  --print-summary-json 0
+
+if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "4" ]]; then
+  echo "expected installed-host host-check, bundle, verifier, and roadmap invocations"
+  cat "$CAPTURE"
+  exit 1
+fi
+installed_host_check_line="$(sed -n '1p' "$CAPTURE")"
+for token in \
+  $'\t--evidence-mode\tinstalled-host' \
+  $'\t--install-dir\t'"$INSTALL_DIR" \
+  $'\t--systemd-unit-file\t'"$SYSTEMD_UNIT_FILE" \
+  $'\t--proxy-kind\tcaddy' \
+  $'\t--proxy-config-file\t'"$PROXY_CONFIG_FILE"
+do
+  if [[ "$installed_host_check_line" != *"$token"* ]]; then
+    echo "missing forwarded installed-host host-check token: $token"
+    echo "$installed_host_check_line"
+    exit 1
+  fi
+done
+installed_bundle_line="$(sed -n '2p' "$CAPTURE")"
+for token in \
+  $'\t--host-install-evidence-mode\tinstalled-host' \
+  $'\t--install-dir\t'"$INSTALL_DIR" \
+  $'\t--systemd-unit-file\t'"$SYSTEMD_UNIT_FILE" \
+  $'\t--proxy-kind\tcaddy' \
+  $'\t--proxy-config-file\t'"$PROXY_CONFIG_FILE"
+do
+  if [[ "$installed_bundle_line" != *"$token"* ]]; then
+    echo "missing forwarded installed-host bundle token: $token"
+    echo "$installed_bundle_line"
+    exit 1
+  fi
+done
+jq -e '
+  .status == "pass"
+  and .stage == "complete"
+  and .inputs.host_install_evidence_mode == "installed-host"
+' "$TMP_DIR/installed-host-run-summary.json" >/dev/null
 
 : >"$CAPTURE"
 set +e

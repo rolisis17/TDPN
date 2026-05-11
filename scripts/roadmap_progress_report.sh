@@ -2101,6 +2101,9 @@ access_recovery_evidence_json() {
           and ((.observed.active_proxy_config_file // "") != "")
           and ((.observed.active_proxy_public_host // "") != "")
           and ((.observed.active_proxy_public_host // "") == (.observed.expected_public_host // ""))
+          and ((.observed.active_proxy_target // "") != "")
+          and ((.observed.env_addr // "") != "")
+          and ((.observed.active_proxy_target // "") == (.observed.env_addr // ""))
           and (.observed.active_proxy_is_deploy_pack_example == false)
           and ((.observed.systemd_environment_file // "") == (.observed.active_env_file // ""))
           and ((.observed.systemd_exec_start // "") == (.observed.active_wrapper_file // ""))
@@ -2363,7 +2366,7 @@ access_recovery_verifier_evidence_json() {
       def pass_status($path):
         (($path // "") | tostring | ascii_downcase) == "pass";
       def schema_minor_ready:
-        ((.schema.minor | type) == "number" and .schema.minor >= 2);
+        ((.schema.minor | type) == "number" and .schema.minor >= 3);
       def tar_sha256_checked:
         .checks.tar_sha256.checked == true;
       def required_checks_enabled:
@@ -2397,6 +2400,7 @@ access_recovery_verifier_evidence_json() {
         schema_minor_ready
         and (.inputs.allow_dev_trust_store != true)
         and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true)
+        and (.pilot_handoff_criteria.installed_host_evidence_present == true)
         and handoff_identity_org_ready
         and (.trusted_pilot_receipt_ready == true)
         and trusted_provenance_ready;
@@ -2416,6 +2420,7 @@ access_recovery_verifier_evidence_json() {
         and (.pilot_handoff_criteria.trust_store_sha256_present == true)
         and (.pilot_handoff_criteria.public_key_file_absent == true)
         and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true)
+        and (.pilot_handoff_criteria.installed_host_evidence_present == true)
         and (.pilot_handoff_criteria.dev_trust_store_allowed != true);
       def generated_at_ready:
         (.generated_at_utc | type) == "string" and ((.generated_at_utc | length) > 0);
@@ -2455,6 +2460,7 @@ access_recovery_verifier_evidence_json() {
             elif $valid_contract and (generated_at_ready | not) then "Access bridge pilot evidence verifier receipt is missing generated_at_utc"
             elif $valid_contract and (evidence_binding_ready | not) then "Access bridge pilot evidence verifier receipt is missing required evidence binding hashes"
             elif $valid_contract and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok != true) then "Access bridge pilot evidence verifier receipt did not prove bundled child evidence semantics"
+            elif $valid_contract and (.pilot_handoff_criteria.installed_host_evidence_present != true) then "Access bridge pilot evidence verifier receipt did not prove installed-host evidence"
             elif $valid_contract and (handoff_identity_org_ready | not) then "Access bridge pilot evidence verifier receipt did not prove helper identity and organization binding"
             elif $valid_contract and enabled(.checks.tar_sha256.enabled) and (pass_status(.checks.tar_sha256.status)) and (tar_sha256_checked | not) then "Access bridge pilot evidence verifier receipt did not prove the bundle tar checksum was checked"
             elif $valid_contract and ($semantic_ok | not) then "Access bridge pilot evidence verifier did not prove trusted real-helper HTTPS provenance"
@@ -2486,6 +2492,7 @@ access_recovery_verifier_evidence_json() {
             pilot_handoff_criteria_trust_store_sha256_present: (if (.pilot_handoff_criteria.trust_store_sha256_present | type) == "boolean" then .pilot_handoff_criteria.trust_store_sha256_present else null end),
             pilot_handoff_criteria_public_key_file_absent: (if (.pilot_handoff_criteria.public_key_file_absent | type) == "boolean" then .pilot_handoff_criteria.public_key_file_absent else null end),
             pilot_handoff_criteria_bundled_child_evidence_semantic_ok: (if (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok | type) == "boolean" then .pilot_handoff_criteria.bundled_child_evidence_semantic_ok else null end),
+            pilot_handoff_criteria_installed_host_evidence_present: (if (.pilot_handoff_criteria.installed_host_evidence_present | type) == "boolean" then .pilot_handoff_criteria.installed_host_evidence_present else null end),
             pilot_handoff_criteria_source_helper_id_present: (if (.pilot_handoff_criteria.source_helper_id_present | type) == "boolean" then .pilot_handoff_criteria.source_helper_id_present else null end),
             pilot_handoff_criteria_source_organization_id_present: (if (.pilot_handoff_criteria.source_organization_id_present | type) == "boolean" then .pilot_handoff_criteria.source_organization_id_present else null end),
             pilot_handoff_criteria_source_registry_id_present: (if (.pilot_handoff_criteria.source_registry_id_present | type) == "boolean" then .pilot_handoff_criteria.source_registry_id_present else null end),
@@ -2650,10 +2657,40 @@ access_recovery_track_json_from_evidence() {
           smoke_config_sha256_match: same_nonempty($service_smoke.details.config_sha256; $deployment_evidence.details.smoke_config_sha256),
           host_config_sha256_match: same_nonempty($deployment_evidence.details.config_sha256; $host_install.details.env_config_sha256),
           host_public_host_match: (
-            if (($host_install.details.evidence_mode // "deploy-pack") == "installed-host") then
-              same_nonempty(host_from_url_string($service_smoke.details.base_url); $host_install.details.active_proxy_public_host)
+            host_from_url_string($service_smoke.details.base_url) as $service_host
+            | if (
+                $service_host == "localhost"
+                or $service_host == "127.0.0.1"
+                or $service_host == "::1"
+                or ($service_host | test("^10\\."))
+                or ($service_host | test("^172\\.(1[6-9]|2[0-9]|3[0-1])\\."))
+                or ($service_host | test("^192\\.168\\."))
+                or ($service_host | test("^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\."))
+                or ($service_host | test("^169\\.254\\."))
+                or ($service_host | test("^0\\."))
+                or ($service_host | test("^192\\.0\\.0\\."))
+                or ($service_host | test("^192\\.0\\.2\\."))
+                or ($service_host | test("^198\\.(1[89])\\."))
+                or ($service_host | test("^198\\.51\\.100\\."))
+                or ($service_host | test("^203\\.0\\.113\\."))
+                or ($service_host | test("^(22[4-9]|23[0-9]|24[0-9]|25[0-5])\\."))
+                or ($service_host | test("(^|\\.)(localhost|local|lan|internal|test|invalid|example)$"))
+                or ($service_host | test("(^|\\.)example\\.(com|net|org)$"))
+                or ($service_host == "home.arpa")
+                or ($service_host | endswith(".home.arpa"))
+                or ($service_host == "ts.net")
+                or ($service_host | endswith(".ts.net"))
+                or ($service_host == "tailscale.net")
+                or ($service_host | endswith(".tailscale.net"))
+                or ($service_host | test("^(::|fc[0-9a-f]|fd[0-9a-f]|fe80:|2001:db8:)"))
+                or ($service_host | test("^::ffff:(127|10|192\\.168|169\\.254|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])|172\\.(1[6-9]|2[0-9]|3[0-1])|192\\.0\\.(0|2)|192\\.88\\.99|198\\.(1[89]|51\\.100)|203\\.0\\.113|22[4-9]|23[0-9]|24[0-9]|25[0-5]|0)\\."))
+                or ($service_host | test("^0:0:0:0:0:ffff:(127|10|192\\.168|169\\.254|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])|172\\.(1[6-9]|2[0-9]|3[0-1])|192\\.0\\.(0|2)|192\\.88\\.99|198\\.(1[89]|51\\.100)|203\\.0\\.113|22[4-9]|23[0-9]|24[0-9]|25[0-5]|0)\\."))
+              ) then
+              true
+            elif (($host_install.details.evidence_mode // "deploy-pack") == "installed-host") then
+              same_nonempty($service_host; $host_install.details.active_proxy_public_host)
             elif (($host_install.details.expected_public_host // "") != "") then
-              same_nonempty(host_from_url_string($service_smoke.details.base_url); $host_install.details.expected_public_host)
+              same_nonempty($service_host; $host_install.details.expected_public_host)
             else
               true
             end
@@ -2767,6 +2804,9 @@ access_recovery_track_json_from_evidence() {
         and ($deployment_evidence.details.transport_tls_verified == true)
         and (($deployment_evidence.details.transport_ssl_verify_result // "") == "0")
         and remote_ip_public_routable($deployment_evidence.details.transport_remote_ip);
+      def installed_host_handoff_evidence:
+        (($host_install.details.evidence_mode // "") == "installed-host")
+        and ($host_install.details.installed_host_mode == true);
       def evidence_scope:
         if all_pass and evidence_binding.ok and real_helper_https_evidence then "real_helper_https"
         elif all_pass and evidence_binding.ok then "local_rehearsal"
@@ -2787,6 +2827,7 @@ access_recovery_track_json_from_evidence() {
         and ($bundle_verify.details.pilot_handoff_criteria_source_helper_id_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_source_organization_id_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_source_registry_id_present == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_installed_host_evidence_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_provenance_organization_matches_evidence == true)
         and ($bundle_verify.details.pilot_handoff_criteria_trusted_organization_matches_evidence == true)
         and (verifier_binding.ok == true);
@@ -2797,6 +2838,7 @@ access_recovery_track_json_from_evidence() {
         and ($bundle_verify.details.pilot_handoff_criteria_trust_store_sha256_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_public_key_file_absent == true)
         and ($bundle_verify.details.pilot_handoff_criteria_bundled_child_evidence_semantic_ok == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_installed_host_evidence_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_source_helper_id_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_source_organization_id_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_source_registry_id_present == true)
@@ -2854,7 +2896,7 @@ access_recovery_track_json_from_evidence() {
         elif ($e == $deployment_evidence) then
           "bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/access_bridge_service_smoke_summary.json --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/access_bridge_deployment_evidence_summary.json"
         else
-          "bash ./scripts/access_bridge_host_install_check.sh --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
+          "bash ./scripts/access_bridge_host_install_check.sh --evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
         end;
       def track_status:
         if real_helper_https_base_ready and pilot_handoff_ready then "pilot-evidence-ready"
@@ -2911,20 +2953,27 @@ access_recovery_track_json_from_evidence() {
             service_remote_ip_public_routable: remote_ip_public_routable($service_smoke.details.transport_remote_ip),
             deployment_remote_ip: ($deployment_evidence.details.transport_remote_ip // null),
             deployment_remote_ip_public_routable: remote_ip_public_routable($deployment_evidence.details.transport_remote_ip),
-            real_helper_https_evidence: real_helper_https_evidence
+            real_helper_https_evidence: real_helper_https_evidence,
+            installed_host_handoff_evidence: installed_host_handoff_evidence
           },
           recommended_next_action: (
             if $track_status == "pilot-evidence-ready" then null
             elif $track_status == "trusted-provenance-required" then {
-              id: "trusted_pilot_evidence_verify",
+              id: (if installed_host_handoff_evidence then "trusted_pilot_evidence_verify" else "access_bridge_installed_host_evidence" end),
               reason: (
-                if ($bundle_verify.available == true and ($verifier_binding.ok != true)) then
+                if (installed_host_handoff_evidence | not) then
+                  "Deploy-pack host evidence is rehearsal-only for public HTTPS helpers; operator handoff requires installed-host service, systemd, and active proxy evidence"
+                elif ($bundle_verify.available == true and ($verifier_binding.ok != true)) then
                   "Trusted verifier receipt does not match the current smoke, deployment, and host-install evidence"
                 else
                   ($bundle_verify.notes // "Trusted real helper HTTPS provenance verification is required before pilot handoff")
                 end
               ),
-              command: trusted_verifier_command
+              command: (
+                if installed_host_handoff_evidence then trusted_verifier_command
+                else "bash ./scripts/access_bridge_host_install_check.sh --evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
+                end
+              )
             }
             elif $track_status == "pilot-handoff-not-ready" then {
               id: "trusted_pilot_evidence_verify",
@@ -2934,7 +2983,7 @@ access_recovery_track_json_from_evidence() {
             elif $track_status == "local-rehearsal-ready" then {
               id: "real_helper_https_evidence",
               reason: "Local Access Recovery rehearsal evidence cannot substitute for real helper HTTPS deployment evidence",
-              command: "./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE --reports-dir .easy-node-logs/access-recovery-pilot"
+              command: "./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --host-install-evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE --reports-dir .easy-node-logs/access-recovery-pilot"
             }
             elif $first_attention == null then null
             else {
@@ -12700,6 +12749,8 @@ next_actions_candidate_json="$(
   def access_recovery_action_metadata($id):
     if $id == "real_helper_https_evidence" then
       action_evidence_metadata(["access-recovery"]; true; false; ["real-helper-https"])
+    elif $id == "access_bridge_installed_host_evidence" then
+      action_evidence_metadata(["access-recovery"]; true; false; ["installed-host-evidence"])
     elif $id == "trusted_pilot_evidence_verify" then
       action_evidence_metadata(["access-recovery"]; false; false; ["trusted-provenance"])
     else

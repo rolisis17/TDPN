@@ -13,6 +13,11 @@ client_cert=""
 client_key=""
 config_json=""
 deploy_pack_dir=""
+host_install_evidence_mode="deploy-pack"
+install_dir=""
+systemd_unit_file=""
+proxy_kind=""
+proxy_config_file=""
 service_name="gpm-access-bridge"
 bundle_dir=""
 summary_json=""
@@ -41,6 +46,11 @@ Usage:
     --config-json FILE \
     --deploy-pack-dir DIR \
     (--code CODE | --code-file FILE) \
+    [--host-install-evidence-mode deploy-pack|installed-host] \
+    [--install-dir DIR] \
+    [--systemd-unit-file FILE] \
+    [--proxy-kind caddy|nginx] \
+    [--proxy-config-file FILE] \
     [--path-id helper-web] \
     [--cacert FILE] \
     [--client-cert FILE --client-key FILE] \
@@ -408,6 +418,26 @@ while [[ $# -gt 0 ]]; do
       deploy_pack_dir="${2:-}"
       shift 2
       ;;
+    --host-install-evidence-mode|--evidence-mode)
+      host_install_evidence_mode="${2:-}"
+      shift 2
+      ;;
+    --install-dir)
+      install_dir="${2:-}"
+      shift 2
+      ;;
+    --systemd-unit-file)
+      systemd_unit_file="${2:-}"
+      shift 2
+      ;;
+    --proxy-kind)
+      proxy_kind="${2:-}"
+      shift 2
+      ;;
+    --proxy-config-file)
+      proxy_config_file="${2:-}"
+      shift 2
+      ;;
     --service-name)
       service_name="${2:-}"
       shift 2
@@ -536,6 +566,7 @@ fi
 base_url="${base_url%/}"
 path_id="$(trim "$path_id")"
 service_name="$(trim "$service_name")"
+host_install_evidence_mode="$(trim "$host_install_evidence_mode")"
 if [[ -z "$base_url" ]]; then
   echo "access bridge pilot evidence bundle failed: --base-url is required" >&2
   exit 2
@@ -554,6 +585,31 @@ if [[ -z "$config_json" ]]; then
 fi
 if [[ -z "$deploy_pack_dir" ]]; then
   echo "access bridge pilot evidence bundle failed: --deploy-pack-dir is required" >&2
+  exit 2
+fi
+if [[ "$host_install_evidence_mode" != "deploy-pack" && "$host_install_evidence_mode" != "installed-host" ]]; then
+  echo "access bridge pilot evidence bundle failed: --host-install-evidence-mode must be deploy-pack or installed-host" >&2
+  exit 2
+fi
+if [[ "$host_install_evidence_mode" == "installed-host" ]]; then
+  if [[ -z "$install_dir" ]]; then
+    echo "access bridge pilot evidence bundle failed: --install-dir is required when --host-install-evidence-mode installed-host" >&2
+    exit 2
+  fi
+  if [[ -z "$systemd_unit_file" ]]; then
+    echo "access bridge pilot evidence bundle failed: --systemd-unit-file is required when --host-install-evidence-mode installed-host" >&2
+    exit 2
+  fi
+  if [[ "$proxy_kind" != "caddy" && "$proxy_kind" != "nginx" ]]; then
+    echo "access bridge pilot evidence bundle failed: --proxy-kind must be caddy or nginx when --host-install-evidence-mode installed-host" >&2
+    exit 2
+  fi
+  if [[ -z "$proxy_config_file" ]]; then
+    echo "access bridge pilot evidence bundle failed: --proxy-config-file is required when --host-install-evidence-mode installed-host" >&2
+    exit 2
+  fi
+elif [[ -n "$proxy_kind" && "$proxy_kind" != "caddy" && "$proxy_kind" != "nginx" ]]; then
+  echo "access bridge pilot evidence bundle failed: --proxy-kind must be caddy or nginx" >&2
   exit 2
 fi
 if [[ -n "$code" && -n "$code_file" ]]; then
@@ -597,6 +653,15 @@ fi
 
 config_json="$(abs_path "$config_json")"
 deploy_pack_dir="$(abs_path "$deploy_pack_dir")"
+if [[ -n "$install_dir" ]]; then
+  install_dir="$(abs_path "$install_dir")"
+fi
+if [[ -n "$systemd_unit_file" ]]; then
+  systemd_unit_file="$(abs_path "$systemd_unit_file")"
+fi
+if [[ -n "$proxy_config_file" ]]; then
+  proxy_config_file="$(abs_path "$proxy_config_file")"
+fi
 if [[ ! -f "$config_json" ]]; then
   echo "access bridge pilot evidence bundle failed: config JSON not found: $config_json" >&2
   exit 2
@@ -604,6 +669,20 @@ fi
 if [[ ! -d "$deploy_pack_dir" ]]; then
   echo "access bridge pilot evidence bundle failed: deploy pack dir not found: $deploy_pack_dir" >&2
   exit 2
+fi
+if [[ "$host_install_evidence_mode" == "installed-host" ]]; then
+  if [[ ! -d "$install_dir" ]]; then
+    echo "access bridge pilot evidence bundle failed: install dir not found: $install_dir" >&2
+    exit 2
+  fi
+  if [[ ! -f "$systemd_unit_file" ]]; then
+    echo "access bridge pilot evidence bundle failed: systemd unit file not found: $systemd_unit_file" >&2
+    exit 2
+  fi
+  if [[ ! -f "$proxy_config_file" ]]; then
+    echo "access bridge pilot evidence bundle failed: proxy config file not found: $proxy_config_file" >&2
+    exit 2
+  fi
 fi
 if [[ -n "$code_file" ]]; then
   code_file="$(abs_path "$code_file")"
@@ -747,15 +826,25 @@ host_summary="$bundle_dir/access_bridge_host_install_check_summary.json"
 host_log="$bundle_dir/access_bridge_host_install_check.log"
 host_install_args=(
   bash ./scripts/access_bridge_host_install_check.sh
+  --evidence-mode "$host_install_evidence_mode"
   --deploy-pack-dir "$deploy_pack_dir"
   --config-json "$config_json"
   --service-name "$service_name"
   --summary-json "$host_summary"
   --print-summary-json 0
 )
+if [[ "$host_install_evidence_mode" == "installed-host" ]]; then
+  host_install_args+=(
+    --install-dir "$install_dir"
+    --systemd-unit-file "$systemd_unit_file"
+    --proxy-kind "$proxy_kind"
+    --proxy-config-file "$proxy_config_file"
+    --expected-base-url "$base_url"
+  )
+fi
 if [[ -n "$expected_public_host" ]]; then
   host_install_args+=(--expected-public-host "$expected_public_host")
-elif [[ "$require_public_host" == "1" ]] && ! base_url_host_is_private_or_reserved "$base_url"; then
+elif [[ "$host_install_evidence_mode" != "installed-host" && "$require_public_host" == "1" ]] && ! base_url_host_is_private_or_reserved "$base_url"; then
   host_install_args+=(--expected-base-url "$base_url")
 fi
 run_json_step "host_install_check" "$host_summary" "$host_log" "${host_install_args[@]}"
@@ -880,6 +969,11 @@ jq -n \
   --arg transport_mtls_client_used "$transport_mtls_client_used" \
   --arg path_id "$path_id" \
   --arg service_name "$service_name" \
+  --arg host_install_evidence_mode "$host_install_evidence_mode" \
+  --arg install_dir "$install_dir" \
+  --arg systemd_unit_file "$systemd_unit_file" \
+  --arg proxy_kind "$proxy_kind" \
+  --arg proxy_config_file "$proxy_config_file" \
   --arg config_json "$config_json" \
   --arg deploy_pack_dir "$deploy_pack_dir" \
   --arg config_copy "$config_copy" \
@@ -908,7 +1002,7 @@ jq -n \
     schema: {
       id: "access_bridge_pilot_evidence_bundle_summary",
       major: 1,
-      minor: 3
+      minor: 4
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -935,6 +1029,11 @@ jq -n \
       base_url: $base_url,
       path_id: $path_id,
       service_name: $service_name,
+      host_install_evidence_mode: $host_install_evidence_mode,
+      install_dir: (if $install_dir == "" then null else $install_dir end),
+      systemd_unit_file: (if $systemd_unit_file == "" then null else $systemd_unit_file end),
+      proxy_kind: (if $proxy_kind == "" then null else $proxy_kind end),
+      proxy_config_file: (if $proxy_config_file == "" then null else $proxy_config_file end),
       config_json: $config_json,
       deploy_pack_dir: $deploy_pack_dir,
       expected_public_host: (if $expected_public_host == "" then null else $expected_public_host end),

@@ -108,6 +108,10 @@ bash ./scripts/access_bridge_host_install_check.sh \
   --summary-json .easy-node-logs/access-recovery-demo/bridge-host-install-check.json
 ```
 
+The deploy-pack host check is a rehearsal check for the generated files. Pilot
+handoff must also record installed-host evidence from the active service,
+systemd unit, and HTTPS proxy config.
+
 4. Bind the bridge service to loopback, for example `127.0.0.1:18980`, and put Caddy or nginx in front of it with HTTPS enabled. The public endpoint must be `https://HELPER_PUBLIC_DNS`, proxying only to the local bridge listener. Keep query-string access codes disabled; pass access codes through `X-GPM-Bridge-Code`.
 
 5. Before sharing the bridge URL or access code, verify helper identity:
@@ -134,6 +138,11 @@ receipt, and refreshes roadmap readiness from that receipt:
   --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt \
   --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \
   --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
+  --host-install-evidence-mode installed-host \
+  --install-dir /etc/gpm/access-bridge \
+  --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service \
+  --proxy-kind caddy \
+  --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy \
   --expect-helper-id helper-demo \
   --expect-org-id freenews-demo \
   --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE \
@@ -163,8 +172,13 @@ bash ./scripts/access_bridge_deployment_evidence.sh \
   --summary-json .easy-node-logs/bridge-deployment-evidence.json
 
 bash ./scripts/access_bridge_host_install_check.sh \
-  --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
+  --evidence-mode installed-host \
+  --install-dir /etc/gpm/access-bridge \
+  --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service \
+  --proxy-kind caddy \
+  --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy \
   --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \
+  --expected-base-url https://HELPER_PUBLIC_DNS \
   --summary-json .easy-node-logs/bridge-host-install-check.json
 
 ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle \
@@ -173,6 +187,11 @@ bash ./scripts/access_bridge_host_install_check.sh \
   --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt \
   --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \
   --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
+  --host-install-evidence-mode installed-host \
+  --install-dir /etc/gpm/access-bridge \
+  --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service \
+  --proxy-kind caddy \
+  --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy \
   --expect-helper-id helper-demo \
   --expect-org-id freenews-demo \
   --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json \
@@ -193,7 +212,7 @@ bash ./scripts/access_bridge_host_install_check.sh \
 
 Keep the smoke JSON, deployment-evidence JSON, host-install-check JSON, trusted provenance JSON, verifier summary JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, `manifest.sha256`, `<bundle>.tar.gz`, `<bundle>.tar.gz.sha256`, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair; the bundle skips access-code/private-key-looking deploy-pack files. Local unsigned integrity checks are diagnostic rehearsal output only. Pilot/operator handoff verification must require trusted provenance, write the verifier summary receipt bound to the current evidence hashes, reject demo-marked trust stores unless explicitly allowed for diagnostics, validate the bundled smoke/deployment/host evidence semantics, and reject manifest tamper, tar checksum mismatch, unsafe tar paths, tar links, and untrusted provenance.
 
-Before marking handoff ready, check the verifier receipt shows schema minor `2` or newer, `trusted_pilot_receipt_ready=true`, `pilot_handoff_ready=true`, `pilot_handoff_criteria.bundled_child_evidence_semantic_ok=true`, real-helper HTTPS provenance from a non-demo `trust_store`, `trust_store_sha256_present=true`, `public_key_file_absent=true`, dev trust-store override disabled, and smoke/deployment/host summary SHA-256 bindings.
+Before marking handoff ready, check the verifier receipt shows schema minor `3` or newer, `trusted_pilot_receipt_ready=true`, `pilot_handoff_ready=true`, `pilot_handoff_criteria.bundled_child_evidence_semantic_ok=true`, `pilot_handoff_criteria.installed_host_evidence_present=true`, real-helper HTTPS provenance from a non-demo `trust_store`, `trust_store_sha256_present=true`, `public_key_file_absent=true`, dev trust-store override disabled, and smoke/deployment/host summary SHA-256 bindings.
 
 7. Fail closed on rotation or quarantine:
 

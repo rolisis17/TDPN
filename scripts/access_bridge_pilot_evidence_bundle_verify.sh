@@ -468,6 +468,7 @@ validate_trusted_bundled_evidence_semantics() {
           if (host_evidence_mode($h) == "installed-host" and (($h.observed.active_proxy_config_file // "") == "" or ($h.observed.active_proxy_public_host // "") == "")) then "bundled installed-host check is missing active proxy evidence" else empty end,
           if (host_evidence_mode($h) == "installed-host" and ($h.observed.active_proxy_is_deploy_pack_example != false)) then "bundled installed-host active proxy points at deploy-pack example evidence" else empty end,
           if (host_evidence_mode($h) == "installed-host" and (($h.observed.active_proxy_public_host // "") != expected_host)) then "bundled installed-host active proxy public host does not match bundle summary host" else empty end,
+          if (host_evidence_mode($h) == "installed-host" and ((($h.observed.active_proxy_target // "") == "") or (($h.observed.env_addr // "") == "") or (($h.observed.active_proxy_target // "") != ($h.observed.env_addr // "")))) then "bundled installed-host active proxy target does not match env bridge address" else empty end,
           if (host_evidence_mode($h) == "installed-host" and (($h.observed.systemd_environment_file // "") != ($h.observed.active_env_file // "") or ($h.observed.systemd_exec_start // "") != ($h.observed.active_wrapper_file // ""))) then "bundled installed-host systemd unit does not point at active env/wrapper" else empty end,
           if str_eq($h.observed.config_allow_local_access_paths; "false") | not then "bundled host install config allows local access paths" else empty end,
           if str_eq($h.observed.env_allow_unauthenticated_local; "false") | not then "bundled host install allows unauthenticated local access" else empty end,
@@ -875,6 +876,7 @@ provenance_bundle_tar_name=""
 provenance_expires_at_utc=""
 tar_sha256_checked="0"
 bundled_child_evidence_semantic_ok="false"
+bundled_installed_host_evidence="false"
 
 write_verification_summary() {
   local status="$1"
@@ -882,10 +884,11 @@ write_verification_summary() {
   local notes="$3"
   local generated_at_utc check_tar_sha256_json tar_sha256_checked_json check_manifest_json check_provenance_json require_trusted_json
   local summary_contract_check_json provenance_checked_json provenance_trusted_json provenance_source
-  local allow_dev_trust_store_json trust_store_sha256 bundled_child_evidence_semantic_ok_json
+  local allow_dev_trust_store_json trust_store_sha256 bundled_child_evidence_semantic_ok_json bundled_installed_host_evidence_json
   local source_summary_sha256 source_base_url source_helper_id source_organization_id source_registry_id
   local source_smoke_summary_json source_deployment_summary_json source_host_summary_json
   local source_smoke_summary_sha256 source_deployment_summary_sha256 source_host_summary_sha256
+  local source_host_evidence_mode
   local bundled_source_summary_json bundled_smoke_summary_json bundled_deployment_summary_json bundled_host_summary_json
 
   [[ -n "$verification_summary_json" ]] || return 0
@@ -900,6 +903,7 @@ write_verification_summary() {
   allow_dev_trust_store_json="$( [[ "$allow_dev_trust_store" == "1" ]] && printf 'true' || printf 'false' )"
   summary_contract_check_json="$( [[ "$summary_contract_check" == "1" ]] && printf 'true' || printf 'false' )"
   bundled_child_evidence_semantic_ok_json="$( [[ "$bundled_child_evidence_semantic_ok" == "true" ]] && printf 'true' || printf 'false' )"
+  bundled_installed_host_evidence_json="$( [[ "$bundled_installed_host_evidence" == "true" ]] && printf 'true' || printf 'false' )"
   provenance_checked_json="$( [[ "$provenance_verify_checked" == "true" ]] && printf 'true' || printf 'false' )"
   provenance_trusted_json="$( [[ "$provenance_trusted" == "true" ]] && printf 'true' || printf 'false' )"
   provenance_source="none"
@@ -919,6 +923,7 @@ write_verification_summary() {
   source_smoke_summary_sha256=""
   source_deployment_summary_sha256=""
   source_host_summary_sha256=""
+  source_host_evidence_mode=""
   trust_store_sha256="$(sha256_value_or_empty "$trust_store")"
   bundled_source_summary_json=""
   bundled_smoke_summary_json=""
@@ -958,6 +963,18 @@ write_verification_summary() {
     source_smoke_summary_sha256="$(sha256_value_or_empty "$source_smoke_summary_json")"
     source_deployment_summary_sha256="$(sha256_value_or_empty "$source_deployment_summary_json")"
     source_host_summary_sha256="$(sha256_value_or_empty "$source_host_summary_json")"
+    if [[ -f "$source_host_summary_json" ]]; then
+      source_host_evidence_mode="$(jq -r '(.inputs.evidence_mode // .observed.evidence_mode // .summary.evidence_mode // "deploy-pack") | tostring' "$source_host_summary_json" 2>/dev/null || true)"
+      if jq -e '
+        ((.inputs.evidence_mode // .observed.evidence_mode // .summary.evidence_mode // "") == "installed-host")
+        and (.inputs.installed_host_mode == true)
+        and (.observed.installed_host_mode == true)
+        and (.summary.installed_host_mode == true)
+      ' "$source_host_summary_json" >/dev/null 2>&1; then
+        bundled_installed_host_evidence="true"
+        bundled_installed_host_evidence_json="true"
+      fi
+    fi
   fi
 
   jq -n \
@@ -976,6 +993,7 @@ write_verification_summary() {
     --arg trust_store_sha256 "$trust_store_sha256" \
     --arg summary_evidence_scope "$summary_evidence_scope" \
     --argjson bundled_child_evidence_semantic_ok "$bundled_child_evidence_semantic_ok_json" \
+    --argjson bundled_installed_host_evidence "$bundled_installed_host_evidence_json" \
     --argjson check_tar_sha256 "$check_tar_sha256_json" \
     --argjson tar_sha256_checked "$tar_sha256_checked_json" \
     --argjson check_manifest "$check_manifest_json" \
@@ -1007,6 +1025,7 @@ write_verification_summary() {
     --arg source_smoke_summary_sha256 "$source_smoke_summary_sha256" \
     --arg source_deployment_summary_sha256 "$source_deployment_summary_sha256" \
     --arg source_host_summary_sha256 "$source_host_summary_sha256" \
+    --arg source_host_evidence_mode "$source_host_evidence_mode" \
     --arg verification_summary_json "$verification_summary_json" '
       def null_if_empty($v):
         if ($v | type) == "string" and ($v | length) > 0 then $v else null end;
@@ -1020,6 +1039,7 @@ write_verification_summary() {
         and $provenance_evidence_scope == "real_helper_https"
         and $summary_evidence_scope == "real_helper_https"
         and $bundled_child_evidence_semantic_ok
+        and $bundled_installed_host_evidence
         and $tar_sha256_checked
         and $trust_store != ""
         and $public_key_file == ""
@@ -1036,7 +1056,7 @@ write_verification_summary() {
         schema: {
           id: "access_bridge_pilot_evidence_bundle_verify_summary",
           major: 1,
-          minor: 2
+          minor: 3
         },
         generated_at_utc: $generated_at_utc,
         status: $status,
@@ -1059,6 +1079,7 @@ write_verification_summary() {
           provenance_organization_matches_evidence: ($provenance_organization_id != "" and $source_organization_id != "" and $provenance_organization_id == $source_organization_id),
           trusted_organization_matches_evidence: ($provenance_trusted_org_id != "" and $source_organization_id != "" and $provenance_trusted_org_id == $source_organization_id),
           bundled_child_evidence_semantic_ok: $bundled_child_evidence_semantic_ok,
+          installed_host_evidence_present: $bundled_installed_host_evidence,
           trust_store_present: ($trust_store != ""),
           trust_store_sha256_present: ($trust_store_sha256 != ""),
           public_key_file_absent: ($public_key_file == ""),
@@ -1124,7 +1145,8 @@ write_verification_summary() {
           deployment_evidence_summary_json: null_if_empty($source_deployment_summary_json),
           deployment_evidence_summary_sha256: null_if_empty($source_deployment_summary_sha256),
           host_install_check_summary_json: null_if_empty($source_host_summary_json),
-          host_install_check_summary_sha256: null_if_empty($source_host_summary_sha256)
+          host_install_check_summary_sha256: null_if_empty($source_host_summary_sha256),
+          host_install_evidence_mode: null_if_empty($source_host_evidence_mode)
         },
         artifacts: {
           verification_summary_json: null_if_empty($verification_summary_json),

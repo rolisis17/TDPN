@@ -1035,16 +1035,16 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
   "schema": {
     "id": "access_bridge_pilot_evidence_bundle_verify_summary",
     "major": 1,
-    "minor": 2
+    "minor": 3
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
   "rc": 0,
-  "pilot_handoff_ready": true,
-  "trusted_pilot_receipt_ready": true,
+  "pilot_handoff_ready": false,
+  "trusted_pilot_receipt_ready": false,
   "pilot_handoff_criteria": {
-    "ready": true,
-    "trusted_pilot_receipt_ready": true,
+    "ready": false,
+    "trusted_pilot_receipt_ready": false,
     "require_trusted_provenance": true,
     "provenance_checked": true,
     "provenance_trusted": true,
@@ -1060,7 +1060,8 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
     "trust_store_present": true,
     "trust_store_sha256_present": true,
     "public_key_file_absent": true,
-    "bundled_child_evidence_semantic_ok": true
+    "bundled_child_evidence_semantic_ok": true,
+    "installed_host_evidence_present": false
   },
   "notes": "Access Bridge pilot evidence bundle verification passed",
   "inputs": {
@@ -1107,7 +1108,8 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
     "deployment_evidence_summary_json": "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON",
     "deployment_evidence_summary_sha256": "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_SHA256",
     "host_install_check_summary_json": "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON",
-    "host_install_check_summary_sha256": "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_SHA256"
+    "host_install_check_summary_sha256": "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_SHA256",
+    "host_install_evidence_mode": "deploy-pack"
   },
   "artifacts": {
     "verification_summary_json": "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON",
@@ -1204,12 +1206,12 @@ if ! jq -e \
   .status == "warn"
   and .rc == 0
   and .current_roadmap_track == "access_recovery"
-  and .access_recovery_pilot_handoff_ready == true
-  and .access_recovery_track.status == "pilot-evidence-ready"
-  and .access_recovery_track.ready == true
-  and .access_recovery_track.pilot_handoff_ready == true
+  and .access_recovery_pilot_handoff_ready == false
+  and .access_recovery_track.status == "trusted-provenance-required"
+  and .access_recovery_track.ready == false
+  and .access_recovery_track.pilot_handoff_ready == false
   and .access_recovery_track.local_rehearsal_ready == false
-  and .access_recovery_track.needs_attention == false
+  and .access_recovery_track.needs_attention == true
   and .access_recovery_track.evidence_scope == "real_helper_https"
   and .access_recovery_track.evidence_host_policy.host == "recovery-helper.gpm-pilot.net"
   and .access_recovery_track.evidence_host_policy.https == true
@@ -1219,6 +1221,7 @@ if ! jq -e \
   and .access_recovery_track.evidence_host_policy.deployment_remote_ip == "8.8.8.8"
   and .access_recovery_track.evidence_host_policy.deployment_remote_ip_public_routable == true
   and .access_recovery_track.evidence_host_policy.real_helper_https_evidence == true
+  and .access_recovery_track.evidence_host_policy.installed_host_handoff_evidence == false
   and .access_recovery_track.access_bridge_service_smoke.available == true
   and .access_recovery_track.access_bridge_service_smoke.status == "pass"
   and .access_recovery_track.access_bridge_service_smoke.source_summary_json == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"'"
@@ -1250,11 +1253,13 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_host_install.status == "pass"
   and .access_recovery_track.access_bridge_host_install.source_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
   and .access_recovery_track.access_bridge_host_install.details.checks_fail == 0
+  and .access_recovery_track.access_bridge_host_install.details.evidence_mode == "deploy-pack"
   and .access_recovery_track.access_bridge_host_install.details.env_rps == "2"
   and .access_recovery_track.access_bridge_host_install.details.env_max_sources == "1024"
-  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == true
-  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "pass"
-  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.source_summary_json == "'"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON"'"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "fail"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.source_summary_json == null
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == false
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.summary_contract_status == "pass"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.tar_sha256_status == "pass"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.tar_sha256_checked == true
@@ -1265,6 +1270,7 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.trusted_provenance_status == "pass"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.evidence_scope == "real_helper_https"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_bundled_child_evidence_semantic_ok == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_installed_host_evidence_present == false
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.smoke_summary_sha256 == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256"'"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.deployment_evidence_summary_sha256 == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_SHA256"'"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.host_install_check_summary_sha256 == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_SHA256"'"
@@ -1276,13 +1282,14 @@ if ! jq -e \
   and .access_recovery_track.trusted_verifier_binding.smoke_summary_sha256_match == true
   and .access_recovery_track.trusted_verifier_binding.deployment_evidence_summary_sha256_match == true
   and .access_recovery_track.trusted_verifier_binding.host_install_check_summary_sha256_match == true
-  and .access_recovery_track.trusted_verifier_ready == true
-  and .access_recovery_track.trusted_pilot_receipt_ready == true
-  and .access_recovery_track.verifier_pilot_handoff_ready == true
+  and .access_recovery_track.trusted_verifier_ready == false
+  and .access_recovery_track.trusted_pilot_receipt_ready == false
+  and .access_recovery_track.verifier_pilot_handoff_ready == false
   and .access_recovery_track.evidence_binding.ok == true
   and .access_recovery_track.evidence_binding.helper_id_match == true
   and .access_recovery_track.evidence_binding.host_config_sha256_match == true
-  and .access_recovery_track.recommended_next_action == null
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_installed_host_evidence"
+  and (.access_recovery_track.recommended_next_action.command | contains("--evidence-mode installed-host"))
   and .vpn_track.readiness_status == "NOT_READY"
   and .vpn_track.roadmap_stage == "READY_FOR_MACHINE_C_SMOKE"
   and .vpn_track.vpn_rc_done_for_phase == false
@@ -1331,12 +1338,18 @@ if ! jq -e \
   and .blockchain_track.phase7_mainnet_cutover_summary_report.dual_write_parity_ok == true
   and (.next_actions | length) >= 1
   and ((.next_actions_remediation // []) | type) == "array"
-  and (.next_actions[0].id // "") == "machine_c_vpn_smoke"
+  and (.next_actions[0].id // "") == "access_bridge_installed_host_evidence"
   and .next_actions[0].requires_real_hosts == true
   and .next_actions[0].local_pack_only == false
-  and .next_actions[0].missing_evidence_family == "machine-c-vpn-smoke"
-  and .next_actions[0].missing_evidence_families == ["machine-c-vpn-smoke"]
-  and .next_actions[0].missing_evidence_action_kind == "real-host"
+  and (.next_actions[0].command | contains("--evidence-mode installed-host"))
+  and ((.next_actions // []) | any(
+    .id == "machine_c_vpn_smoke"
+    and .requires_real_hosts == true
+    and .local_pack_only == false
+    and .missing_evidence_family == "machine-c-vpn-smoke"
+    and .missing_evidence_families == ["machine-c-vpn-smoke"]
+    and .missing_evidence_action_kind == "real-host"
+  ))
   and (
     if .vpn_track.profile_default_gate.next_command_has_unresolved_placeholders == true then
       (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
@@ -1508,7 +1521,7 @@ if ! jq -e \
   and .artifacts.access_bridge_service_smoke_summary_json == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"'"
   and .artifacts.access_bridge_deployment_evidence_summary_json == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"'"
   and .artifacts.access_bridge_host_install_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
-  and .artifacts.access_bridge_pilot_evidence_bundle_verify_summary_json == "'"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON"'"
+  and .artifacts.access_bridge_pilot_evidence_bundle_verify_summary_json == null
   and .artifacts.manual_validation_summary_json == "'"$TEST_LOG_DIR/manual_validation_readiness_summary.json"'"
   and .artifacts.manual_validation_report_md == "'"$TEST_LOG_DIR/manual_validation_readiness_report.md"'"
 ' "$SUMMARY_JSON" >/dev/null; then
@@ -1577,7 +1590,13 @@ jq \
   --arg host_summary_json "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" \
   --arg host_summary_sha256 "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_SHA256" \
   '.evidence_binding.host_install_check_summary_json = $host_summary_json
-    | .evidence_binding.host_install_check_summary_sha256 = $host_summary_sha256' \
+    | .evidence_binding.host_install_check_summary_sha256 = $host_summary_sha256
+    | .evidence_binding.host_install_evidence_mode = "installed-host"
+    | .pilot_handoff_ready = true
+    | .trusted_pilot_receipt_ready = true
+    | .pilot_handoff_criteria.ready = true
+    | .pilot_handoff_criteria.trusted_pilot_receipt_ready = true
+    | .pilot_handoff_criteria.installed_host_evidence_present = true' \
   "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_INSTALLED_BUNDLE_VERIFY_SUMMARY_JSON"
 
 ROADMAP_INSTALLED_HOST_SUMMARY_JSON="$TMP_DIR/roadmap_installed_host_summary.json"
@@ -1617,9 +1636,15 @@ if ! jq -e \
     and .access_recovery_track.access_bridge_host_install.details.installed_host_mode == true
     and .access_recovery_track.access_bridge_host_install.details.active_proxy_kind == "caddy"
     and .access_recovery_track.access_bridge_host_install.details.active_proxy_public_host == "recovery-helper.gpm-pilot.net"
+    and .access_recovery_track.access_bridge_host_install.details.active_proxy_target == "127.0.0.1:18980"
     and .access_recovery_track.access_bridge_host_install.details.active_proxy_is_deploy_pack_example == false
+    and .access_recovery_track.evidence_host_policy.installed_host_handoff_evidence == true
+    and .access_recovery_track.trusted_verifier_ready == true
+    and .access_recovery_track.trusted_pilot_receipt_ready == true
+    and .access_recovery_track.verifier_pilot_handoff_ready == true
     and .access_recovery_track.evidence_binding.host_public_host_match == true
     and .access_recovery_track.trusted_verifier_binding.host_install_check_summary_sha256_match == true
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_installed_host_evidence_present == true
     and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.host_install_check_summary_sha256 == $host_summary_sha256
   ' "$ROADMAP_INSTALLED_HOST_SUMMARY_JSON" >/dev/null; then
   echo "roadmap installed-host access bridge evidence summary mismatch"
@@ -1641,11 +1666,18 @@ if ! grep -Eq '\[roadmap-progress-report\] current_roadmap_track=access_recovery
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! grep -Eq '\[roadmap-progress-report\] access_recovery_track_status=pilot-evidence-ready ready=true needs_attention=false' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
-  echo "expected Access Recovery pass log line"
+if ! grep -Eq '\[roadmap-progress-report\] access_recovery_track_status=trusted-provenance-required ready=false needs_attention=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+  echo "expected Access Recovery deploy-pack rehearsal log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
+
+ACCESS_BRIDGE_DEPLOY_PACK_HOST_INSTALL_SUMMARY_JSON="$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"
+ACCESS_BRIDGE_DEPLOY_PACK_HOST_INSTALL_SUMMARY_SHA256="$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_SHA256"
+ACCESS_BRIDGE_DEPLOY_PACK_BUNDLE_VERIFY_SUMMARY_JSON="$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON"
+ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON="$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON"
+ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_SHA256="$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_SHA256"
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON="$ACCESS_BRIDGE_INSTALLED_BUNDLE_VERIFY_SUMMARY_JSON"
 
 echo "[roadmap-progress-report] Access Recovery real helper HTTPS evidence still requires trusted verifier receipt"
 if ! run_roadmap_progress_report \
@@ -2166,7 +2198,7 @@ if ! run_roadmap_progress_report \
   --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
   --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON" \
   --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
-  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_DEPLOY_PACK_HOST_INSTALL_SUMMARY_JSON" \
   --summary-json "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_report.md" \
   --print-report 0 \
@@ -2244,7 +2276,7 @@ if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_repo
   --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
   --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON" \
   --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
-  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_DEPLOY_PACK_HOST_INSTALL_SUMMARY_JSON" \
   --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_RECOVERY_LOCAL_VERIFY_SUMMARY_JSON" \
   --summary-json "$TMP_DIR/roadmap_progress_access_recovery_local_forged_verifier_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_access_recovery_local_forged_verifier_report.md" \
@@ -2270,7 +2302,7 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == true
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "pass"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == true
-  and .access_recovery_track.trusted_verifier_binding.ok == true
+  and .access_recovery_track.trusted_verifier_binding.ok == false
   and .access_recovery_track.trusted_verifier_ready == false
   and .access_recovery_track.recommended_next_action.id == "real_helper_https_evidence"
 ' "$TMP_DIR/roadmap_progress_access_recovery_local_forged_verifier_summary.json" >/dev/null; then

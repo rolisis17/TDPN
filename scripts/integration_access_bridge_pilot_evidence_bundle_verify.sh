@@ -338,14 +338,15 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --print-verification-summary-json 1 >"$TMP_DIR/verify-provenance-trusted-policy-explicit.log"
 if ! jq -e '
   .schema.id == "access_bridge_pilot_evidence_bundle_verify_summary"
-  and .schema.minor == 2
+  and .schema.minor == 3
   and .status == "pass"
   and .rc == 0
-  and .pilot_handoff_ready == true
-  and .trusted_pilot_receipt_ready == true
-  and .pilot_handoff_criteria.ready == true
-  and .pilot_handoff_criteria.trusted_pilot_receipt_ready == true
+  and .pilot_handoff_ready == false
+  and .trusted_pilot_receipt_ready == false
+  and .pilot_handoff_criteria.ready == false
+  and .pilot_handoff_criteria.trusted_pilot_receipt_ready == false
   and .pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true
+  and .pilot_handoff_criteria.installed_host_evidence_present == false
   and .pilot_handoff_criteria.trust_store_sha256_present == true
   and .checks.summary_contract.enabled == true
   and .checks.tar_sha256.enabled == true
@@ -373,6 +374,7 @@ if ! jq -e '
   and .evidence_binding.smoke_summary_sha256 == "'"$SMOKE_SUMMARY_SHA256"'"
   and .evidence_binding.deployment_evidence_summary_sha256 == "'"$DEPLOYMENT_SUMMARY_SHA256"'"
   and .evidence_binding.host_install_check_summary_sha256 == "'"$HOST_SUMMARY_SHA256"'"
+  and .evidence_binding.host_install_evidence_mode == "deploy-pack"
   and .artifacts.verification_summary_json == "'"$VERIFY_SUMMARY_JSON"'"
   and .artifacts.provenance_json == "'"$PROVENANCE_JSON"'"
 ' "$VERIFY_SUMMARY_JSON" >/dev/null; then
@@ -513,10 +515,87 @@ if ! jq -e \
     and .rc == 0
     and .pilot_handoff_ready == true
     and .pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true
+    and .pilot_handoff_criteria.installed_host_evidence_present == true
     and .evidence_binding.host_install_check_summary_sha256 == $host_summary_sha256
+    and .evidence_binding.host_install_evidence_mode == "installed-host"
   ' "$INSTALLED_HOST_VERIFY_SUMMARY_JSON" >/dev/null; then
   echo "access bridge pilot evidence bundle verifier integration failed: installed-host evidence was not accepted"
   cat "$INSTALLED_HOST_VERIFY_SUMMARY_JSON"
+  exit 1
+fi
+
+BAD_PROXY_TARGET_ROOT="$TMP_DIR/installed-host-bad-proxy-target-root"
+BAD_PROXY_TARGET_DIR="$BAD_PROXY_TARGET_ROOT/$(basename "$BUNDLE_DIR")"
+BAD_PROXY_TARGET_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_bad_proxy_target_summary.json"
+BAD_PROXY_TARGET_TAR="$TMP_DIR/installed-host-bad-proxy-target.tar.gz"
+BAD_PROXY_TARGET_SHA="${BAD_PROXY_TARGET_TAR}.sha256"
+BAD_PROXY_TARGET_PROVENANCE_JSON="$TMP_DIR/installed-host-bad-proxy-target.provenance.json"
+BAD_PROXY_TARGET_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_bad_proxy_target_verify_summary.json"
+mkdir -p "$BAD_PROXY_TARGET_ROOT"
+cp -R "$INSTALLED_HOST_DIR" "$BAD_PROXY_TARGET_DIR"
+jq '.observed.active_proxy_target = "127.0.0.1:9999" | .summary.active_proxy_target = "127.0.0.1:9999"' \
+  "$BAD_PROXY_TARGET_DIR/access_bridge_host_install_check_summary.json" >"$BAD_PROXY_TARGET_DIR/access_bridge_host_install_check_summary.json.tmp"
+mv "$BAD_PROXY_TARGET_DIR/access_bridge_host_install_check_summary.json.tmp" "$BAD_PROXY_TARGET_DIR/access_bridge_host_install_check_summary.json"
+jq \
+  --arg bundle_dir "$BAD_PROXY_TARGET_DIR" \
+  --arg bundle_tar "$BAD_PROXY_TARGET_TAR" \
+  --arg bundle_tar_sha256_file "$BAD_PROXY_TARGET_SHA" \
+  --arg manifest_sha256 "$BAD_PROXY_TARGET_DIR/manifest.sha256" \
+  --arg summary_json "$BAD_PROXY_TARGET_SUMMARY_JSON" \
+  --arg bundled_summary_json "$BAD_PROXY_TARGET_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
+  --arg provenance_json "$BAD_PROXY_TARGET_PROVENANCE_JSON" \
+  --arg smoke_summary_json "$BAD_PROXY_TARGET_DIR/access_bridge_service_smoke_summary.json" \
+  --arg deployment_summary_json "$BAD_PROXY_TARGET_DIR/access_bridge_deployment_evidence_summary.json" \
+  --arg host_summary_json "$BAD_PROXY_TARGET_DIR/access_bridge_host_install_check_summary.json" \
+  '.artifacts.bundle_dir = $bundle_dir
+    | .artifacts.bundle_tar = $bundle_tar
+    | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file
+    | .artifacts.manifest_sha256 = $manifest_sha256
+    | .artifacts.summary_json = $summary_json
+    | .artifacts.bundled_summary_json = $bundled_summary_json
+    | .artifacts.smoke_summary_json = $smoke_summary_json
+    | .artifacts.deployment_evidence_summary_json = $deployment_summary_json
+    | .artifacts.host_install_check_summary_json = $host_summary_json
+    | .artifacts.provenance_json = $provenance_json
+    | .provenance.sidecar_json = $provenance_json' \
+  "$INSTALLED_HOST_SUMMARY_JSON" >"$BAD_PROXY_TARGET_SUMMARY_JSON"
+cp "$BAD_PROXY_TARGET_SUMMARY_JSON" "$BAD_PROXY_TARGET_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+(
+  cd "$BAD_PROXY_TARGET_DIR"
+  find . -type f -print \
+    | sed 's|^\./||' \
+    | grep -v '^manifest\.sha256$' \
+    | LC_ALL=C sort \
+    | while IFS= read -r rel; do
+        sha256sum "$rel"
+      done
+) >"$BAD_PROXY_TARGET_DIR/manifest.sha256"
+tar -czf "$BAD_PROXY_TARGET_TAR" -C "$BAD_PROXY_TARGET_ROOT" "$(basename "$BAD_PROXY_TARGET_DIR")"
+printf '%s  %s\n' "$(sha256sum "$BAD_PROXY_TARGET_TAR" | awk '{print $1}')" "$(basename "$BAD_PROXY_TARGET_TAR")" >"$BAD_PROXY_TARGET_SHA"
+go run ./cmd/gpmrecover provenance-sign \
+  --summary-json "$BAD_PROXY_TARGET_SUMMARY_JSON" \
+  --bundle-tar "$BAD_PROXY_TARGET_TAR" \
+  --bundle-tar-sha256-file "$BAD_PROXY_TARGET_SHA" \
+  --private-key-file "$PRIVATE_KEY_FILE" \
+  --org-id pilot-org \
+  --org-name "Pilot Org" \
+  --out "$BAD_PROXY_TARGET_PROVENANCE_JSON" >/dev/null
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$BAD_PROXY_TARGET_SUMMARY_JSON" \
+  --provenance-json "$BAD_PROXY_TARGET_PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$BAD_PROXY_TARGET_VERIFY_SUMMARY_JSON" \
+  --print-verification-summary-json 0 >"$TMP_DIR/verify-installed-host-bad-proxy-target.log" 2>&1
+bad_proxy_target_rc=$?
+set -e
+if [[ "$bad_proxy_target_rc" -eq 0 ]] || ! grep -Fq 'active proxy target does not match env bridge address' "$TMP_DIR/verify-installed-host-bad-proxy-target.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: installed-host active proxy/env mismatch was accepted"
+  cat "$TMP_DIR/verify-installed-host-bad-proxy-target.log"
+  if [[ -f "$BAD_PROXY_TARGET_VERIFY_SUMMARY_JSON" ]]; then
+    cat "$BAD_PROXY_TARGET_VERIFY_SUMMARY_JSON"
+  fi
   exit 1
 fi
 
@@ -924,8 +1003,9 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
 cp "$ORIGINAL_SMOKE_SUMMARY_COPY" "$BUNDLE_DIR/access_bridge_service_smoke_summary.json"
 if ! jq -e --arg original_sha "$SMOKE_SUMMARY_SHA256" --arg loose_sha "$TAMPERED_LOOSE_SMOKE_SUMMARY_SHA256" '
   .status == "pass"
-  and .pilot_handoff_ready == true
-  and .trusted_pilot_receipt_ready == true
+  and .pilot_handoff_ready == false
+  and .trusted_pilot_receipt_ready == false
+  and .pilot_handoff_criteria.installed_host_evidence_present == false
   and .evidence_binding.smoke_summary_sha256 == $original_sha
   and .evidence_binding.smoke_summary_sha256 != $loose_sha
   and (.evidence_binding.smoke_summary_json | contains("/access_bridge_pilot_evidence_bundle/access_bridge_service_smoke_summary.json"))
