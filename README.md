@@ -1,6 +1,19 @@
-# Trust-Tiered Decentralized Privacy Network (MVP Scaffold)
+# Global Private Mesh Access Recovery
 
-This repository starts a decentralized privacy network where one `node` program can run as:
+GPM is an access recovery toolkit for blocked or disrupted sites, apps, and communities. It verifies signed recovery maps, trusted organization keys, helper bridge invites, and short-lived helper registries before showing a user any recovery path.
+
+The VPN, mesh, wallet, and settlement work in this repository is reusable infrastructure. The current product wedge is Access Recovery, not a generic dVPN.
+
+## Start Here: Access Recovery Beta
+
+- [Access Recovery toolkit track](docs/access-recovery-toolkit-track.md) is the product source of truth for signed packs, trusted keys, helper registries, bridge evidence, and handoff rules.
+- [Access Recovery operator runbook](docs/access-recovery-operator-runbook.md) is the helper/operator flow for key handoff, bridge-service install evidence, onboarding, quarantine, expiry, and incident response.
+- [Web recovery verifier](apps/web/recovery.html) is the browser-local user surface for checking who signed a recovery path before using it.
+- `./scripts/easy_node.sh access-recovery-local-evidence-refresh --write-canonical 1 --refresh-roadmap 1 --print-summary-json 1` refreshes local loopback evidence; real pilot handoff still requires real helper HTTPS evidence and a trusted verifier receipt.
+
+## Reusable Runtime Infrastructure
+
+This repository also contains a decentralized privacy runtime where one `node` program can run as:
 - client
 - entry relay
 - exit relay (including bring-your-own-exit)

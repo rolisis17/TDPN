@@ -6,6 +6,12 @@ This folder provides the first productized public web surface for **Global Priva
 - `portal.html`: authenticated public client workspace scaffold for wallet sign-in (including Keplr/Leap wallet-extension sign + verify), onboarding, client connection controls, contribution/reward status, and diagnostics. Public release builds do not ship admin, audit, operator moderation, server lifecycle, slashing, settlement, or payout controls; those workflows belong in the separate GPM Admin Console.
 - `recovery.html`: local signed access-pack and bridge-invite verifier for the Access Recovery beta path. It can build/import/export a local trusted-organization key store, import single trusted-key handoffs, import/export and summarize a helper registry for active/quarantine checks plus signed abuse-report/rate-limit commitments, verify a signed helper-registry artifact before extracting the raw registry while preserving its organization binding, exchange `GPMREC1` text handoffs including trusted keys and signed helper registries, render/download QR handoffs locally, scan QR images with native QR detection or bundled fallback scanning, then verifies signature, expiry, organization id, trusted-key match, helper status, and helper abuse/rate metadata before listing recovery/helper paths.
 
+## Product Lanes
+
+- Access Recovery: primary beta surface. Signed maps, trusted keys, browser-local verification, helper bridge evidence, and trusted handoff receipts.
+- Client Portal: supporting runtime workspace. Wallet, device, connection, and contribution controls are infrastructure reuse, not the product wedge.
+- Admin Console: separate operator/governance surface, not shipped in this public web folder.
+
 ## Local Preview
 
 From repo root:

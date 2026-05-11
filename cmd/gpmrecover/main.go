@@ -1597,7 +1597,11 @@ func validateBridgeDeployPublicHost(raw string) (string, error) {
 	if len(host) > 253 {
 		return "", errors.New("--public-host is too long")
 	}
-	for _, label := range strings.Split(host, ".") {
+	labels := strings.Split(host, ".")
+	if len(labels) < 2 {
+		return "", errors.New("--public-host must be a fully qualified public DNS name or public IPv4 address")
+	}
+	for _, label := range labels {
 		if label == "" {
 			return "", errors.New("--public-host contains an empty DNS label")
 		}

@@ -53,6 +53,26 @@ trap ci_local_restore_tracked_state EXIT
 echo "[ci] unit tests"
 go test ./...
 
+echo "[ci] access recovery shell syntax preflight"
+bash -n \
+  scripts/access_bridge_deployment_evidence.sh \
+  scripts/access_bridge_host_install_check.sh \
+  scripts/access_bridge_pilot_evidence_bundle.sh \
+  scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  scripts/access_recovery_beta_local_gate.sh \
+  scripts/access_recovery_local_evidence_refresh.sh \
+  scripts/integration_recovery_browser_smoke.sh \
+  scripts/integration_access_recovery_demo_contract.sh \
+  scripts/integration_access_recovery_examples_contract.sh \
+  scripts/integration_access_bridge_service_serve.sh \
+  scripts/integration_access_bridge_deployment_evidence.sh \
+  scripts/integration_access_bridge_host_install_check.sh \
+  scripts/integration_access_bridge_pilot_evidence_bundle.sh \
+  scripts/integration_access_bridge_pilot_evidence_bundle_verify.sh \
+  scripts/integration_access_recovery_beta_local_gate.sh \
+  scripts/integration_easy_node_access_bridge_pilot_evidence_bundle.sh \
+  scripts/integration_easy_node_access_recovery_local_evidence_refresh.sh
+
 echo "[ci] access recovery browser smoke integration"
 bash ./scripts/integration_recovery_browser_smoke.sh
 

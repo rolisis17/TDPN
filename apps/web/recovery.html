@@ -31,13 +31,14 @@
       <section class="recover-tool" aria-labelledby="recover-heading">
         <div class="recover-tool__header">
           <p class="eyebrow">Access recovery</p>
-          <h1 id="recover-heading">Verify a signed recovery artifact.</h1>
+          <h1 id="recover-heading">Check who signed this recovery path before you use it.</h1>
         </div>
+        <p class="recover-panel__hint">Trust key -> recovery pack or invite -> signed helper registry if needed -> verify.</p>
 
         <div class="recover-grid">
           <section class="recover-panel" aria-labelledby="pack-heading">
             <div class="recover-panel__heading">
-              <h2 id="pack-heading">Signed Pack / Invite</h2>
+              <h2 id="pack-heading">Recovery Pack or Bridge Invite</h2>
               <label class="file-picker">
                 <span>Import</span>
                 <input id="pack_file" type="file" accept="application/json,.json" />
@@ -53,7 +54,7 @@
 
           <section class="recover-panel" aria-labelledby="trust-heading">
             <div class="recover-panel__heading">
-              <h2 id="trust-heading">Trust Store</h2>
+              <h2 id="trust-heading">Organization Trust Store</h2>
               <label class="file-picker">
                 <span>Import</span>
                 <input id="trust_file" type="file" accept="application/json,.json" />
@@ -102,7 +103,7 @@
 
           <section class="recover-panel recover-panel--wide" aria-labelledby="registry-heading">
             <div class="recover-panel__heading">
-              <h2 id="registry-heading">Helper Registry</h2>
+              <h2 id="registry-heading">Signed Helper Registry</h2>
               <button class="btn secondary" id="verify_registry_btn" type="button">Verify Signed</button>
               <label class="file-picker">
                 <span>Import</span>
@@ -131,7 +132,7 @@
 
       <section class="recover-panel handoff-panel" aria-labelledby="handoff-heading">
         <div class="recover-panel__heading">
-          <h2 id="handoff-heading">Text Handoff</h2>
+          <h2 id="handoff-heading">GPMREC1 Text or QR Handoff</h2>
           <span class="recover-count">GPMREC1</span>
         </div>
         <textarea

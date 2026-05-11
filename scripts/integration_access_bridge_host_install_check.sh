@@ -133,6 +133,8 @@ bad_public_hosts=(
   "helper.test"
   "helper.invalid"
   "helper.example"
+  "helper"
+  "com"
   "example.com"
   "example.net"
   "example.org"

@@ -56,8 +56,18 @@ Run:
 
 What this does:
 1. Runs all Go tests.
-2. Runs internal topology smoke test.
-3. Runs integration checks:
+2. Runs a fast Access Recovery shell syntax preflight over the recovery/helper scripts.
+3. Runs local Access Recovery gates that do not require live A/B machines:
+   - browser-local recovery verifier smoke
+   - generated demo bundle contract
+   - checked-in example artifact contract
+   - bridge service serve smoke
+   - deployment evidence contract
+   - host install checklist contract
+   - pilot evidence bundle + verifier contracts
+   - beta local gate and easy-node wrapper coverage
+   - local evidence refresh wrapper
+4. Runs the broader runtime, release, roadmap, desktop, and topology integration checks:
    - challenge
    - revocation
    - token-proof replay

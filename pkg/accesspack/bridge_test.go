@@ -359,6 +359,7 @@ func TestEvaluateBridgeServiceRequestRejectsUnsafeHelperURLs(t *testing.T) {
 		{name: "plain-http", url: "http://helper.gpm-pilot.net/connect", code: "bridge_service_access_path_plain_http"},
 		{name: "private-ip", url: "https://10.0.0.5/connect", code: "bridge_service_access_path_private_host"},
 		{name: "reserved-domain", url: "https://reserved-helper.example/connect", code: "bridge_service_access_path_private_host"},
+		{name: "single-label", url: "https://helper/connect", code: "bridge_service_access_path_private_host"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			config := BuildBridgeServiceConfig(testBridgeInvite(), testBridgeHelperRegistry(), BridgeServiceConfigOptions{
@@ -427,6 +428,7 @@ func TestBridgeInvitePolicyRejectsUnsafeServiceableHelperURLs(t *testing.T) {
 		{name: "plain-http", url: "http://helper.gpm-pilot.net/connect", code: "bridge_invite_access_path_plain_http"},
 		{name: "private-ip", url: "https://10.0.0.5/connect", code: "bridge_invite_access_path_private_host"},
 		{name: "reserved-domain", url: "https://reserved-helper.example/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "single-label", url: "https://helper/connect", code: "bridge_invite_access_path_private_host"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			invite := testBridgeInvite()
@@ -505,6 +507,17 @@ func TestBridgeAccessPathPublicIPv4ReservedRanges(t *testing.T) {
 	}
 	if !bridgeAccessPathHostLooksPublic("192.0.3.10") {
 		t.Fatalf("expected non-reserved 192.0.3.10 to remain public-looking")
+	}
+}
+
+func TestBridgeAccessPathRejectsSingleLabelDNSHost(t *testing.T) {
+	for _, host := range []string{"helper", "com"} {
+		if bridgeAccessPathHostLooksPublic(host) {
+			t.Fatalf("expected single-label DNS host %s to be rejected", host)
+		}
+	}
+	if !bridgeAccessPathHostLooksPublic("helper.gpm-pilot.net") {
+		t.Fatalf("expected multi-label public-looking DNS host to pass")
 	}
 }
 

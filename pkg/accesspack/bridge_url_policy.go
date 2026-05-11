@@ -92,7 +92,7 @@ func bridgeAccessPathHostLooksPublic(raw string) bool {
 		}
 		return true
 	}
-	return !bridgeAccessPathDNSNameLooksReserved(host)
+	return bridgeAccessPathDNSNameLooksPublic(host)
 }
 
 func bridgeAccessPathIPv4LooksPublic(ip net.IP) bool {
@@ -133,4 +133,29 @@ func bridgeAccessPathDNSNameLooksReserved(host string) bool {
 		}
 	}
 	return false
+}
+
+func bridgeAccessPathDNSNameLooksPublic(host string) bool {
+	if bridgeAccessPathDNSNameLooksReserved(host) {
+		return false
+	}
+	labels := strings.Split(host, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels {
+		if label == "" || len(label) > 63 {
+			return false
+		}
+		if strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return false
+		}
+		for _, r := range label {
+			valid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-'
+			if !valid {
+				return false
+			}
+		}
+	}
+	return true
 }

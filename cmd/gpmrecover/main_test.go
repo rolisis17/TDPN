@@ -315,6 +315,7 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 		{name: "dot-test", publicHost: "bridge.test", want: "public DNS"},
 		{name: "dot-example", publicHost: "bridge.example", want: "public DNS"},
 		{name: "example-com", publicHost: "example.com", want: "public DNS"},
+		{name: "single-label", publicHost: "helper", want: "fully qualified public DNS"},
 		{name: "loopback-ip", publicHost: "127.0.0.1", want: "public-routable"},
 		{name: "private-ip", publicHost: "10.1.2.3", want: "public-routable"},
 		{name: "cgnat-ip", publicHost: "100.64.0.10", want: "public-routable"},
