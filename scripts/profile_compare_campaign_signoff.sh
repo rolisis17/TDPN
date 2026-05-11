@@ -200,7 +200,7 @@ detect_local_stack_block_reason() {
       reason="local stack permission denied"
     elif grep -Eqi -- 'failed to start local wg-only stack' "$log_path"; then
       reason="local wg-only stack unavailable"
-    elif grep -Eqi -- 'profile-compare-campaign: no valid compare summaries were produced' "$log_path" && [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    elif grep -Eqi -- 'profile-compare-campaign: no valid compare summaries were produced|stage=campaign-abort reason=no_valid_compare_summaries' "$log_path" && [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
       reason="local mode produced no summaries on non-root host"
     fi
   fi

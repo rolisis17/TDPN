@@ -1551,6 +1551,42 @@ for expected in '--execution-mode docker' '--start-local-stack 0'; do
   fi
 done
 
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  echo "[profile-compare-campaign-signoff] automatic docker fallback when current campaign abort line reports no summaries"
+  : >"$SIGNOFF_CAPTURE"
+  AUTO_FALLBACK_ABORT_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_auto_fallback_abort.json"
+  SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+  PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+  PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+  FAKE_CAMPAIGN_FAIL_UNLESS_DOCKER=1 \
+  FAKE_CAMPAIGN_FAIL_MESSAGE='stage=campaign-abort reason=no_valid_compare_summaries elapsed_sec=1' \
+  FAKE_CHECK_RC=0 \
+  FAKE_CHECK_DECISION=GO \
+  ./scripts/profile_compare_campaign_signoff.sh \
+    --reports-dir "$TMP_DIR/reports_auto_fallback_abort" \
+    --refresh-campaign 1 \
+    --summary-json "$AUTO_FALLBACK_ABORT_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_auto_fallback_abort.log 2>&1
+
+  if ! rg -q '\[profile-compare-campaign-signoff\] campaign auto-fallback: mode=local->docker reason=local mode produced no summaries on non-root host' /tmp/integration_profile_compare_campaign_signoff_auto_fallback_abort.log; then
+    echo "expected current abort-line auto-fallback trace line not found"
+    cat /tmp/integration_profile_compare_campaign_signoff_auto_fallback_abort.log
+    exit 1
+  fi
+  if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_fallback.triggered == true and .inputs.campaign_refresh_fallback.reason == "local mode produced no summaries on non-root host" and .inputs.campaign_refresh_fallback.effective_mode == "docker" and .inputs.campaign_refresh_overrides_effective.start_local_stack == "0" and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass"' "$AUTO_FALLBACK_ABORT_SUMMARY" >/dev/null 2>&1; then
+    echo "current abort-line auto-fallback summary JSON missing expected fields"
+    cat "$AUTO_FALLBACK_ABORT_SUMMARY"
+    exit 1
+  fi
+  first_campaign_line="$(sed -n '1p' "$SIGNOFF_CAPTURE" || true)"
+  second_campaign_line="$(sed -n '2p' "$SIGNOFF_CAPTURE" || true)"
+  third_line="$(sed -n '3p' "$SIGNOFF_CAPTURE" || true)"
+  if [[ "$first_campaign_line" != campaign* || "$second_campaign_line" != campaign* || "$third_line" != check* ]]; then
+    echo "current abort-line auto-fallback path should run campaign, campaign fallback, then check"
+    cat "$SIGNOFF_CAPTURE"
+    exit 1
+  fi
+fi
+
 echo "[profile-compare-campaign-signoff] campaign timeout fail-close with heartbeat diagnostics"
 : >"$SIGNOFF_CAPTURE"
 CAMPAIGN_TIMEOUT_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_campaign_timeout.json"

@@ -136,6 +136,23 @@ redact_text() {
     -e "s/(((${sensitive_envs})[[:space:]]*=[[:space:]]*))([^[:space:]]+)/\\1[redacted]/g"
 }
 
+first_log_hint() {
+  local path="$1"
+  local hint=""
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  hint="$(awk 'NF { print; exit }' "$path" 2>/dev/null || true)"
+  hint="$(trim "$hint")"
+  if [[ -z "$hint" ]]; then
+    printf '%s' ""
+    return
+  fi
+  hint="$(printf '%s' "$hint" | cut -c 1-500)"
+  redact_text "$hint"
+}
+
 extract_flag_value_from_command() {
   local command="$1"
   local flag="$2"
@@ -667,6 +684,7 @@ for i in "${!vm_ids[@]}"; do
   timed_out="0"
   status="pass"
   failure_reason=""
+  command_failure_hint=""
   if (( command_timeout_sec > 0 )) && (( command_rc == 124 || command_rc == 137 )); then
     timed_out="1"
     status="timeout"
@@ -674,6 +692,9 @@ for i in "${!vm_ids[@]}"; do
   elif (( command_rc != 0 )); then
     status="fail"
     failure_reason="command_rc_$command_rc"
+  fi
+  if [[ "$status" != "pass" ]]; then
+    command_failure_hint="$(first_log_hint "$vm_log")"
   fi
 
   summary_hint="$(extract_flag_value_from_command "$vm_command" "--summary-json")"
@@ -752,6 +773,13 @@ for i in "${!vm_ids[@]}"; do
     failure_reason="summary_json_reducer_schema_invalid"
   fi
 
+  stale_artifact_reuse="0"
+  if [[ "$summary_exists" == "1" && "$summary_fresh" != "1" ]]; then
+    stale_artifact_reuse="1"
+  elif [[ "$report_exists" == "1" && "$report_fresh" != "1" ]]; then
+    stale_artifact_reuse="1"
+  fi
+
   if [[ "$summary_exists" == "1" && "$summary_valid" == "1" ]]; then
     decision_value="$(summary_value_str "$summary_path" '.decision.decision // .decision // ""')"
     decision_value="$(trim "$decision_value")"
@@ -786,6 +814,8 @@ for i in "${!vm_ids[@]}"; do
     --arg run_started_utc "$run_started_utc" \
     --arg run_completed_utc "$run_completed_utc" \
     --arg failure_reason "$failure_reason" \
+    --arg command_failure_hint "$command_failure_hint" \
+    --arg stale_artifact_reuse "$stale_artifact_reuse" \
     --arg vm_log "$vm_log" \
     --arg summary_path "$summary_path" \
     --arg summary_exists "$summary_exists" \
@@ -810,6 +840,12 @@ for i in "${!vm_ids[@]}"; do
       started_at_utc: $run_started_utc,
       completed_at_utc: $run_completed_utc,
       failure_reason: (if $failure_reason == "" then null else $failure_reason end),
+      diagnostics: {
+        command_failure_hint: (
+          if $command_failure_hint == "" then null else $command_failure_hint end
+        ),
+        stale_artifact_reuse: ($stale_artifact_reuse == "1")
+      },
       artifacts: {
         log: $vm_log,
         summary_json: (if $summary_path == "" then null else $summary_path end),
@@ -1007,18 +1043,20 @@ fi
   echo
   echo "## VM Results"
   echo
-  echo "| VM | Status | rc | timed_out | duration_sec | summary_json | report_md | log |"
-  echo "|---|---|---:|:---:|---:|---|---|---|"
+  echo "| VM | Status | rc | timed_out | duration_sec | stale_artifact_reuse | diagnostic | summary_json | report_md | log |"
+  echo "|---|---|---:|:---:|---:|:---:|---|---|---|---|"
   while IFS= read -r row; do
     vm_id="$(jq -r '.vm_id' <<<"$row")"
     vm_status="$(jq -r '.status' <<<"$row")"
     vm_rc="$(jq -r '.command_rc // "null"' <<<"$row")"
     vm_timed_out="$(jq -r '.timed_out' <<<"$row")"
     vm_duration="$(jq -r '.duration_sec' <<<"$row")"
+    vm_stale_artifact="$(jq -r '.diagnostics.stale_artifact_reuse // false' <<<"$row")"
+    vm_diagnostic="$(jq -r '.diagnostics.command_failure_hint // ""' <<<"$row")"
     vm_summary="$(jq -r '.artifacts.summary_json // ""' <<<"$row")"
     vm_report="$(jq -r '.artifacts.report_md // ""' <<<"$row")"
     vm_log="$(jq -r '.artifacts.log // ""' <<<"$row")"
-    echo "| $vm_id | $vm_status | $vm_rc | $vm_timed_out | $vm_duration | $vm_summary | $vm_report | $vm_log |"
+    echo "| $vm_id | $vm_status | $vm_rc | $vm_timed_out | $vm_duration | $vm_stale_artifact | $vm_diagnostic | $vm_summary | $vm_report | $vm_log |"
   done < <(jq -c '.vms[]' "$summary_json")
   echo
   echo "## Reducer Handoff"

@@ -12,6 +12,7 @@ backup_provider=""
 backup_mode=""
 live_curl_mock_dir=""
 tls_dir=""
+wg_mock_dir=""
 
 env_value() {
   local file="$1"
@@ -43,6 +44,9 @@ cleanup() {
   fi
   if [[ -n "$tls_dir" ]]; then
     rm -rf "$tls_dir"
+  fi
+  if [[ -n "$wg_mock_dir" ]]; then
+    rm -rf "$wg_mock_dir"
   fi
 }
 trap cleanup EXIT
@@ -230,6 +234,37 @@ if ! rg -q "EXIT_WG_PUBKEY invalid; must be a valid WireGuard public key or unse
   exit 1
 fi
 sed -i -E 's/^EXIT_WG_PUBKEY=.*/EXIT_WG_PUBKEY=/' "$AUTH_ENV"
+
+wg_mock_dir="$(mktemp -d)"
+cat >"$wg_mock_dir/wg" <<'EOF_WG'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "pubkey" ]]; then
+  cat >/dev/null
+  echo "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  exit 0
+fi
+exit 1
+EOF_WG
+chmod +x "$wg_mock_dir/wg"
+if rg -q '^EXIT_WG_PUBKEY=' "$AUTH_ENV"; then
+  sed -i -E 's#^EXIT_WG_PUBKEY=.*#EXIT_WG_PUBKEY=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=#' "$AUTH_ENV"
+else
+  echo "EXIT_WG_PUBKEY=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=" >>"$AUTH_ENV"
+fi
+if PATH="$wg_mock_dir:$PATH" ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_wg_pub_mismatch_fail.log 2>&1; then
+  echo "expected prod-preflight to fail when EXIT_WG_PUBKEY does not match EXIT_WG_PRIVATE_KEY_PATH"
+  cat /tmp/integration_prod_preflight_wg_pub_mismatch_fail.log
+  exit 1
+fi
+if ! rg -q "EXIT_WG_PUBKEY does not match EXIT_WG_PRIVATE_KEY_PATH" /tmp/integration_prod_preflight_wg_pub_mismatch_fail.log; then
+  echo "missing expected EXIT_WG_PUBKEY mismatch failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_wg_pub_mismatch_fail.log
+  exit 1
+fi
+sed -i -E 's/^EXIT_WG_PUBKEY=.*/EXIT_WG_PUBKEY=/' "$AUTH_ENV"
+rm -rf "$wg_mock_dir"
+wg_mock_dir=""
 
 echo "ISSUER_ADMIN_TOKEN=legacy-admin-token-1234567890" >>"$AUTH_ENV"
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_token_fail.log 2>&1; then

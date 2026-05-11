@@ -1950,6 +1950,10 @@ access_recovery_evidence_json() {
         (($v | type) == "string" and (($v | ascii_downcase) == $expected));
       def pass_status:
         status_norm == "pass";
+      def generated_at_ready:
+        ((.generated_at_utc | type) == "string")
+        and ((.generated_at_utc | length) > 0)
+        and ($summary_age_sec != null);
       def service_smoke_transport_ok:
         if ((.base_url // "") | test("^https://"; "i")) then
           (.transport.https == true)
@@ -2121,7 +2125,8 @@ access_recovery_evidence_json() {
       (.schema.id // null) as $schema_id
       | status_norm as $raw_status
       | (($schema_id == $expected_schema_id) and ($raw_status != "")) as $valid_contract
-      | ($valid_contract and ($summary_stale | not)) as $fresh_contract
+      | generated_at_ready as $generated_at_ready
+      | ($valid_contract and ($summary_stale | not) and $generated_at_ready) as $fresh_contract
       | (
           if $kind == "service_smoke" then service_smoke_semantic_ok
           elif $kind == "deployment_evidence" then deployment_evidence_semantic_ok
@@ -2131,7 +2136,8 @@ access_recovery_evidence_json() {
         ) as $semantic_ok
       | ($fresh_contract and $semantic_ok) as $usable_contract
       | (
-          if $valid_contract and $summary_stale then "stale"
+          if $valid_contract and ($generated_at_ready | not) then "invalid"
+          elif $valid_contract and $summary_stale then "stale"
           elif $valid_contract and ($semantic_ok | not) then "fail"
           elif $valid_contract then $raw_status
           else "invalid"
@@ -2151,7 +2157,8 @@ access_recovery_evidence_json() {
           summary_max_age_sec: $summary_max_age_sec,
           semantic_ok: (if $fresh_contract then $semantic_ok else null end),
           notes: (
-            if $valid_contract and $summary_stale then ($evidence_label + " summary is stale or has untrusted freshness metadata")
+            if $valid_contract and ($generated_at_ready | not) then ($evidence_label + " summary is missing valid generated_at_utc")
+            elif $valid_contract and $summary_stale then ($evidence_label + " summary is stale or has untrusted freshness metadata")
             elif $valid_contract and ($semantic_ok | not) then ($evidence_label + " summary failed semantic evidence checks")
             elif $valid_contract then str_or_null(.notes)
             elif $schema_id != $expected_schema_id then ($evidence_label + " summary schema mismatch")

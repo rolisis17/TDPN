@@ -13797,6 +13797,25 @@ prod_preflight() {
           check_fail "exit wg private key permissions too open: $exit_wg_private_key_local mode=${exit_key_mode:-unknown}"
         fi
       fi
+      if [[ -n "$exit_wg_pubkey" ]] && is_valid_wg_public_key "$exit_wg_pubkey"; then
+        if command -v wg >/dev/null 2>&1; then
+          local derived_exit_wg_pubkey
+          if derived_exit_wg_pubkey="$(wg pubkey <"$exit_wg_private_key_local" 2>/dev/null)"; then
+            derived_exit_wg_pubkey="$(printf '%s' "$derived_exit_wg_pubkey" | tr -d '\r\n')"
+            if [[ -n "$derived_exit_wg_pubkey" && "$derived_exit_wg_pubkey" == "$exit_wg_pubkey" ]]; then
+              check_ok "EXIT_WG_PUBKEY matches EXIT_WG_PRIVATE_KEY_PATH"
+            elif [[ -n "$derived_exit_wg_pubkey" ]]; then
+              check_fail "EXIT_WG_PUBKEY does not match EXIT_WG_PRIVATE_KEY_PATH; unset EXIT_WG_PUBKEY or rerun server-up to regenerate env from the mounted key"
+            else
+              check_fail "failed to derive EXIT_WG_PUBKEY from EXIT_WG_PRIVATE_KEY_PATH"
+            fi
+          else
+            check_fail "failed to derive EXIT_WG_PUBKEY from EXIT_WG_PRIVATE_KEY_PATH"
+          fi
+        else
+          check_ok "EXIT_WG_PUBKEY/private-key match check skipped (wg command unavailable)"
+        fi
+      fi
     else
       check_fail "missing exit wg private key file: $exit_wg_private_key_local"
     fi

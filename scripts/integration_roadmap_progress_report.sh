@@ -2424,6 +2424,78 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] Access Recovery source summaries require generated_at_utc despite fresh mtime"
+run_access_recovery_missing_generated_at_case() {
+  local case_name="$1"
+  local missing_kind="$2"
+  local expected_field="$3"
+  local smoke_path="$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"
+  local deployment_path="$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"
+  local host_path="$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"
+  local mutated_path="$TMP_DIR/access_recovery_${case_name}_missing_generated_at_utc_summary.json"
+  local out_summary="$TMP_DIR/roadmap_progress_access_recovery_${case_name}_missing_generated_at_utc_summary.json"
+  local out_report="$TMP_DIR/roadmap_progress_access_recovery_${case_name}_missing_generated_at_utc_report.md"
+  local out_log="${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_${case_name}_missing_generated_at_utc.log"
+
+  case "$missing_kind" in
+    service_smoke)
+      jq 'del(.generated_at_utc)' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$mutated_path"
+      smoke_path="$mutated_path"
+      ;;
+    deployment_evidence)
+      jq 'del(.generated_at_utc)' "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$mutated_path"
+      deployment_path="$mutated_path"
+      ;;
+    host_install)
+      jq 'del(.generated_at_utc)' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$mutated_path"
+      host_path="$mutated_path"
+      ;;
+    *)
+      echo "unknown Access Recovery missing generated_at_utc case: $missing_kind"
+      exit 1
+      ;;
+  esac
+  touch "$mutated_path"
+
+  if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+    --access-bridge-service-smoke-summary-json "$smoke_path" \
+    --access-bridge-deployment-evidence-summary-json "$deployment_path" \
+    --access-bridge-host-install-summary-json "$host_path" \
+    --summary-json "$out_summary" \
+    --report-md "$out_report" \
+    --print-report 0 \
+    --print-summary-json 0 >"$out_log" 2>&1; then
+    echo "expected failure when required Access Recovery $missing_kind summary lacks generated_at_utc"
+    cat "$out_log"
+    exit 1
+  fi
+
+  if ! jq -e \
+    --arg field "$expected_field" \
+    --arg action "$expected_field" \
+    '
+      .status == "fail"
+      and .rc == 1
+      and .access_recovery_track.status == "evidence-invalid"
+      and .access_recovery_track[$field].status == "invalid"
+      and .access_recovery_track[$field].available == false
+      and (.access_recovery_track[$field].summary_age_sec | type) == "number"
+      and ((.access_recovery_track[$field].notes // "") | contains("missing valid generated_at_utc"))
+      and .access_recovery_track.recommended_next_action.id == $action
+    ' "$out_summary" >/dev/null; then
+    echo "Access Recovery $missing_kind missing generated_at_utc summary mismatch"
+    cat "$out_summary"
+    exit 1
+  fi
+}
+
+run_access_recovery_missing_generated_at_case "service_smoke" "service_smoke" "access_bridge_service_smoke"
+run_access_recovery_missing_generated_at_case "deployment_evidence" "deployment_evidence" "access_bridge_deployment_evidence"
+run_access_recovery_missing_generated_at_case "host_install" "host_install" "access_bridge_host_install"
+
 echo "[roadmap-progress-report] Access Recovery mixed helper/config evidence blocks required evidence"
 ACCESS_RECOVERY_MIXED_IDENTITY_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_mixed_identity_summary.json"
 jq '.deployed_identity.helper_id = "helper-other"' "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_MIXED_IDENTITY_SUMMARY_JSON"

@@ -297,9 +297,50 @@ if ! jq -e '
   and .vms[0].failure_reason == "summary_json_not_fresh"
   and .vms[0].artifacts.summary_exists == true
   and .vms[0].artifacts.summary_fresh == false
+  and .vms[0].diagnostics.stale_artifact_reuse == true
 ' "$STALE_SUMMARY" >/dev/null 2>&1; then
   echo "stale-artifact summary missing expected fail-closed fields"
   cat "$STALE_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-sweep] ssh rc=255 with stale artifacts surfaces diagnostics"
+SSH_STALE_SUMMARY="$TMP_DIR/ssh_stale_summary.json"
+SSH_STALE_LOG="$TMP_DIR/ssh_stale.log"
+SSH_STALE_CAMPAIGN_SUMMARY_PATH="$TMP_DIR/ssh stale artifacts/stale campaign summary.json"
+SSH_STALE_CAMPAIGN_REPORT_PATH="$TMP_DIR/ssh stale artifacts/stale campaign report.md"
+mkdir -p "$(dirname "$SSH_STALE_CAMPAIGN_SUMMARY_PATH")"
+printf '{"status":"ok","decision":{"decision":"GO","recommended_profile":"balanced","support_rate_pct":99}}' >"$SSH_STALE_CAMPAIGN_SUMMARY_PATH"
+printf '# stale report\n' >"$SSH_STALE_CAMPAIGN_REPORT_PATH"
+
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/reports_ssh_stale" \
+  --summary-json "$SSH_STALE_SUMMARY" \
+  --command-timeout-sec 120 \
+  --vm-command "vm_ssh_stale::bash -lc 'echo \"ssh: connect to host 100.64.244.24 port 2222: Connection timed out\" >&2; exit 255' --summary-json \"$SSH_STALE_CAMPAIGN_SUMMARY_PATH\" --report-md \"$SSH_STALE_CAMPAIGN_REPORT_PATH\"" \
+  --print-summary-json 0 >"$SSH_STALE_LOG" 2>&1
+ssh_stale_rc=$?
+set -e
+
+if [[ "$ssh_stale_rc" -ne 1 ]]; then
+  echo "expected ssh-stale path rc=1, got rc=$ssh_stale_rc"
+  cat "$SSH_STALE_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .counts.vm_fail == 1
+  and .vms[0].command_rc == 255
+  and .vms[0].failure_reason == "command_rc_255"
+  and .vms[0].artifacts.summary_exists == true
+  and .vms[0].artifacts.summary_fresh == false
+  and .vms[0].diagnostics.stale_artifact_reuse == true
+  and ((.vms[0].diagnostics.command_failure_hint // "") | contains("ssh: connect to host 100.64.244.24 port 2222"))
+' "$SSH_STALE_SUMMARY" >/dev/null 2>&1; then
+  echo "ssh-stale summary missing expected diagnostics"
+  cat "$SSH_STALE_SUMMARY"
   exit 1
 fi
 
