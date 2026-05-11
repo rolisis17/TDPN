@@ -1975,7 +1975,7 @@ access_recovery_evidence_json() {
         rc_ok
         and pass_status
         and ((.schema.major | type) == "number" and .schema.major == 1)
-        and ((.schema.minor | type) == "number" and .schema.minor >= 1)
+        and ((.schema.minor | type) == "number" and .schema.minor >= 2)
         and str_eq(.smoke.status; "pass")
         and str_eq(.smoke.evidence_status; "pass")
         and (.smoke.auth_required == true)
@@ -2022,8 +2022,10 @@ access_recovery_evidence_json() {
           "caddy_xff_overwrite",
           "nginx_xff_overwrite",
           "caddy_public_host_valid",
+          "caddy_public_host_matches_expected",
           "caddy_reverse_proxy_target",
           "nginx_public_host_valid",
+          "nginx_public_host_matches_expected",
           "nginx_proxy_pass_target"
         ];
       def required_host_checks_pass:
@@ -2038,7 +2040,7 @@ access_recovery_evidence_json() {
         rc_ok
         and pass_status
         and ((.schema.major | type) == "number" and .schema.major == 1)
-        and ((.schema.minor | type) == "number" and .schema.minor >= 1)
+        and ((.schema.minor | type) == "number" and .schema.minor >= 4)
         and ((.summary.checks_total | type) == "number" and .summary.checks_total >= (required_host_check_ids | length))
         and ((.summary.checks_fail | type) == "number" and .summary.checks_fail == 0)
         and positive_bounded_rps
@@ -3928,10 +3930,12 @@ build_profile_default_gate_stability_cycle_next_command() {
 build_multi_vm_stability_promotion_cycle_next_command() {
   local reports_dir
   local cycles
+  local vm_command_file
   local summary_json_path
   local -a argv=()
   reports_dir="$(trim "${1:-}")"
   cycles="$(trim "${2:-}")"
+  vm_command_file="$(trim "${3:-}")"
   if [[ -z "$reports_dir" ]]; then
     reports_dir=".easy-node-logs"
   fi
@@ -3940,7 +3944,27 @@ build_multi_vm_stability_promotion_cycle_next_command() {
   if [[ "$cycles" =~ ^[1-9][0-9]*$ ]]; then
     argv+=("--cycles" "$cycles")
   fi
+  if [[ -n "$vm_command_file" ]]; then
+    argv+=("--cycle-arg" "--vm-command-file" "--cycle-arg" "$vm_command_file")
+  fi
   argv+=("--fail-on-no-go" "1" "--summary-json" "$summary_json_path" "--print-summary-json" "1")
+  profile_default_gate_command_from_argv "${argv[@]}"
+}
+
+build_multi_vm_live_evidence_publish_bundle_next_command() {
+  local reports_dir
+  local vm_command_file
+  local -a argv=()
+  reports_dir="$(trim "${1:-}")"
+  vm_command_file="$(trim "${2:-}")"
+  if [[ -z "$reports_dir" ]]; then
+    reports_dir=".easy-node-logs"
+  fi
+  argv=("./scripts/easy_node.sh" "profile-compare-multi-vm-live-evidence-publish-bundle" "--reports-dir" "$reports_dir")
+  if [[ -n "$vm_command_file" ]]; then
+    argv+=("--vm-command-file" "$vm_command_file")
+  fi
+  argv+=("--print-summary-json" "1")
   profile_default_gate_command_from_argv "${argv[@]}"
 }
 
@@ -10359,7 +10383,7 @@ if [[ "$(json_file_valid_01 "$profile_compare_multi_vm_stability_promotion_summa
     end
   ' "$profile_compare_multi_vm_stability_promotion_summary_json" 2>/dev/null || true)"
 fi
-multi_vm_stability_promotion_next_command="$(build_multi_vm_stability_promotion_cycle_next_command "$multi_vm_stability_promotion_command_reports_dir" "$multi_vm_stability_promotion_command_cycles")"
+multi_vm_stability_promotion_next_command="$(build_multi_vm_stability_promotion_cycle_next_command "$multi_vm_stability_promotion_command_reports_dir" "$multi_vm_stability_promotion_command_cycles" "$multi_vm_stability_vm_command_file")"
 multi_vm_stability_promotion_next_command_reason="multi-VM stability promotion evidence is missing; run promotion cycle to produce fail-closed GO/NO-GO evidence"
 if [[ -n "$profile_compare_multi_vm_stability_promotion_summary_json" ]] \
    && [[ "$(profile_compare_multi_vm_stability_promotion_summary_usable_01 "$profile_compare_multi_vm_stability_promotion_summary_json")" == "1" ]]; then
@@ -10839,6 +10863,7 @@ profile_default_gate_evidence_pack_go_json="null"
 profile_default_gate_evidence_pack_no_go_json="null"
 profile_default_gate_evidence_pack_reasons_json='[]'
 profile_default_gate_evidence_pack_notes_json=""
+profile_default_gate_evidence_pack_summary_next_command=""
 profile_default_gate_evidence_pack_needs_attention_json="true"
 profile_default_gate_evidence_pack_next_command=""
 profile_default_gate_evidence_pack_next_command_reason="profile-default evidence-pack summary is missing; publish a fresh evidence pack"
@@ -10925,6 +10950,13 @@ if [[ -n "$profile_default_gate_evidence_pack_input_summary_json" ]] && [[ -f "$
         else ""
         end
       ' "$profile_default_gate_evidence_pack_input_summary_json" 2>/dev/null || printf '%s' "")"
+      profile_default_gate_evidence_pack_summary_next_command="$(jq -r '
+        if (.operator_next_action_command | type) == "string" and (.operator_next_action_command | length) > 0 then .operator_next_action_command
+        elif (.next_command | type) == "string" and (.next_command | length) > 0 then .next_command
+        elif (.outcome.next_command | type) == "string" and (.outcome.next_command | length) > 0 then .outcome.next_command
+        else ""
+        end
+      ' "$profile_default_gate_evidence_pack_input_summary_json" 2>/dev/null || printf '%s' "")"
       profile_default_gate_evidence_pack_status_norm="$(printf '%s' "${profile_default_gate_evidence_pack_status_json:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
       if [[ "$profile_default_gate_evidence_pack_go_json" == "true" ]] \
          && [[ "$profile_default_gate_evidence_pack_status_norm" == "ok" || "$profile_default_gate_evidence_pack_status_norm" == "pass" || "$profile_default_gate_evidence_pack_status_norm" == "go" ]] \
@@ -10935,6 +10967,9 @@ if [[ -n "$profile_default_gate_evidence_pack_input_summary_json" ]] && [[ -f "$
         profile_default_gate_evidence_pack_next_command_reason=""
       else
         profile_default_gate_evidence_pack_needs_attention_json="true"
+        if [[ -n "$(trim "$profile_default_gate_evidence_pack_summary_next_command")" ]]; then
+          profile_default_gate_evidence_pack_next_command="$(trim "$profile_default_gate_evidence_pack_summary_next_command")"
+        fi
         first_reason="$(jq -r '
           if (.reasons | type) == "array" and (.reasons | length) > 0 then (.reasons[0] // "")
           elif (.errors | type) == "array" and (.errors | length) > 0 then (.errors[0] // "")
@@ -11200,7 +11235,7 @@ elif [[ "$multi_vm_stability_promotion_available_json" != "true" ]]; then
   if [[ "$multi_vm_stability_promotion_cycle_helper_available_json" == "true" ]]; then
     multi_vm_stability_promotion_evidence_pack_prereq_next_command="$multi_vm_stability_promotion_next_command"
     if [[ -z "$multi_vm_stability_promotion_evidence_pack_prereq_next_command" ]]; then
-      multi_vm_stability_promotion_evidence_pack_prereq_next_command="$(build_multi_vm_stability_promotion_cycle_next_command "$multi_vm_stability_promotion_command_reports_dir" "$multi_vm_stability_promotion_command_cycles")"
+      multi_vm_stability_promotion_evidence_pack_prereq_next_command="$(build_multi_vm_stability_promotion_cycle_next_command "$multi_vm_stability_promotion_command_reports_dir" "$multi_vm_stability_promotion_command_cycles" "$multi_vm_stability_vm_command_file")"
     fi
     if [[ -n "$multi_vm_stability_promotion_evidence_pack_prereq_next_command" ]]; then
       multi_vm_stability_promotion_evidence_pack_prereq_next_reason="multi-VM promotion evidence-pack prerequisites are missing (promotion-cycle summary unavailable); run profile-compare-multi-vm-stability-promotion-cycle first"
@@ -12063,6 +12098,7 @@ if [[ "$multi_vm_stability_promotion_live_action_ready_json" == "true" ]] \
    && [[ "$profile_compare_multi_vm_live_evidence_publish_bundle_helper_available_json" == "true" ]]; then
   profile_compare_multi_vm_live_and_pack_bundle_ready_json="true"
 fi
+profile_compare_multi_vm_live_evidence_publish_bundle_next_command="$(build_multi_vm_live_evidence_publish_bundle_next_command ".easy-node-logs" "$multi_vm_stability_vm_command_file")"
 
 next_actions_live_evidence_pending_action_count_after_bundle=$next_actions_live_evidence_pending_action_count
 next_actions_evidence_pack_pending_action_count_after_bundle=$next_actions_evidence_pack_pending_action_count
@@ -12181,6 +12217,7 @@ next_actions_candidate_json="$(
     --argjson profile_default_gate_live_and_pack_bundle_ready "$profile_default_gate_live_and_pack_bundle_ready_json" \
     --argjson runtime_actuation_live_and_pack_bundle_ready "$runtime_actuation_live_and_pack_bundle_ready_json" \
     --argjson profile_compare_multi_vm_live_and_pack_bundle_ready "$profile_compare_multi_vm_live_and_pack_bundle_ready_json" \
+    --arg profile_compare_multi_vm_live_evidence_publish_bundle_next_command "$profile_compare_multi_vm_live_evidence_publish_bundle_next_command" \
     --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" \
     --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" \
     --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" \
@@ -12315,7 +12352,7 @@ next_actions_candidate_json="$(
     (if ($profile_compare_multi_vm_live_and_pack_bundle_ready == true) then {
       id: "profile_compare_multi_vm_live_evidence_publish_bundle",
       "label": "Multi-VM live+publish bundle",
-      command: "./scripts/easy_node.sh profile-compare-multi-vm-live-evidence-publish-bundle --reports-dir .easy-node-logs --print-summary-json 1",
+      command: $profile_compare_multi_vm_live_evidence_publish_bundle_next_command,
       reason: "multi-VM live gate and evidence-pack publish are both pending; run the bundled orchestrator"
     } + action_evidence_metadata(["multi-vm"]; true; false; ["live-evidence","evidence-pack"]) else empty end),
     (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0) then {

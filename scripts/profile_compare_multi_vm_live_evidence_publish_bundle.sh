@@ -382,13 +382,13 @@ append_publish_bundle_cycle_input_args() {
   local vm_spec=""
   local vm_file=""
   local cycle_arg=""
-  for vm_spec in "${vm_command_specs[@]:-}"; do
+  for vm_spec in "${vm_command_specs[@]}"; do
     out_ref+=(--vm-command "$vm_spec")
   done
-  for vm_file in "${vm_command_files[@]:-}"; do
+  for vm_file in "${vm_command_files[@]}"; do
     out_ref+=(--vm-command-file "$vm_file")
   done
-  for cycle_arg in "${cycle_args[@]:-}"; do
+  for cycle_arg in "${cycle_args[@]}"; do
     out_ref+=(--cycle-arg "$cycle_arg")
   done
 }
@@ -398,13 +398,13 @@ append_promotion_cycle_forwarded_input_args() {
   local vm_spec=""
   local vm_file=""
   local cycle_arg=""
-  for vm_spec in "${vm_command_specs[@]:-}"; do
+  for vm_spec in "${vm_command_specs[@]}"; do
     out_ref+=(--cycle-arg "--vm-command" --cycle-arg "$vm_spec")
   done
-  for vm_file in "${vm_command_files[@]:-}"; do
+  for vm_file in "${vm_command_files[@]}"; do
     out_ref+=(--cycle-arg "--vm-command-file" --cycle-arg "$vm_file")
   done
-  for cycle_arg in "${cycle_args[@]:-}"; do
+  for cycle_arg in "${cycle_args[@]}"; do
     out_ref+=(--cycle-arg "$cycle_arg")
   done
 }

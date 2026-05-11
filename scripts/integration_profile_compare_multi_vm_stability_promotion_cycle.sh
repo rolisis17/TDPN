@@ -430,6 +430,11 @@ if ! jq -e '
   cat "$SOFT_SUMMARY"
   exit 1
 fi
+if grep -F -- "--cycle-arg ''" "$SOFT_SUMMARY" >/dev/null; then
+  echo "NO-GO soft path operator command included empty --cycle-arg"
+  cat "$SOFT_SUMMARY"
+  exit 1
+fi
 
 echo "[profile-compare-multi-vm-stability-promotion-cycle] cycle artifact failure is fail-closed"
 HARD_FAIL_SUMMARY="$TMP_DIR/promotion_cycle_hard_fail_summary.json"

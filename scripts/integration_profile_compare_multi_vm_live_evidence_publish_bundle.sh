@@ -402,6 +402,12 @@ assert_jq "$MISSING_SUMMARY" '
   and .stages.promotion_evidence_pack_publish.attempted == false
   and (.next_command_reason | test("stability cycle summary artifact is missing or stale"))
 '
+if grep -E -- '--vm-command($|[[:space:]])|--vm-command-file($|[[:space:]])|--cycle-arg($|[[:space:]])' "$MISSING_CAPTURE" >/dev/null; then
+  echo "missing prerequisite path forwarded empty optional VM/cycle arguments"
+  cat "$MISSING_CAPTURE"
+  exit 1
+fi
+assert_jq "$MISSING_SUMMARY" '((.next_command // "") | test("--vm-command ''|--vm-command-file ''|--cycle-arg ''") | not)'
 
 echo "[m5-live-evidence-publish-bundle] NO-GO promotion path (warn-only compatibility)"
 NOGO_SUMMARY="$TMP_DIR/nogo_bundle_summary.json"

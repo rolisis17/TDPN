@@ -967,7 +967,7 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
   "schema": {
     "id": "access_bridge_host_install_check_summary",
     "major": 1,
-    "minor": 3
+    "minor": 4
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
@@ -989,7 +989,7 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
     "config_allow_local_access_paths": "false"
   },
   "summary": {
-    "checks_total": 24,
+    "checks_total": 26,
     "checks_fail": 0
   },
   "checks": [
@@ -1014,8 +1014,10 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
     {"id": "caddy_xff_overwrite", "status": "pass", "message": "Caddy overwrites X-Forwarded-For"},
     {"id": "nginx_xff_overwrite", "status": "pass", "message": "nginx overwrites X-Forwarded-For"},
     {"id": "caddy_public_host_valid", "status": "pass", "message": "Caddy uses the public helper host"},
+    {"id": "caddy_public_host_matches_expected", "status": "pass", "message": "Caddy public host matches expected helper host"},
     {"id": "caddy_reverse_proxy_target", "status": "pass", "message": "Caddy reverse_proxy targets the loopback bridge"},
     {"id": "nginx_public_host_valid", "status": "pass", "message": "nginx uses the public helper host"},
+    {"id": "nginx_public_host_matches_expected", "status": "pass", "message": "nginx public host matches expected helper host"},
     {"id": "nginx_proxy_pass_target", "status": "pass", "message": "nginx proxy_pass targets the loopback bridge"}
   ],
   "recommended_next_action": {
@@ -2502,7 +2504,7 @@ jq '
     | .id as $id
     | select((["config_json_valid", "config_local_access_paths_disabled"] | index($id)) == null)
   ]
-  | .summary.checks_total = 22
+  | .summary.checks_total = 24
   | .summary.checks_fail = 0
 ' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_RECOVERY_MISSING_CONFIG_HOST_INSTALL_SUMMARY_JSON"
 if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
@@ -2527,7 +2529,7 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_host_install.status == "fail"
   and .access_recovery_track.access_bridge_host_install.available == false
   and .access_recovery_track.access_bridge_host_install.semantic_ok == false
-  and .access_recovery_track.access_bridge_host_install.details.checks_total == 22
+  and .access_recovery_track.access_bridge_host_install.details.checks_total == 24
   and .access_recovery_track.access_bridge_host_install.details.checks_fail == 0
   and .access_recovery_track.recommended_next_action.id == "access_bridge_host_install"
 ' "$TMP_DIR/roadmap_progress_access_recovery_missing_config_host_summary.json" >/dev/null; then
@@ -2614,7 +2616,7 @@ jq '
   .checks = [
     .checks[]
     | .id as $id
-    | select((["caddy_public_host_valid", "caddy_reverse_proxy_target", "nginx_public_host_valid", "nginx_proxy_pass_target"] | index($id)) == null)
+    | select((["caddy_public_host_valid", "caddy_public_host_matches_expected", "caddy_reverse_proxy_target", "nginx_public_host_valid", "nginx_public_host_matches_expected", "nginx_proxy_pass_target"] | index($id)) == null)
   ]
   | .summary.checks_total = 20
   | .summary.checks_fail = 0

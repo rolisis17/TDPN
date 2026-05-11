@@ -172,7 +172,7 @@ build_rerun_cycle_command() {
   if [[ -n "$promotion_summary_json" ]]; then
     cmd+=(--promotion-summary-json "$promotion_summary_json")
   fi
-  for cycle_arg in "${cycle_args[@]:-}"; do
+  for cycle_arg in "${cycle_args[@]}"; do
     cmd+=(--cycle-arg "$cycle_arg")
   done
   quote_cmd "${cmd[@]}"
