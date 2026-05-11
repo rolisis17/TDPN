@@ -16,6 +16,10 @@ TMP_BIN="$TMP_DIR/bin"
 SNAPSHOT_DIR="$TMP_DIR/incident_bundle"
 ATTACH_LOG="$TMP_DIR/runtime_doctor_before.log"
 ATTACH_JSON="$TMP_DIR/runtime_doctor_before.json"
+ATTACH_CLIENT_PEM="$TMP_DIR/client.pem"
+ATTACH_ID_ED25519="$TMP_DIR/id_ed25519"
+ATTACH_PFX="$TMP_DIR/client.pfx"
+ATTACH_PRIVATE_KEY_MARKER="$TMP_DIR/doctor_private_key_marker.txt"
 mkdir -p "$TMP_BIN"
 
 cleanup() {
@@ -90,6 +94,15 @@ chmod +x "$TMP_BIN/curl" "$TMP_BIN/docker"
 
 printf 'runtime-doctor ok --auth-token attach-secret-123 inv-attach-secret url=http://attach-user-only-secret@attach-a:8081?invite_key=attach-invite-query-secret&anon_cred=attach-anon-query-secret&subject=attach-subject-query-secret#token=attach-fragment-secret\n' >"$ATTACH_LOG"
 printf '{"status":"OK","token":"attach-json-secret","subject":"attach-json-subject-secret","url":"http://attach-json-user-only-secret@attach-json-a:8081?auth_token=attach-json-auth-query-secret#access_token=attach-json-fragment-secret"}\n' >"$ATTACH_JSON"
+printf '%s\n' 'fake client pem should not attach' >"$ATTACH_CLIENT_PEM"
+printf '%s\n' 'fake id_ed25519 should not attach' >"$ATTACH_ID_ED25519"
+printf '%s\n' 'fake pfx should not attach' >"$ATTACH_PFX"
+cat >"$ATTACH_PRIVATE_KEY_MARKER" <<'EOF_PRIVATE_KEY_MARKER'
+runtime note
+-----BEGIN OPENSSH PRIVATE KEY-----
+fake-openssh-private-key-marker-should-not-attach
+-----END OPENSSH PRIVATE KEY-----
+EOF_PRIVATE_KEY_MARKER
 
 PATH="$TMP_BIN:$PATH" ./scripts/incident_snapshot.sh \
   --bundle-dir "$SNAPSHOT_DIR" \
@@ -103,7 +116,11 @@ PATH="$TMP_BIN:$PATH" ./scripts/incident_snapshot.sh \
   --docker-log-lines 15 \
   --timeout-sec 4 \
   --attach-artifact "$ATTACH_LOG" \
-  --attach-artifact "$ATTACH_JSON" >/dev/null
+  --attach-artifact "$ATTACH_JSON" \
+  --attach-artifact "$ATTACH_CLIENT_PEM" \
+  --attach-artifact "$ATTACH_ID_ED25519" \
+  --attach-artifact "$ATTACH_PFX" \
+  --attach-artifact "$ATTACH_PRIVATE_KEY_MARKER" >/dev/null
 
 if [[ ! -f "$SNAPSHOT_DIR/metadata.txt" ]]; then
   echo "incident snapshot integration failed: metadata missing"
@@ -148,12 +165,12 @@ if [[ ! -f "$SNAPSHOT_DIR/incident_report.md" ]]; then
   echo "incident snapshot integration failed: report markdown missing"
   exit 1
 fi
-if ! jq -e '.status == "ok" and .endpoints.directory_relays.relay_count == 1 and .endpoints.exit_metrics.accepted_packets == 7' "$SNAPSHOT_DIR/incident_summary.json" >/dev/null; then
+if ! jq -e '.status == "warn" and .endpoints.directory_relays.relay_count == 1 and .endpoints.exit_metrics.accepted_packets == 7' "$SNAPSHOT_DIR/incident_summary.json" >/dev/null; then
   echo "incident snapshot integration failed: summary JSON missing expected fields"
   cat "$SNAPSHOT_DIR/incident_summary.json"
   exit 1
 fi
-if ! jq -e '.attachments.count == 2 and .attachments.skipped_count == 0 and (.attachments.items | any(.stored_path | endswith("runtime_doctor_before.log")))' "$SNAPSHOT_DIR/incident_summary.json" >/dev/null; then
+if ! jq -e '.attachments.count == 2 and .attachments.skipped_count == 4 and .attachments.sensitive_skipped_count == 4 and (.attachments.items | any(.stored_path | endswith("runtime_doctor_before.log")))' "$SNAPSHOT_DIR/incident_summary.json" >/dev/null; then
   echo "incident snapshot integration failed: summary JSON missing attached artifact details"
   cat "$SNAPSHOT_DIR/incident_summary.json"
   exit 1
@@ -168,9 +185,14 @@ if ! rg -q 'Attached artifacts: `2`' "$SNAPSHOT_DIR/incident_report.md"; then
   cat "$SNAPSHOT_DIR/incident_report.md"
   exit 1
 fi
-if rg -a -q 'user-secret|pass-secret|dir-fragment-secret|issuer-user-secret|issuer-pass-secret|entry-user-secret|entry-pass-secret|exit-user-secret|exit-pass-secret|relay-secret-123|docker-secret-123|docker-bearer-secret|docker-user-only-secret|docker-query-secret|docker-admin-query-secret|docker-fragment-secret|inv-docker-secret|attach-secret-123|attach-user-only-secret|inv-attach-secret|attach-invite-query-secret|attach-anon-query-secret|attach-subject-query-secret|attach-fragment-secret|attach-json-secret|attach-json-subject-secret|attach-json-user-only-secret|attach-json-auth-query-secret|attach-json-fragment-secret' "$SNAPSHOT_DIR"; then
+if [[ "$(awk -F'\t' '$2 == "sensitive_artifact" {count++} END {print count+0}' "$SNAPSHOT_DIR/attachments/skipped.tsv")" -ne 4 ]]; then
+  echo "incident snapshot integration failed: sensitive attachments were not skipped"
+  cat "$SNAPSHOT_DIR/attachments/skipped.tsv"
+  exit 1
+fi
+if rg -a -q 'user-secret|pass-secret|dir-fragment-secret|issuer-user-secret|issuer-pass-secret|entry-user-secret|entry-pass-secret|exit-user-secret|exit-pass-secret|relay-secret-123|docker-secret-123|docker-bearer-secret|docker-user-only-secret|docker-query-secret|docker-admin-query-secret|docker-fragment-secret|inv-docker-secret|attach-secret-123|attach-user-only-secret|inv-attach-secret|attach-invite-query-secret|attach-anon-query-secret|attach-subject-query-secret|attach-fragment-secret|attach-json-secret|attach-json-subject-secret|attach-json-user-only-secret|attach-json-auth-query-secret|attach-json-fragment-secret|fake client pem|fake id_ed25519|fake pfx|fake-openssh-private-key-marker' "$SNAPSHOT_DIR"; then
   echo "incident snapshot integration failed: bundle directory leaked sensitive material"
-  rg -a -n 'user-secret|pass-secret|dir-fragment-secret|issuer-user-secret|issuer-pass-secret|entry-user-secret|entry-pass-secret|exit-user-secret|exit-pass-secret|relay-secret-123|docker-secret-123|docker-bearer-secret|docker-user-only-secret|docker-query-secret|docker-admin-query-secret|docker-fragment-secret|inv-docker-secret|attach-secret-123|attach-user-only-secret|inv-attach-secret|attach-invite-query-secret|attach-anon-query-secret|attach-subject-query-secret|attach-fragment-secret|attach-json-secret|attach-json-subject-secret|attach-json-user-only-secret|attach-json-auth-query-secret|attach-json-fragment-secret' "$SNAPSHOT_DIR" || true
+  rg -a -n 'user-secret|pass-secret|dir-fragment-secret|issuer-user-secret|issuer-pass-secret|entry-user-secret|entry-pass-secret|exit-user-secret|exit-pass-secret|relay-secret-123|docker-secret-123|docker-bearer-secret|docker-user-only-secret|docker-query-secret|docker-admin-query-secret|docker-fragment-secret|inv-docker-secret|attach-secret-123|attach-user-only-secret|inv-attach-secret|attach-invite-query-secret|attach-anon-query-secret|attach-subject-query-secret|attach-fragment-secret|attach-json-secret|attach-json-subject-secret|attach-json-user-only-secret|attach-json-auth-query-secret|attach-json-fragment-secret|fake client pem|fake id_ed25519|fake pfx|fake-openssh-private-key-marker' "$SNAPSHOT_DIR" || true
   exit 1
 fi
 if [[ ! -f "$SNAPSHOT_DIR/attachments/manifest.tsv" ]]; then
@@ -201,7 +223,7 @@ if ! tar -tzf "${SNAPSHOT_DIR}.tar.gz" | rg -q 'incident_bundle/attachments/mani
   tar -tzf "${SNAPSHOT_DIR}.tar.gz"
   exit 1
 fi
-if tar -xOzf "${SNAPSHOT_DIR}.tar.gz" | rg -a -q 'user-secret|pass-secret|dir-fragment-secret|issuer-user-secret|issuer-pass-secret|entry-user-secret|entry-pass-secret|exit-user-secret|exit-pass-secret|relay-secret-123|docker-secret-123|docker-bearer-secret|docker-user-only-secret|docker-query-secret|docker-admin-query-secret|docker-fragment-secret|inv-docker-secret|attach-secret-123|attach-user-only-secret|inv-attach-secret|attach-invite-query-secret|attach-anon-query-secret|attach-subject-query-secret|attach-fragment-secret|attach-json-secret|attach-json-subject-secret|attach-json-user-only-secret|attach-json-auth-query-secret|attach-json-fragment-secret'; then
+if tar -xOzf "${SNAPSHOT_DIR}.tar.gz" | rg -a -q 'user-secret|pass-secret|dir-fragment-secret|issuer-user-secret|issuer-pass-secret|entry-user-secret|entry-pass-secret|exit-user-secret|exit-pass-secret|relay-secret-123|docker-secret-123|docker-bearer-secret|docker-user-only-secret|docker-query-secret|docker-admin-query-secret|docker-fragment-secret|inv-docker-secret|attach-secret-123|attach-user-only-secret|inv-attach-secret|attach-invite-query-secret|attach-anon-query-secret|attach-subject-query-secret|attach-fragment-secret|attach-json-secret|attach-json-subject-secret|attach-json-user-only-secret|attach-json-auth-query-secret|attach-json-fragment-secret|fake client pem|fake id_ed25519|fake pfx|fake-openssh-private-key-marker'; then
   echo "incident snapshot integration failed: bundle tar leaked sensitive material"
   exit 1
 fi

@@ -250,7 +250,8 @@ func usage() {
   go run ./cmd/gpmrecover bridge-sign --invite FILE --private-key-file FILE --out FILE [--key-id ID]
   go run ./cmd/gpmrecover bridge-verify --invite FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
   go run ./cmd/gpmrecover bridge-policy --invite FILE (--trust-store FILE | --public-key-file FILE) (--signed-helper-registry FILE | --helper-registry FILE --allow-unsigned-helper-registry | --allow-missing-helper-registry) [--allow-local-access-paths]
-  go run ./cmd/gpmrecover bridge-service-config --invite FILE --signed-helper-registry FILE (--trust-store FILE | --public-key-file FILE) [--out FILE] [--allow-local-access-paths]
+  go run ./cmd/gpmrecover bridge-service-config --invite FILE --signed-helper-registry FILE --trust-store FILE [--out FILE] [--allow-local-access-paths]
+  go run ./cmd/gpmrecover bridge-service-config --invite FILE --signed-helper-registry FILE --public-key-file FILE --diagnostic-allow-public-key-file [--out FILE] [--allow-local-access-paths]
   go run ./cmd/gpmrecover bridge-service-check --config FILE [--path-id ID | --url URL] [--out FILE]
   go run ./cmd/gpmrecover bridge-service-serve --config FILE --config-sha256 HEX [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] --access-code-sha256 HEX [--allow-unpinned-local=false] [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=false] [--redirect=false]
   go run ./cmd/gpmrecover bridge-service-code-generate (--code-out FILE | --print-code 1) [--hash-out FILE] [--bytes 24]
@@ -984,11 +985,15 @@ func runBridgeServiceConfig(args []string) error {
 	fs := flag.NewFlagSet("bridge-service-config", flag.ContinueOnError)
 	inviteFile := fs.String("invite", "", "path to signed bridge invite JSON")
 	signedHelperRegistryFile := fs.String("signed-helper-registry", "", "path to signed bridge helper registry artifact JSON")
-	publicFile := fs.String("public-key-file", "", "path to public key file for one-off verification")
+	publicFile := fs.String("public-key-file", "", "diagnostic path to public key file for one-off verification; not for pilot/operator handoff")
 	trustStoreFile := fs.String("trust-store", "", "path to access recovery trust store JSON")
 	outFile := fs.String("out", "", "optional path to write bridge service config JSON")
+	diagnosticAllowPublicKeyFile := fs.Bool("diagnostic-allow-public-key-file", false, "diagnostic override: allow raw --public-key-file trust for local verification only; do not use for pilot/operator handoff")
 	allowLocalAccessPaths := fs.Bool("allow-local-access-paths", false, "diagnostic opt-out: allow plain-http/private bridge access paths for local rehearsal only")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := validateBridgeServiceConfigTrustArgs(*publicFile, *trustStoreFile, *diagnosticAllowPublicKeyFile); err != nil {
 		return err
 	}
 	body, err := readInputFileStrict(*inviteFile, "bridge invite", maxPackFileBytes)
@@ -2996,6 +3001,21 @@ func resolveBridgeRegistryVerificationKey(artifact accesspack.BridgeHelperRegist
 		return pub, nil, err
 	}
 	return nil, nil, errors.New("bridge helper registry verification requires --trust-store or --public-key-file")
+}
+
+func validateBridgeServiceConfigTrustArgs(publicFile string, trustStoreFile string, diagnosticAllowPublicKeyFile bool) error {
+	publicFile = strings.TrimSpace(publicFile)
+	trustStoreFile = strings.TrimSpace(trustStoreFile)
+	if trustStoreFile != "" && publicFile != "" {
+		return errors.New("bridge service config verification accepts only one of --trust-store or --public-key-file")
+	}
+	if publicFile != "" && !diagnosticAllowPublicKeyFile {
+		return errors.New("bridge-service-config refuses raw --public-key-file trust for pilot/operator handoff; use --trust-store, or add --diagnostic-allow-public-key-file for local diagnostics only")
+	}
+	if diagnosticAllowPublicKeyFile && publicFile == "" {
+		return errors.New("--diagnostic-allow-public-key-file requires --public-key-file")
+	}
+	return nil
 }
 
 func verifyBridgeHelperRegistryArtifactFile(path string, expectedOrgID string, publicFile string, trustStoreFile string) (accesspack.VerifiedBridgeHelperRegistryArtifact, error) {

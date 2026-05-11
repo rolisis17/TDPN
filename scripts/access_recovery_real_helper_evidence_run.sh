@@ -827,7 +827,7 @@ write_summary() {
     --argjson planned_artifacts "$planned_artifacts_json" \
     '{
       version: 1,
-      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 3},
+      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 4},
       generated_at_utc: $generated_at_utc,
       status: $status,
       rc: $rc,
@@ -835,7 +835,9 @@ write_summary() {
       notes: $notes,
       mode: {
         plan_only: $plan_only,
-        child_execution_skipped: ($plan_only and $status == "pass" and $stage == "plan")
+        child_execution_skipped: ($plan_only and $stage == "plan"),
+        evidence_generated: (if $plan_only then false else ($status == "pass" and $stage == "complete") end),
+        evidence_status: (if $plan_only then "planned_non_evidence" elif ($status == "pass" and $stage == "complete") then "collected" else "not_collected" end)
       },
       inputs: {
         base_url: $base_url,
@@ -1209,8 +1211,8 @@ planned_artifacts_json="$(jq -c -n \
   }')"
 
 if [[ "$plan_only" == "1" ]]; then
-  write_summary "pass" 0 "plan" "Plan-only preflight passed; child execution skipped"
-  echo "access-recovery-real-helper-evidence-run: status=pass stage=plan"
+  write_summary "skipped" 0 "plan" "Plan-only preflight passed; planned commands emitted, child execution skipped, no live evidence collected"
+  echo "access-recovery-real-helper-evidence-run: status=skipped stage=plan evidence_status=planned_non_evidence"
   echo "summary_json: $summary_json"
   echo "report_md: $report_md"
   [[ "$print_summary_json" == "1" ]] && cat "$summary_json"

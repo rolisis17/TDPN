@@ -130,6 +130,16 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 		"--public-key-file", publicKey,
 		"--signed-helper-registry", signedRegistry,
 		"--allow-local-access-paths",
+		"--out", filepath.Join(dir, "bridge-service-config-raw-key.json"),
+	}); err == nil || !strings.Contains(err.Error(), "refuses raw --public-key-file trust") {
+		t.Fatalf("expected bridge-service-config to require trust store or diagnostic raw-key override, got %v", err)
+	}
+	if err := runBridgeServiceConfig([]string{
+		"--invite", signedBridge,
+		"--public-key-file", publicKey,
+		"--diagnostic-allow-public-key-file",
+		"--signed-helper-registry", signedRegistry,
+		"--allow-local-access-paths",
 		"--out", serviceConfig,
 	}); err != nil {
 		t.Fatalf("bridge-service-config: %v", err)
@@ -670,6 +680,7 @@ func TestBridgeCLIDefaultRejectsUnsafeHelperServicePaths(t *testing.T) {
 			if err := runBridgeServiceConfig([]string{
 				"--invite", signedBridge,
 				"--public-key-file", publicKey,
+				"--diagnostic-allow-public-key-file",
 				"--signed-helper-registry", signedRegistry,
 				"--out", filepath.Join(dir, "bridge-service-config.json"),
 			}); err == nil {

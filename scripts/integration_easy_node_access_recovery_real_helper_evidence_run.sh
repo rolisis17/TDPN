@@ -578,10 +578,17 @@ if [[ -s "$CAPTURE" ]]; then
   exit 1
 fi
 jq -e '
-  .status == "pass"
+  .schema.id == "access_recovery_real_helper_evidence_run_summary"
+  and .schema.major == 1
+  and .schema.minor == 4
+  and .status == "skipped"
+  and .status != "pass"
+  and .rc == 0
   and .stage == "plan"
   and .mode.plan_only == true
   and .mode.child_execution_skipped == true
+  and .mode.evidence_generated == false
+  and .mode.evidence_status == "planned_non_evidence"
   and .child_summaries.host_install_check == null
   and .child_summaries.bundle == null
   and .child_summaries.verifier == null
@@ -640,8 +647,17 @@ jq -e \
   --arg install_dir "$INSTALL_DIR" \
   --arg systemd_unit_file "$SYSTEMD_UNIT_FILE" \
   --arg proxy_config_file "$PROXY_CONFIG_FILE" '
-  .status == "pass"
+  .schema.id == "access_recovery_real_helper_evidence_run_summary"
+  and .schema.major == 1
+  and .schema.minor == 4
+  and .status == "skipped"
+  and .status != "pass"
+  and .rc == 0
   and .stage == "plan"
+  and .mode.plan_only == true
+  and .mode.child_execution_skipped == true
+  and .mode.evidence_generated == false
+  and .mode.evidence_status == "planned_non_evidence"
   and .inputs.host_install_evidence_mode == "installed-host"
   and (.planned_child_commands.host_install_check.args | index("--evidence-mode") != null)
   and (.planned_child_commands.host_install_check.args | index("installed-host") != null)
@@ -899,8 +915,14 @@ done
 
 jq -e '
   .schema.id == "access_recovery_real_helper_evidence_run_summary"
+  and .schema.major == 1
+  and .schema.minor == 4
   and .status == "pass"
   and .stage == "complete"
+  and .mode.plan_only == false
+  and .mode.child_execution_skipped == false
+  and .mode.evidence_generated == true
+  and .mode.evidence_status == "collected"
   and .child_summaries.host_install_check.status == "pass"
   and (.artifacts.bundle_service_smoke_summary_json | endswith("/bundle/access_bridge_service_smoke_summary.json"))
   and (.artifacts.bundle_deployment_evidence_summary_json | endswith("/bundle/access_bridge_deployment_evidence_summary.json"))

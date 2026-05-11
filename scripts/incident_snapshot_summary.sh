@@ -405,6 +405,8 @@ attachments_json='[]'
 attachments_skipped_json='[]'
 attachment_count=0
 attachment_skipped_count=0
+attachment_sensitive_skipped_count=0
+attachment_other_skipped_count=0
 attachments_status="none"
 if [[ -f "$attachments_manifest_file" ]]; then
   while IFS=$'\t' read -r stored_path attachment_type source_path; do
@@ -434,6 +436,8 @@ if [[ -f "$attachments_skipped_file" ]]; then
     )"
   done <"$attachments_skipped_file"
   attachment_skipped_count="$(jq 'length' <<<"$attachments_skipped_json")"
+  attachment_sensitive_skipped_count="$(jq '[.[] | select(.reason == "sensitive_artifact")] | length' <<<"$attachments_skipped_json")"
+  attachment_other_skipped_count="$(jq '[.[] | select(.reason != "sensitive_artifact")] | length' <<<"$attachments_skipped_json")"
 fi
 if ((attachment_count > 0)); then
   attachments_status="ok"
@@ -441,7 +445,12 @@ fi
 if ((attachment_skipped_count > 0)); then
   attachments_status="warn"
   warning_count=$((warning_count + 1))
-  add_finding "$tmp_findings" "One or more requested attached artifacts were missing or could not be copied into the incident bundle."
+  if ((attachment_sensitive_skipped_count > 0)); then
+    add_finding "$tmp_findings" "One or more requested attached artifacts were blocked as sensitive and were not copied into the incident bundle."
+  fi
+  if ((attachment_other_skipped_count > 0)); then
+    add_finding "$tmp_findings" "One or more requested attached artifacts were missing or could not be copied into the incident bundle."
+  fi
 fi
 
 if [[ "$critical_count" -gt 0 ]]; then
@@ -510,6 +519,7 @@ jq -n \
   --argjson warning_count "$warning_count" \
   --argjson attachment_count "$attachment_count" \
   --argjson attachment_skipped_count "$attachment_skipped_count" \
+  --argjson attachment_sensitive_skipped_count "$attachment_sensitive_skipped_count" \
   --argjson attachments "$attachments_json" \
   --argjson attachments_skipped "$attachments_skipped_json" \
   --argjson findings "$findings_json" \
@@ -532,6 +542,7 @@ jq -n \
       status: $attachments_status,
       count: $attachment_count,
       skipped_count: $attachment_skipped_count,
+      sensitive_skipped_count: $attachment_sensitive_skipped_count,
       manifest_file: (if $attachment_count > 0 then $attachments_manifest_file else "" end),
       skipped_file: (if $attachment_skipped_count > 0 then $attachments_skipped_file else "" end),
       items: $attachments,

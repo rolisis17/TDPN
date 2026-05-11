@@ -222,6 +222,47 @@ sanitize_attachment_name() {
   printf '%s' "$name"
 }
 
+sensitive_attachment_name() {
+  local path="$1"
+  local base lower
+  base="$(basename "$path")"
+  lower="$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')"
+
+  case "$lower" in
+    id_rsa|id_dsa|id_ecdsa|id_ed25519|identity|client.pem|*.key|*.p12|*.pfx|*.pk8|*.jks|*.keystore)
+      return 0
+      ;;
+  esac
+
+  [[ "$lower" =~ (^|[._-])(private[-_]?key|secret[-_]?key|ssh[-_]?key)($|[._-]) ]]
+}
+
+sensitive_attachment_content() {
+  local file="$1"
+  [[ -f "$file" ]] || return 1
+  text_file_for_redaction "$file" || return 1
+  LC_ALL=C grep -Eq -- '-----BEGIN ([A-Z0-9 ]+ )?PRIVATE KEY-----|-----BEGIN OPENSSH PRIVATE KEY-----' "$file"
+}
+
+sensitive_attachment_path() {
+  local path="$1"
+  if sensitive_attachment_name "$path"; then
+    return 0
+  fi
+  if [[ -f "$path" ]]; then
+    sensitive_attachment_content "$path"
+    return $?
+  fi
+  if [[ -d "$path" ]]; then
+    while IFS= read -r child; do
+      if sensitive_attachment_name "$child" || sensitive_attachment_content "$child"; then
+        return 0
+      fi
+    done < <(find "$path" -type f -print)
+  fi
+  return 1
+}
+
 directory_url=""
 issuer_url=""
 entry_url=""
@@ -430,6 +471,10 @@ if ((${#attach_artifacts[@]} > 0)); then
     artifact_type="file"
     if [[ ! -e "$artifact" ]]; then
       printf '%s\t%s\n' "$artifact_source_ref" "missing" >>"$attachments_skipped"
+      continue
+    fi
+    if sensitive_attachment_path "$artifact"; then
+      printf '%s\t%s\n' "$artifact_source_ref" "sensitive_artifact" >>"$attachments_skipped"
       continue
     fi
     if [[ -d "$artifact" ]]; then

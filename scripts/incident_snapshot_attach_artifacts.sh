@@ -174,6 +174,47 @@ sanitize_attachment_name() {
   printf '%s' "$name"
 }
 
+sensitive_attachment_name() {
+  local path="$1"
+  local base lower
+  base="$(basename "$path")"
+  lower="$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')"
+
+  case "$lower" in
+    id_rsa|id_dsa|id_ecdsa|id_ed25519|identity|client.pem|*.key|*.p12|*.pfx|*.pk8|*.jks|*.keystore)
+      return 0
+      ;;
+  esac
+
+  [[ "$lower" =~ (^|[._-])(private[-_]?key|secret[-_]?key|ssh[-_]?key)($|[._-]) ]]
+}
+
+sensitive_attachment_content() {
+  local file="$1"
+  [[ -f "$file" ]] || return 1
+  text_file_for_redaction "$file" || return 1
+  LC_ALL=C grep -Eq -- '-----BEGIN ([A-Z0-9 ]+ )?PRIVATE KEY-----|-----BEGIN OPENSSH PRIVATE KEY-----' "$file"
+}
+
+sensitive_attachment_path() {
+  local path="$1"
+  if sensitive_attachment_name "$path"; then
+    return 0
+  fi
+  if [[ -f "$path" ]]; then
+    sensitive_attachment_content "$path"
+    return $?
+  fi
+  if [[ -d "$path" ]]; then
+    while IFS= read -r child; do
+      if sensitive_attachment_name "$child" || sensitive_attachment_content "$child"; then
+        return 0
+      fi
+    done < <(find "$path" -type f -print)
+  fi
+  return 1
+}
+
 manifest_has_source() {
   local manifest_file="$1"
   local source_path="$2"
@@ -188,6 +229,13 @@ skipped_has_source() {
   local source_ref="$3"
   [[ -f "$skipped_file" ]] || return 1
   awk -F'\t' -v src="$source_path" -v ref="$source_ref" '$1 == src || $1 == ref {found=1} END {exit found ? 0 : 1}' "$skipped_file"
+}
+
+attachment_stored_path_safe() {
+  local stored_path="$1"
+  [[ "$stored_path" == attachments/* ]] || return 1
+  [[ "$stored_path" != /* ]] || return 1
+  [[ "$stored_path" != *".."* ]] || return 1
 }
 
 bundle_dir=""
@@ -285,6 +333,23 @@ if [[ -f "$attachments_skipped" ]]; then
 fi
 mv "${attachments_skipped}.tmp" "$attachments_skipped"
 
+if [[ -s "$attachments_manifest" ]]; then
+  : >"${attachments_manifest}.filtered"
+  while IFS=$'\t' read -r stored_path attachment_type source_path; do
+    [[ -n "${stored_path:-}" && -n "${attachment_type:-}" && -n "${source_path:-}" ]] || continue
+    stored_abs="$bundle_dir/$stored_path"
+    if attachment_stored_path_safe "$stored_path" && [[ -e "$stored_abs" ]] && sensitive_attachment_path "$stored_abs"; then
+      rm -rf -- "$stored_abs" 2>/dev/null || true
+      if ! skipped_has_source "$attachments_skipped" "$source_path" "$source_path"; then
+        printf '%s\t%s\n' "$source_path" "sensitive_artifact" >>"$attachments_skipped"
+      fi
+      continue
+    fi
+    printf '%s\t%s\t%s\n' "$stored_path" "$attachment_type" "$source_path" >>"${attachments_manifest}.filtered"
+  done <"$attachments_manifest"
+  mv "${attachments_manifest}.filtered" "$attachments_manifest"
+fi
+
 attachment_index="$(awk 'END {print NR+0}' "$attachments_manifest" 2>/dev/null || echo 0)"
 for artifact in "${attach_artifacts[@]}"; do
   artifact="$(trim "$artifact")"
@@ -298,6 +363,12 @@ for artifact in "${attach_artifacts[@]}"; do
   if [[ ! -e "$artifact" ]]; then
     if ! skipped_has_source "$attachments_skipped" "$artifact" "$artifact_source_ref"; then
       printf '%s\t%s\n' "$artifact_source_ref" "missing" >>"$attachments_skipped"
+    fi
+    continue
+  fi
+  if sensitive_attachment_path "$artifact"; then
+    if ! skipped_has_source "$attachments_skipped" "$artifact" "$artifact_source_ref"; then
+      printf '%s\t%s\n' "$artifact_source_ref" "sensitive_artifact" >>"$attachments_skipped"
     fi
     continue
   fi
