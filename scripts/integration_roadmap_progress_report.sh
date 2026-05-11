@@ -1020,7 +1020,7 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
   },
   "checks": {
     "summary_contract": {"enabled": true, "status": "pass"},
-    "tar_sha256": {"enabled": true, "status": "pass"},
+    "tar_sha256": {"enabled": true, "status": "pass", "checked": true},
     "manifest": {"enabled": true, "status": "pass"},
     "provenance": {"enabled": true, "required_trusted": true, "status": "pass"}
   },
@@ -1173,6 +1173,7 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.source_summary_json == "'"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON"'"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.summary_contract_status == "pass"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.tar_sha256_status == "pass"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.tar_sha256_checked == true
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.manifest_status == "pass"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.provenance_status == "pass"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.trusted_provenance_source == "trust_store"
@@ -1646,6 +1647,54 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_access_recovery_false_handoff_verifier_summary.json" >/dev/null; then
   echo "Access Recovery false handoff verifier summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_false_handoff_verifier_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery verifier receipts must prove tar checksum checking"
+ACCESS_BRIDGE_UNCHECKED_TAR_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_unchecked_tar_summary.json"
+jq '
+  .checks.tar_sha256.checked = false
+' "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_UNCHECKED_TAR_VERIFY_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_UNCHECKED_TAR_VERIFY_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_unchecked_tar_verifier_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_unchecked_tar_verifier_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_unchecked_tar_verifier.log 2>&1; then
+  echo "expected success with warning for verifier receipt whose tar checksum check was not proven"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_unchecked_tar_verifier.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and (.notes | contains("Access Recovery evidence still needs attention"))
+  and (.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.notes | contains("tar checksum"))
+  and .access_recovery_pilot_handoff_ready == false
+  and .access_recovery_track.status == "trusted-provenance-required"
+  and .access_recovery_track.ready == false
+  and .access_recovery_track.pilot_handoff_ready == false
+  and .access_recovery_track.needs_attention == true
+  and .access_recovery_track.evidence_scope == "real_helper_https"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "fail"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.tar_sha256_status == "pass"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.tar_sha256_checked == false
+  and .access_recovery_track.trusted_verifier_binding.ok == true
+  and .access_recovery_track.trusted_verifier_ready == false
+  and .access_recovery_track.trusted_pilot_receipt_ready == false
+  and .access_recovery_track.verifier_pilot_handoff_ready == false
+  and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
+' "$TMP_DIR/roadmap_progress_access_recovery_unchecked_tar_verifier_summary.json" >/dev/null; then
+  echo "Access Recovery unchecked tar verifier summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_unchecked_tar_verifier_summary.json"
   exit 1
 fi
 

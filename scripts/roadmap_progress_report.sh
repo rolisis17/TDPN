@@ -2234,6 +2234,8 @@ access_recovery_verifier_evidence_json() {
         (($path // "") | tostring | ascii_downcase) == "pass";
       def schema_minor_ready:
         ((.schema.minor | type) == "number" and .schema.minor >= 1);
+      def tar_sha256_checked:
+        .checks.tar_sha256.checked == true;
       def required_checks_enabled:
         enabled(.checks.summary_contract.enabled)
         and enabled(.checks.tar_sha256.enabled)
@@ -2242,6 +2244,7 @@ access_recovery_verifier_evidence_json() {
       def required_checks_pass:
         pass_status(.checks.summary_contract.status)
         and pass_status(.checks.tar_sha256.status)
+        and tar_sha256_checked
         and pass_status(.checks.manifest.status)
         and pass_status(.checks.provenance.status);
       def trusted_provenance_ready:
@@ -2312,6 +2315,7 @@ access_recovery_verifier_evidence_json() {
             elif $valid_contract and (.inputs.allow_dev_trust_store == true) then "Access bridge pilot evidence verifier used a diagnostic dev trust-store override that cannot prove pilot handoff readiness"
             elif $valid_contract and (generated_at_ready | not) then "Access bridge pilot evidence verifier receipt is missing generated_at_utc"
             elif $valid_contract and (evidence_binding_ready | not) then "Access bridge pilot evidence verifier receipt is missing required evidence binding hashes"
+            elif $valid_contract and enabled(.checks.tar_sha256.enabled) and (pass_status(.checks.tar_sha256.status)) and (tar_sha256_checked | not) then "Access bridge pilot evidence verifier receipt did not prove the bundle tar checksum was checked"
             elif $valid_contract and ($semantic_ok | not) then "Access bridge pilot evidence verifier did not prove trusted real-helper HTTPS provenance"
             elif $valid_contract then str_or_null(.notes)
             elif $schema_id != $expected_schema_id then "Access bridge pilot evidence verifier summary schema mismatch"
@@ -2325,6 +2329,7 @@ access_recovery_verifier_evidence_json() {
             summary_contract_status: str_or_null(.checks.summary_contract.status),
             tar_sha256_enabled: enabled(.checks.tar_sha256.enabled),
             tar_sha256_status: str_or_null(.checks.tar_sha256.status),
+            tar_sha256_checked: (if (.checks.tar_sha256.checked | type) == "boolean" then .checks.tar_sha256.checked else null end),
             manifest_enabled: enabled(.checks.manifest.enabled),
             manifest_status: str_or_null(.checks.manifest.status),
             provenance_enabled: enabled(.checks.provenance.enabled),
@@ -2468,6 +2473,7 @@ access_recovery_track_json_from_evidence() {
         and (verifier_binding.ok == true);
       def verifier_pilot_handoff_ready:
         ($bundle_verify.details.pilot_handoff_ready == true)
+        and ($bundle_verify.details.tar_sha256_checked == true)
         and ($bundle_verify.details.pilot_handoff_criteria_ready == true)
         and ($bundle_verify.details.pilot_handoff_criteria_trust_store_sha256_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_public_key_file_absent == true)
