@@ -321,7 +321,7 @@ func (s *Service) sourceKey(r *http.Request) string {
 	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
 	if err == nil && host != "" {
 		if s.trustProxyHeaders && isLoopbackIP(host) {
-			if forwarded := firstForwardedFor(r.Header.Get("X-Forwarded-For")); forwarded != "" {
+			if forwarded := singleForwardedFor(r.Header.Get("X-Forwarded-For")); forwarded != "" {
 				return forwarded
 			}
 		}
@@ -333,7 +333,10 @@ func (s *Service) sourceKey(r *http.Request) string {
 	return "unknown"
 }
 
-func firstForwardedFor(raw string) string {
+func singleForwardedFor(raw string) string {
+	if strings.Contains(raw, ",") {
+		return ""
+	}
 	for _, part := range strings.Split(raw, ",") {
 		ip := strings.TrimSpace(part)
 		if parsed := net.ParseIP(ip); parsed != nil {

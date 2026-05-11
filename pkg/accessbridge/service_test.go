@@ -258,7 +258,7 @@ func TestServiceTrustsForwardedForOnlyFromLoopback(t *testing.T) {
 	}
 	loopbackReq := httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil)
 	loopbackReq.RemoteAddr = "127.0.0.1:4321"
-	loopbackReq.Header.Set("X-Forwarded-For", "203.0.113.9, 10.0.0.2")
+	loopbackReq.Header.Set("X-Forwarded-For", "203.0.113.9")
 	rr := httptest.NewRecorder()
 	service.Handler().ServeHTTP(rr, loopbackReq)
 	if rr.Code != http.StatusOK {
@@ -266,6 +266,17 @@ func TestServiceTrustsForwardedForOnlyFromLoopback(t *testing.T) {
 	}
 	if service.RequestCount("203.0.113.9") != 1 {
 		t.Fatalf("expected forwarded client source to be counted")
+	}
+	chainedReq := httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil)
+	chainedReq.RemoteAddr = "127.0.0.1:4322"
+	chainedReq.Header.Set("X-Forwarded-For", "203.0.113.11, 10.0.0.2")
+	chainedRR := httptest.NewRecorder()
+	service.Handler().ServeHTTP(chainedRR, chainedReq)
+	if chainedRR.Code != http.StatusOK {
+		t.Fatalf("expected loopback request with chained forwarded header ok, got %d body=%s", chainedRR.Code, chainedRR.Body.String())
+	}
+	if service.RequestCount("203.0.113.11") != 0 || service.RequestCount("127.0.0.1") != 1 {
+		t.Fatalf("expected chained forwarded header to be ignored")
 	}
 	remoteReq := httptest.NewRequest(http.MethodGet, "/bridge/helper-web", nil)
 	remoteReq.RemoteAddr = "198.51.100.7:4321"

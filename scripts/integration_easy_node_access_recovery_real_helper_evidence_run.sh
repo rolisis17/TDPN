@@ -186,6 +186,7 @@ trust_store=""
 pilot_handoff_ready="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_READY:-true}"
 trusted_provenance="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_TRUSTED:-true}"
 binding_mode="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_BINDING_MODE:-match}"
+identity_mode="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_IDENTITY_MODE:-match}"
 sha256_value() {
   sha256sum "$1" | awk '{print $1}'
 }
@@ -227,9 +228,37 @@ base_url="$(jq -r '.inputs.base_url // ""' "$summary_json")"
 smoke_sha="$(sha256_value "$smoke_summary_json")"
 deployment_sha="$(sha256_value "$deployment_summary_json")"
 host_sha="$(sha256_value "$host_summary_json")"
+helper_id="$(jq -r '.details.helper_id // ""' "$smoke_summary_json")"
+organization_id="$(jq -r '.details.organization_id // ""' "$smoke_summary_json")"
+registry_id="$(jq -r '.details.registry_id // ""' "$smoke_summary_json")"
+provenance_org_id="$organization_id"
+trusted_org_id="$organization_id"
 if [[ "$binding_mode" == "mismatch" ]]; then
   smoke_sha="0000000000000000000000000000000000000000000000000000000000000000"
 fi
+case "$identity_mode" in
+  match)
+    ;;
+  missing_helper)
+    helper_id=""
+    ;;
+  missing_organization)
+    organization_id=""
+    ;;
+  missing_registry)
+    registry_id=""
+    ;;
+  provenance_org_mismatch)
+    provenance_org_id="different-provenance-org"
+    ;;
+  trusted_org_mismatch)
+    trusted_org_id="different-trusted-org"
+    ;;
+  *)
+    echo "unknown fake identity mode: $identity_mode" >&2
+    exit 2
+    ;;
+esac
 trust_store_sha="$(sha256_value "$trust_store")"
 jq -n \
   --arg verification_summary_json "$verification_summary_json" \
@@ -244,6 +273,11 @@ jq -n \
   --arg deployment_sha "$deployment_sha" \
   --arg host_summary_json "$host_summary_json" \
   --arg host_sha "$host_sha" \
+  --arg helper_id "$helper_id" \
+  --arg organization_id "$organization_id" \
+  --arg registry_id "$registry_id" \
+  --arg provenance_org_id "$provenance_org_id" \
+  --arg trusted_org_id "$trusted_org_id" \
   --argjson pilot_handoff_ready "$pilot_handoff_ready" \
   --argjson trusted_provenance "$trusted_provenance" \
   '{
@@ -263,6 +297,11 @@ jq -n \
       provenance_source: "trust_store",
       provenance_evidence_scope: "real_helper_https",
       summary_evidence_scope: "real_helper_https",
+      source_helper_id_present: ($helper_id != ""),
+      source_organization_id_present: ($organization_id != ""),
+      source_registry_id_present: ($registry_id != ""),
+      provenance_organization_matches_evidence: ($provenance_org_id != "" and $organization_id != "" and $provenance_org_id == $organization_id),
+      trusted_organization_matches_evidence: ($trusted_org_id != "" and $organization_id != "" and $trusted_org_id == $organization_id),
       bundled_child_evidence_semantic_ok: true,
       trust_store_present: true,
       trust_store_sha256_present: true,
@@ -289,11 +328,16 @@ jq -n \
       source: "trust_store",
       trusted: $trusted_provenance,
       status: "pass",
+      organization_id: $provenance_org_id,
+      trusted_org_id: $trusted_org_id,
       evidence_scope: "real_helper_https",
       summary_evidence_scope: "real_helper_https"
     },
     evidence_binding: {
       base_url: $base_url,
+      helper_id: $helper_id,
+      organization_id: $organization_id,
+      registry_id: $registry_id,
       smoke_summary_json: $smoke_summary_json,
       smoke_summary_sha256: $smoke_sha,
       deployment_evidence_summary_json: $deployment_summary_json,
@@ -908,6 +952,55 @@ if ! grep -Fq -- "Trusted verifier receipt did not prove current real helper HTT
   cat "$TMP_DIR/verifier-binding-mismatch-summary.json"
   exit 1
 fi
+
+for identity_mode in \
+  missing_helper \
+  missing_organization \
+  missing_registry \
+  provenance_org_mismatch \
+  trusted_org_mismatch
+do
+  : >"$CAPTURE"
+  set +e
+  ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+  ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+  ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+  ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+  FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_IDENTITY_MODE="$identity_mode" \
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+    --base-url https://helper.gpm-pilot.net \
+    --path-id helper-web \
+    --code-file "$CODE_FILE" \
+    --config-json "$CONFIG_JSON" \
+    --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+    --provenance-private-key-file "$PROVENANCE_KEY" \
+    --provenance-org-id freenews-demo \
+    --provenance-org-name "FreeNews Demo" \
+    --trust-store "$TRUST_STORE" \
+    --reports-dir "$REPORTS_DIR" \
+    --summary-json "$TMP_DIR/verifier-${identity_mode}-summary.json" \
+    --print-summary-json 0 >"$TMP_DIR/verifier-${identity_mode}.log" 2>&1
+  verifier_identity_rc=$?
+  set -e
+  if [[ "$verifier_identity_rc" -eq 0 ]]; then
+    echo "expected verifier identity/org mode $identity_mode to fail"
+    cat "$TMP_DIR/verifier-${identity_mode}-summary.json"
+    exit 1
+  fi
+  if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
+    echo "expected host-check, bundle, and verifier only for identity/org mode $identity_mode"
+    cat "$CAPTURE"
+    exit 1
+  fi
+  if ! grep -Fq -- "Trusted verifier receipt did not prove current real helper HTTPS evidence binding" "$TMP_DIR/verifier-${identity_mode}-summary.json"; then
+    echo "expected identity/org failure summary note for $identity_mode"
+    cat "$TMP_DIR/verifier-${identity_mode}-summary.json"
+    exit 1
+  fi
+  jq -e '.status == "fail" and .stage == "verify" and .child_summaries.verifier.pilot_handoff_ready == true' "$TMP_DIR/verifier-${identity_mode}-summary.json" >/dev/null
+done
 
 : >"$CAPTURE"
 set +e

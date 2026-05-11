@@ -36,6 +36,7 @@ unset ROADMAP_NEXT_ACTIONS_RUN_SUMMARY_JSON
 unset ROADMAP_NEXT_ACTIONS_RUN_VM_COMMAND_SOURCE
 # Keep placeholder-subject precondition checks deterministic.
 unset ACCESS_RECOVERY_TRUST_STORE
+unset ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_PLAN_ONLY
 unset CAMPAIGN_SUBJECT
 unset INVITE_KEY
 unset TRUST_STORE
@@ -57,6 +58,7 @@ PASS1="$ACTION_TMP_DIR/pass_action_1.sh"
 PASS2="$ACTION_TMP_DIR/pass_action_2.sh"
 DEDUPE_MARK="$ACTION_TMP_DIR/dedupe_mark_action.sh"
 DEDUP_MARK_COUNT_FILE="$ACTION_TMP_DIR/dedupe_mark_count.txt"
+PLAN_ENV_CHECK="$ACTION_TMP_DIR/plan_env_check_action.sh"
 CONFLICT_CMD_A="$ACTION_TMP_DIR/conflict_cmd_a.sh"
 CONFLICT_CMD_B="$ACTION_TMP_DIR/conflict_cmd_b.sh"
 CONFLICT_MARK_A="$ACTION_TMP_DIR/conflict_cmd_a.marker"
@@ -102,6 +104,17 @@ set -euo pipefail
 echo "pass action 2"
 EOF_PASS2
 chmod +x "$PASS2"
+
+cat >"$PLAN_ENV_CHECK" <<'EOF_PLAN_ENV_CHECK'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_PLAN_ONLY:-}" ]]; then
+  echo "plan-only override leaked into action environment"
+  exit 42
+fi
+echo "plan env isolated"
+EOF_PLAN_ENV_CHECK
+chmod +x "$PLAN_ENV_CHECK"
 
 cat >"$DEDUPE_MARK" <<'EOF_DEDUPE_MARK'
 #!/usr/bin/env bash
@@ -560,6 +573,15 @@ JSON
 {
   "next_actions": [
     {"id":"real_helper_https_evidence","label":"Real helper HTTPS evidence","command":"bash \"$FAIL1\"","reason":"test-real-helper-required","requires_real_hosts":true,"local_pack_only":false}
+  ]
+}
+JSON
+    ;;
+  real_helper_plan_env_isolation)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"real_helper_https_evidence","label":"Real helper HTTPS evidence","command":"bash \"$PLAN_ENV_CHECK\"","reason":"test-plan-env-isolation","requires_real_hosts":true,"local_pack_only":false}
   ]
 }
 JSON
@@ -1433,6 +1455,44 @@ fi
 
 ACCESS_RECOVERY_TRUST_STORE_FILE="$TMP_DIR/access_recovery_trust_store.json"
 printf '{"trusted_keys":[]}\n' >"$ACCESS_RECOVERY_TRUST_STORE_FILE"
+
+echo "[roadmap-next-actions-run] Access Recovery real-helper actions ignore ambient plan-only override"
+SUMMARY_ACCESS_RECOVERY_PLAN_ENV_ISOLATION="$TMP_DIR/summary_access_recovery_plan_env_isolation.json"
+REPORTS_ACCESS_RECOVERY_PLAN_ENV_ISOLATION="$TMP_DIR/reports_access_recovery_plan_env_isolation"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_PLAN_ONLY=1 \
+ROADMAP_NEXT_ACTIONS_SCENARIO=real_helper_plan_env_isolation \
+PLAN_ENV_CHECK="$PLAN_ENV_CHECK" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_PLAN_ENV_ISOLATION" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_PLAN_ENV_ISOLATION" \
+  --include-id real_helper_https_evidence \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_plan_env_isolation.log" 2>&1
+access_recovery_plan_env_isolation_rc=$?
+set -e
+if [[ "$access_recovery_plan_env_isolation_rc" != "0" ]]; then
+  echo "expected ambient plan-only override to be stripped before action execution, got rc=$access_recovery_plan_env_isolation_rc"
+  cat "$TMP_DIR/access_recovery_plan_env_isolation.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_PLAN_ENV_ISOLATION" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_PLAN_ENV_ISOLATION"
+  fi
+  exit 1
+fi
+if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.access_recovery_trust_store == $trust_store
+  and .inputs.access_recovery_trust_store_configured == true
+  and .actions[0].id == "real_helper_https_evidence"
+  and .actions[0].status == "pass"
+  and .actions[0].rc == 0
+' "$SUMMARY_ACCESS_RECOVERY_PLAN_ENV_ISOLATION" >/dev/null; then
+  echo "Access Recovery plan-only env isolation summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_PLAN_ENV_ISOLATION"
+  exit 1
+fi
 
 echo "[roadmap-next-actions-run] Access Recovery trusted verifier rejects demo-marked operator trust store"
 SUMMARY_ACCESS_RECOVERY_TRUST_STORE_DEMO="$TMP_DIR/summary_access_recovery_trust_store_demo.json"

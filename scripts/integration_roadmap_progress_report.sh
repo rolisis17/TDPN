@@ -1052,6 +1052,11 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
     "provenance_source": "trust_store",
     "provenance_evidence_scope": "real_helper_https",
     "summary_evidence_scope": "real_helper_https",
+    "source_helper_id_present": true,
+    "source_organization_id_present": true,
+    "source_registry_id_present": true,
+    "provenance_organization_matches_evidence": true,
+    "trusted_organization_matches_evidence": true,
     "trust_store_present": true,
     "trust_store_sha256_present": true,
     "public_key_file_absent": true,
@@ -1584,6 +1589,80 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] Access Recovery missing verifier uses current bundle artifact paths"
+CUSTOM_ACCESS_BRIDGE_BUNDLE_DIR="$TMP_DIR/custom_access_bridge_bundle"
+mkdir -p "$CUSTOM_ACCESS_BRIDGE_BUNDLE_DIR"
+CUSTOM_ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON="$CUSTOM_ACCESS_BRIDGE_BUNDLE_DIR/access_bridge_service_smoke_summary.json"
+CUSTOM_ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON="$CUSTOM_ACCESS_BRIDGE_BUNDLE_DIR/access_bridge_deployment_evidence_summary.json"
+CUSTOM_ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON="$CUSTOM_ACCESS_BRIDGE_BUNDLE_DIR/access_bridge_host_install_check_summary.json"
+CUSTOM_ACCESS_BRIDGE_BUNDLE_SUMMARY_JSON="$CUSTOM_ACCESS_BRIDGE_BUNDLE_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+CUSTOM_ACCESS_BRIDGE_PROVENANCE_JSON="$CUSTOM_ACCESS_BRIDGE_BUNDLE_DIR/custom_access_bridge_pilot_evidence_bundle.provenance.json"
+cp "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" "$CUSTOM_ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"
+cp "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" "$CUSTOM_ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"
+cp "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" "$CUSTOM_ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"
+cat >"$CUSTOM_ACCESS_BRIDGE_PROVENANCE_JSON" <<'EOF_CUSTOM_ACCESS_BRIDGE_PROVENANCE'
+{
+  "version": 1,
+  "kind": "test-provenance-placeholder"
+}
+EOF_CUSTOM_ACCESS_BRIDGE_PROVENANCE
+cat >"$CUSTOM_ACCESS_BRIDGE_BUNDLE_SUMMARY_JSON" <<EOF_CUSTOM_ACCESS_BRIDGE_BUNDLE_SUMMARY
+{
+  "version": 1,
+  "schema": {
+    "id": "access_bridge_pilot_evidence_bundle_summary",
+    "major": 1,
+    "minor": 3
+  },
+  "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
+  "status": "pass",
+  "evidence_scope": "real_helper_https",
+  "artifacts": {
+    "summary_json": "$CUSTOM_ACCESS_BRIDGE_BUNDLE_SUMMARY_JSON",
+    "smoke_summary_json": "$CUSTOM_ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON",
+    "deployment_evidence_summary_json": "$CUSTOM_ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON",
+    "host_install_check_summary_json": "$CUSTOM_ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON",
+    "provenance_json": "$CUSTOM_ACCESS_BRIDGE_PROVENANCE_JSON"
+  }
+}
+EOF_CUSTOM_ACCESS_BRIDGE_BUNDLE_SUMMARY
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$CUSTOM_ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$CUSTOM_ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$CUSTOM_ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$TMP_DIR/missing_custom_access_bridge_pilot_evidence_bundle_verify_summary.json" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_missing_custom_bundle_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_missing_custom_bundle_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_trusted_verifier_missing_custom_bundle.log 2>&1; then
+  echo "expected success with warning for missing trusted verifier receipt with custom bundle artifacts"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_trusted_verifier_missing_custom_bundle.log
+  exit 1
+fi
+if ! jq -e \
+  --arg bundle_summary "$CUSTOM_ACCESS_BRIDGE_BUNDLE_SUMMARY_JSON" \
+  --arg provenance_json "$CUSTOM_ACCESS_BRIDGE_PROVENANCE_JSON" '
+  .status == "warn"
+  and .access_recovery_track.status == "trusted-provenance-required"
+  and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
+  and ((.access_recovery_track.recommended_next_action.command // "") | contains("--summary-json " + $bundle_summary))
+  and ((.access_recovery_track.recommended_next_action.command // "") | contains("--provenance-json " + $provenance_json))
+  and ((.access_recovery_track.recommended_next_action.command // "") | contains(".easy-node-logs/access_bridge_pilot_evidence_bundle_summary.json") | not)
+  and ((.access_recovery_track.recommended_next_action.command // "") | contains(".easy-node-logs/access_bridge_pilot_evidence_bundle.provenance.json") | not)
+  and ((.next_actions // []) | any(
+    .id == "trusted_pilot_evidence_verify"
+    and ((.command // "") | contains("--summary-json " + $bundle_summary))
+    and ((.command // "") | contains("--provenance-json " + $provenance_json))
+  ))
+' "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_missing_custom_bundle_summary.json" >/dev/null; then
+  echo "Access Recovery missing trusted verifier custom bundle command mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_missing_custom_bundle_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] Access Recovery rejects contradictory trusted verifier receipts"
 ACCESS_BRIDGE_BAD_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_bad_summary.json"
 jq '
@@ -1820,6 +1899,61 @@ if ! jq -e '
   cat "$TMP_DIR/roadmap_progress_access_recovery_bad_child_semantics_verifier_summary.json"
   exit 1
 fi
+
+echo "[roadmap-progress-report] Access Recovery verifier receipts must prove identity and organization binding"
+for criterion in \
+  source_helper_id_present \
+  source_organization_id_present \
+  source_registry_id_present \
+  provenance_organization_matches_evidence \
+  trusted_organization_matches_evidence
+do
+  detail_key="pilot_handoff_criteria_${criterion}"
+  criterion_summary_json="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_${criterion}_false_summary.json"
+  roadmap_summary_json="$TMP_DIR/roadmap_progress_access_recovery_${criterion}_false_verifier_summary.json"
+  roadmap_report_md="$TMP_DIR/roadmap_progress_access_recovery_${criterion}_false_verifier_report.md"
+  jq --arg criterion "$criterion" '
+    .pilot_handoff_ready = true
+    | .trusted_pilot_receipt_ready = true
+    | .pilot_handoff_criteria.ready = true
+    | .pilot_handoff_criteria.trusted_pilot_receipt_ready = true
+    | .pilot_handoff_criteria[$criterion] = false
+  ' "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" >"$criterion_summary_json"
+  if ! run_roadmap_progress_report \
+    --refresh-manual-validation 0 \
+    --refresh-single-machine-readiness 0 \
+    --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+    --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+    --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+    --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+    --access-bridge-pilot-evidence-bundle-verify-summary-json "$criterion_summary_json" \
+    --summary-json "$roadmap_summary_json" \
+    --report-md "$roadmap_report_md" \
+    --print-report 0 \
+    --print-summary-json 0 >"${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_${criterion}_false_verifier.log" 2>&1; then
+    echo "expected success with warning for verifier receipt with $criterion=false"
+    cat "${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_${criterion}_false_verifier.log"
+    exit 1
+  fi
+  if ! jq -e --arg detail_key "$detail_key" '
+    .status == "warn"
+    and .rc == 0
+    and (.notes | contains("Access Recovery evidence still needs attention"))
+    and (.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.notes | contains("helper identity and organization binding"))
+    and .access_recovery_pilot_handoff_ready == false
+    and .access_recovery_track.status == "trusted-provenance-required"
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "fail"
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == false
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details[$detail_key] == false
+    and .access_recovery_track.trusted_pilot_receipt_ready == false
+    and .access_recovery_track.verifier_pilot_handoff_ready == false
+    and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
+  ' "$roadmap_summary_json" >/dev/null; then
+    echo "Access Recovery verifier identity/org criterion mismatch for $criterion"
+    cat "$roadmap_summary_json"
+    exit 1
+  fi
+done
 
 echo "[roadmap-progress-report] Access Recovery old forged handoff receipts cannot promote pilot readiness"
 ACCESS_BRIDGE_OLD_FORGED_HANDOFF_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_old_forged_handoff_summary.json"

@@ -2180,6 +2180,10 @@ print_summary_json="${ROADMAP_NEXT_ACTIONS_RUN_PRINT_SUMMARY_JSON:-1}"
 action_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_ACTION_TIMEOUT_SEC:-0}"
 allow_unsafe_shell_commands="${ROADMAP_NEXT_ACTIONS_RUN_ALLOW_UNSAFE_SHELL_COMMANDS:-0}"
 profile_default_gate_default_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC:-2400}"
+
+# Next-actions execution must never inherit a diagnostic plan-only override:
+# a planned real-helper evidence run exits 0 but does not collect evidence.
+unset ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_PLAN_ONLY
 host_a_override_arg=""
 host_b_override_arg=""
 campaign_subject_override_arg=""

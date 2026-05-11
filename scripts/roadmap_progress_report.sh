@@ -2316,10 +2316,17 @@ access_recovery_verifier_evidence_json() {
         and ((.trusted_provenance.summary_evidence_scope // "") == "real_helper_https")
         and ((.inputs.trust_store // "") != "")
         and ((.inputs.public_key_file // null) == null);
+      def handoff_identity_org_ready:
+        (.pilot_handoff_criteria.source_helper_id_present == true)
+        and (.pilot_handoff_criteria.source_organization_id_present == true)
+        and (.pilot_handoff_criteria.source_registry_id_present == true)
+        and (.pilot_handoff_criteria.provenance_organization_matches_evidence == true)
+        and (.pilot_handoff_criteria.trusted_organization_matches_evidence == true);
       def trusted_pilot_receipt_ready:
         schema_minor_ready
         and (.inputs.allow_dev_trust_store != true)
         and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true)
+        and handoff_identity_org_ready
         and (.trusted_pilot_receipt_ready == true)
         and trusted_provenance_ready;
       def pilot_handoff_ready:
@@ -2377,6 +2384,7 @@ access_recovery_verifier_evidence_json() {
             elif $valid_contract and (generated_at_ready | not) then "Access bridge pilot evidence verifier receipt is missing generated_at_utc"
             elif $valid_contract and (evidence_binding_ready | not) then "Access bridge pilot evidence verifier receipt is missing required evidence binding hashes"
             elif $valid_contract and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok != true) then "Access bridge pilot evidence verifier receipt did not prove bundled child evidence semantics"
+            elif $valid_contract and (handoff_identity_org_ready | not) then "Access bridge pilot evidence verifier receipt did not prove helper identity and organization binding"
             elif $valid_contract and enabled(.checks.tar_sha256.enabled) and (pass_status(.checks.tar_sha256.status)) and (tar_sha256_checked | not) then "Access bridge pilot evidence verifier receipt did not prove the bundle tar checksum was checked"
             elif $valid_contract and ($semantic_ok | not) then "Access bridge pilot evidence verifier did not prove trusted real-helper HTTPS provenance"
             elif $valid_contract then str_or_null(.notes)
@@ -2407,6 +2415,11 @@ access_recovery_verifier_evidence_json() {
             pilot_handoff_criteria_trust_store_sha256_present: (if (.pilot_handoff_criteria.trust_store_sha256_present | type) == "boolean" then .pilot_handoff_criteria.trust_store_sha256_present else null end),
             pilot_handoff_criteria_public_key_file_absent: (if (.pilot_handoff_criteria.public_key_file_absent | type) == "boolean" then .pilot_handoff_criteria.public_key_file_absent else null end),
             pilot_handoff_criteria_bundled_child_evidence_semantic_ok: (if (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok | type) == "boolean" then .pilot_handoff_criteria.bundled_child_evidence_semantic_ok else null end),
+            pilot_handoff_criteria_source_helper_id_present: (if (.pilot_handoff_criteria.source_helper_id_present | type) == "boolean" then .pilot_handoff_criteria.source_helper_id_present else null end),
+            pilot_handoff_criteria_source_organization_id_present: (if (.pilot_handoff_criteria.source_organization_id_present | type) == "boolean" then .pilot_handoff_criteria.source_organization_id_present else null end),
+            pilot_handoff_criteria_source_registry_id_present: (if (.pilot_handoff_criteria.source_registry_id_present | type) == "boolean" then .pilot_handoff_criteria.source_registry_id_present else null end),
+            pilot_handoff_criteria_provenance_organization_matches_evidence: (if (.pilot_handoff_criteria.provenance_organization_matches_evidence | type) == "boolean" then .pilot_handoff_criteria.provenance_organization_matches_evidence else null end),
+            pilot_handoff_criteria_trusted_organization_matches_evidence: (if (.pilot_handoff_criteria.trusted_organization_matches_evidence | type) == "boolean" then .pilot_handoff_criteria.trusted_organization_matches_evidence else null end),
             pilot_handoff_criteria_dev_trust_store_allowed: (if (.pilot_handoff_criteria.dev_trust_store_allowed | type) == "boolean" then .pilot_handoff_criteria.dev_trust_store_allowed else null end),
             evidence_scope: str_or_null(.trusted_provenance.evidence_scope),
             summary_evidence_scope: str_or_null(.trusted_provenance.summary_evidence_scope),
@@ -2423,8 +2436,10 @@ access_recovery_verifier_evidence_json() {
             deployment_evidence_summary_sha256: str_or_null(.evidence_binding.deployment_evidence_summary_sha256),
             host_install_check_summary_json: str_or_null(.evidence_binding.host_install_check_summary_json),
             host_install_check_summary_sha256: str_or_null(.evidence_binding.host_install_check_summary_sha256),
-            provenance_json: str_or_null(.artifacts.provenance_json),
-            source_summary_json: str_or_null(.artifacts.source_summary_json),
+            provenance_json: str_or_null(.artifacts.provenance_json // .inputs.provenance_json),
+            input_provenance_json: str_or_null(.inputs.provenance_json),
+            source_summary_json: str_or_null(.artifacts.source_summary_json // .inputs.summary_json),
+            input_summary_json: str_or_null(.inputs.summary_json),
             bundle_tar: str_or_null(.artifacts.bundle_tar),
             trust_store: str_or_null(.inputs.trust_store),
             allow_dev_trust_store: (if (.inputs.allow_dev_trust_store | type) == "boolean" then .inputs.allow_dev_trust_store else null end),
@@ -2434,19 +2449,112 @@ access_recovery_verifier_evidence_json() {
     ' "$path"
 }
 
+access_recovery_current_bundle_artifacts_json() {
+  local service_smoke_json="$1"
+  local deployment_evidence_json="$2"
+  local host_install_json="$3"
+  local bundle_verify_json="$4"
+  local summary_json=""
+  local provenance_json=""
+  local candidate=""
+  local candidate_resolved=""
+  local candidate_source=""
+
+  while IFS=$'\t' read -r candidate_source candidate || [[ -n "$candidate_source$candidate" ]]; do
+    candidate="$(trim "$candidate")"
+    [[ -n "$candidate" ]] || continue
+    candidate_resolved="$(resolve_path_with_base "$candidate" "$candidate_source")"
+    if [[ -n "$candidate_resolved" && -f "$candidate_resolved" ]] \
+       && [[ "$(json_file_valid_01 "$candidate_resolved")" == "1" ]] \
+       && [[ "$(jq -r '.schema.id // ""' "$candidate_resolved" 2>/dev/null || true)" == "access_bridge_pilot_evidence_bundle_summary" ]]; then
+      summary_json="$candidate"
+      provenance_json="$(jq -r '
+        [
+          .artifacts.provenance_json,
+          .provenance.sidecar_json
+        ]
+        | .[]
+        | strings
+        | select(length > 0)
+      ' "$candidate_resolved" 2>/dev/null | head -n 1 || true)"
+      provenance_json="$(trim "$provenance_json")"
+      if [[ -n "$provenance_json" ]]; then
+        provenance_json="$(resolve_path_with_base "$provenance_json" "$candidate_resolved")"
+      fi
+      break
+    fi
+  done < <(
+    jq -r -n \
+      --argjson service_smoke "$service_smoke_json" \
+      --argjson deployment_evidence "$deployment_evidence_json" \
+      --argjson host_install "$host_install_json" \
+      --argjson bundle_verify "$bundle_verify_json" '
+        def strings_nonempty:
+          strings | select(length > 0);
+        def dirname_or_empty:
+          if test("/") then sub("/[^/]*$"; "") else "" end;
+        def direct_candidates($e):
+          [
+            $e.details.bundle_summary_json,
+            $e.details.pilot_evidence_bundle_summary_json,
+            $e.details.access_bridge_pilot_evidence_bundle_summary_json
+          ]
+          | .[]
+          | strings_nonempty
+          | [$e.source_summary_json, .]
+          | @tsv;
+        def sibling_candidate($e):
+          ($e.source_summary_json // "") as $source
+          | ($source | dirname_or_empty) as $dir
+          | select($dir != "")
+          | [$source, ($dir + "/access_bridge_pilot_evidence_bundle_summary.json")]
+          | @tsv;
+        [
+          direct_candidates($bundle_verify),
+          direct_candidates($service_smoke),
+          direct_candidates($deployment_evidence),
+          direct_candidates($host_install),
+          sibling_candidate($service_smoke),
+          sibling_candidate($deployment_evidence),
+          sibling_candidate($host_install)
+        ]
+        | .[]
+      ' 2>/dev/null || true
+  )
+
+  jq -cn \
+    --arg summary_json "$summary_json" \
+    --arg provenance_json "$provenance_json" \
+    '{
+      summary_json: (if $summary_json == "" then null else $summary_json end),
+      provenance_json: (if $provenance_json == "" then null else $provenance_json end)
+    }'
+}
+
 access_recovery_track_json_from_evidence() {
   local smoke_json="$1"
   local deployment_json="$2"
   local host_install_json="$3"
   local bundle_verify_json="$4"
+  local bundle_artifacts_json="${5:-}"
+  if [[ -z "$bundle_artifacts_json" ]]; then
+    bundle_artifacts_json='{"summary_json":null,"provenance_json":null}'
+  fi
 
   jq -cn \
     --argjson service_smoke "$smoke_json" \
     --argjson deployment_evidence "$deployment_json" \
     --argjson host_install "$host_install_json" \
-    --argjson bundle_verify "$bundle_verify_json" '
+    --argjson bundle_verify "$bundle_verify_json" \
+    --argjson bundle_artifacts "$bundle_artifacts_json" '
       def same_nonempty($a; $b):
         (($a // "") != "" and ($b // "") != "" and $a == $b);
+      def first_nonempty($values; $fallback):
+        (
+          $values
+          | map(select((. // "") != ""))
+          | .[0]
+        ) // $fallback;
       def all_pass:
         [$service_smoke, $deployment_evidence, $host_install] | all(.status == "pass");
       def evidence_binding:
@@ -2586,6 +2694,11 @@ access_recovery_track_json_from_evidence() {
         and ($bundle_verify.details.trusted_provenance_trusted == true)
         and (($bundle_verify.details.trusted_provenance_source // "") == "trust_store")
         and (($bundle_verify.details.evidence_scope // "") == "real_helper_https")
+        and ($bundle_verify.details.pilot_handoff_criteria_source_helper_id_present == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_source_organization_id_present == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_source_registry_id_present == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_provenance_organization_matches_evidence == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_trusted_organization_matches_evidence == true)
         and (verifier_binding.ok == true);
       def verifier_pilot_handoff_ready:
         ($bundle_verify.details.pilot_handoff_ready == true)
@@ -2594,6 +2707,11 @@ access_recovery_track_json_from_evidence() {
         and ($bundle_verify.details.pilot_handoff_criteria_trust_store_sha256_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_public_key_file_absent == true)
         and ($bundle_verify.details.pilot_handoff_criteria_bundled_child_evidence_semantic_ok == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_source_helper_id_present == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_source_organization_id_present == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_source_registry_id_present == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_provenance_organization_matches_evidence == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_trusted_organization_matches_evidence == true)
         and ($bundle_verify.details.pilot_handoff_criteria_dev_trust_store_allowed != true)
         and ($bundle_verify.details.allow_dev_trust_store != true);
       def pilot_handoff_ready:
@@ -2603,8 +2721,40 @@ access_recovery_track_json_from_evidence() {
         [$service_smoke, $deployment_evidence, $host_install]
         | map(select(.needs_attention == true))
         | .[0] // (if all_pass and ((evidence_binding.ok) | not) then $deployment_evidence else null end);
+      def trusted_verifier_summary_json:
+        first_nonempty(
+          [
+            $bundle_verify.details.source_summary_json,
+            $bundle_verify.details.input_summary_json,
+            $bundle_artifacts.summary_json
+          ];
+          ".easy-node-logs/access_bridge_pilot_evidence_bundle_summary.json"
+        );
+      def trusted_verifier_provenance_json:
+        first_nonempty(
+          [
+            $bundle_verify.details.provenance_json,
+            $bundle_verify.details.input_provenance_json,
+            $bundle_artifacts.provenance_json
+          ];
+          ".easy-node-logs/access_bridge_pilot_evidence_bundle.provenance.json"
+        );
+      def trusted_verifier_receipt_json:
+        first_nonempty(
+          [
+            $bundle_verify.input_summary_json,
+            $bundle_verify.details.verification_summary_json
+          ];
+          ".easy-node-logs/access_bridge_pilot_evidence_bundle_verify_summary.json"
+        );
       def trusted_verifier_command:
-        "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify --summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_summary.json --provenance-json .easy-node-logs/access_bridge_pilot_evidence_bundle.provenance.json --trust-store TRUST_STORE --require-trusted-provenance 1 --verification-summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_verify_summary.json --print-verification-summary-json 1";
+        "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify --summary-json "
+        + trusted_verifier_summary_json
+        + " --provenance-json "
+        + trusted_verifier_provenance_json
+        + " --trust-store TRUST_STORE --require-trusted-provenance 1 --verification-summary-json "
+        + trusted_verifier_receipt_json
+        + " --print-verification-summary-json 1";
       def next_command_for($e):
         if $e == null then null
         elif ($e == $service_smoke and (($e.status // "") == "missing" or ($e.status // "") == "stale")) then
@@ -12304,12 +12454,20 @@ access_bridge_pilot_evidence_bundle_verify_evidence_json="$(
   access_recovery_verifier_evidence_json \
     "$access_bridge_pilot_evidence_bundle_verify_summary_json"
 )"
+access_recovery_current_bundle_artifacts_json="$(
+  access_recovery_current_bundle_artifacts_json \
+    "$access_bridge_service_smoke_evidence_json" \
+    "$access_bridge_deployment_evidence_json" \
+    "$access_bridge_host_install_evidence_json" \
+    "$access_bridge_pilot_evidence_bundle_verify_evidence_json"
+)"
 access_recovery_track_json="$(
   access_recovery_track_json_from_evidence \
     "$access_bridge_service_smoke_evidence_json" \
     "$access_bridge_deployment_evidence_json" \
     "$access_bridge_host_install_evidence_json" \
-    "$access_bridge_pilot_evidence_bundle_verify_evidence_json"
+    "$access_bridge_pilot_evidence_bundle_verify_evidence_json" \
+    "$access_recovery_current_bundle_artifacts_json"
 )"
 access_recovery_track_status_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r '.status // "unknown"')"
 access_recovery_track_ready_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r 'if (.ready | type) == "boolean" then .ready else false end')"
