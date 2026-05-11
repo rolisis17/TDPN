@@ -152,6 +152,18 @@ if [[ "$(jq -r '.health.config_sha256 // ""' "$TMP_DIR/operator-smoke-summary.js
   cat "$TMP_DIR/operator-smoke-summary.json"
   exit 1
 fi
+if ! jq -e '
+    .schema.minor >= 3
+    and .transport.base_url_scheme == "http"
+    and .transport.loopback == true
+    and .transport.https == false
+    and .transport.tls.checked == false
+    and .transport.tls.verified == false
+  ' "$TMP_DIR/operator-smoke-summary.json" >/dev/null; then
+  echo "access bridge service serve integration failed: operator smoke did not capture expected transport facts"
+  cat "$TMP_DIR/operator-smoke-summary.json"
+  exit 1
+fi
 
 bash ./scripts/access_bridge_deployment_evidence.sh \
   --base-url "$BASE_URL" \

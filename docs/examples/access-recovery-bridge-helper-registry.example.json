@@ -6,8 +6,8 @@
       "display_name": "Perth community helper",
       "status": "active",
       "org_ids": ["freenews-demo"],
-      "contact_url": "https://helper.example/contact/freenews",
-      "abuse_report_url": "https://helper.example/abuse/freenews",
+      "contact_url": "https://helper.gpm-pilot.net/contact/freenews",
+      "abuse_report_url": "https://helper.gpm-pilot.net/abuse/freenews",
       "rate_limit_policy": "beta cap: per-user and per-source limits enforced",
       "active_from_utc": "2026-05-10T00:00:00Z",
       "active_until_utc": "2099-01-01T00:00:00Z",
@@ -18,7 +18,7 @@
       "display_name": "Old helper under review",
       "status": "quarantined",
       "org_ids": ["freenews-demo"],
-      "contact_url": "https://old-helper.example/contact/freenews",
+      "contact_url": "https://old-helper.gpm-pilot.net/contact/freenews",
       "quarantine_reason": "Abuse report pending review",
       "updated_at_utc": "2026-05-10T00:00:00Z"
     }

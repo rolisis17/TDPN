@@ -8,6 +8,9 @@ base_url=""
 path_id="helper-web"
 code=""
 code_file=""
+cacert=""
+client_cert=""
+client_key=""
 config_json=""
 deploy_pack_dir=""
 service_name="gpm-access-bridge"
@@ -38,6 +41,8 @@ Usage:
     --deploy-pack-dir DIR \
     (--code CODE | --code-file FILE) \
     [--path-id helper-web] \
+    [--cacert FILE] \
+    [--client-cert FILE --client-key FILE] \
     [--service-name gpm-access-bridge] \
     [--bundle-dir DIR] \
     [--summary-json FILE] \
@@ -164,7 +169,7 @@ url_host() {
 base_url_is_loopback() {
   local host
   host="$(url_host "$1")"
-  [[ "$host" == "localhost" || "$host" == "::1" || "$host" == 127.* || "$host" == "::ffff:127."* || "$host" == "0:0:0:0:0:ffff:127."* ]]
+  [[ "$host" == "localhost" || "$host" == "::1" || "$host" =~ ^127\.[0-9]+\.[0-9]+\.[0-9]+$ || "$host" =~ ^::ffff:127\.[0-9]+\.[0-9]+\.[0-9]+$ || "$host" =~ ^0:0:0:0:0:ffff:127\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 
 ipv4_host_is_private_or_reserved() {
@@ -349,6 +354,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --code-file)
       code_file="${2:-}"
+      shift 2
+      ;;
+    --cacert)
+      cacert="${2:-}"
+      shift 2
+      ;;
+    --client-cert)
+      client_cert="${2:-}"
+      shift 2
+      ;;
+    --client-key)
+      client_key="${2:-}"
       shift 2
       ;;
     --config-json|--config)
@@ -559,6 +576,31 @@ if [[ -n "$code_file" ]]; then
     exit 2
   fi
 fi
+if [[ -n "$cacert" ]]; then
+  cacert="$(abs_path "$cacert")"
+  if [[ ! -f "$cacert" ]]; then
+    echo "access bridge pilot evidence bundle failed: cacert file not found: $cacert" >&2
+    exit 2
+  fi
+fi
+if [[ -n "$client_cert" ]]; then
+  client_cert="$(abs_path "$client_cert")"
+  if [[ ! -f "$client_cert" ]]; then
+    echo "access bridge pilot evidence bundle failed: client cert file not found: $client_cert" >&2
+    exit 2
+  fi
+fi
+if [[ -n "$client_key" ]]; then
+  client_key="$(abs_path "$client_key")"
+  if [[ ! -f "$client_key" ]]; then
+    echo "access bridge pilot evidence bundle failed: client key file not found: $client_key" >&2
+    exit 2
+  fi
+fi
+if { [[ -n "$client_cert" ]] && [[ -z "$client_key" ]]; } || { [[ -z "$client_cert" ]] && [[ -n "$client_key" ]]; }; then
+  echo "access bridge pilot evidence bundle failed: --client-cert and --client-key must be supplied together" >&2
+  exit 2
+fi
 if [[ "$provenance_sign" == "1" ]]; then
   provenance_private_key_file="$(abs_path "$provenance_private_key_file")"
   if [[ ! -f "$provenance_private_key_file" ]]; then
@@ -625,6 +667,12 @@ smoke_args=(
   --summary-json "$smoke_summary"
   --abuse-message "pilot evidence bundle smoke"
 )
+if [[ -n "$cacert" ]]; then
+  smoke_args+=(--cacert "$cacert")
+fi
+if [[ -n "$client_cert" ]]; then
+  smoke_args+=(--client-cert "$client_cert" --client-key "$client_key")
+fi
 if [[ -n "$expect_helper_id" ]]; then
   smoke_args+=(--expect-helper-id "$expect_helper_id")
 fi
@@ -671,6 +719,11 @@ run_json_step "host_install_check" "$host_summary" "$host_log" \
 
 steps_json="$(jq -s '.' "$steps_jsonl")"
 fail_count="$(jq -s '[.[] | select(.status != "pass" or .rc != 0)] | length' "$steps_jsonl")"
+transport_status="$(json_string_or_empty "$deployment_summary" '.transport.status')"
+transport_https="$(jq -r 'if (.transport.https // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
+transport_tls_verified="$(jq -r 'if (.transport.tls_verified // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
+transport_ssl_verify_result="$(json_string_or_empty "$deployment_summary" '.transport.ssl_verify_result')"
+transport_mtls_client_used="$(jq -r 'if (.transport.mtls_client_certificate_used // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
 status="pass"
 recommended_action_id="trusted_pilot_evidence_verify"
 recommended_action="Run trusted bundle verification with --require-trusted-provenance 1 and --verification-summary-json before helper/operator handoff."
@@ -776,6 +829,11 @@ jq -n \
   --arg base_url_private_or_reserved "$base_url_private_or_reserved" \
   --arg require_https "$require_https" \
   --arg require_public_host "$require_public_host" \
+  --arg transport_status "$transport_status" \
+  --arg transport_https "$transport_https" \
+  --arg transport_tls_verified "$transport_tls_verified" \
+  --arg transport_ssl_verify_result "$transport_ssl_verify_result" \
+  --arg transport_mtls_client_used "$transport_mtls_client_used" \
   --arg path_id "$path_id" \
   --arg service_name "$service_name" \
   --arg config_json "$config_json" \
@@ -806,7 +864,7 @@ jq -n \
     schema: {
       id: "access_bridge_pilot_evidence_bundle_summary",
       major: 1,
-      minor: 1
+      minor: 2
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -824,6 +882,7 @@ jq -n \
     evidence_policy: {
       require_https: ($require_https == "1"),
       require_public_host: ($require_public_host == "1"),
+      require_tls_verified: true,
       base_url_host: $base_url_host,
       base_url_loopback: ($base_url_loopback == "1"),
       base_url_private_or_reserved: ($base_url_private_or_reserved == "1")
@@ -845,6 +904,15 @@ jq -n \
     summary: {
       steps_total: ($steps | length),
       steps_fail: $fail_count
+    },
+    transport: {
+      status: $transport_status,
+      https: ($transport_https == "true"),
+      tls_verified: ($transport_tls_verified == "true"),
+      ssl_verify_result: $transport_ssl_verify_result,
+      mtls_client_certificate_used: ($transport_mtls_client_used == "true"),
+      deployment_evidence_summary_json: $deployment_summary,
+      smoke_summary_json: $smoke_summary
     },
     steps: $steps,
     artifacts: {

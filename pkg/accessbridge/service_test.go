@@ -334,6 +334,8 @@ func TestNewServiceRejectsUnsafeServiceablePathHosts(t *testing.T) {
 		{name: "plain-http", url: "http://helper.gpm-pilot.net/bridge"},
 		{name: "private-ip", url: "https://10.0.0.5/bridge"},
 		{name: "reserved-domain", url: "https://reserved-helper.example/bridge"},
+		{name: "tailscale-overlay", url: "https://helper.tailnet.ts.net/bridge"},
+		{name: "tailscale-domain", url: "https://helper.tailscale.net/bridge"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := NewService(ServiceConfig{

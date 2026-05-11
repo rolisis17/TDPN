@@ -6,6 +6,10 @@ path_id="helper-web"
 code=""
 code_file=""
 allow_unauthenticated="0"
+require_tls="0"
+cacert=""
+client_cert=""
+client_key=""
 summary_json=""
 abuse_message="bridge service smoke"
 expect_helper_id=""
@@ -15,7 +19,7 @@ expect_registry_id=""
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/access_bridge_service_smoke.sh --base-url URL [--path-id helper-web] (--code CODE | --code-file FILE) [--expect-helper-id ID] [--expect-org-id ID] [--expect-registry-id ID] [--summary-json FILE] [--abuse-message TEXT]
+  scripts/access_bridge_service_smoke.sh --base-url URL [--path-id helper-web] (--code CODE | --code-file FILE) [--cacert FILE] [--client-cert FILE --client-key FILE] [--require-tls 0|1] [--expect-helper-id ID] [--expect-org-id ID] [--expect-registry-id ID] [--summary-json FILE] [--abuse-message TEXT]
   scripts/access_bridge_service_smoke.sh --base-url URL [--path-id helper-web] --allow-unauthenticated 1 [diagnostic only]
 
 Checks /health, access-code-gated /bridge/{path_id}, no-store/no-referrer headers, and /abuse logging acceptance.
@@ -42,6 +46,22 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-unauthenticated)
       allow_unauthenticated="${2:-1}"
+      shift 2
+      ;;
+    --require-tls)
+      require_tls="${2:-1}"
+      shift 2
+      ;;
+    --cacert)
+      cacert="${2:-}"
+      shift 2
+      ;;
+    --client-cert)
+      client_cert="${2:-}"
+      shift 2
+      ;;
+    --client-key)
+      client_key="${2:-}"
       shift 2
       ;;
     --summary-json)
@@ -76,7 +96,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for cmd in curl date jq; do
+for cmd in awk curl date jq sed; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "access bridge service smoke failed: missing required command: $cmd" >&2
     exit 2
@@ -94,6 +114,26 @@ if [[ -z "$path_id" ]]; then
 fi
 if [[ "$allow_unauthenticated" != "0" && "$allow_unauthenticated" != "1" ]]; then
   echo "access bridge service smoke failed: --allow-unauthenticated must be 0 or 1" >&2
+  exit 2
+fi
+if [[ "$require_tls" != "0" && "$require_tls" != "1" ]]; then
+  echo "access bridge service smoke failed: --require-tls must be 0 or 1" >&2
+  exit 2
+fi
+if [[ -n "$cacert" && ! -f "$cacert" ]]; then
+  echo "access bridge service smoke failed: cacert file not found: $cacert" >&2
+  exit 2
+fi
+if [[ -n "$client_cert" && ! -f "$client_cert" ]]; then
+  echo "access bridge service smoke failed: client cert file not found: $client_cert" >&2
+  exit 2
+fi
+if [[ -n "$client_key" && ! -f "$client_key" ]]; then
+  echo "access bridge service smoke failed: client key file not found: $client_key" >&2
+  exit 2
+fi
+if { [[ -n "$client_cert" ]] && [[ -z "$client_key" ]]; } || { [[ -z "$client_cert" ]] && [[ -n "$client_key" ]]; }; then
+  echo "access bridge service smoke failed: --client-cert and --client-key must be supplied together" >&2
   exit 2
 fi
 if [[ -n "$code" && -n "$code_file" ]]; then
@@ -126,18 +166,128 @@ wrong_code_body="$tmp_dir/wrong-code.json"
 abuse_body="$tmp_dir/abuse.json"
 code_header_config="$tmp_dir/code-header.curl"
 wrong_code_header_config="$tmp_dir/wrong-code-header.curl"
+health_meta="$tmp_dir/health.meta"
+health_stderr="$tmp_dir/health.stderr"
 
-health_http="$(curl -sS -o "$health_body" -w '%{http_code}' "${base_url}/health" || true)"
+url_scheme() {
+  local raw="$1"
+  if [[ "$raw" =~ ^([A-Za-z][A-Za-z0-9+.-]*):// ]]; then
+    printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]'
+  fi
+}
+
+url_authority() {
+  local raw="$1"
+  raw="${raw#*://}"
+  raw="${raw%%/*}"
+  raw="${raw%%\?*}"
+  raw="${raw%%#*}"
+  printf '%s' "$raw"
+}
+
+url_host() {
+  local authority host
+  authority="$(url_authority "$1")"
+  authority="${authority##*@}"
+  if [[ "$authority" == \[* ]]; then
+    host="${authority#\[}"
+    host="${host%%\]*}"
+  else
+    host="${authority%%:*}"
+  fi
+  printf '%s' "$host" | tr '[:upper:]' '[:lower:]' | sed -E 's/\.+$//'
+}
+
+url_port() {
+  local raw="$1"
+  local scheme authority rest
+  scheme="$(url_scheme "$raw")"
+  authority="$(url_authority "$raw")"
+  authority="${authority##*@}"
+  if [[ "$authority" == \[* ]]; then
+    rest="${authority#*\]}"
+    if [[ "$rest" == :* ]]; then
+      printf '%s' "${rest#:}"
+      return 0
+    fi
+  elif [[ "$authority" == *:* ]]; then
+    printf '%s' "${authority##*:}"
+    return 0
+  fi
+  if [[ "$scheme" == "https" ]]; then
+    printf '%s' "443"
+  elif [[ "$scheme" == "http" ]]; then
+    printf '%s' "80"
+  fi
+}
+
+host_is_loopback() {
+  local host
+  host="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  [[ "$host" == "localhost" || "$host" == "127."* || "$host" == "::1" || "$host" == "0:0:0:0:0:0:0:1" ]]
+}
+
+meta_value() {
+  local file="$1"
+  local key="$2"
+  awk -F= -v k="$key" '$1 == k {print substr($0, length(k) + 2); exit}' "$file" 2>/dev/null || true
+}
+
+curl_common_args=(-sS)
+if [[ -n "$cacert" ]]; then
+  curl_common_args+=(--cacert "$cacert")
+fi
+if [[ -n "$client_cert" ]]; then
+  curl_common_args+=(--cert "$client_cert" --key "$client_key")
+fi
+
+base_url_scheme="$(url_scheme "$base_url")"
+base_url_host="$(url_host "$base_url")"
+base_url_port="$(url_port "$base_url")"
+base_url_loopback="false"
+if host_is_loopback "$base_url_host"; then
+  base_url_loopback="true"
+fi
+base_url_https="false"
+if [[ "$base_url_scheme" == "https" ]]; then
+  base_url_https="true"
+fi
+
+curl "${curl_common_args[@]}" \
+  -o "$health_body" \
+  -w $'http_code=%{http_code}\nssl_verify_result=%{ssl_verify_result}\nremote_ip=%{remote_ip}\nremote_port=%{remote_port}\nhttp_version=%{http_version}\ntime_connect=%{time_connect}\ntime_appconnect=%{time_appconnect}\nurl_effective=%{url_effective}\n' \
+  "${base_url}/health" >"$health_meta" 2>"$health_stderr" || true
+health_http="$(meta_value "$health_meta" "http_code")"
+health_ssl_verify_result="$(meta_value "$health_meta" "ssl_verify_result")"
+health_remote_ip="$(meta_value "$health_meta" "remote_ip")"
+health_remote_port="$(meta_value "$health_meta" "remote_port")"
+health_http_version="$(meta_value "$health_meta" "http_version")"
+health_time_connect="$(meta_value "$health_meta" "time_connect")"
+health_time_appconnect="$(meta_value "$health_meta" "time_appconnect")"
+health_url_effective="$(meta_value "$health_meta" "url_effective")"
+health_curl_error="$(tr -d '\r' <"$health_stderr" | tail -n 3 | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/[[:space:]]+$//')"
+if [[ -z "$health_http" ]]; then
+  health_http="000"
+fi
+tls_checked="$base_url_https"
+tls_verified="false"
+if [[ "$base_url_https" == "true" && "$health_ssl_verify_result" == "0" && "$health_http" != "000" ]]; then
+  tls_verified="true"
+fi
+mtls_client_configured="false"
+if [[ -n "$client_cert" && -n "$client_key" ]]; then
+  mtls_client_configured="true"
+fi
 
 missing_code_http="skipped"
 wrong_code_http="skipped"
 if [[ "$allow_unauthenticated" != "1" ]]; then
-  missing_code_http="$(curl -sS -o "$missing_code_body" -w '%{http_code}' "${base_url}/bridge/${path_id}" || true)"
+  missing_code_http="$(curl "${curl_common_args[@]}" -o "$missing_code_body" -w '%{http_code}' "${base_url}/bridge/${path_id}" || true)"
   printf 'header = "X-GPM-Bridge-Code: wrong-code-denied"\n' >"$wrong_code_header_config"
-  wrong_code_http="$(curl -sS --config "$wrong_code_header_config" -o "$wrong_code_body" -w '%{http_code}' "${base_url}/bridge/${path_id}" || true)"
+  wrong_code_http="$(curl "${curl_common_args[@]}" --config "$wrong_code_header_config" -o "$wrong_code_body" -w '%{http_code}' "${base_url}/bridge/${path_id}" || true)"
 fi
 
-curl_args=(-sS -D "$bridge_headers" -o "$bridge_body" -w '%{http_code}')
+curl_args=("${curl_common_args[@]}" -D "$bridge_headers" -o "$bridge_body" -w '%{http_code}')
 if [[ -n "$code" ]]; then
   printf 'header = "X-GPM-Bridge-Code: %s"\n' "$code" >"$code_header_config"
   curl_args+=(--config "$code_header_config")
@@ -145,7 +295,7 @@ fi
 bridge_http="$(curl "${curl_args[@]}" "${base_url}/bridge/${path_id}" || true)"
 
 abuse_payload="$(jq -cn --arg path_id "$path_id" --arg message "$abuse_message" '{path_id:$path_id,message:$message}')"
-abuse_http="$(curl -sS -X POST -H 'Content-Type: application/json' -d "$abuse_payload" -o "$abuse_body" -w '%{http_code}' "${base_url}/abuse" || true)"
+abuse_http="$(curl "${curl_common_args[@]}" -X POST -H 'Content-Type: application/json' -d "$abuse_payload" -o "$abuse_body" -w '%{http_code}' "${base_url}/abuse" || true)"
 
 health_status="$(jq -r '.status // ""' "$health_body" 2>/dev/null || true)"
 health_helper_id="$(jq -r '.decision.helper_id // ""' "$health_body" 2>/dev/null || true)"
@@ -165,6 +315,9 @@ notes="bridge service smoke passed"
 if [[ "$health_http" != "200" || "$health_status" != "ok" ]]; then
   status="fail"
   notes="health check failed"
+elif [[ "$require_tls" == "1" && "$tls_verified" != "true" ]]; then
+  status="fail"
+  notes="required TLS verification was not proven"
 elif [[ "$allow_unauthenticated" != "1" && "$missing_code_http" != "401" ]]; then
   status="fail"
   notes="missing access-code negative check failed"
@@ -196,6 +349,17 @@ summary="$(jq -cn \
   --arg status "$status" \
   --arg notes "$notes" \
   --arg base_url "$base_url" \
+  --arg base_url_scheme "$base_url_scheme" \
+  --arg base_url_host "$base_url_host" \
+  --arg base_url_port "$base_url_port" \
+  --arg health_url_effective "$health_url_effective" \
+  --arg health_remote_ip "$health_remote_ip" \
+  --arg health_remote_port "$health_remote_port" \
+  --arg health_http_version "$health_http_version" \
+  --arg health_time_connect "$health_time_connect" \
+  --arg health_time_appconnect "$health_time_appconnect" \
+  --arg health_ssl_verify_result "$health_ssl_verify_result" \
+  --arg health_curl_error "$health_curl_error" \
   --arg path_id "$path_id" \
   --arg health_http "$health_http" \
   --arg health_status "$health_status" \
@@ -208,9 +372,14 @@ summary="$(jq -cn \
   --arg bridge_http "$bridge_http" \
   --arg bridge_status "$bridge_status" \
   --arg abuse_http "$abuse_http" \
+  --argjson base_url_loopback "$base_url_loopback" \
+  --argjson base_url_https "$base_url_https" \
+  --argjson tls_checked "$tls_checked" \
+  --argjson tls_verified "$tls_verified" \
+  --argjson mtls_client_configured "$mtls_client_configured" \
   --argjson headers_ok "$headers_ok" \
   --argjson auth_required "$( [[ "$allow_unauthenticated" == "1" ]] && echo false || echo true )" \
-  '{version:1,schema:{id:"access_bridge_service_smoke_summary",major:1,minor:2},generated_at_utc:$generated_at_utc,status:$status,notes:$notes,base_url:$base_url,path_id:$path_id,health:{http_status:$health_http,status:$health_status,helper_id:$health_helper_id,organization_id:$health_org_id,registry_id:$health_registry_id,config_sha256:$health_config_sha256},auth:{required:$auth_required,missing_code_http_status:$missing_code_http,wrong_code_http_status:$wrong_code_http,valid_code_http_status:$bridge_http},bridge:{http_status:$bridge_http,status:$bridge_status,security_headers_ok:$headers_ok},abuse:{http_status:$abuse_http}}')"
+  '{version:1,schema:{id:"access_bridge_service_smoke_summary",major:1,minor:3},generated_at_utc:$generated_at_utc,status:$status,notes:$notes,base_url:$base_url,path_id:$path_id,transport:{base_url_scheme:$base_url_scheme,base_url_host:$base_url_host,base_url_port:$base_url_port,loopback:$base_url_loopback,https:$base_url_https,health:{effective_url:$health_url_effective,remote_ip:$health_remote_ip,remote_port:$health_remote_port,http_version:$health_http_version,time_connect_sec:$health_time_connect,time_appconnect_sec:$health_time_appconnect,curl_error:$health_curl_error},tls:{checked:$tls_checked,verified:$tls_verified,ssl_verify_result:$health_ssl_verify_result},mtls:{client_certificate_configured:$mtls_client_configured,client_certificate_used:$mtls_client_configured}},health:{http_status:$health_http,status:$health_status,helper_id:$health_helper_id,organization_id:$health_org_id,registry_id:$health_registry_id,config_sha256:$health_config_sha256},auth:{required:$auth_required,missing_code_http_status:$missing_code_http,wrong_code_http_status:$wrong_code_http,valid_code_http_status:$bridge_http},bridge:{http_status:$bridge_http,status:$bridge_status,security_headers_ok:$headers_ok},abuse:{http_status:$abuse_http}}')"
 
 if [[ -n "$summary_json" ]]; then
   mkdir -p "$(dirname "$summary_json")"

@@ -94,6 +94,40 @@ fi
 
 set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url http://127.evil.example \
+  --path-id helper-web \
+  --code test-code \
+  --config-json "$TMP_DIR/missing-config.json" \
+  --deploy-pack-dir "$TMP_DIR/missing-deploy-pack" \
+  --print-summary-json 0 >"$TMP_DIR/loopback-looking-dns-http-pilot-bundle.log" 2>&1
+loopback_dns_http_rc=$?
+set -e
+if [[ "$loopback_dns_http_rc" -eq 0 ]] ||
+  ! grep -Fq -- '--base-url must use HTTPS for non-loopback pilot evidence targets' "$TMP_DIR/loopback-looking-dns-http-pilot-bundle.log"; then
+  echo "access bridge pilot evidence bundle integration failed: 127.* DNS name was incorrectly treated as loopback for HTTP"
+  cat "$TMP_DIR/loopback-looking-dns-http-pilot-bundle.log"
+  exit 1
+fi
+
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url https://127.evil.example \
+  --path-id helper-web \
+  --code test-code \
+  --config-json "$TMP_DIR/missing-config.json" \
+  --deploy-pack-dir "$TMP_DIR/missing-deploy-pack" \
+  --print-summary-json 0 >"$TMP_DIR/loopback-looking-dns-https-pilot-bundle.log" 2>&1
+loopback_dns_https_rc=$?
+set -e
+if [[ "$loopback_dns_https_rc" -eq 0 ]] ||
+  ! grep -Fq -- '--base-url host must look public-routable for non-loopback pilot evidence targets' "$TMP_DIR/loopback-looking-dns-https-pilot-bundle.log"; then
+  echo "access bridge pilot evidence bundle integration failed: 127.* DNS name was incorrectly treated as loopback for HTTPS"
+  cat "$TMP_DIR/loopback-looking-dns-https-pilot-bundle.log"
+  exit 1
+fi
+
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
   --base-url https://recovery-helper.gpm-pilot.net \
   --path-id helper-web \
   --code test-code \
@@ -205,7 +239,7 @@ if ! jq -e \
   --arg provenance_json "$PROVENANCE_JSON" \
   '
     .schema.id == "access_bridge_pilot_evidence_bundle_summary"
-    and .schema.minor == 1
+    and .schema.minor == 2
     and .status == "pass"
     and .evidence_scope == "local_rehearsal"
     and .pilot_handoff_ready == false
@@ -213,8 +247,13 @@ if ! jq -e \
     and (.notes | contains("local rehearsal evidence"))
     and .evidence_policy.require_https == true
     and .evidence_policy.require_public_host == true
+    and .evidence_policy.require_tls_verified == true
     and .evidence_policy.base_url_loopback == true
     and .evidence_policy.base_url_private_or_reserved == true
+    and .transport.status == "pass"
+    and .transport.https == false
+    and .transport.tls_verified == false
+    and .transport.smoke_summary_json == .artifacts.smoke_summary_json
     and .inputs.base_url == $base_url
     and .inputs.access_code_redacted == true
     and .expected_identity.helper_id == "helper-pilot"

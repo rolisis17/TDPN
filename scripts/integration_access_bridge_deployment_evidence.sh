@@ -70,13 +70,36 @@ jq -n \
     schema: {
       id: "access_bridge_service_smoke_summary",
       major: 1,
-      minor: 1
+      minor: 3
     },
     generated_at_utc: $generated_at_utc,
     status: "pass",
     notes: "bridge service smoke passed",
     base_url: "https://recovery-helper.gpm-pilot.net",
     path_id: "helper-web",
+    transport: {
+      base_url_scheme: "https",
+      base_url_host: "recovery-helper.gpm-pilot.net",
+      base_url_port: "443",
+      loopback: false,
+      https: true,
+      health: {
+        effective_url: "https://recovery-helper.gpm-pilot.net/health",
+        remote_ip: "198.51.100.240",
+        remote_port: "443",
+        http_version: "2",
+        time_appconnect_sec: "0.010000"
+      },
+      tls: {
+        checked: true,
+        verified: true,
+        ssl_verify_result: "0"
+      },
+      mtls: {
+        client_certificate_configured: false,
+        client_certificate_used: false
+      }
+    },
     health: {
       http_status: "200",
       status: "ok",
@@ -141,6 +164,12 @@ if ! jq -e \
     and .smoke.bridge_status == "ok"
     and .smoke.bridge_security_headers_ok == true
     and .smoke.base_host == "recovery-helper.gpm-pilot.net"
+    and .smoke.transport_https == true
+    and .smoke.transport_tls_verified == true
+    and .transport.status == "pass"
+    and .transport.https == true
+    and .transport.tls_verified == true
+    and .transport.ssl_verify_result == "0"
     and .smoke.config_sha256 == $config_sha256
     and .smoke.summary_json == $smoke_summary
     and .expected_identity.helper_id == "helper-evidence"
@@ -202,6 +231,39 @@ if ! jq -e '
   ' "$LOCAL_SUMMARY_JSON" >/dev/null; then
   echo "access bridge deployment evidence integration failed: loopback pass must remain local rehearsal only"
   cat "$LOCAL_SUMMARY_JSON"
+  exit 1
+fi
+
+BAD_TLS_SMOKE="$TMP_DIR/access_bridge_service_smoke_bad_tls_summary.json"
+BAD_TLS_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_bad_tls_summary.json"
+jq '.transport.tls.verified = false | .transport.tls.ssl_verify_result = "18"' "$SMOKE_SUMMARY" >"$BAD_TLS_SMOKE"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$BAD_TLS_SMOKE" \
+  --expect-helper-id helper-evidence \
+  --expect-org-id evidence-org \
+  --expect-registry-id "$registry_id" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_DIR" \
+  --service-name gpm-access-bridge-evidence \
+  --summary-json "$BAD_TLS_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/bad-tls.log" 2>&1
+bad_tls_rc=$?
+set -e
+if [[ "$bad_tls_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: real helper HTTPS without verified TLS should fail"
+  cat "$BAD_TLS_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+    .status == "fail"
+    and .evidence_scope == "real_helper_https"
+    and .transport.status == "fail"
+    and .transport.tls_verified == false
+    and .recommended_next_action.id == "refresh_deployed_bridge_smoke"
+  ' "$BAD_TLS_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: bad TLS summary mismatch"
+  cat "$BAD_TLS_SUMMARY"
   exit 1
 fi
 

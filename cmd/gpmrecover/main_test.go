@@ -659,6 +659,12 @@ func TestBridgeServiceCommandsRequireAccessCodeByDefault(t *testing.T) {
 	if err := runBridgeServiceServe([]string{"--config", "missing.json", "--access-code-sha256", strings.Repeat("0", 64), "--allow-unpinned-local", "--addr", "0.0.0.0:18980"}); err == nil || !strings.Contains(err.Error(), "loopback") {
 		t.Fatalf("expected unpinned serve to require loopback, got %v", err)
 	}
+	if err := runBridgeServiceServe([]string{"--config", "missing.json", "--config-sha256", strings.Repeat("0", 64), "--access-code-sha256", strings.Repeat("0", 64), "--addr", "0.0.0.0:18980", "--rps", "0"}); err == nil || !strings.Contains(err.Error(), "--rps") {
+		t.Fatalf("expected public serve with disabled rps to fail closed, got %v", err)
+	}
+	if err := runBridgeServiceServe([]string{"--config", "missing.json", "--config-sha256", strings.Repeat("0", 64), "--access-code-sha256", strings.Repeat("0", 64), "--addr", "0.0.0.0:18980", "--max-sources", "0"}); err == nil || !strings.Contains(err.Error(), "--max-sources") {
+		t.Fatalf("expected public serve with disabled source cap to fail closed, got %v", err)
+	}
 }
 
 func TestBridgeServiceCodeGenerationAndWeakCodePolicy(t *testing.T) {

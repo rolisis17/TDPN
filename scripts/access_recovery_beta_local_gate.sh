@@ -177,12 +177,12 @@ append_step() {
   local log="$6"
   jq -nc \
     --arg id "$id" \
-    --arg label "$label" \
+    --arg step_label "$label" \
     --arg status "$status" \
     --arg command "$command" \
     --arg log "$log" \
     --argjson rc "$rc" \
-    '{id:$id,label:$label,status:$status,rc:$rc,command:$command,log:$log}' >>"$steps_jsonl"
+    '{id:$id,label:$step_label,status:$status,rc:$rc,command:$command,log:$log}' >>"$steps_jsonl"
 }
 
 run_step() {

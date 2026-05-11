@@ -1867,7 +1867,7 @@ access_recovery_evidence_json() {
   fi
 
   if [[ -z "$path" ]]; then
-    jq -cn --arg label "$label" --arg expected_schema_id "$expected_schema_id" '{
+    jq -cn --arg evidence_label "$label" --arg expected_schema_id "$expected_schema_id" '{
       available: false,
       input_summary_json: null,
       source_summary_json: null,
@@ -1875,7 +1875,7 @@ access_recovery_evidence_json() {
       expected_schema_id: $expected_schema_id,
       status: "missing",
       generated_at_utc: null,
-      notes: ($label + " summary path is missing"),
+      notes: ($evidence_label + " summary path is missing"),
       rc: null,
       needs_attention: true,
       details: {}
@@ -1884,7 +1884,7 @@ access_recovery_evidence_json() {
   fi
 
   if [[ ! -f "$path" ]]; then
-    jq -cn --argjson input "$input_json" --arg label "$label" --arg expected_schema_id "$expected_schema_id" '{
+    jq -cn --argjson input "$input_json" --arg evidence_label "$label" --arg expected_schema_id "$expected_schema_id" '{
       available: false,
       input_summary_json: $input,
       source_summary_json: null,
@@ -1892,7 +1892,7 @@ access_recovery_evidence_json() {
       expected_schema_id: $expected_schema_id,
       status: "missing",
       generated_at_utc: null,
-      notes: ($label + " summary file is missing"),
+      notes: ($evidence_label + " summary file is missing"),
       rc: null,
       needs_attention: true,
       details: {}
@@ -1901,7 +1901,7 @@ access_recovery_evidence_json() {
   fi
 
   if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
-    jq -cn --argjson input "$input_json" --arg label "$label" --arg expected_schema_id "$expected_schema_id" '{
+    jq -cn --argjson input "$input_json" --arg evidence_label "$label" --arg expected_schema_id "$expected_schema_id" '{
       available: false,
       input_summary_json: $input,
       source_summary_json: null,
@@ -1909,7 +1909,7 @@ access_recovery_evidence_json() {
       expected_schema_id: $expected_schema_id,
       status: "invalid",
       generated_at_utc: null,
-      notes: ($label + " summary is not valid JSON"),
+      notes: ($evidence_label + " summary is not valid JSON"),
       rc: null,
       needs_attention: true,
       details: {}
@@ -1930,7 +1930,7 @@ access_recovery_evidence_json() {
     --arg input "$path" \
     --arg expected_schema_id "$expected_schema_id" \
     --arg kind "$kind" \
-    --arg label "$label" \
+    --arg evidence_label "$label" \
     --arg source_summary_sha256 "$source_summary_sha256" \
     --argjson summary_age_sec "$age_json" \
     --argjson summary_stale "$stale_json" \
@@ -1950,9 +1950,18 @@ access_recovery_evidence_json() {
         (($v | type) == "string" and (($v | ascii_downcase) == $expected));
       def pass_status:
         status_norm == "pass";
+      def service_smoke_transport_ok:
+        if ((.base_url // "") | test("^https://"; "i")) then
+          (.transport.https == true)
+          and (.transport.tls.checked == true)
+          and (.transport.tls.verified == true)
+          and str_eq(.transport.tls.ssl_verify_result; "0")
+        else true
+        end;
       def service_smoke_semantic_ok:
         rc_ok
         and pass_status
+        and service_smoke_transport_ok
         and str_eq(.health.status; "ok")
         and (.auth.required == true)
         and str_eq(.auth.missing_code_http_status; "401")
@@ -2048,7 +2057,14 @@ access_recovery_evidence_json() {
           bridge_http_status: str_or_null(.bridge.http_status),
           bridge_status: str_or_null(.bridge.status),
           bridge_security_headers_ok: (if (.bridge.security_headers_ok | type) == "boolean" then .bridge.security_headers_ok else null end),
-          abuse_http_status: str_or_null(.abuse.http_status)
+          abuse_http_status: str_or_null(.abuse.http_status),
+          transport_https: (if (.transport.https | type) == "boolean" then .transport.https else null end),
+          transport_tls_checked: (if (.transport.tls.checked | type) == "boolean" then .transport.tls.checked else null end),
+          transport_tls_verified: (if (.transport.tls.verified | type) == "boolean" then .transport.tls.verified else null end),
+          transport_ssl_verify_result: str_or_null(.transport.tls.ssl_verify_result),
+          transport_effective_url: str_or_null(.transport.health.effective_url),
+          transport_remote_ip: str_or_null(.transport.health.remote_ip),
+          transport_http_version: str_or_null(.transport.health.http_version)
         };
       def deployment_details:
         {
@@ -2070,6 +2086,10 @@ access_recovery_evidence_json() {
           helper_id: str_or_null(.deployed_identity.helper_id),
           organization_id: str_or_null(.deployed_identity.organization_id),
           registry_id: str_or_null(.deployed_identity.registry_id),
+          transport_status: str_or_null(.transport.status),
+          transport_https: (if (.transport.https | type) == "boolean" then .transport.https else null end),
+          transport_tls_verified: (if (.transport.tls_verified | type) == "boolean" then .transport.tls_verified else null end),
+          transport_ssl_verify_result: str_or_null(.transport.ssl_verify_result),
           recommended_action_id: str_or_null(.recommended_next_action.id),
           recommended_action_command: str_or_null(.recommended_next_action.command)
         };
@@ -2124,11 +2144,11 @@ access_recovery_evidence_json() {
           summary_max_age_sec: $summary_max_age_sec,
           semantic_ok: (if $fresh_contract then $semantic_ok else null end),
           notes: (
-            if $valid_contract and $summary_stale then ($label + " summary is stale or has untrusted freshness metadata")
-            elif $valid_contract and ($semantic_ok | not) then ($label + " summary failed semantic evidence checks")
+            if $valid_contract and $summary_stale then ($evidence_label + " summary is stale or has untrusted freshness metadata")
+            elif $valid_contract and ($semantic_ok | not) then ($evidence_label + " summary failed semantic evidence checks")
             elif $valid_contract then str_or_null(.notes)
-            elif $schema_id != $expected_schema_id then ($label + " summary schema mismatch")
-            else ($label + " summary status is missing")
+            elif $schema_id != $expected_schema_id then ($evidence_label + " summary schema mismatch")
+            else ($evidence_label + " summary status is missing")
             end
           ),
           rc: rc_or_null,
@@ -2464,7 +2484,14 @@ access_recovery_track_json_from_evidence() {
           );
       def real_helper_https_evidence:
         (smoke_base_url | test("^https://"; "i"))
-        and ((private_or_reserved_helper_host) | not);
+        and ((private_or_reserved_helper_host) | not)
+        and ($service_smoke.details.transport_https == true)
+        and ($service_smoke.details.transport_tls_verified == true)
+        and (($service_smoke.details.transport_ssl_verify_result // "") == "0")
+        and (($deployment_evidence.details.transport_status // "") == "pass")
+        and ($deployment_evidence.details.transport_https == true)
+        and ($deployment_evidence.details.transport_tls_verified == true)
+        and (($deployment_evidence.details.transport_ssl_verify_result // "") == "0");
       def evidence_scope:
         if all_pass and evidence_binding.ok and real_helper_https_evidence then "real_helper_https"
         elif all_pass and evidence_binding.ok then "local_rehearsal"

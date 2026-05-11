@@ -12,14 +12,14 @@
   "helper": {
     "helper_id": "helper-perth-1",
     "display_name": "Perth community helper",
-    "contact_url": "https://helper.example/contact/freenews",
+    "contact_url": "https://helper.gpm-pilot.net/contact/freenews",
     "description": "Temporary assisted bootstrap helper for blocked users"
   },
   "access_paths": [
     {
       "path_id": "bridge-helper-web",
       "kind": "bridge",
-      "url": "https://helper.example/freenews/bootstrap",
+      "url": "https://helper.gpm-pilot.net/freenews/bootstrap",
       "priority": 10,
       "description": "Temporary helper bootstrap page",
       "safety_notes": [
@@ -30,7 +30,7 @@
     {
       "path_id": "bridge-helper-chat",
       "kind": "instructions",
-      "url": "mailto:bridge-helper@example.com",
+      "url": "mailto:bridge-helper@gpm-pilot.net",
       "priority": 20,
       "requires_external_app": true,
       "launch_hint": "Email the helper with the invite id only",

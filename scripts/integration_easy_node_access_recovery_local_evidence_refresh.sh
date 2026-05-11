@@ -106,11 +106,25 @@ if ! jq -e '
   and .pilot_handoff_ready == false
   and .evidence_scope == "local_rehearsal"
   and .roadmap.refreshed == false
+  and (.artifacts.pilot_verify_summary_json | length > 0)
   and .recommended_next_action.id == "real_helper_https_evidence"
   and ((.recommended_next_action.reason // "") | contains("Local evidence is only a rehearsal"))
 ' "$REAL_SUMMARY" >/dev/null; then
   echo "easy node access recovery local evidence refresh integration failed: real local summary contract mismatch"
   cat "$REAL_SUMMARY"
+  exit 1
+fi
+VERIFY_SUMMARY="$(jq -r '.artifacts.pilot_verify_summary_json' "$REAL_SUMMARY")"
+if ! jq -e '
+  .schema.id == "access_bridge_pilot_evidence_bundle_verify_summary"
+  and .status == "pass"
+  and .trusted_provenance.required == false
+  and .pilot_handoff_ready == false
+  and .inputs.summary_json != ""
+  and .checks.summary_contract.status == "pass"
+' "$VERIFY_SUMMARY" >/dev/null; then
+  echo "easy node access recovery local evidence refresh integration failed: local verifier summary mismatch"
+  cat "$VERIFY_SUMMARY"
   exit 1
 fi
 

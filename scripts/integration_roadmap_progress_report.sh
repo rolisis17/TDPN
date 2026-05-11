@@ -839,13 +839,36 @@ cat >"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_SERVICE_SMO
   "schema": {
     "id": "access_bridge_service_smoke_summary",
     "major": 1,
-    "minor": 2
+    "minor": 3
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
   "notes": "bridge smoke passed",
   "base_url": "https://recovery-helper.gpm-pilot.net",
   "path_id": "helper-web",
+  "transport": {
+    "base_url_scheme": "https",
+    "base_url_host": "recovery-helper.gpm-pilot.net",
+    "base_url_port": "443",
+    "loopback": false,
+    "https": true,
+    "health": {
+      "effective_url": "https://recovery-helper.gpm-pilot.net/health",
+      "remote_ip": "198.51.100.240",
+      "remote_port": "443",
+      "http_version": "2",
+      "time_appconnect_sec": "0.010000"
+    },
+    "tls": {
+      "checked": true,
+      "verified": true,
+      "ssl_verify_result": "0"
+    },
+    "mtls": {
+      "client_certificate_configured": false,
+      "client_certificate_used": false
+    }
+  },
   "health": {
     "http_status": "200",
     "status": "ok",
@@ -876,7 +899,7 @@ cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLO
   "schema": {
     "id": "access_bridge_deployment_evidence_summary",
     "major": 1,
-    "minor": 1
+    "minor": 2
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
@@ -892,8 +915,26 @@ cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLO
     "bridge_http_status": "200",
     "bridge_status": "ok",
     "bridge_security_headers_ok": true,
+    "transport_https": true,
+    "transport_tls_verified": true,
     "config_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "summary_json": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"
+  },
+  "transport": {
+    "status": "pass",
+    "reason": "",
+    "base_url_scheme": "https",
+    "https": true,
+    "loopback": false,
+    "tls_checked": true,
+    "tls_verified": true,
+    "ssl_verify_result": "0",
+    "effective_url": "https://recovery-helper.gpm-pilot.net/health",
+    "remote_ip": "198.51.100.240",
+    "remote_port": "443",
+    "http_version": "2",
+    "time_appconnect_sec": "0.010000",
+    "mtls_client_certificate_used": false
   },
   "identity_check": {
     "status": "pass",
@@ -1172,6 +1213,9 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_service_smoke.details.bridge_http_status == "200"
   and .access_recovery_track.access_bridge_service_smoke.details.bridge_status == "ok"
   and .access_recovery_track.access_bridge_service_smoke.details.bridge_security_headers_ok == true
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_https == true
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_tls_verified == true
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_ssl_verify_result == "0"
   and .access_recovery_track.access_bridge_deployment_evidence.available == true
   and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
   and .access_recovery_track.access_bridge_deployment_evidence.source_summary_json == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"'"
@@ -1180,6 +1224,10 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_bridge_http_status == "200"
   and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_bridge_status == "ok"
   and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_bridge_security_headers_ok == true
+  and .access_recovery_track.access_bridge_deployment_evidence.details.transport_status == "pass"
+  and .access_recovery_track.access_bridge_deployment_evidence.details.transport_https == true
+  and .access_recovery_track.access_bridge_deployment_evidence.details.transport_tls_verified == true
+  and .access_recovery_track.access_bridge_deployment_evidence.details.transport_ssl_verify_result == "0"
   and .access_recovery_track.access_bridge_host_install.available == true
   and .access_recovery_track.access_bridge_host_install.status == "pass"
   and .access_recovery_track.access_bridge_host_install.source_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"

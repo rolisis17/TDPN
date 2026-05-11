@@ -359,6 +359,8 @@ func TestEvaluateBridgeServiceRequestRejectsUnsafeHelperURLs(t *testing.T) {
 		{name: "plain-http", url: "http://helper.gpm-pilot.net/connect", code: "bridge_service_access_path_plain_http"},
 		{name: "private-ip", url: "https://10.0.0.5/connect", code: "bridge_service_access_path_private_host"},
 		{name: "reserved-domain", url: "https://reserved-helper.example/connect", code: "bridge_service_access_path_private_host"},
+		{name: "tailscale-overlay", url: "https://helper.tailnet.ts.net/connect", code: "bridge_service_access_path_private_host"},
+		{name: "tailscale-domain", url: "https://helper.tailscale.net/connect", code: "bridge_service_access_path_private_host"},
 		{name: "single-label", url: "https://helper/connect", code: "bridge_service_access_path_private_host"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

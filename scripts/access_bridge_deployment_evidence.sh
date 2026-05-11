@@ -493,6 +493,18 @@ smoke_bridge_status="$(json_string_or_empty "$smoke_summary_json" '.bridge.statu
 smoke_bridge_security_headers_ok="$(jq -r 'if (.bridge.security_headers_ok // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_base_url="$(json_string_or_empty "$smoke_summary_json" '.base_url')"
 smoke_base_host="$(host_from_url "$smoke_base_url")"
+smoke_transport_scheme="$(json_string_or_empty "$smoke_summary_json" '.transport.base_url_scheme')"
+smoke_transport_https="$(jq -r 'if (.transport.https // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_transport_loopback="$(jq -r 'if (.transport.loopback // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_transport_tls_checked="$(jq -r 'if (.transport.tls.checked // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_transport_tls_verified="$(jq -r 'if (.transport.tls.verified // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_transport_ssl_verify_result="$(json_string_or_empty "$smoke_summary_json" '.transport.tls.ssl_verify_result')"
+smoke_transport_effective_url="$(json_string_or_empty "$smoke_summary_json" '.transport.health.effective_url')"
+smoke_transport_remote_ip="$(json_string_or_empty "$smoke_summary_json" '.transport.health.remote_ip')"
+smoke_transport_remote_port="$(json_string_or_empty "$smoke_summary_json" '.transport.health.remote_port')"
+smoke_transport_http_version="$(json_string_or_empty "$smoke_summary_json" '.transport.health.http_version')"
+smoke_transport_time_appconnect="$(json_string_or_empty "$smoke_summary_json" '.transport.health.time_appconnect_sec')"
+smoke_transport_mtls_client_used="$(jq -r 'if (.transport.mtls.client_certificate_used // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_base_host_requires_proxy_match="false"
 if [[ -n "$smoke_base_host" ]] && ! is_loopback_host "$smoke_base_host"; then
   smoke_base_host_requires_proxy_match="true"
@@ -500,6 +512,18 @@ fi
 evidence_scope="local_rehearsal"
 if [[ "$smoke_base_url" == https://* ]] && is_bridge_public_host "$smoke_base_host"; then
   evidence_scope="real_helper_https"
+fi
+transport_status="pass"
+transport_reason=""
+if [[ "$evidence_scope" == "real_helper_https" ]]; then
+  if [[ "$smoke_transport_scheme" != "https" || "$smoke_transport_https" != "true" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "smoke summary did not prove HTTPS transport")"
+  fi
+  if [[ "$smoke_transport_tls_checked" != "true" || "$smoke_transport_tls_verified" != "true" || "$smoke_transport_ssl_verify_result" != "0" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "smoke summary did not prove verified TLS")"
+  fi
 fi
 smoke_path_id="$(json_string_or_empty "$smoke_summary_json" '.path_id')"
 actual_helper_id="$(json_string_or_empty "$smoke_summary_json" '.health.helper_id')"
@@ -803,6 +827,10 @@ elif [[ "$smoke_evidence_status" != "pass" ]]; then
   status="fail"
   recommended_action_id="refresh_deployed_bridge_smoke"
   recommended_action="Rerun access_bridge_service_smoke.sh with a valid access code so evidence includes fresh auth-negative checks."
+elif [[ "$transport_status" != "pass" ]]; then
+  status="fail"
+  recommended_action_id="refresh_deployed_bridge_smoke"
+  recommended_action="Rerun access_bridge_service_smoke.sh against the real HTTPS helper so evidence includes verified TLS transport facts."
 elif [[ "$identity_status" != "pass" ]]; then
   status="fail"
   recommended_action_id="fix_bridge_identity"
@@ -840,6 +868,20 @@ jq -n \
   --arg smoke_evidence_reason "$smoke_evidence_reason" \
   --arg smoke_base_url "$smoke_base_url" \
   --arg smoke_base_host "$smoke_base_host" \
+  --arg smoke_transport_scheme "$smoke_transport_scheme" \
+  --arg smoke_transport_https "$smoke_transport_https" \
+  --arg smoke_transport_loopback "$smoke_transport_loopback" \
+  --arg smoke_transport_tls_checked "$smoke_transport_tls_checked" \
+  --arg smoke_transport_tls_verified "$smoke_transport_tls_verified" \
+  --arg smoke_transport_ssl_verify_result "$smoke_transport_ssl_verify_result" \
+  --arg smoke_transport_effective_url "$smoke_transport_effective_url" \
+  --arg smoke_transport_remote_ip "$smoke_transport_remote_ip" \
+  --arg smoke_transport_remote_port "$smoke_transport_remote_port" \
+  --arg smoke_transport_http_version "$smoke_transport_http_version" \
+  --arg smoke_transport_time_appconnect "$smoke_transport_time_appconnect" \
+  --arg smoke_transport_mtls_client_used "$smoke_transport_mtls_client_used" \
+  --arg transport_status "$transport_status" \
+  --arg transport_reason "$transport_reason" \
   --arg evidence_scope "$evidence_scope" \
   --arg smoke_path_id "$smoke_path_id" \
   --arg expect_helper_id "$expect_helper_id" \
@@ -883,7 +925,7 @@ jq -n \
     schema: {
       id: "access_bridge_deployment_evidence_summary",
       major: 1,
-      minor: 1
+      minor: 2
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -923,8 +965,26 @@ jq -n \
       evidence_reason: $smoke_evidence_reason,
       base_url: $smoke_base_url,
       base_host: $smoke_base_host,
+      transport_https: ($smoke_transport_https == "true"),
+      transport_tls_verified: ($smoke_transport_tls_verified == "true"),
       path_id: $smoke_path_id,
       summary_json: $smoke_summary_json
+    },
+    transport: {
+      status: $transport_status,
+      reason: $transport_reason,
+      base_url_scheme: $smoke_transport_scheme,
+      https: ($smoke_transport_https == "true"),
+      loopback: ($smoke_transport_loopback == "true"),
+      tls_checked: ($smoke_transport_tls_checked == "true"),
+      tls_verified: ($smoke_transport_tls_verified == "true"),
+      ssl_verify_result: $smoke_transport_ssl_verify_result,
+      effective_url: $smoke_transport_effective_url,
+      remote_ip: $smoke_transport_remote_ip,
+      remote_port: $smoke_transport_remote_port,
+      http_version: $smoke_transport_http_version,
+      time_appconnect_sec: $smoke_transport_time_appconnect,
+      mtls_client_certificate_used: ($smoke_transport_mtls_client_used == "true")
     },
     expected_identity: {
       helper_id: $expect_helper_id,

@@ -24,8 +24,8 @@ go run ./cmd/gpmrecover demo-bundle \
   --base-url https://freenews.example \
   --helper-id helper-demo \
   --helper-name "Demo bridge helper" \
-  --helper-url https://helper.example/freenews/bootstrap \
-  --helper-contact mailto:bridge-helper@example.com
+  --helper-url https://helper.gpm-pilot.net/freenews/bootstrap \
+  --helper-contact mailto:bridge-helper@gpm-pilot.net
 ```
 
 2. Keep `recovery.key` offline or in a controlled operator machine. Share only:
@@ -182,8 +182,8 @@ go run ./cmd/gpmrecover bridge-registry-upsert-helper \
   --helper-id helper-1 \
   --org-ids freenews-demo \
   --display-name "Helper 1" \
-  --contact-url https://helper.example/contact \
-  --abuse-report-url https://helper.example/abuse \
+  --contact-url https://helper.gpm-pilot.net/contact \
+  --abuse-report-url https://helper.gpm-pilot.net/abuse \
   --rate-limit-policy "beta cap: per-user and per-source limits enforced"
 ```
 

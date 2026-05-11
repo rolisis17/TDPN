@@ -351,8 +351,11 @@ bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
   --report-md "$pilot_report_md" \
   --print-summary-json 0
 
+pilot_verify_summary_json="$reports_dir/access_bridge_pilot_evidence_bundle_verify_summary.json"
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$pilot_summary_json" \
+  --verification-summary-json "$pilot_verify_summary_json" \
+  --print-verification-summary-json 0 \
   --show-details 1 >"$pilot_verify_log" 2>&1
 
 service_smoke_summary_json="$pilot_bundle_dir/access_bridge_service_smoke_summary.json"
@@ -363,15 +366,18 @@ canonical_service_smoke_summary_json=""
 canonical_deployment_evidence_summary_json=""
 canonical_host_install_summary_json=""
 canonical_pilot_summary_json=""
+canonical_pilot_verify_summary_json=""
 if [[ "$write_canonical" == "1" ]]; then
   canonical_service_smoke_summary_json="$canonical_dir/access_bridge_service_smoke_summary.json"
   canonical_deployment_evidence_summary_json="$canonical_dir/access_bridge_deployment_evidence_summary.json"
   canonical_host_install_summary_json="$canonical_dir/access_bridge_host_install_check_summary.json"
   canonical_pilot_summary_json="$canonical_dir/access_bridge_pilot_evidence_bundle_summary.json"
+  canonical_pilot_verify_summary_json="$canonical_dir/access_bridge_pilot_evidence_bundle_verify_summary.json"
   copy_if_present "$service_smoke_summary_json" "$canonical_service_smoke_summary_json"
   copy_if_present "$deployment_evidence_summary_json" "$canonical_deployment_evidence_summary_json"
   copy_if_present "$host_install_summary_json" "$canonical_host_install_summary_json"
   copy_if_present "$pilot_summary_json" "$canonical_pilot_summary_json"
+  copy_if_present "$pilot_verify_summary_json" "$canonical_pilot_verify_summary_json"
 fi
 
 roadmap_status="skipped"
@@ -385,6 +391,7 @@ if [[ "$refresh_roadmap" == "1" ]]; then
     --access-bridge-service-smoke-summary-json "$service_smoke_summary_json" \
     --access-bridge-deployment-evidence-summary-json "$deployment_evidence_summary_json" \
     --access-bridge-host-install-summary-json "$host_install_summary_json" \
+    --access-bridge-pilot-evidence-bundle-verify-summary-json "$pilot_verify_summary_json" \
     --summary-json "$roadmap_summary_json" \
     --report-md "$roadmap_report_md" \
     --print-report 0 \
@@ -421,10 +428,12 @@ jq -n \
   --arg pilot_summary_json "$pilot_summary_json" \
   --arg pilot_report_md "$pilot_report_md" \
   --arg pilot_verify_log "$pilot_verify_log" \
+  --arg pilot_verify_summary_json "$pilot_verify_summary_json" \
   --arg canonical_service_smoke_summary_json "$canonical_service_smoke_summary_json" \
   --arg canonical_deployment_evidence_summary_json "$canonical_deployment_evidence_summary_json" \
   --arg canonical_host_install_summary_json "$canonical_host_install_summary_json" \
   --arg canonical_pilot_summary_json "$canonical_pilot_summary_json" \
+  --arg canonical_pilot_verify_summary_json "$canonical_pilot_verify_summary_json" \
   --arg roadmap_status "$roadmap_status" \
   --argjson roadmap_rc "$roadmap_rc" \
   --arg roadmap_summary_json "$roadmap_summary_json" \
@@ -457,10 +466,12 @@ jq -n \
       pilot_summary_json: $pilot_summary_json,
       pilot_report_md: $pilot_report_md,
       pilot_verify_log: $pilot_verify_log,
+      pilot_verify_summary_json: $pilot_verify_summary_json,
       canonical_service_smoke_summary_json: (if $canonical_service_smoke_summary_json == "" then null else $canonical_service_smoke_summary_json end),
       canonical_deployment_evidence_summary_json: (if $canonical_deployment_evidence_summary_json == "" then null else $canonical_deployment_evidence_summary_json end),
       canonical_host_install_summary_json: (if $canonical_host_install_summary_json == "" then null else $canonical_host_install_summary_json end),
       canonical_pilot_summary_json: (if $canonical_pilot_summary_json == "" then null else $canonical_pilot_summary_json end),
+      canonical_pilot_verify_summary_json: (if $canonical_pilot_verify_summary_json == "" then null else $canonical_pilot_verify_summary_json end),
       roadmap_summary_json: (if $refresh_roadmap then $roadmap_summary_json else null end),
       roadmap_report_md: (if $refresh_roadmap then $roadmap_report_md else null end)
     },

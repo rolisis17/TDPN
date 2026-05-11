@@ -1118,6 +1118,16 @@ func runBridgeServiceServe(args []string) error {
 	if *allowQueryAccessCode && !isLoopbackListenAddr(*addr) {
 		return errors.New("--allow-query-access-code requires a loopback --addr")
 	}
+	if !isLoopbackListenAddr(*addr) {
+		if *rps < 1 || *rps > 20 {
+			return errors.New("bridge-service-serve requires --rps between 1 and 20 for non-loopback listeners")
+		}
+		if *maxSources < 1 || *maxSources > 100000 {
+			return errors.New("bridge-service-serve requires --max-sources between 1 and 100000 for non-loopback listeners")
+		}
+	} else if *maxSources < 0 {
+		return errors.New("bridge-service-serve requires --max-sources >= 0")
+	}
 	body, err := readInputFileStrict(*configFile, "bridge service config", maxPackFileBytes)
 	if err != nil {
 		return err
