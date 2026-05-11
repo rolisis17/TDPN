@@ -30,6 +30,7 @@ SUMMARY_JSON="$REPORTS_DIR/prod_pilot_cohort_summary.json"
 
 cat >"$TREND_JSON" <<'EOF_TREND'
 {
+  "generated_at_utc":"2026-03-11T00:00:00Z",
   "decision":"GO",
   "go_rate_pct":100,
   "policy":{
@@ -44,13 +45,15 @@ cat >"$TREND_JSON" <<'EOF_TREND'
 }
 EOF_TREND
 cat >"$ALERT_JSON" <<'EOF_ALERT'
-{"severity":"OK"}
+{"generated_at_utc":"2026-03-11T00:00:00Z","severity":"OK"}
 EOF_ALERT
 cat >"$MANIFEST_JSON" <<'EOF_MANIFEST'
 {"generated_at":"2026-03-11T00:00:00Z"}
 EOF_MANIFEST
 cat >"$SUMMARY_JSON" <<EOF_SUMMARY
 {
+  "started_at":"2026-03-11T00:00:00Z",
+  "finished_at":"2026-03-11T00:00:30Z",
   "status":"ok",
   "failure_step":"",
   "final_rc":0,
@@ -69,6 +72,7 @@ cat >"$SUMMARY_JSON" <<EOF_SUMMARY
   },
   "artifacts":{
     "trend_summary_json":"$TREND_JSON",
+    "alert_summary_json":"$ALERT_JSON",
     "bundle_manifest_json":"$MANIFEST_JSON"
   }
 }
@@ -77,6 +81,44 @@ EOF_SUMMARY
 echo "[prod-pilot-cohort-check] baseline pass"
 ./scripts/prod_pilot_cohort_check.sh \
   --summary-json "$SUMMARY_JSON" >/tmp/integration_prod_pilot_cohort_check_pass.log 2>&1
+
+echo "[prod-pilot-cohort-check] freshness pass"
+FRESH_NOW_EPOCH="$(jq -nr '"2026-03-11T00:01:00Z" | fromdateiso8601 | floor')"
+PROD_PILOT_COHORT_CHECK_NOW_EPOCH="$FRESH_NOW_EPOCH" \
+./scripts/prod_pilot_cohort_check.sh \
+  --summary-json "$SUMMARY_JSON" \
+  --max-evidence-age-sec 120 \
+  --show-json 1 >/tmp/integration_prod_pilot_cohort_check_freshness_pass.log 2>&1
+if ! rg -q 'freshness max_evidence_age_sec=120' /tmp/integration_prod_pilot_cohort_check_freshness_pass.log; then
+  echo "expected freshness policy signal not found"
+  cat /tmp/integration_prod_pilot_cohort_check_freshness_pass.log
+  exit 1
+fi
+if ! rg -q '"max_evidence_age_sec":120' /tmp/integration_prod_pilot_cohort_check_freshness_pass.log; then
+  echo "expected max_evidence_age_sec policy in JSON payload"
+  cat /tmp/integration_prod_pilot_cohort_check_freshness_pass.log
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-check] stale evidence fail"
+STALE_NOW_EPOCH="$(jq -nr '"2026-03-11T00:10:00Z" | fromdateiso8601 | floor')"
+set +e
+PROD_PILOT_COHORT_CHECK_NOW_EPOCH="$STALE_NOW_EPOCH" \
+./scripts/prod_pilot_cohort_check.sh \
+  --summary-json "$SUMMARY_JSON" \
+  --max-evidence-age-sec 120 >/tmp/integration_prod_pilot_cohort_check_stale_fail.log 2>&1
+stale_rc=$?
+set -e
+if [[ "$stale_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for stale evidence"
+  cat /tmp/integration_prod_pilot_cohort_check_stale_fail.log
+  exit 1
+fi
+if ! rg -q 'cohort summary evidence timestamp is stale' /tmp/integration_prod_pilot_cohort_check_stale_fail.log; then
+  echo "expected stale evidence signal not found"
+  cat /tmp/integration_prod_pilot_cohort_check_stale_fail.log
+  exit 1
+fi
 
 echo "[prod-pilot-cohort-check] severity policy fail"
 BAD_SEVERITY_SUMMARY="$TMP_DIR/summary_bad_severity.json"
@@ -101,6 +143,7 @@ fi
 echo "[prod-pilot-cohort-check] trend decision fail"
 cat >"$TREND_JSON" <<'EOF_TREND_FAIL'
 {
+  "generated_at_utc":"2026-03-11T00:00:00Z",
   "decision":"NO-GO",
   "go_rate_pct":66.67,
   "policy":{
@@ -152,6 +195,7 @@ fi
 echo "[prod-pilot-cohort-check] strict trend artifact policy fail"
 cat >"$TREND_JSON" <<'EOF_TREND_ARTIFACT_FAIL'
 {
+  "generated_at_utc":"2026-03-11T00:00:00Z",
   "decision":"GO",
   "go_rate_pct":100,
   "policy":{
@@ -183,6 +227,7 @@ fi
 
 cat >"$TREND_JSON" <<'EOF_TREND'
 {
+  "generated_at_utc":"2026-03-11T00:00:00Z",
   "decision":"GO",
   "go_rate_pct":100,
   "policy":{
@@ -445,6 +490,7 @@ PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_CHECK" \
   --require-incident-snapshot-artifacts 0 \
   --incident-snapshot-min-attachment-count 2 \
   --incident-snapshot-max-skipped-count 0 \
+  --max-evidence-age-sec 120 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_check_easy_node.log 2>&1
 
 if ! rg -q -- '--summary-json /tmp/cohort/summary.json' "$CHECK_CAPTURE"; then
@@ -489,6 +535,11 @@ if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$CHECK_CAPTURE"; the
 fi
 if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$CHECK_CAPTURE"; then
   echo "easy_node cohort check forwarding failed: missing --incident-snapshot-max-skipped-count"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 120' "$CHECK_CAPTURE"; then
+  echo "easy_node cohort check forwarding failed: missing --max-evidence-age-sec"
   cat "$CHECK_CAPTURE"
   exit 1
 fi

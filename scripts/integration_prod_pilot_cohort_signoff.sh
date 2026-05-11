@@ -61,6 +61,7 @@ PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_CHECK" \
   --require-incident-snapshot-artifacts 1 \
   --incident-snapshot-min-attachment-count 2 \
   --incident-snapshot-max-skipped-count 0 \
+  --max-evidence-age-sec 120 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_signoff_pass.log 2>&1
 
 if ! rg -q -- '^verify ' "$SIGNOFF_CAPTURE"; then
@@ -100,6 +101,11 @@ if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$CHECK_CAPTURE"; the
 fi
 if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$CHECK_CAPTURE"; then
   echo "signoff check forwarding missing --incident-snapshot-max-skipped-count"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 120' "$CHECK_CAPTURE"; then
+  echo "signoff check forwarding missing --max-evidence-age-sec"
   cat "$CHECK_CAPTURE"
   exit 1
 fi
@@ -205,6 +211,7 @@ PROD_PILOT_COHORT_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
   --require-incident-snapshot-artifacts 0 \
   --incident-snapshot-min-attachment-count 2 \
   --incident-snapshot-max-skipped-count 0 \
+  --max-evidence-age-sec 120 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_signoff_easy_node.log 2>&1
 
 if ! rg -q -- '--summary-json /tmp/cohort/summary.json' "$SIGNOFF_FORWARD_CAPTURE"; then
@@ -254,6 +261,11 @@ if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$SIGNOFF_FORWARD_CAP
 fi
 if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$SIGNOFF_FORWARD_CAPTURE"; then
   echo "easy_node cohort signoff forwarding failed: missing --incident-snapshot-max-skipped-count"
+  cat "$SIGNOFF_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 120' "$SIGNOFF_FORWARD_CAPTURE"; then
+  echo "easy_node cohort signoff forwarding failed: missing --max-evidence-age-sec"
   cat "$SIGNOFF_FORWARD_CAPTURE"
   exit 1
 fi

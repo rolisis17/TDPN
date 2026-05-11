@@ -38,6 +38,7 @@ Usage:
     [--signoff-require-incident-snapshot-artifacts [0|1]] \
     [--signoff-incident-snapshot-min-attachment-count N] \
     [--signoff-incident-snapshot-max-skipped-count N|-1] \
+    [--signoff-max-evidence-age-sec N] \
     [--print-run-report [0|1]] \
     [--show-json [0|1]] \
     [-- <prod-pilot-runbook extra args...>]
@@ -182,6 +183,7 @@ signoff_require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQ
 signoff_require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
 signoff_incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}}"
 signoff_incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}}"
+signoff_max_evidence_age_sec="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_SIGNOFF_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_CHECK_MAX_EVIDENCE_AGE_SEC:-0}}}"
 max_round_failures="${PROD_PILOT_COHORT_QUICK_MAX_ROUND_FAILURES:-0}"
 
 declare -a runbook_extra_args=()
@@ -355,6 +357,10 @@ while [[ $# -gt 0 ]]; do
       signoff_incident_snapshot_max_skipped_count="${2:-}"
       shift 2
       ;;
+    --signoff-max-evidence-age-sec)
+      signoff_max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --print-run-report)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         print_run_report="${2:-}"
@@ -413,6 +419,7 @@ int_or_die "--signoff-min-trend-wg-soak-selection-lines" "$signoff_min_trend_wg_
 int_or_die "--signoff-min-trend-wg-soak-entry-operators" "$signoff_min_trend_wg_soak_entry_operators"
 int_or_die "--signoff-min-trend-wg-soak-exit-operators" "$signoff_min_trend_wg_soak_exit_operators"
 int_or_die "--signoff-min-trend-wg-soak-cross-operator-pairs" "$signoff_min_trend_wg_soak_cross_operator_pairs"
+int_or_die "--signoff-max-evidence-age-sec" "$signoff_max_evidence_age_sec"
 if [[ ! "$signoff_incident_snapshot_min_attachment_count" =~ ^[0-9]+$ ]]; then
   echo "--signoff-incident-snapshot-min-attachment-count must be an integer >= 0"
   exit 2
@@ -556,6 +563,7 @@ if [[ "$failure_step" != "runbook_summary_missing" ]]; then
     --require-incident-snapshot-artifacts "$signoff_require_incident_snapshot_artifacts"
     --incident-snapshot-min-attachment-count "$signoff_incident_snapshot_min_attachment_count"
     --incident-snapshot-max-skipped-count "$signoff_incident_snapshot_max_skipped_count"
+    --max-evidence-age-sec "$signoff_max_evidence_age_sec"
     --show-json "$show_json"
   )
 
@@ -630,6 +638,7 @@ jq -nc \
   --argjson signoff_require_incident_snapshot_artifacts "$(json_bool "$signoff_require_incident_snapshot_artifacts")" \
   --argjson signoff_incident_snapshot_min_attachment_count "$signoff_incident_snapshot_min_attachment_count" \
   --argjson signoff_incident_snapshot_max_skipped_count "$signoff_incident_snapshot_max_skipped_count" \
+  --argjson signoff_max_evidence_age_sec "$signoff_max_evidence_age_sec" \
   '{
     started_at:$started_at,
     finished_at:$finished_at,
@@ -671,7 +680,8 @@ jq -nc \
       signoff_require_incident_snapshot_on_fail:$signoff_require_incident_snapshot_on_fail,
       signoff_require_incident_snapshot_artifacts:$signoff_require_incident_snapshot_artifacts,
       signoff_incident_snapshot_min_attachment_count:$signoff_incident_snapshot_min_attachment_count,
-      signoff_incident_snapshot_max_skipped_count:$signoff_incident_snapshot_max_skipped_count
+      signoff_incident_snapshot_max_skipped_count:$signoff_incident_snapshot_max_skipped_count,
+      signoff_max_evidence_age_sec:$signoff_max_evidence_age_sec
     },
     artifacts:{
       reports_dir:$reports_dir,

@@ -30,6 +30,7 @@ Usage:
     [--require-incident-snapshot-artifacts [0|1]] \
     [--incident-snapshot-min-attachment-count N] \
     [--incident-snapshot-max-skipped-count N|-1] \
+    [--max-evidence-age-sec N] \
     [--show-json [0|1]]
 
 Purpose:
@@ -172,6 +173,38 @@ json_valid01() {
   fi
 }
 
+iso8601_utc_to_epoch() {
+  local timestamp="$1"
+  timestamp="$(trim "$timestamp")"
+  if [[ ! "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+    return 1
+  fi
+  jq -nr --arg ts "$timestamp" '$ts | fromdateiso8601 | floor' 2>/dev/null
+}
+
+check_evidence_timestamp_age() {
+  local label="$1"
+  local timestamp="$2"
+  local now_epoch="$3"
+  local timestamp_epoch=""
+  timestamp="$(trim "$timestamp")"
+  if [[ -z "$timestamp" ]]; then
+    errors+=("$label timestamp missing while --max-evidence-age-sec is enabled")
+    return
+  fi
+  if ! timestamp_epoch="$(iso8601_utc_to_epoch "$timestamp" 2>/dev/null)"; then
+    errors+=("$label timestamp is invalid (value=$timestamp)")
+    return
+  fi
+  if (( timestamp_epoch > now_epoch + max_evidence_future_skew_sec )); then
+    errors+=("$label timestamp is too far in the future (value=$timestamp, future_skew_sec=$((timestamp_epoch - now_epoch)))")
+    return
+  fi
+  if (( now_epoch - timestamp_epoch > max_evidence_age_sec )); then
+    errors+=("$label timestamp is stale (value=$timestamp, age_sec=$((now_epoch - timestamp_epoch)), max_evidence_age_sec=$max_evidence_age_sec)")
+  fi
+}
+
 json_string_array() {
   local file="$1"
   local expr="$2"
@@ -204,6 +237,9 @@ require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_CHECK_REQUIRE_INCIDENT_SN
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
 incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}"
 incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}"
+max_evidence_age_sec="${PROD_PILOT_COHORT_CHECK_MAX_EVIDENCE_AGE_SEC:-0}"
+max_evidence_future_skew_sec="${PROD_PILOT_COHORT_CHECK_MAX_EVIDENCE_FUTURE_SKEW_SEC:-300}"
+max_evidence_now_epoch="${PROD_PILOT_COHORT_CHECK_NOW_EPOCH:-}"
 show_json="${PROD_PILOT_COHORT_CHECK_SHOW_JSON:-0}"
 
 while [[ $# -gt 0 ]]; do
@@ -351,6 +387,10 @@ while [[ $# -gt 0 ]]; do
       incident_snapshot_max_skipped_count="${2:-}"
       shift 2
       ;;
+    --max-evidence-age-sec)
+      max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --show-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         show_json="${2:-}"
@@ -390,6 +430,18 @@ if [[ ! "$incident_snapshot_min_attachment_count" =~ ^[0-9]+$ ]]; then
 fi
 if [[ ! "$incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((incident_snapshot_max_skipped_count < -1)); then
   echo "--incident-snapshot-max-skipped-count must be an integer >= -1"
+  exit 2
+fi
+if [[ ! "$max_evidence_age_sec" =~ ^[0-9]+$ ]]; then
+  echo "--max-evidence-age-sec must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$max_evidence_future_skew_sec" =~ ^[0-9]+$ ]]; then
+  echo "PROD_PILOT_COHORT_CHECK_MAX_EVIDENCE_FUTURE_SKEW_SEC must be an integer >= 0"
+  exit 2
+fi
+if [[ -n "$max_evidence_now_epoch" && ! "$max_evidence_now_epoch" =~ ^[0-9]+$ ]]; then
+  echo "PROD_PILOT_COHORT_CHECK_NOW_EPOCH must be an integer >= 0"
   exit 2
 fi
 
@@ -445,6 +497,9 @@ fi
 status="$(json_string "$summary_json" '.status')"
 failure_step="$(json_string "$summary_json" '.failure_step')"
 final_rc="$(json_int "$summary_json" '.final_rc')"
+started_at="$(json_string "$summary_json" '.started_at')"
+finished_at="$(json_string "$summary_json" '.finished_at')"
+generated_at_utc="$(json_string "$summary_json" '.generated_at_utc')"
 
 rounds_requested="$(json_int "$summary_json" '.rounds.requested')"
 rounds_attempted="$(json_int "$summary_json" '.rounds.attempted')"
@@ -457,7 +512,12 @@ trend_summary_json="$(json_string "$summary_json" '.artifacts.trend_summary_json
 if [[ -n "$trend_summary_json" && "$trend_summary_json" != /* ]]; then
   trend_summary_json="$ROOT_DIR/$trend_summary_json"
 fi
+alert_summary_json="$(json_string "$summary_json" '.artifacts.alert_summary_json')"
+if [[ -n "$alert_summary_json" && "$alert_summary_json" != /* ]]; then
+  alert_summary_json="$ROOT_DIR/$alert_summary_json"
+fi
 trend_decision=""
+trend_summary_generated_at_utc=""
 trend_summary_json_valid=0
 trend_artifact_policy_require_wg_validate_udp_source="0"
 trend_artifact_policy_require_wg_validate_strict_distinct="0"
@@ -469,6 +529,7 @@ trend_artifact_policy_min_wg_soak_cross_operator_pairs="0"
 if [[ -n "$trend_summary_json" && -f "$trend_summary_json" ]] && jq -e . "$trend_summary_json" >/dev/null 2>&1; then
   trend_summary_json_valid=1
   trend_decision="$(jq -r '.decision // ""' "$trend_summary_json" 2>/dev/null || true)"
+  trend_summary_generated_at_utc="$(json_string "$trend_summary_json" '.generated_at_utc')"
   trend_artifact_policy_require_wg_validate_udp_source="$(json_bool_flag "$trend_summary_json" '.policy.require_wg_validate_udp_source')"
   trend_artifact_policy_require_wg_validate_strict_distinct="$(json_bool_flag "$trend_summary_json" '.policy.require_wg_validate_strict_distinct')"
   trend_artifact_policy_require_wg_soak_diversity_pass="$(json_bool_flag "$trend_summary_json" '.policy.require_wg_soak_diversity_pass')"
@@ -476,6 +537,12 @@ if [[ -n "$trend_summary_json" && -f "$trend_summary_json" ]] && jq -e . "$trend
   trend_artifact_policy_min_wg_soak_entry_operators="$(json_int "$trend_summary_json" '.policy.min_wg_soak_entry_operators')"
   trend_artifact_policy_min_wg_soak_exit_operators="$(json_int "$trend_summary_json" '.policy.min_wg_soak_exit_operators')"
   trend_artifact_policy_min_wg_soak_cross_operator_pairs="$(json_int "$trend_summary_json" '.policy.min_wg_soak_cross_operator_pairs')"
+fi
+alert_summary_generated_at_utc=""
+alert_summary_json_valid=0
+if [[ -n "$alert_summary_json" && -f "$alert_summary_json" ]] && jq -e . "$alert_summary_json" >/dev/null 2>&1; then
+  alert_summary_json_valid=1
+  alert_summary_generated_at_utc="$(json_string "$alert_summary_json" '.generated_at_utc')"
 fi
 trend_decision="$(printf '%s' "$trend_decision" | tr '[:lower:]' '[:upper:]')"
 trend_policy_require_wg_validate_udp_source="$(json_bool_flag "$summary_json" '.policy.trend_require_wg_validate_udp_source')"
@@ -501,6 +568,34 @@ if [[ -n "$bundle_manifest_json" && "$bundle_manifest_json" != /* ]]; then
 fi
 
 declare -a errors=()
+
+if (( max_evidence_age_sec > 0 )); then
+  if [[ -n "$max_evidence_now_epoch" ]]; then
+    now_epoch="$max_evidence_now_epoch"
+  else
+    now_epoch="$(date -u +%s)"
+  fi
+  if [[ -z "$now_epoch" || ! "$now_epoch" =~ ^[0-9]+$ ]]; then
+    errors+=("could not determine current UTC epoch for evidence freshness check")
+  else
+    summary_freshness_ts="$finished_at"
+    if [[ -z "$summary_freshness_ts" ]]; then
+      summary_freshness_ts="$generated_at_utc"
+    fi
+    if [[ -z "$summary_freshness_ts" ]]; then
+      summary_freshness_ts="$started_at"
+    fi
+    check_evidence_timestamp_age "cohort summary evidence" "$summary_freshness_ts" "$now_epoch"
+    if [[ "$require_trend_go" == "1" || "$require_trend_artifact_policy_match" == "1" ]]; then
+      check_evidence_timestamp_age "trend summary generated_at_utc" "$trend_summary_generated_at_utc" "$now_epoch"
+    elif [[ -n "$trend_summary_generated_at_utc" ]]; then
+      check_evidence_timestamp_age "trend summary generated_at_utc" "$trend_summary_generated_at_utc" "$now_epoch"
+    fi
+    if [[ -n "$alert_summary_json" ]]; then
+      check_evidence_timestamp_age "alert summary generated_at_utc" "$alert_summary_generated_at_utc" "$now_epoch"
+    fi
+  fi
+fi
 
 incident_failed_reports_checked=0
 incident_failed_reports_ok=0
@@ -839,6 +934,9 @@ summary_payload="$(
     --arg decision "$decision" \
     --arg status "$status" \
     --arg failure_step "$failure_step" \
+    --arg started_at "$started_at" \
+    --arg finished_at "$finished_at" \
+    --arg generated_at_utc "$generated_at_utc" \
     --argjson final_rc "$final_rc" \
     --argjson rounds_requested "$rounds_requested" \
     --argjson rounds_attempted "$rounds_attempted" \
@@ -850,6 +948,7 @@ summary_payload="$(
     --argjson alert_rc "$alert_rc" \
     --arg alert_severity "$alert_severity" \
     --argjson alert_rank "$alert_rank" \
+    --argjson alert_summary_json_valid "$(json_bool "$alert_summary_json_valid")" \
     --argjson max_alert_rank "$max_alert_rank" \
     --arg max_alert_severity "$max_alert_severity" \
     --argjson bundle_created "$(json_bool "$bundle_created")" \
@@ -857,6 +956,9 @@ summary_payload="$(
     --arg bundle_manifest_json "$bundle_manifest_json" \
     --arg summary_json "$summary_json" \
     --arg trend_summary_json "$trend_summary_json" \
+    --arg trend_summary_generated_at_utc "$trend_summary_generated_at_utc" \
+    --arg alert_summary_json "$alert_summary_json" \
+    --arg alert_summary_generated_at_utc "$alert_summary_generated_at_utc" \
     --arg incident_latest_run_report "$incident_latest_run_report" \
     --arg incident_latest_status "$incident_latest_status" \
     --arg incident_latest_bundle_dir "$incident_latest_bundle_dir" \
@@ -900,6 +1002,7 @@ summary_payload="$(
     --argjson require_incident_snapshot_artifacts "$(json_bool "$require_incident_snapshot_artifacts")" \
     --argjson incident_snapshot_min_attachment_count "$incident_snapshot_min_attachment_count" \
     --argjson incident_snapshot_max_skipped_count "$incident_snapshot_max_skipped_count" \
+    --argjson max_evidence_age_sec "$max_evidence_age_sec" \
     --argjson incident_failed_reports_checked "$incident_failed_reports_checked" \
     --argjson incident_failed_reports_ok "$incident_failed_reports_ok" \
     --argjson incident_failed_reports_policy_errors "$incident_failed_reports_policy_errors" \
@@ -924,6 +1027,13 @@ summary_payload="$(
       status:$status,
       failure_step:$failure_step,
       final_rc:$final_rc,
+      evidence_timestamps:{
+        summary_started_at:($started_at // ""),
+        summary_finished_at:($finished_at // ""),
+        summary_generated_at_utc:($generated_at_utc // ""),
+        trend_summary_generated_at_utc:($trend_summary_generated_at_utc // ""),
+        alert_summary_generated_at_utc:($alert_summary_generated_at_utc // "")
+      },
       rounds:{
         requested:$rounds_requested,
         attempted:$rounds_attempted,
@@ -939,6 +1049,8 @@ summary_payload="$(
       alert:{
         rc:$alert_rc,
         severity:($alert_severity // ""),
+        alert_summary_json:($alert_summary_json // ""),
+        alert_summary_json_valid:$alert_summary_json_valid,
         severity_rank:$alert_rank,
         max_allowed_severity:$max_alert_severity,
         max_allowed_severity_rank:$max_alert_rank
@@ -988,7 +1100,8 @@ summary_payload="$(
         require_incident_snapshot_on_fail:$require_incident_snapshot_on_fail,
         require_incident_snapshot_artifacts:$require_incident_snapshot_artifacts,
         incident_snapshot_min_attachment_count:$incident_snapshot_min_attachment_count,
-        incident_snapshot_max_skipped_count:$incident_snapshot_max_skipped_count
+        incident_snapshot_max_skipped_count:$incident_snapshot_max_skipped_count,
+        max_evidence_age_sec:$max_evidence_age_sec
       },
       observed_trend_policy:{
         require_wg_validate_udp_source:$trend_policy_require_wg_validate_udp_source,
@@ -1016,6 +1129,7 @@ summary_payload="$(
 )"
 
 echo "[prod-pilot-cohort-check] decision=$decision status=${status:-unset} rounds_failed=$rounds_failed go_rate_pct=${trend_go_rate_pct:-unset} alert=${alert_severity:-unset} errors=${#errors[@]}"
+echo "[prod-pilot-cohort-check] freshness max_evidence_age_sec=$max_evidence_age_sec started_at=${started_at:-unset} finished_at=${finished_at:-unset} generated_at_utc=${generated_at_utc:-unset} trend_summary_generated_at_utc=${trend_summary_generated_at_utc:-unset} alert_summary_generated_at_utc=${alert_summary_generated_at_utc:-unset}"
 if [[ -n "$incident_latest_run_report" ]]; then
   echo "[prod-pilot-cohort-check] incident_snapshot_latest_failed_run_report=$incident_latest_run_report status=${incident_latest_status:-unset} summary_json=${incident_latest_summary_json:-unset} report_md=${incident_latest_report_md:-unset} attachment_manifest=${incident_latest_attachment_manifest:-unset} attachment_skipped=${incident_latest_attachment_skipped:-unset} attachment_count=${incident_latest_attachment_count} attachment_skipped_count=${incident_latest_attachment_skipped_count}"
 fi

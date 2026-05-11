@@ -39,6 +39,7 @@ Usage:
     [--require-incident-snapshot-artifacts [0|1]] \
     [--incident-snapshot-min-attachment-count N] \
     [--incident-snapshot-max-skipped-count N|-1] \
+    [--max-evidence-age-sec N] \
     [--show-json [0|1]]
 
 Purpose:
@@ -152,6 +153,7 @@ require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_INCIDENT_
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
 incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}"
 incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}"
+max_evidence_age_sec="${PROD_PILOT_COHORT_SIGNOFF_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_CHECK_MAX_EVIDENCE_AGE_SEC:-0}}"
 show_json="${PROD_PILOT_COHORT_SIGNOFF_SHOW_JSON:-0}"
 
 while [[ $# -gt 0 ]]; do
@@ -338,6 +340,10 @@ while [[ $# -gt 0 ]]; do
       incident_snapshot_max_skipped_count="${2:-}"
       shift 2
       ;;
+    --max-evidence-age-sec)
+      max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --show-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         show_json="${2:-}"
@@ -394,6 +400,7 @@ int_or_die "--min-trend-wg-soak-entry-operators" "$min_trend_wg_soak_entry_opera
 int_or_die "--min-trend-wg-soak-exit-operators" "$min_trend_wg_soak_exit_operators"
 int_or_die "--min-trend-wg-soak-cross-operator-pairs" "$min_trend_wg_soak_cross_operator_pairs"
 int_or_die "--incident-snapshot-min-attachment-count" "$incident_snapshot_min_attachment_count"
+int_or_die "--max-evidence-age-sec" "$max_evidence_age_sec"
 if [[ ! "$incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((incident_snapshot_max_skipped_count < -1)); then
   echo "--incident-snapshot-max-skipped-count must be an integer >= -1"
   exit 2
@@ -465,6 +472,7 @@ declare -a check_args=(
   --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
   --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count"
   --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count"
+  --max-evidence-age-sec "$max_evidence_age_sec"
   --show-json "$show_json"
 )
 if [[ -n "$summary_json" ]]; then
