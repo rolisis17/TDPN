@@ -72,6 +72,7 @@ bash "$SCRIPT_UNDER_TEST" profile-compare-multi-vm-stability-promotion-cycle \
   --sleep-between-sec 2 \
   --reports-dir .easy-node-logs/multi_vm_stability_promotion_cycle \
   --cycle-summary-list .easy-node-logs/profile_compare_multi_vm_stability_promotion_cycle.list \
+  --promotion-check-only 1 \
   --promotion-summary-json .easy-node-logs/profile_compare_multi_vm_stability_promotion_cycle_promotion_summary.json \
   --summary-json .easy-node-logs/profile_compare_multi_vm_stability_promotion_cycle_summary.json \
   --fail-on-no-go 0 \
@@ -84,10 +85,20 @@ if [[ -z "$line" ]]; then
   cat "$CAPTURE"
   exit 1
 fi
+expected_line=$'argc=20\t--cycles\t5\t--sleep-between-sec\t2\t--reports-dir\t.easy-node-logs/multi_vm_stability_promotion_cycle\t--cycle-summary-list\t.easy-node-logs/profile_compare_multi_vm_stability_promotion_cycle.list\t--promotion-check-only\t1\t--promotion-summary-json\t.easy-node-logs/profile_compare_multi_vm_stability_promotion_cycle_promotion_summary.json\t--summary-json\t.easy-node-logs/profile_compare_multi_vm_stability_promotion_cycle_summary.json\t--fail-on-no-go\t0\t--print-summary-json\t1\t--sample-arg\tsample-value'
+if [[ "$line" != "$expected_line" ]]; then
+  echo "forwarded invocation did not match expected argv exactly"
+  echo "expected: $expected_line"
+  echo "actual:   $line"
+  echo "capture:"
+  cat "$CAPTURE"
+  exit 1
+fi
 assert_token "$line" $'\t--cycles\t5' "missing --cycles forwarding"
 assert_token "$line" $'\t--sleep-between-sec\t2' "missing --sleep-between-sec forwarding"
 assert_token "$line" $'\t--reports-dir\t.easy-node-logs/multi_vm_stability_promotion_cycle' "missing --reports-dir forwarding"
 assert_token "$line" $'\t--cycle-summary-list\t.easy-node-logs/profile_compare_multi_vm_stability_promotion_cycle.list' "missing --cycle-summary-list forwarding"
+assert_token "$line" $'\t--promotion-check-only\t1' "missing --promotion-check-only forwarding"
 assert_token "$line" $'\t--promotion-summary-json\t.easy-node-logs/profile_compare_multi_vm_stability_promotion_cycle_promotion_summary.json' "missing --promotion-summary-json forwarding"
 assert_token "$line" $'\t--summary-json\t.easy-node-logs/profile_compare_multi_vm_stability_promotion_cycle_summary.json' "missing --summary-json forwarding"
 assert_token "$line" $'\t--fail-on-no-go\t0' "missing --fail-on-no-go forwarding"

@@ -4006,15 +4006,55 @@ build_multi_vm_stability_promotion_cycle_next_command() {
   local reports_dir
   local cycles
   local vm_command_file
+  local promotion_cycle_summary_json
+  local archived_cycle_summary_list=""
+  local archived_promotion_summary_json=""
   local summary_json_path
   local -a argv=()
   reports_dir="$(trim "${1:-}")"
   cycles="$(trim "${2:-}")"
   vm_command_file="$(trim "${3:-}")"
+  promotion_cycle_summary_json="$(trim "${4:-}")"
   if [[ -z "$reports_dir" ]]; then
     reports_dir=".easy-node-logs"
   fi
   summary_json_path="$reports_dir/profile_compare_multi_vm_stability_promotion_cycle_summary.json"
+
+  if [[ "$(json_file_valid_01 "$promotion_cycle_summary_json")" == "1" ]]; then
+    archived_cycle_summary_list="$(jq -r '
+      if (.artifacts.cycle_summary_list | type) == "string" then
+        .artifacts.cycle_summary_list
+      else
+        ""
+      end
+    ' "$promotion_cycle_summary_json" 2>/dev/null || true)"
+    archived_cycle_summary_list="$(resolve_path_with_base "$archived_cycle_summary_list" "$promotion_cycle_summary_json")"
+    archived_promotion_summary_json="$(jq -r '
+      if (.artifacts.promotion_summary_json | type) == "string" then
+        .artifacts.promotion_summary_json
+      else
+        ""
+      end
+    ' "$promotion_cycle_summary_json" 2>/dev/null || true)"
+    archived_promotion_summary_json="$(resolve_path_with_base "$archived_promotion_summary_json" "$promotion_cycle_summary_json")"
+  fi
+
+  if [[ -n "$archived_cycle_summary_list" && -f "$archived_cycle_summary_list" ]]; then
+    argv=(
+      "./scripts/easy_node.sh"
+      "profile-compare-multi-vm-stability-promotion-cycle"
+      "--reports-dir" "$reports_dir"
+      "--promotion-check-only" "1"
+      "--cycle-summary-list" "$archived_cycle_summary_list"
+    )
+    if [[ -n "$archived_promotion_summary_json" && -f "$archived_promotion_summary_json" ]]; then
+      argv+=("--promotion-summary-json" "$archived_promotion_summary_json")
+    fi
+    argv+=("--fail-on-no-go" "1" "--summary-json" "$summary_json_path" "--print-summary-json" "1")
+    profile_default_gate_command_from_argv "${argv[@]}"
+    return
+  fi
+
   argv=("./scripts/easy_node.sh" "profile-compare-multi-vm-stability-promotion-cycle" "--reports-dir" "$reports_dir")
   if [[ "$cycles" =~ ^[1-9][0-9]*$ ]]; then
     argv+=("--cycles" "$cycles")
@@ -10458,7 +10498,7 @@ if [[ "$(json_file_valid_01 "$profile_compare_multi_vm_stability_promotion_summa
     end
   ' "$profile_compare_multi_vm_stability_promotion_summary_json" 2>/dev/null || true)"
 fi
-multi_vm_stability_promotion_next_command="$(build_multi_vm_stability_promotion_cycle_next_command "$multi_vm_stability_promotion_command_reports_dir" "$multi_vm_stability_promotion_command_cycles" "$multi_vm_stability_vm_command_file")"
+multi_vm_stability_promotion_next_command="$(build_multi_vm_stability_promotion_cycle_next_command "$multi_vm_stability_promotion_command_reports_dir" "$multi_vm_stability_promotion_command_cycles" "$multi_vm_stability_vm_command_file" "$profile_compare_multi_vm_stability_promotion_summary_json")"
 multi_vm_stability_promotion_next_command_reason="multi-VM stability promotion evidence is missing; run promotion cycle to produce fail-closed GO/NO-GO evidence"
 if [[ -n "$profile_compare_multi_vm_stability_promotion_summary_json" ]] \
    && [[ "$(profile_compare_multi_vm_stability_promotion_summary_usable_01 "$profile_compare_multi_vm_stability_promotion_summary_json")" == "1" ]]; then
@@ -11358,7 +11398,7 @@ elif [[ "$multi_vm_stability_promotion_available_json" != "true" ]]; then
   if [[ "$multi_vm_stability_promotion_cycle_helper_available_json" == "true" ]]; then
     multi_vm_stability_promotion_evidence_pack_prereq_next_command="$multi_vm_stability_promotion_next_command"
     if [[ -z "$multi_vm_stability_promotion_evidence_pack_prereq_next_command" ]]; then
-      multi_vm_stability_promotion_evidence_pack_prereq_next_command="$(build_multi_vm_stability_promotion_cycle_next_command "$multi_vm_stability_promotion_command_reports_dir" "$multi_vm_stability_promotion_command_cycles" "$multi_vm_stability_vm_command_file")"
+      multi_vm_stability_promotion_evidence_pack_prereq_next_command="$(build_multi_vm_stability_promotion_cycle_next_command "$multi_vm_stability_promotion_command_reports_dir" "$multi_vm_stability_promotion_command_cycles" "$multi_vm_stability_vm_command_file" "$profile_compare_multi_vm_stability_promotion_summary_json")"
     fi
     if [[ -n "$multi_vm_stability_promotion_evidence_pack_prereq_next_command" ]]; then
       multi_vm_stability_promotion_evidence_pack_prereq_next_reason="multi-VM promotion evidence-pack prerequisites are missing (promotion-cycle summary unavailable); run profile-compare-multi-vm-stability-promotion-cycle first"

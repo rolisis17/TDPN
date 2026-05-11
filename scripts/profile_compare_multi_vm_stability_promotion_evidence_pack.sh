@@ -156,6 +156,32 @@ json_array_from_lines() {
 
 build_cycle_refresh_command() {
   local canonical_promotion_cycle_summary_json="$reports_dir/profile_compare_multi_vm_stability_promotion_cycle_summary.json"
+  local archived_cycle_summary_list=""
+  local archived_promotion_summary_json=""
+  if [[ -n "$promotion_cycle_summary_json" && "$(json_file_valid_01 "$promotion_cycle_summary_json")" == "1" ]]; then
+    archived_cycle_summary_list="$(jq -r 'if (.artifacts.cycle_summary_list | type) == "string" then .artifacts.cycle_summary_list else "" end' "$promotion_cycle_summary_json" 2>/dev/null || printf '%s' "")"
+    archived_cycle_summary_list="$(abs_path "$archived_cycle_summary_list")"
+    archived_promotion_summary_json="$(jq -r 'if (.artifacts.promotion_summary_json | type) == "string" then .artifacts.promotion_summary_json else "" end' "$promotion_cycle_summary_json" 2>/dev/null || printf '%s' "")"
+    archived_promotion_summary_json="$(abs_path "$archived_promotion_summary_json")"
+  fi
+  if [[ -n "$archived_cycle_summary_list" && -f "$archived_cycle_summary_list" ]]; then
+    local -a check_only_cmd=(
+      bash
+      ./scripts/profile_compare_multi_vm_stability_promotion_cycle.sh
+      --reports-dir "$reports_dir"
+      --promotion-check-only 1
+      --cycle-summary-list "$archived_cycle_summary_list"
+    )
+    if [[ -n "$archived_promotion_summary_json" ]]; then
+      check_only_cmd+=(--promotion-summary-json "$archived_promotion_summary_json")
+    fi
+    check_only_cmd+=(
+      --summary-json "$canonical_promotion_cycle_summary_json"
+      --print-summary-json 1
+    )
+    quote_cmd "${check_only_cmd[@]}"
+    return
+  fi
   quote_cmd \
     bash \
     ./scripts/profile_compare_multi_vm_stability_promotion_cycle.sh \

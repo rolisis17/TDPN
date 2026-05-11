@@ -56,10 +56,14 @@ write_valid_promotion_cycle_summary() {
   local decision="${3:-GO}"
   local status="${4:-pass}"
   local rc="${5:-0}"
+  local cycle_summary_list="${6:-}"
+  local promotion_summary_json="${7:-}"
   jq -n \
     --arg generated_at_utc "$generated_at" \
     --arg decision "$decision" \
     --arg status "$status" \
+    --arg cycle_summary_list "$cycle_summary_list" \
+    --arg promotion_summary_json "$promotion_summary_json" \
     --argjson rc "$rc" \
     '{
       version: 1,
@@ -80,7 +84,12 @@ write_valid_promotion_cycle_summary() {
       },
       outcome: {
         next_operator_action: "Promotion may proceed."
-      }
+      },
+      artifacts: (
+        {}
+        + (if $cycle_summary_list == "" then {} else {cycle_summary_list: $cycle_summary_list} end)
+        + (if $promotion_summary_json == "" then {} else {promotion_summary_json: $promotion_summary_json} end)
+      )
     }' >"$path"
 }
 
@@ -337,8 +346,13 @@ mkdir -p "$FAIL_DIR"
 FAIL_SUMMARY_SRC="$FAIL_DIR/profile_compare_multi_vm_stability_promotion_cycle_summary.json"
 FAIL_SUMMARY="$FAIL_DIR/profile_compare_multi_vm_stability_promotion_evidence_pack_summary.json"
 FAIL_REPORT="$FAIL_DIR/profile_compare_multi_vm_stability_promotion_evidence_pack_report.md"
+FAIL_ARCHIVE="$FAIL_DIR/profile_compare_multi_vm_stability_promotion_cycle_20000101_000000"
+FAIL_CYCLE_LIST="$FAIL_ARCHIVE/profile_compare_multi_vm_stability_promotion_cycle_summary_paths.list"
+FAIL_PROMOTION_CHECK_SUMMARY="$FAIL_ARCHIVE/profile_compare_multi_vm_stability_promotion_check_summary.json"
 
-write_valid_promotion_cycle_summary "$FAIL_SUMMARY_SRC" "2000-01-01T00:00:00Z" "GO" "pass"
+mkdir -p "$FAIL_ARCHIVE/cycle_001"
+printf '%s\n' "$FAIL_ARCHIVE/cycle_001/profile_compare_multi_vm_stability_cycle_summary.json" >"$FAIL_CYCLE_LIST"
+write_valid_promotion_cycle_summary "$FAIL_SUMMARY_SRC" "2000-01-01T00:00:00Z" "GO" "pass" 0 "$FAIL_CYCLE_LIST" "$FAIL_PROMOTION_CHECK_SUMMARY"
 
 set +e
 bash "$SCRIPT_UNDER_TEST" \
@@ -366,6 +380,12 @@ assert_jq "$FAIL_SUMMARY" '(.operator_next_action_command | type) == "string" an
 assert_jq "$FAIL_SUMMARY" '(.operator_next_action_command | contains("profile_compare_multi_vm_stability_promotion_cycle.sh"))'
 assert_jq "$FAIL_SUMMARY" '(.next_operator_action | contains("Rebuild evidence pack with"))'
 assert_jq "$FAIL_SUMMARY" '(.operator_next_action_commands.refresh_promotion_cycle_command | contains("profile_compare_multi_vm_stability_promotion_cycle.sh"))'
+assert_jq "$FAIL_SUMMARY" '(.operator_next_action_commands.refresh_promotion_cycle_command | contains("--promotion-check-only 1"))'
+if ! jq -e --arg list "$FAIL_CYCLE_LIST" '.operator_next_action_commands.refresh_promotion_cycle_command | contains("--cycle-summary-list " + $list)' "$FAIL_SUMMARY" >/dev/null; then
+  echo "fail-closed summary did not prefer archived promotion-check-only rerun guidance"
+  cat "$FAIL_SUMMARY"
+  exit 1
+fi
 assert_jq "$FAIL_SUMMARY" '(.operator_next_action_commands.rebuild_evidence_pack_command | contains("profile_compare_multi_vm_stability_promotion_evidence_pack.sh"))'
 assert_no_blank_reason_error_entries "$FAIL_SUMMARY"
 if [[ ! -f "$FAIL_REPORT" ]]; then

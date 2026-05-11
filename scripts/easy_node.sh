@@ -1359,6 +1359,99 @@ host_is_private_or_loopback() {
   return 1
 }
 
+host_is_ipv4_literal() {
+  local host="$1"
+  [[ "$host" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  local IFS=.
+  local -a octets=()
+  read -r -a octets <<<"$host"
+  local octet
+  for octet in "${octets[@]}"; do
+    [[ "$octet" =~ ^[0-9]+$ ]] || return 1
+    ((10#$octet >= 0 && 10#$octet <= 255)) || return 1
+  done
+}
+
+host_is_ipv6_literal() {
+  local host="$1"
+  [[ "$host" == *:* && "$host" =~ ^[0-9A-Fa-f:]+$ ]] || return 1
+}
+
+host_is_non_public_for_prod() {
+  local host="$1"
+  local h
+  h="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  h="${h#[}"
+  h="${h%]}"
+
+  if [[ "$h" =~ ^::ffff:([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    local mapped_ipv4="${h#::ffff:}"
+    host_is_non_public_for_prod "$mapped_ipv4"
+    return
+  fi
+  if [[ "$h" =~ ^0:0:0:0:0:ffff:([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    local mapped_ipv4="${h##*:}"
+    host_is_non_public_for_prod "$mapped_ipv4"
+    return
+  fi
+
+  if host_is_ipv4_literal "$h"; then
+    local IFS=.
+    local -a octets=()
+    read -r -a octets <<<"$h"
+    local o1=$((10#${octets[0]}))
+    local o2=$((10#${octets[1]}))
+    local o3=$((10#${octets[2]}))
+    case "$o1" in
+      0|10|127)
+        return 0
+        ;;
+      169)
+        ((o2 == 254)) && return 0
+        ;;
+      172)
+        ((o2 >= 16 && o2 <= 31)) && return 0
+        ;;
+      192)
+        ((o2 == 168)) && return 0
+        ((o2 == 0 && (o3 == 0 || o3 == 2))) && return 0
+        ;;
+      100)
+        ((o2 >= 64 && o2 <= 127)) && return 0
+        ;;
+      198)
+        ((o2 == 18 || o2 == 19)) && return 0
+        ((o2 == 51 && o3 == 100)) && return 0
+        ;;
+      203)
+        ((o2 == 0 && o3 == 113)) && return 0
+        ;;
+      224|225|226|227|228|229|230|231|232|233|234|235|236|237|238|239|240|241|242|243|244|245|246|247|248|249|250|251|252|253|254|255)
+        return 0
+        ;;
+    esac
+    return 1
+  fi
+
+  if host_is_ipv6_literal "$h"; then
+    [[ "$h" == "::" || "$h" == "::1" || "$h" == "0:0:0:0:0:0:0:0" || "$h" == "0:0:0:0:0:0:0:1" ]] && return 0
+    [[ "$h" == fc* || "$h" == fd* || "$h" == ff* || "$h" == 100:* ]] && return 0
+    [[ "$h" =~ ^fe[89ab][0-9a-f](:|$) ]] && return 0
+    [[ "$h" =~ ^2001:0?db8(:|$) ]] && return 0
+    return 1
+  fi
+
+  if [[ "$h" != *.* ]]; then
+    return 0
+  fi
+  case "$h" in
+    localhost|*.localhost|*.local|*.internal|*.lan|*.home|*.test|*.invalid|home.arpa|*.home.arpa|ts.net|*.ts.net|tailscale.net|*.tailscale.net|example|*.example|example.com|*.example.com|example.net|*.example.net|example.org|*.example.org)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 hosts_config_file() {
   echo "$ROOT_DIR/data/easy_mode_hosts.conf"
 }
@@ -13440,10 +13533,10 @@ prod_preflight() {
     public_host="$(host_from_url "$u")"
     if [[ -z "$public_host" ]]; then
       check_fail "unable to parse public URL host: $u"
-    elif host_is_private_or_loopback "$public_host"; then
-      check_fail "public URL host must not be private/loopback in prod profile: $u"
+    elif host_is_non_public_for_prod "$public_host"; then
+      check_fail "public URL host must be public in prod profile: $u"
     else
-      check_ok "public URL host is non-private: $u"
+      check_ok "public URL host is public: $u"
     fi
   done
 
@@ -13985,10 +14078,10 @@ prod_preflight() {
       provider_issuer_host="$(host_from_url "$provider_core_issuer_url")"
       if [[ -z "$provider_issuer_host" ]]; then
         check_fail "provider CORE_ISSUER_URL host parse failed"
-      elif host_is_private_or_loopback "$provider_issuer_host"; then
-        check_fail "provider CORE_ISSUER_URL host must not be private/loopback"
+      elif host_is_non_public_for_prod "$provider_issuer_host"; then
+        check_fail "provider CORE_ISSUER_URL host must be public"
       else
-        check_ok "provider CORE_ISSUER_URL host is non-private"
+        check_ok "provider CORE_ISSUER_URL host is public"
       fi
     else
       check_fail "provider CORE_ISSUER_URL must be configured"

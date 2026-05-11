@@ -110,7 +110,7 @@ if ! openssl verify -CAfile "$ca_refresh_dir/ca.crt" "$ca_refresh_dir/client.crt
   cat /tmp/integration_bootstrap_mtls_ca_refresh_client_verify.log
   exit 1
 fi
-"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$tls_dir/tls" --public-host 203.0.113.10 --san 203.0.113.20 --days 365 >/dev/null
+"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$tls_dir/tls" --public-host prod-authority.gpm-pilot.net --san prod-provider.gpm-pilot.net --days 365 >/dev/null
 wg_key_file="$tls_dir/tls/exit_wg.key"
 printf 'test-exit-wg-private-key\n' >"$wg_key_file"
 chmod 600 "$wg_key_file" 2>/dev/null || true
@@ -124,9 +124,9 @@ MTLS_MIN_VERSION=1.3
 MTLS_INSECURE_SKIP_VERIFY=0
 MTLS_CA_FILE=$tls_dir/tls/ca.crt
 DATA_PLANE_MODE=opaque
-DIRECTORY_PUBLIC_URL=https://203.0.113.10:8081
-ENTRY_URL_PUBLIC=https://203.0.113.10:8083
-EXIT_CONTROL_URL_PUBLIC=https://203.0.113.10:8084
+DIRECTORY_PUBLIC_URL=https://prod-authority.gpm-pilot.net:8081
+ENTRY_URL_PUBLIC=https://prod-authority.gpm-pilot.net:8083
+EXIT_CONTROL_URL_PUBLIC=https://prod-authority.gpm-pilot.net:8084
 EASY_NODE_MTLS_CA_FILE_LOCAL=$tls_dir/tls/ca.crt
 EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL=$tls_dir/tls/client.crt
 EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL=$tls_dir/tls/client.key
@@ -146,8 +146,8 @@ EXIT_OPAQUE_SOURCE_ADDR=127.0.0.1:51983
 EXIT_ISSUER_MIN_SOURCES=2
 EXIT_ISSUER_MIN_OPERATORS=2
 EXIT_ISSUER_REQUIRE_ID=1
-ISSUER_URLS=https://203.0.113.10:8082,https://198.51.100.11:8082
-DIRECTORY_ISSUER_TRUST_URLS=https://203.0.113.10:8082,https://198.51.100.11:8082
+ISSUER_URLS=https://prod-authority.gpm-pilot.net:8082,https://prod-issuer2.gpm-pilot.net:8082
+DIRECTORY_ISSUER_TRUST_URLS=https://prod-authority.gpm-pilot.net:8082,https://prod-issuer2.gpm-pilot.net:8082
 ENTRY_EXIT_USER=0:0
 ENTRY_EXIT_PRIVILEGED=true
 ISSUER_ADMIN_REQUIRE_SIGNED=1
@@ -211,12 +211,44 @@ if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_pre
   cat /tmp/integration_prod_preflight_mtls_san_fail.log
   exit 1
 fi
-if ! rg -q "mTLS node certificate SAN does not cover public host: 203.0.113.10" /tmp/integration_prod_preflight_mtls_san_fail.log; then
+if ! rg -q "mTLS node certificate SAN does not cover public host: prod-authority.gpm-pilot.net" /tmp/integration_prod_preflight_mtls_san_fail.log; then
   echo "missing expected mTLS SAN coverage failure signal"
   cat /tmp/integration_prod_preflight_mtls_san_fail.log
   exit 1
 fi
-"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$tls_dir/tls" --public-host 203.0.113.10 --san 203.0.113.20 --rotate-leaf 1 >/tmp/integration_bootstrap_mtls_restore_san.log 2>&1
+"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$tls_dir/tls" --public-host prod-authority.gpm-pilot.net --san prod-provider.gpm-pilot.net --rotate-leaf 1 >/tmp/integration_bootstrap_mtls_restore_san.log 2>&1
+
+for non_public_url in \
+  "https://192.0.2.10:8081" \
+  "https://203.0.113.10:8081" \
+  "https://198.51.100.20:8081" \
+  "https://198.18.0.1:8081" \
+  "https://198.19.255.254:8081" \
+  "https://224.0.0.1:8081" \
+  "https://[2001:db8::10]:8081" \
+  "https://[2001:0db8::10]:8081" \
+  "https://[fe80::1]:8081" \
+  "https://[fe90::1]:8081" \
+  "https://[::ffff:192.0.2.10]:8081" \
+  "https://[0:0:0:0:0:ffff:192.0.2.10]:8081" \
+  "https://[ff02::1]:8081" \
+  "https://node.internal:8081" \
+  "https://node.test:8081" \
+  "https://node.ts.net:8081" \
+  "https://example.com:8081"; do
+  sed -i -E "s#^DIRECTORY_PUBLIC_URL=.*#DIRECTORY_PUBLIC_URL=${non_public_url}#" "$AUTH_ENV"
+  if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_non_public_host_fail.log 2>&1; then
+    echo "expected prod-preflight to fail with non-public public URL host: $non_public_url"
+    cat /tmp/integration_prod_preflight_non_public_host_fail.log
+    exit 1
+  fi
+  if ! rg -q "public URL host must be public in prod profile" /tmp/integration_prod_preflight_non_public_host_fail.log; then
+    echo "missing expected non-public public URL host failure signal for: $non_public_url"
+    cat /tmp/integration_prod_preflight_non_public_host_fail.log
+    exit 1
+  fi
+done
+sed -i -E 's#^DIRECTORY_PUBLIC_URL=.*#DIRECTORY_PUBLIC_URL=https://prod-authority.gpm-pilot.net:8081#' "$AUTH_ENV"
 
 if rg -q '^EXIT_WG_PUBKEY=' "$AUTH_ENV"; then
   sed -i -E 's/^EXIT_WG_PUBKEY=.*/EXIT_WG_PUBKEY=invalid-wg-pubkey/' "$AUTH_ENV"
@@ -349,16 +381,16 @@ fi
 
 sed -i -E 's#^DIRECTORY_PUBLIC_URL=.*#DIRECTORY_PUBLIC_URL=https://127.0.0.1:8081#' "$AUTH_ENV"
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_public_host_fail.log 2>&1; then
-  echo "expected prod-preflight to fail with private/loopback public URL host"
+  echo "expected prod-preflight to fail with non-public public URL host"
   cat /tmp/integration_prod_preflight_public_host_fail.log
   exit 1
 fi
-if ! rg -q "public URL host must not be private/loopback in prod profile" /tmp/integration_prod_preflight_public_host_fail.log; then
-  echo "missing expected public host private/loopback failure signal in prod-preflight output"
+if ! rg -q "public URL host must be public in prod profile" /tmp/integration_prod_preflight_public_host_fail.log; then
+  echo "missing expected public host non-public failure signal in prod-preflight output"
   cat /tmp/integration_prod_preflight_public_host_fail.log
   exit 1
 fi
-sed -i -E 's#^DIRECTORY_PUBLIC_URL=.*#DIRECTORY_PUBLIC_URL=https://203.0.113.10:8081#' "$AUTH_ENV"
+sed -i -E 's#^DIRECTORY_PUBLIC_URL=.*#DIRECTORY_PUBLIC_URL=https://prod-authority.gpm-pilot.net:8081#' "$AUTH_ENV"
 
 sed -i -E 's/^MTLS_ENABLE=.*/MTLS_ENABLE=0/' "$AUTH_ENV"
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_fail.log 2>&1; then
@@ -557,7 +589,7 @@ if ! rg -q "mTLS node certificate missing serverAuth usage" /tmp/integration_pro
   exit 1
 fi
 mv "$tls_dir/tls/node.crt.good" "$tls_dir/tls/node.crt"
-"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$tls_dir/tls" --public-host 203.0.113.10 --san 203.0.113.20 --rotate-leaf 1 >/tmp/integration_bootstrap_mtls_restore_server_usage.log 2>&1
+"$ROOT_DIR/scripts/bootstrap_mtls.sh" --out-dir "$tls_dir/tls" --public-host prod-authority.gpm-pilot.net --san prod-provider.gpm-pilot.net --rotate-leaf 1 >/tmp/integration_bootstrap_mtls_restore_server_usage.log 2>&1
 
 server_only_cfg="$tls_dir/server_only_ext.cnf"
 cat >"$server_only_cfg" <<'EOF_SERVER_ONLY'
@@ -598,7 +630,7 @@ write_provider_env_file() {
   local core_issuer="$1"
   local admin_token="${2:-}"
   local sign_key_id="${3:-}"
-  local issuer_urls="${4:-https://issuer.example:8082,https://issuer2.example:8082}"
+  local issuer_urls="${4:-https://issuer.gpm-pilot.net:8082,https://issuer2.gpm-pilot.net:8082}"
   cat >"$PROVIDER_ENV" <<EOF_PROVIDER
 PROD_STRICT_MODE=1
 BETA_STRICT_MODE=1
@@ -608,9 +640,9 @@ MTLS_MIN_VERSION=1.3
 MTLS_INSECURE_SKIP_VERIFY=0
 MTLS_CA_FILE=$tls_dir/tls/ca.crt
 DATA_PLANE_MODE=opaque
-DIRECTORY_PUBLIC_URL=https://203.0.113.20:8081
-ENTRY_URL_PUBLIC=https://203.0.113.20:8083
-EXIT_CONTROL_URL_PUBLIC=https://203.0.113.20:8084
+DIRECTORY_PUBLIC_URL=https://prod-provider.gpm-pilot.net:8081
+ENTRY_URL_PUBLIC=https://prod-provider.gpm-pilot.net:8083
+EXIT_CONTROL_URL_PUBLIC=https://prod-provider.gpm-pilot.net:8084
 EASY_NODE_MTLS_CA_FILE_LOCAL=$tls_dir/tls/ca.crt
 EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL=$tls_dir/tls/client.crt
 EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL=$tls_dir/tls/client.key
@@ -744,22 +776,40 @@ cat >"$MODE_FILE" <<'EOF_MODE_PROVIDER'
 EASY_NODE_SERVER_MODE=provider
 EOF_MODE_PROVIDER
 
-write_provider_env_file "https://issuer.example:8082"
+write_provider_env_file "https://issuer.gpm-pilot.net:8082"
 ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_provider_ok.log 2>&1
 
 write_provider_env_file "https://127.0.0.1:8082"
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_provider_issuer_private_host_fail.log 2>&1; then
-  echo "expected provider prod-preflight to fail with private/loopback CORE_ISSUER_URL host"
+  echo "expected provider prod-preflight to fail with non-public CORE_ISSUER_URL host"
   cat /tmp/integration_prod_preflight_provider_issuer_private_host_fail.log
   exit 1
 fi
-if ! rg -q "provider CORE_ISSUER_URL host must not be private/loopback" /tmp/integration_prod_preflight_provider_issuer_private_host_fail.log; then
-  echo "missing expected provider CORE_ISSUER_URL private host failure signal"
+if ! rg -q "provider CORE_ISSUER_URL host must be public" /tmp/integration_prod_preflight_provider_issuer_private_host_fail.log; then
+  echo "missing expected provider CORE_ISSUER_URL non-public host failure signal"
   cat /tmp/integration_prod_preflight_provider_issuer_private_host_fail.log
   exit 1
 fi
+for non_public_core_issuer in \
+  "https://203.0.113.10:8082" \
+  "https://[2001:0db8::10]:8082" \
+  "https://[fe90::1]:8082" \
+  "https://issuer.internal:8082" \
+  "https://issuer.ts.net:8082"; do
+  write_provider_env_file "$non_public_core_issuer"
+  if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_provider_issuer_non_public_host_fail.log 2>&1; then
+    echo "expected provider prod-preflight to fail with non-public CORE_ISSUER_URL host: $non_public_core_issuer"
+    cat /tmp/integration_prod_preflight_provider_issuer_non_public_host_fail.log
+    exit 1
+  fi
+  if ! rg -q "provider CORE_ISSUER_URL host must be public" /tmp/integration_prod_preflight_provider_issuer_non_public_host_fail.log; then
+    echo "missing expected provider CORE_ISSUER_URL non-public host failure signal for: $non_public_core_issuer"
+    cat /tmp/integration_prod_preflight_provider_issuer_non_public_host_fail.log
+    exit 1
+  fi
+done
 
-write_provider_env_file "http://issuer.example:8082"
+write_provider_env_file "http://issuer.gpm-pilot.net:8082"
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_provider_issuer_scheme_fail.log 2>&1; then
   echo "expected provider prod-preflight to fail with non-HTTPS CORE_ISSUER_URL"
   cat /tmp/integration_prod_preflight_provider_issuer_scheme_fail.log
@@ -771,7 +821,7 @@ if ! rg -q "provider CORE_ISSUER_URL must be HTTPS" /tmp/integration_prod_prefli
   exit 1
 fi
 
-write_provider_env_file "https://issuer.example:8082" "legacy-provider-admin-token"
+write_provider_env_file "https://issuer.gpm-pilot.net:8082" "legacy-provider-admin-token"
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_provider_token_fail.log 2>&1; then
   echo "expected provider prod-preflight to fail when ISSUER_ADMIN_TOKEN is persisted"
   cat /tmp/integration_prod_preflight_provider_token_fail.log
@@ -783,7 +833,7 @@ if ! rg -q "provider env must not persist ISSUER_ADMIN_TOKEN" /tmp/integration_p
   exit 1
 fi
 
-write_provider_env_file "https://issuer.example:8082" "" "provider-signer-id"
+write_provider_env_file "https://issuer.gpm-pilot.net:8082" "" "provider-signer-id"
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_provider_signer_fail.log 2>&1; then
   echo "expected provider prod-preflight to fail when signing material is persisted"
   cat /tmp/integration_prod_preflight_provider_signer_fail.log
@@ -795,7 +845,7 @@ if ! rg -q "provider env must not include issuer admin signing material" /tmp/in
   exit 1
 fi
 
-write_provider_env_file "https://issuer.example:8082"
+write_provider_env_file "https://issuer.gpm-pilot.net:8082"
 PATH="$live_curl_mock_dir:$PATH" EASY_NODE_CURL_MOCK_POLICY_MODE=good \
   ./scripts/easy_node.sh prod-preflight --days-min 0 --check-live 1 --timeout-sec 1 >/tmp/integration_prod_preflight_provider_live_governance_ok.log 2>&1
 

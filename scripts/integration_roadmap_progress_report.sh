@@ -10428,6 +10428,89 @@ if ! jq -e --arg reports_dir "$PROMOTION_COMMAND_HINTS_DIR" --arg multi_vm_summa
   exit 1
 fi
 
+echo "[roadmap-progress-report] multi-VM promotion next command prefers archived check-only rerun when cycle list exists"
+PROMOTION_COMMAND_HINTS_CHECK_ONLY_DIR="$TMP_DIR/promotion_command_hints_check_only"
+mkdir -p "$PROMOTION_COMMAND_HINTS_CHECK_ONLY_DIR"
+PROMOTION_COMMAND_HINTS_CHECK_ONLY_NOW_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+PROMOTION_COMMAND_HINTS_CHECK_ONLY_LIST="$PROMOTION_COMMAND_HINTS_CHECK_ONLY_DIR/profile_compare_multi_vm_stability_promotion_cycle_summary_paths.list"
+PROMOTION_COMMAND_HINTS_CHECK_ONLY_PROMOTION_JSON="$PROMOTION_COMMAND_HINTS_CHECK_ONLY_DIR/profile_compare_multi_vm_stability_promotion_check_summary.json"
+PROMOTION_COMMAND_HINTS_CHECK_ONLY_SUMMARY_JSON="$PROMOTION_COMMAND_HINTS_CHECK_ONLY_DIR/profile_compare_multi_vm_stability_promotion_cycle_summary.json"
+printf '%s\n' "$PROMOTION_COMMAND_HINTS_CHECK_ONLY_DIR/cycle_1.json" "$PROMOTION_COMMAND_HINTS_CHECK_ONLY_DIR/cycle_2.json" >"$PROMOTION_COMMAND_HINTS_CHECK_ONLY_LIST"
+cat >"$PROMOTION_COMMAND_HINTS_CHECK_ONLY_PROMOTION_JSON" <<EOF_PROMOTION_COMMAND_HINTS_CHECK_ONLY_PROMOTION
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_promotion_check_summary"
+  },
+  "generated_at_utc": "$PROMOTION_COMMAND_HINTS_CHECK_ONLY_NOW_UTC",
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true
+}
+EOF_PROMOTION_COMMAND_HINTS_CHECK_ONLY_PROMOTION
+cat >"$PROMOTION_COMMAND_HINTS_CHECK_ONLY_SUMMARY_JSON" <<EOF_PROMOTION_COMMAND_HINTS_CHECK_ONLY_MULTI_VM_SUMMARY
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_promotion_cycle_summary"
+  },
+  "generated_at_utc": "$PROMOTION_COMMAND_HINTS_CHECK_ONLY_NOW_UTC",
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "inputs": {
+    "reports_dir": "$PROMOTION_COMMAND_HINTS_CHECK_ONLY_DIR",
+    "cycle_orchestration": {
+      "cycles": 7
+    }
+  },
+  "promotion": {
+    "summary_exists": true,
+    "summary_valid_json": true,
+    "summary_fresh": true,
+    "decision": "NO-GO",
+    "status": "fail",
+    "rc": 1
+  },
+  "artifacts": {
+    "cycle_summary_list": "$PROMOTION_COMMAND_HINTS_CHECK_ONLY_LIST",
+    "promotion_summary_json": "$PROMOTION_COMMAND_HINTS_CHECK_ONLY_PROMOTION_JSON"
+  }
+}
+EOF_PROMOTION_COMMAND_HINTS_CHECK_ONLY_MULTI_VM_SUMMARY
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --profile-compare-multi-vm-stability-promotion-summary-json "$PROMOTION_COMMAND_HINTS_CHECK_ONLY_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_promotion_command_hints_check_only_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_promotion_command_hints_check_only_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_promotion_command_hints_check_only.log 2>&1; then
+  echo "expected success for archived multi-VM promotion check-only next-command hint path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_promotion_command_hints_check_only.log
+  exit 1
+fi
+if ! jq -e --arg reports_dir "$PROMOTION_COMMAND_HINTS_CHECK_ONLY_DIR" --arg cycle_list "$PROMOTION_COMMAND_HINTS_CHECK_ONLY_LIST" --arg promotion_summary "$PROMOTION_COMMAND_HINTS_CHECK_ONLY_PROMOTION_JSON" --arg multi_vm_summary_json "$PROMOTION_COMMAND_HINTS_CHECK_ONLY_SUMMARY_JSON" '
+  .vpn_track.multi_vm_stability_promotion.available == true
+  and .vpn_track.multi_vm_stability_promotion.needs_attention == true
+  and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | contains("--reports-dir " + $reports_dir))
+  and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | contains("--summary-json " + $multi_vm_summary_json))
+  and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | contains("--cycle-summary-list " + $cycle_list))
+  and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | contains("--promotion-summary-json " + $promotion_summary))
+  and ((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("(^| )--promotion-check-only 1( |$)"))
+  and (((.vpn_track.multi_vm_stability_promotion.next_command // "") | test("(^| )--cycles 7( |$)")) | not)
+  and ((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion" and ((.command // "") | contains("--cycle-summary-list " + $cycle_list)) and ((.command // "") | test("(^| )--promotion-check-only 1( |$)"))))
+' "$TMP_DIR/roadmap_progress_promotion_command_hints_check_only_summary.json" >/dev/null; then
+  echo "promotion command hints check-only summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_promotion_command_hints_check_only_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] runtime-actuation selector skips malformed freshest promotion-check alias and uses usable cycle summary"
 RUNTIME_ACTUATION_PROMOTION_SELECTOR_DIR="$TMP_DIR/runtime_actuation_selector"
 RUNTIME_ACTUATION_PROMOTION_SELECTOR_LOG_DIR="$RUNTIME_ACTUATION_PROMOTION_SELECTOR_DIR/isolated_logs"

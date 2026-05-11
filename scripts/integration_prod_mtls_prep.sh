@@ -101,6 +101,41 @@ if ! rg -q "reserved/test" "$reserved_dir/prod_mtls_prep_report.md"; then
   exit 1
 fi
 
+non_public_cases=(
+  "placeholder.prod.example.net"
+  "authority.example"
+  "provider.test"
+  "node.internal"
+  "node.local"
+  "prod-node.ts.net"
+  "192.0.2.10"
+  "198.18.0.1"
+  "224.0.0.1"
+  "2001:0db8::1"
+  "fe90::1"
+  "fd00::1"
+  "ff02::1"
+  "::ffff:192.168.1.10"
+)
+for non_public_host in "${non_public_cases[@]}"; do
+  case_dir="$tmp_dir/non-public-$(printf '%s' "$non_public_host" | tr -c 'A-Za-z0-9._-' '_')"
+  case_log="$case_dir.log"
+  if ./scripts/prod_mtls_prep.sh \
+    --authority-host "$non_public_host" \
+    --provider-host provider-a.prod.privacynode.net \
+    --out-dir "$case_dir" \
+    --print-summary-json 1 >"$case_log" 2>&1; then
+    echo "expected prod-mtls-prep to reject non-production host: $non_public_host"
+    cat "$case_log"
+    exit 1
+  fi
+  if ! jq -e '.status=="fail" and .prod_ready==false and (.blockers[]? | select(.code=="private_or_loopback_host")) and (.hosts[]? | select(.private_or_loopback==true))' "$case_dir/prod_mtls_prep_summary.json" >/dev/null; then
+    echo "unexpected non-production host summary for: $non_public_host"
+    cat "$case_dir/prod_mtls_prep_summary.json"
+    exit 1
+  fi
+done
+
 rehearsal_dir="$tmp_dir/rehearsal"
 ./scripts/prod_mtls_prep.sh \
   --authority-host 100.113.245.61 \
@@ -183,9 +218,9 @@ server_pid=""
 
 public_dir="$tmp_dir/public"
 ./scripts/easy_node.sh prod-mtls-prep \
-  --authority-host authority.prod.example.com \
-  --provider-host provider-a.prod.example.com \
-  --provider-host provider.example \
+  --authority-host authority.prod.privacynode.net \
+  --provider-host provider-a.prod.privacynode.net \
+  --provider-host provider-b.prod.privacynode.net \
   --out-dir "$public_dir" \
   --print-summary-json 1 >/tmp/integration_prod_mtls_prep_public.log
 if ! jq -e '.status=="pass" and .prod_ready==true and .rehearsal_only==false and .non_disruptive==true' "$public_dir/prod_mtls_prep_summary.json" >/dev/null; then
@@ -198,7 +233,7 @@ if ! openssl x509 -in "$public_dir/tls/node.crt" -noout -ext subjectAltName >/tm
   cat "$public_dir/bootstrap_mtls.log" 2>/dev/null || true
   exit 1
 fi
-for expected in "DNS:authority.prod.example.com" "DNS:provider-a.prod.example.com" "DNS:provider.example"; do
+for expected in "DNS:authority.prod.privacynode.net" "DNS:provider-a.prod.privacynode.net" "DNS:provider-b.prod.privacynode.net"; do
   if ! rg -q "$expected" /tmp/integration_prod_mtls_prep_san.log; then
     echo "missing expected SAN: $expected"
     cat /tmp/integration_prod_mtls_prep_san.log
@@ -236,7 +271,7 @@ if ! jq -e '(.certificate_generation.host_server_bundles | length) == 3' "$publi
   exit 1
 fi
 authority_bundle="$(jq -r '.certificate_generation.host_server_bundles[] | select(.role=="authority") | .dir' "$public_dir/prod_mtls_prep_summary.json")"
-provider_bundle="$(jq -r '.certificate_generation.host_server_bundles[] | select(.role=="provider" and .host=="provider-a.prod.example.com") | .dir' "$public_dir/prod_mtls_prep_summary.json")"
+provider_bundle="$(jq -r '.certificate_generation.host_server_bundles[] | select(.role=="provider" and .host=="provider-a.prod.privacynode.net") | .dir' "$public_dir/prod_mtls_prep_summary.json")"
 if [[ -z "$authority_bundle" || -z "$provider_bundle" || ! -d "$authority_bundle" || ! -d "$provider_bundle" ]]; then
   echo "missing expected public host-specific bundle"
   cat "$public_dir/prod_mtls_prep_summary.json"
@@ -264,12 +299,12 @@ if [[ -z "$auth_key_fp" || -z "$provider_key_fp" || "$auth_key_fp" == "$provider
 fi
 openssl x509 -in "$authority_bundle/node.crt" -noout -ext subjectAltName >/tmp/integration_prod_mtls_prep_auth_host_san.log
 openssl x509 -in "$provider_bundle/node.crt" -noout -ext subjectAltName >/tmp/integration_prod_mtls_prep_provider_host_san.log
-if ! rg -q "DNS:authority.prod.example.com" /tmp/integration_prod_mtls_prep_auth_host_san.log || rg -q "DNS:provider-a.prod.example.com" /tmp/integration_prod_mtls_prep_auth_host_san.log; then
+if ! rg -q "DNS:authority.prod.privacynode.net" /tmp/integration_prod_mtls_prep_auth_host_san.log || rg -q "DNS:provider-a.prod.privacynode.net" /tmp/integration_prod_mtls_prep_auth_host_san.log; then
   echo "authority host-specific SANs are not isolated to the authority host"
   cat /tmp/integration_prod_mtls_prep_auth_host_san.log
   exit 1
 fi
-if ! rg -q "DNS:provider-a.prod.example.com" /tmp/integration_prod_mtls_prep_provider_host_san.log || rg -q "DNS:authority.prod.example.com" /tmp/integration_prod_mtls_prep_provider_host_san.log; then
+if ! rg -q "DNS:provider-a.prod.privacynode.net" /tmp/integration_prod_mtls_prep_provider_host_san.log || rg -q "DNS:authority.prod.privacynode.net" /tmp/integration_prod_mtls_prep_provider_host_san.log; then
   echo "provider host-specific SANs are not isolated to the provider host"
   cat /tmp/integration_prod_mtls_prep_provider_host_san.log
   exit 1
@@ -277,10 +312,10 @@ fi
 
 ./scripts/easy_node.sh prod-mtls-bundle-verify \
   --bundle-dir "$authority_bundle" \
-  --host authority.prod.example.com \
+  --host authority.prod.privacynode.net \
   --summary-json "$tmp_dir/authority_bundle_verify.json" \
   --print-summary-json 1 >"$tmp_dir/authority_bundle_verify.log"
-if ! jq -e '.status=="pass" and .failures==0 and (.inputs.expected_hosts == ["authority.prod.example.com"])' "$tmp_dir/authority_bundle_verify.json" >/dev/null; then
+if ! jq -e '.status=="pass" and .failures==0 and (.inputs.expected_hosts == ["authority.prod.privacynode.net"])' "$tmp_dir/authority_bundle_verify.json" >/dev/null; then
   echo "expected authority host-specific bundle verify to pass"
   cat "$tmp_dir/authority_bundle_verify.json"
   exit 1
@@ -288,7 +323,7 @@ fi
 
 ./scripts/prod_mtls_bundle_verify.sh \
   --bundle-dir "$provider_bundle" \
-  --host provider-a.prod.example.com \
+  --host provider-a.prod.privacynode.net \
   --summary-json "$tmp_dir/provider_bundle_verify.json" >"$tmp_dir/provider_bundle_verify.log"
 if ! jq -e '.status=="pass" and .failures==0' "$tmp_dir/provider_bundle_verify.json" >/dev/null; then
   echo "expected provider host-specific bundle verify to pass"
@@ -299,7 +334,7 @@ fi
 wrong_host_log="$tmp_dir/wrong_host_bundle_verify.log"
 if ./scripts/prod_mtls_bundle_verify.sh \
   --bundle-dir "$authority_bundle" \
-  --host provider-a.prod.example.com \
+  --host provider-a.prod.privacynode.net \
   --summary-json "$tmp_dir/wrong_host_bundle_verify.json" >"$wrong_host_log" 2>&1; then
   echo "expected bundle verify to fail when host SAN does not match"
   cat "$wrong_host_log"
@@ -322,7 +357,7 @@ req_extensions = req_ext
 [dn]
 CN = server-only-authority
 [req_ext]
-subjectAltName = DNS:authority.prod.example.com
+subjectAltName = DNS:authority.prod.privacynode.net
 extendedKeyUsage = serverAuth
 EOF_SERVER_ONLY_CNF
 openssl req -new \
@@ -342,7 +377,7 @@ openssl x509 -req \
 server_only_log="$tmp_dir/server_only_bundle_verify.log"
 if ./scripts/prod_mtls_bundle_verify.sh \
   --bundle-dir "$server_only_bundle" \
-  --host authority.prod.example.com \
+  --host authority.prod.privacynode.net \
   --summary-json "$tmp_dir/server_only_bundle_verify.json" >"$server_only_log" 2>&1; then
   echo "expected bundle verify to fail when node.crt is missing clientAuth"
   cat "$server_only_log"
@@ -361,7 +396,7 @@ cp "$public_dir/tls/ca.key" "$leaky_bundle/ca.key"
 leaky_log="$tmp_dir/leaky_bundle_verify.log"
 if ./scripts/prod_mtls_bundle_verify.sh \
   --bundle-dir "$leaky_bundle" \
-  --host authority.prod.example.com \
+  --host authority.prod.privacynode.net \
   --summary-json "$tmp_dir/leaky_bundle_verify.json" >"$leaky_log" 2>&1; then
   echo "expected bundle verify to fail when ca.key is staged in a server bundle"
   cat "$leaky_log"
@@ -376,7 +411,7 @@ fi
 stage_target="$tmp_dir/staged_tls"
 ./scripts/easy_node.sh prod-mtls-bundle-stage \
   --bundle-dir "$authority_bundle" \
-  --host authority.prod.example.com \
+  --host authority.prod.privacynode.net \
   --target-dir "$stage_target" \
   --summary-json "$tmp_dir/stage_authority_bundle.json" \
   --print-summary-json 1 >"$tmp_dir/stage_authority_bundle.log"
@@ -398,7 +433,7 @@ if [[ -e "$stage_target/ca.key" ]]; then
 fi
 ./scripts/prod_mtls_bundle_verify.sh \
   --bundle-dir "$stage_target" \
-  --host authority.prod.example.com \
+  --host authority.prod.privacynode.net \
   --require-client-material 1 \
   --summary-json "$tmp_dir/stage_target_verify.json" >"$tmp_dir/stage_target_verify.log"
 if ! jq -e '.status=="pass" and .failures==0' "$tmp_dir/stage_target_verify.json" >/dev/null; then
@@ -413,7 +448,7 @@ cp "$stage_target/ca.crt" "$stage_target/node.crt" "$stage_target/node.key" "$st
 cp "$provider_bundle/node.key" "$mismatched_client_bundle/client.key"
 if ./scripts/prod_mtls_bundle_verify.sh \
   --bundle-dir "$mismatched_client_bundle" \
-  --host authority.prod.example.com \
+  --host authority.prod.privacynode.net \
   --require-client-material 1 \
   --summary-json "$tmp_dir/mismatched_client_bundle_verify.json" >"$tmp_dir/mismatched_client_bundle_verify.log" 2>&1; then
   echo "expected bundle verify to fail when client.crt and client.key do not match"

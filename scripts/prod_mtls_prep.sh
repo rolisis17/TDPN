@@ -103,6 +103,15 @@ is_ipv6() {
   fi
 }
 
+is_ipv4_mapped_ipv6() {
+  local host="$1"
+  local lower
+  lower="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  [[ "$lower" == ::ffff:* || "$lower" == 0:0:0:0:0:ffff:* ]] || return 1
+  local mapped_ipv4="${lower##*:}"
+  is_ipv4 "$mapped_ipv4"
+}
+
 normalize_host_value() {
   local raw="$1"
   local value
@@ -144,6 +153,10 @@ normalize_host_value() {
     fi
   fi
   if [[ "$value" == *:* ]]; then
+    if is_ipv4_mapped_ipv6 "$value"; then
+      printf '%s' "$value"
+      return 0
+    fi
     if ! is_ipv6 "$value"; then
       echo "invalid IPv6 mTLS host '$value': use a bare IPv6 address without brackets or port" >&2
       return 1
@@ -237,6 +250,89 @@ ipv4_non_public_for_prod() {
   return 1
 }
 
+ipv6_hextets() {
+  local host="$1"
+  is_ipv6 "$host" || return 1
+  local IFS=:
+  local -a parts=()
+  local -a left=()
+  local -a right=()
+  local -a expanded=()
+  local part
+  if [[ "$host" == *::* ]]; then
+    local left_part="${host%%::*}"
+    local right_part="${host#*::}"
+    if [[ -n "$left_part" ]]; then
+      read -r -a left <<<"$left_part"
+    fi
+    if [[ -n "$right_part" ]]; then
+      read -r -a right <<<"$right_part"
+    fi
+    expanded=("${left[@]}")
+    local missing=$((8 - ${#left[@]} - ${#right[@]}))
+    while ((missing > 0)); do
+      expanded+=("0")
+      missing=$((missing - 1))
+    done
+    expanded=("${expanded[@]}" "${right[@]}")
+  else
+    read -r -a parts <<<"$host"
+    expanded=("${parts[@]}")
+  fi
+  ((${#expanded[@]} == 8)) || return 1
+  for part in "${expanded[@]}"; do
+    printf '%x\n' "$((16#$part))"
+  done
+}
+
+ipv6_non_public_for_prod() {
+  local host="$1"
+  local -a hextets=()
+  local hextet
+  while IFS= read -r hextet; do
+    hextets+=("$hextet")
+  done < <(ipv6_hextets "$host")
+  ((${#hextets[@]} == 8)) || return 1
+
+  local h1=$((16#${hextets[0]}))
+  local h2=$((16#${hextets[1]}))
+  local h3=$((16#${hextets[2]}))
+  local h4=$((16#${hextets[3]}))
+  local h5=$((16#${hextets[4]}))
+  local h6=$((16#${hextets[5]}))
+  local h7=$((16#${hextets[6]}))
+  local h8=$((16#${hextets[7]}))
+
+  # Unspecified, loopback, IPv4-compatible, documentation, 6to4,
+  # ORCHIDv2, ULA, link-local, and multicast are not true-prod hosts.
+  ((h1 == 0 && h2 == 0 && h3 == 0 && h4 == 0 && h5 == 0 && h6 == 0 && h7 == 0 && (h8 == 0 || h8 == 1))) && return 0
+  ((h1 == 0 && h2 == 0 && h3 == 0 && h4 == 0 && h5 == 0 && h6 == 0)) && return 0
+  ((h1 == 0x2001 && h2 == 0xdb8)) && return 0
+  ((h1 == 0x2002)) && return 0
+  ((h1 == 0x2001 && h2 >= 0x10 && h2 <= 0x1f)) && return 0
+  ((h1 >= 0xfc00 && h1 <= 0xfdff)) && return 0
+  ((h1 >= 0xfe80 && h1 <= 0xfebf)) && return 0
+  ((h1 >= 0xff00 && h1 <= 0xffff)) && return 0
+
+  return 1
+}
+
+dns_has_non_prod_label() {
+  local host="$1"
+  local IFS=.
+  local -a labels=()
+  local label
+  read -r -a labels <<<"$host"
+  for label in "${labels[@]}"; do
+    case "$label" in
+      example|placeholder|test|internal|local|localhost)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
 host_is_non_public_for_prod() {
   local host
   host="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
@@ -244,20 +340,24 @@ host_is_non_public_for_prod() {
     ipv4_non_public_for_prod "$host"
     return
   fi
-  if is_ipv6 "$host"; then
-    case "$host" in
-      ::|::1|0:0:0:0:0:0:0:0|0:0:0:0:0:0:0:1|fc*|fd*|fe80:*)
-        return 0
-        ;;
-    esac
-    return 1
+  if is_ipv4_mapped_ipv6 "$host"; then
+    ipv4_non_public_for_prod "${host##*:}"
+    return
   fi
-  [[ "$host" == "localhost" || "$host" == *.localhost || "$host" == *.local ]]
+  if is_ipv6 "$host"; then
+    ipv6_non_public_for_prod "$host"
+    return
+  fi
+  dns_has_non_prod_label "$host" ||
+  [[ "$host" == "localhost" ||
+    "$host" == *.ts.net ||
+    "$host" == *.tailscale.net ||
+    "$host" == *.beta.tailscale.net ]]
 }
 
 url_host_literal() {
   local host="$1"
-  if is_ipv6 "$host"; then
+  if is_ipv6 "$host" || is_ipv4_mapped_ipv6 "$host"; then
     printf '[%s]' "$host"
   else
     printf '%s' "$host"
@@ -316,7 +416,7 @@ write_host_node_san_config() {
     echo "[alt_names]"
     local san
     for san in "${sans[@]}"; do
-      if is_ipv4 "$san" || is_ipv6 "$san"; then
+      if is_ipv4 "$san" || is_ipv6 "$san" || is_ipv4_mapped_ipv6 "$san"; then
         ip_i=$((ip_i + 1))
         echo "IP.${ip_i} = ${san}"
       else
