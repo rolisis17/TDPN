@@ -17,10 +17,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-PASS_GATE="$TMP_DIR/prod_gate_ok.json"
-PASS_RUN_REPORT="$TMP_DIR/prod_bundle_run_report_ok.json"
-WG_VALIDATE_SUMMARY="$TMP_DIR/wg_validate_summary.json"
-WG_SOAK_SUMMARY="$TMP_DIR/wg_soak_summary.json"
+PASS_BUNDLE_DIR="$TMP_DIR/prod_bundle_dir"
+PASS_GATE="$PASS_BUNDLE_DIR/prod_gate_summary.json"
+PASS_RUN_REPORT="$PASS_BUNDLE_DIR/prod_bundle_run_report.json"
+WG_VALIDATE_SUMMARY="$PASS_BUNDLE_DIR/prod_wg_validate_summary.json"
+WG_SOAK_SUMMARY="$PASS_BUNDLE_DIR/prod_wg_soak_summary.json"
 INCIDENT_BUNDLE_DIR="$TMP_DIR/incident_bundle"
 INCIDENT_BUNDLE_TAR="$TMP_DIR/incident_bundle.tar.gz"
 INCIDENT_SUMMARY_JSON="$TMP_DIR/incident_summary.json"
@@ -29,6 +30,7 @@ INCIDENT_ATTACH_DIR="$INCIDENT_BUNDLE_DIR/attachments"
 INCIDENT_ATTACH_MANIFEST="$INCIDENT_ATTACH_DIR/manifest.tsv"
 INCIDENT_ATTACH_SKIPPED="$INCIDENT_ATTACH_DIR/skipped.tsv"
 
+mkdir -p "$PASS_BUNDLE_DIR"
 mkdir -p "$INCIDENT_BUNDLE_DIR"
 mkdir -p "$INCIDENT_ATTACH_DIR"
 touch "$INCIDENT_BUNDLE_TAR"
@@ -94,7 +96,7 @@ cat >"$PASS_RUN_REPORT" <<EOF_PASS_RUN_REPORT
   "generated_at_utc": "2026-03-10T12:00:25Z",
   "status": "ok",
   "final_rc": 0,
-  "bundle_dir": "$TMP_DIR/prod_bundle_dir",
+  "bundle_dir": "$PASS_BUNDLE_DIR",
   "gate_summary_json": "$PASS_GATE",
   "wg_validate_summary_json": "$WG_VALIDATE_SUMMARY",
   "wg_soak_summary_json": "$WG_SOAK_SUMMARY",
@@ -163,6 +165,109 @@ fi
 if ! rg -q '\[prod-gate-slo\] freshness max_evidence_age_sec=120' /tmp/integration_prod_gate_slo_summary_freshness_pass.log; then
   echo "expected freshness budget line in SLO summary output"
   cat /tmp/integration_prod_gate_slo_summary_freshness_pass.log
+  exit 1
+fi
+
+echo "[prod-gate-slo-summary] run-report artifact binding rejects external gate"
+EXTERNAL_DIR="$TMP_DIR/external"
+mkdir -p "$EXTERNAL_DIR"
+EXTERNAL_GATE="$EXTERNAL_DIR/prod_gate_summary.json"
+EXTERNAL_WG_VALIDATE="$EXTERNAL_DIR/prod_wg_validate_summary.json"
+EXTERNAL_WG_SOAK="$EXTERNAL_DIR/prod_wg_soak_summary.json"
+cp "$PASS_GATE" "$EXTERNAL_GATE"
+cp "$WG_VALIDATE_SUMMARY" "$EXTERNAL_WG_VALIDATE"
+cp "$WG_SOAK_SUMMARY" "$EXTERNAL_WG_SOAK"
+set +e
+./scripts/prod_gate_slo_summary.sh \
+  --run-report-json "$PASS_RUN_REPORT" \
+  --gate-summary-json "$EXTERNAL_GATE" \
+  --fail-on-no-go 1 >/tmp/integration_prod_gate_slo_summary_external_gate_fail.log 2>&1
+external_gate_rc=$?
+set -e
+if [[ "$external_gate_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when run report is combined with external gate summary"
+  cat /tmp/integration_prod_gate_slo_summary_external_gate_fail.log
+  exit 1
+fi
+if ! rg -q 'run report gate_summary_json does not reference the checked bundle artifact' /tmp/integration_prod_gate_slo_summary_external_gate_fail.log; then
+  echo "expected external gate artifact binding reason not found"
+  cat /tmp/integration_prod_gate_slo_summary_external_gate_fail.log
+  exit 1
+fi
+
+echo "[prod-gate-slo-summary] run-report artifact binding rejects external WG summaries"
+set +e
+./scripts/prod_gate_slo_summary.sh \
+  --run-report-json "$PASS_RUN_REPORT" \
+  --wg-validate-summary-json "$EXTERNAL_WG_VALIDATE" \
+  --fail-on-no-go 1 >/tmp/integration_prod_gate_slo_summary_external_wg_validate_fail.log 2>&1
+external_wg_validate_rc=$?
+set -e
+if [[ "$external_wg_validate_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when run report is combined with external wg_validate summary"
+  cat /tmp/integration_prod_gate_slo_summary_external_wg_validate_fail.log
+  exit 1
+fi
+if ! rg -q 'run report wg_validate_summary_json does not reference the checked bundle artifact' /tmp/integration_prod_gate_slo_summary_external_wg_validate_fail.log; then
+  echo "expected external wg_validate artifact binding reason not found"
+  cat /tmp/integration_prod_gate_slo_summary_external_wg_validate_fail.log
+  exit 1
+fi
+set +e
+./scripts/prod_gate_slo_summary.sh \
+  --run-report-json "$PASS_RUN_REPORT" \
+  --wg-soak-summary-json "$EXTERNAL_WG_SOAK" \
+  --fail-on-no-go 1 >/tmp/integration_prod_gate_slo_summary_external_wg_soak_fail.log 2>&1
+external_wg_soak_rc=$?
+set -e
+if [[ "$external_wg_soak_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when run report is combined with external wg_soak summary"
+  cat /tmp/integration_prod_gate_slo_summary_external_wg_soak_fail.log
+  exit 1
+fi
+if ! rg -q 'run report wg_soak_summary_json does not reference the checked bundle artifact' /tmp/integration_prod_gate_slo_summary_external_wg_soak_fail.log; then
+  echo "expected external wg_soak artifact binding reason not found"
+  cat /tmp/integration_prod_gate_slo_summary_external_wg_soak_fail.log
+  exit 1
+fi
+
+echo "[prod-gate-slo-summary] bundle-dir containment rejects external gate"
+set +e
+./scripts/prod_gate_slo_summary.sh \
+  --bundle-dir "$PASS_BUNDLE_DIR" \
+  --gate-summary-json "$EXTERNAL_GATE" \
+  --fail-on-no-go 1 >/tmp/integration_prod_gate_slo_summary_bundle_external_gate_fail.log 2>&1
+bundle_external_gate_rc=$?
+set -e
+if [[ "$bundle_external_gate_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when bundle_dir is combined with external gate summary"
+  cat /tmp/integration_prod_gate_slo_summary_bundle_external_gate_fail.log
+  exit 1
+fi
+if ! rg -q 'gate summary is outside checked bundle_dir' /tmp/integration_prod_gate_slo_summary_bundle_external_gate_fail.log; then
+  echo "expected bundle containment reason not found"
+  cat /tmp/integration_prod_gate_slo_summary_bundle_external_gate_fail.log
+  exit 1
+fi
+
+echo "[prod-gate-slo-summary] WG summary status mismatch"
+MISMATCH_WG_VALIDATE="$TMP_DIR/mismatch_wg_validate_summary.json"
+jq '.status = "fail"' "$WG_VALIDATE_SUMMARY" >"$MISMATCH_WG_VALIDATE"
+set +e
+./scripts/prod_gate_slo_summary.sh \
+  --gate-summary-json "$PASS_GATE" \
+  --wg-validate-summary-json "$MISMATCH_WG_VALIDATE" \
+  --fail-on-no-go 1 >/tmp/integration_prod_gate_slo_summary_wg_status_mismatch.log 2>&1
+wg_status_mismatch_rc=$?
+set -e
+if [[ "$wg_status_mismatch_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when WG validate summary status disagrees with gate summary"
+  cat /tmp/integration_prod_gate_slo_summary_wg_status_mismatch.log
+  exit 1
+fi
+if ! rg -q 'wg validate summary status does not match gate summary' /tmp/integration_prod_gate_slo_summary_wg_status_mismatch.log; then
+  echo "expected WG validate status mismatch reason not found"
+  cat /tmp/integration_prod_gate_slo_summary_wg_status_mismatch.log
   exit 1
 fi
 
@@ -252,8 +357,10 @@ cat >"$RUN_REPORT_PREFLIGHT_FAIL" <<EOF_PREFLIGHT_FAIL
 {
   "status": "fail",
   "final_rc": 1,
-  "bundle_dir": "$TMP_DIR/prod_bundle_dir",
+  "bundle_dir": "$PASS_BUNDLE_DIR",
   "gate_summary_json": "$PASS_GATE",
+  "wg_validate_summary_json": "$WG_VALIDATE_SUMMARY",
+  "wg_soak_summary_json": "$WG_SOAK_SUMMARY",
   "preflight": {
     "enabled": true,
     "status": "fail",
@@ -299,8 +406,10 @@ cat >"$RUN_REPORT_INCIDENT_FAIL" <<EOF_INCIDENT_FAIL
 {
   "status": "fail",
   "final_rc": 1,
-  "bundle_dir": "$TMP_DIR/prod_bundle_dir",
+  "bundle_dir": "$PASS_BUNDLE_DIR",
   "gate_summary_json": "$PASS_GATE",
+  "wg_validate_summary_json": "$WG_VALIDATE_SUMMARY",
+  "wg_soak_summary_json": "$WG_SOAK_SUMMARY",
   "preflight": {
     "enabled": true,
     "status": "ok",
@@ -353,8 +462,10 @@ cat >"$RUN_REPORT_INCIDENT_ARTIFACTS" <<EOF_INCIDENT_ARTIFACTS
 {
   "status": "fail",
   "final_rc": 1,
-  "bundle_dir": "$TMP_DIR/prod_bundle_dir",
+  "bundle_dir": "$PASS_BUNDLE_DIR",
   "gate_summary_json": "$PASS_GATE",
+  "wg_validate_summary_json": "$WG_VALIDATE_SUMMARY",
+  "wg_soak_summary_json": "$WG_SOAK_SUMMARY",
   "preflight": {
     "enabled": true,
     "status": "ok",
@@ -411,8 +522,10 @@ cat >"$RUN_REPORT_INCIDENT_ARTIFACTS_INVALID" <<EOF_INCIDENT_ARTIFACTS_INVALID
 {
   "status": "fail",
   "final_rc": 1,
-  "bundle_dir": "$TMP_DIR/prod_bundle_dir",
+  "bundle_dir": "$PASS_BUNDLE_DIR",
   "gate_summary_json": "$PASS_GATE",
+  "wg_validate_summary_json": "$WG_VALIDATE_SUMMARY",
+  "wg_soak_summary_json": "$WG_SOAK_SUMMARY",
   "incident_snapshot": {
     "enabled_on_fail": true,
     "status": "ok",

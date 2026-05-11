@@ -204,6 +204,24 @@ explicit_min_wg_soak_entry_operators=0
 explicit_min_wg_soak_exit_operators=0
 explicit_min_wg_soak_cross_operator_pairs=0
 explicit_max_evidence_age_sec=0
+[[ -n "${PROD_GATE_SLO_REQUIRE_FULL_SEQUENCE+x}" ]] && explicit_require_full_sequence=1
+[[ -n "${PROD_GATE_SLO_REQUIRE_WG_VALIDATE_OK+x}" ]] && explicit_require_wg_validate_ok=1
+[[ -n "${PROD_GATE_SLO_REQUIRE_WG_SOAK_OK+x}" ]] && explicit_require_wg_soak_ok=1
+[[ -n "${PROD_GATE_SLO_MAX_WG_SOAK_FAILED_ROUNDS+x}" ]] && explicit_max_wg_soak_failed_rounds=1
+[[ -n "${PROD_GATE_SLO_REQUIRE_PREFLIGHT_OK+x}" ]] && explicit_require_preflight_ok=1
+[[ -n "${PROD_GATE_SLO_REQUIRE_BUNDLE_OK+x}" ]] && explicit_require_bundle_ok=1
+[[ -n "${PROD_GATE_SLO_REQUIRE_INTEGRITY_OK+x}" ]] && explicit_require_integrity_ok=1
+[[ -n "${PROD_GATE_SLO_REQUIRE_SIGNOFF_OK+x}" ]] && explicit_require_signoff_ok=1
+[[ -n "${PROD_GATE_SLO_REQUIRE_INCIDENT_SNAPSHOT_ON_FAIL+x}" ]] && explicit_require_incident_snapshot_on_fail=1
+[[ -n "${PROD_GATE_SLO_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS+x}" ]] && explicit_require_incident_snapshot_artifacts=1
+[[ -n "${PROD_GATE_SLO_REQUIRE_WG_VALIDATE_UDP_SOURCE+x}" ]] && explicit_require_wg_validate_udp_source=1
+[[ -n "${PROD_GATE_SLO_REQUIRE_WG_VALIDATE_STRICT_DISTINCT+x}" ]] && explicit_require_wg_validate_strict_distinct=1
+[[ -n "${PROD_GATE_SLO_REQUIRE_WG_SOAK_DIVERSITY_PASS+x}" ]] && explicit_require_wg_soak_diversity_pass=1
+[[ -n "${PROD_GATE_SLO_MIN_WG_SOAK_SELECTION_LINES+x}" ]] && explicit_min_wg_soak_selection_lines=1
+[[ -n "${PROD_GATE_SLO_MIN_WG_SOAK_ENTRY_OPERATORS+x}" ]] && explicit_min_wg_soak_entry_operators=1
+[[ -n "${PROD_GATE_SLO_MIN_WG_SOAK_EXIT_OPERATORS+x}" ]] && explicit_min_wg_soak_exit_operators=1
+[[ -n "${PROD_GATE_SLO_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS+x}" ]] && explicit_min_wg_soak_cross_operator_pairs=1
+[[ -n "${PROD_GATE_SLO_MAX_EVIDENCE_AGE_SEC+x}" || -n "${PROD_GATE_SLO_TREND_MAX_EVIDENCE_AGE_SEC+x}" ]] && explicit_max_evidence_age_sec=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -628,6 +646,27 @@ fi
 
 declare -a freshness_reasons=()
 declare -a policy_reasons=()
+declare -a integrity_reasons=()
+
+if [[ "$trend_source" == "provided" ]]; then
+  explicit_require_full_sequence=1
+  explicit_require_wg_validate_ok=1
+  explicit_require_wg_soak_ok=1
+  explicit_max_wg_soak_failed_rounds=1
+  explicit_require_preflight_ok=1
+  explicit_require_bundle_ok=1
+  explicit_require_integrity_ok=1
+  explicit_require_signoff_ok=1
+  explicit_require_incident_snapshot_on_fail=1
+  explicit_require_incident_snapshot_artifacts=1
+  explicit_require_wg_validate_udp_source=1
+  explicit_require_wg_validate_strict_distinct=1
+  explicit_require_wg_soak_diversity_pass=1
+  explicit_min_wg_soak_selection_lines=1
+  explicit_min_wg_soak_entry_operators=1
+  explicit_min_wg_soak_exit_operators=1
+  explicit_min_wg_soak_cross_operator_pairs=1
+fi
 
 trend_generated_at_utc="$(jq -r '.generated_at_utc // ""' "$trend_summary_json" 2>/dev/null || true)"
 freshness_status="disabled"
@@ -760,6 +799,156 @@ if (( max_evidence_age_sec > 0 )); then
   fi
 fi
 
+check_filter_exact() {
+  local field="$1"
+  local requested="$2"
+  local actual=""
+  actual="$(json_policy_scalar "$trend_summary_json" ".filters.$field")"
+  if [[ ! "$actual" =~ ^[0-9]+$ ]]; then
+    policy_reasons+=("trend filter $field does not match alert request (trend=${actual:-missing}, required=$requested)")
+  elif (( actual != requested )); then
+    policy_reasons+=("trend filter $field does not match alert request (trend=$actual, required=$requested)")
+  fi
+}
+
+if [[ "$trend_source" == "provided" ]]; then
+  check_filter_exact "max_reports" "$max_reports"
+  check_filter_exact "since_hours" "$since_hours"
+
+  provided_reports_total_raw="$(jq -r '.reports_total // 0' "$trend_summary_json" 2>/dev/null || echo 0)"
+  provided_go_raw="$(jq -r 'if has("go") then .go else "" end' "$trend_summary_json" 2>/dev/null || true)"
+  provided_no_go_raw="$(jq -r '.no_go // 0' "$trend_summary_json" 2>/dev/null || echo 0)"
+  provided_eval_errors_raw="$(jq -r '.evaluation_errors // 0' "$trend_summary_json" 2>/dev/null || echo 0)"
+  provided_run_count="$(jq -r '(.runs // []) | if type == "array" then length else 0 end' "$trend_summary_json" 2>/dev/null || echo 0)"
+  run_metrics="$(jq -r '
+    (.runs // []) as $runs
+    | [
+        ($runs | length),
+        ($runs | map(select(.decision == "GO")) | length),
+        ($runs | map(select(.decision == "NO-GO")) | length),
+        ($runs | map(select((.decision != "GO") and (.decision != "NO-GO"))) | length)
+      ]
+    | @tsv
+  ' "$trend_summary_json" 2>/dev/null || printf '0\t0\t0\t0')"
+  IFS=$'\t' read -r recomputed_run_count recomputed_run_go recomputed_run_no_go recomputed_run_invalid <<<"$run_metrics"
+  if [[ ! "$provided_reports_total_raw" =~ ^[0-9]+$ ]]; then
+    integrity_reasons+=("provided trend reports_total is invalid (value=${provided_reports_total_raw:-unset})")
+    provided_reports_total_raw="0"
+  fi
+  if (( provided_reports_total_raw > 0 && provided_run_count == 0 )); then
+    integrity_reasons+=("provided trend summary runs are missing while reports_total is nonzero")
+  elif (( provided_run_count != provided_reports_total_raw )); then
+    integrity_reasons+=("provided trend reports_total does not match runs length (reports_total=$provided_reports_total_raw, runs=$provided_run_count)")
+  fi
+  if [[ ! "$provided_go_raw" =~ ^[0-9]+$ ]]; then
+    integrity_reasons+=("provided trend go count is missing or invalid")
+  elif (( provided_go_raw != recomputed_run_go )); then
+    integrity_reasons+=("provided trend go count does not match runs (trend=$provided_go_raw, runs=$recomputed_run_go)")
+  fi
+  if [[ ! "$provided_no_go_raw" =~ ^[0-9]+$ ]]; then
+    integrity_reasons+=("provided trend no_go count is invalid (value=${provided_no_go_raw:-unset})")
+  elif (( provided_no_go_raw != recomputed_run_no_go )); then
+    integrity_reasons+=("provided trend no_go count does not match runs (trend=$provided_no_go_raw, runs=$recomputed_run_no_go)")
+  fi
+  if [[ ! "$provided_eval_errors_raw" =~ ^[0-9]+$ ]]; then
+    integrity_reasons+=("provided trend evaluation_errors count is invalid (value=${provided_eval_errors_raw:-unset})")
+  elif (( recomputed_run_invalid > 0 && provided_eval_errors_raw < recomputed_run_invalid )); then
+    integrity_reasons+=("provided trend evaluation_errors count does not account for invalid run decisions (trend=$provided_eval_errors_raw, invalid_runs=$recomputed_run_invalid)")
+  fi
+  if (( recomputed_run_invalid > 0 )); then
+    integrity_reasons+=("provided trend contains invalid run decisions (invalid_runs=$recomputed_run_invalid)")
+  fi
+
+  path_integrity_failed=0
+  declare -a provided_run_paths=()
+  while IFS=$'\t' read -r run_idx run_path || [[ -n "${run_idx:-}" ]]; do
+    [[ -z "${run_idx:-}" ]] && continue
+    run_path="$(trim "${run_path:-}")"
+    if [[ -z "$run_path" ]]; then
+      integrity_reasons+=("provided trend run[$run_idx] report_path is missing")
+      path_integrity_failed=1
+      continue
+    fi
+    run_path="$(abs_path "$run_path")"
+    if [[ ! -f "$run_path" ]]; then
+      integrity_reasons+=("provided trend run[$run_idx] report_path does not exist: $run_path")
+      path_integrity_failed=1
+      continue
+    fi
+    provided_run_paths+=("$run_path")
+  done < <(
+    jq -r '
+      (.runs // [])
+      | to_entries[]
+      | [(.key + 1), (.value.report_path // "")]
+      | @tsv
+    ' "$trend_summary_json" 2>/dev/null || true
+  )
+
+  if (( provided_run_count > 0 && path_integrity_failed == 0 )); then
+    recomputed_trend_json="$tmp_dir/recomputed_provided_trend_summary.json"
+    declare -a recompute_args=(
+      --max-reports "$provided_run_count"
+      --since-hours 0
+      --require-full-sequence "$require_full_sequence"
+      --require-wg-validate-ok "$require_wg_validate_ok"
+      --require-wg-soak-ok "$require_wg_soak_ok"
+      --max-wg-soak-failed-rounds "$max_wg_soak_failed_rounds"
+      --require-preflight-ok "$require_preflight_ok"
+      --require-bundle-ok "$require_bundle_ok"
+      --require-integrity-ok "$require_integrity_ok"
+      --require-signoff-ok "$require_signoff_ok"
+      --require-incident-snapshot-on-fail "$require_incident_snapshot_on_fail"
+      --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
+      --require-wg-validate-udp-source "$require_wg_validate_udp_source"
+      --require-wg-validate-strict-distinct "$require_wg_validate_strict_distinct"
+      --require-wg-soak-diversity-pass "$require_wg_soak_diversity_pass"
+      --min-wg-soak-selection-lines "$min_wg_soak_selection_lines"
+      --min-wg-soak-entry-operators "$min_wg_soak_entry_operators"
+      --min-wg-soak-exit-operators "$min_wg_soak_exit_operators"
+      --min-wg-soak-cross-operator-pairs "$min_wg_soak_cross_operator_pairs"
+      --max-evidence-age-sec "$max_evidence_age_sec"
+      --fail-on-any-no-go 0
+      --min-go-rate-pct 0
+      --show-details 0
+      --show-top-reasons "$show_top_reasons"
+      --summary-json "$recomputed_trend_json"
+      --print-summary-json 0
+    )
+    for run_path in "${provided_run_paths[@]}"; do
+      recompute_args+=(--run-report-json "$run_path")
+    done
+    set +e
+    if [[ -n "$max_evidence_now_epoch" ]]; then
+      PROD_GATE_SLO_TREND_NOW_EPOCH="$max_evidence_now_epoch" "$TREND_SCRIPT" "${recompute_args[@]}" >/dev/null 2>&1
+    else
+      "$TREND_SCRIPT" "${recompute_args[@]}" >/dev/null 2>&1
+    fi
+    recompute_rc=$?
+    set -e
+    if [[ ! -f "$recomputed_trend_json" ]] || ! jq -e . "$recomputed_trend_json" >/dev/null 2>&1; then
+      integrity_reasons+=("provided trend could not be recomputed from source reports (rc=$recompute_rc)")
+    else
+      recomputed_reports_total="$(jq -r '.reports_total // 0' "$recomputed_trend_json")"
+      recomputed_go="$(jq -r '.go // 0' "$recomputed_trend_json")"
+      recomputed_no_go="$(jq -r '.no_go // 0' "$recomputed_trend_json")"
+      recomputed_eval_errors="$(jq -r '.evaluation_errors // 0' "$recomputed_trend_json")"
+      if [[ "$provided_reports_total_raw" != "$recomputed_reports_total" ]]; then
+        integrity_reasons+=("provided trend reports_total does not match recomputed source reports (trend=$provided_reports_total_raw, recomputed=$recomputed_reports_total)")
+      fi
+      if [[ "$provided_go_raw" =~ ^[0-9]+$ && "$provided_go_raw" != "$recomputed_go" ]]; then
+        integrity_reasons+=("provided trend go count does not match recomputed source reports (trend=$provided_go_raw, recomputed=$recomputed_go)")
+      fi
+      if [[ "$provided_no_go_raw" =~ ^[0-9]+$ && "$provided_no_go_raw" != "$recomputed_no_go" ]]; then
+        integrity_reasons+=("provided trend no_go count does not match recomputed source reports (trend=$provided_no_go_raw, recomputed=$recomputed_no_go)")
+      fi
+      if [[ "$provided_eval_errors_raw" =~ ^[0-9]+$ && "$provided_eval_errors_raw" != "$recomputed_eval_errors" ]]; then
+        integrity_reasons+=("provided trend evaluation_errors count does not match recomputed source reports (trend=$provided_eval_errors_raw, recomputed=$recomputed_eval_errors)")
+      fi
+    fi
+  fi
+fi
+
 go_rate_pct="$(jq -r '.go_rate_pct // 0' "$trend_summary_json")"
 no_go_count="$(jq -r '.no_go // 0' "$trend_summary_json")"
 eval_errors="$(jq -r '.evaluation_errors // 0' "$trend_summary_json")"
@@ -787,6 +976,11 @@ for reason in "${freshness_reasons[@]}"; do
   alert_reasons+=("$reason")
 done
 for reason in "${policy_reasons[@]}"; do
+  severity="CRITICAL"
+  severity_rank=2
+  alert_reasons+=("$reason")
+done
+for reason in "${integrity_reasons[@]}"; do
   severity="CRITICAL"
   severity_rank=2
   alert_reasons+=("$reason")
@@ -853,6 +1047,7 @@ echo "[prod-gate-slo-alert] thresholds warn_go_rate_pct=$warn_go_rate_pct critic
 echo "[prod-gate-slo-alert] policy require_wg_validate_udp_source=$require_wg_validate_udp_source require_wg_validate_strict_distinct=$require_wg_validate_strict_distinct require_wg_soak_diversity_pass=$require_wg_soak_diversity_pass min_wg_soak_selection_lines=$min_wg_soak_selection_lines min_wg_soak_entry_operators=$min_wg_soak_entry_operators min_wg_soak_exit_operators=$min_wg_soak_exit_operators min_wg_soak_cross_operator_pairs=$min_wg_soak_cross_operator_pairs"
 echo "[prod-gate-slo-alert] freshness status=$freshness_status max_evidence_age_sec=$max_evidence_age_sec trend_generated_at_utc=${trend_generated_at_utc:-unset} age_sec=${freshness_age_sec:-unset}"
 echo "[prod-gate-slo-alert] trend_policy_check reasons=${#policy_reasons[@]}"
+echo "[prod-gate-slo-alert] trend_integrity_check reasons=${#integrity_reasons[@]}"
 echo "[prod-gate-slo-alert] trend_source=$trend_source trend_summary_json=$trend_summary_json"
 if [[ -n "$incident_source_run_report_json" || -n "$incident_summary_json" || -n "$incident_report_md" || -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
   echo "[prod-gate-slo-alert] incident_handoff source_summary_json=${incident_source_summary_json:-unset} source_run_report=${incident_source_run_report_json:-unset} summary_json=${incident_summary_json:-unset} report_md=${incident_report_md:-unset} attachment_manifest=${incident_attachment_manifest:-unset} attachment_skipped=${incident_attachment_skipped:-unset} attachment_count=${incident_attachment_count}"
@@ -883,6 +1078,12 @@ for reason in "${policy_reasons[@]}"; do
   printf '%s\n' "$reason" >>"$policy_reasons_file"
 done
 policy_reasons_json="$(jq -Rn '[inputs]' <"$policy_reasons_file")"
+integrity_reasons_file="$tmp_dir/integrity_reasons.txt"
+: >"$integrity_reasons_file"
+for reason in "${integrity_reasons[@]}"; do
+  printf '%s\n' "$reason" >>"$integrity_reasons_file"
+done
+integrity_reasons_json="$(jq -Rn '[inputs]' <"$integrity_reasons_file")"
 top_reasons_json="$(jq -c '.top_no_go_reasons // []' "$trend_summary_json" 2>/dev/null || echo '[]')"
 
 summary_payload="$(
@@ -910,6 +1111,7 @@ summary_payload="$(
     --arg freshness_age_sec "$freshness_age_sec" \
     --argjson freshness_reasons "$freshness_reasons_json" \
     --argjson policy_reasons "$policy_reasons_json" \
+    --argjson integrity_reasons "$integrity_reasons_json" \
     --argjson require_wg_validate_udp_source "$require_wg_validate_udp_source" \
     --argjson require_wg_validate_strict_distinct "$require_wg_validate_strict_distinct" \
     --argjson require_wg_soak_diversity_pass "$require_wg_soak_diversity_pass" \
@@ -987,6 +1189,10 @@ summary_payload="$(
       trend_policy_check: {
         status: (if ($policy_reasons | length) == 0 then "ok" else "fail" end),
         reasons: $policy_reasons
+      },
+      trend_integrity_check: {
+        status: (if ($integrity_reasons | length) == 0 then "ok" else "fail" end),
+        reasons: $integrity_reasons
       },
       incident_snapshot: {
         latest_failed_run_report: {
