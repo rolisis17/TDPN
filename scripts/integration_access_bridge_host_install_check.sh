@@ -58,7 +58,7 @@ go run ./cmd/gpmrecover bridge-service-deploy-pack \
   --access-code-sha256 "$code_hash" \
   >/dev/null
 
-for bad_deploy_arg in "--rps 0" "--rps 999999" "--max-sources 0" "--public-host helper.tailnet.ts.net"; do
+for bad_deploy_arg in "--rps 0" "--rps 999999" "--max-sources 0" "--public-host helper.home.arpa" "--public-host helper.tailnet.ts.net"; do
   BAD_DEPLOY_ARG_DIR="$TMP_DIR/bad-deploy-arg-${bad_deploy_arg//[^A-Za-z0-9]/_}"
   set +e
   # shellcheck disable=SC2086
@@ -195,6 +195,8 @@ bad_public_hosts=(
   "example.com"
   "example.net"
   "example.org"
+  "home.arpa"
+  "helper.home.arpa"
   "ts.net"
   "tailscale.net"
   "helper.tailnet.ts.net"

@@ -182,7 +182,7 @@ host_looks_non_public_for_real_helper() {
   local host="$1"
   [[ -z "$host" ]] && return 0
   case "$host" in
-    localhost|*.localhost|*.local|*.lan|*.internal|*.test|*.invalid|*.example|*.example.com|*.example.net|*.example.org|*.ts.net|*.tailscale.net|ts.net|tailscale.net)
+    localhost|*.localhost|*.local|*.lan|*.internal|*.test|*.invalid|*.example|*.example.com|*.example.net|*.example.org|home.arpa|*.home.arpa|*.ts.net|*.tailscale.net|ts.net|tailscale.net)
       return 0
       ;;
   esac
