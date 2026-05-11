@@ -381,6 +381,145 @@ if ! jq -e '
   exit 1
 fi
 
+INSTALLED_HOST_ROOT="$TMP_DIR/installed-host-root"
+INSTALLED_HOST_DIR="$INSTALLED_HOST_ROOT/$(basename "$BUNDLE_DIR")"
+INSTALLED_HOST_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_installed_host_summary.json"
+INSTALLED_HOST_TAR="$TMP_DIR/installed-host.tar.gz"
+INSTALLED_HOST_SHA="${INSTALLED_HOST_TAR}.sha256"
+INSTALLED_HOST_PROVENANCE_JSON="$TMP_DIR/installed-host.provenance.json"
+INSTALLED_HOST_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_installed_host_verify_summary.json"
+mkdir -p "$INSTALLED_HOST_ROOT"
+cp -R "$BUNDLE_DIR" "$INSTALLED_HOST_DIR"
+jq '
+  .schema.minor = 5
+  | .inputs.evidence_mode = "installed-host"
+  | .inputs.installed_host_mode = true
+  | .inputs.install_dir = "/etc/gpm/access-bridge"
+  | .inputs.systemd_unit_file = "/etc/systemd/system/gpm-access-bridge.service"
+  | .inputs.proxy_kind = "caddy"
+  | .inputs.proxy_config_file = "/etc/caddy/Caddyfile.d/gpm-access-bridge.caddy"
+  | .inputs.expected_base_url = "https://recovery-helper.gpm-pilot.net"
+  | .inputs.expected_public_host = "recovery-helper.gpm-pilot.net"
+  | .observed.evidence_mode = "installed-host"
+  | .observed.installed_host_mode = true
+  | .observed.expected_public_host = "recovery-helper.gpm-pilot.net"
+  | .observed.active_env_file = "/etc/gpm/access-bridge/gpm-access-bridge.env"
+  | .observed.active_wrapper_file = "/etc/gpm/access-bridge/run-gpm-access-bridge.sh"
+  | .observed.active_systemd_unit_file = "/etc/systemd/system/gpm-access-bridge.service"
+  | .observed.active_proxy_kind = "caddy"
+  | .observed.active_proxy_config_file = "/etc/caddy/Caddyfile.d/gpm-access-bridge.caddy"
+  | .observed.active_proxy_public_host = "recovery-helper.gpm-pilot.net"
+  | .observed.active_proxy_target = "127.0.0.1:8791"
+  | .observed.active_proxy_is_deploy_pack_example = false
+  | .observed.systemd_environment_file = "/etc/gpm/access-bridge/gpm-access-bridge.env"
+  | .observed.systemd_exec_start = "/etc/gpm/access-bridge/run-gpm-access-bridge.sh"
+  | .observed.caddy_site_host = "recovery-helper.gpm-pilot.net"
+  | .observed.caddy_reverse_proxy = "127.0.0.1:8791"
+  | .summary.evidence_mode = "installed-host"
+  | .summary.installed_host_mode = true
+  | .summary.active_env_file = "/etc/gpm/access-bridge/gpm-access-bridge.env"
+  | .summary.active_wrapper_file = "/etc/gpm/access-bridge/run-gpm-access-bridge.sh"
+  | .summary.active_systemd_unit_file = "/etc/systemd/system/gpm-access-bridge.service"
+  | .summary.active_proxy_kind = "caddy"
+  | .summary.active_proxy_config_file = "/etc/caddy/Caddyfile.d/gpm-access-bridge.caddy"
+  | .summary.active_proxy_public_host = "recovery-helper.gpm-pilot.net"
+  | .summary.active_proxy_target = "127.0.0.1:8791"
+  | .summary.active_proxy_is_deploy_pack_example = false
+  | .summary.systemd_environment_file = "/etc/gpm/access-bridge/gpm-access-bridge.env"
+  | .summary.systemd_exec_start = "/etc/gpm/access-bridge/run-gpm-access-bridge.sh"
+  | .checks += [
+      {"id": "install_dir_exists", "status": "pass", "message": "install directory exists"},
+      {"id": "active_env_file_exists", "status": "pass", "message": "active env file exists"},
+      {"id": "active_wrapper_file_exists", "status": "pass", "message": "active wrapper exists"},
+      {"id": "active_systemd_unit_exists", "status": "pass", "message": "active systemd unit exists"},
+      {"id": "active_proxy_config_exists", "status": "pass", "message": "active proxy config exists"},
+      {"id": "systemd_environment_file_matches_active_env", "status": "pass", "message": "systemd EnvironmentFile matches active env"},
+      {"id": "systemd_exec_start_matches_active_wrapper", "status": "pass", "message": "systemd ExecStart matches active wrapper"},
+      {"id": "active_proxy_not_deploy_pack_example", "status": "pass", "message": "active proxy config is not a deploy-pack example"},
+      {"id": "active_proxy_public_host_valid", "status": "pass", "message": "active proxy public host is valid"},
+      {"id": "active_proxy_public_host_matches_expected", "status": "pass", "message": "active proxy public host matches expected host"},
+      {"id": "active_proxy_target_matches_env_addr", "status": "pass", "message": "active proxy target matches bridge addr"},
+      {"id": "active_proxy_xff_overwrite", "status": "pass", "message": "active proxy overwrites X-Forwarded-For"}
+    ]
+  | .summary.checks_total = (.checks | length)
+' "$INSTALLED_HOST_DIR/access_bridge_host_install_check_summary.json" >"$INSTALLED_HOST_DIR/access_bridge_host_install_check_summary.json.tmp"
+mv "$INSTALLED_HOST_DIR/access_bridge_host_install_check_summary.json.tmp" "$INSTALLED_HOST_DIR/access_bridge_host_install_check_summary.json"
+INSTALLED_HOST_SUMMARY_SHA256="$(sha256sum "$INSTALLED_HOST_DIR/access_bridge_host_install_check_summary.json" | awk '{print $1}')"
+jq \
+  --arg bundle_dir "$INSTALLED_HOST_DIR" \
+  --arg bundle_tar "$INSTALLED_HOST_TAR" \
+  --arg bundle_tar_sha256_file "$INSTALLED_HOST_SHA" \
+  --arg manifest_sha256 "$INSTALLED_HOST_DIR/manifest.sha256" \
+  --arg summary_json "$INSTALLED_HOST_SUMMARY_JSON" \
+  --arg bundled_summary_json "$INSTALLED_HOST_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
+  --arg provenance_json "$INSTALLED_HOST_PROVENANCE_JSON" \
+  --arg smoke_summary_json "$INSTALLED_HOST_DIR/access_bridge_service_smoke_summary.json" \
+  --arg deployment_summary_json "$INSTALLED_HOST_DIR/access_bridge_deployment_evidence_summary.json" \
+  --arg host_summary_json "$INSTALLED_HOST_DIR/access_bridge_host_install_check_summary.json" \
+  '.artifacts.bundle_dir = $bundle_dir
+    | .artifacts.bundle_tar = $bundle_tar
+    | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file
+    | .artifacts.manifest_sha256 = $manifest_sha256
+    | .artifacts.summary_json = $summary_json
+    | .artifacts.bundled_summary_json = $bundled_summary_json
+    | .artifacts.smoke_summary_json = $smoke_summary_json
+    | .artifacts.deployment_evidence_summary_json = $deployment_summary_json
+    | .artifacts.host_install_check_summary_json = $host_summary_json
+    | .artifacts.provenance_json = $provenance_json
+    | .provenance.sidecar_json = $provenance_json' \
+  "$SUMMARY_JSON" >"$INSTALLED_HOST_SUMMARY_JSON"
+cp "$INSTALLED_HOST_SUMMARY_JSON" "$INSTALLED_HOST_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+(
+  cd "$INSTALLED_HOST_DIR"
+  find . -type f -print \
+    | sed 's|^\./||' \
+    | grep -v '^manifest\.sha256$' \
+    | LC_ALL=C sort \
+    | while IFS= read -r rel; do
+        sha256sum "$rel"
+      done
+) >"$INSTALLED_HOST_DIR/manifest.sha256"
+tar -czf "$INSTALLED_HOST_TAR" -C "$INSTALLED_HOST_ROOT" "$(basename "$INSTALLED_HOST_DIR")"
+printf '%s  %s\n' "$(sha256sum "$INSTALLED_HOST_TAR" | awk '{print $1}')" "$(basename "$INSTALLED_HOST_TAR")" >"$INSTALLED_HOST_SHA"
+go run ./cmd/gpmrecover provenance-sign \
+  --summary-json "$INSTALLED_HOST_SUMMARY_JSON" \
+  --bundle-tar "$INSTALLED_HOST_TAR" \
+  --bundle-tar-sha256-file "$INSTALLED_HOST_SHA" \
+  --private-key-file "$PRIVATE_KEY_FILE" \
+  --org-id pilot-org \
+  --org-name "Pilot Org" \
+  --out "$INSTALLED_HOST_PROVENANCE_JSON" >/dev/null
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$INSTALLED_HOST_SUMMARY_JSON" \
+  --provenance-json "$INSTALLED_HOST_PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$INSTALLED_HOST_VERIFY_SUMMARY_JSON" \
+  --print-verification-summary-json 1 >"$TMP_DIR/verify-installed-host-trusted-policy-explicit.log" 2>&1
+installed_host_verify_rc=$?
+set -e
+if [[ "$installed_host_verify_rc" -ne 0 ]]; then
+  echo "access bridge pilot evidence bundle verifier integration failed: installed-host verifier command failed"
+  cat "$TMP_DIR/verify-installed-host-trusted-policy-explicit.log"
+  if [[ -f "$INSTALLED_HOST_VERIFY_SUMMARY_JSON" ]]; then
+    cat "$INSTALLED_HOST_VERIFY_SUMMARY_JSON"
+  fi
+  exit 1
+fi
+if ! jq -e \
+  --arg host_summary_sha256 "$INSTALLED_HOST_SUMMARY_SHA256" '
+    .status == "pass"
+    and .rc == 0
+    and .pilot_handoff_ready == true
+    and .pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true
+    and .evidence_binding.host_install_check_summary_sha256 == $host_summary_sha256
+  ' "$INSTALLED_HOST_VERIFY_SUMMARY_JSON" >/dev/null; then
+  echo "access bridge pilot evidence bundle verifier integration failed: installed-host evidence was not accepted"
+  cat "$INSTALLED_HOST_VERIFY_SUMMARY_JSON"
+  exit 1
+fi
+
 OTHER_ORG_ROOT="$TMP_DIR/other-org-root"
 OTHER_ORG_DIR="$OTHER_ORG_ROOT/$(basename "$BUNDLE_DIR")"
 OTHER_ORG_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_other_org_summary.json"

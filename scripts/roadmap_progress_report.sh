@@ -2019,7 +2019,9 @@ access_recovery_evidence_json() {
         and (.observed.env_max_sources | test("^[0-9]+$"))
         and ((.observed.env_max_sources | tonumber) >= 1)
         and ((.observed.env_max_sources | tonumber) <= 100000);
-      def required_host_check_ids:
+      def host_evidence_mode:
+        ((.inputs.evidence_mode // .observed.evidence_mode // .summary.evidence_mode // "deploy-pack") | tostring);
+      def deploy_pack_host_check_ids:
         [
           "deploy_pack_dir_exists",
           "env_file_exists",
@@ -2048,6 +2050,35 @@ access_recovery_evidence_json() {
           "nginx_public_host_matches_expected",
           "nginx_proxy_pass_target"
         ];
+      def installed_host_check_ids:
+        [
+          "install_dir_exists",
+          "active_env_file_exists",
+          "active_wrapper_file_exists",
+          "active_systemd_unit_exists",
+          "active_proxy_config_exists",
+          "config_json_exists",
+          "config_json_valid",
+          "config_local_access_paths_disabled",
+          "config_sha256_matches",
+          "access_code_gate_configured",
+          "query_access_code_disabled",
+          "trusted_proxy_headers_enabled",
+          "loopback_bind",
+          "rate_limit_configured",
+          "rate_limit_source_cap_configured",
+          "wrapper_hardened_flags",
+          "systemd_hardening",
+          "systemd_environment_file_matches_active_env",
+          "systemd_exec_start_matches_active_wrapper",
+          "active_proxy_not_deploy_pack_example",
+          "active_proxy_public_host_valid",
+          "active_proxy_public_host_matches_expected",
+          "active_proxy_target_matches_env_addr",
+          "active_proxy_xff_overwrite"
+        ];
+      def required_host_check_ids:
+        if host_evidence_mode == "installed-host" then installed_host_check_ids else deploy_pack_host_check_ids end;
       def required_host_checks_pass:
         . as $summary
         | required_host_check_ids as $ids
@@ -2056,6 +2087,24 @@ access_recovery_evidence_json() {
             . as $id
             | ([ $summary.checks[]? | select((.id // "") == $id and (((.status // "") | tostring | ascii_downcase) == "pass"))] | length) == 1
           );
+      def installed_host_semantic_ok:
+        if host_evidence_mode != "installed-host" then
+          true
+        else
+          ((.schema.minor | type) == "number" and .schema.minor >= 5)
+          and (.inputs.installed_host_mode == true)
+          and (.observed.installed_host_mode == true)
+          and (.summary.installed_host_mode == true)
+          and ((.inputs.config_json // "") != "")
+          and ((.observed.expected_public_host // "") != "")
+          and ((.observed.active_proxy_kind // "") == "caddy" or (.observed.active_proxy_kind // "") == "nginx")
+          and ((.observed.active_proxy_config_file // "") != "")
+          and ((.observed.active_proxy_public_host // "") != "")
+          and ((.observed.active_proxy_public_host // "") == (.observed.expected_public_host // ""))
+          and (.observed.active_proxy_is_deploy_pack_example == false)
+          and ((.observed.systemd_environment_file // "") == (.observed.active_env_file // ""))
+          and ((.observed.systemd_exec_start // "") == (.observed.active_wrapper_file // ""))
+        end;
       def host_install_semantic_ok:
         rc_ok
         and pass_status
@@ -2065,7 +2114,8 @@ access_recovery_evidence_json() {
         and ((.summary.checks_fail | type) == "number" and .summary.checks_fail == 0)
         and positive_bounded_rps
         and positive_bounded_max_sources
-        and required_host_checks_pass;
+        and required_host_checks_pass
+        and installed_host_semantic_ok;
       def smoke_details:
         {
           base_url: str_or_null(.base_url),
@@ -2124,9 +2174,26 @@ access_recovery_evidence_json() {
         {
           checks_total: (if (.summary.checks_total | type) == "number" then .summary.checks_total else null end),
           checks_fail: (if (.summary.checks_fail | type) == "number" then .summary.checks_fail else null end),
+          evidence_mode: host_evidence_mode,
+          installed_host_mode: (if (.observed.installed_host_mode | type) == "boolean" then .observed.installed_host_mode else null end),
           deploy_pack_dir: str_or_null(.inputs.deploy_pack_dir),
+          install_dir: str_or_null(.inputs.install_dir),
+          systemd_unit_file: str_or_null(.inputs.systemd_unit_file),
+          proxy_kind: str_or_null(.inputs.proxy_kind),
+          proxy_config_file: str_or_null(.inputs.proxy_config_file),
           service_name: str_or_null(.inputs.service_name),
           config_json: str_or_null(.inputs.config_json),
+          expected_public_host: str_or_null(.observed.expected_public_host),
+          active_env_file: str_or_null(.observed.active_env_file),
+          active_wrapper_file: str_or_null(.observed.active_wrapper_file),
+          active_systemd_unit_file: str_or_null(.observed.active_systemd_unit_file),
+          active_proxy_kind: str_or_null(.observed.active_proxy_kind),
+          active_proxy_config_file: str_or_null(.observed.active_proxy_config_file),
+          active_proxy_public_host: str_or_null(.observed.active_proxy_public_host),
+          active_proxy_target: str_or_null(.observed.active_proxy_target),
+          active_proxy_is_deploy_pack_example: (if (.observed.active_proxy_is_deploy_pack_example | type) == "boolean" then .observed.active_proxy_is_deploy_pack_example else null end),
+          systemd_environment_file: str_or_null(.observed.systemd_environment_file),
+          systemd_exec_start: str_or_null(.observed.systemd_exec_start),
           env_config_sha256: str_or_null(.observed.env_config_sha256),
           env_access_code_sha256: str_or_null(.observed.env_access_code_sha256),
           env_allow_unauthenticated_local: str_or_null(.observed.env_allow_unauthenticated_local),
@@ -2136,6 +2203,10 @@ access_recovery_evidence_json() {
           env_rps: str_or_null(.observed.env_rps),
           env_max_sources: str_or_null(.observed.env_max_sources),
           config_allow_local_access_paths: str_or_null(.observed.config_allow_local_access_paths),
+          caddy_site_host: str_or_null(.observed.caddy_site_host),
+          caddy_reverse_proxy: str_or_null(.observed.caddy_reverse_proxy),
+          nginx_server_name: str_or_null(.observed.nginx_server_name),
+          nginx_proxy_pass: str_or_null(.observed.nginx_proxy_pass),
           recommended_action_id: str_or_null(.recommended_next_action.id),
           recommended_action_command: str_or_null(.recommended_next_action.command)
         };
@@ -2555,6 +2626,20 @@ access_recovery_track_json_from_evidence() {
           | map(select((. // "") != ""))
           | .[0]
         ) // $fallback;
+      def first_part($sep):
+        (split($sep) | .[0]) // "";
+      def trim_trailing_dots:
+        gsub("\\.+$"; "");
+      def host_from_url_string($url):
+        (($url // "") | sub("^[A-Za-z][A-Za-z0-9+.-]*://"; "") | first_part("/") | first_part("?") | first_part("#")) as $authority_raw
+        | (($authority_raw | split("@") | .[-1]) // "") as $authority
+        | if ($authority | startswith("[")) then
+            ($authority | sub("^\\["; "") | sub("\\].*$"; ""))
+          else
+            ($authority | first_part(":"))
+          end
+        | ascii_downcase
+        | trim_trailing_dots;
       def all_pass:
         [$service_smoke, $deployment_evidence, $host_install] | all(.status == "pass");
       def evidence_binding:
@@ -2563,9 +2648,18 @@ access_recovery_track_json_from_evidence() {
           organization_id_match: same_nonempty($service_smoke.details.organization_id; $deployment_evidence.details.organization_id),
           registry_id_match: same_nonempty($service_smoke.details.registry_id; $deployment_evidence.details.registry_id),
           smoke_config_sha256_match: same_nonempty($service_smoke.details.config_sha256; $deployment_evidence.details.smoke_config_sha256),
-          host_config_sha256_match: same_nonempty($deployment_evidence.details.config_sha256; $host_install.details.env_config_sha256)
+          host_config_sha256_match: same_nonempty($deployment_evidence.details.config_sha256; $host_install.details.env_config_sha256),
+          host_public_host_match: (
+            if (($host_install.details.evidence_mode // "deploy-pack") == "installed-host") then
+              same_nonempty(host_from_url_string($service_smoke.details.base_url); $host_install.details.active_proxy_public_host)
+            elif (($host_install.details.expected_public_host // "") != "") then
+              same_nonempty(host_from_url_string($service_smoke.details.base_url); $host_install.details.expected_public_host)
+            else
+              true
+            end
+          )
         }
-        | . + {ok: ([.helper_id_match, .organization_id_match, .registry_id_match, .smoke_config_sha256_match, .host_config_sha256_match] | all(. == true))};
+        | . + {ok: ([.helper_id_match, .organization_id_match, .registry_id_match, .smoke_config_sha256_match, .host_config_sha256_match, .host_public_host_match] | all(. == true))};
       def verifier_binding:
         {
           base_url_match: same_nonempty($bundle_verify.details.base_url; $service_smoke.details.base_url),
@@ -2579,10 +2673,6 @@ access_recovery_track_json_from_evidence() {
         | . + {ok: ([.base_url_match, .helper_id_match, .organization_id_match, .registry_id_match, .smoke_summary_sha256_match, .deployment_evidence_summary_sha256_match, .host_install_check_summary_sha256_match] | all(. == true))};
       def smoke_base_url:
         ($service_smoke.details.base_url // "");
-      def first_part($sep):
-        (split($sep) | .[0]) // "";
-      def trim_trailing_dots:
-        gsub("\\.+$"; "");
       def normalize_remote_ip($ip):
         (($ip // "") | tostring | ascii_downcase | sub("^\\["; "") | sub("\\]$"; ""));
       def ipv4_public_routable($ip):

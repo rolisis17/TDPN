@@ -1516,6 +1516,116 @@ if ! jq -e \
   cat "$SUMMARY_JSON"
   exit 1
 fi
+
+ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_installed_host_summary.json"
+jq '
+  .schema.minor = 5
+  | .inputs.evidence_mode = "installed-host"
+  | .inputs.installed_host_mode = true
+  | .inputs.install_dir = "/etc/gpm/access-bridge"
+  | .inputs.systemd_unit_file = "/etc/systemd/system/gpm-access-bridge.service"
+  | .inputs.proxy_kind = "caddy"
+  | .inputs.proxy_config_file = "/etc/caddy/Caddyfile.d/gpm-access-bridge.caddy"
+  | .inputs.expected_base_url = "https://recovery-helper.gpm-pilot.net"
+  | .inputs.expected_public_host = "recovery-helper.gpm-pilot.net"
+  | .observed.evidence_mode = "installed-host"
+  | .observed.installed_host_mode = true
+  | .observed.expected_public_host = "recovery-helper.gpm-pilot.net"
+  | .observed.active_env_file = "/etc/gpm/access-bridge/gpm-access-bridge.env"
+  | .observed.active_wrapper_file = "/etc/gpm/access-bridge/run-gpm-access-bridge.sh"
+  | .observed.active_systemd_unit_file = "/etc/systemd/system/gpm-access-bridge.service"
+  | .observed.active_proxy_kind = "caddy"
+  | .observed.active_proxy_config_file = "/etc/caddy/Caddyfile.d/gpm-access-bridge.caddy"
+  | .observed.active_proxy_public_host = "recovery-helper.gpm-pilot.net"
+  | .observed.active_proxy_target = "127.0.0.1:18980"
+  | .observed.active_proxy_is_deploy_pack_example = false
+  | .observed.systemd_environment_file = "/etc/gpm/access-bridge/gpm-access-bridge.env"
+  | .observed.systemd_exec_start = "/etc/gpm/access-bridge/run-gpm-access-bridge.sh"
+  | .observed.caddy_site_host = "recovery-helper.gpm-pilot.net"
+  | .observed.caddy_reverse_proxy = "127.0.0.1:18980"
+  | .summary.evidence_mode = "installed-host"
+  | .summary.installed_host_mode = true
+  | .summary.active_env_file = "/etc/gpm/access-bridge/gpm-access-bridge.env"
+  | .summary.active_wrapper_file = "/etc/gpm/access-bridge/run-gpm-access-bridge.sh"
+  | .summary.active_systemd_unit_file = "/etc/systemd/system/gpm-access-bridge.service"
+  | .summary.active_proxy_kind = "caddy"
+  | .summary.active_proxy_config_file = "/etc/caddy/Caddyfile.d/gpm-access-bridge.caddy"
+  | .summary.active_proxy_public_host = "recovery-helper.gpm-pilot.net"
+  | .summary.active_proxy_target = "127.0.0.1:18980"
+  | .summary.active_proxy_is_deploy_pack_example = false
+  | .summary.systemd_environment_file = "/etc/gpm/access-bridge/gpm-access-bridge.env"
+  | .summary.systemd_exec_start = "/etc/gpm/access-bridge/run-gpm-access-bridge.sh"
+  | .checks += [
+      {"id": "install_dir_exists", "status": "pass", "message": "install directory exists"},
+      {"id": "active_env_file_exists", "status": "pass", "message": "active env file exists"},
+      {"id": "active_wrapper_file_exists", "status": "pass", "message": "active wrapper exists"},
+      {"id": "active_systemd_unit_exists", "status": "pass", "message": "active systemd unit exists"},
+      {"id": "active_proxy_config_exists", "status": "pass", "message": "active proxy config exists"},
+      {"id": "systemd_environment_file_matches_active_env", "status": "pass", "message": "systemd EnvironmentFile matches active env"},
+      {"id": "systemd_exec_start_matches_active_wrapper", "status": "pass", "message": "systemd ExecStart matches active wrapper"},
+      {"id": "active_proxy_not_deploy_pack_example", "status": "pass", "message": "active proxy config is not a deploy-pack example"},
+      {"id": "active_proxy_public_host_valid", "status": "pass", "message": "active proxy public host is valid"},
+      {"id": "active_proxy_public_host_matches_expected", "status": "pass", "message": "active proxy public host matches expected host"},
+      {"id": "active_proxy_target_matches_env_addr", "status": "pass", "message": "active proxy target matches bridge addr"},
+      {"id": "active_proxy_xff_overwrite", "status": "pass", "message": "active proxy overwrites X-Forwarded-For"}
+    ]
+  | .summary.checks_total = (.checks | length)
+' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON"
+ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_SHA256="$(sha256sum "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" | awk '{print $1}')"
+ACCESS_BRIDGE_INSTALLED_BUNDLE_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_installed_host_pilot_evidence_bundle_verify_summary.json"
+jq \
+  --arg host_summary_json "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" \
+  --arg host_summary_sha256 "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_SHA256" \
+  '.evidence_binding.host_install_check_summary_json = $host_summary_json
+    | .evidence_binding.host_install_check_summary_sha256 = $host_summary_sha256' \
+  "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_INSTALLED_BUNDLE_VERIFY_SUMMARY_JSON"
+
+ROADMAP_INSTALLED_HOST_SUMMARY_JSON="$TMP_DIR/roadmap_installed_host_summary.json"
+ROADMAP_INSTALLED_HOST_REPORT_MD="$TMP_DIR/roadmap_installed_host_report.md"
+if ! FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
+ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL" \
+ROADMAP_PROGRESS_SINGLE_MACHINE_SCRIPT="$FAKE_SINGLE" \
+run_roadmap_progress_report \
+  --refresh-manual-validation 1 \
+  --refresh-single-machine-readiness 0 \
+  --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
+  --phase5-settlement-layer-summary-json "$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" \
+  --blockchain-mainnet-activation-gate-summary-json "$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" \
+  --blockchain-bootstrap-governance-graduation-gate-summary-json "$BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_INSTALLED_BUNDLE_VERIFY_SUMMARY_JSON" \
+  --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
+  --summary-json "$ROADMAP_INSTALLED_HOST_SUMMARY_JSON" \
+  --report-md "$ROADMAP_INSTALLED_HOST_REPORT_MD" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_installed_host_ok.log 2>&1; then
+  echo "roadmap progress report failed with installed-host access bridge evidence"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_installed_host_ok.log
+  exit 1
+fi
+if ! jq -e \
+  --arg host_summary_json "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" \
+  --arg host_summary_sha256 "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_SHA256" '
+    .access_recovery_track.status == "pilot-evidence-ready"
+    and .access_recovery_track.access_bridge_host_install.available == true
+    and .access_recovery_track.access_bridge_host_install.status == "pass"
+    and .access_recovery_track.access_bridge_host_install.source_summary_json == $host_summary_json
+    and .access_recovery_track.access_bridge_host_install.details.evidence_mode == "installed-host"
+    and .access_recovery_track.access_bridge_host_install.details.installed_host_mode == true
+    and .access_recovery_track.access_bridge_host_install.details.active_proxy_kind == "caddy"
+    and .access_recovery_track.access_bridge_host_install.details.active_proxy_public_host == "recovery-helper.gpm-pilot.net"
+    and .access_recovery_track.access_bridge_host_install.details.active_proxy_is_deploy_pack_example == false
+    and .access_recovery_track.evidence_binding.host_public_host_match == true
+    and .access_recovery_track.trusted_verifier_binding.host_install_check_summary_sha256_match == true
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.host_install_check_summary_sha256 == $host_summary_sha256
+  ' "$ROADMAP_INSTALLED_HOST_SUMMARY_JSON" >/dev/null; then
+  echo "roadmap installed-host access bridge evidence summary mismatch"
+  cat "$ROADMAP_INSTALLED_HOST_SUMMARY_JSON"
+  exit 1
+fi
 if ! grep -Fq '## Access Recovery Track' "$REPORT_MD"; then
   echo "report missing Access Recovery track section"
   cat "$REPORT_MD"

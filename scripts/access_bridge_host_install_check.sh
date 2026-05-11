@@ -5,6 +5,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 deploy_pack_dir=""
+evidence_mode="deploy-pack"
+install_dir=""
+systemd_unit_file=""
+proxy_kind=""
+proxy_config_file=""
 service_name="gpm-access-bridge"
 config_json=""
 expected_base_url=""
@@ -17,6 +22,7 @@ usage() {
   cat <<'USAGE'
 Usage:
   scripts/access_bridge_host_install_check.sh \
+    [--evidence-mode deploy-pack|installed-host] \
     --deploy-pack-dir DIR \
     [--service-name gpm-access-bridge] \
     [--config-json FILE] \
@@ -27,6 +33,18 @@ Usage:
 
 Validates the staged/installed Access Recovery bridge host files:
 env, wrapper, systemd unit, and Caddy/nginx proxy examples.
+
+Installed-host evidence mode validates live host evidence instead:
+  scripts/access_bridge_host_install_check.sh \
+    --evidence-mode installed-host \
+    --install-dir DIR \
+    --systemd-unit-file FILE \
+    --proxy-kind caddy|nginx \
+    --proxy-config-file FILE \
+    --config-json FILE \
+    --expected-base-url https://HELPER_PUBLIC_DNS \
+    [--deploy-pack-dir DIR] \
+    [--service-name gpm-access-bridge]
 USAGE
 }
 
@@ -207,6 +225,61 @@ extract_nginx_proxy_pass() {
   sed -nE 's#^[[:space:]]*proxy_pass[[:space:]]+http://([^[:space:];]+);.*#\1#p' "$file" 2>/dev/null | head -n 1
 }
 
+strip_outer_quotes() {
+  local value
+  value="$(trim "${1:-}")"
+  if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+    value="${value#\"}"
+    value="${value%\"}"
+  elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+    value="${value#\'}"
+    value="${value%\'}"
+  fi
+  printf '%s' "$value"
+}
+
+systemd_value() {
+  local file="$1"
+  local key="$2"
+  awk -v key="$key" '
+    $0 ~ "^[[:space:]]*#" { next }
+    $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+      sub("^[[:space:]]*" key "[[:space:]]*=[[:space:]]*", "", $0)
+      print
+      exit
+    }
+  ' "$file" 2>/dev/null
+}
+
+extract_systemd_environment_file() {
+  local value
+  value="$(systemd_value "$1" "EnvironmentFile")"
+  value="$(trim "$value")"
+  value="${value#-}"
+  value="$(strip_outer_quotes "$value")"
+  value="${value%%[[:space:]]*}"
+  printf '%s' "$value"
+}
+
+extract_systemd_exec_start() {
+  local value first
+  value="$(systemd_value "$1" "ExecStart")"
+  value="$(trim "$value")"
+  while [[ "$value" == [-:@+!]* ]]; do
+    value="${value:1}"
+  done
+  if [[ "$value" == \"* ]]; then
+    first="${value#\"}"
+    first="${first%%\"*}"
+  elif [[ "$value" == \'* ]]; then
+    first="${value#\'}"
+    first="${first%%\'*}"
+  else
+    first="${value%%[[:space:]]*}"
+  fi
+  printf '%s' "$first"
+}
+
 abs_path() {
   local path
   path="$(trim "${1:-}")"
@@ -292,8 +365,28 @@ bool_arg_or_die() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --evidence-mode)
+      evidence_mode="${2:-}"
+      shift 2
+      ;;
     --deploy-pack-dir)
       deploy_pack_dir="${2:-}"
+      shift 2
+      ;;
+    --install-dir)
+      install_dir="${2:-}"
+      shift 2
+      ;;
+    --systemd-unit-file)
+      systemd_unit_file="${2:-}"
+      shift 2
+      ;;
+    --proxy-kind)
+      proxy_kind="${2:-}"
+      shift 2
+      ;;
+    --proxy-config-file)
+      proxy_config_file="${2:-}"
       shift 2
       ;;
     --service-name)
@@ -342,12 +435,49 @@ for cmd in bash date jq mktemp sha256sum; do
 done
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 
-if [[ -z "$deploy_pack_dir" ]]; then
-  echo "access bridge host install check failed: --deploy-pack-dir is required" >&2
+if [[ "$evidence_mode" != "deploy-pack" && "$evidence_mode" != "installed-host" ]]; then
+  echo "access bridge host install check failed: --evidence-mode must be deploy-pack or installed-host" >&2
   exit 2
 fi
 
-deploy_pack_dir="$(abs_path "$deploy_pack_dir")"
+if [[ "$evidence_mode" == "deploy-pack" && -z "$deploy_pack_dir" ]]; then
+  echo "access bridge host install check failed: --deploy-pack-dir is required" >&2
+  exit 2
+fi
+if [[ "$evidence_mode" == "installed-host" ]]; then
+  if [[ -z "$install_dir" ]]; then
+    echo "access bridge host install check failed: --install-dir is required in installed-host mode" >&2
+    exit 2
+  fi
+  if [[ -z "$systemd_unit_file" ]]; then
+    echo "access bridge host install check failed: --systemd-unit-file is required in installed-host mode" >&2
+    exit 2
+  fi
+  if [[ "$proxy_kind" != "caddy" && "$proxy_kind" != "nginx" ]]; then
+    echo "access bridge host install check failed: --proxy-kind must be caddy or nginx in installed-host mode" >&2
+    exit 2
+  fi
+  if [[ -z "$proxy_config_file" ]]; then
+    echo "access bridge host install check failed: --proxy-config-file is required in installed-host mode" >&2
+    exit 2
+  fi
+elif [[ -n "$proxy_kind" && "$proxy_kind" != "caddy" && "$proxy_kind" != "nginx" ]]; then
+  echo "access bridge host install check failed: --proxy-kind must be caddy or nginx" >&2
+  exit 2
+fi
+
+if [[ -n "$deploy_pack_dir" ]]; then
+  deploy_pack_dir="$(abs_path "$deploy_pack_dir")"
+fi
+if [[ -n "$install_dir" ]]; then
+  install_dir="$(abs_path "$install_dir")"
+fi
+if [[ -n "$systemd_unit_file" ]]; then
+  systemd_unit_file="$(abs_path "$systemd_unit_file")"
+fi
+if [[ -n "$proxy_config_file" ]]; then
+  proxy_config_file="$(abs_path "$proxy_config_file")"
+fi
 service_name="$(sanitize_systemd_name "$service_name")"
 if [[ -n "$config_json" ]]; then
   config_json="$(abs_path "$config_json")"
@@ -375,6 +505,20 @@ if [[ -n "$expected_host" ]] && ! is_bridge_public_host "$expected_host"; then
   echo "access bridge host install check failed: expected helper host must be a safe public host: $expected_host" >&2
   exit 2
 fi
+if [[ "$evidence_mode" == "installed-host" ]]; then
+  if [[ -z "$config_json" ]]; then
+    echo "access bridge host install check failed: --config-json is required in installed-host mode" >&2
+    exit 2
+  fi
+  if [[ -z "$expected_base_url" ]]; then
+    echo "access bridge host install check failed: --expected-base-url is required in installed-host mode" >&2
+    exit 2
+  fi
+  if [[ -z "$expected_host" ]]; then
+    echo "access bridge host install check failed: --expected-base-url must include a public helper host in installed-host mode" >&2
+    exit 2
+  fi
+fi
 if [[ -z "$summary_json" ]]; then
   summary_json="$ROOT_DIR/.easy-node-logs/access_bridge_host_install_check_summary.json"
 else
@@ -390,22 +534,71 @@ trap cleanup EXIT
 checks_jsonl="$tmp_dir/checks.jsonl"
 : >"$checks_jsonl"
 
-env_file="$deploy_pack_dir/${service_name}.env"
-wrapper_file="$deploy_pack_dir/run-${service_name}.sh"
-unit_file="$deploy_pack_dir/${service_name}.service"
-caddy_file="$deploy_pack_dir/${service_name}.Caddyfile.example"
-nginx_file="$deploy_pack_dir/${service_name}.nginx.example.conf"
-
-if [[ -d "$deploy_pack_dir" ]]; then
-  add_check "deploy_pack_dir_exists" "pass" "deploy pack directory exists"
-else
-  add_check "deploy_pack_dir_exists" "fail" "deploy pack directory is missing"
+installed_host_mode="false"
+if [[ "$evidence_mode" == "installed-host" ]]; then
+  installed_host_mode="true"
 fi
-file_exists_check "env_file_exists" "$env_file"
-file_exists_check "wrapper_file_exists" "$wrapper_file"
-file_exists_check "systemd_unit_exists" "$unit_file"
-file_exists_check "caddy_example_exists" "$caddy_file"
-file_exists_check "nginx_example_exists" "$nginx_file"
+
+caddy_file=""
+nginx_file=""
+if [[ -n "$deploy_pack_dir" ]]; then
+  caddy_file="$deploy_pack_dir/${service_name}.Caddyfile.example"
+  nginx_file="$deploy_pack_dir/${service_name}.nginx.example.conf"
+fi
+
+if [[ "$evidence_mode" == "deploy-pack" ]]; then
+  env_file="$deploy_pack_dir/${service_name}.env"
+  wrapper_file="$deploy_pack_dir/run-${service_name}.sh"
+  unit_file="$deploy_pack_dir/${service_name}.service"
+  active_proxy_kind=""
+  active_proxy_config_file=""
+
+  if [[ -d "$deploy_pack_dir" ]]; then
+    add_check "deploy_pack_dir_exists" "pass" "deploy pack directory exists"
+  else
+    add_check "deploy_pack_dir_exists" "fail" "deploy pack directory is missing"
+  fi
+  file_exists_check "env_file_exists" "$env_file"
+  file_exists_check "wrapper_file_exists" "$wrapper_file"
+  file_exists_check "systemd_unit_exists" "$unit_file"
+  file_exists_check "caddy_example_exists" "$caddy_file"
+  file_exists_check "nginx_example_exists" "$nginx_file"
+else
+  env_file="$install_dir/${service_name}.env"
+  wrapper_file="$install_dir/run-${service_name}.sh"
+  unit_file="$systemd_unit_file"
+  active_proxy_kind="$proxy_kind"
+  active_proxy_config_file="$proxy_config_file"
+
+  if [[ -d "$install_dir" ]]; then
+    add_check "install_dir_exists" "pass" "install directory exists"
+  else
+    add_check "install_dir_exists" "fail" "install directory is missing"
+  fi
+  file_exists_check "active_env_file_exists" "$env_file"
+  file_exists_check "active_wrapper_file_exists" "$wrapper_file"
+  file_exists_check "active_systemd_unit_exists" "$unit_file"
+  file_exists_check "active_proxy_config_exists" "$active_proxy_config_file"
+fi
+
+active_env_file="$env_file"
+active_wrapper_file="$wrapper_file"
+active_systemd_unit_file="$unit_file"
+active_proxy_public_host=""
+active_proxy_target=""
+active_proxy_is_deploy_pack_example="false"
+if [[ -n "$active_proxy_config_file" ]]; then
+  active_proxy_basename="${active_proxy_config_file##*/}"
+  if [[ "$active_proxy_config_file" == "$caddy_file" ||
+    "$active_proxy_config_file" == "$nginx_file" ||
+    "$active_proxy_basename" == "${service_name}.Caddyfile.example" ||
+    "$active_proxy_basename" == "${service_name}.nginx.example.conf" ]]; then
+    active_proxy_is_deploy_pack_example="true"
+  fi
+  if [[ -n "$deploy_pack_dir" && ( "$active_proxy_config_file" == "$deploy_pack_dir" || "$active_proxy_config_file" == "$deploy_pack_dir/"* ) ]]; then
+    active_proxy_is_deploy_pack_example="true"
+  fi
+fi
 
 expected_config_sha256=""
 config_allow_local_access_paths=""
@@ -441,6 +634,8 @@ caddy_site_host=""
 caddy_reverse_proxy=""
 nginx_server_name=""
 nginx_proxy_pass=""
+systemd_environment_file=""
+systemd_exec_start=""
 if [[ -f "$env_file" ]]; then
   env_config_sha256="$(env_file_value "$env_file" "GPM_BRIDGE_CONFIG_SHA256")"
   env_access_code_sha256="$(env_file_value "$env_file" "GPM_BRIDGE_ACCESS_CODE_SHA256")"
@@ -510,6 +705,8 @@ if [[ -f "$wrapper_file" ]]; then
 fi
 
 if [[ -f "$unit_file" ]]; then
+  systemd_environment_file="$(extract_systemd_environment_file "$unit_file")"
+  systemd_exec_start="$(extract_systemd_exec_start "$unit_file")"
   if grep -q '^NoNewPrivileges=true$' "$unit_file" &&
     grep -q '^PrivateTmp=true$' "$unit_file" &&
     grep -q '^ProtectSystem=strict$' "$unit_file" &&
@@ -518,9 +715,21 @@ if [[ -f "$unit_file" ]]; then
   else
     add_check "systemd_hardening" "fail" "systemd unit is missing expected hardening"
   fi
+  if [[ "$evidence_mode" == "installed-host" ]]; then
+    if [[ -n "$systemd_environment_file" && "$(abs_path "$systemd_environment_file")" == "$active_env_file" ]]; then
+      add_check "systemd_environment_file_matches_active_env" "pass" "systemd EnvironmentFile matches active env file"
+    else
+      add_check "systemd_environment_file_matches_active_env" "fail" "systemd EnvironmentFile must match active env file"
+    fi
+    if [[ -n "$systemd_exec_start" && "$(abs_path "$systemd_exec_start")" == "$active_wrapper_file" ]]; then
+      add_check "systemd_exec_start_matches_active_wrapper" "pass" "systemd ExecStart matches active wrapper"
+    else
+      add_check "systemd_exec_start_matches_active_wrapper" "fail" "systemd ExecStart must match active wrapper"
+    fi
+  fi
 fi
 
-if [[ -f "$caddy_file" ]]; then
+if [[ "$evidence_mode" == "deploy-pack" && -f "$caddy_file" ]]; then
   caddy_site_host="$(extract_caddy_site_host "$caddy_file")"
   caddy_reverse_proxy="$(extract_caddy_reverse_proxy "$caddy_file")"
   if is_bridge_public_host "$caddy_site_host"; then
@@ -547,7 +756,7 @@ if [[ -f "$caddy_file" ]]; then
   fi
 fi
 
-if [[ -f "$nginx_file" ]]; then
+if [[ "$evidence_mode" == "deploy-pack" && -f "$nginx_file" ]]; then
   nginx_server_name="$(extract_nginx_server_name "$nginx_file")"
   nginx_proxy_pass="$(extract_nginx_proxy_pass "$nginx_file")"
   if is_bridge_public_host "$nginx_server_name"; then
@@ -575,6 +784,58 @@ if [[ -f "$nginx_file" ]]; then
   fi
 fi
 
+if [[ "$evidence_mode" == "installed-host" ]]; then
+  if [[ "$active_proxy_is_deploy_pack_example" == "true" ]]; then
+    add_check "active_proxy_not_deploy_pack_example" "fail" "active proxy config must not be a deploy-pack example file"
+  else
+    add_check "active_proxy_not_deploy_pack_example" "pass" "active proxy config is not a deploy-pack example file"
+  fi
+
+  if [[ -f "$active_proxy_config_file" ]]; then
+    if [[ "$active_proxy_kind" == "caddy" ]]; then
+      active_proxy_public_host="$(extract_caddy_site_host "$active_proxy_config_file")"
+      active_proxy_target="$(extract_caddy_reverse_proxy "$active_proxy_config_file")"
+      caddy_site_host="$active_proxy_public_host"
+      caddy_reverse_proxy="$active_proxy_target"
+    else
+      active_proxy_public_host="$(extract_nginx_server_name "$active_proxy_config_file")"
+      active_proxy_target="$(extract_nginx_proxy_pass "$active_proxy_config_file")"
+      nginx_server_name="$active_proxy_public_host"
+      nginx_proxy_pass="$active_proxy_target"
+    fi
+
+    if is_bridge_public_host "$active_proxy_public_host"; then
+      add_check "active_proxy_public_host_valid" "pass" "active proxy public host is a safe bare public host"
+    else
+      add_check "active_proxy_public_host_valid" "fail" "active proxy public host must be a safe bare DNS name or IPv4 address"
+    fi
+    if [[ -z "$expected_host" ]]; then
+      add_check "active_proxy_public_host_matches_expected" "skip" "no expected helper host supplied"
+    elif [[ "$(normalize_bridge_host "$active_proxy_public_host")" == "$expected_host" ]]; then
+      add_check "active_proxy_public_host_matches_expected" "pass" "active proxy public host matches expected helper host"
+    else
+      add_check "active_proxy_public_host_matches_expected" "fail" "active proxy public host does not match expected helper host"
+    fi
+    if [[ -n "$env_addr" && "$active_proxy_target" == "$env_addr" ]]; then
+      add_check "active_proxy_target_matches_env_addr" "pass" "active proxy target matches GPM_BRIDGE_ADDR"
+    else
+      add_check "active_proxy_target_matches_env_addr" "fail" "active proxy target must match GPM_BRIDGE_ADDR"
+    fi
+    if [[ "$active_proxy_kind" == "caddy" ]]; then
+      if grep -Fq 'header_up X-Forwarded-For {remote_host}' "$active_proxy_config_file"; then
+        add_check "active_proxy_xff_overwrite" "pass" "active Caddy proxy overwrites X-Forwarded-For"
+      else
+        add_check "active_proxy_xff_overwrite" "fail" "active Caddy proxy must overwrite X-Forwarded-For"
+      fi
+    elif grep -Fq 'proxy_set_header X-Forwarded-For $remote_addr;' "$active_proxy_config_file" &&
+      ! grep -Fq '$proxy_add_x_forwarded_for' "$active_proxy_config_file"; then
+      add_check "active_proxy_xff_overwrite" "pass" "active nginx proxy overwrites X-Forwarded-For"
+    else
+      add_check "active_proxy_xff_overwrite" "fail" "active nginx proxy must overwrite spoofable X-Forwarded-For"
+    fi
+  fi
+fi
+
 checks_json="$(jq -s '.' "$checks_jsonl")"
 fail_count="$(jq -s '[.[] | select(.status == "fail")] | length' "$checks_jsonl")"
 status="pass"
@@ -589,11 +850,27 @@ fi
 jq -n \
   --arg generated_at_utc "$(timestamp_utc)" \
   --arg status "$status" \
+  --arg evidence_mode "$evidence_mode" \
+  --argjson installed_host_mode "$installed_host_mode" \
   --arg deploy_pack_dir "$deploy_pack_dir" \
+  --arg install_dir "$install_dir" \
+  --arg systemd_unit_file "$systemd_unit_file" \
+  --arg proxy_kind "$proxy_kind" \
+  --arg proxy_config_file "$proxy_config_file" \
   --arg service_name "$service_name" \
   --arg config_json "$config_json" \
   --arg expected_base_url "$expected_base_url" \
   --arg expected_host "$expected_host" \
+  --arg active_env_file "$active_env_file" \
+  --arg active_wrapper_file "$active_wrapper_file" \
+  --arg active_systemd_unit_file "$active_systemd_unit_file" \
+  --arg active_proxy_kind "$active_proxy_kind" \
+  --arg active_proxy_config_file "$active_proxy_config_file" \
+  --arg active_proxy_public_host "$active_proxy_public_host" \
+  --arg active_proxy_target "$active_proxy_target" \
+  --argjson active_proxy_is_deploy_pack_example "$active_proxy_is_deploy_pack_example" \
+  --arg systemd_environment_file "$systemd_environment_file" \
+  --arg systemd_exec_start "$systemd_exec_start" \
   --arg expected_config_sha256 "$expected_config_sha256" \
   --arg config_allow_local_access_paths "$config_allow_local_access_paths" \
   --arg env_config_sha256 "$env_config_sha256" \
@@ -617,19 +894,47 @@ jq -n \
     schema: {
       id: "access_bridge_host_install_check_summary",
       major: 1,
-      minor: 4
+      minor: 5
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
     notes: (if $status == "pass" then "Access bridge host install checks passed" else "Access bridge host install checks failed" end),
     inputs: {
+      evidence_mode: $evidence_mode,
+      installed_host_mode: $installed_host_mode,
       deploy_pack_dir: $deploy_pack_dir,
+      install_dir: $install_dir,
+      systemd_unit_file: $systemd_unit_file,
+      proxy_kind: $proxy_kind,
+      proxy_config_file: $proxy_config_file,
       service_name: $service_name,
       config_json: $config_json,
       expected_base_url: $expected_base_url,
-      expected_public_host: $expected_host
+      expected_public_host: $expected_host,
+      active_env_file: $active_env_file,
+      active_wrapper_file: $active_wrapper_file,
+      active_systemd_unit_file: $active_systemd_unit_file,
+      active_proxy_kind: $active_proxy_kind,
+      active_proxy_config_file: $active_proxy_config_file,
+      active_proxy_public_host: $active_proxy_public_host,
+      active_proxy_target: $active_proxy_target,
+      active_proxy_is_deploy_pack_example: $active_proxy_is_deploy_pack_example,
+      systemd_environment_file: $systemd_environment_file,
+      systemd_exec_start: $systemd_exec_start
     },
     observed: {
+      evidence_mode: $evidence_mode,
+      installed_host_mode: $installed_host_mode,
+      active_env_file: $active_env_file,
+      active_wrapper_file: $active_wrapper_file,
+      active_systemd_unit_file: $active_systemd_unit_file,
+      active_proxy_kind: $active_proxy_kind,
+      active_proxy_config_file: $active_proxy_config_file,
+      active_proxy_public_host: $active_proxy_public_host,
+      active_proxy_target: $active_proxy_target,
+      active_proxy_is_deploy_pack_example: $active_proxy_is_deploy_pack_example,
+      systemd_environment_file: $systemd_environment_file,
+      systemd_exec_start: $systemd_exec_start,
       expected_public_host: $expected_host,
       expected_config_sha256: $expected_config_sha256,
       config_allow_local_access_paths: $config_allow_local_access_paths,
@@ -647,6 +952,18 @@ jq -n \
       nginx_proxy_pass: $nginx_proxy_pass
     },
     summary: {
+      evidence_mode: $evidence_mode,
+      installed_host_mode: $installed_host_mode,
+      active_env_file: $active_env_file,
+      active_wrapper_file: $active_wrapper_file,
+      active_systemd_unit_file: $active_systemd_unit_file,
+      active_proxy_kind: $active_proxy_kind,
+      active_proxy_config_file: $active_proxy_config_file,
+      active_proxy_public_host: $active_proxy_public_host,
+      active_proxy_target: $active_proxy_target,
+      active_proxy_is_deploy_pack_example: $active_proxy_is_deploy_pack_example,
+      systemd_environment_file: $systemd_environment_file,
+      systemd_exec_start: $systemd_exec_start,
       checks_total: ($checks | length),
       checks_fail: $fail_count
     },

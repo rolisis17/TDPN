@@ -338,7 +338,9 @@ validate_trusted_bundled_evidence_semantics() {
           end;
       def expected_host:
         host_from_url($expected_base_url);
-      def required_host_check_ids:
+      def host_evidence_mode($h):
+        (($h.inputs.evidence_mode // $h.observed.evidence_mode // $h.summary.evidence_mode // "deploy-pack") | tostring);
+      def deploy_pack_host_check_ids:
         [
           "deploy_pack_dir_exists",
           "env_file_exists",
@@ -367,8 +369,37 @@ validate_trusted_bundled_evidence_semantics() {
           "nginx_public_host_matches_expected",
           "nginx_proxy_pass_target"
         ];
+      def installed_host_check_ids:
+        [
+          "install_dir_exists",
+          "active_env_file_exists",
+          "active_wrapper_file_exists",
+          "active_systemd_unit_exists",
+          "active_proxy_config_exists",
+          "config_json_exists",
+          "config_json_valid",
+          "config_local_access_paths_disabled",
+          "config_sha256_matches",
+          "access_code_gate_configured",
+          "query_access_code_disabled",
+          "trusted_proxy_headers_enabled",
+          "loopback_bind",
+          "rate_limit_configured",
+          "rate_limit_source_cap_configured",
+          "wrapper_hardened_flags",
+          "systemd_hardening",
+          "systemd_environment_file_matches_active_env",
+          "systemd_exec_start_matches_active_wrapper",
+          "active_proxy_not_deploy_pack_example",
+          "active_proxy_public_host_valid",
+          "active_proxy_public_host_matches_expected",
+          "active_proxy_target_matches_env_addr",
+          "active_proxy_xff_overwrite"
+        ];
+      def required_host_check_ids($h):
+        if host_evidence_mode($h) == "installed-host" then installed_host_check_ids else deploy_pack_host_check_ids end;
       def all_required_host_checks_pass($h):
-        all(required_host_check_ids[]; . as $id | ([ $h.checks[]? | select((.id // "") == $id and lc(.status) == "pass") ] | length) == 1);
+        all(required_host_check_ids($h)[]; . as $id | ([ $h.checks[]? | select((.id // "") == $id and lc(.status) == "pass") ] | length) == 1);
       def bounded_num_string($v; $min; $max):
         (($v | type) == "string")
         and ($v | test("^[0-9]+$"))
@@ -425,12 +456,19 @@ validate_trusted_bundled_evidence_semantics() {
           if str_eq($d.local_files.config.allow_local_access_paths; "false") | not then "bundled deployment evidence allows local access paths" else empty end,
           if str_eq($d.local_files.deploy_pack.status; "pass") | not then "bundled deployment evidence deploy pack check is not pass" else empty end,
           if schema_ok($h; "access_bridge_host_install_check_summary"; 4) | not then "bundled host install check summary schema is invalid or too old" else empty end,
+          if (host_evidence_mode($h) == "installed-host" and (schema_ok($h; "access_bridge_host_install_check_summary"; 5) | not)) then "bundled installed-host check summary schema is invalid or too old" else empty end,
           if pass_status($h) | not then "bundled host install check summary status is not pass" else empty end,
           if (($h.inputs.expected_base_url // "") != $expected_base_url) then "bundled host install expected_base_url does not match bundle summary" else empty end,
           if (($h.observed.expected_public_host // "") != expected_host) then "bundled host install expected public host does not match bundle summary host" else empty end,
           if (($h.summary.checks_fail // -1) != 0) then "bundled host install check has failing checks" else empty end,
-          if (($h.summary.checks_total // 0) < (required_host_check_ids | length)) then "bundled host install check is missing required checks" else empty end,
+          if (($h.summary.checks_total // 0) < (required_host_check_ids($h) | length)) then "bundled host install check is missing required checks" else empty end,
           if all_required_host_checks_pass($h) | not then "bundled host install required checks did not all pass" else empty end,
+          if (host_evidence_mode($h) == "installed-host" and ($h.inputs.installed_host_mode != true or $h.observed.installed_host_mode != true or $h.summary.installed_host_mode != true)) then "bundled installed-host check did not declare installed-host mode consistently" else empty end,
+          if (host_evidence_mode($h) == "installed-host" and (($h.observed.active_proxy_kind // "") != "caddy" and ($h.observed.active_proxy_kind // "") != "nginx")) then "bundled installed-host check has invalid active proxy kind" else empty end,
+          if (host_evidence_mode($h) == "installed-host" and (($h.observed.active_proxy_config_file // "") == "" or ($h.observed.active_proxy_public_host // "") == "")) then "bundled installed-host check is missing active proxy evidence" else empty end,
+          if (host_evidence_mode($h) == "installed-host" and ($h.observed.active_proxy_is_deploy_pack_example != false)) then "bundled installed-host active proxy points at deploy-pack example evidence" else empty end,
+          if (host_evidence_mode($h) == "installed-host" and (($h.observed.active_proxy_public_host // "") != expected_host)) then "bundled installed-host active proxy public host does not match bundle summary host" else empty end,
+          if (host_evidence_mode($h) == "installed-host" and (($h.observed.systemd_environment_file // "") != ($h.observed.active_env_file // "") or ($h.observed.systemd_exec_start // "") != ($h.observed.active_wrapper_file // ""))) then "bundled installed-host systemd unit does not point at active env/wrapper" else empty end,
           if str_eq($h.observed.config_allow_local_access_paths; "false") | not then "bundled host install config allows local access paths" else empty end,
           if str_eq($h.observed.env_allow_unauthenticated_local; "false") | not then "bundled host install allows unauthenticated local access" else empty end,
           if str_eq($h.observed.env_allow_query_code; "false") | not then "bundled host install allows query access code" else empty end,
