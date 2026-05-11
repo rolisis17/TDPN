@@ -100,7 +100,12 @@ standard_artifact_ref_ok() {
   if [[ "$reported" == "$checked" ]]; then
     return 0
   fi
-  [[ "${reported##*/}" == "$expected_name" && "${checked##*/}" == "$expected_name" ]]
+  [[ "${reported##*/}" == "$expected_name" && "${checked##*/}" == "$expected_name" ]] || return 1
+  if [[ -n "${bundle_dir:-}" && -n "${run_report_parent_dir:-}" && "$run_report_parent_dir" == "$bundle_dir" ]]; then
+    path_under_dir "$checked" "$bundle_dir"
+    return
+  fi
+  return 1
 }
 
 bool_arg_or_die() {
@@ -654,7 +659,7 @@ fi
 if [[ -n "$run_report_json" ]]; then
   if [[ -z "$run_report_bundle_dir" ]]; then
     errors+=("run report bundle_dir path missing")
-  elif [[ -n "$bundle_dir" && "$run_report_bundle_dir" != "$bundle_dir" && "$bundle_dir_supplied" == "0" && "$bundle_dir" != "$run_report_parent_dir" ]]; then
+  elif [[ -n "$bundle_dir" && "$run_report_bundle_dir" != "$bundle_dir" && "$bundle_dir" != "$run_report_parent_dir" ]]; then
     errors+=("run report bundle_dir does not match checked bundle_dir (run_report=$run_report_bundle_dir, checked=$bundle_dir)")
   fi
   if [[ -z "$run_report_gate_summary_json" ]]; then

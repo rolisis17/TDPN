@@ -275,6 +275,29 @@ cp "$PASS_RUN_REPORT" "$COPIED_BUNDLE_DIR/prod_bundle_run_report.json"
   --run-report-json "$COPIED_BUNDLE_DIR/prod_bundle_run_report.json" \
   --show-json 0 >/tmp/integration_prod_gate_check_copied_bundle.log 2>&1
 
+MIXED_BUNDLE_DIR="$TMP_DIR/mixed_prod_bundle"
+mkdir -p "$MIXED_BUNDLE_DIR"
+cp "$PASS_GATE" "$MIXED_BUNDLE_DIR/prod_gate_summary.json"
+cp "$PASS_WG_VALIDATE" "$MIXED_BUNDLE_DIR/prod_wg_validate_summary.json"
+cp "$PASS_WG_SOAK" "$MIXED_BUNDLE_DIR/prod_wg_soak_summary.json"
+set +e
+./scripts/prod_gate_check.sh \
+  --bundle-dir "$MIXED_BUNDLE_DIR" \
+  --run-report-json "$PASS_RUN_REPORT" \
+  --show-json 0 >/tmp/integration_prod_gate_check_mixed_bundle_ref.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "expected non-zero rc when run report from one bundle is checked against another bundle"
+  cat /tmp/integration_prod_gate_check_mixed_bundle_ref.log
+  exit 1
+fi
+if ! rg -q 'run report bundle_dir does not match checked bundle_dir' /tmp/integration_prod_gate_check_mixed_bundle_ref.log; then
+  echo "expected mixed bundle-dir binding failure message not found"
+  cat /tmp/integration_prod_gate_check_mixed_bundle_ref.log
+  exit 1
+fi
+
 BAD_REF_RUN_REPORT="$COPIED_BUNDLE_DIR/prod_bundle_run_report_bad_external.json"
 STALE_EXTERNAL_GATE="$TMP_DIR/stale_external_gate_ok.json"
 cp "$PASS_GATE" "$STALE_EXTERNAL_GATE"

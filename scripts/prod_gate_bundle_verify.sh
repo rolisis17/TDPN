@@ -107,6 +107,10 @@ run_report_json=""
 bundle_dir=""
 bundle_tar=""
 bundle_tar_sha256_file=""
+run_report_parent_dir=""
+run_report_bundle_dir=""
+run_report_bundle_tar=""
+run_report_bundle_tar_sha256_file=""
 check_tar_sha256="${PROD_GATE_BUNDLE_VERIFY_CHECK_TAR_SHA256:-1}"
 check_manifest="${PROD_GATE_BUNDLE_VERIFY_CHECK_MANIFEST:-1}"
 show_details="${PROD_GATE_BUNDLE_VERIFY_SHOW_DETAILS:-0}"
@@ -192,20 +196,36 @@ if [[ -n "$run_report_json" ]]; then
     echo "run report JSON file not found: $run_report_json"
     exit 1
   fi
+  run_report_parent_dir="$(dirname "$run_report_json")"
+  run_report_bundle_dir="$(json_string_field "$run_report_json" "bundle_dir")"
+  run_report_bundle_dir="$(abs_path "$run_report_bundle_dir")"
+  run_report_bundle_tar="$(json_string_field "$run_report_json" "bundle_tar")"
+  run_report_bundle_tar="$(abs_path "$run_report_bundle_tar")"
+  run_report_bundle_tar_sha256_file="$(json_string_field "$run_report_json" "bundle_tar_sha256_file")"
+  run_report_bundle_tar_sha256_file="$(abs_path "$run_report_bundle_tar_sha256_file")"
   if [[ -z "$bundle_dir" ]]; then
-    bundle_dir="$(json_string_field "$run_report_json" "bundle_dir")"
-    bundle_dir="$(abs_path "$bundle_dir")"
+    if [[ -f "${run_report_parent_dir%/}/manifest.sha256" ]]; then
+      bundle_dir="$run_report_parent_dir"
+    else
+      bundle_dir="$run_report_bundle_dir"
+    fi
   fi
   if [[ -z "$bundle_tar" ]]; then
-    bundle_tar="$(json_string_field "$run_report_json" "bundle_tar")"
-    bundle_tar="$(abs_path "$bundle_tar")"
+    if [[ -n "$bundle_dir" && -f "${bundle_dir}.tar.gz" ]]; then
+      bundle_tar="${bundle_dir}.tar.gz"
+    else
+      bundle_tar="$run_report_bundle_tar"
+    fi
     if [[ -n "$bundle_tar" ]]; then
       bundle_tar_explicit=1
     fi
   fi
   if [[ -z "$bundle_tar_sha256_file" ]]; then
-    bundle_tar_sha256_file="$(json_string_field "$run_report_json" "bundle_tar_sha256_file")"
-    bundle_tar_sha256_file="$(abs_path "$bundle_tar_sha256_file")"
+    if [[ -n "$bundle_tar" && -f "${bundle_tar}.sha256" ]]; then
+      bundle_tar_sha256_file="${bundle_tar}.sha256"
+    else
+      bundle_tar_sha256_file="$run_report_bundle_tar_sha256_file"
+    fi
   fi
 fi
 if [[ -z "$bundle_tar" && -n "$bundle_dir" ]]; then
@@ -218,6 +238,30 @@ fi
 if [[ -z "$run_report_json" && -z "$bundle_dir" && -z "$bundle_tar" ]]; then
   echo "missing required input: provide --run-report-json, --bundle-dir, and/or --bundle-tar"
   exit 2
+fi
+
+binding_issues=0
+if [[ -n "$run_report_json" ]]; then
+  if [[ -n "$run_report_bundle_dir" && -n "$bundle_dir" && "$run_report_bundle_dir" != "$bundle_dir" && "$run_report_parent_dir" != "$bundle_dir" ]]; then
+    echo "run report bundle_dir does not match checked bundle_dir (run_report=$run_report_bundle_dir, checked=$bundle_dir)"
+    binding_issues=$((binding_issues + 1))
+  fi
+  if [[ -n "$run_report_bundle_tar" && -n "$bundle_tar" && "$run_report_bundle_tar" != "$bundle_tar" ]]; then
+    if [[ -z "$bundle_dir" || "$run_report_parent_dir" != "$bundle_dir" || "$bundle_tar" != "${bundle_dir}.tar.gz" ]]; then
+      echo "run report bundle_tar does not match checked bundle_tar (run_report=$run_report_bundle_tar, checked=$bundle_tar)"
+      binding_issues=$((binding_issues + 1))
+    fi
+  fi
+  if [[ -n "$run_report_bundle_tar_sha256_file" && -n "$bundle_tar_sha256_file" && "$run_report_bundle_tar_sha256_file" != "$bundle_tar_sha256_file" ]]; then
+    if [[ -z "$bundle_dir" || "$run_report_parent_dir" != "$bundle_dir" || "$bundle_tar_sha256_file" != "${bundle_dir}.tar.gz.sha256" ]]; then
+      echo "run report bundle_tar_sha256_file does not match checked checksum sidecar (run_report=$run_report_bundle_tar_sha256_file, checked=$bundle_tar_sha256_file)"
+      binding_issues=$((binding_issues + 1))
+    fi
+  fi
+fi
+if ((binding_issues > 0)); then
+  echo "[prod-gate-bundle-verify] failed (issues=$binding_issues)"
+  exit 1
 fi
 
 # If the caller only provided --bundle-dir, default tar checksum checks are skipped.

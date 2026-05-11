@@ -225,6 +225,24 @@ if ! rg -q -- '--show-json 1' "$CHECK_CAPTURE"; then
   exit 1
 fi
 
+echo "[prod-gate-signoff] default freshness budget forwarding"
+: >"$VERIFY_CAPTURE"
+: >"$CHECK_CAPTURE"
+VERIFY_CAPTURE_FILE="$VERIFY_CAPTURE" \
+CHECK_CAPTURE_FILE="$CHECK_CAPTURE" \
+FAKE_VERIFY_RC=0 \
+FAKE_CHECK_RC=0 \
+THREE_MACHINE_PROD_GATE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_CHECK" \
+./scripts/easy_node.sh prod-gate-signoff \
+  --run-report-json /tmp/prod_bundle/prod_bundle_run_report.json >/tmp/integration_prod_gate_signoff_default_freshness.log 2>&1
+
+if ! rg -q -- '--max-evidence-age-sec 600' "$CHECK_CAPTURE"; then
+  echo "prod-gate-signoff default freshness forwarding failed: expected --max-evidence-age-sec 600"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+
 echo "[prod-gate-signoff] verify fail-close path"
 : >"$VERIFY_CAPTURE"
 : >"$CHECK_CAPTURE"

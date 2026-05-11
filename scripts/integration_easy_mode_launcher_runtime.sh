@@ -965,6 +965,7 @@ INPUT38="$TMP_DIR/input38.txt"
   printf '\n'    # require run-report stages default no
   printf '\n'    # require incident snapshot on fail default no
   printf '\n'    # require incident snapshot artifacts default no
+  printf '\n'    # max evidence age seconds default 600
   printf '\n'    # show summary json? default no
   printf '0\n'   # back from advanced menu
   printf '0\n'   # exit main menu
@@ -1013,6 +1014,8 @@ assert_line_has "$line38" '--min-wg-soak-exit-operators 2' \
   "runtime wiring failed: option 38 missing --min-wg-soak-exit-operators 2"
 assert_line_has "$line38" '--min-wg-soak-cross-operator-pairs 2' \
   "runtime wiring failed: option 38 missing --min-wg-soak-cross-operator-pairs 2"
+assert_line_has "$line38" '--max-evidence-age-sec 600' \
+  "runtime wiring failed: option 38 missing default --max-evidence-age-sec 600"
 assert_line_has "$line38" '--run-report-json \.easy-node-logs/prod_gate_bundle_quick/prod_bundle_run_report\.json' \
   "runtime wiring failed: option 38 missing default run-report path"
 
@@ -1945,6 +1948,8 @@ assert_line_has "$line52" '--trend-min-go-rate-pct 95' \
   "runtime wiring failed: option 52 missing default --trend-min-go-rate-pct 95"
 assert_line_has "$line52" '--max-alert-severity WARN' \
   "runtime wiring failed: option 52 missing default --max-alert-severity WARN"
+assert_line_has "$line52" '--signoff-max-evidence-age-sec 600' \
+  "runtime wiring failed: option 52 missing default --signoff-max-evidence-age-sec 600"
 assert_line_has "$line52" '--bundle-outputs 1' \
   "runtime wiring failed: option 52 missing default --bundle-outputs 1"
 assert_line_has "$line52" '--bundle-fail-close 1' \
@@ -2019,6 +2024,8 @@ assert_line_has "$line53" '--require-summary-status-ok 1' \
   "runtime wiring failed: option 53 missing default --require-summary-status-ok 1"
 assert_line_has "$line53" '--max-duration-sec 0' \
   "runtime wiring failed: option 53 missing default --max-duration-sec 0"
+assert_line_has "$line53" '--max-evidence-age-sec 600' \
+  "runtime wiring failed: option 53 missing default --max-evidence-age-sec 600"
 assert_line_has "$line53" '--show-json 0' \
   "runtime wiring failed: option 53 missing default --show-json 0"
 
@@ -2065,6 +2072,8 @@ assert_line_has "$line54" '--require-summary-status-ok 1' \
   "runtime wiring failed: option 54 missing default --require-summary-status-ok 1"
 assert_line_has "$line54" '--max-duration-sec 0' \
   "runtime wiring failed: option 54 missing default --max-duration-sec 0"
+assert_line_has "$line54" '--max-evidence-age-sec 600' \
+  "runtime wiring failed: option 54 missing default --max-evidence-age-sec 600"
 assert_line_has "$line54" '--fail-on-any-no-go 0' \
   "runtime wiring failed: option 54 missing default --fail-on-any-no-go 0"
 assert_line_has "$line54" '--min-go-rate-pct 0' \
@@ -2119,6 +2128,8 @@ assert_line_has "$line55" '--require-summary-status-ok 1' \
   "runtime wiring failed: option 55 missing default --require-summary-status-ok 1"
 assert_line_has "$line55" '--max-duration-sec 0' \
   "runtime wiring failed: option 55 missing default --max-duration-sec 0"
+assert_line_has "$line55" '--max-evidence-age-sec 600' \
+  "runtime wiring failed: option 55 missing default --max-evidence-age-sec 600"
 assert_line_has "$line55" '--warn-go-rate-pct 98' \
   "runtime wiring failed: option 55 missing default --warn-go-rate-pct 98"
 assert_line_has "$line55" '--critical-go-rate-pct 90' \
@@ -2187,6 +2198,8 @@ assert_line_has "$line56" '--incident-snapshot-max-skipped-count 0' \
   "runtime wiring failed: option 56 missing strict --incident-snapshot-max-skipped-count 0"
 assert_line_has "$line56" '--max-duration-sec 0' \
   "runtime wiring failed: option 56 missing default --max-duration-sec 0"
+assert_line_has "$line56" '--max-evidence-age-sec 600' \
+  "runtime wiring failed: option 56 missing default --max-evidence-age-sec 600"
 assert_line_has "$line56" '--fail-on-any-no-go 0' \
   "runtime wiring failed: option 56 missing default --fail-on-any-no-go 0"
 assert_line_has "$line56" '--min-go-rate-pct 95' \
@@ -2245,6 +2258,7 @@ assert_line_has "$line57" '--check-latest 1' "runtime wiring failed: option 57 m
 assert_line_has "$line57" '--check-trend 1' "runtime wiring failed: option 57 missing --check-trend 1"
 assert_line_has "$line57" '--check-alert 1' "runtime wiring failed: option 57 missing --check-alert 1"
 assert_line_has "$line57" '--max-alert-severity WARN' "runtime wiring failed: option 57 missing --max-alert-severity WARN"
+assert_line_has "$line57" '--max-evidence-age-sec 600' "runtime wiring failed: option 57 missing default --max-evidence-age-sec 600"
 assert_line_has "$line57" '--require-cohort-signoff-policy 1' "runtime wiring failed: option 57 missing --require-cohort-signoff-policy 1"
 assert_line_has "$line57" '--require-trend-artifact-policy-match 1' "runtime wiring failed: option 57 missing strict --require-trend-artifact-policy-match 1"
 assert_line_has "$line57" '--require-trend-wg-validate-udp-source 1' "runtime wiring failed: option 57 missing strict --require-trend-wg-validate-udp-source 1"
@@ -2304,6 +2318,7 @@ assert_line_has "$line58" '--dashboard-print 1' "runtime wiring failed: option 5
 assert_line_has "$line58" '--dashboard-print-summary-json 0' "runtime wiring failed: option 58 missing --dashboard-print-summary-json 0"
 assert_line_has "$line58" '--signoff-max-reports 25' "runtime wiring failed: option 58 missing default signoff max reports"
 assert_line_has "$line58" '--signoff-since-hours 24' "runtime wiring failed: option 58 missing default signoff since-hours"
+assert_line_has "$line58" '--signoff-max-evidence-age-sec 600' "runtime wiring failed: option 58 missing default signoff max evidence age"
 assert_line_has "$line58" '--signoff-min-go-rate-pct 95' "runtime wiring failed: option 58 missing default signoff min go rate"
 assert_line_has "$line58" '--signoff-require-cohort-signoff-policy 1' "runtime wiring failed: option 58 missing default signoff cohort policy requirement"
 assert_line_has "$line58" '--signoff-require-trend-artifact-policy-match 1' "runtime wiring failed: option 58 missing strict signoff --signoff-require-trend-artifact-policy-match 1"
@@ -2356,6 +2371,10 @@ assert_line_has "$line59" '--campaign-signoff-summary-fail-on-no-go 1' \
   "runtime wiring failed: option 59 missing default --campaign-signoff-summary-fail-on-no-go 1"
 assert_line_has "$line59" '--campaign-signoff-print-summary-json 0' \
   "runtime wiring failed: option 59 missing default --campaign-signoff-print-summary-json 0"
+assert_line_has "$line59" '--signoff-max-evidence-age-sec 600' \
+  "runtime wiring failed: option 59 missing default quick signoff max evidence age"
+assert_line_has "$line59" '--campaign-signoff-max-evidence-age-sec 600' \
+  "runtime wiring failed: option 59 missing default campaign signoff max evidence age"
 assert_line_has "$line59" '--show-json 0' \
   "runtime wiring failed: option 59 missing default --show-json 0"
 if printf '%s\n' "$line59" | rg -q -- '--campaign-signoff-summary-json '; then

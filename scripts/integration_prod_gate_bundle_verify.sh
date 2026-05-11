@@ -181,6 +181,26 @@ echo "[prod-gate-bundle-verify] verify by bundle-dir"
 echo "[prod-gate-bundle-verify] verify by bundle-tar"
 ./scripts/prod_gate_bundle_verify.sh --bundle-tar "${BUNDLE_DIR}.tar.gz" >/tmp/integration_prod_gate_bundle_verify_tar.log 2>&1
 
+echo "[prod-gate-bundle-verify] reject mixed run-report and bundle-dir"
+MIXED_BUNDLE_DIR="$TMP_DIR/prod_bundle_mixed_ref"
+cp -a "$BUNDLE_DIR" "$MIXED_BUNDLE_DIR"
+set +e
+./scripts/prod_gate_bundle_verify.sh \
+  --run-report-json "$RUN_REPORT" \
+  --bundle-dir "$MIXED_BUNDLE_DIR" >/tmp/integration_prod_gate_bundle_verify_mixed_ref.log 2>&1
+mixed_ref_rc=$?
+set -e
+if [[ "$mixed_ref_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when verifying a run report against a different bundle dir"
+  cat /tmp/integration_prod_gate_bundle_verify_mixed_ref.log
+  exit 1
+fi
+if ! rg -q 'run report bundle_dir does not match checked bundle_dir' /tmp/integration_prod_gate_bundle_verify_mixed_ref.log; then
+  echo "expected mixed bundle-dir binding failure message not found"
+  cat /tmp/integration_prod_gate_bundle_verify_mixed_ref.log
+  exit 1
+fi
+
 echo "[prod-gate-bundle-verify] run-report missing file"
 set +e
 ./scripts/prod_gate_bundle_verify.sh --run-report-json "$TMP_DIR/does_not_exist.json" >/tmp/integration_prod_gate_bundle_verify_missing_report.log 2>&1

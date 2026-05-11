@@ -3447,6 +3447,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       bool requireRunReportStages = parseYesNo(readLine("Require run-report stages (preflight + bundle + integrity + signoff) to be ok? (y/N)", "n"), false);
       bool requireIncidentSnapshotOnFail = parseYesNo(readLine("Require incident snapshot status=ok when run report is fail? (y/N)", "n"), false);
       bool requireIncidentSnapshotArtifacts = parseYesNo(readLine("Require incident snapshot artifacts when snapshot evidence is required? (y/N)", "n"), false);
+      std::string maxEvidenceAgeSec = trim(readLine("Max evidence age seconds (0=disabled)", "600"));
       bool showJson = parseYesNo(readLine("Show summary JSON payload? (y/N)", "n"), false);
 
       if (verifyIntegrity) {
@@ -3472,6 +3473,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
                    << " --min-wg-soak-exit-operators 2"
                    << " --min-wg-soak-cross-operator-pairs 2"
                    << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
+                   << " --max-evidence-age-sec " << shellEscape(maxEvidenceAgeSec)
                    << " --show-json " << (showJson ? "1" : "0");
         if (!runReportJson.empty()) {
           signoffCmd << " --run-report-json " << shellEscape(runReportJson);
@@ -3508,6 +3510,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --min-wg-soak-exit-operators 2"
           << " --min-wg-soak-cross-operator-pairs 2"
           << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
+          << " --max-evidence-age-sec " << shellEscape(maxEvidenceAgeSec)
           << " --show-json " << (showJson ? "1" : "0");
       if (!runReportJson.empty()) {
         cmd << " --run-report-json " << shellEscape(runReportJson);
@@ -4427,6 +4430,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --max-round-failures " << shellEscape(maxRoundFailures)
           << " --trend-min-go-rate-pct " << shellEscape(trendMinGoRate)
           << " --max-alert-severity " << shellEscape(maxAlertSeverityUpper)
+          << " --signoff-max-evidence-age-sec 600"
           << " --bundle-outputs " << (bundleOutputs ? "1" : "0")
           << " --bundle-fail-close " << (bundleFailClose ? "1" : "0")
           << " --pre-real-host-readiness " << (runPreRealHostReadiness ? "1" : "0")
@@ -4489,6 +4493,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --require-incident-snapshot-on-fail " << (requireIncidentSnapshotOnFail ? "1" : "0")
           << " --require-incident-snapshot-artifacts " << (requireIncidentSnapshotArtifacts ? "1" : "0")
           << " --max-duration-sec " << shellEscape(maxDurationSec)
+          << " --max-evidence-age-sec 600"
           << " --show-json " << (showJson ? "1" : "0");
       if (!runReportJson.empty()) {
         cmd << " --run-report-json " << shellEscape(runReportJson);
@@ -4536,6 +4541,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --incident-snapshot-min-attachment-count 1"
           << " --incident-snapshot-max-skipped-count 0"
           << " --max-duration-sec " << shellEscape(maxDurationSec)
+          << " --max-evidence-age-sec 600"
           << " --fail-on-any-no-go " << (failOnAnyNoGo ? "1" : "0")
           << " --min-go-rate-pct " << shellEscape(minGoRatePct)
           << " --show-details " << (showDetails ? "1" : "0")
@@ -4629,6 +4635,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
             << " --require-incident-snapshot-artifacts " << (requireIncidentSnapshotArtifacts ? "1" : "0")
             << " --max-duration-sec " << shellEscape(maxDurationSec);
       }
+      cmd << " --max-evidence-age-sec 600";
       if (!summaryJson.empty()) {
         cmd << " --summary-json " << shellEscape(summaryJson);
       }
@@ -4684,6 +4691,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --incident-snapshot-min-attachment-count 1"
           << " --incident-snapshot-max-skipped-count 0"
           << " --max-duration-sec " << shellEscape(maxDurationSec)
+          << " --max-evidence-age-sec 600"
           << " --fail-on-any-no-go " << (failOnAnyNoGo ? "1" : "0")
           << " --min-go-rate-pct " << shellEscape(minGoRatePct)
           << " --show-top-reasons " << shellEscape(showTopReasons)
@@ -4776,6 +4784,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --incident-snapshot-min-attachment-count 1"
           << " --incident-snapshot-max-skipped-count 0"
           << " --max-duration-sec " << shellEscape(maxDurationSec)
+          << " --max-evidence-age-sec 600"
           << " --max-reports " << shellEscape(maxReports)
           << " --since-hours " << shellEscape(sinceHours)
           << " --fail-on-any-no-go " << (failOnAnyNoGo ? "1" : "0")
@@ -4863,6 +4872,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --reports-dir " << shellEscape(reportsDir)
           << " --signoff-max-reports " << shellEscape(signoffMaxReports)
           << " --signoff-since-hours " << shellEscape(signoffSinceHours)
+          << " --signoff-max-evidence-age-sec 600"
           << " --signoff-fail-on-any-no-go " << (signoffFailOnAnyNoGo ? "1" : "0")
           << " --signoff-min-go-rate-pct " << shellEscape(signoffMinGoRate)
           << " --signoff-require-cohort-signoff-policy " << (signoffRequireCohortSignoffPolicy ? "1" : "0")
@@ -4936,6 +4946,8 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --campaign-signoff-refresh-summary " << (campaignSignoffRefreshSummary ? "1" : "0")
           << " --campaign-signoff-summary-fail-on-no-go " << (campaignSignoffSummaryFailOnNoGo ? "1" : "0")
           << " --campaign-signoff-print-summary-json " << (campaignSignoffPrintSummaryJson ? "1" : "0")
+          << " --signoff-max-evidence-age-sec 600"
+          << " --campaign-signoff-max-evidence-age-sec 600"
           << " --show-json " << (showJson ? "1" : "0");
       if (!reportsDir.empty()) {
         cmd << " --reports-dir " << shellEscape(reportsDir);

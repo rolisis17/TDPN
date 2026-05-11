@@ -10162,7 +10162,7 @@ prod_gate_signoff() {
   local min_wg_soak_exit_operators="2"
   local min_wg_soak_cross_operator_pairs="2"
   local max_wg_soak_failed_rounds="0"
-  local max_evidence_age_sec="0"
+  local max_evidence_age_sec="${PROD_GATE_SIGNOFF_MAX_EVIDENCE_AGE_SEC:-${PROD_GATE_CHECK_MAX_EVIDENCE_AGE_SEC:-600}}"
   local show_json="0"
 
   while [[ $# -gt 0 ]]; do

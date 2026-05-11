@@ -14,6 +14,7 @@ done
 TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
 mkdir -p "$TMP_BIN"
+export PROD_PILOT_COHORT_QUICK_CHECK_MAX_EVIDENCE_AGE_SEC=0
 
 cleanup() {
   rm -rf "$TMP_DIR"

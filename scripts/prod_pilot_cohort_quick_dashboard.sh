@@ -32,6 +32,7 @@ Usage:
     [--incident-snapshot-min-attachment-count N] \
     [--incident-snapshot-max-skipped-count N|-1] \
     [--max-duration-sec N] \
+    [--max-evidence-age-sec N] \
     [--fail-on-any-no-go [0|1]] \
     [--min-go-rate-pct N] \
     [--show-top-reasons N] \
@@ -138,6 +139,7 @@ require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INC
 incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}"
 incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}"
 max_duration_sec="${PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC:-0}"
+max_evidence_age_sec="${PROD_PILOT_COHORT_QUICK_DASHBOARD_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_QUICK_ALERT_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_QUICK_TREND_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_QUICK_CHECK_MAX_EVIDENCE_AGE_SEC:-600}}}}"
 fail_on_any_no_go="${PROD_PILOT_COHORT_QUICK_TREND_FAIL_ON_ANY_NO_GO:-0}"
 min_go_rate_pct="${PROD_PILOT_COHORT_QUICK_TREND_MIN_GO_RATE_PCT:-95}"
 show_top_reasons="${PROD_PILOT_COHORT_QUICK_TREND_SHOW_TOP_REASONS:-5}"
@@ -272,6 +274,10 @@ while [[ $# -gt 0 ]]; do
       max_duration_sec="${2:-}"
       shift 2
       ;;
+    --max-evidence-age-sec)
+      max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --fail-on-any-no-go)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         fail_on_any_no_go="${2:-}"
@@ -400,7 +406,7 @@ bool_arg_or_die "--fail-on-critical" "$fail_on_critical"
 bool_arg_or_die "--print-dashboard" "$print_dashboard"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 
-for int_name in max_reports since_hours max_duration_sec show_top_reasons warn_no_go_count critical_no_go_count warn_eval_errors critical_eval_errors; do
+for int_name in max_reports since_hours max_duration_sec max_evidence_age_sec show_top_reasons warn_no_go_count critical_no_go_count warn_eval_errors critical_eval_errors; do
   value="${!int_name}"
   if [[ ! "$value" =~ ^[0-9]+$ ]]; then
     echo "--${int_name//_/-} must be an integer >= 0"
@@ -486,6 +492,7 @@ trend_args=(
   --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count"
   --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count"
   --max-duration-sec "$max_duration_sec"
+  --max-evidence-age-sec "$max_evidence_age_sec"
   --fail-on-any-no-go "$fail_on_any_no_go"
   --min-go-rate-pct "$min_go_rate_pct"
   --show-details 0
@@ -538,6 +545,7 @@ alert_args=(
   --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
   --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count"
   --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count"
+  --max-evidence-age-sec "$max_evidence_age_sec"
 )
 
 echo "[prod-pilot-cohort-quick-dashboard] running alert classification"
