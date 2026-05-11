@@ -344,6 +344,48 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[profile-compare-multi-vm-sweep] failure diagnostics redact bearer tokens and URL credentials"
+SECRET_HINT_SUMMARY="$TMP_DIR/secret_hint_summary.json"
+SECRET_HINT_LOG="$TMP_DIR/secret_hint.log"
+SECRET_HINT_REPORT="$TMP_DIR/secret_hint_report.md"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/reports_secret_hint" \
+  --summary-json "$SECRET_HINT_SUMMARY" \
+  --report-md "$SECRET_HINT_REPORT" \
+  --vm-command "vm_secret::bash -lc 'echo \"Authorization: Bearer supersecret https://user:pass@example.test/path?token=abc123&ok=1 password: hunter2\" >&2; exit 7'" \
+  --print-summary-json 0 >"$SECRET_HINT_LOG" 2>&1
+secret_hint_rc=$?
+set -e
+
+if [[ "$secret_hint_rc" -ne 1 ]]; then
+  echo "expected secret-hint path rc=1, got rc=$secret_hint_rc"
+  cat "$SECRET_HINT_LOG"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .vms[0].command_rc == 7
+  and ((.vms[0].diagnostics.command_failure_hint // "") | contains("Authorization: Bearer [redacted]"))
+  and ((.vms[0].diagnostics.command_failure_hint // "") | contains("https://[redacted]@example.test/path?token=[redacted]"))
+  and ((.vms[0].diagnostics.command_failure_hint // "") | contains("password: [redacted]"))
+  and ((.vms[0].diagnostics.command_failure_hint // "") | contains("supersecret") | not)
+  and ((.vms[0].diagnostics.command_failure_hint // "") | contains("user:pass") | not)
+  and ((.vms[0].diagnostics.command_failure_hint // "") | contains("abc123") | not)
+  and ((.vms[0].diagnostics.command_failure_hint // "") | contains("hunter2") | not)
+' "$SECRET_HINT_SUMMARY" >/dev/null 2>&1; then
+  echo "secret-hint summary did not redact expected sensitive values"
+  cat "$SECRET_HINT_SUMMARY"
+  exit 1
+fi
+for secret in supersecret user:pass abc123 hunter2; do
+  if rg -q "$secret" "$SECRET_HINT_REPORT"; then
+    echo "secret-hint report leaked sensitive value: $secret"
+    cat "$SECRET_HINT_REPORT"
+    exit 1
+  fi
+done
+
 echo "[profile-compare-multi-vm-sweep] malformed vm spec fails closed"
 set +e
 bash "$SCRIPT_UNDER_TEST" \

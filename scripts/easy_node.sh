@@ -13813,7 +13813,7 @@ prod_preflight() {
             check_fail "failed to derive EXIT_WG_PUBKEY from EXIT_WG_PRIVATE_KEY_PATH"
           fi
         else
-          check_ok "EXIT_WG_PUBKEY/private-key match check skipped (wg command unavailable)"
+          check_fail "EXIT_WG_PUBKEY/private-key match check requires wg command; install wireguard-tools or unset EXIT_WG_PUBKEY for runtime derivation"
         fi
       fi
     else

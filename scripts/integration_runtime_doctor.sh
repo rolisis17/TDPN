@@ -44,6 +44,38 @@ cat >"$TMP_BIN/docker" <<'EOF_DOCKER'
 #!/usr/bin/env bash
 set -euo pipefail
 args=" $* "
+if [[ "${1:-}" == "inspect" ]]; then
+  container="${@: -1}"
+  case "$container" in
+    deploy-entry-exit-1)
+      if [[ "${FAKE_DOCKER_ENTRY_EXIT_PRESENT:-0}" == "1" ]]; then
+        printf '%s\n' "${FAKE_DOCKER_ENTRY_EXIT_STATE:-restarting	true	7}"
+        exit 0
+      fi
+      ;;
+    deploy-directory-1)
+      if [[ "${FAKE_DOCKER_DIRECTORY_PRESENT:-0}" == "1" ]]; then
+        printf '%s\n' "${FAKE_DOCKER_DIRECTORY_STATE:-running	false	0}"
+        exit 0
+      fi
+      ;;
+    deploy-issuer-1)
+      if [[ "${FAKE_DOCKER_ISSUER_PRESENT:-0}" == "1" ]]; then
+        printf '%s\n' "${FAKE_DOCKER_ISSUER_STATE:-running	false	0}"
+        exit 0
+      fi
+      ;;
+  esac
+  exit 1
+fi
+if [[ "${1:-}" == "logs" ]]; then
+  container="${@: -1}"
+  if [[ "$container" == "deploy-entry-exit-1" ]]; then
+    printf '%s\n' "${FAKE_DOCKER_ENTRY_EXIT_LOGS:-}"
+    exit 0
+  fi
+  exit 0
+fi
 if [[ "$args" == *" ps -aq "* && "$args" == *"deploy-client-demo-run-"* ]]; then
   printf '%s\n' "${FAKE_DOCKER_IDS:-}"
   exit 0
@@ -165,6 +197,95 @@ fi
 if ! extract_json_payload /tmp/integration_runtime_doctor_fail.log | jq -e '.status == "FAIL" and .summary.failures_total >= 1 and (.findings | map(.code) | index("authority_env_file_not_writable")) != null and (.findings | map(.code) | index("stale_client_demo_containers")) != null' >/dev/null 2>&1; then
   echo "runtime doctor FAIL JSON payload missing expected findings"
   cat /tmp/integration_runtime_doctor_fail.log
+  exit 1
+fi
+
+echo "[runtime-doctor] detect entry-exit restart loop with WG pubkey mismatch"
+RESTART_DIR="$TMP_DIR/restart"
+mkdir -p "$RESTART_DIR/logs" "$RESTART_DIR/client_vpn" "$RESTART_DIR/wg_only"
+touch "$RESTART_DIR/client.env" "$RESTART_DIR/server.env" "$RESTART_DIR/provider.env"
+
+set +e
+PATH="$TMP_BIN:$PATH" \
+FAKE_DOCKER_ENTRY_EXIT_PRESENT=1 \
+FAKE_DOCKER_ENTRY_EXIT_STATE=$'restarting\ttrue\t42' \
+FAKE_DOCKER_ENTRY_EXIT_LOGS='node stopped: exit wg pubkey init failed: configured EXIT_WG_PUBKEY does not match EXIT_WG_PRIVATE_KEY_PATH' \
+EASY_NODE_DOCTOR_CLIENT_ENV_FILE="$RESTART_DIR/client.env" \
+EASY_NODE_DOCTOR_AUTHORITY_ENV_FILE="$RESTART_DIR/server.env" \
+EASY_NODE_DOCTOR_PROVIDER_ENV_FILE="$RESTART_DIR/provider.env" \
+EASY_NODE_DOCTOR_WG_ONLY_DIR="$RESTART_DIR/wg_only" \
+EASY_NODE_DOCTOR_CLIENT_VPN_KEY_DIR="$RESTART_DIR/client_vpn" \
+EASY_NODE_DOCTOR_LOG_DIR="$RESTART_DIR/logs" \
+EASY_NODE_DOCTOR_WG_ONLY_STATE_FILE="$RESTART_DIR/wg_only.state" \
+EASY_NODE_DOCTOR_CLIENT_VPN_STATE_FILE="$RESTART_DIR/client_vpn.state" \
+./scripts/runtime_doctor.sh --show-json 1 >/tmp/integration_runtime_doctor_entry_exit_restart.log 2>&1
+doctor_restart_rc=$?
+set -e
+
+if [[ "$doctor_restart_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for entry-exit restart-loop doctor scenario"
+  cat /tmp/integration_runtime_doctor_entry_exit_restart.log
+  exit 1
+fi
+if ! rg -q 'entry_exit_exit_wg_pubkey_mismatch' /tmp/integration_runtime_doctor_entry_exit_restart.log; then
+  echo "expected entry-exit WG pubkey mismatch finding not found"
+  cat /tmp/integration_runtime_doctor_entry_exit_restart.log
+  exit 1
+fi
+if ! rg -q 'prod-preflight --days-min 0' /tmp/integration_runtime_doctor_entry_exit_restart.log; then
+  echo "expected prod-preflight remediation hint not found"
+  cat /tmp/integration_runtime_doctor_entry_exit_restart.log
+  exit 1
+fi
+if ! extract_json_payload /tmp/integration_runtime_doctor_entry_exit_restart.log | jq -e '.status == "FAIL" and .summary.failures_total >= 1 and (.findings | map(.code) | index("entry_exit_exit_wg_pubkey_mismatch")) != null' >/dev/null 2>&1; then
+  echo "runtime doctor entry-exit restart JSON payload missing expected finding"
+  cat /tmp/integration_runtime_doctor_entry_exit_restart.log
+  exit 1
+fi
+
+echo "[runtime-doctor] detect env references to missing local key files"
+ENV_REF_DIR="$TMP_DIR/env_ref"
+mkdir -p "$ENV_REF_DIR/logs" "$ENV_REF_DIR/client_vpn" "$ENV_REF_DIR/wg_only"
+touch "$ENV_REF_DIR/client.env" "$ENV_REF_DIR/provider.env"
+cat >"$ENV_REF_DIR/server.env" <<EOF_ENV_REF
+MTLS_CA_FILE=$ENV_REF_DIR/missing-ca.crt
+MTLS_SERVER_CERT_FILE=$ENV_REF_DIR/missing-node.crt
+EXIT_WG_PRIVATE_KEY_PATH=$ENV_REF_DIR/missing-exit-wg.key
+ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL=$ENV_REF_DIR/missing-admin-signer.key
+EOF_ENV_REF
+
+set +e
+PATH="$TMP_BIN:$PATH" \
+EASY_NODE_DOCTOR_CLIENT_ENV_FILE="$ENV_REF_DIR/client.env" \
+EASY_NODE_DOCTOR_AUTHORITY_ENV_FILE="$ENV_REF_DIR/server.env" \
+EASY_NODE_DOCTOR_PROVIDER_ENV_FILE="$ENV_REF_DIR/provider.env" \
+EASY_NODE_DOCTOR_WG_ONLY_DIR="$ENV_REF_DIR/wg_only" \
+EASY_NODE_DOCTOR_CLIENT_VPN_KEY_DIR="$ENV_REF_DIR/client_vpn" \
+EASY_NODE_DOCTOR_LOG_DIR="$ENV_REF_DIR/logs" \
+EASY_NODE_DOCTOR_WG_ONLY_STATE_FILE="$ENV_REF_DIR/wg_only.state" \
+EASY_NODE_DOCTOR_CLIENT_VPN_STATE_FILE="$ENV_REF_DIR/client_vpn.state" \
+./scripts/runtime_doctor.sh --show-json 1 >/tmp/integration_runtime_doctor_env_refs.log 2>&1
+doctor_env_refs_rc=$?
+set -e
+
+if [[ "$doctor_env_refs_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for missing env referenced files"
+  cat /tmp/integration_runtime_doctor_env_refs.log
+  exit 1
+fi
+if ! rg -q 'authority_env_referenced_file_missing' /tmp/integration_runtime_doctor_env_refs.log; then
+  echo "expected authority env referenced file finding not found"
+  cat /tmp/integration_runtime_doctor_env_refs.log
+  exit 1
+fi
+if ! rg -q 'missing-exit-wg.key' /tmp/integration_runtime_doctor_env_refs.log; then
+  echo "expected missing EXIT_WG_PRIVATE_KEY_PATH detail not found"
+  cat /tmp/integration_runtime_doctor_env_refs.log
+  exit 1
+fi
+if ! extract_json_payload /tmp/integration_runtime_doctor_env_refs.log | jq -e '.status == "FAIL" and .summary.failures_total >= 4 and ([.findings[].code] | map(select(. == "authority_env_referenced_file_missing")) | length) >= 4' >/dev/null 2>&1; then
+  echo "runtime doctor env referenced file JSON payload missing expected findings"
+  cat /tmp/integration_runtime_doctor_env_refs.log
   exit 1
 fi
 

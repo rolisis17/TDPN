@@ -125,6 +125,10 @@ redact_text() {
   sensitive_flags='--campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer|--password|--secret|--api-key'
   sensitive_envs='CAMPAIGN_SUBJECT|INVITE_KEY|ANON_CRED|AUTH_TOKEN|ADMIN_TOKEN|API_KEY|PASSWORD|SECRET'
   printf '%s' "$value" | sed -E \
+    -e "s#([A-Za-z][A-Za-z0-9+.-]*://)[^/@[:space:]]+@#\\1[redacted]@#g" \
+    -e "s#([?&]([A-Za-z0-9_.-]*)(token|password|secret|api[_-]?key|auth)([A-Za-z0-9_.-]*)=)[^&[:space:]]+#\\1[redacted]#Ig" \
+    -e "s/([Aa]uthorization:[[:space:]]*(Bearer|Basic)[[:space:]]+)[^[:space:]]+/\\1[redacted]/g" \
+    -e "s/((password|passwd|token|secret|api[_ -]?key)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\\1[redacted]/Ig" \
     -e "s/(((${sensitive_flags})[[:space:]]+))\"([^\"]*)\"/\\1[redacted]/g" \
     -e "s/(((${sensitive_flags})[[:space:]]+))'([^']*)'/\\1[redacted]/g" \
     -e "s/(((${sensitive_flags})[[:space:]]+))([^[:space:]]+)/\\1[redacted]/g" \

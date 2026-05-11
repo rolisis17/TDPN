@@ -22,6 +22,8 @@ What it checks:
   - stale client-vpn / wg-only state files
   - lingering wg-only / client VPN interfaces
   - busy default wg-only ports
+  - env files that reference missing local TLS/WG/admin key files
+  - restart-looping deploy containers with known startup failures
   - stale deploy-client-demo-run-* containers
 
 Notes:
@@ -236,6 +238,97 @@ state_value() {
   awk -F= -v k="$key" '$1 == k { sub(/^[[:space:]]+/, "", $2); print $2; exit }' "$file" 2>/dev/null || true
 }
 
+strip_optional_quotes() {
+  local value="$1"
+  value="$(trim "$value")"
+  if [[ "$value" == \"*\" && "$value" == *\" && "${#value}" -ge 2 ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$value" == \'*\' && "$value" == *\' && "${#value}" -ge 2 ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+env_path_to_local_path() {
+  local value="$1"
+  value="$(strip_optional_quotes "$value")"
+  if [[ -z "$value" ]]; then
+    printf '%s' ""
+    return
+  fi
+  case "$value" in
+    /app/data/*)
+      printf '%s' "$ROOT_DIR/deploy/data/entry-exit/$(basename "$value")"
+      ;;
+    /app/tls/*)
+      printf '%s' "$ROOT_DIR/deploy/tls/$(basename "$value")"
+      ;;
+    /*)
+      printf '%s' "$value"
+      ;;
+    *)
+      abs_path "$value"
+      ;;
+  esac
+}
+
+env_file_check_code() {
+  local label="$1"
+  case "$label" in
+    authority) printf '%s' "authority_env_referenced_file_missing" ;;
+    provider) printf '%s' "provider_env_referenced_file_missing" ;;
+    client) printf '%s' "client_env_referenced_file_missing" ;;
+    *) printf '%s' "env_referenced_file_missing" ;;
+  esac
+}
+
+check_env_referenced_file() {
+  local env_file="$1"
+  local label="$2"
+  local key="$3"
+  local value local_path
+  if [[ ! -f "$env_file" ]]; then
+    return
+  fi
+  value="$(state_value "$env_file" "$key")"
+  value="$(strip_optional_quotes "$value")"
+  if [[ -z "$value" ]]; then
+    return
+  fi
+  case "$value" in
+    /run/secrets/*|/var/run/secrets/*)
+      return
+      ;;
+  esac
+  local_path="$(env_path_to_local_path "$value")"
+  if [[ -n "$local_path" && ! -e "$local_path" ]]; then
+    add_finding \
+      "FAIL" \
+      "$(env_file_check_code "$label")" \
+      "$label env references missing $key path ($value -> $local_path)" \
+      "bash ./scripts/easy_node.sh prod-preflight --days-min 0; rerun ./scripts/easy_node.sh server-up with the intended settings"
+  fi
+}
+
+check_env_referenced_files() {
+  local env_file="$1"
+  local label="$2"
+  local key
+  for key in \
+    MTLS_CA_FILE \
+    MTLS_CERT_FILE \
+    MTLS_KEY_FILE \
+    MTLS_SERVER_CERT_FILE \
+    MTLS_SERVER_KEY_FILE \
+    MTLS_CLIENT_CERT_FILE \
+    MTLS_CLIENT_KEY_FILE \
+    EXIT_WG_PRIVATE_KEY_PATH \
+    ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE \
+    ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL; do
+    check_env_referenced_file "$env_file" "$label" "$key"
+  done
+}
+
 declare -a finding_lines=()
 declare -a remediation_lines=()
 overall_status="OK"
@@ -326,6 +419,60 @@ iface_present01() {
   fi
 }
 
+docker_container_state() {
+  local container="$1"
+  if ! command -v docker >/dev/null 2>&1; then
+    printf '%s' ""
+    return
+  fi
+  docker inspect --format '{{.State.Status}}	{{.State.Restarting}}	{{.RestartCount}}' "$container" 2>/dev/null || true
+}
+
+docker_container_logs_tail() {
+  local container="$1"
+  if ! command -v docker >/dev/null 2>&1; then
+    printf '%s' ""
+    return
+  fi
+  docker logs --tail 80 "$container" 2>&1 || true
+}
+
+check_deploy_container_health() {
+  local container="$1"
+  local service_label="$2"
+  local state_line status restarting restart_count logs
+  state_line="$(docker_container_state "$container")"
+  state_line="$(trim "$state_line")"
+  if [[ -z "$state_line" ]]; then
+    return
+  fi
+
+  IFS=$'\t' read -r status restarting restart_count <<<"$state_line"
+  status="$(trim "${status:-}")"
+  restarting="$(trim "${restarting:-}")"
+  restart_count="$(trim "${restart_count:-}")"
+
+  if [[ "$status" != "restarting" && "$restarting" != "true" ]]; then
+    return
+  fi
+
+  logs="$(docker_container_logs_tail "$container")"
+  if [[ "$container" == "deploy-entry-exit-1" ]] && grep -Fq "configured EXIT_WG_PUBKEY does not match EXIT_WG_PRIVATE_KEY_PATH" <<<"$logs"; then
+    add_finding \
+      "FAIL" \
+      "entry_exit_exit_wg_pubkey_mismatch" \
+      "$service_label container is restarting because configured EXIT_WG_PUBKEY does not match EXIT_WG_PRIVATE_KEY_PATH (restart_count=${restart_count:-unknown})" \
+      "bash ./scripts/easy_node.sh prod-preflight --days-min 0; rerun ./scripts/easy_node.sh server-up with the same settings to recreate entry-exit from current env"
+    return
+  fi
+
+  add_finding \
+    "FAIL" \
+    "deploy_${service_label}_container_restarting" \
+    "$service_label container is restarting (status=${status:-unknown} restarting=${restarting:-unknown} restart_count=${restart_count:-unknown})" \
+    "docker logs --tail 120 $(shell_quote "$container")"
+}
+
 show_json="0"
 base_port="${EASY_NODE_DOCTOR_WG_ONLY_BASE_PORT:-19280}"
 client_iface="${EASY_NODE_DOCTOR_CLIENT_IFACE:-wgcstack0}"
@@ -403,6 +550,9 @@ check_writable_target "WARN" "wg_only_dir_not_writable" "wg-only runtime dir" "$
 check_writable_target "FAIL" "client_vpn_key_dir_not_writable" "client VPN key dir" "$client_vpn_key_dir" "0" "mkdir -p $(shell_quote "$client_vpn_key_dir") && sudo chown -R $(shell_quote "$preferred_owner_spec") $(shell_quote "$client_vpn_key_dir") && chmod 700 $(shell_quote "$client_vpn_key_dir")"
 check_writable_target "FAIL" "log_dir_not_writable" "log dir" "$log_dir" "0" "mkdir -p $(shell_quote "$log_dir") && sudo chown $(shell_quote "$preferred_owner_spec") $(shell_quote "$log_dir") && chmod 700 $(shell_quote "$log_dir")"
 
+check_env_referenced_files "$authority_env_file" "authority"
+check_env_referenced_files "$provider_env_file" "provider"
+
 if [[ "$client_vpn_key_dir" == /mnt/* ]]; then
   add_finding "WARN" "client_vpn_key_dir_on_drvfs" "client VPN key dir resolves under /mnt ($client_vpn_key_dir); Linux-private state dir is safer for keys" "export EASY_NODE_CLIENT_VPN_KEY_DIR=\"\$HOME/.local/state/privacynode/client_vpn\""
 fi
@@ -436,6 +586,10 @@ for port in "$((base_port + 1))" "$((base_port + 2))" "$((base_port + 3))" "$((b
     add_finding "WARN" "wg_only_port_busy_${port}" "wg-only default port still busy ($port): $(port_busy_detail "$port")" "sudo ./scripts/easy_node.sh wg-only-stack-down --force-iface-cleanup 1 --base-port $(shell_quote "$base_port") --client-iface $(shell_quote "$client_iface") --exit-iface $(shell_quote "$exit_iface")"
   fi
 done
+
+check_deploy_container_health "deploy-entry-exit-1" "entry_exit"
+check_deploy_container_health "deploy-directory-1" "directory"
+check_deploy_container_health "deploy-issuer-1" "issuer"
 
 stale_demo_containers=""
 if command -v docker >/dev/null 2>&1; then

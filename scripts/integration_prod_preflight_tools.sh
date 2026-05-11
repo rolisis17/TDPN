@@ -266,6 +266,32 @@ sed -i -E 's/^EXIT_WG_PUBKEY=.*/EXIT_WG_PUBKEY=/' "$AUTH_ENV"
 rm -rf "$wg_mock_dir"
 wg_mock_dir=""
 
+wg_mock_dir="$(mktemp -d)"
+for cmd in awk basename cat chmod cp curl cut date dirname docker find go grep head id jq mkdir mktemp openssl pwd readlink realpath rg rm sed sha256sum sort stat tail timeout tr uname wc xargs; do
+  cmd_path="$(command -v "$cmd" 2>/dev/null || true)"
+  if [[ -n "$cmd_path" ]]; then
+    ln -s "$cmd_path" "$wg_mock_dir/$cmd"
+  fi
+done
+if rg -q '^EXIT_WG_PUBKEY=' "$AUTH_ENV"; then
+  sed -i -E 's#^EXIT_WG_PUBKEY=.*#EXIT_WG_PUBKEY=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=#' "$AUTH_ENV"
+else
+  echo "EXIT_WG_PUBKEY=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=" >>"$AUTH_ENV"
+fi
+if PATH="$wg_mock_dir" /usr/bin/bash ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_wg_pub_no_wg_fail.log 2>&1; then
+  echo "expected prod-preflight to fail when EXIT_WG_PUBKEY is configured but wg is unavailable"
+  cat /tmp/integration_prod_preflight_wg_pub_no_wg_fail.log
+  exit 1
+fi
+if ! rg -q "EXIT_WG_PUBKEY/private-key match check requires wg command" /tmp/integration_prod_preflight_wg_pub_no_wg_fail.log; then
+  echo "missing expected EXIT_WG_PUBKEY no-wg failure signal in prod-preflight output"
+  cat /tmp/integration_prod_preflight_wg_pub_no_wg_fail.log
+  exit 1
+fi
+sed -i -E 's/^EXIT_WG_PUBKEY=.*/EXIT_WG_PUBKEY=/' "$AUTH_ENV"
+rm -rf "$wg_mock_dir"
+wg_mock_dir=""
+
 echo "ISSUER_ADMIN_TOKEN=legacy-admin-token-1234567890" >>"$AUTH_ENV"
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_token_fail.log 2>&1; then
   echo "expected prod-preflight to fail when ISSUER_ADMIN_TOKEN is set while token auth is disabled"
