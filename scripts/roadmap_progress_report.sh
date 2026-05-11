@@ -12336,6 +12336,15 @@ next_actions_candidate_json="$(
     else
       action_evidence_metadata(["access-recovery"]; false; true; ["local-evidence"])
     end;
+  def access_recovery_placeholder_metadata($cmd):
+    [
+      (if (($cmd // "") | test("(^|[^A-Z0-9_])(TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_TRUST_STORE)([^A-Z0-9_]|$)")) then "TRUST_STORE" else empty end),
+      (if (($cmd // "") | contains("<TRUST-STORE>") or contains("<SET-TRUST-STORE>") or contains("REPLACE_WITH_TRUST_STORE") or contains("REPLACE_WITH_ACCESS_RECOVERY_TRUST_STORE")) then "TRUST_STORE" else empty end)
+    ] | unique_strings_preserve_order as $keys
+    | {
+        placeholder_unresolved: (($keys | length) > 0),
+        placeholder_keys: $keys
+      };
   [
     (if (
         ($current_roadmap_track // "") == "access_recovery"
@@ -12346,7 +12355,8 @@ next_actions_candidate_json="$(
       "label": "Access Recovery evidence refresh",
       command: $access_recovery_track.recommended_next_action.command,
       reason: ($access_recovery_track.recommended_next_action.reason // "Access Recovery evidence needs attention")
-    } + access_recovery_action_metadata($access_recovery_track.recommended_next_action.id // "") else empty end),
+    } + access_recovery_action_metadata($access_recovery_track.recommended_next_action.id // "")
+      + access_recovery_placeholder_metadata($access_recovery_track.recommended_next_action.command // "") else empty end),
     (if ($next_action_command // "") != "" then {
       id: (if ($next_action_check_id // "") != "" then $next_action_check_id else "next_action" end),
       "label": (if ($next_action_label // "") != "" then $next_action_label elif ($next_action_check_id // "") != "" then $next_action_check_id else "Next action" end),

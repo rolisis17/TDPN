@@ -564,6 +564,15 @@ JSON
 }
 JSON
     ;;
+  access_recovery_trust_store_placeholder_extra_tokens)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"trusted_pilot_evidence_verify","label":"Trusted pilot evidence verifier","command":"bash \"$FAKE_ACCESS_RECOVERY_VERIFY\" --summary-json /tmp/fake_bundle.json --provenance-json /tmp/fake.provenance.json --trust-store TRUST_STORE --require-trusted-provenance 1 --verification-summary-json /tmp/TRUST_STORE_receipt.json --label TRUST_STORE_AUDIT --print-verification-summary-json 1","reason":"test-access-recovery-trust-store-extra-tokens"}
+  ]
+}
+JSON
+    ;;
   access_recovery_real_helper_trust_store_placeholder)
     cat >"$summary_json" <<JSON
 {
@@ -1309,6 +1318,51 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-next-actions-run] Access Recovery trusted verifier fails closed on missing operator trust-store path"
+SUMMARY_ACCESS_RECOVERY_TRUST_STORE_CLI_MISSING="$TMP_DIR/summary_access_recovery_trust_store_cli_missing.json"
+REPORTS_ACCESS_RECOVERY_TRUST_STORE_CLI_MISSING="$TMP_DIR/reports_access_recovery_trust_store_cli_missing"
+ACCESS_RECOVERY_TRUST_STORE_MISSING_FILE="$TMP_DIR/access_recovery_trust_store_missing.json"
+rm -f "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" "$ACCESS_RECOVERY_TRUST_STORE_MISSING_FILE"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_trust_store_placeholder \
+FAKE_ACCESS_RECOVERY_VERIFY="$FAKE_ACCESS_RECOVERY_VERIFY" \
+FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE="$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_TRUST_STORE_CLI_MISSING" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_CLI_MISSING" \
+  --include-id trusted_pilot_evidence_verify \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_TRUST_STORE_MISSING_FILE" \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_trust_store_cli_missing.log" 2>&1
+access_recovery_trust_store_cli_missing_rc=$?
+set -e
+if [[ "$access_recovery_trust_store_cli_missing_rc" != "2" ]]; then
+  echo "expected missing operator Access Recovery trust-store hard-fail rc=2, got rc=$access_recovery_trust_store_cli_missing_rc"
+  cat "$TMP_DIR/access_recovery_trust_store_cli_missing.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_CLI_MISSING" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_CLI_MISSING"
+  fi
+  exit 1
+fi
+if [[ -f "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" ]]; then
+  echo "Access Recovery verifier ran despite missing operator trust-store path"
+  cat "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .inputs.access_recovery_trust_store_configured == false
+  and (.inputs.access_recovery_trust_store_source | contains("missing_or_unreadable"))
+  and .actions[0].id == "trusted_pilot_evidence_verify"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_trust_store_precondition"
+' "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_CLI_MISSING" >/dev/null; then
+  echo "Access Recovery missing operator trust-store precondition summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_CLI_MISSING"
+  exit 1
+fi
+
 echo "[roadmap-next-actions-run] Access Recovery trusted verifier substitutes configured trust store"
 SUMMARY_ACCESS_RECOVERY_TRUST_STORE_OVERRIDE="$TMP_DIR/summary_access_recovery_trust_store_override.json"
 REPORTS_ACCESS_RECOVERY_TRUST_STORE_OVERRIDE="$TMP_DIR/reports_access_recovery_trust_store_override"
@@ -1343,6 +1397,42 @@ if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
 fi
 if ! grep -F -- "--trust-store" "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" >/dev/null || grep -F -- "TRUST_STORE" "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" >/dev/null; then
   echo "Access Recovery verifier capture missing substituted trust store"
+  cat "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery trust-store substitution only rewrites trust-store argv"
+SUMMARY_ACCESS_RECOVERY_TRUST_STORE_PRECISE_OVERRIDE="$TMP_DIR/summary_access_recovery_trust_store_precise_override.json"
+REPORTS_ACCESS_RECOVERY_TRUST_STORE_PRECISE_OVERRIDE="$TMP_DIR/reports_access_recovery_trust_store_precise_override"
+: >"$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE"
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_trust_store_placeholder_extra_tokens \
+FAKE_ACCESS_RECOVERY_VERIFY="$FAKE_ACCESS_RECOVERY_VERIFY" \
+FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE="$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_TRUST_STORE_PRECISE_OVERRIDE" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_PRECISE_OVERRIDE" \
+  --include-id trusted_pilot_evidence_verify \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+  --print-summary-json 0
+
+if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.access_recovery_trust_store == $trust_store
+  and .actions[0].status == "pass"
+  and (.actions[0].command | contains("--trust-store " + $trust_store))
+  and (.actions[0].command | contains("TRUST_STORE_receipt.json"))
+  and (.actions[0].command | contains("TRUST_STORE_AUDIT"))
+' "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_PRECISE_OVERRIDE" >/dev/null; then
+  echo "Access Recovery precise trust-store override summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_PRECISE_OVERRIDE"
+  exit 1
+fi
+if ! grep -F -- "--trust-store $ACCESS_RECOVERY_TRUST_STORE_FILE" "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" >/dev/null \
+   || ! grep -F -- "TRUST_STORE_receipt.json" "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" >/dev/null \
+   || ! grep -F -- "TRUST_STORE_AUDIT" "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" >/dev/null; then
+  echo "Access Recovery verifier capture did not preserve non-trust-store placeholder-like tokens"
   cat "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE"
   exit 1
 fi

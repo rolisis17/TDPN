@@ -1567,6 +1567,8 @@ if ! jq -e '
     and .local_pack_only == false
     and .missing_evidence_family == "access-recovery"
     and .missing_evidence_action_kind == "trusted-provenance"
+    and .placeholder_unresolved == true
+    and ((.placeholder_keys // []) | index("TRUST_STORE"))
   ))
 ' "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_missing_summary.json" >/dev/null; then
   echo "Access Recovery missing trusted verifier summary mismatch"

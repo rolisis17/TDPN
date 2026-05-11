@@ -1541,8 +1541,6 @@ access_recovery_command_apply_trust_store_override_01() {
     return
   fi
   if ! command_string_to_argv "$cmd"; then
-    cmd="${cmd//ACCESS_RECOVERY_TRUST_STORE/$trust_store}"
-    cmd="${cmd//TRUST_STORE/$trust_store}"
     if [[ ! "$cmd" =~ (^|[[:space:]])--trust-store([[:space:]=]|$) ]]; then
       cmd="${cmd} --trust-store $(printf '%q' "$trust_store")"
     fi
@@ -1576,8 +1574,6 @@ access_recovery_command_apply_trust_store_override_01() {
         ;;
     esac
 
-    token="${token//ACCESS_RECOVERY_TRUST_STORE/$trust_store}"
-    token="${token//TRUST_STORE/$trust_store}"
     out_argv+=("$token")
     idx=$((idx + 1))
   done
@@ -2354,6 +2350,11 @@ elif [[ -n "$(trim "${TRUST_STORE:-}")" ]] && ! access_recovery_trust_store_valu
   runtime_access_recovery_trust_store="$(trim "${TRUST_STORE:-}")"
   runtime_access_recovery_trust_store_source="env:TRUST_STORE"
   runtime_access_recovery_trust_store_configured="1"
+fi
+if [[ "$runtime_access_recovery_trust_store_configured" == "1" ]] \
+   && { [[ ! -f "$runtime_access_recovery_trust_store" ]] || [[ ! -r "$runtime_access_recovery_trust_store" ]]; }; then
+  runtime_access_recovery_trust_store_configured="0"
+  runtime_access_recovery_trust_store_source="${runtime_access_recovery_trust_store_source}:missing_or_unreadable"
 fi
 
 if (( action_timeout_sec > 0 )); then
