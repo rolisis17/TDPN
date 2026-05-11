@@ -2116,6 +2116,7 @@ access_recovery_evidence_json() {
           transport_https: (if (.transport.https | type) == "boolean" then .transport.https else null end),
           transport_tls_verified: (if (.transport.tls_verified | type) == "boolean" then .transport.tls_verified else null end),
           transport_ssl_verify_result: str_or_null(.transport.ssl_verify_result),
+          transport_remote_ip: str_or_null(.transport.remote_ip),
           recommended_action_id: str_or_null(.recommended_next_action.id),
           recommended_action_command: str_or_null(.recommended_next_action.command)
         };
@@ -2474,6 +2475,44 @@ access_recovery_track_json_from_evidence() {
         (split($sep) | .[0]) // "";
       def trim_trailing_dots:
         gsub("\\.+$"; "");
+      def normalize_remote_ip($ip):
+        (($ip // "") | tostring | ascii_downcase | sub("^\\["; "") | sub("\\]$"; ""));
+      def ipv4_public_routable($ip):
+        normalize_remote_ip($ip) as $ip
+        | ($ip | test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"))
+          and (($ip | test("^0\\.")) | not)
+          and (($ip | test("^10\\.")) | not)
+          and (($ip | test("^127\\.")) | not)
+          and (($ip | test("^169\\.254\\.")) | not)
+          and (($ip | test("^172\\.(1[6-9]|2[0-9]|3[0-1])\\.")) | not)
+          and (($ip | test("^192\\.168\\.")) | not)
+          and (($ip | test("^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.")) | not)
+          and (($ip | test("^192\\.0\\.(0|2)\\.")) | not)
+          and (($ip | test("^192\\.88\\.99\\.")) | not)
+          and (($ip | test("^198\\.(1[89]|51\\.100)\\.")) | not)
+          and (($ip | test("^203\\.0\\.113\\.")) | not)
+          and (($ip | test("^(22[4-9]|23[0-9]|24[0-9]|25[0-5])\\.")) | not);
+      def remote_ip_public_routable($ip):
+        normalize_remote_ip($ip) as $ip
+        | if ($ip == "") then false
+          elif ($ip | test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$")) then ipv4_public_routable($ip)
+          elif ($ip | contains(":")) then
+            ($ip != "::")
+            and ($ip != "::1")
+            and (($ip | test("^f[c-d][0-9a-f]*:")) | not)
+            and (($ip | test("^fe[89ab][0-9a-f]*:")) | not)
+            and (($ip | test("^ff[0-9a-f]*:")) | not)
+            and (($ip | test("^2001:0?db8:")) | not)
+            and (
+              if ($ip | startswith("::ffff:")) then
+                ipv4_public_routable($ip | sub("^::ffff:"; ""))
+              elif ($ip | startswith("0:0:0:0:0:ffff:")) then
+                ipv4_public_routable($ip | sub("^0:0:0:0:0:ffff:"; ""))
+              else true
+              end
+            )
+          else false
+          end;
       def smoke_authority:
         (smoke_base_url | sub("^[A-Za-z][A-Za-z0-9+.-]*://"; "") | first_part("/") | first_part("?") | first_part("#"));
       def smoke_authority_has_userinfo:
@@ -2524,10 +2563,12 @@ access_recovery_track_json_from_evidence() {
         and ($service_smoke.details.transport_https == true)
         and ($service_smoke.details.transport_tls_verified == true)
         and (($service_smoke.details.transport_ssl_verify_result // "") == "0")
+        and remote_ip_public_routable($service_smoke.details.transport_remote_ip)
         and (($deployment_evidence.details.transport_status // "") == "pass")
         and ($deployment_evidence.details.transport_https == true)
         and ($deployment_evidence.details.transport_tls_verified == true)
-        and (($deployment_evidence.details.transport_ssl_verify_result // "") == "0");
+        and (($deployment_evidence.details.transport_ssl_verify_result // "") == "0")
+        and remote_ip_public_routable($deployment_evidence.details.transport_remote_ip);
       def evidence_scope:
         if all_pass and evidence_binding.ok and real_helper_https_evidence then "real_helper_https"
         elif all_pass and evidence_binding.ok then "local_rehearsal"
@@ -2626,6 +2667,10 @@ access_recovery_track_json_from_evidence() {
             host: smoke_host,
             https: (smoke_base_url | test("^https://"; "i")),
             public_routable_host: ((private_or_reserved_helper_host) | not),
+            service_remote_ip: ($service_smoke.details.transport_remote_ip // null),
+            service_remote_ip_public_routable: remote_ip_public_routable($service_smoke.details.transport_remote_ip),
+            deployment_remote_ip: ($deployment_evidence.details.transport_remote_ip // null),
+            deployment_remote_ip_public_routable: remote_ip_public_routable($deployment_evidence.details.transport_remote_ip),
             real_helper_https_evidence: real_helper_https_evidence
           },
           recommended_next_action: (
@@ -13886,7 +13931,19 @@ roadmap_progress_register_temp_file "$summary_tmp"
 printf '%s\n' "$summary_payload" >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"
 
-next_actions_md="$(printf '%s\n' "$next_actions_json" | jq -r 'if length == 0 then "- none" else .[] | "- `\(.id)`: `\(.command)` (\(.reason))" end')"
+next_actions_md="$(printf '%s\n' "$next_actions_json" | jq -r '
+  if length == 0 then "- none"
+  else
+    .[]
+    | (
+        if (.placeholder_unresolved == true) then
+          " unresolved placeholders: " + (((.placeholder_keys // []) | if length == 0 then ["unknown"] else . end) | join(","))
+        else ""
+        end
+      ) as $placeholder_note
+    | "- `\(.id)`: `\(.command)` (\(.reason)\($placeholder_note))"
+  end
+')"
 next_actions_remediation_md="$(printf '%s\n' "$next_actions_remediation_json" | jq -r 'if length == 0 then "- none" else .[] | "- `\(.id)`: `\(.remediation_command)` (\(.reason))" end')"
 non_blockchain_actionable_no_sudo_or_github_md="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'if length == 0 then "- none" else .[] | "- `\(.id)`: `\(.command)` (\(.reason))" end')"
 pending_real_host_checks_md="$(printf '%s\n' "$pending_real_host_checks_json" | jq -r '

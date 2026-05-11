@@ -452,6 +452,70 @@ for bad_url in "${bad_real_helper_urls[@]}"; do
   fi
 done
 
+placeholder_input_cases=(
+  "code-file|PRIVATE_CODE_FILE|--code-file must point to a real private access code file, not an unreplaced placeholder"
+  "config-json|BRIDGE_SERVICE_CONFIG|--config-json must point to a real bridge service config, not an unreplaced placeholder"
+  "deploy-pack-dir|BRIDGE_DEPLOY_PACK|--deploy-pack-dir must point to a real bridge deploy pack directory, not an unreplaced placeholder"
+)
+placeholder_input_index=0
+for placeholder_case in "${placeholder_input_cases[@]}"; do
+  placeholder_input_index=$((placeholder_input_index + 1))
+  IFS='|' read -r placeholder_flag placeholder_value expected_message <<<"$placeholder_case"
+  : >"$CAPTURE"
+  case "$placeholder_flag" in
+    code-file)
+      placeholder_code_file="$placeholder_value"
+      placeholder_config_json="$CONFIG_JSON"
+      placeholder_deploy_pack_dir="$DEPLOY_PACK_DIR"
+      ;;
+    config-json)
+      placeholder_code_file="$CODE_FILE"
+      placeholder_config_json="$placeholder_value"
+      placeholder_deploy_pack_dir="$DEPLOY_PACK_DIR"
+      ;;
+    deploy-pack-dir)
+      placeholder_code_file="$CODE_FILE"
+      placeholder_config_json="$CONFIG_JSON"
+      placeholder_deploy_pack_dir="$placeholder_value"
+      ;;
+    *)
+      echo "unknown placeholder integration case: $placeholder_flag"
+      exit 1
+      ;;
+  esac
+  set +e
+  ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+  ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+  ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+  ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+    --base-url https://helper.gpm-pilot.net \
+    --code-file "$placeholder_code_file" \
+    --config-json "$placeholder_config_json" \
+    --deploy-pack-dir "$placeholder_deploy_pack_dir" \
+    --provenance-private-key-file "$PROVENANCE_KEY" \
+    --provenance-org-id freenews-demo \
+    --provenance-org-name "FreeNews Demo" \
+    --trust-store "$TRUST_STORE" \
+    --summary-json "$TMP_DIR/placeholder-input-$placeholder_input_index-summary.json" \
+    --print-summary-json 0 >"$TMP_DIR/placeholder-input-$placeholder_input_index.log" 2>&1
+  placeholder_input_rc=$?
+  set -e
+  if [[ "$placeholder_input_rc" -ne 2 ]] ||
+    ! grep -Fq -- "$expected_message" "$TMP_DIR/placeholder-input-$placeholder_input_index.log"; then
+    echo "expected placeholder $placeholder_flag to fail preflight clearly"
+    cat "$TMP_DIR/placeholder-input-$placeholder_input_index.log"
+    exit 1
+  fi
+  if [[ -s "$CAPTURE" ]]; then
+    echo "placeholder $placeholder_flag should not invoke child scripts"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
+
 : >"$CAPTURE"
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
 ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \

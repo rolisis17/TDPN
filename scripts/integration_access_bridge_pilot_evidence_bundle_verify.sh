@@ -66,7 +66,7 @@ jq -n \
       base_url_port: "443",
       loopback: false,
       https: true,
-      health: {effective_url: "https://recovery-helper.gpm-pilot.net/health", remote_ip: "203.0.113.10", remote_port: "443", http_version: "2", time_connect_sec: "0.01", time_appconnect_sec: "0.02", curl_error: ""},
+      health: {effective_url: "https://recovery-helper.gpm-pilot.net/health", remote_ip: "8.8.8.8", remote_port: "443", http_version: "2", time_connect_sec: "0.01", time_appconnect_sec: "0.02", curl_error: ""},
       tls: {checked: true, verified: true, ssl_verify_result: "0"},
       mtls: {client_certificate_configured: false, client_certificate_used: false}
     },
@@ -116,7 +116,7 @@ jq -n \
       tls_verified: true,
       ssl_verify_result: "0",
       effective_url: "https://recovery-helper.gpm-pilot.net/health",
-      remote_ip: "203.0.113.10",
+      remote_ip: "8.8.8.8",
       remote_port: "443",
       http_version: "2",
       time_appconnect_sec: "0.02"
@@ -434,6 +434,79 @@ set -e
 if [[ "$semantic_bad_rc" -eq 0 ]] || ! grep -Fq 'bundled service smoke did not prove access-code auth is required' "$TMP_DIR/trusted-policy-semantic-bad.log"; then
   echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted semantically incomplete bundled child evidence"
   cat "$TMP_DIR/trusted-policy-semantic-bad.log"
+  exit 1
+fi
+
+PRIVATE_REMOTE_IP_ROOT="$TMP_DIR/private-remote-ip-root"
+PRIVATE_REMOTE_IP_DIR="$PRIVATE_REMOTE_IP_ROOT/$(basename "$BUNDLE_DIR")"
+PRIVATE_REMOTE_IP_SUMMARY="$TMP_DIR/private-remote-ip-summary.json"
+PRIVATE_REMOTE_IP_TAR="$TMP_DIR/private-remote-ip.tar.gz"
+PRIVATE_REMOTE_IP_SHA="${PRIVATE_REMOTE_IP_TAR}.sha256"
+PRIVATE_REMOTE_IP_PROVENANCE="$TMP_DIR/private-remote-ip.provenance.json"
+mkdir -p "$PRIVATE_REMOTE_IP_ROOT"
+cp -R "$BUNDLE_DIR" "$PRIVATE_REMOTE_IP_DIR"
+jq '.transport.health.remote_ip = "10.0.0.8"' \
+  "$PRIVATE_REMOTE_IP_DIR/access_bridge_service_smoke_summary.json" >"$PRIVATE_REMOTE_IP_DIR/access_bridge_service_smoke_summary.json.tmp"
+mv "$PRIVATE_REMOTE_IP_DIR/access_bridge_service_smoke_summary.json.tmp" "$PRIVATE_REMOTE_IP_DIR/access_bridge_service_smoke_summary.json"
+jq '.transport.remote_ip = "10.0.0.8"' \
+  "$PRIVATE_REMOTE_IP_DIR/access_bridge_deployment_evidence_summary.json" >"$PRIVATE_REMOTE_IP_DIR/access_bridge_deployment_evidence_summary.json.tmp"
+mv "$PRIVATE_REMOTE_IP_DIR/access_bridge_deployment_evidence_summary.json.tmp" "$PRIVATE_REMOTE_IP_DIR/access_bridge_deployment_evidence_summary.json"
+jq \
+  --arg bundle_dir "$PRIVATE_REMOTE_IP_DIR" \
+  --arg bundle_tar "$PRIVATE_REMOTE_IP_TAR" \
+  --arg bundle_tar_sha256_file "$PRIVATE_REMOTE_IP_SHA" \
+  --arg manifest_sha256 "$PRIVATE_REMOTE_IP_DIR/manifest.sha256" \
+  --arg summary_json "$PRIVATE_REMOTE_IP_SUMMARY" \
+  --arg bundled_summary_json "$PRIVATE_REMOTE_IP_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
+  --arg provenance_json "$PRIVATE_REMOTE_IP_PROVENANCE" \
+  --arg smoke_summary_json "$PRIVATE_REMOTE_IP_DIR/access_bridge_service_smoke_summary.json" \
+  --arg deployment_summary_json "$PRIVATE_REMOTE_IP_DIR/access_bridge_deployment_evidence_summary.json" \
+  --arg host_summary_json "$PRIVATE_REMOTE_IP_DIR/access_bridge_host_install_check_summary.json" \
+  '.artifacts.bundle_dir = $bundle_dir
+    | .artifacts.bundle_tar = $bundle_tar
+    | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file
+    | .artifacts.manifest_sha256 = $manifest_sha256
+    | .artifacts.summary_json = $summary_json
+    | .artifacts.bundled_summary_json = $bundled_summary_json
+    | .artifacts.provenance_json = $provenance_json
+    | .provenance.sidecar_json = $provenance_json
+    | .artifacts.smoke_summary_json = $smoke_summary_json
+    | .artifacts.deployment_evidence_summary_json = $deployment_summary_json
+    | .artifacts.host_install_check_summary_json = $host_summary_json' \
+  "$SUMMARY_JSON" >"$PRIVATE_REMOTE_IP_SUMMARY"
+cp "$PRIVATE_REMOTE_IP_SUMMARY" "$PRIVATE_REMOTE_IP_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+(
+  cd "$PRIVATE_REMOTE_IP_DIR"
+  find . -type f -print \
+    | sed 's|^\./||' \
+    | grep -v '^manifest\.sha256$' \
+    | LC_ALL=C sort \
+    | while IFS= read -r rel; do
+        sha256sum "$rel"
+      done
+) >"$PRIVATE_REMOTE_IP_DIR/manifest.sha256"
+tar -czf "$PRIVATE_REMOTE_IP_TAR" -C "$PRIVATE_REMOTE_IP_ROOT" "$(basename "$BUNDLE_DIR")"
+printf '%s  %s\n' "$(sha256sum "$PRIVATE_REMOTE_IP_TAR" | awk '{print $1}')" "$(basename "$PRIVATE_REMOTE_IP_TAR")" >"$PRIVATE_REMOTE_IP_SHA"
+go run ./cmd/gpmrecover provenance-sign \
+  --summary-json "$PRIVATE_REMOTE_IP_SUMMARY" \
+  --bundle-tar "$PRIVATE_REMOTE_IP_TAR" \
+  --bundle-tar-sha256-file "$PRIVATE_REMOTE_IP_SHA" \
+  --private-key-file "$PRIVATE_KEY_FILE" \
+  --org-id pilot-org \
+  --org-name "Pilot Org" \
+  --out "$PRIVATE_REMOTE_IP_PROVENANCE" >/dev/null
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$PRIVATE_REMOTE_IP_SUMMARY" \
+  --provenance-json "$PRIVATE_REMOTE_IP_PROVENANCE" \
+  --require-trusted-provenance 1 \
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$TMP_DIR/trusted-policy-private-remote-ip-summary.json" >"$TMP_DIR/trusted-policy-private-remote-ip.log" 2>&1
+private_remote_ip_rc=$?
+set -e
+if [[ "$private_remote_ip_rc" -eq 0 ]] || ! grep -Fq 'bundled service smoke remote IP is missing, invalid, private, or reserved' "$TMP_DIR/trusted-policy-private-remote-ip.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted private remote IP bundled evidence"
+  cat "$TMP_DIR/trusted-policy-private-remote-ip.log"
   exit 1
 fi
 

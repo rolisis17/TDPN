@@ -150,11 +150,11 @@ value_looks_placeholder() {
   value="$(trim "${1:-}")"
   [[ -z "$value" ]] && return 0
   case "$value" in
-    PATH|FILE|DIR|URL|HELPER_PUBLIC_DNS|TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|REPLACE_WITH_*|"<"*">")
+    PATH|FILE|DIR|URL|HELPER_PUBLIC_DNS|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|REPLACE_WITH_*|"<"*">")
       return 0
       ;;
   esac
-  if [[ "$value" == *HELPER_PUBLIC_DNS* || "$value" == *REPLACE_WITH_* || "$value" == *PROVENANCE_PRIVATE_KEY_FILE* || "$value" == *TRUST_STORE* ]]; then
+  if [[ "$value" == *HELPER_PUBLIC_DNS* || "$value" == *PRIVATE_CODE_FILE* || "$value" == *BRIDGE_SERVICE_CONFIG* || "$value" == *BRIDGE_DEPLOY_PACK* || "$value" == *REPLACE_WITH_* || "$value" == *PROVENANCE_PRIVATE_KEY_FILE* || "$value" == *TRUST_STORE* ]]; then
     return 0
   fi
   return 1
@@ -764,11 +764,23 @@ fi
 if [[ -z "$code" && -z "$code_file" ]]; then
   fail_preflight "one of --code or --code-file is required"
 fi
+if [[ -n "$code" ]] && value_looks_placeholder "$code"; then
+  fail_preflight "--code must be a real private access code, not an unreplaced placeholder"
+fi
+if [[ -n "$code_file" ]] && value_looks_placeholder "$code_file"; then
+  fail_preflight "--code-file must point to a real private access code file, not an unreplaced placeholder"
+fi
 if [[ -n "$code_file" && ! -f "$code_file" ]]; then
   fail_preflight "--code-file not found: $code_file"
 fi
+if value_looks_placeholder "$config_json"; then
+  fail_preflight "--config-json must point to a real bridge service config, not an unreplaced placeholder"
+fi
 if [[ ! -f "$config_json" ]]; then
   fail_preflight "--config-json not found: $config_json"
+fi
+if value_looks_placeholder "$deploy_pack_dir"; then
+  fail_preflight "--deploy-pack-dir must point to a real bridge deploy pack directory, not an unreplaced placeholder"
 fi
 if [[ ! -d "$deploy_pack_dir" ]]; then
   fail_preflight "--deploy-pack-dir not found: $deploy_pack_dir"

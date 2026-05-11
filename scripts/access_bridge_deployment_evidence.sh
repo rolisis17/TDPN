@@ -113,6 +113,45 @@ is_private_or_reserved_ipv4_addr() {
   return 1
 }
 
+normalize_remote_ip() {
+  local ip="${1:-}"
+  ip="$(printf '%s' "$ip" | tr '[:upper:]' '[:lower:]')"
+  ip="${ip#[}"
+  ip="${ip%]}"
+  printf '%s' "$ip"
+}
+
+is_ip_literal() {
+  local ip
+  ip="$(normalize_remote_ip "${1:-}")"
+  [[ -n "$ip" ]] || return 1
+  is_ipv4_addr "$ip" && return 0
+  [[ "$ip" == *:* ]]
+}
+
+is_private_or_reserved_remote_ip() {
+  local ip="${1:-}"
+  ip="$(normalize_remote_ip "$ip")"
+  [[ -n "$ip" ]] || return 0
+  if is_ipv4_addr "$ip"; then
+    is_private_or_reserved_ipv4_addr "$ip"
+    return $?
+  fi
+  [[ "$ip" == *:* ]] || return 0
+  [[ "$ip" == "::" || "$ip" == "::1" ]] && return 0
+  [[ "$ip" =~ ^f[c-d][0-9a-f]*: ]] && return 0
+  [[ "$ip" =~ ^fe[89ab][0-9a-f]*: ]] && return 0
+  [[ "$ip" =~ ^ff[0-9a-f]*: ]] && return 0
+  [[ "$ip" =~ ^2001:0?db8: ]] && return 0
+  if [[ "$ip" == ::ffff:* ]]; then
+    is_private_or_reserved_ipv4_addr "${ip#::ffff:}" && return 0
+  fi
+  if [[ "$ip" == 0:0:0:0:0:ffff:* ]]; then
+    is_private_or_reserved_ipv4_addr "${ip#0:0:0:0:0:ffff:}" && return 0
+  fi
+  return 1
+}
+
 is_loopback_host() {
   local host
   host="$(normalize_bridge_host "${1:-}")"
@@ -524,6 +563,16 @@ if [[ "$evidence_scope" == "real_helper_https" ]]; then
   if [[ "$smoke_transport_tls_checked" != "true" || "$smoke_transport_tls_verified" != "true" || "$smoke_transport_ssl_verify_result" != "0" ]]; then
     transport_status="fail"
     transport_reason="$(append_reason "$transport_reason" "smoke summary did not prove verified TLS")"
+  fi
+  if [[ -z "$smoke_transport_remote_ip" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "smoke summary did not record remote IP")"
+  elif ! is_ip_literal "$smoke_transport_remote_ip"; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "smoke summary remote IP is not an IP literal")"
+  elif is_private_or_reserved_remote_ip "$smoke_transport_remote_ip"; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "smoke summary remote IP is private or reserved")"
   fi
 fi
 smoke_path_id="$(json_string_or_empty "$smoke_summary_json" '.path_id')"

@@ -85,7 +85,7 @@ jq -n \
       https: true,
       health: {
         effective_url: "https://recovery-helper.gpm-pilot.net/health",
-        remote_ip: "198.51.100.240",
+        remote_ip: "8.8.8.8",
         remote_port: "443",
         http_version: "2",
         time_appconnect_sec: "0.010000"
@@ -167,10 +167,11 @@ if ! jq -e \
     and .smoke.transport_https == true
     and .smoke.transport_tls_verified == true
     and .transport.status == "pass"
-    and .transport.https == true
-    and .transport.tls_verified == true
-    and .transport.ssl_verify_result == "0"
-    and .smoke.config_sha256 == $config_sha256
+      and .transport.https == true
+      and .transport.tls_verified == true
+      and .transport.ssl_verify_result == "0"
+      and .transport.remote_ip == "8.8.8.8"
+      and .smoke.config_sha256 == $config_sha256
     and .smoke.summary_json == $smoke_summary
     and .expected_identity.helper_id == "helper-evidence"
     and .expected_identity.organization_id == "evidence-org"
@@ -266,6 +267,83 @@ if ! jq -e '
   cat "$BAD_TLS_SUMMARY"
   exit 1
 fi
+
+BAD_REMOTE_IP_SMOKE="$TMP_DIR/access_bridge_service_smoke_bad_remote_ip_summary.json"
+BAD_REMOTE_IP_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_bad_remote_ip_summary.json"
+jq '.transport.health.remote_ip = "10.0.0.5"' "$SMOKE_SUMMARY" >"$BAD_REMOTE_IP_SMOKE"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$BAD_REMOTE_IP_SMOKE" \
+  --expect-helper-id helper-evidence \
+  --expect-org-id evidence-org \
+  --expect-registry-id "$registry_id" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_DIR" \
+  --service-name gpm-access-bridge-evidence \
+  --summary-json "$BAD_REMOTE_IP_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/bad-remote-ip.log" 2>&1
+bad_remote_ip_rc=$?
+set -e
+if [[ "$bad_remote_ip_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: real helper HTTPS with private remote IP should fail"
+  cat "$BAD_REMOTE_IP_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+    .status == "fail"
+    and .evidence_scope == "real_helper_https"
+    and .transport.status == "fail"
+    and .transport.remote_ip == "10.0.0.5"
+    and (.transport.reason | contains("remote IP"))
+    and .recommended_next_action.id == "refresh_deployed_bridge_smoke"
+  ' "$BAD_REMOTE_IP_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: bad remote IP summary mismatch"
+  cat "$BAD_REMOTE_IP_SUMMARY"
+  exit 1
+fi
+while IFS='|' read -r case_id remote_ip expected_fragment; do
+  [[ -n "$case_id" ]] || continue
+  CASE_REMOTE_IP_SMOKE="$TMP_DIR/access_bridge_service_smoke_${case_id}_remote_ip_summary.json"
+  CASE_REMOTE_IP_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_${case_id}_remote_ip_summary.json"
+  jq --arg remote_ip "$remote_ip" '.transport.health.remote_ip = $remote_ip' "$SMOKE_SUMMARY" >"$CASE_REMOTE_IP_SMOKE"
+  set +e
+  ./scripts/access_bridge_deployment_evidence.sh \
+    --smoke-summary-json "$CASE_REMOTE_IP_SMOKE" \
+    --expect-helper-id helper-evidence \
+    --expect-org-id evidence-org \
+    --expect-registry-id "$registry_id" \
+    --config-json "$SERVICE_CONFIG" \
+    --deploy-pack-dir "$DEPLOY_DIR" \
+    --service-name gpm-access-bridge-evidence \
+    --summary-json "$CASE_REMOTE_IP_SUMMARY" \
+    --print-summary-json 0 >"$TMP_DIR/${case_id}-remote-ip.log" 2>&1
+  case_remote_ip_rc=$?
+  set -e
+  if [[ "$case_remote_ip_rc" -eq 0 ]]; then
+    echo "access bridge deployment evidence integration failed: bad remote IP case should fail: $case_id"
+    cat "$CASE_REMOTE_IP_SUMMARY"
+    exit 1
+  fi
+  if ! jq -e \
+    --arg remote_ip "$remote_ip" \
+    --arg expected_fragment "$expected_fragment" \
+    '
+      .status == "fail"
+      and .evidence_scope == "real_helper_https"
+      and .transport.status == "fail"
+      and .transport.remote_ip == $remote_ip
+      and (.transport.reason | contains($expected_fragment))
+      and .recommended_next_action.id == "refresh_deployed_bridge_smoke"
+    ' "$CASE_REMOTE_IP_SUMMARY" >/dev/null; then
+    echo "access bridge deployment evidence integration failed: bad remote IP case summary mismatch: $case_id"
+    cat "$CASE_REMOTE_IP_SUMMARY"
+    exit 1
+  fi
+done <<'EOF_BAD_REMOTE_IP_CASES'
+missing||did not record remote IP
+documentation|203.0.113.10|private or reserved
+not_ip|not-an-ip|not an IP literal
+EOF_BAD_REMOTE_IP_CASES
 
 BAD_LOCAL_CONFIG="$TMP_DIR/bridge-service-config-local-diagnostic.json"
 jq '.allow_local_access_paths = true' "$SERVICE_CONFIG" >"$BAD_LOCAL_CONFIG"

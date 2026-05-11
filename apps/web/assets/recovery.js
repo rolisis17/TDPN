@@ -613,6 +613,9 @@
     if (!raw) {
       throw new Error(`${label} is required`);
     }
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(raw)) {
+      throw new Error(`${label} must be RFC3339 with timezone`);
+    }
     const date = new Date(raw);
     if (!Number.isFinite(date.getTime())) {
       throw new Error(`${label} is not a valid date`);

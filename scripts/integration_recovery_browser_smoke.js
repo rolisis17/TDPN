@@ -182,6 +182,11 @@ function makeLocalStorage() {
   };
 }
 
+function encodeTextEnvelope(kind, payload) {
+  const body = JSON.stringify({ v: 1, k: kind, p: payload });
+  return `GPMREC1.${Buffer.from(body, "utf8").toString("base64url")}`;
+}
+
 async function main() {
   const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "gpm-recovery-browser-smoke-"));
   childProcess.execFileSync(
@@ -359,6 +364,20 @@ async function main() {
   }
 
   await importTextHandoff(trustStoreText, "Trust store text imported");
+
+  const laxDateTrustStore = JSON.parse(trustStore);
+  laxDateTrustStore.trusted_keys[0].added_at_utc = "2026-05-10";
+  document.getElementById("handoff_input").value = encodeTextEnvelope("trust-store", laxDateTrustStore);
+  await document.getElementById("import_text_btn").click();
+  const laxDateStatus = document.getElementById("status-heading").textContent;
+  const laxDateDetail = document.getElementById("status_detail").textContent;
+  if (laxDateStatus !== "Text import failed") {
+    throw new Error(`expected date-only trust-store handoff rejection, got ${laxDateStatus}: ${laxDateDetail}`);
+  }
+  if (!laxDateDetail.includes("trusted key added_at_utc must be RFC3339 with timezone")) {
+    throw new Error(`expected RFC3339 trust-store rejection detail, got ${laxDateDetail}`);
+  }
+
   await document.getElementById("clear_btn").click();
   await importTextHandoff(trustedKeyText, "Trusted key text imported");
 

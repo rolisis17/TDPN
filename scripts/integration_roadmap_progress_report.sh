@@ -854,7 +854,7 @@ cat >"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_SERVICE_SMO
     "https": true,
     "health": {
       "effective_url": "https://recovery-helper.gpm-pilot.net/health",
-      "remote_ip": "198.51.100.240",
+      "remote_ip": "8.8.8.8",
       "remote_port": "443",
       "http_version": "2",
       "time_appconnect_sec": "0.010000"
@@ -930,7 +930,7 @@ cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLO
     "tls_verified": true,
     "ssl_verify_result": "0",
     "effective_url": "https://recovery-helper.gpm-pilot.net/health",
-    "remote_ip": "198.51.100.240",
+    "remote_ip": "8.8.8.8",
     "remote_port": "443",
     "http_version": "2",
     "time_appconnect_sec": "0.010000",
@@ -1209,6 +1209,10 @@ if ! jq -e \
   and .access_recovery_track.evidence_host_policy.host == "recovery-helper.gpm-pilot.net"
   and .access_recovery_track.evidence_host_policy.https == true
   and .access_recovery_track.evidence_host_policy.public_routable_host == true
+  and .access_recovery_track.evidence_host_policy.service_remote_ip == "8.8.8.8"
+  and .access_recovery_track.evidence_host_policy.service_remote_ip_public_routable == true
+  and .access_recovery_track.evidence_host_policy.deployment_remote_ip == "8.8.8.8"
+  and .access_recovery_track.evidence_host_policy.deployment_remote_ip_public_routable == true
   and .access_recovery_track.evidence_host_policy.real_helper_https_evidence == true
   and .access_recovery_track.access_bridge_service_smoke.available == true
   and .access_recovery_track.access_bridge_service_smoke.status == "pass"
@@ -1223,6 +1227,7 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_service_smoke.details.transport_https == true
   and .access_recovery_track.access_bridge_service_smoke.details.transport_tls_verified == true
   and .access_recovery_track.access_bridge_service_smoke.details.transport_ssl_verify_result == "0"
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_remote_ip == "8.8.8.8"
   and .access_recovery_track.access_bridge_deployment_evidence.available == true
   and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
   and .access_recovery_track.access_bridge_deployment_evidence.source_summary_json == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"'"
@@ -1235,6 +1240,7 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_deployment_evidence.details.transport_https == true
   and .access_recovery_track.access_bridge_deployment_evidence.details.transport_tls_verified == true
   and .access_recovery_track.access_bridge_deployment_evidence.details.transport_ssl_verify_result == "0"
+  and .access_recovery_track.access_bridge_deployment_evidence.details.transport_remote_ip == "8.8.8.8"
   and .access_recovery_track.access_bridge_host_install.available == true
   and .access_recovery_track.access_bridge_host_install.status == "pass"
   and .access_recovery_track.access_bridge_host_install.source_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
@@ -1970,6 +1976,11 @@ if ! jq -e '
   cat "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_summary.json"
   exit 1
 fi
+if ! grep -Fq 'unresolved placeholders: TRUST_STORE,HELPER_PUBLIC_DNS,PRIVATE_CODE_FILE,BRIDGE_SERVICE_CONFIG,BRIDGE_DEPLOY_PACK,PROVENANCE_PRIVATE_KEY_FILE,ORG_ID,ORG_NAME' "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_report.md"; then
+  echo "Access Recovery local rehearsal report missing unresolved operator placeholder guidance"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_report.md"
+  exit 1
+fi
 
 echo "[roadmap-progress-report] Access Recovery forged local verifier receipt cannot promote pilot readiness"
 ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_SHA256="$(sha256sum "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON" | awk '{print $1}')"
@@ -2062,9 +2073,64 @@ if ! jq -e '
   and .access_recovery_track.recommended_next_action.id == "real_helper_https_evidence"
   and ((.access_recovery_track.recommended_next_action.command // "") | test("access-recovery-real-helper-evidence-run"))
   and ((.access_recovery_track.recommended_next_action.command // "") | test("--trust-store TRUST_STORE"))
-' "$TMP_DIR/roadmap_progress_access_recovery_private_https_summary.json" >/dev/null; then
+  ' "$TMP_DIR/roadmap_progress_access_recovery_private_https_summary.json" >/dev/null; then
   echo "Access Recovery private HTTPS summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_private_https_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery public helper with private remote IP is not pilot-ready evidence"
+ACCESS_RECOVERY_PRIVATE_REMOTE_IP_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_private_remote_ip_summary.json"
+ACCESS_RECOVERY_PRIVATE_REMOTE_IP_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_private_remote_ip_summary.json"
+jq '.transport.health.remote_ip = "10.0.0.5"' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_PRIVATE_REMOTE_IP_SMOKE_SUMMARY_JSON"
+jq \
+  --arg smoke_summary "$ACCESS_RECOVERY_PRIVATE_REMOTE_IP_SMOKE_SUMMARY_JSON" \
+  '.smoke.summary_json = $smoke_summary | .transport.remote_ip = "10.0.0.5"' \
+  "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_PRIVATE_REMOTE_IP_DEPLOYMENT_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_PRIVATE_REMOTE_IP_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_RECOVERY_PRIVATE_REMOTE_IP_DEPLOYMENT_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_private_remote_ip_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_private_remote_ip_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_private_remote_ip.log 2>&1; then
+  echo "expected success for Access Recovery public helper with private remote IP path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_private_remote_ip.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and .current_roadmap_track == "access_recovery"
+  and .access_recovery_pilot_handoff_ready == false
+  and .access_recovery_track.status == "local-rehearsal-ready"
+  and .access_recovery_track.ready == false
+  and .access_recovery_track.pilot_handoff_ready == false
+  and .access_recovery_track.local_rehearsal_ready == true
+  and .access_recovery_track.needs_attention == true
+  and .access_recovery_track.evidence_scope == "local_rehearsal"
+  and .access_recovery_track.evidence_host_policy.host == "recovery-helper.gpm-pilot.net"
+  and .access_recovery_track.evidence_host_policy.https == true
+  and .access_recovery_track.evidence_host_policy.public_routable_host == true
+  and .access_recovery_track.evidence_host_policy.service_remote_ip == "10.0.0.5"
+  and .access_recovery_track.evidence_host_policy.service_remote_ip_public_routable == false
+  and .access_recovery_track.evidence_host_policy.deployment_remote_ip == "10.0.0.5"
+  and .access_recovery_track.evidence_host_policy.deployment_remote_ip_public_routable == false
+  and .access_recovery_track.evidence_host_policy.real_helper_https_evidence == false
+  and .access_recovery_track.access_bridge_service_smoke.available == true
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_remote_ip == "10.0.0.5"
+  and .access_recovery_track.access_bridge_deployment_evidence.available == true
+  and .access_recovery_track.access_bridge_deployment_evidence.details.transport_remote_ip == "10.0.0.5"
+  and .access_recovery_track.recommended_next_action.id == "real_helper_https_evidence"
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("access-recovery-real-helper-evidence-run"))
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("--trust-store TRUST_STORE"))
+' "$TMP_DIR/roadmap_progress_access_recovery_private_remote_ip_summary.json" >/dev/null; then
+  echo "Access Recovery private remote IP summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_private_remote_ip_summary.json"
   exit 1
 fi
 
@@ -2218,14 +2284,19 @@ fi
 
 echo "[roadmap-progress-report] Access Recovery stale evidence is surfaced as warning by default"
 ACCESS_RECOVERY_STALE_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_stale_summary.json"
+ACCESS_RECOVERY_STALE_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_stale_case_fresh_summary.json"
+ACCESS_RECOVERY_STALE_HOST_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_check_stale_case_fresh_summary.json"
+ACCESS_RECOVERY_STALE_CASE_FRESH_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 jq '.generated_at_utc = "2020-01-01T00:00:00Z"' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_STALE_SMOKE_SUMMARY_JSON"
+jq --arg generated_at_utc "$ACCESS_RECOVERY_STALE_CASE_FRESH_AT" '.generated_at_utc = $generated_at_utc' "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_STALE_DEPLOYMENT_SUMMARY_JSON"
+jq --arg generated_at_utc "$ACCESS_RECOVERY_STALE_CASE_FRESH_AT" '.generated_at_utc = $generated_at_utc' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_RECOVERY_STALE_HOST_SUMMARY_JSON"
 if ! ROADMAP_PROGRESS_ACCESS_RECOVERY_EVIDENCE_MAX_AGE_SEC=60 run_roadmap_progress_report \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
   --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
   --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_STALE_SMOKE_SUMMARY_JSON" \
-  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
-  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_RECOVERY_STALE_DEPLOYMENT_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_RECOVERY_STALE_HOST_SUMMARY_JSON" \
   --summary-json "$TMP_DIR/roadmap_progress_access_recovery_stale_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_access_recovery_stale_report.md" \
   --print-report 0 \
@@ -2257,8 +2328,8 @@ if ! jq -e '
   and .access_recovery_track.recommended_next_action.id == "access_bridge_service_smoke"
   and ((.access_recovery_track.recommended_next_action.command // "") | test("access-recovery-local-evidence-refresh"))
   and .artifacts.access_bridge_service_smoke_summary_json == null
-  and .artifacts.access_bridge_deployment_evidence_summary_json == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"'"
-  and .artifacts.access_bridge_host_install_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
+  and .artifacts.access_bridge_deployment_evidence_summary_json == "'"$ACCESS_RECOVERY_STALE_DEPLOYMENT_SUMMARY_JSON"'"
+  and .artifacts.access_bridge_host_install_summary_json == "'"$ACCESS_RECOVERY_STALE_HOST_SUMMARY_JSON"'"
 ' "$TMP_DIR/roadmap_progress_access_recovery_stale_summary.json" >/dev/null; then
   echo "Access Recovery stale evidence summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_stale_summary.json"
