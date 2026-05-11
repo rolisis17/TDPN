@@ -255,7 +255,7 @@ func usage() {
   go run ./cmd/gpmrecover bridge-service-serve --config FILE --config-sha256 HEX [--addr 127.0.0.1:18980] [--rps 2] [--abuse-log FILE] --access-code-sha256 HEX [--allow-unpinned-local=false] [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=false] [--redirect=false]
   go run ./cmd/gpmrecover bridge-service-code-generate (--code-out FILE | --print-code 1) [--hash-out FILE] [--bytes 24]
   go run ./cmd/gpmrecover bridge-service-code-hash (--code TEXT | --code-file FILE) [--out FILE] [--allow-weak-code=false]
-  go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir DIR [--install-dir /etc/gpm/access-bridge] [--service-name gpm-access-bridge] [--public-host recovery-helper.gpm-pilot.net] --config-sha256 HEX --access-code-sha256 HEX [--allow-unpinned-config=false] [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=true]
+  go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir DIR [--install-dir /etc/gpm/access-bridge] [--service-name gpm-access-bridge] [--public-host recovery-helper.gpm-pilot.net] --config-sha256 HEX --access-code-sha256 HEX [--rps 1..20] [--max-sources 1..100000] [--allow-unpinned-config=false] [--allow-unauthenticated-local=false] [--allow-query-access-code=false] [--trust-proxy-headers=true]
   go run ./cmd/gpmrecover bridge-registry-sign --helper-registry FILE --org-id ID --org-name NAME --private-key-file FILE --out FILE [--registry-id ID] [--lifetime-hours HOURS]
   go run ./cmd/gpmrecover bridge-registry-verify --signed-registry FILE (--trust-store FILE | --public-key-file FILE) [--out-registry FILE] [--show-registry 1]
   go run ./cmd/gpmrecover bridge-registry-check --helper-registry FILE [--helper-id ID] [--org-id ID] [--require-active 1]
@@ -1379,8 +1379,11 @@ func runBridgeServiceDeployPack(args []string) error {
 	if err := validateSHA256Hex("bridge service config", *configSHA256); err != nil {
 		return err
 	}
-	if *rps < 0 || *maxSources < 0 {
-		return errors.New("rps and max-sources must be non-negative")
+	if *rps < 1 || *rps > 20 {
+		return errors.New("bridge-service-deploy-pack requires --rps between 1 and 20 for pilot helper hosts")
+	}
+	if *maxSources < 1 || *maxSources > 100000 {
+		return errors.New("bridge-service-deploy-pack requires --max-sources between 1 and 100000 for pilot helper hosts")
 	}
 	publicHostValue, err := validateBridgeDeployPublicHost(*publicHost)
 	if err != nil {
@@ -1656,7 +1659,10 @@ func bridgeDeployDNSNameLooksReserved(host string) bool {
 	if host == "example.com" || host == "example.net" || host == "example.org" {
 		return true
 	}
-	for _, suffix := range []string{".localhost", ".local", ".lan", ".internal", ".test", ".invalid", ".example", ".example.com", ".example.net", ".example.org"} {
+	if host == "ts.net" || host == "tailscale.net" {
+		return true
+	}
+	for _, suffix := range []string{".localhost", ".local", ".lan", ".internal", ".test", ".invalid", ".example", ".example.com", ".example.net", ".example.org", ".ts.net", ".tailscale.net"} {
 		if strings.HasSuffix(host, suffix) {
 			return true
 		}

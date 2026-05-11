@@ -1984,6 +1984,11 @@ access_recovery_evidence_json() {
         and (.observed.env_rps | test("^[0-9]+$"))
         and ((.observed.env_rps | tonumber) >= 1)
         and ((.observed.env_rps | tonumber) <= 20);
+      def positive_bounded_max_sources:
+        ((.observed.env_max_sources | type) == "string")
+        and (.observed.env_max_sources | test("^[0-9]+$"))
+        and ((.observed.env_max_sources | tonumber) >= 1)
+        and ((.observed.env_max_sources | tonumber) <= 100000);
       def required_host_check_ids:
         [
           "deploy_pack_dir_exists",
@@ -1999,6 +2004,7 @@ access_recovery_evidence_json() {
           "trusted_proxy_headers_enabled",
           "loopback_bind",
           "rate_limit_configured",
+          "rate_limit_source_cap_configured",
           "wrapper_hardened_flags",
           "systemd_hardening",
           "caddy_xff_overwrite",
@@ -2024,6 +2030,7 @@ access_recovery_evidence_json() {
         and ((.summary.checks_total | type) == "number" and .summary.checks_total >= (required_host_check_ids | length))
         and ((.summary.checks_fail | type) == "number" and .summary.checks_fail == 0)
         and positive_bounded_rps
+        and positive_bounded_max_sources
         and required_host_checks_pass;
       def smoke_details:
         {
@@ -2080,6 +2087,7 @@ access_recovery_evidence_json() {
           env_trust_proxy_headers: str_or_null(.observed.env_trust_proxy_headers),
           env_addr: str_or_null(.observed.env_addr),
           env_rps: str_or_null(.observed.env_rps),
+          env_max_sources: str_or_null(.observed.env_max_sources),
           recommended_action_id: str_or_null(.recommended_next_action.id),
           recommended_action_command: str_or_null(.recommended_next_action.command)
         };
@@ -2433,6 +2441,10 @@ access_recovery_track_json_from_evidence() {
             or ($host == "localhost")
             or ($host | test("(^|\\.)(localhost|local|lan|internal|test|invalid|example)$"))
             or ($host | test("(^|\\.)example\\.(com|net|org)$"))
+            or ($host == "ts.net")
+            or ($host | endswith(".ts.net"))
+            or ($host == "tailscale.net")
+            or ($host | endswith(".tailscale.net"))
             or ($host | test("^127\\."))
             or ($host | test("^10\\."))
             or ($host | test("^172\\.(1[6-9]|2[0-9]|3[0-1])\\."))

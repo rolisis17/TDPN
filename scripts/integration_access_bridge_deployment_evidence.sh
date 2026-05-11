@@ -256,6 +256,8 @@ bad_public_hosts=(
   "example.com"
   "example.net"
   "example.org"
+  "helper.tailnet.ts.net"
+  "helper.tailscale.net"
   "user@public.tdpn.net"
   "public.tdpn.net."
 )
@@ -317,6 +319,8 @@ bad_smoke_base_urls=(
   "https://example.com"
   "https://example.net"
   "https://example.org"
+  "https://helper.tailnet.ts.net"
+  "https://helper.tailscale.net"
   "https://user:pass@public.tdpn.net"
   "https://public.tdpn.net."
   "https://[::ffff:10.0.0.8]"

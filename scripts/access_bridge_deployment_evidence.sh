@@ -167,6 +167,7 @@ is_bridge_public_host() {
   [[ "$host" == "localhost" || "$host" == *.localhost ]] && return 1
   [[ "$host" =~ (^|\.)(local|lan|internal|test|invalid|example)$ ]] && return 1
   [[ "$host" =~ (^|\.)example\.(com|net|org)$ ]] && return 1
+  [[ "$host" == ts.net || "$host" == *.ts.net || "$host" == tailscale.net || "$host" == *.tailscale.net ]] && return 1
   IFS=. read -ra labels <<<"$host"
   ((${#labels[@]} >= 2)) || return 1
   for label in "${labels[@]}"; do

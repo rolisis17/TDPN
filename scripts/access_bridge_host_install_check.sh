@@ -152,6 +152,7 @@ is_bridge_public_host() {
   [[ "$host" == "localhost" || "$host" == *.localhost ]] && return 1
   [[ "$host" =~ (^|\.)(local|lan|internal|test|invalid|example)$ ]] && return 1
   [[ "$host" =~ (^|\.)example\.(com|net|org)$ ]] && return 1
+  [[ "$host" == ts.net || "$host" == *.ts.net || "$host" == tailscale.net || "$host" == *.tailscale.net ]] && return 1
   IFS=. read -ra labels <<<"$host"
   ((${#labels[@]} >= 2)) || return 1
   for label in "${labels[@]}"; do
@@ -382,6 +383,7 @@ env_allow_query_code=""
 env_trust_proxy_headers=""
 env_addr=""
 env_rps=""
+env_max_sources=""
 caddy_site_host=""
 caddy_reverse_proxy=""
 nginx_server_name=""
@@ -394,6 +396,7 @@ if [[ -f "$env_file" ]]; then
   env_trust_proxy_headers="$(env_file_value "$env_file" "GPM_BRIDGE_TRUST_PROXY_HEADERS")"
   env_addr="$(env_file_value "$env_file" "GPM_BRIDGE_ADDR")"
   env_rps="$(env_file_value "$env_file" "GPM_BRIDGE_RPS")"
+  env_max_sources="$(env_file_value "$env_file" "GPM_BRIDGE_MAX_SOURCES")"
 
   if [[ -n "$env_config_sha256" ]] && ! is_sha256_hex "$env_config_sha256"; then
     add_check "config_sha256_matches" "fail" "env config sha256 is not 64 hex characters"
@@ -427,10 +430,15 @@ if [[ -f "$env_file" ]]; then
   else
     add_check "loopback_bind" "fail" "bridge service should bind to loopback behind HTTPS proxy"
   fi
-  if [[ "$env_rps" =~ ^[0-9]+$ && "$env_rps" -gt 0 ]]; then
+  if [[ "$env_rps" =~ ^[0-9]+$ && "$env_rps" -ge 1 && "$env_rps" -le 20 ]]; then
     add_check "rate_limit_configured" "pass" "bridge service rate limit is enabled"
   else
-    add_check "rate_limit_configured" "fail" "GPM_BRIDGE_RPS must be a positive integer for pilot helper hosts"
+    add_check "rate_limit_configured" "fail" "GPM_BRIDGE_RPS must be an integer from 1 to 20 for pilot helper hosts"
+  fi
+  if [[ "$env_max_sources" =~ ^[0-9]+$ && "$env_max_sources" -ge 1 && "$env_max_sources" -le 100000 ]]; then
+    add_check "rate_limit_source_cap_configured" "pass" "bridge service rate limit source cap is bounded"
+  else
+    add_check "rate_limit_source_cap_configured" "fail" "GPM_BRIDGE_MAX_SOURCES must be an integer from 1 to 100000 for pilot helper hosts"
   fi
 fi
 
@@ -524,6 +532,7 @@ jq -n \
   --arg env_trust_proxy_headers "$env_trust_proxy_headers" \
   --arg env_addr "$env_addr" \
   --arg env_rps "$env_rps" \
+  --arg env_max_sources "$env_max_sources" \
   --arg caddy_site_host "$caddy_site_host" \
   --arg caddy_reverse_proxy "$caddy_reverse_proxy" \
   --arg nginx_server_name "$nginx_server_name" \
@@ -537,7 +546,7 @@ jq -n \
     schema: {
       id: "access_bridge_host_install_check_summary",
       major: 1,
-      minor: 2
+      minor: 3
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -557,6 +566,7 @@ jq -n \
       env_trust_proxy_headers: $env_trust_proxy_headers,
       env_addr: $env_addr,
       env_rps: $env_rps,
+      env_max_sources: $env_max_sources,
       caddy_site_host: $caddy_site_host,
       caddy_reverse_proxy: $caddy_reverse_proxy,
       nginx_server_name: $nginx_server_name,

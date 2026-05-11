@@ -925,7 +925,7 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
   "schema": {
     "id": "access_bridge_host_install_check_summary",
     "major": 1,
-    "minor": 1
+    "minor": 3
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
@@ -942,10 +942,11 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
     "env_allow_query_code": "false",
     "env_trust_proxy_headers": "true",
     "env_addr": "127.0.0.1:18980",
-    "env_rps": "2"
+    "env_rps": "2",
+    "env_max_sources": "1024"
   },
   "summary": {
-    "checks_total": 21,
+    "checks_total": 22,
     "checks_fail": 0
   },
   "checks": [
@@ -962,6 +963,7 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
     {"id": "trusted_proxy_headers_enabled", "status": "pass", "message": "trusted proxy headers enabled"},
     {"id": "loopback_bind", "status": "pass", "message": "bridge service is configured for loopback bind"},
     {"id": "rate_limit_configured", "status": "pass", "message": "bridge service rate limit is enabled"},
+    {"id": "rate_limit_source_cap_configured", "status": "pass", "message": "bridge service rate limit source cap is bounded"},
     {"id": "wrapper_hardened_flags", "status": "pass", "message": "wrapper propagates hardened flags"},
     {"id": "systemd_hardening", "status": "pass", "message": "systemd unit contains expected hardening"},
     {"id": "caddy_xff_overwrite", "status": "pass", "message": "Caddy overwrites X-Forwarded-For"},
@@ -1183,6 +1185,7 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_host_install.source_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
   and .access_recovery_track.access_bridge_host_install.details.checks_fail == 0
   and .access_recovery_track.access_bridge_host_install.details.env_rps == "2"
+  and .access_recovery_track.access_bridge_host_install.details.env_max_sources == "1024"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == true
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "pass"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.source_summary_json == "'"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON"'"
@@ -2006,6 +2009,8 @@ userinfo|https://public.example@127.0.0.1:19820|127.0.0.1
 localhost_dot|https://localhost.:19820|localhost
 doc_ipv6|https://[2001:db8::1]:19820|2001:db8::1
 mapped_private_ipv6|https://[::ffff:192.168.50.10]:19820|::ffff:192.168.50.10
+tailnet_overlay|https://helper.tailnet.ts.net|helper.tailnet.ts.net
+tailscale_overlay|https://helper.tailscale.net|helper.tailscale.net
 EOF_NONCANONICAL_ACCESS_RECOVERY
 
 echo "[roadmap-progress-report] Access Recovery evidence missing is surfaced as warning by default"
@@ -2445,7 +2450,7 @@ jq '
     | .id as $id
     | select((["caddy_public_host_valid", "caddy_reverse_proxy_target", "nginx_public_host_valid", "nginx_proxy_pass_target"] | index($id)) == null)
   ]
-  | .summary.checks_total = 21
+  | .summary.checks_total = 22
   | .summary.checks_fail = 0
 ' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_RECOVERY_MISSING_PROXY_HOST_INSTALL_SUMMARY_JSON"
 if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
@@ -2472,7 +2477,7 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_host_install.status == "fail"
   and .access_recovery_track.access_bridge_host_install.available == false
   and .access_recovery_track.access_bridge_host_install.semantic_ok == false
-  and .access_recovery_track.access_bridge_host_install.details.checks_total == 21
+  and .access_recovery_track.access_bridge_host_install.details.checks_total == 22
   and .access_recovery_track.access_bridge_host_install.details.checks_fail == 0
   and .access_recovery_track.recommended_next_action.id == "access_bridge_host_install"
 ' "$TMP_DIR/roadmap_progress_access_recovery_missing_proxy_host_summary.json" >/dev/null; then

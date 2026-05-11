@@ -77,6 +77,23 @@ fi
 
 set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url https://helper.tailnet.ts.net \
+  --path-id helper-web \
+  --code test-code \
+  --config-json "$TMP_DIR/missing-config.json" \
+  --deploy-pack-dir "$TMP_DIR/missing-deploy-pack" \
+  --print-summary-json 0 >"$TMP_DIR/overlay-https-pilot-bundle.log" 2>&1
+overlay_https_rc=$?
+set -e
+if [[ "$overlay_https_rc" -eq 0 ]] ||
+  ! grep -Fq -- '--base-url host must look public-routable for non-loopback pilot evidence targets' "$TMP_DIR/overlay-https-pilot-bundle.log"; then
+  echo "access bridge pilot evidence bundle integration failed: overlay HTTPS base URL was not rejected"
+  cat "$TMP_DIR/overlay-https-pilot-bundle.log"
+  exit 1
+fi
+
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
   --base-url https://recovery-helper.gpm-pilot.net \
   --path-id helper-web \
   --code test-code \

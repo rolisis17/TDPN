@@ -58,6 +58,26 @@ go run ./cmd/gpmrecover bridge-service-deploy-pack \
   --access-code-sha256 "$code_hash" \
   >/dev/null
 
+for bad_deploy_arg in "--rps 0" "--rps 999999" "--max-sources 0" "--public-host helper.tailnet.ts.net"; do
+  BAD_DEPLOY_ARG_DIR="$TMP_DIR/bad-deploy-arg-${bad_deploy_arg//[^A-Za-z0-9]/_}"
+  set +e
+  # shellcheck disable=SC2086
+  go run ./cmd/gpmrecover bridge-service-deploy-pack \
+    --out-dir "$BAD_DEPLOY_ARG_DIR" \
+    --service-name gpm-access-bridge-host-check \
+    --install-dir /etc/gpm/access-bridge-host-check \
+    --config /etc/gpm/access-bridge-host-check/bridge-service-config.json \
+    --config-sha256 "$config_sha256" \
+    --access-code-sha256 "$code_hash" \
+    $bad_deploy_arg >"$TMP_DIR/bad-deploy-arg.log" 2>&1
+  bad_deploy_arg_rc=$?
+  set -e
+  if [[ "$bad_deploy_arg_rc" -eq 0 ]]; then
+    echo "access bridge host install check integration failed: deploy pack accepted unsafe arg: $bad_deploy_arg"
+    exit 1
+  fi
+done
+
 ./scripts/access_bridge_host_install_check.sh \
   --deploy-pack-dir "$DEPLOY_DIR" \
   --service-name gpm-access-bridge-host-check \
@@ -80,11 +100,13 @@ if ! jq -e \
     and .observed.env_trust_proxy_headers == "true"
     and .observed.env_addr == "127.0.0.1:18980"
     and .observed.env_rps == "2"
+    and .observed.env_max_sources == "1024"
     and .observed.caddy_site_host == "recovery-helper.gpm-pilot.net"
     and .observed.caddy_reverse_proxy == "127.0.0.1:18980"
     and .observed.nginx_server_name == "recovery-helper.gpm-pilot.net"
     and .observed.nginx_proxy_pass == "127.0.0.1:18980"
     and ([.checks[] | select(.id == "rate_limit_configured" and .status == "pass")] | length == 1)
+    and ([.checks[] | select(.id == "rate_limit_source_cap_configured" and .status == "pass")] | length == 1)
     and ([.checks[] | select(.id == "config_local_access_paths_disabled" and .status == "pass")] | length == 1)
     and ([.checks[] | select(.id == "loopback_bind" and .status == "pass")] | length == 1)
     and ([.checks[] | select(.id == "caddy_reverse_proxy_target" and .status == "pass")] | length == 1)
@@ -138,6 +160,8 @@ bad_public_hosts=(
   "example.com"
   "example.net"
   "example.org"
+  "helper.tailnet.ts.net"
+  "helper.tailscale.net"
   "user@public.tdpn.net"
   "public.tdpn.net."
 )
@@ -289,6 +313,52 @@ fi
 if ! jq -e '.status == "fail" and .observed.env_rps == "0" and ([.checks[] | select(.id == "rate_limit_configured" and .status == "fail")] | length == 1)' "$TMP_DIR/bad-rps-summary.json" >/dev/null; then
   echo "access bridge host install check integration failed: bad rps summary mismatch"
   cat "$TMP_DIR/bad-rps-summary.json"
+  exit 1
+fi
+
+BAD_HIGH_RPS_DIR="$TMP_DIR/bad-high-rps"
+cp -R "$DEPLOY_DIR" "$BAD_HIGH_RPS_DIR"
+sed -i 's/GPM_BRIDGE_RPS="2"/GPM_BRIDGE_RPS="999999"/' "$BAD_HIGH_RPS_DIR/gpm-access-bridge-host-check.env"
+set +e
+./scripts/access_bridge_host_install_check.sh \
+  --deploy-pack-dir "$BAD_HIGH_RPS_DIR" \
+  --service-name gpm-access-bridge-host-check \
+  --config-json "$SERVICE_CONFIG" \
+  --summary-json "$TMP_DIR/bad-high-rps-summary.json" \
+  --print-summary-json 0 >/dev/null 2>&1
+bad_high_rps_rc=$?
+set -e
+if [[ "$bad_high_rps_rc" -eq 0 ]]; then
+  echo "access bridge host install check integration failed: unbounded rate limit should fail"
+  cat "$TMP_DIR/bad-high-rps-summary.json"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .observed.env_rps == "999999" and ([.checks[] | select(.id == "rate_limit_configured" and .status == "fail")] | length == 1)' "$TMP_DIR/bad-high-rps-summary.json" >/dev/null; then
+  echo "access bridge host install check integration failed: high rps summary mismatch"
+  cat "$TMP_DIR/bad-high-rps-summary.json"
+  exit 1
+fi
+
+BAD_MAX_SOURCES_DIR="$TMP_DIR/bad-max-sources"
+cp -R "$DEPLOY_DIR" "$BAD_MAX_SOURCES_DIR"
+sed -i 's/GPM_BRIDGE_MAX_SOURCES="1024"/GPM_BRIDGE_MAX_SOURCES="0"/' "$BAD_MAX_SOURCES_DIR/gpm-access-bridge-host-check.env"
+set +e
+./scripts/access_bridge_host_install_check.sh \
+  --deploy-pack-dir "$BAD_MAX_SOURCES_DIR" \
+  --service-name gpm-access-bridge-host-check \
+  --config-json "$SERVICE_CONFIG" \
+  --summary-json "$TMP_DIR/bad-max-sources-summary.json" \
+  --print-summary-json 0 >/dev/null 2>&1
+bad_max_sources_rc=$?
+set -e
+if [[ "$bad_max_sources_rc" -eq 0 ]]; then
+  echo "access bridge host install check integration failed: unbounded source tracking should fail"
+  cat "$TMP_DIR/bad-max-sources-summary.json"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .observed.env_max_sources == "0" and ([.checks[] | select(.id == "rate_limit_source_cap_configured" and .status == "fail")] | length == 1)' "$TMP_DIR/bad-max-sources-summary.json" >/dev/null; then
+  echo "access bridge host install check integration failed: bad max-sources summary mismatch"
+  cat "$TMP_DIR/bad-max-sources-summary.json"
   exit 1
 fi
 
