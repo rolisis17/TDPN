@@ -75,6 +75,11 @@ Then run fail-closed signoff:
   --summary-json <reports_dir>/prod_pilot_cohort_summary.json
 ```
 
+Signoff is fail-closed by default:
+- cohort evidence must be fresh unless you explicitly change `--max-evidence-age-sec` (default `600` seconds)
+- trend GO-rate and alert severity must match the summary-linked trend/alert artifacts
+- bundle tar/checksum/manifest overrides are rejected when they do not match the summary artifact paths
+
 Minimal one-command operator path:
 
 ```bash
@@ -90,16 +95,16 @@ Quick-mode artifact:
   - output now also prints the upstream `pre_real_host_readiness_summary_json` path when present, plus direct incident handoff paths when failed-round incident artifacts are available
 - aggregate quick trend with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-trend --reports-dir <reports_dir> --summary-json <reports_dir>/prod_pilot_quick_trend.json`
-  - trend summary JSON now also carries latest failed incident handoff paths plus the upstream `pre_real_host_readiness_summary_json` pointer when available
+  - malformed or missing quick-check decisions are counted as `NO-GO` evaluation errors, and trend summary JSON now also carries latest failed incident handoff paths plus the upstream `pre_real_host_readiness_summary_json` pointer when available
 - classify quick alert severity with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-alert --trend-summary-json <reports_dir>/prod_pilot_quick_trend.json --summary-json <reports_dir>/prod_pilot_quick_alert.json`
-  - alert JSON/output now also carries that same readiness pointer when the latest failed incident handoff exists
+  - supplied trend summaries are validated against `.runs[]`, run timestamps, report paths, and recomputed metrics before severity is trusted; alert JSON/output now also carries that same readiness pointer when the latest failed incident handoff exists
 - generate quick dashboard artifacts with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-dashboard --reports-dir <reports_dir> --dashboard-md <reports_dir>/prod_pilot_quick_dashboard.md`
   - dashboard markdown now also renders incident handoff paths plus the same readiness pointer when present
 - run one-command quick signoff gate with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-signoff --run-report-json <reports_dir>/prod_pilot_cohort_quick_report.json --reports-dir <reports_dir> --max-alert-severity WARN`
-  - generated signoff JSON now also carries incident handoff artifact paths and the upstream `pre_real_host_readiness_summary_json` path when present
+  - alert stage requires trend stage; generated signoff JSON now also carries incident handoff artifact paths and the upstream `pre_real_host_readiness_summary_json` path when present
 - run one-command quick pilot runbook (quick + signoff + optional dashboard) with:
   - `./scripts/easy_node.sh prod-pilot-cohort-quick-runbook --bootstrap-directory https://<A_HOST>:8081 --subject pilot-client --max-alert-severity WARN --max-round-failures 0 --bundle-outputs 1 --bundle-fail-close 1`
   - generated runbook summary now also preserves incident handoff artifact paths from quick signoff when available
@@ -159,8 +164,12 @@ Bundle verifier behavior:
 Cohort check/signoff behavior:
 - validates cohort `status` and round-failure policy
 - validates trend decision/GO-rate thresholds
+- validates summary trend metrics against the linked trend artifact
 - validates alert severity threshold
+- validates summary alert severity against the linked alert artifact
 - validates required bundle presence (`bundle.created`, manifest artifact)
+- enforces fresh evidence by default (`--max-evidence-age-sec`, default `600`)
+- rejects signoff bundle artifact overrides that do not match the summary artifact paths
 
 ## Failure-step meanings
 

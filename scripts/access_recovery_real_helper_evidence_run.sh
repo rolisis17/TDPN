@@ -132,6 +132,19 @@ need_cmd() {
   fi
 }
 
+sha256_value() {
+  local file="$1"
+  if [[ ! -f "$file" ]]; then
+    return 1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
 value_looks_placeholder() {
   local value
   value="$(trim "${1:-}")"
@@ -293,6 +306,93 @@ print_failure_log_tail() {
     echo "$label failed; last log lines:" >&2
     tail -n 80 "$file" >&2 || true
   fi
+}
+
+validate_trusted_verifier_receipt() {
+  local smoke_sha deployment_sha host_sha receipt_errors
+  if [[ ! -f "$verification_summary_json" ]]; then
+    echo "Trusted verifier receipt was not written: $verification_summary_json"
+    return 1
+  fi
+  if ! jq -e 'type == "object"' "$verification_summary_json" >/dev/null 2>&1; then
+    echo "Trusted verifier receipt is not valid JSON: $verification_summary_json"
+    return 1
+  fi
+  smoke_sha="$(sha256_value "$bundle_service_smoke_summary_json" 2>/dev/null || true)"
+  deployment_sha="$(sha256_value "$bundle_deployment_evidence_summary_json" 2>/dev/null || true)"
+  host_sha="$(sha256_value "$bundle_host_install_check_summary_json" 2>/dev/null || true)"
+  if [[ -z "$smoke_sha" || -z "$deployment_sha" || -z "$host_sha" ]]; then
+    echo "Trusted verifier receipt cannot be bound because a child evidence summary hash is missing"
+    return 1
+  fi
+  receipt_errors="$(jq -r \
+    --arg verification_summary_json "$verification_summary_json" \
+    --arg bundle_summary_json "$bundle_summary_json" \
+    --arg provenance_out "$provenance_out" \
+    --arg trust_store "$trust_store" \
+    --arg base_url "$base_url" \
+    --arg smoke_sha "$smoke_sha" \
+    --arg deployment_sha "$deployment_sha" \
+    --arg host_sha "$host_sha" \
+    '
+      [
+        if (.schema.id // "") != "access_bridge_pilot_evidence_bundle_verify_summary" then "schema id is not access_bridge_pilot_evidence_bundle_verify_summary" else empty end,
+        if (.schema.major // 0) != 1 then "schema major is not 1" else empty end,
+        if (.schema.minor // -1) < 2 then "schema minor is too old for trusted handoff child-evidence semantics" else empty end,
+        if (.status // "") != "pass" then "receipt status is not pass" else empty end,
+        if (.rc // -1) != 0 then "receipt rc is not 0" else empty end,
+        if (.pilot_handoff_ready // false) != true then "pilot_handoff_ready is not true" else empty end,
+        if (.trusted_pilot_receipt_ready // false) != true then "trusted_pilot_receipt_ready is not true" else empty end,
+        if (.pilot_handoff_criteria.ready // false) != true then "pilot_handoff_criteria.ready is not true" else empty end,
+        if (.pilot_handoff_criteria.trusted_pilot_receipt_ready // false) != true then "pilot_handoff_criteria.trusted_pilot_receipt_ready is not true" else empty end,
+        if (.pilot_handoff_criteria.require_trusted_provenance // false) != true then "trusted provenance was not required" else empty end,
+        if (.pilot_handoff_criteria.provenance_checked // false) != true then "provenance was not checked" else empty end,
+        if (.pilot_handoff_criteria.provenance_trusted // false) != true then "provenance was not trusted" else empty end,
+        if (.pilot_handoff_criteria.provenance_status // "") != "pass" then "provenance status is not pass" else empty end,
+        if (.pilot_handoff_criteria.provenance_source // "") != "trust_store" then "provenance source is not trust_store" else empty end,
+        if (.pilot_handoff_criteria.provenance_evidence_scope // "") != "real_helper_https" then "provenance evidence_scope is not real_helper_https" else empty end,
+        if (.pilot_handoff_criteria.summary_evidence_scope // "") != "real_helper_https" then "summary evidence_scope is not real_helper_https" else empty end,
+        if (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok // false) != true then "bundled child evidence semantic validation did not pass" else empty end,
+        if (.pilot_handoff_criteria.trust_store_sha256_present // false) != true then "trust store sha256 is missing" else empty end,
+        if (.pilot_handoff_criteria.public_key_file_absent // false) != true then "public key file was accepted for trusted handoff" else empty end,
+        if (.pilot_handoff_criteria.dev_trust_store_allowed // false) == true then "diagnostic dev trust-store override was used" else empty end,
+        if (.inputs.summary_json // "") != $bundle_summary_json then "receipt summary_json does not match current bundle summary" else empty end,
+        if (.inputs.provenance_json // "") != $provenance_out then "receipt provenance_json does not match current provenance sidecar" else empty end,
+        if (.inputs.trust_store // "") != $trust_store then "receipt trust_store does not match requested trust store" else empty end,
+        if ((.inputs.trust_store_sha256 // "") | test("^[A-Fa-f0-9]{64}$") | not) then "receipt trust_store_sha256 is missing or malformed" else empty end,
+        if (.inputs.public_key_file // null) != null then "receipt includes a public_key_file" else empty end,
+        if (.inputs.allow_dev_trust_store // false) == true then "receipt used allow_dev_trust_store" else empty end,
+        if (.checks.summary_contract.enabled // false) != true then "summary contract check was not enabled" else empty end,
+        if (.checks.summary_contract.status // "") != "pass" then "summary contract check did not pass" else empty end,
+        if (.checks.tar_sha256.enabled // false) != true then "tar sha256 check was not enabled" else empty end,
+        if (.checks.tar_sha256.checked // false) != true then "tar sha256 was not checked" else empty end,
+        if (.checks.tar_sha256.status // "") != "pass" then "tar sha256 check did not pass" else empty end,
+        if (.checks.manifest.enabled // false) != true then "manifest check was not enabled" else empty end,
+        if (.checks.manifest.status // "") != "pass" then "manifest check did not pass" else empty end,
+        if (.checks.provenance.enabled // false) != true then "provenance check was not enabled" else empty end,
+        if (.checks.provenance.required_trusted // false) != true then "trusted provenance check was not required" else empty end,
+        if (.checks.provenance.status // "") != "pass" then "provenance check did not pass" else empty end,
+        if (.trusted_provenance.required // false) != true then "trusted_provenance.required is not true" else empty end,
+        if (.trusted_provenance.checked // false) != true then "trusted_provenance.checked is not true" else empty end,
+        if (.trusted_provenance.source // "") != "trust_store" then "trusted_provenance.source is not trust_store" else empty end,
+        if (.trusted_provenance.trusted // false) != true then "trusted_provenance.trusted is not true" else empty end,
+        if (.trusted_provenance.status // "") != "pass" then "trusted_provenance.status is not pass" else empty end,
+        if (.trusted_provenance.evidence_scope // "") != "real_helper_https" then "trusted_provenance.evidence_scope is not real_helper_https" else empty end,
+        if (.trusted_provenance.summary_evidence_scope // "") != "real_helper_https" then "trusted_provenance.summary_evidence_scope is not real_helper_https" else empty end,
+        if (.evidence_binding.base_url // "") != $base_url then "evidence binding base_url does not match current run" else empty end,
+        if (.evidence_binding.smoke_summary_sha256 // "") != $smoke_sha then "evidence binding smoke summary hash does not match current bundle output" else empty end,
+        if (.evidence_binding.deployment_evidence_summary_sha256 // "") != $deployment_sha then "evidence binding deployment summary hash does not match current bundle output" else empty end,
+        if (.evidence_binding.host_install_check_summary_sha256 // "") != $host_sha then "evidence binding host-install summary hash does not match current bundle output" else empty end,
+        if (.artifacts.verification_summary_json // "") != $verification_summary_json then "receipt artifact path does not match requested verifier receipt" else empty end,
+        if (.artifacts.source_summary_json // "") != $bundle_summary_json then "receipt source summary artifact does not match current bundle summary" else empty end,
+        if (.artifacts.provenance_json // "") != $provenance_out then "receipt provenance artifact does not match current provenance sidecar" else empty end
+      ] | .[]
+    ' "$verification_summary_json")"
+  if [[ -n "$receipt_errors" ]]; then
+    printf '%s\n' "$receipt_errors"
+    return 1
+  fi
+  return 0
 }
 
 while [[ $# -gt 0 ]]; do
@@ -459,7 +559,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for cmd in date dirname jq mkdir tail; do
+for cmd in awk date dirname jq mkdir tail; do
   need_cmd "$cmd"
 done
 
@@ -641,6 +741,10 @@ fail_preflight() {
   exit 2
 }
 
+if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+  fail_preflight "missing required command: sha256sum or shasum"
+fi
+
 if value_looks_placeholder "$base_url"; then
   fail_preflight "--base-url must be a real public HTTPS helper URL"
 fi
@@ -769,11 +873,18 @@ if [[ "$bundle_rc" -ne 0 ]]; then
   [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
   exit "$bundle_rc"
 fi
-bundle_service_smoke_summary_json="$(jq -r 'if (.artifacts.smoke_summary_json | type) == "string" then .artifacts.smoke_summary_json else "" end' "$bundle_summary_json" 2>/dev/null || printf '%s' "")"
-bundle_deployment_evidence_summary_json="$(jq -r 'if (.artifacts.deployment_evidence_summary_json | type) == "string" then .artifacts.deployment_evidence_summary_json else "" end' "$bundle_summary_json" 2>/dev/null || printf '%s' "")"
-bundle_host_install_check_summary_json="$(jq -r 'if (.artifacts.host_install_check_summary_json | type) == "string" then .artifacts.host_install_check_summary_json else "" end' "$bundle_summary_json" 2>/dev/null || printf '%s' "")"
+bundle_service_smoke_summary_json="$(abs_path "$(jq -r 'if (.artifacts.smoke_summary_json | type) == "string" then .artifacts.smoke_summary_json else "" end' "$bundle_summary_json" 2>/dev/null || printf '%s' "")")"
+bundle_deployment_evidence_summary_json="$(abs_path "$(jq -r 'if (.artifacts.deployment_evidence_summary_json | type) == "string" then .artifacts.deployment_evidence_summary_json else "" end' "$bundle_summary_json" 2>/dev/null || printf '%s' "")")"
+bundle_host_install_check_summary_json="$(abs_path "$(jq -r 'if (.artifacts.host_install_check_summary_json | type) == "string" then .artifacts.host_install_check_summary_json else "" end' "$bundle_summary_json" 2>/dev/null || printf '%s' "")")"
 if [[ -z "$bundle_service_smoke_summary_json" || -z "$bundle_deployment_evidence_summary_json" || -z "$bundle_host_install_check_summary_json" ]]; then
   write_summary "fail" 1 "bundle" "Access bridge pilot evidence bundle summary is missing child evidence paths required for roadmap binding"
+  echo "access-recovery-real-helper-evidence-run: status=fail stage=bundle"
+  echo "summary_json: $summary_json"
+  [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
+  exit 1
+fi
+if [[ ! -f "$bundle_service_smoke_summary_json" || ! -f "$bundle_deployment_evidence_summary_json" || ! -f "$bundle_host_install_check_summary_json" ]]; then
+  write_summary "fail" 1 "bundle" "Access bridge pilot evidence bundle summary points to missing child evidence outputs required for trusted handoff"
   echo "access-recovery-real-helper-evidence-run: status=fail stage=bundle"
   echo "summary_json: $summary_json"
   [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
@@ -805,6 +916,15 @@ fi
 verifier_ready="$(jq -r '.pilot_handoff_ready // false | tostring' "$verification_summary_json" 2>/dev/null || printf '%s' "false")"
 if [[ "$verifier_ready" != "true" ]]; then
   write_summary "fail" 1 "verify" "Trusted verifier receipt did not mark pilot_handoff_ready=true"
+  echo "access-recovery-real-helper-evidence-run: status=fail stage=verify"
+  echo "summary_json: $summary_json"
+  [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
+  exit 1
+fi
+if ! receipt_validation_errors="$(validate_trusted_verifier_receipt 2>&1)"; then
+  write_summary "fail" 1 "verify" "Trusted verifier receipt did not prove current real helper HTTPS evidence binding"
+  echo "trusted verifier receipt validation failed:" >&2
+  printf '%s\n' "$receipt_validation_errors" >&2
   echo "access-recovery-real-helper-evidence-run: status=fail stage=verify"
   echo "summary_json: $summary_json"
   [[ "$print_summary_json" == "1" ]] && cat "$summary_json"

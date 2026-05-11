@@ -42,17 +42,150 @@ PRIVATE_KEY_FILE="$TMP_DIR/provenance-private.key"
 PUBLIC_KEY_FILE="$TMP_DIR/provenance-public.key"
 TRUST_STORE="$TMP_DIR/provenance-trust-store.json"
 DEMO_TRUST_STORE="$TMP_DIR/.easy-node-logs/access-recovery-demo/recovery-trust.json"
+DEMO_MARKED_TRUST_STORE="$TMP_DIR/copied-demo-marker-trust-store.json"
 mkdir -p "$BUNDLE_DIR/bridge-deploy-pack"
 mkdir -p "$(dirname "$DEMO_TRUST_STORE")"
 go run ./cmd/gpmrecover gen --private-key-out "$PRIVATE_KEY_FILE" --public-key-out "$PUBLIC_KEY_FILE" >/dev/null
 go run ./cmd/gpmrecover trust-add --trust-store "$TRUST_STORE" --org-id pilot-org --org-name "Pilot Org" --public-key-file "$PUBLIC_KEY_FILE" >/dev/null
 cp "$TRUST_STORE" "$DEMO_TRUST_STORE"
-printf '%s\n' '{"status":"pass"}' >"$BUNDLE_DIR/access_bridge_service_smoke_summary.json"
+jq '.trusted_keys[0].source = "generated demo bundle"' "$TRUST_STORE" >"$DEMO_MARKED_TRUST_STORE"
+NOW_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+jq -n \
+  --arg generated_at_utc "$NOW_UTC" \
+  '{
+    version: 1,
+    schema: {id: "access_bridge_service_smoke_summary", major: 1, minor: 3},
+    generated_at_utc: $generated_at_utc,
+    status: "pass",
+    notes: "Access bridge service smoke passed",
+    base_url: "https://recovery-helper.gpm-pilot.net",
+    path_id: "helper-web",
+    transport: {
+      base_url_scheme: "https",
+      base_url_host: "recovery-helper.gpm-pilot.net",
+      base_url_port: "443",
+      loopback: false,
+      https: true,
+      health: {effective_url: "https://recovery-helper.gpm-pilot.net/health", remote_ip: "203.0.113.10", remote_port: "443", http_version: "2", time_connect_sec: "0.01", time_appconnect_sec: "0.02", curl_error: ""},
+      tls: {checked: true, verified: true, ssl_verify_result: "0"},
+      mtls: {client_certificate_configured: false, client_certificate_used: false}
+    },
+    health: {http_status: "200", status: "ok", helper_id: "helper-pilot", organization_id: "pilot-org", registry_id: "registry-pilot", config_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    auth: {required: true, missing_code_http_status: "401", wrong_code_http_status: "401", valid_code_http_status: "200"},
+    bridge: {http_status: "200", status: "ok", security_headers_ok: true},
+    abuse: {http_status: "202"}
+  }' >"$BUNDLE_DIR/access_bridge_service_smoke_summary.json"
 ORIGINAL_SMOKE_SUMMARY_COPY="$TMP_DIR/original_access_bridge_service_smoke_summary.json"
 cp "$BUNDLE_DIR/access_bridge_service_smoke_summary.json" "$ORIGINAL_SMOKE_SUMMARY_COPY"
 printf '%s\n' 'smoke ok' >"$BUNDLE_DIR/access_bridge_service_smoke.log"
-printf '%s\n' '{"status":"pass"}' >"$BUNDLE_DIR/access_bridge_deployment_evidence_summary.json"
-printf '%s\n' '{"status":"pass"}' >"$BUNDLE_DIR/access_bridge_host_install_check_summary.json"
+jq -n \
+  --arg generated_at_utc "$NOW_UTC" \
+  '{
+    version: 1,
+    schema: {id: "access_bridge_deployment_evidence_summary", major: 1, minor: 2},
+    generated_at_utc: $generated_at_utc,
+    status: "pass",
+    evidence_scope: "real_helper_https",
+    pilot_handoff_candidate: true,
+    notes: "Access bridge deployment evidence is ready for trusted bundle verification before operator handoff",
+    smoke: {
+      status: "pass",
+      schema_id: "access_bridge_service_smoke_summary",
+      generated_at_utc: $generated_at_utc,
+      auth_required: true,
+      missing_code_http_status: "401",
+      wrong_code_http_status: "401",
+      valid_code_http_status: "200",
+      bridge_http_status: "200",
+      bridge_status: "ok",
+      bridge_security_headers_ok: true,
+      evidence_status: "pass",
+      base_url: "https://recovery-helper.gpm-pilot.net",
+      base_host: "recovery-helper.gpm-pilot.net",
+      transport_https: true,
+      transport_tls_verified: true,
+      path_id: "helper-web",
+      config_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    transport: {
+      status: "pass",
+      base_url_scheme: "https",
+      https: true,
+      loopback: false,
+      tls_checked: true,
+      tls_verified: true,
+      ssl_verify_result: "0",
+      effective_url: "https://recovery-helper.gpm-pilot.net/health",
+      remote_ip: "203.0.113.10",
+      remote_port: "443",
+      http_version: "2",
+      time_appconnect_sec: "0.02"
+    },
+    expected_identity: {helper_id: "helper-pilot", organization_id: "pilot-org", registry_id: "registry-pilot"},
+    deployed_identity: {helper_id: "helper-pilot", organization_id: "pilot-org", registry_id: "registry-pilot"},
+    identity_check: {status: "pass"},
+    local_files: {
+      config: {supplied: true, status: "pass", valid_json: true, sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", helper_id: "helper-pilot", organization_id: "pilot-org", registry_id: "registry-pilot", allow_local_access_paths: "false"},
+      deploy_pack: {supplied: true, status: "pass", exists: true, env: {allow_unauthenticated_local: "false", allow_query_code: "false", trust_proxy_headers: "true", addr: "127.0.0.1:8791"}}
+    }
+  }' >"$BUNDLE_DIR/access_bridge_deployment_evidence_summary.json"
+jq -n \
+  --arg generated_at_utc "$NOW_UTC" \
+  '[
+    "deploy_pack_dir_exists",
+    "env_file_exists",
+    "wrapper_file_exists",
+    "systemd_unit_exists",
+    "caddy_example_exists",
+    "nginx_example_exists",
+    "config_json_exists",
+    "config_json_valid",
+    "config_local_access_paths_disabled",
+    "config_sha256_matches",
+    "access_code_gate_configured",
+    "query_access_code_disabled",
+    "trusted_proxy_headers_enabled",
+    "loopback_bind",
+    "rate_limit_configured",
+    "rate_limit_source_cap_configured",
+    "wrapper_hardened_flags",
+    "systemd_hardening",
+    "caddy_xff_overwrite",
+    "nginx_xff_overwrite",
+    "caddy_public_host_valid",
+    "caddy_public_host_matches_expected",
+    "caddy_reverse_proxy_target",
+    "nginx_public_host_valid",
+    "nginx_public_host_matches_expected",
+    "nginx_proxy_pass_target"
+  ] as $ids
+  | {
+      version: 1,
+      schema: {id: "access_bridge_host_install_check_summary", major: 1, minor: 4},
+      generated_at_utc: $generated_at_utc,
+      status: "pass",
+      notes: "Access bridge host install checks passed",
+      inputs: {deploy_pack_dir: "bridge-deploy-pack", service_name: "gpm-access-bridge", config_json: "bridge-service-config.json", expected_base_url: "https://recovery-helper.gpm-pilot.net", expected_public_host: "recovery-helper.gpm-pilot.net"},
+      observed: {
+        expected_public_host: "recovery-helper.gpm-pilot.net",
+        expected_config_sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        config_allow_local_access_paths: "false",
+        env_config_sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        env_access_code_sha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        env_allow_unauthenticated_local: "false",
+        env_allow_query_code: "false",
+        env_trust_proxy_headers: "true",
+        env_addr: "127.0.0.1:8791",
+        env_rps: "5",
+        env_max_sources: "1024",
+        caddy_site_host: "recovery-helper.gpm-pilot.net",
+        caddy_reverse_proxy: "127.0.0.1:8791",
+        nginx_server_name: "recovery-helper.gpm-pilot.net",
+        nginx_proxy_pass: "127.0.0.1:8791"
+      },
+      summary: {checks_total: ($ids | length), checks_fail: 0},
+      checks: ($ids | map({id: ., status: "pass", message: "ok"}))
+    }' >"$BUNDLE_DIR/access_bridge_host_install_check_summary.json"
 printf '%s\n' 'GPM_BRIDGE_ALLOW_QUERY_CODE="false"' >"$BUNDLE_DIR/bridge-deploy-pack/gpm-access-bridge.env"
 printf '%s\n' '{"helper_id":"helper-pilot"}' >"$BUNDLE_DIR/bridge-service-config.json"
 SMOKE_SUMMARY_SHA256="$(sha256sum "$BUNDLE_DIR/access_bridge_service_smoke_summary.json" | awk '{print $1}')"
@@ -199,13 +332,14 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --print-verification-summary-json 1 >"$TMP_DIR/verify-provenance-trusted-policy-explicit.log"
 if ! jq -e '
   .schema.id == "access_bridge_pilot_evidence_bundle_verify_summary"
-  and .schema.minor == 1
+  and .schema.minor == 2
   and .status == "pass"
   and .rc == 0
   and .pilot_handoff_ready == true
   and .trusted_pilot_receipt_ready == true
   and .pilot_handoff_criteria.ready == true
   and .pilot_handoff_criteria.trusted_pilot_receipt_ready == true
+  and .pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true
   and .pilot_handoff_criteria.trust_store_sha256_present == true
   and .checks.summary_contract.enabled == true
   and .checks.tar_sha256.enabled == true
@@ -234,6 +368,140 @@ if ! jq -e '
   exit 1
 fi
 
+SEMANTIC_BAD_ROOT="$TMP_DIR/semantic-bad-root"
+SEMANTIC_BAD_DIR="$SEMANTIC_BAD_ROOT/$(basename "$BUNDLE_DIR")"
+SEMANTIC_BAD_SUMMARY="$TMP_DIR/semantic-bad-summary.json"
+SEMANTIC_BAD_TAR="$TMP_DIR/semantic-bad.tar.gz"
+SEMANTIC_BAD_SHA="${SEMANTIC_BAD_TAR}.sha256"
+SEMANTIC_BAD_PROVENANCE="$TMP_DIR/semantic-bad.provenance.json"
+mkdir -p "$SEMANTIC_BAD_ROOT"
+cp -R "$BUNDLE_DIR" "$SEMANTIC_BAD_DIR"
+jq '.auth.required = false' "$SEMANTIC_BAD_DIR/access_bridge_service_smoke_summary.json" >"$SEMANTIC_BAD_DIR/access_bridge_service_smoke_summary.json.tmp"
+mv "$SEMANTIC_BAD_DIR/access_bridge_service_smoke_summary.json.tmp" "$SEMANTIC_BAD_DIR/access_bridge_service_smoke_summary.json"
+jq \
+  --arg bundle_dir "$SEMANTIC_BAD_DIR" \
+  --arg bundle_tar "$SEMANTIC_BAD_TAR" \
+  --arg bundle_tar_sha256_file "$SEMANTIC_BAD_SHA" \
+  --arg manifest_sha256 "$SEMANTIC_BAD_DIR/manifest.sha256" \
+  --arg summary_json "$SEMANTIC_BAD_SUMMARY" \
+  --arg bundled_summary_json "$SEMANTIC_BAD_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
+  --arg provenance_json "$SEMANTIC_BAD_PROVENANCE" \
+  --arg smoke_summary_json "$SEMANTIC_BAD_DIR/access_bridge_service_smoke_summary.json" \
+  --arg deployment_summary_json "$SEMANTIC_BAD_DIR/access_bridge_deployment_evidence_summary.json" \
+  --arg host_summary_json "$SEMANTIC_BAD_DIR/access_bridge_host_install_check_summary.json" \
+  '.artifacts.bundle_dir = $bundle_dir
+    | .artifacts.bundle_tar = $bundle_tar
+    | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file
+    | .artifacts.manifest_sha256 = $manifest_sha256
+    | .artifacts.summary_json = $summary_json
+    | .artifacts.bundled_summary_json = $bundled_summary_json
+    | .artifacts.provenance_json = $provenance_json
+    | .provenance.sidecar_json = $provenance_json
+    | .artifacts.smoke_summary_json = $smoke_summary_json
+    | .artifacts.deployment_evidence_summary_json = $deployment_summary_json
+    | .artifacts.host_install_check_summary_json = $host_summary_json' \
+  "$SUMMARY_JSON" >"$SEMANTIC_BAD_SUMMARY"
+cp "$SEMANTIC_BAD_SUMMARY" "$SEMANTIC_BAD_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+(
+  cd "$SEMANTIC_BAD_DIR"
+  find . -type f -print \
+    | sed 's|^\./||' \
+    | grep -v '^manifest\.sha256$' \
+    | LC_ALL=C sort \
+    | while IFS= read -r rel; do
+        sha256sum "$rel"
+      done
+) >"$SEMANTIC_BAD_DIR/manifest.sha256"
+tar -czf "$SEMANTIC_BAD_TAR" -C "$SEMANTIC_BAD_ROOT" "$(basename "$BUNDLE_DIR")"
+printf '%s  %s\n' "$(sha256sum "$SEMANTIC_BAD_TAR" | awk '{print $1}')" "$(basename "$SEMANTIC_BAD_TAR")" >"$SEMANTIC_BAD_SHA"
+go run ./cmd/gpmrecover provenance-sign \
+  --summary-json "$SEMANTIC_BAD_SUMMARY" \
+  --bundle-tar "$SEMANTIC_BAD_TAR" \
+  --bundle-tar-sha256-file "$SEMANTIC_BAD_SHA" \
+  --private-key-file "$PRIVATE_KEY_FILE" \
+  --org-id pilot-org \
+  --org-name "Pilot Org" \
+  --out "$SEMANTIC_BAD_PROVENANCE" >/dev/null
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$SEMANTIC_BAD_SUMMARY" \
+  --provenance-json "$SEMANTIC_BAD_PROVENANCE" \
+  --require-trusted-provenance 1 \
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$TMP_DIR/trusted-policy-semantic-bad-summary.json" >"$TMP_DIR/trusted-policy-semantic-bad.log" 2>&1
+semantic_bad_rc=$?
+set -e
+if [[ "$semantic_bad_rc" -eq 0 ]] || ! grep -Fq 'bundled service smoke did not prove access-code auth is required' "$TMP_DIR/trusted-policy-semantic-bad.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted semantically incomplete bundled child evidence"
+  cat "$TMP_DIR/trusted-policy-semantic-bad.log"
+  exit 1
+fi
+
+MISMATCHED_ARTIFACT_POINTER_ROOT="$TMP_DIR/mismatched-artifact-pointer-root"
+MISMATCHED_ARTIFACT_POINTER_DIR="$MISMATCHED_ARTIFACT_POINTER_ROOT/$(basename "$BUNDLE_DIR")"
+MISMATCHED_ARTIFACT_POINTER_SUMMARY="$TMP_DIR/mismatched-artifact-pointer-summary.json"
+MISMATCHED_ARTIFACT_POINTER_TAR="$TMP_DIR/mismatched-artifact-pointer.tar.gz"
+MISMATCHED_ARTIFACT_POINTER_SHA="${MISMATCHED_ARTIFACT_POINTER_TAR}.sha256"
+MISMATCHED_ARTIFACT_POINTER_PROVENANCE="$TMP_DIR/mismatched-artifact-pointer.provenance.json"
+MISMATCHED_ARTIFACT_POINTER_OTHER_SMOKE="$TMP_DIR/other-smoke-summary.json"
+mkdir -p "$MISMATCHED_ARTIFACT_POINTER_ROOT"
+cp -R "$BUNDLE_DIR" "$MISMATCHED_ARTIFACT_POINTER_DIR"
+printf '%s\n' '{"status":"pass","outside_bundle":true}' >"$MISMATCHED_ARTIFACT_POINTER_OTHER_SMOKE"
+jq \
+  --arg bundle_dir "$MISMATCHED_ARTIFACT_POINTER_DIR" \
+  --arg bundle_tar "$MISMATCHED_ARTIFACT_POINTER_TAR" \
+  --arg bundle_tar_sha256_file "$MISMATCHED_ARTIFACT_POINTER_SHA" \
+  --arg manifest_sha256 "$MISMATCHED_ARTIFACT_POINTER_DIR/manifest.sha256" \
+  --arg summary_json "$MISMATCHED_ARTIFACT_POINTER_SUMMARY" \
+  --arg bundled_summary_json "$MISMATCHED_ARTIFACT_POINTER_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
+  --arg provenance_json "$MISMATCHED_ARTIFACT_POINTER_PROVENANCE" \
+  --arg other_smoke "$MISMATCHED_ARTIFACT_POINTER_OTHER_SMOKE" \
+  '.artifacts.bundle_dir = $bundle_dir
+    | .artifacts.bundle_tar = $bundle_tar
+    | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file
+    | .artifacts.manifest_sha256 = $manifest_sha256
+    | .artifacts.summary_json = $summary_json
+    | .artifacts.bundled_summary_json = $bundled_summary_json
+    | .artifacts.provenance_json = $provenance_json
+    | .provenance.sidecar_json = $provenance_json
+    | .artifacts.smoke_summary_json = $other_smoke' \
+  "$SUMMARY_JSON" >"$MISMATCHED_ARTIFACT_POINTER_SUMMARY"
+cp "$MISMATCHED_ARTIFACT_POINTER_SUMMARY" "$MISMATCHED_ARTIFACT_POINTER_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+(
+  cd "$MISMATCHED_ARTIFACT_POINTER_DIR"
+  find . -type f -print \
+    | sed 's|^\./||' \
+    | grep -v '^manifest\.sha256$' \
+    | LC_ALL=C sort \
+    | while IFS= read -r rel; do
+        sha256sum "$rel"
+      done
+) >"$MISMATCHED_ARTIFACT_POINTER_DIR/manifest.sha256"
+tar -czf "$MISMATCHED_ARTIFACT_POINTER_TAR" -C "$MISMATCHED_ARTIFACT_POINTER_ROOT" "$(basename "$BUNDLE_DIR")"
+printf '%s  %s\n' "$(sha256sum "$MISMATCHED_ARTIFACT_POINTER_TAR" | awk '{print $1}')" "$(basename "$MISMATCHED_ARTIFACT_POINTER_TAR")" >"$MISMATCHED_ARTIFACT_POINTER_SHA"
+go run ./cmd/gpmrecover provenance-sign \
+  --summary-json "$MISMATCHED_ARTIFACT_POINTER_SUMMARY" \
+  --bundle-tar "$MISMATCHED_ARTIFACT_POINTER_TAR" \
+  --bundle-tar-sha256-file "$MISMATCHED_ARTIFACT_POINTER_SHA" \
+  --private-key-file "$PRIVATE_KEY_FILE" \
+  --org-id pilot-org \
+  --org-name "Pilot Org" \
+  --out "$MISMATCHED_ARTIFACT_POINTER_PROVENANCE" >/dev/null
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$MISMATCHED_ARTIFACT_POINTER_SUMMARY" \
+  --provenance-json "$MISMATCHED_ARTIFACT_POINTER_PROVENANCE" \
+  --require-trusted-provenance 1 \
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$TMP_DIR/trusted-policy-mismatched-artifact-pointer-summary.json" >"$TMP_DIR/trusted-policy-mismatched-artifact-pointer.log" 2>&1
+mismatched_artifact_pointer_rc=$?
+set -e
+if [[ "$mismatched_artifact_pointer_rc" -eq 0 ]] || ! grep -Fq 'artifacts.smoke_summary_json to point inside the verified bundle' "$TMP_DIR/trusted-policy-mismatched-artifact-pointer.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted signed summary with mismatched artifact pointer"
+  cat "$TMP_DIR/trusted-policy-mismatched-artifact-pointer.log"
+  exit 1
+fi
+
 set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$SUMMARY_JSON" \
@@ -246,6 +514,21 @@ set -e
 if [[ "$demo_trust_store_rc" -eq 0 ]] || ! grep -Fq 'rejects local/demo trust-store paths' "$TMP_DIR/verify-provenance-demo-trust-store.log"; then
   echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted demo trust store"
   cat "$TMP_DIR/verify-provenance-demo-trust-store.log"
+  exit 1
+fi
+
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$SUMMARY_JSON" \
+  --provenance-json "$PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$DEMO_MARKED_TRUST_STORE" \
+  --verification-summary-json "$TMP_DIR/verify-provenance-demo-marked-trust-store-summary.json" >"$TMP_DIR/verify-provenance-demo-marked-trust-store.log" 2>&1
+demo_marked_trust_store_rc=$?
+set -e
+if [[ "$demo_marked_trust_store_rc" -eq 0 ]] || ! grep -Fq 'rejects demo-marked trust-store contents' "$TMP_DIR/verify-provenance-demo-marked-trust-store.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted copied demo-marked trust store"
+  cat "$TMP_DIR/verify-provenance-demo-marked-trust-store.log"
   exit 1
 fi
 

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash chmod grep jq mktemp sed wc; do
+for cmd in bash chmod grep jq mktemp sed sha256sum wc; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "easy node access recovery real helper evidence run integration failed: missing required command: $cmd"
     exit 2
@@ -80,6 +80,7 @@ set -euo pipefail
 capture_file="${ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE:?}"
 summary_json=""
 provenance_out=""
+base_url=""
 {
   printf 'bundle'
   for arg in "$@"; do
@@ -97,12 +98,50 @@ while [[ $# -gt 0 ]]; do
       provenance_out="${2:-}"
       shift 2
       ;;
+    --base-url)
+      base_url="${2:-}"
+      shift 2
+      ;;
     *)
       shift
       ;;
   esac
 done
-mkdir -p "$(dirname "$summary_json")"
+bundle_dir="$(dirname "$summary_json")/bundle"
+mkdir -p "$bundle_dir"
+cat >"$bundle_dir/access_bridge_service_smoke_summary.json" <<JSON
+{
+  "status": "pass",
+  "details": {
+    "base_url": "$base_url",
+    "helper_id": "helper-pilot",
+    "organization_id": "freenews-demo",
+    "registry_id": "registry-pilot"
+  }
+}
+JSON
+cat >"$bundle_dir/access_bridge_deployment_evidence_summary.json" <<JSON
+{
+  "status": "pass",
+  "details": {
+    "base_url": "$base_url",
+    "helper_id": "helper-pilot",
+    "organization_id": "freenews-demo",
+    "registry_id": "registry-pilot"
+  }
+}
+JSON
+cat >"$bundle_dir/access_bridge_host_install_check_summary.json" <<JSON
+{
+  "status": "pass",
+  "details": {
+    "base_url": "$base_url",
+    "helper_id": "helper-pilot",
+    "organization_id": "freenews-demo",
+    "registry_id": "registry-pilot"
+  }
+}
+JSON
 cat >"$summary_json" <<JSON
 {
   "version": 1,
@@ -111,13 +150,21 @@ cat >"$summary_json" <<JSON
   "rc": 0,
   "evidence_scope": "real_helper_https",
   "pilot_handoff_ready": false,
+  "inputs": {
+    "base_url": "$base_url"
+  },
   "artifacts": {
-    "smoke_summary_json": "$(dirname "$summary_json")/bundle/access_bridge_service_smoke_summary.json",
-    "deployment_evidence_summary_json": "$(dirname "$summary_json")/bundle/access_bridge_deployment_evidence_summary.json",
-    "host_install_check_summary_json": "$(dirname "$summary_json")/bundle/access_bridge_host_install_check_summary.json",
-    "bundle_dir": "$(dirname "$summary_json")/bundle",
+    "smoke_summary_json": "$bundle_dir/access_bridge_service_smoke_summary.json",
+    "deployment_evidence_summary_json": "$bundle_dir/access_bridge_deployment_evidence_summary.json",
+    "host_install_check_summary_json": "$bundle_dir/access_bridge_host_install_check_summary.json",
+    "bundle_dir": "$bundle_dir",
     "bundle_tar": "$(dirname "$summary_json")/bundle.tar.gz",
-    "bundle_tar_sha256_file": "$(dirname "$summary_json")/bundle.tar.gz.sha256"
+    "bundle_tar_sha256_file": "$(dirname "$summary_json")/bundle.tar.gz.sha256",
+    "provenance_json": "$provenance_out"
+  },
+  "provenance": {
+    "enabled": true,
+    "sidecar_json": "$provenance_out"
   }
 }
 JSON
@@ -133,7 +180,15 @@ cat >"$FAKE_VERIFY" <<'EOF_FAKE_VERIFY'
 set -euo pipefail
 capture_file="${ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE:?}"
 verification_summary_json=""
+summary_json=""
+provenance_json=""
+trust_store=""
 pilot_handoff_ready="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_READY:-true}"
+trusted_provenance="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_TRUSTED:-true}"
+binding_mode="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_BINDING_MODE:-match}"
+sha256_value() {
+  sha256sum "$1" | awk '{print $1}'
+}
 {
   printf 'verify'
   for arg in "$@"; do
@@ -147,30 +202,111 @@ while [[ $# -gt 0 ]]; do
       verification_summary_json="${2:-}"
       shift 2
       ;;
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    --provenance-json)
+      provenance_json="${2:-}"
+      shift 2
+      ;;
+    --trust-store)
+      trust_store="${2:-}"
+      shift 2
+      ;;
     *)
       shift
       ;;
   esac
 done
 mkdir -p "$(dirname "$verification_summary_json")"
-cat >"$verification_summary_json" <<JSON
-{
-  "version": 1,
-  "schema": {"id": "access_bridge_pilot_evidence_bundle_verification_summary", "major": 1, "minor": 0},
-  "status": "pass",
-  "rc": 0,
-  "pilot_handoff_ready": $pilot_handoff_ready,
-  "details": {
-    "evidence_scope": "real_helper_https",
-    "summary_evidence_scope": "real_helper_https"
-  },
-  "trusted_provenance": {
-    "ok": true,
-    "evidence_scope": "real_helper_https",
-    "summary_evidence_scope": "real_helper_https"
-  }
-}
-JSON
+smoke_summary_json="$(jq -r '.artifacts.smoke_summary_json // ""' "$summary_json")"
+deployment_summary_json="$(jq -r '.artifacts.deployment_evidence_summary_json // ""' "$summary_json")"
+host_summary_json="$(jq -r '.artifacts.host_install_check_summary_json // ""' "$summary_json")"
+base_url="$(jq -r '.inputs.base_url // ""' "$summary_json")"
+smoke_sha="$(sha256_value "$smoke_summary_json")"
+deployment_sha="$(sha256_value "$deployment_summary_json")"
+host_sha="$(sha256_value "$host_summary_json")"
+if [[ "$binding_mode" == "mismatch" ]]; then
+  smoke_sha="0000000000000000000000000000000000000000000000000000000000000000"
+fi
+trust_store_sha="$(sha256_value "$trust_store")"
+jq -n \
+  --arg verification_summary_json "$verification_summary_json" \
+  --arg summary_json "$summary_json" \
+  --arg provenance_json "$provenance_json" \
+  --arg trust_store "$trust_store" \
+  --arg trust_store_sha "$trust_store_sha" \
+  --arg base_url "$base_url" \
+  --arg smoke_summary_json "$smoke_summary_json" \
+  --arg smoke_sha "$smoke_sha" \
+  --arg deployment_summary_json "$deployment_summary_json" \
+  --arg deployment_sha "$deployment_sha" \
+  --arg host_summary_json "$host_summary_json" \
+  --arg host_sha "$host_sha" \
+  --argjson pilot_handoff_ready "$pilot_handoff_ready" \
+  --argjson trusted_provenance "$trusted_provenance" \
+  '{
+    version: 1,
+    schema: {"id": "access_bridge_pilot_evidence_bundle_verify_summary", "major": 1, "minor": 2},
+    status: "pass",
+    rc: 0,
+    pilot_handoff_ready: $pilot_handoff_ready,
+    trusted_pilot_receipt_ready: ($pilot_handoff_ready and $trusted_provenance),
+    pilot_handoff_criteria: {
+      ready: ($pilot_handoff_ready and $trusted_provenance),
+      trusted_pilot_receipt_ready: ($pilot_handoff_ready and $trusted_provenance),
+      require_trusted_provenance: true,
+      provenance_checked: true,
+      provenance_trusted: $trusted_provenance,
+      provenance_status: "pass",
+      provenance_source: "trust_store",
+      provenance_evidence_scope: "real_helper_https",
+      summary_evidence_scope: "real_helper_https",
+      bundled_child_evidence_semantic_ok: true,
+      trust_store_present: true,
+      trust_store_sha256_present: true,
+      public_key_file_absent: true,
+      dev_trust_store_allowed: false
+    },
+    inputs: {
+      summary_json: $summary_json,
+      provenance_json: $provenance_json,
+      trust_store: $trust_store,
+      trust_store_sha256: $trust_store_sha,
+      public_key_file: null,
+      allow_dev_trust_store: false
+    },
+    checks: {
+      summary_contract: {enabled: true, status: "pass"},
+      tar_sha256: {enabled: true, checked: true, status: "pass"},
+      manifest: {enabled: true, status: "pass"},
+      provenance: {enabled: true, required_trusted: true, status: "pass"}
+    },
+    trusted_provenance: {
+      required: true,
+      checked: true,
+      source: "trust_store",
+      trusted: $trusted_provenance,
+      status: "pass",
+      evidence_scope: "real_helper_https",
+      summary_evidence_scope: "real_helper_https"
+    },
+    evidence_binding: {
+      base_url: $base_url,
+      smoke_summary_json: $smoke_summary_json,
+      smoke_summary_sha256: $smoke_sha,
+      deployment_evidence_summary_json: $deployment_summary_json,
+      deployment_evidence_summary_sha256: $deployment_sha,
+      host_install_check_summary_json: $host_summary_json,
+      host_install_check_summary_sha256: $host_sha
+    },
+    artifacts: {
+      verification_summary_json: $verification_summary_json,
+      source_summary_json: $summary_json,
+      provenance_json: $provenance_json
+    }
+  }' >"$verification_summary_json"
 exit "${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_RC:-0}"
 EOF_FAKE_VERIFY
 chmod +x "$FAKE_VERIFY"
@@ -451,6 +587,86 @@ if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
   exit 1
 fi
 jq -e '.status == "fail" and .stage == "verify" and .readiness.trusted_verifier_pilot_handoff_ready == false' "$TMP_DIR/verifier-not-ready-summary.json" >/dev/null
+
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_TRUSTED=false \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/verifier-untrusted-summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/verifier-untrusted.log" 2>&1
+verifier_untrusted_rc=$?
+set -e
+if [[ "$verifier_untrusted_rc" -eq 0 ]]; then
+  echo "expected untrusted verifier receipt to fail"
+  cat "$TMP_DIR/verifier-untrusted-summary.json"
+  exit 1
+fi
+if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
+  echo "expected host-check, bundle, and verifier only when trusted provenance is false"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! grep -Fq -- "Trusted verifier receipt did not prove current real helper HTTPS evidence binding" "$TMP_DIR/verifier-untrusted-summary.json"; then
+  echo "expected untrusted verifier failure summary note"
+  cat "$TMP_DIR/verifier-untrusted-summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_BINDING_MODE=mismatch \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/verifier-binding-mismatch-summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/verifier-binding-mismatch.log" 2>&1
+verifier_binding_mismatch_rc=$?
+set -e
+if [[ "$verifier_binding_mismatch_rc" -eq 0 ]]; then
+  echo "expected mismatched verifier evidence binding to fail"
+  cat "$TMP_DIR/verifier-binding-mismatch-summary.json"
+  exit 1
+fi
+if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
+  echo "expected host-check, bundle, and verifier only when evidence binding mismatches"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! grep -Fq -- "Trusted verifier receipt did not prove current real helper HTTPS evidence binding" "$TMP_DIR/verifier-binding-mismatch-summary.json"; then
+  echo "expected binding mismatch failure summary note"
+  cat "$TMP_DIR/verifier-binding-mismatch-summary.json"
+  exit 1
+fi
 
 : >"$CAPTURE"
 set +e

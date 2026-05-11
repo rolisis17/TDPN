@@ -43,6 +43,14 @@ Notes:
     writes the durable roadmap/operator receipt.
   - Strict pilot handoff mode rejects known local/demo trust-store paths unless
     --allow-dev-trust-store 1 is set for diagnostics.
+  - Strict pilot handoff mode also rejects trust stores whose trusted-key source
+    is marked as generated demo material unless --allow-dev-trust-store 1 is set.
+  - Strict pilot handoff mode also requires the signed summary artifact paths
+    to match the verified summary/tar/sidecar/provenance inputs and expected
+    in-bundle evidence filenames.
+  - Strict pilot handoff mode validates the bundled service-smoke,
+    deployment-evidence, and host-install summaries semantically before it can
+    emit pilot_handoff_ready=true.
   - When --summary-json is supplied, the summary contract is checked by default;
     set --summary-contract-check 0 only for raw artifact integrity inspection.
   - --verification-summary-json writes a machine-readable verifier result for
@@ -97,6 +105,12 @@ json_string() {
   local file="$1"
   local filter="$2"
   jq -r "$filter // \"\"" "$file" 2>/dev/null || true
+}
+
+summary_artifact_string() {
+  local file="$1"
+  local field="$2"
+  jq -r --arg field "$field" '.artifacts[$field] // ""' "$file" 2>/dev/null || true
 }
 
 validate_bundle_summary_contract() {
@@ -154,6 +168,238 @@ validate_bundle_summary_contract() {
   fi
 
   ((local_issues == 0))
+}
+
+validate_trusted_summary_artifact_bindings() {
+  local file="$1"
+  local local_issues=0
+  local summary_artifact_bundle_dir summary_artifact_summary_json summary_artifact_bundle_tar
+  local summary_artifact_bundle_tar_sha256_file summary_artifact_provenance_json
+  local expected_path actual_path field
+
+  summary_artifact_bundle_dir="$(abs_path "$(summary_artifact_string "$file" "bundle_dir")")"
+  summary_artifact_summary_json="$(abs_path "$(summary_artifact_string "$file" "summary_json")")"
+  summary_artifact_bundle_tar="$(abs_path "$(summary_artifact_string "$file" "bundle_tar")")"
+  summary_artifact_bundle_tar_sha256_file="$(abs_path "$(summary_artifact_string "$file" "bundle_tar_sha256_file")")"
+  summary_artifact_provenance_json="$(abs_path "$(summary_artifact_string "$file" "provenance_json")")"
+
+  if [[ -z "$summary_artifact_bundle_dir" ]]; then
+    echo "trusted pilot provenance requires summary artifacts.bundle_dir"
+    local_issues=$((local_issues + 1))
+  elif [[ -n "$bundle_dir" && "$summary_artifact_bundle_dir" != "$bundle_dir" ]]; then
+    echo "trusted pilot provenance requires summary artifacts.bundle_dir to match resolved bundle dir: summary=$summary_artifact_bundle_dir resolved=$bundle_dir"
+    local_issues=$((local_issues + 1))
+  fi
+  if [[ -z "$summary_artifact_summary_json" ]]; then
+    echo "trusted pilot provenance requires summary artifacts.summary_json"
+    local_issues=$((local_issues + 1))
+  elif [[ "$summary_artifact_summary_json" != "$summary_json" ]]; then
+    echo "trusted pilot provenance requires summary artifacts.summary_json to match verified summary: summary=$summary_artifact_summary_json verified=$summary_json"
+    local_issues=$((local_issues + 1))
+  fi
+  if [[ -z "$summary_artifact_bundle_tar" ]]; then
+    echo "trusted pilot provenance requires summary artifacts.bundle_tar"
+    local_issues=$((local_issues + 1))
+  elif [[ "$summary_artifact_bundle_tar" != "$bundle_tar" ]]; then
+    echo "trusted pilot provenance requires summary artifacts.bundle_tar to match verified tar: summary=$summary_artifact_bundle_tar verified=$bundle_tar"
+    local_issues=$((local_issues + 1))
+  fi
+  if [[ -z "$summary_artifact_bundle_tar_sha256_file" ]]; then
+    echo "trusted pilot provenance requires summary artifacts.bundle_tar_sha256_file"
+    local_issues=$((local_issues + 1))
+  elif [[ "$summary_artifact_bundle_tar_sha256_file" != "$bundle_tar_sha256_file" ]]; then
+    echo "trusted pilot provenance requires summary artifacts.bundle_tar_sha256_file to match verified sidecar: summary=$summary_artifact_bundle_tar_sha256_file verified=$bundle_tar_sha256_file"
+    local_issues=$((local_issues + 1))
+  fi
+  if [[ -z "$summary_artifact_provenance_json" ]]; then
+    echo "trusted pilot provenance requires summary artifacts.provenance_json"
+    local_issues=$((local_issues + 1))
+  elif [[ "$summary_artifact_provenance_json" != "$provenance_json" ]]; then
+    echo "trusted pilot provenance requires summary artifacts.provenance_json to match verified provenance: summary=$summary_artifact_provenance_json verified=$provenance_json"
+    local_issues=$((local_issues + 1))
+  fi
+
+  if [[ -n "$summary_artifact_bundle_dir" ]]; then
+    for field in \
+      "bundled_summary_json:access_bridge_pilot_evidence_bundle_summary.json" \
+      "manifest_sha256:manifest.sha256" \
+      "smoke_summary_json:access_bridge_service_smoke_summary.json" \
+      "deployment_evidence_summary_json:access_bridge_deployment_evidence_summary.json" \
+      "host_install_check_summary_json:access_bridge_host_install_check_summary.json"
+    do
+      expected_path="$summary_artifact_bundle_dir/${field#*:}"
+      actual_path="$(abs_path "$(summary_artifact_string "$file" "${field%%:*}")")"
+      if [[ -z "$actual_path" ]]; then
+        echo "trusted pilot provenance requires summary artifacts.${field%%:*}"
+        local_issues=$((local_issues + 1))
+      elif [[ "$actual_path" != "$expected_path" ]]; then
+        echo "trusted pilot provenance requires summary artifacts.${field%%:*} to point inside the verified bundle: summary=$actual_path expected=$expected_path"
+        local_issues=$((local_issues + 1))
+      fi
+    done
+  fi
+
+  ((local_issues == 0))
+}
+
+validate_trusted_bundled_evidence_semantics() {
+  local bundle_root="$1"
+  local source_summary="$2"
+  local smoke_json deployment_json host_json semantic_errors
+  local expected_base_url expected_helper_id expected_organization_id expected_registry_id
+
+  smoke_json="$bundle_root/access_bridge_service_smoke_summary.json"
+  deployment_json="$bundle_root/access_bridge_deployment_evidence_summary.json"
+  host_json="$bundle_root/access_bridge_host_install_check_summary.json"
+
+  for required_semantic_json in "$smoke_json" "$deployment_json" "$host_json"; do
+    if [[ ! -f "$required_semantic_json" ]]; then
+      echo "trusted pilot provenance requires bundled semantic evidence file: $(basename "$required_semantic_json")"
+      return 1
+    fi
+    if ! jq -e . "$required_semantic_json" >/dev/null 2>&1; then
+      echo "trusted pilot provenance bundled semantic evidence is not valid JSON: $required_semantic_json"
+      return 1
+    fi
+  done
+
+  expected_base_url="$(json_string "$source_summary" '.inputs.base_url')"
+  expected_helper_id="$(json_string "$source_summary" '.expected_identity.helper_id')"
+  expected_organization_id="$(json_string "$source_summary" '.expected_identity.organization_id')"
+  expected_registry_id="$(json_string "$source_summary" '.expected_identity.registry_id')"
+
+  semantic_errors="$(jq -nr \
+    --slurpfile smoke "$smoke_json" \
+    --slurpfile deployment "$deployment_json" \
+    --slurpfile host "$host_json" \
+    --arg expected_base_url "$expected_base_url" \
+    --arg expected_helper_id "$expected_helper_id" \
+    --arg expected_organization_id "$expected_organization_id" \
+    --arg expected_registry_id "$expected_registry_id" '
+      def lc($v):
+        if ($v | type) == "string" then ($v | ascii_downcase) else "" end;
+      def str_eq($v; $expected):
+        (($v | type) == "string") and (($v | ascii_downcase) == $expected);
+      def rc_ok($v):
+        if ($v | has("rc")) then (($v.rc | type) == "number" and $v.rc == 0) else true end;
+      def pass_status($v):
+        lc($v.status) == "pass" and rc_ok($v);
+      def schema_ok($v; $id; $minor):
+        (($v.schema.id // "") == $id)
+        and (($v.schema.major | type) == "number" and $v.schema.major == 1)
+        and (($v.schema.minor | type) == "number" and $v.schema.minor >= $minor);
+      def host_from_url($url):
+        $url
+        | sub("^[A-Za-z][A-Za-z0-9+.-]*://"; "")
+        | split("/")[0]
+        | split("?")[0]
+        | split("#")[0]
+        | sub("^.*@"; "")
+        | if startswith("[") then sub("^\\["; "") | sub("\\].*$"; "") else sub(":[0-9]+$"; "") end
+        | ascii_downcase
+        | sub("\\.+$"; "");
+      def expected_host:
+        host_from_url($expected_base_url);
+      def required_host_check_ids:
+        [
+          "deploy_pack_dir_exists",
+          "env_file_exists",
+          "wrapper_file_exists",
+          "systemd_unit_exists",
+          "caddy_example_exists",
+          "nginx_example_exists",
+          "config_json_exists",
+          "config_json_valid",
+          "config_local_access_paths_disabled",
+          "config_sha256_matches",
+          "access_code_gate_configured",
+          "query_access_code_disabled",
+          "trusted_proxy_headers_enabled",
+          "loopback_bind",
+          "rate_limit_configured",
+          "rate_limit_source_cap_configured",
+          "wrapper_hardened_flags",
+          "systemd_hardening",
+          "caddy_xff_overwrite",
+          "nginx_xff_overwrite",
+          "caddy_public_host_valid",
+          "caddy_public_host_matches_expected",
+          "caddy_reverse_proxy_target",
+          "nginx_public_host_valid",
+          "nginx_public_host_matches_expected",
+          "nginx_proxy_pass_target"
+        ];
+      def all_required_host_checks_pass($h):
+        all(required_host_check_ids[]; . as $id | ([ $h.checks[]? | select((.id // "") == $id and lc(.status) == "pass") ] | length) == 1);
+      def bounded_num_string($v; $min; $max):
+        (($v | type) == "string")
+        and ($v | test("^[0-9]+$"))
+        and (($v | tonumber) >= $min)
+        and (($v | tonumber) <= $max);
+      ($smoke[0]) as $s
+      | ($deployment[0]) as $d
+      | ($host[0]) as $h
+      | [
+          if ($expected_base_url | test("^https://"; "i") | not) then "trusted pilot provenance requires summary inputs.base_url to be HTTPS" else empty end,
+          if schema_ok($s; "access_bridge_service_smoke_summary"; 3) | not then "bundled service smoke summary schema is invalid or too old" else empty end,
+          if pass_status($s) | not then "bundled service smoke summary status is not pass" else empty end,
+          if (($s.base_url // "") != $expected_base_url) then "bundled service smoke base_url does not match bundle summary" else empty end,
+          if ($s.transport.https != true) then "bundled service smoke did not prove HTTPS transport" else empty end,
+          if ($s.transport.tls.checked != true or $s.transport.tls.verified != true or (($s.transport.tls.ssl_verify_result // "") != "0")) then "bundled service smoke did not prove verified TLS" else empty end,
+          if str_eq($s.health.status; "ok") | not then "bundled service smoke health status is not ok" else empty end,
+          if ($expected_helper_id != "" and (($s.health.helper_id // "") != $expected_helper_id)) then "bundled service smoke helper_id does not match expected identity" else empty end,
+          if ($expected_organization_id != "" and (($s.health.organization_id // "") != $expected_organization_id)) then "bundled service smoke organization_id does not match expected identity" else empty end,
+          if ($expected_registry_id != "" and (($s.health.registry_id // "") != $expected_registry_id)) then "bundled service smoke registry_id does not match expected identity" else empty end,
+          if ($s.auth.required != true) then "bundled service smoke did not prove access-code auth is required" else empty end,
+          if str_eq($s.auth.missing_code_http_status; "401") | not then "bundled service smoke missing-code check did not return 401" else empty end,
+          if str_eq($s.auth.wrong_code_http_status; "401") | not then "bundled service smoke wrong-code check did not return 401" else empty end,
+          if str_eq($s.auth.valid_code_http_status; "200") | not then "bundled service smoke valid-code check did not return 200" else empty end,
+          if str_eq($s.bridge.http_status; "200") | not then "bundled service smoke bridge HTTP status is not 200" else empty end,
+          if str_eq($s.bridge.status; "ok") | not then "bundled service smoke bridge status is not ok" else empty end,
+          if ($s.bridge.security_headers_ok != true) then "bundled service smoke security headers check failed" else empty end,
+          if str_eq($s.abuse.http_status; "202") | not then "bundled service smoke abuse endpoint status is not 202" else empty end,
+          if schema_ok($d; "access_bridge_deployment_evidence_summary"; 2) | not then "bundled deployment evidence summary schema is invalid or too old" else empty end,
+          if pass_status($d) | not then "bundled deployment evidence summary status is not pass" else empty end,
+          if (($d.evidence_scope // "") != "real_helper_https") then "bundled deployment evidence scope is not real_helper_https" else empty end,
+          if (($d.smoke.base_url // "") != $expected_base_url) then "bundled deployment evidence base_url does not match bundle summary" else empty end,
+          if str_eq($d.smoke.status; "pass") | not then "bundled deployment evidence smoke status is not pass" else empty end,
+          if str_eq($d.smoke.evidence_status; "pass") | not then "bundled deployment evidence smoke evidence_status is not pass" else empty end,
+          if ($d.smoke.auth_required != true) then "bundled deployment evidence did not prove auth is required" else empty end,
+          if str_eq($d.smoke.missing_code_http_status; "401") | not then "bundled deployment evidence missing-code check did not return 401" else empty end,
+          if str_eq($d.smoke.wrong_code_http_status; "401") | not then "bundled deployment evidence wrong-code check did not return 401" else empty end,
+          if str_eq($d.smoke.valid_code_http_status; "200") | not then "bundled deployment evidence valid-code check did not return 200" else empty end,
+          if str_eq($d.smoke.bridge_http_status; "200") | not then "bundled deployment evidence bridge HTTP status is not 200" else empty end,
+          if str_eq($d.smoke.bridge_status; "ok") | not then "bundled deployment evidence bridge status is not ok" else empty end,
+          if ($d.smoke.bridge_security_headers_ok != true) then "bundled deployment evidence security headers check failed" else empty end,
+          if str_eq($d.transport.status; "pass") | not then "bundled deployment evidence transport status is not pass" else empty end,
+          if ($d.transport.https != true or $d.transport.tls_checked != true or $d.transport.tls_verified != true or (($d.transport.ssl_verify_result // "") != "0")) then "bundled deployment evidence did not prove verified HTTPS transport" else empty end,
+          if str_eq($d.identity_check.status; "pass") | not then "bundled deployment evidence identity check is not pass" else empty end,
+          if ($expected_helper_id != "" and (($d.expected_identity.helper_id // "") != $expected_helper_id or ($d.deployed_identity.helper_id // "") != $expected_helper_id)) then "bundled deployment evidence helper identity does not match expected" else empty end,
+          if ($expected_organization_id != "" and (($d.expected_identity.organization_id // "") != $expected_organization_id or ($d.deployed_identity.organization_id // "") != $expected_organization_id)) then "bundled deployment evidence organization identity does not match expected" else empty end,
+          if ($expected_registry_id != "" and (($d.expected_identity.registry_id // "") != $expected_registry_id or ($d.deployed_identity.registry_id // "") != $expected_registry_id)) then "bundled deployment evidence registry identity does not match expected" else empty end,
+          if str_eq($d.local_files.config.status; "pass") | not then "bundled deployment evidence config file check is not pass" else empty end,
+          if str_eq($d.local_files.config.allow_local_access_paths; "false") | not then "bundled deployment evidence allows local access paths" else empty end,
+          if str_eq($d.local_files.deploy_pack.status; "pass") | not then "bundled deployment evidence deploy pack check is not pass" else empty end,
+          if schema_ok($h; "access_bridge_host_install_check_summary"; 4) | not then "bundled host install check summary schema is invalid or too old" else empty end,
+          if pass_status($h) | not then "bundled host install check summary status is not pass" else empty end,
+          if (($h.inputs.expected_base_url // "") != $expected_base_url) then "bundled host install expected_base_url does not match bundle summary" else empty end,
+          if (($h.observed.expected_public_host // "") != expected_host) then "bundled host install expected public host does not match bundle summary host" else empty end,
+          if (($h.summary.checks_fail // -1) != 0) then "bundled host install check has failing checks" else empty end,
+          if (($h.summary.checks_total // 0) < (required_host_check_ids | length)) then "bundled host install check is missing required checks" else empty end,
+          if all_required_host_checks_pass($h) | not then "bundled host install required checks did not all pass" else empty end,
+          if str_eq($h.observed.config_allow_local_access_paths; "false") | not then "bundled host install config allows local access paths" else empty end,
+          if str_eq($h.observed.env_allow_unauthenticated_local; "false") | not then "bundled host install allows unauthenticated local access" else empty end,
+          if str_eq($h.observed.env_allow_query_code; "false") | not then "bundled host install allows query access code" else empty end,
+          if str_eq($h.observed.env_trust_proxy_headers; "true") | not then "bundled host install did not enable trusted proxy headers" else empty end,
+          if bounded_num_string($h.observed.env_rps; 1; 20) | not then "bundled host install RPS is missing or outside pilot bounds" else empty end,
+          if bounded_num_string($h.observed.env_max_sources; 1; 100000) | not then "bundled host install max-sources is missing or outside pilot bounds" else empty end
+        ] | .[]
+    ')"
+  if [[ -n "$semantic_errors" ]]; then
+    printf '%s\n' "$semantic_errors"
+    return 1
+  fi
+  return 0
 }
 
 sha256_tool=""
@@ -224,6 +470,23 @@ trust_store_path_is_dev() {
     esac
   done
   return 1
+}
+
+trust_store_content_is_dev() {
+  local path="$1"
+  [[ -f "$path" ]] || return 1
+  jq -e '
+    [
+      .trusted_keys[]?
+      | ((.source // "") | tostring | ascii_downcase)
+      | select(
+          contains("generated demo bundle")
+          or contains("demo handoff")
+          or contains("demo bundle")
+        )
+    ]
+    | length > 0
+  ' "$path" >/dev/null 2>&1
 }
 
 rel_path_is_safe() {
@@ -529,6 +792,7 @@ provenance_evidence_scope=""
 provenance_bundle_tar_name=""
 provenance_expires_at_utc=""
 tar_sha256_checked="0"
+bundled_child_evidence_semantic_ok="false"
 
 write_verification_summary() {
   local status="$1"
@@ -536,7 +800,7 @@ write_verification_summary() {
   local notes="$3"
   local generated_at_utc check_tar_sha256_json tar_sha256_checked_json check_manifest_json check_provenance_json require_trusted_json
   local summary_contract_check_json provenance_checked_json provenance_trusted_json provenance_source
-  local allow_dev_trust_store_json trust_store_sha256
+  local allow_dev_trust_store_json trust_store_sha256 bundled_child_evidence_semantic_ok_json
   local source_summary_sha256 source_base_url source_helper_id source_organization_id source_registry_id
   local source_smoke_summary_json source_deployment_summary_json source_host_summary_json
   local source_smoke_summary_sha256 source_deployment_summary_sha256 source_host_summary_sha256
@@ -553,6 +817,7 @@ write_verification_summary() {
   require_trusted_json="$( [[ "$require_trusted_provenance" == "1" ]] && printf 'true' || printf 'false' )"
   allow_dev_trust_store_json="$( [[ "$allow_dev_trust_store" == "1" ]] && printf 'true' || printf 'false' )"
   summary_contract_check_json="$( [[ "$summary_contract_check" == "1" ]] && printf 'true' || printf 'false' )"
+  bundled_child_evidence_semantic_ok_json="$( [[ "$bundled_child_evidence_semantic_ok" == "true" ]] && printf 'true' || printf 'false' )"
   provenance_checked_json="$( [[ "$provenance_verify_checked" == "true" ]] && printf 'true' || printf 'false' )"
   provenance_trusted_json="$( [[ "$provenance_trusted" == "true" ]] && printf 'true' || printf 'false' )"
   provenance_source="none"
@@ -628,6 +893,7 @@ write_verification_summary() {
     --arg public_key_file "$public_key_file" \
     --arg trust_store_sha256 "$trust_store_sha256" \
     --arg summary_evidence_scope "$summary_evidence_scope" \
+    --argjson bundled_child_evidence_semantic_ok "$bundled_child_evidence_semantic_ok_json" \
     --argjson check_tar_sha256 "$check_tar_sha256_json" \
     --argjson tar_sha256_checked "$tar_sha256_checked_json" \
     --argjson check_manifest "$check_manifest_json" \
@@ -671,6 +937,7 @@ write_verification_summary() {
         and $provenance_source == "trust_store"
         and $provenance_evidence_scope == "real_helper_https"
         and $summary_evidence_scope == "real_helper_https"
+        and $bundled_child_evidence_semantic_ok
         and $tar_sha256_checked
         and $trust_store != ""
         and $public_key_file == ""
@@ -682,7 +949,7 @@ write_verification_summary() {
         schema: {
           id: "access_bridge_pilot_evidence_bundle_verify_summary",
           major: 1,
-          minor: 1
+          minor: 2
         },
         generated_at_utc: $generated_at_utc,
         status: $status,
@@ -699,6 +966,7 @@ write_verification_summary() {
           provenance_source: $provenance_source,
           provenance_evidence_scope: null_if_empty($provenance_evidence_scope),
           summary_evidence_scope: null_if_empty($summary_evidence_scope),
+          bundled_child_evidence_semantic_ok: $bundled_child_evidence_semantic_ok,
           trust_store_present: ($trust_store != ""),
           trust_store_sha256_present: ($trust_store_sha256 != ""),
           public_key_file_absent: ($public_key_file == ""),
@@ -814,6 +1082,9 @@ if [[ -n "$summary_json" && "$summary_contract_check" == "1" ]]; then
         echo "trusted pilot provenance requires matching summary provenance paths: provenance.sidecar_json=$summary_provenance_sidecar artifacts.provenance_json=$summary_artifact_provenance"
         issues=$((issues + 1))
       fi
+    fi
+    if ! validate_trusted_summary_artifact_bindings "$summary_json"; then
+      issues=$((issues + 1))
     fi
   fi
 fi
@@ -1013,6 +1284,16 @@ if [[ "$require_trusted_provenance" == "1" ]]; then
         issues=$((issues + 1))
       fi
     done
+    if [[ -n "$summary_json" && -f "$summary_json" ]]; then
+      if validate_trusted_bundled_evidence_semantics "$manifest_bundle_dir" "$summary_json"; then
+        bundled_child_evidence_semantic_ok="true"
+      else
+        issues=$((issues + 1))
+      fi
+    else
+      echo "trusted pilot provenance requires summary JSON for bundled evidence semantic validation"
+      issues=$((issues + 1))
+    fi
   fi
 fi
 
@@ -1053,6 +1334,9 @@ if [[ "$check_provenance" == "1" ]]; then
       issues=$((issues + 1))
     elif [[ "$allow_dev_trust_store" != "1" ]] && trust_store_path_is_dev "$trust_store"; then
       echo "trusted pilot provenance rejects local/demo trust-store paths: $trust_store (set --allow-dev-trust-store 1 only for diagnostics)"
+      issues=$((issues + 1))
+    elif [[ "$allow_dev_trust_store" != "1" ]] && trust_store_content_is_dev "$trust_store"; then
+      echo "trusted pilot provenance rejects demo-marked trust-store contents: $trust_store (set --allow-dev-trust-store 1 only for diagnostics)"
       issues=$((issues + 1))
     fi
   else
