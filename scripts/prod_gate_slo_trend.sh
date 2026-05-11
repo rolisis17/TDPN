@@ -32,6 +32,7 @@ Usage:
     [--min-wg-soak-entry-operators N] \
     [--min-wg-soak-exit-operators N] \
     [--min-wg-soak-cross-operator-pairs N] \
+    [--max-evidence-age-sec N] \
     [--fail-on-any-no-go [0|1]] \
     [--min-go-rate-pct N] \
     [--show-details [0|1]] \
@@ -97,6 +98,15 @@ file_mtime_epoch() {
   echo "0"
 }
 
+iso8601_utc_to_epoch() {
+  local timestamp="$1"
+  timestamp="$(trim "$timestamp")"
+  if [[ ! "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+    return 1
+  fi
+  jq -nr --arg ts "$timestamp" '$ts | fromdateiso8601 | floor' 2>/dev/null
+}
+
 abs_path() {
   local path="$1"
   path="$(trim "$path")"
@@ -144,10 +154,12 @@ min_wg_soak_selection_lines="${PROD_GATE_SLO_MIN_WG_SOAK_SELECTION_LINES:-0}"
 min_wg_soak_entry_operators="${PROD_GATE_SLO_MIN_WG_SOAK_ENTRY_OPERATORS:-0}"
 min_wg_soak_exit_operators="${PROD_GATE_SLO_MIN_WG_SOAK_EXIT_OPERATORS:-0}"
 min_wg_soak_cross_operator_pairs="${PROD_GATE_SLO_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS:-0}"
+max_evidence_age_sec="${PROD_GATE_SLO_TREND_MAX_EVIDENCE_AGE_SEC:-${PROD_GATE_SLO_MAX_EVIDENCE_AGE_SEC:-0}}"
 fail_on_any_no_go="${PROD_GATE_SLO_TREND_FAIL_ON_ANY_NO_GO:-0}"
 min_go_rate_pct="${PROD_GATE_SLO_TREND_MIN_GO_RATE_PCT:-0}"
 max_reports="${PROD_GATE_SLO_TREND_MAX_REPORTS:-25}"
 since_hours="${PROD_GATE_SLO_TREND_SINCE_HOURS:-0}"
+trend_now_epoch="${PROD_GATE_SLO_TREND_NOW_EPOCH:-}"
 show_details="${PROD_GATE_SLO_TREND_SHOW_DETAILS:-1}"
 show_top_reasons="${PROD_GATE_SLO_TREND_SHOW_TOP_REASONS:-5}"
 summary_json=""
@@ -307,6 +319,10 @@ while [[ $# -gt 0 ]]; do
       min_wg_soak_cross_operator_pairs="${2:-}"
       shift 2
       ;;
+    --max-evidence-age-sec)
+      max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --fail-on-any-no-go)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         fail_on_any_no_go="${2:-}"
@@ -411,8 +427,16 @@ if [[ ! "$min_wg_soak_cross_operator_pairs" =~ ^[0-9]+$ ]]; then
   echo "--min-wg-soak-cross-operator-pairs must be an integer >= 0"
   exit 2
 fi
+if [[ ! "$max_evidence_age_sec" =~ ^[0-9]+$ ]]; then
+  echo "--max-evidence-age-sec must be an integer >= 0"
+  exit 2
+fi
 if [[ ! "$show_top_reasons" =~ ^[0-9]+$ ]]; then
   echo "--show-top-reasons must be an integer >= 0"
+  exit 2
+fi
+if [[ -n "$trend_now_epoch" && ! "$trend_now_epoch" =~ ^[0-9]+$ ]]; then
+  echo "PROD_GATE_SLO_TREND_NOW_EPOCH must be an integer epoch when set"
   exit 2
 fi
 if ! is_non_negative_decimal "$min_go_rate_pct"; then
@@ -474,6 +498,12 @@ ranked_file="$tmp_dir/ranked_reports.txt"
 touch "$ranked_file"
 declare -A seen_paths=()
 now_epoch="$(date +%s 2>/dev/null || echo 0)"
+if [[ -n "$trend_now_epoch" ]]; then
+  now_epoch="$trend_now_epoch"
+  if [[ -z "${PROD_GATE_SLO_NOW_EPOCH:-}" ]]; then
+    export PROD_GATE_SLO_NOW_EPOCH="$trend_now_epoch"
+  fi
+fi
 cutoff_epoch=0
 if ((since_hours > 0 && now_epoch > 0)); then
   cutoff_epoch=$((now_epoch - since_hours * 3600))
@@ -498,11 +528,25 @@ while IFS= read -r candidate || [[ -n "$candidate" ]]; do
     continue
   fi
   seen_paths["$local_path"]=1
+  evidence_timestamp="$(jq -r '.generated_at_utc // ""' "$local_path" 2>/dev/null || true)"
+  evidence_epoch=0
+  if [[ -n "$evidence_timestamp" ]]; then
+    evidence_epoch="$(iso8601_utc_to_epoch "$evidence_timestamp" 2>/dev/null || echo 0)"
+  fi
   mtime="$(file_mtime_epoch "$local_path")"
-  if ((cutoff_epoch > 0 && mtime < cutoff_epoch)); then
+  rank_epoch="$mtime"
+  if [[ "$evidence_epoch" =~ ^[0-9]+$ ]] && ((evidence_epoch > 0)); then
+    rank_epoch="$evidence_epoch"
+  fi
+  if ((cutoff_epoch > 0)); then
+    if [[ ! "$evidence_epoch" =~ ^[0-9]+$ ]] || ((evidence_epoch <= 0 || evidence_epoch < cutoff_epoch)); then
+      continue
+    fi
+  fi
+  if [[ ! "$rank_epoch" =~ ^[0-9]+$ ]]; then
     continue
   fi
-  printf '%s\t%s\n' "$mtime" "$local_path" >>"$ranked_file"
+  printf '%s\t%s\n' "$rank_epoch" "$local_path" >>"$ranked_file"
 done <"$candidates_file"
 
 if [[ ! -s "$ranked_file" ]]; then
@@ -573,6 +617,7 @@ while IFS=$'\t' read -r _mtime report_path || [[ -n "${report_path:-}" ]]; do
     --min-wg-soak-entry-operators "$min_wg_soak_entry_operators" \
     --min-wg-soak-exit-operators "$min_wg_soak_exit_operators" \
     --min-wg-soak-cross-operator-pairs "$min_wg_soak_cross_operator_pairs" \
+    --max-evidence-age-sec "$max_evidence_age_sec" \
     --fail-on-no-go 0 \
     --show-json 0 >"$out_file" 2>&1
   rc=$?
@@ -652,7 +697,7 @@ go_rate_pct="$(awk -v g="$go_reports" -v t="$total_reports" 'BEGIN { if (t == 0)
 
 echo "[prod-gate-slo-trend] reports_total=$total_reports go=$go_reports no_go=$no_go_reports go_rate_pct=$go_rate_pct"
 echo "[prod-gate-slo-trend] filters max_reports=$max_reports since_hours=$since_hours"
-echo "[prod-gate-slo-trend] policy require_full_sequence=$require_full_sequence require_wg_validate_ok=$require_wg_validate_ok require_wg_soak_ok=$require_wg_soak_ok max_wg_soak_failed_rounds=$max_wg_soak_failed_rounds require_preflight_ok=$require_preflight_ok require_bundle_ok=$require_bundle_ok require_integrity_ok=$require_integrity_ok require_signoff_ok=$require_signoff_ok require_wg_validate_udp_source=$require_wg_validate_udp_source require_wg_validate_strict_distinct=$require_wg_validate_strict_distinct require_wg_soak_diversity_pass=$require_wg_soak_diversity_pass min_wg_soak_selection_lines=$min_wg_soak_selection_lines min_wg_soak_entry_operators=$min_wg_soak_entry_operators min_wg_soak_exit_operators=$min_wg_soak_exit_operators min_wg_soak_cross_operator_pairs=$min_wg_soak_cross_operator_pairs"
+echo "[prod-gate-slo-trend] policy require_full_sequence=$require_full_sequence require_wg_validate_ok=$require_wg_validate_ok require_wg_soak_ok=$require_wg_soak_ok max_wg_soak_failed_rounds=$max_wg_soak_failed_rounds require_preflight_ok=$require_preflight_ok require_bundle_ok=$require_bundle_ok require_integrity_ok=$require_integrity_ok require_signoff_ok=$require_signoff_ok require_wg_validate_udp_source=$require_wg_validate_udp_source require_wg_validate_strict_distinct=$require_wg_validate_strict_distinct require_wg_soak_diversity_pass=$require_wg_soak_diversity_pass min_wg_soak_selection_lines=$min_wg_soak_selection_lines min_wg_soak_entry_operators=$min_wg_soak_entry_operators min_wg_soak_exit_operators=$min_wg_soak_exit_operators min_wg_soak_cross_operator_pairs=$min_wg_soak_cross_operator_pairs max_evidence_age_sec=$max_evidence_age_sec"
 if ((eval_errors > 0)); then
   echo "[prod-gate-slo-trend] evaluation_errors=$eval_errors"
 fi
@@ -724,6 +769,7 @@ summary_payload="$(
     --argjson eval_errors "$eval_errors" \
     --argjson max_reports "$max_reports" \
     --argjson since_hours "$since_hours" \
+    --argjson max_evidence_age_sec "$max_evidence_age_sec" \
     --argjson min_go_rate_pct "$min_go_rate_pct" \
     --argjson require_full_sequence "$require_full_sequence" \
     --argjson require_wg_validate_ok "$require_wg_validate_ok" \
@@ -776,7 +822,8 @@ summary_payload="$(
       evaluation_errors: $eval_errors,
       filters: {
         max_reports: $max_reports,
-        since_hours: $since_hours
+        since_hours: $since_hours,
+        max_evidence_age_sec: $max_evidence_age_sec
       },
       policy: {
         require_full_sequence: $require_full_sequence,
@@ -794,6 +841,7 @@ summary_payload="$(
         min_wg_soak_entry_operators: $min_wg_soak_entry_operators,
         min_wg_soak_exit_operators: $min_wg_soak_exit_operators,
         min_wg_soak_cross_operator_pairs: $min_wg_soak_cross_operator_pairs,
+        max_evidence_age_sec: $max_evidence_age_sec,
         fail_on_any_no_go: $fail_on_any_no_go,
         min_go_rate_pct: $min_go_rate_pct
       },

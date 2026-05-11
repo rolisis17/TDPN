@@ -1026,6 +1026,10 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-summary --help |
   echo "easy_node prod-gate-slo-summary help missing --fail-on-no-go"
   exit 1
 fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-summary --help | rg -q -- '--max-evidence-age-sec'; then
+  echo "easy_node prod-gate-slo-summary help missing --max-evidence-age-sec"
+  exit 1
+fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- 'prod-gate-slo-trend'; then
   echo "easy_node usage missing prod-gate-slo-trend command"
   exit 1
@@ -1050,6 +1054,10 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-trend --help | r
   echo "easy_node prod-gate-slo-trend help missing --print-summary-json"
   exit 1
 fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-trend --help | rg -q -- '--max-evidence-age-sec'; then
+  echo "easy_node prod-gate-slo-trend help missing --max-evidence-age-sec"
+  exit 1
+fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- 'prod-gate-slo-alert'; then
   echo "easy_node usage missing prod-gate-slo-alert command"
   exit 1
@@ -1066,6 +1074,10 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-alert --help | r
   echo "easy_node prod-gate-slo-alert help missing --summary-json"
   exit 1
 fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-alert --help | rg -q -- '--max-evidence-age-sec'; then
+  echo "easy_node prod-gate-slo-alert help missing --max-evidence-age-sec"
+  exit 1
+fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- 'prod-gate-slo-dashboard'; then
   echo "easy_node usage missing prod-gate-slo-dashboard command"
   exit 1
@@ -1076,6 +1088,10 @@ if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-dashboard --help
 fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-dashboard --help | rg -q -- '--print-dashboard'; then
   echo "easy_node prod-gate-slo-dashboard help missing --print-dashboard"
+  exit 1
+fi
+if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh prod-gate-slo-dashboard --help | rg -q -- '--max-evidence-age-sec'; then
+  echo "easy_node prod-gate-slo-dashboard help missing --max-evidence-age-sec"
   exit 1
 fi
 if ! PATH="$TMP_BIN:$PATH" ./scripts/easy_node.sh --help --expert | rg -q -- 'prod-gate-signoff'; then
@@ -1146,6 +1162,7 @@ PROD_GATE_SLO_SUMMARY_SCRIPT="$FAKE_SLO_SUMMARY" \
   --run-report-json /tmp/prod_bundle/prod_bundle_run_report.json \
   --require-preflight-ok 1 \
   --require-signoff-ok 1 \
+  --max-evidence-age-sec 600 \
   --fail-on-no-go 1 >/tmp/integration_3machine_prod_profile_wiring_prod_gate_slo_summary.log 2>&1
 
 if ! rg -q -- '--run-report-json /tmp/prod_bundle/prod_bundle_run_report.json' "$SLO_SUMMARY_CAPTURE"; then
@@ -1160,6 +1177,11 @@ if ! rg -q -- '--require-preflight-ok 1' "$SLO_SUMMARY_CAPTURE"; then
 fi
 if ! rg -q -- '--require-signoff-ok 1' "$SLO_SUMMARY_CAPTURE"; then
   echo "easy_node prod-gate-slo-summary forwarding failed: missing --require-signoff-ok 1"
+  cat "$SLO_SUMMARY_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$SLO_SUMMARY_CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --max-evidence-age-sec 600"
   cat "$SLO_SUMMARY_CAPTURE"
   exit 1
 fi
@@ -1188,6 +1210,7 @@ PROD_GATE_SLO_TREND_SCRIPT="$FAKE_SLO_TREND" \
   --since-hours 24 \
   --summary-json /tmp/prod_slo_trend.json \
   --print-summary-json 1 \
+  --max-evidence-age-sec 600 \
   --min-go-rate-pct 95 \
   --fail-on-any-no-go 1 >/tmp/integration_3machine_prod_profile_wiring_prod_gate_slo_trend.log 2>&1
 
@@ -1208,6 +1231,11 @@ if ! rg -q -- '--min-go-rate-pct 95' "$SLO_TREND_CAPTURE"; then
 fi
 if ! rg -q -- '--since-hours 24' "$SLO_TREND_CAPTURE"; then
   echo "easy_node prod-gate-slo-trend forwarding failed: missing --since-hours 24"
+  cat "$SLO_TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$SLO_TREND_CAPTURE"; then
+  echo "easy_node prod-gate-slo-trend forwarding failed: missing --max-evidence-age-sec 600"
   cat "$SLO_TREND_CAPTURE"
   exit 1
 fi
@@ -1243,6 +1271,7 @@ PROD_GATE_SLO_ALERT_SCRIPT="$FAKE_SLO_ALERT" \
 ./scripts/easy_node.sh prod-gate-slo-alert \
   --reports-dir /tmp/prod_reports \
   --since-hours 12 \
+  --max-evidence-age-sec 600 \
   --warn-go-rate-pct 99 \
   --critical-go-rate-pct 95 \
   --fail-on-warn 1 \
@@ -1257,6 +1286,11 @@ if ! rg -q -- '--reports-dir /tmp/prod_reports' "$SLO_ALERT_CAPTURE"; then
 fi
 if ! rg -q -- '--since-hours 12' "$SLO_ALERT_CAPTURE"; then
   echo "easy_node prod-gate-slo-alert forwarding failed: missing --since-hours 12"
+  cat "$SLO_ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$SLO_ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --max-evidence-age-sec 600"
   cat "$SLO_ALERT_CAPTURE"
   exit 1
 fi
@@ -1307,6 +1341,7 @@ PROD_GATE_SLO_DASHBOARD_SCRIPT="$FAKE_SLO_DASHBOARD" \
 ./scripts/easy_node.sh prod-gate-slo-dashboard \
   --reports-dir /tmp/prod_reports \
   --since-hours 6 \
+  --max-evidence-age-sec 600 \
   --min-go-rate-pct 97 \
   --warn-go-rate-pct 99 \
   --critical-go-rate-pct 95 \
@@ -1323,6 +1358,11 @@ if ! rg -q -- '--reports-dir /tmp/prod_reports' "$SLO_DASHBOARD_CAPTURE"; then
 fi
 if ! rg -q -- '--since-hours 6' "$SLO_DASHBOARD_CAPTURE"; then
   echo "easy_node prod-gate-slo-dashboard forwarding failed: missing --since-hours 6"
+  cat "$SLO_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$SLO_DASHBOARD_CAPTURE"; then
+  echo "easy_node prod-gate-slo-dashboard forwarding failed: missing --max-evidence-age-sec 600"
   cat "$SLO_DASHBOARD_CAPTURE"
   exit 1
 fi

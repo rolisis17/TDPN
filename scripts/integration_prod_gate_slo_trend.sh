@@ -34,11 +34,78 @@ EOF_INCIDENT_REPORT_B
 
 touch "$REPORTS_DIR/run_b/incident_bundle.tar.gz"
 
-cat >"$REPORTS_DIR/run_a/prod_gate_summary.json" <<'EOF_GATE_A'
+cat >"$REPORTS_DIR/run_a/prod_wg_validate_summary.json" <<'EOF_WG_VALIDATE_A'
 {
+  "status": "ok",
+  "started_at_utc": "2026-03-10T10:00:00Z",
+  "finished_at_utc": "2026-03-10T10:00:15Z",
+  "client_inner_source": "udp",
+  "strict_distinct": true
+}
+EOF_WG_VALIDATE_A
+cat >"$REPORTS_DIR/run_a/prod_wg_soak_summary.json" <<'EOF_WG_SOAK_A'
+{
+  "status": "ok",
+  "summary_generated_at_utc": "2026-03-10T10:00:20Z",
+  "selection_lines_total": 8,
+  "selection_entry_operators": 2,
+  "selection_exit_operators": 2,
+  "selection_cross_operator_pairs": 1,
+  "selection_diversity_failed": 0
+}
+EOF_WG_SOAK_A
+
+cat >"$REPORTS_DIR/run_b/prod_wg_validate_summary.json" <<'EOF_WG_VALIDATE_B'
+{
+  "status": "ok",
+  "started_at_utc": "2026-03-10T11:00:00Z",
+  "finished_at_utc": "2026-03-10T11:00:15Z",
+  "client_inner_source": "udp",
+  "strict_distinct": true
+}
+EOF_WG_VALIDATE_B
+cat >"$REPORTS_DIR/run_b/prod_wg_soak_summary.json" <<'EOF_WG_SOAK_B'
+{
+  "status": "ok",
+  "summary_generated_at_utc": "2026-03-10T11:00:20Z",
+  "selection_lines_total": 8,
+  "selection_entry_operators": 2,
+  "selection_exit_operators": 2,
+  "selection_cross_operator_pairs": 1,
+  "selection_diversity_failed": 0
+}
+EOF_WG_SOAK_B
+
+cat >"$REPORTS_DIR/run_c/prod_wg_validate_summary.json" <<'EOF_WG_VALIDATE_C'
+{
+  "status": "ok",
+  "started_at_utc": "2026-03-10T12:00:00Z",
+  "finished_at_utc": "2026-03-10T12:00:15Z",
+  "client_inner_source": "udp",
+  "strict_distinct": true
+}
+EOF_WG_VALIDATE_C
+cat >"$REPORTS_DIR/run_c/prod_wg_soak_summary.json" <<'EOF_WG_SOAK_C'
+{
+  "status": "ok",
+  "summary_generated_at_utc": "2026-03-10T12:00:20Z",
+  "selection_lines_total": 8,
+  "selection_entry_operators": 2,
+  "selection_exit_operators": 2,
+  "selection_cross_operator_pairs": 1,
+  "selection_diversity_failed": 0
+}
+EOF_WG_SOAK_C
+
+cat >"$REPORTS_DIR/run_a/prod_gate_summary.json" <<EOF_GATE_A
+{
+  "started_at_utc": "2026-03-10T10:00:00Z",
+  "finished_at_utc": "2026-03-10T10:00:20Z",
   "status": "ok",
   "failed_step": "",
   "failed_rc": 0,
+  "wg_validate_summary_json": "$REPORTS_DIR/run_a/prod_wg_validate_summary.json",
+  "wg_soak_summary_json": "$REPORTS_DIR/run_a/prod_wg_soak_summary.json",
   "steps": {
     "control_validate": "ok",
     "control_soak": "ok",
@@ -55,11 +122,15 @@ cat >"$REPORTS_DIR/run_a/prod_gate_summary.json" <<'EOF_GATE_A'
 }
 EOF_GATE_A
 
-cat >"$REPORTS_DIR/run_b/prod_gate_summary.json" <<'EOF_GATE_B'
+cat >"$REPORTS_DIR/run_b/prod_gate_summary.json" <<EOF_GATE_B
 {
+  "started_at_utc": "2026-03-10T11:00:00Z",
+  "finished_at_utc": "2026-03-10T11:00:20Z",
   "status": "ok",
   "failed_step": "",
   "failed_rc": 0,
+  "wg_validate_summary_json": "$REPORTS_DIR/run_b/prod_wg_validate_summary.json",
+  "wg_soak_summary_json": "$REPORTS_DIR/run_b/prod_wg_soak_summary.json",
   "steps": {
     "control_validate": "ok",
     "control_soak": "ok",
@@ -76,11 +147,15 @@ cat >"$REPORTS_DIR/run_b/prod_gate_summary.json" <<'EOF_GATE_B'
 }
 EOF_GATE_B
 
-cat >"$REPORTS_DIR/run_c/prod_gate_summary.json" <<'EOF_GATE_C'
+cat >"$REPORTS_DIR/run_c/prod_gate_summary.json" <<EOF_GATE_C
 {
+  "started_at_utc": "2026-03-10T12:00:00Z",
+  "finished_at_utc": "2026-03-10T12:00:20Z",
   "status": "ok",
   "failed_step": "",
   "failed_rc": 0,
+  "wg_validate_summary_json": "$REPORTS_DIR/run_c/prod_wg_validate_summary.json",
+  "wg_soak_summary_json": "$REPORTS_DIR/run_c/prod_wg_soak_summary.json",
   "steps": {
     "control_validate": "ok",
     "control_soak": "ok",
@@ -102,6 +177,8 @@ cat >"$REPORTS_DIR/run_a/prod_bundle_run_report.json" <<EOF_RR_A
   "generated_at_utc": "2026-03-10T10:00:00Z",
   "bundle_dir": "$REPORTS_DIR/run_a",
   "gate_summary_json": "$REPORTS_DIR/run_a/prod_gate_summary.json",
+  "wg_validate_summary_json": "$REPORTS_DIR/run_a/prod_wg_validate_summary.json",
+  "wg_soak_summary_json": "$REPORTS_DIR/run_a/prod_wg_soak_summary.json",
   "preflight": {"enabled": true, "status": "ok", "rc": 0},
   "bundle": {"status": "ok", "rc": 0},
   "integrity_verify": {"enabled": true, "status": "ok", "rc": 0},
@@ -114,6 +191,8 @@ cat >"$REPORTS_DIR/run_b/prod_bundle_run_report.json" <<EOF_RR_B
   "generated_at_utc": "2026-03-10T11:00:00Z",
   "bundle_dir": "$REPORTS_DIR/run_b",
   "gate_summary_json": "$REPORTS_DIR/run_b/prod_gate_summary.json",
+  "wg_validate_summary_json": "$REPORTS_DIR/run_b/prod_wg_validate_summary.json",
+  "wg_soak_summary_json": "$REPORTS_DIR/run_b/prod_wg_soak_summary.json",
   "preflight": {"enabled": true, "status": "ok", "rc": 0},
   "bundle": {"status": "ok", "rc": 0},
   "integrity_verify": {"enabled": true, "status": "ok", "rc": 0},
@@ -138,6 +217,8 @@ cat >"$REPORTS_DIR/run_c/prod_bundle_run_report.json" <<EOF_RR_C
   "generated_at_utc": "2026-03-10T12:00:00Z",
   "bundle_dir": "$REPORTS_DIR/run_c",
   "gate_summary_json": "$REPORTS_DIR/run_c/prod_gate_summary.json",
+  "wg_validate_summary_json": "$REPORTS_DIR/run_c/prod_wg_validate_summary.json",
+  "wg_soak_summary_json": "$REPORTS_DIR/run_c/prod_wg_soak_summary.json",
   "preflight": {"enabled": true, "status": "ok", "rc": 0},
   "bundle": {"status": "ok", "rc": 0},
   "integrity_verify": {"enabled": true, "status": "ok", "rc": 0},
@@ -197,7 +278,7 @@ if ! jq -e '(.incident_snapshot.latest_failed_run_report.attachment_manifest.pat
   cat "$SUMMARY_JSON"
   exit 1
 fi
-if ! jq -e '.policy.require_wg_validate_udp_source == 0 and .policy.require_wg_validate_strict_distinct == 0 and .policy.require_wg_soak_diversity_pass == 0 and .policy.min_wg_soak_selection_lines == 0 and .policy.min_wg_soak_entry_operators == 0 and .policy.min_wg_soak_exit_operators == 0 and .policy.min_wg_soak_cross_operator_pairs == 0' "$SUMMARY_JSON" >/dev/null 2>&1; then
+if ! jq -e '.policy.require_wg_validate_udp_source == 0 and .policy.require_wg_validate_strict_distinct == 0 and .policy.require_wg_soak_diversity_pass == 0 and .policy.min_wg_soak_selection_lines == 0 and .policy.min_wg_soak_entry_operators == 0 and .policy.min_wg_soak_exit_operators == 0 and .policy.min_wg_soak_cross_operator_pairs == 0 and .policy.max_evidence_age_sec == 0 and .filters.max_evidence_age_sec == 0' "$SUMMARY_JSON" >/dev/null 2>&1; then
   echo "summary JSON policy block missing expected WG evidence defaults"
   cat "$SUMMARY_JSON"
   exit 1
@@ -218,8 +299,59 @@ if ! rg -q 'attachment_manifest=.*incident_attachments_manifest.json' /tmp/integ
   exit 1
 fi
 
+echo "[prod-gate-slo-trend] freshness pass"
+FRESH_NOW_EPOCH="$(jq -nr '"2026-03-10T12:02:00Z" | fromdateiso8601 | floor')"
+FRESH_SUMMARY_JSON="$TMP_DIR/slo_trend_fresh_summary.json"
+PROD_GATE_SLO_NOW_EPOCH="$FRESH_NOW_EPOCH" \
+./scripts/prod_gate_slo_trend.sh \
+  --reports-dir "$REPORTS_DIR" \
+  --max-reports 3 \
+  --max-wg-soak-failed-rounds 0 \
+  --max-evidence-age-sec 10800 \
+  --summary-json "$FRESH_SUMMARY_JSON" \
+  --show-details 0 \
+  --show-top-reasons 3 >/tmp/integration_prod_gate_slo_trend_freshness_pass.log 2>&1
+
+if ! rg -q '\[prod-gate-slo-trend\] reports_total=3 go=2 no_go=1 go_rate_pct=66.67' /tmp/integration_prod_gate_slo_trend_freshness_pass.log; then
+  echo "expected freshness pass trend summary not found"
+  cat /tmp/integration_prod_gate_slo_trend_freshness_pass.log
+  exit 1
+fi
+if ! jq -e '.policy.max_evidence_age_sec == 10800 and .filters.max_evidence_age_sec == 10800' "$FRESH_SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "freshness trend summary JSON missing max_evidence_age_sec"
+  cat "$FRESH_SUMMARY_JSON"
+  exit 1
+fi
+
+echo "[prod-gate-slo-trend] stale evidence fail-close"
+STALE_NOW_EPOCH="$(jq -nr '"2026-03-10T13:00:00Z" | fromdateiso8601 | floor')"
+set +e
+PROD_GATE_SLO_NOW_EPOCH="$STALE_NOW_EPOCH" \
+./scripts/prod_gate_slo_trend.sh \
+  --reports-dir "$REPORTS_DIR" \
+  --max-reports 3 \
+  --max-wg-soak-failed-rounds 0 \
+  --max-evidence-age-sec 60 \
+  --fail-on-any-no-go 1 \
+  --show-details 0 \
+  --show-top-reasons 3 >/tmp/integration_prod_gate_slo_trend_stale_fail.log 2>&1
+stale_trend_rc=$?
+set -e
+if [[ "$stale_trend_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when trend evidence is stale"
+  cat /tmp/integration_prod_gate_slo_trend_stale_fail.log
+  exit 1
+fi
+if ! rg -q 'timestamp is stale' /tmp/integration_prod_gate_slo_trend_stale_fail.log; then
+  echo "expected stale timestamp trend reason not found"
+  cat /tmp/integration_prod_gate_slo_trend_stale_fail.log
+  exit 1
+fi
+
 echo "[prod-gate-slo-trend] since-hours filter"
 touch -t 202001010101 "$REPORTS_DIR/run_a/prod_bundle_run_report.json" "$REPORTS_DIR/run_b/prod_bundle_run_report.json"
+SINCE_NOW_EPOCH="$(jq -nr '"2026-03-10T12:30:00Z" | fromdateiso8601 | floor')"
+PROD_GATE_SLO_TREND_NOW_EPOCH="$SINCE_NOW_EPOCH" \
 ./scripts/prod_gate_slo_trend.sh \
   --reports-dir "$REPORTS_DIR" \
   --max-reports 10 \
@@ -301,6 +433,7 @@ PROD_GATE_SLO_TREND_SCRIPT="$FAKE_TREND" \
   --min-wg-soak-entry-operators 2 \
   --min-wg-soak-exit-operators 2 \
   --min-wg-soak-cross-operator-pairs 1 \
+  --max-evidence-age-sec 600 \
   --summary-json /tmp/slo_trend.json \
   --print-summary-json 1 \
   --fail-on-any-no-go 1 \
@@ -369,6 +502,11 @@ if ! rg -q -- '--min-wg-soak-exit-operators 2' "$CAPTURE"; then
 fi
 if ! rg -q -- '--min-wg-soak-cross-operator-pairs 1' "$CAPTURE"; then
   echo "easy_node prod-gate-slo-trend forwarding failed: missing --min-wg-soak-cross-operator-pairs"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-trend forwarding failed: missing --max-evidence-age-sec"
   cat "$CAPTURE"
   exit 1
 fi

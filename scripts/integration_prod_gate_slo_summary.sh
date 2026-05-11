@@ -19,6 +19,8 @@ trap cleanup EXIT
 
 PASS_GATE="$TMP_DIR/prod_gate_ok.json"
 PASS_RUN_REPORT="$TMP_DIR/prod_bundle_run_report_ok.json"
+WG_VALIDATE_SUMMARY="$TMP_DIR/wg_validate_summary.json"
+WG_SOAK_SUMMARY="$TMP_DIR/wg_soak_summary.json"
 INCIDENT_BUNDLE_DIR="$TMP_DIR/incident_bundle"
 INCIDENT_BUNDLE_TAR="$TMP_DIR/incident_bundle.tar.gz"
 INCIDENT_SUMMARY_JSON="$TMP_DIR/incident_summary.json"
@@ -41,11 +43,36 @@ EOF_INCIDENT_REPORT
 printf 'attachments/01_runtime_doctor_before.json\tfile\t/tmp/runtime_doctor_before.json\n' >"$INCIDENT_ATTACH_MANIFEST"
 printf '/tmp/runtime_fix.json\tmissing\n' >"$INCIDENT_ATTACH_SKIPPED"
 
-cat >"$PASS_GATE" <<'EOF_PASS_GATE'
+cat >"$WG_VALIDATE_SUMMARY" <<'EOF_WG_VALIDATE'
 {
+  "status": "ok",
+  "started_at_utc": "2026-03-10T12:00:00Z",
+  "finished_at_utc": "2026-03-10T12:00:15Z",
+  "client_inner_source": "udp",
+  "strict_distinct": true
+}
+EOF_WG_VALIDATE
+cat >"$WG_SOAK_SUMMARY" <<'EOF_WG_SOAK'
+{
+  "status": "ok",
+  "summary_generated_at_utc": "2026-03-10T12:00:20Z",
+  "selection_lines_total": 8,
+  "selection_entry_operators": 2,
+  "selection_exit_operators": 2,
+  "selection_cross_operator_pairs": 1,
+  "selection_diversity_failed": 0
+}
+EOF_WG_SOAK
+
+cat >"$PASS_GATE" <<EOF_PASS_GATE
+{
+  "started_at_utc": "2026-03-10T12:00:00Z",
+  "finished_at_utc": "2026-03-10T12:00:20Z",
   "status": "ok",
   "failed_step": "",
   "failed_rc": 0,
+  "wg_validate_summary_json": "$WG_VALIDATE_SUMMARY",
+  "wg_soak_summary_json": "$WG_SOAK_SUMMARY",
   "steps": {
     "control_validate": "ok",
     "control_soak": "ok",
@@ -64,10 +91,13 @@ EOF_PASS_GATE
 
 cat >"$PASS_RUN_REPORT" <<EOF_PASS_RUN_REPORT
 {
+  "generated_at_utc": "2026-03-10T12:00:25Z",
   "status": "ok",
   "final_rc": 0,
   "bundle_dir": "$TMP_DIR/prod_bundle_dir",
   "gate_summary_json": "$PASS_GATE",
+  "wg_validate_summary_json": "$WG_VALIDATE_SUMMARY",
+  "wg_soak_summary_json": "$WG_SOAK_SUMMARY",
   "preflight": {
     "enabled": true,
     "status": "ok",
@@ -109,6 +139,52 @@ echo "[prod-gate-slo-summary] pass baseline"
 if ! rg -q '\[prod-gate-slo\] decision=GO' /tmp/integration_prod_gate_slo_summary_pass.log; then
   echo "expected GO decision in pass baseline"
   cat /tmp/integration_prod_gate_slo_summary_pass.log
+  exit 1
+fi
+
+echo "[prod-gate-slo-summary] freshness pass"
+FRESH_NOW_EPOCH="$(jq -nr '"2026-03-10T12:01:00Z" | fromdateiso8601 | floor')"
+PROD_GATE_SLO_NOW_EPOCH="$FRESH_NOW_EPOCH" \
+./scripts/prod_gate_slo_summary.sh \
+  --run-report-json "$PASS_RUN_REPORT" \
+  --require-preflight-ok 1 \
+  --require-bundle-ok 1 \
+  --require-integrity-ok 1 \
+  --require-signoff-ok 1 \
+  --max-evidence-age-sec 120 \
+  --fail-on-no-go 1 \
+  --show-json 0 >/tmp/integration_prod_gate_slo_summary_freshness_pass.log 2>&1
+
+if ! rg -q '\[prod-gate-slo\] decision=GO' /tmp/integration_prod_gate_slo_summary_freshness_pass.log; then
+  echo "expected GO decision with fresh evidence"
+  cat /tmp/integration_prod_gate_slo_summary_freshness_pass.log
+  exit 1
+fi
+if ! rg -q '\[prod-gate-slo\] freshness max_evidence_age_sec=120' /tmp/integration_prod_gate_slo_summary_freshness_pass.log; then
+  echo "expected freshness budget line in SLO summary output"
+  cat /tmp/integration_prod_gate_slo_summary_freshness_pass.log
+  exit 1
+fi
+
+echo "[prod-gate-slo-summary] stale evidence fail-close"
+STALE_NOW_EPOCH="$(jq -nr '"2026-03-10T12:10:00Z" | fromdateiso8601 | floor')"
+set +e
+PROD_GATE_SLO_NOW_EPOCH="$STALE_NOW_EPOCH" \
+./scripts/prod_gate_slo_summary.sh \
+  --run-report-json "$PASS_RUN_REPORT" \
+  --max-evidence-age-sec 120 \
+  --fail-on-no-go 1 \
+  --show-json 0 >/tmp/integration_prod_gate_slo_summary_stale_fail.log 2>&1
+stale_rc=$?
+set -e
+if [[ "$stale_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when SLO evidence is stale"
+  cat /tmp/integration_prod_gate_slo_summary_stale_fail.log
+  exit 1
+fi
+if ! rg -q 'timestamp is stale' /tmp/integration_prod_gate_slo_summary_stale_fail.log; then
+  echo "expected stale timestamp no-go reason not found"
+  cat /tmp/integration_prod_gate_slo_summary_stale_fail.log
   exit 1
 fi
 
@@ -368,16 +444,19 @@ if ! rg -q 'incident snapshot summary_json is invalid JSON' /tmp/integration_pro
 fi
 
 echo "[prod-gate-slo-summary] wg evidence policy checks"
-WG_VALIDATE_SUMMARY="$TMP_DIR/wg_validate_summary.json"
-WG_SOAK_SUMMARY="$TMP_DIR/wg_soak_summary.json"
 cat >"$WG_VALIDATE_SUMMARY" <<'EOF_WG_VALIDATE'
 {
+  "status": "ok",
+  "started_at_utc": "2026-03-10T12:00:00Z",
+  "finished_at_utc": "2026-03-10T12:00:15Z",
   "client_inner_source": "udp",
   "strict_distinct": true
 }
 EOF_WG_VALIDATE
 cat >"$WG_SOAK_SUMMARY" <<'EOF_WG_SOAK'
 {
+  "status": "ok",
+  "summary_generated_at_utc": "2026-03-10T12:00:20Z",
   "selection_lines_total": 8,
   "selection_entry_operators": 2,
   "selection_exit_operators": 2,
@@ -458,6 +537,7 @@ PROD_GATE_SLO_SUMMARY_SCRIPT="$FAKE_SLO_SUMMARY" \
   --min-wg-soak-entry-operators 2 \
   --min-wg-soak-exit-operators 2 \
   --min-wg-soak-cross-operator-pairs 1 \
+  --max-evidence-age-sec 120 \
   --fail-on-no-go 1 \
   --show-json 1 >/tmp/integration_prod_gate_slo_summary_easy_node.log 2>&1
 
@@ -513,6 +593,11 @@ if ! rg -q -- '--min-wg-soak-exit-operators 2' "$CAPTURE"; then
 fi
 if ! rg -q -- '--min-wg-soak-cross-operator-pairs 1' "$CAPTURE"; then
   echo "easy_node prod-gate-slo-summary forwarding failed: missing --min-wg-soak-cross-operator-pairs"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 120' "$CAPTURE"; then
+  echo "easy_node prod-gate-slo-summary forwarding failed: missing --max-evidence-age-sec"
   cat "$CAPTURE"
   exit 1
 fi

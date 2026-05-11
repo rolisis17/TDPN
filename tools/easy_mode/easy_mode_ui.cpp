@@ -3660,6 +3660,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       bool requireWGValidate = parseYesNo(readLine("Require WG validate status=ok? (Y/n)", "y"), true);
       bool requireWGSoak = parseYesNo(readLine("Require WG soak status=ok? (Y/n)", "y"), true);
       std::string maxWGSoakFailedRounds = trim(readLine("Max WG soak failed rounds", "0"));
+      std::string maxEvidenceAgeSec = trim(readLine("Max evidence age seconds (0=disabled)", "0"));
       bool requireRunReportStages = parseYesNo(readLine("Require run-report stages (preflight + bundle + integrity + signoff) to be ok? (y/N)", "n"), false);
       bool failOnNoGo = parseYesNo(readLine("Return non-zero when decision is NO-GO? (y/N)", "n"), false);
       bool showJson = parseYesNo(readLine("Show summary JSON payloads? (y/N)", "n"), false);
@@ -3677,6 +3678,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --min-wg-soak-exit-operators 2"
           << " --min-wg-soak-cross-operator-pairs 1"
           << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
+          << " --max-evidence-age-sec " << shellEscape(maxEvidenceAgeSec)
           << " --require-preflight-ok " << (requireRunReportStages ? "1" : "0")
           << " --require-bundle-ok " << (requireRunReportStages ? "1" : "0")
           << " --require-integrity-ok " << (requireRunReportStages ? "1" : "0")
@@ -3711,6 +3713,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       bool requireWGValidate = parseYesNo(readLine("Require WG validate status=ok? (Y/n)", "y"), true);
       bool requireWGSoak = parseYesNo(readLine("Require WG soak status=ok? (Y/n)", "y"), true);
       std::string maxWGSoakFailedRounds = trim(readLine("Max WG soak failed rounds", "0"));
+      std::string maxEvidenceAgeSec = trim(readLine("Max evidence age seconds (0=disabled)", "0"));
       bool requireRunReportStages = parseYesNo(readLine("Require run-report stages (preflight + bundle + integrity + signoff) to be ok? (y/N)", "n"), false);
       bool failOnAnyNoGo = parseYesNo(readLine("Fail if any run is NO-GO? (y/N)", "n"), false);
       std::string minGoRatePct = trim(readLine("Minimum GO rate percent (0-100)", "0"));
@@ -3734,6 +3737,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --min-wg-soak-exit-operators 2"
           << " --min-wg-soak-cross-operator-pairs 1"
           << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
+          << " --max-evidence-age-sec " << shellEscape(maxEvidenceAgeSec)
           << " --require-preflight-ok " << (requireRunReportStages ? "1" : "0")
           << " --require-bundle-ok " << (requireRunReportStages ? "1" : "0")
           << " --require-integrity-ok " << (requireRunReportStages ? "1" : "0")
@@ -3760,12 +3764,14 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       std::string reportsDir;
       std::string maxReports = "25";
       std::string sinceHours = "24";
+      std::string maxEvidenceAgeSec = "0";
       if (useTrendSummary) {
         trendSummaryJson = trim(readLine("Trend summary JSON path", ".easy-node-logs/prod_slo_trend_24h.json"));
       } else {
         reportsDir = trim(readLine("Reports directory (scan for prod_bundle_run_report.json)", ".easy-node-logs"));
         maxReports = trim(readLine("Max reports to evaluate", "25"));
         sinceHours = trim(readLine("Include only reports from last N hours (0=all)", "24"));
+        maxEvidenceAgeSec = trim(readLine("Max evidence age seconds (0=disabled)", "0"));
       }
 
       std::string warnGoRatePct = trim(readLine("WARN when GO rate below percent", "98"));
@@ -3789,6 +3795,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --min-wg-soak-entry-operators 2"
           << " --min-wg-soak-exit-operators 2"
           << " --min-wg-soak-cross-operator-pairs 1"
+          << " --max-evidence-age-sec " << shellEscape(maxEvidenceAgeSec)
           << " --warn-go-rate-pct " << shellEscape(warnGoRatePct)
           << " --critical-go-rate-pct " << shellEscape(criticalGoRatePct)
           << " --warn-no-go-count " << shellEscape(warnNoGoCount)
@@ -3825,6 +3832,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
       bool requireWGValidate = parseYesNo(readLine("Require WG validate status=ok? (Y/n)", "y"), true);
       bool requireWGSoak = parseYesNo(readLine("Require WG soak status=ok? (Y/n)", "y"), true);
       std::string maxWGSoakFailedRounds = trim(readLine("Max WG soak failed rounds", "0"));
+      std::string maxEvidenceAgeSec = trim(readLine("Max evidence age seconds (0=disabled)", "0"));
       bool requireRunReportStages = parseYesNo(readLine("Require run-report stages (preflight + bundle + integrity + signoff) to be ok? (y/N)", "n"), false);
       bool failOnAnyNoGo = parseYesNo(readLine("Fail if any run is NO-GO? (y/N)", "n"), false);
       std::string minGoRatePct = trim(readLine("Minimum GO rate percent (0-100)", "95"));
@@ -3860,6 +3868,7 @@ void runAdvancedMenu(const std::string &root, const std::string &script, ABHosts
           << " --min-wg-soak-exit-operators 2"
           << " --min-wg-soak-cross-operator-pairs 1"
           << " --max-wg-soak-failed-rounds " << shellEscape(maxWGSoakFailedRounds)
+          << " --max-evidence-age-sec " << shellEscape(maxEvidenceAgeSec)
           << " --require-preflight-ok " << (requireRunReportStages ? "1" : "0")
           << " --require-bundle-ok " << (requireRunReportStages ? "1" : "0")
           << " --require-integrity-ok " << (requireRunReportStages ? "1" : "0")

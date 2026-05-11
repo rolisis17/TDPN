@@ -30,6 +30,7 @@ Usage:
     [--min-wg-soak-entry-operators N] \
     [--min-wg-soak-exit-operators N] \
     [--min-wg-soak-cross-operator-pairs N] \
+    [--max-evidence-age-sec N] \
     [--fail-on-no-go [0|1]] \
     [--show-json [0|1]]
 
@@ -133,6 +134,38 @@ json_bool01() {
   esac
 }
 
+iso8601_utc_to_epoch() {
+  local timestamp="$1"
+  timestamp="$(trim "$timestamp")"
+  if [[ ! "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+    return 1
+  fi
+  jq -nr --arg ts "$timestamp" '$ts | fromdateiso8601 | floor' 2>/dev/null
+}
+
+check_evidence_timestamp_age() {
+  local label="$1"
+  local timestamp="$2"
+  local now_epoch="$3"
+  local timestamp_epoch=""
+  timestamp="$(trim "$timestamp")"
+  if [[ -z "$timestamp" ]]; then
+    reasons+=("$label timestamp missing while --max-evidence-age-sec is enabled")
+    return
+  fi
+  if ! timestamp_epoch="$(iso8601_utc_to_epoch "$timestamp" 2>/dev/null)"; then
+    reasons+=("$label timestamp is invalid (value=$timestamp)")
+    return
+  fi
+  if (( timestamp_epoch > now_epoch + max_evidence_future_skew_sec )); then
+    reasons+=("$label timestamp is too far in the future (value=$timestamp, future_skew_sec=$((timestamp_epoch - now_epoch)))")
+    return
+  fi
+  if (( now_epoch - timestamp_epoch > max_evidence_age_sec )); then
+    reasons+=("$label timestamp is stale (value=$timestamp, age_sec=$((now_epoch - timestamp_epoch)), max_evidence_age_sec=$max_evidence_age_sec)")
+  fi
+}
+
 run_report_json=""
 bundle_dir=""
 gate_summary_json=""
@@ -155,6 +188,9 @@ min_wg_soak_selection_lines="${PROD_GATE_SLO_MIN_WG_SOAK_SELECTION_LINES:-0}"
 min_wg_soak_entry_operators="${PROD_GATE_SLO_MIN_WG_SOAK_ENTRY_OPERATORS:-0}"
 min_wg_soak_exit_operators="${PROD_GATE_SLO_MIN_WG_SOAK_EXIT_OPERATORS:-0}"
 min_wg_soak_cross_operator_pairs="${PROD_GATE_SLO_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS:-0}"
+max_evidence_age_sec="${PROD_GATE_SLO_MAX_EVIDENCE_AGE_SEC:-0}"
+max_evidence_future_skew_sec="${PROD_GATE_SLO_MAX_EVIDENCE_FUTURE_SKEW_SEC:-300}"
+max_evidence_now_epoch="${PROD_GATE_SLO_NOW_EPOCH:-}"
 fail_on_no_go="${PROD_GATE_SLO_FAIL_ON_NO_GO:-0}"
 show_json="${PROD_GATE_SLO_SHOW_JSON:-0}"
 
@@ -308,6 +344,10 @@ while [[ $# -gt 0 ]]; do
       min_wg_soak_cross_operator_pairs="${2:-}"
       shift 2
       ;;
+    --max-evidence-age-sec)
+      max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --fail-on-no-go)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         fail_on_no_go="${2:-}"
@@ -374,6 +414,18 @@ if [[ ! "$min_wg_soak_cross_operator_pairs" =~ ^[0-9]+$ ]]; then
   echo "--min-wg-soak-cross-operator-pairs must be an integer >= 0"
   exit 2
 fi
+if [[ ! "$max_evidence_age_sec" =~ ^[0-9]+$ ]]; then
+  echo "--max-evidence-age-sec must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$max_evidence_future_skew_sec" =~ ^[0-9]+$ ]]; then
+  echo "PROD_GATE_SLO_MAX_EVIDENCE_FUTURE_SKEW_SEC must be an integer >= 0"
+  exit 2
+fi
+if [[ -n "$max_evidence_now_epoch" && ! "$max_evidence_now_epoch" =~ ^[0-9]+$ ]]; then
+  echo "PROD_GATE_SLO_NOW_EPOCH must be an integer epoch when set"
+  exit 2
+fi
 
 run_report_json="$(trim "$run_report_json")"
 bundle_dir="$(trim "$bundle_dir")"
@@ -431,6 +483,20 @@ fi
 if [[ -z "$wg_soak_summary_json" ]]; then
   wg_soak_summary_json="$(json_string "$gate_summary_json" '.wg_soak_summary_json')"
 fi
+wg_validate_summary_status=""
+wg_validate_started_at_utc=""
+wg_validate_finished_at_utc=""
+wg_soak_summary_status=""
+wg_soak_summary_generated_at_utc=""
+if [[ -n "$wg_validate_summary_json" && -f "$wg_validate_summary_json" ]]; then
+  wg_validate_summary_status="$(json_string "$wg_validate_summary_json" '.status')"
+  wg_validate_started_at_utc="$(json_string "$wg_validate_summary_json" '.started_at_utc')"
+  wg_validate_finished_at_utc="$(json_string "$wg_validate_summary_json" '.finished_at_utc')"
+fi
+if [[ -n "$wg_soak_summary_json" && -f "$wg_soak_summary_json" ]]; then
+  wg_soak_summary_status="$(json_string "$wg_soak_summary_json" '.status')"
+  wg_soak_summary_generated_at_utc="$(json_string "$wg_soak_summary_json" '.summary_generated_at_utc // .generated_at_utc')"
+fi
 wg_validate_client_inner_source="$(json_string "$wg_validate_summary_json" '.client_inner_source')"
 wg_validate_strict_distinct="$(json_bool01 "$wg_validate_summary_json" '.strict_distinct')"
 wg_soak_selection_lines="$(json_int "$wg_soak_summary_json" '.selection_lines_total')"
@@ -442,6 +508,8 @@ wg_soak_selection_diversity_failed="$(json_int "$wg_soak_summary_json" '.selecti
 gate_status="$(json_string "$gate_summary_json" '.status')"
 failed_step="$(json_string "$gate_summary_json" '.failed_step')"
 failed_rc="$(json_int "$gate_summary_json" '.failed_rc')"
+gate_started_at_utc="$(json_string "$gate_summary_json" '.started_at_utc')"
+gate_finished_at_utc="$(json_string "$gate_summary_json" '.finished_at_utc')"
 step_control_validate="$(json_string "$gate_summary_json" '.steps.control_validate')"
 step_control_soak="$(json_string "$gate_summary_json" '.steps.control_soak')"
 step_prod_wg_validate="$(json_string "$gate_summary_json" '.steps.prod_wg_validate')"
@@ -478,10 +546,12 @@ incident_summary_valid_json="0"
 incident_report_exists="0"
 incident_enabled_on_fail="0"
 run_report_status=""
+run_report_generated_at_utc=""
 run_report_final_rc="0"
 
 if [[ -n "$run_report_json" ]]; then
   run_report_status="$(json_string "$run_report_json" '.status')"
+  run_report_generated_at_utc="$(json_string "$run_report_json" '.generated_at_utc')"
   run_report_final_rc="$(json_int "$run_report_json" '.final_rc')"
   preflight_enabled="$(json_bool01 "$run_report_json" '.preflight.enabled')"
   preflight_status="$(json_string "$run_report_json" '.preflight.status')"
@@ -509,6 +579,31 @@ if [[ -n "$run_report_json" ]]; then
 fi
 
 declare -a reasons=()
+
+if (( max_evidence_age_sec > 0 )); then
+  if [[ -n "$max_evidence_now_epoch" ]]; then
+    now_epoch="$max_evidence_now_epoch"
+  else
+    need_cmd date
+    now_epoch="$(date -u +%s)"
+  fi
+  if [[ -z "$now_epoch" || ! "$now_epoch" =~ ^[0-9]+$ ]]; then
+    reasons+=("could not determine current UTC epoch for evidence freshness check")
+  else
+    check_evidence_timestamp_age "gate started_at_utc" "$gate_started_at_utc" "$now_epoch"
+    check_evidence_timestamp_age "gate finished_at_utc" "$gate_finished_at_utc" "$now_epoch"
+    if [[ -n "$run_report_json" ]]; then
+      check_evidence_timestamp_age "run report generated_at_utc" "$run_report_generated_at_utc" "$now_epoch"
+    fi
+    if [[ "$require_wg_validate_ok" == "1" || -n "$wg_validate_summary_status" ]]; then
+      check_evidence_timestamp_age "wg validate started_at_utc" "$wg_validate_started_at_utc" "$now_epoch"
+      check_evidence_timestamp_age "wg validate finished_at_utc" "$wg_validate_finished_at_utc" "$now_epoch"
+    fi
+    if [[ "$require_wg_soak_ok" == "1" || -n "$wg_soak_summary_status" ]]; then
+      check_evidence_timestamp_age "wg soak summary_generated_at_utc" "$wg_soak_summary_generated_at_utc" "$now_epoch"
+    fi
+  fi
+fi
 
 if [[ "$gate_status" != "ok" ]]; then
   reasons+=("gate status is not ok (status=${gate_status:-unset}, failed_step=${failed_step:-none}, failed_rc=$failed_rc)")
@@ -666,6 +761,7 @@ fi
 echo "[prod-gate-slo] gate_summary_json=$gate_summary_json"
 echo "[prod-gate-slo] decision=$decision"
 echo "[prod-gate-slo] gate status=${gate_status:-unset} failed_step=${failed_step:-none} failed_rc=$failed_rc"
+echo "[prod-gate-slo] freshness max_evidence_age_sec=${max_evidence_age_sec} gate_started_at_utc=${gate_started_at_utc:-unset} gate_finished_at_utc=${gate_finished_at_utc:-unset} run_report_generated_at_utc=${run_report_generated_at_utc:-unset} wg_validate_started_at_utc=${wg_validate_started_at_utc:-unset} wg_validate_finished_at_utc=${wg_validate_finished_at_utc:-unset} wg_soak_summary_generated_at_utc=${wg_soak_summary_generated_at_utc:-unset}"
 echo "[prod-gate-slo] steps control_validate=${step_control_validate:-unset} control_soak=${step_control_soak:-unset} prod_wg_validate=${step_prod_wg_validate:-unset} prod_wg_soak=${step_prod_wg_soak:-unset}"
 echo "[prod-gate-slo] wg_validate status=${wg_validate_status:-unset} failed_step=${wg_validate_failed_step:-none} summary=${wg_validate_summary_json:-unset}"
 echo "[prod-gate-slo] wg_soak status=${wg_soak_status:-unset} rounds_passed=${wg_soak_rounds_passed} rounds_failed=${wg_soak_rounds_failed} top_failure_class=${wg_soak_top_failure_class:-none} top_failure_count=${wg_soak_top_failure_count} summary=${wg_soak_summary_json:-unset}"

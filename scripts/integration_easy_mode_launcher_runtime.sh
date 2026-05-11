@@ -1106,6 +1106,7 @@ INPUT41="$TMP_DIR/input41.txt"
   printf '\n'    # require wg validate default yes
   printf '\n'    # require wg soak default yes
   printf '\n'    # max wg soak failed rounds default 0
+  printf '\n'    # max evidence age seconds default 0
   printf '\n'    # require run report stages default no
   printf '\n'    # fail on no-go default no
   printf '\n'    # show json default no
@@ -1142,6 +1143,8 @@ assert_line_has "$line41" '--min-wg-soak-cross-operator-pairs 1' \
   "runtime wiring failed: option 41 missing --min-wg-soak-cross-operator-pairs 1 default"
 assert_line_has "$line41" '--max-wg-soak-failed-rounds 0' \
   "runtime wiring failed: option 41 missing default max-wg-soak-failed-rounds"
+assert_line_has "$line41" '--max-evidence-age-sec 0' \
+  "runtime wiring failed: option 41 missing default max-evidence-age-sec"
 assert_line_has "$line41" '--require-preflight-ok 0' \
   "runtime wiring failed: option 41 missing default require-preflight-ok 0"
 assert_line_has "$line41" '--require-bundle-ok 0' \
@@ -1175,6 +1178,7 @@ INPUT42="$TMP_DIR/input42.txt"
   printf '\n'    # require wg validate default yes
   printf '\n'    # require wg soak default yes
   printf '\n'    # max wg soak failed rounds default 0
+  printf '\n'    # max evidence age seconds default 0
   printf '\n'    # require run report stages default no
   printf '\n'    # fail on any no-go default no
   printf '\n'    # min go rate pct default 0
@@ -1221,6 +1225,8 @@ assert_line_has "$line42" '--min-wg-soak-cross-operator-pairs 1' \
   "runtime wiring failed: option 42 missing --min-wg-soak-cross-operator-pairs 1 default"
 assert_line_has "$line42" '--max-wg-soak-failed-rounds 0' \
   "runtime wiring failed: option 42 missing default max-wg-soak-failed-rounds"
+assert_line_has "$line42" '--max-evidence-age-sec 0' \
+  "runtime wiring failed: option 42 missing default max-evidence-age-sec"
 assert_line_has "$line42" '--require-incident-snapshot-on-fail 0' \
   "runtime wiring failed: option 42 missing default require-incident-snapshot-on-fail 0"
 assert_line_has "$line42" '--require-incident-snapshot-artifacts 0' \
@@ -1247,6 +1253,7 @@ INPUT43="$TMP_DIR/input43.txt"
   printf '\n'    # reports dir default
   printf '\n'    # max reports default
   printf '\n'    # since hours default
+  printf '\n'    # max evidence age seconds default 0
   printf '\n'    # warn go rate pct default
   printf '\n'    # critical go rate pct default
   printf '\n'    # warn no-go count default
@@ -1275,6 +1282,8 @@ assert_line_has "$line43" '--max-reports 25' \
   "runtime wiring failed: option 43 missing default max-reports"
 assert_line_has "$line43" '--since-hours 24' \
   "runtime wiring failed: option 43 missing default since-hours"
+assert_line_has "$line43" '--max-evidence-age-sec 0' \
+  "runtime wiring failed: option 43 missing default max-evidence-age-sec"
 assert_line_has "$line43" '--require-wg-validate-udp-source 1' \
   "runtime wiring failed: option 43 missing --require-wg-validate-udp-source 1 default"
 assert_line_has "$line43" '--require-wg-validate-strict-distinct 1' \
@@ -1324,6 +1333,7 @@ INPUT44="$TMP_DIR/input44.txt"
   printf '\n'    # require wg validate default yes
   printf '\n'    # require wg soak default yes
   printf '\n'    # max wg soak failed rounds default 0
+  printf '\n'    # max evidence age seconds default 0
   printf '\n'    # require run report stages default no
   printf '\n'    # fail on any no-go default no
   printf '\n'    # min go rate pct default 95
@@ -1380,6 +1390,8 @@ assert_line_has "$line44" '--min-wg-soak-cross-operator-pairs 1' \
   "runtime wiring failed: option 44 missing --min-wg-soak-cross-operator-pairs 1 default"
 assert_line_has "$line44" '--max-wg-soak-failed-rounds 0' \
   "runtime wiring failed: option 44 missing default max-wg-soak-failed-rounds"
+assert_line_has "$line44" '--max-evidence-age-sec 0' \
+  "runtime wiring failed: option 44 missing default max-evidence-age-sec"
 assert_line_has "$line44" '--require-incident-snapshot-on-fail 0' \
   "runtime wiring failed: option 44 missing default require-incident-snapshot-on-fail 0"
 assert_line_has "$line44" '--require-incident-snapshot-artifacts 0' \

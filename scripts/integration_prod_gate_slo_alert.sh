@@ -215,6 +215,7 @@ PROD_GATE_SLO_TREND_SCRIPT="$FAKE_TREND" \
   --min-wg-soak-entry-operators 2 \
   --min-wg-soak-exit-operators 2 \
   --min-wg-soak-cross-operator-pairs 1 \
+  --max-evidence-age-sec 600 \
   --show-top-reasons 3 >/tmp/integration_prod_gate_slo_alert_generated.log 2>&1
 
 if ! rg -q -- '--reports-dir /tmp/prod_reports' "$TREND_CAPTURE"; then
@@ -282,6 +283,11 @@ if ! rg -q -- '--min-wg-soak-cross-operator-pairs 1' "$TREND_CAPTURE"; then
   cat "$TREND_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$TREND_CAPTURE"; then
+  echo "alert-generated trend failed: missing --max-evidence-age-sec forwarding"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--print-summary-json 0' "$TREND_CAPTURE"; then
   echo "alert-generated trend failed: missing print-summary-json forwarding"
   cat "$TREND_CAPTURE"
@@ -313,6 +319,7 @@ PROD_GATE_SLO_ALERT_SCRIPT="$FAKE_ALERT" \
   --min-wg-soak-entry-operators 2 \
   --min-wg-soak-exit-operators 2 \
   --min-wg-soak-cross-operator-pairs 1 \
+  --max-evidence-age-sec 600 \
   --warn-go-rate-pct 99 \
   --critical-go-rate-pct 95 \
   --fail-on-warn 1 \
@@ -381,6 +388,11 @@ if ! rg -q -- '--min-wg-soak-exit-operators 2' "$ALERT_CAPTURE"; then
 fi
 if ! rg -q -- '--min-wg-soak-cross-operator-pairs 1' "$ALERT_CAPTURE"; then
   echo "easy_node prod-gate-slo-alert forwarding failed: missing --min-wg-soak-cross-operator-pairs"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$ALERT_CAPTURE"; then
+  echo "easy_node prod-gate-slo-alert forwarding failed: missing --max-evidence-age-sec"
   cat "$ALERT_CAPTURE"
   exit 1
 fi

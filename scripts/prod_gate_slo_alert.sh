@@ -33,6 +33,7 @@ Usage:
     [--min-wg-soak-entry-operators N] \
     [--min-wg-soak-exit-operators N] \
     [--min-wg-soak-cross-operator-pairs N] \
+    [--max-evidence-age-sec N] \
     [--warn-go-rate-pct N] \
     [--critical-go-rate-pct N] \
     [--warn-no-go-count N] \
@@ -151,6 +152,7 @@ min_wg_soak_selection_lines="${PROD_GATE_SLO_MIN_WG_SOAK_SELECTION_LINES:-0}"
 min_wg_soak_entry_operators="${PROD_GATE_SLO_MIN_WG_SOAK_ENTRY_OPERATORS:-0}"
 min_wg_soak_exit_operators="${PROD_GATE_SLO_MIN_WG_SOAK_EXIT_OPERATORS:-0}"
 min_wg_soak_cross_operator_pairs="${PROD_GATE_SLO_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS:-0}"
+max_evidence_age_sec="${PROD_GATE_SLO_TREND_MAX_EVIDENCE_AGE_SEC:-${PROD_GATE_SLO_MAX_EVIDENCE_AGE_SEC:-0}}"
 
 warn_go_rate_pct="${PROD_GATE_SLO_ALERT_WARN_GO_RATE_PCT:-98}"
 critical_go_rate_pct="${PROD_GATE_SLO_ALERT_CRITICAL_GO_RATE_PCT:-90}"
@@ -321,6 +323,10 @@ while [[ $# -gt 0 ]]; do
       min_wg_soak_cross_operator_pairs="${2:-}"
       shift 2
       ;;
+    --max-evidence-age-sec)
+      max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --warn-go-rate-pct)
       warn_go_rate_pct="${2:-}"
       shift 2
@@ -445,6 +451,10 @@ if [[ ! "$min_wg_soak_cross_operator_pairs" =~ ^[0-9]+$ ]]; then
   echo "--min-wg-soak-cross-operator-pairs must be an integer >= 0"
   exit 2
 fi
+if [[ ! "$max_evidence_age_sec" =~ ^[0-9]+$ ]]; then
+  echo "--max-evidence-age-sec must be an integer >= 0"
+  exit 2
+fi
 if [[ ! "$show_top_reasons" =~ ^[0-9]+$ ]]; then
   echo "--show-top-reasons must be an integer >= 0"
   exit 2
@@ -522,6 +532,7 @@ if [[ -z "$trend_summary_json" ]]; then
     --min-wg-soak-entry-operators "$min_wg_soak_entry_operators"
     --min-wg-soak-exit-operators "$min_wg_soak_exit_operators"
     --min-wg-soak-cross-operator-pairs "$min_wg_soak_cross_operator_pairs"
+    --max-evidence-age-sec "$max_evidence_age_sec"
     --fail-on-any-no-go 0
     --min-go-rate-pct 0
     --show-details 0

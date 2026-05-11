@@ -150,6 +150,7 @@ PROD_GATE_SLO_ALERT_SCRIPT="$FAKE_ALERT" \
   --min-wg-soak-entry-operators 2 \
   --min-wg-soak-exit-operators 2 \
   --min-wg-soak-cross-operator-pairs 1 \
+  --max-evidence-age-sec 600 \
   --min-go-rate-pct 95 \
   --show-top-reasons 3 \
   --warn-go-rate-pct 98 \
@@ -251,6 +252,11 @@ if ! rg -q -- '--min-wg-soak-cross-operator-pairs 1' "$TREND_CAPTURE"; then
   cat "$TREND_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$TREND_CAPTURE"; then
+  echo "dashboard did not forward --max-evidence-age-sec to trend script"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- "--trend-summary-json $TREND_JSON" "$ALERT_CAPTURE"; then
   echo "dashboard did not forward trend summary path to alert script"
   cat "$ALERT_CAPTURE"
@@ -298,6 +304,11 @@ if ! rg -q -- '--min-wg-soak-exit-operators 2' "$ALERT_CAPTURE"; then
 fi
 if ! rg -q -- '--min-wg-soak-cross-operator-pairs 1' "$ALERT_CAPTURE"; then
   echo "dashboard did not forward --min-wg-soak-cross-operator-pairs to alert script"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$ALERT_CAPTURE"; then
+  echo "dashboard did not forward --max-evidence-age-sec to alert script"
   cat "$ALERT_CAPTURE"
   exit 1
 fi
@@ -403,6 +414,7 @@ PROD_GATE_SLO_DASHBOARD_SCRIPT="$FAKE_EASY_NODE_DASHBOARD" \
   --min-wg-soak-entry-operators 2 \
   --min-wg-soak-exit-operators 2 \
   --min-wg-soak-cross-operator-pairs 1 \
+  --max-evidence-age-sec 600 \
   --dashboard-md /tmp/prod_dashboard.md >/tmp/integration_prod_gate_slo_dashboard_easy_node.log 2>&1
 
 if ! rg -q -- '--reports-dir /tmp/prod_reports' "$EASY_NODE_DASHBOARD_CAPTURE"; then
@@ -457,6 +469,11 @@ if ! rg -q -- '--min-wg-soak-exit-operators 2' "$EASY_NODE_DASHBOARD_CAPTURE"; t
 fi
 if ! rg -q -- '--min-wg-soak-cross-operator-pairs 1' "$EASY_NODE_DASHBOARD_CAPTURE"; then
   echo "easy-node prod-gate-slo-dashboard forwarding missing --min-wg-soak-cross-operator-pairs"
+  cat "$EASY_NODE_DASHBOARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$EASY_NODE_DASHBOARD_CAPTURE"; then
+  echo "easy-node prod-gate-slo-dashboard forwarding missing --max-evidence-age-sec"
   cat "$EASY_NODE_DASHBOARD_CAPTURE"
   exit 1
 fi
