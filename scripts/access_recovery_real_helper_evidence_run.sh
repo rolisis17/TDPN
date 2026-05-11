@@ -178,9 +178,37 @@ url_host() {
   fi
 }
 
+ipv4_mapped_host_to_ipv4() {
+  local host="${1:-}" mapped="" high="" low=""
+  if [[ "$host" == ::ffff:* ]]; then
+    mapped="${host#::ffff:}"
+  elif [[ "$host" == 0:0:0:0:0:ffff:* ]]; then
+    mapped="${host#0:0:0:0:0:ffff:}"
+  else
+    return 1
+  fi
+  if [[ "$mapped" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s' "$mapped"
+    return 0
+  fi
+  if [[ "$mapped" =~ ^([0-9a-f]{1,4}):([0-9a-f]{1,4})$ ]]; then
+    high=$((16#${BASH_REMATCH[1]}))
+    low=$((16#${BASH_REMATCH[2]}))
+    if ((high >= 0 && high <= 65535 && low >= 0 && low <= 65535)); then
+      printf '%d.%d.%d.%d' "$(((high >> 8) & 255))" "$((high & 255))" "$(((low >> 8) & 255))" "$((low & 255))"
+      return 0
+    fi
+  fi
+  return 1
+}
+
 host_looks_non_public_for_real_helper() {
-  local host="$1"
+  local host="$1" mapped_ipv4=""
   [[ -z "$host" ]] && return 0
+  mapped_ipv4="$(ipv4_mapped_host_to_ipv4 "$host" 2>/dev/null || true)"
+  if [[ -n "$mapped_ipv4" ]]; then
+    host="$mapped_ipv4"
+  fi
   case "$host" in
     localhost|*.localhost|*.local|*.lan|*.internal|*.test|*.invalid|*.example|*.example.com|*.example.net|*.example.org|home.arpa|*.home.arpa|*.ts.net|*.tailscale.net|ts.net|tailscale.net)
       return 0

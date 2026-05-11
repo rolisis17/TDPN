@@ -78,6 +78,23 @@ fi
 
 set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url 'https://[::ffff:0a00:0008]' \
+  --path-id helper-web \
+  --code test-code \
+  --config-json "$TMP_DIR/missing-config.json" \
+  --deploy-pack-dir "$TMP_DIR/missing-deploy-pack" \
+  --print-summary-json 0 >"$TMP_DIR/ipv4-mapped-private-https-pilot-bundle.log" 2>&1
+ipv4_mapped_private_https_rc=$?
+set -e
+if [[ "$ipv4_mapped_private_https_rc" -eq 0 ]] ||
+  ! grep -Fq -- '--base-url host must look public-routable for non-loopback pilot evidence targets' "$TMP_DIR/ipv4-mapped-private-https-pilot-bundle.log"; then
+  echo "access bridge pilot evidence bundle integration failed: IPv4-mapped private HTTPS base URL was not rejected"
+  cat "$TMP_DIR/ipv4-mapped-private-https-pilot-bundle.log"
+  exit 1
+fi
+
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
   --base-url https://helper.tailnet.ts.net \
   --path-id helper-web \
   --code test-code \

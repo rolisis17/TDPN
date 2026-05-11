@@ -238,6 +238,8 @@ bad_real_helper_urls=(
   "https://203.0.113.10"
   "https://192.0.2.10"
   "https://224.0.0.1"
+  "https://[::ffff:10.0.0.8]"
+  "https://[::ffff:0a00:0008]"
   "https://home.arpa"
   "https://helper.home.arpa"
   "https://helper.tailnet.ts.net"

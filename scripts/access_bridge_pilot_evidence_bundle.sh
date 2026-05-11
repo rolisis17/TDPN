@@ -197,6 +197,30 @@ ipv4_host_is_private_or_reserved() {
   return 1
 }
 
+ipv4_mapped_host_to_ipv4() {
+  local host="${1:-}" mapped="" high="" low=""
+  if [[ "$host" == ::ffff:* ]]; then
+    mapped="${host#::ffff:}"
+  elif [[ "$host" == 0:0:0:0:0:ffff:* ]]; then
+    mapped="${host#0:0:0:0:0:ffff:}"
+  else
+    return 1
+  fi
+  if [[ "$mapped" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s' "$mapped"
+    return 0
+  fi
+  if [[ "$mapped" =~ ^([0-9a-f]{1,4}):([0-9a-f]{1,4})$ ]]; then
+    high=$((16#${BASH_REMATCH[1]}))
+    low=$((16#${BASH_REMATCH[2]}))
+    if ((high >= 0 && high <= 65535 && low >= 0 && low <= 65535)); then
+      printf '%d.%d.%d.%d' "$(((high >> 8) & 255))" "$((high & 255))" "$(((low >> 8) & 255))" "$((low & 255))"
+      return 0
+    fi
+  fi
+  return 1
+}
+
 base_url_host_is_private_or_reserved() {
   local host mapped_ipv4
   if url_authority_has_userinfo "$1"; then
@@ -224,12 +248,7 @@ base_url_host_is_private_or_reserved() {
   if [[ "$host" =~ ^(::|::1|fc[0-9a-f]|fd[0-9a-f]|fe80:|2001:db8:) ]]; then
     return 0
   fi
-  mapped_ipv4=""
-  if [[ "$host" == ::ffff:* ]]; then
-    mapped_ipv4="${host#::ffff:}"
-  elif [[ "$host" == 0:0:0:0:0:ffff:* ]]; then
-    mapped_ipv4="${host#0:0:0:0:0:ffff:}"
-  fi
+  mapped_ipv4="$(ipv4_mapped_host_to_ipv4 "$host" 2>/dev/null || true)"
   if [[ -n "$mapped_ipv4" ]] && ipv4_host_is_private_or_reserved "$mapped_ipv4"; then
     return 0
   fi
