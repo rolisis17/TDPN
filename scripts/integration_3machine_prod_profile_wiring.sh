@@ -2475,6 +2475,77 @@ if ! rg -q 'signoff_rc=19' "$BUNDLE_DIR_SIGNOFF_FAIL/metadata.txt"; then
   exit 1
 fi
 
+FAKE_BUNDLE_GATE_NO_WRITE="$TMP_DIR/fake_bundle_gate_no_write.sh"
+cat >"$FAKE_BUNDLE_GATE_NO_WRITE" <<'EOF_FAKE_BUNDLE_GATE_NO_WRITE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${BUNDLE_CAPTURE_FILE:?}"
+exit 0
+EOF_FAKE_BUNDLE_GATE_NO_WRITE
+chmod +x "$FAKE_BUNDLE_GATE_NO_WRITE"
+
+echo "[wiring] prod gate bundle removes stale evidence before reused-dir signoff"
+BUNDLE_DIR_STALE_REUSE="$TMP_DIR/prod_gate_bundle_stale_reuse"
+mkdir -p "$BUNDLE_DIR_STALE_REUSE/step_logs" "$BUNDLE_DIR_STALE_REUSE/incident_snapshot"
+cat >"$BUNDLE_DIR_STALE_REUSE/prod_gate_summary.json" <<'EOF_STALE_GATE_SUMMARY'
+{"status":"ok","failed_step":"","steps":{"control_validate":"ok","control_soak":"ok","prod_wg_validate":"ok","prod_wg_soak":"ok"}}
+EOF_STALE_GATE_SUMMARY
+cat >"$BUNDLE_DIR_STALE_REUSE/prod_wg_validate_summary.json" <<'EOF_STALE_WG_VALIDATE'
+{"status":"ok","failed_step":""}
+EOF_STALE_WG_VALIDATE
+cat >"$BUNDLE_DIR_STALE_REUSE/prod_wg_soak_summary.json" <<'EOF_STALE_WG_SOAK'
+{"status":"ok","rounds_failed":0}
+EOF_STALE_WG_SOAK
+printf 'old step log\n' >"$BUNDLE_DIR_STALE_REUSE/step_logs/stale.log"
+printf 'old incident artifact\n' >"$BUNDLE_DIR_STALE_REUSE/incident_snapshot/stale.txt"
+printf 'old misc artifact\n' >"$BUNDLE_DIR_STALE_REUSE/stale-extra.txt"
+: >"$SIGNOFF_CAPTURE"
+set +e
+PATH="$TMP_BIN:$PATH" \
+BUNDLE_CAPTURE_FILE="$BUNDLE_CAPTURE" \
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+FAKE_BUNDLE_SIGNOFF_RC=0 \
+THREE_MACHINE_PROD_GATE_SCRIPT="$FAKE_BUNDLE_GATE_NO_WRITE" \
+THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_BUNDLE_SIGNOFF" \
+./scripts/prod_gate_bundle.sh \
+  --bundle-dir "$BUNDLE_DIR_STALE_REUSE" \
+  --skip-wg 1 \
+  --signoff-check 1 >/tmp/integration_3machine_prod_profile_wiring_bundle_stale_reuse.log 2>&1
+bundle_stale_reuse_rc=$?
+set -e
+if [[ "$bundle_stale_reuse_rc" -eq 0 ]]; then
+  echo "prod gate bundle stale-reuse check failed: expected non-zero rc when gate writes no fresh summary"
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_stale_reuse.log
+  find "$BUNDLE_DIR_STALE_REUSE" -maxdepth 2 -type f -print || true
+  exit 1
+fi
+if [[ -f "$BUNDLE_DIR_STALE_REUSE/prod_gate_summary.json" ]]; then
+  echo "prod gate bundle stale-reuse check failed: stale gate summary survived cleanup"
+  cat "$BUNDLE_DIR_STALE_REUSE/prod_gate_summary.json"
+  exit 1
+fi
+if [[ -f "$BUNDLE_DIR_STALE_REUSE/step_logs/stale.log" ]]; then
+  echo "prod gate bundle stale-reuse check failed: stale copied step log survived cleanup"
+  find "$BUNDLE_DIR_STALE_REUSE/step_logs" -type f -print || true
+  exit 1
+fi
+if [[ -e "$BUNDLE_DIR_STALE_REUSE/incident_snapshot/stale.txt" || -e "$BUNDLE_DIR_STALE_REUSE/stale-extra.txt" ]]; then
+  echo "prod gate bundle stale-reuse check failed: unexpected stale artifact survived cleanup"
+  find "$BUNDLE_DIR_STALE_REUSE" -maxdepth 3 -type f -print || true
+  exit 1
+fi
+if [[ -s "$SIGNOFF_CAPTURE" ]]; then
+  echo "prod gate bundle stale-reuse check failed: signoff should not run without fresh gate summary"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! rg -q 'signoff_rc=1' "$BUNDLE_DIR_STALE_REUSE/metadata.txt"; then
+  echo "prod gate bundle stale-reuse check failed: metadata missing signoff_rc=1"
+  cat "$BUNDLE_DIR_STALE_REUSE/metadata.txt"
+  cat /tmp/integration_3machine_prod_profile_wiring_bundle_stale_reuse.log
+  exit 1
+fi
+
 FAKE_BUNDLE_VERIFY="$TMP_DIR/fake_bundle_verify.sh"
 BUNDLE_VERIFY_CAPTURE="$TMP_DIR/prod_bundle_verify_args.log"
 cat >"$FAKE_BUNDLE_VERIFY" <<'EOF_FAKE_BUNDLE_VERIFY'

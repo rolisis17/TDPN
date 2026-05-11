@@ -24,10 +24,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-PASS_WG_VALIDATE="$TMP_DIR/wg_validate_ok.json"
-PASS_WG_SOAK="$TMP_DIR/wg_soak_ok.json"
-PASS_GATE="$TMP_DIR/prod_gate_ok.json"
-PASS_RUN_REPORT="$TMP_DIR/prod_bundle_run_report_ok.json"
+PASS_BUNDLE_DIR="$TMP_DIR/prod_bundle_dir"
+mkdir -p "$PASS_BUNDLE_DIR"
+PASS_WG_VALIDATE="$PASS_BUNDLE_DIR/prod_wg_validate_summary.json"
+PASS_WG_SOAK="$PASS_BUNDLE_DIR/prod_wg_soak_summary.json"
+PASS_GATE="$PASS_BUNDLE_DIR/prod_gate_summary.json"
+PASS_RUN_REPORT="$PASS_BUNDLE_DIR/prod_bundle_run_report.json"
 GATE_ONLY_RELAX_RUN_REPORT_ARGS=(
   --require-preflight-ok 0
   --require-bundle-ok 0
@@ -87,7 +89,7 @@ cat >"$PASS_RUN_REPORT" <<EOF_RUN_REPORT_OK
 {
   "status": "ok",
   "final_rc": 0,
-  "bundle_dir": "$TMP_DIR/prod_bundle_dir",
+  "bundle_dir": "$PASS_BUNDLE_DIR",
   "gate_summary_json": "$PASS_GATE",
   "wg_validate_summary_json": "$PASS_WG_VALIDATE",
   "wg_soak_summary_json": "$PASS_WG_SOAK",
@@ -124,6 +126,72 @@ EOF_RUN_REPORT_OK
 echo "[prod-gate-check] pass baseline"
 ./scripts/prod_gate_check.sh "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" --gate-summary-json "$PASS_GATE" --show-json 0 >/tmp/integration_prod_gate_check_pass.log 2>&1
 ./scripts/prod_gate_check.sh --run-report-json "$PASS_RUN_REPORT" --show-json 0 >/tmp/integration_prod_gate_check_pass_run_report.log 2>&1
+
+echo "[prod-gate-check] copied bundle prefers local evidence"
+COPIED_BUNDLE_DIR="$TMP_DIR/copied_prod_bundle"
+mkdir -p "$COPIED_BUNDLE_DIR"
+cp "$PASS_GATE" "$COPIED_BUNDLE_DIR/prod_gate_summary.json"
+cp "$PASS_WG_VALIDATE" "$COPIED_BUNDLE_DIR/prod_wg_validate_summary.json"
+cp "$PASS_WG_SOAK" "$COPIED_BUNDLE_DIR/prod_wg_soak_summary.json"
+cp "$PASS_RUN_REPORT" "$COPIED_BUNDLE_DIR/prod_bundle_run_report.json"
+./scripts/prod_gate_check.sh \
+  --bundle-dir "$COPIED_BUNDLE_DIR" \
+  --run-report-json "$COPIED_BUNDLE_DIR/prod_bundle_run_report.json" \
+  --show-json 0 >/tmp/integration_prod_gate_check_copied_bundle.log 2>&1
+
+BAD_REF_RUN_REPORT="$COPIED_BUNDLE_DIR/prod_bundle_run_report_bad_external.json"
+STALE_EXTERNAL_GATE="$TMP_DIR/stale_external_gate_ok.json"
+cp "$PASS_GATE" "$STALE_EXTERNAL_GATE"
+jq --arg gate "$STALE_EXTERNAL_GATE" '.gate_summary_json=$gate' \
+  "$COPIED_BUNDLE_DIR/prod_bundle_run_report.json" >"$BAD_REF_RUN_REPORT"
+set +e
+./scripts/prod_gate_check.sh \
+  --bundle-dir "$COPIED_BUNDLE_DIR" \
+  --run-report-json "$BAD_REF_RUN_REPORT" \
+  --show-json 0 >/tmp/integration_prod_gate_check_copied_bundle_bad_ref.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "expected non-zero rc when run report references non-standard external gate summary"
+  cat /tmp/integration_prod_gate_check_copied_bundle_bad_ref.log
+  exit 1
+fi
+if ! rg -q 'gate_summary_json does not reference the checked bundle artifact' /tmp/integration_prod_gate_check_copied_bundle_bad_ref.log; then
+  echo "expected copied-bundle stale external gate failure message not found"
+  cat /tmp/integration_prod_gate_check_copied_bundle_bad_ref.log
+  exit 1
+fi
+
+BAD_LOCAL_BUNDLE_DIR="$TMP_DIR/copied_prod_bundle_bad_local"
+mkdir -p "$BAD_LOCAL_BUNDLE_DIR"
+cp "$PASS_GATE" "$BAD_LOCAL_BUNDLE_DIR/prod_gate_summary.json"
+cp "$PASS_WG_SOAK" "$BAD_LOCAL_BUNDLE_DIR/prod_wg_soak_summary.json"
+cp "$PASS_RUN_REPORT" "$BAD_LOCAL_BUNDLE_DIR/prod_bundle_run_report.json"
+cat >"$BAD_LOCAL_BUNDLE_DIR/prod_wg_validate_summary.json" <<'EOF_BAD_LOCAL_VALIDATE_STATUS'
+{
+  "status": "fail",
+  "failed_step": "local_tamper",
+  "client_inner_source": "udp",
+  "strict_distinct": 1
+}
+EOF_BAD_LOCAL_VALIDATE_STATUS
+set +e
+./scripts/prod_gate_check.sh \
+  --bundle-dir "$BAD_LOCAL_BUNDLE_DIR" \
+  --run-report-json "$BAD_LOCAL_BUNDLE_DIR/prod_bundle_run_report.json" \
+  --show-json 0 >/tmp/integration_prod_gate_check_copied_bundle_bad_local.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "expected non-zero rc when bundle-local WG summary disagrees with gate summary"
+  cat /tmp/integration_prod_gate_check_copied_bundle_bad_local.log
+  exit 1
+fi
+if ! rg -q 'wg validate summary status does not match gate summary' /tmp/integration_prod_gate_check_copied_bundle_bad_local.log; then
+  echo "expected bundle-local WG status mismatch message not found"
+  cat /tmp/integration_prod_gate_check_copied_bundle_bad_local.log
+  exit 1
+fi
 
 if command -v wslpath >/dev/null 2>&1; then
   WIN_PATH_DIR="$ROOT_DIR/.easy-node-logs/prod_gate_check_windows_path_test_$$"

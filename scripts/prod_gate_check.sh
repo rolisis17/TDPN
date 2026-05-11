@@ -79,6 +79,29 @@ abs_path() {
   fi
 }
 
+path_under_dir() {
+  local child="$1"
+  local parent="$2"
+  child="$(abs_path "$child")"
+  parent="$(abs_path "$parent")"
+  parent="${parent%/}"
+  [[ -n "$child" && -n "$parent" ]] || return 1
+  [[ "$child" == "$parent" || "$child" == "$parent/"* ]]
+}
+
+standard_artifact_ref_ok() {
+  local reported="$1"
+  local checked="$2"
+  local expected_name="$3"
+  reported="$(abs_path "$reported")"
+  checked="$(abs_path "$checked")"
+  [[ -n "$reported" && -n "$checked" ]] || return 1
+  if [[ "$reported" == "$checked" ]]; then
+    return 0
+  fi
+  [[ "${reported##*/}" == "$expected_name" && "${checked##*/}" == "$expected_name" ]]
+}
+
 bool_arg_or_die() {
   local name="$1"
   local value="$2"
@@ -91,6 +114,8 @@ bool_arg_or_die() {
 bundle_dir=""
 run_report_json=""
 gate_summary_json=""
+bundle_dir_supplied="0"
+gate_summary_json_supplied="0"
 require_full_sequence="${PROD_GATE_CHECK_REQUIRE_FULL_SEQUENCE:-1}"
 require_wg_validate_ok="${PROD_GATE_CHECK_REQUIRE_WG_VALIDATE_OK:-1}"
 require_wg_soak_ok="${PROD_GATE_CHECK_REQUIRE_WG_SOAK_OK:-1}"
@@ -116,6 +141,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --bundle-dir)
       bundle_dir="${2:-}"
+      bundle_dir_supplied="1"
       shift 2
       ;;
     --run-report-json)
@@ -124,6 +150,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --gate-summary-json)
       gate_summary_json="${2:-}"
+      gate_summary_json_supplied="1"
       shift 2
       ;;
     --require-full-sequence)
@@ -333,6 +360,11 @@ gate_summary_json="$(trim "$gate_summary_json")"
 bundle_dir="$(abs_path "$bundle_dir")"
 run_report_json="$(abs_path "$run_report_json")"
 gate_summary_json="$(abs_path "$gate_summary_json")"
+run_report_parent_dir=""
+run_report_bundle_dir=""
+run_report_gate_summary_json=""
+run_report_wg_validate_summary_json=""
+run_report_wg_soak_summary_json=""
 if [[ -z "$run_report_json" && -n "$bundle_dir" ]]; then
   candidate_run_report="${bundle_dir%/}/prod_bundle_run_report.json"
   if [[ -f "$candidate_run_report" ]]; then
@@ -348,15 +380,35 @@ if [[ -n "$run_report_json" ]]; then
     echo "run report JSON is not valid JSON: $run_report_json"
     exit 1
   fi
+  run_report_parent_dir="$(dirname "$run_report_json")"
+  run_report_bundle_dir="$(jq -r '.bundle_dir // ""' "$run_report_json" 2>/dev/null || true)"
+  run_report_bundle_dir="$(trim "$run_report_bundle_dir")"
+  run_report_bundle_dir="$(abs_path "$run_report_bundle_dir")"
+  run_report_gate_summary_json="$(jq -r '.gate_summary_json // ""' "$run_report_json" 2>/dev/null || true)"
+  run_report_gate_summary_json="$(trim "$run_report_gate_summary_json")"
+  run_report_gate_summary_json="$(abs_path "$run_report_gate_summary_json")"
+  run_report_wg_validate_summary_json="$(jq -r '.wg_validate_summary_json // ""' "$run_report_json" 2>/dev/null || true)"
+  run_report_wg_validate_summary_json="$(trim "$run_report_wg_validate_summary_json")"
+  run_report_wg_validate_summary_json="$(abs_path "$run_report_wg_validate_summary_json")"
+  run_report_wg_soak_summary_json="$(jq -r '.wg_soak_summary_json // ""' "$run_report_json" 2>/dev/null || true)"
+  run_report_wg_soak_summary_json="$(trim "$run_report_wg_soak_summary_json")"
+  run_report_wg_soak_summary_json="$(abs_path "$run_report_wg_soak_summary_json")"
   if [[ -z "$bundle_dir" ]]; then
-    bundle_dir="$(jq -r '.bundle_dir // ""' "$run_report_json" 2>/dev/null || true)"
-    bundle_dir="$(trim "$bundle_dir")"
-    bundle_dir="$(abs_path "$bundle_dir")"
+    if [[ -f "${run_report_parent_dir%/}/prod_gate_summary.json" ]]; then
+      bundle_dir="$run_report_parent_dir"
+    else
+      bundle_dir="$run_report_bundle_dir"
+    fi
   fi
   if [[ -z "$gate_summary_json" ]]; then
-    gate_summary_json="$(jq -r '.gate_summary_json // ""' "$run_report_json" 2>/dev/null || true)"
-    gate_summary_json="$(trim "$gate_summary_json")"
-    gate_summary_json="$(abs_path "$gate_summary_json")"
+    gate_summary_json="$run_report_gate_summary_json"
+  fi
+fi
+local_bundle_gate_summary_json=""
+if [[ -n "$bundle_dir" ]]; then
+  local_bundle_gate_summary_json="${bundle_dir%/}/prod_gate_summary.json"
+  if [[ "$gate_summary_json_supplied" == "0" && -f "$local_bundle_gate_summary_json" ]]; then
+    gate_summary_json="$local_bundle_gate_summary_json"
   fi
 fi
 if [[ -z "$gate_summary_json" && -n "$bundle_dir" ]]; then
@@ -417,10 +469,24 @@ step_prod_wg_validate="$(json_string "$gate_summary_json" '.steps.prod_wg_valida
 step_prod_wg_soak="$(json_string "$gate_summary_json" '.steps.prod_wg_soak')"
 
 wg_validate_summary_json="$(json_string "$gate_summary_json" '.wg_validate_summary_json')"
+wg_validate_summary_json="$(abs_path "$wg_validate_summary_json")"
+local_bundle_wg_validate_summary_json=""
+if [[ -n "$bundle_dir" && -f "${bundle_dir%/}/prod_wg_validate_summary.json" ]]; then
+  local_bundle_wg_validate_summary_json="${bundle_dir%/}/prod_wg_validate_summary.json"
+  wg_validate_summary_json="$local_bundle_wg_validate_summary_json"
+fi
+wg_validate_summary_status=""
 wg_validate_status="$(json_string "$gate_summary_json" '.wg_validate_status')"
 wg_validate_failed_step="$(json_string "$gate_summary_json" '.wg_validate_failed_step')"
 
 wg_soak_summary_json="$(json_string "$gate_summary_json" '.wg_soak_summary_json')"
+wg_soak_summary_json="$(abs_path "$wg_soak_summary_json")"
+local_bundle_wg_soak_summary_json=""
+if [[ -n "$bundle_dir" && -f "${bundle_dir%/}/prod_wg_soak_summary.json" ]]; then
+  local_bundle_wg_soak_summary_json="${bundle_dir%/}/prod_wg_soak_summary.json"
+  wg_soak_summary_json="$local_bundle_wg_soak_summary_json"
+fi
+wg_soak_summary_status=""
 wg_soak_status="$(json_string "$gate_summary_json" '.wg_soak_status')"
 wg_soak_rounds_failed="$(json_int "$gate_summary_json" '.wg_soak_rounds_failed')"
 wg_soak_top_failure_class="$(json_string "$gate_summary_json" '.wg_soak_top_failure_class')"
@@ -433,10 +499,12 @@ wg_soak_selection_exit_operators="0"
 wg_soak_selection_cross_operator_pairs="0"
 wg_soak_selection_diversity_failed="0"
 if [[ -n "$wg_validate_summary_json" && -f "$wg_validate_summary_json" ]]; then
+  wg_validate_summary_status="$(json_string "$wg_validate_summary_json" '.status')"
   wg_validate_client_inner_source="$(json_string "$wg_validate_summary_json" '.client_inner_source')"
   wg_validate_strict_distinct="$(json_trueish "$wg_validate_summary_json" '.strict_distinct')"
 fi
 if [[ -n "$wg_soak_summary_json" && -f "$wg_soak_summary_json" ]]; then
+  wg_soak_summary_status="$(json_string "$wg_soak_summary_json" '.status')"
   wg_soak_selection_lines="$(json_int "$wg_soak_summary_json" '.selection_lines_total')"
   wg_soak_selection_entry_operators="$(json_int "$wg_soak_summary_json" '.selection_entry_operators')"
   wg_soak_selection_exit_operators="$(json_int "$wg_soak_summary_json" '.selection_exit_operators')"
@@ -480,24 +548,12 @@ if [[ -n "$run_report_json" ]]; then
   run_report_incident_attachment_manifest="$(json_string "$run_report_json" '.incident_snapshot.attachment_manifest')"
   run_report_incident_attachment_skipped="$(json_string "$run_report_json" '.incident_snapshot.attachment_skipped')"
   run_report_incident_attachment_count="$(json_int "$run_report_json" '.incident_snapshot.attachment_count')"
-  if [[ -n "$run_report_incident_bundle_dir" && "$run_report_incident_bundle_dir" != /* ]]; then
-    run_report_incident_bundle_dir="$ROOT_DIR/$run_report_incident_bundle_dir"
-  fi
-  if [[ -n "$run_report_incident_bundle_tar" && "$run_report_incident_bundle_tar" != /* ]]; then
-    run_report_incident_bundle_tar="$ROOT_DIR/$run_report_incident_bundle_tar"
-  fi
-  if [[ -n "$run_report_incident_summary_json" && "$run_report_incident_summary_json" != /* ]]; then
-    run_report_incident_summary_json="$ROOT_DIR/$run_report_incident_summary_json"
-  fi
-  if [[ -n "$run_report_incident_report_md" && "$run_report_incident_report_md" != /* ]]; then
-    run_report_incident_report_md="$ROOT_DIR/$run_report_incident_report_md"
-  fi
-  if [[ -n "$run_report_incident_attachment_manifest" && "$run_report_incident_attachment_manifest" != /* ]]; then
-    run_report_incident_attachment_manifest="$ROOT_DIR/$run_report_incident_attachment_manifest"
-  fi
-  if [[ -n "$run_report_incident_attachment_skipped" && "$run_report_incident_attachment_skipped" != /* ]]; then
-    run_report_incident_attachment_skipped="$ROOT_DIR/$run_report_incident_attachment_skipped"
-  fi
+  run_report_incident_bundle_dir="$(abs_path "$run_report_incident_bundle_dir")"
+  run_report_incident_bundle_tar="$(abs_path "$run_report_incident_bundle_tar")"
+  run_report_incident_summary_json="$(abs_path "$run_report_incident_summary_json")"
+  run_report_incident_report_md="$(abs_path "$run_report_incident_report_md")"
+  run_report_incident_attachment_manifest="$(abs_path "$run_report_incident_attachment_manifest")"
+  run_report_incident_attachment_skipped="$(abs_path "$run_report_incident_attachment_skipped")"
   if [[ -n "$run_report_incident_attachment_skipped" && -f "$run_report_incident_attachment_skipped" ]]; then
     run_report_incident_attachment_skipped_count="$(awk 'NF>0 {c++} END {print c+0}' "$run_report_incident_attachment_skipped" 2>/dev/null || echo "0")"
     if [[ -z "$run_report_incident_attachment_skipped_count" || ! "$run_report_incident_attachment_skipped_count" =~ ^[0-9]+$ ]]; then
@@ -508,8 +564,55 @@ fi
 
 declare -a errors=()
 
+if [[ -n "$run_report_json" ]]; then
+  if [[ -z "$run_report_bundle_dir" ]]; then
+    errors+=("run report bundle_dir path missing")
+  elif [[ -n "$bundle_dir" && "$run_report_bundle_dir" != "$bundle_dir" && "$bundle_dir_supplied" == "0" && "$bundle_dir" != "$run_report_parent_dir" ]]; then
+    errors+=("run report bundle_dir does not match checked bundle_dir (run_report=$run_report_bundle_dir, checked=$bundle_dir)")
+  fi
+  if [[ -z "$run_report_gate_summary_json" ]]; then
+    errors+=("run report gate_summary_json path missing")
+  elif ! standard_artifact_ref_ok "$run_report_gate_summary_json" "$gate_summary_json" "prod_gate_summary.json"; then
+    errors+=("run report gate_summary_json does not reference the checked bundle artifact (run_report=$run_report_gate_summary_json, checked=$gate_summary_json)")
+  fi
+  if [[ "$require_wg_validate_ok" == "1" || -n "$run_report_wg_validate_summary_json" ]]; then
+    if [[ -z "$run_report_wg_validate_summary_json" ]]; then
+      errors+=("run report wg_validate_summary_json path missing")
+    elif [[ -n "$wg_validate_summary_json" ]] && ! standard_artifact_ref_ok "$run_report_wg_validate_summary_json" "$wg_validate_summary_json" "prod_wg_validate_summary.json"; then
+      errors+=("run report wg_validate_summary_json does not reference the checked bundle artifact (run_report=$run_report_wg_validate_summary_json, checked=$wg_validate_summary_json)")
+    fi
+  fi
+  if [[ "$require_wg_soak_ok" == "1" || -n "$run_report_wg_soak_summary_json" ]]; then
+    if [[ -z "$run_report_wg_soak_summary_json" ]]; then
+      errors+=("run report wg_soak_summary_json path missing")
+    elif [[ -n "$wg_soak_summary_json" ]] && ! standard_artifact_ref_ok "$run_report_wg_soak_summary_json" "$wg_soak_summary_json" "prod_wg_soak_summary.json"; then
+      errors+=("run report wg_soak_summary_json does not reference the checked bundle artifact (run_report=$run_report_wg_soak_summary_json, checked=$wg_soak_summary_json)")
+    fi
+  fi
+fi
+
+if [[ -n "$bundle_dir" ]]; then
+  if [[ -n "$gate_summary_json" ]] && ! path_under_dir "$gate_summary_json" "$bundle_dir"; then
+    errors+=("gate summary is outside checked bundle_dir (gate_summary_json=$gate_summary_json, bundle_dir=$bundle_dir)")
+  fi
+  if [[ -n "$wg_validate_summary_json" ]] && ! path_under_dir "$wg_validate_summary_json" "$bundle_dir"; then
+    errors+=("wg_validate_summary_json is outside checked bundle_dir (wg_validate_summary_json=$wg_validate_summary_json, bundle_dir=$bundle_dir)")
+  fi
+  if [[ -n "$wg_soak_summary_json" ]] && ! path_under_dir "$wg_soak_summary_json" "$bundle_dir"; then
+    errors+=("wg_soak_summary_json is outside checked bundle_dir (wg_soak_summary_json=$wg_soak_summary_json, bundle_dir=$bundle_dir)")
+  fi
+fi
+
 if [[ "$gate_status" != "ok" ]]; then
   errors+=("gate status is not ok (status=${gate_status:-unset}, failed_step=${failed_step:-none}, failed_rc=$failed_rc)")
+fi
+
+if [[ -n "$wg_validate_summary_status" && -n "$wg_validate_status" && "$wg_validate_summary_status" != "$wg_validate_status" ]]; then
+  errors+=("wg validate summary status does not match gate summary (summary_status=$wg_validate_summary_status, gate_status=$wg_validate_status)")
+fi
+
+if [[ -n "$wg_soak_summary_status" && -n "$wg_soak_status" && "$wg_soak_summary_status" != "$wg_soak_status" ]]; then
+  errors+=("wg soak summary status does not match gate summary (summary_status=$wg_soak_summary_status, gate_status=$wg_soak_status)")
 fi
 
 if [[ "$require_full_sequence" == "1" ]]; then

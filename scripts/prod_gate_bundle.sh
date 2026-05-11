@@ -75,6 +75,34 @@ abs_path() {
   fi
 }
 
+path_under_dir() {
+  local child="$1"
+  local parent="$2"
+  child="$(abs_path "$child")"
+  parent="$(abs_path "$parent")"
+  parent="${parent%/}"
+  [[ -n "$child" && -n "$parent" ]] || return 1
+  [[ "$child" == "$parent" || "$child" == "$parent/"* ]]
+}
+
+clean_bundle_dir_contents() {
+  local target="$1"
+  local log_root
+  local tmp_root
+  log_root="$(abs_path "$(default_log_dir)")"
+  tmp_root="$(abs_path "${TMPDIR:-/tmp}")"
+  if ! find "$target" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+    return 0
+  fi
+  if ! path_under_dir "$target" "$log_root" && ! path_under_dir "$target" "$tmp_root"; then
+    echo "refusing to clean non-empty bundle dir outside log/temp roots: $target"
+    echo "allowed roots: $log_root, $tmp_root"
+    exit 2
+  fi
+  echo "[prod-gate-bundle] cleaning existing bundle dir contents: $target"
+  find "$target" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+}
+
 bool_arg_or_die() {
   local name="$1"
   local value="$2"
@@ -292,7 +320,7 @@ if [[ ! "$signoff_min_wg_soak_cross_operator_pairs" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-for cmd in bash tar cp date tee find sort grep sed mv; do
+for cmd in bash tar cp date tee find sort grep sed mv mktemp; do
   need_cmd "$cmd"
 done
 detect_sha256_tool
@@ -306,21 +334,30 @@ if [[ ! -x "$GATE_SCRIPT" ]]; then
 fi
 
 if [[ -z "$bundle_dir" ]]; then
-  bundle_dir="$(default_log_dir)/prod_gate_bundle_$(date +%Y%m%d_%H%M%S)"
+  log_dir="$(default_log_dir)"
+  mkdir -p "$log_dir"
+  bundle_dir="$(mktemp -d "${log_dir%/}/prod_gate_bundle_$(date +%Y%m%d_%H%M%S)_XXXXXX")"
 else
   bundle_dir="$(abs_path "$bundle_dir")"
+  mkdir -p "$bundle_dir"
 fi
-mkdir -p "$bundle_dir"
 bundle_dir="$(cd "$bundle_dir" && pwd)"
+clean_bundle_dir_contents "$bundle_dir"
 
 bundle_log="$bundle_dir/prod_gate_bundle.log"
-exec > >(redact_sensitive_stream | tee -a "$bundle_log") 2>&1
-
-started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 report_file="$bundle_dir/prod_gate.log"
 wg_validate_summary_json="$bundle_dir/prod_wg_validate_summary.json"
 wg_soak_summary_json="$bundle_dir/prod_wg_soak_summary.json"
 gate_summary_json="$bundle_dir/prod_gate_summary.json"
+bundle_tar="${bundle_dir}.tar.gz"
+bundle_tar_sha256_file="${bundle_tar}.sha256"
+manifest_file="$bundle_dir/manifest.sha256"
+
+rm -f "$bundle_tar" "$bundle_tar_sha256_file"
+
+exec > >(redact_sensitive_stream | tee -a "$bundle_log") 2>&1
+
+started_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 echo "[prod-gate-bundle] started at $started_at_utc"
 echo "[prod-gate-bundle] bundle_dir=$bundle_dir"
@@ -411,10 +448,6 @@ if [[ "$signoff_check" == "1" ]]; then
   fi
   echo "[prod-gate-bundle] signoff_rc=$signoff_rc"
 fi
-
-bundle_tar="${bundle_dir}.tar.gz"
-bundle_tar_sha256_file="${bundle_tar}.sha256"
-manifest_file="$bundle_dir/manifest.sha256"
 
 cat >"$bundle_dir/metadata.txt" <<EOF
 started_at_utc=$started_at_utc

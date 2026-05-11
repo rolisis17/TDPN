@@ -9744,7 +9744,9 @@ three_machine_prod_bundle() {
     fi
   done
   if [[ -z "$bundle_dir" ]]; then
-    bundle_dir="$(prepare_log_dir)/prod_gate_bundle_$(date +%Y%m%d_%H%M%S)"
+    local prod_bundle_log_dir
+    prod_bundle_log_dir="$(prepare_log_dir)"
+    bundle_dir="$(mktemp -d "${prod_bundle_log_dir%/}/prod_gate_bundle_$(date +%Y%m%d_%H%M%S)_XXXXXX")"
   elif [[ "$bundle_dir" != /* ]]; then
     bundle_dir="$ROOT_DIR/$bundle_dir"
   fi
