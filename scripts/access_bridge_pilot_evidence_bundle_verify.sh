@@ -246,7 +246,7 @@ validate_trusted_bundled_evidence_semantics() {
   local bundle_root="$1"
   local source_summary="$2"
   local smoke_json deployment_json host_json semantic_errors
-  local expected_base_url expected_helper_id expected_organization_id expected_registry_id
+  local expected_base_url expected_helper_id expected_organization_id expected_registry_id expected_require_mtls
 
   smoke_json="$bundle_root/access_bridge_service_smoke_summary.json"
   deployment_json="$bundle_root/access_bridge_deployment_evidence_summary.json"
@@ -267,6 +267,7 @@ validate_trusted_bundled_evidence_semantics() {
   expected_helper_id="$(json_string "$source_summary" '.expected_identity.helper_id')"
   expected_organization_id="$(json_string "$source_summary" '.expected_identity.organization_id')"
   expected_registry_id="$(json_string "$source_summary" '.expected_identity.registry_id')"
+  expected_require_mtls="$(jq -r 'if (.evidence_policy.require_mtls // false) == true then "true" else "false" end' "$source_summary" 2>/dev/null || printf '%s' "false")"
 
   semantic_errors="$(jq -nr \
     --slurpfile smoke "$smoke_json" \
@@ -275,7 +276,8 @@ validate_trusted_bundled_evidence_semantics() {
     --arg expected_base_url "$expected_base_url" \
     --arg expected_helper_id "$expected_helper_id" \
     --arg expected_organization_id "$expected_organization_id" \
-    --arg expected_registry_id "$expected_registry_id" '
+    --arg expected_registry_id "$expected_registry_id" \
+    --arg expected_require_mtls "$expected_require_mtls" '
       def lc($v):
         if ($v | type) == "string" then ($v | ascii_downcase) else "" end;
       def str_eq($v; $expected):
@@ -418,6 +420,9 @@ validate_trusted_bundled_evidence_semantics() {
           if (($s.base_url // "") != $expected_base_url) then "bundled service smoke base_url does not match bundle summary" else empty end,
           if ($s.transport.https != true) then "bundled service smoke did not prove HTTPS transport" else empty end,
           if ($s.transport.tls.checked != true or $s.transport.tls.verified != true or (($s.transport.tls.ssl_verify_result // "") != "0")) then "bundled service smoke did not prove verified TLS" else empty end,
+          if ($expected_require_mtls == "true" and ($s.transport.mtls.required != true)) then "bundled service smoke did not record required mTLS" else empty end,
+          if ($expected_require_mtls == "true" and ($s.transport.mtls.client_certificate_configured != true or $s.transport.mtls.client_certificate_used != true)) then "bundled service smoke did not prove mTLS client certificate use" else empty end,
+          if ($expected_require_mtls == "true" and ($s.transport.mtls.missing_client_certificate_rejected != true or $s.transport.mtls.missing_client_certificate_same_endpoint != true)) then "bundled service smoke did not prove no-client-certificate rejection on the same endpoint" else empty end,
           if remote_ip_public_routable($s.transport.health.remote_ip) | not then "bundled service smoke remote IP is missing, invalid, private, or reserved" else empty end,
           if str_eq($s.health.status; "ok") | not then "bundled service smoke health status is not ok" else empty end,
           if ($expected_helper_id != "" and (($s.health.helper_id // "") != $expected_helper_id)) then "bundled service smoke helper_id does not match expected identity" else empty end,
@@ -446,6 +451,9 @@ validate_trusted_bundled_evidence_semantics() {
           if ($d.smoke.bridge_security_headers_ok != true) then "bundled deployment evidence security headers check failed" else empty end,
           if str_eq($d.transport.status; "pass") | not then "bundled deployment evidence transport status is not pass" else empty end,
           if ($d.transport.https != true or $d.transport.tls_checked != true or $d.transport.tls_verified != true or (($d.transport.ssl_verify_result // "") != "0")) then "bundled deployment evidence did not prove verified HTTPS transport" else empty end,
+          if ($expected_require_mtls == "true" and ($d.transport.mtls_required != true or $d.smoke.transport_mtls_required != true)) then "bundled deployment evidence did not record required mTLS" else empty end,
+          if ($expected_require_mtls == "true" and ($d.transport.mtls_client_certificate_configured != true or $d.transport.mtls_client_certificate_used != true or $d.smoke.transport_mtls_client_certificate_used != true)) then "bundled deployment evidence did not prove mTLS client certificate use" else empty end,
+          if ($expected_require_mtls == "true" and ($d.transport.mtls_missing_client_certificate_rejected != true or $d.transport.mtls_missing_client_certificate_same_endpoint != true or $d.smoke.transport_mtls_missing_client_certificate_rejected != true or $d.smoke.transport_mtls_missing_client_certificate_same_endpoint != true)) then "bundled deployment evidence did not prove no-client-certificate rejection on the same endpoint" else empty end,
           if remote_ip_public_routable($d.transport.remote_ip) | not then "bundled deployment evidence remote IP is missing, invalid, private, or reserved" else empty end,
           if normalize_remote_ip($d.transport.remote_ip) != normalize_remote_ip($s.transport.health.remote_ip) then "bundled deployment evidence remote IP does not match service smoke remote IP" else empty end,
           if str_eq($d.identity_check.status; "pass") | not then "bundled deployment evidence identity check is not pass" else empty end,

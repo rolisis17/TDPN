@@ -14,6 +14,7 @@ code_file=""
 cacert=""
 client_cert=""
 client_key=""
+require_mtls="${ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_REQUIRE_MTLS:-0}"
 config_json=""
 deploy_pack_dir=""
 host_install_evidence_mode="deploy-pack"
@@ -64,6 +65,7 @@ Usage:
     [--path-id helper-web] \
     [--cacert FILE] \
     [--client-cert FILE --client-key FILE] \
+    [--require-mtls 0|1] \
     [--expect-helper-id ID] \
     [--expect-org-id ID] \
     [--expect-registry-id ID] \
@@ -514,6 +516,15 @@ while [[ $# -gt 0 ]]; do
       client_key="$2"
       shift 2
       ;;
+    --require-mtls)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_mtls="${2:-}"
+        shift 2
+      else
+        require_mtls="1"
+        shift
+      fi
+      ;;
     --config-json)
       require_value_or_die "$1" "${2:-}"
       config_json="$2"
@@ -801,6 +812,7 @@ write_summary() {
     --arg report_md "$report_md" \
     --arg evidence_scope "$evidence_scope" \
     --arg verifier_scope "$verifier_scope" \
+    --arg require_mtls "$require_mtls" \
     --argjson code_present "$code_present_json" \
     --argjson code_file_present "$code_file_present_json" \
     --argjson plan_only "$plan_only_json" \
@@ -815,7 +827,7 @@ write_summary() {
     --argjson planned_artifacts "$planned_artifacts_json" \
     '{
       version: 1,
-      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 2},
+      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 3},
       generated_at_utc: $generated_at_utc,
       status: $status,
       rc: $rc,
@@ -835,6 +847,7 @@ write_summary() {
         proxy_config_file: (if $proxy_config_file == "" then null else $proxy_config_file end),
         code_present: $code_present,
         code_file_present: $code_file_present,
+        require_mtls: ($require_mtls == "1"),
         roadmap_refresh: $roadmap_refresh
       },
       readiness: {
@@ -1019,6 +1032,12 @@ fi
 if [[ -n "$client_cert" && -z "$client_key" || -z "$client_cert" && -n "$client_key" ]]; then
   fail_preflight "--client-cert and --client-key must be supplied together"
 fi
+if [[ "$require_mtls" != "0" && "$require_mtls" != "1" ]]; then
+  fail_preflight "--require-mtls must be 0 or 1"
+fi
+if [[ "$require_mtls" == "1" && ( -z "$client_cert" || -z "$client_key" ) ]]; then
+  fail_preflight "--require-mtls 1 requires --client-cert and --client-key"
+fi
 
 if [[ "$allow_child_script_overrides" != "0" && "$allow_child_script_overrides" != "1" ]]; then
   fail_preflight "--allow-child-script-overrides must be 0 or 1"
@@ -1085,6 +1104,7 @@ bundle_args=(
   --provenance-out "$provenance_out"
   --require-https 1
   --require-public-host 1
+  --require-mtls "$require_mtls"
   --expected-public-host "$host"
   --print-summary-json "$print_child_json"
 )

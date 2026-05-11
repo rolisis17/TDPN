@@ -11,6 +11,7 @@ code_file=""
 cacert=""
 client_cert=""
 client_key=""
+require_mtls="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_REQUIRE_MTLS:-0}"
 config_json=""
 deploy_pack_dir=""
 host_install_evidence_mode="deploy-pack"
@@ -54,6 +55,7 @@ Usage:
     [--path-id helper-web] \
     [--cacert FILE] \
     [--client-cert FILE --client-key FILE] \
+    [--require-mtls 0|1] \
     [--service-name gpm-access-bridge] \
     [--bundle-dir DIR] \
     [--summary-json FILE] \
@@ -410,6 +412,15 @@ while [[ $# -gt 0 ]]; do
       client_key="${2:-}"
       shift 2
       ;;
+    --require-mtls)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        require_mtls="${2:-}"
+        shift 2
+      else
+        require_mtls="1"
+        shift
+      fi
+      ;;
     --config-json|--config)
       config_json="${2:-}"
       shift 2
@@ -553,6 +564,7 @@ detect_sha256_tool
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--require-https" "$require_https"
 bool_arg_or_die "--require-public-host" "$require_public_host"
+bool_arg_or_die "--require-mtls" "$require_mtls"
 bool_arg_or_die "--provenance-sign" "$provenance_sign"
 if [[ ! "$max_smoke_age_sec" =~ ^[0-9]+$ ]]; then
   echo "access bridge pilot evidence bundle failed: --max-smoke-age-sec must be a non-negative integer" >&2
@@ -716,6 +728,10 @@ if { [[ -n "$client_cert" ]] && [[ -z "$client_key" ]]; } || { [[ -z "$client_ce
   echo "access bridge pilot evidence bundle failed: --client-cert and --client-key must be supplied together" >&2
   exit 2
 fi
+if [[ "$require_mtls" == "1" && ( -z "$client_cert" || -z "$client_key" ) ]]; then
+  echo "access bridge pilot evidence bundle failed: --require-mtls 1 requires --client-cert and --client-key" >&2
+  exit 2
+fi
 if [[ "$provenance_sign" == "1" ]]; then
   provenance_private_key_file="$(abs_path "$provenance_private_key_file")"
   if [[ ! -f "$provenance_private_key_file" ]]; then
@@ -781,6 +797,7 @@ smoke_args=(
   --code-file "$effective_code_file"
   --summary-json "$smoke_summary"
   --abuse-message "pilot evidence bundle smoke"
+  --require-mtls "$require_mtls"
 )
 if [[ -n "$cacert" ]]; then
   smoke_args+=(--cacert "$cacert")
@@ -810,6 +827,7 @@ deployment_args=(
   --service-name "$service_name"
   --summary-json "$deployment_summary"
   --print-summary-json 0
+  --require-mtls "$require_mtls"
 )
 if [[ -n "$expect_helper_id" ]]; then
   deployment_args+=(--expect-helper-id "$expect_helper_id")
@@ -855,7 +873,11 @@ transport_status="$(json_string_or_empty "$deployment_summary" '.transport.statu
 transport_https="$(jq -r 'if (.transport.https // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
 transport_tls_verified="$(jq -r 'if (.transport.tls_verified // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
 transport_ssl_verify_result="$(json_string_or_empty "$deployment_summary" '.transport.ssl_verify_result')"
+transport_mtls_required="$(jq -r 'if (.transport.mtls_required // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
+transport_mtls_client_configured="$(jq -r 'if (.transport.mtls_client_certificate_configured // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
 transport_mtls_client_used="$(jq -r 'if (.transport.mtls_client_certificate_used // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
+transport_mtls_missing_client_rejected="$(jq -r 'if (.transport.mtls_missing_client_certificate_rejected // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
+transport_mtls_missing_client_same_endpoint="$(jq -r 'if (.transport.mtls_missing_client_certificate_same_endpoint // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
 status="pass"
 recommended_action_id="trusted_pilot_evidence_verify"
 recommended_action="Run trusted bundle verification with --require-trusted-provenance 1 and --verification-summary-json before helper/operator handoff."
@@ -961,12 +983,17 @@ jq -n \
   --arg base_url_private_or_reserved "$base_url_private_or_reserved" \
   --arg require_https "$require_https" \
   --arg require_public_host "$require_public_host" \
+  --arg require_mtls "$require_mtls" \
   --arg expected_public_host "$expected_public_host" \
   --arg transport_status "$transport_status" \
   --arg transport_https "$transport_https" \
   --arg transport_tls_verified "$transport_tls_verified" \
   --arg transport_ssl_verify_result "$transport_ssl_verify_result" \
+  --arg transport_mtls_required "$transport_mtls_required" \
+  --arg transport_mtls_client_configured "$transport_mtls_client_configured" \
   --arg transport_mtls_client_used "$transport_mtls_client_used" \
+  --arg transport_mtls_missing_client_rejected "$transport_mtls_missing_client_rejected" \
+  --arg transport_mtls_missing_client_same_endpoint "$transport_mtls_missing_client_same_endpoint" \
   --arg path_id "$path_id" \
   --arg service_name "$service_name" \
   --arg host_install_evidence_mode "$host_install_evidence_mode" \
@@ -1002,7 +1029,7 @@ jq -n \
     schema: {
       id: "access_bridge_pilot_evidence_bundle_summary",
       major: 1,
-      minor: 4
+      minor: 5
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -1021,6 +1048,7 @@ jq -n \
       require_https: ($require_https == "1"),
       require_public_host: ($require_public_host == "1"),
       require_tls_verified: true,
+      require_mtls: ($require_mtls == "1"),
       base_url_host: $base_url_host,
       base_url_loopback: ($base_url_loopback == "1"),
       base_url_private_or_reserved: ($base_url_private_or_reserved == "1")
@@ -1054,7 +1082,11 @@ jq -n \
       https: ($transport_https == "true"),
       tls_verified: ($transport_tls_verified == "true"),
       ssl_verify_result: $transport_ssl_verify_result,
+      mtls_required: ($transport_mtls_required == "true"),
+      mtls_client_certificate_configured: ($transport_mtls_client_configured == "true"),
       mtls_client_certificate_used: ($transport_mtls_client_used == "true"),
+      mtls_missing_client_certificate_rejected: ($transport_mtls_missing_client_rejected == "true"),
+      mtls_missing_client_certificate_same_endpoint: ($transport_mtls_missing_client_same_endpoint == "true"),
       deployment_evidence_summary_json: $deployment_summary,
       smoke_summary_json: $smoke_summary
     },

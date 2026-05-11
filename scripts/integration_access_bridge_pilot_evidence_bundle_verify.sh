@@ -60,7 +60,7 @@ jq -n \
   --arg generated_at_utc "$NOW_UTC" \
   '{
     version: 1,
-    schema: {id: "access_bridge_service_smoke_summary", major: 1, minor: 3},
+    schema: {id: "access_bridge_service_smoke_summary", major: 1, minor: 4},
     generated_at_utc: $generated_at_utc,
     status: "pass",
     notes: "Access bridge service smoke passed",
@@ -74,7 +74,19 @@ jq -n \
       https: true,
       health: {effective_url: "https://recovery-helper.gpm-pilot.net/health", remote_ip: "8.8.8.8", remote_port: "443", http_version: "2", time_connect_sec: "0.01", time_appconnect_sec: "0.02", curl_error: ""},
       tls: {checked: true, verified: true, ssl_verify_result: "0"},
-      mtls: {client_certificate_configured: false, client_certificate_used: false}
+      mtls: {
+        required: false,
+        client_certificate_configured: false,
+        client_certificate_used: false,
+        missing_client_certificate_rejected: false,
+        missing_client_certificate_same_endpoint: false,
+        missing_client_certificate_health_http_status: "skipped",
+        missing_client_certificate_health_curl_rc: null,
+        missing_client_certificate_health_curl_error: "",
+        missing_client_certificate_health_effective_url: "",
+        missing_client_certificate_health_remote_ip: "",
+        missing_client_certificate_health_remote_port: ""
+      }
     },
     health: {http_status: "200", status: "ok", helper_id: "helper-pilot", organization_id: "pilot-org", registry_id: "registry-pilot", config_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
     auth: {required: true, missing_code_http_status: "401", wrong_code_http_status: "401", valid_code_http_status: "200"},
@@ -110,6 +122,11 @@ jq -n \
       base_host: "recovery-helper.gpm-pilot.net",
       transport_https: true,
       transport_tls_verified: true,
+      transport_mtls_required: false,
+      transport_mtls_client_certificate_configured: false,
+      transport_mtls_client_certificate_used: false,
+      transport_mtls_missing_client_certificate_rejected: false,
+      transport_mtls_missing_client_certificate_same_endpoint: false,
       path_id: "helper-web",
       config_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
@@ -125,7 +142,12 @@ jq -n \
       remote_ip: "8.8.8.8",
       remote_port: "443",
       http_version: "2",
-      time_appconnect_sec: "0.02"
+      time_appconnect_sec: "0.02",
+      mtls_required: false,
+      mtls_client_certificate_configured: false,
+      mtls_client_certificate_used: false,
+      mtls_missing_client_certificate_rejected: false,
+      mtls_missing_client_certificate_same_endpoint: false
     },
     expected_identity: {helper_id: "helper-pilot", organization_id: "pilot-org", registry_id: "registry-pilot"},
     deployed_identity: {helper_id: "helper-pilot", organization_id: "pilot-org", registry_id: "registry-pilot"},
@@ -380,6 +402,38 @@ if ! jq -e '
 ' "$VERIFY_SUMMARY_JSON" >/dev/null; then
   echo "access bridge pilot evidence bundle verifier integration failed: verification summary did not prove trusted provenance"
   cat "$VERIFY_SUMMARY_JSON"
+  exit 1
+fi
+
+MTLS_REQUIRED_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_mtls_required_missing_proof_summary.json"
+MTLS_REQUIRED_PROVENANCE_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_mtls_required_missing_proof.provenance.json"
+MTLS_REQUIRED_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_mtls_required_missing_proof_verify_summary.json"
+jq '.schema.minor = 5 | .evidence_policy.require_mtls = true' "$SUMMARY_JSON" >"$MTLS_REQUIRED_SUMMARY_JSON"
+go run ./cmd/gpmrecover provenance-sign \
+  --summary-json "$MTLS_REQUIRED_SUMMARY_JSON" \
+  --bundle-tar "$BUNDLE_TAR" \
+  --bundle-tar-sha256-file "$BUNDLE_TAR_SHA256_FILE" \
+  --private-key-file "$PRIVATE_KEY_FILE" \
+  --org-id pilot-org \
+  --org-name "Pilot Org" \
+  --out "$MTLS_REQUIRED_PROVENANCE_JSON" >/dev/null
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$MTLS_REQUIRED_SUMMARY_JSON" \
+  --provenance-json "$MTLS_REQUIRED_PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$MTLS_REQUIRED_VERIFY_SUMMARY_JSON" \
+  --print-verification-summary-json 1 >"$TMP_DIR/verify-mtls-required-missing-proof.log" 2>&1
+mtls_required_missing_proof_rc=$?
+set -e
+if [[ "$mtls_required_missing_proof_rc" -eq 0 ]] ||
+  ! grep -Fq -- 'did not prove no-client-certificate rejection' "$TMP_DIR/verify-mtls-required-missing-proof.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted verifier accepted require-mtls summary without mTLS proof"
+  cat "$TMP_DIR/verify-mtls-required-missing-proof.log"
+  if [[ -f "$MTLS_REQUIRED_VERIFY_SUMMARY_JSON" ]]; then
+    cat "$MTLS_REQUIRED_VERIFY_SUMMARY_JSON"
+  fi
   exit 1
 fi
 

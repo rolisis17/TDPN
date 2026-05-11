@@ -215,6 +215,33 @@ go run ./cmd/gpmrecover bridge-service-deploy-pack \
 printf '%s\n' 'should-not-copy-private-key' >"$DEPLOY_PACK/recovery.key"
 printf '%s\n' "$code_value" >"$DEPLOY_PACK/bridge-code.txt"
 
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url "$BASE_URL" \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_PACK" \
+  --service-name gpm-access-bridge-pilot \
+  --require-mtls 1 \
+  --bundle-dir "$TMP_DIR/pilot-evidence-bundle-require-mtls-no-cert" \
+  --summary-json "$TMP_DIR/pilot-evidence-bundle-require-mtls-no-cert.json" \
+  --provenance-sign 1 \
+  --provenance-private-key-file "$PROVENANCE_PRIVATE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --provenance-key-id "$PROVENANCE_KEY_ID" \
+  --provenance-out "$TMP_DIR/pilot-evidence-bundle-require-mtls-no-cert.provenance.json" \
+  --print-summary-json 0 >"$TMP_DIR/pilot-bundle-require-mtls-no-cert.log" 2>&1
+require_mtls_no_cert_rc=$?
+set -e
+if [[ "$require_mtls_no_cert_rc" -eq 0 ]] ||
+  ! grep -Fq -- '--require-mtls 1 requires --client-cert and --client-key' "$TMP_DIR/pilot-bundle-require-mtls-no-cert.log"; then
+  echo "access bridge pilot evidence bundle integration failed: require-mtls without client cert was not rejected"
+  cat "$TMP_DIR/pilot-bundle-require-mtls-no-cert.log"
+  exit 1
+fi
+
 go run ./cmd/gpmrecover bridge-service-serve \
   --config "$SERVICE_CONFIG" \
   --config-sha256 "$config_sha256" \
@@ -286,11 +313,15 @@ if ! jq -e \
     and .evidence_policy.require_https == true
     and .evidence_policy.require_public_host == true
     and .evidence_policy.require_tls_verified == true
+    and .evidence_policy.require_mtls == false
     and .evidence_policy.base_url_loopback == true
     and .evidence_policy.base_url_private_or_reserved == true
     and .transport.status == "pass"
     and .transport.https == false
     and .transport.tls_verified == false
+    and .transport.mtls_required == false
+    and .transport.mtls_client_certificate_used == false
+    and .transport.mtls_missing_client_certificate_rejected == false
     and .transport.smoke_summary_json == .artifacts.smoke_summary_json
     and .inputs.base_url == $base_url
     and .inputs.expected_public_host == $pilot_public_host

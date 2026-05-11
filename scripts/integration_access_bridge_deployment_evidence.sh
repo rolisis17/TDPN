@@ -70,7 +70,7 @@ jq -n \
     schema: {
       id: "access_bridge_service_smoke_summary",
       major: 1,
-      minor: 3
+      minor: 4
     },
     generated_at_utc: $generated_at_utc,
     status: "pass",
@@ -96,8 +96,17 @@ jq -n \
         ssl_verify_result: "0"
       },
       mtls: {
+        required: false,
         client_certificate_configured: false,
-        client_certificate_used: false
+        client_certificate_used: false,
+        missing_client_certificate_rejected: false,
+        missing_client_certificate_same_endpoint: false,
+        missing_client_certificate_health_http_status: "skipped",
+        missing_client_certificate_health_curl_rc: null,
+        missing_client_certificate_health_curl_error: "",
+        missing_client_certificate_health_effective_url: "",
+        missing_client_certificate_health_remote_ip: "",
+        missing_client_certificate_health_remote_port: ""
       }
     },
     health: {
@@ -168,9 +177,13 @@ if ! jq -e \
     and .smoke.transport_tls_verified == true
     and .transport.status == "pass"
       and .transport.https == true
-      and .transport.tls_verified == true
-      and .transport.ssl_verify_result == "0"
-      and .transport.remote_ip == "8.8.8.8"
+    and .transport.tls_verified == true
+    and .transport.ssl_verify_result == "0"
+    and .transport.remote_ip == "8.8.8.8"
+    and .transport.mtls_required == false
+    and .transport.mtls_client_certificate_configured == false
+    and .transport.mtls_client_certificate_used == false
+    and .transport.mtls_missing_client_certificate_rejected == false
       and .smoke.config_sha256 == $config_sha256
     and .smoke.summary_json == $smoke_summary
     and .expected_identity.helper_id == "helper-evidence"
@@ -205,6 +218,89 @@ if ! jq -e \
   ' "$SUMMARY_JSON" >/dev/null; then
   echo "access bridge deployment evidence integration failed: pass summary contract mismatch"
   cat "$SUMMARY_JSON"
+  exit 1
+fi
+
+MISSING_MTLS_SMOKE="$TMP_DIR/access_bridge_deployment_evidence_missing_mtls_smoke.json"
+MISSING_MTLS_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_missing_mtls_summary.json"
+cp "$SMOKE_SUMMARY" "$MISSING_MTLS_SMOKE"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$MISSING_MTLS_SMOKE" \
+  --require-mtls 1 \
+  --expect-helper-id helper-evidence \
+  --expect-org-id evidence-org \
+  --expect-registry-id "$registry_id" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_DIR" \
+  --service-name gpm-access-bridge-evidence \
+  --summary-json "$MISSING_MTLS_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/missing-mtls.log" 2>&1
+missing_mtls_rc=$?
+set -e
+if [[ "$missing_mtls_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: require-mtls accepted smoke without mTLS proof"
+  cat "$MISSING_MTLS_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+    .status == "fail"
+    and .inputs.require_mtls == true
+    and .transport.status == "fail"
+    and .transport.mtls_required == false
+    and .transport.mtls_client_certificate_used == false
+    and .transport.mtls_missing_client_certificate_rejected == false
+    and (.transport.reason | contains("required mTLS"))
+    and .recommended_next_action.id == "refresh_deployed_bridge_smoke"
+  ' "$MISSING_MTLS_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: missing mTLS proof summary mismatch"
+  cat "$MISSING_MTLS_SUMMARY"
+  exit 1
+fi
+
+MTLS_SMOKE="$TMP_DIR/access_bridge_deployment_evidence_mtls_smoke.json"
+MTLS_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_mtls_summary.json"
+jq '
+  .transport.mtls.required = true
+  | .transport.mtls.client_certificate_configured = true
+  | .transport.mtls.client_certificate_used = true
+  | .transport.mtls.missing_client_certificate_rejected = true
+  | .transport.mtls.missing_client_certificate_same_endpoint = true
+  | .transport.mtls.missing_client_certificate_health_http_status = "000"
+  | .transport.mtls.missing_client_certificate_health_curl_rc = 56
+  | .transport.mtls.missing_client_certificate_health_curl_error = "tlsv13 alert certificate required"
+  | .transport.mtls.missing_client_certificate_health_effective_url = .transport.health.effective_url
+  | .transport.mtls.missing_client_certificate_health_remote_ip = .transport.health.remote_ip
+  | .transport.mtls.missing_client_certificate_health_remote_port = .transport.health.remote_port
+' "$SMOKE_SUMMARY" >"$MTLS_SMOKE"
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$MTLS_SMOKE" \
+  --require-mtls 1 \
+  --expect-helper-id helper-evidence \
+  --expect-org-id evidence-org \
+  --expect-registry-id "$registry_id" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_DIR" \
+  --service-name gpm-access-bridge-evidence \
+  --summary-json "$MTLS_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/mtls.log"
+if ! jq -e '
+    .status == "pass"
+    and .inputs.require_mtls == true
+    and .transport.status == "pass"
+    and .transport.mtls_required == true
+    and .transport.mtls_client_certificate_configured == true
+    and .transport.mtls_client_certificate_used == true
+    and .transport.mtls_missing_client_certificate_rejected == true
+    and .transport.mtls_missing_client_certificate_same_endpoint == true
+    and .transport.mtls_missing_client_certificate_health_http_status == "000"
+    and .smoke.transport_mtls_required == true
+    and .smoke.transport_mtls_client_certificate_used == true
+    and .smoke.transport_mtls_missing_client_certificate_rejected == true
+    and .smoke.transport_mtls_missing_client_certificate_same_endpoint == true
+  ' "$MTLS_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: mTLS proof summary mismatch"
+  cat "$MTLS_SUMMARY"
   exit 1
 fi
 

@@ -159,9 +159,39 @@ if ! jq -e '
     and .transport.https == false
     and .transport.tls.checked == false
     and .transport.tls.verified == false
+    and .transport.mtls.required == false
+    and .transport.mtls.client_certificate_configured == false
+    and .transport.mtls.client_certificate_used == false
   ' "$TMP_DIR/operator-smoke-summary.json" >/dev/null; then
   echo "access bridge service serve integration failed: operator smoke did not capture expected transport facts"
   cat "$TMP_DIR/operator-smoke-summary.json"
+  exit 1
+fi
+
+set +e
+bash ./scripts/access_bridge_service_smoke.sh \
+  --base-url "$BASE_URL" \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --require-mtls 1 \
+  --summary-json "$TMP_DIR/operator-smoke-require-mtls-http-summary.json" \
+  --abuse-message "operator smoke require mtls over http" >/dev/null 2>"$TMP_DIR/operator-smoke-require-mtls-http.stderr"
+require_mtls_http_rc=$?
+set -e
+if [[ "$require_mtls_http_rc" -eq 0 ]]; then
+  echo "access bridge service serve integration failed: require-mtls over HTTP unexpectedly passed"
+  cat "$TMP_DIR/operator-smoke-require-mtls-http-summary.json"
+  exit 1
+fi
+if ! jq -e '
+    .status == "fail"
+    and .transport.https == false
+    and .transport.mtls.required == true
+    and .transport.mtls.client_certificate_used == false
+    and (.notes | contains("mTLS"))
+  ' "$TMP_DIR/operator-smoke-require-mtls-http-summary.json" >/dev/null; then
+  echo "access bridge service serve integration failed: require-mtls over HTTP summary mismatch"
+  cat "$TMP_DIR/operator-smoke-require-mtls-http-summary.json"
   exit 1
 fi
 

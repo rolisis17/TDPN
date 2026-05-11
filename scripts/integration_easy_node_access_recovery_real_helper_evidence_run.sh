@@ -590,7 +590,10 @@ jq -e '
   and .planned_child_commands.bundle.enabled == true
   and .planned_child_commands.verifier.enabled == true
   and .planned_child_commands.roadmap.enabled == true
+  and .inputs.require_mtls == false
   and (.planned_child_commands.bundle.args | index("--bundle-dir") != null)
+  and (.planned_child_commands.bundle.args | index("--require-mtls") != null)
+  and (.planned_child_commands.bundle.args | index("0") != null)
   and (.planned_child_commands.bundle.args | index("--code-file") != null)
   and (.planned_artifacts.bundle_service_smoke_summary_json | endswith("/access_bridge_service_smoke_summary.json"))
   and (.planned_artifacts.verification_summary_json | endswith(".json"))
@@ -852,6 +855,7 @@ for token in \
   $'\t--path-id\thelper-web' \
   $'\t--require-https\t1' \
   $'\t--require-public-host\t1' \
+  $'\t--require-mtls\t0' \
   $'\t--expected-public-host\thelper.gpm-pilot.net' \
   $'\t--provenance-sign\t1' \
   $'\t--provenance-private-key-file\t'"$PROVENANCE_KEY" \

@@ -153,6 +153,11 @@ receipt, and refreshes roadmap readiness from that receipt:
 ```
 
 Use the lower-level commands below only when debugging a specific stage.
+When the helper's public reverse proxy is intentionally enforcing client
+certificates, add `--require-mtls 1 --cacert CA.crt --client-cert CLIENT.crt
+--client-key CLIENT.key` to the smoke, deployment, bundle, or real-helper
+evidence command. That opt-in requires both a successful client-cert `/health`
+probe and a rejected no-client-cert `/health` probe against the same endpoint.
 
 ```sh
 bash ./scripts/access_bridge_service_smoke.sh \

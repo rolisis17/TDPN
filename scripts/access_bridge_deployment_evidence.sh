@@ -10,6 +10,11 @@ code=""
 code_file=""
 abuse_message="deployment evidence smoke"
 smoke_summary_json=""
+cacert=""
+client_cert=""
+client_key=""
+require_tls="0"
+require_mtls="0"
 config_json=""
 deploy_pack_dir=""
 service_name="gpm-access-bridge"
@@ -30,6 +35,10 @@ Usage:
     [--expect-helper-id ID] \
     [--expect-org-id ID] \
     [--expect-registry-id ID] \
+    [--cacert FILE] \
+    [--client-cert FILE --client-key FILE] \
+    [--require-tls 0|1] \
+    [--require-mtls 0|1] \
     [--config-json FILE] \
     [--deploy-pack-dir DIR] \
     [--service-name gpm-access-bridge] \
@@ -375,6 +384,26 @@ while [[ $# -gt 0 ]]; do
       smoke_summary_json="${2:-}"
       shift 2
       ;;
+    --cacert)
+      cacert="${2:-}"
+      shift 2
+      ;;
+    --client-cert)
+      client_cert="${2:-}"
+      shift 2
+      ;;
+    --client-key)
+      client_key="${2:-}"
+      shift 2
+      ;;
+    --require-tls)
+      require_tls="${2:-1}"
+      shift 2
+      ;;
+    --require-mtls)
+      require_mtls="${2:-1}"
+      shift 2
+      ;;
     --config-json|--config)
       config_json="${2:-}"
       shift 2
@@ -428,6 +457,8 @@ for cmd in bash date jq mktemp; do
   need_cmd "$cmd"
 done
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "--require-tls" "$require_tls"
+bool_arg_or_die "--require-mtls" "$require_mtls"
 if [[ ! "$max_smoke_age_sec" =~ ^[0-9]+$ ]]; then
   echo "ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_MAX_SMOKE_AGE_SEC must be a non-negative integer" >&2
   exit 2
@@ -458,6 +489,31 @@ if [[ -n "$code_file" ]]; then
     exit 2
   fi
 fi
+if [[ -n "$cacert" ]]; then
+  cacert="$(abs_path "$cacert")"
+  if [[ ! -f "$cacert" ]]; then
+    echo "access bridge deployment evidence failed: cacert file not found: $cacert" >&2
+    exit 2
+  fi
+fi
+if [[ -n "$client_cert" ]]; then
+  client_cert="$(abs_path "$client_cert")"
+  if [[ ! -f "$client_cert" ]]; then
+    echo "access bridge deployment evidence failed: client cert file not found: $client_cert" >&2
+    exit 2
+  fi
+fi
+if [[ -n "$client_key" ]]; then
+  client_key="$(abs_path "$client_key")"
+  if [[ ! -f "$client_key" ]]; then
+    echo "access bridge deployment evidence failed: client key file not found: $client_key" >&2
+    exit 2
+  fi
+fi
+if { [[ -n "$client_cert" ]] && [[ -z "$client_key" ]]; } || { [[ -z "$client_cert" ]] && [[ -n "$client_key" ]]; }; then
+  echo "access bridge deployment evidence failed: --client-cert and --client-key must be supplied together" >&2
+  exit 2
+fi
 
 tmp_dir="$(mktemp -d)"
 cleanup() {
@@ -487,12 +543,20 @@ else
     --path-id "$path_id"
     --summary-json "$smoke_summary_json"
     --abuse-message "$abuse_message"
+    --require-tls "$require_tls"
+    --require-mtls "$require_mtls"
   )
   if [[ -n "$code" ]]; then
     smoke_args+=(--code "$code")
   fi
   if [[ -n "$code_file" ]]; then
     smoke_args+=(--code-file "$code_file")
+  fi
+  if [[ -n "$cacert" ]]; then
+    smoke_args+=(--cacert "$cacert")
+  fi
+  if [[ -n "$client_cert" ]]; then
+    smoke_args+=(--client-cert "$client_cert" --client-key "$client_key")
   fi
   if [[ -n "$expect_helper_id" ]]; then
     smoke_args+=(--expect-helper-id "$expect_helper_id")
@@ -544,7 +608,17 @@ smoke_transport_remote_ip="$(json_string_or_empty "$smoke_summary_json" '.transp
 smoke_transport_remote_port="$(json_string_or_empty "$smoke_summary_json" '.transport.health.remote_port')"
 smoke_transport_http_version="$(json_string_or_empty "$smoke_summary_json" '.transport.health.http_version')"
 smoke_transport_time_appconnect="$(json_string_or_empty "$smoke_summary_json" '.transport.health.time_appconnect_sec')"
+smoke_transport_mtls_required="$(jq -r 'if (.transport.mtls.required // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_transport_mtls_client_configured="$(jq -r 'if (.transport.mtls.client_certificate_configured // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_transport_mtls_client_used="$(jq -r 'if (.transport.mtls.client_certificate_used // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_transport_mtls_missing_client_rejected="$(jq -r 'if (.transport.mtls.missing_client_certificate_rejected // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_transport_mtls_missing_client_same_endpoint="$(jq -r 'if (.transport.mtls.missing_client_certificate_same_endpoint // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_transport_mtls_missing_client_http="$(json_string_or_empty "$smoke_summary_json" '.transport.mtls.missing_client_certificate_health_http_status')"
+smoke_transport_mtls_missing_client_rc="$(json_string_or_empty "$smoke_summary_json" '.transport.mtls.missing_client_certificate_health_curl_rc')"
+smoke_transport_mtls_missing_client_error="$(json_string_or_empty "$smoke_summary_json" '.transport.mtls.missing_client_certificate_health_curl_error')"
+smoke_transport_mtls_missing_client_effective_url="$(json_string_or_empty "$smoke_summary_json" '.transport.mtls.missing_client_certificate_health_effective_url')"
+smoke_transport_mtls_missing_client_remote_ip="$(json_string_or_empty "$smoke_summary_json" '.transport.mtls.missing_client_certificate_health_remote_ip')"
+smoke_transport_mtls_missing_client_remote_port="$(json_string_or_empty "$smoke_summary_json" '.transport.mtls.missing_client_certificate_health_remote_port')"
 smoke_base_host_requires_proxy_match="false"
 if [[ -n "$smoke_base_host" ]] && ! is_loopback_host "$smoke_base_host"; then
   smoke_base_host_requires_proxy_match="true"
@@ -573,6 +647,32 @@ if [[ "$evidence_scope" == "real_helper_https" ]]; then
   elif is_private_or_reserved_remote_ip "$smoke_transport_remote_ip"; then
     transport_status="fail"
     transport_reason="$(append_reason "$transport_reason" "smoke summary remote IP is private or reserved")"
+  fi
+fi
+if [[ "$require_mtls" == "1" ]]; then
+  if [[ "$smoke_transport_scheme" != "https" || "$smoke_transport_https" != "true" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary did not prove HTTPS transport")"
+  fi
+  if [[ "$smoke_transport_tls_checked" != "true" || "$smoke_transport_tls_verified" != "true" || "$smoke_transport_ssl_verify_result" != "0" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary did not prove verified TLS")"
+  fi
+  if [[ "$smoke_transport_mtls_required" != "true" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary did not record mTLS as required")"
+  fi
+  if [[ "$smoke_transport_mtls_client_configured" != "true" || "$smoke_transport_mtls_client_used" != "true" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary did not prove client certificate use")"
+  fi
+  if [[ "$smoke_transport_mtls_missing_client_rejected" != "true" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary did not prove missing-client-certificate rejection")"
+  fi
+  if [[ "$smoke_transport_mtls_missing_client_same_endpoint" != "true" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS missing-client-certificate check did not hit the same endpoint")"
   fi
 fi
 smoke_path_id="$(json_string_or_empty "$smoke_summary_json" '.path_id')"
@@ -940,7 +1040,19 @@ jq -n \
   --arg smoke_transport_remote_port "$smoke_transport_remote_port" \
   --arg smoke_transport_http_version "$smoke_transport_http_version" \
   --arg smoke_transport_time_appconnect "$smoke_transport_time_appconnect" \
+  --arg smoke_transport_mtls_required "$smoke_transport_mtls_required" \
+  --arg smoke_transport_mtls_client_configured "$smoke_transport_mtls_client_configured" \
   --arg smoke_transport_mtls_client_used "$smoke_transport_mtls_client_used" \
+  --arg smoke_transport_mtls_missing_client_rejected "$smoke_transport_mtls_missing_client_rejected" \
+  --arg smoke_transport_mtls_missing_client_same_endpoint "$smoke_transport_mtls_missing_client_same_endpoint" \
+  --arg smoke_transport_mtls_missing_client_http "$smoke_transport_mtls_missing_client_http" \
+  --arg smoke_transport_mtls_missing_client_rc "$smoke_transport_mtls_missing_client_rc" \
+  --arg smoke_transport_mtls_missing_client_error "$smoke_transport_mtls_missing_client_error" \
+  --arg smoke_transport_mtls_missing_client_effective_url "$smoke_transport_mtls_missing_client_effective_url" \
+  --arg smoke_transport_mtls_missing_client_remote_ip "$smoke_transport_mtls_missing_client_remote_ip" \
+  --arg smoke_transport_mtls_missing_client_remote_port "$smoke_transport_mtls_missing_client_remote_port" \
+  --arg require_tls "$require_tls" \
+  --arg require_mtls "$require_mtls" \
   --arg transport_status "$transport_status" \
   --arg transport_reason "$transport_reason" \
   --arg evidence_scope "$evidence_scope" \
@@ -986,7 +1098,7 @@ jq -n \
     schema: {
       id: "access_bridge_deployment_evidence_summary",
       major: 1,
-      minor: 2
+      minor: 3
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -1006,7 +1118,9 @@ jq -n \
       smoke_summary_json: $smoke_summary_json,
       config_json: $config_json,
       deploy_pack_dir: $deploy_pack_dir,
-      service_name: $service_name
+      service_name: $service_name,
+      require_tls: ($require_tls == "1"),
+      require_mtls: ($require_mtls == "1")
     },
     smoke: {
       status: $smoke_status,
@@ -1028,6 +1142,11 @@ jq -n \
       base_host: $smoke_base_host,
       transport_https: ($smoke_transport_https == "true"),
       transport_tls_verified: ($smoke_transport_tls_verified == "true"),
+      transport_mtls_required: ($smoke_transport_mtls_required == "true"),
+      transport_mtls_client_certificate_configured: ($smoke_transport_mtls_client_configured == "true"),
+      transport_mtls_client_certificate_used: ($smoke_transport_mtls_client_used == "true"),
+      transport_mtls_missing_client_certificate_rejected: ($smoke_transport_mtls_missing_client_rejected == "true"),
+      transport_mtls_missing_client_certificate_same_endpoint: ($smoke_transport_mtls_missing_client_same_endpoint == "true"),
       path_id: $smoke_path_id,
       summary_json: $smoke_summary_json
     },
@@ -1045,7 +1164,17 @@ jq -n \
       remote_port: $smoke_transport_remote_port,
       http_version: $smoke_transport_http_version,
       time_appconnect_sec: $smoke_transport_time_appconnect,
-      mtls_client_certificate_used: ($smoke_transport_mtls_client_used == "true")
+      mtls_required: ($smoke_transport_mtls_required == "true"),
+      mtls_client_certificate_configured: ($smoke_transport_mtls_client_configured == "true"),
+      mtls_client_certificate_used: ($smoke_transport_mtls_client_used == "true"),
+      mtls_missing_client_certificate_rejected: ($smoke_transport_mtls_missing_client_rejected == "true"),
+      mtls_missing_client_certificate_same_endpoint: ($smoke_transport_mtls_missing_client_same_endpoint == "true"),
+      mtls_missing_client_certificate_health_http_status: $smoke_transport_mtls_missing_client_http,
+      mtls_missing_client_certificate_health_curl_rc: (if $smoke_transport_mtls_missing_client_rc == "" then null else ($smoke_transport_mtls_missing_client_rc | tonumber) end),
+      mtls_missing_client_certificate_health_curl_error: $smoke_transport_mtls_missing_client_error,
+      mtls_missing_client_certificate_health_effective_url: $smoke_transport_mtls_missing_client_effective_url,
+      mtls_missing_client_certificate_health_remote_ip: $smoke_transport_mtls_missing_client_remote_ip,
+      mtls_missing_client_certificate_health_remote_port: $smoke_transport_mtls_missing_client_remote_port
     },
     expected_identity: {
       helper_id: $expect_helper_id,
