@@ -172,12 +172,33 @@ signoff_final_rc=0
 signoff_decision="GO"
 signoff_runtime_status="pass"
 signoff_next_operator_action="No action required"
+signoff_context=""
+signoff_reason=""
+signoff_primary_failure=""
+signoff_root_required_failures="null"
+signoff_campaign_failure_reason=""
+signoff_campaign_log=""
+signoff_exit_rc=0
 if [[ "$scenario" == "no_go_summary" ]]; then
   signoff_status="fail"
   signoff_final_rc=1
   signoff_decision="NO-GO"
   signoff_runtime_status="fail"
   signoff_next_operator_action="resolve runtime-actuation blockers"
+fi
+if [[ "$scenario" == "fail_root_required_summary" ]]; then
+  signoff_status="fail"
+  signoff_final_rc=1
+  signoff_decision="NO-GO"
+  signoff_runtime_status="fail"
+  signoff_next_operator_action="Run signoff with sudo (root) or force docker campaign refresh mode, then rerun"
+  signoff_context="synthetic_campaign_failure"
+  signoff_reason="--start-local-stack=1 requires root (run with sudo)"
+  signoff_primary_failure="root_required"
+  signoff_root_required_failures="1"
+  signoff_campaign_failure_reason="synthetic campaign failed: root required"
+  signoff_campaign_log="/tmp/fake-signoff-root-required.log"
+  signoff_exit_rc=23
 fi
 if [[ -n "$campaign_check_summary_json" ]]; then
   mkdir -p "$(dirname "$campaign_check_summary_json")"
@@ -219,6 +240,12 @@ jq -n \
   --arg signoff_decision "$signoff_decision" \
   --arg signoff_runtime_status "$signoff_runtime_status" \
   --arg signoff_next_operator_action "$signoff_next_operator_action" \
+  --arg signoff_context "$signoff_context" \
+  --arg signoff_reason "$signoff_reason" \
+  --arg signoff_primary_failure "$signoff_primary_failure" \
+  --argjson signoff_root_required_failures "$signoff_root_required_failures" \
+  --arg signoff_campaign_failure_reason "$signoff_campaign_failure_reason" \
+  --arg signoff_campaign_log "$signoff_campaign_log" \
   --argjson signoff_final_rc "$signoff_final_rc" \
   --arg campaign_check_summary_json "$campaign_check_summary_json" \
   '{
@@ -237,14 +264,28 @@ jq -n \
           source: "explicit_campaign_summary"
         }
       },
-      next_operator_action: $signoff_next_operator_action
+      next_operator_action: $signoff_next_operator_action,
+      context: (if $signoff_context == "" then null else $signoff_context end),
+      reason: (if $signoff_reason == "" then null else $signoff_reason end),
+      diagnostics: {
+        likely_primary_failure: (if $signoff_primary_failure == "" then null else $signoff_primary_failure end),
+        aggregated_diagnostics: {
+          root_required_failures: $signoff_root_required_failures
+        }
+      }
+    },
+    stages: {
+      campaign: {
+        failure_reason: (if $signoff_campaign_failure_reason == "" then null else $signoff_campaign_failure_reason end),
+        log: (if $signoff_campaign_log == "" then null else $signoff_campaign_log end)
+      }
     },
     artifacts: {
       campaign_check_summary_json: (if $campaign_check_summary_json == "" then null else $campaign_check_summary_json end)
     }
   }' >"$summary_json"
 
-exit 0
+exit "$signoff_exit_rc"
 EOF_FAKE_SIGNOFF
 chmod +x "$FAKE_SIGNOFF_SCRIPT"
 
@@ -856,6 +897,51 @@ if ! jq -e '
 ' "$CYCLE_FAIL_SUMMARY" >/dev/null 2>&1; then
   echo "cycle-failure fail-closed summary mismatch"
   cat "$CYCLE_FAIL_SUMMARY"
+  exit 1
+fi
+
+echo "[runtime-actuation-promotion-cycle] signoff command failure keeps root-required context"
+ROOT_REQUIRED_CYCLE_SUMMARY="$TMP_DIR/cycle_root_required_summary.json"
+set +e
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF_SCRIPT" \
+RUNTIME_ACTUATION_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_CHECK_SCRIPT" \
+FAKE_RUNTIME_ACTUATION_CYCLE_CAPTURE_FILE="$TMP_DIR/cycle_root_required_capture.log" \
+FAKE_RUNTIME_ACTUATION_CYCLE_SIGNOFF_SCENARIO="fail_root_required_summary" \
+FAKE_RUNTIME_ACTUATION_CYCLE_PROMOTION_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --cycles 1 \
+  --reports-dir "$TMP_DIR/cycle_root_required_reports" \
+  --fail-on-no-go 1 \
+  --summary-json "$ROOT_REQUIRED_CYCLE_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_runtime_actuation_promotion_cycle_root_required.log 2>&1
+root_required_rc=$?
+set -e
+
+if [[ "$root_required_rc" -eq 0 ]]; then
+  echo "expected root-required signoff failure path rc!=0"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_root_required.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_stage == "cycles"
+  and .diagnostics.no_go.primary_reason_code == "signoff_command_failed"
+  and .diagnostics.no_go.primary_reason_category == "cycle_signoff_failure"
+  and (.cycles[0].error | contains("requires root"))
+  and (.cycles[0].next_operator_action | contains("sudo"))
+  and .cycles[0].summary.signoff_failure.decision_context == "synthetic_campaign_failure"
+  and (.cycles[0].summary.signoff_failure.decision_reason | contains("requires root"))
+  and .cycles[0].summary.signoff_failure.primary_failure == "root_required"
+  and .cycles[0].summary.signoff_failure.root_required_failures == 1
+  and (.cycles[0].summary.signoff_failure.campaign_failure_reason | contains("root required"))
+  and (.stages.cycles.errors[0] | contains("requires root"))
+  and (.outcome.next_operator_action | contains("sudo"))
+  and .outcome.should_promote == false
+  and .outcome.action == "hold_promotion_blocked"
+' "$ROOT_REQUIRED_CYCLE_SUMMARY" >/dev/null 2>&1; then
+  echo "root-required signoff failure summary mismatch"
+  cat "$ROOT_REQUIRED_CYCLE_SUMMARY"
   exit 1
 fi
 

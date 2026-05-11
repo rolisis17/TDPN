@@ -801,6 +801,7 @@ declare -a signoff_summary_paths=()
 declare -a signoff_logs=()
 declare -a cycle_stage_errors=()
 declare -a cycle_error_codes=()
+first_cycle_next_operator_action=""
 cycles_entries_json='[]'
 cycles_completed=0
 cycles_passed=0
@@ -845,6 +846,13 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
   signoff_status_normalized=""
   signoff_decision=""
   signoff_decision_usable="false"
+  signoff_decision_context=""
+  signoff_decision_reason=""
+  signoff_decision_next_operator_action=""
+  signoff_primary_failure=""
+  signoff_root_required_failures_json="null"
+  signoff_campaign_failure_reason=""
+  signoff_campaign_log=""
   signoff_summary_rc_json="null"
   cycle_status="fail"
   cycle_error=""
@@ -880,12 +888,38 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
       else "null"
       end
     ' "$signoff_summary_path" 2>/dev/null || printf '%s' "null")"
+    signoff_decision_context="$(jq -r 'if (.decision.context | type) == "string" then .decision.context else "" end' "$signoff_summary_path" 2>/dev/null || printf '%s' "")"
+    signoff_decision_reason="$(jq -r 'if (.decision.reason | type) == "string" then .decision.reason else "" end' "$signoff_summary_path" 2>/dev/null || printf '%s' "")"
+    signoff_decision_next_operator_action="$(jq -r 'if (.decision.next_operator_action | type) == "string" then .decision.next_operator_action else "" end' "$signoff_summary_path" 2>/dev/null || printf '%s' "")"
+    signoff_primary_failure="$(jq -r 'if (.decision.diagnostics.likely_primary_failure | type) == "string" then .decision.diagnostics.likely_primary_failure else "" end' "$signoff_summary_path" 2>/dev/null || printf '%s' "")"
+    signoff_root_required_failures_json="$(jq -r '
+      if (.decision.diagnostics.aggregated_diagnostics.root_required_failures | type) == "number" then .decision.diagnostics.aggregated_diagnostics.root_required_failures
+      else "null"
+      end
+    ' "$signoff_summary_path" 2>/dev/null || printf '%s' "null")"
+    signoff_campaign_failure_reason="$(jq -r 'if (.stages.campaign.failure_reason | type) == "string" then .stages.campaign.failure_reason else "" end' "$signoff_summary_path" 2>/dev/null || printf '%s' "")"
+    signoff_campaign_log="$(jq -r 'if (.stages.campaign.log | type) == "string" then .stages.campaign.log else "" end' "$signoff_summary_path" 2>/dev/null || printf '%s' "")"
   fi
 
   if [[ "$signoff_rc" -ne 0 ]]; then
+    signoff_failure_detail=""
+    if [[ -n "$signoff_decision_reason" ]]; then
+      signoff_failure_detail="$signoff_decision_reason"
+    elif [[ -n "$signoff_campaign_failure_reason" ]]; then
+      signoff_failure_detail="$signoff_campaign_failure_reason"
+    elif [[ -n "$signoff_primary_failure" ]]; then
+      signoff_failure_detail="primary failure: $signoff_primary_failure"
+    fi
     cycle_error_code="signoff_command_failed"
     cycle_error="signoff command failed (rc=$signoff_rc)"
-    cycle_next_operator_action="inspect signoff log and rerun runtime-actuation promotion cycle"
+    if [[ -n "$signoff_failure_detail" ]]; then
+      cycle_error="$cycle_error: $signoff_failure_detail"
+    fi
+    if [[ -n "$signoff_decision_next_operator_action" ]]; then
+      cycle_next_operator_action="$signoff_decision_next_operator_action"
+    else
+      cycle_next_operator_action="inspect signoff log and rerun runtime-actuation promotion cycle"
+    fi
   elif [[ "$signoff_summary_valid" != "true" ]]; then
     cycle_error_code="signoff_summary_invalid_json"
     cycle_error="signoff summary is missing or invalid JSON"
@@ -921,6 +955,9 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
     if [[ -z "$cycle_error_code" ]]; then
       cycle_error_code="signoff_cycle_failed_unknown"
     fi
+    if [[ -z "$first_cycle_next_operator_action" && -n "$cycle_next_operator_action" ]]; then
+      first_cycle_next_operator_action="$cycle_next_operator_action"
+    fi
     cycle_stage_errors+=("cycle $cycle_idx [$cycle_error_code]: ${cycle_error:-unknown signoff cycle failure}")
     cycle_error_codes+=("$cycle_error_code")
   fi
@@ -945,6 +982,13 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
     --arg signoff_status_normalized "$signoff_status_normalized" \
     --arg signoff_decision "$signoff_decision" \
     --arg signoff_decision_usable "$signoff_decision_usable" \
+    --arg signoff_decision_context "$signoff_decision_context" \
+    --arg signoff_decision_reason "$signoff_decision_reason" \
+    --arg signoff_decision_next_operator_action "$signoff_decision_next_operator_action" \
+    --arg signoff_primary_failure "$signoff_primary_failure" \
+    --argjson signoff_root_required_failures "$signoff_root_required_failures_json" \
+    --arg signoff_campaign_failure_reason "$signoff_campaign_failure_reason" \
+    --arg signoff_campaign_log "$signoff_campaign_log" \
     --argjson signoff_summary_rc "$signoff_summary_rc_json" \
     '{
       cycle_index: $cycle_index,
@@ -964,7 +1008,16 @@ for ((cycle_idx = 1; cycle_idx <= cycles; cycle_idx++)); do
         status_normalized: (if $signoff_status_normalized == "" then null else $signoff_status_normalized end),
         decision: (if $signoff_decision == "" then null else $signoff_decision end),
         has_usable_decision: ($signoff_decision_usable == "true"),
-        rc: $signoff_summary_rc
+        rc: $signoff_summary_rc,
+        signoff_failure: {
+          decision_context: (if $signoff_decision_context == "" then null else $signoff_decision_context end),
+          decision_reason: (if $signoff_decision_reason == "" then null else $signoff_decision_reason end),
+          decision_next_operator_action: (if $signoff_decision_next_operator_action == "" then null else $signoff_decision_next_operator_action end),
+          primary_failure: (if $signoff_primary_failure == "" then null else $signoff_primary_failure end),
+          root_required_failures: $signoff_root_required_failures,
+          campaign_failure_reason: (if $signoff_campaign_failure_reason == "" then null else $signoff_campaign_failure_reason end),
+          campaign_log: (if $signoff_campaign_log == "" then null else $signoff_campaign_log end)
+        }
       },
       artifacts: {
         campaign_check_summary_json: $campaign_check_summary_json,
@@ -1212,7 +1265,9 @@ else
   failure_reason="runtime actuation promotion decision is unrecognized"
 fi
 
-if [[ "$decision" != "GO" && -z "$promotion_next_operator_action" ]]; then
+if [[ "$decision" != "GO" && "$failure_stage" == "cycles" && -n "$first_cycle_next_operator_action" ]]; then
+  promotion_next_operator_action="$first_cycle_next_operator_action"
+elif [[ "$decision" != "GO" && -z "$promotion_next_operator_action" ]]; then
   if [[ -n "$failure_reason" ]]; then
     promotion_next_operator_action="$failure_reason"
   else
