@@ -249,17 +249,17 @@ mtls_rejection_signal_01() {
   local http_code="${1:-}"
   local body_file="${2:-}"
   local stderr_text="${3:-}"
-  local probe_text=""
-  if [[ -n "$body_file" && -f "$body_file" ]]; then
-    probe_text="$(tr -d '\r' <"$body_file" | tr '[:upper:]' '[:lower:]')"
-  fi
-  probe_text="${probe_text}
-$(printf '%s' "$stderr_text" | tr '[:upper:]' '[:lower:]')"
+  local tls_error_text
+  : "$body_file"
   if [[ "$http_code" == "495" || "$http_code" == "496" ]]; then
     return 0
   fi
-  printf '%s\n' "$probe_text" | grep -Eiq \
-    'client[ _-]*certificate|certificate[ _-]*(required|needed|missing)|no[ _-]*(required[ _-]*)?ssl[ _-]*certificate|tlsv[0-9.]*[ _-]*alert[ _-]*certificate[ _-]*required|ssl[ _-]*certificate[ _-]*(error|required)|mtls'
+  if [[ "$http_code" != "000" ]]; then
+    return 1
+  fi
+  tls_error_text="$(printf '%s' "$stderr_text" | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+  printf '%s\n' "$tls_error_text" | grep -Eiq \
+    'tlsv[0-9.]*[ _-]*alert[ _-]*certificate[ _-]*required|alert[ _-]*certificate[ _-]*required|no[ _-]*(required[ _-]*)?ssl[ _-]*certificate|ssl[^[:cntrl:]]*certificate[^[:cntrl:]]*(required|needed|missing|error)|certificate[ _-]*(required|needed|missing)[^[:cntrl:]]*(ssl|tls|handshake)|(ssl|tls)[^[:cntrl:]]*handshake[^[:cntrl:]]*certificate'
 }
 
 curl_common_args=(-sS)

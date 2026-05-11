@@ -666,8 +666,12 @@ if [[ -e "$TLS_DIR/ca.key" ]]; then
 fi
 require_eq "$(env_value "$AUTH_ENV" "PROD_STRICT_MODE")" "1" "staged PROD_STRICT_MODE"
 require_eq "$(env_value "$AUTH_ENV" "MTLS_CA_FILE")" "/app/tls/ca.crt" "staged MTLS_CA_FILE"
+require_eq "$(env_value "$AUTH_ENV" "MTLS_SERVER_CERT_FILE")" "/app/tls/node.crt" "staged MTLS_SERVER_CERT_FILE"
+require_eq "$(env_value "$AUTH_ENV" "MTLS_SERVER_KEY_FILE")" "/app/tls/node.key" "staged MTLS_SERVER_KEY_FILE"
 require_eq "$(env_value "$AUTH_ENV" "MTLS_CERT_FILE")" "/app/tls/node.crt" "staged MTLS_CERT_FILE"
 require_eq "$(env_value "$AUTH_ENV" "MTLS_KEY_FILE")" "/app/tls/node.key" "staged MTLS_KEY_FILE"
+require_eq "$(env_value "$AUTH_ENV" "MTLS_CLIENT_CERT_FILE")" "/app/tls/client.crt" "staged MTLS_CLIENT_CERT_FILE"
+require_eq "$(env_value "$AUTH_ENV" "MTLS_CLIENT_KEY_FILE")" "/app/tls/client.key" "staged MTLS_CLIENT_KEY_FILE"
 
 PATH="$TMP_BIN:$PATH" \
 EASY_NODE_VERIFY_PUBLIC=0 \
@@ -744,6 +748,10 @@ require_eq "$(env_value "$PROVIDER_ENV" "COSMOS_SETTLEMENT_SUBMIT_MODE")" "http"
 require_eq "$(env_value "$PROVIDER_ENV" "EXIT_TOKEN_PROOF_REPLAY_STORE_FILE")" "/app/data/exit_token_proof_replay.json" "provider EXIT_TOKEN_PROOF_REPLAY_STORE_FILE"
 require_eq "$(env_value "$PROVIDER_ENV" "EXIT_EGRESS_BACKEND")" "command" "provider EXIT_EGRESS_BACKEND"
 require_eq "$(env_value "$PROVIDER_ENV" "EXIT_ISSUER_MIN_KEY_VOTES")" "2" "provider EXIT_ISSUER_MIN_KEY_VOTES"
+require_eq "$(env_value "$PROVIDER_ENV" "MTLS_SERVER_CERT_FILE")" "/app/tls/node.crt" "provider MTLS_SERVER_CERT_FILE"
+require_eq "$(env_value "$PROVIDER_ENV" "MTLS_SERVER_KEY_FILE")" "/app/tls/node.key" "provider MTLS_SERVER_KEY_FILE"
+require_eq "$(env_value "$PROVIDER_ENV" "MTLS_CLIENT_CERT_FILE")" "/app/tls/client.crt" "provider MTLS_CLIENT_CERT_FILE"
+require_eq "$(env_value "$PROVIDER_ENV" "MTLS_CLIENT_KEY_FILE")" "/app/tls/client.key" "provider MTLS_CLIENT_KEY_FILE"
 require_log_contains /tmp/integration_easy_node_prod_server_env_provider.log 'server entry-exit runtime data check: ok' "prod provider entry-exit data runtime check"
 require_log_contains /tmp/integration_easy_node_prod_server_env_provider.log 'server WG runtime check: ok' "prod provider WG runtime check"
 

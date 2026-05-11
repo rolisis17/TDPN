@@ -90,6 +90,9 @@ Purpose:
   2. verify it with trusted provenance and write the verifier receipt
   3. refresh roadmap readiness against that verifier receipt
 
+The trusted verifier receipt must use
+access_bridge_pilot_evidence_bundle_verify_summary schema major 1, minor >= 3.
+
 Use --plan-only 1 to run the same strict preflight validation and emit the
 planned child commands/artifacts without invoking host-install, bundle,
 verifier, or roadmap child scripts.
@@ -408,7 +411,7 @@ validate_trusted_verifier_receipt() {
       [
         if (.schema.id // "") != "access_bridge_pilot_evidence_bundle_verify_summary" then "schema id is not access_bridge_pilot_evidence_bundle_verify_summary" else empty end,
         if (.schema.major // 0) != 1 then "schema major is not 1" else empty end,
-        if (.schema.minor // -1) < 2 then "schema minor is too old for trusted handoff child-evidence semantics" else empty end,
+        if (.schema.minor // -1) < 3 then "schema minor is too old for trusted pilot receipt semantics" else empty end,
         if (.status // "") != "pass" then "receipt status is not pass" else empty end,
         if (.rc // -1) != 0 then "receipt rc is not 0" else empty end,
         if (.pilot_handoff_ready // false) != true then "pilot_handoff_ready is not true" else empty end,

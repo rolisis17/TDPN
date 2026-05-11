@@ -123,6 +123,8 @@ MTLS_REQUIRE_CLIENT_CERT=1
 MTLS_MIN_VERSION=1.3
 MTLS_INSECURE_SKIP_VERIFY=0
 MTLS_CA_FILE=$tls_dir/tls/ca.crt
+MTLS_SERVER_CERT_FILE=$tls_dir/tls/node.crt
+MTLS_SERVER_KEY_FILE=$tls_dir/tls/node.key
 DATA_PLANE_MODE=opaque
 DIRECTORY_PUBLIC_URL=https://prod-authority.gpm-pilot.net:8081
 ENTRY_URL_PUBLIC=https://prod-authority.gpm-pilot.net:8083
@@ -132,8 +134,8 @@ EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL=$tls_dir/tls/client.crt
 EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL=$tls_dir/tls/client.key
 MTLS_CERT_FILE=$tls_dir/tls/node.crt
 MTLS_KEY_FILE=$tls_dir/tls/node.key
-MTLS_CLIENT_CERT_FILE=$tls_dir/tls/node.crt
-MTLS_CLIENT_KEY_FILE=$tls_dir/tls/node.key
+MTLS_CLIENT_CERT_FILE=$tls_dir/tls/client.crt
+MTLS_CLIENT_KEY_FILE=$tls_dir/tls/client.key
 ENTRY_LIVE_WG_MODE=1
 WG_BACKEND=command
 EXIT_WG_INTERFACE=wgeprod00
@@ -179,7 +181,7 @@ EOF_MODE
 ./scripts/easy_node.sh admin-signing-status >/tmp/integration_prod_preflight_status.log 2>&1
 ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_ok.log 2>&1
 
-echo "MTLS_SERVER_CERT_FILE=/app/tls/missing-node.crt" >>"$AUTH_ENV"
+sed -i -E "s#^MTLS_SERVER_CERT_FILE=.*#MTLS_SERVER_CERT_FILE=/app/tls/missing-node.crt#" "$AUTH_ENV"
 if ./scripts/easy_node.sh prod-preflight --days-min 0 >/tmp/integration_prod_preflight_mtls_server_cert_override_fail.log 2>&1; then
   echo "expected prod-preflight to honor MTLS_SERVER_CERT_FILE and fail on missing override"
   cat /tmp/integration_prod_preflight_mtls_server_cert_override_fail.log
@@ -623,7 +625,7 @@ if ! rg -q "mTLS client certificate missing clientAuth usage" /tmp/integration_p
   cat /tmp/integration_prod_preflight_mtls_client_usage_fail.log
   exit 1
 fi
-sed -i -E "s#^MTLS_CLIENT_CERT_FILE=.*#MTLS_CLIENT_CERT_FILE=$tls_dir/tls/node.crt#" "$AUTH_ENV"
+sed -i -E "s#^MTLS_CLIENT_CERT_FILE=.*#MTLS_CLIENT_CERT_FILE=$tls_dir/tls/client.crt#" "$AUTH_ENV"
 sed -i -E "s#^MTLS_CLIENT_KEY_FILE=.*#MTLS_CLIENT_KEY_FILE=$tls_dir/tls/node.key#" "$AUTH_ENV"
 
 write_provider_env_file() {
@@ -639,6 +641,8 @@ MTLS_REQUIRE_CLIENT_CERT=1
 MTLS_MIN_VERSION=1.3
 MTLS_INSECURE_SKIP_VERIFY=0
 MTLS_CA_FILE=$tls_dir/tls/ca.crt
+MTLS_SERVER_CERT_FILE=$tls_dir/tls/node.crt
+MTLS_SERVER_KEY_FILE=$tls_dir/tls/node.key
 DATA_PLANE_MODE=opaque
 DIRECTORY_PUBLIC_URL=https://prod-provider.gpm-pilot.net:8081
 ENTRY_URL_PUBLIC=https://prod-provider.gpm-pilot.net:8083
@@ -648,8 +652,8 @@ EASY_NODE_MTLS_CLIENT_CERT_FILE_LOCAL=$tls_dir/tls/client.crt
 EASY_NODE_MTLS_CLIENT_KEY_FILE_LOCAL=$tls_dir/tls/client.key
 MTLS_CERT_FILE=$tls_dir/tls/node.crt
 MTLS_KEY_FILE=$tls_dir/tls/node.key
-MTLS_CLIENT_CERT_FILE=$tls_dir/tls/node.crt
-MTLS_CLIENT_KEY_FILE=$tls_dir/tls/node.key
+MTLS_CLIENT_CERT_FILE=$tls_dir/tls/client.crt
+MTLS_CLIENT_KEY_FILE=$tls_dir/tls/client.key
 ENTRY_LIVE_WG_MODE=1
 WG_BACKEND=command
 EXIT_WG_INTERFACE=wgeprod01

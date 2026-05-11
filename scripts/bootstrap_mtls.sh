@@ -169,7 +169,7 @@ write_san_config() {
     echo ""
     echo "[req_ext]"
     echo "subjectAltName = @alt_names"
-    echo "extendedKeyUsage = serverAuth,clientAuth"
+    echo "extendedKeyUsage = serverAuth"
     echo ""
     echo "[alt_names]"
     local san
@@ -224,6 +224,13 @@ cert_has_all_sans() {
   for san in "$@"; do
     cert_has_san "$cert" "$san" || return 1
   done
+}
+
+cert_verifies_with_purpose() {
+  local ca="$1"
+  local cert="$2"
+  local purpose="$3"
+  openssl verify -purpose "$purpose" -CAfile "$ca" "$cert" >/dev/null 2>&1
 }
 
 out_dir="deploy/tls"
@@ -340,6 +347,10 @@ add_unique "entry-exit" san_hosts
 write_san_config "$san_cfg" "${san_hosts[@]}"
 if [[ -f "$node_crt" ]] && ! cert_has_all_sans "$node_crt" "${san_hosts[@]}"; then
   echo "mTLS node certificate SANs changed; regenerating node certificate" >&2
+  rm -f "$node_csr" "$node_crt"
+fi
+if [[ -f "$node_crt" ]] && cert_verifies_with_purpose "$ca_crt" "$node_crt" "sslclient"; then
+  echo "mTLS node certificate usage changed to server-only; regenerating node certificate" >&2
   rm -f "$node_csr" "$node_crt"
 fi
 

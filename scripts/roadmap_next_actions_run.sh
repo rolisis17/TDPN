@@ -728,6 +728,32 @@ command_has_access_recovery_public_key_handoff_01() {
   [[ "$normalized" =~ (^|[[:space:]])--PUBLIC-KEY-FILE([[:space:]=]|$) ]]
 }
 
+command_has_access_recovery_no_evidence_mode_01() {
+  local command_text normalized token idx token_count
+  command_text="${1:-}"
+  if [[ -z "$command_text" ]]; then
+    return 1
+  fi
+
+  if command_string_to_argv "$command_text"; then
+    token_count="${#COMMAND_STRING_ARGV[@]}"
+    idx=0
+    while (( idx < token_count )); do
+      token="${COMMAND_STRING_ARGV[$idx]}"
+      case "$token" in
+        --plan-only|--plan-only=*|--preflight-only|--preflight-only=*)
+          return 0
+          ;;
+      esac
+      idx=$((idx + 1))
+    done
+    return 1
+  fi
+
+  normalized="$(printf '%s' "$command_text" | tr '[:lower:]' '[:upper:]')"
+  [[ "$normalized" =~ (^|[[:space:]])--(PLAN-ONLY|PREFLIGHT-ONLY)([[:space:]=]|$) ]]
+}
+
 is_profile_subject_flag() {
   case "${1:-}" in
     --campaign-subject|--subject|--key|--invite-key)
@@ -3234,6 +3260,13 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
     action_preflight_failure_kind="missing_access_recovery_trust_store_precondition"
     action_preflight_notes="Access Recovery trusted verifier raw public-key handoff is not accepted for pilot/operator handoff"
   fi
+  if [[ -z "$action_preflight_failure_kind" ]] \
+     && action_id_is_access_recovery_action_01 "$action_id" \
+     && [[ -n "$action_command" ]] \
+     && command_has_access_recovery_no_evidence_mode_01 "$action_command"; then
+    action_preflight_failure_kind="access_recovery_no_evidence_mode"
+    action_preflight_notes="Access Recovery next-actions must collect evidence; diagnostic --plan-only/--preflight-only modes are not accepted"
+  fi
   if action_id_is_multi_vm_stability_action_01 "$action_id" \
      && [[ -n "$action_command" ]] \
      && command_has_vm_command_source_placeholder_01 "$action_command"; then
@@ -3308,6 +3341,14 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         "$action_command_redacted" \
         "$action_preflight_notes" \
         "$action_preflight_next_operator_action"
+    elif [[ "$action_preflight_failure_kind" == "access_recovery_no_evidence_mode" ]]; then
+      action_preflight_next_operator_action="$(build_access_recovery_operator_inputs_operator_command_01 "$action_id")"
+      {
+        echo "failure_kind=access_recovery_no_evidence_mode"
+        echo "$action_preflight_notes"
+        echo "command: $action_command_redacted"
+        echo "next_operator_action: $action_preflight_next_operator_action"
+      } >"$action_log"
     else
       action_preflight_next_operator_action="$(build_profile_default_gate_subject_operator_command)"
       write_profile_default_gate_subject_precondition_log \

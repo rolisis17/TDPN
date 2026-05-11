@@ -420,11 +420,6 @@ if [[ -s "$ca_file" && -s "$cert_file" ]]; then
   else
     record_check "node_cert_server_auth" "fail" "node certificate missing serverAuth usage"
   fi
-  if cert_verifies_with_purpose "$ca_file" "$cert_file" "sslclient"; then
-    record_check "node_cert_client_auth" "ok" "node certificate allows client authentication"
-  else
-    record_check "node_cert_client_auth" "fail" "node certificate missing clientAuth usage"
-  fi
   if cert_not_expiring "$cert_file" "$days_min"; then
     record_check "node_cert_expiry" "ok" "node certificate remains valid for at least ${days_min} day(s)"
   else
@@ -433,7 +428,6 @@ if [[ -s "$ca_file" && -s "$cert_file" ]]; then
 else
   record_check "node_cert_chain" "fail" "cannot verify certificate chain because ca.crt or node.crt is missing"
   record_check "node_cert_server_auth" "fail" "cannot verify serverAuth usage because ca.crt or node.crt is missing"
-  record_check "node_cert_client_auth" "fail" "cannot verify clientAuth usage because ca.crt or node.crt is missing"
   record_check "node_cert_expiry" "fail" "cannot verify expiry because node.crt is missing"
 fi
 

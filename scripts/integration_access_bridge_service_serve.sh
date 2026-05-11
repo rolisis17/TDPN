@@ -195,6 +195,218 @@ if ! jq -e '
   exit 1
 fi
 
+FAKE_CURL_DIR="$TMP_DIR/fake-curl-bin"
+mkdir -p "$FAKE_CURL_DIR"
+cat >"$FAKE_CURL_DIR/curl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+scenario="${ACCESS_BRIDGE_FAKE_CURL_SCENARIO:-app_403}"
+out_file=""
+headers_file=""
+write_out=""
+has_cert="0"
+url=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o)
+      out_file="${2:-}"
+      shift 2
+      ;;
+    -D)
+      headers_file="${2:-}"
+      shift 2
+      ;;
+    -w)
+      write_out="${2:-}"
+      shift 2
+      ;;
+    --cert)
+      has_cert="1"
+      shift 2
+      ;;
+    --cacert|--key|--config|-H|-d|-X)
+      shift 2
+      ;;
+    -s|-S|-f|-sS|-fsS)
+      shift
+      ;;
+    --*)
+      shift
+      ;;
+    *)
+      url="$1"
+      shift
+      ;;
+  esac
+done
+
+write_body() {
+  local body="${1:-}"
+  if [[ -n "$out_file" ]]; then
+    printf '%s' "$body" >"$out_file"
+  else
+    printf '%s' "$body"
+  fi
+}
+
+emit_write_out() {
+  local http_code="$1"
+  local ssl_verify_result="${2:-0}"
+  local remote_ip="${3:-203.0.113.10}"
+  local remote_port="${4:-443}"
+  local http_version="${5:-1.1}"
+  local time_connect="${6:-0.001000}"
+  local time_appconnect="${7:-0.002000}"
+  local rendered="$write_out"
+  rendered="${rendered//\%\{http_code\}/$http_code}"
+  rendered="${rendered//\%\{ssl_verify_result\}/$ssl_verify_result}"
+  rendered="${rendered//\%\{remote_ip\}/$remote_ip}"
+  rendered="${rendered//\%\{remote_port\}/$remote_port}"
+  rendered="${rendered//\%\{http_version\}/$http_version}"
+  rendered="${rendered//\%\{time_connect\}/$time_connect}"
+  rendered="${rendered//\%\{time_appconnect\}/$time_appconnect}"
+  rendered="${rendered//\%\{url_effective\}/$url}"
+  printf '%s' "$rendered"
+}
+
+if [[ "$url" == */health ]]; then
+  if [[ "$has_cert" == "1" ]]; then
+    write_body '{"status":"ok","decision":{"helper_id":"helper-fake","organization_id":"org-fake","registry_id":"registry-fake"},"config_sha256":"fake-config-sha256"}'
+    emit_write_out "200"
+    exit 0
+  fi
+  if [[ "$scenario" == "proxy_496" ]]; then
+    write_body '{"error":"client certificate required"}'
+    emit_write_out "496"
+    exit 0
+  fi
+  if [[ "$scenario" == "tls_000" ]]; then
+    write_body ''
+    printf 'curl: (56) OpenSSL SSL_read: tlsv13 alert certificate required, errno 0\n' >&2
+    emit_write_out "000" "0" "" ""
+    exit 56
+  fi
+  write_body '{"error":"mTLS required"}'
+  emit_write_out "403"
+  exit 0
+fi
+
+if [[ "$url" == */bridge/helper-web ]]; then
+  if [[ -n "$headers_file" ]]; then
+    {
+      printf 'HTTP/1.1 200 OK\r\n'
+      printf 'Referrer-Policy: no-referrer\r\n'
+      printf 'Cache-Control: no-store\r\n'
+      printf 'X-Content-Type-Options: nosniff\r\n'
+      printf '\r\n'
+    } >"$headers_file"
+    write_body '{"status":"ok"}'
+    emit_write_out "200"
+  else
+    write_body '{"status":"denied"}'
+    emit_write_out "401"
+  fi
+  exit 0
+fi
+
+if [[ "$url" == */abuse ]]; then
+  write_body '{"status":"accepted"}'
+  emit_write_out "202"
+  exit 0
+fi
+
+write_body '{"status":"not_found"}'
+emit_write_out "404"
+EOF
+chmod +x "$FAKE_CURL_DIR/curl"
+FAKE_CERT="$TMP_DIR/fake-client.crt"
+FAKE_KEY="$TMP_DIR/fake-client.key"
+FAKE_CA="$TMP_DIR/fake-ca.crt"
+printf 'fake cert\n' >"$FAKE_CERT"
+printf 'fake key\n' >"$FAKE_KEY"
+printf 'fake ca\n' >"$FAKE_CA"
+
+set +e
+ACCESS_BRIDGE_FAKE_CURL_SCENARIO=app_403 PATH="$FAKE_CURL_DIR:$PATH" bash ./scripts/access_bridge_service_smoke.sh \
+  --base-url "https://bridge-fake.example.test" \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --cacert "$FAKE_CA" \
+  --client-cert "$FAKE_CERT" \
+  --client-key "$FAKE_KEY" \
+  --require-mtls 1 \
+  --summary-json "$TMP_DIR/operator-smoke-require-mtls-app-403-summary.json" \
+  --abuse-message "operator smoke require mtls app 403" >/dev/null 2>"$TMP_DIR/operator-smoke-require-mtls-app-403.stderr"
+require_mtls_app_403_rc=$?
+set -e
+if [[ "$require_mtls_app_403_rc" -eq 0 ]]; then
+  echo "access bridge service serve integration failed: app-level 403 mTLS text unexpectedly proved missing-client rejection"
+  cat "$TMP_DIR/operator-smoke-require-mtls-app-403-summary.json"
+  exit 1
+fi
+if ! jq -e '
+    .status == "fail"
+    and .transport.https == true
+    and .transport.tls.verified == true
+    and .transport.mtls.required == true
+    and .transport.mtls.missing_client_certificate_health_http_status == "403"
+    and .transport.mtls.missing_client_certificate_rejection_signal == false
+    and .transport.mtls.missing_client_certificate_rejected == false
+    and (.notes | contains("missing-client-certificate rejection was not proven"))
+  ' "$TMP_DIR/operator-smoke-require-mtls-app-403-summary.json" >/dev/null; then
+  echo "access bridge service serve integration failed: app-level 403 mTLS summary mismatch"
+  cat "$TMP_DIR/operator-smoke-require-mtls-app-403-summary.json"
+  exit 1
+fi
+
+ACCESS_BRIDGE_FAKE_CURL_SCENARIO=proxy_496 PATH="$FAKE_CURL_DIR:$PATH" bash ./scripts/access_bridge_service_smoke.sh \
+  --base-url "https://bridge-fake.example.test" \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --cacert "$FAKE_CA" \
+  --client-cert "$FAKE_CERT" \
+  --client-key "$FAKE_KEY" \
+  --require-mtls 1 \
+  --summary-json "$TMP_DIR/operator-smoke-require-mtls-proxy-496-summary.json" \
+  --abuse-message "operator smoke require mtls proxy 496" >/dev/null
+if ! jq -e '
+    .status == "pass"
+    and .transport.mtls.missing_client_certificate_health_http_status == "496"
+    and .transport.mtls.missing_client_certificate_rejection_signal == true
+    and .transport.mtls.missing_client_certificate_rejected == true
+    and .transport.mtls.client_certificate_used == true
+  ' "$TMP_DIR/operator-smoke-require-mtls-proxy-496-summary.json" >/dev/null; then
+  echo "access bridge service serve integration failed: proxy-native 496 mTLS summary mismatch"
+  cat "$TMP_DIR/operator-smoke-require-mtls-proxy-496-summary.json"
+  exit 1
+fi
+
+ACCESS_BRIDGE_FAKE_CURL_SCENARIO=tls_000 PATH="$FAKE_CURL_DIR:$PATH" bash ./scripts/access_bridge_service_smoke.sh \
+  --base-url "https://bridge-fake.example.test" \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --cacert "$FAKE_CA" \
+  --client-cert "$FAKE_CERT" \
+  --client-key "$FAKE_KEY" \
+  --require-mtls 1 \
+  --summary-json "$TMP_DIR/operator-smoke-require-mtls-tls-000-summary.json" \
+  --abuse-message "operator smoke require mtls tls 000" >/dev/null
+if ! jq -e '
+    .status == "pass"
+    and .transport.mtls.missing_client_certificate_health_http_status == "000"
+    and .transport.mtls.missing_client_certificate_health_curl_rc == 56
+    and (.transport.mtls.missing_client_certificate_health_curl_error | contains("alert certificate required"))
+    and .transport.mtls.missing_client_certificate_rejection_signal == true
+    and .transport.mtls.missing_client_certificate_rejected == true
+    and .transport.mtls.client_certificate_used == true
+  ' "$TMP_DIR/operator-smoke-require-mtls-tls-000-summary.json" >/dev/null; then
+  echo "access bridge service serve integration failed: TLS-layer 000 mTLS summary mismatch"
+  cat "$TMP_DIR/operator-smoke-require-mtls-tls-000-summary.json"
+  exit 1
+fi
+
 bash ./scripts/access_bridge_deployment_evidence.sh \
   --base-url "$BASE_URL" \
   --path-id helper-web \

@@ -411,7 +411,7 @@ write_host_node_san_config() {
     echo ""
     echo "[req_ext]"
     echo "subjectAltName = @alt_names"
-    echo "extendedKeyUsage = serverAuth,clientAuth"
+    echo "extendedKeyUsage = serverAuth"
     echo ""
     echo "[alt_names]"
     local san

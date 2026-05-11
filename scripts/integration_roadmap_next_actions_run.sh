@@ -595,6 +595,15 @@ JSON
 }
 JSON
     ;;
+  real_helper_plan_only_arg)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"real_helper_https_evidence","label":"Real helper HTTPS evidence","command":"bash \"$PLAN_ENV_CHECK\" --plan-only 1","reason":"test-plan-only-arg-rejected","requires_real_hosts":true,"local_pack_only":false}
+  ]
+}
+JSON
+    ;;
   access_recovery_trust_store_placeholder)
     cat >"$summary_json" <<JSON
 {
@@ -1515,6 +1524,48 @@ if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
 ' "$SUMMARY_ACCESS_RECOVERY_PLAN_ENV_ISOLATION" >/dev/null; then
   echo "Access Recovery plan-only env isolation summary mismatch"
   cat "$SUMMARY_ACCESS_RECOVERY_PLAN_ENV_ISOLATION"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery real-helper actions reject diagnostic plan-only commands"
+SUMMARY_ACCESS_RECOVERY_PLAN_ONLY_ARG="$TMP_DIR/summary_access_recovery_plan_only_arg.json"
+REPORTS_ACCESS_RECOVERY_PLAN_ONLY_ARG="$TMP_DIR/reports_access_recovery_plan_only_arg"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=real_helper_plan_only_arg \
+PLAN_ENV_CHECK="$PLAN_ENV_CHECK" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_PLAN_ONLY_ARG" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_PLAN_ONLY_ARG" \
+  --include-id real_helper_https_evidence \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_plan_only_arg.log" 2>&1
+access_recovery_plan_only_arg_rc=$?
+set -e
+if [[ "$access_recovery_plan_only_arg_rc" != "2" ]]; then
+  echo "expected Access Recovery plan-only action hard-fail rc=2, got rc=$access_recovery_plan_only_arg_rc"
+  cat "$TMP_DIR/access_recovery_plan_only_arg.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_PLAN_ONLY_ARG" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_PLAN_ONLY_ARG"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .actions[0].id == "real_helper_https_evidence"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "access_recovery_no_evidence_mode"
+  and (.actions[0].notes | contains("must collect evidence"))
+  and (.actions[0].command | contains("--plan-only"))
+' "$SUMMARY_ACCESS_RECOVERY_PLAN_ONLY_ARG" >/dev/null; then
+  echo "Access Recovery plan-only action precondition summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_PLAN_ONLY_ARG"
+  exit 1
+fi
+if ! grep -Fq "failure_kind=access_recovery_no_evidence_mode" "$REPORTS_ACCESS_RECOVERY_PLAN_ONLY_ARG/action_1_real_helper_https_evidence.log"; then
+  echo "Access Recovery plan-only action log missing failure kind"
+  cat "$REPORTS_ACCESS_RECOVERY_PLAN_ONLY_ARG/action_1_real_helper_https_evidence.log"
   exit 1
 fi
 

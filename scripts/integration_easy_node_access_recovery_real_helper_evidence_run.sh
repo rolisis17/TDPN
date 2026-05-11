@@ -192,6 +192,7 @@ pilot_handoff_ready="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_READY:-true}"
 trusted_provenance="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_TRUSTED:-true}"
 binding_mode="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_BINDING_MODE:-match}"
 identity_mode="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_IDENTITY_MODE:-match}"
+schema_minor="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR:-3}"
 sha256_value() {
   sha256sum "$1" | awk '{print $1}'
 }
@@ -283,11 +284,12 @@ jq -n \
   --arg registry_id "$registry_id" \
   --arg provenance_org_id "$provenance_org_id" \
   --arg trusted_org_id "$trusted_org_id" \
+  --argjson schema_minor "$schema_minor" \
   --argjson pilot_handoff_ready "$pilot_handoff_ready" \
   --argjson trusted_provenance "$trusted_provenance" \
   '{
     version: 1,
-    schema: {"id": "access_bridge_pilot_evidence_bundle_verify_summary", "major": 1, "minor": 2},
+    schema: {"id": "access_bridge_pilot_evidence_bundle_verify_summary", "major": 1, "minor": $schema_minor},
     status: "pass",
     rc: 0,
     pilot_handoff_ready: $pilot_handoff_ready,
@@ -924,12 +926,64 @@ jq -e '
   and .mode.evidence_generated == true
   and .mode.evidence_status == "collected"
   and .child_summaries.host_install_check.status == "pass"
+  and .child_summaries.verifier.schema.minor == 3
   and (.artifacts.bundle_service_smoke_summary_json | endswith("/bundle/access_bridge_service_smoke_summary.json"))
   and (.artifacts.bundle_deployment_evidence_summary_json | endswith("/bundle/access_bridge_deployment_evidence_summary.json"))
   and (.artifacts.bundle_host_install_check_summary_json | endswith("/bundle/access_bridge_host_install_check_summary.json"))
   and .readiness.trusted_verifier_pilot_handoff_ready == true
   and .readiness.roadmap_access_recovery_pilot_handoff_ready == true
 ' "$TMP_DIR/run-summary.json" >/dev/null
+
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR=2 \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/verifier-schema-minor-2-summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/verifier-schema-minor-2.log" 2>&1
+verifier_schema_minor_2_rc=$?
+set -e
+if [[ "$verifier_schema_minor_2_rc" -eq 0 ]]; then
+  echo "expected verifier receipt schema minor 2 to fail"
+  cat "$TMP_DIR/verifier-schema-minor-2-summary.json"
+  exit 1
+fi
+if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
+  echo "expected host-check, bundle, and verifier only when verifier receipt schema is too old"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! grep -Fq -- "Trusted verifier receipt did not prove current real helper HTTPS evidence binding" "$TMP_DIR/verifier-schema-minor-2-summary.json"; then
+  echo "expected verifier schema minor failure summary note"
+  cat "$TMP_DIR/verifier-schema-minor-2-summary.json"
+  exit 1
+fi
+if ! grep -Fq -- "schema minor is too old for trusted pilot receipt semantics" "$TMP_DIR/verifier-schema-minor-2.log"; then
+  echo "expected verifier schema minor floor validation error"
+  cat "$TMP_DIR/verifier-schema-minor-2.log"
+  exit 1
+fi
+jq -e '
+  .status == "fail"
+  and .stage == "verify"
+  and .child_summaries.verifier.schema.minor == 2
+  and .readiness.trusted_verifier_pilot_handoff_ready == true
+' "$TMP_DIR/verifier-schema-minor-2-summary.json" >/dev/null
 
 : >"$CAPTURE"
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \

@@ -345,6 +345,10 @@ if ! jq -e '.status=="pass" and .failures==0' "$tmp_dir/provider_bundle_verify.j
   cat "$tmp_dir/provider_bundle_verify.json"
   exit 1
 fi
+if openssl verify -purpose sslclient -CAfile "$authority_bundle/ca.crt" "$authority_bundle/node.crt" >/dev/null 2>&1; then
+  echo "expected generated node.crt to be server-only, not clientAuth-capable"
+  exit 1
+fi
 
 wrong_host_log="$tmp_dir/wrong_host_bundle_verify.log"
 if ./scripts/prod_mtls_bundle_verify.sh \
@@ -390,16 +394,13 @@ openssl x509 -req \
   -extfile "$server_only_bundle/server_only.cnf" \
   -extensions req_ext >/dev/null 2>&1
 server_only_log="$tmp_dir/server_only_bundle_verify.log"
-if ./scripts/prod_mtls_bundle_verify.sh \
+./scripts/prod_mtls_bundle_verify.sh \
   --bundle-dir "$server_only_bundle" \
   --host authority.prod.privacynode.net \
-  --summary-json "$tmp_dir/server_only_bundle_verify.json" >"$server_only_log" 2>&1; then
-  echo "expected bundle verify to fail when node.crt is missing clientAuth"
+  --summary-json "$tmp_dir/server_only_bundle_verify.json" >"$server_only_log" 2>&1
+if ! jq -e '.status=="pass" and .failures==0' "$tmp_dir/server_only_bundle_verify.json" >/dev/null; then
+  echo "expected server-only node.crt bundle verify to pass"
   cat "$server_only_log"
-  exit 1
-fi
-if ! jq -e '.status=="fail" and (.blockers[]? | select(.code=="node_cert_client_auth"))' "$tmp_dir/server_only_bundle_verify.json" >/dev/null; then
-  echo "expected server-only bundle verify summary to identify missing node clientAuth"
   cat "$tmp_dir/server_only_bundle_verify.json"
   exit 1
 fi
