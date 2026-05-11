@@ -41,12 +41,18 @@ MISMATCHED_PROVENANCE_PATH_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_b
 PRIVATE_KEY_FILE="$TMP_DIR/provenance-private.key"
 PUBLIC_KEY_FILE="$TMP_DIR/provenance-public.key"
 TRUST_STORE="$TMP_DIR/provenance-trust-store.json"
+OTHER_PRIVATE_KEY_FILE="$TMP_DIR/other-provenance-private.key"
+OTHER_PUBLIC_KEY_FILE="$TMP_DIR/other-provenance-public.key"
+OTHER_TRUST_STORE="$TMP_DIR/other-provenance-trust-store.json"
+OTHER_PROVENANCE_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_other_org.provenance.json"
 DEMO_TRUST_STORE="$TMP_DIR/.easy-node-logs/access-recovery-demo/recovery-trust.json"
 DEMO_MARKED_TRUST_STORE="$TMP_DIR/copied-demo-marker-trust-store.json"
 mkdir -p "$BUNDLE_DIR/bridge-deploy-pack"
 mkdir -p "$(dirname "$DEMO_TRUST_STORE")"
 go run ./cmd/gpmrecover gen --private-key-out "$PRIVATE_KEY_FILE" --public-key-out "$PUBLIC_KEY_FILE" >/dev/null
 go run ./cmd/gpmrecover trust-add --trust-store "$TRUST_STORE" --org-id pilot-org --org-name "Pilot Org" --public-key-file "$PUBLIC_KEY_FILE" >/dev/null
+go run ./cmd/gpmrecover gen --private-key-out "$OTHER_PRIVATE_KEY_FILE" --public-key-out "$OTHER_PUBLIC_KEY_FILE" >/dev/null
+go run ./cmd/gpmrecover trust-add --trust-store "$OTHER_TRUST_STORE" --org-id other-org --org-name "Other Org" --public-key-file "$OTHER_PUBLIC_KEY_FILE" >/dev/null
 cp "$TRUST_STORE" "$DEMO_TRUST_STORE"
 jq '.trusted_keys[0].source = "generated demo bundle"' "$TRUST_STORE" >"$DEMO_MARKED_TRUST_STORE"
 NOW_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -350,8 +356,15 @@ if ! jq -e '
   and .trusted_provenance.checked == true
   and .trusted_provenance.source == "trust_store"
   and .trusted_provenance.trusted == true
+  and .trusted_provenance.organization_id == "pilot-org"
+  and .trusted_provenance.trusted_org_id == "pilot-org"
   and .trusted_provenance.evidence_scope == "real_helper_https"
   and .trusted_provenance.summary_evidence_scope == "real_helper_https"
+  and .pilot_handoff_criteria.source_helper_id_present == true
+  and .pilot_handoff_criteria.source_organization_id_present == true
+  and .pilot_handoff_criteria.source_registry_id_present == true
+  and .pilot_handoff_criteria.provenance_organization_matches_evidence == true
+  and .pilot_handoff_criteria.trusted_organization_matches_evidence == true
   and (.inputs.trust_store_sha256 | type == "string" and length == 64)
   and .evidence_binding.base_url == "https://recovery-helper.gpm-pilot.net"
   and .evidence_binding.helper_id == "helper-pilot"
@@ -365,6 +378,140 @@ if ! jq -e '
 ' "$VERIFY_SUMMARY_JSON" >/dev/null; then
   echo "access bridge pilot evidence bundle verifier integration failed: verification summary did not prove trusted provenance"
   cat "$VERIFY_SUMMARY_JSON"
+  exit 1
+fi
+
+OTHER_ORG_ROOT="$TMP_DIR/other-org-root"
+OTHER_ORG_DIR="$OTHER_ORG_ROOT/$(basename "$BUNDLE_DIR")"
+OTHER_ORG_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_other_org_summary.json"
+OTHER_ORG_TAR="$TMP_DIR/other-org.tar.gz"
+OTHER_ORG_SHA="${OTHER_ORG_TAR}.sha256"
+mkdir -p "$OTHER_ORG_ROOT"
+cp -R "$BUNDLE_DIR" "$OTHER_ORG_DIR"
+jq \
+  --arg bundle_dir "$OTHER_ORG_DIR" \
+  --arg bundle_tar "$OTHER_ORG_TAR" \
+  --arg bundle_tar_sha256_file "$OTHER_ORG_SHA" \
+  --arg manifest_sha256 "$OTHER_ORG_DIR/manifest.sha256" \
+  --arg summary_json "$OTHER_ORG_SUMMARY_JSON" \
+  --arg bundled_summary_json "$OTHER_ORG_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
+  --arg provenance_json "$OTHER_PROVENANCE_JSON" \
+  --arg smoke_summary_json "$OTHER_ORG_DIR/access_bridge_service_smoke_summary.json" \
+  --arg deployment_summary_json "$OTHER_ORG_DIR/access_bridge_deployment_evidence_summary.json" \
+  --arg host_summary_json "$OTHER_ORG_DIR/access_bridge_host_install_check_summary.json" \
+  '.artifacts.bundle_dir = $bundle_dir
+    | .artifacts.bundle_tar = $bundle_tar
+    | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file
+    | .artifacts.manifest_sha256 = $manifest_sha256
+    | .artifacts.summary_json = $summary_json
+    | .artifacts.bundled_summary_json = $bundled_summary_json
+    | .artifacts.provenance_json = $provenance_json
+    | .provenance.sidecar_json = $provenance_json
+    | .artifacts.smoke_summary_json = $smoke_summary_json
+    | .artifacts.deployment_evidence_summary_json = $deployment_summary_json
+    | .artifacts.host_install_check_summary_json = $host_summary_json' \
+  "$SUMMARY_JSON" >"$OTHER_ORG_SUMMARY_JSON"
+cp "$OTHER_ORG_SUMMARY_JSON" "$OTHER_ORG_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+(
+  cd "$OTHER_ORG_DIR"
+  find . -type f -print \
+    | sed 's|^\./||' \
+    | grep -v '^manifest\.sha256$' \
+    | LC_ALL=C sort \
+    | while IFS= read -r rel; do
+        sha256sum "$rel"
+      done
+) >"$OTHER_ORG_DIR/manifest.sha256"
+tar -czf "$OTHER_ORG_TAR" -C "$OTHER_ORG_ROOT" "$(basename "$BUNDLE_DIR")"
+printf '%s  %s\n' "$(sha256sum "$OTHER_ORG_TAR" | awk '{print $1}')" "$(basename "$OTHER_ORG_TAR")" >"$OTHER_ORG_SHA"
+go run ./cmd/gpmrecover provenance-sign \
+  --summary-json "$OTHER_ORG_SUMMARY_JSON" \
+  --bundle-tar "$OTHER_ORG_TAR" \
+  --bundle-tar-sha256-file "$OTHER_ORG_SHA" \
+  --private-key-file "$OTHER_PRIVATE_KEY_FILE" \
+  --org-id other-org \
+  --org-name "Other Org" \
+  --out "$OTHER_PROVENANCE_JSON" >/dev/null
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$OTHER_ORG_SUMMARY_JSON" \
+  --provenance-json "$OTHER_PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$OTHER_TRUST_STORE" \
+  --verification-summary-json "$TMP_DIR/trusted-policy-other-org-summary.json" >"$TMP_DIR/trusted-policy-other-org.log" 2>&1
+other_org_rc=$?
+set -e
+if [[ "$other_org_rc" -eq 0 ]] || ! grep -Fq 'trusted pilot provenance organization_id must match evidence organization_id' "$TMP_DIR/trusted-policy-other-org.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted provenance from a different trusted organization"
+  cat "$TMP_DIR/trusted-policy-other-org.log"
+  exit 1
+fi
+
+MISSING_ORG_ROOT="$TMP_DIR/missing-org-root"
+MISSING_ORG_DIR="$MISSING_ORG_ROOT/$(basename "$BUNDLE_DIR")"
+MISSING_ORG_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_missing_org_summary.json"
+MISSING_ORG_PROVENANCE_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_missing_org.provenance.json"
+MISSING_ORG_TAR="$TMP_DIR/missing-org.tar.gz"
+MISSING_ORG_SHA="${MISSING_ORG_TAR}.sha256"
+mkdir -p "$MISSING_ORG_ROOT"
+cp -R "$BUNDLE_DIR" "$MISSING_ORG_DIR"
+jq \
+  --arg bundle_dir "$MISSING_ORG_DIR" \
+  --arg bundle_tar "$MISSING_ORG_TAR" \
+  --arg bundle_tar_sha256_file "$MISSING_ORG_SHA" \
+  --arg manifest_sha256 "$MISSING_ORG_DIR/manifest.sha256" \
+  --arg summary_json "$MISSING_ORG_SUMMARY_JSON" \
+  --arg bundled_summary_json "$MISSING_ORG_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
+  --arg provenance_json "$MISSING_ORG_PROVENANCE_JSON" \
+  --arg smoke_summary_json "$MISSING_ORG_DIR/access_bridge_service_smoke_summary.json" \
+  --arg deployment_summary_json "$MISSING_ORG_DIR/access_bridge_deployment_evidence_summary.json" \
+  --arg host_summary_json "$MISSING_ORG_DIR/access_bridge_host_install_check_summary.json" \
+  '.artifacts.bundle_dir = $bundle_dir
+    | .artifacts.bundle_tar = $bundle_tar
+    | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file
+    | .artifacts.manifest_sha256 = $manifest_sha256
+    | .expected_identity.organization_id = ""
+    | .artifacts.summary_json = $summary_json
+    | .artifacts.bundled_summary_json = $bundled_summary_json
+    | .artifacts.provenance_json = $provenance_json
+    | .provenance.sidecar_json = $provenance_json
+    | .artifacts.smoke_summary_json = $smoke_summary_json
+    | .artifacts.deployment_evidence_summary_json = $deployment_summary_json
+    | .artifacts.host_install_check_summary_json = $host_summary_json' \
+  "$SUMMARY_JSON" >"$MISSING_ORG_SUMMARY_JSON"
+cp "$MISSING_ORG_SUMMARY_JSON" "$MISSING_ORG_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+(
+  cd "$MISSING_ORG_DIR"
+  find . -type f -print \
+    | sed 's|^\./||' \
+    | grep -v '^manifest\.sha256$' \
+    | LC_ALL=C sort \
+    | while IFS= read -r rel; do
+        sha256sum "$rel"
+      done
+) >"$MISSING_ORG_DIR/manifest.sha256"
+tar -czf "$MISSING_ORG_TAR" -C "$MISSING_ORG_ROOT" "$(basename "$BUNDLE_DIR")"
+printf '%s  %s\n' "$(sha256sum "$MISSING_ORG_TAR" | awk '{print $1}')" "$(basename "$MISSING_ORG_TAR")" >"$MISSING_ORG_SHA"
+go run ./cmd/gpmrecover provenance-sign \
+  --summary-json "$MISSING_ORG_SUMMARY_JSON" \
+  --bundle-tar "$MISSING_ORG_TAR" \
+  --bundle-tar-sha256-file "$MISSING_ORG_SHA" \
+  --private-key-file "$PRIVATE_KEY_FILE" \
+  --org-id pilot-org \
+  --org-name "Pilot Org" \
+  --out "$MISSING_ORG_PROVENANCE_JSON" >/dev/null
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$MISSING_ORG_SUMMARY_JSON" \
+  --provenance-json "$MISSING_ORG_PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$TMP_DIR/trusted-policy-missing-org-summary.json" >"$TMP_DIR/trusted-policy-missing-org.log" 2>&1
+missing_org_rc=$?
+set -e
+if [[ "$missing_org_rc" -eq 0 ]] || ! grep -Fq 'trusted pilot provenance requires non-empty expected_identity.organization_id' "$TMP_DIR/trusted-policy-missing-org.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted missing expected organization identity"
+  cat "$TMP_DIR/trusted-policy-missing-org.log"
   exit 1
 fi
 

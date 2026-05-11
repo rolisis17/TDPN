@@ -379,6 +379,9 @@ validate_trusted_bundled_evidence_semantics() {
       | ($host[0]) as $h
       | [
           if ($expected_base_url | test("^https://"; "i") | not) then "trusted pilot provenance requires summary inputs.base_url to be HTTPS" else empty end,
+          if ($expected_helper_id == "") then "trusted pilot provenance requires non-empty expected_identity.helper_id" else empty end,
+          if ($expected_organization_id == "") then "trusted pilot provenance requires non-empty expected_identity.organization_id" else empty end,
+          if ($expected_registry_id == "") then "trusted pilot provenance requires non-empty expected_identity.registry_id" else empty end,
           if schema_ok($s; "access_bridge_service_smoke_summary"; 3) | not then "bundled service smoke summary schema is invalid or too old" else empty end,
           if pass_status($s) | not then "bundled service smoke summary status is not pass" else empty end,
           if (($s.base_url // "") != $expected_base_url) then "bundled service smoke base_url does not match bundle summary" else empty end,
@@ -982,7 +985,12 @@ write_verification_summary() {
         and $tar_sha256_checked
         and $trust_store != ""
         and $public_key_file == ""
-        and ($allow_dev_trust_store | not);
+        and ($allow_dev_trust_store | not)
+        and $source_helper_id != ""
+        and $source_organization_id != ""
+        and $source_registry_id != ""
+        and $provenance_organization_id == $source_organization_id
+        and $provenance_trusted_org_id == $source_organization_id;
       def pilot_handoff_ready:
         trusted_pilot_receipt_ready;
       {
@@ -1007,6 +1015,11 @@ write_verification_summary() {
           provenance_source: $provenance_source,
           provenance_evidence_scope: null_if_empty($provenance_evidence_scope),
           summary_evidence_scope: null_if_empty($summary_evidence_scope),
+          source_helper_id_present: ($source_helper_id != ""),
+          source_organization_id_present: ($source_organization_id != ""),
+          source_registry_id_present: ($source_registry_id != ""),
+          provenance_organization_matches_evidence: ($provenance_organization_id != "" and $source_organization_id != "" and $provenance_organization_id == $source_organization_id),
+          trusted_organization_matches_evidence: ($provenance_trusted_org_id != "" and $source_organization_id != "" and $provenance_trusted_org_id == $source_organization_id),
           bundled_child_evidence_semantic_ok: $bundled_child_evidence_semantic_ok,
           trust_store_present: ($trust_store != ""),
           trust_store_sha256_present: ($trust_store_sha256 != ""),
@@ -1437,6 +1450,7 @@ if [[ "$check_provenance" == "1" ]]; then
         issues=$((issues + 1))
       fi
       if [[ "$require_trusted_provenance" == "1" ]]; then
+        summary_expected_organization_id="$(json_string "$summary_json" '.expected_identity.organization_id')"
         if [[ "$provenance_trusted" != "true" ]]; then
           echo "trusted pilot provenance requires trust-store verified provenance"
           issues=$((issues + 1))
@@ -1444,6 +1458,19 @@ if [[ "$check_provenance" == "1" ]]; then
         if [[ "$provenance_evidence_scope" != "real_helper_https" ]]; then
           echo "trusted pilot provenance requires provenance evidence_scope=real_helper_https: actual=${provenance_evidence_scope:-<missing>}"
           issues=$((issues + 1))
+        fi
+        if [[ -z "$summary_expected_organization_id" ]]; then
+          echo "trusted pilot provenance requires non-empty expected_identity.organization_id"
+          issues=$((issues + 1))
+        else
+          if [[ "$provenance_organization_id" != "$summary_expected_organization_id" ]]; then
+            echo "trusted pilot provenance organization_id must match evidence organization_id: evidence=$summary_expected_organization_id provenance=${provenance_organization_id:-<missing>}"
+            issues=$((issues + 1))
+          fi
+          if [[ "$provenance_trusted_org_id" != "$summary_expected_organization_id" ]]; then
+            echo "trusted pilot provenance trusted_org_id must match evidence organization_id: evidence=$summary_expected_organization_id trusted_org=${provenance_trusted_org_id:-<missing>}"
+            issues=$((issues + 1))
+          fi
         fi
       fi
       if [[ "$show_details" == "1" ]]; then

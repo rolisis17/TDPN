@@ -250,6 +250,21 @@ if ! rg -q "three-machine-prod-signoff" "$public_dir/prod_mtls_prep_report.md"; 
   cat "$public_dir/prod_mtls_prep_report.md"
   exit 1
 fi
+for expected_signoff_arg in \
+  "--mtls-ca-file deploy/tls/ca.crt" \
+  "--mtls-client-cert-file deploy/tls/client.crt" \
+  "--mtls-client-key-file deploy/tls/client.key"; do
+  if ! jq -e --arg expected "$expected_signoff_arg" '.next_commands.three_machine_prod_signoff | contains($expected)' "$public_dir/prod_mtls_prep_summary.json" >/dev/null; then
+    echo "missing mTLS signoff argument in summary command: $expected_signoff_arg"
+    cat "$public_dir/prod_mtls_prep_summary.json"
+    exit 1
+  fi
+  if ! rg -Fq -- "$expected_signoff_arg" "$public_dir/prod_mtls_prep_report.md"; then
+    echo "missing mTLS signoff argument in report command: $expected_signoff_arg"
+    cat "$public_dir/prod_mtls_prep_report.md"
+    exit 1
+  fi
+done
 if ! rg -q "do not distribute the CA private key" "$public_dir/prod_mtls_prep_report.md"; then
   echo "missing CA private-key handling warning in report"
   cat "$public_dir/prod_mtls_prep_report.md"

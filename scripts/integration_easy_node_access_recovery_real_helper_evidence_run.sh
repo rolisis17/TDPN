@@ -369,6 +369,41 @@ if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'access-recovery-real-he
   exit 1
 fi
 
+echo "[easy-node-access-recovery-real-helper-evidence-run] child script overrides are diagnostic-only"
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$TRUST_STORE" \
+  --summary-json "$TMP_DIR/override-block-summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/override-block.log" 2>&1
+override_block_rc=$?
+set -e
+if [[ "$override_block_rc" -ne 2 ]] || ! grep -Fq "override is disabled for real helper evidence" "$TMP_DIR/override-block.log"; then
+  echo "expected child script overrides to fail closed unless explicitly allowed"
+  cat "$TMP_DIR/override-block.log"
+  exit 1
+fi
+if [[ -s "$CAPTURE" ]]; then
+  echo "blocked child script override should not invoke fake child scripts"
+  cat "$CAPTURE"
+  exit 1
+fi
+export ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_ALLOW_SCRIPT_OVERRIDES=1
+
 set +e
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
 ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \

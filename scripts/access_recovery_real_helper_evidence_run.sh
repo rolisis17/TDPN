@@ -36,6 +36,7 @@ summary_json=""
 report_md=""
 print_summary_json="${ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_PRINT_SUMMARY_JSON:-1}"
 print_child_json="0"
+allow_child_script_overrides="${ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_ALLOW_SCRIPT_OVERRIDES:-0}"
 
 usage() {
   cat <<'USAGE'
@@ -62,6 +63,7 @@ Usage:
     [--roadmap-refresh 0|1] \
     [--roadmap-summary-json FILE] \
     [--roadmap-report-md FILE] \
+    [--allow-child-script-overrides 0|1] \
     [--summary-json FILE] \
     [--report-md FILE] \
     [--print-summary-json 0|1] \
@@ -77,6 +79,9 @@ Purpose:
 This wrapper is intentionally stricter than local rehearsal helpers. It refuses
 placeholder values, loopback/private-looking helper URLs, missing trust stores,
 and unsigned provenance inputs before running the evidence tools.
+
+Child script path overrides are disabled by default. Use
+--allow-child-script-overrides 1 only for integration tests or diagnostics.
 USAGE
 }
 
@@ -553,6 +558,12 @@ while [[ $# -gt 0 ]]; do
       print_child_json="$2"
       shift 2
       ;;
+    --allow-child-script-overrides)
+      require_value_or_die "$1" "${2:-}"
+      bool_arg_or_die "$1" "$2"
+      allow_child_script_overrides="$2"
+      shift 2
+      ;;
     *)
       echo "unknown argument: $1" >&2
       usage >&2
@@ -810,6 +821,21 @@ if [[ -n "$client_key" && ! -f "$client_key" ]]; then
 fi
 if [[ -n "$client_cert" && -z "$client_key" || -z "$client_cert" && -n "$client_key" ]]; then
   fail_preflight "--client-cert and --client-key must be supplied together"
+fi
+
+if [[ "$allow_child_script_overrides" != "0" && "$allow_child_script_overrides" != "1" ]]; then
+  fail_preflight "--allow-child-script-overrides must be 0 or 1"
+fi
+if [[ "$allow_child_script_overrides" != "1" ]]; then
+  for override_var in \
+    ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT \
+    ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT \
+    ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT \
+    ROADMAP_PROGRESS_REPORT_SCRIPT; do
+    if [[ -n "${!override_var:-}" ]]; then
+      fail_preflight "${override_var} override is disabled for real helper evidence; pass --allow-child-script-overrides 1 only for integration tests or diagnostics"
+    fi
+  done
 fi
 
 host_install_check_script="${ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT:-$ROOT_DIR/scripts/access_bridge_host_install_check.sh}"

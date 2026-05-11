@@ -375,6 +375,9 @@ THREE_MACHINE_PROD_SIGNOFF_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
   --issuer-url https://198.51.100.10:8082 \
   --entry-url https://198.51.100.10:8083 \
   --exit-url https://203.0.113.20:8084 \
+  --mtls-ca-file deploy/tls/ca.crt \
+  --mtls-client-cert-file deploy/tls/client.crt \
+  --mtls-client-key-file deploy/tls/client.key \
   --pre-real-host-readiness 1 \
   --print-summary-json 1 >/tmp/integration_three_machine_prod_signoff_ok.log 2>&1
 
@@ -405,6 +408,9 @@ if ! grep -F -- '--signoff-check 1' <<<"$line_success" >/dev/null; then
   exit 1
 fi
 for forced_arg in \
+  '--mtls-ca-file deploy/tls/ca.crt' \
+  '--mtls-client-cert-file deploy/tls/client.crt' \
+  '--mtls-client-key-file deploy/tls/client.key' \
   '--preflight-check 1' \
   '--bundle-verify-check 1' \
   '--signoff-require-full-sequence 1' \
