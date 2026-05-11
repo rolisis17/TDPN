@@ -60,7 +60,7 @@ jq -n \
   --arg generated_at_utc "$NOW_UTC" \
   '{
     version: 1,
-    schema: {id: "access_bridge_service_smoke_summary", major: 1, minor: 4},
+    schema: {id: "access_bridge_service_smoke_summary", major: 1, minor: 5},
     generated_at_utc: $generated_at_utc,
     status: "pass",
     notes: "Access bridge service smoke passed",
@@ -80,6 +80,7 @@ jq -n \
         client_certificate_used: false,
         missing_client_certificate_rejected: false,
         missing_client_certificate_same_endpoint: false,
+        missing_client_certificate_rejection_signal: false,
         missing_client_certificate_health_http_status: "skipped",
         missing_client_certificate_health_curl_rc: null,
         missing_client_certificate_health_curl_error: "",
@@ -100,7 +101,7 @@ jq -n \
   --arg generated_at_utc "$NOW_UTC" \
   '{
     version: 1,
-    schema: {id: "access_bridge_deployment_evidence_summary", major: 1, minor: 2},
+    schema: {id: "access_bridge_deployment_evidence_summary", major: 1, minor: 4},
     generated_at_utc: $generated_at_utc,
     status: "pass",
     evidence_scope: "real_helper_https",
@@ -127,6 +128,7 @@ jq -n \
       transport_mtls_client_certificate_used: false,
       transport_mtls_missing_client_certificate_rejected: false,
       transport_mtls_missing_client_certificate_same_endpoint: false,
+      transport_mtls_missing_client_certificate_rejection_signal: false,
       path_id: "helper-web",
       config_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
@@ -147,7 +149,8 @@ jq -n \
       mtls_client_certificate_configured: false,
       mtls_client_certificate_used: false,
       mtls_missing_client_certificate_rejected: false,
-      mtls_missing_client_certificate_same_endpoint: false
+      mtls_missing_client_certificate_same_endpoint: false,
+      mtls_missing_client_certificate_rejection_signal: false
     },
     expected_identity: {helper_id: "helper-pilot", organization_id: "pilot-org", registry_id: "registry-pilot"},
     deployed_identity: {helper_id: "helper-pilot", organization_id: "pilot-org", registry_id: "registry-pilot"},
@@ -428,7 +431,7 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
 mtls_required_missing_proof_rc=$?
 set -e
 if [[ "$mtls_required_missing_proof_rc" -eq 0 ]] ||
-  ! grep -Fq -- 'did not prove no-client-certificate rejection' "$TMP_DIR/verify-mtls-required-missing-proof.log"; then
+  ! grep -Eq -- 'did not prove no-client-certificate rejection|did not prove a client-certificate rejection signal' "$TMP_DIR/verify-mtls-required-missing-proof.log"; then
   echo "access bridge pilot evidence bundle verifier integration failed: trusted verifier accepted require-mtls summary without mTLS proof"
   cat "$TMP_DIR/verify-mtls-required-missing-proof.log"
   if [[ -f "$MTLS_REQUIRED_VERIFY_SUMMARY_JSON" ]]; then

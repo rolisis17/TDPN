@@ -865,8 +865,17 @@ cat >"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_SERVICE_SMO
       "ssl_verify_result": "0"
     },
     "mtls": {
+      "required": false,
       "client_certificate_configured": false,
-      "client_certificate_used": false
+      "client_certificate_used": false,
+      "missing_client_certificate_rejected": false,
+      "missing_client_certificate_same_endpoint": false,
+      "missing_client_certificate_rejection_signal": false,
+      "missing_client_certificate_health_http_status": "skipped",
+      "missing_client_certificate_health_curl_rc": null,
+      "missing_client_certificate_health_effective_url": "",
+      "missing_client_certificate_health_remote_ip": "",
+      "missing_client_certificate_health_remote_port": ""
     }
   },
   "health": {
@@ -917,6 +926,17 @@ cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLO
     "bridge_security_headers_ok": true,
     "transport_https": true,
     "transport_tls_verified": true,
+    "transport_mtls_required": false,
+    "transport_mtls_client_certificate_configured": false,
+    "transport_mtls_client_certificate_used": false,
+    "transport_mtls_missing_client_certificate_rejected": false,
+    "transport_mtls_missing_client_certificate_same_endpoint": false,
+    "transport_mtls_missing_client_certificate_rejection_signal": false,
+    "transport_mtls_missing_client_certificate_health_http_status": "skipped",
+    "transport_mtls_missing_client_certificate_health_curl_rc": null,
+    "transport_mtls_missing_client_certificate_health_effective_url": "",
+    "transport_mtls_missing_client_certificate_health_remote_ip": "",
+    "transport_mtls_missing_client_certificate_health_remote_port": "",
     "config_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "summary_json": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"
   },
@@ -934,7 +954,17 @@ cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLO
     "remote_port": "443",
     "http_version": "2",
     "time_appconnect_sec": "0.010000",
-    "mtls_client_certificate_used": false
+    "mtls_required": false,
+    "mtls_client_certificate_configured": false,
+    "mtls_client_certificate_used": false,
+    "mtls_missing_client_certificate_rejected": false,
+    "mtls_missing_client_certificate_same_endpoint": false,
+    "mtls_missing_client_certificate_rejection_signal": false,
+    "mtls_missing_client_certificate_health_http_status": "skipped",
+    "mtls_missing_client_certificate_health_curl_rc": null,
+    "mtls_missing_client_certificate_health_effective_url": "",
+    "mtls_missing_client_certificate_health_remote_ip": "",
+    "mtls_missing_client_certificate_health_remote_port": ""
   },
   "identity_check": {
     "status": "pass",
@@ -1221,6 +1251,8 @@ if ! jq -e \
   and .access_recovery_track.evidence_host_policy.deployment_remote_ip == "8.8.8.8"
   and .access_recovery_track.evidence_host_policy.deployment_remote_ip_public_routable == true
   and .access_recovery_track.evidence_host_policy.real_helper_https_evidence == true
+  and .access_recovery_track.evidence_host_policy.mtls_required == false
+  and .access_recovery_track.evidence_host_policy.required_mtls_evidence == false
   and .access_recovery_track.evidence_host_policy.installed_host_handoff_evidence == false
   and .access_recovery_track.access_bridge_service_smoke.available == true
   and .access_recovery_track.access_bridge_service_smoke.status == "pass"
@@ -1236,6 +1268,10 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_service_smoke.details.transport_tls_verified == true
   and .access_recovery_track.access_bridge_service_smoke.details.transport_ssl_verify_result == "0"
   and .access_recovery_track.access_bridge_service_smoke.details.transport_remote_ip == "8.8.8.8"
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_mtls_required == false
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_mtls_client_certificate_used == false
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_mtls_missing_client_certificate_rejected == false
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_mtls_missing_client_certificate_same_endpoint == false
   and .access_recovery_track.access_bridge_deployment_evidence.available == true
   and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
   and .access_recovery_track.access_bridge_deployment_evidence.source_summary_json == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"'"
@@ -1249,6 +1285,12 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_deployment_evidence.details.transport_tls_verified == true
   and .access_recovery_track.access_bridge_deployment_evidence.details.transport_ssl_verify_result == "0"
   and .access_recovery_track.access_bridge_deployment_evidence.details.transport_remote_ip == "8.8.8.8"
+  and .access_recovery_track.access_bridge_deployment_evidence.details.transport_mtls_required == false
+  and .access_recovery_track.access_bridge_deployment_evidence.details.transport_mtls_client_certificate_used == false
+  and .access_recovery_track.access_bridge_deployment_evidence.details.transport_mtls_missing_client_certificate_rejected == false
+  and .access_recovery_track.access_bridge_deployment_evidence.details.transport_mtls_missing_client_certificate_same_endpoint == false
+  and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_transport_mtls_required == false
+  and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_transport_mtls_client_certificate_used == false
   and .access_recovery_track.access_bridge_host_install.available == true
   and .access_recovery_track.access_bridge_host_install.status == "pass"
   and .access_recovery_track.access_bridge_host_install.source_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
@@ -2711,6 +2753,65 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_semantic_summary.json" >/dev/null; then
   echo "Access Recovery bad service smoke semantic summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_semantic_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery required mTLS smoke proof is fail-closed"
+ACCESS_RECOVERY_BAD_SMOKE_MTLS_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_bad_mtls_summary.json"
+jq '
+  .schema.minor = 4
+  | .transport.mtls.required = true
+  | .transport.mtls.client_certificate_configured = true
+  | .transport.mtls.client_certificate_used = true
+  | .transport.mtls.missing_client_certificate_rejected = false
+  | .transport.mtls.missing_client_certificate_same_endpoint = true
+  | .transport.mtls.missing_client_certificate_rejection_signal = false
+' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_BAD_SMOKE_MTLS_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_BAD_SMOKE_MTLS_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_mtls_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_mtls_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_bad_smoke_mtls.log 2>&1; then
+  echo "expected failure when required Access Recovery mTLS smoke proof is incomplete"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_bad_smoke_mtls.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .access_recovery_evidence_required == true
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.access_bridge_service_smoke.status == "fail"
+  and .access_recovery_track.access_bridge_service_smoke.available == false
+  and .access_recovery_track.access_bridge_service_smoke.semantic_ok == false
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_mtls_required == true
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_mtls_client_certificate_used == true
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_mtls_missing_client_certificate_rejected == false
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_mtls_missing_client_certificate_same_endpoint == true
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_mtls_missing_client_certificate_rejection_signal == false
+  and .access_recovery_track.evidence_host_policy.mtls_required == true
+  and .access_recovery_track.evidence_host_policy.required_mtls_evidence == false
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
+  and .access_recovery_track.access_bridge_host_install.status == "pass"
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_service_smoke"
+  and (.access_recovery_track.recommended_next_action.command | contains("--require-mtls 1"))
+  and (.access_recovery_track.recommended_next_action.command | contains("--cacert MTLS_CA_FILE"))
+  and (.access_recovery_track.recommended_next_action.command | contains("--client-cert MTLS_CLIENT_CERT_FILE"))
+  and (.access_recovery_track.recommended_next_action.command | contains("--client-key MTLS_CLIENT_KEY_FILE"))
+' "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_mtls_summary.json" >/dev/null; then
+  echo "Access Recovery bad required mTLS smoke summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_mtls_summary.json"
+  exit 1
+fi
+if ! grep -Fq 'Access bridge required mTLS evidence: required=true, proven=false' "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_mtls_report.md"; then
+  echo "Access Recovery bad required mTLS report mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_mtls_report.md"
   exit 1
 fi
 

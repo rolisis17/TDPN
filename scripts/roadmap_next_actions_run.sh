@@ -468,12 +468,12 @@ access_recovery_operator_input_value_looks_placeholder_01() {
   value="$(trim "${1:-}")"
   value="$(strip_optional_wrapping_quotes "$value")"
   normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
-  if [[ "$normalized" =~ (^|[^A-Z0-9_])(HELPER_PUBLIC_DNS|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME)([^A-Z0-9_]|$) ]]; then
+  if [[ "$normalized" =~ (^|[^A-Z0-9_])(HELPER_PUBLIC_DNS|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|MTLS_CA_FILE|MTLS_CLIENT_CERT_FILE|MTLS_CLIENT_KEY_FILE)([^A-Z0-9_]|$) ]]; then
     return 0
   fi
   case "$normalized" in
-    "<HELPER_PUBLIC_DNS>"|"<PRIVATE_CODE_FILE>"|"<BRIDGE_SERVICE_CONFIG>"|"<BRIDGE_DEPLOY_PACK>"|"<PROVENANCE_PRIVATE_KEY_FILE>"|"<ORG_ID>"|"<ORG_NAME>"|\
-    "REPLACE_WITH_HELPER_PUBLIC_DNS"|"REPLACE_WITH_PRIVATE_CODE_FILE"|"REPLACE_WITH_BRIDGE_SERVICE_CONFIG"|"REPLACE_WITH_BRIDGE_DEPLOY_PACK"|"REPLACE_WITH_PROVENANCE_PRIVATE_KEY_FILE"|"REPLACE_WITH_ORG_ID"|"REPLACE_WITH_ORG_NAME")
+    "<HELPER_PUBLIC_DNS>"|"<PRIVATE_CODE_FILE>"|"<BRIDGE_SERVICE_CONFIG>"|"<BRIDGE_DEPLOY_PACK>"|"<PROVENANCE_PRIVATE_KEY_FILE>"|"<ORG_ID>"|"<ORG_NAME>"|"<MTLS_CA_FILE>"|"<MTLS_CLIENT_CERT_FILE>"|"<MTLS_CLIENT_KEY_FILE>"|\
+    "REPLACE_WITH_HELPER_PUBLIC_DNS"|"REPLACE_WITH_PRIVATE_CODE_FILE"|"REPLACE_WITH_BRIDGE_SERVICE_CONFIG"|"REPLACE_WITH_BRIDGE_DEPLOY_PACK"|"REPLACE_WITH_PROVENANCE_PRIVATE_KEY_FILE"|"REPLACE_WITH_ORG_ID"|"REPLACE_WITH_ORG_NAME"|"REPLACE_WITH_MTLS_CA_FILE"|"REPLACE_WITH_MTLS_CLIENT_CERT_FILE"|"REPLACE_WITH_MTLS_CLIENT_KEY_FILE")
       return 0
       ;;
   esac
@@ -643,7 +643,7 @@ command_has_access_recovery_operator_input_placeholder_01() {
     while (( idx < token_count )); do
       token="${COMMAND_STRING_ARGV[$idx]}"
       case "$token" in
-        --base-url|--expected-base-url|--public-host|--code-file|--config-json|--deploy-pack-dir|--provenance-private-key-file|--provenance-org-id|--provenance-org-name)
+        --base-url|--expected-base-url|--public-host|--code-file|--config-json|--deploy-pack-dir|--provenance-private-key-file|--provenance-org-id|--provenance-org-name|--cacert|--client-cert|--client-key)
           if (( idx + 1 >= token_count )); then
             return 0
           fi
@@ -654,7 +654,7 @@ command_has_access_recovery_operator_input_placeholder_01() {
           idx=$((idx + 2))
           continue
           ;;
-        --base-url=*|--expected-base-url=*|--public-host=*|--code-file=*|--config-json=*|--deploy-pack-dir=*|--provenance-private-key-file=*|--provenance-org-id=*|--provenance-org-name=*)
+        --base-url=*|--expected-base-url=*|--public-host=*|--code-file=*|--config-json=*|--deploy-pack-dir=*|--provenance-private-key-file=*|--provenance-org-id=*|--provenance-org-name=*|--cacert=*|--client-cert=*|--client-key=*)
           value="${token#*=}"
           if [[ -z "$value" ]] || access_recovery_operator_input_value_looks_placeholder_01 "$value"; then
             return 0
@@ -672,7 +672,7 @@ command_has_access_recovery_operator_input_placeholder_01() {
   fi
 
   normalized="$(printf '%s' "$command_text" | tr '[:lower:]' '[:upper:]')"
-  [[ "$normalized" =~ (^|[^A-Z0-9_])(HELPER_PUBLIC_DNS|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME)([^A-Z0-9_]|$) ]]
+  [[ "$normalized" =~ (^|[^A-Z0-9_])(HELPER_PUBLIC_DNS|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|MTLS_CA_FILE|MTLS_CLIENT_CERT_FILE|MTLS_CLIENT_KEY_FILE)([^A-Z0-9_]|$) ]]
 }
 
 command_has_access_recovery_public_key_handoff_01() {
@@ -2983,7 +2983,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
      && [[ -n "$action_command" ]] \
      && command_has_access_recovery_operator_input_placeholder_01 "$action_command"; then
     action_preflight_failure_kind="missing_access_recovery_operator_input_precondition"
-    action_preflight_notes="Access Recovery action has unresolved operator input placeholders; replace HELPER_PUBLIC_DNS, PRIVATE_CODE_FILE, BRIDGE_SERVICE_CONFIG, BRIDGE_DEPLOY_PACK, PROVENANCE_PRIVATE_KEY_FILE, ORG_ID, and ORG_NAME with concrete pilot values before execution"
+    action_preflight_notes="Access Recovery action has unresolved operator input placeholders; replace HELPER_PUBLIC_DNS, PRIVATE_CODE_FILE, BRIDGE_SERVICE_CONFIG, BRIDGE_DEPLOY_PACK, PROVENANCE_PRIVATE_KEY_FILE, ORG_ID, ORG_NAME, MTLS_CA_FILE, MTLS_CLIENT_CERT_FILE, and MTLS_CLIENT_KEY_FILE with concrete pilot values before execution"
   fi
   if action_id_is_profile_default_family "$action_id" && [[ -n "$action_command" ]]; then
     if command_has_profile_subject_placeholder_invite_key "$action_command"; then

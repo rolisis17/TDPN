@@ -1978,10 +1978,25 @@ access_recovery_evidence_json() {
           and str_eq(.transport.tls.ssl_verify_result; "0")
         else true
         end;
+      def service_smoke_mtls_required:
+        (.transport.mtls.required == true);
+      def service_smoke_mtls_ok:
+        if service_smoke_mtls_required then
+          (.transport.https == true)
+          and (.transport.tls.checked == true)
+          and (.transport.tls.verified == true)
+          and (.transport.mtls.client_certificate_configured == true)
+          and (.transport.mtls.client_certificate_used == true)
+          and (.transport.mtls.missing_client_certificate_rejected == true)
+          and (.transport.mtls.missing_client_certificate_same_endpoint == true)
+          and (.transport.mtls.missing_client_certificate_rejection_signal == true)
+        else true
+        end;
       def service_smoke_semantic_ok:
         rc_ok
         and pass_status
         and service_smoke_transport_ok
+        and service_smoke_mtls_ok
         and str_eq(.health.status; "ok")
         and (.auth.required == true)
         and str_eq(.auth.missing_code_http_status; "401")
@@ -1991,6 +2006,26 @@ access_recovery_evidence_json() {
         and str_eq(.bridge.status; "ok")
         and (.bridge.security_headers_ok == true)
         and str_eq(.abuse.http_status; "202");
+      def deployment_mtls_required:
+        (.evidence_policy.require_mtls == true)
+        or (.transport.mtls_required == true)
+        or (.smoke.transport_mtls_required == true);
+      def deployment_mtls_ok:
+        if deployment_mtls_required then
+          (.transport.mtls_required == true)
+          and (.transport.mtls_client_certificate_configured == true)
+          and (.transport.mtls_client_certificate_used == true)
+          and (.transport.mtls_missing_client_certificate_rejected == true)
+          and (.transport.mtls_missing_client_certificate_same_endpoint == true)
+          and (.transport.mtls_missing_client_certificate_rejection_signal == true)
+          and (.smoke.transport_mtls_required == true)
+          and (.smoke.transport_mtls_client_certificate_configured == true)
+          and (.smoke.transport_mtls_client_certificate_used == true)
+          and (.smoke.transport_mtls_missing_client_certificate_rejected == true)
+          and (.smoke.transport_mtls_missing_client_certificate_same_endpoint == true)
+          and (.smoke.transport_mtls_missing_client_certificate_rejection_signal == true)
+        else true
+        end;
       def deployment_evidence_semantic_ok:
         rc_ok
         and pass_status
@@ -2008,7 +2043,8 @@ access_recovery_evidence_json() {
         and str_eq(.identity_check.status; "pass")
         and str_eq(.local_files.config.status; "pass")
         and str_eq(.local_files.config.allow_local_access_paths; "false")
-        and str_eq(.local_files.deploy_pack.status; "pass");
+        and str_eq(.local_files.deploy_pack.status; "pass")
+        and deployment_mtls_ok;
       def positive_bounded_rps:
         ((.observed.env_rps | type) == "string")
         and (.observed.env_rps | test("^[0-9]+$"))
@@ -2142,10 +2178,22 @@ access_recovery_evidence_json() {
           transport_ssl_verify_result: str_or_null(.transport.tls.ssl_verify_result),
           transport_effective_url: str_or_null(.transport.health.effective_url),
           transport_remote_ip: str_or_null(.transport.health.remote_ip),
-          transport_http_version: str_or_null(.transport.health.http_version)
+          transport_http_version: str_or_null(.transport.health.http_version),
+          transport_mtls_required: (if (.transport.mtls.required | type) == "boolean" then .transport.mtls.required else null end),
+          transport_mtls_client_certificate_configured: (if (.transport.mtls.client_certificate_configured | type) == "boolean" then .transport.mtls.client_certificate_configured else null end),
+          transport_mtls_client_certificate_used: (if (.transport.mtls.client_certificate_used | type) == "boolean" then .transport.mtls.client_certificate_used else null end),
+          transport_mtls_missing_client_certificate_rejected: (if (.transport.mtls.missing_client_certificate_rejected | type) == "boolean" then .transport.mtls.missing_client_certificate_rejected else null end),
+          transport_mtls_missing_client_certificate_same_endpoint: (if (.transport.mtls.missing_client_certificate_same_endpoint | type) == "boolean" then .transport.mtls.missing_client_certificate_same_endpoint else null end),
+          transport_mtls_missing_client_certificate_rejection_signal: (if (.transport.mtls.missing_client_certificate_rejection_signal | type) == "boolean" then .transport.mtls.missing_client_certificate_rejection_signal else null end),
+          transport_mtls_missing_client_certificate_health_http_status: str_or_null(.transport.mtls.missing_client_certificate_health_http_status),
+          transport_mtls_missing_client_certificate_health_curl_rc: (if (.transport.mtls.missing_client_certificate_health_curl_rc | type) == "number" then .transport.mtls.missing_client_certificate_health_curl_rc else null end),
+          transport_mtls_missing_client_certificate_health_effective_url: str_or_null(.transport.mtls.missing_client_certificate_health_effective_url),
+          transport_mtls_missing_client_certificate_health_remote_ip: str_or_null(.transport.mtls.missing_client_certificate_health_remote_ip),
+          transport_mtls_missing_client_certificate_health_remote_port: str_or_null(.transport.mtls.missing_client_certificate_health_remote_port)
         };
       def deployment_details:
         {
+          evidence_policy_require_mtls: (if (.evidence_policy.require_mtls | type) == "boolean" then .evidence_policy.require_mtls else null end),
           smoke_status: str_or_null(.smoke.status),
           smoke_evidence_status: str_or_null(.smoke.evidence_status),
           smoke_auth_required: (if (.smoke.auth_required | type) == "boolean" then .smoke.auth_required else null end),
@@ -2157,6 +2205,17 @@ access_recovery_evidence_json() {
           smoke_bridge_security_headers_ok: (if (.smoke.bridge_security_headers_ok | type) == "boolean" then .smoke.bridge_security_headers_ok else null end),
           smoke_config_sha256: str_or_null(.smoke.config_sha256),
           smoke_summary_json: str_or_null(.smoke.summary_json),
+          smoke_transport_mtls_required: (if (.smoke.transport_mtls_required | type) == "boolean" then .smoke.transport_mtls_required else null end),
+          smoke_transport_mtls_client_certificate_configured: (if (.smoke.transport_mtls_client_certificate_configured | type) == "boolean" then .smoke.transport_mtls_client_certificate_configured else null end),
+          smoke_transport_mtls_client_certificate_used: (if (.smoke.transport_mtls_client_certificate_used | type) == "boolean" then .smoke.transport_mtls_client_certificate_used else null end),
+          smoke_transport_mtls_missing_client_certificate_rejected: (if (.smoke.transport_mtls_missing_client_certificate_rejected | type) == "boolean" then .smoke.transport_mtls_missing_client_certificate_rejected else null end),
+          smoke_transport_mtls_missing_client_certificate_same_endpoint: (if (.smoke.transport_mtls_missing_client_certificate_same_endpoint | type) == "boolean" then .smoke.transport_mtls_missing_client_certificate_same_endpoint else null end),
+          smoke_transport_mtls_missing_client_certificate_rejection_signal: (if (.smoke.transport_mtls_missing_client_certificate_rejection_signal | type) == "boolean" then .smoke.transport_mtls_missing_client_certificate_rejection_signal else null end),
+          smoke_transport_mtls_missing_client_certificate_health_http_status: str_or_null(.smoke.transport_mtls_missing_client_certificate_health_http_status),
+          smoke_transport_mtls_missing_client_certificate_health_curl_rc: (if (.smoke.transport_mtls_missing_client_certificate_health_curl_rc | type) == "number" then .smoke.transport_mtls_missing_client_certificate_health_curl_rc else null end),
+          smoke_transport_mtls_missing_client_certificate_health_effective_url: str_or_null(.smoke.transport_mtls_missing_client_certificate_health_effective_url),
+          smoke_transport_mtls_missing_client_certificate_health_remote_ip: str_or_null(.smoke.transport_mtls_missing_client_certificate_health_remote_ip),
+          smoke_transport_mtls_missing_client_certificate_health_remote_port: str_or_null(.smoke.transport_mtls_missing_client_certificate_health_remote_port),
           identity_status: str_or_null(.identity_check.status),
           config_status: str_or_null(.local_files.config.status),
           config_sha256: str_or_null(.local_files.config.sha256),
@@ -2170,6 +2229,17 @@ access_recovery_evidence_json() {
           transport_tls_verified: (if (.transport.tls_verified | type) == "boolean" then .transport.tls_verified else null end),
           transport_ssl_verify_result: str_or_null(.transport.ssl_verify_result),
           transport_remote_ip: str_or_null(.transport.remote_ip),
+          transport_mtls_required: (if (.transport.mtls_required | type) == "boolean" then .transport.mtls_required else null end),
+          transport_mtls_client_certificate_configured: (if (.transport.mtls_client_certificate_configured | type) == "boolean" then .transport.mtls_client_certificate_configured else null end),
+          transport_mtls_client_certificate_used: (if (.transport.mtls_client_certificate_used | type) == "boolean" then .transport.mtls_client_certificate_used else null end),
+          transport_mtls_missing_client_certificate_rejected: (if (.transport.mtls_missing_client_certificate_rejected | type) == "boolean" then .transport.mtls_missing_client_certificate_rejected else null end),
+          transport_mtls_missing_client_certificate_same_endpoint: (if (.transport.mtls_missing_client_certificate_same_endpoint | type) == "boolean" then .transport.mtls_missing_client_certificate_same_endpoint else null end),
+          transport_mtls_missing_client_certificate_rejection_signal: (if (.transport.mtls_missing_client_certificate_rejection_signal | type) == "boolean" then .transport.mtls_missing_client_certificate_rejection_signal else null end),
+          transport_mtls_missing_client_certificate_health_http_status: str_or_null(.transport.mtls_missing_client_certificate_health_http_status),
+          transport_mtls_missing_client_certificate_health_curl_rc: (if (.transport.mtls_missing_client_certificate_health_curl_rc | type) == "number" then .transport.mtls_missing_client_certificate_health_curl_rc else null end),
+          transport_mtls_missing_client_certificate_health_effective_url: str_or_null(.transport.mtls_missing_client_certificate_health_effective_url),
+          transport_mtls_missing_client_certificate_health_remote_ip: str_or_null(.transport.mtls_missing_client_certificate_health_remote_ip),
+          transport_mtls_missing_client_certificate_health_remote_port: str_or_null(.transport.mtls_missing_client_certificate_health_remote_port),
           recommended_action_id: str_or_null(.recommended_next_action.id),
           recommended_action_command: str_or_null(.recommended_next_action.command)
         };
@@ -2804,6 +2874,28 @@ access_recovery_track_json_from_evidence() {
         and ($deployment_evidence.details.transport_tls_verified == true)
         and (($deployment_evidence.details.transport_ssl_verify_result // "") == "0")
         and remote_ip_public_routable($deployment_evidence.details.transport_remote_ip);
+      def required_mtls_requested:
+        ($service_smoke.details.transport_mtls_required == true)
+        or ($deployment_evidence.details.evidence_policy_require_mtls == true)
+        or ($deployment_evidence.details.smoke_transport_mtls_required == true)
+        or ($deployment_evidence.details.transport_mtls_required == true);
+      def required_mtls_evidence:
+        required_mtls_requested
+        and ($service_smoke.details.transport_mtls_client_certificate_configured == true)
+        and ($service_smoke.details.transport_mtls_client_certificate_used == true)
+        and ($service_smoke.details.transport_mtls_missing_client_certificate_rejected == true)
+        and ($service_smoke.details.transport_mtls_missing_client_certificate_same_endpoint == true)
+        and ($service_smoke.details.transport_mtls_missing_client_certificate_rejection_signal == true)
+        and ($deployment_evidence.details.smoke_transport_mtls_client_certificate_configured == true)
+        and ($deployment_evidence.details.smoke_transport_mtls_client_certificate_used == true)
+        and ($deployment_evidence.details.smoke_transport_mtls_missing_client_certificate_rejected == true)
+        and ($deployment_evidence.details.smoke_transport_mtls_missing_client_certificate_same_endpoint == true)
+        and ($deployment_evidence.details.smoke_transport_mtls_missing_client_certificate_rejection_signal == true)
+        and ($deployment_evidence.details.transport_mtls_client_certificate_configured == true)
+        and ($deployment_evidence.details.transport_mtls_client_certificate_used == true)
+        and ($deployment_evidence.details.transport_mtls_missing_client_certificate_rejected == true)
+        and ($deployment_evidence.details.transport_mtls_missing_client_certificate_same_endpoint == true)
+        and ($deployment_evidence.details.transport_mtls_missing_client_certificate_rejection_signal == true);
       def installed_host_handoff_evidence:
         (($host_install.details.evidence_mode // "") == "installed-host")
         and ($host_install.details.installed_host_mode == true);
@@ -2887,14 +2979,23 @@ access_recovery_track_json_from_evidence() {
         + " --trust-store TRUST_STORE --require-trusted-provenance 1 --verification-summary-json "
         + trusted_verifier_receipt_json
         + " --print-verification-summary-json 1";
+      def mtls_arg_suffix:
+        if required_mtls_requested then
+          " --require-mtls 1 --cacert MTLS_CA_FILE --client-cert MTLS_CLIENT_CERT_FILE --client-key MTLS_CLIENT_KEY_FILE"
+        else ""
+        end;
       def next_command_for($e):
         if $e == null then null
         elif ($e == $service_smoke and (($e.status // "") == "missing" or ($e.status // "") == "stale")) then
           "./scripts/easy_node.sh access-recovery-local-evidence-refresh --write-canonical 1 --refresh-roadmap 1 --print-summary-json 1"
         elif ($e == $service_smoke) then
-          "bash ./scripts/access_bridge_service_smoke.sh --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/access_bridge_service_smoke_summary.json"
+          "bash ./scripts/access_bridge_service_smoke.sh --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --expect-helper-id helper-demo --expect-org-id freenews-demo"
+          + mtls_arg_suffix
+          + " --summary-json .easy-node-logs/access_bridge_service_smoke_summary.json"
         elif ($e == $deployment_evidence) then
-          "bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/access_bridge_service_smoke_summary.json --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/access_bridge_deployment_evidence_summary.json"
+          "bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/access_bridge_service_smoke_summary.json --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy --expect-helper-id helper-demo --expect-org-id freenews-demo"
+          + mtls_arg_suffix
+          + " --summary-json .easy-node-logs/access_bridge_deployment_evidence_summary.json"
         else
           "bash ./scripts/access_bridge_host_install_check.sh --evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
         end;
@@ -2954,6 +3055,8 @@ access_recovery_track_json_from_evidence() {
             deployment_remote_ip: ($deployment_evidence.details.transport_remote_ip // null),
             deployment_remote_ip_public_routable: remote_ip_public_routable($deployment_evidence.details.transport_remote_ip),
             real_helper_https_evidence: real_helper_https_evidence,
+            mtls_required: required_mtls_requested,
+            required_mtls_evidence: required_mtls_evidence,
             installed_host_handoff_evidence: installed_host_handoff_evidence
           },
           recommended_next_action: (
@@ -2983,7 +3086,11 @@ access_recovery_track_json_from_evidence() {
             elif $track_status == "local-rehearsal-ready" then {
               id: "real_helper_https_evidence",
               reason: "Local Access Recovery rehearsal evidence cannot substitute for real helper HTTPS deployment evidence",
-              command: "./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --host-install-evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE --reports-dir .easy-node-logs/access-recovery-pilot"
+              command: (
+                "./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --host-install-evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE"
+                + mtls_arg_suffix
+                + " --reports-dir .easy-node-logs/access-recovery-pilot"
+              )
             }
             elif $first_attention == null then null
             else {
@@ -14346,6 +14453,7 @@ cat >"$report_tmp" <<EOF_MD
 - Access bridge deployment evidence: available=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.source_summary_json // "none"' "$summary_json")
 - Access bridge host install: available=$(jq -r '.access_recovery_track.access_bridge_host_install.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_host_install.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_host_install.source_summary_json // "none"' "$summary_json")
 - Access bridge trusted bundle verifier: available=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.source_summary_json // "none"' "$summary_json")
+- Access bridge required mTLS evidence: required=$(jq -r '.access_recovery_track.evidence_host_policy.mtls_required | tostring' "$summary_json"), proven=$(jq -r '.access_recovery_track.evidence_host_policy.required_mtls_evidence | tostring' "$summary_json")
 - Access Recovery next action: $(jq -r '.access_recovery_track.recommended_next_action.command // "none"' "$summary_json")
 - Access Recovery next action reason: $(jq -r '.access_recovery_track.recommended_next_action.reason // "none"' "$summary_json")
 
@@ -14707,6 +14815,7 @@ echo "[roadmap-progress-report] access_bridge_service_smoke_available=$access_br
 echo "[roadmap-progress-report] access_bridge_deployment_evidence_available=$access_bridge_deployment_evidence_available_json status=$access_bridge_deployment_evidence_status_json source_summary_json=${access_bridge_deployment_evidence_source_summary_json:-}"
 echo "[roadmap-progress-report] access_bridge_host_install_available=$access_bridge_host_install_available_json status=$access_bridge_host_install_status_json source_summary_json=${access_bridge_host_install_source_summary_json:-}"
 echo "[roadmap-progress-report] access_bridge_pilot_evidence_bundle_verify_available=$access_bridge_pilot_evidence_bundle_verify_available_json status=$access_bridge_pilot_evidence_bundle_verify_status_json source_summary_json=${access_bridge_pilot_evidence_bundle_verify_source_summary_json:-}"
+echo "[roadmap-progress-report] access_bridge_required_mtls required=$(jq -r '.access_recovery_track.evidence_host_policy.mtls_required | tostring' "$summary_json") proven=$(jq -r '.access_recovery_track.evidence_host_policy.required_mtls_evidence | tostring' "$summary_json")"
 echo "[roadmap-progress-report] next_action_check_id=${next_action_check_id:-}"
 echo "[roadmap-progress-report] next_action_command=${next_action_command:-}"
 echo "[roadmap-progress-report] manual_validation_refresh_status=$manual_refresh_status rc=$manual_refresh_rc"

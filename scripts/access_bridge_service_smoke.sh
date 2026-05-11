@@ -245,6 +245,23 @@ meta_value() {
   awk -F= -v k="$key" '$1 == k {print substr($0, length(k) + 2); exit}' "$file" 2>/dev/null || true
 }
 
+mtls_rejection_signal_01() {
+  local http_code="${1:-}"
+  local body_file="${2:-}"
+  local stderr_text="${3:-}"
+  local probe_text=""
+  if [[ -n "$body_file" && -f "$body_file" ]]; then
+    probe_text="$(tr -d '\r' <"$body_file" | tr '[:upper:]' '[:lower:]')"
+  fi
+  probe_text="${probe_text}
+$(printf '%s' "$stderr_text" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$http_code" == "495" || "$http_code" == "496" ]]; then
+    return 0
+  fi
+  printf '%s\n' "$probe_text" | grep -Eiq \
+    'client[ _-]*certificate|certificate[ _-]*(required|needed|missing)|no[ _-]*(required[ _-]*)?ssl[ _-]*certificate|tlsv[0-9.]*[ _-]*alert[ _-]*certificate[ _-]*required|ssl[ _-]*certificate[ _-]*(error|required)|mtls'
+}
+
 curl_common_args=(-sS)
 if [[ -n "$cacert" ]]; then
   curl_common_args+=(--cacert "$cacert")
@@ -306,6 +323,7 @@ mtls_missing_client_cert_health_effective_url=""
 mtls_missing_client_cert_health_remote_ip=""
 mtls_missing_client_cert_health_remote_port=""
 mtls_missing_client_cert_same_endpoint="false"
+mtls_missing_client_cert_rejection_signal="false"
 if [[ "$require_mtls" == "1" ]]; then
   set +e
   curl "${curl_no_client_cert_args[@]}" \
@@ -322,14 +340,32 @@ if [[ "$require_mtls" == "1" ]]; then
   mtls_missing_client_cert_health_remote_ip="$(meta_value "$missing_client_cert_health_meta" "remote_ip")"
   mtls_missing_client_cert_health_remote_port="$(meta_value "$missing_client_cert_health_meta" "remote_port")"
   mtls_missing_client_cert_health_curl_error="$(tr -d '\r' <"$missing_client_cert_health_stderr" | tail -n 3 | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/[[:space:]]+$//')"
-  if [[ ! "$mtls_missing_client_cert_health_http" =~ ^2[0-9][0-9]$ ]]; then
-    mtls_missing_client_cert_rejected="true"
+  if mtls_rejection_signal_01 "$mtls_missing_client_cert_health_http" "$missing_client_cert_health_body" "$mtls_missing_client_cert_health_curl_error"; then
+    mtls_missing_client_cert_rejection_signal="true"
   fi
-  if [[ ( -z "$mtls_missing_client_cert_health_effective_url" || -z "$health_url_effective" || "$mtls_missing_client_cert_health_effective_url" == "$health_url_effective" ) &&
-    ( -z "$mtls_missing_client_cert_health_remote_ip" || -z "$health_remote_ip" || "$mtls_missing_client_cert_health_remote_ip" == "$health_remote_ip" ) &&
-    ( -z "$mtls_missing_client_cert_health_remote_port" || -z "$health_remote_port" || "$mtls_missing_client_cert_health_remote_port" == "$health_remote_port" ) ]]; then
-    mtls_missing_client_cert_same_endpoint="true"
+  if [[ -n "$mtls_missing_client_cert_health_effective_url" &&
+    -n "$health_url_effective" &&
+    "$mtls_missing_client_cert_health_effective_url" == "$health_url_effective" ]]; then
+    if [[ "$mtls_missing_client_cert_health_http" == "000" && "$mtls_missing_client_cert_rejection_signal" == "true" ]]; then
+      mtls_missing_client_cert_same_endpoint="true"
+    elif [[ -n "$mtls_missing_client_cert_health_remote_ip" &&
+      -n "$health_remote_ip" &&
+      "$mtls_missing_client_cert_health_remote_ip" == "$health_remote_ip" &&
+      -n "$mtls_missing_client_cert_health_remote_port" &&
+      -n "$health_remote_port" &&
+      "$mtls_missing_client_cert_health_remote_port" == "$health_remote_port" ]]; then
+      mtls_missing_client_cert_same_endpoint="true"
+    fi
   fi
+  case "$mtls_missing_client_cert_health_http" in
+    000|400|401|403|421|495|496)
+      if [[ "$mtls_missing_client_cert_rejection_signal" == "true" &&
+        "$mtls_missing_client_cert_same_endpoint" == "true" &&
+        ! "$mtls_missing_client_cert_health_http" =~ ^2[0-9][0-9]$ ]]; then
+        mtls_missing_client_cert_rejected="true"
+      fi
+      ;;
+  esac
 fi
 mtls_client_used="$mtls_client_configured"
 if [[ "$require_mtls" == "1" && ( "$mtls_client_configured" != "true" || "$mtls_missing_client_cert_rejected" != "true" || "$mtls_missing_client_cert_same_endpoint" != "true" || "$health_http" != "200" ) ]]; then
@@ -454,6 +490,7 @@ summary="$(jq -cn \
   --arg mtls_missing_client_cert_health_effective_url "$mtls_missing_client_cert_health_effective_url" \
   --arg mtls_missing_client_cert_health_remote_ip "$mtls_missing_client_cert_health_remote_ip" \
   --arg mtls_missing_client_cert_health_remote_port "$mtls_missing_client_cert_health_remote_port" \
+  --argjson mtls_missing_client_cert_rejection_signal "$mtls_missing_client_cert_rejection_signal" \
   --argjson mtls_required "$mtls_required" \
   --argjson mtls_client_configured "$mtls_client_configured" \
   --argjson mtls_client_used "$mtls_client_used" \
@@ -461,7 +498,7 @@ summary="$(jq -cn \
   --argjson mtls_missing_client_cert_same_endpoint "$mtls_missing_client_cert_same_endpoint" \
   --argjson headers_ok "$headers_ok" \
   --argjson auth_required "$( [[ "$allow_unauthenticated" == "1" ]] && echo false || echo true )" \
-  '{version:1,schema:{id:"access_bridge_service_smoke_summary",major:1,minor:4},generated_at_utc:$generated_at_utc,status:$status,notes:$notes,base_url:$base_url,path_id:$path_id,transport:{base_url_scheme:$base_url_scheme,base_url_host:$base_url_host,base_url_port:$base_url_port,loopback:$base_url_loopback,https:$base_url_https,health:{effective_url:$health_url_effective,remote_ip:$health_remote_ip,remote_port:$health_remote_port,http_version:$health_http_version,time_connect_sec:$health_time_connect,time_appconnect_sec:$health_time_appconnect,curl_error:$health_curl_error},tls:{checked:$tls_checked,verified:$tls_verified,ssl_verify_result:$health_ssl_verify_result},mtls:{required:$mtls_required,client_certificate_configured:$mtls_client_configured,client_certificate_used:$mtls_client_used,missing_client_certificate_rejected:$mtls_missing_client_cert_rejected,missing_client_certificate_same_endpoint:$mtls_missing_client_cert_same_endpoint,missing_client_certificate_health_http_status:$mtls_missing_client_cert_health_http,missing_client_certificate_health_curl_rc:(if $mtls_missing_client_cert_health_curl_rc == "" then null else ($mtls_missing_client_cert_health_curl_rc | tonumber) end),missing_client_certificate_health_curl_error:$mtls_missing_client_cert_health_curl_error,missing_client_certificate_health_effective_url:$mtls_missing_client_cert_health_effective_url,missing_client_certificate_health_remote_ip:$mtls_missing_client_cert_health_remote_ip,missing_client_certificate_health_remote_port:$mtls_missing_client_cert_health_remote_port}},health:{http_status:$health_http,status:$health_status,helper_id:$health_helper_id,organization_id:$health_org_id,registry_id:$health_registry_id,config_sha256:$health_config_sha256},auth:{required:$auth_required,missing_code_http_status:$missing_code_http,wrong_code_http_status:$wrong_code_http,valid_code_http_status:$bridge_http},bridge:{http_status:$bridge_http,status:$bridge_status,security_headers_ok:$headers_ok},abuse:{http_status:$abuse_http}}')"
+  '{version:1,schema:{id:"access_bridge_service_smoke_summary",major:1,minor:5},generated_at_utc:$generated_at_utc,status:$status,notes:$notes,base_url:$base_url,path_id:$path_id,transport:{base_url_scheme:$base_url_scheme,base_url_host:$base_url_host,base_url_port:$base_url_port,loopback:$base_url_loopback,https:$base_url_https,health:{effective_url:$health_url_effective,remote_ip:$health_remote_ip,remote_port:$health_remote_port,http_version:$health_http_version,time_connect_sec:$health_time_connect,time_appconnect_sec:$health_time_appconnect,curl_error:$health_curl_error},tls:{checked:$tls_checked,verified:$tls_verified,ssl_verify_result:$health_ssl_verify_result},mtls:{required:$mtls_required,client_certificate_configured:$mtls_client_configured,client_certificate_used:$mtls_client_used,missing_client_certificate_rejected:$mtls_missing_client_cert_rejected,missing_client_certificate_same_endpoint:$mtls_missing_client_cert_same_endpoint,missing_client_certificate_rejection_signal:$mtls_missing_client_cert_rejection_signal,missing_client_certificate_health_http_status:$mtls_missing_client_cert_health_http,missing_client_certificate_health_curl_rc:(if $mtls_missing_client_cert_health_curl_rc == "" then null else ($mtls_missing_client_cert_health_curl_rc | tonumber) end),missing_client_certificate_health_curl_error:$mtls_missing_client_cert_health_curl_error,missing_client_certificate_health_effective_url:$mtls_missing_client_cert_health_effective_url,missing_client_certificate_health_remote_ip:$mtls_missing_client_cert_health_remote_ip,missing_client_certificate_health_remote_port:$mtls_missing_client_cert_health_remote_port}},health:{http_status:$health_http,status:$health_status,helper_id:$health_helper_id,organization_id:$health_org_id,registry_id:$health_registry_id,config_sha256:$health_config_sha256},auth:{required:$auth_required,missing_code_http_status:$missing_code_http,wrong_code_http_status:$wrong_code_http,valid_code_http_status:$bridge_http},bridge:{http_status:$bridge_http,status:$bridge_status,security_headers_ok:$headers_ok},abuse:{http_status:$abuse_http}}')"
 
 if [[ -n "$summary_json" ]]; then
   mkdir -p "$(dirname "$summary_json")"

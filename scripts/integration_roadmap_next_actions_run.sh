@@ -622,6 +622,15 @@ JSON
 }
 JSON
     ;;
+  access_recovery_mtls_operator_placeholders)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"access_bridge_service_smoke","label":"Access bridge service smoke","command":"bash \"$PASS1\" --base-url https://helper.gpm-pilot.net --path-id helper-web --code-file /tmp/bridge-code.txt --require-mtls 1 --cacert MTLS_CA_FILE --client-cert MTLS_CLIENT_CERT_FILE --client-key MTLS_CLIENT_KEY_FILE","reason":"test-access-recovery-mtls-placeholders"}
+  ]
+}
+JSON
+    ;;
   access_recovery_trust_store_concrete)
     cat >"$summary_json" <<JSON
 {
@@ -1625,6 +1634,47 @@ if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
 ' "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS" >/dev/null; then
   echo "Access Recovery unresolved operator placeholder precondition summary mismatch"
   cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery required-mTLS placeholders fail closed"
+SUMMARY_ACCESS_RECOVERY_MTLS_PLACEHOLDERS="$TMP_DIR/summary_access_recovery_mtls_placeholders.json"
+REPORTS_ACCESS_RECOVERY_MTLS_PLACEHOLDERS="$TMP_DIR/reports_access_recovery_mtls_placeholders"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_mtls_operator_placeholders \
+PASS1="$PASS1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_MTLS_PLACEHOLDERS" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_MTLS_PLACEHOLDERS" \
+  --include-id access_bridge_service_smoke \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_mtls_placeholders.log" 2>&1
+access_recovery_mtls_placeholders_rc=$?
+set -e
+if [[ "$access_recovery_mtls_placeholders_rc" != "2" ]]; then
+  echo "expected unresolved Access Recovery mTLS placeholder hard-fail rc=2, got rc=$access_recovery_mtls_placeholders_rc"
+  cat "$TMP_DIR/access_recovery_mtls_placeholders.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_MTLS_PLACEHOLDERS" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_MTLS_PLACEHOLDERS"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .actions[0].id == "access_bridge_service_smoke"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
+  and (.actions[0].notes | contains("MTLS_CA_FILE"))
+  and (.actions[0].notes | contains("MTLS_CLIENT_CERT_FILE"))
+  and (.actions[0].notes | contains("MTLS_CLIENT_KEY_FILE"))
+  and (.actions[0].command | contains("--require-mtls 1"))
+  and (.actions[0].command | contains("MTLS_CLIENT_CERT_FILE"))
+  and (.actions[0].next_operator_action | contains("--include-id access_bridge_service_smoke"))
+' "$SUMMARY_ACCESS_RECOVERY_MTLS_PLACEHOLDERS" >/dev/null; then
+  echo "Access Recovery unresolved mTLS placeholder precondition summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_MTLS_PLACEHOLDERS"
   exit 1
 fi
 

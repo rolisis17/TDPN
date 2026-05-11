@@ -613,6 +613,7 @@ smoke_transport_mtls_client_configured="$(jq -r 'if (.transport.mtls.client_cert
 smoke_transport_mtls_client_used="$(jq -r 'if (.transport.mtls.client_certificate_used // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_transport_mtls_missing_client_rejected="$(jq -r 'if (.transport.mtls.missing_client_certificate_rejected // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_transport_mtls_missing_client_same_endpoint="$(jq -r 'if (.transport.mtls.missing_client_certificate_same_endpoint // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_transport_mtls_missing_client_rejection_signal="$(jq -r 'if (.transport.mtls.missing_client_certificate_rejection_signal // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_transport_mtls_missing_client_http="$(json_string_or_empty "$smoke_summary_json" '.transport.mtls.missing_client_certificate_health_http_status')"
 smoke_transport_mtls_missing_client_rc="$(json_string_or_empty "$smoke_summary_json" '.transport.mtls.missing_client_certificate_health_curl_rc')"
 smoke_transport_mtls_missing_client_error="$(json_string_or_empty "$smoke_summary_json" '.transport.mtls.missing_client_certificate_health_curl_error')"
@@ -669,6 +670,10 @@ if [[ "$require_mtls" == "1" ]]; then
   if [[ "$smoke_transport_mtls_missing_client_rejected" != "true" ]]; then
     transport_status="fail"
     transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary did not prove missing-client-certificate rejection")"
+  fi
+  if [[ "$smoke_transport_mtls_missing_client_rejection_signal" != "true" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary did not prove a client-certificate rejection signal")"
   fi
   if [[ "$smoke_transport_mtls_missing_client_same_endpoint" != "true" ]]; then
     transport_status="fail"
@@ -1045,6 +1050,7 @@ jq -n \
   --arg smoke_transport_mtls_client_used "$smoke_transport_mtls_client_used" \
   --arg smoke_transport_mtls_missing_client_rejected "$smoke_transport_mtls_missing_client_rejected" \
   --arg smoke_transport_mtls_missing_client_same_endpoint "$smoke_transport_mtls_missing_client_same_endpoint" \
+  --arg smoke_transport_mtls_missing_client_rejection_signal "$smoke_transport_mtls_missing_client_rejection_signal" \
   --arg smoke_transport_mtls_missing_client_http "$smoke_transport_mtls_missing_client_http" \
   --arg smoke_transport_mtls_missing_client_rc "$smoke_transport_mtls_missing_client_rc" \
   --arg smoke_transport_mtls_missing_client_error "$smoke_transport_mtls_missing_client_error" \
@@ -1098,7 +1104,7 @@ jq -n \
     schema: {
       id: "access_bridge_deployment_evidence_summary",
       major: 1,
-      minor: 3
+      minor: 4
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -1147,6 +1153,7 @@ jq -n \
       transport_mtls_client_certificate_used: ($smoke_transport_mtls_client_used == "true"),
       transport_mtls_missing_client_certificate_rejected: ($smoke_transport_mtls_missing_client_rejected == "true"),
       transport_mtls_missing_client_certificate_same_endpoint: ($smoke_transport_mtls_missing_client_same_endpoint == "true"),
+      transport_mtls_missing_client_certificate_rejection_signal: ($smoke_transport_mtls_missing_client_rejection_signal == "true"),
       path_id: $smoke_path_id,
       summary_json: $smoke_summary_json
     },
@@ -1169,6 +1176,7 @@ jq -n \
       mtls_client_certificate_used: ($smoke_transport_mtls_client_used == "true"),
       mtls_missing_client_certificate_rejected: ($smoke_transport_mtls_missing_client_rejected == "true"),
       mtls_missing_client_certificate_same_endpoint: ($smoke_transport_mtls_missing_client_same_endpoint == "true"),
+      mtls_missing_client_certificate_rejection_signal: ($smoke_transport_mtls_missing_client_rejection_signal == "true"),
       mtls_missing_client_certificate_health_http_status: $smoke_transport_mtls_missing_client_http,
       mtls_missing_client_certificate_health_curl_rc: (if $smoke_transport_mtls_missing_client_rc == "" then null else ($smoke_transport_mtls_missing_client_rc | tonumber) end),
       mtls_missing_client_certificate_health_curl_error: $smoke_transport_mtls_missing_client_error,

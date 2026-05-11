@@ -878,6 +878,7 @@ transport_mtls_client_configured="$(jq -r 'if (.transport.mtls_client_certificat
 transport_mtls_client_used="$(jq -r 'if (.transport.mtls_client_certificate_used // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
 transport_mtls_missing_client_rejected="$(jq -r 'if (.transport.mtls_missing_client_certificate_rejected // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
 transport_mtls_missing_client_same_endpoint="$(jq -r 'if (.transport.mtls_missing_client_certificate_same_endpoint // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
+transport_mtls_missing_client_rejection_signal="$(jq -r 'if (.transport.mtls_missing_client_certificate_rejection_signal // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
 status="pass"
 recommended_action_id="trusted_pilot_evidence_verify"
 recommended_action="Run trusted bundle verification with --require-trusted-provenance 1 and --verification-summary-json before helper/operator handoff."
@@ -994,6 +995,7 @@ jq -n \
   --arg transport_mtls_client_used "$transport_mtls_client_used" \
   --arg transport_mtls_missing_client_rejected "$transport_mtls_missing_client_rejected" \
   --arg transport_mtls_missing_client_same_endpoint "$transport_mtls_missing_client_same_endpoint" \
+  --arg transport_mtls_missing_client_rejection_signal "$transport_mtls_missing_client_rejection_signal" \
   --arg path_id "$path_id" \
   --arg service_name "$service_name" \
   --arg host_install_evidence_mode "$host_install_evidence_mode" \
@@ -1029,7 +1031,7 @@ jq -n \
     schema: {
       id: "access_bridge_pilot_evidence_bundle_summary",
       major: 1,
-      minor: 5
+      minor: 6
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -1087,6 +1089,7 @@ jq -n \
       mtls_client_certificate_used: ($transport_mtls_client_used == "true"),
       mtls_missing_client_certificate_rejected: ($transport_mtls_missing_client_rejected == "true"),
       mtls_missing_client_certificate_same_endpoint: ($transport_mtls_missing_client_same_endpoint == "true"),
+      mtls_missing_client_certificate_rejection_signal: ($transport_mtls_missing_client_rejection_signal == "true"),
       deployment_evidence_summary_json: $deployment_summary,
       smoke_summary_json: $smoke_summary
     },

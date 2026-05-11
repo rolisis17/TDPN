@@ -70,7 +70,7 @@ jq -n \
     schema: {
       id: "access_bridge_service_smoke_summary",
       major: 1,
-      minor: 4
+      minor: 5
     },
     generated_at_utc: $generated_at_utc,
     status: "pass",
@@ -101,6 +101,7 @@ jq -n \
         client_certificate_used: false,
         missing_client_certificate_rejected: false,
         missing_client_certificate_same_endpoint: false,
+        missing_client_certificate_rejection_signal: false,
         missing_client_certificate_health_http_status: "skipped",
         missing_client_certificate_health_curl_rc: null,
         missing_client_certificate_health_curl_error: "",
@@ -266,6 +267,7 @@ jq '
   | .transport.mtls.client_certificate_used = true
   | .transport.mtls.missing_client_certificate_rejected = true
   | .transport.mtls.missing_client_certificate_same_endpoint = true
+  | .transport.mtls.missing_client_certificate_rejection_signal = true
   | .transport.mtls.missing_client_certificate_health_http_status = "000"
   | .transport.mtls.missing_client_certificate_health_curl_rc = 56
   | .transport.mtls.missing_client_certificate_health_curl_error = "tlsv13 alert certificate required"
@@ -293,11 +295,13 @@ if ! jq -e '
     and .transport.mtls_client_certificate_used == true
     and .transport.mtls_missing_client_certificate_rejected == true
     and .transport.mtls_missing_client_certificate_same_endpoint == true
+    and .transport.mtls_missing_client_certificate_rejection_signal == true
     and .transport.mtls_missing_client_certificate_health_http_status == "000"
     and .smoke.transport_mtls_required == true
     and .smoke.transport_mtls_client_certificate_used == true
     and .smoke.transport_mtls_missing_client_certificate_rejected == true
     and .smoke.transport_mtls_missing_client_certificate_same_endpoint == true
+    and .smoke.transport_mtls_missing_client_certificate_rejection_signal == true
   ' "$MTLS_SUMMARY" >/dev/null; then
   echo "access bridge deployment evidence integration failed: mTLS proof summary mismatch"
   cat "$MTLS_SUMMARY"
