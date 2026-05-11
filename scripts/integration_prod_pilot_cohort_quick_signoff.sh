@@ -60,9 +60,8 @@ while [[ $# -gt 0 ]]; do
 done
 if [[ -n "$summary_json" ]]; then
   mkdir -p "$(dirname "$summary_json")"
-  cat >"$summary_json" <<'EOF_TREND_SUMMARY'
-{"decision":"GO","go_rate_pct":100,"no_go":0,"evaluation_errors":0,"reports_total":1}
-EOF_TREND_SUMMARY
+  jq -nc --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{generated_at_utc:$generated_at_utc, decision:"GO", go_rate_pct:100, no_go:0, evaluation_errors:0, reports_total:1}' >"$summary_json"
 fi
 exit "${FAKE_TREND_RC:-0}"
 EOF_FAKE_TREND
@@ -135,6 +134,7 @@ PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
   --require-bundle-manifest 0 \
   --incident-snapshot-min-attachment-count 2 \
   --incident-snapshot-max-skipped-count 0 \
+  --max-evidence-age-sec 900 \
   --max-alert-severity WARN \
   --show-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_pass.log 2>&1
 
@@ -145,7 +145,7 @@ if [[ ! -f "$SIGNOFF_JSON" ]]; then
   cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_pass.log
   exit 1
 fi
-if ! jq -e '.status=="ok" and .policy.require_trend_artifact_policy_match==0 and .policy.require_trend_wg_validate_udp_source==0 and .policy.require_trend_wg_validate_strict_distinct==0 and .policy.require_trend_wg_soak_diversity_pass==0 and .policy.min_trend_wg_soak_selection_lines==3 and .policy.min_trend_wg_soak_entry_operators==1 and .policy.min_trend_wg_soak_exit_operators==1 and .policy.min_trend_wg_soak_cross_operator_pairs==1 and .policy.require_bundle_created==0 and .policy.require_bundle_manifest==0 and .policy.incident_snapshot_min_attachment_count==2 and .policy.incident_snapshot_max_skipped_count==0 and .policy.max_alert_severity=="WARN"' "$SIGNOFF_JSON" >/dev/null 2>&1; then
+if ! jq -e '.status=="ok" and .policy.require_trend_artifact_policy_match==0 and .policy.require_trend_wg_validate_udp_source==0 and .policy.require_trend_wg_validate_strict_distinct==0 and .policy.require_trend_wg_soak_diversity_pass==0 and .policy.min_trend_wg_soak_selection_lines==3 and .policy.min_trend_wg_soak_entry_operators==1 and .policy.min_trend_wg_soak_exit_operators==1 and .policy.min_trend_wg_soak_cross_operator_pairs==1 and .policy.require_bundle_created==0 and .policy.require_bundle_manifest==0 and .policy.incident_snapshot_min_attachment_count==2 and .policy.incident_snapshot_max_skipped_count==0 and .policy.max_evidence_age_sec==900 and .policy.max_alert_severity=="WARN"' "$SIGNOFF_JSON" >/dev/null 2>&1; then
   echo "quick-signoff artifact missing expected strict policy fields"
   cat "$SIGNOFF_JSON"
   exit 1
@@ -246,8 +246,18 @@ if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$CHECK_CAPTURE"; then
   cat "$CHECK_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--max-evidence-age-sec 900' "$CHECK_CAPTURE"; then
+  echo "quick-signoff forwarding missing --max-evidence-age-sec 900 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--summary-json ' "$TREND_CAPTURE"; then
   echo "quick-signoff forwarding missing --summary-json to quick-trend"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 900' "$TREND_CAPTURE"; then
+  echo "quick-signoff forwarding missing --max-evidence-age-sec 900 to quick-trend"
   cat "$TREND_CAPTURE"
   exit 1
 fi
@@ -259,6 +269,11 @@ fi
 if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$TREND_CAPTURE"; then
   echo "quick-signoff forwarding missing --incident-snapshot-min-attachment-count 2 to quick-trend"
   cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 900' "$ALERT_CAPTURE"; then
+  echo "quick-signoff forwarding missing --max-evidence-age-sec 900 to quick-alert"
+  cat "$ALERT_CAPTURE"
   exit 1
 fi
 if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$TREND_CAPTURE"; then
@@ -717,6 +732,7 @@ PROD_PILOT_COHORT_QUICK_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
   --require-trend-artifact-policy-match 0 \
   --incident-snapshot-min-attachment-count 2 \
   --incident-snapshot-max-skipped-count 0 \
+  --max-evidence-age-sec 900 \
   --max-alert-severity OK \
   --show-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_easy_node.log 2>&1
 
@@ -747,6 +763,11 @@ if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$SIGNOFF_FORWARD_CAP
 fi
 if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$SIGNOFF_FORWARD_CAPTURE"; then
   echo "easy_node quick-signoff forwarding failed: missing --incident-snapshot-max-skipped-count"
+  cat "$SIGNOFF_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 900' "$SIGNOFF_FORWARD_CAPTURE"; then
+  echo "easy_node quick-signoff forwarding failed: missing --max-evidence-age-sec"
   cat "$SIGNOFF_FORWARD_CAPTURE"
   exit 1
 fi

@@ -39,6 +39,7 @@ Usage:
     [--incident-snapshot-min-attachment-count N] \
     [--incident-snapshot-max-skipped-count N|-1] \
     [--max-duration-sec N] \
+    [--max-evidence-age-sec N] \
     [--max-reports N] \
     [--since-hours N] \
     [--fail-on-any-no-go [0|1]] \
@@ -190,6 +191,7 @@ require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_I
 incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}}"
 incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}}"
 max_duration_sec="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MAX_DURATION_SEC:-${PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC:-0}}"
+max_evidence_age_sec="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_QUICK_CHECK_MAX_EVIDENCE_AGE_SEC:-0}}"
 
 max_reports="${PROD_PILOT_COHORT_QUICK_TREND_MAX_REPORTS:-25}"
 since_hours="${PROD_PILOT_COHORT_QUICK_TREND_SINCE_HOURS:-24}"
@@ -409,6 +411,10 @@ while [[ $# -gt 0 ]]; do
       max_duration_sec="${2:-}"
       shift 2
       ;;
+    --max-evidence-age-sec)
+      max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --max-reports)
       max_reports="${2:-}"
       shift 2
@@ -541,6 +547,10 @@ fi
 
 if [[ ! "$max_duration_sec" =~ ^[0-9]+$ ]]; then
   echo "--max-duration-sec must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$max_evidence_age_sec" =~ ^[0-9]+$ ]]; then
+  echo "--max-evidence-age-sec must be an integer >= 0"
   exit 2
 fi
 if [[ ! "$incident_snapshot_min_attachment_count" =~ ^[0-9]+$ ]]; then
@@ -717,6 +727,7 @@ if [[ "$check_latest" == "1" ]]; then
     --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count" \
     --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count" \
     --max-duration-sec "$max_duration_sec" \
+    --max-evidence-age-sec "$max_evidence_age_sec" \
     --show-json 0
   latest_check_rc=$?
   set -e
@@ -747,6 +758,7 @@ if [[ "$status" == "ok" && "$check_trend" == "1" ]]; then
     --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count" \
     --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count" \
     --max-duration-sec "$max_duration_sec" \
+    --max-evidence-age-sec "$max_evidence_age_sec" \
     --fail-on-any-no-go "$fail_on_any_no_go" \
     --min-go-rate-pct "$min_go_rate_pct" \
     --show-details 0 \
@@ -782,6 +794,7 @@ if [[ "$status" == "ok" && "$check_alert" == "1" ]]; then
     --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count" \
     --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count" \
     --max-duration-sec "$max_duration_sec" \
+    --max-evidence-age-sec "$max_evidence_age_sec" \
     --warn-go-rate-pct "$warn_go_rate_pct" \
     --critical-go-rate-pct "$critical_go_rate_pct" \
     --warn-no-go-count "$warn_no_go_count" \
@@ -858,6 +871,7 @@ jq -nc \
     --argjson require_incident_snapshot_artifacts "$require_incident_snapshot_artifacts" \
     --argjson incident_snapshot_min_attachment_count "$incident_snapshot_min_attachment_count" \
     --argjson incident_snapshot_max_skipped_count "$incident_snapshot_max_skipped_count" \
+    --argjson max_evidence_age_sec "$max_evidence_age_sec" \
     --argjson quick_summary_exists "$quick_summary_exists" \
     --argjson quick_summary_valid_json "$quick_summary_valid_json" \
     --argjson incident_enabled "$incident_enabled" \
@@ -899,7 +913,8 @@ jq -nc \
       require_incident_snapshot_on_fail: $require_incident_snapshot_on_fail,
       require_incident_snapshot_artifacts: $require_incident_snapshot_artifacts,
       incident_snapshot_min_attachment_count: $incident_snapshot_min_attachment_count,
-      incident_snapshot_max_skipped_count: $incident_snapshot_max_skipped_count
+      incident_snapshot_max_skipped_count: $incident_snapshot_max_skipped_count,
+      max_evidence_age_sec: $max_evidence_age_sec
     },
     observed: {
       alert_severity: ($alert_severity // "")

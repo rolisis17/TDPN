@@ -59,6 +59,125 @@ if ! rg -q -- "\\[prod-pilot-cohort-quick-check] pre_real_host_readiness_summary
   exit 1
 fi
 
+echo "[prod-pilot-cohort-quick-check] evidence freshness policy"
+FRESHNESS_DIR="$TMP_DIR/freshness"
+mkdir -p "$FRESHNESS_DIR"
+FRESHNESS_NOW_EPOCH="$(jq -nr '"2026-03-10T12:00:00Z" | fromdateiso8601 | floor')"
+FRESH_SUMMARY_JSON="$FRESHNESS_DIR/prod_pilot_cohort_summary.json"
+FRESH_RUN_REPORT_JSON="$FRESHNESS_DIR/prod_pilot_cohort_quick_report.json"
+cat >"$FRESH_SUMMARY_JSON" <<'EOF_FRESH_SUMMARY'
+{
+  "status": "ok",
+  "started_at": "2026-03-10T11:50:00Z",
+  "finished_at": "2026-03-10T11:55:00Z"
+}
+EOF_FRESH_SUMMARY
+cat >"$FRESH_RUN_REPORT_JSON" <<EOF_FRESH_RUN_REPORT
+{
+  "started_at": "2026-03-10T11:45:00Z",
+  "finished_at": "2026-03-10T11:56:00Z",
+  "status":"ok",
+  "failure_step":"",
+  "final_rc":0,
+  "duration_sec":12,
+  "runbook":{"rc":0},
+  "signoff":{"attempted":true,"rc":0},
+  "artifacts":{
+    "summary_json":"$FRESH_SUMMARY_JSON",
+    "pre_real_host_readiness_summary_json":"$PRE_REAL_HOST_READINESS_SUMMARY_JSON"
+  }
+}
+EOF_FRESH_RUN_REPORT
+PROD_PILOT_COHORT_QUICK_CHECK_NOW_EPOCH="$FRESHNESS_NOW_EPOCH" \
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_COHORT_SIGNOFF_POLICY=0 \
+./scripts/prod_pilot_cohort_quick_check.sh \
+  --run-report-json "$FRESH_RUN_REPORT_JSON" \
+  --max-evidence-age-sec 3600 >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_pass.log 2>&1
+
+STALE_RUN_REPORT_JSON="$FRESHNESS_DIR/stale_report.json"
+jq '.started_at="2026-03-10T09:30:00Z" | .finished_at="2026-03-10T10:00:00Z"' "$FRESH_RUN_REPORT_JSON" >"$STALE_RUN_REPORT_JSON"
+set +e
+PROD_PILOT_COHORT_QUICK_CHECK_NOW_EPOCH="$FRESHNESS_NOW_EPOCH" \
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_COHORT_SIGNOFF_POLICY=0 \
+./scripts/prod_pilot_cohort_quick_check.sh \
+  --run-report-json "$STALE_RUN_REPORT_JSON" \
+  --max-evidence-age-sec 3600 >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_stale.log 2>&1
+stale_rc=$?
+set -e
+if [[ "$stale_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for stale quick run report"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_stale.log
+  exit 1
+fi
+if ! rg -q 'timestamp is stale' ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_stale.log; then
+  echo "expected stale timestamp signal not found"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_stale.log
+  exit 1
+fi
+
+MISSING_TS_RUN_REPORT_JSON="$FRESHNESS_DIR/missing_timestamp_report.json"
+jq 'del(.started_at) | del(.finished_at)' "$FRESH_RUN_REPORT_JSON" >"$MISSING_TS_RUN_REPORT_JSON"
+set +e
+PROD_PILOT_COHORT_QUICK_CHECK_NOW_EPOCH="$FRESHNESS_NOW_EPOCH" \
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_COHORT_SIGNOFF_POLICY=0 \
+./scripts/prod_pilot_cohort_quick_check.sh \
+  --run-report-json "$MISSING_TS_RUN_REPORT_JSON" \
+  --max-evidence-age-sec 3600 >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_missing.log 2>&1
+missing_rc=$?
+set -e
+if [[ "$missing_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for missing quick run report timestamps"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_missing.log
+  exit 1
+fi
+if ! rg -q 'timestamp missing' ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_missing.log; then
+  echo "expected missing timestamp signal not found"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_missing.log
+  exit 1
+fi
+
+MALFORMED_TS_RUN_REPORT_JSON="$FRESHNESS_DIR/malformed_timestamp_report.json"
+jq '.finished_at="not-a-timestamp"' "$FRESH_RUN_REPORT_JSON" >"$MALFORMED_TS_RUN_REPORT_JSON"
+set +e
+PROD_PILOT_COHORT_QUICK_CHECK_NOW_EPOCH="$FRESHNESS_NOW_EPOCH" \
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_COHORT_SIGNOFF_POLICY=0 \
+./scripts/prod_pilot_cohort_quick_check.sh \
+  --run-report-json "$MALFORMED_TS_RUN_REPORT_JSON" \
+  --max-evidence-age-sec 3600 >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_invalid.log 2>&1
+invalid_rc=$?
+set -e
+if [[ "$invalid_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for malformed quick run report timestamp"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_invalid.log
+  exit 1
+fi
+if ! rg -q 'timestamp is invalid' ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_invalid.log; then
+  echo "expected invalid timestamp signal not found"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_invalid.log
+  exit 1
+fi
+
+FUTURE_TS_RUN_REPORT_JSON="$FRESHNESS_DIR/future_timestamp_report.json"
+jq '.started_at="2026-03-10T13:00:00Z" | .finished_at="2026-03-10T13:05:00Z"' "$FRESH_RUN_REPORT_JSON" >"$FUTURE_TS_RUN_REPORT_JSON"
+set +e
+PROD_PILOT_COHORT_QUICK_CHECK_NOW_EPOCH="$FRESHNESS_NOW_EPOCH" \
+PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_COHORT_SIGNOFF_POLICY=0 \
+./scripts/prod_pilot_cohort_quick_check.sh \
+  --run-report-json "$FUTURE_TS_RUN_REPORT_JSON" \
+  --max-evidence-age-sec 3600 >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_future.log 2>&1
+future_rc=$?
+set -e
+if [[ "$future_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for future quick run report timestamp"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_future.log
+  exit 1
+fi
+if ! rg -q 'timestamp is too far in the future' ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_future.log; then
+  echo "expected future timestamp signal not found"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_check_freshness_future.log
+  exit 1
+fi
+
 echo "[prod-pilot-cohort-quick-check] detect signoff rc failure"
 BAD_SIGNOFF="$TMP_DIR/bad_signoff.json"
 jq '.signoff.rc=3' "$RUN_REPORT_JSON" >"$BAD_SIGNOFF"
@@ -415,6 +534,7 @@ PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
   --require-signoff-ok 1 \
   --incident-snapshot-min-attachment-count 2 \
   --incident-snapshot-max-skipped-count 0 \
+  --max-evidence-age-sec 900 \
   --show-json 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_check_easy_node.log 2>&1
 
 if ! rg -F -q -- "--run-report-json ${TMP_DIR}/quick/report.json" "$CHECK_CAPTURE"; then
@@ -434,6 +554,11 @@ if ! rg -q -- '--incident-snapshot-min-attachment-count 2' "$CHECK_CAPTURE"; the
 fi
 if ! rg -q -- '--incident-snapshot-max-skipped-count 0' "$CHECK_CAPTURE"; then
   echo "easy_node quick-check forwarding failed: missing --incident-snapshot-max-skipped-count"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 900' "$CHECK_CAPTURE"; then
+  echo "easy_node quick-check forwarding failed: missing --max-evidence-age-sec"
   cat "$CHECK_CAPTURE"
   exit 1
 fi

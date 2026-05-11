@@ -36,6 +36,7 @@ Usage:
     [--incident-snapshot-min-attachment-count N] \
     [--incident-snapshot-max-skipped-count N|-1] \
     [--max-duration-sec N] \
+    [--max-evidence-age-sec N] \
     [--show-json [0|1]]
 
 Purpose:
@@ -139,6 +140,38 @@ json_valid01() {
   fi
 }
 
+iso8601_utc_to_epoch() {
+  local timestamp="$1"
+  timestamp="$(trim "$timestamp")"
+  if [[ ! "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+    return 1
+  fi
+  jq -nr --arg ts "$timestamp" '$ts | fromdateiso8601 | floor' 2>/dev/null
+}
+
+check_evidence_timestamp_age() {
+  local label="$1"
+  local timestamp="$2"
+  local now_epoch="$3"
+  local timestamp_epoch=""
+  timestamp="$(trim "$timestamp")"
+  if [[ -z "$timestamp" ]]; then
+    errors+=("$label timestamp missing while --max-evidence-age-sec is enabled")
+    return
+  fi
+  if ! timestamp_epoch="$(iso8601_utc_to_epoch "$timestamp" 2>/dev/null)"; then
+    errors+=("$label timestamp is invalid (value=$timestamp)")
+    return
+  fi
+  if (( timestamp_epoch > now_epoch + max_evidence_future_skew_sec )); then
+    errors+=("$label timestamp is too far in the future (value=$timestamp, future_skew_sec=$((timestamp_epoch - now_epoch)))")
+    return
+  fi
+  if (( now_epoch - timestamp_epoch > max_evidence_age_sec )); then
+    errors+=("$label timestamp is stale (value=$timestamp, age_sec=$((now_epoch - timestamp_epoch)), max_evidence_age_sec=$max_evidence_age_sec)")
+  fi
+}
+
 need_cmd jq
 
 run_report_json=""
@@ -167,6 +200,9 @@ require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INC
 incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}"
 incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}"
 max_duration_sec="${PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC:-0}"
+max_evidence_age_sec="${PROD_PILOT_COHORT_QUICK_CHECK_MAX_EVIDENCE_AGE_SEC:-0}"
+max_evidence_future_skew_sec="${PROD_PILOT_COHORT_QUICK_CHECK_MAX_EVIDENCE_FUTURE_SKEW_SEC:-300}"
+max_evidence_now_epoch="${PROD_PILOT_COHORT_QUICK_CHECK_NOW_EPOCH:-}"
 show_json="${PROD_PILOT_COHORT_QUICK_CHECK_SHOW_JSON:-0}"
 
 while [[ $# -gt 0 ]]; do
@@ -350,6 +386,10 @@ while [[ $# -gt 0 ]]; do
       max_duration_sec="${2:-}"
       shift 2
       ;;
+    --max-evidence-age-sec)
+      max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --show-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         show_json="${2:-}"
@@ -399,6 +439,18 @@ if [[ ! "$max_duration_sec" =~ ^[0-9]+$ ]]; then
   echo "--max-duration-sec must be an integer >= 0"
   exit 2
 fi
+if [[ ! "$max_evidence_age_sec" =~ ^[0-9]+$ ]]; then
+  echo "--max-evidence-age-sec must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$max_evidence_future_skew_sec" =~ ^[0-9]+$ ]]; then
+  echo "PROD_PILOT_COHORT_QUICK_CHECK_MAX_EVIDENCE_FUTURE_SKEW_SEC must be an integer >= 0"
+  exit 2
+fi
+if [[ -n "$max_evidence_now_epoch" && ! "$max_evidence_now_epoch" =~ ^[0-9]+$ ]]; then
+  echo "PROD_PILOT_COHORT_QUICK_CHECK_NOW_EPOCH must be an integer >= 0"
+  exit 2
+fi
 if [[ ! "$min_trend_wg_soak_selection_lines" =~ ^[0-9]+$ ]]; then
   echo "--min-trend-wg-soak-selection-lines must be an integer >= 0"
   exit 2
@@ -446,6 +498,9 @@ fi
 status="$(json_string "$run_report_json" '.status')"
 failure_step="$(json_string "$run_report_json" '.failure_step')"
 final_rc="$(json_int "$run_report_json" '.final_rc')"
+started_at="$(json_string "$run_report_json" '.started_at')"
+finished_at="$(json_string "$run_report_json" '.finished_at')"
+generated_at_utc="$(json_string "$run_report_json" '.generated_at_utc')"
 duration_sec="$(json_int "$run_report_json" '.duration_sec')"
 runbook_rc="$(json_int "$run_report_json" '.runbook.rc')"
 signoff_attempted="$(json_bool_flag "$run_report_json" '.signoff.attempted')"
@@ -459,6 +514,9 @@ if [[ -n "$pre_real_host_readiness_summary_json" && "$pre_real_host_readiness_su
   pre_real_host_readiness_summary_json="$ROOT_DIR/$pre_real_host_readiness_summary_json"
 fi
 summary_status=""
+summary_started_at=""
+summary_finished_at=""
+summary_generated_at_utc=""
 summary_valid_json="0"
 summary_incident_source_run_report=""
 summary_incident_enabled="0"
@@ -470,6 +528,9 @@ summary_incident_report_md=""
 if [[ -n "$summary_json" && -f "$summary_json" ]]; then
   summary_valid_json="$(json_valid01 "$summary_json")"
   summary_status="$(json_string "$summary_json" '.status')"
+  summary_started_at="$(json_string "$summary_json" '.started_at')"
+  summary_finished_at="$(json_string "$summary_json" '.finished_at')"
+  summary_generated_at_utc="$(json_string "$summary_json" '.generated_at_utc')"
   summary_incident_source_run_report="$(json_string "$summary_json" '.incident_snapshot.latest_failed_run_report.path')"
   summary_incident_enabled="$(json_bool_flag "$summary_json" '.incident_snapshot.latest_failed_run_report.enabled')"
   summary_incident_status="$(json_string "$summary_json" '.incident_snapshot.latest_failed_run_report.status')"
@@ -495,6 +556,35 @@ if [[ -n "$summary_json" && -f "$summary_json" ]]; then
 fi
 
 declare -a errors=()
+
+if (( max_evidence_age_sec > 0 )); then
+  if [[ -n "$max_evidence_now_epoch" ]]; then
+    now_epoch="$max_evidence_now_epoch"
+  else
+    need_cmd date
+    now_epoch="$(date -u +%s)"
+  fi
+  if [[ -z "$now_epoch" || ! "$now_epoch" =~ ^[0-9]+$ ]]; then
+    errors+=("could not determine current UTC epoch for evidence freshness check")
+  else
+    check_evidence_timestamp_age "quick run report started_at" "$started_at" "$now_epoch"
+    quick_finished_freshness_ts="$finished_at"
+    if [[ -z "$quick_finished_freshness_ts" ]]; then
+      quick_finished_freshness_ts="$generated_at_utc"
+    fi
+    check_evidence_timestamp_age "quick run report finished_at" "$quick_finished_freshness_ts" "$now_epoch"
+    if [[ "$require_summary_json" == "1" || "$require_summary_status_ok" == "1" || "$require_cohort_signoff_policy" == "1" ]]; then
+      summary_freshness_ts="$summary_finished_at"
+      if [[ -z "$summary_freshness_ts" ]]; then
+        summary_freshness_ts="$summary_generated_at_utc"
+      fi
+      if [[ -z "$summary_freshness_ts" ]]; then
+        summary_freshness_ts="$summary_started_at"
+      fi
+      check_evidence_timestamp_age "quick summary evidence" "$summary_freshness_ts" "$now_epoch"
+    fi
+  fi
+fi
 
 if [[ "$require_status_ok" == "1" && "$status" != "ok" ]]; then
   errors+=("quick status is not ok (status=${status:-unset}, failure_step=${failure_step:-none}, final_rc=$final_rc)")
@@ -618,6 +708,7 @@ echo "[prod-pilot-cohort-quick-check] run_report_json=$run_report_json"
 if [[ -n "$pre_real_host_readiness_summary_json" ]]; then
   echo "[prod-pilot-cohort-quick-check] pre_real_host_readiness_summary_json=$pre_real_host_readiness_summary_json"
 fi
+echo "[prod-pilot-cohort-quick-check] freshness max_evidence_age_sec=$max_evidence_age_sec started_at=${started_at:-unset} finished_at=${finished_at:-unset} generated_at_utc=${generated_at_utc:-unset} summary_started_at=${summary_started_at:-unset} summary_finished_at=${summary_finished_at:-unset} summary_generated_at_utc=${summary_generated_at_utc:-unset}"
 echo "[prod-pilot-cohort-quick-check] decision=$decision status=${status:-unset} runbook_rc=$runbook_rc signoff_attempted=$signoff_attempted signoff_rc=$signoff_rc duration_sec=$duration_sec"
 if [[ -n "$summary_incident_source_run_report" || -n "$summary_incident_summary_json" || -n "$summary_incident_report_md" ]]; then
   echo "[prod-pilot-cohort-quick-check] incident_handoff source_pre_real_host_readiness_summary_json=${pre_real_host_readiness_summary_json:-unset} source_run_report=${summary_incident_source_run_report:-unset} summary_json=${summary_incident_summary_json:-unset} report_md=${summary_incident_report_md:-unset}"

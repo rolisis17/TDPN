@@ -28,6 +28,7 @@ Usage:
     [--incident-snapshot-min-attachment-count N] \
     [--incident-snapshot-max-skipped-count N|-1] \
     [--max-duration-sec N] \
+    [--max-evidence-age-sec N] \
     [--warn-go-rate-pct N] \
     [--critical-go-rate-pct N] \
     [--warn-no-go-count N] \
@@ -127,6 +128,40 @@ float_gt() {
   awk -v l="$left" -v r="$right" 'BEGIN { exit (l > r) ? 0 : 1 }'
 }
 
+iso8601_utc_to_epoch() {
+  local timestamp="$1"
+  timestamp="$(trim "$timestamp")"
+  if [[ ! "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+    return 1
+  fi
+  jq -nr --arg ts "$timestamp" '$ts | fromdateiso8601 | floor' 2>/dev/null
+}
+
+check_evidence_timestamp_age() {
+  local label="$1"
+  local timestamp="$2"
+  local now_epoch="$3"
+  local timestamp_epoch=""
+  timestamp="$(trim "$timestamp")"
+  if [[ -z "$timestamp" ]]; then
+    echo "$label timestamp missing while --max-evidence-age-sec is enabled"
+    return 1
+  fi
+  if ! timestamp_epoch="$(iso8601_utc_to_epoch "$timestamp" 2>/dev/null)"; then
+    echo "$label timestamp is invalid (value=$timestamp)"
+    return 1
+  fi
+  if (( timestamp_epoch > now_epoch + max_evidence_future_skew_sec )); then
+    echo "$label timestamp is too far in the future (value=$timestamp, future_skew_sec=$((timestamp_epoch - now_epoch)))"
+    return 1
+  fi
+  if (( now_epoch - timestamp_epoch > max_evidence_age_sec )); then
+    echo "$label timestamp is stale (value=$timestamp, age_sec=$((now_epoch - timestamp_epoch)), max_evidence_age_sec=$max_evidence_age_sec)"
+    return 1
+  fi
+  return 0
+}
+
 trend_summary_json=""
 run_report_list=""
 reports_dir=""
@@ -145,6 +180,9 @@ require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INC
 incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}"
 incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}"
 max_duration_sec="${PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC:-0}"
+max_evidence_age_sec="${PROD_PILOT_COHORT_QUICK_ALERT_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_QUICK_TREND_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_QUICK_CHECK_MAX_EVIDENCE_AGE_SEC:-0}}}"
+max_evidence_future_skew_sec="${PROD_PILOT_COHORT_QUICK_ALERT_MAX_EVIDENCE_FUTURE_SKEW_SEC:-300}"
+max_evidence_now_epoch="${PROD_PILOT_COHORT_QUICK_ALERT_NOW_EPOCH:-}"
 
 warn_go_rate_pct="${PROD_PILOT_COHORT_QUICK_ALERT_WARN_GO_RATE_PCT:-98}"
 critical_go_rate_pct="${PROD_PILOT_COHORT_QUICK_ALERT_CRITICAL_GO_RATE_PCT:-90}"
@@ -280,6 +318,10 @@ while [[ $# -gt 0 ]]; do
       max_duration_sec="${2:-}"
       shift 2
       ;;
+    --max-evidence-age-sec)
+      max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --warn-go-rate-pct)
       warn_go_rate_pct="${2:-}"
       shift 2
@@ -385,6 +427,18 @@ if [[ ! "$max_duration_sec" =~ ^[0-9]+$ ]]; then
   echo "--max-duration-sec must be an integer >= 0"
   exit 2
 fi
+if [[ ! "$max_evidence_age_sec" =~ ^[0-9]+$ ]]; then
+  echo "--max-evidence-age-sec must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$max_evidence_future_skew_sec" =~ ^[0-9]+$ ]]; then
+  echo "PROD_PILOT_COHORT_QUICK_ALERT_MAX_EVIDENCE_FUTURE_SKEW_SEC must be an integer >= 0"
+  exit 2
+fi
+if [[ -n "$max_evidence_now_epoch" && ! "$max_evidence_now_epoch" =~ ^[0-9]+$ ]]; then
+  echo "PROD_PILOT_COHORT_QUICK_ALERT_NOW_EPOCH must be an integer >= 0"
+  exit 2
+fi
 if [[ ! "$incident_snapshot_min_attachment_count" =~ ^[0-9]+$ ]]; then
   echo "--incident-snapshot-min-attachment-count must be an integer >= 0"
   exit 2
@@ -465,6 +519,7 @@ if [[ -z "$trend_summary_json" ]]; then
     --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count"
     --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count"
     --max-duration-sec "$max_duration_sec"
+    --max-evidence-age-sec "$max_evidence_age_sec"
     --fail-on-any-no-go 0
     --min-go-rate-pct 0
     --show-details 0
@@ -493,6 +548,23 @@ fi
 if ! jq -e . "$trend_summary_json" >/dev/null 2>&1; then
   echo "trend summary JSON is not valid: $trend_summary_json"
   exit 1
+fi
+
+trend_generated_at_utc="$(jq -r '.generated_at_utc // ""' "$trend_summary_json" 2>/dev/null || true)"
+if (( max_evidence_age_sec > 0 )); then
+  if [[ -n "$max_evidence_now_epoch" ]]; then
+    now_epoch="$max_evidence_now_epoch"
+  else
+    now_epoch="$(date -u +%s)"
+  fi
+  if [[ -z "$now_epoch" || ! "$now_epoch" =~ ^[0-9]+$ ]]; then
+    echo "could not determine current UTC epoch for evidence freshness check"
+    exit 1
+  fi
+  if ! freshness_error="$(check_evidence_timestamp_age "quick trend summary generated_at_utc" "$trend_generated_at_utc" "$now_epoch")"; then
+    echo "$freshness_error"
+    exit 1
+  fi
 fi
 
 go_rate_pct="$(jq -r '.go_rate_pct // 0' "$trend_summary_json")"
@@ -581,6 +653,7 @@ echo "[prod-pilot-cohort-quick-alert] severity=$severity reports_total=$reports_
 echo "[prod-pilot-cohort-quick-alert] thresholds warn_go_rate_pct=$warn_go_rate_pct critical_go_rate_pct=$critical_go_rate_pct warn_no_go_count=$warn_no_go_count critical_no_go_count=$critical_no_go_count warn_eval_errors=$warn_eval_errors critical_eval_errors=$critical_eval_errors"
 echo "[prod-pilot-cohort-quick-alert] policy require_cohort_signoff_policy=$require_cohort_signoff_policy incident_snapshot_min_attachment_count=$incident_snapshot_min_attachment_count incident_snapshot_max_skipped_count=$incident_snapshot_max_skipped_count"
 echo "[prod-pilot-cohort-quick-alert] trend_source=$trend_source trend_summary_json=$trend_summary_json"
+echo "[prod-pilot-cohort-quick-alert] freshness max_evidence_age_sec=$max_evidence_age_sec trend_generated_at_utc=${trend_generated_at_utc:-unset}"
 if [[ -n "$incident_source_pre_real_host_readiness_summary_json" || -n "$incident_source_run_report" || -n "$incident_summary_json" || -n "$incident_report_md" || -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
   echo "[prod-pilot-cohort-quick-alert] incident_handoff source_pre_real_host_readiness_summary_json=${incident_source_pre_real_host_readiness_summary_json:-unset} source_quick_run_report=${incident_source_quick_run_report:-unset} source_summary_json=${incident_source_summary_json:-unset} source_run_report=${incident_source_run_report:-unset} summary_json=${incident_summary_json:-unset} report_md=${incident_report_md:-unset} attachment_manifest=${incident_attachment_manifest:-unset} attachment_skipped=${incident_attachment_skipped:-unset} attachment_count=${incident_attachment_count}"
 fi
@@ -619,6 +692,7 @@ summary_payload="$(
     --argjson require_cohort_signoff_policy "$require_cohort_signoff_policy" \
     --argjson incident_snapshot_min_attachment_count "$incident_snapshot_min_attachment_count" \
     --argjson incident_snapshot_max_skipped_count "$incident_snapshot_max_skipped_count" \
+    --argjson max_evidence_age_sec "$max_evidence_age_sec" \
     --argjson fail_on_warn "$fail_on_warn" \
     --argjson fail_on_critical "$fail_on_critical" \
     --argjson show_top_reasons "$show_top_reasons" \
@@ -674,6 +748,7 @@ summary_payload="$(
         require_cohort_signoff_policy: $require_cohort_signoff_policy,
         incident_snapshot_min_attachment_count: $incident_snapshot_min_attachment_count,
         incident_snapshot_max_skipped_count: $incident_snapshot_max_skipped_count,
+        max_evidence_age_sec: $max_evidence_age_sec,
         fail_on_warn: $fail_on_warn,
         fail_on_critical: $fail_on_critical
       },

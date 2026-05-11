@@ -27,6 +27,7 @@ Usage:
     [--incident-snapshot-min-attachment-count N] \
     [--incident-snapshot-max-skipped-count N|-1] \
     [--max-duration-sec N] \
+    [--max-evidence-age-sec N] \
     [--fail-on-any-no-go [0|1]] \
     [--min-go-rate-pct N] \
     [--show-details [0|1]] \
@@ -154,6 +155,15 @@ file_mtime_epoch() {
   echo "0"
 }
 
+iso8601_utc_to_epoch() {
+  local timestamp="$1"
+  timestamp="$(trim "$timestamp")"
+  if [[ ! "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+    return 1
+  fi
+  jq -nr --arg ts "$timestamp" '$ts | fromdateiso8601 | floor' 2>/dev/null
+}
+
 require_status_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_STATUS_OK:-1}"
 require_runbook_ok="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_RUNBOOK_OK:-1}"
 require_signoff_attempted="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_SIGNOFF_ATTEMPTED:-1}"
@@ -166,11 +176,13 @@ require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_QUICK_CHECK_REQUIRE_INC
 incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-0}"
 incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_QUICK_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:--1}"
 max_duration_sec="${PROD_PILOT_COHORT_QUICK_CHECK_MAX_DURATION_SEC:-0}"
+max_evidence_age_sec="${PROD_PILOT_COHORT_QUICK_TREND_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_QUICK_CHECK_MAX_EVIDENCE_AGE_SEC:-0}}"
 
 fail_on_any_no_go="${PROD_PILOT_COHORT_QUICK_TREND_FAIL_ON_ANY_NO_GO:-0}"
 min_go_rate_pct="${PROD_PILOT_COHORT_QUICK_TREND_MIN_GO_RATE_PCT:-0}"
 max_reports="${PROD_PILOT_COHORT_QUICK_TREND_MAX_REPORTS:-25}"
 since_hours="${PROD_PILOT_COHORT_QUICK_TREND_SINCE_HOURS:-0}"
+trend_now_epoch="${PROD_PILOT_COHORT_QUICK_TREND_NOW_EPOCH:-}"
 show_details="${PROD_PILOT_COHORT_QUICK_TREND_SHOW_DETAILS:-1}"
 show_top_reasons="${PROD_PILOT_COHORT_QUICK_TREND_SHOW_TOP_REASONS:-5}"
 summary_json=""
@@ -295,6 +307,10 @@ while [[ $# -gt 0 ]]; do
       max_duration_sec="${2:-}"
       shift 2
       ;;
+    --max-evidence-age-sec)
+      max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --fail-on-any-no-go)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         fail_on_any_no_go="${2:-}"
@@ -370,6 +386,14 @@ bool_arg_or_die "--print-summary-json" "$print_summary_json"
 
 if [[ ! "$max_duration_sec" =~ ^[0-9]+$ ]]; then
   echo "--max-duration-sec must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$max_evidence_age_sec" =~ ^[0-9]+$ ]]; then
+  echo "--max-evidence-age-sec must be an integer >= 0"
+  exit 2
+fi
+if [[ -n "$trend_now_epoch" && ! "$trend_now_epoch" =~ ^[0-9]+$ ]]; then
+  echo "PROD_PILOT_COHORT_QUICK_TREND_NOW_EPOCH must be an integer >= 0"
   exit 2
 fi
 if [[ ! "$incident_snapshot_min_attachment_count" =~ ^[0-9]+$ ]]; then
@@ -450,7 +474,11 @@ fi
 ranked_file="$tmp_dir/ranked_reports.txt"
 touch "$ranked_file"
 declare -A seen_paths=()
-now_epoch="$(date +%s 2>/dev/null || echo 0)"
+if [[ -n "$trend_now_epoch" ]]; then
+  now_epoch="$trend_now_epoch"
+else
+  now_epoch="$(date -u +%s 2>/dev/null || echo 0)"
+fi
 cutoff_epoch=0
 if ((since_hours > 0 && now_epoch > 0)); then
   cutoff_epoch=$((now_epoch - since_hours * 3600))
@@ -475,11 +503,25 @@ while IFS= read -r candidate || [[ -n "$candidate" ]]; do
     continue
   fi
   seen_paths["$local_path"]=1
+  evidence_timestamp="$(jq -r '.finished_at // .started_at // .generated_at_utc // ""' "$local_path" 2>/dev/null || true)"
+  evidence_epoch=0
+  if [[ -n "$evidence_timestamp" ]]; then
+    evidence_epoch="$(iso8601_utc_to_epoch "$evidence_timestamp" 2>/dev/null || echo 0)"
+  fi
   mtime="$(file_mtime_epoch "$local_path")"
-  if ((cutoff_epoch > 0 && mtime < cutoff_epoch)); then
+  rank_epoch="$mtime"
+  if [[ "$evidence_epoch" =~ ^[0-9]+$ ]] && ((evidence_epoch > 0)); then
+    rank_epoch="$evidence_epoch"
+  fi
+  if ((cutoff_epoch > 0)); then
+    if [[ ! "$evidence_epoch" =~ ^[0-9]+$ ]] || ((evidence_epoch <= 0 || evidence_epoch < cutoff_epoch)); then
+      continue
+    fi
+  fi
+  if [[ ! "$rank_epoch" =~ ^[0-9]+$ ]]; then
     continue
   fi
-  printf '%s\t%s\n' "$mtime" "$local_path" >>"$ranked_file"
+  printf '%s\t%s\n' "$rank_epoch" "$local_path" >>"$ranked_file"
 done <"$candidates_file"
 
 if [[ ! -s "$ranked_file" ]]; then
@@ -599,6 +641,7 @@ while IFS=$'\t' read -r _mtime report_path || [[ -n "${report_path:-}" ]]; do
     --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count" \
     --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count" \
     --max-duration-sec "$max_duration_sec" \
+    --max-evidence-age-sec "$max_evidence_age_sec" \
     --show-json 0 >"$out_file" 2>&1
   rc=$?
   set -e
@@ -640,7 +683,7 @@ go_rate_pct="$(awk -v g="$go_reports" -v t="$total_reports" 'BEGIN { if (t == 0)
 
 echo "[prod-pilot-cohort-quick-trend] reports_total=$total_reports go=$go_reports no_go=$no_go_reports go_rate_pct=$go_rate_pct"
 echo "[prod-pilot-cohort-quick-trend] filters max_reports=$max_reports since_hours=$since_hours"
-echo "[prod-pilot-cohort-quick-trend] policy require_status_ok=$require_status_ok require_runbook_ok=$require_runbook_ok require_signoff_attempted=$require_signoff_attempted require_signoff_ok=$require_signoff_ok require_cohort_signoff_policy=$require_cohort_signoff_policy require_summary_json=$require_summary_json require_summary_status_ok=$require_summary_status_ok max_duration_sec=$max_duration_sec incident_snapshot_min_attachment_count=$incident_snapshot_min_attachment_count incident_snapshot_max_skipped_count=$incident_snapshot_max_skipped_count"
+echo "[prod-pilot-cohort-quick-trend] policy require_status_ok=$require_status_ok require_runbook_ok=$require_runbook_ok require_signoff_attempted=$require_signoff_attempted require_signoff_ok=$require_signoff_ok require_cohort_signoff_policy=$require_cohort_signoff_policy require_summary_json=$require_summary_json require_summary_status_ok=$require_summary_status_ok max_duration_sec=$max_duration_sec max_evidence_age_sec=$max_evidence_age_sec incident_snapshot_min_attachment_count=$incident_snapshot_min_attachment_count incident_snapshot_max_skipped_count=$incident_snapshot_max_skipped_count"
 if ((eval_errors > 0)); then
   echo "[prod-pilot-cohort-quick-trend] evaluation_errors=$eval_errors"
 fi
@@ -712,6 +755,7 @@ summary_payload="$(
     --argjson eval_errors "$eval_errors" \
     --argjson max_reports "$max_reports" \
     --argjson since_hours "$since_hours" \
+    --argjson max_evidence_age_sec "$max_evidence_age_sec" \
     --argjson require_status_ok "$require_status_ok" \
     --argjson require_runbook_ok "$require_runbook_ok" \
     --argjson require_signoff_attempted "$require_signoff_attempted" \
@@ -774,6 +818,7 @@ summary_payload="$(
         require_summary_json: $require_summary_json,
         require_summary_status_ok: $require_summary_status_ok,
         max_duration_sec: $max_duration_sec,
+        max_evidence_age_sec: $max_evidence_age_sec,
         incident_snapshot_min_attachment_count: $incident_snapshot_min_attachment_count,
         incident_snapshot_max_skipped_count: $incident_snapshot_max_skipped_count,
         fail_on_any_no_go: $fail_on_any_no_go,

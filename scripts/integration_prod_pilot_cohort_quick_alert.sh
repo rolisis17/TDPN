@@ -23,9 +23,12 @@ trap cleanup EXIT
 OK_SUMMARY="$TMP_DIR/quick_trend_ok.json"
 WARN_SUMMARY="$TMP_DIR/quick_trend_warn.json"
 CRIT_SUMMARY="$TMP_DIR/quick_trend_critical.json"
+STALE_SUMMARY="$TMP_DIR/quick_trend_stale.json"
+ALERT_NOW_EPOCH="$(jq -nr '"2026-03-10T12:00:00Z" | fromdateiso8601 | floor')"
 
 cat >"$OK_SUMMARY" <<'EOF_OK_SUMMARY'
 {
+  "generated_at_utc": "2026-03-10T11:55:00Z",
   "go_rate_pct": 100,
   "no_go": 0,
   "evaluation_errors": 0,
@@ -36,6 +39,7 @@ EOF_OK_SUMMARY
 
 cat >"$WARN_SUMMARY" <<'EOF_WARN_SUMMARY'
 {
+  "generated_at_utc": "2026-03-10T11:55:00Z",
   "go_rate_pct": 96.5,
   "no_go": 1,
   "evaluation_errors": 0,
@@ -65,6 +69,7 @@ EOF_WARN_SUMMARY
 
 cat >"$CRIT_SUMMARY" <<'EOF_CRIT_SUMMARY'
 {
+  "generated_at_utc": "2026-03-10T11:55:00Z",
   "go_rate_pct": 84.2,
   "no_go": 3,
   "evaluation_errors": 2,
@@ -75,6 +80,8 @@ cat >"$CRIT_SUMMARY" <<'EOF_CRIT_SUMMARY'
   ]
 }
 EOF_CRIT_SUMMARY
+
+jq '.generated_at_utc="2026-03-10T10:00:00Z"' "$OK_SUMMARY" >"$STALE_SUMMARY"
 
 echo "[prod-pilot-cohort-quick-alert] OK severity baseline"
 ./scripts/prod_pilot_cohort_quick_alert.sh \
@@ -150,6 +157,25 @@ if ! jq -e '.incident_snapshot.latest_failed_run_report.source_pre_real_host_rea
   exit 1
 fi
 
+echo "[prod-pilot-cohort-quick-alert] stale trend summary freshness gate"
+set +e
+PROD_PILOT_COHORT_QUICK_ALERT_NOW_EPOCH="$ALERT_NOW_EPOCH" \
+./scripts/prod_pilot_cohort_quick_alert.sh \
+  --trend-summary-json "$STALE_SUMMARY" \
+  --max-evidence-age-sec 3600 >${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_stale.log 2>&1
+stale_alert_rc=$?
+set -e
+if [[ "$stale_alert_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for stale provided trend summary"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_stale.log
+  exit 1
+fi
+if ! rg -q 'timestamp is stale' ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_stale.log; then
+  echo "expected stale trend timestamp signal not found"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_stale.log
+  exit 1
+fi
+
 echo "[prod-pilot-cohort-quick-alert] CRITICAL fail-close"
 set +e
 ./scripts/prod_pilot_cohort_quick_alert.sh \
@@ -189,15 +215,8 @@ while [[ $# -gt 0 ]]; do
 done
 if [[ -n "$summary_file" ]]; then
   mkdir -p "$(dirname "$summary_file")"
-  cat >"$summary_file" <<'EOF_TREND_SUMMARY'
-{
-  "go_rate_pct": 99.2,
-  "no_go": 0,
-  "evaluation_errors": 0,
-  "reports_total": 4,
-  "top_no_go_reasons": []
-}
-EOF_TREND_SUMMARY
+  jq -nc --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{generated_at_utc:$generated_at_utc, go_rate_pct:99.2, no_go:0, evaluation_errors:0, reports_total:4, top_no_go_reasons:[]}' >"$summary_file"
 fi
 exit 0
 EOF_FAKE_TREND
@@ -209,6 +228,7 @@ PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
   --reports-dir ${TMP_DIR}/quick_reports \
   --max-reports 7 \
   --since-hours 24 \
+  --max-evidence-age-sec 900 \
   --require-cohort-signoff-policy 1 \
   --require-signoff-ok 1 \
   --show-top-reasons 3 >${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_generated.log 2>&1
@@ -225,6 +245,11 @@ if ! rg -q -- '--max-reports 7' "$TREND_CAPTURE"; then
 fi
 if ! rg -q -- '--since-hours 24' "$TREND_CAPTURE"; then
   echo "quick-alert generated trend failed: missing since-hours forwarding"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 900' "$TREND_CAPTURE"; then
+  echo "quick-alert generated trend failed: missing max-evidence-age-sec forwarding"
   cat "$TREND_CAPTURE"
   exit 1
 fi
@@ -282,6 +307,7 @@ PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
 ./scripts/easy_node.sh prod-pilot-cohort-quick-alert \
   --reports-dir ${TMP_DIR}/quick_reports \
   --since-hours 12 \
+  --max-evidence-age-sec 600 \
   --require-cohort-signoff-policy 1 \
   --warn-go-rate-pct 99 \
   --critical-go-rate-pct 95 \
@@ -296,6 +322,11 @@ if ! rg -F -q -- "--reports-dir ${TMP_DIR}/quick_reports" "$ALERT_CAPTURE"; then
 fi
 if ! rg -q -- '--since-hours 12' "$ALERT_CAPTURE"; then
   echo "easy_node quick-alert forwarding failed: missing since-hours"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$ALERT_CAPTURE"; then
+  echo "easy_node quick-alert forwarding failed: missing max-evidence-age-sec"
   cat "$ALERT_CAPTURE"
   exit 1
 fi

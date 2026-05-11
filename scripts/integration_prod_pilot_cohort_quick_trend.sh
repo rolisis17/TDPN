@@ -31,6 +31,7 @@ RUN_B_INCIDENT_REPORT_MD="$REPORTS_DIR/run_b/incident_snapshot/incident_report.m
 RUN_B_INCIDENT_ATTACH_MANIFEST="$REPORTS_DIR/run_b/incident_snapshot/attachments_manifest.json"
 RUN_B_INCIDENT_ATTACH_SKIPPED="$REPORTS_DIR/run_b/incident_snapshot/attachments_skipped.json"
 RUN_B_PRE_REAL_HOST_READINESS_SUMMARY_JSON="$REPORTS_DIR/run_b/pre_real_host_readiness_summary.json"
+TREND_NOW_EPOCH="$(jq -nr '"2026-03-10T12:30:00Z" | fromdateiso8601 | floor')"
 
 cat >"$RUN_B_INCIDENT_RUN_REPORT" <<'EOF_RUN_B_INCIDENT_RR'
 {"status":"fail"}
@@ -185,8 +186,8 @@ if ! rg -q "attachment_manifest=${RUN_B_INCIDENT_ATTACH_MANIFEST}" ${TMP_DIR}/in
   exit 1
 fi
 
-echo "[prod-pilot-cohort-quick-trend] since-hours filter"
-touch -t 202001010101 "$REPORTS_DIR/run_a/prod_pilot_cohort_quick_report.json" "$REPORTS_DIR/run_b/prod_pilot_cohort_quick_report.json"
+echo "[prod-pilot-cohort-quick-trend] since-hours filter uses embedded evidence time"
+PROD_PILOT_COHORT_QUICK_TREND_NOW_EPOCH="$TREND_NOW_EPOCH" \
 ./scripts/prod_pilot_cohort_quick_trend.sh \
   --reports-dir "$REPORTS_DIR" \
   --max-reports 10 \
@@ -258,11 +259,17 @@ PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_QUICK_CHECK" \
 ./scripts/prod_pilot_cohort_quick_trend.sh \
   --reports-dir "$REPORTS_DIR" \
   --max-reports 1 \
+  --max-evidence-age-sec 600 \
   --require-cohort-signoff-policy 1 \
   --show-details 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_cohort_policy.log 2>&1
 
 if ! rg -q -- '--require-cohort-signoff-policy 1' "$CHECK_CAPTURE"; then
   echo "quick-trend forwarding failed: missing --require-cohort-signoff-policy 1 to quick-check"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$CHECK_CAPTURE"; then
+  echo "quick-trend forwarding failed: missing --max-evidence-age-sec to quick-check"
   cat "$CHECK_CAPTURE"
   exit 1
 fi
@@ -306,6 +313,7 @@ PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
   --reports-dir /tmp/reports \
   --max-reports 10 \
   --since-hours 24 \
+  --max-evidence-age-sec 900 \
   --require-cohort-signoff-policy 1 \
   --summary-json /tmp/quick_trend.json \
   --print-summary-json 1 \
@@ -330,6 +338,11 @@ if ! rg -q -- '--min-go-rate-pct 95' "$CAPTURE"; then
 fi
 if ! rg -q -- '--since-hours 24' "$CAPTURE"; then
   echo "easy_node quick-trend forwarding failed: missing --since-hours"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 900' "$CAPTURE"; then
+  echo "easy_node quick-trend forwarding failed: missing --max-evidence-age-sec"
   cat "$CAPTURE"
   exit 1
 fi
