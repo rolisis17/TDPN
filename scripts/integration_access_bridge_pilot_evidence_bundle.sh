@@ -95,6 +95,23 @@ fi
 
 set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url https://helper.home.arpa \
+  --path-id helper-web \
+  --code test-code \
+  --config-json "$TMP_DIR/missing-config.json" \
+  --deploy-pack-dir "$TMP_DIR/missing-deploy-pack" \
+  --print-summary-json 0 >"$TMP_DIR/home-arpa-https-pilot-bundle.log" 2>&1
+home_arpa_https_rc=$?
+set -e
+if [[ "$home_arpa_https_rc" -eq 0 ]] ||
+  ! grep -Fq -- '--base-url host must look public-routable for non-loopback pilot evidence targets' "$TMP_DIR/home-arpa-https-pilot-bundle.log"; then
+  echo "access bridge pilot evidence bundle integration failed: home.arpa HTTPS base URL was not rejected"
+  cat "$TMP_DIR/home-arpa-https-pilot-bundle.log"
+  exit 1
+fi
+
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
   --base-url http://127.evil.example \
   --path-id helper-web \
   --code test-code \

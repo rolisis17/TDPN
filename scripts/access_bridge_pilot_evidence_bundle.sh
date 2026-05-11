@@ -212,6 +212,9 @@ base_url_host_is_private_or_reserved() {
   if [[ "$host" =~ (^|\.)example\.(com|net|org)$ ]]; then
     return 0
   fi
+  if [[ "$host" == home.arpa || "$host" == *.home.arpa ]]; then
+    return 0
+  fi
   if [[ "$host" == ts.net || "$host" == *.ts.net || "$host" == tailscale.net || "$host" == *.tailscale.net ]]; then
     return 0
   fi
