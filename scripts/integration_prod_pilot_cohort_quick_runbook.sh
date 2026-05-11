@@ -125,6 +125,7 @@ PROD_PILOT_COHORT_QUICK_RUNBOOK_EASY_NODE_SH="$FAKE_EASY_NODE" \
   --max-round-failures 2 \
   --bundle-outputs 0 \
   --bundle-fail-close 0 \
+  --signoff-max-evidence-age-sec 60 \
   --signoff-incident-snapshot-min-attachment-count 3 \
   --signoff-incident-snapshot-max-skipped-count 0 \
   --reports-dir "$SUCCESS_DIR" \
@@ -310,9 +311,14 @@ if [[ ! -f "${SUCCESS_DIR}/prod_pilot_cohort_quick_runbook_summary.json" ]]; the
   ls -la "$SUCCESS_DIR"
   exit 1
 fi
-if ! jq -e --arg pre_summary_json "${SUCCESS_DIR}/pre_real_host_readiness_summary.json" '.status=="ok" and .stages.quick.rc==0 and .stages.quick_signoff.rc==0 and .stages.quick_dashboard.rc==0 and .config.max_round_failures==2 and .config.bundle_outputs==0 and .config.bundle_fail_close==0 and .config.pre_real_host_readiness==1 and .config.signoff_require_cohort_signoff_policy==1 and .config.dashboard_require_cohort_signoff_policy==0 and .config.signoff_require_trend_artifact_policy_match==1 and .config.signoff_min_trend_wg_soak_selection_lines==12 and .config.signoff_incident_snapshot_min_attachment_count==3 and .config.signoff_incident_snapshot_max_skipped_count==0 and .artifacts.pre_real_host_readiness_summary_json==$pre_summary_json' "${SUCCESS_DIR}/prod_pilot_cohort_quick_runbook_summary.json" >/dev/null 2>&1; then
+if ! jq -e --arg pre_summary_json "${SUCCESS_DIR}/pre_real_host_readiness_summary.json" '.status=="ok" and .stages.quick.rc==0 and .stages.quick_signoff.rc==0 and .stages.quick_dashboard.rc==0 and .config.max_round_failures==2 and .config.bundle_outputs==0 and .config.bundle_fail_close==0 and .config.pre_real_host_readiness==1 and .config.signoff_max_evidence_age_sec==60 and .config.signoff_require_cohort_signoff_policy==1 and .config.dashboard_require_cohort_signoff_policy==0 and .config.signoff_require_trend_artifact_policy_match==1 and .config.signoff_min_trend_wg_soak_selection_lines==12 and .config.signoff_incident_snapshot_min_attachment_count==3 and .config.signoff_incident_snapshot_max_skipped_count==0 and .artifacts.pre_real_host_readiness_summary_json==$pre_summary_json' "${SUCCESS_DIR}/prod_pilot_cohort_quick_runbook_summary.json" >/dev/null 2>&1; then
   echo "runbook summary missing expected success stage fields"
   cat "${SUCCESS_DIR}/prod_pilot_cohort_quick_runbook_summary.json"
+  exit 1
+fi
+if ! rg -q -- '^prod-pilot-cohort-quick-signoff .*--max-evidence-age-sec 60' "$CAPTURE"; then
+  echo "missing freshness policy forwarding to quick-signoff stage"
+  cat "$CAPTURE"
   exit 1
 fi
 if ! rg -q -- "\\[prod-pilot-cohort-quick-runbook] pre_real_host_readiness_summary_json=${SUCCESS_DIR}/pre_real_host_readiness_summary.json" ${TMP_DIR}/integration_prod_pilot_cohort_quick_runbook_success.log; then
@@ -534,6 +540,7 @@ PROD_PILOT_COHORT_QUICK_RUNBOOK_SCRIPT="$FAKE_RUNBOOK" \
   --bundle-fail-close 0 \
   --signoff-incident-snapshot-min-attachment-count 4 \
   --signoff-incident-snapshot-max-skipped-count 1 \
+  --signoff-max-evidence-age-sec 60 \
   --signoff-require-cohort-signoff-policy 1 \
   --signoff-require-trend-artifact-policy-match 0 \
   --dashboard-fail-close 1 \
@@ -601,6 +608,11 @@ if ! rg -q -- '--signoff-incident-snapshot-min-attachment-count 4' "$RUNBOOK_FOR
 fi
 if ! rg -q -- '--signoff-incident-snapshot-max-skipped-count 1' "$RUNBOOK_FORWARD_CAPTURE"; then
   echo "easy_node quick-runbook forwarding failed: missing --signoff-incident-snapshot-max-skipped-count"
+  cat "$RUNBOOK_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--signoff-max-evidence-age-sec 60' "$RUNBOOK_FORWARD_CAPTURE"; then
+  echo "easy_node quick-runbook forwarding failed: missing --signoff-max-evidence-age-sec"
   cat "$RUNBOOK_FORWARD_CAPTURE"
   exit 1
 fi

@@ -337,6 +337,8 @@ Usage:
     [--campaign-signoff-print-summary-json [0|1]] \
     [--campaign-signoff-refresh-summary [0|1]] \
     [--campaign-signoff-summary-fail-on-no-go [0|1]] \
+    [--campaign-signoff-max-evidence-age-sec N] \
+    [--signoff-max-evidence-age-sec N] \
     [--campaign-print-report [0|1]] \
     [--campaign-print-run-report [0|1]] \
     [--campaign-print-summary-json [0|1]] \
@@ -430,6 +432,8 @@ user_campaign_signoff_summary_json=""
 user_campaign_signoff_print_summary_json=""
 user_campaign_signoff_refresh_summary=""
 user_campaign_signoff_summary_fail_on_no_go=""
+user_campaign_signoff_max_evidence_age_sec=""
+user_signoff_max_evidence_age_sec=""
 user_campaign_print_report=""
 user_campaign_print_run_report=""
 user_campaign_print_summary_json=""
@@ -551,6 +555,18 @@ while ((idx < ${#user_args[@]})); do
         user_campaign_signoff_summary_fail_on_no_go="1"
         idx=$((idx + 1))
       fi
+      ;;
+    --campaign-signoff-max-evidence-age-sec)
+      if ((idx + 1 < ${#user_args[@]})); then
+        user_campaign_signoff_max_evidence_age_sec="${user_args[$((idx + 1))]}"
+      fi
+      idx=$((idx + 2))
+      ;;
+    --signoff-max-evidence-age-sec)
+      if ((idx + 1 < ${#user_args[@]})); then
+        user_signoff_max_evidence_age_sec="${user_args[$((idx + 1))]}"
+      fi
+      idx=$((idx + 2))
       ;;
     --pre-real-host-readiness)
       if ((idx + 1 < ${#user_args[@]} && ( "${user_args[$((idx + 1))]}" == "0" || "${user_args[$((idx + 1))]}" == "1" ) )); then
@@ -685,6 +701,7 @@ bundle_outputs="${PROD_PILOT_COHORT_CAMPAIGN_BUNDLE_OUTPUTS:-1}"
 bundle_fail_close="${PROD_PILOT_COHORT_CAMPAIGN_BUNDLE_FAIL_CLOSE:-1}"
 signoff_max_reports="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_MAX_REPORTS:-25}"
 signoff_since_hours="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SINCE_HOURS:-24}"
+signoff_max_evidence_age_sec="${user_signoff_max_evidence_age_sec:-${PROD_PILOT_COHORT_CAMPAIGN_QUICK_SIGNOFF_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_QUICK_SIGNOFF_MAX_EVIDENCE_AGE_SEC:-0}}}"
 signoff_fail_on_any_no_go="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_FAIL_ON_ANY_NO_GO:-0}"
 signoff_min_go_rate_pct="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_MIN_GO_RATE_PCT:-95}"
 signoff_incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}"
@@ -711,6 +728,7 @@ campaign_signoff_required="${user_campaign_signoff_required:-${PROD_PILOT_COHORT
 campaign_signoff_refresh_summary="${user_campaign_signoff_refresh_summary:-${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_REFRESH_SUMMARY:-0}}"
 campaign_signoff_summary_fail_on_no_go="${user_campaign_signoff_summary_fail_on_no_go:-${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SUMMARY_FAIL_ON_NO_GO:-$campaign_summary_fail_close}}"
 campaign_signoff_print_summary_json="${user_campaign_signoff_print_summary_json:-${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_PRINT_SUMMARY_JSON:-0}}"
+campaign_signoff_max_evidence_age_sec="${user_campaign_signoff_max_evidence_age_sec:-${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_CAMPAIGN_CHECK_MAX_EVIDENCE_AGE_SEC:-0}}}"
 reports_dir_override="${PROD_PILOT_COHORT_CAMPAIGN_REPORTS_DIR:-}"
 summary_json_override="${PROD_PILOT_COHORT_CAMPAIGN_SUMMARY_JSON:-}"
 run_report_json_override="${PROD_PILOT_COHORT_CAMPAIGN_RUN_REPORT_JSON:-}"
@@ -737,6 +755,8 @@ int_or_die "PROD_PILOT_COHORT_CAMPAIGN_PAUSE_SEC" "$pause_sec"
 int_or_die "PROD_PILOT_COHORT_CAMPAIGN_MAX_ROUND_FAILURES" "$max_round_failures"
 int_or_die "PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_MAX_REPORTS" "$signoff_max_reports"
 int_or_die "PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SINCE_HOURS" "$signoff_since_hours"
+int_or_die "PROD_PILOT_COHORT_CAMPAIGN_QUICK_SIGNOFF_MAX_EVIDENCE_AGE_SEC" "$signoff_max_evidence_age_sec"
+int_or_die "PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_MAX_EVIDENCE_AGE_SEC" "$campaign_signoff_max_evidence_age_sec"
 int_or_die "PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT" "$signoff_incident_snapshot_min_attachment_count"
 if [[ ! "$signoff_incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((signoff_incident_snapshot_max_skipped_count < -1)); then
   echo "PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT must be an integer >= -1"
@@ -843,6 +863,7 @@ declare -a cmd=(
   --dashboard-md "$dashboard_md"
   --signoff-max-reports "$signoff_max_reports"
   --signoff-since-hours "$signoff_since_hours"
+  --signoff-max-evidence-age-sec "$signoff_max_evidence_age_sec"
   --signoff-fail-on-any-no-go "$signoff_fail_on_any_no_go"
   --signoff-min-go-rate-pct "$effective_signoff_min_go_rate_pct"
   --signoff-require-cohort-signoff-policy 1
@@ -1130,6 +1151,8 @@ write_campaign_run_report() {
     --argjson campaign_signoff_refresh_summary "$campaign_signoff_refresh_summary" \
     --argjson campaign_signoff_summary_fail_on_no_go "$campaign_signoff_summary_fail_on_no_go" \
     --argjson campaign_signoff_print_summary_json "$campaign_signoff_print_summary_json" \
+    --argjson signoff_max_evidence_age_sec "$signoff_max_evidence_age_sec" \
+    --argjson campaign_signoff_max_evidence_age_sec "$campaign_signoff_max_evidence_age_sec" \
     --argjson campaign_run_report_required "$campaign_run_report_required" \
     --argjson campaign_run_report_json_required "$campaign_run_report_json_required" \
     --argjson campaign_require_incident_snapshot_on_fail "$campaign_require_incident_snapshot_on_fail" \
@@ -1176,6 +1199,8 @@ write_campaign_run_report() {
         campaign_signoff_refresh_summary: $campaign_signoff_refresh_summary,
         campaign_signoff_summary_fail_on_no_go: $campaign_signoff_summary_fail_on_no_go,
         campaign_signoff_print_summary_json: $campaign_signoff_print_summary_json,
+        signoff_max_evidence_age_sec: $signoff_max_evidence_age_sec,
+        campaign_signoff_max_evidence_age_sec: $campaign_signoff_max_evidence_age_sec,
         campaign_run_report_required: $campaign_run_report_required,
         campaign_run_report_json_required: $campaign_run_report_json_required,
         require_incident_snapshot_on_fail: $campaign_require_incident_snapshot_on_fail,
@@ -1232,6 +1257,7 @@ if [[ "$campaign_signoff_check" == "1" ]]; then
     --require-incident-snapshot-artifacts "$campaign_require_incident_snapshot_artifacts"
     --incident-snapshot-min-attachment-count "$campaign_incident_snapshot_min_attachment_count"
     --incident-snapshot-max-skipped-count "$campaign_incident_snapshot_max_skipped_count"
+    --max-evidence-age-sec "$campaign_signoff_max_evidence_age_sec"
     --summary-json "$campaign_signoff_summary_json"
     --print-summary-json "$campaign_signoff_print_summary_json"
     --show-json "$show_json"

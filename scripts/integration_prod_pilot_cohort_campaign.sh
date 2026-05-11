@@ -156,6 +156,8 @@ PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_CAMPAIGN_SIGNOFF" \
   --bootstrap-directory https://dir-a:8081 \
   --subject pilot-client \
   --reports-dir "$WRAPPER_REPORTS_DIR" \
+  --signoff-max-evidence-age-sec 60 \
+  --campaign-signoff-max-evidence-age-sec 120 \
   --rounds 7 >/tmp/integration_prod_pilot_cohort_campaign_wrapper.log 2>&1
 
 line="$(sed -n '1p' "$CAPTURE")"
@@ -197,6 +199,11 @@ if ! printf '%s\n' "$line" | rg -q -- '--max-alert-severity WARN'; then
 fi
 if ! printf '%s\n' "$line" | rg -q -- '--bundle-outputs 1'; then
   echo "campaign wrapper missing default --bundle-outputs 1"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! printf '%s\n' "$line" | rg -q -- '--signoff-max-evidence-age-sec 60'; then
+  echo "campaign wrapper missing --signoff-max-evidence-age-sec forwarding"
   cat "$CAPTURE"
   exit 1
 fi
@@ -361,6 +368,11 @@ if ! printf '%s\n' "$line_signoff" | rg -q -- '--require-campaign-signoff-check 
   cat "$SIGNOFF_CAPTURE"
   exit 1
 fi
+if ! printf '%s\n' "$line_signoff" | rg -q -- '--max-evidence-age-sec 120'; then
+  echo "campaign wrapper signoff stage missing --max-evidence-age-sec forwarding"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
 if ! printf '%s\n' "$line_signoff" | rg -q -- '--require-campaign-signoff-enabled 1'; then
   echo "campaign wrapper signoff stage missing --require-campaign-signoff-enabled forwarding"
   cat "$SIGNOFF_CAPTURE"
@@ -433,6 +445,16 @@ if [[ "$(jq -r '.config.campaign_signoff_check' "$run_report_path")" != "1" ]]; 
 fi
 if [[ "$(jq -r '.config.campaign_signoff_required' "$run_report_path")" != "1" ]]; then
   echo "campaign wrapper run report missing default campaign_signoff_required policy"
+  cat "$run_report_path"
+  exit 1
+fi
+if [[ "$(jq -r '.config.signoff_max_evidence_age_sec' "$run_report_path")" != "60" ]]; then
+  echo "campaign wrapper run report missing quick signoff freshness policy"
+  cat "$run_report_path"
+  exit 1
+fi
+if [[ "$(jq -r '.config.campaign_signoff_max_evidence_age_sec' "$run_report_path")" != "120" ]]; then
+  echo "campaign wrapper run report missing campaign signoff freshness policy"
   cat "$run_report_path"
   exit 1
 fi
@@ -661,7 +683,7 @@ echo "[prod-pilot-cohort-campaign] easy-node command dispatch"
 PATH="$TMP_BIN:$PATH" \
 DISPATCH_CAPTURE_FILE="$DISPATCH_CAPTURE" \
 PROD_PILOT_COHORT_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
-./scripts/easy_node.sh prod-pilot-cohort-campaign --bootstrap-directory https://dir-b:8081 --pre-real-host-readiness 0 --pre-real-host-readiness-summary-json /tmp/campaign_pre_real_host.json --campaign-summary-fail-close 0 --campaign-run-report-json /tmp/campaign_run_report.json --campaign-signoff-check 0 --campaign-signoff-required 0 --campaign-signoff-summary-json /tmp/campaign_signoff_summary.json --campaign-signoff-print-summary-json 1 --campaign-signoff-refresh-summary 1 --campaign-signoff-summary-fail-on-no-go 0 --campaign-print-run-report 1 --campaign-run-report-required 0 --campaign-run-report-json-required 0 --campaign-require-incident-snapshot-on-fail 0 --campaign-require-incident-snapshot-artifacts 0 --campaign-incident-snapshot-min-attachment-count 2 --campaign-incident-snapshot-max-skipped-count 3 >/tmp/integration_prod_pilot_cohort_campaign_dispatch.log 2>&1
+./scripts/easy_node.sh prod-pilot-cohort-campaign --bootstrap-directory https://dir-b:8081 --pre-real-host-readiness 0 --pre-real-host-readiness-summary-json /tmp/campaign_pre_real_host.json --signoff-max-evidence-age-sec 60 --campaign-summary-fail-close 0 --campaign-run-report-json /tmp/campaign_run_report.json --campaign-signoff-check 0 --campaign-signoff-required 0 --campaign-signoff-summary-json /tmp/campaign_signoff_summary.json --campaign-signoff-print-summary-json 1 --campaign-signoff-refresh-summary 1 --campaign-signoff-summary-fail-on-no-go 0 --campaign-signoff-max-evidence-age-sec 120 --campaign-print-run-report 1 --campaign-run-report-required 0 --campaign-run-report-json-required 0 --campaign-require-incident-snapshot-on-fail 0 --campaign-require-incident-snapshot-artifacts 0 --campaign-incident-snapshot-min-attachment-count 2 --campaign-incident-snapshot-max-skipped-count 3 >/tmp/integration_prod_pilot_cohort_campaign_dispatch.log 2>&1
 
 if ! rg -q -- '--bootstrap-directory https://dir-b:8081' "$DISPATCH_CAPTURE"; then
   echo "easy-node prod-pilot-cohort-campaign did not forward command arguments"
@@ -731,6 +753,16 @@ if ! rg -q -- '--campaign-signoff-refresh-summary 1' "$DISPATCH_CAPTURE"; then
 fi
 if ! rg -q -- '--campaign-signoff-summary-fail-on-no-go 0' "$DISPATCH_CAPTURE"; then
   echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-signoff-summary-fail-on-no-go"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--signoff-max-evidence-age-sec 60' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --signoff-max-evidence-age-sec"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--campaign-signoff-max-evidence-age-sec 120' "$DISPATCH_CAPTURE"; then
+  echo "easy-node prod-pilot-cohort-campaign did not forward --campaign-signoff-max-evidence-age-sec"
   cat "$DISPATCH_CAPTURE"
   exit 1
 fi

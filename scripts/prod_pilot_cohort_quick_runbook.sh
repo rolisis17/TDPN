@@ -32,6 +32,7 @@ Usage:
     [--dashboard-md PATH] \
     [--signoff-max-reports N] \
     [--signoff-since-hours N] \
+    [--signoff-max-evidence-age-sec N] \
     [--signoff-fail-on-any-no-go [0|1]] \
     [--signoff-min-go-rate-pct N] \
     [--signoff-require-cohort-signoff-policy [0|1]] \
@@ -248,6 +249,7 @@ dashboard_md="${PROD_PILOT_COHORT_QUICK_DASHBOARD_MD:-}"
 
 signoff_max_reports="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MAX_REPORTS:-25}"
 signoff_since_hours="${PROD_PILOT_COHORT_QUICK_SIGNOFF_SINCE_HOURS:-24}"
+signoff_max_evidence_age_sec="${PROD_PILOT_COHORT_QUICK_RUNBOOK_SIGNOFF_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_QUICK_SIGNOFF_MAX_EVIDENCE_AGE_SEC:-0}}"
 signoff_fail_on_any_no_go="${PROD_PILOT_COHORT_QUICK_SIGNOFF_FAIL_ON_ANY_NO_GO:-0}"
 signoff_min_go_rate_pct="${PROD_PILOT_COHORT_QUICK_SIGNOFF_MIN_GO_RATE_PCT:-95}"
 signoff_require_cohort_signoff_policy="${PROD_PILOT_COHORT_QUICK_SIGNOFF_REQUIRE_COHORT_SIGNOFF_POLICY:-1}"
@@ -385,6 +387,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --signoff-since-hours)
       signoff_since_hours="${2:-}"
+      shift 2
+      ;;
+    --signoff-max-evidence-age-sec)
+      signoff_max_evidence_age_sec="${2:-}"
       shift 2
       ;;
     --signoff-fail-on-any-no-go)
@@ -552,6 +558,7 @@ int_or_die "--pause-sec" "$pause_sec"
 int_or_die "--max-round-failures" "$max_round_failures"
 int_or_die "--signoff-max-reports" "$signoff_max_reports"
 int_or_die "--signoff-since-hours" "$signoff_since_hours"
+int_or_die "--signoff-max-evidence-age-sec" "$signoff_max_evidence_age_sec"
 int_or_die "--signoff-min-trend-wg-soak-selection-lines" "$signoff_min_trend_wg_soak_selection_lines"
 int_or_die "--signoff-min-trend-wg-soak-entry-operators" "$signoff_min_trend_wg_soak_entry_operators"
 int_or_die "--signoff-min-trend-wg-soak-exit-operators" "$signoff_min_trend_wg_soak_exit_operators"
@@ -725,6 +732,7 @@ if [[ "$status" == "ok" || -f "$run_report_json" ]]; then
     --reports-dir "$reports_dir"
     --max-reports "$signoff_max_reports"
     --since-hours "$signoff_since_hours"
+    --max-evidence-age-sec "$signoff_max_evidence_age_sec"
     --fail-on-any-no-go "$signoff_fail_on_any_no_go"
     --min-go-rate-pct "$signoff_min_go_rate_pct"
     --require-cohort-signoff-policy "$signoff_require_cohort_signoff_policy"
@@ -881,6 +889,7 @@ jq -nc \
   --argjson trend_min_go_rate_pct "$trend_min_go_rate_pct" \
   --argjson signoff_max_reports "$signoff_max_reports" \
   --argjson signoff_since_hours "$signoff_since_hours" \
+  --argjson signoff_max_evidence_age_sec "$signoff_max_evidence_age_sec" \
   --argjson signoff_fail_on_any_no_go "$signoff_fail_on_any_no_go" \
   --argjson signoff_min_go_rate_pct "$signoff_min_go_rate_pct" \
   --argjson signoff_require_cohort_signoff_policy "$signoff_require_cohort_signoff_policy" \
@@ -943,6 +952,7 @@ jq -nc \
       bundle_fail_close: $bundle_fail_close,
       signoff_max_reports: $signoff_max_reports,
       signoff_since_hours: $signoff_since_hours,
+      signoff_max_evidence_age_sec: $signoff_max_evidence_age_sec,
       signoff_fail_on_any_no_go: $signoff_fail_on_any_no_go,
       signoff_min_go_rate_pct: $signoff_min_go_rate_pct,
       signoff_require_cohort_signoff_policy: $signoff_require_cohort_signoff_policy,
