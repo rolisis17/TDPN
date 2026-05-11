@@ -14,7 +14,7 @@ Command snippets in this runbook assume a Bash-compatible shell on Linux, WSL, o
 
 ## Operator Setup
 
-1. Generate a local demo or pilot bundle:
+1. Generate a local demo bundle for rehearsal, then replace demo hosts/keys with real helper/operator material before any beta handoff:
 
 ```sh
 go run ./cmd/gpmrecover demo-bundle \
@@ -30,7 +30,7 @@ go run ./cmd/gpmrecover demo-bundle \
 
 2. Keep `recovery.key` offline or in a controlled operator machine. Share only:
 
-- `recovery.pub`
+- `recovery.pub` for diagnostic/operator checks only; do not use a raw public key file as beta user handoff material
 - `recovery-trust.json`
 - `recovery-trusted-key.json`, `recovery-trusted-key.txt`, or `recovery-trusted-key.qr.png` for first-time trust handoff
 - signed packs and bridge invites
@@ -191,7 +191,9 @@ bash ./scripts/access_bridge_host_install_check.sh \
   --print-verification-summary-json 1
 ```
 
-Keep the smoke JSON, deployment-evidence JSON, host-install-check JSON, trusted provenance JSON, verifier summary JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, `manifest.sha256`, `<bundle>.tar.gz`, `<bundle>.tar.gz.sha256`, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair; the bundle skips access-code/private-key-looking deploy-pack files. Local integrity checks may be unsigned, but pilot/operator handoff verification must require trusted provenance, write the verifier summary receipt bound to the current evidence hashes, reject demo-marked trust stores unless explicitly allowed for diagnostics, validate the bundled smoke/deployment/host evidence semantics, and reject manifest tamper, tar checksum mismatch, unsafe tar paths, tar links, and untrusted provenance.
+Keep the smoke JSON, deployment-evidence JSON, host-install-check JSON, trusted provenance JSON, verifier summary JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, `manifest.sha256`, `<bundle>.tar.gz`, `<bundle>.tar.gz.sha256`, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair; the bundle skips access-code/private-key-looking deploy-pack files. Local unsigned integrity checks are diagnostic rehearsal output only. Pilot/operator handoff verification must require trusted provenance, write the verifier summary receipt bound to the current evidence hashes, reject demo-marked trust stores unless explicitly allowed for diagnostics, validate the bundled smoke/deployment/host evidence semantics, and reject manifest tamper, tar checksum mismatch, unsafe tar paths, tar links, and untrusted provenance.
+
+Before marking handoff ready, check the verifier receipt shows schema minor `2` or newer, `trusted_pilot_receipt_ready=true`, `pilot_handoff_ready=true`, `pilot_handoff_criteria.bundled_child_evidence_semantic_ok=true`, real-helper HTTPS provenance from a non-demo `trust_store`, `trust_store_sha256_present=true`, `public_key_file_absent=true`, dev trust-store override disabled, and smoke/deployment/host summary SHA-256 bindings.
 
 7. Fail closed on rotation or quarantine:
 

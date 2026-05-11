@@ -86,7 +86,7 @@ ROADMAP_NEXT_ACTIONS_CAPTURE_FILE="$CAPTURE" \
   --local-only 1 \
   --allow-profile-default-gate-unreachable 1 \
   --profile-default-gate-subject inv-forwarded-subject \
-  --access-recovery-trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json \
+  --access-recovery-trust-store .easy-node-logs/operator-trust/recovery-trust.json \
   --include-id blockchain_mainnet_activation_refresh_evidence \
   --exclude-id profile_default_gate \
   --include-id-prefix blockchain_ \
@@ -109,7 +109,7 @@ assert_token "$line" $'\t--parallel\t1' "missing --parallel forwarding"
 assert_token "$line" $'\t--local-only\t1' "missing --local-only forwarding"
 assert_token "$line" $'\t--allow-profile-default-gate-unreachable\t1' "missing --allow-profile-default-gate-unreachable forwarding"
 assert_token "$line" $'\t--profile-default-gate-subject\tinv-forwarded-subject' "missing --profile-default-gate-subject forwarding"
-assert_token "$line" $'\t--access-recovery-trust-store\t.easy-node-logs/access-recovery-demo/recovery-trust.json' "missing --access-recovery-trust-store forwarding"
+assert_token "$line" $'\t--access-recovery-trust-store\t.easy-node-logs/operator-trust/recovery-trust.json' "missing --access-recovery-trust-store forwarding"
 assert_token "$line" $'\t--include-id\tblockchain_mainnet_activation_refresh_evidence' "missing --include-id forwarding"
 assert_token "$line" $'\t--exclude-id\tprofile_default_gate' "missing --exclude-id forwarding"
 assert_token "$line" $'\t--include-id-prefix\tblockchain_' "missing --include-id-prefix forwarding"

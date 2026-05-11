@@ -2291,7 +2291,7 @@ access_recovery_verifier_evidence_json() {
       def pass_status($path):
         (($path // "") | tostring | ascii_downcase) == "pass";
       def schema_minor_ready:
-        ((.schema.minor | type) == "number" and .schema.minor >= 1);
+        ((.schema.minor | type) == "number" and .schema.minor >= 2);
       def tar_sha256_checked:
         .checks.tar_sha256.checked == true;
       def required_checks_enabled:
@@ -2318,6 +2318,7 @@ access_recovery_verifier_evidence_json() {
       def trusted_pilot_receipt_ready:
         schema_minor_ready
         and (.inputs.allow_dev_trust_store != true)
+        and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true)
         and (.trusted_pilot_receipt_ready == true)
         and trusted_provenance_ready;
       def pilot_handoff_ready:
@@ -2335,6 +2336,7 @@ access_recovery_verifier_evidence_json() {
         and (.pilot_handoff_criteria.trust_store_present == true)
         and (.pilot_handoff_criteria.trust_store_sha256_present == true)
         and (.pilot_handoff_criteria.public_key_file_absent == true)
+        and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true)
         and (.pilot_handoff_criteria.dev_trust_store_allowed != true);
       def generated_at_ready:
         (.generated_at_utc | type) == "string" and ((.generated_at_utc | length) > 0);
@@ -2373,6 +2375,7 @@ access_recovery_verifier_evidence_json() {
             elif $valid_contract and (.inputs.allow_dev_trust_store == true) then "Access bridge pilot evidence verifier used a diagnostic dev trust-store override that cannot prove pilot handoff readiness"
             elif $valid_contract and (generated_at_ready | not) then "Access bridge pilot evidence verifier receipt is missing generated_at_utc"
             elif $valid_contract and (evidence_binding_ready | not) then "Access bridge pilot evidence verifier receipt is missing required evidence binding hashes"
+            elif $valid_contract and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok != true) then "Access bridge pilot evidence verifier receipt did not prove bundled child evidence semantics"
             elif $valid_contract and enabled(.checks.tar_sha256.enabled) and (pass_status(.checks.tar_sha256.status)) and (tar_sha256_checked | not) then "Access bridge pilot evidence verifier receipt did not prove the bundle tar checksum was checked"
             elif $valid_contract and ($semantic_ok | not) then "Access bridge pilot evidence verifier did not prove trusted real-helper HTTPS provenance"
             elif $valid_contract then str_or_null(.notes)
@@ -2402,6 +2405,7 @@ access_recovery_verifier_evidence_json() {
             pilot_handoff_criteria_ready: (if (.pilot_handoff_criteria.ready | type) == "boolean" then .pilot_handoff_criteria.ready else null end),
             pilot_handoff_criteria_trust_store_sha256_present: (if (.pilot_handoff_criteria.trust_store_sha256_present | type) == "boolean" then .pilot_handoff_criteria.trust_store_sha256_present else null end),
             pilot_handoff_criteria_public_key_file_absent: (if (.pilot_handoff_criteria.public_key_file_absent | type) == "boolean" then .pilot_handoff_criteria.public_key_file_absent else null end),
+            pilot_handoff_criteria_bundled_child_evidence_semantic_ok: (if (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok | type) == "boolean" then .pilot_handoff_criteria.bundled_child_evidence_semantic_ok else null end),
             pilot_handoff_criteria_dev_trust_store_allowed: (if (.pilot_handoff_criteria.dev_trust_store_allowed | type) == "boolean" then .pilot_handoff_criteria.dev_trust_store_allowed else null end),
             evidence_scope: str_or_null(.trusted_provenance.evidence_scope),
             summary_evidence_scope: str_or_null(.trusted_provenance.summary_evidence_scope),
@@ -2548,6 +2552,7 @@ access_recovery_track_json_from_evidence() {
         and ($bundle_verify.details.pilot_handoff_criteria_ready == true)
         and ($bundle_verify.details.pilot_handoff_criteria_trust_store_sha256_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_public_key_file_absent == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_bundled_child_evidence_semantic_ok == true)
         and ($bundle_verify.details.pilot_handoff_criteria_dev_trust_store_allowed != true)
         and ($bundle_verify.details.allow_dev_trust_store != true);
       def pilot_handoff_ready:
@@ -12339,9 +12344,17 @@ next_actions_candidate_json="$(
       action_evidence_metadata(["access-recovery"]; false; true; ["local-evidence"])
     end;
   def access_recovery_placeholder_metadata($cmd):
-    [
-      (if (($cmd // "") | test("(^|[^A-Z0-9_])(TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_TRUST_STORE)([^A-Z0-9_]|$)")) then "TRUST_STORE" else empty end),
-      (if (($cmd // "") | contains("<TRUST-STORE>") or contains("<SET-TRUST-STORE>") or contains("REPLACE_WITH_TRUST_STORE") or contains("REPLACE_WITH_ACCESS_RECOVERY_TRUST_STORE")) then "TRUST_STORE" else empty end)
+    (($cmd // "") | ascii_upcase) as $ucmd
+    | [
+      (if ($ucmd | test("(^|[^A-Z0-9_])(TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_TRUST_STORE)([^A-Z0-9_]|$)")) then "TRUST_STORE" else empty end),
+      (if ($ucmd | contains("<TRUST-STORE>") or contains("<SET-TRUST-STORE>") or contains("REPLACE_WITH_TRUST_STORE") or contains("REPLACE_WITH_ACCESS_RECOVERY_TRUST_STORE")) then "TRUST_STORE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_])HELPER_PUBLIC_DNS([^A-Z0-9_]|$)")) then "HELPER_PUBLIC_DNS" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_])PRIVATE_CODE_FILE([^A-Z0-9_]|$)")) then "PRIVATE_CODE_FILE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_])BRIDGE_SERVICE_CONFIG([^A-Z0-9_]|$)")) then "BRIDGE_SERVICE_CONFIG" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_])BRIDGE_DEPLOY_PACK([^A-Z0-9_]|$)")) then "BRIDGE_DEPLOY_PACK" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_])PROVENANCE_PRIVATE_KEY_FILE([^A-Z0-9_]|$)")) then "PROVENANCE_PRIVATE_KEY_FILE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_])ORG_ID([^A-Z0-9_]|$)")) then "ORG_ID" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_])ORG_NAME([^A-Z0-9_]|$)")) then "ORG_NAME" else empty end)
     ] | unique_strings_preserve_order as $keys
     | {
         placeholder_unresolved: (($keys | length) > 0),

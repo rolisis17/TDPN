@@ -160,6 +160,8 @@ First CLI (demo bundle plus lower-level artifact examples; commands assume Bash/
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub --timeout-sec 8`
 - `go run ./cmd/gpmrecover fetch-publication --index-url https://freenews.example/.well-known/gpm/recovery-index.json --out-dir .easy-node-logs/access-recovery-fetched`
 
+The `--public-key-file` examples above are local/operator diagnostics for inspecting a single artifact against an expected key. Beta user handoff and pilot/operator receipt paths must use a trust store or trusted-key handoff, plus signed helper registries and trusted evidence provenance where bridge evidence is involved.
+
 Demo bundle flow:
 - `demo-bundle` creates a self-contained beta demo folder with:
   - `recovery.key` and `recovery.pub`
@@ -197,11 +199,13 @@ Local trust-store flow:
 - `bash ./scripts/access_bridge_service_smoke.sh --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/bridge-service-smoke.json`
 - `bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/bridge-service-smoke.json --config-json .easy-node-logs/bridge-service-config.json --deploy-pack-dir .easy-node-logs/bridge-deploy --expect-helper-id helper-demo --expect-org-id freenews-demo --summary-json .easy-node-logs/bridge-deployment-evidence.json`
 - `bash ./scripts/access_bridge_host_install_check.sh --deploy-pack-dir .easy-node-logs/bridge-deploy --config-json .easy-node-logs/bridge-service-config.json --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/bridge-host-install-check.json`
-- `./scripts/easy_node.sh access-recovery-local-evidence-refresh --write-canonical 1 --refresh-roadmap 1 --print-summary-json 1` (local loopback rehearsal; useful for roadmap/dev evidence but not a substitute for real helper HTTPS evidence)
+- `./scripts/easy_node.sh access-recovery-local-evidence-refresh --write-canonical 1 --refresh-roadmap 1 --print-summary-json 1` (local loopback rehearsal; useful for roadmap/dev evidence but not a substitute for real helper HTTPS evidence, signed provenance, and trusted verification)
 - `./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --config-json .easy-node-logs/bridge-service-config.json --deploy-pack-dir .easy-node-logs/bridge-deploy --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE --reports-dir .easy-node-logs/access-recovery-pilot` (preferred real-helper handoff wrapper)
 - `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --config-json .easy-node-logs/bridge-service-config.json --deploy-pack-dir .easy-node-logs/bridge-deploy --summary-json .easy-node-logs/access-bridge-pilot-evidence-summary.json --provenance-sign 1 --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --provenance-out .easy-node-logs/access-bridge-pilot-evidence.provenance.json` (low-level debug command)
-- `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify --summary-json .easy-node-logs/access-bridge-pilot-evidence-summary.json` (local integrity-only verification; unsigned provenance is acceptable for dev evidence)
+- `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify --summary-json .easy-node-logs/access-bridge-pilot-evidence-summary.json` (local integrity-only verification for diagnostics only; unsigned provenance is acceptable for dev evidence but never for pilot/operator handoff)
 - `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify --summary-json .easy-node-logs/access-bridge-pilot-evidence-summary.json --provenance-json .easy-node-logs/access-bridge-pilot-evidence.provenance.json --trust-store TRUST_STORE --require-trusted-provenance 1 --verification-summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_verify_summary.json --print-verification-summary-json 1` (pilot/operator handoff verification and roadmap receipt)
+
+Pilot-ready verifier receipts must use schema minor `2` or newer and show `trusted_pilot_receipt_ready=true`, `pilot_handoff_ready=true`, `pilot_handoff_criteria.bundled_child_evidence_semantic_ok=true`, real-helper HTTPS provenance from a non-demo `trust_store`, `trust_store_sha256_present=true`, `public_key_file_absent=true`, dev trust-store override disabled, and smoke/deployment/host summary SHA-256 bindings.
 
 Warning: local integrity-only verifier output is not a pilot/operator handoff
 receipt. Handoff requires the trusted verification command above, signed
@@ -229,7 +233,7 @@ Trust-store rules:
 - the public key is stored with an organization id/name and derived key id
 - a pack or bridge invite must be signed by a trusted key whose organization id matches the artifact
 - disabled, expired, unknown, or wrong-organization keys fail closed
-- raw `--public-key-file` verification remains available for one-off/operator checks, but beta users should verify through the trust store
+- raw `--public-key-file` verification remains available for one-off/operator diagnostics only; beta users and pilot/operator handoff receipts must verify through the trust store or trusted-key handoff
 
 Bridge-invite rules:
 - bridge invites are helper hints, not new roots of trust

@@ -591,11 +591,29 @@ JSON
 }
 JSON
     ;;
+  access_recovery_real_helper_operator_placeholders)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"real_helper_https_evidence","label":"Real helper HTTPS evidence","command":"./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE --reports-dir /tmp/access-recovery-pilot","reason":"test-real-helper-operator-placeholders","requires_real_hosts":true}
+  ]
+}
+JSON
+    ;;
   access_recovery_trust_store_concrete)
     cat >"$summary_json" <<JSON
 {
   "next_actions": [
     {"id":"trusted_pilot_evidence_verify","label":"Trusted pilot evidence verifier","command":"bash \"$FAKE_ACCESS_RECOVERY_VERIFY\" --summary-json /tmp/fake_bundle.json --provenance-json /tmp/fake.provenance.json --trust-store \"${ACTION_OWNED_TRUST_STORE:-/tmp/action-owned-trust-store.json}\" --require-trusted-provenance 1 --verification-summary-json /tmp/fake_verify.json --print-verification-summary-json 1","reason":"test-access-recovery-concrete-trust-store"}
+  ]
+}
+JSON
+    ;;
+  access_recovery_public_key_handoff)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"trusted_pilot_evidence_verify","label":"Trusted pilot evidence verifier","command":"bash \"$FAKE_ACCESS_RECOVERY_VERIFY\" --summary-json /tmp/fake_bundle.json --provenance-json /tmp/fake.provenance.json --public-key-file /tmp/raw-recovery.pub --require-trusted-provenance 1 --verification-summary-json /tmp/fake_verify.json --print-verification-summary-json 1","reason":"test-access-recovery-public-key-handoff"}
   ]
 }
 JSON
@@ -1413,11 +1431,146 @@ if ! jq -e '
   exit 1
 fi
 
+ACCESS_RECOVERY_TRUST_STORE_FILE="$TMP_DIR/access_recovery_trust_store.json"
+printf '{"trusted_keys":[]}\n' >"$ACCESS_RECOVERY_TRUST_STORE_FILE"
+
+echo "[roadmap-next-actions-run] Access Recovery trusted verifier rejects demo-marked operator trust store"
+SUMMARY_ACCESS_RECOVERY_TRUST_STORE_DEMO="$TMP_DIR/summary_access_recovery_trust_store_demo.json"
+REPORTS_ACCESS_RECOVERY_TRUST_STORE_DEMO="$TMP_DIR/reports_access_recovery_trust_store_demo"
+ACCESS_RECOVERY_DEMO_TRUST_STORE_FILE="$TMP_DIR/access_recovery_demo_trust_store.json"
+printf '{"trusted_keys":[{"source":"generated demo bundle"}]}\n' >"$ACCESS_RECOVERY_DEMO_TRUST_STORE_FILE"
+rm -f "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_trust_store_placeholder \
+FAKE_ACCESS_RECOVERY_VERIFY="$FAKE_ACCESS_RECOVERY_VERIFY" \
+FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE="$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_TRUST_STORE_DEMO" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_DEMO" \
+  --include-id trusted_pilot_evidence_verify \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_DEMO_TRUST_STORE_FILE" \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_trust_store_demo.log" 2>&1
+access_recovery_trust_store_demo_rc=$?
+set -e
+if [[ "$access_recovery_trust_store_demo_rc" != "2" ]]; then
+  echo "expected demo-marked Access Recovery trust-store hard-fail rc=2, got rc=$access_recovery_trust_store_demo_rc"
+  cat "$TMP_DIR/access_recovery_trust_store_demo.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_DEMO" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_DEMO"
+  fi
+  exit 1
+fi
+if [[ -f "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" ]]; then
+  echo "Access Recovery verifier ran despite demo-marked operator trust-store path"
+  cat "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .inputs.access_recovery_trust_store_configured == false
+  and (.inputs.access_recovery_trust_store_source | contains("demo_marked"))
+  and .actions[0].id == "trusted_pilot_evidence_verify"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_trust_store_precondition"
+' "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_DEMO" >/dev/null; then
+  echo "Access Recovery demo-marked trust-store precondition summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_DEMO"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery trusted verifier rejects raw public-key handoff"
+SUMMARY_ACCESS_RECOVERY_PUBLIC_KEY_HANDOFF="$TMP_DIR/summary_access_recovery_public_key_handoff.json"
+REPORTS_ACCESS_RECOVERY_PUBLIC_KEY_HANDOFF="$TMP_DIR/reports_access_recovery_public_key_handoff"
+: >"$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_public_key_handoff \
+FAKE_ACCESS_RECOVERY_VERIFY="$FAKE_ACCESS_RECOVERY_VERIFY" \
+FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE="$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_PUBLIC_KEY_HANDOFF" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_PUBLIC_KEY_HANDOFF" \
+  --include-id trusted_pilot_evidence_verify \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_public_key_handoff.log" 2>&1
+access_recovery_public_key_handoff_rc=$?
+set -e
+if [[ "$access_recovery_public_key_handoff_rc" != "2" ]]; then
+  echo "expected raw public-key Access Recovery handoff hard-fail rc=2, got rc=$access_recovery_public_key_handoff_rc"
+  cat "$TMP_DIR/access_recovery_public_key_handoff.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_PUBLIC_KEY_HANDOFF" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_PUBLIC_KEY_HANDOFF"
+  fi
+  exit 1
+fi
+if [[ -s "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" ]]; then
+  echo "Access Recovery verifier ran despite raw public-key handoff"
+  cat "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE"
+  exit 1
+fi
+if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
+  .status == "fail"
+  and .rc == 2
+  and .inputs.access_recovery_trust_store == $trust_store
+  and .inputs.access_recovery_trust_store_configured == true
+  and .actions[0].id == "trusted_pilot_evidence_verify"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_trust_store_precondition"
+  and (.actions[0].notes | contains("raw public-key handoff"))
+  and (.actions[0].command | contains("--public-key-file"))
+' "$SUMMARY_ACCESS_RECOVERY_PUBLIC_KEY_HANDOFF" >/dev/null; then
+  echo "Access Recovery raw public-key handoff precondition summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_PUBLIC_KEY_HANDOFF"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery real-helper action fails closed on unresolved operator placeholders"
+SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS="$TMP_DIR/summary_access_recovery_operator_placeholders.json"
+REPORTS_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS="$TMP_DIR/reports_access_recovery_operator_placeholders"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_real_helper_operator_placeholders \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS" \
+  --include-id real_helper_https_evidence \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_operator_placeholders.log" 2>&1
+access_recovery_operator_placeholders_rc=$?
+set -e
+if [[ "$access_recovery_operator_placeholders_rc" != "2" ]]; then
+  echo "expected unresolved Access Recovery operator placeholder hard-fail rc=2, got rc=$access_recovery_operator_placeholders_rc"
+  cat "$TMP_DIR/access_recovery_operator_placeholders.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS"
+  fi
+  exit 1
+fi
+if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
+  .status == "fail"
+  and .rc == 2
+  and .inputs.access_recovery_trust_store == $trust_store
+  and .inputs.access_recovery_trust_store_configured == true
+  and .actions[0].id == "real_helper_https_evidence"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
+  and (.actions[0].notes | contains("HELPER_PUBLIC_DNS"))
+  and (.actions[0].notes | contains("PROVENANCE_PRIVATE_KEY_FILE"))
+  and (.actions[0].command | contains("--trust-store " + $trust_store))
+  and (.actions[0].command | contains("HELPER_PUBLIC_DNS"))
+  and (.actions[0].next_operator_action | contains("--include-id real_helper_https_evidence"))
+  and (.actions[0].next_operator_action | contains("HELPER_PUBLIC_DNS"))
+' "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS" >/dev/null; then
+  echo "Access Recovery unresolved operator placeholder precondition summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS"
+  exit 1
+fi
+
 echo "[roadmap-next-actions-run] Access Recovery trusted verifier substitutes configured trust store"
 SUMMARY_ACCESS_RECOVERY_TRUST_STORE_OVERRIDE="$TMP_DIR/summary_access_recovery_trust_store_override.json"
 REPORTS_ACCESS_RECOVERY_TRUST_STORE_OVERRIDE="$TMP_DIR/reports_access_recovery_trust_store_override"
-ACCESS_RECOVERY_TRUST_STORE_FILE="$TMP_DIR/access_recovery_trust_store.json"
-printf '{"trusted_keys":[]}\n' >"$ACCESS_RECOVERY_TRUST_STORE_FILE"
 : >"$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE"
 ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_trust_store_placeholder \
 FAKE_ACCESS_RECOVERY_VERIFY="$FAKE_ACCESS_RECOVERY_VERIFY" \

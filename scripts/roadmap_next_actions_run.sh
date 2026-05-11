@@ -347,6 +347,17 @@ action_id_is_access_recovery_trusted_verify_01() {
   [[ "$action_id" == "trusted_pilot_evidence_verify" || "$action_id" == "real_helper_https_evidence" ]]
 }
 
+action_id_is_access_recovery_action_01() {
+  local action_id
+  action_id="$(trim "${1:-}")"
+  case "$action_id" in
+    access_recovery_evidence|trusted_pilot_evidence_verify|real_helper_https_evidence|access_bridge_service_smoke|access_bridge_deployment_evidence|access_bridge_host_install)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 strip_optional_wrapping_quotes() {
   local value="${1:-}"
   local first_char=""
@@ -450,6 +461,61 @@ access_recovery_trust_store_value_looks_placeholder_01() {
       ;;
   esac
   return 1
+}
+
+access_recovery_operator_input_value_looks_placeholder_01() {
+  local value normalized
+  value="$(trim "${1:-}")"
+  value="$(strip_optional_wrapping_quotes "$value")"
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  if [[ "$normalized" =~ (^|[^A-Z0-9_])(HELPER_PUBLIC_DNS|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME)([^A-Z0-9_]|$) ]]; then
+    return 0
+  fi
+  case "$normalized" in
+    "<HELPER_PUBLIC_DNS>"|"<PRIVATE_CODE_FILE>"|"<BRIDGE_SERVICE_CONFIG>"|"<BRIDGE_DEPLOY_PACK>"|"<PROVENANCE_PRIVATE_KEY_FILE>"|"<ORG_ID>"|"<ORG_NAME>"|\
+    "REPLACE_WITH_HELPER_PUBLIC_DNS"|"REPLACE_WITH_PRIVATE_CODE_FILE"|"REPLACE_WITH_BRIDGE_SERVICE_CONFIG"|"REPLACE_WITH_BRIDGE_DEPLOY_PACK"|"REPLACE_WITH_PROVENANCE_PRIVATE_KEY_FILE"|"REPLACE_WITH_ORG_ID"|"REPLACE_WITH_ORG_NAME")
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+access_recovery_trust_store_path_is_dev_01() {
+  local path canonical candidate
+  path="$(abs_path "${1:-}")"
+  canonical="$path"
+  if [[ -n "$path" ]] && command -v realpath >/dev/null 2>&1; then
+    canonical="$(realpath "$path" 2>/dev/null || printf '%s' "$path")"
+  elif [[ -n "$path" ]] && command -v readlink >/dev/null 2>&1; then
+    canonical="$(readlink -f "$path" 2>/dev/null || printf '%s' "$path")"
+  fi
+  for candidate in "$path" "$canonical"; do
+    candidate="${candidate//\\//}"
+    case "$candidate" in
+      */.easy-node-logs/access-recovery-demo/*|*/docs/examples/*|*/examples/access-recovery/*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+access_recovery_trust_store_content_is_dev_01() {
+  local path
+  path="$(trim "${1:-}")"
+  [[ -f "$path" ]] || return 1
+  jq -e '
+    [
+      .trusted_keys[]?
+      | ((.source // "") | tostring | ascii_downcase)
+      | select(
+          contains("generated demo bundle")
+          or contains("demo handoff")
+          or contains("demo bundle")
+        )
+    ]
+    | length > 0
+  ' "$path" >/dev/null 2>&1
 }
 
 command_has_vm_command_source_placeholder_01() {
@@ -562,6 +628,77 @@ command_has_access_recovery_trust_store_placeholder_01() {
     return 0
   fi
   return 1
+}
+
+command_has_access_recovery_operator_input_placeholder_01() {
+  local command_text token value idx token_count normalized
+  command_text="${1:-}"
+  if [[ -z "$command_text" ]]; then
+    return 1
+  fi
+
+  if command_string_to_argv "$command_text"; then
+    token_count="${#COMMAND_STRING_ARGV[@]}"
+    idx=0
+    while (( idx < token_count )); do
+      token="${COMMAND_STRING_ARGV[$idx]}"
+      case "$token" in
+        --base-url|--expected-base-url|--public-host|--code-file|--config-json|--deploy-pack-dir|--provenance-private-key-file|--provenance-org-id|--provenance-org-name)
+          if (( idx + 1 >= token_count )); then
+            return 0
+          fi
+          value="${COMMAND_STRING_ARGV[$((idx + 1))]}"
+          if [[ -z "$value" ]] || access_recovery_operator_input_value_looks_placeholder_01 "$value"; then
+            return 0
+          fi
+          idx=$((idx + 2))
+          continue
+          ;;
+        --base-url=*|--expected-base-url=*|--public-host=*|--code-file=*|--config-json=*|--deploy-pack-dir=*|--provenance-private-key-file=*|--provenance-org-id=*|--provenance-org-name=*)
+          value="${token#*=}"
+          if [[ -z "$value" ]] || access_recovery_operator_input_value_looks_placeholder_01 "$value"; then
+            return 0
+          fi
+          idx=$((idx + 1))
+          continue
+          ;;
+      esac
+      if access_recovery_operator_input_value_looks_placeholder_01 "$token"; then
+        return 0
+      fi
+      idx=$((idx + 1))
+    done
+    return 1
+  fi
+
+  normalized="$(printf '%s' "$command_text" | tr '[:lower:]' '[:upper:]')"
+  [[ "$normalized" =~ (^|[^A-Z0-9_])(HELPER_PUBLIC_DNS|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME)([^A-Z0-9_]|$) ]]
+}
+
+command_has_access_recovery_public_key_handoff_01() {
+  local command_text normalized token idx token_count
+  command_text="${1:-}"
+  if [[ -z "$command_text" ]]; then
+    return 1
+  fi
+
+  if command_string_to_argv "$command_text"; then
+    token_count="${#COMMAND_STRING_ARGV[@]}"
+    idx=0
+    while (( idx < token_count )); do
+      token="${COMMAND_STRING_ARGV[$idx]}"
+      case "$token" in
+        --public-key-file|--public-key-file=*)
+          return 0
+          ;;
+      esac
+      idx=$((idx + 1))
+    done
+    return 1
+  fi
+
+  normalized="$(printf '%s' "$command_text" | tr '[:lower:]' '[:upper:]')"
+  [[ "$normalized" =~ (^|[[:space:]])--PUBLIC-KEY-FILE([[:space:]=]|$) ]]
 }
 
 is_profile_subject_flag() {
@@ -901,6 +1038,70 @@ write_access_recovery_trust_store_precondition_log_01() {
   {
     echo "failure_kind=missing_access_recovery_trust_store_precondition"
     echo "Access Recovery trusted verifier trust-store precondition failed before execution"
+    if [[ -n "$notes" ]]; then
+      echo "$notes"
+    fi
+    if [[ -n "$command_redacted" ]]; then
+      echo "command=$command_redacted"
+    fi
+    echo "operator_next_action: $next_operator_action"
+  } >"$log_path"
+}
+
+build_access_recovery_operator_inputs_operator_command_01() {
+  local action_id="${1:-real_helper_https_evidence}"
+  local -a cmd=("./scripts/roadmap_next_actions_run.sh")
+
+  if [[ -n "${reports_dir:-}" ]]; then
+    cmd+=(--reports-dir "$reports_dir")
+  fi
+  if [[ -n "${summary_json:-}" ]]; then
+    cmd+=(--summary-json "$summary_json")
+  fi
+  if [[ -n "${roadmap_summary_json:-}" ]]; then
+    cmd+=(--roadmap-summary-json "$roadmap_summary_json")
+  fi
+  if [[ -n "${roadmap_report_md:-}" ]]; then
+    cmd+=(--roadmap-report-md "$roadmap_report_md")
+  fi
+  if [[ "${parallel:-0}" == "1" ]]; then
+    cmd+=(--parallel 1)
+  fi
+  if [[ "${action_timeout_sec:-0}" != "0" ]]; then
+    cmd+=(--action-timeout-sec "$action_timeout_sec")
+  fi
+  if [[ "${allow_unsafe_shell_commands:-0}" == "1" ]]; then
+    cmd+=(--allow-unsafe-shell-commands 1)
+  fi
+  if [[ "${local_only:-0}" == "1" ]]; then
+    cmd+=(--local-only 1)
+  fi
+  cmd+=(--include-id "$action_id")
+  if [[ -n "${runtime_access_recovery_trust_store:-}" ]]; then
+    cmd+=(--access-recovery-trust-store "$runtime_access_recovery_trust_store")
+  else
+    cmd+=(--access-recovery-trust-store "REPLACE_WITH_TRUST_STORE")
+  fi
+  cmd+=(--print-summary-json "${print_summary_json:-1}")
+  printf '%s # replace Access Recovery placeholders with concrete operator values: HELPER_PUBLIC_DNS PRIVATE_CODE_FILE BRIDGE_SERVICE_CONFIG BRIDGE_DEPLOY_PACK PROVENANCE_PRIVATE_KEY_FILE ORG_ID ORG_NAME' \
+    "$(render_command_line_from_argv "${cmd[@]}")"
+}
+
+write_access_recovery_operator_inputs_precondition_log_01() {
+  local log_path="${1:-}"
+  local command_redacted="${2:-}"
+  local notes="${3:-}"
+  local next_operator_action="${4:-}"
+
+  if [[ -z "$log_path" ]]; then
+    return
+  fi
+  if [[ -z "$next_operator_action" ]]; then
+    next_operator_action="$(build_access_recovery_operator_inputs_operator_command_01)"
+  fi
+  {
+    echo "failure_kind=missing_access_recovery_operator_input_precondition"
+    echo "Access Recovery operator input precondition failed before execution"
     if [[ -n "$notes" ]]; then
       echo "$notes"
     fi
@@ -2355,6 +2556,14 @@ if [[ "$runtime_access_recovery_trust_store_configured" == "1" ]] \
    && { [[ ! -f "$runtime_access_recovery_trust_store" ]] || [[ ! -r "$runtime_access_recovery_trust_store" ]]; }; then
   runtime_access_recovery_trust_store_configured="0"
   runtime_access_recovery_trust_store_source="${runtime_access_recovery_trust_store_source}:missing_or_unreadable"
+elif [[ "$runtime_access_recovery_trust_store_configured" == "1" ]] \
+   && access_recovery_trust_store_path_is_dev_01 "$runtime_access_recovery_trust_store"; then
+  runtime_access_recovery_trust_store_configured="0"
+  runtime_access_recovery_trust_store_source="${runtime_access_recovery_trust_store_source}:dev_or_demo_path"
+elif [[ "$runtime_access_recovery_trust_store_configured" == "1" ]] \
+   && access_recovery_trust_store_content_is_dev_01 "$runtime_access_recovery_trust_store"; then
+  runtime_access_recovery_trust_store_configured="0"
+  runtime_access_recovery_trust_store_source="${runtime_access_recovery_trust_store_source}:demo_marked"
 fi
 
 if (( action_timeout_sec > 0 )); then
@@ -2747,6 +2956,12 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         "$runtime_access_recovery_trust_store"
     )"
   fi
+  if action_id_is_access_recovery_trusted_verify_01 "$action_id" \
+     && [[ -n "$action_command" ]] \
+     && command_has_access_recovery_public_key_handoff_01 "$action_command"; then
+    action_preflight_failure_kind="missing_access_recovery_trust_store_precondition"
+    action_preflight_notes="Access Recovery trusted verifier raw public-key handoff is not accepted for pilot/operator handoff"
+  fi
   if action_id_is_multi_vm_stability_action_01 "$action_id" \
      && [[ -n "$action_command" ]] \
      && command_has_vm_command_source_placeholder_01 "$action_command"; then
@@ -2758,6 +2973,13 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
      && command_has_access_recovery_trust_store_placeholder_01 "$action_command"; then
     action_preflight_failure_kind="missing_access_recovery_trust_store_precondition"
     action_preflight_notes="Access Recovery trusted verifier trust-store placeholder token unresolved"
+  fi
+  if [[ -z "$action_preflight_failure_kind" ]] \
+     && action_id_is_access_recovery_action_01 "$action_id" \
+     && [[ -n "$action_command" ]] \
+     && command_has_access_recovery_operator_input_placeholder_01 "$action_command"; then
+    action_preflight_failure_kind="missing_access_recovery_operator_input_precondition"
+    action_preflight_notes="Access Recovery action has unresolved operator input placeholders; replace HELPER_PUBLIC_DNS, PRIVATE_CODE_FILE, BRIDGE_SERVICE_CONFIG, BRIDGE_DEPLOY_PACK, PROVENANCE_PRIVATE_KEY_FILE, ORG_ID, and ORG_NAME with concrete pilot values before execution"
   fi
   if action_id_is_profile_default_family "$action_id" && [[ -n "$action_command" ]]; then
     if command_has_profile_subject_placeholder_invite_key "$action_command"; then
@@ -2803,6 +3025,13 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
     elif [[ "$action_preflight_failure_kind" == "missing_access_recovery_trust_store_precondition" ]]; then
       action_preflight_next_operator_action="$(build_access_recovery_trust_store_operator_command_01 "$action_id")"
       write_access_recovery_trust_store_precondition_log_01 \
+        "$action_log" \
+        "$action_command_redacted" \
+        "$action_preflight_notes" \
+        "$action_preflight_next_operator_action"
+    elif [[ "$action_preflight_failure_kind" == "missing_access_recovery_operator_input_precondition" ]]; then
+      action_preflight_next_operator_action="$(build_access_recovery_operator_inputs_operator_command_01 "$action_id")"
+      write_access_recovery_operator_inputs_precondition_log_01 \
         "$action_log" \
         "$action_command_redacted" \
         "$action_preflight_notes" \

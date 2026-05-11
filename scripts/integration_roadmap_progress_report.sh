@@ -1035,7 +1035,7 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
   "schema": {
     "id": "access_bridge_pilot_evidence_bundle_verify_summary",
     "major": 1,
-    "minor": 1
+    "minor": 2
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
@@ -1054,7 +1054,8 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
     "summary_evidence_scope": "real_helper_https",
     "trust_store_present": true,
     "trust_store_sha256_present": true,
-    "public_key_file_absent": true
+    "public_key_file_absent": true,
+    "bundled_child_evidence_semantic_ok": true
   },
   "notes": "Access Bridge pilot evidence bundle verification passed",
   "inputs": {
@@ -1252,6 +1253,7 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.trusted_provenance_trusted == true
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.trusted_provenance_status == "pass"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.evidence_scope == "real_helper_https"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_bundled_child_evidence_semantic_ok == true
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.smoke_summary_sha256 == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256"'"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.deployment_evidence_summary_sha256 == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_SHA256"'"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.host_install_check_summary_sha256 == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_SHA256"'"
@@ -1713,6 +1715,7 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.trusted_pilot_receipt_ready == true
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_ready == false
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_ready == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_bundled_child_evidence_semantic_ok == true
   and .access_recovery_track.trusted_verifier_binding.ok == true
   and .access_recovery_track.trusted_verifier_ready == true
   and .access_recovery_track.trusted_pilot_receipt_ready == true
@@ -1769,6 +1772,46 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_access_recovery_unchecked_tar_verifier_summary.json" >/dev/null; then
   echo "Access Recovery unchecked tar verifier summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_unchecked_tar_verifier_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery verifier receipts must prove bundled child evidence semantics"
+ACCESS_BRIDGE_BAD_CHILD_SEMANTICS_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_bad_child_semantics_summary.json"
+jq '
+  .pilot_handoff_criteria.bundled_child_evidence_semantic_ok = false
+' "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_BAD_CHILD_SEMANTICS_VERIFY_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_BAD_CHILD_SEMANTICS_VERIFY_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_bad_child_semantics_verifier_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_bad_child_semantics_verifier_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_bad_child_semantics_verifier.log 2>&1; then
+  echo "expected success with warning for verifier receipt without bundled child semantics"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_bad_child_semantics_verifier.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and (.notes | contains("Access Recovery evidence still needs attention"))
+  and (.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.notes | contains("bundled child evidence semantics"))
+  and .access_recovery_pilot_handoff_ready == false
+  and .access_recovery_track.status == "trusted-provenance-required"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "fail"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_bundled_child_evidence_semantic_ok == false
+  and .access_recovery_track.trusted_pilot_receipt_ready == false
+  and .access_recovery_track.verifier_pilot_handoff_ready == false
+  and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
+' "$TMP_DIR/roadmap_progress_access_recovery_bad_child_semantics_verifier_summary.json" >/dev/null; then
+  echo "Access Recovery bad child semantics verifier summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_bad_child_semantics_verifier_summary.json"
   exit 1
 fi
 
@@ -1909,6 +1952,15 @@ if ! jq -e '
     and .local_pack_only == false
     and .missing_evidence_family == "access-recovery"
     and .missing_evidence_action_kind == "real-helper-https"
+    and .placeholder_unresolved == true
+    and ((.placeholder_keys // []) | index("HELPER_PUBLIC_DNS"))
+    and ((.placeholder_keys // []) | index("PRIVATE_CODE_FILE"))
+    and ((.placeholder_keys // []) | index("BRIDGE_SERVICE_CONFIG"))
+    and ((.placeholder_keys // []) | index("BRIDGE_DEPLOY_PACK"))
+    and ((.placeholder_keys // []) | index("PROVENANCE_PRIVATE_KEY_FILE"))
+    and ((.placeholder_keys // []) | index("ORG_ID"))
+    and ((.placeholder_keys // []) | index("ORG_NAME"))
+    and ((.placeholder_keys // []) | index("TRUST_STORE"))
     and ((.command // "") | test("access-recovery-real-helper-evidence-run"))
     and ((.command // "") | test("--trust-store TRUST_STORE"))
   ))
