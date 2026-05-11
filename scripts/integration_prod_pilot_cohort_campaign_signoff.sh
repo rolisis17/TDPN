@@ -90,6 +90,7 @@ PROD_PILOT_COHORT_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
   --require-incident-snapshot-artifacts 1 \
   --incident-snapshot-min-attachment-count 2 \
   --incident-snapshot-max-skipped-count 0 \
+  --max-evidence-age-sec 60 \
   --summary-json "$SIGNOFF_SUMMARY_PASS_JSON" \
   --print-summary-json 0 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_campaign_signoff_pass.log 2>&1
@@ -105,6 +106,16 @@ if [[ "$(jq -r '.status // ""' "$SIGNOFF_SUMMARY_PASS_JSON")" != "ok" ]]; then
 fi
 if [[ "$(jq -r '.final_rc // -1' "$SIGNOFF_SUMMARY_PASS_JSON")" != "0" ]]; then
   echo "campaign-signoff success summary should report final_rc=0"
+  cat "$SIGNOFF_SUMMARY_PASS_JSON"
+  exit 1
+fi
+if [[ -z "$(jq -r '.generated_at_utc // ""' "$SIGNOFF_SUMMARY_PASS_JSON")" ]]; then
+  echo "campaign-signoff success summary should include generated_at_utc"
+  cat "$SIGNOFF_SUMMARY_PASS_JSON"
+  exit 1
+fi
+if [[ "$(jq -r '.config.max_evidence_age_sec // -1' "$SIGNOFF_SUMMARY_PASS_JSON")" != "60" ]]; then
+  echo "campaign-signoff success summary should record max_evidence_age_sec"
   cat "$SIGNOFF_SUMMARY_PASS_JSON"
   exit 1
 fi
@@ -273,6 +284,11 @@ if ! rg -q -- '--require-incident-policy-clean 1' "$CHECK_CAPTURE"; then
   cat "$CHECK_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--max-evidence-age-sec 60' "$CHECK_CAPTURE"; then
+  echo "campaign-signoff check forwarding missing --max-evidence-age-sec"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--show-json 1' "$CHECK_CAPTURE"; then
   echo "campaign-signoff check forwarding missing --show-json"
   cat "$CHECK_CAPTURE"
@@ -429,6 +445,7 @@ PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF" \
   --require-artifact-path-match 0 \
   --require-runbook-summary-json 0 \
   --require-quick-run-report-json 0 \
+  --max-evidence-age-sec 60 \
   --summary-json /tmp/campaign/signoff_summary.json \
   --print-summary-json 1 \
   --require-summary-policy-match 0 \
@@ -536,6 +553,11 @@ if ! rg -q -- '--require-runbook-summary-json 0' "$SIGNOFF_FORWARD_CAPTURE"; the
 fi
 if ! rg -q -- '--require-quick-run-report-json 0' "$SIGNOFF_FORWARD_CAPTURE"; then
   echo "easy_node campaign-signoff forwarding failed: missing --require-quick-run-report-json"
+  cat "$SIGNOFF_FORWARD_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 60' "$SIGNOFF_FORWARD_CAPTURE"; then
+  echo "easy_node campaign-signoff forwarding failed: missing --max-evidence-age-sec"
   cat "$SIGNOFF_FORWARD_CAPTURE"
   exit 1
 fi

@@ -30,9 +30,11 @@ QUICK_RUN_REPORT_JSON="$REPORTS_DIR/prod_pilot_cohort_quick_report.json"
 RUN_REPORT_JSON="$REPORTS_DIR/prod_pilot_campaign_run_report.json"
 SIGNOFF_SUMMARY_JSON="$REPORTS_DIR/prod_pilot_campaign_signoff_summary.json"
 CHECK_SUMMARY_JSON="$REPORTS_DIR/prod_pilot_campaign_check_summary.json"
+FRESH_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-cat >"$SUMMARY_JSON" <<'EOF_SUMMARY'
+cat >"$SUMMARY_JSON" <<EOF_SUMMARY
 {
+  "generated_at_utc": "$FRESH_TS",
   "decision": "GO",
   "decision_reason": "all required campaign gates passed",
   "fail_policy": {
@@ -48,23 +50,28 @@ cat >"$REPORT_MD" <<'EOF_REPORT'
 # Campaign Summary
 EOF_REPORT
 
-cat >"$RUNBOOK_SUMMARY_JSON" <<'EOF_RUNBOOK'
+cat >"$RUNBOOK_SUMMARY_JSON" <<EOF_RUNBOOK
 {
+  "started_at": "$FRESH_TS",
+  "finished_at": "$FRESH_TS",
   "status": "ok",
   "final_rc": 0
 }
 EOF_RUNBOOK
 
-cat >"$QUICK_RUN_REPORT_JSON" <<'EOF_QUICK_RUN_REPORT'
+cat >"$QUICK_RUN_REPORT_JSON" <<EOF_QUICK_RUN_REPORT
 {
+  "started_at": "$FRESH_TS",
+  "finished_at": "$FRESH_TS",
   "status": "ok",
   "runbook_rc": 0,
   "signoff_rc": 0
 }
 EOF_QUICK_RUN_REPORT
 
-cat >"$SIGNOFF_SUMMARY_JSON" <<'EOF_SIGNOFF_SUMMARY'
+cat >"$SIGNOFF_SUMMARY_JSON" <<EOF_SIGNOFF_SUMMARY
 {
+  "generated_at_utc": "$FRESH_TS",
   "status": "ok",
   "failure_stage": "",
   "final_rc": 0
@@ -73,6 +80,8 @@ EOF_SIGNOFF_SUMMARY
 
 cat >"$RUN_REPORT_JSON" <<EOF_RUN_REPORT
 {
+  "started_at_utc": "$FRESH_TS",
+  "finished_at_utc": "$FRESH_TS",
   "status": "ok",
   "failure_step": "",
   "final_rc": 0,
@@ -123,6 +132,41 @@ fi
 if [[ "$(jq -r '.issues | length' "$CHECK_SUMMARY_JSON")" != "0" ]]; then
   echo "campaign-check summary JSON issues should be empty on baseline pass"
   cat "$CHECK_SUMMARY_JSON"
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-campaign-check] freshness pass"
+FRESH_CHECK_SUMMARY_JSON="$REPORTS_DIR/prod_pilot_campaign_check_fresh_summary.json"
+./scripts/prod_pilot_cohort_campaign_check.sh \
+  --campaign-run-report-json "$RUN_REPORT_JSON" \
+  --max-evidence-age-sec 86400 \
+  --summary-json "$FRESH_CHECK_SUMMARY_JSON" \
+  --print-summary-json 0 >/tmp/integration_prod_pilot_cohort_campaign_check_fresh.log 2>&1
+if [[ "$(jq -r '.policy.max_evidence_age_sec // -1' "$FRESH_CHECK_SUMMARY_JSON")" != "86400" ]]; then
+  echo "campaign-check freshness summary should record max_evidence_age_sec"
+  cat "$FRESH_CHECK_SUMMARY_JSON"
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-campaign-check] stale campaign summary fail"
+STALE_SUMMARY="$REPORTS_DIR/prod_pilot_campaign_summary_stale.json"
+STALE_RUN_REPORT="$REPORTS_DIR/prod_pilot_campaign_run_report_stale_summary.json"
+jq '.generated_at_utc="2000-01-01T00:00:00Z"' "$SUMMARY_JSON" >"$STALE_SUMMARY"
+jq --arg summary "$STALE_SUMMARY" '.artifacts.campaign_summary_json.path=$summary' "$RUN_REPORT_JSON" >"$STALE_RUN_REPORT"
+set +e
+./scripts/prod_pilot_cohort_campaign_check.sh \
+  --campaign-run-report-json "$STALE_RUN_REPORT" \
+  --max-evidence-age-sec 86400 >/tmp/integration_prod_pilot_cohort_campaign_check_stale.log 2>&1
+stale_rc=$?
+set -e
+if [[ "$stale_rc" -eq 0 ]]; then
+  echo "campaign-check should fail when campaign summary evidence is stale"
+  cat /tmp/integration_prod_pilot_cohort_campaign_check_stale.log
+  exit 1
+fi
+if ! rg -q 'campaign summary generated_at_utc timestamp is stale' /tmp/integration_prod_pilot_cohort_campaign_check_stale.log; then
+  echo "campaign-check missing stale campaign summary failure signal"
+  cat /tmp/integration_prod_pilot_cohort_campaign_check_stale.log
   exit 1
 fi
 
@@ -397,6 +441,7 @@ PROD_PILOT_COHORT_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
   --require-artifact-path-match 0 \
   --require-summary-policy-match 0 \
   --require-incident-policy-clean 0 \
+  --max-evidence-age-sec 60 \
   --summary-json /tmp/campaign_check_summary.json \
   --print-summary-json 1 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_campaign_check_dispatch.log 2>&1
@@ -503,6 +548,11 @@ if ! rg -q -- '--require-summary-policy-match 0' "$DISPATCH_CAPTURE"; then
 fi
 if ! rg -q -- '--require-incident-policy-clean 0' "$DISPATCH_CAPTURE"; then
   echo "easy-node campaign-check dispatch missing --require-incident-policy-clean"
+  cat "$DISPATCH_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 60' "$DISPATCH_CAPTURE"; then
+  echo "easy-node campaign-check dispatch missing --max-evidence-age-sec"
   cat "$DISPATCH_CAPTURE"
   exit 1
 fi

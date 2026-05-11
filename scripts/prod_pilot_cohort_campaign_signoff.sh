@@ -49,6 +49,7 @@ Usage:
     [--require-incident-snapshot-artifacts [0|1]] \
     [--incident-snapshot-min-attachment-count N] \
     [--incident-snapshot-max-skipped-count N|-1] \
+    [--max-evidence-age-sec N] \
     [--summary-json PATH] \
     [--print-summary-json [0|1]] \
     [--show-json [0|1]]
@@ -128,6 +129,7 @@ require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_REQUIRE_
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-${PROD_PILOT_COHORT_CAMPAIGN_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}}"
 incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-${PROD_PILOT_COHORT_CAMPAIGN_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}}"
 incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-${PROD_PILOT_COHORT_CAMPAIGN_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}}"
+max_evidence_age_sec="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_CAMPAIGN_CHECK_MAX_EVIDENCE_AGE_SEC:-0}}"
 summary_json="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SUMMARY_JSON:-}"
 print_summary_json="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_PRINT_SUMMARY_JSON:-0}"
 show_json="${PROD_PILOT_COHORT_CAMPAIGN_SIGNOFF_SHOW_JSON:-${PROD_PILOT_COHORT_CAMPAIGN_CHECK_SHOW_JSON:-0}}"
@@ -427,6 +429,10 @@ while [[ $# -gt 0 ]]; do
       incident_snapshot_max_skipped_count="${2:-}"
       shift 2
       ;;
+    --max-evidence-age-sec)
+      max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --summary-json)
       summary_json="${2:-}"
       shift 2
@@ -519,6 +525,10 @@ if [[ ! "$incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((incident_sn
   echo "--incident-snapshot-max-skipped-count must be an integer >= -1"
   exit 2
 fi
+if [[ ! "$max_evidence_age_sec" =~ ^[0-9]+$ ]]; then
+  echo "--max-evidence-age-sec must be an integer >= 0"
+  exit 2
+fi
 
 runbook_summary_json="$(abs_path "$runbook_summary_json")"
 campaign_run_report_json="$(abs_path "$campaign_run_report_json")"
@@ -595,6 +605,7 @@ declare -a check_args=(
   --require-incident-snapshot-artifacts "$require_incident_snapshot_artifacts"
   --incident-snapshot-min-attachment-count "$incident_snapshot_min_attachment_count"
   --incident-snapshot-max-skipped-count "$incident_snapshot_max_skipped_count"
+  --max-evidence-age-sec "$max_evidence_age_sec"
   --show-json "$show_json"
 )
 if [[ -n "$campaign_run_report_json" ]]; then
@@ -649,8 +660,10 @@ if [[ "$status" == "ok" ]]; then
   fi
 fi
 
+generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 summary_payload="$(
   jq -nc \
+    --arg generated_at_utc "$generated_at_utc" \
     --arg status "$status" \
     --arg failure_stage "$failure_stage" \
     --arg runbook_summary_json "${runbook_summary_json:-}" \
@@ -696,9 +709,11 @@ summary_payload="$(
     --argjson require_incident_snapshot_artifacts "$require_incident_snapshot_artifacts" \
     --argjson incident_snapshot_min_attachment_count "$incident_snapshot_min_attachment_count" \
     --argjson incident_snapshot_max_skipped_count "$incident_snapshot_max_skipped_count" \
+    --argjson max_evidence_age_sec "$max_evidence_age_sec" \
     --argjson show_json "$show_json" \
     '{
       version: 1,
+      generated_at_utc: $generated_at_utc,
       status: $status,
       failure_stage: $failure_stage,
       final_rc: $final_rc,
@@ -735,6 +750,7 @@ summary_payload="$(
         require_incident_snapshot_artifacts: $require_incident_snapshot_artifacts,
         incident_snapshot_min_attachment_count: $incident_snapshot_min_attachment_count,
         incident_snapshot_max_skipped_count: $incident_snapshot_max_skipped_count,
+        max_evidence_age_sec: $max_evidence_age_sec,
         show_json: $show_json
       },
       stages: {

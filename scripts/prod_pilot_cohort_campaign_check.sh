@@ -41,6 +41,7 @@ Usage:
     [--require-incident-snapshot-artifacts [0|1]] \
     [--incident-snapshot-min-attachment-count N] \
     [--incident-snapshot-max-skipped-count N|-1] \
+    [--max-evidence-age-sec N] \
     [--summary-json PATH] \
     [--print-summary-json [0|1]] \
     [--show-json [0|1]]
@@ -141,6 +142,38 @@ json_valid01() {
   fi
 }
 
+iso8601_utc_to_epoch() {
+  local timestamp="$1"
+  timestamp="$(trim "$timestamp")"
+  if [[ ! "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+    return 1
+  fi
+  jq -nr --arg ts "$timestamp" '$ts | fromdateiso8601 | floor' 2>/dev/null
+}
+
+check_evidence_timestamp_age() {
+  local label="$1"
+  local timestamp="$2"
+  local now_epoch="$3"
+  local timestamp_epoch=""
+  timestamp="$(trim "$timestamp")"
+  if [[ -z "$timestamp" ]]; then
+    errors+=("$label timestamp missing while --max-evidence-age-sec is enabled")
+    return
+  fi
+  if ! timestamp_epoch="$(iso8601_utc_to_epoch "$timestamp" 2>/dev/null)"; then
+    errors+=("$label timestamp is invalid (value=$timestamp)")
+    return
+  fi
+  if (( timestamp_epoch > now_epoch + max_evidence_future_skew_sec )); then
+    errors+=("$label timestamp is too far in the future (value=$timestamp, future_skew_sec=$((timestamp_epoch - now_epoch)))")
+    return
+  fi
+  if (( now_epoch - timestamp_epoch > max_evidence_age_sec )); then
+    errors+=("$label timestamp is stale (value=$timestamp, age_sec=$((now_epoch - timestamp_epoch)), max_evidence_age_sec=$max_evidence_age_sec)")
+  fi
+}
+
 need_cmd jq
 
 campaign_run_report_json=""
@@ -177,6 +210,9 @@ require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_CAMPAIGN_CHECK_REQUIRE_IN
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_CAMPAIGN_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
 incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_CAMPAIGN_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}"
 incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_CAMPAIGN_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}"
+max_evidence_age_sec="${PROD_PILOT_COHORT_CAMPAIGN_CHECK_MAX_EVIDENCE_AGE_SEC:-0}"
+max_evidence_future_skew_sec="${PROD_PILOT_COHORT_CAMPAIGN_CHECK_MAX_EVIDENCE_FUTURE_SKEW_SEC:-300}"
+max_evidence_now_epoch="${PROD_PILOT_COHORT_CAMPAIGN_CHECK_NOW_EPOCH:-}"
 show_json="${PROD_PILOT_COHORT_CAMPAIGN_CHECK_SHOW_JSON:-0}"
 summary_json="${PROD_PILOT_COHORT_CAMPAIGN_CHECK_SUMMARY_JSON:-}"
 print_summary_json="${PROD_PILOT_COHORT_CAMPAIGN_CHECK_PRINT_SUMMARY_JSON:-0}"
@@ -454,6 +490,10 @@ while [[ $# -gt 0 ]]; do
       incident_snapshot_max_skipped_count="${2:-}"
       shift 2
       ;;
+    --max-evidence-age-sec)
+      max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --summary-json)
       summary_json="${2:-}"
       shift 2
@@ -525,6 +565,14 @@ if [[ ! "$incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((incident_sn
   echo "--incident-snapshot-max-skipped-count must be an integer >= -1"
   exit 2
 fi
+if [[ ! "$max_evidence_age_sec" =~ ^[0-9]+$ ]]; then
+  echo "--max-evidence-age-sec must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$max_evidence_future_skew_sec" =~ ^[0-9]+$ ]]; then
+  echo "PROD_PILOT_COHORT_CAMPAIGN_CHECK_MAX_EVIDENCE_FUTURE_SKEW_SEC must be an integer >= 0"
+  exit 2
+fi
 
 reports_dir="$(abs_path "$reports_dir")"
 campaign_run_report_json="$(abs_path "$campaign_run_report_json")"
@@ -552,6 +600,8 @@ fi
 status="$(json_string "$campaign_run_report_json" '.status')"
 failure_step="$(json_string "$campaign_run_report_json" '.failure_step')"
 final_rc="$(json_int "$campaign_run_report_json" '.final_rc')"
+campaign_run_started_at_utc="$(json_string "$campaign_run_report_json" '.started_at_utc')"
+campaign_run_finished_at_utc="$(json_string "$campaign_run_report_json" '.finished_at_utc')"
 quick_runbook_rc="$(json_int "$campaign_run_report_json" '.stages.quick_runbook.rc')"
 campaign_summary_attempted="$(json_bool_flag "$campaign_run_report_json" '.stages.campaign_summary.attempted')"
 campaign_summary_rc="$(json_int "$campaign_run_report_json" '.stages.campaign_summary.rc')"
@@ -608,23 +658,43 @@ quick_run_report_json="$run_report_quick_run_report_path"
 
 runbook_summary_exists="0"
 runbook_summary_valid_json="0"
+runbook_summary_started_at=""
+runbook_summary_finished_at=""
+runbook_summary_generated_at_utc=""
 if [[ -n "$runbook_summary_json" && -f "$runbook_summary_json" ]]; then
   runbook_summary_exists="1"
   runbook_summary_valid_json="$(json_valid01 "$runbook_summary_json")"
+  if [[ "$runbook_summary_valid_json" == "1" ]]; then
+    runbook_summary_started_at="$(json_string "$runbook_summary_json" '.started_at')"
+    runbook_summary_finished_at="$(json_string "$runbook_summary_json" '.finished_at')"
+    runbook_summary_generated_at_utc="$(json_string "$runbook_summary_json" '.generated_at_utc')"
+  fi
 fi
 
 quick_run_report_exists="0"
 quick_run_report_valid_json="0"
+quick_run_report_started_at=""
+quick_run_report_finished_at=""
+quick_run_report_generated_at_utc=""
 if [[ -n "$quick_run_report_json" && -f "$quick_run_report_json" ]]; then
   quick_run_report_exists="1"
   quick_run_report_valid_json="$(json_valid01 "$quick_run_report_json")"
+  if [[ "$quick_run_report_valid_json" == "1" ]]; then
+    quick_run_report_started_at="$(json_string "$quick_run_report_json" '.started_at')"
+    quick_run_report_finished_at="$(json_string "$quick_run_report_json" '.finished_at')"
+    quick_run_report_generated_at_utc="$(json_string "$quick_run_report_json" '.generated_at_utc')"
+  fi
 fi
 
 summary_exists="0"
 summary_valid_json="0"
+campaign_summary_generated_at_utc=""
 if [[ -n "$campaign_summary_json" && -f "$campaign_summary_json" ]]; then
   summary_exists="1"
   summary_valid_json="$(json_valid01 "$campaign_summary_json")"
+  if [[ "$summary_valid_json" == "1" ]]; then
+    campaign_summary_generated_at_utc="$(json_string "$campaign_summary_json" '.generated_at_utc')"
+  fi
 fi
 
 report_md_exists="0"
@@ -634,9 +704,13 @@ fi
 
 campaign_signoff_summary_exists="0"
 campaign_signoff_summary_valid_json="0"
+campaign_signoff_summary_generated_at_utc=""
 if [[ -n "$campaign_signoff_summary_json" && -f "$campaign_signoff_summary_json" ]]; then
   campaign_signoff_summary_exists="1"
   campaign_signoff_summary_valid_json="$(json_valid01 "$campaign_signoff_summary_json")"
+  if [[ "$campaign_signoff_summary_valid_json" == "1" ]]; then
+    campaign_signoff_summary_generated_at_utc="$(json_string "$campaign_signoff_summary_json" '.generated_at_utc')"
+  fi
 fi
 campaign_signoff_summary_status=""
 campaign_signoff_summary_final_rc="0"
@@ -675,6 +749,48 @@ if [[ "$summary_exists" == "1" && "$summary_valid_json" == "1" ]]; then
 fi
 
 declare -a errors=()
+now_epoch=""
+
+if (( max_evidence_age_sec > 0 )); then
+  if [[ -n "$max_evidence_now_epoch" ]]; then
+    now_epoch="$max_evidence_now_epoch"
+  else
+    need_cmd date
+    now_epoch="$(date -u +%s)"
+  fi
+  if [[ -z "$now_epoch" || ! "$now_epoch" =~ ^[0-9]+$ ]]; then
+    errors+=("could not determine current UTC epoch for evidence freshness check")
+  else
+    check_evidence_timestamp_age "campaign run report started_at_utc" "$campaign_run_started_at_utc" "$now_epoch"
+    check_evidence_timestamp_age "campaign run report finished_at_utc" "$campaign_run_finished_at_utc" "$now_epoch"
+    if [[ "$runbook_summary_valid_json" == "1" ]]; then
+      runbook_summary_freshness_ts="$runbook_summary_finished_at"
+      if [[ -z "$runbook_summary_freshness_ts" ]]; then
+        runbook_summary_freshness_ts="$runbook_summary_generated_at_utc"
+      fi
+      if [[ -z "$runbook_summary_freshness_ts" ]]; then
+        runbook_summary_freshness_ts="$runbook_summary_started_at"
+      fi
+      check_evidence_timestamp_age "runbook summary evidence" "$runbook_summary_freshness_ts" "$now_epoch"
+    fi
+    if [[ "$quick_run_report_valid_json" == "1" ]]; then
+      quick_run_report_freshness_ts="$quick_run_report_finished_at"
+      if [[ -z "$quick_run_report_freshness_ts" ]]; then
+        quick_run_report_freshness_ts="$quick_run_report_generated_at_utc"
+      fi
+      if [[ -z "$quick_run_report_freshness_ts" ]]; then
+        quick_run_report_freshness_ts="$quick_run_report_started_at"
+      fi
+      check_evidence_timestamp_age "quick run report evidence" "$quick_run_report_freshness_ts" "$now_epoch"
+    fi
+    if [[ "$summary_valid_json" == "1" ]]; then
+      check_evidence_timestamp_age "campaign summary generated_at_utc" "$campaign_summary_generated_at_utc" "$now_epoch"
+    fi
+    if [[ "$campaign_signoff_summary_valid_json" == "1" ]]; then
+      check_evidence_timestamp_age "campaign signoff summary generated_at_utc" "$campaign_signoff_summary_generated_at_utc" "$now_epoch"
+    fi
+  fi
+fi
 
 check_distinct_path() {
   local path="$1"
@@ -937,8 +1053,11 @@ issues_json='[]'
 if ((${#errors[@]} > 0)); then
   issues_json="$(printf '%s\n' "${errors[@]}" | jq -R . | jq -s '.')"
 fi
+need_cmd date
+generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 summary_payload="$(
   jq -nc \
+    --arg generated_at_utc "$generated_at_utc" \
     --arg decision "$decision" \
     --arg status "$status" \
     --arg failure_step "$failure_step" \
@@ -1011,6 +1130,17 @@ summary_payload="$(
     --arg run_report_summary_path "${run_report_summary_path:-}" \
     --arg run_report_report_md_path "${run_report_report_md_path:-}" \
     --arg run_report_campaign_signoff_summary_path "${run_report_campaign_signoff_summary_path:-}" \
+    --arg campaign_run_started_at_utc "${campaign_run_started_at_utc:-}" \
+    --arg campaign_run_finished_at_utc "${campaign_run_finished_at_utc:-}" \
+    --arg runbook_summary_started_at "${runbook_summary_started_at:-}" \
+    --arg runbook_summary_finished_at "${runbook_summary_finished_at:-}" \
+    --arg runbook_summary_generated_at_utc "${runbook_summary_generated_at_utc:-}" \
+    --arg quick_run_report_started_at "${quick_run_report_started_at:-}" \
+    --arg quick_run_report_finished_at "${quick_run_report_finished_at:-}" \
+    --arg quick_run_report_generated_at_utc "${quick_run_report_generated_at_utc:-}" \
+    --arg campaign_summary_generated_at_utc "${campaign_summary_generated_at_utc:-}" \
+    --arg campaign_signoff_summary_generated_at_utc "${campaign_signoff_summary_generated_at_utc:-}" \
+    --arg now_epoch "${now_epoch:-}" \
     --argjson runbook_summary_exists "$runbook_summary_exists" \
     --argjson runbook_summary_valid_json "$runbook_summary_valid_json" \
     --argjson run_report_runbook_summary_exists "$run_report_runbook_summary_exists" \
@@ -1029,9 +1159,12 @@ summary_payload="$(
     --argjson campaign_signoff_summary_valid_json "$campaign_signoff_summary_valid_json" \
     --argjson run_report_campaign_signoff_summary_exists "$run_report_campaign_signoff_summary_exists" \
     --argjson run_report_campaign_signoff_summary_valid_json "$run_report_campaign_signoff_summary_valid_json" \
+    --argjson max_evidence_age_sec "$max_evidence_age_sec" \
+    --argjson max_evidence_future_skew_sec "$max_evidence_future_skew_sec" \
     --argjson issues "$issues_json" \
     '{
       version: 1,
+      generated_at_utc: $generated_at_utc,
       decision: $decision,
       status: $status,
       failure_step: $failure_step,
@@ -1084,9 +1217,24 @@ summary_payload="$(
         require_incident_snapshot_on_fail: $require_incident_snapshot_on_fail,
         require_incident_snapshot_artifacts: $require_incident_snapshot_artifacts,
         incident_snapshot_min_attachment_count: $incident_snapshot_min_attachment_count,
-        incident_snapshot_max_skipped_count: $incident_snapshot_max_skipped_count
+        incident_snapshot_max_skipped_count: $incident_snapshot_max_skipped_count,
+        max_evidence_age_sec: $max_evidence_age_sec,
+        max_evidence_future_skew_sec: $max_evidence_future_skew_sec
       },
       observed: {
+        freshness: {
+          now_epoch: (if $now_epoch == "" then null else ($now_epoch | tonumber) end),
+          campaign_run_started_at_utc: $campaign_run_started_at_utc,
+          campaign_run_finished_at_utc: $campaign_run_finished_at_utc,
+          runbook_summary_started_at: $runbook_summary_started_at,
+          runbook_summary_finished_at: $runbook_summary_finished_at,
+          runbook_summary_generated_at_utc: $runbook_summary_generated_at_utc,
+          quick_run_report_started_at: $quick_run_report_started_at,
+          quick_run_report_finished_at: $quick_run_report_finished_at,
+          quick_run_report_generated_at_utc: $quick_run_report_generated_at_utc,
+          campaign_summary_generated_at_utc: $campaign_summary_generated_at_utc,
+          campaign_signoff_summary_generated_at_utc: $campaign_signoff_summary_generated_at_utc
+        },
         campaign_signoff_stage: {
           enabled: $campaign_signoff_enabled,
           required: $campaign_signoff_required,
@@ -1178,6 +1326,7 @@ echo "[prod-pilot-cohort-campaign-check] campaign_signoff_summary_json=${campaig
 if [[ -n "$summary_json" ]]; then
   echo "[prod-pilot-cohort-campaign-check] summary_json=$summary_json"
 fi
+echo "[prod-pilot-cohort-campaign-check] freshness max_evidence_age_sec=$max_evidence_age_sec campaign_run_started_at_utc=${campaign_run_started_at_utc:-unset} campaign_run_finished_at_utc=${campaign_run_finished_at_utc:-unset} runbook_summary_started_at=${runbook_summary_started_at:-unset} runbook_summary_finished_at=${runbook_summary_finished_at:-unset} runbook_summary_generated_at_utc=${runbook_summary_generated_at_utc:-unset} quick_run_report_started_at=${quick_run_report_started_at:-unset} quick_run_report_finished_at=${quick_run_report_finished_at:-unset} quick_run_report_generated_at_utc=${quick_run_report_generated_at_utc:-unset} campaign_summary_generated_at_utc=${campaign_summary_generated_at_utc:-unset} campaign_signoff_summary_generated_at_utc=${campaign_signoff_summary_generated_at_utc:-unset}"
 echo "[prod-pilot-cohort-campaign-check] decision=$decision status=${status:-unset} quick_runbook_rc=$quick_runbook_rc campaign_summary_attempted=$campaign_summary_attempted campaign_summary_rc=$campaign_summary_rc campaign_signoff_attempted=$campaign_signoff_attempted campaign_signoff_rc=$campaign_signoff_rc campaign_decision=${campaign_decision:-unset}"
 if [[ -n "$summary_incident_handoff_summary_json" || -n "$summary_incident_handoff_report_md" ]]; then
   echo "[prod-pilot-cohort-campaign-check] incident_handoff summary_json=${summary_incident_handoff_summary_json:-unset} report_md=${summary_incident_handoff_report_md:-unset}"
