@@ -297,6 +297,7 @@ Usage:
   ./scripts/easy_node.sh three-machine-real-host-validation-pack [three_machine_real_host_validation_pack args...]
   ./scripts/easy_node.sh access-recovery-beta-local-gate [access_recovery_beta_local_gate args...]
   ./scripts/easy_node.sh access-recovery-local-evidence-refresh [access_recovery_local_evidence_refresh args...]
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run [access_recovery_real_helper_evidence_run args...]
   ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle [access_bridge_pilot_evidence_bundle args...]
   ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify [access_bridge_pilot_evidence_bundle_verify args...]
   ./scripts/easy_node.sh three-machine-docker-profile-matrix [three_machine_docker_profile_matrix args...]
@@ -588,6 +589,7 @@ Usage:
   ./scripts/easy_node.sh three-machine-real-host-validation-pack [three_machine_real_host_validation_pack args...]
   ./scripts/easy_node.sh access-recovery-beta-local-gate [access_recovery_beta_local_gate args...]
   ./scripts/easy_node.sh access-recovery-local-evidence-refresh [access_recovery_local_evidence_refresh args...]
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run [access_recovery_real_helper_evidence_run args...]
   ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle [access_bridge_pilot_evidence_bundle args...]
   ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify [access_bridge_pilot_evidence_bundle_verify args...]
   ./scripts/easy_node.sh three-machine-reminder
@@ -800,6 +802,7 @@ Notes:
   - three-machine-real-host-validation-pack wraps the real-host validation pack helper path (override with `THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT`) and preserves pass-through args.
   - access-recovery-beta-local-gate runs the focused local Access Recovery beta contract gate (demo/examples/browser/bridge/bundle) without the legacy VPN matrix (override with `ACCESS_RECOVERY_BETA_LOCAL_GATE_SCRIPT`).
   - access-recovery-local-evidence-refresh runs a loopback Access Recovery helper rehearsal and writes canonical evidence summaries for roadmap ingestion (override with `ACCESS_RECOVERY_LOCAL_EVIDENCE_REFRESH_SCRIPT`).
+  - access-recovery-real-helper-evidence-run runs the real public helper HTTPS evidence flow in one operator command: signed pilot evidence bundle, trusted verifier receipt, and roadmap refresh (override with `ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT`).
   - access-bridge-pilot-evidence-bundle wraps deployed bridge smoke, deployment evidence, and host-install checks into one candidate pilot evidence bundle (override with `ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT`) and preserves pass-through args; trusted verification is required before pilot/operator handoff.
   - access-bridge-pilot-evidence-bundle-verify validates Access Bridge pilot bundle integrity artifacts (manifest + tarball checksum + safe tar members). Local integrity checks can be unsigned; pilot/operator handoff must add --provenance-json PROVENANCE_JSON --trust-store TRUST_STORE --require-trusted-provenance 1 --verification-summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_verify_summary.json --print-verification-summary-json 1 so roadmap can bind the receipt to the current evidence hashes.
   - three-machine-reminder prints the true 3-machine production test checklist.
@@ -9461,6 +9464,15 @@ access_recovery_beta_local_gate() {
 
 access_recovery_local_evidence_refresh() {
   local script="${ACCESS_RECOVERY_LOCAL_EVIDENCE_REFRESH_SCRIPT:-$ROOT_DIR/scripts/access_recovery_local_evidence_refresh.sh}"
+  if [[ ! -x "$script" ]]; then
+    echo "missing helper script: $script"
+    exit 2
+  fi
+  "$script" "$@"
+}
+
+access_recovery_real_helper_evidence_run() {
+  local script="${ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT:-$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh}"
   if [[ ! -x "$script" ]]; then
     echo "missing helper script: $script"
     exit 2
@@ -19629,6 +19641,10 @@ main() {
     access-recovery-local-evidence-refresh)
       shift
       access_recovery_local_evidence_refresh "$@"
+      ;;
+    access-recovery-real-helper-evidence-run)
+      shift
+      access_recovery_real_helper_evidence_run "$@"
       ;;
     access-bridge-pilot-evidence-bundle)
       shift

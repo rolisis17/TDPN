@@ -1987,6 +1987,7 @@ access_recovery_evidence_json() {
         and (.smoke.bridge_security_headers_ok == true)
         and str_eq(.identity_check.status; "pass")
         and str_eq(.local_files.config.status; "pass")
+        and str_eq(.local_files.config.allow_local_access_paths; "false")
         and str_eq(.local_files.deploy_pack.status; "pass");
       def positive_bounded_rps:
         ((.observed.env_rps | type) == "string")
@@ -2007,6 +2008,8 @@ access_recovery_evidence_json() {
           "caddy_example_exists",
           "nginx_example_exists",
           "config_json_exists",
+          "config_json_valid",
+          "config_local_access_paths_disabled",
           "config_sha256_matches",
           "access_code_gate_configured",
           "query_access_code_disabled",
@@ -2082,6 +2085,7 @@ access_recovery_evidence_json() {
           identity_status: str_or_null(.identity_check.status),
           config_status: str_or_null(.local_files.config.status),
           config_sha256: str_or_null(.local_files.config.sha256),
+          config_allow_local_access_paths: str_or_null(.local_files.config.allow_local_access_paths),
           deploy_pack_status: str_or_null(.local_files.deploy_pack.status),
           helper_id: str_or_null(.deployed_identity.helper_id),
           organization_id: str_or_null(.deployed_identity.organization_id),
@@ -2108,6 +2112,7 @@ access_recovery_evidence_json() {
           env_addr: str_or_null(.observed.env_addr),
           env_rps: str_or_null(.observed.env_rps),
           env_max_sources: str_or_null(.observed.env_max_sources),
+          config_allow_local_access_paths: str_or_null(.observed.config_allow_local_access_paths),
           recommended_action_id: str_or_null(.recommended_next_action.id),
           recommended_action_command: str_or_null(.recommended_next_action.command)
         };
@@ -2612,7 +2617,7 @@ access_recovery_track_json_from_evidence() {
             elif $track_status == "local-rehearsal-ready" then {
               id: "real_helper_https_evidence",
               reason: "Local Access Recovery rehearsal evidence cannot substitute for real helper HTTPS deployment evidence",
-              command: "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_summary.json --provenance-sign 1 --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --provenance-out .easy-node-logs/access_bridge_pilot_evidence_bundle.provenance.json"
+              command: "./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE --reports-dir .easy-node-logs/access-recovery-pilot"
             }
             elif $first_attention == null then null
             else {

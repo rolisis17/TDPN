@@ -117,6 +117,28 @@ Smoke evidence for pilot handoff must target the real helper HTTPS host from
 outside the helper machine. Loopback/local rehearsal output is useful for
 development, but it is not Access Recovery pilot handoff evidence.
 
+The preferred operator path is the single guarded wrapper. It captures the
+signed pilot evidence bundle, verifies trusted provenance, writes the verifier
+receipt, and refreshes roadmap readiness from that receipt:
+
+```sh
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://HELPER_PUBLIC_DNS \
+  --path-id helper-web \
+  --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt \
+  --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \
+  --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
+  --expect-helper-id helper-demo \
+  --expect-org-id freenews-demo \
+  --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE \
+  --provenance-org-id ORG_ID \
+  --provenance-org-name ORG_NAME \
+  --trust-store TRUST_STORE \
+  --reports-dir .easy-node-logs/access-recovery-pilot
+```
+
+Use the lower-level commands below only when debugging a specific stage.
+
 ```sh
 bash ./scripts/access_bridge_service_smoke.sh \
   --base-url https://HELPER_PUBLIC_DNS \

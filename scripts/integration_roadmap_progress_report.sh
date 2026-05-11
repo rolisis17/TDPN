@@ -943,7 +943,8 @@ cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLO
   "local_files": {
     "config": {
       "status": "pass",
-      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "allow_local_access_paths": "false"
     },
     "deploy_pack": {
       "status": "pass"
@@ -984,10 +985,11 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
     "env_trust_proxy_headers": "true",
     "env_addr": "127.0.0.1:18980",
     "env_rps": "2",
-    "env_max_sources": "1024"
+    "env_max_sources": "1024",
+    "config_allow_local_access_paths": "false"
   },
   "summary": {
-    "checks_total": 22,
+    "checks_total": 24,
     "checks_fail": 0
   },
   "checks": [
@@ -998,6 +1000,8 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
     {"id": "caddy_example_exists", "status": "pass", "message": "Caddy example exists"},
     {"id": "nginx_example_exists", "status": "pass", "message": "nginx example exists"},
     {"id": "config_json_exists", "status": "pass", "message": "config JSON exists"},
+    {"id": "config_json_valid", "status": "pass", "message": "config JSON is valid"},
+    {"id": "config_local_access_paths_disabled", "status": "pass", "message": "deployable config does not allow local diagnostic access paths"},
     {"id": "config_sha256_matches", "status": "pass", "message": "env config sha256 matches supplied config"},
     {"id": "access_code_gate_configured", "status": "pass", "message": "access-code hash is configured"},
     {"id": "query_access_code_disabled", "status": "pass", "message": "query-string access codes disabled"},
@@ -1892,17 +1896,17 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_service_smoke.available == true
   and .access_recovery_track.access_bridge_service_smoke.details.base_url == "http://127.0.0.1:19820"
   and .access_recovery_track.recommended_next_action.id == "real_helper_https_evidence"
-  and ((.access_recovery_track.recommended_next_action.command // "") | test("access-bridge-pilot-evidence-bundle"))
-  and ((.access_recovery_track.recommended_next_action.command // "") | test("--provenance-sign 1"))
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("access-recovery-real-helper-evidence-run"))
   and ((.access_recovery_track.recommended_next_action.command // "") | test("--provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE"))
-  and ((.access_recovery_track.recommended_next_action.command // "") | test("--provenance-out"))
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("--trust-store TRUST_STORE"))
   and ((.next_actions // []) | any(
     .id == "real_helper_https_evidence"
     and .requires_real_hosts == true
     and .local_pack_only == false
     and .missing_evidence_family == "access-recovery"
     and .missing_evidence_action_kind == "real-helper-https"
-    and ((.command // "") | test("--provenance-sign 1"))
+    and ((.command // "") | test("access-recovery-real-helper-evidence-run"))
+    and ((.command // "") | test("--trust-store TRUST_STORE"))
   ))
   and .artifacts.access_bridge_service_smoke_summary_json == "'"$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON"'"
 ' "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_summary.json" >/dev/null; then
@@ -2000,7 +2004,8 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_service_smoke.available == true
   and .access_recovery_track.access_bridge_service_smoke.details.base_url == "https://192.168.50.10:19820"
   and .access_recovery_track.recommended_next_action.id == "real_helper_https_evidence"
-  and ((.access_recovery_track.recommended_next_action.command // "") | test("--provenance-sign 1"))
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("access-recovery-real-helper-evidence-run"))
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("--trust-store TRUST_STORE"))
 ' "$TMP_DIR/roadmap_progress_access_recovery_private_https_summary.json" >/dev/null; then
   echo "Access Recovery private HTTPS summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_private_https_summary.json"
@@ -2046,7 +2051,8 @@ while IFS='|' read -r case_id case_base_url expected_host; do
       and .access_recovery_track.evidence_host_policy.real_helper_https_evidence == false
       and .access_recovery_track.access_bridge_service_smoke.details.base_url == $base_url
       and .access_recovery_track.recommended_next_action.id == "real_helper_https_evidence"
-      and ((.access_recovery_track.recommended_next_action.command // "") | test("--provenance-sign 1"))
+      and ((.access_recovery_track.recommended_next_action.command // "") | test("access-recovery-real-helper-evidence-run"))
+      and ((.access_recovery_track.recommended_next_action.command // "") | test("--trust-store TRUST_STORE"))
     ' "$TMP_DIR/roadmap_progress_access_recovery_${case_id}_summary.json" >/dev/null; then
     echo "Access Recovery non-canonical helper authority summary mismatch: $case_id"
     cat "$TMP_DIR/roadmap_progress_access_recovery_${case_id}_summary.json"
@@ -2339,6 +2345,39 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] Access Recovery deployment evidence rejects diagnostic local access config"
+ACCESS_RECOVERY_DIAGNOSTIC_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_diagnostic_config_summary.json"
+jq '.local_files.config.allow_local_access_paths = "true"' "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_DIAGNOSTIC_DEPLOYMENT_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_RECOVERY_DIAGNOSTIC_DEPLOYMENT_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_diagnostic_deployment_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_diagnostic_deployment_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_diagnostic_deployment.log 2>&1; then
+  echo "expected failure when deployment evidence carries diagnostic local access config"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_diagnostic_deployment.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "fail"
+  and .access_recovery_track.access_bridge_deployment_evidence.available == false
+  and .access_recovery_track.access_bridge_deployment_evidence.semantic_ok == false
+  and .access_recovery_track.access_bridge_deployment_evidence.details.config_allow_local_access_paths == "true"
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_deployment_evidence"
+' "$TMP_DIR/roadmap_progress_access_recovery_diagnostic_deployment_summary.json" >/dev/null; then
+  echo "Access Recovery diagnostic deployment summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_diagnostic_deployment_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] Access Recovery deployment evidence must carry hardened smoke proof fields"
 ACCESS_RECOVERY_OLD_DEPLOYMENT_SEMANTIC_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_old_schema_missing_hardened_smoke_summary.json"
 jq '
@@ -2455,6 +2494,85 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] Access Recovery host-install config validation checks are required"
+ACCESS_RECOVERY_MISSING_CONFIG_HOST_INSTALL_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_missing_config_checks_summary.json"
+jq '
+  .checks = [
+    .checks[]
+    | .id as $id
+    | select((["config_json_valid", "config_local_access_paths_disabled"] | index($id)) == null)
+  ]
+  | .summary.checks_total = 22
+  | .summary.checks_fail = 0
+' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_RECOVERY_MISSING_CONFIG_HOST_INSTALL_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_RECOVERY_MISSING_CONFIG_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_missing_config_host_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_missing_config_host_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_missing_config_host.log 2>&1; then
+  echo "expected failure when required Access Recovery host-install config checks are missing"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_missing_config_host.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.access_bridge_host_install.status == "fail"
+  and .access_recovery_track.access_bridge_host_install.available == false
+  and .access_recovery_track.access_bridge_host_install.semantic_ok == false
+  and .access_recovery_track.access_bridge_host_install.details.checks_total == 22
+  and .access_recovery_track.access_bridge_host_install.details.checks_fail == 0
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_host_install"
+' "$TMP_DIR/roadmap_progress_access_recovery_missing_config_host_summary.json" >/dev/null; then
+  echo "Access Recovery missing config host-install summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_missing_config_host_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery host-install rejects local diagnostic access config"
+ACCESS_RECOVERY_LOCAL_ACCESS_HOST_INSTALL_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_local_access_enabled_summary.json"
+jq '
+  .observed.config_allow_local_access_paths = "true"
+  | (.checks[] | select(.id == "config_local_access_paths_disabled").status) = "fail"
+  | (.checks[] | select(.id == "config_local_access_paths_disabled").message) = "deployable config must not allow local diagnostic access paths"
+' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_RECOVERY_LOCAL_ACCESS_HOST_INSTALL_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_RECOVERY_LOCAL_ACCESS_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_local_access_host_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_local_access_host_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_local_access_host.log 2>&1; then
+  echo "expected failure when host-install config allows local diagnostic access paths"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_local_access_host.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.access_bridge_host_install.status == "fail"
+  and .access_recovery_track.access_bridge_host_install.available == false
+  and .access_recovery_track.access_bridge_host_install.semantic_ok == false
+  and .access_recovery_track.access_bridge_host_install.details.config_allow_local_access_paths == "true"
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_host_install"
+' "$TMP_DIR/roadmap_progress_access_recovery_local_access_host_summary.json" >/dev/null; then
+  echo "Access Recovery local access host-install summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_local_access_host_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] Access Recovery forged current host-install summaries without hardening checks block required evidence"
 ACCESS_RECOVERY_FORGED_HOST_INSTALL_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_forged_current_summary.json"
 jq '.summary.checks_total = 1 | .summary.checks_fail = 0 | .checks = [{"id":"rate_limit_configured","status":"pass","message":"bridge service rate limit is enabled"}]' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_RECOVERY_FORGED_HOST_INSTALL_SUMMARY_JSON"
@@ -2498,7 +2616,7 @@ jq '
     | .id as $id
     | select((["caddy_public_host_valid", "caddy_reverse_proxy_target", "nginx_public_host_valid", "nginx_proxy_pass_target"] | index($id)) == null)
   ]
-  | .summary.checks_total = 22
+  | .summary.checks_total = 20
   | .summary.checks_fail = 0
 ' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_RECOVERY_MISSING_PROXY_HOST_INSTALL_SUMMARY_JSON"
 if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
@@ -2525,7 +2643,7 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_host_install.status == "fail"
   and .access_recovery_track.access_bridge_host_install.available == false
   and .access_recovery_track.access_bridge_host_install.semantic_ok == false
-  and .access_recovery_track.access_bridge_host_install.details.checks_total == 22
+  and .access_recovery_track.access_bridge_host_install.details.checks_total == 20
   and .access_recovery_track.access_bridge_host_install.details.checks_fail == 0
   and .access_recovery_track.recommended_next_action.id == "access_bridge_host_install"
 ' "$TMP_DIR/roadmap_progress_access_recovery_missing_proxy_host_summary.json" >/dev/null; then

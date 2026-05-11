@@ -344,7 +344,7 @@ action_id_is_multi_vm_stability_action_01() {
 action_id_is_access_recovery_trusted_verify_01() {
   local action_id
   action_id="$(trim "${1:-}")"
-  [[ "$action_id" == "trusted_pilot_evidence_verify" ]]
+  [[ "$action_id" == "trusted_pilot_evidence_verify" || "$action_id" == "real_helper_https_evidence" ]]
 }
 
 strip_optional_wrapping_quotes() {
