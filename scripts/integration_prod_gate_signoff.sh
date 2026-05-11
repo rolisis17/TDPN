@@ -75,6 +75,7 @@ THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_CHECK" \
   --min-wg-soak-exit-operators 2 \
   --min-wg-soak-cross-operator-pairs 2 \
   --max-wg-soak-failed-rounds 3 \
+  --max-evidence-age-sec 900 \
   --show-json 1 >/tmp/integration_prod_gate_signoff_success.log 2>&1
 
 if ! rg -q -- '--run-report-json /tmp/prod_bundle/prod_bundle_run_report.json' "$VERIFY_CAPTURE"; then
@@ -135,6 +136,11 @@ if ! rg -q -- '--require-wg-soak-ok 0' "$CHECK_CAPTURE"; then
 fi
 if ! rg -q -- '--max-wg-soak-failed-rounds 3' "$CHECK_CAPTURE"; then
   echo "prod-gate-signoff forwarding failed: check missing --max-wg-soak-failed-rounds"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 900' "$CHECK_CAPTURE"; then
+  echo "prod-gate-signoff forwarding failed: check missing --max-evidence-age-sec"
   cat "$CHECK_CAPTURE"
   exit 1
 fi

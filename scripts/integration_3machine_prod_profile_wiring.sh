@@ -2387,6 +2387,7 @@ THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_BUNDLE_SIGNOFF" \
   --signoff-require-wg-validate-ok 0 \
   --signoff-require-wg-soak-ok 1 \
   --signoff-max-wg-soak-failed-rounds 2 \
+  --signoff-max-evidence-age-sec 600 \
   --signoff-show-json 1 >/tmp/integration_3machine_prod_profile_wiring_bundle_signoff_ok.log 2>&1
 bundle_signoff_ok_rc=$?
 set -e
@@ -2420,6 +2421,11 @@ if ! rg -q -- '--max-wg-soak-failed-rounds 2' "$SIGNOFF_CAPTURE"; then
   cat "$SIGNOFF_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$SIGNOFF_CAPTURE"; then
+  echo "prod gate bundle signoff wiring failed: missing --max-evidence-age-sec 600"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--show-json 1' "$SIGNOFF_CAPTURE"; then
   echo "prod gate bundle signoff wiring failed: missing --show-json 1"
   cat "$SIGNOFF_CAPTURE"
@@ -2432,6 +2438,11 @@ if ! rg -q 'signoff_enabled=1' "$BUNDLE_DIR_SIGNOFF_OK/metadata.txt"; then
 fi
 if ! rg -q 'signoff_rc=0' "$BUNDLE_DIR_SIGNOFF_OK/metadata.txt"; then
   echo "prod gate bundle signoff wiring failed: metadata missing signoff_rc=0"
+  cat "$BUNDLE_DIR_SIGNOFF_OK/metadata.txt"
+  exit 1
+fi
+if ! rg -q 'signoff_max_evidence_age_sec=600' "$BUNDLE_DIR_SIGNOFF_OK/metadata.txt"; then
+  echo "prod gate bundle signoff wiring failed: metadata missing signoff_max_evidence_age_sec=600"
   cat "$BUNDLE_DIR_SIGNOFF_OK/metadata.txt"
   exit 1
 fi
@@ -2974,6 +2985,7 @@ THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_BUNDLE_SIGNOFF" \
   --skip-wg 1 \
   --signoff-check 1 \
   --signoff-max-wg-soak-failed-rounds 5 \
+  --signoff-max-evidence-age-sec 700 \
   --signoff-show-json 1 >/tmp/integration_3machine_prod_profile_wiring_easy_bundle_signoff.log 2>&1
 easy_bundle_signoff_rc=$?
 set -e
@@ -2984,6 +2996,11 @@ if [[ "$easy_bundle_signoff_rc" -ne 0 ]]; then
 fi
 if ! rg -q -- '--max-wg-soak-failed-rounds 5' "$SIGNOFF_CAPTURE"; then
   echo "easy_node prod bundle signoff wiring failed: missing signoff max failed rounds forwarding"
+  cat "$SIGNOFF_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 700' "$SIGNOFF_CAPTURE"; then
+  echo "easy_node prod bundle signoff wiring failed: missing signoff max evidence age forwarding"
   cat "$SIGNOFF_CAPTURE"
   exit 1
 fi

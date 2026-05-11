@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash jq mktemp rg; do
+for cmd in bash date jq mktemp rg; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -15,6 +15,10 @@ TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
 mkdir -p "$TMP_BIN"
 WIN_PATH_DIR=""
+
+epoch_to_utc() {
+  date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ
+}
 
 cleanup() {
   rm -rf "$TMP_DIR"
@@ -30,6 +34,10 @@ PASS_WG_VALIDATE="$PASS_BUNDLE_DIR/prod_wg_validate_summary.json"
 PASS_WG_SOAK="$PASS_BUNDLE_DIR/prod_wg_soak_summary.json"
 PASS_GATE="$PASS_BUNDLE_DIR/prod_gate_summary.json"
 PASS_RUN_REPORT="$PASS_BUNDLE_DIR/prod_bundle_run_report.json"
+NOW_EPOCH="$(date -u +%s)"
+NOW_UTC="$(epoch_to_utc "$NOW_EPOCH")"
+STALE_UTC="$(epoch_to_utc "$((NOW_EPOCH - 7200))")"
+FUTURE_UTC="$(epoch_to_utc "$((NOW_EPOCH + 7200))")"
 GATE_ONLY_RELAX_RUN_REPORT_ARGS=(
   --require-preflight-ok 0
   --require-bundle-ok 0
@@ -41,18 +49,21 @@ GATE_ONLY_RELAX_RUN_REPORT_ARGS=(
   --incident-snapshot-max-skipped-count -1
 )
 
-cat >"$PASS_WG_VALIDATE" <<'EOF_WG_VALIDATE_OK'
+cat >"$PASS_WG_VALIDATE" <<EOF_WG_VALIDATE_OK
 {
   "status": "ok",
   "failed_step": "",
+  "started_at_utc": "$NOW_UTC",
+  "finished_at_utc": "$NOW_UTC",
   "client_inner_source": "udp",
   "strict_distinct": 1
 }
 EOF_WG_VALIDATE_OK
 
-cat >"$PASS_WG_SOAK" <<'EOF_WG_SOAK_OK'
+cat >"$PASS_WG_SOAK" <<EOF_WG_SOAK_OK
 {
   "status": "ok",
+  "summary_generated_at_utc": "$NOW_UTC",
   "rounds_failed": 0,
   "failure_classes": {},
   "selection_lines_total": 16,
@@ -68,6 +79,8 @@ cat >"$PASS_GATE" <<EOF_GATE_OK
   "status": "ok",
   "failed_step": "",
   "failed_rc": 0,
+  "started_at_utc": "$NOW_UTC",
+  "finished_at_utc": "$NOW_UTC",
   "steps": {
     "control_validate": "ok",
     "control_soak": "ok",
@@ -87,6 +100,7 @@ EOF_GATE_OK
 
 cat >"$PASS_RUN_REPORT" <<EOF_RUN_REPORT_OK
 {
+  "generated_at_utc": "$NOW_UTC",
   "status": "ok",
   "final_rc": 0,
   "bundle_dir": "$PASS_BUNDLE_DIR",
@@ -126,6 +140,128 @@ EOF_RUN_REPORT_OK
 echo "[prod-gate-check] pass baseline"
 ./scripts/prod_gate_check.sh "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" --gate-summary-json "$PASS_GATE" --show-json 0 >/tmp/integration_prod_gate_check_pass.log 2>&1
 ./scripts/prod_gate_check.sh --run-report-json "$PASS_RUN_REPORT" --show-json 0 >/tmp/integration_prod_gate_check_pass_run_report.log 2>&1
+
+echo "[prod-gate-check] evidence freshness policy"
+PROD_GATE_CHECK_NOW_EPOCH="$NOW_EPOCH" ./scripts/prod_gate_check.sh \
+  --run-report-json "$PASS_RUN_REPORT" \
+  --max-evidence-age-sec 3600 \
+  --require-wg-validate-ok 1 \
+  --require-wg-soak-ok 1 \
+  --show-json 0 >/tmp/integration_prod_gate_check_freshness_pass.log 2>&1
+
+STALE_BUNDLE_DIR="$TMP_DIR/prod_bundle_stale_evidence"
+mkdir -p "$STALE_BUNDLE_DIR"
+jq --arg ts "$STALE_UTC" \
+  '.started_at_utc=$ts | .finished_at_utc=$ts' \
+  "$PASS_WG_VALIDATE" >"$STALE_BUNDLE_DIR/prod_wg_validate_summary.json"
+jq --arg ts "$STALE_UTC" \
+  '.summary_generated_at_utc=$ts' \
+  "$PASS_WG_SOAK" >"$STALE_BUNDLE_DIR/prod_wg_soak_summary.json"
+jq --arg ts "$STALE_UTC" \
+  --arg dir "$STALE_BUNDLE_DIR" \
+  '.started_at_utc=$ts | .finished_at_utc=$ts | .wg_validate_summary_json=($dir + "/prod_wg_validate_summary.json") | .wg_soak_summary_json=($dir + "/prod_wg_soak_summary.json")' \
+  "$PASS_GATE" >"$STALE_BUNDLE_DIR/prod_gate_summary.json"
+jq --arg ts "$STALE_UTC" \
+  --arg dir "$STALE_BUNDLE_DIR" \
+  '.generated_at_utc=$ts | .bundle_dir=$dir | .gate_summary_json=($dir + "/prod_gate_summary.json") | .wg_validate_summary_json=($dir + "/prod_wg_validate_summary.json") | .wg_soak_summary_json=($dir + "/prod_wg_soak_summary.json")' \
+  "$PASS_RUN_REPORT" >"$STALE_BUNDLE_DIR/prod_bundle_run_report.json"
+set +e
+PROD_GATE_CHECK_NOW_EPOCH="$NOW_EPOCH" ./scripts/prod_gate_check.sh \
+  --run-report-json "$STALE_BUNDLE_DIR/prod_bundle_run_report.json" \
+  --max-evidence-age-sec 3600 \
+  --require-wg-validate-ok 1 \
+  --require-wg-soak-ok 1 \
+  --show-json 0 >/tmp/integration_prod_gate_check_freshness_stale.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "expected non-zero rc for stale evidence timestamps"
+  cat /tmp/integration_prod_gate_check_freshness_stale.log
+  exit 1
+fi
+if ! rg -q 'timestamp is stale' /tmp/integration_prod_gate_check_freshness_stale.log; then
+  echo "expected stale evidence timestamp message not found"
+  cat /tmp/integration_prod_gate_check_freshness_stale.log
+  exit 1
+fi
+
+MISSING_TS_GATE="$TMP_DIR/prod_gate_missing_timestamps.json"
+jq 'del(.started_at_utc) | del(.finished_at_utc)' "$PASS_GATE" >"$MISSING_TS_GATE"
+set +e
+PROD_GATE_CHECK_NOW_EPOCH="$NOW_EPOCH" ./scripts/prod_gate_check.sh \
+  "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" \
+  --gate-summary-json "$MISSING_TS_GATE" \
+  --max-evidence-age-sec 3600 \
+  --show-json 0 >/tmp/integration_prod_gate_check_freshness_missing.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "expected non-zero rc for missing gate evidence timestamps"
+  cat /tmp/integration_prod_gate_check_freshness_missing.log
+  exit 1
+fi
+if ! rg -q 'timestamp missing' /tmp/integration_prod_gate_check_freshness_missing.log; then
+  echo "expected missing evidence timestamp message not found"
+  cat /tmp/integration_prod_gate_check_freshness_missing.log
+  exit 1
+fi
+
+MALFORMED_TS_GATE="$TMP_DIR/prod_gate_malformed_timestamps.json"
+jq '.finished_at_utc="not-a-timestamp"' "$PASS_GATE" >"$MALFORMED_TS_GATE"
+set +e
+PROD_GATE_CHECK_NOW_EPOCH="$NOW_EPOCH" ./scripts/prod_gate_check.sh \
+  "${GATE_ONLY_RELAX_RUN_REPORT_ARGS[@]}" \
+  --gate-summary-json "$MALFORMED_TS_GATE" \
+  --max-evidence-age-sec 3600 \
+  --show-json 0 >/tmp/integration_prod_gate_check_freshness_malformed.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "expected non-zero rc for malformed gate evidence timestamp"
+  cat /tmp/integration_prod_gate_check_freshness_malformed.log
+  exit 1
+fi
+if ! rg -q 'timestamp is invalid' /tmp/integration_prod_gate_check_freshness_malformed.log; then
+  echo "expected malformed evidence timestamp message not found"
+  cat /tmp/integration_prod_gate_check_freshness_malformed.log
+  exit 1
+fi
+
+FUTURE_BUNDLE_DIR="$TMP_DIR/prod_bundle_future_evidence"
+mkdir -p "$FUTURE_BUNDLE_DIR"
+jq --arg ts "$FUTURE_UTC" \
+  '.started_at_utc=$ts | .finished_at_utc=$ts' \
+  "$PASS_WG_VALIDATE" >"$FUTURE_BUNDLE_DIR/prod_wg_validate_summary.json"
+jq --arg ts "$FUTURE_UTC" \
+  '.summary_generated_at_utc=$ts' \
+  "$PASS_WG_SOAK" >"$FUTURE_BUNDLE_DIR/prod_wg_soak_summary.json"
+jq --arg ts "$FUTURE_UTC" \
+  --arg dir "$FUTURE_BUNDLE_DIR" \
+  '.started_at_utc=$ts | .finished_at_utc=$ts | .wg_validate_summary_json=($dir + "/prod_wg_validate_summary.json") | .wg_soak_summary_json=($dir + "/prod_wg_soak_summary.json")' \
+  "$PASS_GATE" >"$FUTURE_BUNDLE_DIR/prod_gate_summary.json"
+jq --arg ts "$FUTURE_UTC" \
+  --arg dir "$FUTURE_BUNDLE_DIR" \
+  '.generated_at_utc=$ts | .bundle_dir=$dir | .gate_summary_json=($dir + "/prod_gate_summary.json") | .wg_validate_summary_json=($dir + "/prod_wg_validate_summary.json") | .wg_soak_summary_json=($dir + "/prod_wg_soak_summary.json")' \
+  "$PASS_RUN_REPORT" >"$FUTURE_BUNDLE_DIR/prod_bundle_run_report.json"
+set +e
+PROD_GATE_CHECK_NOW_EPOCH="$NOW_EPOCH" ./scripts/prod_gate_check.sh \
+  --run-report-json "$FUTURE_BUNDLE_DIR/prod_bundle_run_report.json" \
+  --max-evidence-age-sec 3600 \
+  --require-wg-validate-ok 1 \
+  --require-wg-soak-ok 1 \
+  --show-json 0 >/tmp/integration_prod_gate_check_freshness_future.log 2>&1
+rc=$?
+set -e
+if [[ "$rc" -eq 0 ]]; then
+  echo "expected non-zero rc for future evidence timestamps"
+  cat /tmp/integration_prod_gate_check_freshness_future.log
+  exit 1
+fi
+if ! rg -q 'timestamp is too far in the future' /tmp/integration_prod_gate_check_freshness_future.log; then
+  echo "expected future evidence timestamp message not found"
+  cat /tmp/integration_prod_gate_check_freshness_future.log
+  exit 1
+fi
 
 echo "[prod-gate-check] copied bundle prefers local evidence"
 COPIED_BUNDLE_DIR="$TMP_DIR/copied_prod_bundle"
@@ -763,6 +899,7 @@ THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_CHECK" \
   --min-wg-soak-exit-operators 2 \
   --min-wg-soak-cross-operator-pairs 2 \
   --max-wg-soak-failed-rounds 1 \
+  --max-evidence-age-sec 900 \
   --show-json 1 >/tmp/integration_prod_gate_check_easy_node.log 2>&1
 
 if ! rg -q -- '--bundle-dir /tmp/prod_bundle' "$CAPTURE"; then
@@ -777,6 +914,11 @@ if ! rg -q -- '--run-report-json /tmp/prod_bundle/prod_bundle_run_report.json' "
 fi
 if ! rg -q -- '--max-wg-soak-failed-rounds 1' "$CAPTURE"; then
   echo "easy_node prod-gate-check forwarding failed: missing --max-wg-soak-failed-rounds"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 900' "$CAPTURE"; then
+  echo "easy_node prod-gate-check forwarding failed: missing --max-evidence-age-sec"
   cat "$CAPTURE"
   exit 1
 fi
@@ -911,6 +1053,7 @@ THREE_MACHINE_PROD_GATE_CHECK_SCRIPT="$FAKE_CHECK" \
   --min-wg-soak-exit-operators 2 \
   --min-wg-soak-cross-operator-pairs 2 \
   --max-wg-soak-failed-rounds 0 \
+  --max-evidence-age-sec 900 \
   --show-json 1 >/tmp/integration_prod_gate_signoff_easy_node.log 2>&1
 
 if ! rg -q -- '--run-report-json /tmp/prod_bundle/prod_bundle_run_report.json' "$VERIFY_CAPTURE"; then
@@ -940,6 +1083,11 @@ if ! rg -q -- '--require-wg-soak-ok 1' "$CHECK_CAPTURE"; then
 fi
 if ! rg -q -- '--max-wg-soak-failed-rounds 0' "$CHECK_CAPTURE"; then
   echo "easy_node prod-gate-signoff forwarding failed: check missing max failed rounds"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 900' "$CHECK_CAPTURE"; then
+  echo "easy_node prod-gate-signoff forwarding failed: check missing max evidence age"
   cat "$CHECK_CAPTURE"
   exit 1
 fi

@@ -30,6 +30,7 @@ Usage:
     [--min-wg-soak-exit-operators N] \
     [--min-wg-soak-cross-operator-pairs N] \
     [--max-wg-soak-failed-rounds N] \
+    [--max-evidence-age-sec N] \
     [--show-json [0|1]]
 
 Purpose:
@@ -135,6 +136,9 @@ min_wg_soak_entry_operators="${PROD_GATE_CHECK_MIN_WG_SOAK_ENTRY_OPERATORS:-2}"
 min_wg_soak_exit_operators="${PROD_GATE_CHECK_MIN_WG_SOAK_EXIT_OPERATORS:-2}"
 min_wg_soak_cross_operator_pairs="${PROD_GATE_CHECK_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS:-2}"
 max_wg_soak_failed_rounds="${PROD_GATE_CHECK_MAX_WG_SOAK_FAILED_ROUNDS:-0}"
+max_evidence_age_sec="${PROD_GATE_CHECK_MAX_EVIDENCE_AGE_SEC:-0}"
+max_evidence_future_skew_sec="${PROD_GATE_CHECK_MAX_EVIDENCE_FUTURE_SKEW_SEC:-300}"
+max_evidence_now_epoch="${PROD_GATE_CHECK_NOW_EPOCH:-}"
 show_json="${PROD_GATE_CHECK_SHOW_JSON:-0}"
 
 while [[ $# -gt 0 ]]; do
@@ -289,6 +293,10 @@ while [[ $# -gt 0 ]]; do
       max_wg_soak_failed_rounds="${2:-}"
       shift 2
       ;;
+    --max-evidence-age-sec)
+      max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --show-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         show_json="${2:-}"
@@ -335,6 +343,18 @@ if [[ ! "$incident_snapshot_max_skipped_count" =~ ^-?[0-9]+$ ]] || ((incident_sn
 fi
 if [[ ! "$max_wg_soak_failed_rounds" =~ ^[0-9]+$ ]]; then
   echo "--max-wg-soak-failed-rounds must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$max_evidence_age_sec" =~ ^[0-9]+$ ]]; then
+  echo "--max-evidence-age-sec must be an integer >= 0"
+  exit 2
+fi
+if [[ ! "$max_evidence_future_skew_sec" =~ ^[0-9]+$ ]]; then
+  echo "PROD_GATE_CHECK_MAX_EVIDENCE_FUTURE_SKEW_SEC must be an integer >= 0"
+  exit 2
+fi
+if [[ -n "$max_evidence_now_epoch" && ! "$max_evidence_now_epoch" =~ ^[0-9]+$ ]]; then
+  echo "PROD_GATE_CHECK_NOW_EPOCH must be an integer >= 0"
   exit 2
 fi
 if [[ ! "$min_wg_soak_selection_lines" =~ ^[0-9]+$ ]]; then
@@ -460,9 +480,43 @@ json_trueish() {
   esac
 }
 
+iso8601_utc_to_epoch() {
+  local timestamp="$1"
+  timestamp="$(trim "$timestamp")"
+  if [[ ! "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+    return 1
+  fi
+  jq -nr --arg ts "$timestamp" '$ts | fromdateiso8601 | floor' 2>/dev/null
+}
+
+check_evidence_timestamp_age() {
+  local label="$1"
+  local timestamp="$2"
+  local now_epoch="$3"
+  local timestamp_epoch=""
+  timestamp="$(trim "$timestamp")"
+  if [[ -z "$timestamp" ]]; then
+    errors+=("$label timestamp missing while --max-evidence-age-sec is enabled")
+    return
+  fi
+  if ! timestamp_epoch="$(iso8601_utc_to_epoch "$timestamp" 2>/dev/null)"; then
+    errors+=("$label timestamp is invalid (value=$timestamp)")
+    return
+  fi
+  if (( timestamp_epoch > now_epoch + max_evidence_future_skew_sec )); then
+    errors+=("$label timestamp is too far in the future (value=$timestamp, future_skew_sec=$((timestamp_epoch - now_epoch)))")
+    return
+  fi
+  if (( now_epoch - timestamp_epoch > max_evidence_age_sec )); then
+    errors+=("$label timestamp is stale (value=$timestamp, age_sec=$((now_epoch - timestamp_epoch)), max_evidence_age_sec=$max_evidence_age_sec)")
+  fi
+}
+
 gate_status="$(json_string "$gate_summary_json" '.status')"
 failed_step="$(json_string "$gate_summary_json" '.failed_step')"
 failed_rc="$(json_int "$gate_summary_json" '.failed_rc')"
+gate_started_at_utc="$(json_string "$gate_summary_json" '.started_at_utc')"
+gate_finished_at_utc="$(json_string "$gate_summary_json" '.finished_at_utc')"
 step_control_validate="$(json_string "$gate_summary_json" '.steps.control_validate')"
 step_control_soak="$(json_string "$gate_summary_json" '.steps.control_soak')"
 step_prod_wg_validate="$(json_string "$gate_summary_json" '.steps.prod_wg_validate')"
@@ -476,6 +530,8 @@ if [[ -n "$bundle_dir" && -f "${bundle_dir%/}/prod_wg_validate_summary.json" ]];
   wg_validate_summary_json="$local_bundle_wg_validate_summary_json"
 fi
 wg_validate_summary_status=""
+wg_validate_started_at_utc=""
+wg_validate_finished_at_utc=""
 wg_validate_status="$(json_string "$gate_summary_json" '.wg_validate_status')"
 wg_validate_failed_step="$(json_string "$gate_summary_json" '.wg_validate_failed_step')"
 
@@ -487,6 +543,7 @@ if [[ -n "$bundle_dir" && -f "${bundle_dir%/}/prod_wg_soak_summary.json" ]]; the
   wg_soak_summary_json="$local_bundle_wg_soak_summary_json"
 fi
 wg_soak_summary_status=""
+wg_soak_summary_generated_at_utc=""
 wg_soak_status="$(json_string "$gate_summary_json" '.wg_soak_status')"
 wg_soak_rounds_failed="$(json_int "$gate_summary_json" '.wg_soak_rounds_failed')"
 wg_soak_top_failure_class="$(json_string "$gate_summary_json" '.wg_soak_top_failure_class')"
@@ -500,11 +557,14 @@ wg_soak_selection_cross_operator_pairs="0"
 wg_soak_selection_diversity_failed="0"
 if [[ -n "$wg_validate_summary_json" && -f "$wg_validate_summary_json" ]]; then
   wg_validate_summary_status="$(json_string "$wg_validate_summary_json" '.status')"
+  wg_validate_started_at_utc="$(json_string "$wg_validate_summary_json" '.started_at_utc')"
+  wg_validate_finished_at_utc="$(json_string "$wg_validate_summary_json" '.finished_at_utc')"
   wg_validate_client_inner_source="$(json_string "$wg_validate_summary_json" '.client_inner_source')"
   wg_validate_strict_distinct="$(json_trueish "$wg_validate_summary_json" '.strict_distinct')"
 fi
 if [[ -n "$wg_soak_summary_json" && -f "$wg_soak_summary_json" ]]; then
   wg_soak_summary_status="$(json_string "$wg_soak_summary_json" '.status')"
+  wg_soak_summary_generated_at_utc="$(json_string "$wg_soak_summary_json" '.summary_generated_at_utc')"
   wg_soak_selection_lines="$(json_int "$wg_soak_summary_json" '.selection_lines_total')"
   wg_soak_selection_entry_operators="$(json_int "$wg_soak_summary_json" '.selection_entry_operators')"
   wg_soak_selection_exit_operators="$(json_int "$wg_soak_summary_json" '.selection_exit_operators')"
@@ -513,6 +573,7 @@ if [[ -n "$wg_soak_summary_json" && -f "$wg_soak_summary_json" ]]; then
 fi
 
 run_report_status=""
+run_report_generated_at_utc=""
 run_report_final_rc=0
 run_report_preflight_status=""
 run_report_bundle_status=""
@@ -532,6 +593,7 @@ run_report_incident_attachment_count=0
 run_report_incident_attachment_skipped_count=0
 if [[ -n "$run_report_json" ]]; then
   run_report_status="$(json_string "$run_report_json" '.status')"
+  run_report_generated_at_utc="$(json_string "$run_report_json" '.generated_at_utc')"
   run_report_final_rc="$(json_int "$run_report_json" '.final_rc')"
   run_report_preflight_status="$(json_string "$run_report_json" '.preflight.status')"
   run_report_bundle_status="$(json_string "$run_report_json" '.bundle.status')"
@@ -563,6 +625,31 @@ if [[ -n "$run_report_json" ]]; then
 fi
 
 declare -a errors=()
+
+if (( max_evidence_age_sec > 0 )); then
+  if [[ -n "$max_evidence_now_epoch" ]]; then
+    now_epoch="$max_evidence_now_epoch"
+  else
+    need_cmd date
+    now_epoch="$(date -u +%s)"
+  fi
+  if [[ -z "$now_epoch" || ! "$now_epoch" =~ ^[0-9]+$ ]]; then
+    errors+=("could not determine current UTC epoch for evidence freshness check")
+  else
+    check_evidence_timestamp_age "gate started_at_utc" "$gate_started_at_utc" "$now_epoch"
+    check_evidence_timestamp_age "gate finished_at_utc" "$gate_finished_at_utc" "$now_epoch"
+    if [[ -n "$run_report_json" ]]; then
+      check_evidence_timestamp_age "run report generated_at_utc" "$run_report_generated_at_utc" "$now_epoch"
+    fi
+    if [[ "$require_wg_validate_ok" == "1" || -n "$wg_validate_summary_status" ]]; then
+      check_evidence_timestamp_age "wg validate started_at_utc" "$wg_validate_started_at_utc" "$now_epoch"
+      check_evidence_timestamp_age "wg validate finished_at_utc" "$wg_validate_finished_at_utc" "$now_epoch"
+    fi
+    if [[ "$require_wg_soak_ok" == "1" || -n "$wg_soak_summary_status" ]]; then
+      check_evidence_timestamp_age "wg soak summary_generated_at_utc" "$wg_soak_summary_generated_at_utc" "$now_epoch"
+    fi
+  fi
+fi
 
 if [[ -n "$run_report_json" ]]; then
   if [[ -z "$run_report_bundle_dir" ]]; then
@@ -828,14 +915,15 @@ if [[ -n "$run_report_json" ]]; then
   echo "[prod-gate-check] run_report_json=$run_report_json"
 fi
 echo "[prod-gate-check] gate_summary_json=$gate_summary_json"
-echo "[prod-gate-check] status=${gate_status:-unset} failed_step=${failed_step:-none} failed_rc=$failed_rc"
+echo "[prod-gate-check] status=${gate_status:-unset} failed_step=${failed_step:-none} failed_rc=$failed_rc started_at_utc=${gate_started_at_utc:-unset} finished_at_utc=${gate_finished_at_utc:-unset}"
 echo "[prod-gate-check] steps control_validate=${step_control_validate:-unset} control_soak=${step_control_soak:-unset} prod_wg_validate=${step_prod_wg_validate:-unset} prod_wg_soak=${step_prod_wg_soak:-unset}"
 echo "[prod-gate-check] wg_validate status=${wg_validate_status:-unset} failed_step=${wg_validate_failed_step:-none} summary=${wg_validate_summary_json:-unset}"
 echo "[prod-gate-check] wg_soak status=${wg_soak_status:-unset} rounds_failed=${wg_soak_rounds_failed} top_failure_class=${wg_soak_top_failure_class:-none} top_failure_count=${wg_soak_top_failure_count} summary=${wg_soak_summary_json:-unset}"
+echo "[prod-gate-check] freshness max_evidence_age_sec=${max_evidence_age_sec} gate_started_at_utc=${gate_started_at_utc:-unset} gate_finished_at_utc=${gate_finished_at_utc:-unset} run_report_generated_at_utc=${run_report_generated_at_utc:-unset} wg_validate_started_at_utc=${wg_validate_started_at_utc:-unset} wg_validate_finished_at_utc=${wg_validate_finished_at_utc:-unset} wg_soak_summary_generated_at_utc=${wg_soak_summary_generated_at_utc:-unset}"
 echo "[prod-gate-check] wg_validate_evidence client_inner_source=${wg_validate_client_inner_source:-unset} strict_distinct=${wg_validate_strict_distinct}"
 echo "[prod-gate-check] wg_soak_diversity selection_lines_total=${wg_soak_selection_lines} selection_entry_operators=${wg_soak_selection_entry_operators} selection_exit_operators=${wg_soak_selection_exit_operators} selection_cross_operator_pairs=${wg_soak_selection_cross_operator_pairs} selection_diversity_failed=${wg_soak_selection_diversity_failed}"
 if [[ -n "$run_report_json" ]]; then
-  echo "[prod-gate-check] run_report status=${run_report_status:-unset} final_rc=${run_report_final_rc} preflight=${run_report_preflight_status:-unset} bundle=${run_report_bundle_status:-unset} integrity=${run_report_integrity_status:-unset} signoff_enabled=${run_report_signoff_enabled:-unset} signoff_rc=${run_report_signoff_rc} incident_enabled_on_fail=${run_report_incident_enabled_on_fail:-unset} incident_status=${run_report_incident_status:-unset} incident_rc=${run_report_incident_rc}"
+  echo "[prod-gate-check] run_report status=${run_report_status:-unset} generated_at_utc=${run_report_generated_at_utc:-unset} final_rc=${run_report_final_rc} preflight=${run_report_preflight_status:-unset} bundle=${run_report_bundle_status:-unset} integrity=${run_report_integrity_status:-unset} signoff_enabled=${run_report_signoff_enabled:-unset} signoff_rc=${run_report_signoff_rc} incident_enabled_on_fail=${run_report_incident_enabled_on_fail:-unset} incident_status=${run_report_incident_status:-unset} incident_rc=${run_report_incident_rc}"
   if [[ -n "$run_report_incident_summary_json" || -n "$run_report_incident_report_md" || -n "$run_report_incident_attachment_manifest" || -n "$run_report_incident_attachment_skipped" ]]; then
     echo "[prod-gate-check] incident_handoff source_run_report=${run_report_json:-unset} summary_json=${run_report_incident_summary_json:-unset} report_md=${run_report_incident_report_md:-unset} attachment_manifest=${run_report_incident_attachment_manifest:-unset} attachment_skipped=${run_report_incident_attachment_skipped:-unset} attachment_count=${run_report_incident_attachment_count} attachment_skipped_count=${run_report_incident_attachment_skipped_count}"
   fi
