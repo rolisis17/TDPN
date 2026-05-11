@@ -345,7 +345,13 @@ reason_category_from_code_01() {
     min_samples_not_met|min_pass_samples_not_met|max_fail_samples_exceeded|max_warn_samples_exceeded|ready_rate_below_threshold|modal_runtime_actuation_status_mismatch)
       printf '%s' "pass_sample_thresholds"
       ;;
-    signoff_context_missing|runtime_actuation_diagnostics_missing|runtime_actuation_status_missing|runtime_actuation_ready_missing|signoff_summary_invalid_json|signoff_decision_missing)
+    source_decision_not_go|source_status_not_pass)
+      printf '%s' "upstream_source_blocked"
+      ;;
+    runtime_actuation_diagnostics_missing|runtime_actuation_status_missing|runtime_actuation_ready_missing)
+      printf '%s' "runtime_diagnostics_missing"
+      ;;
+    signoff_context_missing|signoff_summary_invalid_json|signoff_decision_missing)
       printf '%s' "missing_signoff_context"
       ;;
     signoff_summary_stale|freshness_stale|freshness_unknown|freshness_invalid_generated_at_utc)
@@ -1075,6 +1081,7 @@ promotion_next_operator_action=""
 promotion_violations_json='[]'
 promotion_errors_json='[]'
 promotion_violation_codes_json='[]'
+promotion_driver_codes_json='[]'
 promotion_policy_require_min_samples="0"
 promotion_policy_require_min_pass_samples="0"
 
@@ -1112,6 +1119,15 @@ if [[ "$(json_file_valid_01 "$promotion_summary_json")" == "1" ]]; then
       | select((.code | type) == "string")
       | .code
     ]
+  ' "$promotion_summary_json" 2>/dev/null || printf '%s' '[]')"
+  promotion_driver_codes_json="$(jq -c '
+    if (.diagnostics.no_go.driver_codes | type) == "array" then
+      [ .diagnostics.no_go.driver_codes[]
+        | select(type == "string")
+      ]
+    else
+      []
+    end
   ' "$promotion_summary_json" 2>/dev/null || printf '%s' '[]')"
   promotion_policy_require_min_samples="$(jq -r '
     if (.inputs.policy.require_min_samples | type) == "number" then (.inputs.policy.require_min_samples | floor | tostring)
@@ -1155,6 +1171,24 @@ if ((${#cycle_error_codes[@]} > 0)); then
   first_cycle_error_code="${cycle_error_codes[0]}"
 fi
 first_promotion_error="$(jq -r '
+  if (.driver_codes | type) == "array"
+    and (.driver_codes | length) > 0
+    and (.violations | type) == "array" then
+    (.driver_codes) as $driver_codes
+    |
+    (
+      [ .violations[]
+        | select((.code | type) == "string" and (.message | type) == "string")
+        | select(.code as $code | ($driver_codes | index($code)) != null)
+        | .message
+      ][0] // ""
+    )
+  else
+    ""
+  end
+' <<<"$(jq -cn --argjson driver_codes "$promotion_driver_codes_json" --argjson violations "$promotion_violations_json" '{driver_codes:$driver_codes,violations:$violations}')" 2>/dev/null || printf '%s' "")"
+if [[ -z "$first_promotion_error" ]]; then
+  first_promotion_error="$(jq -r '
   if (. | type) == "array" and (. | length) > 0 then
     if (.[0].message | type) == "string" then .[0].message
     elif (.[0] | type) == "string" then .[0]
@@ -1164,6 +1198,7 @@ first_promotion_error="$(jq -r '
     ""
   end
 ' <<<"$promotion_violations_json" 2>/dev/null || printf '%s' "")"
+fi
 if [[ -z "$first_promotion_error" ]]; then
   first_promotion_error="$(jq -r '
     if (. | type) == "array" and (. | length) > 0 and (.[0] | type) == "string" then .[0] else "" end
@@ -1173,7 +1208,14 @@ first_promotion_violation_code="$(jq -r '
   if (. | type) == "array" and (. | length) > 0 and (.[0] | type) == "string" then .[0]
   else ""
   end
+' <<<"$promotion_driver_codes_json" 2>/dev/null || printf '%s' "")"
+if [[ -z "$first_promotion_violation_code" ]]; then
+  first_promotion_violation_code="$(jq -r '
+  if (. | type) == "array" and (. | length) > 0 and (.[0] | type) == "string" then .[0]
+  else ""
+  end
 ' <<<"$promotion_violation_codes_json" 2>/dev/null || printf '%s' "")"
+fi
 
 decision="$promotion_decision"
 status="fail"
@@ -1306,7 +1348,11 @@ if [[ "$decision" == "NO-GO" ]]; then
     if [[ -n "$first_promotion_violation_code" ]]; then
       no_go_primary_reason_code="$first_promotion_violation_code"
       no_go_primary_reason_category="$(reason_category_from_code_01 "$no_go_primary_reason_code")"
-      no_go_reason_codes_json="$promotion_violation_codes_json"
+      if [[ "$(jq -r 'length' <<<"$promotion_driver_codes_json" 2>/dev/null || printf '%s' 0)" -gt 0 ]]; then
+        no_go_reason_codes_json="$promotion_driver_codes_json"
+      else
+        no_go_reason_codes_json="$promotion_violation_codes_json"
+      fi
     elif [[ "$promotion_summary_valid" != "true" ]]; then
       no_go_primary_reason_code="promotion_summary_invalid_json"
       no_go_primary_reason_category="policy_violation"
@@ -1342,6 +1388,14 @@ if [[ "$decision" == "NO-GO" ]]; then
     missing_signoff_context)
       remediation_next_command="$(build_runtime_actuation_easy_node_command_01 "" "1")"
       remediation_next_command_reason="regenerate signoff evidence with campaign-check context before rerunning promotion"
+      ;;
+    runtime_diagnostics_missing)
+      remediation_next_command="$(build_runtime_actuation_easy_node_command_01 "" "1")"
+      remediation_next_command_reason="regenerate runtime-actuation diagnostics in signoff/campaign-check evidence"
+      ;;
+    upstream_source_blocked)
+      remediation_next_command="$(build_runtime_actuation_easy_node_command_01 "" "1")"
+      remediation_next_command_reason="resolve upstream campaign-check/signoff blockers before rerunning promotion"
       ;;
     cycle_signoff_failure)
       remediation_next_command="$(build_runtime_actuation_easy_node_command_01 "" "1")"

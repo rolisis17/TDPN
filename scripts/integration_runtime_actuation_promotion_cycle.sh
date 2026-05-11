@@ -420,6 +420,74 @@ if [[ "$scenario" == "no_go" ]]; then
   exit "$rc"
 fi
 
+if [[ "$scenario" == "source_blocked_thresholds" ]]; then
+  rc=0
+  if [[ "$fail_on_no_go" == "1" ]]; then
+    rc=1
+  fi
+  jq -n \
+    --argjson rc "$rc" \
+    --argjson samples_total "$samples_total" \
+    --argjson missing_samples "$missing_samples" \
+    '{
+      version: 1,
+      schema: { id: "runtime_actuation_promotion_check_summary" },
+      decision: "NO-GO",
+      status: "fail",
+      rc: $rc,
+      notes: "simulated all-upstream-blocked NO-GO promotion decision",
+      observed: {
+        samples_total: $samples_total,
+        samples_pass: 0,
+        samples_fail: $samples_total,
+        source_contract_blocked_samples: $samples_total,
+        runtime_actuation_ready_rate_pct: 0
+      },
+      enforcement: {
+        fail_on_no_go: true,
+        no_go_detected: true,
+        no_go_enforced: ($rc != 0)
+      },
+      outcome: {
+        should_promote: false,
+        action: (if $rc == 0 then "hold_promotion_warn_only" else "hold_promotion_blocked" end),
+        next_operator_action: "resolve upstream campaign-check/signoff blockers before promotion",
+        remediation: {
+          next_command: "./scripts/easy_node.sh runtime-actuation-promotion-cycle",
+          next_command_reason: "resolve upstream campaign-check/signoff blockers before promotion"
+        }
+      },
+      diagnostics: {
+        no_go: {
+          primary_driver: "upstream_source_blocked",
+          driver_codes: ["source_decision_not_go", "source_status_not_pass"],
+          threshold_violation_count: 2,
+          source_contract_violation_count: 2,
+          source_contract_all_samples: true
+        }
+      },
+      violations: [
+        {
+          code: "min_pass_samples_not_met",
+          message: "runtime-actuation pass sample count is below threshold"
+        },
+        {
+          code: "source_decision_not_go",
+          message: "upstream summary decision is not GO"
+        },
+        {
+          code: "source_status_not_pass",
+          message: "upstream summary status is not pass/ok"
+        }
+      ],
+      errors: [],
+      artifacts: {
+        missing_samples: $missing_samples
+      }
+    }' >"$summary_json"
+  exit "$rc"
+fi
+
 if [[ "$scenario" == "go_wrong_schema" ]]; then
   jq -n \
     --argjson samples_total "$samples_total" \
@@ -858,6 +926,46 @@ fi
 if ! grep -q $'^promotion_check\t.*\tfail_on_no_go=0\t' "$NO_GO_SOFT_CAPTURE"; then
   echo "expected promotion check fail_on_no_go=0 capture not found"
   cat "$NO_GO_SOFT_CAPTURE"
+  exit 1
+fi
+
+echo "[runtime-actuation-promotion-cycle] promotion driver codes outrank threshold violation order"
+SOURCE_BLOCKED_THRESHOLD_SUMMARY="$TMP_DIR/cycle_source_blocked_threshold_summary.json"
+set +e
+PROFILE_COMPARE_CAMPAIGN_SIGNOFF_SCRIPT="$FAKE_SIGNOFF_SCRIPT" \
+RUNTIME_ACTUATION_PROMOTION_CHECK_SCRIPT="$FAKE_PROMOTION_CHECK_SCRIPT" \
+FAKE_RUNTIME_ACTUATION_CYCLE_CAPTURE_FILE="$TMP_DIR/source_blocked_threshold_capture.log" \
+FAKE_RUNTIME_ACTUATION_CYCLE_SIGNOFF_SCENARIO="pass" \
+FAKE_RUNTIME_ACTUATION_CYCLE_PROMOTION_SCENARIO="source_blocked_thresholds" \
+bash "$SCRIPT_UNDER_TEST" \
+  --cycles 3 \
+  --reports-dir "$TMP_DIR/source_blocked_threshold_reports" \
+  --fail-on-no-go 1 \
+  --summary-json "$SOURCE_BLOCKED_THRESHOLD_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_runtime_actuation_promotion_cycle_source_blocked_threshold.log 2>&1
+source_blocked_threshold_rc=$?
+set -e
+
+if [[ "$source_blocked_threshold_rc" -eq 0 ]]; then
+  echo "expected source-blocked threshold path rc!=0"
+  cat /tmp/integration_runtime_actuation_promotion_cycle_source_blocked_threshold.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .decision == "NO-GO"
+  and .failure_stage == "promotion_check"
+  and .failure_reason == "upstream summary decision is not GO"
+  and .promotion_check.decision == "NO-GO"
+  and .diagnostics.no_go.primary_reason_code == "source_decision_not_go"
+  and .diagnostics.no_go.primary_reason_category == "upstream_source_blocked"
+  and ((.diagnostics.no_go.reason_codes | index("source_decision_not_go")) != null)
+  and ((.diagnostics.no_go.reason_codes | index("source_status_not_pass")) != null)
+  and (.outcome.next_operator_action | contains("resolve upstream"))
+  and (.outcome.remediation.next_command_reason | contains("resolve upstream"))
+' "$SOURCE_BLOCKED_THRESHOLD_SUMMARY" >/dev/null 2>&1; then
+  echo "source-blocked threshold summary mismatch"
+  cat "$SOURCE_BLOCKED_THRESHOLD_SUMMARY"
   exit 1
 fi
 

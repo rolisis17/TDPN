@@ -489,6 +489,8 @@ runtime_ready_missing_samples=0
 signoff_context_missing_samples=0
 source_not_go_samples=0
 source_not_pass_samples=0
+source_contract_blocked_samples=0
+runtime_diagnostics_blocked_samples=0
 
 for sample_path in "${sample_paths[@]}"; do
   sample_exists="0"
@@ -695,7 +697,11 @@ for sample_path in "${sample_paths[@]}"; do
       diagnostics_present="1"
     fi
 
+    sample_source_contract_blocked=0
+    sample_runtime_diagnostics_blocked=0
+
     if [[ "$diagnostics_present" != "1" ]]; then
+      sample_runtime_diagnostics_blocked=1
       diagnostics_missing_samples=$((diagnostics_missing_samples + 1))
       append_sample_reason \
         "runtime_actuation_diagnostics_missing" \
@@ -704,6 +710,7 @@ for sample_path in "${sample_paths[@]}"; do
     fi
 
     if [[ "$signoff_context_missing" == "1" ]]; then
+      sample_runtime_diagnostics_blocked=1
       signoff_context_missing_samples=$((signoff_context_missing_samples + 1))
       append_sample_reason \
         "signoff_context_missing" \
@@ -712,6 +719,7 @@ for sample_path in "${sample_paths[@]}"; do
     fi
 
     if [[ "$runtime_status" == "unknown" ]]; then
+      sample_runtime_diagnostics_blocked=1
       runtime_status_missing_samples=$((runtime_status_missing_samples + 1))
       append_sample_reason \
         "runtime_actuation_status_missing" \
@@ -720,6 +728,7 @@ for sample_path in "${sample_paths[@]}"; do
     fi
 
     if [[ "$runtime_ready_present" != "1" ]]; then
+      sample_runtime_diagnostics_blocked=1
       runtime_ready_missing_samples=$((runtime_ready_missing_samples + 1))
       append_sample_reason \
         "runtime_actuation_ready_missing" \
@@ -728,6 +737,7 @@ for sample_path in "${sample_paths[@]}"; do
     fi
 
     if [[ "$source_decision" != "GO" ]]; then
+      sample_source_contract_blocked=1
       source_not_go_samples=$((source_not_go_samples + 1))
       append_sample_reason \
         "source_decision_not_go" \
@@ -736,11 +746,19 @@ for sample_path in "${sample_paths[@]}"; do
     fi
 
     if [[ "$source_status_normalized" != "pass" ]]; then
+      sample_source_contract_blocked=1
       source_not_pass_samples=$((source_not_pass_samples + 1))
       append_sample_reason \
         "source_status_not_pass" \
         "upstream summary status is not pass/ok" \
         "stabilize upstream campaign-check/signoff status before promotion"
+    fi
+
+    if [[ "$sample_source_contract_blocked" == "1" ]]; then
+      source_contract_blocked_samples=$((source_contract_blocked_samples + 1))
+    fi
+    if [[ "$sample_runtime_diagnostics_blocked" == "1" ]]; then
+      runtime_diagnostics_blocked_samples=$((runtime_diagnostics_blocked_samples + 1))
     fi
 
     if [[ "$(jq -r 'length' <<<"$sample_reasons_json")" -eq 0 ]]; then
@@ -1114,6 +1132,14 @@ threshold_violation_count="$(jq -r 'length' <<<"$threshold_violation_codes_json"
 signoff_context_violation_count="$(jq -r 'length' <<<"$signoff_context_violation_codes_json")"
 runtime_diagnostics_violation_count="$(jq -r 'length' <<<"$runtime_diagnostics_violation_codes_json")"
 source_contract_violation_count="$(jq -r 'length' <<<"$source_contract_violation_codes_json")"
+source_contract_all_samples=0
+runtime_diagnostics_all_samples=0
+if (( samples_total > 0 && source_contract_violation_count > 0 && source_contract_blocked_samples == samples_total )); then
+  source_contract_all_samples=1
+fi
+if (( samples_total > 0 && runtime_diagnostics_violation_count > 0 && runtime_diagnostics_blocked_samples == samples_total )); then
+  runtime_diagnostics_all_samples=1
+fi
 
 threshold_recommended_cycles="$require_min_samples"
 threshold_recommended_cycles="$(max_int_01 "$threshold_recommended_cycles" "$require_min_pass_samples")"
@@ -1134,6 +1160,16 @@ if [[ "$decision" == "NO-GO" ]]; then
     no_go_driver_codes_json="$signoff_context_violation_codes_json"
     remediation_next_command="$(build_runtime_actuation_cycle_rerun_command_01 "")"
     remediation_next_command_reason="refresh signoff summaries with campaign-check context before promotion"
+  elif (( source_contract_all_samples > 0 )); then
+    no_go_primary_driver="upstream_source_blocked"
+    no_go_driver_codes_json="$source_contract_violation_codes_json"
+    remediation_next_command="$(build_runtime_actuation_cycle_rerun_command_01 "")"
+    remediation_next_command_reason="resolve upstream campaign-check/signoff NO-GO or non-pass blockers before promotion"
+  elif (( runtime_diagnostics_all_samples > 0 )); then
+    no_go_primary_driver="runtime_diagnostics_missing"
+    no_go_driver_codes_json="$runtime_diagnostics_violation_codes_json"
+    remediation_next_command="$(build_runtime_actuation_cycle_rerun_command_01 "")"
+    remediation_next_command_reason="regenerate runtime-actuation diagnostics in signoff/campaign-check evidence"
   elif (( threshold_violation_count > 0 )); then
     no_go_primary_driver="pass_sample_thresholds"
     no_go_driver_codes_json="$threshold_violation_codes_json"
@@ -1207,11 +1243,15 @@ jq -n \
   --argjson signoff_context_missing_samples "$signoff_context_missing_samples" \
   --argjson source_not_go_samples "$source_not_go_samples" \
   --argjson source_not_pass_samples "$source_not_pass_samples" \
+  --argjson source_contract_blocked_samples "$source_contract_blocked_samples" \
+  --argjson runtime_diagnostics_blocked_samples "$runtime_diagnostics_blocked_samples" \
   --argjson threshold_recommended_cycles "$threshold_recommended_cycles" \
   --argjson threshold_violation_count "$threshold_violation_count" \
   --argjson signoff_context_violation_count "$signoff_context_violation_count" \
   --argjson runtime_diagnostics_violation_count "$runtime_diagnostics_violation_count" \
   --argjson source_contract_violation_count "$source_contract_violation_count" \
+  --argjson source_contract_all_samples "$source_contract_all_samples" \
+  --argjson runtime_diagnostics_all_samples "$runtime_diagnostics_all_samples" \
   --argjson no_go_driver_codes "$no_go_driver_codes_json" \
   --argjson violations "$violations_json" \
   --argjson errors "$errors_json" \
@@ -1265,7 +1305,9 @@ jq -n \
       runtime_ready_missing_samples: $runtime_ready_missing_samples,
       signoff_context_missing_samples: $signoff_context_missing_samples,
       source_not_go_samples: $source_not_go_samples,
-      source_not_pass_samples: $source_not_pass_samples
+      source_not_pass_samples: $source_not_pass_samples,
+      source_contract_blocked_samples: $source_contract_blocked_samples,
+      runtime_diagnostics_blocked_samples: $runtime_diagnostics_blocked_samples
     },
     enforcement: {
       fail_on_no_go: ($fail_on_no_go == 1),
@@ -1300,6 +1342,8 @@ jq -n \
         signoff_context_violation_count: $signoff_context_violation_count,
         runtime_diagnostics_violation_count: $runtime_diagnostics_violation_count,
         source_contract_violation_count: $source_contract_violation_count,
+        source_contract_all_samples: ($source_contract_all_samples == 1),
+        runtime_diagnostics_all_samples: ($runtime_diagnostics_all_samples == 1),
         threshold_recommended_cycles: $threshold_recommended_cycles,
         remediation: {
           next_command: (if $remediation_next_command == "" then null else $remediation_next_command end),

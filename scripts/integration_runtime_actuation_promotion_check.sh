@@ -28,6 +28,8 @@ SIGNOFF_MISSING_CONTEXT="$TMP_DIR/signoff_missing_context.json"
 FAIL_CAMPAIGN_A="$TMP_DIR/campaign_check_fail_a.json"
 FAIL_CAMPAIGN_B="$TMP_DIR/campaign_check_fail_b.json"
 SOURCE_BLOCKED_CAMPAIGN="$TMP_DIR/campaign_check_source_blocked.json"
+SOURCE_BLOCKED_CAMPAIGN_B="$TMP_DIR/campaign_check_source_blocked_b.json"
+SOURCE_BLOCKED_CAMPAIGN_C="$TMP_DIR/campaign_check_source_blocked_c.json"
 MISSING_DIAGNOSTICS="$TMP_DIR/campaign_check_missing_diagnostics.json"
 
 cat >"$PASS_CAMPAIGN_A" <<'EOF_PASS_CAMPAIGN_A'
@@ -201,6 +203,50 @@ cat >"$SOURCE_BLOCKED_CAMPAIGN" <<'EOF_SOURCE_BLOCKED_CAMPAIGN'
 }
 EOF_SOURCE_BLOCKED_CAMPAIGN
 
+cat >"$SOURCE_BLOCKED_CAMPAIGN_B" <<'EOF_SOURCE_BLOCKED_CAMPAIGN_B'
+{
+  "version": 1,
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO",
+  "decision_diagnostics": {
+    "m4_policy": {
+      "gate_evaluation": {
+        "runtime_actuation_status_pass": {
+          "required": false,
+          "available": false,
+          "status": "unknown",
+          "source": "synthetic_campaign_failure",
+          "actionable_reason": "campaign refresh command failed before runtime actuation gate evaluation"
+        }
+      }
+    }
+  }
+}
+EOF_SOURCE_BLOCKED_CAMPAIGN_B
+
+cat >"$SOURCE_BLOCKED_CAMPAIGN_C" <<'EOF_SOURCE_BLOCKED_CAMPAIGN_C'
+{
+  "version": 1,
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO",
+  "decision_diagnostics": {
+    "m4_policy": {
+      "gate_evaluation": {
+        "runtime_actuation_status_pass": {
+          "required": false,
+          "available": false,
+          "status": "unknown",
+          "source": "synthetic_campaign_failure",
+          "actionable_reason": "local stack startup required root before campaign evidence was available"
+        }
+      }
+    }
+  }
+}
+EOF_SOURCE_BLOCKED_CAMPAIGN_C
+
 cat >"$MISSING_DIAGNOSTICS" <<'EOF_MISSING_DIAGNOSTICS'
 {
   "version": 1,
@@ -373,6 +419,53 @@ if ! jq -e '
 ' "$SOURCE_BLOCKED_SUMMARY" >/dev/null 2>&1; then
   echo "upstream NO-GO source summary mismatch"
   cat "$SOURCE_BLOCKED_SUMMARY"
+  exit 1
+fi
+
+echo "[runtime-actuation-promotion-check] all upstream-blocked samples outrank sample thresholds"
+SOURCE_BLOCKED_ALL_SUMMARY="$TMP_DIR/runtime_actuation_promotion_source_blocked_all.json"
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --campaign-check-summary-json "$SOURCE_BLOCKED_CAMPAIGN" \
+  --campaign-check-summary-json "$SOURCE_BLOCKED_CAMPAIGN_B" \
+  --campaign-check-summary-json "$SOURCE_BLOCKED_CAMPAIGN_C" \
+  --require-min-samples 4 \
+  --require-min-pass-samples 4 \
+  --require-max-fail-samples 0 \
+  --require-max-warn-samples 0 \
+  --require-min-ready-rate-pct 100 \
+  --require-modal-runtime-actuation-status pass \
+  --fail-on-no-go 1 \
+  --summary-json "$SOURCE_BLOCKED_ALL_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_runtime_actuation_promotion_check_source_blocked_all.log 2>&1
+source_blocked_all_rc=$?
+set -e
+
+if [[ "$source_blocked_all_rc" -eq 0 ]]; then
+  echo "expected all-upstream-blocked path to fail closed with rc!=0"
+  cat /tmp/integration_runtime_actuation_promotion_check_source_blocked_all.log
+  exit 1
+fi
+if ! jq -e '
+  .decision == "NO-GO"
+  and .status == "fail"
+  and .rc != 0
+  and .observed.samples_total == 3
+  and .observed.samples_pass == 0
+  and .observed.samples_fail == 3
+  and .observed.source_contract_blocked_samples == 3
+  and .diagnostics.no_go.primary_driver == "upstream_source_blocked"
+  and .diagnostics.no_go.source_contract_all_samples == true
+  and .diagnostics.no_go.threshold_violation_count > 0
+  and .diagnostics.no_go.source_contract_violation_count > 0
+  and ((.diagnostics.no_go.driver_codes | index("source_decision_not_go")) != null)
+  and ((.diagnostics.no_go.driver_codes | index("source_status_not_pass")) != null)
+  and (.outcome.next_operator_action | contains("resolve upstream"))
+  and (.outcome.remediation.next_command_reason | contains("resolve upstream"))
+  and ((.violations | map(.code) | index("min_pass_samples_not_met")) != null)
+' "$SOURCE_BLOCKED_ALL_SUMMARY" >/dev/null 2>&1; then
+  echo "all-upstream-blocked source summary mismatch"
+  cat "$SOURCE_BLOCKED_ALL_SUMMARY"
   exit 1
 fi
 

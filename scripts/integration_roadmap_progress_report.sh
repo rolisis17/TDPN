@@ -10164,8 +10164,36 @@ cat >"$RUNTIME_ACTUATION_PROMOTION_ATTENTION_JSON" <<EOF_RUNTIME_ACTUATION_PROMO
   "decision": "NO-GO",
   "go": false,
   "no_go": true,
+  "outcome": {
+    "next_operator_action": "resolve upstream campaign-check/signoff blockers before promotion",
+    "remediation": {
+      "next_command_reason": "resolve upstream campaign-check/signoff blockers before promotion"
+    }
+  },
+  "diagnostics": {
+    "no_go": {
+      "primary_driver": "upstream_source_blocked",
+      "driver_codes": [
+        "source_decision_not_go",
+        "source_status_not_pass"
+      ],
+      "remediation": {
+        "next_command_reason": "resolve upstream campaign-check/signoff blockers before promotion"
+      }
+    }
+  },
   "reasons": [
     "runtime-actuation promotion attention fixture"
+  ],
+  "violations": [
+    {
+      "code": "min_pass_samples_not_met",
+      "message": "runtime-actuation pass sample count is below threshold"
+    },
+    {
+      "code": "source_decision_not_go",
+      "message": "upstream summary decision is not GO"
+    }
   ],
   "notes": "attention should downgrade final status to warn without introducing hard failure"
 }
@@ -10200,9 +10228,11 @@ if ! jq -e --arg src "$RUNTIME_ACTUATION_PROMOTION_ATTENTION_JSON" '
   and .vpn_track.runtime_actuation_promotion.status == "fail"
   and .vpn_track.runtime_actuation_promotion.decision == "NO-GO"
   and .vpn_track.runtime_actuation_promotion.go == false
-  and .vpn_track.runtime_actuation_promotion.no_go == true
-  and .vpn_track.runtime_actuation_promotion.needs_attention == true
-  and .vpn_track.optional_gate_status.runtime_actuation_promotion == "fail"
+	  and .vpn_track.runtime_actuation_promotion.no_go == true
+	  and .vpn_track.runtime_actuation_promotion.needs_attention == true
+	  and ((.vpn_track.runtime_actuation_promotion.next_command_reason // "") | contains("resolve upstream"))
+	  and ((.vpn_track.runtime_actuation_promotion.reasons // []) | any(contains("resolve upstream")))
+	  and .vpn_track.optional_gate_status.runtime_actuation_promotion == "fail"
   and .next_actions_summary.runtime_actuation_live_evidence_publish_bundle_helper_emitted == true
   and .next_actions_summary.runtime_actuation_live_and_pack_bundle_ready == true
   and ((.next_actions // []) | any(.id == "runtime_actuation_live_evidence_publish_bundle"))

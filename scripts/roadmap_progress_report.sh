@@ -10720,16 +10720,27 @@ if [[ -n "$runtime_actuation_promotion_summary_json" ]] \
     else "null"
     end
   ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' "null")"
-  runtime_actuation_promotion_reasons_json="$(jq -c '
-    if (.reasons | type) == "array" then [.reasons[] | strings]
-    elif (.errors | type) == "array" then [.errors[] | strings]
-    else
-      ([
-        (if (.failure_reason | type) == "string" then .failure_reason else empty end),
-        (if (.promotion_check.next_operator_action | type) == "string" then .promotion_check.next_operator_action else empty end),
-        (
-          if (.promotion_check.violations | type) == "array" then
-            .promotion_check.violations[]
+	  runtime_actuation_promotion_reasons_json="$(jq -c '
+	    def structured_reasons:
+	      [
+	        (if (.outcome.remediation.next_command_reason | type) == "string" then .outcome.remediation.next_command_reason else empty end),
+	        (if (.diagnostics.no_go.remediation.next_command_reason | type) == "string" then .diagnostics.no_go.remediation.next_command_reason else empty end),
+	        (if (.outcome.next_operator_action | type) == "string" then .outcome.next_operator_action else empty end),
+	        (if (.failure_reason | type) == "string" then .failure_reason else empty end),
+	        (if (.promotion_check.next_operator_action | type) == "string" then .promotion_check.next_operator_action else empty end),
+	        (
+	          if (.violations | type) == "array" then
+	            .violations[]
+	            | if (type == "string") then .
+	              elif (.message | type) == "string" then .message
+	              else empty
+	              end
+	          else empty
+	          end
+	        ),
+	        (
+	          if (.promotion_check.violations | type) == "array" then
+	            .promotion_check.violations[]
             | if (type == "string") then .
               elif (.message | type) == "string" then .message
               else empty
@@ -10740,12 +10751,16 @@ if [[ -n "$runtime_actuation_promotion_summary_json" ]] \
         (
           if (.promotion_check.errors | type) == "array" then
             .promotion_check.errors[] | strings
-          else empty
-          end
-        )
-      ] | map(select((. // "") != "")))
-    end
-  ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' '[]')"
+	          else empty
+	          end
+	        )
+	      ];
+	    (
+	      (if (.reasons | type) == "array" then [.reasons[] | strings] else [] end)
+	      + (if (.reasons | type) != "array" and (.errors | type) == "array" then [.errors[] | strings] else [] end)
+	      + structured_reasons
+	    ) | map(select((. // "") != "")) | unique
+	  ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' '[]')"
   runtime_actuation_promotion_notes_json="$(jq -r '
     if (.notes | type) == "string" then .notes
     elif (.promotion_check.notes | type) == "string" then .promotion_check.notes
@@ -10863,17 +10878,31 @@ if [[ -n "$runtime_actuation_promotion_summary_json" ]] \
     if [[ "$runtime_actuation_promotion_consistency_ok_01" == "0" ]]; then
       first_reason="$(jq -r 'if (. | type) == "array" and (. | length) > 0 then (.[0] // "") else "" end' <<<"$runtime_actuation_promotion_consistency_errors_json" 2>/dev/null || true)"
     else
-    first_reason="$(jq -r '
-      if (.reasons | type) == "array" and (.reasons | length) > 0 then
-        (.reasons[0] // "")
-      elif (.errors | type) == "array" and (.errors | length) > 0 then
-        (.errors[0] // "")
+	    first_reason="$(jq -r '
+	      if (.outcome.remediation.next_command_reason | type) == "string" then
+	        .outcome.remediation.next_command_reason
+	      elif (.diagnostics.no_go.remediation.next_command_reason | type) == "string" then
+	        .diagnostics.no_go.remediation.next_command_reason
+	      elif (.outcome.next_operator_action | type) == "string" then
+	        .outcome.next_operator_action
+	      elif (.reasons | type) == "array" and (.reasons | length) > 0 then
+	        (.reasons[0] // "")
+	      elif (.errors | type) == "array" and (.errors | length) > 0 then
+	        (.errors[0] // "")
       elif (.failure_reason | type) == "string" then
         .failure_reason
-      elif (.promotion_check.next_operator_action | type) == "string" then
-        .promotion_check.next_operator_action
-      elif (.promotion_check.violations | type) == "array" and (.promotion_check.violations | length) > 0 then
-        if (.promotion_check.violations[0] | type) == "string" then
+	      elif (.promotion_check.next_operator_action | type) == "string" then
+	        .promotion_check.next_operator_action
+	      elif (.violations | type) == "array" and (.violations | length) > 0 then
+	        if (.violations[0] | type) == "string" then
+	          .violations[0]
+	        elif (.violations[0].message | type) == "string" then
+	          .violations[0].message
+	        else
+	          ""
+	        end
+	      elif (.promotion_check.violations | type) == "array" and (.promotion_check.violations | length) > 0 then
+	        if (.promotion_check.violations[0] | type) == "string" then
           .promotion_check.violations[0]
         elif (.promotion_check.violations[0].message | type) == "string" then
           .promotion_check.violations[0].message
