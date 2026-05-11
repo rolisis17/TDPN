@@ -98,6 +98,27 @@ is_non_negative_decimal() {
   [[ "${1:-}" =~ ^[0-9]+([.][0-9]+)?$ ]]
 }
 
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+abs_path() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" ]]; then
+    echo ""
+    return
+  fi
+  if [[ "$path" == /* ]]; then
+    echo "$path"
+  else
+    echo "$ROOT_DIR/$path"
+  fi
+}
+
 require_decimal_floor_or_die() {
   local name="$1"
   local value="$2"
@@ -121,6 +142,25 @@ require_max_alert_severity_or_die() {
   if [[ "$max_alert_severity" == "CRITICAL" ]]; then
     echo "prod-pilot-cohort-signoff requires --max-alert-severity no weaker than WARN; use prod-pilot-cohort-check directly for diagnostic policy bypasses."
     exit 2
+  fi
+}
+
+reject_bundle_override_mismatch() {
+  local label="$1"
+  local override_path="$2"
+  local summary_path="$3"
+  local override_abs
+  local summary_abs
+  override_abs="$(abs_path "$override_path")"
+  summary_abs="$(abs_path "$summary_path")"
+  [[ -z "$override_abs" ]] && return
+  if [[ -z "$summary_abs" ]]; then
+    echo "prod-pilot-cohort-signoff refuses $label override because the cohort summary does not list the matching artifact"
+    exit 1
+  fi
+  if [[ "$override_abs" != "$summary_abs" ]]; then
+    echo "prod-pilot-cohort-signoff refuses $label override that differs from cohort summary artifact: override=$override_abs summary=$summary_abs"
+    exit 1
   fi
 }
 
@@ -153,7 +193,7 @@ require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_INCIDENT_
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_SIGNOFF_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
 incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_SIGNOFF_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}"
 incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_SIGNOFF_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}"
-max_evidence_age_sec="${PROD_PILOT_COHORT_SIGNOFF_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_CHECK_MAX_EVIDENCE_AGE_SEC:-0}}"
+max_evidence_age_sec="${PROD_PILOT_COHORT_SIGNOFF_MAX_EVIDENCE_AGE_SEC:-${PROD_PILOT_COHORT_CHECK_MAX_EVIDENCE_AGE_SEC:-600}}"
 show_json="${PROD_PILOT_COHORT_SIGNOFF_SHOW_JSON:-0}"
 
 while [[ $# -gt 0 ]]; do
@@ -428,6 +468,28 @@ require_int_floor_or_die "--incident-snapshot-min-attachment-count" "$incident_s
 if [[ "$incident_snapshot_max_skipped_count" != "0" ]]; then
   echo "prod-pilot-cohort-signoff requires --incident-snapshot-max-skipped-count 0; use prod-pilot-cohort-check directly for diagnostic policy bypasses."
   exit 2
+fi
+
+if [[ -n "$summary_json" && ( -n "$bundle_tar" || -n "$bundle_sha256_file" || -n "$bundle_manifest_json" ) ]]; then
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "missing required command: jq"
+    exit 2
+  fi
+  summary_json_abs="$(abs_path "$summary_json")"
+  if [[ ! -f "$summary_json_abs" ]]; then
+    echo "cohort summary JSON file not found while validating bundle override scope: $summary_json_abs"
+    exit 1
+  fi
+  if ! jq -e . "$summary_json_abs" >/dev/null 2>&1; then
+    echo "cohort summary JSON is invalid while validating bundle override scope: $summary_json_abs"
+    exit 1
+  fi
+  summary_bundle_tar="$(jq -r '.artifacts.bundle_tar // ""' "$summary_json_abs" 2>/dev/null || true)"
+  summary_bundle_sha256_file="$(jq -r '.artifacts.bundle_sha256_file // ""' "$summary_json_abs" 2>/dev/null || true)"
+  summary_bundle_manifest_json="$(jq -r '.artifacts.bundle_manifest_json // ""' "$summary_json_abs" 2>/dev/null || true)"
+  reject_bundle_override_mismatch "--bundle-tar" "$bundle_tar" "$summary_bundle_tar"
+  reject_bundle_override_mismatch "--bundle-sha256-file" "$bundle_sha256_file" "$summary_bundle_sha256_file"
+  reject_bundle_override_mismatch "--bundle-manifest-json" "$bundle_manifest_json" "$summary_bundle_manifest_json"
 fi
 
 declare -a verify_args=(

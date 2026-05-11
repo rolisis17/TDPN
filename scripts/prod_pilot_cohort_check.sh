@@ -41,8 +41,8 @@ Notes:
     - --summary-json (recommended; from prod-pilot-cohort-runbook)
     - --reports-dir (auto-resolves <reports_dir>/prod_pilot_cohort_summary.json)
   - Default policy is strict: status must be ok, rounds_failed must be 0, trend decision
-    must be GO, GO rate must be >= 95, alert severity must be <= WARN, and bundle
-    artifacts must be present.
+    must be GO, GO rate must be >= 95, alert severity must be <= WARN, bundle
+    artifacts must be present, and evidence must be fresh.
 USAGE
 }
 
@@ -86,6 +86,13 @@ bool_arg_or_die() {
 is_non_negative_decimal() {
   local value="$1"
   [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]
+}
+
+decimal_diff_gt() {
+  local left="$1"
+  local right="$2"
+  local threshold="$3"
+  awk -v l="$left" -v r="$right" -v t="$threshold" 'BEGIN { d = l - r; if (d < 0) d = -d; exit (d > t) ? 0 : 1 }'
 }
 
 float_lt() {
@@ -237,7 +244,7 @@ require_incident_snapshot_on_fail="${PROD_PILOT_COHORT_CHECK_REQUIRE_INCIDENT_SN
 require_incident_snapshot_artifacts="${PROD_PILOT_COHORT_CHECK_REQUIRE_INCIDENT_SNAPSHOT_ARTIFACTS:-1}"
 incident_snapshot_min_attachment_count="${PROD_PILOT_COHORT_CHECK_INCIDENT_SNAPSHOT_MIN_ATTACHMENT_COUNT:-1}"
 incident_snapshot_max_skipped_count="${PROD_PILOT_COHORT_CHECK_INCIDENT_SNAPSHOT_MAX_SKIPPED_COUNT:-0}"
-max_evidence_age_sec="${PROD_PILOT_COHORT_CHECK_MAX_EVIDENCE_AGE_SEC:-0}"
+max_evidence_age_sec="${PROD_PILOT_COHORT_CHECK_MAX_EVIDENCE_AGE_SEC:-600}"
 max_evidence_future_skew_sec="${PROD_PILOT_COHORT_CHECK_MAX_EVIDENCE_FUTURE_SKEW_SEC:-300}"
 max_evidence_now_epoch="${PROD_PILOT_COHORT_CHECK_NOW_EPOCH:-}"
 show_json="${PROD_PILOT_COHORT_CHECK_SHOW_JSON:-0}"
@@ -519,6 +526,7 @@ fi
 trend_decision=""
 trend_summary_generated_at_utc=""
 trend_summary_json_valid=0
+trend_artifact_go_rate_pct=""
 trend_artifact_policy_require_wg_validate_udp_source="0"
 trend_artifact_policy_require_wg_validate_strict_distinct="0"
 trend_artifact_policy_require_wg_soak_diversity_pass="0"
@@ -529,6 +537,7 @@ trend_artifact_policy_min_wg_soak_cross_operator_pairs="0"
 if [[ -n "$trend_summary_json" && -f "$trend_summary_json" ]] && jq -e . "$trend_summary_json" >/dev/null 2>&1; then
   trend_summary_json_valid=1
   trend_decision="$(jq -r '.decision // ""' "$trend_summary_json" 2>/dev/null || true)"
+  trend_artifact_go_rate_pct="$(json_string "$trend_summary_json" '.go_rate_pct')"
   trend_summary_generated_at_utc="$(json_string "$trend_summary_json" '.generated_at_utc')"
   trend_artifact_policy_require_wg_validate_udp_source="$(json_bool_flag "$trend_summary_json" '.policy.require_wg_validate_udp_source')"
   trend_artifact_policy_require_wg_validate_strict_distinct="$(json_bool_flag "$trend_summary_json" '.policy.require_wg_validate_strict_distinct')"
@@ -540,11 +549,14 @@ if [[ -n "$trend_summary_json" && -f "$trend_summary_json" ]] && jq -e . "$trend
 fi
 alert_summary_generated_at_utc=""
 alert_summary_json_valid=0
+alert_artifact_severity=""
 if [[ -n "$alert_summary_json" && -f "$alert_summary_json" ]] && jq -e . "$alert_summary_json" >/dev/null 2>&1; then
   alert_summary_json_valid=1
   alert_summary_generated_at_utc="$(json_string "$alert_summary_json" '.generated_at_utc')"
+  alert_artifact_severity="$(json_string "$alert_summary_json" '.severity')"
 fi
 trend_decision="$(printf '%s' "$trend_decision" | tr '[:lower:]' '[:upper:]')"
+alert_artifact_severity="$(printf '%s' "$alert_artifact_severity" | tr '[:lower:]' '[:upper:]')"
 trend_policy_require_wg_validate_udp_source="$(json_bool_flag "$summary_json" '.policy.trend_require_wg_validate_udp_source')"
 trend_policy_require_wg_validate_strict_distinct="$(json_bool_flag "$summary_json" '.policy.trend_require_wg_validate_strict_distinct')"
 trend_policy_require_wg_soak_diversity_pass="$(json_bool_flag "$summary_json" '.policy.trend_require_wg_soak_diversity_pass')"
@@ -820,6 +832,13 @@ if [[ "$require_trend_go" == "1" ]]; then
     errors+=("trend rc is non-zero (trend_rc=$trend_rc)")
   fi
 fi
+if [[ "$trend_summary_json_valid" == "1" ]]; then
+  if [[ -z "$trend_artifact_go_rate_pct" || ! "$trend_artifact_go_rate_pct" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    errors+=("trend summary go_rate_pct missing or invalid")
+  elif [[ "$trend_go_rate_pct" =~ ^[0-9]+([.][0-9]+)?$ ]] && decimal_diff_gt "$trend_go_rate_pct" "$trend_artifact_go_rate_pct" "0.01"; then
+    errors+=("cohort summary/trend summary metric mismatch: summary trend.go_rate_pct=$trend_go_rate_pct artifact go_rate_pct=$trend_artifact_go_rate_pct")
+  fi
+fi
 if [[ "$require_trend_wg_validate_udp_source" == "1" && "$trend_policy_require_wg_validate_udp_source" != "1" ]]; then
   errors+=("cohort trend policy missing strict wg validate udp-source requirement")
 fi
@@ -897,6 +916,19 @@ fi
 if [[ "$alert_rc" -ne 0 ]]; then
   errors+=("alert rc is non-zero (alert_rc=$alert_rc)")
 fi
+if [[ -z "$alert_summary_json" ]]; then
+  errors+=("alert summary path missing in cohort artifacts")
+elif [[ ! -f "$alert_summary_json" ]]; then
+  errors+=("alert summary file not found: $alert_summary_json")
+elif [[ "$alert_summary_json_valid" != "1" ]]; then
+  errors+=("alert summary JSON is not valid: $alert_summary_json")
+else
+  if [[ -z "$alert_artifact_severity" ]]; then
+    errors+=("alert summary severity missing in artifact: $alert_summary_json")
+  elif [[ -n "$alert_severity" && "$alert_artifact_severity" != "$alert_severity" ]]; then
+    errors+=("cohort summary/alert summary severity mismatch: summary alert.severity=${alert_severity:-unset} artifact severity=$alert_artifact_severity")
+  fi
+fi
 if [[ "$alert_rank" -lt 0 ]]; then
   errors+=("alert severity missing or invalid (severity=${alert_severity:-unset})")
 elif [[ "$alert_rank" -gt "$max_alert_rank" ]]; then
@@ -944,9 +976,11 @@ summary_payload="$(
     --argjson rounds_failed "$rounds_failed" \
     --argjson trend_rc "$trend_rc" \
     --arg trend_go_rate_pct "$trend_go_rate_pct" \
+    --arg trend_artifact_go_rate_pct "$trend_artifact_go_rate_pct" \
     --arg trend_decision "$trend_decision" \
     --argjson alert_rc "$alert_rc" \
     --arg alert_severity "$alert_severity" \
+    --arg alert_artifact_severity "$alert_artifact_severity" \
     --argjson alert_rank "$alert_rank" \
     --argjson alert_summary_json_valid "$(json_bool "$alert_summary_json_valid")" \
     --argjson max_alert_rank "$max_alert_rank" \
@@ -1043,12 +1077,14 @@ summary_payload="$(
       trend:{
         rc:$trend_rc,
         go_rate_pct:$trend_go_rate_pct,
+        artifact_go_rate_pct:($trend_artifact_go_rate_pct // ""),
         decision:($trend_decision // ""),
         trend_summary_json:($trend_summary_json // "")
       },
       alert:{
         rc:$alert_rc,
         severity:($alert_severity // ""),
+        artifact_severity:($alert_artifact_severity // ""),
         alert_summary_json:($alert_summary_json // ""),
         alert_summary_json_valid:$alert_summary_json_valid,
         severity_rank:$alert_rank,

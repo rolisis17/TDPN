@@ -656,6 +656,43 @@ if [[ -s "$SIGNOFF_CAPTURE" || -s "$CHECK_CAPTURE" || -s "$TREND_CAPTURE" || -s 
   exit 1
 fi
 
+echo "[prod-pilot-cohort-quick-signoff] alert-only signoff is rejected"
+: >"$SIGNOFF_CAPTURE"
+: >"$CHECK_CAPTURE"
+: >"$TREND_CAPTURE"
+: >"$ALERT_CAPTURE"
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+CHECK_CAPTURE_FILE="$CHECK_CAPTURE" \
+TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+ALERT_CAPTURE_FILE="$ALERT_CAPTURE" \
+PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_CHECK" \
+PROD_PILOT_COHORT_QUICK_TREND_SCRIPT="$FAKE_TREND" \
+PROD_PILOT_COHORT_QUICK_ALERT_SCRIPT="$FAKE_ALERT" \
+./scripts/prod_pilot_cohort_quick_signoff.sh \
+  --run-report-json ${TMP_DIR}/quick/report.json \
+  --reports-dir ${TMP_DIR}/quick/reports \
+  --check-latest 0 \
+  --check-trend 0 \
+  --check-alert 1 >${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_alert_only.log 2>&1
+alert_only_rc=$?
+set -e
+if [[ "$alert_only_rc" -ne 2 ]]; then
+  echo "expected alert-only quick signoff to fail with rc=2, got rc=$alert_only_rc"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_alert_only.log
+  exit 1
+fi
+if ! rg -q -- 'requires --check-trend 1 when --check-alert 1' ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_alert_only.log; then
+  echo "expected alert-only quick signoff rejection hint not found"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_signoff_alert_only.log
+  exit 1
+fi
+if [[ -s "$SIGNOFF_CAPTURE" || -s "$CHECK_CAPTURE" || -s "$TREND_CAPTURE" || -s "$ALERT_CAPTURE" ]]; then
+  echo "alert-only quick signoff should not invoke any quick signoff subprocess"
+  cat "$SIGNOFF_CAPTURE" "$CHECK_CAPTURE" "$TREND_CAPTURE" "$ALERT_CAPTURE"
+  exit 1
+fi
+
 echo "[prod-pilot-cohort-quick-signoff] cohort policy bypass is rejected"
 : >"$SIGNOFF_CAPTURE"
 : >"$CHECK_CAPTURE"

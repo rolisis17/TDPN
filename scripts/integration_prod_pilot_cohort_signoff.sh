@@ -125,6 +125,64 @@ if ! rg -q -- '--min-trend-wg-soak-selection-lines 12' "$CHECK_CAPTURE"; then
   exit 1
 fi
 
+echo "[prod-pilot-cohort-signoff] default freshness policy"
+: >"$CHECK_CAPTURE"
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+VERIFY_CAPTURE_FILE="$VERIFY_CAPTURE" \
+CHECK_CAPTURE_FILE="$CHECK_CAPTURE" \
+PROD_PILOT_COHORT_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_CHECK" \
+./scripts/prod_pilot_cohort_signoff.sh \
+  --summary-json /tmp/cohort/summary.json \
+  --check-manifest 0 >/tmp/integration_prod_pilot_cohort_signoff_default_freshness.log 2>&1
+if ! rg -q -- '--max-evidence-age-sec 600' "$CHECK_CAPTURE"; then
+  echo "signoff check forwarding missing default --max-evidence-age-sec 600"
+  cat "$CHECK_CAPTURE"
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-signoff] reject mismatched bundle override"
+MISMATCH_SUMMARY="$TMP_DIR/mismatch_summary.json"
+MISMATCH_BUNDLE_A="$TMP_DIR/bundle_a.tar.gz"
+MISMATCH_BUNDLE_B="$TMP_DIR/bundle_b.tar.gz"
+MISMATCH_SHA_A="$TMP_DIR/bundle_a.tar.gz.sha256"
+MISMATCH_MANIFEST_A="$TMP_DIR/bundle_a_manifest.json"
+printf 'bundle-a\n' >"$MISMATCH_BUNDLE_A"
+printf 'bundle-b\n' >"$MISMATCH_BUNDLE_B"
+printf 'sha-a\n' >"$MISMATCH_SHA_A"
+printf '{"ok":true}\n' >"$MISMATCH_MANIFEST_A"
+cat >"$MISMATCH_SUMMARY" <<EOF_MISMATCH_SUMMARY
+{
+  "artifacts":{
+    "bundle_tar":"$MISMATCH_BUNDLE_A",
+    "bundle_sha256_file":"$MISMATCH_SHA_A",
+    "bundle_manifest_json":"$MISMATCH_MANIFEST_A"
+  }
+}
+EOF_MISMATCH_SUMMARY
+set +e
+SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+VERIFY_CAPTURE_FILE="$VERIFY_CAPTURE" \
+CHECK_CAPTURE_FILE="$CHECK_CAPTURE" \
+PROD_PILOT_COHORT_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+PROD_PILOT_COHORT_CHECK_SCRIPT="$FAKE_CHECK" \
+./scripts/prod_pilot_cohort_signoff.sh \
+  --summary-json "$MISMATCH_SUMMARY" \
+  --bundle-tar "$MISMATCH_BUNDLE_B" \
+  --check-manifest 0 >/tmp/integration_prod_pilot_cohort_signoff_mismatch_bundle.log 2>&1
+mismatch_bundle_rc=$?
+set -e
+if [[ "$mismatch_bundle_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for mismatched bundle override"
+  cat /tmp/integration_prod_pilot_cohort_signoff_mismatch_bundle.log
+  exit 1
+fi
+if ! rg -q 'refuses --bundle-tar override that differs from cohort summary artifact' /tmp/integration_prod_pilot_cohort_signoff_mismatch_bundle.log; then
+  echo "expected mismatched bundle override signal not found"
+  cat /tmp/integration_prod_pilot_cohort_signoff_mismatch_bundle.log
+  exit 1
+fi
+
 echo "[prod-pilot-cohort-signoff] fail-close when verify fails"
 FAKE_VERIFY_FAIL="$TMP_DIR/fake_verify_fail.sh"
 cat >"$FAKE_VERIFY_FAIL" <<'EOF_FAKE_VERIFY_FAIL'

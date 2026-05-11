@@ -647,14 +647,12 @@ while IFS=$'\t' read -r _mtime report_path || [[ -n "${report_path:-}" ]]; do
   set -e
 
   decision="$(sed -nE 's/^\[prod-pilot-cohort-quick-check\] decision=([A-Z-]+).*/\1/p' "$out_file" | tail -n1)"
+  decision_parse_error_reason=""
   if [[ "$decision" != "GO" && "$decision" != "NO-GO" ]]; then
-    if [[ "$rc" -eq 0 ]]; then
-      decision="GO"
-    else
-      decision="NO-GO"
-    fi
+    decision="NO-GO"
+    decision_parse_error_reason="quick-check decision parse failed (rc=$rc)"
     eval_errors=$((eval_errors + 1))
-    reason_counts["quick-check decision parse failed (rc=$rc)"]=$(( ${reason_counts["quick-check decision parse failed (rc=$rc)"]:-0} + 1 ))
+    reason_counts["$decision_parse_error_reason"]=$(( ${reason_counts["$decision_parse_error_reason"]:-0} + 1 ))
   fi
 
   first_reason=""
@@ -662,6 +660,9 @@ while IFS=$'\t' read -r _mtime report_path || [[ -n "${report_path:-}" ]]; do
     go_reports=$((go_reports + 1))
   else
     no_go_reports=$((no_go_reports + 1))
+    if [[ -n "$decision_parse_error_reason" ]]; then
+      first_reason="$decision_parse_error_reason"
+    fi
     while IFS= read -r reason || [[ -n "$reason" ]]; do
       reason="$(trim "${reason#- }")"
       [[ -z "$reason" ]] && continue

@@ -540,6 +540,10 @@ if [[ "$check_latest" == "0" && "$check_trend" == "0" && "$check_alert" == "0" ]
   echo "at least one quick signoff check must be enabled"
   exit 2
 fi
+if [[ "$check_alert" == "1" && "$check_trend" != "1" ]]; then
+  echo "quick signoff requires --check-trend 1 when --check-alert 1; use quick-alert directly for diagnostic alert-only checks."
+  exit 2
+fi
 if [[ "$require_cohort_signoff_policy" != "1" ]]; then
   echo "quick signoff requires --require-cohort-signoff-policy 1; use prod-pilot-cohort-quick-check directly for diagnostic policy bypasses."
   exit 2

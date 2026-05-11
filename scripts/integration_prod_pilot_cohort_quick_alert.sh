@@ -26,23 +26,62 @@ OK_SUMMARY="$TMP_DIR/quick_trend_ok.json"
 WARN_SUMMARY="$TMP_DIR/quick_trend_warn.json"
 CRIT_SUMMARY="$TMP_DIR/quick_trend_critical.json"
 STALE_SUMMARY="$TMP_DIR/quick_trend_stale.json"
+STALE_RUN_SUMMARY="$TMP_DIR/quick_trend_stale_run.json"
+MISSING_RUN_TIMESTAMP_SUMMARY="$TMP_DIR/quick_trend_missing_run_timestamp.json"
+INCONSISTENT_RUN_SUMMARY="$TMP_DIR/quick_trend_inconsistent_runs.json"
+MISSING_REPORT_PATH_SUMMARY="$TMP_DIR/quick_trend_missing_report_path.json"
 ALERT_NOW_EPOCH="$(jq -nr '"2026-03-10T12:00:00Z" | fromdateiso8601 | floor')"
+OK_RUN_A="$TMP_DIR/run_a/prod_pilot_cohort_quick_report.json"
+OK_RUN_B="$TMP_DIR/run_b/prod_pilot_cohort_quick_report.json"
+OK_RUN_C="$TMP_DIR/run_c/prod_pilot_cohort_quick_report.json"
+OK_RUN_D="$TMP_DIR/run_d/prod_pilot_cohort_quick_report.json"
+OK_RUN_E="$TMP_DIR/run_e/prod_pilot_cohort_quick_report.json"
+OK_RUN_F="$TMP_DIR/run_f/prod_pilot_cohort_quick_report.json"
+OK_RUN_G="$TMP_DIR/run_g/prod_pilot_cohort_quick_report.json"
+OK_RUN_H="$TMP_DIR/run_h/prod_pilot_cohort_quick_report.json"
+WARN_RUN_A="$TMP_DIR/warn_run_a/prod_pilot_cohort_quick_report.json"
+WARN_RUN_B="$TMP_DIR/warn_run_b/prod_pilot_cohort_quick_report.json"
+WARN_RUN_C="$TMP_DIR/warn_run_c/prod_pilot_cohort_quick_report.json"
+WARN_RUN_D="$TMP_DIR/warn_run_d/prod_pilot_cohort_quick_report.json"
+WARN_RUN_E="$TMP_DIR/warn_run_e/prod_pilot_cohort_quick_report.json"
+WARN_RUN_F="$TMP_DIR/warn_run_f/prod_pilot_cohort_quick_report.json"
+WARN_RUN_G="$TMP_DIR/warn_run_g/prod_pilot_cohort_quick_report.json"
+WARN_RUN_H="$TMP_DIR/warn_run_h/prod_pilot_cohort_quick_report.json"
+WARN_RUN_I="$TMP_DIR/warn_run_i/prod_pilot_cohort_quick_report.json"
+WARN_RUN_J="$TMP_DIR/warn_run_j/prod_pilot_cohort_quick_report.json"
+CRIT_RUN_A="$TMP_DIR/crit_run_a/prod_pilot_cohort_quick_report.json"
+CRIT_RUN_B="$TMP_DIR/crit_run_b/prod_pilot_cohort_quick_report.json"
+CRIT_RUN_C="$TMP_DIR/crit_run_c/prod_pilot_cohort_quick_report.json"
+mkdir -p "$(dirname "$OK_RUN_A")" "$(dirname "$OK_RUN_B")" "$(dirname "$OK_RUN_C")" "$(dirname "$OK_RUN_D")" "$(dirname "$OK_RUN_E")" "$(dirname "$OK_RUN_F")" "$(dirname "$OK_RUN_G")" "$(dirname "$OK_RUN_H")" "$(dirname "$WARN_RUN_A")" "$(dirname "$WARN_RUN_B")" "$(dirname "$WARN_RUN_C")" "$(dirname "$WARN_RUN_D")" "$(dirname "$WARN_RUN_E")" "$(dirname "$WARN_RUN_F")" "$(dirname "$WARN_RUN_G")" "$(dirname "$WARN_RUN_H")" "$(dirname "$WARN_RUN_I")" "$(dirname "$WARN_RUN_J")" "$(dirname "$CRIT_RUN_A")" "$(dirname "$CRIT_RUN_B")" "$(dirname "$CRIT_RUN_C")"
+for report_path in "$OK_RUN_A" "$OK_RUN_B" "$OK_RUN_C" "$OK_RUN_D" "$OK_RUN_E" "$OK_RUN_F" "$OK_RUN_G" "$OK_RUN_H" "$WARN_RUN_A" "$WARN_RUN_B" "$WARN_RUN_C" "$WARN_RUN_D" "$WARN_RUN_E" "$WARN_RUN_F" "$WARN_RUN_G" "$WARN_RUN_H" "$WARN_RUN_I" "$WARN_RUN_J" "$CRIT_RUN_A" "$CRIT_RUN_B" "$CRIT_RUN_C"; do
+  printf '{}\n' >"$report_path"
+done
 
-cat >"$OK_SUMMARY" <<'EOF_OK_SUMMARY'
+cat >"$OK_SUMMARY" <<EOF_OK_SUMMARY
 {
   "generated_at_utc": "2026-03-10T11:55:00Z",
   "go_rate_pct": 100,
   "no_go": 0,
   "evaluation_errors": 0,
   "reports_total": 8,
-  "top_no_go_reasons": []
+  "top_no_go_reasons": [],
+  "runs": [
+    {"generated_at_utc": "2026-03-10T11:55:00Z", "decision": "GO", "report_path": "$OK_RUN_A", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:54:00Z", "decision": "GO", "report_path": "$OK_RUN_B", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:53:00Z", "decision": "GO", "report_path": "$OK_RUN_C", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:52:00Z", "decision": "GO", "report_path": "$OK_RUN_D", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:51:00Z", "decision": "GO", "report_path": "$OK_RUN_E", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:50:00Z", "decision": "GO", "report_path": "$OK_RUN_F", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:49:00Z", "decision": "GO", "report_path": "$OK_RUN_G", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:48:00Z", "decision": "GO", "report_path": "$OK_RUN_H", "first_no_go_reason": ""}
+  ]
 }
 EOF_OK_SUMMARY
 
-cat >"$WARN_SUMMARY" <<'EOF_WARN_SUMMARY'
+cat >"$WARN_SUMMARY" <<EOF_WARN_SUMMARY
 {
   "generated_at_utc": "2026-03-10T11:55:00Z",
-  "go_rate_pct": 96.5,
+  "go_rate_pct": 90,
   "no_go": 1,
   "evaluation_errors": 0,
   "reports_total": 10,
@@ -65,25 +104,46 @@ cat >"$WARN_SUMMARY" <<'EOF_WARN_SUMMARY'
   },
   "top_no_go_reasons": [
     {"count": 1, "reason": "signoff rc is non-zero (signoff_rc=3)"}
+  ],
+  "runs": [
+    {"generated_at_utc": "2026-03-10T11:55:00Z", "decision": "GO", "report_path": "$WARN_RUN_A", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:54:00Z", "decision": "GO", "report_path": "$WARN_RUN_B", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:53:00Z", "decision": "GO", "report_path": "$WARN_RUN_C", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:52:00Z", "decision": "GO", "report_path": "$WARN_RUN_D", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:51:00Z", "decision": "GO", "report_path": "$WARN_RUN_E", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:50:00Z", "decision": "GO", "report_path": "$WARN_RUN_F", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:49:00Z", "decision": "GO", "report_path": "$WARN_RUN_G", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:48:00Z", "decision": "GO", "report_path": "$WARN_RUN_H", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:47:00Z", "decision": "GO", "report_path": "$WARN_RUN_I", "first_no_go_reason": ""},
+    {"generated_at_utc": "2026-03-10T11:46:00Z", "decision": "NO-GO", "report_path": "$WARN_RUN_J", "first_no_go_reason": "signoff rc is non-zero (signoff_rc=3)"}
   ]
 }
 EOF_WARN_SUMMARY
 
-cat >"$CRIT_SUMMARY" <<'EOF_CRIT_SUMMARY'
+cat >"$CRIT_SUMMARY" <<EOF_CRIT_SUMMARY
 {
   "generated_at_utc": "2026-03-10T11:55:00Z",
-  "go_rate_pct": 84.2,
+  "go_rate_pct": 0,
   "no_go": 3,
   "evaluation_errors": 2,
-  "reports_total": 12,
+  "reports_total": 3,
   "top_no_go_reasons": [
     {"count": 2, "reason": "quick status is not ok"},
     {"count": 1, "reason": "summary status is not ok"}
+  ],
+  "runs": [
+    {"generated_at_utc": "2026-03-10T11:55:00Z", "decision": "NO-GO", "report_path": "$CRIT_RUN_A", "first_no_go_reason": "quick status is not ok"},
+    {"generated_at_utc": "2026-03-10T11:54:00Z", "decision": "NO-GO", "report_path": "$CRIT_RUN_B", "first_no_go_reason": "quick status is not ok"},
+    {"generated_at_utc": "2026-03-10T11:53:00Z", "decision": "NO-GO", "report_path": "$CRIT_RUN_C", "first_no_go_reason": "summary status is not ok"}
   ]
 }
 EOF_CRIT_SUMMARY
 
 jq '.generated_at_utc="2026-03-10T10:00:00Z"' "$OK_SUMMARY" >"$STALE_SUMMARY"
+jq '.runs[0].generated_at_utc="2026-03-10T10:00:00Z"' "$OK_SUMMARY" >"$STALE_RUN_SUMMARY"
+jq 'del(.runs[0].generated_at_utc)' "$OK_SUMMARY" >"$MISSING_RUN_TIMESTAMP_SUMMARY"
+jq '.runs[1].decision="NO-GO" | .runs[1].first_no_go_reason="provided run says no-go"' "$OK_SUMMARY" >"$INCONSISTENT_RUN_SUMMARY"
+jq 'del(.runs[0].report_path)' "$OK_SUMMARY" >"$MISSING_REPORT_PATH_SUMMARY"
 
 echo "[prod-pilot-cohort-quick-alert] OK severity baseline"
 ./scripts/prod_pilot_cohort_quick_alert.sh \
@@ -178,6 +238,80 @@ if ! rg -q 'timestamp is stale' ${TMP_DIR}/integration_prod_pilot_cohort_quick_a
   exit 1
 fi
 
+echo "[prod-pilot-cohort-quick-alert] stale run freshness gate"
+set +e
+PROD_PILOT_COHORT_QUICK_ALERT_NOW_EPOCH="$ALERT_NOW_EPOCH" \
+./scripts/prod_pilot_cohort_quick_alert.sh \
+  --trend-summary-json "$STALE_RUN_SUMMARY" \
+  --max-evidence-age-sec 3600 >${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_stale_run.log 2>&1
+stale_run_alert_rc=$?
+set -e
+if [[ "$stale_run_alert_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for stale provided trend run"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_stale_run.log
+  exit 1
+fi
+if ! rg -q 'quick trend run\[1\] generated_at_utc timestamp is stale' ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_stale_run.log; then
+  echo "expected stale run timestamp signal not found"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_stale_run.log
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-quick-alert] missing run timestamp freshness gate"
+set +e
+PROD_PILOT_COHORT_QUICK_ALERT_NOW_EPOCH="$ALERT_NOW_EPOCH" \
+./scripts/prod_pilot_cohort_quick_alert.sh \
+  --trend-summary-json "$MISSING_RUN_TIMESTAMP_SUMMARY" \
+  --max-evidence-age-sec 3600 >${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_missing_run_timestamp.log 2>&1
+missing_run_timestamp_alert_rc=$?
+set -e
+if [[ "$missing_run_timestamp_alert_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for missing provided trend run timestamp"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_missing_run_timestamp.log
+  exit 1
+fi
+if ! rg -q 'quick trend run\[1\] generated_at_utc timestamp missing' ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_missing_run_timestamp.log; then
+  echo "expected missing run timestamp signal not found"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_missing_run_timestamp.log
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-quick-alert] top-level metrics must match runs"
+set +e
+./scripts/prod_pilot_cohort_quick_alert.sh \
+  --trend-summary-json "$INCONSISTENT_RUN_SUMMARY" \
+  --max-evidence-age-sec 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_inconsistent_runs.log 2>&1
+inconsistent_run_alert_rc=$?
+set -e
+if [[ "$inconsistent_run_alert_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for inconsistent provided trend metrics"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_inconsistent_runs.log
+  exit 1
+fi
+if ! rg -q 'is inconsistent with runs_no_go=1' ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_inconsistent_runs.log; then
+  echo "expected no_go consistency signal not found"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_inconsistent_runs.log
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-quick-alert] provided runs require report_path"
+set +e
+./scripts/prod_pilot_cohort_quick_alert.sh \
+  --trend-summary-json "$MISSING_REPORT_PATH_SUMMARY" \
+  --max-evidence-age-sec 0 >${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_missing_report_path.log 2>&1
+missing_report_path_alert_rc=$?
+set -e
+if [[ "$missing_report_path_alert_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for missing provided trend report_path"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_missing_report_path.log
+  exit 1
+fi
+if ! rg -q 'trend summary run\[1\] report_path missing' ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_missing_report_path.log; then
+  echo "expected missing report_path signal not found"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_alert_missing_report_path.log
+  exit 1
+fi
+
 echo "[prod-pilot-cohort-quick-alert] CRITICAL fail-close"
 set +e
 ./scripts/prod_pilot_cohort_quick_alert.sh \
@@ -217,8 +351,11 @@ while [[ $# -gt 0 ]]; do
 done
 if [[ -n "$summary_file" ]]; then
   mkdir -p "$(dirname "$summary_file")"
+  report_path="$(dirname "$summary_file")/generated_quick_report.json"
+  printf '{}\n' >"$report_path"
   jq -nc --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{generated_at_utc:$generated_at_utc, go_rate_pct:99.2, no_go:0, evaluation_errors:0, reports_total:4, top_no_go_reasons:[]}' >"$summary_file"
+    --arg report_path "$report_path" \
+    '{generated_at_utc:$generated_at_utc, go_rate_pct:100, no_go:0, evaluation_errors:0, reports_total:1, top_no_go_reasons:[], runs:[{generated_at_utc:$generated_at_utc, decision:"GO", report_path:$report_path, first_no_go_reason:""}]}' >"$summary_file"
 fi
 exit 0
 EOF_FAKE_TREND

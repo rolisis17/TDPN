@@ -79,6 +79,8 @@ cat >"$SUMMARY_JSON" <<EOF_SUMMARY
 EOF_SUMMARY
 
 echo "[prod-pilot-cohort-check] baseline pass"
+BASELINE_NOW_EPOCH="$(jq -nr '"2026-03-11T00:01:00Z" | fromdateiso8601 | floor')"
+PROD_PILOT_COHORT_CHECK_NOW_EPOCH="$BASELINE_NOW_EPOCH" \
 ./scripts/prod_pilot_cohort_check.sh \
   --summary-json "$SUMMARY_JSON" >/tmp/integration_prod_pilot_cohort_check_pass.log 2>&1
 
@@ -120,10 +122,30 @@ if ! rg -q 'cohort summary evidence timestamp is stale' /tmp/integration_prod_pi
   exit 1
 fi
 
+echo "[prod-pilot-cohort-check] stale evidence fails by default"
+DEFAULT_STALE_NOW_EPOCH="$(jq -nr '"2026-03-11T00:12:00Z" | fromdateiso8601 | floor')"
+set +e
+PROD_PILOT_COHORT_CHECK_NOW_EPOCH="$DEFAULT_STALE_NOW_EPOCH" \
+./scripts/prod_pilot_cohort_check.sh \
+  --summary-json "$SUMMARY_JSON" >/tmp/integration_prod_pilot_cohort_check_default_stale_fail.log 2>&1
+default_stale_rc=$?
+set -e
+if [[ "$default_stale_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for stale evidence under default policy"
+  cat /tmp/integration_prod_pilot_cohort_check_default_stale_fail.log
+  exit 1
+fi
+if ! rg -q 'cohort summary evidence timestamp is stale' /tmp/integration_prod_pilot_cohort_check_default_stale_fail.log; then
+  echo "expected default stale evidence signal not found"
+  cat /tmp/integration_prod_pilot_cohort_check_default_stale_fail.log
+  exit 1
+fi
+
 echo "[prod-pilot-cohort-check] severity policy fail"
 BAD_SEVERITY_SUMMARY="$TMP_DIR/summary_bad_severity.json"
 jq '.alert.severity="CRITICAL"' "$SUMMARY_JSON" >"$BAD_SEVERITY_SUMMARY"
 set +e
+PROD_PILOT_COHORT_CHECK_NOW_EPOCH="$BASELINE_NOW_EPOCH" \
 ./scripts/prod_pilot_cohort_check.sh \
   --summary-json "$BAD_SEVERITY_SUMMARY" \
   --max-alert-severity WARN >/tmp/integration_prod_pilot_cohort_check_bad_severity.log 2>&1
@@ -137,6 +159,30 @@ fi
 if ! rg -q 'alert severity exceeds policy' /tmp/integration_prod_pilot_cohort_check_bad_severity.log; then
   echo "expected severity policy signal not found"
   cat /tmp/integration_prod_pilot_cohort_check_bad_severity.log
+  exit 1
+fi
+
+echo "[prod-pilot-cohort-check] alert artifact mismatch fail"
+BAD_ALERT_ARTIFACT="$TMP_DIR/prod_pilot_cohort_alert_bad.json"
+cat >"$BAD_ALERT_ARTIFACT" <<'EOF_BAD_ALERT_ARTIFACT'
+{"generated_at_utc":"2026-03-11T00:00:00Z","severity":"CRITICAL"}
+EOF_BAD_ALERT_ARTIFACT
+BAD_ALERT_ARTIFACT_SUMMARY="$TMP_DIR/summary_bad_alert_artifact.json"
+jq --arg alert "$BAD_ALERT_ARTIFACT" '.artifacts.alert_summary_json=$alert' "$SUMMARY_JSON" >"$BAD_ALERT_ARTIFACT_SUMMARY"
+set +e
+PROD_PILOT_COHORT_CHECK_NOW_EPOCH="$BASELINE_NOW_EPOCH" \
+./scripts/prod_pilot_cohort_check.sh \
+  --summary-json "$BAD_ALERT_ARTIFACT_SUMMARY" >/tmp/integration_prod_pilot_cohort_check_bad_alert_artifact.log 2>&1
+bad_alert_artifact_rc=$?
+set -e
+if [[ "$bad_alert_artifact_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for alert artifact mismatch"
+  cat /tmp/integration_prod_pilot_cohort_check_bad_alert_artifact.log
+  exit 1
+fi
+if ! rg -q 'cohort summary/alert summary severity mismatch' /tmp/integration_prod_pilot_cohort_check_bad_alert_artifact.log; then
+  echo "expected alert artifact mismatch signal not found"
+  cat /tmp/integration_prod_pilot_cohort_check_bad_alert_artifact.log
   exit 1
 fi
 
@@ -158,6 +204,7 @@ cat >"$TREND_JSON" <<'EOF_TREND_FAIL'
 }
 EOF_TREND_FAIL
 set +e
+PROD_PILOT_COHORT_CHECK_NOW_EPOCH="$BASELINE_NOW_EPOCH" \
 ./scripts/prod_pilot_cohort_check.sh \
   --summary-json "$SUMMARY_JSON" >/tmp/integration_prod_pilot_cohort_check_bad_trend.log 2>&1
 bad_trend_rc=$?
@@ -173,10 +220,62 @@ if ! rg -q 'trend decision is not GO' /tmp/integration_prod_pilot_cohort_check_b
   exit 1
 fi
 
+echo "[prod-pilot-cohort-check] trend artifact metric mismatch fail"
+cat >"$TREND_JSON" <<'EOF_TREND_METRIC_MISMATCH'
+{
+  "generated_at_utc":"2026-03-11T00:00:00Z",
+  "decision":"GO",
+  "go_rate_pct":0,
+  "policy":{
+    "require_wg_validate_udp_source":1,
+    "require_wg_validate_strict_distinct":1,
+    "require_wg_soak_diversity_pass":1,
+    "min_wg_soak_selection_lines":12,
+    "min_wg_soak_entry_operators":2,
+    "min_wg_soak_exit_operators":2,
+    "min_wg_soak_cross_operator_pairs":2
+  }
+}
+EOF_TREND_METRIC_MISMATCH
+set +e
+PROD_PILOT_COHORT_CHECK_NOW_EPOCH="$BASELINE_NOW_EPOCH" \
+./scripts/prod_pilot_cohort_check.sh \
+  --summary-json "$SUMMARY_JSON" >/tmp/integration_prod_pilot_cohort_check_bad_trend_metric.log 2>&1
+bad_trend_metric_rc=$?
+set -e
+if [[ "$bad_trend_metric_rc" -eq 0 ]]; then
+  echo "expected non-zero rc for trend metric mismatch"
+  cat /tmp/integration_prod_pilot_cohort_check_bad_trend_metric.log
+  exit 1
+fi
+if ! rg -q 'cohort summary/trend summary metric mismatch' /tmp/integration_prod_pilot_cohort_check_bad_trend_metric.log; then
+  echo "expected trend metric mismatch signal not found"
+  cat /tmp/integration_prod_pilot_cohort_check_bad_trend_metric.log
+  exit 1
+fi
+
+cat >"$TREND_JSON" <<'EOF_TREND'
+{
+  "generated_at_utc":"2026-03-11T00:00:00Z",
+  "decision":"GO",
+  "go_rate_pct":100,
+  "policy":{
+    "require_wg_validate_udp_source":1,
+    "require_wg_validate_strict_distinct":1,
+    "require_wg_soak_diversity_pass":1,
+    "min_wg_soak_selection_lines":12,
+    "min_wg_soak_entry_operators":2,
+    "min_wg_soak_exit_operators":2,
+    "min_wg_soak_cross_operator_pairs":2
+  }
+}
+EOF_TREND
+
 echo "[prod-pilot-cohort-check] strict trend policy fail"
 STRICT_POLICY_FAIL_SUMMARY="$TMP_DIR/summary_strict_policy_fail.json"
 jq '.policy.trend_require_wg_validate_udp_source=false' "$SUMMARY_JSON" >"$STRICT_POLICY_FAIL_SUMMARY"
 set +e
+PROD_PILOT_COHORT_CHECK_NOW_EPOCH="$BASELINE_NOW_EPOCH" \
 ./scripts/prod_pilot_cohort_check.sh \
   --summary-json "$STRICT_POLICY_FAIL_SUMMARY" >/tmp/integration_prod_pilot_cohort_check_strict_policy_fail.log 2>&1
 strict_policy_fail_rc=$?
@@ -210,6 +309,7 @@ cat >"$TREND_JSON" <<'EOF_TREND_ARTIFACT_FAIL'
 }
 EOF_TREND_ARTIFACT_FAIL
 set +e
+PROD_PILOT_COHORT_CHECK_NOW_EPOCH="$BASELINE_NOW_EPOCH" \
 ./scripts/prod_pilot_cohort_check.sh \
   --summary-json "$SUMMARY_JSON" >/tmp/integration_prod_pilot_cohort_check_strict_artifact_policy_fail.log 2>&1
 strict_artifact_policy_fail_rc=$?
@@ -343,6 +443,7 @@ jq \
   --max-round-failures 1 \
   --require-incident-snapshot-on-fail 1 \
   --require-incident-snapshot-artifacts 1 \
+  --max-evidence-age-sec 0 \
   --show-json 1 >/tmp/integration_prod_pilot_cohort_check_incident_pass.log 2>&1
 if ! rg -q 'incident_snapshot_latest_failed_run_report=' /tmp/integration_prod_pilot_cohort_check_incident_pass.log; then
   echo "expected latest failed incident snapshot handoff line not found"
@@ -403,6 +504,7 @@ set +e
   --summary-json "$INCIDENT_PASS_SUMMARY" \
   --require-all-rounds-ok 0 \
   --max-round-failures 1 \
+  --max-evidence-age-sec 0 \
   --incident-snapshot-min-attachment-count 2 >/tmp/integration_prod_pilot_cohort_check_incident_attachment_floor_fail.log 2>&1
 incident_attach_floor_rc=$?
 set -e
@@ -424,6 +526,7 @@ set +e
   --summary-json "$INCIDENT_PASS_SUMMARY" \
   --require-all-rounds-ok 0 \
   --max-round-failures 1 \
+  --max-evidence-age-sec 0 \
   --incident-snapshot-max-skipped-count 0 >/tmp/integration_prod_pilot_cohort_check_incident_skipped_budget_fail.log 2>&1
 incident_skipped_budget_rc=$?
 set -e
@@ -442,6 +545,7 @@ fi
   --summary-json "$INCIDENT_PASS_SUMMARY" \
   --require-all-rounds-ok 0 \
   --max-round-failures 1 \
+  --max-evidence-age-sec 0 \
   --incident-snapshot-min-attachment-count 1 \
   --incident-snapshot-max-skipped-count 1 >/tmp/integration_prod_pilot_cohort_check_incident_attachment_policy_pass.log 2>&1
 

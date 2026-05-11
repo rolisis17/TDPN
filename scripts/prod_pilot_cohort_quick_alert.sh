@@ -162,6 +162,11 @@ check_evidence_timestamp_age() {
   return 0
 }
 
+append_validation_error() {
+  local message="$1"
+  trend_validation_errors+=("$message")
+}
+
 trend_summary_json=""
 run_report_list=""
 reports_dir=""
@@ -565,6 +570,78 @@ if (( max_evidence_age_sec > 0 )); then
     echo "$freshness_error"
     exit 1
   fi
+fi
+
+declare -a trend_validation_errors=()
+runs_type="$(jq -r 'if has("runs") then (.runs | type) else "missing" end' "$trend_summary_json" 2>/dev/null || echo "missing")"
+reports_total_raw="$(jq -r '.reports_total // 0' "$trend_summary_json" 2>/dev/null || echo 0)"
+top_no_go_for_validation="$(jq -r '.no_go // 0' "$trend_summary_json" 2>/dev/null || echo 0)"
+top_go_rate_for_validation="$(jq -r '.go_rate_pct // 0' "$trend_summary_json" 2>/dev/null || echo 0)"
+eval_errors_raw="$(jq -r '.evaluation_errors // 0' "$trend_summary_json" 2>/dev/null || echo 0)"
+if [[ ! "$reports_total_raw" =~ ^[0-9]+$ ]]; then
+  append_validation_error "trend summary reports_total must be an integer >= 0"
+fi
+if [[ ! "$top_no_go_for_validation" =~ ^[0-9]+$ ]]; then
+  append_validation_error "trend summary no_go must be an integer >= 0"
+fi
+if ! is_non_negative_decimal "$top_go_rate_for_validation"; then
+  append_validation_error "trend summary go_rate_pct must be a number >= 0"
+fi
+if [[ ! "$eval_errors_raw" =~ ^[0-9]+$ ]]; then
+  append_validation_error "trend summary evaluation_errors must be an integer >= 0"
+fi
+if [[ "$runs_type" != "missing" && "$runs_type" != "array" ]]; then
+  append_validation_error "trend summary .runs must be an array when present"
+fi
+if [[ "$runs_type" == "missing" && "$reports_total_raw" =~ ^[0-9]+$ && "$reports_total_raw" -gt 0 ]]; then
+  append_validation_error "trend summary reports_total=$reports_total_raw but .runs is missing"
+fi
+if [[ "$runs_type" == "array" ]]; then
+  runs_total="$(jq -r '.runs | length' "$trend_summary_json")"
+  runs_go="$(jq -r '[.runs[] | select(.decision == "GO")] | length' "$trend_summary_json")"
+  runs_no_go="$(jq -r '[.runs[] | select(.decision == "NO-GO")] | length' "$trend_summary_json")"
+  runs_invalid_decision="$(jq -r '[.runs[] | select((.decision // "") != "GO" and (.decision // "") != "NO-GO")] | length' "$trend_summary_json")"
+  runs_go_rate_pct="$(awk -v g="$runs_go" -v t="$runs_total" 'BEGIN { if (t == 0) { printf "0.00" } else { printf "%.2f", (g * 100.0) / t } }')"
+
+  if ((runs_invalid_decision > 0)); then
+    append_validation_error "trend summary .runs contains $runs_invalid_decision invalid decision value(s)"
+  fi
+  if [[ "$reports_total_raw" =~ ^[0-9]+$ && "$reports_total_raw" -ne "$runs_total" ]]; then
+    append_validation_error "trend summary reports_total=$reports_total_raw is inconsistent with runs_total=$runs_total"
+  fi
+  if [[ "$top_no_go_for_validation" =~ ^[0-9]+$ && "$top_no_go_for_validation" -ne "$runs_no_go" ]]; then
+    append_validation_error "trend summary no_go=$top_no_go_for_validation is inconsistent with runs_no_go=$runs_no_go"
+  fi
+  if is_non_negative_decimal "$top_go_rate_for_validation"; then
+    if awk -v top="$top_go_rate_for_validation" -v runs="$runs_go_rate_pct" 'BEGIN { diff = top - runs; if (diff < 0) diff = -diff; exit (diff > 0.01) ? 0 : 1 }'; then
+      append_validation_error "trend summary go_rate_pct=$top_go_rate_for_validation is inconsistent with runs_go_rate_pct=$runs_go_rate_pct"
+    fi
+  fi
+
+  run_index=0
+  while IFS= read -r run_json || [[ -n "$run_json" ]]; do
+    run_index=$((run_index + 1))
+    run_timestamp="$(jq -r '.generated_at_utc // ""' <<<"$run_json" 2>/dev/null || true)"
+    run_report_path="$(jq -r '.report_path // ""' <<<"$run_json" 2>/dev/null || true)"
+    if (( max_evidence_age_sec > 0 )); then
+      if ! run_freshness_error="$(check_evidence_timestamp_age "quick trend run[$run_index] generated_at_utc" "$run_timestamp" "$now_epoch")"; then
+        append_validation_error "$run_freshness_error"
+      fi
+    fi
+    run_report_path_abs="$(abs_path "$run_report_path")"
+    if [[ -z "$run_report_path_abs" ]]; then
+      append_validation_error "trend summary run[$run_index] report_path missing"
+    elif [[ ! -f "$run_report_path_abs" ]]; then
+      append_validation_error "trend summary run[$run_index] report_path does not exist: $run_report_path_abs"
+    fi
+  done < <(jq -c '.runs[]' "$trend_summary_json")
+fi
+if ((${#trend_validation_errors[@]} > 0)); then
+  echo "trend summary validation failed:"
+  for validation_error in "${trend_validation_errors[@]}"; do
+    echo "  - $validation_error"
+  done
+  exit 1
 fi
 
 go_rate_pct="$(jq -r '.go_rate_pct // 0' "$trend_summary_json")"

@@ -275,6 +275,56 @@ if ! rg -q -- '--max-evidence-age-sec 600' "$CHECK_CAPTURE"; then
   exit 1
 fi
 
+echo "[prod-pilot-cohort-quick-trend] fail-closed when quick-check omits decision"
+FAKE_QUICK_CHECK_NO_DECISION="$TMP_DIR/fake_quick_check_no_decision_for_trend.sh"
+NO_DECISION_SUMMARY_JSON="$TMP_DIR/quick_trend_no_decision_summary.json"
+cat >"$FAKE_QUICK_CHECK_NO_DECISION" <<'EOF_FAKE_QUICK_CHECK_NO_DECISION'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "[prod-pilot-cohort-quick-check] run_report_json=${2:-unknown}"
+echo "[prod-pilot-cohort-quick-check] ok without decision line"
+exit 0
+EOF_FAKE_QUICK_CHECK_NO_DECISION
+chmod +x "$FAKE_QUICK_CHECK_NO_DECISION"
+
+set +e
+PROD_PILOT_COHORT_QUICK_CHECK_SCRIPT="$FAKE_QUICK_CHECK_NO_DECISION" \
+./scripts/prod_pilot_cohort_quick_trend.sh \
+  --reports-dir "$REPORTS_DIR" \
+  --max-reports 1 \
+  --summary-json "$NO_DECISION_SUMMARY_JSON" \
+  --fail-on-any-no-go 1 \
+  --show-details 1 \
+  --show-top-reasons 3 >${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_no_decision.log 2>&1
+no_decision_rc=$?
+set -e
+if [[ "$no_decision_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when quick-check omits a parseable decision line"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_no_decision.log
+  exit 1
+fi
+if ! rg -q '\[prod-pilot-cohort-quick-trend\] reports_total=1 go=0 no_go=1 go_rate_pct=0.00' ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_no_decision.log; then
+  echo "expected malformed quick-check output to count as NO-GO, not GO"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_no_decision.log
+  exit 1
+fi
+if ! rg -q '\[prod-pilot-cohort-quick-trend\] evaluation_errors=1' ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_no_decision.log; then
+  echo "expected malformed quick-check output to count as an evaluation error"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_no_decision.log
+  exit 1
+fi
+if ! rg -q 'reason=quick-check decision parse failed \(rc=0\)' ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_no_decision.log; then
+  echo "expected decision parse failure reason in malformed quick-check output"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_no_decision.log
+  exit 1
+fi
+if ! jq -e '.reports_total == 1 and .go == 0 and .no_go == 1 and .evaluation_errors == 1 and .decision == "NO-GO" and .runs[0].decision == "NO-GO" and .runs[0].first_no_go_reason == "quick-check decision parse failed (rc=0)"' "$NO_DECISION_SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "quick trend summary JSON did not fail closed for malformed quick-check output"
+  cat "$NO_DECISION_SUMMARY_JSON"
+  cat ${TMP_DIR}/integration_prod_pilot_cohort_quick_trend_no_decision.log
+  exit 1
+fi
+
 cat >"$TMP_BIN/docker" <<'EOF_DOCKER'
 #!/usr/bin/env bash
 set -euo pipefail
