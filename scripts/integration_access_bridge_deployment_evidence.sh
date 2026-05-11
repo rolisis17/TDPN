@@ -208,6 +208,39 @@ if ! jq -e \
   exit 1
 fi
 
+MISSING_HANDOFF_INPUTS_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_missing_handoff_inputs.json"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$SMOKE_SUMMARY" \
+  --expect-helper-id helper-evidence \
+  --expect-org-id evidence-org \
+  --expect-registry-id "$registry_id" \
+  --summary-json "$MISSING_HANDOFF_INPUTS_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/missing-handoff-inputs.log" 2>&1
+missing_handoff_inputs_rc=$?
+set -e
+if [[ "$missing_handoff_inputs_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: real helper handoff evidence without config/deploy inputs should fail"
+  cat "$MISSING_HANDOFF_INPUTS_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+    .status == "fail"
+    and .evidence_scope == "real_helper_https"
+    and .pilot_handoff_candidate == false
+    and .local_files.config.supplied == false
+    and .local_files.config.status == "fail"
+    and (.local_files.config.reason | contains("--config-json"))
+    and .local_files.deploy_pack.supplied == false
+    and .local_files.deploy_pack.status == "fail"
+    and (.local_files.deploy_pack.reason | contains("--deploy-pack-dir"))
+    and .recommended_next_action.id == "stage_bridge_service_config"
+  ' "$MISSING_HANDOFF_INPUTS_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: missing handoff inputs summary mismatch"
+  cat "$MISSING_HANDOFF_INPUTS_SUMMARY"
+  exit 1
+fi
+
 LOCAL_SMOKE_SUMMARY="$TMP_DIR/access_bridge_service_smoke_loopback_summary.json"
 LOCAL_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_loopback_summary.json"
 jq '.base_url = "http://127.0.0.1:19837"' "$SMOKE_SUMMARY" >"$LOCAL_SMOKE_SUMMARY"

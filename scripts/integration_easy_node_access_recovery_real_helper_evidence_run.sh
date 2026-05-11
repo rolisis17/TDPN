@@ -491,6 +491,117 @@ for bad_url in "${bad_real_helper_urls[@]}"; do
   fi
 done
 
+echo "[easy-node-access-recovery-real-helper-evidence-run] plan-only validates and emits planned commands without invoking children"
+: >"$CAPTURE"
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --plan-only \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/plan-only-summary.json" \
+  --report-md "$TMP_DIR/plan-only-report.md" \
+  --print-summary-json 0
+if [[ -s "$CAPTURE" ]]; then
+  echo "plan-only should not invoke child scripts"
+  cat "$CAPTURE"
+  exit 1
+fi
+jq -e '
+  .status == "pass"
+  and .stage == "plan"
+  and .mode.plan_only == true
+  and .mode.child_execution_skipped == true
+  and .child_summaries.host_install_check == null
+  and .child_summaries.bundle == null
+  and .child_summaries.verifier == null
+  and .child_summaries.roadmap == null
+  and .planned_child_commands.host_install_check.enabled == true
+  and .planned_child_commands.bundle.enabled == true
+  and .planned_child_commands.verifier.enabled == true
+  and .planned_child_commands.roadmap.enabled == true
+  and (.planned_child_commands.bundle.args | index("--bundle-dir") != null)
+  and (.planned_child_commands.bundle.args | index("--code-file") != null)
+  and (.planned_artifacts.bundle_service_smoke_summary_json | endswith("/access_bridge_service_smoke_summary.json"))
+  and (.planned_artifacts.verification_summary_json | endswith(".json"))
+' "$TMP_DIR/plan-only-summary.json" >/dev/null
+if ! grep -Fq -- "Planned Child Commands" "$TMP_DIR/plan-only-report.md" ||
+  ! grep -Fq -- "Planned Artifacts" "$TMP_DIR/plan-only-report.md"; then
+  echo "plan-only report missing planned commands/artifacts"
+  cat "$TMP_DIR/plan-only-report.md"
+  exit 1
+fi
+
+plan_only_reject_cases=(
+  "private-url|--base-url|https://10.1.2.3|--base-url host must look public-routable for real helper evidence"
+  "placeholder-url|--base-url|https://HELPER_PUBLIC_DNS|--base-url must be a real public HTTPS helper URL"
+  "placeholder-code-file|--code-file|PRIVATE_CODE_FILE|--code-file must point to a real private access code file, not an unreplaced placeholder"
+)
+plan_only_reject_index=0
+for plan_only_case in "${plan_only_reject_cases[@]}"; do
+  plan_only_reject_index=$((plan_only_reject_index + 1))
+  IFS='|' read -r plan_only_name plan_only_flag plan_only_value plan_only_expected_message <<<"$plan_only_case"
+  : >"$CAPTURE"
+  plan_only_base_url="https://helper.gpm-pilot.net"
+  plan_only_code_file="$CODE_FILE"
+  case "$plan_only_flag" in
+    --base-url)
+      plan_only_base_url="$plan_only_value"
+      ;;
+    --code-file)
+      plan_only_code_file="$plan_only_value"
+      ;;
+    *)
+      echo "unknown plan-only reject case flag: $plan_only_flag"
+      exit 1
+      ;;
+  esac
+  set +e
+  ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+  ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+  ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+  ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+    --plan-only \
+    --base-url "$plan_only_base_url" \
+    --code-file "$plan_only_code_file" \
+    --config-json "$CONFIG_JSON" \
+    --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+    --provenance-private-key-file "$PROVENANCE_KEY" \
+    --provenance-org-id freenews-demo \
+    --provenance-org-name "FreeNews Demo" \
+    --trust-store "$TRUST_STORE" \
+    --summary-json "$TMP_DIR/plan-only-reject-$plan_only_reject_index-summary.json" \
+    --print-summary-json 0 >"$TMP_DIR/plan-only-reject-$plan_only_reject_index.log" 2>&1
+  plan_only_reject_rc=$?
+  set -e
+  if [[ "$plan_only_reject_rc" -ne 2 ]] ||
+    ! grep -Fq -- "$plan_only_expected_message" "$TMP_DIR/plan-only-reject-$plan_only_reject_index.log"; then
+    echo "expected plan-only reject case to fail preflight: $plan_only_name"
+    cat "$TMP_DIR/plan-only-reject-$plan_only_reject_index.log"
+    exit 1
+  fi
+  if [[ -s "$CAPTURE" ]]; then
+    echo "plan-only reject case should not invoke child scripts: $plan_only_name"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
+
 : >"$CAPTURE"
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
 ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \

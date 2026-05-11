@@ -30,6 +30,7 @@ bundle_summary_json=""
 provenance_out=""
 verification_summary_json=""
 roadmap_refresh="${ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_ROADMAP_REFRESH:-1}"
+plan_only="${ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_PLAN_ONLY:-0}"
 roadmap_summary_json=""
 roadmap_report_md=""
 summary_json=""
@@ -61,6 +62,7 @@ Usage:
     [--provenance-out FILE] \
     [--verification-summary-json FILE] \
     [--roadmap-refresh 0|1] \
+    [--plan-only 0|1] \
     [--roadmap-summary-json FILE] \
     [--roadmap-report-md FILE] \
     [--allow-child-script-overrides 0|1] \
@@ -75,6 +77,10 @@ Purpose:
   1. capture the HTTPS pilot evidence bundle with signed provenance
   2. verify it with trusted provenance and write the verifier receipt
   3. refresh roadmap readiness against that verifier receipt
+
+Use --plan-only 1 to run the same strict preflight validation and emit the
+planned child commands/artifacts without invoking host-install, bundle,
+verifier, or roadmap child scripts.
 
 This wrapper is intentionally stricter than local rehearsal helpers. It refuses
 placeholder values, loopback/private-looking helper URLs, missing trust stores,
@@ -293,6 +299,51 @@ json_file_or_null() {
   else
     printf '%s' "null"
   fi
+}
+
+json_array_from_args() {
+  if [[ $# -eq 0 ]]; then
+    printf '%s' "[]"
+  else
+    printf '%s\n' "$@" | jq -R . | jq -s -c .
+  fi
+}
+
+redacted_args_json() {
+  local arg redact_next="0"
+  local redacted=()
+  for arg in "$@"; do
+    if [[ "$redact_next" == "1" ]]; then
+      redacted+=("<redacted>")
+      redact_next="0"
+    elif [[ "$arg" == "--code" ]]; then
+      redacted+=("$arg")
+      redact_next="1"
+    else
+      redacted+=("$arg")
+    fi
+  done
+  json_array_from_args "${redacted[@]}"
+}
+
+planned_command_json() {
+  local enabled="$1"
+  local script="$2"
+  local reason="$3"
+  shift 3
+  local args_json
+  args_json="$(redacted_args_json "$@")"
+  jq -c -n \
+    --argjson enabled "$enabled" \
+    --arg script "$script" \
+    --arg reason "$reason" \
+    --argjson args "$args_json" \
+    '{
+      enabled: $enabled,
+      script: $script,
+      args: $args,
+      argv: ([$script] + $args)
+    } + (if $reason == "" then {} else {reason: $reason} end)'
 }
 
 first_nonempty() {
@@ -528,6 +579,15 @@ while [[ $# -gt 0 ]]; do
       roadmap_refresh="$2"
       shift 2
       ;;
+    --plan-only|--preflight-only)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        plan_only="${2:-}"
+        shift 2
+      else
+        plan_only="1"
+        shift
+      fi
+      ;;
     --roadmap-summary-json)
       require_value_or_die "$1" "${2:-}"
       roadmap_summary_json="$2"
@@ -577,6 +637,7 @@ for cmd in awk date dirname jq mkdir tail; do
 done
 
 bool_arg_or_die "--roadmap-refresh" "$roadmap_refresh"
+bool_arg_or_die "--plan-only" "$plan_only"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--print-child-json" "$print_child_json"
 
@@ -599,6 +660,8 @@ roadmap_log="$reports_dir/access_recovery_real_helper_evidence_run_${run_id}_roa
 bundle_service_smoke_summary_json=""
 bundle_deployment_evidence_summary_json=""
 bundle_host_install_check_summary_json=""
+planned_child_commands_json="{}"
+planned_artifacts_json="{}"
 
 config_json="$(abs_path "$config_json")"
 deploy_pack_dir="$(abs_path "$deploy_pack_dir")"
@@ -618,6 +681,7 @@ write_summary() {
   local host_install_obj bundle_obj verify_obj roadmap_obj pilot_ready roadmap_ready evidence_scope verifier_scope
   local code_present_json code_file_present_json
   local roadmap_refresh_json
+  local plan_only_json
   generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   host_install_obj="$(json_file_or_null "$host_install_check_summary_json")"
   bundle_obj="$(json_file_or_null "$bundle_summary_json")"
@@ -645,6 +709,11 @@ write_summary() {
     roadmap_refresh_json="true"
   else
     roadmap_refresh_json="false"
+  fi
+  if [[ "$plan_only" == "1" ]]; then
+    plan_only_json="true"
+  else
+    plan_only_json="false"
   fi
   mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
   jq -n \
@@ -675,6 +744,7 @@ write_summary() {
     --arg verifier_scope "$verifier_scope" \
     --argjson code_present "$code_present_json" \
     --argjson code_file_present "$code_file_present_json" \
+    --argjson plan_only "$plan_only_json" \
     --argjson pilot_handoff_ready "$pilot_ready" \
     --argjson roadmap_ready "$roadmap_ready" \
     --argjson roadmap_refresh "$roadmap_refresh_json" \
@@ -682,14 +752,20 @@ write_summary() {
     --argjson bundle "$bundle_obj" \
     --argjson verifier "$verify_obj" \
     --argjson roadmap "$roadmap_obj" \
+    --argjson planned_child_commands "$planned_child_commands_json" \
+    --argjson planned_artifacts "$planned_artifacts_json" \
     '{
       version: 1,
-      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 1},
+      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 2},
       generated_at_utc: $generated_at_utc,
       status: $status,
       rc: $rc,
       stage: $stage,
       notes: $notes,
+      mode: {
+        plan_only: $plan_only,
+        child_execution_skipped: ($plan_only and $status == "pass" and $stage == "plan")
+      },
       inputs: {
         base_url: $base_url,
         path_id: $path_id,
@@ -709,6 +785,8 @@ write_summary() {
         verifier: $verifier,
         roadmap: $roadmap
       },
+      planned_child_commands: $planned_child_commands,
+      planned_artifacts: $planned_artifacts,
       artifacts: {
         reports_dir: $reports_dir,
         host_install_check_summary_json: $host_install_check_summary_json,
@@ -735,6 +813,7 @@ write_summary() {
 - Status: ${status}
 - Stage: ${stage}
 - Notes: ${notes}
+- Plan only: ${plan_only}
 - Base URL: ${base_url}
 - Host install check: ${host_install_check_summary_json}
 - Bundle summary: ${bundle_summary_json}
@@ -742,6 +821,31 @@ write_summary() {
 - Roadmap summary: ${roadmap_summary_json}
 - Summary JSON: ${summary_json}
 REPORT
+
+  if printf '%s\n' "$planned_child_commands_json" | jq -e 'type == "object" and length > 0' >/dev/null 2>&1; then
+    {
+      echo
+      echo "## Planned Child Commands"
+      printf '%s\n' "$planned_child_commands_json" | jq -r '
+        to_entries[]
+        | "- " + .key
+          + (if (.value.enabled // true) == false then " (disabled" + (if (.value.reason // "") == "" then "" else ": " + .value.reason end) + ")" else "" end)
+          + ": " + ((.value.argv // []) | map(@sh) | join(" "))
+      '
+    } >>"$report_md"
+  fi
+
+  if printf '%s\n' "$planned_artifacts_json" | jq -e 'type == "object" and length > 0' >/dev/null 2>&1; then
+    {
+      echo
+      echo "## Planned Artifacts"
+      printf '%s\n' "$planned_artifacts_json" | jq -r '
+        to_entries[]
+        | select((.value // "") != "")
+        | "- " + .key + ": " + (.value | tostring)
+      '
+    } >>"$report_md"
+  fi
 }
 
 fail_preflight() {
@@ -849,6 +953,11 @@ if [[ "$roadmap_refresh" == "1" && ! -x "$roadmap_script" ]]; then
   fail_preflight "missing executable roadmap script: $roadmap_script"
 fi
 
+planned_bundle_dir="$reports_dir/access_bridge_pilot_evidence_bundle_${run_id}"
+planned_bundle_service_smoke_summary_json="$planned_bundle_dir/access_bridge_service_smoke_summary.json"
+planned_bundle_deployment_evidence_summary_json="$planned_bundle_dir/access_bridge_deployment_evidence_summary.json"
+planned_bundle_host_install_check_summary_json="$planned_bundle_dir/access_bridge_host_install_check_summary.json"
+
 host_install_check_args=(
   --deploy-pack-dir "$deploy_pack_dir"
   --service-name "$service_name"
@@ -857,18 +966,6 @@ host_install_check_args=(
   --summary-json "$host_install_check_summary_json"
   --print-summary-json "$print_child_json"
 )
-set +e
-"$host_install_check_script" "${host_install_check_args[@]}" >"$host_install_check_log" 2>&1
-host_install_check_rc=$?
-set -e
-if [[ "$host_install_check_rc" -ne 0 ]]; then
-  write_summary "fail" "$host_install_check_rc" "host_install_check" "Access bridge deploy pack host install check failed"
-  print_failure_log_tail "host-install-check" "$host_install_check_log"
-  echo "access-recovery-real-helper-evidence-run: status=fail stage=host_install_check"
-  echo "summary_json: $summary_json"
-  [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
-  exit "$host_install_check_rc"
-fi
 
 bundle_args=(
   --base-url "$base_url"
@@ -876,6 +973,7 @@ bundle_args=(
   --config-json "$config_json"
   --deploy-pack-dir "$deploy_pack_dir"
   --service-name "$service_name"
+  --bundle-dir "$planned_bundle_dir"
   --summary-json "$bundle_summary_json"
   --provenance-sign 1
   --provenance-private-key-file "$provenance_private_key_file"
@@ -900,6 +998,106 @@ fi
 [[ -z "$expect_registry_id" ]] || bundle_args+=(--expect-registry-id "$expect_registry_id")
 [[ -z "$provenance_key_id" ]] || bundle_args+=(--provenance-key-id "$provenance_key_id")
 [[ -z "$provenance_lifetime_hours" ]] || bundle_args+=(--provenance-lifetime-hours "$provenance_lifetime_hours")
+
+verify_args=(
+  --summary-json "$bundle_summary_json"
+  --provenance-json "$provenance_out"
+  --trust-store "$trust_store"
+  --require-trusted-provenance 1
+  --verification-summary-json "$verification_summary_json"
+  --print-verification-summary-json "$print_child_json"
+)
+
+planned_roadmap_args=(
+  --refresh-manual-validation 0
+  --refresh-single-machine-readiness 0
+  --access-bridge-service-smoke-summary-json "$planned_bundle_service_smoke_summary_json"
+  --access-bridge-deployment-evidence-summary-json "$planned_bundle_deployment_evidence_summary_json"
+  --access-bridge-host-install-summary-json "$planned_bundle_host_install_check_summary_json"
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$verification_summary_json"
+  --summary-json "$roadmap_summary_json"
+  --report-md "$roadmap_report_md"
+  --print-summary-json 0
+)
+
+host_install_plan_json="$(planned_command_json true "$host_install_check_script" "" "${host_install_check_args[@]}")"
+bundle_plan_json="$(planned_command_json true "$bundle_script" "" "${bundle_args[@]}")"
+verify_plan_json="$(planned_command_json true "$verify_script" "" "${verify_args[@]}")"
+if [[ "$roadmap_refresh" == "1" ]]; then
+  roadmap_plan_json="$(planned_command_json true "$roadmap_script" "" "${planned_roadmap_args[@]}")"
+else
+  roadmap_plan_json="$(planned_command_json false "$roadmap_script" "roadmap_refresh disabled" "${planned_roadmap_args[@]}")"
+fi
+planned_child_commands_json="$(jq -c -n \
+  --argjson host_install_check "$host_install_plan_json" \
+  --argjson bundle "$bundle_plan_json" \
+  --argjson verifier "$verify_plan_json" \
+  --argjson roadmap "$roadmap_plan_json" \
+  '{
+    host_install_check: $host_install_check,
+    bundle: $bundle,
+    verifier: $verifier,
+    roadmap: $roadmap
+  }')"
+planned_artifacts_json="$(jq -c -n \
+  --arg reports_dir "$reports_dir" \
+  --arg host_install_check_summary_json "$host_install_check_summary_json" \
+  --arg host_install_check_log "$host_install_check_log" \
+  --arg bundle_dir "$planned_bundle_dir" \
+  --arg bundle_summary_json "$bundle_summary_json" \
+  --arg bundle_service_smoke_summary_json "$planned_bundle_service_smoke_summary_json" \
+  --arg bundle_deployment_evidence_summary_json "$planned_bundle_deployment_evidence_summary_json" \
+  --arg bundle_host_install_check_summary_json "$planned_bundle_host_install_check_summary_json" \
+  --arg bundle_log "$bundle_log" \
+  --arg provenance_json "$provenance_out" \
+  --arg verification_summary_json "$verification_summary_json" \
+  --arg verify_log "$verify_log" \
+  --arg roadmap_summary_json "$roadmap_summary_json" \
+  --arg roadmap_report_md "$roadmap_report_md" \
+  --arg roadmap_log "$roadmap_log" \
+  --arg summary_json "$summary_json" \
+  --arg report_md "$report_md" \
+  '{
+    reports_dir: $reports_dir,
+    host_install_check_summary_json: $host_install_check_summary_json,
+    host_install_check_log: $host_install_check_log,
+    bundle_dir: $bundle_dir,
+    bundle_summary_json: $bundle_summary_json,
+    bundle_service_smoke_summary_json: $bundle_service_smoke_summary_json,
+    bundle_deployment_evidence_summary_json: $bundle_deployment_evidence_summary_json,
+    bundle_host_install_check_summary_json: $bundle_host_install_check_summary_json,
+    bundle_log: $bundle_log,
+    provenance_json: $provenance_json,
+    verification_summary_json: $verification_summary_json,
+    verify_log: $verify_log,
+    roadmap_summary_json: $roadmap_summary_json,
+    roadmap_report_md: $roadmap_report_md,
+    roadmap_log: $roadmap_log,
+    summary_json: $summary_json,
+    report_md: $report_md
+  }')"
+
+if [[ "$plan_only" == "1" ]]; then
+  write_summary "pass" 0 "plan" "Plan-only preflight passed; child execution skipped"
+  echo "access-recovery-real-helper-evidence-run: status=pass stage=plan"
+  echo "summary_json: $summary_json"
+  echo "report_md: $report_md"
+  [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
+  exit 0
+fi
+
+set +e
+"$host_install_check_script" "${host_install_check_args[@]}" >"$host_install_check_log" 2>&1
+host_install_check_rc=$?
+set -e
+if [[ "$host_install_check_rc" -ne 0 ]]; then
+  write_summary "fail" "$host_install_check_rc" "host_install_check" "Access bridge deploy pack host install check failed"
+  print_failure_log_tail "host-install-check" "$host_install_check_log"
+  echo "access-recovery-real-helper-evidence-run: status=fail stage=host_install_check"
+  echo "summary_json: $summary_json"
+  [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
+  exit "$host_install_check_rc"
+fi
 
 set +e
 "$bundle_script" "${bundle_args[@]}" >"$bundle_log" 2>&1
@@ -930,15 +1128,6 @@ if [[ ! -f "$bundle_service_smoke_summary_json" || ! -f "$bundle_deployment_evid
   [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
   exit 1
 fi
-
-verify_args=(
-  --summary-json "$bundle_summary_json"
-  --provenance-json "$provenance_out"
-  --trust-store "$trust_store"
-  --require-trusted-provenance 1
-  --verification-summary-json "$verification_summary_json"
-  --print-verification-summary-json "$print_child_json"
-)
 
 set +e
 "$verify_script" "${verify_args[@]}" >"$verify_log" 2>&1

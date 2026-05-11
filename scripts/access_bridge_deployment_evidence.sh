@@ -686,6 +686,10 @@ if [[ "$config_status" == "pass" ]]; then
     smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "live config sha256 does not match supplied config")"
   fi
 fi
+if [[ "$evidence_scope" == "real_helper_https" && "$config_status" == "skip" ]]; then
+  config_status="fail"
+  config_reason="real helper HTTPS deployment evidence requires --config-json"
+fi
 
 identity_status="pass"
 identity_reason=""
@@ -864,6 +868,10 @@ if [[ -n "$deploy_pack_dir" ]]; then
     fi
   fi
 fi
+if [[ "$evidence_scope" == "real_helper_https" && "$deploy_status" == "skip" ]]; then
+  deploy_status="fail"
+  deploy_reason="real helper HTTPS deployment evidence requires --deploy-pack-dir"
+fi
 
 status="pass"
 recommended_action_id="record_operator_evidence"
@@ -983,7 +991,7 @@ jq -n \
     generated_at_utc: $generated_at_utc,
     status: $status,
     evidence_scope: $evidence_scope,
-    pilot_handoff_candidate: ($evidence_scope == "real_helper_https"),
+    pilot_handoff_candidate: ($status == "pass" and $evidence_scope == "real_helper_https"),
     notes: (
       if $status != "pass" then
         "Access bridge deployment evidence needs operator action"
