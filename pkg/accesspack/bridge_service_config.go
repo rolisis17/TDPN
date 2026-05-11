@@ -215,6 +215,8 @@ func EvaluateBridgeServiceRequest(config BridgeServiceConfig, request BridgeServ
 	}
 	if config.HelperAbuseReportURL == "" {
 		decision.addFinding("bridge_service_missing_abuse_report", "error", "bridge service config is missing helper abuse-report URL")
+	} else if code, message, bad := bridgeHelperPublicHTTPSURLIssue(config.HelperAbuseReportURL); bad {
+		decision.addFinding("bridge_service_abuse_report_"+code, "error", message)
 	}
 	if config.HelperRateLimitPolicy == "" {
 		decision.addFinding("bridge_service_missing_rate_limit_policy", "error", "bridge service config is missing helper rate-limit policy")

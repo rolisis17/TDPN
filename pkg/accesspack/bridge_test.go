@@ -635,6 +635,81 @@ func TestBridgeInvitePolicyRejectsHelperMissingAbuseAndRateLimitMetadata(t *test
 	}
 }
 
+func TestBridgeHelperRegistryValidationRejectsUnsafeActiveAbuseReportURL(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+		code string
+	}{
+		{name: "plain-http", url: "http://helper.gpm-pilot.net/abuse", code: "plain_http"},
+		{name: "mailto", url: "mailto:abuse@helper.gpm-pilot.net", code: "unserviceable_scheme"},
+		{name: "loopback-ip", url: "https://127.0.0.1/abuse", code: "private_host"},
+		{name: "private-ip", url: "https://10.0.0.5/abuse", code: "private_host"},
+		{name: "documentation-ip", url: "https://192.0.2.10/abuse", code: "private_host"},
+		{name: "internal-domain", url: "https://helper.internal/abuse", code: "private_host"},
+		{name: "single-label", url: "https://helper/abuse", code: "private_host"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := testBridgeHelperRegistry()
+			registry.Helpers[0].AbuseReportURL = tc.url
+			err := ValidateBridgeHelperRegistry(registry, time.Time{})
+			if err == nil {
+				t.Fatalf("expected unsafe active abuse_report_url to fail validation")
+			}
+			if !strings.Contains(err.Error(), tc.code) {
+				t.Fatalf("expected validation error to include %q, got %v", tc.code, err)
+			}
+		})
+	}
+}
+
+func TestBridgeInvitePolicyRejectsUnsafeActiveAbuseReportURL(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	registry := testBridgeHelperRegistry()
+	registry.Helpers[0].AbuseReportURL = "https://helper.internal/abuse"
+	options := DefaultBridgeInvitePolicyOptions()
+	options.HelperRegistry = &registry
+	report := CheckBridgeInvitePolicy(testBridgeInvite(), options, now)
+	if report.Status != "fail" {
+		t.Fatalf("expected policy fail, got %+v", report)
+	}
+	if !sawBridgePolicyFinding(report, "invalid_bridge_helper_registry") {
+		t.Fatalf("expected invalid helper registry finding, got %+v", report.Findings)
+	}
+}
+
+func TestEvaluateBridgeServiceRequestRejectsUnsafeAbuseReportURL(t *testing.T) {
+	now := time.Date(2026, 5, 10, 1, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		url  string
+		code string
+	}{
+		{name: "plain-http", url: "http://helper.gpm-pilot.net/abuse", code: "bridge_service_abuse_report_plain_http"},
+		{name: "mailto", url: "mailto:abuse@helper.gpm-pilot.net", code: "bridge_service_abuse_report_unserviceable_scheme"},
+		{name: "loopback-ip", url: "https://127.0.0.1/abuse", code: "bridge_service_abuse_report_private_host"},
+		{name: "private-ip", url: "https://10.0.0.5/abuse", code: "bridge_service_abuse_report_private_host"},
+		{name: "internal-domain", url: "https://helper.internal/abuse", code: "bridge_service_abuse_report_private_host"},
+		{name: "single-label", url: "https://helper/abuse", code: "bridge_service_abuse_report_private_host"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := BuildBridgeServiceConfig(testBridgeInvite(), testBridgeHelperRegistry(), BridgeServiceConfigOptions{
+				RegistryID:           "registry-demo",
+				RegistryExpiresAtUTC: now.Add(24 * time.Hour).Format(time.RFC3339),
+				SignedRegistry:       true,
+			}, now)
+			config.HelperAbuseReportURL = tc.url
+			decision := EvaluateBridgeServiceRequest(config, BridgeServiceRequest{PathID: "helper-site"}, now)
+			if decision.Allowed || decision.Status != "fail" {
+				t.Fatalf("expected unsafe abuse report URL to fail closed: %+v", decision)
+			}
+			if !sawBridgeServiceFinding(decision, tc.code) {
+				t.Fatalf("expected %s finding, got %+v", tc.code, decision.Findings)
+			}
+		})
+	}
+}
+
 func sawBridgeServiceFinding(decision BridgeServiceDecision, code string) bool {
 	for _, finding := range decision.Findings {
 		if finding.Code == code {

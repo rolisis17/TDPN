@@ -221,6 +221,14 @@ ipv4_mapped_host_to_ipv4() {
   return 1
 }
 
+ipv6_host_is_private_or_reserved() {
+  local host="${1:-}"
+  [[ "$host" =~ ^(::|::1|0:0:0:0:0:0:0:1|fc[0-9a-f]|fd[0-9a-f]) ]] && return 0
+  [[ "$host" =~ ^fe(8[0-9a-f]|9[0-9a-f]|a[0-9a-f]|b[0-9a-f])(:|$) ]] && return 0
+  [[ "$host" =~ ^2001:0?db8(:|$) ]] && return 0
+  return 1
+}
+
 host_looks_non_public_for_real_helper() {
   local host="$1" mapped_ipv4=""
   [[ -z "$host" ]] && return 0
@@ -234,14 +242,8 @@ host_looks_non_public_for_real_helper() {
       ;;
   esac
   if [[ "$host" == *:* ]]; then
-    case "$host" in
-      ::1|0:0:0:0:0:0:0:1|fc*|fd*|fe80:*|2001:db8:*)
-        return 0
-        ;;
-      *)
-        return 1
-        ;;
-    esac
+    ipv6_host_is_private_or_reserved "$host"
+    return $?
   fi
   case "$host" in
     127.*|10.*|192.168.*|169.254.*|0.*)

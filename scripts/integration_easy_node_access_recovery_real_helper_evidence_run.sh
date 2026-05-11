@@ -414,6 +414,10 @@ bad_real_helper_urls=(
   "https://ts.net"
   "https://tailscale.net"
   "https://[2001:db8::1]"
+  "https://[2001:0db8::1]"
+  "https://[fe90::1]"
+  "https://[fea0::1]"
+  "https://[febf::1]"
 )
 bad_real_helper_index=0
 for bad_url in "${bad_real_helper_urls[@]}"; do
@@ -451,6 +455,33 @@ for bad_url in "${bad_real_helper_urls[@]}"; do
     exit 1
   fi
 done
+
+: >"$CAPTURE"
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url "https://[2606:4700:4700::1111]" \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$TRUST_STORE" \
+  --roadmap-refresh 0 \
+  --summary-json "$TMP_DIR/public-ipv6-summary.json" \
+  --print-summary-json 0
+if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
+  echo "expected public IPv6 real-helper URL to invoke host-check, bundle, and verify"
+  cat "$CAPTURE"
+  exit 1
+fi
+jq -e '.status == "pass" and .inputs.base_url == "https://[2606:4700:4700::1111]"' "$TMP_DIR/public-ipv6-summary.json" >/dev/null
 
 placeholder_input_cases=(
   "code-file|PRIVATE_CODE_FILE|--code-file must point to a real private access code file, not an unreplaced placeholder"

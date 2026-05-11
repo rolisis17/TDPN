@@ -221,6 +221,14 @@ ipv4_mapped_host_to_ipv4() {
   return 1
 }
 
+ipv6_host_is_private_or_reserved() {
+  local host="${1:-}"
+  [[ "$host" =~ ^(::|::1|0:0:0:0:0:0:0:1|fc[0-9a-f]|fd[0-9a-f]) ]] && return 0
+  [[ "$host" =~ ^fe(8[0-9a-f]|9[0-9a-f]|a[0-9a-f]|b[0-9a-f])(:|$) ]] && return 0
+  [[ "$host" =~ ^2001:0?db8(:|$) ]] && return 0
+  return 1
+}
+
 base_url_host_is_private_or_reserved() {
   local host mapped_ipv4
   if url_authority_has_userinfo "$1"; then
@@ -245,7 +253,7 @@ base_url_host_is_private_or_reserved() {
   if ipv4_host_is_private_or_reserved "$host"; then
     return 0
   fi
-  if [[ "$host" =~ ^(::|::1|fc[0-9a-f]|fd[0-9a-f]|fe80:|2001:db8:) ]]; then
+  if ipv6_host_is_private_or_reserved "$host"; then
     return 0
   fi
   mapped_ipv4="$(ipv4_mapped_host_to_ipv4 "$host" 2>/dev/null || true)"

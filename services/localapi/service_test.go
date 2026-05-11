@@ -14557,6 +14557,140 @@ func TestValidateManifestSourceURLPolicyRejectsUserinfoQueryAndFragment(t *testi
 	}
 }
 
+func TestValidateBootstrapManifestEndpointHintsRequirePublicHTTPS(t *testing.T) {
+	originalLookup := lookupIPAddr
+	t.Cleanup(func() {
+		lookupIPAddr = originalLookup
+	})
+
+	now := time.Now().UTC()
+	newManifest := func() gpmBootstrapManifest {
+		return gpmBootstrapManifest{
+			Version:              1,
+			GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+			ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+			BootstrapDirectories: []string{"https://directory.hints.globalprivatemesh.example:8081"},
+			GatewayMirrors: []gpmBootstrapURLHint{{
+				URL:  "https://mirror.hints.globalprivatemesh.example/v1/bootstrap/manifest",
+				Kind: "mirror",
+			}},
+			BootstrapSources: []gpmBootstrapURLHint{{
+				URL:  "https://source.hints.globalprivatemesh.example/v1/bootstrap/manifest",
+				Kind: "primary",
+			}},
+			RelayHints: []gpmBootstrapRelayHint{{
+				RelayID:    "relay-hints",
+				OperatorID: "operator-hints",
+				EntryURL:   "https://relay.hints.globalprivatemesh.example/entry",
+				PublicHost: "relay.hints.globalprivatemesh.example",
+				HintSource: "manifest",
+			}},
+			BridgeHints: []gpmBootstrapBridgeHint{{
+				BridgeID:  "bridge-hints",
+				Endpoint:  "https://bridge.hints.globalprivatemesh.example/bootstrap",
+				Transport: "https",
+			}},
+		}
+	}
+
+	lookupIPAddr = func(_ context.Context, host string) ([]net.IPAddr, error) {
+		switch strings.TrimSpace(host) {
+		case "private.hints.globalprivatemesh.example":
+			return []net.IPAddr{{IP: net.ParseIP("10.12.0.8")}}, nil
+		default:
+			return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+		}
+	}
+
+	if err := validateBootstrapManifest(newManifest()); err != nil {
+		t.Fatalf("expected safe hint endpoints to validate: %v", err)
+	}
+
+	tests := []struct {
+		name          string
+		mutate        func(*gpmBootstrapManifest)
+		wantErrSubstr string
+	}{
+		{
+			name: "gateway mirror rejects javascript scheme",
+			mutate: func(manifest *gpmBootstrapManifest) {
+				manifest.GatewayMirrors[0].URL = "javascript:alert(1)"
+			},
+			wantErrSubstr: "unsupported url scheme",
+		},
+		{
+			name: "gateway mirror rejects remote http",
+			mutate: func(manifest *gpmBootstrapManifest) {
+				manifest.GatewayMirrors[0].URL = "http://mirror.hints.globalprivatemesh.example/v1/bootstrap/manifest"
+			},
+			wantErrSubstr: "must use https",
+		},
+		{
+			name: "bootstrap source rejects single label host",
+			mutate: func(manifest *gpmBootstrapManifest) {
+				manifest.BootstrapSources[0].URL = "https://bootstrap/manifest"
+			},
+			wantErrSubstr: "single-label",
+		},
+		{
+			name: "relay entry rejects private literal",
+			mutate: func(manifest *gpmBootstrapManifest) {
+				manifest.RelayHints[0].EntryURL = "https://10.0.0.8/entry"
+			},
+			wantErrSubstr: "private, loopback, or link-local",
+		},
+		{
+			name: "relay public host rejects scheme",
+			mutate: func(manifest *gpmBootstrapManifest) {
+				manifest.RelayHints[0].PublicHost = "https://relay.hints.globalprivatemesh.example"
+			},
+			wantErrSubstr: "must not include scheme",
+		},
+		{
+			name: "relay public host rejects private dns resolution",
+			mutate: func(manifest *gpmBootstrapManifest) {
+				manifest.RelayHints[0].PublicHost = "private.hints.globalprivatemesh.example"
+			},
+			wantErrSubstr: "private, loopback, or link-local",
+		},
+		{
+			name: "bridge endpoint rejects test net literal",
+			mutate: func(manifest *gpmBootstrapManifest) {
+				manifest.BridgeHints[0].Endpoint = "https://203.0.113.10/bootstrap"
+			},
+			wantErrSubstr: "reserved or test-only",
+		},
+		{
+			name: "bridge endpoint rejects http",
+			mutate: func(manifest *gpmBootstrapManifest) {
+				manifest.BridgeHints[0].Endpoint = "http://bridge.hints.globalprivatemesh.example/bootstrap"
+			},
+			wantErrSubstr: "must use https",
+		},
+		{
+			name: "bridge transport rejects arbitrary transport",
+			mutate: func(manifest *gpmBootstrapManifest) {
+				manifest.BridgeHints[0].Transport = "quic"
+			},
+			wantErrSubstr: "transport unsupported",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := newManifest()
+			tc.mutate(&manifest)
+			err := validateBootstrapManifest(manifest)
+			if err == nil {
+				t.Fatal("expected manifest endpoint hint to be rejected")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSubstr) {
+				t.Fatalf("error=%q want contains %q", err.Error(), tc.wantErrSubstr)
+			}
+		})
+	}
+}
+
 func TestNormalizeBootstrapDirectoriesCanonicalizesURLs(t *testing.T) {
 	got := normalizeBootstrapDirectories([]string{
 		" HTTPS://Directory.GPM.Example:443/ ",
@@ -15271,6 +15405,14 @@ func TestReadBootstrapManifestCacheRejectsOversizedFile(t *testing.T) {
 }
 
 func TestGPMBootstrapManifestResponseIncludesTrustTelemetry(t *testing.T) {
+	originalLookup := lookupIPAddr
+	t.Cleanup(func() {
+		lookupIPAddr = originalLookup
+	})
+	lookupIPAddr = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+	}
+
 	svc, _ := newFakeService(t, false)
 	svc.gpmManifestCache = filepath.Join(t.TempDir(), "manifest_cache.json")
 	svc.gpmManifestMaxAge = 2 * time.Hour

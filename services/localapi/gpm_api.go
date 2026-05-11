@@ -18,6 +18,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/netip"
 	urlpkg "net/url"
 	"os"
 	"os/exec"
@@ -6730,6 +6731,9 @@ func validateProductionManifestOutboundIP(host string, ip net.IP) error {
 	if ip.IsUnspecified() || ip.IsMulticast() {
 		return fmt.Errorf("production manifest outbound policy rejected %q: resolved address %s is not a public unicast target", host, ip.String())
 	}
+	if isReservedOrTestOutboundIP(ip) {
+		return fmt.Errorf("production manifest outbound policy rejected %q: resolved address %s is reserved or test-only", host, ip.String())
+	}
 	return nil
 }
 
@@ -6739,6 +6743,33 @@ func isSharedAddressSpaceCGNATIP(ip net.IP) bool {
 		return false
 	}
 	return ipv4[0] == 100 && ipv4[1]&0xc0 == 0x40
+}
+
+func isReservedOrTestOutboundIP(ip net.IP) bool {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return true
+	}
+	addr = addr.Unmap()
+	for _, prefix := range reservedOrTestOutboundIPPrefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+var reservedOrTestOutboundIPPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("255.255.255.255/32"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001:db8::/32"),
 }
 
 func validateBootstrapManifest(manifest gpmBootstrapManifest) error {
@@ -6801,6 +6832,9 @@ func validateBootstrapURLHints(field string, hints []gpmBootstrapURLHint, maxIte
 		if err := validateManifestText(prefix+".url", hint.URL, 240, true); err != nil {
 			return err
 		}
+		if err := validateBootstrapHintHTTPSURL(prefix+".url", hint.URL); err != nil {
+			return err
+		}
 		if err := validateManifestText(prefix+".kind", hint.Kind, 64, true); err != nil {
 			return err
 		}
@@ -6840,8 +6874,18 @@ func validateBootstrapRelayHints(hints []gpmBootstrapRelayHint) error {
 		if err := validateManifestText(prefix+".entry_url", hint.EntryURL, 240, false); err != nil {
 			return err
 		}
+		if strings.TrimSpace(hint.EntryURL) != "" {
+			if err := validateBootstrapHintHTTPSURL(prefix+".entry_url", hint.EntryURL); err != nil {
+				return err
+			}
+		}
 		if err := validateManifestText(prefix+".public_host", hint.PublicHost, 180, false); err != nil {
 			return err
+		}
+		if strings.TrimSpace(hint.PublicHost) != "" {
+			if err := validateBootstrapHintPublicHost(prefix+".public_host", hint.PublicHost); err != nil {
+				return err
+			}
 		}
 		if err := validateManifestText(prefix+".country", hint.Country, 2, false); err != nil {
 			return err
@@ -6874,14 +6918,125 @@ func validateBootstrapBridgeHints(hints []gpmBootstrapBridgeHint) error {
 		if err := validateManifestText(prefix+".endpoint", hint.Endpoint, 240, true); err != nil {
 			return err
 		}
+		if err := validateBootstrapHintHTTPSURL(prefix+".endpoint", hint.Endpoint); err != nil {
+			return err
+		}
 		if err := validateManifestText(prefix+".transport", hint.Transport, 32, true); err != nil {
 			return err
+		}
+		if !strings.EqualFold(strings.TrimSpace(hint.Transport), "https") {
+			return fmt.Errorf("%s.transport unsupported: must be https", prefix)
 		}
 		if err := validateManifestText(prefix+".rate_limit_class", hint.RateLimitClass, 32, false); err != nil {
 			return err
 		}
 		if err := validateOptionalManifestTime(prefix+".expires_at_utc", hint.ExpiresAtUTC); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateBootstrapHintHTTPSURL(field string, raw string) error {
+	parsed, err := parseManifestSourceURL(raw)
+	if err != nil {
+		return fmt.Errorf("%s invalid: %w", field, err)
+	}
+	if !strings.EqualFold(parsed.Scheme, "https") {
+		return fmt.Errorf("%s must use https", field)
+	}
+	if err := validateBootstrapHintPublicHost(field+".host", parsed.Hostname()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateBootstrapHintPublicHost(field string, raw string) error {
+	host, ip, err := parseBootstrapHintHost(raw)
+	if err != nil {
+		return fmt.Errorf("%s invalid: %w", field, err)
+	}
+	if ip != nil {
+		return validateProductionManifestOutboundIP(host, ip)
+	}
+	if err := validatePublicBootstrapHintHostname(host); err != nil {
+		return fmt.Errorf("%s invalid: %w", field, err)
+	}
+	addrs, err := resolveManifestOutboundIPs(context.Background(), host)
+	if err != nil {
+		return fmt.Errorf("%s failed to resolve %q: %w", field, host, err)
+	}
+	if len(addrs) == 0 {
+		return fmt.Errorf("%s failed to resolve %q: no addresses", field, host)
+	}
+	for _, addr := range addrs {
+		if err := validateProductionManifestOutboundIP(host, addr.IP); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func parseBootstrapHintHost(raw string) (string, net.IP, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", nil, errors.New("host is required")
+	}
+	if strings.Contains(value, "://") || strings.ContainsAny(value, "/?#@") {
+		return "", nil, errors.New("host must not include scheme, path, query, fragment, or userinfo")
+	}
+	if ip := net.ParseIP(value); ip != nil {
+		return ip.String(), ip, nil
+	}
+	host := strings.Trim(value, "[]")
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String(), ip, nil
+	}
+	if strings.Contains(value, ":") {
+		return "", nil, errors.New("host must not include a port")
+	}
+	return strings.ToLower(strings.TrimSuffix(value, ".")), nil, nil
+}
+
+func validatePublicBootstrapHintHostname(host string) error {
+	if host == "" {
+		return errors.New("host is required")
+	}
+	switch host {
+	case "localhost", "localhost.localdomain", "example.com", "example.net", "example.org", "placeholder", "todo", "changeme":
+		return errors.New("placeholder or local host is not allowed")
+	}
+	if !strings.Contains(host, ".") {
+		return errors.New("single-label hosts are not allowed")
+	}
+	switch {
+	case strings.HasSuffix(host, ".localhost"),
+		strings.HasSuffix(host, ".local"),
+		strings.HasSuffix(host, ".internal"),
+		strings.HasSuffix(host, ".lan"),
+		strings.HasSuffix(host, ".home"),
+		strings.HasSuffix(host, ".test"),
+		strings.HasSuffix(host, ".invalid"):
+		return errors.New("internal or test host suffix is not allowed")
+	}
+	if len(host) > 253 {
+		return errors.New("host exceeds max length 253")
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" {
+			return errors.New("host contains an empty label")
+		}
+		if len(label) > 63 {
+			return errors.New("host label exceeds max length 63")
+		}
+		if label[0] == '-' || label[len(label)-1] == '-' {
+			return errors.New("host labels must not start or end with hyphen")
+		}
+		for _, r := range label {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+				continue
+			}
+			return errors.New("host contains invalid characters")
 		}
 	}
 	return nil

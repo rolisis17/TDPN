@@ -270,7 +270,7 @@ func usage() {
   go run ./cmd/gpmrecover qr-png --text TEXT --out FILE [--size 768]
   go run ./cmd/gpmrecover verify --pack FILE (--trust-store FILE | --public-key-file FILE) [--show-paths 1]
   go run ./cmd/gpmrecover check --pack FILE (--trust-store FILE | --public-key-file FILE) [--timeout-sec 8]
-  go run ./cmd/gpmrecover demo-bundle [--out-dir DIR] [--org-id ID] [--org-name NAME] [--base-url URL] [--helper-id ID] [--helper-name NAME]
+  go run ./cmd/gpmrecover demo-bundle [--out-dir DIR] [--org-id ID] [--org-name NAME] [--base-url URL] [--helper-url URL] [--helper-contact URL] [--helper-abuse-url URL] [--helper-id ID] [--helper-name NAME]
   go run ./cmd/gpmrecover provenance-sign --summary-json FILE --bundle-tar FILE --bundle-tar-sha256-file FILE --private-key-file FILE --org-id ID --org-name NAME --out FILE [--lifetime-hours 720] [--key-id ID]
   go run ./cmd/gpmrecover provenance-verify --provenance FILE --summary-json FILE --bundle-tar FILE --bundle-tar-sha256-file FILE (--trust-store FILE | --public-key-file FILE)
   go run ./cmd/gpmrecover fetch-publication --index-url URL --out-dir DIR [--timeout-sec 10]
@@ -2223,6 +2223,7 @@ func runDemoBundle(args []string) error {
 	baseURL := fs.String("base-url", "https://freenews.gpm-pilot.net", "primary demo access URL")
 	helperURL := fs.String("helper-url", "https://helper.gpm-pilot.net/freenews/bootstrap", "demo bridge helper URL")
 	helperContact := fs.String("helper-contact", "mailto:bridge-helper@gpm-pilot.net", "demo helper contact URL")
+	helperAbuseURL := fs.String("helper-abuse-url", "https://helper.gpm-pilot.net/abuse", "demo helper abuse-report URL")
 	helperID := fs.String("helper-id", "helper-demo", "demo bridge helper id")
 	helperName := fs.String("helper-name", "Demo bridge helper", "demo bridge helper display name")
 	packAudience := fs.String("pack-audience", "Demo users validating the GPM access recovery flow", "signed access-pack intended audience")
@@ -2289,7 +2290,7 @@ func runDemoBundle(args []string) error {
 	if _, err := accesspack.VerifyBridgeInvite(signedInvite, pub, now); err != nil {
 		return fmt.Errorf("verify signed demo bridge invite: %w", err)
 	}
-	bridgeHelperRegistry := demoBridgeHelperRegistry(strings.TrimSpace(*orgID), strings.TrimSpace(*helperID), strings.TrimSpace(*helperName), strings.TrimSpace(*helperContact), now)
+	bridgeHelperRegistry := demoBridgeHelperRegistry(strings.TrimSpace(*orgID), strings.TrimSpace(*helperID), strings.TrimSpace(*helperName), strings.TrimSpace(*helperContact), strings.TrimSpace(*helperAbuseURL), now)
 	bridgeHelperRegistryArtifact, err := accesspack.SignBridgeHelperRegistryArtifact(accesspack.BridgeHelperRegistryArtifact{
 		SchemaVersion: accesspack.BridgeHelperRegistryArtifactSchemaVersion,
 		RegistryID:    "reg-demo-" + now.Format("20060102-150405"),
@@ -2827,7 +2828,7 @@ func demoBridgeInvite(orgID string, orgName string, baseURL string, helperID str
 	}
 }
 
-func demoBridgeHelperRegistry(orgID string, helperID string, helperName string, helperContact string, now time.Time) accesspack.BridgeHelperRegistry {
+func demoBridgeHelperRegistry(orgID string, helperID string, helperName string, helperContact string, helperAbuseURL string, now time.Time) accesspack.BridgeHelperRegistry {
 	return accesspack.BridgeHelperRegistry{
 		Version: accesspack.BridgeHelperRegistryVersion,
 		Helpers: []accesspack.BridgeHelperRegistration{
@@ -2837,7 +2838,7 @@ func demoBridgeHelperRegistry(orgID string, helperID string, helperName string, 
 				Status:          accesspack.BridgeHelperStatusActive,
 				OrgIDs:          []string{orgID},
 				ContactURL:      helperContact,
-				AbuseReportURL:  strings.TrimRight(helperContact, "/") + "/abuse",
+				AbuseReportURL:  helperAbuseURL,
 				RateLimitPolicy: "beta cap: per-user and per-source limits enforced",
 				ActiveFromUTC:   now.Add(-1 * time.Hour).Format(time.RFC3339),
 				ActiveUntilUTC:  now.Add(8 * 24 * time.Hour).Format(time.RFC3339),

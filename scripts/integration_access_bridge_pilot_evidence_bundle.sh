@@ -186,7 +186,7 @@ go run ./cmd/gpmrecover demo-bundle \
   --helper-id helper-pilot \
   --helper-name "Pilot Helper" \
   --helper-url https://helper.gpm-pilot.net/pilot/bootstrap \
-  --helper-contact mailto:helper-pilot@example.com \
+  --helper-contact https://helper-pilot.gpm-pilot.net/contact \
   >"$TMP_DIR/demo-bundle.stdout.json"
 
 trust_store="$(jq -r '.files.trust_store' "$BUNDLE_DIR/demo-manifest.json")"
@@ -363,6 +363,48 @@ set -e
 if [[ "$doc_ipv6_url_rc" -eq 0 ]] || ! grep -Fq -- "--base-url host must look public-routable" "$TMP_DIR/pilot-bundle-doc-ipv6-url.log"; then
   echo "access bridge pilot evidence bundle integration failed: documentation IPv6 URL was not rejected as non-public"
   cat "$TMP_DIR/pilot-bundle-doc-ipv6-url.log"
+  exit 1
+fi
+
+non_public_ipv6_urls=(
+  "https://[fe90::1]:19820"
+  "https://[fea0::1]:19820"
+  "https://[febf::1]:19820"
+  "https://[2001:0db8::1]:19820"
+)
+non_public_ipv6_index=0
+for non_public_ipv6_url in "${non_public_ipv6_urls[@]}"; do
+  non_public_ipv6_index=$((non_public_ipv6_index + 1))
+  set +e
+  bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+    --base-url "$non_public_ipv6_url" \
+    --path-id helper-web \
+    --config-json "$SERVICE_CONFIG" \
+    --deploy-pack-dir "$DEPLOY_PACK" \
+    --code-file "$CODE_FILE" >"$TMP_DIR/pilot-bundle-non-public-ipv6-$non_public_ipv6_index.log" 2>&1
+  non_public_ipv6_rc=$?
+  set -e
+  if [[ "$non_public_ipv6_rc" -eq 0 ]] || ! grep -Fq -- "--base-url host must look public-routable" "$TMP_DIR/pilot-bundle-non-public-ipv6-$non_public_ipv6_index.log"; then
+    echo "access bridge pilot evidence bundle integration failed: non-public IPv6 URL was not rejected: $non_public_ipv6_url"
+    cat "$TMP_DIR/pilot-bundle-non-public-ipv6-$non_public_ipv6_index.log"
+    exit 1
+  fi
+done
+
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url "https://[2606:4700:4700::1111]:19820" \
+  --path-id helper-web \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_PACK" \
+  --code-file "$CODE_FILE" >"$TMP_DIR/pilot-bundle-public-ipv6-url.log" 2>&1
+public_ipv6_url_rc=$?
+set -e
+if [[ "$public_ipv6_url_rc" -eq 0 ]] ||
+  grep -Fq -- "--base-url host must look public-routable" "$TMP_DIR/pilot-bundle-public-ipv6-url.log" ||
+  ! grep -Fq -- "real helper HTTPS pilot handoff requires --provenance-sign 1" "$TMP_DIR/pilot-bundle-public-ipv6-url.log"; then
+  echo "access bridge pilot evidence bundle integration failed: public IPv6 URL did not advance past public-host classification"
+  cat "$TMP_DIR/pilot-bundle-public-ipv6-url.log"
   exit 1
 fi
 

@@ -50,6 +50,31 @@ func bridgeAccessPathServiceURLIssue(path AccessPath) (string, string, bool) {
 	return "", "", false
 }
 
+func bridgeHelperPublicHTTPSURLIssue(raw string) (string, string, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" {
+		return "invalid_url", "helper abuse-report URL is invalid", true
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if parsed.User != nil {
+		return "userinfo", "helper abuse-report URL must not include userinfo", true
+	}
+	if scheme == "http" {
+		return "plain_http", "helper abuse-report URL must use https", true
+	}
+	if scheme != "https" {
+		return "unserviceable_scheme", "helper abuse-report URL must be an HTTPS URL", true
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return "missing_host", "helper abuse-report URL host is required", true
+	}
+	if !bridgeAccessPathHostLooksPublic(host) {
+		return "private_host", "helper abuse-report URL host must be public-routable", true
+	}
+	return "", "", false
+}
+
 func bridgeAccessPathLocalDiagnosticIssueAllowed(code string, path AccessPath) bool {
 	switch code {
 	case "plain_http", "private_host":

@@ -16,6 +16,7 @@ Usage:
     [--sleep-between-sec N] \
     [--cycle-timeout-sec N] \
     [--cycle-summary-list PATH] \
+    [--promotion-check-only [0|1]] \
     [--promotion-summary-json PATH] \
     [--require-min-cycles N] \
     [--require-min-pass-cycles N] \
@@ -51,6 +52,8 @@ Notes:
   - Stage scripts can be overridden with:
     PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_STAGE_SCRIPT
     PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CHECK_STAGE_SCRIPT
+  - --promotion-check-only 1 preserves an existing --cycle-summary-list
+    and runs only the promotion check over archived cycle evidence.
 USAGE
 }
 
@@ -169,6 +172,9 @@ build_rerun_cycle_command() {
   if [[ -n "$cycle_summary_list" ]]; then
     cmd+=(--cycle-summary-list "$cycle_summary_list")
   fi
+  if [[ "${promotion_check_only:-0}" == "1" ]]; then
+    cmd+=(--promotion-check-only 1)
+  fi
   if [[ -n "$promotion_summary_json" ]]; then
     cmd+=(--promotion-summary-json "$promotion_summary_json")
   fi
@@ -253,8 +259,13 @@ need_cmd wc
 
 reports_dir="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_REPORTS_DIR:-$ROOT_DIR/.easy-node-logs}"
 cycles="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_CYCLES:-3}"
+cycles_defaulted=1
+if [[ -n "${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_CYCLES+x}" ]]; then
+  cycles_defaulted=0
+fi
 sleep_between_sec="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_SLEEP_BETWEEN_SEC:-5}"
 cycle_timeout_sec="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_TIMEOUT_SEC:-0}"
+promotion_check_only="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_PROMOTION_CHECK_ONLY:-0}"
 
 cycle_summary_list="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_SUMMARY_LIST:-}"
 promotion_summary_json="${PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_PROMOTION_SUMMARY_JSON:-}"
@@ -289,10 +300,12 @@ while [[ $# -gt 0 ]]; do
     --cycles)
       require_value_or_die "$1" "$#"
       cycles="${2:-}"
+      cycles_defaulted=0
       shift 2
       ;;
     --cycles=*)
       cycles="${1#*=}"
+      cycles_defaulted=0
       shift
       ;;
     --sleep-between-sec)
@@ -320,6 +333,19 @@ while [[ $# -gt 0 ]]; do
       ;;
     --cycle-summary-list=*)
       cycle_summary_list="${1#*=}"
+      shift
+      ;;
+    --promotion-check-only)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        promotion_check_only="${2:-}"
+        shift 2
+      else
+        promotion_check_only="1"
+        shift
+      fi
+      ;;
+    --promotion-check-only=*)
+      promotion_check_only="${1#*=}"
       shift
       ;;
     --promotion-summary-json)
@@ -492,6 +518,7 @@ cycle_timeout_sec="$(trim "$cycle_timeout_sec")"
 cycle_summary_list="$(abs_path "$cycle_summary_list")"
 promotion_summary_json="$(abs_path "$promotion_summary_json")"
 summary_json="$(abs_path "$summary_json")"
+promotion_check_only="$(trim "$promotion_check_only")"
 require_min_cycles="$(trim "$require_min_cycles")"
 require_min_pass_cycles="$(trim "$require_min_pass_cycles")"
 require_max_fail_cycles="$(trim "$require_max_fail_cycles")"
@@ -513,6 +540,36 @@ bool_arg_or_die "--require-cycle-schema-valid" "$require_cycle_schema_valid"
 bool_arg_or_die "--fail-on-no-go" "$fail_on_no_go"
 bool_arg_or_die "--show-json" "$show_json"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "--promotion-check-only" "$promotion_check_only"
+
+check_only_cycle_count=0
+if [[ "$promotion_check_only" == "1" ]]; then
+  if [[ -z "$cycle_summary_list" ]]; then
+    echo "--promotion-check-only requires --cycle-summary-list"
+    exit 2
+  fi
+  if [[ ! -f "$cycle_summary_list" ]]; then
+    echo "--promotion-check-only cycle summary list not found: $cycle_summary_list"
+    exit 2
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    if [[ -z "$line" || "${line:0:1}" == "#" ]]; then
+      continue
+    fi
+    check_only_cycle_count=$((check_only_cycle_count + 1))
+  done <"$cycle_summary_list"
+  if (( check_only_cycle_count < 1 )); then
+    echo "--promotion-check-only cycle summary list is empty: $cycle_summary_list"
+    exit 2
+  fi
+  if [[ "$cycles_defaulted" == "1" ]]; then
+    cycles="$check_only_cycle_count"
+  elif (( cycles != check_only_cycle_count )); then
+    echo "--promotion-check-only --cycles must match non-comment cycle-summary-list entries ($check_only_cycle_count)"
+    exit 2
+  fi
+fi
 
 if ! is_non_negative_decimal "$require_min_pass_rate_pct"; then
   echo "--require-min-pass-rate-pct must be a non-negative number"
@@ -565,7 +622,7 @@ if [[ "$require_check_policy_modal_decision" != "GO" && "$require_check_policy_m
   exit 2
 fi
 
-if [[ ! -f "$CYCLE_SCRIPT" ]]; then
+if [[ "$promotion_check_only" != "1" && ! -f "$CYCLE_SCRIPT" ]]; then
   echo "stability cycle script not found: $CYCLE_SCRIPT"
   exit 2
 fi
@@ -573,7 +630,7 @@ if [[ ! -f "$PROMOTION_CHECK_SCRIPT" ]]; then
   echo "stability promotion check script not found: $PROMOTION_CHECK_SCRIPT"
   exit 2
 fi
-if (( cycle_timeout_sec > 0 )) && ! command -v timeout >/dev/null 2>&1; then
+if [[ "$promotion_check_only" != "1" ]] && (( cycle_timeout_sec > 0 )) && ! command -v timeout >/dev/null 2>&1; then
   echo "cycle timeout requested but missing required command: timeout"
   exit 2
 fi
@@ -597,7 +654,18 @@ mkdir -p "$(dirname "$cycle_summary_list")" "$(dirname "$promotion_summary_json"
 rerun_cycle_command_display="$(build_rerun_cycle_command)"
 rerun_cycle_command_display="$(trim "$rerun_cycle_command_display")"
 
-: >"$cycle_summary_list"
+declare -a check_only_cycle_summary_paths=()
+if [[ "$promotion_check_only" == "1" ]]; then
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    if [[ -z "$line" || "${line:0:1}" == "#" ]]; then
+      continue
+    fi
+    check_only_cycle_summary_paths+=("$(abs_path "$line")")
+  done <"$cycle_summary_list"
+else
+  : >"$cycle_summary_list"
+fi
 
 cycle_counts_requested="$cycles"
 cycle_counts_completed=0
@@ -611,38 +679,58 @@ cycle_summary_stale_count=0
 
 cycles_json='[]'
 
-echo "[profile-compare-multi-vm-stability-promotion-cycle] $(timestamp_utc) start cycles=$cycles sleep_between_sec=$sleep_between_sec reports_dir=$reports_dir"
+if [[ "$promotion_check_only" == "1" ]]; then
+  echo "[profile-compare-multi-vm-stability-promotion-cycle] $(timestamp_utc) promotion-check-only start archived_cycles=$cycles cycle_summary_list=$cycle_summary_list reports_dir=$reports_dir"
+else
+  echo "[profile-compare-multi-vm-stability-promotion-cycle] $(timestamp_utc) start cycles=$cycles sleep_between_sec=$sleep_between_sec reports_dir=$reports_dir"
+fi
 
 cycle_index=0
 while (( cycle_index < cycles )); do
   cycle_index=$((cycle_index + 1))
-  cycle_id="$(printf 'cycle_%03d' "$cycle_index")"
-  cycle_dir="$archive_root/$cycle_id"
-  mkdir -p "$cycle_dir"
-
-  cycle_summary_json="$cycle_dir/profile_compare_multi_vm_stability_cycle_summary.json"
-  cycle_log="$cycle_dir/profile_compare_multi_vm_stability_cycle.log"
-  printf '%s\n' "$cycle_summary_json" >>"$cycle_summary_list"
-
-  cycle_cmd=(bash "$CYCLE_SCRIPT" --reports-dir "$cycle_dir" --summary-json "$cycle_summary_json" --show-json 0 --print-summary-json 0)
-  if (( ${#cycle_args[@]} > 0 )); then
-    cycle_cmd+=("${cycle_args[@]}")
-  fi
-  cycle_command_display="$(quote_cmd "${cycle_cmd[@]}")"
-
-  cycle_started_at="$(timestamp_utc)"
-  pre_cycle_summary_fingerprint="$(file_fingerprint_01 "$cycle_summary_json")"
-
-  echo "[profile-compare-multi-vm-stability-promotion-cycle] $(timestamp_utc) cycle-start cycle_id=$cycle_id cycle_summary_json=$cycle_summary_json"
-  set +e
-  if (( cycle_timeout_sec > 0 )); then
-    timeout "${cycle_timeout_sec}s" "${cycle_cmd[@]}" >"$cycle_log" 2>&1
+  if [[ "$promotion_check_only" == "1" ]]; then
+    cycle_id="$(printf 'archived_cycle_%03d' "$cycle_index")"
+    cycle_summary_json="${check_only_cycle_summary_paths[$((cycle_index - 1))]}"
+    cycle_dir="${cycle_summary_json%/*}"
+    if [[ "$cycle_dir" == "$cycle_summary_json" ]]; then
+      cycle_dir="$ROOT_DIR"
+    fi
+    cycle_log=""
+    cycle_command_display="promotion-check-only archived summary: $cycle_summary_json"
+    cycle_command_rc=0
+    cycle_started_at="$(timestamp_utc)"
+    cycle_completed_at="$cycle_started_at"
+    pre_cycle_summary_fingerprint=""
+    echo "[profile-compare-multi-vm-stability-promotion-cycle] $(timestamp_utc) archived-cycle-check cycle_id=$cycle_id cycle_summary_json=$cycle_summary_json"
   else
-    "${cycle_cmd[@]}" >"$cycle_log" 2>&1
+    cycle_id="$(printf 'cycle_%03d' "$cycle_index")"
+    cycle_dir="$archive_root/$cycle_id"
+    mkdir -p "$cycle_dir"
+
+    cycle_summary_json="$cycle_dir/profile_compare_multi_vm_stability_cycle_summary.json"
+    cycle_log="$cycle_dir/profile_compare_multi_vm_stability_cycle.log"
+    printf '%s\n' "$cycle_summary_json" >>"$cycle_summary_list"
+
+    cycle_cmd=(bash "$CYCLE_SCRIPT" --reports-dir "$cycle_dir" --summary-json "$cycle_summary_json" --show-json 0 --print-summary-json 0)
+    if (( ${#cycle_args[@]} > 0 )); then
+      cycle_cmd+=("${cycle_args[@]}")
+    fi
+    cycle_command_display="$(quote_cmd "${cycle_cmd[@]}")"
+
+    cycle_started_at="$(timestamp_utc)"
+    pre_cycle_summary_fingerprint="$(file_fingerprint_01 "$cycle_summary_json")"
+
+    echo "[profile-compare-multi-vm-stability-promotion-cycle] $(timestamp_utc) cycle-start cycle_id=$cycle_id cycle_summary_json=$cycle_summary_json"
+    set +e
+    if (( cycle_timeout_sec > 0 )); then
+      timeout "${cycle_timeout_sec}s" "${cycle_cmd[@]}" >"$cycle_log" 2>&1
+    else
+      "${cycle_cmd[@]}" >"$cycle_log" 2>&1
+    fi
+    cycle_command_rc=$?
+    set -e
+    cycle_completed_at="$(timestamp_utc)"
   fi
-  cycle_command_rc=$?
-  set -e
-  cycle_completed_at="$(timestamp_utc)"
 
   cycle_summary_exists="false"
   cycle_summary_valid="false"
@@ -658,7 +746,9 @@ while (( cycle_index < cycles )); do
   if [[ "$(json_file_valid_01 "$cycle_summary_json")" == "1" ]]; then
     cycle_summary_valid="true"
     post_cycle_summary_fingerprint="$(file_fingerprint_01 "$cycle_summary_json")"
-    if [[ -z "$pre_cycle_summary_fingerprint" && -n "$post_cycle_summary_fingerprint" ]]; then
+    if [[ "$promotion_check_only" == "1" ]]; then
+      cycle_summary_fresh="true"
+    elif [[ -z "$pre_cycle_summary_fingerprint" && -n "$post_cycle_summary_fingerprint" ]]; then
       cycle_summary_fresh="true"
     elif [[ -n "$post_cycle_summary_fingerprint" && "$post_cycle_summary_fingerprint" != "$pre_cycle_summary_fingerprint" ]]; then
       cycle_summary_fresh="true"
@@ -792,7 +882,7 @@ while (( cycle_index < cycles )); do
 
   echo "[profile-compare-multi-vm-stability-promotion-cycle] $(timestamp_utc) cycle-end cycle_id=$cycle_id status=$cycle_result_status command_rc=$cycle_command_rc summary_json=$cycle_summary_json"
 
-  if (( cycle_index < cycles )) && (( sleep_between_sec > 0 )); then
+  if [[ "$promotion_check_only" != "1" ]] && (( cycle_index < cycles )) && (( sleep_between_sec > 0 )); then
     sleep "$sleep_between_sec"
   fi
 done
@@ -1113,6 +1203,7 @@ jq -n \
   --argjson cycles "$cycles_json" \
   --argjson sleep_between_sec "$sleep_between_sec" \
   --argjson cycle_timeout_sec "$cycle_timeout_sec" \
+  --argjson promotion_check_only "$promotion_check_only" \
   --argjson require_min_cycles "$require_min_cycles" \
   --argjson require_min_pass_cycles "$require_min_pass_cycles" \
   --argjson require_max_fail_cycles "$require_max_fail_cycles" \
@@ -1146,7 +1237,8 @@ jq -n \
       cycle_orchestration: {
         cycles: $cycles_requested,
         sleep_between_sec: $sleep_between_sec,
-        cycle_timeout_sec: $cycle_timeout_sec
+        cycle_timeout_sec: $cycle_timeout_sec,
+        promotion_check_only: ($promotion_check_only == 1)
       },
       prerequisites: {
         cycles_collection_complete: ($cycles_prereq_satisfied == "true")

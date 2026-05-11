@@ -387,6 +387,68 @@ if ! grep -q '^promotion' "$HAPPY_CAPTURE"; then
   exit 1
 fi
 
+echo "[profile-compare-multi-vm-stability-promotion-cycle] promotion-check-only reuses archived cycle summaries"
+CHECK_ONLY_SUMMARY="$TMP_DIR/promotion_cycle_check_only_summary.json"
+CHECK_ONLY_CAPTURE="$TMP_DIR/promotion_cycle_check_only_capture.log"
+CHECK_ONLY_LIST_BEFORE="$(cat "$HAPPY_LIST")"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_STAGE_SCRIPT="$FAKE_CYCLE_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CHECK_STAGE_SCRIPT="$FAKE_PROMOTION_SCRIPT" \
+FAKE_PROFILE_COMPARE_PROMOTION_CAPTURE_FILE="$CHECK_ONLY_CAPTURE" \
+FAKE_PROFILE_COMPARE_PROMOTION_CHECK_SCENARIO="go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/reports_check_only" \
+  --promotion-check-only 1 \
+  --cycle-summary-list "$HAPPY_LIST" \
+  --sleep-between-sec 0 \
+  --summary-json "$CHECK_ONLY_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_promotion_cycle_check_only.log 2>&1
+check_only_rc=$?
+set -e
+
+if [[ "$check_only_rc" -ne 0 ]]; then
+  echo "expected promotion-check-only rc=0, got rc=$check_only_rc"
+  cat /tmp/integration_profile_compare_multi_vm_stability_promotion_cycle_check_only.log
+  exit 1
+fi
+if [[ "$(cat "$HAPPY_LIST")" != "$CHECK_ONLY_LIST_BEFORE" ]]; then
+  echo "promotion-check-only changed the archived cycle summary list"
+  cat "$HAPPY_LIST"
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .decision == "GO"
+  and .inputs.cycle_orchestration.promotion_check_only == true
+  and .cycle_counts.requested == 3
+  and .cycle_counts.completed == 3
+  and .cycle_counts.pass == 3
+  and .cycle_counts.warn == 0
+  and .cycle_counts.fail == 0
+  and .cycle_counts.summary_stale == 0
+  and (.cycles | length) == 3
+  and (.cycles | all(.cycle_id | startswith("archived_cycle_")))
+  and (.cycles | all(.summary_fresh == true))
+  and (.cycles | all(.command_rc == 0))
+  and (.operator_next_action_command | test("--promotion-check-only 1"))
+  and .promotion.decision == "GO"
+' "$CHECK_ONLY_SUMMARY" >/dev/null 2>&1; then
+  echo "promotion-check-only summary mismatch"
+  cat "$CHECK_ONLY_SUMMARY"
+  exit 1
+fi
+if grep -q '^cycle' "$CHECK_ONLY_CAPTURE"; then
+  echo "promotion-check-only unexpectedly invoked the cycle stage"
+  cat "$CHECK_ONLY_CAPTURE"
+  exit 1
+fi
+if [[ "$(grep -c '^list' "$CHECK_ONLY_CAPTURE")" -ne 3 ]]; then
+  echo "promotion-check-only promotion stage did not receive the archived summary list"
+  cat "$CHECK_ONLY_CAPTURE"
+  exit 1
+fi
+
 echo "[profile-compare-multi-vm-stability-promotion-cycle] NO-GO soft path when fail-on-no-go=0"
 SOFT_SUMMARY="$TMP_DIR/promotion_cycle_soft_summary.json"
 SOFT_CAPTURE="$TMP_DIR/promotion_cycle_soft_capture.log"

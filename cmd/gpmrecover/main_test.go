@@ -90,7 +90,7 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 		"--org-ids", "cli-org,cli-org-alt",
 		"--display-name", "CLI Helper Two",
 		"--contact-url", server.URL + "/contact-two",
-		"--abuse-report-url", server.URL + "/abuse-two",
+		"--abuse-report-url", "https://helper-two.gpm-pilot.net/abuse",
 		"--rate-limit-policy", "beta cap: per-user and per-source limits enforced",
 		"--out", upsertedRegistry,
 	}); err != nil {
@@ -1364,7 +1364,7 @@ func testCLIBridgeHelperRegistry(serverURL string) accesspack.BridgeHelperRegist
 				Status:          accesspack.BridgeHelperStatusActive,
 				OrgIDs:          []string{"cli-org"},
 				ContactURL:      serverURL + "/contact",
-				AbuseReportURL:  serverURL + "/abuse",
+				AbuseReportURL:  "https://helper-cli.gpm-pilot.net/abuse",
 				RateLimitPolicy: "beta cap: per-user and per-source limits enforced",
 				ActiveFromUTC:   now.Add(-2 * time.Hour).Format(time.RFC3339),
 				ActiveUntilUTC:  now.Add(8 * 24 * time.Hour).Format(time.RFC3339),

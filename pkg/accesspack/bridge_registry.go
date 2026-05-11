@@ -167,6 +167,11 @@ func validateBridgeHelperRegistration(prefix string, helper BridgeHelperRegistra
 	if helper.Status == BridgeHelperStatusActive && helper.AbuseReportURL == "" {
 		return fmt.Errorf("%s.abuse_report_url is required when status is active", prefix)
 	}
+	if helper.Status == BridgeHelperStatusActive {
+		if code, message, bad := bridgeHelperPublicHTTPSURLIssue(helper.AbuseReportURL); bad {
+			return fmt.Errorf("%s.abuse_report_url %s: %s", prefix, code, message)
+		}
+	}
 	if helper.Status == BridgeHelperStatusActive && helper.RateLimitPolicy == "" {
 		return fmt.Errorf("%s.rate_limit_policy is required when status is active", prefix)
 	}
