@@ -212,6 +212,7 @@ async function main() {
 
   const trustStore = fs.readFileSync(path.join(outDir, "recovery-trust.json"), "utf8");
   const bridgeInvite = fs.readFileSync(path.join(outDir, "bridge-invite.signed.json"), "utf8");
+  const unsignedBridgeInvite = fs.readFileSync(path.join(outDir, "bridge-invite.unsigned.json"), "utf8");
   const unsignedRegistry = fs.readFileSync(path.join(outDir, "bridge-helper-registry.json"), "utf8");
   const trustStoreText = fs.readFileSync(path.join(outDir, "recovery-trust.txt"), "utf8").trim();
   const bridgeInviteText = fs.readFileSync(path.join(outDir, "bridge-invite.txt"), "utf8").trim();
@@ -426,6 +427,34 @@ async function main() {
   }
   if (!context.localStorage.getItem(helperRegistryMetaStorageKey)) {
     throw new Error("expected verified helper registry metadata to be saved in localStorage");
+  }
+
+  const publicMappedInvite = JSON.parse(unsignedBridgeInvite);
+  publicMappedInvite.access_paths[0].url = "https://[::ffff:0808:0808]/smoke/bootstrap";
+  const publicMappedUnsignedPath = path.join(outDir, "bridge-invite-public-mapped.unsigned.json");
+  const publicMappedSignedPath = path.join(outDir, "bridge-invite-public-mapped.signed.json");
+  fs.writeFileSync(publicMappedUnsignedPath, `${JSON.stringify(publicMappedInvite, null, 2)}\n`, "utf8");
+  childProcess.execFileSync(
+    "go",
+    [
+      "run",
+      "./cmd/gpmrecover",
+      "bridge-sign",
+      "--invite",
+      publicMappedUnsignedPath,
+      "--private-key-file",
+      path.join(outDir, "recovery.key"),
+      "--out",
+      publicMappedSignedPath,
+    ],
+    { cwd: repoRoot, stdio: "pipe" },
+  );
+  document.getElementById("pack_input").value = fs.readFileSync(publicMappedSignedPath, "utf8");
+  await document.getElementById("verify_btn").click();
+  const publicMappedStatus = document.getElementById("status-heading").textContent;
+  const publicMappedDetail = document.getElementById("status_detail").textContent;
+  if (publicMappedStatus !== "Trusted bridge invite") {
+    throw new Error(`expected public IPv4-mapped IPv6 bridge invite to verify, got ${publicMappedStatus}: ${publicMappedDetail}`);
   }
 
   async function expectUnsafeBridgeInviteRejected(mutator, expectedDetail, label) {

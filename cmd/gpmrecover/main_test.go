@@ -697,29 +697,86 @@ func TestVerifyOptionalSHA256(t *testing.T) {
 }
 
 func TestBridgeServiceCommandsRequireAccessCodeByDefault(t *testing.T) {
+	validHash := strings.Repeat("0", 64)
+
 	if err := runBridgeServiceDeployPack([]string{"--out-dir", t.TempDir()}); err == nil || !strings.Contains(err.Error(), "--access-code-sha256") {
 		t.Fatalf("expected deploy pack access-code requirement, got %v", err)
 	}
-	if err := runBridgeServiceDeployPack([]string{"--out-dir", t.TempDir(), "--access-code-sha256", strings.Repeat("0", 64)}); err == nil || !strings.Contains(err.Error(), "--config-sha256") {
+	if err := runBridgeServiceDeployPack([]string{"--out-dir", t.TempDir(), "--access-code-sha256", validHash}); err == nil || !strings.Contains(err.Error(), "--config-sha256") {
 		t.Fatalf("expected deploy pack config hash requirement, got %v", err)
 	}
 	if err := runBridgeServiceServe([]string{"--config", "missing.json"}); err == nil || !strings.Contains(err.Error(), "--access-code-sha256") {
 		t.Fatalf("expected serve access-code requirement, got %v", err)
 	}
-	if err := runBridgeServiceServe([]string{"--config", "missing.json", "--access-code-sha256", strings.Repeat("0", 64)}); err == nil || !strings.Contains(err.Error(), "--config-sha256") {
+	if err := runBridgeServiceServe([]string{"--config", "missing.json", "--access-code-sha256", validHash}); err == nil || !strings.Contains(err.Error(), "--config-sha256") {
 		t.Fatalf("expected serve config hash requirement, got %v", err)
 	}
-	if err := runBridgeServiceServe([]string{"--config", "missing.json", "--allow-unauthenticated-local", "--addr", "0.0.0.0:18980"}); err == nil || !strings.Contains(err.Error(), "loopback") {
-		t.Fatalf("expected unauthenticated serve to require loopback, got %v", err)
+
+	expectServeGuard := func(t *testing.T, args []string, want string) {
+		t.Helper()
+		err := runBridgeServiceServe(append([]string{"--config", "missing.json"}, args...))
+		if err == nil {
+			t.Fatalf("expected bridge-service-serve to fail with %q", want)
+		}
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected bridge-service-serve to fail with %q, got %v", want, err)
+		}
+		if strings.Contains(err.Error(), "missing.json") {
+			t.Fatalf("expected bridge-service-serve guard %q before config IO, got %v", want, err)
+		}
 	}
-	if err := runBridgeServiceServe([]string{"--config", "missing.json", "--access-code-sha256", strings.Repeat("0", 64), "--allow-unpinned-local", "--addr", "0.0.0.0:18980"}); err == nil || !strings.Contains(err.Error(), "loopback") {
-		t.Fatalf("expected unpinned serve to require loopback, got %v", err)
+
+	publicAddrs := []string{"0.0.0.0:18980", "[::]:18980", ":18980"}
+	for _, addr := range publicAddrs {
+		t.Run("public-"+addr+"-missing-access-code-hash", func(t *testing.T) {
+			expectServeGuard(t, []string{"--addr", addr}, "--access-code-sha256")
+		})
+		t.Run("public-"+addr+"-missing-config-hash", func(t *testing.T) {
+			expectServeGuard(t, []string{"--addr", addr, "--access-code-sha256", validHash}, "--config-sha256")
+		})
+		for _, rps := range []string{"0", "21"} {
+			t.Run("public-"+addr+"-rps-"+rps, func(t *testing.T) {
+				expectServeGuard(t, []string{"--addr", addr, "--config-sha256", validHash, "--access-code-sha256", validHash, "--rps", rps}, "--rps")
+			})
+		}
+		for _, maxSources := range []string{"0", "100001"} {
+			t.Run("public-"+addr+"-max-sources-"+maxSources, func(t *testing.T) {
+				expectServeGuard(t, []string{"--addr", addr, "--config-sha256", validHash, "--access-code-sha256", validHash, "--max-sources", maxSources}, "--max-sources")
+			})
+		}
 	}
-	if err := runBridgeServiceServe([]string{"--config", "missing.json", "--config-sha256", strings.Repeat("0", 64), "--access-code-sha256", strings.Repeat("0", 64), "--addr", "0.0.0.0:18980", "--rps", "0"}); err == nil || !strings.Contains(err.Error(), "--rps") {
-		t.Fatalf("expected public serve with disabled rps to fail closed, got %v", err)
-	}
-	if err := runBridgeServiceServe([]string{"--config", "missing.json", "--config-sha256", strings.Repeat("0", 64), "--access-code-sha256", strings.Repeat("0", 64), "--addr", "0.0.0.0:18980", "--max-sources", "0"}); err == nil || !strings.Contains(err.Error(), "--max-sources") {
-		t.Fatalf("expected public serve with disabled source cap to fail closed, got %v", err)
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "allow-query-access-code",
+			args: []string{
+				"--addr", "[::]:18980",
+				"--config-sha256", validHash,
+				"--access-code-sha256", validHash,
+				"--allow-query-access-code",
+			},
+		},
+		{
+			name: "allow-unauthenticated-local",
+			args: []string{
+				"--addr", "[::]:18980",
+				"--allow-unauthenticated-local",
+			},
+		},
+		{
+			name: "allow-unpinned-local",
+			args: []string{
+				"--addr", "[::]:18980",
+				"--access-code-sha256", validHash,
+				"--allow-unpinned-local",
+			},
+		},
+	} {
+		t.Run("ipv6-wildcard-"+tc.name, func(t *testing.T) {
+			expectServeGuard(t, tc.args, "loopback")
+		})
 	}
 }
 
