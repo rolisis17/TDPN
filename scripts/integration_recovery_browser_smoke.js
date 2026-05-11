@@ -454,6 +454,24 @@ async function main() {
     throw new Error(`expected unsupported bridge invite URL scheme detail, got ${unsupportedSchemeInviteDetail}`);
   }
 
+  const homeArpaInvite = JSON.parse(bridgeInvite);
+  homeArpaInvite.access_paths[0].url = "https://helper.home.arpa/smoke/bootstrap";
+  document.getElementById("pack_input").value = JSON.stringify(homeArpaInvite);
+  await document.getElementById("verify_btn").click();
+  const homeArpaInviteStatus = document.getElementById("status-heading").textContent;
+  const homeArpaInviteDetail = document.getElementById("status_detail").textContent;
+  const homeArpaPathCount = document.getElementById("path_count").textContent;
+  const homeArpaPathsRendered = document.getElementById("paths_list").children.length;
+  if (homeArpaInviteStatus !== "Verification failed") {
+    throw new Error(`expected home.arpa bridge invite URL rejection, got ${homeArpaInviteStatus}: ${homeArpaInviteDetail}`);
+  }
+  if (!homeArpaInviteDetail.includes("access_paths[].url host must be public-routable")) {
+    throw new Error(`expected home.arpa public-host rejection detail, got ${homeArpaInviteDetail}`);
+  }
+  if (homeArpaPathCount !== "0" || homeArpaPathsRendered !== 0) {
+    throw new Error(`expected unsafe bridge invite to render no paths, got count=${homeArpaPathCount} rendered=${homeArpaPathsRendered}`);
+  }
+
   const userinfoRegistry = JSON.parse(unsignedRegistry);
   userinfoRegistry.helpers[0].abuse_report_url = "https://helper-smoke:secret@helper.example/smoke/abuse";
   document.getElementById("registry_input").value = JSON.stringify(userinfoRegistry);

@@ -342,6 +342,7 @@ func TestNewServiceRejectsUnsafeServiceablePathHosts(t *testing.T) {
 		{name: "ipv6-ula-fd", url: "https://[fd00::1]/bridge"},
 		{name: "ipv6-documentation", url: "https://[2001:db8::1]/bridge"},
 		{name: "reserved-domain", url: "https://reserved-helper.example/bridge"},
+		{name: "home-arpa", url: "https://helper.home.arpa/bridge"},
 		{name: "tailscale-overlay", url: "https://helper.tailnet.ts.net/bridge"},
 		{name: "tailscale-apex-ts-net", url: "https://ts.net/bridge"},
 		{name: "tailscale-domain", url: "https://helper.tailscale.net/bridge"},

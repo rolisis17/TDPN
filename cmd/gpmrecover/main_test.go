@@ -650,6 +650,7 @@ func TestBridgeCLIDefaultRejectsUnsafeHelperServicePaths(t *testing.T) {
 		{name: "ipv6-link-local", baseURL: "https://[fe80::1]"},
 		{name: "ipv6-ula", baseURL: "https://[fd00::1]"},
 		{name: "ipv6-documentation", baseURL: "https://[2001:db8::1]"},
+		{name: "home-arpa", baseURL: "https://helper.home.arpa"},
 		{name: "tailscale-apex-ts-net", baseURL: "https://ts.net"},
 		{name: "tailscale-apex-domain", baseURL: "https://tailscale.net"},
 	} {

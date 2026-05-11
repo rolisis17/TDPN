@@ -1679,6 +1679,17 @@ runtime_actuation_promotion_summary_usable_01() {
       or ((. | norm_status) == "runtimefail");
     def schema_id:
       (.schema.id // "");
+    def number_or_zero:
+      if (type == "number") then . else 0 end;
+    def cycle_failure_override:
+      (
+        (((.stages.cycles.failed // 0) | number_or_zero) > 0)
+        or ((.failure_stage // "") == "cycles")
+      )
+      and ((.decision | norm_decision) == "NOGO")
+      and ((.status | norm_status) == "fail")
+      and (((.rc // 1) | type) == "number")
+      and ((.rc // 1) != 0);
     (.version == 1)
     and ((.decision | type) == "string")
     and ((.status | type) == "string")
@@ -1709,8 +1720,13 @@ runtime_actuation_promotion_summary_usable_01() {
         and ((.promotion_check.rc | type) == "number")
         and (.promotion_check.decision | decision_allowed)
         and (.promotion_check.status | status_allowed)
-        and ((.promotion_check.decision | norm_decision) == (.decision | norm_decision))
-        and ((.promotion_check.status | norm_status) == (.status | norm_status))
+        and (
+          cycle_failure_override
+          or (
+            ((.promotion_check.decision | norm_decision) == (.decision | norm_decision))
+            and ((.promotion_check.status | norm_status) == (.status | norm_status))
+          )
+        )
       else
         true
       end
@@ -10712,6 +10728,24 @@ if [[ -n "$runtime_actuation_promotion_summary_json" ]] \
   runtime_actuation_promotion_nested_rc_json="$(jq -r '
     if (.promotion_check.rc | type) == "number" then .promotion_check.rc else "null" end
   ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' "null")"
+  runtime_actuation_promotion_cycle_failed_json="$(jq -r '
+    def number_or_zero:
+      if (type == "number") then . else 0 end;
+    if ((.schema.id // "") == "runtime_actuation_promotion_cycle_summary") then
+      ((((.stages.cycles.failed // 0) | number_or_zero) > 0) or ((.failure_stage // "") == "cycles"))
+    else
+      false
+    end
+  ' "$runtime_actuation_promotion_summary_json" 2>/dev/null || printf '%s' "false")"
+  runtime_actuation_promotion_cycle_child_mismatch_allowed_01="0"
+  if [[ "$runtime_actuation_promotion_schema_id_json" == "runtime_actuation_promotion_cycle_summary" ]] \
+     && [[ "$runtime_actuation_promotion_cycle_failed_json" == "true" ]] \
+     && [[ "$runtime_actuation_promotion_decision_norm" == "NO-GO" ]] \
+     && [[ "$runtime_actuation_promotion_status_norm" == "fail" ]] \
+     && [[ "$runtime_actuation_promotion_rc_json" != "0" ]] \
+     && [[ "$runtime_actuation_promotion_rc_json" != "null" ]]; then
+    runtime_actuation_promotion_cycle_child_mismatch_allowed_01="1"
+  fi
   runtime_actuation_promotion_consistency_errors_json='[]'
   runtime_actuation_promotion_consistency_ok_01="1"
   declare -a runtime_actuation_promotion_consistency_errors=()
@@ -10738,7 +10772,8 @@ if [[ -n "$runtime_actuation_promotion_summary_json" ]] \
       runtime_actuation_promotion_consistency_errors+=("runtime-actuation promotion summary is inconsistent: status pass/ok with rc!=0")
     fi
   fi
-  if [[ "$runtime_actuation_promotion_schema_id_json" == "runtime_actuation_promotion_cycle_summary" ]]; then
+  if [[ "$runtime_actuation_promotion_schema_id_json" == "runtime_actuation_promotion_cycle_summary" ]] \
+     && [[ "$runtime_actuation_promotion_cycle_child_mismatch_allowed_01" != "1" ]]; then
     if [[ -n "$runtime_actuation_promotion_nested_status_norm" && -n "$runtime_actuation_promotion_status_norm" ]] \
        && [[ "$runtime_actuation_promotion_nested_status_norm" != "$runtime_actuation_promotion_status_norm" ]]; then
       runtime_actuation_promotion_consistency_errors+=("runtime-actuation promotion summary is inconsistent: cycle top-level status disagrees with promotion_check.status")

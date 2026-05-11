@@ -367,6 +367,7 @@ func TestEvaluateBridgeServiceRequestRejectsUnsafeHelperURLs(t *testing.T) {
 		{name: "ipv6-ula-fd", url: "https://[fd00::1]/connect", code: "bridge_service_access_path_private_host"},
 		{name: "ipv6-documentation", url: "https://[2001:db8::1]/connect", code: "bridge_service_access_path_private_host"},
 		{name: "reserved-domain", url: "https://reserved-helper.example/connect", code: "bridge_service_access_path_private_host"},
+		{name: "home-arpa", url: "https://helper.home.arpa/connect", code: "bridge_service_access_path_private_host"},
 		{name: "tailscale-overlay", url: "https://helper.tailnet.ts.net/connect", code: "bridge_service_access_path_private_host"},
 		{name: "tailscale-apex-ts-net", url: "https://ts.net/connect", code: "bridge_service_access_path_private_host"},
 		{name: "tailscale-domain", url: "https://helper.tailscale.net/connect", code: "bridge_service_access_path_private_host"},
@@ -448,6 +449,7 @@ func TestBridgeInvitePolicyRejectsUnsafeServiceableHelperURLs(t *testing.T) {
 		{name: "ipv6-ula-fd", url: "https://[fd00::1]/connect", code: "bridge_invite_access_path_private_host"},
 		{name: "ipv6-documentation", url: "https://[2001:db8::1]/connect", code: "bridge_invite_access_path_private_host"},
 		{name: "reserved-domain", url: "https://reserved-helper.example/connect", code: "bridge_invite_access_path_private_host"},
+		{name: "home-arpa", url: "https://helper.home.arpa/connect", code: "bridge_invite_access_path_private_host"},
 		{name: "tailscale-overlay", url: "https://helper.tailnet.ts.net/connect", code: "bridge_invite_access_path_private_host"},
 		{name: "tailscale-apex-ts-net", url: "https://ts.net/connect", code: "bridge_invite_access_path_private_host"},
 		{name: "tailscale-domain", url: "https://helper.tailscale.net/connect", code: "bridge_invite_access_path_private_host"},
@@ -546,7 +548,7 @@ func TestBridgeAccessPathPublicIPv6ReservedRanges(t *testing.T) {
 }
 
 func TestBridgeAccessPathRejectsSingleLabelDNSHost(t *testing.T) {
-	for _, host := range []string{"helper", "com", "ts.net", "tailscale.net"} {
+	for _, host := range []string{"helper", "com", "home.arpa", "helper.home.arpa", "ts.net", "tailscale.net"} {
 		if bridgeAccessPathHostLooksPublic(host) {
 			t.Fatalf("expected single-label or reserved DNS host %s to be rejected", host)
 		}

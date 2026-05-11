@@ -110,6 +110,100 @@
     if (!["http:", "https:", "mailto:"].includes(parsed.protocol.toLowerCase())) {
       throw new Error(`${field} scheme must be http, https, or mailto`);
     }
+    return parsed;
+  }
+
+  function normalizeURLHostname(hostname) {
+    let host = trimString(hostname).toLowerCase();
+    if (host.startsWith("[") && host.endsWith("]")) {
+      host = host.slice(1, -1);
+    }
+    return host;
+  }
+
+  function ipv4HostLooksPublic(host) {
+    const parts = host.split(".");
+    if (parts.length !== 4) {
+      return null;
+    }
+    const nums = parts.map((part) => {
+      if (!/^[0-9]+$/.test(part)) {
+        return NaN;
+      }
+      const num = Number(part);
+      return Number.isInteger(num) && num >= 0 && num <= 255 ? num : NaN;
+    });
+    if (nums.some((num) => Number.isNaN(num))) {
+      return null;
+    }
+    const [first, second, third] = nums;
+    if (first === 0 || first === 10 || first === 127) return false;
+    if (first === 169 && second === 254) return false;
+    if (first === 172 && second >= 16 && second <= 31) return false;
+    if (first === 192 && second === 168) return false;
+    if (first === 100 && second >= 64 && second <= 127) return false;
+    if (first === 192 && second === 0 && (third === 0 || third === 2)) return false;
+    if (first === 192 && second === 88 && third === 99) return false;
+    if (first === 198 && (second === 18 || second === 19)) return false;
+    if (first === 198 && second === 51 && third === 100) return false;
+    if (first === 203 && second === 0 && third === 113) return false;
+    if (first >= 224) return false;
+    return true;
+  }
+
+  function ipv6HostLooksPublic(host) {
+    if (!host.includes(":")) {
+      return null;
+    }
+    if (host === "::" || host === "::1") return false;
+    if (host.startsWith("fe80:") || host.startsWith("fc") || host.startsWith("fd")) return false;
+    if (host.startsWith("ff")) return false;
+    if (host.startsWith("2001:db8:") || host.startsWith("2001:0db8:") || host === "2001:db8::1") return false;
+    return true;
+  }
+
+  function dnsNameLooksReserved(host) {
+    if (host === "localhost") return true;
+    if (["example.com", "example.net", "example.org", "home.arpa", "ts.net", "tailscale.net"].includes(host)) {
+      return true;
+    }
+    return [".localhost", ".local", ".lan", ".internal", ".test", ".invalid", ".example", ".example.com", ".example.net", ".example.org", ".home.arpa", ".ts.net", ".tailscale.net"]
+      .some((suffix) => host.endsWith(suffix));
+  }
+
+  function dnsNameLooksPublic(host) {
+    if (host.endsWith(".") || dnsNameLooksReserved(host)) {
+      return false;
+    }
+    const labels = host.split(".");
+    if (labels.length < 2) {
+      return false;
+    }
+    return labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+  }
+
+  function bridgeAccessPathHostLooksPublic(hostname) {
+    const host = normalizeURLHostname(hostname);
+    if (!host) {
+      return false;
+    }
+    const ipv4 = ipv4HostLooksPublic(host);
+    if (ipv4 !== null) {
+      return ipv4;
+    }
+    const ipv6 = ipv6HostLooksPublic(host);
+    if (ipv6 !== null) {
+      return ipv6;
+    }
+    return dnsNameLooksPublic(host);
+  }
+
+  function validateBridgeAccessPathURL(field, value) {
+    const parsed = validateURL(field, value);
+    const scheme = parsed.protocol.toLowerCase();
+    if ((scheme === "http:" || scheme === "https:") && !bridgeAccessPathHostLooksPublic(parsed.hostname)) {
+      throw new Error(`${field} host must be public-routable`);
+    }
   }
 
   function base64URLToBytes(value, label) {
@@ -1079,7 +1173,7 @@
       throw new Error("Bridge invite must include access paths");
     }
     for (const path of invite.access_paths) {
-      validateURL("access_paths[].url", path && path.url);
+      validateBridgeAccessPathURL("access_paths[].url", path && path.url);
     }
   }
 

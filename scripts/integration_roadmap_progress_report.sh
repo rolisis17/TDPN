@@ -9731,6 +9731,104 @@ if ! jq -e --arg src "$RUNTIME_ACTUATION_PROMOTION_CYCLE_INVERSE_MISMATCH_JSON" 
   exit 1
 fi
 
+echo "[roadmap-progress-report] runtime-actuation cycle failure may differ from raw promotion-check result"
+RUNTIME_ACTUATION_PROMOTION_CYCLE_SIGNOFF_FAILURE_JSON="$TMP_DIR/runtime_actuation_promotion_cycle_signoff_failure_summary.json"
+cat >"$RUNTIME_ACTUATION_PROMOTION_CYCLE_SIGNOFF_FAILURE_JSON" <<EOF_RUNTIME_ACTUATION_PROMOTION_CYCLE_SIGNOFF_FAILURE
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_cycle_summary"
+  },
+  "generated_at_utc": "$runtime_actuation_contradiction_generated_at_iso",
+  "status": "fail",
+  "rc": 1,
+  "decision": "NO-GO",
+  "go": false,
+  "no_go": true,
+  "failure_stage": "cycles",
+  "failure_reason": "cycle 1 [signoff_command_failed]: signoff command failed (rc=23): --start-local-stack=1 requires root (run with sudo)",
+  "stages": {
+    "cycles": {
+      "failed": 1,
+      "errors": [
+        "cycle 1 [signoff_command_failed]: signoff command failed (rc=23): --start-local-stack=1 requires root (run with sudo)"
+      ],
+      "error_codes": [
+        "signoff_command_failed"
+      ]
+    },
+    "promotion_check": {
+      "summary_exists": true,
+      "summary_valid_json": true,
+      "summary_fresh": true,
+      "has_usable_decision": true
+    }
+  },
+  "diagnostics": {
+    "no_go": {
+      "primary_reason_code": "signoff_command_failed",
+      "primary_reason_category": "cycle_signoff_failure"
+    }
+  },
+  "cycles": [
+    {
+      "error_code": "signoff_command_failed",
+      "error": "signoff command failed (rc=23): --start-local-stack=1 requires root (run with sudo)",
+      "next_operator_action": "Run signoff with sudo (root) or force docker campaign refresh mode, then rerun",
+      "summary": {
+        "signoff_failure": {
+          "primary_failure": "root_required",
+          "root_required_failures": 1,
+          "decision_reason": "--start-local-stack=1 requires root (run with sudo)"
+        }
+      }
+    }
+  ],
+  "promotion_check": {
+    "status": "pass",
+    "rc": 0,
+    "decision": "GO"
+  },
+  "outcome": {
+    "should_promote": false,
+    "action": "hold_promotion_blocked",
+    "next_operator_action": "Run signoff with sudo (root) or force docker campaign refresh mode, then rerun"
+  }
+}
+EOF_RUNTIME_ACTUATION_PROMOTION_CYCLE_SIGNOFF_FAILURE
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$MINIMAL_MANUAL_SUMMARY_JSON" \
+  --runtime-actuation-promotion-summary-json "$RUNTIME_ACTUATION_PROMOTION_CYCLE_SIGNOFF_FAILURE_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_signoff_failure_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_signoff_failure_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_signoff_failure.log 2>&1; then
+  echo "expected success for runtime-actuation cycle signoff-failure reporting path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_runtime_actuation_cycle_signoff_failure.log
+  exit 1
+fi
+if ! jq -e --arg src "$RUNTIME_ACTUATION_PROMOTION_CYCLE_SIGNOFF_FAILURE_JSON" '
+  .vpn_track.runtime_actuation_promotion.input_summary_json == $src
+  and .vpn_track.runtime_actuation_promotion.available == true
+  and .vpn_track.runtime_actuation_promotion.source_summary_json == $src
+  and .vpn_track.runtime_actuation_promotion.status == "fail"
+  and .vpn_track.runtime_actuation_promotion.rc == 1
+  and .vpn_track.runtime_actuation_promotion.decision == "NO-GO"
+  and .vpn_track.runtime_actuation_promotion.go == false
+  and .vpn_track.runtime_actuation_promotion.no_go == true
+  and .vpn_track.runtime_actuation_promotion.needs_attention == true
+  and ((.vpn_track.runtime_actuation_promotion.reasons // []) | any(test("requires root|signoff"; "i")))
+  and (((.vpn_track.runtime_actuation_promotion.reasons // []) | any(test("disagrees"; "i"))) | not)
+  and .vpn_track.optional_gate_status.runtime_actuation_promotion == "fail"
+  and ((.vpn_track.runtime_actuation_promotion.next_command // "") | test("runtime-actuation-promotion-cycle"))
+' "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_signoff_failure_summary.json" >/dev/null; then
+  echo "runtime-actuation cycle signoff-failure summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_runtime_actuation_cycle_signoff_failure_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] runtime-actuation cycle summary without promotion_check payload is fail-closed"
 RUNTIME_ACTUATION_PROMOTION_CYCLE_MALFORMED_JSON="$TMP_DIR/runtime_actuation_promotion_cycle_malformed_summary.json"
 cat >"$RUNTIME_ACTUATION_PROMOTION_CYCLE_MALFORMED_JSON" <<'EOF_RUNTIME_ACTUATION_PROMOTION_CYCLE_MALFORMED'
