@@ -19,6 +19,7 @@ Usage:
     [--require-trusted-provenance [0|1]] \
     [--trust-store PATH] \
     [--public-key-file PATH] \
+    [--allow-dev-trust-store [0|1]] \
     [--summary-contract-check [0|1]] \
     [--verification-summary-json PATH] \
     [--print-verification-summary-json [0|1]] \
@@ -40,6 +41,8 @@ Notes:
     --trust-store and --verification-summary-json. This requires real_helper_https
     evidence scope, keeps summary/manifest/tar/provenance checks enabled, and
     writes the durable roadmap/operator receipt.
+  - Strict pilot handoff mode rejects known local/demo trust-store paths unless
+    --allow-dev-trust-store 1 is set for diagnostics.
   - When --summary-json is supplied, the summary contract is checked by default;
     set --summary-contract-check 0 only for raw artifact integrity inspection.
   - --verification-summary-json writes a machine-readable verifier result for
@@ -187,6 +190,42 @@ sha256_value_or_empty() {
   fi
 }
 
+canonical_path_or_abs() {
+  local path
+  path="$(abs_path "${1:-}")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if command -v realpath >/dev/null 2>&1; then
+    if realpath "$path" 2>/dev/null; then
+      return
+    fi
+  fi
+  if command -v readlink >/dev/null 2>&1; then
+    if readlink -f "$path" 2>/dev/null; then
+      return
+    fi
+  fi
+  printf '%s' "$path"
+}
+
+trust_store_path_is_dev() {
+  local path="${1:-}"
+  local canonical
+  canonical="$(canonical_path_or_abs "$path")"
+  path="${path//\\//}"
+  canonical="${canonical//\\//}"
+  for path in "$path" "$canonical"; do
+    case "$path" in
+      */.easy-node-logs/access-recovery-demo/*|*/docs/examples/*|*/examples/access-recovery/*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
 rel_path_is_safe() {
   local rel
   rel="$(trim "${1:-}")"
@@ -261,6 +300,7 @@ require_trusted_provenance="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_REQUIRE
 provenance_json=""
 trust_store=""
 public_key_file=""
+allow_dev_trust_store="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_ALLOW_DEV_TRUST_STORE:-0}"
 summary_contract_check="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_CONTRACT_CHECK:-1}"
 verification_summary_json="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_VERIFICATION_SUMMARY_JSON:-}"
 print_verification_summary_json="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_PRINT_VERIFICATION_SUMMARY_JSON:-0}"
@@ -336,6 +376,15 @@ while [[ $# -gt 0 ]]; do
       public_key_file="${2:-}"
       shift 2
       ;;
+    --allow-dev-trust-store)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_dev_trust_store="${2:-}"
+        shift 2
+      else
+        allow_dev_trust_store="1"
+        shift
+      fi
+      ;;
     --summary-contract-check)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         summary_contract_check="${2:-}"
@@ -394,6 +443,7 @@ bool_or_die "--check-tar-sha256" "$check_tar_sha256"
 bool_or_die "--check-manifest" "$check_manifest"
 bool_or_die "--check-provenance" "$check_provenance"
 bool_or_die "--require-trusted-provenance" "$require_trusted_provenance"
+bool_or_die "--allow-dev-trust-store" "$allow_dev_trust_store"
 bool_or_die "--summary-contract-check" "$summary_contract_check"
 bool_or_die "--print-verification-summary-json" "$print_verification_summary_json"
 bool_or_die "--show-details" "$show_details"
@@ -485,6 +535,7 @@ write_verification_summary() {
   local notes="$3"
   local generated_at_utc check_tar_sha256_json check_manifest_json check_provenance_json require_trusted_json
   local summary_contract_check_json provenance_checked_json provenance_trusted_json provenance_source
+  local allow_dev_trust_store_json trust_store_sha256
   local source_summary_sha256 source_base_url source_helper_id source_organization_id source_registry_id
   local source_smoke_summary_json source_deployment_summary_json source_host_summary_json
   local source_smoke_summary_sha256 source_deployment_summary_sha256 source_host_summary_sha256
@@ -498,6 +549,7 @@ write_verification_summary() {
   check_manifest_json="$( [[ "$check_manifest" == "1" ]] && printf 'true' || printf 'false' )"
   check_provenance_json="$( [[ "$check_provenance" == "1" ]] && printf 'true' || printf 'false' )"
   require_trusted_json="$( [[ "$require_trusted_provenance" == "1" ]] && printf 'true' || printf 'false' )"
+  allow_dev_trust_store_json="$( [[ "$allow_dev_trust_store" == "1" ]] && printf 'true' || printf 'false' )"
   summary_contract_check_json="$( [[ "$summary_contract_check" == "1" ]] && printf 'true' || printf 'false' )"
   provenance_checked_json="$( [[ "$provenance_verify_checked" == "true" ]] && printf 'true' || printf 'false' )"
   provenance_trusted_json="$( [[ "$provenance_trusted" == "true" ]] && printf 'true' || printf 'false' )"
@@ -518,6 +570,7 @@ write_verification_summary() {
   source_smoke_summary_sha256=""
   source_deployment_summary_sha256=""
   source_host_summary_sha256=""
+  trust_store_sha256="$(sha256_value_or_empty "$trust_store")"
   bundled_source_summary_json=""
   bundled_smoke_summary_json=""
   bundled_deployment_summary_json=""
@@ -571,11 +624,13 @@ write_verification_summary() {
     --arg provenance_json "$provenance_json" \
     --arg trust_store "$trust_store" \
     --arg public_key_file "$public_key_file" \
+    --arg trust_store_sha256 "$trust_store_sha256" \
     --arg summary_evidence_scope "$summary_evidence_scope" \
     --argjson check_tar_sha256 "$check_tar_sha256_json" \
     --argjson check_manifest "$check_manifest_json" \
     --argjson check_provenance "$check_provenance_json" \
     --argjson require_trusted_provenance "$require_trusted_json" \
+    --argjson allow_dev_trust_store "$allow_dev_trust_store_json" \
     --argjson summary_contract_check "$summary_contract_check_json" \
     --argjson provenance_checked "$provenance_checked_json" \
     --arg provenance_status "$provenance_verify_status" \
@@ -614,19 +669,37 @@ write_verification_summary() {
         and $provenance_evidence_scope == "real_helper_https"
         and $summary_evidence_scope == "real_helper_https"
         and $trust_store != ""
-        and $public_key_file == "";
+        and $public_key_file == ""
+        and ($allow_dev_trust_store | not);
+      def pilot_handoff_ready:
+        trusted_pilot_receipt_ready;
       {
         version: 1,
         schema: {
           id: "access_bridge_pilot_evidence_bundle_verify_summary",
           major: 1,
-          minor: 0
+          minor: 1
         },
         generated_at_utc: $generated_at_utc,
         status: $status,
         rc: $rc,
-        pilot_handoff_ready: false,
+        pilot_handoff_ready: pilot_handoff_ready,
         trusted_pilot_receipt_ready: trusted_pilot_receipt_ready,
+        pilot_handoff_criteria: {
+          ready: pilot_handoff_ready,
+          trusted_pilot_receipt_ready: trusted_pilot_receipt_ready,
+          require_trusted_provenance: $require_trusted_provenance,
+          provenance_checked: $provenance_checked,
+          provenance_trusted: $provenance_trusted,
+          provenance_status: $provenance_status,
+          provenance_source: $provenance_source,
+          provenance_evidence_scope: null_if_empty($provenance_evidence_scope),
+          summary_evidence_scope: null_if_empty($summary_evidence_scope),
+          trust_store_present: ($trust_store != ""),
+          trust_store_sha256_present: ($trust_store_sha256 != ""),
+          public_key_file_absent: ($public_key_file == ""),
+          dev_trust_store_allowed: $allow_dev_trust_store
+        },
         notes: $notes,
         inputs: {
           summary_json: null_if_empty($summary_json),
@@ -635,7 +708,9 @@ write_verification_summary() {
           bundle_tar_sha256_file: null_if_empty($bundle_tar_sha256_file),
           provenance_json: null_if_empty($provenance_json),
           trust_store: null_if_empty($trust_store),
-          public_key_file: null_if_empty($public_key_file)
+          trust_store_sha256: null_if_empty($trust_store_sha256),
+          public_key_file: null_if_empty($public_key_file),
+          allow_dev_trust_store: $allow_dev_trust_store
         },
         checks: {
           summary_contract: {
@@ -962,6 +1037,9 @@ if [[ "$check_provenance" == "1" ]]; then
       issues=$((issues + 1))
     elif [[ ! -f "$trust_store" ]]; then
       echo "trust store not found: $trust_store"
+      issues=$((issues + 1))
+    elif [[ "$allow_dev_trust_store" != "1" ]] && trust_store_path_is_dev "$trust_store"; then
+      echo "trusted pilot provenance rejects local/demo trust-store paths: $trust_store (set --allow-dev-trust-store 1 only for diagnostics)"
       issues=$((issues + 1))
     fi
   else

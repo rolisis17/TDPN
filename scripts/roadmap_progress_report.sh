@@ -2232,6 +2232,8 @@ access_recovery_verifier_evidence_json() {
         if ($path | type) == "boolean" then $path else false end;
       def pass_status($path):
         (($path // "") | tostring | ascii_downcase) == "pass";
+      def schema_minor_ready:
+        ((.schema.minor | type) == "number" and .schema.minor >= 1);
       def required_checks_enabled:
         enabled(.checks.summary_contract.enabled)
         and enabled(.checks.tar_sha256.enabled)
@@ -2253,10 +2255,26 @@ access_recovery_verifier_evidence_json() {
         and ((.inputs.trust_store // "") != "")
         and ((.inputs.public_key_file // null) == null);
       def trusted_pilot_receipt_ready:
-        (.trusted_pilot_receipt_ready == true)
+        schema_minor_ready
+        and (.inputs.allow_dev_trust_store != true)
+        and (.trusted_pilot_receipt_ready == true)
         and trusted_provenance_ready;
       def pilot_handoff_ready:
-        .pilot_handoff_ready == true;
+        trusted_pilot_receipt_ready
+        and (.pilot_handoff_ready == true)
+        and (.pilot_handoff_criteria.ready == true)
+        and (.pilot_handoff_criteria.trusted_pilot_receipt_ready == true)
+        and (.pilot_handoff_criteria.require_trusted_provenance == true)
+        and (.pilot_handoff_criteria.provenance_checked == true)
+        and (.pilot_handoff_criteria.provenance_trusted == true)
+        and pass_status(.pilot_handoff_criteria.provenance_status)
+        and ((.pilot_handoff_criteria.provenance_source // "") == "trust_store")
+        and ((.pilot_handoff_criteria.provenance_evidence_scope // "") == "real_helper_https")
+        and ((.pilot_handoff_criteria.summary_evidence_scope // "") == "real_helper_https")
+        and (.pilot_handoff_criteria.trust_store_present == true)
+        and (.pilot_handoff_criteria.trust_store_sha256_present == true)
+        and (.pilot_handoff_criteria.public_key_file_absent == true)
+        and (.pilot_handoff_criteria.dev_trust_store_allowed != true);
       def generated_at_ready:
         (.generated_at_utc | type) == "string" and ((.generated_at_utc | length) > 0);
       def evidence_binding_ready:
@@ -2290,6 +2308,8 @@ access_recovery_verifier_evidence_json() {
           semantic_ok: (if $fresh_contract then $semantic_ok else null end),
           notes: (
             if $valid_contract and $summary_stale then "Access bridge pilot evidence verifier summary is stale or has untrusted freshness metadata"
+            elif $valid_contract and (schema_minor_ready | not) then "Access bridge pilot evidence verifier receipt is from an old schema that cannot prove pilot handoff readiness"
+            elif $valid_contract and (.inputs.allow_dev_trust_store == true) then "Access bridge pilot evidence verifier used a diagnostic dev trust-store override that cannot prove pilot handoff readiness"
             elif $valid_contract and (generated_at_ready | not) then "Access bridge pilot evidence verifier receipt is missing generated_at_utc"
             elif $valid_contract and (evidence_binding_ready | not) then "Access bridge pilot evidence verifier receipt is missing required evidence binding hashes"
             elif $valid_contract and ($semantic_ok | not) then "Access bridge pilot evidence verifier did not prove trusted real-helper HTTPS provenance"
@@ -2316,6 +2336,10 @@ access_recovery_verifier_evidence_json() {
             trusted_provenance_source: str_or_null(.trusted_provenance.source),
             trusted_pilot_receipt_ready: (if (.trusted_pilot_receipt_ready | type) == "boolean" then .trusted_pilot_receipt_ready else null end),
             pilot_handoff_ready: (if (.pilot_handoff_ready | type) == "boolean" then .pilot_handoff_ready else null end),
+            pilot_handoff_criteria_ready: (if (.pilot_handoff_criteria.ready | type) == "boolean" then .pilot_handoff_criteria.ready else null end),
+            pilot_handoff_criteria_trust_store_sha256_present: (if (.pilot_handoff_criteria.trust_store_sha256_present | type) == "boolean" then .pilot_handoff_criteria.trust_store_sha256_present else null end),
+            pilot_handoff_criteria_public_key_file_absent: (if (.pilot_handoff_criteria.public_key_file_absent | type) == "boolean" then .pilot_handoff_criteria.public_key_file_absent else null end),
+            pilot_handoff_criteria_dev_trust_store_allowed: (if (.pilot_handoff_criteria.dev_trust_store_allowed | type) == "boolean" then .pilot_handoff_criteria.dev_trust_store_allowed else null end),
             evidence_scope: str_or_null(.trusted_provenance.evidence_scope),
             summary_evidence_scope: str_or_null(.trusted_provenance.summary_evidence_scope),
             generated_at_utc_present: generated_at_ready,
@@ -2335,6 +2359,7 @@ access_recovery_verifier_evidence_json() {
             source_summary_json: str_or_null(.artifacts.source_summary_json),
             bundle_tar: str_or_null(.artifacts.bundle_tar),
             trust_store: str_or_null(.inputs.trust_store),
+            allow_dev_trust_store: (if (.inputs.allow_dev_trust_store | type) == "boolean" then .inputs.allow_dev_trust_store else null end),
             public_key_file: str_or_null(.inputs.public_key_file)
           }
         }
@@ -2432,7 +2457,12 @@ access_recovery_track_json_from_evidence() {
         and (($bundle_verify.details.evidence_scope // "") == "real_helper_https")
         and (verifier_binding.ok == true);
       def verifier_pilot_handoff_ready:
-        $bundle_verify.details.pilot_handoff_ready == true;
+        ($bundle_verify.details.pilot_handoff_ready == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_ready == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_trust_store_sha256_present == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_public_key_file_absent == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_dev_trust_store_allowed != true)
+        and ($bundle_verify.details.allow_dev_trust_store != true);
       def pilot_handoff_ready:
         trusted_pilot_receipt_ready
         and verifier_pilot_handoff_ready;

@@ -143,6 +143,9 @@ echo "[ci] roadmap next actions run integration"
 echo "[ci] easy-node roadmap next actions run integration"
 ./scripts/integration_easy_node_roadmap_next_actions_run.sh
 
+echo "[ci] easy-node roadmap progress report integration"
+./scripts/integration_easy_node_roadmap_progress_report.sh
+
 echo "[ci] roadmap non-blockchain actionable run integration"
 ./scripts/integration_roadmap_non_blockchain_actionable_run.sh
 

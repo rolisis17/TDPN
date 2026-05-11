@@ -54,6 +54,7 @@ run_step "roadmap progress phase-4 handoff" ./scripts/integration_roadmap_progre
 run_step "roadmap progress phase-5 handoff" ./scripts/integration_roadmap_progress_phase5_handoff.sh
 run_step "roadmap next actions run integration" ./scripts/integration_roadmap_next_actions_run.sh
 run_step "easy-node roadmap next actions run integration" ./scripts/integration_easy_node_roadmap_next_actions_run.sh
+run_step "easy-node roadmap progress report integration" ./scripts/integration_easy_node_roadmap_progress_report.sh
 run_step "roadmap non-blockchain actionable run integration" ./scripts/integration_roadmap_non_blockchain_actionable_run.sh
 run_step "easy-node roadmap non-blockchain actionable run integration" ./scripts/integration_easy_node_roadmap_non_blockchain_actionable_run.sh
 run_step "pre-real-host readiness" ./scripts/integration_pre_real_host_readiness.sh

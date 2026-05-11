@@ -986,13 +986,27 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
   "schema": {
     "id": "access_bridge_pilot_evidence_bundle_verify_summary",
     "major": 1,
-    "minor": 0
+    "minor": 1
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
   "rc": 0,
   "pilot_handoff_ready": true,
   "trusted_pilot_receipt_ready": true,
+  "pilot_handoff_criteria": {
+    "ready": true,
+    "trusted_pilot_receipt_ready": true,
+    "require_trusted_provenance": true,
+    "provenance_checked": true,
+    "provenance_trusted": true,
+    "provenance_status": "pass",
+    "provenance_source": "trust_store",
+    "provenance_evidence_scope": "real_helper_https",
+    "summary_evidence_scope": "real_helper_https",
+    "trust_store_present": true,
+    "trust_store_sha256_present": true,
+    "public_key_file_absent": true
+  },
   "notes": "Access Bridge pilot evidence bundle verification passed",
   "inputs": {
     "summary_json": ".easy-node-logs/access_bridge_pilot_evidence_bundle_summary.json",
@@ -1001,6 +1015,7 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
     "bundle_tar_sha256_file": ".easy-node-logs/access_bridge_pilot_evidence_bundle.tar.gz.sha256",
     "provenance_json": ".easy-node-logs/access_bridge_pilot_evidence_bundle.provenance.json",
     "trust_store": ".easy-node-logs/access-recovery-demo/provenance-trust-store.json",
+    "trust_store_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     "public_key_file": null
   },
   "checks": {
@@ -1622,6 +1637,7 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == true
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.trusted_pilot_receipt_ready == true
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_ready == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_ready == true
   and .access_recovery_track.trusted_verifier_binding.ok == true
   and .access_recovery_track.trusted_verifier_ready == true
   and .access_recovery_track.trusted_pilot_receipt_ready == true
@@ -1630,6 +1646,98 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_access_recovery_false_handoff_verifier_summary.json" >/dev/null; then
   echo "Access Recovery false handoff verifier summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_false_handoff_verifier_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery old forged handoff receipts cannot promote pilot readiness"
+ACCESS_BRIDGE_OLD_FORGED_HANDOFF_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_old_forged_handoff_summary.json"
+jq '
+  .schema.minor = 0
+  | .pilot_handoff_ready = true
+  | .trusted_pilot_receipt_ready = true
+  | del(.pilot_handoff_criteria)
+' "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_OLD_FORGED_HANDOFF_VERIFY_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_OLD_FORGED_HANDOFF_VERIFY_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_old_forged_handoff_verifier_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_old_forged_handoff_verifier_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_old_forged_handoff_verifier.log 2>&1; then
+  echo "expected success with warning for old forged verifier receipt"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_old_forged_handoff_verifier.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and (.notes | contains("Access Recovery evidence still needs attention"))
+  and (.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.notes | contains("old schema"))
+  and .access_recovery_pilot_handoff_ready == false
+  and .access_recovery_track.status == "trusted-provenance-required"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "fail"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_ready == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_ready == null
+  and .access_recovery_track.trusted_pilot_receipt_ready == false
+  and .access_recovery_track.verifier_pilot_handoff_ready == false
+  and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
+' "$TMP_DIR/roadmap_progress_access_recovery_old_forged_handoff_verifier_summary.json" >/dev/null; then
+  echo "Access Recovery old forged verifier summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_old_forged_handoff_verifier_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery diagnostic dev trust-store receipts cannot promote pilot readiness"
+ACCESS_BRIDGE_DEV_TRUST_STORE_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_dev_trust_store_summary.json"
+jq '
+  .inputs.allow_dev_trust_store = true
+  | .pilot_handoff_ready = true
+  | .trusted_pilot_receipt_ready = true
+  | .pilot_handoff_criteria.ready = true
+  | .pilot_handoff_criteria.trusted_pilot_receipt_ready = true
+  | .pilot_handoff_criteria.dev_trust_store_allowed = true
+' "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_DEV_TRUST_STORE_VERIFY_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_DEV_TRUST_STORE_VERIFY_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_dev_trust_store_verifier_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_dev_trust_store_verifier_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_dev_trust_store_verifier.log 2>&1; then
+  echo "expected success with warning for diagnostic dev trust-store verifier receipt"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_dev_trust_store_verifier.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and (.notes | contains("Access Recovery evidence still needs attention"))
+  and (.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.notes | contains("diagnostic dev trust-store override"))
+  and .access_recovery_pilot_handoff_ready == false
+  and .access_recovery_track.status == "trusted-provenance-required"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "fail"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_ready == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_ready == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_dev_trust_store_allowed == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.allow_dev_trust_store == true
+  and .access_recovery_track.trusted_pilot_receipt_ready == false
+  and .access_recovery_track.verifier_pilot_handoff_ready == false
+  and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
+' "$TMP_DIR/roadmap_progress_access_recovery_dev_trust_store_verifier_summary.json" >/dev/null; then
+  echo "Access Recovery diagnostic dev trust-store verifier summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_dev_trust_store_verifier_summary.json"
   exit 1
 fi
 

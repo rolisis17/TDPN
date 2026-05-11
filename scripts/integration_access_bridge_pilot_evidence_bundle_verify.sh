@@ -41,9 +41,12 @@ MISMATCHED_PROVENANCE_PATH_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_b
 PRIVATE_KEY_FILE="$TMP_DIR/provenance-private.key"
 PUBLIC_KEY_FILE="$TMP_DIR/provenance-public.key"
 TRUST_STORE="$TMP_DIR/provenance-trust-store.json"
+DEMO_TRUST_STORE="$TMP_DIR/.easy-node-logs/access-recovery-demo/recovery-trust.json"
 mkdir -p "$BUNDLE_DIR/bridge-deploy-pack"
+mkdir -p "$(dirname "$DEMO_TRUST_STORE")"
 go run ./cmd/gpmrecover gen --private-key-out "$PRIVATE_KEY_FILE" --public-key-out "$PUBLIC_KEY_FILE" >/dev/null
 go run ./cmd/gpmrecover trust-add --trust-store "$TRUST_STORE" --org-id pilot-org --org-name "Pilot Org" --public-key-file "$PUBLIC_KEY_FILE" >/dev/null
+cp "$TRUST_STORE" "$DEMO_TRUST_STORE"
 printf '%s\n' '{"status":"pass"}' >"$BUNDLE_DIR/access_bridge_service_smoke_summary.json"
 ORIGINAL_SMOKE_SUMMARY_COPY="$TMP_DIR/original_access_bridge_service_smoke_summary.json"
 cp "$BUNDLE_DIR/access_bridge_service_smoke_summary.json" "$ORIGINAL_SMOKE_SUMMARY_COPY"
@@ -178,10 +181,14 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --print-verification-summary-json 1 >"$TMP_DIR/verify-provenance-trusted-policy-explicit.log"
 if ! jq -e '
   .schema.id == "access_bridge_pilot_evidence_bundle_verify_summary"
+  and .schema.minor == 1
   and .status == "pass"
   and .rc == 0
-  and .pilot_handoff_ready == false
+  and .pilot_handoff_ready == true
   and .trusted_pilot_receipt_ready == true
+  and .pilot_handoff_criteria.ready == true
+  and .pilot_handoff_criteria.trusted_pilot_receipt_ready == true
+  and .pilot_handoff_criteria.trust_store_sha256_present == true
   and .checks.summary_contract.enabled == true
   and .checks.tar_sha256.enabled == true
   and .checks.manifest.enabled == true
@@ -192,6 +199,7 @@ if ! jq -e '
   and .trusted_provenance.trusted == true
   and .trusted_provenance.evidence_scope == "real_helper_https"
   and .trusted_provenance.summary_evidence_scope == "real_helper_https"
+  and (.inputs.trust_store_sha256 | type == "string" and length == 64)
   and .evidence_binding.base_url == "https://recovery-helper.gpm-pilot.net"
   and .evidence_binding.helper_id == "helper-pilot"
   and .evidence_binding.organization_id == "pilot-org"
@@ -207,6 +215,42 @@ if ! jq -e '
   exit 1
 fi
 
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$SUMMARY_JSON" \
+  --provenance-json "$PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$DEMO_TRUST_STORE" \
+  --verification-summary-json "$TMP_DIR/verify-provenance-demo-trust-store-summary.json" >"$TMP_DIR/verify-provenance-demo-trust-store.log" 2>&1
+demo_trust_store_rc=$?
+set -e
+if [[ "$demo_trust_store_rc" -eq 0 ]] || ! grep -Fq 'rejects local/demo trust-store paths' "$TMP_DIR/verify-provenance-demo-trust-store.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted demo trust store"
+  cat "$TMP_DIR/verify-provenance-demo-trust-store.log"
+  exit 1
+fi
+
+DEMO_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_demo_trust_store_summary.json"
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$SUMMARY_JSON" \
+  --provenance-json "$PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$DEMO_TRUST_STORE" \
+  --allow-dev-trust-store 1 \
+  --verification-summary-json "$DEMO_VERIFY_SUMMARY_JSON" >"$TMP_DIR/verify-provenance-demo-trust-store-allowed.log"
+if ! jq -e '
+  .status == "pass"
+  and .pilot_handoff_ready == false
+  and .trusted_pilot_receipt_ready == false
+  and .pilot_handoff_criteria.ready == false
+  and .pilot_handoff_criteria.dev_trust_store_allowed == true
+  and .inputs.allow_dev_trust_store == true
+' "$DEMO_VERIFY_SUMMARY_JSON" >/dev/null; then
+  echo "access bridge pilot evidence bundle verifier integration failed: diagnostic dev trust-store override produced unsafe readiness semantics"
+  cat "$DEMO_VERIFY_SUMMARY_JSON"
+  exit 1
+fi
+
 TAMPERED_LOOSE_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_tampered_loose_summary.json"
 printf '%s\n' '{"status":"pass","tampered_loose_file":true}' >"$BUNDLE_DIR/access_bridge_service_smoke_summary.json"
 TAMPERED_LOOSE_SMOKE_SUMMARY_SHA256="$(sha256sum "$BUNDLE_DIR/access_bridge_service_smoke_summary.json" | awk '{print $1}')"
@@ -219,7 +263,7 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
 cp "$ORIGINAL_SMOKE_SUMMARY_COPY" "$BUNDLE_DIR/access_bridge_service_smoke_summary.json"
 if ! jq -e --arg original_sha "$SMOKE_SUMMARY_SHA256" --arg loose_sha "$TAMPERED_LOOSE_SMOKE_SUMMARY_SHA256" '
   .status == "pass"
-  and .pilot_handoff_ready == false
+  and .pilot_handoff_ready == true
   and .trusted_pilot_receipt_ready == true
   and .evidence_binding.smoke_summary_sha256 == $original_sha
   and .evidence_binding.smoke_summary_sha256 != $loose_sha
