@@ -1105,6 +1105,21 @@ if [[ ! -f "$SUMMARY_JSON" || ! -f "$REPORT_MD" ]]; then
   ls -la "$TMP_DIR"
   exit 1
 fi
+if ! grep -F -- '- Access Recovery next action:' "$REPORT_MD" >/dev/null 2>&1; then
+  echo "roadmap report should expose the Access Recovery next action while that is the current track"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if grep -F -- '- Primary next action:' "$REPORT_MD" >/dev/null 2>&1; then
+  echo "roadmap report should not label the VPN command as the primary next action on the Access Recovery track"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! grep -F -- '- VPN next action:' "$REPORT_MD" >/dev/null 2>&1; then
+  echo "roadmap report should keep the VPN next action explicitly scoped"
+  cat "$REPORT_MD"
+  exit 1
+fi
 LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON="false"
 if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "roadmap-live-evidence-archive-run")" == "1" ]]; then
   LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON="true"

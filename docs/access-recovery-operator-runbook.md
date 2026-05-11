@@ -48,11 +48,16 @@ go run ./cmd/gpmrecover bridge-service-check --config .easy-node-logs/access-rec
 go run ./cmd/gpmrecover bridge-service-code-generate --code-out .easy-node-logs/access-recovery-demo/bridge-code.txt --hash-out .easy-node-logs/access-recovery-demo/bridge-code-hash.json
 CONFIG_HASH="$(sha256sum .easy-node-logs/access-recovery-demo/bridge-service-config.json | awk '{print $1}')"
 CODE_HASH="$(jq -r '.sha256' .easy-node-logs/access-recovery-demo/bridge-code-hash.json)"
-go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --config-sha256 "$CONFIG_HASH" --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/access-recovery-demo/bridge-abuse.jsonl --access-code-sha256 "$CODE_HASH"
 go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/access-recovery-demo/bridge-deploy --public-host HELPER_PUBLIC_DNS --config-sha256 "$CONFIG_HASH" --access-code-sha256 "$CODE_HASH"
 ```
 
-4. If testing online publication, upload `public/.well-known/gpm/` and fetch it from another machine before verification:
+4. Start the bridge service in a separate terminal when you are ready to smoke-test it. This command stays in the foreground:
+
+```sh
+go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/access-recovery-demo/bridge-service-config.json --config-sha256 "$CONFIG_HASH" --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/access-recovery-demo/bridge-abuse.jsonl --access-code-sha256 "$CODE_HASH"
+```
+
+5. If testing online publication, upload `public/.well-known/gpm/` and fetch it from another machine before verification:
 
 ```sh
 go run ./cmd/gpmrecover fetch-publication \

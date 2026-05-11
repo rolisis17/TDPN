@@ -366,6 +366,97 @@ if ! rg -q 'note: host Go entry route assertion keygen unavailable; using openss
   exit 1
 fi
 
+echo "[three-machine-docker-readiness] direct-exit and 3hop profile wiring"
+SUMMARY_1HOP="$TMP_DIR/summary_1hop.json"
+LOG_1HOP="$TMP_DIR/run_1hop.log"
+: >"$DOCKER_CAPTURE"
+: >"$CURL_CAPTURE"
+: >"$VALIDATE_CAPTURE"
+: >"$SOAK_CAPTURE"
+rm -f "$DOCKER_STATE_DIR"/*.count 2>/dev/null || true
+FAKE_DOCKER_CAPTURE_FILE="$DOCKER_CAPTURE" \
+FAKE_DOCKER_STATE_DIR="$DOCKER_STATE_DIR" \
+FAKE_CURL_CAPTURE_FILE="$CURL_CAPTURE" \
+FAKE_VALIDATE_CAPTURE_FILE="$VALIDATE_CAPTURE" \
+FAKE_SOAK_CAPTURE_FILE="$SOAK_CAPTURE" \
+EASY_NODE_LOG_DIR="$TMP_DIR/logs_1hop" \
+THREE_MACHINE_DOCKER_DATA_ROOT="$TMP_DIR/data_1hop" \
+THREE_MACHINE_DOCKER_DOCKER_BIN="$TMP_BIN/docker" \
+THREE_MACHINE_DOCKER_CURL_BIN="$TMP_BIN/curl" \
+THREE_MACHINE_DOCKER_VALIDATE_SCRIPT="$FAKE_VALIDATE" \
+THREE_MACHINE_DOCKER_SOAK_SCRIPT="$FAKE_SOAK" \
+./scripts/three_machine_docker_readiness.sh \
+  --path-profile 1hop \
+  --run-soak 0 \
+  --summary-json "$SUMMARY_1HOP" \
+  --print-summary-json 0 >"$LOG_1HOP"
+if ! jq -e '
+  .status == "pass"
+  and .config.normalized_path_profile == "1hop"
+  and .config.client_min_entry_operators == 0
+  and .config.middle_relay_enabled == false
+  and .config.beta_profile == false
+  and .config.prod_profile == false
+' "$SUMMARY_1HOP" >/dev/null; then
+  echo "1hop readiness should lower entry-operator floor without enabling middle relay"
+  cat "$SUMMARY_1HOP"
+  cat "$LOG_1HOP"
+  exit 1
+fi
+
+SUMMARY_3HOP="$TMP_DIR/summary_3hop.json"
+LOG_3HOP="$TMP_DIR/run_3hop.log"
+: >"$DOCKER_CAPTURE"
+: >"$CURL_CAPTURE"
+: >"$VALIDATE_CAPTURE"
+: >"$SOAK_CAPTURE"
+rm -f "$DOCKER_STATE_DIR"/*.count 2>/dev/null || true
+FAKE_DOCKER_CAPTURE_FILE="$DOCKER_CAPTURE" \
+FAKE_DOCKER_STATE_DIR="$DOCKER_STATE_DIR" \
+FAKE_CURL_CAPTURE_FILE="$CURL_CAPTURE" \
+FAKE_VALIDATE_CAPTURE_FILE="$VALIDATE_CAPTURE" \
+FAKE_SOAK_CAPTURE_FILE="$SOAK_CAPTURE" \
+EASY_NODE_LOG_DIR="$TMP_DIR/logs_3hop" \
+THREE_MACHINE_DOCKER_DATA_ROOT="$TMP_DIR/data_3hop" \
+THREE_MACHINE_DOCKER_DOCKER_BIN="$TMP_BIN/docker" \
+THREE_MACHINE_DOCKER_CURL_BIN="$TMP_BIN/curl" \
+THREE_MACHINE_DOCKER_VALIDATE_SCRIPT="$FAKE_VALIDATE" \
+THREE_MACHINE_DOCKER_SOAK_SCRIPT="$FAKE_SOAK" \
+./scripts/three_machine_docker_readiness.sh \
+  --path-profile 3hop \
+  --run-soak 0 \
+  --summary-json "$SUMMARY_3HOP" \
+  --print-summary-json 0 >"$LOG_3HOP"
+if ! jq -e '
+  .status == "pass"
+  and .config.normalized_path_profile == "3hop"
+  and .config.middle_relay_enabled == true
+' "$SUMMARY_3HOP" >/dev/null; then
+  echo "3hop readiness should enable docker middle relay wiring"
+  cat "$SUMMARY_3HOP"
+  cat "$LOG_3HOP"
+  exit 1
+fi
+if ! rg -q -- '-p pn3a .* up -d --build directory issuer entry-exit middle' "$DOCKER_CAPTURE" ||
+   ! rg -q -- '-p pn3b .* up -d --build directory issuer entry-exit middle' "$DOCKER_CAPTURE"; then
+  echo "3hop readiness should start middle services"
+  cat "$DOCKER_CAPTURE"
+  exit 1
+fi
+override_3hop_a="$(jq -r '.artifacts.override_a // ""' "$SUMMARY_3HOP")"
+override_3hop_b="$(jq -r '.artifacts.override_b // ""' "$SUMMARY_3HOP")"
+if ! rg -q 'MIDDLE_RELAY_ENABLED: "1"' "$override_3hop_a" ||
+   ! rg -q 'MIDDLE_OPERATOR_ID: "op-docker-a-middle"' "$override_3hop_a" ||
+   ! rg -q 'MIDDLE_ENDPOINT_PUBLIC: "host.docker.internal:18122"' "$override_3hop_a" ||
+   ! rg -q 'MIDDLE_RELAY_ENABLED: "1"' "$override_3hop_b" ||
+   ! rg -q 'MIDDLE_OPERATOR_ID: "op-docker-b-middle"' "$override_3hop_b" ||
+   ! rg -q 'MIDDLE_ENDPOINT_PUBLIC: "host.docker.internal:28122"' "$override_3hop_b"; then
+  echo "3hop readiness should advertise unique middle-capable relay descriptors"
+  cat "$override_3hop_a"
+  cat "$override_3hop_b"
+  exit 1
+fi
+
 echo "[three-machine-docker-readiness] invalid entry-exit user path"
 : >"$DOCKER_CAPTURE"
 : >"$CURL_CAPTURE"

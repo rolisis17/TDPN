@@ -127,6 +127,9 @@ if ! jq -e \
   '
     .schema.id == "access_bridge_deployment_evidence_summary"
     and .status == "pass"
+    and .evidence_scope == "real_helper_https"
+    and .pilot_handoff_candidate == true
+    and (.notes | contains("trusted bundle verification before operator handoff"))
     and .smoke.status == "pass"
     and .smoke.schema_id == "access_bridge_service_smoke_summary"
     and .smoke.evidence_status == "pass"
@@ -172,6 +175,33 @@ if ! jq -e \
   ' "$SUMMARY_JSON" >/dev/null; then
   echo "access bridge deployment evidence integration failed: pass summary contract mismatch"
   cat "$SUMMARY_JSON"
+  exit 1
+fi
+
+LOCAL_SMOKE_SUMMARY="$TMP_DIR/access_bridge_service_smoke_loopback_summary.json"
+LOCAL_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_loopback_summary.json"
+jq '.base_url = "http://127.0.0.1:19837"' "$SMOKE_SUMMARY" >"$LOCAL_SMOKE_SUMMARY"
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$LOCAL_SMOKE_SUMMARY" \
+  --expect-helper-id helper-evidence \
+  --expect-org-id evidence-org \
+  --expect-registry-id "$registry_id" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_DIR" \
+  --service-name gpm-access-bridge-evidence \
+  --summary-json "$LOCAL_SUMMARY_JSON" \
+  --print-summary-json 0 >"$TMP_DIR/local-loopback.log"
+if ! jq -e '
+    .status == "pass"
+    and .evidence_scope == "local_rehearsal"
+    and .pilot_handoff_candidate == false
+    and (.notes | contains("local rehearsal"))
+    and ((.notes | contains("ready for operator handoff")) | not)
+    and .recommended_next_action.id == "capture_real_helper_https_evidence"
+    and ((.recommended_next_action.command | contains("proceed with operator handoff")) | not)
+  ' "$LOCAL_SUMMARY_JSON" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: loopback pass must remain local rehearsal only"
+  cat "$LOCAL_SUMMARY_JSON"
   exit 1
 fi
 

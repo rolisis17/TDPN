@@ -496,6 +496,10 @@ smoke_base_host_requires_proxy_match="false"
 if [[ -n "$smoke_base_host" ]] && ! is_loopback_host "$smoke_base_host"; then
   smoke_base_host_requires_proxy_match="true"
 fi
+evidence_scope="local_rehearsal"
+if [[ "$smoke_base_url" == https://* ]] && is_bridge_public_host "$smoke_base_host"; then
+  evidence_scope="real_helper_https"
+fi
 smoke_path_id="$(json_string_or_empty "$smoke_summary_json" '.path_id')"
 actual_helper_id="$(json_string_or_empty "$smoke_summary_json" '.health.helper_id')"
 actual_org_id="$(json_string_or_empty "$smoke_summary_json" '.health.organization_id')"
@@ -786,6 +790,10 @@ fi
 status="pass"
 recommended_action_id="record_operator_evidence"
 recommended_action="Record this JSON with the deployment evidence bundle and proceed with operator handoff."
+if [[ "$evidence_scope" != "real_helper_https" ]]; then
+  recommended_action_id="capture_real_helper_https_evidence"
+  recommended_action="Local deployment evidence passed; capture real helper HTTPS smoke, deployment, host-install, and trusted verifier evidence before operator handoff."
+fi
 if [[ "$smoke_status" != "pass" ]]; then
   status="fail"
   recommended_action_id="fix_deployed_bridge_smoke"
@@ -831,6 +839,7 @@ jq -n \
   --arg smoke_evidence_reason "$smoke_evidence_reason" \
   --arg smoke_base_url "$smoke_base_url" \
   --arg smoke_base_host "$smoke_base_host" \
+  --arg evidence_scope "$evidence_scope" \
   --arg smoke_path_id "$smoke_path_id" \
   --arg expect_helper_id "$expect_helper_id" \
   --arg expect_org_id "$expect_org_id" \
@@ -877,7 +886,17 @@ jq -n \
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
-    notes: (if $status == "pass" then "Access bridge deployment evidence is ready for operator handoff" else "Access bridge deployment evidence needs operator action" end),
+    evidence_scope: $evidence_scope,
+    pilot_handoff_candidate: ($evidence_scope == "real_helper_https"),
+    notes: (
+      if $status != "pass" then
+        "Access bridge deployment evidence needs operator action"
+      elif $evidence_scope == "real_helper_https" then
+        "Access bridge deployment evidence is ready for trusted bundle verification before operator handoff"
+      else
+        "Access bridge deployment evidence passed as local rehearsal; capture real helper HTTPS evidence before operator handoff"
+      end
+    ),
     inputs: {
       summary_json: $summary_json,
       smoke_summary_json: $smoke_summary_json,

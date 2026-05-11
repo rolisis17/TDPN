@@ -85,6 +85,25 @@ int_arg_or_die() {
   fi
 }
 
+normalize_docker_path_profile() {
+  local profile
+  profile="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  case "$profile" in
+    ""|balanced|2hop|2-hop|hop2|hop-2|twohop|speed|fast)
+      printf '%s\n' "2hop"
+      ;;
+    speed-1hop|speed1hop|fast-1hop|fast1hop|onehop|1hop|1-hop|hop1|hop-1)
+      printf '%s\n' "1hop"
+      ;;
+    private|privacy|3hop|3-hop|hop3|hop-3|threehop)
+      printf '%s\n' "3hop"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 generate_strong_token() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 24
@@ -320,15 +339,30 @@ write_stack_override() {
   local entry_route_assertion_pub="${11}"
   local trusted_entry_route_assertion_pubs="${12}"
 
-  local dir_port issuer_port entry_port exit_port entry_udp_port exit_udp_port peer_dir_port peer_issuer_port
+  local dir_port issuer_port entry_port exit_port middle_port entry_udp_port exit_udp_port middle_udp_port peer_dir_port peer_issuer_port
+  local entry_country exit_country middle_country
   dir_port="$((base_port + 1))"
   issuer_port="$((base_port + 2))"
   entry_port="$((base_port + 3))"
   exit_port="$((base_port + 4))"
+  middle_port="$((base_port + 5))"
   entry_udp_port="$((base_port + 40))"
   exit_udp_port="$((base_port + 41))"
+  middle_udp_port="$((base_port + 42))"
   peer_dir_port="$((peer_base_port + 1))"
   peer_issuer_port="$((peer_base_port + 2))"
+  case "$stack_id" in
+    a)
+      entry_country="AU"
+      exit_country="US"
+      middle_country="NL"
+      ;;
+    *)
+      entry_country="CA"
+      exit_country="DE"
+      middle_country="SE"
+      ;;
+  esac
 
   cat >"$file" <<EOF_YAML
 services:
@@ -345,6 +379,14 @@ services:
       EXIT_CONTROL_URL: "http://${docker_host_alias}:${exit_port}"
       ENTRY_ENDPOINT: "${docker_host_alias}:${entry_udp_port}"
       EXIT_ENDPOINT: "${docker_host_alias}:${exit_udp_port}"
+      ENTRY_COUNTRY_CODE: "${entry_country}"
+      EXIT_COUNTRY_CODE: "${exit_country}"
+      MIDDLE_RELAY_ENABLED: "${middle_relay_enabled}"
+      MIDDLE_RELAY_ID: "middle-${stack_id}"
+      MIDDLE_OPERATOR_ID: "${operator_id}-middle"
+      MIDDLE_ENDPOINT_PUBLIC: "${docker_host_alias}:${middle_udp_port}"
+      MIDDLE_CONTROL_URL_PUBLIC: "http://${docker_host_alias}:${middle_port}"
+      MIDDLE_COUNTRY_CODE: "${middle_country}"
       DIRECTORY_PEERS: "http://${docker_host_alias}:${peer_dir_port}"
       DIRECTORY_SYNC_SEC: "2"
       DIRECTORY_GOSSIP_SEC: "2"
@@ -423,6 +465,10 @@ docker_host_alias="${THREE_MACHINE_DOCKER_HOST_ALIAS:-host.docker.internal}"
 client_subject=""
 client_anon_cred=""
 client_min_selection_lines="${THREE_MACHINE_DOCKER_CLIENT_MIN_SELECTION_LINES:-1}"
+client_min_entry_operators_explicit="0"
+if [[ -n "${THREE_MACHINE_DOCKER_CLIENT_MIN_ENTRY_OPERATORS+x}" ]]; then
+  client_min_entry_operators_explicit="1"
+fi
 client_min_entry_operators="${THREE_MACHINE_DOCKER_CLIENT_MIN_ENTRY_OPERATORS:-1}"
 client_min_exit_operators="${THREE_MACHINE_DOCKER_CLIENT_MIN_EXIT_OPERATORS:-1}"
 bootstrap_directory=""
@@ -636,6 +682,22 @@ int_arg_or_die "--min-operators" "$min_operators"
 int_arg_or_die "--federation-timeout-sec" "$federation_timeout_sec"
 int_arg_or_die "--timeout-sec" "$validate_timeout_sec"
 
+normalized_path_profile="$(normalize_docker_path_profile "$path_profile")" || {
+  echo "--path-profile must be one of: 1hop, 2hop, 3hop, speed, balanced, private (legacy aliases: fast, privacy)"
+  exit 2
+}
+middle_relay_enabled="0"
+if [[ "$normalized_path_profile" == "3hop" ]]; then
+  middle_relay_enabled="1"
+fi
+if [[ "$normalized_path_profile" == "1hop" && ( "$beta_profile" != "0" || "$prod_profile" != "0" ) ]]; then
+  beta_profile="0"
+  prod_profile="0"
+fi
+if [[ "$normalized_path_profile" == "1hop" && "$client_min_entry_operators_explicit" != "1" ]]; then
+  client_min_entry_operators="0"
+fi
+
 if [[ -n "$client_subject" && -n "$client_anon_cred" ]]; then
   echo "set only one of --subject or --anon-cred"
   exit 2
@@ -656,8 +718,12 @@ if ((stack_a_base_port < 1024 || stack_b_base_port < 1024)); then
   echo "--stack-a-base-port and --stack-b-base-port must be >= 1024"
   exit 2
 fi
-if ((client_min_selection_lines < 1 || client_min_entry_operators < 1 || client_min_exit_operators < 1)); then
-  echo "THREE_MACHINE_DOCKER_CLIENT_MIN_* thresholds must be >= 1"
+if ((client_min_selection_lines < 1 || client_min_exit_operators < 1)); then
+  echo "THREE_MACHINE_DOCKER_CLIENT_MIN_SELECTION_LINES and THREE_MACHINE_DOCKER_CLIENT_MIN_EXIT_OPERATORS must be >= 1"
+  exit 2
+fi
+if ((client_min_entry_operators < 0)); then
+  echo "THREE_MACHINE_DOCKER_CLIENT_MIN_ENTRY_OPERATORS must be >= 0"
   exit 2
 fi
 if [[ "$prod_profile" == "1" ]]; then
@@ -773,7 +839,7 @@ compose_up_stack() {
   local project="$1"
   local override_file="$2"
   local env_file="$3"
-  compose_cmd "$project" "$override_file" "$env_file" up -d --build directory issuer entry-exit
+  compose_cmd "$project" "$override_file" "$env_file" up -d --build "${compose_services[@]}"
 }
 
 compose_down_stack() {
@@ -862,14 +928,18 @@ stack_a_dir_port="$((stack_a_base_port + 1))"
 stack_a_issuer_port="$((stack_a_base_port + 2))"
 stack_a_entry_port="$((stack_a_base_port + 3))"
 stack_a_exit_port="$((stack_a_base_port + 4))"
+stack_a_middle_port="$((stack_a_base_port + 5))"
 stack_a_entry_udp_port="$((stack_a_base_port + 40))"
 stack_a_exit_udp_port="$((stack_a_base_port + 41))"
+stack_a_middle_udp_port="$((stack_a_base_port + 42))"
 stack_b_dir_port="$((stack_b_base_port + 1))"
 stack_b_issuer_port="$((stack_b_base_port + 2))"
 stack_b_entry_port="$((stack_b_base_port + 3))"
 stack_b_exit_port="$((stack_b_base_port + 4))"
+stack_b_middle_port="$((stack_b_base_port + 5))"
 stack_b_entry_udp_port="$((stack_b_base_port + 40))"
 stack_b_exit_udp_port="$((stack_b_base_port + 41))"
+stack_b_middle_udp_port="$((stack_b_base_port + 42))"
 
 directory_a_url="http://127.0.0.1:${stack_a_dir_port}"
 directory_b_url="http://127.0.0.1:${stack_b_dir_port}"
@@ -878,13 +948,17 @@ issuer_a_url="$issuer_url"
 issuer_b_url="http://127.0.0.1:${stack_b_issuer_port}"
 entry_url="http://127.0.0.1:${stack_a_entry_port}"
 exit_url="http://127.0.0.1:${stack_a_exit_port}"
+middle_a_url="http://127.0.0.1:${stack_a_middle_port}"
+middle_b_url="http://127.0.0.1:${stack_b_middle_port}"
 
 if [[ "$reset_data" == "1" ]]; then
   rm -rf "$data_root/a" "$data_root/b"
 fi
 mkdir -p \
   "$data_root/a/directory" "$data_root/a/issuer" "$data_root/a/entry-exit" \
-  "$data_root/b/directory" "$data_root/b/issuer" "$data_root/b/entry-exit"
+  "$data_root/a/middle" \
+  "$data_root/b/directory" "$data_root/b/issuer" "$data_root/b/entry-exit" \
+  "$data_root/b/middle"
 
 directory_admin_token_a="${THREE_MACHINE_DOCKER_DIRECTORY_ADMIN_TOKEN_A:-$(generate_strong_token)}"
 directory_admin_token_b="${THREE_MACHINE_DOCKER_DIRECTORY_ADMIN_TOKEN_B:-$(generate_strong_token)}"
@@ -925,14 +999,18 @@ DIRECTORY_PUBLISHED_BIND_ADDR=0.0.0.0
 ISSUER_PUBLISHED_BIND_ADDR=0.0.0.0
 ENTRY_PUBLISHED_BIND_ADDR=0.0.0.0
 EXIT_PUBLISHED_BIND_ADDR=0.0.0.0
+MIDDLE_PUBLISHED_BIND_ADDR=0.0.0.0
 ENTRY_UDP_PUBLISHED_BIND_ADDR=0.0.0.0
 EXIT_UDP_PUBLISHED_BIND_ADDR=0.0.0.0
+MIDDLE_UDP_PUBLISHED_BIND_ADDR=0.0.0.0
 DIRECTORY_PUBLISHED_PORT=$stack_a_dir_port
 ISSUER_PUBLISHED_PORT=$stack_a_issuer_port
 ENTRY_PUBLISHED_PORT=$stack_a_entry_port
 EXIT_PUBLISHED_PORT=$stack_a_exit_port
+MIDDLE_PUBLISHED_PORT=$stack_a_middle_port
 ENTRY_UDP_PUBLISHED_PORT=$stack_a_entry_udp_port
 EXIT_UDP_PUBLISHED_PORT=$stack_a_exit_udp_port
+MIDDLE_UDP_PUBLISHED_PORT=$stack_a_middle_udp_port
 ENTRY_ENDPOINT_PUBLIC=${docker_host_alias}:$stack_a_entry_udp_port
 EXIT_ENDPOINT_PUBLIC=${docker_host_alias}:$stack_a_exit_udp_port
 ENTRY_PUZZLE_SECRET=$entry_puzzle_secret_a
@@ -947,14 +1025,18 @@ DIRECTORY_PUBLISHED_BIND_ADDR=0.0.0.0
 ISSUER_PUBLISHED_BIND_ADDR=0.0.0.0
 ENTRY_PUBLISHED_BIND_ADDR=0.0.0.0
 EXIT_PUBLISHED_BIND_ADDR=0.0.0.0
+MIDDLE_PUBLISHED_BIND_ADDR=0.0.0.0
 ENTRY_UDP_PUBLISHED_BIND_ADDR=0.0.0.0
 EXIT_UDP_PUBLISHED_BIND_ADDR=0.0.0.0
+MIDDLE_UDP_PUBLISHED_BIND_ADDR=0.0.0.0
 DIRECTORY_PUBLISHED_PORT=$stack_b_dir_port
 ISSUER_PUBLISHED_PORT=$stack_b_issuer_port
 ENTRY_PUBLISHED_PORT=$stack_b_entry_port
 EXIT_PUBLISHED_PORT=$stack_b_exit_port
+MIDDLE_PUBLISHED_PORT=$stack_b_middle_port
 ENTRY_UDP_PUBLISHED_PORT=$stack_b_entry_udp_port
 EXIT_UDP_PUBLISHED_PORT=$stack_b_exit_udp_port
+MIDDLE_UDP_PUBLISHED_PORT=$stack_b_middle_udp_port
 ENTRY_ENDPOINT_PUBLIC=${docker_host_alias}:$stack_b_entry_udp_port
 EXIT_ENDPOINT_PUBLIC=${docker_host_alias}:$stack_b_exit_udp_port
 ENTRY_PUZZLE_SECRET=$entry_puzzle_secret_b
@@ -969,6 +1051,9 @@ chmod 600 "$override_a" "$override_b" "$env_a" "$env_b" "$entry_route_assertion_
 echo "[three-machine-docker-readiness] starting local docker rehearsal"
 echo "[three-machine-docker-readiness] stack_a directory=$directory_a_url issuer=$issuer_a_url entry=$entry_url exit=$exit_url"
 echo "[three-machine-docker-readiness] stack_b directory=$directory_b_url issuer=$issuer_b_url entry=http://127.0.0.1:${stack_b_entry_port} exit=http://127.0.0.1:${stack_b_exit_port}"
+if [[ "$middle_relay_enabled" == "1" ]]; then
+  echo "[three-machine-docker-readiness] middle relays enabled for path-profile=$path_profile"
+fi
 echo "[three-machine-docker-readiness] overrides: $override_a $override_b"
 echo "[three-machine-docker-readiness] env-files: $env_a $env_b"
 
@@ -977,8 +1062,12 @@ final_rc=0
 failed_step=""
 stack_a_up=0
 stack_b_up=0
+compose_services=(directory issuer entry-exit)
+if [[ "$middle_relay_enabled" == "1" ]]; then
+  compose_services+=(middle)
+fi
 
-up_a_cmd_print="$(print_cmd "$docker_bin" compose --env-file "$env_a" -p "$project_a" -f "$compose_file" -f "$override_a" up -d --build directory issuer entry-exit)"
+up_a_cmd_print="$(print_cmd "$docker_bin" compose --env-file "$env_a" -p "$project_a" -f "$compose_file" -f "$override_a" up -d --build "${compose_services[@]}")"
 if compose_up_stack_with_retry "stack_a_up" "$project_a" "$override_a" "$env_a" "$up_a_cmd_print"; then
   stack_a_up=1
 else
@@ -989,7 +1078,7 @@ else
 fi
 
 if [[ "$status" == "pass" ]]; then
-  up_b_cmd_print="$(print_cmd "$docker_bin" compose --env-file "$env_b" -p "$project_b" -f "$compose_file" -f "$override_b" up -d --build directory issuer entry-exit)"
+  up_b_cmd_print="$(print_cmd "$docker_bin" compose --env-file "$env_b" -p "$project_b" -f "$compose_file" -f "$override_b" up -d --build "${compose_services[@]}")"
   if compose_up_stack_with_retry "stack_b_up" "$project_b" "$override_b" "$env_b" "$up_b_cmd_print"; then
     stack_b_up=1
   else
@@ -1006,7 +1095,9 @@ if [[ "$status" == "pass" ]]; then
     wait_http_ok "$curl_bin" "${issuer_a_url}/v1/pubkeys" "issuer A" 30 &&
     wait_http_ok "$curl_bin" "${issuer_b_url}/v1/pubkeys" "issuer B" 30 &&
     wait_http_ok "$curl_bin" "${entry_url}/v1/health" "entry A" 30 &&
-    wait_http_ok "$curl_bin" "${exit_url}/v1/health" "exit A" 30; then
+    wait_http_ok "$curl_bin" "${exit_url}/v1/health" "exit A" 30 &&
+    { [[ "$middle_relay_enabled" != "1" ]] || wait_http_ok "$curl_bin" "${middle_a_url}/v1/health" "middle A" 30; } &&
+    { [[ "$middle_relay_enabled" != "1" ]] || wait_http_ok "$curl_bin" "${middle_b_url}/v1/health" "middle B" 30; }; then
     if entry_route_assertion_logs_ok "$project_a" "$override_a" "$env_a" "stack A" &&
       entry_route_assertion_logs_ok "$project_b" "$override_b" "$env_b" "stack B"; then
       record_step "health" "pass" 0
@@ -1291,6 +1382,7 @@ jq -n \
   --arg project_b "$project_b" \
   --arg docker_host_alias "$docker_host_alias" \
   --arg path_profile "$path_profile" \
+  --arg normalized_path_profile "$normalized_path_profile" \
   --arg bootstrap_directory "$bootstrap_directory" \
   --argjson compose_up_max_attempts "$compose_up_max_attempts" \
   --argjson compose_up_initial_backoff_sec "$compose_up_initial_backoff_sec" \
@@ -1315,6 +1407,7 @@ jq -n \
   --argjson client_min_entry_operators "$client_min_entry_operators" \
   --argjson client_min_exit_operators "$client_min_exit_operators" \
   --argjson distinct_operators "$distinct_operators" \
+  --argjson middle_relay_enabled "$middle_relay_enabled" \
   --argjson require_issuer_quorum "$require_issuer_quorum" \
   --argjson beta_profile "$beta_profile" \
   --argjson prod_profile "$prod_profile" \
@@ -1349,6 +1442,8 @@ jq -n \
       "client_min_entry_operators": $client_min_entry_operators,
       "client_min_exit_operators": $client_min_exit_operators,
       "path_profile": $path_profile,
+      "normalized_path_profile": $normalized_path_profile,
+      "middle_relay_enabled": ($middle_relay_enabled == 1),
       "compose_up_max_attempts": $compose_up_max_attempts,
       "compose_up_initial_backoff_sec": $compose_up_initial_backoff_sec,
       "distinct_operators": ($distinct_operators == 1),

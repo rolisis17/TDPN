@@ -9765,6 +9765,10 @@ if [[ "$blockchain_mainnet_activation_refresh_evidence_available_json" == "true"
   blockchain_mainnet_activation_stale_evidence_action_required_json="true"
   blockchain_mainnet_activation_stale_evidence_reason_json="$blockchain_mainnet_activation_refresh_evidence_reason"
   blockchain_mainnet_activation_stale_evidence_refresh_command_json="$blockchain_mainnet_activation_refresh_evidence_command"
+elif [[ "$blockchain_mainnet_activation_gate_available_json" == "true" ]] \
+  && [[ "$blockchain_mainnet_activation_gate_source_summary_kind" != "phase7-mainnet-cutover-signal" ]] \
+  && [[ "$blockchain_mainnet_activation_gate_summary_stale_json" == "true" ]]; then
+  blockchain_mainnet_activation_stale_evidence_reason_json="stale activation evidence is present, but the gate is NO-GO or not GO; refresh real evidence before relying on any future GO signal"
 fi
 
 blockchain_recommended_gate_id=""
@@ -13969,7 +13973,7 @@ cat >"$report_tmp" <<EOF_MD
 - Multi-VM promotion evidence pack status/decision: status=$(jq -r '.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.status // "none"' "$summary_json"), decision=$(jq -r '.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.decision // "none"' "$summary_json")
 - Multi-VM promotion evidence pack helper/needs-attention: helper_available=$(jq -r '.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.helper_available | if . == null then "null" else tostring end' "$summary_json"), needs_attention=$(jq -r '.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.needs_attention | if . == null then "null" else tostring end' "$summary_json")
 - Multi-VM promotion evidence pack next command/reason: command=$(jq -r '.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command // "none"' "$summary_json"), reason=$(jq -r '.vpn_track.profile_compare_multi_vm_stability_promotion_evidence_pack.next_command_reason // "none"' "$summary_json")
-- Primary next action: $(jq -r '.vpn_track.next_action.command // ""' "$summary_json")
+- VPN next action: $(jq -r '.vpn_track.next_action.command // ""' "$summary_json")
 
 ## Pending Real-Host Checks
 

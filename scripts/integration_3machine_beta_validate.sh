@@ -998,7 +998,8 @@ fi
 if ((client_min_selection_lines < 1)); then
   client_min_selection_lines="1"
 fi
-if ((client_min_entry_operators < 1)); then
+# Direct-exit 1hop has no entry relay, so an explicit zero entry floor is valid.
+if ((client_min_entry_operators < 1)) && [[ "$normalized_path_profile" != "speed-1hop" ]]; then
   client_min_entry_operators="1"
 fi
 if ((client_min_exit_operators < 1)); then

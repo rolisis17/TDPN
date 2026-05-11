@@ -158,6 +158,7 @@ assert_token "$dry_line_1hop" '--reset-data 1' "expected first profile dry-run c
 assert_token "$dry_line_1hop" '--distinct-operators 0' "expected 1hop dry-run command to force --distinct-operators 0"
 assert_token "$dry_line_1hop" '--beta-profile 0' "expected 1hop dry-run command to force --beta-profile 0"
 assert_token "$dry_line_1hop" '--prod-profile 0' "expected 1hop dry-run command to force --prod-profile 0"
+assert_token "$dry_line_1hop" 'THREE_MACHINE_DOCKER_CLIENT_MIN_ENTRY_OPERATORS=0' "expected 1hop dry-run command to allow direct-exit entry diversity floor"
 assert_token "$dry_line_2hop" '--subject' "missing subject flag forwarding in 2hop dry-run command"
 assert_token "$dry_line_2hop" 'REDACTED' "expected redacted subject value in 2hop dry-run command"
 if [[ "$dry_line_2hop" == *"inv-integration-subject"* ]]; then
@@ -171,7 +172,7 @@ assert_token "$dry_line_2hop" '--distinct-operators 1' "expected 2hop dry-run co
 assert_token "$dry_line_2hop" '--beta-profile 1' "expected 2hop dry-run command to keep configured --beta-profile"
 assert_token "$dry_line_2hop" '--prod-profile 0' "expected 2hop dry-run command to keep configured --prod-profile"
 
-echo "[three-machine-docker-profile-matrix] 3hop dry-run includes lab-mode overrides by default"
+echo "[three-machine-docker-profile-matrix] 3hop dry-run includes lab-mode country override by default"
 dry_run_3hop_out="$TMP_DIR/matrix_dry_run_3hop.log"
 ./scripts/three_machine_docker_profile_matrix.sh \
   --profiles 3hop \
@@ -184,8 +185,12 @@ if [[ -z "$dry_line_3hop" ]]; then
   cat "$dry_run_3hop_out"
   exit 1
 fi
-assert_token "$dry_line_3hop" 'CLIENT_REQUIRE_MIDDLE_RELAY=0' "missing default 3hop CLIENT_REQUIRE_MIDDLE_RELAY override in dry-run command"
 assert_token "$dry_line_3hop" 'THREE_MACHINE_DISTINCT_COUNTRIES=0' "missing default 3hop THREE_MACHINE_DISTINCT_COUNTRIES override in dry-run command"
+if [[ "$dry_line_3hop" == *"CLIENT_REQUIRE_MIDDLE_RELAY=0"* ]]; then
+  echo "unexpected CLIENT_REQUIRE_MIDDLE_RELAY override for 3hop; CLIENT_PATH_PROFILE=3hop must stay fail-closed"
+  cat "$dry_run_3hop_out"
+  exit 1
+fi
 
 echo "[three-machine-docker-profile-matrix] 3hop strict gate disables lab-mode overrides"
 dry_run_3hop_strict_out="$TMP_DIR/matrix_dry_run_3hop_strict.log"
@@ -197,11 +202,6 @@ THREE_MACHINE_DOCKER_PROFILE_MATRIX_3HOP_STRICT=1 ./scripts/three_machine_docker
 dry_line_3hop_strict="$(grep -F -- '--path-profile 3hop' "$dry_run_3hop_strict_out" | head -n 1 || true)"
 if [[ -z "$dry_line_3hop_strict" ]]; then
   echo "missing strict-mode dry-run command line for 3hop profile"
-  cat "$dry_run_3hop_strict_out"
-  exit 1
-fi
-if [[ "$dry_line_3hop_strict" == *"CLIENT_REQUIRE_MIDDLE_RELAY=0"* ]]; then
-  echo "unexpected CLIENT_REQUIRE_MIDDLE_RELAY override with THREE_MACHINE_DOCKER_PROFILE_MATRIX_3HOP_STRICT=1"
   cat "$dry_run_3hop_strict_out"
   exit 1
 fi
@@ -229,6 +229,7 @@ fi
 assert_token "$dry_line_1hop_strict_flags" '--beta-profile 0' "expected 1hop strict-flag dry-run command to force --beta-profile 0"
 assert_token "$dry_line_1hop_strict_flags" '--prod-profile 0' "expected 1hop strict-flag dry-run command to force --prod-profile 0"
 assert_token "$dry_line_1hop_strict_flags" '--distinct-operators 0' "expected 1hop strict-flag dry-run command to force --distinct-operators 0"
+assert_token "$dry_line_1hop_strict_flags" 'THREE_MACHINE_DOCKER_CLIENT_MIN_ENTRY_OPERATORS=0' "expected 1hop strict-flag dry-run command to allow direct-exit entry diversity floor"
 
 echo "[three-machine-docker-profile-matrix] failing profile summary emits reduction helper contract"
 FAKE_READINESS="$TMP_DIR/fake_three_machine_docker_readiness.sh"

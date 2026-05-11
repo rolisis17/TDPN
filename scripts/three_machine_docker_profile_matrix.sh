@@ -586,9 +586,13 @@ if [[ "$dry_run" == "1" ]]; then
     run_env=(
       "THREE_MACHINE_DISCOVERY_WAIT_SEC=$discovery_wait_sec"
     )
+    if [[ "$profile" == "1hop" ]]; then
+      run_env+=(
+        "THREE_MACHINE_DOCKER_CLIENT_MIN_ENTRY_OPERATORS=0"
+      )
+    fi
     if [[ "$profile" == "3hop" && "$profile_3hop_strict" != "1" ]]; then
       run_env+=(
-        "CLIENT_REQUIRE_MIDDLE_RELAY=0"
         "THREE_MACHINE_DISTINCT_COUNTRIES=0"
       )
     fi
@@ -663,9 +667,13 @@ for profile_idx in "${!profiles[@]}"; do
   run_env=(
     "THREE_MACHINE_DISCOVERY_WAIT_SEC=$discovery_wait_sec"
   )
+  if [[ "$profile" == "1hop" ]]; then
+    run_env+=(
+      "THREE_MACHINE_DOCKER_CLIENT_MIN_ENTRY_OPERATORS=0"
+    )
+  fi
   if [[ "$profile" == "3hop" && "$profile_3hop_strict" != "1" ]]; then
     run_env+=(
-      "CLIENT_REQUIRE_MIDDLE_RELAY=0"
       "THREE_MACHINE_DISTINCT_COUNTRIES=0"
     )
   fi
