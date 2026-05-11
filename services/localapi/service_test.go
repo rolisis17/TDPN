@@ -391,14 +391,15 @@ func seedGPMAdminTestSession(t *testing.T, svc *Service, token string, walletAdd
 	return token
 }
 
-func auditRecentAdminPath(t *testing.T, svc *Service, path string) string {
+func gpmAdminSessionHeaders(t *testing.T, svc *Service, token string, walletAddress string) map[string]string {
 	t.Helper()
-	token := seedGPMAdminTestSession(t, svc, "gpm-audit-admin-token", "cosmos1auditadmin")
-	separator := "?"
-	if strings.Contains(path, "?") {
-		separator = "&"
-	}
-	return path + separator + "session_token=" + token
+	token = seedGPMAdminTestSession(t, svc, token, walletAddress)
+	return map[string]string{"X-GPM-Session-Token": token}
+}
+
+func auditRecentAdminHeaders(t *testing.T, svc *Service) map[string]string {
+	t.Helper()
+	return gpmAdminSessionHeaders(t, svc, "gpm-audit-admin-token", "cosmos1auditadmin")
 }
 
 func TestGPMOperatorApplyRequiresWalletBoundSession(t *testing.T) {
@@ -6366,12 +6367,21 @@ func TestGPMAdminSurfacesRejectUnboundAdminSessions(t *testing.T) {
 		method  string
 		target  string
 		body    string
+		headers map[string]string
 	}{
 		{
 			name:    "audit_recent",
 			handler: svc.handleGPMAuditRecent,
 			method:  http.MethodGet,
-			target:  "/v1/gpm/audit/recent?session_token=gpm-unbound-admin-token",
+			target:  "/v1/gpm/audit/recent",
+			headers: map[string]string{"X-GPM-Session-Token": "gpm-unbound-admin-token"},
+		},
+		{
+			name:    "gap_summary",
+			handler: svc.handleGPMGapSummary,
+			method:  http.MethodGet,
+			target:  "/v1/gpm/gaps/summary",
+			headers: map[string]string{"X-GPM-Session-Token": "gpm-unbound-admin-token"},
 		},
 		{
 			name:    "admin_contribution_list",
@@ -6405,7 +6415,7 @@ func TestGPMAdminSurfacesRejectUnboundAdminSessions(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			code, payload := callJSONHandler(t, tc.handler, tc.method, tc.target, tc.body)
+			code, payload := callJSONHandlerWithHeaders(t, tc.handler, tc.method, tc.target, tc.body, tc.headers)
 			if code != http.StatusForbidden {
 				t.Fatalf("status=%d payload=%v", code, payload)
 			}
@@ -6423,7 +6433,7 @@ func TestGPMAdminSurfacesRevalidateCurrentAdminPolicy(t *testing.T) {
 		token := seedGPMAdminTestSession(t, svc, "gpm-admin-stale-allowlist-token", "cosmos1staleadmin")
 		svc.gpmAdminWalletAllowlist = map[string]struct{}{}
 
-		code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?session_token="+token, "")
+		code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent", "", map[string]string{"X-GPM-Session-Token": token})
 		if code != http.StatusForbidden {
 			t.Fatalf("status=%d want=%d payload=%v", code, http.StatusForbidden, payload)
 		}
@@ -6446,7 +6456,7 @@ func TestGPMAdminSurfacesRevalidateCurrentAdminPolicy(t *testing.T) {
 		})
 		trustGPMAdminTestPolicy(svc, "cosmos1legacyadmin")
 
-		code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?session_token=gpm-admin-legacy-source-token", "")
+		code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent", "", map[string]string{"X-GPM-Session-Token": "gpm-admin-legacy-source-token"})
 		if code != http.StatusForbidden {
 			t.Fatalf("status=%d want=%d payload=%v", code, http.StatusForbidden, payload)
 		}
@@ -16332,7 +16342,7 @@ func TestGPMAuditRecentHandlerDefaultBehavior(t *testing.T) {
 	svc.appendGPMAudit("event_one", map[string]any{"idx": 1})
 	svc.appendGPMAudit("event_two", map[string]any{"idx": 2})
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent"), "")
+	code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent", "", auditRecentAdminHeaders(t, svc))
 	if code != http.StatusOK {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -16410,8 +16420,22 @@ func TestGPMAuditRecentHandlerRequiresAdminSession(t *testing.T) {
 		t.Fatalf("missing admin error=%q payload=%v", errMsg, payload)
 	}
 
+	adminQueryToken := seedGPMAdminTestSession(t, svc, "gpm-audit-query-admin-token", "cosmos1auditqueryadmin")
+	code, payload = callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?session_token="+adminQueryToken, "")
+	if code != http.StatusBadRequest {
+		t.Fatalf("query admin session status=%d want=%d payload=%v", code, http.StatusBadRequest, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "X-GPM-Session-Token") {
+		t.Fatalf("query admin error=%q payload=%v", errMsg, payload)
+	}
+
+	code, payload = callJSONHandlerWithHeaders(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?session_token=leaked-token", "", auditRecentAdminHeaders(t, svc))
+	if code != http.StatusBadRequest {
+		t.Fatalf("query plus header admin session status=%d want=%d payload=%v", code, http.StatusBadRequest, payload)
+	}
+
 	clientToken := seedGPMTestSession(t, svc, "gpm-audit-client-token", "cosmos1auditclient", 2, true, true)
-	code, payload = callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?session_token="+clientToken, "")
+	code, payload = callJSONHandlerWithHeaders(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent", "", map[string]string{"X-GPM-Session-Token": clientToken})
 	if code != http.StatusForbidden {
 		t.Fatalf("non-admin audit status=%d want=%d payload=%v", code, http.StatusForbidden, payload)
 	}
@@ -16431,7 +16455,7 @@ func TestGPMAuditRecentHandlerLimitQueryBackwardCompatible(t *testing.T) {
 	svc.appendGPMAudit("event_one", map[string]any{"idx": 1})
 	svc.appendGPMAudit("event_two", map[string]any{"idx": 2})
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent?limit=1"), "")
+	code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?limit=1", "", auditRecentAdminHeaders(t, svc))
 	if code != http.StatusOK {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -16477,7 +16501,7 @@ func TestGPMAuditRecentHandlerEventFilter(t *testing.T) {
 	svc.appendGPMAudit("session_refreshed", map[string]any{"idx": 2})
 	svc.appendGPMAudit("AUTH_VERIFIED", map[string]any{"idx": 3})
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent?event=AuTh_VeRiFiEd"), "")
+	code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?event=AuTh_VeRiFiEd", "", auditRecentAdminHeaders(t, svc))
 	if code != http.StatusOK {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -16519,7 +16543,7 @@ func TestGPMAuditRecentHandlerWalletFilter(t *testing.T) {
 	svc.appendGPMAudit("session_refreshed", map[string]any{"wallet_address": "cosmos1walletb"})
 	svc.appendGPMAudit("session_revoked", map[string]any{"role": "client"})
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent?wallet_address=COSMOS1WALLETA"), "")
+	code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?wallet_address=COSMOS1WALLETA", "", auditRecentAdminHeaders(t, svc))
 	if code != http.StatusOK {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -16558,7 +16582,7 @@ func TestGPMAuditRecentHandlerOffsetPagingMetadata(t *testing.T) {
 	svc.appendGPMAudit("event_three", map[string]any{"idx": 3})
 	svc.appendGPMAudit("event_four", map[string]any{"idx": 4})
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent?limit=2&offset=1&order=desc"), "")
+	code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?limit=2&offset=1&order=desc", "", auditRecentAdminHeaders(t, svc))
 	if code != http.StatusOK {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -16609,7 +16633,7 @@ func TestGPMAuditRecentHandlerRejectsInvalidOrder(t *testing.T) {
 		gpmState:            newGPMRuntimeState(),
 	}
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent?order=sideways"), "")
+	code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?order=sideways", "", auditRecentAdminHeaders(t, svc))
 	if code != http.StatusBadRequest {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -16628,7 +16652,7 @@ func TestGPMAuditRecentHandlerRejectsInvalidWalletFilter(t *testing.T) {
 		gpmState:            newGPMRuntimeState(),
 	}
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent?wallet_address=bad!"), "")
+	code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent?wallet_address=bad!", "", auditRecentAdminHeaders(t, svc))
 	if code != http.StatusBadRequest {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -16651,7 +16675,7 @@ func TestGPMAuditRecentHandlerRejectsOversizedAuditFile(t *testing.T) {
 		gpmState:            newGPMRuntimeState(),
 	}
 
-	code, payload := callJSONHandler(t, svc.handleGPMAuditRecent, http.MethodGet, auditRecentAdminPath(t, svc, "/v1/gpm/audit/recent"), "")
+	code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMAuditRecent, http.MethodGet, "/v1/gpm/audit/recent", "", auditRecentAdminHeaders(t, svc))
 	if code != http.StatusInternalServerError {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -16715,7 +16739,7 @@ func TestGPMGapSummaryHandlerSuccess(t *testing.T) {
 		gpmState:              newGPMRuntimeState(),
 	}
 
-	code, payload := callJSONHandler(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "")
+	code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "", gpmAdminSessionHeaders(t, svc, "gpm-gaps-admin-token", "cosmos1gapsadmin"))
 	if code != http.StatusOK {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -16759,6 +16783,51 @@ func TestGPMGapSummaryHandlerSuccess(t *testing.T) {
 	}
 }
 
+func TestGPMGapSummaryHandlerRequiresAdminSession(t *testing.T) {
+	summaryPath := filepath.Join(t.TempDir(), "gpm_gap_scan_summary.json")
+	body := []byte(`{"schema":{"id":"gpm_gap_scan_summary"},"status":"ok","generated_at_utc":"` + time.Now().UTC().Format(time.RFC3339) + `","counts":{"in_progress":0,"missing_next":0,"total":0},"items":[]}`)
+	if err := os.WriteFile(summaryPath, body, 0o600); err != nil {
+		t.Fatalf("write summary fixture: %v", err)
+	}
+	svc := &Service{
+		addr:                  "127.0.0.1:8095",
+		allowUnauthLoopback:   true,
+		gpmGapScanSummaryPath: summaryPath,
+		gpmState:              newGPMRuntimeState(),
+	}
+
+	code, payload := callJSONHandler(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "")
+	if code != http.StatusBadRequest {
+		t.Fatalf("missing admin session status=%d want=%d payload=%v", code, http.StatusBadRequest, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "session_token is required") {
+		t.Fatalf("missing admin error=%q payload=%v", errMsg, payload)
+	}
+
+	queryToken := seedGPMAdminTestSession(t, svc, "gpm-gaps-query-admin-token", "cosmos1gapsqueryadmin")
+	code, payload = callJSONHandler(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary?session_token="+queryToken, "")
+	if code != http.StatusBadRequest {
+		t.Fatalf("query admin session status=%d want=%d payload=%v", code, http.StatusBadRequest, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "X-GPM-Session-Token") {
+		t.Fatalf("query admin error=%q payload=%v", errMsg, payload)
+	}
+
+	code, payload = callJSONHandlerWithHeaders(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary?session_token=leaked-token", "", gpmAdminSessionHeaders(t, svc, "gpm-gaps-query-plus-header-admin-token", "cosmos1gapsqueryheaderadmin"))
+	if code != http.StatusBadRequest {
+		t.Fatalf("query plus header admin session status=%d want=%d payload=%v", code, http.StatusBadRequest, payload)
+	}
+
+	clientToken := seedGPMTestSession(t, svc, "gpm-gaps-client-token", "cosmos1gapsclient", 2, true, true)
+	code, payload = callJSONHandlerWithHeaders(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "", map[string]string{"X-GPM-Session-Token": clientToken})
+	if code != http.StatusForbidden {
+		t.Fatalf("client session status=%d want=%d payload=%v", code, http.StatusForbidden, payload)
+	}
+	if errMsg, _ := payload["error"].(string); !strings.Contains(errMsg, "admin session role") {
+		t.Fatalf("client session error=%q payload=%v", errMsg, payload)
+	}
+}
+
 func TestGPMGapSummaryHandlerMissingArtifactFailsClosed(t *testing.T) {
 	summaryPath := filepath.Join(t.TempDir(), "missing_gpm_gap_scan_summary.json")
 	svc := &Service{
@@ -16768,7 +16837,7 @@ func TestGPMGapSummaryHandlerMissingArtifactFailsClosed(t *testing.T) {
 		gpmState:              newGPMRuntimeState(),
 	}
 
-	code, payload := callJSONHandler(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "")
+	code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "", gpmAdminSessionHeaders(t, svc, "gpm-gaps-missing-admin-token", "cosmos1gapsmissingadmin"))
 	if code != http.StatusServiceUnavailable {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -16792,7 +16861,7 @@ func TestGPMGapSummaryHandlerMalformedArtifactFailsClosed(t *testing.T) {
 		gpmState:              newGPMRuntimeState(),
 	}
 
-	code, payload := callJSONHandler(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "")
+	code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "", gpmAdminSessionHeaders(t, svc, "gpm-gaps-malformed-admin-token", "cosmos1gapsmalformedadmin"))
 	if code != http.StatusInternalServerError {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -16818,7 +16887,7 @@ func TestGPMGapSummaryHandlerStaleArtifactFailsClosed(t *testing.T) {
 		gpmState:              newGPMRuntimeState(),
 	}
 
-	code, payload := callJSONHandler(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "")
+	code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "", gpmAdminSessionHeaders(t, svc, "gpm-gaps-stale-admin-token", "cosmos1gapsstaleadmin"))
 	if code != http.StatusInternalServerError {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}
@@ -16864,7 +16933,7 @@ func TestGPMGapSummaryHandlerOversizedArtifactFailsClosed(t *testing.T) {
 		gpmState:              newGPMRuntimeState(),
 	}
 
-	code, payload := callJSONHandler(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "")
+	code, payload := callJSONHandlerWithHeaders(t, svc.handleGPMGapSummary, http.MethodGet, "/v1/gpm/gaps/summary", "", gpmAdminSessionHeaders(t, svc, "gpm-gaps-oversized-admin-token", "cosmos1gapsoversizedadmin"))
 	if code != http.StatusInternalServerError {
 		t.Fatalf("status=%d payload=%v", code, payload)
 	}

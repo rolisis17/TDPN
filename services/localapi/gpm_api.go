@@ -1589,7 +1589,7 @@ func (s *Service) handleGPMAuditRecent(w http.ResponseWriter, r *http.Request) {
 	if !s.requireCommandReadAuth(w, r) {
 		return
 	}
-	adminSession, ok := s.gpmAdminSessionFromAuditRequestForResponse(w, r)
+	adminSession, ok := s.gpmAdminSessionFromHeaderForResponse(w, r)
 	if !ok {
 		return
 	}
@@ -1672,6 +1672,9 @@ func (s *Service) handleGPMGapSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.requireCommandReadAuth(w, r) {
+		return
+	}
+	if _, ok := s.gpmAdminSessionFromHeaderForResponse(w, r); !ok {
 		return
 	}
 
@@ -3311,11 +3314,12 @@ func (s *Service) gpmSessionFromTokenOrBearer(r *http.Request, token string) (gp
 	return s.gpmSessionFromToken(gpmSessionTokenFromRequest(r, token))
 }
 
-func (s *Service) gpmAdminSessionFromAuditRequestForResponse(w http.ResponseWriter, r *http.Request) (gpmSession, bool) {
-	token := strings.TrimSpace(r.URL.Query().Get("session_token"))
-	if token == "" {
-		token = strings.TrimSpace(r.Header.Get("X-GPM-Session-Token"))
+func (s *Service) gpmAdminSessionFromHeaderForResponse(w http.ResponseWriter, r *http.Request) (gpmSession, bool) {
+	if r != nil && strings.TrimSpace(r.URL.Query().Get("session_token")) != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "session_token must be sent in X-GPM-Session-Token, not the URL query"})
+		return gpmSession{}, false
 	}
+	token := strings.TrimSpace(r.Header.Get("X-GPM-Session-Token"))
 	return s.gpmAdminSessionFromTokenForResponse(w, token)
 }
 
