@@ -288,8 +288,15 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 		"--config-sha256", serviceConfigHash,
 		"--allow-unauthenticated-local",
 		"--addr", "0.0.0.0:18980",
-	}); err == nil || !strings.Contains(err.Error(), "loopback") {
+	}); err == nil || !strings.Contains(err.Error(), "not supported for deploy packs") {
 		t.Fatalf("expected unsafe unauthenticated deploy pack to fail closed, got %v", err)
+	}
+	if err := runBridgeServiceDeployPack([]string{
+		"--out-dir", filepath.Join(dir, "bridge-deploy-loopback-unauth"),
+		"--config-sha256", serviceConfigHash,
+		"--allow-unauthenticated-local",
+	}); err == nil || !strings.Contains(err.Error(), "not supported for deploy packs") {
+		t.Fatalf("expected loopback unauthenticated deploy pack to fail closed, got %v", err)
 	}
 	if err := runBridgeServiceDeployPack([]string{
 		"--out-dir", filepath.Join(dir, "bridge-deploy-query-code-non-loopback"),
@@ -297,8 +304,16 @@ func TestGPMRecoverSignVerifyRoundTrip(t *testing.T) {
 		"--access-code-sha256", codeHashOut.SHA256,
 		"--allow-query-access-code",
 		"--addr", "0.0.0.0:18980",
-	}); err == nil || !strings.Contains(err.Error(), "loopback") {
+	}); err == nil || !strings.Contains(err.Error(), "not supported for deploy packs") {
 		t.Fatalf("expected query-code deploy pack on non-loopback to fail closed, got %v", err)
+	}
+	if err := runBridgeServiceDeployPack([]string{
+		"--out-dir", filepath.Join(dir, "bridge-deploy-query-code-loopback"),
+		"--config-sha256", serviceConfigHash,
+		"--access-code-sha256", codeHashOut.SHA256,
+		"--allow-query-access-code",
+	}); err == nil || !strings.Contains(err.Error(), "not supported for deploy packs") {
+		t.Fatalf("expected query-code deploy pack on loopback to fail closed, got %v", err)
 	}
 	for _, tc := range []struct {
 		name       string

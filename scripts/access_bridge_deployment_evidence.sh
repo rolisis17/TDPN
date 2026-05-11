@@ -724,9 +724,12 @@ if [[ -n "$deploy_pack_dir" ]]; then
       deploy_env_allow_query_code="$(env_file_value "$env_file" "GPM_BRIDGE_ALLOW_QUERY_CODE")"
       deploy_env_trust_proxy_headers="$(env_file_value "$env_file" "GPM_BRIDGE_TRUST_PROXY_HEADERS")"
       deploy_env_addr="$(env_file_value "$env_file" "GPM_BRIDGE_ADDR")"
-      if [[ -z "$deploy_env_access_code_sha256" && "$deploy_env_allow_unauth_local" != "true" ]]; then
+      if [[ "$deploy_env_allow_unauth_local" == "true" ]]; then
         deploy_status="fail"
-        deploy_reason="$(append_reason "$deploy_reason" "deploy env must include an access-code hash unless explicitly local unauthenticated")"
+        deploy_reason="$(append_reason "$deploy_reason" "deploy env must keep unauthenticated local mode disabled")"
+      elif [[ -z "$deploy_env_access_code_sha256" ]]; then
+        deploy_status="fail"
+        deploy_reason="$(append_reason "$deploy_reason" "deploy env must include an access-code hash")"
       elif [[ -n "$deploy_env_access_code_sha256" ]] && ! is_sha256_hex "$deploy_env_access_code_sha256"; then
         deploy_status="fail"
         deploy_reason="$(append_reason "$deploy_reason" "deploy env access-code sha256 must be 64 hex characters")"

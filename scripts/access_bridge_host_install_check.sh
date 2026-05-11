@@ -460,10 +460,12 @@ if [[ -f "$env_file" ]]; then
     add_check "config_sha256_matches" "skip" "no config JSON supplied"
   fi
 
-  if [[ -n "$env_access_code_sha256" ]] && ! is_sha256_hex "$env_access_code_sha256"; then
+  if [[ "$env_allow_unauth_local" == "true" ]]; then
+    add_check "access_code_gate_configured" "fail" "unauthenticated local mode must be disabled in deploy packs"
+  elif [[ -n "$env_access_code_sha256" ]] && ! is_sha256_hex "$env_access_code_sha256"; then
     add_check "access_code_gate_configured" "fail" "access-code hash is not 64 hex characters"
-  elif [[ -n "$env_access_code_sha256" || "$env_allow_unauth_local" == "true" ]]; then
-    add_check "access_code_gate_configured" "pass" "access-code hash is configured or unauthenticated local mode is explicit"
+  elif [[ -n "$env_access_code_sha256" ]]; then
+    add_check "access_code_gate_configured" "pass" "access-code hash is configured"
   else
     add_check "access_code_gate_configured" "fail" "access-code hash is missing"
   fi

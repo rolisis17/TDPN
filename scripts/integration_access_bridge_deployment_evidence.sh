@@ -299,6 +299,40 @@ if ! jq -e \
   exit 1
 fi
 
+BAD_UNAUTH_DEPLOY_DIR="$TMP_DIR/bad-unauth-deploy"
+cp -R "$DEPLOY_DIR" "$BAD_UNAUTH_DEPLOY_DIR"
+sed -i 's/GPM_BRIDGE_ACCESS_CODE_SHA256="[^"]*"/GPM_BRIDGE_ACCESS_CODE_SHA256=""/' "$BAD_UNAUTH_DEPLOY_DIR/gpm-access-bridge-evidence.env"
+sed -i 's/GPM_BRIDGE_ALLOW_UNAUTH_LOCAL="false"/GPM_BRIDGE_ALLOW_UNAUTH_LOCAL="true"/' "$BAD_UNAUTH_DEPLOY_DIR/gpm-access-bridge-evidence.env"
+BAD_UNAUTH_DEPLOY_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_bad_unauth_deploy.json"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$SMOKE_SUMMARY" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$BAD_UNAUTH_DEPLOY_DIR" \
+  --service-name gpm-access-bridge-evidence \
+  --summary-json "$BAD_UNAUTH_DEPLOY_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/bad-unauth-deploy.log" 2>&1
+bad_unauth_deploy_rc=$?
+set -e
+if [[ "$bad_unauth_deploy_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: unauthenticated-local deploy env should fail"
+  cat "$BAD_UNAUTH_DEPLOY_SUMMARY"
+  exit 1
+fi
+if ! jq -e \
+  '
+    .status == "fail"
+    and .local_files.deploy_pack.status == "fail"
+    and .local_files.deploy_pack.env.allow_unauthenticated_local == "true"
+    and .local_files.deploy_pack.env.access_code_sha256 == ""
+    and (.local_files.deploy_pack.reason | contains("unauthenticated local mode disabled"))
+    and .recommended_next_action.id == "stage_bridge_deploy_pack"
+  ' "$BAD_UNAUTH_DEPLOY_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: unauthenticated-local deploy env summary mismatch"
+  cat "$BAD_UNAUTH_DEPLOY_SUMMARY"
+  exit 1
+fi
+
 bad_public_hosts=(
   "localhost"
   "10.0.0.8"

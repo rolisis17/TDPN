@@ -307,6 +307,30 @@ if ! jq -e '.status == "fail" and ([.checks[] | select(.id == "query_access_code
   exit 1
 fi
 
+BAD_UNAUTH_DIR="$TMP_DIR/bad-unauth"
+cp -R "$DEPLOY_DIR" "$BAD_UNAUTH_DIR"
+sed -i 's/GPM_BRIDGE_ACCESS_CODE_SHA256="[^"]*"/GPM_BRIDGE_ACCESS_CODE_SHA256=""/' "$BAD_UNAUTH_DIR/gpm-access-bridge-host-check.env"
+sed -i 's/GPM_BRIDGE_ALLOW_UNAUTH_LOCAL="false"/GPM_BRIDGE_ALLOW_UNAUTH_LOCAL="true"/' "$BAD_UNAUTH_DIR/gpm-access-bridge-host-check.env"
+set +e
+./scripts/access_bridge_host_install_check.sh \
+  --deploy-pack-dir "$BAD_UNAUTH_DIR" \
+  --service-name gpm-access-bridge-host-check \
+  --config-json "$SERVICE_CONFIG" \
+  --summary-json "$TMP_DIR/bad-unauth-summary.json" \
+  --print-summary-json 0 >/dev/null 2>&1
+bad_unauth_rc=$?
+set -e
+if [[ "$bad_unauth_rc" -eq 0 ]]; then
+  echo "access bridge host install check integration failed: unauthenticated local env should fail"
+  cat "$TMP_DIR/bad-unauth-summary.json"
+  exit 1
+fi
+if ! jq -e '.status == "fail" and .observed.env_allow_unauthenticated_local == "true" and ([.checks[] | select(.id == "access_code_gate_configured" and .status == "fail")] | length == 1)' "$TMP_DIR/bad-unauth-summary.json" >/dev/null; then
+  echo "access bridge host install check integration failed: unauthenticated local summary mismatch"
+  cat "$TMP_DIR/bad-unauth-summary.json"
+  exit 1
+fi
+
 BAD_HASH_DIR="$TMP_DIR/bad-hash"
 cp -R "$DEPLOY_DIR" "$BAD_HASH_DIR"
 sed -i 's/GPM_BRIDGE_ACCESS_CODE_SHA256="[^"]*"/GPM_BRIDGE_ACCESS_CODE_SHA256="not-a-valid-sha256"/' "$BAD_HASH_DIR/gpm-access-bridge-host-check.env"

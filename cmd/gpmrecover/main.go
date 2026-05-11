@@ -1366,14 +1366,14 @@ func runBridgeServiceDeployPack(args []string) error {
 	if *redirect {
 		return errors.New("bridge-service-deploy-pack redirect mode is not supported by the current smoke/evidence path")
 	}
-	if *allowUnauthenticatedLocal && !isLoopbackListenAddr(*addr) {
-		return errors.New("--allow-unauthenticated-local requires a loopback --addr")
+	if *allowUnauthenticatedLocal {
+		return errors.New("--allow-unauthenticated-local is not supported for deploy packs; use bridge-service-serve for local diagnostics")
 	}
-	if *allowQueryAccessCode && !isLoopbackListenAddr(*addr) {
-		return errors.New("--allow-query-access-code requires a loopback --addr")
+	if *allowQueryAccessCode {
+		return errors.New("--allow-query-access-code is not supported for deploy packs; use bridge-service-serve for local diagnostics")
 	}
-	if strings.TrimSpace(*accessCodeSHA256) == "" && !*allowUnauthenticatedLocal {
-		return errors.New("bridge-service-deploy-pack requires --access-code-sha256 unless --allow-unauthenticated-local is set")
+	if strings.TrimSpace(*accessCodeSHA256) == "" {
+		return errors.New("bridge-service-deploy-pack requires --access-code-sha256")
 	}
 	if strings.TrimSpace(*accessCodeSHA256) != "" {
 		if err := validateSHA256Hex("bridge service access code", *accessCodeSHA256); err != nil {
