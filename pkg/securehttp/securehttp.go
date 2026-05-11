@@ -163,10 +163,12 @@ func loadConfig() (runtimeConfig, error) {
 	}
 	cfg.minVersion = minVersion
 
-	if _, err := readMTLSFileStrict(cfg.serverCertFile, "MTLS_SERVER_CERT_FILE", false, mtlsMaxCertFileBytes); err != nil {
+	serverCertPEM, err := readMTLSFileStrict(cfg.serverCertFile, "MTLS_SERVER_CERT_FILE", false, mtlsMaxCertFileBytes)
+	if err != nil {
 		return runtimeConfig{}, err
 	}
-	if _, err := readMTLSFileStrict(cfg.serverKeyFile, "MTLS_SERVER_KEY_FILE", true, mtlsMaxKeyFileBytes); err != nil {
+	serverKeyPEM, err := readMTLSFileStrict(cfg.serverKeyFile, "MTLS_SERVER_KEY_FILE", true, mtlsMaxKeyFileBytes)
+	if err != nil {
 		return runtimeConfig{}, err
 	}
 	clientCertPEM, err := readMTLSFileStrict(clientCertFile, "MTLS_CLIENT_CERT_FILE", false, mtlsMaxCertFileBytes)
@@ -177,12 +179,6 @@ func loadConfig() (runtimeConfig, error) {
 	if err != nil {
 		return runtimeConfig{}, err
 	}
-	cert, err := tls.X509KeyPair(clientCertPEM, clientKeyPEM)
-	if err != nil {
-		return runtimeConfig{}, fmt.Errorf("load mTLS client cert/key: %w", err)
-	}
-	cfg.clientCert = cert
-
 	caPEM, err := readMTLSFileStrict(caFile, "MTLS_CA_FILE", false, mtlsMaxCAFileBytes)
 	if err != nil {
 		return runtimeConfig{}, err
@@ -193,7 +189,93 @@ func loadConfig() (runtimeConfig, error) {
 	}
 	cfg.caPool = pool
 
+	serverCert, err := tls.X509KeyPair(serverCertPEM, serverKeyPEM)
+	if err != nil {
+		return runtimeConfig{}, fmt.Errorf("load mTLS server cert/key: %w", err)
+	}
+	serverLeaf, serverIntermediates, err := certificateChain(serverCert, "mTLS server certificate")
+	if err != nil {
+		return runtimeConfig{}, err
+	}
+	if err := verifyCertificateForUsage(serverLeaf, serverIntermediates, pool, x509.ExtKeyUsageServerAuth, cfg.serverName, "mTLS server certificate"); err != nil {
+		return runtimeConfig{}, err
+	}
+
+	cert, err := tls.X509KeyPair(clientCertPEM, clientKeyPEM)
+	if err != nil {
+		return runtimeConfig{}, fmt.Errorf("load mTLS client cert/key: %w", err)
+	}
+	clientLeaf, clientIntermediates, err := certificateChain(cert, "mTLS client certificate")
+	if err != nil {
+		return runtimeConfig{}, err
+	}
+	if err := verifyCertificateForUsage(clientLeaf, clientIntermediates, pool, x509.ExtKeyUsageClientAuth, "", "mTLS client certificate"); err != nil {
+		return runtimeConfig{}, err
+	}
+	cfg.clientCert = cert
+
 	return cfg, nil
+}
+
+func certificateChain(cert tls.Certificate, label string) (*x509.Certificate, *x509.CertPool, error) {
+	if len(cert.Certificate) == 0 {
+		return nil, nil, fmt.Errorf("%s has no leaf certificate", label)
+	}
+	leaf := cert.Leaf
+	if leaf == nil {
+		var err error
+		leaf, err = x509.ParseCertificate(cert.Certificate[0])
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse %s: %w", label, err)
+		}
+	}
+	intermediates := x509.NewCertPool()
+	for i, raw := range cert.Certificate[1:] {
+		intermediate, err := x509.ParseCertificate(raw)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse %s intermediate %d: %w", label, i+1, err)
+		}
+		intermediates.AddCert(intermediate)
+	}
+	return leaf, intermediates, nil
+}
+
+func verifyCertificateForUsage(cert *x509.Certificate, intermediates *x509.CertPool, roots *x509.CertPool, usage x509.ExtKeyUsage, dnsName string, label string) error {
+	if cert == nil {
+		return fmt.Errorf("%s is required", label)
+	}
+	if !certificateAllowsUsage(cert, usage) {
+		return fmt.Errorf("%s missing %s usage", label, extKeyUsageName(usage))
+	}
+	if _, err := cert.Verify(x509.VerifyOptions{
+		Roots:         roots,
+		Intermediates: intermediates,
+		DNSName:       dnsName,
+		KeyUsages:     []x509.ExtKeyUsage{usage},
+	}); err != nil {
+		return fmt.Errorf("verify %s chain: %w", label, err)
+	}
+	return nil
+}
+
+func certificateAllowsUsage(cert *x509.Certificate, usage x509.ExtKeyUsage) bool {
+	for _, certUsage := range cert.ExtKeyUsage {
+		if certUsage == usage || certUsage == x509.ExtKeyUsageAny {
+			return true
+		}
+	}
+	return false
+}
+
+func extKeyUsageName(usage x509.ExtKeyUsage) string {
+	switch usage {
+	case x509.ExtKeyUsageServerAuth:
+		return "serverAuth"
+	case x509.ExtKeyUsageClientAuth:
+		return "clientAuth"
+	default:
+		return fmt.Sprintf("extendedKeyUsage(%d)", usage)
+	}
 }
 
 func firstNonEmpty(values ...string) string {

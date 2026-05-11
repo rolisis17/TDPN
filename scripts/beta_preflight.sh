@@ -31,6 +31,7 @@ run_step "access bridge host install check" bash ./scripts/integration_access_br
 run_step "access bridge pilot evidence bundle" bash ./scripts/integration_access_bridge_pilot_evidence_bundle.sh
 run_step "access bridge pilot evidence bundle verifier" bash ./scripts/integration_access_bridge_pilot_evidence_bundle_verify.sh
 run_step "access recovery beta local gate" bash ./scripts/integration_access_recovery_beta_local_gate.sh
+run_step "access recovery real helper evidence run" bash ./scripts/integration_access_recovery_real_helper_evidence_run.sh
 run_step "easy-node access bridge pilot evidence bundle" bash ./scripts/integration_easy_node_access_bridge_pilot_evidence_bundle.sh
 run_step "easy-node access recovery local evidence refresh" bash ./scripts/integration_easy_node_access_recovery_local_evidence_refresh.sh
 run_step "secret hygiene" ./scripts/integration_secret_hygiene.sh

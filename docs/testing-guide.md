@@ -67,6 +67,7 @@ What this does:
    - pilot evidence bundle + verifier contracts
    - beta local gate and easy-node wrapper coverage
    - local evidence refresh wrapper
+   - real-helper evidence-run wrapper contract with fake child scripts and installed-host handoff arguments
 4. Runs the broader runtime, release, roadmap, desktop, and topology integration checks:
    - challenge
    - revocation

@@ -61,6 +61,7 @@ bash -n \
   scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   scripts/access_recovery_beta_local_gate.sh \
   scripts/access_recovery_local_evidence_refresh.sh \
+  scripts/access_recovery_real_helper_evidence_run.sh \
   scripts/integration_recovery_browser_smoke.sh \
   scripts/integration_access_recovery_demo_contract.sh \
   scripts/integration_access_recovery_examples_contract.sh \
@@ -70,8 +71,10 @@ bash -n \
   scripts/integration_access_bridge_pilot_evidence_bundle.sh \
   scripts/integration_access_bridge_pilot_evidence_bundle_verify.sh \
   scripts/integration_access_recovery_beta_local_gate.sh \
+  scripts/integration_access_recovery_real_helper_evidence_run.sh \
   scripts/integration_easy_node_access_bridge_pilot_evidence_bundle.sh \
-  scripts/integration_easy_node_access_recovery_local_evidence_refresh.sh
+  scripts/integration_easy_node_access_recovery_local_evidence_refresh.sh \
+  scripts/integration_easy_node_access_recovery_real_helper_evidence_run.sh
 
 echo "[ci] access recovery browser smoke integration"
 bash ./scripts/integration_recovery_browser_smoke.sh
@@ -99,6 +102,9 @@ bash ./scripts/integration_access_bridge_pilot_evidence_bundle_verify.sh
 
 echo "[ci] access recovery beta local gate integration"
 bash ./scripts/integration_access_recovery_beta_local_gate.sh
+
+echo "[ci] access recovery real helper evidence run integration"
+bash ./scripts/integration_access_recovery_real_helper_evidence_run.sh
 
 echo "[ci] easy-node access bridge pilot evidence bundle integration"
 bash ./scripts/integration_easy_node_access_bridge_pilot_evidence_bundle.sh
