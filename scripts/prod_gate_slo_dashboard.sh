@@ -548,6 +548,7 @@ for raw in "${run_report_jsons[@]}"; do
 done
 
 echo "[prod-gate-slo-dashboard] running trend summary"
+rm -f -- "$trend_summary_json"
 set +e
 "$TREND_SCRIPT" "${trend_args[@]}"
 trend_rc=$?
@@ -596,6 +597,7 @@ alert_args=(
 )
 
 echo "[prod-gate-slo-dashboard] running alert classification"
+rm -f -- "$alert_summary_json"
 set +e
 "$ALERT_SCRIPT" "${alert_args[@]}"
 alert_rc=$?

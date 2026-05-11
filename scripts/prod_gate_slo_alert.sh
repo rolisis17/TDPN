@@ -129,6 +129,21 @@ json_valid01() {
   fi
 }
 
+iso8601_utc_to_epoch() {
+  local timestamp="$1"
+  timestamp="$(trim "$timestamp")"
+  if [[ ! "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+    return 1
+  fi
+  jq -nr --arg ts "$timestamp" '$ts | fromdateiso8601 | floor' 2>/dev/null
+}
+
+json_policy_scalar() {
+  local file="$1"
+  local expr="$2"
+  jq -r "$expr // \"\"" "$file" 2>/dev/null || true
+}
+
 trend_summary_json=""
 run_report_list=""
 reports_dir=""
@@ -153,6 +168,8 @@ min_wg_soak_entry_operators="${PROD_GATE_SLO_MIN_WG_SOAK_ENTRY_OPERATORS:-0}"
 min_wg_soak_exit_operators="${PROD_GATE_SLO_MIN_WG_SOAK_EXIT_OPERATORS:-0}"
 min_wg_soak_cross_operator_pairs="${PROD_GATE_SLO_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS:-0}"
 max_evidence_age_sec="${PROD_GATE_SLO_TREND_MAX_EVIDENCE_AGE_SEC:-${PROD_GATE_SLO_MAX_EVIDENCE_AGE_SEC:-0}}"
+max_evidence_future_skew_sec="${PROD_GATE_SLO_ALERT_MAX_EVIDENCE_FUTURE_SKEW_SEC:-${PROD_GATE_SLO_MAX_EVIDENCE_FUTURE_SKEW_SEC:-300}}"
+max_evidence_now_epoch="${PROD_GATE_SLO_ALERT_NOW_EPOCH:-${PROD_GATE_SLO_TREND_NOW_EPOCH:-${PROD_GATE_SLO_NOW_EPOCH:-}}}"
 
 warn_go_rate_pct="${PROD_GATE_SLO_ALERT_WARN_GO_RATE_PCT:-98}"
 critical_go_rate_pct="${PROD_GATE_SLO_ALERT_CRITICAL_GO_RATE_PCT:-90}"
@@ -168,6 +185,25 @@ summary_json=""
 print_summary_json="${PROD_GATE_SLO_ALERT_PRINT_SUMMARY_JSON:-0}"
 
 declare -a run_report_jsons=()
+
+explicit_require_full_sequence=0
+explicit_require_wg_validate_ok=0
+explicit_require_wg_soak_ok=0
+explicit_max_wg_soak_failed_rounds=0
+explicit_require_preflight_ok=0
+explicit_require_bundle_ok=0
+explicit_require_integrity_ok=0
+explicit_require_signoff_ok=0
+explicit_require_incident_snapshot_on_fail=0
+explicit_require_incident_snapshot_artifacts=0
+explicit_require_wg_validate_udp_source=0
+explicit_require_wg_validate_strict_distinct=0
+explicit_require_wg_soak_diversity_pass=0
+explicit_min_wg_soak_selection_lines=0
+explicit_min_wg_soak_entry_operators=0
+explicit_min_wg_soak_exit_operators=0
+explicit_min_wg_soak_cross_operator_pairs=0
+explicit_max_evidence_age_sec=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -196,6 +232,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --require-full-sequence)
+      explicit_require_full_sequence=1
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_full_sequence="${2:-}"
         shift 2
@@ -205,6 +242,7 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --require-wg-validate-ok)
+      explicit_require_wg_validate_ok=1
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_wg_validate_ok="${2:-}"
         shift 2
@@ -214,6 +252,7 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --require-wg-soak-ok)
+      explicit_require_wg_soak_ok=1
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_wg_soak_ok="${2:-}"
         shift 2
@@ -223,10 +262,12 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --max-wg-soak-failed-rounds)
+      explicit_max_wg_soak_failed_rounds=1
       max_wg_soak_failed_rounds="${2:-}"
       shift 2
       ;;
     --require-preflight-ok)
+      explicit_require_preflight_ok=1
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_preflight_ok="${2:-}"
         shift 2
@@ -236,6 +277,7 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --require-bundle-ok)
+      explicit_require_bundle_ok=1
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_bundle_ok="${2:-}"
         shift 2
@@ -245,6 +287,7 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --require-integrity-ok)
+      explicit_require_integrity_ok=1
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_integrity_ok="${2:-}"
         shift 2
@@ -254,6 +297,7 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --require-signoff-ok)
+      explicit_require_signoff_ok=1
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_signoff_ok="${2:-}"
         shift 2
@@ -263,6 +307,7 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --require-incident-snapshot-on-fail)
+      explicit_require_incident_snapshot_on_fail=1
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_incident_snapshot_on_fail="${2:-}"
         shift 2
@@ -272,6 +317,7 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --require-incident-snapshot-artifacts)
+      explicit_require_incident_snapshot_artifacts=1
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_incident_snapshot_artifacts="${2:-}"
         shift 2
@@ -281,6 +327,7 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --require-wg-validate-udp-source)
+      explicit_require_wg_validate_udp_source=1
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_wg_validate_udp_source="${2:-}"
         shift 2
@@ -290,6 +337,7 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --require-wg-validate-strict-distinct)
+      explicit_require_wg_validate_strict_distinct=1
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_wg_validate_strict_distinct="${2:-}"
         shift 2
@@ -299,6 +347,7 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --require-wg-soak-diversity-pass)
+      explicit_require_wg_soak_diversity_pass=1
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         require_wg_soak_diversity_pass="${2:-}"
         shift 2
@@ -308,22 +357,27 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --min-wg-soak-selection-lines)
+      explicit_min_wg_soak_selection_lines=1
       min_wg_soak_selection_lines="${2:-}"
       shift 2
       ;;
     --min-wg-soak-entry-operators)
+      explicit_min_wg_soak_entry_operators=1
       min_wg_soak_entry_operators="${2:-}"
       shift 2
       ;;
     --min-wg-soak-exit-operators)
+      explicit_min_wg_soak_exit_operators=1
       min_wg_soak_exit_operators="${2:-}"
       shift 2
       ;;
     --min-wg-soak-cross-operator-pairs)
+      explicit_min_wg_soak_cross_operator_pairs=1
       min_wg_soak_cross_operator_pairs="${2:-}"
       shift 2
       ;;
     --max-evidence-age-sec)
+      explicit_max_evidence_age_sec=1
       max_evidence_age_sec="${2:-}"
       shift 2
       ;;
@@ -455,6 +509,14 @@ if [[ ! "$max_evidence_age_sec" =~ ^[0-9]+$ ]]; then
   echo "--max-evidence-age-sec must be an integer >= 0"
   exit 2
 fi
+if [[ ! "$max_evidence_future_skew_sec" =~ ^[0-9]+$ ]]; then
+  echo "PROD_GATE_SLO_ALERT_MAX_EVIDENCE_FUTURE_SKEW_SEC must be an integer >= 0"
+  exit 2
+fi
+if [[ -n "$max_evidence_now_epoch" && ! "$max_evidence_now_epoch" =~ ^[0-9]+$ ]]; then
+  echo "PROD_GATE_SLO_ALERT_NOW_EPOCH must be an integer >= 0"
+  exit 2
+fi
 if [[ ! "$show_top_reasons" =~ ^[0-9]+$ ]]; then
   echo "--show-top-reasons must be an integer >= 0"
   exit 2
@@ -564,6 +626,140 @@ if ! jq -e . "$trend_summary_json" >/dev/null 2>&1; then
   exit 1
 fi
 
+declare -a freshness_reasons=()
+declare -a policy_reasons=()
+
+trend_generated_at_utc="$(jq -r '.generated_at_utc // ""' "$trend_summary_json" 2>/dev/null || true)"
+freshness_status="disabled"
+freshness_age_sec=""
+if ((max_evidence_age_sec > 0)); then
+  freshness_status="ok"
+  if [[ -n "$max_evidence_now_epoch" ]]; then
+    freshness_now_epoch="$max_evidence_now_epoch"
+  else
+    freshness_now_epoch="$(date -u +%s)"
+  fi
+  if [[ -z "$trend_generated_at_utc" ]]; then
+    freshness_status="fail"
+    freshness_reasons+=("trend summary generated_at_utc timestamp missing while --max-evidence-age-sec is enabled")
+  elif ! trend_generated_epoch="$(iso8601_utc_to_epoch "$trend_generated_at_utc" 2>/dev/null)"; then
+    freshness_status="fail"
+    freshness_reasons+=("trend summary generated_at_utc timestamp is invalid (value=$trend_generated_at_utc)")
+  elif (( trend_generated_epoch > freshness_now_epoch + max_evidence_future_skew_sec )); then
+    freshness_status="fail"
+    freshness_age_sec="$((freshness_now_epoch - trend_generated_epoch))"
+    freshness_reasons+=("trend summary generated_at_utc timestamp is too far in the future (value=$trend_generated_at_utc, future_skew_sec=$((trend_generated_epoch - freshness_now_epoch)))")
+  else
+    freshness_age_sec="$((freshness_now_epoch - trend_generated_epoch))"
+    if (( freshness_age_sec > max_evidence_age_sec )); then
+      freshness_status="fail"
+      freshness_reasons+=("trend summary generated_at_utc timestamp is stale (value=$trend_generated_at_utc, age_sec=$freshness_age_sec, max_evidence_age_sec=$max_evidence_age_sec)")
+    fi
+  fi
+  trend_runs_total="$(jq -r '.runs | if type == "array" then length else 0 end' "$trend_summary_json" 2>/dev/null || echo 0)"
+  trend_reports_total_for_freshness="$(jq -r '.reports_total // 0' "$trend_summary_json" 2>/dev/null || echo 0)"
+  if [[ "$trend_reports_total_for_freshness" =~ ^[0-9]+$ && "$trend_reports_total_for_freshness" -gt 0 && "$trend_runs_total" -eq 0 ]]; then
+    freshness_status="fail"
+    freshness_reasons+=("trend summary runs are missing while --max-evidence-age-sec is enabled")
+  fi
+  while IFS=$'\t' read -r run_idx run_timestamp run_path || [[ -n "${run_idx:-}" ]]; do
+    [[ -z "${run_idx:-}" ]] && continue
+    if [[ -z "$run_timestamp" ]]; then
+      freshness_status="fail"
+      freshness_reasons+=("trend summary run[$run_idx] generated_at_utc timestamp missing while --max-evidence-age-sec is enabled (path=${run_path:-unset})")
+      continue
+    fi
+    if ! run_generated_epoch="$(iso8601_utc_to_epoch "$run_timestamp" 2>/dev/null)"; then
+      freshness_status="fail"
+      freshness_reasons+=("trend summary run[$run_idx] generated_at_utc timestamp is invalid (value=$run_timestamp, path=${run_path:-unset})")
+      continue
+    fi
+    if (( run_generated_epoch > freshness_now_epoch + max_evidence_future_skew_sec )); then
+      freshness_status="fail"
+      freshness_reasons+=("trend summary run[$run_idx] generated_at_utc timestamp is too far in the future (value=$run_timestamp, future_skew_sec=$((run_generated_epoch - freshness_now_epoch)), path=${run_path:-unset})")
+      continue
+    fi
+    run_age_sec="$((freshness_now_epoch - run_generated_epoch))"
+    if (( run_age_sec > max_evidence_age_sec )); then
+      freshness_status="fail"
+      freshness_reasons+=("trend summary run[$run_idx] generated_at_utc timestamp is stale (value=$run_timestamp, age_sec=$run_age_sec, max_evidence_age_sec=$max_evidence_age_sec, path=${run_path:-unset})")
+    fi
+  done < <(
+    jq -r '
+      (.runs // [])
+      | to_entries[]
+      | [(.key + 1), (.value.generated_at_utc // ""), (.value.report_path // "")]
+      | @tsv
+    ' "$trend_summary_json" 2>/dev/null || true
+  )
+fi
+
+check_policy_bool() {
+  local explicit="$1"
+  local field="$2"
+  local requested="$3"
+  local actual=""
+  [[ "$explicit" != "1" || "$requested" != "1" ]] && return
+  actual="$(json_policy_scalar "$trend_summary_json" ".policy.$field")"
+  if [[ "$actual" != "1" && "$actual" != "true" ]]; then
+    policy_reasons+=("trend policy $field does not satisfy alert request (trend=${actual:-missing}, required=1)")
+  fi
+}
+
+check_policy_min() {
+  local explicit="$1"
+  local field="$2"
+  local requested="$3"
+  local actual=""
+  [[ "$explicit" != "1" || "$requested" -eq 0 ]] && return
+  actual="$(json_policy_scalar "$trend_summary_json" ".policy.$field")"
+  if [[ ! "$actual" =~ ^[0-9]+$ ]]; then
+    policy_reasons+=("trend policy $field does not satisfy alert request (trend=${actual:-missing}, required>=$requested)")
+  elif (( actual < requested )); then
+    policy_reasons+=("trend policy $field does not satisfy alert request (trend=$actual, required>=$requested)")
+  fi
+}
+
+check_policy_max() {
+  local explicit="$1"
+  local field="$2"
+  local requested="$3"
+  local actual=""
+  [[ "$explicit" != "1" ]] && return
+  actual="$(json_policy_scalar "$trend_summary_json" ".policy.$field")"
+  if [[ ! "$actual" =~ ^[0-9]+$ ]]; then
+    policy_reasons+=("trend policy $field does not satisfy alert request (trend=${actual:-missing}, required<=$requested)")
+  elif (( actual > requested )); then
+    policy_reasons+=("trend policy $field does not satisfy alert request (trend=$actual, required<=$requested)")
+  fi
+}
+
+check_policy_bool "$explicit_require_full_sequence" "require_full_sequence" "$require_full_sequence"
+check_policy_bool "$explicit_require_wg_validate_ok" "require_wg_validate_ok" "$require_wg_validate_ok"
+check_policy_bool "$explicit_require_wg_soak_ok" "require_wg_soak_ok" "$require_wg_soak_ok"
+check_policy_max "$explicit_max_wg_soak_failed_rounds" "max_wg_soak_failed_rounds" "$max_wg_soak_failed_rounds"
+check_policy_bool "$explicit_require_preflight_ok" "require_preflight_ok" "$require_preflight_ok"
+check_policy_bool "$explicit_require_bundle_ok" "require_bundle_ok" "$require_bundle_ok"
+check_policy_bool "$explicit_require_integrity_ok" "require_integrity_ok" "$require_integrity_ok"
+check_policy_bool "$explicit_require_signoff_ok" "require_signoff_ok" "$require_signoff_ok"
+check_policy_bool "$explicit_require_incident_snapshot_on_fail" "require_incident_snapshot_on_fail" "$require_incident_snapshot_on_fail"
+check_policy_bool "$explicit_require_incident_snapshot_artifacts" "require_incident_snapshot_artifacts" "$require_incident_snapshot_artifacts"
+check_policy_bool "$explicit_require_wg_validate_udp_source" "require_wg_validate_udp_source" "$require_wg_validate_udp_source"
+check_policy_bool "$explicit_require_wg_validate_strict_distinct" "require_wg_validate_strict_distinct" "$require_wg_validate_strict_distinct"
+check_policy_bool "$explicit_require_wg_soak_diversity_pass" "require_wg_soak_diversity_pass" "$require_wg_soak_diversity_pass"
+check_policy_min "$explicit_min_wg_soak_selection_lines" "min_wg_soak_selection_lines" "$min_wg_soak_selection_lines"
+check_policy_min "$explicit_min_wg_soak_entry_operators" "min_wg_soak_entry_operators" "$min_wg_soak_entry_operators"
+check_policy_min "$explicit_min_wg_soak_exit_operators" "min_wg_soak_exit_operators" "$min_wg_soak_exit_operators"
+check_policy_min "$explicit_min_wg_soak_cross_operator_pairs" "min_wg_soak_cross_operator_pairs" "$min_wg_soak_cross_operator_pairs"
+if (( max_evidence_age_sec > 0 )); then
+  trend_policy_max_evidence_age_sec="$(json_policy_scalar "$trend_summary_json" '.policy.max_evidence_age_sec // .filters.max_evidence_age_sec')"
+  if [[ ! "$trend_policy_max_evidence_age_sec" =~ ^[0-9]+$ ]]; then
+    policy_reasons+=("trend policy max_evidence_age_sec does not satisfy alert request (trend=${trend_policy_max_evidence_age_sec:-missing}, required<=$max_evidence_age_sec)")
+  elif (( trend_policy_max_evidence_age_sec == 0 || trend_policy_max_evidence_age_sec > max_evidence_age_sec )); then
+    policy_reasons+=("trend policy max_evidence_age_sec does not satisfy alert request (trend=$trend_policy_max_evidence_age_sec, required<=$max_evidence_age_sec)")
+  fi
+fi
+
 go_rate_pct="$(jq -r '.go_rate_pct // 0' "$trend_summary_json")"
 no_go_count="$(jq -r '.no_go // 0' "$trend_summary_json")"
 eval_errors="$(jq -r '.evaluation_errors // 0' "$trend_summary_json")"
@@ -584,6 +780,17 @@ fi
 severity="OK"
 severity_rank=0
 declare -a alert_reasons=()
+
+for reason in "${freshness_reasons[@]}"; do
+  severity="CRITICAL"
+  severity_rank=2
+  alert_reasons+=("$reason")
+done
+for reason in "${policy_reasons[@]}"; do
+  severity="CRITICAL"
+  severity_rank=2
+  alert_reasons+=("$reason")
+done
 
 if float_lt "$go_rate_pct" "$critical_go_rate_pct"; then
   severity="CRITICAL"
@@ -615,7 +822,7 @@ if ((severity_rank < 2)); then
   if ((eval_errors >= warn_eval_errors)); then
     severity="WARN"
     severity_rank=1
-alert_reasons+=("evaluation_errors $eval_errors >= warn_eval_errors $warn_eval_errors")
+    alert_reasons+=("evaluation_errors $eval_errors >= warn_eval_errors $warn_eval_errors")
   fi
 fi
 
@@ -644,6 +851,8 @@ incident_attachment_count="$(jq -r '.incident_snapshot.latest_failed_run_report.
 echo "[prod-gate-slo-alert] severity=$severity reports_total=$reports_total go_rate_pct=$go_rate_pct no_go=$no_go_count evaluation_errors=$eval_errors"
 echo "[prod-gate-slo-alert] thresholds warn_go_rate_pct=$warn_go_rate_pct critical_go_rate_pct=$critical_go_rate_pct warn_no_go_count=$warn_no_go_count critical_no_go_count=$critical_no_go_count warn_eval_errors=$warn_eval_errors critical_eval_errors=$critical_eval_errors"
 echo "[prod-gate-slo-alert] policy require_wg_validate_udp_source=$require_wg_validate_udp_source require_wg_validate_strict_distinct=$require_wg_validate_strict_distinct require_wg_soak_diversity_pass=$require_wg_soak_diversity_pass min_wg_soak_selection_lines=$min_wg_soak_selection_lines min_wg_soak_entry_operators=$min_wg_soak_entry_operators min_wg_soak_exit_operators=$min_wg_soak_exit_operators min_wg_soak_cross_operator_pairs=$min_wg_soak_cross_operator_pairs"
+echo "[prod-gate-slo-alert] freshness status=$freshness_status max_evidence_age_sec=$max_evidence_age_sec trend_generated_at_utc=${trend_generated_at_utc:-unset} age_sec=${freshness_age_sec:-unset}"
+echo "[prod-gate-slo-alert] trend_policy_check reasons=${#policy_reasons[@]}"
 echo "[prod-gate-slo-alert] trend_source=$trend_source trend_summary_json=$trend_summary_json"
 if [[ -n "$incident_source_run_report_json" || -n "$incident_summary_json" || -n "$incident_report_md" || -n "$incident_attachment_manifest" || -n "$incident_attachment_skipped" ]]; then
   echo "[prod-gate-slo-alert] incident_handoff source_summary_json=${incident_source_summary_json:-unset} source_run_report=${incident_source_run_report_json:-unset} summary_json=${incident_summary_json:-unset} report_md=${incident_report_md:-unset} attachment_manifest=${incident_attachment_manifest:-unset} attachment_skipped=${incident_attachment_skipped:-unset} attachment_count=${incident_attachment_count}"
@@ -662,6 +871,18 @@ for reason in "${alert_reasons[@]}"; do
   printf '%s\n' "$reason" >>"$reasons_file"
 done
 reasons_json="$(jq -Rn '[inputs]' <"$reasons_file")"
+freshness_reasons_file="$tmp_dir/freshness_reasons.txt"
+: >"$freshness_reasons_file"
+for reason in "${freshness_reasons[@]}"; do
+  printf '%s\n' "$reason" >>"$freshness_reasons_file"
+done
+freshness_reasons_json="$(jq -Rn '[inputs]' <"$freshness_reasons_file")"
+policy_reasons_file="$tmp_dir/policy_reasons.txt"
+: >"$policy_reasons_file"
+for reason in "${policy_reasons[@]}"; do
+  printf '%s\n' "$reason" >>"$policy_reasons_file"
+done
+policy_reasons_json="$(jq -Rn '[inputs]' <"$policy_reasons_file")"
 top_reasons_json="$(jq -c '.top_no_go_reasons // []' "$trend_summary_json" 2>/dev/null || echo '[]')"
 
 summary_payload="$(
@@ -682,6 +903,13 @@ summary_payload="$(
     --argjson critical_eval_errors "$critical_eval_errors" \
     --argjson fail_on_warn "$fail_on_warn" \
     --argjson fail_on_critical "$fail_on_critical" \
+    --argjson max_evidence_age_sec "$max_evidence_age_sec" \
+    --argjson max_evidence_future_skew_sec "$max_evidence_future_skew_sec" \
+    --arg trend_generated_at_utc "$trend_generated_at_utc" \
+    --arg freshness_status "$freshness_status" \
+    --arg freshness_age_sec "$freshness_age_sec" \
+    --argjson freshness_reasons "$freshness_reasons_json" \
+    --argjson policy_reasons "$policy_reasons_json" \
     --argjson require_wg_validate_udp_source "$require_wg_validate_udp_source" \
     --argjson require_wg_validate_strict_distinct "$require_wg_validate_strict_distinct" \
     --argjson require_wg_soak_diversity_pass "$require_wg_soak_diversity_pass" \
@@ -738,6 +966,14 @@ summary_payload="$(
         fail_on_warn: $fail_on_warn,
         fail_on_critical: $fail_on_critical
       },
+      evidence_freshness: {
+        max_evidence_age_sec: $max_evidence_age_sec,
+        max_evidence_future_skew_sec: $max_evidence_future_skew_sec,
+        trend_generated_at_utc: ($trend_generated_at_utc // ""),
+        age_sec: (if $freshness_age_sec == "" then null else ($freshness_age_sec | tonumber) end),
+        status: $freshness_status,
+        reasons: $freshness_reasons
+      },
       wg_evidence_policy: {
         require_wg_validate_udp_source: $require_wg_validate_udp_source,
         require_wg_validate_strict_distinct: $require_wg_validate_strict_distinct,
@@ -748,6 +984,10 @@ summary_payload="$(
         min_wg_soak_cross_operator_pairs: $min_wg_soak_cross_operator_pairs
       },
       trend_policy: $trend_policy,
+      trend_policy_check: {
+        status: (if ($policy_reasons | length) == 0 then "ok" else "fail" end),
+        reasons: $policy_reasons
+      },
       incident_snapshot: {
         latest_failed_run_report: {
           source_run_report_json: {path: ($incident_source_run_report_json // ""), exists: $incident_source_run_report_exists},

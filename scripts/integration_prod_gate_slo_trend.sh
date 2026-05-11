@@ -323,8 +323,38 @@ if ! jq -e '.policy.max_evidence_age_sec == 10800 and .filters.max_evidence_age_
   exit 1
 fi
 
-echo "[prod-gate-slo-trend] stale evidence fail-close"
+echo "[prod-gate-slo-trend] stale evidence default fail-close"
+STALE_DEFAULT_SUMMARY_JSON="$TMP_DIR/slo_trend_stale_default_summary.json"
 STALE_NOW_EPOCH="$(jq -nr '"2026-03-10T13:00:00Z" | fromdateiso8601 | floor')"
+set +e
+PROD_GATE_SLO_NOW_EPOCH="$STALE_NOW_EPOCH" \
+./scripts/prod_gate_slo_trend.sh \
+  --reports-dir "$REPORTS_DIR" \
+  --max-reports 3 \
+  --max-wg-soak-failed-rounds 0 \
+  --max-evidence-age-sec 60 \
+  --summary-json "$STALE_DEFAULT_SUMMARY_JSON" \
+  --show-details 0 \
+  --show-top-reasons 3 >/tmp/integration_prod_gate_slo_trend_stale_default.log 2>&1
+stale_default_trend_rc=$?
+set -e
+if [[ "$stale_default_trend_rc" -eq 0 ]]; then
+  echo "expected non-zero rc when freshness-enabled trend sees stale evidence by default"
+  cat /tmp/integration_prod_gate_slo_trend_stale_default.log
+  exit 1
+fi
+if ! rg -q '\[prod-gate-slo-trend\] trend_decision=NO-GO' /tmp/integration_prod_gate_slo_trend_stale_default.log; then
+  echo "expected NO-GO trend decision for stale evidence default"
+  cat /tmp/integration_prod_gate_slo_trend_stale_default.log
+  exit 1
+fi
+if ! jq -e '.decision == "NO-GO" and .freshness_no_go > 0' "$STALE_DEFAULT_SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "stale default trend summary missing freshness NO-GO"
+  cat "$STALE_DEFAULT_SUMMARY_JSON"
+  exit 1
+fi
+
+echo "[prod-gate-slo-trend] stale evidence fail-close"
 set +e
 PROD_GATE_SLO_NOW_EPOCH="$STALE_NOW_EPOCH" \
 ./scripts/prod_gate_slo_trend.sh \

@@ -120,6 +120,140 @@ if ! rg -q 'attachment_manifest=/tmp/run_b/incident_attachments_manifest.json' /
   exit 1
 fi
 
+echo "[prod-gate-slo-alert] provided trend freshness fail-close"
+MISSING_FRESHNESS_JSON="$TMP_DIR/alert_missing_freshness.json"
+set +e
+./scripts/prod_gate_slo_alert.sh \
+  --trend-summary-json "$OK_SUMMARY" \
+  --max-evidence-age-sec 600 \
+  --fail-on-critical 1 \
+  --summary-json "$MISSING_FRESHNESS_JSON" >/tmp/integration_prod_gate_slo_alert_missing_freshness.log 2>&1
+missing_freshness_rc=$?
+set -e
+if [[ "$missing_freshness_rc" -ne 2 ]]; then
+  echo "expected rc=2 for missing trend freshness fail-close (got $missing_freshness_rc)"
+  cat /tmp/integration_prod_gate_slo_alert_missing_freshness.log
+  exit 1
+fi
+if ! jq -e '.severity == "CRITICAL" and any(.evidence_freshness.reasons[]; test("generated_at_utc timestamp missing"))' "$MISSING_FRESHNESS_JSON" >/dev/null 2>&1; then
+  echo "alert missing freshness summary JSON missing expected CRITICAL reason"
+  cat "$MISSING_FRESHNESS_JSON"
+  exit 1
+fi
+
+FRESH_POLICY_SUMMARY="$TMP_DIR/summary_fresh_policy.json"
+cat >"$FRESH_POLICY_SUMMARY" <<'EOF_FRESH_POLICY_SUMMARY'
+{
+  "generated_at_utc": "2026-03-10T00:05:00Z",
+  "go_rate_pct": 100,
+  "no_go": 0,
+  "evaluation_errors": 0,
+  "reports_total": 1,
+  "filters": {"max_evidence_age_sec": 600},
+  "policy": {
+    "require_full_sequence": 1,
+    "require_wg_validate_ok": 1,
+    "require_wg_soak_ok": 1,
+    "max_wg_soak_failed_rounds": 0,
+    "require_preflight_ok": 1,
+    "require_bundle_ok": 1,
+    "require_integrity_ok": 1,
+    "require_signoff_ok": 1,
+    "require_incident_snapshot_on_fail": 1,
+    "require_incident_snapshot_artifacts": 1,
+    "require_wg_validate_udp_source": 1,
+    "require_wg_validate_strict_distinct": 1,
+    "require_wg_soak_diversity_pass": 1,
+    "min_wg_soak_selection_lines": 8,
+    "min_wg_soak_entry_operators": 2,
+    "min_wg_soak_exit_operators": 2,
+    "min_wg_soak_cross_operator_pairs": 1,
+    "max_evidence_age_sec": 600
+  },
+  "runs": [
+    {"generated_at_utc": "2026-03-10T00:04:30Z", "decision": "GO", "report_path": "/tmp/run_a/prod_bundle_run_report.json", "first_no_go_reason": ""}
+  ],
+  "top_no_go_reasons": []
+}
+EOF_FRESH_POLICY_SUMMARY
+
+FRESH_POLICY_NOW_EPOCH="$(jq -nr '"2026-03-10T00:06:00Z" | fromdateiso8601 | floor')"
+PROD_GATE_SLO_ALERT_NOW_EPOCH="$FRESH_POLICY_NOW_EPOCH" \
+./scripts/prod_gate_slo_alert.sh \
+  --trend-summary-json "$FRESH_POLICY_SUMMARY" \
+  --max-evidence-age-sec 600 \
+  --require-full-sequence 1 \
+  --require-wg-validate-ok 1 \
+  --require-wg-soak-ok 1 \
+  --max-wg-soak-failed-rounds 0 \
+  --require-preflight-ok 1 \
+  --require-bundle-ok 1 \
+  --require-integrity-ok 1 \
+  --require-signoff-ok 1 \
+  --require-incident-snapshot-on-fail 1 \
+  --require-incident-snapshot-artifacts 1 \
+  --require-wg-validate-udp-source 1 \
+  --require-wg-validate-strict-distinct 1 \
+  --require-wg-soak-diversity-pass 1 \
+  --min-wg-soak-selection-lines 8 \
+  --min-wg-soak-entry-operators 2 \
+  --min-wg-soak-exit-operators 2 \
+  --min-wg-soak-cross-operator-pairs 1 \
+  --fail-on-critical 1 \
+  --summary-json "$TMP_DIR/alert_fresh_policy_out.json" >/tmp/integration_prod_gate_slo_alert_fresh_policy.log 2>&1
+if ! jq -e '.severity == "OK" and .evidence_freshness.status == "ok" and .trend_policy_check.status == "ok"' "$TMP_DIR/alert_fresh_policy_out.json" >/dev/null 2>&1; then
+  echo "fresh policy alert did not stay OK"
+  cat "$TMP_DIR/alert_fresh_policy_out.json"
+  exit 1
+fi
+
+STALE_POLICY_SUMMARY="$TMP_DIR/summary_stale_policy.json"
+jq '.generated_at_utc = "2026-03-10T00:00:00Z" | .runs[0].generated_at_utc = "2026-03-10T00:00:00Z"' "$FRESH_POLICY_SUMMARY" >"$STALE_POLICY_SUMMARY"
+STALE_POLICY_NOW_EPOCH="$(jq -nr '"2026-03-10T00:30:00Z" | fromdateiso8601 | floor')"
+set +e
+PROD_GATE_SLO_ALERT_NOW_EPOCH="$STALE_POLICY_NOW_EPOCH" \
+./scripts/prod_gate_slo_alert.sh \
+  --trend-summary-json "$STALE_POLICY_SUMMARY" \
+  --max-evidence-age-sec 600 \
+  --fail-on-critical 1 \
+  --summary-json "$TMP_DIR/alert_stale_policy_out.json" >/tmp/integration_prod_gate_slo_alert_stale_policy.log 2>&1
+stale_policy_rc=$?
+set -e
+if [[ "$stale_policy_rc" -ne 2 ]]; then
+  echo "expected rc=2 for stale provided trend summary (got $stale_policy_rc)"
+  cat /tmp/integration_prod_gate_slo_alert_stale_policy.log
+  exit 1
+fi
+if ! jq -e '.severity == "CRITICAL" and any(.evidence_freshness.reasons[]; test("timestamp is stale"))' "$TMP_DIR/alert_stale_policy_out.json" >/dev/null 2>&1; then
+  echo "stale provided trend summary did not produce expected freshness reason"
+  cat "$TMP_DIR/alert_stale_policy_out.json"
+  exit 1
+fi
+
+WEAK_POLICY_SUMMARY="$TMP_DIR/summary_weak_policy.json"
+jq '.policy.require_signoff_ok = 0 | .policy.require_wg_validate_udp_source = 0 | .policy.max_evidence_age_sec = 0 | .filters.max_evidence_age_sec = 0' "$FRESH_POLICY_SUMMARY" >"$WEAK_POLICY_SUMMARY"
+set +e
+PROD_GATE_SLO_ALERT_NOW_EPOCH="$FRESH_POLICY_NOW_EPOCH" \
+./scripts/prod_gate_slo_alert.sh \
+  --trend-summary-json "$WEAK_POLICY_SUMMARY" \
+  --max-evidence-age-sec 600 \
+  --require-signoff-ok 1 \
+  --require-wg-validate-udp-source 1 \
+  --fail-on-critical 1 \
+  --summary-json "$TMP_DIR/alert_weak_policy_out.json" >/tmp/integration_prod_gate_slo_alert_weak_policy.log 2>&1
+weak_policy_rc=$?
+set -e
+if [[ "$weak_policy_rc" -ne 2 ]]; then
+  echo "expected rc=2 for weak trend policy fail-close (got $weak_policy_rc)"
+  cat /tmp/integration_prod_gate_slo_alert_weak_policy.log
+  exit 1
+fi
+if ! jq -e '.severity == "CRITICAL" and any(.trend_policy_check.reasons[]; test("require_signoff_ok")) and any(.trend_policy_check.reasons[]; test("require_wg_validate_udp_source")) and any(.trend_policy_check.reasons[]; test("max_evidence_age_sec"))' "$TMP_DIR/alert_weak_policy_out.json" >/dev/null 2>&1; then
+  echo "weak trend policy summary missing expected policy reasons"
+  cat "$TMP_DIR/alert_weak_policy_out.json"
+  exit 1
+fi
+
 echo "[prod-gate-slo-alert] WARN fail-close"
 set +e
 ./scripts/prod_gate_slo_alert.sh \
@@ -187,10 +321,28 @@ if [[ -n "$summary_file" ]]; then
   mkdir -p "$(dirname "$summary_file")"
   cat >"$summary_file" <<'EOF_TREND_SUMMARY'
 {
+  "generated_at_utc": "2026-03-10T00:05:00Z",
   "go_rate_pct": 99.2,
   "no_go": 0,
   "evaluation_errors": 0,
   "reports_total": 4,
+  "filters": {"max_evidence_age_sec": 600},
+  "policy": {
+    "require_signoff_ok": 1,
+    "require_incident_snapshot_on_fail": 1,
+    "require_incident_snapshot_artifacts": 1,
+    "require_wg_validate_udp_source": 1,
+    "require_wg_validate_strict_distinct": 1,
+    "require_wg_soak_diversity_pass": 1,
+    "min_wg_soak_selection_lines": 8,
+    "min_wg_soak_entry_operators": 2,
+    "min_wg_soak_exit_operators": 2,
+    "min_wg_soak_cross_operator_pairs": 1,
+    "max_evidence_age_sec": 600
+  },
+  "runs": [
+    {"generated_at_utc": "2026-03-10T00:04:30Z", "decision": "GO", "report_path": "/tmp/run_a/prod_bundle_run_report.json", "first_no_go_reason": ""}
+  ],
   "top_no_go_reasons": []
 }
 EOF_TREND_SUMMARY
@@ -201,6 +353,7 @@ chmod +x "$FAKE_TREND"
 
 TREND_CAPTURE_FILE="$TREND_CAPTURE" \
 PROD_GATE_SLO_TREND_SCRIPT="$FAKE_TREND" \
+PROD_GATE_SLO_ALERT_NOW_EPOCH="$FRESH_POLICY_NOW_EPOCH" \
 ./scripts/prod_gate_slo_alert.sh \
   --reports-dir /tmp/prod_reports \
   --max-reports 7 \

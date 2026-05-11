@@ -180,6 +180,7 @@ Usage:
     [--trend-min-wg-soak-cross-operator-pairs N] \
     [--trend-max-reports N] \
     [--trend-since-hours N] \
+    [--trend-max-evidence-age-sec N] \
     [--trend-show-top-reasons N] \
     [--warn-go-rate-pct N] \
     [--critical-go-rate-pct N] \
@@ -261,6 +262,7 @@ trend_min_wg_soak_exit_operators="${PROD_PILOT_COHORT_TREND_MIN_WG_SOAK_EXIT_OPE
 trend_min_wg_soak_cross_operator_pairs="${PROD_PILOT_COHORT_TREND_MIN_WG_SOAK_CROSS_OPERATOR_PAIRS:-2}"
 trend_max_reports="${PROD_PILOT_COHORT_TREND_MAX_REPORTS:-0}"
 trend_since_hours="${PROD_PILOT_COHORT_TREND_SINCE_HOURS:-0}"
+trend_max_evidence_age_sec="${PROD_PILOT_COHORT_TREND_MAX_EVIDENCE_AGE_SEC:-${PROD_GATE_SLO_MAX_EVIDENCE_AGE_SEC:-600}}"
 trend_show_top_reasons="${PROD_PILOT_COHORT_TREND_SHOW_TOP_REASONS:-5}"
 warn_go_rate_pct="${PROD_PILOT_COHORT_ALERT_WARN_GO_RATE_PCT:-98}"
 critical_go_rate_pct="${PROD_PILOT_COHORT_ALERT_CRITICAL_GO_RATE_PCT:-90}"
@@ -399,6 +401,10 @@ while [[ $# -gt 0 ]]; do
       trend_since_hours="${2:-}"
       shift 2
       ;;
+    --trend-max-evidence-age-sec)
+      trend_max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --trend-show-top-reasons)
       trend_show_top_reasons="${2:-}"
       shift 2
@@ -507,6 +513,7 @@ int_or_die "--rounds" "$rounds"
 int_or_die "--pause-sec" "$pause_sec"
 int_or_die "--trend-max-reports" "$trend_max_reports"
 int_or_die "--trend-since-hours" "$trend_since_hours"
+int_or_die "--trend-max-evidence-age-sec" "$trend_max_evidence_age_sec"
 int_or_die "--trend-show-top-reasons" "$trend_show_top_reasons"
 int_or_die "--trend-min-wg-soak-selection-lines" "$trend_min_wg_soak_selection_lines"
 int_or_die "--trend-min-wg-soak-entry-operators" "$trend_min_wg_soak_entry_operators"
@@ -759,6 +766,7 @@ if [[ -s "$report_list_file" ]]; then
     --run-report-list "$report_list_file" \
     --max-reports "$trend_max_reports" \
     --since-hours "$trend_since_hours" \
+    --max-evidence-age-sec "$trend_max_evidence_age_sec" \
     --show-details 0 \
     --show-top-reasons "$trend_show_top_reasons" \
     --fail-on-any-no-go "$trend_fail_on_any_no_go" \
@@ -779,6 +787,7 @@ if [[ -s "$report_list_file" ]]; then
   set +e
   "$SLO_ALERT_SCRIPT" \
     --trend-summary-json "$trend_summary_json" \
+    --max-evidence-age-sec "$trend_max_evidence_age_sec" \
     --require-wg-validate-udp-source "$trend_require_wg_validate_udp_source" \
     --require-wg-validate-strict-distinct "$trend_require_wg_validate_strict_distinct" \
     --require-wg-soak-diversity-pass "$trend_require_wg_soak_diversity_pass" \
@@ -993,6 +1002,7 @@ jq -nc \
   --argjson trend_show_top_reasons "$trend_show_top_reasons" \
   --argjson trend_max_reports "$trend_max_reports" \
   --argjson trend_since_hours "$trend_since_hours" \
+  --argjson trend_max_evidence_age_sec "$trend_max_evidence_age_sec" \
   --argjson trend_min_go_rate_pct "$trend_min_go_rate_pct" \
   --argjson trend_rc "$trend_rc" \
   --argjson alert_rc "$alert_rc" \
@@ -1059,6 +1069,7 @@ jq -nc \
       trend_show_top_reasons:$trend_show_top_reasons,
       trend_max_reports:$trend_max_reports,
       trend_since_hours:$trend_since_hours,
+      trend_max_evidence_age_sec:$trend_max_evidence_age_sec,
       trend_min_go_rate_pct:$trend_min_go_rate_pct,
       max_alert_severity:$max_alert_severity,
       bundle_outputs:$bundle_outputs,

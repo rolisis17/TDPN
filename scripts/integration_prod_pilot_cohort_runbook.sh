@@ -360,8 +360,18 @@ if ! rg -q -- '--min-wg-soak-cross-operator-pairs 2' "$TREND_CAPTURE"; then
   cat "$TREND_CAPTURE"
   exit 1
 fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$TREND_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing trend --max-evidence-age-sec 600"
+  cat "$TREND_CAPTURE"
+  exit 1
+fi
 if ! rg -q -- '--trend-summary-json ' "$ALERT_CAPTURE"; then
   echo "prod-pilot-cohort success path missing alert trend-summary-json input"
+  cat "$ALERT_CAPTURE"
+  exit 1
+fi
+if ! rg -q -- '--max-evidence-age-sec 600' "$ALERT_CAPTURE"; then
+  echo "prod-pilot-cohort success path missing alert --max-evidence-age-sec 600"
   cat "$ALERT_CAPTURE"
   exit 1
 fi
@@ -453,6 +463,11 @@ fi
 if [[ "$(jq -r '.policy.max_alert_severity' "$ALERT_FAIL_SUMMARY")" != "WARN" ]]; then
   echo "prod-pilot-cohort alert fail summary expected policy.max_alert_severity=WARN"
   cat "$ALERT_FAIL_SUMMARY"
+  exit 1
+fi
+if [[ "$(jq -r '.policy.trend_max_evidence_age_sec' "$SUCCESS_SUMMARY")" != "600" ]]; then
+  echo "prod-pilot-cohort success summary expected policy.trend_max_evidence_age_sec=600"
+  cat "$SUCCESS_SUMMARY"
   exit 1
 fi
 if [[ "$(jq -r '.bundle.created' "$ALERT_FAIL_SUMMARY")" != "true" ]]; then

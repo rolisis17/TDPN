@@ -276,6 +276,11 @@ if ! printf '%s\n' "$dashboard_line" | rg -q -- '--print-dashboard 1'; then
   cat "$CAPTURE"
   exit 1
 fi
+if ! printf '%s\n' "$dashboard_line" | rg -q -- '--max-evidence-age-sec 600'; then
+  echo "prod-pilot wrapper missing dashboard --max-evidence-age-sec 600"
+  cat "$CAPTURE"
+  exit 1
+fi
 if ! printf '%s\n' "$dashboard_line" | rg -q -- '--require-wg-validate-udp-source 1'; then
   echo "prod-pilot wrapper missing dashboard --require-wg-validate-udp-source 1"
   cat "$CAPTURE"

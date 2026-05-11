@@ -561,6 +561,7 @@ total_reports=0
 go_reports=0
 no_go_reports=0
 eval_errors=0
+freshness_no_go_reports=0
 incident_source_run_report_json=""
 incident_source_run_report_exists="0"
 incident_source_summary_json=""
@@ -635,17 +636,24 @@ while IFS=$'\t' read -r _mtime report_path || [[ -n "${report_path:-}" ]]; do
     go_reports=$((go_reports + 1))
   else
     no_go_reports=$((no_go_reports + 1))
+    freshness_reason_seen=0
     while IFS= read -r reason || [[ -n "$reason" ]]; do
       reason="$(trim "${reason#- }")"
       [[ -z "$reason" ]] && continue
       if [[ -z "$first_reason" ]]; then
         first_reason="$reason"
       fi
+      if [[ "$reason" == *"timestamp missing while --max-evidence-age-sec is enabled"* || "$reason" == *"timestamp is invalid"* || "$reason" == *"timestamp is too far in the future"* || "$reason" == *"timestamp is stale"* ]]; then
+        freshness_reason_seen=1
+      fi
       reason_counts["$reason"]=$(( ${reason_counts["$reason"]:-0} + 1 ))
     done < <(sed -nE 's/^  - (.*)$/\1/p' "$out_file")
     if [[ -z "$first_reason" ]]; then
       first_reason="unspecified no-go reason"
       reason_counts["$first_reason"]=$(( ${reason_counts["$first_reason"]:-0} + 1 ))
+    fi
+    if [[ "${freshness_reason_seen:-0}" == "1" ]]; then
+      freshness_no_go_reports=$((freshness_no_go_reports + 1))
     fi
     if [[ -z "$incident_source_run_report_json" ]]; then
       candidate_incident_summary_json="$(abs_path "$(jq -r '.incident_snapshot.summary_json // ""' "$report_path" 2>/dev/null || true)")"
@@ -698,6 +706,7 @@ go_rate_pct="$(awk -v g="$go_reports" -v t="$total_reports" 'BEGIN { if (t == 0)
 echo "[prod-gate-slo-trend] reports_total=$total_reports go=$go_reports no_go=$no_go_reports go_rate_pct=$go_rate_pct"
 echo "[prod-gate-slo-trend] filters max_reports=$max_reports since_hours=$since_hours"
 echo "[prod-gate-slo-trend] policy require_full_sequence=$require_full_sequence require_wg_validate_ok=$require_wg_validate_ok require_wg_soak_ok=$require_wg_soak_ok max_wg_soak_failed_rounds=$max_wg_soak_failed_rounds require_preflight_ok=$require_preflight_ok require_bundle_ok=$require_bundle_ok require_integrity_ok=$require_integrity_ok require_signoff_ok=$require_signoff_ok require_wg_validate_udp_source=$require_wg_validate_udp_source require_wg_validate_strict_distinct=$require_wg_validate_strict_distinct require_wg_soak_diversity_pass=$require_wg_soak_diversity_pass min_wg_soak_selection_lines=$min_wg_soak_selection_lines min_wg_soak_entry_operators=$min_wg_soak_entry_operators min_wg_soak_exit_operators=$min_wg_soak_exit_operators min_wg_soak_cross_operator_pairs=$min_wg_soak_cross_operator_pairs max_evidence_age_sec=$max_evidence_age_sec"
+echo "[prod-gate-slo-trend] freshness_no_go_reports=$freshness_no_go_reports"
 if ((eval_errors > 0)); then
   echo "[prod-gate-slo-trend] evaluation_errors=$eval_errors"
 fi
@@ -743,6 +752,9 @@ decision="GO"
 if [[ "$fail_on_any_no_go" == "1" && "$no_go_reports" -gt 0 ]]; then
   decision="NO-GO"
 fi
+if ((max_evidence_age_sec > 0 && freshness_no_go_reports > 0)); then
+  decision="NO-GO"
+fi
 if float_lt "$go_rate_pct" "$min_go_rate_pct"; then
   decision="NO-GO"
 fi
@@ -765,6 +777,7 @@ summary_payload="$(
     --argjson reports_total "$total_reports" \
     --argjson go "$go_reports" \
     --argjson no_go "$no_go_reports" \
+    --argjson freshness_no_go_reports "$freshness_no_go_reports" \
     --argjson go_rate_pct "$go_rate_pct" \
     --argjson eval_errors "$eval_errors" \
     --argjson max_reports "$max_reports" \
@@ -779,6 +792,8 @@ summary_payload="$(
     --argjson require_bundle_ok "$require_bundle_ok" \
     --argjson require_integrity_ok "$require_integrity_ok" \
     --argjson require_signoff_ok "$require_signoff_ok" \
+    --argjson require_incident_snapshot_on_fail "$require_incident_snapshot_on_fail" \
+    --argjson require_incident_snapshot_artifacts "$require_incident_snapshot_artifacts" \
     --argjson require_wg_validate_udp_source "$require_wg_validate_udp_source" \
     --argjson require_wg_validate_strict_distinct "$require_wg_validate_strict_distinct" \
     --argjson require_wg_soak_diversity_pass "$require_wg_soak_diversity_pass" \
@@ -818,6 +833,7 @@ summary_payload="$(
       reports_total: $reports_total,
       go: $go,
       no_go: $no_go,
+      freshness_no_go: $freshness_no_go_reports,
       go_rate_pct: $go_rate_pct,
       evaluation_errors: $eval_errors,
       filters: {
@@ -834,6 +850,8 @@ summary_payload="$(
         require_bundle_ok: $require_bundle_ok,
         require_integrity_ok: $require_integrity_ok,
         require_signoff_ok: $require_signoff_ok,
+        require_incident_snapshot_on_fail: $require_incident_snapshot_on_fail,
+        require_incident_snapshot_artifacts: $require_incident_snapshot_artifacts,
         require_wg_validate_udp_source: $require_wg_validate_udp_source,
         require_wg_validate_strict_distinct: $require_wg_validate_strict_distinct,
         require_wg_soak_diversity_pass: $require_wg_soak_diversity_pass,
