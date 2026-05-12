@@ -2964,8 +2964,9 @@ function syncWorkspaceNextActionHint(clientTabVisible = isClientTabVisibleRole()
 
 function syncWorkspaceFirstRunHints(clientTabVisible) {
   if (workspaceFirstRunHintEl) {
-    workspaceFirstRunHintEl.textContent =
-      `Client controls only. ${formatWorkspaceTabAvailabilityHint(clientTabVisible)}`;
+    workspaceFirstRunHintEl.textContent = clientTabVisible
+      ? `Client controls only. ${formatWorkspaceTabAvailabilityHint(clientTabVisible)}`
+      : `Client workspace locked. ${formatWorkspaceTabAvailabilityHint(clientTabVisible)}`;
     workspaceFirstRunHintEl.classList.toggle("locked", !clientTabVisible);
   }
   if (workspacePlatformHintEl) {
@@ -2984,6 +2985,9 @@ function inferWorkspaceTabActivationPathHint(tabName, reason) {
   }
   const hasSessionToken = byId("session_token").value.trim().length > 0;
   if (tabName === "client") {
+    if (/server-only|role[- ]?locked|role\/readiness/i.test(normalizedReason)) {
+      return "Open Access Recovery or the Admin Console activation path";
+    }
     if (!hasSessionToken) {
       return "Connect Wallet, then Register Device";
     }
@@ -3082,6 +3086,11 @@ function refreshOnboardingSteps() {
   }
 }
 
+function composeClientLaneLockedPortalGuidance(guidanceText) {
+  const base = ensureSentence(guidanceText) || "Client lane is locked for this session.";
+  return `${base} Open Access Recovery or the Admin Console activation path before retrying.`;
+}
+
 function computePortalNextRecommendedAction() {
   const sessionToken = byId("session_token").value.trim();
   if (!sessionToken) {
@@ -3104,6 +3113,9 @@ function computePortalNextRecommendedAction() {
   }
 
   const clientReadiness = computeClientReadiness();
+  if (clientReadiness.state === "role_locked") {
+    return composeClientLaneLockedPortalGuidance(clientReadiness.guidanceText);
+  }
   if (
     clientReadiness.state === "ready_to_register" ||
     clientReadiness.state === "re_registration_required"
@@ -3159,6 +3171,15 @@ function computePortalOnboardingState() {
       kind: "warn",
       title: "Session expiry unknown",
       detail: sessionFreshness.detail
+    };
+  }
+
+  const clientReadiness = computeClientReadiness();
+  if (clientReadiness.state === "role_locked") {
+    return {
+      kind: "warn",
+      title: "Client lane locked",
+      detail: composeClientLaneLockedPortalGuidance(clientReadiness.guidanceText)
     };
   }
 

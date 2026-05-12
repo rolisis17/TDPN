@@ -2071,8 +2071,7 @@ classify_action_failure_from_log() {
     return 0
   fi
 
-  if [[ "$action_id" =~ (three_machine|real_host|prod_signoff|production_signoff) ]] \
-     || grep -E -i -q 'three[- ]machine[^[:cntrl:]]*(prod|production)?[^[:cntrl:]]*signoff|required[^[:cntrl:]]*real[- ]host|real[- ]host[^[:cntrl:]]*signoff|required[^[:cntrl:]]*production[[:space:]_-]+signoff|pilot[[:space:]_-]+handoff[^[:cntrl:]]*requires|real[[:space:]_-]+helper[[:space:]_-]+HTTPS[^[:cntrl:]]*required' "$log_path"; then
+  if grep -E -i -q 'three[- ]machine[^[:cntrl:]]*(prod|production)?[^[:cntrl:]]*signoff|required[^[:cntrl:]]*real[- ]host|real[- ]host[^[:cntrl:]]*signoff|required[^[:cntrl:]]*production[[:space:]_-]+signoff|pilot[[:space:]_-]+handoff[^[:cntrl:]]*requires|real[[:space:]_-]+helper[[:space:]_-]+HTTPS[^[:cntrl:]]*required' "$log_path"; then
     CLASSIFIED_ACTION_FAILURE_KIND="real_host_signoff_required"
     CLASSIFIED_ACTION_FAILURE_NOTES="command failed because real-host signoff evidence is required"
     return 0

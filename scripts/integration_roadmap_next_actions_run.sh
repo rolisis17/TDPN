@@ -597,6 +597,15 @@ JSON
 }
 JSON
     ;;
+  local_pack_real_host_generic_failure)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"three_machine_real_host_validation_pack","label":"Three-machine real-host validation pack","command":"bash \"$FAIL1\"","reason":"test-real-host-generic-failure","requires_real_hosts":false,"local_pack_only":true}
+  ]
+}
+JSON
+    ;;
   real_helper_https_only)
     cat >"$summary_json" <<JSON
 {
@@ -1379,6 +1388,40 @@ if ! jq -e '
 ' "$SUMMARY_REAL_HOST_SIGNOFF_REQUIRED" >/dev/null; then
   echo "real-host signoff required classification mismatch"
   cat "$SUMMARY_REAL_HOST_SIGNOFF_REQUIRED"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] real-host action ids do not override generic command failures"
+SUMMARY_REAL_HOST_GENERIC_FAILURE="$TMP_DIR/summary_real_host_generic_failure.json"
+REPORTS_REAL_HOST_GENERIC_FAILURE="$TMP_DIR/reports_real_host_generic_failure"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=local_pack_real_host_generic_failure \
+FAIL1="$FAIL1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_REAL_HOST_GENERIC_FAILURE" \
+  --summary-json "$SUMMARY_REAL_HOST_GENERIC_FAILURE" \
+  --local-only 1 \
+  --print-summary-json 0 >"$TMP_DIR/real_host_generic_failure.log" 2>&1
+real_host_generic_failure_rc=$?
+set -e
+if [[ "$real_host_generic_failure_rc" != "7" ]]; then
+  echo "expected generic real-host action failure rc=7, got rc=$real_host_generic_failure_rc"
+  cat "$TMP_DIR/real_host_generic_failure.log"
+  cat "$SUMMARY_REAL_HOST_GENERIC_FAILURE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 7
+  and .actions[0].id == "three_machine_real_host_validation_pack"
+  and .actions[0].rc == 7
+  and .actions[0].command_rc == 7
+  and .actions[0].failure_kind == "command_failed"
+  and .actions[0].notes == "command failed"
+' "$SUMMARY_REAL_HOST_GENERIC_FAILURE" >/dev/null; then
+  echo "generic real-host action classification mismatch"
+  cat "$SUMMARY_REAL_HOST_GENERIC_FAILURE"
   exit 1
 fi
 

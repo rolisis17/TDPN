@@ -3877,7 +3877,9 @@ if ! jq -e --arg stale_reason "stale activation evidence" --arg stale_iso "$stal
   and ((.blockchain_track.mainnet_activation_refresh_evidence_action.reason // "") | contains($stale_reason))
   and (.blockchain_track.mainnet_activation_refresh_evidence_action.command // "") == "./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1"
   and .blockchain_track.mainnet_activation_missing_metrics_action.available == false
-  and .blockchain_track.mainnet_activation_missing_metrics_action.id == "blockchain_mainnet_activation_refresh_evidence"
+  and .blockchain_track.mainnet_activation_missing_metrics_action.id == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.reason == null
+  and .blockchain_track.mainnet_activation_missing_metrics_action.real_evidence_run_command == null
   and .blockchain_track.recommended_gate_id == "blockchain_mainnet_activation_refresh_evidence"
   and ((.blockchain_track.recommended_gate_reason // "") | contains($stale_reason))
   and .blockchain_track.recommended_gate_command == "./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1"
@@ -5754,6 +5756,68 @@ if ! jq -e '
 ' "$TMP_DIR/roadmap_progress_summary_gate_fallback_summary.json" >/dev/null; then
   echo "summary-gate fallback JSON missing expected inferred readiness fields"
   cat "$TMP_DIR/roadmap_progress_summary_gate_fallback_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] root-required real-WG skip remains actionable"
+ROOT_REQUIRED_REAL_WG_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_root_required_real_wg_summary.json"
+cat >"$ROOT_REQUIRED_REAL_WG_MANUAL_SUMMARY_JSON" <<'EOF_ROOT_REQUIRED_REAL_WG'
+{
+  "version": 1,
+  "summary": {
+    "next_action_check_id": "",
+    "next_action_label": "",
+    "next_action_command": "",
+    "roadmap_stage": "IN_PROGRESS",
+    "single_machine_ready": false,
+    "blocking_check_ids": [],
+    "optional_check_ids": ["three_machine_docker_readiness", "real_wg_privileged_matrix"],
+    "real_host_gate": {
+      "ready": false,
+      "blockers": []
+    },
+    "docker_rehearsal_gate": {
+      "status": "pass"
+    },
+    "profile_default_gate": {
+      "status": "pass"
+    },
+    "real_wg_privileged_gate": {
+      "status": "skip",
+      "root_required": true,
+      "next_command": "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    }
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_ROOT_REQUIRED_REAL_WG
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$ROOT_REQUIRED_REAL_WG_MANUAL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_root_required_real_wg_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_root_required_real_wg_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_root_required_real_wg.log 2>&1; then
+  echo "expected success when root-required real-WG skip is actionable"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_root_required_real_wg.log
+  exit 1
+fi
+if ! jq -e '
+  ((.next_actions // []) | any(
+    .id == "real_wg_privileged_matrix"
+    and .command == "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    and .requires_real_hosts == false
+    and .local_pack_only == false
+    and .missing_evidence_family == "real-wg-privileged"
+    and .missing_evidence_action_kind == "local-root-real-wg"
+    and ((.reason // "") | contains("root is required"))
+  ))
+' "$TMP_DIR/roadmap_progress_root_required_real_wg_summary.json" >/dev/null; then
+  echo "root-required real-WG summary did not expose sudo next action"
+  cat "$TMP_DIR/roadmap_progress_root_required_real_wg_summary.json"
   exit 1
 fi
 

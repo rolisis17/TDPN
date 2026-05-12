@@ -10568,12 +10568,6 @@ elif [[ "$blockchain_mainnet_activation_stale_evidence_action_required_json" == 
   blockchain_recommended_gate_id="$blockchain_mainnet_activation_refresh_evidence_id_json"
   blockchain_recommended_gate_reason="$blockchain_mainnet_activation_stale_evidence_reason_json"
   blockchain_recommended_gate_command="$blockchain_mainnet_activation_stale_evidence_refresh_command_json"
-  if [[ -z "$blockchain_mainnet_activation_missing_metrics_action_id" ]]; then
-    # Compatibility shim: existing blockchain actionable runners read this field
-    # for recommended-only mode. Keep missing_metrics.available=false and expose
-    # stale refresh action id here when stale evidence is the blocker.
-    blockchain_mainnet_activation_missing_metrics_action_id="$blockchain_recommended_gate_id"
-  fi
 fi
 
 readiness_status="$(jq -r '.report.readiness_status // "UNKNOWN"' "$manual_validation_summary_json")"
@@ -13237,11 +13231,18 @@ next_actions_candidate_json="$(
       command: $blockchain_mainnet_activation_missing_metrics_action_prefill_command,
       reason: (if ($blockchain_mainnet_activation_missing_metrics_action_reason // "") != "" then $blockchain_mainnet_activation_missing_metrics_action_reason else "mainnet activation metrics evidence is missing/invalid; prefill the operator input" end)
     } + action_evidence_metadata(["blockchain-mainnet-activation"]; false; true; ["metrics-prefill"]) else empty end),
-    (if ((.summary.real_wg_privileged_gate.status // "pending") != "pass" and (.summary.real_wg_privileged_gate.status // "pending") != "skip" and ((.summary.real_wg_privileged_gate.next_command // .summary.real_wg_privileged_gate.command // "") != "")) then {
+    (if (
+      (.summary.real_wg_privileged_gate.status // "pending") != "pass"
+      and (
+        (.summary.real_wg_privileged_gate.status // "pending") != "skip"
+        or (.summary.real_wg_privileged_gate.root_required // false) == true
+      )
+      and ((.summary.real_wg_privileged_gate.next_command // .summary.real_wg_privileged_gate.command // "") != "")
+    ) then {
       id: "real_wg_privileged_matrix",
       "label": "Linux root real-WG privileged matrix",
       command: (.summary.real_wg_privileged_gate.next_command // .summary.real_wg_privileged_gate.command // ""),
-      reason: "one-host dataplane confidence gate"
+      reason: (if (.summary.real_wg_privileged_gate.root_required // false) == true then "real-WG privileged matrix was skipped because root is required; rerun with sudo on the same Linux host" else "one-host dataplane confidence gate" end)
     } + action_evidence_metadata(["real-wg-privileged"]; false; false; ["local-root-real-wg"]) else empty end)
   ]
   | unique_commands_preserve_order
