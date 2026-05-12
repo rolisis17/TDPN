@@ -44,6 +44,8 @@ cat >"$PASS_CAMPAIGN_A" <<'EOF_PASS_CAMPAIGN_A'
         "runtime_actuation_status_pass": {
           "required": true,
           "observed": true,
+          "runtime_actuation_status": "pass",
+          "runtime_actuation_ready": true,
           "status": "pass",
           "source": "explicit_campaign_summary"
         }
@@ -65,6 +67,8 @@ cat >"$PASS_CAMPAIGN_B" <<'EOF_PASS_CAMPAIGN_B'
         "runtime_actuation_status_pass": {
           "required": true,
           "observed": true,
+          "runtime_actuation_status": "pass",
+          "runtime_actuation_ready": true,
           "status": "pass",
           "source": "explicit_selected_summaries"
         }
@@ -86,6 +90,8 @@ cat >"$PASS_SIGNOFF" <<'EOF_PASS_SIGNOFF'
       "runtime_actuation_status_pass": {
         "available": true,
         "required": true,
+        "runtime_actuation_status": "pass",
+        "runtime_actuation_ready": true,
         "status": "pass",
         "blocking": false,
         "source": "explicit_campaign_summary"
@@ -110,6 +116,8 @@ cat >"$SIGNOFF_UNKNOWN_DUPLICATE" <<EOF_SIGNOFF_UNKNOWN_DUPLICATE
       "runtime_actuation_status_pass": {
         "available": false,
         "required": true,
+        "runtime_actuation_status": "unknown",
+        "runtime_actuation_ready": null,
         "status": "unknown",
         "blocking": false,
         "source": "explicit_campaign_summary"
@@ -149,6 +157,8 @@ cat >"$FAIL_CAMPAIGN_A" <<'EOF_FAIL_CAMPAIGN_A'
         "runtime_actuation_status_pass": {
           "required": true,
           "observed": false,
+          "runtime_actuation_status": "fail",
+          "runtime_actuation_ready": false,
           "status": "fail",
           "source": "explicit_campaign_summary",
           "actionable_reason": "runtime actuation explicit status is fail; fix runtime evidence and rerun"
@@ -171,6 +181,8 @@ cat >"$FAIL_CAMPAIGN_B" <<'EOF_FAIL_CAMPAIGN_B'
         "runtime_actuation_status_pass": {
           "required": true,
           "observed": false,
+          "runtime_actuation_status": "fail",
+          "runtime_actuation_ready": false,
           "status": "fail",
           "source": "explicit_selected_summaries_partial_fail",
           "actionable_reason": "runtime actuation selected summaries are failing; repair and rerun"
@@ -193,6 +205,8 @@ cat >"$SOURCE_BLOCKED_CAMPAIGN" <<'EOF_SOURCE_BLOCKED_CAMPAIGN'
         "runtime_actuation_status_pass": {
           "required": true,
           "observed": true,
+          "runtime_actuation_status": "pass",
+          "runtime_actuation_ready": true,
           "status": "pass",
           "source": "explicit_campaign_summary",
           "actionable_reason": "resolve upstream campaign blockers before promotion"
@@ -215,6 +229,8 @@ cat >"$SOURCE_BLOCKED_CAMPAIGN_B" <<'EOF_SOURCE_BLOCKED_CAMPAIGN_B'
         "runtime_actuation_status_pass": {
           "required": false,
           "available": false,
+          "runtime_actuation_status": "unknown",
+          "runtime_actuation_ready": null,
           "status": "unknown",
           "source": "synthetic_campaign_failure",
           "actionable_reason": "campaign refresh command failed before runtime actuation gate evaluation"
@@ -237,6 +253,8 @@ cat >"$SOURCE_BLOCKED_CAMPAIGN_C" <<'EOF_SOURCE_BLOCKED_CAMPAIGN_C'
         "runtime_actuation_status_pass": {
           "required": false,
           "available": false,
+          "runtime_actuation_status": "unknown",
+          "runtime_actuation_ready": null,
           "status": "unknown",
           "source": "synthetic_campaign_failure",
           "actionable_reason": "local stack startup required root before campaign evidence was available"
@@ -295,6 +313,7 @@ if ! jq -e '
   and .observed.samples_fail == 0
   and .observed.runtime_actuation_ready_rate_pct >= 99.9
   and .observed.modal_runtime_actuation_status == "pass"
+  and ([.samples[] | select(.runtime_actuation_status == "pass" and .runtime_actuation_ready == true)] | length) == 3
   and (.violations | length) == 0
   and .outcome.should_promote == true
   and .outcome.action == "promote_allowed"

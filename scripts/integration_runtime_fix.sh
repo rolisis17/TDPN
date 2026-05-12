@@ -244,6 +244,54 @@ if ! extract_json_payload /tmp/integration_runtime_fix_stale_state_nonroot.log |
   exit 1
 fi
 
+echo "[runtime-fix] key material rebuild guard"
+KEY_MATERIAL_DOCTOR="$TMP_DIR/fake_doctor_key_material.sh"
+cat >"$KEY_MATERIAL_DOCTOR" <<'EOF_KEY_MATERIAL_DOCTOR'
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'OUT'
+[runtime-doctor] status=FAIL findings=1 warnings=0 failures=1
+[runtime-doctor] summary_json_payload:
+{"version":1,"status":"FAIL","summary":{"findings_total":1,"warnings_total":0,"failures_total":1},"paths":{"wg_only_dir":"/tmp/key_material_guard_wg_only"},"findings":[
+{"severity":"FAIL","code":"authority_env_temp_backed_key_material_missing","message":"authority env references missing temp-backed MTLS_CA_FILE path (/tmp/prod-preflight/ca.crt -> /tmp/prod-preflight/ca.crt); this looks like stale prod-preflight/bootstrap key material leakage","remediation":"runtime-fix will not recreate prod key material; stale temp-backed env reference detected. For bootstrap mode run ./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_HOST> [--san <PEER_HOST>...] then ./scripts/easy_node.sh server-up --prod-profile 1 --prod-mtls-mode bootstrap with the intended settings. For staged mode run ./scripts/easy_node.sh prod-mtls-bundle-stage --bundle-dir <BUNDLE_DIR> --host <PUBLIC_HOST> then server-up --prod-profile 1 --prod-mtls-mode staged"}
+]}
+OUT
+exit 0
+EOF_KEY_MATERIAL_DOCTOR
+chmod +x "$KEY_MATERIAL_DOCTOR"
+
+set +e
+RUNTIME_DOCTOR_SCRIPT="$KEY_MATERIAL_DOCTOR" \
+./scripts/runtime_fix.sh --manual-validation-report 0 --show-json 1 >/tmp/integration_runtime_fix_key_material_guard.log 2>&1
+key_material_guard_rc=$?
+set -e
+
+if [[ "$key_material_guard_rc" -eq 0 ]]; then
+  echo "expected runtime-fix key material guard path to fail after diagnostic skip"
+  cat /tmp/integration_runtime_fix_key_material_guard.log
+  exit 1
+fi
+if ! rg -q '\[runtime-fix\] action_skipped=prod key material rebuild \(manual bootstrap required\)' /tmp/integration_runtime_fix_key_material_guard.log; then
+  echo "expected runtime-fix key material rebuild skip message not found"
+  cat /tmp/integration_runtime_fix_key_material_guard.log
+  exit 1
+fi
+if ! rg -q 'diagnostic=temp-backed prod key material env reference detected; live env was not modified' /tmp/integration_runtime_fix_key_material_guard.log; then
+  echo "expected runtime-fix temp-backed diagnostic not found"
+  cat /tmp/integration_runtime_fix_key_material_guard.log
+  exit 1
+fi
+if ! rg -q 'bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_HOST>' /tmp/integration_runtime_fix_key_material_guard.log; then
+  echo "expected runtime-fix bootstrap remediation hint not found"
+  cat /tmp/integration_runtime_fix_key_material_guard.log
+  exit 1
+fi
+if ! extract_json_payload /tmp/integration_runtime_fix_key_material_guard.log | jq -e '.doctor.before.status == "FAIL" and .doctor.after.status == "FAIL" and (.actions.skipped | index("prod key material rebuild (manual bootstrap required)")) != null and (.actions.taken | length) == 0' >/dev/null 2>&1; then
+  echo "runtime-fix key material guard JSON payload missing expected skipped action"
+  cat /tmp/integration_runtime_fix_key_material_guard.log
+  exit 1
+fi
+
 echo "[runtime-fix] cleanup orchestration"
 DOCTOR_STATE_DIR="$TMP_DIR/doctor_state"
 mkdir -p "$DOCTOR_STATE_DIR"

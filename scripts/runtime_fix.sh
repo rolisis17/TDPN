@@ -540,6 +540,16 @@ json_has_code() {
   printf '%s\n' "$json" | jq -e "$expr" >/dev/null 2>&1
 }
 
+json_key_material_missing_count() {
+  local json="$1"
+  printf '%s\n' "$json" | jq -r '[.findings[]? | select(((.code // "") | test("(^|_)env_(referenced_file|temp_backed_key_material)_missing$")))] | length' 2>/dev/null || printf '0'
+}
+
+json_temp_backed_key_material_missing_count() {
+  local json="$1"
+  printf '%s\n' "$json" | jq -r '[.findings[]? | select(((.code // "") | test("(^|_)env_temp_backed_key_material_missing$")))] | length' 2>/dev/null || printf '0'
+}
+
 repair_ownership_path() {
   local action_name="$1"
   local path="$2"
@@ -647,6 +657,17 @@ if [[ "$current_uid" == "$root_required_uid" && -z "${EASY_NODE_RUNTIME_FIX_EUID
   mutable_path_allowlist="$(runtime_fix_default_mutable_allowlist "$target_owner_user")"
 else
   mutable_path_allowlist="${EASY_NODE_RUNTIME_FIX_MUTABLE_PATH_ALLOWLIST:-$(runtime_fix_default_mutable_allowlist "$target_owner_user")}"
+fi
+
+key_material_missing_count="$(json_key_material_missing_count "$before_json")"
+temp_backed_key_material_missing_count="$(json_temp_backed_key_material_missing_count "$before_json")"
+if [[ "$key_material_missing_count" =~ ^[0-9]+$ ]] && ((key_material_missing_count > 0)); then
+  actions_skipped+=("prod key material rebuild (manual bootstrap required)")
+  echo "[runtime-fix] action_skipped=prod key material rebuild (manual bootstrap required)"
+  echo "[runtime-fix] key_material_remediation=runtime-fix will not recreate prod key material; restore the referenced files, or run ./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_HOST> [--san <PEER_HOST>...] then ./scripts/easy_node.sh server-up --prod-profile 1 --prod-mtls-mode bootstrap with the intended settings. For staged mode run ./scripts/easy_node.sh prod-mtls-bundle-stage --bundle-dir <BUNDLE_DIR> --host <PUBLIC_HOST> then server-up --prod-profile 1 --prod-mtls-mode staged"
+  if [[ "$temp_backed_key_material_missing_count" =~ ^[0-9]+$ ]] && ((temp_backed_key_material_missing_count > 0)); then
+    echo "[runtime-fix] diagnostic=temp-backed prod key material env reference detected; live env was not modified"
+  fi
 fi
 
 wg_only_state_stale="0"

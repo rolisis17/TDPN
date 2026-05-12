@@ -153,7 +153,7 @@ json_file_semantically_usable_01() {
     )
     and (
       (.schema.id // "") as $schema_id
-      | if $schema_id == "three_machine_docker_readiness_record_summary" then
+        | if $schema_id == "three_machine_docker_readiness_record_summary" then
           (((.rehearsal.status // "") | ascii_downcase | gsub("[[:space:]_-]";"")) == "pass")
           and (((.rehearsal.rc // null) | tonumber?) == 0)
           and (
@@ -163,6 +163,41 @@ json_file_semantically_usable_01() {
               else
                 true
               end
+            else
+              true
+            end
+          )
+          and (
+            if ((.manual_validation_record // null) | type) == "object" then
+              if ((.manual_validation_record.enabled // false) == true) then
+                (((.manual_validation_record.status // "") | ascii_downcase) == "ok")
+                and (((.manual_validation_record.rc // null) | tonumber?) == 0)
+                and ((.manual_validation_record.written_receipt // false) == true)
+              else
+                true
+              end
+            else
+              true
+            end
+          )
+        elif $schema_id == "three_machine_docker_profile_matrix_record_summary" then
+          ((.stages.manual_validation_report // null) | type) == "object"
+          and ((.stages.manual_validation_record // null) | type) == "object"
+          and (
+            if ((.stages.manual_validation_report.enabled // false) == true) then
+              (((.stages.manual_validation_report.status // "") | ascii_downcase) == "ok")
+              and (((.stages.manual_validation_report.rc // null) | tonumber?) == 0)
+              and ((.stages.manual_validation_report.written_summary_json // false) == true)
+              and ((.stages.manual_validation_report.written_report_md // false) == true)
+            else
+              true
+            end
+          )
+          and (
+            if ((.stages.manual_validation_record.enabled // false) == true) then
+              (((.stages.manual_validation_record.status // "") | ascii_downcase) == "ok")
+              and (((.stages.manual_validation_record.rc // null) | tonumber?) == 0)
+              and ((.stages.manual_validation_record.written_receipt // false) == true)
             else
               true
             end
@@ -450,7 +485,7 @@ declare -a artifact_specs=(
   "docker_readiness_3hop|docker_readiness|three_machine_docker_readiness_3hop.json|Docker readiness 3-hop summary"
   "docker_readiness_summary|docker_readiness|three_machine_docker_readiness_summary.json|Docker readiness summary"
   "docker_readiness_record_summary|docker_readiness|three_machine_docker_readiness_record_????????_??????.json|Docker readiness record summary"
-  "docker_readiness_record_rehearsal|docker_readiness|three_machine_docker_readiness_record_????????_??????_rehearsal.json|Docker readiness record rehearsal summary"
+  "docker_readiness_record_rehearsal|docker_readiness_support|three_machine_docker_readiness_record_????????_??????_rehearsal.json|Docker readiness record rehearsal summary"
   "real_host_signoff_summary|real_host|three_machine_prod_signoff_summary.json|Real-host signoff summary"
   "real_host_signoff_latest|real_host|three_machine_prod_signoff_latest.json|Real-host signoff latest summary"
   "real_host_signoff_timestamped|real_host|three_machine_prod_signoff_*.json|Real-host signoff timestamped summary"
@@ -462,18 +497,21 @@ declare -A path_seen=()
 declare -A group_found=(
   [docker_matrix]=0
   [docker_readiness]=0
+  [docker_readiness_support]=0
   [real_host]=0
   [real_host_support]=0
 )
 declare -A group_usable=(
   [docker_matrix]=0
   [docker_readiness]=0
+  [docker_readiness_support]=0
   [real_host]=0
   [real_host_support]=0
 )
 declare -A group_freshness_blocked=(
   [docker_matrix]=0
   [docker_readiness]=0
+  [docker_readiness_support]=0
   [real_host]=0
   [real_host_support]=0
 )

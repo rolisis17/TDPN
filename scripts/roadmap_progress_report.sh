@@ -3168,6 +3168,38 @@ access_recovery_track_json_from_evidence() {
           ];
           ".easy-node-logs/access_bridge_pilot_evidence_bundle_verify_summary.json"
         );
+      def access_recovery_placeholder_keys($cmd):
+        (($cmd // "") | ascii_upcase) as $ucmd
+        | [
+          (if ($ucmd | test("(^|[^A-Z0-9_-])(TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_TRUST_STORE)([^A-Z0-9_-]|$)")) then "TRUST_STORE" else empty end),
+          (if ($ucmd | contains("<TRUST-STORE>") or contains("<SET-TRUST-STORE>") or contains("REPLACE_WITH_TRUST_STORE") or contains("REPLACE_WITH_ACCESS_RECOVERY_TRUST_STORE")) then "TRUST_STORE" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])HELPER_PUBLIC_DNS([^A-Z0-9_-]|$)")) then "HELPER_PUBLIC_DNS" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])HELPER_ID([^A-Z0-9_-]|$)")) then "HELPER_ID" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])PRIVATE_CODE_FILE([^A-Z0-9_-]|$)")) then "PRIVATE_CODE_FILE" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])BRIDGE_SERVICE_CONFIG([^A-Z0-9_-]|$)")) then "BRIDGE_SERVICE_CONFIG" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])BRIDGE_DEPLOY_PACK([^A-Z0-9_-]|$)")) then "BRIDGE_DEPLOY_PACK" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])PROVENANCE_PRIVATE_KEY_FILE([^A-Z0-9_-]|$)")) then "PROVENANCE_PRIVATE_KEY_FILE" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])ORG_ID([^A-Z0-9_-]|$)")) then "ORG_ID" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])ORG_NAME([^A-Z0-9_-]|$)")) then "ORG_NAME" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CA_FILE([^A-Z0-9_-]|$)")) then "MTLS_CA_FILE" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CLIENT_CERT_FILE([^A-Z0-9_-]|$)")) then "MTLS_CLIENT_CERT_FILE" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CLIENT_KEY_FILE([^A-Z0-9_-]|$)")) then "MTLS_CLIENT_KEY_FILE" else empty end)
+        ]
+        | reduce .[] as $key ([]; if index($key) then . else . + [$key] end);
+      def access_recovery_placeholder_metadata($cmd):
+        access_recovery_placeholder_keys($cmd) as $keys
+        | {
+            placeholder_unresolved: (($keys | length) > 0),
+            placeholder_keys: $keys,
+            safe_to_execute_as_is: (($keys | length) == 0),
+            operator_input_required: (($keys | length) > 0),
+            placeholder_resolution: (
+              if ($keys | length) > 0 then
+                "Template command only; replace Access Recovery placeholders with concrete pilot host, helper, credential, config, deploy-pack, provenance, trust-store, and optional mTLS values before execution."
+              else null
+              end
+            )
+          };
       def trusted_verifier_command:
         "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify --summary-json "
         + trusted_verifier_summary_json
@@ -3268,7 +3300,7 @@ access_recovery_track_json_from_evidence() {
               id: "access_bridge_installed_host_evidence",
               reason: "Deploy-pack host evidence is rehearsal-only for public HTTPS helpers; operator handoff requires installed-host service, systemd, and active proxy evidence",
               command: "bash ./scripts/access_bridge_host_install_check.sh --evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --config-json BRIDGE_SERVICE_CONFIG --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
-            }
+            } + access_recovery_placeholder_metadata("bash ./scripts/access_bridge_host_install_check.sh --evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --config-json BRIDGE_SERVICE_CONFIG --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json")
             elif $track_status == "trusted-provenance-required" then {
               id: "trusted_pilot_evidence_verify",
               reason: (
@@ -3279,12 +3311,12 @@ access_recovery_track_json_from_evidence() {
                 end
               ),
               command: trusted_verifier_command
-            }
+            } + access_recovery_placeholder_metadata(trusted_verifier_command)
             elif $track_status == "local-rehearsal-ready" then {
               id: "real_helper_https_evidence",
               reason: "Local Access Recovery rehearsal evidence cannot substitute for real helper HTTPS deployment evidence",
               command: real_helper_operator_command
-            }
+            } + access_recovery_placeholder_metadata(real_helper_operator_command)
             elif $first_attention == null then null
             else {
               id: (
@@ -3301,7 +3333,7 @@ access_recovery_track_json_from_evidence() {
                 end
               ),
               command: next_command_for($first_attention)
-            }
+            } + access_recovery_placeholder_metadata(next_command_for($first_attention))
             end
           ),
           preferred_operator_next_action: (
@@ -3310,7 +3342,7 @@ access_recovery_track_json_from_evidence() {
               id: "real_helper_https_evidence",
               reason: "Preferred guarded operator path captures real helper smoke, deployment, installed-host evidence, signed bundle, trusted verifier receipt, and roadmap refresh in one run; recommended_next_action shows the first child evidence gap.",
               command: real_helper_operator_command
-            }
+            } + access_recovery_placeholder_metadata(real_helper_operator_command)
             end
           )
         }
@@ -14678,12 +14710,20 @@ cat >"$report_tmp" <<EOF_MD
 - Policy: $(jq -r '.access_recovery_track.policy' "$summary_json")
 - Recommendation: $(jq -r '.access_recovery_track.recommendation' "$summary_json")
 - Access bridge service smoke: available=$(jq -r '.access_recovery_track.access_bridge_service_smoke.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_service_smoke.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_service_smoke.source_summary_json // "none"' "$summary_json")
+- Access bridge service smoke freshness: generated_at=$(jq -r '.access_recovery_track.access_bridge_service_smoke.generated_at_utc // "none"' "$summary_json"), age_sec=$(jq -r '.access_recovery_track.access_bridge_service_smoke.summary_age_sec // "null"' "$summary_json"), stale=$(jq -r '.access_recovery_track.access_bridge_service_smoke.summary_stale | if . == null then "null" else tostring end' "$summary_json"), max_age_sec=$(jq -r '.access_recovery_track.access_bridge_service_smoke.summary_max_age_sec // "null"' "$summary_json")
 - Access bridge deployment evidence: available=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.source_summary_json // "none"' "$summary_json")
+- Access bridge deployment freshness: generated_at=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.generated_at_utc // "none"' "$summary_json"), age_sec=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.summary_age_sec // "null"' "$summary_json"), stale=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.summary_stale | if . == null then "null" else tostring end' "$summary_json"), max_age_sec=$(jq -r '.access_recovery_track.access_bridge_deployment_evidence.summary_max_age_sec // "null"' "$summary_json")
 - Access bridge host install: available=$(jq -r '.access_recovery_track.access_bridge_host_install.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_host_install.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_host_install.source_summary_json // "none"' "$summary_json")
+- Access bridge host install freshness: generated_at=$(jq -r '.access_recovery_track.access_bridge_host_install.generated_at_utc // "none"' "$summary_json"), age_sec=$(jq -r '.access_recovery_track.access_bridge_host_install.summary_age_sec // "null"' "$summary_json"), stale=$(jq -r '.access_recovery_track.access_bridge_host_install.summary_stale | if . == null then "null" else tostring end' "$summary_json"), max_age_sec=$(jq -r '.access_recovery_track.access_bridge_host_install.summary_max_age_sec // "null"' "$summary_json")
 - Access bridge trusted bundle verifier: available=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.source_summary_json // "none"' "$summary_json")
+- Access bridge trusted bundle verifier freshness: generated_at=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.generated_at_utc // "none"' "$summary_json"), age_sec=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.summary_age_sec // "null"' "$summary_json"), stale=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.summary_stale | if . == null then "null" else tostring end' "$summary_json"), max_age_sec=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.summary_max_age_sec // "null"' "$summary_json")
 - Access bridge required mTLS evidence: required=$(jq -r '.access_recovery_track.evidence_host_policy.mtls_required | tostring' "$summary_json"), proven=$(jq -r '.access_recovery_track.evidence_host_policy.required_mtls_evidence | tostring' "$summary_json")
 - Access Recovery next action: $(jq -r '.access_recovery_track.recommended_next_action.command // "none"' "$summary_json")
 - Access Recovery next action reason: $(jq -r '.access_recovery_track.recommended_next_action.reason // "none"' "$summary_json")
+- Access Recovery next action placeholder unresolved: $(jq -r '.access_recovery_track.recommended_next_action.placeholder_unresolved | if . == null then "null" else tostring end' "$summary_json")
+- Access Recovery next action placeholder keys: $(jq -r '.access_recovery_track.recommended_next_action.placeholder_keys | if . == null or length == 0 then "none" else join(",") end' "$summary_json")
+- Access Recovery next action safe to execute as-is: $(jq -r '.access_recovery_track.recommended_next_action.safe_to_execute_as_is | if . == null then "null" else tostring end' "$summary_json")
+- Access Recovery next action placeholder resolution: $(jq -r '.access_recovery_track.recommended_next_action.placeholder_resolution // "none"' "$summary_json")
 - Access Recovery preferred operator action: $(jq -r '.access_recovery_track.preferred_operator_next_action.command // "none"' "$summary_json")
 
 ## VPN Track

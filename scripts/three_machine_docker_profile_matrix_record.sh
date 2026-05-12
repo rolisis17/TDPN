@@ -354,6 +354,8 @@ manual_validation_record_log="$log_dir/three_machine_docker_profile_matrix_recor
 stage="matrix"
 matrix_status="fail"
 matrix_rc=1
+record_status="fail"
+record_rc=1
 matrix_command_rc=1
 matrix_summary_rc=""
 notes=""
@@ -386,7 +388,8 @@ write_summary_json() {
   summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
   jq -n \
     --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --arg status "$matrix_status" \
+    --arg status "$record_status" \
+    --arg matrix_status "$matrix_status" \
     --arg notes "$notes" \
     --arg command "$(print_cmd "$0" "${original_args[@]}")" \
     --argjson run_matrix "$run_matrix" \
@@ -396,6 +399,7 @@ write_summary_json() {
     --arg matrix_log "$matrix_log" \
     --arg matrix_log_from_summary "$matrix_log_path" \
     --argjson matrix_rc "$matrix_rc" \
+    --argjson record_rc "$record_rc" \
     --argjson matrix_command_rc "$matrix_command_rc" \
     --arg matrix_summary_rc "$matrix_summary_rc" \
     --arg matrix_summary_status "$matrix_summary_status" \
@@ -433,7 +437,7 @@ write_summary_json() {
       },
       generated_at_utc: $generated_at_utc,
       status: $status,
-      rc: $matrix_rc,
+      rc: $record_rc,
       notes: $notes,
       command: $command,
       inputs: {
@@ -442,7 +446,7 @@ write_summary_json() {
       stages: {
         matrix: {
           ran: ($matrix_ran == 1),
-          status: $status,
+          status: $matrix_status,
           rc: $matrix_rc,
           command_rc: $matrix_command_rc,
           summary_rc: (
@@ -546,8 +550,8 @@ refresh_manual_validation_report() {
     manual_validation_report_status="ok"
     manual_validation_report_rc=0
   else
-    manual_validation_report_status="fail"
     manual_validation_report_rc=$?
+    manual_validation_report_status="fail"
   fi
   persist_artifact_text "$manual_validation_report_log" "$report_output"
 
@@ -610,8 +614,8 @@ record_receipt() {
     receipt_status="ok"
     receipt_rc=0
   else
-    receipt_status="fail"
     receipt_rc=$?
+    receipt_status="fail"
   fi
   persist_artifact_text "$manual_validation_record_log" "$record_output"
 
@@ -621,6 +625,39 @@ record_receipt() {
     receipt_written="1"
   else
     receipt_written="0"
+  fi
+}
+
+apply_record_gate_status() {
+  local -a gate_failures=()
+  local gate_summary=""
+
+  if [[ "$manual_validation_report_enabled" == "1" ]]; then
+    if [[ "$manual_validation_report_status" != "ok" || "$manual_validation_report_rc" -ne 0 ]]; then
+      gate_failures+=("manual-validation-report failed")
+    elif [[ "$manual_validation_report_written_summary_json" != "1" || "$manual_validation_report_written_report_md" != "1" ]]; then
+      gate_failures+=("manual-validation-report artifact missing")
+    fi
+  fi
+
+  if [[ "$record_result" == "1" ]]; then
+    if [[ "$receipt_status" != "ok" || "$receipt_rc" -ne 0 ]]; then
+      gate_failures+=("manual-validation-record failed")
+    elif [[ "$receipt_written" != "1" ]]; then
+      gate_failures+=("manual-validation-record receipt missing")
+    fi
+  fi
+
+  if (( ${#gate_failures[@]} > 0 )); then
+    record_status="fail"
+    record_rc=1
+    gate_summary="$(IFS='; '; printf '%s' "${gate_failures[*]}")"
+    if [[ "$notes" != *"record gate failed:"* ]]; then
+      notes="${notes}; record gate failed: $gate_summary"
+    fi
+  else
+    record_status="$matrix_status"
+    record_rc="$matrix_rc"
   fi
 }
 
@@ -713,6 +750,9 @@ else
   fi
 fi
 
+record_status="$matrix_status"
+record_rc="$matrix_rc"
+
 write_summary_json
 refresh_manual_validation_report
 write_summary_json
@@ -731,16 +771,17 @@ if [[ "$record_result" == "1" ]]; then
   record_receipt "${receipt_artifacts[@]}"
 fi
 
+apply_record_gate_status
 write_summary_json
 
-echo "three-machine-docker-profile-matrix-record: status=$matrix_status"
+echo "three-machine-docker-profile-matrix-record: status=$record_status"
 echo "summary_log: $summary_log"
 echo "summary_json: $summary_json"
 if [[ "$print_summary_json" == "1" ]]; then
   cat "$summary_json"
 fi
 
-if [[ "$matrix_status" != "pass" ]]; then
+if [[ "$record_status" != "pass" ]]; then
   exit 1
 fi
 exit 0

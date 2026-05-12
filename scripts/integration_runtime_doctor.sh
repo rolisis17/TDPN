@@ -291,13 +291,18 @@ fi
 echo "[runtime-doctor] detect env references to missing local key files"
 ENV_REF_DIR="$TMP_DIR/env_ref"
 mkdir -p "$ENV_REF_DIR/logs" "$ENV_REF_DIR/client_vpn" "$ENV_REF_DIR/wg_only"
-touch "$ENV_REF_DIR/client.env" "$ENV_REF_DIR/provider.env"
+touch "$ENV_REF_DIR/client.env"
+NON_TEMP_MISSING_PATH="$ROOT_DIR/deploy/data/integration_runtime_doctor_missing_key_$$.key"
+rm -f "$NON_TEMP_MISSING_PATH"
 cat >"$ENV_REF_DIR/server.env" <<EOF_ENV_REF
 MTLS_CA_FILE=$ENV_REF_DIR/missing-ca.crt
 MTLS_SERVER_CERT_FILE=$ENV_REF_DIR/missing-node.crt
 EXIT_WG_PRIVATE_KEY_PATH=$ENV_REF_DIR/missing-exit-wg.key
 ISSUER_ADMIN_SIGNING_PRIVATE_KEY_FILE_LOCAL=$ENV_REF_DIR/missing-admin-signer.key
 EOF_ENV_REF
+cat >"$ENV_REF_DIR/provider.env" <<EOF_ENV_REF_PROVIDER
+EXIT_WG_PRIVATE_KEY_PATH=$NON_TEMP_MISSING_PATH
+EOF_ENV_REF_PROVIDER
 
 set +e
 PATH="$TMP_BIN:$PATH" \
@@ -318,8 +323,13 @@ if [[ "$doctor_env_refs_rc" -eq 0 ]]; then
   cat /tmp/integration_runtime_doctor_env_refs.log
   exit 1
 fi
-if ! rg -q 'authority_env_referenced_file_missing' /tmp/integration_runtime_doctor_env_refs.log; then
-  echo "expected authority env referenced file finding not found"
+if ! rg -q 'authority_env_temp_backed_key_material_missing' /tmp/integration_runtime_doctor_env_refs.log; then
+  echo "expected temp-backed authority env referenced file finding not found"
+  cat /tmp/integration_runtime_doctor_env_refs.log
+  exit 1
+fi
+if ! rg -q 'provider_env_referenced_file_missing' /tmp/integration_runtime_doctor_env_refs.log; then
+  echo "expected generic provider env referenced file finding not found"
   cat /tmp/integration_runtime_doctor_env_refs.log
   exit 1
 fi
@@ -328,7 +338,17 @@ if ! rg -q 'missing-exit-wg.key' /tmp/integration_runtime_doctor_env_refs.log; t
   cat /tmp/integration_runtime_doctor_env_refs.log
   exit 1
 fi
-if ! extract_json_payload /tmp/integration_runtime_doctor_env_refs.log | jq -e '.status == "FAIL" and .summary.failures_total >= 4 and ([.findings[].code] | map(select(. == "authority_env_referenced_file_missing")) | length) >= 4' >/dev/null 2>&1; then
+if ! rg -q 'stale prod-preflight/bootstrap key material leakage' /tmp/integration_runtime_doctor_env_refs.log; then
+  echo "expected temp-backed prod-preflight leakage diagnostic not found"
+  cat /tmp/integration_runtime_doctor_env_refs.log
+  exit 1
+fi
+if ! rg -q 'bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_HOST>' /tmp/integration_runtime_doctor_env_refs.log; then
+  echo "expected bootstrap/server-up remediation hint not found"
+  cat /tmp/integration_runtime_doctor_env_refs.log
+  exit 1
+fi
+if ! extract_json_payload /tmp/integration_runtime_doctor_env_refs.log | jq -e '.status == "FAIL" and .summary.failures_total >= 5 and ([.findings[].code] | map(select(. == "authority_env_temp_backed_key_material_missing")) | length) >= 4 and ([.findings[].code] | map(select(. == "provider_env_referenced_file_missing")) | length) >= 1' >/dev/null 2>&1; then
   echo "runtime doctor env referenced file JSON payload missing expected findings"
   cat /tmp/integration_runtime_doctor_env_refs.log
   exit 1

@@ -588,8 +588,8 @@ for sample_path in "${sample_paths[@]}"; do
           source_status: source_status,
           source_decision: source_decision,
           runtime_status_raw: (
-            if ($gate.status | type) == "string" then $gate.status
-            elif ($gate.runtime_actuation_status | type) == "string" then $gate.runtime_actuation_status
+            if ($gate.runtime_actuation_status | type) == "string" then $gate.runtime_actuation_status
+            elif ($gate.status | type) == "string" then $gate.status
             else ""
             end
           ),

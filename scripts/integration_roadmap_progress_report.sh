@@ -1217,6 +1217,16 @@ if ! grep -F -- '- Access Recovery next action:' "$REPORT_MD" >/dev/null 2>&1; t
   cat "$REPORT_MD"
   exit 1
 fi
+if ! grep -F -- '- Access Recovery next action placeholder unresolved: true' "$REPORT_MD" >/dev/null 2>&1; then
+  echo "roadmap report should expose Access Recovery next-action placeholder safety state"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! grep -F -- '- Access bridge service smoke freshness:' "$REPORT_MD" >/dev/null 2>&1; then
+  echo "roadmap report should expose Access Recovery evidence freshness"
+  cat "$REPORT_MD"
+  exit 1
+fi
 if grep -F -- '- Primary next action:' "$REPORT_MD" >/dev/null 2>&1; then
   echo "roadmap report should not label the VPN command as the primary next action on the Access Recovery track"
   cat "$REPORT_MD"
@@ -1352,6 +1362,14 @@ if ! jq -e \
   and .access_recovery_track.evidence_binding.host_config_sha256_match == true
   and .access_recovery_track.recommended_next_action.id == "access_bridge_installed_host_evidence"
   and (.access_recovery_track.recommended_next_action.command | contains("--evidence-mode installed-host"))
+  and .access_recovery_track.recommended_next_action.placeholder_unresolved == true
+  and .access_recovery_track.recommended_next_action.placeholder_keys == ["HELPER_PUBLIC_DNS","BRIDGE_SERVICE_CONFIG"]
+  and .access_recovery_track.recommended_next_action.safe_to_execute_as_is == false
+  and .access_recovery_track.recommended_next_action.operator_input_required == true
+  and ((.access_recovery_track.recommended_next_action.placeholder_resolution // "") | contains("Template command only"))
+  and .access_recovery_track.preferred_operator_next_action.placeholder_unresolved == true
+  and (.access_recovery_track.preferred_operator_next_action.placeholder_keys | index("HELPER_PUBLIC_DNS") != null)
+  and (.access_recovery_track.preferred_operator_next_action.placeholder_keys | index("TRUST_STORE") != null)
   and .vpn_track.readiness_status == "NOT_READY"
   and .vpn_track.roadmap_stage == "READY_FOR_MACHINE_C_SMOKE"
   and .vpn_track.vpn_rc_done_for_phase == false
@@ -1895,6 +1913,10 @@ if ! jq -e '
   and ((.access_recovery_track.recommended_next_action.command // "") | test("access-bridge-pilot-evidence-bundle-verify"))
   and ((.access_recovery_track.recommended_next_action.command // "") | test("--require-trusted-provenance 1"))
   and ((.access_recovery_track.recommended_next_action.command // "") | test("--trust-store TRUST_STORE"))
+  and .access_recovery_track.recommended_next_action.placeholder_unresolved == true
+  and .access_recovery_track.recommended_next_action.placeholder_keys == ["TRUST_STORE"]
+  and .access_recovery_track.recommended_next_action.safe_to_execute_as_is == false
+  and .access_recovery_track.recommended_next_action.operator_input_required == true
   and ((.next_actions // []) | any(
     .id == "trusted_pilot_evidence_verify"
     and .requires_real_hosts == false
@@ -2808,11 +2830,11 @@ fi
 
 echo "[roadmap-progress-report] Access Recovery stale evidence is surfaced as warning by default"
 ACCESS_RECOVERY_STALE_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_stale_summary.json"
-ACCESS_RECOVERY_STALE_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_stale_case_fresh_summary.json"
+ACCESS_RECOVERY_STALE_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_stale_summary.json"
 ACCESS_RECOVERY_STALE_HOST_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_check_stale_case_fresh_summary.json"
 ACCESS_RECOVERY_STALE_CASE_FRESH_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 jq '.generated_at_utc = "2020-01-01T00:00:00Z"' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_STALE_SMOKE_SUMMARY_JSON"
-jq --arg generated_at_utc "$ACCESS_RECOVERY_STALE_CASE_FRESH_AT" '.generated_at_utc = $generated_at_utc' "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_STALE_DEPLOYMENT_SUMMARY_JSON"
+jq '.generated_at_utc = "2020-01-01T00:00:00Z"' "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_STALE_DEPLOYMENT_SUMMARY_JSON"
 jq --arg generated_at_utc "$ACCESS_RECOVERY_STALE_CASE_FRESH_AT" '.generated_at_utc = $generated_at_utc' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_RECOVERY_STALE_HOST_SUMMARY_JSON"
 if ! ROADMAP_PROGRESS_ACCESS_RECOVERY_EVIDENCE_MAX_AGE_SEC=60 run_roadmap_progress_report \
   --refresh-manual-validation 0 \
@@ -2845,14 +2867,24 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_service_smoke.summary_max_age_sec == 60
   and ((.access_recovery_track.access_bridge_service_smoke.summary_age_sec // null) | type) == "number"
   and (.access_recovery_track.access_bridge_service_smoke.notes | contains("stale"))
-  and .access_recovery_track.access_bridge_deployment_evidence.available == true
-  and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
+  and .access_recovery_track.access_bridge_deployment_evidence.available == false
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "stale"
+  and .access_recovery_track.access_bridge_deployment_evidence.source_summary_json == null
+  and .access_recovery_track.access_bridge_deployment_evidence.summary_stale == true
+  and .access_recovery_track.access_bridge_deployment_evidence.summary_max_age_sec == 60
+  and ((.access_recovery_track.access_bridge_deployment_evidence.summary_age_sec // null) | type) == "number"
+  and (.access_recovery_track.access_bridge_deployment_evidence.notes | contains("stale"))
   and .access_recovery_track.access_bridge_host_install.available == true
   and .access_recovery_track.access_bridge_host_install.status == "pass"
   and .access_recovery_track.recommended_next_action.id == "access_bridge_service_smoke"
   and ((.access_recovery_track.recommended_next_action.command // "") | test("access_bridge_service_smoke.sh"))
+  and .access_recovery_track.recommended_next_action.placeholder_unresolved == true
+  and .access_recovery_track.recommended_next_action.safe_to_execute_as_is == false
+  and .access_recovery_track.recommended_next_action.operator_input_required == true
+  and (.access_recovery_track.recommended_next_action.placeholder_keys == ["HELPER_PUBLIC_DNS","HELPER_ID","PRIVATE_CODE_FILE","ORG_ID"])
+  and ((.access_recovery_track.recommended_next_action.placeholder_resolution // "") | contains("Template command only"))
   and .artifacts.access_bridge_service_smoke_summary_json == null
-  and .artifacts.access_bridge_deployment_evidence_summary_json == "'"$ACCESS_RECOVERY_STALE_DEPLOYMENT_SUMMARY_JSON"'"
+  and .artifacts.access_bridge_deployment_evidence_summary_json == null
   and .artifacts.access_bridge_host_install_summary_json == "'"$ACCESS_RECOVERY_STALE_HOST_SUMMARY_JSON"'"
 ' "$TMP_DIR/roadmap_progress_access_recovery_stale_summary.json" >/dev/null; then
   echo "Access Recovery stale evidence summary mismatch"
@@ -2861,6 +2893,16 @@ if ! jq -e '
 fi
 if ! grep -Fq 'Access bridge service smoke: available=false, status=stale' "$TMP_DIR/roadmap_progress_access_recovery_stale_report.md"; then
   echo "Access Recovery stale evidence report mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_stale_report.md"
+  exit 1
+fi
+if ! grep -Fq 'Access bridge deployment evidence: available=false, status=stale' "$TMP_DIR/roadmap_progress_access_recovery_stale_report.md"; then
+  echo "Access Recovery stale deployment evidence report mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_stale_report.md"
+  exit 1
+fi
+if ! grep -Fq 'Access Recovery next action safe to execute as-is: false' "$TMP_DIR/roadmap_progress_access_recovery_stale_report.md"; then
+  echo "Access Recovery stale report should mark placeholder next action unsafe to execute as-is"
   cat "$TMP_DIR/roadmap_progress_access_recovery_stale_report.md"
   exit 1
 fi

@@ -1252,11 +1252,14 @@ mkdir -p "$archive_dir"
 
 candidate_total=0
 copied_total=0
+qualifying_copied_total=0
+diagnostic_copied_total=0
 missing_total=0
 copy_error_total=0
 source_path_reject_total=0
 artifact_contract_error_total=0
 missing_family_count=0
+diagnostic_only_family_count=0
 included_family_count="${#included_families[@]}"
 
 build_next_action_hints_json() {
@@ -1346,6 +1349,8 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
 
   family_candidate_count=0
   family_copied_count=0
+  family_qualifying_copied_count=0
+  family_diagnostic_copied_count=0
   family_missing_count=0
   family_copy_error_count=0
   family_source_path_reject_count=0
@@ -1428,6 +1433,11 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
           artifact_diagnostic_evidence="false"
           if [[ "$artifact_status" == "fail" ]]; then
             artifact_diagnostic_evidence="true"
+            family_diagnostic_copied_count=$((family_diagnostic_copied_count + 1))
+            diagnostic_copied_total=$((diagnostic_copied_total + 1))
+          else
+            family_qualifying_copied_count=$((family_qualifying_copied_count + 1))
+            qualifying_copied_total=$((qualifying_copied_total + 1))
           fi
           jq -nc \
             --arg family "$family" \
@@ -1472,7 +1482,10 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
     if (( family_copied_count == 0 )); then
       missing_family_count=$((missing_family_count + 1))
     fi
-    if (( family_copied_count == 0 || family_missing_count > 0 || family_copy_error_count > 0 || family_artifact_contract_error_count > 0 )); then
+    if (( family_copied_count > 0 && family_qualifying_copied_count == 0 )); then
+      diagnostic_only_family_count=$((diagnostic_only_family_count + 1))
+    fi
+    if (( family_qualifying_copied_count == 0 || family_missing_count > 0 || family_copy_error_count > 0 || family_artifact_contract_error_count > 0 )); then
       family_hints_json="$(build_next_action_hints_json "$family")"
       if [[ "$(printf '%s\n' "$family_hints_json" | jq -r 'length')" != "0" ]]; then
         while IFS= read -r hint_line; do
@@ -1485,6 +1498,8 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
   family_status="skipped"
   if [[ "$included_flag" == "1" ]]; then
     if (( family_copied_count == 0 )); then
+      family_status="fail"
+    elif (( family_qualifying_copied_count == 0 )); then
       family_status="fail"
     elif (( family_artifact_contract_error_count > 0 )); then
       family_status="fail"
@@ -1507,6 +1522,8 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
     --arg status "$family_status" \
     --argjson candidate_count "$family_candidate_count" \
     --argjson copied_count "$family_copied_count" \
+    --argjson qualifying_copied_count "$family_qualifying_copied_count" \
+    --argjson diagnostic_copied_count "$family_diagnostic_copied_count" \
     --argjson missing_count "$family_missing_count" \
     --argjson copy_error_count "$family_copy_error_count" \
     --argjson source_path_reject_count "$family_source_path_reject_count" \
@@ -1523,6 +1540,8 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
       status: $status,
       candidate_count: $candidate_count,
       copied_count: $copied_count,
+      qualifying_copied_count: $qualifying_copied_count,
+      diagnostic_copied_count: $diagnostic_copied_count,
       missing_count: $missing_count,
       copy_error_count: $copy_error_count,
       source_path_reject_count: $source_path_reject_count,
@@ -1566,6 +1585,11 @@ elif (( copied_total == 0 )); then
   final_rc=1
   final_reason="no artifacts were copied for selected families"
   failure_substep="selected_families_no_artifacts_copied"
+elif (( qualifying_copied_total == 0 || diagnostic_only_family_count > 0 )); then
+  final_status="fail"
+  final_rc=1
+  final_reason="archive only found diagnostic failing artifacts for one or more selected families"
+  failure_substep="selected_families_no_qualifying_artifacts"
 elif (( copy_error_total > 0 || missing_family_count > 0 )); then
   final_status="fail"
   final_rc=1
@@ -1589,7 +1613,7 @@ if [[ -z "$included_families_csv" ]]; then
   included_families_csv="none"
 fi
 
-echo "[roadmap-live-evidence-archive-run] scope=$requested_scope resolved_scope=$resolved_scope included_families=$included_families_csv missing_source_policy=$missing_source_policy candidate_total=$candidate_total copied_total=$copied_total missing_total=$missing_total copy_error_total=$copy_error_total source_path_reject_total=$source_path_reject_total artifact_contract_error_total=$artifact_contract_error_total missing_family_count=$missing_family_count status=$final_status failure_substep=${failure_substep:-none}"
+echo "[roadmap-live-evidence-archive-run] scope=$requested_scope resolved_scope=$resolved_scope included_families=$included_families_csv missing_source_policy=$missing_source_policy candidate_total=$candidate_total copied_total=$copied_total qualifying_copied_total=$qualifying_copied_total diagnostic_copied_total=$diagnostic_copied_total missing_total=$missing_total copy_error_total=$copy_error_total source_path_reject_total=$source_path_reject_total artifact_contract_error_total=$artifact_contract_error_total missing_family_count=$missing_family_count diagnostic_only_family_count=$diagnostic_only_family_count status=$final_status failure_substep=${failure_substep:-none}"
 if [[ "$final_status" == "fail" && -n "$failure_substep" ]]; then
   echo "[roadmap-live-evidence-archive-run] fail_substep=$failure_substep reason=$final_reason"
 elif [[ "$final_status" == "warn" ]]; then
@@ -1623,11 +1647,14 @@ jq -n \
   --argjson included_family_count "$included_family_count" \
   --argjson candidate_total "$candidate_total" \
   --argjson copied_total "$copied_total" \
+  --argjson qualifying_copied_total "$qualifying_copied_total" \
+  --argjson diagnostic_copied_total "$diagnostic_copied_total" \
   --argjson missing_total "$missing_total" \
   --argjson copy_error_total "$copy_error_total" \
   --argjson source_path_reject_total "$source_path_reject_total" \
   --argjson artifact_contract_error_total "$artifact_contract_error_total" \
   --argjson missing_family_count "$missing_family_count" \
+  --argjson diagnostic_only_family_count "$diagnostic_only_family_count" \
   --argjson source_path_allowlist "$source_path_allowlist_json" \
   --argjson family_results "$(jsonl_to_array "$family_results_jsonl")" \
   --argjson next_action_hints "$(jsonl_to_array "$next_action_hints_jsonl")" \
@@ -1664,11 +1691,14 @@ jq -n \
     summary: {
       candidate_total: $candidate_total,
       copied_total: $copied_total,
+      qualifying_copied_total: $qualifying_copied_total,
+      diagnostic_copied_total: $diagnostic_copied_total,
       missing_total: $missing_total,
       copy_error_total: $copy_error_total,
       source_path_reject_total: $source_path_reject_total,
       artifact_contract_error_total: $artifact_contract_error_total,
-      missing_family_count: $missing_family_count
+      missing_family_count: $missing_family_count,
+      diagnostic_only_family_count: $diagnostic_only_family_count
     },
     path_safety: {
       source_path_allowlist: $source_path_allowlist,

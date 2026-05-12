@@ -138,9 +138,15 @@ set -euo pipefail
 capture="${FAKE_HELPER_CAPTURE_FILE:?}"
 receipt_json="${FAKE_MANUAL_VALIDATION_RECEIPT_JSON:?}"
 printf '%s\n' "manual-validation-record $*" >>"$capture"
+if [[ "${FAKE_MANUAL_RECORD_FAIL:-0}" == "1" ]]; then
+  echo "manual-validation-record forced failure"
+  exit 17
+fi
 mkdir -p "$(dirname "$receipt_json")"
-printf '%s\n' '{"status":"ok"}' >"$receipt_json"
-echo "[manual-validation-record] receipt_json=$receipt_json"
+if [[ "${FAKE_MANUAL_RECORD_NO_RECEIPT:-0}" != "1" ]]; then
+  printf '%s\n' '{"status":"ok"}' >"$receipt_json"
+  echo "[manual-validation-record] receipt_json=$receipt_json"
+fi
 echo "manual-validation-record ok"
 exit 0
 EOF_FAKE_MANUAL_RECORD
@@ -152,6 +158,10 @@ set -euo pipefail
 
 capture="${FAKE_HELPER_CAPTURE_FILE:?}"
 printf '%s\n' "manual-validation-report $*" >>"$capture"
+if [[ "${FAKE_MANUAL_REPORT_FAIL:-0}" == "1" ]]; then
+  echo "manual-validation-report forced failure"
+  exit 23
+fi
 
 summary_json=""
 report_md=""
@@ -264,6 +274,79 @@ fi
 if ! grep -Eq '\[REDACTED\]|\[REDACTED_INVITE\]' "$summary_log_path"; then
   echo "three-machine-docker-profile-matrix-record summary log missing redaction markers"
   cat "$summary_log_path"
+  exit 1
+fi
+
+echo "[three-machine-docker-profile-matrix-record] manual validation report failure fails record gate"
+: >"$CAPTURE"
+if FAKE_HELPER_CAPTURE_FILE="$CAPTURE" \
+  FAKE_MANUAL_REPORT_FAIL="1" \
+  FAKE_MANUAL_VALIDATION_RECEIPT_JSON="$TMP_DIR/manual_validation_receipt_report_fail.json" \
+  THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MATRIX_SCRIPT="$FAKE_MATRIX" \
+  THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MANUAL_VALIDATION_RECORD_SCRIPT="$FAKE_MANUAL_RECORD" \
+  THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+  ./scripts/three_machine_docker_profile_matrix_record.sh \
+    --summary-json "$TMP_DIR/summary_report_fail.json" \
+    --matrix-summary-json "$TMP_DIR/matrix_summary_report_fail.json" \
+    --manual-validation-report-summary-json "$TMP_DIR/manual_validation_report_fail_gate.json" \
+    --manual-validation-report-md "$TMP_DIR/manual_validation_report_fail_gate.md" \
+    --record-result 1 \
+    --print-summary-json 1 >"$TMP_DIR/integration_three_machine_docker_profile_matrix_record_report_fail.log" 2>&1; then
+  echo "expected manual-validation-report failure to fail profile matrix record"
+  cat "$TMP_DIR/integration_three_machine_docker_profile_matrix_record_report_fail.log"
+  exit 1
+fi
+if ! grep -q 'three-machine-docker-profile-matrix-record: status=fail' "$TMP_DIR/integration_three_machine_docker_profile_matrix_record_report_fail.log"; then
+  echo "expected fail status for manual-validation-report failure"
+  cat "$TMP_DIR/integration_three_machine_docker_profile_matrix_record_report_fail.log"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and (.notes | contains("record gate failed"))
+  and .stages.matrix.status == "pass"
+  and .stages.matrix.rc == 0
+  and .stages.manual_validation_report.status == "fail"
+  and .stages.manual_validation_report.rc == 23
+  and .stages.manual_validation_record.status == "ok"
+' "$TMP_DIR/summary_report_fail.json" >/dev/null; then
+  echo "manual-validation-report failure summary mismatch"
+  cat "$TMP_DIR/summary_report_fail.json"
+  exit 1
+fi
+
+echo "[three-machine-docker-profile-matrix-record] missing manual validation receipt fails record gate"
+: >"$CAPTURE"
+if FAKE_HELPER_CAPTURE_FILE="$CAPTURE" \
+  FAKE_MANUAL_RECORD_NO_RECEIPT="1" \
+  FAKE_MANUAL_VALIDATION_RECEIPT_JSON="$TMP_DIR/manual_validation_receipt_missing_gate.json" \
+  THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MATRIX_SCRIPT="$FAKE_MATRIX" \
+  THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MANUAL_VALIDATION_RECORD_SCRIPT="$FAKE_MANUAL_RECORD" \
+  THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+  ./scripts/three_machine_docker_profile_matrix_record.sh \
+    --summary-json "$TMP_DIR/summary_receipt_missing.json" \
+    --matrix-summary-json "$TMP_DIR/matrix_summary_receipt_missing.json" \
+    --manual-validation-report-summary-json "$TMP_DIR/manual_validation_report_receipt_missing.json" \
+    --manual-validation-report-md "$TMP_DIR/manual_validation_report_receipt_missing.md" \
+    --record-result 1 \
+    --print-summary-json 1 >"$TMP_DIR/integration_three_machine_docker_profile_matrix_record_receipt_missing.log" 2>&1; then
+  echo "expected missing manual-validation-record receipt to fail profile matrix record"
+  cat "$TMP_DIR/integration_three_machine_docker_profile_matrix_record_receipt_missing.log"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and (.notes | contains("manual-validation-record receipt missing"))
+  and .stages.matrix.status == "pass"
+  and .stages.matrix.rc == 0
+  and .stages.manual_validation_report.status == "ok"
+  and .stages.manual_validation_record.status == "ok"
+  and .stages.manual_validation_record.written_receipt == false
+' "$TMP_DIR/summary_receipt_missing.json" >/dev/null; then
+  echo "missing manual-validation-record receipt summary mismatch"
+  cat "$TMP_DIR/summary_receipt_missing.json"
   exit 1
 fi
 

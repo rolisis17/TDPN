@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in jq mktemp; do
+for cmd in awk jq mktemp tr; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing required command: $cmd"
     exit 2
@@ -306,6 +306,7 @@ fi
 mkdir -p "$(dirname "$summary_json")" "$(dirname "$rehearsal_summary_json")" "$(dirname "$manual_validation_report_summary_json")" "$(dirname "$manual_validation_report_md")"
 summary_log="$log_dir/three_machine_docker_readiness_record_${timestamp}.log"
 manual_validation_report_log="$log_dir/three_machine_docker_readiness_record_${timestamp}_manual_validation_report.log"
+manual_validation_record_log="$log_dir/three_machine_docker_readiness_record_${timestamp}_manual_validation_record.log"
 : >"$summary_log"
 
 stage="rehearsal"
@@ -319,6 +320,11 @@ rehearsal_log_path=""
 manual_validation_report_status="skipped"
 manual_validation_report_readiness_status=""
 manual_validation_report_next_action_check_id=""
+receipt_status="skipped"
+receipt_rc=0
+receipt_ran="0"
+receipt_written="0"
+receipt_json_path=""
 
 write_summary_json() {
   local summary_tmp=""
@@ -343,6 +349,13 @@ write_summary_json() {
     --arg manual_validation_report_next_action_check_id "$manual_validation_report_next_action_check_id" \
     --arg manual_validation_report_log "$manual_validation_report_log" \
     --argjson manual_validation_report_enabled "$manual_validation_report_enabled" \
+    --argjson record_result "$record_result" \
+    --argjson receipt_ran "$receipt_ran" \
+    --arg receipt_status "$receipt_status" \
+    --argjson receipt_rc "$receipt_rc" \
+    --argjson receipt_written "$receipt_written" \
+    --arg receipt_json_path "$receipt_json_path" \
+    --arg manual_validation_record_log "$manual_validation_record_log" \
     '{
       version: 1,
       schema: {
@@ -371,10 +384,21 @@ write_summary_json() {
         readiness_status: $manual_validation_report_readiness_status,
         next_action_check_id: $manual_validation_report_next_action_check_id
       },
+      manual_validation_record: {
+        enabled: ($record_result == 1),
+        ran: ($receipt_ran == 1),
+        status: $receipt_status,
+        rc: $receipt_rc,
+        check_id: "three_machine_docker_readiness",
+        log: $manual_validation_record_log,
+        written_receipt: ($receipt_written == 1),
+        receipt_json: $receipt_json_path
+      },
       artifacts: {
         summary_log: $summary_log,
         summary_json: $summary_json,
-        rehearsal_summary_json: $rehearsal_summary_json
+        rehearsal_summary_json: $rehearsal_summary_json,
+        manual_validation_record_log: $manual_validation_record_log
       }
     }' >"$summary_tmp"
   mv -f "$summary_tmp" "$summary_json"
@@ -429,8 +453,11 @@ refresh_manual_validation_report() {
 
 record_receipt() {
   local -a record_cmd=()
+  local record_output=""
+  local record_receipt_json=""
   local receipt_artifact=""
 
+  receipt_ran="1"
   record_cmd=(
     "$easy_node_script" manual-validation-record
     --check-id "three_machine_docker_readiness"
@@ -442,7 +469,22 @@ record_receipt() {
   for receipt_artifact in "$@"; do
     record_cmd+=(--artifact "$receipt_artifact")
   done
-  "${record_cmd[@]}" 2>&1 | redact_sensitive_output >>"$summary_log" || true
+  if run_and_capture record_output "${record_cmd[@]}"; then
+    receipt_status="ok"
+    receipt_rc=0
+  else
+    receipt_rc=$?
+    receipt_status="fail"
+  fi
+  persist_artifact_text "$manual_validation_record_log" "$record_output"
+
+  record_receipt_json="$(printf '%s\n' "$record_output" | awk -F'=' '/^\[manual-validation-record\] receipt_json=/{print $2; exit}' | tr -d '\r')"
+  receipt_json_path="$(trim "$record_receipt_json")"
+  if [[ -n "$receipt_json_path" && -f "$receipt_json_path" ]]; then
+    receipt_written="1"
+  else
+    receipt_written="0"
+  fi
 }
 
 declare -a rehearsal_cmd=()
@@ -523,6 +565,30 @@ append_existing_artifact receipt_artifacts "$manual_validation_report_md"
 if [[ "$record_result" == "1" ]]; then
   record_receipt "${receipt_artifacts[@]}"
 fi
+
+if [[ "$record_result" == "1" ]]; then
+  if [[ "$receipt_status" != "ok" || "$receipt_rc" -ne 0 || "$receipt_written" != "1" ]]; then
+    record_status="fail"
+    record_rc=1
+    if [[ "$notes" != *"manual-validation record failed"* && "$notes" != *"manual-validation receipt missing"* ]]; then
+      if [[ "$receipt_status" != "ok" || "$receipt_rc" -ne 0 ]]; then
+        if [[ -n "$notes" ]]; then
+          notes="$notes; manual-validation record failed"
+        else
+          notes="manual-validation record failed"
+        fi
+      else
+        if [[ -n "$notes" ]]; then
+          notes="$notes; manual-validation receipt missing"
+        else
+          notes="manual-validation receipt missing"
+        fi
+      fi
+    fi
+  fi
+fi
+
+write_summary_json
 
 echo "three-machine-docker-readiness-record: status=$record_status"
 echo "summary_log: $summary_log"

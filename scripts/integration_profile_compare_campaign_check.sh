@@ -286,6 +286,11 @@ if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and (.errors | le
   cat "$M4_OPT_OUT_SUMMARY"
   exit 1
 fi
+if ! jq -e '.decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.runtime_actuation_status == "unknown" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.runtime_actuation_ready == null' "$M4_OPT_OUT_SUMMARY" >/dev/null 2>&1; then
+  echo "explicit m4 policy opt-out summary missing unknown runtime-actuation signal fields"
+  cat "$M4_OPT_OUT_SUMMARY"
+  exit 1
+fi
 
 echo "[profile-compare-campaign-check] hardened defaults fail-close weak evidence"
 WEAK_DEFAULT_SUMMARY="$TMP_DIR/campaign_check_weak_default_fail.json"
@@ -641,6 +646,11 @@ if ! rg -q '\[profile-compare-campaign-check\] decision=GO status=ok rc=0' /tmp/
 fi
 if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and .inputs.policy.require_micro_relay_quality_evidence == true and .inputs.policy.require_micro_relay_quality_status_pass == true and .inputs.policy.require_micro_relay_demotion_policy == true and .inputs.policy.require_micro_relay_promotion_policy == true and .inputs.policy.require_trust_tier_port_unlock_policy == true and .inputs.policy.require_runtime_actuation_status_pass == true and .observed.micro_relay_policy_evidence.quality_evidence_present == true and .observed.micro_relay_policy_evidence.quality_status_pass == true and .observed.micro_relay_policy_evidence.demotion_policy_present == true and .observed.micro_relay_policy_evidence.promotion_policy_present == true and .observed.micro_relay_policy_evidence.trust_tier_port_unlock_policy_present == true and .observed.micro_relay_policy_evidence.runtime_actuation_status_pass == true and (.decision_diagnostics.m4_policy.unmet_requirements | length) == 0 and .decision_diagnostics.m4_policy.gate_summary.required_total == 6 and .decision_diagnostics.m4_policy.gate_summary.required_passed == 6 and .decision_diagnostics.m4_policy.gate_summary.required_failed == 0 and (.decision_diagnostics.m4_policy.gate_summary.failed_gate_ids | length) == 0 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.status == "pass" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.observed_any == true and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_quality_evidence.selected_summaries_total == 0 and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.status == "pass" and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.observed_any == true and .decision_diagnostics.m4_policy.gate_evaluation.micro_relay_demotion_policy.selected_summaries_total == 0 and .decision_diagnostics.m4_policy.gate_evaluation.trust_tier_port_unlock_policy.status == "pass" and .decision_diagnostics.m4_policy.gate_evaluation.trust_tier_port_unlock_policy.observed_any == true and .decision_diagnostics.m4_policy.gate_evaluation.trust_tier_port_unlock_policy.selected_summaries_total == 0 and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status == "pass" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.observed == true' "$M4_PASS_SUMMARY" >/dev/null 2>&1; then
   echo "m4 pass summary missing expected fields"
+  cat "$M4_PASS_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.observed.micro_relay_policy_evidence.runtime_actuation_status == "pass" and .observed.micro_relay_policy_evidence.runtime_actuation_ready == true and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.runtime_actuation_status == "pass" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.runtime_actuation_ready == true' "$M4_PASS_SUMMARY" >/dev/null 2>&1; then
+  echo "m4 pass summary missing explicit runtime-actuation diagnostics"
   cat "$M4_PASS_SUMMARY"
   exit 1
 fi
@@ -1062,6 +1072,11 @@ if ! jq -e '.decision == "GO" and .status == "ok" and .rc == 0 and .observed.mic
   cat "$M4_RUNTIME_EXPLICIT_PASS_SUMMARY"
   exit 1
 fi
+if ! jq -e '.observed.micro_relay_policy_evidence.runtime_actuation_status == "pass" and .observed.micro_relay_policy_evidence.runtime_actuation_ready == true and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.runtime_actuation_status == "pass" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.runtime_actuation_ready == true' "$M4_RUNTIME_EXPLICIT_PASS_SUMMARY" >/dev/null 2>&1; then
+  echo "runtime explicit pass summary missing explicit runtime-actuation status/ready fields"
+  cat "$M4_RUNTIME_EXPLICIT_PASS_SUMMARY"
+  exit 1
+fi
 
 echo "[profile-compare-campaign-check] runtime actuation explicit fail overrides composite"
 CAMPAIGN_M4_RUNTIME_EXPLICIT_FAIL_JSON="$TMP_DIR/profile_compare_campaign_summary_m4_runtime_explicit_fail.json"
@@ -1138,6 +1153,11 @@ if ! rg -q '\[profile-compare-campaign-check\] decision=NO-GO status=fail rc=0' 
 fi
 if ! jq -e '.decision == "NO-GO" and .status == "fail" and .rc == 0 and (.decision_diagnostics.m4_policy.unmet_requirements | index("runtime_actuation_status_not_pass")) != null and .observed.micro_relay_policy_evidence.runtime_actuation_status_source == "explicit_campaign_summary" and .observed.micro_relay_policy_evidence.runtime_actuation_explicit_observed == true and .observed.micro_relay_policy_evidence.runtime_actuation_explicit_pass == false and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.source == "explicit_campaign_summary"' "$M4_RUNTIME_EXPLICIT_FAIL_SUMMARY" >/dev/null 2>&1; then
   echo "runtime explicit fail summary missing expected fields"
+  cat "$M4_RUNTIME_EXPLICIT_FAIL_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.observed.micro_relay_policy_evidence.runtime_actuation_status == "fail" and .observed.micro_relay_policy_evidence.runtime_actuation_ready == false and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.runtime_actuation_status == "fail" and .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.runtime_actuation_ready == false' "$M4_RUNTIME_EXPLICIT_FAIL_SUMMARY" >/dev/null 2>&1; then
+  echo "runtime explicit fail summary missing explicit runtime-actuation status/ready fields"
   cat "$M4_RUNTIME_EXPLICIT_FAIL_SUMMARY"
   exit 1
 fi

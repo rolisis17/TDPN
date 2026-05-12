@@ -61,6 +61,18 @@ trim() {
   printf '%s' "$value"
 }
 
+normalize_runtime_actuation_status() {
+  local status
+  status="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  case "$status" in
+    pass|ok|ready|true) printf '%s\n' "pass" ;;
+    fail|blocked|false) printf '%s\n' "fail" ;;
+    warn|warning) printf '%s\n' "warn" ;;
+    unknown|unset|missing|"") printf '%s\n' "unknown" ;;
+    *) printf '%s\n' "$status" ;;
+  esac
+}
+
 abs_path() {
   local path
   path="$(trim "${1:-}")"
@@ -1259,6 +1271,44 @@ if ((runtime_actuation_explicit_observed == 0)) && [[ "$runtime_actuation_status
   runtime_actuation_status_source="composite"
 fi
 
+runtime_actuation_composite_observed=0
+if ((micro_relay_quality_evidence_present == 1 \
+    || micro_relay_quality_status_pass == 1 \
+    || micro_relay_demotion_policy_present == 1 \
+    || micro_relay_promotion_policy_present == 1 \
+    || trust_tier_port_unlock_policy_present == 1)); then
+  runtime_actuation_composite_observed=1
+fi
+
+runtime_actuation_status="unknown"
+runtime_actuation_ready_json="null"
+runtime_actuation_status_raw=""
+if ((campaign_runtime_actuation_explicit_present == 1)); then
+  runtime_actuation_status_raw="$(jq -r '.runtime_actuation.status // ""' <<<"$campaign_m4_observed_json" 2>/dev/null || printf '%s' "")"
+fi
+runtime_actuation_status="$(normalize_runtime_actuation_status "$runtime_actuation_status_raw")"
+if [[ "$runtime_actuation_status" == "unknown" ]]; then
+  if ((runtime_actuation_status_pass == 1)); then
+    runtime_actuation_status="pass"
+  elif ((runtime_actuation_explicit_observed == 1 || runtime_actuation_composite_observed == 1)); then
+    runtime_actuation_status="fail"
+  fi
+fi
+case "$runtime_actuation_status" in
+  pass)
+    runtime_actuation_ready_json="true"
+    ;;
+  fail|warn)
+    runtime_actuation_ready_json="false"
+    ;;
+  *)
+    runtime_actuation_ready_json="null"
+    ;;
+esac
+if ((runtime_actuation_status_pass == 1)); then
+  runtime_actuation_ready_json="true"
+fi
+
 declare -a errors=()
 if ((${#numeric_validation_issues[@]} > 0)); then
   errors+=("campaign/trend numeric fields invalid or non-numeric: $(IFS=,; echo "${numeric_validation_issues[*]}")")
@@ -1463,6 +1513,8 @@ jq -n \
   --argjson micro_relay_promotion_policy_present "$micro_relay_promotion_policy_present" \
   --argjson trust_tier_port_unlock_policy_present "$trust_tier_port_unlock_policy_present" \
   --argjson runtime_actuation_status_pass "$runtime_actuation_status_pass" \
+  --arg runtime_actuation_status "$runtime_actuation_status" \
+  --argjson runtime_actuation_ready "$runtime_actuation_ready_json" \
   --arg runtime_actuation_status_source "$runtime_actuation_status_source" \
   --argjson runtime_actuation_explicit_observed "$runtime_actuation_explicit_observed" \
   --argjson runtime_actuation_explicit_pass "$runtime_actuation_explicit_pass" \
@@ -1558,6 +1610,8 @@ jq -n \
         promotion_policy_present: ($micro_relay_promotion_policy_present == 1),
         trust_tier_port_unlock_policy_present: ($trust_tier_port_unlock_policy_present == 1),
         runtime_actuation_status_pass: ($runtime_actuation_status_pass == 1),
+        runtime_actuation_status: $runtime_actuation_status,
+        runtime_actuation_ready: $runtime_actuation_ready,
         runtime_actuation_status_source: $runtime_actuation_status_source,
         runtime_actuation_explicit_observed: ($runtime_actuation_explicit_observed == 1),
         runtime_actuation_explicit_pass: ($runtime_actuation_explicit_pass == 1),
@@ -1724,6 +1778,8 @@ jq -n \
             runtime_actuation_status_pass: {
               required: ($require_runtime_actuation_status_pass == 1),
               observed: ($runtime_actuation_status_pass == 1),
+              runtime_actuation_status: $runtime_actuation_status,
+              runtime_actuation_ready: $runtime_actuation_ready,
               source: $runtime_actuation_status_source,
               explicit_observed: ($runtime_actuation_explicit_observed == 1),
               explicit_status_pass: ($runtime_actuation_explicit_pass == 1),

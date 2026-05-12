@@ -1986,7 +1986,7 @@ trend_source_value=""
 selection_policy_evidence_present="0"
 selection_policy_evidence_valid="0"
 decision_diagnostics_json='{"source_schema":"none","legacy":null,"aggregated_diagnostics":{"transport_mismatch_failures":0,"token_proof_invalid_failures":0,"unknown_exit_failures":0,"directory_trust_failures":0,"real_packet_no_udp_failures":0,"root_required_failures":0,"endpoint_unreachable_failures":0},"likely_primary_failure":"none","operator_hint":""}'
-campaign_check_gate_diagnostics_json='{"runtime_actuation_status_pass":{"available":false,"required":false,"status":"unknown","blocking":false,"source":null,"actionable_reason":null}}'
+campaign_check_gate_diagnostics_json='{"runtime_actuation_status_pass":{"available":false,"required":false,"status":"unknown","runtime_actuation_status":"unknown","runtime_actuation_ready":null,"blocking":false,"source":null,"actionable_reason":null}}'
 next_operator_action=""
 campaign_check_summary_present=0
 if [[ "$check_attempted" == "1" && -f "$campaign_check_summary_json" ]] && jq -e . "$campaign_check_summary_json" >/dev/null 2>&1; then
@@ -2018,14 +2018,36 @@ if [[ "$check_attempted" == "1" && -f "$campaign_check_summary_json" ]] && jq -e
     ' "$campaign_check_summary_json" 2>/dev/null || printf '%s' "")"
   fi
   campaign_check_gate_diagnostics_candidate="$(jq -c '
+    def gate: .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass;
+    def status_ready($status):
+      if ($status | type) != "string" then null
+      else
+        (($status | ascii_downcase) as $normalized
+          | if ($normalized == "pass" or $normalized == "ok" or $normalized == "ready") then true
+            elif ($normalized == "fail" or $normalized == "blocked") then false
+            else null
+            end)
+      end;
     {
       runtime_actuation_status_pass: {
-        available: (.decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass != null),
-        required: (.decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.required // false),
-        status: (.decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.status // "unknown"),
-        blocking: (.decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.blocking // false),
-        source: (.decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.source // null),
-        actionable_reason: (.decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass.actionable_reason // null)
+        available: (gate != null),
+        required: (gate.required // false),
+        status: (gate.status // "unknown"),
+        runtime_actuation_status: (
+          if (gate.runtime_actuation_status | type) == "string" then gate.runtime_actuation_status
+          elif (gate.status | type) == "string" then gate.status
+          else "unknown"
+          end
+        ),
+        runtime_actuation_ready: (
+          if (gate.runtime_actuation_ready | type) == "boolean" then gate.runtime_actuation_ready
+          elif (gate.observed | type) == "boolean" then gate.observed
+          else status_ready(gate.status)
+          end
+        ),
+        blocking: (gate.blocking // false),
+        source: (gate.source // null),
+        actionable_reason: (gate.actionable_reason // null)
       }
     }
   ' "$campaign_check_summary_json" 2>/dev/null || true)"

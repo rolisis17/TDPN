@@ -97,6 +97,16 @@ EOF_REHEARSAL
     exit 0
     ;;
   manual-validation-record)
+    if [[ "${FAKE_MANUAL_RECORD_FAIL:-0}" == "1" ]]; then
+      echo "manual-validation-record forced failure"
+      exit 17
+    fi
+    receipt_json="${FAKE_MANUAL_VALIDATION_RECEIPT_JSON:-${FAKE_EASY_CAPTURE_FILE}.receipt.json}"
+    if [[ "${FAKE_MANUAL_RECORD_NO_RECEIPT:-0}" != "1" ]]; then
+      mkdir -p "$(dirname "$receipt_json")"
+      printf '%s\n' '{"status":"ok"}' >"$receipt_json"
+      echo "[manual-validation-record] receipt_json=$receipt_json"
+    fi
     echo "manual-validation-record ok"
     exit 0
     ;;
@@ -154,6 +164,8 @@ if ! jq -e '
   and .manual_validation_report.status == "ok"
   and .manual_validation_report.readiness_status == "NOT_READY"
   and .manual_validation_report.next_action_check_id == "machine_c_vpn_smoke"
+  and .manual_validation_record.status == "ok"
+  and .manual_validation_record.written_receipt == true
 ' "$summary_json_path" >/dev/null; then
   echo "success summary JSON missing expected fields"
   cat "$summary_json_path"
@@ -173,6 +185,52 @@ fi
 if ! rg -q '\[REDACTED\]|\[REDACTED_INVITE\]' "$summary_log_path"; then
   echo "three-machine-docker-readiness-record summary log missing redaction markers"
   cat "$summary_log_path"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[three-machine-docker-readiness-record] missing manual validation receipt path"
+set +e
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_MANUAL_RECORD_NO_RECEIPT="1" \
+THREE_MACHINE_DOCKER_READINESS_RECORD_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+./scripts/three_machine_docker_readiness_record.sh \
+  --path-profile balanced \
+  --soak-rounds 2 \
+  --soak-pause-sec 1 \
+  --print-summary-json 1 >/tmp/integration_three_machine_docker_readiness_record_receipt_missing.log 2>&1
+receipt_missing_rc=$?
+set -e
+
+if [[ "$receipt_missing_rc" -eq 0 ]]; then
+  echo "expected non-zero status when manual-validation receipt is missing"
+  cat /tmp/integration_three_machine_docker_readiness_record_receipt_missing.log
+  exit 1
+fi
+if ! rg -q 'three-machine-docker-readiness-record: status=fail' /tmp/integration_three_machine_docker_readiness_record_receipt_missing.log; then
+  echo "expected fail status when manual-validation receipt is missing"
+  cat /tmp/integration_three_machine_docker_readiness_record_receipt_missing.log
+  exit 1
+fi
+receipt_missing_summary_json_path="$(sed -n 's/^summary_json: //p' /tmp/integration_three_machine_docker_readiness_record_receipt_missing.log | tail -n 1)"
+if [[ -z "$receipt_missing_summary_json_path" || ! -f "$receipt_missing_summary_json_path" ]]; then
+  echo "expected missing-receipt summary JSON missing"
+  cat /tmp/integration_three_machine_docker_readiness_record_receipt_missing.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and (.notes | contains("manual-validation receipt missing"))
+  and .rehearsal.status == "pass"
+  and .rehearsal.rc == 0
+  and .manual_validation_report.status == "ok"
+  and .manual_validation_record.status == "ok"
+  and .manual_validation_record.written_receipt == false
+' "$receipt_missing_summary_json_path" >/dev/null; then
+  echo "missing receipt path did not fail-close manual record status"
+  cat "$receipt_missing_summary_json_path"
   exit 1
 fi
 

@@ -202,6 +202,8 @@ EOF_SUMMARY
         .decision_diagnostics.m4_policy.gate_evaluation.runtime_actuation_status_pass = {
           required: ($runtime_gate_required == "1"),
           status: $runtime_gate_status,
+          runtime_actuation_status: $runtime_gate_status,
+          runtime_actuation_ready: ($runtime_gate_status == "pass" or $runtime_gate_status == "ok"),
           blocking: ($runtime_gate_blocking == "1"),
           source: (if $runtime_gate_source == "" then null else $runtime_gate_source end),
           actionable_reason: (if $runtime_gate_actionable_reason == "" then null else $runtime_gate_actionable_reason end)
@@ -307,6 +309,11 @@ if ! rg -q 'campaign refresh completed attempt=initial' /tmp/integration_profile
 fi
 if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .decision.selection_policy_evidence.present == true and .decision.selection_policy_evidence.valid == true and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass" and .stages.campaign.attempted == true and .stages.campaign_check.attempted == true and .stages.campaign.timed_out == false and .stages.campaign.timeout_sec == 0 and .inputs.campaign_refresh_runtime.timeout_sec == 0 and .inputs.campaign_refresh_runtime.campaign_runs == 5 and .inputs.campaign_refresh_runtime.profile_rounds == 1 and .inputs.campaign_refresh_runtime.profile_timeout_sec == 80 and .inputs.campaign_refresh_runtime.heartbeat_interval_sec >= 1 and .inputs.policy.require_selection_policy_present == 1 and .inputs.policy.require_selection_policy_valid == 1 and .inputs.policy.require_micro_relay_quality_evidence == 1 and .inputs.policy.require_micro_relay_quality_status_pass == 1 and .inputs.policy.require_micro_relay_demotion_policy == 1 and .inputs.policy.require_micro_relay_promotion_policy == 1 and .inputs.policy.require_trust_tier_port_unlock_policy == 1 and .inputs.policy.require_runtime_actuation_status_pass == 1 and .inputs.campaign_refresh_overrides.execution_mode == "docker" and .inputs.campaign_refresh_overrides.campaign_runs == null and .inputs.campaign_refresh_overrides.profile_rounds == 1 and .inputs.campaign_refresh_overrides.profile_timeout_sec == 80 and .inputs.campaign_refresh_overrides.profiles == "balanced,speed" and .inputs.campaign_refresh_overrides.allow_insecure_remote_http == true and .inputs.campaign_refresh_overrides_effective.campaign_runs == 5 and .inputs.campaign_refresh_overrides_effective.profile_rounds == 1 and .inputs.campaign_refresh_overrides_effective.profile_timeout_sec == 80 and .inputs.campaign_refresh_overrides_effective.profiles == "balanced,speed" and .inputs.campaign_refresh_overrides_effective.allow_insecure_remote_http == true and .inputs.campaign_refresh_overrides.directory_urls == "http://127.0.0.1:18081,http://127.0.0.1:28081" and .inputs.campaign_refresh_overrides.bootstrap_directory == "http://127.0.0.1:18081" and .inputs.campaign_refresh_overrides.discovery_wait_sec == 7 and .inputs.campaign_refresh_overrides.issuer_url == "http://127.0.0.1:18082" and .inputs.campaign_refresh_overrides.entry_url == "http://127.0.0.1:18083" and .inputs.campaign_refresh_overrides.exit_url == "http://127.0.0.1:18084" and .inputs.campaign_refresh_overrides.subject_configured == true and .inputs.campaign_refresh_overrides.anon_cred_configured == false and .inputs.campaign_refresh_overrides.start_local_stack == "0" and .inputs.campaign_refresh_overrides_effective.subject_configured == true and .inputs.campaign_refresh_overrides_effective.anon_cred_configured == false and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.available == false and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.status == "unknown"' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
   echo "success summary JSON missing expected fields"
+  cat "$SUCCESS_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.runtime_actuation_status == "unknown" and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.runtime_actuation_ready == null' "$SUCCESS_SUMMARY" >/dev/null 2>&1; then
+  echo "success summary JSON missing explicit unknown runtime-actuation diagnostics"
   cat "$SUCCESS_SUMMARY"
   exit 1
 fi
@@ -2334,6 +2341,11 @@ FAKE_CHECK_RUNTIME_GATE_ACTIONABLE_REASON='runtime gate action please rerun afte
   --summary-json "$RUNTIME_GATE_PROP_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_runtime_gate_propagation.log 2>&1
 if ! jq -e '.status == "ok" and .final_rc == 0 and .decision.decision == "GO" and .decision.next_operator_action == "runtime gate action please rerun after fixing runtime evidence" and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.available == true and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.required == true and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.status == "fail" and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.blocking == true and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.source == "explicit_campaign_summary" and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.actionable_reason == "runtime gate action please rerun after fixing runtime evidence"' "$RUNTIME_GATE_PROP_SUMMARY" >/dev/null 2>&1; then
   echo "runtime gate diagnostics propagation assertion failed"
+  cat "$RUNTIME_GATE_PROP_SUMMARY"
+  exit 1
+fi
+if ! jq -e '.decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.runtime_actuation_status == "fail" and .decision.campaign_check_gate_diagnostics.runtime_actuation_status_pass.runtime_actuation_ready == false' "$RUNTIME_GATE_PROP_SUMMARY" >/dev/null 2>&1; then
+  echo "runtime gate diagnostics propagation missing explicit runtime-actuation status/ready"
   cat "$RUNTIME_GATE_PROP_SUMMARY"
   exit 1
 fi

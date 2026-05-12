@@ -282,11 +282,53 @@ env_file_check_code() {
   esac
 }
 
+env_file_temp_backed_check_code() {
+  local label="$1"
+  case "$label" in
+    authority) printf '%s' "authority_env_temp_backed_key_material_missing" ;;
+    provider) printf '%s' "provider_env_temp_backed_key_material_missing" ;;
+    client) printf '%s' "client_env_temp_backed_key_material_missing" ;;
+    *) printf '%s' "env_temp_backed_key_material_missing" ;;
+  esac
+}
+
+path_is_temp_backed() {
+  local path="$1"
+  path="$(strip_optional_quotes "$path")"
+  path="${path%/}"
+  if [[ -z "$path" ]]; then
+    return 1
+  fi
+  case "$path" in
+    /tmp/*|/var/tmp/*|/private/tmp/*|/var/folders/*)
+      return 0
+      ;;
+  esac
+  local tmp_root
+  for tmp_root in "${TMPDIR:-}" "${TMP:-}" "${TEMP:-}"; do
+    tmp_root="$(strip_optional_quotes "$tmp_root")"
+    tmp_root="${tmp_root%/}"
+    if [[ -n "$tmp_root" && "$tmp_root" == /* ]] && path_is_within "$path" "$tmp_root"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+missing_key_material_remediation() {
+  local temp_backed="$1"
+  if [[ "$temp_backed" == "1" ]]; then
+    printf '%s' "runtime-fix will not recreate prod key material; stale temp-backed env reference detected. For bootstrap mode run ./scripts/easy_node.sh bootstrap-mtls --out-dir deploy/tls --public-host <PUBLIC_HOST> [--san <PEER_HOST>...] then ./scripts/easy_node.sh server-up --prod-profile 1 --prod-mtls-mode bootstrap with the intended settings. For staged mode run ./scripts/easy_node.sh prod-mtls-bundle-stage --bundle-dir <BUNDLE_DIR> --host <PUBLIC_HOST> then server-up --prod-profile 1 --prod-mtls-mode staged"
+    return
+  fi
+  printf '%s' "runtime-fix will not recreate key material; restore the referenced file or rerun ./scripts/easy_node.sh server-up --prod-profile 1 with the intended settings, then verify with ./scripts/easy_node.sh prod-preflight --days-min 0"
+}
+
 check_env_referenced_file() {
   local env_file="$1"
   local label="$2"
   local key="$3"
-  local value local_path
+  local value local_path temp_backed code message remediation
   if [[ ! -f "$env_file" ]]; then
     return
   fi
@@ -302,11 +344,22 @@ check_env_referenced_file() {
   esac
   local_path="$(env_path_to_local_path "$value")"
   if [[ -n "$local_path" && ! -e "$local_path" ]]; then
+    temp_backed="0"
+    if path_is_temp_backed "$value" || path_is_temp_backed "$local_path"; then
+      temp_backed="1"
+    fi
+    code="$(env_file_check_code "$label")"
+    message="$label env references missing $key path ($value -> $local_path)"
+    if [[ "$temp_backed" == "1" ]]; then
+      code="$(env_file_temp_backed_check_code "$label")"
+      message="$label env references missing temp-backed $key path ($value -> $local_path); this looks like stale prod-preflight/bootstrap key material leakage"
+    fi
+    remediation="$(missing_key_material_remediation "$temp_backed")"
     add_finding \
       "FAIL" \
-      "$(env_file_check_code "$label")" \
-      "$label env references missing $key path ($value -> $local_path)" \
-      "bash ./scripts/easy_node.sh prod-preflight --days-min 0; rerun ./scripts/easy_node.sh server-up with the intended settings"
+      "$code" \
+      "$message" \
+      "$remediation"
   fi
 }
 

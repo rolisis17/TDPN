@@ -402,21 +402,30 @@ jq -n --arg artifact "$FAIL_EVIDENCE_ARTIFACT" '{
   }
 }' >"$ROADMAP_FAIL_EVIDENCE"
 
-bash ./scripts/roadmap_live_evidence_archive_run.sh \
-  --reports-dir "$REPORTS_FAIL_EVIDENCE" \
-  --roadmap-summary-json "$ROADMAP_FAIL_EVIDENCE" \
-  --archive-root "$ARCHIVE_ROOT_FAIL_EVIDENCE" \
-  --scope runtime-actuation \
-  --summary-json "$SUMMARY_FAIL_EVIDENCE" \
-  --print-summary-json 0
+if bash ./scripts/roadmap_live_evidence_archive_run.sh \
+    --reports-dir "$REPORTS_FAIL_EVIDENCE" \
+    --roadmap-summary-json "$ROADMAP_FAIL_EVIDENCE" \
+    --archive-root "$ARCHIVE_ROOT_FAIL_EVIDENCE" \
+    --scope runtime-actuation \
+    --summary-json "$SUMMARY_FAIL_EVIDENCE" \
+    --print-summary-json 0; then
+  echo "failing diagnostic-only evidence should not satisfy archive gate"
+  cat "$SUMMARY_FAIL_EVIDENCE"
+  exit 1
+fi
 
 if ! jq -e --arg artifact "$FAIL_EVIDENCE_ARTIFACT" '
-  .status == "pass"
-  and .rc == 0
-  and .failure_substep == null
+  .status == "fail"
+  and .rc == 1
+  and .failure_substep == "selected_families_no_qualifying_artifacts"
   and .summary.copied_total == 1
+  and .summary.qualifying_copied_total == 0
+  and .summary.diagnostic_copied_total == 1
+  and .summary.diagnostic_only_family_count == 1
   and .summary.artifact_contract_error_total == 0
-  and ([.family_results[] | select(.family == "runtime-actuation")][0].status == "pass")
+  and ([.family_results[] | select(.family == "runtime-actuation")][0].status == "fail")
+  and ([.family_results[] | select(.family == "runtime-actuation")][0].qualifying_copied_count == 0)
+  and ([.family_results[] | select(.family == "runtime-actuation")][0].diagnostic_copied_count == 1)
   and (
     [.family_results[] | select(.family == "runtime-actuation")][0].copied
     | map(select(
