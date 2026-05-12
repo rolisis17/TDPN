@@ -457,6 +457,41 @@ if ! jq -e '.status=="pass" and .failures==0' "$tmp_dir/stage_target_verify.json
   cat "$tmp_dir/stage_target_verify.json"
   exit 1
 fi
+for expected_distinct_check in \
+  "client_cert_identity_distinct_from_node_cert" \
+  "client_cert_public_key_distinct_from_node_cert" \
+  "client_key_identity_distinct_from_node_key"; do
+  if ! jq -e --arg check_id "$expected_distinct_check" '.checks[]? | select(.id==$check_id and .status=="ok")' "$tmp_dir/stage_target_verify.json" >/dev/null; then
+    echo "expected staged target verify to prove distinct client/node material: $expected_distinct_check"
+    cat "$tmp_dir/stage_target_verify.json"
+    exit 1
+  fi
+done
+
+copied_node_client_bundle="$tmp_dir/copied_node_client_bundle"
+mkdir -p "$copied_node_client_bundle"
+cp "$stage_target/ca.crt" "$stage_target/node.crt" "$stage_target/node.key" "$copied_node_client_bundle/"
+cp "$stage_target/node.crt" "$copied_node_client_bundle/client.crt"
+cp "$stage_target/node.key" "$copied_node_client_bundle/client.key"
+if ./scripts/prod_mtls_bundle_verify.sh \
+  --bundle-dir "$copied_node_client_bundle" \
+  --host authority.prod.privacynode.net \
+  --require-client-material 1 \
+  --summary-json "$tmp_dir/copied_node_client_bundle_verify.json" >"$tmp_dir/copied_node_client_bundle_verify.log" 2>&1; then
+  echo "expected bundle verify to fail when client material is copied from node material"
+  cat "$tmp_dir/copied_node_client_bundle_verify.log"
+  exit 1
+fi
+for expected_blocker in \
+  "client_cert_identity_distinct_from_node_cert" \
+  "client_cert_public_key_distinct_from_node_cert" \
+  "client_key_identity_distinct_from_node_key"; do
+  if ! jq -e --arg code "$expected_blocker" '.status=="fail" and (.blockers[]? | select(.code==$code))' "$tmp_dir/copied_node_client_bundle_verify.json" >/dev/null; then
+    echo "expected copied-node client bundle verify summary to identify non-distinct material: $expected_blocker"
+    cat "$tmp_dir/copied_node_client_bundle_verify.json"
+    exit 1
+  fi
+done
 
 mismatched_client_bundle="$tmp_dir/mismatched_client_bundle"
 mkdir -p "$mismatched_client_bundle"

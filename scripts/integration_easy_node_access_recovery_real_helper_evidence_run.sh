@@ -192,7 +192,7 @@ pilot_handoff_ready="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_READY:-true}"
 trusted_provenance="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_TRUSTED:-true}"
 binding_mode="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_BINDING_MODE:-match}"
 identity_mode="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_IDENTITY_MODE:-match}"
-schema_minor="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR:-3}"
+schema_minor="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR:-4}"
 sha256_value() {
   sha256sum "$1" | awk '{print $1}'
 }
@@ -266,7 +266,9 @@ case "$identity_mode" in
     ;;
 esac
 trust_store_sha="$(sha256_value "$trust_store")"
+generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 jq -n \
+  --arg generated_at_utc "$generated_at_utc" \
   --arg verification_summary_json "$verification_summary_json" \
   --arg summary_json "$summary_json" \
   --arg provenance_json "$provenance_json" \
@@ -290,6 +292,7 @@ jq -n \
   '{
     version: 1,
     schema: {"id": "access_bridge_pilot_evidence_bundle_verify_summary", "major": 1, "minor": $schema_minor},
+    generated_at_utc: $generated_at_utc,
     status: "pass",
     rc: 0,
     pilot_handoff_ready: $pilot_handoff_ready,
@@ -310,6 +313,10 @@ jq -n \
       provenance_organization_matches_evidence: ($provenance_org_id != "" and $organization_id != "" and $provenance_org_id == $organization_id),
       trusted_organization_matches_evidence: ($trusted_org_id != "" and $organization_id != "" and $trusted_org_id == $organization_id),
       bundled_child_evidence_semantic_ok: true,
+      evidence_freshness_checked: true,
+      evidence_freshness_ok: true,
+      evidence_max_age_sec: 604800,
+      installed_host_evidence_present: true,
       trust_store_present: true,
       trust_store_sha256_present: true,
       public_key_file_absent: true,
@@ -327,7 +334,14 @@ jq -n \
       summary_contract: {enabled: true, status: "pass"},
       tar_sha256: {enabled: true, checked: true, status: "pass"},
       manifest: {enabled: true, status: "pass"},
-      provenance: {enabled: true, required_trusted: true, status: "pass"}
+      provenance: {enabled: true, required_trusted: true, status: "pass"},
+      evidence_freshness: {checked: true, required_trusted: true, status: "pass"}
+    },
+    evidence_freshness: {
+      checked: true,
+      ok: true,
+      max_age_sec: 604800,
+      details: []
     },
     trusted_provenance: {
       required: true,
@@ -350,7 +364,8 @@ jq -n \
       deployment_evidence_summary_json: $deployment_summary_json,
       deployment_evidence_summary_sha256: $deployment_sha,
       host_install_check_summary_json: $host_summary_json,
-      host_install_check_summary_sha256: $host_sha
+      host_install_check_summary_sha256: $host_sha,
+      host_install_evidence_mode: "installed-host"
     },
     artifacts: {
       verification_summary_json: $verification_summary_json,
@@ -926,7 +941,7 @@ jq -e '
   and .mode.evidence_generated == true
   and .mode.evidence_status == "collected"
   and .child_summaries.host_install_check.status == "pass"
-  and .child_summaries.verifier.schema.minor == 3
+  and .child_summaries.verifier.schema.minor == 4
   and (.artifacts.bundle_service_smoke_summary_json | endswith("/bundle/access_bridge_service_smoke_summary.json"))
   and (.artifacts.bundle_deployment_evidence_summary_json | endswith("/bundle/access_bridge_deployment_evidence_summary.json"))
   and (.artifacts.bundle_host_install_check_summary_json | endswith("/bundle/access_bridge_host_install_check_summary.json"))
@@ -942,7 +957,7 @@ ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
 ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
 ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
 ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
-FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR=2 \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR=3 \
 ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
   --base-url https://helper.gpm-pilot.net \
   --path-id helper-web \
@@ -954,13 +969,13 @@ FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR=2 \
   --provenance-org-name "FreeNews Demo" \
   --trust-store "$TRUST_STORE" \
   --reports-dir "$REPORTS_DIR" \
-  --summary-json "$TMP_DIR/verifier-schema-minor-2-summary.json" \
-  --print-summary-json 0 >"$TMP_DIR/verifier-schema-minor-2.log" 2>&1
-verifier_schema_minor_2_rc=$?
+  --summary-json "$TMP_DIR/verifier-schema-minor-3-summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/verifier-schema-minor-3.log" 2>&1
+verifier_schema_minor_3_rc=$?
 set -e
-if [[ "$verifier_schema_minor_2_rc" -eq 0 ]]; then
-  echo "expected verifier receipt schema minor 2 to fail"
-  cat "$TMP_DIR/verifier-schema-minor-2-summary.json"
+if [[ "$verifier_schema_minor_3_rc" -eq 0 ]]; then
+  echo "expected verifier receipt schema minor 3 to fail"
+  cat "$TMP_DIR/verifier-schema-minor-3-summary.json"
   exit 1
 fi
 if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
@@ -968,22 +983,22 @@ if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
   cat "$CAPTURE"
   exit 1
 fi
-if ! grep -Fq -- "Trusted verifier receipt did not prove current real helper HTTPS evidence binding" "$TMP_DIR/verifier-schema-minor-2-summary.json"; then
+if ! grep -Fq -- "Trusted verifier receipt did not prove current real helper HTTPS evidence binding" "$TMP_DIR/verifier-schema-minor-3-summary.json"; then
   echo "expected verifier schema minor failure summary note"
-  cat "$TMP_DIR/verifier-schema-minor-2-summary.json"
+  cat "$TMP_DIR/verifier-schema-minor-3-summary.json"
   exit 1
 fi
-if ! grep -Fq -- "schema minor is too old for trusted pilot receipt semantics" "$TMP_DIR/verifier-schema-minor-2.log"; then
+if ! grep -Fq -- "schema minor is too old for trusted pilot receipt freshness semantics" "$TMP_DIR/verifier-schema-minor-3.log"; then
   echo "expected verifier schema minor floor validation error"
-  cat "$TMP_DIR/verifier-schema-minor-2.log"
+  cat "$TMP_DIR/verifier-schema-minor-3.log"
   exit 1
 fi
 jq -e '
   .status == "fail"
   and .stage == "verify"
-  and .child_summaries.verifier.schema.minor == 2
+  and .child_summaries.verifier.schema.minor == 3
   and .readiness.trusted_verifier_pilot_handoff_ready == true
-' "$TMP_DIR/verifier-schema-minor-2-summary.json" >/dev/null
+' "$TMP_DIR/verifier-schema-minor-3-summary.json" >/dev/null
 
 : >"$CAPTURE"
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \

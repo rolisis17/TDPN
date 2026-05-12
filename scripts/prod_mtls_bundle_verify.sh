@@ -209,6 +209,16 @@ cert_public_key_fingerprint() {
   echo "$fingerprint"
 }
 
+cert_identity_fingerprint() {
+  local cert_file="$1"
+  local fingerprint
+  fingerprint="$(openssl x509 -in "$cert_file" -outform DER 2>/dev/null |
+    openssl dgst -sha256 -r 2>/dev/null |
+    awk '{print $1}')" || return 1
+  [[ -n "$fingerprint" ]] || return 1
+  echo "$fingerprint"
+}
+
 private_key_public_fingerprint() {
   local key_file="$1"
   local fingerprint
@@ -226,6 +236,26 @@ cert_matches_private_key() {
   cert_fp="$(cert_public_key_fingerprint "$cert_file")" || return 1
   key_fp="$(private_key_public_fingerprint "$key_file")" || return 1
   [[ "$cert_fp" == "$key_fp" ]]
+}
+
+canonical_file_identity() {
+  local file="$1"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$file" 2>/dev/null && return 0
+  fi
+  if command -v readlink >/dev/null 2>&1; then
+    readlink -f "$file" 2>/dev/null && return 0
+  fi
+  return 1
+}
+
+files_are_same_path() {
+  local left="$1"
+  local right="$2"
+  local left_identity right_identity
+  left_identity="$(canonical_file_identity "$left")" || return 1
+  right_identity="$(canonical_file_identity "$right")" || return 1
+  [[ "$left_identity" == "$right_identity" ]]
 }
 
 cert_verifies_with_ca() {
@@ -506,6 +536,68 @@ if [[ "$require_client_material" == "1" || "$client_cert_present" == "1" || "$cl
     fi
   else
     record_check "client_cert_key_match" "fail" "cannot verify client key match because client.crt or client.key is missing"
+  fi
+
+  if [[ "$client_cert_present" == "1" && -s "$cert_file" ]]; then
+    if files_are_same_path "$client_cert_file" "$cert_file"; then
+      record_check "client_cert_path_distinct_from_node_cert" "fail" "client certificate path resolves to node certificate path"
+    else
+      record_check "client_cert_path_distinct_from_node_cert" "ok" "client certificate path is distinct from node certificate path"
+    fi
+
+    node_cert_identity_fp=""
+    client_cert_identity_fp=""
+    if node_cert_identity_fp="$(cert_identity_fingerprint "$cert_file")" &&
+      client_cert_identity_fp="$(cert_identity_fingerprint "$client_cert_file")"; then
+      if [[ "$client_cert_identity_fp" == "$node_cert_identity_fp" ]]; then
+        record_check "client_cert_identity_distinct_from_node_cert" "fail" "client certificate is identical to node certificate"
+      else
+        record_check "client_cert_identity_distinct_from_node_cert" "ok" "client certificate identity is distinct from node certificate"
+      fi
+    else
+      record_check "client_cert_identity_distinct_from_node_cert" "fail" "cannot compare client and node certificate identities"
+    fi
+
+    node_cert_pubkey_fp=""
+    client_cert_pubkey_fp=""
+    if node_cert_pubkey_fp="$(cert_public_key_fingerprint "$cert_file")" &&
+      client_cert_pubkey_fp="$(cert_public_key_fingerprint "$client_cert_file")"; then
+      if [[ "$client_cert_pubkey_fp" == "$node_cert_pubkey_fp" ]]; then
+        record_check "client_cert_public_key_distinct_from_node_cert" "fail" "client certificate uses the same public key as node certificate"
+      else
+        record_check "client_cert_public_key_distinct_from_node_cert" "ok" "client certificate public key is distinct from node certificate"
+      fi
+    else
+      record_check "client_cert_public_key_distinct_from_node_cert" "fail" "cannot compare client and node certificate public keys"
+    fi
+  else
+    record_check "client_cert_path_distinct_from_node_cert" "fail" "cannot compare client and node certificate paths because client.crt or node.crt is missing"
+    record_check "client_cert_identity_distinct_from_node_cert" "fail" "cannot compare client and node certificate identities because client.crt or node.crt is missing"
+    record_check "client_cert_public_key_distinct_from_node_cert" "fail" "cannot compare client and node certificate public keys because client.crt or node.crt is missing"
+  fi
+
+  if [[ "$client_key_present" == "1" && -s "$key_file" ]]; then
+    if files_are_same_path "$client_key_file" "$key_file"; then
+      record_check "client_key_path_distinct_from_node_key" "fail" "client private key path resolves to node private key path"
+    else
+      record_check "client_key_path_distinct_from_node_key" "ok" "client private key path is distinct from node private key path"
+    fi
+
+    node_key_pubkey_fp=""
+    client_key_pubkey_fp=""
+    if node_key_pubkey_fp="$(private_key_public_fingerprint "$key_file")" &&
+      client_key_pubkey_fp="$(private_key_public_fingerprint "$client_key_file")"; then
+      if [[ "$client_key_pubkey_fp" == "$node_key_pubkey_fp" ]]; then
+        record_check "client_key_identity_distinct_from_node_key" "fail" "client private key is the same key material as node private key"
+      else
+        record_check "client_key_identity_distinct_from_node_key" "ok" "client private key material is distinct from node private key"
+      fi
+    else
+      record_check "client_key_identity_distinct_from_node_key" "fail" "cannot compare client and node private key identities"
+    fi
+  else
+    record_check "client_key_path_distinct_from_node_key" "fail" "cannot compare client and node private key paths because client.key or node.key is missing"
+    record_check "client_key_identity_distinct_from_node_key" "fail" "cannot compare client and node private key identities because client.key or node.key is missing"
   fi
 else
   record_check "client_material_optional" "ok" "client.crt/client.key are optional for this verification mode"

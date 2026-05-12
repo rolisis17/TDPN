@@ -20,6 +20,7 @@ Usage:
     [--trust-store PATH] \
     [--public-key-file PATH] \
     [--allow-dev-trust-store [0|1]] \
+    [--max-evidence-age-sec N] \
     [--summary-contract-check [0|1]] \
     [--verification-summary-json PATH] \
     [--print-verification-summary-json [0|1]] \
@@ -51,6 +52,8 @@ Notes:
   - Strict pilot handoff mode validates the bundled service-smoke,
     deployment-evidence, and host-install summaries semantically before it can
     emit pilot_handoff_ready=true.
+  - Strict pilot handoff mode also rejects stale or future-dated bundled
+    evidence. Use --max-evidence-age-sec N to tune the freshness window.
   - When --summary-json is supplied, the summary contract is checked by default;
     set --summary-contract-check 0 only for raw artifact integrity inspection.
   - --verification-summary-json writes a machine-readable verifier result for
@@ -70,6 +73,15 @@ bool_or_die() {
   local value="$2"
   if [[ "$value" != "0" && "$value" != "1" ]]; then
     echo "$name must be 0 or 1"
+    exit 2
+  fi
+}
+
+nonnegative_int_or_die() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    echo "$name must be a non-negative integer"
     exit 2
   fi
 }
@@ -495,6 +507,134 @@ validate_trusted_bundled_evidence_semantics() {
   return 0
 }
 
+record_evidence_freshness_detail() {
+  local label="$1"
+  local path="$2"
+  local generated_at_utc="$3"
+  local status="$4"
+  local message="$5"
+  local age_sec="$6"
+  local max_age_sec_value="$7"
+  local stale="$8"
+  local future="$9"
+  local parsed="${10}"
+
+  [[ -n "$evidence_freshness_details_file" ]] || return 0
+  jq -cn \
+    --arg label "$label" \
+    --arg path "$path" \
+    --arg generated_at_utc "$generated_at_utc" \
+    --arg status "$status" \
+    --arg message "$message" \
+    --argjson age_sec "$age_sec" \
+    --argjson max_age_sec "$max_age_sec_value" \
+    --argjson stale "$stale" \
+    --argjson future "$future" \
+    --argjson parsed "$parsed" \
+    '{
+      label: $label,
+      path: $path,
+      generated_at_utc: (if $generated_at_utc == "" then null else $generated_at_utc end),
+      parsed: $parsed,
+      age_sec: (if $parsed then $age_sec else null end),
+      max_age_sec: $max_age_sec,
+      stale: $stale,
+      future: $future,
+      status: $status,
+      message: $message
+    }' >>"$evidence_freshness_details_file"
+}
+
+validate_trusted_bundled_evidence_freshness() {
+  local bundle_root="$1"
+  local source_summary="$2"
+  local now_epoch future_skew_sec local_issues=0
+  local label path generated_at_utc generated_epoch age_sec stale future status message parsed
+
+  evidence_freshness_checked="true"
+  evidence_freshness_ok="false"
+  evidence_freshness_now_epoch="$(date -u +%s)"
+  now_epoch="$evidence_freshness_now_epoch"
+  future_skew_sec=300
+  [[ -n "$evidence_freshness_details_file" ]] && : >"$evidence_freshness_details_file"
+
+  while IFS='|' read -r label path; do
+    [[ -n "$label" ]] || continue
+    generated_at_utc=""
+    generated_epoch=0
+    age_sec=0
+    stale=false
+    future=false
+    status="ok"
+    message="evidence timestamp is fresh"
+    parsed=false
+
+    if [[ -z "$path" || ! -f "$path" ]]; then
+      status="fail"
+      message="evidence file missing"
+      local_issues=$((local_issues + 1))
+      record_evidence_freshness_detail "$label" "$path" "$generated_at_utc" "$status" "$message" 0 "$max_evidence_age_sec" "$stale" "$future" "$parsed"
+      echo "trusted pilot provenance freshness check missing evidence file: $label $path"
+      continue
+    fi
+    if ! jq -e . "$path" >/dev/null 2>&1; then
+      status="fail"
+      message="evidence file is not valid JSON"
+      local_issues=$((local_issues + 1))
+      record_evidence_freshness_detail "$label" "$path" "$generated_at_utc" "$status" "$message" 0 "$max_evidence_age_sec" "$stale" "$future" "$parsed"
+      echo "trusted pilot provenance freshness check found invalid JSON: $label $path"
+      continue
+    fi
+
+    generated_at_utc="$(jq -r 'if (.generated_at_utc | type) == "string" then .generated_at_utc else "" end' "$path" 2>/dev/null || true)"
+    if [[ -z "$generated_at_utc" ]]; then
+      status="fail"
+      message="generated_at_utc is missing"
+      local_issues=$((local_issues + 1))
+      record_evidence_freshness_detail "$label" "$path" "$generated_at_utc" "$status" "$message" 0 "$max_evidence_age_sec" "$stale" "$future" "$parsed"
+      echo "trusted pilot provenance freshness check requires generated_at_utc: $label $path"
+      continue
+    fi
+    if ! generated_epoch="$(date -u -d "$generated_at_utc" +%s 2>/dev/null)"; then
+      status="fail"
+      message="generated_at_utc is not parseable"
+      local_issues=$((local_issues + 1))
+      record_evidence_freshness_detail "$label" "$path" "$generated_at_utc" "$status" "$message" 0 "$max_evidence_age_sec" "$stale" "$future" "$parsed"
+      echo "trusted pilot provenance freshness check cannot parse generated_at_utc for $label: $generated_at_utc"
+      continue
+    fi
+
+    parsed=true
+    age_sec=$((now_epoch - generated_epoch))
+    if ((generated_epoch > now_epoch + future_skew_sec)); then
+      future=true
+      status="fail"
+      message="generated_at_utc is in the future"
+      local_issues=$((local_issues + 1))
+      echo "trusted pilot provenance freshness check rejected future-dated evidence: $label generated_at_utc=$generated_at_utc"
+    elif ((max_evidence_age_sec > 0 && age_sec > max_evidence_age_sec)); then
+      stale=true
+      status="fail"
+      message="generated_at_utc is older than max_evidence_age_sec"
+      local_issues=$((local_issues + 1))
+      echo "trusted pilot provenance freshness check rejected stale evidence: $label age_sec=$age_sec max_age_sec=$max_evidence_age_sec"
+    fi
+    record_evidence_freshness_detail "$label" "$path" "$generated_at_utc" "$status" "$message" "$age_sec" "$max_evidence_age_sec" "$stale" "$future" "$parsed"
+  done <<EOF
+source_summary|$source_summary
+bundled_summary|$bundle_root/access_bridge_pilot_evidence_bundle_summary.json
+service_smoke|$bundle_root/access_bridge_service_smoke_summary.json
+deployment_evidence|$bundle_root/access_bridge_deployment_evidence_summary.json
+host_install_check|$bundle_root/access_bridge_host_install_check_summary.json
+EOF
+
+  if ((local_issues == 0)); then
+    evidence_freshness_ok="true"
+    return 0
+  fi
+  return 1
+}
+
 sha256_tool=""
 detect_sha256_tool() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -657,6 +797,7 @@ provenance_json=""
 trust_store=""
 public_key_file=""
 allow_dev_trust_store="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_ALLOW_DEV_TRUST_STORE:-0}"
+max_evidence_age_sec="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_MAX_EVIDENCE_AGE_SEC:-604800}"
 summary_contract_check="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_CONTRACT_CHECK:-1}"
 verification_summary_json="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_VERIFICATION_SUMMARY_JSON:-}"
 print_verification_summary_json="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_PRINT_VERIFICATION_SUMMARY_JSON:-0}"
@@ -741,6 +882,10 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --max-evidence-age-sec)
+      max_evidence_age_sec="${2:-}"
+      shift 2
+      ;;
     --summary-contract-check)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
         summary_contract_check="${2:-}"
@@ -800,6 +945,7 @@ bool_or_die "--check-manifest" "$check_manifest"
 bool_or_die "--check-provenance" "$check_provenance"
 bool_or_die "--require-trusted-provenance" "$require_trusted_provenance"
 bool_or_die "--allow-dev-trust-store" "$allow_dev_trust_store"
+nonnegative_int_or_die "--max-evidence-age-sec" "$max_evidence_age_sec"
 bool_or_die "--summary-contract-check" "$summary_contract_check"
 bool_or_die "--print-verification-summary-json" "$print_verification_summary_json"
 bool_or_die "--show-details" "$show_details"
@@ -814,6 +960,10 @@ if [[ "$require_trusted_provenance" == "1" ]]; then
   fi
   if [[ "$check_tar_sha256" != "1" || "$check_manifest" != "1" || "$summary_contract_check" != "1" ]]; then
     echo "--require-trusted-provenance requires tar checksum, manifest, and summary contract checks to remain enabled"
+    exit 2
+  fi
+  if [[ "$max_evidence_age_sec" == "0" ]]; then
+    echo "--require-trusted-provenance requires --max-evidence-age-sec to be greater than 0"
     exit 2
   fi
 fi
@@ -863,10 +1013,12 @@ if [[ "$check_tar_sha256" == "0" && "$check_manifest" == "0" && "$check_provenan
 fi
 
 tmp_extract_dir=""
+evidence_freshness_details_file="$(mktemp)"
 cleanup() {
   if [[ -n "$tmp_extract_dir" && -d "$tmp_extract_dir" ]]; then
     rm -rf "$tmp_extract_dir"
   fi
+  rm -f "$evidence_freshness_details_file"
 }
 trap cleanup EXIT
 
@@ -887,6 +1039,9 @@ provenance_expires_at_utc=""
 tar_sha256_checked="0"
 bundled_child_evidence_semantic_ok="false"
 bundled_installed_host_evidence="false"
+evidence_freshness_checked="false"
+evidence_freshness_ok="false"
+evidence_freshness_now_epoch=""
 
 write_verification_summary() {
   local status="$1"
@@ -900,6 +1055,7 @@ write_verification_summary() {
   local source_smoke_summary_sha256 source_deployment_summary_sha256 source_host_summary_sha256
   local source_host_evidence_mode
   local bundled_source_summary_json bundled_smoke_summary_json bundled_deployment_summary_json bundled_host_summary_json
+  local evidence_freshness_checked_json evidence_freshness_ok_json evidence_freshness_details_json
 
   [[ -n "$verification_summary_json" ]] || return 0
 
@@ -914,6 +1070,12 @@ write_verification_summary() {
   summary_contract_check_json="$( [[ "$summary_contract_check" == "1" ]] && printf 'true' || printf 'false' )"
   bundled_child_evidence_semantic_ok_json="$( [[ "$bundled_child_evidence_semantic_ok" == "true" ]] && printf 'true' || printf 'false' )"
   bundled_installed_host_evidence_json="$( [[ "$bundled_installed_host_evidence" == "true" ]] && printf 'true' || printf 'false' )"
+  evidence_freshness_checked_json="$( [[ "$evidence_freshness_checked" == "true" ]] && printf 'true' || printf 'false' )"
+  evidence_freshness_ok_json="$( [[ "$evidence_freshness_ok" == "true" ]] && printf 'true' || printf 'false' )"
+  evidence_freshness_details_json="[]"
+  if [[ -n "$evidence_freshness_details_file" && -s "$evidence_freshness_details_file" ]]; then
+    evidence_freshness_details_json="$(jq -s '.' "$evidence_freshness_details_file" 2>/dev/null || printf '[]')"
+  fi
   provenance_checked_json="$( [[ "$provenance_verify_checked" == "true" ]] && printf 'true' || printf 'false' )"
   provenance_trusted_json="$( [[ "$provenance_trusted" == "true" ]] && printf 'true' || printf 'false' )"
   provenance_source="none"
@@ -1036,6 +1198,10 @@ write_verification_summary() {
     --arg source_deployment_summary_sha256 "$source_deployment_summary_sha256" \
     --arg source_host_summary_sha256 "$source_host_summary_sha256" \
     --arg source_host_evidence_mode "$source_host_evidence_mode" \
+    --argjson evidence_freshness_checked "$evidence_freshness_checked_json" \
+    --argjson evidence_freshness_ok "$evidence_freshness_ok_json" \
+    --argjson evidence_max_age_sec "$max_evidence_age_sec" \
+    --argjson evidence_freshness_details "$evidence_freshness_details_json" \
     --arg verification_summary_json "$verification_summary_json" '
       def null_if_empty($v):
         if ($v | type) == "string" and ($v | length) > 0 then $v else null end;
@@ -1049,6 +1215,7 @@ write_verification_summary() {
         and $provenance_evidence_scope == "real_helper_https"
         and $summary_evidence_scope == "real_helper_https"
         and $bundled_child_evidence_semantic_ok
+        and $evidence_freshness_ok
         and $bundled_installed_host_evidence
         and $tar_sha256_checked
         and $trust_store != ""
@@ -1066,7 +1233,7 @@ write_verification_summary() {
         schema: {
           id: "access_bridge_pilot_evidence_bundle_verify_summary",
           major: 1,
-          minor: 3
+          minor: 4
         },
         generated_at_utc: $generated_at_utc,
         status: $status,
@@ -1089,6 +1256,9 @@ write_verification_summary() {
           provenance_organization_matches_evidence: ($provenance_organization_id != "" and $source_organization_id != "" and $provenance_organization_id == $source_organization_id),
           trusted_organization_matches_evidence: ($provenance_trusted_org_id != "" and $source_organization_id != "" and $provenance_trusted_org_id == $source_organization_id),
           bundled_child_evidence_semantic_ok: $bundled_child_evidence_semantic_ok,
+          evidence_freshness_checked: $evidence_freshness_checked,
+          evidence_freshness_ok: $evidence_freshness_ok,
+          evidence_max_age_sec: $evidence_max_age_sec,
           installed_host_evidence_present: $bundled_installed_host_evidence,
           trust_store_present: ($trust_store != ""),
           trust_store_sha256_present: ($trust_store_sha256 != ""),
@@ -1125,7 +1295,18 @@ write_verification_summary() {
             enabled: $check_provenance,
             required_trusted: $require_trusted_provenance,
             status: $provenance_status
+          },
+          evidence_freshness: {
+            checked: $evidence_freshness_checked,
+            required_trusted: $require_trusted_provenance,
+            status: (if ($require_trusted_provenance | not) then "skipped" elif $evidence_freshness_ok then "pass" else "fail" end)
           }
+        },
+        evidence_freshness: {
+          checked: $evidence_freshness_checked,
+          ok: $evidence_freshness_ok,
+          max_age_sec: $evidence_max_age_sec,
+          details: $evidence_freshness_details
         },
         trusted_provenance: {
           required: $require_trusted_provenance,
@@ -1411,6 +1592,11 @@ if [[ "$require_trusted_provenance" == "1" ]]; then
     if [[ -n "$summary_json" && -f "$summary_json" ]]; then
       if validate_trusted_bundled_evidence_semantics "$manifest_bundle_dir" "$summary_json"; then
         bundled_child_evidence_semantic_ok="true"
+      else
+        issues=$((issues + 1))
+      fi
+      if validate_trusted_bundled_evidence_freshness "$manifest_bundle_dir" "$summary_json"; then
+        evidence_freshness_ok="true"
       else
         issues=$((issues + 1))
       fi

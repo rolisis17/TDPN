@@ -2436,7 +2436,7 @@ access_recovery_verifier_evidence_json() {
       def pass_status($path):
         (($path // "") | tostring | ascii_downcase) == "pass";
       def schema_minor_ready:
-        ((.schema.minor | type) == "number" and .schema.minor >= 3);
+        ((.schema.minor | type) == "number" and .schema.minor >= 4);
       def tar_sha256_checked:
         .checks.tar_sha256.checked == true;
       def required_checks_enabled:
@@ -2466,10 +2466,17 @@ access_recovery_verifier_evidence_json() {
         and (.pilot_handoff_criteria.source_registry_id_present == true)
         and (.pilot_handoff_criteria.provenance_organization_matches_evidence == true)
         and (.pilot_handoff_criteria.trusted_organization_matches_evidence == true);
+      def evidence_freshness_ready:
+        (.pilot_handoff_criteria.evidence_freshness_checked == true)
+        and (.pilot_handoff_criteria.evidence_freshness_ok == true)
+        and (.checks.evidence_freshness.checked == true)
+        and pass_status(.checks.evidence_freshness.status)
+        and (.evidence_freshness.ok == true);
       def trusted_pilot_receipt_ready:
         schema_minor_ready
         and (.inputs.allow_dev_trust_store != true)
         and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true)
+        and evidence_freshness_ready
         and (.pilot_handoff_criteria.installed_host_evidence_present == true)
         and handoff_identity_org_ready
         and (.trusted_pilot_receipt_ready == true)
@@ -2490,6 +2497,7 @@ access_recovery_verifier_evidence_json() {
         and (.pilot_handoff_criteria.trust_store_sha256_present == true)
         and (.pilot_handoff_criteria.public_key_file_absent == true)
         and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true)
+        and evidence_freshness_ready
         and (.pilot_handoff_criteria.installed_host_evidence_present == true)
         and (.pilot_handoff_criteria.dev_trust_store_allowed != true);
       def generated_at_ready:
@@ -2530,6 +2538,7 @@ access_recovery_verifier_evidence_json() {
             elif $valid_contract and (generated_at_ready | not) then "Access bridge pilot evidence verifier receipt is missing generated_at_utc"
             elif $valid_contract and (evidence_binding_ready | not) then "Access bridge pilot evidence verifier receipt is missing required evidence binding hashes"
             elif $valid_contract and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok != true) then "Access bridge pilot evidence verifier receipt did not prove bundled child evidence semantics"
+            elif $valid_contract and (evidence_freshness_ready | not) then "Access bridge pilot evidence verifier receipt did not prove fresh bundled child evidence"
             elif $valid_contract and (.pilot_handoff_criteria.installed_host_evidence_present != true) then "Access bridge pilot evidence verifier receipt did not prove installed-host evidence"
             elif $valid_contract and (handoff_identity_org_ready | not) then "Access bridge pilot evidence verifier receipt did not prove helper identity and organization binding"
             elif $valid_contract and enabled(.checks.tar_sha256.enabled) and (pass_status(.checks.tar_sha256.status)) and (tar_sha256_checked | not) then "Access bridge pilot evidence verifier receipt did not prove the bundle tar checksum was checked"
@@ -2562,6 +2571,11 @@ access_recovery_verifier_evidence_json() {
             pilot_handoff_criteria_trust_store_sha256_present: (if (.pilot_handoff_criteria.trust_store_sha256_present | type) == "boolean" then .pilot_handoff_criteria.trust_store_sha256_present else null end),
             pilot_handoff_criteria_public_key_file_absent: (if (.pilot_handoff_criteria.public_key_file_absent | type) == "boolean" then .pilot_handoff_criteria.public_key_file_absent else null end),
             pilot_handoff_criteria_bundled_child_evidence_semantic_ok: (if (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok | type) == "boolean" then .pilot_handoff_criteria.bundled_child_evidence_semantic_ok else null end),
+            pilot_handoff_criteria_evidence_freshness_checked: (if (.pilot_handoff_criteria.evidence_freshness_checked | type) == "boolean" then .pilot_handoff_criteria.evidence_freshness_checked else null end),
+            pilot_handoff_criteria_evidence_freshness_ok: (if (.pilot_handoff_criteria.evidence_freshness_ok | type) == "boolean" then .pilot_handoff_criteria.evidence_freshness_ok else null end),
+            evidence_freshness_checked: (if (.evidence_freshness.checked | type) == "boolean" then .evidence_freshness.checked else null end),
+            evidence_freshness_ok: (if (.evidence_freshness.ok | type) == "boolean" then .evidence_freshness.ok else null end),
+            evidence_freshness_max_age_sec: (if (.evidence_freshness.max_age_sec | type) == "number" then .evidence_freshness.max_age_sec else null end),
             pilot_handoff_criteria_installed_host_evidence_present: (if (.pilot_handoff_criteria.installed_host_evidence_present | type) == "boolean" then .pilot_handoff_criteria.installed_host_evidence_present else null end),
             pilot_handoff_criteria_source_helper_id_present: (if (.pilot_handoff_criteria.source_helper_id_present | type) == "boolean" then .pilot_handoff_criteria.source_helper_id_present else null end),
             pilot_handoff_criteria_source_organization_id_present: (if (.pilot_handoff_criteria.source_organization_id_present | type) == "boolean" then .pilot_handoff_criteria.source_organization_id_present else null end),
@@ -2916,6 +2930,9 @@ access_recovery_track_json_from_evidence() {
         and ($bundle_verify.details.trusted_provenance_trusted == true)
         and (($bundle_verify.details.trusted_provenance_source // "") == "trust_store")
         and (($bundle_verify.details.evidence_scope // "") == "real_helper_https")
+        and ($bundle_verify.details.pilot_handoff_criteria_evidence_freshness_checked == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_evidence_freshness_ok == true)
+        and ($bundle_verify.details.evidence_freshness_ok == true)
         and ($bundle_verify.details.pilot_handoff_criteria_source_helper_id_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_source_organization_id_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_source_registry_id_present == true)
@@ -2930,6 +2947,9 @@ access_recovery_track_json_from_evidence() {
         and ($bundle_verify.details.pilot_handoff_criteria_trust_store_sha256_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_public_key_file_absent == true)
         and ($bundle_verify.details.pilot_handoff_criteria_bundled_child_evidence_semantic_ok == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_evidence_freshness_checked == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_evidence_freshness_ok == true)
+        and ($bundle_verify.details.evidence_freshness_ok == true)
         and ($bundle_verify.details.pilot_handoff_criteria_installed_host_evidence_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_source_helper_id_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_source_organization_id_present == true)

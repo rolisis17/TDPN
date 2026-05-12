@@ -91,7 +91,7 @@ Purpose:
   3. refresh roadmap readiness against that verifier receipt
 
 The trusted verifier receipt must use
-access_bridge_pilot_evidence_bundle_verify_summary schema major 1, minor >= 3.
+access_bridge_pilot_evidence_bundle_verify_summary schema major 1, minor >= 4.
 
 Use --plan-only 1 to run the same strict preflight validation and emit the
 planned child commands/artifacts without invoking host-install, bundle,
@@ -411,7 +411,7 @@ validate_trusted_verifier_receipt() {
       [
         if (.schema.id // "") != "access_bridge_pilot_evidence_bundle_verify_summary" then "schema id is not access_bridge_pilot_evidence_bundle_verify_summary" else empty end,
         if (.schema.major // 0) != 1 then "schema major is not 1" else empty end,
-        if (.schema.minor // -1) < 3 then "schema minor is too old for trusted pilot receipt semantics" else empty end,
+        if (.schema.minor // -1) < 4 then "schema minor is too old for trusted pilot receipt freshness semantics" else empty end,
         if (.status // "") != "pass" then "receipt status is not pass" else empty end,
         if (.rc // -1) != 0 then "receipt rc is not 0" else empty end,
         if (.pilot_handoff_ready // false) != true then "pilot_handoff_ready is not true" else empty end,
@@ -426,6 +426,9 @@ validate_trusted_verifier_receipt() {
         if (.pilot_handoff_criteria.provenance_evidence_scope // "") != "real_helper_https" then "provenance evidence_scope is not real_helper_https" else empty end,
         if (.pilot_handoff_criteria.summary_evidence_scope // "") != "real_helper_https" then "summary evidence_scope is not real_helper_https" else empty end,
         if (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok // false) != true then "bundled child evidence semantic validation did not pass" else empty end,
+        if (.pilot_handoff_criteria.evidence_freshness_checked // false) != true then "evidence freshness was not checked" else empty end,
+        if (.pilot_handoff_criteria.evidence_freshness_ok // false) != true then "evidence freshness check did not pass" else empty end,
+        if (.pilot_handoff_criteria.installed_host_evidence_present // false) != true then "installed-host evidence was not proven present" else empty end,
         if (.pilot_handoff_criteria.source_helper_id_present // false) != true then "source helper id was not proven present" else empty end,
         if (.pilot_handoff_criteria.source_organization_id_present // false) != true then "source organization id was not proven present" else empty end,
         if (.pilot_handoff_criteria.source_registry_id_present // false) != true then "source registry id was not proven present" else empty end,
@@ -450,6 +453,9 @@ validate_trusted_verifier_receipt() {
         if (.checks.provenance.enabled // false) != true then "provenance check was not enabled" else empty end,
         if (.checks.provenance.required_trusted // false) != true then "trusted provenance check was not required" else empty end,
         if (.checks.provenance.status // "") != "pass" then "provenance check did not pass" else empty end,
+        if (.checks.evidence_freshness.checked // false) != true then "evidence freshness check was not enabled" else empty end,
+        if (.checks.evidence_freshness.status // "") != "pass" then "evidence freshness check did not pass" else empty end,
+        if (.evidence_freshness.ok // false) != true then "evidence_freshness.ok is not true" else empty end,
         if (.trusted_provenance.required // false) != true then "trusted_provenance.required is not true" else empty end,
         if (.trusted_provenance.checked // false) != true then "trusted_provenance.checked is not true" else empty end,
         if (.trusted_provenance.source // "") != "trust_store" then "trusted_provenance.source is not trust_store" else empty end,

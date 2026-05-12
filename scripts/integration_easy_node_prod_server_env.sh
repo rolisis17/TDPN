@@ -93,6 +93,14 @@ if ! rg -q 'EXIT_EGRESS_BACKEND: "\$\{EXIT_EGRESS_BACKEND:-noop\}"' "$ROOT_DIR/d
   echo "docker-compose entry-exit environment must forward EXIT_EGRESS_BACKEND"
   exit 1
 fi
+if [[ "$(rg -c 'MTLS_SERVER_CERT_FILE: "\$\{MTLS_(DIRECTORY|ISSUER|ENTRY_EXIT)_SERVER_CERT_FILE:-/app/tls/node\.crt\}"' "$ROOT_DIR/deploy/docker-compose.yml")" -ne 3 ]]; then
+  echo "docker-compose server services must expose explicit mTLS server certificate env aliases"
+  exit 1
+fi
+if [[ "$(rg -c 'MTLS_SERVER_KEY_FILE: "\$\{MTLS_(DIRECTORY|ISSUER|ENTRY_EXIT)_SERVER_KEY_FILE:-/app/tls/node\.key\}"' "$ROOT_DIR/deploy/docker-compose.yml")" -ne 3 ]]; then
+  echo "docker-compose server services must expose explicit mTLS server key env aliases"
+  exit 1
+fi
 
 backup_file() {
   local src="$1"

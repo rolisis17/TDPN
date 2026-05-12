@@ -1065,7 +1065,7 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
   "schema": {
     "id": "access_bridge_pilot_evidence_bundle_verify_summary",
     "major": 1,
-    "minor": 3
+    "minor": 4
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
@@ -1091,6 +1091,9 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
     "trust_store_sha256_present": true,
     "public_key_file_absent": true,
     "bundled_child_evidence_semantic_ok": true,
+    "evidence_freshness_checked": true,
+    "evidence_freshness_ok": true,
+    "evidence_max_age_sec": 604800,
     "installed_host_evidence_present": false
   },
   "notes": "Access Bridge pilot evidence bundle verification passed",
@@ -1108,7 +1111,14 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
     "summary_contract": {"enabled": true, "status": "pass"},
     "tar_sha256": {"enabled": true, "status": "pass", "checked": true},
     "manifest": {"enabled": true, "status": "pass"},
-    "provenance": {"enabled": true, "required_trusted": true, "status": "pass"}
+    "provenance": {"enabled": true, "required_trusted": true, "status": "pass"},
+    "evidence_freshness": {"checked": true, "required_trusted": true, "status": "pass"}
+  },
+  "evidence_freshness": {
+    "checked": true,
+    "ok": true,
+    "max_age_sec": 604800,
+    "details": []
   },
   "trusted_provenance": {
     "required": true,

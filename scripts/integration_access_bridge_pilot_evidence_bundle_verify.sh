@@ -224,6 +224,7 @@ DEPLOYMENT_SUMMARY_SHA256="$(sha256sum "$BUNDLE_DIR/access_bridge_deployment_evi
 HOST_SUMMARY_SHA256="$(sha256sum "$BUNDLE_DIR/access_bridge_host_install_check_summary.json" | awk '{print $1}')"
 
 jq -n \
+  --arg generated_at_utc "$NOW_UTC" \
   --arg bundle_dir "$BUNDLE_DIR" \
   --arg bundle_tar "$BUNDLE_TAR" \
   --arg bundle_tar_sha256_file "$BUNDLE_TAR_SHA256_FILE" \
@@ -237,6 +238,7 @@ jq -n \
   '{
     version: 1,
     schema: {id: "access_bridge_pilot_evidence_bundle_summary"},
+    generated_at_utc: $generated_at_utc,
     status: "pass",
     rc: 0,
     evidence_scope: "real_helper_https",
@@ -363,7 +365,7 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --print-verification-summary-json 1 >"$TMP_DIR/verify-provenance-trusted-policy-explicit.log"
 if ! jq -e '
   .schema.id == "access_bridge_pilot_evidence_bundle_verify_summary"
-  and .schema.minor == 3
+  and .schema.minor == 4
   and .status == "pass"
   and .rc == 0
   and .pilot_handoff_ready == false
@@ -371,6 +373,9 @@ if ! jq -e '
   and .pilot_handoff_criteria.ready == false
   and .pilot_handoff_criteria.trusted_pilot_receipt_ready == false
   and .pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true
+  and .pilot_handoff_criteria.evidence_freshness_checked == true
+  and .pilot_handoff_criteria.evidence_freshness_ok == true
+  and .pilot_handoff_criteria.evidence_max_age_sec == 604800
   and .pilot_handoff_criteria.installed_host_evidence_present == false
   and .pilot_handoff_criteria.trust_store_sha256_present == true
   and .checks.summary_contract.enabled == true
@@ -400,11 +405,108 @@ if ! jq -e '
   and .evidence_binding.deployment_evidence_summary_sha256 == "'"$DEPLOYMENT_SUMMARY_SHA256"'"
   and .evidence_binding.host_install_check_summary_sha256 == "'"$HOST_SUMMARY_SHA256"'"
   and .evidence_binding.host_install_evidence_mode == "deploy-pack"
+  and .evidence_freshness.checked == true
+  and .evidence_freshness.ok == true
+  and .evidence_freshness.max_age_sec == 604800
+  and ([.evidence_freshness.details[]? | select(.status == "ok")] | length) == 5
   and .artifacts.verification_summary_json == "'"$VERIFY_SUMMARY_JSON"'"
   and .artifacts.provenance_json == "'"$PROVENANCE_JSON"'"
 ' "$VERIFY_SUMMARY_JSON" >/dev/null; then
   echo "access bridge pilot evidence bundle verifier integration failed: verification summary did not prove trusted provenance"
   cat "$VERIFY_SUMMARY_JSON"
+  exit 1
+fi
+
+STALE_ROOT="$TMP_DIR/stale-evidence-root"
+STALE_DIR="$STALE_ROOT/$(basename "$BUNDLE_DIR")"
+STALE_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_stale_summary.json"
+STALE_TAR="$TMP_DIR/access_bridge_pilot_evidence_bundle_stale.tar.gz"
+STALE_SHA="${STALE_TAR}.sha256"
+STALE_PROVENANCE_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_stale.provenance.json"
+STALE_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_stale_verify_summary.json"
+STALE_UTC="2000-01-01T00:00:00Z"
+mkdir -p "$STALE_ROOT"
+cp -R "$BUNDLE_DIR" "$STALE_DIR"
+for stale_json in \
+  "$STALE_DIR/access_bridge_service_smoke_summary.json" \
+  "$STALE_DIR/access_bridge_host_install_check_summary.json"
+do
+  jq --arg stale_utc "$STALE_UTC" '.generated_at_utc = $stale_utc' "$stale_json" >"$stale_json.tmp"
+  mv "$stale_json.tmp" "$stale_json"
+done
+jq --arg stale_utc "$STALE_UTC" '.generated_at_utc = $stale_utc | .smoke.generated_at_utc = $stale_utc' \
+  "$STALE_DIR/access_bridge_deployment_evidence_summary.json" >"$STALE_DIR/access_bridge_deployment_evidence_summary.json.tmp"
+mv "$STALE_DIR/access_bridge_deployment_evidence_summary.json.tmp" "$STALE_DIR/access_bridge_deployment_evidence_summary.json"
+jq \
+  --arg stale_utc "$STALE_UTC" \
+  --arg bundle_dir "$STALE_DIR" \
+  --arg bundle_tar "$STALE_TAR" \
+  --arg bundle_tar_sha256_file "$STALE_SHA" \
+  --arg manifest_sha256 "$STALE_DIR/manifest.sha256" \
+  --arg summary_json "$STALE_SUMMARY_JSON" \
+  --arg bundled_summary_json "$STALE_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
+  --arg provenance_json "$STALE_PROVENANCE_JSON" \
+  --arg smoke_summary_json "$STALE_DIR/access_bridge_service_smoke_summary.json" \
+  --arg deployment_summary_json "$STALE_DIR/access_bridge_deployment_evidence_summary.json" \
+  --arg host_summary_json "$STALE_DIR/access_bridge_host_install_check_summary.json" \
+  '.generated_at_utc = $stale_utc
+    | .artifacts.bundle_dir = $bundle_dir
+    | .artifacts.bundle_tar = $bundle_tar
+    | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file
+    | .artifacts.manifest_sha256 = $manifest_sha256
+    | .artifacts.summary_json = $summary_json
+    | .artifacts.bundled_summary_json = $bundled_summary_json
+    | .artifacts.smoke_summary_json = $smoke_summary_json
+    | .artifacts.deployment_evidence_summary_json = $deployment_summary_json
+    | .artifacts.host_install_check_summary_json = $host_summary_json
+    | .artifacts.provenance_json = $provenance_json
+    | .provenance.sidecar_json = $provenance_json' \
+  "$SUMMARY_JSON" >"$STALE_SUMMARY_JSON"
+cp "$STALE_SUMMARY_JSON" "$STALE_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+(
+  cd "$STALE_DIR"
+  find . -type f -print \
+    | sed 's|^\./||' \
+    | grep -v '^manifest\.sha256$' \
+    | LC_ALL=C sort \
+    | while IFS= read -r rel; do
+        sha256sum "$rel"
+      done
+) >"$STALE_DIR/manifest.sha256"
+tar -czf "$STALE_TAR" -C "$STALE_ROOT" "$(basename "$STALE_DIR")"
+printf '%s  %s\n' "$(sha256sum "$STALE_TAR" | awk '{print $1}')" "$(basename "$STALE_TAR")" >"$STALE_SHA"
+go run ./cmd/gpmrecover provenance-sign \
+  --summary-json "$STALE_SUMMARY_JSON" \
+  --bundle-tar "$STALE_TAR" \
+  --bundle-tar-sha256-file "$STALE_SHA" \
+  --private-key-file "$PRIVATE_KEY_FILE" \
+  --org-id pilot-org \
+  --org-name "Pilot Org" \
+  --out "$STALE_PROVENANCE_JSON" >/dev/null
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$STALE_SUMMARY_JSON" \
+  --provenance-json "$STALE_PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$STALE_VERIFY_SUMMARY_JSON" \
+  --print-verification-summary-json 1 >"$TMP_DIR/verify-stale-trusted-policy.log" 2>&1
+stale_verify_rc=$?
+set -e
+if [[ "$stale_verify_rc" -eq 0 ]] ||
+  ! jq -e '
+    .status == "fail"
+    and .pilot_handoff_ready == false
+    and .pilot_handoff_criteria.evidence_freshness_checked == true
+    and .pilot_handoff_criteria.evidence_freshness_ok == false
+    and .checks.evidence_freshness.status == "fail"
+    and ([.evidence_freshness.details[]? | select(.stale == true and .status == "fail")] | length) >= 4
+  ' "$STALE_VERIFY_SUMMARY_JSON" >/dev/null; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted verifier accepted stale bundled evidence"
+  cat "$TMP_DIR/verify-stale-trusted-policy.log"
+  if [[ -f "$STALE_VERIFY_SUMMARY_JSON" ]]; then
+    cat "$STALE_VERIFY_SUMMARY_JSON"
+  fi
   exit 1
 fi
 
@@ -572,7 +674,9 @@ if ! jq -e \
     and .rc == 0
     and .pilot_handoff_ready == true
     and .pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true
+    and .pilot_handoff_criteria.evidence_freshness_ok == true
     and .pilot_handoff_criteria.installed_host_evidence_present == true
+    and .evidence_freshness.ok == true
     and .evidence_binding.host_install_check_summary_sha256 == $host_summary_sha256
     and .evidence_binding.host_install_evidence_mode == "installed-host"
   ' "$INSTALLED_HOST_VERIFY_SUMMARY_JSON" >/dev/null; then
