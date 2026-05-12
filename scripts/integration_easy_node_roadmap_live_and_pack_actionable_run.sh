@@ -41,13 +41,13 @@ for arg in "$@"; do
     continue
   fi
   case "$arg" in
-    --reports-dir|--summary-json|--roadmap-summary-json|--roadmap-report-md|--run-live-archive|--archive-root|--action-timeout-sec|--allow-unsafe-shell-commands|--refresh-manual-validation|--refresh-single-machine-readiness|--parallel|--max-actions|--print-summary-json)
+    --reports-dir|--summary-json|--roadmap-summary-json|--roadmap-report-md|--run-live-archive|--archive-root|--action-timeout-sec|--allow-unsafe-shell-commands|--refresh-manual-validation|--refresh-single-machine-readiness|--scope|--parallel|--max-actions|--continue-on-live-fail|--print-summary-json)
       expect_value=1
       ;;
     --*=*)
       flag="${arg%%=*}"
       case "$flag" in
-        --reports-dir|--summary-json|--roadmap-summary-json|--roadmap-report-md|--run-live-archive|--archive-root|--action-timeout-sec|--allow-unsafe-shell-commands|--refresh-manual-validation|--refresh-single-machine-readiness|--parallel|--max-actions|--print-summary-json)
+        --reports-dir|--summary-json|--roadmap-summary-json|--roadmap-report-md|--run-live-archive|--archive-root|--action-timeout-sec|--allow-unsafe-shell-commands|--refresh-manual-validation|--refresh-single-machine-readiness|--scope|--parallel|--max-actions|--continue-on-live-fail|--print-summary-json)
           ;;
         *)
           echo "unknown argument: $arg" >&2
@@ -97,11 +97,15 @@ fi
 for expected in \
   '--roadmap-summary-json PATH' \
   '--roadmap-report-md PATH' \
+  '--run-live-archive [0|1]' \
+  '--archive-root DIR' \
   '--action-timeout-sec N' \
   '--allow-unsafe-shell-commands [0|1]' \
   '--refresh-manual-validation [0|1]' \
   '--refresh-single-machine-readiness [0|1]' \
+  '--scope auto|all|profile-default|runtime-actuation|multi-vm' \
   '--max-actions N' \
+  '--continue-on-live-fail [0|1]' \
   '--parallel [0|1]' \
   '--print-summary-json [0|1]'; do
   if ! grep -F -- "$expected" "$HELP_OUT" >/dev/null 2>&1; then

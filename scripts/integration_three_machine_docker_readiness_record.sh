@@ -86,14 +86,16 @@ EOF_REHEARSAL
     if [[ "${FAKE_MANUAL_REPORT_INVALID_SCHEMA:-0}" == "1" ]]; then
       report_payload='{"schema":{"id":"manual_validation_readiness_summary","major":2,"minor":0},"report":{"readiness_status":"NOT_READY"},"summary":{"next_action_check_id":"machine_c_vpn_smoke"}}'
     fi
-    printf '%s\n' "$report_payload" >"$summary_json"
-    printf '# Manual Validation Readiness Report\n' >"$report_md"
+    if [[ "${FAKE_MANUAL_REPORT_NO_ARTIFACTS:-0}" != "1" ]]; then
+      printf '%s\n' "$report_payload" >"$summary_json"
+      printf '# Manual Validation Readiness Report\n' >"$report_md"
+    fi
     echo "[manual-validation-report] readiness_status=NOT_READY total=4 pass=2 warn=0 fail=0 pending=2"
     echo "[manual-validation-report] summary_json=$summary_json"
     echo "[manual-validation-report] report_md=$report_md"
     echo "[manual-validation-report] next_action_check_id=machine_c_vpn_smoke"
     echo "[manual-validation-report] summary_json_payload:"
-    cat "$summary_json"
+    printf '%s\n' "$report_payload"
     exit 0
     ;;
   manual-validation-record)
@@ -157,13 +159,17 @@ if ! jq -e '
   .status == "pass"
   and .schema.id == "three_machine_docker_readiness_record_summary"
   and .schema.major == 1
-  and .schema.minor == 0
+  and .schema.minor == 1
   and .rc == 0
   and .rehearsal.status == "pass"
   and .rehearsal.rc == 0
+  and .manual_validation_report.ran == true
   and .manual_validation_report.status == "ok"
+  and .manual_validation_report.rc == 0
   and .manual_validation_report.readiness_status == "NOT_READY"
   and .manual_validation_report.next_action_check_id == "machine_c_vpn_smoke"
+  and .manual_validation_report.written_summary_json == true
+  and .manual_validation_report.written_report_md == true
   and .manual_validation_record.status == "ok"
   and .manual_validation_record.written_receipt == true
 ' "$summary_json_path" >/dev/null; then
@@ -226,11 +232,64 @@ if ! jq -e '
   and .rehearsal.status == "pass"
   and .rehearsal.rc == 0
   and .manual_validation_report.status == "ok"
+  and .manual_validation_report.rc == 0
+  and .manual_validation_report.written_summary_json == true
+  and .manual_validation_report.written_report_md == true
   and .manual_validation_record.status == "ok"
   and .manual_validation_record.written_receipt == false
 ' "$receipt_missing_summary_json_path" >/dev/null; then
   echo "missing receipt path did not fail-close manual record status"
   cat "$receipt_missing_summary_json_path"
+  exit 1
+fi
+
+: >"$CAPTURE"
+
+echo "[three-machine-docker-readiness-record] manual validation report missing artifacts path"
+set +e
+FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
+FAKE_MANUAL_REPORT_NO_ARTIFACTS="1" \
+THREE_MACHINE_DOCKER_READINESS_RECORD_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
+./scripts/three_machine_docker_readiness_record.sh \
+  --path-profile balanced \
+  --soak-rounds 2 \
+  --soak-pause-sec 1 \
+  --print-summary-json 1 >/tmp/integration_three_machine_docker_readiness_record_manual_report_artifact_missing.log 2>&1
+manual_report_artifact_missing_rc=$?
+set -e
+
+if [[ "$manual_report_artifact_missing_rc" -eq 0 ]]; then
+  echo "expected non-zero status when manual-validation report artifacts are missing"
+  cat /tmp/integration_three_machine_docker_readiness_record_manual_report_artifact_missing.log
+  exit 1
+fi
+if ! rg -q 'three-machine-docker-readiness-record: status=fail' /tmp/integration_three_machine_docker_readiness_record_manual_report_artifact_missing.log; then
+  echo "expected fail status when manual-validation report artifacts are missing"
+  cat /tmp/integration_three_machine_docker_readiness_record_manual_report_artifact_missing.log
+  exit 1
+fi
+manual_report_artifact_missing_summary_json_path="$(sed -n 's/^summary_json: //p' /tmp/integration_three_machine_docker_readiness_record_manual_report_artifact_missing.log | tail -n 1)"
+if [[ -z "$manual_report_artifact_missing_summary_json_path" || ! -f "$manual_report_artifact_missing_summary_json_path" ]]; then
+  echo "expected missing-report-artifact summary JSON missing"
+  cat /tmp/integration_three_machine_docker_readiness_record_manual_report_artifact_missing.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and (.notes | contains("manual-validation report artifact missing"))
+  and .rehearsal.status == "pass"
+  and .rehearsal.rc == 0
+  and .manual_validation_report.ran == true
+  and .manual_validation_report.status == "ok"
+  and .manual_validation_report.rc == 0
+  and .manual_validation_report.written_summary_json == false
+  and .manual_validation_report.written_report_md == false
+  and .manual_validation_record.status == "ok"
+  and .manual_validation_record.written_receipt == true
+' "$manual_report_artifact_missing_summary_json_path" >/dev/null; then
+  echo "missing manual-validation report artifacts did not fail-close summary"
+  cat "$manual_report_artifact_missing_summary_json_path"
   exit 1
 fi
 
@@ -271,6 +330,7 @@ if ! jq -e '
   and .rehearsal.status == "pass"
   and .rehearsal.rc == 0
   and .manual_validation_report.status == "fail"
+  and .manual_validation_report.rc == 1
   and .manual_validation_report.readiness_status == ""
   and .manual_validation_report.next_action_check_id == ""
 ' "$manual_invalid_summary_json_path" >/dev/null; then
@@ -327,11 +387,12 @@ if ! jq -e '
   .status == "fail"
   and .schema.id == "three_machine_docker_readiness_record_summary"
   and .schema.major == 1
-  and .schema.minor == 0
+  and .schema.minor == 1
   and .rc == 1
   and .rehearsal.status == "fail"
   and .rehearsal.rc == 1
   and .manual_validation_report.status == "ok"
+  and .manual_validation_report.rc == 0
 ' "$fail_summary_json_path" >/dev/null; then
   echo "failure summary JSON missing expected fields"
   cat "$fail_summary_json_path"

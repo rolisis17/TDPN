@@ -1743,6 +1743,78 @@ if ! jq -e \
   exit 1
 fi
 
+echo "[roadmap-progress-report] Access Recovery installed-host public host must match the smoked helper"
+ACCESS_BRIDGE_WRONG_PUBLIC_HOST_INSTALL_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_wrong_public_host_summary.json"
+jq '
+  .inputs.expected_base_url = "https://wrong-helper.gpm-pilot.net"
+  | .inputs.expected_public_host = "wrong-helper.gpm-pilot.net"
+  | .observed.expected_public_host = "wrong-helper.gpm-pilot.net"
+  | .observed.active_proxy_public_host = "wrong-helper.gpm-pilot.net"
+  | .observed.caddy_site_host = "wrong-helper.gpm-pilot.net"
+  | .summary.active_proxy_public_host = "wrong-helper.gpm-pilot.net"
+' "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_BRIDGE_WRONG_PUBLIC_HOST_INSTALL_SUMMARY_JSON"
+ACCESS_BRIDGE_WRONG_PUBLIC_HOST_INSTALL_SUMMARY_SHA256="$(sha256sum "$ACCESS_BRIDGE_WRONG_PUBLIC_HOST_INSTALL_SUMMARY_JSON" | awk '{print $1}')"
+ACCESS_BRIDGE_WRONG_PUBLIC_HOST_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_wrong_public_host_pilot_evidence_bundle_verify_summary.json"
+jq \
+  --arg host_summary_json "$ACCESS_BRIDGE_WRONG_PUBLIC_HOST_INSTALL_SUMMARY_JSON" \
+  --arg host_summary_sha256 "$ACCESS_BRIDGE_WRONG_PUBLIC_HOST_INSTALL_SUMMARY_SHA256" \
+  '.evidence_binding.host_install_check_summary_json = $host_summary_json
+    | .evidence_binding.host_install_check_summary_sha256 = $host_summary_sha256' \
+  "$ACCESS_BRIDGE_INSTALLED_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_WRONG_PUBLIC_HOST_VERIFY_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_WRONG_PUBLIC_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_WRONG_PUBLIC_HOST_VERIFY_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_wrong_public_host_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_wrong_public_host_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_wrong_public_host.log 2>&1; then
+  echo "expected failure when installed-host Access Recovery evidence points at a different public host"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_wrong_public_host.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .current_roadmap_track == "access_recovery"
+  and .access_recovery_evidence_required == true
+  and .access_recovery_pilot_handoff_ready == false
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.ready == false
+  and .access_recovery_track.pilot_handoff_ready == false
+  and .access_recovery_track.evidence_scope == "incomplete"
+  and .access_recovery_track.access_bridge_host_install.status == "pass"
+  and .access_recovery_track.access_bridge_host_install.available == true
+  and .access_recovery_track.access_bridge_host_install.details.evidence_mode == "installed-host"
+  and .access_recovery_track.access_bridge_host_install.details.expected_public_host == "wrong-helper.gpm-pilot.net"
+  and .access_recovery_track.access_bridge_host_install.details.active_proxy_public_host == "wrong-helper.gpm-pilot.net"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "pass"
+  and .access_recovery_track.trusted_verifier_binding.host_install_check_summary_sha256_match == true
+  and .access_recovery_track.trusted_verifier_ready == false
+  and .access_recovery_track.trusted_pilot_receipt_ready == false
+  and .access_recovery_track.evidence_binding.ok == false
+  and .access_recovery_track.evidence_binding.host_public_host_match == false
+  and .access_recovery_track.evidence_binding.failed_bindings == ["host_public_host"]
+  and .access_recovery_track.evidence_binding.failed_binding_count == 1
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_host_install"
+  and (.access_recovery_track.recommended_next_action.reason | contains("host_public_host"))
+  and ((.next_actions // []) | any(
+    .id == "access_bridge_host_install"
+    and .missing_evidence_family == "access-recovery"
+    and .missing_evidence_action_kind == "installed-host-evidence"
+    and (.reason | contains("host_public_host"))
+  ))
+' "$TMP_DIR/roadmap_progress_access_recovery_wrong_public_host_summary.json" >/dev/null; then
+  echo "Access Recovery wrong installed-host public host summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_wrong_public_host_summary.json"
+  exit 1
+fi
+
 ACCESS_BRIDGE_FORGED_CRITERIA_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_forged_criteria_pilot_evidence_bundle_verify_summary.json"
 jq '
   .pilot_handoff_criteria.provenance_checked = false
@@ -3420,8 +3492,11 @@ if ! jq -e '
   and .access_recovery_track.evidence_binding.helper_id_match == false
   and .access_recovery_track.evidence_binding.organization_id_match == true
   and .access_recovery_track.evidence_binding.host_config_sha256_match == true
+  and .access_recovery_track.evidence_binding.failed_bindings == ["helper_id"]
+  and .access_recovery_track.evidence_binding.failed_binding_count == 1
   and .access_recovery_track.recommended_next_action.id == "access_bridge_deployment_evidence"
-  and (.access_recovery_track.recommended_next_action.reason | contains("same helper/config identity"))
+  and (.access_recovery_track.recommended_next_action.reason | contains("same helper/config/proxy identity"))
+  and (.access_recovery_track.recommended_next_action.reason | contains("failed bindings: helper_id"))
 ' "$TMP_DIR/roadmap_progress_access_recovery_mixed_identity_summary.json" >/dev/null; then
   echo "Access Recovery mixed identity summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_mixed_identity_summary.json"

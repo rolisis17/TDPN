@@ -2910,7 +2910,20 @@ access_recovery_track_json_from_evidence() {
             end
           )
         }
-        | . + {ok: ([.helper_id_match, .organization_id_match, .registry_id_match, .smoke_config_sha256_match, .host_config_sha256_match, .host_public_host_match] | all(. == true))};
+        | . as $binding
+        | [
+            (if $binding.helper_id_match == true then empty else "helper_id" end),
+            (if $binding.organization_id_match == true then empty else "organization_id" end),
+            (if $binding.registry_id_match == true then empty else "registry_id" end),
+            (if $binding.smoke_config_sha256_match == true then empty else "smoke_config_sha256" end),
+            (if $binding.host_config_sha256_match == true then empty else "host_config_sha256" end),
+            (if $binding.host_public_host_match == true then empty else "host_public_host" end)
+          ] as $failed_bindings
+        | $binding + {
+            ok: (($failed_bindings | length) == 0),
+            failed_bindings: $failed_bindings,
+            failed_binding_count: ($failed_bindings | length)
+          };
       def verifier_binding:
         {
           base_url_match: same_nonempty($bundle_verify.details.base_url; $service_smoke.details.base_url),
@@ -3141,7 +3154,15 @@ access_recovery_track_json_from_evidence() {
       def first_attention:
         [$service_smoke, $deployment_evidence, $host_install]
         | map(select(.needs_attention == true))
-        | .[0] // (if all_pass and ((evidence_binding.ok) | not) then $deployment_evidence else null end);
+        | .[0] // (
+            if all_pass and ((evidence_binding.ok) | not) then
+              evidence_binding as $binding
+              | if (
+                  ($binding.host_config_sha256_match != true)
+                  or ($binding.host_public_host_match != true)
+                ) then $host_install else $deployment_evidence end
+            else null end
+          );
       def trusted_verifier_summary_json:
         first_nonempty(
           [
@@ -3327,7 +3348,13 @@ access_recovery_track_json_from_evidence() {
               ),
               reason: (
                 if all_pass and (($evidence_binding.ok) | not) then
-                  "Access Recovery evidence summaries are not bound to the same helper/config identity"
+                  "Access Recovery evidence summaries are not bound to the same helper/config/proxy identity"
+                  + (
+                    if (($evidence_binding.failed_bindings // []) | length) > 0 then
+                      "; failed bindings: " + (($evidence_binding.failed_bindings // []) | join(","))
+                    else ""
+                    end
+                  )
                 else
                   ($first_attention.notes // "Access Recovery evidence needs attention")
                 end

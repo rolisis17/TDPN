@@ -318,8 +318,12 @@ notes=""
 rehearsal_json='{}'
 rehearsal_log_path=""
 manual_validation_report_status="skipped"
+manual_validation_report_rc=0
+manual_validation_report_ran="0"
 manual_validation_report_readiness_status=""
 manual_validation_report_next_action_check_id=""
+manual_validation_report_written_summary_json="0"
+manual_validation_report_written_report_md="0"
 receipt_status="skipped"
 receipt_rc=0
 receipt_ran="0"
@@ -345,10 +349,14 @@ write_summary_json() {
     --arg manual_validation_report_summary_json "$manual_validation_report_summary_json" \
     --arg manual_validation_report_md "$manual_validation_report_md" \
     --arg manual_validation_report_status "$manual_validation_report_status" \
+    --argjson manual_validation_report_rc "$manual_validation_report_rc" \
+    --argjson manual_validation_report_ran "$manual_validation_report_ran" \
     --arg manual_validation_report_readiness_status "$manual_validation_report_readiness_status" \
     --arg manual_validation_report_next_action_check_id "$manual_validation_report_next_action_check_id" \
     --arg manual_validation_report_log "$manual_validation_report_log" \
     --argjson manual_validation_report_enabled "$manual_validation_report_enabled" \
+    --argjson manual_validation_report_written_summary_json "$manual_validation_report_written_summary_json" \
+    --argjson manual_validation_report_written_report_md "$manual_validation_report_written_report_md" \
     --argjson record_result "$record_result" \
     --argjson receipt_ran "$receipt_ran" \
     --arg receipt_status "$receipt_status" \
@@ -361,7 +369,7 @@ write_summary_json() {
       schema: {
         id: "three_machine_docker_readiness_record_summary",
         major: 1,
-        minor: 0
+        minor: 1
       },
       generated_at_utc: $generated_at_utc,
       status: $status,
@@ -377,12 +385,16 @@ write_summary_json() {
       },
       manual_validation_report: {
         enabled: ($manual_validation_report_enabled == 1),
+        ran: ($manual_validation_report_ran == 1),
         status: $manual_validation_report_status,
+        rc: $manual_validation_report_rc,
         summary_json: $manual_validation_report_summary_json,
         report_md: $manual_validation_report_md,
         log: $manual_validation_report_log,
         readiness_status: $manual_validation_report_readiness_status,
-        next_action_check_id: $manual_validation_report_next_action_check_id
+        next_action_check_id: $manual_validation_report_next_action_check_id,
+        written_summary_json: ($manual_validation_report_written_summary_json == 1),
+        written_report_md: ($manual_validation_report_written_report_md == 1)
       },
       manual_validation_record: {
         enabled: ($record_result == 1),
@@ -398,6 +410,10 @@ write_summary_json() {
         summary_log: $summary_log,
         summary_json: $summary_json,
         rehearsal_summary_json: $rehearsal_summary_json,
+        rehearsal_log: $rehearsal_log,
+        manual_validation_report_summary_json: $manual_validation_report_summary_json,
+        manual_validation_report_md: $manual_validation_report_md,
+        manual_validation_report_log: $manual_validation_report_log,
         manual_validation_record_log: $manual_validation_record_log
       }
     }' >"$summary_tmp"
@@ -407,12 +423,15 @@ write_summary_json() {
 refresh_manual_validation_report() {
   local report_output=""
   local report_json=""
+  local report_compatible="0"
   local -a report_cmd=()
 
   if [[ "$manual_validation_report_enabled" != "1" ]]; then
     return 0
   fi
 
+  manual_validation_report_ran="1"
+  rm -f "$manual_validation_report_summary_json" "$manual_validation_report_md" 2>/dev/null || true
   report_cmd=(
     "$easy_node_script" manual-validation-report
     --overlay-check-id "three_machine_docker_readiness"
@@ -431,22 +450,44 @@ refresh_manual_validation_report() {
   stage="manual-validation-report"
   if run_and_capture report_output "${report_cmd[@]}"; then
     manual_validation_report_status="ok"
+    manual_validation_report_rc=0
   else
+    manual_validation_report_rc=$?
     manual_validation_report_status="fail"
   fi
   persist_artifact_text "$manual_validation_report_log" "$report_output"
+
+  if [[ -f "$manual_validation_report_summary_json" ]] && jq -e . "$manual_validation_report_summary_json" >/dev/null 2>&1; then
+    manual_validation_report_written_summary_json="1"
+  else
+    manual_validation_report_written_summary_json="0"
+  fi
+  if [[ -f "$manual_validation_report_md" ]]; then
+    manual_validation_report_written_report_md="1"
+  else
+    manual_validation_report_written_report_md="0"
+  fi
 
   report_json="$(extract_json_payload "manual-validation-report" "$report_output")"
   if [[ -z "$report_json" && -f "$manual_validation_report_summary_json" ]] && jq -e . "$manual_validation_report_summary_json" >/dev/null 2>&1; then
     report_json="$(cat "$manual_validation_report_summary_json")"
   fi
   if validate_manual_validation_summary_payload "$report_json"; then
+    report_compatible="1"
     manual_validation_report_readiness_status="$(jq -r '.report.readiness_status // ""' <<<"$report_json")"
     manual_validation_report_next_action_check_id="$(jq -r '.summary.next_action_check_id // ""' <<<"$report_json")"
   else
-    manual_validation_report_status="fail"
     manual_validation_report_readiness_status=""
     manual_validation_report_next_action_check_id=""
+  fi
+
+  if [[ "$report_compatible" != "1" ]]; then
+    if [[ "$manual_validation_report_status" == "ok" ]]; then
+      manual_validation_report_status="fail"
+      if [[ "$manual_validation_report_rc" -eq 0 ]]; then
+        manual_validation_report_rc=1
+      fi
+    fi
     printf '%s\n' "[$stage] summary_payload_invalid_or_incompatible schema check failed" >>"$summary_log"
   fi
 }
@@ -542,13 +583,21 @@ fi
 
 write_summary_json
 refresh_manual_validation_report
-if [[ "$rehearsal_status" == "pass" && "$manual_validation_report_enabled" == "1" && "$manual_validation_report_status" != "ok" ]]; then
+if [[ "$rehearsal_status" == "pass" && "$manual_validation_report_enabled" == "1" ]]; then
+  manual_validation_report_gate_failure=""
+  if [[ "$manual_validation_report_status" != "ok" || "$manual_validation_report_rc" -ne 0 ]]; then
+    manual_validation_report_gate_failure="manual-validation report failed or emitted incompatible summary"
+  elif [[ "$manual_validation_report_written_summary_json" != "1" || "$manual_validation_report_written_report_md" != "1" ]]; then
+    manual_validation_report_gate_failure="manual-validation report artifact missing"
+  fi
+fi
+if [[ -n "${manual_validation_report_gate_failure:-}" ]]; then
   record_status="fail"
   record_rc=1
   if [[ -n "$notes" ]]; then
-    notes="$notes; manual-validation report failed or emitted incompatible summary"
+    notes="$notes; $manual_validation_report_gate_failure"
   else
-    notes="manual-validation report failed or emitted incompatible summary"
+    notes="$manual_validation_report_gate_failure"
   fi
 fi
 write_summary_json

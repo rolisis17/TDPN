@@ -64,6 +64,7 @@ for expected in \
   '--allow-unsafe-shell-commands [0|1]' \
   '--refresh-manual-validation [0|1]' \
   '--refresh-single-machine-readiness [0|1]' \
+  '--scope auto|all|profile-default|runtime-actuation|multi-vm' \
   '--max-actions N' \
   '--parallel [0|1]' \
   '--print-summary-json [0|1]'; do

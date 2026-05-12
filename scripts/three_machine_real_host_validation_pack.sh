@@ -154,28 +154,27 @@ json_file_semantically_usable_01() {
     and (
       (.schema.id // "") as $schema_id
         | if $schema_id == "three_machine_docker_readiness_record_summary" then
-          (((.rehearsal.status // "") | ascii_downcase | gsub("[[:space:]_-]";"")) == "pass")
+          (((.schema.major // null) | tonumber?) == 1)
+          and (((.schema.minor // -1) | tonumber?) >= 1)
+          and (((.rehearsal.status // "") | ascii_downcase | gsub("[[:space:]_-]";"")) == "pass")
           and (((.rehearsal.rc // null) | tonumber?) == 0)
+          and ((.manual_validation_report // null) | type) == "object"
+          and ((.manual_validation_record // null) | type) == "object"
           and (
-            if ((.manual_validation_report // null) | type) == "object" then
-              if (((.manual_validation_report.enabled // false) == true) or (((.manual_validation_report.status // "") | tostring | length) > 0)) then
-                ((.manual_validation_report.status // "") == "ok")
-              else
-                true
-              end
+            if ((.manual_validation_report.enabled // false) == true) then
+              (((.manual_validation_report.status // "") | ascii_downcase) == "ok")
+              and (((.manual_validation_report.rc // null) | tonumber?) == 0)
+              and ((.manual_validation_report.written_summary_json // false) == true)
+              and ((.manual_validation_report.written_report_md // false) == true)
             else
               true
             end
           )
           and (
-            if ((.manual_validation_record // null) | type) == "object" then
-              if ((.manual_validation_record.enabled // false) == true) then
-                (((.manual_validation_record.status // "") | ascii_downcase) == "ok")
-                and (((.manual_validation_record.rc // null) | tonumber?) == 0)
-                and ((.manual_validation_record.written_receipt // false) == true)
-              else
-                true
-              end
+            if ((.manual_validation_record.enabled // false) == true) then
+              (((.manual_validation_record.status // "") | ascii_downcase) == "ok")
+              and (((.manual_validation_record.rc // null) | tonumber?) == 0)
+              and ((.manual_validation_record.written_receipt // false) == true)
             else
               true
             end

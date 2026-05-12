@@ -99,14 +99,18 @@ write_readiness_record_summary() {
   local manual_status="${3:-ok}"
   local receipt_status="${4:-ok}"
   local receipt_written="${5:-true}"
+  local manual_report_summary_written="${6:-true}"
+  local manual_report_md_written="${7:-true}"
   jq -n \
     --arg generated_at_utc "$generated_at_utc" \
     --arg manual_status "$manual_status" \
     --arg receipt_status "$receipt_status" \
     --argjson receipt_written "$receipt_written" \
+    --argjson manual_report_summary_written "$manual_report_summary_written" \
+    --argjson manual_report_md_written "$manual_report_md_written" \
     '{
     version: 1,
-    schema: { id: "three_machine_docker_readiness_record_summary" },
+    schema: { id: "three_machine_docker_readiness_record_summary", major: 1, minor: 1 },
     generated_at_utc: $generated_at_utc,
     status: "pass",
     rc: 0,
@@ -121,7 +125,10 @@ write_readiness_record_summary() {
     },
     manual_validation_report: {
       enabled: true,
-      status: $manual_status
+      status: $manual_status,
+      rc: (if $manual_status == "ok" then 0 else 1 end),
+      written_summary_json: $manual_report_summary_written,
+      written_report_md: $manual_report_md_written
     },
     manual_validation_record: {
       enabled: true,
@@ -265,6 +272,36 @@ assert_jq "$RECORD_MANUAL_FAIL_SUMMARY" '.status == "fail"'
 assert_jq "$RECORD_MANUAL_FAIL_SUMMARY" '.decision == "NO-GO"'
 assert_jq "$RECORD_MANUAL_FAIL_SUMMARY" '.required_groups.docker_readiness.usable == false'
 assert_jq "$RECORD_MANUAL_FAIL_SUMMARY" '.artifacts | map(select(.id == "docker_readiness_record_summary" and .semantic_usable == false)) | length == 1'
+
+echo "[three-machine-real-host-validation-pack] docker readiness record with missing manual report artifacts is unusable"
+RECORD_MANUAL_ARTIFACT_MISSING_DIR="$TMP_DIR/record_manual_artifact_missing"
+mkdir -p "$RECORD_MANUAL_ARTIFACT_MISSING_DIR"
+write_matrix_summary "$RECORD_MANUAL_ARTIFACT_MISSING_DIR/three_machine_docker_profile_matrix_summary.json" "$FRESH_GENERATED_AT_UTC"
+write_readiness_record_summary "$RECORD_MANUAL_ARTIFACT_MISSING_DIR/three_machine_docker_readiness_record_20260507_120250.json" "$FRESH_GENERATED_AT_UTC" "ok" "ok" "true" "false" "false"
+write_real_host_summary "$RECORD_MANUAL_ARTIFACT_MISSING_DIR/three_machine_prod_signoff_summary.json" "$FRESH_GENERATED_AT_UTC"
+
+RECORD_MANUAL_ARTIFACT_MISSING_SUMMARY="$RECORD_MANUAL_ARTIFACT_MISSING_DIR/validation_pack_summary.json"
+RECORD_MANUAL_ARTIFACT_MISSING_REPORT="$RECORD_MANUAL_ARTIFACT_MISSING_DIR/validation_pack_report.md"
+
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$RECORD_MANUAL_ARTIFACT_MISSING_DIR" \
+  --summary-json "$RECORD_MANUAL_ARTIFACT_MISSING_SUMMARY" \
+  --report-md "$RECORD_MANUAL_ARTIFACT_MISSING_REPORT" \
+  --include-missing 0 \
+  --print-summary-json 0 >/tmp/integration_three_machine_real_host_validation_pack_record_manual_artifact_missing.log 2>&1
+RECORD_MANUAL_ARTIFACT_MISSING_RC=$?
+set -e
+
+if [[ "$RECORD_MANUAL_ARTIFACT_MISSING_RC" -eq 0 ]]; then
+  echo "expected non-zero rc when docker readiness record manual report artifacts are missing"
+  cat /tmp/integration_three_machine_real_host_validation_pack_record_manual_artifact_missing.log
+  exit 1
+fi
+assert_jq "$RECORD_MANUAL_ARTIFACT_MISSING_SUMMARY" '.status == "fail"'
+assert_jq "$RECORD_MANUAL_ARTIFACT_MISSING_SUMMARY" '.decision == "NO-GO"'
+assert_jq "$RECORD_MANUAL_ARTIFACT_MISSING_SUMMARY" '.required_groups.docker_readiness.usable == false'
+assert_jq "$RECORD_MANUAL_ARTIFACT_MISSING_SUMMARY" '.artifacts | map(select(.id == "docker_readiness_record_summary" and .semantic_usable == false)) | length == 1'
 
 echo "[three-machine-real-host-validation-pack] docker readiness record with missing receipt is unusable"
 RECORD_RECEIPT_MISSING_DIR="$TMP_DIR/record_receipt_missing"

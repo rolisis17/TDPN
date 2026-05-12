@@ -182,11 +182,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
-printf '%s\n' '{"report":{"readiness_status":"NOT_READY"},"summary":{"next_action_check_id":"machine_c_vpn_smoke"}}' >"$summary_json"
-printf '# Manual Validation Readiness Report\n' >"$report_md"
+if [[ "${FAKE_MANUAL_REPORT_NO_ARTIFACTS:-0}" != "1" ]]; then
+  printf '%s\n' '{"report":{"readiness_status":"NOT_READY"},"summary":{"next_action_check_id":"machine_c_vpn_smoke"}}' >"$summary_json"
+  printf '# Manual Validation Readiness Report\n' >"$report_md"
+fi
 
 echo "[manual-validation-report] summary_json_payload:"
-cat "$summary_json"
+printf '%s\n' '{"report":{"readiness_status":"NOT_READY"},"summary":{"next_action_check_id":"machine_c_vpn_smoke"}}'
 exit 0
 EOF_FAKE_MANUAL_REPORT
 chmod +x "$FAKE_MANUAL_REPORT"
@@ -277,6 +279,44 @@ if ! grep -Eq '\[REDACTED\]|\[REDACTED_INVITE\]' "$summary_log_path"; then
   exit 1
 fi
 
+echo "[three-machine-docker-profile-matrix-record] stale manual validation report artifacts are not reused"
+: >"$CAPTURE"
+printf '%s\n' '{"stale":true}' >"$TMP_DIR/manual_validation_report_stale_summary.json"
+printf '# stale report\n' >"$TMP_DIR/manual_validation_report_stale.md"
+if FAKE_HELPER_CAPTURE_FILE="$CAPTURE" \
+  FAKE_MANUAL_REPORT_NO_ARTIFACTS="1" \
+  FAKE_MANUAL_VALIDATION_RECEIPT_JSON="$TMP_DIR/manual_validation_receipt_stale_report.json" \
+  THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MATRIX_SCRIPT="$FAKE_MATRIX" \
+  THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MANUAL_VALIDATION_RECORD_SCRIPT="$FAKE_MANUAL_RECORD" \
+  THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+  ./scripts/three_machine_docker_profile_matrix_record.sh \
+    --summary-json "$TMP_DIR/summary_stale_report.json" \
+    --matrix-summary-json "$TMP_DIR/matrix_summary_stale_report.json" \
+    --manual-validation-report-summary-json "$TMP_DIR/manual_validation_report_stale_summary.json" \
+    --manual-validation-report-md "$TMP_DIR/manual_validation_report_stale.md" \
+    --record-result 1 \
+    --print-summary-json 1 >"$TMP_DIR/integration_three_machine_docker_profile_matrix_record_stale_report.log" 2>&1; then
+  echo "expected missing current-run manual-validation-report artifacts to fail profile matrix record"
+  cat "$TMP_DIR/integration_three_machine_docker_profile_matrix_record_stale_report.log"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and (.notes | contains("manual-validation-report artifact missing"))
+  and .stages.matrix.status == "pass"
+  and .stages.matrix.rc == 0
+  and .stages.manual_validation_report.status == "ok"
+  and .stages.manual_validation_report.rc == 0
+  and .stages.manual_validation_report.written_summary_json == false
+  and .stages.manual_validation_report.written_report_md == false
+  and .stages.manual_validation_record.status == "ok"
+' "$TMP_DIR/summary_stale_report.json" >/dev/null; then
+  echo "stale manual-validation report artifact summary mismatch"
+  cat "$TMP_DIR/summary_stale_report.json"
+  exit 1
+fi
+
 echo "[three-machine-docker-profile-matrix-record] manual validation report failure fails record gate"
 : >"$CAPTURE"
 if FAKE_HELPER_CAPTURE_FILE="$CAPTURE" \
@@ -299,6 +339,11 @@ fi
 if ! grep -q 'three-machine-docker-profile-matrix-record: status=fail' "$TMP_DIR/integration_three_machine_docker_profile_matrix_record_report_fail.log"; then
   echo "expected fail status for manual-validation-report failure"
   cat "$TMP_DIR/integration_three_machine_docker_profile_matrix_record_report_fail.log"
+  exit 1
+fi
+if ! grep -Eq '^manual-validation-record --check-id three_machine_docker_readiness --status fail ' "$CAPTURE"; then
+  echo "expected manual-validation-record fail call when manual-validation-report gate failed"
+  cat "$CAPTURE"
   exit 1
 fi
 if ! jq -e '

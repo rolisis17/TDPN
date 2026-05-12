@@ -526,6 +526,7 @@ refresh_manual_validation_report() {
   fi
 
   manual_validation_report_ran="1"
+  rm -f "$manual_validation_report_summary_json" "$manual_validation_report_md" 2>/dev/null || true
   report_cmd=(
     "$manual_validation_report_script"
     --overlay-check-id "three_machine_docker_readiness"
@@ -601,7 +602,7 @@ record_receipt() {
   record_cmd=(
     "$manual_validation_record_script"
     --check-id "three_machine_docker_readiness"
-    --status "$matrix_status"
+    --status "$record_status"
     --notes "$notes"
     --command "$(print_cmd "$0" "${original_args[@]}")"
     --show-json 0
@@ -629,6 +630,7 @@ record_receipt() {
 }
 
 apply_record_gate_status() {
+  local include_receipt_gate="${1:-1}"
   local -a gate_failures=()
   local gate_summary=""
 
@@ -640,7 +642,7 @@ apply_record_gate_status() {
     fi
   fi
 
-  if [[ "$record_result" == "1" ]]; then
+  if [[ "$include_receipt_gate" == "1" && "$record_result" == "1" ]]; then
     if [[ "$receipt_status" != "ok" || "$receipt_rc" -ne 0 ]]; then
       gate_failures+=("manual-validation-record failed")
     elif [[ "$receipt_written" != "1" ]]; then
@@ -653,7 +655,11 @@ apply_record_gate_status() {
     record_rc=1
     gate_summary="$(IFS='; '; printf '%s' "${gate_failures[*]}")"
     if [[ "$notes" != *"record gate failed:"* ]]; then
-      notes="${notes}; record gate failed: $gate_summary"
+      if [[ -n "$notes" ]]; then
+        notes="${notes}; record gate failed: $gate_summary"
+      else
+        notes="record gate failed: $gate_summary"
+      fi
     fi
   else
     record_status="$matrix_status"
@@ -755,6 +761,7 @@ record_rc="$matrix_rc"
 
 write_summary_json
 refresh_manual_validation_report
+apply_record_gate_status 0
 write_summary_json
 
 declare -a receipt_artifacts=()
@@ -771,7 +778,7 @@ if [[ "$record_result" == "1" ]]; then
   record_receipt "${receipt_artifacts[@]}"
 fi
 
-apply_record_gate_status
+apply_record_gate_status 1
 write_summary_json
 
 echo "three-machine-docker-profile-matrix-record: status=$record_status"

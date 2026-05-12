@@ -743,14 +743,20 @@ archive_summary_status_json="null"
 archive_summary_rc_json="null"
 archive_candidate_total_num=0
 archive_copied_total_num=0
+archive_qualifying_copied_total_num=0
+archive_diagnostic_copied_total_num=0
 archive_missing_total_num=0
 archive_copy_error_total_num=0
 archive_missing_family_count_num=0
+archive_diagnostic_only_family_count_num=0
 archive_candidate_total_json="null"
 archive_copied_total_json="null"
+archive_qualifying_copied_total_json="null"
+archive_diagnostic_copied_total_json="null"
 archive_missing_total_json="null"
 archive_copy_error_total_json="null"
 archive_missing_family_count_json="null"
+archive_diagnostic_only_family_count_json="null"
 archive_archive_dir=""
 archive_fail_closed_blocking=0
 
@@ -1021,6 +1027,16 @@ if [[ "$run_live_archive" == "1" ]]; then
         archive_copied_total_num="$value"
         archive_copied_total_json="$value"
       fi
+      value="$(jq -r '.summary.qualifying_copied_total // empty' "$archive_summary_json")"
+      if [[ "$value" =~ ^[0-9]+$ ]]; then
+        archive_qualifying_copied_total_num="$value"
+        archive_qualifying_copied_total_json="$value"
+      fi
+      value="$(jq -r '.summary.diagnostic_copied_total // empty' "$archive_summary_json")"
+      if [[ "$value" =~ ^[0-9]+$ ]]; then
+        archive_diagnostic_copied_total_num="$value"
+        archive_diagnostic_copied_total_json="$value"
+      fi
       value="$(jq -r '.summary.missing_total // empty' "$archive_summary_json")"
       if [[ "$value" =~ ^[0-9]+$ ]]; then
         archive_missing_total_num="$value"
@@ -1035,6 +1051,28 @@ if [[ "$run_live_archive" == "1" ]]; then
       if [[ "$value" =~ ^[0-9]+$ ]]; then
         archive_missing_family_count_num="$value"
         archive_missing_family_count_json="$value"
+      fi
+      value="$(jq -r '.summary.diagnostic_only_family_count // empty' "$archive_summary_json")"
+      if [[ "$value" =~ ^[0-9]+$ ]]; then
+        archive_diagnostic_only_family_count_num="$value"
+        archive_diagnostic_only_family_count_json="$value"
+      fi
+
+      archive_status_norm="$(printf '%s' "${archive_status:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+      if (( archive_contract_valid == 1 && archive_rc_num == 0 )) && [[ "$archive_status_norm" == "pass" ]] && (( archive_diagnostic_only_family_count_num > 0 )); then
+        archive_contract_valid=0
+        archive_contract_failure_reason="archive summary reports diagnostic-only copied artifacts that do not qualify a live-evidence family"
+        archive_status="fail"
+        if (( archive_rc_num == 0 )); then
+          archive_rc_num=1
+        fi
+      elif (( archive_contract_valid == 1 && archive_rc_num == 0 && archive_copied_total_num > 0 && archive_qualifying_copied_total_num == 0 )) && [[ "$archive_status_norm" == "pass" && "$archive_qualifying_copied_total_json" != "null" ]]; then
+        archive_contract_valid=0
+        archive_contract_failure_reason="archive summary reports copied artifacts but zero qualifying copied artifacts"
+        archive_status="fail"
+        if (( archive_rc_num == 0 )); then
+          archive_rc_num=1
+        fi
       fi
       archive_archive_dir="$(jq -r '.artifacts.archive_dir // ""' "$archive_summary_json")"
     else
@@ -1390,9 +1428,12 @@ jq -n \
   --argjson archive_summary_rc "$archive_summary_rc_json" \
   --argjson archive_candidate_total "$archive_candidate_total_json" \
   --argjson archive_copied_total "$archive_copied_total_json" \
+  --argjson archive_qualifying_copied_total "$archive_qualifying_copied_total_json" \
+  --argjson archive_diagnostic_copied_total "$archive_diagnostic_copied_total_json" \
   --argjson archive_missing_total "$archive_missing_total_json" \
   --argjson archive_copy_error_total "$archive_copy_error_total_json" \
   --argjson archive_missing_family_count "$archive_missing_family_count_json" \
+  --argjson archive_diagnostic_only_family_count "$archive_diagnostic_only_family_count_json" \
   --argjson archive_fail_closed_blocking "$archive_fail_closed_blocking" \
   --arg pack_status "$pack_status" \
   --argjson pack_rc "$pack_rc_json" \
@@ -1482,9 +1523,12 @@ jq -n \
         summary_rc: $archive_summary_rc,
         candidate_total: $archive_candidate_total,
         copied_total: $archive_copied_total,
+        qualifying_copied_total: $archive_qualifying_copied_total,
+        diagnostic_copied_total: $archive_diagnostic_copied_total,
         missing_total: $archive_missing_total,
         copy_error_total: $archive_copy_error_total,
         missing_family_count: $archive_missing_family_count,
+        diagnostic_only_family_count: $archive_diagnostic_only_family_count,
         artifacts: {
           archive_root: $archive_root,
           archive_dir: (if $archive_archive_dir == "" then null else $archive_archive_dir end),

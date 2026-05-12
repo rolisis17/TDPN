@@ -238,9 +238,12 @@ if [[ "${FAKE_ARCHIVE_WRITE_SUMMARY:-1}" == "1" ]]; then
 
   candidate_total="${FAKE_ARCHIVE_CANDIDATE_TOTAL:-3}"
   copied_total="${FAKE_ARCHIVE_COPIED_TOTAL:-3}"
+  qualifying_copied_total="${FAKE_ARCHIVE_QUALIFYING_COPIED_TOTAL:-$copied_total}"
+  diagnostic_copied_total="${FAKE_ARCHIVE_DIAGNOSTIC_COPIED_TOTAL:-0}"
   missing_total="${FAKE_ARCHIVE_MISSING_TOTAL:-0}"
   copy_error_total="${FAKE_ARCHIVE_COPY_ERROR_TOTAL:-0}"
   missing_family_count="${FAKE_ARCHIVE_MISSING_FAMILY_COUNT:-0}"
+  diagnostic_only_family_count="${FAKE_ARCHIVE_DIAGNOSTIC_ONLY_FAMILY_COUNT:-0}"
   archive_dir="${FAKE_ARCHIVE_DIR:-$archive_root/archive_bundle}"
 
   jq -n \
@@ -248,9 +251,12 @@ if [[ "${FAKE_ARCHIVE_WRITE_SUMMARY:-1}" == "1" ]]; then
     --argjson rc "$summary_rc" \
     --argjson candidate_total "$candidate_total" \
     --argjson copied_total "$copied_total" \
+    --argjson qualifying_copied_total "$qualifying_copied_total" \
+    --argjson diagnostic_copied_total "$diagnostic_copied_total" \
     --argjson missing_total "$missing_total" \
     --argjson copy_error_total "$copy_error_total" \
     --argjson missing_family_count "$missing_family_count" \
+    --argjson diagnostic_only_family_count "$diagnostic_only_family_count" \
     --arg roadmap_summary_json "$roadmap_summary_json" \
     --arg archive_root "$archive_root" \
     --arg archive_dir "$archive_dir" \
@@ -262,9 +268,12 @@ if [[ "${FAKE_ARCHIVE_WRITE_SUMMARY:-1}" == "1" ]]; then
       summary: {
         candidate_total: $candidate_total,
         copied_total: $copied_total,
+        qualifying_copied_total: $qualifying_copied_total,
+        diagnostic_copied_total: $diagnostic_copied_total,
         missing_total: $missing_total,
         copy_error_total: $copy_error_total,
-        missing_family_count: $missing_family_count
+        missing_family_count: $missing_family_count,
+        diagnostic_only_family_count: $diagnostic_only_family_count
       },
       artifacts: {
         roadmap_summary_json: (if $roadmap_summary_json == "" then null else $roadmap_summary_json end),
@@ -915,6 +924,66 @@ fi
 assert_token "$archive_line" $'\t--scope\tauto' "missing scope forwarding to archive runner"
 assert_token "$archive_line" $'\t--archive-root\t' "missing archive-root forwarding to archive runner"
 assert_token "$archive_line" "$ARCHIVE_ROOT_ENABLED" "missing configured archive root in archive runner invocation"
+
+echo "[roadmap-live-and-pack-actionable-run] diagnostic-only archive counters block evidence-pack even with pass status"
+SUMMARY_ARCHIVE_DIAGNOSTIC_ONLY="$TMP_DIR/summary_archive_diagnostic_only.json"
+REPORTS_ARCHIVE_DIAGNOSTIC_ONLY="$TMP_DIR/reports_archive_diagnostic_only"
+: >"$LIVE_CAPTURE"
+: >"$ARCHIVE_CAPTURE"
+: >"$PACK_CAPTURE"
+set +e
+ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_LIVE_SCRIPT="$FAKE_LIVE_SCRIPT" \
+ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_ARCHIVE_SCRIPT="$FAKE_ARCHIVE_SCRIPT" \
+ROADMAP_LIVE_AND_PACK_ACTIONABLE_RUN_PACK_SCRIPT="$FAKE_PACK_SCRIPT" \
+FAKE_LIVE_CAPTURE_FILE="$LIVE_CAPTURE" \
+FAKE_ARCHIVE_CAPTURE_FILE="$ARCHIVE_CAPTURE" \
+FAKE_PACK_CAPTURE_FILE="$PACK_CAPTURE" \
+FAKE_SHARED_ROADMAP_SUMMARY_JSON="$SHARED_ROADMAP_SUMMARY" \
+FAKE_SHARED_ROADMAP_REPORT_MD="$SHARED_ROADMAP_REPORT" \
+FAKE_LIVE_RC=0 FAKE_LIVE_SUMMARY_RC=0 FAKE_LIVE_SELECTED_IDS_JSON='["runtime_actuation_promotion"]' FAKE_LIVE_SELECTED_COUNT=1 FAKE_LIVE_ACTIONS_EXECUTED=1 FAKE_LIVE_PASS=1 FAKE_LIVE_FAIL=0 \
+FAKE_ARCHIVE_RC=0 FAKE_ARCHIVE_SUMMARY_RC=0 FAKE_ARCHIVE_STATUS=pass FAKE_ARCHIVE_CANDIDATE_TOTAL=1 FAKE_ARCHIVE_COPIED_TOTAL=1 FAKE_ARCHIVE_QUALIFYING_COPIED_TOTAL=0 FAKE_ARCHIVE_DIAGNOSTIC_COPIED_TOTAL=1 FAKE_ARCHIVE_MISSING_TOTAL=0 FAKE_ARCHIVE_COPY_ERROR_TOTAL=0 FAKE_ARCHIVE_MISSING_FAMILY_COUNT=0 FAKE_ARCHIVE_DIAGNOSTIC_ONLY_FAMILY_COUNT=1 \
+FAKE_PACK_RC=0 FAKE_PACK_SUMMARY_RC=0 FAKE_PACK_SELECTED_IDS_JSON='["runtime_actuation_promotion_evidence_pack"]' FAKE_PACK_SELECTED_COUNT=1 FAKE_PACK_ACTIONS_EXECUTED=1 FAKE_PACK_PASS=1 FAKE_PACK_FAIL=0 \
+bash ./scripts/roadmap_live_and_pack_actionable_run.sh \
+  --reports-dir "$REPORTS_ARCHIVE_DIAGNOSTIC_ONLY" \
+  --summary-json "$SUMMARY_ARCHIVE_DIAGNOSTIC_ONLY" \
+  --run-live-archive 1 \
+  --scope runtime-actuation \
+  --print-summary-json 0
+archive_diagnostic_only_rc=$?
+set -e
+if [[ "$archive_diagnostic_only_rc" != "1" ]]; then
+  echo "expected diagnostic-only archive rc=1, got rc=$archive_diagnostic_only_rc"
+  cat "$SUMMARY_ARCHIVE_DIAGNOSTIC_ONLY"
+  exit 1
+fi
+
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .failure_substep == "live_evidence_archive_summary_contract"
+  and .steps.live_evidence.status == "pass"
+  and .steps.live_evidence_archive.attempted == true
+  and .steps.live_evidence_archive.status == "fail"
+  and .steps.live_evidence_archive.contract_valid == false
+  and (.steps.live_evidence_archive.contract_failure_reason | contains("diagnostic-only copied artifacts"))
+  and .steps.live_evidence_archive.fail_closed_blocking == true
+  and .steps.live_evidence_archive.copied_total == 1
+  and .steps.live_evidence_archive.qualifying_copied_total == 0
+  and .steps.live_evidence_archive.diagnostic_copied_total == 1
+  and .steps.live_evidence_archive.diagnostic_only_family_count == 1
+  and .steps.evidence_pack.status == "skipped"
+  and .steps.evidence_pack.skip_reason == "archive_step_failed_fail_closed"
+' "$SUMMARY_ARCHIVE_DIAGNOSTIC_ONLY" >/dev/null; then
+  echo "diagnostic-only archive summary mismatch"
+  cat "$SUMMARY_ARCHIVE_DIAGNOSTIC_ONLY"
+  exit 1
+fi
+
+if [[ -s "$PACK_CAPTURE" ]]; then
+  echo "evidence-pack runner should be blocked by diagnostic-only archive counters"
+  cat "$PACK_CAPTURE"
+  exit 1
+fi
 
 echo "[roadmap-live-and-pack-actionable-run] archive fail-closed blocks evidence-pack when archive is not pass"
 SUMMARY_ARCHIVE_BLOCK="$TMP_DIR/summary_archive_block.json"
