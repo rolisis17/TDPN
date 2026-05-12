@@ -380,11 +380,20 @@ deploy_pack_rel_path_is_secret() {
   local lower
   lower="$(printf '%s' "$rel" | tr '[:upper:]' '[:lower:]')"
   case "$lower" in
-    bridge-code.txt|*/bridge-code.txt|recovery.key|*/recovery.key|*.key|*private-key*|*access-code*|*secret*)
+    bridge-code.txt|*/bridge-code.txt|\
+    recovery.key|*/recovery.key|\
+    id_rsa|*/id_rsa|id_dsa|*/id_dsa|id_ecdsa|*/id_ecdsa|id_ed25519|*/id_ed25519|\
+    *.key|*.pem|*.p8|*.pkcs8|*.p12|*.pfx|\
+    *private-key*|*private_key*|*access-code*|*access_code*|*secret*|*credential*)
       return 0
       ;;
   esac
   return 1
+}
+
+deploy_pack_file_contains_private_key() {
+  local file="$1"
+  LC_ALL=C grep -aEq -- '-----BEGIN ([A-Z0-9]+ )?PRIVATE KEY-----|-----BEGIN OPENSSH PRIVATE KEY-----' "$file" 2>/dev/null
 }
 
 copy_public_deploy_pack() {
@@ -399,7 +408,7 @@ copy_public_deploy_pack() {
   while IFS= read -r file; do
     [[ -n "$file" ]] || continue
     rel="${file#$src/}"
-    if deploy_pack_rel_path_is_secret "$rel"; then
+    if deploy_pack_rel_path_is_secret "$rel" || deploy_pack_file_contains_private_key "$file"; then
       printf '%s\n' "$rel" >>"$skipped_file"
       continue
     fi
@@ -889,6 +898,18 @@ if [[ "$real_helper_https_pilot_handoff" == "1" ]]; then
   fi
   if [[ -n "$expect_registry_id" ]] && value_looks_generated_demo_identity "$expect_registry_id"; then
     echo "access bridge pilot evidence bundle failed: expected registry identity must not use a generated demo/example identity for real helper HTTPS pilot handoff" >&2
+    exit 2
+  fi
+  if [[ -z "$expect_helper_id" || -z "$expect_org_id" || -z "$expect_registry_id" ]]; then
+    echo "access bridge pilot evidence bundle failed: real helper HTTPS pilot handoff requires expected helper, organization, and registry identities" >&2
+    exit 2
+  fi
+  if [[ "$provenance_org_id" != "$expect_org_id" ]]; then
+    echo "access bridge pilot evidence bundle failed: --provenance-org-id must match expected organization identity for real helper HTTPS pilot handoff" >&2
+    exit 2
+  fi
+  if [[ "$host_install_evidence_mode" != "installed-host" ]]; then
+    echo "access bridge pilot evidence bundle failed: real helper HTTPS pilot handoff requires --host-install-evidence-mode installed-host" >&2
     exit 2
   fi
 fi

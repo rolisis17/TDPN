@@ -997,7 +997,7 @@ else
   promotion_stage_status="fail"
 fi
 
-if [[ "$promotion_stage_rc" -eq 0 && "$promotion_summary_valid" == "true" && "$promotion_summary_fresh" == "true" && ( "$promotion_decision" == "GO" || "$promotion_decision" == "NO-GO" ) ]]; then
+if [[ "$promotion_summary_valid" == "true" && "$promotion_summary_fresh" == "true" && ( "$promotion_decision" == "GO" || "$promotion_decision" == "NO-GO" ) ]]; then
   promotion_contract_ok="true"
 fi
 
@@ -1017,7 +1017,7 @@ if (( cycle_command_failures > 0 || cycle_summary_missing_count > 0 || cycle_sum
   cycles_collection_failure_reason="one or more cycle runs failed to execute or produce fresh valid summary artifacts"
 fi
 
-if [[ "$promotion_stage_rc" -ne 0 ]]; then
+if [[ "$promotion_stage_rc" -ne 0 && ! ( "$promotion_summary_valid" == "true" && "$promotion_summary_fresh" == "true" && "$promotion_decision" == "NO-GO" ) ]]; then
   set_promotion_failure \
     "promotion_check_command_failed" \
     "promotion_check" \
@@ -1071,7 +1071,7 @@ elif [[ "$promotion_decision" == "GO" && "$promotion_status" == "pass" && "$prom
   if [[ -z "$next_operator_action" ]]; then
     next_operator_action="Promotion may proceed."
   fi
-elif [[ "$promotion_decision" == "NO-GO" ]]; then
+elif [[ "$promotion_summary_valid" == "true" && "$promotion_summary_fresh" == "true" && "$promotion_decision" == "NO-GO" ]]; then
   final_decision="NO-GO"
   primary_code="$promotion_primary_violation_code"
   primary_message="$promotion_primary_violation_message"
@@ -1081,6 +1081,9 @@ elif [[ "$promotion_decision" == "NO-GO" ]]; then
   fi
   if [[ -z "$primary_message" ]]; then
     primary_message="promotion decision is NO-GO"
+  fi
+  if [[ -z "$primary_action" ]]; then
+    primary_action="$promotion_operator_next_action"
   fi
   if [[ -z "$primary_action" ]]; then
     primary_action="Hold promotion, resolve promotion-check violations, and rerun profile_compare_multi_vm_stability_promotion_cycle.sh."

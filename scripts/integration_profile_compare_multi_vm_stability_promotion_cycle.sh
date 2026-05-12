@@ -263,7 +263,8 @@ if [[ "$scenario" == "no_go" ]]; then
           code: "simulated_no_go",
           field: "observed.cycles_status_fail",
           severity: "error",
-          message: "simulated NO-GO for integration coverage"
+          message: "simulated NO-GO for integration coverage",
+          action: "investigate NO-GO signal"
         }
       ],
       errors: []
@@ -495,6 +496,55 @@ fi
 if grep -F -- "--cycle-arg ''" "$SOFT_SUMMARY" >/dev/null; then
   echo "NO-GO soft path operator command included empty --cycle-arg"
   cat "$SOFT_SUMMARY"
+  exit 1
+fi
+
+echo "[profile-compare-multi-vm-stability-promotion-cycle] NO-GO hard path preserves policy failure"
+HARD_NO_GO_SUMMARY="$TMP_DIR/promotion_cycle_hard_no_go_summary.json"
+HARD_NO_GO_CAPTURE="$TMP_DIR/promotion_cycle_hard_no_go_capture.log"
+HARD_NO_GO_COUNTER="$TMP_DIR/promotion_cycle_hard_no_go_counter.txt"
+set +e
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_STAGE_SCRIPT="$FAKE_CYCLE_SCRIPT" \
+PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CHECK_STAGE_SCRIPT="$FAKE_PROMOTION_SCRIPT" \
+FAKE_PROFILE_COMPARE_PROMOTION_CAPTURE_FILE="$HARD_NO_GO_CAPTURE" \
+FAKE_PROFILE_COMPARE_PROMOTION_COUNTER_FILE="$HARD_NO_GO_COUNTER" \
+FAKE_PROFILE_COMPARE_PROMOTION_CYCLE_SCENARIOS="pass,pass,pass" \
+FAKE_PROFILE_COMPARE_PROMOTION_CHECK_SCENARIO="no_go" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$TMP_DIR/reports_hard_no_go" \
+  --cycles 3 \
+  --sleep-between-sec 0 \
+  --fail-on-no-go 1 \
+  --summary-json "$HARD_NO_GO_SUMMARY" \
+  --print-summary-json 0 >/tmp/integration_profile_compare_multi_vm_stability_promotion_cycle_hard_no_go.log 2>&1
+hard_no_go_rc=$?
+set -e
+
+if [[ "$hard_no_go_rc" -eq 0 ]]; then
+  echo "expected NO-GO hard path rc!=0"
+  cat /tmp/integration_profile_compare_multi_vm_stability_promotion_cycle_hard_no_go.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc != 0
+  and .decision == "NO-GO"
+  and .failure_stage == "promotion_check"
+  and .failure_reason_code == "simulated_no_go"
+  and .failure_category == "policy"
+  and .failure_reason == "simulated NO-GO for integration coverage"
+  and .promotion.contract_ok == true
+  and .promotion.decision == "NO-GO"
+  and .promotion.status == "fail"
+  and .promotion.rc == 1
+  and .stages.promotion_check.rc == 1
+  and .enforcement.no_go_enforced == true
+  and .outcome.should_promote == false
+  and .outcome.action == "hold_promotion_blocked"
+  and ((.next_operator_action // "") | contains("investigate NO-GO signal"))
+' "$HARD_NO_GO_SUMMARY" >/dev/null 2>&1; then
+  echo "NO-GO hard summary mismatch"
+  cat "$HARD_NO_GO_SUMMARY"
   exit 1
 fi
 

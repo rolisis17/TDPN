@@ -227,6 +227,7 @@ validate_manual_validation_summary_payload() {
 matrix_script="${THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MATRIX_SCRIPT:-$ROOT_DIR/scripts/three_machine_docker_profile_matrix.sh}"
 manual_validation_record_script="${THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MANUAL_VALIDATION_RECORD_SCRIPT:-$ROOT_DIR/scripts/manual_validation_record.sh}"
 manual_validation_report_script="${THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MANUAL_VALIDATION_REPORT_SCRIPT:-$ROOT_DIR/scripts/manual_validation_report.sh}"
+record_check_id="three_machine_docker_profile_matrix"
 if [[ ! -x "$matrix_script" ]]; then
   echo "missing executable matrix script: $matrix_script"
   exit 2
@@ -362,6 +363,8 @@ notes=""
 matrix_json='{}'
 matrix_log_path=""
 matrix_summary_valid="0"
+matrix_summary_contract_valid="0"
+matrix_summary_contract_reason=""
 matrix_summary_status=""
 matrix_dry_run_mode="0"
 matrix_ran="0"
@@ -389,6 +392,7 @@ write_summary_json() {
   jq -n \
     --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg status "$record_status" \
+    --arg record_check_id "$record_check_id" \
     --arg matrix_status "$matrix_status" \
     --arg notes "$notes" \
     --arg command "$(print_cmd "$0" "${original_args[@]}")" \
@@ -404,6 +408,8 @@ write_summary_json() {
     --arg matrix_summary_rc "$matrix_summary_rc" \
     --arg matrix_summary_status "$matrix_summary_status" \
     --argjson matrix_summary_valid "$matrix_summary_valid" \
+    --argjson matrix_summary_contract_valid "$matrix_summary_contract_valid" \
+    --arg matrix_summary_contract_reason "$matrix_summary_contract_reason" \
     --argjson matrix_dry_run_mode "$matrix_dry_run_mode" \
     --argjson matrix_ran "$matrix_ran" \
     --argjson matrix_reduction_available "$matrix_reduction_available" \
@@ -458,6 +464,14 @@ write_summary_json() {
           ),
           summary_status: $matrix_summary_status,
           summary_valid: ($matrix_summary_valid == 1),
+          summary_contract_valid: ($matrix_summary_contract_valid == 1),
+          summary_contract_reason: (
+            if $matrix_summary_contract_reason == "" then
+              null
+            else
+              $matrix_summary_contract_reason
+            end
+          ),
           dry_run: ($matrix_dry_run_mode == 1),
           summary_json: $matrix_summary_json,
           log: $matrix_log,
@@ -494,7 +508,7 @@ write_summary_json() {
           ran: ($receipt_ran == 1),
           status: $receipt_status,
           rc: $receipt_rc,
-          check_id: "three_machine_docker_readiness",
+          check_id: $record_check_id,
           log: $manual_validation_record_log,
           written_receipt: ($receipt_written == 1),
           receipt_json: $receipt_json_path
@@ -527,9 +541,9 @@ refresh_manual_validation_report() {
 
   manual_validation_report_ran="1"
   rm -f "$manual_validation_report_summary_json" "$manual_validation_report_md" 2>/dev/null || true
-  report_cmd=(
-    "$manual_validation_report_script"
-    --overlay-check-id "three_machine_docker_readiness"
+	  report_cmd=(
+	    "$manual_validation_report_script"
+	    --overlay-check-id "$record_check_id"
     --overlay-status "$matrix_status"
     --overlay-notes "$notes"
     --overlay-command "$(print_cmd "$0" "${original_args[@]}")"
@@ -599,9 +613,9 @@ record_receipt() {
 
   receipt_ran="1"
   stage="manual-validation-record"
-  record_cmd=(
-    "$manual_validation_record_script"
-    --check-id "three_machine_docker_readiness"
+	  record_cmd=(
+	    "$manual_validation_record_script"
+	    --check-id "$record_check_id"
     --status "$record_status"
     --notes "$notes"
     --command "$(print_cmd "$0" "${original_args[@]}")"
@@ -678,6 +692,7 @@ matrix_cmd=(
 matrix_output=""
 if [[ "$run_matrix" == "1" ]]; then
   matrix_ran="1"
+  rm -f "$matrix_summary_json" 2>/dev/null || true
   if run_and_capture matrix_output "${matrix_cmd[@]}"; then
     matrix_command_rc=0
   else
@@ -712,8 +727,29 @@ if [[ -f "$matrix_summary_json" ]] && jq -e . "$matrix_summary_json" >/dev/null 
   if [[ "$matrix_summary_rc" =~ ^[0-9]+$ ]]; then
     matrix_rc="$matrix_summary_rc"
   fi
+  matrix_summary_schema_id="$(jq -r '.schema.id // ""' <<<"$matrix_json" 2>/dev/null || true)"
+  matrix_summary_schema_major="$(jq -r '.schema.major // ""' <<<"$matrix_json" 2>/dev/null || true)"
+  matrix_profiles_total="$(jq -r 'if (.summary.profiles_total | type) == "number" then .summary.profiles_total else "" end' <<<"$matrix_json" 2>/dev/null || true)"
+  matrix_profiles_pass="$(jq -r 'if (.summary.profiles_pass | type) == "number" then .summary.profiles_pass else "" end' <<<"$matrix_json" 2>/dev/null || true)"
+  matrix_profiles_fail="$(jq -r 'if (.summary.profiles_fail | type) == "number" then .summary.profiles_fail else "" end' <<<"$matrix_json" 2>/dev/null || true)"
+  if [[ "$matrix_summary_schema_id" != "three_machine_docker_profile_matrix_summary" ]]; then
+    matrix_summary_contract_reason="matrix summary schema.id is not three_machine_docker_profile_matrix_summary"
+  elif [[ ! "$matrix_summary_schema_major" =~ ^[0-9]+$ || "$matrix_summary_schema_major" -ne 1 ]]; then
+    matrix_summary_contract_reason="matrix summary schema.major is not 1"
+  elif [[ ! "$matrix_profiles_total" =~ ^[0-9]+$ || ! "$matrix_profiles_pass" =~ ^[0-9]+$ || ! "$matrix_profiles_fail" =~ ^[0-9]+$ ]]; then
+    matrix_summary_contract_reason="matrix summary profile counters are missing or non-numeric"
+  elif (( matrix_profiles_pass + matrix_profiles_fail != matrix_profiles_total )); then
+    matrix_summary_contract_reason="matrix summary profile counters do not add up"
+  elif [[ -z "$matrix_log_path" || ! -f "$matrix_log_path" ]]; then
+    matrix_summary_contract_reason="matrix summary log artifact is missing"
+  else
+    matrix_summary_contract_valid="1"
+    matrix_summary_contract_reason=""
+  fi
 else
   matrix_summary_valid="0"
+  matrix_summary_contract_valid="0"
+  matrix_summary_contract_reason="matrix summary JSON is missing or invalid"
   matrix_json='{}'
   matrix_summary_status="missing"
   matrix_reduction_available="0"
@@ -721,7 +757,7 @@ else
   matrix_rerun_failed_profiles_command=""
 fi
 
-if [[ "$matrix_summary_valid" == "1" ]]; then
+if [[ "$matrix_summary_valid" == "1" && "$matrix_summary_contract_valid" == "1" ]]; then
   if [[ "$matrix_command_rc" -eq 0 && "$matrix_summary_status" == "pass" ]]; then
     matrix_status="pass"
   else
@@ -735,6 +771,12 @@ if [[ "$matrix_summary_valid" == "1" ]]; then
       notes="Docker 3-machine profile matrix rehearsal failed"
     fi
   fi
+elif [[ "$matrix_summary_valid" == "1" ]]; then
+  matrix_status="fail"
+  if [[ "$matrix_rc" -eq 0 ]]; then
+    matrix_rc=1
+  fi
+  notes="three-machine-docker-profile-matrix emitted a JSON summary that failed the record contract: $matrix_summary_contract_reason"
 else
   if [[ "$run_matrix" == "0" ]]; then
     matrix_status="fail"

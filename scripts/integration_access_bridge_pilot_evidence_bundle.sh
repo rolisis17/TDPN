@@ -214,6 +214,17 @@ go run ./cmd/gpmrecover bridge-service-deploy-pack \
   --access-code-sha256 "$code_hash" >/dev/null
 printf '%s\n' 'should-not-copy-private-key' >"$DEPLOY_PACK/recovery.key"
 printf '%s\n' "$code_value" >"$DEPLOY_PACK/bridge-code.txt"
+cat >"$DEPLOY_PACK/operator.pem" <<'EOF_OPERATOR_PEM'
+-----BEGIN PRIVATE KEY-----
+not-a-real-key-but-private-key-material-for-filter-test
+-----END PRIVATE KEY-----
+EOF_OPERATOR_PEM
+mkdir -p "$DEPLOY_PACK/keys"
+cat >"$DEPLOY_PACK/keys/id_ed25519" <<'EOF_OPENSSH_KEY'
+-----BEGIN OPENSSH PRIVATE KEY-----
+not-a-real-openssh-key-but-private-key-material-for-filter-test
+-----END OPENSSH PRIVATE KEY-----
+EOF_OPENSSH_KEY
 
 STALE_BUNDLE_DIR="$TMP_DIR/stale-pilot-evidence-bundle"
 mkdir -p "$STALE_BUNDLE_DIR"
@@ -256,6 +267,7 @@ bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
   --config-json "$DEMO_PATH_CONFIG" \
   --deploy-pack-dir "$DEPLOY_PACK" \
   --service-name gpm-access-bridge-pilot \
+  --expect-registry-id registry-pilot \
   --provenance-sign 1 \
   --provenance-private-key-file "$PROVENANCE_PRIVATE_KEY" \
   --provenance-org-id pilot-org \
@@ -280,6 +292,9 @@ bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
   --config-json "$SERVICE_CONFIG" \
   --deploy-pack-dir "$DEPLOY_PACK" \
   --service-name gpm-access-bridge-pilot \
+  --expect-helper-id helper-pilot \
+  --expect-org-id pilot-org \
+  --expect-registry-id registry-pilot \
   --provenance-sign 1 \
   --provenance-private-key-file "$PROVENANCE_PRIVATE_KEY" \
   --provenance-org-id freenews-demo \
@@ -319,6 +334,60 @@ if [[ "$demo_helper_config_bundle_rc" -eq 0 ]] ||
   ! grep -Fq -- 'expected helper identity must not use a generated demo/example identity for real helper HTTPS pilot handoff' "$TMP_DIR/demo-helper-config-pilot-evidence-bundle.log"; then
   echo "access bridge pilot evidence bundle integration failed: config-inferred demo helper id was not rejected for real helper HTTPS pilot handoff"
   cat "$TMP_DIR/demo-helper-config-pilot-evidence-bundle.log"
+  exit 1
+fi
+
+MISSING_HELPER_CONFIG="$TMP_DIR/missing-helper-config.json"
+jq 'del(.helper_id)' "$SERVICE_CONFIG" >"$MISSING_HELPER_CONFIG"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url https://recovery-helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+	  --config-json "$MISSING_HELPER_CONFIG" \
+	  --deploy-pack-dir "$DEPLOY_PACK" \
+	  --service-name gpm-access-bridge-pilot \
+	  --expect-registry-id registry-pilot \
+	  --provenance-sign 1 \
+  --provenance-private-key-file "$PROVENANCE_PRIVATE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --provenance-key-id "$PROVENANCE_KEY_ID" \
+  --provenance-out "$TMP_DIR/missing-helper-config-pilot-evidence.provenance.json" \
+  --print-summary-json 0 >"$TMP_DIR/missing-helper-config-pilot-evidence-bundle.log" 2>&1
+missing_helper_config_bundle_rc=$?
+set -e
+if [[ "$missing_helper_config_bundle_rc" -eq 0 ]] ||
+  ! grep -Fq -- 'real helper HTTPS pilot handoff requires expected helper, organization, and registry identities' "$TMP_DIR/missing-helper-config-pilot-evidence-bundle.log"; then
+  echo "access bridge pilot evidence bundle integration failed: missing helper id was not rejected for real helper HTTPS pilot handoff"
+  cat "$TMP_DIR/missing-helper-config-pilot-evidence-bundle.log"
+  exit 1
+fi
+
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url https://recovery-helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+	  --config-json "$SERVICE_CONFIG" \
+	  --deploy-pack-dir "$DEPLOY_PACK" \
+	  --service-name gpm-access-bridge-pilot \
+	  --expect-helper-id helper-pilot \
+	  --expect-org-id pilot-org \
+	  --expect-registry-id registry-pilot \
+	  --provenance-sign 1 \
+  --provenance-private-key-file "$PROVENANCE_PRIVATE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --provenance-key-id "$PROVENANCE_KEY_ID" \
+  --provenance-out "$TMP_DIR/deploy-pack-mode-pilot-evidence.provenance.json" \
+  --print-summary-json 0 >"$TMP_DIR/deploy-pack-mode-pilot-evidence-bundle.log" 2>&1
+deploy_pack_mode_bundle_rc=$?
+set -e
+if [[ "$deploy_pack_mode_bundle_rc" -eq 0 ]] ||
+  ! grep -Fq -- 'real helper HTTPS pilot handoff requires --host-install-evidence-mode installed-host' "$TMP_DIR/deploy-pack-mode-pilot-evidence-bundle.log"; then
+  echo "access bridge pilot evidence bundle integration failed: deploy-pack host evidence was not rejected for real helper HTTPS pilot handoff"
+  cat "$TMP_DIR/deploy-pack-mode-pilot-evidence-bundle.log"
   exit 1
 fi
 
@@ -625,13 +694,20 @@ if find "$EVIDENCE_BUNDLE" -type f -name 'recovery.key' -print -quit | grep -q .
   echo "access bridge pilot evidence bundle integration failed: recovery private key copied into evidence bundle"
   exit 1
 fi
-if tar -tzf "${EVIDENCE_BUNDLE}.tar.gz" | grep -Eq '(^|/)(bridge-code\.txt|recovery\.key)$'; then
+if find "$EVIDENCE_BUNDLE" -type f \( -name 'operator.pem' -o -name 'id_ed25519' \) -print -quit | grep -q .; then
+  echo "access bridge pilot evidence bundle integration failed: private key material copied into evidence bundle"
+  find "$EVIDENCE_BUNDLE" -type f \( -name 'operator.pem' -o -name 'id_ed25519' \) -print
+  exit 1
+fi
+if tar -tzf "${EVIDENCE_BUNDLE}.tar.gz" | grep -Eq '(^|/)(bridge-code\.txt|recovery\.key|operator\.pem|id_ed25519)$'; then
   echo "access bridge pilot evidence bundle integration failed: secret file copied into evidence tar"
   tar -tzf "${EVIDENCE_BUNDLE}.tar.gz"
   exit 1
 fi
 if ! grep -Fxq 'recovery.key' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt" ||
-  ! grep -Fxq 'bridge-code.txt' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt"; then
+  ! grep -Fxq 'bridge-code.txt' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt" ||
+  ! grep -Fxq 'operator.pem' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt" ||
+  ! grep -Fxq 'keys/id_ed25519' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt"; then
   echo "access bridge pilot evidence bundle integration failed: skipped secret list mismatch"
   cat "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt"
   exit 1

@@ -518,6 +518,10 @@ if { [[ -n "$client_cert" ]] && [[ -z "$client_key" ]]; } || { [[ -z "$client_ce
   echo "access bridge deployment evidence failed: --client-cert and --client-key must be supplied together" >&2
   exit 2
 fi
+if [[ -n "$base_url" && "$require_mtls" == "1" && ( -z "$client_cert" || -z "$client_key" ) ]]; then
+  echo "access bridge deployment evidence failed: --require-mtls 1 with --base-url requires --client-cert and --client-key" >&2
+  exit 2
+fi
 
 tmp_dir="$(mktemp -d)"
 cleanup() {

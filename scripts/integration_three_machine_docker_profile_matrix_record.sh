@@ -102,6 +102,11 @@ if [[ -n "$summary_json" && "$emit_summary" == "1" ]]; then
   cat >"$summary_json" <<EOF_MATRIX_JSON
 {
   "version": 1,
+  "schema": {
+    "id": "three_machine_docker_profile_matrix_summary",
+    "major": 1,
+    "minor": 0
+  },
   "status": "$status",
   "rc": $rc,
   "notes": "$notes",
@@ -222,7 +227,7 @@ if ! grep -Eq '^three-machine-docker-profile-matrix( |$)' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
-if ! grep -Eq '^manual-validation-record --check-id three_machine_docker_readiness --status pass ' "$CAPTURE"; then
+if ! grep -Eq '^manual-validation-record --check-id three_machine_docker_profile_matrix --status pass ' "$CAPTURE"; then
   echo "expected manual-validation-record pass call missing"
   cat "$CAPTURE"
   exit 1
@@ -252,7 +257,7 @@ if ! jq -e '
   and .stages.matrix.reduction.rerun_failed_profiles_command == null
   and .stages.manual_validation_record.ran == true
   and .stages.manual_validation_record.status == "ok"
-  and .stages.manual_validation_record.check_id == "three_machine_docker_readiness"
+  and .stages.manual_validation_record.check_id == "three_machine_docker_profile_matrix"
   and .stages.manual_validation_record.written_receipt == true
   and .stages.manual_validation_report.status == "ok"
   and .stages.manual_validation_report.readiness_status == "NOT_READY"
@@ -341,7 +346,7 @@ if ! grep -q 'three-machine-docker-profile-matrix-record: status=fail' "$TMP_DIR
   cat "$TMP_DIR/integration_three_machine_docker_profile_matrix_record_report_fail.log"
   exit 1
 fi
-if ! grep -Eq '^manual-validation-record --check-id three_machine_docker_readiness --status fail ' "$CAPTURE"; then
+if ! grep -Eq '^manual-validation-record --check-id three_machine_docker_profile_matrix --status fail ' "$CAPTURE"; then
   echo "expected manual-validation-record fail call when manual-validation-report gate failed"
   cat "$CAPTURE"
   exit 1
@@ -401,6 +406,11 @@ mkdir -p "$TMP_DIR/reuse"
 cat >"$TMP_DIR/reuse/matrix_summary_reuse.json" <<EOF_REUSE_SUMMARY
 {
   "version": 1,
+  "schema": {
+    "id": "three_machine_docker_profile_matrix_summary",
+    "major": 1,
+    "minor": 0
+  },
   "status": "pass",
   "rc": 0,
   "notes": "Reused matrix summary artifact",
@@ -447,7 +457,7 @@ if grep -Eq '^three-machine-docker-profile-matrix( |$)' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
-if ! grep -Eq '^manual-validation-record --check-id three_machine_docker_readiness --status pass ' "$CAPTURE"; then
+if ! grep -Eq '^manual-validation-record --check-id three_machine_docker_profile_matrix --status pass ' "$CAPTURE"; then
   echo "expected manual-validation-record pass call missing in run-matrix=0 reuse path"
   cat "$CAPTURE"
   exit 1
@@ -469,9 +479,10 @@ if ! jq -e '
   and .stages.matrix.ran == false
   and .stages.matrix.status == "pass"
   and .stages.matrix.rc == 0
-  and .stages.matrix.command_rc == 0
-  and .stages.matrix.summary_valid == true
-  and .stages.matrix.summary_status == "pass"
+	  and .stages.matrix.command_rc == 0
+	  and .stages.matrix.summary_valid == true
+	  and .stages.matrix.summary_contract_valid == true
+	  and .stages.matrix.summary_status == "pass"
   and .stages.matrix.summary.summary.profiles_total == 3
   and .stages.matrix.reduction.available == false
   and .stages.matrix.reduction.failed_profiles == []
@@ -482,9 +493,53 @@ if ! jq -e '
   and .stages.manual_validation_record.status == "ok"
   and .stages.manual_validation_report.status == "ok"
   and .stages.manual_validation_report.readiness_status == "NOT_READY"
-' "$reuse_summary_json_path" >/dev/null; then
-  echo "run-matrix=0 reuse summary JSON missing expected contract fields"
-  cat "$reuse_summary_json_path"
+	' "$reuse_summary_json_path" >/dev/null; then
+	  echo "run-matrix=0 reuse summary JSON missing expected contract fields"
+	  cat "$reuse_summary_json_path"
+	  exit 1
+	fi
+
+echo "[three-machine-docker-profile-matrix-record] run-matrix=0 rejects placeholder matrix summary"
+: >"$CAPTURE"
+mkdir -p "$TMP_DIR/reuse_placeholder"
+cat >"$TMP_DIR/reuse_placeholder/matrix_summary_placeholder.json" <<EOF_REUSE_PLACEHOLDER_SUMMARY
+{
+  "version": 1,
+  "status": "pass",
+  "rc": 0,
+  "notes": "placeholder pass without matrix schema"
+}
+EOF_REUSE_PLACEHOLDER_SUMMARY
+if FAKE_HELPER_CAPTURE_FILE="$CAPTURE" \
+  FAKE_MANUAL_VALIDATION_RECEIPT_JSON="$TMP_DIR/manual_validation_receipt_reuse_placeholder.json" \
+  THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MATRIX_SCRIPT="$FAKE_MATRIX" \
+  THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MANUAL_VALIDATION_RECORD_SCRIPT="$FAKE_MANUAL_RECORD" \
+  THREE_MACHINE_DOCKER_PROFILE_MATRIX_RECORD_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL_REPORT" \
+  ./scripts/three_machine_docker_profile_matrix_record.sh \
+    --run-matrix 0 \
+    --summary-json "$TMP_DIR/summary_reuse_placeholder.json" \
+    --matrix-summary-json "$TMP_DIR/reuse_placeholder/matrix_summary_placeholder.json" \
+    --manual-validation-report-summary-json "$TMP_DIR/manual_validation_report_reuse_placeholder.json" \
+    --manual-validation-report-md "$TMP_DIR/manual_validation_report_reuse_placeholder.md" \
+    --record-result 1 \
+    --print-summary-json 1 >"$TMP_DIR/integration_three_machine_docker_profile_matrix_record_reuse_placeholder.log" 2>&1; then
+  echo "expected run-matrix=0 placeholder summary to fail record gate"
+  cat "$TMP_DIR/integration_three_machine_docker_profile_matrix_record_reuse_placeholder.log"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .inputs.run_matrix == false
+  and .stages.matrix.ran == false
+  and .stages.matrix.summary_valid == true
+  and .stages.matrix.summary_contract_valid == false
+  and (.stages.matrix.summary_contract_reason | contains("schema.id"))
+  and (.notes | contains("failed the record contract"))
+  and .stages.manual_validation_record.check_id == "three_machine_docker_profile_matrix"
+' "$TMP_DIR/summary_reuse_placeholder.json" >/dev/null; then
+  echo "run-matrix=0 placeholder summary did not fail closed as expected"
+  cat "$TMP_DIR/summary_reuse_placeholder.json"
   exit 1
 fi
 
@@ -515,7 +570,7 @@ if ! grep -Eq '^three-machine-docker-profile-matrix .*--dry-run 1( |$)' "$CAPTUR
   cat "$CAPTURE"
   exit 1
 fi
-if ! grep -Eq '^manual-validation-record --check-id three_machine_docker_readiness --status pass ' "$CAPTURE"; then
+if ! grep -Eq '^manual-validation-record --check-id three_machine_docker_profile_matrix --status pass ' "$CAPTURE"; then
   echo "expected manual-validation-record pass call missing in dry-run path"
   cat "$CAPTURE"
   exit 1
@@ -548,7 +603,7 @@ if ! jq -e '
   and (.notes | test("dry-run"))
   and .stages.manual_validation_record.ran == true
   and .stages.manual_validation_record.status == "ok"
-  and .stages.manual_validation_record.check_id == "three_machine_docker_readiness"
+  and .stages.manual_validation_record.check_id == "three_machine_docker_profile_matrix"
   and .stages.manual_validation_report.status == "ok"
   and .stages.manual_validation_report.readiness_status == "NOT_READY"
 ' "$dry_run_summary_json_path" >/dev/null; then
@@ -559,6 +614,35 @@ fi
 
 echo "[three-machine-docker-profile-matrix-record] non-dry-run missing summary fails closed"
 : >"$CAPTURE"
+cat >"$TMP_DIR/matrix_summary_missing_summary.json" <<EOF_STALE_MATRIX_SUMMARY
+{
+  "version": 1,
+  "schema": {
+    "id": "three_machine_docker_profile_matrix_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0,
+  "notes": "stale matrix summary that must be removed before current run",
+  "summary": {
+    "profiles_total": 1,
+    "profiles_pass": 1,
+    "profiles_fail": 0
+  },
+  "reduction": {
+    "available": false,
+    "failed_profiles": [],
+    "failed_profiles_count": 0,
+    "failed_profiles_csv": null,
+    "rerun_failed_profiles_command": null
+  },
+  "artifacts": {
+    "matrix_log": "$TMP_DIR/stale_matrix.log"
+  }
+}
+EOF_STALE_MATRIX_SUMMARY
+: >"$TMP_DIR/stale_matrix.log"
 if env \
   FAKE_HELPER_CAPTURE_FILE="$CAPTURE" \
   FAKE_MANUAL_VALIDATION_RECEIPT_JSON="$TMP_DIR/manual_validation_receipt_missing_summary.json" \
@@ -584,7 +668,7 @@ if ! grep -q 'three-machine-docker-profile-matrix-record: status=fail' "$TMP_DIR
   cat "$TMP_DIR/integration_three_machine_docker_profile_matrix_record_missing_summary.log"
   exit 1
 fi
-if ! grep -Eq '^manual-validation-record --check-id three_machine_docker_readiness --status fail ' "$CAPTURE"; then
+if ! grep -Eq '^manual-validation-record --check-id three_machine_docker_profile_matrix --status fail ' "$CAPTURE"; then
   echo "expected manual-validation-record fail call missing in non-dry-run missing-summary path"
   cat "$CAPTURE"
   exit 1
@@ -617,7 +701,7 @@ if ! jq -e '
   and (.notes | test("did not emit a usable JSON summary"))
   and .stages.manual_validation_record.ran == true
   and .stages.manual_validation_record.status == "ok"
-  and .stages.manual_validation_record.check_id == "three_machine_docker_readiness"
+  and .stages.manual_validation_record.check_id == "three_machine_docker_profile_matrix"
   and .stages.manual_validation_report.status == "ok"
   and .stages.manual_validation_report.readiness_status == "NOT_READY"
 ' "$missing_summary_json_path" >/dev/null; then
@@ -661,7 +745,7 @@ if ! grep -Eq '^three-machine-docker-profile-matrix( |$)' "$CAPTURE"; then
   cat "$CAPTURE"
   exit 1
 fi
-if ! grep -Eq '^manual-validation-record --check-id three_machine_docker_readiness --status fail ' "$CAPTURE"; then
+if ! grep -Eq '^manual-validation-record --check-id three_machine_docker_profile_matrix --status fail ' "$CAPTURE"; then
   echo "expected manual-validation-record fail call missing"
   cat "$CAPTURE"
   exit 1
@@ -690,7 +774,7 @@ if ! jq -e '
   and (.stages.matrix.reduction.rerun_failed_profiles_command | contains("--profiles balanced"))
   and .stages.manual_validation_record.ran == true
   and .stages.manual_validation_record.status == "ok"
-  and .stages.manual_validation_record.check_id == "three_machine_docker_readiness"
+  and .stages.manual_validation_record.check_id == "three_machine_docker_profile_matrix"
   and .stages.manual_validation_report.status == "ok"
   and .stages.manual_validation_report.readiness_status == "NOT_READY"
 ' "$fail_summary_json_path" >/dev/null; then

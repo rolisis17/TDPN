@@ -222,6 +222,39 @@ if ! jq -e \
   exit 1
 fi
 
+DIRECT_MTLS_NO_CERT_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_direct_mtls_no_cert_summary.json"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --base-url https://recovery-helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --require-mtls 1 \
+  --expect-helper-id helper-evidence \
+  --expect-org-id evidence-org \
+  --expect-registry-id "$registry_id" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_DIR" \
+  --service-name gpm-access-bridge-evidence \
+  --summary-json "$DIRECT_MTLS_NO_CERT_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/direct-mtls-no-cert.log" 2>&1
+direct_mtls_no_cert_rc=$?
+set -e
+if [[ "$direct_mtls_no_cert_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: direct require-mtls accepted missing client cert/key"
+  cat "$TMP_DIR/direct-mtls-no-cert.log"
+  exit 1
+fi
+if ! grep -Fq -- "--require-mtls 1 with --base-url requires --client-cert and --client-key" "$TMP_DIR/direct-mtls-no-cert.log"; then
+  echo "access bridge deployment evidence integration failed: direct require-mtls missing cert/key error mismatch"
+  cat "$TMP_DIR/direct-mtls-no-cert.log"
+  exit 1
+fi
+if [[ -e "$DIRECT_MTLS_NO_CERT_SUMMARY" ]]; then
+  echo "access bridge deployment evidence integration failed: direct require-mtls preflight wrote a summary unexpectedly"
+  cat "$DIRECT_MTLS_NO_CERT_SUMMARY"
+  exit 1
+fi
+
 MISSING_MTLS_SMOKE="$TMP_DIR/access_bridge_deployment_evidence_missing_mtls_smoke.json"
 MISSING_MTLS_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_missing_mtls_summary.json"
 cp "$SMOKE_SUMMARY" "$MISSING_MTLS_SMOKE"
