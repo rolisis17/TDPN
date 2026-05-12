@@ -87,6 +87,41 @@ if ! grep -qF 'id="client_readiness_guidance"' "$PORTAL_HTML"; then
 fi
 echo "[web-portal] portal readiness UI markers are present"
 
+# Product-lane messaging: the portal is a supporting client workspace. Access
+# Recovery remains the beta starting point, so the first viewport must not drift
+# back into generic "start here / connect VPN" positioning.
+PORTAL_POSITIONING_REQUIRED_MARKERS=(
+  'Client workspace'
+  'Wallet and runtime controls.'
+  'Access Recovery is the beta starting point.'
+  'Start with <a href="./recovery.html">Access Recovery</a>'
+  'Open Access Recovery for beta handoffs, or connect a wallet for client controls.'
+  'Wallet session. Device registration. Connection controls.'
+)
+for marker in "${PORTAL_POSITIONING_REQUIRED_MARKERS[@]}"; do
+  if ! grep -qF "$marker" "$PORTAL_HTML" "$PORTAL_JS"; then
+    echo "web portal contract failed: missing product-lane positioning marker '$marker'"
+    exit 1
+  fi
+done
+PORTAL_POSITIONING_STALE_HTML_MARKERS=(
+  '<p class="eyebrow">Start here</p>'
+  '<h1>Connect your wallet.</h1>'
+  'Wallet. Device. Connect.'
+  '<p class="eyebrow">VPN</p>'
+)
+for marker in "${PORTAL_POSITIONING_STALE_HTML_MARKERS[@]}"; do
+  if grep -qF "$marker" "$PORTAL_HTML"; then
+    echo "web portal contract failed: stale primary portal positioning marker '$marker'"
+    exit 1
+  fi
+done
+if ! grep -qF '`portal.html` must present itself as the client workspace' "$README_FILE"; then
+  echo "web portal contract failed: README must document portal messaging contract"
+  exit 1
+fi
+echo "[web-portal] portal product-lane positioning markers are present"
+
 # Bootstrap trust panel markers in portal scaffold.
 BOOTSTRAP_TRUST_UI_MARKERS=(
   'id="bootstrap_trust_status"'

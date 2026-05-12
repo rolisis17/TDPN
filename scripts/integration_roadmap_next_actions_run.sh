@@ -649,6 +649,15 @@ JSON
 }
 JSON
     ;;
+  access_recovery_service_smoke_helper_id_placeholder)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"access_bridge_service_smoke","label":"Access bridge service smoke","command":"bash \"$PASS1\" --base-url https://helper.gpm-pilot.net --path-id helper-web --code-file /tmp/bridge-code.txt --expect-helper-id HELPER_ID --expect-org-id pilot-org --summary-json /tmp/access_bridge_service_smoke_summary.json","reason":"test-helper-id-placeholder"}
+  ]
+}
+JSON
+    ;;
   access_recovery_installed_host_operator_placeholders)
     cat >"$summary_json" <<JSON
 {
@@ -1816,6 +1825,43 @@ if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
 ' "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS" >/dev/null; then
   echo "Access Recovery unresolved operator placeholder precondition summary mismatch"
   cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery helper-id placeholders fail closed"
+SUMMARY_ACCESS_RECOVERY_HELPER_ID_PLACEHOLDER="$TMP_DIR/summary_access_recovery_helper_id_placeholder.json"
+REPORTS_ACCESS_RECOVERY_HELPER_ID_PLACEHOLDER="$TMP_DIR/reports_access_recovery_helper_id_placeholder"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_service_smoke_helper_id_placeholder \
+PASS1="$PASS1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_HELPER_ID_PLACEHOLDER" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_HELPER_ID_PLACEHOLDER" \
+  --include-id access_bridge_service_smoke \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_helper_id_placeholder.log" 2>&1
+access_recovery_helper_id_placeholder_rc=$?
+set -e
+if [[ "$access_recovery_helper_id_placeholder_rc" != "2" ]]; then
+  echo "expected unresolved Access Recovery HELPER_ID placeholder hard-fail rc=2, got rc=$access_recovery_helper_id_placeholder_rc"
+  cat "$TMP_DIR/access_recovery_helper_id_placeholder.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_HELPER_ID_PLACEHOLDER" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_HELPER_ID_PLACEHOLDER"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .actions[0].id == "access_bridge_service_smoke"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
+  and (.actions[0].notes | contains("HELPER_ID"))
+  and (.actions[0].command | contains("--expect-helper-id HELPER_ID"))
+  and (.actions[0].next_operator_action | contains("--include-id access_bridge_service_smoke"))
+' "$SUMMARY_ACCESS_RECOVERY_HELPER_ID_PLACEHOLDER" >/dev/null; then
+  echo "Access Recovery HELPER_ID placeholder precondition summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_HELPER_ID_PLACEHOLDER"
   exit 1
 fi
 

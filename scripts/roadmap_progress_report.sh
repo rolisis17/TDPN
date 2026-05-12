@@ -13185,6 +13185,12 @@ next_actions_candidate_json="$(
       command: "./scripts/easy_node.sh roadmap-live-evidence-archive-run --reports-dir .easy-node-logs --summary-json .easy-node-logs/roadmap_live_evidence_archive_run_summary.json --print-summary-json 1",
       reason: "archive current live evidence artifacts before rerunning cycles"
     } + action_evidence_metadata(pending_live_evidence_families_after_bundle; false; true; ["archive"]) else empty end),
+    (if ((.summary.docker_rehearsal_gate.status // "pending") != "pass" and (.summary.docker_rehearsal_gate.status // "pending") != "skip" and ((.summary.docker_rehearsal_gate.next_command // .summary.docker_rehearsal_gate.command // "") != "")) then {
+      id: "three_machine_docker_readiness",
+      "label": "One-host docker 3-machine rehearsal",
+      command: (.summary.docker_rehearsal_gate.next_command // .summary.docker_rehearsal_gate.command // ""),
+      reason: "one-host confidence gate"
+    } + action_evidence_metadata(["three-machine-docker"]; false; true; ["docker-readiness"]) else empty end),
     (if ($three_machine_real_host_validation_pack_signoff_pending == true and $three_machine_real_host_validation_pack_helper_available == true) then {
       id: "three_machine_real_host_validation_pack",
       "label": "Three-machine real-host validation pack",
@@ -13238,12 +13244,6 @@ next_actions_candidate_json="$(
       "label": "Blockchain missing-metrics prefill",
       command: $blockchain_mainnet_activation_missing_metrics_action_prefill_command,
       reason: (if ($blockchain_mainnet_activation_missing_metrics_action_reason // "") != "" then $blockchain_mainnet_activation_missing_metrics_action_reason else "mainnet activation metrics evidence is missing/invalid; prefill the operator input" end)
-    } else empty end),
-    (if ((.summary.docker_rehearsal_gate.status // "pending") != "pass" and (.summary.docker_rehearsal_gate.status // "pending") != "skip" and ((.summary.docker_rehearsal_gate.next_command // .summary.docker_rehearsal_gate.command // "") != "")) then {
-      id: "three_machine_docker_readiness",
-      "label": "One-host docker 3-machine rehearsal",
-      command: (.summary.docker_rehearsal_gate.next_command // .summary.docker_rehearsal_gate.command // ""),
-      reason: "one-host confidence gate"
     } else empty end),
     (if ((.summary.real_wg_privileged_gate.status // "pending") != "pass" and (.summary.real_wg_privileged_gate.status // "pending") != "skip" and ((.summary.real_wg_privileged_gate.next_command // .summary.real_wg_privileged_gate.command // "") != "")) then {
       id: "real_wg_privileged_matrix",

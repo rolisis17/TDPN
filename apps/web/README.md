@@ -12,6 +12,12 @@ This folder provides the first productized public web surface for **Global Priva
 - Client Portal: supporting runtime workspace. Wallet, device, connection, and contribution controls are infrastructure reuse, not the product wedge.
 - Admin Console: separate operator/governance surface, not shipped in this public web folder.
 
+## Portal Messaging Contract
+
+- `portal.html` must present itself as the client workspace, not as the public beta starting point.
+- The first viewport should point users back to `recovery.html` for Access Recovery beta handoffs, signed packs, bridge invites, and browser-local verification.
+- Wallet, device registration, connection, contribution, and reward controls are supporting runtime surfaces; avoid hero copy such as `Start here`, `Connect your wallet`, or `Wallet. Device. Connect.` that makes the portal look like the primary product wedge.
+
 ## Local Preview
 
 From repo root:

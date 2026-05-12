@@ -31,9 +31,16 @@
     <main class="wrap portal-shell portal-experience">
       <section class="portal-hero card">
         <div class="portal-hero__copy">
-          <p class="eyebrow">Start here</p>
-          <h1>Connect your wallet.</h1>
-          <p>Choose Keplr or Leap. GPM handles the account, session, and safety checks.</p>
+          <p class="eyebrow">Client workspace</p>
+          <h1>Wallet and runtime controls.</h1>
+          <p>
+            Access Recovery is the beta starting point. Use this portal after sign-in to manage wallet sessions,
+            device registration, and connection controls.
+          </p>
+          <p class="helper-copy">
+            Start with <a href="./recovery.html">Access Recovery</a> for signed recovery packs, bridge invites,
+            and browser-local verification.
+          </p>
         </div>
 
         <div class="portal-wallet-panel" aria-label="Wallet sign in">
@@ -64,16 +71,16 @@
             <div class="status-banner__label">Portal status</div>
             <div id="status_line" class="status">
               <strong id="status_title">Ready</strong>
-              <span id="status_detail">Connect a wallet to begin.</span>
+              <span id="status_detail">Open Access Recovery for beta handoffs, or connect a wallet for client controls.</span>
             </div>
           </article>
           <article id="onboarding_state_banner" class="status-banner" data-kind="warn" role="status" aria-live="polite">
             <div class="status-banner__label">Next step</div>
             <div id="onboarding_state_line" class="status warn">
               <strong id="onboarding_state_title">Signed out</strong>
-              <span id="onboarding_state_detail">Connect your wallet to begin.</span>
+              <span id="onboarding_state_detail">Connect your wallet when you need the client workspace.</span>
             </div>
-            <p id="onboarding_next_action" class="helper-copy">Next: Connect Wallet.</p>
+            <p id="onboarding_next_action" class="helper-copy">Next: Open Access Recovery, or connect wallet for portal controls.</p>
           </article>
           <article id="session_freshness_banner" class="status-banner" data-kind="warn" role="status" aria-live="polite" data-support-only hidden>
             <div class="status-banner__label">Session</div>
@@ -145,10 +152,10 @@
       <section class="card portal-flow-card">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Your path</p>
-            <h2>Three calm steps.</h2>
+            <p class="eyebrow">Workspace path</p>
+            <h2>Three support steps.</h2>
           </div>
-          <p class="section-lead">Wallet. Device. Connect.</p>
+          <p class="section-lead">Wallet session. Device registration. Connection controls.</p>
         </div>
         <div class="steps-grid portal-steps">
           <article id="onboarding_step_signin" class="step-card" data-state="active">
@@ -240,10 +247,10 @@
         <section class="card action-card" id="connection_console">
           <div class="section-head">
             <div>
-              <p class="eyebrow">VPN</p>
+              <p class="eyebrow">Runtime</p>
               <h2>Connect</h2>
             </div>
-            <p class="section-lead">Start or stop GPM on this device.</p>
+            <p class="section-lead">Start or stop GPM on this device when the client workspace is needed.</p>
           </div>
           <div id="connection_snapshot" class="status-banner" data-kind="warn" role="status" aria-live="polite">
             <div class="status-banner__label">Connection</div>
@@ -263,8 +270,10 @@
           </div>
           <p id="tab_lock_hint" class="helper-copy locked tab-lock-hint" hidden aria-live="polite"></p>
           <p id="workspace_first_run_hint" class="helper-copy workspace-first-run-hint">Client controls only.</p>
-          <p id="workspace_platform_hint" class="helper-copy workspace-first-run-hint">First run: connect wallet, register, connect.</p>
-          <p id="workspace_next_action_hint" class="helper-copy workspace-first-run-hint">Next: Connect Wallet.</p>
+          <p id="workspace_platform_hint" class="helper-copy workspace-first-run-hint">
+            First run: connect wallet, register this device, then connect.
+          </p>
+          <p id="workspace_next_action_hint" class="helper-copy workspace-first-run-hint">Next: Connect Wallet for portal controls.</p>
           <div id="panel_client" class="tab-panel active" role="tabpanel" aria-labelledby="tab_client">
             <p id="client_lock_hint" class="helper-copy">Register first, then connect.</p>
             <p id="connect_policy_hint" class="helper-copy">GPM chooses safe paths automatically.</p>

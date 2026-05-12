@@ -5048,7 +5048,7 @@ function initializePortal() {
   refreshPolicyPostureBanner();
   refreshLegacyAliasWarningBanner();
   clearPublicContributionState();
-  setStatus("good", "Portal ready", "Connect your wallet to begin.");
+  setStatus("good", "Portal ready", "Open Access Recovery for beta handoffs, or connect a wallet for client controls.");
   void refreshConnectPolicyConfigBestEffort({ quiet: true });
   void refreshBootstrapTrustStatusBestEffort({ quiet: true });
   void restoreSessionStatusBestEffort();

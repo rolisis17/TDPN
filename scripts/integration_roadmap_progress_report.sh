@@ -6120,8 +6120,21 @@ if ! run_roadmap_progress_report \
   exit 1
 fi
 if ! jq -e '
-  ((.next_actions // []) | any(.id == "three_machine_docker_readiness" and .command == "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"))
+  ([.next_actions[]?.id] | index("three_machine_docker_readiness")) as $docker_idx
+  | ([.next_actions[]?.id] | index("three_machine_real_host_validation_pack")) as $pack_idx
+  | ((.next_actions // []) | any(
+    .id == "three_machine_docker_readiness"
+    and .command == "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
+    and .requires_real_hosts == false
+    and .local_pack_only == true
+    and .missing_evidence_family == "three-machine-docker"
+    and .missing_evidence_families == ["three-machine-docker"]
+    and .missing_evidence_action_kind == "docker-readiness"
+    and .missing_evidence_action_kinds == ["docker-readiness"]
+  ))
   and ((.next_actions // []) | any(.id == "real_wg_privileged_matrix" and .command == "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"))
+  and ($docker_idx != null)
+  and ($pack_idx == null or $docker_idx < $pack_idx)
 ' "$TMP_DIR/roadmap_progress_optional_fallback_summary.json" >/dev/null; then
   echo "optional gate command fallback summary JSON missing expected commands"
   cat "$TMP_DIR/roadmap_progress_optional_fallback_summary.json"
