@@ -1693,7 +1693,10 @@ if ! jq -e \
     and .access_recovery_track.evidence_host_policy.installed_host_handoff_evidence == true
     and .access_recovery_track.trusted_verifier_ready == true
     and .access_recovery_track.trusted_pilot_receipt_ready == true
+    and .access_recovery_track.trusted_verifier_receipt_valid == true
+    and .access_recovery_track.trusted_verifier_receipt_valid_is_handoff_ready == false
     and .access_recovery_track.verifier_pilot_handoff_ready == true
+    and .access_recovery_track.preferred_operator_next_action == null
     and .access_recovery_track.evidence_binding.host_public_host_match == true
     and .access_recovery_track.trusted_verifier_binding.host_install_check_summary_sha256_match == true
     and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_installed_host_evidence_present == true
@@ -2050,8 +2053,11 @@ if ! jq -e '
   and .access_recovery_track.trusted_verifier_binding.ok == true
   and .access_recovery_track.trusted_verifier_ready == true
   and .access_recovery_track.trusted_pilot_receipt_ready == true
+  and .access_recovery_track.trusted_verifier_receipt_valid == true
+  and .access_recovery_track.trusted_verifier_receipt_valid_is_handoff_ready == false
   and .access_recovery_track.verifier_pilot_handoff_ready == false
   and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
+  and .access_recovery_track.preferred_operator_next_action.id == "trusted_pilot_evidence_verify"
 ' "$TMP_DIR/roadmap_progress_access_recovery_false_handoff_verifier_summary.json" >/dev/null; then
   echo "Access Recovery false handoff verifier summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_false_handoff_verifier_summary.json"
@@ -2442,6 +2448,8 @@ if ! jq -e '
   and .rc == 1
   and .current_roadmap_track == "access_recovery"
   and .access_recovery_evidence_required == true
+  and .access_recovery_evidence_gate_required == true
+  and .access_recovery_evidence_attention_required == true
   and .access_recovery_pilot_handoff_ready == false
   and .access_recovery_track.status == "local-rehearsal-ready"
   and .access_recovery_track.ready == false
@@ -2641,6 +2649,9 @@ if ! jq -e '
   and .rc == 0
   and .current_roadmap_track == "access_recovery"
   and .access_recovery_evidence_required == false
+  and .access_recovery_evidence_gate_required == false
+  and .access_recovery_evidence_attention_required == true
+  and (.notes | contains("reporting only"))
   and .access_recovery_pilot_handoff_ready == false
   and .access_recovery_track.status == "evidence-missing"
   and .access_recovery_track.ready == false
@@ -2653,12 +2664,16 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_host_install.available == false
   and .access_recovery_track.access_bridge_host_install.status == "missing"
   and .access_recovery_track.recommended_next_action.id == "access_bridge_service_smoke"
-  and ((.access_recovery_track.recommended_next_action.command // "") | test("access-recovery-local-evidence-refresh"))
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("access_bridge_service_smoke.sh"))
+  and .access_recovery_track.preferred_operator_next_action.id == "real_helper_https_evidence"
+  and ((.access_recovery_track.preferred_operator_next_action.command // "") | test("access-recovery-real-helper-evidence-run"))
   and ((.next_actions // []) | any(
     .id == "access_bridge_service_smoke"
     and .missing_evidence_family == "access-recovery"
-    and .missing_evidence_action_kind == "local-evidence"
-    and ((.command // "") | test("access-recovery-local-evidence-refresh"))
+    and .missing_evidence_action_kind == "real-helper-https"
+    and .requires_real_hosts == true
+    and .local_pack_only == false
+    and ((.command // "") | test("access_bridge_service_smoke.sh"))
   ))
   and .artifacts.access_bridge_service_smoke_summary_json == null
   and .artifacts.access_bridge_deployment_evidence_summary_json == null
@@ -2753,7 +2768,7 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_host_install.available == true
   and .access_recovery_track.access_bridge_host_install.status == "pass"
   and .access_recovery_track.recommended_next_action.id == "access_bridge_service_smoke"
-  and ((.access_recovery_track.recommended_next_action.command // "") | test("access-recovery-local-evidence-refresh"))
+  and ((.access_recovery_track.recommended_next_action.command // "") | test("access_bridge_service_smoke.sh"))
   and .artifacts.access_bridge_service_smoke_summary_json == null
   and .artifacts.access_bridge_deployment_evidence_summary_json == "'"$ACCESS_RECOVERY_STALE_DEPLOYMENT_SUMMARY_JSON"'"
   and .artifacts.access_bridge_host_install_summary_json == "'"$ACCESS_RECOVERY_STALE_HOST_SUMMARY_JSON"'"

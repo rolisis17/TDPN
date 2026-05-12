@@ -3150,10 +3150,12 @@ access_recovery_track_json_from_evidence() {
           " --require-mtls 1 --cacert MTLS_CA_FILE --client-cert MTLS_CLIENT_CERT_FILE --client-key MTLS_CLIENT_KEY_FILE"
         else ""
         end;
+      def real_helper_operator_command:
+        "./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --host-install-evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --expect-helper-id HELPER_ID --expect-org-id ORG_ID --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE"
+        + mtls_arg_suffix
+        + " --reports-dir .easy-node-logs/access-recovery-pilot";
       def next_command_for($e):
         if $e == null then null
-        elif ($e == $service_smoke and (($e.status // "") == "missing" or ($e.status // "") == "stale")) then
-          "./scripts/easy_node.sh access-recovery-local-evidence-refresh --write-canonical 1 --refresh-roadmap 1 --print-summary-json 1"
         elif ($e == $service_smoke) then
           "bash ./scripts/access_bridge_service_smoke.sh --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --expect-helper-id HELPER_ID --expect-org-id ORG_ID"
           + mtls_arg_suffix
@@ -3210,6 +3212,8 @@ access_recovery_track_json_from_evidence() {
           trusted_verifier_binding: $verifier_binding,
           trusted_verifier_ready: trusted_pilot_receipt_ready,
           trusted_pilot_receipt_ready: trusted_pilot_receipt_ready,
+          trusted_verifier_receipt_valid: trusted_pilot_receipt_ready,
+          trusted_verifier_receipt_valid_is_handoff_ready: false,
           verifier_pilot_handoff_ready: verifier_pilot_handoff_ready,
           evidence_host_policy: {
             base_url: smoke_base_url,
@@ -3252,11 +3256,7 @@ access_recovery_track_json_from_evidence() {
             elif $track_status == "local-rehearsal-ready" then {
               id: "real_helper_https_evidence",
               reason: "Local Access Recovery rehearsal evidence cannot substitute for real helper HTTPS deployment evidence",
-              command: (
-                "./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --host-install-evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --expect-helper-id HELPER_ID --expect-org-id ORG_ID --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE"
-                + mtls_arg_suffix
-                + " --reports-dir .easy-node-logs/access-recovery-pilot"
-              )
+              command: real_helper_operator_command
             }
             elif $first_attention == null then null
             else {
@@ -3274,6 +3274,20 @@ access_recovery_track_json_from_evidence() {
                 end
               ),
               command: next_command_for($first_attention)
+            }
+            end
+          ),
+          preferred_operator_next_action: (
+            if $track_status == "pilot-evidence-ready" then null
+            elif $track_status == "pilot-handoff-not-ready" then {
+              id: "trusted_pilot_evidence_verify",
+              reason: "Trusted verifier receipt is valid but not handoff-ready; rerun trusted verification after correcting handoff criteria",
+              command: trusted_verifier_command
+            }
+            else {
+              id: "real_helper_https_evidence",
+              reason: "Preferred guarded operator path captures real helper smoke, deployment, installed-host evidence, signed bundle, trusted verifier receipt, and roadmap refresh in one run; recommended_next_action shows the first child evidence gap.",
+              command: real_helper_operator_command
             }
             end
           )
@@ -13022,6 +13036,12 @@ next_actions_candidate_json="$(
   def access_recovery_action_metadata($id):
     if $id == "real_helper_https_evidence" then
       action_evidence_metadata(["access-recovery"]; true; false; ["real-helper-https"])
+    elif $id == "access_bridge_service_smoke" then
+      action_evidence_metadata(["access-recovery"]; true; false; ["real-helper-https"])
+    elif $id == "access_bridge_deployment_evidence" then
+      action_evidence_metadata(["access-recovery"]; true; false; ["real-helper-https"])
+    elif $id == "access_bridge_host_install" then
+      action_evidence_metadata(["access-recovery"]; true; false; ["installed-host-evidence"])
     elif $id == "access_bridge_installed_host_evidence" then
       action_evidence_metadata(["access-recovery"]; true; false; ["installed-host-evidence"])
     elif $id == "trusted_pilot_evidence_verify" then
@@ -13298,7 +13318,7 @@ elif [[ "$access_recovery_track_needs_attention_json" == "true" && "$require_acc
   notes="Access Recovery evidence is required and still needs attention: $access_recovery_track_recommendation Next action: access_recovery_track.recommended_next_action.id=$access_recovery_track_recommended_next_action_id."
 elif [[ "$current_roadmap_track" == "access_recovery" && "$access_recovery_track_needs_attention_json" == "true" ]]; then
   final_status="warn"
-  notes="Access Recovery evidence still needs attention: $access_recovery_track_recommendation Next action: access_recovery_track.recommended_next_action.id=$access_recovery_track_recommended_next_action_id."
+  notes="Access Recovery evidence still needs attention (reporting only; set --require-access-recovery-evidence 1 to fail this gate): $access_recovery_track_recommendation Next action: access_recovery_track.recommended_next_action.id=$access_recovery_track_recommended_next_action_id."
 elif [[ "$readiness_status" != "READY" ]]; then
   final_status="warn"
   notes="VPN production signoff is still pending external real-host gates."
@@ -13960,6 +13980,8 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
     notes: $notes,
     current_roadmap_track: $current_roadmap_track,
     access_recovery_evidence_required: $access_recovery_evidence_required,
+    access_recovery_evidence_gate_required: $access_recovery_evidence_required,
+    access_recovery_evidence_attention_required: ($access_recovery_track.needs_attention == true),
     access_recovery_pilot_handoff_ready: ($access_recovery_track.pilot_handoff_ready == true),
     access_recovery_track: $access_recovery_track,
     vpn_track: {
@@ -14616,7 +14638,11 @@ cat >"$report_tmp" <<EOF_MD
 - Status: $(jq -r '.access_recovery_track.status' "$summary_json")
 - Ready: $(jq -r '.access_recovery_track.ready | tostring' "$summary_json")
 - Pilot handoff ready: $(jq -r '.access_recovery_pilot_handoff_ready | tostring' "$summary_json")
+- Evidence gate required: $(jq -r '.access_recovery_evidence_gate_required | tostring' "$summary_json")
+- Evidence attention required: $(jq -r '.access_recovery_evidence_attention_required | tostring' "$summary_json")
 - Needs attention: $(jq -r '.access_recovery_track.needs_attention | tostring' "$summary_json")
+- Trusted verifier receipt valid: $(jq -r '.access_recovery_track.trusted_verifier_receipt_valid | tostring' "$summary_json")
+- Trusted verifier pilot handoff ready: $(jq -r '.access_recovery_track.verifier_pilot_handoff_ready | tostring' "$summary_json")
 - Policy: $(jq -r '.access_recovery_track.policy' "$summary_json")
 - Recommendation: $(jq -r '.access_recovery_track.recommendation' "$summary_json")
 - Access bridge service smoke: available=$(jq -r '.access_recovery_track.access_bridge_service_smoke.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_service_smoke.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_service_smoke.source_summary_json // "none"' "$summary_json")
@@ -14626,6 +14652,7 @@ cat >"$report_tmp" <<EOF_MD
 - Access bridge required mTLS evidence: required=$(jq -r '.access_recovery_track.evidence_host_policy.mtls_required | tostring' "$summary_json"), proven=$(jq -r '.access_recovery_track.evidence_host_policy.required_mtls_evidence | tostring' "$summary_json")
 - Access Recovery next action: $(jq -r '.access_recovery_track.recommended_next_action.command // "none"' "$summary_json")
 - Access Recovery next action reason: $(jq -r '.access_recovery_track.recommended_next_action.reason // "none"' "$summary_json")
+- Access Recovery preferred operator action: $(jq -r '.access_recovery_track.preferred_operator_next_action.command // "none"' "$summary_json")
 
 ## VPN Track
 

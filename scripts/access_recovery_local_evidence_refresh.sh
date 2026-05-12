@@ -22,8 +22,8 @@ Usage:
     [--print-summary-json [0|1]]
 
 Purpose:
-  Run a local Access Recovery helper rehearsal and produce canonical evidence
-  summaries for roadmap ingestion:
+  Run a local Access Recovery helper rehearsal and, when --write-canonical 1 is
+  explicitly set, write canonical evidence summaries for roadmap ingestion:
   - access_bridge_service_smoke_summary.json
   - access_bridge_deployment_evidence_summary.json
   - access_bridge_host_install_check_summary.json
@@ -136,7 +136,7 @@ org_name="Local Recovery Demo"
 helper_id="helper-local"
 helper_name="Local Helper"
 service_name="gpm-access-bridge-local"
-write_canonical="1"
+write_canonical="0"
 canonical_dir="$ROOT_DIR/.easy-node-logs"
 refresh_roadmap="0"
 

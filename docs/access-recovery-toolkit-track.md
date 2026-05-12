@@ -212,7 +212,7 @@ Pilot/operator handoff flow (real pilot artifacts only):
 
 Current evidence schema floors are service smoke minor `6`, deployment evidence minor `5`, pilot evidence bundle minor `7`, and verifier receipt minor `4`. Pilot-ready verifier receipts must also show `trusted_pilot_receipt_ready=true`, `pilot_handoff_ready=true`, `pilot_handoff_criteria.bundled_child_evidence_semantic_ok=true`, `pilot_handoff_criteria.evidence_freshness_ok=true`, `pilot_handoff_criteria.installed_host_evidence_present=true`, real-helper HTTPS provenance from a non-demo `trust_store`, `trust_store_sha256_present=true`, `public_key_file_absent=true`, dev trust-store override disabled, and smoke/deployment/host summary SHA-256 bindings. Roadmap reports are consumer/status evidence only; the trusted verifier receipt from `--verification-summary-json` is the pilot handoff authority.
 
-`access-recovery-real-helper-evidence-run --roadmap-refresh 0` is diagnostics/verifier-only. It can inspect the verifier path, but it skips the wrapper `handoff_complete`/status roll-up. The trusted verifier receipt remains the pilot handoff authority; roadmap refresh only updates status evidence.
+`access-recovery-real-helper-evidence-run --roadmap-refresh 0` is diagnostics/verifier-only. It can inspect the verifier path, but it skips the roadmap status roll-up. The trusted verifier receipt remains the pilot handoff authority; roadmap refresh only updates status evidence.
 
 Warning: local integrity-only verifier output is not a pilot/operator handoff
 receipt. Handoff requires the trusted verification command above, signed

@@ -460,7 +460,7 @@ if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'access-recovery-real-he
   echo "easy_node expert help missing real helper evidence run note"
   exit 1
 fi
-if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'Use --roadmap-refresh 0 for diagnostics/verifier-only runs; those stop at verifier_ready, while the wrapper handoff_complete/status roll-up requires roadmap refresh. The trusted verifier receipt remains the handoff authority'; then
+if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'Use --roadmap-refresh 0 for diagnostics/verifier-only runs; those stop at verifier_ready and skip the roadmap status roll-up. The trusted verifier receipt remains the handoff authority'; then
   echo "easy_node expert help missing real helper roadmap-refresh 0 verifier-ready semantics"
   exit 1
 fi
@@ -623,7 +623,7 @@ fi
 jq -e '
   .schema.id == "access_recovery_real_helper_evidence_run_summary"
   and .schema.major == 1
-  and .schema.minor == 5
+  and .schema.minor == 6
   and .status == "skipped"
   and .status != "pass"
   and .rc == 0
@@ -693,7 +693,7 @@ jq -e \
   --arg proxy_config_file "$PROXY_CONFIG_FILE" '
   .schema.id == "access_recovery_real_helper_evidence_run_summary"
   and .schema.major == 1
-  and .schema.minor == 5
+  and .schema.minor == 6
   and .status == "skipped"
   and .status != "pass"
   and .rc == 0
@@ -1365,7 +1365,7 @@ done
 jq -e '
   .schema.id == "access_recovery_real_helper_evidence_run_summary"
   and .schema.major == 1
-  and .schema.minor == 5
+  and .schema.minor == 6
   and .status == "pass"
   and .stage == "complete"
   and .mode.plan_only == false
@@ -1379,8 +1379,11 @@ jq -e '
   and (.artifacts.bundle_deployment_evidence_summary_json | endswith("/bundle/access_bridge_deployment_evidence_summary.json"))
   and (.artifacts.bundle_host_install_check_summary_json | endswith("/bundle/access_bridge_host_install_check_summary.json"))
   and .readiness.verifier_ready == true
+  and .readiness.handoff_authority_ready == true
   and .readiness.roadmap_ready == true
+  and .readiness.roadmap_status_synced == true
   and .readiness.handoff_complete == true
+  and .readiness.status_rollup_complete == true
   and .readiness.trusted_verifier_pilot_handoff_ready == true
   and .readiness.roadmap_access_recovery_pilot_handoff_ready == true
 ' "$TMP_DIR/run-summary.json" >/dev/null
@@ -1693,20 +1696,28 @@ FAKE_ACCESS_RECOVERY_REAL_HELPER_ROADMAP_READY=false \
   --trust-store "$TRUST_STORE" \
   --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/roadmap-not-ready-summary.json" \
-  --print-summary-json 0 >/dev/null 2>&1
-roadmap_not_ready_rc=$?
-set -e
-if [[ "$roadmap_not_ready_rc" -eq 0 ]]; then
-  echo "expected roadmap access_recovery_pilot_handoff_ready=false to fail"
-  cat "$TMP_DIR/roadmap-not-ready-summary.json"
-  exit 1
-fi
+  --print-summary-json 0 >/dev/null
 if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "4" ]]; then
   echo "expected host-check, bundle, verifier, and roadmap when roadmap is not ready"
   cat "$CAPTURE"
   exit 1
 fi
-jq -e '.status == "fail" and .stage == "roadmap" and .readiness.trusted_verifier_pilot_handoff_ready == true and .readiness.roadmap_access_recovery_pilot_handoff_ready == false' "$TMP_DIR/roadmap-not-ready-summary.json" >/dev/null
+if ! jq -e '
+  .status == "pass"
+  and .stage == "status_refresh_mismatch"
+  and .mode.evidence_generated == true
+  and .mode.evidence_status == "collected_status_refresh_mismatch"
+  and .readiness.handoff_authority_ready == true
+  and .readiness.handoff_complete == true
+  and .readiness.status_rollup_complete == false
+  and .readiness.roadmap_status_synced == false
+  and .readiness.trusted_verifier_pilot_handoff_ready == true
+  and .readiness.roadmap_access_recovery_pilot_handoff_ready == false
+' "$TMP_DIR/roadmap-not-ready-summary.json" >/dev/null; then
+  echo "expected roadmap access_recovery_pilot_handoff_ready=false to preserve verifier authority but mark status refresh mismatch"
+  cat "$TMP_DIR/roadmap-not-ready-summary.json"
+  exit 1
+fi
 
 : >"$CAPTURE"
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
@@ -1742,8 +1753,11 @@ jq -e '
   and .mode.evidence_status == "verifier_ready"
   and .inputs.roadmap_refresh == false
   and .readiness.verifier_ready == true
+  and .readiness.handoff_authority_ready == true
   and .readiness.roadmap_ready == false
-  and .readiness.handoff_complete == false
+  and .readiness.roadmap_status_synced == false
+  and .readiness.handoff_complete == true
+  and .readiness.status_rollup_complete == false
   and .readiness.trusted_verifier_pilot_handoff_ready == true
   and .readiness.roadmap_access_recovery_pilot_handoff_ready == false
   and .child_summaries.roadmap == null

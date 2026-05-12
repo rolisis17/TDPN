@@ -94,7 +94,6 @@ REAL_PORT="$((19880 + (RANDOM % 200)))"
 bash ./scripts/access_recovery_local_evidence_refresh.sh \
   --reports-dir "$REAL_REPORTS" \
   --port "$REAL_PORT" \
-  --write-canonical 0 \
   --refresh-roadmap 1 \
   --summary-json "$REAL_SUMMARY" \
   --print-summary-json 0
@@ -105,11 +104,17 @@ if ! jq -e '
   and .rc == 0
   and .pilot_handoff_ready == false
   and .evidence_scope == "local_rehearsal"
+  and .inputs.write_canonical == false
   and (.inputs.rehearsal_public_host | test("^helper-local[.]gpm-pilot[.]net$"))
   and .roadmap.refreshed == true
   and .roadmap.rc == 0
   and (.artifacts.pilot_verify_summary_json | length > 0)
   and (.artifacts.host_install_summary_json | length > 0)
+  and .artifacts.canonical_service_smoke_summary_json == null
+  and .artifacts.canonical_deployment_evidence_summary_json == null
+  and .artifacts.canonical_host_install_summary_json == null
+  and .artifacts.canonical_pilot_summary_json == null
+  and .artifacts.canonical_pilot_verify_summary_json == null
   and (.artifacts.roadmap_summary_json | length > 0)
   and .recommended_next_action.id == "real_helper_https_evidence"
   and ((.recommended_next_action.reason // "") | contains("Local evidence is only a rehearsal"))

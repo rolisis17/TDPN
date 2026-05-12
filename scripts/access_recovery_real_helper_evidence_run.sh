@@ -844,7 +844,7 @@ write_summary() {
   local stage="$3"
   local notes="$4"
   local generated_at_utc
-  local host_install_obj bundle_obj verify_obj roadmap_obj pilot_ready roadmap_ready handoff_complete evidence_scope verifier_scope
+  local host_install_obj bundle_obj verify_obj roadmap_obj pilot_ready roadmap_ready handoff_complete status_rollup_complete evidence_scope verifier_scope
   local code_present_json code_file_present_json
   local roadmap_refresh_json
   local plan_only_json
@@ -859,10 +859,15 @@ write_summary() {
   fi
   pilot_ready="$(printf '%s\n' "$verify_obj" | jq -r 'if type == "object" then (.pilot_handoff_ready // false | tostring) else "false" end')"
   roadmap_ready="$(printf '%s\n' "$roadmap_obj" | jq -r 'if type == "object" then (.access_recovery_pilot_handoff_ready // false | tostring) else "false" end')"
-  if [[ "$pilot_ready" == "true" && "$roadmap_ready" == "true" ]]; then
+  if [[ "$pilot_ready" == "true" ]]; then
     handoff_complete="true"
   else
     handoff_complete="false"
+  fi
+  if [[ "$pilot_ready" == "true" && "$roadmap_ready" == "true" ]]; then
+    status_rollup_complete="true"
+  else
+    status_rollup_complete="false"
   fi
   evidence_scope="$(printf '%s\n' "$bundle_obj" | jq -r 'if type == "object" then (.evidence_scope // "") else "" end')"
   verifier_scope="$(printf '%s\n' "$verify_obj" | jq -r 'if type == "object" then ((.details.evidence_scope // .trusted_provenance.evidence_scope // .evidence_scope // "") | tostring) else "" end')"
@@ -925,6 +930,7 @@ write_summary() {
     --argjson pilot_handoff_ready "$pilot_ready" \
     --argjson roadmap_ready "$roadmap_ready" \
     --argjson handoff_complete "$handoff_complete" \
+    --argjson status_rollup_complete "$status_rollup_complete" \
     --argjson roadmap_refresh "$roadmap_refresh_json" \
     --argjson host_install_check "$host_install_obj" \
     --argjson bundle "$bundle_obj" \
@@ -934,7 +940,7 @@ write_summary() {
     --argjson planned_artifacts "$planned_artifacts_json" \
     '{
       version: 1,
-      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 5},
+      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 6},
       generated_at_utc: $generated_at_utc,
       status: $status,
       rc: $rc,
@@ -943,10 +949,16 @@ write_summary() {
       mode: {
         plan_only: $plan_only,
         child_execution_skipped: ($plan_only and $stage == "plan"),
-        evidence_generated: (if $plan_only then false else ($status == "pass" and ($stage == "complete" or $stage == "verifier_ready")) end),
+        evidence_generated: (
+          if $plan_only then false
+          else ($status == "pass" and ($stage == "complete" or $stage == "verifier_ready" or $stage == "status_refresh_failed" or $stage == "status_refresh_mismatch"))
+          end
+        ),
         evidence_status: (
           if $plan_only then "planned_non_evidence"
           elif ($status == "pass" and $stage == "complete") then "collected"
+          elif ($status == "pass" and $stage == "status_refresh_failed") then "collected_status_refresh_failed"
+          elif ($status == "pass" and $stage == "status_refresh_mismatch") then "collected_status_refresh_mismatch"
           elif ($status == "pass" and $stage == "verifier_ready") then "verifier_ready"
           else "not_collected"
           end
@@ -969,8 +981,11 @@ write_summary() {
         evidence_scope: (if $evidence_scope == "" then null else $evidence_scope end),
         verifier_evidence_scope: (if $verifier_scope == "" then null else $verifier_scope end),
         verifier_ready: $pilot_handoff_ready,
+        handoff_authority_ready: $pilot_handoff_ready,
         roadmap_ready: $roadmap_ready,
+        roadmap_status_synced: $status_rollup_complete,
         handoff_complete: $handoff_complete,
+        status_rollup_complete: $status_rollup_complete,
         trusted_verifier_pilot_handoff_ready: $pilot_handoff_ready,
         roadmap_access_recovery_pilot_handoff_ready: $roadmap_ready
       },
@@ -1467,28 +1482,28 @@ if [[ "$roadmap_refresh" == "1" ]]; then
   roadmap_rc=$?
   set -e
   if [[ "$roadmap_rc" -ne 0 ]]; then
-    write_summary "fail" "$roadmap_rc" "roadmap" "Roadmap refresh failed after trusted evidence verification"
+    write_summary "pass" 0 "status_refresh_failed" "Trusted verifier receipt marked pilot_handoff_ready=true; roadmap refresh failed, so status roll-up was not synced"
     print_failure_log_tail "roadmap" "$roadmap_log"
-    echo "access-recovery-real-helper-evidence-run: status=fail stage=roadmap"
+    echo "access-recovery-real-helper-evidence-run: status=pass stage=status_refresh_failed evidence_status=collected_status_refresh_failed"
     echo "summary_json: $summary_json"
     [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
-    exit "$roadmap_rc"
+    exit 0
   fi
   roadmap_ready="$(jq -r '.access_recovery_pilot_handoff_ready // false | tostring' "$roadmap_summary_json" 2>/dev/null || printf '%s' "false")"
   if [[ "$roadmap_ready" != "true" ]]; then
-    write_summary "fail" 1 "roadmap" "Roadmap did not mark Access Recovery pilot handoff ready"
-    echo "access-recovery-real-helper-evidence-run: status=fail stage=roadmap"
+    write_summary "pass" 0 "status_refresh_mismatch" "Trusted verifier receipt marked pilot_handoff_ready=true; roadmap status did not mark Access Recovery pilot handoff ready"
+    echo "access-recovery-real-helper-evidence-run: status=pass stage=status_refresh_mismatch evidence_status=collected_status_refresh_mismatch"
     echo "summary_json: $summary_json"
     [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
-    exit 1
+    exit 0
   fi
 fi
 
 if [[ "$roadmap_refresh" == "1" ]]; then
-  write_summary "pass" 0 "complete" "Real helper HTTPS evidence, trusted verifier receipt, and roadmap handoff readiness completed"
+  write_summary "pass" 0 "complete" "Trusted verifier receipt marked pilot_handoff_ready=true and roadmap status roll-up synced"
   echo "access-recovery-real-helper-evidence-run: status=pass stage=complete"
 else
-  write_summary "pass" 0 "verifier_ready" "Trusted verifier receipt validated; roadmap refresh disabled, so handoff is not marked complete"
+  write_summary "pass" 0 "verifier_ready" "Trusted verifier receipt marked pilot_handoff_ready=true; roadmap refresh disabled, so status roll-up was not synced"
   echo "access-recovery-real-helper-evidence-run: status=pass stage=verifier_ready evidence_status=verifier_ready"
 fi
 echo "summary_json: $summary_json"
