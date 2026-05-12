@@ -572,6 +572,225 @@ if [[ "$mtls_required_missing_proof_rc" -eq 0 ]] ||
   exit 1
 fi
 
+MTLS_SUCCESS_NO_CLIENT_ROOT="$TMP_DIR/mtls-success-no-client-root"
+MTLS_SUCCESS_NO_CLIENT_DIR="$MTLS_SUCCESS_NO_CLIENT_ROOT/$(basename "$BUNDLE_DIR")"
+MTLS_SUCCESS_NO_CLIENT_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_mtls_success_no_client_summary.json"
+MTLS_SUCCESS_NO_CLIENT_TAR="$TMP_DIR/mtls-success-no-client.tar.gz"
+MTLS_SUCCESS_NO_CLIENT_SHA="${MTLS_SUCCESS_NO_CLIENT_TAR}.sha256"
+MTLS_SUCCESS_NO_CLIENT_PROVENANCE_JSON="$TMP_DIR/mtls-success-no-client.provenance.json"
+MTLS_SUCCESS_NO_CLIENT_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_mtls_success_no_client_verify_summary.json"
+mkdir -p "$MTLS_SUCCESS_NO_CLIENT_ROOT"
+cp -R "$BUNDLE_DIR" "$MTLS_SUCCESS_NO_CLIENT_DIR"
+jq '
+  .transport.mtls.required = true
+  | .transport.mtls.client_certificate_configured = true
+  | .transport.mtls.client_certificate_used = true
+  | .transport.mtls.local_client_certificate_key_match = true
+  | .transport.mtls.client_certificate_client_auth_eku = true
+  | .transport.mtls.server_leaf_certificate_fetched = true
+  | .transport.mtls.client_certificate_der_sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
+  | .transport.mtls.client_certificate_public_key_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+  | .transport.mtls.client_key_public_key_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+  | .transport.mtls.server_leaf_certificate_der_sha256 = "3333333333333333333333333333333333333333333333333333333333333333"
+  | .transport.mtls.server_leaf_public_key_sha256 = "4444444444444444444444444444444444444444444444444444444444444444"
+  | .transport.mtls.client_certificate_der_fingerprint_distinct_from_server_leaf = true
+  | .transport.mtls.client_certificate_public_key_fingerprint_distinct_from_server_leaf = true
+  | .transport.mtls.missing_client_certificate_rejected = true
+  | .transport.mtls.missing_client_certificate_same_endpoint = true
+  | .transport.mtls.missing_client_certificate_rejection_signal = true
+  | .transport.mtls.missing_client_certificate_health_http_status = "200"
+' "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_service_smoke_summary.json" >"$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_service_smoke_summary.json.tmp"
+mv "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_service_smoke_summary.json.tmp" "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_service_smoke_summary.json"
+jq '
+  .smoke.transport_mtls_required = true
+  | .smoke.transport_mtls_client_certificate_configured = true
+  | .smoke.transport_mtls_client_certificate_used = true
+  | .smoke.transport_mtls_local_client_certificate_key_match = true
+  | .smoke.transport_mtls_client_certificate_client_auth_eku = true
+  | .smoke.transport_mtls_server_leaf_certificate_fetched = true
+  | .smoke.transport_mtls_client_certificate_der_sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
+  | .smoke.transport_mtls_client_certificate_public_key_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+  | .smoke.transport_mtls_client_key_public_key_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+  | .smoke.transport_mtls_server_leaf_certificate_der_sha256 = "3333333333333333333333333333333333333333333333333333333333333333"
+  | .smoke.transport_mtls_server_leaf_public_key_sha256 = "4444444444444444444444444444444444444444444444444444444444444444"
+  | .smoke.transport_mtls_client_certificate_der_fingerprint_distinct_from_server_leaf = true
+  | .smoke.transport_mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf = true
+  | .smoke.transport_mtls_missing_client_certificate_rejected = true
+  | .smoke.transport_mtls_missing_client_certificate_same_endpoint = true
+  | .smoke.transport_mtls_missing_client_certificate_rejection_signal = true
+  | .smoke.transport_mtls_missing_client_certificate_health_http_status = "200"
+  | .transport.mtls_required = true
+  | .transport.mtls_client_certificate_configured = true
+  | .transport.mtls_client_certificate_used = true
+  | .transport.mtls_local_client_certificate_key_match = true
+  | .transport.mtls_client_certificate_client_auth_eku = true
+  | .transport.mtls_server_leaf_certificate_fetched = true
+  | .transport.mtls_client_certificate_der_sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
+  | .transport.mtls_client_certificate_public_key_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+  | .transport.mtls_client_key_public_key_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+  | .transport.mtls_server_leaf_certificate_der_sha256 = "3333333333333333333333333333333333333333333333333333333333333333"
+  | .transport.mtls_server_leaf_public_key_sha256 = "4444444444444444444444444444444444444444444444444444444444444444"
+  | .transport.mtls_client_certificate_der_fingerprint_distinct_from_server_leaf = true
+  | .transport.mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf = true
+  | .transport.mtls_missing_client_certificate_rejected = true
+  | .transport.mtls_missing_client_certificate_same_endpoint = true
+  | .transport.mtls_missing_client_certificate_rejection_signal = true
+  | .transport.mtls_missing_client_certificate_health_http_status = "200"
+' "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_deployment_evidence_summary.json" >"$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_deployment_evidence_summary.json.tmp"
+mv "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_deployment_evidence_summary.json.tmp" "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_deployment_evidence_summary.json"
+jq \
+  --arg bundle_dir "$MTLS_SUCCESS_NO_CLIENT_DIR" \
+  --arg bundle_tar "$MTLS_SUCCESS_NO_CLIENT_TAR" \
+  --arg bundle_tar_sha256_file "$MTLS_SUCCESS_NO_CLIENT_SHA" \
+  --arg manifest_sha256 "$MTLS_SUCCESS_NO_CLIENT_DIR/manifest.sha256" \
+  --arg summary_json "$MTLS_SUCCESS_NO_CLIENT_SUMMARY_JSON" \
+  --arg bundled_summary_json "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
+  --arg provenance_json "$MTLS_SUCCESS_NO_CLIENT_PROVENANCE_JSON" \
+  --arg smoke_summary_json "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_service_smoke_summary.json" \
+  --arg deployment_summary_json "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_deployment_evidence_summary.json" \
+  --arg host_summary_json "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_host_install_check_summary.json" \
+  '.schema.minor = 5
+    | .evidence_policy.require_mtls = true
+    | .artifacts.bundle_dir = $bundle_dir
+    | .artifacts.bundle_tar = $bundle_tar
+    | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file
+    | .artifacts.manifest_sha256 = $manifest_sha256
+    | .artifacts.summary_json = $summary_json
+    | .artifacts.bundled_summary_json = $bundled_summary_json
+    | .artifacts.provenance_json = $provenance_json
+    | .artifacts.smoke_summary_json = $smoke_summary_json
+    | .artifacts.deployment_evidence_summary_json = $deployment_summary_json
+    | .artifacts.host_install_check_summary_json = $host_summary_json
+    | .provenance.sidecar_json = $provenance_json' \
+  "$SUMMARY_JSON" >"$MTLS_SUCCESS_NO_CLIENT_SUMMARY_JSON"
+cp "$MTLS_SUCCESS_NO_CLIENT_SUMMARY_JSON" "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+(
+  cd "$MTLS_SUCCESS_NO_CLIENT_DIR"
+  find . -type f -print \
+    | sed 's|^\./||' \
+    | grep -v '^manifest\.sha256$' \
+    | LC_ALL=C sort \
+    | while IFS= read -r rel; do
+        sha256sum "$rel"
+      done
+) >"$MTLS_SUCCESS_NO_CLIENT_DIR/manifest.sha256"
+tar -czf "$MTLS_SUCCESS_NO_CLIENT_TAR" -C "$MTLS_SUCCESS_NO_CLIENT_ROOT" "$(basename "$BUNDLE_DIR")"
+printf '%s  %s\n' "$(sha256sum "$MTLS_SUCCESS_NO_CLIENT_TAR" | awk '{print $1}')" "$(basename "$MTLS_SUCCESS_NO_CLIENT_TAR")" >"$MTLS_SUCCESS_NO_CLIENT_SHA"
+go run ./cmd/gpmrecover provenance-sign \
+  --summary-json "$MTLS_SUCCESS_NO_CLIENT_SUMMARY_JSON" \
+  --bundle-tar "$MTLS_SUCCESS_NO_CLIENT_TAR" \
+  --bundle-tar-sha256-file "$MTLS_SUCCESS_NO_CLIENT_SHA" \
+  --private-key-file "$PRIVATE_KEY_FILE" \
+  --org-id pilot-org \
+  --org-name "Pilot Org" \
+  --out "$MTLS_SUCCESS_NO_CLIENT_PROVENANCE_JSON" >/dev/null
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$MTLS_SUCCESS_NO_CLIENT_SUMMARY_JSON" \
+  --provenance-json "$MTLS_SUCCESS_NO_CLIENT_PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$MTLS_SUCCESS_NO_CLIENT_VERIFY_SUMMARY_JSON" \
+  --print-verification-summary-json 1 >"$TMP_DIR/verify-mtls-success-no-client.log" 2>&1
+mtls_success_no_client_rc=$?
+set -e
+if [[ "$mtls_success_no_client_rc" -eq 0 ]] ||
+  ! grep -Fq 'bundled service smoke mTLS no-client-certificate probe returned a successful HTTP status' "$TMP_DIR/verify-mtls-success-no-client.log" ||
+  ! grep -Fq 'bundled deployment evidence mTLS no-client-certificate probe returned a successful HTTP status' "$TMP_DIR/verify-mtls-success-no-client.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted verifier accepted require-mtls summary with successful no-client-certificate probe status"
+  cat "$TMP_DIR/verify-mtls-success-no-client.log"
+  if [[ -f "$MTLS_SUCCESS_NO_CLIENT_VERIFY_SUMMARY_JSON" ]]; then
+    cat "$MTLS_SUCCESS_NO_CLIENT_VERIFY_SUMMARY_JSON"
+  fi
+  exit 1
+fi
+
+MTLS_MISSING_DER_ROOT="$TMP_DIR/mtls-missing-der-root"
+MTLS_MISSING_DER_DIR="$MTLS_MISSING_DER_ROOT/$(basename "$BUNDLE_DIR")"
+MTLS_MISSING_DER_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_mtls_missing_der_summary.json"
+MTLS_MISSING_DER_TAR="$TMP_DIR/mtls-missing-der.tar.gz"
+MTLS_MISSING_DER_SHA="${MTLS_MISSING_DER_TAR}.sha256"
+MTLS_MISSING_DER_PROVENANCE_JSON="$TMP_DIR/mtls-missing-der.provenance.json"
+MTLS_MISSING_DER_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_mtls_missing_der_verify_summary.json"
+mkdir -p "$MTLS_MISSING_DER_ROOT"
+cp -R "$MTLS_SUCCESS_NO_CLIENT_DIR" "$MTLS_MISSING_DER_DIR"
+jq '
+  .transport.mtls.client_certificate_der_sha256 = null
+  | .transport.mtls.missing_client_certificate_health_http_status = "401"
+' "$MTLS_MISSING_DER_DIR/access_bridge_service_smoke_summary.json" >"$MTLS_MISSING_DER_DIR/access_bridge_service_smoke_summary.json.tmp"
+mv "$MTLS_MISSING_DER_DIR/access_bridge_service_smoke_summary.json.tmp" "$MTLS_MISSING_DER_DIR/access_bridge_service_smoke_summary.json"
+jq '
+  .smoke.transport_mtls_client_certificate_der_sha256 = ""
+  | .smoke.transport_mtls_missing_client_certificate_health_http_status = "401"
+  | .transport.mtls_client_certificate_der_sha256 = ""
+  | .transport.mtls_missing_client_certificate_health_http_status = "401"
+' "$MTLS_MISSING_DER_DIR/access_bridge_deployment_evidence_summary.json" >"$MTLS_MISSING_DER_DIR/access_bridge_deployment_evidence_summary.json.tmp"
+mv "$MTLS_MISSING_DER_DIR/access_bridge_deployment_evidence_summary.json.tmp" "$MTLS_MISSING_DER_DIR/access_bridge_deployment_evidence_summary.json"
+jq \
+  --arg bundle_dir "$MTLS_MISSING_DER_DIR" \
+  --arg bundle_tar "$MTLS_MISSING_DER_TAR" \
+  --arg bundle_tar_sha256_file "$MTLS_MISSING_DER_SHA" \
+  --arg manifest_sha256 "$MTLS_MISSING_DER_DIR/manifest.sha256" \
+  --arg summary_json "$MTLS_MISSING_DER_SUMMARY_JSON" \
+  --arg bundled_summary_json "$MTLS_MISSING_DER_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
+  --arg provenance_json "$MTLS_MISSING_DER_PROVENANCE_JSON" \
+  --arg smoke_summary_json "$MTLS_MISSING_DER_DIR/access_bridge_service_smoke_summary.json" \
+  --arg deployment_summary_json "$MTLS_MISSING_DER_DIR/access_bridge_deployment_evidence_summary.json" \
+  --arg host_summary_json "$MTLS_MISSING_DER_DIR/access_bridge_host_install_check_summary.json" \
+  '.artifacts.bundle_dir = $bundle_dir
+    | .artifacts.bundle_tar = $bundle_tar
+    | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file
+    | .artifacts.manifest_sha256 = $manifest_sha256
+    | .artifacts.summary_json = $summary_json
+    | .artifacts.bundled_summary_json = $bundled_summary_json
+    | .artifacts.provenance_json = $provenance_json
+    | .artifacts.smoke_summary_json = $smoke_summary_json
+    | .artifacts.deployment_evidence_summary_json = $deployment_summary_json
+    | .artifacts.host_install_check_summary_json = $host_summary_json
+    | .provenance.sidecar_json = $provenance_json' \
+  "$MTLS_SUCCESS_NO_CLIENT_SUMMARY_JSON" >"$MTLS_MISSING_DER_SUMMARY_JSON"
+cp "$MTLS_MISSING_DER_SUMMARY_JSON" "$MTLS_MISSING_DER_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+(
+  cd "$MTLS_MISSING_DER_DIR"
+  find . -type f -print \
+    | sed 's|^\./||' \
+    | grep -v '^manifest\.sha256$' \
+    | LC_ALL=C sort \
+    | while IFS= read -r rel; do
+        sha256sum "$rel"
+      done
+) >"$MTLS_MISSING_DER_DIR/manifest.sha256"
+tar -czf "$MTLS_MISSING_DER_TAR" -C "$MTLS_MISSING_DER_ROOT" "$(basename "$BUNDLE_DIR")"
+printf '%s  %s\n' "$(sha256sum "$MTLS_MISSING_DER_TAR" | awk '{print $1}')" "$(basename "$MTLS_MISSING_DER_TAR")" >"$MTLS_MISSING_DER_SHA"
+go run ./cmd/gpmrecover provenance-sign \
+  --summary-json "$MTLS_MISSING_DER_SUMMARY_JSON" \
+  --bundle-tar "$MTLS_MISSING_DER_TAR" \
+  --bundle-tar-sha256-file "$MTLS_MISSING_DER_SHA" \
+  --private-key-file "$PRIVATE_KEY_FILE" \
+  --org-id pilot-org \
+  --org-name "Pilot Org" \
+  --out "$MTLS_MISSING_DER_PROVENANCE_JSON" >/dev/null
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$MTLS_MISSING_DER_SUMMARY_JSON" \
+  --provenance-json "$MTLS_MISSING_DER_PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$MTLS_MISSING_DER_VERIFY_SUMMARY_JSON" \
+  --print-verification-summary-json 1 >"$TMP_DIR/verify-mtls-missing-der.log" 2>&1
+mtls_missing_der_rc=$?
+set -e
+if [[ "$mtls_missing_der_rc" -eq 0 ]] ||
+  ! grep -Fq 'bundled service smoke mTLS client certificate/key fingerprints are missing or mismatched' "$TMP_DIR/verify-mtls-missing-der.log" ||
+  ! grep -Fq 'bundled deployment evidence mTLS client certificate/key fingerprints are missing or mismatched' "$TMP_DIR/verify-mtls-missing-der.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted verifier accepted require-mtls summary with missing client certificate DER fingerprint"
+  cat "$TMP_DIR/verify-mtls-missing-der.log"
+  if [[ -f "$MTLS_MISSING_DER_VERIFY_SUMMARY_JSON" ]]; then
+    cat "$MTLS_MISSING_DER_VERIFY_SUMMARY_JSON"
+  fi
+  exit 1
+fi
+
 INSTALLED_HOST_ROOT="$TMP_DIR/installed-host-root"
 INSTALLED_HOST_DIR="$INSTALLED_HOST_ROOT/$(basename "$BUNDLE_DIR")"
 INSTALLED_HOST_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_installed_host_summary.json"

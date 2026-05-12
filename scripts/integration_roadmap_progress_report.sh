@@ -2814,6 +2814,13 @@ if ! jq -e '
   and (.access_recovery_track.recommended_next_action.command | contains("--cacert MTLS_CA_FILE"))
   and (.access_recovery_track.recommended_next_action.command | contains("--client-cert MTLS_CLIENT_CERT_FILE"))
   and (.access_recovery_track.recommended_next_action.command | contains("--client-key MTLS_CLIENT_KEY_FILE"))
+  and ((.next_actions // []) | any(
+    .id == "access_bridge_service_smoke"
+    and .placeholder_unresolved == true
+    and ((.placeholder_keys // []) | index("MTLS_CA_FILE"))
+    and ((.placeholder_keys // []) | index("MTLS_CLIENT_CERT_FILE"))
+    and ((.placeholder_keys // []) | index("MTLS_CLIENT_KEY_FILE"))
+  ))
 ' "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_mtls_summary.json" >/dev/null; then
   echo "Access Recovery bad required mTLS smoke summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_mtls_summary.json"
@@ -2822,6 +2829,143 @@ fi
 if ! grep -Fq 'Access bridge required mTLS evidence: required=true, proven=false' "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_mtls_report.md"; then
   echo "Access Recovery bad required mTLS report mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_mtls_report.md"
+  exit 1
+fi
+
+ACCESS_RECOVERY_GOOD_MTLS_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_good_mtls_summary.json"
+ACCESS_RECOVERY_GOOD_MTLS_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_good_mtls_summary.json"
+jq '
+  .schema.minor = 6
+  | .transport.mtls.required = true
+  | .transport.mtls.client_certificate_configured = true
+  | .transport.mtls.client_certificate_used = true
+  | .transport.mtls.local_client_certificate_key_match = true
+  | .transport.mtls.client_certificate_client_auth_eku = true
+  | .transport.mtls.server_leaf_certificate_fetched = true
+  | .transport.mtls.client_certificate_der_sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
+  | .transport.mtls.client_certificate_public_key_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+  | .transport.mtls.client_key_public_key_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+  | .transport.mtls.server_leaf_certificate_der_sha256 = "3333333333333333333333333333333333333333333333333333333333333333"
+  | .transport.mtls.server_leaf_public_key_sha256 = "4444444444444444444444444444444444444444444444444444444444444444"
+  | .transport.mtls.client_certificate_der_fingerprint_distinct_from_server_leaf = true
+  | .transport.mtls.client_certificate_public_key_fingerprint_distinct_from_server_leaf = true
+  | .transport.mtls.missing_client_certificate_rejected = true
+  | .transport.mtls.missing_client_certificate_same_endpoint = true
+  | .transport.mtls.missing_client_certificate_rejection_signal = true
+  | .transport.mtls.missing_client_certificate_health_http_status = "000"
+  | .transport.mtls.missing_client_certificate_health_curl_rc = 56
+  | .transport.mtls.missing_client_certificate_health_effective_url = .transport.health.effective_url
+  | .transport.mtls.missing_client_certificate_health_remote_ip = .transport.health.remote_ip
+  | .transport.mtls.missing_client_certificate_health_remote_port = .transport.health.remote_port
+' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_GOOD_MTLS_SMOKE_SUMMARY_JSON"
+jq '
+  .schema.minor = 5
+  | .evidence_policy.require_mtls = true
+  | .smoke.transport_mtls_required = true
+  | .smoke.transport_mtls_client_certificate_configured = true
+  | .smoke.transport_mtls_client_certificate_used = true
+  | .smoke.transport_mtls_local_client_certificate_key_match = true
+  | .smoke.transport_mtls_client_certificate_client_auth_eku = true
+  | .smoke.transport_mtls_server_leaf_certificate_fetched = true
+  | .smoke.transport_mtls_client_certificate_der_sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
+  | .smoke.transport_mtls_client_certificate_public_key_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+  | .smoke.transport_mtls_client_key_public_key_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+  | .smoke.transport_mtls_server_leaf_certificate_der_sha256 = "3333333333333333333333333333333333333333333333333333333333333333"
+  | .smoke.transport_mtls_server_leaf_public_key_sha256 = "4444444444444444444444444444444444444444444444444444444444444444"
+  | .smoke.transport_mtls_client_certificate_der_fingerprint_distinct_from_server_leaf = true
+  | .smoke.transport_mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf = true
+  | .smoke.transport_mtls_missing_client_certificate_rejected = true
+  | .smoke.transport_mtls_missing_client_certificate_same_endpoint = true
+  | .smoke.transport_mtls_missing_client_certificate_rejection_signal = true
+  | .smoke.transport_mtls_missing_client_certificate_health_http_status = "000"
+  | .smoke.transport_mtls_missing_client_certificate_health_curl_rc = 56
+  | .transport.mtls_required = true
+  | .transport.mtls_client_certificate_configured = true
+  | .transport.mtls_client_certificate_used = true
+  | .transport.mtls_local_client_certificate_key_match = true
+  | .transport.mtls_client_certificate_client_auth_eku = true
+  | .transport.mtls_server_leaf_certificate_fetched = true
+  | .transport.mtls_client_certificate_der_sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
+  | .transport.mtls_client_certificate_public_key_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+  | .transport.mtls_client_key_public_key_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+  | .transport.mtls_server_leaf_certificate_der_sha256 = "3333333333333333333333333333333333333333333333333333333333333333"
+  | .transport.mtls_server_leaf_public_key_sha256 = "4444444444444444444444444444444444444444444444444444444444444444"
+  | .transport.mtls_client_certificate_der_fingerprint_distinct_from_server_leaf = true
+  | .transport.mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf = true
+  | .transport.mtls_missing_client_certificate_rejected = true
+  | .transport.mtls_missing_client_certificate_same_endpoint = true
+  | .transport.mtls_missing_client_certificate_rejection_signal = true
+  | .transport.mtls_missing_client_certificate_health_http_status = "000"
+  | .transport.mtls_missing_client_certificate_health_curl_rc = 56
+' "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_GOOD_MTLS_DEPLOYMENT_SUMMARY_JSON"
+
+echo "[roadmap-progress-report] Access Recovery required mTLS raw no-client 2xx proof is fail-closed"
+ACCESS_RECOVERY_MTLS_NO_CLIENT_2XX_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_mtls_no_client_2xx_summary.json"
+ACCESS_RECOVERY_MTLS_NO_CLIENT_2XX_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_mtls_no_client_2xx_summary.json"
+jq '.transport.mtls.missing_client_certificate_health_http_status = "200"' "$ACCESS_RECOVERY_GOOD_MTLS_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_MTLS_NO_CLIENT_2XX_SMOKE_SUMMARY_JSON"
+jq '.smoke.transport_mtls_missing_client_certificate_health_http_status = "200" | .transport.mtls_missing_client_certificate_health_http_status = "200"' "$ACCESS_RECOVERY_GOOD_MTLS_DEPLOYMENT_SUMMARY_JSON" >"$ACCESS_RECOVERY_MTLS_NO_CLIENT_2XX_DEPLOYMENT_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_MTLS_NO_CLIENT_2XX_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_RECOVERY_MTLS_NO_CLIENT_2XX_DEPLOYMENT_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_mtls_no_client_2xx_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_mtls_no_client_2xx_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_mtls_no_client_2xx.log 2>&1; then
+  echo "expected failure when required Access Recovery mTLS no-client probe returns HTTP 2xx"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_mtls_no_client_2xx.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .access_recovery_track.access_bridge_service_smoke.semantic_ok == false
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_mtls_missing_client_certificate_health_http_status == "200"
+  and .access_recovery_track.access_bridge_deployment_evidence.semantic_ok == false
+  and .access_recovery_track.access_bridge_deployment_evidence.details.transport_mtls_missing_client_certificate_health_http_status == "200"
+  and .access_recovery_track.evidence_host_policy.required_mtls_evidence == false
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_service_smoke"
+' "$TMP_DIR/roadmap_progress_access_recovery_mtls_no_client_2xx_summary.json" >/dev/null; then
+  echo "Access Recovery mTLS no-client 2xx summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_mtls_no_client_2xx_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery required mTLS partial fingerprint proof is fail-closed"
+ACCESS_RECOVERY_MTLS_MISSING_CLIENT_DER_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_mtls_missing_client_der_summary.json"
+ACCESS_RECOVERY_MTLS_MISSING_CLIENT_DER_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_mtls_missing_client_der_summary.json"
+jq '.transport.mtls.client_certificate_der_sha256 = ""' "$ACCESS_RECOVERY_GOOD_MTLS_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_MTLS_MISSING_CLIENT_DER_SMOKE_SUMMARY_JSON"
+jq '.smoke.transport_mtls_client_certificate_der_sha256 = "" | .transport.mtls_client_certificate_der_sha256 = ""' "$ACCESS_RECOVERY_GOOD_MTLS_DEPLOYMENT_SUMMARY_JSON" >"$ACCESS_RECOVERY_MTLS_MISSING_CLIENT_DER_DEPLOYMENT_SUMMARY_JSON"
+if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_MTLS_MISSING_CLIENT_DER_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_RECOVERY_MTLS_MISSING_CLIENT_DER_DEPLOYMENT_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_mtls_missing_client_der_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_mtls_missing_client_der_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_mtls_missing_client_der.log 2>&1; then
+  echo "expected failure when required Access Recovery mTLS client DER fingerprint is missing"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_mtls_missing_client_der.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .access_recovery_track.access_bridge_service_smoke.semantic_ok == false
+  and .access_recovery_track.access_bridge_service_smoke.details.transport_mtls_client_certificate_der_sha256 == null
+  and .access_recovery_track.access_bridge_deployment_evidence.semantic_ok == false
+  and .access_recovery_track.access_bridge_deployment_evidence.details.transport_mtls_client_certificate_der_sha256 == null
+  and .access_recovery_track.evidence_host_policy.required_mtls_evidence == false
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_service_smoke"
+' "$TMP_DIR/roadmap_progress_access_recovery_mtls_missing_client_der_summary.json" >/dev/null; then
+  echo "Access Recovery mTLS missing client DER summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_mtls_missing_client_der_summary.json"
   exit 1
 fi
 

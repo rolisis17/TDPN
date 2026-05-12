@@ -12992,7 +12992,10 @@ next_actions_candidate_json="$(
       (if ($ucmd | test("(^|[^A-Z0-9_])BRIDGE_DEPLOY_PACK([^A-Z0-9_]|$)")) then "BRIDGE_DEPLOY_PACK" else empty end),
       (if ($ucmd | test("(^|[^A-Z0-9_])PROVENANCE_PRIVATE_KEY_FILE([^A-Z0-9_]|$)")) then "PROVENANCE_PRIVATE_KEY_FILE" else empty end),
       (if ($ucmd | test("(^|[^A-Z0-9_])ORG_ID([^A-Z0-9_]|$)")) then "ORG_ID" else empty end),
-      (if ($ucmd | test("(^|[^A-Z0-9_])ORG_NAME([^A-Z0-9_]|$)")) then "ORG_NAME" else empty end)
+      (if ($ucmd | test("(^|[^A-Z0-9_])ORG_NAME([^A-Z0-9_]|$)")) then "ORG_NAME" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_])MTLS_CA_FILE([^A-Z0-9_]|$)")) then "MTLS_CA_FILE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_])MTLS_CLIENT_CERT_FILE([^A-Z0-9_]|$)")) then "MTLS_CLIENT_CERT_FILE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_])MTLS_CLIENT_KEY_FILE([^A-Z0-9_]|$)")) then "MTLS_CLIENT_KEY_FILE" else empty end)
     ] | unique_strings_preserve_order as $keys
     | {
         placeholder_unresolved: (($keys | length) > 0),

@@ -52,6 +52,7 @@ run_gate_with_overrides() {
     ACCESS_RECOVERY_BETA_LOCAL_GATE_BRIDGE_HOST_INSTALL_SCRIPT="$PASS_STEP" \
     ACCESS_RECOVERY_BETA_LOCAL_GATE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$PASS_STEP" \
     ACCESS_RECOVERY_BETA_LOCAL_GATE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$PASS_STEP" \
+    ACCESS_RECOVERY_BETA_LOCAL_GATE_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$PASS_STEP" \
     bash ./scripts/access_recovery_beta_local_gate.sh "${@:2}"
 }
 
@@ -68,8 +69,8 @@ if ! jq -e '
   .schema.id == "access_recovery_beta_local_gate_summary"
   and .status == "pass"
   and .rc == 0
-  and .summary.steps_total == 8
-  and .summary.steps_pass == 8
+  and .summary.steps_total == 9
+  and .summary.steps_pass == 9
   and .summary.steps_fail == 0
   and .summary.first_failed_step == null
   and .recommended_next_action.id == "real_helper_bridge_evidence"
@@ -86,7 +87,8 @@ if ! jq -e '
     "bridge_deployment_evidence",
     "bridge_host_install",
     "pilot_evidence_bundle",
-    "pilot_evidence_bundle_verify"
+    "pilot_evidence_bundle_verify",
+    "real_helper_evidence_run"
   ])
   and ([.steps[].status] | all(. == "pass"))
 ' "$PASS_SUMMARY" >/dev/null; then
@@ -127,8 +129,8 @@ fi
 if ! jq -e '
   .status == "fail"
   and .rc == 1
-  and .summary.steps_total == 8
-  and .summary.steps_pass == 7
+  and .summary.steps_total == 9
+  and .summary.steps_pass == 8
   and .summary.steps_fail == 1
   and .summary.first_failed_step == "browser_smoke"
   and .recommended_next_action.id == "fix_access_recovery_local_gate"

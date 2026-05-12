@@ -18,10 +18,10 @@ Purpose:
   VPN/GPM production matrix. This checks the signed artifact demo/examples,
   browser-local verifier flow, local bridge service evidence, host-install
   checks, pilot evidence bundle generation, and the trusted verifier receipt
-  contract required for pilot handoff.
+  contract plus real-helper evidence-run wrapper required for pilot handoff.
 
 Notes:
-  Real helper HTTPS deployment evidence is still a separate real-host gate.
+  Live real helper HTTPS deployment evidence is still a separate real-host gate.
 USAGE
 }
 
@@ -223,6 +223,7 @@ run_step "bridge_deployment_evidence" "Bridge deployment evidence contract" "ACC
 run_step "bridge_host_install" "Bridge host-install check contract" "ACCESS_RECOVERY_BETA_LOCAL_GATE_BRIDGE_HOST_INSTALL_SCRIPT" "scripts/integration_access_bridge_host_install_check.sh"
 run_step "pilot_evidence_bundle" "Pilot evidence bundle contract" "ACCESS_RECOVERY_BETA_LOCAL_GATE_PILOT_EVIDENCE_BUNDLE_SCRIPT" "scripts/integration_access_bridge_pilot_evidence_bundle.sh"
 run_step "pilot_evidence_bundle_verify" "Pilot evidence bundle verifier contract" "ACCESS_RECOVERY_BETA_LOCAL_GATE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT" "scripts/integration_access_bridge_pilot_evidence_bundle_verify.sh"
+run_step "real_helper_evidence_run" "Real helper evidence-run wrapper contract" "ACCESS_RECOVERY_BETA_LOCAL_GATE_REAL_HELPER_EVIDENCE_RUN_SCRIPT" "scripts/integration_access_recovery_real_helper_evidence_run.sh"
 
 steps_json="$(jq -s '.' "$steps_jsonl")"
 fail_count="$(jq -s '[.[] | select(.status != "pass" or .rc != 0)] | length' "$steps_jsonl")"
