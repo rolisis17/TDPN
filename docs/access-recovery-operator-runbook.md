@@ -159,9 +159,10 @@ path at `.easy-node-logs/access-recovery-demo`, `helper-demo`, or
   --reports-dir .easy-node-logs/access-recovery-pilot
 ```
 
-Do not use `access-recovery-real-helper-evidence-run --roadmap-refresh 0` as a
-full pilot handoff. That mode is diagnostics/verifier-only and intentionally
-skips roadmap/status refresh.
+Do not use `access-recovery-real-helper-evidence-run --roadmap-refresh 0` to
+produce the final status roll-up. That mode is diagnostics/verifier-only and
+intentionally skips the wrapper `handoff_complete`/roadmap refresh. The trusted
+verifier receipt remains the pilot handoff authority.
 
 Use the lower-level commands below only when debugging a specific stage.
 When the helper's public reverse proxy is intentionally enforcing client
