@@ -139,6 +139,126 @@ verifier_summary_has_handoff_authority() {
   ' "$path" >/dev/null 2>&1
 }
 
+canonical_summary_json_is_invalid() {
+  local path="$1"
+  [[ -f "$path" ]] || return 1
+  ! jq -e 'type == "object"' "$path" >/dev/null 2>&1
+}
+
+canonical_child_summary_blocks_local_rehearsal_overwrite() {
+  local path="$1"
+  [[ -f "$path" ]] || return 1
+  jq -e '
+    def str($v): (($v // "") | tostring);
+    def bool($v): ($v == true or $v == "true");
+    def trim_trailing_dots: gsub("[.]+$"; "");
+    def first_part($sep): split($sep)[0];
+    def url_authority($url):
+      ($url | sub("^[A-Za-z][A-Za-z0-9+.-]*://"; "") | first_part("/") | first_part("?") | first_part("#"));
+    def url_host($url):
+      (url_authority($url) | split("@") | .[-1]) as $authority
+      | if ($authority | startswith("[")) then
+          ($authority | sub("^\\["; "") | sub("\\].*$"; ""))
+        else
+          ($authority | first_part(":"))
+        end
+      | ascii_downcase
+      | trim_trailing_dots;
+    def private_or_reserved_host($host):
+      (
+        ($host == "")
+        or ($host == "localhost")
+        or ($host | test("(^|\\.)(localhost|local|lan|internal|test|invalid|example)$"))
+        or ($host | test("(^|\\.)example\\.(com|net|org)$"))
+        or ($host == "home.arpa")
+        or ($host | endswith(".home.arpa"))
+        or ($host == "ts.net")
+        or ($host | endswith(".ts.net"))
+        or ($host == "tailscale.net")
+        or ($host | endswith(".tailscale.net"))
+        or ($host | test("^127\\."))
+        or ($host | test("^10\\."))
+        or ($host | test("^172\\.(1[6-9]|2[0-9]|3[0-1])\\."))
+        or ($host | test("^192\\.168\\."))
+        or ($host | test("^169\\.254\\."))
+        or ($host | test("^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\."))
+        or ($host | test("^0\\."))
+        or ($host | test("^192\\.0\\.(0|2)\\."))
+        or ($host | test("^192\\.88\\.99\\."))
+        or ($host | test("^198\\.(1[89]|51\\.100)\\."))
+        or ($host | test("^203\\.0\\.113\\."))
+        or ($host | test("^(22[4-9]|23[0-9]|24[0-9]|25[0-5])\\."))
+        or ($host | test("^(::|::1|0:0:0:0:0:0:0:1|fc[0-9a-f]|fd[0-9a-f]|fe(8[0-9a-f]|9[0-9a-f]|a[0-9a-f]|b[0-9a-f])|2001:0?db8)(:|$)"))
+        or ($host | test("^::ffff:(127|10|192\\.168|169\\.254|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])|172\\.(1[6-9]|2[0-9]|3[0-1])|192\\.0\\.(0|2)|192\\.88\\.99|198\\.(1[89]|51\\.100)|203\\.0\\.113|22[4-9]|23[0-9]|24[0-9]|25[0-5]|0)\\."))
+        or ($host | test("^0:0:0:0:0:ffff:(127|10|192\\.168|169\\.254|100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])|172\\.(1[6-9]|2[0-9]|3[0-1])|192\\.0\\.(0|2)|192\\.88\\.99|198\\.(1[89]|51\\.100)|203\\.0\\.113|22[4-9]|23[0-9]|24[0-9]|25[0-5]|0)\\."))
+      );
+    def public_https_url($url):
+      ($url | test("^https://"; "i"))
+      and ((url_authority($url) | contains("@")) | not)
+      and ((private_or_reserved_host(url_host($url))) | not);
+    def schema_id: str(.schema.id);
+    def evidence_scope: str(.evidence_scope // .details.evidence_scope // .trusted_provenance.evidence_scope // .details.trusted_provenance_evidence_scope);
+    def real_service_smoke:
+      schema_id == "access_bridge_service_smoke_summary"
+      and str(.status) == "pass"
+      and public_https_url(str(.base_url // .details.base_url))
+      and bool(.transport.https // .details.transport_https)
+      and bool(.transport.tls.verified // .details.transport_tls_verified)
+      and str(.transport.tls.ssl_verify_result // .details.transport_ssl_verify_result) == "0";
+    def real_deployment_evidence:
+      schema_id == "access_bridge_deployment_evidence_summary"
+      and str(.status) == "pass"
+      and (
+        evidence_scope == "real_helper_https"
+        or bool(.pilot_handoff_candidate)
+        or (
+          public_https_url(str(.smoke.base_url // .details.base_url))
+          and bool(.transport.https // .details.transport_https)
+          and bool(.transport.tls_verified // .details.transport_tls_verified)
+          and str(.transport.ssl_verify_result // .details.transport_ssl_verify_result) == "0"
+        )
+      );
+    def installed_host_evidence:
+      schema_id == "access_bridge_host_install_check_summary"
+      and str(.status) == "pass"
+      and (
+        str(.inputs.evidence_mode // .observed.evidence_mode // .summary.evidence_mode // .details.evidence_mode) == "installed-host"
+        or bool(.inputs.installed_host_mode // .observed.installed_host_mode // .summary.installed_host_mode // .details.installed_host_mode)
+      );
+    def real_or_trusted_bundle_evidence:
+      schema_id == "access_bridge_pilot_evidence_bundle_summary"
+      and str(.status) == "pass"
+      and (
+        evidence_scope == "real_helper_https"
+        or bool(.provenance.enabled)
+        or bool(.trusted_provenance.checked)
+        or bool(.trusted_provenance.trusted)
+      );
+    real_service_smoke
+    or real_deployment_evidence
+    or installed_host_evidence
+    or real_or_trusted_bundle_evidence
+  ' "$path" >/dev/null 2>&1
+}
+
+refuse_protected_canonical_overwrite() {
+  local label="$1"
+  local path="$2"
+  [[ -f "$path" ]] || return 0
+  if canonical_summary_json_is_invalid "$path"; then
+    echo "access recovery local evidence refresh failed: --write-canonical 1 refuses to overwrite unreadable existing canonical $label summary (fail-closed): $path" >&2
+    exit 2
+  fi
+  if [[ "$label" == "pilot verifier receipt" ]] && verifier_summary_has_handoff_authority "$path"; then
+    echo "access recovery local evidence refresh failed: --write-canonical 1 would overwrite existing trusted pilot verifier receipt: $path" >&2
+    exit 2
+  fi
+  if canonical_child_summary_blocks_local_rehearsal_overwrite "$path"; then
+    echo "access recovery local evidence refresh failed: --write-canonical 1 would overwrite existing canonical real-helper/installed-host/trusted child evidence with local rehearsal evidence: $path" >&2
+    exit 2
+  fi
+}
+
 reports_dir="$ROOT_DIR/.easy-node-logs/access_recovery_local_evidence_$(timestamp_file)"
 summary_json=""
 print_summary_json="1"
@@ -256,6 +376,11 @@ fi
 mkdir -p "$(dirname "$summary_json")"
 if [[ "$write_canonical" == "1" ]]; then
   mkdir -p "$canonical_dir"
+  refuse_protected_canonical_overwrite "service smoke" "$canonical_dir/access_bridge_service_smoke_summary.json"
+  refuse_protected_canonical_overwrite "deployment evidence" "$canonical_dir/access_bridge_deployment_evidence_summary.json"
+  refuse_protected_canonical_overwrite "host install" "$canonical_dir/access_bridge_host_install_check_summary.json"
+  refuse_protected_canonical_overwrite "pilot bundle" "$canonical_dir/access_bridge_pilot_evidence_bundle_summary.json"
+  refuse_protected_canonical_overwrite "pilot verifier receipt" "$canonical_dir/access_bridge_pilot_evidence_bundle_verify_summary.json"
 fi
 
 demo_dir="$reports_dir/access-recovery-demo"
@@ -388,10 +513,11 @@ if [[ "$write_canonical" == "1" ]]; then
   canonical_host_install_summary_json="$canonical_dir/access_bridge_host_install_check_summary.json"
   canonical_pilot_summary_json="$canonical_dir/access_bridge_pilot_evidence_bundle_summary.json"
   canonical_pilot_verify_summary_json="$canonical_dir/access_bridge_pilot_evidence_bundle_verify_summary.json"
-  if verifier_summary_has_handoff_authority "$canonical_pilot_verify_summary_json"; then
-    echo "access recovery local evidence refresh failed: --write-canonical 1 would overwrite existing trusted pilot verifier receipt: $canonical_pilot_verify_summary_json" >&2
-    exit 2
-  fi
+  refuse_protected_canonical_overwrite "service smoke" "$canonical_service_smoke_summary_json"
+  refuse_protected_canonical_overwrite "deployment evidence" "$canonical_deployment_evidence_summary_json"
+  refuse_protected_canonical_overwrite "host install" "$canonical_host_install_summary_json"
+  refuse_protected_canonical_overwrite "pilot bundle" "$canonical_pilot_summary_json"
+  refuse_protected_canonical_overwrite "pilot verifier receipt" "$canonical_pilot_verify_summary_json"
   copy_if_present "$service_smoke_summary_json" "$canonical_service_smoke_summary_json"
   copy_if_present "$deployment_evidence_summary_json" "$canonical_deployment_evidence_summary_json"
   copy_if_present "$host_install_summary_json" "$canonical_host_install_summary_json"

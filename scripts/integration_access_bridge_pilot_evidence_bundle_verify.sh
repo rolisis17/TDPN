@@ -109,11 +109,13 @@ jq -n \
 ORIGINAL_SMOKE_SUMMARY_COPY="$TMP_DIR/original_access_bridge_service_smoke_summary.json"
 cp "$BUNDLE_DIR/access_bridge_service_smoke_summary.json" "$ORIGINAL_SMOKE_SUMMARY_COPY"
 printf '%s\n' 'smoke ok' >"$BUNDLE_DIR/access_bridge_service_smoke.log"
+SMOKE_SUMMARY_SHA256="$(sha256sum "$BUNDLE_DIR/access_bridge_service_smoke_summary.json" | awk '{print $1}')"
 jq -n \
   --arg generated_at_utc "$NOW_UTC" \
+  --arg smoke_summary_sha256 "$SMOKE_SUMMARY_SHA256" \
   '{
     version: 1,
-    schema: {id: "access_bridge_deployment_evidence_summary", major: 1, minor: 5},
+    schema: {id: "access_bridge_deployment_evidence_summary", major: 1, minor: 6},
     generated_at_utc: $generated_at_utc,
     status: "pass",
     evidence_scope: "real_helper_https",
@@ -123,6 +125,7 @@ jq -n \
       status: "pass",
       schema_id: "access_bridge_service_smoke_summary",
       generated_at_utc: $generated_at_utc,
+      summary_sha256: $smoke_summary_sha256,
       auth_required: true,
       missing_code_http_status: "401",
       wrong_code_http_status: "401",
@@ -190,6 +193,9 @@ jq -n \
     local_files: {
       config: {supplied: true, status: "pass", valid_json: true, sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", helper_id: "helper-pilot", organization_id: "pilot-org", registry_id: "registry-pilot", allow_local_access_paths: "false"},
       deploy_pack: {supplied: true, status: "pass", exists: true, env: {allow_unauthenticated_local: "false", allow_query_code: "false", trust_proxy_headers: "true", addr: "127.0.0.1:8791"}}
+    },
+    evidence_binding: {
+      smoke_summary_sha256: $smoke_summary_sha256
     }
   }' >"$BUNDLE_DIR/access_bridge_deployment_evidence_summary.json"
 jq -n \
@@ -251,7 +257,6 @@ jq -n \
     }' >"$BUNDLE_DIR/access_bridge_host_install_check_summary.json"
 printf '%s\n' 'GPM_BRIDGE_ALLOW_QUERY_CODE="false"' >"$BUNDLE_DIR/bridge-deploy-pack/gpm-access-bridge.env"
 printf '%s\n' '{"helper_id":"helper-pilot"}' >"$BUNDLE_DIR/bridge-service-config.json"
-SMOKE_SUMMARY_SHA256="$(sha256sum "$BUNDLE_DIR/access_bridge_service_smoke_summary.json" | awk '{print $1}')"
 DEPLOYMENT_SUMMARY_SHA256="$(sha256sum "$BUNDLE_DIR/access_bridge_deployment_evidence_summary.json" | awk '{print $1}')"
 HOST_SUMMARY_SHA256="$(sha256sum "$BUNDLE_DIR/access_bridge_host_install_check_summary.json" | awk '{print $1}')"
 
@@ -426,7 +431,7 @@ if [[ "$trusted_policy_explicit_rc" -eq 0 ]] ||
   ! grep -Fq 'trusted pilot handoff criteria not ready' "$TMP_DIR/verify-provenance-trusted-policy-explicit.log" ||
   ! jq -e '
   .schema.id == "access_bridge_pilot_evidence_bundle_verify_summary"
-  and .schema.minor == 5
+  and .schema.minor == 6
   and .status == "fail"
   and .rc == 1
   and .pilot_handoff_ready == false
@@ -438,6 +443,7 @@ if [[ "$trusted_policy_explicit_rc" -eq 0 ]] ||
   and .pilot_handoff_criteria.ready == false
   and .pilot_handoff_criteria.trusted_pilot_receipt_ready == false
   and .pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true
+  and .pilot_handoff_criteria.deployment_smoke_summary_sha256_matches_bundle == true
   and .pilot_handoff_criteria.evidence_freshness_checked == true
   and .pilot_handoff_criteria.evidence_freshness_ok == true
   and .pilot_handoff_criteria.evidence_max_age_sec == 604800
@@ -468,6 +474,8 @@ if [[ "$trusted_policy_explicit_rc" -eq 0 ]] ||
   and .evidence_binding.organization_id == "pilot-org"
   and .evidence_binding.registry_id == "registry-pilot"
   and .evidence_binding.smoke_summary_sha256 == "'"$SMOKE_SUMMARY_SHA256"'"
+  and .evidence_binding.deployment_smoke_summary_sha256 == "'"$SMOKE_SUMMARY_SHA256"'"
+  and .evidence_binding.deployment_evidence_binding_smoke_summary_sha256 == "'"$SMOKE_SUMMARY_SHA256"'"
   and .evidence_binding.deployment_evidence_summary_sha256 == "'"$DEPLOYMENT_SUMMARY_SHA256"'"
   and .evidence_binding.host_install_check_summary_sha256 == "'"$HOST_SUMMARY_SHA256"'"
   and .evidence_binding.host_install_evidence_mode == "deploy-pack"
@@ -482,6 +490,77 @@ if [[ "$trusted_policy_explicit_rc" -eq 0 ]] ||
   echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted non-handoff-ready receipt"
   cat "$TMP_DIR/verify-provenance-trusted-policy-explicit.log"
   cat "$VERIFY_SUMMARY_JSON"
+  exit 1
+fi
+
+SMOKE_HASH_MISMATCH_DIR="$TMP_DIR/access_bridge_pilot_evidence_bundle_smoke_hash_mismatch"
+SMOKE_HASH_MISMATCH_SUMMARY="$TMP_DIR/access_bridge_pilot_evidence_bundle_smoke_hash_mismatch_summary.json"
+SMOKE_HASH_MISMATCH_TAR="$TMP_DIR/access_bridge_pilot_evidence_bundle_smoke_hash_mismatch.tar.gz"
+SMOKE_HASH_MISMATCH_SHA="$SMOKE_HASH_MISMATCH_TAR.sha256"
+SMOKE_HASH_MISMATCH_PROVENANCE="$TMP_DIR/access_bridge_pilot_evidence_bundle_smoke_hash_mismatch.provenance.json"
+SMOKE_HASH_MISMATCH_VERIFY_SUMMARY="$TMP_DIR/access_bridge_pilot_evidence_bundle_smoke_hash_mismatch_verify_summary.json"
+cp -R "$BUNDLE_DIR" "$SMOKE_HASH_MISMATCH_DIR"
+jq '.notes = "Access bridge service smoke passed after regenerated receipt"' \
+  "$SMOKE_HASH_MISMATCH_DIR/access_bridge_service_smoke_summary.json" \
+  >"$SMOKE_HASH_MISMATCH_DIR/access_bridge_service_smoke_summary.json.tmp"
+mv "$SMOKE_HASH_MISMATCH_DIR/access_bridge_service_smoke_summary.json.tmp" "$SMOKE_HASH_MISMATCH_DIR/access_bridge_service_smoke_summary.json"
+jq \
+  --arg bundle_dir "$SMOKE_HASH_MISMATCH_DIR" \
+  --arg bundle_tar "$SMOKE_HASH_MISMATCH_TAR" \
+  --arg bundle_tar_sha256_file "$SMOKE_HASH_MISMATCH_SHA" \
+  --arg manifest_sha256 "$SMOKE_HASH_MISMATCH_DIR/manifest.sha256" \
+  --arg summary_json "$SMOKE_HASH_MISMATCH_SUMMARY" \
+  --arg bundled_summary_json "$SMOKE_HASH_MISMATCH_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
+  --arg provenance_json "$SMOKE_HASH_MISMATCH_PROVENANCE" \
+  --arg smoke_summary_json "$SMOKE_HASH_MISMATCH_DIR/access_bridge_service_smoke_summary.json" \
+  --arg deployment_summary_json "$SMOKE_HASH_MISMATCH_DIR/access_bridge_deployment_evidence_summary.json" \
+  --arg host_summary_json "$SMOKE_HASH_MISMATCH_DIR/access_bridge_host_install_check_summary.json" \
+  '.artifacts.bundle_dir = $bundle_dir
+    | .artifacts.bundle_tar = $bundle_tar
+    | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file
+    | .artifacts.manifest_sha256 = $manifest_sha256
+    | .artifacts.summary_json = $summary_json
+    | .artifacts.bundled_summary_json = $bundled_summary_json
+    | .artifacts.provenance_json = $provenance_json
+    | .artifacts.smoke_summary_json = $smoke_summary_json
+    | .artifacts.deployment_evidence_summary_json = $deployment_summary_json
+    | .artifacts.host_install_check_summary_json = $host_summary_json
+    | .provenance.sidecar_json = $provenance_json' \
+  "$SUMMARY_JSON" >"$SMOKE_HASH_MISMATCH_SUMMARY"
+cp "$SMOKE_HASH_MISMATCH_SUMMARY" "$SMOKE_HASH_MISMATCH_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+(
+  cd "$SMOKE_HASH_MISMATCH_DIR"
+  find . -type f -print \
+    | sed 's|^\./||' \
+    | grep -v '^manifest\.sha256$' \
+    | LC_ALL=C sort \
+    | while IFS= read -r rel; do
+        sha256sum "$rel"
+      done
+) >"$SMOKE_HASH_MISMATCH_DIR/manifest.sha256"
+tar -czf "$SMOKE_HASH_MISMATCH_TAR" -C "$TMP_DIR" "$(basename "$SMOKE_HASH_MISMATCH_DIR")"
+printf '%s  %s\n' "$(sha256sum "$SMOKE_HASH_MISMATCH_TAR" | awk '{print $1}')" "$(basename "$SMOKE_HASH_MISMATCH_TAR")" >"$SMOKE_HASH_MISMATCH_SHA"
+go run ./cmd/gpmrecover provenance-sign \
+  --summary-json "$SMOKE_HASH_MISMATCH_SUMMARY" \
+  --bundle-tar "$SMOKE_HASH_MISMATCH_TAR" \
+  --bundle-tar-sha256-file "$SMOKE_HASH_MISMATCH_SHA" \
+  --private-key-file "$PRIVATE_KEY_FILE" \
+  --org-id pilot-org \
+  --org-name "Pilot Org" \
+  --out "$SMOKE_HASH_MISMATCH_PROVENANCE" >/dev/null
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$SMOKE_HASH_MISMATCH_SUMMARY" \
+  --provenance-json "$SMOKE_HASH_MISMATCH_PROVENANCE" \
+  --require-trusted-provenance 1 \
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$SMOKE_HASH_MISMATCH_VERIFY_SUMMARY" >"$TMP_DIR/trusted-policy-smoke-hash-mismatch.log" 2>&1
+smoke_hash_mismatch_rc=$?
+set -e
+if [[ "$smoke_hash_mismatch_rc" -eq 0 ]] ||
+  ! grep -Fq 'bundled deployment evidence smoke summary hash does not match bundled smoke summary' "$TMP_DIR/trusted-policy-smoke-hash-mismatch.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted verifier accepted deployment/smoke hash mismatch"
+  cat "$TMP_DIR/trusted-policy-smoke-hash-mismatch.log"
   exit 1
 fi
 
@@ -965,9 +1044,12 @@ if ! jq -e \
     and .integrity_only == false
     and .status_meaning == "trusted pilot handoff authority"
     and .pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true
+    and .pilot_handoff_criteria.deployment_smoke_summary_sha256_matches_bundle == true
     and .pilot_handoff_criteria.evidence_freshness_ok == true
     and .pilot_handoff_criteria.installed_host_evidence_present == true
     and .evidence_freshness.ok == true
+    and .evidence_binding.deployment_smoke_summary_sha256 == "'"$SMOKE_SUMMARY_SHA256"'"
+    and .evidence_binding.deployment_evidence_binding_smoke_summary_sha256 == "'"$SMOKE_SUMMARY_SHA256"'"
     and .evidence_binding.host_install_check_summary_sha256 == $host_summary_sha256
     and .evidence_binding.host_install_evidence_mode == "installed-host"
   ' "$INSTALLED_HOST_VERIFY_SUMMARY_JSON" >/dev/null; then

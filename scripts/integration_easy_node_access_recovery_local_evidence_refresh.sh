@@ -229,4 +229,114 @@ if [[ "$(find "$PROTECTED_CANONICAL" -type f | wc -l | tr -d '[:space:]')" != "1
   exit 1
 fi
 
+run_protected_canonical_child_case() {
+  local case_name="$1"
+  local canonical_dir="$TMP_DIR/protected-canonical-child-$case_name"
+  local reports_dir="$TMP_DIR/protected-child-refresh-$case_name"
+  local summary_json="$TMP_DIR/protected-child-refresh-$case_name-summary.json"
+  local log_file="$TMP_DIR/protected-child-refresh-$case_name.log"
+  local protected_file=""
+  local protected_port="$((20380 + (RANDOM % 200)))"
+
+  mkdir -p "$canonical_dir"
+  case "$case_name" in
+    service-smoke)
+      protected_file="$canonical_dir/access_bridge_service_smoke_summary.json"
+      cat >"$protected_file" <<'JSON_PROTECTED_CHILD'
+{
+  "version": 1,
+  "schema": {"id": "access_bridge_service_smoke_summary", "major": 1, "minor": 6},
+  "status": "pass",
+  "base_url": "https://helper.gpm-pilot.net",
+  "transport": {
+    "https": true,
+    "tls": {"verified": true, "ssl_verify_result": "0"}
+  }
+}
+JSON_PROTECTED_CHILD
+      ;;
+    deployment-evidence)
+      protected_file="$canonical_dir/access_bridge_deployment_evidence_summary.json"
+      cat >"$protected_file" <<'JSON_PROTECTED_CHILD'
+{
+  "version": 1,
+  "schema": {"id": "access_bridge_deployment_evidence_summary", "major": 1, "minor": 5},
+  "status": "pass",
+  "evidence_scope": "real_helper_https",
+  "pilot_handoff_candidate": true
+}
+JSON_PROTECTED_CHILD
+      ;;
+    host-install)
+      protected_file="$canonical_dir/access_bridge_host_install_check_summary.json"
+      cat >"$protected_file" <<'JSON_PROTECTED_CHILD'
+{
+  "version": 1,
+  "schema": {"id": "access_bridge_host_install_check_summary", "major": 1, "minor": 5},
+  "status": "pass",
+  "inputs": {
+    "evidence_mode": "installed-host",
+    "installed_host_mode": true
+  }
+}
+JSON_PROTECTED_CHILD
+      ;;
+    pilot-bundle)
+      protected_file="$canonical_dir/access_bridge_pilot_evidence_bundle_summary.json"
+      cat >"$protected_file" <<'JSON_PROTECTED_CHILD'
+{
+  "version": 1,
+  "schema": {"id": "access_bridge_pilot_evidence_bundle_summary", "major": 1, "minor": 7},
+  "status": "pass",
+  "evidence_scope": "real_helper_https",
+  "provenance": {"enabled": true}
+}
+JSON_PROTECTED_CHILD
+      ;;
+    *)
+      echo "unknown protected canonical child case: $case_name"
+      exit 1
+      ;;
+  esac
+
+  protected_sha_before="$(sha256sum "$protected_file" | awk '{print $1}')"
+  set +e
+  bash ./scripts/access_recovery_local_evidence_refresh.sh \
+    --reports-dir "$reports_dir" \
+    --port "$protected_port" \
+    --write-canonical 1 \
+    --canonical-dir "$canonical_dir" \
+    --refresh-roadmap 0 \
+    --summary-json "$summary_json" \
+    --print-summary-json 0 >"$log_file" 2>&1
+  protected_child_rc=$?
+  set -e
+  if [[ "$protected_child_rc" -ne 2 ]]; then
+    echo "expected protected canonical child overwrite case $case_name to fail with rc 2, got $protected_child_rc"
+    cat "$log_file"
+    [[ -f "$summary_json" ]] && cat "$summary_json"
+    exit 1
+  fi
+  if ! grep -Fq -- "would overwrite existing canonical real-helper/installed-host/trusted child evidence" "$log_file"; then
+    echo "expected protected canonical child overwrite diagnostic for $case_name"
+    cat "$log_file"
+    exit 1
+  fi
+  protected_sha_after="$(sha256sum "$protected_file" | awk '{print $1}')"
+  if [[ "$protected_sha_after" != "$protected_sha_before" ]]; then
+    echo "protected canonical child evidence was modified for $case_name"
+    exit 1
+  fi
+  if [[ "$(find "$canonical_dir" -type f | wc -l | tr -d '[:space:]')" != "1" ]]; then
+    echo "protected canonical child refresh wrote unexpected canonical files for $case_name"
+    find "$canonical_dir" -type f -print
+    exit 1
+  fi
+}
+
+run_protected_canonical_child_case service-smoke
+run_protected_canonical_child_case deployment-evidence
+run_protected_canonical_child_case host-install
+run_protected_canonical_child_case pilot-bundle
+
 echo "easy node access recovery local evidence refresh integration check ok"

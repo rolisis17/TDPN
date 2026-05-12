@@ -70,7 +70,7 @@ jq -n \
     schema: {
       id: "access_bridge_service_smoke_summary",
       major: 1,
-      minor: 5
+      minor: 6
     },
     generated_at_utc: $generated_at_utc,
     status: "pass",
@@ -133,6 +133,7 @@ jq -n \
       http_status: "202"
     }
   }' >"$SMOKE_SUMMARY"
+SMOKE_SUMMARY_SHA256="$(sha256sum "$SMOKE_SUMMARY" | awk '{print $1}')"
 
 ./scripts/access_bridge_deployment_evidence.sh \
   --smoke-summary-json "$SMOKE_SUMMARY" \
@@ -153,6 +154,7 @@ fi
 
 if ! jq -e \
   --arg smoke_summary "$SMOKE_SUMMARY" \
+  --arg smoke_summary_sha256 "$SMOKE_SUMMARY_SHA256" \
   --arg config_json "$SERVICE_CONFIG" \
   --arg deploy_dir "$DEPLOY_DIR" \
   --arg registry_id "$registry_id" \
@@ -185,8 +187,11 @@ if ! jq -e \
     and .transport.mtls_client_certificate_configured == false
     and .transport.mtls_client_certificate_used == false
     and .transport.mtls_missing_client_certificate_rejected == false
-      and .smoke.config_sha256 == $config_sha256
+    and .smoke.config_sha256 == $config_sha256
     and .smoke.summary_json == $smoke_summary
+    and .smoke.summary_sha256 == $smoke_summary_sha256
+    and .evidence_binding.smoke_summary_json == $smoke_summary
+    and .evidence_binding.smoke_summary_sha256 == $smoke_summary_sha256
     and .expected_identity.helper_id == "helper-evidence"
     and .expected_identity.organization_id == "evidence-org"
     and .expected_identity.registry_id == $registry_id
@@ -219,6 +224,38 @@ if ! jq -e \
   ' "$SUMMARY_JSON" >/dev/null; then
   echo "access bridge deployment evidence integration failed: pass summary contract mismatch"
   cat "$SUMMARY_JSON"
+  exit 1
+fi
+
+OLD_SCHEMA_SMOKE="$TMP_DIR/access_bridge_deployment_evidence_old_schema_smoke.json"
+OLD_SCHEMA_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_old_schema_summary.json"
+jq '.schema.minor = 5' "$SMOKE_SUMMARY" >"$OLD_SCHEMA_SMOKE"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$OLD_SCHEMA_SMOKE" \
+  --expect-helper-id helper-evidence \
+  --expect-org-id evidence-org \
+  --expect-registry-id "$registry_id" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_DIR" \
+  --service-name gpm-access-bridge-evidence \
+  --summary-json "$OLD_SCHEMA_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/old-schema-smoke.log" 2>&1
+old_schema_rc=$?
+set -e
+if [[ "$old_schema_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: accepted old smoke schema"
+  cat "$TMP_DIR/old-schema-smoke.log"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .smoke.evidence_status == "fail"
+  and (.smoke.evidence_reason | contains("smoke summary schema minor is too old"))
+  and .recommended_next_action.id == "refresh_deployed_bridge_smoke"
+' "$OLD_SCHEMA_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: old smoke schema failure summary mismatch"
+  cat "$OLD_SCHEMA_SUMMARY"
   exit 1
 fi
 

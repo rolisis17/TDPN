@@ -594,7 +594,10 @@ fi
 smoke_status="$(json_string_or_empty "$smoke_summary_json" '.status')"
 smoke_notes="$(json_string_or_empty "$smoke_summary_json" '.notes')"
 smoke_schema_id="$(json_string_or_empty "$smoke_summary_json" '.schema.id')"
+smoke_schema_major="$(jq -r 'if (.schema.major | type) == "number" then (.schema.major | tostring) else "" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_schema_minor="$(jq -r 'if (.schema.minor | type) == "number" then (.schema.minor | tostring) else "" end' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_generated_at_utc="$(json_string_or_empty "$smoke_summary_json" '.generated_at_utc')"
+smoke_summary_sha256="$(file_sha256 "$smoke_summary_json")"
 smoke_age_sec="$(smoke_age_seconds "$smoke_generated_at_utc")"
 smoke_auth_required="$(jq -r '.auth.required // false' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_missing_code_http="$(json_string_or_empty "$smoke_summary_json" '.auth.missing_code_http_status')"
@@ -752,9 +755,19 @@ smoke_config_sha256="$(json_string_or_empty "$smoke_summary_json" '.health.confi
 
 smoke_evidence_status="pass"
 smoke_evidence_reason=""
+if [[ -z "$smoke_summary_sha256" ]]; then
+  smoke_evidence_status="fail"
+  smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "unable to compute smoke summary sha256")"
+fi
 if [[ "$smoke_schema_id" != "access_bridge_service_smoke_summary" ]]; then
   smoke_evidence_status="fail"
   smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary schema id missing or invalid")"
+elif [[ "$smoke_schema_major" != "1" ]]; then
+  smoke_evidence_status="fail"
+  smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary schema major missing or invalid")"
+elif [[ -z "$smoke_schema_minor" || "$smoke_schema_minor" -lt 6 ]]; then
+  smoke_evidence_status="fail"
+  smoke_evidence_reason="$(append_reason "$smoke_evidence_reason" "smoke summary schema minor is too old")"
 fi
 if [[ -z "$smoke_age_sec" ]]; then
   smoke_evidence_status="fail"
@@ -1081,9 +1094,12 @@ jq -n \
   --arg status "$status" \
   --arg summary_json "$summary_json" \
   --arg smoke_summary_json "$smoke_summary_json" \
+  --arg smoke_summary_sha256 "$smoke_summary_sha256" \
   --arg smoke_status "$smoke_status" \
   --arg smoke_notes "$smoke_notes" \
   --arg smoke_schema_id "$smoke_schema_id" \
+  --arg smoke_schema_major "$smoke_schema_major" \
+  --arg smoke_schema_minor "$smoke_schema_minor" \
   --arg smoke_generated_at_utc "$smoke_generated_at_utc" \
   --arg smoke_age_sec "$smoke_age_sec" \
   --arg smoke_auth_required "$smoke_auth_required" \
@@ -1178,7 +1194,7 @@ jq -n \
     schema: {
       id: "access_bridge_deployment_evidence_summary",
       major: 1,
-      minor: 5
+      minor: 6
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -1206,7 +1222,10 @@ jq -n \
       status: $smoke_status,
       notes: $smoke_notes,
       schema_id: $smoke_schema_id,
+      schema_major: (if $smoke_schema_major == "" then null else ($smoke_schema_major | tonumber) end),
+      schema_minor: (if $smoke_schema_minor == "" then null else ($smoke_schema_minor | tonumber) end),
       generated_at_utc: $smoke_generated_at_utc,
+      summary_sha256: $smoke_summary_sha256,
       age_sec: (if $smoke_age_sec == "" then null else ($smoke_age_sec | tonumber) end),
       auth_required: ($smoke_auth_required == "true"),
       missing_code_http_status: $smoke_missing_code_http,
@@ -1246,6 +1265,10 @@ jq -n \
       transport_mtls_missing_client_certificate_health_remote_port: $smoke_transport_mtls_missing_client_remote_port,
       path_id: $smoke_path_id,
       summary_json: $smoke_summary_json
+    },
+    evidence_binding: {
+      smoke_summary_json: $smoke_summary_json,
+      smoke_summary_sha256: $smoke_summary_sha256
     },
     transport: {
       status: $transport_status,

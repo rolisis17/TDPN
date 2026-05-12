@@ -1422,6 +1422,11 @@ if ! jq -e \
   and .next_actions[0].requires_real_hosts == true
   and .next_actions[0].local_pack_only == false
   and (.next_actions[0].command | contains("--evidence-mode installed-host"))
+  and .next_actions[0].placeholder_unresolved == true
+  and .next_actions[0].placeholder_keys == ["HELPER_PUBLIC_DNS","BRIDGE_SERVICE_CONFIG"]
+  and .next_actions[0].safe_to_execute_as_is == false
+  and .next_actions[0].operator_input_required == true
+  and ((.next_actions[0].placeholder_resolution // "") | contains("Template command only"))
   and ((.next_actions // []) | any(
     .id == "machine_c_vpn_smoke"
     and .requires_real_hosts == true
@@ -1997,6 +2002,9 @@ if ! jq -e '
     and .missing_evidence_action_kind == "trusted-provenance"
     and .placeholder_unresolved == true
     and ((.placeholder_keys // []) | index("TRUST_STORE"))
+    and .safe_to_execute_as_is == false
+    and .operator_input_required == true
+    and ((.placeholder_resolution // "") | contains("Template command only"))
   ))
 ' "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_missing_summary.json" >/dev/null; then
   echo "Access Recovery missing trusted verifier summary mismatch"
@@ -3130,6 +3138,9 @@ if ! jq -e '
     and ((.placeholder_keys // []) | index("MTLS_CA_FILE"))
     and ((.placeholder_keys // []) | index("MTLS_CLIENT_CERT_FILE"))
     and ((.placeholder_keys // []) | index("MTLS_CLIENT_KEY_FILE"))
+    and .safe_to_execute_as_is == false
+    and .operator_input_required == true
+    and ((.placeholder_resolution // "") | contains("Template command only"))
   ))
 ' "$TMP_DIR/roadmap_progress_access_recovery_bad_smoke_mtls_summary.json" >/dev/null; then
   echo "Access Recovery bad required mTLS smoke summary mismatch"

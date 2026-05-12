@@ -13147,7 +13147,15 @@ next_actions_candidate_json="$(
     ] | unique_strings_preserve_order as $keys
     | {
         placeholder_unresolved: (($keys | length) > 0),
-        placeholder_keys: $keys
+        placeholder_keys: $keys,
+        safe_to_execute_as_is: (($keys | length) == 0),
+        operator_input_required: (($keys | length) > 0),
+        placeholder_resolution: (
+          if ($keys | length) > 0 then
+            "Template command only; replace Access Recovery placeholders with concrete pilot host, helper, credential, config, deploy-pack, provenance, trust-store, and optional mTLS values before execution."
+          else null
+          end
+        )
       };
   [
     (if (

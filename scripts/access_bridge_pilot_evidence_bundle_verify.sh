@@ -274,7 +274,7 @@ validate_trusted_summary_artifact_bindings() {
 validate_trusted_bundled_evidence_semantics() {
   local bundle_root="$1"
   local source_summary="$2"
-  local smoke_json deployment_json host_json semantic_errors
+  local smoke_json deployment_json host_json semantic_errors smoke_summary_sha256
   local expected_base_url expected_helper_id expected_organization_id expected_registry_id expected_require_mtls
 
   smoke_json="$bundle_root/access_bridge_service_smoke_summary.json"
@@ -297,6 +297,7 @@ validate_trusted_bundled_evidence_semantics() {
   expected_organization_id="$(json_string "$source_summary" '.expected_identity.organization_id')"
   expected_registry_id="$(json_string "$source_summary" '.expected_identity.registry_id')"
   expected_require_mtls="$(jq -r 'if (.evidence_policy.require_mtls // false) == true then "true" else "false" end' "$source_summary" 2>/dev/null || printf '%s' "false")"
+  smoke_summary_sha256="$(sha256_value "$smoke_json")"
 
   semantic_errors="$(jq -nr \
     --slurpfile smoke "$smoke_json" \
@@ -306,7 +307,8 @@ validate_trusted_bundled_evidence_semantics() {
     --arg expected_helper_id "$expected_helper_id" \
     --arg expected_organization_id "$expected_organization_id" \
     --arg expected_registry_id "$expected_registry_id" \
-    --arg expected_require_mtls "$expected_require_mtls" '
+    --arg expected_require_mtls "$expected_require_mtls" \
+    --arg smoke_summary_sha256 "$smoke_summary_sha256" '
       def lc($v):
         if ($v | type) == "string" then ($v | ascii_downcase) else "" end;
       def str_eq($v; $expected):
@@ -482,10 +484,13 @@ validate_trusted_bundled_evidence_semantics() {
           if str_eq($s.bridge.status; "ok") | not then "bundled service smoke bridge status is not ok" else empty end,
           if ($s.bridge.security_headers_ok != true) then "bundled service smoke security headers check failed" else empty end,
           if str_eq($s.abuse.http_status; "202") | not then "bundled service smoke abuse endpoint status is not 202" else empty end,
-          if schema_ok($d; "access_bridge_deployment_evidence_summary"; 5) | not then "bundled deployment evidence summary schema is invalid or too old" else empty end,
+          if schema_ok($d; "access_bridge_deployment_evidence_summary"; 6) | not then "bundled deployment evidence summary schema is invalid or too old" else empty end,
           if pass_status($d) | not then "bundled deployment evidence summary status is not pass" else empty end,
           if (($d.evidence_scope // "") != "real_helper_https") then "bundled deployment evidence scope is not real_helper_https" else empty end,
           if (($d.smoke.base_url // "") != $expected_base_url) then "bundled deployment evidence base_url does not match bundle summary" else empty end,
+          if (($d.smoke.summary_sha256 // "") == "") then "bundled deployment evidence smoke summary hash is missing" else empty end,
+          if (($d.evidence_binding.smoke_summary_sha256 // "") == "") then "bundled deployment evidence binding smoke summary hash is missing" else empty end,
+          if (($d.smoke.summary_sha256 // "") != $smoke_summary_sha256 or ($d.evidence_binding.smoke_summary_sha256 // "") != $smoke_summary_sha256) then "bundled deployment evidence smoke summary hash does not match bundled smoke summary" else empty end,
           if str_eq($d.smoke.status; "pass") | not then "bundled deployment evidence smoke status is not pass" else empty end,
           if str_eq($d.smoke.evidence_status; "pass") | not then "bundled deployment evidence smoke evidence_status is not pass" else empty end,
           if ($d.smoke.auth_required != true) then "bundled deployment evidence did not prove auth is required" else empty end,
@@ -1121,7 +1126,7 @@ write_verification_summary() {
   local source_summary_sha256 source_base_url source_helper_id source_organization_id source_registry_id
   local source_smoke_summary_json source_deployment_summary_json source_host_summary_json
   local source_smoke_summary_sha256 source_deployment_summary_sha256 source_host_summary_sha256
-  local source_host_evidence_mode
+  local source_deployment_smoke_summary_sha256 source_deployment_binding_smoke_summary_sha256 source_host_evidence_mode
   local bundled_source_summary_json bundled_smoke_summary_json bundled_deployment_summary_json bundled_host_summary_json
   local evidence_freshness_checked_json evidence_freshness_ok_json evidence_freshness_details_json
 
@@ -1164,6 +1169,8 @@ write_verification_summary() {
   source_smoke_summary_sha256=""
   source_deployment_summary_sha256=""
   source_host_summary_sha256=""
+  source_deployment_smoke_summary_sha256=""
+  source_deployment_binding_smoke_summary_sha256=""
   source_host_evidence_mode=""
   trust_store_sha256="$(sha256_value_or_empty "$trust_store")"
   bundled_source_summary_json=""
@@ -1204,6 +1211,10 @@ write_verification_summary() {
     source_smoke_summary_sha256="$(sha256_value_or_empty "$source_smoke_summary_json")"
     source_deployment_summary_sha256="$(sha256_value_or_empty "$source_deployment_summary_json")"
     source_host_summary_sha256="$(sha256_value_or_empty "$source_host_summary_json")"
+    if [[ -f "$source_deployment_summary_json" ]]; then
+      source_deployment_smoke_summary_sha256="$(json_string "$source_deployment_summary_json" '.smoke.summary_sha256')"
+      source_deployment_binding_smoke_summary_sha256="$(json_string "$source_deployment_summary_json" '.evidence_binding.smoke_summary_sha256')"
+    fi
     if [[ -f "$source_host_summary_json" ]]; then
       source_host_evidence_mode="$(jq -r '(.inputs.evidence_mode // .observed.evidence_mode // .summary.evidence_mode // "deploy-pack") | tostring' "$source_host_summary_json" 2>/dev/null || true)"
       if jq -e '
@@ -1267,6 +1278,8 @@ write_verification_summary() {
     --arg source_smoke_summary_sha256 "$source_smoke_summary_sha256" \
     --arg source_deployment_summary_sha256 "$source_deployment_summary_sha256" \
     --arg source_host_summary_sha256 "$source_host_summary_sha256" \
+    --arg source_deployment_smoke_summary_sha256 "$source_deployment_smoke_summary_sha256" \
+    --arg source_deployment_binding_smoke_summary_sha256 "$source_deployment_binding_smoke_summary_sha256" \
     --arg source_host_evidence_mode "$source_host_evidence_mode" \
     --argjson evidence_freshness_checked "$evidence_freshness_checked_json" \
     --argjson evidence_freshness_ok "$evidence_freshness_ok_json" \
@@ -1323,12 +1336,18 @@ write_verification_summary() {
         end;
       def tar_sha256_effective_enabled:
         $check_tar_sha256 and ($bundle_tar != "");
+      def deployment_smoke_summary_sha256_matches_bundle:
+        $source_smoke_summary_sha256 != ""
+        and $source_deployment_smoke_summary_sha256 != ""
+        and $source_deployment_binding_smoke_summary_sha256 != ""
+        and $source_deployment_smoke_summary_sha256 == $source_smoke_summary_sha256
+        and $source_deployment_binding_smoke_summary_sha256 == $source_smoke_summary_sha256;
       {
         version: 1,
         schema: {
           id: "access_bridge_pilot_evidence_bundle_verify_summary",
           major: 1,
-          minor: 5
+          minor: 6
         },
         generated_at_utc: $generated_at_utc,
         status: $status,
@@ -1355,6 +1374,7 @@ write_verification_summary() {
           provenance_organization_matches_evidence: ($provenance_organization_id != "" and $source_organization_id != "" and $provenance_organization_id == $source_organization_id),
           trusted_organization_matches_evidence: ($provenance_trusted_org_id != "" and $source_organization_id != "" and $provenance_trusted_org_id == $source_organization_id),
           bundled_child_evidence_semantic_ok: $bundled_child_evidence_semantic_ok,
+          deployment_smoke_summary_sha256_matches_bundle: deployment_smoke_summary_sha256_matches_bundle,
           evidence_freshness_checked: $evidence_freshness_checked,
           evidence_freshness_ok: $evidence_freshness_ok,
           evidence_max_age_sec: $evidence_max_age_sec,
@@ -1435,6 +1455,8 @@ write_verification_summary() {
           registry_id: null_if_empty($source_registry_id),
           smoke_summary_json: null_if_empty($source_smoke_summary_json),
           smoke_summary_sha256: null_if_empty($source_smoke_summary_sha256),
+          deployment_smoke_summary_sha256: null_if_empty($source_deployment_smoke_summary_sha256),
+          deployment_evidence_binding_smoke_summary_sha256: null_if_empty($source_deployment_binding_smoke_summary_sha256),
           deployment_evidence_summary_json: null_if_empty($source_deployment_summary_json),
           deployment_evidence_summary_sha256: null_if_empty($source_deployment_summary_sha256),
           host_install_check_summary_json: null_if_empty($source_host_summary_json),
