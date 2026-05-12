@@ -47,6 +47,7 @@ OTHER_TRUST_STORE="$TMP_DIR/other-provenance-trust-store.json"
 OTHER_PROVENANCE_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_other_org.provenance.json"
 DEMO_TRUST_STORE="$TMP_DIR/.easy-node-logs/access-recovery-demo/recovery-trust.json"
 DEMO_MARKED_TRUST_STORE="$TMP_DIR/copied-demo-marker-trust-store.json"
+DEMO_ID_TRUST_STORE="$TMP_DIR/copied-demo-id-trust-store.json"
 mkdir -p "$BUNDLE_DIR/bridge-deploy-pack"
 mkdir -p "$(dirname "$DEMO_TRUST_STORE")"
 go run ./cmd/gpmrecover gen --private-key-out "$PRIVATE_KEY_FILE" --public-key-out "$PUBLIC_KEY_FILE" >/dev/null
@@ -55,6 +56,7 @@ go run ./cmd/gpmrecover gen --private-key-out "$OTHER_PRIVATE_KEY_FILE" --public
 go run ./cmd/gpmrecover trust-add --trust-store "$OTHER_TRUST_STORE" --org-id other-org --org-name "Other Org" --public-key-file "$OTHER_PUBLIC_KEY_FILE" >/dev/null
 cp "$TRUST_STORE" "$DEMO_TRUST_STORE"
 jq '.trusted_keys[0].source = "generated demo bundle"' "$TRUST_STORE" >"$DEMO_MARKED_TRUST_STORE"
+jq '.trusted_keys[0].source = "" | .trusted_keys[0].org_id = "freenews-demo" | .trusted_keys[0].name = "FreeNews Demo"' "$TRUST_STORE" >"$DEMO_ID_TRUST_STORE"
 NOW_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 jq -n \
   --arg generated_at_utc "$NOW_UTC" \
@@ -1404,6 +1406,21 @@ set -e
 if [[ "$demo_marked_trust_store_rc" -eq 0 ]] || ! grep -Fq 'rejects demo-marked trust-store contents' "$TMP_DIR/verify-provenance-demo-marked-trust-store.log"; then
   echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted copied demo-marked trust store"
   cat "$TMP_DIR/verify-provenance-demo-marked-trust-store.log"
+  exit 1
+fi
+
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$SUMMARY_JSON" \
+  --provenance-json "$PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$DEMO_ID_TRUST_STORE" \
+  --verification-summary-json "$TMP_DIR/verify-provenance-demo-id-trust-store-summary.json" >"$TMP_DIR/verify-provenance-demo-id-trust-store.log" 2>&1
+demo_id_trust_store_rc=$?
+set -e
+if [[ "$demo_id_trust_store_rc" -eq 0 ]] || ! grep -Fq 'rejects demo-marked trust-store contents' "$TMP_DIR/verify-provenance-demo-id-trust-store.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted copied demo identity trust store"
+  cat "$TMP_DIR/verify-provenance-demo-id-trust-store.log"
   exit 1
 fi
 

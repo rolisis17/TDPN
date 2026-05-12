@@ -2503,6 +2503,10 @@ access_recovery_verifier_evidence_json() {
         (($path // "") | tostring | ascii_downcase) == "pass";
       def schema_minor_ready:
         ((.schema.minor | type) == "number" and .schema.minor >= 4);
+      def schema_major_ready:
+        ((.schema.major | type) == "number" and .schema.major == 1);
+      def schema_version_ready:
+        schema_major_ready and schema_minor_ready;
       def tar_sha256_checked:
         .checks.tar_sha256.checked == true;
       def required_checks_enabled:
@@ -2539,7 +2543,7 @@ access_recovery_verifier_evidence_json() {
         and pass_status(.checks.evidence_freshness.status)
         and (.evidence_freshness.ok == true);
       def trusted_pilot_receipt_ready:
-        schema_minor_ready
+        schema_version_ready
         and (.inputs.allow_dev_trust_store != true)
         and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true)
         and evidence_freshness_ready
@@ -2599,6 +2603,7 @@ access_recovery_verifier_evidence_json() {
           semantic_ok: (if $fresh_contract then $semantic_ok else null end),
           notes: (
             if $valid_contract and $summary_stale then "Access bridge pilot evidence verifier summary is stale or has untrusted freshness metadata"
+            elif $valid_contract and (schema_major_ready | not) then "Access bridge pilot evidence verifier receipt schema major is incompatible with pilot handoff readiness"
             elif $valid_contract and (schema_minor_ready | not) then "Access bridge pilot evidence verifier receipt is from an old schema that cannot prove pilot handoff readiness"
             elif $valid_contract and (.inputs.allow_dev_trust_store == true) then "Access bridge pilot evidence verifier used a diagnostic dev trust-store override that cannot prove pilot handoff readiness"
             elif $valid_contract and (generated_at_ready | not) then "Access bridge pilot evidence verifier receipt is missing generated_at_utc"
@@ -3041,7 +3046,9 @@ access_recovery_track_json_from_evidence() {
         and ($bundle_verify.details.pilot_handoff_criteria_trusted_organization_matches_evidence == true)
         and (verifier_binding.ok == true);
       def verifier_pilot_handoff_ready:
-        ($bundle_verify.details.pilot_handoff_ready == true)
+        ($bundle_verify.available == true)
+        and ($bundle_verify.semantic_ok == true)
+        and ($bundle_verify.details.pilot_handoff_ready == true)
         and ($bundle_verify.details.tar_sha256_checked == true)
         and ($bundle_verify.details.pilot_handoff_criteria_ready == true)
         and ($bundle_verify.details.pilot_handoff_criteria_trust_store_sha256_present == true)
@@ -3109,15 +3116,15 @@ access_recovery_track_json_from_evidence() {
         elif ($e == $service_smoke and (($e.status // "") == "missing" or ($e.status // "") == "stale")) then
           "./scripts/easy_node.sh access-recovery-local-evidence-refresh --write-canonical 1 --refresh-roadmap 1 --print-summary-json 1"
         elif ($e == $service_smoke) then
-          "bash ./scripts/access_bridge_service_smoke.sh --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt --expect-helper-id helper-demo --expect-org-id freenews-demo"
+          "bash ./scripts/access_bridge_service_smoke.sh --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --expect-helper-id HELPER_ID --expect-org-id ORG_ID"
           + mtls_arg_suffix
           + " --summary-json .easy-node-logs/access_bridge_service_smoke_summary.json"
         elif ($e == $deployment_evidence) then
-          "bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/access_bridge_service_smoke_summary.json --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy --expect-helper-id helper-demo --expect-org-id freenews-demo"
+          "bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/access_bridge_service_smoke_summary.json --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --expect-helper-id HELPER_ID --expect-org-id ORG_ID"
           + mtls_arg_suffix
           + " --summary-json .easy-node-logs/access_bridge_deployment_evidence_summary.json"
         else
-          "bash ./scripts/access_bridge_host_install_check.sh --evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
+          "bash ./scripts/access_bridge_host_install_check.sh --evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --config-json BRIDGE_SERVICE_CONFIG --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
         end;
       def track_status:
         if real_helper_https_base_ready and pilot_handoff_ready then "pilot-evidence-ready"
@@ -3194,7 +3201,7 @@ access_recovery_track_json_from_evidence() {
               ),
               command: (
                 if installed_host_handoff_evidence then trusted_verifier_command
-                else "bash ./scripts/access_bridge_host_install_check.sh --evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
+                else "bash ./scripts/access_bridge_host_install_check.sh --evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --config-json BRIDGE_SERVICE_CONFIG --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
                 end
               )
             }
@@ -3207,7 +3214,7 @@ access_recovery_track_json_from_evidence() {
               id: "real_helper_https_evidence",
               reason: "Local Access Recovery rehearsal evidence cannot substitute for real helper HTTPS deployment evidence",
               command: (
-                "./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --host-install-evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE"
+                "./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --host-install-evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --expect-helper-id HELPER_ID --expect-org-id ORG_ID --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE"
                 + mtls_arg_suffix
                 + " --reports-dir .easy-node-logs/access-recovery-pilot"
               )
@@ -12989,6 +12996,7 @@ next_actions_candidate_json="$(
       (if ($ucmd | test("(^|[^A-Z0-9_])(TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_TRUST_STORE)([^A-Z0-9_]|$)")) then "TRUST_STORE" else empty end),
       (if ($ucmd | contains("<TRUST-STORE>") or contains("<SET-TRUST-STORE>") or contains("REPLACE_WITH_TRUST_STORE") or contains("REPLACE_WITH_ACCESS_RECOVERY_TRUST_STORE")) then "TRUST_STORE" else empty end),
       (if ($ucmd | test("(^|[^A-Z0-9_])HELPER_PUBLIC_DNS([^A-Z0-9_]|$)")) then "HELPER_PUBLIC_DNS" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_])HELPER_ID([^A-Z0-9_]|$)")) then "HELPER_ID" else empty end),
       (if ($ucmd | test("(^|[^A-Z0-9_])PRIVATE_CODE_FILE([^A-Z0-9_]|$)")) then "PRIVATE_CODE_FILE" else empty end),
       (if ($ucmd | test("(^|[^A-Z0-9_])BRIDGE_SERVICE_CONFIG([^A-Z0-9_]|$)")) then "BRIDGE_SERVICE_CONFIG" else empty end),
       (if ($ucmd | test("(^|[^A-Z0-9_])BRIDGE_DEPLOY_PACK([^A-Z0-9_]|$)")) then "BRIDGE_DEPLOY_PACK" else empty end),

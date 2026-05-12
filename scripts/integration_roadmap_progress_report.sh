@@ -2193,6 +2193,52 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] Access Recovery incompatible verifier receipt schema majors cannot promote pilot readiness"
+ACCESS_BRIDGE_INCOMPATIBLE_MAJOR_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_incompatible_major_summary.json"
+jq '
+  .schema.major = 2
+  | .schema.minor = 4
+  | .pilot_handoff_ready = true
+  | .trusted_pilot_receipt_ready = true
+  | .pilot_handoff_criteria.ready = true
+  | .pilot_handoff_criteria.trusted_pilot_receipt_ready = true
+' "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_INCOMPATIBLE_MAJOR_VERIFY_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_INCOMPATIBLE_MAJOR_VERIFY_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_incompatible_major_verifier_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_incompatible_major_verifier_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_incompatible_major_verifier.log 2>&1; then
+  echo "expected success with warning for incompatible verifier receipt schema major"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_incompatible_major_verifier.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and (.notes | contains("Access Recovery evidence still needs attention"))
+  and (.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.notes | contains("schema major is incompatible"))
+  and .access_recovery_pilot_handoff_ready == false
+  and .access_recovery_track.status == "trusted-provenance-required"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "fail"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_ready == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_ready == true
+  and .access_recovery_track.trusted_pilot_receipt_ready == false
+  and .access_recovery_track.verifier_pilot_handoff_ready == false
+  and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
+' "$TMP_DIR/roadmap_progress_access_recovery_incompatible_major_verifier_summary.json" >/dev/null; then
+  echo "Access Recovery incompatible verifier schema major summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_incompatible_major_verifier_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] Access Recovery diagnostic dev trust-store receipts cannot promote pilot readiness"
 ACCESS_BRIDGE_DEV_TRUST_STORE_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_dev_trust_store_summary.json"
 jq '
@@ -2288,6 +2334,7 @@ if ! jq -e '
     and .missing_evidence_action_kind == "real-helper-https"
     and .placeholder_unresolved == true
     and ((.placeholder_keys // []) | index("HELPER_PUBLIC_DNS"))
+    and ((.placeholder_keys // []) | index("HELPER_ID"))
     and ((.placeholder_keys // []) | index("PRIVATE_CODE_FILE"))
     and ((.placeholder_keys // []) | index("BRIDGE_SERVICE_CONFIG"))
     and ((.placeholder_keys // []) | index("BRIDGE_DEPLOY_PACK"))
@@ -2304,7 +2351,7 @@ if ! jq -e '
   cat "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_summary.json"
   exit 1
 fi
-if ! grep -Fq 'unresolved placeholders: TRUST_STORE,HELPER_PUBLIC_DNS,PRIVATE_CODE_FILE,BRIDGE_SERVICE_CONFIG,BRIDGE_DEPLOY_PACK,PROVENANCE_PRIVATE_KEY_FILE,ORG_ID,ORG_NAME' "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_report.md"; then
+if ! grep -Fq 'unresolved placeholders: TRUST_STORE,HELPER_PUBLIC_DNS,HELPER_ID,PRIVATE_CODE_FILE,BRIDGE_SERVICE_CONFIG,BRIDGE_DEPLOY_PACK,PROVENANCE_PRIVATE_KEY_FILE,ORG_ID,ORG_NAME' "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_report.md"; then
   echo "Access Recovery local rehearsal report missing unresolved operator placeholder guidance"
   cat "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_report.md"
   exit 1

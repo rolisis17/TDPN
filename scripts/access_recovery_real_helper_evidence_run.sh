@@ -178,14 +178,27 @@ value_looks_placeholder() {
   value="$(trim "${1:-}")"
   [[ -z "$value" ]] && return 0
   case "$value" in
-    PATH|FILE|DIR|URL|HELPER_PUBLIC_DNS|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|INSTALL_DIR|SYSTEMD_UNIT_FILE|PROXY_KIND|PROXY_CONFIG_FILE|TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|REPLACE_WITH_*|"<"*">")
+    PATH|FILE|DIR|URL|HELPER_PUBLIC_DNS|HELPER_ID|PRIVATE_CODE_FILE|PILOT_ACCESS_CODE_FILE|BRIDGE_SERVICE_CONFIG|PILOT_BRIDGE_SERVICE_CONFIG_JSON|BRIDGE_DEPLOY_PACK|PILOT_DEPLOY_PACK_DIR|INSTALL_DIR|SYSTEMD_UNIT_FILE|PROXY_KIND|PROXY_CONFIG_FILE|TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|REPLACE_WITH_*|"<"*">")
       return 0
       ;;
   esac
-  if [[ "$value" == *HELPER_PUBLIC_DNS* || "$value" == *PRIVATE_CODE_FILE* || "$value" == *BRIDGE_SERVICE_CONFIG* || "$value" == *BRIDGE_DEPLOY_PACK* || "$value" == *INSTALL_DIR* || "$value" == *SYSTEMD_UNIT_FILE* || "$value" == *PROXY_CONFIG_FILE* || "$value" == *REPLACE_WITH_* || "$value" == *PROVENANCE_PRIVATE_KEY_FILE* || "$value" == *TRUST_STORE* ]]; then
+  if [[ "$value" == *HELPER_PUBLIC_DNS* || "$value" == *HELPER_ID* || "$value" == *PRIVATE_CODE_FILE* || "$value" == *PILOT_ACCESS_CODE_FILE* || "$value" == *BRIDGE_SERVICE_CONFIG* || "$value" == *PILOT_BRIDGE_SERVICE_CONFIG_JSON* || "$value" == *BRIDGE_DEPLOY_PACK* || "$value" == *PILOT_DEPLOY_PACK_DIR* || "$value" == *INSTALL_DIR* || "$value" == *SYSTEMD_UNIT_FILE* || "$value" == *PROXY_CONFIG_FILE* || "$value" == *REPLACE_WITH_* || "$value" == *PROVENANCE_PRIVATE_KEY_FILE* || "$value" == *TRUST_STORE* ]]; then
     return 0
   fi
   return 1
+}
+
+value_looks_generated_demo_identity() {
+  local value
+  value="$(trim "${1:-}")"
+  [[ -z "$value" ]] && return 1
+  value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+  case "$value" in
+    demo|demo-*|*-demo|helper-demo|freenews-demo|*generated-demo*|*generated_example*)
+      return 0
+      ;;
+  esac
+  [[ "$value" =~ (^|[^a-z0-9])demo([^a-z0-9]|$) ]]
 }
 
 url_authority() {
@@ -306,6 +319,83 @@ host_looks_non_public_for_real_helper() {
   fi
   [[ "$host" != *.* ]] && return 0
   return 1
+}
+
+canonical_path_or_abs() {
+  local path
+  path="$(abs_path "${1:-}")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if command -v realpath >/dev/null 2>&1; then
+    if realpath "$path" 2>/dev/null; then
+      return
+    fi
+  fi
+  if command -v readlink >/dev/null 2>&1; then
+    if readlink -f "$path" 2>/dev/null; then
+      return
+    fi
+  fi
+  printf '%s' "$path"
+}
+
+path_looks_generated_demo_example_artifact() {
+  local path="${1:-}" candidate
+  local candidates=()
+  [[ -z "$(trim "$path")" ]] && return 1
+  candidates+=("$path" "$(canonical_path_or_abs "$path")")
+  for candidate in "${candidates[@]}"; do
+    candidate="${candidate//\\//}"
+    candidate="$(printf '%s' "$candidate" | tr '[:upper:]' '[:lower:]')"
+    candidate="${candidate%/}"
+    case "$candidate" in
+      */docs/examples|*/docs/examples/*|*/examples/access-recovery|*/examples/access-recovery/*|\
+      */.easy-node-logs/access-recovery-demo*|\
+      */.easy-node-logs/access_recovery_local_evidence*/access-recovery-demo|\
+      */.easy-node-logs/access_recovery_local_evidence*/access-recovery-demo/*|\
+      */generated-demo/*|*/generated-example/*|*/demo-bundle/*|*/demo-manifest.json|\
+      *.example|*.example.*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+trust_store_content_looks_generated_demo() {
+  local path="$1"
+  [[ -f "$path" ]] || return 1
+  jq -e '
+    def demo_marker:
+      tostring
+      | ascii_downcase
+      | test("(^|[^a-z0-9])(generated-demo|helper-demo|freenews-demo|demo)([^a-z0-9]|$)");
+    [
+      (.trusted_keys[]?, .keys[]?)
+      | [
+          .source,
+          .description,
+          .label,
+          .name,
+          .org_id,
+          .organization_id,
+          .trusted_org_id,
+          .helper_id,
+          .registry_id
+        ]
+      | map(select(. != null) | tostring)
+      | join(" ")
+      | select(
+          demo_marker
+          or (ascii_downcase | contains("generated demo bundle"))
+          or (ascii_downcase | contains("demo handoff"))
+          or (ascii_downcase | contains("demo bundle"))
+        )
+    ]
+    | length > 0
+  ' "$path" >/dev/null 2>&1
 }
 
 json_file_or_null() {
@@ -948,6 +1038,12 @@ fail_preflight() {
   exit 2
 }
 
+fail_live_generated_demo_example_input() {
+  local flag="$1"
+  local path="$2"
+  fail_preflight "$flag must not point to a generated demo/example artifact path for live pilot handoff: $path"
+}
+
 if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
   fail_preflight "missing required command: sha256sum or shasum"
 fi
@@ -1035,6 +1131,32 @@ if value_looks_placeholder "$provenance_org_name"; then
 fi
 if value_looks_placeholder "$trust_store" || [[ ! -f "$trust_store" ]]; then
   fail_preflight "--trust-store must point to a real trusted verifier trust store"
+fi
+if [[ "$plan_only" != "1" ]]; then
+  if [[ -n "$expect_helper_id" ]] && value_looks_generated_demo_identity "$expect_helper_id"; then
+    fail_preflight "--expect-helper-id must not use a generated demo identity for live pilot handoff"
+  fi
+  if [[ -n "$expect_org_id" ]] && value_looks_generated_demo_identity "$expect_org_id"; then
+    fail_preflight "--expect-org-id must not use a generated demo identity for live pilot handoff"
+  fi
+  if [[ -n "$code_file" ]] && path_looks_generated_demo_example_artifact "$code_file"; then
+    fail_live_generated_demo_example_input "--code-file" "$code_file"
+  fi
+  if path_looks_generated_demo_example_artifact "$config_json"; then
+    fail_live_generated_demo_example_input "--config-json" "$config_json"
+  fi
+  if path_looks_generated_demo_example_artifact "$deploy_pack_dir"; then
+    fail_live_generated_demo_example_input "--deploy-pack-dir" "$deploy_pack_dir"
+  fi
+  if path_looks_generated_demo_example_artifact "$provenance_private_key_file"; then
+    fail_live_generated_demo_example_input "--provenance-private-key-file" "$provenance_private_key_file"
+  fi
+  if path_looks_generated_demo_example_artifact "$trust_store"; then
+    fail_live_generated_demo_example_input "--trust-store" "$trust_store"
+  fi
+  if trust_store_content_looks_generated_demo "$trust_store"; then
+    fail_preflight "--trust-store must not contain generated demo/example trust entries for live pilot handoff"
+  fi
 fi
 if [[ -n "$cacert" && ! -f "$cacert" ]]; then
   fail_preflight "--cacert not found: $cacert"

@@ -29,6 +29,14 @@ PROXY_CONFIG_FILE="$TMP_DIR/gpm-access-bridge.caddy"
 CODE_FILE="$TMP_DIR/code.txt"
 TRUST_STORE="$TMP_DIR/trust-store.json"
 PROVENANCE_KEY="$TMP_DIR/provenance.key"
+GENERATED_DEMO_DIR="$TMP_DIR/generated-demo/artifacts"
+GENERATED_DEMO_CODE_FILE="$GENERATED_DEMO_DIR/code.txt"
+GENERATED_DEMO_CONFIG_JSON="$GENERATED_DEMO_DIR/bridge-service-config.json"
+GENERATED_DEMO_DEPLOY_PACK_DIR="$GENERATED_DEMO_DIR/deploy-pack"
+GENERATED_DEMO_TRUST_STORE="$GENERATED_DEMO_DIR/trust-store.json"
+GENERATED_DEMO_PROVENANCE_KEY="$GENERATED_DEMO_DIR/provenance.key"
+DEMO_MARKED_TRUST_STORE="$TMP_DIR/demo-marked-trust-store.json"
+DEMO_ID_TRUST_STORE="$TMP_DIR/demo-id-trust-store.json"
 INSTALLED_HOST_ARGS=(
   --host-install-evidence-mode installed-host
   --install-dir "$INSTALL_DIR"
@@ -37,13 +45,19 @@ INSTALLED_HOST_ARGS=(
   --proxy-config-file "$PROXY_CONFIG_FILE"
 )
 
-mkdir -p "$DEPLOY_PACK_DIR" "$INSTALL_DIR" "$REPORTS_DIR"
+mkdir -p "$DEPLOY_PACK_DIR" "$INSTALL_DIR" "$REPORTS_DIR" "$GENERATED_DEMO_DEPLOY_PACK_DIR"
 printf '%s\n' '{"status":"pass"}' >"$CONFIG_JSON"
 printf '%s\n' '[Service]' 'EnvironmentFile='"$INSTALL_DIR/gpm-access-bridge.env" 'ExecStart='"$INSTALL_DIR/run-gpm-access-bridge.sh" >"$SYSTEMD_UNIT_FILE"
 printf '%s\n' 'helper.gpm-pilot.net {' '  reverse_proxy 127.0.0.1:8791 {' '    header_up X-Forwarded-For {remote_host}' '  }' '}' >"$PROXY_CONFIG_FILE"
 printf '%s\n' 'test-access-code' >"$CODE_FILE"
 printf '%s\n' '{"version":1,"keys":[]}' >"$TRUST_STORE"
 printf '%s\n' 'test-provenance-key' >"$PROVENANCE_KEY"
+printf '%s\n' '{"status":"pass"}' >"$GENERATED_DEMO_CONFIG_JSON"
+printf '%s\n' 'generated-demo-access-code' >"$GENERATED_DEMO_CODE_FILE"
+printf '%s\n' '{"version":1,"keys":[]}' >"$GENERATED_DEMO_TRUST_STORE"
+printf '%s\n' 'generated-demo-provenance-key' >"$GENERATED_DEMO_PROVENANCE_KEY"
+printf '%s\n' '{"version":1,"keys":[{"source":"generated demo bundle"}]}' >"$DEMO_MARKED_TRUST_STORE"
+printf '%s\n' '{"version":1,"keys":[{"org_id":"freenews-demo","name":"FreeNews Demo"}]}' >"$DEMO_ID_TRUST_STORE"
 
 cat >"$FAKE_HOST_CHECK" <<'EOF_FAKE_HOST_CHECK'
 #!/usr/bin/env bash
@@ -701,6 +715,41 @@ jq -e \
   and (.planned_child_commands.bundle.args | index($install_dir) != null)
 ' "$TMP_DIR/plan-only-installed-host-summary.json" >/dev/null
 
+: >"$CAPTURE"
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --plan-only \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$GENERATED_DEMO_CODE_FILE" \
+  --config-json "$GENERATED_DEMO_CONFIG_JSON" \
+  --deploy-pack-dir "$GENERATED_DEMO_DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$GENERATED_DEMO_PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$GENERATED_DEMO_TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/plan-only-generated-demo-paths-summary.json" \
+  --print-summary-json 0
+if [[ -s "$CAPTURE" ]]; then
+  echo "plan-only generated demo/example paths should not invoke child scripts"
+  cat "$CAPTURE"
+  exit 1
+fi
+jq -e '
+  .status == "skipped"
+  and .rc == 0
+  and .stage == "plan"
+  and .mode.plan_only == true
+  and .mode.evidence_status == "planned_non_evidence"
+  and .inputs.host_install_evidence_mode == "deploy-pack"
+' "$TMP_DIR/plan-only-generated-demo-paths-summary.json" >/dev/null
+
 plan_only_reject_cases=(
   "private-url|--base-url|https://10.1.2.3|--base-url host must look public-routable for real helper evidence"
   "placeholder-url|--base-url|https://HELPER_PUBLIC_DNS|--base-url must be a real public HTTPS helper URL"
@@ -759,6 +808,192 @@ for plan_only_case in "${plan_only_reject_cases[@]}"; do
   fi
 done
 
+live_generated_demo_path_cases=(
+  "code-file|--code-file|$GENERATED_DEMO_CODE_FILE|--code-file must not point to a generated demo/example artifact path for live pilot handoff"
+  "config-json|--config-json|$GENERATED_DEMO_CONFIG_JSON|--config-json must not point to a generated demo/example artifact path for live pilot handoff"
+  "deploy-pack-dir|--deploy-pack-dir|$GENERATED_DEMO_DEPLOY_PACK_DIR|--deploy-pack-dir must not point to a generated demo/example artifact path for live pilot handoff"
+  "provenance-private-key-file|--provenance-private-key-file|$GENERATED_DEMO_PROVENANCE_KEY|--provenance-private-key-file must not point to a generated demo/example artifact path for live pilot handoff"
+  "trust-store|--trust-store|$GENERATED_DEMO_TRUST_STORE|--trust-store must not point to a generated demo/example artifact path for live pilot handoff"
+)
+live_generated_demo_path_index=0
+for live_generated_demo_path_case in "${live_generated_demo_path_cases[@]}"; do
+  live_generated_demo_path_index=$((live_generated_demo_path_index + 1))
+  IFS='|' read -r generated_demo_name generated_demo_flag generated_demo_value generated_demo_expected_message <<<"$live_generated_demo_path_case"
+  : >"$CAPTURE"
+  live_code_file="$CODE_FILE"
+  live_config_json="$CONFIG_JSON"
+  live_deploy_pack_dir="$DEPLOY_PACK_DIR"
+  live_provenance_key="$PROVENANCE_KEY"
+  live_trust_store="$TRUST_STORE"
+  case "$generated_demo_flag" in
+    --code-file)
+      live_code_file="$generated_demo_value"
+      ;;
+    --config-json)
+      live_config_json="$generated_demo_value"
+      ;;
+    --deploy-pack-dir)
+      live_deploy_pack_dir="$generated_demo_value"
+      ;;
+    --provenance-private-key-file)
+      live_provenance_key="$generated_demo_value"
+      ;;
+    --trust-store)
+      live_trust_store="$generated_demo_value"
+      ;;
+    *)
+      echo "unknown live generated demo path case flag: $generated_demo_flag"
+      exit 1
+      ;;
+  esac
+  set +e
+  ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+  ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+  ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+  ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+    --base-url https://helper.gpm-pilot.net \
+    --path-id helper-web \
+    --code-file "$live_code_file" \
+    --config-json "$live_config_json" \
+    --deploy-pack-dir "$live_deploy_pack_dir" \
+    "${INSTALLED_HOST_ARGS[@]}" \
+    --provenance-private-key-file "$live_provenance_key" \
+    --provenance-org-id freenews-demo \
+    --provenance-org-name "FreeNews Demo" \
+    --trust-store "$live_trust_store" \
+    --summary-json "$TMP_DIR/live-generated-demo-path-$live_generated_demo_path_index-summary.json" \
+    --print-summary-json 0 >"$TMP_DIR/live-generated-demo-path-$live_generated_demo_path_index.log" 2>&1
+  live_generated_demo_path_rc=$?
+  set -e
+  if [[ "$live_generated_demo_path_rc" -ne 2 ]] ||
+    ! grep -Fq -- "$generated_demo_expected_message" "$TMP_DIR/live-generated-demo-path-$live_generated_demo_path_index.log"; then
+    echo "expected live generated demo/example path to fail preflight: $generated_demo_name"
+    cat "$TMP_DIR/live-generated-demo-path-$live_generated_demo_path_index.log"
+    exit 1
+  fi
+  if [[ -s "$CAPTURE" ]]; then
+    echo "live generated demo/example path should not invoke child scripts: $generated_demo_name"
+    cat "$CAPTURE"
+    exit 1
+  fi
+  jq -e '.status == "fail" and .rc == 2 and .stage == "preflight" and .mode.plan_only == false' "$TMP_DIR/live-generated-demo-path-$live_generated_demo_path_index-summary.json" >/dev/null
+done
+
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$DEMO_MARKED_TRUST_STORE" \
+  --summary-json "$TMP_DIR/live-demo-marked-trust-store-summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/live-demo-marked-trust-store.log" 2>&1
+live_demo_marked_trust_store_rc=$?
+set -e
+if [[ "$live_demo_marked_trust_store_rc" -ne 2 ]] ||
+  ! grep -Fq -- "--trust-store must not contain generated demo/example trust entries for live pilot handoff" "$TMP_DIR/live-demo-marked-trust-store.log"; then
+  echo "expected live demo-marked trust store contents to fail preflight"
+  cat "$TMP_DIR/live-demo-marked-trust-store.log"
+  exit 1
+fi
+if [[ -s "$CAPTURE" ]]; then
+  echo "live demo-marked trust store should not invoke child scripts"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$DEMO_ID_TRUST_STORE" \
+  --summary-json "$TMP_DIR/live-demo-id-trust-store-summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/live-demo-id-trust-store.log" 2>&1
+live_demo_id_trust_store_rc=$?
+set -e
+if [[ "$live_demo_id_trust_store_rc" -ne 2 ]] ||
+  ! grep -Fq -- "--trust-store must not contain generated demo/example trust entries for live pilot handoff" "$TMP_DIR/live-demo-id-trust-store.log"; then
+  echo "expected live demo-identity trust store contents to fail preflight"
+  cat "$TMP_DIR/live-demo-id-trust-store.log"
+  exit 1
+fi
+if [[ -s "$CAPTURE" ]]; then
+  echo "live demo-identity trust store should not invoke child scripts"
+  cat "$CAPTURE"
+  exit 1
+fi
+
+for demo_identity_case in \
+  "helper|--expect-helper-id|helper-demo|--expect-helper-id must not use a generated demo identity for live pilot handoff" \
+  "org|--expect-org-id|freenews-demo|--expect-org-id must not use a generated demo identity for live pilot handoff"
+do
+  IFS='|' read -r demo_identity_name demo_identity_flag demo_identity_value demo_identity_message <<<"$demo_identity_case"
+  : >"$CAPTURE"
+  set +e
+  ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+  ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+  ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+  ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+    --base-url https://helper.gpm-pilot.net \
+    --path-id helper-web \
+    --code-file "$CODE_FILE" \
+    --config-json "$CONFIG_JSON" \
+    --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+    "${INSTALLED_HOST_ARGS[@]}" \
+    "$demo_identity_flag" "$demo_identity_value" \
+    --provenance-private-key-file "$PROVENANCE_KEY" \
+    --provenance-org-id freenews-demo \
+    --provenance-org-name "FreeNews Demo" \
+    --trust-store "$TRUST_STORE" \
+    --summary-json "$TMP_DIR/live-demo-identity-$demo_identity_name-summary.json" \
+    --print-summary-json 0 >"$TMP_DIR/live-demo-identity-$demo_identity_name.log" 2>&1
+  demo_identity_rc=$?
+  set -e
+  if [[ "$demo_identity_rc" -ne 2 ]] ||
+    ! grep -Fq -- "$demo_identity_message" "$TMP_DIR/live-demo-identity-$demo_identity_name.log"; then
+    echo "expected live demo identity to fail preflight: $demo_identity_name"
+    cat "$TMP_DIR/live-demo-identity-$demo_identity_name.log"
+    exit 1
+  fi
+  if [[ -s "$CAPTURE" ]]; then
+    echo "live demo identity should not invoke child scripts: $demo_identity_name"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
+
 echo "[easy-node-access-recovery-real-helper-evidence-run] live handoff requires installed-host evidence mode"
 : >"$CAPTURE"
 set +e
@@ -800,6 +1035,91 @@ jq -e '
   and .mode.plan_only == false
   and .inputs.host_install_evidence_mode == "deploy-pack"
 ' "$TMP_DIR/live-default-deploy-pack-summary.json" >/dev/null
+
+echo "[easy-node-access-recovery-real-helper-evidence-run] live handoff rejects demo/example artifacts"
+DEMO_ARTIFACT_DIR="$TMP_DIR/.easy-node-logs/access-recovery-demo"
+DEMO_CODE_FILE="$DEMO_ARTIFACT_DIR/bridge-code.txt"
+DEMO_CONFIG_JSON="$DEMO_ARTIFACT_DIR/bridge-service-config.json"
+DEMO_DEPLOY_PACK_DIR="$DEMO_ARTIFACT_DIR/bridge-deploy"
+DEMO_TRUST_STORE="$DEMO_ARTIFACT_DIR/recovery-trust.json"
+mkdir -p "$DEMO_DEPLOY_PACK_DIR"
+printf '%s\n' 'demo-access-code' >"$DEMO_CODE_FILE"
+printf '%s\n' '{"status":"pass"}' >"$DEMO_CONFIG_JSON"
+printf '%s\n' '{"version":1,"keys":[]}' >"$DEMO_TRUST_STORE"
+
+demo_artifact_cases=(
+  "code-file|$DEMO_CODE_FILE|--code-file must not point to a generated demo/example artifact path for live pilot handoff"
+  "config-json|$DEMO_CONFIG_JSON|--config-json must not point to a generated demo/example artifact path for live pilot handoff"
+  "deploy-pack-dir|$DEMO_DEPLOY_PACK_DIR|--deploy-pack-dir must not point to a generated demo/example artifact path for live pilot handoff"
+  "trust-store|$DEMO_TRUST_STORE|--trust-store must not point to a generated demo/example artifact path for live pilot handoff"
+)
+demo_artifact_index=0
+for demo_artifact_case in "${demo_artifact_cases[@]}"; do
+  demo_artifact_index=$((demo_artifact_index + 1))
+  IFS='|' read -r demo_artifact_flag demo_artifact_value demo_artifact_expected_message <<<"$demo_artifact_case"
+  demo_code_file="$CODE_FILE"
+  demo_config_json="$CONFIG_JSON"
+  demo_deploy_pack_dir="$DEPLOY_PACK_DIR"
+  demo_trust_store="$TRUST_STORE"
+  case "$demo_artifact_flag" in
+    code-file)
+      demo_code_file="$demo_artifact_value"
+      ;;
+    config-json)
+      demo_config_json="$demo_artifact_value"
+      ;;
+    deploy-pack-dir)
+      demo_deploy_pack_dir="$demo_artifact_value"
+      ;;
+    trust-store)
+      demo_trust_store="$demo_artifact_value"
+      ;;
+    *)
+      echo "unknown demo artifact integration case: $demo_artifact_flag"
+      exit 1
+      ;;
+  esac
+  : >"$CAPTURE"
+  set +e
+  ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+  ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+  ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+  ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+    --base-url https://helper.gpm-pilot.net \
+    --path-id helper-web \
+    --code-file "$demo_code_file" \
+    --config-json "$demo_config_json" \
+    --deploy-pack-dir "$demo_deploy_pack_dir" \
+    "${INSTALLED_HOST_ARGS[@]}" \
+    --provenance-private-key-file "$PROVENANCE_KEY" \
+    --provenance-org-id freenews-demo \
+    --provenance-org-name "FreeNews Demo" \
+    --trust-store "$demo_trust_store" \
+    --summary-json "$TMP_DIR/live-demo-artifact-$demo_artifact_index-summary.json" \
+    --print-summary-json 0 >"$TMP_DIR/live-demo-artifact-$demo_artifact_index.log" 2>&1
+  demo_artifact_rc=$?
+  set -e
+  if [[ "$demo_artifact_rc" -ne 2 ]] ||
+    ! grep -Fq -- "$demo_artifact_expected_message" "$TMP_DIR/live-demo-artifact-$demo_artifact_index.log"; then
+    echo "expected live demo artifact case to fail preflight: $demo_artifact_flag"
+    cat "$TMP_DIR/live-demo-artifact-$demo_artifact_index.log"
+    exit 1
+  fi
+  if [[ -s "$CAPTURE" ]]; then
+    echo "live demo artifact preflight should not invoke child scripts: $demo_artifact_flag"
+    cat "$CAPTURE"
+    exit 1
+  fi
+  jq -e '
+    .status == "fail"
+    and .rc == 2
+    and .stage == "preflight"
+    and .mode.plan_only == false
+  ' "$TMP_DIR/live-demo-artifact-$demo_artifact_index-summary.json" >/dev/null
+done
 
 : >"$CAPTURE"
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
