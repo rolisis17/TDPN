@@ -1289,6 +1289,7 @@ write_verification_summary() {
         and $bundled_installed_host_evidence
         and $tar_sha256_checked
         and $trust_store != ""
+        and $trust_store_sha256 != ""
         and $public_key_file == ""
         and ($allow_dev_trust_store | not)
         and $source_helper_id != ""

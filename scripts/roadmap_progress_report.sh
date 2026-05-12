@@ -2569,7 +2569,8 @@ access_recovery_verifier_evidence_json() {
       def receipt_authority_ready:
         (.handoff_authority == true)
         and ((.authority_level // "") == "pilot_handoff")
-        and (.integrity_only == false);
+        and (.integrity_only == false)
+        and ((.status_meaning // "") == "trusted pilot handoff authority");
       def readiness_fields_consistent:
         (.pilot_handoff_ready == .trusted_pilot_receipt_ready)
         and (.pilot_handoff_ready == .pilot_handoff_criteria.ready)
@@ -2629,7 +2630,7 @@ access_recovery_verifier_evidence_json() {
       | status_norm as $raw_status
       | (($schema_id == $expected_schema_id) and ($raw_status != "")) as $valid_contract
       | ($valid_contract and ($summary_stale | not)) as $fresh_contract
-      | ($fresh_contract and ($raw_status == "pass") and rc_ok and generated_at_ready and required_checks_enabled and required_checks_pass and trusted_pilot_receipt_ready and evidence_binding_ready) as $semantic_ok
+      | ($fresh_contract and ($raw_status == "pass") and rc_ok and generated_at_ready and required_checks_enabled and required_checks_pass and pilot_handoff_ready and evidence_binding_ready) as $semantic_ok
       | (
           if $valid_contract and $summary_stale then "stale"
           elif $valid_contract and ($semantic_ok | not) then (if $raw_status == "pass" then "fail" else $raw_status end)
@@ -3224,7 +3225,7 @@ access_recovery_track_json_from_evidence() {
             if $track_status == "pilot-evidence-ready" then
               "Access Recovery bridge pilot evidence is ready for operator handoff."
             elif $track_status == "pilot-handoff-not-ready" then
-              "Access Recovery trusted verifier receipt is valid, but pilot_handoff_ready is false; complete handoff readiness before operator handoff."
+              "Access Recovery trusted verifier receipt is present, but final pilot handoff authority is false; complete handoff readiness before operator handoff."
             elif $track_status == "trusted-provenance-required" then
               "Access Recovery real helper HTTPS evidence is present; run the trusted provenance verifier before pilot handoff."
             elif $track_status == "local-rehearsal-ready" then
@@ -3239,9 +3240,11 @@ access_recovery_track_json_from_evidence() {
           access_bridge_pilot_evidence_bundle_verify: $bundle_verify,
           evidence_binding: $evidence_binding,
           trusted_verifier_binding: $verifier_binding,
-          trusted_verifier_ready: trusted_pilot_receipt_ready,
-          trusted_pilot_receipt_ready: trusted_pilot_receipt_ready,
-          trusted_verifier_receipt_valid: trusted_pilot_receipt_ready,
+          trusted_verifier_semantic_ok: trusted_pilot_receipt_ready,
+          trusted_pilot_receipt_semantic_ok: trusted_pilot_receipt_ready,
+          trusted_verifier_ready: pilot_handoff_ready,
+          trusted_pilot_receipt_ready: pilot_handoff_ready,
+          trusted_verifier_receipt_valid: pilot_handoff_ready,
           trusted_verifier_receipt_valid_is_handoff_ready: pilot_handoff_ready,
           verifier_pilot_handoff_ready: verifier_pilot_handoff_ready,
           evidence_host_policy: {

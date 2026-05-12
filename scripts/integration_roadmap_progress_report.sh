@@ -1719,6 +1719,60 @@ if ! jq -e \
   exit 1
 fi
 
+ACCESS_BRIDGE_FORGED_CRITERIA_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_forged_criteria_pilot_evidence_bundle_verify_summary.json"
+jq '
+  .pilot_handoff_criteria.provenance_checked = false
+' "$ACCESS_BRIDGE_INSTALLED_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_FORGED_CRITERIA_VERIFY_SUMMARY_JSON"
+ROADMAP_FORGED_CRITERIA_SUMMARY_JSON="$TMP_DIR/roadmap_forged_criteria_summary.json"
+ROADMAP_FORGED_CRITERIA_REPORT_MD="$TMP_DIR/roadmap_forged_criteria_report.md"
+if ! FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
+ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL" \
+ROADMAP_PROGRESS_SINGLE_MACHINE_SCRIPT="$FAKE_SINGLE" \
+run_roadmap_progress_report \
+  --refresh-manual-validation 1 \
+  --refresh-single-machine-readiness 0 \
+  --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
+  --phase5-settlement-layer-summary-json "$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" \
+  --blockchain-mainnet-activation-gate-summary-json "$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" \
+  --blockchain-bootstrap-governance-graduation-gate-summary-json "$BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_FORGED_CRITERIA_VERIFY_SUMMARY_JSON" \
+  --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
+  --summary-json "$ROADMAP_FORGED_CRITERIA_SUMMARY_JSON" \
+  --report-md "$ROADMAP_FORGED_CRITERIA_REPORT_MD" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_forged_criteria.log 2>&1; then
+  echo "expected success with warning for verifier receipt with forged handoff criteria"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_forged_criteria.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .access_recovery_pilot_handoff_ready == false
+  and .access_recovery_track.status == "trusted-provenance-required"
+  and .access_recovery_track.ready == false
+  and .access_recovery_track.pilot_handoff_ready == false
+  and .access_recovery_track.trusted_verifier_semantic_ok == false
+  and .access_recovery_track.trusted_pilot_receipt_semantic_ok == false
+  and .access_recovery_track.trusted_verifier_ready == false
+  and .access_recovery_track.trusted_pilot_receipt_ready == false
+  and .access_recovery_track.trusted_verifier_receipt_valid == false
+  and .access_recovery_track.trusted_verifier_receipt_valid_is_handoff_ready == false
+  and .access_recovery_track.verifier_pilot_handoff_ready == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_ready == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_ready == true
+  and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
+' "$ROADMAP_FORGED_CRITERIA_SUMMARY_JSON" >/dev/null; then
+  echo "roadmap forged verifier criteria summary mismatch"
+  cat "$ROADMAP_FORGED_CRITERIA_SUMMARY_JSON"
+  exit 1
+fi
+
 ACCESS_BRIDGE_DEMO_BUNDLE_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_demo_material_pilot_evidence_bundle_verify_summary.json"
 jq '
   .inputs.trust_store = ".easy-node-logs/access-recovery-demo/provenance-trust-store.json"
