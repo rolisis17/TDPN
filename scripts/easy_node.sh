@@ -297,7 +297,7 @@ Usage:
   ./scripts/easy_node.sh three-machine-real-host-validation-pack [three_machine_real_host_validation_pack args...]
   ./scripts/easy_node.sh access-recovery-beta-local-gate [access_recovery_beta_local_gate args...]
   ./scripts/easy_node.sh access-recovery-local-evidence-refresh [access_recovery_local_evidence_refresh args...]
-  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run [access_recovery_real_helper_evidence_run args...]
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run [--roadmap-refresh 0|1] [access_recovery_real_helper_evidence_run args...]
   ./scripts/easy_node.sh access-bridge-host-install-check [access_bridge_host_install_check args...]
   ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle [access_bridge_pilot_evidence_bundle args...]
   ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify [access_bridge_pilot_evidence_bundle_verify args...]
@@ -590,7 +590,7 @@ Usage:
   ./scripts/easy_node.sh three-machine-real-host-validation-pack [three_machine_real_host_validation_pack args...]
   ./scripts/easy_node.sh access-recovery-beta-local-gate [access_recovery_beta_local_gate args...]
   ./scripts/easy_node.sh access-recovery-local-evidence-refresh [access_recovery_local_evidence_refresh args...]
-  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run [access_recovery_real_helper_evidence_run args...]
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run [--roadmap-refresh 0|1] [access_recovery_real_helper_evidence_run args...]
   ./scripts/easy_node.sh access-bridge-host-install-check [access_bridge_host_install_check args...]
   ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle [access_bridge_pilot_evidence_bundle args...]
   ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify [access_bridge_pilot_evidence_bundle_verify args...]
@@ -804,7 +804,7 @@ Notes:
   - three-machine-real-host-validation-pack wraps the real-host validation pack helper path (override with `THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT`) and preserves pass-through args.
   - access-recovery-beta-local-gate runs the focused local Access Recovery beta contract gate (demo/examples/browser/bridge/bundle) without the legacy VPN matrix (override with `ACCESS_RECOVERY_BETA_LOCAL_GATE_SCRIPT`).
   - access-recovery-local-evidence-refresh runs a loopback Access Recovery helper rehearsal and writes canonical evidence summaries for roadmap ingestion (override with `ACCESS_RECOVERY_LOCAL_EVIDENCE_REFRESH_SCRIPT`).
-  - access-recovery-real-helper-evidence-run runs the real public helper HTTPS evidence flow in one operator command: signed pilot evidence bundle, trusted verifier receipt, and roadmap refresh (override with `ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT`).
+  - access-recovery-real-helper-evidence-run runs the real public helper HTTPS evidence flow in one operator command: signed pilot evidence bundle, trusted verifier receipt, and roadmap refresh. Use --roadmap-refresh 0 for diagnostics/verifier-only runs; those stop at verifier_ready and full handoff completion requires roadmap refresh (override with `ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT`).
   - access-bridge-host-install-check records host-install evidence directly (override with `ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT`); deploy-pack mode is rehearsal-only, while pilot/operator handoff should use --evidence-mode installed-host with --install-dir, --systemd-unit-file, --proxy-kind, and --proxy-config-file.
   - access-bridge-pilot-evidence-bundle wraps deployed bridge smoke, deployment evidence, and host-install checks into one candidate pilot evidence bundle (override with `ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT`) and preserves pass-through args; trusted verification is required before pilot/operator handoff.
   - access-bridge-pilot-evidence-bundle-verify validates Access Bridge pilot bundle integrity artifacts (manifest + tarball checksum + safe tar members). Local integrity checks can be unsigned; pilot/operator handoff must add --provenance-json PROVENANCE_JSON --trust-store TRUST_STORE --require-trusted-provenance 1 --verification-summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_verify_summary.json --print-verification-summary-json 1 so roadmap can bind the receipt to the current evidence hashes.

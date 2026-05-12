@@ -141,7 +141,7 @@ Example:
 - `docs/examples/access-recovery-bridge-helper-registry.example.json`
 - `docs/examples/access-recovery-trusted-key.example.json`
 
-First CLI (demo bundle plus lower-level artifact examples; commands assume Bash/WSL/Linux shell syntax):
+Local demo/rehearsal CLI examples (demo bundle plus lower-level artifact examples; commands assume Bash/WSL/Linux shell syntax):
 - `go run ./cmd/gpmrecover demo-bundle --out-dir .easy-node-logs/access-recovery-demo --org-id freenews-demo --org-name "FreeNews Demo" --helper-id helper-demo --helper-name "Demo bridge helper"`
 - `bash ./scripts/integration_recovery_browser_smoke.sh`
 - `bash ./scripts/integration_access_recovery_demo_contract.sh`
@@ -160,7 +160,7 @@ First CLI (demo bundle plus lower-level artifact examples; commands assume Bash/
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --public-key-file .easy-node-logs/recovery.pub --timeout-sec 8`
 - `go run ./cmd/gpmrecover fetch-publication --index-url https://freenews.example/.well-known/gpm/recovery-index.json --out-dir .easy-node-logs/access-recovery-fetched`
 
-The `--public-key-file` examples above are local/operator diagnostics for inspecting a single artifact against an expected key. Beta user handoff and pilot/operator receipt paths must use a trust store or trusted-key handoff, plus signed helper registries and trusted evidence provenance where bridge evidence is involved.
+The `--public-key-file` examples above are local/operator diagnostics for inspecting a single artifact against an expected key. Do not use the generated `freenews-demo`, `helper-demo`, `.easy-node-logs/access-recovery-demo`, or unsigned/raw helper-registry examples as beta handoff material. Beta user handoff and pilot/operator receipt paths must use a trust store or trusted-key handoff, a signed helper registry, non-demo pilot organization/helper identities, signed evidence provenance, and the trusted verifier receipt described below.
 
 Demo bundle flow:
 - `demo-bundle` creates a self-contained beta demo folder with:
@@ -178,7 +178,7 @@ Demo bundle flow:
 - For bridge invites, import `bridge-helper-registry.signed.json`, paste `bridge-helper-registry.signed.txt`, or scan `bridge-helper-registry.signed.qr.png` into the Helper Registry panel, then click `Verify Signed` to verify/extract the raw helper registry before checking the invite.
 - Alternatively, paste or scan the generated `GPMREC1` text/QR handoffs into the Text Handoff panel.
 
-Local trust-store flow:
+Local trust-store and bridge rehearsal flow:
 - `go run ./cmd/gpmrecover trust-add --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --org-name "FreeNews Demo" --public-key-file .easy-node-logs/recovery.pub --source "demo handoff"`
 - `go run ./cmd/gpmrecover trust-list --trust-store .easy-node-logs/recovery-trust.json`
 - `go run ./cmd/gpmrecover trust-export-key --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID --out .easy-node-logs/recovery-trusted-key.json --text-out .easy-node-logs/recovery-trusted-key.txt`
@@ -196,11 +196,14 @@ Local trust-store flow:
 - `go run ./cmd/gpmrecover bridge-service-serve --config .easy-node-logs/bridge-service-config.json --config-sha256 "$CONFIG_HASH" --addr 127.0.0.1:18980 --rps 2 --abuse-log .easy-node-logs/bridge-abuse.jsonl --access-code-sha256 "$CODE_HASH"`
 - `go run ./cmd/gpmrecover bridge-service-deploy-pack --out-dir .easy-node-logs/bridge-deploy --public-host HELPER_PUBLIC_DNS --config-sha256 "$CONFIG_HASH" --access-code-sha256 "$CODE_HASH"`
 - `bash ./scripts/integration_access_bridge_service_serve.sh`
+- `bash ./scripts/access_bridge_host_install_check.sh --deploy-pack-dir .easy-node-logs/bridge-deploy --config-json .easy-node-logs/bridge-service-config.json --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/bridge-host-install-check.json` (deploy-pack rehearsal only)
+- `./scripts/easy_node.sh access-recovery-local-evidence-refresh --write-canonical 1 --refresh-roadmap 1 --print-summary-json 1` (local loopback rehearsal; useful for roadmap/dev evidence but not a substitute for real helper HTTPS evidence, signed provenance, and trusted verification)
+
+Pilot/operator handoff flow (real pilot artifacts only):
+- Use a real pilot trust store or trusted-key handoff, signed helper registry, non-demo `ORG_ID`/`HELPER_ID`, and real helper HTTPS endpoint. Demo paths, raw `--public-key-file` verification, unsigned helper registries, non-handoff receipts, and dev trust-store overrides are local diagnostics only.
 - `bash ./scripts/access_bridge_service_smoke.sh --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PILOT_ACCESS_CODE_FILE --expect-helper-id HELPER_ID --expect-org-id ORG_ID --summary-json .easy-node-logs/bridge-service-smoke.json`
 - `bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/bridge-service-smoke.json --config-json PILOT_BRIDGE_SERVICE_CONFIG_JSON --deploy-pack-dir PILOT_DEPLOY_PACK_DIR --expect-helper-id HELPER_ID --expect-org-id ORG_ID --summary-json .easy-node-logs/bridge-deployment-evidence.json`
-- `bash ./scripts/access_bridge_host_install_check.sh --deploy-pack-dir .easy-node-logs/bridge-deploy --config-json .easy-node-logs/bridge-service-config.json --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/bridge-host-install-check.json` (deploy-pack rehearsal only)
 - `bash ./scripts/access_bridge_host_install_check.sh --evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --config-json PILOT_BRIDGE_SERVICE_CONFIG_JSON --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/bridge-host-install-check.json` (pilot/operator handoff host evidence)
-- `./scripts/easy_node.sh access-recovery-local-evidence-refresh --write-canonical 1 --refresh-roadmap 1 --print-summary-json 1` (local loopback rehearsal; useful for roadmap/dev evidence but not a substitute for real helper HTTPS evidence, signed provenance, and trusted verification)
 - `./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PILOT_ACCESS_CODE_FILE --config-json PILOT_BRIDGE_SERVICE_CONFIG_JSON --deploy-pack-dir PILOT_DEPLOY_PACK_DIR --host-install-evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --expect-helper-id HELPER_ID --expect-org-id ORG_ID --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE --reports-dir .easy-node-logs/access-recovery-pilot` (preferred real-helper handoff wrapper; use real pilot artifacts, not generated demo paths)
 - `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PILOT_ACCESS_CODE_FILE --config-json PILOT_BRIDGE_SERVICE_CONFIG_JSON --deploy-pack-dir PILOT_DEPLOY_PACK_DIR --host-install-evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --expect-helper-id HELPER_ID --expect-org-id ORG_ID --summary-json .easy-node-logs/access-recovery-pilot/access-bridge-pilot-evidence-summary.json --provenance-sign 1 --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --provenance-out .easy-node-logs/access-recovery-pilot/access-bridge-pilot-evidence.provenance.json` (low-level debug command; use real pilot artifacts, not generated demo paths)
 - `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify --summary-json .easy-node-logs/access-recovery-pilot/access-bridge-pilot-evidence-summary.json --allow-non-handoff-receipt 1` (local integrity-only verification for diagnostics only; unsigned provenance and non-handoff receipts are acceptable for dev evidence but never for pilot/operator handoff)
@@ -216,7 +219,7 @@ provenance, and a verifier summary receipt bound to the current evidence hashes.
 - `go run ./cmd/gpmrecover check --pack .easy-node-logs/access-pack.signed.json --trust-store .easy-node-logs/recovery-trust.json --timeout-sec 8`
 - `go run ./cmd/gpmrecover trust-remove --trust-store .easy-node-logs/recovery-trust.json --org-id freenews-demo --key-id KEY_ID`
 
-Text handoff flow:
+Local text handoff flow:
 - `go run ./cmd/gpmrecover text-export --kind access-pack --in .easy-node-logs/access-pack.signed.json --out .easy-node-logs/access-pack.txt`
 - `go run ./cmd/gpmrecover text-export --kind bridge-invite --in .easy-node-logs/bridge-invite.signed.json --out .easy-node-logs/bridge-invite.txt`
 - `go run ./cmd/gpmrecover text-export --kind trust-store --in .easy-node-logs/recovery-trust.json --out .easy-node-logs/recovery-trust.txt`

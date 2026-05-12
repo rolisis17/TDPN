@@ -460,6 +460,10 @@ if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'access-recovery-real-he
   echo "easy_node expert help missing real helper evidence run note"
   exit 1
 fi
+if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'Use --roadmap-refresh 0 for diagnostics/verifier-only runs; those stop at verifier_ready and full handoff completion requires roadmap refresh'; then
+  echo "easy_node expert help missing real helper roadmap-refresh 0 verifier-ready semantics"
+  exit 1
+fi
 if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'access-bridge-host-install-check records host-install evidence directly'; then
   echo "easy_node expert help missing host-install check note"
   exit 1
