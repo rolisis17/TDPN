@@ -343,6 +343,12 @@ exit 0
 EOF_FAKE_SINGLE
 chmod +x "$FAKE_SINGLE"
 
+echo "[roadmap-progress-report] Access Recovery unreachable handoff state is absent"
+if grep -Fq 'pilot-handoff-not-ready' scripts/roadmap_progress_report.sh; then
+  echo "roadmap progress report still contains unreachable Access Recovery pilot-handoff-not-ready state"
+  exit 1
+fi
+
 FAKE_MANUAL_REFRESH_RESILIENCE="$TMP_DIR/fake_manual_validation_report_refresh_resilience.sh"
 cat >"$FAKE_MANUAL_REFRESH_RESILIENCE" <<'EOF_FAKE_MANUAL_REFRESH_RESILIENCE'
 #!/usr/bin/env bash
@@ -3875,7 +3881,14 @@ if ! jq -e --arg stale_reason "stale activation evidence" --arg stale_iso "$stal
   and .blockchain_track.recommended_gate_id == "blockchain_mainnet_activation_refresh_evidence"
   and ((.blockchain_track.recommended_gate_reason // "") | contains($stale_reason))
   and .blockchain_track.recommended_gate_command == "./scripts/easy_node.sh blockchain-mainnet-activation-real-evidence-run --input-json .easy-node-logs/blockchain_mainnet_activation_metrics_input.operator.json --reports-dir .easy-node-logs/blockchain_mainnet_activation_real_evidence_run --summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_latest_summary.json --canonical-summary-json .easy-node-logs/blockchain_mainnet_activation_real_evidence_run_summary.json --refresh-roadmap 1 --print-summary-json 1"
-  and ((.next_actions // []) | any(.id == "blockchain_mainnet_activation_refresh_evidence" and ((.reason // "") | contains($stale_reason))))
+  and ((.next_actions // []) | any(
+    .id == "blockchain_mainnet_activation_refresh_evidence"
+    and ((.reason // "") | contains($stale_reason))
+    and .requires_real_hosts == true
+    and .local_pack_only == false
+    and .missing_evidence_family == "blockchain-mainnet-activation"
+    and .missing_evidence_action_kind == "real-evidence-refresh"
+  ))
 ' "$STALE_SUMMARY_JSON" >/dev/null; then
   echo "stale blockchain freshness summary missing expected refresh action"
   cat "$STALE_SUMMARY_JSON"
@@ -4853,13 +4866,21 @@ fi
       .id == "blockchain_mainnet_activation_missing_metrics_prefill"
       and .command == $prefill_command
       and .reason == $missing_metrics_reason
+      and .requires_real_hosts == false
+      and .local_pack_only == true
+      and .missing_evidence_family == "blockchain-mainnet-activation"
+      and .missing_evidence_action_kind == "metrics-prefill"
     ))
     and ((.next_actions // []) | any(
       .id == "blockchain_mainnet_activation_missing_metrics"
       and ((.label // "") | test("^Blockchain missing-metrics"))
-    and .command == $preferred_missing_metrics_command
-    and .reason == $missing_metrics_reason
-  ))
+      and .command == $preferred_missing_metrics_command
+      and .reason == $missing_metrics_reason
+      and .requires_real_hosts == true
+      and .local_pack_only == false
+      and .missing_evidence_family == "blockchain-mainnet-activation"
+      and .missing_evidence_action_kind == "real-evidence"
+    ))
 ' "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_summary.json" >/dev/null; then
   echo "auto-discovered gate summary JSON missing expected fields"
   cat "$TMP_DIR/roadmap_progress_mainnet_activation_gate_auto_summary.json"

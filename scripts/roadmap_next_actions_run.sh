@@ -495,7 +495,7 @@ access_recovery_operator_input_value_looks_placeholder_01() {
   value="$(trim "${1:-}")"
   value="$(strip_optional_wrapping_quotes "$value")"
   normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
-  if [[ "$normalized" =~ (^|[^A-Z0-9_])(HELPER_PUBLIC_DNS|HELPER_ID|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|MTLS_CA_FILE|MTLS_CLIENT_CERT_FILE|MTLS_CLIENT_KEY_FILE)([^A-Z0-9_]|$) ]]; then
+  if [[ "$normalized" =~ (^|[^A-Z0-9_-])(HELPER_PUBLIC_DNS|HELPER_ID|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|MTLS_CA_FILE|MTLS_CLIENT_CERT_FILE|MTLS_CLIENT_KEY_FILE)([^A-Z0-9_-]|$) ]]; then
     return 0
   fi
   case "$normalized" in
@@ -716,7 +716,7 @@ command_has_access_recovery_operator_input_placeholder_01() {
   fi
 
   normalized="$(printf '%s' "$command_text" | tr '[:lower:]' '[:upper:]')"
-  [[ "$normalized" =~ (^|[^A-Z0-9_])(HELPER_PUBLIC_DNS|HELPER_ID|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|MTLS_CA_FILE|MTLS_CLIENT_CERT_FILE|MTLS_CLIENT_KEY_FILE)([^A-Z0-9_]|$) ]]
+  [[ "$normalized" =~ (^|[^A-Z0-9_-])(HELPER_PUBLIC_DNS|HELPER_ID|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|MTLS_CA_FILE|MTLS_CLIENT_CERT_FILE|MTLS_CLIENT_KEY_FILE)([^A-Z0-9_-]|$) ]]
 }
 
 command_has_access_recovery_public_key_handoff_01() {
@@ -1177,7 +1177,7 @@ build_access_recovery_operator_inputs_operator_command_01() {
     cmd+=(--access-recovery-mtls-client-key "REPLACE_WITH_MTLS_CLIENT_KEY_FILE")
   fi
   cmd+=(--print-summary-json "${print_summary_json:-1}")
-  printf '%s # replace Access Recovery placeholders with concrete operator values: HELPER_PUBLIC_DNS PRIVATE_CODE_FILE BRIDGE_SERVICE_CONFIG BRIDGE_DEPLOY_PACK PROVENANCE_PRIVATE_KEY_FILE ORG_ID ORG_NAME MTLS_CA_FILE MTLS_CLIENT_CERT_FILE MTLS_CLIENT_KEY_FILE' \
+  printf '%s # replace Access Recovery placeholders with concrete operator values: HELPER_PUBLIC_DNS HELPER_ID PRIVATE_CODE_FILE BRIDGE_SERVICE_CONFIG BRIDGE_DEPLOY_PACK PROVENANCE_PRIVATE_KEY_FILE ORG_ID ORG_NAME MTLS_CA_FILE MTLS_CLIENT_CERT_FILE MTLS_CLIENT_KEY_FILE' \
     "$(render_command_line_from_argv "${cmd[@]}")"
 }
 

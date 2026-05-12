@@ -550,6 +550,16 @@ JSON
 }
 JSON
     ;;
+  blockchain_local_only_metrics_prefill)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"blockchain_mainnet_activation_refresh_evidence","label":"Blockchain mainnet activation refresh evidence","command":"bash \"$FAIL1\"","reason":"test-blockchain-refresh","requires_real_hosts":true,"local_pack_only":false,"missing_evidence_family":"blockchain-mainnet-activation","missing_evidence_action_kind":"real-evidence-refresh"},
+    {"id":"blockchain_mainnet_activation_missing_metrics_prefill","label":"Blockchain missing-metrics prefill","command":"bash \"$PASS1\"","reason":"test-blockchain-prefill","requires_real_hosts":false,"local_pack_only":true,"missing_evidence_family":"blockchain-mainnet-activation","missing_evidence_action_kind":"metrics-prefill"}
+  ]
+}
+JSON
+    ;;
   local_pack_missing_live_prereq)
     cat >"$summary_json" <<JSON
 {
@@ -654,6 +664,15 @@ JSON
 {
   "next_actions": [
     {"id":"access_bridge_service_smoke","label":"Access bridge service smoke","command":"bash \"$PASS1\" --base-url https://helper.gpm-pilot.net --path-id helper-web --code-file /tmp/bridge-code.txt --expect-helper-id HELPER_ID --expect-org-id pilot-org --summary-json /tmp/access_bridge_service_smoke_summary.json","reason":"test-helper-id-placeholder"}
+  ]
+}
+JSON
+    ;;
+  access_recovery_placeholder_like_concrete_values)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"access_bridge_service_smoke","label":"Access bridge service smoke","command":"bash \"$PASS1\" --base-url https://helper_public_dns-prod.example --path-id helper-web --code-file /tmp/private_code_file-prod.txt --config-json /tmp/bridge_service_config-prod.json --deploy-pack-dir /tmp/bridge_deploy_pack-prod --provenance-private-key-file /tmp/provenance_private_key_file-prod.key --provenance-org-id org_id-prod --provenance-org-name org_name-prod --expect-helper-id helper_id-prod --expect-org-id org_id-prod --cacert /tmp/mtls_ca_file-prod.crt --client-cert /tmp/mtls_client_cert_file-prod.crt --client-key /tmp/mtls_client_key_file-prod.key --summary-json /tmp/access_bridge_service_smoke_summary.json","reason":"test-placeholder-like-concrete-values"}
   ]
 }
 JSON
@@ -1154,6 +1173,39 @@ if ! jq -e '
 ' "$SUMMARY_LOCAL_ONLY" >/dev/null; then
   echo "local-only summary mismatch"
   cat "$SUMMARY_LOCAL_ONLY"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] local-only keeps blockchain metrics prefill and skips real evidence"
+SUMMARY_BLOCKCHAIN_LOCAL_ONLY_PREFILL="$TMP_DIR/summary_blockchain_local_only_prefill.json"
+REPORTS_BLOCKCHAIN_LOCAL_ONLY_PREFILL="$TMP_DIR/reports_blockchain_local_only_prefill"
+ROADMAP_NEXT_ACTIONS_SCENARIO=blockchain_local_only_metrics_prefill \
+PASS1="$PASS1" FAIL1="$FAIL1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_BLOCKCHAIN_LOCAL_ONLY_PREFILL" \
+  --summary-json "$SUMMARY_BLOCKCHAIN_LOCAL_ONLY_PREFILL" \
+  --local-only 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.local_only == true
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["blockchain_mainnet_activation_missing_metrics_prefill"]
+  and .roadmap.selection_accounting.non_empty_command_count == 2
+  and .roadmap.selection_accounting.after_local_only_filters_count == 1
+  and .roadmap.selection_accounting.local_only_skipped_real_host_actions_count == 1
+  and .roadmap.selection_accounting.local_only_skipped_real_host_action_ids == ["blockchain_mainnet_activation_refresh_evidence"]
+  and .actions[0].id == "blockchain_mainnet_activation_missing_metrics_prefill"
+  and .actions[0].status == "pass"
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+' "$SUMMARY_BLOCKCHAIN_LOCAL_ONLY_PREFILL" >/dev/null; then
+  echo "blockchain local-only metrics prefill summary mismatch"
+  cat "$SUMMARY_BLOCKCHAIN_LOCAL_ONLY_PREFILL"
   exit 1
 fi
 
@@ -1929,6 +1981,33 @@ if ! jq -e '
 ' "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_CONCRETE" >/dev/null; then
   echo "Access Recovery installed-host concrete action summary mismatch"
   cat "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_CONCRETE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery placeholder-like concrete slugs execute"
+SUMMARY_ACCESS_RECOVERY_PLACEHOLDER_LIKE_CONCRETE="$TMP_DIR/summary_access_recovery_placeholder_like_concrete.json"
+REPORTS_ACCESS_RECOVERY_PLACEHOLDER_LIKE_CONCRETE="$TMP_DIR/reports_access_recovery_placeholder_like_concrete"
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_placeholder_like_concrete_values \
+PASS1="$PASS1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_PLACEHOLDER_LIKE_CONCRETE" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_PLACEHOLDER_LIKE_CONCRETE" \
+  --include-id access_bridge_service_smoke \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .actions[0].id == "access_bridge_service_smoke"
+  and .actions[0].status == "pass"
+  and .actions[0].failure_kind == "none"
+  and (.actions[0].command | contains("helper_id-prod"))
+  and (.actions[0].command | contains("org_id-prod"))
+  and (.actions[0].command | contains("helper_public_dns-prod.example"))
+' "$SUMMARY_ACCESS_RECOVERY_PLACEHOLDER_LIKE_CONCRETE" >/dev/null; then
+  echo "Access Recovery placeholder-like concrete action summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_PLACEHOLDER_LIKE_CONCRETE"
   exit 1
 fi
 

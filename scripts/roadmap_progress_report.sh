@@ -3201,7 +3201,6 @@ access_recovery_track_json_from_evidence() {
       def track_status:
         if real_helper_https_base_ready and pilot_handoff_ready then "pilot-evidence-ready"
         elif real_helper_https_base_ready and (installed_host_handoff_evidence | not) then "installed-host-evidence-required"
-        elif real_helper_https_base_ready and trusted_pilot_receipt_ready then "pilot-handoff-not-ready"
         elif real_helper_https_base_ready then "trusted-provenance-required"
         elif all_pass and evidence_binding.ok then "local-rehearsal-ready"
         elif all_pass and ((evidence_binding.ok) | not) then "evidence-failed"
@@ -3228,8 +3227,6 @@ access_recovery_track_json_from_evidence() {
               "Access Recovery bridge pilot evidence is ready for operator handoff."
             elif $track_status == "installed-host-evidence-required" then
               "Access Recovery real helper HTTPS evidence is present, but deploy-pack host evidence is rehearsal-only; capture installed-host service, systemd, and active proxy evidence before verifier handoff."
-            elif $track_status == "pilot-handoff-not-ready" then
-              "Access Recovery trusted verifier receipt is present, but final pilot handoff authority is false; complete handoff readiness before operator handoff."
             elif $track_status == "trusted-provenance-required" then
               "Access Recovery real helper HTTPS evidence is present; run the trusted provenance verifier before pilot handoff."
             elif $track_status == "local-rehearsal-ready" then
@@ -3283,11 +3280,6 @@ access_recovery_track_json_from_evidence() {
               ),
               command: trusted_verifier_command
             }
-            elif $track_status == "pilot-handoff-not-ready" then {
-              id: "trusted_pilot_evidence_verify",
-              reason: ($bundle_verify.notes // "Trusted verifier receipt is present, but pilot_handoff_ready is false"),
-              command: trusted_verifier_command
-            }
             elif $track_status == "local-rehearsal-ready" then {
               id: "real_helper_https_evidence",
               reason: "Local Access Recovery rehearsal evidence cannot substitute for real helper HTTPS deployment evidence",
@@ -3314,11 +3306,6 @@ access_recovery_track_json_from_evidence() {
           ),
           preferred_operator_next_action: (
             if $track_status == "pilot-evidence-ready" then null
-            elif $track_status == "pilot-handoff-not-ready" then {
-              id: "trusted_pilot_evidence_verify",
-              reason: "Trusted verifier receipt is valid but not handoff-ready; rerun trusted verification after correcting handoff criteria",
-              command: trusted_verifier_command
-            }
             else {
               id: "real_helper_https_evidence",
               reason: "Preferred guarded operator path captures real helper smoke, deployment, installed-host evidence, signed bundle, trusted verifier receipt, and roadmap refresh in one run; recommended_next_action shows the first child evidence gap.",
@@ -13232,19 +13219,24 @@ next_actions_candidate_json="$(
       "label": (if ($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") != "" then "Blockchain missing-metrics real-evidence run" else "Blockchain missing-metrics operator pack" end),
       command: (if ($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") != "" then $blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command else $blockchain_mainnet_activation_missing_metrics_action_operator_pack_command end),
       reason: (if ($blockchain_mainnet_activation_missing_metrics_action_reason // "") != "" then $blockchain_mainnet_activation_missing_metrics_action_reason else "mainnet activation metrics evidence is missing/invalid; run the real evidence flow" end)
-    } else empty end),
+    } + action_evidence_metadata(
+      ["blockchain-mainnet-activation"];
+      (($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") != "");
+      (($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") == "");
+      [(if ($blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command // "") != "" then "real-evidence" else "operator-pack" end)]
+    ) else empty end),
     (if ($blockchain_mainnet_activation_refresh_evidence_available == true and ($blockchain_mainnet_activation_refresh_evidence_command // "") != "") then {
       id: "blockchain_mainnet_activation_refresh_evidence",
       "label": "Blockchain mainnet activation refresh evidence",
       command: $blockchain_mainnet_activation_refresh_evidence_command,
       reason: (if ($blockchain_mainnet_activation_refresh_evidence_reason // "") != "" then $blockchain_mainnet_activation_refresh_evidence_reason else "stale activation evidence; refresh before trusting the GO signal" end)
-    } else empty end),
+    } + action_evidence_metadata(["blockchain-mainnet-activation"]; true; false; ["real-evidence-refresh"]) else empty end),
     (if ($blockchain_mainnet_activation_missing_metrics_action_available == true and ($blockchain_mainnet_activation_missing_metrics_action_prefill_command // "") != "") then {
       id: "blockchain_mainnet_activation_missing_metrics_prefill",
       "label": "Blockchain missing-metrics prefill",
       command: $blockchain_mainnet_activation_missing_metrics_action_prefill_command,
       reason: (if ($blockchain_mainnet_activation_missing_metrics_action_reason // "") != "" then $blockchain_mainnet_activation_missing_metrics_action_reason else "mainnet activation metrics evidence is missing/invalid; prefill the operator input" end)
-    } else empty end),
+    } + action_evidence_metadata(["blockchain-mainnet-activation"]; false; true; ["metrics-prefill"]) else empty end),
     (if ((.summary.real_wg_privileged_gate.status // "pending") != "pass" and (.summary.real_wg_privileged_gate.status // "pending") != "skip" and ((.summary.real_wg_privileged_gate.next_command // .summary.real_wg_privileged_gate.command // "") != "")) then {
       id: "real_wg_privileged_matrix",
       "label": "Linux root real-WG privileged matrix",

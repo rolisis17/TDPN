@@ -3135,12 +3135,12 @@ function computePortalNextRecommendedAction() {
     const challengeId = byId("challenge_id").value.trim();
     const signature = byId("signature").value.trim();
     if (!challengeId) {
-      return "Connect Wallet.";
+      return "Open Access Recovery for beta handoffs, or connect wallet for portal controls.";
     }
     if (!signature) {
-      return "Use Connect Wallet, or use advanced Sign Challenge.";
+      return "Open Access Recovery for beta handoffs, or sign the wallet challenge for portal controls.";
     }
-      return "Use Connect Wallet.";
+    return "Verify the wallet session for portal controls.";
   }
   const sessionFreshness = computeSessionFreshnessState();
   if (sessionFreshness.state === "expired") {

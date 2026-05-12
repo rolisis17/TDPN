@@ -116,6 +116,17 @@ for marker in "${PORTAL_POSITIONING_STALE_HTML_MARKERS[@]}"; do
     exit 1
   fi
 done
+PORTAL_POSITIONING_STALE_JS_MARKERS=(
+  'return "Connect Wallet.";'
+  'return "Use Connect Wallet, or use advanced Sign Challenge.";'
+  'return "Use Connect Wallet.";'
+)
+for marker in "${PORTAL_POSITIONING_STALE_JS_MARKERS[@]}"; do
+  if grep -qF "$marker" "$PORTAL_JS"; then
+    echo "web portal contract failed: stale runtime portal positioning marker '$marker'"
+    exit 1
+  fi
+done
 if ! grep -qF '`portal.html` must present itself as the client workspace' "$README_FILE"; then
   echo "web portal contract failed: README must document portal messaging contract"
   exit 1
