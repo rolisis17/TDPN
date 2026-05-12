@@ -976,6 +976,139 @@ if ! jq -e \
   exit 1
 fi
 
+for generated_identity_case in \
+  "helper|helper-demo|trusted pilot provenance rejects generated demo/example expected_identity.helper_id" \
+  "registry|registry-example|trusted pilot provenance rejects generated demo/example expected_identity.registry_id"
+do
+  IFS='|' read -r generated_identity_field generated_identity_value generated_identity_message <<<"$generated_identity_case"
+  GENERATED_IDENTITY_ROOT="$TMP_DIR/generated-identity-${generated_identity_field}-root"
+  GENERATED_IDENTITY_DIR="$GENERATED_IDENTITY_ROOT/$(basename "$BUNDLE_DIR")"
+  GENERATED_IDENTITY_SUMMARY="$TMP_DIR/generated-identity-${generated_identity_field}-summary.json"
+  GENERATED_IDENTITY_TAR="$TMP_DIR/generated-identity-${generated_identity_field}.tar.gz"
+  GENERATED_IDENTITY_SHA="${GENERATED_IDENTITY_TAR}.sha256"
+  GENERATED_IDENTITY_PROVENANCE="$TMP_DIR/generated-identity-${generated_identity_field}.provenance.json"
+  GENERATED_IDENTITY_VERIFY_SUMMARY="$TMP_DIR/generated-identity-${generated_identity_field}-verify-summary.json"
+  mkdir -p "$GENERATED_IDENTITY_ROOT"
+  cp -R "$INSTALLED_HOST_DIR" "$GENERATED_IDENTITY_DIR"
+  case "$generated_identity_field" in
+    helper)
+      jq --arg value "$generated_identity_value" '.health.helper_id = $value' \
+        "$GENERATED_IDENTITY_DIR/access_bridge_service_smoke_summary.json" >"$GENERATED_IDENTITY_DIR/access_bridge_service_smoke_summary.json.tmp"
+      mv "$GENERATED_IDENTITY_DIR/access_bridge_service_smoke_summary.json.tmp" "$GENERATED_IDENTITY_DIR/access_bridge_service_smoke_summary.json"
+      jq --arg value "$generated_identity_value" '
+        .expected_identity.helper_id = $value
+        | .deployed_identity.helper_id = $value
+        | .local_files.config.helper_id = $value
+      ' "$GENERATED_IDENTITY_DIR/access_bridge_deployment_evidence_summary.json" >"$GENERATED_IDENTITY_DIR/access_bridge_deployment_evidence_summary.json.tmp"
+      mv "$GENERATED_IDENTITY_DIR/access_bridge_deployment_evidence_summary.json.tmp" "$GENERATED_IDENTITY_DIR/access_bridge_deployment_evidence_summary.json"
+      jq \
+        --arg value "$generated_identity_value" \
+        --arg bundle_dir "$GENERATED_IDENTITY_DIR" \
+        --arg bundle_tar "$GENERATED_IDENTITY_TAR" \
+        --arg bundle_tar_sha256_file "$GENERATED_IDENTITY_SHA" \
+        --arg manifest_sha256 "$GENERATED_IDENTITY_DIR/manifest.sha256" \
+        --arg summary_json "$GENERATED_IDENTITY_SUMMARY" \
+        --arg bundled_summary_json "$GENERATED_IDENTITY_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
+        --arg provenance_json "$GENERATED_IDENTITY_PROVENANCE" \
+        --arg smoke_summary_json "$GENERATED_IDENTITY_DIR/access_bridge_service_smoke_summary.json" \
+        --arg deployment_summary_json "$GENERATED_IDENTITY_DIR/access_bridge_deployment_evidence_summary.json" \
+        --arg host_summary_json "$GENERATED_IDENTITY_DIR/access_bridge_host_install_check_summary.json" \
+        '.expected_identity.helper_id = $value
+          | .artifacts.bundle_dir = $bundle_dir
+          | .artifacts.bundle_tar = $bundle_tar
+          | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file
+          | .artifacts.manifest_sha256 = $manifest_sha256
+          | .artifacts.summary_json = $summary_json
+          | .artifacts.bundled_summary_json = $bundled_summary_json
+          | .artifacts.provenance_json = $provenance_json
+          | .provenance.sidecar_json = $provenance_json
+          | .artifacts.smoke_summary_json = $smoke_summary_json
+          | .artifacts.deployment_evidence_summary_json = $deployment_summary_json
+          | .artifacts.host_install_check_summary_json = $host_summary_json' \
+        "$INSTALLED_HOST_SUMMARY_JSON" >"$GENERATED_IDENTITY_SUMMARY"
+      ;;
+    registry)
+      jq --arg value "$generated_identity_value" '.health.registry_id = $value' \
+        "$GENERATED_IDENTITY_DIR/access_bridge_service_smoke_summary.json" >"$GENERATED_IDENTITY_DIR/access_bridge_service_smoke_summary.json.tmp"
+      mv "$GENERATED_IDENTITY_DIR/access_bridge_service_smoke_summary.json.tmp" "$GENERATED_IDENTITY_DIR/access_bridge_service_smoke_summary.json"
+      jq --arg value "$generated_identity_value" '
+        .expected_identity.registry_id = $value
+        | .deployed_identity.registry_id = $value
+        | .local_files.config.registry_id = $value
+      ' "$GENERATED_IDENTITY_DIR/access_bridge_deployment_evidence_summary.json" >"$GENERATED_IDENTITY_DIR/access_bridge_deployment_evidence_summary.json.tmp"
+      mv "$GENERATED_IDENTITY_DIR/access_bridge_deployment_evidence_summary.json.tmp" "$GENERATED_IDENTITY_DIR/access_bridge_deployment_evidence_summary.json"
+      jq \
+        --arg value "$generated_identity_value" \
+        --arg bundle_dir "$GENERATED_IDENTITY_DIR" \
+        --arg bundle_tar "$GENERATED_IDENTITY_TAR" \
+        --arg bundle_tar_sha256_file "$GENERATED_IDENTITY_SHA" \
+        --arg manifest_sha256 "$GENERATED_IDENTITY_DIR/manifest.sha256" \
+        --arg summary_json "$GENERATED_IDENTITY_SUMMARY" \
+        --arg bundled_summary_json "$GENERATED_IDENTITY_DIR/access_bridge_pilot_evidence_bundle_summary.json" \
+        --arg provenance_json "$GENERATED_IDENTITY_PROVENANCE" \
+        --arg smoke_summary_json "$GENERATED_IDENTITY_DIR/access_bridge_service_smoke_summary.json" \
+        --arg deployment_summary_json "$GENERATED_IDENTITY_DIR/access_bridge_deployment_evidence_summary.json" \
+        --arg host_summary_json "$GENERATED_IDENTITY_DIR/access_bridge_host_install_check_summary.json" \
+        '.expected_identity.registry_id = $value
+          | .artifacts.bundle_dir = $bundle_dir
+          | .artifacts.bundle_tar = $bundle_tar
+          | .artifacts.bundle_tar_sha256_file = $bundle_tar_sha256_file
+          | .artifacts.manifest_sha256 = $manifest_sha256
+          | .artifacts.summary_json = $summary_json
+          | .artifacts.bundled_summary_json = $bundled_summary_json
+          | .artifacts.provenance_json = $provenance_json
+          | .provenance.sidecar_json = $provenance_json
+          | .artifacts.smoke_summary_json = $smoke_summary_json
+          | .artifacts.deployment_evidence_summary_json = $deployment_summary_json
+          | .artifacts.host_install_check_summary_json = $host_summary_json' \
+        "$INSTALLED_HOST_SUMMARY_JSON" >"$GENERATED_IDENTITY_SUMMARY"
+      ;;
+    *)
+      echo "unknown generated identity field: $generated_identity_field"
+      exit 2
+      ;;
+  esac
+  cp "$GENERATED_IDENTITY_SUMMARY" "$GENERATED_IDENTITY_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+  (
+    cd "$GENERATED_IDENTITY_DIR"
+    find . -type f -print \
+      | sed 's|^\./||' \
+      | grep -v '^manifest\.sha256$' \
+      | LC_ALL=C sort \
+      | while IFS= read -r rel; do
+          sha256sum "$rel"
+        done
+  ) >"$GENERATED_IDENTITY_DIR/manifest.sha256"
+  tar -czf "$GENERATED_IDENTITY_TAR" -C "$GENERATED_IDENTITY_ROOT" "$(basename "$GENERATED_IDENTITY_DIR")"
+  printf '%s  %s\n' "$(sha256sum "$GENERATED_IDENTITY_TAR" | awk '{print $1}')" "$(basename "$GENERATED_IDENTITY_TAR")" >"$GENERATED_IDENTITY_SHA"
+  go run ./cmd/gpmrecover provenance-sign \
+    --summary-json "$GENERATED_IDENTITY_SUMMARY" \
+    --bundle-tar "$GENERATED_IDENTITY_TAR" \
+    --bundle-tar-sha256-file "$GENERATED_IDENTITY_SHA" \
+    --private-key-file "$PRIVATE_KEY_FILE" \
+    --org-id pilot-org \
+    --org-name "Pilot Org" \
+    --out "$GENERATED_IDENTITY_PROVENANCE" >/dev/null
+  set +e
+  bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+    --summary-json "$GENERATED_IDENTITY_SUMMARY" \
+    --provenance-json "$GENERATED_IDENTITY_PROVENANCE" \
+    --require-trusted-provenance 1 \
+    --trust-store "$TRUST_STORE" \
+    --verification-summary-json "$GENERATED_IDENTITY_VERIFY_SUMMARY" \
+    --print-verification-summary-json 0 >"$TMP_DIR/verify-generated-identity-${generated_identity_field}.log" 2>&1
+  generated_identity_rc=$?
+  set -e
+  if [[ "$generated_identity_rc" -eq 0 ]] || ! grep -Fq "$generated_identity_message" "$TMP_DIR/verify-generated-identity-${generated_identity_field}.log"; then
+    echo "access bridge pilot evidence bundle verifier integration failed: generated identity was accepted: $generated_identity_field"
+    cat "$TMP_DIR/verify-generated-identity-${generated_identity_field}.log"
+    if [[ -f "$GENERATED_IDENTITY_VERIFY_SUMMARY" ]]; then
+      cat "$GENERATED_IDENTITY_VERIFY_SUMMARY"
+    fi
+    exit 1
+  fi
+done
+
 BAD_PROXY_TARGET_ROOT="$TMP_DIR/installed-host-bad-proxy-target-root"
 BAD_PROXY_TARGET_DIR="$BAD_PROXY_TARGET_ROOT/$(basename "$BUNDLE_DIR")"
 BAD_PROXY_TARGET_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_bad_proxy_target_summary.json"

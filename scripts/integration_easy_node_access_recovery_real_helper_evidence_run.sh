@@ -22,6 +22,9 @@ FAKE_ROADMAP="$TMP_DIR/fake_roadmap_progress_report.sh"
 HELP_OUT="$TMP_DIR/help.txt"
 REPORTS_DIR="$TMP_DIR/reports"
 CONFIG_JSON="$TMP_DIR/bridge-service-config.json"
+CONFIG_INFERRED_HELPER_DEMO_JSON="$TMP_DIR/bridge-service-config-helper-demo.json"
+CONFIG_INFERRED_ORG_DEMO_JSON="$TMP_DIR/bridge-service-config-org-demo.json"
+CONFIG_INFERRED_REGISTRY_DEMO_JSON="$TMP_DIR/bridge-service-config-registry-demo.json"
 DEPLOY_PACK_DIR="$TMP_DIR/deploy-pack"
 INSTALL_DIR="$TMP_DIR/installed-host"
 SYSTEMD_UNIT_FILE="$TMP_DIR/gpm-access-bridge.service"
@@ -47,6 +50,9 @@ INSTALLED_HOST_ARGS=(
 
 mkdir -p "$DEPLOY_PACK_DIR" "$INSTALL_DIR" "$REPORTS_DIR" "$GENERATED_DEMO_DEPLOY_PACK_DIR"
 printf '%s\n' '{"status":"pass"}' >"$CONFIG_JSON"
+printf '%s\n' '{"helper_id":"helper-demo","organization_id":"pilot-org","registry_id":"registry-pilot","status":"pass"}' >"$CONFIG_INFERRED_HELPER_DEMO_JSON"
+printf '%s\n' '{"helper_id":"helper-pilot","organization_id":"freenews-demo","registry_id":"registry-pilot","status":"pass"}' >"$CONFIG_INFERRED_ORG_DEMO_JSON"
+printf '%s\n' '{"helper_id":"helper-pilot","organization_id":"pilot-org","registry_id":"registry-demo","status":"pass"}' >"$CONFIG_INFERRED_REGISTRY_DEMO_JSON"
 printf '%s\n' '[Service]' 'EnvironmentFile='"$INSTALL_DIR/gpm-access-bridge.env" 'ExecStart='"$INSTALL_DIR/run-gpm-access-bridge.sh" >"$SYSTEMD_UNIT_FILE"
 printf '%s\n' 'helper.gpm-pilot.net {' '  reverse_proxy 127.0.0.1:8791 {' '    header_up X-Forwarded-For {remote_host}' '  }' '}' >"$PROXY_CONFIG_FILE"
 printf '%s\n' 'test-access-code' >"$CODE_FILE"
@@ -542,6 +548,49 @@ if grep -Fq -- "token@helper" "$TMP_DIR/userinfo-url.log"; then
   exit 1
 fi
 
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code "test-access-code" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --trust-store "$TRUST_STORE" \
+  --summary-json "$TMP_DIR/live-inline-code-summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/live-inline-code.log" 2>&1
+live_inline_code_rc=$?
+set -e
+if [[ "$live_inline_code_rc" -ne 2 ]] ||
+  ! grep -Fq -- "live real-helper pilot handoff requires --code-file; inline --code is not allowed for live evidence runs" "$TMP_DIR/live-inline-code.log"; then
+  echo "expected live inline --code to fail preflight"
+  cat "$TMP_DIR/live-inline-code.log"
+  exit 1
+fi
+if [[ -s "$CAPTURE" ]]; then
+  echo "live inline --code preflight should not invoke child scripts"
+  cat "$CAPTURE"
+  exit 1
+fi
+jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .stage == "preflight"
+  and .mode.plan_only == false
+  and .inputs.code_present == true
+  and .inputs.code_file_present == false
+' "$TMP_DIR/live-inline-code-summary.json" >/dev/null
+
 bad_real_helper_urls=(
   "https://198.51.100.10"
   "https://203.0.113.10"
@@ -659,6 +708,52 @@ if ! grep -Fq -- "Planned Child Commands" "$TMP_DIR/plan-only-report.md" ||
   ! grep -Fq -- "Planned Artifacts" "$TMP_DIR/plan-only-report.md"; then
   echo "plan-only report missing planned commands/artifacts"
   cat "$TMP_DIR/plan-only-report.md"
+  exit 1
+fi
+
+: >"$CAPTURE"
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --plan-only \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code "test-access-code" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/plan-only-inline-code-summary.json" \
+  --report-md "$TMP_DIR/plan-only-inline-code-report.md" \
+  --print-summary-json 0 >"$TMP_DIR/plan-only-inline-code.log" 2>&1
+if [[ -s "$CAPTURE" ]]; then
+  echo "plan-only inline code should not invoke child scripts"
+  cat "$CAPTURE"
+  exit 1
+fi
+jq -e '
+  .status == "skipped"
+  and .stage == "plan"
+  and .mode.plan_only == true
+  and .inputs.code_present == true
+  and .inputs.code_file_present == false
+  and (.planned_child_commands.bundle.args | index("--code") != null)
+  and (.planned_child_commands.bundle.args | index("<redacted>") != null)
+' "$TMP_DIR/plan-only-inline-code-summary.json" >/dev/null
+if grep -Fq -- "test-access-code" "$TMP_DIR/plan-only-inline-code-summary.json" ||
+  grep -Fq -- "test-access-code" "$TMP_DIR/plan-only-inline-code-report.md" ||
+  grep -Fq -- "test-access-code" "$TMP_DIR/plan-only-inline-code.log"; then
+  echo "plan-only inline code leaked into summary, report, or log"
+  cat "$TMP_DIR/plan-only-inline-code-summary.json"
+  cat "$TMP_DIR/plan-only-inline-code-report.md"
+  cat "$TMP_DIR/plan-only-inline-code.log"
   exit 1
 fi
 
@@ -963,8 +1058,12 @@ if [[ -s "$CAPTURE" ]]; then
 fi
 
 for demo_identity_case in \
-  "helper|--expect-helper-id|helper-demo|--expect-helper-id must not use a generated demo identity for live pilot handoff" \
-  "org|--expect-org-id|freenews-demo|--expect-org-id must not use a generated demo identity for live pilot handoff"
+  "helper|--expect-helper-id|helper-demo|--expect-helper-id must not use a generated demo/example identity for live pilot handoff" \
+  "org|--expect-org-id|freenews-demo|--expect-org-id must not use a generated demo/example identity for live pilot handoff" \
+  "registry|--expect-registry-id|registry-demo|--expect-registry-id must not use a generated demo/example identity for live pilot handoff" \
+  "helper-example|--expect-helper-id|helper-example|--expect-helper-id must not use a generated demo/example identity for live pilot handoff" \
+  "org-example|--expect-org-id|org-example|--expect-org-id must not use a generated demo/example identity for live pilot handoff" \
+  "registry-example|--expect-registry-id|registry-example|--expect-registry-id must not use a generated demo/example identity for live pilot handoff"
 do
   IFS='|' read -r demo_identity_name demo_identity_flag demo_identity_value demo_identity_message <<<"$demo_identity_case"
   : >"$CAPTURE"
@@ -1004,9 +1103,51 @@ do
   fi
 done
 
+for inferred_demo_identity_case in \
+  "helper|$CONFIG_INFERRED_HELPER_DEMO_JSON|--config-json helper_id must not use a generated demo/example identity for live pilot handoff" \
+  "org|$CONFIG_INFERRED_ORG_DEMO_JSON|--config-json organization_id must not use a generated demo/example identity for live pilot handoff" \
+  "registry|$CONFIG_INFERRED_REGISTRY_DEMO_JSON|--config-json registry_id must not use a generated demo/example identity for live pilot handoff"
+do
+  IFS='|' read -r inferred_demo_identity_name inferred_demo_identity_config inferred_demo_identity_message <<<"$inferred_demo_identity_case"
+  : >"$CAPTURE"
+  set +e
+  ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+  ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+  ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+  ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+    --base-url https://helper.gpm-pilot.net \
+    --path-id helper-web \
+    --code-file "$CODE_FILE" \
+    --config-json "$inferred_demo_identity_config" \
+    --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+    "${INSTALLED_HOST_ARGS[@]}" \
+    --provenance-private-key-file "$PROVENANCE_KEY" \
+    --provenance-org-id pilot-org \
+    --provenance-org-name "Pilot Org" \
+    --trust-store "$TRUST_STORE" \
+    --summary-json "$TMP_DIR/live-inferred-demo-identity-$inferred_demo_identity_name-summary.json" \
+    --print-summary-json 0 >"$TMP_DIR/live-inferred-demo-identity-$inferred_demo_identity_name.log" 2>&1
+  inferred_demo_identity_rc=$?
+  set -e
+  if [[ "$inferred_demo_identity_rc" -ne 2 ]] ||
+    ! grep -Fq -- "$inferred_demo_identity_message" "$TMP_DIR/live-inferred-demo-identity-$inferred_demo_identity_name.log"; then
+    echo "expected live inferred demo identity to fail preflight: $inferred_demo_identity_name"
+    cat "$TMP_DIR/live-inferred-demo-identity-$inferred_demo_identity_name.log"
+    exit 1
+  fi
+  if [[ -s "$CAPTURE" ]]; then
+    echo "live inferred demo identity should not invoke child scripts: $inferred_demo_identity_name"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
+
 for provenance_demo_identity_case in \
-  "provenance-org-id|freenews-demo|Pilot Org|--provenance-org-id must not use a generated demo identity for live pilot handoff" \
-  "provenance-org-name|pilot-org|FreeNews Demo|--provenance-org-name must not use a generated demo identity for live pilot handoff"
+  "provenance-org-id|freenews-demo|Pilot Org|--provenance-org-id must not use a generated demo/example identity for live pilot handoff" \
+  "provenance-org-name|pilot-org|FreeNews Demo|--provenance-org-name must not use a generated demo/example identity for live pilot handoff"
 do
   IFS='|' read -r provenance_demo_identity_name provenance_demo_org_id provenance_demo_org_name provenance_demo_identity_message <<<"$provenance_demo_identity_case"
   : >"$CAPTURE"
@@ -1460,7 +1601,11 @@ jq -e '
   .status == "fail"
   and .stage == "verify"
   and .child_summaries.verifier.schema.minor == 3
-  and .readiness.trusted_verifier_pilot_handoff_ready == true
+  and .readiness.verifier_claimed_pilot_handoff_ready == true
+  and .readiness.trusted_verifier_pilot_handoff_ready == false
+  and .readiness.handoff_authority_ready == false
+  and .readiness.handoff_complete == false
+  and .readiness.handoff_authority_complete == false
 ' "$TMP_DIR/verifier-schema-minor-3-summary.json" >/dev/null
 
 : >"$CAPTURE"
@@ -1646,6 +1791,15 @@ if ! grep -Fq -- "Trusted verifier receipt did not prove current real helper HTT
   cat "$TMP_DIR/verifier-binding-mismatch-summary.json"
   exit 1
 fi
+jq -e '
+  .status == "fail"
+  and .stage == "verify"
+  and .readiness.verifier_claimed_pilot_handoff_ready == true
+  and .readiness.trusted_verifier_pilot_handoff_ready == false
+  and .readiness.handoff_authority_ready == false
+  and .readiness.handoff_complete == false
+  and .readiness.handoff_authority_complete == false
+' "$TMP_DIR/verifier-binding-mismatch-summary.json" >/dev/null
 
 for identity_mode in \
   missing_helper \
@@ -1694,7 +1848,16 @@ do
     cat "$TMP_DIR/verifier-${identity_mode}-summary.json"
     exit 1
   fi
-  jq -e '.status == "fail" and .stage == "verify" and .child_summaries.verifier.pilot_handoff_ready == true' "$TMP_DIR/verifier-${identity_mode}-summary.json" >/dev/null
+  jq -e '
+    .status == "fail"
+    and .stage == "verify"
+    and .child_summaries.verifier.pilot_handoff_ready == true
+    and .readiness.verifier_claimed_pilot_handoff_ready == true
+    and .readiness.trusted_verifier_pilot_handoff_ready == false
+    and .readiness.handoff_authority_ready == false
+    and .readiness.handoff_complete == false
+    and .readiness.handoff_authority_complete == false
+  ' "$TMP_DIR/verifier-${identity_mode}-summary.json" >/dev/null
 done
 
 : >"$CAPTURE"

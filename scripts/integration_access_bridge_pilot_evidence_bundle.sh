@@ -290,9 +290,35 @@ bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
 demo_provenance_id_bundle_rc=$?
 set -e
 if [[ "$demo_provenance_id_bundle_rc" -eq 0 ]] ||
-  ! grep -Fq -- '--provenance-org-id must not use a generated demo identity for real helper HTTPS pilot handoff' "$TMP_DIR/demo-provenance-id-pilot-evidence-bundle.log"; then
+  ! grep -Fq -- '--provenance-org-id must not use a generated demo/example identity for real helper HTTPS pilot handoff' "$TMP_DIR/demo-provenance-id-pilot-evidence-bundle.log"; then
   echo "access bridge pilot evidence bundle integration failed: demo provenance org id was not rejected for real helper HTTPS pilot handoff"
   cat "$TMP_DIR/demo-provenance-id-pilot-evidence-bundle.log"
+  exit 1
+fi
+
+DEMO_HELPER_CONFIG="$TMP_DIR/demo-helper-config.json"
+jq '.helper_id = "helper-demo"' "$SERVICE_CONFIG" >"$DEMO_HELPER_CONFIG"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url https://recovery-helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$DEMO_HELPER_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_PACK" \
+  --service-name gpm-access-bridge-pilot \
+  --provenance-sign 1 \
+  --provenance-private-key-file "$PROVENANCE_PRIVATE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --provenance-key-id "$PROVENANCE_KEY_ID" \
+  --provenance-out "$TMP_DIR/demo-helper-config-pilot-evidence.provenance.json" \
+  --print-summary-json 0 >"$TMP_DIR/demo-helper-config-pilot-evidence-bundle.log" 2>&1
+demo_helper_config_bundle_rc=$?
+set -e
+if [[ "$demo_helper_config_bundle_rc" -eq 0 ]] ||
+  ! grep -Fq -- 'expected helper identity must not use a generated demo/example identity for real helper HTTPS pilot handoff' "$TMP_DIR/demo-helper-config-pilot-evidence-bundle.log"; then
+  echo "access bridge pilot evidence bundle integration failed: config-inferred demo helper id was not rejected for real helper HTTPS pilot handoff"
+  cat "$TMP_DIR/demo-helper-config-pilot-evidence-bundle.log"
   exit 1
 fi
 

@@ -185,11 +185,11 @@ value_looks_generated_demo_identity() {
   [[ -z "$value" ]] && return 1
   value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
   case "$value" in
-    demo|demo-*|*-demo|helper-demo|freenews-demo|*generated-demo*|*generated_example*)
+    demo|demo-*|*-demo|helper-demo|freenews-demo|*generated-demo*|*generated_example*|example|example-*|*-example|helper-example|freenews-example|*generated-example*|*generated_example*)
       return 0
       ;;
   esac
-  [[ "$value" =~ (^|[^a-z0-9])demo([^a-z0-9]|$) ]]
+  [[ "$value" =~ (^|[^a-z0-9])(demo|example)([^a-z0-9]|$) ]]
 }
 
 fail_pilot_demo_example_input() {
@@ -823,11 +823,11 @@ if [[ "$real_helper_https_pilot_handoff" == "1" ]]; then
     fail_pilot_demo_example_input "--provenance-private-key-file" "$provenance_private_key_file"
   fi
   if [[ -n "$provenance_org_id" ]] && value_looks_generated_demo_identity "$provenance_org_id"; then
-    echo "access bridge pilot evidence bundle failed: --provenance-org-id must not use a generated demo identity for real helper HTTPS pilot handoff" >&2
+    echo "access bridge pilot evidence bundle failed: --provenance-org-id must not use a generated demo/example identity for real helper HTTPS pilot handoff" >&2
     exit 2
   fi
   if [[ -n "$provenance_org_name" ]] && value_looks_generated_demo_identity "$provenance_org_name"; then
-    echo "access bridge pilot evidence bundle failed: --provenance-org-name must not use a generated demo identity for real helper HTTPS pilot handoff" >&2
+    echo "access bridge pilot evidence bundle failed: --provenance-org-name must not use a generated demo/example identity for real helper HTTPS pilot handoff" >&2
     exit 2
   fi
 fi
@@ -877,6 +877,20 @@ if [[ -z "$expect_org_id" ]]; then
 fi
 if [[ -z "$expect_registry_id" ]]; then
   expect_registry_id="$(json_string_or_empty "$config_json" '.registry_id')"
+fi
+if [[ "$real_helper_https_pilot_handoff" == "1" ]]; then
+  if [[ -n "$expect_helper_id" ]] && value_looks_generated_demo_identity "$expect_helper_id"; then
+    echo "access bridge pilot evidence bundle failed: expected helper identity must not use a generated demo/example identity for real helper HTTPS pilot handoff" >&2
+    exit 2
+  fi
+  if [[ -n "$expect_org_id" ]] && value_looks_generated_demo_identity "$expect_org_id"; then
+    echo "access bridge pilot evidence bundle failed: expected organization identity must not use a generated demo/example identity for real helper HTTPS pilot handoff" >&2
+    exit 2
+  fi
+  if [[ -n "$expect_registry_id" ]] && value_looks_generated_demo_identity "$expect_registry_id"; then
+    echo "access bridge pilot evidence bundle failed: expected registry identity must not use a generated demo/example identity for real helper HTTPS pilot handoff" >&2
+    exit 2
+  fi
 fi
 
 config_copy="$bundle_dir/bridge-service-config.json"

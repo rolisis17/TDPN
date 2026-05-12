@@ -44,6 +44,7 @@ report_md=""
 print_summary_json="${ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_PRINT_SUMMARY_JSON:-1}"
 print_child_json="0"
 allow_child_script_overrides="${ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_ALLOW_SCRIPT_OVERRIDES:-0}"
+receipt_validation_passed="false"
 
 usage() {
   cat <<'USAGE'
@@ -52,7 +53,7 @@ Usage:
     --base-url https://HELPER_PUBLIC_DNS \
     --config-json FILE \
     --deploy-pack-dir DIR \
-    (--code CODE | --code-file FILE) \
+    --code-file FILE \
     [--host-install-evidence-mode deploy-pack|installed-host] \
     [--install-dir DIR] \
     [--systemd-unit-file FILE] \
@@ -78,6 +79,7 @@ Usage:
     [--roadmap-summary-json FILE] \
     [--roadmap-report-md FILE] \
     [--allow-child-script-overrides 0|1] \
+    [--code CODE] \
     [--summary-json FILE] \
     [--report-md FILE] \
     [--print-summary-json 0|1] \
@@ -96,6 +98,9 @@ access_bridge_pilot_evidence_bundle_verify_summary schema major 1, minor >= 5.
 Use --plan-only 1 to run the same strict preflight validation and emit the
 planned child commands/artifacts without invoking host-install, bundle,
 verifier, or roadmap child scripts.
+Live evidence runs require --code-file so the private access code is never
+handed off as inline plaintext. Inline --code is accepted only with
+--plan-only 1 for command-shape rehearsal.
 
 This wrapper is intentionally stricter than local rehearsal helpers. It refuses
 placeholder values, loopback/private-looking helper URLs, missing trust stores,
@@ -194,11 +199,11 @@ value_looks_generated_demo_identity() {
   [[ -z "$value" ]] && return 1
   value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
   case "$value" in
-    demo|demo-*|*-demo|helper-demo|freenews-demo|*generated-demo*|*generated_example*)
+    demo|demo-*|*-demo|helper-demo|freenews-demo|*generated-demo*|*generated_example*|example|example-*|*-example|helper-example|freenews-example|*generated-example*|*generated_example*)
       return 0
       ;;
   esac
-  [[ "$value" =~ (^|[^a-z0-9])demo([^a-z0-9]|$) ]]
+  [[ "$value" =~ (^|[^a-z0-9])(demo|example)([^a-z0-9]|$) ]]
 }
 
 url_authority() {
@@ -371,7 +376,7 @@ trust_store_content_looks_generated_demo() {
     def demo_marker:
       tostring
       | ascii_downcase
-      | test("(^|[^a-z0-9])(generated-demo|helper-demo|freenews-demo|demo)([^a-z0-9]|$)");
+      | test("(^|[^a-z0-9])(generated[-_](demo|example)|helper-(demo|example)|freenews-(demo|example)|demo|example)([^a-z0-9]|$)");
     [
       (.trusted_keys[]?, .keys[]?)
       | [
@@ -414,6 +419,12 @@ json_array_from_args() {
   else
     printf '%s\n' "$@" | jq -R . | jq -s -c .
   fi
+}
+
+json_string_or_empty() {
+  local file="$1"
+  local filter="$2"
+  jq -r "$filter // \"\"" "$file" 2>/dev/null || true
 }
 
 redacted_args_json() {
@@ -851,7 +862,7 @@ write_summary() {
   local stage="$3"
   local notes="$4"
   local generated_at_utc
-  local host_install_obj bundle_obj verify_obj roadmap_obj pilot_ready roadmap_ready handoff_complete status_rollup_complete evidence_scope verifier_scope
+  local host_install_obj bundle_obj verify_obj roadmap_obj pilot_ready verifier_claimed_pilot_ready roadmap_ready handoff_complete status_rollup_complete evidence_scope verifier_scope
   local verifier_authority_level verifier_integrity_only
   local code_present_json code_file_present_json
   local roadmap_refresh_json
@@ -865,7 +876,7 @@ write_summary() {
   else
     roadmap_obj="null"
   fi
-  pilot_ready="$(printf '%s\n' "$verify_obj" | jq -r '
+  verifier_claimed_pilot_ready="$(printf '%s\n' "$verify_obj" | jq -r '
     if type == "object" then
       (
         .handoff_authority == true
@@ -878,6 +889,11 @@ write_summary() {
       ) | tostring
     else "false" end
   ')"
+  if [[ "$status" == "pass" && "$receipt_validation_passed" == "true" && "$verifier_claimed_pilot_ready" == "true" ]]; then
+    pilot_ready="true"
+  else
+    pilot_ready="false"
+  fi
   verifier_authority_level="$(printf '%s\n' "$verify_obj" | jq -r 'if type == "object" then (.authority_level // "") else "" end')"
   verifier_integrity_only="$(printf '%s\n' "$verify_obj" | jq -r 'if type == "object" and (.integrity_only | type) == "boolean" then (.integrity_only | tostring) else "false" end')"
   roadmap_ready="$(printf '%s\n' "$roadmap_obj" | jq -r 'if type == "object" then (.access_recovery_pilot_handoff_ready // false | tostring) else "false" end')"
@@ -951,6 +967,7 @@ write_summary() {
     --argjson code_file_present "$code_file_present_json" \
     --argjson plan_only "$plan_only_json" \
     --argjson pilot_handoff_ready "$pilot_ready" \
+    --argjson verifier_claimed_pilot_handoff_ready "$verifier_claimed_pilot_ready" \
     --argjson roadmap_ready "$roadmap_ready" \
     --argjson handoff_complete "$handoff_complete" \
     --argjson status_rollup_complete "$status_rollup_complete" \
@@ -1013,6 +1030,7 @@ write_summary() {
         handoff_complete: $handoff_complete,
         handoff_authority_complete: $pilot_handoff_ready,
         status_rollup_complete: $status_rollup_complete,
+        verifier_claimed_pilot_handoff_ready: $verifier_claimed_pilot_handoff_ready,
         trusted_verifier_pilot_handoff_ready: $pilot_handoff_ready,
         roadmap_access_recovery_pilot_handoff_ready: $roadmap_ready
       },
@@ -1118,10 +1136,16 @@ host="$(url_host "$base_url")"
 if host_looks_non_public_for_real_helper "$host"; then
   fail_preflight "--base-url host must look public-routable for real helper evidence: ${host:-<missing>}"
 fi
-if [[ -n "$code" && -n "$code_file" ]]; then
+if [[ "$plan_only" != "1" ]]; then
+  if [[ -n "$code" ]]; then
+    fail_preflight "live real-helper pilot handoff requires --code-file; inline --code is not allowed for live evidence runs"
+  fi
+  if [[ -z "$code_file" ]]; then
+    fail_preflight "live real-helper pilot handoff requires --code-file"
+  fi
+elif [[ -n "$code" && -n "$code_file" ]]; then
   fail_preflight "use either --code or --code-file, not both"
-fi
-if [[ -z "$code" && -z "$code_file" ]]; then
+elif [[ -z "$code" && -z "$code_file" ]]; then
   fail_preflight "one of --code or --code-file is required"
 fi
 if [[ -n "$code" ]] && value_looks_placeholder "$code"; then
@@ -1190,17 +1214,38 @@ if value_looks_placeholder "$trust_store" || [[ ! -f "$trust_store" ]]; then
   fail_preflight "--trust-store must point to a real trusted verifier trust store"
 fi
 if [[ "$plan_only" != "1" ]]; then
-  if [[ -n "$expect_helper_id" ]] && value_looks_generated_demo_identity "$expect_helper_id"; then
-    fail_preflight "--expect-helper-id must not use a generated demo identity for live pilot handoff"
+  effective_expect_helper_id="$expect_helper_id"
+  effective_expect_helper_source="--expect-helper-id"
+  if [[ -z "$effective_expect_helper_id" ]]; then
+    effective_expect_helper_id="$(json_string_or_empty "$config_json" '.helper_id')"
+    effective_expect_helper_source="--config-json helper_id"
   fi
-  if [[ -n "$expect_org_id" ]] && value_looks_generated_demo_identity "$expect_org_id"; then
-    fail_preflight "--expect-org-id must not use a generated demo identity for live pilot handoff"
+  effective_expect_org_id="$expect_org_id"
+  effective_expect_org_source="--expect-org-id"
+  if [[ -z "$effective_expect_org_id" ]]; then
+    effective_expect_org_id="$(json_string_or_empty "$config_json" '.organization_id')"
+    effective_expect_org_source="--config-json organization_id"
+  fi
+  effective_expect_registry_id="$expect_registry_id"
+  effective_expect_registry_source="--expect-registry-id"
+  if [[ -z "$effective_expect_registry_id" ]]; then
+    effective_expect_registry_id="$(json_string_or_empty "$config_json" '.registry_id')"
+    effective_expect_registry_source="--config-json registry_id"
+  fi
+  if [[ -n "$effective_expect_helper_id" ]] && value_looks_generated_demo_identity "$effective_expect_helper_id"; then
+    fail_preflight "$effective_expect_helper_source must not use a generated demo/example identity for live pilot handoff"
+  fi
+  if [[ -n "$effective_expect_org_id" ]] && value_looks_generated_demo_identity "$effective_expect_org_id"; then
+    fail_preflight "$effective_expect_org_source must not use a generated demo/example identity for live pilot handoff"
+  fi
+  if [[ -n "$effective_expect_registry_id" ]] && value_looks_generated_demo_identity "$effective_expect_registry_id"; then
+    fail_preflight "$effective_expect_registry_source must not use a generated demo/example identity for live pilot handoff"
   fi
   if [[ -n "$provenance_org_id" ]] && value_looks_generated_demo_identity "$provenance_org_id"; then
-    fail_preflight "--provenance-org-id must not use a generated demo identity for live pilot handoff"
+    fail_preflight "--provenance-org-id must not use a generated demo/example identity for live pilot handoff"
   fi
   if [[ -n "$provenance_org_name" ]] && value_looks_generated_demo_identity "$provenance_org_name"; then
-    fail_preflight "--provenance-org-name must not use a generated demo identity for live pilot handoff"
+    fail_preflight "--provenance-org-name must not use a generated demo/example identity for live pilot handoff"
   fi
   if [[ -n "$code_file" ]] && path_looks_generated_demo_example_artifact "$code_file"; then
     fail_live_generated_demo_example_input "--code-file" "$code_file"
@@ -1491,6 +1536,7 @@ if ! receipt_validation_errors="$(validate_trusted_verifier_receipt 2>&1)"; then
   [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
   exit 1
 fi
+receipt_validation_passed="true"
 
 if [[ "$roadmap_refresh" == "1" ]]; then
   roadmap_args=(

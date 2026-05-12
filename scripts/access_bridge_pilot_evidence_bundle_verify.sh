@@ -319,6 +319,10 @@ validate_trusted_bundled_evidence_semantics() {
         (($v.schema.id // "") == $id)
         and (($v.schema.major | type) == "number" and $v.schema.major == 1)
         and (($v.schema.minor | type) == "number" and $v.schema.minor >= $minor);
+      def generated_demo_example_identity($v):
+        ($v | tostring | ascii_downcase) as $s
+        | ($s != "")
+          and ($s | test("(^|[^a-z0-9])(generated[-_](demo|example)|helper-(demo|example)|freenews-(demo|example)|demo|example)([^a-z0-9]|$)"));
       def host_from_url($url):
         $url
         | sub("^[A-Za-z][A-Za-z0-9+.-]*://"; "")
@@ -446,6 +450,9 @@ validate_trusted_bundled_evidence_semantics() {
           if ($expected_helper_id == "") then "trusted pilot provenance requires non-empty expected_identity.helper_id" else empty end,
           if ($expected_organization_id == "") then "trusted pilot provenance requires non-empty expected_identity.organization_id" else empty end,
           if ($expected_registry_id == "") then "trusted pilot provenance requires non-empty expected_identity.registry_id" else empty end,
+          if generated_demo_example_identity($expected_helper_id) then "trusted pilot provenance rejects generated demo/example expected_identity.helper_id" else empty end,
+          if generated_demo_example_identity($expected_organization_id) then "trusted pilot provenance rejects generated demo/example expected_identity.organization_id" else empty end,
+          if generated_demo_example_identity($expected_registry_id) then "trusted pilot provenance rejects generated demo/example expected_identity.registry_id" else empty end,
           if schema_ok($s; "access_bridge_service_smoke_summary"; 6) | not then "bundled service smoke summary schema is invalid or too old" else empty end,
           if pass_status($s) | not then "bundled service smoke summary status is not pass" else empty end,
           if (($s.base_url // "") != $expected_base_url) then "bundled service smoke base_url does not match bundle summary" else empty end,
@@ -745,7 +752,7 @@ trust_store_content_is_dev() {
     def demo_marker:
       tostring
       | ascii_downcase
-      | test("(^|[^a-z0-9])(generated-demo|helper-demo|freenews-demo|demo)([^a-z0-9]|$)");
+      | test("(^|[^a-z0-9])(generated[-_](demo|example)|helper-(demo|example)|freenews-(demo|example)|demo|example)([^a-z0-9]|$)");
     [
       (.trusted_keys[]?, .keys[]?)
       | [
@@ -1287,6 +1294,9 @@ write_verification_summary() {
         and $source_helper_id != ""
         and $source_organization_id != ""
         and $source_registry_id != ""
+        and (($source_helper_id | tostring | ascii_downcase | test("(^|[^a-z0-9])(generated[-_](demo|example)|helper-(demo|example)|freenews-(demo|example)|demo|example)([^a-z0-9]|$)")) | not)
+        and (($source_organization_id | tostring | ascii_downcase | test("(^|[^a-z0-9])(generated[-_](demo|example)|helper-(demo|example)|freenews-(demo|example)|demo|example)([^a-z0-9]|$)")) | not)
+        and (($source_registry_id | tostring | ascii_downcase | test("(^|[^a-z0-9])(generated[-_](demo|example)|helper-(demo|example)|freenews-(demo|example)|demo|example)([^a-z0-9]|$)")) | not)
         and $provenance_organization_id == $source_organization_id
         and $provenance_trusted_org_id == $source_organization_id;
       def pilot_handoff_ready:
