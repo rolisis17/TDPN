@@ -274,7 +274,7 @@ jq -n \
   --arg host_summary_json "$BUNDLE_DIR/access_bridge_host_install_check_summary.json" \
   '{
     version: 1,
-    schema: {id: "access_bridge_pilot_evidence_bundle_summary", major: 1, minor: 7},
+    schema: {id: "access_bridge_pilot_evidence_bundle_summary", major: 1, minor: 8},
     generated_at_utc: $generated_at_utc,
     status: "pass",
     rc: 0,
@@ -400,7 +400,7 @@ if [[ "$trusted_policy_receipt_required_rc" -eq 0 ]] || ! grep -Fq -- '--require
 fi
 
 OLD_BUNDLE_SCHEMA_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_old_schema_summary.json"
-jq '.schema.minor = 6' "$SUMMARY_JSON" >"$OLD_BUNDLE_SCHEMA_SUMMARY_JSON"
+jq '.schema.minor = 7' "$SUMMARY_JSON" >"$OLD_BUNDLE_SCHEMA_SUMMARY_JSON"
 set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$OLD_BUNDLE_SCHEMA_SUMMARY_JSON" \
@@ -660,7 +660,7 @@ fi
 MTLS_REQUIRED_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_mtls_required_missing_proof_summary.json"
 MTLS_REQUIRED_PROVENANCE_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_mtls_required_missing_proof.provenance.json"
 MTLS_REQUIRED_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_mtls_required_missing_proof_verify_summary.json"
-jq '.schema.minor = 7 | .evidence_policy.require_mtls = true' "$SUMMARY_JSON" >"$MTLS_REQUIRED_SUMMARY_JSON"
+jq '.schema.minor = 8 | .evidence_policy.require_mtls = true' "$SUMMARY_JSON" >"$MTLS_REQUIRED_SUMMARY_JSON"
 go run ./cmd/gpmrecover provenance-sign \
   --summary-json "$MTLS_REQUIRED_SUMMARY_JSON" \
   --bundle-tar "$BUNDLE_TAR" \
@@ -766,7 +766,7 @@ jq \
   --arg smoke_summary_json "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_service_smoke_summary.json" \
   --arg deployment_summary_json "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_deployment_evidence_summary.json" \
   --arg host_summary_json "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_host_install_check_summary.json" \
-  '.schema.minor = 7
+  '.schema.minor = 8
     | .evidence_policy.require_mtls = true
     | .artifacts.bundle_dir = $bundle_dir
     | .artifacts.bundle_tar = $bundle_tar
@@ -918,7 +918,7 @@ INSTALLED_HOST_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle
 mkdir -p "$INSTALLED_HOST_ROOT"
 cp -R "$BUNDLE_DIR" "$INSTALLED_HOST_DIR"
 jq '
-  .schema.minor = 7
+  .schema.minor = 8
   | .inputs.evidence_mode = "installed-host"
   | .inputs.installed_host_mode = true
   | .inputs.install_dir = "/etc/gpm/access-bridge"

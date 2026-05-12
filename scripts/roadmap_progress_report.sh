@@ -2066,7 +2066,7 @@ access_recovery_evidence_json() {
         rc_ok
         and pass_status
         and ((.schema.major | type) == "number" and .schema.major == 1)
-        and ((.schema.minor | type) == "number" and .schema.minor >= 5)
+        and ((.schema.minor | type) == "number" and .schema.minor >= 6)
         and str_eq(.smoke.status; "pass")
         and str_eq(.smoke.evidence_status; "pass")
         and (.smoke.auth_required == true)
@@ -2251,6 +2251,8 @@ access_recovery_evidence_json() {
           smoke_bridge_security_headers_ok: (if (.smoke.bridge_security_headers_ok | type) == "boolean" then .smoke.bridge_security_headers_ok else null end),
           smoke_config_sha256: str_or_null(.smoke.config_sha256),
           smoke_summary_json: str_or_null(.smoke.summary_json),
+          smoke_summary_sha256: str_or_null(.smoke.summary_sha256),
+          evidence_binding_smoke_summary_sha256: str_or_null(.evidence_binding.smoke_summary_sha256),
           smoke_transport_mtls_required: (if (.smoke.transport_mtls_required | type) == "boolean" then .smoke.transport_mtls_required else null end),
           smoke_transport_mtls_client_certificate_configured: (if (.smoke.transport_mtls_client_certificate_configured | type) == "boolean" then .smoke.transport_mtls_client_certificate_configured else null end),
           smoke_transport_mtls_client_certificate_used: (if (.smoke.transport_mtls_client_certificate_used | type) == "boolean" then .smoke.transport_mtls_client_certificate_used else null end),
@@ -2538,7 +2540,7 @@ access_recovery_verifier_evidence_json() {
       def pass_status($path):
         (($path // "") | tostring | ascii_downcase) == "pass";
       def schema_minor_ready:
-        ((.schema.minor | type) == "number" and .schema.minor >= 5);
+        ((.schema.minor | type) == "number" and .schema.minor >= 6);
       def schema_major_ready:
         ((.schema.major | type) == "number" and .schema.major == 1);
       def schema_version_ready:
@@ -2595,6 +2597,7 @@ access_recovery_verifier_evidence_json() {
         and (.inputs.allow_dev_trust_store != true)
         and (verifier_receipt_has_dev_material | not)
         and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true)
+        and (.pilot_handoff_criteria.deployment_smoke_summary_sha256_matches_bundle == true)
         and evidence_freshness_ready
         and (.pilot_handoff_criteria.installed_host_evidence_present == true)
         and handoff_identity_org_ready
@@ -2616,6 +2619,7 @@ access_recovery_verifier_evidence_json() {
         and (.pilot_handoff_criteria.trust_store_sha256_present == true)
         and (.pilot_handoff_criteria.public_key_file_absent == true)
         and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true)
+        and (.pilot_handoff_criteria.deployment_smoke_summary_sha256_matches_bundle == true)
         and evidence_freshness_ready
         and (.pilot_handoff_criteria.installed_host_evidence_present == true)
         and (.pilot_handoff_criteria.dev_trust_store_allowed != true);
@@ -2624,6 +2628,8 @@ access_recovery_verifier_evidence_json() {
       def evidence_binding_ready:
         ((.evidence_binding.source_summary_sha256 // "") != "")
         and ((.evidence_binding.smoke_summary_sha256 // "") != "")
+        and ((.evidence_binding.deployment_smoke_summary_sha256 // "") != "")
+        and ((.evidence_binding.deployment_evidence_binding_smoke_summary_sha256 // "") != "")
         and ((.evidence_binding.deployment_evidence_summary_sha256 // "") != "")
         and ((.evidence_binding.host_install_check_summary_sha256 // "") != "");
       (.schema.id // null) as $schema_id
@@ -2653,7 +2659,7 @@ access_recovery_verifier_evidence_json() {
           notes: (
             if $valid_contract and $summary_stale then "Access bridge pilot evidence verifier summary is stale or has untrusted freshness metadata"
             elif $valid_contract and (schema_major_ready | not) then "Access bridge pilot evidence verifier receipt schema major is incompatible with pilot handoff readiness"
-            elif $valid_contract and (schema_minor_ready | not) then "Access bridge pilot evidence verifier receipt is from an old schema that lacks explicit handoff authority fields"
+            elif $valid_contract and (schema_minor_ready | not) then "Access bridge pilot evidence verifier receipt is from an old schema that lacks current smoke/deployment evidence binding semantics"
             elif $valid_contract and (readiness_fields_consistent | not) then "Access bridge pilot evidence verifier receipt readiness fields disagree; rerun verifier"
             elif $valid_contract and (receipt_authority_ready | not) then "Access bridge pilot evidence verifier receipt is not pilot handoff authority"
             elif $valid_contract and (.inputs.allow_dev_trust_store == true) then "Access bridge pilot evidence verifier used a diagnostic dev trust-store override that cannot prove pilot handoff readiness"
@@ -2661,6 +2667,7 @@ access_recovery_verifier_evidence_json() {
             elif $valid_contract and (generated_at_ready | not) then "Access bridge pilot evidence verifier receipt is missing generated_at_utc"
             elif $valid_contract and (evidence_binding_ready | not) then "Access bridge pilot evidence verifier receipt is missing required evidence binding hashes"
             elif $valid_contract and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok != true) then "Access bridge pilot evidence verifier receipt did not prove bundled child evidence semantics"
+            elif $valid_contract and (.pilot_handoff_criteria.deployment_smoke_summary_sha256_matches_bundle != true) then "Access bridge pilot evidence verifier receipt did not prove deployment smoke summary hash matches the bundled service-smoke summary"
             elif $valid_contract and (evidence_freshness_ready | not) then "Access bridge pilot evidence verifier receipt did not prove fresh bundled child evidence"
             elif $valid_contract and (.pilot_handoff_criteria.installed_host_evidence_present != true) then "Access bridge pilot evidence verifier receipt did not prove installed-host evidence"
             elif $valid_contract and (handoff_identity_org_ready | not) then "Access bridge pilot evidence verifier receipt did not prove helper identity and organization binding"
@@ -2700,6 +2707,7 @@ access_recovery_verifier_evidence_json() {
             pilot_handoff_criteria_trust_store_sha256_present: (if (.pilot_handoff_criteria.trust_store_sha256_present | type) == "boolean" then .pilot_handoff_criteria.trust_store_sha256_present else null end),
             pilot_handoff_criteria_public_key_file_absent: (if (.pilot_handoff_criteria.public_key_file_absent | type) == "boolean" then .pilot_handoff_criteria.public_key_file_absent else null end),
             pilot_handoff_criteria_bundled_child_evidence_semantic_ok: (if (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok | type) == "boolean" then .pilot_handoff_criteria.bundled_child_evidence_semantic_ok else null end),
+            pilot_handoff_criteria_deployment_smoke_summary_sha256_matches_bundle: (if (.pilot_handoff_criteria.deployment_smoke_summary_sha256_matches_bundle | type) == "boolean" then .pilot_handoff_criteria.deployment_smoke_summary_sha256_matches_bundle else null end),
             pilot_handoff_criteria_evidence_freshness_checked: (if (.pilot_handoff_criteria.evidence_freshness_checked | type) == "boolean" then .pilot_handoff_criteria.evidence_freshness_checked else null end),
             pilot_handoff_criteria_evidence_freshness_ok: (if (.pilot_handoff_criteria.evidence_freshness_ok | type) == "boolean" then .pilot_handoff_criteria.evidence_freshness_ok else null end),
             evidence_freshness_checked: (if (.evidence_freshness.checked | type) == "boolean" then .evidence_freshness.checked else null end),
@@ -2724,6 +2732,8 @@ access_recovery_verifier_evidence_json() {
             registry_id: str_or_null(.evidence_binding.registry_id),
             smoke_summary_json: str_or_null(.evidence_binding.smoke_summary_json),
             smoke_summary_sha256: str_or_null(.evidence_binding.smoke_summary_sha256),
+            deployment_smoke_summary_sha256: str_or_null(.evidence_binding.deployment_smoke_summary_sha256),
+            deployment_evidence_binding_smoke_summary_sha256: str_or_null(.evidence_binding.deployment_evidence_binding_smoke_summary_sha256),
             deployment_evidence_summary_json: str_or_null(.evidence_binding.deployment_evidence_summary_json),
             deployment_evidence_summary_sha256: str_or_null(.evidence_binding.deployment_evidence_summary_sha256),
             host_install_check_summary_json: str_or_null(.evidence_binding.host_install_check_summary_json),
@@ -2869,6 +2879,8 @@ access_recovery_track_json_from_evidence() {
           organization_id_match: same_nonempty($service_smoke.details.organization_id; $deployment_evidence.details.organization_id),
           registry_id_match: same_nonempty($service_smoke.details.registry_id; $deployment_evidence.details.registry_id),
           smoke_config_sha256_match: same_nonempty($service_smoke.details.config_sha256; $deployment_evidence.details.smoke_config_sha256),
+          deployment_smoke_summary_sha256_match: same_nonempty($deployment_evidence.details.smoke_summary_sha256; $service_smoke.source_summary_sha256),
+          deployment_binding_smoke_summary_sha256_match: same_nonempty($deployment_evidence.details.evidence_binding_smoke_summary_sha256; $service_smoke.source_summary_sha256),
           host_config_sha256_match: same_nonempty($deployment_evidence.details.config_sha256; $host_install.details.env_config_sha256),
           host_public_host_match: (
             host_from_url_string($service_smoke.details.base_url) as $service_host
@@ -2916,6 +2928,8 @@ access_recovery_track_json_from_evidence() {
             (if $binding.organization_id_match == true then empty else "organization_id" end),
             (if $binding.registry_id_match == true then empty else "registry_id" end),
             (if $binding.smoke_config_sha256_match == true then empty else "smoke_config_sha256" end),
+            (if $binding.deployment_smoke_summary_sha256_match == true then empty else "deployment_smoke_summary_sha256" end),
+            (if $binding.deployment_binding_smoke_summary_sha256_match == true then empty else "deployment_binding_smoke_summary_sha256" end),
             (if $binding.host_config_sha256_match == true then empty else "host_config_sha256" end),
             (if $binding.host_public_host_match == true then empty else "host_public_host" end)
           ] as $failed_bindings
@@ -2931,10 +2945,13 @@ access_recovery_track_json_from_evidence() {
           organization_id_match: same_nonempty($bundle_verify.details.organization_id; $service_smoke.details.organization_id),
           registry_id_match: same_nonempty($bundle_verify.details.registry_id; $service_smoke.details.registry_id),
           smoke_summary_sha256_match: same_nonempty($bundle_verify.details.smoke_summary_sha256; $service_smoke.source_summary_sha256),
+          deployment_smoke_summary_sha256_match: same_nonempty($bundle_verify.details.deployment_smoke_summary_sha256; $service_smoke.source_summary_sha256),
+          deployment_evidence_binding_smoke_summary_sha256_match: same_nonempty($bundle_verify.details.deployment_evidence_binding_smoke_summary_sha256; $service_smoke.source_summary_sha256),
+          deployment_smoke_bundle_match_flag: ($bundle_verify.details.pilot_handoff_criteria_deployment_smoke_summary_sha256_matches_bundle == true),
           deployment_evidence_summary_sha256_match: same_nonempty($bundle_verify.details.deployment_evidence_summary_sha256; $deployment_evidence.source_summary_sha256),
           host_install_check_summary_sha256_match: same_nonempty($bundle_verify.details.host_install_check_summary_sha256; $host_install.source_summary_sha256)
         }
-        | . + {ok: ([.base_url_match, .helper_id_match, .organization_id_match, .registry_id_match, .smoke_summary_sha256_match, .deployment_evidence_summary_sha256_match, .host_install_check_summary_sha256_match] | all(. == true))};
+        | . + {ok: ([.base_url_match, .helper_id_match, .organization_id_match, .registry_id_match, .smoke_summary_sha256_match, .deployment_smoke_summary_sha256_match, .deployment_evidence_binding_smoke_summary_sha256_match, .deployment_smoke_bundle_match_flag, .deployment_evidence_summary_sha256_match, .host_install_check_summary_sha256_match] | all(. == true))};
       def smoke_base_url:
         ($service_smoke.details.base_url // "");
       def normalize_remote_ip($ip):
@@ -3114,6 +3131,7 @@ access_recovery_track_json_from_evidence() {
         and (($bundle_verify.details.evidence_scope // "") == "real_helper_https")
         and ($bundle_verify.details.pilot_handoff_criteria_evidence_freshness_checked == true)
         and ($bundle_verify.details.pilot_handoff_criteria_evidence_freshness_ok == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_deployment_smoke_summary_sha256_matches_bundle == true)
         and ($bundle_verify.details.evidence_freshness_ok == true)
         and ($bundle_verify.details.pilot_handoff_criteria_source_helper_id_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_source_organization_id_present == true)
@@ -3136,6 +3154,7 @@ access_recovery_track_json_from_evidence() {
         and ($bundle_verify.details.pilot_handoff_criteria_trust_store_sha256_present == true)
         and ($bundle_verify.details.pilot_handoff_criteria_public_key_file_absent == true)
         and ($bundle_verify.details.pilot_handoff_criteria_bundled_child_evidence_semantic_ok == true)
+        and ($bundle_verify.details.pilot_handoff_criteria_deployment_smoke_summary_sha256_matches_bundle == true)
         and ($bundle_verify.details.pilot_handoff_criteria_evidence_freshness_checked == true)
         and ($bundle_verify.details.pilot_handoff_criteria_evidence_freshness_ok == true)
         and ($bundle_verify.details.evidence_freshness_ok == true)

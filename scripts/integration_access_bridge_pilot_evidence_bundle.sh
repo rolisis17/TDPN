@@ -418,6 +418,210 @@ if [[ "$require_mtls_no_cert_rc" -eq 0 ]] ||
   exit 1
 fi
 
+FAKE_SMOKE_SCRIPT="$TMP_DIR/fake_access_bridge_service_smoke.sh"
+FAKE_DEPLOYMENT_SCRIPT="$TMP_DIR/fake_access_bridge_deployment_evidence.sh"
+FAKE_HOST_SCRIPT="$TMP_DIR/fake_access_bridge_host_install_check.sh"
+cat >"$FAKE_SMOKE_SCRIPT" <<'EOF_FAKE_SMOKE'
+#!/usr/bin/env bash
+set -euo pipefail
+summary_json=""
+base_url=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    --base-url)
+      base_url="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+mkdir -p "$(dirname "$summary_json")"
+jq -n --arg base_url "$base_url" '{
+  schema:{id:"access_bridge_service_smoke_summary",major:1,minor:6},
+  status:"pass",
+  base_url:$base_url,
+  path_id:"helper-web",
+  auth:{required:true},
+  health:{status:"ok",helper_id:"helper-pilot",organization_id:"pilot-org",registry_id:"registry-pilot",config_sha256:"fake-config-sha"},
+  transport:{https:true,tls_verified:true,ssl_verify_result:"0"}
+}' >"$summary_json"
+EOF_FAKE_SMOKE
+chmod +x "$FAKE_SMOKE_SCRIPT"
+
+cat >"$FAKE_DEPLOYMENT_SCRIPT" <<'EOF_FAKE_DEPLOYMENT'
+#!/usr/bin/env bash
+set -euo pipefail
+summary_json=""
+smoke_summary_json=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    --smoke-summary-json)
+      smoke_summary_json="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+mkdir -p "$(dirname "$summary_json")"
+smoke_sha="$(sha256sum "$smoke_summary_json" | awk '{print $1}')"
+minor=6
+embedded_sha="$smoke_sha"
+binding_sha="$smoke_sha"
+if [[ "${FAKE_DEPLOYMENT_EVIDENCE_MODE:-}" == "old-schema" ]]; then
+  minor=5
+elif [[ "${FAKE_DEPLOYMENT_EVIDENCE_MODE:-}" == "mismatch" ]]; then
+  embedded_sha="0000000000000000000000000000000000000000000000000000000000000000"
+  binding_sha="$embedded_sha"
+fi
+jq -n \
+  --argjson minor "$minor" \
+  --arg smoke_summary_json "$smoke_summary_json" \
+  --arg smoke_sha "$embedded_sha" \
+  --arg binding_sha "$binding_sha" \
+  '{
+    schema:{id:"access_bridge_deployment_evidence_summary",major:1,minor:$minor},
+    status:"pass",
+    evidence_scope:"real_helper_https",
+    smoke:{summary_json:$smoke_summary_json,summary_sha256:$smoke_sha},
+    evidence_binding:{smoke_summary_json:$smoke_summary_json,smoke_summary_sha256:$binding_sha},
+    transport:{status:"pass",https:true,tls_verified:true,ssl_verify_result:"0"}
+  }' >"$summary_json"
+EOF_FAKE_DEPLOYMENT
+chmod +x "$FAKE_DEPLOYMENT_SCRIPT"
+
+cat >"$FAKE_HOST_SCRIPT" <<'EOF_FAKE_HOST'
+#!/usr/bin/env bash
+set -euo pipefail
+summary_json=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --summary-json)
+      summary_json="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+mkdir -p "$(dirname "$summary_json")"
+jq -n '{
+  schema:{id:"access_bridge_host_install_check_summary",major:1,minor:4},
+  status:"pass",
+  inputs:{evidence_mode:"installed-host",installed_host_mode:true},
+  observed:{evidence_mode:"installed-host",installed_host_mode:true},
+  summary:{evidence_mode:"installed-host",installed_host_mode:true,checks_total:1},
+  checks:[{id:"fake_installed_host",status:"pass"}]
+}' >"$summary_json"
+EOF_FAKE_HOST
+chmod +x "$FAKE_HOST_SCRIPT"
+
+FAKE_INSTALL_DIR="$TMP_DIR/fake-installed-host"
+FAKE_SYSTEMD_UNIT="$TMP_DIR/fake-gpm-access-bridge.service"
+FAKE_PROXY_CONFIG="$TMP_DIR/fake-Caddyfile"
+mkdir -p "$FAKE_INSTALL_DIR"
+printf '%s\n' '[Service]' >"$FAKE_SYSTEMD_UNIT"
+printf '%s\n' 'recovery-helper.gpm-pilot.net { reverse_proxy 127.0.0.1:19791 }' >"$FAKE_PROXY_CONFIG"
+
+set +e
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SERVICE_SMOKE_SCRIPT="$FAKE_SMOKE_SCRIPT" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_DEPLOYMENT_EVIDENCE_SCRIPT="$FAKE_DEPLOYMENT_SCRIPT" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_SCRIPT" \
+FAKE_DEPLOYMENT_EVIDENCE_MODE=old-schema \
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url https://recovery-helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_PACK" \
+  --host-install-evidence-mode installed-host \
+  --install-dir "$FAKE_INSTALL_DIR" \
+  --systemd-unit-file "$FAKE_SYSTEMD_UNIT" \
+  --proxy-kind caddy \
+  --proxy-config-file "$FAKE_PROXY_CONFIG" \
+  --service-name gpm-access-bridge-pilot \
+  --expect-helper-id helper-pilot \
+  --expect-org-id pilot-org \
+  --expect-registry-id registry-pilot \
+  --bundle-dir "$TMP_DIR/old-schema-pilot-evidence-bundle" \
+  --summary-json "$TMP_DIR/old-schema-pilot-evidence-summary.json" \
+  --provenance-sign 1 \
+  --provenance-private-key-file "$PROVENANCE_PRIVATE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --provenance-key-id "$PROVENANCE_KEY_ID" \
+  --provenance-out "$TMP_DIR/old-schema-pilot-evidence.provenance.json" \
+  --print-summary-json 0 >"$TMP_DIR/old-schema-pilot-evidence-bundle.log" 2>&1
+old_schema_bundle_rc=$?
+set -e
+if [[ "$old_schema_bundle_rc" -eq 0 ]] ||
+  ! jq -e '.status == "fail"
+    and .evidence_binding.status == "fail"
+    and (.evidence_binding.reason | contains("schema >= 1.6"))
+    and ([.steps[] | select(.id == "deployment_evidence" and .status == "fail" and (.evidence_binding_reason | contains("schema >= 1.6")))] | length) == 1' \
+    "$TMP_DIR/old-schema-pilot-evidence-summary.json" >/dev/null; then
+  echo "access bridge pilot evidence bundle integration failed: old deployment evidence schema was not rejected for real helper HTTPS handoff"
+  cat "$TMP_DIR/old-schema-pilot-evidence-bundle.log"
+  cat "$TMP_DIR/old-schema-pilot-evidence-summary.json"
+  exit 1
+fi
+
+set +e
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SERVICE_SMOKE_SCRIPT="$FAKE_SMOKE_SCRIPT" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_DEPLOYMENT_EVIDENCE_SCRIPT="$FAKE_DEPLOYMENT_SCRIPT" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_SCRIPT" \
+FAKE_DEPLOYMENT_EVIDENCE_MODE=mismatch \
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url https://recovery-helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_PACK" \
+  --host-install-evidence-mode installed-host \
+  --install-dir "$FAKE_INSTALL_DIR" \
+  --systemd-unit-file "$FAKE_SYSTEMD_UNIT" \
+  --proxy-kind caddy \
+  --proxy-config-file "$FAKE_PROXY_CONFIG" \
+  --service-name gpm-access-bridge-pilot \
+  --expect-helper-id helper-pilot \
+  --expect-org-id pilot-org \
+  --expect-registry-id registry-pilot \
+  --bundle-dir "$TMP_DIR/mismatch-pilot-evidence-bundle" \
+  --summary-json "$TMP_DIR/mismatch-pilot-evidence-summary.json" \
+  --provenance-sign 1 \
+  --provenance-private-key-file "$PROVENANCE_PRIVATE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --provenance-key-id "$PROVENANCE_KEY_ID" \
+  --provenance-out "$TMP_DIR/mismatch-pilot-evidence.provenance.json" \
+  --print-summary-json 0 >"$TMP_DIR/mismatch-pilot-evidence-bundle.log" 2>&1
+mismatch_bundle_rc=$?
+set -e
+if [[ "$mismatch_bundle_rc" -eq 0 ]] ||
+  ! jq -e '.status == "fail"
+    and .evidence_binding.status == "fail"
+    and .evidence_binding.deployment_smoke_summary_sha256_matches_bundle == false
+    and (.evidence_binding.reason | contains("does not match bundle smoke summary"))
+    and ([.steps[] | select(.id == "deployment_evidence" and .status == "fail" and (.evidence_binding_reason | contains("does not match bundle smoke summary")))] | length) == 1' \
+    "$TMP_DIR/mismatch-pilot-evidence-summary.json" >/dev/null; then
+  echo "access bridge pilot evidence bundle integration failed: deployment evidence smoke hash mismatch was not rejected"
+  cat "$TMP_DIR/mismatch-pilot-evidence-bundle.log"
+  cat "$TMP_DIR/mismatch-pilot-evidence-summary.json"
+  exit 1
+fi
+
 go run ./cmd/gpmrecover bridge-service-serve \
   --config "$SERVICE_CONFIG" \
   --config-sha256 "$config_sha256" \
@@ -478,6 +682,9 @@ if ! jq -e \
   --arg registry_id "$registry_id" \
   --arg provenance_json "$PROVENANCE_JSON" \
   --arg pilot_public_host "$PILOT_PUBLIC_HOST" \
+  --arg smoke_summary_sha256 "$(sha256sum "$EVIDENCE_BUNDLE/access_bridge_service_smoke_summary.json" | awk '{print $1}')" \
+  --arg deployment_evidence_summary_sha256 "$(sha256sum "$EVIDENCE_BUNDLE/access_bridge_deployment_evidence_summary.json" | awk '{print $1}')" \
+  --arg host_install_check_summary_sha256 "$(sha256sum "$EVIDENCE_BUNDLE/access_bridge_host_install_check_summary.json" | awk '{print $1}')" \
   '
     .schema.id == "access_bridge_pilot_evidence_bundle_summary"
     and .schema.minor >= 3
@@ -515,6 +722,24 @@ if ! jq -e \
     and .summary.steps_total == 3
     and .summary.steps_fail == 0
     and ([.steps[].status] | all(. == "pass"))
+    and .evidence_binding.status == "pass"
+    and .evidence_binding.reason == null
+    and .evidence_binding.base_url == $base_url
+    and .evidence_binding.helper_id == "helper-pilot"
+    and .evidence_binding.organization_id == "pilot-org"
+    and .evidence_binding.registry_id == $registry_id
+    and .evidence_binding.smoke_summary_json == .artifacts.smoke_summary_json
+    and .evidence_binding.smoke_summary_sha256 == $smoke_summary_sha256
+    and .evidence_binding.deployment_evidence_summary_json == .artifacts.deployment_evidence_summary_json
+    and .evidence_binding.deployment_evidence_summary_sha256 == $deployment_evidence_summary_sha256
+    and .evidence_binding.host_install_check_summary_json == .artifacts.host_install_check_summary_json
+    and .evidence_binding.host_install_check_summary_sha256 == $host_install_check_summary_sha256
+    and .evidence_binding.deployment_evidence_schema_major == 1
+    and .evidence_binding.deployment_evidence_schema_minor >= 6
+    and .evidence_binding.deployment_evidence_smoke_summary_sha256 == $smoke_summary_sha256
+    and .evidence_binding.deployment_smoke_summary_sha256 == $smoke_summary_sha256
+    and .evidence_binding.deployment_evidence_binding_smoke_summary_sha256 == $smoke_summary_sha256
+    and .evidence_binding.deployment_smoke_summary_sha256_matches_bundle == true
     and .artifacts.bundle_dir == $bundle_dir
     and (.artifacts.smoke_summary_json | length > 0)
     and (.artifacts.deployment_evidence_summary_json | length > 0)

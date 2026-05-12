@@ -17,6 +17,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 CAPTURE="$TMP_DIR/capture.tsv"
 FAKE_HOST_CHECK="$TMP_DIR/fake_access_bridge_host_install_check.sh"
 FAKE_BUNDLE="$TMP_DIR/fake_access_bridge_pilot_evidence_bundle.sh"
+FAKE_OLD_DEPLOYMENT_BUNDLE="$TMP_DIR/fake_access_bridge_pilot_evidence_bundle_old_deployment.sh"
 FAKE_VERIFY="$TMP_DIR/fake_access_bridge_pilot_evidence_bundle_verify.sh"
 FAKE_ROADMAP="$TMP_DIR/fake_roadmap_progress_report.sh"
 HELP_OUT="$TMP_DIR/help.txt"
@@ -113,6 +114,10 @@ capture_file="${ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE:?}"
 summary_json=""
 provenance_out=""
 base_url=""
+deployment_schema_minor="${FAKE_ACCESS_RECOVERY_REAL_HELPER_DEPLOYMENT_SCHEMA_MINOR:-6}"
+sha256_value() {
+  sha256sum "$1" | awk '{print $1}'
+}
 {
   printf 'bundle'
   for arg in "$@"; do
@@ -143,6 +148,7 @@ bundle_dir="$(dirname "$summary_json")/bundle"
 mkdir -p "$bundle_dir"
 cat >"$bundle_dir/access_bridge_service_smoke_summary.json" <<JSON
 {
+  "schema": {"id": "access_bridge_service_smoke_summary", "major": 1, "minor": 6},
   "status": "pass",
   "details": {
     "base_url": "$base_url",
@@ -152,9 +158,17 @@ cat >"$bundle_dir/access_bridge_service_smoke_summary.json" <<JSON
   }
 }
 JSON
+smoke_sha="$(sha256_value "$bundle_dir/access_bridge_service_smoke_summary.json")"
 cat >"$bundle_dir/access_bridge_deployment_evidence_summary.json" <<JSON
 {
+  "schema": {"id": "access_bridge_deployment_evidence_summary", "major": 1, "minor": $deployment_schema_minor},
   "status": "pass",
+  "smoke": {
+    "summary_sha256": "$smoke_sha"
+  },
+  "evidence_binding": {
+    "smoke_summary_sha256": "$smoke_sha"
+  },
   "details": {
     "base_url": "$base_url",
     "helper_id": "helper-pilot",
@@ -207,6 +221,31 @@ exit "${FAKE_ACCESS_RECOVERY_REAL_HELPER_BUNDLE_RC:-0}"
 EOF_FAKE_BUNDLE
 chmod +x "$FAKE_BUNDLE"
 
+cat >"$FAKE_OLD_DEPLOYMENT_BUNDLE" <<EOF_FAKE_OLD_DEPLOYMENT_BUNDLE
+#!/usr/bin/env bash
+set -euo pipefail
+summary_json=""
+args=("\$@")
+idx=0
+while [[ "\$idx" -lt "\${#args[@]}" ]]; do
+  case "\${args[\$idx]}" in
+    --summary-json)
+      summary_json="\${args[\$((idx + 1))]:-}"
+      idx=\$((idx + 2))
+      ;;
+    *)
+      idx=\$((idx + 1))
+      ;;
+  esac
+done
+"$FAKE_BUNDLE" "\${args[@]}"
+deployment_summary_json="\$(dirname "\$summary_json")/bundle/access_bridge_deployment_evidence_summary.json"
+tmp_json="\${deployment_summary_json}.tmp"
+jq '.schema.minor = 5' "\$deployment_summary_json" >"\$tmp_json"
+mv "\$tmp_json" "\$deployment_summary_json"
+EOF_FAKE_OLD_DEPLOYMENT_BUNDLE
+chmod +x "$FAKE_OLD_DEPLOYMENT_BUNDLE"
+
 cat >"$FAKE_VERIFY" <<'EOF_FAKE_VERIFY'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -219,7 +258,7 @@ pilot_handoff_ready="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_READY:-true}"
 trusted_provenance="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_TRUSTED:-true}"
 binding_mode="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_BINDING_MODE:-match}"
 identity_mode="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_IDENTITY_MODE:-match}"
-schema_minor="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR:-5}"
+schema_minor="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR:-6}"
 sha256_value() {
   sha256sum "$1" | awk '{print $1}'
 }
@@ -261,6 +300,8 @@ base_url="$(jq -r '.inputs.base_url // ""' "$summary_json")"
 smoke_sha="$(sha256_value "$smoke_summary_json")"
 deployment_sha="$(sha256_value "$deployment_summary_json")"
 host_sha="$(sha256_value "$host_summary_json")"
+deployment_smoke_sha="$(jq -r '.smoke.summary_sha256 // ""' "$deployment_summary_json")"
+deployment_binding_smoke_sha="$(jq -r '.evidence_binding.smoke_summary_sha256 // ""' "$deployment_summary_json")"
 helper_id="$(jq -r '.details.helper_id // ""' "$smoke_summary_json")"
 organization_id="$(jq -r '.details.organization_id // ""' "$smoke_summary_json")"
 registry_id="$(jq -r '.details.registry_id // ""' "$smoke_summary_json")"
@@ -268,6 +309,9 @@ provenance_org_id="$organization_id"
 trusted_org_id="$organization_id"
 if [[ "$binding_mode" == "mismatch" ]]; then
   smoke_sha="0000000000000000000000000000000000000000000000000000000000000000"
+elif [[ "$binding_mode" == "deployment_smoke_mismatch" ]]; then
+  deployment_smoke_sha="1111111111111111111111111111111111111111111111111111111111111111"
+  deployment_binding_smoke_sha="2222222222222222222222222222222222222222222222222222222222222222"
 fi
 case "$identity_mode" in
   match)
@@ -306,6 +350,8 @@ jq -n \
   --arg smoke_sha "$smoke_sha" \
   --arg deployment_summary_json "$deployment_summary_json" \
   --arg deployment_sha "$deployment_sha" \
+  --arg deployment_smoke_sha "$deployment_smoke_sha" \
+  --arg deployment_binding_smoke_sha "$deployment_binding_smoke_sha" \
   --arg host_summary_json "$host_summary_json" \
   --arg host_sha "$host_sha" \
   --arg helper_id "$helper_id" \
@@ -345,6 +391,7 @@ jq -n \
       provenance_organization_matches_evidence: ($provenance_org_id != "" and $organization_id != "" and $provenance_org_id == $organization_id),
       trusted_organization_matches_evidence: ($trusted_org_id != "" and $organization_id != "" and $trusted_org_id == $organization_id),
       bundled_child_evidence_semantic_ok: true,
+      deployment_smoke_summary_sha256_matches_bundle: ($deployment_smoke_sha != "" and $deployment_binding_smoke_sha != "" and $deployment_smoke_sha == $smoke_sha and $deployment_binding_smoke_sha == $smoke_sha),
       evidence_freshness_checked: true,
       evidence_freshness_ok: true,
       evidence_max_age_sec: 604800,
@@ -393,6 +440,8 @@ jq -n \
       registry_id: $registry_id,
       smoke_summary_json: $smoke_summary_json,
       smoke_summary_sha256: $smoke_sha,
+      deployment_smoke_summary_sha256: $deployment_smoke_sha,
+      deployment_evidence_binding_smoke_summary_sha256: $deployment_binding_smoke_sha,
       deployment_evidence_summary_json: $deployment_summary_json,
       deployment_evidence_summary_sha256: $deployment_sha,
       host_install_check_summary_json: $host_summary_json,
@@ -1521,7 +1570,7 @@ do
   fi
 done
 
-jq -e '
+if ! jq -e '
   .schema.id == "access_recovery_real_helper_evidence_run_summary"
   and .schema.major == 1
   and .schema.minor == 6
@@ -1533,13 +1582,10 @@ jq -e '
   and .mode.evidence_status == "collected"
   and .inputs.host_install_evidence_mode == "installed-host"
   and .child_summaries.host_install_check.status == "pass"
-  and .child_summaries.verifier.schema.minor == 5
+  and .child_summaries.verifier.schema.minor == 6
   and .child_summaries.verifier.handoff_authority == true
   and .child_summaries.verifier.authority_level == "pilot_handoff"
   and .child_summaries.verifier.integrity_only == false
-  and (.artifacts.bundle_service_smoke_summary_json | endswith("/bundle/access_bridge_service_smoke_summary.json"))
-  and (.artifacts.bundle_deployment_evidence_summary_json | endswith("/bundle/access_bridge_deployment_evidence_summary.json"))
-  and (.artifacts.bundle_host_install_check_summary_json | endswith("/bundle/access_bridge_host_install_check_summary.json"))
   and .readiness.verifier_ready == true
   and .readiness.handoff_authority_ready == true
   and .readiness.verifier_authority_level == "pilot_handoff"
@@ -1550,7 +1596,11 @@ jq -e '
   and .readiness.status_rollup_complete == true
   and .readiness.trusted_verifier_pilot_handoff_ready == true
   and .readiness.roadmap_access_recovery_pilot_handoff_ready == true
-' "$TMP_DIR/run-summary.json" >/dev/null
+' "$TMP_DIR/run-summary.json" >/dev/null; then
+  echo "expected real helper evidence run summary to record complete trusted handoff"
+  cat "$TMP_DIR/run-summary.json"
+  exit 1
+fi
 
 : >"$CAPTURE"
 set +e
@@ -1560,7 +1610,7 @@ ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
 ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
 ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
 ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
-FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR=3 \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR=5 \
 ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
   --base-url https://helper.gpm-pilot.net \
   --path-id helper-web \
@@ -1573,13 +1623,13 @@ FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR=3 \
   --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --reports-dir "$REPORTS_DIR" \
-  --summary-json "$TMP_DIR/verifier-schema-minor-3-summary.json" \
-  --print-summary-json 0 >"$TMP_DIR/verifier-schema-minor-3.log" 2>&1
-verifier_schema_minor_3_rc=$?
+  --summary-json "$TMP_DIR/verifier-schema-minor-5-summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/verifier-schema-minor-5.log" 2>&1
+verifier_schema_minor_5_rc=$?
 set -e
-if [[ "$verifier_schema_minor_3_rc" -eq 0 ]]; then
-  echo "expected verifier receipt schema minor 3 to fail"
-  cat "$TMP_DIR/verifier-schema-minor-3-summary.json"
+if [[ "$verifier_schema_minor_5_rc" -eq 0 ]]; then
+  echo "expected verifier receipt schema minor 5 to fail"
+  cat "$TMP_DIR/verifier-schema-minor-5-summary.json"
   exit 1
 fi
 if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
@@ -1587,26 +1637,84 @@ if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
   cat "$CAPTURE"
   exit 1
 fi
-if ! grep -Fq -- "Trusted verifier receipt did not prove current real helper HTTPS evidence binding" "$TMP_DIR/verifier-schema-minor-3-summary.json"; then
+if ! grep -Fq -- "Trusted verifier receipt did not prove current real helper HTTPS evidence binding" "$TMP_DIR/verifier-schema-minor-5-summary.json"; then
   echo "expected verifier schema minor failure summary note"
-  cat "$TMP_DIR/verifier-schema-minor-3-summary.json"
+  cat "$TMP_DIR/verifier-schema-minor-5-summary.json"
   exit 1
 fi
-if ! grep -Fq -- "schema minor is too old for explicit trusted pilot handoff authority semantics" "$TMP_DIR/verifier-schema-minor-3.log"; then
+if ! grep -Fq -- "schema minor is too old for current smoke/deployment evidence binding semantics" "$TMP_DIR/verifier-schema-minor-5.log"; then
   echo "expected verifier schema minor floor validation error"
-  cat "$TMP_DIR/verifier-schema-minor-3.log"
+  cat "$TMP_DIR/verifier-schema-minor-5.log"
   exit 1
 fi
-jq -e '
+if ! jq -e '
   .status == "fail"
   and .stage == "verify"
-  and .child_summaries.verifier.schema.minor == 3
+  and .child_summaries.verifier.schema.minor == 5
   and .readiness.verifier_claimed_pilot_handoff_ready == true
   and .readiness.trusted_verifier_pilot_handoff_ready == false
   and .readiness.handoff_authority_ready == false
   and .readiness.handoff_complete == false
   and .readiness.handoff_authority_complete == false
-' "$TMP_DIR/verifier-schema-minor-3-summary.json" >/dev/null
+' "$TMP_DIR/verifier-schema-minor-5-summary.json" >/dev/null; then
+  echo "expected verifier schema minor 5 summary to mark trusted handoff unavailable"
+  cat "$TMP_DIR/verifier-schema-minor-5-summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_OLD_DEPLOYMENT_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/deployment-schema-minor-5-summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/deployment-schema-minor-5.log" 2>&1
+deployment_schema_minor_5_rc=$?
+set -e
+if [[ "$deployment_schema_minor_5_rc" -eq 0 ]]; then
+  echo "expected bundled deployment evidence schema minor 5 to fail"
+  cat "$TMP_DIR/deployment-schema-minor-5-summary.json"
+  exit 1
+fi
+if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "2" ]]; then
+  echo "expected host-check and bundle only when bundled deployment evidence schema is too old"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! grep -Fq -- "Access bridge pilot evidence bundle child evidence failed current schema and smoke/deployment binding validation" "$TMP_DIR/deployment-schema-minor-5-summary.json"; then
+  echo "expected deployment schema failure summary note"
+  cat "$TMP_DIR/deployment-schema-minor-5-summary.json"
+  exit 1
+fi
+if ! grep -Fq -- "bundled deployment evidence summary schema minor is too old for current smoke hash binding semantics" "$TMP_DIR/deployment-schema-minor-5.log"; then
+  echo "expected deployment schema floor validation error"
+  cat "$TMP_DIR/deployment-schema-minor-5.log"
+  exit 1
+fi
+jq -e '
+  .status == "fail"
+  and .stage == "bundle"
+  and .child_summaries.verifier == null
+  and .readiness.verifier_claimed_pilot_handoff_ready == false
+  and .readiness.trusted_verifier_pilot_handoff_ready == false
+  and .readiness.handoff_authority_ready == false
+  and .readiness.handoff_complete == false
+' "$TMP_DIR/deployment-schema-minor-5-summary.json" >/dev/null
 
 : >"$CAPTURE"
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
@@ -1800,6 +1908,57 @@ jq -e '
   and .readiness.handoff_complete == false
   and .readiness.handoff_authority_complete == false
 ' "$TMP_DIR/verifier-binding-mismatch-summary.json" >/dev/null
+
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_BINDING_MODE=deployment_smoke_mismatch \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/verifier-deployment-smoke-binding-mismatch-summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/verifier-deployment-smoke-binding-mismatch.log" 2>&1
+verifier_deployment_smoke_binding_mismatch_rc=$?
+set -e
+if [[ "$verifier_deployment_smoke_binding_mismatch_rc" -eq 0 ]]; then
+  echo "expected mismatched verifier deployment smoke evidence binding to fail"
+  cat "$TMP_DIR/verifier-deployment-smoke-binding-mismatch-summary.json"
+  exit 1
+fi
+if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
+  echo "expected host-check, bundle, and verifier only when deployment smoke binding mismatches"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! grep -Fq -- "deployment smoke summary hash was not proven to match bundled smoke summary" "$TMP_DIR/verifier-deployment-smoke-binding-mismatch.log"; then
+  echo "expected deployment smoke binding verifier validation error"
+  cat "$TMP_DIR/verifier-deployment-smoke-binding-mismatch.log"
+  exit 1
+fi
+jq -e '
+  .status == "fail"
+  and .stage == "verify"
+  and .child_summaries.verifier.pilot_handoff_criteria.deployment_smoke_summary_sha256_matches_bundle == false
+  and .readiness.verifier_claimed_pilot_handoff_ready == true
+  and .readiness.trusted_verifier_pilot_handoff_ready == false
+  and .readiness.handoff_authority_ready == false
+  and .readiness.handoff_complete == false
+  and .readiness.handoff_authority_complete == false
+' "$TMP_DIR/verifier-deployment-smoke-binding-mismatch-summary.json" >/dev/null
 
 for identity_mode in \
   missing_helper \

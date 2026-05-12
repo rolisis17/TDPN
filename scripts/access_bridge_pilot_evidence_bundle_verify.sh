@@ -164,8 +164,8 @@ validate_bundle_summary_contract() {
     echo "$label schema major is invalid or missing: expected=1 actual=${summary_schema_major:-<missing>}"
     local_issues=$((local_issues + 1))
   fi
-  if [[ -z "$summary_schema_minor" || "$summary_schema_minor" -lt 7 ]]; then
-    echo "$label schema minor is too old: expected>=7 actual=${summary_schema_minor:-<missing>}"
+  if [[ -z "$summary_schema_minor" || "$summary_schema_minor" -lt 8 ]]; then
+    echo "$label schema minor is too old: expected>=8 actual=${summary_schema_minor:-<missing>}"
     local_issues=$((local_issues + 1))
   fi
   if [[ "$summary_status" != "pass" ]]; then

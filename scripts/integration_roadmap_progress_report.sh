@@ -908,13 +908,14 @@ cat >"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_SERVICE_SMO
   }
 }
 EOF_ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY
+ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256="$(sha256sum "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" | awk '{print $1}')"
 cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY
 {
   "version": 1,
   "schema": {
     "id": "access_bridge_deployment_evidence_summary",
     "major": 1,
-    "minor": 5
+    "minor": 6
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
@@ -922,6 +923,8 @@ cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLO
   "smoke": {
     "status": "pass",
     "schema_id": "access_bridge_service_smoke_summary",
+    "summary_json": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON",
+    "summary_sha256": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256",
     "evidence_status": "pass",
     "auth_required": true,
     "missing_code_http_status": "401",
@@ -990,6 +993,10 @@ cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLO
     "helper_id": "helper-prod",
     "organization_id": "pilot-org",
     "registry_id": "registry-prod"
+  },
+  "evidence_binding": {
+    "smoke_summary_json": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON",
+    "smoke_summary_sha256": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256"
   },
   "recommended_next_action": {
     "id": "record_access_bridge_pilot_evidence_bundle",
@@ -1062,7 +1069,6 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
   }
 }
 EOF_ACCESS_BRIDGE_HOST_INSTALL_SUMMARY
-ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256="$(sha256sum "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" | awk '{print $1}')"
 ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_SHA256="$(sha256sum "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" | awk '{print $1}')"
 ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_SHA256="$(sha256sum "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" | awk '{print $1}')"
 cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_BUNDLE_VERIFY_SUMMARY
@@ -1071,7 +1077,7 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
   "schema": {
     "id": "access_bridge_pilot_evidence_bundle_verify_summary",
     "major": 1,
-    "minor": 5
+    "minor": 6
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
@@ -1101,6 +1107,7 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
     "trust_store_sha256_present": true,
     "public_key_file_absent": true,
     "bundled_child_evidence_semantic_ok": true,
+    "deployment_smoke_summary_sha256_matches_bundle": true,
     "evidence_freshness_checked": true,
     "evidence_freshness_ok": true,
     "evidence_max_age_sec": 604800,
@@ -1155,6 +1162,8 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
     "registry_id": "registry-prod",
     "smoke_summary_json": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON",
     "smoke_summary_sha256": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256",
+    "deployment_smoke_summary_sha256": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256",
+    "deployment_evidence_binding_smoke_summary_sha256": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256",
     "deployment_evidence_summary_json": "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON",
     "deployment_evidence_summary_sha256": "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_SHA256",
     "host_install_check_summary_json": "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON",
@@ -1321,6 +1330,8 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_deployment_evidence.details.transport_mtls_missing_client_certificate_same_endpoint == false
   and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_transport_mtls_required == false
   and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_transport_mtls_client_certificate_used == false
+  and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_summary_sha256 == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256"'"
+  and .access_recovery_track.access_bridge_deployment_evidence.details.evidence_binding_smoke_summary_sha256 == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256"'"
   and .access_recovery_track.access_bridge_host_install.available == true
   and .access_recovery_track.access_bridge_host_install.status == "pass"
   and .access_recovery_track.access_bridge_host_install.source_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
@@ -1342,8 +1353,11 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.trusted_provenance_status == "pass"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.evidence_scope == "real_helper_https"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_bundled_child_evidence_semantic_ok == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_deployment_smoke_summary_sha256_matches_bundle == true
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_installed_host_evidence_present == false
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.smoke_summary_sha256 == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256"'"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.deployment_smoke_summary_sha256 == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256"'"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.deployment_evidence_binding_smoke_summary_sha256 == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256"'"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.deployment_evidence_summary_sha256 == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_SHA256"'"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.host_install_check_summary_sha256 == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_SHA256"'"
   and .access_recovery_track.trusted_verifier_binding.ok == true
@@ -1352,6 +1366,9 @@ if ! jq -e \
   and .access_recovery_track.trusted_verifier_binding.organization_id_match == true
   and .access_recovery_track.trusted_verifier_binding.registry_id_match == true
   and .access_recovery_track.trusted_verifier_binding.smoke_summary_sha256_match == true
+  and .access_recovery_track.trusted_verifier_binding.deployment_smoke_summary_sha256_match == true
+  and .access_recovery_track.trusted_verifier_binding.deployment_evidence_binding_smoke_summary_sha256_match == true
+  and .access_recovery_track.trusted_verifier_binding.deployment_smoke_bundle_match_flag == true
   and .access_recovery_track.trusted_verifier_binding.deployment_evidence_summary_sha256_match == true
   and .access_recovery_track.trusted_verifier_binding.host_install_check_summary_sha256_match == true
   and .access_recovery_track.trusted_verifier_ready == false
@@ -1359,6 +1376,8 @@ if ! jq -e \
   and .access_recovery_track.verifier_pilot_handoff_ready == false
   and .access_recovery_track.evidence_binding.ok == true
   and .access_recovery_track.evidence_binding.helper_id_match == true
+  and .access_recovery_track.evidence_binding.deployment_smoke_summary_sha256_match == true
+  and .access_recovery_track.evidence_binding.deployment_binding_smoke_summary_sha256_match == true
   and .access_recovery_track.evidence_binding.host_config_sha256_match == true
   and .access_recovery_track.recommended_next_action.id == "access_bridge_installed_host_evidence"
   and (.access_recovery_track.recommended_next_action.command | contains("--evidence-mode installed-host"))
@@ -1737,14 +1756,93 @@ if ! jq -e \
     and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.authority_level == "pilot_handoff"
     and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.integrity_only == false
     and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.readiness_fields_consistent == true
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_deployment_smoke_summary_sha256_matches_bundle == true
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.deployment_smoke_summary_sha256 == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256"'"
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.deployment_evidence_binding_smoke_summary_sha256 == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256"'"
     and .access_recovery_track.preferred_operator_next_action == null
     and .access_recovery_track.evidence_binding.host_public_host_match == true
+    and .access_recovery_track.evidence_binding.deployment_smoke_summary_sha256_match == true
+    and .access_recovery_track.evidence_binding.deployment_binding_smoke_summary_sha256_match == true
+    and .access_recovery_track.trusted_verifier_binding.deployment_smoke_summary_sha256_match == true
+    and .access_recovery_track.trusted_verifier_binding.deployment_evidence_binding_smoke_summary_sha256_match == true
+    and .access_recovery_track.trusted_verifier_binding.deployment_smoke_bundle_match_flag == true
     and .access_recovery_track.trusted_verifier_binding.host_install_check_summary_sha256_match == true
     and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_installed_host_evidence_present == true
     and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.host_install_check_summary_sha256 == $host_summary_sha256
   ' "$ROADMAP_INSTALLED_HOST_SUMMARY_JSON" >/dev/null; then
   echo "roadmap installed-host access bridge evidence summary mismatch"
   cat "$ROADMAP_INSTALLED_HOST_SUMMARY_JSON"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery rejects deployment evidence schema minor 5"
+ACCESS_BRIDGE_OLD_DEPLOYMENT_EVIDENCE_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_old_schema_summary.json"
+jq '.schema.minor = 5' "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_BRIDGE_OLD_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_OLD_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_INSTALLED_BUNDLE_VERIFY_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_old_deployment_schema_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_old_deployment_schema_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_old_deployment_schema.log 2>&1; then
+  echo "expected success with warning for old deployment evidence schema"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_old_deployment_schema.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.access_bridge_deployment_evidence.available == false
+  and .access_recovery_track.access_bridge_deployment_evidence.status == "fail"
+  and .access_recovery_track.access_bridge_deployment_evidence.semantic_ok == false
+  and (.access_recovery_track.access_bridge_deployment_evidence.notes | contains("semantic evidence checks"))
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_deployment_evidence"
+' "$TMP_DIR/roadmap_progress_access_recovery_old_deployment_schema_summary.json" >/dev/null; then
+  echo "Access Recovery old deployment schema summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_old_deployment_schema_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery deployment evidence must bind to the bundled smoke hash"
+ACCESS_BRIDGE_BAD_DEPLOYMENT_SMOKE_BINDING_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_bad_smoke_binding_summary.json"
+jq '
+  .smoke.summary_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+  | .evidence_binding.smoke_summary_sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
+' "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_BRIDGE_BAD_DEPLOYMENT_SMOKE_BINDING_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_BAD_DEPLOYMENT_SMOKE_BINDING_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$TMP_DIR/missing_access_bridge_pilot_evidence_bundle_verify_summary.json" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_bad_deployment_smoke_binding_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_bad_deployment_smoke_binding_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_bad_deployment_smoke_binding.log 2>&1; then
+  echo "expected success with warning for deployment smoke hash mismatch"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_bad_deployment_smoke_binding.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .access_recovery_track.status == "evidence-failed"
+  and .access_recovery_track.access_bridge_deployment_evidence.available == true
+  and .access_recovery_track.evidence_binding.ok == false
+  and .access_recovery_track.evidence_binding.deployment_smoke_summary_sha256_match == false
+  and .access_recovery_track.evidence_binding.deployment_binding_smoke_summary_sha256_match == false
+  and .access_recovery_track.evidence_binding.failed_bindings == ["deployment_smoke_summary_sha256","deployment_binding_smoke_summary_sha256"]
+  and .access_recovery_track.evidence_binding.failed_binding_count == 2
+  and .access_recovery_track.recommended_next_action.id == "access_bridge_deployment_evidence"
+' "$TMP_DIR/roadmap_progress_access_recovery_bad_deployment_smoke_binding_summary.json" >/dev/null; then
+  echo "Access Recovery bad deployment smoke binding summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_bad_deployment_smoke_binding_summary.json"
   exit 1
 fi
 
@@ -2331,6 +2429,47 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] Access Recovery verifier receipts must prove deployment smoke hash binding"
+ACCESS_BRIDGE_BAD_DEPLOYMENT_SMOKE_BINDING_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_bad_deployment_smoke_binding_summary.json"
+jq '
+  .pilot_handoff_criteria.deployment_smoke_summary_sha256_matches_bundle = false
+' "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_BAD_DEPLOYMENT_SMOKE_BINDING_VERIFY_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_BAD_DEPLOYMENT_SMOKE_BINDING_VERIFY_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_bad_deployment_smoke_binding_verifier_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_bad_deployment_smoke_binding_verifier_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_bad_deployment_smoke_binding_verifier.log 2>&1; then
+  echo "expected success with warning for verifier receipt without deployment smoke hash binding proof"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_bad_deployment_smoke_binding_verifier.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and (.notes | contains("Access Recovery evidence still needs attention"))
+  and (.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.notes | contains("deployment smoke summary hash"))
+  and .access_recovery_pilot_handoff_ready == false
+  and .access_recovery_track.status == "trusted-provenance-required"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "fail"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_deployment_smoke_summary_sha256_matches_bundle == false
+  and .access_recovery_track.trusted_verifier_binding.deployment_smoke_bundle_match_flag == false
+  and .access_recovery_track.trusted_pilot_receipt_ready == false
+  and .access_recovery_track.verifier_pilot_handoff_ready == false
+  and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
+' "$TMP_DIR/roadmap_progress_access_recovery_bad_deployment_smoke_binding_verifier_summary.json" >/dev/null; then
+  echo "Access Recovery bad deployment smoke binding verifier summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_bad_deployment_smoke_binding_verifier_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] Access Recovery verifier receipts must prove identity and organization binding"
 for criterion in \
   source_helper_id_present \
@@ -2430,6 +2569,52 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-progress-report] Access Recovery verifier schema minor 5 cannot promote pilot readiness"
+ACCESS_BRIDGE_SCHEMA_MINOR_5_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_schema_minor_5_summary.json"
+jq '
+  .schema.minor = 5
+  | .pilot_handoff_ready = true
+  | .trusted_pilot_receipt_ready = true
+  | .pilot_handoff_criteria.ready = true
+  | .pilot_handoff_criteria.trusted_pilot_receipt_ready = true
+' "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_SCHEMA_MINOR_5_VERIFY_SUMMARY_JSON"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_SCHEMA_MINOR_5_VERIFY_SUMMARY_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_access_recovery_schema_minor_5_verifier_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_access_recovery_schema_minor_5_verifier_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_schema_minor_5_verifier.log 2>&1; then
+  echo "expected success with warning for verifier receipt schema minor 5"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_schema_minor_5_verifier.log
+  exit 1
+fi
+if ! jq -e '
+  .status == "warn"
+  and .rc == 0
+  and (.notes | contains("Access Recovery evidence still needs attention"))
+  and (.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.notes | contains("old schema"))
+  and .access_recovery_pilot_handoff_ready == false
+  and .access_recovery_track.status == "trusted-provenance-required"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "fail"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_ready == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_ready == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_deployment_smoke_summary_sha256_matches_bundle == true
+  and .access_recovery_track.trusted_pilot_receipt_ready == false
+  and .access_recovery_track.verifier_pilot_handoff_ready == false
+  and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
+' "$TMP_DIR/roadmap_progress_access_recovery_schema_minor_5_verifier_summary.json" >/dev/null; then
+  echo "Access Recovery verifier schema minor 5 summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_access_recovery_schema_minor_5_verifier_summary.json"
+  exit 1
+fi
+
 echo "[roadmap-progress-report] Access Recovery incompatible verifier receipt schema majors cannot promote pilot readiness"
 ACCESS_BRIDGE_INCOMPATIBLE_MAJOR_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_incompatible_major_summary.json"
 jq '
@@ -2526,13 +2711,24 @@ fi
 
 echo "[roadmap-progress-report] Access Recovery local rehearsal is not pilot-ready evidence"
 ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_local_summary.json"
+ACCESS_RECOVERY_LOCAL_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_local_summary.json"
 jq '.base_url = "http://127.0.0.1:19820"' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON"
+ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_SHA256="$(sha256sum "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON" | awk '{print $1}')"
+jq \
+  --arg smoke_summary_json "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON" \
+  --arg smoke_summary_sha256 "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_SHA256" \
+  '.smoke.summary_json = $smoke_summary_json
+    | .smoke.summary_sha256 = $smoke_summary_sha256
+    | .evidence_binding.smoke_summary_json = $smoke_summary_json
+    | .evidence_binding.smoke_summary_sha256 = $smoke_summary_sha256' \
+  "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_LOCAL_DEPLOYMENT_SUMMARY_JSON"
+ACCESS_RECOVERY_LOCAL_DEPLOYMENT_SUMMARY_SHA256="$(sha256sum "$ACCESS_RECOVERY_LOCAL_DEPLOYMENT_SUMMARY_JSON" | awk '{print $1}')"
 if ! run_roadmap_progress_report \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
   --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
   --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON" \
-  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_RECOVERY_LOCAL_DEPLOYMENT_SUMMARY_JSON" \
   --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_DEPLOY_PACK_HOST_INSTALL_SUMMARY_JSON" \
   --summary-json "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_access_recovery_local_rehearsal_report.md" \
@@ -2601,17 +2797,23 @@ jq \
   --arg base_url "http://127.0.0.1:19820" \
   --arg smoke_summary_json "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON" \
   --arg smoke_summary_sha256 "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_SHA256" \
+  --arg deployment_summary_json "$ACCESS_RECOVERY_LOCAL_DEPLOYMENT_SUMMARY_JSON" \
+  --arg deployment_summary_sha256 "$ACCESS_RECOVERY_LOCAL_DEPLOYMENT_SUMMARY_SHA256" \
   '
     .evidence_binding.base_url = $base_url
     | .evidence_binding.smoke_summary_json = $smoke_summary_json
     | .evidence_binding.smoke_summary_sha256 = $smoke_summary_sha256
+    | .evidence_binding.deployment_smoke_summary_sha256 = $smoke_summary_sha256
+    | .evidence_binding.deployment_evidence_binding_smoke_summary_sha256 = $smoke_summary_sha256
+    | .evidence_binding.deployment_evidence_summary_json = $deployment_summary_json
+    | .evidence_binding.deployment_evidence_summary_sha256 = $deployment_summary_sha256
   ' "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_RECOVERY_LOCAL_VERIFY_SUMMARY_JSON"
 if ROADMAP_PROGRESS_REQUIRE_ACCESS_RECOVERY_EVIDENCE=1 run_roadmap_progress_report \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
   --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
   --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_LOCAL_SMOKE_SUMMARY_JSON" \
-  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_RECOVERY_LOCAL_DEPLOYMENT_SUMMARY_JSON" \
   --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_DEPLOY_PACK_HOST_INSTALL_SUMMARY_JSON" \
   --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_RECOVERY_LOCAL_VERIFY_SUMMARY_JSON" \
   --summary-json "$TMP_DIR/roadmap_progress_access_recovery_local_forged_verifier_summary.json" \
@@ -2656,13 +2858,23 @@ fi
 
 echo "[roadmap-progress-report] Access Recovery private HTTPS lab endpoint is not pilot-ready evidence"
 ACCESS_RECOVERY_PRIVATE_HTTPS_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_private_https_summary.json"
+ACCESS_RECOVERY_PRIVATE_HTTPS_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_private_https_summary.json"
 jq '.base_url = "https://192.168.50.10:19820"' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_PRIVATE_HTTPS_SMOKE_SUMMARY_JSON"
+ACCESS_RECOVERY_PRIVATE_HTTPS_SMOKE_SUMMARY_SHA256="$(sha256sum "$ACCESS_RECOVERY_PRIVATE_HTTPS_SMOKE_SUMMARY_JSON" | awk '{print $1}')"
+jq \
+  --arg smoke_summary_json "$ACCESS_RECOVERY_PRIVATE_HTTPS_SMOKE_SUMMARY_JSON" \
+  --arg smoke_summary_sha256 "$ACCESS_RECOVERY_PRIVATE_HTTPS_SMOKE_SUMMARY_SHA256" \
+  '.smoke.summary_json = $smoke_summary_json
+    | .smoke.summary_sha256 = $smoke_summary_sha256
+    | .evidence_binding.smoke_summary_json = $smoke_summary_json
+    | .evidence_binding.smoke_summary_sha256 = $smoke_summary_sha256' \
+  "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_PRIVATE_HTTPS_DEPLOYMENT_SUMMARY_JSON"
 if ! run_roadmap_progress_report \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
   --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
   --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_PRIVATE_HTTPS_SMOKE_SUMMARY_JSON" \
-  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_RECOVERY_PRIVATE_HTTPS_DEPLOYMENT_SUMMARY_JSON" \
   --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
   --summary-json "$TMP_DIR/roadmap_progress_access_recovery_private_https_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_access_recovery_private_https_report.md" \
@@ -2702,9 +2914,15 @@ echo "[roadmap-progress-report] Access Recovery public helper with private remot
 ACCESS_RECOVERY_PRIVATE_REMOTE_IP_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_private_remote_ip_summary.json"
 ACCESS_RECOVERY_PRIVATE_REMOTE_IP_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_private_remote_ip_summary.json"
 jq '.transport.health.remote_ip = "10.0.0.5"' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_PRIVATE_REMOTE_IP_SMOKE_SUMMARY_JSON"
+ACCESS_RECOVERY_PRIVATE_REMOTE_IP_SMOKE_SUMMARY_SHA256="$(sha256sum "$ACCESS_RECOVERY_PRIVATE_REMOTE_IP_SMOKE_SUMMARY_JSON" | awk '{print $1}')"
 jq \
   --arg smoke_summary "$ACCESS_RECOVERY_PRIVATE_REMOTE_IP_SMOKE_SUMMARY_JSON" \
-  '.smoke.summary_json = $smoke_summary | .transport.remote_ip = "10.0.0.5"' \
+  --arg smoke_summary_sha256 "$ACCESS_RECOVERY_PRIVATE_REMOTE_IP_SMOKE_SUMMARY_SHA256" \
+  '.smoke.summary_json = $smoke_summary
+    | .smoke.summary_sha256 = $smoke_summary_sha256
+    | .evidence_binding.smoke_summary_json = $smoke_summary
+    | .evidence_binding.smoke_summary_sha256 = $smoke_summary_sha256
+    | .transport.remote_ip = "10.0.0.5"' \
   "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_PRIVATE_REMOTE_IP_DEPLOYMENT_SUMMARY_JSON"
 if ! run_roadmap_progress_report \
   --refresh-manual-validation 0 \
@@ -2756,13 +2974,23 @@ fi
 echo "[roadmap-progress-report] Access Recovery non-canonical helper authorities are not pilot-ready evidence"
 while IFS='|' read -r case_id case_base_url expected_host; do
   ACCESS_RECOVERY_NONCANONICAL_SMOKE_SUMMARY_JSON="$TMP_DIR/access_bridge_service_smoke_${case_id}_summary.json"
+  ACCESS_RECOVERY_NONCANONICAL_DEPLOYMENT_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_${case_id}_summary.json"
   jq --arg base_url "$case_base_url" '.base_url = $base_url' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_NONCANONICAL_SMOKE_SUMMARY_JSON"
+  ACCESS_RECOVERY_NONCANONICAL_SMOKE_SUMMARY_SHA256="$(sha256sum "$ACCESS_RECOVERY_NONCANONICAL_SMOKE_SUMMARY_JSON" | awk '{print $1}')"
+  jq \
+    --arg smoke_summary_json "$ACCESS_RECOVERY_NONCANONICAL_SMOKE_SUMMARY_JSON" \
+    --arg smoke_summary_sha256 "$ACCESS_RECOVERY_NONCANONICAL_SMOKE_SUMMARY_SHA256" \
+    '.smoke.summary_json = $smoke_summary_json
+      | .smoke.summary_sha256 = $smoke_summary_sha256
+      | .evidence_binding.smoke_summary_json = $smoke_summary_json
+      | .evidence_binding.smoke_summary_sha256 = $smoke_summary_sha256' \
+    "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" >"$ACCESS_RECOVERY_NONCANONICAL_DEPLOYMENT_SUMMARY_JSON"
   if ! run_roadmap_progress_report \
     --refresh-manual-validation 0 \
     --refresh-single-machine-readiness 0 \
     --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
     --access-bridge-service-smoke-summary-json "$ACCESS_RECOVERY_NONCANONICAL_SMOKE_SUMMARY_JSON" \
-    --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+    --access-bridge-deployment-evidence-summary-json "$ACCESS_RECOVERY_NONCANONICAL_DEPLOYMENT_SUMMARY_JSON" \
     --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
     --summary-json "$TMP_DIR/roadmap_progress_access_recovery_${case_id}_summary.json" \
     --report-md "$TMP_DIR/roadmap_progress_access_recovery_${case_id}_report.md" \
@@ -3179,8 +3407,15 @@ jq '
   | .transport.mtls.missing_client_certificate_health_remote_ip = .transport.health.remote_ip
   | .transport.mtls.missing_client_certificate_health_remote_port = .transport.health.remote_port
 ' "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" >"$ACCESS_RECOVERY_GOOD_MTLS_SMOKE_SUMMARY_JSON"
-jq '
-  .schema.minor = 5
+ACCESS_RECOVERY_GOOD_MTLS_SMOKE_SUMMARY_SHA256="$(sha256sum "$ACCESS_RECOVERY_GOOD_MTLS_SMOKE_SUMMARY_JSON" | awk '{print $1}')"
+jq \
+  --arg smoke_summary_json "$ACCESS_RECOVERY_GOOD_MTLS_SMOKE_SUMMARY_JSON" \
+  --arg smoke_summary_sha256 "$ACCESS_RECOVERY_GOOD_MTLS_SMOKE_SUMMARY_SHA256" \
+  '.schema.minor = 6
+  | .smoke.summary_json = $smoke_summary_json
+  | .smoke.summary_sha256 = $smoke_summary_sha256
+  | .evidence_binding.smoke_summary_json = $smoke_summary_json
+  | .evidence_binding.smoke_summary_sha256 = $smoke_summary_sha256
   | .evidence_policy.require_mtls = true
   | .smoke.transport_mtls_required = true
   | .smoke.transport_mtls_client_certificate_configured = true

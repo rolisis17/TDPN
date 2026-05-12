@@ -1,6 +1,6 @@
 # Global Private Mesh (GPM) Full Execution Plan (Access Recovery Pivot)
 
-Last updated: 2026-05-12
+Last updated: 2026-05-13
 
 This is the implementation baseline for the next stages of Global Private Mesh (GPM).
 
@@ -23,13 +23,13 @@ Compatibility note:
 ### Phase A0 (current): Access Recovery Toolkit Beta
 - Freeze the local CLI/browser contract for signed packs, bridge invites, signed helper registries, trust stores, and `GPMREC1` handoffs.
 - Keep all verification local-first: untrusted channels may deliver artifacts, but trust comes only from organization keys in the local trust store.
-- Treat pilot handoff authority as a signed trusted-provenance verifier contract: schema minor `>=5`, `handoff_authority=true`, `authority_level=pilot_handoff`, `integrity_only=false`, trust-store SHA present, real-helper HTTPS, and installed-host evidence; dev/public-key-only trust and local rehearsal receipts are not handoff authority.
+- Treat pilot handoff authority as a signed trusted-provenance verifier contract: schema minor `>=6`, `handoff_authority=true`, `authority_level=pilot_handoff`, `integrity_only=false`, trust-store SHA present, real-helper HTTPS, installed-host evidence, and service-smoke-to-deployment hash binding; dev/public-key-only trust and local rehearsal receipts are not handoff authority.
 - Fail closed on malformed, expired, disabled, wrong-organization, duplicated, or badly signed material.
 - Ship a one-command demo bundle and browser-local recovery page that can be used without running a VPN tunnel, blockchain node, or public exit.
 
 Exit gate:
 - one signed pack and one signed bridge invite can be generated, shared by text/QR/file, verified locally, and inspected in the browser
-- verifier receipts that claim handoff authority include signed trusted provenance, real-helper HTTPS, installed-host evidence, schema minor `>=5`, `handoff_authority=true`, `authority_level=pilot_handoff`, `integrity_only=false`, and a trust-store SHA
+- verifier receipts that claim handoff authority include signed trusted provenance, real-helper HTTPS, installed-host evidence, schema minor `>=6`, `handoff_authority=true`, `authority_level=pilot_handoff`, `integrity_only=false`, a trust-store SHA, and deployment evidence bound to the bundled service-smoke summary hash
 - signed helper registries must be verified before extraction and remain organization-bound during bridge-invite checks
 - helper registry policy can quarantine/disable helpers without changing the organization signing key
 - docs explain the non-technical user flow and the operator flow clearly enough for a first beta cohort

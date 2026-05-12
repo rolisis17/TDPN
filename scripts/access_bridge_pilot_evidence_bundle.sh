@@ -38,6 +38,9 @@ provenance_org_name=""
 provenance_key_id=""
 provenance_lifetime_hours=""
 provenance_out=""
+service_smoke_script="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SERVICE_SMOKE_SCRIPT:-./scripts/access_bridge_service_smoke.sh}"
+deployment_evidence_script="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_DEPLOYMENT_EVIDENCE_SCRIPT:-./scripts/access_bridge_deployment_evidence.sh}"
+host_install_check_script="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_HOST_INSTALL_CHECK_SCRIPT:-./scripts/access_bridge_host_install_check.sh}"
 
 usage() {
   cat <<'USAGE'
@@ -923,7 +926,7 @@ copy_public_deploy_pack "$deploy_pack_dir" "$deploy_pack_copy" "$deploy_pack_ski
 smoke_summary="$bundle_dir/access_bridge_service_smoke_summary.json"
 smoke_log="$bundle_dir/access_bridge_service_smoke.log"
 smoke_args=(
-  bash ./scripts/access_bridge_service_smoke.sh
+  bash "$service_smoke_script"
   --base-url "$base_url"
   --path-id "$path_id"
   --code-file "$effective_code_file"
@@ -952,7 +955,7 @@ deployment_summary="$bundle_dir/access_bridge_deployment_evidence_summary.json"
 deployment_log="$bundle_dir/access_bridge_deployment_evidence.log"
 deployment_args=(
   env "ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_MAX_SMOKE_AGE_SEC=$max_smoke_age_sec"
-  bash ./scripts/access_bridge_deployment_evidence.sh
+  bash "$deployment_evidence_script"
   --smoke-summary-json "$smoke_summary"
   --config-json "$config_json"
   --deploy-pack-dir "$deploy_pack_dir"
@@ -975,7 +978,7 @@ run_json_step "deployment_evidence" "$deployment_summary" "$deployment_log" "${d
 host_summary="$bundle_dir/access_bridge_host_install_check_summary.json"
 host_log="$bundle_dir/access_bridge_host_install_check.log"
 host_install_args=(
-  bash ./scripts/access_bridge_host_install_check.sh
+  bash "$host_install_check_script"
   --evidence-mode "$host_install_evidence_mode"
   --deploy-pack-dir "$deploy_pack_dir"
   --config-json "$config_json"
@@ -999,8 +1002,66 @@ elif [[ "$host_install_evidence_mode" != "installed-host" && "$require_public_ho
 fi
 run_json_step "host_install_check" "$host_summary" "$host_log" "${host_install_args[@]}"
 
-steps_json="$(jq -s '.' "$steps_jsonl")"
-fail_count="$(jq -s '[.[] | select(.status != "pass" or .rc != 0)] | length' "$steps_jsonl")"
+smoke_summary_sha256=""
+deployment_evidence_summary_sha256=""
+host_install_check_summary_sha256=""
+deployment_evidence_schema_major=""
+deployment_evidence_schema_minor=""
+deployment_evidence_smoke_summary_sha256=""
+deployment_evidence_binding_smoke_summary_sha256=""
+evidence_binding_status="pass"
+evidence_binding_reason=""
+if [[ -f "$smoke_summary" ]]; then
+  smoke_summary_sha256="$(sha256_value "$smoke_summary")"
+fi
+if [[ -f "$deployment_summary" ]]; then
+  deployment_evidence_summary_sha256="$(sha256_value "$deployment_summary")"
+  deployment_evidence_schema_major="$(jq -r 'if (.schema.major | type) == "number" then (.schema.major | tostring) else "" end' "$deployment_summary" 2>/dev/null || true)"
+  deployment_evidence_schema_minor="$(jq -r 'if (.schema.minor | type) == "number" then (.schema.minor | tostring) else "" end' "$deployment_summary" 2>/dev/null || true)"
+  deployment_evidence_smoke_summary_sha256="$(json_string_or_empty "$deployment_summary" '.smoke.summary_sha256')"
+  deployment_evidence_binding_smoke_summary_sha256="$(json_string_or_empty "$deployment_summary" '.evidence_binding.smoke_summary_sha256')"
+fi
+if [[ -f "$host_summary" ]]; then
+  host_install_check_summary_sha256="$(sha256_value "$host_summary")"
+fi
+if [[ "$real_helper_https_pilot_handoff" == "1" ]]; then
+  if [[ "$deployment_evidence_schema_major" != "1" || -z "$deployment_evidence_schema_minor" || "$deployment_evidence_schema_minor" -lt 6 ]]; then
+    evidence_binding_status="fail"
+    evidence_binding_reason="real helper HTTPS pilot handoff requires deployment evidence schema >= 1.6"
+  elif [[ -z "$deployment_evidence_smoke_summary_sha256" || -z "$deployment_evidence_binding_smoke_summary_sha256" ]]; then
+    evidence_binding_status="fail"
+    evidence_binding_reason="real helper HTTPS pilot handoff requires deployment evidence embedded smoke summary hashes"
+  fi
+fi
+if [[ "$evidence_binding_status" == "pass" && -n "$smoke_summary_sha256" ]]; then
+  if [[ -n "$deployment_evidence_smoke_summary_sha256" && "$deployment_evidence_smoke_summary_sha256" != "$smoke_summary_sha256" ]]; then
+    evidence_binding_status="fail"
+    evidence_binding_reason="deployment evidence smoke summary hash does not match bundle smoke summary"
+  elif [[ -n "$deployment_evidence_binding_smoke_summary_sha256" && "$deployment_evidence_binding_smoke_summary_sha256" != "$smoke_summary_sha256" ]]; then
+    evidence_binding_status="fail"
+    evidence_binding_reason="deployment evidence binding smoke summary hash does not match bundle smoke summary"
+  fi
+fi
+
+raw_steps_json="$(jq -s '.' "$steps_jsonl")"
+if [[ "$evidence_binding_status" == "fail" ]]; then
+  steps_json="$(printf '%s' "$raw_steps_json" | jq --arg reason "$evidence_binding_reason" '
+    map(
+      if .id == "deployment_evidence" then
+        . + {
+          status: "fail",
+          rc: (if ((.rc | type) == "number" and .rc != 0) then .rc else 1 end),
+          evidence_binding_status: "fail",
+          evidence_binding_reason: $reason
+        }
+      else .
+      end
+    )
+  ')"
+else
+  steps_json="$raw_steps_json"
+fi
+fail_count="$(printf '%s' "$steps_json" | jq '[.[] | select(.status != "pass" or .rc != 0)] | length')"
 transport_status="$(json_string_or_empty "$deployment_summary" '.transport.status')"
 transport_https="$(jq -r 'if (.transport.https // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
 transport_tls_verified="$(jq -r 'if (.transport.tls_verified // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
@@ -1032,7 +1093,7 @@ recommended_action_id="trusted_pilot_evidence_verify"
 recommended_action="Run trusted bundle verification with --require-trusted-provenance 1 and --verification-summary-json before helper/operator handoff."
 if [[ "$fail_count" != "0" ]]; then
   status="fail"
-  first_failed_step="$(jq -rs '[.[] | select(.status != "pass" or .rc != 0)][0].id // ""' "$steps_jsonl")"
+  first_failed_step="$(printf '%s' "$steps_json" | jq -r '[.[] | select(.status != "pass" or .rc != 0)][0].id // ""')"
   case "$first_failed_step" in
     service_smoke)
       recommended_action_id="fix_deployed_bridge_smoke"
@@ -1111,6 +1172,10 @@ cat >"$report_md" <<REPORT
 - Smoke summary: ${smoke_summary}
 - Deployment evidence summary: ${deployment_summary}
 - Host install summary: ${host_summary}
+- Smoke summary SHA-256: ${smoke_summary_sha256}
+- Deployment evidence summary SHA-256: ${deployment_evidence_summary_sha256}
+- Host install summary SHA-256: ${host_install_check_summary_sha256}
+- Deployment embedded smoke SHA-256: ${deployment_evidence_smoke_summary_sha256}
 
 Next action: ${recommended_action}
 REPORT
@@ -1177,11 +1242,20 @@ jq -n \
   --arg expect_org_id "$expect_org_id" \
   --arg expect_registry_id "$expect_registry_id" \
   --arg smoke_summary "$smoke_summary" \
+  --arg smoke_summary_sha256 "$smoke_summary_sha256" \
   --arg smoke_log "$smoke_log" \
   --arg deployment_summary "$deployment_summary" \
+  --arg deployment_evidence_summary_sha256 "$deployment_evidence_summary_sha256" \
   --arg deployment_log "$deployment_log" \
   --arg host_summary "$host_summary" \
+  --arg host_install_check_summary_sha256 "$host_install_check_summary_sha256" \
   --arg host_log "$host_log" \
+  --arg deployment_evidence_schema_major "$deployment_evidence_schema_major" \
+  --arg deployment_evidence_schema_minor "$deployment_evidence_schema_minor" \
+  --arg deployment_evidence_smoke_summary_sha256 "$deployment_evidence_smoke_summary_sha256" \
+  --arg deployment_evidence_binding_smoke_summary_sha256 "$deployment_evidence_binding_smoke_summary_sha256" \
+  --arg evidence_binding_status "$evidence_binding_status" \
+  --arg evidence_binding_reason "$evidence_binding_reason" \
   --arg provenance_sign "$provenance_sign" \
   --arg provenance_out "$provenance_out" \
   --arg provenance_key_id "$provenance_key_id" \
@@ -1195,7 +1269,7 @@ jq -n \
     schema: {
       id: "access_bridge_pilot_evidence_bundle_summary",
       major: 1,
-      minor: 7
+      minor: 8
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -1242,6 +1316,32 @@ jq -n \
     summary: {
       steps_total: ($steps | length),
       steps_fail: $fail_count
+    },
+    evidence_binding: {
+      status: $evidence_binding_status,
+      reason: (if $evidence_binding_reason == "" then null else $evidence_binding_reason end),
+      base_url: $base_url,
+      helper_id: $expect_helper_id,
+      organization_id: $expect_org_id,
+      registry_id: $expect_registry_id,
+      smoke_summary_json: $smoke_summary,
+      smoke_summary_sha256: $smoke_summary_sha256,
+      deployment_evidence_summary_json: $deployment_summary,
+      deployment_evidence_summary_sha256: $deployment_evidence_summary_sha256,
+      host_install_check_summary_json: $host_summary,
+      host_install_check_summary_sha256: $host_install_check_summary_sha256,
+      deployment_evidence_schema_major: (if $deployment_evidence_schema_major == "" then null else ($deployment_evidence_schema_major | tonumber) end),
+      deployment_evidence_schema_minor: (if $deployment_evidence_schema_minor == "" then null else ($deployment_evidence_schema_minor | tonumber) end),
+      deployment_evidence_smoke_summary_sha256: $deployment_evidence_smoke_summary_sha256,
+      deployment_smoke_summary_sha256: $deployment_evidence_smoke_summary_sha256,
+      deployment_evidence_binding_smoke_summary_sha256: $deployment_evidence_binding_smoke_summary_sha256,
+      deployment_smoke_summary_sha256_matches_bundle: (
+        $smoke_summary_sha256 != ""
+        and $deployment_evidence_smoke_summary_sha256 != ""
+        and $deployment_evidence_binding_smoke_summary_sha256 != ""
+        and $deployment_evidence_smoke_summary_sha256 == $smoke_summary_sha256
+        and $deployment_evidence_binding_smoke_summary_sha256 == $smoke_summary_sha256
+      )
     },
     transport: {
       status: $transport_status,

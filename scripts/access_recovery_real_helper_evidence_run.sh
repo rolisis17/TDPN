@@ -93,7 +93,7 @@ Purpose:
   3. refresh roadmap readiness against that verifier receipt
 
 The trusted verifier receipt must use
-access_bridge_pilot_evidence_bundle_verify_summary schema major 1, minor >= 5.
+access_bridge_pilot_evidence_bundle_verify_summary schema major 1, minor >= 6.
 
 Use --plan-only 1 to run the same strict preflight validation and emit the
 planned child commands/artifacts without invoking host-install, bundle,
@@ -514,7 +514,7 @@ validate_trusted_verifier_receipt() {
       [
         if (.schema.id // "") != "access_bridge_pilot_evidence_bundle_verify_summary" then "schema id is not access_bridge_pilot_evidence_bundle_verify_summary" else empty end,
         if (.schema.major // 0) != 1 then "schema major is not 1" else empty end,
-        if (.schema.minor // -1) < 5 then "schema minor is too old for explicit trusted pilot handoff authority semantics" else empty end,
+        if (.schema.minor // -1) < 6 then "schema minor is too old for current smoke/deployment evidence binding semantics" else empty end,
         if (.status // "") != "pass" then "receipt status is not pass" else empty end,
         if (.rc // -1) != 0 then "receipt rc is not 0" else empty end,
         if (.handoff_authority // false) != true then "handoff_authority is not true" else empty end,
@@ -536,6 +536,7 @@ validate_trusted_verifier_receipt() {
         if (.pilot_handoff_criteria.provenance_evidence_scope // "") != "real_helper_https" then "provenance evidence_scope is not real_helper_https" else empty end,
         if (.pilot_handoff_criteria.summary_evidence_scope // "") != "real_helper_https" then "summary evidence_scope is not real_helper_https" else empty end,
         if (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok // false) != true then "bundled child evidence semantic validation did not pass" else empty end,
+        if (.pilot_handoff_criteria.deployment_smoke_summary_sha256_matches_bundle // false) != true then "deployment smoke summary hash was not proven to match bundled smoke summary" else empty end,
         if (.pilot_handoff_criteria.evidence_freshness_checked // false) != true then "evidence freshness was not checked" else empty end,
         if (.pilot_handoff_criteria.evidence_freshness_ok // false) != true then "evidence freshness check did not pass" else empty end,
         if (.pilot_handoff_criteria.installed_host_evidence_present // false) != true then "installed-host evidence was not proven present" else empty end,
@@ -580,6 +581,8 @@ validate_trusted_verifier_receipt() {
         if (.trusted_provenance.trusted_org_id // "") != (.evidence_binding.organization_id // "") then "trusted provenance trusted_org_id does not match evidence binding organization_id" else empty end,
         if (.evidence_binding.base_url // "") != $base_url then "evidence binding base_url does not match current run" else empty end,
         if (.evidence_binding.smoke_summary_sha256 // "") != $smoke_sha then "evidence binding smoke summary hash does not match current bundle output" else empty end,
+        if (.evidence_binding.deployment_smoke_summary_sha256 // "") != $smoke_sha then "evidence binding deployment smoke summary hash does not match current bundle smoke output" else empty end,
+        if (.evidence_binding.deployment_evidence_binding_smoke_summary_sha256 // "") != $smoke_sha then "evidence binding deployment nested smoke summary hash does not match current bundle smoke output" else empty end,
         if (.evidence_binding.deployment_evidence_summary_sha256 // "") != $deployment_sha then "evidence binding deployment summary hash does not match current bundle output" else empty end,
         if (.evidence_binding.host_install_check_summary_sha256 // "") != $host_sha then "evidence binding host-install summary hash does not match current bundle output" else empty end,
         if (.artifacts.verification_summary_json // "") != $verification_summary_json then "receipt artifact path does not match requested verifier receipt" else empty end,
@@ -589,6 +592,41 @@ validate_trusted_verifier_receipt() {
     ' "$verification_summary_json")"
   if [[ -n "$receipt_errors" ]]; then
     printf '%s\n' "$receipt_errors"
+    return 1
+  fi
+  return 0
+}
+
+validate_current_child_evidence_contracts() {
+  local smoke_sha child_errors
+  smoke_sha="$(sha256_value "$bundle_service_smoke_summary_json" 2>/dev/null || true)"
+  if [[ -z "$smoke_sha" ]]; then
+    echo "Bundled child evidence cannot be checked because the smoke summary hash is missing"
+    return 1
+  fi
+  if ! child_errors="$(jq -n -r \
+    --arg smoke_sha "$smoke_sha" \
+    --slurpfile smoke "$bundle_service_smoke_summary_json" \
+    --slurpfile deployment "$bundle_deployment_evidence_summary_json" \
+    '
+      ($smoke[0] // {}) as $s
+      | ($deployment[0] // {}) as $d
+      | [
+          if ($s.schema.id // "") != "access_bridge_service_smoke_summary" then "bundled smoke summary schema id is not access_bridge_service_smoke_summary" else empty end,
+          if ($s.schema.major // 0) != 1 then "bundled smoke summary schema major is not 1" else empty end,
+          if ($s.schema.minor // -1) < 6 then "bundled smoke summary schema minor is too old for current deployment binding semantics" else empty end,
+          if ($d.schema.id // "") != "access_bridge_deployment_evidence_summary" then "bundled deployment evidence summary schema id is not access_bridge_deployment_evidence_summary" else empty end,
+          if ($d.schema.major // 0) != 1 then "bundled deployment evidence summary schema major is not 1" else empty end,
+          if ($d.schema.minor // -1) < 6 then "bundled deployment evidence summary schema minor is too old for current smoke hash binding semantics" else empty end,
+          if ($d.smoke.summary_sha256 // "") != $smoke_sha then "bundled deployment evidence smoke summary hash does not match bundled smoke summary" else empty end,
+          if ($d.evidence_binding.smoke_summary_sha256 // "") != $smoke_sha then "bundled deployment evidence binding smoke summary hash does not match bundled smoke summary" else empty end
+        ] | .[]
+    ' 2>/dev/null)"; then
+    echo "Bundled child evidence summaries are not valid JSON"
+    return 1
+  fi
+  if [[ -n "$child_errors" ]]; then
+    printf '%s\n' "$child_errors"
     return 1
   fi
   return 0
@@ -837,6 +875,18 @@ bundle_deployment_evidence_summary_json=""
 bundle_host_install_check_summary_json=""
 planned_child_commands_json="{}"
 planned_artifacts_json="{}"
+
+if [[ "$plan_only" != "1" ]]; then
+  rm -f -- \
+    "$host_install_check_summary_json" \
+    "$bundle_summary_json" \
+    "$provenance_out" \
+    "$verification_summary_json" \
+    "$roadmap_summary_json" \
+    "$roadmap_report_md" \
+    "$summary_json" \
+    "$report_md"
+fi
 
 config_json="$(abs_path "$config_json")"
 deploy_pack_dir="$(abs_path "$deploy_pack_dir")"
@@ -1500,6 +1550,15 @@ if [[ -z "$bundle_service_smoke_summary_json" || -z "$bundle_deployment_evidence
 fi
 if [[ ! -f "$bundle_service_smoke_summary_json" || ! -f "$bundle_deployment_evidence_summary_json" || ! -f "$bundle_host_install_check_summary_json" ]]; then
   write_summary "fail" 1 "bundle" "Access bridge pilot evidence bundle summary points to missing child evidence outputs required for trusted handoff"
+  echo "access-recovery-real-helper-evidence-run: status=fail stage=bundle"
+  echo "summary_json: $summary_json"
+  [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
+  exit 1
+fi
+if ! child_contract_errors="$(validate_current_child_evidence_contracts 2>&1)"; then
+  write_summary "fail" 1 "bundle" "Access bridge pilot evidence bundle child evidence failed current schema and smoke/deployment binding validation"
+  echo "bundled child evidence validation failed:" >&2
+  printf '%s\n' "$child_contract_errors" >&2
   echo "access-recovery-real-helper-evidence-run: status=fail stage=bundle"
   echo "summary_json: $summary_json"
   [[ "$print_summary_json" == "1" ]] && cat "$summary_json"

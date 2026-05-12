@@ -29,7 +29,8 @@ reject_phrase README.md "one-command local Access Recovery demo/pilot artifacts"
 require_phrase README.md "contract/local coverage only"
 require_phrase README.md "real pilot handoff still requires real helper HTTPS evidence, signed provenance, and trusted verification"
 require_phrase README.md "local integrity-only checks may omit provenance for diagnostics only and are never pilot/operator handoff receipts"
-require_phrase README.md 'Pilot-ready verifier receipts must use schema minor `5` or newer'
+require_phrase README.md 'Pilot-ready verifier receipts must use schema minor `6` or newer'
+require_phrase README.md 'deployment evidence bound to the exact service-smoke summary hash'
 
 require_phrase docs/beta-playbook.md "legacy VPN closed-beta readiness only"
 require_phrase docs/beta-playbook.md "It is not Access"
@@ -48,6 +49,7 @@ require_phrase docs/access-recovery-toolkit-track.md "receipt. Handoff requires 
 require_phrase docs/access-recovery-toolkit-track.md "provenance, and a verifier summary receipt"
 require_phrase docs/access-recovery-toolkit-track.md "examples above are local/operator diagnostics"
 require_phrase docs/access-recovery-toolkit-track.md "never for pilot/operator handoff"
-require_phrase docs/access-recovery-toolkit-track.md 'Pilot-ready verifier receipts must use schema minor `5` or newer'
+require_phrase docs/access-recovery-toolkit-track.md 'Pilot-ready verifier receipts must use schema minor `6` or newer'
+require_phrase docs/access-recovery-toolkit-track.md 'pilot evidence bundle minor `8`'
 
 echo "access recovery pivot copy integration check ok"
