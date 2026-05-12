@@ -649,6 +649,24 @@ JSON
 }
 JSON
     ;;
+  access_recovery_installed_host_operator_placeholders)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"access_bridge_installed_host_evidence","label":"Access bridge installed-host evidence","command":"bash \"$PASS1\" --evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --config-json BRIDGE_SERVICE_CONFIG --expected-base-url https://HELPER_PUBLIC_DNS --summary-json /tmp/access_bridge_host_install_check_summary.json","reason":"test-installed-host-operator-placeholders"}
+  ]
+}
+JSON
+    ;;
+  access_recovery_installed_host_concrete)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"access_bridge_installed_host_evidence","label":"Access bridge installed-host evidence","command":"bash \"$PASS1\" --evidence-mode installed-host --install-dir /tmp/gpm/access-bridge --systemd-unit-file /tmp/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /tmp/gpm-access-bridge.caddy --config-json /tmp/bridge-service-config.json --expected-base-url https://helper.gpm-pilot.net --summary-json /tmp/access_bridge_host_install_check_summary.json","reason":"test-installed-host-concrete"}
+  ]
+}
+JSON
+    ;;
   access_recovery_mtls_operator_placeholders)
     cat >"$summary_json" <<JSON
 {
@@ -1798,6 +1816,73 @@ if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
 ' "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS" >/dev/null; then
   echo "Access Recovery unresolved operator placeholder precondition summary mismatch"
   cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery installed-host action fails closed on unresolved operator placeholders"
+SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_PLACEHOLDERS="$TMP_DIR/summary_access_recovery_installed_host_placeholders.json"
+REPORTS_ACCESS_RECOVERY_INSTALLED_HOST_PLACEHOLDERS="$TMP_DIR/reports_access_recovery_installed_host_placeholders"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_installed_host_operator_placeholders \
+PASS1="$PASS1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_INSTALLED_HOST_PLACEHOLDERS" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_PLACEHOLDERS" \
+  --include-id access_bridge_installed_host_evidence \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_installed_host_placeholders.log" 2>&1
+access_recovery_installed_host_placeholders_rc=$?
+set -e
+if [[ "$access_recovery_installed_host_placeholders_rc" != "2" ]]; then
+  echo "expected unresolved Access Recovery installed-host placeholder hard-fail rc=2, got rc=$access_recovery_installed_host_placeholders_rc"
+  cat "$TMP_DIR/access_recovery_installed_host_placeholders.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_PLACEHOLDERS" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_PLACEHOLDERS"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .actions[0].id == "access_bridge_installed_host_evidence"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
+  and (.actions[0].notes | contains("HELPER_PUBLIC_DNS"))
+  and (.actions[0].notes | contains("BRIDGE_SERVICE_CONFIG"))
+  and (.actions[0].command | contains("--evidence-mode installed-host"))
+  and (.actions[0].command | contains("HELPER_PUBLIC_DNS"))
+  and (.actions[0].next_operator_action | contains("--include-id access_bridge_installed_host_evidence"))
+' "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_PLACEHOLDERS" >/dev/null; then
+  echo "Access Recovery installed-host unresolved operator placeholder precondition summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_PLACEHOLDERS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery installed-host action executes with concrete operator inputs"
+SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_CONCRETE="$TMP_DIR/summary_access_recovery_installed_host_concrete.json"
+REPORTS_ACCESS_RECOVERY_INSTALLED_HOST_CONCRETE="$TMP_DIR/reports_access_recovery_installed_host_concrete"
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_installed_host_concrete \
+PASS1="$PASS1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_INSTALLED_HOST_CONCRETE" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_CONCRETE" \
+  --include-id access_bridge_installed_host_evidence \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .actions[0].id == "access_bridge_installed_host_evidence"
+  and .actions[0].status == "pass"
+  and .actions[0].failure_kind == "none"
+  and (.actions[0].command | contains("--evidence-mode installed-host"))
+  and (.actions[0].command | contains("https://helper.gpm-pilot.net"))
+  and ((.actions[0].command | contains("HELPER_PUBLIC_DNS")) | not)
+  and ((.actions[0].command | contains("BRIDGE_SERVICE_CONFIG")) | not)
+' "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_CONCRETE" >/dev/null; then
+  echo "Access Recovery installed-host concrete action summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_CONCRETE"
   exit 1
 fi
 

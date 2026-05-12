@@ -3135,7 +3135,8 @@ access_recovery_track_json_from_evidence() {
         and ($bundle_verify.details.pilot_handoff_criteria_dev_trust_store_allowed != true)
         and ($bundle_verify.details.allow_dev_trust_store != true);
       def pilot_handoff_ready:
-        trusted_pilot_receipt_ready
+        installed_host_handoff_evidence
+        and trusted_pilot_receipt_ready
         and verifier_pilot_handoff_ready;
       def first_attention:
         [$service_smoke, $deployment_evidence, $host_install]
@@ -3199,6 +3200,7 @@ access_recovery_track_json_from_evidence() {
         end;
       def track_status:
         if real_helper_https_base_ready and pilot_handoff_ready then "pilot-evidence-ready"
+        elif real_helper_https_base_ready and (installed_host_handoff_evidence | not) then "installed-host-evidence-required"
         elif real_helper_https_base_ready and trusted_pilot_receipt_ready then "pilot-handoff-not-ready"
         elif real_helper_https_base_ready then "trusted-provenance-required"
         elif all_pass and evidence_binding.ok then "local-rehearsal-ready"
@@ -3224,6 +3226,8 @@ access_recovery_track_json_from_evidence() {
           recommendation: (
             if $track_status == "pilot-evidence-ready" then
               "Access Recovery bridge pilot evidence is ready for operator handoff."
+            elif $track_status == "installed-host-evidence-required" then
+              "Access Recovery real helper HTTPS evidence is present, but deploy-pack host evidence is rehearsal-only; capture installed-host service, systemd, and active proxy evidence before verifier handoff."
             elif $track_status == "pilot-handoff-not-ready" then
               "Access Recovery trusted verifier receipt is present, but final pilot handoff authority is false; complete handoff readiness before operator handoff."
             elif $track_status == "trusted-provenance-required" then
@@ -3263,22 +3267,21 @@ access_recovery_track_json_from_evidence() {
           },
           recommended_next_action: (
             if $track_status == "pilot-evidence-ready" then null
+            elif $track_status == "installed-host-evidence-required" then {
+              id: "access_bridge_installed_host_evidence",
+              reason: "Deploy-pack host evidence is rehearsal-only for public HTTPS helpers; operator handoff requires installed-host service, systemd, and active proxy evidence",
+              command: "bash ./scripts/access_bridge_host_install_check.sh --evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --config-json BRIDGE_SERVICE_CONFIG --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
+            }
             elif $track_status == "trusted-provenance-required" then {
-              id: (if installed_host_handoff_evidence then "trusted_pilot_evidence_verify" else "access_bridge_installed_host_evidence" end),
+              id: "trusted_pilot_evidence_verify",
               reason: (
-                if (installed_host_handoff_evidence | not) then
-                  "Deploy-pack host evidence is rehearsal-only for public HTTPS helpers; operator handoff requires installed-host service, systemd, and active proxy evidence"
-                elif ($bundle_verify.available == true and ($verifier_binding.ok != true)) then
+                if ($bundle_verify.available == true and ($verifier_binding.ok != true)) then
                   "Trusted verifier receipt does not match the current smoke, deployment, and host-install evidence"
                 else
                   ($bundle_verify.notes // "Trusted real helper HTTPS provenance verification is required before pilot handoff")
                 end
               ),
-              command: (
-                if installed_host_handoff_evidence then trusted_verifier_command
-                else "bash ./scripts/access_bridge_host_install_check.sh --evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --config-json BRIDGE_SERVICE_CONFIG --expected-base-url https://HELPER_PUBLIC_DNS --summary-json .easy-node-logs/access_bridge_host_install_check_summary.json"
-                end
-              )
+              command: trusted_verifier_command
             }
             elif $track_status == "pilot-handoff-not-ready" then {
               id: "trusted_pilot_evidence_verify",

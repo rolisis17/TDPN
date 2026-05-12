@@ -1251,7 +1251,7 @@ if ! jq -e \
   and .rc == 0
   and .current_roadmap_track == "access_recovery"
   and .access_recovery_pilot_handoff_ready == false
-  and .access_recovery_track.status == "trusted-provenance-required"
+  and .access_recovery_track.status == "installed-host-evidence-required"
   and .access_recovery_track.ready == false
   and .access_recovery_track.pilot_handoff_ready == false
   and .access_recovery_track.local_rehearsal_ready == false
@@ -1839,7 +1839,7 @@ if ! grep -Eq '\[roadmap-progress-report\] current_roadmap_track=access_recovery
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1
 fi
-if ! grep -Eq '\[roadmap-progress-report\] access_recovery_track_status=trusted-provenance-required ready=false needs_attention=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
+if ! grep -Eq '\[roadmap-progress-report\] access_recovery_track_status=installed-host-evidence-required ready=false needs_attention=true' ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log; then
   echo "expected Access Recovery deploy-pack rehearsal log line"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_ok.log
   exit 1

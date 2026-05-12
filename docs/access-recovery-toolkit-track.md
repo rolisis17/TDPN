@@ -201,6 +201,7 @@ Local trust-store and bridge rehearsal flow:
 
 Pilot/operator handoff flow (real pilot artifacts only):
 - Use a real pilot trust store or trusted-key handoff, signed helper registry, non-demo `ORG_ID`/`HELPER_ID`, and real helper HTTPS endpoint. Demo paths, raw `--public-key-file` verification, unsigned helper registries, non-handoff receipts, and dev trust-store overrides are local diagnostics only.
+- Public HTTPS smoke/deployment evidence against a deploy pack is necessary but not handoff-ready by itself; trusted verifier handoff authority requires installed-host evidence from the active helper install.
 - Installed-host evidence should be recorded on the helper host, or from copied active helper-host files. Use sudo/root if the installed bridge directory, systemd unit, or proxy config is protected; this is separate from the legacy VPN `runtime_hygiene` sudo gate.
 - `bash ./scripts/access_bridge_service_smoke.sh --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PILOT_ACCESS_CODE_FILE --expect-helper-id HELPER_ID --expect-org-id ORG_ID --summary-json .easy-node-logs/bridge-service-smoke.json`
 - `bash ./scripts/access_bridge_deployment_evidence.sh --smoke-summary-json .easy-node-logs/bridge-service-smoke.json --config-json PILOT_BRIDGE_SERVICE_CONFIG_JSON --deploy-pack-dir PILOT_DEPLOY_PACK_DIR --expect-helper-id HELPER_ID --expect-org-id ORG_ID --summary-json .easy-node-logs/bridge-deployment-evidence.json`

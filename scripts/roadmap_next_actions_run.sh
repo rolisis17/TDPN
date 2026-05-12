@@ -359,7 +359,7 @@ action_id_is_access_recovery_action_01() {
   local action_id
   action_id="$(trim "${1:-}")"
   case "$action_id" in
-    access_recovery_evidence|trusted_pilot_evidence_verify|real_helper_https_evidence|access_bridge_service_smoke|access_bridge_deployment_evidence|access_bridge_host_install|access_bridge_pilot_evidence_bundle)
+    access_recovery_evidence|trusted_pilot_evidence_verify|real_helper_https_evidence|access_bridge_service_smoke|access_bridge_deployment_evidence|access_bridge_host_install|access_bridge_installed_host_evidence|access_bridge_pilot_evidence_bundle)
       return 0
       ;;
   esac

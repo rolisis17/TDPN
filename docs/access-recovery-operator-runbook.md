@@ -108,8 +108,10 @@ bash ./scripts/access_bridge_host_install_check.sh \
   --summary-json .easy-node-logs/access-recovery-pilot/bridge-host-install-check.json
 ```
 
-The deploy-pack host check is a rehearsal check for the generated files. Pilot
-handoff must also record installed-host evidence from the active service,
+The deploy-pack host check is a rehearsal check for the generated files. Public
+HTTPS smoke/deployment evidence against a deploy pack is useful, but it is not
+handoff-ready by itself and must not create trusted verifier handoff authority.
+Pilot handoff must also record installed-host evidence from the active service,
 systemd unit, and HTTPS proxy config.
 
 4. Bind the bridge service to loopback, for example `127.0.0.1:18980`, and put Caddy or nginx in front of it with HTTPS enabled. The public endpoint must be `https://HELPER_PUBLIC_DNS`, proxying only to the local bridge listener. Keep query-string access codes disabled; pass access codes through `X-GPM-Bridge-Code`.
