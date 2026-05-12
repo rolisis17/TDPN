@@ -127,6 +127,18 @@ copy_if_present() {
   cp -p "$src" "$dst"
 }
 
+verifier_summary_has_handoff_authority() {
+  local path="$1"
+  [[ -f "$path" ]] || return 1
+  jq -e '
+    (.handoff_authority == true)
+    or ((.authority_level // "") == "pilot_handoff")
+    or (.pilot_handoff_ready == true)
+    or (.trusted_pilot_receipt_ready == true)
+    or ((.trusted_provenance.evidence_scope // "") == "real_helper_https")
+  ' "$path" >/dev/null 2>&1
+}
+
 reports_dir="$ROOT_DIR/.easy-node-logs/access_recovery_local_evidence_$(timestamp_file)"
 summary_json=""
 print_summary_json="1"
@@ -376,6 +388,10 @@ if [[ "$write_canonical" == "1" ]]; then
   canonical_host_install_summary_json="$canonical_dir/access_bridge_host_install_check_summary.json"
   canonical_pilot_summary_json="$canonical_dir/access_bridge_pilot_evidence_bundle_summary.json"
   canonical_pilot_verify_summary_json="$canonical_dir/access_bridge_pilot_evidence_bundle_verify_summary.json"
+  if verifier_summary_has_handoff_authority "$canonical_pilot_verify_summary_json"; then
+    echo "access recovery local evidence refresh failed: --write-canonical 1 would overwrite existing trusted pilot verifier receipt: $canonical_pilot_verify_summary_json" >&2
+    exit 2
+  fi
   copy_if_present "$service_smoke_summary_json" "$canonical_service_smoke_summary_json"
   copy_if_present "$deployment_evidence_summary_json" "$canonical_deployment_evidence_summary_json"
   copy_if_present "$host_install_summary_json" "$canonical_host_install_summary_json"

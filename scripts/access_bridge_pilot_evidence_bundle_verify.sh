@@ -50,6 +50,9 @@ Notes:
   - Strict pilot handoff mode exits non-zero unless pilot_handoff_ready=true.
     Use --allow-non-handoff-receipt 1 only for diagnostics that intentionally
     inspect a trusted verification receipt that is not handoff-ready.
+  - Non-strict status=pass can mean integrity-only verification; check
+    authority_level=pilot_handoff and handoff_authority=true before treating a
+    verifier summary as pilot/operator handoff authority.
   - Strict pilot handoff mode also requires the signed summary artifact paths
     to match the verified summary/tar/sidecar/provenance inputs and expected
     in-bundle evidence filenames.
@@ -1288,18 +1291,43 @@ write_verification_summary() {
         and $provenance_trusted_org_id == $source_organization_id;
       def pilot_handoff_ready:
         trusted_pilot_receipt_ready;
+      def receipt_authority_level:
+        if pilot_handoff_ready then "pilot_handoff"
+        elif $require_trusted_provenance and $allow_dev_trust_store then "diagnostic_integrity_only"
+        elif $require_trusted_provenance and $allow_non_handoff_receipt then "trusted_non_handoff_diagnostic"
+        elif $require_trusted_provenance then "trusted_non_handoff"
+        else "integrity_only"
+        end;
+      def receipt_status_meaning:
+        if pilot_handoff_ready then
+          "trusted pilot handoff authority"
+        elif receipt_authority_level == "integrity_only" then
+          "integrity verification only; not pilot handoff authority"
+        elif receipt_authority_level == "diagnostic_integrity_only" then
+          "diagnostic integrity verification with dev trust-store override; not pilot handoff authority"
+        elif receipt_authority_level == "trusted_non_handoff_diagnostic" then
+          "trusted non-handoff diagnostic receipt; not pilot handoff authority"
+        else
+          "trusted verification did not satisfy pilot handoff criteria; not pilot handoff authority"
+        end;
+      def tar_sha256_effective_enabled:
+        $check_tar_sha256 and ($bundle_tar != "");
       {
         version: 1,
         schema: {
           id: "access_bridge_pilot_evidence_bundle_verify_summary",
           major: 1,
-          minor: 4
+          minor: 5
         },
         generated_at_utc: $generated_at_utc,
         status: $status,
         rc: $rc,
         pilot_handoff_ready: pilot_handoff_ready,
         trusted_pilot_receipt_ready: trusted_pilot_receipt_ready,
+        handoff_authority: pilot_handoff_ready,
+        authority_level: receipt_authority_level,
+        integrity_only: (receipt_authority_level != "pilot_handoff"),
+        status_meaning: receipt_status_meaning,
         pilot_handoff_criteria: {
           ready: pilot_handoff_ready,
           trusted_pilot_receipt_ready: trusted_pilot_receipt_ready,
@@ -1345,9 +1373,10 @@ write_verification_summary() {
             status: (if $summary_contract_check then $status else "skipped" end)
           },
           tar_sha256: {
-            enabled: $check_tar_sha256,
+            enabled: tar_sha256_effective_enabled,
             checked: $tar_sha256_checked,
-            status: (if ($check_tar_sha256 | not) then "skipped" elif $tar_sha256_checked then $status elif $status == "pass" then "skipped" else $status end)
+            status: (if (tar_sha256_effective_enabled | not) then "skipped" elif $tar_sha256_checked then $status elif $status == "pass" then "skipped" else $status end),
+            skipped_reason: (if ($check_tar_sha256 and ($bundle_tar == "")) then "bundle_dir_only_no_tar" else null end)
           },
           manifest: {
             enabled: $check_manifest,

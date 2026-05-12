@@ -344,9 +344,14 @@ if ! jq -e '
   .status == "pass"
   and .rc == 0
   and .pilot_handoff_ready == false
-  and .checks.tar_sha256.enabled == true
+  and .handoff_authority == false
+  and .authority_level == "integrity_only"
+  and .integrity_only == true
+  and (.status_meaning | contains("not pilot handoff authority"))
+  and .checks.tar_sha256.enabled == false
   and .checks.tar_sha256.checked == false
   and .checks.tar_sha256.status == "skipped"
+  and .checks.tar_sha256.skipped_reason == "bundle_dir_only_no_tar"
   and .checks.manifest.enabled == true
   and .checks.manifest.status == "pass"
 ' "$DIR_VERIFY_SUMMARY_JSON" >/dev/null; then
@@ -421,11 +426,15 @@ if [[ "$trusted_policy_explicit_rc" -eq 0 ]] ||
   ! grep -Fq 'trusted pilot handoff criteria not ready' "$TMP_DIR/verify-provenance-trusted-policy-explicit.log" ||
   ! jq -e '
   .schema.id == "access_bridge_pilot_evidence_bundle_verify_summary"
-  and .schema.minor == 4
+  and .schema.minor == 5
   and .status == "fail"
   and .rc == 1
   and .pilot_handoff_ready == false
   and .trusted_pilot_receipt_ready == false
+  and .handoff_authority == false
+  and .authority_level == "trusted_non_handoff"
+  and .integrity_only == true
+  and (.status_meaning | contains("not pilot handoff authority"))
   and .pilot_handoff_criteria.ready == false
   and .pilot_handoff_criteria.trusted_pilot_receipt_ready == false
   and .pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true
@@ -951,6 +960,10 @@ if ! jq -e \
     .status == "pass"
     and .rc == 0
     and .pilot_handoff_ready == true
+    and .handoff_authority == true
+    and .authority_level == "pilot_handoff"
+    and .integrity_only == false
+    and .status_meaning == "trusted pilot handoff authority"
     and .pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true
     and .pilot_handoff_criteria.evidence_freshness_ok == true
     and .pilot_handoff_criteria.installed_host_evidence_present == true
@@ -1437,6 +1450,9 @@ if ! jq -e '
   .status == "pass"
   and .pilot_handoff_ready == false
   and .trusted_pilot_receipt_ready == false
+  and .handoff_authority == false
+  and .authority_level == "diagnostic_integrity_only"
+  and .integrity_only == true
   and .pilot_handoff_criteria.ready == false
   and .pilot_handoff_criteria.dev_trust_store_allowed == true
   and .pilot_handoff_criteria.non_handoff_receipt_allowed == true
@@ -1463,6 +1479,9 @@ if ! jq -e --arg original_sha "$SMOKE_SUMMARY_SHA256" --arg loose_sha "$TAMPERED
   .status == "pass"
   and .pilot_handoff_ready == false
   and .trusted_pilot_receipt_ready == false
+  and .handoff_authority == false
+  and .authority_level == "trusted_non_handoff_diagnostic"
+  and .integrity_only == true
   and .pilot_handoff_criteria.non_handoff_receipt_allowed == true
   and .pilot_handoff_criteria.installed_host_evidence_present == false
   and .evidence_binding.smoke_summary_sha256 == $original_sha

@@ -1065,13 +1065,17 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
   "schema": {
     "id": "access_bridge_pilot_evidence_bundle_verify_summary",
     "major": 1,
-    "minor": 4
+    "minor": 5
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
   "rc": 0,
   "pilot_handoff_ready": false,
   "trusted_pilot_receipt_ready": false,
+  "handoff_authority": false,
+  "authority_level": "trusted_non_handoff",
+  "integrity_only": true,
+  "status_meaning": "trusted verification did not satisfy pilot handoff criteria; not pilot handoff authority",
   "pilot_handoff_criteria": {
     "ready": false,
     "trusted_pilot_receipt_ready": false,
@@ -1646,6 +1650,10 @@ jq \
     | .evidence_binding.host_install_evidence_mode = "installed-host"
     | .pilot_handoff_ready = true
     | .trusted_pilot_receipt_ready = true
+    | .handoff_authority = true
+    | .authority_level = "pilot_handoff"
+    | .integrity_only = false
+    | .status_meaning = "trusted pilot handoff authority"
     | .pilot_handoff_criteria.ready = true
     | .pilot_handoff_criteria.trusted_pilot_receipt_ready = true
     | .pilot_handoff_criteria.installed_host_evidence_present = true' \
@@ -1694,8 +1702,12 @@ if ! jq -e \
     and .access_recovery_track.trusted_verifier_ready == true
     and .access_recovery_track.trusted_pilot_receipt_ready == true
     and .access_recovery_track.trusted_verifier_receipt_valid == true
-    and .access_recovery_track.trusted_verifier_receipt_valid_is_handoff_ready == false
+    and .access_recovery_track.trusted_verifier_receipt_valid_is_handoff_ready == true
     and .access_recovery_track.verifier_pilot_handoff_ready == true
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.handoff_authority == true
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.authority_level == "pilot_handoff"
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.integrity_only == false
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.readiness_fields_consistent == true
     and .access_recovery_track.preferred_operator_next_action == null
     and .access_recovery_track.evidence_binding.host_public_host_match == true
     and .access_recovery_track.trusted_verifier_binding.host_install_check_summary_sha256_match == true
@@ -2035,29 +2047,34 @@ if ! jq -e '
   .status == "warn"
   and .rc == 0
   and (.notes | contains("Access Recovery evidence still needs attention"))
-  and (.notes | contains("pilot_handoff_ready is false"))
   and .current_roadmap_track == "access_recovery"
   and .access_recovery_pilot_handoff_ready == false
-  and .access_recovery_track.status == "pilot-handoff-not-ready"
+  and .access_recovery_track.status == "trusted-provenance-required"
   and .access_recovery_track.ready == false
   and .access_recovery_track.pilot_handoff_ready == false
   and .access_recovery_track.needs_attention == true
   and .access_recovery_track.evidence_scope == "real_helper_https"
-  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == true
-  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "pass"
-  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "fail"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == false
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.trusted_pilot_receipt_ready == true
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_ready == false
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_ready == true
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.pilot_handoff_criteria_bundled_child_evidence_semantic_ok == true
+  and (.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.notes | contains("receipt readiness fields disagree"))
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.handoff_authority == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.authority_level == "pilot_handoff"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.integrity_only == false
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.receipt_authority_ready == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.readiness_fields_consistent == false
   and .access_recovery_track.trusted_verifier_binding.ok == true
-  and .access_recovery_track.trusted_verifier_ready == true
-  and .access_recovery_track.trusted_pilot_receipt_ready == true
-  and .access_recovery_track.trusted_verifier_receipt_valid == true
+  and .access_recovery_track.trusted_verifier_ready == false
+  and .access_recovery_track.trusted_pilot_receipt_ready == false
+  and .access_recovery_track.trusted_verifier_receipt_valid == false
   and .access_recovery_track.trusted_verifier_receipt_valid_is_handoff_ready == false
   and .access_recovery_track.verifier_pilot_handoff_ready == false
   and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
-  and .access_recovery_track.preferred_operator_next_action.id == "trusted_pilot_evidence_verify"
+  and .access_recovery_track.preferred_operator_next_action.id == "real_helper_https_evidence"
 ' "$TMP_DIR/roadmap_progress_access_recovery_false_handoff_verifier_summary.json" >/dev/null; then
   echo "Access Recovery false handoff verifier summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_false_handoff_verifier_summary.json"
@@ -2255,7 +2272,7 @@ echo "[roadmap-progress-report] Access Recovery incompatible verifier receipt sc
 ACCESS_BRIDGE_INCOMPATIBLE_MAJOR_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_verify_incompatible_major_summary.json"
 jq '
   .schema.major = 2
-  | .schema.minor = 4
+  | .schema.minor = 5
   | .pilot_handoff_ready = true
   | .trusted_pilot_receipt_ready = true
   | .pilot_handoff_criteria.ready = true
@@ -2461,8 +2478,13 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == true
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "pass"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.handoff_authority == true
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.authority_level == "pilot_handoff"
+  and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.integrity_only == false
   and .access_recovery_track.trusted_verifier_binding.ok == false
   and .access_recovery_track.trusted_verifier_ready == false
+  and .access_recovery_track.trusted_verifier_receipt_valid == false
+  and .access_recovery_track.trusted_verifier_receipt_valid_is_handoff_ready == false
   and .access_recovery_track.recommended_next_action.id == "real_helper_https_evidence"
 ' "$TMP_DIR/roadmap_progress_access_recovery_local_forged_verifier_summary.json" >/dev/null; then
   echo "Access Recovery forged local verifier summary mismatch"

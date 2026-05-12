@@ -91,7 +91,7 @@ Purpose:
   3. refresh roadmap readiness against that verifier receipt
 
 The trusted verifier receipt must use
-access_bridge_pilot_evidence_bundle_verify_summary schema major 1, minor >= 4.
+access_bridge_pilot_evidence_bundle_verify_summary schema major 1, minor >= 5.
 
 Use --plan-only 1 to run the same strict preflight validation and emit the
 planned child commands/artifacts without invoking host-install, bundle,
@@ -503,11 +503,18 @@ validate_trusted_verifier_receipt() {
       [
         if (.schema.id // "") != "access_bridge_pilot_evidence_bundle_verify_summary" then "schema id is not access_bridge_pilot_evidence_bundle_verify_summary" else empty end,
         if (.schema.major // 0) != 1 then "schema major is not 1" else empty end,
-        if (.schema.minor // -1) < 4 then "schema minor is too old for trusted pilot receipt freshness semantics" else empty end,
+        if (.schema.minor // -1) < 5 then "schema minor is too old for explicit trusted pilot handoff authority semantics" else empty end,
         if (.status // "") != "pass" then "receipt status is not pass" else empty end,
         if (.rc // -1) != 0 then "receipt rc is not 0" else empty end,
+        if (.handoff_authority // false) != true then "handoff_authority is not true" else empty end,
+        if (.authority_level // "") != "pilot_handoff" then "authority_level is not pilot_handoff" else empty end,
+        if ((.integrity_only | type) != "boolean") or (.integrity_only != false) then "integrity_only is not false" else empty end,
         if (.pilot_handoff_ready // false) != true then "pilot_handoff_ready is not true" else empty end,
         if (.trusted_pilot_receipt_ready // false) != true then "trusted_pilot_receipt_ready is not true" else empty end,
+        if (.handoff_authority // null) != (.pilot_handoff_ready // null) then "handoff_authority disagrees with pilot_handoff_ready" else empty end,
+        if (.trusted_pilot_receipt_ready // null) != (.pilot_handoff_ready // null) then "trusted_pilot_receipt_ready disagrees with pilot_handoff_ready" else empty end,
+        if (.pilot_handoff_criteria.ready // null) != (.pilot_handoff_ready // null) then "pilot_handoff_criteria.ready disagrees with pilot_handoff_ready" else empty end,
+        if (.pilot_handoff_criteria.trusted_pilot_receipt_ready // null) != (.pilot_handoff_ready // null) then "pilot_handoff_criteria.trusted_pilot_receipt_ready disagrees with pilot_handoff_ready" else empty end,
         if (.pilot_handoff_criteria.ready // false) != true then "pilot_handoff_criteria.ready is not true" else empty end,
         if (.pilot_handoff_criteria.trusted_pilot_receipt_ready // false) != true then "pilot_handoff_criteria.trusted_pilot_receipt_ready is not true" else empty end,
         if (.pilot_handoff_criteria.require_trusted_provenance // false) != true then "trusted provenance was not required" else empty end,
@@ -845,6 +852,7 @@ write_summary() {
   local notes="$4"
   local generated_at_utc
   local host_install_obj bundle_obj verify_obj roadmap_obj pilot_ready roadmap_ready handoff_complete status_rollup_complete evidence_scope verifier_scope
+  local verifier_authority_level verifier_integrity_only
   local code_present_json code_file_present_json
   local roadmap_refresh_json
   local plan_only_json
@@ -857,7 +865,21 @@ write_summary() {
   else
     roadmap_obj="null"
   fi
-  pilot_ready="$(printf '%s\n' "$verify_obj" | jq -r 'if type == "object" then (.pilot_handoff_ready // false | tostring) else "false" end')"
+  pilot_ready="$(printf '%s\n' "$verify_obj" | jq -r '
+    if type == "object" then
+      (
+        .handoff_authority == true
+        and (.authority_level // "") == "pilot_handoff"
+        and .integrity_only == false
+        and .pilot_handoff_ready == true
+        and .trusted_pilot_receipt_ready == true
+        and .pilot_handoff_criteria.ready == true
+        and .pilot_handoff_criteria.trusted_pilot_receipt_ready == true
+      ) | tostring
+    else "false" end
+  ')"
+  verifier_authority_level="$(printf '%s\n' "$verify_obj" | jq -r 'if type == "object" then (.authority_level // "") else "" end')"
+  verifier_integrity_only="$(printf '%s\n' "$verify_obj" | jq -r 'if type == "object" and (.integrity_only | type) == "boolean" then (.integrity_only | tostring) else "false" end')"
   roadmap_ready="$(printf '%s\n' "$roadmap_obj" | jq -r 'if type == "object" then (.access_recovery_pilot_handoff_ready // false | tostring) else "false" end')"
   if [[ "$pilot_ready" == "true" ]]; then
     handoff_complete="true"
@@ -923,6 +945,7 @@ write_summary() {
     --arg report_md "$report_md" \
     --arg evidence_scope "$evidence_scope" \
     --arg verifier_scope "$verifier_scope" \
+    --arg verifier_authority_level "$verifier_authority_level" \
     --arg require_mtls "$require_mtls" \
     --argjson code_present "$code_present_json" \
     --argjson code_file_present "$code_file_present_json" \
@@ -931,6 +954,7 @@ write_summary() {
     --argjson roadmap_ready "$roadmap_ready" \
     --argjson handoff_complete "$handoff_complete" \
     --argjson status_rollup_complete "$status_rollup_complete" \
+    --argjson verifier_integrity_only "$verifier_integrity_only" \
     --argjson roadmap_refresh "$roadmap_refresh_json" \
     --argjson host_install_check "$host_install_obj" \
     --argjson bundle "$bundle_obj" \
@@ -982,9 +1006,12 @@ write_summary() {
         verifier_evidence_scope: (if $verifier_scope == "" then null else $verifier_scope end),
         verifier_ready: $pilot_handoff_ready,
         handoff_authority_ready: $pilot_handoff_ready,
+        verifier_authority_level: (if $verifier_authority_level == "" then null else $verifier_authority_level end),
+        verifier_integrity_only: $verifier_integrity_only,
         roadmap_ready: $roadmap_ready,
         roadmap_status_synced: $status_rollup_complete,
         handoff_complete: $handoff_complete,
+        handoff_authority_complete: $pilot_handoff_ready,
         status_rollup_complete: $status_rollup_complete,
         trusted_verifier_pilot_handoff_ready: $pilot_handoff_ready,
         roadmap_access_recovery_pilot_handoff_ready: $roadmap_ready

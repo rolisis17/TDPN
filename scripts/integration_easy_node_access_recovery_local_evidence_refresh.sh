@@ -126,9 +126,14 @@ fi
 VERIFY_SUMMARY="$(jq -r '.artifacts.pilot_verify_summary_json' "$REAL_SUMMARY")"
 if ! jq -e '
   .schema.id == "access_bridge_pilot_evidence_bundle_verify_summary"
+  and .schema.minor >= 5
   and .status == "pass"
   and .trusted_provenance.required == false
   and .pilot_handoff_ready == false
+  and .handoff_authority == false
+  and .authority_level == "integrity_only"
+  and .integrity_only == true
+  and ((.status_meaning // "") | contains("not pilot handoff authority"))
   and .inputs.summary_json != ""
   and .checks.summary_contract.status == "pass"
 ' "$VERIFY_SUMMARY" >/dev/null; then
@@ -162,6 +167,65 @@ if ! jq -e '
 ' "$ROADMAP_SUMMARY" >/dev/null; then
   echo "easy node access recovery local evidence refresh integration failed: roadmap local rehearsal summary mismatch"
   cat "$ROADMAP_SUMMARY"
+  exit 1
+fi
+
+PROTECTED_CANONICAL="$TMP_DIR/protected-canonical"
+PROTECTED_VERIFY="$PROTECTED_CANONICAL/access_bridge_pilot_evidence_bundle_verify_summary.json"
+mkdir -p "$PROTECTED_CANONICAL"
+cat >"$PROTECTED_VERIFY" <<'JSON_PROTECTED_VERIFY'
+{
+  "schema": {
+    "id": "access_bridge_pilot_evidence_bundle_verify_summary",
+    "major": 1,
+    "minor": 5
+  },
+  "status": "pass",
+  "rc": 0,
+  "pilot_handoff_ready": true,
+  "trusted_pilot_receipt_ready": true,
+  "handoff_authority": true,
+  "authority_level": "pilot_handoff",
+  "integrity_only": false,
+  "trusted_provenance": {
+    "evidence_scope": "real_helper_https"
+  }
+}
+JSON_PROTECTED_VERIFY
+protected_sha_before="$(sha256sum "$PROTECTED_VERIFY" | awk '{print $1}')"
+PROTECTED_REPORTS="$TMP_DIR/protected-refresh"
+PROTECTED_SUMMARY="$TMP_DIR/protected-refresh-summary.json"
+PROTECTED_PORT="$((20120 + (RANDOM % 200)))"
+set +e
+bash ./scripts/access_recovery_local_evidence_refresh.sh \
+  --reports-dir "$PROTECTED_REPORTS" \
+  --port "$PROTECTED_PORT" \
+  --write-canonical 1 \
+  --canonical-dir "$PROTECTED_CANONICAL" \
+  --refresh-roadmap 0 \
+  --summary-json "$PROTECTED_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/protected-refresh.log" 2>&1
+protected_rc=$?
+set -e
+if [[ "$protected_rc" -ne 2 ]]; then
+  echo "expected protected canonical verifier overwrite to fail with rc 2, got $protected_rc"
+  cat "$TMP_DIR/protected-refresh.log"
+  [[ -f "$PROTECTED_SUMMARY" ]] && cat "$PROTECTED_SUMMARY"
+  exit 1
+fi
+if ! grep -Fq -- "would overwrite existing trusted pilot verifier receipt" "$TMP_DIR/protected-refresh.log"; then
+  echo "expected protected canonical overwrite diagnostic"
+  cat "$TMP_DIR/protected-refresh.log"
+  exit 1
+fi
+protected_sha_after="$(sha256sum "$PROTECTED_VERIFY" | awk '{print $1}')"
+if [[ "$protected_sha_after" != "$protected_sha_before" ]]; then
+  echo "protected canonical verifier receipt was modified"
+  exit 1
+fi
+if [[ "$(find "$PROTECTED_CANONICAL" -type f | wc -l | tr -d '[:space:]')" != "1" ]]; then
+  echo "protected canonical refresh wrote unexpected canonical files"
+  find "$PROTECTED_CANONICAL" -type f -print
   exit 1
 fi
 

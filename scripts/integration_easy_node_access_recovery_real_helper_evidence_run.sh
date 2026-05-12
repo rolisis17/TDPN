@@ -213,7 +213,7 @@ pilot_handoff_ready="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_READY:-true}"
 trusted_provenance="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_TRUSTED:-true}"
 binding_mode="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_BINDING_MODE:-match}"
 identity_mode="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_IDENTITY_MODE:-match}"
-schema_minor="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR:-4}"
+schema_minor="${FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR:-5}"
 sha256_value() {
   sha256sum "$1" | awk '{print $1}'
 }
@@ -310,17 +310,22 @@ jq -n \
   --argjson schema_minor "$schema_minor" \
   --argjson pilot_handoff_ready "$pilot_handoff_ready" \
   --argjson trusted_provenance "$trusted_provenance" \
-  '{
+  '($pilot_handoff_ready and $trusted_provenance) as $authority_ready
+  | {
     version: 1,
     schema: {"id": "access_bridge_pilot_evidence_bundle_verify_summary", "major": 1, "minor": $schema_minor},
     generated_at_utc: $generated_at_utc,
     status: "pass",
     rc: 0,
-    pilot_handoff_ready: $pilot_handoff_ready,
-    trusted_pilot_receipt_ready: ($pilot_handoff_ready and $trusted_provenance),
+    pilot_handoff_ready: $authority_ready,
+    trusted_pilot_receipt_ready: $authority_ready,
+    handoff_authority: $authority_ready,
+    authority_level: (if $authority_ready then "pilot_handoff" else "trusted_non_handoff" end),
+    integrity_only: ($authority_ready | not),
+    status_meaning: (if $authority_ready then "trusted pilot handoff authority" else "trusted verification did not satisfy pilot handoff criteria; not pilot handoff authority" end),
     pilot_handoff_criteria: {
-      ready: ($pilot_handoff_ready and $trusted_provenance),
-      trusted_pilot_receipt_ready: ($pilot_handoff_ready and $trusted_provenance),
+      ready: $authority_ready,
+      trusted_pilot_receipt_ready: $authority_ready,
       require_trusted_provenance: true,
       provenance_checked: true,
       provenance_trusted: $trusted_provenance,
@@ -594,6 +599,7 @@ done
 
 echo "[easy-node-access-recovery-real-helper-evidence-run] plan-only validates and emits planned commands without invoking children"
 : >"$CAPTURE"
+set +e
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
 ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
 ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
@@ -1167,6 +1173,7 @@ for demo_artifact_case in "${demo_artifact_cases[@]}"; do
 done
 
 : >"$CAPTURE"
+set +e
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
 ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
 ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
@@ -1187,6 +1194,17 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --roadmap-refresh 0 \
   --summary-json "$TMP_DIR/public-ipv6-summary.json" \
   --print-summary-json 0
+public_ipv6_rc=$?
+set -e
+if [[ "$public_ipv6_rc" -ne 0 ]]; then
+  echo "expected public IPv6 real-helper URL to pass, got rc $public_ipv6_rc"
+  [[ -f "$TMP_DIR/public-ipv6-summary.json" ]] && cat "$TMP_DIR/public-ipv6-summary.json"
+  if [[ -d "$REPORTS_DIR" ]]; then
+    find "$REPORTS_DIR" -maxdepth 1 -name 'access_bridge_pilot_evidence_verify_*.json' -print -exec cat {} \;
+  fi
+  cat "$CAPTURE"
+  exit 1
+fi
 if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
   echo "expected public IPv6 real-helper URL to invoke host-check, bundle, and verify"
   cat "$CAPTURE"
@@ -1374,12 +1392,17 @@ jq -e '
   and .mode.evidence_status == "collected"
   and .inputs.host_install_evidence_mode == "installed-host"
   and .child_summaries.host_install_check.status == "pass"
-  and .child_summaries.verifier.schema.minor == 4
+  and .child_summaries.verifier.schema.minor == 5
+  and .child_summaries.verifier.handoff_authority == true
+  and .child_summaries.verifier.authority_level == "pilot_handoff"
+  and .child_summaries.verifier.integrity_only == false
   and (.artifacts.bundle_service_smoke_summary_json | endswith("/bundle/access_bridge_service_smoke_summary.json"))
   and (.artifacts.bundle_deployment_evidence_summary_json | endswith("/bundle/access_bridge_deployment_evidence_summary.json"))
   and (.artifacts.bundle_host_install_check_summary_json | endswith("/bundle/access_bridge_host_install_check_summary.json"))
   and .readiness.verifier_ready == true
   and .readiness.handoff_authority_ready == true
+  and .readiness.verifier_authority_level == "pilot_handoff"
+  and .readiness.verifier_integrity_only == false
   and .readiness.roadmap_ready == true
   and .readiness.roadmap_status_synced == true
   and .readiness.handoff_complete == true
@@ -1428,7 +1451,7 @@ if ! grep -Fq -- "Trusted verifier receipt did not prove current real helper HTT
   cat "$TMP_DIR/verifier-schema-minor-3-summary.json"
   exit 1
 fi
-if ! grep -Fq -- "schema minor is too old for trusted pilot receipt freshness semantics" "$TMP_DIR/verifier-schema-minor-3.log"; then
+if ! grep -Fq -- "schema minor is too old for explicit trusted pilot handoff authority semantics" "$TMP_DIR/verifier-schema-minor-3.log"; then
   echo "expected verifier schema minor floor validation error"
   cat "$TMP_DIR/verifier-schema-minor-3.log"
   exit 1
@@ -1577,7 +1600,7 @@ if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
   cat "$CAPTURE"
   exit 1
 fi
-if ! grep -Fq -- "Trusted verifier receipt did not prove current real helper HTTPS evidence binding" "$TMP_DIR/verifier-untrusted-summary.json"; then
+if ! grep -Fq -- "Trusted verifier receipt did not mark pilot_handoff_ready=true" "$TMP_DIR/verifier-untrusted-summary.json"; then
   echo "expected untrusted verifier failure summary note"
   cat "$TMP_DIR/verifier-untrusted-summary.json"
   exit 1

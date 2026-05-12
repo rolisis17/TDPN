@@ -2538,7 +2538,7 @@ access_recovery_verifier_evidence_json() {
       def pass_status($path):
         (($path // "") | tostring | ascii_downcase) == "pass";
       def schema_minor_ready:
-        ((.schema.minor | type) == "number" and .schema.minor >= 4);
+        ((.schema.minor | type) == "number" and .schema.minor >= 5);
       def schema_major_ready:
         ((.schema.major | type) == "number" and .schema.major == 1);
       def schema_version_ready:
@@ -2566,6 +2566,15 @@ access_recovery_verifier_evidence_json() {
         and ((.trusted_provenance.summary_evidence_scope // "") == "real_helper_https")
         and ((.inputs.trust_store // "") != "")
         and ((.inputs.public_key_file // null) == null);
+      def receipt_authority_ready:
+        (.handoff_authority == true)
+        and ((.authority_level // "") == "pilot_handoff")
+        and (.integrity_only == false);
+      def readiness_fields_consistent:
+        (.pilot_handoff_ready == .trusted_pilot_receipt_ready)
+        and (.pilot_handoff_ready == .pilot_handoff_criteria.ready)
+        and (.pilot_handoff_ready == .pilot_handoff_criteria.trusted_pilot_receipt_ready)
+        and (.pilot_handoff_ready == .handoff_authority);
       def handoff_identity_org_ready:
         (.pilot_handoff_criteria.source_helper_id_present == true)
         and (.pilot_handoff_criteria.source_organization_id_present == true)
@@ -2580,6 +2589,8 @@ access_recovery_verifier_evidence_json() {
         and (.evidence_freshness.ok == true);
       def trusted_pilot_receipt_ready:
         schema_version_ready
+        and receipt_authority_ready
+        and readiness_fields_consistent
         and (.inputs.allow_dev_trust_store != true)
         and (verifier_receipt_has_dev_material | not)
         and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true)
@@ -2641,7 +2652,9 @@ access_recovery_verifier_evidence_json() {
           notes: (
             if $valid_contract and $summary_stale then "Access bridge pilot evidence verifier summary is stale or has untrusted freshness metadata"
             elif $valid_contract and (schema_major_ready | not) then "Access bridge pilot evidence verifier receipt schema major is incompatible with pilot handoff readiness"
-            elif $valid_contract and (schema_minor_ready | not) then "Access bridge pilot evidence verifier receipt is from an old schema that cannot prove pilot handoff readiness"
+            elif $valid_contract and (schema_minor_ready | not) then "Access bridge pilot evidence verifier receipt is from an old schema that lacks explicit handoff authority fields"
+            elif $valid_contract and (readiness_fields_consistent | not) then "Access bridge pilot evidence verifier receipt readiness fields disagree; rerun verifier"
+            elif $valid_contract and (receipt_authority_ready | not) then "Access bridge pilot evidence verifier receipt is not pilot handoff authority"
             elif $valid_contract and (.inputs.allow_dev_trust_store == true) then "Access bridge pilot evidence verifier used a diagnostic dev trust-store override that cannot prove pilot handoff readiness"
             elif $valid_contract and verifier_receipt_has_dev_material then "Access bridge pilot evidence verifier receipt contains demo trust-store paths or copied demo identity material"
             elif $valid_contract and (generated_at_ready | not) then "Access bridge pilot evidence verifier receipt is missing generated_at_utc"
@@ -2669,6 +2682,12 @@ access_recovery_verifier_evidence_json() {
             manifest_status: str_or_null(.checks.manifest.status),
             provenance_enabled: enabled(.checks.provenance.enabled),
             provenance_status: str_or_null(.checks.provenance.status),
+            handoff_authority: (if (.handoff_authority | type) == "boolean" then .handoff_authority else null end),
+            authority_level: str_or_null(.authority_level),
+            integrity_only: (if (.integrity_only | type) == "boolean" then .integrity_only else null end),
+            status_meaning: str_or_null(.status_meaning),
+            readiness_fields_consistent: readiness_fields_consistent,
+            receipt_authority_ready: receipt_authority_ready,
             trusted_provenance_required: (.trusted_provenance.required // null),
             trusted_provenance_checked: (.trusted_provenance.checked // null),
             trusted_provenance_trusted: (.trusted_provenance.trusted // null),
@@ -3069,6 +3088,11 @@ access_recovery_track_json_from_evidence() {
         and ($bundle_verify.available == true)
         and ($bundle_verify.status == "pass")
         and ($bundle_verify.semantic_ok == true)
+        and ($bundle_verify.details.handoff_authority == true)
+        and (($bundle_verify.details.authority_level // "") == "pilot_handoff")
+        and ($bundle_verify.details.integrity_only == false)
+        and ($bundle_verify.details.receipt_authority_ready == true)
+        and ($bundle_verify.details.readiness_fields_consistent == true)
         and ($bundle_verify.details.trusted_provenance_required == true)
         and ($bundle_verify.details.trusted_provenance_checked == true)
         and ($bundle_verify.details.trusted_provenance_trusted == true)
@@ -3087,6 +3111,11 @@ access_recovery_track_json_from_evidence() {
       def verifier_pilot_handoff_ready:
         ($bundle_verify.available == true)
         and ($bundle_verify.semantic_ok == true)
+        and ($bundle_verify.details.handoff_authority == true)
+        and (($bundle_verify.details.authority_level // "") == "pilot_handoff")
+        and ($bundle_verify.details.integrity_only == false)
+        and ($bundle_verify.details.receipt_authority_ready == true)
+        and ($bundle_verify.details.readiness_fields_consistent == true)
         and ($bundle_verify.details.pilot_handoff_ready == true)
         and ($bundle_verify.details.tar_sha256_checked == true)
         and ($bundle_verify.details.pilot_handoff_criteria_ready == true)
@@ -3213,7 +3242,7 @@ access_recovery_track_json_from_evidence() {
           trusted_verifier_ready: trusted_pilot_receipt_ready,
           trusted_pilot_receipt_ready: trusted_pilot_receipt_ready,
           trusted_verifier_receipt_valid: trusted_pilot_receipt_ready,
-          trusted_verifier_receipt_valid_is_handoff_ready: false,
+          trusted_verifier_receipt_valid_is_handoff_ready: pilot_handoff_ready,
           verifier_pilot_handoff_ready: verifier_pilot_handoff_ready,
           evidence_host_policy: {
             base_url: smoke_base_url,
