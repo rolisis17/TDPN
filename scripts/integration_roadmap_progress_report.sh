@@ -6153,7 +6153,16 @@ if ! jq -e '
     and .missing_evidence_action_kind == "docker-readiness"
     and .missing_evidence_action_kinds == ["docker-readiness"]
   ))
-  and ((.next_actions // []) | any(.id == "real_wg_privileged_matrix" and .command == "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"))
+  and ((.next_actions // []) | any(
+    .id == "real_wg_privileged_matrix"
+    and .command == "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"
+    and .requires_real_hosts == false
+    and .local_pack_only == false
+    and .missing_evidence_family == "real-wg-privileged"
+    and .missing_evidence_families == ["real-wg-privileged"]
+    and .missing_evidence_action_kind == "local-root-real-wg"
+    and .missing_evidence_action_kinds == ["local-root-real-wg"]
+  ))
   and ($docker_idx != null)
   and ($pack_idx == null or $docker_idx < $pack_idx)
 ' "$TMP_DIR/roadmap_progress_optional_fallback_summary.json" >/dev/null; then

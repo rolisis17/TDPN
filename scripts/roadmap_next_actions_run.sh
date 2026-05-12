@@ -112,13 +112,53 @@ trim() {
   printf '%s' "$value"
 }
 
+path_is_cross_platform_absolute_01() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" ]]; then
+    printf '0'
+    return
+  fi
+  if [[ "$path" == /* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$path" =~ ^[A-Za-z]:[\\/].* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$path" =~ ^\\\\.* ]]; then
+    printf '1'
+    return
+  fi
+  if [[ "$path" == //* ]]; then
+    printf '1'
+    return
+  fi
+  printf '0'
+}
+
+normalize_cross_platform_path_separators() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if [[ "$path" =~ ^[A-Za-z]:[\\/].* ]] || [[ "$path" =~ ^\\\\.* ]] || [[ "$path" == //* ]]; then
+    printf '%s' "${path//\\//}"
+    return
+  fi
+  printf '%s' "$path"
+}
+
 abs_path() {
   local path
   path="$(trim "${1:-}")"
   if [[ -z "$path" ]]; then
     printf '%s' ""
-  elif [[ "$path" == /* ]]; then
-    printf '%s' "$path"
+  elif [[ "$(path_is_cross_platform_absolute_01 "$path")" == "1" ]]; then
+    printf '%s' "$(normalize_cross_platform_path_separators "$path")"
   else
     printf '%s' "$ROOT_DIR/$path"
   fi
@@ -2986,6 +3026,8 @@ fi
 after_exclude_suffix_filters_count="$(printf '%s\n' "$selected_actions_json" | jq -r 'length')"
 local_only_skipped_real_host_action_ids_json="[]"
 local_only_skipped_real_host_actions_count=0
+local_only_skipped_unclassified_action_ids_json="[]"
+local_only_skipped_unclassified_actions_count=0
 if [[ "$local_only" == "1" ]]; then
   local_only_skipped_real_host_action_ids_json="$(
     printf '%s\n' "$selected_actions_json" | jq -c '
@@ -2997,6 +3039,22 @@ if [[ "$local_only" == "1" ]]; then
       ]'
   )"
   local_only_skipped_real_host_actions_count="$(printf '%s\n' "$local_only_skipped_real_host_action_ids_json" | jq -r 'length')"
+  local_only_skipped_unclassified_action_ids_json="$(
+    printf '%s\n' "$selected_actions_json" | jq -c '
+      [
+        .[]
+        | select(
+            (
+              (.local_pack_only == true)
+              or (.requires_real_hosts == false)
+              or ((.requires_real_hosts == true) and (.local_pack_only != true))
+            ) | not
+          )
+        | ((.id // "") | tostring)
+        | select(length > 0)
+      ]'
+  )"
+  local_only_skipped_unclassified_actions_count="$(printf '%s\n' "$local_only_skipped_unclassified_action_ids_json" | jq -r 'length')"
   selected_actions_json="$(
     printf '%s\n' "$selected_actions_json" | jq -c '
       [
@@ -3779,6 +3837,8 @@ jq -n \
   --argjson after_local_only_filters_count "$after_local_only_filters_count" \
   --argjson local_only_skipped_real_host_actions_count "$local_only_skipped_real_host_actions_count" \
   --argjson local_only_skipped_real_host_action_ids "$local_only_skipped_real_host_action_ids_json" \
+  --argjson local_only_skipped_unclassified_actions_count "$local_only_skipped_unclassified_actions_count" \
+  --argjson local_only_skipped_unclassified_action_ids "$local_only_skipped_unclassified_action_ids_json" \
   --argjson before_dedupe_count "$before_dedupe_count" \
   --argjson deduped_actions_count "$deduped_actions_count" \
   --argjson deduped_exact_duplicate_count "$deduped_exact_duplicate_count" \
@@ -3895,6 +3955,8 @@ jq -n \
         after_local_only_filters_count: $after_local_only_filters_count,
         local_only_skipped_real_host_actions_count: $local_only_skipped_real_host_actions_count,
         local_only_skipped_real_host_action_ids: $local_only_skipped_real_host_action_ids,
+        local_only_skipped_unclassified_actions_count: $local_only_skipped_unclassified_actions_count,
+        local_only_skipped_unclassified_action_ids: $local_only_skipped_unclassified_action_ids,
         before_dedupe_count: $before_dedupe_count,
         deduped_actions_count: $deduped_actions_count,
         deduped_exact_duplicate_count: $deduped_exact_duplicate_count,

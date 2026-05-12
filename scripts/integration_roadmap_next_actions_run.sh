@@ -560,6 +560,16 @@ JSON
 }
 JSON
     ;;
+  real_wg_local_only_matrix)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"real_wg_privileged_matrix","label":"Linux root real-WG privileged matrix","command":"bash \"$PASS1\"","reason":"test-real-wg-local-root","requires_real_hosts":false,"local_pack_only":false,"missing_evidence_family":"real-wg-privileged","missing_evidence_action_kind":"local-root-real-wg"},
+    {"id":"real_helper_https_evidence","label":"Real helper HTTPS evidence","command":"bash \"$FAIL1\"","reason":"test-real-helper-required","requires_real_hosts":true,"local_pack_only":false}
+  ]
+}
+JSON
+    ;;
   local_pack_missing_live_prereq)
     cat >"$summary_json" <<JSON
 {
@@ -1167,12 +1177,49 @@ if ! jq -e '
   and .roadmap.selection_accounting.after_local_only_filters_count == 2
   and .roadmap.selection_accounting.local_only_skipped_real_host_actions_count == 1
   and .roadmap.selection_accounting.local_only_skipped_real_host_action_ids == ["real_host_action"]
+  and .roadmap.selection_accounting.local_only_skipped_unclassified_actions_count == 1
+  and .roadmap.selection_accounting.local_only_skipped_unclassified_action_ids == ["unknown_metadata_action"]
   and .summary.actions_executed == 2
   and .summary.pass == 2
   and .summary.fail == 0
 ' "$SUMMARY_LOCAL_ONLY" >/dev/null; then
   echo "local-only summary mismatch"
   cat "$SUMMARY_LOCAL_ONLY"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] local-only keeps real-WG root matrix and skips real-host helpers"
+SUMMARY_REAL_WG_LOCAL_ONLY="$TMP_DIR/summary_real_wg_local_only.json"
+REPORTS_REAL_WG_LOCAL_ONLY="$TMP_DIR/reports_real_wg_local_only"
+ROADMAP_NEXT_ACTIONS_SCENARIO=real_wg_local_only_matrix \
+PASS1="$PASS1" FAIL1="$FAIL1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_REAL_WG_LOCAL_ONLY" \
+  --summary-json "$SUMMARY_REAL_WG_LOCAL_ONLY" \
+  --local-only 1 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.local_only == true
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["real_wg_privileged_matrix"]
+  and .roadmap.selection_accounting.non_empty_command_count == 2
+  and .roadmap.selection_accounting.after_local_only_filters_count == 1
+  and .roadmap.selection_accounting.local_only_skipped_real_host_actions_count == 1
+  and .roadmap.selection_accounting.local_only_skipped_real_host_action_ids == ["real_helper_https_evidence"]
+  and .roadmap.selection_accounting.local_only_skipped_unclassified_actions_count == 0
+  and .roadmap.selection_accounting.local_only_skipped_unclassified_action_ids == []
+  and .actions[0].id == "real_wg_privileged_matrix"
+  and .actions[0].status == "pass"
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+' "$SUMMARY_REAL_WG_LOCAL_ONLY" >/dev/null; then
+  echo "real-WG local-only summary mismatch"
+  cat "$SUMMARY_REAL_WG_LOCAL_ONLY"
   exit 1
 fi
 

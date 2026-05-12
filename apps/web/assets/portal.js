@@ -34,10 +34,6 @@ const clientReadinessEl = byId("client_readiness");
 const clientReadinessLineEl = byId("client_readiness_line");
 const clientReadinessStatusEl = byId("client_readiness_status");
 const clientReadinessGuidanceEl = byId("client_readiness_guidance");
-const serverReadinessEl = byId("server_readiness");
-const serverReadinessLineEl = byId("server_readiness_line");
-const serverApplicationStatusEl = byId("server_application_status");
-const serverApplicationGuidanceEl = byId("server_application_guidance");
 const bootstrapTrustStatusEl = byId("bootstrap_trust_status");
 const bootstrapTrustStatusLineEl = byId("bootstrap_trust_status_line");
 const bootstrapTrustStateEl = byId("bootstrap_trust_state");
@@ -97,7 +93,6 @@ const connectProdProfileEl = byId("connect_prod_profile");
 const connectInstallRouteEl = byId("connect_install_route");
 const onboardingStepSigninEl = document.getElementById("onboarding_step_signin");
 const onboardingStepClientEl = document.getElementById("onboarding_step_client");
-const onboardingStepServerEl = document.getElementById("onboarding_step_server");
 const actionButtons = Array.from(document.querySelectorAll(".actions button"));
 const SERVER_ONLY_ROLES = new Set(["server", "server_only"]);
 const CLIENT_REGISTRATION_TRUST_DRIFT_STATUS_KEYS = new Set([
@@ -2914,46 +2909,6 @@ function parsePublicReadiness(payload) {
   };
 }
 
-function parseServerApplicationStatus(payload) {
-  const value =
-    payload?.application?.status ||
-    payload?.readiness?.operator_application_status ||
-    payload?.readiness?.operatorApplicationStatus ||
-    payload?.status;
-  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : "";
-}
-
-function setServerApplicationStatus(status, guidance = "") {
-  const normalized = typeof status === "string" ? status.trim().toLowerCase() : "";
-  let kind = "warn";
-  let label = "Not checked";
-  let detail = guidance || "Connect wallet first, then apply if you want this device reviewed for server mode.";
-  if (normalized === "approved") {
-    kind = "good";
-    label = "Approved";
-    detail = guidance || "Server access is approved. This device can continue with server setup.";
-  } else if (normalized === "pending") {
-    label = "Pending approval";
-    detail = guidance || "Your server application is waiting for GPM review.";
-  } else if (normalized === "rejected") {
-    kind = "bad";
-    label = "Refused";
-    detail = guidance || "The server application was refused. Update details before applying again.";
-  } else if (normalized === "not_submitted") {
-    label = "Not applied";
-    detail = guidance || "Apply if you want this device reviewed for server mode.";
-  }
-  serverReadinessEl.dataset.kind = kind;
-  serverReadinessEl.dataset.state = normalized || "unknown";
-  serverReadinessLineEl.classList.remove("good", "warn", "bad");
-  serverReadinessLineEl.classList.add(kind);
-  serverApplicationStatusEl.textContent = label;
-  serverApplicationGuidanceEl.textContent = detail;
-  if (onboardingStepServerEl) {
-    setStepState(onboardingStepServerEl, normalized === "approved" ? "done" : normalized === "pending" ? "active" : "idle");
-  }
-}
-
 function setPublicReadiness(value) {
   publicReadiness = value || null;
   refreshClientReadiness();
@@ -3111,12 +3066,10 @@ function refreshOnboardingSteps() {
   if (!hasSession) {
     setStepState(onboardingStepSigninEl, "active");
     setStepState(onboardingStepClientEl, "blocked");
-    setStepState(onboardingStepServerEl, "blocked");
     return;
   }
 
   setStepState(onboardingStepSigninEl, "done");
-  setStepState(onboardingStepServerEl, "idle");
   const clientLaneRoleLocked = clientReadiness.state === "role_locked";
   if (!clientRegistered && !clientLaneRoleLocked) {
     setStepState(onboardingStepClientEl, "active");
@@ -3158,9 +3111,6 @@ function computePortalNextRecommendedAction() {
     return "Register Device.";
   }
 
-  if (!publicContributionStatusPayload) {
-    return "Run Contribution Status or Status.";
-  }
   return "Use Connect, Disconnect, or Status from the client workspace.";
 }
 
@@ -4315,31 +4265,6 @@ async function requestClientStatus() {
   return post("/v1/gpm/onboarding/client/status", request);
 }
 
-function publicServerSessionRequest(actionLabel) {
-  assertSessionFreshForAction(actionLabel, { requireToken: true });
-  const sessionToken = byId("session_token").value.trim();
-  const walletAddress = byId("wallet_address").value.trim();
-  return {
-    session_token: sessionToken,
-    wallet_address: walletAddress || undefined
-  };
-}
-
-async function requestServerStatus() {
-  return post("/v1/gpm/onboarding/server/status", publicServerSessionRequest("Server status"));
-}
-
-async function requestServerApply() {
-  const request = publicServerSessionRequest("Apply to run server");
-  const walletAddress = byId("wallet_address").value.trim();
-  if (!walletAddress) {
-    throw new Error("Connect wallet first so GPM can identify this server application.");
-  }
-  request.chain_operator_id = walletAddress;
-  request.server_label = `gpm-server-${walletAddress.slice(-8) || "device"}`;
-  return post("/v1/gpm/onboarding/operator/apply", request);
-}
-
 function publicContributionSessionRequest(actionLabel) {
   assertSessionFreshForAction(actionLabel, { requireToken: true });
   return {
@@ -4384,7 +4309,6 @@ function applyOnboardingOverviewPayload(payload) {
   applyClientRegistrationPayload(payload);
   applyBootstrapTrustStatusPayload(payload);
   setPublicReadiness(parsePublicReadiness(payload));
-  setServerApplicationStatus(parseServerApplicationStatus(payload));
 }
 
 async function requestOverview() {
@@ -4770,7 +4694,6 @@ byId("session_revoke_btn").addEventListener("click", () =>
     byId("session_token").value = "";
     byId("role").value = "client";
     setPublicReadiness(null);
-    setServerApplicationStatus("not_submitted", "Connect wallet first, then apply if you want this device reviewed for server mode.");
     clearPublicContributionState();
     persistPortalState();
     await refreshBootstrapTrustStatusBestEffort({ quiet: true });
@@ -4834,35 +4757,6 @@ byId("overview_status_btn").addEventListener("click", () =>
     },
     {
       successDetail: () => "Onboarding overview refreshed for the public client lane."
-    }
-  )
-);
-
-byId("apply_server_btn").addEventListener("click", () =>
-  run(
-    "server_apply",
-    async () => {
-      const result = await requestServerApply();
-      setServerApplicationStatus(parseServerApplicationStatus(result), "Server application sent for GPM review.");
-      return result;
-    },
-    {
-      successDetail: () => "Server application submitted. GPM must approve it before server mode is available."
-    }
-  )
-);
-
-byId("server_status_btn").addEventListener("click", () =>
-  run(
-    "server_status",
-    async () => {
-      const result = await requestServerStatus();
-      setServerApplicationStatus(parseServerApplicationStatus(result));
-      setPublicReadiness(parsePublicReadiness(result));
-      return result;
-    },
-    {
-      successDetail: () => "Server application status refreshed."
     }
   )
 );

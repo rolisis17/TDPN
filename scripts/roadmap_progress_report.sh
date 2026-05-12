@@ -13074,19 +13074,19 @@ next_actions_candidate_json="$(
   def access_recovery_placeholder_metadata($cmd):
     (($cmd // "") | ascii_upcase) as $ucmd
     | [
-      (if ($ucmd | test("(^|[^A-Z0-9_])(TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_TRUST_STORE)([^A-Z0-9_]|$)")) then "TRUST_STORE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])(TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_TRUST_STORE)([^A-Z0-9_-]|$)")) then "TRUST_STORE" else empty end),
       (if ($ucmd | contains("<TRUST-STORE>") or contains("<SET-TRUST-STORE>") or contains("REPLACE_WITH_TRUST_STORE") or contains("REPLACE_WITH_ACCESS_RECOVERY_TRUST_STORE")) then "TRUST_STORE" else empty end),
-      (if ($ucmd | test("(^|[^A-Z0-9_])HELPER_PUBLIC_DNS([^A-Z0-9_]|$)")) then "HELPER_PUBLIC_DNS" else empty end),
-      (if ($ucmd | test("(^|[^A-Z0-9_])HELPER_ID([^A-Z0-9_]|$)")) then "HELPER_ID" else empty end),
-      (if ($ucmd | test("(^|[^A-Z0-9_])PRIVATE_CODE_FILE([^A-Z0-9_]|$)")) then "PRIVATE_CODE_FILE" else empty end),
-      (if ($ucmd | test("(^|[^A-Z0-9_])BRIDGE_SERVICE_CONFIG([^A-Z0-9_]|$)")) then "BRIDGE_SERVICE_CONFIG" else empty end),
-      (if ($ucmd | test("(^|[^A-Z0-9_])BRIDGE_DEPLOY_PACK([^A-Z0-9_]|$)")) then "BRIDGE_DEPLOY_PACK" else empty end),
-      (if ($ucmd | test("(^|[^A-Z0-9_])PROVENANCE_PRIVATE_KEY_FILE([^A-Z0-9_]|$)")) then "PROVENANCE_PRIVATE_KEY_FILE" else empty end),
-      (if ($ucmd | test("(^|[^A-Z0-9_])ORG_ID([^A-Z0-9_]|$)")) then "ORG_ID" else empty end),
-      (if ($ucmd | test("(^|[^A-Z0-9_])ORG_NAME([^A-Z0-9_]|$)")) then "ORG_NAME" else empty end),
-      (if ($ucmd | test("(^|[^A-Z0-9_])MTLS_CA_FILE([^A-Z0-9_]|$)")) then "MTLS_CA_FILE" else empty end),
-      (if ($ucmd | test("(^|[^A-Z0-9_])MTLS_CLIENT_CERT_FILE([^A-Z0-9_]|$)")) then "MTLS_CLIENT_CERT_FILE" else empty end),
-      (if ($ucmd | test("(^|[^A-Z0-9_])MTLS_CLIENT_KEY_FILE([^A-Z0-9_]|$)")) then "MTLS_CLIENT_KEY_FILE" else empty end)
+      (if ($ucmd | test("(^|[^A-Z0-9_-])HELPER_PUBLIC_DNS([^A-Z0-9_-]|$)")) then "HELPER_PUBLIC_DNS" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])HELPER_ID([^A-Z0-9_-]|$)")) then "HELPER_ID" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])PRIVATE_CODE_FILE([^A-Z0-9_-]|$)")) then "PRIVATE_CODE_FILE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])BRIDGE_SERVICE_CONFIG([^A-Z0-9_-]|$)")) then "BRIDGE_SERVICE_CONFIG" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])BRIDGE_DEPLOY_PACK([^A-Z0-9_-]|$)")) then "BRIDGE_DEPLOY_PACK" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])PROVENANCE_PRIVATE_KEY_FILE([^A-Z0-9_-]|$)")) then "PROVENANCE_PRIVATE_KEY_FILE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ORG_ID([^A-Z0-9_-]|$)")) then "ORG_ID" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ORG_NAME([^A-Z0-9_-]|$)")) then "ORG_NAME" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CA_FILE([^A-Z0-9_-]|$)")) then "MTLS_CA_FILE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CLIENT_CERT_FILE([^A-Z0-9_-]|$)")) then "MTLS_CLIENT_CERT_FILE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CLIENT_KEY_FILE([^A-Z0-9_-]|$)")) then "MTLS_CLIENT_KEY_FILE" else empty end)
     ] | unique_strings_preserve_order as $keys
     | {
         placeholder_unresolved: (($keys | length) > 0),
@@ -13242,7 +13242,7 @@ next_actions_candidate_json="$(
       "label": "Linux root real-WG privileged matrix",
       command: (.summary.real_wg_privileged_gate.next_command // .summary.real_wg_privileged_gate.command // ""),
       reason: "one-host dataplane confidence gate"
-    } else empty end)
+    } + action_evidence_metadata(["real-wg-privileged"]; false; false; ["local-root-real-wg"]) else empty end)
   ]
   | unique_commands_preserve_order
 ' "$manual_validation_summary_json")"

@@ -147,20 +147,26 @@ done
 require_regex_marker "$PORTAL_HTML" 'Bootstrap trust status' "bootstrap-trust label"
 echo "[web-portal] bootstrap trust UI markers are present"
 
-# Public/admin split: public portal release builds may expose self-service
-# server application/status, but must not ship admin approval/refusal queues,
-# service lifecycle, audit, slashing, settlement, or payout controls.
+# Public/admin split: public portal release builds ship only the client
+# workspace plus signed-in contribution/reward status. Server hosting
+# applications, admin approval/refusal queues, service lifecycle, audit,
+# slashing, settlement, and payout controls belong outside apps/web.
 PUBLIC_ADMIN_FORBIDDEN_HTML_MARKERS=(
   'data-admin-only'
   'id="onboarding_step_operator"'
+  'id="onboarding_step_server"'
   'id="audit_recent_btn"'
   'id="operator"'
+  'id="server_application"'
+  'id="server_application_status"'
   'id="tab_server"'
   'id="panel_server"'
   'id="server_start_btn"'
   'id="server_stop_btn"'
   'id="server_restart_btn"'
   'id="status_btn_server"'
+  'id="server_status_btn"'
+  'id="apply_server_btn"'
   'id="apply_operator_btn"'
   'id="approve_operator_btn"'
   'id="reject_operator_btn"'
@@ -183,8 +189,16 @@ PUBLIC_ADMIN_FORBIDDEN_JS_MARKERS=(
   'byId("status_btn_server").addEventListener'
   'post("/v1/gpm/onboarding/operator/list'
   'post("/v1/gpm/onboarding/operator/approve'
+  'post("/v1/gpm/onboarding/operator/apply'
+  'post("/v1/gpm/onboarding/server/status'
   'post(`/v1/gpm/service/'
   '/v1/gpm/audit/recent'
+  'requestServerApply'
+  'requestServerStatus'
+  'publicServerSessionRequest'
+  'apply_server_btn'
+  'server_status_btn'
+  'server_application_status'
 )
 for marker in "${PUBLIC_ADMIN_FORBIDDEN_JS_MARKERS[@]}"; do
   if grep -qF "$marker" "$PORTAL_JS"; then
@@ -192,7 +206,7 @@ for marker in "${PUBLIC_ADMIN_FORBIDDEN_JS_MARKERS[@]}"; do
     exit 1
   fi
 done
-require_absent_regex_marker "$PORTAL_JS" 'admin_token|data-admin-only|PUBLIC_WEB_RELEASE|portalAdminMode|adminOnlyEls|requestOperatorList|requestOperatorApprove|requestServiceLifecycle|requestAuditRecent|operatorList|selected_application_updated_at|apply_operator_btn|approve_operator_btn|reject_operator_btn|audit_recent_btn|tab_server|panel_server|server_start_btn|server_stop_btn|server_restart_btn|status_btn_server' "public release admin/operator/server JS bundle"
+require_absent_regex_marker "$PORTAL_JS" 'admin_token|data-admin-only|PUBLIC_WEB_RELEASE|portalAdminMode|adminOnlyEls|requestOperatorList|requestOperatorApprove|requestServiceLifecycle|requestAuditRecent|operatorList|selected_application_updated_at|requestServerApply|requestServerStatus|publicServerSessionRequest|apply_operator_btn|approve_operator_btn|reject_operator_btn|audit_recent_btn|tab_server|panel_server|server_start_btn|server_stop_btn|server_restart_btn|status_btn_server|apply_server_btn|server_status_btn|server_application_status|/v1/gpm/onboarding/operator/apply|/v1/gpm/onboarding/server/status' "public release admin/operator/server JS bundle"
 require_absent_regex_marker "$GPM_CSS" 'admin-portal-mode|data-admin-only|operator-readiness|onboarding-checklist' "admin portal reveal/hide CSS"
 if grep -qF 'portal.html#operator' apps/web/index.html; then
   echo "web portal contract failed: public homepage must not deep-link to hidden operator lane"
@@ -200,18 +214,7 @@ if grep -qF 'portal.html#operator' apps/web/index.html; then
 fi
 echo "[web-portal] public admin/operator/server-management surface is absent"
 
-PUBLIC_SERVER_APPLICATION_MARKERS=(
-  'id="server_application"'
-  'id="apply_server_btn"'
-  'id="server_status_btn"'
-  'id="server_application_status"'
-)
-for marker in "${PUBLIC_SERVER_APPLICATION_MARKERS[@]}"; do
-  require_regex_marker "$PORTAL_HTML" "$marker" "public server application UI"
-done
-require_regex_marker "$PORTAL_JS" 'requestServerApply' "public server application handler"
-require_regex_marker "$PORTAL_JS" 'requestServerStatus' "public server status handler"
-echo "[web-portal] public self-service server application surface is present"
+echo "[web-portal] public self-service server application surface is absent"
 
 # Public contribution/reward parity markers: signed-in-user-only controls must stay
 # in the public portal while admin review/hold routes remain absent from the portal.

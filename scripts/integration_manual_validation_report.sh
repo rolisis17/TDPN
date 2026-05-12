@@ -422,7 +422,7 @@ if ! printf '%s\n' "$report_json_payload" | jq -e --arg summary_json "$SUMMARY_J
   and .summary.docker_rehearsal_gate.check_id == "three_machine_docker_readiness"
   and .summary.docker_rehearsal_gate.next_command == "./scripts/easy_node.sh three-machine-docker-readiness-record --path-profile balanced --soak-rounds 6 --soak-pause-sec 3 --print-summary-json 1"
   and (
-    if .summary.real_wg_privileged_gate.host.eligible then
+    if .summary.real_wg_privileged_gate.host.eligible or .summary.real_wg_privileged_gate.root_required then
       .summary.real_wg_privileged_gate.status == "pending"
       and .summary.real_wg_privileged_gate.ready == false
       and .summary.real_wg_privileged_gate.next_command == "sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record --print-summary-json 1"

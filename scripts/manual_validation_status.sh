@@ -2262,7 +2262,23 @@ elif [[ "$real_wg_host_root" != "1" ]]; then
 elif [[ "$real_wg_host_has_wg" != "1" || "$real_wg_host_has_ip" != "1" ]]; then
   real_wg_host_hint="requires wg and ip commands on host"
 fi
-if [[ "$real_wg_host_eligible" != "1" ]]; then
+if [[ "$real_wg_host_eligible" != "1" && "$real_wg_host_linux" == "1" && "$real_wg_host_root" != "1" ]]; then
+  real_wg_privileged_check_json="$(
+    printf '%s\n' "$real_wg_privileged_check_json" | jq -c --arg host_hint "$real_wg_host_hint" '
+      if (.status // "pending") == "pending" then
+        .notes = (
+          if (.notes // "" | length) > 0 then
+            .notes
+          else
+            $host_hint
+          end
+        )
+      else
+        .
+      end
+    '
+  )"
+elif [[ "$real_wg_host_eligible" != "1" ]]; then
   real_wg_privileged_check_json="$(
     printf '%s\n' "$real_wg_privileged_check_json" | jq -c --arg host_hint "$real_wg_host_hint" '
       if (.status // "pending") == "pending" then
@@ -2581,7 +2597,8 @@ combined_json="$(
               hint: $real_wg_host_hint
             }
           }
-          | .next_command = (if .status == "pass" or .status == "skip" then "" else .command end)
+          | .root_required = ((.host.linux == true) and (.host.root | not))
+          | .next_command = (if .status == "pass" or (.status == "skip" and (.root_required | not)) then "" else .command end)
           | .notes = (
               if (.notes | length) > 0 then
                 .notes
@@ -2591,7 +2608,7 @@ combined_json="$(
                 .notes
               end
             )
-          | .ready = (.status == "pass" or .status == "skip")
+          | .ready = (.status == "pass" or (.status == "skip" and (.root_required | not)))
         )
       | .summary.single_machine_ready = (.summary.local_gate.ready // false)
       | .summary.roadmap_stage = (
