@@ -786,6 +786,10 @@ campaign_subject_cli_provided="0"
 campaign_subject_canonical_cli_provided="0"
 campaign_subject_source=""
 campaign_start_local_stack="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_START_LOCAL_STACK:-}"
+campaign_start_local_stack_explicit="0"
+if [[ -n "${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_START_LOCAL_STACK:-}" ]]; then
+  campaign_start_local_stack_explicit="1"
+fi
 campaign_profiles="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_PROFILES:-}"
 campaign_live_evidence="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_LIVE_EVIDENCE:-}"
 campaign_live_evidence_udp_inject="${PROFILE_COMPARE_CAMPAIGN_SIGNOFF_CAMPAIGN_LIVE_EVIDENCE_UDP_INJECT:-}"
@@ -1163,7 +1167,13 @@ while [[ $# -gt 0 ]]; do
       ;;
     --campaign-start-local-stack)
       campaign_start_local_stack="${2:-}"
+      campaign_start_local_stack_explicit="1"
       shift 2
+      ;;
+    --campaign-start-local-stack=*)
+      campaign_start_local_stack="${1#--campaign-start-local-stack=}"
+      campaign_start_local_stack_explicit="1"
+      shift
       ;;
     --campaign-profiles)
       require_flag_value_or_die "$1" "${2:-}"
@@ -1604,6 +1614,9 @@ if [[ "$campaign_refresh_effective" == "1" && -z "$campaign_execution_mode_effec
 fi
 
 if [[ "$campaign_refresh_effective" == "1" && "$campaign_execution_mode_effective" == "docker" && -z "$campaign_start_local_stack_effective" ]]; then
+  campaign_start_local_stack_effective="0"
+fi
+if [[ "$campaign_refresh_effective" == "1" && "${EUID:-$(id -u)}" -ne 0 && -z "$campaign_start_local_stack_effective" && "$campaign_start_local_stack_explicit" != "1" ]]; then
   campaign_start_local_stack_effective="0"
 fi
 

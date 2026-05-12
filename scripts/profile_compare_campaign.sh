@@ -556,6 +556,7 @@ allow_insecure_remote_http="${PROFILE_COMPARE_CAMPAIGN_ALLOW_INSECURE_REMOTE_HTT
 live_evidence="${PROFILE_COMPARE_CAMPAIGN_LIVE_EVIDENCE:-0}"
 live_evidence_udp_inject="${PROFILE_COMPARE_CAMPAIGN_LIVE_EVIDENCE_UDP_INJECT:-}"
 start_local_stack="auto"
+start_local_stack_explicit="0"
 force_stack_reset="1"
 stack_strict_beta="0"
 base_port="${PROFILE_COMPARE_LOCAL_BASE_PORT:-19280}"
@@ -715,7 +716,13 @@ while [[ $# -gt 0 ]]; do
       ;;
     --start-local-stack)
       start_local_stack="${2:-}"
+      start_local_stack_explicit="1"
       shift 2
+      ;;
+    --start-local-stack=*)
+      start_local_stack="${1#--start-local-stack=}"
+      start_local_stack_explicit="1"
+      shift
       ;;
     --force-stack-reset)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
@@ -979,6 +986,11 @@ if [[ "$execution_mode_effective" == "docker" && "$start_local_stack_effective" 
   start_local_stack_effective="0"
   start_local_stack_adjusted="1"
   start_local_stack_adjustment_reason="docker mode disables implicit local stack bootstrap"
+fi
+if [[ "${EUID:-$(id -u)}" -ne 0 && "$start_local_stack_effective" == "auto" && "$start_local_stack_explicit" != "1" ]]; then
+  start_local_stack_effective="0"
+  start_local_stack_adjusted="1"
+  start_local_stack_adjustment_reason="non-root campaign wrapper disables implicit local stack bootstrap"
 fi
 
 explicit_remote_endpoints="0"

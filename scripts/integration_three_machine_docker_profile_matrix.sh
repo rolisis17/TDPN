@@ -320,6 +320,9 @@ if [[ ! -f "$matrix_fail_report" ]]; then
 fi
 if ! jq -e '
   .status == "fail"
+  and .schema.id == "three_machine_docker_profile_matrix_summary"
+  and .schema.major == 1
+  and .schema.minor == 0
   and .rc == 1
   and .summary.profiles_total == 2
   and .summary.profiles_pass == 1

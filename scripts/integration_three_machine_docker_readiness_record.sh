@@ -179,6 +179,7 @@ fi
 : >"$CAPTURE"
 
 echo "[three-machine-docker-readiness-record] manual validation malformed payload path"
+set +e
 FAKE_EASY_CAPTURE_FILE="$CAPTURE" \
 FAKE_MANUAL_REPORT_INVALID_SCHEMA="1" \
 THREE_MACHINE_DOCKER_READINESS_RECORD_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
@@ -187,9 +188,16 @@ THREE_MACHINE_DOCKER_READINESS_RECORD_EASY_NODE_SCRIPT="$FAKE_EASY_NODE" \
   --soak-rounds 2 \
   --soak-pause-sec 1 \
   --print-summary-json 1 >/tmp/integration_three_machine_docker_readiness_record_manual_invalid.log 2>&1
+manual_invalid_rc=$?
+set -e
 
-if ! rg -q 'three-machine-docker-readiness-record: status=pass' /tmp/integration_three_machine_docker_readiness_record_manual_invalid.log; then
-  echo "expected pass status in manual-validation malformed payload path"
+if [[ "$manual_invalid_rc" -eq 0 ]]; then
+  echo "expected non-zero status in manual-validation malformed payload path"
+  cat /tmp/integration_three_machine_docker_readiness_record_manual_invalid.log
+  exit 1
+fi
+if ! rg -q 'three-machine-docker-readiness-record: status=fail' /tmp/integration_three_machine_docker_readiness_record_manual_invalid.log; then
+  echo "expected fail status in manual-validation malformed payload path"
   cat /tmp/integration_three_machine_docker_readiness_record_manual_invalid.log
   exit 1
 fi
@@ -200,7 +208,10 @@ if [[ -z "$manual_invalid_summary_json_path" || ! -f "$manual_invalid_summary_js
   exit 1
 fi
 if ! jq -e '
-  .status == "pass"
+  .status == "fail"
+  and .rc == 1
+  and .rehearsal.status == "pass"
+  and .rehearsal.rc == 0
   and .manual_validation_report.status == "fail"
   and .manual_validation_report.readiness_status == ""
   and .manual_validation_report.next_action_check_id == ""

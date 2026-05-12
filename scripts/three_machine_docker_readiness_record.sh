@@ -53,6 +53,15 @@ abs_path() {
     printf '%s' ""
   elif [[ "$path" = /* ]]; then
     printf '%s' "$path"
+  elif [[ "$path" =~ ^[A-Za-z]:[\\/].* ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      cygpath -u "$path"
+    else
+      local drive="${path:0:1}"
+      local tail="${path:2}"
+      tail="${tail//\\//}"
+      printf '/mnt/%s/%s' "${drive,,}" "${tail#/}"
+    fi
   else
     printf '%s' "$ROOT_DIR/$path"
   fi
@@ -302,6 +311,8 @@ manual_validation_report_log="$log_dir/three_machine_docker_readiness_record_${t
 stage="rehearsal"
 rehearsal_status="fail"
 rehearsal_rc=1
+record_status="fail"
+record_rc=1
 notes=""
 rehearsal_json='{}'
 rehearsal_log_path=""
@@ -314,13 +325,15 @@ write_summary_json() {
   summary_tmp="$(mktemp "${summary_json}.tmp.XXXXXX")"
   jq -n \
     --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --arg status "$rehearsal_status" \
+    --arg status "$record_status" \
+    --arg rehearsal_status "$rehearsal_status" \
     --arg notes "$notes" \
     --arg command "$(print_cmd "$0" "${original_args[@]}")" \
     --arg summary_log "$summary_log" \
     --arg summary_json "$summary_json" \
     --arg rehearsal_summary_json "$rehearsal_summary_json" \
     --arg rehearsal_log "$rehearsal_log_path" \
+    --argjson record_rc "$record_rc" \
     --argjson rehearsal_rc "$rehearsal_rc" \
     --argjson rehearsal "$rehearsal_json" \
     --arg manual_validation_report_summary_json "$manual_validation_report_summary_json" \
@@ -339,11 +352,11 @@ write_summary_json() {
       },
       generated_at_utc: $generated_at_utc,
       status: $status,
-      rc: $rehearsal_rc,
+      rc: $record_rc,
       notes: $notes,
       command: $command,
       rehearsal: {
-        status: $status,
+        status: $rehearsal_status,
         rc: $rehearsal_rc,
         summary_json: $rehearsal_summary_json,
         summary_log: $rehearsal_log,
@@ -421,7 +434,7 @@ record_receipt() {
   record_cmd=(
     "$easy_node_script" manual-validation-record
     --check-id "three_machine_docker_readiness"
-    --status "$rehearsal_status"
+    --status "$record_status"
     --notes "$notes"
     --command "$(print_cmd "$0" "${original_args[@]}")"
     --show-json 0
@@ -453,6 +466,8 @@ if [[ -f "$rehearsal_summary_json" ]] && jq -e . "$rehearsal_summary_json" >/dev
 else
   notes="three-machine-docker-readiness did not emit a usable JSON summary"
   rehearsal_status="fail"
+  record_status="fail"
+  record_rc=1
   write_summary_json
   echo "three-machine-docker-readiness-record: status=fail"
   echo "summary_log: $summary_log"
@@ -477,8 +492,23 @@ else
   fi
 fi
 
+record_status="$rehearsal_status"
+record_rc="$rehearsal_rc"
+if [[ "$record_status" != "pass" && "$record_rc" -eq 0 ]]; then
+  record_rc=1
+fi
+
 write_summary_json
 refresh_manual_validation_report
+if [[ "$rehearsal_status" == "pass" && "$manual_validation_report_enabled" == "1" && "$manual_validation_report_status" != "ok" ]]; then
+  record_status="fail"
+  record_rc=1
+  if [[ -n "$notes" ]]; then
+    notes="$notes; manual-validation report failed or emitted incompatible summary"
+  else
+    notes="manual-validation report failed or emitted incompatible summary"
+  fi
+fi
 write_summary_json
 
 declare -a receipt_artifacts=()
@@ -494,14 +524,14 @@ if [[ "$record_result" == "1" ]]; then
   record_receipt "${receipt_artifacts[@]}"
 fi
 
-echo "three-machine-docker-readiness-record: status=$rehearsal_status"
+echo "three-machine-docker-readiness-record: status=$record_status"
 echo "summary_log: $summary_log"
 echo "summary_json: $summary_json"
 if [[ "$print_summary_json" == "1" ]]; then
   cat "$summary_json"
 fi
 
-if [[ "$rehearsal_status" != "pass" ]]; then
+if [[ "$record_status" != "pass" ]]; then
   exit 1
 fi
 exit 0

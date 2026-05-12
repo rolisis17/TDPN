@@ -1505,6 +1505,34 @@ if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_endpoint_pre
   exit 1
 fi
 
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  echo "[profile-compare-campaign-signoff] implicit local stack startup disabled on non-root refresh"
+  : >"$SIGNOFF_CAPTURE"
+  NON_ROOT_STACK_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_non_root_stack_default.json"
+  SIGNOFF_CAPTURE_FILE="$SIGNOFF_CAPTURE" \
+  PROFILE_COMPARE_CAMPAIGN_SCRIPT="$FAKE_CAMPAIGN" \
+  PROFILE_COMPARE_CAMPAIGN_CHECK_SCRIPT="$FAKE_CHECK" \
+  FAKE_CAMPAIGN_FAIL_UNLESS_DOCKER=0 \
+  FAKE_CHECK_RC=0 \
+  FAKE_CHECK_DECISION=GO \
+  ./scripts/profile_compare_campaign_signoff.sh \
+    --reports-dir "$TMP_DIR/reports_non_root_stack_default" \
+    --refresh-campaign 1 \
+    --summary-json "$NON_ROOT_STACK_SUMMARY" >/tmp/integration_profile_compare_campaign_signoff_non_root_stack_default.log 2>&1
+
+  if ! jq -e '.status == "ok" and .final_rc == 0 and .inputs.campaign_refresh_overrides.start_local_stack == null and .inputs.campaign_refresh_overrides_effective.start_local_stack == "0" and .stages.campaign.status == "pass" and .stages.campaign_check.status == "pass"' "$NON_ROOT_STACK_SUMMARY" >/dev/null 2>&1; then
+    echo "non-root stack-default summary JSON missing expected fields"
+    cat "$NON_ROOT_STACK_SUMMARY"
+    cat /tmp/integration_profile_compare_campaign_signoff_non_root_stack_default.log
+    exit 1
+  fi
+  if ! rg -q -- '--start-local-stack 0' "$SIGNOFF_CAPTURE"; then
+    echo "expected signoff refresh to forward --start-local-stack 0 on non-root hosts"
+    cat "$SIGNOFF_CAPTURE"
+    exit 1
+  fi
+fi
+
 echo "[profile-compare-campaign-signoff] automatic docker fallback when local refresh is root-blocked"
 : >"$SIGNOFF_CAPTURE"
 AUTO_FALLBACK_SUMMARY="$TMP_DIR/profile_compare_campaign_signoff_auto_fallback.json"

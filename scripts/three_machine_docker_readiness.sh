@@ -62,6 +62,15 @@ abs_path() {
     printf '%s' ""
   elif [[ "$path" == /* ]]; then
     printf '%s' "$path"
+  elif [[ "$path" =~ ^[A-Za-z]:[\\/].* ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      cygpath -u "$path"
+    else
+      local drive="${path:0:1}"
+      local tail="${path:2}"
+      tail="${tail//\\//}"
+      printf '/mnt/%s/%s' "${drive,,}" "${tail#/}"
+    fi
   else
     printf '%s' "$ROOT_DIR/$path"
   fi
@@ -1414,6 +1423,11 @@ jq -n \
   --argjson steps "$steps_json" \
   '{
     "version": 1,
+    "schema": {
+      "id": "three_machine_docker_readiness_summary",
+      "major": 1,
+      "minor": 0
+    },
     "generated_at_utc": $generated_at_utc,
     "status": $status,
     "rc": $rc,

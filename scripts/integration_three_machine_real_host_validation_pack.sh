@@ -60,7 +60,8 @@ write_readiness_summary() {
 write_readiness_record_summary() {
   local path="$1"
   local generated_at_utc="${2:-$FRESH_GENERATED_AT_UTC}"
-  jq -n --arg generated_at_utc "$generated_at_utc" '{
+  local manual_status="${3:-ok}"
+  jq -n --arg generated_at_utc "$generated_at_utc" --arg manual_status "$manual_status" '{
     version: 1,
     schema: { id: "three_machine_docker_readiness_record_summary" },
     generated_at_utc: $generated_at_utc,
@@ -74,6 +75,10 @@ write_readiness_record_summary() {
         status: "pass",
         rc: 0
       }
+    },
+    manual_validation_report: {
+      enabled: true,
+      status: $manual_status
     }
   }' >"$path"
 }
@@ -181,6 +186,36 @@ assert_jq "$RECORD_SUMMARY" '.rc == 0'
 assert_jq "$RECORD_SUMMARY" '.decision == "GO"'
 assert_jq "$RECORD_SUMMARY" '.required_groups.docker_readiness.usable == true'
 assert_jq "$RECORD_SUMMARY" '.artifacts | map(select(.id == "docker_readiness_record_summary" and .usable == true)) | length == 1'
+
+echo "[three-machine-real-host-validation-pack] docker readiness record with failed manual report is unusable"
+RECORD_MANUAL_FAIL_DIR="$TMP_DIR/record_manual_fail"
+mkdir -p "$RECORD_MANUAL_FAIL_DIR"
+write_matrix_summary "$RECORD_MANUAL_FAIL_DIR/three_machine_docker_profile_matrix_summary.json" "$FRESH_GENERATED_AT_UTC"
+write_readiness_record_summary "$RECORD_MANUAL_FAIL_DIR/three_machine_docker_readiness_record_20260507_120000.json" "$FRESH_GENERATED_AT_UTC" "fail"
+write_real_host_summary "$RECORD_MANUAL_FAIL_DIR/three_machine_prod_signoff_summary.json" "$FRESH_GENERATED_AT_UTC"
+
+RECORD_MANUAL_FAIL_SUMMARY="$RECORD_MANUAL_FAIL_DIR/validation_pack_summary.json"
+RECORD_MANUAL_FAIL_REPORT="$RECORD_MANUAL_FAIL_DIR/validation_pack_report.md"
+
+set +e
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$RECORD_MANUAL_FAIL_DIR" \
+  --summary-json "$RECORD_MANUAL_FAIL_SUMMARY" \
+  --report-md "$RECORD_MANUAL_FAIL_REPORT" \
+  --include-missing 0 \
+  --print-summary-json 0 >/tmp/integration_three_machine_real_host_validation_pack_record_manual_fail.log 2>&1
+RECORD_MANUAL_FAIL_RC=$?
+set -e
+
+if [[ "$RECORD_MANUAL_FAIL_RC" -eq 0 ]]; then
+  echo "expected non-zero rc when docker readiness record manual report failed"
+  cat /tmp/integration_three_machine_real_host_validation_pack_record_manual_fail.log
+  exit 1
+fi
+assert_jq "$RECORD_MANUAL_FAIL_SUMMARY" '.status == "fail"'
+assert_jq "$RECORD_MANUAL_FAIL_SUMMARY" '.decision == "NO-GO"'
+assert_jq "$RECORD_MANUAL_FAIL_SUMMARY" '.required_groups.docker_readiness.usable == false'
+assert_jq "$RECORD_MANUAL_FAIL_SUMMARY" '.artifacts | map(select(.id == "docker_readiness_record_summary" and .semantic_usable == false)) | length == 1'
 
 echo "[three-machine-real-host-validation-pack] missing real-host fail-closed path"
 FAIL_DIR="$TMP_DIR/fail"

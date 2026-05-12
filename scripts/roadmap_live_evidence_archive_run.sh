@@ -942,7 +942,7 @@ artifact_contract_error_reason() {
 
   status_value="$(jq -r 'if (.status? | type) == "string" then .status else "" end' "$path")"
   case "$status_value" in
-    pass|ok|warn)
+    pass|ok|warn|fail)
       ;;
     "")
       printf '%s' "missing_status"
@@ -971,7 +971,11 @@ artifact_contract_error_reason() {
     return 0
   fi
 
-  if [[ "$rc_value" != "0" ]]; then
+  if [[ "$status_value" == "fail" && "$rc_value" == "0" ]]; then
+    printf '%s' "status_rc_mismatch"
+    return 0
+  fi
+  if [[ "$status_value" != "fail" && "$rc_value" != "0" ]]; then
     printf '%s' "rc_nonzero"
     return 0
   fi
@@ -1418,8 +1422,36 @@ for family in "profile-default" "runtime-actuation" "multi-vm"; do
         if cp -f "$resolved_source_path" "$destination"; then
           family_copied_count=$((family_copied_count + 1))
           copied_total=$((copied_total + 1))
-          jq -nc --arg family "$family" --arg path "$path" --arg source "$source" --arg key "$key" --arg archive_path "$destination" \
-            '{family: $family, path: $path, source: $source, key: $key, archive_path: $archive_path}' >>"$family_copied_jsonl"
+          artifact_status="$(jq -r 'if (.status? | type) == "string" then .status else "" end' "$resolved_source_path" 2>/dev/null || true)"
+          artifact_rc="$(jq -r 'if has("rc") then (.rc | tostring) elif has("final_rc") then (.final_rc | tostring) else "" end' "$resolved_source_path" 2>/dev/null || true)"
+          artifact_schema_id="$(jq -r 'if (.schema.id? | type) == "string" then .schema.id else "" end' "$resolved_source_path" 2>/dev/null || true)"
+          artifact_diagnostic_evidence="false"
+          if [[ "$artifact_status" == "fail" ]]; then
+            artifact_diagnostic_evidence="true"
+          fi
+          jq -nc \
+            --arg family "$family" \
+            --arg path "$path" \
+            --arg source "$source" \
+            --arg key "$key" \
+            --arg archive_path "$destination" \
+            --arg status "$artifact_status" \
+            --arg rc "$artifact_rc" \
+            --arg schema_id "$artifact_schema_id" \
+            --argjson diagnostic_evidence "$artifact_diagnostic_evidence" \
+            '{
+              family: $family,
+              path: $path,
+              source: $source,
+              key: $key,
+              archive_path: $archive_path,
+              diagnostic_evidence: $diagnostic_evidence,
+              observed: {
+                schema_id: (if $schema_id == "" then null else $schema_id end),
+                status: (if $status == "" then null else $status end),
+                rc: (if $rc == "" then null else $rc end)
+              }
+            }' >>"$family_copied_jsonl"
         else
           family_copy_error_count=$((family_copy_error_count + 1))
           copy_error_total=$((copy_error_total + 1))

@@ -151,6 +151,26 @@ json_file_semantically_usable_01() {
         | gsub("[[:space:]_-]";"")) as $status
       | ($decision != "" or $status != "")
     )
+    and (
+      (.schema.id // "") as $schema_id
+      | if $schema_id == "three_machine_docker_readiness_record_summary" then
+          (((.rehearsal.status // "") | ascii_downcase | gsub("[[:space:]_-]";"")) == "pass")
+          and (((.rehearsal.rc // null) | tonumber?) == 0)
+          and (
+            if ((.manual_validation_report // null) | type) == "object" then
+              if (((.manual_validation_report.enabled // false) == true) or (((.manual_validation_report.status // "") | tostring | length) > 0)) then
+                ((.manual_validation_report.status // "") == "ok")
+              else
+                true
+              end
+            else
+              true
+            end
+          )
+        else
+          true
+        end
+    )
   ' "$path" >/dev/null 2>&1; then
     printf '1'
   else

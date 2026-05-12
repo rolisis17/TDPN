@@ -663,6 +663,7 @@ done
 
 signoff_has_subject_credential="false"
 signoff_has_anon_credential="false"
+signoff_has_campaign_start_local_stack="false"
 campaign_subject_injected="false"
 campaign_subject_placeholder_replaced="false"
 campaign_subject_resolution_mode="none"
@@ -745,6 +746,22 @@ if ((${#signoff_passthrough_args[@]} > 0)); then
         normalized_signoff_passthrough_args+=("$token")
         idx=$((idx + 1))
         ;;
+      --campaign-start-local-stack)
+        signoff_has_campaign_start_local_stack="true"
+        normalized_signoff_passthrough_args+=("$token")
+        idx=$((idx + 1))
+        if (( idx >= ${#signoff_passthrough_args[@]} )); then
+          echo "runtime-actuation-promotion-cycle: $token requires a value in signoff passthrough args"
+          exit 2
+        fi
+        normalized_signoff_passthrough_args+=("${signoff_passthrough_args[$idx]}")
+        idx=$((idx + 1))
+        ;;
+      --campaign-start-local-stack=*)
+        signoff_has_campaign_start_local_stack="true"
+        normalized_signoff_passthrough_args+=("$token")
+        idx=$((idx + 1))
+        ;;
       *)
         normalized_signoff_passthrough_args+=("$token")
         idx=$((idx + 1))
@@ -758,6 +775,10 @@ if [[ "$signoff_has_subject_credential" != "true" && "$signoff_has_anon_credenti
   signoff_passthrough_args+=(--campaign-subject "$resolved_campaign_subject")
   signoff_has_subject_credential="true"
   campaign_subject_injected="true"
+fi
+
+if [[ "${EUID:-$(id -u)}" -ne 0 && "$signoff_has_campaign_start_local_stack" != "true" ]]; then
+  signoff_passthrough_args+=(--campaign-start-local-stack 0)
 fi
 
 if [[ "$campaign_subject_placeholder_replaced" == "true" ]]; then

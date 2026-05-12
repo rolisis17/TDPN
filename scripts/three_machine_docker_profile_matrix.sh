@@ -837,6 +837,11 @@ jq -n \
   --argjson runs "$runs_json" \
   '{
     version: 1,
+    schema: {
+      id: "three_machine_docker_profile_matrix_summary",
+      major: 1,
+      minor: 0
+    },
     generated_at_utc: $generated_at_utc,
     status: $status,
     rc: $rc,

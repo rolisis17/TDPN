@@ -201,6 +201,9 @@ if ! rg -q '^three-machine-docker-readiness: status=pass$' "$LOG_OK"; then
 fi
 if ! jq -e '
   .status == "pass"
+  and .schema.id == "three_machine_docker_readiness_summary"
+  and .schema.major == 1
+  and .schema.minor == 0
   and .rc == 0
   and (.steps[] | select(.step_id == "issuer_allowlist") | .status == "pass")
   and (.steps[] | select(.step_id == "validate") | .status == "pass")

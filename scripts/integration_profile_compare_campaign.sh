@@ -553,6 +553,37 @@ for expected in \
   fi
 done
 
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  echo "[profile-compare-campaign] implicit local stack startup disabled on non-root default"
+  : >"$LOCAL_CAPTURE"
+  : >"$TREND_CAPTURE"
+  printf '0\n' >"$LOCAL_COUNTER"
+  NON_ROOT_STACK_JSON="$TMP_DIR/campaign_non_root_stack_default.json"
+  PROFILE_COMPARE_CAMPAIGN_LOCAL_SCRIPT="$FAKE_LOCAL" \
+  PROFILE_COMPARE_CAMPAIGN_TREND_SCRIPT="$FAKE_TREND" \
+  FAKE_LOCAL_CAPTURE_FILE="$LOCAL_CAPTURE" \
+  FAKE_LOCAL_COUNTER_FILE="$LOCAL_COUNTER" \
+  FAKE_LOCAL_FAIL_AT=0 \
+  FAKE_TREND_CAPTURE_FILE="$TREND_CAPTURE" \
+  FAKE_TREND_FORCE_FAIL=0 \
+  FAKE_TREND_INCLUDE_SELECTION_POLICY=1 \
+  ./scripts/profile_compare_campaign.sh \
+    --campaign-runs 1 \
+    --summary-json "$NON_ROOT_STACK_JSON" >/tmp/integration_profile_compare_campaign_non_root_stack_default.log 2>&1
+
+  if ! jq -e '.status == "pass" and .inputs.compare.execution_mode == "local" and .inputs.compare.execution_mode_effective == "local" and .inputs.compare.start_local_stack == "auto" and .inputs.compare.start_local_stack_effective == "0" and .inputs.compare.start_local_stack_adjusted == true and .inputs.compare.start_local_stack_adjustment_reason == "non-root campaign wrapper disables implicit local stack bootstrap"' "$NON_ROOT_STACK_JSON" >/dev/null 2>&1; then
+    echo "campaign non-root stack-default summary missing expected fields"
+    cat "$NON_ROOT_STACK_JSON"
+    cat /tmp/integration_profile_compare_campaign_non_root_stack_default.log
+    exit 1
+  fi
+  if ! rg -q -- '--start-local-stack 0' "$LOCAL_CAPTURE"; then
+    echo "expected campaign to forward --start-local-stack 0 on non-root hosts"
+    cat "$LOCAL_CAPTURE"
+    exit 1
+  fi
+fi
+
 echo "[profile-compare-campaign] explicit local execution is preserved for remote live evidence"
 : >"$LOCAL_CAPTURE"
 : >"$TREND_CAPTURE"

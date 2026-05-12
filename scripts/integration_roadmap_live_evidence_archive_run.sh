@@ -384,6 +384,55 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-live-evidence-archive-run] case: failing evidence artifact is archived as diagnostics"
+CASE_FAIL_EVIDENCE_DIR="$TMP_DIR/case_failing_evidence_artifact"
+REPORTS_FAIL_EVIDENCE="$CASE_FAIL_EVIDENCE_DIR/reports"
+ARCHIVE_ROOT_FAIL_EVIDENCE="$CASE_FAIL_EVIDENCE_DIR/archive_root"
+SUMMARY_FAIL_EVIDENCE="$CASE_FAIL_EVIDENCE_DIR/archive_summary.json"
+ROADMAP_FAIL_EVIDENCE="$CASE_FAIL_EVIDENCE_DIR/roadmap_summary.json"
+FAIL_EVIDENCE_ARTIFACT="$CASE_FAIL_EVIDENCE_DIR/artifacts/runtime_actuation_promotion_summary.json"
+mkdir -p "$REPORTS_FAIL_EVIDENCE" "$ARCHIVE_ROOT_FAIL_EVIDENCE"
+
+touch_json "$FAIL_EVIDENCE_ARTIFACT" "runtime_actuation_promotion_cycle_summary" "fail" "1"
+jq -n --arg artifact "$FAIL_EVIDENCE_ARTIFACT" '{
+  status: "pass",
+  rc: 0,
+  artifacts: {
+    runtime_actuation_promotion_summary_json: $artifact
+  }
+}' >"$ROADMAP_FAIL_EVIDENCE"
+
+bash ./scripts/roadmap_live_evidence_archive_run.sh \
+  --reports-dir "$REPORTS_FAIL_EVIDENCE" \
+  --roadmap-summary-json "$ROADMAP_FAIL_EVIDENCE" \
+  --archive-root "$ARCHIVE_ROOT_FAIL_EVIDENCE" \
+  --scope runtime-actuation \
+  --summary-json "$SUMMARY_FAIL_EVIDENCE" \
+  --print-summary-json 0
+
+if ! jq -e --arg artifact "$FAIL_EVIDENCE_ARTIFACT" '
+  .status == "pass"
+  and .rc == 0
+  and .failure_substep == null
+  and .summary.copied_total == 1
+  and .summary.artifact_contract_error_total == 0
+  and ([.family_results[] | select(.family == "runtime-actuation")][0].status == "pass")
+  and (
+    [.family_results[] | select(.family == "runtime-actuation")][0].copied
+    | map(select(
+        .path == $artifact
+        and .diagnostic_evidence == true
+        and .observed.status == "fail"
+        and .observed.rc == "1"
+      ))
+    | length
+  ) == 1
+' "$SUMMARY_FAIL_EVIDENCE" >/dev/null; then
+  echo "case failing evidence artifact assertions failed"
+  cat "$SUMMARY_FAIL_EVIDENCE"
+  exit 1
+fi
+
 echo "[roadmap-live-evidence-archive-run] case: invalid artifact contracts fail closed"
 CASE_CONTRACT_DIR="$TMP_DIR/case_invalid_artifact_contracts"
 REPORTS_CONTRACT="$CASE_CONTRACT_DIR/reports"
@@ -481,7 +530,7 @@ if ! jq -e '
   )
   and (
     ([.family_results[] | select(.family == "runtime-actuation")][0].artifact_contract_errors | map(.reason) | sort)
-    == ["invalid_json","invalid_status","missing_rc","missing_schema_id","missing_status","rc_nonzero","schema_mismatch"]
+    == ["invalid_json","missing_rc","missing_schema_id","missing_status","rc_nonzero","schema_mismatch","status_rc_mismatch"]
   )
   and (
     [.family_results[] | select(.family == "runtime-actuation")][0].copied | length

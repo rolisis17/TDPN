@@ -643,6 +643,13 @@ if ! grep -q $'^promotion_check\t.*\tfail_on_no_go=1\t' "$CAPTURE_FILE"; then
   cat "$CAPTURE_FILE"
   exit 1
 fi
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  if ! grep -q -- '--campaign-start-local-stack 0' "$CAPTURE_FILE"; then
+    echo "expected runtime promotion cycle to disable implicit campaign local stack on non-root hosts"
+    cat "$CAPTURE_FILE"
+    exit 1
+  fi
+fi
 
 echo "[runtime-actuation-promotion-cycle] latest alias files refresh from stale preseed"
 STALE_ALIAS_REPORTS_DIR="$TMP_DIR/stale_alias_reports"
