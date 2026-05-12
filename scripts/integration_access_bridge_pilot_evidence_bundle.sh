@@ -215,6 +215,87 @@ go run ./cmd/gpmrecover bridge-service-deploy-pack \
 printf '%s\n' 'should-not-copy-private-key' >"$DEPLOY_PACK/recovery.key"
 printf '%s\n' "$code_value" >"$DEPLOY_PACK/bridge-code.txt"
 
+STALE_BUNDLE_DIR="$TMP_DIR/stale-pilot-evidence-bundle"
+mkdir -p "$STALE_BUNDLE_DIR"
+printf '%s\n' 'old-demo-artifact' >"$STALE_BUNDLE_DIR/old-demo-artifact.txt"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url "$BASE_URL" \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_PACK" \
+  --service-name gpm-access-bridge-pilot \
+  --bundle-dir "$STALE_BUNDLE_DIR" \
+  --summary-json "$TMP_DIR/stale-pilot-evidence-summary.json" \
+  --provenance-sign 1 \
+  --provenance-private-key-file "$PROVENANCE_PRIVATE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --provenance-key-id "$PROVENANCE_KEY_ID" \
+  --provenance-out "$TMP_DIR/stale-pilot-evidence.provenance.json" \
+  --print-summary-json 0 >"$TMP_DIR/stale-pilot-evidence-bundle.log" 2>&1
+stale_bundle_dir_rc=$?
+set -e
+if [[ "$stale_bundle_dir_rc" -eq 0 ]] ||
+  ! grep -Fq -- '--bundle-dir already exists and is not empty' "$TMP_DIR/stale-pilot-evidence-bundle.log"; then
+  echo "access bridge pilot evidence bundle integration failed: stale explicit bundle dir was not rejected"
+  cat "$TMP_DIR/stale-pilot-evidence-bundle.log"
+  exit 1
+fi
+
+DEMO_PATH_DIR="$TMP_DIR/generated-demo"
+mkdir -p "$DEMO_PATH_DIR"
+DEMO_PATH_CONFIG="$DEMO_PATH_DIR/generated-demo-config.json"
+cp "$SERVICE_CONFIG" "$DEMO_PATH_CONFIG"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url https://recovery-helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$DEMO_PATH_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_PACK" \
+  --service-name gpm-access-bridge-pilot \
+  --provenance-sign 1 \
+  --provenance-private-key-file "$PROVENANCE_PRIVATE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --provenance-key-id "$PROVENANCE_KEY_ID" \
+  --provenance-out "$TMP_DIR/demo-path-pilot-evidence.provenance.json" \
+  --print-summary-json 0 >"$TMP_DIR/demo-path-pilot-evidence-bundle.log" 2>&1
+demo_path_bundle_rc=$?
+set -e
+if [[ "$demo_path_bundle_rc" -eq 0 ]] ||
+  ! grep -Fq -- '--config-json must not use generated demo/example artifacts for real helper HTTPS pilot handoff' "$TMP_DIR/demo-path-pilot-evidence-bundle.log"; then
+  echo "access bridge pilot evidence bundle integration failed: demo/example config path was not rejected for real helper HTTPS pilot handoff"
+  cat "$TMP_DIR/demo-path-pilot-evidence-bundle.log"
+  exit 1
+fi
+
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+  --base-url https://recovery-helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_PACK" \
+  --service-name gpm-access-bridge-pilot \
+  --provenance-sign 1 \
+  --provenance-private-key-file "$PROVENANCE_PRIVATE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "Pilot Org" \
+  --provenance-key-id "$PROVENANCE_KEY_ID" \
+  --provenance-out "$TMP_DIR/demo-provenance-id-pilot-evidence.provenance.json" \
+  --print-summary-json 0 >"$TMP_DIR/demo-provenance-id-pilot-evidence-bundle.log" 2>&1
+demo_provenance_id_bundle_rc=$?
+set -e
+if [[ "$demo_provenance_id_bundle_rc" -eq 0 ]] ||
+  ! grep -Fq -- '--provenance-org-id must not use a generated demo identity for real helper HTTPS pilot handoff' "$TMP_DIR/demo-provenance-id-pilot-evidence-bundle.log"; then
+  echo "access bridge pilot evidence bundle integration failed: demo provenance org id was not rejected for real helper HTTPS pilot handoff"
+  cat "$TMP_DIR/demo-provenance-id-pilot-evidence-bundle.log"
+  exit 1
+fi
+
 set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
   --base-url "$BASE_URL" \

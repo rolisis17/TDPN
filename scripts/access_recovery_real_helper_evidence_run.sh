@@ -1154,6 +1154,12 @@ if [[ "$plan_only" != "1" ]]; then
   if [[ -n "$expect_org_id" ]] && value_looks_generated_demo_identity "$expect_org_id"; then
     fail_preflight "--expect-org-id must not use a generated demo identity for live pilot handoff"
   fi
+  if [[ -n "$provenance_org_id" ]] && value_looks_generated_demo_identity "$provenance_org_id"; then
+    fail_preflight "--provenance-org-id must not use a generated demo identity for live pilot handoff"
+  fi
+  if [[ -n "$provenance_org_name" ]] && value_looks_generated_demo_identity "$provenance_org_name"; then
+    fail_preflight "--provenance-org-name must not use a generated demo identity for live pilot handoff"
+  fi
   if [[ -n "$code_file" ]] && path_looks_generated_demo_example_artifact "$code_file"; then
     fail_live_generated_demo_example_input "--code-file" "$code_file"
   fi

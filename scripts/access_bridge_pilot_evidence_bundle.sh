@@ -136,6 +136,69 @@ path_is_inside_dir() {
   [[ "$path" == "$dir" || "$path" == "$dir/"* ]]
 }
 
+canonical_path_or_abs() {
+  local path
+  path="$(abs_path "${1:-}")"
+  if [[ -z "$path" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if command -v realpath >/dev/null 2>&1; then
+    if realpath "$path" 2>/dev/null; then
+      return
+    fi
+  fi
+  if command -v readlink >/dev/null 2>&1; then
+    if readlink -f "$path" 2>/dev/null; then
+      return
+    fi
+  fi
+  printf '%s' "$path"
+}
+
+path_looks_generated_demo_example_artifact() {
+  local path="${1:-}" candidate
+  local candidates=()
+  [[ -z "$(trim "$path")" ]] && return 1
+  candidates+=("$path" "$(canonical_path_or_abs "$path")")
+  for candidate in "${candidates[@]}"; do
+    candidate="${candidate//\\//}"
+    candidate="$(printf '%s' "$candidate" | tr '[:upper:]' '[:lower:]')"
+    candidate="${candidate%/}"
+    case "$candidate" in
+      */docs/examples|*/docs/examples/*|*/examples/access-recovery|*/examples/access-recovery/*|\
+      */.easy-node-logs/access-recovery-demo*|\
+      */.easy-node-logs/access_recovery_local_evidence*/access-recovery-demo|\
+      */.easy-node-logs/access_recovery_local_evidence*/access-recovery-demo/*|\
+      */generated-demo/*|*/generated-example/*|*/demo-bundle/*|*/demo-manifest.json|\
+      *.example|*.example.*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+value_looks_generated_demo_identity() {
+  local value
+  value="$(trim "${1:-}")"
+  [[ -z "$value" ]] && return 1
+  value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+  case "$value" in
+    demo|demo-*|*-demo|helper-demo|freenews-demo|*generated-demo*|*generated_example*)
+      return 0
+      ;;
+  esac
+  [[ "$value" =~ (^|[^a-z0-9])demo([^a-z0-9]|$) ]]
+}
+
+fail_pilot_demo_example_input() {
+  local label="$1"
+  local value="$2"
+  echo "access bridge pilot evidence bundle failed: $label must not use generated demo/example artifacts for real helper HTTPS pilot handoff: $value" >&2
+  exit 2
+}
+
 url_scheme() {
   local url="${1:-}"
   if [[ "$url" == *://* ]]; then
@@ -662,6 +725,13 @@ if [[ "$provenance_sign" != "1" && "$require_https" == "1" && "$require_public_h
   echo "access bridge pilot evidence bundle failed: real helper HTTPS pilot handoff requires --provenance-sign 1" >&2
   exit 2
 fi
+real_helper_https_pilot_handoff="0"
+if [[ "$provenance_sign" == "1" && "$require_https" == "1" && "$require_public_host" == "1" ]] &&
+  ! base_url_is_loopback "$base_url" &&
+  [[ "$(url_scheme "$base_url")" == "https" ]] &&
+  ! base_url_host_is_private_or_reserved "$base_url"; then
+  real_helper_https_pilot_handoff="1"
+fi
 
 config_json="$(abs_path "$config_json")"
 deploy_pack_dir="$(abs_path "$deploy_pack_dir")"
@@ -739,13 +809,40 @@ if [[ "$provenance_sign" == "1" ]]; then
     exit 2
   fi
 fi
+if [[ "$real_helper_https_pilot_handoff" == "1" ]]; then
+  if [[ -n "$code_file" ]] && path_looks_generated_demo_example_artifact "$code_file"; then
+    fail_pilot_demo_example_input "--code-file" "$code_file"
+  fi
+  if path_looks_generated_demo_example_artifact "$config_json"; then
+    fail_pilot_demo_example_input "--config-json" "$config_json"
+  fi
+  if path_looks_generated_demo_example_artifact "$deploy_pack_dir"; then
+    fail_pilot_demo_example_input "--deploy-pack-dir" "$deploy_pack_dir"
+  fi
+  if path_looks_generated_demo_example_artifact "$provenance_private_key_file"; then
+    fail_pilot_demo_example_input "--provenance-private-key-file" "$provenance_private_key_file"
+  fi
+  if [[ -n "$provenance_org_id" ]] && value_looks_generated_demo_identity "$provenance_org_id"; then
+    echo "access bridge pilot evidence bundle failed: --provenance-org-id must not use a generated demo identity for real helper HTTPS pilot handoff" >&2
+    exit 2
+  fi
+  if [[ -n "$provenance_org_name" ]] && value_looks_generated_demo_identity "$provenance_org_name"; then
+    echo "access bridge pilot evidence bundle failed: --provenance-org-name must not use a generated demo identity for real helper HTTPS pilot handoff" >&2
+    exit 2
+  fi
+fi
 
 if [[ -z "$bundle_dir" ]]; then
-  bundle_dir="$ROOT_DIR/.easy-node-logs/access_bridge_pilot_evidence_bundle_$(timestamp_file)"
+  mkdir -p "$ROOT_DIR/.easy-node-logs"
+  bundle_dir="$(mktemp -d "$ROOT_DIR/.easy-node-logs/access_bridge_pilot_evidence_bundle_$(timestamp_file).XXXXXX")"
 else
   bundle_dir="$(abs_path "$bundle_dir")"
+  if [[ -d "$bundle_dir" ]] && find "$bundle_dir" -mindepth 1 -print -quit | grep -q .; then
+    echo "access bridge pilot evidence bundle failed: --bundle-dir already exists and is not empty: $bundle_dir" >&2
+    exit 2
+  fi
+  mkdir -p "$bundle_dir"
 fi
-mkdir -p "$bundle_dir"
 if [[ -z "$summary_json" ]]; then
   summary_json="$bundle_dir/access_bridge_pilot_evidence_bundle_summary.json"
 else

@@ -486,8 +486,8 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --summary-json "$TMP_DIR/override-block-summary.json" \
   --print-summary-json 0 >"$TMP_DIR/override-block.log" 2>&1
@@ -518,8 +518,8 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --config-json "$CONFIG_JSON" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --summary-json "$TMP_DIR/userinfo-url-summary.json" \
   --print-summary-json 0 >"$TMP_DIR/userinfo-url.log" 2>&1
@@ -572,8 +572,8 @@ for bad_url in "${bad_real_helper_urls[@]}"; do
     --config-json "$CONFIG_JSON" \
     --deploy-pack-dir "$DEPLOY_PACK_DIR" \
     --provenance-private-key-file "$PROVENANCE_KEY" \
-    --provenance-org-id freenews-demo \
-    --provenance-org-name "FreeNews Demo" \
+    --provenance-org-id pilot-org \
+    --provenance-org-name "Pilot Org" \
     --trust-store "$TRUST_STORE" \
     --summary-json "$TMP_DIR/bad-url-$bad_real_helper_index-summary.json" \
     --print-summary-json 0 >"$TMP_DIR/bad-url-$bad_real_helper_index.log" 2>&1
@@ -608,8 +608,8 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --config-json "$CONFIG_JSON" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/plan-only-summary.json" \
@@ -676,8 +676,8 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --proxy-kind caddy \
   --proxy-config-file "$PROXY_CONFIG_FILE" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/plan-only-installed-host-summary.json" \
@@ -734,8 +734,8 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --config-json "$GENERATED_DEMO_CONFIG_JSON" \
   --deploy-pack-dir "$GENERATED_DEMO_DEPLOY_PACK_DIR" \
   --provenance-private-key-file "$GENERATED_DEMO_PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$GENERATED_DEMO_TRUST_STORE" \
   --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/plan-only-generated-demo-paths-summary.json" \
@@ -792,8 +792,8 @@ for plan_only_case in "${plan_only_reject_cases[@]}"; do
     --config-json "$CONFIG_JSON" \
     --deploy-pack-dir "$DEPLOY_PACK_DIR" \
     --provenance-private-key-file "$PROVENANCE_KEY" \
-    --provenance-org-id freenews-demo \
-    --provenance-org-name "FreeNews Demo" \
+    --provenance-org-id pilot-org \
+    --provenance-org-name "Pilot Org" \
     --trust-store "$TRUST_STORE" \
     --summary-json "$TMP_DIR/plan-only-reject-$plan_only_reject_index-summary.json" \
     --print-summary-json 0 >"$TMP_DIR/plan-only-reject-$plan_only_reject_index.log" 2>&1
@@ -865,8 +865,8 @@ for live_generated_demo_path_case in "${live_generated_demo_path_cases[@]}"; do
     --deploy-pack-dir "$live_deploy_pack_dir" \
     "${INSTALLED_HOST_ARGS[@]}" \
     --provenance-private-key-file "$live_provenance_key" \
-    --provenance-org-id freenews-demo \
-    --provenance-org-name "FreeNews Demo" \
+    --provenance-org-id pilot-org \
+    --provenance-org-name "Pilot Org" \
     --trust-store "$live_trust_store" \
     --summary-json "$TMP_DIR/live-generated-demo-path-$live_generated_demo_path_index-summary.json" \
     --print-summary-json 0 >"$TMP_DIR/live-generated-demo-path-$live_generated_demo_path_index.log" 2>&1
@@ -902,8 +902,8 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$DEMO_MARKED_TRUST_STORE" \
   --summary-json "$TMP_DIR/live-demo-marked-trust-store-summary.json" \
   --print-summary-json 0 >"$TMP_DIR/live-demo-marked-trust-store.log" 2>&1
@@ -937,8 +937,8 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$DEMO_ID_TRUST_STORE" \
   --summary-json "$TMP_DIR/live-demo-id-trust-store-summary.json" \
   --print-summary-json 0 >"$TMP_DIR/live-demo-id-trust-store.log" 2>&1
@@ -978,8 +978,8 @@ do
     "${INSTALLED_HOST_ARGS[@]}" \
     "$demo_identity_flag" "$demo_identity_value" \
     --provenance-private-key-file "$PROVENANCE_KEY" \
-    --provenance-org-id freenews-demo \
-    --provenance-org-name "FreeNews Demo" \
+    --provenance-org-id pilot-org \
+    --provenance-org-name "Pilot Org" \
     --trust-store "$TRUST_STORE" \
     --summary-json "$TMP_DIR/live-demo-identity-$demo_identity_name-summary.json" \
     --print-summary-json 0 >"$TMP_DIR/live-demo-identity-$demo_identity_name.log" 2>&1
@@ -993,6 +993,47 @@ do
   fi
   if [[ -s "$CAPTURE" ]]; then
     echo "live demo identity should not invoke child scripts: $demo_identity_name"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
+
+for provenance_demo_identity_case in \
+  "provenance-org-id|freenews-demo|Pilot Org|--provenance-org-id must not use a generated demo identity for live pilot handoff" \
+  "provenance-org-name|pilot-org|FreeNews Demo|--provenance-org-name must not use a generated demo identity for live pilot handoff"
+do
+  IFS='|' read -r provenance_demo_identity_name provenance_demo_org_id provenance_demo_org_name provenance_demo_identity_message <<<"$provenance_demo_identity_case"
+  : >"$CAPTURE"
+  set +e
+  ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+  ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+  ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+  ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+    --base-url https://helper.gpm-pilot.net \
+    --path-id helper-web \
+    --code-file "$CODE_FILE" \
+    --config-json "$CONFIG_JSON" \
+    --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+    "${INSTALLED_HOST_ARGS[@]}" \
+    --provenance-private-key-file "$PROVENANCE_KEY" \
+    --provenance-org-id "$provenance_demo_org_id" \
+    --provenance-org-name "$provenance_demo_org_name" \
+    --trust-store "$TRUST_STORE" \
+    --summary-json "$TMP_DIR/live-demo-provenance-identity-$provenance_demo_identity_name-summary.json" \
+    --print-summary-json 0 >"$TMP_DIR/live-demo-provenance-identity-$provenance_demo_identity_name.log" 2>&1
+  provenance_demo_identity_rc=$?
+  set -e
+  if [[ "$provenance_demo_identity_rc" -ne 2 ]] ||
+    ! grep -Fq -- "$provenance_demo_identity_message" "$TMP_DIR/live-demo-provenance-identity-$provenance_demo_identity_name.log"; then
+    echo "expected live demo provenance identity to fail preflight: $provenance_demo_identity_name"
+    cat "$TMP_DIR/live-demo-provenance-identity-$provenance_demo_identity_name.log"
+    exit 1
+  fi
+  if [[ -s "$CAPTURE" ]]; then
+    echo "live demo provenance identity should not invoke child scripts: $provenance_demo_identity_name"
     cat "$CAPTURE"
     exit 1
   fi
@@ -1014,8 +1055,8 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --config-json "$CONFIG_JSON" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --summary-json "$TMP_DIR/live-default-deploy-pack-summary.json" \
   --print-summary-json 0 >"$TMP_DIR/live-default-deploy-pack.log" 2>&1
@@ -1099,8 +1140,8 @@ for demo_artifact_case in "${demo_artifact_cases[@]}"; do
     --deploy-pack-dir "$demo_deploy_pack_dir" \
     "${INSTALLED_HOST_ARGS[@]}" \
     --provenance-private-key-file "$PROVENANCE_KEY" \
-    --provenance-org-id freenews-demo \
-    --provenance-org-name "FreeNews Demo" \
+    --provenance-org-id pilot-org \
+    --provenance-org-name "Pilot Org" \
     --trust-store "$demo_trust_store" \
     --summary-json "$TMP_DIR/live-demo-artifact-$demo_artifact_index-summary.json" \
     --print-summary-json 0 >"$TMP_DIR/live-demo-artifact-$demo_artifact_index.log" 2>&1
@@ -1140,8 +1181,8 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --roadmap-refresh 0 \
   --summary-json "$TMP_DIR/public-ipv6-summary.json" \
@@ -1201,8 +1242,8 @@ for placeholder_case in "${placeholder_input_cases[@]}"; do
     --config-json "$placeholder_config_json" \
     --deploy-pack-dir "$placeholder_deploy_pack_dir" \
     --provenance-private-key-file "$PROVENANCE_KEY" \
-    --provenance-org-id freenews-demo \
-    --provenance-org-name "FreeNews Demo" \
+    --provenance-org-id pilot-org \
+    --provenance-org-name "Pilot Org" \
     --trust-store "$TRUST_STORE" \
     --summary-json "$TMP_DIR/placeholder-input-$placeholder_input_index-summary.json" \
     --print-summary-json 0 >"$TMP_DIR/placeholder-input-$placeholder_input_index.log" 2>&1
@@ -1236,8 +1277,8 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/run-summary.json" \
@@ -1283,8 +1324,8 @@ for token in \
   $'\t--proxy-config-file\t'"$PROXY_CONFIG_FILE" \
   $'\t--provenance-sign\t1' \
   $'\t--provenance-private-key-file\t'"$PROVENANCE_KEY" \
-  $'\t--provenance-org-id\tfreenews-demo' \
-  $'\t--provenance-org-name\tFreeNews Demo'
+  $'\t--provenance-org-id\tpilot-org' \
+  $'\t--provenance-org-name\tPilot Org'
 do
   if [[ "$bundle_line" != *"$token"* ]]; then
     echo "missing forwarded bundle token: $token"
@@ -1361,8 +1402,8 @@ FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR=3 \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/verifier-schema-minor-3-summary.json" \
@@ -1415,8 +1456,8 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --proxy-kind caddy \
   --proxy-config-file "$PROXY_CONFIG_FILE" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/installed-host-run-summary.json" \
@@ -1478,8 +1519,8 @@ FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_READY=false \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/verifier-not-ready-summary.json" \
@@ -1515,8 +1556,8 @@ FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_TRUSTED=false \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/verifier-untrusted-summary.json" \
@@ -1556,8 +1597,8 @@ FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_BINDING_MODE=mismatch \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/verifier-binding-mismatch-summary.json" \
@@ -1604,8 +1645,8 @@ do
     --deploy-pack-dir "$DEPLOY_PACK_DIR" \
     "${INSTALLED_HOST_ARGS[@]}" \
     --provenance-private-key-file "$PROVENANCE_KEY" \
-    --provenance-org-id freenews-demo \
-    --provenance-org-name "FreeNews Demo" \
+    --provenance-org-id pilot-org \
+    --provenance-org-name "Pilot Org" \
     --trust-store "$TRUST_STORE" \
     --reports-dir "$REPORTS_DIR" \
     --summary-json "$TMP_DIR/verifier-${identity_mode}-summary.json" \
@@ -1647,8 +1688,8 @@ FAKE_ACCESS_RECOVERY_REAL_HELPER_ROADMAP_READY=false \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/roadmap-not-ready-summary.json" \
@@ -1682,8 +1723,8 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --reports-dir "$REPORTS_DIR" \
   --roadmap-refresh 0 \
@@ -1722,8 +1763,8 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --config-json "$CONFIG_JSON" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
-  --provenance-org-id freenews-demo \
-  --provenance-org-name "FreeNews Demo" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
   --summary-json "$TMP_DIR/placeholder-summary.json" \
   --print-summary-json 0 >/dev/null 2>&1

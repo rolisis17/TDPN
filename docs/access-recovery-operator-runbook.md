@@ -159,6 +159,12 @@ path at `.easy-node-logs/access-recovery-demo`, `helper-demo`, or
   --reports-dir .easy-node-logs/access-recovery-pilot
 ```
 
+Run this from the helper host, or from an evidence runner that has copied the
+same active files. If `/etc/gpm/access-bridge`, the systemd unit, or the reverse
+proxy config are protected, use sudo/root for the installed-host evidence step;
+that is Access Recovery host evidence, not the legacy VPN `runtime_hygiene`
+gate.
+
 Do not use `access-recovery-real-helper-evidence-run --roadmap-refresh 0` to
 produce the final status roll-up. That mode is diagnostics/verifier-only and
 intentionally skips the wrapper `handoff_complete`/roadmap refresh. The trusted

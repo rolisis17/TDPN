@@ -604,6 +604,15 @@ JSON
 }
 JSON
     ;;
+  real_helper_no_roadmap_refresh_arg)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"real_helper_https_evidence","label":"Real helper HTTPS evidence","command":"bash \"$PLAN_ENV_CHECK\" --roadmap-refresh 0","reason":"test-roadmap-refresh-0-rejected","requires_real_hosts":true,"local_pack_only":false}
+  ]
+}
+JSON
+    ;;
   access_recovery_trust_store_placeholder)
     cat >"$summary_json" <<JSON
 {
@@ -626,7 +635,7 @@ JSON
     cat >"$summary_json" <<JSON
 {
   "next_actions": [
-    {"id":"real_helper_https_evidence","label":"Real helper HTTPS evidence","command":"./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://helper.gpm-pilot.net --path-id helper-web --code-file /tmp/bridge-code.txt --config-json /tmp/bridge-service-config.json --deploy-pack-dir /tmp/bridge-deploy --provenance-private-key-file /tmp/provenance.key --provenance-org-id freenews-demo --provenance-org-name Demo --trust-store TRUST_STORE --reports-dir /tmp/access-recovery-pilot","reason":"test-real-helper-trust-store","requires_real_hosts":true}
+    {"id":"real_helper_https_evidence","label":"Real helper HTTPS evidence","command":"./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://helper.gpm-pilot.net --path-id helper-web --code-file /tmp/bridge-code.txt --config-json /tmp/bridge-service-config.json --deploy-pack-dir /tmp/bridge-deploy --provenance-private-key-file /tmp/provenance.key --provenance-org-id pilot-org --provenance-org-name 'Pilot Org' --trust-store TRUST_STORE --reports-dir /tmp/access-recovery-pilot","reason":"test-real-helper-trust-store","requires_real_hosts":true}
   ]
 }
 JSON
@@ -1566,6 +1575,49 @@ fi
 if ! grep -Fq "failure_kind=access_recovery_no_evidence_mode" "$REPORTS_ACCESS_RECOVERY_PLAN_ONLY_ARG/action_1_real_helper_https_evidence.log"; then
   echo "Access Recovery plan-only action log missing failure kind"
   cat "$REPORTS_ACCESS_RECOVERY_PLAN_ONLY_ARG/action_1_real_helper_https_evidence.log"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery real-helper actions reject verifier-only roadmap-refresh 0 commands"
+SUMMARY_ACCESS_RECOVERY_ROADMAP_REFRESH_ZERO_ARG="$TMP_DIR/summary_access_recovery_roadmap_refresh_zero_arg.json"
+REPORTS_ACCESS_RECOVERY_ROADMAP_REFRESH_ZERO_ARG="$TMP_DIR/reports_access_recovery_roadmap_refresh_zero_arg"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=real_helper_no_roadmap_refresh_arg \
+PLAN_ENV_CHECK="$PLAN_ENV_CHECK" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_ROADMAP_REFRESH_ZERO_ARG" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_ROADMAP_REFRESH_ZERO_ARG" \
+  --include-id real_helper_https_evidence \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_roadmap_refresh_zero_arg.log" 2>&1
+access_recovery_roadmap_refresh_zero_arg_rc=$?
+set -e
+if [[ "$access_recovery_roadmap_refresh_zero_arg_rc" != "2" ]]; then
+  echo "expected Access Recovery roadmap-refresh 0 action hard-fail rc=2, got rc=$access_recovery_roadmap_refresh_zero_arg_rc"
+  cat "$TMP_DIR/access_recovery_roadmap_refresh_zero_arg.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_ROADMAP_REFRESH_ZERO_ARG" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_ROADMAP_REFRESH_ZERO_ARG"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .actions[0].id == "real_helper_https_evidence"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "access_recovery_no_evidence_mode"
+  and (.actions[0].notes | contains("must collect evidence"))
+  and (.actions[0].notes | contains("roadmap-refresh 0"))
+  and (.actions[0].command | contains("--roadmap-refresh 0"))
+' "$SUMMARY_ACCESS_RECOVERY_ROADMAP_REFRESH_ZERO_ARG" >/dev/null; then
+  echo "Access Recovery roadmap-refresh 0 action precondition summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_ROADMAP_REFRESH_ZERO_ARG"
+  exit 1
+fi
+if ! grep -Fq "failure_kind=access_recovery_no_evidence_mode" "$REPORTS_ACCESS_RECOVERY_ROADMAP_REFRESH_ZERO_ARG/action_1_real_helper_https_evidence.log"; then
+  echo "Access Recovery roadmap-refresh 0 action log missing failure kind"
+  cat "$REPORTS_ACCESS_RECOVERY_ROADMAP_REFRESH_ZERO_ARG/action_1_real_helper_https_evidence.log"
   exit 1
 fi
 

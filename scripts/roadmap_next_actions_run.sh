@@ -746,7 +746,7 @@ command_has_access_recovery_public_key_handoff_01() {
 }
 
 command_has_access_recovery_no_evidence_mode_01() {
-  local command_text normalized token idx token_count
+  local command_text normalized token idx token_count next_token
   command_text="${1:-}"
   if [[ -z "$command_text" ]]; then
     return 1
@@ -761,6 +761,15 @@ command_has_access_recovery_no_evidence_mode_01() {
         --plan-only|--plan-only=*|--preflight-only|--preflight-only=*)
           return 0
           ;;
+        --roadmap-refresh)
+          next_token="${COMMAND_STRING_ARGV[$((idx + 1))]:-}"
+          if [[ "$next_token" == "0" ]]; then
+            return 0
+          fi
+          ;;
+        --roadmap-refresh=0)
+          return 0
+          ;;
       esac
       idx=$((idx + 1))
     done
@@ -768,7 +777,7 @@ command_has_access_recovery_no_evidence_mode_01() {
   fi
 
   normalized="$(printf '%s' "$command_text" | tr '[:lower:]' '[:upper:]')"
-  [[ "$normalized" =~ (^|[[:space:]])--(PLAN-ONLY|PREFLIGHT-ONLY)([[:space:]=]|$) ]]
+  [[ "$normalized" =~ (^|[[:space:]])--(PLAN-ONLY|PREFLIGHT-ONLY)([[:space:]=]|$) || "$normalized" =~ (^|[[:space:]])--ROADMAP-REFRESH([[:space:]]+0|=0)([[:space:]]|$) ]]
 }
 
 is_profile_subject_flag() {
@@ -3282,7 +3291,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
      && [[ -n "$action_command" ]] \
      && command_has_access_recovery_no_evidence_mode_01 "$action_command"; then
     action_preflight_failure_kind="access_recovery_no_evidence_mode"
-    action_preflight_notes="Access Recovery next-actions must collect evidence; diagnostic --plan-only/--preflight-only modes are not accepted"
+    action_preflight_notes="Access Recovery next-actions must collect evidence and refresh status; diagnostic --plan-only/--preflight-only/--roadmap-refresh 0 modes are not accepted"
   fi
   if action_id_is_multi_vm_stability_action_01 "$action_id" \
      && [[ -n "$action_command" ]] \
