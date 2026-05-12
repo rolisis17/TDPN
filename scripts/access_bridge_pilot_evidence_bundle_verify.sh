@@ -20,6 +20,7 @@ Usage:
     [--trust-store PATH] \
     [--public-key-file PATH] \
     [--allow-dev-trust-store [0|1]] \
+    [--allow-non-handoff-receipt [0|1]] \
     [--max-evidence-age-sec N] \
     [--summary-contract-check [0|1]] \
     [--verification-summary-json PATH] \
@@ -46,6 +47,9 @@ Notes:
     --allow-dev-trust-store 1 is set for diagnostics.
   - Strict pilot handoff mode also rejects trust stores whose trusted-key source
     is marked as generated demo material unless --allow-dev-trust-store 1 is set.
+  - Strict pilot handoff mode exits non-zero unless pilot_handoff_ready=true.
+    Use --allow-non-handoff-receipt 1 only for diagnostics that intentionally
+    inspect a trusted verification receipt that is not handoff-ready.
   - Strict pilot handoff mode also requires the signed summary artifact paths
     to match the verified summary/tar/sidecar/provenance inputs and expected
     in-bundle evidence filenames.
@@ -129,7 +133,7 @@ validate_bundle_summary_contract() {
   local file="$1"
   local label="$2"
   local local_issues=0
-  local summary_schema_id summary_status summary_rc summary_steps_total summary_steps_fail summary_steps_len summary_bad_step_count
+  local summary_schema_id summary_schema_major summary_schema_minor summary_status summary_rc summary_steps_total summary_steps_fail summary_steps_len summary_bad_step_count
 
   if [[ ! -f "$file" ]]; then
     echo "$label not found: $file"
@@ -141,6 +145,8 @@ validate_bundle_summary_contract() {
   fi
 
   summary_schema_id="$(jq -r '.schema.id // ""' "$file")"
+  summary_schema_major="$(jq -r 'if (.schema.major|type) == "number" then (.schema.major|tostring) else "" end' "$file")"
+  summary_schema_minor="$(jq -r 'if (.schema.minor|type) == "number" then (.schema.minor|tostring) else "" end' "$file")"
   summary_status="$(jq -r '.status // ""' "$file" | tr '[:upper:]' '[:lower:]')"
   summary_rc="$(jq -r 'if has("rc") then (.rc|tostring) else "" end' "$file")"
   summary_steps_total="$(jq -r 'if (.summary.steps_total|type) == "number" then .summary.steps_total else "" end' "$file")"
@@ -149,6 +155,14 @@ validate_bundle_summary_contract() {
   summary_bad_step_count="$(jq -r '[.steps[]? | select((.status // "" | ascii_downcase) != "pass" or (has("rc") and .rc != 0))] | length' "$file")"
   if [[ "$summary_schema_id" != "access_bridge_pilot_evidence_bundle_summary" ]]; then
     echo "$label schema mismatch: expected=access_bridge_pilot_evidence_bundle_summary actual=${summary_schema_id:-<missing>}"
+    local_issues=$((local_issues + 1))
+  fi
+  if [[ "$summary_schema_major" != "1" ]]; then
+    echo "$label schema major is invalid or missing: expected=1 actual=${summary_schema_major:-<missing>}"
+    local_issues=$((local_issues + 1))
+  fi
+  if [[ -z "$summary_schema_minor" || "$summary_schema_minor" -lt 7 ]]; then
+    echo "$label schema minor is too old: expected>=7 actual=${summary_schema_minor:-<missing>}"
     local_issues=$((local_issues + 1))
   fi
   if [[ "$summary_status" != "pass" ]]; then
@@ -429,7 +443,7 @@ validate_trusted_bundled_evidence_semantics() {
           if ($expected_helper_id == "") then "trusted pilot provenance requires non-empty expected_identity.helper_id" else empty end,
           if ($expected_organization_id == "") then "trusted pilot provenance requires non-empty expected_identity.organization_id" else empty end,
           if ($expected_registry_id == "") then "trusted pilot provenance requires non-empty expected_identity.registry_id" else empty end,
-          if schema_ok($s; "access_bridge_service_smoke_summary"; (if $expected_require_mtls == "true" then 6 else 3 end)) | not then "bundled service smoke summary schema is invalid or too old" else empty end,
+          if schema_ok($s; "access_bridge_service_smoke_summary"; 6) | not then "bundled service smoke summary schema is invalid or too old" else empty end,
           if pass_status($s) | not then "bundled service smoke summary status is not pass" else empty end,
           if (($s.base_url // "") != $expected_base_url) then "bundled service smoke base_url does not match bundle summary" else empty end,
           if ($s.transport.https != true) then "bundled service smoke did not prove HTTPS transport" else empty end,
@@ -458,7 +472,7 @@ validate_trusted_bundled_evidence_semantics() {
           if str_eq($s.bridge.status; "ok") | not then "bundled service smoke bridge status is not ok" else empty end,
           if ($s.bridge.security_headers_ok != true) then "bundled service smoke security headers check failed" else empty end,
           if str_eq($s.abuse.http_status; "202") | not then "bundled service smoke abuse endpoint status is not 202" else empty end,
-          if schema_ok($d; "access_bridge_deployment_evidence_summary"; (if $expected_require_mtls == "true" then 5 else 2 end)) | not then "bundled deployment evidence summary schema is invalid or too old" else empty end,
+          if schema_ok($d; "access_bridge_deployment_evidence_summary"; 5) | not then "bundled deployment evidence summary schema is invalid or too old" else empty end,
           if pass_status($d) | not then "bundled deployment evidence summary status is not pass" else empty end,
           if (($d.evidence_scope // "") != "real_helper_https") then "bundled deployment evidence scope is not real_helper_https" else empty end,
           if (($d.smoke.base_url // "") != $expected_base_url) then "bundled deployment evidence base_url does not match bundle summary" else empty end,
@@ -813,6 +827,7 @@ provenance_json=""
 trust_store=""
 public_key_file=""
 allow_dev_trust_store="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_ALLOW_DEV_TRUST_STORE:-0}"
+allow_non_handoff_receipt="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_ALLOW_NON_HANDOFF_RECEIPT:-0}"
 max_evidence_age_sec="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_MAX_EVIDENCE_AGE_SEC:-604800}"
 summary_contract_check="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_CONTRACT_CHECK:-1}"
 verification_summary_json="${ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_VERIFICATION_SUMMARY_JSON:-}"
@@ -898,6 +913,15 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --allow-non-handoff-receipt)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        allow_non_handoff_receipt="${2:-}"
+        shift 2
+      else
+        allow_non_handoff_receipt="1"
+        shift
+      fi
+      ;;
     --max-evidence-age-sec)
       max_evidence_age_sec="${2:-}"
       shift 2
@@ -961,6 +985,7 @@ bool_or_die "--check-manifest" "$check_manifest"
 bool_or_die "--check-provenance" "$check_provenance"
 bool_or_die "--require-trusted-provenance" "$require_trusted_provenance"
 bool_or_die "--allow-dev-trust-store" "$allow_dev_trust_store"
+bool_or_die "--allow-non-handoff-receipt" "$allow_non_handoff_receipt"
 nonnegative_int_or_die "--max-evidence-age-sec" "$max_evidence_age_sec"
 bool_or_die "--summary-contract-check" "$summary_contract_check"
 bool_or_die "--print-verification-summary-json" "$print_verification_summary_json"
@@ -1065,7 +1090,7 @@ write_verification_summary() {
   local notes="$3"
   local generated_at_utc check_tar_sha256_json tar_sha256_checked_json check_manifest_json check_provenance_json require_trusted_json
   local summary_contract_check_json provenance_checked_json provenance_trusted_json provenance_source
-  local allow_dev_trust_store_json trust_store_sha256 bundled_child_evidence_semantic_ok_json bundled_installed_host_evidence_json
+  local allow_dev_trust_store_json allow_non_handoff_receipt_json trust_store_sha256 bundled_child_evidence_semantic_ok_json bundled_installed_host_evidence_json
   local source_summary_sha256 source_base_url source_helper_id source_organization_id source_registry_id
   local source_smoke_summary_json source_deployment_summary_json source_host_summary_json
   local source_smoke_summary_sha256 source_deployment_summary_sha256 source_host_summary_sha256
@@ -1083,6 +1108,7 @@ write_verification_summary() {
   check_provenance_json="$( [[ "$check_provenance" == "1" ]] && printf 'true' || printf 'false' )"
   require_trusted_json="$( [[ "$require_trusted_provenance" == "1" ]] && printf 'true' || printf 'false' )"
   allow_dev_trust_store_json="$( [[ "$allow_dev_trust_store" == "1" ]] && printf 'true' || printf 'false' )"
+  allow_non_handoff_receipt_json="$( [[ "$allow_non_handoff_receipt" == "1" ]] && printf 'true' || printf 'false' )"
   summary_contract_check_json="$( [[ "$summary_contract_check" == "1" ]] && printf 'true' || printf 'false' )"
   bundled_child_evidence_semantic_ok_json="$( [[ "$bundled_child_evidence_semantic_ok" == "true" ]] && printf 'true' || printf 'false' )"
   bundled_installed_host_evidence_json="$( [[ "$bundled_installed_host_evidence" == "true" ]] && printf 'true' || printf 'false' )"
@@ -1188,6 +1214,7 @@ write_verification_summary() {
     --argjson check_provenance "$check_provenance_json" \
     --argjson require_trusted_provenance "$require_trusted_json" \
     --argjson allow_dev_trust_store "$allow_dev_trust_store_json" \
+    --argjson allow_non_handoff_receipt "$allow_non_handoff_receipt_json" \
     --argjson summary_contract_check "$summary_contract_check_json" \
     --argjson provenance_checked "$provenance_checked_json" \
     --arg provenance_status "$provenance_verify_status" \
@@ -1279,7 +1306,8 @@ write_verification_summary() {
           trust_store_present: ($trust_store != ""),
           trust_store_sha256_present: ($trust_store_sha256 != ""),
           public_key_file_absent: ($public_key_file == ""),
-          dev_trust_store_allowed: $allow_dev_trust_store
+          dev_trust_store_allowed: $allow_dev_trust_store,
+          non_handoff_receipt_allowed: $allow_non_handoff_receipt
         },
         notes: $notes,
         inputs: {
@@ -1291,7 +1319,8 @@ write_verification_summary() {
           trust_store: null_if_empty($trust_store),
           trust_store_sha256: null_if_empty($trust_store_sha256),
           public_key_file: null_if_empty($public_key_file),
-          allow_dev_trust_store: $allow_dev_trust_store
+          allow_dev_trust_store: $allow_dev_trust_store,
+          allow_non_handoff_receipt: $allow_non_handoff_receipt
         },
         checks: {
           summary_contract: {
@@ -1757,6 +1786,18 @@ if ((issues > 0)); then
   write_verification_summary "fail" 1 "Access Bridge pilot evidence bundle verification failed"
   echo "[access-bridge-pilot-evidence-bundle-verify] failed (issues=$issues)"
   exit 1
+fi
+
+if [[ "$require_trusted_provenance" == "1" && "$allow_non_handoff_receipt" != "1" ]]; then
+  original_print_verification_summary_json="$print_verification_summary_json"
+  print_verification_summary_json="0"
+  write_verification_summary "pass" 0 "Access Bridge pilot evidence bundle verification passed"
+  print_verification_summary_json="$original_print_verification_summary_json"
+  if ! jq -e '.pilot_handoff_ready == true' "$verification_summary_json" >/dev/null 2>&1; then
+    write_verification_summary "fail" 1 "Access Bridge pilot evidence bundle verification failed: trusted pilot handoff criteria not ready"
+    echo "[access-bridge-pilot-evidence-bundle-verify] failed (trusted pilot handoff criteria not ready)"
+    exit 1
+  fi
 fi
 
 write_verification_summary "pass" 0 "Access Bridge pilot evidence bundle verification passed"

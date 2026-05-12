@@ -267,7 +267,7 @@ jq -n \
   --arg host_summary_json "$BUNDLE_DIR/access_bridge_host_install_check_summary.json" \
   '{
     version: 1,
-    schema: {id: "access_bridge_pilot_evidence_bundle_summary"},
+    schema: {id: "access_bridge_pilot_evidence_bundle_summary", major: 1, minor: 7},
     generated_at_utc: $generated_at_utc,
     status: "pass",
     rc: 0,
@@ -386,18 +386,42 @@ if [[ "$trusted_policy_receipt_required_rc" -eq 0 ]] || ! grep -Fq -- '--require
   cat "$TMP_DIR/verify-provenance-trusted-policy-receipt-required.log"
   exit 1
 fi
+
+OLD_BUNDLE_SCHEMA_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_old_schema_summary.json"
+jq '.schema.minor = 6' "$SUMMARY_JSON" >"$OLD_BUNDLE_SCHEMA_SUMMARY_JSON"
+set +e
+bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
+  --summary-json "$OLD_BUNDLE_SCHEMA_SUMMARY_JSON" \
+  --provenance-json "$PROVENANCE_JSON" \
+  --require-trusted-provenance 1 \
+  --trust-store "$TRUST_STORE" \
+  --verification-summary-json "$TMP_DIR/verify-old-bundle-schema-summary.json" >"$TMP_DIR/verify-old-bundle-schema.log" 2>&1
+old_bundle_schema_rc=$?
+set -e
+if [[ "$old_bundle_schema_rc" -eq 0 ]] ||
+  ! grep -Fq 'external bundle summary schema minor is too old' "$TMP_DIR/verify-old-bundle-schema.log"; then
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted old bundle summary schema"
+  cat "$TMP_DIR/verify-old-bundle-schema.log"
+  exit 1
+fi
+
+set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --summary-json "$SUMMARY_JSON" \
   --provenance-json "$PROVENANCE_JSON" \
   --require-trusted-provenance 1 \
   --trust-store "$TRUST_STORE" \
   --verification-summary-json "$VERIFY_SUMMARY_JSON" \
-  --print-verification-summary-json 1 >"$TMP_DIR/verify-provenance-trusted-policy-explicit.log"
-if ! jq -e '
+  --print-verification-summary-json 1 >"$TMP_DIR/verify-provenance-trusted-policy-explicit.log" 2>&1
+trusted_policy_explicit_rc=$?
+set -e
+if [[ "$trusted_policy_explicit_rc" -eq 0 ]] ||
+  ! grep -Fq 'trusted pilot handoff criteria not ready' "$TMP_DIR/verify-provenance-trusted-policy-explicit.log" ||
+  ! jq -e '
   .schema.id == "access_bridge_pilot_evidence_bundle_verify_summary"
   and .schema.minor == 4
-  and .status == "pass"
-  and .rc == 0
+  and .status == "fail"
+  and .rc == 1
   and .pilot_handoff_ready == false
   and .trusted_pilot_receipt_ready == false
   and .pilot_handoff_criteria.ready == false
@@ -408,6 +432,7 @@ if ! jq -e '
   and .pilot_handoff_criteria.evidence_max_age_sec == 604800
   and .pilot_handoff_criteria.installed_host_evidence_present == false
   and .pilot_handoff_criteria.trust_store_sha256_present == true
+  and .pilot_handoff_criteria.non_handoff_receipt_allowed == false
   and .checks.summary_contract.enabled == true
   and .checks.tar_sha256.enabled == true
   and .checks.tar_sha256.checked == true
@@ -439,10 +464,12 @@ if ! jq -e '
   and .evidence_freshness.ok == true
   and .evidence_freshness.max_age_sec == 604800
   and ([.evidence_freshness.details[]? | select(.status == "ok")] | length) == 5
+  and .inputs.allow_non_handoff_receipt == false
   and .artifacts.verification_summary_json == "'"$VERIFY_SUMMARY_JSON"'"
   and .artifacts.provenance_json == "'"$PROVENANCE_JSON"'"
 ' "$VERIFY_SUMMARY_JSON" >/dev/null; then
-  echo "access bridge pilot evidence bundle verifier integration failed: verification summary did not prove trusted provenance"
+  echo "access bridge pilot evidence bundle verifier integration failed: trusted policy accepted non-handoff-ready receipt"
+  cat "$TMP_DIR/verify-provenance-trusted-policy-explicit.log"
   cat "$VERIFY_SUMMARY_JSON"
   exit 1
 fi
@@ -543,7 +570,7 @@ fi
 MTLS_REQUIRED_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_mtls_required_missing_proof_summary.json"
 MTLS_REQUIRED_PROVENANCE_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_mtls_required_missing_proof.provenance.json"
 MTLS_REQUIRED_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle_mtls_required_missing_proof_verify_summary.json"
-jq '.schema.minor = 5 | .evidence_policy.require_mtls = true' "$SUMMARY_JSON" >"$MTLS_REQUIRED_SUMMARY_JSON"
+jq '.schema.minor = 7 | .evidence_policy.require_mtls = true' "$SUMMARY_JSON" >"$MTLS_REQUIRED_SUMMARY_JSON"
 go run ./cmd/gpmrecover provenance-sign \
   --summary-json "$MTLS_REQUIRED_SUMMARY_JSON" \
   --bundle-tar "$BUNDLE_TAR" \
@@ -649,7 +676,7 @@ jq \
   --arg smoke_summary_json "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_service_smoke_summary.json" \
   --arg deployment_summary_json "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_deployment_evidence_summary.json" \
   --arg host_summary_json "$MTLS_SUCCESS_NO_CLIENT_DIR/access_bridge_host_install_check_summary.json" \
-  '.schema.minor = 5
+  '.schema.minor = 7
     | .evidence_policy.require_mtls = true
     | .artifacts.bundle_dir = $bundle_dir
     | .artifacts.bundle_tar = $bundle_tar
@@ -801,7 +828,7 @@ INSTALLED_HOST_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_pilot_evidence_bundle
 mkdir -p "$INSTALLED_HOST_ROOT"
 cp -R "$BUNDLE_DIR" "$INSTALLED_HOST_DIR"
 jq '
-  .schema.minor = 5
+  .schema.minor = 7
   | .inputs.evidence_mode = "installed-host"
   | .inputs.installed_host_mode = true
   | .inputs.install_dir = "/etc/gpm/access-bridge"
@@ -1387,6 +1414,7 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --require-trusted-provenance 1 \
   --trust-store "$DEMO_TRUST_STORE" \
   --allow-dev-trust-store 1 \
+  --allow-non-handoff-receipt 1 \
   --verification-summary-json "$DEMO_VERIFY_SUMMARY_JSON" >"$TMP_DIR/verify-provenance-demo-trust-store-allowed.log"
 if ! jq -e '
   .status == "pass"
@@ -1394,7 +1422,9 @@ if ! jq -e '
   and .trusted_pilot_receipt_ready == false
   and .pilot_handoff_criteria.ready == false
   and .pilot_handoff_criteria.dev_trust_store_allowed == true
+  and .pilot_handoff_criteria.non_handoff_receipt_allowed == true
   and .inputs.allow_dev_trust_store == true
+  and .inputs.allow_non_handoff_receipt == true
 ' "$DEMO_VERIFY_SUMMARY_JSON" >/dev/null; then
   echo "access bridge pilot evidence bundle verifier integration failed: diagnostic dev trust-store override produced unsafe readiness semantics"
   cat "$DEMO_VERIFY_SUMMARY_JSON"
@@ -1409,12 +1439,14 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
   --provenance-json "$PROVENANCE_JSON" \
   --require-trusted-provenance 1 \
   --trust-store "$TRUST_STORE" \
+  --allow-non-handoff-receipt 1 \
   --verification-summary-json "$TAMPERED_LOOSE_VERIFY_SUMMARY_JSON" >"$TMP_DIR/verify-provenance-trusted-policy-tampered-loose.log"
 cp "$ORIGINAL_SMOKE_SUMMARY_COPY" "$BUNDLE_DIR/access_bridge_service_smoke_summary.json"
 if ! jq -e --arg original_sha "$SMOKE_SUMMARY_SHA256" --arg loose_sha "$TAMPERED_LOOSE_SMOKE_SUMMARY_SHA256" '
   .status == "pass"
   and .pilot_handoff_ready == false
   and .trusted_pilot_receipt_ready == false
+  and .pilot_handoff_criteria.non_handoff_receipt_allowed == true
   and .pilot_handoff_criteria.installed_host_evidence_present == false
   and .evidence_binding.smoke_summary_sha256 == $original_sha
   and .evidence_binding.smoke_summary_sha256 != $loose_sha

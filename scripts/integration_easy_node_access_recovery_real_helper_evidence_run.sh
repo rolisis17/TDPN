@@ -29,6 +29,13 @@ PROXY_CONFIG_FILE="$TMP_DIR/gpm-access-bridge.caddy"
 CODE_FILE="$TMP_DIR/code.txt"
 TRUST_STORE="$TMP_DIR/trust-store.json"
 PROVENANCE_KEY="$TMP_DIR/provenance.key"
+INSTALLED_HOST_ARGS=(
+  --host-install-evidence-mode installed-host
+  --install-dir "$INSTALL_DIR"
+  --systemd-unit-file "$SYSTEMD_UNIT_FILE"
+  --proxy-kind caddy
+  --proxy-config-file "$PROXY_CONFIG_FILE"
+)
 
 mkdir -p "$DEPLOY_PACK_DIR" "$INSTALL_DIR" "$REPORTS_DIR"
 printf '%s\n' '{"status":"pass"}' >"$CONFIG_JSON"
@@ -459,6 +466,7 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --code-file "$CODE_FILE" \
   --config-json "$CONFIG_JSON" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
   --provenance-org-id freenews-demo \
   --provenance-org-name "FreeNews Demo" \
@@ -606,6 +614,7 @@ jq -e '
   and .mode.child_execution_skipped == true
   and .mode.evidence_generated == false
   and .mode.evidence_status == "planned_non_evidence"
+  and .inputs.host_install_evidence_mode == "deploy-pack"
   and .child_summaries.host_install_check == null
   and .child_summaries.bundle == null
   and .child_summaries.verifier == null
@@ -750,6 +759,48 @@ for plan_only_case in "${plan_only_reject_cases[@]}"; do
   fi
 done
 
+echo "[easy-node-access-recovery-real-helper-evidence-run] live handoff requires installed-host evidence mode"
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id freenews-demo \
+  --provenance-org-name "FreeNews Demo" \
+  --trust-store "$TRUST_STORE" \
+  --summary-json "$TMP_DIR/live-default-deploy-pack-summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/live-default-deploy-pack.log" 2>&1
+live_default_deploy_pack_rc=$?
+set -e
+if [[ "$live_default_deploy_pack_rc" -ne 2 ]] ||
+  ! grep -Fq -- "live real-helper pilot handoff requires --host-install-evidence-mode installed-host" "$TMP_DIR/live-default-deploy-pack.log"; then
+  echo "expected live default deploy-pack mode to fail closed"
+  cat "$TMP_DIR/live-default-deploy-pack.log"
+  exit 1
+fi
+if [[ -s "$CAPTURE" ]]; then
+  echo "live default deploy-pack preflight should not invoke child scripts"
+  cat "$CAPTURE"
+  exit 1
+fi
+jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .stage == "preflight"
+  and .mode.plan_only == false
+  and .inputs.host_install_evidence_mode == "deploy-pack"
+' "$TMP_DIR/live-default-deploy-pack-summary.json" >/dev/null
+
 : >"$CAPTURE"
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
 ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
@@ -763,6 +814,7 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --code-file "$CODE_FILE" \
   --config-json "$CONFIG_JSON" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
   --provenance-org-id freenews-demo \
   --provenance-org-name "FreeNews Demo" \
@@ -775,7 +827,11 @@ if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
   cat "$CAPTURE"
   exit 1
 fi
-jq -e '.status == "pass" and .inputs.base_url == "https://[2606:4700:4700::1111]"' "$TMP_DIR/public-ipv6-summary.json" >/dev/null
+jq -e '
+  .status == "pass"
+  and .inputs.base_url == "https://[2606:4700:4700::1111]"
+  and .inputs.host_install_evidence_mode == "installed-host"
+' "$TMP_DIR/public-ipv6-summary.json" >/dev/null
 
 placeholder_input_cases=(
   "code-file|PRIVATE_CODE_FILE|--code-file must point to a real private access code file, not an unreplaced placeholder"
@@ -854,6 +910,7 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --code-file "$CODE_FILE" \
   --config-json "$CONFIG_JSON" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
   --provenance-org-id freenews-demo \
   --provenance-org-name "FreeNews Demo" \
@@ -871,7 +928,12 @@ fi
 
 host_check_line="$(sed -n '1p' "$CAPTURE")"
 for token in \
+  $'\t--evidence-mode\tinstalled-host' \
   $'\t--deploy-pack-dir\t'"$DEPLOY_PACK_DIR" \
+  $'\t--install-dir\t'"$INSTALL_DIR" \
+  $'\t--systemd-unit-file\t'"$SYSTEMD_UNIT_FILE" \
+  $'\t--proxy-kind\tcaddy' \
+  $'\t--proxy-config-file\t'"$PROXY_CONFIG_FILE" \
   $'\t--config-json\t'"$CONFIG_JSON" \
   $'\t--expected-base-url\thttps://helper.gpm-pilot.net'
 do
@@ -890,6 +952,11 @@ for token in \
   $'\t--require-public-host\t1' \
   $'\t--require-mtls\t0' \
   $'\t--expected-public-host\thelper.gpm-pilot.net' \
+  $'\t--host-install-evidence-mode\tinstalled-host' \
+  $'\t--install-dir\t'"$INSTALL_DIR" \
+  $'\t--systemd-unit-file\t'"$SYSTEMD_UNIT_FILE" \
+  $'\t--proxy-kind\tcaddy' \
+  $'\t--proxy-config-file\t'"$PROXY_CONFIG_FILE" \
   $'\t--provenance-sign\t1' \
   $'\t--provenance-private-key-file\t'"$PROVENANCE_KEY" \
   $'\t--provenance-org-id\tfreenews-demo' \
@@ -940,6 +1007,7 @@ jq -e '
   and .mode.child_execution_skipped == false
   and .mode.evidence_generated == true
   and .mode.evidence_status == "collected"
+  and .inputs.host_install_evidence_mode == "installed-host"
   and .child_summaries.host_install_check.status == "pass"
   and .child_summaries.verifier.schema.minor == 4
   and (.artifacts.bundle_service_smoke_summary_json | endswith("/bundle/access_bridge_service_smoke_summary.json"))
@@ -964,6 +1032,7 @@ FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_SCHEMA_MINOR=3 \
   --code-file "$CODE_FILE" \
   --config-json "$CONFIG_JSON" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
   --provenance-org-id freenews-demo \
   --provenance-org-name "FreeNews Demo" \
@@ -1080,6 +1149,7 @@ FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_READY=false \
   --code-file "$CODE_FILE" \
   --config-json "$CONFIG_JSON" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
   --provenance-org-id freenews-demo \
   --provenance-org-name "FreeNews Demo" \
@@ -1116,6 +1186,7 @@ FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_TRUSTED=false \
   --code-file "$CODE_FILE" \
   --config-json "$CONFIG_JSON" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
   --provenance-org-id freenews-demo \
   --provenance-org-name "FreeNews Demo" \
@@ -1156,6 +1227,7 @@ FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_BINDING_MODE=mismatch \
   --code-file "$CODE_FILE" \
   --config-json "$CONFIG_JSON" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
   --provenance-org-id freenews-demo \
   --provenance-org-name "FreeNews Demo" \
@@ -1203,6 +1275,7 @@ do
     --code-file "$CODE_FILE" \
     --config-json "$CONFIG_JSON" \
     --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+    "${INSTALLED_HOST_ARGS[@]}" \
     --provenance-private-key-file "$PROVENANCE_KEY" \
     --provenance-org-id freenews-demo \
     --provenance-org-name "FreeNews Demo" \
@@ -1245,6 +1318,7 @@ FAKE_ACCESS_RECOVERY_REAL_HELPER_ROADMAP_READY=false \
   --code-file "$CODE_FILE" \
   --config-json "$CONFIG_JSON" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
   --provenance-org-id freenews-demo \
   --provenance-org-name "FreeNews Demo" \
@@ -1279,6 +1353,7 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --code-file "$CODE_FILE" \
   --config-json "$CONFIG_JSON" \
   --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
   --provenance-private-key-file "$PROVENANCE_KEY" \
   --provenance-org-id freenews-demo \
   --provenance-org-name "FreeNews Demo" \

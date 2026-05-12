@@ -100,6 +100,8 @@ verifier, or roadmap child scripts.
 This wrapper is intentionally stricter than local rehearsal helpers. It refuses
 placeholder values, loopback/private-looking helper URLs, missing trust stores,
 and unsigned provenance inputs before running the evidence tools.
+Live pilot handoff runs also require installed-host evidence mode; deploy-pack
+mode is only allowed for plan-only rehearsal of the command shape.
 
 Child script path overrides are disabled by default. Use
 --allow-child-script-overrides 1 only for integration tests or diagnostics.
@@ -993,6 +995,9 @@ fi
 host_install_evidence_mode="$(printf '%s' "$host_install_evidence_mode" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
 if [[ "$host_install_evidence_mode" != "deploy-pack" && "$host_install_evidence_mode" != "installed-host" ]]; then
   fail_preflight "--host-install-evidence-mode must be deploy-pack or installed-host"
+fi
+if [[ "$plan_only" != "1" && "$host_install_evidence_mode" != "installed-host" ]]; then
+  fail_preflight "live real-helper pilot handoff requires --host-install-evidence-mode installed-host; deploy-pack host evidence is rehearsal-only (use --plan-only to inspect planned deploy-pack commands)"
 fi
 if [[ "$host_install_evidence_mode" == "installed-host" ]]; then
   if value_looks_placeholder "$install_dir"; then

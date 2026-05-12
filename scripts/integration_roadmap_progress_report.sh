@@ -839,7 +839,7 @@ cat >"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_SERVICE_SMO
   "schema": {
     "id": "access_bridge_service_smoke_summary",
     "major": 1,
-    "minor": 3
+    "minor": 6
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",
@@ -908,7 +908,7 @@ cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLO
   "schema": {
     "id": "access_bridge_deployment_evidence_summary",
     "major": 1,
-    "minor": 2
+    "minor": 5
   },
   "generated_at_utc": "$ACCESS_BRIDGE_EVIDENCE_GENERATED_AT_UTC",
   "status": "pass",

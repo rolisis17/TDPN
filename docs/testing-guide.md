@@ -147,9 +147,9 @@ Desktop launcher wrappers:
 ./scripts/ci_phase0.sh
 ```
 
-- Purpose: fail-fast contract check for launcher wiring/runtime, simple prompt budget (`<=6` prompts), config-v1, and local control API forwarding.
-- When to run: before full `ci_local.sh` when editing launcher/simple-mode flow, prompt flow, or config-v1/local API surface.
-- Expected artifacts: console step lines (`[ci-phase0] ...`); no aggregate summary file.
+- Purpose: fail-fast product-surface contract check for launcher wiring/runtime, simple prompt budget (`<=6` prompts), config-v1, local control API forwarding, public/admin split, desktop/Admin Console release guardrails, GPM admin settlement docs, and the lightweight Access Recovery checked examples contract.
+- When to run: before full `ci_local.sh` when editing launcher/simple-mode flow, prompt flow, config-v1/local API surface, public/admin split, desktop release packaging, GPM admin settlement docs, or Access Recovery checked examples.
+- Expected artifacts: console step lines (`[ci-phase0] ...`) plus `.easy-node-logs/ci_phase0_summary.json` by default; use `--summary-json PATH` and `--print-summary-json 1` when a caller needs a deterministic artifact path or inline payload.
 - Exit meaning: `0` with final `[ci-phase0] ok` on full pass; non-zero on first failing step (`2` for invalid args/missing executable step script).
 
 `ci_phase1_resilience` (focused Phase-1 resilience wrapper gate):

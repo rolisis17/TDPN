@@ -2010,6 +2010,8 @@ access_recovery_evidence_json() {
       def service_smoke_semantic_ok:
         rc_ok
         and pass_status
+        and ((.schema.major | type) == "number" and .schema.major == 1)
+        and ((.schema.minor | type) == "number" and .schema.minor >= 6)
         and service_smoke_transport_ok
         and service_smoke_mtls_ok
         and str_eq(.health.status; "ok")
@@ -2064,7 +2066,7 @@ access_recovery_evidence_json() {
         rc_ok
         and pass_status
         and ((.schema.major | type) == "number" and .schema.major == 1)
-        and ((.schema.minor | type) == "number" and .schema.minor >= 2)
+        and ((.schema.minor | type) == "number" and .schema.minor >= 5)
         and str_eq(.smoke.status; "pass")
         and str_eq(.smoke.evidence_status; "pass")
         and (.smoke.auth_required == true)

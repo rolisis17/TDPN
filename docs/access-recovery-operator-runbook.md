@@ -131,20 +131,25 @@ The preferred operator path is the single guarded wrapper. It captures the
 signed pilot evidence bundle, verifies trusted provenance, writes the verifier
 receipt, and refreshes roadmap readiness from that receipt:
 
+Replace the `PILOT_*`, `HELPER_ID`, and `ORG_ID` placeholders with real signed
+operator/helper artifacts before beta handoff. Do not point the trusted handoff
+path at `.easy-node-logs/access-recovery-demo`, `helper-demo`, or
+`freenews-demo`; those are rehearsal identities only.
+
 ```sh
 ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
   --base-url https://HELPER_PUBLIC_DNS \
   --path-id helper-web \
-  --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt \
-  --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \
-  --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
+  --code-file PILOT_ACCESS_CODE_FILE \
+  --config-json PILOT_BRIDGE_SERVICE_CONFIG_JSON \
+  --deploy-pack-dir PILOT_DEPLOY_PACK_DIR \
   --host-install-evidence-mode installed-host \
   --install-dir /etc/gpm/access-bridge \
   --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service \
   --proxy-kind caddy \
   --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy \
-  --expect-helper-id helper-demo \
-  --expect-org-id freenews-demo \
+  --expect-helper-id HELPER_ID \
+  --expect-org-id ORG_ID \
   --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE \
   --provenance-org-id ORG_ID \
   --provenance-org-name ORG_NAME \
@@ -163,17 +168,17 @@ probe and a rejected no-client-cert `/health` probe against the same endpoint.
 bash ./scripts/access_bridge_service_smoke.sh \
   --base-url https://HELPER_PUBLIC_DNS \
   --path-id helper-web \
-  --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt \
-  --expect-helper-id helper-demo \
-  --expect-org-id freenews-demo \
+  --code-file PILOT_ACCESS_CODE_FILE \
+  --expect-helper-id HELPER_ID \
+  --expect-org-id ORG_ID \
   --summary-json .easy-node-logs/bridge-service-smoke.json
 
 bash ./scripts/access_bridge_deployment_evidence.sh \
   --smoke-summary-json .easy-node-logs/bridge-service-smoke.json \
-  --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \
-  --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
-  --expect-helper-id helper-demo \
-  --expect-org-id freenews-demo \
+  --config-json PILOT_BRIDGE_SERVICE_CONFIG_JSON \
+  --deploy-pack-dir PILOT_DEPLOY_PACK_DIR \
+  --expect-helper-id HELPER_ID \
+  --expect-org-id ORG_ID \
   --summary-json .easy-node-logs/bridge-deployment-evidence.json
 
 bash ./scripts/access_bridge_host_install_check.sh \
@@ -182,33 +187,33 @@ bash ./scripts/access_bridge_host_install_check.sh \
   --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service \
   --proxy-kind caddy \
   --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy \
-  --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \
+  --config-json PILOT_BRIDGE_SERVICE_CONFIG_JSON \
   --expected-base-url https://HELPER_PUBLIC_DNS \
   --summary-json .easy-node-logs/bridge-host-install-check.json
 
 ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle \
   --base-url https://HELPER_PUBLIC_DNS \
   --path-id helper-web \
-  --code-file .easy-node-logs/access-recovery-demo/bridge-code.txt \
-  --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \
-  --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
+  --code-file PILOT_ACCESS_CODE_FILE \
+  --config-json PILOT_BRIDGE_SERVICE_CONFIG_JSON \
+  --deploy-pack-dir PILOT_DEPLOY_PACK_DIR \
   --host-install-evidence-mode installed-host \
   --install-dir /etc/gpm/access-bridge \
   --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service \
   --proxy-kind caddy \
   --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy \
-  --expect-helper-id helper-demo \
-  --expect-org-id freenews-demo \
-  --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json \
+  --expect-helper-id HELPER_ID \
+  --expect-org-id ORG_ID \
+  --summary-json .easy-node-logs/access-recovery-pilot/access-bridge-pilot-evidence-summary.json \
   --provenance-sign 1 \
   --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE \
   --provenance-org-id ORG_ID \
   --provenance-org-name ORG_NAME \
-  --provenance-out .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence.provenance.json
+  --provenance-out .easy-node-logs/access-recovery-pilot/access-bridge-pilot-evidence.provenance.json
 
 ./scripts/easy_node.sh access-bridge-pilot-evidence-bundle-verify \
-  --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json \
-  --provenance-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence.provenance.json \
+  --summary-json .easy-node-logs/access-recovery-pilot/access-bridge-pilot-evidence-summary.json \
+  --provenance-json .easy-node-logs/access-recovery-pilot/access-bridge-pilot-evidence.provenance.json \
   --trust-store TRUST_STORE \
   --require-trusted-provenance 1 \
   --verification-summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_verify_summary.json \
