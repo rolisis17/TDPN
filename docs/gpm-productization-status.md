@@ -9,7 +9,8 @@ Scope:
 Current pivot:
 - Access Recovery is the active roadmap track. The launchable wedge is signed emergency access packs, signed bridge invites, trusted organization keys, signed helper registries, browser-local verification, and operator evidence bundles for helper bridges.
 - Local rehearsal evidence can be refreshed with `./scripts/easy_node.sh access-recovery-local-evidence-refresh --write-canonical 1 --refresh-roadmap 1 --print-summary-json 1`; it proves the loopback flow and writes canonical roadmap summaries, but it is not real pilot handoff evidence.
-- Pilot handoff still requires real helper HTTPS evidence through `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle ... --provenance-sign 1 ...` plus `access-bridge-pilot-evidence-bundle-verify --require-trusted-provenance 1 --verification-summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_verify_summary.json`; the roadmap only marks pilot-ready after that trusted verifier receipt passes and matches the current evidence hashes.
+- Pilot handoff still requires real helper HTTPS evidence through `./scripts/easy_node.sh access-bridge-pilot-evidence-bundle ... --provenance-sign 1 ...` plus `access-bridge-pilot-evidence-bundle-verify --require-trusted-provenance 1 --verification-summary-json .easy-node-logs/access_bridge_pilot_evidence_bundle_verify_summary.json`; the trusted verifier receipt is the handoff authority. Roadmap reports are consumer/status evidence only.
+- `access-recovery-real-helper-evidence-run --roadmap-refresh 0` is diagnostics/verifier-only. It can inspect the verifier path, but it is not full pilot handoff completion because roadmap/status refresh is skipped.
 
 Compatibility note:
 - legacy TDPN path aliases are retained for backward compatibility.

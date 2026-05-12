@@ -1615,6 +1615,52 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-next-actions-run] Access Recovery trusted verifier rejects copied demo identity trust store"
+SUMMARY_ACCESS_RECOVERY_TRUST_STORE_DEMO_IDENTITY="$TMP_DIR/summary_access_recovery_trust_store_demo_identity.json"
+REPORTS_ACCESS_RECOVERY_TRUST_STORE_DEMO_IDENTITY="$TMP_DIR/reports_access_recovery_trust_store_demo_identity"
+ACCESS_RECOVERY_DEMO_IDENTITY_TRUST_STORE_FILE="$TMP_DIR/access_recovery_demo_identity_trust_store.json"
+printf '{"trusted_keys":[{"source":"pilot registry","org_id":"freenews-demo","name":"FreeNews Demo","helper_id":"helper-demo"}]}\n' >"$ACCESS_RECOVERY_DEMO_IDENTITY_TRUST_STORE_FILE"
+rm -f "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_trust_store_placeholder \
+FAKE_ACCESS_RECOVERY_VERIFY="$FAKE_ACCESS_RECOVERY_VERIFY" \
+FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE="$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_TRUST_STORE_DEMO_IDENTITY" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_DEMO_IDENTITY" \
+  --include-id trusted_pilot_evidence_verify \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_DEMO_IDENTITY_TRUST_STORE_FILE" \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_trust_store_demo_identity.log" 2>&1
+access_recovery_trust_store_demo_identity_rc=$?
+set -e
+if [[ "$access_recovery_trust_store_demo_identity_rc" != "2" ]]; then
+  echo "expected demo-identity Access Recovery trust-store hard-fail rc=2, got rc=$access_recovery_trust_store_demo_identity_rc"
+  cat "$TMP_DIR/access_recovery_trust_store_demo_identity.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_DEMO_IDENTITY" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_DEMO_IDENTITY"
+  fi
+  exit 1
+fi
+if [[ -f "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" ]]; then
+  echo "Access Recovery verifier ran despite demo-identity operator trust-store"
+  cat "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .inputs.access_recovery_trust_store_configured == false
+  and (.inputs.access_recovery_trust_store_source | contains("demo_marked"))
+  and .actions[0].id == "trusted_pilot_evidence_verify"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_trust_store_precondition"
+' "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_DEMO_IDENTITY" >/dev/null; then
+  echo "Access Recovery demo-identity trust-store precondition summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_DEMO_IDENTITY"
+  exit 1
+fi
+
 echo "[roadmap-next-actions-run] Access Recovery trusted verifier rejects raw public-key handoff"
 SUMMARY_ACCESS_RECOVERY_PUBLIC_KEY_HANDOFF="$TMP_DIR/summary_access_recovery_public_key_handoff.json"
 REPORTS_ACCESS_RECOVERY_PUBLIC_KEY_HANDOFF="$TMP_DIR/reports_access_recovery_public_key_handoff"

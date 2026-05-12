@@ -73,39 +73,39 @@ Use this checklist before a helper bridge is announced to users. Keep the bridge
 
 ```sh
 go run ./cmd/gpmrecover bridge-service-config \
-  --invite .easy-node-logs/access-recovery-demo/bridge-invite.signed.json \
-  --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json \
-  --signed-helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json \
-  --out .easy-node-logs/access-recovery-demo/bridge-service-config.json
+  --invite "$PILOT_BRIDGE_INVITE_SIGNED" \
+  --trust-store "$PILOT_RECOVERY_TRUST_STORE" \
+  --signed-helper-registry "$PILOT_HELPER_REGISTRY_SIGNED" \
+  --out .easy-node-logs/access-recovery-pilot/bridge-service-config.json
 go run ./cmd/gpmrecover bridge-service-check \
-  --config .easy-node-logs/access-recovery-demo/bridge-service-config.json \
+  --config .easy-node-logs/access-recovery-pilot/bridge-service-config.json \
   --path-id helper-web
-CONFIG_HASH="$(sha256sum .easy-node-logs/access-recovery-demo/bridge-service-config.json | awk '{print $1}')"
+CONFIG_HASH="$(sha256sum .easy-node-logs/access-recovery-pilot/bridge-service-config.json | awk '{print $1}')"
 ```
 
 2. Create a high-entropy access code out of band and deploy only the hash. Do not place the plaintext code in config files, shell history, service units, tickets, screenshots, or smoke summaries:
 
 ```sh
 go run ./cmd/gpmrecover bridge-service-code-generate \
-  --code-out .easy-node-logs/access-recovery-demo/bridge-code.txt \
-  --hash-out .easy-node-logs/access-recovery-demo/bridge-code-hash.json
-CODE_HASH="$(jq -r '.sha256' .easy-node-logs/access-recovery-demo/bridge-code-hash.json)"
+  --code-out .easy-node-logs/access-recovery-pilot/bridge-code.txt \
+  --hash-out .easy-node-logs/access-recovery-pilot/bridge-code-hash.json
+CODE_HASH="$(jq -r '.sha256' .easy-node-logs/access-recovery-pilot/bridge-code-hash.json)"
 ```
 
 3. Generate the helper deploy pack and install only the generated env, wrapper, service unit, and selected HTTPS reverse-proxy example on the helper host:
 
 ```sh
 go run ./cmd/gpmrecover bridge-service-deploy-pack \
-  --out-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
+  --out-dir .easy-node-logs/access-recovery-pilot/bridge-deploy \
   --public-host HELPER_PUBLIC_DNS \
   --config-sha256 "$CONFIG_HASH" \
   --access-code-sha256 "$CODE_HASH"
 
 bash ./scripts/access_bridge_host_install_check.sh \
-  --deploy-pack-dir .easy-node-logs/access-recovery-demo/bridge-deploy \
-  --config-json .easy-node-logs/access-recovery-demo/bridge-service-config.json \
+  --deploy-pack-dir .easy-node-logs/access-recovery-pilot/bridge-deploy \
+  --config-json .easy-node-logs/access-recovery-pilot/bridge-service-config.json \
   --expected-base-url https://HELPER_PUBLIC_DNS \
-  --summary-json .easy-node-logs/access-recovery-demo/bridge-host-install-check.json
+  --summary-json .easy-node-logs/access-recovery-pilot/bridge-host-install-check.json
 ```
 
 The deploy-pack host check is a rehearsal check for the generated files. Pilot
@@ -129,7 +129,9 @@ development, but it is not Access Recovery pilot handoff evidence.
 
 The preferred operator path is the single guarded wrapper. It captures the
 signed pilot evidence bundle, verifies trusted provenance, writes the verifier
-receipt, and refreshes roadmap readiness from that receipt:
+receipt, and refreshes roadmap readiness from that receipt. The trusted verifier
+receipt is the handoff authority; roadmap reports only consume it as
+status evidence.
 
 Replace the `PILOT_*`, `HELPER_ID`, and `ORG_ID` placeholders with real signed
 operator/helper artifacts before beta handoff. Do not point the trusted handoff
@@ -156,6 +158,10 @@ path at `.easy-node-logs/access-recovery-demo`, `helper-demo`, or
   --trust-store TRUST_STORE \
   --reports-dir .easy-node-logs/access-recovery-pilot
 ```
+
+Do not use `access-recovery-real-helper-evidence-run --roadmap-refresh 0` as a
+full pilot handoff. That mode is diagnostics/verifier-only and intentionally
+skips roadmap/status refresh.
 
 Use the lower-level commands below only when debugging a specific stage.
 When the helper's public reverse proxy is intentionally enforcing client
@@ -220,7 +226,7 @@ bash ./scripts/access_bridge_host_install_check.sh \
   --print-verification-summary-json 1
 ```
 
-Keep the smoke JSON, deployment-evidence JSON, host-install-check JSON, trusted provenance JSON, verifier summary JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, `manifest.sha256`, `<bundle>.tar.gz`, `<bundle>.tar.gz.sha256`, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair; the bundle skips access-code/private-key-looking deploy-pack files. Local unsigned integrity checks are diagnostic rehearsal output only. Pilot/operator handoff verification must require trusted provenance, write the verifier summary receipt bound to the current evidence hashes, reject demo-marked trust stores unless explicitly allowed for diagnostics, validate the bundled smoke/deployment/host evidence semantics, and reject manifest tamper, tar checksum mismatch, unsafe tar paths, tar links, and untrusted provenance.
+Keep the smoke JSON, deployment-evidence JSON, host-install-check JSON, trusted provenance JSON, verifier summary JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, `manifest.sha256`, `<bundle>.tar.gz`, `<bundle>.tar.gz.sha256`, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair; the bundle skips access-code/private-key-looking deploy-pack files. Local unsigned integrity checks are diagnostic rehearsal output only. Pilot/operator handoff verification must require trusted provenance, write the verifier summary receipt bound to the current evidence hashes, reject demo-marked trust stores unless explicitly allowed for diagnostics, validate the bundled smoke/deployment/host evidence semantics, and reject manifest tamper, tar checksum mismatch, unsafe tar paths, tar links, and untrusted provenance. Do not promote from a roadmap report alone; use the trusted verifier receipt.
 
 Before marking handoff ready, check the verifier receipt shows schema minor `4` or newer, `trusted_pilot_receipt_ready=true`, `pilot_handoff_ready=true`, `pilot_handoff_criteria.bundled_child_evidence_semantic_ok=true`, `pilot_handoff_criteria.evidence_freshness_ok=true`, `pilot_handoff_criteria.installed_host_evidence_present=true`, real-helper HTTPS provenance from a non-demo `trust_store`, `trust_store_sha256_present=true`, `public_key_file_absent=true`, dev trust-store override disabled, and smoke/deployment/host summary SHA-256 bindings.
 
@@ -237,9 +243,9 @@ Before marking handoff ready, check the verifier receipt shows schema minor `4` 
 
 ```sh
 go run ./cmd/gpmrecover bridge-registry-upsert-helper \
-  --helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.json \
+  --helper-registry .easy-node-logs/access-recovery-pilot/bridge-helper-registry.json \
   --helper-id helper-1 \
-  --org-ids freenews-demo \
+  --org-ids ORG_ID \
   --display-name "Helper 1" \
   --contact-url https://helper.gpm-pilot.net/contact \
   --abuse-report-url https://helper.gpm-pilot.net/abuse \
@@ -250,9 +256,9 @@ go run ./cmd/gpmrecover bridge-registry-upsert-helper \
 
 ```sh
 go run ./cmd/gpmrecover bridge-registry-check \
-  --helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.json \
+  --helper-registry .easy-node-logs/access-recovery-pilot/bridge-helper-registry.json \
   --helper-id helper-1 \
-  --org-id freenews-demo \
+  --org-id ORG_ID \
   --require-active
 ```
 
@@ -260,11 +266,11 @@ go run ./cmd/gpmrecover bridge-registry-check \
 
 ```sh
 go run ./cmd/gpmrecover bridge-registry-sign \
-  --helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.json \
-  --org-id freenews-demo \
-  --org-name "FreeNews Demo" \
-  --private-key-file .easy-node-logs/access-recovery-demo/recovery.key \
-  --out .easy-node-logs/access-recovery-demo/bridge-helper-registry.signed.json
+  --helper-registry .easy-node-logs/access-recovery-pilot/bridge-helper-registry.json \
+  --org-id ORG_ID \
+  --org-name "ORG_NAME" \
+  --private-key-file "$PILOT_ORG_PRIVATE_KEY_FILE" \
+  --out .easy-node-logs/access-recovery-pilot/bridge-helper-registry.signed.json
 ```
 
 ## User Handoff
@@ -279,11 +285,11 @@ For non-demo or rotated trust stores, export a single trusted-key handoff from t
 
 ```sh
 go run ./cmd/gpmrecover trust-export-key \
-  --trust-store .easy-node-logs/access-recovery-demo/recovery-trust.json \
-  --org-id freenews-demo \
+  --trust-store "$PILOT_RECOVERY_TRUST_STORE" \
+  --org-id ORG_ID \
   --key-id KEY_ID \
-  --out .easy-node-logs/access-recovery-demo/recovery-trusted-key.json \
-  --text-out .easy-node-logs/access-recovery-demo/recovery-trusted-key.txt
+  --out .easy-node-logs/access-recovery-pilot/recovery-trusted-key.json \
+  --text-out .easy-node-logs/access-recovery-pilot/recovery-trusted-key.txt
 ```
 
 User flow:
@@ -301,7 +307,7 @@ Quarantine a helper immediately if the contact path is compromised, abusive, sta
 
 ```sh
 go run ./cmd/gpmrecover bridge-registry-set-status \
-  --helper-registry .easy-node-logs/access-recovery-demo/bridge-helper-registry.json \
+  --helper-registry .easy-node-logs/access-recovery-pilot/bridge-helper-registry.json \
   --helper-id helper-1 \
   --status quarantined \
   --reason "operator requested maintenance window"

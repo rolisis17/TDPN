@@ -532,13 +532,30 @@ access_recovery_trust_store_content_is_dev_01() {
   path="$(trim "${1:-}")"
   [[ -f "$path" ]] || return 1
   jq -e '
+    def demo_marker:
+      tostring
+      | ascii_downcase
+      | test("(^|[^a-z0-9])(generated-demo|helper-demo|freenews-demo|demo)([^a-z0-9]|$)");
     [
-      .trusted_keys[]?
-      | ((.source // "") | tostring | ascii_downcase)
+      (.trusted_keys[]?, .keys[]?)
+      | [
+          .source,
+          .description,
+          .label,
+          .name,
+          .org_id,
+          .organization_id,
+          .trusted_org_id,
+          .helper_id,
+          .registry_id
+        ]
+      | map(select(. != null) | tostring)
+      | join(" ")
       | select(
-          contains("generated demo bundle")
-          or contains("demo handoff")
-          or contains("demo bundle")
+          demo_marker
+          or (ascii_downcase | contains("generated demo bundle"))
+          or (ascii_downcase | contains("demo handoff"))
+          or (ascii_downcase | contains("demo bundle"))
         )
     ]
     | length > 0

@@ -881,9 +881,9 @@ cat >"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_SERVICE_SMO
   "health": {
     "http_status": "200",
     "status": "ok",
-    "helper_id": "helper-demo",
-    "organization_id": "freenews-demo",
-    "registry_id": "registry-demo",
+    "helper_id": "helper-prod",
+    "organization_id": "pilot-org",
+    "registry_id": "registry-prod",
     "config_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   },
   "auth": {
@@ -981,13 +981,13 @@ cat >"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_DEPLO
     }
   },
   "deployed_identity": {
-    "helper_id": "helper-demo",
-    "organization_id": "freenews-demo",
-    "registry_id": "registry-demo"
+    "helper_id": "helper-prod",
+    "organization_id": "pilot-org",
+    "registry_id": "registry-prod"
   },
   "recommended_next_action": {
     "id": "record_access_bridge_pilot_evidence_bundle",
-    "command": "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json"
+    "command": "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --summary-json .easy-node-logs/access-recovery-pilot/access-bridge-pilot-evidence-summary.json"
   }
 }
 EOF_ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY
@@ -1003,9 +1003,9 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
   "status": "pass",
   "notes": "Access bridge host install checks passed",
   "inputs": {
-    "deploy_pack_dir": ".easy-node-logs/access-recovery-demo/bridge-deploy",
+    "deploy_pack_dir": ".easy-node-logs/access-recovery-pilot/bridge-deploy",
     "service_name": "gpm-access-bridge",
-    "config_json": ".easy-node-logs/access-recovery-demo/bridge-service-config.json"
+    "config_json": ".easy-node-logs/access-recovery-pilot/bridge-service-config.json"
   },
   "observed": {
     "env_config_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1052,7 +1052,7 @@ cat >"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_HOST_INSTALL
   ],
   "recommended_next_action": {
     "id": "record_access_bridge_pilot_evidence_bundle",
-    "command": "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --summary-json .easy-node-logs/access-recovery-demo/access-bridge-pilot-evidence-summary.json"
+    "command": "./scripts/easy_node.sh access-bridge-pilot-evidence-bundle --summary-json .easy-node-logs/access-recovery-pilot/access-bridge-pilot-evidence-summary.json"
   }
 }
 EOF_ACCESS_BRIDGE_HOST_INSTALL_SUMMARY
@@ -1103,7 +1103,7 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
     "bundle_tar": ".easy-node-logs/access_bridge_pilot_evidence_bundle.tar.gz",
     "bundle_tar_sha256_file": ".easy-node-logs/access_bridge_pilot_evidence_bundle.tar.gz.sha256",
     "provenance_json": ".easy-node-logs/access_bridge_pilot_evidence_bundle.provenance.json",
-    "trust_store": ".easy-node-logs/access-recovery-demo/provenance-trust-store.json",
+    "trust_store": ".easy-node-logs/access-recovery-pilot/provenance-trust-store.json",
     "trust_store_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     "public_key_file": null
   },
@@ -1128,10 +1128,10 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
     "status": "pass",
     "rc": 0,
     "key_id": "pilot-key",
-    "organization_id": "freenews-demo",
-    "organization_name": "FreeNews Demo",
-    "trusted_org_id": "freenews-demo",
-    "trusted_org_name": "FreeNews Demo",
+    "organization_id": "pilot-org",
+    "organization_name": "Pilot Org",
+    "trusted_org_id": "pilot-org",
+    "trusted_org_name": "Pilot Org",
     "evidence_scope": "real_helper_https",
     "summary_evidence_scope": "real_helper_https",
     "bundle_tar_name": "access_bridge_pilot_evidence_bundle.tar.gz",
@@ -1140,9 +1140,9 @@ cat >"$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" <<EOF_ACCESS_BRI
   "evidence_binding": {
     "source_summary_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "base_url": "https://recovery-helper.gpm-pilot.net",
-    "helper_id": "helper-demo",
-    "organization_id": "freenews-demo",
-    "registry_id": "registry-demo",
+    "helper_id": "helper-prod",
+    "organization_id": "pilot-org",
+    "registry_id": "registry-prod",
     "smoke_summary_json": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON",
     "smoke_summary_sha256": "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256",
     "deployment_evidence_summary_json": "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON",
@@ -1267,8 +1267,8 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_service_smoke.available == true
   and .access_recovery_track.access_bridge_service_smoke.status == "pass"
   and .access_recovery_track.access_bridge_service_smoke.source_summary_json == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"'"
-  and .access_recovery_track.access_bridge_service_smoke.details.helper_id == "helper-demo"
-  and .access_recovery_track.access_bridge_service_smoke.details.organization_id == "freenews-demo"
+  and .access_recovery_track.access_bridge_service_smoke.details.helper_id == "helper-prod"
+  and .access_recovery_track.access_bridge_service_smoke.details.organization_id == "pilot-org"
   and .access_recovery_track.access_bridge_service_smoke.details.auth_required == true
   and .access_recovery_track.access_bridge_service_smoke.details.valid_code_http_status == "200"
   and .access_recovery_track.access_bridge_service_smoke.details.bridge_http_status == "200"
@@ -1701,6 +1701,58 @@ if ! jq -e \
   ' "$ROADMAP_INSTALLED_HOST_SUMMARY_JSON" >/dev/null; then
   echo "roadmap installed-host access bridge evidence summary mismatch"
   cat "$ROADMAP_INSTALLED_HOST_SUMMARY_JSON"
+  exit 1
+fi
+
+ACCESS_BRIDGE_DEMO_BUNDLE_VERIFY_SUMMARY_JSON="$TMP_DIR/access_bridge_demo_material_pilot_evidence_bundle_verify_summary.json"
+jq '
+  .inputs.trust_store = ".easy-node-logs/access-recovery-demo/provenance-trust-store.json"
+  | .trusted_provenance.organization_id = "freenews-demo"
+  | .trusted_provenance.organization_name = "FreeNews Demo"
+  | .trusted_provenance.trusted_org_id = "freenews-demo"
+  | .trusted_provenance.trusted_org_name = "FreeNews Demo"
+  | .evidence_binding.helper_id = "helper-demo"
+  | .evidence_binding.organization_id = "freenews-demo"
+  | .evidence_binding.registry_id = "registry-demo"
+' "$ACCESS_BRIDGE_INSTALLED_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_DEMO_BUNDLE_VERIFY_SUMMARY_JSON"
+ROADMAP_DEMO_RECEIPT_SUMMARY_JSON="$TMP_DIR/roadmap_demo_receipt_summary.json"
+ROADMAP_DEMO_RECEIPT_REPORT_MD="$TMP_DIR/roadmap_demo_receipt_report.md"
+if ! FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
+ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL" \
+ROADMAP_PROGRESS_SINGLE_MACHINE_SCRIPT="$FAKE_SINGLE" \
+run_roadmap_progress_report \
+  --refresh-manual-validation 1 \
+  --refresh-single-machine-readiness 0 \
+  --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
+  --phase5-settlement-layer-summary-json "$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" \
+  --blockchain-mainnet-activation-gate-summary-json "$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" \
+  --blockchain-bootstrap-governance-graduation-gate-summary-json "$BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_DEMO_BUNDLE_VERIFY_SUMMARY_JSON" \
+  --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
+  --summary-json "$ROADMAP_DEMO_RECEIPT_SUMMARY_JSON" \
+  --report-md "$ROADMAP_DEMO_RECEIPT_REPORT_MD" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_demo_receipt_rejected.log 2>&1; then
+  echo "roadmap progress report failed while rejecting demo-material access bridge evidence"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_demo_receipt_rejected.log
+  exit 1
+fi
+if ! jq -e '
+    .access_recovery_track.status != "pilot-evidence-ready"
+    and .access_recovery_track.trusted_verifier_ready == false
+    and .access_recovery_track.trusted_pilot_receipt_ready == false
+    and .access_recovery_track.verifier_pilot_handoff_ready == false
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == false
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status == "fail"
+    and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.dev_or_demo_material_present == true
+    and (.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.notes | contains("demo"))
+  ' "$ROADMAP_DEMO_RECEIPT_SUMMARY_JSON" >/dev/null; then
+  echo "roadmap demo-material verifier receipt rejection mismatch"
+  cat "$ROADMAP_DEMO_RECEIPT_SUMMARY_JSON"
   exit 1
 fi
 if ! grep -Fq '## Access Recovery Track' "$REPORT_MD"; then

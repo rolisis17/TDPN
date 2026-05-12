@@ -2497,6 +2497,42 @@ access_recovery_verifier_evidence_json() {
         end;
       def rc_ok:
         if has("rc") then ((.rc | type) == "number" and .rc == 0) else false end;
+      def demo_marker:
+        tostring
+        | gsub("\\\\"; "/")
+        | ascii_downcase
+        | (
+          test("(^|[^a-z0-9])(generated-demo|helper-demo|freenews-demo|demo)([^a-z0-9]|$)")
+          or contains("generated demo bundle")
+          or contains("demo handoff")
+          or contains("demo bundle")
+          or contains("/.easy-node-logs/access-recovery-demo/")
+          or contains("/docs/examples/")
+          or contains("/examples/access-recovery/")
+        );
+      def verifier_receipt_has_dev_material:
+        [
+          .inputs.summary_json,
+          .inputs.bundle_dir,
+          .inputs.bundle_tar,
+          .inputs.provenance_json,
+          .inputs.trust_store,
+          .artifacts.source_summary_json,
+          .artifacts.bundle_dir,
+          .artifacts.bundle_tar,
+          .artifacts.provenance_json,
+          .trusted_provenance.organization_id,
+          .trusted_provenance.organization_name,
+          .trusted_provenance.trusted_org_id,
+          .trusted_provenance.trusted_org_name,
+          .evidence_binding.helper_id,
+          .evidence_binding.organization_id,
+          .evidence_binding.registry_id,
+          .evidence_binding.smoke_summary_json,
+          .evidence_binding.deployment_evidence_summary_json,
+          .evidence_binding.host_install_check_summary_json
+        ]
+        | any(.[]; (. != null and demo_marker));
       def enabled($path):
         if ($path | type) == "boolean" then $path else false end;
       def pass_status($path):
@@ -2545,6 +2581,7 @@ access_recovery_verifier_evidence_json() {
       def trusted_pilot_receipt_ready:
         schema_version_ready
         and (.inputs.allow_dev_trust_store != true)
+        and (verifier_receipt_has_dev_material | not)
         and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok == true)
         and evidence_freshness_ready
         and (.pilot_handoff_criteria.installed_host_evidence_present == true)
@@ -2606,6 +2643,7 @@ access_recovery_verifier_evidence_json() {
             elif $valid_contract and (schema_major_ready | not) then "Access bridge pilot evidence verifier receipt schema major is incompatible with pilot handoff readiness"
             elif $valid_contract and (schema_minor_ready | not) then "Access bridge pilot evidence verifier receipt is from an old schema that cannot prove pilot handoff readiness"
             elif $valid_contract and (.inputs.allow_dev_trust_store == true) then "Access bridge pilot evidence verifier used a diagnostic dev trust-store override that cannot prove pilot handoff readiness"
+            elif $valid_contract and verifier_receipt_has_dev_material then "Access bridge pilot evidence verifier receipt contains demo trust-store paths or copied demo identity material"
             elif $valid_contract and (generated_at_ready | not) then "Access bridge pilot evidence verifier receipt is missing generated_at_utc"
             elif $valid_contract and (evidence_binding_ready | not) then "Access bridge pilot evidence verifier receipt is missing required evidence binding hashes"
             elif $valid_contract and (.pilot_handoff_criteria.bundled_child_evidence_semantic_ok != true) then "Access bridge pilot evidence verifier receipt did not prove bundled child evidence semantics"
@@ -2654,6 +2692,7 @@ access_recovery_verifier_evidence_json() {
             pilot_handoff_criteria_provenance_organization_matches_evidence: (if (.pilot_handoff_criteria.provenance_organization_matches_evidence | type) == "boolean" then .pilot_handoff_criteria.provenance_organization_matches_evidence else null end),
             pilot_handoff_criteria_trusted_organization_matches_evidence: (if (.pilot_handoff_criteria.trusted_organization_matches_evidence | type) == "boolean" then .pilot_handoff_criteria.trusted_organization_matches_evidence else null end),
             pilot_handoff_criteria_dev_trust_store_allowed: (if (.pilot_handoff_criteria.dev_trust_store_allowed | type) == "boolean" then .pilot_handoff_criteria.dev_trust_store_allowed else null end),
+            dev_or_demo_material_present: verifier_receipt_has_dev_material,
             evidence_scope: str_or_null(.trusted_provenance.evidence_scope),
             summary_evidence_scope: str_or_null(.trusted_provenance.summary_evidence_scope),
             generated_at_utc_present: generated_at_ready,

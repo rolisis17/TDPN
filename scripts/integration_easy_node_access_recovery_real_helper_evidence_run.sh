@@ -619,7 +619,7 @@ fi
 jq -e '
   .schema.id == "access_recovery_real_helper_evidence_run_summary"
   and .schema.major == 1
-  and .schema.minor == 4
+  and .schema.minor == 5
   and .status == "skipped"
   and .status != "pass"
   and .rc == 0
@@ -689,7 +689,7 @@ jq -e \
   --arg proxy_config_file "$PROXY_CONFIG_FILE" '
   .schema.id == "access_recovery_real_helper_evidence_run_summary"
   and .schema.major == 1
-  and .schema.minor == 4
+  and .schema.minor == 5
   and .status == "skipped"
   and .status != "pass"
   and .rc == 0
@@ -1320,7 +1320,7 @@ done
 jq -e '
   .schema.id == "access_recovery_real_helper_evidence_run_summary"
   and .schema.major == 1
-  and .schema.minor == 4
+  and .schema.minor == 5
   and .status == "pass"
   and .stage == "complete"
   and .mode.plan_only == false
@@ -1333,6 +1333,9 @@ jq -e '
   and (.artifacts.bundle_service_smoke_summary_json | endswith("/bundle/access_bridge_service_smoke_summary.json"))
   and (.artifacts.bundle_deployment_evidence_summary_json | endswith("/bundle/access_bridge_deployment_evidence_summary.json"))
   and (.artifacts.bundle_host_install_check_summary_json | endswith("/bundle/access_bridge_host_install_check_summary.json"))
+  and .readiness.verifier_ready == true
+  and .readiness.roadmap_ready == true
+  and .readiness.handoff_complete == true
   and .readiness.trusted_verifier_pilot_handoff_ready == true
   and .readiness.roadmap_access_recovery_pilot_handoff_ready == true
 ' "$TMP_DIR/run-summary.json" >/dev/null
@@ -1687,7 +1690,19 @@ if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
   cat "$CAPTURE"
   exit 1
 fi
-jq -e '.status == "pass" and .stage == "complete" and .inputs.roadmap_refresh == false and .readiness.trusted_verifier_pilot_handoff_ready == true and .readiness.roadmap_access_recovery_pilot_handoff_ready == false and .child_summaries.roadmap == null' "$TMP_DIR/no-roadmap-refresh-summary.json" >/dev/null
+jq -e '
+  .status == "pass"
+  and .stage == "verifier_ready"
+  and .mode.evidence_generated == true
+  and .mode.evidence_status == "verifier_ready"
+  and .inputs.roadmap_refresh == false
+  and .readiness.verifier_ready == true
+  and .readiness.roadmap_ready == false
+  and .readiness.handoff_complete == false
+  and .readiness.trusted_verifier_pilot_handoff_ready == true
+  and .readiness.roadmap_access_recovery_pilot_handoff_ready == false
+  and .child_summaries.roadmap == null
+' "$TMP_DIR/no-roadmap-refresh-summary.json" >/dev/null
 
 : >"$CAPTURE"
 set +e

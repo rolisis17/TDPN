@@ -844,7 +844,7 @@ write_summary() {
   local stage="$3"
   local notes="$4"
   local generated_at_utc
-  local host_install_obj bundle_obj verify_obj roadmap_obj pilot_ready roadmap_ready evidence_scope verifier_scope
+  local host_install_obj bundle_obj verify_obj roadmap_obj pilot_ready roadmap_ready handoff_complete evidence_scope verifier_scope
   local code_present_json code_file_present_json
   local roadmap_refresh_json
   local plan_only_json
@@ -859,6 +859,11 @@ write_summary() {
   fi
   pilot_ready="$(printf '%s\n' "$verify_obj" | jq -r 'if type == "object" then (.pilot_handoff_ready // false | tostring) else "false" end')"
   roadmap_ready="$(printf '%s\n' "$roadmap_obj" | jq -r 'if type == "object" then (.access_recovery_pilot_handoff_ready // false | tostring) else "false" end')"
+  if [[ "$pilot_ready" == "true" && "$roadmap_ready" == "true" ]]; then
+    handoff_complete="true"
+  else
+    handoff_complete="false"
+  fi
   evidence_scope="$(printf '%s\n' "$bundle_obj" | jq -r 'if type == "object" then (.evidence_scope // "") else "" end')"
   verifier_scope="$(printf '%s\n' "$verify_obj" | jq -r 'if type == "object" then ((.details.evidence_scope // .trusted_provenance.evidence_scope // .evidence_scope // "") | tostring) else "" end')"
   if [[ -n "$code" ]]; then
@@ -919,6 +924,7 @@ write_summary() {
     --argjson plan_only "$plan_only_json" \
     --argjson pilot_handoff_ready "$pilot_ready" \
     --argjson roadmap_ready "$roadmap_ready" \
+    --argjson handoff_complete "$handoff_complete" \
     --argjson roadmap_refresh "$roadmap_refresh_json" \
     --argjson host_install_check "$host_install_obj" \
     --argjson bundle "$bundle_obj" \
@@ -928,7 +934,7 @@ write_summary() {
     --argjson planned_artifacts "$planned_artifacts_json" \
     '{
       version: 1,
-      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 4},
+      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 5},
       generated_at_utc: $generated_at_utc,
       status: $status,
       rc: $rc,
@@ -937,8 +943,14 @@ write_summary() {
       mode: {
         plan_only: $plan_only,
         child_execution_skipped: ($plan_only and $stage == "plan"),
-        evidence_generated: (if $plan_only then false else ($status == "pass" and $stage == "complete") end),
-        evidence_status: (if $plan_only then "planned_non_evidence" elif ($status == "pass" and $stage == "complete") then "collected" else "not_collected" end)
+        evidence_generated: (if $plan_only then false else ($status == "pass" and ($stage == "complete" or $stage == "verifier_ready")) end),
+        evidence_status: (
+          if $plan_only then "planned_non_evidence"
+          elif ($status == "pass" and $stage == "complete") then "collected"
+          elif ($status == "pass" and $stage == "verifier_ready") then "verifier_ready"
+          else "not_collected"
+          end
+        )
       },
       inputs: {
         base_url: $base_url,
@@ -956,6 +968,9 @@ write_summary() {
       readiness: {
         evidence_scope: (if $evidence_scope == "" then null else $evidence_scope end),
         verifier_evidence_scope: (if $verifier_scope == "" then null else $verifier_scope end),
+        verifier_ready: $pilot_handoff_ready,
+        roadmap_ready: $roadmap_ready,
+        handoff_complete: $handoff_complete,
         trusted_verifier_pilot_handoff_ready: $pilot_handoff_ready,
         roadmap_access_recovery_pilot_handoff_ready: $roadmap_ready
       },
@@ -1463,8 +1478,13 @@ if [[ "$roadmap_refresh" == "1" ]]; then
   fi
 fi
 
-write_summary "pass" 0 "complete" "Real helper HTTPS evidence and trusted verifier receipt completed"
-echo "access-recovery-real-helper-evidence-run: status=pass stage=complete"
+if [[ "$roadmap_refresh" == "1" ]]; then
+  write_summary "pass" 0 "complete" "Real helper HTTPS evidence, trusted verifier receipt, and roadmap handoff readiness completed"
+  echo "access-recovery-real-helper-evidence-run: status=pass stage=complete"
+else
+  write_summary "pass" 0 "verifier_ready" "Trusted verifier receipt validated; roadmap refresh disabled, so handoff is not marked complete"
+  echo "access-recovery-real-helper-evidence-run: status=pass stage=verifier_ready evidence_status=verifier_ready"
+fi
 echo "summary_json: $summary_json"
 echo "verification_summary_json: $verification_summary_json"
 if [[ "$roadmap_refresh" == "1" ]]; then
