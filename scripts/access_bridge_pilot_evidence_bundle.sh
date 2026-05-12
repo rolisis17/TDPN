@@ -876,9 +876,25 @@ transport_ssl_verify_result="$(json_string_or_empty "$deployment_summary" '.tran
 transport_mtls_required="$(jq -r 'if (.transport.mtls_required // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
 transport_mtls_client_configured="$(jq -r 'if (.transport.mtls_client_certificate_configured // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
 transport_mtls_client_used="$(jq -r 'if (.transport.mtls_client_certificate_used // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
+transport_mtls_local_client_key_match="$(jq -r 'if (.transport.mtls_local_client_certificate_key_match // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
+transport_mtls_client_auth_eku="$(jq -r 'if (.transport.mtls_client_certificate_client_auth_eku // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
+transport_mtls_server_leaf_fetched="$(jq -r 'if (.transport.mtls_server_leaf_certificate_fetched // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
+transport_mtls_client_cert_der_sha256="$(json_string_or_empty "$deployment_summary" '.transport.mtls_client_certificate_der_sha256')"
+transport_mtls_client_cert_public_key_sha256="$(json_string_or_empty "$deployment_summary" '.transport.mtls_client_certificate_public_key_sha256')"
+transport_mtls_client_key_public_key_sha256="$(json_string_or_empty "$deployment_summary" '.transport.mtls_client_key_public_key_sha256')"
+transport_mtls_server_leaf_der_sha256="$(json_string_or_empty "$deployment_summary" '.transport.mtls_server_leaf_certificate_der_sha256')"
+transport_mtls_server_leaf_public_key_sha256="$(json_string_or_empty "$deployment_summary" '.transport.mtls_server_leaf_public_key_sha256')"
+transport_mtls_client_der_distinct="$(jq -r 'if (.transport.mtls_client_certificate_der_fingerprint_distinct_from_server_leaf // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
+transport_mtls_client_pubkey_distinct="$(jq -r 'if (.transport.mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
 transport_mtls_missing_client_rejected="$(jq -r 'if (.transport.mtls_missing_client_certificate_rejected // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
 transport_mtls_missing_client_same_endpoint="$(jq -r 'if (.transport.mtls_missing_client_certificate_same_endpoint // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
 transport_mtls_missing_client_rejection_signal="$(jq -r 'if (.transport.mtls_missing_client_certificate_rejection_signal // false) == true then "true" else "false" end' "$deployment_summary" 2>/dev/null || true)"
+transport_mtls_missing_client_http="$(json_string_or_empty "$deployment_summary" '.transport.mtls_missing_client_certificate_health_http_status')"
+transport_mtls_missing_client_rc="$(json_string_or_empty "$deployment_summary" '.transport.mtls_missing_client_certificate_health_curl_rc')"
+transport_mtls_missing_client_error="$(json_string_or_empty "$deployment_summary" '.transport.mtls_missing_client_certificate_health_curl_error')"
+transport_mtls_missing_client_effective_url="$(json_string_or_empty "$deployment_summary" '.transport.mtls_missing_client_certificate_health_effective_url')"
+transport_mtls_missing_client_remote_ip="$(json_string_or_empty "$deployment_summary" '.transport.mtls_missing_client_certificate_health_remote_ip')"
+transport_mtls_missing_client_remote_port="$(json_string_or_empty "$deployment_summary" '.transport.mtls_missing_client_certificate_health_remote_port')"
 status="pass"
 recommended_action_id="trusted_pilot_evidence_verify"
 recommended_action="Run trusted bundle verification with --require-trusted-provenance 1 and --verification-summary-json before helper/operator handoff."
@@ -993,9 +1009,25 @@ jq -n \
   --arg transport_mtls_required "$transport_mtls_required" \
   --arg transport_mtls_client_configured "$transport_mtls_client_configured" \
   --arg transport_mtls_client_used "$transport_mtls_client_used" \
+  --arg transport_mtls_local_client_key_match "$transport_mtls_local_client_key_match" \
+  --arg transport_mtls_client_auth_eku "$transport_mtls_client_auth_eku" \
+  --arg transport_mtls_server_leaf_fetched "$transport_mtls_server_leaf_fetched" \
+  --arg transport_mtls_client_cert_der_sha256 "$transport_mtls_client_cert_der_sha256" \
+  --arg transport_mtls_client_cert_public_key_sha256 "$transport_mtls_client_cert_public_key_sha256" \
+  --arg transport_mtls_client_key_public_key_sha256 "$transport_mtls_client_key_public_key_sha256" \
+  --arg transport_mtls_server_leaf_der_sha256 "$transport_mtls_server_leaf_der_sha256" \
+  --arg transport_mtls_server_leaf_public_key_sha256 "$transport_mtls_server_leaf_public_key_sha256" \
+  --arg transport_mtls_client_der_distinct "$transport_mtls_client_der_distinct" \
+  --arg transport_mtls_client_pubkey_distinct "$transport_mtls_client_pubkey_distinct" \
   --arg transport_mtls_missing_client_rejected "$transport_mtls_missing_client_rejected" \
   --arg transport_mtls_missing_client_same_endpoint "$transport_mtls_missing_client_same_endpoint" \
   --arg transport_mtls_missing_client_rejection_signal "$transport_mtls_missing_client_rejection_signal" \
+  --arg transport_mtls_missing_client_http "$transport_mtls_missing_client_http" \
+  --arg transport_mtls_missing_client_rc "$transport_mtls_missing_client_rc" \
+  --arg transport_mtls_missing_client_error "$transport_mtls_missing_client_error" \
+  --arg transport_mtls_missing_client_effective_url "$transport_mtls_missing_client_effective_url" \
+  --arg transport_mtls_missing_client_remote_ip "$transport_mtls_missing_client_remote_ip" \
+  --arg transport_mtls_missing_client_remote_port "$transport_mtls_missing_client_remote_port" \
   --arg path_id "$path_id" \
   --arg service_name "$service_name" \
   --arg host_install_evidence_mode "$host_install_evidence_mode" \
@@ -1031,7 +1063,7 @@ jq -n \
     schema: {
       id: "access_bridge_pilot_evidence_bundle_summary",
       major: 1,
-      minor: 6
+      minor: 7
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -1087,9 +1119,25 @@ jq -n \
       mtls_required: ($transport_mtls_required == "true"),
       mtls_client_certificate_configured: ($transport_mtls_client_configured == "true"),
       mtls_client_certificate_used: ($transport_mtls_client_used == "true"),
+      mtls_local_client_certificate_key_match: ($transport_mtls_local_client_key_match == "true"),
+      mtls_client_certificate_client_auth_eku: ($transport_mtls_client_auth_eku == "true"),
+      mtls_server_leaf_certificate_fetched: ($transport_mtls_server_leaf_fetched == "true"),
+      mtls_client_certificate_der_sha256: $transport_mtls_client_cert_der_sha256,
+      mtls_client_certificate_public_key_sha256: $transport_mtls_client_cert_public_key_sha256,
+      mtls_client_key_public_key_sha256: $transport_mtls_client_key_public_key_sha256,
+      mtls_server_leaf_certificate_der_sha256: $transport_mtls_server_leaf_der_sha256,
+      mtls_server_leaf_public_key_sha256: $transport_mtls_server_leaf_public_key_sha256,
+      mtls_client_certificate_der_fingerprint_distinct_from_server_leaf: ($transport_mtls_client_der_distinct == "true"),
+      mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf: ($transport_mtls_client_pubkey_distinct == "true"),
       mtls_missing_client_certificate_rejected: ($transport_mtls_missing_client_rejected == "true"),
       mtls_missing_client_certificate_same_endpoint: ($transport_mtls_missing_client_same_endpoint == "true"),
       mtls_missing_client_certificate_rejection_signal: ($transport_mtls_missing_client_rejection_signal == "true"),
+      mtls_missing_client_certificate_health_http_status: $transport_mtls_missing_client_http,
+      mtls_missing_client_certificate_health_curl_rc: (if $transport_mtls_missing_client_rc == "" then null else ($transport_mtls_missing_client_rc | tonumber) end),
+      mtls_missing_client_certificate_health_curl_error: $transport_mtls_missing_client_error,
+      mtls_missing_client_certificate_health_effective_url: $transport_mtls_missing_client_effective_url,
+      mtls_missing_client_certificate_health_remote_ip: $transport_mtls_missing_client_remote_ip,
+      mtls_missing_client_certificate_health_remote_port: $transport_mtls_missing_client_remote_port,
       deployment_evidence_summary_json: $deployment_summary,
       smoke_summary_json: $smoke_summary
     },

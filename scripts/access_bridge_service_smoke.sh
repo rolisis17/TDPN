@@ -107,6 +107,10 @@ for cmd in awk curl date jq sed; do
     exit 2
   fi
 done
+if [[ "$require_mtls" == "1" ]] && ! command -v openssl >/dev/null 2>&1; then
+  echo "access bridge service smoke failed: missing required command for --require-mtls 1: openssl" >&2
+  exit 2
+fi
 
 base_url="${base_url%/}"
 if [[ -z "$base_url" ]]; then
@@ -180,6 +184,9 @@ health_stderr="$tmp_dir/health.stderr"
 missing_client_cert_health_body="$tmp_dir/missing-client-cert-health.json"
 missing_client_cert_health_meta="$tmp_dir/missing-client-cert-health.meta"
 missing_client_cert_health_stderr="$tmp_dir/missing-client-cert-health.stderr"
+server_leaf_s_client_out="$tmp_dir/server-leaf.sclient"
+server_leaf_s_client_stderr="$tmp_dir/server-leaf.stderr"
+server_leaf_cert="$tmp_dir/server-leaf.pem"
 
 url_scheme() {
   local raw="$1"
@@ -262,6 +269,85 @@ mtls_rejection_signal_01() {
     'tlsv[0-9.]*[ _-]*alert[ _-]*certificate[ _-]*required|alert[ _-]*certificate[ _-]*required|no[ _-]*(required[ _-]*)?ssl[ _-]*certificate|ssl[^[:cntrl:]]*certificate[^[:cntrl:]]*(required|needed|missing|error)|certificate[ _-]*(required|needed|missing)[^[:cntrl:]]*(ssl|tls|handshake)|(ssl|tls)[^[:cntrl:]]*handshake[^[:cntrl:]]*certificate'
 }
 
+openssl_sha256_file_01() {
+  local source_file="$1"
+  if [[ ! -s "$source_file" ]]; then
+    return 1
+  fi
+  openssl dgst -sha256 -r "$source_file" 2>/dev/null | awk '{print $1}'
+}
+
+cert_der_sha256_01() {
+  local cert_file="$1"
+  local der_file
+  der_file="$(mktemp "$tmp_dir/client-cert-der.XXXXXX")"
+  openssl x509 -in "$cert_file" -outform DER >"$der_file" 2>/dev/null &&
+    openssl_sha256_file_01 "$der_file"
+}
+
+cert_public_key_sha256_01() {
+  local cert_file="$1"
+  local pubkey_der_file
+  pubkey_der_file="$(mktemp "$tmp_dir/cert-pubkey-der.XXXXXX")"
+  openssl x509 -in "$cert_file" -pubkey -noout 2>/dev/null |
+    openssl pkey -pubin -outform DER >"$pubkey_der_file" 2>/dev/null &&
+    openssl_sha256_file_01 "$pubkey_der_file"
+}
+
+key_public_key_sha256_01() {
+  local key_file="$1"
+  local pubkey_der_file
+  pubkey_der_file="$(mktemp "$tmp_dir/key-pubkey-der.XXXXXX")"
+  openssl pkey -in "$key_file" -pubout -outform DER >"$pubkey_der_file" 2>/dev/null &&
+    openssl_sha256_file_01 "$pubkey_der_file"
+}
+
+cert_has_client_auth_eku_01() {
+  local cert_file="$1"
+  local eku_text
+  eku_text="$(openssl x509 -in "$cert_file" -noout -ext extendedKeyUsage 2>/dev/null || true)"
+  printf '%s\n' "$eku_text" | grep -Eiq 'TLS Web Client Authentication|clientAuth|1\.3\.6\.1\.5\.5\.7\.3\.2'
+}
+
+extract_first_pem_cert_01() {
+  local source_file="$1"
+  local dest_file="$2"
+  awk '
+    /-----BEGIN CERTIFICATE-----/ { in_cert = 1 }
+    in_cert { print }
+    /-----END CERTIFICATE-----/ { exit }
+  ' "$source_file" >"$dest_file"
+  grep -q -- '-----BEGIN CERTIFICATE-----' "$dest_file" &&
+    grep -q -- '-----END CERTIFICATE-----' "$dest_file"
+}
+
+fetch_server_leaf_cert_01() {
+  local host="$1"
+  local port="$2"
+  local cert_out="$3"
+  local s_client_out="$4"
+  local s_client_stderr="$5"
+  local connect_target
+  local s_client_args
+  if [[ -z "$host" || -z "$port" ]]; then
+    return 1
+  fi
+  if [[ "$host" == *:* ]]; then
+    connect_target="[$host]:$port"
+  else
+    connect_target="${host}:${port}"
+  fi
+  s_client_args=(-connect "$connect_target" -servername "$host" -showcerts)
+  if [[ -n "$cacert" ]]; then
+    s_client_args+=(-CAfile "$cacert")
+  fi
+  if [[ -n "$client_cert" && -n "$client_key" ]]; then
+    s_client_args+=(-cert "$client_cert" -key "$client_key")
+  fi
+  openssl s_client "${s_client_args[@]}" < /dev/null >"$s_client_out" 2>"$s_client_stderr" || true
+  extract_first_pem_cert_01 "$s_client_out" "$cert_out"
+}
+
 curl_common_args=(-sS)
 if [[ -n "$cacert" ]]; then
   curl_common_args+=(--cacert "$cacert")
@@ -324,7 +410,54 @@ mtls_missing_client_cert_health_remote_ip=""
 mtls_missing_client_cert_health_remote_port=""
 mtls_missing_client_cert_same_endpoint="false"
 mtls_missing_client_cert_rejection_signal="false"
+mtls_local_client_cert_key_match="skipped"
+mtls_client_cert_client_auth_eku="skipped"
+mtls_server_leaf_cert_fetched="skipped"
+mtls_client_cert_der_sha256=""
+mtls_client_cert_public_key_sha256=""
+mtls_client_key_public_key_sha256=""
+mtls_server_leaf_cert_der_sha256=""
+mtls_server_leaf_public_key_sha256=""
+mtls_client_cert_der_fingerprint_distinct_from_server_leaf="skipped"
+mtls_client_cert_public_key_fingerprint_distinct_from_server_leaf="skipped"
+mtls_server_leaf_cert_fetch_error=""
 if [[ "$require_mtls" == "1" ]]; then
+  mtls_local_client_cert_key_match="false"
+  mtls_client_cert_client_auth_eku="false"
+  mtls_server_leaf_cert_fetched="false"
+  mtls_client_cert_der_fingerprint_distinct_from_server_leaf="false"
+  mtls_client_cert_public_key_fingerprint_distinct_from_server_leaf="false"
+  if [[ "$mtls_client_configured" == "true" ]]; then
+    mtls_client_cert_der_sha256="$(cert_der_sha256_01 "$client_cert" || true)"
+    mtls_client_cert_public_key_sha256="$(cert_public_key_sha256_01 "$client_cert" || true)"
+    mtls_client_key_public_key_sha256="$(key_public_key_sha256_01 "$client_key" || true)"
+    if [[ -n "$mtls_client_cert_public_key_sha256" &&
+      "$mtls_client_cert_public_key_sha256" == "$mtls_client_key_public_key_sha256" ]]; then
+      mtls_local_client_cert_key_match="true"
+    fi
+    if cert_has_client_auth_eku_01 "$client_cert"; then
+      mtls_client_cert_client_auth_eku="true"
+    fi
+  fi
+  if fetch_server_leaf_cert_01 "$base_url_host" "$base_url_port" "$server_leaf_cert" "$server_leaf_s_client_out" "$server_leaf_s_client_stderr"; then
+    mtls_server_leaf_cert_der_sha256="$(cert_der_sha256_01 "$server_leaf_cert" || true)"
+    mtls_server_leaf_public_key_sha256="$(cert_public_key_sha256_01 "$server_leaf_cert" || true)"
+    if [[ -n "$mtls_server_leaf_cert_der_sha256" && -n "$mtls_server_leaf_public_key_sha256" ]]; then
+      mtls_server_leaf_cert_fetched="true"
+    fi
+  else
+    mtls_server_leaf_cert_fetch_error="$(tr -d '\r' <"$server_leaf_s_client_stderr" | tail -n 3 | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/[[:space:]]+$//')"
+  fi
+  if [[ -n "$mtls_client_cert_der_sha256" &&
+    -n "$mtls_server_leaf_cert_der_sha256" &&
+    "$mtls_client_cert_der_sha256" != "$mtls_server_leaf_cert_der_sha256" ]]; then
+    mtls_client_cert_der_fingerprint_distinct_from_server_leaf="true"
+  fi
+  if [[ -n "$mtls_client_cert_public_key_sha256" &&
+    -n "$mtls_server_leaf_public_key_sha256" &&
+    "$mtls_client_cert_public_key_sha256" != "$mtls_server_leaf_public_key_sha256" ]]; then
+    mtls_client_cert_public_key_fingerprint_distinct_from_server_leaf="true"
+  fi
   set +e
   curl "${curl_no_client_cert_args[@]}" \
     -o "$missing_client_cert_health_body" \
@@ -420,6 +553,21 @@ elif [[ "$require_tls" == "1" && "$tls_verified" != "true" ]]; then
 elif [[ "$require_mtls" == "1" && "$tls_verified" != "true" ]]; then
   status="fail"
   notes="required mTLS TLS verification was not proven"
+elif [[ "$require_mtls" == "1" && "$mtls_local_client_cert_key_match" != "true" ]]; then
+  status="fail"
+  notes="required mTLS client certificate/key match was not proven"
+elif [[ "$require_mtls" == "1" && "$mtls_client_cert_client_auth_eku" != "true" ]]; then
+  status="fail"
+  notes="required mTLS client certificate clientAuth EKU was not proven"
+elif [[ "$require_mtls" == "1" && "$mtls_server_leaf_cert_fetched" != "true" ]]; then
+  status="fail"
+  notes="required mTLS server leaf certificate was not fetched"
+elif [[ "$require_mtls" == "1" && "$mtls_client_cert_der_fingerprint_distinct_from_server_leaf" != "true" ]]; then
+  status="fail"
+  notes="required mTLS client certificate DER fingerprint was not distinct from server leaf"
+elif [[ "$require_mtls" == "1" && "$mtls_client_cert_public_key_fingerprint_distinct_from_server_leaf" != "true" ]]; then
+  status="fail"
+  notes="required mTLS client certificate public key fingerprint was not distinct from server leaf"
 elif [[ "$require_mtls" == "1" && "$mtls_missing_client_cert_rejected" != "true" ]]; then
   status="fail"
   notes="required mTLS missing-client-certificate rejection was not proven"
@@ -490,6 +638,17 @@ summary="$(jq -cn \
   --arg mtls_missing_client_cert_health_effective_url "$mtls_missing_client_cert_health_effective_url" \
   --arg mtls_missing_client_cert_health_remote_ip "$mtls_missing_client_cert_health_remote_ip" \
   --arg mtls_missing_client_cert_health_remote_port "$mtls_missing_client_cert_health_remote_port" \
+  --arg mtls_local_client_cert_key_match "$mtls_local_client_cert_key_match" \
+  --arg mtls_client_cert_client_auth_eku "$mtls_client_cert_client_auth_eku" \
+  --arg mtls_server_leaf_cert_fetched "$mtls_server_leaf_cert_fetched" \
+  --arg mtls_client_cert_der_sha256 "$mtls_client_cert_der_sha256" \
+  --arg mtls_client_cert_public_key_sha256 "$mtls_client_cert_public_key_sha256" \
+  --arg mtls_client_key_public_key_sha256 "$mtls_client_key_public_key_sha256" \
+  --arg mtls_server_leaf_cert_der_sha256 "$mtls_server_leaf_cert_der_sha256" \
+  --arg mtls_server_leaf_public_key_sha256 "$mtls_server_leaf_public_key_sha256" \
+  --arg mtls_client_cert_der_fingerprint_distinct_from_server_leaf "$mtls_client_cert_der_fingerprint_distinct_from_server_leaf" \
+  --arg mtls_client_cert_public_key_fingerprint_distinct_from_server_leaf "$mtls_client_cert_public_key_fingerprint_distinct_from_server_leaf" \
+  --arg mtls_server_leaf_cert_fetch_error "$mtls_server_leaf_cert_fetch_error" \
   --argjson mtls_missing_client_cert_rejection_signal "$mtls_missing_client_cert_rejection_signal" \
   --argjson mtls_required "$mtls_required" \
   --argjson mtls_client_configured "$mtls_client_configured" \
@@ -498,7 +657,83 @@ summary="$(jq -cn \
   --argjson mtls_missing_client_cert_same_endpoint "$mtls_missing_client_cert_same_endpoint" \
   --argjson headers_ok "$headers_ok" \
   --argjson auth_required "$( [[ "$allow_unauthenticated" == "1" ]] && echo false || echo true )" \
-  '{version:1,schema:{id:"access_bridge_service_smoke_summary",major:1,minor:5},generated_at_utc:$generated_at_utc,status:$status,notes:$notes,base_url:$base_url,path_id:$path_id,transport:{base_url_scheme:$base_url_scheme,base_url_host:$base_url_host,base_url_port:$base_url_port,loopback:$base_url_loopback,https:$base_url_https,health:{effective_url:$health_url_effective,remote_ip:$health_remote_ip,remote_port:$health_remote_port,http_version:$health_http_version,time_connect_sec:$health_time_connect,time_appconnect_sec:$health_time_appconnect,curl_error:$health_curl_error},tls:{checked:$tls_checked,verified:$tls_verified,ssl_verify_result:$health_ssl_verify_result},mtls:{required:$mtls_required,client_certificate_configured:$mtls_client_configured,client_certificate_used:$mtls_client_used,missing_client_certificate_rejected:$mtls_missing_client_cert_rejected,missing_client_certificate_same_endpoint:$mtls_missing_client_cert_same_endpoint,missing_client_certificate_rejection_signal:$mtls_missing_client_cert_rejection_signal,missing_client_certificate_health_http_status:$mtls_missing_client_cert_health_http,missing_client_certificate_health_curl_rc:(if $mtls_missing_client_cert_health_curl_rc == "" then null else ($mtls_missing_client_cert_health_curl_rc | tonumber) end),missing_client_certificate_health_curl_error:$mtls_missing_client_cert_health_curl_error,missing_client_certificate_health_effective_url:$mtls_missing_client_cert_health_effective_url,missing_client_certificate_health_remote_ip:$mtls_missing_client_cert_health_remote_ip,missing_client_certificate_health_remote_port:$mtls_missing_client_cert_health_remote_port}},health:{http_status:$health_http,status:$health_status,helper_id:$health_helper_id,organization_id:$health_org_id,registry_id:$health_registry_id,config_sha256:$health_config_sha256},auth:{required:$auth_required,missing_code_http_status:$missing_code_http,wrong_code_http_status:$wrong_code_http,valid_code_http_status:$bridge_http},bridge:{http_status:$bridge_http,status:$bridge_status,security_headers_ok:$headers_ok},abuse:{http_status:$abuse_http}}')"
+  'def proof_value($v): if $v == "skipped" then "skipped" elif $v == "true" then true else false end;
+  def null_empty($v): if $v == "" then null else $v end;
+  {
+    version: 1,
+    schema: {id: "access_bridge_service_smoke_summary", major: 1, minor: 6},
+    generated_at_utc: $generated_at_utc,
+    status: $status,
+    notes: $notes,
+    base_url: $base_url,
+    path_id: $path_id,
+    transport: {
+      base_url_scheme: $base_url_scheme,
+      base_url_host: $base_url_host,
+      base_url_port: $base_url_port,
+      loopback: $base_url_loopback,
+      https: $base_url_https,
+      health: {
+        effective_url: $health_url_effective,
+        remote_ip: $health_remote_ip,
+        remote_port: $health_remote_port,
+        http_version: $health_http_version,
+        time_connect_sec: $health_time_connect,
+        time_appconnect_sec: $health_time_appconnect,
+        curl_error: $health_curl_error
+      },
+      tls: {
+        checked: $tls_checked,
+        verified: $tls_verified,
+        ssl_verify_result: $health_ssl_verify_result
+      },
+      mtls: {
+        required: $mtls_required,
+        client_certificate_configured: $mtls_client_configured,
+        client_certificate_used: $mtls_client_used,
+        local_client_certificate_key_match: proof_value($mtls_local_client_cert_key_match),
+        client_certificate_client_auth_eku: proof_value($mtls_client_cert_client_auth_eku),
+        server_leaf_certificate_fetched: proof_value($mtls_server_leaf_cert_fetched),
+        client_certificate_der_sha256: null_empty($mtls_client_cert_der_sha256),
+        client_certificate_public_key_sha256: null_empty($mtls_client_cert_public_key_sha256),
+        client_key_public_key_sha256: null_empty($mtls_client_key_public_key_sha256),
+        server_leaf_certificate_der_sha256: null_empty($mtls_server_leaf_cert_der_sha256),
+        server_leaf_public_key_sha256: null_empty($mtls_server_leaf_public_key_sha256),
+        client_certificate_der_fingerprint_distinct_from_server_leaf: proof_value($mtls_client_cert_der_fingerprint_distinct_from_server_leaf),
+        client_certificate_public_key_fingerprint_distinct_from_server_leaf: proof_value($mtls_client_cert_public_key_fingerprint_distinct_from_server_leaf),
+        server_leaf_certificate_fetch_error: null_empty($mtls_server_leaf_cert_fetch_error),
+        missing_client_certificate_rejected: $mtls_missing_client_cert_rejected,
+        missing_client_certificate_same_endpoint: $mtls_missing_client_cert_same_endpoint,
+        missing_client_certificate_rejection_signal: $mtls_missing_client_cert_rejection_signal,
+        missing_client_certificate_health_http_status: $mtls_missing_client_cert_health_http,
+        missing_client_certificate_health_curl_rc: (if $mtls_missing_client_cert_health_curl_rc == "" then null else ($mtls_missing_client_cert_health_curl_rc | tonumber) end),
+        missing_client_certificate_health_curl_error: $mtls_missing_client_cert_health_curl_error,
+        missing_client_certificate_health_effective_url: $mtls_missing_client_cert_health_effective_url,
+        missing_client_certificate_health_remote_ip: $mtls_missing_client_cert_health_remote_ip,
+        missing_client_certificate_health_remote_port: $mtls_missing_client_cert_health_remote_port
+      }
+    },
+    health: {
+      http_status: $health_http,
+      status: $health_status,
+      helper_id: $health_helper_id,
+      organization_id: $health_org_id,
+      registry_id: $health_registry_id,
+      config_sha256: $health_config_sha256
+    },
+    auth: {
+      required: $auth_required,
+      missing_code_http_status: $missing_code_http,
+      wrong_code_http_status: $wrong_code_http,
+      valid_code_http_status: $bridge_http
+    },
+    bridge: {
+      http_status: $bridge_http,
+      status: $bridge_status,
+      security_headers_ok: $headers_ok
+    },
+    abuse: {http_status: $abuse_http}
+  }')"
 
 if [[ -n "$summary_json" ]]; then
   mkdir -p "$(dirname "$summary_json")"

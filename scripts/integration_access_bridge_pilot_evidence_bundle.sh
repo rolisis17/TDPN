@@ -321,7 +321,14 @@ if ! jq -e \
     and .transport.tls_verified == false
     and .transport.mtls_required == false
     and .transport.mtls_client_certificate_used == false
+    and .transport.mtls_local_client_certificate_key_match == false
+    and .transport.mtls_client_certificate_client_auth_eku == false
+    and .transport.mtls_server_leaf_certificate_fetched == false
+    and .transport.mtls_client_certificate_der_fingerprint_distinct_from_server_leaf == false
+    and .transport.mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf == false
     and .transport.mtls_missing_client_certificate_rejected == false
+    and .transport.mtls_missing_client_certificate_health_http_status == "skipped"
+    and .transport.mtls_missing_client_certificate_health_curl_rc == null
     and .transport.smoke_summary_json == .artifacts.smoke_summary_json
     and .inputs.base_url == $base_url
     and .inputs.expected_public_host == $pilot_public_host

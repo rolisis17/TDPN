@@ -161,6 +161,10 @@ is_private_or_reserved_remote_ip() {
   return 1
 }
 
+is_http_success_status() {
+  [[ "${1:-}" =~ ^2[0-9][0-9]$ ]]
+}
+
 is_loopback_host() {
   local host
   host="$(normalize_bridge_host "${1:-}")"
@@ -611,6 +615,16 @@ smoke_transport_time_appconnect="$(json_string_or_empty "$smoke_summary_json" '.
 smoke_transport_mtls_required="$(jq -r 'if (.transport.mtls.required // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_transport_mtls_client_configured="$(jq -r 'if (.transport.mtls.client_certificate_configured // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_transport_mtls_client_used="$(jq -r 'if (.transport.mtls.client_certificate_used // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_transport_mtls_local_client_key_match="$(jq -r 'if (.transport.mtls.local_client_certificate_key_match // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_transport_mtls_client_auth_eku="$(jq -r 'if (.transport.mtls.client_certificate_client_auth_eku // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_transport_mtls_server_leaf_fetched="$(jq -r 'if (.transport.mtls.server_leaf_certificate_fetched // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_transport_mtls_client_cert_der_sha256="$(json_string_or_empty "$smoke_summary_json" '.transport.mtls.client_certificate_der_sha256')"
+smoke_transport_mtls_client_cert_public_key_sha256="$(json_string_or_empty "$smoke_summary_json" '.transport.mtls.client_certificate_public_key_sha256')"
+smoke_transport_mtls_client_key_public_key_sha256="$(json_string_or_empty "$smoke_summary_json" '.transport.mtls.client_key_public_key_sha256')"
+smoke_transport_mtls_server_leaf_der_sha256="$(json_string_or_empty "$smoke_summary_json" '.transport.mtls.server_leaf_certificate_der_sha256')"
+smoke_transport_mtls_server_leaf_public_key_sha256="$(json_string_or_empty "$smoke_summary_json" '.transport.mtls.server_leaf_public_key_sha256')"
+smoke_transport_mtls_client_der_distinct="$(jq -r 'if (.transport.mtls.client_certificate_der_fingerprint_distinct_from_server_leaf // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
+smoke_transport_mtls_client_pubkey_distinct="$(jq -r 'if (.transport.mtls.client_certificate_public_key_fingerprint_distinct_from_server_leaf // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_transport_mtls_missing_client_rejected="$(jq -r 'if (.transport.mtls.missing_client_certificate_rejected // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_transport_mtls_missing_client_same_endpoint="$(jq -r 'if (.transport.mtls.missing_client_certificate_same_endpoint // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
 smoke_transport_mtls_missing_client_rejection_signal="$(jq -r 'if (.transport.mtls.missing_client_certificate_rejection_signal // false) == true then "true" else "false" end' "$smoke_summary_json" 2>/dev/null || true)"
@@ -667,9 +681,40 @@ if [[ "$require_mtls" == "1" ]]; then
     transport_status="fail"
     transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary did not prove client certificate use")"
   fi
+  if [[ "$smoke_transport_mtls_local_client_key_match" != "true" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary did not prove local client certificate/key match")"
+  fi
+  if [[ "$smoke_transport_mtls_client_auth_eku" != "true" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary did not prove clientAuth extended key usage")"
+  fi
+  if [[ "$smoke_transport_mtls_server_leaf_fetched" != "true" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary did not fetch the server leaf certificate")"
+  fi
+  if [[ "$smoke_transport_mtls_client_cert_public_key_sha256" != "$smoke_transport_mtls_client_key_public_key_sha256" ||
+    -z "$smoke_transport_mtls_client_cert_public_key_sha256" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary client certificate/key public-key fingerprints are missing or mismatched")"
+  fi
+  if [[ "$smoke_transport_mtls_client_der_distinct" != "true" || "$smoke_transport_mtls_client_pubkey_distinct" != "true" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary did not prove client certificate identity is distinct from the server leaf")"
+  fi
+  if [[ -z "$smoke_transport_mtls_server_leaf_der_sha256" || -z "$smoke_transport_mtls_server_leaf_public_key_sha256" ||
+    "$smoke_transport_mtls_client_cert_der_sha256" == "$smoke_transport_mtls_server_leaf_der_sha256" ||
+    "$smoke_transport_mtls_client_cert_public_key_sha256" == "$smoke_transport_mtls_server_leaf_public_key_sha256" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary server/client certificate fingerprints are missing or reused")"
+  fi
   if [[ "$smoke_transport_mtls_missing_client_rejected" != "true" ]]; then
     transport_status="fail"
     transport_reason="$(append_reason "$transport_reason" "required mTLS smoke summary did not prove missing-client-certificate rejection")"
+  fi
+  if is_http_success_status "$smoke_transport_mtls_missing_client_http"; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS missing-client-certificate check returned a success HTTP status")"
   fi
   if [[ "$smoke_transport_mtls_missing_client_rejection_signal" != "true" ]]; then
     transport_status="fail"
@@ -678,6 +723,21 @@ if [[ "$require_mtls" == "1" ]]; then
   if [[ "$smoke_transport_mtls_missing_client_same_endpoint" != "true" ]]; then
     transport_status="fail"
     transport_reason="$(append_reason "$transport_reason" "required mTLS missing-client-certificate check did not hit the same endpoint")"
+  fi
+  if [[ -n "$smoke_transport_mtls_missing_client_effective_url" && -n "$smoke_transport_effective_url" &&
+    "$smoke_transport_mtls_missing_client_effective_url" != "$smoke_transport_effective_url" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS missing-client-certificate check effective URL did not match the healthy endpoint")"
+  fi
+  if [[ -n "$smoke_transport_mtls_missing_client_remote_ip" && -n "$smoke_transport_remote_ip" &&
+    "$smoke_transport_mtls_missing_client_remote_ip" != "$smoke_transport_remote_ip" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS missing-client-certificate check remote IP did not match the healthy endpoint")"
+  fi
+  if [[ -n "$smoke_transport_mtls_missing_client_remote_port" && -n "$smoke_transport_remote_port" &&
+    "$smoke_transport_mtls_missing_client_remote_port" != "$smoke_transport_remote_port" ]]; then
+    transport_status="fail"
+    transport_reason="$(append_reason "$transport_reason" "required mTLS missing-client-certificate check remote port did not match the healthy endpoint")"
   fi
 fi
 smoke_path_id="$(json_string_or_empty "$smoke_summary_json" '.path_id')"
@@ -1048,6 +1108,16 @@ jq -n \
   --arg smoke_transport_mtls_required "$smoke_transport_mtls_required" \
   --arg smoke_transport_mtls_client_configured "$smoke_transport_mtls_client_configured" \
   --arg smoke_transport_mtls_client_used "$smoke_transport_mtls_client_used" \
+  --arg smoke_transport_mtls_local_client_key_match "$smoke_transport_mtls_local_client_key_match" \
+  --arg smoke_transport_mtls_client_auth_eku "$smoke_transport_mtls_client_auth_eku" \
+  --arg smoke_transport_mtls_server_leaf_fetched "$smoke_transport_mtls_server_leaf_fetched" \
+  --arg smoke_transport_mtls_client_cert_der_sha256 "$smoke_transport_mtls_client_cert_der_sha256" \
+  --arg smoke_transport_mtls_client_cert_public_key_sha256 "$smoke_transport_mtls_client_cert_public_key_sha256" \
+  --arg smoke_transport_mtls_client_key_public_key_sha256 "$smoke_transport_mtls_client_key_public_key_sha256" \
+  --arg smoke_transport_mtls_server_leaf_der_sha256 "$smoke_transport_mtls_server_leaf_der_sha256" \
+  --arg smoke_transport_mtls_server_leaf_public_key_sha256 "$smoke_transport_mtls_server_leaf_public_key_sha256" \
+  --arg smoke_transport_mtls_client_der_distinct "$smoke_transport_mtls_client_der_distinct" \
+  --arg smoke_transport_mtls_client_pubkey_distinct "$smoke_transport_mtls_client_pubkey_distinct" \
   --arg smoke_transport_mtls_missing_client_rejected "$smoke_transport_mtls_missing_client_rejected" \
   --arg smoke_transport_mtls_missing_client_same_endpoint "$smoke_transport_mtls_missing_client_same_endpoint" \
   --arg smoke_transport_mtls_missing_client_rejection_signal "$smoke_transport_mtls_missing_client_rejection_signal" \
@@ -1104,7 +1174,7 @@ jq -n \
     schema: {
       id: "access_bridge_deployment_evidence_summary",
       major: 1,
-      minor: 4
+      minor: 5
     },
     generated_at_utc: $generated_at_utc,
     status: $status,
@@ -1151,9 +1221,25 @@ jq -n \
       transport_mtls_required: ($smoke_transport_mtls_required == "true"),
       transport_mtls_client_certificate_configured: ($smoke_transport_mtls_client_configured == "true"),
       transport_mtls_client_certificate_used: ($smoke_transport_mtls_client_used == "true"),
+      transport_mtls_local_client_certificate_key_match: ($smoke_transport_mtls_local_client_key_match == "true"),
+      transport_mtls_client_certificate_client_auth_eku: ($smoke_transport_mtls_client_auth_eku == "true"),
+      transport_mtls_server_leaf_certificate_fetched: ($smoke_transport_mtls_server_leaf_fetched == "true"),
+      transport_mtls_client_certificate_der_sha256: $smoke_transport_mtls_client_cert_der_sha256,
+      transport_mtls_client_certificate_public_key_sha256: $smoke_transport_mtls_client_cert_public_key_sha256,
+      transport_mtls_client_key_public_key_sha256: $smoke_transport_mtls_client_key_public_key_sha256,
+      transport_mtls_server_leaf_certificate_der_sha256: $smoke_transport_mtls_server_leaf_der_sha256,
+      transport_mtls_server_leaf_public_key_sha256: $smoke_transport_mtls_server_leaf_public_key_sha256,
+      transport_mtls_client_certificate_der_fingerprint_distinct_from_server_leaf: ($smoke_transport_mtls_client_der_distinct == "true"),
+      transport_mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf: ($smoke_transport_mtls_client_pubkey_distinct == "true"),
       transport_mtls_missing_client_certificate_rejected: ($smoke_transport_mtls_missing_client_rejected == "true"),
       transport_mtls_missing_client_certificate_same_endpoint: ($smoke_transport_mtls_missing_client_same_endpoint == "true"),
       transport_mtls_missing_client_certificate_rejection_signal: ($smoke_transport_mtls_missing_client_rejection_signal == "true"),
+      transport_mtls_missing_client_certificate_health_http_status: $smoke_transport_mtls_missing_client_http,
+      transport_mtls_missing_client_certificate_health_curl_rc: (if $smoke_transport_mtls_missing_client_rc == "" then null else ($smoke_transport_mtls_missing_client_rc | tonumber) end),
+      transport_mtls_missing_client_certificate_health_curl_error: $smoke_transport_mtls_missing_client_error,
+      transport_mtls_missing_client_certificate_health_effective_url: $smoke_transport_mtls_missing_client_effective_url,
+      transport_mtls_missing_client_certificate_health_remote_ip: $smoke_transport_mtls_missing_client_remote_ip,
+      transport_mtls_missing_client_certificate_health_remote_port: $smoke_transport_mtls_missing_client_remote_port,
       path_id: $smoke_path_id,
       summary_json: $smoke_summary_json
     },
@@ -1174,6 +1260,16 @@ jq -n \
       mtls_required: ($smoke_transport_mtls_required == "true"),
       mtls_client_certificate_configured: ($smoke_transport_mtls_client_configured == "true"),
       mtls_client_certificate_used: ($smoke_transport_mtls_client_used == "true"),
+      mtls_local_client_certificate_key_match: ($smoke_transport_mtls_local_client_key_match == "true"),
+      mtls_client_certificate_client_auth_eku: ($smoke_transport_mtls_client_auth_eku == "true"),
+      mtls_server_leaf_certificate_fetched: ($smoke_transport_mtls_server_leaf_fetched == "true"),
+      mtls_client_certificate_der_sha256: $smoke_transport_mtls_client_cert_der_sha256,
+      mtls_client_certificate_public_key_sha256: $smoke_transport_mtls_client_cert_public_key_sha256,
+      mtls_client_key_public_key_sha256: $smoke_transport_mtls_client_key_public_key_sha256,
+      mtls_server_leaf_certificate_der_sha256: $smoke_transport_mtls_server_leaf_der_sha256,
+      mtls_server_leaf_public_key_sha256: $smoke_transport_mtls_server_leaf_public_key_sha256,
+      mtls_client_certificate_der_fingerprint_distinct_from_server_leaf: ($smoke_transport_mtls_client_der_distinct == "true"),
+      mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf: ($smoke_transport_mtls_client_pubkey_distinct == "true"),
       mtls_missing_client_certificate_rejected: ($smoke_transport_mtls_missing_client_rejected == "true"),
       mtls_missing_client_certificate_same_endpoint: ($smoke_transport_mtls_missing_client_same_endpoint == "true"),
       mtls_missing_client_certificate_rejection_signal: ($smoke_transport_mtls_missing_client_rejection_signal == "true"),

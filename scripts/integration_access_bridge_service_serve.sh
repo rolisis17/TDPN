@@ -321,6 +321,133 @@ write_body '{"status":"not_found"}'
 emit_write_out "404"
 EOF
 chmod +x "$FAKE_CURL_DIR/curl"
+cat >"$FAKE_CURL_DIR/openssl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  dgst)
+    file="${@: -1}"
+    case "$(cat "$file" 2>/dev/null || true)" in
+      *CLIENT_CERT_DER*)
+        printf '1111111111111111111111111111111111111111111111111111111111111111 *%s\n' "$file"
+        ;;
+      *CLIENT_PUBLIC_KEY_DER*)
+        printf '2222222222222222222222222222222222222222222222222222222222222222 *%s\n' "$file"
+        ;;
+      *SERVER_LEAF_CERT_DER*)
+        printf '3333333333333333333333333333333333333333333333333333333333333333 *%s\n' "$file"
+        ;;
+      *SERVER_PUBLIC_KEY_DER*)
+        printf '4444444444444444444444444444444444444444444444444444444444444444 *%s\n' "$file"
+        ;;
+      *)
+        printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa *%s\n' "$file"
+        ;;
+    esac
+    ;;
+  x509)
+    in_file=""
+    pubkey="0"
+    ext_name=""
+    outform=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        -in)
+          in_file="${2:-}"
+          shift 2
+          ;;
+        -pubkey)
+          pubkey="1"
+          shift
+          ;;
+        -ext)
+          ext_name="${2:-}"
+          shift 2
+          ;;
+        -outform)
+          outform="${2:-}"
+          shift 2
+          ;;
+        -noout)
+          shift
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+    if [[ "$ext_name" == "extendedKeyUsage" ]]; then
+      printf 'X509v3 Extended Key Usage:\n    TLS Web Client Authentication\n'
+    elif [[ "$pubkey" == "1" ]]; then
+      if grep -q 'server leaf' "$in_file" 2>/dev/null; then
+        printf '%s\n' 'SERVER_PUBLIC_KEY'
+      else
+        printf '%s\n' 'CLIENT_PUBLIC_KEY'
+      fi
+    elif [[ "$outform" == "DER" ]]; then
+      if grep -q 'server leaf' "$in_file" 2>/dev/null; then
+        printf '%s\n' 'SERVER_LEAF_CERT_DER'
+      else
+        printf '%s\n' 'CLIENT_CERT_DER'
+      fi
+    else
+      cat "$in_file"
+    fi
+    ;;
+  pkey)
+    in_file=""
+    pubin="0"
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        -in)
+          in_file="${2:-}"
+          shift 2
+          ;;
+        -pubin|-pubout)
+          pubin="1"
+          shift
+          ;;
+        -outform)
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+    if [[ "$pubin" == "1" && -z "$in_file" ]]; then
+      if grep -q 'SERVER_PUBLIC_KEY'; then
+        printf '%s\n' 'SERVER_PUBLIC_KEY_DER'
+      else
+        printf '%s\n' 'CLIENT_PUBLIC_KEY_DER'
+      fi
+    elif [[ -n "$in_file" ]]; then
+      printf '%s\n' 'CLIENT_PUBLIC_KEY_DER'
+    else
+      printf '%s\n' 'CLIENT_PUBLIC_KEY_DER'
+    fi
+    ;;
+  s_client)
+    cat <<'CERT'
+CONNECTED(00000003)
+Certificate chain
+ 0 s:CN = bridge-fake.example.test
+-----BEGIN CERTIFICATE-----
+server leaf
+-----END CERTIFICATE-----
+CERT
+    ;;
+  *)
+    echo "fake openssl: unsupported command: $cmd" >&2
+    exit 2
+    ;;
+esac
+EOF
+chmod +x "$FAKE_CURL_DIR/openssl"
 FAKE_CERT="$TMP_DIR/fake-client.crt"
 FAKE_KEY="$TMP_DIR/fake-client.key"
 FAKE_CA="$TMP_DIR/fake-ca.crt"
@@ -347,13 +474,27 @@ if [[ "$require_mtls_app_403_rc" -eq 0 ]]; then
   exit 1
 fi
 if ! jq -e '
+    def mtls_proofs:
+      .transport.mtls.local_client_certificate_key_match == true
+      and .transport.mtls.client_certificate_client_auth_eku == true
+      and .transport.mtls.server_leaf_certificate_fetched == true
+      and .transport.mtls.client_certificate_der_sha256 == "1111111111111111111111111111111111111111111111111111111111111111"
+      and .transport.mtls.client_certificate_public_key_sha256 == "2222222222222222222222222222222222222222222222222222222222222222"
+      and .transport.mtls.client_key_public_key_sha256 == "2222222222222222222222222222222222222222222222222222222222222222"
+      and .transport.mtls.server_leaf_certificate_der_sha256 == "3333333333333333333333333333333333333333333333333333333333333333"
+      and .transport.mtls.server_leaf_public_key_sha256 == "4444444444444444444444444444444444444444444444444444444444444444"
+      and .transport.mtls.client_certificate_der_fingerprint_distinct_from_server_leaf == true
+      and .transport.mtls.client_certificate_public_key_fingerprint_distinct_from_server_leaf == true
+      and .transport.mtls.server_leaf_certificate_fetch_error == null;
     .status == "fail"
+    and mtls_proofs
     and .transport.https == true
     and .transport.tls.verified == true
     and .transport.mtls.required == true
     and .transport.mtls.missing_client_certificate_health_http_status == "403"
     and .transport.mtls.missing_client_certificate_rejection_signal == false
     and .transport.mtls.missing_client_certificate_rejected == false
+    and .transport.mtls.missing_client_certificate_same_endpoint == true
     and (.notes | contains("missing-client-certificate rejection was not proven"))
   ' "$TMP_DIR/operator-smoke-require-mtls-app-403-summary.json" >/dev/null; then
   echo "access bridge service serve integration failed: app-level 403 mTLS summary mismatch"
@@ -372,10 +513,24 @@ ACCESS_BRIDGE_FAKE_CURL_SCENARIO=proxy_496 PATH="$FAKE_CURL_DIR:$PATH" bash ./sc
   --summary-json "$TMP_DIR/operator-smoke-require-mtls-proxy-496-summary.json" \
   --abuse-message "operator smoke require mtls proxy 496" >/dev/null
 if ! jq -e '
+    def mtls_proofs:
+      .transport.mtls.local_client_certificate_key_match == true
+      and .transport.mtls.client_certificate_client_auth_eku == true
+      and .transport.mtls.server_leaf_certificate_fetched == true
+      and .transport.mtls.client_certificate_der_sha256 == "1111111111111111111111111111111111111111111111111111111111111111"
+      and .transport.mtls.client_certificate_public_key_sha256 == "2222222222222222222222222222222222222222222222222222222222222222"
+      and .transport.mtls.client_key_public_key_sha256 == "2222222222222222222222222222222222222222222222222222222222222222"
+      and .transport.mtls.server_leaf_certificate_der_sha256 == "3333333333333333333333333333333333333333333333333333333333333333"
+      and .transport.mtls.server_leaf_public_key_sha256 == "4444444444444444444444444444444444444444444444444444444444444444"
+      and .transport.mtls.client_certificate_der_fingerprint_distinct_from_server_leaf == true
+      and .transport.mtls.client_certificate_public_key_fingerprint_distinct_from_server_leaf == true
+      and .transport.mtls.server_leaf_certificate_fetch_error == null;
     .status == "pass"
+    and mtls_proofs
     and .transport.mtls.missing_client_certificate_health_http_status == "496"
     and .transport.mtls.missing_client_certificate_rejection_signal == true
     and .transport.mtls.missing_client_certificate_rejected == true
+    and .transport.mtls.missing_client_certificate_same_endpoint == true
     and .transport.mtls.client_certificate_used == true
   ' "$TMP_DIR/operator-smoke-require-mtls-proxy-496-summary.json" >/dev/null; then
   echo "access bridge service serve integration failed: proxy-native 496 mTLS summary mismatch"
@@ -394,12 +549,26 @@ ACCESS_BRIDGE_FAKE_CURL_SCENARIO=tls_000 PATH="$FAKE_CURL_DIR:$PATH" bash ./scri
   --summary-json "$TMP_DIR/operator-smoke-require-mtls-tls-000-summary.json" \
   --abuse-message "operator smoke require mtls tls 000" >/dev/null
 if ! jq -e '
+    def mtls_proofs:
+      .transport.mtls.local_client_certificate_key_match == true
+      and .transport.mtls.client_certificate_client_auth_eku == true
+      and .transport.mtls.server_leaf_certificate_fetched == true
+      and .transport.mtls.client_certificate_der_sha256 == "1111111111111111111111111111111111111111111111111111111111111111"
+      and .transport.mtls.client_certificate_public_key_sha256 == "2222222222222222222222222222222222222222222222222222222222222222"
+      and .transport.mtls.client_key_public_key_sha256 == "2222222222222222222222222222222222222222222222222222222222222222"
+      and .transport.mtls.server_leaf_certificate_der_sha256 == "3333333333333333333333333333333333333333333333333333333333333333"
+      and .transport.mtls.server_leaf_public_key_sha256 == "4444444444444444444444444444444444444444444444444444444444444444"
+      and .transport.mtls.client_certificate_der_fingerprint_distinct_from_server_leaf == true
+      and .transport.mtls.client_certificate_public_key_fingerprint_distinct_from_server_leaf == true
+      and .transport.mtls.server_leaf_certificate_fetch_error == null;
     .status == "pass"
+    and mtls_proofs
     and .transport.mtls.missing_client_certificate_health_http_status == "000"
     and .transport.mtls.missing_client_certificate_health_curl_rc == 56
     and (.transport.mtls.missing_client_certificate_health_curl_error | contains("alert certificate required"))
     and .transport.mtls.missing_client_certificate_rejection_signal == true
     and .transport.mtls.missing_client_certificate_rejected == true
+    and .transport.mtls.missing_client_certificate_same_endpoint == true
     and .transport.mtls.client_certificate_used == true
   ' "$TMP_DIR/operator-smoke-require-mtls-tls-000-summary.json" >/dev/null; then
   echo "access bridge service serve integration failed: TLS-layer 000 mTLS summary mismatch"

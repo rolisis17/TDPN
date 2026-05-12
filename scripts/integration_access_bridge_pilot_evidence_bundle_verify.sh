@@ -60,7 +60,7 @@ jq -n \
   --arg generated_at_utc "$NOW_UTC" \
   '{
     version: 1,
-    schema: {id: "access_bridge_service_smoke_summary", major: 1, minor: 5},
+    schema: {id: "access_bridge_service_smoke_summary", major: 1, minor: 6},
     generated_at_utc: $generated_at_utc,
     status: "pass",
     notes: "Access bridge service smoke passed",
@@ -78,6 +78,16 @@ jq -n \
         required: false,
         client_certificate_configured: false,
         client_certificate_used: false,
+        local_client_certificate_key_match: "skipped",
+        client_certificate_client_auth_eku: "skipped",
+        server_leaf_certificate_fetched: "skipped",
+        client_certificate_der_sha256: null,
+        client_certificate_public_key_sha256: null,
+        client_key_public_key_sha256: null,
+        server_leaf_certificate_der_sha256: null,
+        server_leaf_public_key_sha256: null,
+        client_certificate_der_fingerprint_distinct_from_server_leaf: "skipped",
+        client_certificate_public_key_fingerprint_distinct_from_server_leaf: "skipped",
         missing_client_certificate_rejected: false,
         missing_client_certificate_same_endpoint: false,
         missing_client_certificate_rejection_signal: false,
@@ -101,7 +111,7 @@ jq -n \
   --arg generated_at_utc "$NOW_UTC" \
   '{
     version: 1,
-    schema: {id: "access_bridge_deployment_evidence_summary", major: 1, minor: 4},
+    schema: {id: "access_bridge_deployment_evidence_summary", major: 1, minor: 5},
     generated_at_utc: $generated_at_utc,
     status: "pass",
     evidence_scope: "real_helper_https",
@@ -126,6 +136,16 @@ jq -n \
       transport_mtls_required: false,
       transport_mtls_client_certificate_configured: false,
       transport_mtls_client_certificate_used: false,
+      transport_mtls_local_client_certificate_key_match: false,
+      transport_mtls_client_certificate_client_auth_eku: false,
+      transport_mtls_server_leaf_certificate_fetched: false,
+      transport_mtls_client_certificate_der_sha256: "",
+      transport_mtls_client_certificate_public_key_sha256: "",
+      transport_mtls_client_key_public_key_sha256: "",
+      transport_mtls_server_leaf_certificate_der_sha256: "",
+      transport_mtls_server_leaf_public_key_sha256: "",
+      transport_mtls_client_certificate_der_fingerprint_distinct_from_server_leaf: false,
+      transport_mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf: false,
       transport_mtls_missing_client_certificate_rejected: false,
       transport_mtls_missing_client_certificate_same_endpoint: false,
       transport_mtls_missing_client_certificate_rejection_signal: false,
@@ -148,6 +168,16 @@ jq -n \
       mtls_required: false,
       mtls_client_certificate_configured: false,
       mtls_client_certificate_used: false,
+      mtls_local_client_certificate_key_match: false,
+      mtls_client_certificate_client_auth_eku: false,
+      mtls_server_leaf_certificate_fetched: false,
+      mtls_client_certificate_der_sha256: "",
+      mtls_client_certificate_public_key_sha256: "",
+      mtls_client_key_public_key_sha256: "",
+      mtls_server_leaf_certificate_der_sha256: "",
+      mtls_server_leaf_public_key_sha256: "",
+      mtls_client_certificate_der_fingerprint_distinct_from_server_leaf: false,
+      mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf: false,
       mtls_missing_client_certificate_rejected: false,
       mtls_missing_client_certificate_same_endpoint: false,
       mtls_missing_client_certificate_rejection_signal: false
@@ -533,7 +563,7 @@ bash ./scripts/access_bridge_pilot_evidence_bundle_verify.sh \
 mtls_required_missing_proof_rc=$?
 set -e
 if [[ "$mtls_required_missing_proof_rc" -eq 0 ]] ||
-  ! grep -Eq -- 'did not prove no-client-certificate rejection|did not prove a client-certificate rejection signal' "$TMP_DIR/verify-mtls-required-missing-proof.log"; then
+  ! grep -Eq -- 'did not prove mTLS client certificate/key match|did not prove mTLS clientAuth EKU|did not fetch the mTLS server leaf certificate|did not prove no-client-certificate rejection|did not prove a client-certificate rejection signal' "$TMP_DIR/verify-mtls-required-missing-proof.log"; then
   echo "access bridge pilot evidence bundle verifier integration failed: trusted verifier accepted require-mtls summary without mTLS proof"
   cat "$TMP_DIR/verify-mtls-required-missing-proof.log"
   if [[ -f "$MTLS_REQUIRED_VERIFY_SUMMARY_JSON" ]]; then

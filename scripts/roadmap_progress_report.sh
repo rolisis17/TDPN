@@ -1964,6 +1964,8 @@ access_recovery_evidence_json() {
         if has("rc") then ((.rc | type) == "number" and .rc == 0) else true end;
       def str_eq($v; $expected):
         (($v | type) == "string" and (($v | ascii_downcase) == $expected));
+      def http_success_status($v):
+        (($v // "") | tostring | test("^2[0-9][0-9]$"));
       def pass_status:
         status_norm == "pass";
       def generated_at_ready:
@@ -1987,9 +1989,22 @@ access_recovery_evidence_json() {
           and (.transport.tls.verified == true)
           and (.transport.mtls.client_certificate_configured == true)
           and (.transport.mtls.client_certificate_used == true)
+          and (.transport.mtls.local_client_certificate_key_match == true)
+          and (.transport.mtls.client_certificate_client_auth_eku == true)
+          and (.transport.mtls.server_leaf_certificate_fetched == true)
+          and (.transport.mtls.client_certificate_der_fingerprint_distinct_from_server_leaf == true)
+          and (.transport.mtls.client_certificate_public_key_fingerprint_distinct_from_server_leaf == true)
+          and ((.transport.mtls.client_certificate_der_sha256 // "") != "")
+          and ((.transport.mtls.client_certificate_public_key_sha256 // "") != "")
+          and ((.transport.mtls.client_certificate_public_key_sha256 // "") == (.transport.mtls.client_key_public_key_sha256 // ""))
+          and ((.transport.mtls.server_leaf_certificate_der_sha256 // "") != "")
+          and ((.transport.mtls.server_leaf_public_key_sha256 // "") != "")
+          and ((.transport.mtls.client_certificate_der_sha256 // "") != (.transport.mtls.server_leaf_certificate_der_sha256 // ""))
+          and ((.transport.mtls.client_certificate_public_key_sha256 // "") != (.transport.mtls.server_leaf_public_key_sha256 // ""))
           and (.transport.mtls.missing_client_certificate_rejected == true)
           and (.transport.mtls.missing_client_certificate_same_endpoint == true)
           and (.transport.mtls.missing_client_certificate_rejection_signal == true)
+          and (http_success_status(.transport.mtls.missing_client_certificate_health_http_status) | not)
         else true
         end;
       def service_smoke_semantic_ok:
@@ -2015,15 +2030,34 @@ access_recovery_evidence_json() {
           (.transport.mtls_required == true)
           and (.transport.mtls_client_certificate_configured == true)
           and (.transport.mtls_client_certificate_used == true)
+          and (.transport.mtls_local_client_certificate_key_match == true)
+          and (.transport.mtls_client_certificate_client_auth_eku == true)
+          and (.transport.mtls_server_leaf_certificate_fetched == true)
+          and (.transport.mtls_client_certificate_der_fingerprint_distinct_from_server_leaf == true)
+          and (.transport.mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf == true)
+          and ((.transport.mtls_client_certificate_der_sha256 // "") != "")
+          and ((.transport.mtls_client_certificate_public_key_sha256 // "") != "")
+          and ((.transport.mtls_client_certificate_public_key_sha256 // "") == (.transport.mtls_client_key_public_key_sha256 // ""))
+          and ((.transport.mtls_server_leaf_certificate_der_sha256 // "") != "")
+          and ((.transport.mtls_server_leaf_public_key_sha256 // "") != "")
+          and ((.transport.mtls_client_certificate_der_sha256 // "") != (.transport.mtls_server_leaf_certificate_der_sha256 // ""))
+          and ((.transport.mtls_client_certificate_public_key_sha256 // "") != (.transport.mtls_server_leaf_public_key_sha256 // ""))
           and (.transport.mtls_missing_client_certificate_rejected == true)
           and (.transport.mtls_missing_client_certificate_same_endpoint == true)
           and (.transport.mtls_missing_client_certificate_rejection_signal == true)
+          and (http_success_status(.transport.mtls_missing_client_certificate_health_http_status) | not)
           and (.smoke.transport_mtls_required == true)
           and (.smoke.transport_mtls_client_certificate_configured == true)
           and (.smoke.transport_mtls_client_certificate_used == true)
+          and (.smoke.transport_mtls_local_client_certificate_key_match == true)
+          and (.smoke.transport_mtls_client_certificate_client_auth_eku == true)
+          and (.smoke.transport_mtls_server_leaf_certificate_fetched == true)
+          and (.smoke.transport_mtls_client_certificate_der_fingerprint_distinct_from_server_leaf == true)
+          and (.smoke.transport_mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf == true)
           and (.smoke.transport_mtls_missing_client_certificate_rejected == true)
           and (.smoke.transport_mtls_missing_client_certificate_same_endpoint == true)
           and (.smoke.transport_mtls_missing_client_certificate_rejection_signal == true)
+          and (http_success_status(.smoke.transport_mtls_missing_client_certificate_health_http_status) | not)
         else true
         end;
       def deployment_evidence_semantic_ok:
@@ -2182,6 +2216,16 @@ access_recovery_evidence_json() {
           transport_mtls_required: (if (.transport.mtls.required | type) == "boolean" then .transport.mtls.required else null end),
           transport_mtls_client_certificate_configured: (if (.transport.mtls.client_certificate_configured | type) == "boolean" then .transport.mtls.client_certificate_configured else null end),
           transport_mtls_client_certificate_used: (if (.transport.mtls.client_certificate_used | type) == "boolean" then .transport.mtls.client_certificate_used else null end),
+          transport_mtls_local_client_certificate_key_match: (if (.transport.mtls.local_client_certificate_key_match | type) == "boolean" then .transport.mtls.local_client_certificate_key_match else null end),
+          transport_mtls_client_certificate_client_auth_eku: (if (.transport.mtls.client_certificate_client_auth_eku | type) == "boolean" then .transport.mtls.client_certificate_client_auth_eku else null end),
+          transport_mtls_server_leaf_certificate_fetched: (if (.transport.mtls.server_leaf_certificate_fetched | type) == "boolean" then .transport.mtls.server_leaf_certificate_fetched else null end),
+          transport_mtls_client_certificate_der_sha256: str_or_null(.transport.mtls.client_certificate_der_sha256),
+          transport_mtls_client_certificate_public_key_sha256: str_or_null(.transport.mtls.client_certificate_public_key_sha256),
+          transport_mtls_client_key_public_key_sha256: str_or_null(.transport.mtls.client_key_public_key_sha256),
+          transport_mtls_server_leaf_certificate_der_sha256: str_or_null(.transport.mtls.server_leaf_certificate_der_sha256),
+          transport_mtls_server_leaf_public_key_sha256: str_or_null(.transport.mtls.server_leaf_public_key_sha256),
+          transport_mtls_client_certificate_der_fingerprint_distinct_from_server_leaf: (if (.transport.mtls.client_certificate_der_fingerprint_distinct_from_server_leaf | type) == "boolean" then .transport.mtls.client_certificate_der_fingerprint_distinct_from_server_leaf else null end),
+          transport_mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf: (if (.transport.mtls.client_certificate_public_key_fingerprint_distinct_from_server_leaf | type) == "boolean" then .transport.mtls.client_certificate_public_key_fingerprint_distinct_from_server_leaf else null end),
           transport_mtls_missing_client_certificate_rejected: (if (.transport.mtls.missing_client_certificate_rejected | type) == "boolean" then .transport.mtls.missing_client_certificate_rejected else null end),
           transport_mtls_missing_client_certificate_same_endpoint: (if (.transport.mtls.missing_client_certificate_same_endpoint | type) == "boolean" then .transport.mtls.missing_client_certificate_same_endpoint else null end),
           transport_mtls_missing_client_certificate_rejection_signal: (if (.transport.mtls.missing_client_certificate_rejection_signal | type) == "boolean" then .transport.mtls.missing_client_certificate_rejection_signal else null end),
@@ -2208,6 +2252,16 @@ access_recovery_evidence_json() {
           smoke_transport_mtls_required: (if (.smoke.transport_mtls_required | type) == "boolean" then .smoke.transport_mtls_required else null end),
           smoke_transport_mtls_client_certificate_configured: (if (.smoke.transport_mtls_client_certificate_configured | type) == "boolean" then .smoke.transport_mtls_client_certificate_configured else null end),
           smoke_transport_mtls_client_certificate_used: (if (.smoke.transport_mtls_client_certificate_used | type) == "boolean" then .smoke.transport_mtls_client_certificate_used else null end),
+          smoke_transport_mtls_local_client_certificate_key_match: (if (.smoke.transport_mtls_local_client_certificate_key_match | type) == "boolean" then .smoke.transport_mtls_local_client_certificate_key_match else null end),
+          smoke_transport_mtls_client_certificate_client_auth_eku: (if (.smoke.transport_mtls_client_certificate_client_auth_eku | type) == "boolean" then .smoke.transport_mtls_client_certificate_client_auth_eku else null end),
+          smoke_transport_mtls_server_leaf_certificate_fetched: (if (.smoke.transport_mtls_server_leaf_certificate_fetched | type) == "boolean" then .smoke.transport_mtls_server_leaf_certificate_fetched else null end),
+          smoke_transport_mtls_client_certificate_der_sha256: str_or_null(.smoke.transport_mtls_client_certificate_der_sha256),
+          smoke_transport_mtls_client_certificate_public_key_sha256: str_or_null(.smoke.transport_mtls_client_certificate_public_key_sha256),
+          smoke_transport_mtls_client_key_public_key_sha256: str_or_null(.smoke.transport_mtls_client_key_public_key_sha256),
+          smoke_transport_mtls_server_leaf_certificate_der_sha256: str_or_null(.smoke.transport_mtls_server_leaf_certificate_der_sha256),
+          smoke_transport_mtls_server_leaf_public_key_sha256: str_or_null(.smoke.transport_mtls_server_leaf_public_key_sha256),
+          smoke_transport_mtls_client_certificate_der_fingerprint_distinct_from_server_leaf: (if (.smoke.transport_mtls_client_certificate_der_fingerprint_distinct_from_server_leaf | type) == "boolean" then .smoke.transport_mtls_client_certificate_der_fingerprint_distinct_from_server_leaf else null end),
+          smoke_transport_mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf: (if (.smoke.transport_mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf | type) == "boolean" then .smoke.transport_mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf else null end),
           smoke_transport_mtls_missing_client_certificate_rejected: (if (.smoke.transport_mtls_missing_client_certificate_rejected | type) == "boolean" then .smoke.transport_mtls_missing_client_certificate_rejected else null end),
           smoke_transport_mtls_missing_client_certificate_same_endpoint: (if (.smoke.transport_mtls_missing_client_certificate_same_endpoint | type) == "boolean" then .smoke.transport_mtls_missing_client_certificate_same_endpoint else null end),
           smoke_transport_mtls_missing_client_certificate_rejection_signal: (if (.smoke.transport_mtls_missing_client_certificate_rejection_signal | type) == "boolean" then .smoke.transport_mtls_missing_client_certificate_rejection_signal else null end),
@@ -2232,6 +2286,16 @@ access_recovery_evidence_json() {
           transport_mtls_required: (if (.transport.mtls_required | type) == "boolean" then .transport.mtls_required else null end),
           transport_mtls_client_certificate_configured: (if (.transport.mtls_client_certificate_configured | type) == "boolean" then .transport.mtls_client_certificate_configured else null end),
           transport_mtls_client_certificate_used: (if (.transport.mtls_client_certificate_used | type) == "boolean" then .transport.mtls_client_certificate_used else null end),
+          transport_mtls_local_client_certificate_key_match: (if (.transport.mtls_local_client_certificate_key_match | type) == "boolean" then .transport.mtls_local_client_certificate_key_match else null end),
+          transport_mtls_client_certificate_client_auth_eku: (if (.transport.mtls_client_certificate_client_auth_eku | type) == "boolean" then .transport.mtls_client_certificate_client_auth_eku else null end),
+          transport_mtls_server_leaf_certificate_fetched: (if (.transport.mtls_server_leaf_certificate_fetched | type) == "boolean" then .transport.mtls_server_leaf_certificate_fetched else null end),
+          transport_mtls_client_certificate_der_sha256: str_or_null(.transport.mtls_client_certificate_der_sha256),
+          transport_mtls_client_certificate_public_key_sha256: str_or_null(.transport.mtls_client_certificate_public_key_sha256),
+          transport_mtls_client_key_public_key_sha256: str_or_null(.transport.mtls_client_key_public_key_sha256),
+          transport_mtls_server_leaf_certificate_der_sha256: str_or_null(.transport.mtls_server_leaf_certificate_der_sha256),
+          transport_mtls_server_leaf_public_key_sha256: str_or_null(.transport.mtls_server_leaf_public_key_sha256),
+          transport_mtls_client_certificate_der_fingerprint_distinct_from_server_leaf: (if (.transport.mtls_client_certificate_der_fingerprint_distinct_from_server_leaf | type) == "boolean" then .transport.mtls_client_certificate_der_fingerprint_distinct_from_server_leaf else null end),
+          transport_mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf: (if (.transport.mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf | type) == "boolean" then .transport.mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf else null end),
           transport_mtls_missing_client_certificate_rejected: (if (.transport.mtls_missing_client_certificate_rejected | type) == "boolean" then .transport.mtls_missing_client_certificate_rejected else null end),
           transport_mtls_missing_client_certificate_same_endpoint: (if (.transport.mtls_missing_client_certificate_same_endpoint | type) == "boolean" then .transport.mtls_missing_client_certificate_same_endpoint else null end),
           transport_mtls_missing_client_certificate_rejection_signal: (if (.transport.mtls_missing_client_certificate_rejection_signal | type) == "boolean" then .transport.mtls_missing_client_certificate_rejection_signal else null end),
@@ -2832,6 +2896,8 @@ access_recovery_track_json_from_evidence() {
             )
           else false
           end;
+      def http_success_status($v):
+        (($v // "") | tostring | test("^2[0-9][0-9]$"));
       def smoke_authority:
         (smoke_base_url | sub("^[A-Za-z][A-Za-z0-9+.-]*://"; "") | first_part("/") | first_part("?") | first_part("#"));
       def smoke_authority_has_userinfo:
@@ -2897,19 +2963,51 @@ access_recovery_track_json_from_evidence() {
         required_mtls_requested
         and ($service_smoke.details.transport_mtls_client_certificate_configured == true)
         and ($service_smoke.details.transport_mtls_client_certificate_used == true)
+        and ($service_smoke.details.transport_mtls_local_client_certificate_key_match == true)
+        and ($service_smoke.details.transport_mtls_client_certificate_client_auth_eku == true)
+        and ($service_smoke.details.transport_mtls_server_leaf_certificate_fetched == true)
+        and ($service_smoke.details.transport_mtls_client_certificate_der_fingerprint_distinct_from_server_leaf == true)
+        and ($service_smoke.details.transport_mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf == true)
+        and (($service_smoke.details.transport_mtls_client_certificate_der_sha256 // "") != "")
+        and (($service_smoke.details.transport_mtls_client_certificate_public_key_sha256 // "") != "")
+        and (($service_smoke.details.transport_mtls_client_certificate_public_key_sha256 // "") == ($service_smoke.details.transport_mtls_client_key_public_key_sha256 // ""))
+        and (($service_smoke.details.transport_mtls_server_leaf_certificate_der_sha256 // "") != "")
+        and (($service_smoke.details.transport_mtls_server_leaf_public_key_sha256 // "") != "")
+        and (($service_smoke.details.transport_mtls_client_certificate_der_sha256 // "") != ($service_smoke.details.transport_mtls_server_leaf_certificate_der_sha256 // ""))
+        and (($service_smoke.details.transport_mtls_client_certificate_public_key_sha256 // "") != ($service_smoke.details.transport_mtls_server_leaf_public_key_sha256 // ""))
         and ($service_smoke.details.transport_mtls_missing_client_certificate_rejected == true)
         and ($service_smoke.details.transport_mtls_missing_client_certificate_same_endpoint == true)
         and ($service_smoke.details.transport_mtls_missing_client_certificate_rejection_signal == true)
+        and (http_success_status($service_smoke.details.transport_mtls_missing_client_certificate_health_http_status) | not)
         and ($deployment_evidence.details.smoke_transport_mtls_client_certificate_configured == true)
         and ($deployment_evidence.details.smoke_transport_mtls_client_certificate_used == true)
+        and ($deployment_evidence.details.smoke_transport_mtls_local_client_certificate_key_match == true)
+        and ($deployment_evidence.details.smoke_transport_mtls_client_certificate_client_auth_eku == true)
+        and ($deployment_evidence.details.smoke_transport_mtls_server_leaf_certificate_fetched == true)
+        and ($deployment_evidence.details.smoke_transport_mtls_client_certificate_der_fingerprint_distinct_from_server_leaf == true)
+        and ($deployment_evidence.details.smoke_transport_mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf == true)
         and ($deployment_evidence.details.smoke_transport_mtls_missing_client_certificate_rejected == true)
         and ($deployment_evidence.details.smoke_transport_mtls_missing_client_certificate_same_endpoint == true)
         and ($deployment_evidence.details.smoke_transport_mtls_missing_client_certificate_rejection_signal == true)
+        and (http_success_status($deployment_evidence.details.smoke_transport_mtls_missing_client_certificate_health_http_status) | not)
         and ($deployment_evidence.details.transport_mtls_client_certificate_configured == true)
         and ($deployment_evidence.details.transport_mtls_client_certificate_used == true)
+        and ($deployment_evidence.details.transport_mtls_local_client_certificate_key_match == true)
+        and ($deployment_evidence.details.transport_mtls_client_certificate_client_auth_eku == true)
+        and ($deployment_evidence.details.transport_mtls_server_leaf_certificate_fetched == true)
+        and ($deployment_evidence.details.transport_mtls_client_certificate_der_fingerprint_distinct_from_server_leaf == true)
+        and ($deployment_evidence.details.transport_mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf == true)
+        and (($deployment_evidence.details.transport_mtls_client_certificate_der_sha256 // "") != "")
+        and (($deployment_evidence.details.transport_mtls_client_certificate_public_key_sha256 // "") != "")
+        and (($deployment_evidence.details.transport_mtls_client_certificate_public_key_sha256 // "") == ($deployment_evidence.details.transport_mtls_client_key_public_key_sha256 // ""))
+        and (($deployment_evidence.details.transport_mtls_server_leaf_certificate_der_sha256 // "") != "")
+        and (($deployment_evidence.details.transport_mtls_server_leaf_public_key_sha256 // "") != "")
+        and (($deployment_evidence.details.transport_mtls_client_certificate_der_sha256 // "") != ($deployment_evidence.details.transport_mtls_server_leaf_certificate_der_sha256 // ""))
+        and (($deployment_evidence.details.transport_mtls_client_certificate_public_key_sha256 // "") != ($deployment_evidence.details.transport_mtls_server_leaf_public_key_sha256 // ""))
         and ($deployment_evidence.details.transport_mtls_missing_client_certificate_rejected == true)
         and ($deployment_evidence.details.transport_mtls_missing_client_certificate_same_endpoint == true)
-        and ($deployment_evidence.details.transport_mtls_missing_client_certificate_rejection_signal == true);
+        and ($deployment_evidence.details.transport_mtls_missing_client_certificate_rejection_signal == true)
+        and (http_success_status($deployment_evidence.details.transport_mtls_missing_client_certificate_health_http_status) | not);
       def installed_host_handoff_evidence:
         (($host_install.details.evidence_mode // "") == "installed-host")
         and ($host_install.details.installed_host_mode == true);

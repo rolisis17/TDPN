@@ -265,6 +265,16 @@ jq '
   .transport.mtls.required = true
   | .transport.mtls.client_certificate_configured = true
   | .transport.mtls.client_certificate_used = true
+  | .transport.mtls.local_client_certificate_key_match = true
+  | .transport.mtls.client_certificate_client_auth_eku = true
+  | .transport.mtls.server_leaf_certificate_fetched = true
+  | .transport.mtls.client_certificate_der_sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
+  | .transport.mtls.client_certificate_public_key_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+  | .transport.mtls.client_key_public_key_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+  | .transport.mtls.server_leaf_certificate_der_sha256 = "3333333333333333333333333333333333333333333333333333333333333333"
+  | .transport.mtls.server_leaf_public_key_sha256 = "4444444444444444444444444444444444444444444444444444444444444444"
+  | .transport.mtls.client_certificate_der_fingerprint_distinct_from_server_leaf = true
+  | .transport.mtls.client_certificate_public_key_fingerprint_distinct_from_server_leaf = true
   | .transport.mtls.missing_client_certificate_rejected = true
   | .transport.mtls.missing_client_certificate_same_endpoint = true
   | .transport.mtls.missing_client_certificate_rejection_signal = true
@@ -293,18 +303,74 @@ if ! jq -e '
     and .transport.mtls_required == true
     and .transport.mtls_client_certificate_configured == true
     and .transport.mtls_client_certificate_used == true
+    and .transport.mtls_local_client_certificate_key_match == true
+    and .transport.mtls_client_certificate_client_auth_eku == true
+    and .transport.mtls_server_leaf_certificate_fetched == true
+    and .transport.mtls_client_certificate_public_key_sha256 == "2222222222222222222222222222222222222222222222222222222222222222"
+    and .transport.mtls_client_key_public_key_sha256 == "2222222222222222222222222222222222222222222222222222222222222222"
+    and .transport.mtls_server_leaf_public_key_sha256 == "4444444444444444444444444444444444444444444444444444444444444444"
+    and .transport.mtls_client_certificate_der_fingerprint_distinct_from_server_leaf == true
+    and .transport.mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf == true
     and .transport.mtls_missing_client_certificate_rejected == true
     and .transport.mtls_missing_client_certificate_same_endpoint == true
     and .transport.mtls_missing_client_certificate_rejection_signal == true
     and .transport.mtls_missing_client_certificate_health_http_status == "000"
     and .smoke.transport_mtls_required == true
     and .smoke.transport_mtls_client_certificate_used == true
+    and .smoke.transport_mtls_local_client_certificate_key_match == true
+    and .smoke.transport_mtls_client_certificate_client_auth_eku == true
+    and .smoke.transport_mtls_server_leaf_certificate_fetched == true
+    and .smoke.transport_mtls_client_certificate_der_fingerprint_distinct_from_server_leaf == true
+    and .smoke.transport_mtls_client_certificate_public_key_fingerprint_distinct_from_server_leaf == true
     and .smoke.transport_mtls_missing_client_certificate_rejected == true
     and .smoke.transport_mtls_missing_client_certificate_same_endpoint == true
     and .smoke.transport_mtls_missing_client_certificate_rejection_signal == true
+    and .smoke.transport_mtls_missing_client_certificate_health_http_status == "000"
+    and .smoke.transport_mtls_missing_client_certificate_health_curl_rc == 56
+    and .smoke.transport_mtls_missing_client_certificate_health_curl_error == "tlsv13 alert certificate required"
+    and .smoke.transport_mtls_missing_client_certificate_health_effective_url == .transport.effective_url
+    and .smoke.transport_mtls_missing_client_certificate_health_remote_ip == .transport.remote_ip
+    and .smoke.transport_mtls_missing_client_certificate_health_remote_port == .transport.remote_port
   ' "$MTLS_SUMMARY" >/dev/null; then
   echo "access bridge deployment evidence integration failed: mTLS proof summary mismatch"
   cat "$MTLS_SUMMARY"
+  exit 1
+fi
+
+MTLS_SUCCESS_NO_CERT_SMOKE="$TMP_DIR/access_bridge_deployment_evidence_mtls_success_no_cert_smoke.json"
+MTLS_SUCCESS_NO_CERT_SUMMARY="$TMP_DIR/access_bridge_deployment_evidence_mtls_success_no_cert_summary.json"
+jq '.transport.mtls.missing_client_certificate_health_http_status = "200"' "$MTLS_SMOKE" >"$MTLS_SUCCESS_NO_CERT_SMOKE"
+set +e
+./scripts/access_bridge_deployment_evidence.sh \
+  --smoke-summary-json "$MTLS_SUCCESS_NO_CERT_SMOKE" \
+  --require-mtls 1 \
+  --expect-helper-id helper-evidence \
+  --expect-org-id evidence-org \
+  --expect-registry-id "$registry_id" \
+  --config-json "$SERVICE_CONFIG" \
+  --deploy-pack-dir "$DEPLOY_DIR" \
+  --service-name gpm-access-bridge-evidence \
+  --summary-json "$MTLS_SUCCESS_NO_CERT_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/mtls-success-no-cert.log" 2>&1
+mtls_success_no_cert_rc=$?
+set -e
+if [[ "$mtls_success_no_cert_rc" -eq 0 ]]; then
+  echo "access bridge deployment evidence integration failed: require-mtls accepted successful missing-client-cert probe"
+  cat "$MTLS_SUCCESS_NO_CERT_SUMMARY"
+  exit 1
+fi
+if ! jq -e '
+    .status == "fail"
+    and .inputs.require_mtls == true
+    and .transport.status == "fail"
+    and .transport.mtls_missing_client_certificate_rejected == true
+    and .transport.mtls_missing_client_certificate_health_http_status == "200"
+    and .smoke.transport_mtls_missing_client_certificate_health_http_status == "200"
+    and (.transport.reason | contains("success HTTP status"))
+    and .recommended_next_action.id == "refresh_deployed_bridge_smoke"
+  ' "$MTLS_SUCCESS_NO_CERT_SUMMARY" >/dev/null; then
+  echo "access bridge deployment evidence integration failed: successful missing-client-cert probe summary mismatch"
+  cat "$MTLS_SUCCESS_NO_CERT_SUMMARY"
   exit 1
 fi
 
