@@ -1223,6 +1223,26 @@ else
     exit 1
   fi
 fi
+if ! grep -qF 'id="desktop_step_client_detail"' "$DESKTOP_HTML_FILE"; then
+  echo "desktop scaffold contract failed: missing dynamic client onboarding detail element in $DESKTOP_HTML_FILE"
+  exit 1
+fi
+if ! grep -qF 'function isServerOnlyRole(' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing server-only role helper in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'Continue in Server lane' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing direct server-only activation path in $JS_FILE"
+  exit 1
+fi
+if ! grep -qF 'Client lane is locked for this session.' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: missing client onboarding role-lock detail in $JS_FILE"
+  exit 1
+fi
+if grep -qF 'finish Step 2 and unlock client actions' "$JS_FILE"; then
+  echo "desktop scaffold contract failed: stale server-only Step 2 unlock guidance remains in $JS_FILE"
+  exit 1
+fi
 echo "[desktop-scaffold] role-lock logic markers are present (client+server hints, disabled-tab handling)"
 
 SYNC_SERVER_MUTATION_SNIPPET="$(sed -n '/function syncServerMutationControls(/,/^}/p' "$JS_FILE")"

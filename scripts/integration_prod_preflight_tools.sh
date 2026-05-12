@@ -4,12 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-AUTH_ENV="$ROOT_DIR/deploy/.env.easy.server"
-PROVIDER_ENV="$ROOT_DIR/deploy/.env.easy.provider"
-MODE_FILE="$ROOT_DIR/deploy/data/easy_node_server_mode.conf"
-backup_env=""
-backup_provider=""
-backup_mode=""
+TEST_ROOT="$(mktemp -d)"
+DEPLOY_DIR="$TEST_ROOT/deploy"
+export EASY_NODE_DEPLOY_DIR="$DEPLOY_DIR"
+
+AUTH_ENV="$DEPLOY_DIR/.env.easy.server"
+PROVIDER_ENV="$DEPLOY_DIR/.env.easy.provider"
+MODE_FILE="$DEPLOY_DIR/data/easy_node_server_mode.conf"
 live_curl_mock_dir=""
 tls_dir=""
 wg_mock_dir=""
@@ -21,24 +22,6 @@ env_value() {
 }
 
 cleanup() {
-  if [[ -n "$backup_env" && -f "$backup_env" ]]; then
-    cp "$backup_env" "$AUTH_ENV"
-    rm -f "$backup_env"
-  else
-    rm -f "$AUTH_ENV"
-  fi
-  if [[ -n "$backup_provider" && -f "$backup_provider" ]]; then
-    cp "$backup_provider" "$PROVIDER_ENV"
-    rm -f "$backup_provider"
-  else
-    rm -f "$PROVIDER_ENV"
-  fi
-  if [[ -n "$backup_mode" && -f "$backup_mode" ]]; then
-    cp "$backup_mode" "$MODE_FILE"
-    rm -f "$backup_mode"
-  else
-    rm -f "$MODE_FILE"
-  fi
   if [[ -n "$live_curl_mock_dir" ]]; then
     rm -rf "$live_curl_mock_dir"
   fi
@@ -48,22 +31,11 @@ cleanup() {
   if [[ -n "$wg_mock_dir" ]]; then
     rm -rf "$wg_mock_dir"
   fi
+  rm -rf "$TEST_ROOT"
 }
 trap cleanup EXIT
 
-mkdir -p "$ROOT_DIR/deploy/data"
-if [[ -f "$AUTH_ENV" ]]; then
-  backup_env="$(mktemp)"
-  cp "$AUTH_ENV" "$backup_env"
-fi
-if [[ -f "$PROVIDER_ENV" ]]; then
-  backup_provider="$(mktemp)"
-  cp "$PROVIDER_ENV" "$backup_provider"
-fi
-if [[ -f "$MODE_FILE" ]]; then
-  backup_mode="$(mktemp)"
-  cp "$MODE_FILE" "$backup_mode"
-fi
+mkdir -p "$DEPLOY_DIR/data"
 
 tls_dir="$(mktemp -d)"
 export EASY_NODE_ADMIN_SIGNING_KEY_DIR="$tls_dir/admin_signing"
@@ -347,7 +319,7 @@ if [[ -z "$first_key_id" || -z "$second_key_id" || "$first_key_id" == "$second_k
   cat /tmp/integration_prod_preflight_rotate.log /tmp/integration_prod_preflight_rotate2.log 2>/dev/null || true
   exit 1
 fi
-signers_file="$ROOT_DIR/deploy/data/issuer/issuer_admin_signers.txt"
+signers_file="$DEPLOY_DIR/data/issuer/issuer_admin_signers.txt"
 if [[ ! -f "$signers_file" ]]; then
   echo "missing signer file after rotate: $signers_file"
   exit 1
@@ -626,7 +598,7 @@ if ! rg -q "mTLS client certificate missing clientAuth usage" /tmp/integration_p
   exit 1
 fi
 sed -i -E "s#^MTLS_CLIENT_CERT_FILE=.*#MTLS_CLIENT_CERT_FILE=$tls_dir/tls/client.crt#" "$AUTH_ENV"
-sed -i -E "s#^MTLS_CLIENT_KEY_FILE=.*#MTLS_CLIENT_KEY_FILE=$tls_dir/tls/node.key#" "$AUTH_ENV"
+sed -i -E "s#^MTLS_CLIENT_KEY_FILE=.*#MTLS_CLIENT_KEY_FILE=$tls_dir/tls/client.key#" "$AUTH_ENV"
 
 write_provider_env_file() {
   local core_issuer="$1"

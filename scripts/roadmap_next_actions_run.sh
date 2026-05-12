@@ -2244,6 +2244,7 @@ action_command_argv_allowed() {
   local scripts_root="$ROOT_DIR/scripts"
   local scripts_root_canonical=""
   local canonical_script_path=""
+  local command_index=0
   ACTION_COMMAND_VALIDATED_SCRIPT_PATH=""
   if [[ "${#argv[@]}" -eq 0 ]]; then
     return 1
@@ -2251,12 +2252,18 @@ action_command_argv_allowed() {
   if ! scripts_root_canonical="$(cd -P "$scripts_root" 2>/dev/null && pwd)"; then
     return 1
   fi
-  cmd="${argv[0]}"
-  if [[ "$cmd" == "bash" ]]; then
-    if [[ "${#argv[@]}" -lt 2 ]]; then
+  if [[ "${argv[0]}" == "sudo" ]]; then
+    if [[ "${#argv[@]}" -lt 2 || "${argv[1]}" == -* ]]; then
       return 1
     fi
-    script_path="${argv[1]}"
+    command_index=1
+  fi
+  cmd="${argv[$command_index]}"
+  if [[ "$cmd" == "bash" ]]; then
+    if [[ "${#argv[@]}" -lt $((command_index + 2)) ]]; then
+      return 1
+    fi
+    script_path="${argv[$((command_index + 1))]}"
     if [[ "$script_path" == -* ]]; then
       # Keep shell-evaluated modes blocked in argv-safe path mode.
       return 1

@@ -62,6 +62,8 @@ TMP_DIR="$(mktemp -d "$ROOT_DIR/.easy-node-logs/integration_roadmap_next_actions
 ACTION_TMP_DIR="$(mktemp -d "$ROOT_DIR/scripts/.integration_roadmap_next_actions_run.XXXXXX")"
 trap 'rm -rf "$TMP_DIR" "$ACTION_TMP_DIR"' EXIT
 
+FAKE_BIN_DIR="$TMP_DIR/fake-bin"
+FAKE_SUDO="$FAKE_BIN_DIR/sudo"
 FAKE_ROADMAP="$TMP_DIR/fake_roadmap_progress_report.sh"
 PASS1="$ACTION_TMP_DIR/pass_action_1.sh"
 PASS2="$ACTION_TMP_DIR/pass_action_2.sh"
@@ -113,6 +115,18 @@ set -euo pipefail
 echo "pass action 2"
 EOF_PASS2
 chmod +x "$PASS2"
+
+mkdir -p "$FAKE_BIN_DIR"
+cat >"$FAKE_SUDO" <<'EOF_FAKE_SUDO'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$#" -eq 0 || "${1:-}" == -* ]]; then
+  echo "fake sudo only supports transparent command execution in this integration"
+  exit 2
+fi
+exec "$@"
+EOF_FAKE_SUDO
+chmod +x "$FAKE_SUDO"
 
 cat >"$PLAN_ENV_CHECK" <<'EOF_PLAN_ENV_CHECK'
 #!/usr/bin/env bash
@@ -462,6 +476,15 @@ case "$scenario" in
     {"id":"next_pass_1","label":"Next pass 1","command":"bash \"$PASS1\"","reason":"test"},
     {"id":"next_empty","label":"Next empty","command":"","reason":"skip-empty"},
     {"id":"next_pass_2","label":"Next pass 2","command":"bash \"$PASS2\"","reason":"test"}
+  ]
+}
+JSON
+    ;;
+  sudo_allowed_script)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"sudo_pass","label":"Sudo pass","command":"sudo bash \"$PASS1\"","reason":"test-sudo-wrapper","requires_real_hosts":false}
   ]
 }
 JSON
@@ -1068,6 +1091,34 @@ if ! jq -e '
 ' "$SUMMARY_PASS" >/dev/null; then
   echo "success path summary mismatch"
   cat "$SUMMARY_PASS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] accepts sudo only as a transparent scripts-allowlist wrapper"
+SUMMARY_SUDO_ALLOWED="$TMP_DIR/summary_sudo_allowed.json"
+REPORTS_SUDO_ALLOWED="$TMP_DIR/reports_sudo_allowed"
+ROADMAP_NEXT_ACTIONS_SCENARIO=sudo_allowed_script \
+PASS1="$PASS1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+PATH="$FAKE_BIN_DIR:$PATH" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_SUDO_ALLOWED" \
+  --summary-json "$SUMMARY_SUDO_ALLOWED" \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .roadmap.actions_selected_count == 1
+  and .roadmap.selected_action_ids == ["sudo_pass"]
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+  and .actions[0].id == "sudo_pass"
+  and .actions[0].status == "pass"
+' "$SUMMARY_SUDO_ALLOWED" >/dev/null; then
+  echo "sudo allowed wrapper summary mismatch"
+  cat "$SUMMARY_SUDO_ALLOWED"
   exit 1
 fi
 

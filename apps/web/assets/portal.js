@@ -851,7 +851,7 @@ function configEndpointUnavailableFailClosedMode() {
 }
 
 function failClosedMutatingActionGuidance() {
-  return "Restore the daemon config endpoint (/v1/config) first to re-enable Register Client and Connect actions.";
+  return "Restore the daemon config endpoint (/v1/config) first to re-enable mutating client actions.";
 }
 
 function failClosedMutatingActionStatusDetail() {
@@ -1804,13 +1804,16 @@ function computeContributionActionState() {
   const sessionFreshness = computeSessionFreshnessState();
   const sessionReady = sessionToken.length > 0 && sessionFreshness.state !== "expired";
   const isBusy = document.body.classList.contains("is-busy");
+  const failClosed = configEndpointUnavailableFailClosedMode();
   const statusLoaded = publicContributionStatusPayload && typeof publicContributionStatusPayload === "object";
   const selectedRole = publicContributionSelectedRole();
   const canEnable = statusLoaded && selectedContributionRoleEligibility(publicContributionStatusPayload, selectedRole) === true;
   const profile = statusLoaded ? publicContributionProfile(publicContributionStatusPayload) : {};
   const enabled = publicContributionBoolean(profile, ["enabled"]) === true;
   let baseHint = "";
-  if (!sessionToken) {
+  if (failClosed) {
+    baseHint = failClosedMutatingActionStatusDetail();
+  } else if (!sessionToken) {
     baseHint = "Sign in first to use public contribution and reward controls.";
   } else if (sessionFreshness.state === "expired") {
     baseHint = sessionFreshness.detail;
@@ -1819,6 +1822,7 @@ function computeContributionActionState() {
   }
   return {
     isBusy,
+    failClosed,
     sessionReady,
     statusLoaded,
     canEnable,
@@ -1831,14 +1835,14 @@ function computeContributionActionState() {
 function syncContributionActionState() {
   const state = computeContributionActionState();
   const readDisabled = state.isBusy || !state.sessionReady;
-  const enableDisabled = state.isBusy || !state.sessionReady || !state.statusLoaded || state.enabled || !state.canEnable;
-  const disableDisabled = state.isBusy || !state.sessionReady || !state.statusLoaded || !state.enabled;
+  const enableDisabled = state.isBusy || state.failClosed || !state.sessionReady || !state.statusLoaded || state.enabled || !state.canEnable;
+  const disableDisabled = state.isBusy || state.failClosed || !state.sessionReady || !state.statusLoaded || !state.enabled;
   contributionStatusBtnEl.disabled = readDisabled;
   rewardCurrentWeekBtnEl.disabled = readDisabled;
   rewardHistoryBtnEl.disabled = readDisabled;
   contributionEnableBtnEl.disabled = enableDisabled;
   contributionDisableBtnEl.disabled = disableDisabled;
-  contributionRoleEl.disabled = state.isBusy || !state.sessionReady;
+  contributionRoleEl.disabled = state.isBusy || state.failClosed || !state.sessionReady;
   for (const [button, disabled, fallback] of [
     [contributionStatusBtnEl, readDisabled, "Sign in first to check contribution status."],
     [rewardCurrentWeekBtnEl, readDisabled, "Sign in first to load current-week rewards."],
@@ -4293,11 +4297,18 @@ function publicContributionSessionRequest(actionLabel) {
   };
 }
 
+function assertPublicContributionMutationAllowed(actionLabel) {
+  if (configEndpointUnavailableFailClosedMode()) {
+    throw new Error(`${actionLabel} is unavailable: ${failClosedMutatingActionStatusDetail()}`);
+  }
+}
+
 async function requestPublicContributionStatus() {
   return post("/v1/gpm/contribution/status", publicContributionSessionRequest("Contribution status"));
 }
 
 async function requestPublicContributionEnable() {
+  assertPublicContributionMutationAllowed("Enable contribution");
   const role = publicContributionSelectedRole();
   const request = publicContributionSessionRequest("Enable contribution");
   request.role = role;
@@ -4305,6 +4316,7 @@ async function requestPublicContributionEnable() {
 }
 
 async function requestPublicContributionDisable() {
+  assertPublicContributionMutationAllowed("Disable contribution");
   return post("/v1/gpm/contribution/disable", publicContributionSessionRequest("Disable contribution"));
 }
 

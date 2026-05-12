@@ -115,6 +115,7 @@ const compatAdvancedHintEl =
   document.getElementById("legacy_compat_hint") || document.querySelector("details#legacy_compat_section > p");
 const desktopStepSessionEl = document.getElementById("desktop_step_session");
 const desktopStepClientEl = document.getElementById("desktop_step_client");
+const desktopStepClientDetailEl = document.getElementById("desktop_step_client_detail");
 const desktopStepOperatorEl = document.getElementById("desktop_step_operator");
 const desktopOnboardingBannerEl = document.getElementById("desktop_onboarding_banner");
 const desktopOnboardingStateEl = document.getElementById("desktop_onboarding_state");
@@ -3744,12 +3745,17 @@ function setServerReadiness(readiness) {
   syncServerRoleLockState();
 }
 
+function isServerOnlyRole(role = state.role, readiness = state.serverReadiness) {
+  const normalized = (readiness?.role || role || "client").toLowerCase();
+  return normalized === "server" || normalized === "server_only";
+}
+
 function isServerTabVisibleRole(role = state.role) {
   if (state.serverReadiness && typeof state.serverReadiness.tabVisible === "boolean") {
     return state.serverReadiness.tabVisible;
   }
   const normalized = (state.serverReadiness?.role || role || "client").toLowerCase();
-  return normalized === "operator" || normalized === "admin" || normalized === "server" || normalized === "server_only";
+  return normalized === "operator" || normalized === "admin" || isServerOnlyRole(normalized, null);
 }
 
 function isClientTabVisibleRole(role = state.role) {
@@ -3760,7 +3766,7 @@ function isClientTabVisibleRole(role = state.role) {
     return state.serverReadiness.clientTabVisible;
   }
   const normalized = (state.serverReadiness?.role || role || "client").toLowerCase();
-  if (normalized === "server" || normalized === "server_only") {
+  if (isServerOnlyRole(normalized, null)) {
     return false;
   }
   if (normalized === "operator" || normalized === "admin") {
@@ -4252,6 +4258,9 @@ function syncDesktopOnboardingSteps() {
   if (!hasSession) {
     setDesktopStepState(desktopStepSessionEl, "active");
     setDesktopStepState(desktopStepClientEl, "blocked");
+    if (desktopStepClientDetailEl) {
+      desktopStepClientDetailEl.textContent = "Sign in before client registration.";
+    }
     setDesktopStepState(desktopStepOperatorEl, "blocked");
     return;
   }
@@ -4259,12 +4268,21 @@ function syncDesktopOnboardingSteps() {
   setDesktopStepState(desktopStepSessionEl, "done");
   if (clientLaneRoleLocked) {
     setDesktopStepState(desktopStepClientEl, "blocked");
+    if (desktopStepClientDetailEl) {
+      desktopStepClientDetailEl.textContent = "Client lane is locked for this session.";
+    }
   } else if (!state.clientRegistered) {
     setDesktopStepState(desktopStepClientEl, "active");
+    if (desktopStepClientDetailEl) {
+      desktopStepClientDetailEl.textContent = "Register this device.";
+    }
     setDesktopStepState(desktopStepOperatorEl, "blocked");
     return;
   } else {
     setDesktopStepState(desktopStepClientEl, "done");
+    if (desktopStepClientDetailEl) {
+      desktopStepClientDetailEl.textContent = "Client profile is registered.";
+    }
   }
   if (operatorReady) {
     setDesktopStepState(desktopStepOperatorEl, "done");
@@ -4421,7 +4439,7 @@ function computeServerLockHintText() {
       "approved operator application and matching session/application chain_operator_id values"
     )}`;
   }
-  if (role === "server" || role === "server_only") {
+  if (isServerOnlyRole(role, null)) {
     if (!state.serviceMutationsAllowed) {
       return "Server-only role detected. Service lifecycle actions are disabled by environment policy.";
     }
@@ -4434,13 +4452,17 @@ function computeServerLockHintText() {
 }
 
 function computeClientLockHintText() {
-  if (state.clientRegistrationTrustDegraded || state.clientRegistrationReregisterRequired) {
-    return clientRegistrationTrustHintText();
-  }
+  const role = (state.serverReadiness?.role || state.role || "client").toLowerCase();
   if (state.serverReadiness) {
     const readiness = state.serverReadiness;
     if (readiness.clientTabVisible === false) {
       const reason = readiness.clientLockReason || "Client controls are locked by backend readiness policy for this role.";
+      if (isServerOnlyRole(role, readiness)) {
+        return `${reason} ${formatDirectActionGuidance(
+          "Continue in Server lane",
+          "operator/server readiness in Step 3"
+        )}`;
+      }
       return `${reason} ${formatDirectActionGuidance(
         "Use Register Client when the role allows client lane access",
         "client-capable role with an active session token"
@@ -4453,8 +4475,10 @@ function computeClientLockHintText() {
       return "Client controls are unlocked by backend readiness policy.";
     }
   }
+  if (state.clientRegistrationTrustDegraded || state.clientRegistrationReregisterRequired) {
+    return clientRegistrationTrustHintText();
+  }
   if (!isClientTabVisibleRole()) {
-    const role = (state.serverReadiness?.role || state.role || "client").toLowerCase();
     if (!state.sessionToken) {
       return "Sign in first to unlock client controls.";
     }
@@ -4464,7 +4488,7 @@ function computeClientLockHintText() {
         "active session token and successful client registration"
       )}`;
     }
-    if (role === "server" || role === "server_only") {
+    if (isServerOnlyRole(role, state.serverReadiness)) {
       return `Client controls are disabled for server-only role. ${formatDirectActionGuidance(
         "Continue in Server lane",
         "operator/server readiness in Step 3"
@@ -4472,7 +4496,6 @@ function computeClientLockHintText() {
     }
     return "Client controls are locked by current role policy.";
   }
-  const role = (state.serverReadiness?.role || state.role || "client").toLowerCase();
   if ((role === "operator" || role === "admin") && state.clientRegistered) {
     return "Client controls are unlocked for dual-role operation.";
   }
@@ -4508,7 +4531,7 @@ function formatWorkspaceTabAvailabilityHint(clientTabVisible, serverTabVisible) 
     return "Client and Server tabs are disabled by role/readiness policy. Use the lock message activation paths before retrying.";
   }
   if (!clientTabVisible) {
-    return "Client tab is disabled for this session. Use the lock message activation path to finish Step 2 and unlock client actions.";
+    return "Client tab is disabled for this session. Use the lock message activation path shown above.";
   }
   return "Server tab is disabled for this session. Use the lock message activation path to finish Step 3 and unlock server actions.";
 }
@@ -4547,6 +4570,9 @@ function inferTabActivationPathHint(tabName, reason) {
     return directPathMatch[1].trim();
   }
   if (tabName === "client") {
+    if (/server-only|role[- ]?locked|role\/readiness/i.test(normalizedReason)) {
+      return "Continue in Server lane";
+    }
     if (!state.sessionToken) {
       return "Connect Wallet or use advanced Sign In, then Register Client";
     }

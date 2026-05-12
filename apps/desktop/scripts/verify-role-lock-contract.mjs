@@ -25,6 +25,12 @@ function run() {
   requirePattern(/id="tab_client"/, indexHtml, 'index.html missing `tab_client` tab button', failures);
   requirePattern(/id="tab_server"/, indexHtml, 'index.html missing `tab_server` tab button', failures);
   requirePattern(/id="tab_lock_hint"/, indexHtml, 'index.html missing `tab_lock_hint` lock messaging element', failures);
+  requirePattern(
+    /id="desktop_step_client_detail"/,
+    indexHtml,
+    'index.html missing dynamic `desktop_step_client_detail` onboarding detail',
+    failures
+  );
   requirePattern(/<body[^>]*class="[^"]*public-app-mode/, indexHtml, "index.html missing default public-app-mode body class", failures);
   requirePattern(/data-admin-only/, indexHtml, "index.html missing public-app/admin-console split markers", failures);
   requirePattern(/id="contribution_enable_btn"/, indexHtml, "index.html missing contribution enable control", failures);
@@ -48,6 +54,33 @@ function run() {
     "main.js missing locked-tab formatter",
     failures
   );
+  requirePattern(
+    /function\s+isServerOnlyRole\s*\(/,
+    mainJs,
+    "main.js missing server-only role helper",
+    failures
+  );
+  requirePattern(
+    /Continue in Server lane/,
+    mainJs,
+    "main.js missing direct server-only activation path",
+    failures
+  );
+  requirePattern(
+    /Client lane is locked for this session\./,
+    mainJs,
+    "main.js missing client onboarding role-lock detail",
+    failures
+  );
+  requirePattern(
+    /Use the lock message activation path shown above\./,
+    mainJs,
+    "main.js missing generic lock-message activation path wording",
+    failures
+  );
+  if (/finish Step 2 and unlock client actions/.test(mainJs)) {
+    failures.push("main.js still tells locked server-only users to finish client Step 2");
+  }
   requirePattern(
     /Lock reason:\s*\$\{normalizedReason\}\s*Activation path:\s*\$\{activationPath\}/,
     mainJs,

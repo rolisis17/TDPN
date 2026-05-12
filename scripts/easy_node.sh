@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEPLOY_DIR="$ROOT_DIR/deploy"
+DEPLOY_DIR="${EASY_NODE_DEPLOY_DIR:-$ROOT_DIR/deploy}"
 AUTHORITY_ENV_FILE="$DEPLOY_DIR/.env.easy.server"
 PROVIDER_ENV_FILE="$DEPLOY_DIR/.env.easy.provider"
 # Backward-compatible alias for older helpers that expect SERVER_ENV_FILE.

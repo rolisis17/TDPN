@@ -13026,6 +13026,10 @@ next_actions_candidate_json="$(
       action_evidence_metadata(["machine-c-vpn-smoke"]; true; false; ["real-host"])
     elif ($next_action_check_id // "") == "three_machine_prod_signoff" then
       action_evidence_metadata(["three-machine-real-host"]; true; false; ["real-host"])
+    elif ($next_action_check_id // "") == "runtime_hygiene" then
+      action_evidence_metadata(["runtime-hygiene"]; false; false; ["local-root-runtime"])
+    elif ($next_action_check_id // "") == "wg_only_stack_selftest" then
+      action_evidence_metadata(["wg-only-stack-selftest"]; false; false; ["local-root-real-wg"])
     else
       {}
     end;
