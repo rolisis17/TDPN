@@ -133,6 +133,7 @@ ACCESS_RECOVERY_OPERATOR_CONFIG_JSON="$TMP_DIR/operator-bridge-service-config.js
 ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK="$TMP_DIR/operator-bridge-deploy-pack"
 ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY="$TMP_DIR/operator-provenance.key"
 ACCESS_RECOVERY_OPERATOR_REPORTS_DIR="$TMP_DIR/operator-access-recovery-reports"
+ACCESS_RECOVERY_OPERATOR_PREFLIGHT_SUMMARY_JSON="$ACCESS_RECOVERY_OPERATOR_REPORTS_DIR/operator_preflight_summary.json"
 ACCESS_RECOVERY_OPERATOR_DEMO_DIR="$TMP_DIR/access_recovery_local_evidence_fake/access-recovery-demo"
 ACCESS_RECOVERY_OPERATOR_DEMO_CODE_FILE="$ACCESS_RECOVERY_OPERATOR_DEMO_DIR/private-code.txt"
 ACCESS_RECOVERY_OPERATOR_INSTALL_DIR="/srv/gpm/access-bridge"
@@ -497,6 +498,9 @@ provenance_org_id="$(arg_value_for_flag --provenance-org-id "$@")"
 provenance_org_name="$(arg_value_for_flag --provenance-org-name "$@")"
 trust_store="$(arg_value_for_flag --trust-store "$@")"
 reports_dir="$(arg_value_for_flag --reports-dir "$@")"
+summary_json="$(arg_value_for_flag --summary-json "$@")"
+plan_only="$(arg_value_for_flag --plan-only "$@")"
+roadmap_refresh="$(arg_value_for_flag --roadmap-refresh "$@")"
 if [[ "$base_url" != "https://helper-pilot.gpm.net" ]]; then
   echo "fake real-helper expected concrete base-url, got $base_url"
   exit 9
@@ -521,6 +525,57 @@ if [[ -z "$reports_dir" ]]; then
 fi
 if [[ -n "${FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE:-}" ]]; then
   printf '%s\n' "$*" >>"$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+fi
+if [[ "$plan_only" == "1" ]]; then
+  if [[ -z "$summary_json" ]]; then
+    echo "fake real-helper preflight missing summary-json"
+    exit 9
+  fi
+  mkdir -p "$(dirname "$summary_json")"
+  jq -n \
+    --arg summary_json "$summary_json" \
+    --arg reports_dir "$reports_dir" \
+    --arg roadmap_refresh "$roadmap_refresh" \
+    '{
+      version: 1,
+      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 7},
+      status: "skipped",
+      rc: 0,
+      stage: "plan",
+      mode: {
+        plan_only: true,
+        child_execution_skipped: true,
+        evidence_generated: false,
+        evidence_status: "planned_non_evidence"
+      },
+      operator_preflight: {
+        schema: {id: "access_recovery_operator_preflight_summary", major: 1, minor: 0},
+        status: "pass",
+        rc: 0,
+        stage: "plan",
+        local_only: true,
+        rehearsal_only: true,
+        non_evidence_rehearsal: true,
+        requires_live_hosts: false,
+        child_execution_skipped: true,
+        evidence_generated: false,
+        roadmap_refresh_enabled: ($roadmap_refresh != "0"),
+        roadmap_refresh_disabled: ($roadmap_refresh == "0"),
+        planned_child_commands: {
+          roadmap: {
+            enabled: ($roadmap_refresh != "0"),
+            reason: (if $roadmap_refresh == "0" then "roadmap_refresh disabled" else "" end)
+          },
+          bundle: {enabled: true},
+          verifier: {enabled: true}
+        },
+        planned_artifacts: {
+          summary_json: $summary_json,
+          reports_dir: $reports_dir,
+          verification_summary_json: ($reports_dir + "/access_bridge_pilot_evidence_verify.json")
+        }
+      }
+    }' >"$summary_json"
 fi
 echo "fake access recovery real-helper ok"
 EOF_FAKE_ACCESS_RECOVERY_REAL_HELPER
@@ -856,6 +911,15 @@ JSON
 {
   "next_actions": [
     {"id":"real_helper_https_evidence","label":"Real helper HTTPS evidence","command":"bash \"$FAKE_ACCESS_RECOVERY_REAL_HELPER\" access-recovery-real-helper-evidence-run --base-url https://helper-pilot.gpm.net --path-id helper-web --code-file $ACCESS_RECOVERY_OPERATOR_CODE_FILE --config-json $ACCESS_RECOVERY_OPERATOR_CONFIG_JSON --deploy-pack-dir $ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK --provenance-private-key-file $ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY --provenance-org-id pilot-org --provenance-org-name 'Pilot Org' --trust-store $ACCESS_RECOVERY_TRUST_STORE_FILE --reports-dir $ACCESS_RECOVERY_OPERATOR_REPORTS_DIR","reason":"test-real-helper-concrete-operator-input-override-validation","requires_real_hosts":true}
+  ]
+}
+JSON
+    ;;
+  access_recovery_operator_preflight_concrete_fake_exec)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"access_recovery_operator_preflight","label":"Access Recovery operator preflight","command":"bash \"$FAKE_ACCESS_RECOVERY_REAL_HELPER\" access-recovery-real-helper-evidence-run --base-url https://helper-pilot.gpm.net --path-id helper-web --code-file $ACCESS_RECOVERY_OPERATOR_CODE_FILE --config-json $ACCESS_RECOVERY_OPERATOR_CONFIG_JSON --deploy-pack-dir $ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK --provenance-private-key-file $ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY --provenance-org-id pilot-org --provenance-org-name 'Pilot Org' --trust-store $ACCESS_RECOVERY_TRUST_STORE_FILE --reports-dir $ACCESS_RECOVERY_OPERATOR_REPORTS_DIR --summary-json $ACCESS_RECOVERY_OPERATOR_PREFLIGHT_SUMMARY_JSON --plan-only 1 --roadmap-refresh 0","reason":"test-operator-preflight-local-only","requires_real_hosts":false,"local_pack_only":true}
   ]
 }
 JSON
@@ -2057,6 +2121,62 @@ if ! grep -Fq "failure_kind=access_recovery_no_evidence_mode" "$REPORTS_ACCESS_R
   cat "$REPORTS_ACCESS_RECOVERY_ROADMAP_REFRESH_ZERO_ARG/action_1_real_helper_https_evidence.log"
   exit 1
 fi
+
+echo "[roadmap-next-actions-run] Access Recovery operator preflight allows local non-evidence rehearsal"
+SUMMARY_ACCESS_RECOVERY_OPERATOR_PREFLIGHT="$TMP_DIR/summary_access_recovery_operator_preflight.json"
+REPORTS_ACCESS_RECOVERY_OPERATOR_PREFLIGHT="$TMP_DIR/reports_access_recovery_operator_preflight"
+: >"$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+FAKE_ACCESS_RECOVERY_REAL_HELPER="$FAKE_ACCESS_RECOVERY_REAL_HELPER" \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE="$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" \
+ACCESS_RECOVERY_OPERATOR_CODE_FILE="$ACCESS_RECOVERY_OPERATOR_CODE_FILE" \
+ACCESS_RECOVERY_OPERATOR_CONFIG_JSON="$ACCESS_RECOVERY_OPERATOR_CONFIG_JSON" \
+ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK="$ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK" \
+ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY="$ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY" \
+ACCESS_RECOVERY_OPERATOR_REPORTS_DIR="$ACCESS_RECOVERY_OPERATOR_REPORTS_DIR" \
+ACCESS_RECOVERY_OPERATOR_PREFLIGHT_SUMMARY_JSON="$ACCESS_RECOVERY_OPERATOR_PREFLIGHT_SUMMARY_JSON" \
+ACCESS_RECOVERY_TRUST_STORE_FILE="$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_operator_preflight_concrete_fake_exec \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_OPERATOR_PREFLIGHT" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PREFLIGHT" \
+  --include-id access_recovery_operator_preflight \
+  --local-only 1 \
+  --print-summary-json 0
+
+if ! jq -e --arg preflight_summary "$ACCESS_RECOVERY_OPERATOR_PREFLIGHT_SUMMARY_JSON" '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.local_only == true
+  and .roadmap.selected_action_ids == ["access_recovery_operator_preflight"]
+  and .roadmap.selection_accounting.local_only_skipped_real_host_action_ids == []
+  and .roadmap.selection_accounting.local_only_skipped_unclassified_action_ids == []
+  and .actions[0].id == "access_recovery_operator_preflight"
+  and .actions[0].status == "pass"
+  and .actions[0].failure_kind == "none"
+  and (.actions[0].command | contains("--plan-only 1"))
+  and (.actions[0].command | contains("--roadmap-refresh 0"))
+  and .actions[0].operator_preflight.ingested == true
+  and .actions[0].operator_preflight.valid == true
+  and ((.actions[0].operator_preflight.summary_json // "") as $path | (($path | endswith("/operator_preflight_summary.json")) or ($path | endswith("\\operator_preflight_summary.json"))))
+  and .actions[0].operator_preflight.schema_id == "access_recovery_operator_preflight_summary"
+  and .actions[0].operator_preflight.local_only == true
+  and .actions[0].operator_preflight.requires_live_hosts == false
+  and .actions[0].operator_preflight.child_execution_skipped == true
+  and .actions[0].operator_preflight.evidence_generated == false
+  and .actions[0].operator_preflight.roadmap_refresh_disabled == true
+' "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PREFLIGHT" >/dev/null; then
+  echo "Access Recovery operator preflight summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PREFLIGHT"
+  exit 1
+fi
+if ! grep -Fq -- "--plan-only 1" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" ||
+   ! grep -Fq -- "--roadmap-refresh 0" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"; then
+  echo "Access Recovery operator preflight did not execute the planned local rehearsal command"
+  cat "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+  exit 1
+fi
+rm -f "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
 
 echo "[roadmap-next-actions-run] Access Recovery trusted verifier rejects demo-marked operator trust store"
 SUMMARY_ACCESS_RECOVERY_TRUST_STORE_DEMO="$TMP_DIR/summary_access_recovery_trust_store_demo.json"

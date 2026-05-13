@@ -3333,6 +3333,9 @@ access_recovery_track_json_from_evidence() {
         "./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --host-install-evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --expect-helper-id HELPER_ID --expect-org-id ORG_ID --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE"
         + mtls_arg_suffix
         + " --reports-dir .easy-node-logs/access-recovery-pilot";
+      def real_helper_operator_preflight_command:
+        real_helper_operator_command
+        + " --plan-only 1 --roadmap-refresh 0 --summary-json .easy-node-logs/access-recovery-pilot/operator_preflight_summary.json";
       def next_command_for($e):
         if $e == null then null
         elif ($e == $service_smoke) then
@@ -13172,6 +13175,8 @@ cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
   def access_recovery_action_metadata($id):
     if $id == "real_helper_https_evidence" then
       action_evidence_metadata(["access-recovery"]; true; false; ["real-helper-https"])
+    elif $id == "access_recovery_operator_preflight" then
+      action_evidence_metadata(["access-recovery"]; false; true; ["operator-preflight"])
     elif $id == "access_bridge_service_smoke" then
       action_evidence_metadata(["access-recovery"]; true; false; ["real-helper-https"])
     elif $id == "access_bridge_deployment_evidence" then
@@ -13226,6 +13231,23 @@ cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
       reason: ($access_recovery_track.preferred_operator_next_action.reason // "Run the guarded Access Recovery operator evidence handoff")
     } + access_recovery_action_metadata($access_recovery_track.preferred_operator_next_action.id // "")
       + access_recovery_placeholder_metadata($access_recovery_track.preferred_operator_next_action.command // "") else empty end),
+    (if (
+        ($current_roadmap_track // "") == "access_recovery"
+        and ($access_recovery_track.needs_attention == true)
+        and (($access_recovery_track.preferred_operator_next_action.command // "") != "")
+      ) then {
+      id: "access_recovery_operator_preflight",
+      "label": "Access Recovery operator preflight",
+      command: (
+        ($access_recovery_track.preferred_operator_next_action.command // "")
+        + " --plan-only 1 --roadmap-refresh 0 --summary-json .easy-node-logs/access-recovery-pilot/operator_preflight_summary.json"
+      ),
+      reason: "Local-only rehearsal validates the guarded Access Recovery operator command shape and planned artifacts without collecting live handoff evidence."
+    } + access_recovery_action_metadata("access_recovery_operator_preflight")
+      + access_recovery_placeholder_metadata(
+        ($access_recovery_track.preferred_operator_next_action.command // "")
+        + " --plan-only 1 --roadmap-refresh 0 --summary-json .easy-node-logs/access-recovery-pilot/operator_preflight_summary.json"
+      ) else empty end),
     (if (
         ($current_roadmap_track // "") == "access_recovery"
         and ($access_recovery_track.needs_attention == true)

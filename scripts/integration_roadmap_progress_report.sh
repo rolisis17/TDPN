@@ -1693,6 +1693,30 @@ if ! jq -e \
   exit 1
 fi
 
+if ! jq -e '
+  (.next_actions | length) >= 3
+  and (.next_actions[0].id // "") == "real_helper_https_evidence"
+  and (.next_actions[1].id // "") == "access_recovery_operator_preflight"
+  and .next_actions[1].requires_real_hosts == false
+  and .next_actions[1].local_pack_only == true
+  and .next_actions[1].missing_evidence_family == "access-recovery"
+  and .next_actions[1].missing_evidence_action_kind == "operator-preflight"
+  and (.next_actions[1].command | contains("access-recovery-real-helper-evidence-run"))
+  and (.next_actions[1].command | contains("--plan-only 1"))
+  and (.next_actions[1].command | contains("--roadmap-refresh 0"))
+  and (.next_actions[1].command | contains("operator_preflight_summary.json"))
+  and .next_actions[1].placeholder_unresolved == true
+  and (.next_actions[1].placeholder_keys | index("HELPER_PUBLIC_DNS") != null)
+  and (.next_actions[1].placeholder_keys | index("TRUST_STORE") != null)
+  and .next_actions[1].safe_to_execute_as_is == false
+  and .next_actions[1].operator_input_required == true
+  and ((.next_actions[1].placeholder_resolution // "") | contains("Template command only"))
+' "$SUMMARY_JSON" >/dev/null; then
+  echo "Access Recovery operator preflight next-action summary mismatch"
+  cat "$SUMMARY_JSON"
+  exit 1
+fi
+
 ACCESS_BRIDGE_INSTALLED_SOURCE_DIR="$TMP_DIR/access_bridge_installed_source"
 mkdir -p "$ACCESS_BRIDGE_INSTALLED_SOURCE_DIR"
 ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON="$ACCESS_BRIDGE_INSTALLED_SOURCE_DIR/access_bridge_host_install_check_summary.json"

@@ -194,6 +194,20 @@ abs_path() {
   fi
 }
 
+sha256_file_01() {
+  local path="${1:-}"
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    return 1
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$path" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$path" | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
 bool_arg_or_die() {
   local name="$1"
   local value="$2"
@@ -425,11 +439,17 @@ action_id_is_access_recovery_trusted_verify_01() {
   [[ "$action_id" == "trusted_pilot_evidence_verify" || "$action_id" == "real_helper_https_evidence" ]]
 }
 
+action_id_is_access_recovery_local_no_evidence_allowed_01() {
+  local action_id
+  action_id="$(trim "${1:-}")"
+  [[ "$action_id" == "access_recovery_operator_preflight" ]]
+}
+
 action_id_is_access_recovery_action_01() {
   local action_id
   action_id="$(trim "${1:-}")"
   case "$action_id" in
-    access_recovery_evidence|trusted_pilot_evidence_verify|real_helper_https_evidence|access_bridge_service_smoke|access_bridge_deployment_evidence|access_bridge_host_install|access_bridge_installed_host_evidence|access_bridge_pilot_evidence_bundle)
+    access_recovery_evidence|trusted_pilot_evidence_verify|real_helper_https_evidence|access_recovery_operator_preflight|access_bridge_service_smoke|access_bridge_deployment_evidence|access_bridge_host_install|access_bridge_installed_host_evidence|access_bridge_pilot_evidence_bundle)
       return 0
       ;;
   esac
@@ -1538,7 +1558,7 @@ build_access_recovery_operator_inputs_operator_command_01() {
   local needs_full_real_helper_inputs="0"
 
   case "$action_id" in
-    access_recovery_evidence|real_helper_https_evidence|access_bridge_pilot_evidence_bundle)
+    access_recovery_evidence|real_helper_https_evidence|access_recovery_operator_preflight|access_bridge_pilot_evidence_bundle)
       needs_full_real_helper_inputs="1"
       ;;
   esac
@@ -1880,6 +1900,92 @@ command_extract_first_flag_value_01() {
     idx=$((idx + 1))
   done
   printf '%s' ""
+}
+
+ACCESS_RECOVERY_OPERATOR_PREFLIGHT_RESULT_JSON="null"
+ACCESS_RECOVERY_OPERATOR_PREFLIGHT_ERROR=""
+
+validate_access_recovery_operator_preflight_result_01() {
+  local action_id="${1:-}"
+  local command_text="${2:-}"
+  local summary_path=""
+  local summary_abs=""
+  local summary_sha=""
+  ACCESS_RECOVERY_OPERATOR_PREFLIGHT_RESULT_JSON="null"
+  ACCESS_RECOVERY_OPERATOR_PREFLIGHT_ERROR=""
+
+  if ! action_id_is_access_recovery_local_no_evidence_allowed_01 "$action_id"; then
+    return 0
+  fi
+
+  summary_path="$(command_extract_first_flag_value_01 "$command_text" --summary-json)"
+  summary_path="$(trim "$summary_path")"
+  summary_abs="$(abs_path "$summary_path")"
+  if [[ -z "$summary_path" ]]; then
+    ACCESS_RECOVERY_OPERATOR_PREFLIGHT_ERROR="operator preflight action did not specify --summary-json"
+  elif [[ ! -f "$summary_abs" ]]; then
+    ACCESS_RECOVERY_OPERATOR_PREFLIGHT_ERROR="operator preflight summary was not written: $summary_abs"
+  elif ! jq -e 'type == "object"' "$summary_abs" >/dev/null 2>&1; then
+    ACCESS_RECOVERY_OPERATOR_PREFLIGHT_ERROR="operator preflight summary is not valid JSON: $summary_abs"
+  elif ! jq -e '
+      .schema.id == "access_recovery_real_helper_evidence_run_summary"
+      and .schema.major == 1
+      and ((.schema.minor // 0) >= 7)
+      and .status == "skipped"
+      and .rc == 0
+      and .stage == "plan"
+      and .mode.plan_only == true
+      and .mode.child_execution_skipped == true
+      and .mode.evidence_generated == false
+      and .mode.evidence_status == "planned_non_evidence"
+      and .operator_preflight.schema.id == "access_recovery_operator_preflight_summary"
+      and .operator_preflight.schema.major == 1
+      and .operator_preflight.status == "pass"
+      and .operator_preflight.local_only == true
+      and .operator_preflight.non_evidence_rehearsal == true
+      and .operator_preflight.requires_live_hosts == false
+      and .operator_preflight.child_execution_skipped == true
+      and .operator_preflight.evidence_generated == false
+      and .operator_preflight.roadmap_refresh_enabled == false
+      and .operator_preflight.roadmap_refresh_disabled == true
+      and .operator_preflight.planned_child_commands.roadmap.enabled == false
+    ' "$summary_abs" >/dev/null; then
+    ACCESS_RECOVERY_OPERATOR_PREFLIGHT_ERROR="operator preflight summary failed contract validation: $summary_abs"
+  else
+    summary_sha="$(sha256_file_01 "$summary_abs" 2>/dev/null || true)"
+    ACCESS_RECOVERY_OPERATOR_PREFLIGHT_RESULT_JSON="$(
+      jq -c \
+        --arg summary_json "$summary_abs" \
+        --arg summary_sha256 "$summary_sha" \
+        '{
+          ingested: true,
+          valid: true,
+          summary_json: $summary_json,
+          summary_sha256: (if $summary_sha256 == "" then null else $summary_sha256 end),
+          schema_id: (.operator_preflight.schema.id // null),
+          status: (.operator_preflight.status // null),
+          local_only: (if (.operator_preflight.local_only | type) == "boolean" then .operator_preflight.local_only else false end),
+          requires_live_hosts: (if (.operator_preflight.requires_live_hosts | type) == "boolean" then .operator_preflight.requires_live_hosts else null end),
+          child_execution_skipped: (if (.operator_preflight.child_execution_skipped | type) == "boolean" then .operator_preflight.child_execution_skipped else null end),
+          evidence_generated: (if (.operator_preflight.evidence_generated | type) == "boolean" then .operator_preflight.evidence_generated else null end),
+          roadmap_refresh_disabled: (if (.operator_preflight.roadmap_refresh_disabled | type) == "boolean" then .operator_preflight.roadmap_refresh_disabled else null end)
+        }' "$summary_abs"
+    )"
+    return 0
+  fi
+
+  ACCESS_RECOVERY_OPERATOR_PREFLIGHT_RESULT_JSON="$(
+    jq -cn \
+      --arg summary_json "$summary_abs" \
+      --arg error "$ACCESS_RECOVERY_OPERATOR_PREFLIGHT_ERROR" \
+      '{
+        ingested: false,
+        valid: false,
+        summary_json: (if $summary_json == "" then null else $summary_json end),
+        error: $error
+      }'
+  )"
+  return 1
 }
 
 extract_host_a_value_from_command_01() {
@@ -4243,6 +4349,7 @@ selected_has_access_recovery_action="$(printf '%s\n' "$selected_actions_json" | 
     "access_recovery_evidence",
     "trusted_pilot_evidence_verify",
     "real_helper_https_evidence",
+    "access_recovery_operator_preflight",
     "access_bridge_service_smoke",
     "access_bridge_deployment_evidence",
     "access_bridge_host_install",
@@ -4410,6 +4517,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   fi
   if [[ -z "$action_preflight_failure_kind" ]] \
      && action_id_is_access_recovery_action_01 "$action_id" \
+     && ! action_id_is_access_recovery_local_no_evidence_allowed_01 "$action_id" \
      && [[ -n "$action_command" ]] \
      && command_has_access_recovery_no_evidence_mode_01 "$action_command"; then
     action_preflight_failure_kind="access_recovery_no_evidence_mode"
@@ -4573,6 +4681,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         action_timed_out="false"
         action_failure_kind="command_failed"
         action_notes="command failed"
+        action_operator_preflight_result_json="null"
         set +e
         run_action_command_string "$action_command" "$action_log" "$action_timeout_sec_effective"
         command_rc=$?
@@ -4582,6 +4691,17 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
           action_rc=0
           action_notes=""
           action_failure_kind="none"
+          if action_id_is_access_recovery_local_no_evidence_allowed_01 "$action_id"; then
+            if validate_access_recovery_operator_preflight_result_01 "$action_id" "$action_command"; then
+              action_operator_preflight_result_json="$ACCESS_RECOVERY_OPERATOR_PREFLIGHT_RESULT_JSON"
+            else
+              action_status="fail"
+              action_rc=4
+              action_failure_kind="invalid_access_recovery_operator_preflight_summary"
+              action_notes="$ACCESS_RECOVERY_OPERATOR_PREFLIGHT_ERROR"
+              action_operator_preflight_result_json="$ACCESS_RECOVERY_OPERATOR_PREFLIGHT_RESULT_JSON"
+            fi
+          fi
         else
           action_status="fail"
           action_rc="$command_rc"
@@ -4603,6 +4723,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
           --arg notes "$action_notes" \
           --arg log "$action_log" \
           --arg failure_kind "$action_failure_kind" \
+          --argjson operator_preflight "$action_operator_preflight_result_json" \
           --argjson rc "$action_rc" \
           --argjson command_rc "$command_rc" \
           --argjson timed_out "$action_timed_out" \
@@ -4620,7 +4741,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
             failure_kind: $failure_kind,
             notes: (if $notes == "" then null else $notes end),
             artifacts: { log: $log }
-          }' >"$action_result_file"
+          } + (if $operator_preflight == null then {} else {operator_preflight: $operator_preflight} end)' >"$action_result_file"
       ) &
       action_pids[$idx]=$!
     else
@@ -4630,6 +4751,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       action_timed_out="false"
       action_failure_kind="command_failed"
       action_notes="command failed"
+      action_operator_preflight_result_json="null"
       set +e
       run_action_command_string "$action_command" "$action_log" "$action_timeout_sec_effective"
       command_rc=$?
@@ -4639,6 +4761,17 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         action_rc=0
         action_notes=""
         action_failure_kind="none"
+        if action_id_is_access_recovery_local_no_evidence_allowed_01 "$action_id"; then
+          if validate_access_recovery_operator_preflight_result_01 "$action_id" "$action_command"; then
+            action_operator_preflight_result_json="$ACCESS_RECOVERY_OPERATOR_PREFLIGHT_RESULT_JSON"
+          else
+            action_status="fail"
+            action_rc=4
+            action_failure_kind="invalid_access_recovery_operator_preflight_summary"
+            action_notes="$ACCESS_RECOVERY_OPERATOR_PREFLIGHT_ERROR"
+            action_operator_preflight_result_json="$ACCESS_RECOVERY_OPERATOR_PREFLIGHT_RESULT_JSON"
+          fi
+        fi
       else
         action_status="fail"
         action_rc="$command_rc"
@@ -4660,6 +4793,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         --arg notes "$action_notes" \
         --arg log "$action_log" \
         --arg failure_kind "$action_failure_kind" \
+        --argjson operator_preflight "$action_operator_preflight_result_json" \
         --argjson rc "$action_rc" \
         --argjson command_rc "$command_rc" \
         --argjson timed_out "$action_timed_out" \
@@ -4677,7 +4811,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
           failure_kind: $failure_kind,
           notes: (if $notes == "" then null else $notes end),
           artifacts: { log: $log }
-        }' >"$action_result_file"
+        } + (if $operator_preflight == null then {} else {operator_preflight: $operator_preflight} end)' >"$action_result_file"
     fi
   fi
 done

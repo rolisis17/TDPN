@@ -1010,6 +1010,14 @@ write_summary() {
     --arg verifier_scope "$verifier_scope" \
     --arg verifier_authority_level "$verifier_authority_level" \
     --arg require_mtls "$require_mtls" \
+    --arg allow_child_script_overrides "$allow_child_script_overrides" \
+    --arg config_json "$config_json" \
+    --arg deploy_pack_dir "$deploy_pack_dir" \
+    --arg provenance_private_key_file "$provenance_private_key_file" \
+    --arg trust_store "$trust_store" \
+    --arg cacert "$cacert" \
+    --arg client_cert "$client_cert" \
+    --arg client_key "$client_key" \
     --argjson code_present "$code_present_json" \
     --argjson code_file_present "$code_file_present_json" \
     --argjson plan_only "$plan_only_json" \
@@ -1028,7 +1036,7 @@ write_summary() {
     --argjson planned_artifacts "$planned_artifacts_json" \
     '{
       version: 1,
-      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 6},
+      schema: {id: "access_recovery_real_helper_evidence_run_summary", major: 1, minor: 7},
       generated_at_utc: $generated_at_utc,
       status: $status,
       rc: $rc,
@@ -1065,6 +1073,50 @@ write_summary() {
         require_mtls: ($require_mtls == "1"),
         roadmap_refresh: $roadmap_refresh
       },
+      operator_preflight: (
+        if $plan_only then {
+          schema: {id: "access_recovery_operator_preflight_summary", major: 1, minor: 0},
+          status: (if $stage == "plan" and $rc == 0 then "pass" else $status end),
+          rc: $rc,
+          stage: $stage,
+          local_only: true,
+          rehearsal_only: true,
+          non_evidence_rehearsal: true,
+          requires_sudo: false,
+          requires_live_hosts: false,
+          child_execution_skipped: ($plan_only and $stage == "plan"),
+          evidence_generated: false,
+          roadmap_refresh_enabled: $roadmap_refresh,
+          roadmap_refresh_disabled: ($roadmap_refresh | not),
+          host_install_evidence_mode: $host_install_evidence_mode,
+          base_url: $base_url,
+          path_id: $path_id,
+          require_mtls: ($require_mtls == "1"),
+          inputs: {
+            code_present: $code_present,
+            code_file_present: $code_file_present,
+            inline_code_used: $code_present,
+            config_json_present: ($config_json != ""),
+            deploy_pack_dir_present: ($deploy_pack_dir != ""),
+            provenance_private_key_file_present: ($provenance_private_key_file != ""),
+            trust_store_present: ($trust_store != ""),
+            mtls_ca_present: ($cacert != ""),
+            mtls_client_cert_present: ($client_cert != ""),
+            mtls_client_key_present: ($client_key != ""),
+            host_install_evidence_mode: $host_install_evidence_mode
+          },
+          checks: {
+            command_shape_valid: ($stage == "plan" and $rc == 0),
+            base_url_https: (($base_url | ascii_downcase) | startswith("https://")),
+            base_url_userinfo_absent: ($stage == "plan" and $rc == 0),
+            public_host_required: true,
+            public_host_preflight_passed: ($stage == "plan" and $rc == 0),
+            child_script_overrides_allowed: ($allow_child_script_overrides == "1")
+          },
+          planned_child_commands: $planned_child_commands,
+          planned_artifacts: $planned_artifacts
+        } else null end
+      ),
       readiness: {
         evidence_scope: (if $evidence_scope == "" then null else $evidence_scope end),
         verifier_evidence_scope: (if $verifier_scope == "" then null else $verifier_scope end),
@@ -1123,6 +1175,18 @@ write_summary() {
 - Roadmap summary: ${roadmap_summary_json}
 - Summary JSON: ${summary_json}
 REPORT
+
+  if [[ "$plan_only" == "1" ]]; then
+    {
+      echo
+      echo "## Operator Preflight"
+      echo
+      echo "- Local only: true"
+      echo "- Evidence generated: false"
+      echo "- Child execution skipped: true"
+      echo "- Roadmap refresh enabled: ${roadmap_refresh}"
+    } >>"$report_md"
+  fi
 
   if printf '%s\n' "$planned_child_commands_json" | jq -e 'type == "object" and length > 0' >/dev/null 2>&1; then
     {

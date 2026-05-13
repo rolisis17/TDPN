@@ -767,7 +767,7 @@ fi
 jq -e '
   .schema.id == "access_recovery_real_helper_evidence_run_summary"
   and .schema.major == 1
-  and .schema.minor == 6
+  and .schema.minor == 7
   and .status == "skipped"
   and .status != "pass"
   and .rc == 0
@@ -785,6 +785,19 @@ jq -e '
   and .planned_child_commands.bundle.enabled == true
   and .planned_child_commands.verifier.enabled == true
   and .planned_child_commands.roadmap.enabled == true
+  and .operator_preflight.schema.id == "access_recovery_operator_preflight_summary"
+  and .operator_preflight.status == "pass"
+  and .operator_preflight.local_only == true
+  and .operator_preflight.rehearsal_only == true
+  and .operator_preflight.non_evidence_rehearsal == true
+  and .operator_preflight.child_execution_skipped == true
+  and .operator_preflight.evidence_generated == false
+  and .operator_preflight.roadmap_refresh_enabled == true
+  and .operator_preflight.roadmap_refresh_disabled == false
+  and .operator_preflight.inputs.code_file_present == true
+  and .operator_preflight.inputs.code_present == false
+  and .operator_preflight.planned_child_commands.bundle.enabled == true
+  and (.operator_preflight.planned_artifacts.verification_summary_json | endswith(".json"))
   and .inputs.require_mtls == false
   and (.planned_child_commands.bundle.args | index("--bundle-dir") != null)
   and (.planned_child_commands.bundle.args | index("--require-mtls") != null)
@@ -799,6 +812,44 @@ if ! grep -Fq -- "Planned Child Commands" "$TMP_DIR/plan-only-report.md" ||
   cat "$TMP_DIR/plan-only-report.md"
   exit 1
 fi
+
+: >"$CAPTURE"
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --plan-only \
+  --roadmap-refresh 0 \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/plan-only-no-roadmap-refresh-summary.json" \
+  --print-summary-json 0
+if [[ -s "$CAPTURE" ]]; then
+  echo "plan-only roadmap-refresh 0 should not invoke child scripts"
+  cat "$CAPTURE"
+  exit 1
+fi
+jq -e '
+  .status == "skipped"
+  and .stage == "plan"
+  and .mode.plan_only == true
+  and .mode.evidence_generated == false
+  and .operator_preflight.roadmap_refresh_enabled == false
+  and .operator_preflight.roadmap_refresh_disabled == true
+  and .operator_preflight.planned_child_commands.roadmap.enabled == false
+  and .operator_preflight.planned_child_commands.roadmap.reason == "roadmap_refresh disabled"
+' "$TMP_DIR/plan-only-no-roadmap-refresh-summary.json" >/dev/null
 
 : >"$CAPTURE"
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
@@ -833,6 +884,8 @@ jq -e '
   and .mode.plan_only == true
   and .inputs.code_present == true
   and .inputs.code_file_present == false
+  and .operator_preflight.inputs.code_present == true
+  and .operator_preflight.inputs.code_file_present == false
   and (.planned_child_commands.bundle.args | index("--code") != null)
   and (.planned_child_commands.bundle.args | index("<redacted>") != null)
 ' "$TMP_DIR/plan-only-inline-code-summary.json" >/dev/null
@@ -883,7 +936,7 @@ jq -e \
   --arg proxy_config_file "$PROXY_CONFIG_FILE" '
   .schema.id == "access_recovery_real_helper_evidence_run_summary"
   and .schema.major == 1
-  and .schema.minor == 6
+  and .schema.minor == 7
   and .status == "skipped"
   and .status != "pass"
   and .rc == 0
@@ -893,6 +946,8 @@ jq -e \
   and .mode.evidence_generated == false
   and .mode.evidence_status == "planned_non_evidence"
   and .inputs.host_install_evidence_mode == "installed-host"
+  and .operator_preflight.inputs.host_install_evidence_mode == "installed-host"
+  and .operator_preflight.planned_child_commands.host_install_check.enabled == true
   and (.planned_child_commands.host_install_check.args | index("--evidence-mode") != null)
   and (.planned_child_commands.host_install_check.args | index("installed-host") != null)
   and (.planned_child_commands.host_install_check.args | index("--install-dir") != null)
@@ -941,6 +996,8 @@ jq -e '
   and .stage == "plan"
   and .mode.plan_only == true
   and .mode.evidence_status == "planned_non_evidence"
+  and .operator_preflight.local_only == true
+  and .operator_preflight.non_evidence_rehearsal == true
   and .inputs.host_install_evidence_mode == "deploy-pack"
 ' "$TMP_DIR/plan-only-generated-demo-paths-summary.json" >/dev/null
 
@@ -1613,7 +1670,7 @@ done
 if ! jq -e '
   .schema.id == "access_recovery_real_helper_evidence_run_summary"
   and .schema.major == 1
-  and .schema.minor == 6
+  and .schema.minor == 7
   and .status == "pass"
   and .stage == "complete"
   and .mode.plan_only == false
