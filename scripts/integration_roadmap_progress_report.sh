@@ -23,6 +23,16 @@ INTEGRATION_STDOUT_LOG_DIR="$TMP_DIR/stdout-logs"
 mkdir -p "$INTEGRATION_STDOUT_LOG_DIR"
 ROADMAP_PROGRESS_REPORT_LOG_PREFIX="$INTEGRATION_STDOUT_LOG_DIR/integration_roadmap_progress_report"
 ROADMAP_PROGRESS_FORWARD_SUMMARY_JSON="$TMP_DIR/roadmap_progress_forward_summary.json"
+ROADMAP_PROGRESS_REPORT_FOCUS="${ROADMAP_PROGRESS_REPORT_FOCUS:-all}"
+
+case "$ROADMAP_PROGRESS_REPORT_FOCUS" in
+  all|access-recovery|access-recovery-source-binding)
+    ;;
+  *)
+    echo "unsupported ROADMAP_PROGRESS_REPORT_FOCUS: $ROADMAP_PROGRESS_REPORT_FOCUS"
+    exit 2
+    ;;
+esac
 
 cleanup_integration_artifacts() {
   if [[ "${INTEGRATION_KEEP_TMP:-0}" == "1" ]]; then
@@ -71,6 +81,15 @@ run_roadmap_progress_report() {
     --phase6-cosmos-l1-summary-json "$ROADMAP_PROGRESS_MISSING_PHASE6_SUMMARY_JSON" \
     --phase7-mainnet-cutover-summary-json "$ROADMAP_PROGRESS_MISSING_PHASE7_SUMMARY_JSON" \
     "$@"
+}
+
+finish_focus_if() {
+  local focus="$1"
+  local label="$2"
+  if [[ "$ROADMAP_PROGRESS_REPORT_FOCUS" == "$focus" ]]; then
+    echo "[roadmap-progress-report] ${label} focused subset ok"
+    exit 0
+  fi
 }
 
 assert_no_temp_cleanup_leftovers() {
@@ -1980,6 +1999,10 @@ if ! jq -e \
   cat "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_fallback_source_binding_summary.json"
   exit 1
 fi
+if [[ "$ROADMAP_PROGRESS_REPORT_FOCUS" == "access-recovery-source-binding" \
+   || "$ROADMAP_PROGRESS_REPORT_FOCUS" == "access-recovery" ]]; then
+  finish_focus_if "$ROADMAP_PROGRESS_REPORT_FOCUS" "Access Recovery source-binding"
+fi
 
 echo "[roadmap-progress-report] Access Recovery rejects deployment evidence schema minor 5"
 ACCESS_BRIDGE_OLD_DEPLOYMENT_EVIDENCE_SUMMARY_JSON="$TMP_DIR/access_bridge_deployment_evidence_old_schema_summary.json"
@@ -2051,6 +2074,7 @@ if ! jq -e '
   cat "$TMP_DIR/roadmap_progress_access_recovery_bad_deployment_smoke_binding_summary.json"
   exit 1
 fi
+finish_focus_if "access-recovery" "Access Recovery"
 
 echo "[roadmap-progress-report] Access Recovery installed-host public host must match the smoked helper"
 ACCESS_BRIDGE_WRONG_PUBLIC_HOST_INSTALL_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_wrong_public_host_summary.json"

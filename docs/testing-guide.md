@@ -274,6 +274,17 @@ Retry example:
 - Expected artifacts: harness temp summaries validating direct, nested, fallback, and missing-input ingestion paths.
 - Exit meaning: `0` when contract checks pass; non-zero on any schema/status/mapping regression.
 
+`integration_roadmap_progress_report` Access Recovery source-binding focus:
+
+```bash
+ROADMAP_PROGRESS_REPORT_FOCUS=access-recovery-source-binding ./scripts/integration_roadmap_progress_report.sh
+```
+
+- Purpose: run the Access Recovery roadmap source-binding subset, including real-helper installed-host handoff readiness, trusted verifier source binding, unresolvable source rejection, and self-referential receipt rejection.
+- When to run: after editing Access Recovery fields in `roadmap_progress_report.sh` or the Access Recovery evidence/handoff fixtures in `integration_roadmap_progress_report.sh`.
+- Expected artifacts: harness temp summaries under the script-owned temp directory; set `INTEGRATION_KEEP_TMP=1` to inspect them.
+- Exit meaning: `0` when the focused subset passes; non-zero on any Access Recovery roadmap contract regression. Normal `./scripts/integration_roadmap_progress_report.sh` still runs the full roadmap harness.
+
 `roadmap_non_blockchain_actionable_run` (no-sudo actionable gate runner):
 
 ```bash

@@ -113,6 +113,20 @@ assert_file_contains "$PRIMARY_SUMMARY_JSON" '"suggested_tests": []' "summary JS
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md"]' "summary JSON missing default suggested_files array"
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"top_actionable_item_ids": [' "summary JSON missing top_actionable_item_ids field"
 
+if command -v cygpath >/dev/null 2>&1; then
+  echo "[gpm-gap-scan] Windows absolute status-doc paths are preserved"
+  WINDOWS_ABS_STATUS_DOC="$(cygpath -m "$PRIMARY_STATUS_DOC")"
+  WINDOWS_ABS_SUMMARY_JSON="$TMP_DIR/windows_abs_summary.json"
+  bash "$SCRIPT_UNDER_TEST" \
+    --status-doc "$WINDOWS_ABS_STATUS_DOC" \
+    --summary-json "$WINDOWS_ABS_SUMMARY_JSON" \
+    --print-summary-json 0 >/dev/null
+
+  assert_file_contains "$WINDOWS_ABS_SUMMARY_JSON" "\"status_doc\": \"$WINDOWS_ABS_STATUS_DOC\"" "Windows absolute status-doc path was incorrectly re-rooted"
+else
+  echo "[gpm-gap-scan] Windows absolute path check skipped; cygpath unavailable"
+fi
+
 echo "[gpm-gap-scan] optional roadmap summary contributes machine-readable blockers"
 ROADMAP_STATUS_DOC="$TMP_DIR/roadmap_status.md"
 ROADMAP_SUMMARY_INPUT="$TMP_DIR/roadmap_input_summary.json"
@@ -167,8 +181,9 @@ bash "$SCRIPT_UNDER_TEST" \
   --print-summary-json 0 >"$ROADMAP_STDOUT"
 
 assert_file_contains "$ROADMAP_SUMMARY_JSON" '"roadmap_summary_json": "' "roadmap-aware summary missing roadmap summary input path"
-assert_file_matches_regex "$ROADMAP_SUMMARY_JSON" '"missing_next"[[:space:]]*:[[:space:]]*7' "roadmap-aware missing_next count mismatch"
-assert_file_matches_regex "$ROADMAP_SUMMARY_JSON" '"total"[[:space:]]*:[[:space:]]*8' "roadmap-aware total count mismatch"
+assert_file_matches_regex "$ROADMAP_SUMMARY_JSON" '"missing_next"[[:space:]]*:[[:space:]]*8' "roadmap-aware missing_next count mismatch"
+assert_file_matches_regex "$ROADMAP_SUMMARY_JSON" '"total"[[:space:]]*:[[:space:]]*9' "roadmap-aware total count mismatch"
+assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap Access Recovery handoff state is missing; provide a roadmap summary with access_recovery_track before pilot handoff.' "roadmap-aware summary missing access recovery track blocker"
 assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap profile-default gate next action has unresolved placeholders (invite_key)' "roadmap-aware summary missing profile placeholder blocker"
 assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap multi-VM stability command source is not actionable' "roadmap-aware summary missing multi-vm blocker"
 assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap runtime-actuation promotion is not green' "roadmap-aware summary missing runtime promotion blocker"
@@ -181,7 +196,7 @@ assert_file_contains "$ROADMAP_SUMMARY_JSON" '"blocked_by": ["promotion_threshol
 assert_file_contains "$ROADMAP_SUMMARY_JSON" '"requires_real_hosts": true' "roadmap-aware summary missing requires_real_hosts true"
 assert_file_contains "$ROADMAP_SUMMARY_JSON" '"suggested_tests": ["scripts/integration_client_vpn_path_profile_wiring.sh"]' "roadmap-aware summary missing profile suggested test"
 assert_file_contains "$ROADMAP_SUMMARY_JSON" '"suggested_tests": ["scripts/integration_3machine_prod_wg_validate.sh"]' "roadmap-aware summary missing multi-vm suggested test"
-assert_file_contains "$ROADMAP_STDOUT" "## Missing / Next (7)" "roadmap-aware markdown missing expanded missing/next count"
+assert_file_contains "$ROADMAP_STDOUT" "## Missing / Next (8)" "roadmap-aware markdown missing expanded missing/next count"
 
 echo "[gpm-gap-scan] access recovery roadmap handoff state is surfaced"
 ACCESS_RECOVERY_STATUS_DOC="$TMP_DIR/access_recovery_status.md"
@@ -289,6 +304,33 @@ if grep -F "Roadmap Access Recovery handoff state is not ready" "$ACCESS_RECOVER
   exit 1
 fi
 
+echo "[gpm-gap-scan] access recovery missing attention boolean fails closed"
+ACCESS_RECOVERY_UNKNOWN_ATTENTION_INPUT="$TMP_DIR/access_recovery_unknown_attention_roadmap.json"
+ACCESS_RECOVERY_UNKNOWN_ATTENTION_SUMMARY_JSON="$TMP_DIR/access_recovery_unknown_attention_summary.json"
+
+cat >"$ACCESS_RECOVERY_UNKNOWN_ATTENTION_INPUT" <<'EOF_ACCESS_RECOVERY_UNKNOWN_ATTENTION'
+{
+  "access_recovery_pilot_handoff_ready": true,
+  "access_recovery_track": {
+    "status": "pilot-handoff-ready",
+    "pilot_handoff_ready": true,
+    "trusted_verifier_receipt_valid": true,
+    "trusted_pilot_receipt_ready": true,
+    "verifier_pilot_handoff_ready": true
+  }
+}
+EOF_ACCESS_RECOVERY_UNKNOWN_ATTENTION
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$ACCESS_RECOVERY_STATUS_DOC" \
+  --roadmap-summary-json "$ACCESS_RECOVERY_UNKNOWN_ATTENTION_INPUT" \
+  --summary-json "$ACCESS_RECOVERY_UNKNOWN_ATTENTION_SUMMARY_JSON" \
+  --print-summary-json 0 >/dev/null
+
+assert_file_matches_regex "$ACCESS_RECOVERY_UNKNOWN_ATTENTION_SUMMARY_JSON" '"missing_next"[[:space:]]*:[[:space:]]*6' "missing access recovery needs_attention should add a handoff blocker"
+assert_file_contains "$ACCESS_RECOVERY_UNKNOWN_ATTENTION_SUMMARY_JSON" 'Roadmap Access Recovery handoff state is not ready (status=pilot-handoff-ready, access_recovery_pilot_handoff_ready=true' "missing access recovery needs_attention blocker text missing"
+assert_file_contains "$ACCESS_RECOVERY_UNKNOWN_ATTENTION_SUMMARY_JSON" 'trusted verifier receipt remains the handoff authority' "missing access recovery needs_attention blocker should preserve authority wording"
+
 echo "[gpm-gap-scan] missing roadmap fields fail closed"
 MISSING_FIELDS_STATUS_DOC="$TMP_DIR/missing_fields_status.md"
 MISSING_FIELDS_INPUT="$TMP_DIR/missing_fields_roadmap.json"
@@ -324,7 +366,8 @@ bash "$SCRIPT_UNDER_TEST" \
   --summary-json "$MISSING_FIELDS_SUMMARY_JSON" \
   --print-summary-json 0 >/dev/null
 
-assert_file_matches_regex "$MISSING_FIELDS_SUMMARY_JSON" '"missing_next"[[:space:]]*:[[:space:]]*5' "missing roadmap fields should add four fail-closed blockers"
+assert_file_matches_regex "$MISSING_FIELDS_SUMMARY_JSON" '"missing_next"[[:space:]]*:[[:space:]]*6' "missing roadmap fields should add five fail-closed blockers"
+assert_file_contains "$MISSING_FIELDS_SUMMARY_JSON" 'Roadmap Access Recovery handoff state is missing; provide a roadmap summary with access_recovery_track before pilot handoff.' "missing roadmap fields summary missing access recovery track blocker"
 assert_file_contains "$MISSING_FIELDS_SUMMARY_JSON" 'Roadmap multi-VM stability command source is not actionable (vm_command_source_ready=unknown, next_command_actionable=unknown)' "missing roadmap fields summary missing multi-vm unknown blocker"
 assert_file_contains "$MISSING_FIELDS_SUMMARY_JSON" 'Roadmap evidence pack profile_default_gate_evidence_pack needs attention (status=missing)' "missing roadmap fields summary missing profile evidence-pack blocker"
 assert_file_contains "$MISSING_FIELDS_SUMMARY_JSON" 'Roadmap evidence pack runtime_actuation_promotion_evidence_pack needs attention (status=missing)' "missing roadmap fields summary missing runtime evidence-pack blocker"
