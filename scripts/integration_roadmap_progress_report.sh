@@ -1295,7 +1295,7 @@ if ! jq -e \
   and .access_recovery_track.evidence_host_policy.installed_host_handoff_evidence == false
   and .access_recovery_track.access_bridge_service_smoke.available == true
   and .access_recovery_track.access_bridge_service_smoke.status == "pass"
-  and .access_recovery_track.access_bridge_service_smoke.source_summary_json == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"'"
+  and ((.access_recovery_track.access_bridge_service_smoke.source_summary_json // "") | gsub("\\\\"; "/") | endswith("/access_bridge_service_smoke_summary.json"))
   and .access_recovery_track.access_bridge_service_smoke.details.helper_id == "helper-prod"
   and .access_recovery_track.access_bridge_service_smoke.details.organization_id == "pilot-org"
   and .access_recovery_track.access_bridge_service_smoke.details.auth_required == true
@@ -1313,7 +1313,7 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_service_smoke.details.transport_mtls_missing_client_certificate_same_endpoint == false
   and .access_recovery_track.access_bridge_deployment_evidence.available == true
   and .access_recovery_track.access_bridge_deployment_evidence.status == "pass"
-  and .access_recovery_track.access_bridge_deployment_evidence.source_summary_json == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"'"
+  and ((.access_recovery_track.access_bridge_deployment_evidence.source_summary_json // "") | gsub("\\\\"; "/") | endswith("/access_bridge_deployment_evidence_summary.json"))
   and .access_recovery_track.access_bridge_deployment_evidence.details.identity_status == "pass"
   and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_valid_code_http_status == "200"
   and .access_recovery_track.access_bridge_deployment_evidence.details.smoke_bridge_http_status == "200"
@@ -1334,7 +1334,7 @@ if ! jq -e \
   and .access_recovery_track.access_bridge_deployment_evidence.details.evidence_binding_smoke_summary_sha256 == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_SHA256"'"
   and .access_recovery_track.access_bridge_host_install.available == true
   and .access_recovery_track.access_bridge_host_install.status == "pass"
-  and .access_recovery_track.access_bridge_host_install.source_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
+  and ((.access_recovery_track.access_bridge_host_install.source_summary_json // "") | gsub("\\\\"; "/") | endswith("/access_bridge_host_install_check_summary.json"))
   and .access_recovery_track.access_bridge_host_install.details.checks_fail == 0
   and .access_recovery_track.access_bridge_host_install.details.evidence_mode == "deploy-pack"
   and .access_recovery_track.access_bridge_host_install.details.env_rps == "2"
@@ -1435,17 +1435,29 @@ if ! jq -e \
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_keeper_coverage_floor_ok == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.cosmos_app_coverage_floor_ok == true
   and .blockchain_track.phase7_mainnet_cutover_summary_report.dual_write_parity_ok == true
-  and (.next_actions | length) >= 1
+  and (.next_actions | length) >= 2
   and ((.next_actions_remediation // []) | type) == "array"
-  and (.next_actions[0].id // "") == "access_bridge_installed_host_evidence"
+  and (.next_actions[0].id // "") == "real_helper_https_evidence"
   and .next_actions[0].requires_real_hosts == true
   and .next_actions[0].local_pack_only == false
-  and (.next_actions[0].command | contains("--evidence-mode installed-host"))
+  and (.next_actions[0].command | contains("access-recovery-real-helper-evidence-run"))
   and .next_actions[0].placeholder_unresolved == true
-  and .next_actions[0].placeholder_keys == ["HELPER_PUBLIC_DNS","BRIDGE_SERVICE_CONFIG"]
+  and (.next_actions[0].placeholder_keys | index("HELPER_PUBLIC_DNS") != null)
+  and (.next_actions[0].placeholder_keys | index("TRUST_STORE") != null)
   and .next_actions[0].safe_to_execute_as_is == false
   and .next_actions[0].operator_input_required == true
   and ((.next_actions[0].placeholder_resolution // "") | contains("Template command only"))
+  and ((.next_actions // []) | any(
+    .id == "access_bridge_installed_host_evidence"
+    and .requires_real_hosts == true
+    and .local_pack_only == false
+    and (.command | contains("--evidence-mode installed-host"))
+    and .placeholder_unresolved == true
+    and .placeholder_keys == ["HELPER_PUBLIC_DNS","BRIDGE_SERVICE_CONFIG"]
+    and .safe_to_execute_as_is == false
+    and .operator_input_required == true
+    and ((.placeholder_resolution // "") | contains("Template command only"))
+  ))
   and ((.next_actions // []) | any(
     .id == "machine_c_vpn_smoke"
     and .requires_real_hosts == true
@@ -1622,9 +1634,9 @@ if ! jq -e \
          and (((.next_actions // []) | any(.id == "three_machine_real_host_validation_pack")) | not)
        end)
   and .artifacts.phase0_summary_json == "'"$PHASE0_SUMMARY_JSON"'"
-  and .artifacts.access_bridge_service_smoke_summary_json == "'"$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON"'"
-  and .artifacts.access_bridge_deployment_evidence_summary_json == "'"$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON"'"
-  and .artifacts.access_bridge_host_install_summary_json == "'"$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON"'"
+  and ((.artifacts.access_bridge_service_smoke_summary_json // "") | gsub("\\\\"; "/") | endswith("/access_bridge_service_smoke_summary.json"))
+  and ((.artifacts.access_bridge_deployment_evidence_summary_json // "") | gsub("\\\\"; "/") | endswith("/access_bridge_deployment_evidence_summary.json"))
+  and ((.artifacts.access_bridge_host_install_summary_json // "") | gsub("\\\\"; "/") | endswith("/access_bridge_host_install_check_summary.json"))
   and .artifacts.access_bridge_pilot_evidence_bundle_verify_summary_json == null
   and .artifacts.manual_validation_summary_json == "'"$TEST_LOG_DIR/manual_validation_readiness_summary.json"'"
   and .artifacts.manual_validation_report_md == "'"$TEST_LOG_DIR/manual_validation_readiness_report.md"'"

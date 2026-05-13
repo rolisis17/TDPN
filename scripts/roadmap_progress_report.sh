@@ -1942,16 +1942,10 @@ access_recovery_evidence_json() {
   fi
   source_summary_sha256="$(file_sha256_or_empty "$path")"
 
-  jq -c \
-    --arg input "$path" \
-    --arg expected_schema_id "$expected_schema_id" \
-    --arg kind "$kind" \
-    --arg evidence_label "$label" \
-    --arg source_summary_sha256 "$source_summary_sha256" \
-    --argjson summary_age_sec "$age_json" \
-    --argjson summary_stale "$stale_json" \
-    --argjson summary_max_age_sec "$max_age_sec" \
-    '
+  local evidence_filter_file=""
+  local jq_rc=0
+  evidence_filter_file="$(mktemp "${TMPDIR:-/tmp}/roadmap_access_recovery_evidence_filter.XXXXXX.jq")"
+  cat >"$evidence_filter_file" <<'JQ_ACCESS_RECOVERY_EVIDENCE'
       def str_or_null($v):
         if ($v | type) == "string" and ($v | length) > 0 then $v else null end;
       def status_norm:
@@ -2404,7 +2398,21 @@ access_recovery_evidence_json() {
             end
           )
         }
-    ' "$path"
+JQ_ACCESS_RECOVERY_EVIDENCE
+
+  jq -c \
+    --arg input "$path" \
+    --arg expected_schema_id "$expected_schema_id" \
+    --arg kind "$kind" \
+    --arg evidence_label "$label" \
+    --arg source_summary_sha256 "$source_summary_sha256" \
+    --argjson summary_age_sec "$age_json" \
+    --argjson summary_stale "$stale_json" \
+    --argjson summary_max_age_sec "$max_age_sec" \
+    -f "$evidence_filter_file" \
+    "$path" || jq_rc=$?
+  rm -f "$evidence_filter_file"
+  return "$jq_rc"
 }
 
 access_recovery_verifier_evidence_json() {
@@ -2843,12 +2851,31 @@ access_recovery_track_json_from_evidence() {
     bundle_artifacts_json='{"summary_json":null,"provenance_json":null}'
   fi
 
-  jq -cn \
-    --argjson service_smoke "$smoke_json" \
-    --argjson deployment_evidence "$deployment_json" \
-    --argjson host_install "$host_install_json" \
-    --argjson bundle_verify "$bundle_verify_json" \
-    --argjson bundle_artifacts "$bundle_artifacts_json" '
+  local track_filter_file=""
+  local service_smoke_file=""
+  local deployment_evidence_file=""
+  local host_install_file=""
+  local bundle_verify_file=""
+  local bundle_artifacts_file=""
+  local jq_rc=0
+  track_filter_file="$(mktemp "${TMPDIR:-/tmp}/roadmap_access_recovery_track_filter.XXXXXX.jq")"
+  service_smoke_file="$(mktemp "${TMPDIR:-/tmp}/roadmap_access_recovery_smoke.XXXXXX.json")"
+  deployment_evidence_file="$(mktemp "${TMPDIR:-/tmp}/roadmap_access_recovery_deployment.XXXXXX.json")"
+  host_install_file="$(mktemp "${TMPDIR:-/tmp}/roadmap_access_recovery_host.XXXXXX.json")"
+  bundle_verify_file="$(mktemp "${TMPDIR:-/tmp}/roadmap_access_recovery_bundle_verify.XXXXXX.json")"
+  bundle_artifacts_file="$(mktemp "${TMPDIR:-/tmp}/roadmap_access_recovery_bundle_artifacts.XXXXXX.json")"
+  printf '%s\n' "$smoke_json" >"$service_smoke_file"
+  printf '%s\n' "$deployment_json" >"$deployment_evidence_file"
+  printf '%s\n' "$host_install_json" >"$host_install_file"
+  printf '%s\n' "$bundle_verify_json" >"$bundle_verify_file"
+  printf '%s\n' "$bundle_artifacts_json" >"$bundle_artifacts_file"
+  cat >"$track_filter_file" <<'JQ_ACCESS_RECOVERY_TRACK'
+      ($service_smoke_input[0] // {}) as $service_smoke
+      | ($deployment_evidence_input[0] // {}) as $deployment_evidence
+      | ($host_install_input[0] // {}) as $host_install
+      | ($bundle_verify_input[0] // {}) as $bundle_verify
+      | ($bundle_artifacts_input[0] // {}) as $bundle_artifacts
+      | (
       def same_nonempty($a; $b):
         (($a // "") != "" and ($b // "") != "" and $a == $b);
       def first_nonempty($values; $fallback):
@@ -3392,7 +3419,24 @@ access_recovery_track_json_from_evidence() {
             end
           )
         }
-    '
+      )
+JQ_ACCESS_RECOVERY_TRACK
+
+  jq -cn \
+    --slurpfile service_smoke_input "$service_smoke_file" \
+    --slurpfile deployment_evidence_input "$deployment_evidence_file" \
+    --slurpfile host_install_input "$host_install_file" \
+    --slurpfile bundle_verify_input "$bundle_verify_file" \
+    --slurpfile bundle_artifacts_input "$bundle_artifacts_file" \
+    -f "$track_filter_file" || jq_rc=$?
+  rm -f \
+    "$track_filter_file" \
+    "$service_smoke_file" \
+    "$deployment_evidence_file" \
+    "$host_install_file" \
+    "$bundle_verify_file" \
+    "$bundle_artifacts_file"
+  return "$jq_rc"
 }
 
 runtime_actuation_promotion_evidence_pack_preferred_candidate_path() {
@@ -13007,67 +13051,12 @@ access_bridge_pilot_evidence_bundle_verify_available_json="$(printf '%s\n' "$acc
 access_bridge_pilot_evidence_bundle_verify_status_json="$(printf '%s\n' "$access_bridge_pilot_evidence_bundle_verify_evidence_json" | jq -r '.status // "unknown"')"
 access_bridge_pilot_evidence_bundle_verify_source_summary_json="$(printf '%s\n' "$access_bridge_pilot_evidence_bundle_verify_evidence_json" | jq -r '.source_summary_json // ""')"
 
-next_actions_candidate_json="$(
-  jq -c \
-    --arg current_roadmap_track "$current_roadmap_track" \
-    --argjson access_recovery_track "$access_recovery_track_json" \
-    --arg next_action_check_id "$next_action_check_id" \
-    --arg next_action_label "$next_action_label" \
-    --arg next_action_command "$next_action_command" \
-    --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" \
-    --arg profile_default_gate_next_command "$profile_default_gate_next_command" \
-    --arg profile_default_gate_next_command_reason "$profile_default_gate_next_command_reason" \
-    --argjson profile_default_gate_next_command_has_unresolved_placeholders "$profile_default_gate_next_command_has_unresolved_placeholders_json" \
-    --argjson profile_default_gate_unresolved_placeholder_keys "$profile_default_gate_unresolved_placeholder_keys_json" \
-    --argjson profile_default_gate_live_action_ready "$profile_default_gate_live_action_ready_json" \
-    --argjson multi_vm_stability_needs_attention "$multi_vm_stability_needs_attention_json" \
-    --arg multi_vm_stability_next_command "$multi_vm_stability_next_command" \
-    --arg multi_vm_stability_next_command_reason "$multi_vm_stability_next_command_reason" \
-    --argjson multi_vm_stability_live_action_ready "$multi_vm_stability_live_action_ready_json" \
-    --argjson multi_vm_stability_promotion_needs_attention "$multi_vm_stability_promotion_needs_attention_json" \
-    --arg multi_vm_stability_promotion_next_command "$multi_vm_stability_promotion_next_command" \
-    --arg multi_vm_stability_promotion_next_command_reason "$multi_vm_stability_promotion_next_command_reason" \
-    --argjson multi_vm_stability_promotion_live_action_ready "$multi_vm_stability_promotion_live_action_ready_json" \
-    --argjson runtime_actuation_promotion_needs_attention "$runtime_actuation_promotion_needs_attention_json" \
-    --arg runtime_actuation_promotion_next_command "$runtime_actuation_promotion_next_command" \
-    --arg runtime_actuation_promotion_next_command_reason "$runtime_actuation_promotion_next_command_reason" \
-    --argjson runtime_actuation_promotion_live_action_ready "$runtime_actuation_promotion_live_action_ready_json" \
-    --argjson profile_default_gate_evidence_pack_needs_attention "$profile_default_gate_evidence_pack_needs_attention_json" \
-    --arg profile_default_gate_evidence_pack_next_command "$profile_default_gate_evidence_pack_next_command" \
-    --arg profile_default_gate_evidence_pack_next_command_reason "$profile_default_gate_evidence_pack_next_command_reason" \
-    --argjson profile_default_gate_evidence_pack_action_ready "$profile_default_gate_evidence_pack_action_ready_json" \
-    --argjson runtime_actuation_promotion_evidence_pack_needs_attention "$runtime_actuation_promotion_evidence_pack_needs_attention_json" \
-    --arg runtime_actuation_promotion_evidence_pack_next_command "$runtime_actuation_promotion_evidence_pack_next_command" \
-    --arg runtime_actuation_promotion_evidence_pack_next_command_reason "$runtime_actuation_promotion_evidence_pack_next_command_reason" \
-    --argjson runtime_actuation_promotion_evidence_pack_action_ready "$runtime_actuation_promotion_evidence_pack_action_ready_json" \
-    --argjson multi_vm_stability_promotion_evidence_pack_needs_attention "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" \
-    --arg multi_vm_stability_promotion_evidence_pack_next_command "$multi_vm_stability_promotion_evidence_pack_next_command" \
-    --arg multi_vm_stability_promotion_evidence_pack_next_command_reason "$multi_vm_stability_promotion_evidence_pack_next_command_reason" \
-    --argjson multi_vm_stability_promotion_evidence_pack_action_ready "$multi_vm_stability_promotion_evidence_pack_action_ready_json" \
-    --argjson next_actions_live_evidence_pending_action_count "$next_actions_live_evidence_pending_action_count" \
-    --argjson next_actions_evidence_pack_pending_action_count "$next_actions_evidence_pack_pending_action_count" \
-    --argjson next_actions_live_evidence_pending_action_count_after_bundle "$next_actions_live_evidence_pending_action_count_after_bundle" \
-    --argjson next_actions_evidence_pack_pending_action_count_after_bundle "$next_actions_evidence_pack_pending_action_count_after_bundle" \
-    --argjson live_evidence_cycle_batch_helper_available "$live_evidence_cycle_batch_helper_available_json" \
-    --argjson live_evidence_archive_helper_available "$live_evidence_archive_helper_available_json" \
-    --argjson three_machine_real_host_validation_pack_helper_available "$three_machine_real_host_validation_pack_helper_available_json" \
-    --argjson three_machine_real_host_validation_pack_signoff_pending "$three_machine_real_host_validation_pack_signoff_pending_json" \
-    --argjson profile_default_gate_live_evidence_publish_bundle_helper_available "$profile_default_gate_live_evidence_publish_bundle_helper_available_json" \
-    --argjson runtime_actuation_live_evidence_publish_bundle_helper_available "$runtime_actuation_live_evidence_publish_bundle_helper_available_json" \
-    --argjson profile_compare_multi_vm_live_evidence_publish_bundle_helper_available "$profile_compare_multi_vm_live_evidence_publish_bundle_helper_available_json" \
-    --argjson profile_default_gate_live_and_pack_bundle_ready "$profile_default_gate_live_and_pack_bundle_ready_json" \
-    --argjson runtime_actuation_live_and_pack_bundle_ready "$runtime_actuation_live_and_pack_bundle_ready_json" \
-    --argjson profile_compare_multi_vm_live_and_pack_bundle_ready "$profile_compare_multi_vm_live_and_pack_bundle_ready_json" \
-    --arg profile_compare_multi_vm_live_evidence_publish_bundle_next_command "$profile_compare_multi_vm_live_evidence_publish_bundle_next_command" \
-    --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" \
-    --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" \
-    --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" \
-    --arg blockchain_mainnet_activation_missing_metrics_action_prefill_command "$blockchain_mainnet_activation_missing_metrics_action_prefill_command" \
-    --arg blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command "$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command" \
-    --argjson blockchain_mainnet_activation_refresh_evidence_available "$blockchain_mainnet_activation_refresh_evidence_available_json" \
-    --arg blockchain_mainnet_activation_refresh_evidence_command "$blockchain_mainnet_activation_refresh_evidence_command" \
-    --arg blockchain_mainnet_activation_refresh_evidence_reason "$blockchain_mainnet_activation_refresh_evidence_reason" \
-    '
+next_actions_candidate_filter_file="$(mktemp "${TMPDIR:-/tmp}/roadmap_next_actions_candidate_filter.XXXXXX.jq")"
+next_actions_candidate_access_recovery_track_file="$(mktemp "${TMPDIR:-/tmp}/roadmap_access_recovery_track.XXXXXX.json")"
+printf '%s\n' "$access_recovery_track_json" >"$next_actions_candidate_access_recovery_track_file"
+cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
+  ($access_recovery_track_input[0] // {}) as $access_recovery_track
+  | (
   def unique_commands_preserve_order:
     reduce .[] as $item (
       [];
@@ -13177,6 +13166,17 @@ next_actions_candidate_json="$(
         )
       };
   [
+    (if (
+        ($current_roadmap_track // "") == "access_recovery"
+        and ($access_recovery_track.needs_attention == true)
+        and (($access_recovery_track.preferred_operator_next_action.command // "") != "")
+      ) then {
+      id: ($access_recovery_track.preferred_operator_next_action.id // "real_helper_https_evidence"),
+      "label": "Access Recovery guarded operator evidence run",
+      command: $access_recovery_track.preferred_operator_next_action.command,
+      reason: ($access_recovery_track.preferred_operator_next_action.reason // "Run the guarded Access Recovery operator evidence handoff")
+    } + access_recovery_action_metadata($access_recovery_track.preferred_operator_next_action.id // "")
+      + access_recovery_placeholder_metadata($access_recovery_track.preferred_operator_next_action.command // "") else empty end),
     (if (
         ($current_roadmap_track // "") == "access_recovery"
         and ($access_recovery_track.needs_attention == true)
@@ -13336,7 +13336,78 @@ next_actions_candidate_json="$(
     } + action_evidence_metadata(["real-wg-privileged"]; false; false; ["local-root-real-wg"]) else empty end)
   ]
   | unique_commands_preserve_order
-' "$manual_validation_summary_json")"
+)
+JQ_NEXT_ACTIONS_CANDIDATE
+
+next_actions_candidate_json=""
+next_actions_candidate_rc=0
+next_actions_candidate_json="$(
+  jq -c \
+    --arg current_roadmap_track "$current_roadmap_track" \
+    --slurpfile access_recovery_track_input "$next_actions_candidate_access_recovery_track_file" \
+    --arg next_action_check_id "$next_action_check_id" \
+    --arg next_action_label "$next_action_label" \
+    --arg next_action_command "$next_action_command" \
+    --argjson profile_default_gate_needs_attention "$profile_default_gate_needs_attention_json" \
+    --arg profile_default_gate_next_command "$profile_default_gate_next_command" \
+    --arg profile_default_gate_next_command_reason "$profile_default_gate_next_command_reason" \
+    --argjson profile_default_gate_next_command_has_unresolved_placeholders "$profile_default_gate_next_command_has_unresolved_placeholders_json" \
+    --argjson profile_default_gate_unresolved_placeholder_keys "$profile_default_gate_unresolved_placeholder_keys_json" \
+    --argjson profile_default_gate_live_action_ready "$profile_default_gate_live_action_ready_json" \
+    --argjson multi_vm_stability_needs_attention "$multi_vm_stability_needs_attention_json" \
+    --arg multi_vm_stability_next_command "$multi_vm_stability_next_command" \
+    --arg multi_vm_stability_next_command_reason "$multi_vm_stability_next_command_reason" \
+    --argjson multi_vm_stability_live_action_ready "$multi_vm_stability_live_action_ready_json" \
+    --argjson multi_vm_stability_promotion_needs_attention "$multi_vm_stability_promotion_needs_attention_json" \
+    --arg multi_vm_stability_promotion_next_command "$multi_vm_stability_promotion_next_command" \
+    --arg multi_vm_stability_promotion_next_command_reason "$multi_vm_stability_promotion_next_command_reason" \
+    --argjson multi_vm_stability_promotion_live_action_ready "$multi_vm_stability_promotion_live_action_ready_json" \
+    --argjson runtime_actuation_promotion_needs_attention "$runtime_actuation_promotion_needs_attention_json" \
+    --arg runtime_actuation_promotion_next_command "$runtime_actuation_promotion_next_command" \
+    --arg runtime_actuation_promotion_next_command_reason "$runtime_actuation_promotion_next_command_reason" \
+    --argjson runtime_actuation_promotion_live_action_ready "$runtime_actuation_promotion_live_action_ready_json" \
+    --argjson profile_default_gate_evidence_pack_needs_attention "$profile_default_gate_evidence_pack_needs_attention_json" \
+    --arg profile_default_gate_evidence_pack_next_command "$profile_default_gate_evidence_pack_next_command" \
+    --arg profile_default_gate_evidence_pack_next_command_reason "$profile_default_gate_evidence_pack_next_command_reason" \
+    --argjson profile_default_gate_evidence_pack_action_ready "$profile_default_gate_evidence_pack_action_ready_json" \
+    --argjson runtime_actuation_promotion_evidence_pack_needs_attention "$runtime_actuation_promotion_evidence_pack_needs_attention_json" \
+    --arg runtime_actuation_promotion_evidence_pack_next_command "$runtime_actuation_promotion_evidence_pack_next_command" \
+    --arg runtime_actuation_promotion_evidence_pack_next_command_reason "$runtime_actuation_promotion_evidence_pack_next_command_reason" \
+    --argjson runtime_actuation_promotion_evidence_pack_action_ready "$runtime_actuation_promotion_evidence_pack_action_ready_json" \
+    --argjson multi_vm_stability_promotion_evidence_pack_needs_attention "$multi_vm_stability_promotion_evidence_pack_needs_attention_json" \
+    --arg multi_vm_stability_promotion_evidence_pack_next_command "$multi_vm_stability_promotion_evidence_pack_next_command" \
+    --arg multi_vm_stability_promotion_evidence_pack_next_command_reason "$multi_vm_stability_promotion_evidence_pack_next_command_reason" \
+    --argjson multi_vm_stability_promotion_evidence_pack_action_ready "$multi_vm_stability_promotion_evidence_pack_action_ready_json" \
+    --argjson next_actions_live_evidence_pending_action_count "$next_actions_live_evidence_pending_action_count" \
+    --argjson next_actions_evidence_pack_pending_action_count "$next_actions_evidence_pack_pending_action_count" \
+    --argjson next_actions_live_evidence_pending_action_count_after_bundle "$next_actions_live_evidence_pending_action_count_after_bundle" \
+    --argjson next_actions_evidence_pack_pending_action_count_after_bundle "$next_actions_evidence_pack_pending_action_count_after_bundle" \
+    --argjson live_evidence_cycle_batch_helper_available "$live_evidence_cycle_batch_helper_available_json" \
+    --argjson live_evidence_archive_helper_available "$live_evidence_archive_helper_available_json" \
+    --argjson three_machine_real_host_validation_pack_helper_available "$three_machine_real_host_validation_pack_helper_available_json" \
+    --argjson three_machine_real_host_validation_pack_signoff_pending "$three_machine_real_host_validation_pack_signoff_pending_json" \
+    --argjson profile_default_gate_live_evidence_publish_bundle_helper_available "$profile_default_gate_live_evidence_publish_bundle_helper_available_json" \
+    --argjson runtime_actuation_live_evidence_publish_bundle_helper_available "$runtime_actuation_live_evidence_publish_bundle_helper_available_json" \
+    --argjson profile_compare_multi_vm_live_evidence_publish_bundle_helper_available "$profile_compare_multi_vm_live_evidence_publish_bundle_helper_available_json" \
+    --argjson profile_default_gate_live_and_pack_bundle_ready "$profile_default_gate_live_and_pack_bundle_ready_json" \
+    --argjson runtime_actuation_live_and_pack_bundle_ready "$runtime_actuation_live_and_pack_bundle_ready_json" \
+    --argjson profile_compare_multi_vm_live_and_pack_bundle_ready "$profile_compare_multi_vm_live_and_pack_bundle_ready_json" \
+    --arg profile_compare_multi_vm_live_evidence_publish_bundle_next_command "$profile_compare_multi_vm_live_evidence_publish_bundle_next_command" \
+    --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" \
+    --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" \
+    --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" \
+    --arg blockchain_mainnet_activation_missing_metrics_action_prefill_command "$blockchain_mainnet_activation_missing_metrics_action_prefill_command" \
+    --arg blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command "$blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command" \
+    --argjson blockchain_mainnet_activation_refresh_evidence_available "$blockchain_mainnet_activation_refresh_evidence_available_json" \
+    --arg blockchain_mainnet_activation_refresh_evidence_command "$blockchain_mainnet_activation_refresh_evidence_command" \
+    --arg blockchain_mainnet_activation_refresh_evidence_reason "$blockchain_mainnet_activation_refresh_evidence_reason" \
+    -f "$next_actions_candidate_filter_file" \
+    "$manual_validation_summary_json"
+)" || next_actions_candidate_rc=$?
+rm -f "$next_actions_candidate_filter_file" "$next_actions_candidate_access_recovery_track_file"
+if [[ "$next_actions_candidate_rc" != "0" ]]; then
+  exit "$next_actions_candidate_rc"
+fi
 next_actions_json="$(printf '%s\n' "$next_actions_candidate_json" | jq -c --argjson suppress_live_evidence_next_actions_when_batch_helper "$suppress_live_evidence_next_actions_when_batch_helper_json" '
   def is_live_evidence_individual_action:
     (.id // "") as $id
