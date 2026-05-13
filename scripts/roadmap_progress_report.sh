@@ -3248,6 +3248,11 @@ access_recovery_track_json_from_evidence() {
           (if ($ucmd | test("(^|[^A-Z0-9_-])PROVENANCE_PRIVATE_KEY_FILE([^A-Z0-9_-]|$)")) then "PROVENANCE_PRIVATE_KEY_FILE" else empty end),
           (if ($ucmd | test("(^|[^A-Z0-9_-])ORG_ID([^A-Z0-9_-]|$)")) then "ORG_ID" else empty end),
           (if ($ucmd | test("(^|[^A-Z0-9_-])ORG_NAME([^A-Z0-9_-]|$)")) then "ORG_NAME" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_REPORTS_DIR([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_REPORTS_DIR" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_INSTALL_DIR([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_INSTALL_DIR" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_SYSTEMD_UNIT_FILE([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_SYSTEMD_UNIT_FILE" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_PROXY_KIND([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_PROXY_KIND" else empty end),
+          (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_PROXY_CONFIG_FILE([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_PROXY_CONFIG_FILE" else empty end),
           (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CA_FILE([^A-Z0-9_-]|$)")) then "MTLS_CA_FILE" else empty end),
           (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CLIENT_CERT_FILE([^A-Z0-9_-]|$)")) then "MTLS_CLIENT_CERT_FILE" else empty end),
           (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CLIENT_KEY_FILE([^A-Z0-9_-]|$)")) then "MTLS_CLIENT_KEY_FILE" else empty end)
@@ -3262,7 +3267,7 @@ access_recovery_track_json_from_evidence() {
             operator_input_required: (($keys | length) > 0),
             placeholder_resolution: (
               if ($keys | length) > 0 then
-                "Template command only; replace Access Recovery placeholders with concrete pilot host, helper, credential, config, deploy-pack, provenance, trust-store, and optional mTLS values before execution."
+                "Template command only; replace Access Recovery placeholders with concrete pilot host, helper, credential, config, deploy-pack, installed-host/proxy, provenance, trust-store, and optional mTLS values before execution."
               else null
               end
             )

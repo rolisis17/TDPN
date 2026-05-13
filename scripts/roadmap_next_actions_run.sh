@@ -674,7 +674,7 @@ access_recovery_proxy_kind_value_invalid_reason_01() {
     return 0
   fi
   case "$value" in
-    caddy|nginx|none)
+    caddy|nginx)
       return 1
       ;;
   esac
@@ -832,6 +832,14 @@ access_recovery_operator_input_value_looks_placeholder_01() {
       ;;
   esac
   return 1
+}
+
+access_recovery_operator_value_may_contain_placeholder_01() {
+  local value normalized
+  value="$(trim "${1:-}")"
+  value="$(strip_optional_wrapping_quotes "$value")"
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  [[ "$normalized" =~ (HELPER_PUBLIC_DNS|HELPER_ID|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|ACCESS_RECOVERY_REPORTS_DIR|ACCESS_RECOVERY_INSTALL_DIR|ACCESS_RECOVERY_SYSTEMD_UNIT_FILE|ACCESS_RECOVERY_PROXY_KIND|ACCESS_RECOVERY_PROXY_CONFIG_FILE|MTLS_CA_FILE|MTLS_CLIENT_CERT_FILE|MTLS_CLIENT_KEY_FILE|REPLACE_WITH_) ]]
 }
 
 access_recovery_trust_store_path_is_dev_01() {
@@ -1008,6 +1016,11 @@ command_has_access_recovery_operator_input_placeholder_01() {
     return 1
   fi
 
+  normalized="$(printf '%s' "$command_text" | tr '[:lower:]' '[:upper:]')"
+  if [[ "$normalized" =~ (^|[^A-Z0-9_-])(HELPER_PUBLIC_DNS|HELPER_ID|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|ACCESS_RECOVERY_REPORTS_DIR|ACCESS_RECOVERY_INSTALL_DIR|ACCESS_RECOVERY_SYSTEMD_UNIT_FILE|ACCESS_RECOVERY_PROXY_KIND|ACCESS_RECOVERY_PROXY_CONFIG_FILE|MTLS_CA_FILE|MTLS_CLIENT_CERT_FILE|MTLS_CLIENT_KEY_FILE)([^A-Z0-9_-]|$) ]]; then
+    return 0
+  fi
+
   if command_string_to_argv "$command_text"; then
     token_count="${#COMMAND_STRING_ARGV[@]}"
     idx=0
@@ -1019,7 +1032,9 @@ command_has_access_recovery_operator_input_placeholder_01() {
             return 0
           fi
           value="${COMMAND_STRING_ARGV[$((idx + 1))]}"
-          if [[ -z "$value" ]] || access_recovery_operator_input_value_looks_placeholder_01 "$value"; then
+          if [[ -z "$value" ]] \
+             || { access_recovery_operator_value_may_contain_placeholder_01 "$value" \
+               && access_recovery_operator_input_value_looks_placeholder_01 "$value"; }; then
             return 0
           fi
           idx=$((idx + 2))
@@ -1027,14 +1042,17 @@ command_has_access_recovery_operator_input_placeholder_01() {
           ;;
         --base-url=*|--expected-base-url=*|--public-host=*|--code-file=*|--config-json=*|--deploy-pack-dir=*|--provenance-private-key-file=*|--provenance-org-id=*|--provenance-org-name=*|--expect-helper-id=*|--expect-org-id=*|--reports-dir=*|--install-dir=*|--systemd-unit-file=*|--proxy-kind=*|--proxy-config-file=*|--cacert=*|--client-cert=*|--client-key=*)
           value="${token#*=}"
-          if [[ -z "$value" ]] || access_recovery_operator_input_value_looks_placeholder_01 "$value"; then
+          if [[ -z "$value" ]] \
+             || { access_recovery_operator_value_may_contain_placeholder_01 "$value" \
+               && access_recovery_operator_input_value_looks_placeholder_01 "$value"; }; then
             return 0
           fi
           idx=$((idx + 1))
           continue
           ;;
       esac
-      if access_recovery_operator_input_value_looks_placeholder_01 "$token"; then
+      if access_recovery_operator_value_may_contain_placeholder_01 "$token" \
+         && access_recovery_operator_input_value_looks_placeholder_01 "$token"; then
         return 0
       fi
       idx=$((idx + 1))
@@ -1042,8 +1060,64 @@ command_has_access_recovery_operator_input_placeholder_01() {
     return 1
   fi
 
+  return 1
+}
+
+command_text_has_access_recovery_operator_token_01() {
+  local command_text token normalized
+  command_text="${1:-}"
+  token="$(trim "${2:-}")"
+  if [[ -z "$command_text" || -z "$token" ]]; then
+    return 1
+  fi
   normalized="$(printf '%s' "$command_text" | tr '[:lower:]' '[:upper:]')"
-  [[ "$normalized" =~ (^|[^A-Z0-9_-])(HELPER_PUBLIC_DNS|HELPER_ID|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|ACCESS_RECOVERY_REPORTS_DIR|ACCESS_RECOVERY_INSTALL_DIR|ACCESS_RECOVERY_SYSTEMD_UNIT_FILE|ACCESS_RECOVERY_PROXY_KIND|ACCESS_RECOVERY_PROXY_CONFIG_FILE|MTLS_CA_FILE|MTLS_CLIENT_CERT_FILE|MTLS_CLIENT_KEY_FILE)([^A-Z0-9_-]|$) ]]
+  token="$(printf '%s' "$token" | tr '[:lower:]' '[:upper:]')"
+  [[ "$normalized" =~ (^|[^A-Z0-9_-])${token}([^A-Z0-9_-]|$) ]]
+}
+
+command_text_needs_access_recovery_operator_input_01() {
+  local command_text placeholder token value opt idx token_count
+  command_text="${1:-}"
+  placeholder="$(trim "${2:-}")"
+  shift 2 || true
+
+  if command_text_has_access_recovery_operator_token_01 "$command_text" "$placeholder"; then
+    return 0
+  fi
+  if [[ -z "$command_text" ]]; then
+    return 1
+  fi
+  if ! command_string_to_argv "$command_text"; then
+    return 1
+  fi
+
+  token_count="${#COMMAND_STRING_ARGV[@]}"
+  idx=0
+  while (( idx < token_count )); do
+    token="${COMMAND_STRING_ARGV[$idx]}"
+    for opt in "$@"; do
+      if [[ "$token" == "$opt" ]]; then
+        if (( idx + 1 >= token_count )); then
+          return 0
+        fi
+        value="${COMMAND_STRING_ARGV[$((idx + 1))]}"
+        if [[ -z "$value" ]] \
+           || { access_recovery_operator_value_may_contain_placeholder_01 "$value" \
+             && access_recovery_operator_input_value_looks_placeholder_01 "$value"; }; then
+          return 0
+        fi
+      elif [[ "$token" == "${opt}="* ]]; then
+        value="${token#*=}"
+        if [[ -z "$value" ]] \
+           || { access_recovery_operator_value_may_contain_placeholder_01 "$value" \
+             && access_recovery_operator_input_value_looks_placeholder_01 "$value"; }; then
+          return 0
+        fi
+      fi
+    done
+    idx=$((idx + 1))
+  done
+  return 1
 }
 
 command_has_access_recovery_public_key_handoff_01() {
@@ -1456,7 +1530,18 @@ write_access_recovery_trust_store_precondition_log_01() {
 
 build_access_recovery_operator_inputs_operator_command_01() {
   local action_id="${1:-real_helper_https_evidence}"
+  local action_command_text="${2:-${action_command:-}}"
   local -a cmd=("./scripts/roadmap_next_actions_run.sh")
+  local -a placeholder_tokens=()
+  local replacement_tokens=""
+  local placeholder_token=""
+  local needs_full_real_helper_inputs="0"
+
+  case "$action_id" in
+    access_recovery_evidence|real_helper_https_evidence|access_bridge_pilot_evidence_bundle)
+      needs_full_real_helper_inputs="1"
+      ;;
+  esac
 
   if [[ -n "${reports_dir:-}" ]]; then
     cmd+=(--reports-dir "$reports_dir")
@@ -1483,72 +1568,165 @@ build_access_recovery_operator_inputs_operator_command_01() {
     cmd+=(--local-only 1)
   fi
   cmd+=(--include-id "$action_id")
-  if [[ -n "${runtime_access_recovery_helper_public_dns:-}" ]]; then
-    cmd+=(--access-recovery-helper-public-dns "$runtime_access_recovery_helper_public_dns")
-  else
-    cmd+=(--access-recovery-helper-public-dns "HELPER_PUBLIC_DNS")
+  if [[ "$needs_full_real_helper_inputs" == "1" ]] \
+     || command_text_needs_access_recovery_operator_input_01 "$action_command_text" "HELPER_PUBLIC_DNS" --base-url --expected-base-url --public-host; then
+    if [[ -n "${runtime_access_recovery_helper_public_dns:-}" ]]; then
+      cmd+=(--access-recovery-helper-public-dns "$runtime_access_recovery_helper_public_dns")
+    else
+      cmd+=(--access-recovery-helper-public-dns "HELPER_PUBLIC_DNS")
+      placeholder_tokens+=("HELPER_PUBLIC_DNS")
+    fi
   fi
-  if [[ -n "${runtime_access_recovery_helper_id:-}" ]]; then
-    cmd+=(--access-recovery-helper-id "$runtime_access_recovery_helper_id")
-  else
-    cmd+=(--access-recovery-helper-id "HELPER_ID")
+  if [[ "$needs_full_real_helper_inputs" == "1" ]] \
+     || command_text_needs_access_recovery_operator_input_01 "$action_command_text" "HELPER_ID" --expect-helper-id; then
+    if [[ -n "${runtime_access_recovery_helper_id:-}" ]]; then
+      cmd+=(--access-recovery-helper-id "$runtime_access_recovery_helper_id")
+    else
+      cmd+=(--access-recovery-helper-id "HELPER_ID")
+      placeholder_tokens+=("HELPER_ID")
+    fi
   fi
-  if [[ -n "${runtime_access_recovery_org_id:-}" ]]; then
-    cmd+=(--access-recovery-org-id "$runtime_access_recovery_org_id")
-  else
-    cmd+=(--access-recovery-org-id "ORG_ID")
+  if [[ "$needs_full_real_helper_inputs" == "1" ]] \
+     || command_text_needs_access_recovery_operator_input_01 "$action_command_text" "ORG_ID" --expect-org-id --provenance-org-id; then
+    if [[ -n "${runtime_access_recovery_org_id:-}" ]]; then
+      cmd+=(--access-recovery-org-id "$runtime_access_recovery_org_id")
+    else
+      cmd+=(--access-recovery-org-id "ORG_ID")
+      placeholder_tokens+=("ORG_ID")
+    fi
   fi
-  if [[ -n "${runtime_access_recovery_org_name:-}" ]]; then
-    cmd+=(--access-recovery-org-name "$runtime_access_recovery_org_name")
-  else
-    cmd+=(--access-recovery-org-name "ORG_NAME")
+  if [[ "$needs_full_real_helper_inputs" == "1" ]] \
+     || command_text_needs_access_recovery_operator_input_01 "$action_command_text" "ORG_NAME" --provenance-org-name; then
+    if [[ -n "${runtime_access_recovery_org_name:-}" ]]; then
+      cmd+=(--access-recovery-org-name "$runtime_access_recovery_org_name")
+    else
+      cmd+=(--access-recovery-org-name "ORG_NAME")
+      placeholder_tokens+=("ORG_NAME")
+    fi
   fi
-  if [[ -n "${runtime_access_recovery_private_code_file:-}" ]]; then
-    cmd+=(--access-recovery-private-code-file "$runtime_access_recovery_private_code_file")
-  else
-    cmd+=(--access-recovery-private-code-file "PRIVATE_CODE_FILE")
+  if [[ "$needs_full_real_helper_inputs" == "1" ]] \
+     || command_text_needs_access_recovery_operator_input_01 "$action_command_text" "PRIVATE_CODE_FILE" --code-file; then
+    if [[ -n "${runtime_access_recovery_private_code_file:-}" ]]; then
+      cmd+=(--access-recovery-private-code-file "$runtime_access_recovery_private_code_file")
+    else
+      cmd+=(--access-recovery-private-code-file "PRIVATE_CODE_FILE")
+      placeholder_tokens+=("PRIVATE_CODE_FILE")
+    fi
   fi
-  if [[ -n "${runtime_access_recovery_bridge_service_config:-}" ]]; then
-    cmd+=(--access-recovery-bridge-service-config "$runtime_access_recovery_bridge_service_config")
-  else
-    cmd+=(--access-recovery-bridge-service-config "BRIDGE_SERVICE_CONFIG")
+  if [[ "$needs_full_real_helper_inputs" == "1" ]] \
+     || command_text_needs_access_recovery_operator_input_01 "$action_command_text" "BRIDGE_SERVICE_CONFIG" --config-json; then
+    if [[ -n "${runtime_access_recovery_bridge_service_config:-}" ]]; then
+      cmd+=(--access-recovery-bridge-service-config "$runtime_access_recovery_bridge_service_config")
+    else
+      cmd+=(--access-recovery-bridge-service-config "BRIDGE_SERVICE_CONFIG")
+      placeholder_tokens+=("BRIDGE_SERVICE_CONFIG")
+    fi
   fi
-  if [[ -n "${runtime_access_recovery_bridge_deploy_pack:-}" ]]; then
-    cmd+=(--access-recovery-bridge-deploy-pack "$runtime_access_recovery_bridge_deploy_pack")
-  else
-    cmd+=(--access-recovery-bridge-deploy-pack "BRIDGE_DEPLOY_PACK")
+  if [[ "$needs_full_real_helper_inputs" == "1" ]] \
+     || command_text_needs_access_recovery_operator_input_01 "$action_command_text" "BRIDGE_DEPLOY_PACK" --deploy-pack-dir; then
+    if [[ -n "${runtime_access_recovery_bridge_deploy_pack:-}" ]]; then
+      cmd+=(--access-recovery-bridge-deploy-pack "$runtime_access_recovery_bridge_deploy_pack")
+    else
+      cmd+=(--access-recovery-bridge-deploy-pack "BRIDGE_DEPLOY_PACK")
+      placeholder_tokens+=("BRIDGE_DEPLOY_PACK")
+    fi
   fi
-  if [[ -n "${runtime_access_recovery_provenance_private_key_file:-}" ]]; then
-    cmd+=(--access-recovery-provenance-private-key-file "$runtime_access_recovery_provenance_private_key_file")
-  else
-    cmd+=(--access-recovery-provenance-private-key-file "PROVENANCE_PRIVATE_KEY_FILE")
+  if [[ "$needs_full_real_helper_inputs" == "1" ]] \
+     || command_text_needs_access_recovery_operator_input_01 "$action_command_text" "PROVENANCE_PRIVATE_KEY_FILE" --provenance-private-key-file; then
+    if [[ -n "${runtime_access_recovery_provenance_private_key_file:-}" ]]; then
+      cmd+=(--access-recovery-provenance-private-key-file "$runtime_access_recovery_provenance_private_key_file")
+    else
+      cmd+=(--access-recovery-provenance-private-key-file "PROVENANCE_PRIVATE_KEY_FILE")
+      placeholder_tokens+=("PROVENANCE_PRIVATE_KEY_FILE")
+    fi
   fi
-  if [[ -n "${runtime_access_recovery_reports_dir:-}" ]]; then
-    cmd+=(--access-recovery-reports-dir "$runtime_access_recovery_reports_dir")
+  if command_text_needs_access_recovery_operator_input_01 "$action_command_text" "ACCESS_RECOVERY_REPORTS_DIR" --reports-dir; then
+    if [[ -n "${runtime_access_recovery_reports_dir:-}" ]]; then
+      cmd+=(--access-recovery-reports-dir "$runtime_access_recovery_reports_dir")
+    else
+      cmd+=(--access-recovery-reports-dir "ACCESS_RECOVERY_REPORTS_DIR")
+      placeholder_tokens+=("ACCESS_RECOVERY_REPORTS_DIR")
+    fi
   fi
-  if [[ -n "${runtime_access_recovery_trust_store:-}" ]]; then
-    cmd+=(--access-recovery-trust-store "$runtime_access_recovery_trust_store")
-  else
-    cmd+=(--access-recovery-trust-store "REPLACE_WITH_TRUST_STORE")
+  if command_text_needs_access_recovery_operator_input_01 "$action_command_text" "ACCESS_RECOVERY_INSTALL_DIR" --install-dir; then
+    if [[ -n "${runtime_access_recovery_install_dir:-}" ]]; then
+      cmd+=(--access-recovery-install-dir "$runtime_access_recovery_install_dir")
+    else
+      cmd+=(--access-recovery-install-dir "ACCESS_RECOVERY_INSTALL_DIR")
+      placeholder_tokens+=("ACCESS_RECOVERY_INSTALL_DIR")
+    fi
   fi
-  if [[ -n "${runtime_access_recovery_mtls_ca:-}" ]]; then
-    cmd+=(--access-recovery-mtls-ca "$runtime_access_recovery_mtls_ca")
-  else
-    cmd+=(--access-recovery-mtls-ca "REPLACE_WITH_MTLS_CA_FILE")
+  if command_text_needs_access_recovery_operator_input_01 "$action_command_text" "ACCESS_RECOVERY_SYSTEMD_UNIT_FILE" --systemd-unit-file; then
+    if [[ -n "${runtime_access_recovery_systemd_unit_file:-}" ]]; then
+      cmd+=(--access-recovery-systemd-unit-file "$runtime_access_recovery_systemd_unit_file")
+    else
+      cmd+=(--access-recovery-systemd-unit-file "ACCESS_RECOVERY_SYSTEMD_UNIT_FILE")
+      placeholder_tokens+=("ACCESS_RECOVERY_SYSTEMD_UNIT_FILE")
+    fi
   fi
-  if [[ -n "${runtime_access_recovery_mtls_client_cert:-}" ]]; then
-    cmd+=(--access-recovery-mtls-client-cert "$runtime_access_recovery_mtls_client_cert")
-  else
-    cmd+=(--access-recovery-mtls-client-cert "REPLACE_WITH_MTLS_CLIENT_CERT_FILE")
+  if command_text_needs_access_recovery_operator_input_01 "$action_command_text" "ACCESS_RECOVERY_PROXY_KIND" --proxy-kind; then
+    if [[ -n "${runtime_access_recovery_proxy_kind:-}" ]]; then
+      cmd+=(--access-recovery-proxy-kind "$runtime_access_recovery_proxy_kind")
+    else
+      cmd+=(--access-recovery-proxy-kind "ACCESS_RECOVERY_PROXY_KIND")
+      placeholder_tokens+=("ACCESS_RECOVERY_PROXY_KIND")
+    fi
   fi
-  if [[ -n "${runtime_access_recovery_mtls_client_key:-}" ]]; then
-    cmd+=(--access-recovery-mtls-client-key "$runtime_access_recovery_mtls_client_key")
-  else
-    cmd+=(--access-recovery-mtls-client-key "REPLACE_WITH_MTLS_CLIENT_KEY_FILE")
+  if command_text_needs_access_recovery_operator_input_01 "$action_command_text" "ACCESS_RECOVERY_PROXY_CONFIG_FILE" --proxy-config-file; then
+    if [[ -n "${runtime_access_recovery_proxy_config_file:-}" ]]; then
+      cmd+=(--access-recovery-proxy-config-file "$runtime_access_recovery_proxy_config_file")
+    else
+      cmd+=(--access-recovery-proxy-config-file "ACCESS_RECOVERY_PROXY_CONFIG_FILE")
+      placeholder_tokens+=("ACCESS_RECOVERY_PROXY_CONFIG_FILE")
+    fi
+  fi
+  if action_id_is_access_recovery_trusted_verify_01 "$action_id" \
+     || command_text_needs_access_recovery_operator_input_01 "$action_command_text" "TRUST_STORE" --trust-store; then
+    if [[ -n "${runtime_access_recovery_trust_store:-}" ]]; then
+      cmd+=(--access-recovery-trust-store "$runtime_access_recovery_trust_store")
+    else
+      cmd+=(--access-recovery-trust-store "REPLACE_WITH_TRUST_STORE")
+      placeholder_tokens+=("TRUST_STORE")
+    fi
+  fi
+  if command_text_needs_access_recovery_operator_input_01 "$action_command_text" "MTLS_CA_FILE" --cacert; then
+    if [[ -n "${runtime_access_recovery_mtls_ca:-}" ]]; then
+      cmd+=(--access-recovery-mtls-ca "$runtime_access_recovery_mtls_ca")
+    else
+      cmd+=(--access-recovery-mtls-ca "REPLACE_WITH_MTLS_CA_FILE")
+      placeholder_tokens+=("MTLS_CA_FILE")
+    fi
+  fi
+  if command_text_needs_access_recovery_operator_input_01 "$action_command_text" "MTLS_CLIENT_CERT_FILE" --client-cert; then
+    if [[ -n "${runtime_access_recovery_mtls_client_cert:-}" ]]; then
+      cmd+=(--access-recovery-mtls-client-cert "$runtime_access_recovery_mtls_client_cert")
+    else
+      cmd+=(--access-recovery-mtls-client-cert "REPLACE_WITH_MTLS_CLIENT_CERT_FILE")
+      placeholder_tokens+=("MTLS_CLIENT_CERT_FILE")
+    fi
+  fi
+  if command_text_needs_access_recovery_operator_input_01 "$action_command_text" "MTLS_CLIENT_KEY_FILE" --client-key; then
+    if [[ -n "${runtime_access_recovery_mtls_client_key:-}" ]]; then
+      cmd+=(--access-recovery-mtls-client-key "$runtime_access_recovery_mtls_client_key")
+    else
+      cmd+=(--access-recovery-mtls-client-key "REPLACE_WITH_MTLS_CLIENT_KEY_FILE")
+      placeholder_tokens+=("MTLS_CLIENT_KEY_FILE")
+    fi
   fi
   cmd+=(--print-summary-json "${print_summary_json:-1}")
-  printf '%s # replace Access Recovery placeholders with concrete operator values: HELPER_PUBLIC_DNS HELPER_ID PRIVATE_CODE_FILE BRIDGE_SERVICE_CONFIG BRIDGE_DEPLOY_PACK PROVENANCE_PRIVATE_KEY_FILE ORG_ID ORG_NAME MTLS_CA_FILE MTLS_CLIENT_CERT_FILE MTLS_CLIENT_KEY_FILE' \
-    "$(render_command_line_from_argv "${cmd[@]}")"
+  for placeholder_token in "${placeholder_tokens[@]}"; do
+    case " $replacement_tokens " in
+      *" $placeholder_token "*) ;;
+      *) replacement_tokens="${replacement_tokens}${replacement_tokens:+ }${placeholder_token}" ;;
+    esac
+  done
+  if [[ -n "$replacement_tokens" ]]; then
+    printf '%s # replace Access Recovery placeholders with concrete operator values: %s' \
+      "$(render_command_line_from_argv "${cmd[@]}")" \
+      "$replacement_tokens"
+  else
+    render_command_line_from_argv "${cmd[@]}"
+  fi
 }
 
 write_access_recovery_operator_inputs_precondition_log_01() {
@@ -2968,9 +3146,19 @@ allow_unsafe_shell_commands="${ROADMAP_NEXT_ACTIONS_RUN_ALLOW_UNSAFE_SHELL_COMMA
 profile_default_gate_default_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC:-2400}"
 access_recovery_default_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_DEFAULT_TIMEOUT_SEC:-1800}"
 
-# Next-actions execution must never inherit a diagnostic plan-only override:
-# a planned real-helper evidence run exits 0 but does not collect evidence.
+# Next-actions execution must never inherit diagnostic/test hook overrides:
+# planned or child-script-overridden real-helper runs can exit 0 without
+# collecting authoritative pilot handoff evidence.
 unset ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_PLAN_ONLY
+unset ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_ROADMAP_REFRESH
+unset ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_ALLOW_SCRIPT_OVERRIDES
+unset ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT
+unset ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT
+unset ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SERVICE_SMOKE_SCRIPT
+unset ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_DEPLOYMENT_EVIDENCE_SCRIPT
+unset ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_HOST_INSTALL_CHECK_SCRIPT
+unset ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT
+unset ROADMAP_PROGRESS_REPORT_SCRIPT
 host_a_override_arg=""
 host_b_override_arg=""
 campaign_subject_override_arg=""
@@ -4295,14 +4483,14 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         "$action_preflight_notes" \
         "$action_preflight_next_operator_action"
     elif [[ "$action_preflight_failure_kind" == "missing_access_recovery_operator_input_precondition" ]]; then
-      action_preflight_next_operator_action="$(build_access_recovery_operator_inputs_operator_command_01 "$action_id")"
+      action_preflight_next_operator_action="$(build_access_recovery_operator_inputs_operator_command_01 "$action_id" "$action_command")"
       write_access_recovery_operator_inputs_precondition_log_01 \
         "$action_log" \
         "$action_command_redacted" \
         "$action_preflight_notes" \
         "$action_preflight_next_operator_action"
     elif [[ "$action_preflight_failure_kind" == "access_recovery_no_evidence_mode" ]]; then
-      action_preflight_next_operator_action="$(build_access_recovery_operator_inputs_operator_command_01 "$action_id")"
+      action_preflight_next_operator_action="$(build_access_recovery_operator_inputs_operator_command_01 "$action_id" "$action_command")"
       {
         echo "failure_kind=access_recovery_no_evidence_mode"
         echo "$action_preflight_notes"

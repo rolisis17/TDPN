@@ -70,6 +70,15 @@ unset ACCESS_RECOVERY_MTLS_CA
 unset ACCESS_RECOVERY_MTLS_CLIENT_CERT
 unset ACCESS_RECOVERY_MTLS_CLIENT_KEY
 unset ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_PLAN_ONLY
+unset ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_ROADMAP_REFRESH
+unset ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_ALLOW_SCRIPT_OVERRIDES
+unset ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT
+unset ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT
+unset ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SERVICE_SMOKE_SCRIPT
+unset ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_DEPLOYMENT_EVIDENCE_SCRIPT
+unset ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_HOST_INSTALL_CHECK_SCRIPT
+unset ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT
+unset ROADMAP_PROGRESS_REPORT_SCRIPT
 unset CAMPAIGN_SUBJECT
 unset INVITE_KEY
 unset MTLS_CA_FILE
@@ -174,6 +183,21 @@ if [[ -n "${ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_PLAN_ONLY:-}" ]]; then
   echo "plan-only override leaked into action environment"
   exit 42
 fi
+for leaked_var in \
+  ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_ROADMAP_REFRESH \
+  ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_ALLOW_SCRIPT_OVERRIDES \
+  ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SERVICE_SMOKE_SCRIPT \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_DEPLOYMENT_EVIDENCE_SCRIPT \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_HOST_INSTALL_CHECK_SCRIPT \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT \
+  ROADMAP_PROGRESS_REPORT_SCRIPT; do
+  if [[ -n "${!leaked_var:-}" ]]; then
+    echo "${leaked_var} leaked into action environment"
+    exit 42
+  fi
+done
 echo "plan env isolated"
 EOF_PLAN_ENV_CHECK
 chmod +x "$PLAN_ENV_CHECK"
@@ -859,6 +883,24 @@ JSON
 {
   "next_actions": [
     {"id":"access_bridge_installed_host_evidence","label":"Access bridge installed-host evidence","command":"bash \"$PASS1\" --evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --config-json BRIDGE_SERVICE_CONFIG --expected-base-url https://HELPER_PUBLIC_DNS --summary-json /tmp/access_bridge_host_install_check_summary.json","reason":"test-installed-host-operator-placeholders"}
+  ]
+}
+JSON
+    ;;
+  access_recovery_installed_host_optional_placeholders)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"access_bridge_installed_host_evidence","label":"Access bridge installed-host evidence","command":"bash \"$PASS1\" --evidence-mode installed-host --install-dir ACCESS_RECOVERY_INSTALL_DIR --systemd-unit-file ACCESS_RECOVERY_SYSTEMD_UNIT_FILE --proxy-kind ACCESS_RECOVERY_PROXY_KIND --proxy-config-file ACCESS_RECOVERY_PROXY_CONFIG_FILE --config-json BRIDGE_SERVICE_CONFIG --expected-base-url https://HELPER_PUBLIC_DNS --summary-json /tmp/access_bridge_host_install_check_summary.json","reason":"test-installed-host-optional-placeholders"}
+  ]
+}
+JSON
+    ;;
+  access_recovery_installed_host_empty_optional_inputs)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"access_bridge_installed_host_evidence","label":"Access bridge installed-host evidence","command":"bash \"$PASS1\" --evidence-mode installed-host --install-dir \"\" --systemd-unit-file= --proxy-kind \"\" --proxy-config-file= --config-json BRIDGE_SERVICE_CONFIG --expected-base-url https://HELPER_PUBLIC_DNS --summary-json /tmp/access_bridge_host_install_check_summary.json","reason":"test-installed-host-empty-optional-inputs"}
   ]
 }
 JSON
@@ -1858,6 +1900,15 @@ SUMMARY_ACCESS_RECOVERY_PLAN_ENV_ISOLATION="$TMP_DIR/summary_access_recovery_pla
 REPORTS_ACCESS_RECOVERY_PLAN_ENV_ISOLATION="$TMP_DIR/reports_access_recovery_plan_env_isolation"
 set +e
 ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_PLAN_ONLY=1 \
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_ROADMAP_REFRESH=0 \
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_ALLOW_SCRIPT_OVERRIDES=1 \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT=/tmp/fake_host_install.sh \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT=/tmp/fake_bundle.sh \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SERVICE_SMOKE_SCRIPT=/tmp/fake_service_smoke.sh \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_DEPLOYMENT_EVIDENCE_SCRIPT=/tmp/fake_deployment_evidence.sh \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_HOST_INSTALL_CHECK_SCRIPT=/tmp/fake_bundle_host_install.sh \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT=/tmp/fake_verify.sh \
+ROADMAP_PROGRESS_REPORT_SCRIPT=/tmp/fake_roadmap.sh \
 ROADMAP_NEXT_ACTIONS_SCENARIO=real_helper_plan_env_isolation \
 PLAN_ENV_CHECK="$PLAN_ENV_CHECK" \
 ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
@@ -2187,6 +2238,7 @@ if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
   and (.actions[0].command | contains("HELPER_PUBLIC_DNS"))
   and (.actions[0].next_operator_action | contains("--include-id real_helper_https_evidence"))
   and (.actions[0].next_operator_action | contains("HELPER_PUBLIC_DNS"))
+  and ((.actions[0].next_operator_action | contains("REPLACE_WITH_MTLS_CA_FILE")) | not)
 ' "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS" >/dev/null; then
   echo "Access Recovery unresolved operator placeholder precondition summary mismatch"
   cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS"
@@ -2656,9 +2708,91 @@ if ! jq -e '
   and (.actions[0].command | contains("--evidence-mode installed-host"))
   and (.actions[0].command | contains("HELPER_PUBLIC_DNS"))
   and (.actions[0].next_operator_action | contains("--include-id access_bridge_installed_host_evidence"))
+  and ((.actions[0].next_operator_action | contains("REPLACE_WITH_MTLS_CA_FILE")) | not)
+  and ((.actions[0].next_operator_action | contains("REPLACE_WITH_TRUST_STORE")) | not)
 ' "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_PLACEHOLDERS" >/dev/null; then
   echo "Access Recovery installed-host unresolved operator placeholder precondition summary mismatch"
   cat "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_PLACEHOLDERS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery installed-host next action includes optional host/proxy placeholders when needed"
+SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_OPTIONAL_PLACEHOLDERS="$TMP_DIR/summary_access_recovery_installed_host_optional_placeholders.json"
+REPORTS_ACCESS_RECOVERY_INSTALLED_HOST_OPTIONAL_PLACEHOLDERS="$TMP_DIR/reports_access_recovery_installed_host_optional_placeholders"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_installed_host_optional_placeholders \
+PASS1="$PASS1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_INSTALLED_HOST_OPTIONAL_PLACEHOLDERS" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_OPTIONAL_PLACEHOLDERS" \
+  --include-id access_bridge_installed_host_evidence \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_installed_host_optional_placeholders.log" 2>&1
+access_recovery_installed_host_optional_placeholders_rc=$?
+set -e
+if [[ "$access_recovery_installed_host_optional_placeholders_rc" != "2" ]]; then
+  echo "expected optional Access Recovery installed-host placeholder hard-fail rc=2, got rc=$access_recovery_installed_host_optional_placeholders_rc"
+  cat "$TMP_DIR/access_recovery_installed_host_optional_placeholders.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_OPTIONAL_PLACEHOLDERS" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_OPTIONAL_PLACEHOLDERS"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .actions[0].id == "access_bridge_installed_host_evidence"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
+  and (.actions[0].next_operator_action | contains("--access-recovery-install-dir ACCESS_RECOVERY_INSTALL_DIR"))
+  and (.actions[0].next_operator_action | contains("--access-recovery-systemd-unit-file ACCESS_RECOVERY_SYSTEMD_UNIT_FILE"))
+  and (.actions[0].next_operator_action | contains("--access-recovery-proxy-kind ACCESS_RECOVERY_PROXY_KIND"))
+  and (.actions[0].next_operator_action | contains("--access-recovery-proxy-config-file ACCESS_RECOVERY_PROXY_CONFIG_FILE"))
+  and ((.actions[0].next_operator_action | contains("REPLACE_WITH_MTLS_CA_FILE")) | not)
+  and ((.actions[0].next_operator_action | contains("REPLACE_WITH_TRUST_STORE")) | not)
+' "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_OPTIONAL_PLACEHOLDERS" >/dev/null; then
+  echo "Access Recovery installed-host optional placeholder next action summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_OPTIONAL_PLACEHOLDERS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery installed-host next action includes empty host/proxy operator inputs"
+SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_EMPTY_OPTIONAL_INPUTS="$TMP_DIR/summary_access_recovery_installed_host_empty_optional_inputs.json"
+REPORTS_ACCESS_RECOVERY_INSTALLED_HOST_EMPTY_OPTIONAL_INPUTS="$TMP_DIR/reports_access_recovery_installed_host_empty_optional_inputs"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_installed_host_empty_optional_inputs \
+PASS1="$PASS1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_INSTALLED_HOST_EMPTY_OPTIONAL_INPUTS" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_EMPTY_OPTIONAL_INPUTS" \
+  --include-id access_bridge_installed_host_evidence \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_installed_host_empty_optional_inputs.log" 2>&1
+access_recovery_installed_host_empty_optional_inputs_rc=$?
+set -e
+if [[ "$access_recovery_installed_host_empty_optional_inputs_rc" != "2" ]]; then
+  echo "expected empty Access Recovery installed-host operator input hard-fail rc=2, got rc=$access_recovery_installed_host_empty_optional_inputs_rc"
+  cat "$TMP_DIR/access_recovery_installed_host_empty_optional_inputs.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_EMPTY_OPTIONAL_INPUTS" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_EMPTY_OPTIONAL_INPUTS"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .actions[0].id == "access_bridge_installed_host_evidence"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
+  and (.actions[0].next_operator_action | contains("--access-recovery-install-dir ACCESS_RECOVERY_INSTALL_DIR"))
+  and (.actions[0].next_operator_action | contains("--access-recovery-systemd-unit-file ACCESS_RECOVERY_SYSTEMD_UNIT_FILE"))
+  and (.actions[0].next_operator_action | contains("--access-recovery-proxy-kind ACCESS_RECOVERY_PROXY_KIND"))
+  and (.actions[0].next_operator_action | contains("--access-recovery-proxy-config-file ACCESS_RECOVERY_PROXY_CONFIG_FILE"))
+  and ((.actions[0].next_operator_action | contains("REPLACE_WITH_MTLS_CA_FILE")) | not)
+  and ((.actions[0].next_operator_action | contains("REPLACE_WITH_TRUST_STORE")) | not)
+' "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_EMPTY_OPTIONAL_INPUTS" >/dev/null; then
+  echo "Access Recovery installed-host empty optional input next action summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_EMPTY_OPTIONAL_INPUTS"
   exit 1
 fi
 
@@ -2687,6 +2821,42 @@ if ! jq -e '
 ' "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_CONCRETE" >/dev/null; then
   echo "Access Recovery installed-host concrete action summary mismatch"
   cat "$SUMMARY_ACCESS_RECOVERY_INSTALLED_HOST_CONCRETE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery rejects unsupported installed-host proxy kind"
+SUMMARY_ACCESS_RECOVERY_PROXY_KIND_INVALID="$TMP_DIR/summary_access_recovery_proxy_kind_invalid.json"
+REPORTS_ACCESS_RECOVERY_PROXY_KIND_INVALID="$TMP_DIR/reports_access_recovery_proxy_kind_invalid"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_installed_host_concrete \
+PASS1="$PASS1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_PROXY_KIND_INVALID" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_PROXY_KIND_INVALID" \
+  --include-id access_bridge_installed_host_evidence \
+  --access-recovery-proxy-kind none \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_proxy_kind_invalid.log" 2>&1
+access_recovery_proxy_kind_invalid_rc=$?
+set -e
+if [[ "$access_recovery_proxy_kind_invalid_rc" != "2" ]]; then
+  echo "expected unsupported Access Recovery proxy-kind hard-fail rc=2, got rc=$access_recovery_proxy_kind_invalid_rc"
+  cat "$TMP_DIR/access_recovery_proxy_kind_invalid.log"
+  if [[ -f "$SUMMARY_ACCESS_RECOVERY_PROXY_KIND_INVALID" ]]; then
+    cat "$SUMMARY_ACCESS_RECOVERY_PROXY_KIND_INVALID"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .actions[0].id == "access_bridge_installed_host_evidence"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
+  and (.actions[0].notes | contains("ACCESS_RECOVERY_PROXY_KIND=cli:--access-recovery-proxy-kind:unsupported_proxy_kind"))
+' "$SUMMARY_ACCESS_RECOVERY_PROXY_KIND_INVALID" >/dev/null; then
+  echo "Access Recovery unsupported proxy-kind summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_PROXY_KIND_INVALID"
   exit 1
 fi
 
@@ -2752,6 +2922,10 @@ if ! jq -e '
   and (.actions[0].command | contains("--require-mtls 1"))
   and (.actions[0].command | contains("MTLS_CLIENT_CERT_FILE"))
   and (.actions[0].next_operator_action | contains("--include-id access_bridge_service_smoke"))
+  and (.actions[0].next_operator_action | contains("--access-recovery-mtls-ca REPLACE_WITH_MTLS_CA_FILE"))
+  and (.actions[0].next_operator_action | contains("--access-recovery-mtls-client-cert REPLACE_WITH_MTLS_CLIENT_CERT_FILE"))
+  and (.actions[0].next_operator_action | contains("--access-recovery-mtls-client-key REPLACE_WITH_MTLS_CLIENT_KEY_FILE"))
+  and ((.actions[0].next_operator_action | contains("REPLACE_WITH_TRUST_STORE")) | not)
 ' "$SUMMARY_ACCESS_RECOVERY_MTLS_PLACEHOLDERS" >/dev/null; then
   echo "Access Recovery unresolved mTLS placeholder precondition summary mismatch"
   cat "$SUMMARY_ACCESS_RECOVERY_MTLS_PLACEHOLDERS"
