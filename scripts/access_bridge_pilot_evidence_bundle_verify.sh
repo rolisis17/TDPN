@@ -1298,6 +1298,7 @@ write_verification_summary() {
         and $provenance_evidence_scope == "real_helper_https"
         and $summary_evidence_scope == "real_helper_https"
         and $bundled_child_evidence_semantic_ok
+        and $source_summary_sha256 != ""
         and $source_smoke_summary_sha256 != ""
         and $source_deployment_smoke_summary_sha256 != ""
         and $source_deployment_binding_smoke_summary_sha256 != ""
@@ -1376,6 +1377,7 @@ write_verification_summary() {
           source_helper_id_present: ($source_helper_id != ""),
           source_organization_id_present: ($source_organization_id != ""),
           source_registry_id_present: ($source_registry_id != ""),
+          source_summary_sha256_present: ($source_summary_sha256 != ""),
           provenance_organization_matches_evidence: ($provenance_organization_id != "" and $source_organization_id != "" and $provenance_organization_id == $source_organization_id),
           trusted_organization_matches_evidence: ($provenance_trusted_org_id != "" and $source_organization_id != "" and $provenance_trusted_org_id == $source_organization_id),
           bundled_child_evidence_semantic_ok: $bundled_child_evidence_semantic_ok,

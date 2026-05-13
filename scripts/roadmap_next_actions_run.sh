@@ -890,7 +890,7 @@ access_recovery_trust_store_content_is_dev_01() {
     def demo_marker:
       tostring
       | ascii_downcase
-      | test("(^|[^a-z0-9])(generated-demo|helper-demo|freenews-demo|demo)([^a-z0-9]|$)");
+      | test("(^|[^a-z0-9])(generated[-_](demo|example)|helper[-_](demo|example)|freenews[-_](demo|example)|demo|example)([^a-z0-9]|$)");
     [
       (.trusted_keys[]?, .keys[]?)
       | [
@@ -909,8 +909,11 @@ access_recovery_trust_store_content_is_dev_01() {
       | select(
           demo_marker
           or (ascii_downcase | contains("generated demo bundle"))
+          or (ascii_downcase | contains("generated example bundle"))
           or (ascii_downcase | contains("demo handoff"))
+          or (ascii_downcase | contains("example handoff"))
           or (ascii_downcase | contains("demo bundle"))
+          or (ascii_downcase | contains("example bundle"))
         )
     ]
     | length > 0

@@ -996,6 +996,7 @@ jq \
     | .provenance.sidecar_json = $provenance_json' \
   "$SUMMARY_JSON" >"$INSTALLED_HOST_SUMMARY_JSON"
 cp "$INSTALLED_HOST_SUMMARY_JSON" "$INSTALLED_HOST_DIR/access_bridge_pilot_evidence_bundle_summary.json"
+INSTALLED_HOST_SOURCE_SUMMARY_SHA256="$(sha256sum "$INSTALLED_HOST_DIR/access_bridge_pilot_evidence_bundle_summary.json" | awk '{print $1}')"
 (
   cd "$INSTALLED_HOST_DIR"
   find . -type f -print \
@@ -1035,6 +1036,7 @@ if [[ "$installed_host_verify_rc" -ne 0 ]]; then
   exit 1
 fi
 if ! jq -e \
+  --arg source_summary_sha256 "$INSTALLED_HOST_SOURCE_SUMMARY_SHA256" \
   --arg host_summary_sha256 "$INSTALLED_HOST_SUMMARY_SHA256" '
     .status == "pass"
     and .rc == 0
@@ -1047,7 +1049,9 @@ if ! jq -e \
     and .pilot_handoff_criteria.deployment_smoke_summary_sha256_matches_bundle == true
     and .pilot_handoff_criteria.evidence_freshness_ok == true
     and .pilot_handoff_criteria.installed_host_evidence_present == true
+    and .pilot_handoff_criteria.source_summary_sha256_present == true
     and .evidence_freshness.ok == true
+    and .evidence_binding.source_summary_sha256 == $source_summary_sha256
     and .evidence_binding.deployment_smoke_summary_sha256 == "'"$SMOKE_SUMMARY_SHA256"'"
     and .evidence_binding.deployment_evidence_binding_smoke_summary_sha256 == "'"$SMOKE_SUMMARY_SHA256"'"
     and .evidence_binding.host_install_check_summary_sha256 == $host_summary_sha256

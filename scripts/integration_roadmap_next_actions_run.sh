@@ -2270,6 +2270,58 @@ if ! jq -e '
   exit 1
 fi
 
+echo "[roadmap-next-actions-run] Access Recovery trusted verifier rejects copied example trust stores"
+for access_recovery_example_trust_store_case in \
+  'generated_example|{"trusted_keys":[{"source":"generated example bundle"}]}' \
+  'freenews_example_identity|{"trusted_keys":[{"source":"pilot registry","org_id":"freenews-example","name":"FreeNews Example","helper_id":"helper-example"}]}'
+do
+  IFS='|' read -r example_trust_store_name example_trust_store_json <<<"$access_recovery_example_trust_store_case"
+  SUMMARY_ACCESS_RECOVERY_TRUST_STORE_EXAMPLE="$TMP_DIR/summary_access_recovery_trust_store_${example_trust_store_name}.json"
+  REPORTS_ACCESS_RECOVERY_TRUST_STORE_EXAMPLE="$TMP_DIR/reports_access_recovery_trust_store_${example_trust_store_name}"
+  ACCESS_RECOVERY_EXAMPLE_TRUST_STORE_FILE="$TMP_DIR/access_recovery_${example_trust_store_name}_trust_store.json"
+  printf '%s\n' "$example_trust_store_json" >"$ACCESS_RECOVERY_EXAMPLE_TRUST_STORE_FILE"
+  rm -f "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE"
+  set +e
+  ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_trust_store_placeholder \
+  FAKE_ACCESS_RECOVERY_VERIFY="$FAKE_ACCESS_RECOVERY_VERIFY" \
+  FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE="$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" \
+  ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+  bash ./scripts/roadmap_next_actions_run.sh \
+    --reports-dir "$REPORTS_ACCESS_RECOVERY_TRUST_STORE_EXAMPLE" \
+    --summary-json "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_EXAMPLE" \
+    --include-id trusted_pilot_evidence_verify \
+    --access-recovery-trust-store "$ACCESS_RECOVERY_EXAMPLE_TRUST_STORE_FILE" \
+    --print-summary-json 0 >"$TMP_DIR/access_recovery_trust_store_${example_trust_store_name}.log" 2>&1
+  access_recovery_trust_store_example_rc=$?
+  set -e
+  if [[ "$access_recovery_trust_store_example_rc" != "2" ]]; then
+    echo "expected example Access Recovery trust-store hard-fail rc=2, got rc=$access_recovery_trust_store_example_rc case=$example_trust_store_name"
+    cat "$TMP_DIR/access_recovery_trust_store_${example_trust_store_name}.log"
+    if [[ -f "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_EXAMPLE" ]]; then
+      cat "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_EXAMPLE"
+    fi
+    exit 1
+  fi
+  if [[ -f "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" ]]; then
+    echo "Access Recovery verifier ran despite example operator trust-store case=$example_trust_store_name"
+    cat "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE"
+    exit 1
+  fi
+  if ! jq -e '
+    .status == "fail"
+    and .rc == 2
+    and .inputs.access_recovery_trust_store_configured == false
+    and (.inputs.access_recovery_trust_store_source | contains("demo_marked"))
+    and .actions[0].id == "trusted_pilot_evidence_verify"
+    and .actions[0].status == "fail"
+    and .actions[0].failure_kind == "missing_access_recovery_trust_store_precondition"
+  ' "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_EXAMPLE" >/dev/null; then
+    echo "Access Recovery example trust-store precondition summary mismatch case=$example_trust_store_name"
+    cat "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_EXAMPLE"
+    exit 1
+  fi
+done
+
 echo "[roadmap-next-actions-run] Access Recovery trusted verifier rejects raw public-key handoff"
 SUMMARY_ACCESS_RECOVERY_PUBLIC_KEY_HANDOFF="$TMP_DIR/summary_access_recovery_public_key_handoff.json"
 REPORTS_ACCESS_RECOVERY_PUBLIC_KEY_HANDOFF="$TMP_DIR/reports_access_recovery_public_key_handoff"
