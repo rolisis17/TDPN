@@ -376,6 +376,20 @@ is_real_host_validation_gap_item() {
   return 1
 }
 
+is_access_recovery_gap_item() {
+  local normalized_text="${1:-}"
+  if [[ "$normalized_text" == *"access recovery"* \
+     || "$normalized_text" == *"access-recovery"* \
+     || "$normalized_text" == *"trusted verifier receipt"* \
+     || "$normalized_text" == *"trusted_pilot_receipt_ready"* \
+     || "$normalized_text" == *"verifier_pilot_handoff_ready"* \
+     || "$normalized_text" == *"pilot handoff"* \
+     || "$normalized_text" == *"pilot_handoff_ready"* ]]; then
+    return 0
+  fi
+  return 1
+}
+
 infer_item_actionable() {
   local section="${1:-}"
   local normalized_text="${2:-}"
@@ -418,6 +432,10 @@ infer_item_recommended_action() {
   local normalized_text="${2:-}"
   if is_informational_gap_item "$normalized_text"; then
     printf '%s' "No direct closure action; use this note as operator guidance for related roadmap blockers."
+    return
+  fi
+  if is_access_recovery_gap_item "$normalized_text"; then
+    printf '%s' "Complete Access Recovery real-helper evidence and trusted verifier receipt, then refresh roadmap handoff state."
     return
   fi
   local reservation_signal="0"
@@ -544,6 +562,7 @@ infer_item_closure_mode() {
      || "$normalized_text" == *"vm command"* \
      || "$normalized_text" == *"--vm-command"* \
      || "$normalized_text" == *"multi-vm"* ]] \
+     || is_access_recovery_gap_item "$normalized_text" \
      || is_real_host_validation_gap_item "$normalized_text"; then
     printf '%s' "real_host_required"
     return
@@ -576,6 +595,7 @@ infer_item_blocked_by() {
     return
   fi
   if [[ "$normalized_text" == *"unresolved placeholder"* \
+     || "$normalized_text" == *"placeholder_unresolved=true"* \
      || "$normalized_text" == *"invite_key"* \
      || "$normalized_text" == *"campaign-subject"* \
      || "$normalized_text" == *"a_host"* \
@@ -634,6 +654,21 @@ infer_item_blocked_by() {
   fi
   if is_auth_wallet_gap_item "$normalized_text"; then
     blockers+=("wallet_extension_evidence")
+  fi
+  if is_access_recovery_gap_item "$normalized_text"; then
+    blockers+=("access_recovery_handoff")
+    if [[ "$normalized_text" == *"real helper"* \
+       || "$normalized_text" == *"real-helper"* \
+       || "$normalized_text" == *"https"* \
+       || "$normalized_text" == *"installed-host"* \
+       || "$normalized_text" == *"installed host"* ]]; then
+      blockers+=("real_helper_evidence")
+    fi
+    if [[ "$normalized_text" == *"trusted verifier"* \
+       || "$normalized_text" == *"trusted_pilot_receipt_ready"* \
+       || "$normalized_text" == *"verifier_pilot_handoff_ready"* ]]; then
+      blockers+=("trusted_verifier_receipt")
+    fi
   fi
   if ! is_auth_wallet_gap_item "$normalized_text" && [[ "$normalized_text" == *"admin console"* \
      || "$normalized_text" == *"admin"* \
@@ -711,6 +746,10 @@ infer_item_suggested_tests() {
   fi
   if is_profile_default_subject_gap_item "$normalized_text"; then
     tests+=("scripts/integration_client_vpn_path_profile_wiring.sh")
+  fi
+  if is_access_recovery_gap_item "$normalized_text"; then
+    tests+=("scripts/access_recovery_real_helper_evidence_run.sh")
+    tests+=("scripts/access_bridge_pilot_evidence_bundle_verify.sh")
   fi
   if [[ "$normalized_text" == *"vm command"* \
      || "$normalized_text" == *"--vm-command"* \
@@ -809,9 +848,17 @@ infer_item_suggested_files() {
   if [[ "$normalized_text" == *"roadmap"* \
      || "$normalized_text" == *"promotion"* \
      || "$normalized_text" == *"evidence pack"* \
-     || "$normalized_text" == *"evidence-pack"* ]]; then
+     || "$normalized_text" == *"evidence-pack"* ]] \
+     || is_access_recovery_gap_item "$normalized_text"; then
     files+=("docs/global-privacy-mesh-track.md")
     files+=("docs/product-roadmap.md")
+  fi
+  if is_access_recovery_gap_item "$normalized_text"; then
+    files+=("docs/access-recovery-toolkit-track.md")
+    files+=("docs/access-recovery-operator-runbook.md")
+    files+=("scripts/access_recovery_real_helper_evidence_run.sh")
+    files+=("scripts/access_bridge_pilot_evidence_bundle_verify.sh")
+    files+=("scripts/roadmap_progress_report.sh")
   fi
   if [[ "$normalized_text" == *"profile-default"* \
      || "$normalized_text" == *"profile compare"* \
@@ -949,6 +996,15 @@ print_json_string_array() {
   printf ']'
 }
 
+print_json_bool_or_null() {
+  local value="${1:-}"
+  if [[ "$value" == "true" || "$value" == "false" ]]; then
+    printf '%s' "$value"
+  else
+    printf 'null'
+  fi
+}
+
 while IFS= read -r line || [[ -n "$line" ]]; do
   line_number=$((line_number + 1))
   line="${line%$'\r'}"
@@ -1007,9 +1063,73 @@ if [[ "$saw_missing_next" != "1" ]]; then
   fail_closed "required heading not found: Missing / Next"
 fi
 
+roadmap_access_recovery_present="false"
+access_recovery_track_status=""
+access_recovery_pilot_handoff_ready="unknown"
+access_recovery_track_pilot_handoff_ready="unknown"
+access_recovery_needs_attention="unknown"
+access_recovery_trusted_verifier_receipt_valid="unknown"
+access_recovery_trusted_pilot_receipt_ready="unknown"
+access_recovery_verifier_pilot_handoff_ready="unknown"
+access_recovery_operator_next_action_source=""
+access_recovery_operator_next_action_id=""
+access_recovery_operator_next_action_command=""
+access_recovery_operator_next_action_reason=""
+access_recovery_operator_next_action_placeholder_unresolved="unknown"
+access_recovery_operator_next_action_placeholder_keys=""
+access_recovery_operator_next_action_safe_to_execute="unknown"
+
 if [[ -n "$roadmap_summary_json" ]]; then
   if ! jq -e 'type == "object"' "$roadmap_summary_json" >/dev/null 2>&1; then
     fail_closed "roadmap summary JSON is malformed: $roadmap_summary_json"
+  fi
+
+  roadmap_access_recovery_present="$(jq -r '(.access_recovery_track | type) == "object"' "$roadmap_summary_json")"
+  if [[ "$roadmap_access_recovery_present" == "true" ]]; then
+    access_recovery_track_status="$(jq -r '.access_recovery_track.status // "unknown"' "$roadmap_summary_json")"
+    access_recovery_pilot_handoff_ready="$(jq -r 'if (.access_recovery_pilot_handoff_ready | type) == "boolean" then .access_recovery_pilot_handoff_ready elif (.access_recovery_track.pilot_handoff_ready | type) == "boolean" then .access_recovery_track.pilot_handoff_ready else "unknown" end' "$roadmap_summary_json")"
+    access_recovery_track_pilot_handoff_ready="$(jq -r 'if (.access_recovery_track.pilot_handoff_ready | type) == "boolean" then .access_recovery_track.pilot_handoff_ready else "unknown" end' "$roadmap_summary_json")"
+    access_recovery_needs_attention="$(jq -r 'if (.access_recovery_track.needs_attention | type) == "boolean" then .access_recovery_track.needs_attention else "unknown" end' "$roadmap_summary_json")"
+    access_recovery_trusted_verifier_receipt_valid="$(jq -r 'if (.access_recovery_track.trusted_verifier_receipt_valid | type) == "boolean" then .access_recovery_track.trusted_verifier_receipt_valid elif (.access_recovery_track.trusted_verifier_ready | type) == "boolean" then .access_recovery_track.trusted_verifier_ready else "unknown" end' "$roadmap_summary_json")"
+    access_recovery_trusted_pilot_receipt_ready="$(jq -r 'if (.access_recovery_track.trusted_pilot_receipt_ready | type) == "boolean" then .access_recovery_track.trusted_pilot_receipt_ready else "unknown" end' "$roadmap_summary_json")"
+    access_recovery_verifier_pilot_handoff_ready="$(jq -r 'if (.access_recovery_track.verifier_pilot_handoff_ready | type) == "boolean" then .access_recovery_track.verifier_pilot_handoff_ready else "unknown" end' "$roadmap_summary_json")"
+    access_recovery_operator_next_action_source="$(jq -r 'if ((.access_recovery_track.preferred_operator_next_action.command // "") != "") then "preferred_operator_next_action" elif ((.access_recovery_track.recommended_next_action.command // "") != "") then "recommended_next_action" else "" end' "$roadmap_summary_json")"
+    if [[ -n "$access_recovery_operator_next_action_source" ]]; then
+      access_recovery_operator_next_action_id="$(jq -r --arg source "$access_recovery_operator_next_action_source" '.access_recovery_track[$source].id // ""' "$roadmap_summary_json")"
+      access_recovery_operator_next_action_command="$(jq -r --arg source "$access_recovery_operator_next_action_source" '.access_recovery_track[$source].command // ""' "$roadmap_summary_json")"
+      access_recovery_operator_next_action_reason="$(jq -r --arg source "$access_recovery_operator_next_action_source" '.access_recovery_track[$source].reason // ""' "$roadmap_summary_json")"
+      access_recovery_operator_next_action_placeholder_unresolved="$(jq -r --arg source "$access_recovery_operator_next_action_source" 'if (.access_recovery_track[$source].placeholder_unresolved | type) == "boolean" then .access_recovery_track[$source].placeholder_unresolved else "unknown" end' "$roadmap_summary_json")"
+      access_recovery_operator_next_action_placeholder_keys="$(jq -r --arg source "$access_recovery_operator_next_action_source" '[.access_recovery_track[$source].placeholder_keys[]?] | join(",")' "$roadmap_summary_json")"
+      access_recovery_operator_next_action_safe_to_execute="$(jq -r --arg source "$access_recovery_operator_next_action_source" 'if (.access_recovery_track[$source].safe_to_execute_as_is | type) == "boolean" then .access_recovery_track[$source].safe_to_execute_as_is else "unknown" end' "$roadmap_summary_json")"
+    fi
+    if [[ "$access_recovery_pilot_handoff_ready" != "true" \
+       || "$access_recovery_trusted_verifier_receipt_valid" != "true" \
+       || "$access_recovery_trusted_pilot_receipt_ready" != "true" \
+       || "$access_recovery_verifier_pilot_handoff_ready" != "true" \
+       || "$access_recovery_needs_attention" == "true" ]]; then
+      access_recovery_gap_text="Roadmap Access Recovery handoff state is not ready (status=${access_recovery_track_status:-unknown}, access_recovery_pilot_handoff_ready=${access_recovery_pilot_handoff_ready}, access_recovery_track.pilot_handoff_ready=${access_recovery_track_pilot_handoff_ready}, trusted_verifier_receipt_valid=${access_recovery_trusted_verifier_receipt_valid}, trusted_pilot_receipt_ready=${access_recovery_trusted_pilot_receipt_ready}, verifier_pilot_handoff_ready=${access_recovery_verifier_pilot_handoff_ready}); trusted verifier receipt remains the handoff authority."
+      if [[ -n "$access_recovery_operator_next_action_command" ]]; then
+        access_recovery_gap_text+=" Operator next action (${access_recovery_operator_next_action_source}"
+        if [[ -n "$access_recovery_operator_next_action_id" ]]; then
+          access_recovery_gap_text+="/${access_recovery_operator_next_action_id}"
+        fi
+        access_recovery_gap_text+="): ${access_recovery_operator_next_action_command}"
+        if [[ -n "$access_recovery_operator_next_action_reason" ]]; then
+          access_recovery_gap_text+=" Reason: ${access_recovery_operator_next_action_reason}"
+        fi
+        if [[ "$access_recovery_operator_next_action_placeholder_unresolved" == "true" ]]; then
+          access_recovery_gap_text+=" placeholder_unresolved=true"
+          if [[ -n "$access_recovery_operator_next_action_placeholder_keys" ]]; then
+            access_recovery_gap_text+=" (${access_recovery_operator_next_action_placeholder_keys})"
+          fi
+        fi
+        if [[ "$access_recovery_operator_next_action_safe_to_execute" == "false" ]]; then
+          access_recovery_gap_text+=" safe_to_execute_as_is=false"
+        fi
+        access_recovery_gap_text+="."
+      fi
+      append_gap_item "missing_next" "$access_recovery_gap_text"
+    fi
   fi
 
   profile_unresolved_placeholders="$(jq -r '.vpn_track.profile_default_gate.unresolved_placeholders // false' "$roadmap_summary_json")"
@@ -1102,6 +1222,55 @@ done
   fi
   printf '    "reports_dir": "%s",\n' "$(json_escape "$reports_dir")"
   printf '    "summary_json": "%s"\n' "$(json_escape "$summary_json")"
+  printf '  },\n'
+  printf '  "roadmap_status": {\n'
+  printf '    "access_recovery": '
+  if [[ "$roadmap_access_recovery_present" == "true" ]]; then
+    printf '{\n'
+    printf '      "status": "%s",\n' "$(json_escape "${access_recovery_track_status:-unknown}")"
+    printf '      "access_recovery_pilot_handoff_ready": '
+    print_json_bool_or_null "$access_recovery_pilot_handoff_ready"
+    printf ',\n'
+    printf '      "track_pilot_handoff_ready": '
+    print_json_bool_or_null "$access_recovery_track_pilot_handoff_ready"
+    printf ',\n'
+    printf '      "needs_attention": '
+    print_json_bool_or_null "$access_recovery_needs_attention"
+    printf ',\n'
+    printf '      "trusted_verifier_receipt_valid": '
+    print_json_bool_or_null "$access_recovery_trusted_verifier_receipt_valid"
+    printf ',\n'
+    printf '      "trusted_pilot_receipt_ready": '
+    print_json_bool_or_null "$access_recovery_trusted_pilot_receipt_ready"
+    printf ',\n'
+    printf '      "verifier_pilot_handoff_ready": '
+    print_json_bool_or_null "$access_recovery_verifier_pilot_handoff_ready"
+    printf ',\n'
+    printf '      "operator_next_action": '
+    if [[ -n "$access_recovery_operator_next_action_command" ]]; then
+      printf '{\n'
+      printf '        "source": "%s",\n' "$(json_escape "$access_recovery_operator_next_action_source")"
+      printf '        "id": "%s",\n' "$(json_escape "$access_recovery_operator_next_action_id")"
+      printf '        "command": "%s",\n' "$(json_escape "$access_recovery_operator_next_action_command")"
+      printf '        "reason": "%s",\n' "$(json_escape "$access_recovery_operator_next_action_reason")"
+      printf '        "placeholder_unresolved": '
+      print_json_bool_or_null "$access_recovery_operator_next_action_placeholder_unresolved"
+      printf ',\n'
+      printf '        "placeholder_keys": '
+      print_json_string_array "$access_recovery_operator_next_action_placeholder_keys"
+      printf ',\n'
+      printf '        "safe_to_execute_as_is": '
+      print_json_bool_or_null "$access_recovery_operator_next_action_safe_to_execute"
+      printf '\n'
+      printf '      }\n'
+    else
+      printf 'null\n'
+    fi
+    printf '    }'
+  else
+    printf 'null'
+  fi
+  printf '\n'
   printf '  },\n'
   printf '  "counts": {\n'
   printf '    "in_progress": %d,\n' "$in_progress_count"

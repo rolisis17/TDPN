@@ -2082,13 +2082,21 @@ FAKE_ACCESS_RECOVERY_REAL_HELPER_ROADMAP_READY=false \
   --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/roadmap-not-ready-summary.json" \
   --print-summary-json 0 >/dev/null
+roadmap_not_ready_rc=$?
+set -e
+if [[ "$roadmap_not_ready_rc" -eq 0 ]]; then
+  echo "expected roadmap access_recovery_pilot_handoff_ready=false to fail closed"
+  cat "$TMP_DIR/roadmap-not-ready-summary.json"
+  exit 1
+fi
 if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "4" ]]; then
   echo "expected host-check, bundle, verifier, and roadmap when roadmap is not ready"
   cat "$CAPTURE"
   exit 1
 fi
 if ! jq -e '
-  .status == "pass"
+  .status == "fail"
+  and .rc == 1
   and .stage == "status_refresh_mismatch"
   and .mode.evidence_generated == true
   and .mode.evidence_status == "collected_status_refresh_mismatch"
@@ -2099,8 +2107,61 @@ if ! jq -e '
   and .readiness.trusted_verifier_pilot_handoff_ready == true
   and .readiness.roadmap_access_recovery_pilot_handoff_ready == false
 ' "$TMP_DIR/roadmap-not-ready-summary.json" >/dev/null; then
-  echo "expected roadmap access_recovery_pilot_handoff_ready=false to preserve verifier authority but mark status refresh mismatch"
+  echo "expected roadmap access_recovery_pilot_handoff_ready=false to preserve verifier authority but fail closed"
   cat "$TMP_DIR/roadmap-not-ready-summary.json"
+  exit 1
+fi
+
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_ROADMAP_RC=7 \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/roadmap-refresh-failed-summary.json" \
+  --print-summary-json 0 >/dev/null
+roadmap_refresh_failed_rc=$?
+set -e
+if [[ "$roadmap_refresh_failed_rc" -eq 0 ]]; then
+  echo "expected roadmap refresh command failure to fail closed"
+  cat "$TMP_DIR/roadmap-refresh-failed-summary.json"
+  exit 1
+fi
+if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "4" ]]; then
+  echo "expected host-check, bundle, verifier, and roadmap when roadmap refresh fails"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .stage == "status_refresh_failed"
+  and .mode.evidence_generated == true
+  and .mode.evidence_status == "collected_status_refresh_failed"
+  and .readiness.handoff_authority_ready == true
+  and .readiness.handoff_complete == true
+  and .readiness.status_rollup_complete == false
+  and .readiness.roadmap_status_synced == false
+  and .readiness.trusted_verifier_pilot_handoff_ready == true
+  and .readiness.roadmap_access_recovery_pilot_handoff_ready == true
+' "$TMP_DIR/roadmap-refresh-failed-summary.json" >/dev/null; then
+  echo "expected roadmap refresh command failure to preserve verifier authority but fail closed"
+  cat "$TMP_DIR/roadmap-refresh-failed-summary.json"
   exit 1
 fi
 

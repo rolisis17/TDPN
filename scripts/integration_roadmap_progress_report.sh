@@ -1646,7 +1646,9 @@ if ! jq -e \
   exit 1
 fi
 
-ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_installed_host_summary.json"
+ACCESS_BRIDGE_INSTALLED_SOURCE_DIR="$TMP_DIR/access_bridge_installed_source"
+mkdir -p "$ACCESS_BRIDGE_INSTALLED_SOURCE_DIR"
+ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON="$ACCESS_BRIDGE_INSTALLED_SOURCE_DIR/access_bridge_host_install_check_summary.json"
 jq '
   .schema.minor = 5
   | .inputs.evidence_mode = "installed-host"
@@ -1701,7 +1703,7 @@ jq '
   | .summary.checks_total = (.checks | length)
 ' "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" >"$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON"
 ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_SHA256="$(sha256sum "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" | awk '{print $1}')"
-ACCESS_BRIDGE_INSTALLED_BUNDLE_SOURCE_SUMMARY_JSON="$TMP_DIR/access_bridge_installed_host_pilot_evidence_bundle_summary.json"
+ACCESS_BRIDGE_INSTALLED_BUNDLE_SOURCE_SUMMARY_JSON="$ACCESS_BRIDGE_INSTALLED_SOURCE_DIR/access_bridge_pilot_evidence_bundle_summary.json"
 cat >"$ACCESS_BRIDGE_INSTALLED_BUNDLE_SOURCE_SUMMARY_JSON" <<EOF_ACCESS_BRIDGE_INSTALLED_BUNDLE_SOURCE_SUMMARY
 {
   "version": 1,
@@ -1874,6 +1876,7 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.source_summary_sha256 == "0000000000000000000000000000000000000000000000000000000000000000"
   and .access_recovery_track.trusted_verifier_ready == false
   and .access_recovery_track.trusted_pilot_receipt_ready == false
+  and .access_recovery_track.verifier_pilot_handoff_ready == false
   and .access_recovery_track.trusted_verifier_binding.ok == false
   and .access_recovery_track.trusted_verifier_binding.source_summary_sha256_match == false
   and .access_recovery_track.trusted_verifier_binding.smoke_summary_sha256_match == true
@@ -1887,6 +1890,14 @@ if ! jq -e '
 fi
 
 echo "[roadmap-progress-report] Access Recovery rejects verifier receipts with unresolvable source summaries"
+ACCESS_BRIDGE_NO_SOURCE_BINDING_DIR="$ACCESS_BRIDGE_SOURCE_BINDING_DIR/no-current-source"
+mkdir -p "$ACCESS_BRIDGE_NO_SOURCE_BINDING_DIR"
+ACCESS_BRIDGE_NO_SOURCE_SMOKE_SUMMARY_JSON="$ACCESS_BRIDGE_NO_SOURCE_BINDING_DIR/access_bridge_service_smoke_summary.json"
+ACCESS_BRIDGE_NO_SOURCE_DEPLOYMENT_SUMMARY_JSON="$ACCESS_BRIDGE_NO_SOURCE_BINDING_DIR/access_bridge_deployment_evidence_summary.json"
+ACCESS_BRIDGE_NO_SOURCE_HOST_INSTALL_SUMMARY_JSON="$ACCESS_BRIDGE_NO_SOURCE_BINDING_DIR/access_bridge_host_install_check_summary.json"
+cp "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" "$ACCESS_BRIDGE_NO_SOURCE_SMOKE_SUMMARY_JSON"
+cp "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" "$ACCESS_BRIDGE_NO_SOURCE_DEPLOYMENT_SUMMARY_JSON"
+cp "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" "$ACCESS_BRIDGE_NO_SOURCE_HOST_INSTALL_SUMMARY_JSON"
 ACCESS_BRIDGE_MISSING_SOURCE_BIND_VERIFY_SUMMARY_JSON="$ACCESS_BRIDGE_SOURCE_BINDING_DIR/access_bridge_missing_source_pilot_evidence_bundle_verify_summary.json"
 jq \
   --arg source_summary_json "$ACCESS_BRIDGE_SOURCE_BINDING_DIR/missing_access_bridge_pilot_evidence_bundle_summary.json" \
@@ -1897,9 +1908,9 @@ if ! run_roadmap_progress_report \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
   --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
-  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
-  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
-  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_NO_SOURCE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_NO_SOURCE_DEPLOYMENT_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_NO_SOURCE_HOST_INSTALL_SUMMARY_JSON" \
   --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_MISSING_SOURCE_BIND_VERIFY_SUMMARY_JSON" \
   --summary-json "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_missing_source_binding_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_missing_source_binding_report.md" \
@@ -1917,6 +1928,7 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.semantic_ok == true
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.resolved_source_summary_sha256 == null
   and .access_recovery_track.trusted_verifier_ready == false
+  and .access_recovery_track.verifier_pilot_handoff_ready == false
   and .access_recovery_track.trusted_verifier_binding.ok == false
   and .access_recovery_track.trusted_verifier_binding.source_summary_sha256_match == false
   and .access_recovery_track.trusted_verifier_binding.smoke_summary_sha256_match == true
@@ -1927,7 +1939,7 @@ if ! jq -e '
   exit 1
 fi
 
-echo "[roadmap-progress-report] Access Recovery verifier source binding falls back from bad artifact path to valid input path"
+echo "[roadmap-progress-report] Access Recovery rejects verifier source binding that only resolves through receipt input path"
 ACCESS_BRIDGE_FALLBACK_SOURCE_BIND_VERIFY_SUMMARY_JSON="$ACCESS_BRIDGE_SOURCE_BINDING_DIR/access_bridge_fallback_source_pilot_evidence_bundle_verify_summary.json"
 jq \
   --arg bad_source_summary_json "$ACCESS_BRIDGE_SOURCE_BINDING_DIR/missing_artifact_source_summary.json" \
@@ -1939,30 +1951,32 @@ if ! run_roadmap_progress_report \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
   --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
-  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
-  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
-  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_NO_SOURCE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_NO_SOURCE_DEPLOYMENT_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_NO_SOURCE_HOST_INSTALL_SUMMARY_JSON" \
   --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_FALLBACK_SOURCE_BIND_VERIFY_SUMMARY_JSON" \
   --summary-json "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_fallback_source_binding_summary.json" \
   --report-md "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_fallback_source_binding_report.md" \
   --print-report 0 \
   --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_trusted_verifier_fallback_source_binding.log 2>&1; then
-  echo "expected success for verifier receipt with valid source summary in inputs"
+  echo "expected success with warning for verifier receipt whose source only resolves through receipt input"
   cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_trusted_verifier_fallback_source_binding.log
   exit 1
 fi
 if ! jq -e \
   --arg source_summary_sha256 "$ACCESS_BRIDGE_INSTALLED_BUNDLE_SOURCE_SUMMARY_SHA256" '
   .status == "warn"
-  and .access_recovery_pilot_handoff_ready == true
-  and .access_recovery_track.status == "pilot-evidence-ready"
+  and .access_recovery_pilot_handoff_ready == false
+  and .access_recovery_track.status == "trusted-provenance-required"
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available == true
   and .access_recovery_track.access_bridge_pilot_evidence_bundle_verify.details.resolved_source_summary_sha256 == $source_summary_sha256
-  and .access_recovery_track.trusted_verifier_ready == true
-  and .access_recovery_track.trusted_verifier_binding.ok == true
-  and .access_recovery_track.trusted_verifier_binding.source_summary_sha256_match == true
+  and .access_recovery_track.trusted_verifier_ready == false
+  and .access_recovery_track.verifier_pilot_handoff_ready == false
+  and .access_recovery_track.trusted_verifier_binding.ok == false
+  and .access_recovery_track.trusted_verifier_binding.source_summary_sha256_match == false
+  and .access_recovery_track.recommended_next_action.id == "trusted_pilot_evidence_verify"
 ' "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_fallback_source_binding_summary.json" >/dev/null; then
-  echo "Access Recovery verifier source binding fallback summary mismatch"
+  echo "Access Recovery verifier self-referential source binding summary mismatch"
   cat "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_fallback_source_binding_summary.json"
   exit 1
 fi

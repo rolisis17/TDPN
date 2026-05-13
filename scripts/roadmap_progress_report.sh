@@ -2999,10 +2999,7 @@ access_recovery_track_json_from_evidence() {
         {
           source_summary_sha256_match: (
             ($bundle_verify.details.source_summary_sha256 // "") as $claimed_source_sha256
-            | ([
-                $bundle_artifacts.summary_sha256,
-                $bundle_verify.details.resolved_source_summary_sha256
-              ]
+            | ([$bundle_artifacts.summary_sha256]
               | map(select((. // "") != ""))
               | unique) as $source_summary_hashes
             | if ($bundle_verify.available == true) then
@@ -3238,7 +3235,8 @@ access_recovery_track_json_from_evidence() {
         and ($bundle_verify.details.pilot_handoff_criteria_provenance_organization_matches_evidence == true)
         and ($bundle_verify.details.pilot_handoff_criteria_trusted_organization_matches_evidence == true)
         and ($bundle_verify.details.pilot_handoff_criteria_dev_trust_store_allowed != true)
-        and ($bundle_verify.details.allow_dev_trust_store != true);
+        and ($bundle_verify.details.allow_dev_trust_store != true)
+        and (verifier_binding.ok == true);
       def pilot_handoff_ready:
         installed_host_handoff_evidence
         and trusted_pilot_receipt_ready

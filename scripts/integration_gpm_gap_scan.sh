@@ -183,6 +183,112 @@ assert_file_contains "$ROADMAP_SUMMARY_JSON" '"suggested_tests": ["scripts/integ
 assert_file_contains "$ROADMAP_SUMMARY_JSON" '"suggested_tests": ["scripts/integration_3machine_prod_wg_validate.sh"]' "roadmap-aware summary missing multi-vm suggested test"
 assert_file_contains "$ROADMAP_STDOUT" "## Missing / Next (7)" "roadmap-aware markdown missing expanded missing/next count"
 
+echo "[gpm-gap-scan] access recovery roadmap handoff state is surfaced"
+ACCESS_RECOVERY_STATUS_DOC="$TMP_DIR/access_recovery_status.md"
+ACCESS_RECOVERY_ROADMAP_INPUT="$TMP_DIR/access_recovery_roadmap.json"
+ACCESS_RECOVERY_SUMMARY_JSON="$TMP_DIR/access_recovery_summary.json"
+ACCESS_RECOVERY_STDOUT="$TMP_DIR/access_recovery_stdout.md"
+
+cat >"$ACCESS_RECOVERY_STATUS_DOC" <<'EOF_ACCESS_RECOVERY_STATUS'
+# Access Recovery Fixture
+
+## In-Progress
+- Access Recovery local rehearsal is wired.
+
+## Missing / Next
+- Keep the pilot handoff state visible.
+EOF_ACCESS_RECOVERY_STATUS
+
+cat >"$ACCESS_RECOVERY_ROADMAP_INPUT" <<'EOF_ACCESS_RECOVERY_ROADMAP'
+{
+  "access_recovery_pilot_handoff_ready": false,
+  "access_recovery_track": {
+    "status": "installed-host-evidence-required",
+    "pilot_handoff_ready": false,
+    "needs_attention": true,
+    "trusted_verifier_receipt_valid": false,
+    "trusted_pilot_receipt_ready": false,
+    "verifier_pilot_handoff_ready": false,
+    "preferred_operator_next_action": {
+      "id": "trusted_verifier_receipt",
+      "command": "./scripts/easy_node.sh access-recovery-real-helper-evidence-run --trust-store TRUST_STORE",
+      "reason": "Write the trusted verifier receipt before pilot handoff",
+      "placeholder_unresolved": true,
+      "placeholder_keys": ["TRUST_STORE"],
+      "safe_to_execute_as_is": false
+    },
+    "recommended_next_action": {
+      "id": "fallback_recommended",
+      "command": "should-not-be-used"
+    }
+  }
+}
+EOF_ACCESS_RECOVERY_ROADMAP
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$ACCESS_RECOVERY_STATUS_DOC" \
+  --roadmap-summary-json "$ACCESS_RECOVERY_ROADMAP_INPUT" \
+  --summary-json "$ACCESS_RECOVERY_SUMMARY_JSON" \
+  --print-summary-json 0 >"$ACCESS_RECOVERY_STDOUT"
+
+assert_file_matches_regex "$ACCESS_RECOVERY_SUMMARY_JSON" '"missing_next"[[:space:]]*:[[:space:]]*6' "access recovery roadmap should add handoff blocker plus fail-closed vpn blockers"
+assert_file_matches_regex "$ACCESS_RECOVERY_SUMMARY_JSON" '"total"[[:space:]]*:[[:space:]]*7' "access recovery roadmap total count mismatch"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"roadmap_status": {' "access recovery summary missing roadmap_status object"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"access_recovery": {' "access recovery summary missing access_recovery status object"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"status": "installed-host-evidence-required"' "access recovery status not extracted"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"access_recovery_pilot_handoff_ready": false' "access recovery root handoff readiness not extracted"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"trusted_verifier_receipt_valid": false' "access recovery trusted verifier receipt validity not extracted"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"trusted_pilot_receipt_ready": false' "access recovery trusted pilot receipt readiness not extracted"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"verifier_pilot_handoff_ready": false' "access recovery verifier handoff readiness not extracted"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"source": "preferred_operator_next_action"' "access recovery preferred operator action not selected"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"command": "./scripts/easy_node.sh access-recovery-real-helper-evidence-run --trust-store TRUST_STORE"' "access recovery preferred command not extracted"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"placeholder_keys": ["TRUST_STORE"]' "access recovery placeholder keys not extracted"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" 'Roadmap Access Recovery handoff state is not ready (status=installed-host-evidence-required, access_recovery_pilot_handoff_ready=false' "access recovery handoff blocker text missing"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" 'Operator next action (preferred_operator_next_action/trusted_verifier_receipt): ./scripts/easy_node.sh access-recovery-real-helper-evidence-run --trust-store TRUST_STORE' "access recovery operator next action missing from blocker text"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"recommended_action": "Complete Access Recovery real-helper evidence and trusted verifier receipt, then refresh roadmap handoff state."' "access recovery recommended action classification missing"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"blocked_by": ["unresolved_placeholders", "access_recovery_handoff", "real_helper_evidence", "trusted_verifier_receipt"]' "access recovery blocker metadata missing"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"suggested_tests": ["scripts/access_recovery_real_helper_evidence_run.sh", "scripts/access_bridge_pilot_evidence_bundle_verify.sh"]' "access recovery suggested tests missing"
+assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/global-privacy-mesh-track.md", "docs/product-roadmap.md", "docs/access-recovery-toolkit-track.md", "docs/access-recovery-operator-runbook.md", "scripts/access_recovery_real_helper_evidence_run.sh", "scripts/access_bridge_pilot_evidence_bundle_verify.sh", "scripts/roadmap_progress_report.sh"]' "access recovery suggested files missing"
+assert_file_contains "$ACCESS_RECOVERY_STDOUT" "## Missing / Next (6)" "access recovery markdown missing expanded missing/next count"
+
+echo "[gpm-gap-scan] access recovery ready roadmap state does not add a blocker"
+ACCESS_RECOVERY_READY_INPUT="$TMP_DIR/access_recovery_ready_roadmap.json"
+ACCESS_RECOVERY_READY_SUMMARY_JSON="$TMP_DIR/access_recovery_ready_summary.json"
+
+cat >"$ACCESS_RECOVERY_READY_INPUT" <<'EOF_ACCESS_RECOVERY_READY'
+{
+  "access_recovery_pilot_handoff_ready": true,
+  "access_recovery_track": {
+    "status": "pilot-handoff-ready",
+    "pilot_handoff_ready": true,
+    "needs_attention": false,
+    "trusted_verifier_receipt_valid": true,
+    "trusted_pilot_receipt_ready": true,
+    "verifier_pilot_handoff_ready": true,
+    "recommended_next_action": {
+      "id": "archive_receipt",
+      "command": "archive trusted verifier receipt"
+    }
+  }
+}
+EOF_ACCESS_RECOVERY_READY
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$ACCESS_RECOVERY_STATUS_DOC" \
+  --roadmap-summary-json "$ACCESS_RECOVERY_READY_INPUT" \
+  --summary-json "$ACCESS_RECOVERY_READY_SUMMARY_JSON" \
+  --print-summary-json 0 >/dev/null
+
+assert_file_matches_regex "$ACCESS_RECOVERY_READY_SUMMARY_JSON" '"missing_next"[[:space:]]*:[[:space:]]*5' "ready access recovery roadmap should not add a handoff blocker"
+assert_file_contains "$ACCESS_RECOVERY_READY_SUMMARY_JSON" '"status": "pilot-handoff-ready"' "ready access recovery status not extracted"
+assert_file_contains "$ACCESS_RECOVERY_READY_SUMMARY_JSON" '"access_recovery_pilot_handoff_ready": true' "ready access recovery handoff readiness not extracted"
+assert_file_contains "$ACCESS_RECOVERY_READY_SUMMARY_JSON" '"source": "recommended_next_action"' "ready access recovery recommended action source not extracted"
+if grep -F "Roadmap Access Recovery handoff state is not ready" "$ACCESS_RECOVERY_READY_SUMMARY_JSON" >/dev/null 2>&1; then
+  echo "ready access recovery roadmap should not add not-ready blocker"
+  cat "$ACCESS_RECOVERY_READY_SUMMARY_JSON"
+  exit 1
+fi
+
 echo "[gpm-gap-scan] missing roadmap fields fail closed"
 MISSING_FIELDS_STATUS_DOC="$TMP_DIR/missing_fields_status.md"
 MISSING_FIELDS_INPUT="$TMP_DIR/missing_fields_roadmap.json"

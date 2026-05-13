@@ -939,7 +939,7 @@ write_summary() {
       ) | tostring
     else "false" end
   ')"
-  if [[ "$status" == "pass" && "$receipt_validation_passed" == "true" && "$verifier_claimed_pilot_ready" == "true" ]]; then
+  if [[ "$receipt_validation_passed" == "true" && "$verifier_claimed_pilot_ready" == "true" ]]; then
     pilot_ready="true"
   else
     pilot_ready="false"
@@ -952,7 +952,7 @@ write_summary() {
   else
     handoff_complete="false"
   fi
-  if [[ "$pilot_ready" == "true" && "$roadmap_ready" == "true" ]]; then
+  if [[ "$status" == "pass" && "$pilot_ready" == "true" && "$roadmap_ready" == "true" ]]; then
     status_rollup_complete="true"
   else
     status_rollup_complete="false"
@@ -1042,15 +1042,15 @@ write_summary() {
         child_execution_skipped: ($plan_only and $stage == "plan"),
         evidence_generated: (
           if $plan_only then false
-          else ($status == "pass" and ($stage == "complete" or $stage == "verifier_ready" or $stage == "status_refresh_failed" or $stage == "status_refresh_mismatch"))
+          else ($stage == "complete" or $stage == "verifier_ready" or $stage == "status_refresh_failed" or $stage == "status_refresh_mismatch")
           end
         ),
         evidence_status: (
           if $plan_only then "planned_non_evidence"
-          elif ($status == "pass" and $stage == "complete") then "collected"
-          elif ($status == "pass" and $stage == "status_refresh_failed") then "collected_status_refresh_failed"
-          elif ($status == "pass" and $stage == "status_refresh_mismatch") then "collected_status_refresh_mismatch"
-          elif ($status == "pass" and $stage == "verifier_ready") then "verifier_ready"
+          elif $stage == "complete" then "collected"
+          elif $stage == "status_refresh_failed" then "collected_status_refresh_failed"
+          elif $stage == "status_refresh_mismatch" then "collected_status_refresh_mismatch"
+          elif $stage == "verifier_ready" then "verifier_ready"
           else "not_collected"
           end
         )
@@ -1617,20 +1617,20 @@ if [[ "$roadmap_refresh" == "1" ]]; then
   roadmap_rc=$?
   set -e
   if [[ "$roadmap_rc" -ne 0 ]]; then
-    write_summary "pass" 0 "status_refresh_failed" "Trusted verifier receipt marked pilot_handoff_ready=true; roadmap refresh failed, so status roll-up was not synced"
+    write_summary "fail" 1 "status_refresh_failed" "Trusted verifier receipt marked pilot_handoff_ready=true, but roadmap refresh failed; status roll-up was not synced"
     print_failure_log_tail "roadmap" "$roadmap_log"
-    echo "access-recovery-real-helper-evidence-run: status=pass stage=status_refresh_failed evidence_status=collected_status_refresh_failed"
+    echo "access-recovery-real-helper-evidence-run: status=fail stage=status_refresh_failed evidence_status=collected_status_refresh_failed"
     echo "summary_json: $summary_json"
     [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
-    exit 0
+    exit 1
   fi
   roadmap_ready="$(jq -r '.access_recovery_pilot_handoff_ready // false | tostring' "$roadmap_summary_json" 2>/dev/null || printf '%s' "false")"
   if [[ "$roadmap_ready" != "true" ]]; then
-    write_summary "pass" 0 "status_refresh_mismatch" "Trusted verifier receipt marked pilot_handoff_ready=true; roadmap status did not mark Access Recovery pilot handoff ready"
-    echo "access-recovery-real-helper-evidence-run: status=pass stage=status_refresh_mismatch evidence_status=collected_status_refresh_mismatch"
+    write_summary "fail" 1 "status_refresh_mismatch" "Trusted verifier receipt marked pilot_handoff_ready=true, but roadmap status did not mark Access Recovery pilot handoff ready"
+    echo "access-recovery-real-helper-evidence-run: status=fail stage=status_refresh_mismatch evidence_status=collected_status_refresh_mismatch"
     echo "summary_json: $summary_json"
     [[ "$print_summary_json" == "1" ]] && cat "$summary_json"
-    exit 0
+    exit 1
   fi
 fi
 
