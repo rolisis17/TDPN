@@ -86,6 +86,8 @@ Defaults:
   --access-recovery-mtls-client-key ""   (operator supplied only; precedence: CLI > ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_KEY > ACCESS_RECOVERY_MTLS_CLIENT_KEY > MTLS_CLIENT_KEY_FILE)
   profile_default_gate default timeout sec: 2400
     (env ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC)
+  Access Recovery default timeout sec: 1800
+    (env ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_DEFAULT_TIMEOUT_SEC)
   --refresh-manual-validation 0
   --refresh-single-machine-readiness 0
   --parallel 0
@@ -126,6 +128,8 @@ Exit behavior:
     real subject value is available from the configured override/env fallback.
   - With global --action-timeout-sec=0, profile_default_gate gets a default
     per-action timeout from ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC.
+  - With global --action-timeout-sec=0, Access Recovery actions get a default
+    per-action timeout from ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_DEFAULT_TIMEOUT_SEC.
   - With --allow-profile-default-gate-unreachable=1, profile_default_gate can
     soft-fail on unreachable endpoint logs or missing invite-subject precondition logs.
 USAGE
@@ -2962,6 +2966,7 @@ print_summary_json="${ROADMAP_NEXT_ACTIONS_RUN_PRINT_SUMMARY_JSON:-1}"
 action_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_ACTION_TIMEOUT_SEC:-0}"
 allow_unsafe_shell_commands="${ROADMAP_NEXT_ACTIONS_RUN_ALLOW_UNSAFE_SHELL_COMMANDS:-0}"
 profile_default_gate_default_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC:-2400}"
+access_recovery_default_timeout_sec="${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_DEFAULT_TIMEOUT_SEC:-1800}"
 
 # Next-actions execution must never inherit a diagnostic plan-only override:
 # a planned real-helper evidence run exits 0 but does not collect evidence.
@@ -3326,8 +3331,13 @@ bool_arg_or_die "--allow-unsafe-shell-commands" "$allow_unsafe_shell_commands"
 int_arg_or_die "--max-actions" "$max_actions"
 int_arg_or_die "--action-timeout-sec" "$action_timeout_sec"
 int_arg_or_die "ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC" "$profile_default_gate_default_timeout_sec"
+int_arg_or_die "ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_DEFAULT_TIMEOUT_SEC" "$access_recovery_default_timeout_sec"
 if (( profile_default_gate_default_timeout_sec < 1 )); then
   echo "ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC must be >= 1"
+  exit 2
+fi
+if (( access_recovery_default_timeout_sec < 1 )); then
+  echo "ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_DEFAULT_TIMEOUT_SEC must be >= 1"
   exit 2
 fi
 
@@ -4040,7 +4050,22 @@ if [[ "$runtime_vm_command_source_configured" != "1" ]]; then
   fi
 fi
 selected_has_profile_default_gate="$(printf '%s\n' "$selected_actions_json" | jq -r 'any(.[]; (.id // "") == "profile_default_gate")')"
+selected_has_access_recovery_action="$(printf '%s\n' "$selected_actions_json" | jq -r '
+  any(.[]; ((.id // "") as $id | [
+    "access_recovery_evidence",
+    "trusted_pilot_evidence_verify",
+    "real_helper_https_evidence",
+    "access_bridge_service_smoke",
+    "access_bridge_deployment_evidence",
+    "access_bridge_host_install",
+    "access_bridge_installed_host_evidence",
+    "access_bridge_pilot_evidence_bundle"
+  ] | index($id) != null))
+')"
 if [[ "$selected_has_profile_default_gate" == "true" && "$action_timeout_sec" == "0" ]]; then
+  need_cmd timeout
+fi
+if [[ "$selected_has_access_recovery_action" == "true" && "$action_timeout_sec" == "0" ]]; then
   need_cmd timeout
 fi
 
@@ -4108,6 +4133,8 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   action_timeout_sec_effective="$action_timeout_sec"
   if [[ "$action_id" == "profile_default_gate" && "$action_timeout_sec" == "0" ]]; then
     action_timeout_sec_effective="$profile_default_gate_default_timeout_sec"
+  elif action_id_is_access_recovery_action_01 "$action_id" && [[ "$action_timeout_sec" == "0" ]]; then
+    action_timeout_sec_effective="$access_recovery_default_timeout_sec"
   fi
   if action_id_is_profile_default_family "$action_id"; then
     action_command="$(
@@ -4769,6 +4796,7 @@ jq -n \
   --argjson allow_empty_actions "$allow_empty_actions" \
   --argjson local_only "$local_only" \
   --argjson profile_default_gate_default_timeout_sec "$profile_default_gate_default_timeout_sec" \
+  --argjson access_recovery_default_timeout_sec "$access_recovery_default_timeout_sec" \
   --argjson action_timeout_sec "$action_timeout_sec" \
   --argjson allow_unsafe_shell_commands "$allow_unsafe_shell_commands" \
   --argjson actions_count "$actions_count" \
@@ -4856,6 +4884,7 @@ jq -n \
       access_recovery_mtls_client_key_configured: ($runtime_access_recovery_mtls_client_key_configured == 1),
       access_recovery_mtls_client_key_source: (if $runtime_access_recovery_mtls_client_key_source == "" then null else $runtime_access_recovery_mtls_client_key_source end),
       profile_default_gate_default_timeout_sec: $profile_default_gate_default_timeout_sec,
+      access_recovery_default_timeout_sec: $access_recovery_default_timeout_sec,
       profile_default_gate_subject: (if $profile_default_gate_subject_configured == 1 then $profile_default_gate_subject_redacted else null end),
       profile_default_gate_subject_configured: ($profile_default_gate_subject_configured == 1),
       allow_profile_default_gate_unreachable: ($allow_profile_default_gate_unreachable == 1),

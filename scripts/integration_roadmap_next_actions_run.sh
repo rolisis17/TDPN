@@ -40,6 +40,7 @@ unset ROADMAP_NEXT_ACTIONS_RUN_MAX_ACTIONS
 unset ROADMAP_NEXT_ACTIONS_RUN_PARALLEL
 unset ROADMAP_NEXT_ACTIONS_RUN_PRE_EXEC_REVALIDATE_DELAY_SEC
 unset ROADMAP_NEXT_ACTIONS_RUN_PRINT_SUMMARY_JSON
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_DEFAULT_TIMEOUT_SEC
 unset ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_DEFAULT_TIMEOUT_SEC
 unset ROADMAP_NEXT_ACTIONS_RUN_PROFILE_DEFAULT_GATE_SUBJECT
 unset ROADMAP_NEXT_ACTIONS_RUN_REFRESH_MANUAL_VALIDATION
@@ -1881,12 +1882,43 @@ if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
   and .rc == 0
   and .inputs.access_recovery_trust_store == $trust_store
   and .inputs.access_recovery_trust_store_configured == true
+  and .inputs.action_timeout_sec == 0
+  and .inputs.access_recovery_default_timeout_sec == 1800
   and .actions[0].id == "real_helper_https_evidence"
   and .actions[0].status == "pass"
   and .actions[0].rc == 0
+  and .actions[0].timeout_sec == 1800
 ' "$SUMMARY_ACCESS_RECOVERY_PLAN_ENV_ISOLATION" >/dev/null; then
   echo "Access Recovery plan-only env isolation summary mismatch"
   cat "$SUMMARY_ACCESS_RECOVERY_PLAN_ENV_ISOLATION"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery explicit action timeout overrides default"
+SUMMARY_ACCESS_RECOVERY_TIMEOUT_OVERRIDE="$TMP_DIR/summary_access_recovery_timeout_override.json"
+REPORTS_ACCESS_RECOVERY_TIMEOUT_OVERRIDE="$TMP_DIR/reports_access_recovery_timeout_override"
+ROADMAP_NEXT_ACTIONS_SCENARIO=real_helper_plan_env_isolation \
+PLAN_ENV_CHECK="$PLAN_ENV_CHECK" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_TIMEOUT_OVERRIDE" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_TIMEOUT_OVERRIDE" \
+  --include-id real_helper_https_evidence \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+  --action-timeout-sec 7 \
+  --print-summary-json 0
+
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.action_timeout_sec == 7
+  and .inputs.access_recovery_default_timeout_sec == 1800
+  and .actions[0].id == "real_helper_https_evidence"
+  and .actions[0].status == "pass"
+  and .actions[0].timeout_sec == 7
+' "$SUMMARY_ACCESS_RECOVERY_TIMEOUT_OVERRIDE" >/dev/null; then
+  echo "Access Recovery action-timeout override summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_TIMEOUT_OVERRIDE"
   exit 1
 fi
 
