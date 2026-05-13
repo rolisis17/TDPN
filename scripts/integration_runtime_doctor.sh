@@ -13,7 +13,8 @@ done
 
 TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
-mkdir -p "$TMP_BIN"
+TMP_ID_BIN="$TMP_DIR/idbin"
+mkdir -p "$TMP_BIN" "$TMP_ID_BIN"
 EXTRA_CLEANUP_PATHS=()
 
 cleanup() {
@@ -90,6 +91,30 @@ EOF_DOCKER
 
 chmod +x "$TMP_BIN/ip" "$TMP_BIN/ss" "$TMP_BIN/docker"
 
+cat >"$TMP_ID_BIN/id" <<'EOF_ID'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  -un)
+    printf 'dracsis\n'
+    ;;
+  -u)
+    printf '1000\n'
+    ;;
+  -gn)
+    printf 'id: cannot find name for group ID 197121\n' >&2
+    exit 1
+    ;;
+  -g)
+    printf '197121\n'
+    ;;
+  *)
+    exec /usr/bin/id "$@"
+    ;;
+esac
+EOF_ID
+chmod +x "$TMP_ID_BIN/id"
+
 extract_json_payload() {
   local log_file="$1"
   awk '/^\[runtime-doctor\] summary_json_payload:/{flag=1; next} flag{print}' "$log_file"
@@ -119,6 +144,38 @@ fi
 if ! extract_json_payload /tmp/integration_runtime_doctor_ok.log | jq -e '.status == "OK" and .summary.findings_total == 0' >/dev/null 2>&1; then
   echo "runtime doctor OK JSON payload missing expected fields"
   cat /tmp/integration_runtime_doctor_ok.log
+  exit 1
+fi
+
+echo "[runtime-doctor] unnamed current group falls back to numeric gid"
+UNNAMED_GROUP_DIR="$TMP_DIR/unnamed_group"
+mkdir -p "$UNNAMED_GROUP_DIR/logs" "$UNNAMED_GROUP_DIR/client_vpn" "$UNNAMED_GROUP_DIR/wg_only"
+touch "$UNNAMED_GROUP_DIR/client.env" "$UNNAMED_GROUP_DIR/server.env" "$UNNAMED_GROUP_DIR/provider.env"
+
+PATH="$TMP_ID_BIN:$TMP_BIN:$PATH" \
+EASY_NODE_DOCTOR_CLIENT_ENV_FILE="$UNNAMED_GROUP_DIR/client.env" \
+EASY_NODE_DOCTOR_AUTHORITY_ENV_FILE="$UNNAMED_GROUP_DIR/server.env" \
+EASY_NODE_DOCTOR_PROVIDER_ENV_FILE="$UNNAMED_GROUP_DIR/provider.env" \
+EASY_NODE_DOCTOR_WG_ONLY_DIR="$UNNAMED_GROUP_DIR/wg_only" \
+EASY_NODE_DOCTOR_CLIENT_VPN_KEY_DIR="$UNNAMED_GROUP_DIR/client_vpn" \
+EASY_NODE_DOCTOR_LOG_DIR="$UNNAMED_GROUP_DIR/logs" \
+EASY_NODE_DOCTOR_WG_ONLY_STATE_FILE="$UNNAMED_GROUP_DIR/wg_only.state" \
+EASY_NODE_DOCTOR_CLIENT_VPN_STATE_FILE="$UNNAMED_GROUP_DIR/client_vpn.state" \
+./scripts/runtime_doctor.sh --show-json 1 >/tmp/integration_runtime_doctor_unnamed_group.log 2>&1
+
+if rg -q 'cannot find name for group ID' /tmp/integration_runtime_doctor_unnamed_group.log; then
+  echo "runtime doctor leaked id -gn failure instead of falling back"
+  cat /tmp/integration_runtime_doctor_unnamed_group.log
+  exit 1
+fi
+if ! extract_json_payload /tmp/integration_runtime_doctor_unnamed_group.log | jq -e '
+  .status == "OK"
+  and .summary.findings_total == 0
+  and .ownership.preferred_user == "dracsis"
+  and .ownership.preferred_group == "197121"
+' >/dev/null 2>&1; then
+  echo "runtime doctor unnamed group JSON payload missing fallback ownership"
+  cat /tmp/integration_runtime_doctor_unnamed_group.log
   exit 1
 fi
 

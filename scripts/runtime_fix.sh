@@ -84,6 +84,7 @@ preferred_target_user() {
 
 preferred_target_group() {
   local user="${1:-}"
+  local candidate=""
   if [[ -n "${EASY_NODE_RUNTIME_FIX_TARGET_GROUP:-}" ]]; then
     printf '%s\n' "${EASY_NODE_RUNTIME_FIX_TARGET_GROUP}"
     return
@@ -92,12 +93,28 @@ preferred_target_group() {
     id -gn "$user"
     return
   fi
+  if [[ -n "$user" ]]; then
+    candidate="$(id -g "$user" 2>/dev/null || true)"
+    if [[ -n "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  fi
   if [[ -n "${SUDO_GID:-}" ]]; then
     printf '%s\n' "${SUDO_GID}"
     return
   fi
   if [[ "$(effective_uid)" != "0" ]]; then
-    id -gn
+    candidate="$(id -gn 2>/dev/null || true)"
+    if [[ -n "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+    candidate="$(id -g 2>/dev/null || true)"
+    if [[ -n "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
     return
   fi
   printf '%s\n' ""

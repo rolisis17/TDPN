@@ -13,7 +13,8 @@ done
 
 TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/bin"
-mkdir -p "$TMP_BIN"
+TMP_ID_BIN="$TMP_DIR/idbin"
+mkdir -p "$TMP_BIN" "$TMP_ID_BIN"
 REPORT_CAPTURE="$TMP_DIR/manual_validation_report_args.log"
 
 cleanup() {
@@ -76,6 +77,30 @@ fi
 exec "$@"
 EOF_RUNUSER
 chmod +x "$TMP_BIN/runuser"
+
+cat >"$TMP_ID_BIN/id" <<'EOF_ID'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  -un)
+    printf 'dracsis\n'
+    ;;
+  -u)
+    printf '1000\n'
+    ;;
+  -gn)
+    printf 'id: cannot find name for group ID 197121\n' >&2
+    exit 1
+    ;;
+  -g)
+    printf '197121\n'
+    ;;
+  *)
+    exec /usr/bin/id "$@"
+    ;;
+esac
+EOF_ID
+chmod +x "$TMP_ID_BIN/id"
 
 FAKE_REPORT="$TMP_DIR/fake_manual_validation_report.sh"
 cat >"$FAKE_REPORT" <<'EOF_FAKE_REPORT'
@@ -166,6 +191,28 @@ fi
 if ! extract_json_payload /tmp/integration_runtime_fix_ok.log | jq -e '.manual_validation_report.status == "ok" and .manual_validation_report.summary.report.readiness_status == "NOT_READY"' >/dev/null 2>&1; then
   echo "runtime-fix OK JSON payload missing manual validation report metadata"
   cat /tmp/integration_runtime_fix_ok.log
+  exit 1
+fi
+
+echo "[runtime-fix] unnamed current group falls back to numeric gid"
+FAKE_MANUAL_VALIDATION_REPORT_CAPTURE_FILE="$REPORT_CAPTURE" \
+MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_REPORT" \
+RUNTIME_DOCTOR_SCRIPT="$BASE_DOCTOR" \
+PATH="$TMP_ID_BIN:$PATH" \
+./scripts/runtime_fix.sh --show-json 1 >/tmp/integration_runtime_fix_unnamed_group.log 2>&1
+
+if rg -q 'cannot find name for group ID' /tmp/integration_runtime_fix_unnamed_group.log; then
+  echo "runtime-fix leaked id -gn failure instead of falling back"
+  cat /tmp/integration_runtime_fix_unnamed_group.log
+  exit 1
+fi
+if ! extract_json_payload /tmp/integration_runtime_fix_unnamed_group.log | jq -e '
+  .inputs.target_owner_user == "dracsis"
+  and .inputs.target_owner_group == "197121"
+  and .inputs.target_owner_spec == "dracsis:197121"
+' >/dev/null 2>&1; then
+  echo "runtime-fix unnamed group JSON payload missing fallback ownership"
+  cat /tmp/integration_runtime_fix_unnamed_group.log
   exit 1
 fi
 
@@ -484,6 +531,8 @@ CHMOD_CAPTURE_SUDO="$TMP_DIR/chmod_calls_sudo_user.log"
 : >"$RUNUSER_CAPTURE"
 : >"$CHOWN_CAPTURE_SUDO"
 : >"$CHMOD_CAPTURE_SUDO"
+CURRENT_TEST_USER="$(id -un 2>/dev/null || printf '%s' "${USER:-unknown}")"
+CURRENT_TEST_GROUP="$(id -gn 2>/dev/null || id -g 2>/dev/null || printf '%s' "$CURRENT_TEST_USER")"
 PATH="$TMP_BIN:$PATH" \
 DOCTOR_COUNTER_FILE="$SUDO_DOCTOR_COUNTER" \
 RUNTIME_DOCTOR_SCRIPT="$SUDO_DOCTOR" \
@@ -495,10 +544,10 @@ FAKE_CHMOD_CAPTURE_FILE="$CHMOD_CAPTURE_SUDO" \
 EASY_NODE_RUNTIME_FIX_WG_ONLY_PRUNE_ALLOWLIST="$SUDO_WG_ONLY_DIR" \
 EASY_NODE_RUNTIME_FIX_MUTABLE_PATH_ALLOWLIST="$SUDO_WG_ONLY_DIR" \
 EASY_NODE_RUNTIME_FIX_EUID=0 \
-SUDO_USER="$(id -un)" \
+SUDO_USER="$CURRENT_TEST_USER" \
 ./scripts/runtime_fix.sh --prune-wg-only-dir 1 --show-json 1 >/tmp/integration_runtime_fix_sudo_user.log 2>&1
 
-if ! rg -q -- "-u $(id -un) -- env -i" "$RUNUSER_CAPTURE" || ! rg -q -- "${SUDO_DOCTOR} --base-port" "$RUNUSER_CAPTURE"; then
+if ! grep -Fq -- "-u ${CURRENT_TEST_USER} -- env -i" "$RUNUSER_CAPTURE" || ! grep -Fq -- "${SUDO_DOCTOR} --base-port" "$RUNUSER_CAPTURE"; then
   echo "expected runtime-fix to run runtime-doctor via runuser for SUDO_USER perspective"
   cat "$RUNUSER_CAPTURE"
   exit 1
@@ -508,12 +557,12 @@ if ! rg -q '\[runtime-fix\] action=wg-only runtime dir ownership repair' /tmp/in
   cat /tmp/integration_runtime_fix_sudo_user.log
   exit 1
 fi
-if ! rg -q -- "-R $(id -un):$(id -gn) ${SUDO_WG_ONLY_DIR}" "$CHOWN_CAPTURE_SUDO"; then
+if ! grep -Fq -- "-R ${CURRENT_TEST_USER}:${CURRENT_TEST_GROUP} ${SUDO_WG_ONLY_DIR}" "$CHOWN_CAPTURE_SUDO"; then
   echo "expected recursive chown on wg-only dir not found in sudo-user perspective path"
   cat "$CHOWN_CAPTURE_SUDO"
   exit 1
 fi
-if ! rg -q -- "700 ${SUDO_WG_ONLY_DIR}" "$CHMOD_CAPTURE_SUDO"; then
+if ! grep -Fq -- "700 ${SUDO_WG_ONLY_DIR}" "$CHMOD_CAPTURE_SUDO"; then
   echo "expected chmod 700 on wg-only dir not found in sudo-user perspective path"
   cat "$CHMOD_CAPTURE_SUDO"
   exit 1
@@ -610,17 +659,19 @@ if ! rg -q '\[runtime-fix\] action=log dir ownership repair' /tmp/integration_ru
   cat /tmp/integration_runtime_fix_ownership.log
   exit 1
 fi
-if ! rg -q -- "$(id -un):$(id -gn) ${OWN_DIR}/client.env" "$CHOWN_CAPTURE"; then
+OWN_TEST_USER="$(id -un 2>/dev/null || printf '%s' "${USER:-unknown}")"
+OWN_TEST_GROUP="$(id -gn 2>/dev/null || id -g 2>/dev/null || printf '%s' "$OWN_TEST_USER")"
+if ! grep -Fq -- "${OWN_TEST_USER}:${OWN_TEST_GROUP} ${OWN_DIR}/client.env" "$CHOWN_CAPTURE"; then
   echo "expected client env chown command not found"
   cat "$CHOWN_CAPTURE"
   exit 1
 fi
-if ! rg -q -- "$(id -un):$(id -gn) ${OWN_DIR}/server.env" "$CHOWN_CAPTURE"; then
+if ! grep -Fq -- "${OWN_TEST_USER}:${OWN_TEST_GROUP} ${OWN_DIR}/server.env" "$CHOWN_CAPTURE"; then
   echo "expected authority env chown command not found"
   cat "$CHOWN_CAPTURE"
   exit 1
 fi
-if ! rg -q -- '-R '"$(id -un):$(id -gn) ${OWN_DIR}/client_vpn" "$CHOWN_CAPTURE"; then
+if ! grep -Fq -- "-R ${OWN_TEST_USER}:${OWN_TEST_GROUP} ${OWN_DIR}/client_vpn" "$CHOWN_CAPTURE"; then
   echo "expected recursive client-vpn dir chown command not found"
   cat "$CHOWN_CAPTURE"
   exit 1

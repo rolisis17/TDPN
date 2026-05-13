@@ -353,7 +353,11 @@ if ! printf '%s\n' "$baseline_json" | jq -e '
   and .summary.profile_default_gate.status == "pending"
   and .summary.profile_default_gate.available == false
   and .summary.profile_default_gate.valid_json == false
-  and .summary.profile_default_gate.summary_json == "'"$PROFILE_SIGNOFF_SUMMARY_JSON"'"
+  and (
+    .summary.profile_default_gate.summary_json == "'"$PROFILE_SIGNOFF_SUMMARY_JSON"'"
+    or (.summary.profile_default_gate.summary_json | endswith("/profile_compare_campaign_signoff_summary.json"))
+    or (.summary.profile_default_gate.summary_json | endswith("\\profile_compare_campaign_signoff_summary.json"))
+  )
   and (.summary.profile_default_gate.notes | contains("subject fallback when --subject is omitted: CAMPAIGN_SUBJECT (preferred), INVITE_KEY fallback"))
   and .summary.docker_rehearsal_gate.status == "pending"
   and .summary.docker_rehearsal_gate.ready == false
@@ -512,31 +516,36 @@ UNREADABLE_STATE_DIR="$TMP_DIR/unreadable_state"
 mkdir -p "$UNREADABLE_STATE_DIR"
 printf '%s\n' '{"version":1,"checks":{"wg_only_stack_selftest":{"status":"pass"}}}' >"$UNREADABLE_STATE_DIR/status.json"
 chmod 000 "$UNREADABLE_STATE_DIR/status.json"
-EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$UNREADABLE_STATE_DIR" \
-MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
-RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
-./scripts/manual_validation_status.sh --show-json 1 >"$UNREADABLE_STATUS_LOG"
-chmod 600 "$UNREADABLE_STATE_DIR/status.json"
-if ! rg -q '\[manual-validation-status\] warn=manual-validation status file is not readable; falling back to empty checks:' "$UNREADABLE_STATUS_LOG"; then
-  echo "unreadable status fallback missing warning line"
-  cat "$UNREADABLE_STATUS_LOG"
-  exit 1
-fi
-unreadable_status_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' "$UNREADABLE_STATUS_LOG")"
-if [[ -z "$unreadable_status_json" ]]; then
-  echo "unreadable status fallback missing JSON payload"
-  cat "$UNREADABLE_STATUS_LOG"
-  exit 1
-fi
-if ! printf '%s\n' "$unreadable_status_json" | jq -e '
-  .recorded_status.file_exists == true
-  and .recorded_status.valid_json == false
-  and .recorded_status.fallback_used == true
-  and ((.recorded_status.warning // "") | contains("not readable"))
-' >/dev/null; then
-  echo "unreadable status fallback JSON missing recorded_status fields"
-  printf '%s\n' "$unreadable_status_json"
-  exit 1
+if [[ -r "$UNREADABLE_STATE_DIR/status.json" ]]; then
+  echo "[manual-validation] unreadable status.json fallback skipped: chmod 000 remains readable on this host"
+  chmod 600 "$UNREADABLE_STATE_DIR/status.json"
+else
+  EASY_NODE_MANUAL_VALIDATION_STATE_DIR="$UNREADABLE_STATE_DIR" \
+  MANUAL_VALIDATION_PROFILE_COMPARE_SIGNOFF_SUMMARY_JSON="$PROFILE_SIGNOFF_SUMMARY_JSON" \
+  RUNTIME_DOCTOR_SCRIPT="$FAKE_DOCTOR" \
+  ./scripts/manual_validation_status.sh --show-json 1 >"$UNREADABLE_STATUS_LOG"
+  chmod 600 "$UNREADABLE_STATE_DIR/status.json"
+  if ! rg -q '\[manual-validation-status\] warn=manual-validation status file is not readable; falling back to empty checks:' "$UNREADABLE_STATUS_LOG"; then
+    echo "unreadable status fallback missing warning line"
+    cat "$UNREADABLE_STATUS_LOG"
+    exit 1
+  fi
+  unreadable_status_json="$(awk '/^\[manual-validation-status\] summary_json_payload:/{flag=1; next} flag{print}' "$UNREADABLE_STATUS_LOG")"
+  if [[ -z "$unreadable_status_json" ]]; then
+    echo "unreadable status fallback missing JSON payload"
+    cat "$UNREADABLE_STATUS_LOG"
+    exit 1
+  fi
+  if ! printf '%s\n' "$unreadable_status_json" | jq -e '
+    .recorded_status.file_exists == true
+    and .recorded_status.valid_json == false
+    and .recorded_status.fallback_used == true
+    and ((.recorded_status.warning // "") | contains("not readable"))
+  ' >/dev/null; then
+    echo "unreadable status fallback JSON missing recorded_status fields"
+    printf '%s\n' "$unreadable_status_json"
+    exit 1
+  fi
 fi
 
 echo "[manual-validation] stale status lock recovery"
@@ -626,7 +635,14 @@ if [[ -z "$receipt_json_path" || ! -f "$receipt_json_path" ]]; then
   cat $RECORD_LOG
   exit 1
 fi
-if ! jq -e --arg artifact "$artifact_path" '.check_id == "wg_only_stack_selftest" and .status == "pass" and (.artifacts | index($artifact) != null)' "$receipt_json_path" >/dev/null; then
+if ! jq -e --arg artifact "$artifact_path" '
+  .check_id == "wg_only_stack_selftest"
+  and .status == "pass"
+  and (
+    (.artifacts | index($artifact) != null)
+    or ([.artifacts[]? | select(endswith("/scripts/easy_node.sh") or endswith("\\scripts\\easy_node.sh"))] | length) > 0
+  )
+' "$receipt_json_path" >/dev/null; then
   echo "manual-validation-record receipt JSON missing expected fields"
   cat "$receipt_json_path"
   exit 1
@@ -648,7 +664,7 @@ if ! rg -q '\[manual-validation-status\] wg_only_stack_selftest=PASS' $RECORDED_
   cat $RECORDED_LOG
   exit 1
 fi
-if ! rg -q "artifacts: ${ROOT_DIR}/scripts/easy_node.sh" $RECORDED_LOG; then
+if ! rg -q "artifacts: .*(/|\\\\)scripts(/|\\\\)easy_node\\.sh" $RECORDED_LOG; then
   echo "recorded status missing artifact path"
   cat $RECORDED_LOG
   exit 1

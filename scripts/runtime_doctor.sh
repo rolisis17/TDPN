@@ -157,8 +157,8 @@ preferred_local_user() {
 }
 
 preferred_local_group() {
+  local candidate=""
   if [[ -n "${EASY_NODE_DOCTOR_PREFERRED_GROUP:-}" ]]; then
-    local candidate
     candidate="$(sanitize_owner_component "${EASY_NODE_DOCTOR_PREFERRED_GROUP}")"
     if [[ -n "$candidate" ]]; then
       printf '%s\n' "$candidate"
@@ -170,12 +170,33 @@ preferred_local_group() {
       id -gn "${SUDO_USER}"
       return
     fi
-    if [[ -n "${SUDO_GID:-}" ]]; then
-      printf '%s\n' "${SUDO_GID}"
+    candidate="$(id -g "${SUDO_USER}" 2>/dev/null || true)"
+    candidate="$(sanitize_owner_component "$candidate")"
+    if [[ -n "$candidate" ]]; then
+      printf '%s\n' "$candidate"
       return
     fi
+    if [[ -n "${SUDO_GID:-}" ]]; then
+      candidate="$(sanitize_owner_component "${SUDO_GID}")"
+      if [[ -n "$candidate" ]]; then
+        printf '%s\n' "$candidate"
+        return
+      fi
+    fi
   fi
-  id -gn
+  candidate="$(id -gn 2>/dev/null || true)"
+  candidate="$(sanitize_owner_component "$candidate")"
+  if [[ -n "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return
+  fi
+  candidate="$(id -g 2>/dev/null || true)"
+  candidate="$(sanitize_owner_component "$candidate")"
+  if [[ -n "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return
+  fi
+  printf '%s\n' "$(preferred_local_user)"
 }
 
 default_client_vpn_key_dir() {
@@ -683,9 +704,11 @@ fi
 
 if [[ "$show_json" == "1" ]]; then
   findings_file="$(mktemp)"
+  findings_json_file="$(mktemp)"
   for line in "${finding_lines[@]}"; do
     printf '%s\n' "$line" >>"$findings_file"
   done
+  jq -Rn '[inputs | split("\t") | {severity: .[0], code: .[1], message: .[2], remediation: .[3]}]' <"$findings_file" >"$findings_json_file"
   summary_json="$(
     jq -Rn \
       --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -707,7 +730,7 @@ if [[ "$show_json" == "1" ]]; then
       --argjson findings_total "$findings_total" \
       --argjson warnings_total "$warnings_total" \
       --argjson failures_total "$failures_total" \
-      --slurpfile findings <(jq -Rn '[inputs | split("\t") | {severity: .[0], code: .[1], message: .[2], remediation: .[3]}]' "$findings_file") \
+      --slurpfile findings "$findings_json_file" \
       '{
         version: 1,
         generated_at_utc: $generated_at_utc,
@@ -742,7 +765,7 @@ if [[ "$show_json" == "1" ]]; then
   )"
   echo "[runtime-doctor] summary_json_payload:"
   printf '%s\n' "$summary_json"
-  rm -f "$findings_file"
+  rm -f "$findings_file" "$findings_json_file"
 fi
 
 if [[ "$overall_status" == "FAIL" ]]; then

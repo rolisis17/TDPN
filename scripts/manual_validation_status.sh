@@ -2297,6 +2297,27 @@ elif [[ "$real_wg_host_eligible" != "1" ]]; then
   )"
 fi
 
+combined_json_input_files=()
+write_combined_json_input_01() {
+  local payload="${1:-}"
+  local path
+  path="$(mktemp)"
+  printf '%s\n' "$payload" >"$path"
+  combined_json_input_files+=("$path")
+  printf '%s\n' "$path"
+}
+
+recorded_json_file="$(write_combined_json_input_01 "$recorded_json")"
+runtime_doctor_json_file="$(write_combined_json_input_01 "$runtime_doctor_json")"
+runtime_hygiene_check_json_file="$(write_combined_json_input_01 "$runtime_hygiene_check_json")"
+wg_only_check_json_file="$(write_combined_json_input_01 "$wg_only_check_json")"
+docker_rehearsal_check_json_file="$(write_combined_json_input_01 "$docker_rehearsal_check_json")"
+real_wg_privileged_check_json_file="$(write_combined_json_input_01 "$real_wg_privileged_check_json")"
+machine_c_check_json_file="$(write_combined_json_input_01 "$machine_c_check_json")"
+closed_beta_check_json_file="$(write_combined_json_input_01 "$closed_beta_check_json")"
+three_machine_check_json_file="$(write_combined_json_input_01 "$three_machine_check_json")"
+profile_default_gate_json_file="$(write_combined_json_input_01 "$profile_default_gate_json")"
+
 combined_json="$(
   jq -n \
     --arg state_dir "$state_dir" \
@@ -2308,16 +2329,16 @@ combined_json="$(
     --arg runtime_doctor_timed_out "$runtime_doctor_timed_out" \
     --arg runtime_doctor_timeout_guard_available "$runtime_doctor_timeout_guard_available" \
     --arg runtime_doctor_json_rc "$runtime_doctor_rc" \
-    --argjson recorded "$recorded_json" \
-    --argjson runtime_doctor "$runtime_doctor_json" \
-    --argjson runtime_hygiene_check "$runtime_hygiene_check_json" \
-    --argjson wg_only_check "$wg_only_check_json" \
-    --argjson docker_rehearsal_check "$docker_rehearsal_check_json" \
-    --argjson real_wg_privileged_check "$real_wg_privileged_check_json" \
-    --argjson machine_c_check "$machine_c_check_json" \
-    --argjson closed_beta_check "$closed_beta_check_json" \
-    --argjson three_machine_check "$three_machine_check_json" \
-    --argjson profile_default_gate "$profile_default_gate_json" \
+    --slurpfile recorded "$recorded_json_file" \
+    --slurpfile runtime_doctor "$runtime_doctor_json_file" \
+    --slurpfile runtime_hygiene_check "$runtime_hygiene_check_json_file" \
+    --slurpfile wg_only_check "$wg_only_check_json_file" \
+    --slurpfile docker_rehearsal_check "$docker_rehearsal_check_json_file" \
+    --slurpfile real_wg_privileged_check "$real_wg_privileged_check_json_file" \
+    --slurpfile machine_c_check "$machine_c_check_json_file" \
+    --slurpfile closed_beta_check "$closed_beta_check_json_file" \
+    --slurpfile three_machine_check "$three_machine_check_json_file" \
+    --slurpfile profile_default_gate "$profile_default_gate_json_file" \
     --arg real_wg_host_linux "$real_wg_host_linux" \
     --arg real_wg_host_root "$real_wg_host_root" \
     --arg real_wg_host_has_wg "$real_wg_host_has_wg" \
@@ -2325,6 +2346,17 @@ combined_json="$(
     --arg real_wg_host_eligible "$real_wg_host_eligible" \
     --arg real_wg_host_hint "$real_wg_host_hint" \
     '
+      ($recorded[0] // {}) as $recorded
+      | ($runtime_doctor[0] // {}) as $runtime_doctor
+      | ($runtime_hygiene_check[0] // {}) as $runtime_hygiene_check
+      | ($wg_only_check[0] // {}) as $wg_only_check
+      | ($docker_rehearsal_check[0] // {}) as $docker_rehearsal_check
+      | ($real_wg_privileged_check[0] // {}) as $real_wg_privileged_check
+      | ($machine_c_check[0] // {}) as $machine_c_check
+      | ($closed_beta_check[0] // {}) as $closed_beta_check
+      | ($three_machine_check[0] // {}) as $three_machine_check
+      | ($profile_default_gate[0] // {}) as $profile_default_gate
+      |
       {
         version: 1,
         generated_at_utc: (now | todateiso8601),
@@ -2626,6 +2658,7 @@ combined_json="$(
         )
     '
 )"
+rm -f "${combined_json_input_files[@]}"
 
 echo "[manual-validation-status] state_dir=$state_dir"
 printf '%s\n' "$combined_json" | jq -r '
