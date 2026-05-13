@@ -11,6 +11,19 @@ unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CA
 unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_CERT
 unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_KEY
 unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_HELPER_PUBLIC_DNS
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_HELPER_ID
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_ORG_ID
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_ORG_NAME
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PRIVATE_CODE_FILE
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_BRIDGE_SERVICE_CONFIG
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_BRIDGE_DEPLOY_PACK
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PROVENANCE_PRIVATE_KEY_FILE
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_REPORTS_DIR
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_INSTALL_DIR
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_SYSTEMD_UNIT_FILE
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PROXY_KIND
+unset ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PROXY_CONFIG_FILE
 unset ROADMAP_NEXT_ACTIONS_RUN_ALLOW_PROFILE_DEFAULT_GATE_UNREACHABLE
 unset ROADMAP_NEXT_ACTIONS_RUN_ALLOW_UNSAFE_SHELL_COMMANDS
 unset ROADMAP_NEXT_ACTIONS_RUN_CAMPAIGN_SUBJECT
@@ -39,6 +52,19 @@ unset ROADMAP_NEXT_ACTIONS_RUN_SUMMARY_JSON
 unset ROADMAP_NEXT_ACTIONS_RUN_VM_COMMAND_SOURCE
 # Keep placeholder-subject precondition checks deterministic.
 unset ACCESS_RECOVERY_TRUST_STORE
+unset ACCESS_RECOVERY_HELPER_PUBLIC_DNS
+unset ACCESS_RECOVERY_HELPER_ID
+unset ACCESS_RECOVERY_ORG_ID
+unset ACCESS_RECOVERY_ORG_NAME
+unset ACCESS_RECOVERY_PRIVATE_CODE_FILE
+unset ACCESS_RECOVERY_BRIDGE_SERVICE_CONFIG
+unset ACCESS_RECOVERY_BRIDGE_DEPLOY_PACK
+unset ACCESS_RECOVERY_PROVENANCE_PRIVATE_KEY_FILE
+unset ACCESS_RECOVERY_REPORTS_DIR
+unset ACCESS_RECOVERY_INSTALL_DIR
+unset ACCESS_RECOVERY_SYSTEMD_UNIT_FILE
+unset ACCESS_RECOVERY_PROXY_KIND
+unset ACCESS_RECOVERY_PROXY_CONFIG_FILE
 unset ACCESS_RECOVERY_MTLS_CA
 unset ACCESS_RECOVERY_MTLS_CLIENT_CERT
 unset ACCESS_RECOVERY_MTLS_CLIENT_KEY
@@ -90,6 +116,18 @@ FAKE_EASY_NODE="$ACTION_TMP_DIR/fake_easy_node.sh"
 FAKE_EASY_NODE_CAPTURE="$ACTION_TMP_DIR/fake_easy_node_capture.log"
 FAKE_ACCESS_RECOVERY_VERIFY="$ACTION_TMP_DIR/fake_access_recovery_verify.sh"
 FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE="$ACTION_TMP_DIR/fake_access_recovery_verify_capture.log"
+FAKE_ACCESS_RECOVERY_REAL_HELPER="$ACTION_TMP_DIR/fake_access_recovery_real_helper.sh"
+FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE="$ACTION_TMP_DIR/fake_access_recovery_real_helper_capture.log"
+ACCESS_RECOVERY_OPERATOR_CODE_FILE="$TMP_DIR/operator-code.txt"
+ACCESS_RECOVERY_OPERATOR_CONFIG_JSON="$TMP_DIR/operator-bridge-service-config.json"
+ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK="$TMP_DIR/operator-bridge-deploy-pack"
+ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY="$TMP_DIR/operator-provenance.key"
+ACCESS_RECOVERY_OPERATOR_REPORTS_DIR="$TMP_DIR/operator-access-recovery-reports"
+ACCESS_RECOVERY_OPERATOR_DEMO_DIR="$TMP_DIR/access_recovery_local_evidence_fake/access-recovery-demo"
+ACCESS_RECOVERY_OPERATOR_DEMO_CODE_FILE="$ACCESS_RECOVERY_OPERATOR_DEMO_DIR/private-code.txt"
+ACCESS_RECOVERY_OPERATOR_INSTALL_DIR="/srv/gpm/access-bridge"
+ACCESS_RECOVERY_OPERATOR_SYSTEMD_UNIT="/etc/systemd/system/gpm-access-bridge-pilot.service"
+ACCESS_RECOVERY_OPERATOR_PROXY_CONFIG="/etc/caddy/Caddyfile.d/gpm-access-bridge-pilot.caddy"
 SYMLINK_ESCAPE_TARGET="$TMP_DIR/symlink_escape_target.sh"
 SYMLINK_ESCAPE_LINK="$ACTION_TMP_DIR/symlink_escape_action.sh"
 SYMLINK_ESCAPE_MARKER="$TMP_DIR/symlink_escape_marker.txt"
@@ -384,6 +422,84 @@ fi
 echo "fake access recovery verifier ok"
 EOF_FAKE_ACCESS_RECOVERY_VERIFY
 chmod +x "$FAKE_ACCESS_RECOVERY_VERIFY"
+
+mkdir -p "$ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK" "$ACCESS_RECOVERY_OPERATOR_REPORTS_DIR" "$ACCESS_RECOVERY_OPERATOR_DEMO_DIR"
+printf '%s\n' 'pilot-secret-code' >"$ACCESS_RECOVERY_OPERATOR_CODE_FILE"
+printf '%s\n' 'demo-secret-code' >"$ACCESS_RECOVERY_OPERATOR_DEMO_CODE_FILE"
+printf '%s\n' '{"helper_id":"helper-pilot","organization_id":"pilot-org"}' >"$ACCESS_RECOVERY_OPERATOR_CONFIG_JSON"
+printf '%s\n' 'pilot-provenance-private-key' >"$ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY"
+printf '%s\n' 'deploy pack marker' >"$ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK/manifest.txt"
+
+cat >"$FAKE_ACCESS_RECOVERY_REAL_HELPER" <<'EOF_FAKE_ACCESS_RECOVERY_REAL_HELPER'
+#!/usr/bin/env bash
+set -euo pipefail
+arg_value_for_flag() {
+  local flag="$1"
+  shift
+  local -a argv=("$@")
+  local idx=0
+  local token=""
+  for token in "${argv[@]}"; do
+    if [[ "$token" == "$flag" ]]; then
+      if (( idx + 1 < ${#argv[@]} )); then
+        printf '%s' "${argv[$((idx + 1))]}"
+      fi
+      return
+    fi
+    if [[ "$token" == "$flag="* ]]; then
+      printf '%s' "${token#"$flag="}"
+      return
+    fi
+    idx=$((idx + 1))
+  done
+  printf '%s' ""
+}
+if [[ "${1:-}" != "access-recovery-real-helper-evidence-run" ]]; then
+  echo "fake real-helper expected access-recovery-real-helper-evidence-run subcommand"
+  exit 9
+fi
+if [[ "$*" =~ (HELPER_PUBLIC_DNS|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|TRUST_STORE) ]]; then
+  echo "fake real-helper received unresolved placeholder"
+  printf '%s\n' "$*"
+  exit 9
+fi
+base_url="$(arg_value_for_flag --base-url "$@")"
+code_file="$(arg_value_for_flag --code-file "$@")"
+config_json="$(arg_value_for_flag --config-json "$@")"
+deploy_pack="$(arg_value_for_flag --deploy-pack-dir "$@")"
+provenance_key="$(arg_value_for_flag --provenance-private-key-file "$@")"
+provenance_org_id="$(arg_value_for_flag --provenance-org-id "$@")"
+provenance_org_name="$(arg_value_for_flag --provenance-org-name "$@")"
+trust_store="$(arg_value_for_flag --trust-store "$@")"
+reports_dir="$(arg_value_for_flag --reports-dir "$@")"
+if [[ "$base_url" != "https://helper-pilot.gpm.net" ]]; then
+  echo "fake real-helper expected concrete base-url, got $base_url"
+  exit 9
+fi
+for required_file in "$code_file" "$config_json" "$provenance_key" "$trust_store"; do
+  if [[ -z "$required_file" || ! -f "$required_file" ]]; then
+    echo "fake real-helper missing file: ${required_file:-<empty>}"
+    exit 9
+  fi
+done
+if [[ -z "$deploy_pack" || ! -d "$deploy_pack" ]]; then
+  echo "fake real-helper missing deploy pack: ${deploy_pack:-<empty>}"
+  exit 9
+fi
+if [[ "$provenance_org_id" != "pilot-org" || "$provenance_org_name" != "Pilot Org" ]]; then
+  echo "fake real-helper provenance identity mismatch: $provenance_org_id / $provenance_org_name"
+  exit 9
+fi
+if [[ -z "$reports_dir" ]]; then
+  echo "fake real-helper missing reports-dir"
+  exit 9
+fi
+if [[ -n "${FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE:-}" ]]; then
+  printf '%s\n' "$*" >>"$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+fi
+echo "fake access recovery real-helper ok"
+EOF_FAKE_ACCESS_RECOVERY_REAL_HELPER
+chmod +x "$FAKE_ACCESS_RECOVERY_REAL_HELPER"
 
 cat >"$SYMLINK_ESCAPE_TARGET" <<'EOF_SYMLINK_ESCAPE_TARGET'
 #!/usr/bin/env bash
@@ -697,6 +813,15 @@ JSON
 {
   "next_actions": [
     {"id":"real_helper_https_evidence","label":"Real helper HTTPS evidence","command":"./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE --reports-dir /tmp/access-recovery-pilot","reason":"test-real-helper-operator-placeholders","requires_real_hosts":true}
+  ]
+}
+JSON
+    ;;
+  access_recovery_real_helper_operator_placeholders_fake_exec)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"real_helper_https_evidence","label":"Real helper HTTPS evidence","command":"bash \"$FAKE_ACCESS_RECOVERY_REAL_HELPER\" access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE --reports-dir ACCESS_RECOVERY_REPORTS_DIR","reason":"test-real-helper-operator-placeholder-materialization","requires_real_hosts":true}
   ]
 }
 JSON
@@ -2001,6 +2126,11 @@ if [[ "$access_recovery_operator_placeholders_rc" != "2" ]]; then
   fi
   exit 1
 fi
+if [[ -f "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" ]]; then
+  echo "Access Recovery real-helper ran despite unresolved operator placeholders"
+  cat "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+  exit 1
+fi
 if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
   .status == "fail"
   and .rc == 2
@@ -2018,6 +2148,227 @@ if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
 ' "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS" >/dev/null; then
   echo "Access Recovery unresolved operator placeholder precondition summary mismatch"
   cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_PLACEHOLDERS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery real-helper action materializes configured operator inputs"
+SUMMARY_ACCESS_RECOVERY_OPERATOR_MATERIALIZED="$TMP_DIR/summary_access_recovery_operator_materialized.json"
+REPORTS_ACCESS_RECOVERY_OPERATOR_MATERIALIZED="$TMP_DIR/reports_access_recovery_operator_materialized"
+: >"$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_real_helper_operator_placeholders_fake_exec \
+FAKE_ACCESS_RECOVERY_REAL_HELPER="$FAKE_ACCESS_RECOVERY_REAL_HELPER" \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE="$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_OPERATOR_MATERIALIZED" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_OPERATOR_MATERIALIZED" \
+  --include-id real_helper_https_evidence \
+  --access-recovery-helper-public-dns helper-pilot.gpm.net \
+  --access-recovery-private-code-file "$ACCESS_RECOVERY_OPERATOR_CODE_FILE" \
+  --access-recovery-bridge-service-config "$ACCESS_RECOVERY_OPERATOR_CONFIG_JSON" \
+  --access-recovery-bridge-deploy-pack "$ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK" \
+  --access-recovery-provenance-private-key-file "$ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY" \
+  --access-recovery-org-id pilot-org \
+  --access-recovery-org-name "Pilot Org" \
+  --access-recovery-reports-dir "$ACCESS_RECOVERY_OPERATOR_REPORTS_DIR" \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_operator_materialized.log" 2>&1
+if ! jq -e \
+  --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+  --arg code_file "$ACCESS_RECOVERY_OPERATOR_CODE_FILE" \
+  --arg config_json "$ACCESS_RECOVERY_OPERATOR_CONFIG_JSON" \
+  --arg deploy_pack "$ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK" \
+  --arg provenance_key "$ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY" \
+  --arg reports_dir "$ACCESS_RECOVERY_OPERATOR_REPORTS_DIR" '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.access_recovery_helper_public_dns == "helper-pilot.gpm.net"
+  and .inputs.access_recovery_helper_public_dns_source == "cli:--access-recovery-helper-public-dns"
+  and .inputs.access_recovery_private_code_file == $code_file
+  and .inputs.access_recovery_private_code_file_configured == true
+  and .inputs.access_recovery_bridge_service_config == $config_json
+  and .inputs.access_recovery_bridge_deploy_pack == $deploy_pack
+  and .inputs.access_recovery_provenance_private_key_file == $provenance_key
+  and .inputs.access_recovery_org_id == "pilot-org"
+  and .inputs.access_recovery_org_name == "Pilot Org"
+  and .inputs.access_recovery_reports_dir == $reports_dir
+  and .inputs.access_recovery_trust_store == $trust_store
+  and .actions[0].id == "real_helper_https_evidence"
+  and .actions[0].status == "pass"
+  and .actions[0].failure_kind == "none"
+  and (.actions[0].command | contains("HELPER_PUBLIC_DNS") | not)
+  and (.actions[0].command | contains("PRIVATE_CODE_FILE") | not)
+  and (.actions[0].command | contains("BRIDGE_SERVICE_CONFIG") | not)
+  and (.actions[0].command | contains("BRIDGE_DEPLOY_PACK") | not)
+  and (.actions[0].command | contains("PROVENANCE_PRIVATE_KEY_FILE") | not)
+  and (.actions[0].command | contains("ORG_ID") | not)
+  and (.actions[0].command | contains("ORG_NAME") | not)
+' "$SUMMARY_ACCESS_RECOVERY_OPERATOR_MATERIALIZED" >/dev/null; then
+  echo "Access Recovery materialized operator input summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_MATERIALIZED"
+  cat "$TMP_DIR/access_recovery_operator_materialized.log"
+  exit 1
+fi
+if ! grep -F -- "--base-url https://helper-pilot.gpm.net" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "--code-file $ACCESS_RECOVERY_OPERATOR_CODE_FILE" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "--config-json $ACCESS_RECOVERY_OPERATOR_CONFIG_JSON" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "--deploy-pack-dir $ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "--provenance-private-key-file $ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "--trust-store $ACCESS_RECOVERY_TRUST_STORE_FILE" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   grep -E 'HELPER_PUBLIC_DNS|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|TRUST_STORE' "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null; then
+  echo "Access Recovery materialized real-helper capture mismatch"
+  cat "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery real-helper materialization fails closed when operator input is missing"
+SUMMARY_ACCESS_RECOVERY_OPERATOR_MISSING_INPUT="$TMP_DIR/summary_access_recovery_operator_missing_input.json"
+REPORTS_ACCESS_RECOVERY_OPERATOR_MISSING_INPUT="$TMP_DIR/reports_access_recovery_operator_missing_input"
+: >"$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_real_helper_operator_placeholders_fake_exec \
+FAKE_ACCESS_RECOVERY_REAL_HELPER="$FAKE_ACCESS_RECOVERY_REAL_HELPER" \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE="$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_OPERATOR_MISSING_INPUT" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_OPERATOR_MISSING_INPUT" \
+  --include-id real_helper_https_evidence \
+  --access-recovery-helper-public-dns helper-pilot.gpm.net \
+  --access-recovery-private-code-file "$ACCESS_RECOVERY_OPERATOR_CODE_FILE" \
+  --access-recovery-bridge-service-config "$ACCESS_RECOVERY_OPERATOR_CONFIG_JSON" \
+  --access-recovery-bridge-deploy-pack "$ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK" \
+  --access-recovery-org-id pilot-org \
+  --access-recovery-org-name "Pilot Org" \
+  --access-recovery-reports-dir "$ACCESS_RECOVERY_OPERATOR_REPORTS_DIR" \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_operator_missing_input.log" 2>&1
+access_recovery_operator_missing_input_rc=$?
+set -e
+if [[ "$access_recovery_operator_missing_input_rc" != "2" ]]; then
+  echo "expected missing Access Recovery operator input hard-fail rc=2, got rc=$access_recovery_operator_missing_input_rc"
+  cat "$TMP_DIR/access_recovery_operator_missing_input.log"
+  cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_MISSING_INPUT"
+  exit 1
+fi
+if [[ -s "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" ]]; then
+  echo "Access Recovery real-helper ran despite missing operator input"
+  cat "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .inputs.access_recovery_provenance_private_key_file_configured == false
+  and .actions[0].id == "real_helper_https_evidence"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
+  and (.actions[0].notes | contains("PROVENANCE_PRIVATE_KEY_FILE"))
+' "$SUMMARY_ACCESS_RECOVERY_OPERATOR_MISSING_INPUT" >/dev/null; then
+  echo "Access Recovery missing operator input summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_MISSING_INPUT"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery real-helper materialization rejects demo helper DNS"
+SUMMARY_ACCESS_RECOVERY_OPERATOR_DEMO_DNS="$TMP_DIR/summary_access_recovery_operator_demo_dns.json"
+REPORTS_ACCESS_RECOVERY_OPERATOR_DEMO_DNS="$TMP_DIR/reports_access_recovery_operator_demo_dns"
+: >"$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_real_helper_operator_placeholders_fake_exec \
+FAKE_ACCESS_RECOVERY_REAL_HELPER="$FAKE_ACCESS_RECOVERY_REAL_HELPER" \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE="$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_OPERATOR_DEMO_DNS" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_OPERATOR_DEMO_DNS" \
+  --include-id real_helper_https_evidence \
+  --access-recovery-helper-public-dns helper-demo.gpm.net \
+  --access-recovery-private-code-file "$ACCESS_RECOVERY_OPERATOR_CODE_FILE" \
+  --access-recovery-bridge-service-config "$ACCESS_RECOVERY_OPERATOR_CONFIG_JSON" \
+  --access-recovery-bridge-deploy-pack "$ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK" \
+  --access-recovery-provenance-private-key-file "$ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY" \
+  --access-recovery-org-id pilot-org \
+  --access-recovery-org-name "Pilot Org" \
+  --access-recovery-reports-dir "$ACCESS_RECOVERY_OPERATOR_REPORTS_DIR" \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_operator_demo_dns.log" 2>&1
+access_recovery_operator_demo_dns_rc=$?
+set -e
+if [[ "$access_recovery_operator_demo_dns_rc" != "2" ]]; then
+  echo "expected demo Access Recovery helper DNS hard-fail rc=2, got rc=$access_recovery_operator_demo_dns_rc"
+  cat "$TMP_DIR/access_recovery_operator_demo_dns.log"
+  cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_DEMO_DNS"
+  exit 1
+fi
+if [[ -s "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" ]]; then
+  echo "Access Recovery real-helper ran despite demo helper DNS"
+  cat "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .inputs.access_recovery_helper_public_dns_configured == false
+  and (.inputs.access_recovery_helper_public_dns_source | contains("demo_or_example_identity"))
+  and .actions[0].id == "real_helper_https_evidence"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
+  and (.actions[0].notes | contains("HELPER_PUBLIC_DNS"))
+' "$SUMMARY_ACCESS_RECOVERY_OPERATOR_DEMO_DNS" >/dev/null; then
+  echo "Access Recovery demo helper DNS summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_DEMO_DNS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery real-helper materialization rejects nested demo paths"
+SUMMARY_ACCESS_RECOVERY_OPERATOR_DEMO_PATH="$TMP_DIR/summary_access_recovery_operator_demo_path.json"
+REPORTS_ACCESS_RECOVERY_OPERATOR_DEMO_PATH="$TMP_DIR/reports_access_recovery_operator_demo_path"
+: >"$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_real_helper_operator_placeholders_fake_exec \
+FAKE_ACCESS_RECOVERY_REAL_HELPER="$FAKE_ACCESS_RECOVERY_REAL_HELPER" \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE="$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_OPERATOR_DEMO_PATH" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_OPERATOR_DEMO_PATH" \
+  --include-id real_helper_https_evidence \
+  --access-recovery-helper-public-dns helper-pilot.gpm.net \
+  --access-recovery-private-code-file "$ACCESS_RECOVERY_OPERATOR_DEMO_CODE_FILE" \
+  --access-recovery-bridge-service-config "$ACCESS_RECOVERY_OPERATOR_CONFIG_JSON" \
+  --access-recovery-bridge-deploy-pack "$ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK" \
+  --access-recovery-provenance-private-key-file "$ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY" \
+  --access-recovery-org-id pilot-org \
+  --access-recovery-org-name "Pilot Org" \
+  --access-recovery-reports-dir "$ACCESS_RECOVERY_OPERATOR_REPORTS_DIR" \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_operator_demo_path.log" 2>&1
+access_recovery_operator_demo_path_rc=$?
+set -e
+if [[ "$access_recovery_operator_demo_path_rc" != "2" ]]; then
+  echo "expected demo Access Recovery path hard-fail rc=2, got rc=$access_recovery_operator_demo_path_rc"
+  cat "$TMP_DIR/access_recovery_operator_demo_path.log"
+  cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_DEMO_PATH"
+  exit 1
+fi
+if [[ -s "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" ]]; then
+  echo "Access Recovery real-helper ran despite nested demo path"
+  cat "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .inputs.access_recovery_private_code_file_configured == false
+  and (.inputs.access_recovery_private_code_file_source | contains("dev_or_demo_path"))
+  and .actions[0].id == "real_helper_https_evidence"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
+  and (.actions[0].notes | contains("PRIVATE_CODE_FILE"))
+' "$SUMMARY_ACCESS_RECOVERY_OPERATOR_DEMO_PATH" >/dev/null; then
+  echo "Access Recovery nested demo path summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_DEMO_PATH"
   exit 1
 fi
 

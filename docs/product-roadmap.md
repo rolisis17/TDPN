@@ -21,7 +21,7 @@ Next 5 roadmap execution steps:
 1. Freeze the Access Recovery beta contract around signed packs, bridge invites, signed helper registries, trust stores, and `GPMREC1` text/QR handoffs.
 2. Finish the browser-local verification loop for file, text, and QR handoffs, including fail-closed trust-store and helper-registry validation.
 3. Write the first operator/helper runbook for key handoff, helper onboarding, helper quarantine, artifact expiry, and abuse response.
-4. Build one small pilot bundle for a real organization/community, verify it with a handoff-authority verifier receipt, and test it with a non-technical user flow before adding network economics.
+4. Build one small pilot bundle for a real organization/community, run it through `roadmap-next-actions-run` with concrete Access Recovery operator inputs (helper DNS/ID, org ID/name, private code, bridge config/deploy pack, provenance key, trust store, reports/install/proxy/systemd paths, and optional mTLS files), verify it with a handoff-authority verifier receipt backed by real helper HTTPS evidence, and test it with a non-technical user flow before adding network economics.
 5. Keep VPN, Windows client, and L1 settlement work parked as reusable infrastructure until the access-recovery wedge has beta demand.
 
 Status update (March 24, 2026):
@@ -128,7 +128,7 @@ Scope:
 - provide local key/sign/verify tooling
 - provide a local trust-store file for trusted organization public keys
 - import or verify a pack or bridge invite from an untrusted channel
-- enforce the handoff-authority verifier contract: signed trusted provenance, real-helper HTTPS, installed-host evidence, schema minor `>=6`, `handoff_authority=true`, `authority_level=pilot_handoff`, `integrity_only=false`, a trust-store SHA, and service-smoke-to-deployment hash binding; public HTTPS deploy-pack evidence alone, dev/public-key-only trust, and local rehearsal are non-authoritative
+- enforce the handoff-authority verifier contract: signed trusted provenance, real-helper HTTPS, installed-host evidence, schema minor `>=6`, `handoff_authority=true`, `authority_level=pilot_handoff`, `integrity_only=false`, a trust-store SHA, and service-smoke-to-deployment hash binding; `roadmap-next-actions-run` can now materialize the operator inputs for that verifier path, but public HTTPS deploy-pack evidence alone, dev/public-key-only trust, and local rehearsal are non-authoritative
 - expose a browser-local import/verify screen for signed packs, bridge invites, and trust stores
 - support portable `GPMREC1` text handoffs for packs, bridge invites, trust stores, helper registries, and single trusted keys
 - render `GPMREC1` handoffs as QR PNGs from the CLI and browser, and import QR images with native scanning or a bundled browser fallback
@@ -141,7 +141,7 @@ Exit criteria:
 - one signed bridge invite can be generated, shared, verified, and inspected locally
 - one command can generate a complete demo bundle with keys, trust store, helper registry, signed artifacts, signed helper-registry handoffs, QR PNGs, and a manifest
 - one organization key can be added to a local trust store and used for verification/checking
-- a trusted verifier receipt can claim handoff authority only with schema minor `>=6`, signed trusted provenance, real-helper HTTPS, installed-host evidence, `handoff_authority=true`, `authority_level=pilot_handoff`, `integrity_only=false`, a trust-store SHA, and deployment evidence bound to the bundled service-smoke summary hash; public HTTPS deploy-pack evidence alone is not handoff-ready
+- a trusted verifier receipt can claim handoff authority only with schema minor `>=6`, signed trusted provenance, real-helper HTTPS, installed-host evidence, `handoff_authority=true`, `authority_level=pilot_handoff`, `integrity_only=false`, a trust-store SHA, and deployment evidence bound to the bundled service-smoke summary hash; runner materialization is preparation/status automation only, and public HTTPS deploy-pack evidence alone is not handoff-ready
 - a browser-local UI can verify a signed pack or bridge invite against a trusted organization key and list trusted paths
 - the browser-local UI can verify a signed helper registry artifact against the trust store before extracting it for bridge-invite checks
 - extracted signed helper registries remain bound to the signer organization during browser bridge-invite checks
