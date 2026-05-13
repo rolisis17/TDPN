@@ -26,7 +26,7 @@ ROADMAP_PROGRESS_FORWARD_SUMMARY_JSON="$TMP_DIR/roadmap_progress_forward_summary
 ROADMAP_PROGRESS_REPORT_FOCUS="${ROADMAP_PROGRESS_REPORT_FOCUS:-all}"
 
 case "$ROADMAP_PROGRESS_REPORT_FOCUS" in
-  all|access-recovery|access-recovery-source-binding)
+  all|access-recovery-source-binding)
     ;;
   *)
     echo "unsupported ROADMAP_PROGRESS_REPORT_FOCUS: $ROADMAP_PROGRESS_REPORT_FOCUS"
@@ -1250,6 +1250,31 @@ if ! grep -F -- '- Access Recovery next action placeholder unresolved: true' "$R
   cat "$REPORT_MD"
   exit 1
 fi
+if ! grep -F -- '- Access Recovery preferred operator action placeholder unresolved: true' "$REPORT_MD" >/dev/null 2>&1; then
+  echo "roadmap report should expose Access Recovery preferred action placeholder safety state"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! grep -F -- '- Access Recovery preferred operator action safe to execute as-is: false' "$REPORT_MD" >/dev/null 2>&1; then
+  echo "roadmap report should expose Access Recovery preferred action safe-to-execute state"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! grep -F -- '- Access Recovery preferred operator action operator input required: true' "$REPORT_MD" >/dev/null 2>&1; then
+  echo "roadmap report should expose Access Recovery preferred action operator-input requirement"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! grep -F -- '- Access Recovery preferred operator action placeholder keys:' "$REPORT_MD" | grep -F -- 'HELPER_PUBLIC_DNS' | grep -F -- 'TRUST_STORE' >/dev/null 2>&1; then
+  echo "roadmap report should expose Access Recovery preferred action placeholder keys"
+  cat "$REPORT_MD"
+  exit 1
+fi
+if ! grep -F -- '- Access Recovery preferred operator action placeholder resolution:' "$REPORT_MD" | grep -F -- 'Template command only' >/dev/null 2>&1; then
+  echo "roadmap report should expose Access Recovery preferred action placeholder resolution"
+  cat "$REPORT_MD"
+  exit 1
+fi
 if ! grep -F -- '- Access bridge service smoke freshness:' "$REPORT_MD" >/dev/null 2>&1; then
   echo "roadmap report should expose Access Recovery evidence freshness"
   cat "$REPORT_MD"
@@ -1408,6 +1433,9 @@ if ! jq -e \
   and .access_recovery_track.preferred_operator_next_action.placeholder_unresolved == true
   and (.access_recovery_track.preferred_operator_next_action.placeholder_keys | index("HELPER_PUBLIC_DNS") != null)
   and (.access_recovery_track.preferred_operator_next_action.placeholder_keys | index("TRUST_STORE") != null)
+  and .access_recovery_track.preferred_operator_next_action.safe_to_execute_as_is == false
+  and .access_recovery_track.preferred_operator_next_action.operator_input_required == true
+  and ((.access_recovery_track.preferred_operator_next_action.placeholder_resolution // "") | contains("Template command only"))
   and .vpn_track.readiness_status == "NOT_READY"
   and .vpn_track.roadmap_stage == "READY_FOR_MACHINE_C_SMOKE"
   and .vpn_track.vpn_rc_done_for_phase == false
@@ -1999,8 +2027,7 @@ if ! jq -e \
   cat "$TMP_DIR/roadmap_progress_access_recovery_trusted_verifier_fallback_source_binding_summary.json"
   exit 1
 fi
-if [[ "$ROADMAP_PROGRESS_REPORT_FOCUS" == "access-recovery-source-binding" \
-   || "$ROADMAP_PROGRESS_REPORT_FOCUS" == "access-recovery" ]]; then
+if [[ "$ROADMAP_PROGRESS_REPORT_FOCUS" == "access-recovery-source-binding" ]]; then
   finish_focus_if "$ROADMAP_PROGRESS_REPORT_FOCUS" "Access Recovery source-binding"
 fi
 
@@ -2074,8 +2101,6 @@ if ! jq -e '
   cat "$TMP_DIR/roadmap_progress_access_recovery_bad_deployment_smoke_binding_summary.json"
   exit 1
 fi
-finish_focus_if "access-recovery" "Access Recovery"
-
 echo "[roadmap-progress-report] Access Recovery installed-host public host must match the smoked helper"
 ACCESS_BRIDGE_WRONG_PUBLIC_HOST_INSTALL_SUMMARY_JSON="$TMP_DIR/access_bridge_host_install_wrong_public_host_summary.json"
 jq '

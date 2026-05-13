@@ -2101,7 +2101,7 @@ if ! jq -e '
   and .mode.evidence_generated == true
   and .mode.evidence_status == "collected_status_refresh_mismatch"
   and .readiness.handoff_authority_ready == true
-  and .readiness.handoff_complete == true
+  and .readiness.handoff_complete == false
   and .readiness.status_rollup_complete == false
   and .readiness.roadmap_status_synced == false
   and .readiness.trusted_verifier_pilot_handoff_ready == true
@@ -2154,7 +2154,7 @@ if ! jq -e '
   and .mode.evidence_generated == true
   and .mode.evidence_status == "collected_status_refresh_failed"
   and .readiness.handoff_authority_ready == true
-  and .readiness.handoff_complete == true
+  and .readiness.handoff_complete == false
   and .readiness.status_rollup_complete == false
   and .readiness.roadmap_status_synced == false
   and .readiness.trusted_verifier_pilot_handoff_ready == true
@@ -2202,7 +2202,7 @@ jq -e '
   and .readiness.handoff_authority_ready == true
   and .readiness.roadmap_ready == false
   and .readiness.roadmap_status_synced == false
-  and .readiness.handoff_complete == true
+  and .readiness.handoff_complete == false
   and .readiness.status_rollup_complete == false
   and .readiness.trusted_verifier_pilot_handoff_ready == true
   and .readiness.roadmap_access_recovery_pilot_handoff_ready == false

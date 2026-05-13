@@ -95,9 +95,10 @@ Purpose:
 The trusted verifier receipt must use
 access_bridge_pilot_evidence_bundle_verify_summary schema major 1, minor >= 6.
 
-Use --plan-only 1 to run the same strict preflight validation and emit the
-planned child commands/artifacts without invoking host-install, bundle,
-verifier, or roadmap child scripts.
+Use --plan-only 1 to validate command shape and emit planned child
+commands/artifacts without invoking host-install, bundle, verifier, or roadmap
+child scripts. Plan-only output is non-evidence; generated demo/example paths
+are allowed only for rehearsal and are rejected by live handoff runs.
 Live evidence runs require --code-file so the private access code is never
 handed off as inline plaintext. Inline --code is accepted only with
 --plan-only 1 for command-shape rehearsal.
@@ -947,16 +948,12 @@ write_summary() {
   verifier_authority_level="$(printf '%s\n' "$verify_obj" | jq -r 'if type == "object" then (.authority_level // "") else "" end')"
   verifier_integrity_only="$(printf '%s\n' "$verify_obj" | jq -r 'if type == "object" and (.integrity_only | type) == "boolean" then (.integrity_only | tostring) else "false" end')"
   roadmap_ready="$(printf '%s\n' "$roadmap_obj" | jq -r 'if type == "object" then (.access_recovery_pilot_handoff_ready // false | tostring) else "false" end')"
-  if [[ "$pilot_ready" == "true" ]]; then
-    handoff_complete="true"
-  else
-    handoff_complete="false"
-  fi
   if [[ "$status" == "pass" && "$pilot_ready" == "true" && "$roadmap_ready" == "true" ]]; then
     status_rollup_complete="true"
   else
     status_rollup_complete="false"
   fi
+  handoff_complete="$status_rollup_complete"
   evidence_scope="$(printf '%s\n' "$bundle_obj" | jq -r 'if type == "object" then (.evidence_scope // "") else "" end')"
   verifier_scope="$(printf '%s\n' "$verify_obj" | jq -r 'if type == "object" then ((.details.evidence_scope // .trusted_provenance.evidence_scope // .evidence_scope // "") | tostring) else "" end')"
   if [[ -n "$code" ]]; then

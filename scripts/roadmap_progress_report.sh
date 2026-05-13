@@ -14899,6 +14899,12 @@ cat >"$report_tmp" <<EOF_MD
 - Access Recovery next action safe to execute as-is: $(jq -r '.access_recovery_track.recommended_next_action.safe_to_execute_as_is | if . == null then "null" else tostring end' "$summary_json")
 - Access Recovery next action placeholder resolution: $(jq -r '.access_recovery_track.recommended_next_action.placeholder_resolution // "none"' "$summary_json")
 - Access Recovery preferred operator action: $(jq -r '.access_recovery_track.preferred_operator_next_action.command // "none"' "$summary_json")
+- Access Recovery preferred operator action reason: $(jq -r '.access_recovery_track.preferred_operator_next_action.reason // "none"' "$summary_json")
+- Access Recovery preferred operator action placeholder unresolved: $(jq -r '.access_recovery_track.preferred_operator_next_action.placeholder_unresolved | if . == null then "null" else tostring end' "$summary_json")
+- Access Recovery preferred operator action placeholder keys: $(jq -r '.access_recovery_track.preferred_operator_next_action.placeholder_keys | if . == null or length == 0 then "none" else join(",") end' "$summary_json")
+- Access Recovery preferred operator action safe to execute as-is: $(jq -r '.access_recovery_track.preferred_operator_next_action.safe_to_execute_as_is | if . == null then "null" else tostring end' "$summary_json")
+- Access Recovery preferred operator action operator input required: $(jq -r '.access_recovery_track.preferred_operator_next_action.operator_input_required | if . == null then "null" else tostring end' "$summary_json")
+- Access Recovery preferred operator action placeholder resolution: $(jq -r '.access_recovery_track.preferred_operator_next_action.placeholder_resolution // "none"' "$summary_json")
 
 ## VPN Track
 
