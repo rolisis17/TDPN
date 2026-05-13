@@ -486,7 +486,7 @@ print_failure_log_tail() {
 }
 
 validate_trusted_verifier_receipt() {
-  local smoke_sha deployment_sha host_sha receipt_errors
+  local bundle_sha smoke_sha deployment_sha host_sha receipt_errors
   if [[ ! -f "$verification_summary_json" ]]; then
     echo "Trusted verifier receipt was not written: $verification_summary_json"
     return 1
@@ -495,11 +495,12 @@ validate_trusted_verifier_receipt() {
     echo "Trusted verifier receipt is not valid JSON: $verification_summary_json"
     return 1
   fi
+  bundle_sha="$(sha256_value "$bundle_summary_json" 2>/dev/null || true)"
   smoke_sha="$(sha256_value "$bundle_service_smoke_summary_json" 2>/dev/null || true)"
   deployment_sha="$(sha256_value "$bundle_deployment_evidence_summary_json" 2>/dev/null || true)"
   host_sha="$(sha256_value "$bundle_host_install_check_summary_json" 2>/dev/null || true)"
-  if [[ -z "$smoke_sha" || -z "$deployment_sha" || -z "$host_sha" ]]; then
-    echo "Trusted verifier receipt cannot be bound because a child evidence summary hash is missing"
+  if [[ -z "$bundle_sha" || -z "$smoke_sha" || -z "$deployment_sha" || -z "$host_sha" ]]; then
+    echo "Trusted verifier receipt cannot be bound because a source or child evidence summary hash is missing"
     return 1
   fi
   receipt_errors="$(jq -r \
@@ -508,6 +509,7 @@ validate_trusted_verifier_receipt() {
     --arg provenance_out "$provenance_out" \
     --arg trust_store "$trust_store" \
     --arg base_url "$base_url" \
+    --arg bundle_sha "$bundle_sha" \
     --arg smoke_sha "$smoke_sha" \
     --arg deployment_sha "$deployment_sha" \
     --arg host_sha "$host_sha" \
@@ -578,6 +580,7 @@ validate_trusted_verifier_receipt() {
         if (.evidence_binding.helper_id // "") == "" then "evidence binding helper_id is missing" else empty end,
         if (.evidence_binding.organization_id // "") == "" then "evidence binding organization_id is missing" else empty end,
         if (.evidence_binding.registry_id // "") == "" then "evidence binding registry_id is missing" else empty end,
+        if (.evidence_binding.source_summary_sha256 // "") != $bundle_sha then "evidence binding source summary hash does not match current bundle summary" else empty end,
         if (.trusted_provenance.organization_id // "") != (.evidence_binding.organization_id // "") then "trusted provenance organization_id does not match evidence binding organization_id" else empty end,
         if (.trusted_provenance.trusted_org_id // "") != (.evidence_binding.organization_id // "") then "trusted provenance trusted_org_id does not match evidence binding organization_id" else empty end,
         if (.evidence_binding.base_url // "") != $base_url then "evidence binding base_url does not match current run" else empty end,
@@ -1127,7 +1130,7 @@ write_summary() {
         roadmap_ready: $roadmap_ready,
         roadmap_status_synced: $status_rollup_complete,
         handoff_complete: $handoff_complete,
-        handoff_authority_complete: $pilot_handoff_ready,
+        handoff_authority_complete: $handoff_complete,
         status_rollup_complete: $status_rollup_complete,
         verifier_claimed_pilot_handoff_ready: $verifier_claimed_pilot_handoff_ready,
         trusted_verifier_pilot_handoff_ready: $pilot_handoff_ready,

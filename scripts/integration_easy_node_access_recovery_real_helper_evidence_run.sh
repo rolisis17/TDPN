@@ -297,6 +297,7 @@ smoke_summary_json="$(jq -r '.artifacts.smoke_summary_json // ""' "$summary_json
 deployment_summary_json="$(jq -r '.artifacts.deployment_evidence_summary_json // ""' "$summary_json")"
 host_summary_json="$(jq -r '.artifacts.host_install_check_summary_json // ""' "$summary_json")"
 base_url="$(jq -r '.inputs.base_url // ""' "$summary_json")"
+source_sha="$(sha256_value "$summary_json")"
 smoke_sha="$(sha256_value "$smoke_summary_json")"
 deployment_sha="$(sha256_value "$deployment_summary_json")"
 host_sha="$(sha256_value "$host_summary_json")"
@@ -312,6 +313,8 @@ if [[ "$binding_mode" == "mismatch" ]]; then
 elif [[ "$binding_mode" == "deployment_smoke_mismatch" ]]; then
   deployment_smoke_sha="1111111111111111111111111111111111111111111111111111111111111111"
   deployment_binding_smoke_sha="2222222222222222222222222222222222222222222222222222222222222222"
+elif [[ "$binding_mode" == "source_summary_mismatch" ]]; then
+  source_sha="3333333333333333333333333333333333333333333333333333333333333333"
 fi
 case "$identity_mode" in
   match)
@@ -346,6 +349,7 @@ jq -n \
   --arg trust_store "$trust_store" \
   --arg trust_store_sha "$trust_store_sha" \
   --arg base_url "$base_url" \
+  --arg source_sha "$source_sha" \
   --arg smoke_summary_json "$smoke_summary_json" \
   --arg smoke_sha "$smoke_sha" \
   --arg deployment_summary_json "$deployment_summary_json" \
@@ -438,6 +442,7 @@ jq -n \
       helper_id: $helper_id,
       organization_id: $organization_id,
       registry_id: $registry_id,
+      source_summary_sha256: $source_sha,
       smoke_summary_json: $smoke_summary_json,
       smoke_summary_sha256: $smoke_sha,
       deployment_smoke_summary_sha256: $deployment_smoke_sha,
@@ -520,7 +525,7 @@ if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'access-recovery-real-he
   echo "easy_node expert help missing real helper evidence run note"
   exit 1
 fi
-if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'Use --roadmap-refresh 0 for diagnostics/verifier-only runs; those stop at verifier_ready and skip the roadmap status roll-up. The trusted verifier receipt remains the handoff authority'; then
+if ! ./scripts/easy_node.sh help --expert | grep -Fq -- 'Use --roadmap-refresh 0 for diagnostics/verifier-only runs; those stop at verifier_ready and skip the roadmap status roll-up, so handoff_authority_complete remains false until roadmap status is synced'; then
   echo "easy_node expert help missing real helper roadmap-refresh 0 verifier-ready semantics"
   exit 1
 fi
@@ -1690,6 +1695,7 @@ if ! jq -e '
   and .readiness.roadmap_ready == true
   and .readiness.roadmap_status_synced == true
   and .readiness.handoff_complete == true
+  and .readiness.handoff_authority_complete == true
   and .readiness.status_rollup_complete == true
   and .readiness.trusted_verifier_pilot_handoff_ready == true
   and .readiness.roadmap_access_recovery_pilot_handoff_ready == true
@@ -2014,6 +2020,56 @@ ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
 ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
 ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
 ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_BINDING_MODE=source_summary_mismatch \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/verifier-source-summary-binding-mismatch-summary.json" \
+  --print-summary-json 0 >"$TMP_DIR/verifier-source-summary-binding-mismatch.log" 2>&1
+verifier_source_summary_binding_mismatch_rc=$?
+set -e
+if [[ "$verifier_source_summary_binding_mismatch_rc" -eq 0 ]]; then
+  echo "expected mismatched verifier source summary evidence binding to fail"
+  cat "$TMP_DIR/verifier-source-summary-binding-mismatch-summary.json"
+  exit 1
+fi
+if [[ "$(wc -l <"$CAPTURE" | tr -d '[:space:]')" != "3" ]]; then
+  echo "expected host-check, bundle, and verifier only when source summary binding mismatches"
+  cat "$CAPTURE"
+  exit 1
+fi
+if ! grep -Fq -- "evidence binding source summary hash does not match current bundle summary" "$TMP_DIR/verifier-source-summary-binding-mismatch.log"; then
+  echo "expected source summary binding verifier validation error"
+  cat "$TMP_DIR/verifier-source-summary-binding-mismatch.log"
+  exit 1
+fi
+jq -e '
+  .status == "fail"
+  and .stage == "verify"
+  and .readiness.verifier_claimed_pilot_handoff_ready == true
+  and .readiness.trusted_verifier_pilot_handoff_ready == false
+  and .readiness.handoff_authority_ready == false
+  and .readiness.handoff_complete == false
+  and .readiness.handoff_authority_complete == false
+' "$TMP_DIR/verifier-source-summary-binding-mismatch-summary.json" >/dev/null
+
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
 FAKE_ACCESS_RECOVERY_REAL_HELPER_VERIFY_BINDING_MODE=deployment_smoke_mismatch \
 ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
   --base-url https://helper.gpm-pilot.net \
@@ -2260,6 +2316,7 @@ jq -e '
   and .readiness.roadmap_ready == false
   and .readiness.roadmap_status_synced == false
   and .readiness.handoff_complete == false
+  and .readiness.handoff_authority_complete == false
   and .readiness.status_rollup_complete == false
   and .readiness.trusted_verifier_pilot_handoff_ready == true
   and .readiness.roadmap_access_recovery_pilot_handoff_ready == false

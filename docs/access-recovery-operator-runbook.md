@@ -169,8 +169,9 @@ gate.
 
 Do not use `access-recovery-real-helper-evidence-run --roadmap-refresh 0` to
 produce the final status roll-up. That mode is diagnostics/verifier-only and
-intentionally skips the roadmap refresh. The trusted verifier receipt remains
-the pilot handoff authority.
+intentionally skips the roadmap refresh. The trusted verifier receipt is still
+the verifier authority, but `handoff_authority_complete` remains false until
+the roadmap status roll-up is synced.
 
 Use the lower-level commands below only when debugging a specific stage.
 When the helper's public reverse proxy is intentionally enforcing client
@@ -237,7 +238,7 @@ bash ./scripts/access_bridge_host_install_check.sh \
 
 Keep the smoke JSON, deployment-evidence JSON, host-install-check JSON, trusted provenance JSON, verifier summary JSON, deployed service config hash, signed invite id, signed registry id, proxy config hashes, `manifest.sha256`, `<bundle>.tar.gz`, `<bundle>.tar.gz.sha256`, and operator timestamp in the incident/evidence folder. Do not include the plaintext access code in evidence shared beyond the helper/operator pair; the bundle skips access-code/private-key-looking deploy-pack files. Local unsigned integrity checks are diagnostic rehearsal output only. Pilot/operator handoff verification must require trusted provenance, write the verifier summary receipt bound to the current evidence hashes, reject demo-marked trust stores unless explicitly allowed for diagnostics, validate the bundled smoke/deployment/host evidence semantics, and reject manifest tamper, tar checksum mismatch, unsafe tar paths, tar links, and untrusted provenance. Do not promote from a roadmap report alone; use the trusted verifier receipt.
 
-Before marking handoff ready, check the verifier receipt shows schema minor `6` or newer, `trusted_pilot_receipt_ready=true`, `pilot_handoff_ready=true`, `handoff_authority=true`, `authority_level=pilot_handoff`, `integrity_only=false`, `pilot_handoff_criteria.bundled_child_evidence_semantic_ok=true`, `pilot_handoff_criteria.deployment_smoke_summary_sha256_matches_bundle=true`, `pilot_handoff_criteria.evidence_freshness_ok=true`, `pilot_handoff_criteria.installed_host_evidence_present=true`, real-helper HTTPS provenance from a non-demo `trust_store`, `trust_store_sha256_present=true`, `public_key_file_absent=true`, dev trust-store override disabled, smoke/deployment/host summary SHA-256 bindings, and deployment evidence bound to the same smoke summary hash as the bundled service-smoke JSON. If a verifier summary says `status=pass` but `authority_level=integrity_only`, it is diagnostic integrity output, not pilot/operator handoff authority.
+Before marking handoff ready, check the verifier receipt shows schema minor `6` or newer, `trusted_pilot_receipt_ready=true`, `pilot_handoff_ready=true`, `handoff_authority=true`, `authority_level=pilot_handoff`, `integrity_only=false`, `pilot_handoff_criteria.bundled_child_evidence_semantic_ok=true`, `pilot_handoff_criteria.deployment_smoke_summary_sha256_matches_bundle=true`, `pilot_handoff_criteria.evidence_freshness_ok=true`, `pilot_handoff_criteria.installed_host_evidence_present=true`, real-helper HTTPS provenance from a non-demo `trust_store`, `trust_store_sha256_present=true`, `public_key_file_absent=true`, dev trust-store override disabled, source/smoke/deployment/host summary SHA-256 bindings, deployment evidence bound to the same smoke summary hash as the bundled service-smoke JSON, and `evidence_binding.source_summary_sha256` bound to the exact bundle summary hash. If a verifier summary says `status=pass` but `authority_level=integrity_only`, it is diagnostic integrity output, not pilot/operator handoff authority.
 
 7. Fail closed on rotation or quarantine:
 

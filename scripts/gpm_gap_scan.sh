@@ -1107,7 +1107,7 @@ if [[ -n "$roadmap_summary_json" ]]; then
        || "$access_recovery_trusted_pilot_receipt_ready" != "true" \
        || "$access_recovery_verifier_pilot_handoff_ready" != "true" \
        || "$access_recovery_needs_attention" != "false" ]]; then
-      access_recovery_gap_text="Roadmap Access Recovery handoff state is not ready (status=${access_recovery_track_status:-unknown}, access_recovery_pilot_handoff_ready=${access_recovery_pilot_handoff_ready}, access_recovery_track.pilot_handoff_ready=${access_recovery_track_pilot_handoff_ready}, trusted_verifier_receipt_valid=${access_recovery_trusted_verifier_receipt_valid}, trusted_pilot_receipt_ready=${access_recovery_trusted_pilot_receipt_ready}, verifier_pilot_handoff_ready=${access_recovery_verifier_pilot_handoff_ready}); trusted verifier receipt remains the handoff authority."
+      access_recovery_gap_text="Roadmap Access Recovery handoff state is not ready (status=${access_recovery_track_status:-unknown}, access_recovery_pilot_handoff_ready=${access_recovery_pilot_handoff_ready}, access_recovery_track.pilot_handoff_ready=${access_recovery_track_pilot_handoff_ready}, trusted_verifier_receipt_valid=${access_recovery_trusted_verifier_receipt_valid}, trusted_pilot_receipt_ready=${access_recovery_trusted_pilot_receipt_ready}, verifier_pilot_handoff_ready=${access_recovery_verifier_pilot_handoff_ready}); verifier authority and synced roadmap status are both required before handoff is complete."
       if [[ -n "$access_recovery_operator_next_action_command" ]]; then
         access_recovery_gap_text+=" Operator next action (${access_recovery_operator_next_action_source}"
         if [[ -n "$access_recovery_operator_next_action_id" ]]; then

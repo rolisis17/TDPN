@@ -329,7 +329,7 @@ bash "$SCRIPT_UNDER_TEST" \
 
 assert_file_matches_regex "$ACCESS_RECOVERY_UNKNOWN_ATTENTION_SUMMARY_JSON" '"missing_next"[[:space:]]*:[[:space:]]*6' "missing access recovery needs_attention should add a handoff blocker"
 assert_file_contains "$ACCESS_RECOVERY_UNKNOWN_ATTENTION_SUMMARY_JSON" 'Roadmap Access Recovery handoff state is not ready (status=pilot-handoff-ready, access_recovery_pilot_handoff_ready=true' "missing access recovery needs_attention blocker text missing"
-assert_file_contains "$ACCESS_RECOVERY_UNKNOWN_ATTENTION_SUMMARY_JSON" 'trusted verifier receipt remains the handoff authority' "missing access recovery needs_attention blocker should preserve authority wording"
+assert_file_contains "$ACCESS_RECOVERY_UNKNOWN_ATTENTION_SUMMARY_JSON" 'verifier authority and synced roadmap status are both required before handoff is complete' "missing access recovery needs_attention blocker should preserve authority wording"
 
 echo "[gpm-gap-scan] missing roadmap fields fail closed"
 MISSING_FIELDS_STATUS_DOC="$TMP_DIR/missing_fields_status.md"
