@@ -2423,6 +2423,9 @@ access_recovery_verifier_evidence_json() {
   local age_sec=""
   local age_json="null"
   local stale_json="true"
+  local source_summary_candidate=""
+  local source_summary_resolved=""
+  local source_summary_sha256=""
 
   if ! [[ "$max_age_sec" =~ ^[0-9]+$ ]]; then
     max_age_sec="86400"
@@ -2492,10 +2495,32 @@ access_recovery_verifier_evidence_json() {
   if [[ "$(evidence_pack_summary_stale_01 "$path" "$max_age_sec")" == "0" ]]; then
     stale_json="false"
   fi
+  while IFS= read -r source_summary_candidate || [[ -n "$source_summary_candidate" ]]; do
+    source_summary_candidate="$(trim "$source_summary_candidate")"
+    [[ -n "$source_summary_candidate" ]] || continue
+    source_summary_resolved="$(resolve_path_with_base "$source_summary_candidate" "$path")"
+    if [[ -n "$source_summary_resolved" && -f "$source_summary_resolved" ]] \
+       && [[ "$(json_file_valid_01 "$source_summary_resolved")" == "1" ]] \
+       && [[ "$(jq -r '.schema.id // ""' "$source_summary_resolved" 2>/dev/null || true)" == "access_bridge_pilot_evidence_bundle_summary" ]]; then
+      source_summary_sha256="$(file_sha256_or_empty "$source_summary_resolved")"
+      break
+    fi
+  done < <(
+    jq -r '
+      [
+        .artifacts.source_summary_json,
+        .inputs.summary_json
+      ]
+      | .[]
+      | strings
+      | select(length > 0)
+    ' "$path" 2>/dev/null || true
+  )
 
   jq -c \
     --arg input "$path" \
     --arg expected_schema_id "$expected_schema_id" \
+    --arg resolved_source_summary_sha256 "$source_summary_sha256" \
     --argjson summary_age_sec "$age_json" \
     --argjson summary_stale "$stale_json" \
     --argjson summary_max_age_sec "$max_age_sec" '
@@ -2733,6 +2758,7 @@ access_recovery_verifier_evidence_json() {
             summary_evidence_scope: str_or_null(.trusted_provenance.summary_evidence_scope),
             generated_at_utc_present: generated_at_ready,
             evidence_binding_hashes_present: evidence_binding_ready,
+            resolved_source_summary_sha256: (if $resolved_source_summary_sha256 == "" then null else $resolved_source_summary_sha256 end),
             source_summary_sha256: str_or_null(.evidence_binding.source_summary_sha256),
             base_url: str_or_null(.evidence_binding.base_url),
             helper_id: str_or_null(.evidence_binding.helper_id),
@@ -2765,6 +2791,7 @@ access_recovery_current_bundle_artifacts_json() {
   local host_install_json="$3"
   local bundle_verify_json="$4"
   local summary_json=""
+  local summary_sha256=""
   local provenance_json=""
   local candidate=""
   local candidate_resolved=""
@@ -2778,6 +2805,7 @@ access_recovery_current_bundle_artifacts_json() {
        && [[ "$(json_file_valid_01 "$candidate_resolved")" == "1" ]] \
        && [[ "$(jq -r '.schema.id // ""' "$candidate_resolved" 2>/dev/null || true)" == "access_bridge_pilot_evidence_bundle_summary" ]]; then
       summary_json="$candidate"
+      summary_sha256="$(file_sha256_or_empty "$candidate_resolved")"
       provenance_json="$(jq -r '
         [
           .artifacts.provenance_json,
@@ -2834,9 +2862,11 @@ access_recovery_current_bundle_artifacts_json() {
 
   jq -cn \
     --arg summary_json "$summary_json" \
+    --arg summary_sha256 "$summary_sha256" \
     --arg provenance_json "$provenance_json" \
     '{
       summary_json: (if $summary_json == "" then null else $summary_json end),
+      summary_sha256: (if $summary_sha256 == "" then null else $summary_sha256 end),
       provenance_json: (if $provenance_json == "" then null else $provenance_json end)
     }'
 }
@@ -2967,6 +2997,22 @@ access_recovery_track_json_from_evidence() {
           };
       def verifier_binding:
         {
+          source_summary_sha256_match: (
+            ($bundle_verify.details.source_summary_sha256 // "") as $claimed_source_sha256
+            | ([
+                $bundle_artifacts.summary_sha256,
+                $bundle_verify.details.resolved_source_summary_sha256
+              ]
+              | map(select((. // "") != ""))
+              | unique) as $source_summary_hashes
+            | if ($bundle_verify.available == true) then
+              (
+                ($claimed_source_sha256 != "")
+                and (($source_summary_hashes | length) > 0)
+                and ($source_summary_hashes | all(. == $claimed_source_sha256))
+              )
+            else true end
+          ),
           base_url_match: same_nonempty($bundle_verify.details.base_url; $service_smoke.details.base_url),
           helper_id_match: same_nonempty($bundle_verify.details.helper_id; $service_smoke.details.helper_id),
           organization_id_match: same_nonempty($bundle_verify.details.organization_id; $service_smoke.details.organization_id),
@@ -2978,7 +3024,7 @@ access_recovery_track_json_from_evidence() {
           deployment_evidence_summary_sha256_match: same_nonempty($bundle_verify.details.deployment_evidence_summary_sha256; $deployment_evidence.source_summary_sha256),
           host_install_check_summary_sha256_match: same_nonempty($bundle_verify.details.host_install_check_summary_sha256; $host_install.source_summary_sha256)
         }
-        | . + {ok: ([.base_url_match, .helper_id_match, .organization_id_match, .registry_id_match, .smoke_summary_sha256_match, .deployment_smoke_summary_sha256_match, .deployment_evidence_binding_smoke_summary_sha256_match, .deployment_smoke_bundle_match_flag, .deployment_evidence_summary_sha256_match, .host_install_check_summary_sha256_match] | all(. == true))};
+        | . + {ok: ([.source_summary_sha256_match, .base_url_match, .helper_id_match, .organization_id_match, .registry_id_match, .smoke_summary_sha256_match, .deployment_smoke_summary_sha256_match, .deployment_evidence_binding_smoke_summary_sha256_match, .deployment_smoke_bundle_match_flag, .deployment_evidence_summary_sha256_match, .host_install_check_summary_sha256_match] | all(. == true))};
       def smoke_base_url:
         ($service_smoke.details.base_url // "");
       def normalize_remote_ip($ip):
