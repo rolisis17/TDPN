@@ -29,6 +29,7 @@ reject_phrase README.md "one-command local Access Recovery demo/pilot artifacts"
 require_phrase README.md "contract/local coverage only"
 require_phrase README.md "real pilot handoff still requires real helper HTTPS evidence, signed provenance, and trusted verification"
 require_phrase README.md "local integrity-only checks may omit provenance for diagnostics only and are never pilot/operator handoff receipts"
+require_phrase README.md 'real-helper smoke, deployment evidence, bundle, or `access-recovery-real-helper-evidence-run` command'
 require_phrase README.md 'Pilot-ready verifier receipts must use schema minor `6` or newer'
 require_phrase README.md 'deployment evidence bound to the exact service-smoke summary hash'
 

@@ -523,7 +523,7 @@ vm_command_source_value_looks_placeholder_01() {
 access_recovery_trust_store_value_looks_placeholder_01() {
   local value
   value="$(trim "${1:-}")"
-  for token in TRUST_STORE ACCESS_RECOVERY_TRUST_STORE PROVENANCE_TRUST_STORE; do
+  for token in TRUST_STORE ACCESS_RECOVERY_TRUST_STORE ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE PROVENANCE_TRUST_STORE; do
     if value_matches_placeholder_token_01 "$value" "$token"; then
       return 0
     fi
@@ -541,7 +541,10 @@ access_recovery_mtls_file_value_looks_placeholder_01() {
   local value normalized
   value="$(trim "${1:-}")"
   value="$(strip_optional_wrapping_quotes "$value")"
-  for token in MTLS_CA_FILE MTLS_CLIENT_CERT_FILE MTLS_CLIENT_KEY_FILE; do
+  for token in \
+    MTLS_CA_FILE ACCESS_RECOVERY_MTLS_CA ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CA \
+    MTLS_CLIENT_CERT_FILE ACCESS_RECOVERY_MTLS_CLIENT_CERT ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_CERT \
+    MTLS_CLIENT_KEY_FILE ACCESS_RECOVERY_MTLS_CLIENT_KEY ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_KEY; do
     if value_matches_placeholder_token_01 "$value" "$token"; then
       return 0
     fi
@@ -736,10 +739,84 @@ resolve_runtime_access_recovery_input_01() {
   return 0
 }
 
+resolve_runtime_access_recovery_input_from_env_01() {
+  local target_base="${1:-}"
+  local kind="${2:-text}"
+  local env_name value
+  shift 2 || true
+  for env_name in "$@"; do
+    value="$(trim "${!env_name:-}")"
+    if [[ -n "$value" ]]; then
+      resolve_runtime_access_recovery_input_01 "$target_base" "$value" "env:$env_name" "$kind" || true
+      return 0
+    fi
+  done
+  return 1
+}
+
+append_invalid_access_recovery_runtime_input_detail_01() {
+  local current="${1:-}"
+  local label="${2:-}"
+  local source="${3:-}"
+  local configured="${4:-}"
+  if [[ -z "$source" || "$configured" == "1" ]]; then
+    printf '%s' "$current"
+    return 0
+  fi
+  if [[ -n "$current" ]]; then
+    printf '%s, %s=%s' "$current" "$label" "$source"
+  else
+    printf '%s=%s' "$label" "$source"
+  fi
+}
+
+access_recovery_invalid_runtime_inputs_detail_01() {
+  local detail=""
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "HELPER_PUBLIC_DNS" "$runtime_access_recovery_helper_public_dns_source" "$runtime_access_recovery_helper_public_dns_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "HELPER_ID" "$runtime_access_recovery_helper_id_source" "$runtime_access_recovery_helper_id_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "ORG_ID" "$runtime_access_recovery_org_id_source" "$runtime_access_recovery_org_id_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "ORG_NAME" "$runtime_access_recovery_org_name_source" "$runtime_access_recovery_org_name_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "PRIVATE_CODE_FILE" "$runtime_access_recovery_private_code_file_source" "$runtime_access_recovery_private_code_file_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "BRIDGE_SERVICE_CONFIG" "$runtime_access_recovery_bridge_service_config_source" "$runtime_access_recovery_bridge_service_config_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "BRIDGE_DEPLOY_PACK" "$runtime_access_recovery_bridge_deploy_pack_source" "$runtime_access_recovery_bridge_deploy_pack_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "PROVENANCE_PRIVATE_KEY_FILE" "$runtime_access_recovery_provenance_private_key_file_source" "$runtime_access_recovery_provenance_private_key_file_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "ACCESS_RECOVERY_REPORTS_DIR" "$runtime_access_recovery_reports_dir_source" "$runtime_access_recovery_reports_dir_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "ACCESS_RECOVERY_INSTALL_DIR" "$runtime_access_recovery_install_dir_source" "$runtime_access_recovery_install_dir_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "ACCESS_RECOVERY_SYSTEMD_UNIT_FILE" "$runtime_access_recovery_systemd_unit_file_source" "$runtime_access_recovery_systemd_unit_file_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "ACCESS_RECOVERY_PROXY_KIND" "$runtime_access_recovery_proxy_kind_source" "$runtime_access_recovery_proxy_kind_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "ACCESS_RECOVERY_PROXY_CONFIG_FILE" "$runtime_access_recovery_proxy_config_file_source" "$runtime_access_recovery_proxy_config_file_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "TRUST_STORE" "$runtime_access_recovery_trust_store_source" "$runtime_access_recovery_trust_store_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "MTLS_CA_FILE" "$runtime_access_recovery_mtls_ca_source" "$runtime_access_recovery_mtls_ca_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "MTLS_CLIENT_CERT_FILE" "$runtime_access_recovery_mtls_client_cert_source" "$runtime_access_recovery_mtls_client_cert_configured")"
+  detail="$(append_invalid_access_recovery_runtime_input_detail_01 "$detail" "MTLS_CLIENT_KEY_FILE" "$runtime_access_recovery_mtls_client_key_source" "$runtime_access_recovery_mtls_client_key_configured")"
+  printf '%s' "$detail"
+}
+
 access_recovery_operator_input_value_looks_placeholder_01() {
   local value normalized
   value="$(trim "${1:-}")"
   value="$(strip_optional_wrapping_quotes "$value")"
+  for token in \
+    HELPER_PUBLIC_DNS ACCESS_RECOVERY_HELPER_PUBLIC_DNS ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_HELPER_PUBLIC_DNS \
+    HELPER_ID ACCESS_RECOVERY_HELPER_ID ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_HELPER_ID \
+    ORG_ID ACCESS_RECOVERY_ORG_ID ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_ORG_ID \
+    ORG_NAME ACCESS_RECOVERY_ORG_NAME ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_ORG_NAME \
+    PRIVATE_CODE_FILE ACCESS_RECOVERY_PRIVATE_CODE_FILE ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PRIVATE_CODE_FILE \
+    BRIDGE_SERVICE_CONFIG ACCESS_RECOVERY_BRIDGE_SERVICE_CONFIG ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_BRIDGE_SERVICE_CONFIG \
+    BRIDGE_DEPLOY_PACK ACCESS_RECOVERY_BRIDGE_DEPLOY_PACK ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_BRIDGE_DEPLOY_PACK \
+    PROVENANCE_PRIVATE_KEY_FILE ACCESS_RECOVERY_PROVENANCE_PRIVATE_KEY_FILE ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PROVENANCE_PRIVATE_KEY_FILE \
+    ACCESS_RECOVERY_REPORTS_DIR ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_REPORTS_DIR \
+    ACCESS_RECOVERY_INSTALL_DIR ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_INSTALL_DIR \
+    ACCESS_RECOVERY_SYSTEMD_UNIT_FILE ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_SYSTEMD_UNIT_FILE \
+    ACCESS_RECOVERY_PROXY_KIND ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PROXY_KIND \
+    ACCESS_RECOVERY_PROXY_CONFIG_FILE ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PROXY_CONFIG_FILE \
+    MTLS_CA_FILE ACCESS_RECOVERY_MTLS_CA ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CA \
+    MTLS_CLIENT_CERT_FILE ACCESS_RECOVERY_MTLS_CLIENT_CERT ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_CERT \
+    MTLS_CLIENT_KEY_FILE ACCESS_RECOVERY_MTLS_CLIENT_KEY ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_KEY; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
   normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
   if [[ "$normalized" =~ (^|[^A-Z0-9_-])(HELPER_PUBLIC_DNS|HELPER_ID|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|ACCESS_RECOVERY_REPORTS_DIR|ACCESS_RECOVERY_INSTALL_DIR|ACCESS_RECOVERY_SYSTEMD_UNIT_FILE|ACCESS_RECOVERY_PROXY_KIND|ACCESS_RECOVERY_PROXY_CONFIG_FILE|MTLS_CA_FILE|MTLS_CLIENT_CERT_FILE|MTLS_CLIENT_KEY_FILE)([^A-Z0-9_-]|$) ]]; then
     return 0
@@ -3417,80 +3494,80 @@ fi
 
 if [[ "$access_recovery_helper_public_dns_override_arg_provided" == "1" ]]; then
   resolve_runtime_access_recovery_input_01 runtime_access_recovery_helper_public_dns "$access_recovery_helper_public_dns_override_arg" "cli:--access-recovery-helper-public-dns" "public_dns" || true
-elif [[ -n "$(trim "$access_recovery_helper_public_dns_override_env")" ]]; then
-  resolve_runtime_access_recovery_input_01 runtime_access_recovery_helper_public_dns "$access_recovery_helper_public_dns_override_env" "env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_HELPER_PUBLIC_DNS" "public_dns" || true
+elif resolve_runtime_access_recovery_input_from_env_01 runtime_access_recovery_helper_public_dns public_dns ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_HELPER_PUBLIC_DNS ACCESS_RECOVERY_HELPER_PUBLIC_DNS HELPER_PUBLIC_DNS; then
+  :
 fi
 
 if [[ "$access_recovery_helper_id_override_arg_provided" == "1" ]]; then
   resolve_runtime_access_recovery_input_01 runtime_access_recovery_helper_id "$access_recovery_helper_id_override_arg" "cli:--access-recovery-helper-id" "identity" || true
-elif [[ -n "$(trim "$access_recovery_helper_id_override_env")" ]]; then
-  resolve_runtime_access_recovery_input_01 runtime_access_recovery_helper_id "$access_recovery_helper_id_override_env" "env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_HELPER_ID" "identity" || true
+elif resolve_runtime_access_recovery_input_from_env_01 runtime_access_recovery_helper_id identity ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_HELPER_ID ACCESS_RECOVERY_HELPER_ID HELPER_ID; then
+  :
 fi
 
 if [[ "$access_recovery_org_id_override_arg_provided" == "1" ]]; then
   resolve_runtime_access_recovery_input_01 runtime_access_recovery_org_id "$access_recovery_org_id_override_arg" "cli:--access-recovery-org-id" "identity" || true
-elif [[ -n "$(trim "$access_recovery_org_id_override_env")" ]]; then
-  resolve_runtime_access_recovery_input_01 runtime_access_recovery_org_id "$access_recovery_org_id_override_env" "env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_ORG_ID" "identity" || true
+elif resolve_runtime_access_recovery_input_from_env_01 runtime_access_recovery_org_id identity ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_ORG_ID ACCESS_RECOVERY_ORG_ID ORG_ID; then
+  :
 fi
 
 if [[ "$access_recovery_org_name_override_arg_provided" == "1" ]]; then
   resolve_runtime_access_recovery_input_01 runtime_access_recovery_org_name "$access_recovery_org_name_override_arg" "cli:--access-recovery-org-name" "org_name" || true
-elif [[ -n "$(trim "$access_recovery_org_name_override_env")" ]]; then
-  resolve_runtime_access_recovery_input_01 runtime_access_recovery_org_name "$access_recovery_org_name_override_env" "env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_ORG_NAME" "org_name" || true
+elif resolve_runtime_access_recovery_input_from_env_01 runtime_access_recovery_org_name org_name ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_ORG_NAME ACCESS_RECOVERY_ORG_NAME ORG_NAME; then
+  :
 fi
 
 if [[ "$access_recovery_private_code_file_override_arg_provided" == "1" ]]; then
   resolve_runtime_access_recovery_input_01 runtime_access_recovery_private_code_file "$access_recovery_private_code_file_override_arg" "cli:--access-recovery-private-code-file" "file" || true
-elif [[ -n "$(trim "$access_recovery_private_code_file_override_env")" ]]; then
-  resolve_runtime_access_recovery_input_01 runtime_access_recovery_private_code_file "$access_recovery_private_code_file_override_env" "env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PRIVATE_CODE_FILE" "file" || true
+elif resolve_runtime_access_recovery_input_from_env_01 runtime_access_recovery_private_code_file file ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PRIVATE_CODE_FILE ACCESS_RECOVERY_PRIVATE_CODE_FILE PRIVATE_CODE_FILE; then
+  :
 fi
 
 if [[ "$access_recovery_bridge_service_config_override_arg_provided" == "1" ]]; then
   resolve_runtime_access_recovery_input_01 runtime_access_recovery_bridge_service_config "$access_recovery_bridge_service_config_override_arg" "cli:--access-recovery-bridge-service-config" "file" || true
-elif [[ -n "$(trim "$access_recovery_bridge_service_config_override_env")" ]]; then
-  resolve_runtime_access_recovery_input_01 runtime_access_recovery_bridge_service_config "$access_recovery_bridge_service_config_override_env" "env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_BRIDGE_SERVICE_CONFIG" "file" || true
+elif resolve_runtime_access_recovery_input_from_env_01 runtime_access_recovery_bridge_service_config file ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_BRIDGE_SERVICE_CONFIG ACCESS_RECOVERY_BRIDGE_SERVICE_CONFIG BRIDGE_SERVICE_CONFIG; then
+  :
 fi
 
 if [[ "$access_recovery_bridge_deploy_pack_override_arg_provided" == "1" ]]; then
   resolve_runtime_access_recovery_input_01 runtime_access_recovery_bridge_deploy_pack "$access_recovery_bridge_deploy_pack_override_arg" "cli:--access-recovery-bridge-deploy-pack" "dir" || true
-elif [[ -n "$(trim "$access_recovery_bridge_deploy_pack_override_env")" ]]; then
-  resolve_runtime_access_recovery_input_01 runtime_access_recovery_bridge_deploy_pack "$access_recovery_bridge_deploy_pack_override_env" "env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_BRIDGE_DEPLOY_PACK" "dir" || true
+elif resolve_runtime_access_recovery_input_from_env_01 runtime_access_recovery_bridge_deploy_pack dir ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_BRIDGE_DEPLOY_PACK ACCESS_RECOVERY_BRIDGE_DEPLOY_PACK BRIDGE_DEPLOY_PACK; then
+  :
 fi
 
 if [[ "$access_recovery_provenance_private_key_file_override_arg_provided" == "1" ]]; then
   resolve_runtime_access_recovery_input_01 runtime_access_recovery_provenance_private_key_file "$access_recovery_provenance_private_key_file_override_arg" "cli:--access-recovery-provenance-private-key-file" "file" || true
-elif [[ -n "$(trim "$access_recovery_provenance_private_key_file_override_env")" ]]; then
-  resolve_runtime_access_recovery_input_01 runtime_access_recovery_provenance_private_key_file "$access_recovery_provenance_private_key_file_override_env" "env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PROVENANCE_PRIVATE_KEY_FILE" "file" || true
+elif resolve_runtime_access_recovery_input_from_env_01 runtime_access_recovery_provenance_private_key_file file ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PROVENANCE_PRIVATE_KEY_FILE ACCESS_RECOVERY_PROVENANCE_PRIVATE_KEY_FILE PROVENANCE_PRIVATE_KEY_FILE; then
+  :
 fi
 
 if [[ "$access_recovery_reports_dir_override_arg_provided" == "1" ]]; then
   resolve_runtime_access_recovery_input_01 runtime_access_recovery_reports_dir "$access_recovery_reports_dir_override_arg" "cli:--access-recovery-reports-dir" "path" || true
-elif [[ -n "$(trim "$access_recovery_reports_dir_override_env")" ]]; then
-  resolve_runtime_access_recovery_input_01 runtime_access_recovery_reports_dir "$access_recovery_reports_dir_override_env" "env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_REPORTS_DIR" "path" || true
+elif resolve_runtime_access_recovery_input_from_env_01 runtime_access_recovery_reports_dir path ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_REPORTS_DIR ACCESS_RECOVERY_REPORTS_DIR; then
+  :
 fi
 
 if [[ "$access_recovery_install_dir_override_arg_provided" == "1" ]]; then
   resolve_runtime_access_recovery_input_01 runtime_access_recovery_install_dir "$access_recovery_install_dir_override_arg" "cli:--access-recovery-install-dir" "path" || true
-elif [[ -n "$(trim "$access_recovery_install_dir_override_env")" ]]; then
-  resolve_runtime_access_recovery_input_01 runtime_access_recovery_install_dir "$access_recovery_install_dir_override_env" "env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_INSTALL_DIR" "path" || true
+elif resolve_runtime_access_recovery_input_from_env_01 runtime_access_recovery_install_dir path ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_INSTALL_DIR ACCESS_RECOVERY_INSTALL_DIR; then
+  :
 fi
 
 if [[ "$access_recovery_systemd_unit_file_override_arg_provided" == "1" ]]; then
   resolve_runtime_access_recovery_input_01 runtime_access_recovery_systemd_unit_file "$access_recovery_systemd_unit_file_override_arg" "cli:--access-recovery-systemd-unit-file" "path" || true
-elif [[ -n "$(trim "$access_recovery_systemd_unit_file_override_env")" ]]; then
-  resolve_runtime_access_recovery_input_01 runtime_access_recovery_systemd_unit_file "$access_recovery_systemd_unit_file_override_env" "env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_SYSTEMD_UNIT_FILE" "path" || true
+elif resolve_runtime_access_recovery_input_from_env_01 runtime_access_recovery_systemd_unit_file path ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_SYSTEMD_UNIT_FILE ACCESS_RECOVERY_SYSTEMD_UNIT_FILE; then
+  :
 fi
 
 if [[ "$access_recovery_proxy_kind_override_arg_provided" == "1" ]]; then
   resolve_runtime_access_recovery_input_01 runtime_access_recovery_proxy_kind "$access_recovery_proxy_kind_override_arg" "cli:--access-recovery-proxy-kind" "proxy_kind" || true
-elif [[ -n "$(trim "$access_recovery_proxy_kind_override_env")" ]]; then
-  resolve_runtime_access_recovery_input_01 runtime_access_recovery_proxy_kind "$access_recovery_proxy_kind_override_env" "env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PROXY_KIND" "proxy_kind" || true
+elif resolve_runtime_access_recovery_input_from_env_01 runtime_access_recovery_proxy_kind proxy_kind ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PROXY_KIND ACCESS_RECOVERY_PROXY_KIND; then
+  :
 fi
 
 if [[ "$access_recovery_proxy_config_file_override_arg_provided" == "1" ]]; then
   resolve_runtime_access_recovery_input_01 runtime_access_recovery_proxy_config_file "$access_recovery_proxy_config_file_override_arg" "cli:--access-recovery-proxy-config-file" "path" || true
-elif [[ -n "$(trim "$access_recovery_proxy_config_file_override_env")" ]]; then
-  resolve_runtime_access_recovery_input_01 runtime_access_recovery_proxy_config_file "$access_recovery_proxy_config_file_override_env" "env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PROXY_CONFIG_FILE" "path" || true
+elif resolve_runtime_access_recovery_input_from_env_01 runtime_access_recovery_proxy_config_file path ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PROXY_CONFIG_FILE ACCESS_RECOVERY_PROXY_CONFIG_FILE; then
+  :
 fi
 
 runtime_value_candidate="$(trim "$access_recovery_trust_store_override_arg")"
@@ -3502,18 +3579,33 @@ if [[ "$access_recovery_trust_store_override_arg_provided" == "1" ]]; then
   else
     runtime_access_recovery_trust_store_source="cli:--access-recovery-trust-store=placeholder_or_empty"
   fi
-elif [[ -n "$(trim "${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE:-}")" ]] && ! access_recovery_trust_store_value_looks_placeholder_01 "${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE:-}"; then
-  runtime_access_recovery_trust_store="$(trim "${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE:-}")"
-  runtime_access_recovery_trust_store_source="env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE"
-  runtime_access_recovery_trust_store_configured="1"
-elif [[ -n "$(trim "${ACCESS_RECOVERY_TRUST_STORE:-}")" ]] && ! access_recovery_trust_store_value_looks_placeholder_01 "${ACCESS_RECOVERY_TRUST_STORE:-}"; then
-  runtime_access_recovery_trust_store="$(trim "${ACCESS_RECOVERY_TRUST_STORE:-}")"
-  runtime_access_recovery_trust_store_source="env:ACCESS_RECOVERY_TRUST_STORE"
-  runtime_access_recovery_trust_store_configured="1"
-elif [[ -n "$(trim "${TRUST_STORE:-}")" ]] && ! access_recovery_trust_store_value_looks_placeholder_01 "${TRUST_STORE:-}"; then
-  runtime_access_recovery_trust_store="$(trim "${TRUST_STORE:-}")"
-  runtime_access_recovery_trust_store_source="env:TRUST_STORE"
-  runtime_access_recovery_trust_store_configured="1"
+elif [[ -n "$(trim "${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE:-}")" ]]; then
+  runtime_value_candidate="$(trim "${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE:-}")"
+  if ! access_recovery_trust_store_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_trust_store="$runtime_value_candidate"
+    runtime_access_recovery_trust_store_source="env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE"
+    runtime_access_recovery_trust_store_configured="1"
+  else
+    runtime_access_recovery_trust_store_source="env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_TRUST_STORE=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "${ACCESS_RECOVERY_TRUST_STORE:-}")" ]]; then
+  runtime_value_candidate="$(trim "${ACCESS_RECOVERY_TRUST_STORE:-}")"
+  if ! access_recovery_trust_store_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_trust_store="$runtime_value_candidate"
+    runtime_access_recovery_trust_store_source="env:ACCESS_RECOVERY_TRUST_STORE"
+    runtime_access_recovery_trust_store_configured="1"
+  else
+    runtime_access_recovery_trust_store_source="env:ACCESS_RECOVERY_TRUST_STORE=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "${TRUST_STORE:-}")" ]]; then
+  runtime_value_candidate="$(trim "${TRUST_STORE:-}")"
+  if ! access_recovery_trust_store_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_trust_store="$runtime_value_candidate"
+    runtime_access_recovery_trust_store_source="env:TRUST_STORE"
+    runtime_access_recovery_trust_store_configured="1"
+  else
+    runtime_access_recovery_trust_store_source="env:TRUST_STORE=placeholder_or_empty"
+  fi
 fi
 if [[ "$runtime_access_recovery_trust_store_configured" == "1" ]] \
    && { [[ ! -f "$runtime_access_recovery_trust_store" ]] || [[ ! -r "$runtime_access_recovery_trust_store" ]]; }; then
@@ -3538,10 +3630,33 @@ if [[ "$access_recovery_mtls_ca_override_arg_provided" == "1" ]]; then
   else
     runtime_access_recovery_mtls_ca_source="cli:--access-recovery-mtls-ca=placeholder_or_empty"
   fi
-elif [[ -n "$(trim "$access_recovery_mtls_ca_override_env")" ]] && ! access_recovery_mtls_file_value_looks_placeholder_01 "$access_recovery_mtls_ca_override_env"; then
-  runtime_access_recovery_mtls_ca="$(trim "$access_recovery_mtls_ca_override_env")"
-  runtime_access_recovery_mtls_ca_source="env:ACCESS_RECOVERY_MTLS_CA"
-  runtime_access_recovery_mtls_ca_configured="1"
+elif [[ -n "$(trim "${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CA:-}")" ]]; then
+  runtime_value_candidate="$(trim "${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CA:-}")"
+  if ! access_recovery_mtls_file_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_mtls_ca="$runtime_value_candidate"
+    runtime_access_recovery_mtls_ca_source="env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CA"
+    runtime_access_recovery_mtls_ca_configured="1"
+  else
+    runtime_access_recovery_mtls_ca_source="env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CA=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "${ACCESS_RECOVERY_MTLS_CA:-}")" ]]; then
+  runtime_value_candidate="$(trim "${ACCESS_RECOVERY_MTLS_CA:-}")"
+  if ! access_recovery_mtls_file_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_mtls_ca="$runtime_value_candidate"
+    runtime_access_recovery_mtls_ca_source="env:ACCESS_RECOVERY_MTLS_CA"
+    runtime_access_recovery_mtls_ca_configured="1"
+  else
+    runtime_access_recovery_mtls_ca_source="env:ACCESS_RECOVERY_MTLS_CA=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "${MTLS_CA_FILE:-}")" ]]; then
+  runtime_value_candidate="$(trim "${MTLS_CA_FILE:-}")"
+  if ! access_recovery_mtls_file_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_mtls_ca="$runtime_value_candidate"
+    runtime_access_recovery_mtls_ca_source="env:MTLS_CA_FILE"
+    runtime_access_recovery_mtls_ca_configured="1"
+  else
+    runtime_access_recovery_mtls_ca_source="env:MTLS_CA_FILE=placeholder_or_empty"
+  fi
 fi
 if [[ "$runtime_access_recovery_mtls_ca_configured" == "1" ]] \
    && { [[ ! -f "$runtime_access_recovery_mtls_ca" ]] || [[ ! -r "$runtime_access_recovery_mtls_ca" ]]; }; then
@@ -3558,10 +3673,33 @@ if [[ "$access_recovery_mtls_client_cert_override_arg_provided" == "1" ]]; then
   else
     runtime_access_recovery_mtls_client_cert_source="cli:--access-recovery-mtls-client-cert=placeholder_or_empty"
   fi
-elif [[ -n "$(trim "$access_recovery_mtls_client_cert_override_env")" ]] && ! access_recovery_mtls_file_value_looks_placeholder_01 "$access_recovery_mtls_client_cert_override_env"; then
-  runtime_access_recovery_mtls_client_cert="$(trim "$access_recovery_mtls_client_cert_override_env")"
-  runtime_access_recovery_mtls_client_cert_source="env:ACCESS_RECOVERY_MTLS_CLIENT_CERT"
-  runtime_access_recovery_mtls_client_cert_configured="1"
+elif [[ -n "$(trim "${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_CERT:-}")" ]]; then
+  runtime_value_candidate="$(trim "${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_CERT:-}")"
+  if ! access_recovery_mtls_file_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_mtls_client_cert="$runtime_value_candidate"
+    runtime_access_recovery_mtls_client_cert_source="env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_CERT"
+    runtime_access_recovery_mtls_client_cert_configured="1"
+  else
+    runtime_access_recovery_mtls_client_cert_source="env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_CERT=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "${ACCESS_RECOVERY_MTLS_CLIENT_CERT:-}")" ]]; then
+  runtime_value_candidate="$(trim "${ACCESS_RECOVERY_MTLS_CLIENT_CERT:-}")"
+  if ! access_recovery_mtls_file_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_mtls_client_cert="$runtime_value_candidate"
+    runtime_access_recovery_mtls_client_cert_source="env:ACCESS_RECOVERY_MTLS_CLIENT_CERT"
+    runtime_access_recovery_mtls_client_cert_configured="1"
+  else
+    runtime_access_recovery_mtls_client_cert_source="env:ACCESS_RECOVERY_MTLS_CLIENT_CERT=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "${MTLS_CLIENT_CERT_FILE:-}")" ]]; then
+  runtime_value_candidate="$(trim "${MTLS_CLIENT_CERT_FILE:-}")"
+  if ! access_recovery_mtls_file_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_mtls_client_cert="$runtime_value_candidate"
+    runtime_access_recovery_mtls_client_cert_source="env:MTLS_CLIENT_CERT_FILE"
+    runtime_access_recovery_mtls_client_cert_configured="1"
+  else
+    runtime_access_recovery_mtls_client_cert_source="env:MTLS_CLIENT_CERT_FILE=placeholder_or_empty"
+  fi
 fi
 if [[ "$runtime_access_recovery_mtls_client_cert_configured" == "1" ]] \
    && { [[ ! -f "$runtime_access_recovery_mtls_client_cert" ]] || [[ ! -r "$runtime_access_recovery_mtls_client_cert" ]]; }; then
@@ -3578,10 +3716,33 @@ if [[ "$access_recovery_mtls_client_key_override_arg_provided" == "1" ]]; then
   else
     runtime_access_recovery_mtls_client_key_source="cli:--access-recovery-mtls-client-key=placeholder_or_empty"
   fi
-elif [[ -n "$(trim "$access_recovery_mtls_client_key_override_env")" ]] && ! access_recovery_mtls_file_value_looks_placeholder_01 "$access_recovery_mtls_client_key_override_env"; then
-  runtime_access_recovery_mtls_client_key="$(trim "$access_recovery_mtls_client_key_override_env")"
-  runtime_access_recovery_mtls_client_key_source="env:ACCESS_RECOVERY_MTLS_CLIENT_KEY"
-  runtime_access_recovery_mtls_client_key_configured="1"
+elif [[ -n "$(trim "${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_KEY:-}")" ]]; then
+  runtime_value_candidate="$(trim "${ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_KEY:-}")"
+  if ! access_recovery_mtls_file_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_mtls_client_key="$runtime_value_candidate"
+    runtime_access_recovery_mtls_client_key_source="env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_KEY"
+    runtime_access_recovery_mtls_client_key_configured="1"
+  else
+    runtime_access_recovery_mtls_client_key_source="env:ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_KEY=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "${ACCESS_RECOVERY_MTLS_CLIENT_KEY:-}")" ]]; then
+  runtime_value_candidate="$(trim "${ACCESS_RECOVERY_MTLS_CLIENT_KEY:-}")"
+  if ! access_recovery_mtls_file_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_mtls_client_key="$runtime_value_candidate"
+    runtime_access_recovery_mtls_client_key_source="env:ACCESS_RECOVERY_MTLS_CLIENT_KEY"
+    runtime_access_recovery_mtls_client_key_configured="1"
+  else
+    runtime_access_recovery_mtls_client_key_source="env:ACCESS_RECOVERY_MTLS_CLIENT_KEY=placeholder_or_empty"
+  fi
+elif [[ -n "$(trim "${MTLS_CLIENT_KEY_FILE:-}")" ]]; then
+  runtime_value_candidate="$(trim "${MTLS_CLIENT_KEY_FILE:-}")"
+  if ! access_recovery_mtls_file_value_looks_placeholder_01 "$runtime_value_candidate"; then
+    runtime_access_recovery_mtls_client_key="$runtime_value_candidate"
+    runtime_access_recovery_mtls_client_key_source="env:MTLS_CLIENT_KEY_FILE"
+    runtime_access_recovery_mtls_client_key_configured="1"
+  else
+    runtime_access_recovery_mtls_client_key_source="env:MTLS_CLIENT_KEY_FILE=placeholder_or_empty"
+  fi
 fi
 if [[ "$runtime_access_recovery_mtls_client_key_configured" == "1" ]] \
    && { [[ ! -f "$runtime_access_recovery_mtls_client_key" ]] || [[ ! -r "$runtime_access_recovery_mtls_client_key" ]]; }; then
@@ -3996,6 +4157,15 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         "$action_command" \
         "$runtime_access_recovery_trust_store"
     )"
+  fi
+  if [[ -z "$action_preflight_failure_kind" ]] \
+     && action_id_is_access_recovery_action_01 "$action_id" \
+     && [[ -n "$action_command" ]]; then
+    invalid_access_recovery_runtime_inputs="$(access_recovery_invalid_runtime_inputs_detail_01)"
+    if [[ -n "$invalid_access_recovery_runtime_inputs" ]]; then
+      action_preflight_failure_kind="missing_access_recovery_operator_input_precondition"
+      action_preflight_notes="Invalid explicit Access Recovery operator inputs: $invalid_access_recovery_runtime_inputs"
+    fi
   fi
   if action_id_is_access_recovery_action_01 "$action_id" \
      && [[ -n "$action_command" ]]; then

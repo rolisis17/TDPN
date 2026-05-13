@@ -826,6 +826,15 @@ JSON
 }
 JSON
     ;;
+  access_recovery_real_helper_concrete_fake_exec)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"real_helper_https_evidence","label":"Real helper HTTPS evidence","command":"bash \"$FAKE_ACCESS_RECOVERY_REAL_HELPER\" access-recovery-real-helper-evidence-run --base-url https://helper-pilot.gpm.net --path-id helper-web --code-file $ACCESS_RECOVERY_OPERATOR_CODE_FILE --config-json $ACCESS_RECOVERY_OPERATOR_CONFIG_JSON --deploy-pack-dir $ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK --provenance-private-key-file $ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY --provenance-org-id pilot-org --provenance-org-name 'Pilot Org' --trust-store $ACCESS_RECOVERY_TRUST_STORE_FILE --reports-dir $ACCESS_RECOVERY_OPERATOR_REPORTS_DIR","reason":"test-real-helper-concrete-operator-input-override-validation","requires_real_hosts":true}
+  ]
+}
+JSON
+    ;;
   access_recovery_service_smoke_helper_id_placeholder)
     cat >"$summary_json" <<JSON
 {
@@ -2141,7 +2150,8 @@ if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
   and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
   and (.actions[0].notes | contains("HELPER_PUBLIC_DNS"))
   and (.actions[0].notes | contains("PROVENANCE_PRIVATE_KEY_FILE"))
-  and (.actions[0].command | contains("--trust-store " + $trust_store))
+  and (.actions[0].command | contains("--trust-store "))
+  and (.actions[0].command | contains("access_recovery_trust_store.json"))
   and (.actions[0].command | contains("HELPER_PUBLIC_DNS"))
   and (.actions[0].next_operator_action | contains("--include-id real_helper_https_evidence"))
   and (.actions[0].next_operator_action | contains("HELPER_PUBLIC_DNS"))
@@ -2210,11 +2220,16 @@ if ! jq -e \
   exit 1
 fi
 if ! grep -F -- "--base-url https://helper-pilot.gpm.net" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
-   ! grep -F -- "--code-file $ACCESS_RECOVERY_OPERATOR_CODE_FILE" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
-   ! grep -F -- "--config-json $ACCESS_RECOVERY_OPERATOR_CONFIG_JSON" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
-   ! grep -F -- "--deploy-pack-dir $ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
-   ! grep -F -- "--provenance-private-key-file $ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
-   ! grep -F -- "--trust-store $ACCESS_RECOVERY_TRUST_STORE_FILE" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "--code-file " "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "operator-code.txt" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "--config-json " "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "operator-bridge-service-config.json" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "--deploy-pack-dir " "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "operator-bridge-deploy-pack" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "--provenance-private-key-file " "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "operator-provenance.key" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "--trust-store " "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
+   ! grep -F -- "access_recovery_trust_store.json" "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null ||
    grep -E 'HELPER_PUBLIC_DNS|PRIVATE_CODE_FILE|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|PROVENANCE_PRIVATE_KEY_FILE|ORG_ID|ORG_NAME|TRUST_STORE' "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" >/dev/null; then
   echo "Access Recovery materialized real-helper capture mismatch"
   cat "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
@@ -2318,6 +2333,173 @@ if ! jq -e '
 ' "$SUMMARY_ACCESS_RECOVERY_OPERATOR_DEMO_DNS" >/dev/null; then
   echo "Access Recovery demo helper DNS summary mismatch"
   cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_DEMO_DNS"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery real-helper rejects invalid explicit overrides even for concrete commands"
+SUMMARY_ACCESS_RECOVERY_OPERATOR_CONCRETE_INVALID="$TMP_DIR/summary_access_recovery_operator_concrete_invalid.json"
+REPORTS_ACCESS_RECOVERY_OPERATOR_CONCRETE_INVALID="$TMP_DIR/reports_access_recovery_operator_concrete_invalid"
+: >"$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_real_helper_concrete_fake_exec \
+FAKE_ACCESS_RECOVERY_REAL_HELPER="$FAKE_ACCESS_RECOVERY_REAL_HELPER" \
+FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE="$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" \
+ACCESS_RECOVERY_OPERATOR_CODE_FILE="$ACCESS_RECOVERY_OPERATOR_CODE_FILE" \
+ACCESS_RECOVERY_OPERATOR_CONFIG_JSON="$ACCESS_RECOVERY_OPERATOR_CONFIG_JSON" \
+ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK="$ACCESS_RECOVERY_OPERATOR_DEPLOY_PACK" \
+ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY="$ACCESS_RECOVERY_OPERATOR_PROVENANCE_KEY" \
+ACCESS_RECOVERY_OPERATOR_REPORTS_DIR="$ACCESS_RECOVERY_OPERATOR_REPORTS_DIR" \
+ACCESS_RECOVERY_TRUST_STORE_FILE="$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_OPERATOR_CONCRETE_INVALID" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_OPERATOR_CONCRETE_INVALID" \
+  --include-id real_helper_https_evidence \
+  --access-recovery-helper-public-dns helper-demo.gpm.net \
+  --access-recovery-trust-store "$ACCESS_RECOVERY_TRUST_STORE_FILE" \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_operator_concrete_invalid.log" 2>&1
+access_recovery_operator_concrete_invalid_rc=$?
+set -e
+if [[ "$access_recovery_operator_concrete_invalid_rc" != "2" ]]; then
+  echo "expected invalid explicit Access Recovery override hard-fail rc=2, got rc=$access_recovery_operator_concrete_invalid_rc"
+  cat "$TMP_DIR/access_recovery_operator_concrete_invalid.log"
+  cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_CONCRETE_INVALID"
+  exit 1
+fi
+if [[ -s "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE" ]]; then
+  echo "Access Recovery real-helper ran despite invalid explicit override on concrete command"
+  cat "$FAKE_ACCESS_RECOVERY_REAL_HELPER_CAPTURE"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .inputs.access_recovery_helper_public_dns_configured == false
+  and (.inputs.access_recovery_helper_public_dns_source | contains("demo_or_example_identity"))
+  and .actions[0].id == "real_helper_https_evidence"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
+  and (.actions[0].notes | contains("Invalid explicit Access Recovery operator inputs"))
+  and (.actions[0].notes | contains("HELPER_PUBLIC_DNS"))
+  and (.actions[0].command | contains("https://helper-pilot.gpm.net"))
+' "$SUMMARY_ACCESS_RECOVERY_OPERATOR_CONCRETE_INVALID" >/dev/null; then
+  echo "Access Recovery invalid explicit override on concrete command summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_OPERATOR_CONCRETE_INVALID"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery concrete action rejects placeholder trust-store env override"
+ACCESS_RECOVERY_CONCRETE_ENV_ROADMAP_SUMMARY="$TMP_DIR/access_recovery_concrete_env_roadmap_summary.json"
+ACCESS_RECOVERY_CONCRETE_ENV_ROADMAP_REPORT="$TMP_DIR/access_recovery_concrete_env_roadmap_report.md"
+ROADMAP_NEXT_ACTIONS_SCENARIO=access_recovery_placeholder_like_concrete_values \
+PASS1="$PASS1" \
+"$FAKE_ROADMAP" \
+  --summary-json "$ACCESS_RECOVERY_CONCRETE_ENV_ROADMAP_SUMMARY" \
+  --report-md "$ACCESS_RECOVERY_CONCRETE_ENV_ROADMAP_REPORT"
+SUMMARY_ACCESS_RECOVERY_TRUST_STORE_ENV_PLACEHOLDER="$TMP_DIR/summary_access_recovery_trust_store_env_placeholder.json"
+REPORTS_ACCESS_RECOVERY_TRUST_STORE_ENV_PLACEHOLDER="$TMP_DIR/reports_access_recovery_trust_store_env_placeholder"
+set +e
+TRUST_STORE=TRUST_STORE \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_TRUST_STORE_ENV_PLACEHOLDER" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_ENV_PLACEHOLDER" \
+  --roadmap-summary-json "$ACCESS_RECOVERY_CONCRETE_ENV_ROADMAP_SUMMARY" \
+  --roadmap-report-md "$ACCESS_RECOVERY_CONCRETE_ENV_ROADMAP_REPORT" \
+  --include-id access_bridge_service_smoke \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_trust_store_env_placeholder.log" 2>&1
+access_recovery_trust_store_env_placeholder_rc=$?
+set -e
+if [[ "$access_recovery_trust_store_env_placeholder_rc" != "2" ]]; then
+  echo "expected placeholder trust-store env override hard-fail rc=2, got rc=$access_recovery_trust_store_env_placeholder_rc"
+  cat "$TMP_DIR/access_recovery_trust_store_env_placeholder.log"
+  cat "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_ENV_PLACEHOLDER"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .inputs.access_recovery_trust_store_configured == false
+  and (.inputs.access_recovery_trust_store_source | contains("env:TRUST_STORE=placeholder_or_empty"))
+  and .actions[0].id == "access_bridge_service_smoke"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
+  and (.actions[0].notes | contains("Invalid explicit Access Recovery operator inputs"))
+  and (.actions[0].notes | contains("TRUST_STORE"))
+' "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_ENV_PLACEHOLDER" >/dev/null; then
+  echo "Access Recovery placeholder trust-store env override summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_ENV_PLACEHOLDER"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery concrete action rejects env-name helper placeholder override"
+SUMMARY_ACCESS_RECOVERY_HELPER_ENV_NAME_PLACEHOLDER="$TMP_DIR/summary_access_recovery_helper_env_name_placeholder.json"
+REPORTS_ACCESS_RECOVERY_HELPER_ENV_NAME_PLACEHOLDER="$TMP_DIR/reports_access_recovery_helper_env_name_placeholder"
+set +e
+ACCESS_RECOVERY_HELPER_PUBLIC_DNS=ACCESS_RECOVERY_HELPER_PUBLIC_DNS \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_HELPER_ENV_NAME_PLACEHOLDER" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_HELPER_ENV_NAME_PLACEHOLDER" \
+  --roadmap-summary-json "$ACCESS_RECOVERY_CONCRETE_ENV_ROADMAP_SUMMARY" \
+  --roadmap-report-md "$ACCESS_RECOVERY_CONCRETE_ENV_ROADMAP_REPORT" \
+  --include-id access_bridge_service_smoke \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_helper_env_name_placeholder.log" 2>&1
+access_recovery_helper_env_name_placeholder_rc=$?
+set -e
+if [[ "$access_recovery_helper_env_name_placeholder_rc" != "2" ]]; then
+  echo "expected env-name helper placeholder override hard-fail rc=2, got rc=$access_recovery_helper_env_name_placeholder_rc"
+  cat "$TMP_DIR/access_recovery_helper_env_name_placeholder.log"
+  cat "$SUMMARY_ACCESS_RECOVERY_HELPER_ENV_NAME_PLACEHOLDER"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .inputs.access_recovery_helper_public_dns_configured == false
+  and (.inputs.access_recovery_helper_public_dns_source | contains("env:ACCESS_RECOVERY_HELPER_PUBLIC_DNS:placeholder_or_empty"))
+  and .actions[0].id == "access_bridge_service_smoke"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
+  and (.actions[0].notes | contains("Invalid explicit Access Recovery operator inputs"))
+  and (.actions[0].notes | contains("HELPER_PUBLIC_DNS=env:ACCESS_RECOVERY_HELPER_PUBLIC_DNS:placeholder_or_empty"))
+' "$SUMMARY_ACCESS_RECOVERY_HELPER_ENV_NAME_PLACEHOLDER" >/dev/null; then
+  echo "Access Recovery env-name helper placeholder override summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_HELPER_ENV_NAME_PLACEHOLDER"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Access Recovery concrete action rejects placeholder mTLS env override"
+SUMMARY_ACCESS_RECOVERY_MTLS_ENV_PLACEHOLDER="$TMP_DIR/summary_access_recovery_mtls_env_placeholder.json"
+REPORTS_ACCESS_RECOVERY_MTLS_ENV_PLACEHOLDER="$TMP_DIR/reports_access_recovery_mtls_env_placeholder"
+set +e
+MTLS_CA_FILE=MTLS_CA_FILE \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ACCESS_RECOVERY_MTLS_ENV_PLACEHOLDER" \
+  --summary-json "$SUMMARY_ACCESS_RECOVERY_MTLS_ENV_PLACEHOLDER" \
+  --roadmap-summary-json "$ACCESS_RECOVERY_CONCRETE_ENV_ROADMAP_SUMMARY" \
+  --roadmap-report-md "$ACCESS_RECOVERY_CONCRETE_ENV_ROADMAP_REPORT" \
+  --include-id access_bridge_service_smoke \
+  --print-summary-json 0 >"$TMP_DIR/access_recovery_mtls_env_placeholder.log" 2>&1
+access_recovery_mtls_env_placeholder_rc=$?
+set -e
+if [[ "$access_recovery_mtls_env_placeholder_rc" != "2" ]]; then
+  echo "expected placeholder mTLS env override hard-fail rc=2, got rc=$access_recovery_mtls_env_placeholder_rc"
+  cat "$TMP_DIR/access_recovery_mtls_env_placeholder.log"
+  cat "$SUMMARY_ACCESS_RECOVERY_MTLS_ENV_PLACEHOLDER"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .inputs.access_recovery_mtls_ca_configured == false
+  and (.inputs.access_recovery_mtls_ca_source | contains("env:MTLS_CA_FILE=placeholder_or_empty"))
+  and .actions[0].id == "access_bridge_service_smoke"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_access_recovery_operator_input_precondition"
+  and (.actions[0].notes | contains("Invalid explicit Access Recovery operator inputs"))
+  and (.actions[0].notes | contains("MTLS_CA_FILE"))
+' "$SUMMARY_ACCESS_RECOVERY_MTLS_ENV_PLACEHOLDER" >/dev/null; then
+  echo "Access Recovery placeholder mTLS env override summary mismatch"
+  cat "$SUMMARY_ACCESS_RECOVERY_MTLS_ENV_PLACEHOLDER"
   exit 1
 fi
 
@@ -2578,9 +2760,12 @@ if ! jq -e \
   and .actions[0].id == "access_bridge_service_smoke"
   and .actions[0].status == "pass"
   and (.actions[0].command | contains("--require-mtls 1"))
-  and (.actions[0].command | contains("--cacert " + $mtls_ca))
-  and (.actions[0].command | contains("--client-cert " + $mtls_cert))
-  and (.actions[0].command | contains("--client-key " + $mtls_key))
+  and (.actions[0].command | contains("--cacert "))
+  and (.actions[0].command | contains("access_recovery_mtls_ca.pem"))
+  and (.actions[0].command | contains("--client-cert "))
+  and (.actions[0].command | contains("access_recovery_mtls_client_cert.pem"))
+  and (.actions[0].command | contains("--client-key "))
+  and (.actions[0].command | contains("access_recovery_mtls_client_key.pem"))
   and ((.actions[0].command | contains("MTLS_CA_FILE")) | not)
   and ((.actions[0].command | contains("MTLS_CLIENT_CERT_FILE")) | not)
   and ((.actions[0].command | contains("MTLS_CLIENT_KEY_FILE")) | not)
@@ -2613,7 +2798,8 @@ if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
   and .inputs.access_recovery_trust_store_source == "cli:--access-recovery-trust-store"
   and .actions[0].id == "trusted_pilot_evidence_verify"
   and .actions[0].status == "pass"
-  and (.actions[0].command | contains("--trust-store " + $trust_store))
+  and (.actions[0].command | contains("--trust-store "))
+  and (.actions[0].command | contains("access_recovery_trust_store.json"))
   and (.actions[0].command | contains("TRUST_STORE") | not)
 ' "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_OVERRIDE" >/dev/null; then
   echo "Access Recovery trust-store override summary mismatch"
@@ -2646,7 +2832,8 @@ if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
   and .rc == 0
   and .inputs.access_recovery_trust_store == $trust_store
   and .actions[0].status == "pass"
-  and (.actions[0].command | contains("--trust-store " + $trust_store))
+  and (.actions[0].command | contains("--trust-store "))
+  and (.actions[0].command | contains("access_recovery_trust_store.json"))
   and (.actions[0].command | contains("TRUST_STORE_receipt.json"))
   and (.actions[0].command | contains("TRUST_STORE_AUDIT"))
 ' "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_PRECISE_OVERRIDE" >/dev/null; then
@@ -2654,7 +2841,8 @@ if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" '
   cat "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_PRECISE_OVERRIDE"
   exit 1
 fi
-if ! grep -F -- "--trust-store $ACCESS_RECOVERY_TRUST_STORE_FILE" "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" >/dev/null \
+if ! grep -F -- "--trust-store " "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" >/dev/null \
+   || ! grep -F -- "access_recovery_trust_store.json" "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" >/dev/null \
    || ! grep -F -- "TRUST_STORE_receipt.json" "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" >/dev/null \
    || ! grep -F -- "TRUST_STORE_AUDIT" "$FAKE_ACCESS_RECOVERY_VERIFY_CAPTURE" >/dev/null; then
   echo "Access Recovery verifier capture did not preserve non-trust-store placeholder-like tokens"
@@ -2683,7 +2871,8 @@ if ! jq -e --arg trust_store "$ACCESS_RECOVERY_TRUST_STORE_FILE" --arg action_st
   and .rc == 0
   and .inputs.access_recovery_trust_store == $trust_store
   and .actions[0].status == "pass"
-  and (.actions[0].command | contains("--trust-store " + $trust_store))
+  and (.actions[0].command | contains("--trust-store "))
+  and (.actions[0].command | contains("access_recovery_trust_store.json"))
   and (.actions[0].command | contains($action_store) | not)
 ' "$SUMMARY_ACCESS_RECOVERY_TRUST_STORE_CONCRETE_OVERRIDE" >/dev/null; then
   echo "Access Recovery concrete trust-store override summary mismatch"
