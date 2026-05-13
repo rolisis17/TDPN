@@ -563,6 +563,46 @@ if [[ -s "$CAPTURE" ]]; then
   cat "$CAPTURE"
   exit 1
 fi
+
+for bundle_child_override_var in \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SERVICE_SMOKE_SCRIPT \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_DEPLOYMENT_EVIDENCE_SCRIPT \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_HOST_INSTALL_CHECK_SCRIPT; do
+  echo "[easy-node-access-recovery-real-helper-evidence-run] bundle child override is diagnostic-only: $bundle_child_override_var"
+  : >"$CAPTURE"
+  set +e
+  env \
+    ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+    "$bundle_child_override_var=$FAKE_HOST_CHECK" \
+    ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+    ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+      --base-url https://helper.gpm-pilot.net \
+      --path-id helper-web \
+      --code-file "$CODE_FILE" \
+      --config-json "$CONFIG_JSON" \
+      --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+      "${INSTALLED_HOST_ARGS[@]}" \
+      --provenance-private-key-file "$PROVENANCE_KEY" \
+      --provenance-org-id pilot-org \
+      --provenance-org-name "Pilot Org" \
+      --trust-store "$TRUST_STORE" \
+      --summary-json "$TMP_DIR/bundle-child-override-block-${bundle_child_override_var}.json" \
+      --print-summary-json 0 >"$TMP_DIR/bundle-child-override-block-${bundle_child_override_var}.log" 2>&1
+  bundle_child_override_block_rc=$?
+  set -e
+  if [[ "$bundle_child_override_block_rc" -ne 2 ]] ||
+    ! grep -Fq "${bundle_child_override_var} override is disabled for real helper evidence" "$TMP_DIR/bundle-child-override-block-${bundle_child_override_var}.log"; then
+    echo "expected bundle child script override to fail closed unless explicitly allowed: $bundle_child_override_var"
+    cat "$TMP_DIR/bundle-child-override-block-${bundle_child_override_var}.log"
+    exit 1
+  fi
+  if [[ -s "$CAPTURE" ]]; then
+    echo "blocked bundle child script override should not invoke fake child scripts: $bundle_child_override_var"
+    cat "$CAPTURE"
+    exit 1
+  fi
+done
+
 export ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_ALLOW_SCRIPT_OVERRIDES=1
 
 set +e

@@ -588,7 +588,7 @@ jq -n \
   --argjson refresh_roadmap "$( [[ "$refresh_roadmap" == "1" ]] && printf 'true' || printf 'false' )" \
   '{
     version: 1,
-    schema: {id: "access_recovery_local_evidence_refresh_summary", major: 1, minor: 1},
+    schema: {id: "access_recovery_local_evidence_refresh_summary", major: 1, minor: 2},
     generated_at_utc: $generated_at_utc,
     status: $status,
     rc: (if $status == "pass" then 0 else 1 end),
@@ -630,7 +630,21 @@ jq -n \
     recommended_next_action: {
       id: "real_helper_https_evidence",
       command: "./scripts/easy_node.sh access-recovery-real-helper-evidence-run --base-url https://HELPER_PUBLIC_DNS --path-id helper-web --code-file PRIVATE_CODE_FILE --config-json BRIDGE_SERVICE_CONFIG --deploy-pack-dir BRIDGE_DEPLOY_PACK --host-install-evidence-mode installed-host --install-dir /etc/gpm/access-bridge --systemd-unit-file /etc/systemd/system/gpm-access-bridge.service --proxy-kind caddy --proxy-config-file /etc/caddy/Caddyfile.d/gpm-access-bridge.caddy --provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE --provenance-org-id ORG_ID --provenance-org-name ORG_NAME --trust-store TRUST_STORE --reports-dir .easy-node-logs/access-recovery-pilot",
-      reason: "Local evidence is only a rehearsal; real beta handoff still needs signed helper HTTPS deployment evidence from the actual host and trusted provenance verification."
+      reason: "Local evidence is only a rehearsal; real beta handoff still needs signed helper HTTPS deployment evidence from the actual host and trusted provenance verification.",
+      placeholder_unresolved: true,
+      placeholder_keys: [
+        "HELPER_PUBLIC_DNS",
+        "PRIVATE_CODE_FILE",
+        "BRIDGE_SERVICE_CONFIG",
+        "BRIDGE_DEPLOY_PACK",
+        "PROVENANCE_PRIVATE_KEY_FILE",
+        "ORG_ID",
+        "ORG_NAME",
+        "TRUST_STORE"
+      ],
+      safe_to_execute_as_is: false,
+      operator_input_required: true,
+      placeholder_resolution: "Template command only; replace Access Recovery placeholders with concrete pilot host, credential, config, deploy-pack, provenance, trust-store, and organization values before execution."
     }
   }' >"$summary_json"
 

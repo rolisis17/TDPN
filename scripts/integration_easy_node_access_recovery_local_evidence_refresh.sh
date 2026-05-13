@@ -118,6 +118,13 @@ if ! jq -e '
   and (.artifacts.roadmap_summary_json | length > 0)
   and .recommended_next_action.id == "real_helper_https_evidence"
   and ((.recommended_next_action.reason // "") | contains("Local evidence is only a rehearsal"))
+  and .recommended_next_action.placeholder_unresolved == true
+  and .recommended_next_action.safe_to_execute_as_is == false
+  and .recommended_next_action.operator_input_required == true
+  and ((.recommended_next_action.placeholder_keys // []) | index("HELPER_PUBLIC_DNS") != null)
+  and ((.recommended_next_action.placeholder_keys // []) | index("PRIVATE_CODE_FILE") != null)
+  and ((.recommended_next_action.placeholder_keys // []) | index("TRUST_STORE") != null)
+  and ((.recommended_next_action.placeholder_resolution // "") | contains("Template command only"))
 ' "$REAL_SUMMARY" >/dev/null; then
   echo "easy node access recovery local evidence refresh integration failed: real local summary contract mismatch"
   cat "$REAL_SUMMARY"
@@ -126,7 +133,7 @@ fi
 VERIFY_SUMMARY="$(jq -r '.artifacts.pilot_verify_summary_json' "$REAL_SUMMARY")"
 if ! jq -e '
   .schema.id == "access_bridge_pilot_evidence_bundle_verify_summary"
-  and .schema.minor >= 5
+  and .schema.minor >= 6
   and .status == "pass"
   and .trusted_provenance.required == false
   and .pilot_handoff_ready == false

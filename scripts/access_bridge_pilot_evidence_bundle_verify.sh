@@ -1298,6 +1298,11 @@ write_verification_summary() {
         and $provenance_evidence_scope == "real_helper_https"
         and $summary_evidence_scope == "real_helper_https"
         and $bundled_child_evidence_semantic_ok
+        and $source_smoke_summary_sha256 != ""
+        and $source_deployment_smoke_summary_sha256 != ""
+        and $source_deployment_binding_smoke_summary_sha256 != ""
+        and $source_deployment_smoke_summary_sha256 == $source_smoke_summary_sha256
+        and $source_deployment_binding_smoke_summary_sha256 == $source_smoke_summary_sha256
         and $evidence_freshness_ok
         and $bundled_installed_host_evidence
         and $tar_sha256_checked
