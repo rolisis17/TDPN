@@ -129,6 +129,76 @@ kill_process_tree() {
   kill "-${signal}" "$root_pid" >/dev/null 2>&1 || true
 }
 
+collect_process_tree_pids() {
+  local root_pid="$1"
+  local child_pid=""
+  if [[ -z "$root_pid" || ! "$root_pid" =~ ^[0-9]+$ ]]; then
+    return
+  fi
+  if command -v pgrep >/dev/null 2>&1; then
+    while IFS= read -r child_pid; do
+      [[ -z "$child_pid" ]] && continue
+      collect_process_tree_pids "$child_pid"
+    done < <(pgrep -P "$root_pid" 2>/dev/null || true)
+  elif command -v ps >/dev/null 2>&1 && command -v awk >/dev/null 2>&1; then
+    while IFS= read -r child_pid; do
+      [[ -z "$child_pid" ]] && continue
+      collect_process_tree_pids "$child_pid"
+    done < <(ps -e -l 2>/dev/null | awk -v root_pid="$root_pid" 'NR > 1 && $2 == root_pid { print $1 }')
+  fi
+  printf '%s\n' "$root_pid"
+}
+
+collect_process_group_pids() {
+  local group_pid="$1"
+  if [[ -z "$group_pid" || ! "$group_pid" =~ ^[0-9]+$ ]]; then
+    return
+  fi
+  if command -v ps >/dev/null 2>&1 && command -v awk >/dev/null 2>&1; then
+    if ps -eo pid=,pgid= >/dev/null 2>&1; then
+      ps -eo pid=,pgid= 2>/dev/null | awk -v group_pid="$group_pid" '$2 == group_pid { print $1 }'
+    else
+      ps -e -l 2>/dev/null | awk -v group_pid="$group_pid" 'NR > 1 && $3 == group_pid { print $1 }'
+    fi
+  fi
+}
+
+kill_pid_list() {
+  local signal="$1"
+  shift
+  local pid=""
+  for pid in "$@"; do
+    [[ -z "$pid" || ! "$pid" =~ ^[0-9]+$ ]] && continue
+    kill "-${signal}" "$pid" >/dev/null 2>&1 || true
+  done
+}
+
+pid_list_has_live_process() {
+  local pid=""
+  for pid in "$@"; do
+    [[ -z "$pid" || ! "$pid" =~ ^[0-9]+$ ]] && continue
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+kill_stage_targets() {
+  local signal="$1"
+  local stage_pgid="$2"
+  local root_pid="$3"
+  shift 3
+  if (( $# > 0 )); then
+    kill_pid_list "$signal" "$@"
+  else
+    kill_process_tree "$root_pid" "$signal"
+  fi
+  if [[ -n "$stage_pgid" ]]; then
+    kill "-${signal}" -- "-${stage_pgid}" >/dev/null 2>&1 || true
+  fi
+}
+
 RUN_WITH_TIMEOUT_TIMED_OUT="false"
 
 run_with_timeout() {
@@ -160,21 +230,24 @@ run_with_timeout() {
   fi
 
   (
+    stage_tree_pids=()
     sleep "$timeout_sec"
     if kill -0 "$stage_pid" >/dev/null 2>&1; then
       : >"$timeout_marker"
+      while IFS= read -r child_pid; do
+        [[ -z "$child_pid" ]] && continue
+        stage_tree_pids+=("$child_pid")
+      done < <(collect_process_tree_pids "$stage_pid")
       if [[ -n "$stage_pgid" ]]; then
-        kill -TERM -- "-${stage_pgid}" >/dev/null 2>&1 || true
-      else
-        kill_process_tree "$stage_pid" TERM
+        while IFS= read -r child_pid; do
+          [[ -z "$child_pid" ]] && continue
+          stage_tree_pids+=("$child_pid")
+        done < <(collect_process_group_pids "$stage_pgid")
       fi
+      kill_stage_targets TERM "$stage_pgid" "$stage_pid" "${stage_tree_pids[@]}"
       sleep 2
-      if kill -0 "$stage_pid" >/dev/null 2>&1; then
-        if [[ -n "$stage_pgid" ]]; then
-          kill -KILL -- "-${stage_pgid}" >/dev/null 2>&1 || true
-        else
-          kill_process_tree "$stage_pid" KILL
-        fi
+      if kill -0 "$stage_pid" >/dev/null 2>&1 || pid_list_has_live_process "${stage_tree_pids[@]}"; then
+        kill_stage_targets KILL "$stage_pgid" "$stage_pid" "${stage_tree_pids[@]}"
       fi
     fi
   ) &

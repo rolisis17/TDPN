@@ -118,6 +118,24 @@ is_sensitive_secret_flag() {
   esac
 }
 
+is_sensitive_env_assignment() {
+  local token="${1:-}"
+  local key=""
+  local upper_key=""
+  [[ "$token" == *=* ]] || return 1
+  key="${token%%=*}"
+  [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+  upper_key="$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]')"
+  case "$upper_key" in
+    *TOKEN*|*KEY*|*SECRET*|*PASSWORD*|*PASSWD*|*AUTHORIZATION*|*BEARER*|*CREDENTIAL*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 render_log_token() {
   local token="${1:-}"
   if [[ "$token" == *[[:space:]]* ]]; then
@@ -141,6 +159,13 @@ redact_command_secrets() {
     token_count="${#COMMAND_STRING_ARGV[@]}"
     while (( idx < token_count )); do
       token="${COMMAND_STRING_ARGV[$idx]}"
+      if is_sensitive_env_assignment "$token"; then
+        key="${token%%=*}"
+        rendered="${rendered}${rendered:+ }${key}=[redacted]"
+        idx=$((idx + 1))
+        continue
+      fi
+
       if is_sensitive_secret_flag "$token"; then
         rendered="${rendered}${rendered:+ }$(render_log_token "$token")"
         if (( idx + 1 < token_count )); then
@@ -168,12 +193,42 @@ redact_command_secrets() {
     return
   fi
 
+  local env_regex='[A-Za-z_][A-Za-z0-9_]*(TOKEN|KEY|SECRET|PASSWORD|PASSWD|AUTHORIZATION|BEARER|CREDENTIAL)[A-Za-z0-9_]*'
   line="$(printf '%s' "$line" | sed -E \
+    -e "s/(^|[[:space:]])(${env_regex})=(\"[^\"]*\"|'[^']*'|[^[:space:]]+)/\\1\\2=[redacted]/gI" \
     -e "s/(${flag_regex})([[:space:]]+)\"[^\"]*\"/\\1\\2[redacted]/g" \
     -e "s/(${flag_regex})([[:space:]]+)'[^']*'/\\1\\2[redacted]/g" \
     -e "s/(${flag_regex})([[:space:]]+)[^[:space:]]+/\\1\\2[redacted]/g" \
     -e "s/(${flag_regex})=[^[:space:]]+/\\1=[redacted]/g")"
   printf '%s' "$line"
+}
+
+redact_roadmap_summary_artifact() {
+  local summary_path="${1:-}"
+  local action_count=0
+  local idx=0
+  local action_command=""
+  local action_command_redacted=""
+  local tmp_path=""
+
+  [[ -f "$summary_path" ]] || return 0
+  action_count="$(jq -r '(.vpn_track.non_blockchain_actionable_no_sudo_or_github // []) | length' "$summary_path" 2>/dev/null || printf '0')"
+  [[ "$action_count" =~ ^[0-9]+$ ]] || action_count=0
+
+  for (( idx=0; idx<action_count; idx++ )); do
+    action_command="$(jq -r --argjson idx "$idx" '.vpn_track.non_blockchain_actionable_no_sudo_or_github[$idx].command // ""' "$summary_path" 2>/dev/null || true)"
+    [[ -z "$action_command" ]] && continue
+    action_command_redacted="$(redact_command_secrets "$action_command")"
+    tmp_path="$(mktemp)"
+    if jq --argjson idx "$idx" --arg command "$action_command_redacted" \
+      '.vpn_track.non_blockchain_actionable_no_sudo_or_github[$idx].command = $command' \
+      "$summary_path" >"$tmp_path"; then
+      mv "$tmp_path" "$summary_path"
+    else
+      rm -f "$tmp_path"
+      return 1
+    fi
+  done
 }
 
 command_requires_shell_execution() {
@@ -708,6 +763,7 @@ fi
 
 recommended_id="$(jq -r '.vpn_track.non_blockchain_recommended_gate_id // ""' "$roadmap_summary_json")"
 selected_actions_json="$(jq -c '.vpn_track.non_blockchain_actionable_no_sudo_or_github // []' "$roadmap_summary_json")"
+redact_roadmap_summary_artifact "$roadmap_summary_json"
 recommended_only_selection_state="disabled"
 recommended_only_selection_reason=""
 recommended_only_fail_closed="false"

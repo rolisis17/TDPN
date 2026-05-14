@@ -435,13 +435,13 @@ JSON
   "blockchain_track": {
     "recommended_gate_id": "blockchain_env_prefixed_reject",
     "recommended_gate_reason": "env-prefixed rejection scenario",
-    "recommended_gate_command": "BASH_ENV=\"$ENV_REJECT_PAYLOAD\" bash \"$PASS2\"",
+    "recommended_gate_command": "API_KEY=chain-env-api-sentinel SECRET_TOKEN=chain-env-token-sentinel PASSWORD=chain-env-password-sentinel AUTHORIZATION=chain-env-auth-sentinel BASH_ENV=\"$ENV_REJECT_PAYLOAD\" bash \"$PASS2\"",
     "mainnet_activation_missing_metrics_action": {
       "id": "blockchain_env_prefixed_reject"
     }
   },
   "next_actions": [
-    {"id":"blockchain_env_prefixed_reject","label":"Blockchain env-prefixed reject","command":"BASH_ENV=\"$ENV_REJECT_PAYLOAD\" bash \"$PASS2\"","reason":"test-env-prefixed-reject"}
+    {"id":"blockchain_env_prefixed_reject","label":"Blockchain env-prefixed reject","command":"API_KEY=chain-env-api-sentinel SECRET_TOKEN=chain-env-token-sentinel PASSWORD=chain-env-password-sentinel AUTHORIZATION=chain-env-auth-sentinel BASH_ENV=\"$ENV_REJECT_PAYLOAD\" bash \"$PASS2\"","reason":"test-env-prefixed-reject"}
   ]
 }
 JSON
@@ -702,11 +702,41 @@ if ! jq -e '
   and .actions[0].id == "blockchain_env_prefixed_reject"
   and .actions[0].status == "fail"
   and .actions[0].rc == 5
+  and ((.roadmap.recommended_gate_command // "") | contains("API_KEY=[redacted]"))
+  and ((.roadmap.recommended_gate_command // "") | contains("SECRET_TOKEN=[redacted]"))
+  and ((.roadmap.recommended_gate_command // "") | contains("PASSWORD=[redacted]"))
+  and ((.roadmap.recommended_gate_command // "") | contains("AUTHORIZATION=[redacted]"))
+  and ((.actions[0].command // "") | contains("API_KEY=[redacted]"))
+  and ((.actions[0].command // "") | contains("SECRET_TOKEN=[redacted]"))
+  and ((.actions[0].command // "") | contains("PASSWORD=[redacted]"))
+  and ((.actions[0].command // "") | contains("AUTHORIZATION=[redacted]"))
+  and (((.roadmap.recommended_gate_command // "") | contains("chain-env-api-sentinel")) | not)
+  and (((.roadmap.recommended_gate_command // "") | contains("chain-env-token-sentinel")) | not)
+  and (((.roadmap.recommended_gate_command // "") | contains("chain-env-password-sentinel")) | not)
+  and (((.roadmap.recommended_gate_command // "") | contains("chain-env-auth-sentinel")) | not)
+  and (((.actions[0].command // "") | contains("chain-env-api-sentinel")) | not)
+  and (((.actions[0].command // "") | contains("chain-env-token-sentinel")) | not)
+  and (((.actions[0].command // "") | contains("chain-env-password-sentinel")) | not)
+  and (((.actions[0].command // "") | contains("chain-env-auth-sentinel")) | not)
 ' "$SUMMARY_ENV_REJECT" >/dev/null; then
   echo "env-prefixed safe-mode rejection summary mismatch"
   cat "$SUMMARY_ENV_REJECT"
   exit 1
 fi
+for env_reject_output_file in "$SUMMARY_ENV_REJECT" "$REPORTS_ENV_REJECT"/*; do
+  [[ -e "$env_reject_output_file" ]] || continue
+  for env_reject_sentinel in \
+    chain-env-api-sentinel \
+    chain-env-token-sentinel \
+    chain-env-password-sentinel \
+    chain-env-auth-sentinel; do
+    if grep -F -- "$env_reject_sentinel" "$env_reject_output_file" >/dev/null; then
+      echo "env-prefixed secret leaked into $env_reject_output_file: $env_reject_sentinel"
+      cat "$env_reject_output_file"
+      exit 1
+    fi
+  done
+done
 
 if [[ "$SYMLINK_ESCAPE_MODE" == "symlink" ]]; then
   echo "[roadmap-blockchain-actionable-run] symlinked action path remains fail-closed"

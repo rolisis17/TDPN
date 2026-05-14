@@ -14575,6 +14575,28 @@ func TestValidateBootstrapManifestRejectsFutureGeneratedAtBeyondSkew(t *testing.
 	}
 }
 
+func TestValidateBootstrapManifestRejectsUnknownVersion(t *testing.T) {
+	now := time.Now().UTC()
+	for _, version := range []int{0, 2} {
+		t.Run(fmt.Sprintf("version_%d", version), func(t *testing.T) {
+			manifest := gpmBootstrapManifest{
+				Version:              version,
+				GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+				ExpiresAtUTC:         now.Add(time.Hour).Format(time.RFC3339),
+				BootstrapDirectories: []string{"https://directory.manifest-version.globalprivatemesh.example:8081"},
+			}
+
+			err := validateBootstrapManifest(manifest)
+			if err == nil {
+				t.Fatalf("expected manifest version %d to fail closed", version)
+			}
+			if !strings.Contains(err.Error(), "manifest version must be 1") {
+				t.Fatalf("error=%q want manifest version rejection", err.Error())
+			}
+		})
+	}
+}
+
 func TestValidateBootstrapManifestRejectsTooManyBootstrapDirectories(t *testing.T) {
 	now := time.Now().UTC()
 	directories := make([]string, 0, gpmManifestBootstrapDirectoryMax+1)

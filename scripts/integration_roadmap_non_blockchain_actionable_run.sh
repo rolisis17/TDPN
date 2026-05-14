@@ -318,7 +318,7 @@ JSON
   "vpn_track": {
     "non_blockchain_recommended_gate_id": "action_env_prefixed_reject",
     "non_blockchain_actionable_no_sudo_or_github": [
-      {"id":"action_env_prefixed_reject","label":"Action env-prefixed reject","command":"BASH_ENV=\"$ENV_REJECT_PAYLOAD\" bash \"$PASS2\"","reason":"test-env-prefixed-reject"}
+      {"id":"action_env_prefixed_reject","label":"Action env-prefixed reject","command":"API_KEY=nonchain-env-api-sentinel SECRET_TOKEN=nonchain-env-token-sentinel PASSWORD=nonchain-env-password-sentinel AUTHORIZATION=nonchain-env-auth-sentinel BASH_ENV=\"$ENV_REJECT_PAYLOAD\" bash \"$PASS2\"","reason":"test-env-prefixed-reject"}
     ]
   }
 }
@@ -596,11 +596,33 @@ if ! jq -e '
   and .actions[0].id == "action_env_prefixed_reject"
   and .actions[0].status == "fail"
   and .actions[0].rc == 5
+  and ((.actions[0].command // "") | contains("API_KEY=[redacted]"))
+  and ((.actions[0].command // "") | contains("SECRET_TOKEN=[redacted]"))
+  and ((.actions[0].command // "") | contains("PASSWORD=[redacted]"))
+  and ((.actions[0].command // "") | contains("AUTHORIZATION=[redacted]"))
+  and (((.actions[0].command // "") | contains("nonchain-env-api-sentinel")) | not)
+  and (((.actions[0].command // "") | contains("nonchain-env-token-sentinel")) | not)
+  and (((.actions[0].command // "") | contains("nonchain-env-password-sentinel")) | not)
+  and (((.actions[0].command // "") | contains("nonchain-env-auth-sentinel")) | not)
 ' "$SUMMARY_ENV_REJECT" >/dev/null; then
   echo "env-prefixed safe-mode rejection summary mismatch"
   cat "$SUMMARY_ENV_REJECT"
   exit 1
 fi
+for env_reject_output_file in "$SUMMARY_ENV_REJECT" "$REPORTS_ENV_REJECT"/*; do
+  [[ -e "$env_reject_output_file" ]] || continue
+  for env_reject_sentinel in \
+    nonchain-env-api-sentinel \
+    nonchain-env-token-sentinel \
+    nonchain-env-password-sentinel \
+    nonchain-env-auth-sentinel; do
+    if grep -F -- "$env_reject_sentinel" "$env_reject_output_file" >/dev/null; then
+      echo "env-prefixed secret leaked into $env_reject_output_file: $env_reject_sentinel"
+      cat "$env_reject_output_file"
+      exit 1
+    fi
+  done
+done
 
 echo "[roadmap-non-blockchain-actionable-run] symlinked action path remains fail-closed"
 if [[ "$SYMLINK_TESTS_SUPPORTED" != "1" ]]; then

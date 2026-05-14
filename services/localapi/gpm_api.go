@@ -6775,8 +6775,8 @@ var reservedOrTestOutboundIPPrefixes = []netip.Prefix{
 }
 
 func validateBootstrapManifest(manifest gpmBootstrapManifest) error {
-	if manifest.Version <= 0 {
-		return errors.New("manifest version must be > 0")
+	if manifest.Version != 1 {
+		return fmt.Errorf("manifest version must be 1, got %d", manifest.Version)
 	}
 	if len(manifest.BootstrapDirectories) == 0 {
 		return errors.New("manifest bootstrap_directories is empty")
