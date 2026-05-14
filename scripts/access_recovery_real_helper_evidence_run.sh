@@ -244,6 +244,27 @@ url_authority_has_userinfo() {
   [[ "$rest" == *@* ]]
 }
 
+redact_url_userinfo() {
+  local value="${1:-}" prefix rest authority suffix host_part
+  if [[ "$value" == *"://"* ]]; then
+    prefix="${value%%://*}://"
+    rest="${value#*://}"
+  else
+    prefix=""
+    rest="$value"
+  fi
+  authority="${rest%%/*}"
+  authority="${authority%%\?*}"
+  authority="${authority%%#*}"
+  if [[ "$authority" != *@* ]]; then
+    printf '%s' "$value"
+  else
+    suffix="${rest:${#authority}}"
+    host_part="${authority##*@}"
+    printf '%s[redacted]@%s%s' "$prefix" "$host_part" "$suffix"
+  fi
+}
+
 ipv4_mapped_host_to_ipv4() {
   local host="${1:-}" mapped="" high="" low=""
   if [[ "$host" == ::ffff:* ]]; then
@@ -404,6 +425,48 @@ trust_store_content_looks_generated_demo() {
   ' "$path" >/dev/null 2>&1
 }
 
+trust_store_contract_first_error() {
+  local path="$1" output=""
+  if ! output="$(jq -r '
+    if type != "object" then
+      ["trust store must be a JSON object"]
+    else
+      [
+        if (.version // null) != 1 then "version must be 1" else empty end,
+        if has("keys") then "legacy keys field is not supported; use trusted_keys" else empty end,
+        if ((.trusted_keys // null) | type) != "array" then "trusted_keys must be an array" else empty end,
+        if (((.trusted_keys // []) | map(select((.disabled // false) != true)) | length) == 0) then "trusted_keys must contain at least one enabled key" else empty end,
+        (.trusted_keys // [] | to_entries[] |
+          if (.value | type) != "object" then
+            "trusted_keys[" + (.key | tostring) + "] must be an object"
+          else
+            [
+              if (((.value.org_id // "") | type) != "string" or ((.value.org_id // "") | length) == 0) then "trusted_keys[" + (.key | tostring) + "].org_id is required" else empty end,
+              if (((.value.org_name // "") | type) != "string" or ((.value.org_name // "") | length) == 0) then "trusted_keys[" + (.key | tostring) + "].org_name is required" else empty end,
+              if (((.value.key_id // "") | type) != "string" or ((.value.key_id // "") | length) == 0) then "trusted_keys[" + (.key | tostring) + "].key_id is required" else empty end,
+              if (((.value.public_key // "") | type) != "string" or ((.value.public_key // "") | length) < 32) then "trusted_keys[" + (.key | tostring) + "].public_key is required" else empty end,
+              if (((.value.added_at_utc // "") | type) != "string" or ((.value.added_at_utc // "") | length) == 0) then "trusted_keys[" + (.key | tostring) + "].added_at_utc is required" else empty end
+            ] | .[]
+          end
+        )
+      ]
+    end
+    | .[]
+  ' "$path" 2>/dev/null)"; then
+    printf '%s' "trust store must be valid JSON"
+    return 0
+  fi
+  output="$(printf '%s\n' "$output" | head -n 1)"
+  if [[ -n "$(trim "$output")" ]]; then
+    printf '%s' "$output"
+    return 0
+  fi
+  if ! output="$(go run ./cmd/gpmrecover trust-list --trust-store "$path" 2>&1 >/dev/null)"; then
+    output="$(printf '%s\n' "$output" | head -n 1)"
+    printf 'trust store parser rejected trust material%s' "$(if [[ -n "$(trim "$output")" ]]; then printf ': %s' "$output"; fi)"
+  fi
+}
+
 json_file_or_null() {
   local file
   file="$(trim "${1:-}")"
@@ -429,15 +492,21 @@ json_string_or_empty() {
 }
 
 redacted_args_json() {
-  local arg redact_next="0"
+  local arg redact_next="0" redact_next_url="0"
   local redacted=()
   for arg in "$@"; do
     if [[ "$redact_next" == "1" ]]; then
       redacted+=("<redacted>")
       redact_next="0"
+    elif [[ "$redact_next_url" == "1" ]]; then
+      redacted+=("$(redact_url_userinfo "$arg")")
+      redact_next_url="0"
     elif [[ "$arg" == "--code" ]]; then
       redacted+=("$arg")
       redact_next="1"
+    elif [[ "$arg" == "--base-url" ]]; then
+      redacted+=("$arg")
+      redact_next_url="1"
     else
       redacted+=("$arg")
     fi
@@ -849,7 +918,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for cmd in awk date dirname jq mkdir tail; do
+for cmd in awk date dirname go jq mkdir tail; do
   need_cmd "$cmd"
 done
 
@@ -921,7 +990,9 @@ write_summary() {
   local code_present_json code_file_present_json
   local roadmap_refresh_json
   local plan_only_json
+  local base_url_display
   generated_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  base_url_display="$(redact_url_userinfo "$base_url")"
   host_install_obj="$(json_file_or_null "$host_install_check_summary_json")"
   bundle_obj="$(json_file_or_null "$bundle_summary_json")"
   verify_obj="$(json_file_or_null "$verification_summary_json")"
@@ -986,7 +1057,7 @@ write_summary() {
     --argjson rc "$rc" \
     --arg stage "$stage" \
     --arg notes "$notes" \
-    --arg base_url "$base_url" \
+    --arg base_url "$base_url_display" \
     --arg path_id "$path_id" \
     --arg host_install_evidence_mode "$host_install_evidence_mode" \
     --arg install_dir "$install_dir" \
@@ -1171,7 +1242,7 @@ write_summary() {
 - Stage: ${stage}
 - Notes: ${notes}
 - Plan only: ${plan_only}
-- Base URL: ${base_url}
+- Base URL: ${base_url_display}
 - Host install check: ${host_install_check_summary_json}
 - Bundle summary: ${bundle_summary_json}
 - Verifier receipt: ${verification_summary_json}
@@ -1326,6 +1397,10 @@ if value_looks_placeholder "$provenance_org_name"; then
 fi
 if value_looks_placeholder "$trust_store" || [[ ! -f "$trust_store" ]]; then
   fail_preflight "--trust-store must point to a real trusted verifier trust store"
+fi
+trust_store_contract_error="$(trust_store_contract_first_error "$trust_store")"
+if [[ -n "$(trim "$trust_store_contract_error")" ]]; then
+  fail_preflight "--trust-store failed schema validation: $trust_store_contract_error"
 fi
 if [[ "$plan_only" != "1" ]]; then
   effective_expect_helper_id="$expect_helper_id"

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-for cmd in bash chmod grep jq mktemp sed sha256sum wc; do
+for cmd in bash chmod find go grep head jq mktemp sed sha256sum wc; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "easy node access recovery real helper evidence run integration failed: missing required command: $cmd"
     exit 2
@@ -22,6 +22,8 @@ FAKE_VERIFY="$TMP_DIR/fake_access_bridge_pilot_evidence_bundle_verify.sh"
 FAKE_ROADMAP="$TMP_DIR/fake_roadmap_progress_report.sh"
 HELP_OUT="$TMP_DIR/help.txt"
 REPORTS_DIR="$TMP_DIR/reports"
+CANONICAL_REPORTS_DIR="$ROOT_DIR/.easy-node-logs/access-recovery-pilot"
+CANONICAL_REPORTS_SENTINEL="$TMP_DIR/canonical-access-recovery-pilot.sentinel"
 CONFIG_JSON="$TMP_DIR/bridge-service-config.json"
 CONFIG_INFERRED_HELPER_DEMO_JSON="$TMP_DIR/bridge-service-config-helper-demo.json"
 CONFIG_INFERRED_ORG_DEMO_JSON="$TMP_DIR/bridge-service-config-org-demo.json"
@@ -32,7 +34,12 @@ SYSTEMD_UNIT_FILE="$TMP_DIR/gpm-access-bridge.service"
 PROXY_CONFIG_FILE="$TMP_DIR/gpm-access-bridge.caddy"
 CODE_FILE="$TMP_DIR/code.txt"
 TRUST_STORE="$TMP_DIR/trust-store.json"
+LEGACY_KEYS_TRUST_STORE="$TMP_DIR/legacy-keys-trust-store.json"
+EMPTY_TRUST_STORE="$TMP_DIR/empty-trust-store.json"
+MISMATCH_TRUST_STORE="$TMP_DIR/mismatch-trust-store.json"
 PROVENANCE_KEY="$TMP_DIR/provenance.key"
+PROVENANCE_PUBLIC_KEY="$TMP_DIR/provenance.key.pub"
+PROVENANCE_KEYGEN_JSON="$TMP_DIR/provenance-keygen.json"
 GENERATED_DEMO_DIR="$TMP_DIR/generated-demo/artifacts"
 GENERATED_DEMO_CODE_FILE="$GENERATED_DEMO_DIR/code.txt"
 GENERATED_DEMO_CONFIG_JSON="$GENERATED_DEMO_DIR/bridge-service-config.json"
@@ -50,6 +57,8 @@ INSTALLED_HOST_ARGS=(
 )
 
 mkdir -p "$DEPLOY_PACK_DIR" "$INSTALL_DIR" "$REPORTS_DIR" "$GENERATED_DEMO_DEPLOY_PACK_DIR"
+: >"$CANONICAL_REPORTS_SENTINEL"
+export ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_REPORTS_DIR="$REPORTS_DIR"
 printf '%s\n' '{"status":"pass"}' >"$CONFIG_JSON"
 printf '%s\n' '{"helper_id":"helper-demo","organization_id":"pilot-org","registry_id":"registry-pilot","status":"pass"}' >"$CONFIG_INFERRED_HELPER_DEMO_JSON"
 printf '%s\n' '{"helper_id":"helper-pilot","organization_id":"freenews-demo","registry_id":"registry-pilot","status":"pass"}' >"$CONFIG_INFERRED_ORG_DEMO_JSON"
@@ -57,14 +66,95 @@ printf '%s\n' '{"helper_id":"helper-pilot","organization_id":"pilot-org","regist
 printf '%s\n' '[Service]' 'EnvironmentFile='"$INSTALL_DIR/gpm-access-bridge.env" 'ExecStart='"$INSTALL_DIR/run-gpm-access-bridge.sh" >"$SYSTEMD_UNIT_FILE"
 printf '%s\n' 'helper.gpm-pilot.net {' '  reverse_proxy 127.0.0.1:8791 {' '    header_up X-Forwarded-For {remote_host}' '  }' '}' >"$PROXY_CONFIG_FILE"
 printf '%s\n' 'test-access-code' >"$CODE_FILE"
-printf '%s\n' '{"version":1,"keys":[]}' >"$TRUST_STORE"
-printf '%s\n' 'test-provenance-key' >"$PROVENANCE_KEY"
+go run ./cmd/gpmrecover gen --private-key-out "$PROVENANCE_KEY" --public-key-out "$PROVENANCE_PUBLIC_KEY" >"$PROVENANCE_KEYGEN_JSON"
+TRUST_PUBLIC_KEY="$(jq -r '.public_key' "$PROVENANCE_KEYGEN_JSON")"
+TRUST_KEY_ID="$(jq -r '.key_id' "$PROVENANCE_KEYGEN_JSON")"
+jq -n \
+  --arg key_id "$TRUST_KEY_ID" \
+  --arg public_key "$TRUST_PUBLIC_KEY" \
+  '{
+    version: 1,
+    trusted_keys: [{
+      org_id: "pilot-org",
+      org_name: "Pilot Org",
+      key_id: $key_id,
+      public_key: $public_key,
+      added_at_utc: "2026-05-01T00:00:00Z",
+      source: "integration fixture"
+    }]
+  }' >"$TRUST_STORE"
+printf '%s\n' '{"version":1,"keys":[]}' >"$LEGACY_KEYS_TRUST_STORE"
+printf '%s\n' '{"version":1,"trusted_keys":[]}' >"$EMPTY_TRUST_STORE"
+jq -n \
+  --arg public_key "$TRUST_PUBLIC_KEY" \
+  '{
+    version: 1,
+    trusted_keys: [{
+      org_id: "pilot-org",
+      org_name: "Pilot Org",
+      key_id: "mismatched-key-id",
+      public_key: $public_key,
+      added_at_utc: "2026-05-01T00:00:00Z",
+      source: "integration fixture"
+    }]
+  }' >"$MISMATCH_TRUST_STORE"
 printf '%s\n' '{"status":"pass"}' >"$GENERATED_DEMO_CONFIG_JSON"
 printf '%s\n' 'generated-demo-access-code' >"$GENERATED_DEMO_CODE_FILE"
-printf '%s\n' '{"version":1,"keys":[]}' >"$GENERATED_DEMO_TRUST_STORE"
+jq -n \
+  --arg key_id "$TRUST_KEY_ID" \
+  --arg public_key "$TRUST_PUBLIC_KEY" \
+  '{
+    version: 1,
+    trusted_keys: [{
+      org_id: "generated-demo-org",
+      org_name: "Generated Demo Org",
+      key_id: $key_id,
+      public_key: $public_key,
+      added_at_utc: "2026-05-01T00:00:00Z",
+      source: "generated demo bundle"
+    }]
+  }' >"$GENERATED_DEMO_TRUST_STORE"
 printf '%s\n' 'generated-demo-provenance-key' >"$GENERATED_DEMO_PROVENANCE_KEY"
-printf '%s\n' '{"version":1,"keys":[{"source":"generated demo bundle"}]}' >"$DEMO_MARKED_TRUST_STORE"
-printf '%s\n' '{"version":1,"keys":[{"org_id":"freenews-demo","name":"FreeNews Demo"}]}' >"$DEMO_ID_TRUST_STORE"
+jq -n \
+  --arg key_id "$TRUST_KEY_ID" \
+  --arg public_key "$TRUST_PUBLIC_KEY" \
+  '{
+    version: 1,
+    trusted_keys: [{
+      org_id: "pilot-org",
+      org_name: "Pilot Org",
+      key_id: $key_id,
+      public_key: $public_key,
+      added_at_utc: "2026-05-01T00:00:00Z",
+      source: "generated demo bundle"
+    }]
+  }' >"$DEMO_MARKED_TRUST_STORE"
+jq -n \
+  --arg key_id "$TRUST_KEY_ID" \
+  --arg public_key "$TRUST_PUBLIC_KEY" \
+  '{
+    version: 1,
+    trusted_keys: [{
+      org_id: "freenews-demo",
+      org_name: "FreeNews Demo",
+      key_id: $key_id,
+      public_key: $public_key,
+      added_at_utc: "2026-05-01T00:00:00Z",
+      source: "integration fixture"
+    }]
+  }' >"$DEMO_ID_TRUST_STORE"
+
+assert_no_canonical_access_recovery_pilot_writes() {
+  local leaked
+  [[ -d "$CANONICAL_REPORTS_DIR" ]] || return 0
+  leaked="$(find "$CANONICAL_REPORTS_DIR" -type f -newer "$CANONICAL_REPORTS_SENTINEL" -print | head -n 5)"
+  if [[ -n "$leaked" ]]; then
+    echo "mocked real-helper integration wrote Access Recovery pilot artifacts outside the temp reports dir"
+    printf '%s\n' "$leaked"
+    exit 1
+  fi
+}
+trap 'status=$?; assert_no_canonical_access_recovery_pilot_writes; rm -rf "$TMP_DIR"; exit "$status"' EXIT
 
 cat >"$FAKE_HOST_CHECK" <<'EOF_FAKE_HOST_CHECK'
 #!/usr/bin/env bash
@@ -554,6 +644,7 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --provenance-org-id pilot-org \
   --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/override-block-summary.json" \
   --print-summary-json 0 >"$TMP_DIR/override-block.log" 2>&1
 override_block_rc=$?
@@ -591,6 +682,7 @@ for bundle_child_override_var in \
       --provenance-org-id pilot-org \
       --provenance-org-name "Pilot Org" \
       --trust-store "$TRUST_STORE" \
+      --reports-dir "$REPORTS_DIR" \
       --summary-json "$TMP_DIR/bundle-child-override-block-${bundle_child_override_var}.json" \
       --print-summary-json 0 >"$TMP_DIR/bundle-child-override-block-${bundle_child_override_var}.log" 2>&1
   bundle_child_override_block_rc=$?
@@ -626,7 +718,9 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --provenance-org-id pilot-org \
   --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/userinfo-url-summary.json" \
+  --report-md "$TMP_DIR/userinfo-url-report.md" \
   --print-summary-json 0 >"$TMP_DIR/userinfo-url.log" 2>&1
 userinfo_url_rc=$?
 set -e
@@ -636,11 +730,177 @@ if [[ "$userinfo_url_rc" -ne 2 ]] ||
   cat "$TMP_DIR/userinfo-url.log"
   exit 1
 fi
-if grep -Fq -- "token@helper" "$TMP_DIR/userinfo-url.log"; then
-  echo "userinfo real-helper URL leaked into preflight log"
+if grep -Fq -- "token@" "$TMP_DIR/userinfo-url.log" "$TMP_DIR/userinfo-url-summary.json" "$TMP_DIR/userinfo-url-report.md"; then
+  echo "userinfo real-helper URL leaked into preflight log, summary, or report"
   cat "$TMP_DIR/userinfo-url.log"
+  cat "$TMP_DIR/userinfo-url-summary.json"
+  cat "$TMP_DIR/userinfo-url-report.md"
   exit 1
 fi
+jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .stage == "preflight"
+  and .inputs.base_url == "https://[redacted]@helper.gpm-pilot.net"
+' "$TMP_DIR/userinfo-url-summary.json" >/dev/null
+
+: >"$CAPTURE"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url "https://token@helper.gpm-pilot.net" \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --summary-json "$TMP_DIR/userinfo-url-default-print-summary.json" \
+  --report-md "$TMP_DIR/userinfo-url-default-print-report.md" \
+  >"$TMP_DIR/userinfo-url-default-print.log" 2>&1
+userinfo_url_default_print_rc=$?
+set -e
+if [[ "$userinfo_url_default_print_rc" -ne 2 ]] ||
+  ! grep -Fq -- "--base-url must not include userinfo" "$TMP_DIR/userinfo-url-default-print.log"; then
+  echo "expected userinfo real-helper URL with default summary printing to fail preflight"
+  cat "$TMP_DIR/userinfo-url-default-print.log"
+  exit 1
+fi
+if grep -Fq -- "token@" "$TMP_DIR/userinfo-url-default-print.log" "$TMP_DIR/userinfo-url-default-print-summary.json" "$TMP_DIR/userinfo-url-default-print-report.md"; then
+  echo "userinfo real-helper URL leaked when default print-summary-json was enabled"
+  cat "$TMP_DIR/userinfo-url-default-print.log"
+  cat "$TMP_DIR/userinfo-url-default-print-summary.json"
+  cat "$TMP_DIR/userinfo-url-default-print-report.md"
+  exit 1
+fi
+jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .stage == "preflight"
+  and .inputs.base_url == "https://[redacted]@helper.gpm-pilot.net"
+' "$TMP_DIR/userinfo-url-default-print-summary.json" >/dev/null
+
+userinfo_edge_index=0
+for userinfo_edge_case in \
+  "https://token@|token@" \
+  " https://token@helper.gpm-pilot.net|token@" \
+  "https://to ken@helper.gpm-pilot.net|to ken@"; do
+  userinfo_edge_index=$((userinfo_edge_index + 1))
+  IFS='|' read -r userinfo_edge_url userinfo_edge_secret <<<"$userinfo_edge_case"
+  : >"$CAPTURE"
+  set +e
+  ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+  ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+  ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+  ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+    --base-url "$userinfo_edge_url" \
+    --code-file "$CODE_FILE" \
+    --config-json "$CONFIG_JSON" \
+    --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+    --provenance-private-key-file "$PROVENANCE_KEY" \
+    --provenance-org-id pilot-org \
+    --provenance-org-name "Pilot Org" \
+    --trust-store "$TRUST_STORE" \
+    --reports-dir "$REPORTS_DIR" \
+    --summary-json "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index-summary.json" \
+    --report-md "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index-report.md" \
+    --print-summary-json 0 >"$TMP_DIR/userinfo-url-edge-$userinfo_edge_index.log" 2>&1
+  userinfo_edge_rc=$?
+  set -e
+  if [[ "$userinfo_edge_rc" -ne 2 ]]; then
+    echo "expected userinfo edge URL to fail preflight: $userinfo_edge_url"
+    cat "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index.log"
+    exit 1
+  fi
+  if grep -Fq -- "$userinfo_edge_secret" \
+    "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index.log" \
+    "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index-summary.json" \
+    "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index-report.md"; then
+    echo "userinfo edge URL leaked into preflight log, summary, or report"
+    cat "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index.log"
+    cat "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index-summary.json"
+    cat "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index-report.md"
+    exit 1
+  fi
+  jq -e '
+    .status == "fail"
+    and .rc == 2
+    and .stage == "preflight"
+    and (.inputs.base_url | contains("[redacted]@"))
+  ' "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index-summary.json" >/dev/null
+done
+
+for invalid_trust_case in legacy_keys empty_trusted_keys mismatched_key_id; do
+  case "$invalid_trust_case" in
+    legacy_keys)
+      invalid_trust_store="$LEGACY_KEYS_TRUST_STORE"
+      expected_trust_message="legacy keys field is not supported"
+      ;;
+    empty_trusted_keys)
+      invalid_trust_store="$EMPTY_TRUST_STORE"
+      expected_trust_message="trusted_keys must contain at least one enabled key"
+      ;;
+    mismatched_key_id)
+      invalid_trust_store="$MISMATCH_TRUST_STORE"
+      expected_trust_message="key_id mismatch"
+      ;;
+    *)
+      echo "unknown invalid trust-store case: $invalid_trust_case"
+      exit 1
+      ;;
+  esac
+  : >"$CAPTURE"
+  set +e
+  ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+  ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$FAKE_BUNDLE" \
+  ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$FAKE_VERIFY" \
+  ROADMAP_PROGRESS_REPORT_SCRIPT="$FAKE_ROADMAP" \
+  ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
+  ./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+    --base-url https://helper.gpm-pilot.net \
+    --path-id helper-web \
+    --code-file "$CODE_FILE" \
+    --config-json "$CONFIG_JSON" \
+    --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+    "${INSTALLED_HOST_ARGS[@]}" \
+    --provenance-private-key-file "$PROVENANCE_KEY" \
+    --provenance-org-id pilot-org \
+    --provenance-org-name "Pilot Org" \
+    --trust-store "$invalid_trust_store" \
+    --reports-dir "$REPORTS_DIR" \
+    --summary-json "$TMP_DIR/${invalid_trust_case}-summary.json" \
+    --print-summary-json 0 >"$TMP_DIR/${invalid_trust_case}.log" 2>&1
+  invalid_trust_rc=$?
+  set -e
+  if [[ "$invalid_trust_rc" -ne 2 ]] ||
+    ! grep -Fq -- "$expected_trust_message" "$TMP_DIR/${invalid_trust_case}.log"; then
+    echo "expected invalid trust-store schema to fail preflight: $invalid_trust_case"
+    cat "$TMP_DIR/${invalid_trust_case}.log"
+    exit 1
+  fi
+  if [[ -s "$CAPTURE" ]]; then
+    echo "invalid trust-store schema should not invoke child scripts: $invalid_trust_case"
+    cat "$CAPTURE"
+    exit 1
+  fi
+  jq -e '
+    .status == "fail"
+    and .rc == 2
+    and .stage == "preflight"
+    and (.notes | contains("--trust-store failed schema validation"))
+  ' "$TMP_DIR/${invalid_trust_case}-summary.json" >/dev/null
+done
 
 : >"$CAPTURE"
 set +e
@@ -661,6 +921,7 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --provenance-org-id pilot-org \
   --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/live-inline-code-summary.json" \
   --print-summary-json 0 >"$TMP_DIR/live-inline-code.log" 2>&1
 live_inline_code_rc=$?
@@ -723,6 +984,7 @@ for bad_url in "${bad_real_helper_urls[@]}"; do
     --provenance-org-id pilot-org \
     --provenance-org-name "Pilot Org" \
     --trust-store "$TRUST_STORE" \
+    --reports-dir "$REPORTS_DIR" \
     --summary-json "$TMP_DIR/bad-url-$bad_real_helper_index-summary.json" \
     --print-summary-json 0 >"$TMP_DIR/bad-url-$bad_real_helper_index.log" 2>&1
   bad_url_rc=$?
@@ -1047,6 +1309,7 @@ for plan_only_case in "${plan_only_reject_cases[@]}"; do
     --provenance-org-id pilot-org \
     --provenance-org-name "Pilot Org" \
     --trust-store "$TRUST_STORE" \
+    --reports-dir "$REPORTS_DIR" \
     --summary-json "$TMP_DIR/plan-only-reject-$plan_only_reject_index-summary.json" \
     --print-summary-json 0 >"$TMP_DIR/plan-only-reject-$plan_only_reject_index.log" 2>&1
   plan_only_reject_rc=$?
@@ -1120,6 +1383,7 @@ for live_generated_demo_path_case in "${live_generated_demo_path_cases[@]}"; do
     --provenance-org-id pilot-org \
     --provenance-org-name "Pilot Org" \
     --trust-store "$live_trust_store" \
+    --reports-dir "$REPORTS_DIR" \
     --summary-json "$TMP_DIR/live-generated-demo-path-$live_generated_demo_path_index-summary.json" \
     --print-summary-json 0 >"$TMP_DIR/live-generated-demo-path-$live_generated_demo_path_index.log" 2>&1
   live_generated_demo_path_rc=$?
@@ -1157,6 +1421,7 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --provenance-org-id pilot-org \
   --provenance-org-name "Pilot Org" \
   --trust-store "$DEMO_MARKED_TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/live-demo-marked-trust-store-summary.json" \
   --print-summary-json 0 >"$TMP_DIR/live-demo-marked-trust-store.log" 2>&1
 live_demo_marked_trust_store_rc=$?
@@ -1192,6 +1457,7 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --provenance-org-id pilot-org \
   --provenance-org-name "Pilot Org" \
   --trust-store "$DEMO_ID_TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/live-demo-id-trust-store-summary.json" \
   --print-summary-json 0 >"$TMP_DIR/live-demo-id-trust-store.log" 2>&1
 live_demo_id_trust_store_rc=$?
@@ -1237,6 +1503,7 @@ do
     --provenance-org-id pilot-org \
     --provenance-org-name "Pilot Org" \
     --trust-store "$TRUST_STORE" \
+    --reports-dir "$REPORTS_DIR" \
     --summary-json "$TMP_DIR/live-demo-identity-$demo_identity_name-summary.json" \
     --print-summary-json 0 >"$TMP_DIR/live-demo-identity-$demo_identity_name.log" 2>&1
   demo_identity_rc=$?
@@ -1279,6 +1546,7 @@ do
     --provenance-org-id pilot-org \
     --provenance-org-name "Pilot Org" \
     --trust-store "$TRUST_STORE" \
+    --reports-dir "$REPORTS_DIR" \
     --summary-json "$TMP_DIR/live-inferred-demo-identity-$inferred_demo_identity_name-summary.json" \
     --print-summary-json 0 >"$TMP_DIR/live-inferred-demo-identity-$inferred_demo_identity_name.log" 2>&1
   inferred_demo_identity_rc=$?
@@ -1320,6 +1588,7 @@ do
     --provenance-org-id "$provenance_demo_org_id" \
     --provenance-org-name "$provenance_demo_org_name" \
     --trust-store "$TRUST_STORE" \
+    --reports-dir "$REPORTS_DIR" \
     --summary-json "$TMP_DIR/live-demo-provenance-identity-$provenance_demo_identity_name-summary.json" \
     --print-summary-json 0 >"$TMP_DIR/live-demo-provenance-identity-$provenance_demo_identity_name.log" 2>&1
   provenance_demo_identity_rc=$?
@@ -1356,6 +1625,7 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --provenance-org-id pilot-org \
   --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/live-default-deploy-pack-summary.json" \
   --print-summary-json 0 >"$TMP_DIR/live-default-deploy-pack.log" 2>&1
 live_default_deploy_pack_rc=$?
@@ -1388,7 +1658,20 @@ DEMO_TRUST_STORE="$DEMO_ARTIFACT_DIR/recovery-trust.json"
 mkdir -p "$DEMO_DEPLOY_PACK_DIR"
 printf '%s\n' 'demo-access-code' >"$DEMO_CODE_FILE"
 printf '%s\n' '{"status":"pass"}' >"$DEMO_CONFIG_JSON"
-printf '%s\n' '{"version":1,"keys":[]}' >"$DEMO_TRUST_STORE"
+jq -n \
+  --arg key_id "$TRUST_KEY_ID" \
+  --arg public_key "$TRUST_PUBLIC_KEY" \
+  '{
+    version: 1,
+    trusted_keys: [{
+      org_id: "pilot-org",
+      org_name: "Pilot Org",
+      key_id: $key_id,
+      public_key: $public_key,
+      added_at_utc: "2026-05-01T00:00:00Z",
+      source: "demo artifact path fixture"
+    }]
+  }' >"$DEMO_TRUST_STORE"
 
 demo_artifact_cases=(
   "code-file|$DEMO_CODE_FILE|--code-file must not point to a generated demo/example artifact path for live pilot handoff"
@@ -1441,6 +1724,7 @@ for demo_artifact_case in "${demo_artifact_cases[@]}"; do
     --provenance-org-id pilot-org \
     --provenance-org-name "Pilot Org" \
     --trust-store "$demo_trust_store" \
+    --reports-dir "$REPORTS_DIR" \
     --summary-json "$TMP_DIR/live-demo-artifact-$demo_artifact_index-summary.json" \
     --print-summary-json 0 >"$TMP_DIR/live-demo-artifact-$demo_artifact_index.log" 2>&1
   demo_artifact_rc=$?
@@ -1483,6 +1767,7 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --provenance-org-id pilot-org \
   --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
   --roadmap-refresh 0 \
   --summary-json "$TMP_DIR/public-ipv6-summary.json" \
   --print-summary-json 0
@@ -1555,6 +1840,7 @@ for placeholder_case in "${placeholder_input_cases[@]}"; do
     --provenance-org-id pilot-org \
     --provenance-org-name "Pilot Org" \
     --trust-store "$TRUST_STORE" \
+    --reports-dir "$REPORTS_DIR" \
     --summary-json "$TMP_DIR/placeholder-input-$placeholder_input_index-summary.json" \
     --print-summary-json 0 >"$TMP_DIR/placeholder-input-$placeholder_input_index.log" 2>&1
   placeholder_input_rc=$?
@@ -2340,6 +2626,7 @@ ACCESS_RECOVERY_REAL_HELPER_CAPTURE_FILE="$CAPTURE" \
   --provenance-org-id pilot-org \
   --provenance-org-name "Pilot Org" \
   --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
   --summary-json "$TMP_DIR/placeholder-summary.json" \
   --print-summary-json 0 >/dev/null 2>&1
 rc=$?
@@ -2353,5 +2640,7 @@ if [[ -s "$CAPTURE" ]]; then
   cat "$CAPTURE"
   exit 1
 fi
+
+assert_no_canonical_access_recovery_pilot_writes
 
 echo "easy node access recovery real helper evidence run integration check ok"
