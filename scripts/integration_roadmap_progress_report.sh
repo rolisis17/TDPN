@@ -26,7 +26,7 @@ ROADMAP_PROGRESS_FORWARD_SUMMARY_JSON="$TMP_DIR/roadmap_progress_forward_summary
 ROADMAP_PROGRESS_REPORT_FOCUS="${ROADMAP_PROGRESS_REPORT_FOCUS:-all}"
 
 case "$ROADMAP_PROGRESS_REPORT_FOCUS" in
-  all|access-recovery-source-binding)
+  all|access-recovery-source-binding|wallet-auth-next-action)
     ;;
   *)
     echo "unsupported ROADMAP_PROGRESS_REPORT_FOCUS: $ROADMAP_PROGRESS_REPORT_FOCUS"
@@ -1791,6 +1791,155 @@ if ! grep -Eq 'Admin settlement live evidence: needed=true' "$REPORT_ADMIN_SETTL
   cat "$REPORT_ADMIN_SETTLEMENT_PHASE5_MISSING"
   exit 1
 fi
+
+echo "[roadmap-progress-report] GPM wallet-auth evidence next action when explicit summary is missing"
+GPM_WALLET_AUTH_EVIDENCE_HELPER_AVAILABLE_JSON="false"
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "gpm-wallet-auth-evidence")" == "1" ]]; then
+  GPM_WALLET_AUTH_EVIDENCE_HELPER_AVAILABLE_JSON="true"
+fi
+WALLET_AUTH_MINIMAL_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_wallet_auth_minimal_summary.json"
+cat >"$WALLET_AUTH_MINIMAL_MANUAL_SUMMARY_JSON" <<'EOF_WALLET_AUTH_MINIMAL_MANUAL_SUMMARY'
+{"version":1,"summary":{"next_action_check_id":""},"report":{"readiness_status":"NOT_READY"}}
+EOF_WALLET_AUTH_MINIMAL_MANUAL_SUMMARY
+SUMMARY_WALLET_AUTH_MISSING="$TMP_DIR/roadmap_progress_wallet_auth_missing_summary.json"
+REPORT_WALLET_AUTH_MISSING="$TMP_DIR/roadmap_progress_wallet_auth_missing_report.md"
+MISSING_WALLET_AUTH_SUMMARY_JSON="$TMP_DIR/missing_gpm_wallet_auth_evidence_summary.json"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$WALLET_AUTH_MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
+  --phase5-settlement-layer-summary-json "$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" \
+  --gpm-wallet-auth-evidence-summary-json "$MISSING_WALLET_AUTH_SUMMARY_JSON" \
+  --summary-json "$SUMMARY_WALLET_AUTH_MISSING" \
+  --report-md "$REPORT_WALLET_AUTH_MISSING" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_wallet_auth_missing.log 2>&1; then
+  echo "roadmap progress report failed in wallet-auth missing path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_wallet_auth_missing.log
+  exit 1
+fi
+if ! jq -e \
+  --arg missing "$MISSING_WALLET_AUTH_SUMMARY_JSON" \
+  --argjson expect_wallet_helper "$GPM_WALLET_AUTH_EVIDENCE_HELPER_AVAILABLE_JSON" '
+  .gpm_wallet_auth_evidence.available == false
+  and .gpm_wallet_auth_evidence.input_summary_json == $missing
+  and .gpm_wallet_auth_evidence.source_summary_json == null
+  and .gpm_wallet_auth_evidence.status == "missing"
+  and .gpm_wallet_auth_evidence.action_needed == true
+  and .next_actions_summary.gpm_wallet_auth_evidence_helper_available == $expect_wallet_helper
+  and .next_actions_summary.gpm_wallet_auth_evidence_action_needed == true
+  and (if $expect_wallet_helper then
+         .next_actions_summary.gpm_wallet_auth_evidence_emitted == true
+         and .next_actions_summary.gpm_wallet_auth_evidence_count == 1
+         and ((.next_actions // []) | any(
+           .id == "gpm_wallet_auth_evidence"
+           and (.label // "") == "GPM wallet-auth evidence"
+           and (.command // "") == "./scripts/easy_node.sh gpm-wallet-auth-evidence --reports-dir .easy-node-logs/gpm_wallet_auth_evidence --summary-json .easy-node-logs/gpm_wallet_auth_evidence_summary.json --report-md .easy-node-logs/gpm_wallet_auth_evidence_report.md --print-summary-json 1"
+           and ((.reason // "") | contains("GPM wallet-auth evidence is missing or failing"))
+           and .requires_real_hosts == false
+           and .local_pack_only == true
+           and .missing_evidence_family == "wallet-auth"
+           and .missing_evidence_families == ["wallet-auth"]
+           and .missing_evidence_action_kind == "local-auth-evidence"
+           and .placeholder_unresolved == false
+           and .safe_to_execute_as_is == true
+           and .operator_input_required == false
+         ))
+       else
+         .next_actions_summary.gpm_wallet_auth_evidence_emitted == false
+         and .next_actions_summary.gpm_wallet_auth_evidence_count == 0
+         and (((.next_actions // []) | any(.id == "gpm_wallet_auth_evidence")) | not)
+       end)
+' "$SUMMARY_WALLET_AUTH_MISSING" >/dev/null; then
+  echo "GPM wallet-auth missing evidence next action summary mismatch"
+  cat "$SUMMARY_WALLET_AUTH_MISSING"
+  exit 1
+fi
+if ! grep -Eq 'GPM wallet-auth evidence: needed=true' "$REPORT_WALLET_AUTH_MISSING"; then
+  echo "report markdown missing GPM wallet-auth evidence needed=true line"
+  cat "$REPORT_WALLET_AUTH_MISSING"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] GPM wallet-auth pass evidence suppresses next action"
+PASS_WALLET_AUTH_SUMMARY_JSON="$TMP_DIR/gpm_wallet_auth_evidence_pass_summary.json"
+cat >"$PASS_WALLET_AUTH_SUMMARY_JSON" <<EOF_PASS_WALLET_AUTH
+{
+  "version": 1,
+  "schema": {
+    "id": "gpm_wallet_auth_evidence_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "generated_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "status": "pass",
+  "rc": 0,
+  "summary": {
+    "checks_total": 5,
+    "checks_passed": 5,
+    "checks_failed": 0
+  },
+  "evidence": {
+    "keplr_wallet_extension_alias_pubkey_types": true,
+    "leap_wallet_extension_alias_pubkey_types": true,
+    "secp256k1_wallet_binding": true,
+    "mismatched_wallet_rejection": true,
+    "admin_elevation_rejection": true,
+    "chain_id_hrp_binding": true,
+    "signature_metadata_validation": true,
+    "wallet_extension_source_policy": true,
+    "local_control_api_session_binding": true,
+    "admin_console_command_backed_only": true,
+    "portal_wallet_extension_contract": true,
+    "public_app_admin_free": true
+  }
+}
+EOF_PASS_WALLET_AUTH
+SUMMARY_WALLET_AUTH_PASS="$TMP_DIR/roadmap_progress_wallet_auth_pass_summary.json"
+REPORT_WALLET_AUTH_PASS="$TMP_DIR/roadmap_progress_wallet_auth_pass_report.md"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$WALLET_AUTH_MINIMAL_MANUAL_SUMMARY_JSON" \
+  --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
+  --phase5-settlement-layer-summary-json "$PHASE5_SETTLEMENT_LAYER_SUMMARY_JSON" \
+  --gpm-wallet-auth-evidence-summary-json "$PASS_WALLET_AUTH_SUMMARY_JSON" \
+  --summary-json "$SUMMARY_WALLET_AUTH_PASS" \
+  --report-md "$REPORT_WALLET_AUTH_PASS" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_wallet_auth_pass.log 2>&1; then
+  echo "roadmap progress report failed in wallet-auth pass path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_wallet_auth_pass.log
+  exit 1
+fi
+if ! jq -e \
+  --arg src "$PASS_WALLET_AUTH_SUMMARY_JSON" \
+  --argjson expect_wallet_helper "$GPM_WALLET_AUTH_EVIDENCE_HELPER_AVAILABLE_JSON" '
+  .gpm_wallet_auth_evidence.available == true
+  and .gpm_wallet_auth_evidence.input_summary_json == $src
+  and .gpm_wallet_auth_evidence.source_summary_json == $src
+  and .gpm_wallet_auth_evidence.status == "pass"
+  and .gpm_wallet_auth_evidence.rc == 0
+  and .gpm_wallet_auth_evidence.action_needed == false
+  and .next_actions_summary.gpm_wallet_auth_evidence_helper_available == $expect_wallet_helper
+  and .next_actions_summary.gpm_wallet_auth_evidence_action_needed == false
+  and .next_actions_summary.gpm_wallet_auth_evidence_emitted == false
+  and .next_actions_summary.gpm_wallet_auth_evidence_count == 0
+  and (((.next_actions // []) | any(.id == "gpm_wallet_auth_evidence")) | not)
+  and .artifacts.gpm_wallet_auth_evidence_summary_json == $src
+' "$SUMMARY_WALLET_AUTH_PASS" >/dev/null; then
+  echo "GPM wallet-auth pass evidence summary mismatch"
+  cat "$SUMMARY_WALLET_AUTH_PASS"
+  exit 1
+fi
+if ! grep -Eq 'GPM wallet-auth evidence: needed=false' "$REPORT_WALLET_AUTH_PASS"; then
+  echo "report markdown missing GPM wallet-auth evidence needed=false line"
+  cat "$REPORT_WALLET_AUTH_PASS"
+  exit 1
+fi
+
+finish_focus_if "wallet-auth-next-action" "wallet-auth next-action"
 
 ACCESS_BRIDGE_INSTALLED_SOURCE_DIR="$TMP_DIR/access_bridge_installed_source"
 mkdir -p "$ACCESS_BRIDGE_INSTALLED_SOURCE_DIR"

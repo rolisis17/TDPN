@@ -56,6 +56,7 @@ for token in \
   '--phase7-mainnet-cutover-summary-json PATH' \
   '--blockchain-mainnet-activation-gate-summary-json PATH' \
   '--blockchain-bootstrap-governance-graduation-gate-summary-json PATH' \
+  '--gpm-wallet-auth-evidence-summary-json PATH' \
   '--access-bridge-service-smoke-summary-json PATH' \
   '--access-bridge-deployment-evidence-summary-json PATH' \
   '--access-bridge-host-install-summary-json PATH' \
@@ -91,6 +92,7 @@ ROADMAP_PROGRESS_REPORT_CAPTURE_FILE="$CAPTURE" \
   --phase7-mainnet-cutover-summary-json .easy-node-logs/phase7_mainnet_cutover_summary.json \
   --blockchain-mainnet-activation-gate-summary-json .easy-node-logs/blockchain_mainnet_activation_gate_summary.json \
   --blockchain-bootstrap-governance-graduation-gate-summary-json .easy-node-logs/blockchain_bootstrap_governance_graduation_gate_summary.json \
+  --gpm-wallet-auth-evidence-summary-json .easy-node-logs/gpm_wallet_auth_evidence_summary.json \
   --access-bridge-service-smoke-summary-json .easy-node-logs/access_bridge_service_smoke_summary.json \
   --access-bridge-deployment-evidence-summary-json .easy-node-logs/access_bridge_deployment_evidence_summary.json \
   --access-bridge-host-install-summary-json .easy-node-logs/access_bridge_host_install_summary.json \
@@ -115,6 +117,7 @@ assert_token "$line" $'\t--phase6-cosmos-l1-summary-json\t.easy-node-logs/phase6
 assert_token "$line" $'\t--phase7-mainnet-cutover-summary-json\t.easy-node-logs/phase7_mainnet_cutover_summary.json' "missing --phase7-mainnet-cutover-summary-json forwarding"
 assert_token "$line" $'\t--blockchain-mainnet-activation-gate-summary-json\t.easy-node-logs/blockchain_mainnet_activation_gate_summary.json' "missing --blockchain-mainnet-activation-gate-summary-json forwarding"
 assert_token "$line" $'\t--blockchain-bootstrap-governance-graduation-gate-summary-json\t.easy-node-logs/blockchain_bootstrap_governance_graduation_gate_summary.json' "missing --blockchain-bootstrap-governance-graduation-gate-summary-json forwarding"
+assert_token "$line" $'\t--gpm-wallet-auth-evidence-summary-json\t.easy-node-logs/gpm_wallet_auth_evidence_summary.json' "missing --gpm-wallet-auth-evidence-summary-json forwarding"
 assert_token "$line" $'\t--access-bridge-service-smoke-summary-json\t.easy-node-logs/access_bridge_service_smoke_summary.json' "missing --access-bridge-service-smoke-summary-json forwarding"
 assert_token "$line" $'\t--access-bridge-deployment-evidence-summary-json\t.easy-node-logs/access_bridge_deployment_evidence_summary.json' "missing --access-bridge-deployment-evidence-summary-json forwarding"
 assert_token "$line" $'\t--access-bridge-host-install-summary-json\t.easy-node-logs/access_bridge_host_install_summary.json' "missing --access-bridge-host-install-summary-json forwarding"

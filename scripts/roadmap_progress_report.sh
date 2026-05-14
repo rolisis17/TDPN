@@ -30,6 +30,7 @@ Usage:
     [--phase7-mainnet-cutover-summary-json PATH] \
     [--blockchain-mainnet-activation-gate-summary-json PATH] \
     [--blockchain-bootstrap-governance-graduation-gate-summary-json PATH] \
+    [--gpm-wallet-auth-evidence-summary-json PATH] \
     [--access-bridge-service-smoke-summary-json PATH] \
     [--access-bridge-deployment-evidence-summary-json PATH] \
     [--access-bridge-host-install-summary-json PATH] \
@@ -260,6 +261,39 @@ json_file_valid_01() {
     ROADMAP_JSON_VALID_CACHE[$path]="0"
   fi
   printf '%s' "${ROADMAP_JSON_VALID_CACHE[$path]}"
+}
+
+gpm_wallet_auth_evidence_pass_01() {
+  local path="$1"
+  if [[ "$(json_file_valid_01 "$path")" != "1" ]]; then
+    printf '0'
+    return
+  fi
+  if jq -e '
+    def status_norm:
+      if (.status | type) == "string" then (.status | ascii_downcase) else "" end;
+    (.schema.id // "") == "gpm_wallet_auth_evidence_summary"
+    and status_norm == "pass"
+    and ((.rc // 1) == 0)
+    and ((.summary.checks_total // 0) >= 5)
+    and ((.summary.checks_failed // 1) == 0)
+    and (.evidence.keplr_wallet_extension_alias_pubkey_types == true)
+    and (.evidence.leap_wallet_extension_alias_pubkey_types == true)
+    and (.evidence.secp256k1_wallet_binding == true)
+    and (.evidence.mismatched_wallet_rejection == true)
+    and (.evidence.admin_elevation_rejection == true)
+    and (.evidence.chain_id_hrp_binding == true)
+    and (.evidence.signature_metadata_validation == true)
+    and (.evidence.wallet_extension_source_policy == true)
+    and (.evidence.local_control_api_session_binding == true)
+    and (.evidence.admin_console_command_backed_only == true)
+    and (.evidence.portal_wallet_extension_contract == true)
+    and (.evidence.public_app_admin_free == true)
+  ' "$path" >/dev/null 2>&1; then
+    printf '1'
+  else
+    printf '0'
+  fi
 }
 
 json_first_string_field_from_path() {
@@ -7943,6 +7977,15 @@ if [[ -n "$(trim "$blockchain_bootstrap_governance_graduation_gate_summary_json"
   path_arg_or_die "--blockchain-bootstrap-governance-graduation-gate-summary-json" "$blockchain_bootstrap_governance_graduation_gate_summary_json"
 fi
 blockchain_bootstrap_governance_graduation_gate_summary_json="$(abs_path "$blockchain_bootstrap_governance_graduation_gate_summary_json")"
+gpm_wallet_auth_evidence_summary_explicit_01="0"
+if [[ -n "$(trim "${ROADMAP_PROGRESS_GPM_WALLET_AUTH_EVIDENCE_SUMMARY_JSON:-}")" ]]; then
+  gpm_wallet_auth_evidence_summary_explicit_01="1"
+fi
+gpm_wallet_auth_evidence_summary_json="${ROADMAP_PROGRESS_GPM_WALLET_AUTH_EVIDENCE_SUMMARY_JSON:-$default_log_dir/gpm_wallet_auth_evidence_summary.json}"
+if [[ -n "$(trim "$gpm_wallet_auth_evidence_summary_json")" ]]; then
+  path_arg_or_die "--gpm-wallet-auth-evidence-summary-json" "$gpm_wallet_auth_evidence_summary_json"
+fi
+gpm_wallet_auth_evidence_summary_json="$(abs_path "$gpm_wallet_auth_evidence_summary_json")"
 access_bridge_service_smoke_summary_json="${ROADMAP_PROGRESS_ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON:-$default_log_dir/access_bridge_service_smoke_summary.json}"
 if [[ -n "$(trim "$access_bridge_service_smoke_summary_json")" ]]; then
   path_arg_or_die "--access-bridge-service-smoke-summary-json" "$access_bridge_service_smoke_summary_json"
@@ -8083,6 +8126,12 @@ while [[ $# -gt 0 ]]; do
     --blockchain-bootstrap-governance-graduation-gate-summary-json)
       optional_path_arg_or_die "--blockchain-bootstrap-governance-graduation-gate-summary-json" "$#" "${2:-}"
       blockchain_bootstrap_governance_graduation_gate_summary_json="$(abs_path "${2:-}")"
+      shift 2
+      ;;
+    --gpm-wallet-auth-evidence-summary-json)
+      optional_path_arg_or_die "--gpm-wallet-auth-evidence-summary-json" "$#" "${2:-}"
+      gpm_wallet_auth_evidence_summary_json="$(abs_path "${2:-}")"
+      gpm_wallet_auth_evidence_summary_explicit_01="1"
       shift 2
       ;;
     --access-bridge-service-smoke-summary-json)
@@ -13046,6 +13095,37 @@ fi
 gpm_admin_settlement_live_evidence_command="./scripts/easy_node.sh gpm-admin-settlement-live-evidence --reports-dir .easy-node-logs --summary-json .easy-node-logs/gpm_admin_settlement_live_evidence_summary.json --print-summary-json 1"
 gpm_admin_settlement_live_evidence_reason="Admin Console live settlement/slashing evidence is missing or stale; capture reservation, settlement, reward proof, finality, and slashing evidence against a configured bridge."
 
+gpm_wallet_auth_evidence_helper_subcommand="gpm-wallet-auth-evidence"
+gpm_wallet_auth_evidence_helper_available_json="false"
+if [[ "$(easy_node_supports_subcommand_01 "$gpm_wallet_auth_evidence_helper_subcommand")" == "1" ]]; then
+  gpm_wallet_auth_evidence_helper_available_json="true"
+fi
+gpm_wallet_auth_evidence_available_json="false"
+gpm_wallet_auth_evidence_status_json="missing"
+gpm_wallet_auth_evidence_rc_json="null"
+gpm_wallet_auth_evidence_source_summary_json=""
+gpm_wallet_auth_evidence_action_needed_json="false"
+if [[ -n "$gpm_wallet_auth_evidence_summary_json" && -f "$gpm_wallet_auth_evidence_summary_json" ]]; then
+  if [[ "$(json_file_valid_01 "$gpm_wallet_auth_evidence_summary_json")" == "1" ]]; then
+    gpm_wallet_auth_evidence_available_json="true"
+    gpm_wallet_auth_evidence_source_summary_json="$gpm_wallet_auth_evidence_summary_json"
+    gpm_wallet_auth_evidence_status_json="$(jq -r 'if (.status | type) == "string" and (.status | length) > 0 then .status else "unknown" end' "$gpm_wallet_auth_evidence_summary_json" 2>/dev/null || printf '%s' "unknown")"
+    gpm_wallet_auth_evidence_rc_json="$(jq -r 'if (.rc | type) == "number" then (.rc | tostring) else "null" end' "$gpm_wallet_auth_evidence_summary_json" 2>/dev/null || printf '%s' "null")"
+    if [[ "$(gpm_wallet_auth_evidence_pass_01 "$gpm_wallet_auth_evidence_summary_json")" == "1" ]]; then
+      gpm_wallet_auth_evidence_action_needed_json="false"
+    else
+      gpm_wallet_auth_evidence_action_needed_json="true"
+    fi
+  else
+    gpm_wallet_auth_evidence_status_json="invalid"
+    gpm_wallet_auth_evidence_action_needed_json="true"
+  fi
+elif [[ "$gpm_wallet_auth_evidence_summary_explicit_01" == "1" ]]; then
+  gpm_wallet_auth_evidence_action_needed_json="true"
+fi
+gpm_wallet_auth_evidence_command="./scripts/easy_node.sh gpm-wallet-auth-evidence --reports-dir .easy-node-logs/gpm_wallet_auth_evidence --summary-json .easy-node-logs/gpm_wallet_auth_evidence_summary.json --report-md .easy-node-logs/gpm_wallet_auth_evidence_report.md --print-summary-json 1"
+gpm_wallet_auth_evidence_reason="GPM wallet-auth evidence is missing or failing; capture local Keplr/Leap secp256k1 binding, mismatched-wallet rejection, source-policy, and portal wallet-signing contracts."
+
 next_actions_live_evidence_pending_action_count_after_bundle=$next_actions_live_evidence_pending_action_count
 next_actions_evidence_pack_pending_action_count_after_bundle=$next_actions_evidence_pack_pending_action_count
 if [[ "$profile_default_gate_live_and_pack_bundle_ready_json" == "true" ]]; then
@@ -13298,6 +13378,16 @@ cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
       operator_input_required: true,
       placeholder_resolution: "Set GPM_ADMIN_SETTLEMENT_* bridge URL/token-file environment variables, or the equivalent COSMOS_BRIDGE_* variables, before running this action."
     } + action_evidence_metadata(["admin-settlement-live-chain"]; true; false; ["live-chain-evidence"]) else empty end),
+    (if ($gpm_wallet_auth_evidence_action_needed == true and $gpm_wallet_auth_evidence_helper_available == true) then {
+      id: "gpm_wallet_auth_evidence",
+      "label": "GPM wallet-auth evidence",
+      command: $gpm_wallet_auth_evidence_command,
+      reason: $gpm_wallet_auth_evidence_reason,
+      placeholder_unresolved: false,
+      placeholder_keys: [],
+      safe_to_execute_as_is: true,
+      operator_input_required: false
+    } + action_evidence_metadata(["wallet-auth"]; false; true; ["local-auth-evidence"]) else empty end),
     (if ($profile_default_gate_live_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true and ($profile_default_gate_next_command // "") != "") then {
       id: "profile_default_gate",
       "label": "Profile default decision gate",
@@ -13501,6 +13591,10 @@ next_actions_candidate_json="$(
     --argjson gpm_admin_settlement_live_evidence_action_needed "$gpm_admin_settlement_live_evidence_action_needed_json" \
     --arg gpm_admin_settlement_live_evidence_command "$gpm_admin_settlement_live_evidence_command" \
     --arg gpm_admin_settlement_live_evidence_reason "$gpm_admin_settlement_live_evidence_reason" \
+    --argjson gpm_wallet_auth_evidence_helper_available "$gpm_wallet_auth_evidence_helper_available_json" \
+    --argjson gpm_wallet_auth_evidence_action_needed "$gpm_wallet_auth_evidence_action_needed_json" \
+    --arg gpm_wallet_auth_evidence_command "$gpm_wallet_auth_evidence_command" \
+    --arg gpm_wallet_auth_evidence_reason "$gpm_wallet_auth_evidence_reason" \
     --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" \
     --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" \
     --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" \
@@ -13570,6 +13664,8 @@ next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitte
 next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "profile_compare_multi_vm_live_evidence_publish_bundle")] | length')"
 next_actions_gpm_admin_settlement_live_evidence_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "gpm_admin_settlement_live_evidence")')"
 next_actions_gpm_admin_settlement_live_evidence_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "gpm_admin_settlement_live_evidence")] | length')"
+next_actions_gpm_wallet_auth_evidence_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "gpm_wallet_auth_evidence")')"
+next_actions_gpm_wallet_auth_evidence_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "gpm_wallet_auth_evidence")] | length')"
 next_actions_live_and_pack_batch_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "roadmap_live_and_pack_actionable_run")')"
 next_actions_live_and_pack_batch_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "roadmap_live_and_pack_actionable_run")] | length')"
 next_actions_live_evidence_individual_suppression_applied_json="$(jq -n \
@@ -14209,6 +14305,15 @@ summary_payload_jq_args=(
   --argjson next_actions_gpm_admin_settlement_live_evidence_action_needed "$gpm_admin_settlement_live_evidence_action_needed_json" \
   --argjson next_actions_gpm_admin_settlement_live_evidence_emitted "$next_actions_gpm_admin_settlement_live_evidence_emitted_json" \
   --argjson next_actions_gpm_admin_settlement_live_evidence_count "$next_actions_gpm_admin_settlement_live_evidence_count_json" \
+  --arg gpm_wallet_auth_evidence_input_summary_json "$gpm_wallet_auth_evidence_summary_json" \
+  --arg gpm_wallet_auth_evidence_source_summary_json "$gpm_wallet_auth_evidence_source_summary_json" \
+  --argjson gpm_wallet_auth_evidence_available "$gpm_wallet_auth_evidence_available_json" \
+  --arg gpm_wallet_auth_evidence_status "$gpm_wallet_auth_evidence_status_json" \
+  --argjson gpm_wallet_auth_evidence_rc "$gpm_wallet_auth_evidence_rc_json" \
+  --argjson next_actions_gpm_wallet_auth_evidence_helper_available "$gpm_wallet_auth_evidence_helper_available_json" \
+  --argjson next_actions_gpm_wallet_auth_evidence_action_needed "$gpm_wallet_auth_evidence_action_needed_json" \
+  --argjson next_actions_gpm_wallet_auth_evidence_emitted "$next_actions_gpm_wallet_auth_evidence_emitted_json" \
+  --argjson next_actions_gpm_wallet_auth_evidence_count "$next_actions_gpm_wallet_auth_evidence_count_json" \
   --argjson next_actions_profile_default_live_and_pack_bundle_ready "$profile_default_gate_live_and_pack_bundle_ready_json" \
   --argjson next_actions_runtime_actuation_live_and_pack_bundle_ready "$runtime_actuation_live_and_pack_bundle_ready_json" \
   --argjson next_actions_profile_compare_multi_vm_live_and_pack_bundle_ready "$profile_compare_multi_vm_live_and_pack_bundle_ready_json" \
@@ -14814,6 +14919,17 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
     },
     next_actions: $next_actions,
     next_actions_remediation: $next_actions_remediation,
+    gpm_wallet_auth_evidence: {
+      available: $gpm_wallet_auth_evidence_available,
+      input_summary_json: (if $gpm_wallet_auth_evidence_input_summary_json == "" then null else $gpm_wallet_auth_evidence_input_summary_json end),
+      source_summary_json: (if $gpm_wallet_auth_evidence_source_summary_json == "" then null else $gpm_wallet_auth_evidence_source_summary_json end),
+      status: $gpm_wallet_auth_evidence_status,
+      rc: $gpm_wallet_auth_evidence_rc,
+      helper_available: $next_actions_gpm_wallet_auth_evidence_helper_available,
+      action_needed: $next_actions_gpm_wallet_auth_evidence_action_needed,
+      action_emitted: $next_actions_gpm_wallet_auth_evidence_emitted,
+      action_count: $next_actions_gpm_wallet_auth_evidence_count
+    },
     next_actions_summary: {
       live_evidence_batch_helper_emitted: $next_actions_live_evidence_batch_helper_emitted,
       live_evidence_cycle_batch_helper_emitted: $next_actions_live_evidence_cycle_batch_helper_emitted,
@@ -14838,6 +14954,10 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
       gpm_admin_settlement_live_evidence_action_needed: $next_actions_gpm_admin_settlement_live_evidence_action_needed,
       gpm_admin_settlement_live_evidence_emitted: $next_actions_gpm_admin_settlement_live_evidence_emitted,
       gpm_admin_settlement_live_evidence_count: $next_actions_gpm_admin_settlement_live_evidence_count,
+      gpm_wallet_auth_evidence_helper_available: $next_actions_gpm_wallet_auth_evidence_helper_available,
+      gpm_wallet_auth_evidence_action_needed: $next_actions_gpm_wallet_auth_evidence_action_needed,
+      gpm_wallet_auth_evidence_emitted: $next_actions_gpm_wallet_auth_evidence_emitted,
+      gpm_wallet_auth_evidence_count: $next_actions_gpm_wallet_auth_evidence_count,
       profile_default_live_and_pack_bundle_ready: $next_actions_profile_default_live_and_pack_bundle_ready,
       runtime_actuation_live_and_pack_bundle_ready: $next_actions_runtime_actuation_live_and_pack_bundle_ready,
       profile_compare_multi_vm_live_and_pack_bundle_ready: $next_actions_profile_compare_multi_vm_live_and_pack_bundle_ready,
@@ -14885,6 +15005,7 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
       access_bridge_deployment_evidence_summary_json: $access_recovery_track.access_bridge_deployment_evidence.source_summary_json,
       access_bridge_host_install_summary_json: $access_recovery_track.access_bridge_host_install.source_summary_json,
       access_bridge_pilot_evidence_bundle_verify_summary_json: $access_recovery_track.access_bridge_pilot_evidence_bundle_verify.source_summary_json,
+      gpm_wallet_auth_evidence_summary_json: (if $gpm_wallet_auth_evidence_source_summary_json == "" then null else $gpm_wallet_auth_evidence_source_summary_json end),
       vpn_rc_resilience_summary_json: (if $resilience_handoff_source_summary_json == "" then null else $resilience_handoff_source_summary_json end),
       summary_json: $summary_json_path,
       report_md: $report_md_path
@@ -15276,6 +15397,7 @@ $pending_real_host_checks_md
 - Live-evidence archive helper: available=$(jq -r '.next_actions_summary.live_evidence_archive_helper_available | tostring' "$summary_json"), emitted=$(jq -r '.next_actions_summary.live_evidence_archive_helper_emitted | tostring' "$summary_json"), count=$(jq -r '.next_actions_summary.live_evidence_archive_helper_count | tostring' "$summary_json")
 - Three-machine validation pack helper: available=$(jq -r '.next_actions_summary.three_machine_real_host_validation_pack_helper_available | tostring' "$summary_json"), signoff_pending=$(jq -r '.next_actions_summary.three_machine_real_host_validation_pack_signoff_pending | tostring' "$summary_json"), emitted=$(jq -r '.next_actions_summary.three_machine_real_host_validation_pack_helper_emitted | tostring' "$summary_json"), count=$(jq -r '.next_actions_summary.three_machine_real_host_validation_pack_helper_count | tostring' "$summary_json")
 - Admin settlement live evidence: needed=$(jq -r '.next_actions_summary.gpm_admin_settlement_live_evidence_action_needed | tostring' "$summary_json"), helper_available=$(jq -r '.next_actions_summary.gpm_admin_settlement_live_evidence_helper_available | tostring' "$summary_json"), emitted=$(jq -r '.next_actions_summary.gpm_admin_settlement_live_evidence_emitted | tostring' "$summary_json"), count=$(jq -r '.next_actions_summary.gpm_admin_settlement_live_evidence_count | tostring' "$summary_json")
+- GPM wallet-auth evidence: needed=$(jq -r '.next_actions_summary.gpm_wallet_auth_evidence_action_needed | tostring' "$summary_json"), helper_available=$(jq -r '.next_actions_summary.gpm_wallet_auth_evidence_helper_available | tostring' "$summary_json"), emitted=$(jq -r '.next_actions_summary.gpm_wallet_auth_evidence_emitted | tostring' "$summary_json"), count=$(jq -r '.next_actions_summary.gpm_wallet_auth_evidence_count | tostring' "$summary_json")
 
 $next_actions_md
 
@@ -15321,6 +15443,7 @@ $non_blockchain_actionable_no_sudo_or_github_md
 - Access bridge deployment evidence summary source: $(jq -r '.artifacts.access_bridge_deployment_evidence_summary_json // "none"' "$summary_json")
 - Access bridge host install summary source: $(jq -r '.artifacts.access_bridge_host_install_summary_json // "none"' "$summary_json")
 - Access bridge trusted bundle verifier summary source: $(jq -r '.artifacts.access_bridge_pilot_evidence_bundle_verify_summary_json // "none"' "$summary_json")
+- GPM wallet-auth evidence summary source: $(jq -r '.artifacts.gpm_wallet_auth_evidence_summary_json // "none"' "$summary_json")
 - VPN RC resilience summary: $(jq -r '.artifacts.vpn_rc_resilience_summary_json // "none"' "$summary_json")
 EOF_MD
 mv -f "$report_tmp" "$report_md"
@@ -15409,6 +15532,7 @@ echo "[roadmap-progress-report] runtime_actuation_promotion_evidence_pack_status
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_evidence_pack_available=$multi_vm_stability_promotion_evidence_pack_available_json helper_available=$multi_vm_stability_promotion_evidence_pack_helper_available_json input_summary_json=${multi_vm_stability_promotion_evidence_pack_input_summary_json:-} source_summary_json=${multi_vm_stability_promotion_evidence_pack_source_summary_json:-}"
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_evidence_pack_status=${multi_vm_stability_promotion_evidence_pack_status_json:-} rc=$multi_vm_stability_promotion_evidence_pack_rc_json decision=${multi_vm_stability_promotion_evidence_pack_decision_json:-} go=$multi_vm_stability_promotion_evidence_pack_go_json no_go=$multi_vm_stability_promotion_evidence_pack_no_go_json needs_attention=$multi_vm_stability_promotion_evidence_pack_needs_attention_json next_command=${multi_vm_stability_promotion_evidence_pack_next_command:-} next_command_reason=${multi_vm_stability_promotion_evidence_pack_next_command_reason:-}"
 echo "[roadmap-progress-report] live_evidence_archive_helper_available=$live_evidence_archive_helper_available_json live_evidence_archive_helper_emitted=$next_actions_live_evidence_archive_helper_emitted_json live_evidence_archive_helper_count=$next_actions_live_evidence_archive_helper_count_json three_machine_real_host_validation_pack_helper_available=$three_machine_real_host_validation_pack_helper_available_json three_machine_real_host_validation_pack_signoff_pending=$three_machine_real_host_validation_pack_signoff_pending_json three_machine_real_host_validation_pack_helper_emitted=$next_actions_three_machine_real_host_validation_pack_helper_emitted_json three_machine_real_host_validation_pack_helper_count=$next_actions_three_machine_real_host_validation_pack_helper_count_json"
+echo "[roadmap-progress-report] gpm_wallet_auth_evidence_available=$gpm_wallet_auth_evidence_available_json helper_available=$gpm_wallet_auth_evidence_helper_available_json input_summary_json=${gpm_wallet_auth_evidence_summary_json:-} source_summary_json=${gpm_wallet_auth_evidence_source_summary_json:-} status=${gpm_wallet_auth_evidence_status_json:-} rc=$gpm_wallet_auth_evidence_rc_json action_needed=$gpm_wallet_auth_evidence_action_needed_json emitted=$next_actions_gpm_wallet_auth_evidence_emitted_json count=$next_actions_gpm_wallet_auth_evidence_count_json"
 echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"
 echo "[roadmap-progress-report] profile_matrix_stable=$resilience_profile_matrix_stable_json peer_loss_recovery_ok=$resilience_peer_loss_recovery_ok_json session_churn_guard_ok=$resilience_session_churn_guard_ok_json"
 echo "[roadmap-progress-report] summary_json=$summary_json"
