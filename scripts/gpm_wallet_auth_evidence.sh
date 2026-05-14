@@ -178,23 +178,30 @@ fi
 declare -a check_ids=(
   "local_wallet_crypto_contracts"
   "strict_signature_metadata_contracts"
+  "wallet_extension_source_policy"
   "local_control_api_wallet_session_contract"
-  "manifest_trust_wallet_extension_policy"
   "web_portal_wallet_extension_contract"
 )
 declare -a check_names=(
   "Local wallet crypto contracts"
   "Strict signature metadata contracts"
+  "Wallet-extension source policy contract"
   "Local Control API wallet-session contract"
-  "Manifest trust and wallet-extension policy contract"
   "Web portal wallet-extension contract"
 )
 declare -a check_commands=(
-  "go test ./services/localapi -run '^(TestGPMAuthChallengeAndVerifyBindExpectedChainIDAndWalletHRP|TestGPMAuthVerifyRejectsMismatchedChainIDAgainstChallenge|TestGPMAuthVerifyRejectsChainIDNotBoundToChallenge|TestGPMAuthVerifyLocalSecp256k1WalletBindingMatchesDerivedAddress|TestGPMAuthVerifyLocalSecp256k1WalletBindingAcceptsCosmosPubKeyTypeAlias|TestGPMAuthVerifyWalletExtensionKeplrLeapAcceptAliasSecp256k1PubKeyTypes|TestGPMAuthVerifyLocalSecp256k1WalletBindingMismatchUnboundAndStrictRejects|TestGPMAuthVerifyWalletExtensionMismatchedDerivedAddressRejectsAdminElevation|TestGPMAuthVerifyLocalSecp256k1WalletBindingChecksumHRPMismatchStaysUnbound|TestGPMAuthVerifyLocalSecp256k1BindingDoesNotReplaceCommandBackedAdminVerification)$' -count=1"
+  "go test ./services/localapi -run '^(TestGPMAuthChallengeAndVerifyBindExpectedChainIDAndWalletHRP|TestGPMAuthVerifyRejectsMismatchedChainIDAgainstChallenge|TestGPMAuthVerifyRejectsChainIDNotBoundToChallenge|TestGPMAuthVerifyLocalSecp256k1WalletBindingMatchesDerivedAddress|TestGPMAuthVerifyLocalSecp256k1WalletBindingAcceptsCosmosPubKeyTypeAlias|TestGPMAuthVerifyWalletExtensionKeplrLeapAcceptAliasSecp256k1PubKeyTypes|TestGPMAuthVerifyRejectsManualSignatureSourceWhenWalletExtensionRequired|TestGPMAuthVerifyLocalSecp256k1WalletBindingMismatchUnboundAndStrictRejects|TestGPMAuthVerifyWalletExtensionMismatchedDerivedAddressRejectsAdminElevation|TestGPMAuthVerifyLocalSecp256k1WalletBindingChecksumHRPMismatchStaysUnbound|TestGPMAuthVerifyLocalSecp256k1BindingDoesNotReplaceCommandBackedAdminVerification)$' -count=1"
   "go test ./services/localapi -run 'TestGPMAuthVerifyRejects(InvalidOptionalSignatureMetadata|SignatureWithWhitespaceControlCharacters)' -count=1"
+  "go test ./services/localapi -run '^(TestGPMAuthVerifyWalletExtensionKeplrLeapAcceptAliasSecp256k1PubKeyTypes|TestGPMAuthVerifyRejectsManualSignatureSourceWhenWalletExtensionRequired)$' -count=1"
   "bash ./scripts/integration_local_control_api_contract.sh"
-  "bash ./scripts/integration_local_control_api_gpm_manifest_trust.sh"
   "bash ./scripts/integration_web_portal_contract.sh"
+)
+declare -a check_require_executed_go_tests=(
+  1
+  1
+  1
+  0
+  0
 )
 
 checks_jsonl="$reports_dir/gpm_wallet_auth_evidence_checks.jsonl"
@@ -229,6 +236,14 @@ for ((idx = 0; idx < checks_total; idx++)); do
   if [[ "$rc" == "124" || "$rc" == "137" ]]; then
     timed_out=true
   fi
+  no_tests_detected=false
+  if [[ "${check_require_executed_go_tests[$idx]}" == "1" && "$rc" -eq 0 ]]; then
+    if grep -Eiq '(^|[[:space:]])(no tests to run|\[no tests to run\]|\[no test files\])($|[[:space:]])' "$log_path"; then
+      no_tests_detected=true
+      rc=1
+      echo "gpm-wallet-auth-evidence: refusing vacuous go test pass for $check_id; matched no-test output" >>"$log_path"
+    fi
+  fi
   check_status="pass"
   if [[ "$rc" -ne 0 ]]; then
     check_status="fail"
@@ -245,6 +260,7 @@ for ((idx = 0; idx < checks_total; idx++)); do
     --argjson rc "$rc" \
     --argjson duration_sec "$duration_sec" \
     --argjson timed_out "$timed_out" \
+    --argjson no_tests_detected "$no_tests_detected" \
     '{
       id: $id,
       name: $name,
@@ -252,6 +268,7 @@ for ((idx = 0; idx < checks_total; idx++)); do
       status: $status,
       rc: $rc,
       timed_out: $timed_out,
+      no_tests_detected: $no_tests_detected,
       duration_sec: $duration_sec,
       log_path: $log_path
     }' >>"$checks_jsonl"
@@ -269,9 +286,10 @@ finished_at_utc="$(timestamp_utc)"
 
 local_wallet_contract_pass="$(jq -r '.[] | select(.id == "local_wallet_crypto_contracts") | .status == "pass"' <<<"$checks_json")"
 metadata_contract_pass="$(jq -r '.[] | select(.id == "strict_signature_metadata_contracts") | .status == "pass"' <<<"$checks_json")"
+wallet_source_policy_pass="$(jq -r '.[] | select(.id == "wallet_extension_source_policy") | .status == "pass"' <<<"$checks_json")"
 local_control_contract_pass="$(jq -r '.[] | select(.id == "local_control_api_wallet_session_contract") | .status == "pass"' <<<"$checks_json")"
-manifest_policy_pass="$(jq -r '.[] | select(.id == "manifest_trust_wallet_extension_policy") | .status == "pass"' <<<"$checks_json")"
 portal_contract_pass="$(jq -r '.[] | select(.id == "web_portal_wallet_extension_contract") | .status == "pass"' <<<"$checks_json")"
+no_vacuous_go_tests="$(jq -r '[.[] | select(.no_tests_detected == true)] | length == 0' <<<"$checks_json")"
 
 jq -n \
   --arg generated_at_utc "$finished_at_utc" \
@@ -290,9 +308,10 @@ jq -n \
   --argjson timeout_available "$([[ "$timeout_available" == "1" ]] && echo true || echo false)" \
   --argjson local_wallet_contract_pass "$local_wallet_contract_pass" \
   --argjson metadata_contract_pass "$metadata_contract_pass" \
+  --argjson wallet_source_policy_pass "$wallet_source_policy_pass" \
   --argjson local_control_contract_pass "$local_control_contract_pass" \
-  --argjson manifest_policy_pass "$manifest_policy_pass" \
   --argjson portal_contract_pass "$portal_contract_pass" \
+  --argjson no_vacuous_go_tests "$no_vacuous_go_tests" \
   '{
     version: 1,
     schema: {
@@ -322,11 +341,22 @@ jq -n \
       admin_elevation_rejection: $local_wallet_contract_pass,
       chain_id_hrp_binding: $local_wallet_contract_pass,
       signature_metadata_validation: $metadata_contract_pass,
-      wallet_extension_source_policy: $manifest_policy_pass,
+      wallet_extension_source_policy: $wallet_source_policy_pass,
       local_control_api_session_binding: $local_control_contract_pass,
       admin_console_command_backed_only: ($local_wallet_contract_pass and $local_control_contract_pass),
       portal_wallet_extension_contract: $portal_contract_pass,
-      public_app_admin_free: $portal_contract_pass
+      public_app_admin_free: $portal_contract_pass,
+      no_vacuous_go_test_evidence: $no_vacuous_go_tests,
+      real_browser_extension_beta_evidence: false
+    },
+    release_evidence: {
+      real_browser_extension_beta_evidence: {
+        status: "pending",
+        required_for_release: true,
+        keplr_installed_extension_evidence: false,
+        leap_installed_extension_evidence: false,
+        notes: "Deterministic local tests prove request/verification contracts only; installed Keplr/Leap browser-extension evidence remains a separate beta/release artifact."
+      }
     },
     checks: $checks,
     artifacts: {

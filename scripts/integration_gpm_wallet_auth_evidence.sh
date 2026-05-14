@@ -52,7 +52,14 @@ if ! jq -e '
   and .evidence.chain_id_hrp_binding == true
   and .evidence.wallet_extension_source_policy == true
   and .evidence.portal_wallet_extension_contract == true
+  and .evidence.no_vacuous_go_test_evidence == true
+  and .evidence.real_browser_extension_beta_evidence == false
+  and .release_evidence.real_browser_extension_beta_evidence.status == "pending"
+  and .release_evidence.real_browser_extension_beta_evidence.required_for_release == true
+  and .release_evidence.real_browser_extension_beta_evidence.keplr_installed_extension_evidence == false
+  and .release_evidence.real_browser_extension_beta_evidence.leap_installed_extension_evidence == false
   and (.checks | length == 5)
+  and (.checks | all(.no_tests_detected == false))
 ' "$SUMMARY_JSON" >/dev/null; then
   echo "wallet-auth evidence summary missing expected pass contract"
   cat "$SUMMARY_JSON"
@@ -62,8 +69,8 @@ fi
 for check_id in \
   local_wallet_crypto_contracts \
   strict_signature_metadata_contracts \
+  wallet_extension_source_policy \
   local_control_api_wallet_session_contract \
-  manifest_trust_wallet_extension_policy \
   web_portal_wallet_extension_contract; do
   log_path="$(jq -r --arg check_id "$check_id" '.checks[] | select(.id == $check_id) | .log_path' "$SUMMARY_JSON")"
   if [[ -z "$log_path" || ! -f "$log_path" ]]; then

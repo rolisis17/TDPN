@@ -584,6 +584,44 @@ func TestGPMAuthVerifyWalletExtensionKeplrLeapAcceptAliasSecp256k1PubKeyTypes(t 
 	}
 }
 
+func TestGPMAuthVerifyRejectsManualSignatureSourceWhenWalletExtensionRequired(t *testing.T) {
+	svc, _ := newFakeService(t, false)
+	svc.gpmState = newGPMRuntimeState()
+	svc.gpmRoleDefault = "client"
+	svc.gpmAuthVerifyRequireCryptoProof = true
+	svc.gpmAuthVerifyRequireWalletExt = true
+	walletAddress := deterministicSecp256k1WalletAddress(t, "cosmos")
+
+	challengeID, message := issueGPMAuthChallengeForWallet(t, svc, walletAddress)
+	signature, publicKey := deterministicSecp256k1Proof(message)
+	verifyRequest := map[string]any{
+		"wallet_address":            walletAddress,
+		"wallet_provider":           "keplr",
+		"challenge_id":              challengeID,
+		"signature":                 signature,
+		"signature_kind":            "sign_arbitrary",
+		"signature_source":          "manual",
+		"signature_public_key":      publicKey,
+		"signature_public_key_type": "secp256k1",
+		"signed_message":            message,
+	}
+	bodyBytes, err := json.Marshal(verifyRequest)
+	if err != nil {
+		t.Fatalf("json marshal verify request: %v", err)
+	}
+	code, payload := callJSONHandler(t, svc.handleGPMAuthVerify, http.MethodPost, "/v1/gpm/auth/verify", string(bodyBytes))
+	if code != http.StatusUnauthorized {
+		t.Fatalf("verify status=%d want=%d body=%v", code, http.StatusUnauthorized, payload)
+	}
+	errMsg, _ := payload["error"].(string)
+	if !strings.Contains(errMsg, "signature_source must be wallet_extension") {
+		t.Fatalf("error=%q want wallet_extension source policy payload=%v", errMsg, payload)
+	}
+	if len(svc.gpmState.sessions) != 0 {
+		t.Fatalf("stored sessions=%d want=0 after rejected manual signature source", len(svc.gpmState.sessions))
+	}
+}
+
 func TestGPMAuthVerifyLocalSecp256k1WalletBindingMismatchUnboundAndStrictRejects(t *testing.T) {
 	mismatchedWalletAddress, err := encodeGPMBech32Address("cosmos", []byte{
 		0x00, 0x01, 0x02, 0x03, 0x04,
