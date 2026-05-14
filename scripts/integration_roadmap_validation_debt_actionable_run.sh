@@ -266,6 +266,67 @@ if [[ "$(wc -l <"$EXEC_LOG" | tr -d '[:space:]')" != "0" ]]; then
   exit 1
 fi
 
+echo "[roadmap-validation-debt-actionable-run] env CSV tokens do not execute shell"
+SUMMARY_MALICIOUS_CSV="$TMP_DIR/summary_malicious_csv.json"
+REPORTS_MALICIOUS_CSV="$TMP_DIR/reports_malicious_csv"
+MALICIOUS_INCLUDE_MARKER="$TMP_DIR/include_token_executed"
+MALICIOUS_EXCLUDE_MARKER="$TMP_DIR/exclude_token_executed"
+malicious_include_token='unknown_$(touch '"$MALICIOUS_INCLUDE_MARKER"')'
+malicious_exclude_token='another_unknown_`touch '"$MALICIOUS_EXCLUDE_MARKER"'`'
+: >"$EXEC_LOG"
+set +e
+ROADMAP_VALIDATION_DEBT_ACTIONABLE_INCLUDE_IDS=" $malicious_include_token , m1_client_3hop_runtime " \
+ROADMAP_VALIDATION_DEBT_ACTIONABLE_EXCLUDE_IDS=" $malicious_exclude_token " \
+ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_CLIENT_3HOP_RUNTIME_SCRIPT="$PASS_CLIENT" \
+ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_ROADMAP_PROGRESS_REPORT_SCRIPT="$PASS_ROADMAP" \
+ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_MICRO_RELAY_OPERATOR_FLOOR_SCRIPT="$PASS_MICRO" \
+ROADMAP_VALIDATION_DEBT_ACTIONABLE_CHECK_THREE_MACHINE_REAL_HOST_VALIDATION_PACK_SCRIPT="$PASS_M3_PACK" \
+bash "$SCRIPT_UNDER_TEST" \
+  --reports-dir "$REPORTS_MALICIOUS_CSV" \
+  --summary-json "$SUMMARY_MALICIOUS_CSV" \
+  --print-summary-json 0
+malicious_csv_rc=$?
+set -e
+
+if [[ "$malicious_csv_rc" != "3" ]]; then
+  echo "expected malicious-looking CSV token path rc=3, got rc=$malicious_csv_rc"
+  cat "$SUMMARY_MALICIOUS_CSV"
+  exit 1
+fi
+
+if [[ -e "$MALICIOUS_INCLUDE_MARKER" || -e "$MALICIOUS_EXCLUDE_MARKER" ]]; then
+  echo "malicious-looking CSV token caused shell execution"
+  ls -l "$MALICIOUS_INCLUDE_MARKER" "$MALICIOUS_EXCLUDE_MARKER" 2>/dev/null || true
+  exit 1
+fi
+
+if ! jq -e \
+  --arg include_token "$malicious_include_token" \
+  --arg exclude_token "$malicious_exclude_token" \
+  '
+  .status == "fail"
+  and .rc == 3
+  and .selection_error == "unknown_check_ids"
+  and .inputs.include_ids == [$include_token, "m1_client_3hop_runtime"]
+  and .inputs.exclude_ids == [$exclude_token]
+  and .selection_accounting.include_ids_requested_count == 2
+  and .selection_accounting.exclude_ids_requested_count == 1
+  and .selection_accounting.unknown_include_ids == [$include_token]
+  and .selection_accounting.unknown_exclude_ids == [$exclude_token]
+  and .summary.checks_executed == 0
+  and ((.checks // []) | length == 0)
+' "$SUMMARY_MALICIOUS_CSV" >/dev/null; then
+  echo "malicious-looking CSV summary mismatch"
+  cat "$SUMMARY_MALICIOUS_CSV"
+  exit 1
+fi
+
+if [[ "$(wc -l <"$EXEC_LOG" | tr -d '[:space:]')" != "0" ]]; then
+  echo "expected zero executed checks in malicious-looking CSV path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
 echo "[roadmap-validation-debt-actionable-run] filtered path (include/exclude/max-actions)"
 SUMMARY_FILTERED="$TMP_DIR/summary_filtered.json"
 REPORTS_FILTERED="$TMP_DIR/reports_filtered"

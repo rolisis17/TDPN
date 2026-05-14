@@ -38,6 +38,17 @@ PROVENANCE_JSON="$TMP_DIR/pilot-evidence-bundle.provenance.json"
 PROVENANCE_PRIVATE_KEY="$TMP_DIR/provenance-private.key"
 PROVENANCE_PUBLIC_KEY="$TMP_DIR/provenance-public.key"
 PILOT_PUBLIC_HOST="helper.gpm-pilot.net"
+SYMLINK_OUTPUT_TESTS_ENABLED="0"
+
+SYMLINK_PROBE_TARGET="$TMP_DIR/symlink-output-probe-target"
+SYMLINK_PROBE_LINK="$TMP_DIR/symlink-output-probe-link"
+printf '%s\n' 'probe' >"$SYMLINK_PROBE_TARGET"
+if command -v ln >/dev/null 2>&1 &&
+  ln -s "$SYMLINK_PROBE_TARGET" "$SYMLINK_PROBE_LINK" 2>/dev/null &&
+  [[ -L "$SYMLINK_PROBE_LINK" ]]; then
+  SYMLINK_OUTPUT_TESTS_ENABLED="1"
+fi
+rm -f "$SYMLINK_PROBE_LINK"
 
 go run ./cmd/gpmrecover gen --private-key-out "$PROVENANCE_PRIVATE_KEY" --public-key-out "$PROVENANCE_PUBLIC_KEY" >/dev/null
 PROVENANCE_KEY_ID="$(go run ./cmd/gpmrecover inspect-key --private-key-file "$PROVENANCE_PRIVATE_KEY" | jq -r '.key_id')"
@@ -260,6 +271,92 @@ if [[ "$stale_bundle_dir_rc" -eq 0 ]] ||
   echo "access bridge pilot evidence bundle integration failed: stale explicit bundle dir was not rejected"
   cat "$TMP_DIR/stale-pilot-evidence-bundle.log"
   exit 1
+fi
+
+if [[ "$SYMLINK_OUTPUT_TESTS_ENABLED" != "1" ]]; then
+  echo "[access-bridge-pilot-evidence-bundle] output symlink rejection skipped (symlink unsupported in current environment)"
+else
+  SYMLINK_OUTPUT_TARGET="$TMP_DIR/symlink-output-target"
+  printf '%s\n' 'do-not-overwrite-through-symlink' >"$SYMLINK_OUTPUT_TARGET"
+
+  SYMLINK_TAR_BUNDLE_DIR="$TMP_DIR/symlink-tar-pilot-evidence-bundle"
+  ln -s "$SYMLINK_OUTPUT_TARGET" "${SYMLINK_TAR_BUNDLE_DIR}.tar.gz"
+  set +e
+  bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+    --base-url "$BASE_URL" \
+    --path-id helper-web \
+    --code-file "$CODE_FILE" \
+    --config-json "$SERVICE_CONFIG" \
+    --deploy-pack-dir "$DEPLOY_PACK" \
+    --service-name gpm-access-bridge-pilot \
+    --bundle-dir "$SYMLINK_TAR_BUNDLE_DIR" \
+    --summary-json "$TMP_DIR/symlink-tar-pilot-evidence-summary.json" \
+    --print-summary-json 0 >"$TMP_DIR/symlink-tar-pilot-evidence-bundle.log" 2>&1
+  symlink_tar_rc=$?
+  set -e
+  if [[ "$symlink_tar_rc" -eq 0 ]] ||
+    ! grep -Fq -- 'refusing to write evidence output through symlink' "$TMP_DIR/symlink-tar-pilot-evidence-bundle.log"; then
+    echo "access bridge pilot evidence bundle integration failed: symlinked bundle tar sidecar was not rejected"
+    cat "$TMP_DIR/symlink-tar-pilot-evidence-bundle.log"
+    exit 1
+  fi
+
+  SYMLINK_SHA_BUNDLE_DIR="$TMP_DIR/symlink-sha-pilot-evidence-bundle"
+  ln -s "$SYMLINK_OUTPUT_TARGET" "${SYMLINK_SHA_BUNDLE_DIR}.tar.gz.sha256"
+  set +e
+  bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+    --base-url "$BASE_URL" \
+    --path-id helper-web \
+    --code-file "$CODE_FILE" \
+    --config-json "$SERVICE_CONFIG" \
+    --deploy-pack-dir "$DEPLOY_PACK" \
+    --service-name gpm-access-bridge-pilot \
+    --bundle-dir "$SYMLINK_SHA_BUNDLE_DIR" \
+    --summary-json "$TMP_DIR/symlink-sha-pilot-evidence-summary.json" \
+    --print-summary-json 0 >"$TMP_DIR/symlink-sha-pilot-evidence-bundle.log" 2>&1
+  symlink_sha_rc=$?
+  set -e
+  if [[ "$symlink_sha_rc" -eq 0 ]] ||
+    ! grep -Fq -- 'refusing to write evidence output through symlink' "$TMP_DIR/symlink-sha-pilot-evidence-bundle.log"; then
+    echo "access bridge pilot evidence bundle integration failed: symlinked bundle checksum sidecar was not rejected"
+    cat "$TMP_DIR/symlink-sha-pilot-evidence-bundle.log"
+    exit 1
+  fi
+
+  SYMLINK_PROVENANCE_BUNDLE_DIR="$TMP_DIR/symlink-provenance-pilot-evidence-bundle"
+  SYMLINK_PROVENANCE_OUT="$TMP_DIR/symlink-provenance-pilot-evidence.provenance.json"
+  ln -s "$SYMLINK_OUTPUT_TARGET" "$SYMLINK_PROVENANCE_OUT"
+  set +e
+  bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+    --base-url "$BASE_URL" \
+    --path-id helper-web \
+    --code-file "$CODE_FILE" \
+    --config-json "$SERVICE_CONFIG" \
+    --deploy-pack-dir "$DEPLOY_PACK" \
+    --service-name gpm-access-bridge-pilot \
+    --bundle-dir "$SYMLINK_PROVENANCE_BUNDLE_DIR" \
+    --summary-json "$TMP_DIR/symlink-provenance-pilot-evidence-summary.json" \
+    --provenance-sign 1 \
+    --provenance-private-key-file "$PROVENANCE_PRIVATE_KEY" \
+    --provenance-org-id pilot-org \
+    --provenance-org-name "Pilot Org" \
+    --provenance-key-id "$PROVENANCE_KEY_ID" \
+    --provenance-out "$SYMLINK_PROVENANCE_OUT" \
+    --print-summary-json 0 >"$TMP_DIR/symlink-provenance-pilot-evidence-bundle.log" 2>&1
+  symlink_provenance_rc=$?
+  set -e
+  if [[ "$symlink_provenance_rc" -eq 0 ]] ||
+    ! grep -Fq -- 'refusing to write evidence output through symlink' "$TMP_DIR/symlink-provenance-pilot-evidence-bundle.log"; then
+    echo "access bridge pilot evidence bundle integration failed: symlinked provenance sidecar was not rejected"
+    cat "$TMP_DIR/symlink-provenance-pilot-evidence-bundle.log"
+    exit 1
+  fi
+
+  if [[ "$(cat "$SYMLINK_OUTPUT_TARGET")" != "do-not-overwrite-through-symlink" ]]; then
+    echo "access bridge pilot evidence bundle integration failed: symlink target was modified"
+    cat "$SYMLINK_OUTPUT_TARGET"
+    exit 1
+  fi
 fi
 
 DEMO_PATH_DIR="$TMP_DIR/generated-demo"
@@ -796,6 +893,40 @@ if [[ "$userinfo_url_rc" -eq 0 ]] || ! grep -Fq -- "--base-url must not include 
   cat "$TMP_DIR/pilot-bundle-userinfo-url.log"
   exit 1
 fi
+if grep -Fq -- "public.example@" "$TMP_DIR/pilot-bundle-userinfo-url.log"; then
+  echo "access bridge pilot evidence bundle integration failed: userinfo URL leaked into rejection log"
+  cat "$TMP_DIR/pilot-bundle-userinfo-url.log"
+  exit 1
+fi
+
+userinfo_edge_index=0
+for userinfo_edge_case in \
+  "https://token@|token@" \
+  " https://token@helper.gpm-pilot.net|token@" \
+  "https://to ken@helper.gpm-pilot.net|to ken@"; do
+  userinfo_edge_index=$((userinfo_edge_index + 1))
+  IFS='|' read -r userinfo_edge_url userinfo_edge_secret <<<"$userinfo_edge_case"
+  set +e
+  bash ./scripts/access_bridge_pilot_evidence_bundle.sh \
+    --base-url "$userinfo_edge_url" \
+    --path-id helper-web \
+    --config-json "$SERVICE_CONFIG" \
+    --deploy-pack-dir "$DEPLOY_PACK" \
+    --code-file "$CODE_FILE" >"$TMP_DIR/pilot-bundle-userinfo-edge-$userinfo_edge_index.log" 2>&1
+  userinfo_edge_rc=$?
+  set -e
+  if [[ "$userinfo_edge_rc" -eq 0 ]] ||
+    ! grep -Fq -- "--base-url must not include userinfo" "$TMP_DIR/pilot-bundle-userinfo-edge-$userinfo_edge_index.log"; then
+    echo "access bridge pilot evidence bundle integration failed: userinfo edge URL was not rejected before pilot evidence classification"
+    cat "$TMP_DIR/pilot-bundle-userinfo-edge-$userinfo_edge_index.log"
+    exit 1
+  fi
+  if grep -Fq -- "$userinfo_edge_secret" "$TMP_DIR/pilot-bundle-userinfo-edge-$userinfo_edge_index.log"; then
+    echo "access bridge pilot evidence bundle integration failed: userinfo edge URL leaked into rejection log"
+    cat "$TMP_DIR/pilot-bundle-userinfo-edge-$userinfo_edge_index.log"
+    exit 1
+  fi
+done
 
 set +e
 bash ./scripts/access_bridge_pilot_evidence_bundle.sh \

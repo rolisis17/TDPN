@@ -123,13 +123,13 @@ array_contains() {
 
 append_csv_tokens() {
   local csv="${1:-}"
-  local target_name="$2"
+  local -n target_ref="$2"
   local token
   IFS=',' read -r -a __csv_parts <<<"$csv"
   for token in "${__csv_parts[@]}"; do
     token="$(trim "$token")"
     if [[ -n "$token" ]]; then
-      eval "$target_name+=(\"\$token\")"
+      target_ref+=("$token")
     fi
   done
 }

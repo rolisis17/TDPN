@@ -204,14 +204,16 @@ fail_pilot_demo_example_input() {
 }
 
 url_scheme() {
-  local url="${1:-}"
+  local url
+  url="$(trim "${1:-}")"
   if [[ "$url" == *://* ]]; then
     printf '%s' "${url%%://*}" | tr '[:upper:]' '[:lower:]'
   fi
 }
 
 url_authority() {
-  local rest="${1:-}"
+  local rest
+  rest="$(trim "${1:-}")"
   rest="${rest#*://}"
   rest="${rest%%/*}"
   rest="${rest%%\?*}"
@@ -227,6 +229,7 @@ url_authority_has_userinfo() {
 
 redact_url_userinfo() {
   local value="${1:-}" prefix rest authority suffix host_part
+  value="$(trim "$value")"
   if [[ "$value" == *"://"* ]]; then
     prefix="${value%%://*}://"
     rest="${value#*://}"
@@ -682,6 +685,7 @@ if [[ -n "$provenance_lifetime_hours" && ( ! "$provenance_lifetime_hours" =~ ^[0
   exit 2
 fi
 
+base_url="$(trim "$base_url")"
 base_url="${base_url%/}"
 path_id="$(trim "$path_id")"
 service_name="$(trim "$service_name")"
@@ -904,6 +908,24 @@ fi
 mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
 reject_output_symlink_or_die "$summary_json"
 reject_output_symlink_or_die "$report_md"
+
+bundle_tar="${bundle_dir}.tar.gz"
+bundle_tar_sha256_file="${bundle_tar}.sha256"
+reject_output_symlink_or_die "$bundle_tar"
+reject_output_symlink_or_die "$bundle_tar_sha256_file"
+if [[ "$provenance_sign" == "1" ]]; then
+  if [[ -z "$provenance_out" ]]; then
+    provenance_out="${bundle_tar}.provenance.json"
+  else
+    provenance_out="$(abs_path "$provenance_out")"
+  fi
+  if path_is_inside_dir "$provenance_out" "$bundle_dir"; then
+    echo "access bridge pilot evidence bundle failed: --provenance-out must be outside the bundle directory so it is not included in the tar or manifest" >&2
+    exit 2
+  fi
+  reject_output_symlink_or_die "$provenance_out"
+  mkdir -p "$(dirname "$provenance_out")"
+fi
 
 tmp_dir="$(mktemp -d)"
 cleanup() {
@@ -1183,22 +1205,8 @@ elif [[ "$status" == "pass" && "$evidence_scope" != "real_helper_https" ]]; then
   recommended_action="Capture the same bundle against a public HTTPS helper host before operator handoff."
 fi
 
-bundle_tar="${bundle_dir}.tar.gz"
-bundle_tar_sha256_file="${bundle_tar}.sha256"
 manifest_sha256="$bundle_dir/manifest.sha256"
 bundled_summary_json="$bundle_dir/access_bridge_pilot_evidence_bundle_summary.json"
-if [[ "$provenance_sign" == "1" ]]; then
-  if [[ -z "$provenance_out" ]]; then
-    provenance_out="${bundle_tar}.provenance.json"
-  else
-    provenance_out="$(abs_path "$provenance_out")"
-  fi
-  if path_is_inside_dir "$provenance_out" "$bundle_dir"; then
-    echo "access bridge pilot evidence bundle failed: --provenance-out must be outside the bundle directory so it is not included in the tar or manifest" >&2
-    exit 2
-  fi
-  mkdir -p "$(dirname "$provenance_out")"
-fi
 
 cat >"$report_md" <<REPORT
 # Access Bridge Pilot Evidence Bundle

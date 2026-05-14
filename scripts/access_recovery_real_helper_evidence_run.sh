@@ -230,7 +230,8 @@ value_looks_generated_demo_identity() {
 }
 
 url_authority() {
-  local rest="${1:-}"
+  local rest
+  rest="$(trim "${1:-}")"
   rest="${rest#*://}"
   rest="${rest%%/*}"
   rest="${rest%%\?*}"
@@ -268,6 +269,7 @@ url_authority_has_userinfo() {
 
 redact_url_userinfo() {
   local value="${1:-}" prefix rest authority suffix host_part
+  value="$(trim "$value")"
   if [[ "$value" == *"://"* ]]; then
     prefix="${value%%://*}://"
     rest="${value#*://}"
@@ -1003,6 +1005,8 @@ if [[ "$plan_only" != "1" ]]; then
   done
 fi
 
+base_url="$(trim "$base_url")"
+base_url="${base_url%/}"
 config_json="$(abs_path "$config_json")"
 deploy_pack_dir="$(abs_path "$deploy_pack_dir")"
 if [[ -n "$install_dir" ]]; then
