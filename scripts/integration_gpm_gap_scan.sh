@@ -97,6 +97,7 @@ assert_file_contains "$PRIMARY_SUMMARY_JSON" '"counts": {' "summary JSON missing
 assert_file_matches_regex "$PRIMARY_SUMMARY_JSON" '"in_progress"[[:space:]]*:[[:space:]]*2' "summary JSON in_progress count mismatch"
 assert_file_matches_regex "$PRIMARY_SUMMARY_JSON" '"missing_next"[[:space:]]*:[[:space:]]*2' "summary JSON missing_next count mismatch"
 assert_file_matches_regex "$PRIMARY_SUMMARY_JSON" '"total"[[:space:]]*:[[:space:]]*4' "summary JSON total count mismatch"
+assert_file_matches_regex "$PRIMARY_SUMMARY_JSON" '"top_local_only"[[:space:]]*:[[:space:]]*4' "summary JSON top_local_only count mismatch"
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"items": [' "summary JSON missing items key"
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"id": "in_progress_01"' "summary JSON missing in_progress item id"
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"id": "missing_next_02"' "summary JSON missing missing_next item id"
@@ -112,6 +113,17 @@ assert_file_contains "$PRIMARY_SUMMARY_JSON" '"requires_real_hosts": false' "sum
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"suggested_tests": []' "summary JSON missing empty suggested_tests array"
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md"]' "summary JSON missing default suggested_files array"
 assert_file_contains "$PRIMARY_SUMMARY_JSON" '"top_actionable_item_ids": [' "summary JSON missing top_actionable_item_ids field"
+assert_file_contains "$PRIMARY_SUMMARY_JSON" '"top_local_only_item_ids": [' "summary JSON missing top_local_only_item_ids field"
+if ! grep -A16 '"top_local_only_item_ids": \[' "$PRIMARY_SUMMARY_JSON" | grep -F '"missing_next_01"' >/dev/null 2>&1; then
+  echo "primary local-only top tasks should include first missing/next item"
+  cat "$PRIMARY_SUMMARY_JSON"
+  exit 1
+fi
+if ! grep -A16 '"top_local_only_item_ids": \[' "$PRIMARY_SUMMARY_JSON" | grep -F '"in_progress_02"' >/dev/null 2>&1; then
+  echo "primary local-only top tasks should include second in-progress item"
+  cat "$PRIMARY_SUMMARY_JSON"
+  exit 1
+fi
 
 if command -v cygpath >/dev/null 2>&1; then
   echo "[gpm-gap-scan] Windows absolute status-doc paths are preserved"
@@ -183,6 +195,7 @@ bash "$SCRIPT_UNDER_TEST" \
 assert_file_contains "$ROADMAP_SUMMARY_JSON" '"roadmap_summary_json": "' "roadmap-aware summary missing roadmap summary input path"
 assert_file_matches_regex "$ROADMAP_SUMMARY_JSON" '"missing_next"[[:space:]]*:[[:space:]]*8' "roadmap-aware missing_next count mismatch"
 assert_file_matches_regex "$ROADMAP_SUMMARY_JSON" '"total"[[:space:]]*:[[:space:]]*9' "roadmap-aware total count mismatch"
+assert_file_matches_regex "$ROADMAP_SUMMARY_JSON" '"top_local_only"[[:space:]]*:[[:space:]]*2' "roadmap-aware top_local_only count mismatch"
 assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap Access Recovery handoff state is missing; provide a roadmap summary with access_recovery_track before pilot handoff.' "roadmap-aware summary missing access recovery track blocker"
 assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap profile-default gate next action has unresolved placeholders (invite_key)' "roadmap-aware summary missing profile placeholder blocker"
 assert_file_contains "$ROADMAP_SUMMARY_JSON" 'Roadmap multi-VM stability command source is not actionable' "roadmap-aware summary missing multi-vm blocker"
@@ -197,6 +210,11 @@ assert_file_contains "$ROADMAP_SUMMARY_JSON" '"requires_real_hosts": true' "road
 assert_file_contains "$ROADMAP_SUMMARY_JSON" '"suggested_tests": ["scripts/integration_client_vpn_path_profile_wiring.sh"]' "roadmap-aware summary missing profile suggested test"
 assert_file_contains "$ROADMAP_SUMMARY_JSON" '"suggested_tests": ["scripts/integration_3machine_prod_wg_validate.sh"]' "roadmap-aware summary missing multi-vm suggested test"
 assert_file_contains "$ROADMAP_STDOUT" "## Missing / Next (8)" "roadmap-aware markdown missing expanded missing/next count"
+if grep -A16 '"top_local_only_item_ids": \[' "$ROADMAP_SUMMARY_JSON" | grep -F '"missing_next_03"' >/dev/null 2>&1; then
+  echo "roadmap real-host blocker should not appear in top_local_only_item_ids"
+  cat "$ROADMAP_SUMMARY_JSON"
+  exit 1
+fi
 
 echo "[gpm-gap-scan] access recovery roadmap handoff state is surfaced"
 ACCESS_RECOVERY_STATUS_DOC="$TMP_DIR/access_recovery_status.md"

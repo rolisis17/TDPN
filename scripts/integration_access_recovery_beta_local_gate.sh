@@ -17,6 +17,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
+test_path() {
+  local path="${1:-}"
+  if [[ -f "$path" ]]; then
+    return 0
+  fi
+  if command -v cygpath >/dev/null 2>&1; then
+    path="$(cygpath -u "$path" 2>/dev/null || printf '%s' "$path")"
+    [[ -f "$path" ]]
+    return
+  fi
+  return 1
+}
+
 PASS_STEP="$TMP_DIR/pass-step.sh"
 FAIL_STEP="$TMP_DIR/fail-step.sh"
 FAKE_GATE="$TMP_DIR/fake-easy-node-gate.sh"
@@ -104,7 +117,7 @@ if [[ ! -f "$PASS_REPORT" ]] || ! grep -q "Access Recovery Beta Local Gate" "$PA
 fi
 
 while IFS= read -r step_log; do
-  if [[ ! -f "$step_log" ]]; then
+  if ! test_path "$step_log"; then
     echo "access recovery beta local gate integration failed: missing step log $step_log"
     cat "$PASS_SUMMARY"
     exit 1

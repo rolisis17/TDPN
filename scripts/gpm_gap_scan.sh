@@ -1184,6 +1184,7 @@ summary_tmp="$(mktemp "$reports_dir/gpm_gap_scan_summary.tmp.XXXXXX")"
 in_progress_ordinal=0
 missing_next_ordinal=0
 declare -a sorted_actionable_ids=()
+declare -a sorted_local_only_actionable_ids=()
 for wanted_severity in p1 p2 p3; do
   for idx in "${!ITEM_TEXTS[@]}"; do
     if [[ "${ITEM_SEVERITIES[$idx]:-}" != "$wanted_severity" ]]; then
@@ -1201,6 +1202,11 @@ for wanted_severity in p1 p2 p3; do
       item_id="$(printf 'missing_next_%02d' "$(( $(printf '%s\n' "${ITEM_SECTIONS[@]:0:$idx}" | grep -c '^missing_next$' 2>/dev/null || true) + 1 ))")"
     fi
     sorted_actionable_ids+=("$item_id")
+    if [[ "${ITEM_CLOSURE_MODES[$idx]:-}" == "local_only" \
+       && "${ITEM_REQUIRES_REAL_HOSTS[$idx]:-false}" == "false" \
+       && -z "${ITEM_BLOCKED_BYS[$idx]:-}" ]]; then
+      sorted_local_only_actionable_ids+=("$item_id")
+    fi
   done
 done
 
@@ -1277,7 +1283,8 @@ done
   printf '  "counts": {\n'
   printf '    "in_progress": %d,\n' "$in_progress_count"
   printf '    "missing_next": %d,\n' "$missing_next_count"
-  printf '    "total": %d\n' "$total_count"
+  printf '    "total": %d,\n' "$total_count"
+  printf '    "top_local_only": %d\n' "${#sorted_local_only_actionable_ids[@]}"
   printf '  },\n'
   printf '  "items": [\n'
   if (( item_count > 0 )); then
@@ -1337,6 +1344,17 @@ done
         printf ',\n'
       fi
       printf '    "%s"' "$(json_escape "${sorted_actionable_ids[$idx]}")"
+    done
+    printf '\n'
+  fi
+  printf '  ],\n'
+  printf '  "top_local_only_item_ids": [\n'
+  if (( ${#sorted_local_only_actionable_ids[@]} > 0 )); then
+    for idx in "${!sorted_local_only_actionable_ids[@]}"; do
+      if (( idx > 0 )); then
+        printf ',\n'
+      fi
+      printf '    "%s"' "$(json_escape "${sorted_local_only_actionable_ids[$idx]}")"
     done
     printf '\n'
   fi

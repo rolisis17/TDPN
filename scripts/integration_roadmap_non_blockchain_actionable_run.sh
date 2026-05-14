@@ -294,7 +294,7 @@ JSON
   "vpn_track": {
     "non_blockchain_recommended_gate_id": "action_redaction_1",
     "non_blockchain_actionable_no_sudo_or_github": [
-      {"id":"action_redaction_1","label":"Action redaction 1","command":"bash \"$PASS1\" --token super-secret-token --campaign-subject inv-secret-subject --password nonchain-pass-sentinel --passwd nonchain-passwd-sentinel --api-key=nonchain-api-sentinel --private-key nonchain-private-sentinel --private-key-file /tmp/nonchain-private.key --provenance-private-key-file /tmp/nonchain-provenance.key --secret \"nonchain quoted sentinel\" --secret-key=nonchain-secret-key-sentinel --secret-key-file=/tmp/nonchain-secret.key --admin-key 'nonchain admin sentinel' --admin-key-file /tmp/nonchain-admin.key","reason":"test-redaction"}
+      {"id":"action_redaction_1","label":"Action redaction 1","command":"bash \"$PASS1\" --token super-secret-token --campaign-subject inv-secret-subject --password nonchain-pass-sentinel --passwd nonchain-passwd-sentinel --api-key=nonchain-api-sentinel --private-key nonchain-private-sentinel --private-key-file /tmp/nonchain-private.key --provenance-private-key-file /tmp/nonchain-provenance.key --secret \"nonchain quoted sentinel\" --secret-key=nonchain-secret-key-sentinel --secret-key-file=/tmp/nonchain-secret.key --admin-key 'nonchain admin sentinel' --admin-key-file /tmp/nonchain-admin.key --bootstrap-directory https://user:nonchain-url-pass@bootstrap.example.test:8443/path?token=nonchain-url-token#frag --issuer-url=https://issuer-user:issuer-pass@issuer.example.test/api?api_key=issuer-secret --directory-urls https://dir-user:dir-pass@dir-a.example.test/path?token=dir-token,http://dir-b.example.test:8081/status?secret=dir-secret","reason":"test-redaction"}
     ]
   }
 }
@@ -490,6 +490,9 @@ if ! jq -e '
   and ((.actions[0].command // "") | contains("--secret-key-file=[redacted]"))
   and ((.actions[0].command // "") | contains("--admin-key [redacted]"))
   and ((.actions[0].command // "") | contains("--admin-key-file [redacted]"))
+  and ((.actions[0].command // "") | contains("--bootstrap-directory https://bootstrap.example.test:8443/path"))
+  and ((.actions[0].command // "") | contains("--issuer-url=https://issuer.example.test/api"))
+  and ((.actions[0].command // "") | contains("--directory-urls https://dir-a.example.test/path,http://dir-b.example.test:8081/status"))
 ' "$SUMMARY_REDACTION" >/dev/null; then
   echo "redaction summary mismatch"
   cat "$SUMMARY_REDACTION"
@@ -497,9 +500,10 @@ if ! jq -e '
   exit 1
 fi
 REDACTION_ACTION_LOG="$(jq -r '.actions[0].artifacts.log // ""' "$SUMMARY_REDACTION")"
+REDACTION_ROADMAP_SUMMARY="$(jq -r '.artifacts.roadmap_summary_json // ""' "$SUMMARY_REDACTION")"
 REDACTION_ROADMAP_LOG="$(jq -r '.artifacts.roadmap_log // ""' "$SUMMARY_REDACTION")"
 REDACTION_ROADMAP_REPORT="$(jq -r '.artifacts.roadmap_report_md // ""' "$SUMMARY_REDACTION")"
-for redaction_output_file in "$SUMMARY_REDACTION" "$RUN_LOG_REDACTION" "$REDACTION_ACTION_LOG" "$REDACTION_ROADMAP_LOG" "$REDACTION_ROADMAP_REPORT"; do
+for redaction_output_file in "$SUMMARY_REDACTION" "$RUN_LOG_REDACTION" "$REDACTION_ACTION_LOG" "$REDACTION_ROADMAP_SUMMARY" "$REDACTION_ROADMAP_LOG" "$REDACTION_ROADMAP_REPORT"; do
   if [[ -z "$redaction_output_file" || ! -f "$redaction_output_file" ]]; then
     echo "redaction output file missing: ${redaction_output_file:-<empty>}"
     cat "$SUMMARY_REDACTION"
@@ -519,7 +523,14 @@ for redaction_output_file in "$SUMMARY_REDACTION" "$RUN_LOG_REDACTION" "$REDACTI
     nonchain-secret-key-sentinel \
     /tmp/nonchain-secret.key \
     "nonchain admin sentinel" \
-    /tmp/nonchain-admin.key; do
+    /tmp/nonchain-admin.key \
+    nonchain-url-pass \
+    nonchain-url-token \
+    issuer-pass \
+    issuer-secret \
+    dir-pass \
+    dir-token \
+    dir-secret; do
     if grep -F -- "$redaction_sentinel" "$redaction_output_file" >/dev/null; then
       echo "redaction sentinel leaked into $redaction_output_file: $redaction_sentinel"
       cat "$redaction_output_file"
@@ -527,6 +538,39 @@ for redaction_output_file in "$SUMMARY_REDACTION" "$RUN_LOG_REDACTION" "$REDACTI
     fi
   done
 done
+
+echo "[roadmap-non-blockchain-actionable-run] caller-supplied roadmap summary remains unredacted source"
+EXTERNAL_REDACTION_SUMMARY="$TMP_DIR/external_redaction_source.json"
+EXTERNAL_REDACTION_REPORT="$TMP_DIR/external_redaction_report.md"
+SUMMARY_REDACTION_EXTERNAL="$TMP_DIR/summary_redaction_external.json"
+REPORTS_REDACTION_EXTERNAL="$TMP_DIR/reports_redaction_external"
+ROADMAP_ACTIONABLE_SCENARIO=redaction \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_non_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_REDACTION_EXTERNAL" \
+  --summary-json "$SUMMARY_REDACTION_EXTERNAL" \
+  --roadmap-summary-json "$EXTERNAL_REDACTION_SUMMARY" \
+  --roadmap-report-md "$EXTERNAL_REDACTION_REPORT" \
+  --print-summary-json 0 >"$TMP_DIR/run_redaction_external.log" 2>&1
+EXTERNAL_REDACTED_ARTIFACT="$(jq -r '.artifacts.roadmap_summary_json // ""' "$SUMMARY_REDACTION_EXTERNAL")"
+EXTERNAL_SOURCE_ARTIFACT="$(jq -r '.artifacts.roadmap_source_summary_json // ""' "$SUMMARY_REDACTION_EXTERNAL")"
+EXTERNAL_REDACTION_SUMMARY_CANON="$(cygpath -m "$EXTERNAL_REDACTION_SUMMARY" 2>/dev/null || printf '%s' "$EXTERNAL_REDACTION_SUMMARY")"
+if [[ "$EXTERNAL_REDACTED_ARTIFACT" == "$EXTERNAL_REDACTION_SUMMARY_CANON" || "$EXTERNAL_SOURCE_ARTIFACT" != "$EXTERNAL_REDACTION_SUMMARY_CANON" ]]; then
+  echo "caller-supplied roadmap summary should be preserved separately from redacted artifact"
+  cat "$SUMMARY_REDACTION_EXTERNAL"
+  exit 1
+fi
+if ! grep -F -- 'nonchain-url-pass' "$EXTERNAL_REDACTION_SUMMARY" >/dev/null; then
+  echo "caller-supplied roadmap summary source was unexpectedly redacted"
+  cat "$EXTERNAL_REDACTION_SUMMARY"
+  exit 1
+fi
+if grep -F -- 'nonchain-url-pass' "$EXTERNAL_REDACTED_ARTIFACT" >/dev/null; then
+  echo "redacted roadmap summary artifact leaked URL secret"
+  cat "$EXTERNAL_REDACTED_ARTIFACT"
+  exit 1
+fi
 
 echo "[roadmap-non-blockchain-actionable-run] no-python safe-mode path preserves quoted argv parsing"
 SUMMARY_NO_PYTHON_QUOTED="$TMP_DIR/summary_no_python_quoted.json"

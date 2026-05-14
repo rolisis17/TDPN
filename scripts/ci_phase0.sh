@@ -7,7 +7,8 @@ cd "$ROOT_DIR"
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/ci_phase0.sh [--dry-run [0|1]] [--summary-json PATH] [--print-summary-json [0|1]]
+  ./scripts/ci_phase0.sh [--dry-run [0|1]] [--summary-json PATH] \
+    [--access-recovery-beta-local-gate [0|1]] [--print-summary-json [0|1]]
 
 Purpose:
   Run a fast Phase-0 product-surface gate:
@@ -22,11 +23,13 @@ Purpose:
     9) desktop admin-console release guardrails contract
     10) GPM admin settlement docs contract
     11) Access Recovery checked examples contract
+    12) optional Access Recovery beta local gate
 
 Notes:
   - fail-fast by default
-  - Access Recovery coverage is the checked examples contract only; beta/local
-    evidence and real-helper handoff gates remain outside Phase-0
+  - Access Recovery checked examples always run; the broader beta/local evidence
+    gate is opt-in with --access-recovery-beta-local-gate 1
+  - live real-helper handoff evidence remains outside Phase-0
   - --dry-run 1 prints commands without executing
   - always emits a machine-readable summary artifact (including dry-run)
   - --print-summary-json 1 prints summary JSON payload to stdout at the end
@@ -44,6 +47,8 @@ Notes:
       CI_PHASE0_DESKTOP_ADMIN_CONSOLE_RELEASE_GUARDRAILS_SCRIPT
       CI_PHASE0_GPM_ADMIN_SETTLEMENT_CONTRACT_SCRIPT
       CI_PHASE0_ACCESS_RECOVERY_EXAMPLES_CONTRACT_SCRIPT
+      CI_PHASE0_ACCESS_RECOVERY_BETA_LOCAL_GATE_SCRIPT
+      CI_PHASE0_ACCESS_RECOVERY_BETA_LOCAL_GATE
       CI_PHASE0_SUMMARY_JSON
 USAGE
 }
@@ -78,6 +83,7 @@ print_cmd() {
 
 dry_run="${CI_PHASE0_DRY_RUN:-0}"
 summary_json="$(abs_path "${CI_PHASE0_SUMMARY_JSON:-$ROOT_DIR/.easy-node-logs/ci_phase0_summary.json}")"
+access_recovery_beta_local_gate="${CI_PHASE0_ACCESS_RECOVERY_BETA_LOCAL_GATE:-0}"
 print_summary_json="${CI_PHASE0_PRINT_SUMMARY_JSON:-0}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -93,6 +99,15 @@ while [[ $# -gt 0 ]]; do
     --summary-json)
       summary_json="$(abs_path "${2:-}")"
       shift 2
+      ;;
+    --access-recovery-beta-local-gate)
+      if [[ $# -ge 2 && ! "${2:-}" =~ ^-- ]]; then
+        access_recovery_beta_local_gate="${2:-}"
+        shift 2
+      else
+        access_recovery_beta_local_gate="1"
+        shift
+      fi
       ;;
     --print-summary-json)
       if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
@@ -116,6 +131,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 bool_arg_or_die "--dry-run" "$dry_run"
+bool_arg_or_die "--access-recovery-beta-local-gate" "$access_recovery_beta_local_gate"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 
 launcher_wiring_script="${CI_PHASE0_LAUNCHER_WIRING_SCRIPT:-$ROOT_DIR/scripts/integration_easy_mode_launcher_wiring.sh}"
@@ -129,8 +145,9 @@ desktop_release_guardrails_script="${CI_PHASE0_DESKTOP_RELEASE_GUARDRAILS_SCRIPT
 desktop_admin_console_release_guardrails_script="${CI_PHASE0_DESKTOP_ADMIN_CONSOLE_RELEASE_GUARDRAILS_SCRIPT:-$ROOT_DIR/scripts/integration_desktop_admin_console_release_bundle_guardrails.sh}"
 admin_settlement_contract_script="${CI_PHASE0_GPM_ADMIN_SETTLEMENT_CONTRACT_SCRIPT:-$ROOT_DIR/scripts/integration_gpm_admin_settlement_contract.sh}"
 access_recovery_examples_contract_script="${CI_PHASE0_ACCESS_RECOVERY_EXAMPLES_CONTRACT_SCRIPT:-$ROOT_DIR/scripts/integration_access_recovery_examples_contract.sh}"
+access_recovery_beta_local_gate_script="${CI_PHASE0_ACCESS_RECOVERY_BETA_LOCAL_GATE_SCRIPT:-$ROOT_DIR/scripts/access_recovery_beta_local_gate.sh}"
 
-step_ids=("launcher_wiring" "launcher_runtime" "prompt_budget" "config_v1" "local_control_api" "public_admin_split" "desktop_admin_console" "desktop_release_guardrails" "desktop_admin_console_release_guardrails" "gpm_admin_settlement_contract" "access_recovery_examples_contract")
+step_ids=("launcher_wiring" "launcher_runtime" "prompt_budget" "config_v1" "local_control_api" "public_admin_split" "desktop_admin_console" "desktop_release_guardrails" "desktop_admin_console_release_guardrails" "gpm_admin_settlement_contract" "access_recovery_examples_contract" "access_recovery_beta_local_gate")
 step_labels=(
   "easy-mode launcher wiring integration"
   "easy-mode launcher runtime integration"
@@ -143,6 +160,7 @@ step_labels=(
   "desktop admin-console release guardrails integration"
   "GPM admin settlement contract integration"
   "Access Recovery checked examples contract integration"
+  "Access Recovery beta local gate"
 )
 step_scripts=(
   "$launcher_wiring_script"
@@ -156,9 +174,12 @@ step_scripts=(
   "$desktop_admin_console_release_guardrails_script"
   "$admin_settlement_contract_script"
   "$access_recovery_examples_contract_script"
+  "$access_recovery_beta_local_gate_script"
 )
-step_statuses=("pending" "pending" "pending" "pending" "pending" "pending" "pending" "pending" "pending" "pending" "pending")
-step_rcs=("null" "null" "null" "null" "null" "null" "null" "null" "null" "null" "null")
+step_required=("1" "1" "1" "1" "1" "1" "1" "1" "1" "1" "1" "0")
+step_enabled=("1" "1" "1" "1" "1" "1" "1" "1" "1" "1" "1" "$access_recovery_beta_local_gate")
+step_statuses=("pending" "pending" "pending" "pending" "pending" "pending" "pending" "pending" "pending" "pending" "pending" "pending")
+step_rcs=("null" "null" "null" "null" "null" "null" "null" "null" "null" "null" "null" "null")
 
 set_step_result() {
   local idx="$1"
@@ -180,6 +201,11 @@ write_summary() {
   local dry_run_steps=0
   local skipped_steps=0
   local pending_steps=0
+  local required_steps=0
+  local required_pass_steps=0
+  local optional_steps=0
+  local optional_enabled_steps=0
+  local optional_pass_steps=0
   local contract_ok="false"
   local all_required_steps_ok="false"
   local summary_tmp=""
@@ -217,12 +243,26 @@ write_summary() {
         pending_steps=$((pending_steps + 1))
         ;;
     esac
+    if [[ "${step_required[$i]}" == "1" ]]; then
+      required_steps=$((required_steps + 1))
+      if [[ "${step_statuses[$i]}" == "pass" ]]; then
+        required_pass_steps=$((required_pass_steps + 1))
+      fi
+    else
+      optional_steps=$((optional_steps + 1))
+      if [[ "${step_enabled[$i]}" == "1" ]]; then
+        optional_enabled_steps=$((optional_enabled_steps + 1))
+      fi
+      if [[ "${step_statuses[$i]}" == "pass" ]]; then
+        optional_pass_steps=$((optional_pass_steps + 1))
+      fi
+    fi
   done
 
   if [[ "$status" == "pass" ]]; then
     contract_ok="true"
   fi
-  if [[ "$pass_steps" -eq "$step_count" ]]; then
+  if [[ "$required_pass_steps" -eq "$required_steps" ]]; then
     all_required_steps_ok="true"
   fi
 
@@ -233,6 +273,8 @@ write_summary() {
       --arg id "${step_ids[$i]}" \
       --arg label_value "${step_labels[$i]}" \
       --arg script "${step_scripts[$i]}" \
+      --argjson required "$( [[ "${step_required[$i]}" == "1" ]] && printf 'true' || printf 'false' )" \
+      --argjson enabled "$( [[ "${step_enabled[$i]}" == "1" ]] && printf 'true' || printf 'false' )" \
       --arg step_status "${step_statuses[$i]}" \
       --arg step_rc "$rc_value" \
       '
@@ -240,6 +282,8 @@ write_summary() {
           ($id): {
             "label": $label_value,
             script: $script,
+            required: $required,
+            enabled: $enabled,
             status: $step_status,
             rc: (if $step_rc == "null" then null else ($step_rc | tonumber) end)
           }
@@ -262,6 +306,11 @@ write_summary() {
     --argjson dry_run_steps "$dry_run_steps" \
     --argjson skipped_steps "$skipped_steps" \
     --argjson pending_steps "$pending_steps" \
+    --argjson required_steps "$required_steps" \
+    --argjson required_pass_steps "$required_pass_steps" \
+    --argjson optional_steps "$optional_steps" \
+    --argjson optional_enabled_steps "$optional_enabled_steps" \
+    --argjson optional_pass_steps "$optional_pass_steps" \
     --argjson contract_ok "$contract_ok" \
     --argjson all_required_steps_ok "$all_required_steps_ok" \
     --arg summary_json_path "$summary_json" \
@@ -285,6 +334,11 @@ write_summary() {
           dry_run_steps: $dry_run_steps,
           skipped_steps: $skipped_steps,
           pending_steps: $pending_steps,
+          required_steps: $required_steps,
+          required_pass_steps: $required_pass_steps,
+          optional_steps: $optional_steps,
+          optional_enabled_steps: $optional_enabled_steps,
+          optional_pass_steps: $optional_pass_steps,
           contract_ok: $contract_ok,
           all_required_steps_ok: $all_required_steps_ok
         },
@@ -310,6 +364,11 @@ run_step() {
   local label="${step_labels[$idx]}"
   local script="${step_scripts[$idx]}"
   local rc=0
+  if [[ "${step_enabled[$idx]}" != "1" ]]; then
+    set_step_result "$idx" "skipped" "null"
+    echo "[ci-phase0] skipped optional step: ${label}"
+    return 0
+  fi
   if [[ ! -x "$script" ]]; then
     set_step_result "$idx" "fail" "2"
     echo "missing executable step script for ${label}: $script"

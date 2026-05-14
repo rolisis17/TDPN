@@ -146,6 +146,50 @@ render_log_token() {
   fi
 }
 
+is_url_value_flag() {
+  local token="${1:-}"
+  case "$token" in
+    --*url|--*urls|--bootstrap-directory|--directory-urls)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+redact_url_segment() {
+  local value="${1:-}"
+  if [[ "$value" =~ ^([A-Za-z][A-Za-z0-9+.-]*://)([^/?#@]+@)?([^?#]*)([?#].*)?$ ]]; then
+    printf '%s%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]}"
+  else
+    printf '%s' "$value"
+  fi
+}
+
+redact_url_value() {
+  local value="${1:-}"
+  local IFS=","
+  local part=""
+  local rendered=""
+  local redacted=""
+  read -r -a parts <<<"$value"
+  for part in "${parts[@]}"; do
+    redacted="$(redact_url_segment "$part")"
+    rendered="${rendered}${rendered:+,}${redacted}"
+  done
+  printf '%s' "$rendered"
+}
+
+redact_log_token_urls() {
+  local token="${1:-}"
+  if [[ "$token" == *"://"* ]]; then
+    redact_url_value "$token"
+  else
+    printf '%s' "$token"
+  fi
+}
+
 redact_command_secrets() {
   local line="${1:-}"
   local flag_regex='--campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer|--password|--passwd|--secret|--api-key|--private-key|--private-key-file|--provenance-private-key-file|--secret-key|--secret-key-file|--admin-key|--admin-key-file'
@@ -177,6 +221,17 @@ redact_command_secrets() {
         continue
       fi
 
+      if is_url_value_flag "$token"; then
+        rendered="${rendered}${rendered:+ }$(render_log_token "$token")"
+        if (( idx + 1 < token_count )); then
+          rendered="${rendered}${rendered:+ }$(render_log_token "$(redact_url_value "${COMMAND_STRING_ARGV[$((idx + 1))]}")")"
+          idx=$((idx + 2))
+        else
+          idx=$((idx + 1))
+        fi
+        continue
+      fi
+
       if [[ "$token" == --*=* ]]; then
         key="${token%%=*}"
         if is_sensitive_secret_flag "$key"; then
@@ -184,9 +239,14 @@ redact_command_secrets() {
           idx=$((idx + 1))
           continue
         fi
+        if is_url_value_flag "$key"; then
+          rendered="${rendered}${rendered:+ }${key}=$(render_log_token "$(redact_url_value "${token#*=}")")"
+          idx=$((idx + 1))
+          continue
+        fi
       fi
 
-      rendered="${rendered}${rendered:+ }$(render_log_token "$token")"
+      rendered="${rendered}${rendered:+ }$(render_log_token "$(redact_log_token_urls "$token")")"
       idx=$((idx + 1))
     done
     printf '%s' "$rendered"
@@ -568,6 +628,10 @@ reports_dir="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_REPORTS_DIR:-}"
 summary_json="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_SUMMARY_JSON:-}"
 roadmap_summary_json="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SUMMARY_JSON:-}"
 roadmap_report_md="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_REPORT_MD:-}"
+roadmap_summary_json_provided="0"
+if [[ -n "$roadmap_summary_json" ]]; then
+  roadmap_summary_json_provided="1"
+fi
 refresh_manual_validation="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_REFRESH_MANUAL_VALIDATION:-0}"
 refresh_single_machine_readiness="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_REFRESH_SINGLE_MACHINE_READINESS:-0}"
 allow_policy_no_go="${ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ALLOW_POLICY_NO_GO:-0}"
@@ -593,6 +657,7 @@ while [[ $# -gt 0 ]]; do
     --roadmap-summary-json)
       require_value_or_die "$1" "${2:-}"
       roadmap_summary_json="${2:-}"
+      roadmap_summary_json_provided="1"
       shift 2
       ;;
     --roadmap-report-md)
@@ -763,7 +828,16 @@ fi
 
 recommended_id="$(jq -r '.vpn_track.non_blockchain_recommended_gate_id // ""' "$roadmap_summary_json")"
 selected_actions_json="$(jq -c '.vpn_track.non_blockchain_actionable_no_sudo_or_github // []' "$roadmap_summary_json")"
-redact_roadmap_summary_artifact "$roadmap_summary_json"
+roadmap_source_summary_json="$roadmap_summary_json"
+roadmap_summary_artifact_json="$roadmap_summary_json"
+if [[ "$roadmap_summary_json_provided" == "1" ]]; then
+  roadmap_summary_artifact_json="$reports_dir/roadmap_progress_summary.redacted.json"
+  if ! jq '.' "$roadmap_source_summary_json" >"$roadmap_summary_artifact_json"; then
+    echo "failed to create redacted roadmap summary artifact: $roadmap_summary_artifact_json"
+    exit 3
+  fi
+fi
+redact_roadmap_summary_artifact "$roadmap_summary_artifact_json"
 recommended_only_selection_state="disabled"
 recommended_only_selection_reason=""
 recommended_only_fail_closed="false"
@@ -1161,7 +1235,8 @@ jq -n \
   --arg command "$summary_command_redacted" \
   --arg reports_dir "$reports_dir" \
   --arg summary_json "$summary_json" \
-  --arg roadmap_summary_json "$roadmap_summary_json" \
+  --arg roadmap_summary_json "$roadmap_summary_artifact_json" \
+  --arg roadmap_source_summary_json "$roadmap_source_summary_json" \
   --arg roadmap_report_md "$roadmap_report_md" \
   --arg roadmap_log "$roadmap_log" \
   --arg recommended_id "$recommended_id" \
@@ -1219,6 +1294,7 @@ jq -n \
       reports_dir: $reports_dir,
       summary_json: $summary_json,
       roadmap_summary_json: $roadmap_summary_json,
+      roadmap_source_summary_json: $roadmap_source_summary_json,
       roadmap_report_md: $roadmap_report_md,
       roadmap_log: $roadmap_log
     }

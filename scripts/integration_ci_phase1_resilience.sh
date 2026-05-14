@@ -24,6 +24,7 @@ CAPTURE="$TMP_DIR/stage_calls.tsv"
 DRY_RUN_LOG="$TMP_DIR/dry_run.log"
 RESUME_LOG="$TMP_DIR/resume.log"
 RESUME_FALLBACK_LOG="$TMP_DIR/resume_fallback.log"
+RESUME_WRONG_SCHEMA_LOG="$TMP_DIR/resume_wrong_schema.log"
 TIMEOUT_LOG="$TMP_DIR/timeout.log"
 FAIL_LOG="$TMP_DIR/fail.log"
 POLICY_NO_GO_FAIL_CLOSED_LOG="$TMP_DIR/policy_no_go_fail_closed.log"
@@ -34,6 +35,7 @@ DEFAULT_THREE_HOP_SCRIPT_LOG="$TMP_DIR/default_three_hop_script.log"
 DRY_RUN_REPORTS_DIR="$TMP_DIR/reports_dry_run"
 RESUME_REPORTS_DIR="$TMP_DIR/reports_resume"
 RESUME_FALLBACK_REPORTS_DIR="$TMP_DIR/reports_resume_fallback"
+RESUME_WRONG_SCHEMA_REPORTS_DIR="$TMP_DIR/reports_resume_wrong_schema"
 TIMEOUT_REPORTS_DIR="$TMP_DIR/reports_timeout"
 FAIL_REPORTS_DIR="$TMP_DIR/reports_fail"
 POLICY_NO_GO_FAIL_CLOSED_REPORTS_DIR="$TMP_DIR/reports_policy_no_go_fail_closed"
@@ -43,6 +45,7 @@ DEFAULT_THREE_HOP_SCRIPT_REPORTS_DIR="$TMP_DIR/reports_default_three_hop_script"
 DRY_RUN_SUMMARY_JSON="$TMP_DIR/summary_dry_run.json"
 RESUME_SUMMARY_JSON="$TMP_DIR/summary_resume.json"
 RESUME_FALLBACK_SUMMARY_JSON="$TMP_DIR/summary_resume_fallback.json"
+RESUME_WRONG_SCHEMA_SUMMARY_JSON="$TMP_DIR/summary_resume_wrong_schema.json"
 TIMEOUT_SUMMARY_JSON="$TMP_DIR/summary_timeout.json"
 FAIL_SUMMARY_JSON="$TMP_DIR/summary_fail.json"
 POLICY_NO_GO_FAIL_CLOSED_SUMMARY_JSON="$TMP_DIR/summary_policy_no_go_fail_closed.json"
@@ -535,6 +538,57 @@ fi
 if ! grep -q '\[ci-phase1-resilience\] step=three_machine_docker_profile_matrix status=pass rc=0 reason=resume-artifact-pass' "$RESUME_LOG"; then
   echo "resume log missing artifact-reuse signal"
   cat "$RESUME_LOG"
+  exit 1
+fi
+
+echo "[ci-phase1-resilience] resume mode rejects wrong-schema pass artifact and reruns stage"
+resume_wrong_schema_matrix_summary_json="$RESUME_WRONG_SCHEMA_REPORTS_DIR/three_machine_docker_profile_matrix/three_machine_docker_profile_matrix_summary.json"
+mkdir -p "$(dirname "$resume_wrong_schema_matrix_summary_json")"
+cat >"$resume_wrong_schema_matrix_summary_json" <<'EOF_RESUME_WRONG_SCHEMA_SUMMARY'
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_docker_matrix_summary",
+    "major": 1,
+    "minor": 0
+  },
+  "status": "pass",
+  "rc": 0
+}
+EOF_RESUME_WRONG_SCHEMA_SUMMARY
+
+: >"$CAPTURE"
+CI_PHASE1_RESILIENCE_CAPTURE_FILE="$CAPTURE" \
+bash "$GATE_SCRIPT" \
+  --resume 1 \
+  --reports-dir "$RESUME_WRONG_SCHEMA_REPORTS_DIR" \
+  --summary-json "$RESUME_WRONG_SCHEMA_SUMMARY_JSON" \
+  --print-summary-json 0 \
+  --run-three-machine-docker-profile-matrix 1 \
+  --run-profile-compare-docker-matrix 0 \
+  --run-three-machine-docker-profile-matrix-record 0 \
+  --run-vpn-rc-matrix-path 0 \
+  --run-vpn-rc-resilience-path 0 \
+  --run-session-churn-guard 0 \
+  --run-3hop-runtime-integration 0 >"$RESUME_WRONG_SCHEMA_LOG" 2>&1
+
+assert_stage_order "$CAPTURE" "three_machine_docker_profile_matrix"
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .inputs.resume == true
+  and .steps.three_machine_docker_profile_matrix.enabled == true
+  and .steps.three_machine_docker_profile_matrix.status == "pass"
+  and .steps.three_machine_docker_profile_matrix.reused_artifact == false
+' "$RESUME_WRONG_SCHEMA_SUMMARY_JSON" >/dev/null; then
+  echo "resume wrong-schema summary missing expected rerun contract fields"
+  cat "$RESUME_WRONG_SCHEMA_SUMMARY_JSON"
+  cat "$RESUME_WRONG_SCHEMA_LOG"
+  exit 1
+fi
+if grep -q 'reason=resume-artifact-pass' "$RESUME_WRONG_SCHEMA_LOG"; then
+  echo "wrong-schema resume artifact should not be reused"
+  cat "$RESUME_WRONG_SCHEMA_LOG"
   exit 1
 fi
 

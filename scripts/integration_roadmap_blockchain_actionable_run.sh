@@ -401,13 +401,13 @@ JSON
   "blockchain_track": {
     "recommended_gate_id": "blockchain_redaction_1",
     "recommended_gate_reason": "redaction scenario",
-    "recommended_gate_command": "bash \"$PASS1\" --token chain-secret --campaign-subject inv-chain-secret --password chain-pass-sentinel --passwd chain-passwd-sentinel --api-key=chain-api-sentinel --private-key chain-private-sentinel --private-key-file /tmp/chain-private.key --provenance-private-key-file /tmp/chain-provenance.key --secret \"chain quoted sentinel\" --secret-key=chain-secret-key-sentinel --secret-key-file=/tmp/chain-secret.key --admin-key 'chain admin sentinel' --admin-key-file /tmp/chain-admin.key",
+    "recommended_gate_command": "bash \"$PASS1\" --token chain-secret --campaign-subject inv-chain-secret --password chain-pass-sentinel --passwd chain-passwd-sentinel --api-key=chain-api-sentinel --private-key chain-private-sentinel --private-key-file /tmp/chain-private.key --provenance-private-key-file /tmp/chain-provenance.key --secret \"chain quoted sentinel\" --secret-key=chain-secret-key-sentinel --secret-key-file=/tmp/chain-secret.key --admin-key 'chain admin sentinel' --admin-key-file /tmp/chain-admin.key --bootstrap-directory https://chain-user:chain-url-pass@chain-bootstrap.example.test:9443/path?token=chain-url-token#frag --issuer-url=https://chain-issuer-user:chain-issuer-pass@chain-issuer.example.test/api?api_key=chain-issuer-secret --directory-urls https://chain-dir-user:chain-dir-pass@chain-dir-a.example.test/path?token=chain-dir-token,http://chain-dir-b.example.test:8081/status?secret=chain-dir-secret",
     "mainnet_activation_missing_metrics_action": {
       "id": "blockchain_redaction_1"
     }
   },
   "next_actions": [
-    {"id":"blockchain_redaction_1","label":"Blockchain redaction 1","command":"bash \"$PASS1\" --token chain-secret --campaign-subject inv-chain-secret --password chain-pass-sentinel --passwd chain-passwd-sentinel --api-key=chain-api-sentinel --private-key chain-private-sentinel --private-key-file /tmp/chain-private.key --provenance-private-key-file /tmp/chain-provenance.key --secret \"chain quoted sentinel\" --secret-key=chain-secret-key-sentinel --secret-key-file=/tmp/chain-secret.key --admin-key 'chain admin sentinel' --admin-key-file /tmp/chain-admin.key","reason":"test-redaction"}
+    {"id":"blockchain_redaction_1","label":"Blockchain redaction 1","command":"bash \"$PASS1\" --token chain-secret --campaign-subject inv-chain-secret --password chain-pass-sentinel --passwd chain-passwd-sentinel --api-key=chain-api-sentinel --private-key chain-private-sentinel --private-key-file /tmp/chain-private.key --provenance-private-key-file /tmp/chain-provenance.key --secret \"chain quoted sentinel\" --secret-key=chain-secret-key-sentinel --secret-key-file=/tmp/chain-secret.key --admin-key 'chain admin sentinel' --admin-key-file /tmp/chain-admin.key --bootstrap-directory https://chain-user:chain-url-pass@chain-bootstrap.example.test:9443/path?token=chain-url-token#frag --issuer-url=https://chain-issuer-user:chain-issuer-pass@chain-issuer.example.test/api?api_key=chain-issuer-secret --directory-urls https://chain-dir-user:chain-dir-pass@chain-dir-a.example.test/path?token=chain-dir-token,http://chain-dir-b.example.test:8081/status?secret=chain-dir-secret","reason":"test-redaction"}
   ]
 }
 JSON
@@ -580,6 +580,9 @@ if ! jq -e '
   and ((.roadmap.recommended_gate_command // "") | contains("--secret-key-file=[redacted]"))
   and ((.roadmap.recommended_gate_command // "") | contains("--admin-key [redacted]"))
   and ((.roadmap.recommended_gate_command // "") | contains("--admin-key-file [redacted]"))
+  and ((.roadmap.recommended_gate_command // "") | contains("--bootstrap-directory https://chain-bootstrap.example.test:9443/path"))
+  and ((.roadmap.recommended_gate_command // "") | contains("--issuer-url=https://chain-issuer.example.test/api"))
+  and ((.roadmap.recommended_gate_command // "") | contains("--directory-urls https://chain-dir-a.example.test/path,http://chain-dir-b.example.test:8081/status"))
   and ((.actions // []) | length == 1)
   and .actions[0].id == "blockchain_redaction_1"
   and .actions[0].status == "pass"
@@ -596,6 +599,9 @@ if ! jq -e '
   and ((.actions[0].command // "") | contains("--secret-key-file=[redacted]"))
   and ((.actions[0].command // "") | contains("--admin-key [redacted]"))
   and ((.actions[0].command // "") | contains("--admin-key-file [redacted]"))
+  and ((.actions[0].command // "") | contains("--bootstrap-directory https://chain-bootstrap.example.test:9443/path"))
+  and ((.actions[0].command // "") | contains("--issuer-url=https://chain-issuer.example.test/api"))
+  and ((.actions[0].command // "") | contains("--directory-urls https://chain-dir-a.example.test/path,http://chain-dir-b.example.test:8081/status"))
 ' "$SUMMARY_REDACTION" >/dev/null; then
   echo "redaction summary mismatch"
   cat "$SUMMARY_REDACTION"
@@ -603,9 +609,10 @@ if ! jq -e '
   exit 1
 fi
 REDACTION_ACTION_LOG="$(jq -r '.actions[0].artifacts.log // ""' "$SUMMARY_REDACTION")"
+REDACTION_ROADMAP_SUMMARY="$(jq -r '.artifacts.roadmap_summary_json // ""' "$SUMMARY_REDACTION")"
 REDACTION_ROADMAP_LOG="$(jq -r '.artifacts.roadmap_log // ""' "$SUMMARY_REDACTION")"
 REDACTION_ROADMAP_REPORT="$(jq -r '.artifacts.roadmap_report_md // ""' "$SUMMARY_REDACTION")"
-for redaction_output_file in "$SUMMARY_REDACTION" "$RUN_LOG_REDACTION" "$REDACTION_ACTION_LOG" "$REDACTION_ROADMAP_LOG" "$REDACTION_ROADMAP_REPORT"; do
+for redaction_output_file in "$SUMMARY_REDACTION" "$RUN_LOG_REDACTION" "$REDACTION_ACTION_LOG" "$REDACTION_ROADMAP_SUMMARY" "$REDACTION_ROADMAP_LOG" "$REDACTION_ROADMAP_REPORT"; do
   if [[ -z "$redaction_output_file" || ! -f "$redaction_output_file" ]]; then
     echo "redaction output file missing: ${redaction_output_file:-<empty>}"
     cat "$SUMMARY_REDACTION"
@@ -625,7 +632,14 @@ for redaction_output_file in "$SUMMARY_REDACTION" "$RUN_LOG_REDACTION" "$REDACTI
     chain-secret-key-sentinel \
     /tmp/chain-secret.key \
     "chain admin sentinel" \
-    /tmp/chain-admin.key; do
+    /tmp/chain-admin.key \
+    chain-url-pass \
+    chain-url-token \
+    chain-issuer-pass \
+    chain-issuer-secret \
+    chain-dir-pass \
+    chain-dir-token \
+    chain-dir-secret; do
     if grep -F -- "$redaction_sentinel" "$redaction_output_file" >/dev/null; then
       echo "redaction sentinel leaked into $redaction_output_file: $redaction_sentinel"
       cat "$redaction_output_file"
@@ -633,6 +647,39 @@ for redaction_output_file in "$SUMMARY_REDACTION" "$RUN_LOG_REDACTION" "$REDACTI
     fi
   done
 done
+
+echo "[roadmap-blockchain-actionable-run] caller-supplied roadmap summary remains unredacted source"
+EXTERNAL_REDACTION_SUMMARY="$TMP_DIR/external_chain_redaction_source.json"
+EXTERNAL_REDACTION_REPORT="$TMP_DIR/external_chain_redaction_report.md"
+SUMMARY_REDACTION_EXTERNAL="$TMP_DIR/summary_chain_redaction_external.json"
+REPORTS_REDACTION_EXTERNAL="$TMP_DIR/reports_chain_redaction_external"
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=redaction \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PREFILL="$PREFILL" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_REDACTION_EXTERNAL" \
+  --summary-json "$SUMMARY_REDACTION_EXTERNAL" \
+  --roadmap-summary-json "$EXTERNAL_REDACTION_SUMMARY" \
+  --print-summary-json 0 >"$TMP_DIR/run_chain_redaction_external.log" 2>&1
+EXTERNAL_REDACTED_ARTIFACT="$(jq -r '.artifacts.roadmap_summary_json // ""' "$SUMMARY_REDACTION_EXTERNAL")"
+EXTERNAL_SOURCE_ARTIFACT="$(jq -r '.artifacts.roadmap_source_summary_json // ""' "$SUMMARY_REDACTION_EXTERNAL")"
+EXTERNAL_REDACTION_SUMMARY_CANON="$(cygpath -m "$EXTERNAL_REDACTION_SUMMARY" 2>/dev/null || printf '%s' "$EXTERNAL_REDACTION_SUMMARY")"
+if [[ "$EXTERNAL_REDACTED_ARTIFACT" == "$EXTERNAL_REDACTION_SUMMARY_CANON" || "$EXTERNAL_SOURCE_ARTIFACT" != "$EXTERNAL_REDACTION_SUMMARY_CANON" ]]; then
+  echo "caller-supplied blockchain roadmap summary should be preserved separately from redacted artifact"
+  cat "$SUMMARY_REDACTION_EXTERNAL"
+  exit 1
+fi
+if ! grep -F -- 'chain-url-pass' "$EXTERNAL_REDACTION_SUMMARY" >/dev/null; then
+  echo "caller-supplied blockchain roadmap summary source was unexpectedly redacted"
+  cat "$EXTERNAL_REDACTION_SUMMARY"
+  exit 1
+fi
+if grep -F -- 'chain-url-pass' "$EXTERNAL_REDACTED_ARTIFACT" >/dev/null; then
+  echo "redacted blockchain roadmap summary artifact leaked URL secret"
+  cat "$EXTERNAL_REDACTED_ARTIFACT"
+  exit 1
+fi
 
 echo "[roadmap-blockchain-actionable-run] no-python safe-mode path preserves quoted argv parsing"
 SUMMARY_NO_PYTHON_QUOTED="$TMP_DIR/summary_no_python_quoted.json"

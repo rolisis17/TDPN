@@ -306,14 +306,40 @@ json_file_valid() {
 
 summary_pass_contract_valid() {
   local path="$1"
+  local expected_schema_id="${2:-}"
+  local expected_command_token="${3:-}"
+  local expected_dry_run="${4:-}"
   if ! json_file_valid "$path"; then
     return 1
   fi
-  jq -e '
+  jq -e \
+    --arg expected_schema_id "$expected_schema_id" \
+    --arg expected_command_token "$expected_command_token" \
+    --arg expected_dry_run "$expected_dry_run" \
+    '
     (.status | type) == "string"
     and .status == "pass"
     and (.rc | type) == "number"
     and .rc == 0
+    and (
+      $expected_schema_id == ""
+      or ((.schema.id // "") == "" or .schema.id == $expected_schema_id)
+    )
+    and (
+      ((.schema.major // 1) | tostring) == "1"
+    )
+    and (
+      $expected_command_token == ""
+      or ((.command // "") == "" or (.command | contains($expected_command_token)))
+    )
+    and (
+      $expected_dry_run == ""
+      or ((.inputs.dry_run | type) != "boolean" or .inputs.dry_run == ($expected_dry_run == "1"))
+    )
+    and (
+      $expected_dry_run == ""
+      or ((.dry_run | type) != "boolean" or .dry_run == ($expected_dry_run == "1"))
+    )
   ' "$path" >/dev/null 2>&1
 }
 
@@ -783,7 +809,7 @@ final_rc=0
 
 if [[ "$run_three_machine_docker_profile_matrix" == "1" ]]; then
   three_machine_matrix_command="$(print_cmd "${three_machine_matrix_cmd[@]}")"
-  if [[ "$resume" == "1" ]] && summary_pass_contract_valid "$three_machine_matrix_summary_json"; then
+  if [[ "$resume" == "1" ]] && summary_pass_contract_valid "$three_machine_matrix_summary_json" "three_machine_docker_profile_matrix_summary" "${three_machine_docker_profile_matrix_script##*/}" "$dry_run"; then
     echo "[ci-phase1-resilience] step=three_machine_docker_profile_matrix status=pass rc=0 reason=resume-artifact-pass"
     three_machine_matrix_status="pass"
     three_machine_matrix_rc=0
@@ -815,7 +841,7 @@ fi
 
 if [[ "$run_profile_compare_docker_matrix" == "1" ]]; then
   profile_compare_matrix_command="$(print_cmd "${profile_compare_matrix_cmd[@]}")"
-  if [[ "$resume" == "1" ]] && summary_pass_contract_valid "$profile_compare_matrix_summary_json"; then
+  if [[ "$resume" == "1" ]] && summary_pass_contract_valid "$profile_compare_matrix_summary_json" "" "${profile_compare_docker_matrix_script##*/}" "$dry_run"; then
     echo "[ci-phase1-resilience] step=profile_compare_docker_matrix status=pass rc=0 reason=resume-artifact-pass"
     profile_compare_matrix_status="pass"
     profile_compare_matrix_rc=0
@@ -847,7 +873,7 @@ fi
 
 if [[ "$run_three_machine_docker_profile_matrix_record" == "1" ]]; then
   three_machine_matrix_record_command="$(print_cmd "${three_machine_matrix_record_cmd[@]}")"
-  if [[ "$resume" == "1" ]] && summary_pass_contract_valid "$three_machine_matrix_record_summary_json"; then
+  if [[ "$resume" == "1" ]] && summary_pass_contract_valid "$three_machine_matrix_record_summary_json" "three_machine_docker_profile_matrix_record_summary" "${three_machine_docker_profile_matrix_record_script##*/}" "$dry_run"; then
     echo "[ci-phase1-resilience] step=three_machine_docker_profile_matrix_record status=pass rc=0 reason=resume-artifact-pass"
     three_machine_matrix_record_status="pass"
     three_machine_matrix_record_rc=0
@@ -879,7 +905,7 @@ fi
 
 if [[ "$run_vpn_rc_matrix_path" == "1" ]]; then
   vpn_rc_matrix_command="$(print_cmd "${vpn_rc_matrix_cmd[@]}")"
-  if [[ "$resume" == "1" ]] && summary_pass_contract_valid "$vpn_rc_matrix_summary_json"; then
+  if [[ "$resume" == "1" ]] && summary_pass_contract_valid "$vpn_rc_matrix_summary_json" "" "${vpn_rc_matrix_path_script##*/}" "$dry_run"; then
     echo "[ci-phase1-resilience] step=vpn_rc_matrix_path status=pass rc=0 reason=resume-artifact-pass"
     vpn_rc_matrix_status="pass"
     vpn_rc_matrix_rc=0
@@ -918,7 +944,7 @@ fi
 
 if [[ "$run_vpn_rc_resilience_path" == "1" ]]; then
   vpn_rc_resilience_command="$(print_cmd "${vpn_rc_resilience_cmd[@]}")"
-  if [[ "$resume" == "1" ]] && summary_pass_contract_valid "$vpn_rc_resilience_summary_json"; then
+  if [[ "$resume" == "1" ]] && summary_pass_contract_valid "$vpn_rc_resilience_summary_json" "" "${vpn_rc_resilience_path_script##*/}" "$dry_run"; then
     echo "[ci-phase1-resilience] step=vpn_rc_resilience_path status=pass rc=0 reason=resume-artifact-pass"
     vpn_rc_resilience_status="pass"
     vpn_rc_resilience_rc=0
