@@ -75,6 +75,23 @@ need_cmd() {
   fi
 }
 
+reject_output_symlink_or_die() {
+  local path="${1:-}"
+  local current
+  if [[ -n "$path" && -L "$path" ]]; then
+    echo "refusing to write GPM blockchain logic check output through symlink: $path"
+    exit 2
+  fi
+  current="$(dirname "$path")"
+  while [[ -n "$current" && "$current" != "." && "$current" != "/" ]]; do
+    if [[ -L "$current" ]]; then
+      echo "refusing to write GPM blockchain logic check output through symlink: $path (symlink ancestor: $current)"
+      exit 2
+    fi
+    current="$(dirname "$current")"
+  done
+}
+
 require_value_or_die() {
   local flag="$1"
   local value="${2:-}"
@@ -555,6 +572,8 @@ if [[ -z "$summary_json" ]]; then
   exit 2
 fi
 
+reject_output_symlink_or_die "$reports_dir"
+reject_output_symlink_or_die "$summary_json"
 if [[ -e "$reports_dir" && ! -d "$reports_dir" ]]; then
   echo "--reports-dir must reference a directory path: $reports_dir"
   exit 2
@@ -568,6 +587,8 @@ fi
 
 mkdir -p "$reports_dir"
 mkdir -p "$summary_dir"
+reject_output_symlink_or_die "$reports_dir"
+reject_output_symlink_or_die "$summary_json"
 
 declare -a default_check_id=()
 declare -a default_check_command=()
@@ -699,6 +720,7 @@ if [[ -z "$selection_error" ]]; then
     check_command="${selected_check_command[$idx]}"
     check_safe="${check_id//[^A-Za-z0-9._-]/_}"
     log_path="$reports_dir/$(printf '%02d_%s.log' "$check_index" "$check_safe")"
+    reject_output_symlink_or_die "$log_path"
     if [[ "$check_timeout_sec" -gt 0 ]]; then
       timeout_display="$check_timeout_sec"
     fi
@@ -712,7 +734,10 @@ if [[ -z "$selection_error" ]]; then
     fi
 
     set +e
-    "${check_cmd[@]}" >"$log_path" 2>&1 &
+    (
+      reject_output_symlink_or_die "$log_path"
+      "${check_cmd[@]}" >"$log_path" 2>&1
+    ) &
     check_pid=$!
     if [[ "$progress_interval_sec" -gt 0 ]]; then
       next_progress_epoch=$((start_epoch + progress_interval_sec))
@@ -818,6 +843,7 @@ if [[ -n "$invariant_error" ]]; then
   invariant_error_json="\"$(json_escape "$invariant_error")\""
 fi
 
+reject_output_symlink_or_die "$summary_json"
 summary_tmp="$(mktemp "$summary_dir/gpm_blockchain_logic_check_summary.tmp.XXXXXX")"
 
 {
@@ -938,6 +964,7 @@ summary_tmp="$(mktemp "$summary_dir/gpm_blockchain_logic_check_summary.tmp.XXXXX
   echo "}"
 } >"$summary_tmp"
 
+reject_output_symlink_or_die "$summary_json"
 mv -f "$summary_tmp" "$summary_json"
 
 echo "[gpm-blockchain-logic-check] summary_json=$summary_json status=$overall_status rc=$overall_rc checks_failed=$checks_failed checks_executed=$executed_count"

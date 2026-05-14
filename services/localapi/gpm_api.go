@@ -53,6 +53,7 @@ const (
 	gpmManifestBodyLimit             = 1 << 20
 	gpmManifestCacheBodyLimit        = 2 << 20
 	gpmManifestCacheFutureSkew       = 2 * time.Minute
+	gpmManifestMaxValidity           = 24 * time.Hour
 	gpmManifestBootstrapDirectoryMax = 32
 	gpmAuthSignatureMaxLen           = 8 * 1024
 	gpmAuthSignatureEnvelopeMaxLen   = 16 * 1024
@@ -6793,6 +6794,9 @@ func validateBootstrapManifest(manifest gpmBootstrapManifest) error {
 	}
 	if !expiresAt.After(generatedAt) {
 		return errors.New("manifest expires_at_utc must be after generated_at_utc")
+	}
+	if expiresAt.Sub(generatedAt) > gpmManifestMaxValidity {
+		return fmt.Errorf("manifest validity window exceeds maximum %s", gpmManifestMaxValidity)
 	}
 	now := time.Now().UTC()
 	if generatedAt.After(now.Add(gpmManifestCacheFutureSkew)) {

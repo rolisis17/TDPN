@@ -20,7 +20,8 @@
     },
     "expires_at_utc": {
       "type": "string",
-      "format": "date-time"
+      "format": "date-time",
+      "description": "Must be after generated_at_utc and no more than 24 hours after generated_at_utc."
     },
     "bootstrap_directories": {
       "type": "array",

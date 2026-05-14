@@ -111,7 +111,7 @@ sanitize_id() {
 
 is_sensitive_secret_flag() {
   case "${1:-}" in
-    --campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer)
+    --campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer|--password|--passwd|--secret|--api-key|--private-key|--private-key-file|--provenance-private-key-file|--secret-key|--secret-key-file|--admin-key|--admin-key-file)
       return 0
       ;;
     *)
@@ -132,7 +132,7 @@ render_log_token() {
 
 redact_command_secrets() {
   local line="${1:-}"
-  local flag_regex='--campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer'
+  local flag_regex='--campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer|--password|--passwd|--secret|--api-key|--private-key|--private-key-file|--provenance-private-key-file|--secret-key|--secret-key-file|--admin-key|--admin-key-file'
   local token=""
   local key=""
   local rendered=""
@@ -510,12 +510,22 @@ path_is_symlink_free_under_scripts_dir() {
   done
 }
 
-canonical_existing_file_path() {
+canonical_existing_path() {
   local candidate="${1:-}"
   local parent_dir=""
   local base_name=""
-  if [[ -z "$candidate" || ! -f "$candidate" ]]; then
+  if [[ -z "$candidate" || ! -e "$candidate" ]]; then
     return 1
+  fi
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$candidate" 2>/dev/null && return 0
+  fi
+  if command -v readlink >/dev/null 2>&1; then
+    readlink -f "$candidate" 2>/dev/null && return 0
+  fi
+  if [[ -d "$candidate" ]]; then
+    (cd -P "$candidate" 2>/dev/null && pwd)
+    return
   fi
   parent_dir="$(dirname "$candidate")"
   base_name="$(basename "$candidate")"
@@ -523,6 +533,14 @@ canonical_existing_file_path() {
     return 1
   fi
   printf '%s/%s' "$parent_dir" "$base_name"
+}
+
+canonical_existing_file_path() {
+  local candidate="${1:-}"
+  if [[ -z "$candidate" || ! -f "$candidate" ]]; then
+    return 1
+  fi
+  canonical_existing_path "$candidate"
 }
 
 ACTION_COMMAND_VALIDATED_SCRIPT_PATH=""
@@ -538,7 +556,7 @@ action_command_argv_allowed() {
   if [[ "${#argv[@]}" -eq 0 ]]; then
     return 1
   fi
-  if ! scripts_root_canonical="$(cd -P "$scripts_root" 2>/dev/null && pwd)"; then
+  if ! scripts_root_canonical="$(canonical_existing_path "$scripts_root")"; then
     return 1
   fi
   cmd="${argv[0]}"

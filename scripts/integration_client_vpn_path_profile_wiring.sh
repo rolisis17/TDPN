@@ -67,8 +67,10 @@ check_pattern 'client_vpn_route_mode_for\(\)' \
   "client-vpn-up missing route mode classifier"
 check_pattern 'client-vpn-up refuses no-route full-tunnel in prod profile' \
   "client-vpn-up must fail closed for prod full-tunnel no-route starts"
-check_pattern 'set --install-route 1, use split AllowedIPs, or disable --prod-profile for controlled diagnostics' \
+check_pattern 'set --install-route 1, use split AllowedIPs, pass --allow-no-route 1 for controlled diagnostics, or disable --prod-profile' \
   "client-vpn-up missing operator remediation hint for prod no-route refusal"
+check_pattern 'client-vpn-up route mode: no-route override enabled for controlled prod diagnostics' \
+  "client-vpn-up missing explicit prod diagnostic no-route override warning"
 check_pattern 'client-vpn-up route mode: no-route \(full-tunnel AllowedIPs=\$allowed_ips with install_route=0; host traffic will not be routed through the VPN\)' \
   "client-vpn-up missing explicit no-route warning for full-tunnel AllowedIPs with install_route=0"
 check_pattern 'CLIENT_VPN_ROUTE_MODE=\$route_mode' \

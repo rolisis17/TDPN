@@ -4,7 +4,7 @@ Status: planning track plus first local tooling
 
 Goal:
 - let new users find the GPM network even when the main website or first gateway is unavailable
-- keep first-contact trust anchored in signed, short-lived bootstrap material
+- keep first-contact trust anchored in signed, short-lived bootstrap material (manifests are capped to a 24-hour validity window)
 - allow existing insiders to help outsiders discover the network without making one insider a permanent authority
 
 ## Why This Track Exists

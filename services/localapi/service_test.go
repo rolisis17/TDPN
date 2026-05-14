@@ -14598,6 +14598,24 @@ func TestValidateBootstrapManifestRejectsTooManyBootstrapDirectories(t *testing.
 	}
 }
 
+func TestValidateBootstrapManifestRejectsOverlongValidityWindow(t *testing.T) {
+	now := time.Now().UTC()
+	manifest := gpmBootstrapManifest{
+		Version:              1,
+		GeneratedAtUTC:       now.Add(-time.Minute).Format(time.RFC3339),
+		ExpiresAtUTC:         now.Add(gpmManifestMaxValidity + time.Hour).Format(time.RFC3339),
+		BootstrapDirectories: []string{"https://directory.overlong-validity.globalprivatemesh.example:8081"},
+	}
+
+	err := validateBootstrapManifest(manifest)
+	if err == nil {
+		t.Fatal("expected overlong manifest validity window to fail closed")
+	}
+	if !strings.Contains(err.Error(), "validity window exceeds maximum") {
+		t.Fatalf("error=%q want validity window rejection", err.Error())
+	}
+}
+
 func TestValidateBootstrapManifestEndpointHintsRequirePublicHTTPS(t *testing.T) {
 	originalLookup := lookupIPAddr
 	t.Cleanup(func() {

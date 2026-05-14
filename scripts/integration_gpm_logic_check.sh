@@ -47,6 +47,39 @@ assert_jq_true() {
   fi
 }
 
+assert_file_content_equals() {
+  local file_path="$1"
+  local expected="$2"
+  local actual
+  actual="$(cat "$file_path")"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "file content mismatch: $file_path"
+    echo "expected: $expected"
+    echo "actual: $actual"
+    exit 1
+  fi
+}
+
+assert_symlink_refusal_log() {
+  local log_path="$1"
+  if ! grep -Fq "refusing to write" "$log_path"; then
+    echo "expected symlink refusal message in log: $log_path"
+    cat "$log_path"
+    exit 1
+  fi
+}
+
+SYMLINK_OUTPUT_TESTS_ENABLED=0
+SYMLINK_PROBE_TARGET="$TMP_DIR/symlink_probe_target"
+SYMLINK_PROBE_LINK="$TMP_DIR/symlink_probe_link"
+printf '%s' "probe" >"$SYMLINK_PROBE_TARGET"
+if command -v ln >/dev/null 2>&1 \
+  && ln -s "$SYMLINK_PROBE_TARGET" "$SYMLINK_PROBE_LINK" 2>/dev/null \
+  && [[ -L "$SYMLINK_PROBE_LINK" ]]; then
+  SYMLINK_OUTPUT_TESTS_ENABLED=1
+fi
+rm -f "$SYMLINK_PROBE_LINK"
+
 PASS_A="$TMP_DIR/pass_a.sh"
 PASS_B="$TMP_DIR/pass_b.sh"
 PASS_C="$TMP_DIR/pass_c.sh"
@@ -648,6 +681,99 @@ if [[ ! -f "$allow_missing_defaults_log" ]]; then
   exit 1
 fi
 assert_file_contains "$allow_missing_defaults_log" "pass check a" "allow-missing-defaults log missing expected output"
+
+if [[ "$SYMLINK_OUTPUT_TESTS_ENABLED" == "1" ]]; then
+  echo "[gpm-logic-check] summary symlink refusal"
+  SYMLINK_SUMMARY_REPORTS="$TMP_DIR/reports_symlink_summary"
+  SYMLINK_SUMMARY_LINK="$TMP_DIR/symlink_summary.json"
+  SYMLINK_SUMMARY_TARGET="$TMP_DIR/symlink_summary_target"
+  SYMLINK_SUMMARY_STDOUT="$TMP_DIR/symlink_summary_stdout.log"
+  printf '%s' "summary-sentinel" >"$SYMLINK_SUMMARY_TARGET"
+  ln -s "$SYMLINK_SUMMARY_TARGET" "$SYMLINK_SUMMARY_LINK"
+  symlink_summary_cmd=(
+    bash "$SCRIPT_UNDER_TEST"
+    --reports-dir "$SYMLINK_SUMMARY_REPORTS"
+    --summary-json "$SYMLINK_SUMMARY_LINK"
+    --print-summary-json 0
+    --include-check "$PASS_A"
+  )
+  for exclude_script in "${DEFAULT_EXCLUDES[@]}"; do
+    symlink_summary_cmd+=(--exclude-check "$exclude_script")
+  done
+  set +e
+  "${symlink_summary_cmd[@]}" >"$SYMLINK_SUMMARY_STDOUT" 2>&1
+  symlink_summary_rc=$?
+  set -e
+  if [[ "$symlink_summary_rc" -ne 2 ]]; then
+    echo "expected summary symlink refusal to exit 2, got rc=$symlink_summary_rc"
+    cat "$SYMLINK_SUMMARY_STDOUT"
+    exit 1
+  fi
+  assert_symlink_refusal_log "$SYMLINK_SUMMARY_STDOUT"
+  assert_file_content_equals "$SYMLINK_SUMMARY_TARGET" "summary-sentinel"
+
+  echo "[gpm-logic-check] reports-dir symlink refusal"
+  SYMLINK_REPORTS_TARGET="$TMP_DIR/symlink_reports_target"
+  SYMLINK_REPORTS_LINK="$TMP_DIR/symlink_reports_link"
+  SYMLINK_REPORTS_SUMMARY="$TMP_DIR/symlink_reports_summary.json"
+  SYMLINK_REPORTS_STDOUT="$TMP_DIR/symlink_reports_stdout.log"
+  mkdir -p "$SYMLINK_REPORTS_TARGET"
+  printf '%s' "reports-sentinel" >"$SYMLINK_REPORTS_TARGET/sentinel.txt"
+  ln -s "$SYMLINK_REPORTS_TARGET" "$SYMLINK_REPORTS_LINK"
+  symlink_reports_cmd=(
+    bash "$SCRIPT_UNDER_TEST"
+    --reports-dir "$SYMLINK_REPORTS_LINK"
+    --summary-json "$SYMLINK_REPORTS_SUMMARY"
+    --print-summary-json 0
+    --include-check "$PASS_A"
+  )
+  for exclude_script in "${DEFAULT_EXCLUDES[@]}"; do
+    symlink_reports_cmd+=(--exclude-check "$exclude_script")
+  done
+  set +e
+  "${symlink_reports_cmd[@]}" >"$SYMLINK_REPORTS_STDOUT" 2>&1
+  symlink_reports_rc=$?
+  set -e
+  if [[ "$symlink_reports_rc" -ne 2 ]]; then
+    echo "expected reports-dir symlink refusal to exit 2, got rc=$symlink_reports_rc"
+    cat "$SYMLINK_REPORTS_STDOUT"
+    exit 1
+  fi
+  assert_symlink_refusal_log "$SYMLINK_REPORTS_STDOUT"
+  assert_file_content_equals "$SYMLINK_REPORTS_TARGET/sentinel.txt" "reports-sentinel"
+
+  echo "[gpm-logic-check] log symlink refusal"
+  SYMLINK_LOG_REPORTS="$TMP_DIR/reports_symlink_log"
+  SYMLINK_LOG_SUMMARY="$TMP_DIR/symlink_log_summary.json"
+  SYMLINK_LOG_TARGET="$TMP_DIR/symlink_log_target"
+  SYMLINK_LOG_STDOUT="$TMP_DIR/symlink_log_stdout.log"
+  mkdir -p "$SYMLINK_LOG_REPORTS"
+  printf '%s' "log-sentinel" >"$SYMLINK_LOG_TARGET"
+  ln -s "$SYMLINK_LOG_TARGET" "$SYMLINK_LOG_REPORTS/01_pass_a.sh.log"
+  symlink_log_cmd=(
+    bash "$SCRIPT_UNDER_TEST"
+    --reports-dir "$SYMLINK_LOG_REPORTS"
+    --summary-json "$SYMLINK_LOG_SUMMARY"
+    --print-summary-json 0
+    --include-check "$PASS_A"
+  )
+  for exclude_script in "${DEFAULT_EXCLUDES[@]}"; do
+    symlink_log_cmd+=(--exclude-check "$exclude_script")
+  done
+  set +e
+  "${symlink_log_cmd[@]}" >"$SYMLINK_LOG_STDOUT" 2>&1
+  symlink_log_rc=$?
+  set -e
+  if [[ "$symlink_log_rc" -ne 2 ]]; then
+    echo "expected log symlink refusal to exit 2, got rc=$symlink_log_rc"
+    cat "$SYMLINK_LOG_STDOUT"
+    exit 1
+  fi
+  assert_symlink_refusal_log "$SYMLINK_LOG_STDOUT"
+  assert_file_content_equals "$SYMLINK_LOG_TARGET" "log-sentinel"
+else
+  echo "[gpm-logic-check] symlink output refusal checks skipped (symlink creation unavailable)"
+fi
 
 echo "[gpm-logic-check] missing include-check script returns usage error"
 MISSING_REPORTS="$TMP_DIR/reports_missing"

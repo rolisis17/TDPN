@@ -329,6 +329,7 @@ Policy posture config hints:
 - `gpm_manifest_require_signature`: whether strict manifest signature evidence policy is enabled for both remote fetch and cache fallback.
 - `gpm_manifest_require_signature_policy_source`: additive source for manifest signature strictness (`production-default` when inherited from production mode with no explicit signature-policy env override).
 - `gpm_manifest_cache_max_age_sec`: manifest cache trust max age in seconds (runtime value derived from `GPM_BOOTSTRAP_MANIFEST_CACHE_MAX_AGE_SEC`, legacy alias `TDPN_BOOTSTRAP_MANIFEST_CACHE_MAX_AGE_SEC`).
+- Trusted bootstrap manifests must also be short-lived: `expires_at_utc - generated_at_utc` is capped at 24 hours, even when signature and source policy checks pass.
 - `gpm_manifest_remote_refresh_interval_sec`: bounded periodic remote refresh interval in seconds when a trusted cache entry is still valid (runtime value derived from `GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC`, legacy alias `TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC`).
 - `gpm_manifest_remote_refresh_interval_source`: additive source describing how `gpm_manifest_remote_refresh_interval_sec` was selected (`GPM_*`, `TDPN_*`, or `default`).
 - `gpm_manifest_resolve_policy`: additive manifest resolve strategy hint (`cache_first_bounded_remote_refresh` in current daemon behavior).

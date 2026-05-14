@@ -18604,11 +18604,15 @@ client_vpn_up() {
   local route_mode
   route_mode="$(client_vpn_route_mode_for "$allowed_ips" "$install_route")"
   if [[ "$route_mode" == "no-route" ]]; then
-    if [[ "$prod_profile" == "1" ]]; then
-      echo "client-vpn-up refuses no-route full-tunnel in prod profile: full-tunnel AllowedIPs=$allowed_ips with install_route=0 would not route host traffic through the VPN; set --install-route 1, use split AllowedIPs, or disable --prod-profile for controlled diagnostics"
+    if [[ "$prod_profile" == "1" && "$allow_no_route" != "1" ]]; then
+      echo "client-vpn-up refuses no-route full-tunnel in prod profile: full-tunnel AllowedIPs=$allowed_ips with install_route=0 would not route host traffic through the VPN; set --install-route 1, use split AllowedIPs, pass --allow-no-route 1 for controlled diagnostics, or disable --prod-profile"
       exit 2
     fi
-    echo "client-vpn-up route mode: no-route (full-tunnel AllowedIPs=$allowed_ips with install_route=0; host traffic will not be routed through the VPN)"
+    if [[ "$prod_profile" == "1" ]]; then
+      echo "client-vpn-up route mode: no-route override enabled for controlled prod diagnostics (full-tunnel AllowedIPs=$allowed_ips with install_route=0; host traffic will not be routed through the VPN)"
+    else
+      echo "client-vpn-up route mode: no-route (full-tunnel AllowedIPs=$allowed_ips with install_route=0; host traffic will not be routed through the VPN)"
+    fi
   fi
   if [[ "$force_restart" != "0" && "$force_restart" != "1" ]]; then
     echo "client-vpn-up requires --force-restart 0 or 1"

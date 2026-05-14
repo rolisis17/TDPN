@@ -147,7 +147,7 @@ fi
 echo "symlink escape payload executed"
 EOF_SYMLINK_ESCAPE_TARGET
 chmod +x "$SYMLINK_ESCAPE_TARGET"
-if ln -s "$SYMLINK_ESCAPE_TARGET" "$SYMLINK_ESCAPE_LINK" 2>/dev/null; then
+if ln -s "$SYMLINK_ESCAPE_TARGET" "$SYMLINK_ESCAPE_LINK" 2>/dev/null && [[ -L "$SYMLINK_ESCAPE_LINK" ]]; then
   SYMLINK_ESCAPE_PATH="$SYMLINK_ESCAPE_LINK"
   SYMLINK_ESCAPE_MODE="symlink"
 else
@@ -401,13 +401,13 @@ JSON
   "blockchain_track": {
     "recommended_gate_id": "blockchain_redaction_1",
     "recommended_gate_reason": "redaction scenario",
-    "recommended_gate_command": "bash \"$PASS1\" --token chain-secret --campaign-subject inv-chain-secret",
+    "recommended_gate_command": "bash \"$PASS1\" --token chain-secret --campaign-subject inv-chain-secret --password chain-pass-sentinel --passwd chain-passwd-sentinel --api-key=chain-api-sentinel --private-key chain-private-sentinel --private-key-file /tmp/chain-private.key --provenance-private-key-file /tmp/chain-provenance.key --secret \"chain quoted sentinel\" --secret-key=chain-secret-key-sentinel --secret-key-file=/tmp/chain-secret.key --admin-key 'chain admin sentinel' --admin-key-file /tmp/chain-admin.key",
     "mainnet_activation_missing_metrics_action": {
       "id": "blockchain_redaction_1"
     }
   },
   "next_actions": [
-    {"id":"blockchain_redaction_1","label":"Blockchain redaction 1","command":"bash \"$PASS1\" --token chain-secret --campaign-subject inv-chain-secret","reason":"test-redaction"}
+    {"id":"blockchain_redaction_1","label":"Blockchain redaction 1","command":"bash \"$PASS1\" --token chain-secret --campaign-subject inv-chain-secret --password chain-pass-sentinel --passwd chain-passwd-sentinel --api-key=chain-api-sentinel --private-key chain-private-sentinel --private-key-file /tmp/chain-private.key --provenance-private-key-file /tmp/chain-provenance.key --secret \"chain quoted sentinel\" --secret-key=chain-secret-key-sentinel --secret-key-file=/tmp/chain-secret.key --admin-key 'chain admin sentinel' --admin-key-file /tmp/chain-admin.key","reason":"test-redaction"}
   ]
 }
 JSON
@@ -553,6 +553,7 @@ fi
 echo "[roadmap-blockchain-actionable-run] command redaction in action summaries"
 SUMMARY_REDACTION="$TMP_DIR/summary_redaction.json"
 REPORTS_REDACTION="$TMP_DIR/reports_redaction"
+RUN_LOG_REDACTION="$TMP_DIR/run_redaction.log"
 ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=redaction \
 PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
 PREFILL="$PREFILL" \
@@ -560,7 +561,7 @@ ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
 bash ./scripts/roadmap_blockchain_actionable_run.sh \
   --reports-dir "$REPORTS_REDACTION" \
   --summary-json "$SUMMARY_REDACTION" \
-  --print-summary-json 0
+  --print-summary-json 0 >"$RUN_LOG_REDACTION" 2>&1
 
 if ! jq -e '
   .status == "pass"
@@ -568,20 +569,70 @@ if ! jq -e '
   and .roadmap.actions_selected_count == 1
   and ((.roadmap.recommended_gate_command // "") | contains("--token [redacted]"))
   and ((.roadmap.recommended_gate_command // "") | contains("--campaign-subject [redacted]"))
-  and (((.roadmap.recommended_gate_command // "") | contains("chain-secret")) | not)
-  and (((.roadmap.recommended_gate_command // "") | contains("inv-chain-secret")) | not)
+  and ((.roadmap.recommended_gate_command // "") | contains("--password [redacted]"))
+  and ((.roadmap.recommended_gate_command // "") | contains("--passwd [redacted]"))
+  and ((.roadmap.recommended_gate_command // "") | contains("--api-key=[redacted]"))
+  and ((.roadmap.recommended_gate_command // "") | contains("--private-key [redacted]"))
+  and ((.roadmap.recommended_gate_command // "") | contains("--private-key-file [redacted]"))
+  and ((.roadmap.recommended_gate_command // "") | contains("--provenance-private-key-file [redacted]"))
+  and ((.roadmap.recommended_gate_command // "") | contains("--secret [redacted]"))
+  and ((.roadmap.recommended_gate_command // "") | contains("--secret-key=[redacted]"))
+  and ((.roadmap.recommended_gate_command // "") | contains("--secret-key-file=[redacted]"))
+  and ((.roadmap.recommended_gate_command // "") | contains("--admin-key [redacted]"))
+  and ((.roadmap.recommended_gate_command // "") | contains("--admin-key-file [redacted]"))
   and ((.actions // []) | length == 1)
   and .actions[0].id == "blockchain_redaction_1"
   and .actions[0].status == "pass"
   and ((.actions[0].command // "") | contains("--token [redacted]"))
   and ((.actions[0].command // "") | contains("--campaign-subject [redacted]"))
-  and (((.actions[0].command // "") | contains("chain-secret")) | not)
-  and (((.actions[0].command // "") | contains("inv-chain-secret")) | not)
+  and ((.actions[0].command // "") | contains("--password [redacted]"))
+  and ((.actions[0].command // "") | contains("--passwd [redacted]"))
+  and ((.actions[0].command // "") | contains("--api-key=[redacted]"))
+  and ((.actions[0].command // "") | contains("--private-key [redacted]"))
+  and ((.actions[0].command // "") | contains("--private-key-file [redacted]"))
+  and ((.actions[0].command // "") | contains("--provenance-private-key-file [redacted]"))
+  and ((.actions[0].command // "") | contains("--secret [redacted]"))
+  and ((.actions[0].command // "") | contains("--secret-key=[redacted]"))
+  and ((.actions[0].command // "") | contains("--secret-key-file=[redacted]"))
+  and ((.actions[0].command // "") | contains("--admin-key [redacted]"))
+  and ((.actions[0].command // "") | contains("--admin-key-file [redacted]"))
 ' "$SUMMARY_REDACTION" >/dev/null; then
   echo "redaction summary mismatch"
   cat "$SUMMARY_REDACTION"
+  cat "$RUN_LOG_REDACTION"
   exit 1
 fi
+REDACTION_ACTION_LOG="$(jq -r '.actions[0].artifacts.log // ""' "$SUMMARY_REDACTION")"
+REDACTION_ROADMAP_LOG="$(jq -r '.artifacts.roadmap_log // ""' "$SUMMARY_REDACTION")"
+REDACTION_ROADMAP_REPORT="$(jq -r '.artifacts.roadmap_report_md // ""' "$SUMMARY_REDACTION")"
+for redaction_output_file in "$SUMMARY_REDACTION" "$RUN_LOG_REDACTION" "$REDACTION_ACTION_LOG" "$REDACTION_ROADMAP_LOG" "$REDACTION_ROADMAP_REPORT"; do
+  if [[ -z "$redaction_output_file" || ! -f "$redaction_output_file" ]]; then
+    echo "redaction output file missing: ${redaction_output_file:-<empty>}"
+    cat "$SUMMARY_REDACTION"
+    cat "$RUN_LOG_REDACTION"
+    exit 1
+  fi
+  for redaction_sentinel in \
+    chain-secret \
+    inv-chain-secret \
+    chain-pass-sentinel \
+    chain-passwd-sentinel \
+    chain-api-sentinel \
+    chain-private-sentinel \
+    /tmp/chain-private.key \
+    /tmp/chain-provenance.key \
+    "chain quoted sentinel" \
+    chain-secret-key-sentinel \
+    /tmp/chain-secret.key \
+    "chain admin sentinel" \
+    /tmp/chain-admin.key; do
+    if grep -F -- "$redaction_sentinel" "$redaction_output_file" >/dev/null; then
+      echo "redaction sentinel leaked into $redaction_output_file: $redaction_sentinel"
+      cat "$redaction_output_file"
+      exit 1
+    fi
+  done
+done
 
 echo "[roadmap-blockchain-actionable-run] no-python safe-mode path preserves quoted argv parsing"
 SUMMARY_NO_PYTHON_QUOTED="$TMP_DIR/summary_no_python_quoted.json"

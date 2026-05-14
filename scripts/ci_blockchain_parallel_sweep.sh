@@ -64,9 +64,27 @@ need_cmd() {
   fi
 }
 
+reject_output_symlink_or_die() {
+  local path="${1:-}"
+  local current
+  if [[ -n "$path" && -L "$path" ]]; then
+    echo "refusing to write CI blockchain parallel sweep output through symlink: $path"
+    exit 2
+  fi
+  current="$(dirname "$path")"
+  while [[ -n "$current" && "$current" != "." && "$current" != "/" ]]; do
+    if [[ -L "$current" ]]; then
+      echo "refusing to write CI blockchain parallel sweep output through symlink: $path (symlink ancestor: $current)"
+      exit 2
+    fi
+    current="$(dirname "$current")"
+  done
+}
+
 need_cmd jq
 need_cmd date
 need_cmd mktemp
+need_cmd mv
 
 reports_dir="${CI_BLOCKCHAIN_PARALLEL_SWEEP_REPORTS_DIR:-}"
 summary_json="${CI_BLOCKCHAIN_PARALLEL_SWEEP_SUMMARY_JSON:-}"
@@ -258,7 +276,11 @@ if [[ -z "$reports_dir" ]]; then
   reports_dir="$ROOT_DIR/.easy-node-logs/ci_blockchain_parallel_sweep_$(date -u +%Y%m%d_%H%M%S)"
 fi
 reports_dir="$(abs_path "$reports_dir")"
-mkdir -p "$reports_dir"
+reject_output_symlink_or_die "$reports_dir"
+if [[ -e "$reports_dir" && ! -d "$reports_dir" ]]; then
+  echo "--reports-dir must reference a directory path: $reports_dir"
+  exit 2
+fi
 
 if [[ -z "$summary_json" ]]; then
   summary_json="$reports_dir/ci_blockchain_parallel_sweep_summary.json"
@@ -266,8 +288,14 @@ fi
 summary_json="$(abs_path "$summary_json")"
 canonical_summary_json="$(abs_path "$canonical_summary_json")"
 
+reject_output_symlink_or_die "$summary_json"
+reject_output_symlink_or_die "$canonical_summary_json"
+mkdir -p "$reports_dir"
 mkdir -p "$(dirname "$summary_json")"
 mkdir -p "$(dirname "$canonical_summary_json")"
+reject_output_symlink_or_die "$reports_dir"
+reject_output_symlink_or_die "$summary_json"
+reject_output_symlink_or_die "$canonical_summary_json"
 
 lane_ids=(
   "cosmos_low_level"
@@ -299,6 +327,8 @@ declare -A lane_pid=()
 for lane_id in "${lane_ids[@]}"; do
   lane_log_path["$lane_id"]="$reports_dir/${lane_id}.log"
   lane_rc_file["$lane_id"]="$reports_dir/${lane_id}.rc"
+  reject_output_symlink_or_die "${lane_log_path[$lane_id]}"
+  reject_output_symlink_or_die "${lane_rc_file[$lane_id]}"
   lane_status["$lane_id"]="skipped"
   lane_rc["$lane_id"]="0"
   lane_started_at["$lane_id"]=""
@@ -333,10 +363,13 @@ if [[ "$dry_run" == "0" ]]; then
     echo "[ci-blockchain-parallel-sweep] lane=${lane_id} status=running"
     (
       cd "$ROOT_DIR"
+      reject_output_symlink_or_die "$lane_log"
+      reject_output_symlink_or_die "$lane_rc_out"
       set +e
       bash -lc "$lane_cmd_value" >"$lane_log" 2>&1
       lane_exec_rc=$?
       set -e
+      reject_output_symlink_or_die "$lane_rc_out"
       printf '%s' "$lane_exec_rc" >"$lane_rc_out"
       exit 0
     ) &
@@ -449,6 +482,7 @@ for lane_id in "${lane_ids[@]}"; do
   )"
 done
 
+summary_tmp="$(mktemp "$(dirname "$summary_json")/.ci_blockchain_parallel_sweep_summary.XXXXXX")"
 jq -n \
   --arg generated_at "$run_completed_at" \
   --arg started_at "$run_started_at" \
@@ -496,9 +530,14 @@ jq -n \
       rc: (if $first_failure_lane == "" then null else $first_failure_rc end)
     },
     lanes: $lanes
-  }' >"$summary_json"
+  }' >"$summary_tmp"
+reject_output_symlink_or_die "$summary_json"
+mv -f "$summary_tmp" "$summary_json"
 
-cp "$summary_json" "$canonical_summary_json"
+canonical_tmp="$(mktemp "$(dirname "$canonical_summary_json")/.ci_blockchain_parallel_sweep_canonical.XXXXXX")"
+cp "$summary_json" "$canonical_tmp"
+reject_output_symlink_or_die "$canonical_summary_json"
+mv -f "$canonical_tmp" "$canonical_summary_json"
 
 if [[ "$print_summary_json" == "1" ]]; then
   cat "$summary_json"

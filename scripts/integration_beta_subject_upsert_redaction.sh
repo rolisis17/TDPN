@@ -33,6 +33,9 @@ EOF_GO
 cat >"$FAKE_BIN/curl" <<'EOF_CURL'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "$*" == *"batch-fail-sentinel-secret"* ]]; then
+  exit 22
+fi
 if [[ "$*" == *"/v1/admin/subject/upsert"* ]]; then
   printf '{"subject":"inv-upsert-secret","kind":"client","tier":1}\n'
   exit 0
@@ -102,6 +105,42 @@ fi
 if ! rg -q '\[batch-upsert\] summary total=1 ok=1 failed=0' "$TMP_DIR/batch.log"; then
   echo "expected successful redacted batch summary"
   cat "$TMP_DIR/batch.log"
+  exit 1
+fi
+
+BATCH_FAIL_SENTINEL_SUBJECT="batch-fail-sentinel-secret"
+BATCH_FAIL_CSV="$TMP_DIR/batch_fail.csv"
+cat >"$BATCH_FAIL_CSV" <<EOF_CSV
+subject,kind,tier,reputation,bond,stake
+$BATCH_FAIL_SENTINEL_SUBJECT,client,1,0.4,3,5
+EOF_CSV
+
+set +e
+PATH="$FAKE_BIN:$PATH" \
+./scripts/beta_subject_batch_upsert.sh \
+  --issuer-url http://127.0.0.1:18082 \
+  --admin-token-file "$BATCH_TOKEN_FILE" \
+  --csv "$BATCH_FAIL_CSV" >"$TMP_DIR/batch_fail.log" 2>&1
+batch_fail_rc=$?
+set -e
+if [[ "$batch_fail_rc" -ne 1 ]]; then
+  echo "expected failing batch upsert to exit 1, got rc=$batch_fail_rc"
+  cat "$TMP_DIR/batch_fail.log"
+  exit 1
+fi
+if grep -F -- "$BATCH_FAIL_SENTINEL_SUBJECT" "$TMP_DIR/batch_fail.log" >/dev/null; then
+  echo "beta subject batch upsert failure output leaked subject"
+  cat "$TMP_DIR/batch_fail.log"
+  exit 1
+fi
+if ! rg -q '\[batch-upsert\] failed row=2 subject=\[redacted\]' "$TMP_DIR/batch_fail.log"; then
+  echo "expected redacted batch failure status line"
+  cat "$TMP_DIR/batch_fail.log"
+  exit 1
+fi
+if ! rg -q '\[batch-upsert\] summary total=1 ok=0 failed=1' "$TMP_DIR/batch_fail.log"; then
+  echo "expected failing redacted batch summary"
+  cat "$TMP_DIR/batch_fail.log"
   exit 1
 fi
 

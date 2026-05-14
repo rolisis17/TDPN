@@ -213,9 +213,43 @@ run_sweep() {
   CI_BLOCKCHAIN_PARALLEL_SWEEP_LANE_COSMOS_CMD="$FAKE_COSMOS" \
   CI_BLOCKCHAIN_PARALLEL_SWEEP_LANE_PHASE_CMD="$FAKE_PHASE" \
   CI_BLOCKCHAIN_PARALLEL_SWEEP_LANE_GO_CMD="$FAKE_GO" \
+  CI_BLOCKCHAIN_PARALLEL_SWEEP_CANONICAL_SUMMARY_JSON="${CI_BLOCKCHAIN_PARALLEL_SWEEP_CANONICAL_SUMMARY_JSON:-}" \
   CI_BLOCKCHAIN_PARALLEL_SWEEP_ALLOW_UNSAFE_CMD_OVERRIDE=1 \
   "$SCRIPT_UNDER_TEST" "$@"
 }
+
+assert_file_content_equals() {
+  local path="$1"
+  local expected="$2"
+  local actual
+  actual="$(cat "$path")"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "file content mismatch: $path"
+    echo "expected: $expected"
+    echo "actual: $actual"
+    exit 1
+  fi
+}
+
+assert_symlink_refusal_log() {
+  local log_path="$1"
+  if ! grep -Fq "refusing to write CI blockchain parallel sweep output through symlink:" "$log_path"; then
+    echo "expected symlink refusal message in log: $log_path"
+    cat "$log_path"
+    exit 1
+  fi
+}
+
+SYMLINK_OUTPUT_TESTS_ENABLED=0
+SYMLINK_PROBE_TARGET="$TMP_DIR/symlink_probe_target"
+SYMLINK_PROBE_LINK="$TMP_DIR/symlink_probe_link"
+printf '%s' "probe" >"$SYMLINK_PROBE_TARGET"
+if command -v ln >/dev/null 2>&1 \
+  && ln -s "$SYMLINK_PROBE_TARGET" "$SYMLINK_PROBE_LINK" 2>/dev/null \
+  && [[ -L "$SYMLINK_PROBE_LINK" ]]; then
+  SYMLINK_OUTPUT_TESTS_ENABLED=1
+fi
+rm -f "$SYMLINK_PROBE_LINK"
 
 echo "[ci-blockchain-parallel-sweep] success path"
 : >"$CAPTURE"
@@ -350,6 +384,134 @@ cp "$ROOT_DIR/.easy-node-logs/ci_blockchain_parallel_sweep_summary.json" "$FAIL_
 if ! cmp -s "$FAIL_SUMMARY_JSON" "$FAIL_CANONICAL_SUMMARY_JSON"; then
   echo "expected failure canonical summary to mirror summary-json output"
   exit 1
+fi
+
+if [[ "$SYMLINK_OUTPUT_TESTS_ENABLED" == "1" ]]; then
+  echo "[ci-blockchain-parallel-sweep] summary symlink refusal"
+  SYMLINK_SUMMARY_REPORTS_DIR="$TMP_DIR/reports_symlink_summary"
+  SYMLINK_SUMMARY_TARGET="$TMP_DIR/symlink_summary_target"
+  SYMLINK_SUMMARY_LOG="$TMP_DIR/symlink_summary.log"
+  mkdir -p "$SYMLINK_SUMMARY_REPORTS_DIR"
+  printf '%s' "summary-sentinel" >"$SYMLINK_SUMMARY_TARGET"
+  ln -s "$SYMLINK_SUMMARY_TARGET" "$SYMLINK_SUMMARY_REPORTS_DIR/ci_blockchain_parallel_sweep_summary.json"
+  : >"$CAPTURE"
+  if run_sweep \
+    --reports-dir "$SYMLINK_SUMMARY_REPORTS_DIR" \
+    --print-summary-json 0 >"$SYMLINK_SUMMARY_LOG" 2>&1; then
+    echo "expected summary symlink refusal to fail"
+    cat "$SYMLINK_SUMMARY_LOG"
+    exit 1
+  fi
+  assert_symlink_refusal_log "$SYMLINK_SUMMARY_LOG"
+  assert_file_content_equals "$SYMLINK_SUMMARY_TARGET" "summary-sentinel"
+  if [[ -s "$CAPTURE" ]]; then
+    echo "summary symlink refusal unexpectedly invoked lanes"
+    cat "$CAPTURE"
+    exit 1
+  fi
+
+  echo "[ci-blockchain-parallel-sweep] reports-dir symlink refusal"
+  SYMLINK_REPORTS_TARGET_DIR="$TMP_DIR/symlink_reports_target_dir"
+  SYMLINK_REPORTS_LINK_DIR="$TMP_DIR/symlink_reports_link_dir"
+  SYMLINK_REPORTS_SUMMARY_JSON="$TMP_DIR/symlink_reports_summary.json"
+  SYMLINK_REPORTS_LOG="$TMP_DIR/symlink_reports.log"
+  mkdir -p "$SYMLINK_REPORTS_TARGET_DIR"
+  printf '%s' "reports-dir-sentinel" >"$SYMLINK_REPORTS_TARGET_DIR/sentinel.txt"
+  ln -s "$SYMLINK_REPORTS_TARGET_DIR" "$SYMLINK_REPORTS_LINK_DIR"
+  : >"$CAPTURE"
+  if run_sweep \
+    --reports-dir "$SYMLINK_REPORTS_LINK_DIR" \
+    --summary-json "$SYMLINK_REPORTS_SUMMARY_JSON" \
+    --print-summary-json 0 >"$SYMLINK_REPORTS_LOG" 2>&1; then
+    echo "expected reports-dir symlink refusal to fail"
+    cat "$SYMLINK_REPORTS_LOG"
+    exit 1
+  fi
+  assert_symlink_refusal_log "$SYMLINK_REPORTS_LOG"
+  assert_file_content_equals "$SYMLINK_REPORTS_TARGET_DIR/sentinel.txt" "reports-dir-sentinel"
+  if [[ -s "$CAPTURE" ]]; then
+    echo "reports-dir symlink refusal unexpectedly invoked lanes"
+    cat "$CAPTURE"
+    exit 1
+  fi
+
+  echo "[ci-blockchain-parallel-sweep] canonical summary symlink refusal"
+  SYMLINK_CANONICAL_REPORTS_DIR="$TMP_DIR/reports_symlink_canonical"
+  SYMLINK_CANONICAL_SUMMARY_JSON="$TMP_DIR/symlink_canonical_summary.json"
+  SYMLINK_CANONICAL_LINK="$TMP_DIR/symlink_canonical_output.json"
+  SYMLINK_CANONICAL_TARGET="$TMP_DIR/symlink_canonical_target"
+  SYMLINK_CANONICAL_LOG="$TMP_DIR/symlink_canonical.log"
+  printf '%s' "canonical-sentinel" >"$SYMLINK_CANONICAL_TARGET"
+  ln -s "$SYMLINK_CANONICAL_TARGET" "$SYMLINK_CANONICAL_LINK"
+  : >"$CAPTURE"
+  if CI_BLOCKCHAIN_PARALLEL_SWEEP_CANONICAL_SUMMARY_JSON="$SYMLINK_CANONICAL_LINK" \
+    run_sweep \
+      --reports-dir "$SYMLINK_CANONICAL_REPORTS_DIR" \
+      --summary-json "$SYMLINK_CANONICAL_SUMMARY_JSON" \
+      --print-summary-json 0 >"$SYMLINK_CANONICAL_LOG" 2>&1; then
+    echo "expected canonical summary symlink refusal to fail"
+    cat "$SYMLINK_CANONICAL_LOG"
+    exit 1
+  fi
+  assert_symlink_refusal_log "$SYMLINK_CANONICAL_LOG"
+  assert_file_content_equals "$SYMLINK_CANONICAL_TARGET" "canonical-sentinel"
+  if [[ -s "$CAPTURE" ]]; then
+    echo "canonical symlink refusal unexpectedly invoked lanes"
+    cat "$CAPTURE"
+    exit 1
+  fi
+
+  echo "[ci-blockchain-parallel-sweep] lane log symlink refusal"
+  SYMLINK_LOG_REPORTS_DIR="$TMP_DIR/reports_symlink_lane_log"
+  SYMLINK_LOG_SUMMARY_JSON="$TMP_DIR/symlink_lane_log_summary.json"
+  SYMLINK_LOG_TARGET="$TMP_DIR/symlink_lane_log_target"
+  SYMLINK_LOG="$TMP_DIR/symlink_lane_log.log"
+  mkdir -p "$SYMLINK_LOG_REPORTS_DIR"
+  printf '%s' "lane-log-sentinel" >"$SYMLINK_LOG_TARGET"
+  ln -s "$SYMLINK_LOG_TARGET" "$SYMLINK_LOG_REPORTS_DIR/cosmos_low_level.log"
+  : >"$CAPTURE"
+  if run_sweep \
+    --reports-dir "$SYMLINK_LOG_REPORTS_DIR" \
+    --summary-json "$SYMLINK_LOG_SUMMARY_JSON" \
+    --print-summary-json 0 >"$SYMLINK_LOG" 2>&1; then
+    echo "expected lane log symlink refusal to fail"
+    cat "$SYMLINK_LOG"
+    exit 1
+  fi
+  assert_symlink_refusal_log "$SYMLINK_LOG"
+  assert_file_content_equals "$SYMLINK_LOG_TARGET" "lane-log-sentinel"
+  if [[ -s "$CAPTURE" ]]; then
+    echo "lane log symlink refusal unexpectedly invoked lanes"
+    cat "$CAPTURE"
+    exit 1
+  fi
+
+  echo "[ci-blockchain-parallel-sweep] lane rc symlink refusal"
+  SYMLINK_RC_REPORTS_DIR="$TMP_DIR/reports_symlink_lane_rc"
+  SYMLINK_RC_SUMMARY_JSON="$TMP_DIR/symlink_lane_rc_summary.json"
+  SYMLINK_RC_TARGET="$TMP_DIR/symlink_lane_rc_target"
+  SYMLINK_RC_LOG="$TMP_DIR/symlink_lane_rc.log"
+  mkdir -p "$SYMLINK_RC_REPORTS_DIR"
+  printf '%s' "lane-rc-sentinel" >"$SYMLINK_RC_TARGET"
+  ln -s "$SYMLINK_RC_TARGET" "$SYMLINK_RC_REPORTS_DIR/cosmos_low_level.rc"
+  : >"$CAPTURE"
+  if run_sweep \
+    --reports-dir "$SYMLINK_RC_REPORTS_DIR" \
+    --summary-json "$SYMLINK_RC_SUMMARY_JSON" \
+    --print-summary-json 0 >"$SYMLINK_RC_LOG" 2>&1; then
+    echo "expected lane rc symlink refusal to fail"
+    cat "$SYMLINK_RC_LOG"
+    exit 1
+  fi
+  assert_symlink_refusal_log "$SYMLINK_RC_LOG"
+  assert_file_content_equals "$SYMLINK_RC_TARGET" "lane-rc-sentinel"
+  if [[ -s "$CAPTURE" ]]; then
+    echo "lane rc symlink refusal unexpectedly invoked lanes"
+    cat "$CAPTURE"
+    exit 1
+  fi
+else
+  echo "[ci-blockchain-parallel-sweep] symlink output refusal checks skipped (symlink creation unavailable)"
 fi
 
 echo "ci blockchain parallel sweep integration check ok"
