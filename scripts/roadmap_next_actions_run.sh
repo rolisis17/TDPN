@@ -300,7 +300,19 @@ sanitize_id() {
 
 is_sensitive_secret_flag() {
   case "${1:-}" in
-    --campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer|--password|--passwd|--secret|--api-key|--private-key|--private-key-file|--provenance-private-key-file|--secret-key|--secret-key-file|--admin-key|--admin-key-file)
+    --campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer|--password|--passwd|--secret|--api-key|--private-key|--private-key-file|--provenance-private-key-file|--secret-key|--secret-key-file|--admin-key|--admin-key-file|--code-file|--private-code-file|--client-key|--mtls-client-key|--access-recovery-private-code-file|--access-recovery-provenance-private-key-file|--access-recovery-mtls-client-key)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_sensitive_env_var_name() {
+  local name="${1:-}"
+  case "$name" in
+    INVITE_KEY|CAMPAIGN_SUBJECT|*TOKEN|*SECRET|*PASSWORD|*PASSWD|*API_KEY|*AUTHORIZATION|*BEARER|*PRIVATE_KEY|*PRIVATE_KEY_FILE|*ADMIN_KEY|*ADMIN_KEY_FILE|*CLIENT_KEY|*CLIENT_KEY_FILE|ACCESS_RECOVERY_PRIVATE_CODE_FILE|ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PRIVATE_CODE_FILE|ACCESS_RECOVERY_PROVENANCE_PRIVATE_KEY_FILE|ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PROVENANCE_PRIVATE_KEY_FILE|ACCESS_RECOVERY_MTLS_CLIENT_KEY|ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_KEY|MTLS_CLIENT_KEY_FILE)
       return 0
       ;;
     *)
@@ -2014,7 +2026,7 @@ write_access_recovery_operator_inputs_precondition_log_01() {
 
 redact_command_secrets() {
   local line="${1:-}"
-  local flag_regex='--campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer|--password|--passwd|--secret|--api-key|--private-key|--private-key-file|--provenance-private-key-file|--secret-key|--secret-key-file|--admin-key|--admin-key-file'
+  local flag_regex='--campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer|--password|--passwd|--secret|--api-key|--private-key|--private-key-file|--provenance-private-key-file|--secret-key|--secret-key-file|--admin-key|--admin-key-file|--code-file|--private-code-file|--client-key|--mtls-client-key|--access-recovery-private-code-file|--access-recovery-provenance-private-key-file|--access-recovery-mtls-client-key'
   local token=""
   local key=""
   local rendered=""
@@ -2044,6 +2056,14 @@ redact_command_secrets() {
           continue
         fi
       fi
+      if [[ "$token" =~ ^[A-Za-z_][A-Za-z0-9_]*=.*$ ]]; then
+        key="${token%%=*}"
+        if is_sensitive_env_var_name "$key"; then
+          rendered="${rendered}${rendered:+ }${key}=[redacted]"
+          idx=$((idx + 1))
+          continue
+        fi
+      fi
 
       rendered="${rendered}${rendered:+ }$(render_log_token "$token")"
       idx=$((idx + 1))
@@ -2056,7 +2076,8 @@ redact_command_secrets() {
     -e "s/(${flag_regex})([[:space:]]+)\"[^\"]*\"/\\1\\2[redacted]/g" \
     -e "s/(${flag_regex})([[:space:]]+)'[^']*'/\\1\\2[redacted]/g" \
     -e "s/(${flag_regex})([[:space:]]+)[^[:space:]]+/\\1\\2[redacted]/g" \
-    -e "s/(${flag_regex})=[^[:space:]]+/\\1=[redacted]/g")"
+    -e "s/(${flag_regex})=[^[:space:]]+/\\1=[redacted]/g" \
+    -e "s/([A-Za-z_][A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|AUTHORIZATION|BEARER|PRIVATE_KEY|PRIVATE_KEY_FILE|ADMIN_KEY|ADMIN_KEY_FILE|CLIENT_KEY|CLIENT_KEY_FILE)|INVITE_KEY|CAMPAIGN_SUBJECT|ACCESS_RECOVERY_PRIVATE_CODE_FILE|ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PRIVATE_CODE_FILE|ACCESS_RECOVERY_PROVENANCE_PRIVATE_KEY_FILE|ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_PROVENANCE_PRIVATE_KEY_FILE|ACCESS_RECOVERY_MTLS_CLIENT_KEY|ROADMAP_NEXT_ACTIONS_RUN_ACCESS_RECOVERY_MTLS_CLIENT_KEY|MTLS_CLIENT_KEY_FILE)=[^[:space:]]+/\\1=[redacted]/g")"
   printf '%s' "$line"
 }
 
@@ -4832,6 +4853,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
   if [[ -n "$action_preflight_failure_kind" ]]; then
     if [[ "$action_preflight_failure_kind" == "missing_vm_command_source_precondition" ]]; then
       action_preflight_next_operator_action="$(build_multi_vm_stability_vm_command_source_operator_command_01)"
+      action_preflight_next_operator_action="$(redact_command_secrets "$action_preflight_next_operator_action")"
       write_multi_vm_stability_vm_command_source_precondition_log_01 \
         "$action_log" \
         "$action_command_redacted" \
@@ -4839,6 +4861,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         "$action_preflight_next_operator_action"
     elif [[ "$action_preflight_failure_kind" == "missing_access_recovery_trust_store_precondition" ]]; then
       action_preflight_next_operator_action="$(build_access_recovery_trust_store_operator_command_01 "$action_id")"
+      action_preflight_next_operator_action="$(redact_command_secrets "$action_preflight_next_operator_action")"
       write_access_recovery_trust_store_precondition_log_01 \
         "$action_log" \
         "$action_command_redacted" \
@@ -4846,6 +4869,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         "$action_preflight_next_operator_action"
     elif [[ "$action_preflight_failure_kind" == "missing_access_recovery_operator_input_precondition" ]]; then
       action_preflight_next_operator_action="$(build_access_recovery_operator_inputs_operator_command_01 "$action_id" "$action_command")"
+      action_preflight_next_operator_action="$(redact_command_secrets "$action_preflight_next_operator_action")"
       write_access_recovery_operator_inputs_precondition_log_01 \
         "$action_log" \
         "$action_command_redacted" \
@@ -4853,6 +4877,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         "$action_preflight_next_operator_action"
     elif [[ "$action_preflight_failure_kind" == "missing_admin_settlement_live_evidence_precondition" ]]; then
       action_preflight_next_operator_action="$(build_admin_settlement_live_evidence_operator_command_01 "$action_id")"
+      action_preflight_next_operator_action="$(redact_command_secrets "$action_preflight_next_operator_action")"
       write_admin_settlement_live_evidence_precondition_log_01 \
         "$action_log" \
         "$action_command_redacted" \
@@ -4860,6 +4885,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
         "$action_preflight_next_operator_action"
     elif [[ "$action_preflight_failure_kind" == "access_recovery_no_evidence_mode" ]]; then
       action_preflight_next_operator_action="$(build_access_recovery_operator_inputs_operator_command_01 "$action_id" "$action_command")"
+      action_preflight_next_operator_action="$(redact_command_secrets "$action_preflight_next_operator_action")"
       {
         echo "failure_kind=access_recovery_no_evidence_mode"
         echo "$action_preflight_notes"
@@ -4868,6 +4894,7 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
       } >"$action_log"
     else
       action_preflight_next_operator_action="$(build_profile_default_gate_subject_operator_command)"
+      action_preflight_next_operator_action="$(redact_command_secrets "$action_preflight_next_operator_action")"
       write_profile_default_gate_subject_precondition_log \
         "$action_log" \
         "$action_command_redacted" \
@@ -5427,7 +5454,7 @@ jq -n \
       access_recovery_org_name: (if $runtime_access_recovery_org_name_configured == 1 then $runtime_access_recovery_org_name else null end),
       access_recovery_org_name_configured: ($runtime_access_recovery_org_name_configured == 1),
       access_recovery_org_name_source: (if $runtime_access_recovery_org_name_source == "" then null else $runtime_access_recovery_org_name_source end),
-      access_recovery_private_code_file: (if $runtime_access_recovery_private_code_file_configured == 1 then $runtime_access_recovery_private_code_file else null end),
+      access_recovery_private_code_file: (if $runtime_access_recovery_private_code_file_configured == 1 then "[redacted]" else null end),
       access_recovery_private_code_file_configured: ($runtime_access_recovery_private_code_file_configured == 1),
       access_recovery_private_code_file_source: (if $runtime_access_recovery_private_code_file_source == "" then null else $runtime_access_recovery_private_code_file_source end),
       access_recovery_bridge_service_config: (if $runtime_access_recovery_bridge_service_config_configured == 1 then $runtime_access_recovery_bridge_service_config else null end),
@@ -5436,7 +5463,7 @@ jq -n \
       access_recovery_bridge_deploy_pack: (if $runtime_access_recovery_bridge_deploy_pack_configured == 1 then $runtime_access_recovery_bridge_deploy_pack else null end),
       access_recovery_bridge_deploy_pack_configured: ($runtime_access_recovery_bridge_deploy_pack_configured == 1),
       access_recovery_bridge_deploy_pack_source: (if $runtime_access_recovery_bridge_deploy_pack_source == "" then null else $runtime_access_recovery_bridge_deploy_pack_source end),
-      access_recovery_provenance_private_key_file: (if $runtime_access_recovery_provenance_private_key_file_configured == 1 then $runtime_access_recovery_provenance_private_key_file else null end),
+      access_recovery_provenance_private_key_file: (if $runtime_access_recovery_provenance_private_key_file_configured == 1 then "[redacted]" else null end),
       access_recovery_provenance_private_key_file_configured: ($runtime_access_recovery_provenance_private_key_file_configured == 1),
       access_recovery_provenance_private_key_file_source: (if $runtime_access_recovery_provenance_private_key_file_source == "" then null else $runtime_access_recovery_provenance_private_key_file_source end),
       access_recovery_reports_dir: (if $runtime_access_recovery_reports_dir_configured == 1 then $runtime_access_recovery_reports_dir else null end),
@@ -5463,7 +5490,7 @@ jq -n \
       access_recovery_mtls_client_cert: (if $runtime_access_recovery_mtls_client_cert_configured == 1 then $runtime_access_recovery_mtls_client_cert else null end),
       access_recovery_mtls_client_cert_configured: ($runtime_access_recovery_mtls_client_cert_configured == 1),
       access_recovery_mtls_client_cert_source: (if $runtime_access_recovery_mtls_client_cert_source == "" then null else $runtime_access_recovery_mtls_client_cert_source end),
-      access_recovery_mtls_client_key: (if $runtime_access_recovery_mtls_client_key_configured == 1 then $runtime_access_recovery_mtls_client_key else null end),
+      access_recovery_mtls_client_key: (if $runtime_access_recovery_mtls_client_key_configured == 1 then "[redacted]" else null end),
       access_recovery_mtls_client_key_configured: ($runtime_access_recovery_mtls_client_key_configured == 1),
       access_recovery_mtls_client_key_source: (if $runtime_access_recovery_mtls_client_key_source == "" then null else $runtime_access_recovery_mtls_client_key_source end),
       profile_default_gate_default_timeout_sec: $profile_default_gate_default_timeout_sec,

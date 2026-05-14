@@ -689,7 +689,16 @@ JSON
     cat >"$summary_json" <<JSON
 {
   "next_actions": [
-    {"id":"secret_redaction_extended","label":"Secret redaction extended","command":"bash \"$PASS1\" --password pass-secret --api-key=api-secret --private-key-file /tmp/private.key --provenance-private-key-file /tmp/provenance.key --admin-key 'admin secret' --secret \"quoted secret\" --token legacy-token","reason":"test-secret-redaction"}
+    {"id":"secret_redaction_extended","label":"Secret redaction extended","command":"bash \"$PASS1\" --password pass-secret --api-key=api-secret --private-key-file /tmp/private.key --provenance-private-key-file /tmp/provenance.key --code-file /tmp/private-code-file.txt --client-key /tmp/client.key --access-recovery-private-code-file /tmp/access-recovery-code.txt --access-recovery-mtls-client-key /tmp/access-recovery-client.key --admin-key 'admin secret' --secret \"quoted secret\" --token legacy-token","reason":"test-secret-redaction"}
+  ]
+}
+JSON
+    ;;
+  secret_redaction_env_prefix)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"secret_redaction_env_prefix","label":"Secret redaction env prefix","command":"GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN=bridge-token ACCESS_RECOVERY_PRIVATE_CODE_FILE=/tmp/recovery-private-code.txt ACCESS_RECOVERY_MTLS_CLIENT_KEY=/tmp/recovery-mtls-client.key bash \"$PASS1\"","reason":"test-secret-env-redaction"}
   ]
 }
 JSON
@@ -1406,6 +1415,10 @@ if ! jq -e '
   and ((.actions[0].command // "") | contains("--api-key=[redacted]"))
   and ((.actions[0].command // "") | contains("--private-key-file [redacted]"))
   and ((.actions[0].command // "") | contains("--provenance-private-key-file [redacted]"))
+  and ((.actions[0].command // "") | contains("--code-file [redacted]"))
+  and ((.actions[0].command // "") | contains("--client-key [redacted]"))
+  and ((.actions[0].command // "") | contains("--access-recovery-private-code-file [redacted]"))
+  and ((.actions[0].command // "") | contains("--access-recovery-mtls-client-key [redacted]"))
   and ((.actions[0].command // "") | contains("--admin-key [redacted]"))
   and ((.actions[0].command // "") | contains("--secret [redacted]"))
   and ((.actions[0].command // "") | contains("--token [redacted]"))
@@ -1413,12 +1426,67 @@ if ! jq -e '
   and (((.actions[0].command // "") | contains("api-secret")) | not)
   and (((.actions[0].command // "") | contains("/tmp/private.key")) | not)
   and (((.actions[0].command // "") | contains("/tmp/provenance.key")) | not)
+  and (((.actions[0].command // "") | contains("/tmp/private-code-file.txt")) | not)
+  and (((.actions[0].command // "") | contains("/tmp/client.key")) | not)
+  and (((.actions[0].command // "") | contains("/tmp/access-recovery-code.txt")) | not)
+  and (((.actions[0].command // "") | contains("/tmp/access-recovery-client.key")) | not)
   and (((.actions[0].command // "") | contains("admin secret")) | not)
   and (((.actions[0].command // "") | contains("quoted secret")) | not)
   and (((.actions[0].command // "") | contains("legacy-token")) | not)
 ' "$SUMMARY_REDACTION_EXTENDED" >/dev/null; then
   echo "extended secret redaction summary mismatch"
   cat "$SUMMARY_REDACTION_EXTENDED"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] redacts sensitive env assignments from refused action summaries/logs"
+SUMMARY_REDACTION_ENV_PREFIX="$TMP_DIR/summary_redaction_env_prefix.json"
+REPORTS_REDACTION_ENV_PREFIX="$TMP_DIR/reports_redaction_env_prefix"
+set +e
+ROADMAP_NEXT_ACTIONS_SCENARIO=secret_redaction_env_prefix \
+PASS1="$PASS1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_REDACTION_ENV_PREFIX" \
+  --summary-json "$SUMMARY_REDACTION_ENV_PREFIX" \
+  --print-summary-json 0 >"$TMP_DIR/redaction_env_prefix.log" 2>&1
+redaction_env_prefix_rc=$?
+set -e
+if [[ "$redaction_env_prefix_rc" != "5" ]]; then
+  echo "expected env-prefix redaction refusal rc=5, got rc=$redaction_env_prefix_rc"
+  cat "$TMP_DIR/redaction_env_prefix.log"
+  cat "$SUMMARY_REDACTION_ENV_PREFIX"
+  exit 1
+fi
+redaction_env_prefix_action_log="$(jq -r '.actions[0].artifacts.log // ""' "$SUMMARY_REDACTION_ENV_PREFIX")"
+if ! jq -e '
+  .status == "fail"
+  and .rc == 5
+  and .actions[0].id == "secret_redaction_env_prefix"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "command_failed"
+  and ((.actions[0].command // "") | contains("GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN=[redacted]"))
+  and ((.actions[0].command // "") | contains("ACCESS_RECOVERY_PRIVATE_CODE_FILE=[redacted]"))
+  and ((.actions[0].command // "") | contains("ACCESS_RECOVERY_MTLS_CLIENT_KEY=[redacted]"))
+  and (((.actions[0].command // "") | contains("bridge-token")) | not)
+  and (((.actions[0].command // "") | contains("/tmp/recovery-private-code.txt")) | not)
+  and (((.actions[0].command // "") | contains("/tmp/recovery-mtls-client.key")) | not)
+' "$SUMMARY_REDACTION_ENV_PREFIX" >/dev/null; then
+  echo "env-prefix secret redaction summary mismatch"
+  cat "$SUMMARY_REDACTION_ENV_PREFIX"
+  exit 1
+fi
+if [[ ! -f "$redaction_env_prefix_action_log" ]]; then
+  echo "env-prefix action log missing: $redaction_env_prefix_action_log"
+  cat "$SUMMARY_REDACTION_ENV_PREFIX"
+  exit 1
+fi
+if ! grep -F 'GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN=[redacted]' "$redaction_env_prefix_action_log" >/dev/null ||
+   ! grep -F 'ACCESS_RECOVERY_PRIVATE_CODE_FILE=[redacted]' "$redaction_env_prefix_action_log" >/dev/null ||
+   ! grep -F 'ACCESS_RECOVERY_MTLS_CLIENT_KEY=[redacted]' "$redaction_env_prefix_action_log" >/dev/null ||
+   grep -E 'bridge-token|recovery-private-code\.txt|recovery-mtls-client\.key' "$redaction_env_prefix_action_log" >/dev/null; then
+  echo "env-prefix action log redaction mismatch"
+  cat "$redaction_env_prefix_action_log"
   exit 1
 fi
 
@@ -2870,11 +2938,11 @@ if ! jq -e \
   and .rc == 0
   and .inputs.access_recovery_helper_public_dns == "helper-pilot.gpm.net"
   and .inputs.access_recovery_helper_public_dns_source == "cli:--access-recovery-helper-public-dns"
-  and .inputs.access_recovery_private_code_file == $code_file
+  and .inputs.access_recovery_private_code_file == "[redacted]"
   and .inputs.access_recovery_private_code_file_configured == true
   and .inputs.access_recovery_bridge_service_config == $config_json
   and .inputs.access_recovery_bridge_deploy_pack == $deploy_pack
-  and .inputs.access_recovery_provenance_private_key_file == $provenance_key
+  and .inputs.access_recovery_provenance_private_key_file == "[redacted]"
   and .inputs.access_recovery_org_id == "pilot-org"
   and .inputs.access_recovery_org_name == "Pilot Org"
   and .inputs.access_recovery_reports_dir == $reports_dir
@@ -2887,6 +2955,10 @@ if ! jq -e \
   and (.actions[0].command | contains("BRIDGE_SERVICE_CONFIG") | not)
   and (.actions[0].command | contains("BRIDGE_DEPLOY_PACK") | not)
   and (.actions[0].command | contains("PROVENANCE_PRIVATE_KEY_FILE") | not)
+  and (.actions[0].command | contains("--code-file [redacted]"))
+  and (.actions[0].command | contains("--provenance-private-key-file [redacted]"))
+  and ((.actions[0].command | contains($code_file)) | not)
+  and ((.actions[0].command | contains($provenance_key)) | not)
   and (.actions[0].command | contains("ORG_ID") | not)
   and (.actions[0].command | contains("ORG_NAME") | not)
 ' "$SUMMARY_ACCESS_RECOVERY_OPERATOR_MATERIALIZED" >/dev/null; then
@@ -3513,10 +3585,12 @@ if ! jq -e '
   and (.actions[0].notes | contains("MTLS_CLIENT_KEY_FILE"))
   and (.actions[0].command | contains("--require-mtls 1"))
   and (.actions[0].command | contains("MTLS_CLIENT_CERT_FILE"))
+  and (.actions[0].command | contains("--client-key [redacted]"))
+  and ((.actions[0].command | contains("MTLS_CLIENT_KEY_FILE")) | not)
   and (.actions[0].next_operator_action | contains("--include-id access_bridge_service_smoke"))
   and (.actions[0].next_operator_action | contains("--access-recovery-mtls-ca REPLACE_WITH_MTLS_CA_FILE"))
   and (.actions[0].next_operator_action | contains("--access-recovery-mtls-client-cert REPLACE_WITH_MTLS_CLIENT_CERT_FILE"))
-  and (.actions[0].next_operator_action | contains("--access-recovery-mtls-client-key REPLACE_WITH_MTLS_CLIENT_KEY_FILE"))
+  and (.actions[0].next_operator_action | contains("--access-recovery-mtls-client-key [redacted]"))
   and ((.actions[0].next_operator_action | contains("REPLACE_WITH_TRUST_STORE")) | not)
 ' "$SUMMARY_ACCESS_RECOVERY_MTLS_PLACEHOLDERS" >/dev/null; then
   echo "Access Recovery unresolved mTLS placeholder precondition summary mismatch"
@@ -3552,7 +3626,7 @@ if ! jq -e \
   and .inputs.access_recovery_mtls_client_cert == $mtls_cert
   and .inputs.access_recovery_mtls_client_cert_configured == true
   and .inputs.access_recovery_mtls_client_cert_source == "cli:--access-recovery-mtls-client-cert"
-  and .inputs.access_recovery_mtls_client_key == $mtls_key
+  and .inputs.access_recovery_mtls_client_key == "[redacted]"
   and .inputs.access_recovery_mtls_client_key_configured == true
   and .inputs.access_recovery_mtls_client_key_source == "cli:--access-recovery-mtls-client-key"
   and .actions[0].id == "access_bridge_service_smoke"
@@ -3563,7 +3637,8 @@ if ! jq -e \
   and (.actions[0].command | contains("--client-cert "))
   and (.actions[0].command | contains("access_recovery_mtls_client_cert.pem"))
   and (.actions[0].command | contains("--client-key "))
-  and (.actions[0].command | contains("access_recovery_mtls_client_key.pem"))
+  and (.actions[0].command | contains("--client-key [redacted]"))
+  and ((.actions[0].command | contains($mtls_key)) | not)
   and ((.actions[0].command | contains("MTLS_CA_FILE")) | not)
   and ((.actions[0].command | contains("MTLS_CLIENT_CERT_FILE")) | not)
   and ((.actions[0].command | contains("MTLS_CLIENT_KEY_FILE")) | not)
