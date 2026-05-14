@@ -90,6 +90,10 @@ print_subject_redacted_response() {
   fi
 }
 
+urlencode() {
+  jq -nr --arg value "$1" '$value | @uri'
+}
+
 issuer_url="${ISSUER_URL:-http://127.0.0.1:8082}"
 admin_token="${ISSUER_ADMIN_TOKEN:-}"
 admin_token_file="${ISSUER_ADMIN_TOKEN_FILE:-}"
@@ -251,13 +255,19 @@ need_cmd curl
 need_cmd jq
 need_cmd go
 
-payload="$(cat <<EOF
-{"subject":"${subject}","kind":"${kind}","tier":${tier},"reputation":${reputation},"bond":${bond},"stake":${stake}}
-EOF
+payload="$(
+  jq -cn \
+    --arg subject "$subject" \
+    --arg kind "$kind" \
+    --argjson tier "$tier" \
+    --argjson reputation "$reputation" \
+    --argjson bond "$bond" \
+    --argjson stake "$stake" \
+    '{subject:$subject,kind:$kind,tier:$tier,reputation:$reputation,bond:$bond,stake:$stake}'
 )"
 
 request_upsert="${issuer_url}/v1/admin/subject/upsert"
-request_get="${issuer_url}/v1/admin/subject/get?subject=${subject}"
+request_get="${issuer_url}/v1/admin/subject/get?subject=$(urlencode "$subject")"
 
 build_header_config_file() {
   local method="$1"

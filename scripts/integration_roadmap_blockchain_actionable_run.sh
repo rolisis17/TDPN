@@ -13,6 +13,7 @@ unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_MAX_ACTIONS
 unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PARALLEL
 unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PRE_EXEC_REVALIDATE_DELAY_SEC
 unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PRE_EXEC_REVALIDATE_READY_FILE
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PROVIDED_ROADMAP_MAX_AGE_SEC
 unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PRINT_SUMMARY_JSON
 unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_RECOMMENDED_ONLY
 unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_REFRESH_MANUAL_VALIDATION
@@ -22,6 +23,7 @@ unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_REPORT_MD
 unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT
 unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SUMMARY_JSON
 unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_SUMMARY_JSON
+unset ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_TRUST_PROVIDED_ROADMAP
 
 for cmd in bash jq mktemp chmod mkdir cat grep timeout date ln; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -412,6 +414,23 @@ JSON
 }
 JSON
     ;;
+  redaction_fallback)
+    cat >"$summary_json" <<JSON
+{
+  "blockchain_track": {
+    "recommended_gate_id": "blockchain_redaction_fallback",
+    "recommended_gate_reason": "redaction fallback scenario",
+    "recommended_gate_command": "bash \"$PASS1\" --issuer-url \"https://fallback-chain-user:fallback-chain-pass@fallback-chain.example.test/path?token=fallback-chain-token --directory-urls=https://fallback-chain-dir-user:fallback-chain-dir-pass@fallback-chain-dir.example.test/path?secret=fallback-chain-dir-secret --token fallback-chain-token",
+    "mainnet_activation_missing_metrics_action": {
+      "id": "blockchain_redaction_fallback"
+    }
+  },
+  "next_actions": [
+    {"id":"blockchain_redaction_fallback","label":"Blockchain redaction fallback","command":"bash \"$PASS1\" --issuer-url \"https://fallback-chain-user:fallback-chain-pass@fallback-chain.example.test/path?token=fallback-chain-token --directory-urls=https://fallback-chain-dir-user:fallback-chain-dir-pass@fallback-chain-dir.example.test/path?secret=fallback-chain-dir-secret --token fallback-chain-token","reason":"test-redaction-fallback"}
+  ]
+}
+JSON
+    ;;
   no_python_quoted)
     cat >"$summary_json" <<JSON
 {
@@ -506,6 +525,14 @@ if ! bash ./scripts/roadmap_blockchain_actionable_run.sh --help | grep -F -- "--
   echo "help output missing --allow-refresh-evidence-command-drift [0|1]"
   exit 1
 fi
+if ! bash ./scripts/roadmap_blockchain_actionable_run.sh --help | grep -F -- "--trust-provided-roadmap [0|1]" >/dev/null; then
+  echo "help output missing --trust-provided-roadmap [0|1]"
+  exit 1
+fi
+if ! bash ./scripts/roadmap_blockchain_actionable_run.sh --help | grep -F -- "--provided-roadmap-max-age-sec N" >/dev/null; then
+  echo "help output missing --provided-roadmap-max-age-sec N"
+  exit 1
+fi
 if ! bash ./scripts/roadmap_blockchain_actionable_run.sh --help | grep -F -- "--max-actions N" >/dev/null; then
   echo "help output missing --max-actions N"
   exit 1
@@ -528,6 +555,8 @@ if ! jq -e '
   and .rc == 0
   and .inputs.parallel == false
   and .inputs.recommended_only == false
+  and .inputs.trust_provided_roadmap == false
+  and .inputs.using_trusted_provided_roadmap == false
   and .roadmap.generated_this_run == true
   and .roadmap.actions_selected_count == 3
   and .roadmap.recommended_gate_id == "blockchain_pass_2"
@@ -547,6 +576,49 @@ if ! jq -e '
 ' "$SUMMARY_PASS" >/dev/null; then
   echo "success path summary mismatch"
   cat "$SUMMARY_PASS"
+  exit 1
+fi
+
+echo "[roadmap-blockchain-actionable-run] trusted provided roadmap artifacts require freshness"
+TRUSTED_STALE_SUMMARY="$TMP_DIR/trusted_stale_summary.json"
+TRUSTED_STALE_REPORT="$TMP_DIR/trusted_stale_report.md"
+TRUSTED_STALE_OUT="$TMP_DIR/trusted_stale_out.json"
+TRUSTED_STALE_LOG="$TMP_DIR/trusted_stale.log"
+cat >"$TRUSTED_STALE_SUMMARY" <<JSON
+{
+  "generated_at_utc": "2000-01-01T00:00:00Z",
+  "blockchain_track": {
+    "recommended_gate_id": "blockchain_stale_action",
+    "recommended_gate_reason": "stale trusted provided roadmap",
+    "recommended_gate_command": "bash \"$PASS1\"",
+    "mainnet_activation_missing_metrics_action": {
+      "id": "blockchain_stale_action"
+    }
+  },
+  "next_actions": [
+    {"id":"blockchain_stale_action","label":"Blockchain stale action","command":"bash \"$PASS1\"","reason":"stale trusted provided roadmap"}
+  ]
+}
+JSON
+echo "# stale trusted roadmap report" >"$TRUSTED_STALE_REPORT"
+set +e
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --roadmap-summary-json "$TRUSTED_STALE_SUMMARY" \
+  --roadmap-report-md "$TRUSTED_STALE_REPORT" \
+  --trust-provided-roadmap 1 \
+  --summary-json "$TRUSTED_STALE_OUT" \
+  --print-summary-json 0 >"$TRUSTED_STALE_LOG" 2>&1
+trusted_stale_rc=$?
+set -e
+if [[ "$trusted_stale_rc" -ne 3 ]]; then
+  echo "expected trusted stale provided roadmap to fail rc=3, got rc=$trusted_stale_rc"
+  cat "$TRUSTED_STALE_LOG"
+  [[ -f "$TRUSTED_STALE_OUT" ]] && cat "$TRUSTED_STALE_OUT"
+  exit 1
+fi
+if ! grep -F -- "trusted provided roadmap summary is stale" "$TRUSTED_STALE_LOG" >/dev/null; then
+  echo "expected stale trusted roadmap freshness failure detail"
+  cat "$TRUSTED_STALE_LOG"
   exit 1
 fi
 
@@ -642,6 +714,48 @@ for redaction_output_file in "$SUMMARY_REDACTION" "$RUN_LOG_REDACTION" "$REDACTI
     chain-dir-secret; do
     if grep -F -- "$redaction_sentinel" "$redaction_output_file" >/dev/null; then
       echo "redaction sentinel leaked into $redaction_output_file: $redaction_sentinel"
+      cat "$redaction_output_file"
+      exit 1
+    fi
+  done
+done
+
+echo "[roadmap-blockchain-actionable-run] fallback redacts URL-bearing malformed commands"
+SUMMARY_REDACTION_FALLBACK="$TMP_DIR/summary_redaction_fallback.json"
+REPORTS_REDACTION_FALLBACK="$TMP_DIR/reports_redaction_fallback"
+RUN_LOG_REDACTION_FALLBACK="$TMP_DIR/run_redaction_fallback.log"
+set +e
+ROADMAP_BLOCKCHAIN_ACTIONABLE_SCENARIO=redaction_fallback \
+PASS1="$PASS1" PASS2="$PASS2" FAIL1="$FAIL1" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+PREFILL="$PREFILL" \
+ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_REDACTION_FALLBACK" \
+  --summary-json "$SUMMARY_REDACTION_FALLBACK" \
+  --print-summary-json 0 >"$RUN_LOG_REDACTION_FALLBACK" 2>&1
+fallback_rc=$?
+set -e
+if [[ "$fallback_rc" -eq 0 ]]; then
+  echo "expected malformed fallback redaction scenario to fail"
+  cat "$SUMMARY_REDACTION_FALLBACK"
+  cat "$RUN_LOG_REDACTION_FALLBACK"
+  exit 1
+fi
+if ! grep -F -- "[redacted-url]" "$SUMMARY_REDACTION_FALLBACK" >/dev/null; then
+  echo "expected malformed fallback summary to contain redacted URL marker"
+  cat "$SUMMARY_REDACTION_FALLBACK"
+  cat "$RUN_LOG_REDACTION_FALLBACK"
+  exit 1
+fi
+FALLBACK_REDACTION_ACTION_LOG="$(jq -r '.actions[0].artifacts.log // ""' "$SUMMARY_REDACTION_FALLBACK")"
+FALLBACK_REDACTION_ROADMAP_SUMMARY="$(jq -r '.artifacts.roadmap_summary_json // ""' "$SUMMARY_REDACTION_FALLBACK")"
+FALLBACK_REDACTION_ROADMAP_LOG="$(jq -r '.artifacts.roadmap_log // ""' "$SUMMARY_REDACTION_FALLBACK")"
+FALLBACK_REDACTION_ROADMAP_REPORT="$(jq -r '.artifacts.roadmap_report_md // ""' "$SUMMARY_REDACTION_FALLBACK")"
+for redaction_output_file in "$SUMMARY_REDACTION_FALLBACK" "$RUN_LOG_REDACTION_FALLBACK" "$FALLBACK_REDACTION_ACTION_LOG" "$FALLBACK_REDACTION_ROADMAP_SUMMARY" "$FALLBACK_REDACTION_ROADMAP_LOG" "$FALLBACK_REDACTION_ROADMAP_REPORT"; do
+  [[ -n "$redaction_output_file" && -f "$redaction_output_file" ]] || continue
+  for redaction_sentinel in fallback-chain-pass fallback-chain-token fallback-chain-dir-pass fallback-chain-dir-secret; do
+    if grep -F -- "$redaction_sentinel" "$redaction_output_file" >/dev/null; then
+      echo "fallback redaction sentinel leaked into $redaction_output_file: $redaction_sentinel"
       cat "$redaction_output_file"
       exit 1
     fi

@@ -20,6 +20,8 @@ Usage:
     [--recommended-only [0|1]] \
     [--allow-recommended-gate-drift [0|1]] \
     [--allow-refresh-evidence-command-drift [0|1]] \
+    [--trust-provided-roadmap [0|1]] \
+    [--provided-roadmap-max-age-sec N] \
     [--max-actions N] \
     [--print-summary-json [0|1]]
 
@@ -36,6 +38,8 @@ Defaults:
   --recommended-only 0
   --allow-recommended-gate-drift 0
   --allow-refresh-evidence-command-drift 0
+  --trust-provided-roadmap 0
+  --provided-roadmap-max-age-sec 86400
   --max-actions 0   (0 = no limit)
   --print-summary-json 1
 
@@ -97,6 +101,45 @@ need_cmd() {
     echo "missing required command: $cmd"
     exit 2
   fi
+}
+
+validate_trusted_provided_roadmap() {
+  local summary_path="${1:-}"
+  local report_path="${2:-}"
+  local max_age_sec="${3:-86400}"
+  local generated_at=""
+  local generated_epoch=""
+  local now_epoch=""
+  local age_sec=0
+
+  if [[ ! -f "$summary_path" ]] || ! jq -e . "$summary_path" >/dev/null 2>&1; then
+    echo "trusted provided roadmap summary missing or invalid: $summary_path"
+    return 3
+  fi
+  if [[ ! -f "$report_path" ]]; then
+    echo "trusted provided roadmap report missing: $report_path"
+    return 3
+  fi
+  generated_at="$(jq -r '.generated_at_utc // ""' "$summary_path")"
+  if [[ -z "$generated_at" || "$generated_at" == "null" ]]; then
+    echo "trusted provided roadmap summary missing generated_at_utc: $summary_path"
+    return 3
+  fi
+  if ! generated_epoch="$(date -u -d "$generated_at" +%s 2>/dev/null)"; then
+    echo "trusted provided roadmap summary has invalid generated_at_utc: $generated_at"
+    return 3
+  fi
+  now_epoch="$(date -u +%s)"
+  if (( generated_epoch > now_epoch + 300 )); then
+    echo "trusted provided roadmap summary is from the future: $generated_at"
+    return 3
+  fi
+  age_sec=$(( now_epoch - generated_epoch ))
+  if (( max_age_sec > 0 && age_sec > max_age_sec )); then
+    echo "trusted provided roadmap summary is stale: age_sec=$age_sec max_age_sec=$max_age_sec"
+    return 3
+  fi
+  return 0
 }
 
 sanitize_id() {
@@ -256,12 +299,18 @@ redact_command_secrets() {
   fi
 
   local env_regex='[A-Za-z_][A-Za-z0-9_]*(TOKEN|KEY|SECRET|PASSWORD|PASSWD|AUTHORIZATION|BEARER|CREDENTIAL)[A-Za-z0-9_]*'
+  local url_flag_regex='--([A-Za-z0-9_-]*(url|urls)|bootstrap-directory|directory-urls)'
   line="$(printf '%s' "$line" | sed -E \
     -e "s/(^|[[:space:]])(${env_regex})=(\"[^\"]*\"|'[^']*'|[^[:space:]]+)/\\1\\2=[redacted]/gI" \
+    -e "s#(${url_flag_regex})([[:space:]]+)\"[^\"]*://[^\"]*\"#\\1\\4[redacted-url]#gI" \
+    -e "s#(${url_flag_regex})([[:space:]]+)'[^']*://[^']*'#\\1\\4[redacted-url]#gI" \
+    -e "s#(${url_flag_regex})([[:space:]]+)[^[:space:]]*://[^[:space:]]+#\\1\\4[redacted-url]#gI" \
+    -e "s#(${url_flag_regex})=[^[:space:]]*://[^[:space:]]+#\\1=[redacted-url]#gI" \
     -e "s/(${flag_regex})([[:space:]]+)\"[^\"]*\"/\\1\\2[redacted]/g" \
     -e "s/(${flag_regex})([[:space:]]+)'[^']*'/\\1\\2[redacted]/g" \
     -e "s/(${flag_regex})([[:space:]]+)[^[:space:]]+/\\1\\2[redacted]/g" \
-    -e "s/(${flag_regex})=[^[:space:]]+/\\1=[redacted]/g")"
+    -e "s/(${flag_regex})=[^[:space:]]+/\\1=[redacted]/g" \
+    -e "s#[^[:space:]\"']*://[^[:space:]\"']*#[redacted-url]#g")"
   printf '%s' "$line"
 }
 
@@ -873,6 +922,8 @@ parallel="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PARALLEL:-0}"
 recommended_only="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_RECOMMENDED_ONLY:-0}"
 allow_recommended_gate_drift="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ALLOW_RECOMMENDED_GATE_DRIFT:-0}"
 allow_refresh_evidence_command_drift="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ALLOW_REFRESH_EVIDENCE_COMMAND_DRIFT:-0}"
+trust_provided_roadmap="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_TRUST_PROVIDED_ROADMAP:-0}"
+provided_roadmap_max_age_sec="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PROVIDED_ROADMAP_MAX_AGE_SEC:-86400}"
 max_actions="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_MAX_ACTIONS:-0}"
 print_summary_json="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_PRINT_SUMMARY_JSON:-1}"
 action_timeout_sec="${ROADMAP_BLOCKCHAIN_ACTIONABLE_RUN_ACTION_TIMEOUT_SEC:-0}"
@@ -969,6 +1020,20 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --trust-provided-roadmap)
+      if [[ $# -ge 2 && ( "${2:-}" == "0" || "${2:-}" == "1" ) ]]; then
+        trust_provided_roadmap="${2:-}"
+        shift 2
+      else
+        trust_provided_roadmap="1"
+        shift
+      fi
+      ;;
+    --provided-roadmap-max-age-sec)
+      require_value_or_die "$1" "${2:-}"
+      provided_roadmap_max_age_sec="${2:-}"
+      shift 2
+      ;;
     --max-actions)
       require_value_or_die "$1" "${2:-}"
       max_actions="${2:-}"
@@ -1003,8 +1068,10 @@ bool_arg_or_die "--allow-recommended-gate-drift" "$allow_recommended_gate_drift"
 bool_arg_or_die "--allow-refresh-evidence-command-drift" "$allow_refresh_evidence_command_drift"
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--allow-unsafe-shell-commands" "$allow_unsafe_shell_commands"
+bool_arg_or_die "--trust-provided-roadmap" "$trust_provided_roadmap"
 int_arg_or_die "--max-actions" "$max_actions"
 int_arg_or_die "--action-timeout-sec" "$action_timeout_sec"
+int_arg_or_die "--provided-roadmap-max-age-sec" "$provided_roadmap_max_age_sec"
 
 if (( action_timeout_sec > 0 )); then
   need_cmd timeout
@@ -1013,6 +1080,14 @@ fi
 roadmap_paths_provided="1"
 if [[ -z "$roadmap_summary_json" || -z "$roadmap_report_md" ]]; then
   roadmap_paths_provided="0"
+fi
+using_trusted_provided_roadmap="0"
+if [[ "$roadmap_paths_provided" == "1" ]]; then
+  if [[ "$trust_provided_roadmap" == "1" ]]; then
+    using_trusted_provided_roadmap="1"
+  else
+    roadmap_paths_provided="0"
+  fi
 fi
 
 run_stamp="$(date -u +%Y%m%d_%H%M%S)"
@@ -1073,6 +1148,8 @@ if [[ "$roadmap_paths_provided" != "1" ]]; then
   fi
   ran_roadmap_report="1"
   echo "[roadmap-blockchain-actionable-run] stage=roadmap_progress_report status=pass rc=0"
+else
+  validate_trusted_provided_roadmap "$roadmap_summary_json" "$roadmap_report_md" "$provided_roadmap_max_age_sec"
 fi
 
 if [[ ! -f "$roadmap_summary_json" ]] || ! jq -e . "$roadmap_summary_json" >/dev/null 2>&1; then
@@ -1635,6 +1712,9 @@ jq -n \
   --argjson recommended_only "$recommended_only" \
   --argjson allow_recommended_gate_drift "$allow_recommended_gate_drift" \
   --argjson allow_refresh_evidence_command_drift "$allow_refresh_evidence_command_drift" \
+  --argjson trust_provided_roadmap "$trust_provided_roadmap" \
+  --argjson using_trusted_provided_roadmap "$using_trusted_provided_roadmap" \
+  --argjson provided_roadmap_max_age_sec "$provided_roadmap_max_age_sec" \
   --argjson max_actions "$max_actions" \
   --argjson action_timeout_sec "$action_timeout_sec" \
   --argjson allow_unsafe_shell_commands "$allow_unsafe_shell_commands" \
@@ -1659,6 +1739,9 @@ jq -n \
       recommended_only: ($recommended_only == 1),
       allow_recommended_gate_drift: ($allow_recommended_gate_drift == 1),
       allow_refresh_evidence_command_drift: ($allow_refresh_evidence_command_drift == 1),
+      trust_provided_roadmap: ($trust_provided_roadmap == 1),
+      using_trusted_provided_roadmap: ($using_trusted_provided_roadmap == 1),
+      provided_roadmap_max_age_sec: $provided_roadmap_max_age_sec,
       max_actions: $max_actions,
       action_timeout_sec: $action_timeout_sec,
       allow_unsafe_shell_commands: ($allow_unsafe_shell_commands == 1)

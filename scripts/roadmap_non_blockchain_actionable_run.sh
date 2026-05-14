@@ -254,12 +254,18 @@ redact_command_secrets() {
   fi
 
   local env_regex='[A-Za-z_][A-Za-z0-9_]*(TOKEN|KEY|SECRET|PASSWORD|PASSWD|AUTHORIZATION|BEARER|CREDENTIAL)[A-Za-z0-9_]*'
+  local url_flag_regex='--([A-Za-z0-9_-]*(url|urls)|bootstrap-directory|directory-urls)'
   line="$(printf '%s' "$line" | sed -E \
     -e "s/(^|[[:space:]])(${env_regex})=(\"[^\"]*\"|'[^']*'|[^[:space:]]+)/\\1\\2=[redacted]/gI" \
+    -e "s#(${url_flag_regex})([[:space:]]+)\"[^\"]*://[^\"]*\"#\\1\\4[redacted-url]#gI" \
+    -e "s#(${url_flag_regex})([[:space:]]+)'[^']*://[^']*'#\\1\\4[redacted-url]#gI" \
+    -e "s#(${url_flag_regex})([[:space:]]+)[^[:space:]]*://[^[:space:]]+#\\1\\4[redacted-url]#gI" \
+    -e "s#(${url_flag_regex})=[^[:space:]]*://[^[:space:]]+#\\1=[redacted-url]#gI" \
     -e "s/(${flag_regex})([[:space:]]+)\"[^\"]*\"/\\1\\2[redacted]/g" \
     -e "s/(${flag_regex})([[:space:]]+)'[^']*'/\\1\\2[redacted]/g" \
     -e "s/(${flag_regex})([[:space:]]+)[^[:space:]]+/\\1\\2[redacted]/g" \
-    -e "s/(${flag_regex})=[^[:space:]]+/\\1=[redacted]/g")"
+    -e "s/(${flag_regex})=[^[:space:]]+/\\1=[redacted]/g" \
+    -e "s#[^[:space:]\"']*://[^[:space:]\"']*#[redacted-url]#g")"
   printf '%s' "$line"
 }
 

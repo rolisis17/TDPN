@@ -33,15 +33,41 @@ EOF_GO
 cat >"$FAKE_BIN/curl" <<'EOF_CURL'
 #!/usr/bin/env bash
 set -euo pipefail
+data_arg=""
+take_data=0
+for arg in "$@"; do
+  if [[ "$take_data" == "1" ]]; then
+    data_arg="$arg"
+    take_data=0
+    continue
+  fi
+  if [[ "$arg" == "--data" ]]; then
+    take_data=1
+  fi
+done
 if [[ "$*" == *"batch-fail-sentinel-secret"* ]]; then
   exit 22
 fi
 if [[ "$*" == *"/v1/admin/subject/upsert"* ]]; then
-  printf '{"subject":"inv-upsert-secret","kind":"client","tier":1}\n'
+  subject_value="$(printf '%s' "$data_arg" | jq -r '.subject // ""')"
+  if [[ "$subject_value" == 'inv-upsert-secret"&mode=oops' ]] && ! printf '%s' "$data_arg" | jq -e '.kind == "client" and .tier == 1' >/dev/null; then
+    echo "unexpected upsert JSON payload" >&2
+    printf '%s\n' "$data_arg" >&2
+    exit 23
+  fi
+  jq -cn --arg subject "$subject_value" '{subject:$subject,kind:"client",tier:1}'
   exit 0
 fi
 if [[ "$*" == *"/v1/admin/subject/get"* ]]; then
-  printf '{"subject":"inv-upsert-secret","kind":"client","tier":1,"reputation":0.5}\n'
+  if [[ "$*" == *"inv-upsert-secret"* && "$*" != *"subject=inv-upsert-secret%22%26mode%3Doops"* ]]; then
+    echo "subject readback URL was not URL-encoded" >&2
+    exit 24
+  fi
+  if [[ "$*" == *"subject=inv-upsert-secret%22%26mode%3Doops"* ]]; then
+    jq -cn --arg subject 'inv-upsert-secret"&mode=oops' '{subject:$subject,kind:"client",tier:1,reputation:0.5}'
+  else
+    jq -cn --arg subject 'batch-upsert-sentinel-secret' '{subject:$subject,kind:"client",tier:1,reputation:0.5}'
+  fi
   exit 0
 fi
 echo "unexpected fake curl invocation: $*" >&2
@@ -51,17 +77,18 @@ chmod +x "$FAKE_BIN/go" "$FAKE_BIN/curl"
 
 KEY_FILE="$TMP_DIR/admin.key"
 printf 'fake-key' >"$KEY_FILE"
+UPSERT_SENTINEL_SUBJECT='inv-upsert-secret"&mode=oops'
 
 PATH="$FAKE_BIN:$PATH" \
 ./scripts/beta_subject_upsert.sh \
   --issuer-url http://127.0.0.1:18082 \
   --admin-key-file "$KEY_FILE" \
   --admin-key-id test-key \
-  --subject inv-upsert-secret \
+  --subject "$UPSERT_SENTINEL_SUBJECT" \
   --kind client \
   --tier 1 >"$TMP_DIR/upsert.log" 2>&1
 
-if grep -F -- "inv-upsert-secret" "$TMP_DIR/upsert.log" >/dev/null; then
+if grep -F -- "$UPSERT_SENTINEL_SUBJECT" "$TMP_DIR/upsert.log" >/dev/null; then
   echo "beta subject upsert output leaked subject"
   cat "$TMP_DIR/upsert.log"
   exit 1

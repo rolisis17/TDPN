@@ -4341,6 +4341,9 @@ function applyOnboardingOverviewPayload(payload) {
   }
   applyClientRegistrationPayload(payload);
   applyBootstrapTrustStatusPayload(payload);
+  if (payload.contribution && typeof payload.contribution === "object") {
+    applyPublicContributionStatusPayload(payload.contribution);
+  }
   setPublicReadiness(parsePublicReadiness(payload));
 }
 

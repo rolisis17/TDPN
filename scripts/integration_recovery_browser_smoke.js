@@ -96,12 +96,17 @@ class Element {
   }
 
   getContext() {
+    const element = this;
     return {
       fillStyle: "",
       fillRect() {},
       drawImage() {},
       getImageData() {
-        return { data: new Uint8ClampedArray(0) };
+        return {
+          data: new Uint8ClampedArray(4),
+          width: element.width || 1,
+          height: element.height || 1,
+        };
       },
     };
   }
@@ -301,6 +306,7 @@ async function main() {
   ];
 
   const document = makeDocument(ids);
+  let qrScanText = "";
   const window = {
     atob(value) {
       return Buffer.from(value, "base64").toString("binary");
@@ -320,7 +326,7 @@ async function main() {
         },
       };
     },
-    jsQR: () => null,
+    jsQR: () => (qrScanText ? { data: qrScanText } : null),
   };
   const context = {
     Blob,
@@ -340,6 +346,13 @@ async function main() {
         },
       },
     },
+    async createImageBitmap() {
+      return {
+        width: 1,
+        height: 1,
+        close() {},
+      };
+    },
     setTimeout,
     window,
   };
@@ -347,6 +360,7 @@ async function main() {
   window.localStorage = context.localStorage;
   window.navigator = context.navigator;
   window.crypto = context.crypto;
+  window.createImageBitmap = context.createImageBitmap;
 
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(repoRoot, "apps/web/assets/recovery.js"), "utf8"), context, {
@@ -412,6 +426,29 @@ async function main() {
   }
   if (!document.getElementById("qr_preview").querySelector("canvas")) {
     throw new Error("expected QR render to append a canvas");
+  }
+  document.getElementById("qr_image_file").files = [new Blob(["no-qr"], { type: "image/png" })];
+  qrScanText = "";
+  await document.getElementById("scan_qr_btn").click();
+  const emptyQRStatus = document.getElementById("status-heading").textContent;
+  const emptyQRDetail = document.getElementById("status_detail").textContent;
+  if (emptyQRStatus !== "QR scan failed") {
+    throw new Error(`expected empty QR scan to fail closed, got ${emptyQRStatus}: ${emptyQRDetail}`);
+  }
+  if (!emptyQRDetail.includes("No QR code text was found")) {
+    throw new Error(`expected no-code QR scan detail, got ${emptyQRDetail}`);
+  }
+  document.getElementById("handoff_input").value = "";
+  document.getElementById("pack_input").value = "";
+  qrScanText = bridgeInviteText;
+  await document.getElementById("scan_qr_btn").click();
+  const scannedQRStatus = document.getElementById("status-heading").textContent;
+  const scannedQRDetail = document.getElementById("status_detail").textContent;
+  if (scannedQRStatus !== "Bridge invite text imported") {
+    throw new Error(`expected QR scan import, got ${scannedQRStatus}: ${scannedQRDetail}`);
+  }
+  if (!document.getElementById("pack_input").value.includes("helper-smoke")) {
+    throw new Error("expected QR scan import to populate the bridge invite pack input");
   }
   await document.getElementById("verify_btn").click();
 

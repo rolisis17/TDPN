@@ -263,6 +263,7 @@ PUBLIC_CONTRIBUTION_JS_MARKERS=(
   'post("/v1/gpm/contribution/disable", publicContributionSessionRequest("Disable contribution"))'
   'post("/v1/gpm/rewards/current-week", publicContributionSessionRequest("Current week reward"))'
   'post("/v1/gpm/rewards/history", publicContributionSessionRequest("Reward history"))'
+  'applyPublicContributionStatusPayload(payload.contribution);'
   'function refreshPublicContributionBestEffort('
   'function syncContributionActionState('
   'contributionEnableBtnEl.addEventListener("click"'

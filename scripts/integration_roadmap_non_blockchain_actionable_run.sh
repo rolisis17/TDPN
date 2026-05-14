@@ -300,6 +300,18 @@ JSON
 }
 JSON
     ;;
+  redaction_fallback)
+    cat >"$summary_json" <<JSON
+{
+  "vpn_track": {
+    "non_blockchain_recommended_gate_id": "action_redaction_fallback",
+    "non_blockchain_actionable_no_sudo_or_github": [
+      {"id":"action_redaction_fallback","label":"Action redaction fallback","command":"bash \"$PASS1\" --issuer-url \"https://fallback-user:fallback-pass@fallback.example.test/path?token=fallback-token --directory-urls=https://fallback-dir-user:fallback-dir-pass@fallback-dir.example.test/path?secret=fallback-dir-secret --token fallback-token","reason":"test-redaction-fallback"}
+    ]
+  }
+}
+JSON
+    ;;
   no_python_quoted)
     cat >"$summary_json" <<JSON
 {
@@ -533,6 +545,47 @@ for redaction_output_file in "$SUMMARY_REDACTION" "$RUN_LOG_REDACTION" "$REDACTI
     dir-secret; do
     if grep -F -- "$redaction_sentinel" "$redaction_output_file" >/dev/null; then
       echo "redaction sentinel leaked into $redaction_output_file: $redaction_sentinel"
+      cat "$redaction_output_file"
+      exit 1
+    fi
+  done
+done
+
+echo "[roadmap-non-blockchain-actionable-run] fallback redacts URL-bearing malformed commands"
+SUMMARY_REDACTION_FALLBACK="$TMP_DIR/summary_redaction_fallback.json"
+REPORTS_REDACTION_FALLBACK="$TMP_DIR/reports_redaction_fallback"
+RUN_LOG_REDACTION_FALLBACK="$TMP_DIR/run_redaction_fallback.log"
+set +e
+ROADMAP_ACTIONABLE_SCENARIO=redaction_fallback \
+PASS1="$PASS1" PASS2="$PASS2" FAIL2="$FAIL2" SLOW1="$SLOW1" SLOW2="$SLOW2" \
+ROADMAP_NON_BLOCKCHAIN_ACTIONABLE_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_non_blockchain_actionable_run.sh \
+  --reports-dir "$REPORTS_REDACTION_FALLBACK" \
+  --summary-json "$SUMMARY_REDACTION_FALLBACK" \
+  --print-summary-json 0 >"$RUN_LOG_REDACTION_FALLBACK" 2>&1
+fallback_rc=$?
+set -e
+if [[ "$fallback_rc" -eq 0 ]]; then
+  echo "expected malformed fallback redaction scenario to fail"
+  cat "$SUMMARY_REDACTION_FALLBACK"
+  cat "$RUN_LOG_REDACTION_FALLBACK"
+  exit 1
+fi
+if ! grep -F -- "[redacted-url]" "$SUMMARY_REDACTION_FALLBACK" >/dev/null; then
+  echo "expected malformed fallback summary to contain redacted URL marker"
+  cat "$SUMMARY_REDACTION_FALLBACK"
+  cat "$RUN_LOG_REDACTION_FALLBACK"
+  exit 1
+fi
+FALLBACK_REDACTION_ACTION_LOG="$(jq -r '.actions[0].artifacts.log // ""' "$SUMMARY_REDACTION_FALLBACK")"
+FALLBACK_REDACTION_ROADMAP_SUMMARY="$(jq -r '.artifacts.roadmap_summary_json // ""' "$SUMMARY_REDACTION_FALLBACK")"
+FALLBACK_REDACTION_ROADMAP_LOG="$(jq -r '.artifacts.roadmap_log // ""' "$SUMMARY_REDACTION_FALLBACK")"
+FALLBACK_REDACTION_ROADMAP_REPORT="$(jq -r '.artifacts.roadmap_report_md // ""' "$SUMMARY_REDACTION_FALLBACK")"
+for redaction_output_file in "$SUMMARY_REDACTION_FALLBACK" "$RUN_LOG_REDACTION_FALLBACK" "$FALLBACK_REDACTION_ACTION_LOG" "$FALLBACK_REDACTION_ROADMAP_SUMMARY" "$FALLBACK_REDACTION_ROADMAP_LOG" "$FALLBACK_REDACTION_ROADMAP_REPORT"; do
+  [[ -n "$redaction_output_file" && -f "$redaction_output_file" ]] || continue
+  for redaction_sentinel in fallback-pass fallback-token fallback-dir-pass fallback-dir-secret; do
+    if grep -F -- "$redaction_sentinel" "$redaction_output_file" >/dev/null; then
+      echo "fallback redaction sentinel leaked into $redaction_output_file: $redaction_sentinel"
       cat "$redaction_output_file"
       exit 1
     fi
