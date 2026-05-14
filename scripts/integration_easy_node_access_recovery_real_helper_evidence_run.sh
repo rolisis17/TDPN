@@ -825,11 +825,11 @@ jq -e '
 
 userinfo_edge_index=0
 for userinfo_edge_case in \
-  "https://token@|token@" \
-  " https://token@helper.gpm-pilot.net|token@" \
-  "https://to ken@helper.gpm-pilot.net|to ken@"; do
+  "missing-host-userinfo|https://token@|token@|https://[redacted]@" \
+  "leading-space-userinfo| https://token@helper.gpm-pilot.net|token@|https://[redacted]@helper.gpm-pilot.net" \
+  "embedded-space-userinfo|https://to ken@helper.gpm-pilot.net|to ken@|https://[redacted]@helper.gpm-pilot.net"; do
   userinfo_edge_index=$((userinfo_edge_index + 1))
-  IFS='|' read -r userinfo_edge_url userinfo_edge_secret <<<"$userinfo_edge_case"
+  IFS='|' read -r userinfo_edge_name userinfo_edge_url userinfo_edge_secret userinfo_edge_expected_redacted <<<"$userinfo_edge_case"
   : >"$CAPTURE"
   set +e
   ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
@@ -854,7 +854,18 @@ for userinfo_edge_case in \
   userinfo_edge_rc=$?
   set -e
   if [[ "$userinfo_edge_rc" -ne 2 ]]; then
-    echo "expected userinfo edge URL to fail preflight: $userinfo_edge_url"
+    echo "expected userinfo edge URL to fail preflight: $userinfo_edge_name"
+    cat "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index.log"
+    exit 1
+  fi
+  if ! grep -Fq -- "--base-url must not include userinfo" "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index.log"; then
+    echo "expected userinfo edge URL to fail with explicit userinfo rejection: $userinfo_edge_name"
+    cat "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index.log"
+    exit 1
+  fi
+  if [[ "$userinfo_edge_name" == "leading-space-userinfo" ]] &&
+    grep -Fq -- "--base-url must use https:// for real helper evidence" "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index.log"; then
+    echo "leading-space userinfo URL failed generic HTTPS preflight instead of trim-before-userinfo rejection"
     cat "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index.log"
     exit 1
   fi
@@ -868,11 +879,19 @@ for userinfo_edge_case in \
     cat "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index-report.md"
     exit 1
   fi
-  jq -e '
+  if [[ -s "$CAPTURE" ]]; then
+    echo "userinfo edge URL should not invoke child scripts: $userinfo_edge_name"
+    cat "$CAPTURE"
+    exit 1
+  fi
+  jq -e \
+    --arg expected_redacted "$userinfo_edge_expected_redacted" \
+    '
     .status == "fail"
     and .rc == 2
     and .stage == "preflight"
-    and (.inputs.base_url | contains("[redacted]@"))
+    and .notes == "--base-url must not include userinfo"
+    and .inputs.base_url == $expected_redacted
   ' "$TMP_DIR/userinfo-url-edge-$userinfo_edge_index-summary.json" >/dev/null
 done
 

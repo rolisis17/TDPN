@@ -74,4 +74,35 @@ if [[ "$(grep -F -c '"subject": "[redacted]"' "$TMP_DIR/upsert.log")" -lt 2 ]]; 
   exit 1
 fi
 
+BATCH_SENTINEL_SUBJECT="batch-upsert-sentinel-secret"
+BATCH_CSV="$TMP_DIR/batch.csv"
+BATCH_TOKEN_FILE="$TMP_DIR/admin.token"
+cat >"$BATCH_CSV" <<EOF_CSV
+subject,kind,tier,reputation,bond,stake
+$BATCH_SENTINEL_SUBJECT,client,2,0.6,7,11
+EOF_CSV
+printf 'fake-token' >"$BATCH_TOKEN_FILE"
+
+PATH="$FAKE_BIN:$PATH" \
+./scripts/beta_subject_batch_upsert.sh \
+  --issuer-url http://127.0.0.1:18082 \
+  --admin-token-file "$BATCH_TOKEN_FILE" \
+  --csv "$BATCH_CSV" >"$TMP_DIR/batch.log" 2>&1
+
+if grep -F -- "$BATCH_SENTINEL_SUBJECT" "$TMP_DIR/batch.log" >/dev/null; then
+  echo "beta subject batch upsert output leaked subject"
+  cat "$TMP_DIR/batch.log"
+  exit 1
+fi
+if ! rg -q '\[batch-upsert\] row=2 subject=\[redacted\] kind=client tier=2' "$TMP_DIR/batch.log"; then
+  echo "expected redacted batch status line"
+  cat "$TMP_DIR/batch.log"
+  exit 1
+fi
+if ! rg -q '\[batch-upsert\] summary total=1 ok=1 failed=0' "$TMP_DIR/batch.log"; then
+  echo "expected successful redacted batch summary"
+  cat "$TMP_DIR/batch.log"
+  exit 1
+fi
+
 echo "beta subject upsert redaction integration check ok"

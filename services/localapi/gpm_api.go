@@ -53,6 +53,7 @@ const (
 	gpmManifestBodyLimit             = 1 << 20
 	gpmManifestCacheBodyLimit        = 2 << 20
 	gpmManifestCacheFutureSkew       = 2 * time.Minute
+	gpmManifestBootstrapDirectoryMax = 32
 	gpmAuthSignatureMaxLen           = 8 * 1024
 	gpmAuthSignatureEnvelopeMaxLen   = 16 * 1024
 	gpmAuthVerifierOutputLimit       = 8 * 1024
@@ -6779,6 +6780,9 @@ func validateBootstrapManifest(manifest gpmBootstrapManifest) error {
 	if len(manifest.BootstrapDirectories) == 0 {
 		return errors.New("manifest bootstrap_directories is empty")
 	}
+	if len(manifest.BootstrapDirectories) > gpmManifestBootstrapDirectoryMax {
+		return fmt.Errorf("manifest bootstrap_directories has %d items, max %d", len(manifest.BootstrapDirectories), gpmManifestBootstrapDirectoryMax)
+	}
 	generatedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(manifest.GeneratedAtUTC))
 	if err != nil {
 		return fmt.Errorf("manifest generated_at_utc invalid: %w", err)
@@ -6790,7 +6794,11 @@ func validateBootstrapManifest(manifest gpmBootstrapManifest) error {
 	if !expiresAt.After(generatedAt) {
 		return errors.New("manifest expires_at_utc must be after generated_at_utc")
 	}
-	if !expiresAt.After(time.Now().UTC()) {
+	now := time.Now().UTC()
+	if generatedAt.After(now.Add(gpmManifestCacheFutureSkew)) {
+		return errors.New("manifest generated_at_utc is in the future")
+	}
+	if !expiresAt.After(now) {
 		return errors.New("manifest is expired")
 	}
 	for _, dir := range manifest.BootstrapDirectories {

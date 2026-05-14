@@ -271,8 +271,13 @@ SUMMARY_MALICIOUS_CSV="$TMP_DIR/summary_malicious_csv.json"
 REPORTS_MALICIOUS_CSV="$TMP_DIR/reports_malicious_csv"
 MALICIOUS_INCLUDE_MARKER="$TMP_DIR/include_token_executed"
 MALICIOUS_EXCLUDE_MARKER="$TMP_DIR/exclude_token_executed"
-malicious_include_token='unknown_$(touch '"$MALICIOUS_INCLUDE_MARKER"')'
-malicious_exclude_token='another_unknown_`touch '"$MALICIOUS_EXCLUDE_MARKER"'`'
+malicious_include_token='unknown_"); touch '"$MALICIOUS_INCLUDE_MARKER"'; : "'
+malicious_exclude_token='another_unknown_"); touch '"$MALICIOUS_EXCLUDE_MARKER"'; : "'
+if grep -Eq '(^|[[:space:];|&(){}])eval([[:space:];|&(){}]|$)' "$SCRIPT_UNDER_TEST"; then
+  echo "script under test must not use eval for CSV token array appends"
+  grep -n -E '(^|[[:space:];|&(){}])eval([[:space:];|&(){}]|$)' "$SCRIPT_UNDER_TEST"
+  exit 1
+fi
 : >"$EXEC_LOG"
 set +e
 ROADMAP_VALIDATION_DEBT_ACTIONABLE_INCLUDE_IDS=" $malicious_include_token , m1_client_3hop_runtime " \

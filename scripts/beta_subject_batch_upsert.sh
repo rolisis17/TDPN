@@ -184,7 +184,7 @@ while IFS=, read -r c_subject c_kind c_tier c_reputation c_bond c_stake _rest; d
   [[ -z "$stake" ]] && stake="0"
 
   total=$((total + 1))
-  echo "[batch-upsert] row=$line_no subject=$subject kind=$kind tier=$tier"
+  echo "[batch-upsert] row=$line_no subject=[redacted] kind=$kind tier=$tier"
   upsert_cmd=(
     "$SINGLE_UPSERT"
     --issuer-url "$issuer_url"
@@ -200,7 +200,7 @@ while IFS=, read -r c_subject c_kind c_tier c_reputation c_bond c_stake _rest; d
     ok=$((ok + 1))
   else
     failed=$((failed + 1))
-    echo "[batch-upsert] failed row=$line_no subject=$subject"
+    echo "[batch-upsert] failed row=$line_no subject=[redacted]"
     if [[ "$continue_on_error" == "0" ]]; then
       break
     fi
