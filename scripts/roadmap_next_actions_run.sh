@@ -1551,6 +1551,241 @@ write_access_recovery_trust_store_precondition_log_01() {
   } >"$log_path"
 }
 
+action_id_is_admin_settlement_live_evidence_01() {
+  [[ "${1:-}" == "gpm_admin_settlement_live_evidence" ]]
+}
+
+admin_settlement_config_value_looks_placeholder_01() {
+  local value normalized token
+  value="$(trim "${1:-}")"
+  value="$(strip_optional_wrapping_quotes "$value")"
+  [[ -z "$value" ]] && return 0
+
+  for token in \
+    BRIDGE_HOST BRIDGE_URL GPM_ADMIN_SETTLEMENT_BRIDGE_URL COSMOS_BRIDGE_URL \
+    BRIDGE_TOKEN GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN COSMOS_BRIDGE_TOKEN \
+    REWARD_PROOF_TOKEN GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN COSMOS_BRIDGE_REWARD_PROOF_TOKEN \
+    FINALITY_TOKEN GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN COSMOS_BRIDGE_FINALITY_TOKEN \
+    BRIDGE_TOKEN_FILE GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE COSMOS_BRIDGE_TOKEN_FILE \
+    REWARD_PROOF_TOKEN_FILE GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN_FILE COSMOS_BRIDGE_REWARD_PROOF_TOKEN_FILE \
+    FINALITY_TOKEN_FILE GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE COSMOS_BRIDGE_FINALITY_TOKEN_FILE; do
+    if value_matches_placeholder_token_01 "$value" "$token"; then
+      return 0
+    fi
+  done
+
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    *BRIDGE_HOST*|*REPLACE_WITH_*|YOUR_*|*/PATH/TO/*|*\\PATH\\TO\\*|"<"*">")
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+admin_settlement_config_value_present_01() {
+  local value
+  value="$(trim "${1:-}")"
+  [[ -n "$value" ]] && ! admin_settlement_config_value_looks_placeholder_01 "$value"
+}
+
+admin_settlement_config_file_present_01() {
+  local path file_value
+  path="$(trim "${1:-}")"
+  if [[ -z "$path" ]] \
+     || admin_settlement_config_value_looks_placeholder_01 "$path" \
+     || [[ ! -f "$path" ]] \
+     || [[ ! -r "$path" ]]; then
+    return 1
+  fi
+  file_value="$(sed -n '/[^[:space:]]/{p;q;}' "$path" 2>/dev/null || true)"
+  file_value="$(trim "$file_value")"
+  [[ -n "$file_value" ]] && ! admin_settlement_config_value_looks_placeholder_01 "$file_value"
+}
+
+admin_settlement_selected_value_present_01() {
+  local primary secondary
+  primary="${1:-}"
+  secondary="${2:-}"
+  if [[ -n "$primary" ]]; then
+    admin_settlement_config_value_present_01 "$primary"
+    return $?
+  fi
+  if [[ -n "$secondary" ]]; then
+    admin_settlement_config_value_present_01 "$secondary"
+    return $?
+  fi
+  return 1
+}
+
+admin_settlement_selected_token_present_01() {
+  local primary_token secondary_token primary_file secondary_file
+  primary_token="${1:-}"
+  secondary_token="${2:-}"
+  primary_file="${3:-}"
+  secondary_file="${4:-}"
+
+  if [[ -n "$primary_file" ]]; then
+    admin_settlement_config_file_present_01 "$primary_file"
+    return $?
+  fi
+  if [[ -n "$secondary_file" ]]; then
+    admin_settlement_config_file_present_01 "$secondary_file"
+    return $?
+  fi
+  if [[ -n "$primary_token" ]]; then
+    admin_settlement_config_value_present_01 "$primary_token"
+    return $?
+  fi
+  if [[ -n "$secondary_token" ]]; then
+    admin_settlement_config_value_present_01 "$secondary_token"
+    return $?
+  fi
+  return 1
+}
+
+admin_settlement_command_value_looks_placeholder_01() {
+  local value normalized
+  value="$(trim "${1:-}")"
+  value="$(strip_optional_wrapping_quotes "$value")"
+  if admin_settlement_config_value_looks_placeholder_01 "$value"; then
+    return 0
+  fi
+
+  normalized="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    *BRIDGE_URL*|*BRIDGE_TOKEN*|*REWARD_PROOF_TOKEN*|*FINALITY_TOKEN*|\
+    *BRIDGE_TOKEN_FILE*|*REWARD_PROOF_TOKEN_FILE*|*FINALITY_TOKEN_FILE*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+command_has_admin_settlement_live_evidence_placeholder_01() {
+  local command_text token value idx token_count normalized
+  command_text="${1:-}"
+  if [[ -z "$command_text" ]]; then
+    return 1
+  fi
+
+  if command_string_to_argv "$command_text"; then
+    token_count="${#COMMAND_STRING_ARGV[@]}"
+    idx=0
+    while (( idx < token_count )); do
+      token="${COMMAND_STRING_ARGV[$idx]}"
+      case "$token" in
+        GPM_ADMIN_SETTLEMENT_BRIDGE_URL=*|COSMOS_BRIDGE_URL=*|GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN=*|COSMOS_BRIDGE_TOKEN=*|GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN=*|COSMOS_BRIDGE_REWARD_PROOF_TOKEN=*|GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN=*|COSMOS_BRIDGE_FINALITY_TOKEN=*|GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE=*|COSMOS_BRIDGE_TOKEN_FILE=*|GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN_FILE=*|COSMOS_BRIDGE_REWARD_PROOF_TOKEN_FILE=*|GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE=*|COSMOS_BRIDGE_FINALITY_TOKEN_FILE=*)
+          value="${token#*=}"
+          if admin_settlement_command_value_looks_placeholder_01 "$value"; then
+            return 0
+          fi
+          idx=$((idx + 1))
+          continue
+          ;;
+        --bridge-url|--bridge-token|--reward-proof-token|--finality-token|--bridge-token-file|--reward-proof-token-file|--finality-token-file)
+          if (( idx + 1 >= token_count )); then
+            return 0
+          fi
+          value="${COMMAND_STRING_ARGV[$((idx + 1))]}"
+          if admin_settlement_command_value_looks_placeholder_01 "$value"; then
+            return 0
+          fi
+          idx=$((idx + 2))
+          continue
+          ;;
+        --bridge-url=*|--bridge-token=*|--reward-proof-token=*|--finality-token=*|--bridge-token-file=*|--reward-proof-token-file=*|--finality-token-file=*)
+          value="${token#*=}"
+          if admin_settlement_command_value_looks_placeholder_01 "$value"; then
+            return 0
+          fi
+          idx=$((idx + 1))
+          continue
+          ;;
+      esac
+      if admin_settlement_command_value_looks_placeholder_01 "$token"; then
+        return 0
+      fi
+      idx=$((idx + 1))
+    done
+    return 1
+  fi
+
+  normalized="$(printf '%s' "$command_text" | tr '[:lower:]' '[:upper:]')"
+  if [[ "$normalized" == *"BRIDGE_HOST"* ]] \
+     || [[ "$normalized" == *"REPLACE_WITH_"* ]] \
+     || [[ "$normalized" == *"/PATH/TO/"* ]] \
+     || [[ "$normalized" == *"\\PATH\\TO\\"* ]] \
+     || [[ "$normalized" =~ (^|[^A-Z0-9_])(BRIDGE_URL|BRIDGE_TOKEN|REWARD_PROOF_TOKEN|FINALITY_TOKEN|BRIDGE_TOKEN_FILE|REWARD_PROOF_TOKEN_FILE|FINALITY_TOKEN_FILE)([^A-Z0-9_]|$) ]]; then
+    return 0
+  fi
+  return 1
+}
+
+admin_settlement_live_evidence_missing_detail_01() {
+  local -a missing=()
+  if ! admin_settlement_selected_value_present_01 \
+    "${GPM_ADMIN_SETTLEMENT_BRIDGE_URL:-}" \
+    "${COSMOS_BRIDGE_URL:-}"; then
+    missing+=("bridge_url")
+  fi
+  if ! admin_settlement_selected_token_present_01 \
+    "${GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN:-}" \
+    "${COSMOS_BRIDGE_TOKEN:-}" \
+    "${GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE:-}" \
+    "${COSMOS_BRIDGE_TOKEN_FILE:-}"; then
+    missing+=("bridge_token")
+  fi
+  if ! admin_settlement_selected_token_present_01 \
+    "${GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN:-}" \
+    "${COSMOS_BRIDGE_REWARD_PROOF_TOKEN:-}" \
+    "${GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN_FILE:-}" \
+    "${COSMOS_BRIDGE_REWARD_PROOF_TOKEN_FILE:-}"; then
+    missing+=("reward_proof_token")
+  fi
+  if ! admin_settlement_selected_token_present_01 \
+    "${GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN:-}" \
+    "${COSMOS_BRIDGE_FINALITY_TOKEN:-}" \
+    "${GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE:-}" \
+    "${COSMOS_BRIDGE_FINALITY_TOKEN_FILE:-}"; then
+    missing+=("finality_token")
+  fi
+  local IFS=","
+  printf '%s' "${missing[*]:-}"
+}
+
+build_admin_settlement_live_evidence_operator_command_01() {
+  local action_id="${1:-gpm_admin_settlement_live_evidence}"
+  printf 'GPM_ADMIN_SETTLEMENT_BRIDGE_URL=https://BRIDGE_HOST GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE=/path/to/bridge.token GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN_FILE=/path/to/reward-proof.token GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE=/path/to/finality.token ./scripts/roadmap_next_actions_run.sh --include-id %s --print-summary-json %s' \
+    "$action_id" \
+    "${print_summary_json:-1}"
+}
+
+write_admin_settlement_live_evidence_precondition_log_01() {
+  local log_path="${1:-}"
+  local command_redacted="${2:-}"
+  local notes="${3:-}"
+  local next_operator_action="${4:-}"
+
+  if [[ -z "$log_path" ]]; then
+    return
+  fi
+  if [[ -z "$next_operator_action" ]]; then
+    next_operator_action="$(build_admin_settlement_live_evidence_operator_command_01)"
+  fi
+  {
+    echo "failure_kind=missing_admin_settlement_live_evidence_precondition"
+    echo "Admin Console settlement live evidence requires bridge URL and token inputs before execution"
+    if [[ -n "$notes" ]]; then
+      echo "$notes"
+    fi
+    if [[ -n "$command_redacted" ]]; then
+      echo "command=$command_redacted"
+    fi
+    echo "operator_next_action: $next_operator_action"
+  } >"$log_path"
+}
+
 build_access_recovery_operator_inputs_operator_command_01() {
   local action_id="${1:-real_helper_https_evidence}"
   local action_command_text="${2:-${action_command:-}}"
@@ -4532,6 +4767,22 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
     action_preflight_failure_kind="missing_vm_command_source_precondition"
     action_preflight_notes="multi-vm stability vm command source placeholder token unresolved"
   fi
+  if [[ -z "$action_preflight_failure_kind" ]] \
+     && action_id_is_admin_settlement_live_evidence_01 "$action_id" \
+     && [[ -n "$action_command" ]]; then
+    admin_settlement_missing_detail="$(admin_settlement_live_evidence_missing_detail_01)"
+    if command_has_admin_settlement_live_evidence_placeholder_01 "$action_command"; then
+      if [[ -n "$admin_settlement_missing_detail" ]]; then
+        admin_settlement_missing_detail="${admin_settlement_missing_detail},command_placeholder"
+      else
+        admin_settlement_missing_detail="command_placeholder"
+      fi
+    fi
+    if [[ -n "$admin_settlement_missing_detail" ]]; then
+      action_preflight_failure_kind="missing_admin_settlement_live_evidence_precondition"
+      action_preflight_notes="Admin Console settlement live evidence is missing required inputs: $admin_settlement_missing_detail"
+    fi
+  fi
   if action_id_is_access_recovery_trusted_verify_01 "$action_id" \
      && [[ -n "$action_command" ]] \
      && command_has_access_recovery_trust_store_placeholder_01 "$action_command"; then
@@ -4596,6 +4847,13 @@ for idx in $(seq 0 $(( actions_count - 1 )) 2>/dev/null || true); do
     elif [[ "$action_preflight_failure_kind" == "missing_access_recovery_operator_input_precondition" ]]; then
       action_preflight_next_operator_action="$(build_access_recovery_operator_inputs_operator_command_01 "$action_id" "$action_command")"
       write_access_recovery_operator_inputs_precondition_log_01 \
+        "$action_log" \
+        "$action_command_redacted" \
+        "$action_preflight_notes" \
+        "$action_preflight_next_operator_action"
+    elif [[ "$action_preflight_failure_kind" == "missing_admin_settlement_live_evidence_precondition" ]]; then
+      action_preflight_next_operator_action="$(build_admin_settlement_live_evidence_operator_command_01 "$action_id")"
+      write_admin_settlement_live_evidence_precondition_log_01 \
         "$action_log" \
         "$action_command_redacted" \
         "$action_preflight_notes" \

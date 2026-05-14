@@ -843,6 +843,24 @@ JSON
 }
 JSON
     ;;
+  admin_settlement_live_evidence)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"gpm_admin_settlement_live_evidence","label":"Admin Console settlement live evidence","command":"bash \"$PASS1\"","reason":"test-admin-settlement-live-evidence","requires_real_hosts":true,"local_pack_only":false}
+  ]
+}
+JSON
+    ;;
+  admin_settlement_live_evidence_placeholder_command)
+    cat >"$summary_json" <<JSON
+{
+  "next_actions": [
+    {"id":"gpm_admin_settlement_live_evidence","label":"Admin Console settlement live evidence","command":"bash \"$PASS1\" --bridge-url https://BRIDGE_URL --bridge-token-file /path/to/bridge.token --reward-proof-token-file /path/to/reward-proof.token --finality-token-file /path/to/finality.token","reason":"test-admin-settlement-live-evidence-placeholder-command","requires_real_hosts":true,"local_pack_only":false}
+  ]
+}
+JSON
+    ;;
   real_helper_plan_only_arg)
     cat >"$summary_json" <<JSON
 {
@@ -1778,6 +1796,408 @@ if ! jq -e '
 ' "$SUMMARY_MULTI_VM_STABILITY" >/dev/null; then
   echo "multi-VM stability action summary mismatch"
   cat "$SUMMARY_MULTI_VM_STABILITY"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Admin settlement live evidence fails closed without bridge inputs"
+SUMMARY_ADMIN_SETTLEMENT_MISSING="$TMP_DIR/summary_admin_settlement_missing.json"
+REPORTS_ADMIN_SETTLEMENT_MISSING="$TMP_DIR/reports_admin_settlement_missing"
+set +e
+env \
+  -u GPM_ADMIN_SETTLEMENT_BRIDGE_URL \
+  -u COSMOS_BRIDGE_URL \
+  -u GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN \
+  -u COSMOS_BRIDGE_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE \
+  -u COSMOS_BRIDGE_TOKEN_FILE \
+  -u GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN \
+  -u COSMOS_BRIDGE_REWARD_PROOF_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN_FILE \
+  -u COSMOS_BRIDGE_REWARD_PROOF_TOKEN_FILE \
+  -u GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN \
+  -u COSMOS_BRIDGE_FINALITY_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE \
+  -u COSMOS_BRIDGE_FINALITY_TOKEN_FILE \
+  ROADMAP_NEXT_ACTIONS_SCENARIO=admin_settlement_live_evidence \
+  PASS1="$PASS1" \
+  ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+  bash ./scripts/roadmap_next_actions_run.sh \
+    --reports-dir "$REPORTS_ADMIN_SETTLEMENT_MISSING" \
+    --summary-json "$SUMMARY_ADMIN_SETTLEMENT_MISSING" \
+    --include-id gpm_admin_settlement_live_evidence \
+    --print-summary-json 0 >"$TMP_DIR/admin_settlement_missing.log" 2>&1
+admin_settlement_missing_rc=$?
+set -e
+if [[ "$admin_settlement_missing_rc" != "2" ]]; then
+  echo "expected missing Admin settlement precondition rc=2, got rc=$admin_settlement_missing_rc"
+  cat "$TMP_DIR/admin_settlement_missing.log"
+  if [[ -f "$SUMMARY_ADMIN_SETTLEMENT_MISSING" ]]; then
+    cat "$SUMMARY_ADMIN_SETTLEMENT_MISSING"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .actions[0].id == "gpm_admin_settlement_live_evidence"
+  and .actions[0].status == "fail"
+  and .actions[0].failure_kind == "missing_admin_settlement_live_evidence_precondition"
+  and (.actions[0].notes | contains("bridge_url"))
+  and (.actions[0].notes | contains("bridge_token"))
+  and (.actions[0].notes | contains("reward_proof_token"))
+  and (.actions[0].notes | contains("finality_token"))
+  and (.actions[0].next_operator_action | contains("GPM_ADMIN_SETTLEMENT_BRIDGE_URL=https://BRIDGE_HOST"))
+' "$SUMMARY_ADMIN_SETTLEMENT_MISSING" >/dev/null; then
+  echo "Admin settlement missing precondition summary mismatch"
+  cat "$SUMMARY_ADMIN_SETTLEMENT_MISSING"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Admin settlement live evidence rejects placeholder bridge URL"
+SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_URL="$TMP_DIR/summary_admin_settlement_placeholder_url.json"
+REPORTS_ADMIN_SETTLEMENT_PLACEHOLDER_URL="$TMP_DIR/reports_admin_settlement_placeholder_url"
+ADMIN_SETTLEMENT_PLACEHOLDER_URL_BRIDGE_TOKEN_FILE="$TMP_DIR/admin_settlement_placeholder_url_bridge.token"
+ADMIN_SETTLEMENT_PLACEHOLDER_URL_REWARD_TOKEN_FILE="$TMP_DIR/admin_settlement_placeholder_url_reward.token"
+ADMIN_SETTLEMENT_PLACEHOLDER_URL_FINALITY_TOKEN_FILE="$TMP_DIR/admin_settlement_placeholder_url_finality.token"
+printf '%s\n' 'bridge-token-for-test' >"$ADMIN_SETTLEMENT_PLACEHOLDER_URL_BRIDGE_TOKEN_FILE"
+printf '%s\n' 'reward-proof-token-for-test' >"$ADMIN_SETTLEMENT_PLACEHOLDER_URL_REWARD_TOKEN_FILE"
+printf '%s\n' 'finality-token-for-test' >"$ADMIN_SETTLEMENT_PLACEHOLDER_URL_FINALITY_TOKEN_FILE"
+set +e
+env \
+  -u GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN \
+  -u COSMOS_BRIDGE_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN \
+  -u COSMOS_BRIDGE_REWARD_PROOF_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN \
+  -u COSMOS_BRIDGE_FINALITY_TOKEN \
+  GPM_ADMIN_SETTLEMENT_BRIDGE_URL="https://BRIDGE_HOST" \
+  GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE="$ADMIN_SETTLEMENT_PLACEHOLDER_URL_BRIDGE_TOKEN_FILE" \
+  GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN_FILE="$ADMIN_SETTLEMENT_PLACEHOLDER_URL_REWARD_TOKEN_FILE" \
+  GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE="$ADMIN_SETTLEMENT_PLACEHOLDER_URL_FINALITY_TOKEN_FILE" \
+  ROADMAP_NEXT_ACTIONS_SCENARIO=admin_settlement_live_evidence \
+  PASS1="$PASS1" \
+  ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+  bash ./scripts/roadmap_next_actions_run.sh \
+    --reports-dir "$REPORTS_ADMIN_SETTLEMENT_PLACEHOLDER_URL" \
+    --summary-json "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_URL" \
+    --include-id gpm_admin_settlement_live_evidence \
+    --print-summary-json 0 >"$TMP_DIR/admin_settlement_placeholder_url.log" 2>&1
+admin_settlement_placeholder_url_rc=$?
+set -e
+if [[ "$admin_settlement_placeholder_url_rc" != "2" ]]; then
+  echo "expected placeholder Admin settlement bridge URL rc=2, got rc=$admin_settlement_placeholder_url_rc"
+  cat "$TMP_DIR/admin_settlement_placeholder_url.log"
+  if [[ -f "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_URL" ]]; then
+    cat "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_URL"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .actions[0].failure_kind == "missing_admin_settlement_live_evidence_precondition"
+  and (.actions[0].notes | contains("bridge_url"))
+' "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_URL" >/dev/null; then
+  echo "Admin settlement placeholder bridge URL summary mismatch"
+  cat "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_URL"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Admin settlement live evidence rejects whitespace primary env over fallback"
+SUMMARY_ADMIN_SETTLEMENT_WHITESPACE_PRIMARY="$TMP_DIR/summary_admin_settlement_whitespace_primary.json"
+REPORTS_ADMIN_SETTLEMENT_WHITESPACE_PRIMARY="$TMP_DIR/reports_admin_settlement_whitespace_primary"
+ADMIN_SETTLEMENT_WHITESPACE_COSMOS_BRIDGE_TOKEN_FILE="$TMP_DIR/admin_settlement_whitespace_cosmos_bridge.token"
+ADMIN_SETTLEMENT_WHITESPACE_REWARD_TOKEN_FILE="$TMP_DIR/admin_settlement_whitespace_reward.token"
+ADMIN_SETTLEMENT_WHITESPACE_FINALITY_TOKEN_FILE="$TMP_DIR/admin_settlement_whitespace_finality.token"
+printf '%s\n' 'bridge-token-for-test' >"$ADMIN_SETTLEMENT_WHITESPACE_COSMOS_BRIDGE_TOKEN_FILE"
+printf '%s\n' 'reward-proof-token-for-test' >"$ADMIN_SETTLEMENT_WHITESPACE_REWARD_TOKEN_FILE"
+printf '%s\n' 'finality-token-for-test' >"$ADMIN_SETTLEMENT_WHITESPACE_FINALITY_TOKEN_FILE"
+set +e
+env \
+  -u GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN \
+  -u COSMOS_BRIDGE_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN \
+  -u COSMOS_BRIDGE_REWARD_PROOF_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN \
+  -u COSMOS_BRIDGE_FINALITY_TOKEN \
+  GPM_ADMIN_SETTLEMENT_BRIDGE_URL="   " \
+  COSMOS_BRIDGE_URL="https://bridge.gpm.example" \
+  GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE="   " \
+  COSMOS_BRIDGE_TOKEN_FILE="$ADMIN_SETTLEMENT_WHITESPACE_COSMOS_BRIDGE_TOKEN_FILE" \
+  GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN_FILE="$ADMIN_SETTLEMENT_WHITESPACE_REWARD_TOKEN_FILE" \
+  GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE="$ADMIN_SETTLEMENT_WHITESPACE_FINALITY_TOKEN_FILE" \
+  ROADMAP_NEXT_ACTIONS_SCENARIO=admin_settlement_live_evidence \
+  PASS1="$PASS1" \
+  ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+  bash ./scripts/roadmap_next_actions_run.sh \
+    --reports-dir "$REPORTS_ADMIN_SETTLEMENT_WHITESPACE_PRIMARY" \
+    --summary-json "$SUMMARY_ADMIN_SETTLEMENT_WHITESPACE_PRIMARY" \
+    --include-id gpm_admin_settlement_live_evidence \
+    --print-summary-json 0 >"$TMP_DIR/admin_settlement_whitespace_primary.log" 2>&1
+admin_settlement_whitespace_primary_rc=$?
+set -e
+if [[ "$admin_settlement_whitespace_primary_rc" != "2" ]]; then
+  echo "expected whitespace Admin settlement primary env rc=2, got rc=$admin_settlement_whitespace_primary_rc"
+  cat "$TMP_DIR/admin_settlement_whitespace_primary.log"
+  if [[ -f "$SUMMARY_ADMIN_SETTLEMENT_WHITESPACE_PRIMARY" ]]; then
+    cat "$SUMMARY_ADMIN_SETTLEMENT_WHITESPACE_PRIMARY"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .actions[0].failure_kind == "missing_admin_settlement_live_evidence_precondition"
+  and (.actions[0].notes | contains("bridge_url"))
+  and (.actions[0].notes | contains("bridge_token"))
+  and ((.actions[0].notes | contains("reward_proof_token")) | not)
+  and ((.actions[0].notes | contains("finality_token")) | not)
+' "$SUMMARY_ADMIN_SETTLEMENT_WHITESPACE_PRIMARY" >/dev/null; then
+  echo "Admin settlement whitespace primary env summary mismatch"
+  cat "$SUMMARY_ADMIN_SETTLEMENT_WHITESPACE_PRIMARY"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Admin settlement live evidence rejects empty or placeholder token files"
+SUMMARY_ADMIN_SETTLEMENT_BAD_TOKEN_FILES="$TMP_DIR/summary_admin_settlement_bad_token_files.json"
+REPORTS_ADMIN_SETTLEMENT_BAD_TOKEN_FILES="$TMP_DIR/reports_admin_settlement_bad_token_files"
+ADMIN_SETTLEMENT_EMPTY_BRIDGE_TOKEN_FILE="$TMP_DIR/admin_settlement_empty_bridge.token"
+ADMIN_SETTLEMENT_PLACEHOLDER_REWARD_TOKEN_FILE="$TMP_DIR/admin_settlement_placeholder_reward.token"
+ADMIN_SETTLEMENT_VALID_FINALITY_TOKEN_FILE="$TMP_DIR/admin_settlement_valid_finality.token"
+: >"$ADMIN_SETTLEMENT_EMPTY_BRIDGE_TOKEN_FILE"
+printf '%s\n' 'REPLACE_WITH_REWARD_PROOF_TOKEN' >"$ADMIN_SETTLEMENT_PLACEHOLDER_REWARD_TOKEN_FILE"
+printf '%s\n' 'finality-token-for-test' >"$ADMIN_SETTLEMENT_VALID_FINALITY_TOKEN_FILE"
+set +e
+env \
+  -u GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN \
+  -u COSMOS_BRIDGE_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN \
+  -u COSMOS_BRIDGE_REWARD_PROOF_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN \
+  -u COSMOS_BRIDGE_FINALITY_TOKEN \
+  GPM_ADMIN_SETTLEMENT_BRIDGE_URL="https://bridge.gpm.example" \
+  GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE="$ADMIN_SETTLEMENT_EMPTY_BRIDGE_TOKEN_FILE" \
+  GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN_FILE="$ADMIN_SETTLEMENT_PLACEHOLDER_REWARD_TOKEN_FILE" \
+  GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE="$ADMIN_SETTLEMENT_VALID_FINALITY_TOKEN_FILE" \
+  ROADMAP_NEXT_ACTIONS_SCENARIO=admin_settlement_live_evidence \
+  PASS1="$PASS1" \
+  ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+  bash ./scripts/roadmap_next_actions_run.sh \
+    --reports-dir "$REPORTS_ADMIN_SETTLEMENT_BAD_TOKEN_FILES" \
+    --summary-json "$SUMMARY_ADMIN_SETTLEMENT_BAD_TOKEN_FILES" \
+    --include-id gpm_admin_settlement_live_evidence \
+    --print-summary-json 0 >"$TMP_DIR/admin_settlement_bad_token_files.log" 2>&1
+admin_settlement_bad_token_files_rc=$?
+set -e
+if [[ "$admin_settlement_bad_token_files_rc" != "2" ]]; then
+  echo "expected bad Admin settlement token files rc=2, got rc=$admin_settlement_bad_token_files_rc"
+  cat "$TMP_DIR/admin_settlement_bad_token_files.log"
+  if [[ -f "$SUMMARY_ADMIN_SETTLEMENT_BAD_TOKEN_FILES" ]]; then
+    cat "$SUMMARY_ADMIN_SETTLEMENT_BAD_TOKEN_FILES"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .actions[0].failure_kind == "missing_admin_settlement_live_evidence_precondition"
+  and (.actions[0].notes | contains("bridge_token"))
+  and (.actions[0].notes | contains("reward_proof_token"))
+  and ((.actions[0].notes | contains("finality_token")) | not)
+' "$SUMMARY_ADMIN_SETTLEMENT_BAD_TOKEN_FILES" >/dev/null; then
+  echo "Admin settlement bad token files summary mismatch"
+  cat "$SUMMARY_ADMIN_SETTLEMENT_BAD_TOKEN_FILES"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Admin settlement live evidence honors valid token file over placeholder direct token"
+SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_DIRECT_TOKEN="$TMP_DIR/summary_admin_settlement_placeholder_direct_token.json"
+REPORTS_ADMIN_SETTLEMENT_PLACEHOLDER_DIRECT_TOKEN="$TMP_DIR/reports_admin_settlement_placeholder_direct_token"
+ADMIN_SETTLEMENT_DIRECT_BRIDGE_TOKEN_FILE="$TMP_DIR/admin_settlement_direct_bridge.token"
+ADMIN_SETTLEMENT_DIRECT_REWARD_TOKEN_FILE="$TMP_DIR/admin_settlement_direct_reward.token"
+ADMIN_SETTLEMENT_DIRECT_FINALITY_TOKEN_FILE="$TMP_DIR/admin_settlement_direct_finality.token"
+printf '%s\n' 'bridge-token-for-test' >"$ADMIN_SETTLEMENT_DIRECT_BRIDGE_TOKEN_FILE"
+printf '%s\n' 'reward-proof-token-for-test' >"$ADMIN_SETTLEMENT_DIRECT_REWARD_TOKEN_FILE"
+printf '%s\n' 'finality-token-for-test' >"$ADMIN_SETTLEMENT_DIRECT_FINALITY_TOKEN_FILE"
+set +e
+env \
+  -u COSMOS_BRIDGE_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN \
+  -u COSMOS_BRIDGE_REWARD_PROOF_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN \
+  -u COSMOS_BRIDGE_FINALITY_TOKEN \
+  GPM_ADMIN_SETTLEMENT_BRIDGE_URL="https://bridge.gpm.example" \
+  GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN="BRIDGE_TOKEN" \
+  GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE="$ADMIN_SETTLEMENT_DIRECT_BRIDGE_TOKEN_FILE" \
+  GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN_FILE="$ADMIN_SETTLEMENT_DIRECT_REWARD_TOKEN_FILE" \
+  GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE="$ADMIN_SETTLEMENT_DIRECT_FINALITY_TOKEN_FILE" \
+  ROADMAP_NEXT_ACTIONS_SCENARIO=admin_settlement_live_evidence \
+  PASS1="$PASS1" \
+  ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+  bash ./scripts/roadmap_next_actions_run.sh \
+    --reports-dir "$REPORTS_ADMIN_SETTLEMENT_PLACEHOLDER_DIRECT_TOKEN" \
+    --summary-json "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_DIRECT_TOKEN" \
+    --include-id gpm_admin_settlement_live_evidence \
+    --print-summary-json 0 >"$TMP_DIR/admin_settlement_placeholder_direct_token.log" 2>&1
+admin_settlement_placeholder_direct_token_rc=$?
+set -e
+if [[ "$admin_settlement_placeholder_direct_token_rc" != "0" ]]; then
+  echo "expected placeholder Admin settlement direct token shadowed by valid file rc=0, got rc=$admin_settlement_placeholder_direct_token_rc"
+  cat "$TMP_DIR/admin_settlement_placeholder_direct_token.log"
+  if [[ -f "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_DIRECT_TOKEN" ]]; then
+    cat "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_DIRECT_TOKEN"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .actions[0].id == "gpm_admin_settlement_live_evidence"
+  and .actions[0].status == "pass"
+  and .actions[0].failure_kind == "none"
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+' "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_DIRECT_TOKEN" >/dev/null; then
+  echo "Admin settlement placeholder direct token shadowed by valid file summary mismatch"
+  cat "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_DIRECT_TOKEN"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Admin settlement live evidence rejects placeholder token file even with direct token"
+SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_FILE_OVERRIDES="$TMP_DIR/summary_admin_settlement_placeholder_file_overrides.json"
+REPORTS_ADMIN_SETTLEMENT_PLACEHOLDER_FILE_OVERRIDES="$TMP_DIR/reports_admin_settlement_placeholder_file_overrides"
+ADMIN_SETTLEMENT_FILE_OVERRIDE_BRIDGE_TOKEN_FILE="$TMP_DIR/admin_settlement_file_override_bridge.token"
+ADMIN_SETTLEMENT_FILE_OVERRIDE_REWARD_TOKEN_FILE="$TMP_DIR/admin_settlement_file_override_reward.token"
+ADMIN_SETTLEMENT_FILE_OVERRIDE_FINALITY_TOKEN_FILE="$TMP_DIR/admin_settlement_file_override_finality.token"
+printf '%s\n' 'REPLACE_WITH_BRIDGE_TOKEN' >"$ADMIN_SETTLEMENT_FILE_OVERRIDE_BRIDGE_TOKEN_FILE"
+printf '%s\n' 'reward-proof-token-for-test' >"$ADMIN_SETTLEMENT_FILE_OVERRIDE_REWARD_TOKEN_FILE"
+printf '%s\n' 'finality-token-for-test' >"$ADMIN_SETTLEMENT_FILE_OVERRIDE_FINALITY_TOKEN_FILE"
+set +e
+env \
+  -u COSMOS_BRIDGE_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN \
+  -u COSMOS_BRIDGE_REWARD_PROOF_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN \
+  -u COSMOS_BRIDGE_FINALITY_TOKEN \
+  GPM_ADMIN_SETTLEMENT_BRIDGE_URL="https://bridge.gpm.example" \
+  GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN="bridge-token-for-test" \
+  GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE="$ADMIN_SETTLEMENT_FILE_OVERRIDE_BRIDGE_TOKEN_FILE" \
+  GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN_FILE="$ADMIN_SETTLEMENT_FILE_OVERRIDE_REWARD_TOKEN_FILE" \
+  GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE="$ADMIN_SETTLEMENT_FILE_OVERRIDE_FINALITY_TOKEN_FILE" \
+  ROADMAP_NEXT_ACTIONS_SCENARIO=admin_settlement_live_evidence \
+  PASS1="$PASS1" \
+  ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+  bash ./scripts/roadmap_next_actions_run.sh \
+    --reports-dir "$REPORTS_ADMIN_SETTLEMENT_PLACEHOLDER_FILE_OVERRIDES" \
+    --summary-json "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_FILE_OVERRIDES" \
+    --include-id gpm_admin_settlement_live_evidence \
+    --print-summary-json 0 >"$TMP_DIR/admin_settlement_placeholder_file_overrides.log" 2>&1
+admin_settlement_placeholder_file_overrides_rc=$?
+set -e
+if [[ "$admin_settlement_placeholder_file_overrides_rc" != "2" ]]; then
+  echo "expected placeholder Admin settlement token file override rc=2, got rc=$admin_settlement_placeholder_file_overrides_rc"
+  cat "$TMP_DIR/admin_settlement_placeholder_file_overrides.log"
+  if [[ -f "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_FILE_OVERRIDES" ]]; then
+    cat "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_FILE_OVERRIDES"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .actions[0].failure_kind == "missing_admin_settlement_live_evidence_precondition"
+  and (.actions[0].notes | contains("bridge_token"))
+  and ((.actions[0].notes | contains("reward_proof_token")) | not)
+  and ((.actions[0].notes | contains("finality_token")) | not)
+' "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_FILE_OVERRIDES" >/dev/null; then
+  echo "Admin settlement placeholder token file override summary mismatch"
+  cat "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_FILE_OVERRIDES"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Admin settlement live evidence rejects command-level placeholders"
+SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_COMMAND="$TMP_DIR/summary_admin_settlement_placeholder_command.json"
+REPORTS_ADMIN_SETTLEMENT_PLACEHOLDER_COMMAND="$TMP_DIR/reports_admin_settlement_placeholder_command"
+ADMIN_SETTLEMENT_COMMAND_BRIDGE_TOKEN_FILE="$TMP_DIR/admin_settlement_command_bridge.token"
+ADMIN_SETTLEMENT_COMMAND_REWARD_TOKEN_FILE="$TMP_DIR/admin_settlement_command_reward.token"
+ADMIN_SETTLEMENT_COMMAND_FINALITY_TOKEN_FILE="$TMP_DIR/admin_settlement_command_finality.token"
+printf '%s\n' 'bridge-token-for-test' >"$ADMIN_SETTLEMENT_COMMAND_BRIDGE_TOKEN_FILE"
+printf '%s\n' 'reward-proof-token-for-test' >"$ADMIN_SETTLEMENT_COMMAND_REWARD_TOKEN_FILE"
+printf '%s\n' 'finality-token-for-test' >"$ADMIN_SETTLEMENT_COMMAND_FINALITY_TOKEN_FILE"
+set +e
+env \
+  -u GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN \
+  -u COSMOS_BRIDGE_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN \
+  -u COSMOS_BRIDGE_REWARD_PROOF_TOKEN \
+  -u GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN \
+  -u COSMOS_BRIDGE_FINALITY_TOKEN \
+  GPM_ADMIN_SETTLEMENT_BRIDGE_URL="https://bridge.gpm.example" \
+  GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE="$ADMIN_SETTLEMENT_COMMAND_BRIDGE_TOKEN_FILE" \
+  GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN_FILE="$ADMIN_SETTLEMENT_COMMAND_REWARD_TOKEN_FILE" \
+  GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE="$ADMIN_SETTLEMENT_COMMAND_FINALITY_TOKEN_FILE" \
+  ROADMAP_NEXT_ACTIONS_SCENARIO=admin_settlement_live_evidence_placeholder_command \
+  PASS1="$PASS1" \
+  ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+  bash ./scripts/roadmap_next_actions_run.sh \
+    --reports-dir "$REPORTS_ADMIN_SETTLEMENT_PLACEHOLDER_COMMAND" \
+    --summary-json "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_COMMAND" \
+    --include-id gpm_admin_settlement_live_evidence \
+    --print-summary-json 0 >"$TMP_DIR/admin_settlement_placeholder_command.log" 2>&1
+admin_settlement_placeholder_command_rc=$?
+set -e
+if [[ "$admin_settlement_placeholder_command_rc" != "2" ]]; then
+  echo "expected placeholder Admin settlement command rc=2, got rc=$admin_settlement_placeholder_command_rc"
+  cat "$TMP_DIR/admin_settlement_placeholder_command.log"
+  if [[ -f "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_COMMAND" ]]; then
+    cat "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_COMMAND"
+  fi
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 2
+  and .actions[0].failure_kind == "missing_admin_settlement_live_evidence_precondition"
+  and (.actions[0].notes | contains("command_placeholder"))
+' "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_COMMAND" >/dev/null; then
+  echo "Admin settlement placeholder command summary mismatch"
+  cat "$SUMMARY_ADMIN_SETTLEMENT_PLACEHOLDER_COMMAND"
+  exit 1
+fi
+
+echo "[roadmap-next-actions-run] Admin settlement live evidence runs with configured bridge token files"
+SUMMARY_ADMIN_SETTLEMENT_CONFIGURED="$TMP_DIR/summary_admin_settlement_configured.json"
+REPORTS_ADMIN_SETTLEMENT_CONFIGURED="$TMP_DIR/reports_admin_settlement_configured"
+ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE="$TMP_DIR/admin_settlement_bridge.token"
+ADMIN_SETTLEMENT_REWARD_TOKEN_FILE="$TMP_DIR/admin_settlement_reward.token"
+ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE="$TMP_DIR/admin_settlement_finality.token"
+printf '%s\n' 'bridge-token-for-test' >"$ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE"
+printf '%s\n' 'reward-proof-token-for-test' >"$ADMIN_SETTLEMENT_REWARD_TOKEN_FILE"
+printf '%s\n' 'finality-token-for-test' >"$ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE"
+GPM_ADMIN_SETTLEMENT_BRIDGE_URL="https://bridge.gpm.example" \
+GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE="$ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE" \
+GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN_FILE="$ADMIN_SETTLEMENT_REWARD_TOKEN_FILE" \
+GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE="$ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE" \
+ROADMAP_NEXT_ACTIONS_SCENARIO=admin_settlement_live_evidence \
+PASS1="$PASS1" \
+ROADMAP_NEXT_ACTIONS_RUN_ROADMAP_SCRIPT="$FAKE_ROADMAP" \
+bash ./scripts/roadmap_next_actions_run.sh \
+  --reports-dir "$REPORTS_ADMIN_SETTLEMENT_CONFIGURED" \
+  --summary-json "$SUMMARY_ADMIN_SETTLEMENT_CONFIGURED" \
+  --include-id gpm_admin_settlement_live_evidence \
+  --print-summary-json 0
+if ! jq -e '
+  .status == "pass"
+  and .rc == 0
+  and .actions[0].id == "gpm_admin_settlement_live_evidence"
+  and .actions[0].status == "pass"
+  and .summary.actions_executed == 1
+  and .summary.pass == 1
+  and .summary.fail == 0
+' "$SUMMARY_ADMIN_SETTLEMENT_CONFIGURED" >/dev/null; then
+  echo "Admin settlement configured summary mismatch"
+  cat "$SUMMARY_ADMIN_SETTLEMENT_CONFIGURED"
   exit 1
 fi
 

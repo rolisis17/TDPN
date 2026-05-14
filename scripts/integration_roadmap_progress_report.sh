@@ -1310,12 +1310,17 @@ PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON="fal
 if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "profile-compare-multi-vm-live-evidence-publish-bundle")" == "1" ]]; then
   PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON="true"
 fi
+GPM_ADMIN_SETTLEMENT_LIVE_EVIDENCE_HELPER_AVAILABLE_JSON="false"
+if [[ "$(roadmap_test_easy_node_supports_subcommand_01 "gpm-admin-settlement-live-evidence")" == "1" ]]; then
+  GPM_ADMIN_SETTLEMENT_LIVE_EVIDENCE_HELPER_AVAILABLE_JSON="true"
+fi
 if ! jq -e \
   --argjson expect_live_archive_helper "$LIVE_EVIDENCE_ARCHIVE_HELPER_AVAILABLE_JSON" \
   --argjson expect_three_machine_pack_helper "$THREE_MACHINE_REAL_HOST_VALIDATION_PACK_HELPER_AVAILABLE_JSON" \
   --argjson expect_profile_default_live_evidence_publish_bundle_helper "$PROFILE_DEFAULT_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" \
   --argjson expect_runtime_actuation_live_evidence_publish_bundle_helper "$RUNTIME_ACTUATION_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" \
-  --argjson expect_profile_compare_multi_vm_live_evidence_publish_bundle_helper "$PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" '
+  --argjson expect_profile_compare_multi_vm_live_evidence_publish_bundle_helper "$PROFILE_COMPARE_MULTI_VM_LIVE_EVIDENCE_PUBLISH_BUNDLE_HELPER_AVAILABLE_JSON" \
+  --argjson expect_admin_settlement_helper "$GPM_ADMIN_SETTLEMENT_LIVE_EVIDENCE_HELPER_AVAILABLE_JSON" '
   .status == "warn"
   and .rc == 0
   and .current_roadmap_track == "access_recovery"
@@ -1635,6 +1640,10 @@ if ! jq -e \
   and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_available == $expect_profile_compare_multi_vm_live_evidence_publish_bundle_helper
   and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted == false
   and .next_actions_summary.profile_compare_multi_vm_live_evidence_publish_bundle_helper_count == 0
+  and .next_actions_summary.gpm_admin_settlement_live_evidence_helper_available == $expect_admin_settlement_helper
+  and .next_actions_summary.gpm_admin_settlement_live_evidence_action_needed == false
+  and .next_actions_summary.gpm_admin_settlement_live_evidence_emitted == false
+  and .next_actions_summary.gpm_admin_settlement_live_evidence_count == 0
   and .next_actions_summary.profile_default_live_and_pack_bundle_ready == false
   and .next_actions_summary.runtime_actuation_live_and_pack_bundle_ready == false
   and .next_actions_summary.profile_compare_multi_vm_live_and_pack_bundle_ready == false
@@ -1714,6 +1723,72 @@ if ! jq -e '
 ' "$SUMMARY_JSON" >/dev/null; then
   echo "Access Recovery operator preflight next-action summary mismatch"
   cat "$SUMMARY_JSON"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] Admin settlement live evidence next action when phase5 evidence is missing"
+SUMMARY_ADMIN_SETTLEMENT_PHASE5_MISSING="$TMP_DIR/roadmap_progress_admin_settlement_phase5_missing_summary.json"
+REPORT_ADMIN_SETTLEMENT_PHASE5_MISSING="$TMP_DIR/roadmap_progress_admin_settlement_phase5_missing_report.md"
+if ! FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
+ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL" \
+ROADMAP_PROGRESS_SINGLE_MACHINE_SCRIPT="$FAKE_SINGLE" \
+run_roadmap_progress_report \
+  --refresh-manual-validation 1 \
+  --refresh-single-machine-readiness 0 \
+  --phase0-summary-json "$PHASE0_SUMMARY_JSON" \
+  --phase5-settlement-layer-summary-json "$ROADMAP_PROGRESS_MISSING_PHASE5_SUMMARY_JSON" \
+  --phase7-mainnet-cutover-summary-json "$PHASE7_MAINNET_CUTOVER_SUMMARY_REPORT_JSON" \
+  --blockchain-mainnet-activation-gate-summary-json "$BLOCKCHAIN_MAINNET_ACTIVATION_GATE_SUMMARY_JSON" \
+  --blockchain-bootstrap-governance-graduation-gate-summary-json "$BLOCKCHAIN_BOOTSTRAP_GOVERNANCE_GRADUATION_GATE_SUMMARY_JSON" \
+  --access-bridge-service-smoke-summary-json "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --access-bridge-deployment-evidence-summary-json "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --access-bridge-host-install-summary-json "$ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" \
+  --single-machine-summary-json "$SINGLE_MACHINE_SUMMARY_JSON" \
+  --summary-json "$SUMMARY_ADMIN_SETTLEMENT_PHASE5_MISSING" \
+  --report-md "$REPORT_ADMIN_SETTLEMENT_PHASE5_MISSING" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_admin_settlement_phase5_missing.log 2>&1; then
+  echo "roadmap progress report failed in admin-settlement missing phase5 path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_admin_settlement_phase5_missing.log
+  exit 1
+fi
+if ! jq -e \
+  --argjson expect_admin_settlement_helper "$GPM_ADMIN_SETTLEMENT_LIVE_EVIDENCE_HELPER_AVAILABLE_JSON" '
+  .next_actions_summary.gpm_admin_settlement_live_evidence_helper_available == $expect_admin_settlement_helper
+  and .next_actions_summary.gpm_admin_settlement_live_evidence_action_needed == true
+  and (if $expect_admin_settlement_helper then
+         .next_actions_summary.gpm_admin_settlement_live_evidence_emitted == true
+         and .next_actions_summary.gpm_admin_settlement_live_evidence_count == 1
+         and ((.next_actions // []) | any(
+           .id == "gpm_admin_settlement_live_evidence"
+           and (.label // "") == "Admin Console settlement live evidence"
+           and (.command // "") == "./scripts/easy_node.sh gpm-admin-settlement-live-evidence --reports-dir .easy-node-logs --summary-json .easy-node-logs/gpm_admin_settlement_live_evidence_summary.json --print-summary-json 1"
+           and ((.reason // "") | contains("Admin Console live settlement/slashing evidence"))
+           and .requires_real_hosts == true
+           and .local_pack_only == false
+           and .missing_evidence_family == "admin-settlement-live-chain"
+           and .missing_evidence_families == ["admin-settlement-live-chain"]
+           and .missing_evidence_action_kind == "live-chain-evidence"
+           and .placeholder_unresolved == true
+           and .safe_to_execute_as_is == false
+           and .operator_input_required == true
+           and ((.placeholder_keys // []) | index("GPM_ADMIN_SETTLEMENT_BRIDGE_URL")) != null
+           and ((.placeholder_keys // []) | index("GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE")) != null
+         ))
+       else
+         .next_actions_summary.gpm_admin_settlement_live_evidence_emitted == false
+         and .next_actions_summary.gpm_admin_settlement_live_evidence_count == 0
+         and (((.next_actions // []) | any(.id == "gpm_admin_settlement_live_evidence")) | not)
+       end)
+' "$SUMMARY_ADMIN_SETTLEMENT_PHASE5_MISSING" >/dev/null; then
+  echo "Admin settlement live evidence next action summary mismatch"
+  cat "$SUMMARY_ADMIN_SETTLEMENT_PHASE5_MISSING"
+  exit 1
+fi
+if ! grep -Eq 'Admin settlement live evidence: needed=true' "$REPORT_ADMIN_SETTLEMENT_PHASE5_MISSING"; then
+  echo "report markdown missing Admin settlement live evidence line"
+  cat "$REPORT_ADMIN_SETTLEMENT_PHASE5_MISSING"
   exit 1
 fi
 

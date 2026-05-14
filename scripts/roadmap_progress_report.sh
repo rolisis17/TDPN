@@ -13029,6 +13029,23 @@ if [[ "$multi_vm_stability_promotion_live_action_ready_json" == "true" ]] \
 fi
 profile_compare_multi_vm_live_evidence_publish_bundle_next_command="$(build_multi_vm_live_evidence_publish_bundle_next_command ".easy-node-logs" "$multi_vm_stability_vm_command_file")"
 
+gpm_admin_settlement_live_evidence_helper_subcommand="gpm-admin-settlement-live-evidence"
+gpm_admin_settlement_live_evidence_helper_available_json="false"
+if [[ "$(easy_node_supports_subcommand_01 "$gpm_admin_settlement_live_evidence_helper_subcommand")" == "1" ]]; then
+  gpm_admin_settlement_live_evidence_helper_available_json="true"
+fi
+gpm_admin_settlement_live_evidence_action_needed_json="false"
+if [[ "$phase5_settlement_layer_handoff_available_json" != "true" \
+   || "${phase5_settlement_layer_handoff_status_json,,}" != "pass" \
+   || "$phase5_settlement_layer_handoff_settlement_adapter_signed_tx_roundtrip_ok_json" != "true" \
+   || "$phase5_settlement_layer_handoff_issuer_settlement_status_live_smoke_ok_json" != "true" \
+   || "$phase5_settlement_layer_handoff_issuer_admin_blockchain_handlers_coverage_ok_json" != "true" \
+   || "$phase5_settlement_layer_handoff_exit_settlement_status_live_smoke_ok_json" != "true" ]]; then
+  gpm_admin_settlement_live_evidence_action_needed_json="true"
+fi
+gpm_admin_settlement_live_evidence_command="./scripts/easy_node.sh gpm-admin-settlement-live-evidence --reports-dir .easy-node-logs --summary-json .easy-node-logs/gpm_admin_settlement_live_evidence_summary.json --print-summary-json 1"
+gpm_admin_settlement_live_evidence_reason="Admin Console live settlement/slashing evidence is missing or stale; capture reservation, settlement, reward proof, finality, and slashing evidence against a configured bridge."
+
 next_actions_live_evidence_pending_action_count_after_bundle=$next_actions_live_evidence_pending_action_count
 next_actions_evidence_pack_pending_action_count_after_bundle=$next_actions_evidence_pack_pending_action_count
 if [[ "$profile_default_gate_live_and_pack_bundle_ready_json" == "true" ]]; then
@@ -13265,6 +13282,22 @@ cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
       command: $next_action_command,
       reason: "primary roadmap gate"
     } + primary_real_host_metadata else empty end),
+    (if ($gpm_admin_settlement_live_evidence_action_needed == true and $gpm_admin_settlement_live_evidence_helper_available == true) then {
+      id: "gpm_admin_settlement_live_evidence",
+      "label": "Admin Console settlement live evidence",
+      command: $gpm_admin_settlement_live_evidence_command,
+      reason: $gpm_admin_settlement_live_evidence_reason,
+      placeholder_unresolved: true,
+      placeholder_keys: [
+        "GPM_ADMIN_SETTLEMENT_BRIDGE_URL",
+        "GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN_FILE",
+        "GPM_ADMIN_SETTLEMENT_REWARD_PROOF_TOKEN_FILE",
+        "GPM_ADMIN_SETTLEMENT_FINALITY_TOKEN_FILE"
+      ],
+      safe_to_execute_as_is: false,
+      operator_input_required: true,
+      placeholder_resolution: "Set GPM_ADMIN_SETTLEMENT_* bridge URL/token-file environment variables, or the equivalent COSMOS_BRIDGE_* variables, before running this action."
+    } + action_evidence_metadata(["admin-settlement-live-chain"]; true; false; ["live-chain-evidence"]) else empty end),
     (if ($profile_default_gate_live_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true and ($profile_default_gate_next_command // "") != "") then {
       id: "profile_default_gate",
       "label": "Profile default decision gate",
@@ -13464,6 +13497,10 @@ next_actions_candidate_json="$(
     --argjson runtime_actuation_live_and_pack_bundle_ready "$runtime_actuation_live_and_pack_bundle_ready_json" \
     --argjson profile_compare_multi_vm_live_and_pack_bundle_ready "$profile_compare_multi_vm_live_and_pack_bundle_ready_json" \
     --arg profile_compare_multi_vm_live_evidence_publish_bundle_next_command "$profile_compare_multi_vm_live_evidence_publish_bundle_next_command" \
+    --argjson gpm_admin_settlement_live_evidence_helper_available "$gpm_admin_settlement_live_evidence_helper_available_json" \
+    --argjson gpm_admin_settlement_live_evidence_action_needed "$gpm_admin_settlement_live_evidence_action_needed_json" \
+    --arg gpm_admin_settlement_live_evidence_command "$gpm_admin_settlement_live_evidence_command" \
+    --arg gpm_admin_settlement_live_evidence_reason "$gpm_admin_settlement_live_evidence_reason" \
     --argjson blockchain_mainnet_activation_missing_metrics_action_available "$blockchain_mainnet_activation_missing_metrics_action_available_json" \
     --arg blockchain_mainnet_activation_missing_metrics_action_reason "$blockchain_mainnet_activation_missing_metrics_action_reason" \
     --arg blockchain_mainnet_activation_missing_metrics_action_operator_pack_command "$blockchain_mainnet_activation_missing_metrics_action_operator_pack_command" \
@@ -13531,6 +13568,8 @@ next_actions_runtime_actuation_live_evidence_publish_bundle_helper_emitted_json=
 next_actions_runtime_actuation_live_evidence_publish_bundle_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "runtime_actuation_live_evidence_publish_bundle")] | length')"
 next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "profile_compare_multi_vm_live_evidence_publish_bundle")')"
 next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "profile_compare_multi_vm_live_evidence_publish_bundle")] | length')"
+next_actions_gpm_admin_settlement_live_evidence_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "gpm_admin_settlement_live_evidence")')"
+next_actions_gpm_admin_settlement_live_evidence_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "gpm_admin_settlement_live_evidence")] | length')"
 next_actions_live_and_pack_batch_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "roadmap_live_and_pack_actionable_run")')"
 next_actions_live_and_pack_batch_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "roadmap_live_and_pack_actionable_run")] | length')"
 next_actions_live_evidence_individual_suppression_applied_json="$(jq -n \
@@ -14166,6 +14205,10 @@ summary_payload_jq_args=(
   --argjson next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_available "$profile_compare_multi_vm_live_evidence_publish_bundle_helper_available_json" \
   --argjson next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted "$next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted_json" \
   --argjson next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_count "$next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_count_json" \
+  --argjson next_actions_gpm_admin_settlement_live_evidence_helper_available "$gpm_admin_settlement_live_evidence_helper_available_json" \
+  --argjson next_actions_gpm_admin_settlement_live_evidence_action_needed "$gpm_admin_settlement_live_evidence_action_needed_json" \
+  --argjson next_actions_gpm_admin_settlement_live_evidence_emitted "$next_actions_gpm_admin_settlement_live_evidence_emitted_json" \
+  --argjson next_actions_gpm_admin_settlement_live_evidence_count "$next_actions_gpm_admin_settlement_live_evidence_count_json" \
   --argjson next_actions_profile_default_live_and_pack_bundle_ready "$profile_default_gate_live_and_pack_bundle_ready_json" \
   --argjson next_actions_runtime_actuation_live_and_pack_bundle_ready "$runtime_actuation_live_and_pack_bundle_ready_json" \
   --argjson next_actions_profile_compare_multi_vm_live_and_pack_bundle_ready "$profile_compare_multi_vm_live_and_pack_bundle_ready_json" \
@@ -14791,6 +14834,10 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
       profile_compare_multi_vm_live_evidence_publish_bundle_helper_available: $next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_available,
       profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted: $next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_emitted,
       profile_compare_multi_vm_live_evidence_publish_bundle_helper_count: $next_actions_profile_compare_multi_vm_live_evidence_publish_bundle_helper_count,
+      gpm_admin_settlement_live_evidence_helper_available: $next_actions_gpm_admin_settlement_live_evidence_helper_available,
+      gpm_admin_settlement_live_evidence_action_needed: $next_actions_gpm_admin_settlement_live_evidence_action_needed,
+      gpm_admin_settlement_live_evidence_emitted: $next_actions_gpm_admin_settlement_live_evidence_emitted,
+      gpm_admin_settlement_live_evidence_count: $next_actions_gpm_admin_settlement_live_evidence_count,
       profile_default_live_and_pack_bundle_ready: $next_actions_profile_default_live_and_pack_bundle_ready,
       runtime_actuation_live_and_pack_bundle_ready: $next_actions_runtime_actuation_live_and_pack_bundle_ready,
       profile_compare_multi_vm_live_and_pack_bundle_ready: $next_actions_profile_compare_multi_vm_live_and_pack_bundle_ready,
@@ -15228,6 +15275,7 @@ $pending_real_host_checks_md
 - Live-evidence individual suppression applied: $(jq -r '.next_actions_summary.live_evidence_individual_suppression_applied | tostring' "$summary_json") (mode=$(jq -r '.next_actions_summary.live_evidence_individual_suppression_mode | tostring' "$summary_json"), batch_helper=$(jq -r '.next_actions_summary.live_evidence_batch_helper_emitted | tostring' "$summary_json"))
 - Live-evidence archive helper: available=$(jq -r '.next_actions_summary.live_evidence_archive_helper_available | tostring' "$summary_json"), emitted=$(jq -r '.next_actions_summary.live_evidence_archive_helper_emitted | tostring' "$summary_json"), count=$(jq -r '.next_actions_summary.live_evidence_archive_helper_count | tostring' "$summary_json")
 - Three-machine validation pack helper: available=$(jq -r '.next_actions_summary.three_machine_real_host_validation_pack_helper_available | tostring' "$summary_json"), signoff_pending=$(jq -r '.next_actions_summary.three_machine_real_host_validation_pack_signoff_pending | tostring' "$summary_json"), emitted=$(jq -r '.next_actions_summary.three_machine_real_host_validation_pack_helper_emitted | tostring' "$summary_json"), count=$(jq -r '.next_actions_summary.three_machine_real_host_validation_pack_helper_count | tostring' "$summary_json")
+- Admin settlement live evidence: needed=$(jq -r '.next_actions_summary.gpm_admin_settlement_live_evidence_action_needed | tostring' "$summary_json"), helper_available=$(jq -r '.next_actions_summary.gpm_admin_settlement_live_evidence_helper_available | tostring' "$summary_json"), emitted=$(jq -r '.next_actions_summary.gpm_admin_settlement_live_evidence_emitted | tostring' "$summary_json"), count=$(jq -r '.next_actions_summary.gpm_admin_settlement_live_evidence_count | tostring' "$summary_json")
 
 $next_actions_md
 
