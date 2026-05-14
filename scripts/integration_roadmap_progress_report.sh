@@ -26,7 +26,7 @@ ROADMAP_PROGRESS_FORWARD_SUMMARY_JSON="$TMP_DIR/roadmap_progress_forward_summary
 ROADMAP_PROGRESS_REPORT_FOCUS="${ROADMAP_PROGRESS_REPORT_FOCUS:-all}"
 
 case "$ROADMAP_PROGRESS_REPORT_FOCUS" in
-  all|access-recovery-source-binding|wallet-auth-next-action)
+  all|access-recovery-source-binding|access-recovery-unsynced-verifier|wallet-auth-next-action)
     ;;
   *)
     echo "unsupported ROADMAP_PROGRESS_REPORT_FOCUS: $ROADMAP_PROGRESS_REPORT_FOCUS"
@@ -2107,6 +2107,173 @@ if ! jq -e \
   echo "roadmap installed-host access bridge evidence summary mismatch"
   cat "$ROADMAP_INSTALLED_HOST_SUMMARY_JSON"
   exit 1
+fi
+
+echo "[roadmap-progress-report] Access Recovery surfaces unsynced trusted verifier receipts"
+ACCESS_BRIDGE_UNSYNCED_VERIFIER_DIR="$TMP_DIR/access recovery unsynced verifier reports"
+mkdir -p "$ACCESS_BRIDGE_UNSYNCED_VERIFIER_DIR"
+ACCESS_BRIDGE_UNSYNCED_READY_VERIFY_SUMMARY_JSON="$ACCESS_BRIDGE_UNSYNCED_VERIFIER_DIR/access_bridge_pilot_evidence_bundle_verify_ready_summary.json"
+jq '.' "$ACCESS_BRIDGE_INSTALLED_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_UNSYNCED_READY_VERIFY_SUMMARY_JSON"
+ACCESS_BRIDGE_UNSYNCED_NEWER_NOT_READY_VERIFY_SUMMARY_JSON="$ACCESS_BRIDGE_UNSYNCED_VERIFIER_DIR/access_bridge_pilot_evidence_bundle_verify_newer_not_ready_summary.json"
+jq \
+  --arg generated_at "2099-01-01T00:00:00Z" \
+  '.generated_at_utc = $generated_at
+    | .pilot_handoff_ready = false
+    | .trusted_pilot_receipt_ready = false
+    | .handoff_authority = false
+    | .authority_level = "integrity_only"
+    | .integrity_only = true
+    | .pilot_handoff_criteria.ready = false
+    | .pilot_handoff_criteria.trusted_pilot_receipt_ready = false
+    | .evidence_binding.organization_id = "freenews-demo"
+    | .evidence_binding.helper_id = "helper-demo"
+    | .evidence_binding.registry_id = "registry-demo"' \
+  "$ACCESS_BRIDGE_INSTALLED_BUNDLE_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_UNSYNCED_NEWER_NOT_READY_VERIFY_SUMMARY_JSON"
+ROADMAP_UNSYNCED_VERIFIER_SUMMARY_JSON="$TMP_DIR/roadmap_progress_access_recovery_unsynced_verifier_summary.json"
+ROADMAP_UNSYNCED_VERIFIER_REPORT_MD="$TMP_DIR/roadmap_progress_access_recovery_unsynced_verifier_report.md"
+export ROADMAP_PROGRESS_ACCESS_RECOVERY_PILOT_REPORTS_DIR="$ACCESS_BRIDGE_UNSYNCED_VERIFIER_DIR"
+if ! FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
+ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL" \
+ROADMAP_PROGRESS_SINGLE_MACHINE_SCRIPT="$FAKE_SINGLE" \
+run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$TMP_DIR/missing_access_bridge_service_smoke_unsynced_summary.json" \
+  --access-bridge-deployment-evidence-summary-json "$TMP_DIR/missing_access_bridge_deployment_evidence_unsynced_summary.json" \
+  --access-bridge-host-install-summary-json "$TMP_DIR/missing_access_bridge_host_install_unsynced_summary.json" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$TMP_DIR/missing_access_bridge_pilot_evidence_bundle_verify_unsynced_summary.json" \
+  --summary-json "$ROADMAP_UNSYNCED_VERIFIER_SUMMARY_JSON" \
+  --report-md "$ROADMAP_UNSYNCED_VERIFIER_REPORT_MD" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_unsynced_verifier.log 2>&1; then
+  unset ROADMAP_PROGRESS_ACCESS_RECOVERY_PILOT_REPORTS_DIR
+  echo "roadmap progress report failed while surfacing unsynced Access Recovery verifier receipt"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_unsynced_verifier.log
+  exit 1
+fi
+unset ROADMAP_PROGRESS_ACCESS_RECOVERY_PILOT_REPORTS_DIR
+if ! jq -e \
+  --arg ready_summary "$ACCESS_BRIDGE_UNSYNCED_READY_VERIFY_SUMMARY_JSON" \
+  --arg newer_not_ready_summary "$ACCESS_BRIDGE_UNSYNCED_NEWER_NOT_READY_VERIFY_SUMMARY_JSON" \
+  --arg service_summary "$ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" \
+  --arg deployment_summary "$ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" \
+  --arg host_summary "$ACCESS_BRIDGE_INSTALLED_HOST_INSTALL_SUMMARY_JSON" '
+    .access_recovery_pilot_handoff_ready == false
+    and .access_recovery_track.ready == false
+    and .access_recovery_track.pilot_handoff_ready == false
+    and .access_recovery_track.needs_attention == true
+    and .access_recovery_track.unsynced_trusted_verifier_receipt.found == true
+    and .access_recovery_track.unsynced_trusted_verifier_receipt.ready == true
+    and .access_recovery_track.unsynced_trusted_verifier_receipt.canonical_sync_required == true
+    and .access_recovery_track.unsynced_trusted_verifier_receipt.source_summary_json == $ready_summary
+    and .access_recovery_track.unsynced_trusted_verifier_receipt.source_summary_json != $newer_not_ready_summary
+    and .access_recovery_track.unsynced_trusted_verifier_receipt.candidate.available == true
+    and .access_recovery_track.unsynced_trusted_verifier_receipt.candidate.semantic_ok == true
+    and .access_recovery_track.recommended_next_action.id == "access_recovery_sync_trusted_verifier_receipt"
+    and .access_recovery_track.recommended_next_action.safe_to_execute_as_is == true
+    and .access_recovery_track.recommended_next_action.placeholder_unresolved == false
+    and ((.access_recovery_track.recommended_next_action.placeholder_keys // []) | length == 0)
+    and (
+      .access_recovery_track.recommended_next_action.command
+      | contains("--access-bridge-service-smoke-summary-json ")
+        and contains($service_summary)
+    )
+    and (
+      .access_recovery_track.recommended_next_action.command
+      | contains("--access-bridge-deployment-evidence-summary-json ")
+        and contains($deployment_summary)
+    )
+    and (
+      .access_recovery_track.recommended_next_action.command
+      | contains("--access-bridge-host-install-summary-json ")
+        and contains($host_summary)
+    )
+    and (
+      .access_recovery_track.recommended_next_action.command
+      | contains("--access-bridge-pilot-evidence-bundle-verify-summary-json ")
+        and contains($ready_summary)
+    )
+    and (
+      .next_actions // []
+      | any(
+          .id == "access_recovery_sync_trusted_verifier_receipt"
+          and .safe_to_execute_as_is == true
+          and .placeholder_unresolved == false
+          and ((.placeholder_keys // []) | length == 0)
+          and ((.command // "") | contains($ready_summary))
+        )
+    )
+  ' "$ROADMAP_UNSYNCED_VERIFIER_SUMMARY_JSON" >/dev/null; then
+  echo "roadmap Access Recovery unsynced verifier receipt summary mismatch"
+  cat "$ROADMAP_UNSYNCED_VERIFIER_SUMMARY_JSON"
+  exit 1
+fi
+if ! grep -F "Access Recovery unsynced trusted verifier receipt: found=true, ready=true, sync_required=true" "$ROADMAP_UNSYNCED_VERIFIER_REPORT_MD" >/dev/null; then
+  echo "roadmap Access Recovery unsynced verifier receipt report line missing"
+  cat "$ROADMAP_UNSYNCED_VERIFIER_REPORT_MD"
+  exit 1
+fi
+
+ACCESS_BRIDGE_UNSYNCED_PLACEHOLDER_VERIFIER_DIR="$TMP_DIR/access recovery unsynced placeholder verifier reports"
+mkdir -p "$ACCESS_BRIDGE_UNSYNCED_PLACEHOLDER_VERIFIER_DIR"
+ACCESS_BRIDGE_UNSYNCED_PLACEHOLDER_VERIFY_SUMMARY_JSON="$ACCESS_BRIDGE_UNSYNCED_PLACEHOLDER_VERIFIER_DIR/access_bridge_pilot_evidence_bundle_verify_placeholder_summary.json"
+jq '
+  del(
+    .evidence_binding.smoke_summary_json,
+    .evidence_binding.deployment_evidence_summary_json,
+    .evidence_binding.host_install_check_summary_json
+  )
+' "$ACCESS_BRIDGE_UNSYNCED_READY_VERIFY_SUMMARY_JSON" >"$ACCESS_BRIDGE_UNSYNCED_PLACEHOLDER_VERIFY_SUMMARY_JSON"
+ROADMAP_UNSYNCED_PLACEHOLDER_SUMMARY_JSON="$TMP_DIR/roadmap_progress_access_recovery_unsynced_placeholder_summary.json"
+ROADMAP_UNSYNCED_PLACEHOLDER_REPORT_MD="$TMP_DIR/roadmap_progress_access_recovery_unsynced_placeholder_report.md"
+export ROADMAP_PROGRESS_ACCESS_RECOVERY_PILOT_REPORTS_DIR="$ACCESS_BRIDGE_UNSYNCED_PLACEHOLDER_VERIFIER_DIR"
+if ! FAKE_ROADMAP_CAPTURE_FILE="$CAPTURE" \
+ROADMAP_PROGRESS_MANUAL_VALIDATION_REPORT_SCRIPT="$FAKE_MANUAL" \
+ROADMAP_PROGRESS_SINGLE_MACHINE_SCRIPT="$FAKE_SINGLE" \
+run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$TEST_LOG_DIR/manual_validation_readiness_summary.json" \
+  --access-bridge-service-smoke-summary-json "$TMP_DIR/missing_access_bridge_service_smoke_unsynced_placeholder_summary.json" \
+  --access-bridge-deployment-evidence-summary-json "$TMP_DIR/missing_access_bridge_deployment_evidence_unsynced_placeholder_summary.json" \
+  --access-bridge-host-install-summary-json "$TMP_DIR/missing_access_bridge_host_install_unsynced_placeholder_summary.json" \
+  --access-bridge-pilot-evidence-bundle-verify-summary-json "$TMP_DIR/missing_access_bridge_pilot_evidence_bundle_verify_unsynced_placeholder_summary.json" \
+  --summary-json "$ROADMAP_UNSYNCED_PLACEHOLDER_SUMMARY_JSON" \
+  --report-md "$ROADMAP_UNSYNCED_PLACEHOLDER_REPORT_MD" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_unsynced_placeholder.log 2>&1; then
+  unset ROADMAP_PROGRESS_ACCESS_RECOVERY_PILOT_REPORTS_DIR
+  echo "roadmap progress report failed while surfacing unsynced placeholder Access Recovery verifier receipt"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_access_recovery_unsynced_placeholder.log
+  exit 1
+fi
+unset ROADMAP_PROGRESS_ACCESS_RECOVERY_PILOT_REPORTS_DIR
+if ! jq -e '
+    .access_recovery_track.unsynced_trusted_verifier_receipt.ready == true
+    and .access_recovery_track.unsynced_trusted_verifier_receipt.canonical_sync_required == true
+    and .access_recovery_track.recommended_next_action.id == "access_recovery_sync_trusted_verifier_receipt"
+    and .access_recovery_track.recommended_next_action.safe_to_execute_as_is == false
+    and .access_recovery_track.recommended_next_action.placeholder_unresolved == true
+    and (.access_recovery_track.recommended_next_action.placeholder_keys | index("ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON") != null)
+    and (.access_recovery_track.recommended_next_action.placeholder_keys | index("ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON") != null)
+    and (.access_recovery_track.recommended_next_action.placeholder_keys | index("ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON") != null)
+    and (
+      .next_actions // []
+      | any(
+          .id == "access_recovery_sync_trusted_verifier_receipt"
+          and .safe_to_execute_as_is == false
+          and .placeholder_unresolved == true
+          and (.placeholder_keys | index("ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON") != null)
+        )
+    )
+  ' "$ROADMAP_UNSYNCED_PLACEHOLDER_SUMMARY_JSON" >/dev/null; then
+  echo "roadmap Access Recovery unsynced placeholder verifier receipt summary mismatch"
+  cat "$ROADMAP_UNSYNCED_PLACEHOLDER_SUMMARY_JSON"
+  exit 1
+fi
+if [[ "$ROADMAP_PROGRESS_REPORT_FOCUS" == "access-recovery-unsynced-verifier" ]]; then
+  finish_focus_if "$ROADMAP_PROGRESS_REPORT_FOCUS" "Access Recovery unsynced verifier"
 fi
 
 echo "[roadmap-progress-report] Access Recovery rejects verifier receipts with mismatched source summary binding"

@@ -225,6 +225,13 @@ cat >"$DEPLOY_PACK/keys/id_ed25519" <<'EOF_OPENSSH_KEY'
 not-a-real-openssh-key-but-private-key-material-for-filter-test
 -----END OPENSSH PRIVATE KEY-----
 EOF_OPENSSH_KEY
+printf '%s\n' 'DOTENV_SECRET=should-not-copy' >"$DEPLOY_PACK/.env"
+printf '%s\n' 'token should not copy' >"$DEPLOY_PACK/api-token.txt"
+printf '%s\n' 'password should not copy' >"$DEPLOY_PACK/db-password.txt"
+printf '%s\n' 'passwd should not copy' >"$DEPLOY_PACK/shadow.passwd"
+printf '%s\n' 'auth should not copy' >"$DEPLOY_PACK/auth-header.txt"
+printf '%s\n' 'bearer should not copy' >"$DEPLOY_PACK/bearer-creds.txt"
+printf '%s\n' 'oauth should not copy' >"$DEPLOY_PACK/oauth-client.json"
 
 STALE_BUNDLE_DIR="$TMP_DIR/stale-pilot-evidence-bundle"
 mkdir -p "$STALE_BUNDLE_DIR"
@@ -919,12 +926,32 @@ if find "$EVIDENCE_BUNDLE" -type f -name 'recovery.key' -print -quit | grep -q .
   echo "access bridge pilot evidence bundle integration failed: recovery private key copied into evidence bundle"
   exit 1
 fi
-if find "$EVIDENCE_BUNDLE" -type f \( -name 'operator.pem' -o -name 'id_ed25519' \) -print -quit | grep -q .; then
-  echo "access bridge pilot evidence bundle integration failed: private key material copied into evidence bundle"
-  find "$EVIDENCE_BUNDLE" -type f \( -name 'operator.pem' -o -name 'id_ed25519' \) -print
+if find "$EVIDENCE_BUNDLE" -type f \( \
+  -name '.env' -o \
+  -name '*token*' -o \
+  -name '*password*' -o \
+  -name '*passwd*' -o \
+  -name '*auth*' -o \
+  -name '*bearer*' -o \
+  -name '*oauth*' -o \
+  -name 'operator.pem' -o \
+  -name 'id_ed25519' \
+  \) -print -quit | grep -q .; then
+  echo "access bridge pilot evidence bundle integration failed: sensitive deploy-pack file copied into evidence bundle"
+  find "$EVIDENCE_BUNDLE" -type f \( \
+    -name '.env' -o \
+    -name '*token*' -o \
+    -name '*password*' -o \
+    -name '*passwd*' -o \
+    -name '*auth*' -o \
+    -name '*bearer*' -o \
+    -name '*oauth*' -o \
+    -name 'operator.pem' -o \
+    -name 'id_ed25519' \
+    \) -print
   exit 1
 fi
-if tar -tzf "${EVIDENCE_BUNDLE}.tar.gz" | grep -Eq '(^|/)(bridge-code\.txt|recovery\.key|operator\.pem|id_ed25519)$'; then
+if tar -tzf "${EVIDENCE_BUNDLE}.tar.gz" | grep -Eq '(^|/)(bridge-code\.txt|recovery\.key|operator\.pem|id_ed25519|\.env|api-token\.txt|db-password\.txt|shadow\.passwd|auth-header\.txt|bearer-creds\.txt|oauth-client\.json)$'; then
   echo "access bridge pilot evidence bundle integration failed: secret file copied into evidence tar"
   tar -tzf "${EVIDENCE_BUNDLE}.tar.gz"
   exit 1
@@ -932,7 +959,14 @@ fi
 if ! grep -Fxq 'recovery.key' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt" ||
   ! grep -Fxq 'bridge-code.txt' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt" ||
   ! grep -Fxq 'operator.pem' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt" ||
-  ! grep -Fxq 'keys/id_ed25519' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt"; then
+  ! grep -Fxq 'keys/id_ed25519' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt" ||
+  ! grep -Fxq '.env' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt" ||
+  ! grep -Fxq 'api-token.txt' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt" ||
+  ! grep -Fxq 'db-password.txt' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt" ||
+  ! grep -Fxq 'shadow.passwd' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt" ||
+  ! grep -Fxq 'auth-header.txt' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt" ||
+  ! grep -Fxq 'bearer-creds.txt' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt" ||
+  ! grep -Fxq 'oauth-client.json' "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt"; then
   echo "access bridge pilot evidence bundle integration failed: skipped secret list mismatch"
   cat "$EVIDENCE_BUNDLE/deploy-pack-skipped-secrets.txt"
   exit 1

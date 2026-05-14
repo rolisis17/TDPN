@@ -385,9 +385,11 @@ deploy_pack_rel_path_is_secret() {
   case "$lower" in
     bridge-code.txt|*/bridge-code.txt|\
     recovery.key|*/recovery.key|\
+    .env|*/.env|\
     id_rsa|*/id_rsa|id_dsa|*/id_dsa|id_ecdsa|*/id_ecdsa|id_ed25519|*/id_ed25519|\
     *.key|*.pem|*.p8|*.pkcs8|*.p12|*.pfx|\
-    *private-key*|*private_key*|*access-code*|*access_code*|*secret*|*credential*)
+    *private-key*|*private_key*|*access-code*|*access_code*|*secret*|*credential*|\
+    *token*|*password*|*passwd*|*auth*|*bearer*|*oauth*)
       return 0
       ;;
   esac

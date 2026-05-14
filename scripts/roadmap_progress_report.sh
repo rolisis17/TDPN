@@ -2905,6 +2905,229 @@ access_recovery_current_bundle_artifacts_json() {
     }'
 }
 
+access_recovery_placeholder_metadata_json_for_command() {
+  local cmd="$1"
+  jq -cn --arg cmd "$cmd" '
+    def unique_strings_preserve_order:
+      reduce .[] as $item ([]; if ($item | type) != "string" then . elif index($item) then . else . + [$item] end);
+    ($cmd | ascii_upcase) as $ucmd
+    | [
+        (if ($ucmd | test("(^|[^A-Z0-9_-])(TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE|PROVENANCE_TRUST_STORE)([^A-Z0-9_-]|$)")) then "TRUST_STORE" else empty end),
+        (if ($ucmd | contains("<TRUST-STORE>") or contains("<SET-TRUST-STORE>") or contains("REPLACE_WITH_TRUST_STORE") or contains("REPLACE_WITH_ACCESS_RECOVERY_TRUST_STORE")) then "TRUST_STORE" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])HELPER_PUBLIC_DNS([^A-Z0-9_-]|$)")) then "HELPER_PUBLIC_DNS" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])HELPER_ID([^A-Z0-9_-]|$)")) then "HELPER_ID" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])PRIVATE_CODE_FILE([^A-Z0-9_-]|$)")) then "PRIVATE_CODE_FILE" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])BRIDGE_SERVICE_CONFIG([^A-Z0-9_-]|$)")) then "BRIDGE_SERVICE_CONFIG" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])BRIDGE_DEPLOY_PACK([^A-Z0-9_-]|$)")) then "BRIDGE_DEPLOY_PACK" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])PROVENANCE_PRIVATE_KEY_FILE([^A-Z0-9_-]|$)")) then "PROVENANCE_PRIVATE_KEY_FILE" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])ORG_ID([^A-Z0-9_-]|$)")) then "ORG_ID" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])ORG_NAME([^A-Z0-9_-]|$)")) then "ORG_NAME" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_REPORTS_DIR([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_REPORTS_DIR" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_INSTALL_DIR([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_INSTALL_DIR" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_SYSTEMD_UNIT_FILE([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_SYSTEMD_UNIT_FILE" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_PROXY_KIND([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_PROXY_KIND" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_PROXY_CONFIG_FILE([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_PROXY_CONFIG_FILE" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON([^A-Z0-9_-]|$)")) then "ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON([^A-Z0-9_-]|$)")) then "ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON([^A-Z0-9_-]|$)")) then "ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON([^A-Z0-9_-]|$)")) then "ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CA_FILE([^A-Z0-9_-]|$)")) then "MTLS_CA_FILE" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CLIENT_CERT_FILE([^A-Z0-9_-]|$)")) then "MTLS_CLIENT_CERT_FILE" else empty end),
+        (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CLIENT_KEY_FILE([^A-Z0-9_-]|$)")) then "MTLS_CLIENT_KEY_FILE" else empty end)
+      ]
+    | unique_strings_preserve_order as $keys
+    | {
+        placeholder_unresolved: (($keys | length) > 0),
+        placeholder_keys: $keys,
+        safe_to_execute_as_is: (($keys | length) == 0),
+        operator_input_required: (($keys | length) > 0),
+        placeholder_resolution: (
+          if ($keys | length) > 0 then
+            "Template command only; replace Access Recovery placeholders with concrete pilot host, helper, credential, config, deploy-pack, evidence summary, installed-host/proxy, provenance, trust-store, and optional mTLS values before execution."
+          else null end
+        )
+      }'
+}
+
+access_recovery_unsynced_trusted_verifier_receipt_json() {
+  local canonical_verifier_summary_json="$1"
+  local canonical_verifier_evidence_json="$2"
+  local search_dir="${ROADMAP_PROGRESS_ACCESS_RECOVERY_PILOT_REPORTS_DIR:-$default_log_dir/access-recovery-pilot}"
+  local candidate_summary_json=""
+  local candidate_evidence_json=""
+  local candidate_generated_at=""
+  local candidate_norm=""
+  local candidate_ready=""
+  local best_any_summary_json=""
+  local best_any_evidence_json=""
+  local best_any_generated_at=""
+  local best_ready_summary_json=""
+  local best_ready_evidence_json=""
+  local best_ready_generated_at=""
+  local discovered_verifier_summary_json=""
+  local discovered_verifier_evidence_json=""
+  local canonical_norm=""
+  local discovered_norm=""
+  local canonical_status=""
+  local canonical_summary_stale=""
+  local explicit_search_dir="0"
+  local max_candidates_raw="${ROADMAP_PROGRESS_ACCESS_RECOVERY_UNSYNCED_VERIFIER_DISCOVERY_MAX_CANDIDATES:-25}"
+  local find_max_files_raw="${ROADMAP_PROGRESS_ACCESS_RECOVERY_UNSYNCED_VERIFIER_DISCOVERY_FIND_MAX_FILES:-250}"
+  local max_candidates=25
+  local find_max_files=250
+  local candidates_seen=0
+  local files_seen=0
+
+  search_dir="$(abs_path "$search_dir")"
+  canonical_norm="${canonical_verifier_summary_json//\\//}"
+  if [[ -n "${ROADMAP_PROGRESS_ACCESS_RECOVERY_PILOT_REPORTS_DIR+x}" ]]; then
+    explicit_search_dir="1"
+  fi
+  canonical_status="$(
+    printf '%s\n' "$canonical_verifier_evidence_json" | jq -r '.status // "unknown"' 2>/dev/null || printf 'unknown'
+  )"
+  canonical_summary_stale="$(
+    printf '%s\n' "$canonical_verifier_evidence_json" | jq -r '(.summary_stale == true) | tostring' 2>/dev/null || printf 'false'
+  )"
+  if [[ "$explicit_search_dir" != "1" && "$canonical_status" != "missing" && "$canonical_status" != "stale" && "$canonical_summary_stale" != "true" ]]; then
+    jq -cn \
+      --arg canonical "$canonical_verifier_summary_json" \
+      --arg canonical_status "$canonical_status" '{
+        found: false,
+        ready: false,
+        status: "skipped",
+        canonical_sync_required: false,
+        canonical_summary_json: $canonical,
+        source_summary_json: null,
+        reason: ("Canonical Access Recovery verifier input status is " + $canonical_status + "; automatic unsynced receipt discovery is reserved for stale or missing canonical verifier inputs. Set ROADMAP_PROGRESS_ACCESS_RECOVERY_PILOT_REPORTS_DIR to force a reports-dir scan."),
+        sync_command: null,
+        candidate: null
+      }'
+    return
+  fi
+  if [[ "$max_candidates_raw" =~ ^[0-9]+$ ]]; then
+    max_candidates="$max_candidates_raw"
+  fi
+  if [[ "$find_max_files_raw" =~ ^[0-9]+$ ]]; then
+    find_max_files="$find_max_files_raw"
+  fi
+  if [[ -d "$search_dir" ]]; then
+    while IFS= read -r candidate_summary_json || [[ -n "$candidate_summary_json" ]]; do
+      [[ -n "$candidate_summary_json" ]] || continue
+      if (( find_max_files > 0 && files_seen >= find_max_files )); then
+        break
+      fi
+      files_seen=$((files_seen + 1))
+      candidate_norm="${candidate_summary_json//\\//}"
+      [[ "$candidate_norm" != "$canonical_norm" ]] || continue
+      [[ "$(json_file_valid_01 "$candidate_summary_json")" == "1" ]] || continue
+      if [[ "$(jq -r '.schema.id // ""' "$candidate_summary_json" 2>/dev/null || true)" != "access_bridge_pilot_evidence_bundle_verify_summary" ]]; then
+        continue
+      fi
+      if (( max_candidates > 0 && candidates_seen >= max_candidates )); then
+        break
+      fi
+      candidates_seen=$((candidates_seen + 1))
+
+      candidate_evidence_json="$(
+        access_recovery_verifier_evidence_json "$candidate_summary_json"
+      )"
+      candidate_ready="$(
+        printf '%s\n' "$candidate_evidence_json" \
+          | jq -r '(.available == true and .semantic_ok == true) | tostring' 2>/dev/null \
+          || printf 'false'
+      )"
+      candidate_generated_at="$(jq -r '.generated_at_utc // ""' "$candidate_summary_json" 2>/dev/null || true)"
+      if [[ -z "$best_any_summary_json" || "$candidate_generated_at" > "$best_any_generated_at" ]]; then
+        best_any_summary_json="$candidate_summary_json"
+        best_any_evidence_json="$candidate_evidence_json"
+        best_any_generated_at="$candidate_generated_at"
+      fi
+      if [[ "$candidate_ready" == "true" ]]; then
+        if [[ -z "$best_ready_summary_json" || "$candidate_generated_at" > "$best_ready_generated_at" ]]; then
+          best_ready_summary_json="$candidate_summary_json"
+          best_ready_evidence_json="$candidate_evidence_json"
+          best_ready_generated_at="$candidate_generated_at"
+        fi
+      fi
+    done < <(
+      find "$search_dir" -type f \
+        \( -name 'access_bridge_pilot_evidence_bundle_verify_summary.json' \
+           -o -name 'access_bridge_pilot_evidence_verify_*.json' \
+           -o -name '*pilot_evidence_bundle_verify*summary*.json' \
+           -o -name '*pilot_evidence_verify*.json' \) \
+        -print 2>/dev/null || true
+    )
+  fi
+
+  if [[ -n "$best_ready_summary_json" ]]; then
+    discovered_verifier_summary_json="$best_ready_summary_json"
+    discovered_verifier_evidence_json="$best_ready_evidence_json"
+  else
+    discovered_verifier_summary_json="$best_any_summary_json"
+    discovered_verifier_evidence_json="$best_any_evidence_json"
+  fi
+  discovered_verifier_summary_json="$(trim "$discovered_verifier_summary_json")"
+  discovered_norm="${discovered_verifier_summary_json//\\//}"
+  if [[ -z "$discovered_verifier_summary_json" || "$discovered_norm" == "$canonical_norm" ]]; then
+    jq -cn --arg canonical "$canonical_verifier_summary_json" '{
+      found: false,
+      ready: false,
+      status: "missing",
+      canonical_sync_required: false,
+      canonical_summary_json: $canonical,
+      source_summary_json: null,
+      reason: "No out-of-band trusted verifier receipt was discovered under the Access Recovery pilot reports dir.",
+      sync_command: null,
+      candidate: null
+    }'
+    return
+  fi
+
+  jq -cn \
+    --arg canonical "$canonical_verifier_summary_json" \
+    --arg discovered "$discovered_verifier_summary_json" \
+    --argjson canonical_evidence "$canonical_verifier_evidence_json" \
+    --argjson candidate "$discovered_verifier_evidence_json" '
+      def nonempty($v): (($v // "") | strings | select(length > 0));
+      def sharg($v): (($v // "") | tostring | @sh);
+      def command_or_null:
+        if ($candidate.available == true) then
+          "./scripts/roadmap_progress_report.sh"
+          + " --access-bridge-service-smoke-summary-json " + sharg($candidate.details.smoke_summary_json // "ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON")
+          + " --access-bridge-deployment-evidence-summary-json " + sharg($candidate.details.deployment_evidence_summary_json // "ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON")
+          + " --access-bridge-host-install-summary-json " + sharg($candidate.details.host_install_check_summary_json // "ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON")
+          + " --access-bridge-pilot-evidence-bundle-verify-summary-json " + sharg($discovered)
+          + " --summary-json " + sharg(".easy-node-logs/roadmap_progress_summary.json")
+          + " --report-md " + sharg(".easy-node-logs/roadmap_progress_report.md")
+          + " --print-summary-json 1"
+        else null end;
+      ($candidate.available == true and $candidate.semantic_ok == true) as $ready
+      | ($ready and ($canonical_evidence.available != true)) as $sync_required
+      | {
+          found: true,
+          ready: $ready,
+          status: (if $sync_required then "ready-unsynced" elif $ready then "ready-canonical-equivalent" else ($candidate.status // "not-ready") end),
+          canonical_sync_required: $sync_required,
+          canonical_summary_json: $canonical,
+          canonical_available: ($canonical_evidence.available == true),
+          canonical_status: ($canonical_evidence.status // "unknown"),
+          source_summary_json: $discovered,
+          reason: (
+            if $sync_required then
+              "Trusted Access Recovery verifier receipt exists outside canonical roadmap inputs; keep pilot handoff NOT_READY until the roadmap report is rerun with the receipt and bound child evidence paths."
+            elif $ready then
+              "Trusted Access Recovery verifier receipt exists outside the default path, but canonical verifier evidence is already available."
+            else
+              ($candidate.notes // "Discovered Access Recovery verifier receipt is not handoff-ready.")
+            end
+          ),
+          sync_command: command_or_null,
+          candidate: $candidate
+        }
+    '
+}
+
 access_recovery_track_json_from_evidence() {
   local smoke_json="$1"
   local deployment_json="$2"
@@ -3328,10 +3551,14 @@ access_recovery_track_json_from_evidence() {
           (if ($ucmd | test("(^|[^A-Z0-9_-])ORG_NAME([^A-Z0-9_-]|$)")) then "ORG_NAME" else empty end),
           (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_REPORTS_DIR([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_REPORTS_DIR" else empty end),
           (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_INSTALL_DIR([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_INSTALL_DIR" else empty end),
-          (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_SYSTEMD_UNIT_FILE([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_SYSTEMD_UNIT_FILE" else empty end),
-          (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_PROXY_KIND([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_PROXY_KIND" else empty end),
-          (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_PROXY_CONFIG_FILE([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_PROXY_CONFIG_FILE" else empty end),
-          (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CA_FILE([^A-Z0-9_-]|$)")) then "MTLS_CA_FILE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_SYSTEMD_UNIT_FILE([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_SYSTEMD_UNIT_FILE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_PROXY_KIND([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_PROXY_KIND" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_PROXY_CONFIG_FILE([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_PROXY_CONFIG_FILE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON([^A-Z0-9_-]|$)")) then "ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON([^A-Z0-9_-]|$)")) then "ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON([^A-Z0-9_-]|$)")) then "ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON([^A-Z0-9_-]|$)")) then "ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CA_FILE([^A-Z0-9_-]|$)")) then "MTLS_CA_FILE" else empty end),
           (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CLIENT_CERT_FILE([^A-Z0-9_-]|$)")) then "MTLS_CLIENT_CERT_FILE" else empty end),
           (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CLIENT_KEY_FILE([^A-Z0-9_-]|$)")) then "MTLS_CLIENT_KEY_FILE" else empty end)
         ]
@@ -8212,7 +8439,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for cmd in jq date mktemp rg sha256sum; do
+for cmd in jq date find mktemp rg sha256sum; do
   need_cmd "$cmd"
 done
 
@@ -13167,6 +13394,11 @@ access_bridge_pilot_evidence_bundle_verify_evidence_json="$(
   access_recovery_verifier_evidence_json \
     "$access_bridge_pilot_evidence_bundle_verify_summary_json"
 )"
+access_recovery_unsynced_trusted_verifier_receipt_json="$(
+  access_recovery_unsynced_trusted_verifier_receipt_json \
+    "$access_bridge_pilot_evidence_bundle_verify_summary_json" \
+    "$access_bridge_pilot_evidence_bundle_verify_evidence_json"
+)"
 access_recovery_current_bundle_artifacts_json="$(
   access_recovery_current_bundle_artifacts_json \
     "$access_bridge_service_smoke_evidence_json" \
@@ -13181,6 +13413,46 @@ access_recovery_track_json="$(
     "$access_bridge_host_install_evidence_json" \
     "$access_bridge_pilot_evidence_bundle_verify_evidence_json" \
     "$access_recovery_current_bundle_artifacts_json"
+)"
+access_recovery_track_json="$(
+  printf '%s\n' "$access_recovery_track_json" | jq -c \
+    --argjson unsynced_trusted_verifier_receipt "$access_recovery_unsynced_trusted_verifier_receipt_json" '
+      . + {unsynced_trusted_verifier_receipt: $unsynced_trusted_verifier_receipt}
+      | if (
+          ($unsynced_trusted_verifier_receipt.canonical_sync_required == true)
+          and (.ready != true)
+        ) then
+          .recommendation = $unsynced_trusted_verifier_receipt.reason
+          | .recommended_next_action = {
+              id: "access_recovery_sync_trusted_verifier_receipt",
+              reason: $unsynced_trusted_verifier_receipt.reason,
+              command: $unsynced_trusted_verifier_receipt.sync_command,
+              placeholder_unresolved: false,
+              placeholder_keys: [],
+              safe_to_execute_as_is: true,
+              operator_input_required: false,
+              placeholder_resolution: null
+            }
+        else
+          .
+        end
+    '
+)"
+access_recovery_sync_trusted_verifier_receipt_placeholder_metadata_json="$(
+  access_recovery_placeholder_metadata_json_for_command "$(
+    printf '%s\n' "$access_recovery_track_json" \
+      | jq -r '.unsynced_trusted_verifier_receipt.sync_command // ""'
+  )"
+)"
+access_recovery_track_json="$(
+  printf '%s\n' "$access_recovery_track_json" | jq -c \
+    --argjson sync_placeholder_metadata "$access_recovery_sync_trusted_verifier_receipt_placeholder_metadata_json" '
+      if .recommended_next_action.id == "access_recovery_sync_trusted_verifier_receipt" then
+        .recommended_next_action += $sync_placeholder_metadata
+      else
+        .
+      end
+    '
 )"
 access_recovery_track_status_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r '.status // "unknown"')"
 access_recovery_track_ready_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r 'if (.ready | type) == "boolean" then .ready else false end')"
@@ -13300,6 +13572,15 @@ cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
       (if ($ucmd | test("(^|[^A-Z0-9_-])PROVENANCE_PRIVATE_KEY_FILE([^A-Z0-9_-]|$)")) then "PROVENANCE_PRIVATE_KEY_FILE" else empty end),
       (if ($ucmd | test("(^|[^A-Z0-9_-])ORG_ID([^A-Z0-9_-]|$)")) then "ORG_ID" else empty end),
       (if ($ucmd | test("(^|[^A-Z0-9_-])ORG_NAME([^A-Z0-9_-]|$)")) then "ORG_NAME" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_REPORTS_DIR([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_REPORTS_DIR" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_INSTALL_DIR([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_INSTALL_DIR" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_SYSTEMD_UNIT_FILE([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_SYSTEMD_UNIT_FILE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_PROXY_KIND([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_PROXY_KIND" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_RECOVERY_PROXY_CONFIG_FILE([^A-Z0-9_-]|$)")) then "ACCESS_RECOVERY_PROXY_CONFIG_FILE" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON([^A-Z0-9_-]|$)")) then "ACCESS_BRIDGE_SERVICE_SMOKE_SUMMARY_JSON" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON([^A-Z0-9_-]|$)")) then "ACCESS_BRIDGE_DEPLOYMENT_EVIDENCE_SUMMARY_JSON" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON([^A-Z0-9_-]|$)")) then "ACCESS_BRIDGE_HOST_INSTALL_SUMMARY_JSON" else empty end),
+      (if ($ucmd | test("(^|[^A-Z0-9_-])ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON([^A-Z0-9_-]|$)")) then "ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_VERIFY_SUMMARY_JSON" else empty end),
       (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CA_FILE([^A-Z0-9_-]|$)")) then "MTLS_CA_FILE" else empty end),
       (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CLIENT_CERT_FILE([^A-Z0-9_-]|$)")) then "MTLS_CLIENT_CERT_FILE" else empty end),
       (if ($ucmd | test("(^|[^A-Z0-9_-])MTLS_CLIENT_KEY_FILE([^A-Z0-9_-]|$)")) then "MTLS_CLIENT_KEY_FILE" else empty end)
@@ -13311,7 +13592,7 @@ cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
         operator_input_required: (($keys | length) > 0),
         placeholder_resolution: (
           if ($keys | length) > 0 then
-            "Template command only; replace Access Recovery placeholders with concrete pilot host, helper, credential, config, deploy-pack, provenance, trust-store, and optional mTLS values before execution."
+            "Template command only; replace Access Recovery placeholders with concrete pilot host, helper, credential, config, deploy-pack, evidence summary, installed-host/proxy, provenance, trust-store, and optional mTLS values before execution."
           else null
           end
         )
@@ -15082,6 +15363,9 @@ cat >"$report_tmp" <<EOF_MD
 - Access bridge trusted bundle verifier: available=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.available | tostring' "$summary_json"), status=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.status' "$summary_json"), source=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.source_summary_json // "none"' "$summary_json")
 - Access bridge trusted bundle verifier freshness: generated_at=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.generated_at_utc // "none"' "$summary_json"), age_sec=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.summary_age_sec // "null"' "$summary_json"), stale=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.summary_stale | if . == null then "null" else tostring end' "$summary_json"), max_age_sec=$(jq -r '.access_recovery_track.access_bridge_pilot_evidence_bundle_verify.summary_max_age_sec // "null"' "$summary_json")
 - Access bridge required mTLS evidence: required=$(jq -r '.access_recovery_track.evidence_host_policy.mtls_required | tostring' "$summary_json"), proven=$(jq -r '.access_recovery_track.evidence_host_policy.required_mtls_evidence | tostring' "$summary_json")
+- Access Recovery unsynced trusted verifier receipt: found=$(jq -r '.access_recovery_track.unsynced_trusted_verifier_receipt.found | tostring' "$summary_json"), ready=$(jq -r '.access_recovery_track.unsynced_trusted_verifier_receipt.ready | tostring' "$summary_json"), sync_required=$(jq -r '.access_recovery_track.unsynced_trusted_verifier_receipt.canonical_sync_required | tostring' "$summary_json"), source=$(jq -r '.access_recovery_track.unsynced_trusted_verifier_receipt.source_summary_json // "none"' "$summary_json")
+- Access Recovery unsynced trusted verifier receipt reason: $(jq -r '.access_recovery_track.unsynced_trusted_verifier_receipt.reason // "none"' "$summary_json")
+- Access Recovery unsynced trusted verifier sync command: $(jq -r '.access_recovery_track.unsynced_trusted_verifier_receipt.sync_command // "none"' "$summary_json")
 - Access Recovery next action: $(jq -r '.access_recovery_track.recommended_next_action.command // "none"' "$summary_json")
 - Access Recovery next action reason: $(jq -r '.access_recovery_track.recommended_next_action.reason // "none"' "$summary_json")
 - Access Recovery next action placeholder unresolved: $(jq -r '.access_recovery_track.recommended_next_action.placeholder_unresolved | if . == null then "null" else tostring end' "$summary_json")
@@ -15458,6 +15742,7 @@ echo "[roadmap-progress-report] access_bridge_deployment_evidence_available=$acc
 echo "[roadmap-progress-report] access_bridge_host_install_available=$access_bridge_host_install_available_json status=$access_bridge_host_install_status_json source_summary_json=${access_bridge_host_install_source_summary_json:-}"
 echo "[roadmap-progress-report] access_bridge_pilot_evidence_bundle_verify_available=$access_bridge_pilot_evidence_bundle_verify_available_json status=$access_bridge_pilot_evidence_bundle_verify_status_json source_summary_json=${access_bridge_pilot_evidence_bundle_verify_source_summary_json:-}"
 echo "[roadmap-progress-report] access_bridge_required_mtls required=$(jq -r '.access_recovery_track.evidence_host_policy.mtls_required | tostring' "$summary_json") proven=$(jq -r '.access_recovery_track.evidence_host_policy.required_mtls_evidence | tostring' "$summary_json")"
+echo "[roadmap-progress-report] access_recovery_unsynced_trusted_verifier_receipt found=$(jq -r '.access_recovery_track.unsynced_trusted_verifier_receipt.found | tostring' "$summary_json") ready=$(jq -r '.access_recovery_track.unsynced_trusted_verifier_receipt.ready | tostring' "$summary_json") sync_required=$(jq -r '.access_recovery_track.unsynced_trusted_verifier_receipt.canonical_sync_required | tostring' "$summary_json") source=$(jq -r '.access_recovery_track.unsynced_trusted_verifier_receipt.source_summary_json // ""' "$summary_json")"
 echo "[roadmap-progress-report] next_action_check_id=${next_action_check_id:-}"
 echo "[roadmap-progress-report] next_action_command=${next_action_command:-}"
 echo "[roadmap-progress-report] manual_validation_refresh_status=$manual_refresh_status rc=$manual_refresh_rc"
