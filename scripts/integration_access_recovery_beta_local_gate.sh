@@ -57,6 +57,7 @@ chmod +x "$PASS_STEP" "$FAIL_STEP" "$FAKE_GATE"
 
 run_gate_with_overrides() {
   env \
+    ACCESS_RECOVERY_BETA_LOCAL_GATE_ALLOW_CUSTOM_STEP_SCRIPTS=1 \
     ACCESS_RECOVERY_BETA_LOCAL_GATE_DEMO_CONTRACT_SCRIPT="$PASS_STEP" \
     ACCESS_RECOVERY_BETA_LOCAL_GATE_EXAMPLES_CONTRACT_SCRIPT="$PASS_STEP" \
     ACCESS_RECOVERY_BETA_LOCAL_GATE_BROWSER_SMOKE_SCRIPT="${1:-$PASS_STEP}" \
@@ -68,6 +69,53 @@ run_gate_with_overrides() {
     ACCESS_RECOVERY_BETA_LOCAL_GATE_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$PASS_STEP" \
     bash ./scripts/access_recovery_beta_local_gate.sh "${@:2}"
 }
+
+REFUSE_DIR="$TMP_DIR/refuse-reports"
+REFUSE_SUMMARY="$REFUSE_DIR/summary.json"
+set +e
+env \
+  ACCESS_RECOVERY_BETA_LOCAL_GATE_DEMO_CONTRACT_SCRIPT="$PASS_STEP" \
+  ACCESS_RECOVERY_BETA_LOCAL_GATE_EXAMPLES_CONTRACT_SCRIPT="$PASS_STEP" \
+  ACCESS_RECOVERY_BETA_LOCAL_GATE_BROWSER_SMOKE_SCRIPT="$PASS_STEP" \
+  ACCESS_RECOVERY_BETA_LOCAL_GATE_BRIDGE_SERVICE_SERVE_SCRIPT="$PASS_STEP" \
+  ACCESS_RECOVERY_BETA_LOCAL_GATE_BRIDGE_DEPLOYMENT_EVIDENCE_SCRIPT="$PASS_STEP" \
+  ACCESS_RECOVERY_BETA_LOCAL_GATE_BRIDGE_HOST_INSTALL_SCRIPT="$PASS_STEP" \
+  ACCESS_RECOVERY_BETA_LOCAL_GATE_PILOT_EVIDENCE_BUNDLE_SCRIPT="$PASS_STEP" \
+  ACCESS_RECOVERY_BETA_LOCAL_GATE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT="$PASS_STEP" \
+  ACCESS_RECOVERY_BETA_LOCAL_GATE_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$PASS_STEP" \
+  bash ./scripts/access_recovery_beta_local_gate.sh \
+    --reports-dir "$REFUSE_DIR" \
+    --summary-json "$REFUSE_SUMMARY" \
+    --print-summary-json 0 >"$TMP_DIR/refuse.log" 2>&1
+refuse_rc=$?
+set -e
+
+if [[ "$refuse_rc" -ne 1 ]]; then
+  echo "access recovery beta local gate integration failed: custom step override should fail closed without explicit allow"
+  cat "$TMP_DIR/refuse.log"
+  exit 1
+fi
+if ! jq -e '
+  .status == "fail"
+  and .rc == 1
+  and .security.custom_step_scripts_allowed == false
+  and .summary.steps_total == 9
+  and .summary.steps_pass == 0
+  and .summary.steps_fail == 9
+  and .summary.first_failed_step == "demo_contract"
+  and ([.steps[].rc] | all(. == 2))
+  and ([.steps[].status] | all(. == "fail"))
+' "$REFUSE_SUMMARY" >/dev/null; then
+  echo "access recovery beta local gate integration failed: custom override refusal summary mismatch"
+  cat "$REFUSE_SUMMARY"
+  exit 1
+fi
+first_refuse_log="$(jq -r '.steps[0].log' "$REFUSE_SUMMARY")"
+if ! test_path "$first_refuse_log" || ! grep -F 'custom step script refused' "$first_refuse_log" >/dev/null 2>&1; then
+  echo "access recovery beta local gate integration failed: custom override refusal log missing"
+  cat "$first_refuse_log" 2>/dev/null || true
+  exit 1
+fi
 
 PASS_DIR="$TMP_DIR/pass-reports"
 PASS_SUMMARY="$PASS_DIR/summary.json"
@@ -82,6 +130,7 @@ if ! jq -e '
   .schema.id == "access_recovery_beta_local_gate_summary"
   and .status == "pass"
   and .rc == 0
+  and .security.custom_step_scripts_allowed == true
   and .summary.steps_total == 9
   and .summary.steps_pass == 9
   and .summary.steps_fail == 0
@@ -142,6 +191,7 @@ fi
 if ! jq -e '
   .status == "fail"
   and .rc == 1
+  and .security.custom_step_scripts_allowed == true
   and .summary.steps_total == 9
   and .summary.steps_pass == 8
   and .summary.steps_fail == 1

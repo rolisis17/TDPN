@@ -22,6 +22,11 @@ Purpose:
 
 Notes:
   Live real helper HTTPS deployment evidence is still a separate real-host gate.
+
+Environment:
+  ACCESS_RECOVERY_BETA_LOCAL_GATE_ALLOW_CUSTOM_STEP_SCRIPTS=1 permits step
+  script overrides outside this repository's scripts/ tree. The default is 0
+  so copied or CI commands cannot silently execute arbitrary local paths.
 USAGE
 }
 
@@ -96,6 +101,7 @@ reports_dir="$ROOT_DIR/.easy-node-logs/access_recovery_beta_local_gate_$(timesta
 summary_json=""
 report_md=""
 print_summary_json="1"
+allow_custom_step_scripts="${ACCESS_RECOVERY_BETA_LOCAL_GATE_ALLOW_CUSTOM_STEP_SCRIPTS:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -139,6 +145,7 @@ for cmd in bash date dirname jq mkdir mktemp rm; do
   need_cmd "$cmd"
 done
 bool_arg_or_die "--print-summary-json" "$print_summary_json"
+bool_arg_or_die "ACCESS_RECOVERY_BETA_LOCAL_GATE_ALLOW_CUSTOM_STEP_SCRIPTS" "$allow_custom_step_scripts"
 
 mkdir -p "$reports_dir"
 if [[ -z "$summary_json" ]]; then
@@ -168,6 +175,35 @@ step_script() {
   fi
 }
 
+canonical_existing_path() {
+  local path
+  local dir
+  local base
+  path="$(abs_path "${1:-}")"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$path" 2>/dev/null && return 0
+  fi
+  dir="${path%/*}"
+  base="${path##*/}"
+  if [[ -n "$dir" && "$dir" != "$path" && -d "$dir" ]]; then
+    (cd "$dir" && printf '%s/%s\n' "$(pwd -P)" "$base")
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
+custom_step_script_allowed() {
+  local script="$1"
+  local canonical_script
+  local canonical_scripts_root
+  canonical_script="$(canonical_existing_path "$script")"
+  canonical_scripts_root="$(canonical_existing_path "$ROOT_DIR/scripts")"
+  if [[ "$canonical_script" == "$canonical_scripts_root" || "$canonical_script" == "$canonical_scripts_root/"* ]]; then
+    return 0
+  fi
+  [[ "$allow_custom_step_scripts" == "1" ]]
+}
+
 append_step() {
   local id="$1"
   local label="$2"
@@ -194,8 +230,20 @@ run_step() {
   local log
   local rc
   local status
+  local configured
   script="$(step_script "$env_name" "$default_script")"
+  configured="$(trim "${!env_name:-}")"
   log="$reports_dir/${id}.log"
+
+  if [[ -n "$configured" ]] && ! custom_step_script_allowed "$script"; then
+    {
+      printf 'custom step script refused: %s\n' "$script"
+      printf 'env override: %s\n' "$env_name"
+      printf 'reason: step script overrides outside repository scripts/ require ACCESS_RECOVERY_BETA_LOCAL_GATE_ALLOW_CUSTOM_STEP_SCRIPTS=1\n'
+    } >"$log"
+    append_step "$id" "$label" "fail" 2 "bash $script" "$log"
+    return
+  fi
 
   if [[ ! -f "$script" ]]; then
     printf 'missing script: %s\n' "$script" >"$log"
@@ -243,6 +291,7 @@ jq -n \
   --arg summary_json "$summary_json" \
   --arg report_md "$report_md" \
   --arg first_failed_step "$first_failed_step" \
+  --arg allow_custom_step_scripts "$allow_custom_step_scripts" \
   --argjson fail_count "$fail_count" \
   --argjson steps "$steps_json" \
   '{
@@ -257,6 +306,9 @@ jq -n \
       steps_pass: ($steps | map(select(.status == "pass" and .rc == 0)) | length),
       steps_fail: $fail_count,
       first_failed_step: (if $first_failed_step == "" then null else $first_failed_step end)
+    },
+    security: {
+      custom_step_scripts_allowed: ($allow_custom_step_scripts == "1")
     },
     steps: $steps,
     artifacts: {

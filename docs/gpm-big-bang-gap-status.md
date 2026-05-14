@@ -1,11 +1,12 @@
-# GPM Big-Bang Productization Gap Status
+# GPM Big-Bang Productization Gap Status (Historical Snapshot)
 
 Snapshot date: 2026-04-26
 
 ## Scope and source of truth
 
-- Big-bang sequencing priority: VPN hardening -> Windows parity -> settlement/L1 rollout (`docs/full-execution-plan-2026-2027.md`).
-- GPM milestone requirements and next-wave ordering (`docs/gpm-productization-status.md`, `docs/global-privacy-mesh-track.md`).
+- This is retained as a historical snapshot of the earlier big-bang sequencing priority: VPN hardening -> Windows parity -> settlement/L1 rollout (`docs/full-execution-plan-2026-2027.md`).
+- Current productization source of truth is `docs/gpm-productization-status.md`, with Access Recovery beta evidence and Global Private Mesh (GPM) tooling treated as the active pivot.
+- GPM milestone requirements and next-wave ordering remain in `docs/gpm-productization-status.md` and `docs/global-privacy-mesh-track.md`.
 - Live implementation signals from `.easy-node-logs/roadmap_progress_summary.json` generated `2026-04-24T15:57:00Z` (top-level `status=warn`).
 
 ## Implemented baseline signals

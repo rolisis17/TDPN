@@ -13531,6 +13531,13 @@ cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
         ) then "multi-vm" else empty end)
     ]
     | unique_strings_preserve_order;
+  def pending_live_evidence_cycle_batch_families_after_bundle:
+    [
+      (if $profile_default_gate_live_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true then "profile-default" else empty end),
+      (if $runtime_actuation_promotion_live_action_ready == true and $runtime_actuation_live_and_pack_bundle_ready != true then "runtime-actuation" else empty end),
+      (if $multi_vm_stability_promotion_live_action_ready == true and $profile_compare_multi_vm_live_and_pack_bundle_ready != true then "multi-vm" else empty end)
+    ]
+    | unique_strings_preserve_order;
   def pending_evidence_pack_families_after_bundle:
     [
       (if $profile_default_gate_evidence_pack_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true then "profile-default" else empty end),
@@ -13719,12 +13726,12 @@ cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
       command: "./scripts/easy_node.sh roadmap-live-evidence-actionable-run --reports-dir .easy-node-logs --print-summary-json 1",
       reason: "batch-run pending live evidence cycle actions"
     } + action_evidence_metadata(pending_live_evidence_families_after_bundle; true; false; ["live-evidence"]) else empty end),
-    (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0 and $live_evidence_cycle_batch_helper_available == true) then {
+    (if ((pending_live_evidence_cycle_batch_families_after_bundle | length) > 0 and $live_evidence_cycle_batch_helper_available == true) then {
       id: "roadmap_live_evidence_cycle_batch_run",
       "label": "Roadmap live-evidence cycle-batch run",
       command: "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs --print-summary-json 1",
-      reason: "repeat pending live evidence cycles across tracks in one helper run"
-    } + action_evidence_metadata(pending_live_evidence_families_after_bundle; true; false; ["live-evidence"]) else empty end),
+      reason: "repeat pending cycle-batch covered live evidence cycles across tracks in one helper run"
+    } + action_evidence_metadata(pending_live_evidence_cycle_batch_families_after_bundle; true; false; ["live-evidence"]) else empty end),
     (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0 and $live_evidence_archive_helper_available == true) then {
       id: "roadmap_live_evidence_archive_run",
       "label": "Roadmap live-evidence archive run",
@@ -13892,18 +13899,22 @@ if [[ "$next_actions_candidate_rc" != "0" ]]; then
   exit "$next_actions_candidate_rc"
 fi
 next_actions_json="$(printf '%s\n' "$next_actions_candidate_json" | jq -c --argjson suppress_live_evidence_next_actions_when_batch_helper "$suppress_live_evidence_next_actions_when_batch_helper_json" '
-  def is_live_evidence_individual_action:
-    (.id // "") as $id
-    | (
-      $id == "profile_default_gate"
-      or $id == "profile_compare_multi_vm_stability"
-      or $id == "profile_compare_multi_vm_stability_promotion"
-      or $id == "runtime_actuation_promotion"
-    );
-  if $suppress_live_evidence_next_actions_when_batch_helper
-      and any(.[]; (.id // "") == "roadmap_live_evidence_actionable_run")
+  . as $actions
+  | ($actions | any(.[]; (.id // "") == "roadmap_live_evidence_cycle_batch_run")) as $cycle_batch_helper_present
+  | if $suppress_live_evidence_next_actions_when_batch_helper
+      and ($actions | any(.[]; (.id // "") == "roadmap_live_evidence_actionable_run"))
   then
-    map(select(is_live_evidence_individual_action | not))
+    map(select(
+      (
+        (.id // "") as $id
+        | (
+          $id == "profile_default_gate"
+          or ($id == "profile_compare_multi_vm_stability" and ($cycle_batch_helper_present | not))
+          or $id == "profile_compare_multi_vm_stability_promotion"
+          or $id == "runtime_actuation_promotion"
+        )
+      ) | not
+    ))
   else
     .
   end
@@ -13962,9 +13973,14 @@ next_actions_live_evidence_individual_suppression_applied_json="$(jq -n \
       or $id == "runtime_actuation_promotion"
     );
   ($candidate | any(.[]; (.id // "") == "roadmap_live_evidence_actionable_run")) as $candidate_has_helper
-  | ($candidate | any(.[]; is_live_evidence_individual_action)) as $candidate_has_individual
-  | ($final | any(.[]; is_live_evidence_individual_action)) as $final_has_individual
-  | ($suppression_mode and $candidate_has_helper and $candidate_has_individual and ($final_has_individual | not))
+  | ($candidate | map(select(is_live_evidence_individual_action)) | length) as $candidate_individual_count
+  | ($final | map(select(is_live_evidence_individual_action)) | length) as $final_individual_count
+  | (
+      $suppression_mode
+      and $candidate_has_helper
+      and ($candidate_individual_count > 0)
+      and ($final_individual_count < $candidate_individual_count)
+    )
 ')"
 
 blockchain_track_status="parallel-cosmos-build"
@@ -14564,6 +14580,7 @@ summary_payload_jq_args=(
   --slurpfile pending_real_host_checks_file "$pending_real_host_checks_json_file_jq" \
   --rawfile next_action_command_raw "$next_action_command_raw_file_jq" \
   --argjson next_actions_live_evidence_batch_helper_emitted "$next_actions_live_evidence_batch_helper_emitted_json" \
+  --argjson next_actions_live_evidence_cycle_batch_helper_available "$live_evidence_cycle_batch_helper_available_json" \
   --argjson next_actions_live_evidence_cycle_batch_helper_emitted "$next_actions_live_evidence_cycle_batch_helper_emitted_json" \
   --argjson next_actions_live_evidence_cycle_batch_helper_count "$next_actions_live_evidence_cycle_batch_helper_count_json" \
   --argjson next_actions_live_evidence_archive_helper_available "$live_evidence_archive_helper_available_json" \
@@ -15213,6 +15230,7 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
     },
     next_actions_summary: {
       live_evidence_batch_helper_emitted: $next_actions_live_evidence_batch_helper_emitted,
+      live_evidence_cycle_batch_helper_available: $next_actions_live_evidence_cycle_batch_helper_available,
       live_evidence_cycle_batch_helper_emitted: $next_actions_live_evidence_cycle_batch_helper_emitted,
       live_evidence_cycle_batch_helper_count: $next_actions_live_evidence_cycle_batch_helper_count,
       live_evidence_archive_helper_available: $next_actions_live_evidence_archive_helper_available,

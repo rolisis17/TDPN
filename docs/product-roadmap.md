@@ -22,7 +22,7 @@ Next 5 roadmap execution steps:
 2. Finish the browser-local verification loop for file, text, and QR handoffs, including fail-closed trust-store and helper-registry validation.
 3. Write the first operator/helper runbook for key handoff, helper onboarding, helper quarantine, artifact expiry, and abuse response.
 4. Build one small pilot bundle for a real organization/community, run it through `roadmap-next-actions-run` with concrete Access Recovery operator inputs (helper DNS/ID, org ID/name, private code, bridge config/deploy pack, provenance key, trust store, reports/install/proxy/systemd paths, and optional mTLS files), verify it with a handoff-authority verifier receipt backed by real helper HTTPS evidence, and test it with a non-technical user flow before adding network economics.
-5. Keep VPN, Windows client, and L1 settlement work parked as reusable infrastructure until the access-recovery wedge has beta demand.
+5. Keep VPN, Windows client, and L1 settlement work as reusable connectivity and settlement infrastructure, advancing those tracks when they strengthen Access Recovery/GPM beta evidence or operator trust.
 
 Status update (March 24, 2026):
 - simple launcher defaults are now sourced from a versioned config contract (`deploy/config/easy_mode_config_v1.conf`) with command support in `easy_node.sh` (`config-v1-show`, `config-v1-init`, `config-v1-set-profile`).
@@ -91,7 +91,7 @@ Status update (March 24, 2026):
 - desktop scaffold coverage now includes `integration_desktop_scaffold_contract.sh` in `ci_local` and `beta_preflight`, validating file/JSON contract and JS-Rust `control_*` command alignment.
 - `three-machine-docker-readiness-record` is now available (`./scripts/easy_node.sh three-machine-docker-readiness-record ...`) to wrap that rehearsal in one recorded manual-validation receipt and keep a durable summary/log artifact.
 - `real-wg-privileged-matrix-record` is now available (`sudo ./scripts/easy_node.sh real-wg-privileged-matrix-record ...`) to wrap Linux root real-WG matrix validation into one recorded manual-validation receipt, surfaced as a non-blocking optional gate in the readiness handoff.
-- planning track docs for a future "Global Privacy Mesh" architecture are now added:
+- planning track docs for the Global Private Mesh (GPM) architecture are now added:
   - `docs/global-privacy-mesh-track.md`
   - `docs/exit-node-safety-baseline-v1.md`
   - `docs/exit-node-safety-guide.md`
@@ -194,7 +194,7 @@ Exit criteria:
 - failure classes and recovery SLOs are measured and enforced
 - operator onboarding/offboarding process is documented and repeatable
 
-## Parallel Architecture Track: Global Privacy Mesh (Planning + Incremental Build)
+## Parallel Architecture Track: Global Private Mesh (GPM) (Planning + Incremental Build)
 
 Goal: evolve from fixed 2-hop topology toward an optional micro-relay mesh model,
 without regressing current production-grade VPN stability work.

@@ -9925,6 +9925,89 @@ if ! grep -Eq '\[roadmap-progress-report\] profile_compare_multi_vm_stability_st
   exit 1
 fi
 
+echo "[roadmap-progress-report] base multi-VM stability action does not emit narrower cycle-batch helper"
+PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_NOW_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_RUNTIME_PROMOTION_JSON="$TMP_DIR/profile_compare_multi_vm_stability_base_only_runtime_promotion_summary.json"
+cat >"$PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_RUNTIME_PROMOTION_JSON" <<EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_RUNTIME_PROMOTION
+{
+  "version": 1,
+  "schema": {
+    "id": "runtime_actuation_promotion_check_summary"
+  },
+  "generated_at_utc": "$PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_NOW_UTC",
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "go": true,
+  "no_go": false
+}
+EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_RUNTIME_PROMOTION
+PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_MULTI_VM_PROMOTION_JSON="$TMP_DIR/profile_compare_multi_vm_stability_base_only_multi_vm_promotion_summary.json"
+cat >"$PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_MULTI_VM_PROMOTION_JSON" <<EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_MULTI_VM_PROMOTION
+{
+  "version": 1,
+  "schema": {
+    "id": "profile_compare_multi_vm_stability_promotion_check_summary"
+  },
+  "generated_at_utc": "$PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_NOW_UTC",
+  "status": "pass",
+  "rc": 0,
+  "decision": "GO",
+  "go": true,
+  "no_go": false
+}
+EOF_PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_MULTI_VM_PROMOTION
+PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_profile_compare_multi_vm_stability_base_only_summary.json"
+jq '
+  .summary = (
+    (.summary // {})
+    + {
+      next_action_check_id: "",
+      next_action_label: "",
+      next_action_command: "",
+      profile_default_gate: {
+        status: "pass",
+        next_command: "",
+        next_command_sudo: ""
+      }
+    }
+  )
+  | .report = ((.report // {}) + {readiness_status: "READY"})
+' "$MINIMAL_MANUAL_SUMMARY_JSON" >"$PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_MANUAL_SUMMARY_JSON"
+if ! EASY_NODE_LOG_DIR="$PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_REPORTS_DIR" run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_MANUAL_SUMMARY_JSON" \
+  --runtime-actuation-promotion-summary-json "$PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_RUNTIME_PROMOTION_JSON" \
+  --profile-compare-multi-vm-stability-promotion-summary-json "$PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_MULTI_VM_PROMOTION_JSON" \
+  --summary-json "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_base_only_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_base_only_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_base_only.log 2>&1; then
+  echo "expected success when only base multi-VM stability live action is pending"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_profile_compare_multi_vm_stability_base_only.log
+  exit 1
+fi
+if ! jq -e '
+  .vpn_track.multi_vm_stability.needs_attention == true
+  and .vpn_track.multi_vm_stability.next_command_actionable == true
+  and (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
+  and (((.next_actions // []) | any(.id == "runtime_actuation_promotion")) | not)
+  and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion")) | not)
+  and ((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability"))
+  and ((.next_actions // []) | any(.id == "roadmap_live_evidence_actionable_run"))
+  and (((.next_actions // []) | any(.id == "roadmap_live_evidence_cycle_batch_run")) | not)
+  and .next_actions_summary.live_evidence_batch_helper_emitted == true
+  and .next_actions_summary.live_evidence_cycle_batch_helper_available == true
+  and .next_actions_summary.live_evidence_cycle_batch_helper_emitted == false
+  and .next_actions_summary.live_evidence_cycle_batch_helper_count == 0
+  and .next_actions_summary.live_evidence_pending_action_count_after_bundle >= 1
+' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_base_only_summary.json" >/dev/null; then
+  echo "base-only multi-VM stability cycle-batch summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_base_only_summary.json"
+  exit 1
+fi
+
 : >"$CAPTURE"
 
 echo "[roadmap-progress-report] multi-VM promotion contradictory GO tuple is fail-closed"
@@ -12791,6 +12874,54 @@ if ! jq -e \
 ' "$TMP_DIR/roadmap_progress_invalid_promotion_reason_precedence_suppressed_summary.json" >/dev/null; then
   echo "invalid promotion reason-precedence suppression mode summary mismatch"
   cat "$TMP_DIR/roadmap_progress_invalid_promotion_reason_precedence_suppressed_summary.json"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] suppression mode preserves base multi-VM action when cycle-batch helper is present"
+if ! EASY_NODE_LOG_DIR="$PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_REPORTS_DIR" run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_MANUAL_SUMMARY_JSON" \
+  --runtime-actuation-promotion-summary-json "$INVALID_PROMOTION_REASON_RUNTIME_JSON" \
+  --profile-compare-multi-vm-stability-promotion-summary-json "$PROFILE_COMPARE_MULTI_VM_STABILITY_BASE_ONLY_MULTI_VM_PROMOTION_JSON" \
+  --suppress-live-evidence-next-actions-when-batch-helper 1 \
+  --summary-json "$TMP_DIR/roadmap_progress_base_multi_vm_plus_cycle_suppressed_summary.json" \
+  --report-md "$TMP_DIR/roadmap_progress_base_multi_vm_plus_cycle_suppressed_report.md" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_base_multi_vm_plus_cycle_suppressed.log 2>&1; then
+  echo "expected success for mixed base multi-VM plus cycle-batch covered suppression path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_base_multi_vm_plus_cycle_suppressed.log
+  exit 1
+fi
+if ! jq -e \
+  --argjson expect_cycle_batch_helper "$INVALID_PROMOTION_REASON_EXPECT_CYCLE_BATCH_HELPER_JSON" \
+  '
+  ((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability"))
+  and (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
+  and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion")) | not)
+  and (((.next_actions // []) | any(.id == "runtime_actuation_promotion")) | not)
+  and ((.next_actions // []) | any(.id == "roadmap_live_evidence_actionable_run"))
+  and .next_actions_summary.live_evidence_batch_helper_emitted == true
+  and .next_actions_summary.live_evidence_individual_suppression_mode == true
+  and .next_actions_summary.live_evidence_individual_suppression_applied == true
+  and .next_actions_summary.live_evidence_pending_action_count_after_bundle >= 2
+  and (if $expect_cycle_batch_helper then
+         .next_actions_summary.live_evidence_cycle_batch_helper_available == true
+         and .next_actions_summary.live_evidence_cycle_batch_helper_emitted == true
+         and .next_actions_summary.live_evidence_cycle_batch_helper_count == 1
+         and ((.next_actions // []) | any(
+           .id == "roadmap_live_evidence_cycle_batch_run"
+           and ((.missing_evidence_families // []) | index("runtime-actuation")) != null
+           and (((.missing_evidence_families // []) | index("multi-vm")) == null)
+         ))
+       else
+         .next_actions_summary.live_evidence_cycle_batch_helper_emitted == false
+         and .next_actions_summary.live_evidence_cycle_batch_helper_count == 0
+         and (((.next_actions // []) | any(.id == "roadmap_live_evidence_cycle_batch_run")) | not)
+       end)
+' "$TMP_DIR/roadmap_progress_base_multi_vm_plus_cycle_suppressed_summary.json" >/dev/null; then
+  echo "mixed base multi-VM plus cycle-batch suppression summary mismatch"
+  cat "$TMP_DIR/roadmap_progress_base_multi_vm_plus_cycle_suppressed_summary.json"
   exit 1
 fi
 
