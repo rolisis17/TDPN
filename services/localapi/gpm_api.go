@@ -3230,18 +3230,21 @@ func (s *Service) handleGPMOnboardingOverview(w http.ResponseWriter, r *http.Req
 		return
 	}
 	registrationState := s.buildGPMClientRegistration(r.Context(), session)
+	readiness := s.buildGPMServerReadiness(
+		walletAddress,
+		session,
+		true,
+		registrationState.Status,
+		registrationState.StatusReason,
+	)
+	contribution := s.gpmContributionStatusForSession(session, time.Now().UTC())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":           true,
-		"session":      serializeGPMSession(session),
-		"registration": registrationState.Registration,
-		"readiness": s.buildGPMServerReadiness(
-			walletAddress,
-			session,
-			true,
-			registrationState.Status,
-			registrationState.StatusReason,
-		),
-		"contribution": s.gpmContributionStatusForSession(session, time.Now().UTC()),
+		"ok":            true,
+		"session":       serializeGPMSession(session),
+		"registration":  registrationState.Registration,
+		"readiness":     readiness,
+		"contribution":  contribution,
+		"beta_guidance": buildGPMOnboardingBetaGuidance(session, registrationState, readiness, contribution),
 	})
 }
 
@@ -4622,6 +4625,147 @@ func (s *Service) buildGPMServerReadiness(walletAddress string, session gpmSessi
 	}
 }
 
+func buildGPMOnboardingBetaGuidance(session gpmSession, registrationState gpmClientRegistrationState, readiness map[string]any, contribution map[string]any) map[string]any {
+	role := strings.ToLower(strings.TrimSpace(session.Role))
+	if role == "" {
+		role = "client"
+	}
+	registrationStatus := strings.ToLower(strings.TrimSpace(registrationState.Status))
+	registrationReason := strings.TrimSpace(registrationState.StatusReason)
+	if registrationStatus == "" || registrationStatus == "not_registered" {
+		return map[string]any{
+			"state":            "client_register_required",
+			"next_action":      "Register Client",
+			"next_actions":     []string{"Register Client", "Refresh onboarding overview"},
+			"detail":           firstNonEmpty(registrationReason, "Client registration is required before connect controls are ready."),
+			"blocked_controls": []string{"connect"},
+		}
+	}
+	if registrationStatus == "degraded" {
+		return map[string]any{
+			"state":            "client_registration_degraded",
+			"next_action":      "Register Client",
+			"next_actions":     []string{"Register Client", "Refresh Bootstrap trust status"},
+			"detail":           firstNonEmpty(registrationReason, "Client registration trust must be refreshed before connect controls are ready."),
+			"blocked_controls": []string{"connect"},
+		}
+	}
+
+	if role == "admin" {
+		if unlocked, ok := readiness["lifecycle_actions_unlocked"].(bool); ok && !unlocked {
+			actions := stringSliceFromAny(readiness["unlock_actions"])
+			if len(actions) == 0 {
+				actions = []string{"Check Server Application"}
+			}
+			return map[string]any{
+				"state":            "admin_readiness_locked",
+				"next_action":      actions[0],
+				"next_actions":     actions,
+				"detail":           firstNonEmpty(stringFromAny(readiness["lock_reason"]), "Admin server lifecycle readiness is locked."),
+				"blocked_controls": []string{"server_lifecycle"},
+			}
+		}
+		return map[string]any{
+			"state":            "admin_ready",
+			"next_action":      "Continue in Admin Console or Server controls",
+			"next_actions":     []string{"Check Server Status", "Continue in Admin Console"},
+			"detail":           "Admin session is ready for governance and server operations.",
+			"blocked_controls": []string{},
+		}
+	}
+
+	if role == "operator" || role == "server" || role == "server_only" {
+		status := strings.ToLower(stringFromAny(readiness["operator_application_status"]))
+		if status == "" {
+			status = "not_submitted"
+		}
+		switch status {
+		case "pending":
+			return map[string]any{
+				"state":            "operator_pending",
+				"next_action":      "Wait for operator approval",
+				"next_actions":     []string{"Check Server Application", "Wait for operator approval"},
+				"detail":           "Operator approval is pending before server lifecycle controls can unlock.",
+				"blocked_controls": []string{"server_lifecycle"},
+			}
+		case "rejected":
+			return map[string]any{
+				"state":            "operator_rejected",
+				"next_action":      "Apply to Run Server",
+				"next_actions":     []string{"Apply to Run Server", "Check Server Application"},
+				"detail":           "Operator application was rejected; update server details and re-apply.",
+				"blocked_controls": []string{"server_lifecycle"},
+			}
+		case "approved":
+			if unlocked, ok := readiness["lifecycle_actions_unlocked"].(bool); ok && !unlocked {
+				actions := stringSliceFromAny(readiness["unlock_actions"])
+				if len(actions) == 0 {
+					actions = []string{"Check Server Application"}
+				}
+				nextAction := actions[0]
+				return map[string]any{
+					"state":            "operator_readiness_locked",
+					"next_action":      nextAction,
+					"next_actions":     actions,
+					"detail":           firstNonEmpty(stringFromAny(readiness["lock_reason"]), "Operator approval exists, but server lifecycle readiness is still locked."),
+					"blocked_controls": []string{"server_lifecycle"},
+				}
+			}
+		default:
+			return map[string]any{
+				"state":            "operator_application_required",
+				"next_action":      "Apply to Run Server",
+				"next_actions":     []string{"Apply to Run Server", "Check Server Application"},
+				"detail":           "Submit an operator application before server lifecycle controls can unlock.",
+				"blocked_controls": []string{"server_lifecycle"},
+			}
+		}
+	}
+
+	if canEnable, ok := contribution["can_enable_requested_role"].(bool); ok && canEnable {
+		return map[string]any{
+			"state":            "client_ready",
+			"next_action":      "Connect or enable contribution mode",
+			"next_actions":     []string{"Connect", "Enable contribution mode"},
+			"detail":           "Client registration is ready; connect normally or opt in to contribution mode.",
+			"blocked_controls": []string{},
+		}
+	}
+	return map[string]any{
+		"state":            "client_ready",
+		"next_action":      "Connect",
+		"next_actions":     []string{"Connect", "Refresh onboarding overview"},
+		"detail":           firstNonEmpty(stringFromAny(contribution["contribution_lock_reason"]), "Client registration is ready for connection controls."),
+		"blocked_controls": []string{},
+	}
+}
+
+func stringSliceFromAny(value any) []string {
+	raw, ok := value.([]string)
+	if ok {
+		out := make([]string, 0, len(raw))
+		for _, item := range raw {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return out
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if text, ok := item.(string); ok {
+			if trimmed := strings.TrimSpace(text); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+	}
+	return out
+}
+
 type gpmEndpointDiagnosticEntry struct {
 	Scheme     string
 	Host       string
@@ -4955,11 +5099,8 @@ func (s *Service) handleGPMOperatorStatus(w http.ResponseWriter, r *http.Request
 	app, ok := s.gpmState.getOperator(walletAddress)
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok": true,
-			"application": map[string]any{
-				"wallet_address": walletAddress,
-				"status":         "not_submitted",
-			},
+			"ok":          true,
+			"application": serializeGPMOperatorNotSubmitted(walletAddress),
 		})
 		return
 	}
@@ -5246,6 +5387,7 @@ func serializeGPMFundReservation(reservation settlement.FundReservation) map[str
 }
 
 func serializeGPMOperator(app gpmOperatorApplication) map[string]any {
+	nextAction, requiredConditions := gpmOperatorApplicationNextAction(app)
 	return map[string]any{
 		"wallet_address":            app.WalletAddress,
 		"chain_operator_id":         app.ChainOperatorID,
@@ -5254,7 +5396,59 @@ func serializeGPMOperator(app gpmOperatorApplication) map[string]any {
 		"reason":                    app.Reason,
 		"approval_evidence_source":  strings.TrimSpace(app.ApprovalEvidenceSource),
 		"approval_evidence_trusted": gpmOperatorApprovalEvidenceTrusted(app),
+		"next_action":               nextAction,
+		"required_conditions":       requiredConditions,
 		"updated_at_utc":            app.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+func serializeGPMOperatorNotSubmitted(walletAddress string) map[string]any {
+	app := gpmOperatorApplication{
+		WalletAddress: normalizeWalletAddress(walletAddress),
+		Status:        "not_submitted",
+	}
+	nextAction, requiredConditions := gpmOperatorApplicationNextAction(app)
+	return map[string]any{
+		"wallet_address":      app.WalletAddress,
+		"status":              app.Status,
+		"next_action":         nextAction,
+		"required_conditions": requiredConditions,
+	}
+}
+
+func gpmOperatorApplicationNextAction(app gpmOperatorApplication) (string, []string) {
+	status := strings.ToLower(strings.TrimSpace(app.Status))
+	switch status {
+	case "", "not_submitted":
+		return "submit_operator_application", []string{
+			"wallet_bound_session",
+			"chain_operator_id",
+		}
+	case "pending":
+		return "wait_for_operator_approval", []string{
+			"admin_or_chain_governance_approval",
+			"approved_operator_application",
+		}
+	case "rejected":
+		return "reapply_operator_application", []string{
+			"updated_operator_application",
+			"admin_or_chain_governance_approval",
+		}
+	case "approved":
+		if gpmOperatorApprovalEvidenceTrusted(app) {
+			return "refresh_operator_session", []string{
+				"operator_session_role",
+				"matching_chain_operator_id",
+			}
+		}
+		return "wait_for_trusted_approval_evidence", []string{
+			"chain_governance_or_signed_attestation",
+			"trusted_approval_evidence_source",
+		}
+	default:
+		return "resolve_operator_application_status", []string{
+			"valid_operator_application_status",
+		}
 	}
 }
 

@@ -284,6 +284,51 @@ assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"suggested_tests": ["scrip
 assert_file_contains "$ACCESS_RECOVERY_SUMMARY_JSON" '"suggested_files": ["docs/gpm-productization-status.md", "docs/global-privacy-mesh-track.md", "docs/product-roadmap.md", "docs/access-recovery-toolkit-track.md", "docs/access-recovery-operator-runbook.md", "scripts/access_recovery_real_helper_evidence_run.sh", "scripts/access_bridge_pilot_evidence_bundle_verify.sh", "scripts/roadmap_progress_report.sh"]' "access recovery suggested files missing"
 assert_file_contains "$ACCESS_RECOVERY_STDOUT" "## Missing / Next (6)" "access recovery markdown missing expanded missing/next count"
 
+echo "[gpm-gap-scan] access recovery operator command is redacted in artifacts"
+ACCESS_RECOVERY_REDACTION_INPUT="$TMP_DIR/access_recovery_redaction_roadmap.json"
+ACCESS_RECOVERY_REDACTION_SUMMARY_JSON="$TMP_DIR/access_recovery_redaction_summary.json"
+ACCESS_RECOVERY_REDACTION_STDOUT="$TMP_DIR/access_recovery_redaction_stdout.md"
+
+cat >"$ACCESS_RECOVERY_REDACTION_INPUT" <<'EOF_ACCESS_RECOVERY_REDACTION'
+{
+  "access_recovery_pilot_handoff_ready": false,
+  "access_recovery_track": {
+    "status": "installed-host-evidence-required",
+    "pilot_handoff_ready": false,
+    "needs_attention": true,
+    "trusted_verifier_receipt_valid": false,
+    "trusted_pilot_receipt_ready": false,
+    "verifier_pilot_handoff_ready": false,
+    "preferred_operator_next_action": {
+      "id": "sensitive_command_preview",
+      "command": "./scripts/easy_node.sh access-recovery-real-helper-evidence-run --subject inv-secret-leak --admin-token super-admin-token --bootstrap-directory http://user:pass@helper.example/path?token=supersecret",
+      "reason": "Retry with AUTH_TOKEN=reason-secret and --invite-key inv-reason-leak",
+      "placeholder_unresolved": false,
+      "safe_to_execute_as_is": true
+    }
+  }
+}
+EOF_ACCESS_RECOVERY_REDACTION
+
+bash "$SCRIPT_UNDER_TEST" \
+  --status-doc "$ACCESS_RECOVERY_STATUS_DOC" \
+  --roadmap-summary-json "$ACCESS_RECOVERY_REDACTION_INPUT" \
+  --summary-json "$ACCESS_RECOVERY_REDACTION_SUMMARY_JSON" \
+  --print-summary-json 0 >"$ACCESS_RECOVERY_REDACTION_STDOUT"
+
+assert_file_contains "$ACCESS_RECOVERY_REDACTION_SUMMARY_JSON" '"command_redacted": true' "access recovery redaction summary missing command_redacted marker"
+assert_file_contains "$ACCESS_RECOVERY_REDACTION_SUMMARY_JSON" '--subject [redacted] --admin-token [redacted]' "access recovery command did not redact secret flags"
+assert_file_contains "$ACCESS_RECOVERY_REDACTION_SUMMARY_JSON" 'http://[redacted]@helper.example/path?token=[redacted]' "access recovery command did not redact URL credentials/query token"
+assert_file_contains "$ACCESS_RECOVERY_REDACTION_SUMMARY_JSON" 'AUTH_TOKEN=[redacted] and --invite-key [redacted]' "access recovery reason did not redact secret env/flag values"
+for leaked in inv-secret-leak super-admin-token user:pass supersecret reason-secret inv-reason-leak; do
+  if grep -F -- "$leaked" "$ACCESS_RECOVERY_REDACTION_SUMMARY_JSON" "$ACCESS_RECOVERY_REDACTION_STDOUT" >/dev/null 2>&1; then
+    echo "access recovery redaction leaked sensitive token: $leaked"
+    cat "$ACCESS_RECOVERY_REDACTION_SUMMARY_JSON"
+    cat "$ACCESS_RECOVERY_REDACTION_STDOUT"
+    exit 1
+  fi
+done
+
 echo "[gpm-gap-scan] access recovery ready roadmap state does not add a blocker"
 ACCESS_RECOVERY_READY_INPUT="$TMP_DIR/access_recovery_ready_roadmap.json"
 ACCESS_RECOVERY_READY_SUMMARY_JSON="$TMP_DIR/access_recovery_ready_summary.json"

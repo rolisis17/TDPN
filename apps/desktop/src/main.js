@@ -219,6 +219,7 @@ const state = {
   sessionExpiryAtMs: undefined,
   sessionExpiryToken: "",
   role: "client",
+  betaGuidance: null,
   operatorApplicationStatus: undefined,
   selectedApplicationUpdatedAtUtc: "",
   serverReadiness: null,
@@ -642,6 +643,18 @@ function pushUniqueNonEmptyString(target, value) {
   if (!target.includes(parsed)) {
     target.push(parsed);
   }
+}
+
+function parseNonEmptyStringList(value) {
+  const values = [];
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      pushUniqueNonEmptyString(values, entry);
+    }
+    return values;
+  }
+  pushUniqueNonEmptyString(values, value);
+  return values;
 }
 
 function appendBootstrapDirectoryEntries(target, value) {
@@ -3734,6 +3747,30 @@ function parseServerReadiness(payload) {
   };
 }
 
+function parseDesktopBetaGuidance(payload) {
+  const guidance = firstDefined(payload?.beta_guidance, payload?.betaGuidance);
+  if (!guidance || typeof guidance !== "object") {
+    return null;
+  }
+  const nextAction = nonEmptyStringOrUndefined(firstDefined(guidance.next_action, guidance.nextAction));
+  const detail = nonEmptyStringOrUndefined(guidance.detail);
+  const stateValue = nonEmptyStringOrUndefined(guidance.state);
+  const nextActions = parseNonEmptyStringList(firstDefined(guidance.next_actions, guidance.nextActions));
+  const blockedControls = parseNonEmptyStringList(
+    firstDefined(guidance.blocked_controls, guidance.blockedControls)
+  );
+  if (!nextAction && !detail && !stateValue) {
+    return null;
+  }
+  return {
+    state: stateValue,
+    nextAction,
+    nextActions,
+    detail,
+    blockedControls
+  };
+}
+
 function setServerReadiness(readiness) {
   state.serverReadiness = readiness || null;
   if (readiness?.operatorApplicationStatus !== undefined) {
@@ -3833,6 +3870,10 @@ function computeDesktopNextRecommendedAction() {
   }
   if (sessionFreshness.state === "unknown") {
     return "Run Session to validate session freshness.";
+  }
+
+  if (state.betaGuidance?.nextAction) {
+    return state.betaGuidance.nextAction;
   }
 
   if (state.clientRegistrationTrustDegraded || state.clientRegistrationReregisterRequired) {
@@ -4695,6 +4736,7 @@ function setSessionToken(value, options = {}) {
     clearClientRegistrationTrustState();
     clearOperatorListPaginationState();
     state.contributionStatus = null;
+    state.betaGuidance = null;
     state.sessionBootstrapDirectoryOptions = [];
     state.readinessHeartbeatInFlight = false;
     state.readinessFreshnessLastAttemptMs = 0;
@@ -5222,6 +5264,7 @@ function applyOnboardingOverviewState(payload) {
   refreshSessionFreshnessFromPayload(payload, { tokenOverride: state.sessionToken });
   setClientRegistrationStateFromPayload(payload, { allowFallback: true });
   setRole(parseSessionRole(payload));
+  state.betaGuidance = parseDesktopBetaGuidance(payload);
   setServerReadiness(parseServerReadiness(payload));
 }
 

@@ -13370,6 +13370,13 @@ func TestGPMOnboardingOverview(t *testing.T) {
 		if _, ok := readiness["chain_binding_reason"]; !ok {
 			t.Fatalf("readiness.chain_binding_reason missing payload=%v", payload)
 		}
+		guidance, _ := payload["beta_guidance"].(map[string]any)
+		if guidance == nil {
+			t.Fatalf("beta_guidance missing payload=%v", payload)
+		}
+		if got, _ := guidance["next_action"].(string); got == "" {
+			t.Fatalf("beta_guidance.next_action=%q want non-empty payload=%v", got, payload)
+		}
 	})
 
 	t.Run("manifest drift revokes registration readiness", func(t *testing.T) {
@@ -13443,6 +13450,16 @@ func TestGPMOnboardingOverview(t *testing.T) {
 		if got, _ := readiness["client_lock_reason"].(string); !strings.Contains(got, "no longer trusted") {
 			t.Fatalf("readiness.client_lock_reason=%q want trust-revoked guidance payload=%v", got, payload)
 		}
+		guidance, _ := payload["beta_guidance"].(map[string]any)
+		if guidance == nil {
+			t.Fatalf("beta_guidance missing payload=%v", payload)
+		}
+		if got, _ := guidance["state"].(string); got != "client_register_required" {
+			t.Fatalf("beta_guidance.state=%q want client_register_required payload=%v", got, payload)
+		}
+		if got, _ := guidance["next_action"].(string); got != "Register Client" {
+			t.Fatalf("beta_guidance.next_action=%q want Register Client payload=%v", got, payload)
+		}
 	})
 
 	t.Run("manifest revalidation hard failure reports degraded registration readiness", func(t *testing.T) {
@@ -13501,7 +13518,19 @@ func TestGPMOnboardingOverview(t *testing.T) {
 		const (
 			sessionToken = "gpm-overview-operator-approved-missing-session-chain-token"
 			wallet       = "cosmos1overviewmissingchainsession"
+			bootstrapDir = "https://directory.globalprivatemesh.example:8081"
 		)
+		manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"version":               1,
+				"generated_at_utc":      now.Format(time.RFC3339),
+				"expires_at_utc":        now.Add(time.Hour).Format(time.RFC3339),
+				"bootstrap_directories": []string{bootstrapDir},
+			})
+		}))
+		t.Cleanup(manifestServer.Close)
+		svc.gpmMainDomain = manifestServer.URL
+		svc.gpmManifestURL = manifestServer.URL
 		svc.gpmState.putSession(gpmSession{
 			Token:              sessionToken,
 			WalletAddress:      wallet,
@@ -13509,7 +13538,7 @@ func TestGPMOnboardingOverview(t *testing.T) {
 			Role:               "operator",
 			CreatedAt:          now,
 			ExpiresAt:          now.Add(time.Hour),
-			BootstrapDirectory: "https://directory.globalprivatemesh.example:8081",
+			BootstrapDirectory: bootstrapDir,
 			InviteKey:          "inv-overview-missing-session-chain",
 			PathProfile:        "2hop",
 		})
@@ -13554,6 +13583,16 @@ func TestGPMOnboardingOverview(t *testing.T) {
 		lockReason, _ := readiness["lock_reason"].(string)
 		if strings.TrimSpace(lockReason) == "" {
 			t.Fatalf("readiness.lock_reason=%q want non-empty payload=%v", lockReason, payload)
+		}
+		guidance, _ := payload["beta_guidance"].(map[string]any)
+		if guidance == nil {
+			t.Fatalf("beta_guidance missing payload=%v", payload)
+		}
+		if got, _ := guidance["state"].(string); got != "operator_readiness_locked" {
+			t.Fatalf("beta_guidance.state=%q want operator_readiness_locked payload=%v", got, payload)
+		}
+		if got, _ := guidance["next_action"].(string); got == "" {
+			t.Fatalf("beta_guidance.next_action=%q want non-empty payload=%v", got, payload)
 		}
 	})
 }

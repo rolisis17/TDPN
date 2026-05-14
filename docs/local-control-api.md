@@ -30,31 +30,42 @@ Defaults:
   - `LOCAL_CONTROL_API_SERVICE_RESTART_COMMAND`
 - optional production policy mode (umbrella defaulting):
   - `GPM_PRODUCTION_MODE=1` (legacy alias: `TDPN_PRODUCTION_MODE=1`)
-  - when enabled and explicit per-flag overrides are unset, daemon defaults become:
+  - when enabled, daemon production policy applies in two classes:
+    - production-enforced gates stay closed even when compatibility envs try to relax them
+    - production-default gates become strict only when their explicit per-flag overrides are unset or invalid
+  - production-enforced gates:
     - `/v1/connect` session-required (`connect_require_session=true`)
     - manual bootstrap/invite compatibility override locked (`allow_legacy_connect_override=false`)
+    - legacy connect bootstrap resolution must use trusted manifest bootstrap evidence (`gpm_legacy_connect_require_trusted_manifest_bootstrap=true`)
     - bootstrap manifest transport hardening enabled (`gpm_manifest_require_https=true`)
     - bootstrap manifest signature evidence required (`gpm_manifest_require_signature=true`)
+    - GPM settlement finalization requires a chain-backed settlement adapter (`gpm_settlement_chain_required=true`)
+  - production-default gates when explicit per-flag overrides are unset:
     - auth-verify external verifier command required (`gpm_auth_verify_require_command=true`)
     - auth-verify strict metadata required (`gpm_auth_verify_require_metadata=true`)
     - auth-verify strict wallet-extension-source required (`gpm_auth_verify_require_wallet_extension_source=true`)
     - auth-verify strict cryptographic proof required (`gpm_auth_verify_require_crypto_proof=true`)
     - legacy `/v1/service/start|stop|restart` mutations blocked (`allow_legacy_service_mutations=false`)
-    - GPM settlement finalization requires a chain-backed settlement adapter (`gpm_settlement_chain_required=true`)
-  - explicit env overrides still take precedence over production defaults (`GPM_CONNECT_REQUIRE_SESSION`, `GPM_OPERATOR_APPROVAL_REQUIRE_SESSION`, `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE`, `GPM_ALLOW_LEGACY_SERVICE_MUTATIONS`, `GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS`, `GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE`, `GPM_AUTH_VERIFY_REQUIRE_COMMAND`, `GPM_AUTH_VERIFY_REQUIRE_METADATA`, `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE`, `GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF`, plus legacy `TDPN_*` aliases)
+  - ordinary explicit env overrides still take precedence over production defaults where the gate is not production-enforced (`GPM_OPERATOR_APPROVAL_REQUIRE_SESSION`, `GPM_AUTH_VERIFY_REQUIRE_COMMAND`, `GPM_AUTH_VERIFY_REQUIRE_METADATA`, `GPM_AUTH_VERIFY_REQUIRE_WALLET_EXTENSION_SOURCE`, `GPM_AUTH_VERIFY_REQUIRE_CRYPTO_PROOF`, plus legacy `TDPN_*` aliases)
+  - `GPM_ALLOW_LEGACY_SERVICE_MUTATIONS=1` is the only documented break-glass override in this policy set; it reopens legacy `/v1/service/*` mutations for emergency compatibility only
+  - disabling envs such as `GPM_CONNECT_REQUIRE_SESSION=0`, `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE=1`, `GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP=0`, `GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS=0`, or `GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE=0` do not relax the corresponding production-enforced gates
 - GPM settlement adapter wiring:
   - compatibility mode defaults to local memory settlement for developer flows.
   - production mode (`GPM_PRODUCTION_MODE=1`) still boots without a configured adapter for status/config inspection, but Admin Console reward finalization fails closed until `gpm_settlement_chain_backed=true`.
   - set `GPM_SETTLEMENT_COSMOS_ENDPOINT` (legacy alias: `TDPN_SETTLEMENT_COSMOS_ENDPOINT`) to wire the local settlement service through `CosmosAdapter`; `GPM_SETTLEMENT_BACKEND=cosmos` can require Cosmos wiring explicitly (`auto|memory|cosmos`, legacy alias: `TDPN_SETTLEMENT_BACKEND`).
   - optional Cosmos adapter env: `GPM_SETTLEMENT_COSMOS_API_KEY`, `GPM_SETTLEMENT_COSMOS_QUEUE_SIZE`, `GPM_SETTLEMENT_COSMOS_MAX_RETRIES`, `GPM_SETTLEMENT_COSMOS_BASE_BACKOFF_MS`, `GPM_SETTLEMENT_COSMOS_HTTP_TIMEOUT_SEC`, `GPM_SETTLEMENT_COSMOS_ALLOW_INSECURE_HTTP`, `GPM_SETTLEMENT_COSMOS_SUBMIT_MODE`, and signed-tx fields `GPM_SETTLEMENT_COSMOS_SIGNED_TX_BROADCAST_PATH`, `GPM_SETTLEMENT_COSMOS_SIGNED_TX_CHAIN_ID`, `GPM_SETTLEMENT_COSMOS_SIGNED_TX_SIGNER`, `GPM_SETTLEMENT_COSMOS_SIGNED_TX_SECRET`, `GPM_SETTLEMENT_COSMOS_SIGNED_TX_SECRET_FILE`, `GPM_SETTLEMENT_COSMOS_SIGNED_TX_KEY_ID` (all support `TDPN_*` legacy aliases).
   - `/v1/config` reports non-secret settlement posture only; adapter secrets and API keys are never returned.
-- optional `/v1/connect` hardening flags (standalone or as explicit overrides):
+- optional `/v1/connect` hardening flags (standalone in compatibility mode; production-enforced where noted):
   - `GPM_CONNECT_REQUIRE_SESSION=1` (legacy alias: `TDPN_CONNECT_REQUIRE_SESSION=1`)
   - when enabled, `/v1/connect` requires a registered `session_token` and rejects manual `bootstrap_directory` / `invite_key` overrides
-  - default remains legacy-compatible unless this flag (or production mode defaults) is enabled
+  - default remains legacy-compatible unless this flag is enabled or production mode enforces session-required connect
   - optional desktop/web compatibility-control gate:
     - `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE=1` (legacy alias: `TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE=1`)
     - when disabled (default), UI compatibility controls for manual bootstrap/invite overrides are hidden by policy
+    - production mode keeps this gate disabled even when the env is set; use signed manifest-backed session bootstrap instead
+  - optional trusted-manifest bootstrap gate for legacy connect compatibility:
+    - `GPM_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP=1` (legacy alias: `TDPN_LEGACY_CONNECT_REQUIRE_TRUSTED_MANIFEST_BOOTSTRAP=1`)
+    - production mode keeps this gate enabled even when the env is set to `0`
 - strict operator-approval auth policy:
   - `GPM_OPERATOR_APPROVAL_REQUIRE_SESSION=1` (legacy alias: `TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION=1`)
   - when enabled, `POST /v1/gpm/onboarding/operator/approve` requires an admin `session_token` and rejects legacy `admin_token` fallback
@@ -69,10 +80,11 @@ Defaults:
   - cache fallback uses the same host check against the cached manifest source URL
   - this complements existing signature verification and expiry checks
   - if the main domain is unset, this hardening is skipped for dev compatibility
-- optional bootstrap manifest transport/signature hardening flags (standalone or as explicit production-default overrides):
+- optional bootstrap manifest transport/signature hardening flags (standalone in compatibility mode; production-enforced when production mode is enabled):
   - `GPM_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS=1` (legacy alias: `TDPN_BOOTSTRAP_MANIFEST_REQUIRE_HTTPS=1`) requires HTTPS for bootstrap manifest URLs when the host is non-loopback or when a pinned main domain is configured
   - `GPM_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE=1` (legacy alias: `TDPN_BOOTSTRAP_MANIFEST_REQUIRE_SIGNATURE=1`) requires verified manifest signature evidence for both remote fetch and cache fallback
-  - default for both flags is `false` in compatibility mode, and `true` by default when `GPM_PRODUCTION_MODE=1` is enabled with no explicit override
+  - default for both flags is `false` in compatibility mode, and `true` by default when `GPM_PRODUCTION_MODE=1` is enabled
+  - production mode enforces both flags even when an env override tries to set either one to `0`
   - production manifest fetches use a direct hardened outbound policy and fail closed when the manifest target resolves to private, loopback, link-local, unspecified, or multicast addresses
 - bootstrap resilience planning:
   - signed bootstrap manifests remain the trust anchor for first contact; see `docs/gpm-bootstrap-resilience-track.md`
@@ -176,11 +188,17 @@ GPM onboarding/session endpoints (used by desktop and portal flows):
 - `POST /v1/gpm/admin/rewards/hold` (Admin Console API surface only; mutation auth plus `admin` `session_token`; `action=hold|release` places or releases weekly reward holds before finalization)
 - `POST /v1/gpm/admin/rewards/finalize` (Admin Console API surface only; mutation auth plus `admin` `session_token`; finalizes a closed weekly reward after holds and, in production, objective signed or chain-queryable traffic proof evidence checks, then submits/reconciles the settlement reward issue)
 - `POST /v1/gpm/onboarding/operator/apply`
-- `POST /v1/gpm/onboarding/operator/status`
+- `POST /v1/gpm/onboarding/operator/status` (response `application` includes additive backend guidance fields `next_action` and `required_conditions` so UIs do not need to infer operator workflow state locally)
 - `POST /v1/gpm/onboarding/operator/list` (admin-only; supports optional `status` filter (`pending|approved|rejected`), optional `search` substring filter (`wallet_address`, `chain_operator_id`, `server_label`, `status`, `reason`), optional `limit` (default `100`, clamped `1..500`), and optional cursor pagination via `cursor="<updated_at_utc>|<wallet_address>"`; response includes additive pagination metadata `total`, `has_more`, `next_cursor`, and echoed `request` fields)
 - `POST /v1/gpm/onboarding/operator/approve` (requires admin authorization: `session_token` with admin role, or legacy `admin_token` fallback when an approval admin token env is configured; strict mode `GPM_OPERATOR_APPROVAL_REQUIRE_SESSION=1` (legacy alias: `TDPN_OPERATOR_APPROVAL_REQUIRE_SESSION=1`) disables that fallback and fails closed unless an admin `session_token` is provided; primary approval-token env is `GPM_APPROVAL_ADMIN_TOKEN` (legacy aliases: `TDPN_APPROVAL_ADMIN_TOKEN`, `GPM_OPERATOR_APPROVAL_TOKEN`, `TDPN_OPERATOR_APPROVAL_TOKEN`); request body supports optional optimistic concurrency precondition `if_updated_at_utc` (RFC3339); successful responses include additive `decision` (`approved|rejected`) and `decision_auth` (`admin_session|legacy_admin_token`) metadata; matching wallet sessions are promoted on approval and demoted on rejection)
 - `GET /v1/gpm/audit/recent` (command-read auth; supports optional `limit` (default `25`, clamped `1..200`), optional `offset` (`>=0`), optional exact case-insensitive `event` filter, optional normalized `wallet_address` filter against `fields.wallet_address`, and optional `order` (`desc|asc`, default `desc`); response includes additive metadata `total`, `count`, `limit`, `offset`, `has_more`, `next_offset`, and echoed `filters`)
 - `GET /v1/gpm/gaps/summary` (command-read auth; reads `GPM_GAP_SCAN_SUMMARY_JSON` (legacy alias `TDPN_GAP_SCAN_SUMMARY_JSON`, default `.easy-node-logs/gpm_gap_scan_summary.json`) and returns fail-closed status: `ok` with normalized `in_progress`/`missing_next` items plus convenience `key_gaps`/`next_actions`, or one of `artifact_missing|artifact_unreadable|artifact_malformed` when source evidence is unavailable or invalid)
+
+Onboarding overview guidance:
+- `POST /v1/gpm/onboarding/overview` returns additive `beta_guidance` with backend-authored `state`, `next_action`, `next_actions`, `detail`, and `blocked_controls` fields.
+- Public portal and desktop UIs should prefer `beta_guidance.next_action` after local session freshness checks, while keeping their existing fallback sequence for older daemons.
+- Operator application responses use machine-readable `next_action` values such as `submit_operator_application`, `wait_for_operator_approval`, `reapply_operator_application`, `wait_for_trusted_approval_evidence`, `refresh_operator_session`, and `resolve_operator_application_status`.
+- `required_conditions` lists the backend conditions that must be satisfied before the operator flow can progress, for example `chain_operator_id`, `approved_operator_application`, `trusted_approval_evidence_source`, or `matching_chain_operator_id`.
 
 Contribution policy notes:
 - `micro-relay` remains available when tier, stake, prepaid, and agent-capacity gates pass.
@@ -275,6 +293,8 @@ If auth is required and missing/invalid, the API returns `401`.
     "connect_policy_source": "GPM_PRODUCTION_MODE",
     "gpm_operator_approval_require_session": true,
     "gpm_operator_approval_require_session_policy_source": "production-default",
+    "gpm_legacy_connect_require_trusted_manifest_bootstrap": true,
+    "gpm_legacy_connect_require_trusted_manifest_bootstrap_source": "production-default",
     "gpm_manifest_trust_policy_mode": "production",
     "gpm_manifest_trust_policy_source": "GPM_PRODUCTION_MODE",
     "gpm_manifest_require_https": true,
@@ -322,12 +342,14 @@ Policy posture config hints:
 - `connect_policy_source`: additive source for connect posture mode/defaulting (for example `GPM_PRODUCTION_MODE`, `GPM_CONNECT_REQUIRE_SESSION`, `TDPN_CONNECT_REQUIRE_SESSION`, or `default`).
 - `gpm_operator_approval_require_session`: whether strict operator-approval auth policy is enabled (`session_token` required for admin moderation decisions, legacy `admin_token` fallback disabled).
 - `gpm_operator_approval_require_session_policy_source`: additive source for operator-approval auth strictness (`production-default` when inherited from production mode with no explicit `GPM_OPERATOR_APPROVAL_REQUIRE_SESSION` override).
+- `gpm_legacy_connect_require_trusted_manifest_bootstrap`: whether legacy connect compatibility bootstrap must still resolve through trusted manifest evidence.
+- `gpm_legacy_connect_require_trusted_manifest_bootstrap_source`: additive source for trusted-manifest bootstrap strictness (`production-default`, `production-enforced`, or `production-invalid-env-fail-closed` when production mode keeps the gate enabled).
 - `gpm_manifest_trust_policy_mode`: additive manifest-trust posture mode (`default|production`).
 - `gpm_manifest_trust_policy_source`: additive source for manifest-trust posture mode/defaulting (for example `GPM_PRODUCTION_MODE` or `default`).
 - `gpm_manifest_require_https`: whether manifest URL transport hardening is enabled.
-- `gpm_manifest_require_https_policy_source`: additive source for manifest HTTPS strictness (`production-default` when inherited from production mode with no explicit manifest HTTPS env override).
+- `gpm_manifest_require_https_policy_source`: additive source for manifest HTTPS strictness (`production-default` when inherited from production mode with no explicit manifest HTTPS env override; `production-enforced` when production mode rejected a disabling env override).
 - `gpm_manifest_require_signature`: whether strict manifest signature evidence policy is enabled for both remote fetch and cache fallback.
-- `gpm_manifest_require_signature_policy_source`: additive source for manifest signature strictness (`production-default` when inherited from production mode with no explicit signature-policy env override).
+- `gpm_manifest_require_signature_policy_source`: additive source for manifest signature strictness (`production-default` when inherited from production mode with no explicit signature-policy env override; `production-enforced` when production mode rejected a disabling env override).
 - `gpm_manifest_cache_max_age_sec`: manifest cache trust max age in seconds (runtime value derived from `GPM_BOOTSTRAP_MANIFEST_CACHE_MAX_AGE_SEC`, legacy alias `TDPN_BOOTSTRAP_MANIFEST_CACHE_MAX_AGE_SEC`).
 - Trusted bootstrap manifests must also be short-lived: `expires_at_utc - generated_at_utc` is capped at 24 hours, even when signature and source policy checks pass.
 - `gpm_manifest_remote_refresh_interval_sec`: bounded periodic remote refresh interval in seconds when a trusted cache entry is still valid (runtime value derived from `GPM_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC`, legacy alias `TDPN_BOOTSTRAP_MANIFEST_REMOTE_REFRESH_INTERVAL_SEC`).
@@ -392,7 +414,7 @@ Notes:
 - loopback-only developer bootstrap may use `http://127.0.0.1:...` or `http://[::1]:...` when explicitly intended.
 - `http://localhost:...` is intentionally rejected by desktop validation; use literal loopback IPs to avoid hostname/DNS ambiguity.
 - bootstrap directory URLs are canonicalized before storage and trusted-manifest comparison, including lower-cased scheme/host, default-port elision, and trailing-slash normalization.
-- production hardening can be enabled explicitly (`GPM_CONNECT_REQUIRE_SESSION=1`, legacy `TDPN_CONNECT_REQUIRE_SESSION=1`) or inherited by default from `GPM_PRODUCTION_MODE=1` / `TDPN_PRODUCTION_MODE=1` when connect-specific overrides are unset; in hardening mode, connect requires `session_token` and rejects manual `bootstrap_directory`/`invite_key` request overrides.
+- production hardening can be enabled explicitly (`GPM_CONNECT_REQUIRE_SESSION=1`, legacy `TDPN_CONNECT_REQUIRE_SESSION=1`) or enforced by `GPM_PRODUCTION_MODE=1` / `TDPN_PRODUCTION_MODE=1`; in hardening mode, connect requires `session_token` and rejects manual `bootstrap_directory`/`invite_key` request overrides, and production mode does not allow `GPM_CONNECT_REQUIRE_SESSION=0` to relax this.
 - UI compatibility controls for manual `bootstrap_directory`/`invite_key` overrides are policy-gated by `GPM_ALLOW_LEGACY_CONNECT_OVERRIDE` (legacy alias: `TDPN_ALLOW_LEGACY_CONNECT_OVERRIDE`); default is hidden/disabled.
 - when hardening mode is not enabled (default), legacy `bootstrap_directory` + `invite_key` behavior remains available.
 - when connect resolves credentials from a registered `session_token`, the session-bound `path_profile` from client registration is authoritative.

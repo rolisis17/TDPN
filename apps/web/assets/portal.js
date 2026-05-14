@@ -183,6 +183,7 @@ const PERSISTED_FIELD_IDS = [
   "connect_ready_timeout_sec"
 ];
 let publicReadiness = null;
+let portalBetaGuidance = null;
 let clientRegistered = false;
 let clientRegistrationTrustDriftDetected = false;
 let clientRegistrationTrustDriftGuidance = "";
@@ -2913,6 +2914,34 @@ function parsePublicReadiness(payload) {
   };
 }
 
+function parsePortalBetaGuidance(payload) {
+  const guidance = firstDefined(payload?.beta_guidance, payload?.betaGuidance);
+  if (!guidance || typeof guidance !== "object") {
+    return null;
+  }
+  const nextAction = nonEmptyString(firstDefined(guidance.next_action, guidance.nextAction));
+  const detail = nonEmptyString(guidance.detail);
+  const state = nonEmptyString(guidance.state);
+  const blockedControls = parseNonEmptyStringList(
+    firstDefined(guidance.blocked_controls, guidance.blockedControls)
+  );
+  const nextActions = parseNonEmptyStringList(firstDefined(guidance.next_actions, guidance.nextActions));
+  if (!nextAction && !detail && !state) {
+    return null;
+  }
+  return {
+    state,
+    nextAction,
+    nextActions,
+    detail,
+    blockedControls
+  };
+}
+
+function setPortalBetaGuidance(value) {
+  portalBetaGuidance = value || null;
+}
+
 function setPublicReadiness(value) {
   publicReadiness = value || null;
   refreshClientReadiness();
@@ -3114,6 +3143,10 @@ function computePortalNextRecommendedAction() {
   }
   if (sessionFreshness.state === "expiring_soon") {
     return "Rotate Session.";
+  }
+
+  if (portalBetaGuidance?.nextAction) {
+    return portalBetaGuidance.nextAction;
   }
 
   const clientReadiness = computeClientReadiness();
@@ -3587,6 +3620,7 @@ function bindReadinessListeners() {
   byId("session_token").addEventListener("input", () => {
     markSessionFreshnessUnknownForCurrentToken();
     setPublicReadiness(null);
+    setPortalBetaGuidance(null);
     clientRegistered = false;
     setClientRegistrationTrustDriftState(false, "");
     clearPublicContributionState();
@@ -3788,6 +3822,7 @@ async function get(path) {
 }
 
 function applySession(result) {
+  setPortalBetaGuidance(null);
   syncSessionDerivedState(result);
   const token = result.session_token || byId("session_token").value.trim();
   byId("session_token").value = token;
@@ -4344,6 +4379,7 @@ function applyOnboardingOverviewPayload(payload) {
   if (payload.contribution && typeof payload.contribution === "object") {
     applyPublicContributionStatusPayload(payload.contribution);
   }
+  setPortalBetaGuidance(parsePortalBetaGuidance(payload));
   setPublicReadiness(parsePublicReadiness(payload));
 }
 
@@ -4730,6 +4766,7 @@ byId("session_revoke_btn").addEventListener("click", () =>
     byId("session_token").value = "";
     byId("role").value = "client";
     setPublicReadiness(null);
+    setPortalBetaGuidance(null);
     clearPublicContributionState();
     persistPortalState();
     await refreshBootstrapTrustStatusBestEffort({ quiet: true });
@@ -4931,6 +4968,7 @@ async function restoreSessionStatusBestEffort() {
   if (!token) {
     clearSessionFreshnessTelemetry();
     setPublicReadiness(null);
+    setPortalBetaGuidance(null);
     clearPublicContributionState();
     await refreshBootstrapTrustStatusBestEffort({ quiet: true });
     return;

@@ -128,6 +128,18 @@ json_escape() {
   printf '%s' "$value"
 }
 
+redact_sensitive_command_text() {
+  local value="${1:-}"
+  printf '%s' "$value" | sed -E '
+s/(--(subject|anon-cred|campaign-subject|campaign-anon-cred|key|invite-key|token|auth-token|admin-token|authorization|bearer|password|passwd|secret|api-key|private-key|private-key-file|secret-key|secret-key-file|admin-key|admin-key-file)(=|[[:space:]]+))[^[:space:]]+/\1[redacted]/g
+s/((^|[[:space:]])[A-Za-z_][A-Za-z0-9_]*(TOKEN|KEY|SECRET|PASSWORD|PASSWD|AUTHORIZATION|BEARER|CREDENTIAL)[A-Za-z0-9_]*=)[^[:space:]]+/\1[redacted]/Ig
+s/((Authorization|X-Admin-Token):[[:space:]]*(Bearer[[:space:]]*)?)[^[:space:]]+/\1[redacted]/Ig
+s~([A-Za-z][A-Za-z0-9+.-]*://)[^/?#@[:space:]]+@~\1[redacted]@~g
+s~([?&#](subject|anon_cred|anon-cred|invite_key|invite-key|key|token|access_token|refresh_token|api_key|apikey|auth_token|admin_token|authorization|bearer|password|secret)=)[^,&#[:space:]]+~\1[redacted]~Ig
+s/inv-[A-Za-z0-9._:-]+/[redacted-invite]/g
+'
+}
+
 fail_closed() {
   local message="${1:-malformed status document}"
   echo "[gpm-gap-scan] $message" >&2
@@ -1074,7 +1086,9 @@ access_recovery_verifier_pilot_handoff_ready="unknown"
 access_recovery_operator_next_action_source=""
 access_recovery_operator_next_action_id=""
 access_recovery_operator_next_action_command=""
+access_recovery_operator_next_action_command_redacted=""
 access_recovery_operator_next_action_reason=""
+access_recovery_operator_next_action_reason_redacted=""
 access_recovery_operator_next_action_placeholder_unresolved="unknown"
 access_recovery_operator_next_action_placeholder_keys=""
 access_recovery_operator_next_action_safe_to_execute="unknown"
@@ -1098,6 +1112,8 @@ if [[ -n "$roadmap_summary_json" ]]; then
       access_recovery_operator_next_action_id="$(jq -r --arg source "$access_recovery_operator_next_action_source" '.access_recovery_track[$source].id // ""' "$roadmap_summary_json")"
       access_recovery_operator_next_action_command="$(jq -r --arg source "$access_recovery_operator_next_action_source" '.access_recovery_track[$source].command // ""' "$roadmap_summary_json")"
       access_recovery_operator_next_action_reason="$(jq -r --arg source "$access_recovery_operator_next_action_source" '.access_recovery_track[$source].reason // ""' "$roadmap_summary_json")"
+      access_recovery_operator_next_action_command_redacted="$(redact_sensitive_command_text "$access_recovery_operator_next_action_command")"
+      access_recovery_operator_next_action_reason_redacted="$(redact_sensitive_command_text "$access_recovery_operator_next_action_reason")"
       access_recovery_operator_next_action_placeholder_unresolved="$(jq -r --arg source "$access_recovery_operator_next_action_source" 'if (.access_recovery_track[$source].placeholder_unresolved | type) == "boolean" then .access_recovery_track[$source].placeholder_unresolved else "unknown" end' "$roadmap_summary_json")"
       access_recovery_operator_next_action_placeholder_keys="$(jq -r --arg source "$access_recovery_operator_next_action_source" '[.access_recovery_track[$source].placeholder_keys[]?] | join(",")' "$roadmap_summary_json")"
       access_recovery_operator_next_action_safe_to_execute="$(jq -r --arg source "$access_recovery_operator_next_action_source" 'if (.access_recovery_track[$source].safe_to_execute_as_is | type) == "boolean" then .access_recovery_track[$source].safe_to_execute_as_is else "unknown" end' "$roadmap_summary_json")"
@@ -1113,9 +1129,9 @@ if [[ -n "$roadmap_summary_json" ]]; then
         if [[ -n "$access_recovery_operator_next_action_id" ]]; then
           access_recovery_gap_text+="/${access_recovery_operator_next_action_id}"
         fi
-        access_recovery_gap_text+="): ${access_recovery_operator_next_action_command}"
-        if [[ -n "$access_recovery_operator_next_action_reason" ]]; then
-          access_recovery_gap_text+=" Reason: ${access_recovery_operator_next_action_reason}"
+        access_recovery_gap_text+="): ${access_recovery_operator_next_action_command_redacted}"
+        if [[ -n "$access_recovery_operator_next_action_reason_redacted" ]]; then
+          access_recovery_gap_text+=" Reason: ${access_recovery_operator_next_action_reason_redacted}"
         fi
         if [[ "$access_recovery_operator_next_action_placeholder_unresolved" == "true" ]]; then
           access_recovery_gap_text+=" placeholder_unresolved=true"
@@ -1259,8 +1275,9 @@ done
       printf '{\n'
       printf '        "source": "%s",\n' "$(json_escape "$access_recovery_operator_next_action_source")"
       printf '        "id": "%s",\n' "$(json_escape "$access_recovery_operator_next_action_id")"
-      printf '        "command": "%s",\n' "$(json_escape "$access_recovery_operator_next_action_command")"
-      printf '        "reason": "%s",\n' "$(json_escape "$access_recovery_operator_next_action_reason")"
+      printf '        "command": "%s",\n' "$(json_escape "$access_recovery_operator_next_action_command_redacted")"
+      printf '        "command_redacted": true,\n'
+      printf '        "reason": "%s",\n' "$(json_escape "$access_recovery_operator_next_action_reason_redacted")"
       printf '        "placeholder_unresolved": '
       print_json_bool_or_null "$access_recovery_operator_next_action_placeholder_unresolved"
       printf ',\n'

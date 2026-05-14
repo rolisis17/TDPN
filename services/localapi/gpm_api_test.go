@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -288,6 +289,96 @@ func TestGPMRuntimeStateCapsGlobalApplicationStores(t *testing.T) {
 		Role:          "micro-exit",
 	}) {
 		t.Fatalf("expected existing contribution update to be allowed at cap")
+	}
+}
+
+func TestGPMOperatorSerializationIncludesBackendNextAction(t *testing.T) {
+	tests := []struct {
+		name                string
+		app                 gpmOperatorApplication
+		wantNextAction      string
+		wantCondition       string
+		wantEvidenceTrusted bool
+	}{
+		{
+			name: "pending",
+			app: gpmOperatorApplication{
+				WalletAddress:   "cosmos1operatorpending",
+				ChainOperatorID: "gpmvaloper1pending",
+				Status:          "pending",
+				UpdatedAt:       time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC),
+			},
+			wantNextAction: "wait_for_operator_approval",
+			wantCondition:  "approved_operator_application",
+		},
+		{
+			name: "rejected",
+			app: gpmOperatorApplication{
+				WalletAddress:   "cosmos1operatorrejected",
+				ChainOperatorID: "gpmvaloper1rejected",
+				Status:          "rejected",
+				Reason:          "insufficient evidence",
+				UpdatedAt:       time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC),
+			},
+			wantNextAction: "reapply_operator_application",
+			wantCondition:  "updated_operator_application",
+		},
+		{
+			name: "approved without trusted evidence",
+			app: gpmOperatorApplication{
+				WalletAddress:          "cosmos1operatorapprovedlocal",
+				ChainOperatorID:        "gpmvaloper1approvedlocal",
+				Status:                 "approved",
+				ApprovalEvidenceSource: "local-admin",
+				UpdatedAt:              time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC),
+			},
+			wantNextAction: "wait_for_trusted_approval_evidence",
+			wantCondition:  "trusted_approval_evidence_source",
+		},
+		{
+			name: "approved with trusted evidence",
+			app: gpmOperatorApplication{
+				WalletAddress:          "cosmos1operatorapprovedchain",
+				ChainOperatorID:        "gpmvaloper1approvedchain",
+				Status:                 "approved",
+				ApprovalEvidenceSource: "chain-governance",
+				UpdatedAt:              time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC),
+			},
+			wantNextAction:      "refresh_operator_session",
+			wantCondition:       "matching_chain_operator_id",
+			wantEvidenceTrusted: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := serializeGPMOperator(tt.app)
+			if got["next_action"] != tt.wantNextAction {
+				t.Fatalf("next_action=%v want=%s payload=%v", got["next_action"], tt.wantNextAction, got)
+			}
+			if got["approval_evidence_trusted"] != tt.wantEvidenceTrusted {
+				t.Fatalf("approval_evidence_trusted=%v want=%v payload=%v", got["approval_evidence_trusted"], tt.wantEvidenceTrusted, got)
+			}
+			conditions, ok := got["required_conditions"].([]string)
+			if !ok {
+				t.Fatalf("required_conditions type=%T payload=%v", got["required_conditions"], got)
+			}
+			if !slices.Contains(conditions, tt.wantCondition) {
+				t.Fatalf("required_conditions=%v missing %q", conditions, tt.wantCondition)
+			}
+		})
+	}
+
+	notSubmitted := serializeGPMOperatorNotSubmitted("COSMOS1OPERATORNEW")
+	if notSubmitted["wallet_address"] != "cosmos1operatornew" {
+		t.Fatalf("not-submitted wallet_address=%v payload=%v", notSubmitted["wallet_address"], notSubmitted)
+	}
+	if notSubmitted["next_action"] != "submit_operator_application" {
+		t.Fatalf("not-submitted next_action=%v payload=%v", notSubmitted["next_action"], notSubmitted)
+	}
+	conditions, ok := notSubmitted["required_conditions"].([]string)
+	if !ok || !slices.Contains(conditions, "chain_operator_id") {
+		t.Fatalf("not-submitted required_conditions=%v payload=%v", notSubmitted["required_conditions"], notSubmitted)
 	}
 }
 
