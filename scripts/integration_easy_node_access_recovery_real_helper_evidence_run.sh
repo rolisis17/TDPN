@@ -660,6 +660,42 @@ if [[ -s "$CAPTURE" ]]; then
   exit 1
 fi
 
+echo "[easy-node-access-recovery-real-helper-evidence-run] failed preflight preserves caller-owned outputs outside reports dir"
+EXTERNAL_SENTINEL_BUNDLE_SUMMARY="$TMP_DIR/external-output-sentinel-bundle-summary.json"
+printf '%s\n' '{"sentinel":"keep"}' >"$EXTERNAL_SENTINEL_BUNDLE_SUMMARY"
+set +e
+ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_SCRIPT="$ROOT_DIR/scripts/access_recovery_real_helper_evidence_run.sh" \
+ACCESS_BRIDGE_HOST_INSTALL_CHECK_SCRIPT="$FAKE_HOST_CHECK" \
+./scripts/easy_node.sh access-recovery-real-helper-evidence-run \
+  --base-url https://helper.gpm-pilot.net \
+  --path-id helper-web \
+  --code-file "$CODE_FILE" \
+  --config-json "$CONFIG_JSON" \
+  --deploy-pack-dir "$DEPLOY_PACK_DIR" \
+  "${INSTALLED_HOST_ARGS[@]}" \
+  --provenance-private-key-file "$PROVENANCE_KEY" \
+  --provenance-org-id pilot-org \
+  --provenance-org-name "Pilot Org" \
+  --trust-store "$TRUST_STORE" \
+  --reports-dir "$REPORTS_DIR" \
+  --bundle-summary-json "$EXTERNAL_SENTINEL_BUNDLE_SUMMARY" \
+  --summary-json "$TMP_DIR/external-output-sentinel-summary.json" \
+  --report-md "$TMP_DIR/external-output-sentinel-report.md" \
+  --print-summary-json 0 >"$TMP_DIR/external-output-sentinel.log" 2>&1
+external_output_sentinel_rc=$?
+set -e
+if [[ "$external_output_sentinel_rc" -ne 2 ]] ||
+  ! grep -Fq "override is disabled for real helper evidence" "$TMP_DIR/external-output-sentinel.log"; then
+  echo "expected diagnostic override preflight to fail before evidence capture"
+  cat "$TMP_DIR/external-output-sentinel.log"
+  exit 1
+fi
+if ! grep -Fq '"sentinel":"keep"' "$EXTERNAL_SENTINEL_BUNDLE_SUMMARY"; then
+  echo "caller-owned output outside reports dir was removed or overwritten during failed preflight"
+  cat "$TMP_DIR/external-output-sentinel.log"
+  exit 1
+fi
+
 for bundle_child_override_var in \
   ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_SERVICE_SMOKE_SCRIPT \
   ACCESS_BRIDGE_PILOT_EVIDENCE_BUNDLE_DEPLOYMENT_EVIDENCE_SCRIPT \

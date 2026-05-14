@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+umask 077
 
 usage() {
   cat <<'USAGE'
@@ -71,6 +72,15 @@ abs_path() {
     printf '%s' "$path"
   else
     printf '%s' "$ROOT_DIR/$path"
+  fi
+}
+
+reject_output_symlink_or_die() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -n "$path" && -L "$path" ]]; then
+    echo "blockchain mainnet activation real evidence failed: refusing to write evidence output through symlink: $path" >&2
+    exit 2
   fi
 }
 
@@ -439,6 +449,20 @@ if [[ -z "$(trim "$missing_checklist_md")" ]]; then
   missing_checklist_md="$reports_dir/blockchain_mainnet_activation_metrics_missing_checklist.md"
 fi
 missing_checklist_md="$(abs_path "$missing_checklist_md")"
+
+for output_path in \
+  "$summary_json" \
+  "$canonical_summary_json" \
+  "$template_output_json" \
+  "$template_canonical_output_json" \
+  "$missing_checklist_json" \
+  "$missing_checklist_md" \
+  "$gate_cycle_summary_json" \
+  "$gate_cycle_canonical_summary_json" \
+  "$operator_pack_summary_json" \
+  "$operator_pack_canonical_summary_json"; do
+  reject_output_symlink_or_die "$output_path"
+done
 
 mkdir -p "$reports_dir"
 mkdir -p "$gate_cycle_reports_dir"

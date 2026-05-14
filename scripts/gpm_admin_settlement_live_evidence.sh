@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+umask 077
 
 usage() {
   cat <<'USAGE'
@@ -69,6 +70,15 @@ abs_path() {
     printf '%s' "${path//\\//}"
   else
     printf '%s' "$ROOT_DIR/$path"
+  fi
+}
+
+reject_output_symlink_or_die() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -n "$path" && -L "$path" ]]; then
+    echo "refusing to write evidence output through symlink: $path" >&2
+    exit 2
   fi
 }
 
@@ -387,6 +397,8 @@ fi
 summary_json="$(abs_path "$summary_json")"
 report_md="$(abs_path "$report_md")"
 mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
+reject_output_symlink_or_die "$summary_json"
+reject_output_symlink_or_die "$report_md"
 
 if [[ -z "$run_id" ]]; then
   run_id="gpm-admin-settlement-$(date -u +%Y%m%d%H%M%S)-$$"
@@ -551,6 +563,7 @@ request_json() {
   local scoped_token=""
   local auth_token="$bridge_token"
   local -a curl_args
+  reject_output_symlink_or_die "$response_file"
 
   case "$auth_mode" in
     none)
@@ -612,6 +625,7 @@ wait_for_health_ready() {
   local url="$1"
   local response_file="$reports_dir/local_tdpnd_health.json"
   local code
+  reject_output_symlink_or_die "$response_file"
   for _ in $(seq 1 100); do
     if [[ -n "$TDPND_PID" ]] && ! kill -0 "$TDPND_PID" 2>/dev/null; then
       return 2
@@ -637,6 +651,7 @@ start_local_bridge() {
   finality_token="${finality_token:-gpm-admin-live-finality-token-$$}"
   bridge_url="http://127.0.0.1:$port"
   LOCAL_TDPND_LOG="$reports_dir/gpm_admin_settlement_live_evidence_tdpnd.log"
+  reject_output_symlink_or_die "$LOCAL_TDPND_LOG"
   local bin_suffix=""
   if [[ "$(go env GOOS 2>/dev/null || true)" == "windows" ]]; then
     bin_suffix=".exe"

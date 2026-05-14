@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+umask 077
 
 base_url=""
 path_id="helper-web"
@@ -222,6 +223,35 @@ url_authority_has_userinfo() {
   local authority
   authority="$(url_authority "$1")"
   [[ "$authority" == *@* ]]
+}
+
+redact_url_userinfo() {
+  local value="${1:-}" prefix rest authority suffix host_part
+  if [[ "$value" == *"://"* ]]; then
+    prefix="${value%%://*}://"
+    rest="${value#*://}"
+  else
+    prefix=""
+    rest="$value"
+  fi
+  authority="${rest%%/*}"
+  authority="${authority%%\?*}"
+  authority="${authority%%#*}"
+  if [[ "$authority" != *@* ]]; then
+    printf '%s' "$value"
+  else
+    suffix="${rest:${#authority}}"
+    host_part="${authority##*@}"
+    printf '%s[redacted]@%s%s' "$prefix" "$host_part" "$suffix"
+  fi
+}
+
+reject_output_symlink_or_die() {
+  local path="${1:-}"
+  if [[ -n "$path" && -L "$path" ]]; then
+    echo "access bridge pilot evidence bundle failed: refusing to write evidence output through symlink: $path" >&2
+    exit 2
+  fi
 }
 
 normalize_host() {
@@ -851,6 +881,10 @@ if [[ -z "$bundle_dir" ]]; then
   bundle_dir="$(mktemp -d "$ROOT_DIR/.easy-node-logs/access_bridge_pilot_evidence_bundle_$(timestamp_file).XXXXXX")"
 else
   bundle_dir="$(abs_path "$bundle_dir")"
+  if [[ -L "$bundle_dir" ]]; then
+    echo "access bridge pilot evidence bundle failed: refusing to use symlink bundle dir: $bundle_dir" >&2
+    exit 2
+  fi
   if [[ -d "$bundle_dir" ]] && find "$bundle_dir" -mindepth 1 -print -quit | grep -q .; then
     echo "access bridge pilot evidence bundle failed: --bundle-dir already exists and is not empty: $bundle_dir" >&2
     exit 2
@@ -868,6 +902,8 @@ else
   report_md="$(abs_path "$report_md")"
 fi
 mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
+reject_output_symlink_or_die "$summary_json"
+reject_output_symlink_or_die "$report_md"
 
 tmp_dir="$(mktemp -d)"
 cleanup() {
@@ -1117,6 +1153,7 @@ if [[ "$fail_count" != "0" ]]; then
 fi
 
 base_url_host="$(url_host "$base_url")"
+base_url_display="$(redact_url_userinfo "$base_url")"
 base_url_loopback="0"
 if base_url_is_loopback "$base_url"; then
   base_url_loopback="1"
@@ -1168,7 +1205,7 @@ cat >"$report_md" <<REPORT
 
 - Status: ${status}
 - Evidence scope: ${evidence_scope}
-- Base URL: ${base_url}
+- Base URL: ${base_url_display}
 - Path ID: ${path_id}
 - Service name: ${service_name}
 - Smoke summary: ${smoke_summary}
@@ -1193,7 +1230,7 @@ jq -n \
   --arg summary_json "$summary_json" \
   --arg bundled_summary_json "$bundled_summary_json" \
   --arg report_md "$report_md" \
-  --arg base_url "$base_url" \
+  --arg base_url "$base_url_display" \
   --arg base_url_host "$base_url_host" \
   --arg base_url_loopback "$base_url_loopback" \
   --arg base_url_private_or_reserved "$base_url_private_or_reserved" \

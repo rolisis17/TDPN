@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+umask 077
 
 run_id="$(date -u +%Y%m%d_%H%M%S)"
 reports_dir="${ACCESS_RECOVERY_REAL_HELPER_EVIDENCE_RUN_REPORTS_DIR:-.easy-node-logs/access-recovery-pilot}"
@@ -138,6 +139,27 @@ abs_path() {
     printf '%s' "$path"
   else
     printf '%s' "$ROOT_DIR/$path"
+  fi
+}
+
+path_is_under_dir() {
+  local path dir path_parent dir_physical path_parent_physical
+  path="$(abs_path "${1:-}")"
+  dir="$(abs_path "${2:-}")"
+  [[ -n "$path" && -n "$dir" && -d "$dir" ]] || return 1
+  path_parent="$(dirname "$path")"
+  [[ -d "$path_parent" ]] || return 1
+  dir_physical="$(cd "$dir" && pwd -P)"
+  path_parent_physical="$(cd "$path_parent" && pwd -P)"
+  [[ "$path_parent_physical" == "$dir_physical" || "$path_parent_physical" == "$dir_physical"/* ]]
+}
+
+reject_output_symlink_or_die() {
+  local path
+  path="$(abs_path "${1:-}")"
+  if [[ -n "$path" && -L "$path" ]]; then
+    echo "access recovery real helper evidence run failed: refusing to write evidence output through symlink: $path" >&2
+    exit 2
   fi
 }
 
@@ -501,7 +523,7 @@ redacted_args_json() {
     elif [[ "$redact_next_url" == "1" ]]; then
       redacted+=("$(redact_url_userinfo "$arg")")
       redact_next_url="0"
-    elif [[ "$arg" == "--code" ]]; then
+    elif [[ "$arg" == "--code" || "$arg" == "--code-file" || "$arg" == "--client-key" || "$arg" == "--provenance-private-key-file" || "$arg" == "--trust-store" ]]; then
       redacted+=("$arg")
       redact_next="1"
     elif [[ "$arg" == "--base-url" ]]; then
@@ -928,6 +950,10 @@ bool_arg_or_die "--print-summary-json" "$print_summary_json"
 bool_arg_or_die "--print-child-json" "$print_child_json"
 
 reports_dir="$(abs_path "$reports_dir")"
+if [[ -L "$reports_dir" ]]; then
+  echo "access recovery real helper evidence run failed: refusing to use symlink reports dir: $reports_dir" >&2
+  exit 2
+fi
 mkdir -p "$reports_dir"
 
 bundle_summary_json="$(abs_path "$(first_nonempty "$bundle_summary_json" "$reports_dir/access_bridge_pilot_evidence_${run_id}.json")")"
@@ -949,8 +975,20 @@ bundle_host_install_check_summary_json=""
 planned_child_commands_json="{}"
 planned_artifacts_json="{}"
 
+for output_path in \
+  "$host_install_check_summary_json" \
+  "$bundle_summary_json" \
+  "$provenance_out" \
+  "$verification_summary_json" \
+  "$roadmap_summary_json" \
+  "$roadmap_report_md" \
+  "$summary_json" \
+  "$report_md"; do
+  reject_output_symlink_or_die "$output_path"
+done
+
 if [[ "$plan_only" != "1" ]]; then
-  rm -f -- \
+  for previous_output in \
     "$host_install_check_summary_json" \
     "$bundle_summary_json" \
     "$provenance_out" \
@@ -958,7 +996,11 @@ if [[ "$plan_only" != "1" ]]; then
     "$roadmap_summary_json" \
     "$roadmap_report_md" \
     "$summary_json" \
-    "$report_md"
+    "$report_md"; do
+    if path_is_under_dir "$previous_output" "$reports_dir"; then
+      rm -f -- "$previous_output"
+    fi
+  done
 fi
 
 config_json="$(abs_path "$config_json")"

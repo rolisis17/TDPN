@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+umask 077
 
 usage() {
   cat <<'USAGE'
@@ -59,6 +60,15 @@ abs_path() {
     printf '%s' "$path"
   else
     printf '%s' "$ROOT_DIR/$path"
+  fi
+}
+
+reject_output_symlink_or_die() {
+  local path
+  path="$(trim "${1:-}")"
+  if [[ -n "$path" && -L "$path" ]]; then
+    echo "refusing to write evidence output through symlink: $path"
+    exit 2
   fi
 }
 
@@ -157,6 +167,8 @@ else
   report_md="$(abs_path "$report_md")"
 fi
 mkdir -p "$(dirname "$summary_json")" "$(dirname "$report_md")"
+reject_output_symlink_or_die "$summary_json"
+reject_output_symlink_or_die "$report_md"
 
 timeout_available=0
 if command -v timeout >/dev/null 2>&1; then
@@ -186,6 +198,7 @@ declare -a check_commands=(
 )
 
 checks_jsonl="$reports_dir/gpm_wallet_auth_evidence_checks.jsonl"
+reject_output_symlink_or_die "$checks_jsonl"
 : >"$checks_jsonl"
 
 passed=0
@@ -198,6 +211,7 @@ for ((idx = 0; idx < checks_total; idx++)); do
   check_name="${check_names[$idx]}"
   check_command="${check_commands[$idx]}"
   log_path="$reports_dir/$((idx + 1))_${check_id}.log"
+  reject_output_symlink_or_die "$log_path"
   started_epoch="$(date +%s)"
   echo "[gpm-wallet-auth-evidence] check=$check_id status=running log_path=$log_path"
   set +e
