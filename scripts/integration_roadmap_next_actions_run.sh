@@ -3585,12 +3585,11 @@ if ! jq -e '
   and (.actions[0].notes | contains("MTLS_CLIENT_KEY_FILE"))
   and (.actions[0].command | contains("--require-mtls 1"))
   and (.actions[0].command | contains("MTLS_CLIENT_CERT_FILE"))
-  and (.actions[0].command | contains("--client-key [redacted]"))
-  and ((.actions[0].command | contains("MTLS_CLIENT_KEY_FILE")) | not)
+  and (.actions[0].command | contains("--client-key MTLS_CLIENT_KEY_FILE"))
   and (.actions[0].next_operator_action | contains("--include-id access_bridge_service_smoke"))
   and (.actions[0].next_operator_action | contains("--access-recovery-mtls-ca REPLACE_WITH_MTLS_CA_FILE"))
   and (.actions[0].next_operator_action | contains("--access-recovery-mtls-client-cert REPLACE_WITH_MTLS_CLIENT_CERT_FILE"))
-  and (.actions[0].next_operator_action | contains("--access-recovery-mtls-client-key [redacted]"))
+  and (.actions[0].next_operator_action | contains("--access-recovery-mtls-client-key REPLACE_WITH_MTLS_CLIENT_KEY_FILE"))
   and ((.actions[0].next_operator_action | contains("REPLACE_WITH_TRUST_STORE")) | not)
 ' "$SUMMARY_ACCESS_RECOVERY_MTLS_PLACEHOLDERS" >/dev/null; then
   echo "Access Recovery unresolved mTLS placeholder precondition summary mismatch"

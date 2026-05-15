@@ -59,6 +59,18 @@ if [[ "$args" != *" --campaign-live-evidence 1 "* || "$args" != *" --require-ext
   echo "profile_default_gate_stability_cycle missing strict external live-evidence policy args: $*"
   exit 64
 fi
+if [[ -n "${TRACK_A_EXPECT_HOST_A:-}" && "$args" != *" --host-a $TRACK_A_EXPECT_HOST_A "* ]]; then
+  echo "profile_default_gate_stability_cycle expected --host-a '$TRACK_A_EXPECT_HOST_A' but got: $*"
+  exit 64
+fi
+if [[ -n "${TRACK_A_EXPECT_HOST_B:-}" && "$args" != *" --host-b $TRACK_A_EXPECT_HOST_B "* ]]; then
+  echo "profile_default_gate_stability_cycle expected --host-b '$TRACK_A_EXPECT_HOST_B' but got: $*"
+  exit 64
+fi
+if [[ -n "${TRACK_A_EXPECT_CAMPAIGN_SUBJECT:-}" && "$args" != *" --campaign-subject $TRACK_A_EXPECT_CAMPAIGN_SUBJECT "* ]]; then
+  echo "profile_default_gate_stability_cycle expected --campaign-subject '$TRACK_A_EXPECT_CAMPAIGN_SUBJECT' but got: $*"
+  exit 64
+fi
 echo "A:$behavior args:$*" >>"$exec_log"
 if [[ "$behavior" == "fail" ]]; then
   exit "${TRACK_A_RC:-17}"
@@ -77,9 +89,17 @@ if [[ "$args" != *" --campaign-live-evidence 1 "* || "$args" != *" --require-ext
   echo "runtime_actuation_promotion_cycle missing strict external live-evidence policy args: $*"
   exit 64
 fi
+if [[ -n "${TRACK_B_EXPECT_CAMPAIGN_SUBJECT:-}" && "$args" != *" --campaign-subject $TRACK_B_EXPECT_CAMPAIGN_SUBJECT "* ]]; then
+  echo "runtime_actuation_promotion_cycle expected --campaign-subject '$TRACK_B_EXPECT_CAMPAIGN_SUBJECT' but got: $*"
+  exit 64
+fi
 echo "B:$behavior args:$*" >>"$exec_log"
 if [[ "$behavior" == "fail" ]]; then
   echo "runtime_actuation_promotion_cycle failed rc=${TRACK_B_RC:-23}"
+  exit "${TRACK_B_RC:-23}"
+fi
+if [[ "$behavior" == "secret_fail" ]]; then
+  echo "INVITE_KEY=inv-secret-tail-001 CAMPAIGN_SUBJECT=inv-secret-tail-002 --campaign-subject inv-secret-tail-003 --client-key /tmp/raw-client-tail.key ACCESS_RECOVERY_MTLS_CLIENT_KEY=/tmp/raw-mtls-tail.key"
   exit "${TRACK_B_RC:-23}"
 fi
 if [[ "$behavior" == "placeholder_fail" ]]; then
@@ -96,7 +116,16 @@ cat >"$TRACK_C" <<'EOF_TRACK_C'
 set -euo pipefail
 exec_log="${BATCH_TRACK_EXEC_LOG:?}"
 behavior="${TRACK_C_BEHAVIOR:-pass}"
-echo "C:$behavior" >>"$exec_log"
+args=" $* "
+if [[ -n "${TRACK_C_EXPECT_REPORTS_DIR:-}" && "$args" != *" --reports-dir $TRACK_C_EXPECT_REPORTS_DIR "* ]]; then
+  echo "profile_compare_multi_vm_stability_promotion_cycle expected --reports-dir '$TRACK_C_EXPECT_REPORTS_DIR' but got: $*"
+  exit 64
+fi
+if [[ -n "${TRACK_C_EXPECT_VM_COMMAND_FILE:-}" && "$args" != *" --cycle-arg --vm-command-file --cycle-arg $TRACK_C_EXPECT_VM_COMMAND_FILE "* ]]; then
+  echo "profile_compare_multi_vm_stability_promotion_cycle expected VM command-file cycle args for '$TRACK_C_EXPECT_VM_COMMAND_FILE' but got: $*"
+  exit 64
+fi
+echo "C:$behavior args:$*" >>"$exec_log"
 if [[ "$behavior" == "fail" ]]; then
   exit "${TRACK_C_RC:-31}"
 fi
@@ -431,6 +460,59 @@ if grep -F "C:" "$EXEC_LOG" >/dev/null; then
   exit 1
 fi
 
+echo "[roadmap-live-evidence-cycle-batch-run] failure diagnostics redact secret-bearing log tails"
+SECRET_TAIL_SUMMARY="$TMP_DIR/secret_tail_summary.json"
+: >"$EXEC_LOG"
+set +e
+A_HOST=203.0.113.10 B_HOST=203.0.113.11 INVITE_KEY=inv-real-002b CAMPAIGN_SUBJECT=inv-real-002b \
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="$VM_COMMAND_FILE" \
+BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
+TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=secret_fail TRACK_B_RC=23 TRACK_C_BEHAVIOR=pass \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT="$TRACK_B" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_SCRIPT="$TRACK_C" \
+bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
+  --reports-dir "$TMP_DIR/secret_tail_reports" \
+  --summary-json "$SECRET_TAIL_SUMMARY" \
+  --iterations 1 \
+  --continue-on-fail 0 \
+  --parallel 0 \
+  --print-summary-json 0
+secret_tail_rc=$?
+set -e
+
+if [[ "$secret_tail_rc" != "23" ]]; then
+  echo "expected secret-tail diagnostics rc=23, got rc=$secret_tail_rc"
+  cat "$SECRET_TAIL_SUMMARY"
+  exit 1
+fi
+
+if jq -e '
+  ((.iterations[0].tracks[1].failure_diagnostics.log_tail_lines // []) | tostring)
+  | contains("inv-secret-tail-001")
+    or contains("inv-secret-tail-002")
+    or contains("inv-secret-tail-003")
+    or contains("/tmp/raw-client-tail.key")
+    or contains("/tmp/raw-mtls-tail.key")
+' "$SECRET_TAIL_SUMMARY" >/dev/null; then
+  echo "secret-tail diagnostics leaked raw secret-like values"
+  cat "$SECRET_TAIL_SUMMARY"
+  exit 1
+fi
+
+if ! jq -e '
+  (.iterations[0].tracks[1].failure_diagnostics.log_tail_lines // []) == [
+    "INVITE_KEY=[redacted] CAMPAIGN_SUBJECT=[redacted] --campaign-subject [redacted] --client-key [redacted] ACCESS_RECOVERY_MTLS_CLIENT_KEY=[redacted]"
+  ]
+  and .iterations[0].tracks[1].failure_diagnostics.log_tail_line_count == 1
+  and .iterations[0].tracks[1].failure_diagnostics.log_total_line_count == 1
+  and .iterations[0].tracks[1].failure_diagnostics.log_tail_truncated == false
+' "$SECRET_TAIL_SUMMARY" >/dev/null; then
+  echo "secret-tail diagnostics redaction summary mismatch"
+  cat "$SECRET_TAIL_SUMMARY"
+  exit 1
+fi
+
 echo "[roadmap-live-evidence-cycle-batch-run] placeholder unresolved-input diagnostics path"
 PLACEHOLDER_SUMMARY="$TMP_DIR/placeholder_summary.json"
 : >"$EXEC_LOG"
@@ -596,6 +678,7 @@ PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT= INVITE_KEY=inv-real-009 CAMPAIG
 PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE="$VM_COMMAND_FILE" \
 BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
 TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=pass TRACK_C_BEHAVIOR=pass \
+TRACK_A_EXPECT_HOST_A=198.51.100.41 TRACK_A_EXPECT_HOST_B=198.51.100.42 TRACK_A_EXPECT_CAMPAIGN_SUBJECT=inv-real-009 \
 ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_ROADMAP_PROGRESS_SUMMARY_JSON="$FALLBACK_HOSTS_ROADMAP_PROGRESS_SUMMARY_JSON" \
 ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
 ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT="$TRACK_B" \
@@ -677,6 +760,8 @@ A_HOST= B_HOST= PROFILE_DEFAULT_GATE_STABILITY_HOST_A= PROFILE_DEFAULT_GATE_STAB
 PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT= CAMPAIGN_SUBJECT= INVITE_KEY= \
 BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
 TRACK_A_BEHAVIOR=pass TRACK_B_BEHAVIOR=pass TRACK_C_BEHAVIOR=pass \
+TRACK_A_EXPECT_HOST_A=198.51.100.61 TRACK_A_EXPECT_HOST_B=198.51.100.62 TRACK_A_EXPECT_CAMPAIGN_SUBJECT=inv-real-011 \
+TRACK_B_EXPECT_CAMPAIGN_SUBJECT=inv-real-012 \
 ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUN_ROADMAP_PROGRESS_SUMMARY_JSON="$FALLBACK_ENV_ASSIGNMENTS_ROADMAP_PROGRESS_SUMMARY_JSON" \
 ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_DEFAULT_GATE_STABILITY_CYCLE_SCRIPT="$TRACK_A" \
 ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_RUNTIME_ACTUATION_PROMOTION_CYCLE_SCRIPT="$TRACK_B" \
@@ -1316,6 +1401,71 @@ if ! grep -F "A:pass" "$EXEC_LOG" >/dev/null; then
 fi
 if grep -F "B:" "$EXEC_LOG" >/dev/null || grep -F "C:" "$EXEC_LOG" >/dev/null; then
   echo "unexpected track execution in filtering path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+
+echo "[roadmap-live-evidence-cycle-batch-run] custom reports-dir M5 VM command source reaches child"
+M5_REPORTS_DIR_VM_COMMAND_SUMMARY="$TMP_DIR/m5_reports_dir_vm_command_summary.json"
+M5_REPORTS_DIR_VM_COMMAND_REPORTS="$TMP_DIR/m5_reports_dir_vm_command_reports"
+M5_REPORTS_DIR_VM_COMMAND_FILE="$M5_REPORTS_DIR_VM_COMMAND_REPORTS/profile_compare_multi_vm_stability_vm_commands.txt"
+mkdir -p "$M5_REPORTS_DIR_VM_COMMAND_REPORTS"
+cat >"$M5_REPORTS_DIR_VM_COMMAND_FILE" <<'EOF_M5_REPORTS_DIR_VM_COMMAND_FILE'
+vm_a::ssh vm-a.example
+EOF_M5_REPORTS_DIR_VM_COMMAND_FILE
+: >"$EXEC_LOG"
+PROFILE_COMPARE_MULTI_VM_STABILITY_RUN_VM_COMMAND_FILE= \
+PROFILE_COMPARE_MULTI_VM_STABILITY_VM_COMMAND_FILE= \
+PROFILE_COMPARE_MULTI_VM_VM_COMMAND_FILE= \
+BATCH_TRACK_EXEC_LOG="$EXEC_LOG" \
+TRACK_C_BEHAVIOR=pass \
+TRACK_C_EXPECT_REPORTS_DIR="$M5_REPORTS_DIR_VM_COMMAND_REPORTS" \
+TRACK_C_EXPECT_VM_COMMAND_FILE="$M5_REPORTS_DIR_VM_COMMAND_FILE" \
+ROADMAP_LIVE_EVIDENCE_CYCLE_BATCH_PROFILE_COMPARE_MULTI_VM_STABILITY_PROMOTION_CYCLE_SCRIPT="$TRACK_C" \
+bash ./scripts/roadmap_live_evidence_cycle_batch_run.sh \
+  --reports-dir "$M5_REPORTS_DIR_VM_COMMAND_REPORTS" \
+  --summary-json "$M5_REPORTS_DIR_VM_COMMAND_SUMMARY" \
+  --iterations 1 \
+  --include-track-id profile_compare_multi_vm_stability_promotion_cycle \
+  --print-summary-json 0
+
+if ! jq -e --arg reports_dir "$M5_REPORTS_DIR_VM_COMMAND_REPORTS" --arg vm_file "$M5_REPORTS_DIR_VM_COMMAND_FILE" '
+  def has_arg_pair($flag; $value):
+    .command_args as $args
+    | any(range(0; (($args | length) - 1)); $args[.] == $flag and $args[. + 1] == $value);
+  .status == "pass"
+  and .rc == 0
+  and .summary.executed_tracks == 1
+  and .summary.skipped_tracks == 0
+  and .inputs.selected_track_ids == ["profile_compare_multi_vm_stability_promotion_cycle"]
+  and .selection_accounting.unresolved_required_track_count == 0
+  and (
+    .inputs.track_runtime_requirements[]
+    | select(.track_id == "profile_compare_multi_vm_stability_promotion_cycle")
+    | .required_runtime_inputs[]
+    | select(.id == "vm_command_source")
+    | .resolution_path
+  ) == $vm_file
+  and (.iterations | length == 1)
+  and (.iterations[0].tracks | length == 1)
+  and .iterations[0].tracks[0].track_id == "profile_compare_multi_vm_stability_promotion_cycle"
+  and .iterations[0].tracks[0].status == "pass"
+  and (.iterations[0].tracks[0] | has_arg_pair("--reports-dir"; $reports_dir))
+  and ((.iterations[0].tracks[0].command_args | index("--vm-command-file")) != null)
+  and ((.iterations[0].tracks[0].command_args | index($vm_file)) != null)
+' "$M5_REPORTS_DIR_VM_COMMAND_SUMMARY" >/dev/null; then
+  echo "custom reports-dir M5 VM command propagation summary mismatch"
+  cat "$M5_REPORTS_DIR_VM_COMMAND_SUMMARY"
+  exit 1
+fi
+
+if [[ "$(grep -c '.' "$EXEC_LOG" || true)" != "1" ]]; then
+  echo "expected 1 execution in custom reports-dir M5 VM command path"
+  cat "$EXEC_LOG"
+  exit 1
+fi
+if ! grep -F "C:pass" "$EXEC_LOG" >/dev/null; then
+  echo "track C should run in custom reports-dir M5 VM command path"
   cat "$EXEC_LOG"
   exit 1
 fi

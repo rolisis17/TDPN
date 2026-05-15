@@ -103,6 +103,80 @@ is_runtime_placeholder_token_01() {
   return 1
 }
 
+is_failure_log_sensitive_flag_01() {
+  case "${1:-}" in
+    --campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer|--password|--passwd|--secret|--api-key|--private-key|--private-key-file|--provenance-private-key-file|--secret-key|--secret-key-file|--admin-key|--admin-key-file|--code-file|--private-code-file|--client-key|--mtls-client-key|--access-recovery-private-code-file|--access-recovery-provenance-private-key-file|--access-recovery-mtls-client-key)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_failure_log_sensitive_env_name_01() {
+  local name="${1:-}"
+  local normalized
+  normalized="$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')"
+  case "$normalized" in
+    INVITE_KEY|CAMPAIGN_SUBJECT|*TOKEN|*SECRET|*PASSWORD|*PASSWD|*API_KEY|*AUTHORIZATION|*BEARER|*PRIVATE_KEY|*PRIVATE_KEY_FILE|*ADMIN_KEY|*ADMIN_KEY_FILE|*CLIENT_KEY|*CLIENT_KEY_FILE|ACCESS_RECOVERY_PRIVATE_CODE_FILE|ACCESS_RECOVERY_PROVENANCE_PRIVATE_KEY_FILE|ACCESS_RECOVERY_MTLS_CLIENT_KEY|MTLS_CLIENT_KEY_FILE)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+redact_failure_log_line_01() {
+  local line="${1:-}"
+  local -a tokens=()
+  local -a redacted_tokens=()
+  local token
+  local key
+  local value
+  local redact_next="0"
+  read -r -a tokens <<<"$line"
+  if (( ${#tokens[@]} == 0 )); then
+    printf '%s' "$line"
+    return
+  fi
+  for token in "${tokens[@]}"; do
+    if [[ "$redact_next" == "1" ]]; then
+      redacted_tokens+=("[redacted]")
+      redact_next="0"
+      continue
+    fi
+    if [[ "$token" == --*=* ]]; then
+      key="${token%%=*}"
+      value="${token#*=}"
+      if is_failure_log_sensitive_flag_01 "$key" && [[ -n "$value" ]]; then
+        redacted_tokens+=("$key=[redacted]")
+      else
+        redacted_tokens+=("$token")
+      fi
+      continue
+    fi
+    if [[ "$token" == *=* ]]; then
+      key="${token%%=*}"
+      value="${token#*=}"
+      if [[ -n "$key" && -n "$value" ]] && is_failure_log_sensitive_env_name_01 "$key"; then
+        redacted_tokens+=("$key=[redacted]")
+      else
+        redacted_tokens+=("$token")
+      fi
+      continue
+    fi
+    if is_failure_log_sensitive_flag_01 "$token"; then
+      redacted_tokens+=("$token")
+      redact_next="1"
+      continue
+    fi
+    redacted_tokens+=("$token")
+  done
+  printf '%s' "${redacted_tokens[*]}"
+}
+
 abs_path() {
   local path
   path="$(trim "${1:-}")"
@@ -168,10 +242,12 @@ log_tail_window_json() {
   local total_line_count=0
   local -a tail_lines=()
   local line
+  local redacted_line
   if [[ "$max_lines" =~ ^[0-9]+$ ]] && (( max_lines > 0 )) && [[ -f "$log_path" && -r "$log_path" ]]; then
     while IFS= read -r line || [[ -n "$line" ]]; do
       total_line_count=$((total_line_count + 1))
-      tail_lines+=("$line")
+      redacted_line="$(redact_failure_log_line_01 "$line")"
+      tail_lines+=("$redacted_line")
       if (( ${#tail_lines[@]} > max_lines )); then
         tail_lines=("${tail_lines[@]:1}")
       fi
@@ -602,6 +678,7 @@ resolve_runtime_input_state_json() {
   local env_name=""
   local env_value=""
   local resolved_env=""
+  local resolved_value=""
   local resolved_fallback_value=""
   local fallback_placeholder_detected="0"
   local state="missing"
@@ -623,6 +700,7 @@ resolve_runtime_input_state_json() {
   if [[ -n "$resolved_env" ]]; then
     state="resolved"
     resolution_source="env:${resolved_env}"
+    resolved_value="$(trim "${!resolved_env:-}")"
   else
     resolve_runtime_input_from_roadmap_summary_01 "$track_id" "$input_id"
     resolved_fallback_value="$roadmap_runtime_input_fallback_last_value"
@@ -630,6 +708,7 @@ resolve_runtime_input_state_json() {
     if [[ -n "$resolved_fallback_value" ]]; then
       state="resolved"
       resolution_source="$roadmap_runtime_input_fallback_last_source"
+      resolved_value="$resolved_fallback_value"
     elif (( ${#placeholder_envs[@]} > 0 )) || [[ "$fallback_placeholder_detected" == "1" ]]; then
       state="placeholder_unresolved"
     fi
@@ -643,7 +722,6 @@ resolve_runtime_input_state_json() {
   if [[ "$state" != "missing" ]]; then
     value_present_json="true"
   fi
-
   jq -cn \
     --arg id "$input_id" \
     --argjson required "$required_flag" \
@@ -665,6 +743,34 @@ resolve_runtime_input_state_json() {
       placeholder_envs: $placeholder_envs,
       operator_hint: $operator_hint
     }'
+}
+
+resolve_runtime_input_value_for_execution() {
+  local track_id="$1"
+  local input_id="$2"
+  shift 2
+  local -a env_candidates=("$@")
+  local env_name=""
+  local env_value=""
+
+  for env_name in "${env_candidates[@]}"; do
+    env_value="$(trim "${!env_name:-}")"
+    if [[ -z "$env_value" ]]; then
+      continue
+    fi
+    if is_runtime_placeholder_token_01 "$env_value"; then
+      continue
+    fi
+    printf '%s' "$env_value"
+    return 0
+  done
+
+  if resolve_runtime_input_from_roadmap_summary_01 "$track_id" "$input_id"; then
+    printf '%s' "$roadmap_runtime_input_fallback_last_value"
+    return 0
+  fi
+  printf '%s' ""
+  return 1
 }
 
 m5_validate_vm_command_source_file_or_reason_01() {
@@ -877,7 +983,6 @@ resolve_m5_vm_command_source_runtime_input_state_json() {
   if [[ "$state" != "missing" ]]; then
     value_present_json="true"
   fi
-
   jq -cn \
     --arg id "$input_id" \
     --argjson required "$required_flag" \
@@ -1312,17 +1417,52 @@ execute_track_to_result_file() {
   local started_at ended_at duration_sec rc status
   local -a track_cmd=()
   local track_cmd_args_json
+  local track_runtime_requirements_json=""
+  local resolved_host_a=""
+  local resolved_host_b=""
+  local resolved_campaign_subject=""
+  local m5_vm_command_source_path=""
   started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local start_epoch end_epoch
   start_epoch="$(date +%s)"
   track_cmd=(bash "$script_path")
   case "$track_id" in
-    profile_default_gate_stability_cycle|runtime_actuation_promotion_cycle)
+    profile_default_gate_stability_cycle)
+      resolved_host_a="$(resolve_runtime_input_value_for_execution "$track_id" "host_a" "PROFILE_DEFAULT_GATE_STABILITY_HOST_A" "A_HOST")"
+      resolved_host_b="$(resolve_runtime_input_value_for_execution "$track_id" "host_b" "PROFILE_DEFAULT_GATE_STABILITY_HOST_B" "B_HOST")"
+      resolved_campaign_subject="$(resolve_runtime_input_value_for_execution "$track_id" "campaign_subject" "PROFILE_DEFAULT_GATE_STABILITY_CAMPAIGN_SUBJECT" "INVITE_KEY")"
       track_cmd+=(
+        --host-a "$resolved_host_a"
+        --host-b "$resolved_host_b"
+        --campaign-subject "$resolved_campaign_subject"
         --campaign-live-evidence "$batch_campaign_live_evidence"
         --require-external-live-evidence "$batch_require_external_live_evidence"
         --campaign-live-evidence-udp-inject "$batch_campaign_live_evidence_udp_inject"
       )
+      ;;
+    runtime_actuation_promotion_cycle)
+      resolved_campaign_subject="$(resolve_runtime_input_value_for_execution "$track_id" "campaign_subject" "CAMPAIGN_SUBJECT" "INVITE_KEY")"
+      track_cmd+=(
+        --campaign-live-evidence "$batch_campaign_live_evidence"
+        --require-external-live-evidence "$batch_require_external_live_evidence"
+        --campaign-live-evidence-udp-inject "$batch_campaign_live_evidence_udp_inject"
+        --campaign-subject "$resolved_campaign_subject"
+      )
+      ;;
+    profile_compare_multi_vm_stability_promotion_cycle)
+      track_cmd+=(--reports-dir "$reports_dir")
+      track_runtime_requirements_json="${selected_track_runtime_requirements_by_id[$track_id]:-}"
+      if [[ -n "$track_runtime_requirements_json" ]]; then
+        m5_vm_command_source_path="$(jq -r '
+          (.required_runtime_inputs // [])
+          | map(select((.id // "") == "vm_command_source"))
+          | .[0].resolution_path // ""
+        ' <<<"$track_runtime_requirements_json" 2>/dev/null || true)"
+        m5_vm_command_source_path="$(trim "$m5_vm_command_source_path")"
+        if [[ -n "$m5_vm_command_source_path" ]]; then
+          track_cmd+=(--cycle-arg "--vm-command-file" --cycle-arg "$m5_vm_command_source_path")
+        fi
+      fi
       ;;
     *)
       ;;

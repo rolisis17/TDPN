@@ -213,6 +213,59 @@ file_sha256_or_empty() {
   fi
 }
 
+roadmap_progress_redact_summary_command_surfaces_json() {
+  jq -c '
+    def walk(f):
+      . as $in
+      | if type == "object" then
+          reduce keys_unsorted[] as $key
+            ({}; . + {($key): ($in[$key] | walk(f))}) | f
+        elif type == "array" then
+          map(walk(f)) | f
+        else
+          f
+        end;
+    def command_secret_flag_regex:
+      "--(?:(?:token|token-file|auth-token|auth-token-file|admin-token|admin-token-file|authorization|bearer|password|passwd|secret|api-key|private-key|private-key-file|provenance-private-key-file|secret-key|secret-key-file|admin-key|admin-key-file|code|code-file|private-code|private-code-file|access-code|access-code-file|client-key|client-key-file|mtls-client-key|mtls-client-key-file)|access-recovery-[A-Za-z0-9-]*(?:key|code|token|secret|password|auth)[A-Za-z0-9-]*)";
+    def secret_env_regex:
+      "(?:[A-Za-z_][A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|AUTHORIZATION|BEARER|PRIVATE_KEY|PRIVATE_KEY_FILE|ADMIN_KEY|ADMIN_KEY_FILE|CLIENT_KEY|CLIENT_KEY_FILE|PRIVATE_CODE_FILE|CODE_FILE|ACCESS_CODE)|[A-Za-z_][A-Za-z0-9_]*ACCESS_RECOVERY_[A-Za-z0-9_]*(?:KEY|CODE|TOKEN|SECRET|PASSWORD|AUTH)[A-Za-z0-9_]*)";
+    def quoted_or_bare_value:
+      "\"[^\"]*\"|\u0027[^\u0027]*\u0027|[^[:space:]]+";
+    def redact_command_secrets:
+      if type != "string" then
+        .
+      else
+        gsub("(?<prefix>(^|[[:space:]])" + command_secret_flag_regex + "[[:space:]]+)(?<value>" + quoted_or_bare_value + ")"; "\(.prefix)[redacted]")
+        | gsub("(?<prefix>(^|[[:space:]])" + command_secret_flag_regex + "=)(?<value>" + quoted_or_bare_value + ")"; "\(.prefix)[redacted]")
+        | gsub("(?<prefix>(^|[[:space:]])" + secret_env_regex + "=)(?<value>" + quoted_or_bare_value + ")"; "\(.prefix)[redacted]")
+      end;
+    def command_surface_key:
+      type == "string"
+      and (
+        . == "command"
+        or . == "sync_command"
+        or . == "next_command"
+        or . == "next_command_sudo"
+        or . == "remediation_command"
+        or . == "recommended_gate_command"
+        or test("(^|_)command($|_)")
+      );
+    walk(
+      if type == "object" then
+        with_entries(
+          if ((.key | command_surface_key) and (.value | type) == "string") then
+            .value |= redact_command_secrets
+          else
+            .
+          end
+        )
+      else
+        .
+      end
+    )
+  '
+}
+
 declare -A ROADMAP_JSON_VALID_CACHE=()
 declare -A ROADMAP_BOOL_SIGNAL_CACHE=()
 declare -A ROADMAP_STRING_SIGNAL_CACHE=()
@@ -4220,11 +4273,222 @@ PY
 
 profile_default_gate_command_from_argv() {
   local token
+  local rendered_token=""
   local out=""
   for token in "$@"; do
-    out="${out}${out:+ }$(printf '%q' "$token")"
+    case "$token" in
+      "[redacted]"|*="[redacted]")
+        rendered_token="$token"
+        ;;
+      *)
+        rendered_token="$(printf '%q' "$token")"
+        ;;
+    esac
+    out="${out}${out:+ }${rendered_token}"
   done
   printf '%s' "$out"
+}
+
+roadmap_progress_sensitive_flag_placeholder() {
+  case "${1:-}" in
+    --campaign-subject|--subject|--key|--invite-key)
+      printf '%s' "INVITE_KEY"
+      return 0
+      ;;
+    --campaign-anon-cred|--anon-cred)
+      printf '%s' "ANON_CRED"
+      return 0
+      ;;
+    --token|--token-file|--auth-token|--auth-token-file|--admin-token|--admin-token-file|--authorization|--bearer|--password|--passwd|--secret|--api-key|--private-key|--private-key-file|--provenance-private-key-file|--secret-key|--secret-key-file|--admin-key|--admin-key-file|--code|--code-file|--private-code|--private-code-file|--access-code|--access-code-file|--client-key|--client-key-file|--mtls-client-key|--mtls-client-key-file)
+      printf '%s' "[redacted]"
+      return 0
+      ;;
+    --access-recovery-*key*|--access-recovery-*code*|--access-recovery-*token*|--access-recovery-*secret*|--access-recovery-*password*|--access-recovery-*auth*)
+      printf '%s' "[redacted]"
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+roadmap_progress_sensitive_env_name_01() {
+  local name="${1:-}"
+  local upper=""
+  upper="$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')"
+  case "$upper" in
+    INVITE_KEY|CAMPAIGN_SUBJECT|*TOKEN|*SECRET|*PASSWORD|*PASSWD|*API_KEY|*AUTHORIZATION|*BEARER|*PRIVATE_KEY|*PRIVATE_KEY_FILE|*ADMIN_KEY|*ADMIN_KEY_FILE|*CLIENT_KEY|*CLIENT_KEY_FILE|*PRIVATE_CODE_FILE|*CODE_FILE|*ACCESS_CODE|*ACCESS_RECOVERY_*KEY*|*ACCESS_RECOVERY_*CODE*|*ACCESS_RECOVERY_*TOKEN*|*ACCESS_RECOVERY_*SECRET*|*ACCESS_RECOVERY_*PASSWORD*|*ACCESS_RECOVERY_*AUTH*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+strip_optional_wrapping_quotes_01() {
+  local value="${1:-}"
+  local first_char=""
+  local last_char=""
+  if (( ${#value} < 2 )); then
+    printf '%s' "$value"
+    return
+  fi
+  first_char="${value:0:1}"
+  last_char="${value: -1}"
+  if [[ "$first_char" == '"' && "$last_char" == '"' ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$first_char" == "'" && "$last_char" == "'" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+roadmap_progress_operator_placeholder_value_01() {
+  local value="${1:-}"
+  local upper=""
+  value="$(strip_optional_wrapping_quotes_01 "$value")"
+  upper="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$upper" in
+    ""|"[REDACTED]"|REDACTED)
+      return 1
+      ;;
+    REPLACE_WITH*|*REPLACE_WITH*|*SET-REAL*|*SET_REAL*|YOUR_*|"<"*">"|"\${"*"}"|"$"*)
+      return 0
+      ;;
+    PRIVATE_CODE_FILE|PROVENANCE_PRIVATE_KEY_FILE|MTLS_CLIENT_KEY_FILE|MTLS_CLIENT_CERT_FILE|MTLS_CA_FILE|TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE)
+      return 0
+      ;;
+    HELPER_PUBLIC_DNS|HELPER_ID|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|ORG_ID|ORG_NAME|ACCESS_RECOVERY_REPORTS_DIR)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+roadmap_progress_redact_command_secrets_best_effort() {
+  local cmd
+  cmd="$(trim "${1:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '%s' ""
+    return
+  fi
+  printf '%s' "$cmd" | sed -E \
+    -e 's@(^|[[:space:]])(--campaign-subject|--subject|--key|--invite-key)=([^[:space:]]+)@\1\2=INVITE_KEY@g' \
+    -e 's@(^|[[:space:]])(--campaign-anon-cred|--anon-cred)=([^[:space:]]+)@\1\2=ANON_CRED@g' \
+    -e 's@(^|[[:space:]])(--campaign-subject|--subject|--key|--invite-key)[[:space:]]+([^[:space:]]+)@\1\2 INVITE_KEY@g' \
+    -e 's@(^|[[:space:]])(--campaign-anon-cred|--anon-cred)[[:space:]]+([^[:space:]]+)@\1\2 ANON_CRED@g' \
+    -e 's@(^|[[:space:]])(--token|--token-file|--auth-token|--auth-token-file|--admin-token|--admin-token-file|--authorization|--bearer|--password|--passwd|--secret|--api-key|--private-key|--private-key-file|--provenance-private-key-file|--secret-key|--secret-key-file|--admin-key|--admin-key-file|--code|--code-file|--private-code|--private-code-file|--access-code|--access-code-file|--client-key|--client-key-file|--mtls-client-key|--mtls-client-key-file|--access-recovery-[A-Za-z0-9-]*key[A-Za-z0-9-]*|--access-recovery-[A-Za-z0-9-]*code[A-Za-z0-9-]*|--access-recovery-[A-Za-z0-9-]*token[A-Za-z0-9-]*|--access-recovery-[A-Za-z0-9-]*secret[A-Za-z0-9-]*|--access-recovery-[A-Za-z0-9-]*password[A-Za-z0-9-]*|--access-recovery-[A-Za-z0-9-]*auth[A-Za-z0-9-]*)=([^[:space:]]+)@\1\2=[redacted]@g' \
+    -e 's@(^|[[:space:]])(--token|--token-file|--auth-token|--auth-token-file|--admin-token|--admin-token-file|--authorization|--bearer|--password|--passwd|--secret|--api-key|--private-key|--private-key-file|--provenance-private-key-file|--secret-key|--secret-key-file|--admin-key|--admin-key-file|--code|--code-file|--private-code|--private-code-file|--access-code|--access-code-file|--client-key|--client-key-file|--mtls-client-key|--mtls-client-key-file|--access-recovery-[A-Za-z0-9-]*key[A-Za-z0-9-]*|--access-recovery-[A-Za-z0-9-]*code[A-Za-z0-9-]*|--access-recovery-[A-Za-z0-9-]*token[A-Za-z0-9-]*|--access-recovery-[A-Za-z0-9-]*secret[A-Za-z0-9-]*|--access-recovery-[A-Za-z0-9-]*password[A-Za-z0-9-]*|--access-recovery-[A-Za-z0-9-]*auth[A-Za-z0-9-]*)[[:space:]]+([^[:space:]]+)@\1\2 [redacted]@g' \
+    -e 's@(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|AUTHORIZATION|BEARER|PRIVATE_KEY|PRIVATE_KEY_FILE|ADMIN_KEY|ADMIN_KEY_FILE|CLIENT_KEY|CLIENT_KEY_FILE|PRIVATE_CODE_FILE|CODE_FILE|ACCESS_CODE|ACCESS_RECOVERY_[A-Za-z0-9_]*(KEY|CODE|TOKEN|SECRET|PASSWORD|AUTH)[A-Za-z0-9_]*)=)([^[:space:]]+)@\1\2[redacted]@g'
+}
+
+roadmap_progress_redact_command_secrets() {
+  local cmd
+  local token=""
+  local key=""
+  local value=""
+  local placeholder=""
+  local idx=0
+  local redacted_any="0"
+  local -a redacted_argv=()
+  cmd="$(trim "${1:-}")"
+  if [[ -z "$cmd" ]]; then
+    printf '%s' ""
+    return
+  fi
+  if ! command_string_to_argv "$cmd"; then
+    roadmap_progress_redact_command_secrets_best_effort "$cmd"
+    return
+  fi
+  while (( idx < ${#COMMAND_STRING_ARGV[@]} )); do
+    token="${COMMAND_STRING_ARGV[$idx]}"
+    if placeholder="$(roadmap_progress_sensitive_flag_placeholder "$token" 2>/dev/null)"; then
+      redacted_argv+=("$token")
+      if (( idx + 1 < ${#COMMAND_STRING_ARGV[@]} )); then
+        value="${COMMAND_STRING_ARGV[$((idx + 1))]}"
+        if [[ "$value" != --* ]]; then
+          if [[ "$placeholder" == "[redacted]" ]]; then
+            redacted_argv+=("$placeholder")
+            redacted_any="1"
+          elif roadmap_progress_operator_placeholder_value_01 "$value"; then
+            redacted_argv+=("$value")
+          else
+            redacted_argv+=("$placeholder")
+            redacted_any="1"
+          fi
+          idx=$((idx + 2))
+          continue
+        fi
+      fi
+    elif [[ "$token" == --*=* ]]; then
+      key="${token%%=*}"
+      if placeholder="$(roadmap_progress_sensitive_flag_placeholder "$key" 2>/dev/null)"; then
+        value="${token#*=}"
+        if [[ "$placeholder" == "[redacted]" ]]; then
+          redacted_argv+=("${key}=${placeholder}")
+          redacted_any="1"
+        elif roadmap_progress_operator_placeholder_value_01 "$value"; then
+          redacted_argv+=("${key}=${value}")
+        else
+          redacted_argv+=("${key}=${placeholder}")
+          redacted_any="1"
+        fi
+        idx=$((idx + 1))
+        continue
+      fi
+    elif [[ "$token" =~ ^[A-Za-z_][A-Za-z0-9_]*=.*$ ]]; then
+      key="${token%%=*}"
+      if roadmap_progress_sensitive_env_name_01 "$key"; then
+        value="${token#*=}"
+        if roadmap_progress_operator_placeholder_value_01 "$value"; then
+          redacted_argv+=("${key}=${value}")
+        else
+          redacted_argv+=("${key}=[redacted]")
+          redacted_any="1"
+        fi
+        idx=$((idx + 1))
+        continue
+      fi
+    fi
+    redacted_argv+=("$token")
+    idx=$((idx + 1))
+  done
+  if [[ "$redacted_any" == "1" ]]; then
+    profile_default_gate_command_from_argv "${redacted_argv[@]}"
+  else
+    printf '%s' "$cmd"
+  fi
+}
+
+roadmap_progress_redact_json_array_command_fields() {
+  local json_text="${1:-[]}"
+  local out_json=""
+  local len=0
+  local idx=0
+  local field=""
+  local raw_cmd=""
+  local redacted_cmd=""
+  out_json="$json_text"
+  if ! len="$(printf '%s\n' "$out_json" | jq -r 'if type == "array" then length else 0 end' 2>/dev/null)"; then
+    printf '%s' "$json_text"
+    return
+  fi
+  while (( idx < len )); do
+    for field in command remediation_command; do
+      raw_cmd="$(printf '%s\n' "$out_json" | jq -r --argjson idx "$idx" --arg field "$field" '.[$idx][$field] // ""')"
+      if [[ -z "$raw_cmd" ]]; then
+        continue
+      fi
+      redacted_cmd="$(roadmap_progress_redact_command_secrets "$raw_cmd")"
+      out_json="$(printf '%s\n' "$out_json" | jq -c --argjson idx "$idx" --arg field "$field" --arg command "$redacted_cmd" '.[$idx][$field] = $command')"
+    done
+    idx=$((idx + 1))
+  done
+  printf '%s' "$out_json"
 }
 
 profile_default_gate_extract_arg_value_from_cmd() {
@@ -13186,6 +13450,7 @@ non_blockchain_actionable_no_sudo_or_github_json="$(
       } else empty end)
     ]'
 )"
+non_blockchain_actionable_no_sudo_or_github_json="$(roadmap_progress_redact_json_array_command_fields "$non_blockchain_actionable_no_sudo_or_github_json")"
 non_blockchain_recommended_gate_id="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'if length > 0 then .[0].id else "" end')"
 non_blockchain_actionable_no_sudo_or_github_count="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'length')"
 
@@ -13454,6 +13719,31 @@ access_recovery_track_json="$(
       end
     '
 )"
+access_recovery_sync_command_redacted="$(roadmap_progress_redact_command_secrets "$(
+  printf '%s\n' "$access_recovery_track_json" | jq -r '.unsynced_trusted_verifier_receipt.sync_command // ""'
+)")"
+access_recovery_recommended_command_redacted="$(roadmap_progress_redact_command_secrets "$(
+  printf '%s\n' "$access_recovery_track_json" | jq -r '.recommended_next_action.command // ""'
+)")"
+access_recovery_preferred_command_redacted="$(roadmap_progress_redact_command_secrets "$(
+  printf '%s\n' "$access_recovery_track_json" | jq -r '.preferred_operator_next_action.command // ""'
+)")"
+access_recovery_track_json="$(
+  printf '%s\n' "$access_recovery_track_json" | jq -c \
+    --arg sync_command "$access_recovery_sync_command_redacted" \
+    --arg recommended_command "$access_recovery_recommended_command_redacted" \
+    --arg preferred_command "$access_recovery_preferred_command_redacted" '
+      if ((.unsynced_trusted_verifier_receipt.sync_command // "") != "") then
+        .unsynced_trusted_verifier_receipt.sync_command = $sync_command
+      else . end
+      | if ((.recommended_next_action.command // "") != "") then
+        .recommended_next_action.command = $recommended_command
+      else . end
+      | if ((.preferred_operator_next_action.command // "") != "") then
+        .preferred_operator_next_action.command = $preferred_command
+      else . end
+    '
+)"
 access_recovery_track_status_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r '.status // "unknown"')"
 access_recovery_track_ready_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r 'if (.ready | type) == "boolean" then .ready else false end')"
 access_recovery_track_needs_attention_json="$(printf '%s\n' "$access_recovery_track_json" | jq -r 'if (.needs_attention | type) == "boolean" then .needs_attention else true end')"
@@ -13535,9 +13825,34 @@ cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
     [
       (if $profile_default_gate_live_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true then "profile-default" else empty end),
       (if $runtime_actuation_promotion_live_action_ready == true and $runtime_actuation_live_and_pack_bundle_ready != true then "runtime-actuation" else empty end),
-      (if $multi_vm_stability_promotion_live_action_ready == true and $profile_compare_multi_vm_live_and_pack_bundle_ready != true then "multi-vm" else empty end)
+      (if (
+          $multi_vm_stability_live_action_ready == true
+          or ($multi_vm_stability_promotion_live_action_ready == true and $profile_compare_multi_vm_live_and_pack_bundle_ready != true)
+        ) then "multi-vm" else empty end)
     ]
     | unique_strings_preserve_order;
+  def pending_live_evidence_cycle_batch_track_ids_after_bundle:
+    [
+      (if $profile_default_gate_live_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true then "profile_default_gate_stability_cycle" else empty end),
+      (if $runtime_actuation_promotion_live_action_ready == true and $runtime_actuation_live_and_pack_bundle_ready != true then "runtime_actuation_promotion_cycle" else empty end),
+      (if (
+          $multi_vm_stability_live_action_ready == true
+          or ($multi_vm_stability_promotion_live_action_ready == true and $profile_compare_multi_vm_live_and_pack_bundle_ready != true)
+        ) then "profile_compare_multi_vm_stability_promotion_cycle" else empty end)
+    ]
+    | unique_strings_preserve_order;
+  def pending_live_evidence_cycle_batch_covered_action_ids_after_bundle:
+    [
+      (if $profile_default_gate_live_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true then "profile_default_gate" else empty end),
+      (if $runtime_actuation_promotion_live_action_ready == true and $runtime_actuation_live_and_pack_bundle_ready != true then "runtime_actuation_promotion" else empty end),
+      (if $multi_vm_stability_live_action_ready == true then "profile_compare_multi_vm_stability" else empty end),
+      (if $multi_vm_stability_promotion_live_action_ready == true and $profile_compare_multi_vm_live_and_pack_bundle_ready != true then "profile_compare_multi_vm_stability_promotion" else empty end)
+    ]
+    | unique_strings_preserve_order;
+  def roadmap_live_evidence_cycle_batch_command:
+    "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs"
+    + (pending_live_evidence_cycle_batch_track_ids_after_bundle | map(" --include-track-id " + .) | join(""))
+    + " --print-summary-json 1";
   def pending_evidence_pack_families_after_bundle:
     [
       (if $profile_default_gate_evidence_pack_action_ready == true and $profile_default_gate_live_and_pack_bundle_ready != true then "profile-default" else empty end),
@@ -13604,6 +13919,43 @@ cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
           end
         )
       };
+  def access_recovery_action_placeholder_metadata($action; $cmd):
+    if (($action | type) == "object") and (($action.placeholder_keys // null | type) == "array") then
+      ($action.placeholder_keys // []) as $keys
+      | {
+          placeholder_unresolved: (
+            if (($action.placeholder_unresolved // null | type) == "boolean") then
+              $action.placeholder_unresolved
+            else
+              (($keys | length) > 0)
+            end
+          ),
+          placeholder_keys: $keys,
+          safe_to_execute_as_is: (
+            if (($action.safe_to_execute_as_is // null | type) == "boolean") then
+              $action.safe_to_execute_as_is
+            else
+              (($keys | length) == 0)
+            end
+          ),
+          operator_input_required: (
+            if (($action.operator_input_required // null | type) == "boolean") then
+              $action.operator_input_required
+            else
+              (($keys | length) > 0)
+            end
+          ),
+          placeholder_resolution: (
+            if (($action.placeholder_resolution // null) != null) then
+              $action.placeholder_resolution
+            elif (($keys | length) > 0) then
+              "Template command only; replace Access Recovery placeholders with concrete pilot host, helper, credential, config, deploy-pack, evidence summary, installed-host/proxy, provenance, trust-store, and optional mTLS values before execution."
+            else null end
+          )
+        }
+    else
+      access_recovery_placeholder_metadata($cmd)
+    end;
   [
     (if (
         ($current_roadmap_track // "") == "access_recovery"
@@ -13615,7 +13967,7 @@ cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
       command: $access_recovery_track.preferred_operator_next_action.command,
       reason: ($access_recovery_track.preferred_operator_next_action.reason // "Run the guarded Access Recovery operator evidence handoff")
     } + access_recovery_action_metadata($access_recovery_track.preferred_operator_next_action.id // "")
-      + access_recovery_placeholder_metadata($access_recovery_track.preferred_operator_next_action.command // "") else empty end),
+      + access_recovery_action_placeholder_metadata($access_recovery_track.preferred_operator_next_action; $access_recovery_track.preferred_operator_next_action.command // "") else empty end),
     (if (
         ($current_roadmap_track // "") == "access_recovery"
         and ($access_recovery_track.needs_attention == true)
@@ -13629,7 +13981,8 @@ cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
       ),
       reason: "Local-only rehearsal validates the guarded Access Recovery operator command shape and planned artifacts without collecting live handoff evidence."
     } + access_recovery_action_metadata("access_recovery_operator_preflight")
-      + access_recovery_placeholder_metadata(
+      + access_recovery_action_placeholder_metadata(
+        $access_recovery_track.preferred_operator_next_action;
         ($access_recovery_track.preferred_operator_next_action.command // "")
         + " --plan-only 1 --roadmap-refresh 0 --summary-json .easy-node-logs/access-recovery-pilot/operator_preflight_summary.json"
       ) else empty end),
@@ -13643,7 +13996,7 @@ cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
       command: $access_recovery_track.recommended_next_action.command,
       reason: ($access_recovery_track.recommended_next_action.reason // "Access Recovery evidence needs attention")
     } + access_recovery_action_metadata($access_recovery_track.recommended_next_action.id // "")
-      + access_recovery_placeholder_metadata($access_recovery_track.recommended_next_action.command // "") else empty end),
+      + access_recovery_action_placeholder_metadata($access_recovery_track.recommended_next_action; $access_recovery_track.recommended_next_action.command // "") else empty end),
     (if ($next_action_command // "") != "" then {
       id: (if ($next_action_check_id // "") != "" then $next_action_check_id else "next_action" end),
       "label": (if ($next_action_label // "") != "" then $next_action_label elif ($next_action_check_id // "") != "" then $next_action_check_id else "Next action" end),
@@ -13729,8 +14082,10 @@ cat >"$next_actions_candidate_filter_file" <<'JQ_NEXT_ACTIONS_CANDIDATE'
     (if ((pending_live_evidence_cycle_batch_families_after_bundle | length) > 0 and $live_evidence_cycle_batch_helper_available == true) then {
       id: "roadmap_live_evidence_cycle_batch_run",
       "label": "Roadmap live-evidence cycle-batch run",
-      command: "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs --print-summary-json 1",
-      reason: "repeat pending cycle-batch covered live evidence cycles across tracks in one helper run"
+      command: roadmap_live_evidence_cycle_batch_command,
+      reason: "repeat pending cycle-batch covered live evidence cycles across tracks in one helper run",
+      selected_track_ids: pending_live_evidence_cycle_batch_track_ids_after_bundle,
+      covered_next_action_ids: pending_live_evidence_cycle_batch_covered_action_ids_after_bundle
     } + action_evidence_metadata(pending_live_evidence_cycle_batch_families_after_bundle; true; false; ["live-evidence"]) else empty end),
     (if ($next_actions_live_evidence_pending_action_count_after_bundle > 0 and $live_evidence_archive_helper_available == true) then {
       id: "roadmap_live_evidence_archive_run",
@@ -13901,24 +14256,32 @@ fi
 next_actions_json="$(printf '%s\n' "$next_actions_candidate_json" | jq -c --argjson suppress_live_evidence_next_actions_when_batch_helper "$suppress_live_evidence_next_actions_when_batch_helper_json" '
   . as $actions
   | ($actions | any(.[]; (.id // "") == "roadmap_live_evidence_cycle_batch_run")) as $cycle_batch_helper_present
+  | (if $cycle_batch_helper_present then
+       $actions | map(select((.id // "") != "profile_compare_multi_vm_stability"))
+     else
+       $actions
+     end) as $deduped_actions
   | if $suppress_live_evidence_next_actions_when_batch_helper
-      and ($actions | any(.[]; (.id // "") == "roadmap_live_evidence_actionable_run"))
+      and ($deduped_actions | any(.[]; (.id // "") == "roadmap_live_evidence_actionable_run"))
   then
+    $deduped_actions
+    |
     map(select(
       (
         (.id // "") as $id
         | (
           $id == "profile_default_gate"
-          or ($id == "profile_compare_multi_vm_stability" and ($cycle_batch_helper_present | not))
+          or $id == "profile_compare_multi_vm_stability"
           or $id == "profile_compare_multi_vm_stability_promotion"
           or $id == "runtime_actuation_promotion"
         )
       ) | not
     ))
   else
-    .
+    $deduped_actions
   end
 ')"
+next_actions_json="$(roadmap_progress_redact_json_array_command_fields "$next_actions_json")"
 next_actions_remediation_json="$(
   jq -nc \
     --argjson profile_default_gate_placeholder_remediation_available "$profile_default_gate_placeholder_remediation_available_json" \
@@ -13941,6 +14304,7 @@ next_actions_remediation_json="$(
     ]
     '
 )"
+next_actions_remediation_json="$(roadmap_progress_redact_json_array_command_fields "$next_actions_remediation_json")"
 next_actions_live_evidence_batch_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "roadmap_live_evidence_actionable_run")')"
 next_actions_live_evidence_cycle_batch_helper_emitted_json="$(printf '%s\n' "$next_actions_json" | jq -r 'any(.[]; (.id // "") == "roadmap_live_evidence_cycle_batch_run")')"
 next_actions_live_evidence_cycle_batch_helper_count_json="$(printf '%s\n' "$next_actions_json" | jq -r '[.[] | select((.id // "") == "roadmap_live_evidence_cycle_batch_run")] | length')"
@@ -14048,7 +14412,7 @@ roadmap_progress_register_temp_file "$optional_check_ids_json_file"
 printf '%s\n' "$optional_check_ids_json" >"$optional_check_ids_json_file"
 next_action_command_raw_file="$(mktemp)"
 roadmap_progress_register_temp_file "$next_action_command_raw_file"
-printf '%s' "$next_action_command" >"$next_action_command_raw_file"
+printf '%s' "$(roadmap_progress_redact_command_secrets "$next_action_command")" >"$next_action_command_raw_file"
 
 if [[ "${ROADMAP_PROGRESS_DEBUG_SUMMARY_ARG_SIZES:-0}" == "1" ]]; then
   {
@@ -15312,6 +15676,10 @@ ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BEGIN
   }
 ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_END
 ROADMAP_PROGRESS_SUMMARY_PAYLOAD_JQ_BLOCK
+if ! summary_payload="$(printf '%s\n' "$summary_payload" | roadmap_progress_redact_summary_command_surfaces_json)"; then
+  echo "roadmap-progress-report: failed to redact command secrets in summary payload" >&2
+  exit 1
+fi
 rm -f "$next_actions_json_file"
 rm -f "$pending_real_host_checks_json_file"
 rm -f "$non_blockchain_actionable_no_sudo_or_github_json_file"
@@ -15325,7 +15693,9 @@ roadmap_progress_register_temp_file "$summary_tmp"
 printf '%s\n' "$summary_payload" >"$summary_tmp"
 mv -f "$summary_tmp" "$summary_json"
 
-next_actions_md="$(printf '%s\n' "$next_actions_json" | jq -r '
+next_actions_md="$(jq -r '
+  (.next_actions // [])
+  |
   if length == 0 then "- none"
   else
     .[]
@@ -15337,10 +15707,12 @@ next_actions_md="$(printf '%s\n' "$next_actions_json" | jq -r '
       ) as $placeholder_note
     | "- `\(.id)`: `\(.command)` (\(.reason)\($placeholder_note))"
   end
-')"
-next_actions_remediation_md="$(printf '%s\n' "$next_actions_remediation_json" | jq -r 'if length == 0 then "- none" else .[] | "- `\(.id)`: `\(.remediation_command)` (\(.reason))" end')"
-non_blockchain_actionable_no_sudo_or_github_md="$(printf '%s\n' "$non_blockchain_actionable_no_sudo_or_github_json" | jq -r 'if length == 0 then "- none" else .[] | "- `\(.id)`: `\(.command)` (\(.reason))" end')"
-pending_real_host_checks_md="$(printf '%s\n' "$pending_real_host_checks_json" | jq -r '
+' "$summary_json")"
+next_actions_remediation_md="$(jq -r '(.next_actions_remediation // []) | if length == 0 then "- none" else .[] | "- `\(.id)`: `\(.remediation_command)` (\(.reason))" end' "$summary_json")"
+non_blockchain_actionable_no_sudo_or_github_md="$(jq -r '(.vpn_track.non_blockchain_actionable_no_sudo_or_github // []) | if length == 0 then "- none" else .[] | "- `\(.id)`: `\(.command)` (\(.reason))" end' "$summary_json")"
+pending_real_host_checks_md="$(jq -r '
+  (.vpn_track.pending_real_host_checks // [])
+  |
   if length == 0 then
     "- none"
   else
@@ -15348,7 +15720,7 @@ pending_real_host_checks_md="$(printf '%s\n' "$pending_real_host_checks_json" | 
     | "- `\(.check_id)`: `\(.status // "")` - \(.label // "") - command: `\(.command // "")`"
       + (if (.notes // "") != "" then " - notes: \(.notes)" else "" end)
   end
-')"
+' "$summary_json")"
 
 report_tmp="$(mktemp "${report_md}.tmp.XXXXXX")"
 roadmap_progress_register_temp_file "$report_tmp"
@@ -15762,7 +16134,7 @@ echo "[roadmap-progress-report] access_bridge_pilot_evidence_bundle_verify_avail
 echo "[roadmap-progress-report] access_bridge_required_mtls required=$(jq -r '.access_recovery_track.evidence_host_policy.mtls_required | tostring' "$summary_json") proven=$(jq -r '.access_recovery_track.evidence_host_policy.required_mtls_evidence | tostring' "$summary_json")"
 echo "[roadmap-progress-report] access_recovery_unsynced_trusted_verifier_receipt found=$(jq -r '.access_recovery_track.unsynced_trusted_verifier_receipt.found | tostring' "$summary_json") ready=$(jq -r '.access_recovery_track.unsynced_trusted_verifier_receipt.ready | tostring' "$summary_json") sync_required=$(jq -r '.access_recovery_track.unsynced_trusted_verifier_receipt.canonical_sync_required | tostring' "$summary_json") source=$(jq -r '.access_recovery_track.unsynced_trusted_verifier_receipt.source_summary_json // ""' "$summary_json")"
 echo "[roadmap-progress-report] next_action_check_id=${next_action_check_id:-}"
-echo "[roadmap-progress-report] next_action_command=${next_action_command:-}"
+echo "[roadmap-progress-report] next_action_command=$(roadmap_progress_redact_command_secrets "${next_action_command:-}")"
 echo "[roadmap-progress-report] manual_validation_refresh_status=$manual_refresh_status rc=$manual_refresh_rc"
 echo "[roadmap-progress-report] single_machine_refresh_status=$single_machine_refresh_status rc=$single_machine_refresh_rc"
 echo "[roadmap-progress-report] single_machine_refresh_non_blocking_transient=$single_machine_refresh_non_blocking_transient reason=$single_machine_refresh_non_blocking_reason"
@@ -15798,19 +16170,19 @@ echo "[roadmap-progress-report] phase6_cosmos_l1_handoff_status=$phase6_cosmos_l
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_available=$phase7_mainnet_cutover_summary_available_json source_summary_json=${phase7_mainnet_cutover_summary_source_summary_json:-} source_kind=${phase7_mainnet_cutover_summary_source_summary_kind:-}"
 echo "[roadmap-progress-report] phase7_mainnet_cutover_summary_status=$phase7_mainnet_cutover_summary_status_json rc=$phase7_mainnet_cutover_summary_rc_json check_ok=$phase7_mainnet_cutover_summary_check_ok_json run_ok=$phase7_mainnet_cutover_summary_run_ok_json handoff_check_ok=$phase7_mainnet_cutover_summary_handoff_check_ok_json handoff_run_ok=$phase7_mainnet_cutover_summary_handoff_run_ok_json mainnet_activation_gate_go_ok=$phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_json mainnet_activation_gate_go_ok_source=${phase7_mainnet_cutover_summary_mainnet_activation_gate_go_ok_source_json:-} bootstrap_governance_graduation_gate_go_ok=$phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_json bootstrap_governance_graduation_gate_go_ok_source=${phase7_mainnet_cutover_summary_bootstrap_governance_graduation_gate_go_ok_source_json:-} tdpnd_grpc_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_live_smoke_ok_json module_tx_surface_ok=$phase7_mainnet_cutover_summary_module_tx_surface_ok_json tdpnd_grpc_auth_live_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_grpc_auth_live_smoke_ok_json tdpnd_comet_runtime_smoke_ok=$phase7_mainnet_cutover_summary_tdpnd_comet_runtime_smoke_ok_json cosmos_module_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_module_coverage_floor_ok_json cosmos_keeper_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_keeper_coverage_floor_ok_json cosmos_app_coverage_floor_ok=$phase7_mainnet_cutover_summary_cosmos_app_coverage_floor_ok_json dual_write_parity_ok=$phase7_mainnet_cutover_summary_dual_write_parity_ok_json"
 echo "[roadmap-progress-report] mainnet_activation_gate_available=$blockchain_mainnet_activation_gate_available_json source_summary_json=${blockchain_mainnet_activation_gate_source_summary_json:-} source_kind=${blockchain_mainnet_activation_gate_source_summary_kind:-} status=$blockchain_mainnet_activation_gate_status_json decision=${blockchain_mainnet_activation_gate_decision_json:-} go=$blockchain_mainnet_activation_gate_go_json no_go=$blockchain_mainnet_activation_gate_no_go_json summary_generated_at=${blockchain_mainnet_activation_gate_summary_generated_at_json:-} summary_age_sec=${blockchain_mainnet_activation_gate_summary_age_sec_json:-} summary_stale=${blockchain_mainnet_activation_gate_summary_stale_json:-null} summary_max_age_sec=${blockchain_mainnet_activation_gate_summary_max_age_sec_json:-}"
-echo "[roadmap-progress-report] mainnet_activation_refresh_evidence_available=$blockchain_mainnet_activation_refresh_evidence_available_json action_id=${blockchain_mainnet_activation_refresh_evidence_id_json:-} reason=${blockchain_mainnet_activation_refresh_evidence_reason:-} command=${blockchain_mainnet_activation_refresh_evidence_command:-}"
-echo "[roadmap-progress-report] mainnet_activation_stale_evidence_status=$blockchain_mainnet_activation_stale_evidence_status_json action_required=$blockchain_mainnet_activation_stale_evidence_action_required_json reason=${blockchain_mainnet_activation_stale_evidence_reason_json:-} refresh_command=${blockchain_mainnet_activation_stale_evidence_refresh_command_json:-}"
-echo "[roadmap-progress-report] blockchain_recommended_gate_id=${blockchain_recommended_gate_id:-} reason=${blockchain_recommended_gate_reason:-} command=${blockchain_recommended_gate_command:-}"
+echo "[roadmap-progress-report] mainnet_activation_refresh_evidence_available=$blockchain_mainnet_activation_refresh_evidence_available_json action_id=${blockchain_mainnet_activation_refresh_evidence_id_json:-} reason=${blockchain_mainnet_activation_refresh_evidence_reason:-} command=$(roadmap_progress_redact_command_secrets "${blockchain_mainnet_activation_refresh_evidence_command:-}")"
+echo "[roadmap-progress-report] mainnet_activation_stale_evidence_status=$blockchain_mainnet_activation_stale_evidence_status_json action_required=$blockchain_mainnet_activation_stale_evidence_action_required_json reason=${blockchain_mainnet_activation_stale_evidence_reason_json:-} refresh_command=$(roadmap_progress_redact_command_secrets "${blockchain_mainnet_activation_stale_evidence_refresh_command_json:-}")"
+echo "[roadmap-progress-report] blockchain_recommended_gate_id=${blockchain_recommended_gate_id:-} reason=${blockchain_recommended_gate_reason:-} command=$(roadmap_progress_redact_command_secrets "${blockchain_recommended_gate_command:-}")"
 echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_available=$blockchain_mainnet_activation_missing_metrics_action_available_json action_id=${blockchain_mainnet_activation_missing_metrics_action_id:-} reason=${blockchain_mainnet_activation_missing_metrics_action_reason:-}"
-echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_normalize_command=${blockchain_mainnet_activation_missing_metrics_action_normalize_command:-} rerun_bundle_command=${blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command:-}"
-echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_checklist_command=${blockchain_mainnet_activation_missing_metrics_action_checklist_command:-}"
-echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_missing_input_template_command=${blockchain_mainnet_activation_missing_metrics_action_missing_input_template_command:-}"
-echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_template_command=${blockchain_mainnet_activation_missing_metrics_action_template_command:-} prefill_command=${blockchain_mainnet_activation_missing_metrics_action_prefill_command:-} operator_pack_command=${blockchain_mainnet_activation_missing_metrics_action_operator_pack_command:-} cycle_command=${blockchain_mainnet_activation_missing_metrics_action_cycle_command:-}"
-echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command=${blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command:-}"
-echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command=${blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command:-}"
+echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_normalize_command=$(roadmap_progress_redact_command_secrets "${blockchain_mainnet_activation_missing_metrics_action_normalize_command:-}") rerun_bundle_command=$(roadmap_progress_redact_command_secrets "${blockchain_mainnet_activation_missing_metrics_action_rerun_bundle_command:-}")"
+echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_checklist_command=$(roadmap_progress_redact_command_secrets "${blockchain_mainnet_activation_missing_metrics_action_checklist_command:-}")"
+echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_missing_input_template_command=$(roadmap_progress_redact_command_secrets "${blockchain_mainnet_activation_missing_metrics_action_missing_input_template_command:-}")"
+echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_template_command=$(roadmap_progress_redact_command_secrets "${blockchain_mainnet_activation_missing_metrics_action_template_command:-}") prefill_command=$(roadmap_progress_redact_command_secrets "${blockchain_mainnet_activation_missing_metrics_action_prefill_command:-}") operator_pack_command=$(roadmap_progress_redact_command_secrets "${blockchain_mainnet_activation_missing_metrics_action_operator_pack_command:-}") cycle_command=$(roadmap_progress_redact_command_secrets "${blockchain_mainnet_activation_missing_metrics_action_cycle_command:-}")"
+echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command=$(roadmap_progress_redact_command_secrets "${blockchain_mainnet_activation_missing_metrics_action_seeded_cycle_command:-}")"
+echo "[roadmap-progress-report] blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command=$(roadmap_progress_redact_command_secrets "${blockchain_mainnet_activation_missing_metrics_action_real_evidence_run_command:-}")"
 echo "[roadmap-progress-report] bootstrap_governance_graduation_gate_available=$blockchain_bootstrap_governance_graduation_gate_available_json source_summary_json=${blockchain_bootstrap_governance_graduation_gate_source_summary_json:-} source_kind=${blockchain_bootstrap_governance_graduation_gate_source_summary_kind:-} status=$blockchain_bootstrap_governance_graduation_gate_status_json decision=${blockchain_bootstrap_governance_graduation_gate_decision_json:-} go=$blockchain_bootstrap_governance_graduation_gate_go_json no_go=$blockchain_bootstrap_governance_graduation_gate_no_go_json summary_generated_at=${blockchain_bootstrap_governance_graduation_gate_summary_generated_at_json:-} summary_age_sec=${blockchain_bootstrap_governance_graduation_gate_summary_age_sec_json:-} summary_stale=${blockchain_bootstrap_governance_graduation_gate_summary_stale_json:-null} summary_max_age_sec=${blockchain_bootstrap_governance_graduation_gate_summary_max_age_sec_json:-}"
-echo "[roadmap-progress-report] profile_default_gate_status=$profile_default_gate_status next_command=${profile_default_gate_next_command:-} next_command_sudo=${profile_default_gate_next_command_sudo:-} next_command_source=${profile_default_gate_next_command_source:-}"
-echo "[roadmap-progress-report] profile_default_gate_next_command_reason=${profile_default_gate_next_command_reason:-} next_command_actionable=$profile_default_gate_next_command_actionable_json next_command_sudo_actionable=$profile_default_gate_next_command_sudo_actionable_json next_command_has_unresolved_placeholders=$profile_default_gate_next_command_has_unresolved_placeholders_json next_command_sudo_has_unresolved_placeholders=$profile_default_gate_next_command_sudo_has_unresolved_placeholders_json unresolved_placeholders=$profile_default_gate_unresolved_placeholders_json unresolved_placeholder_keys=${profile_default_gate_unresolved_placeholder_keys_json:-[]} unresolved_placeholder_reason=${profile_default_gate_unresolved_placeholder_reason:-} placeholder_remediation_available=$profile_default_gate_placeholder_remediation_available_json placeholder_remediation_command=${profile_default_gate_placeholder_remediation_command:-}"
+echo "[roadmap-progress-report] profile_default_gate_status=$profile_default_gate_status next_command=$(roadmap_progress_redact_command_secrets "${profile_default_gate_next_command:-}") next_command_sudo=$(roadmap_progress_redact_command_secrets "${profile_default_gate_next_command_sudo:-}") next_command_source=${profile_default_gate_next_command_source:-}"
+echo "[roadmap-progress-report] profile_default_gate_next_command_reason=${profile_default_gate_next_command_reason:-} next_command_actionable=$profile_default_gate_next_command_actionable_json next_command_sudo_actionable=$profile_default_gate_next_command_sudo_actionable_json next_command_has_unresolved_placeholders=$profile_default_gate_next_command_has_unresolved_placeholders_json next_command_sudo_has_unresolved_placeholders=$profile_default_gate_next_command_sudo_has_unresolved_placeholders_json unresolved_placeholders=$profile_default_gate_unresolved_placeholders_json unresolved_placeholder_keys=${profile_default_gate_unresolved_placeholder_keys_json:-[]} unresolved_placeholder_reason=${profile_default_gate_unresolved_placeholder_reason:-} placeholder_remediation_available=$profile_default_gate_placeholder_remediation_available_json placeholder_remediation_command=$(roadmap_progress_redact_command_secrets "${profile_default_gate_placeholder_remediation_command:-}")"
 echo "[roadmap-progress-report] profile_default_gate_docker_hint_available=$profile_default_gate_docker_hint_available_json docker_hint_source=${profile_default_gate_docker_hint_source:-} campaign_check_summary_resolved=${profile_default_gate_campaign_check_summary_json_resolved:-} docker_matrix_summary_json=${profile_default_gate_docker_matrix_summary_json:-} docker_profile_summary_json=${profile_default_gate_docker_profile_summary_json:-}"
 echo "[roadmap-progress-report] profile_default_gate_selection_policy_evidence_present=$profile_default_gate_selection_policy_evidence_present_json selection_policy_evidence_valid=$profile_default_gate_selection_policy_evidence_valid_json selection_policy_evidence_note=${profile_default_gate_selection_policy_evidence_note:-}"
 echo "[roadmap-progress-report] profile_default_gate_micro_relay_evidence_available=$profile_default_gate_micro_relay_evidence_available_json micro_relay_quality_status_pass=$profile_default_gate_micro_relay_quality_status_pass_json micro_relay_demotion_policy_present=$profile_default_gate_micro_relay_demotion_policy_present_json micro_relay_promotion_policy_present=$profile_default_gate_micro_relay_promotion_policy_present_json trust_tier_port_unlock_policy_present=$profile_default_gate_trust_tier_port_unlock_policy_present_json micro_relay_evidence_note=${profile_default_gate_micro_relay_evidence_note:-}"
@@ -15820,20 +16192,20 @@ echo "[roadmap-progress-report] profile_default_gate_stability_selection_policy_
 echo "[roadmap-progress-report] profile_default_gate_stability_check_summary_json=${profile_default_gate_stability_check_summary_json:-} stability_check_summary_available=$profile_default_gate_stability_check_summary_available_json stability_check_decision=${profile_default_gate_stability_check_decision_json:-} stability_check_status=${profile_default_gate_stability_check_status_json:-} stability_check_rc=$profile_default_gate_stability_check_rc_json stability_check_modal_recommended_profile=${profile_default_gate_stability_check_modal_recommended_profile_json:-} stability_check_modal_support_rate_pct=$profile_default_gate_stability_check_modal_support_rate_pct_json"
 echo "[roadmap-progress-report] profile_default_gate_stability_cycle_summary_json=${profile_default_gate_stability_cycle_summary_json:-} cycle_summary_available=$profile_default_gate_stability_cycle_summary_available_json cycle_decision=${profile_default_gate_stability_cycle_decision_json:-} cycle_status=${profile_default_gate_stability_cycle_status_json:-} cycle_rc=$profile_default_gate_stability_cycle_rc_json cycle_failure_stage=${profile_default_gate_stability_cycle_failure_stage_json:-} cycle_failure_reason=${profile_default_gate_stability_cycle_failure_reason_json:-}"
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_available=$multi_vm_stability_available_json input_summary_json=${multi_vm_stability_input_summary_json:-} source_summary_json=${multi_vm_stability_source_summary_json:-} source_kind=${multi_vm_stability_source_summary_kind:-}"
-echo "[roadmap-progress-report] profile_compare_multi_vm_stability_status=${multi_vm_stability_status_json:-} rc=$multi_vm_stability_rc_json decision=${multi_vm_stability_decision_json:-} go=$multi_vm_stability_go_json no_go=$multi_vm_stability_no_go_json recommended_profile=${multi_vm_stability_recommended_profile_json:-} support_rate_pct=$multi_vm_stability_support_rate_pct_json runs_requested=$multi_vm_stability_runs_requested_json runs_completed=$multi_vm_stability_runs_completed_json runs_fail=$multi_vm_stability_runs_fail_json needs_attention=$multi_vm_stability_needs_attention_json next_command=${multi_vm_stability_next_command:-} next_command_reason=${multi_vm_stability_next_command_reason:-} next_command_actionable=$multi_vm_stability_next_command_actionable_json vm_command_source=${multi_vm_stability_vm_command_source_json:-} vm_command_source_ready=$multi_vm_stability_vm_command_source_ready_json vm_command_file_fallback=${multi_vm_stability_vm_command_file:-} vm_command_file_fallback_usable=$multi_vm_stability_vm_command_file_usable_json"
+echo "[roadmap-progress-report] profile_compare_multi_vm_stability_status=${multi_vm_stability_status_json:-} rc=$multi_vm_stability_rc_json decision=${multi_vm_stability_decision_json:-} go=$multi_vm_stability_go_json no_go=$multi_vm_stability_no_go_json recommended_profile=${multi_vm_stability_recommended_profile_json:-} support_rate_pct=$multi_vm_stability_support_rate_pct_json runs_requested=$multi_vm_stability_runs_requested_json runs_completed=$multi_vm_stability_runs_completed_json runs_fail=$multi_vm_stability_runs_fail_json needs_attention=$multi_vm_stability_needs_attention_json next_command=$(roadmap_progress_redact_command_secrets "${multi_vm_stability_next_command:-}") next_command_reason=${multi_vm_stability_next_command_reason:-} next_command_actionable=$multi_vm_stability_next_command_actionable_json vm_command_source=${multi_vm_stability_vm_command_source_json:-} vm_command_source_ready=$multi_vm_stability_vm_command_source_ready_json vm_command_file_fallback=${multi_vm_stability_vm_command_file:-} vm_command_file_fallback_usable=$multi_vm_stability_vm_command_file_usable_json"
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_decision_counts=$multi_vm_stability_decision_counts_json recommended_profile_counts=$multi_vm_stability_recommended_profile_counts_json reasons=$multi_vm_stability_reasons_json notes=${multi_vm_stability_notes_json:-}"
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_available=$multi_vm_stability_promotion_available_json input_summary_json=${multi_vm_stability_promotion_input_summary_json:-} source_summary_json=${multi_vm_stability_promotion_source_summary_json:-}"
-echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_status=${multi_vm_stability_promotion_status_json:-} rc=$multi_vm_stability_promotion_rc_json decision=${multi_vm_stability_promotion_decision_json:-} go=$multi_vm_stability_promotion_go_json no_go=$multi_vm_stability_promotion_no_go_json needs_attention=$multi_vm_stability_promotion_needs_attention_json next_command=${multi_vm_stability_promotion_next_command:-} next_command_reason=${multi_vm_stability_promotion_next_command_reason:-}"
+echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_status=${multi_vm_stability_promotion_status_json:-} rc=$multi_vm_stability_promotion_rc_json decision=${multi_vm_stability_promotion_decision_json:-} go=$multi_vm_stability_promotion_go_json no_go=$multi_vm_stability_promotion_no_go_json needs_attention=$multi_vm_stability_promotion_needs_attention_json next_command=$(roadmap_progress_redact_command_secrets "${multi_vm_stability_promotion_next_command:-}") next_command_reason=${multi_vm_stability_promotion_next_command_reason:-}"
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_reasons=$multi_vm_stability_promotion_reasons_json notes=${multi_vm_stability_promotion_notes_json:-}"
 echo "[roadmap-progress-report] runtime_actuation_promotion_available=$runtime_actuation_promotion_available_json input_summary_json=${runtime_actuation_promotion_input_summary_json:-} source_summary_json=${runtime_actuation_promotion_source_summary_json:-}"
-echo "[roadmap-progress-report] runtime_actuation_promotion_status=${runtime_actuation_promotion_status_json:-} rc=$runtime_actuation_promotion_rc_json decision=${runtime_actuation_promotion_decision_json:-} go=$runtime_actuation_promotion_go_json no_go=$runtime_actuation_promotion_no_go_json needs_attention=$runtime_actuation_promotion_needs_attention_json next_command=${runtime_actuation_promotion_next_command:-} next_command_reason=${runtime_actuation_promotion_next_command_reason:-}"
+echo "[roadmap-progress-report] runtime_actuation_promotion_status=${runtime_actuation_promotion_status_json:-} rc=$runtime_actuation_promotion_rc_json decision=${runtime_actuation_promotion_decision_json:-} go=$runtime_actuation_promotion_go_json no_go=$runtime_actuation_promotion_no_go_json needs_attention=$runtime_actuation_promotion_needs_attention_json next_command=$(roadmap_progress_redact_command_secrets "${runtime_actuation_promotion_next_command:-}") next_command_reason=${runtime_actuation_promotion_next_command_reason:-}"
 echo "[roadmap-progress-report] runtime_actuation_promotion_reasons=$runtime_actuation_promotion_reasons_json notes=${runtime_actuation_promotion_notes_json:-}"
 echo "[roadmap-progress-report] profile_default_gate_evidence_pack_available=$profile_default_gate_evidence_pack_available_json helper_available=$profile_default_gate_evidence_pack_helper_available_json input_summary_json=${profile_default_gate_evidence_pack_input_summary_json:-} source_summary_json=${profile_default_gate_evidence_pack_source_summary_json:-}"
-echo "[roadmap-progress-report] profile_default_gate_evidence_pack_status=${profile_default_gate_evidence_pack_status_json:-} rc=$profile_default_gate_evidence_pack_rc_json decision=${profile_default_gate_evidence_pack_decision_json:-} go=$profile_default_gate_evidence_pack_go_json no_go=$profile_default_gate_evidence_pack_no_go_json needs_attention=$profile_default_gate_evidence_pack_needs_attention_json next_command=${profile_default_gate_evidence_pack_next_command:-} next_command_reason=${profile_default_gate_evidence_pack_next_command_reason:-}"
+echo "[roadmap-progress-report] profile_default_gate_evidence_pack_status=${profile_default_gate_evidence_pack_status_json:-} rc=$profile_default_gate_evidence_pack_rc_json decision=${profile_default_gate_evidence_pack_decision_json:-} go=$profile_default_gate_evidence_pack_go_json no_go=$profile_default_gate_evidence_pack_no_go_json needs_attention=$profile_default_gate_evidence_pack_needs_attention_json next_command=$(roadmap_progress_redact_command_secrets "${profile_default_gate_evidence_pack_next_command:-}") next_command_reason=${profile_default_gate_evidence_pack_next_command_reason:-}"
 echo "[roadmap-progress-report] runtime_actuation_promotion_evidence_pack_available=$runtime_actuation_promotion_evidence_pack_available_json helper_available=$runtime_actuation_promotion_evidence_pack_helper_available_json input_summary_json=${runtime_actuation_promotion_evidence_pack_input_summary_json:-} source_summary_json=${runtime_actuation_promotion_evidence_pack_source_summary_json:-}"
-echo "[roadmap-progress-report] runtime_actuation_promotion_evidence_pack_status=${runtime_actuation_promotion_evidence_pack_status_json:-} rc=$runtime_actuation_promotion_evidence_pack_rc_json decision=${runtime_actuation_promotion_evidence_pack_decision_json:-} go=$runtime_actuation_promotion_evidence_pack_go_json no_go=$runtime_actuation_promotion_evidence_pack_no_go_json needs_attention=$runtime_actuation_promotion_evidence_pack_needs_attention_json next_command=${runtime_actuation_promotion_evidence_pack_next_command:-} next_command_reason=${runtime_actuation_promotion_evidence_pack_next_command_reason:-}"
+echo "[roadmap-progress-report] runtime_actuation_promotion_evidence_pack_status=${runtime_actuation_promotion_evidence_pack_status_json:-} rc=$runtime_actuation_promotion_evidence_pack_rc_json decision=${runtime_actuation_promotion_evidence_pack_decision_json:-} go=$runtime_actuation_promotion_evidence_pack_go_json no_go=$runtime_actuation_promotion_evidence_pack_no_go_json needs_attention=$runtime_actuation_promotion_evidence_pack_needs_attention_json next_command=$(roadmap_progress_redact_command_secrets "${runtime_actuation_promotion_evidence_pack_next_command:-}") next_command_reason=${runtime_actuation_promotion_evidence_pack_next_command_reason:-}"
 echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_evidence_pack_available=$multi_vm_stability_promotion_evidence_pack_available_json helper_available=$multi_vm_stability_promotion_evidence_pack_helper_available_json input_summary_json=${multi_vm_stability_promotion_evidence_pack_input_summary_json:-} source_summary_json=${multi_vm_stability_promotion_evidence_pack_source_summary_json:-}"
-echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_evidence_pack_status=${multi_vm_stability_promotion_evidence_pack_status_json:-} rc=$multi_vm_stability_promotion_evidence_pack_rc_json decision=${multi_vm_stability_promotion_evidence_pack_decision_json:-} go=$multi_vm_stability_promotion_evidence_pack_go_json no_go=$multi_vm_stability_promotion_evidence_pack_no_go_json needs_attention=$multi_vm_stability_promotion_evidence_pack_needs_attention_json next_command=${multi_vm_stability_promotion_evidence_pack_next_command:-} next_command_reason=${multi_vm_stability_promotion_evidence_pack_next_command_reason:-}"
+echo "[roadmap-progress-report] profile_compare_multi_vm_stability_promotion_evidence_pack_status=${multi_vm_stability_promotion_evidence_pack_status_json:-} rc=$multi_vm_stability_promotion_evidence_pack_rc_json decision=${multi_vm_stability_promotion_evidence_pack_decision_json:-} go=$multi_vm_stability_promotion_evidence_pack_go_json no_go=$multi_vm_stability_promotion_evidence_pack_no_go_json needs_attention=$multi_vm_stability_promotion_evidence_pack_needs_attention_json next_command=$(roadmap_progress_redact_command_secrets "${multi_vm_stability_promotion_evidence_pack_next_command:-}") next_command_reason=${multi_vm_stability_promotion_evidence_pack_next_command_reason:-}"
 echo "[roadmap-progress-report] live_evidence_archive_helper_available=$live_evidence_archive_helper_available_json live_evidence_archive_helper_emitted=$next_actions_live_evidence_archive_helper_emitted_json live_evidence_archive_helper_count=$next_actions_live_evidence_archive_helper_count_json three_machine_real_host_validation_pack_helper_available=$three_machine_real_host_validation_pack_helper_available_json three_machine_real_host_validation_pack_signoff_pending=$three_machine_real_host_validation_pack_signoff_pending_json three_machine_real_host_validation_pack_helper_emitted=$next_actions_three_machine_real_host_validation_pack_helper_emitted_json three_machine_real_host_validation_pack_helper_count=$next_actions_three_machine_real_host_validation_pack_helper_count_json"
 echo "[roadmap-progress-report] gpm_wallet_auth_evidence_available=$gpm_wallet_auth_evidence_available_json helper_available=$gpm_wallet_auth_evidence_helper_available_json input_summary_json=${gpm_wallet_auth_evidence_summary_json:-} source_summary_json=${gpm_wallet_auth_evidence_source_summary_json:-} status=${gpm_wallet_auth_evidence_status_json:-} rc=$gpm_wallet_auth_evidence_rc_json action_needed=$gpm_wallet_auth_evidence_action_needed_json emitted=$next_actions_gpm_wallet_auth_evidence_emitted_json count=$next_actions_gpm_wallet_auth_evidence_count_json"
 echo "[roadmap-progress-report] resilience_handoff_available=$resilience_handoff_available_json source_summary_json=${resilience_handoff_source_summary_json:-}"

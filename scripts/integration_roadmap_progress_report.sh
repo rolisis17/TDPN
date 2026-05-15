@@ -26,7 +26,7 @@ ROADMAP_PROGRESS_FORWARD_SUMMARY_JSON="$TMP_DIR/roadmap_progress_forward_summary
 ROADMAP_PROGRESS_REPORT_FOCUS="${ROADMAP_PROGRESS_REPORT_FOCUS:-all}"
 
 case "$ROADMAP_PROGRESS_REPORT_FOCUS" in
-  all|access-recovery-source-binding|access-recovery-unsynced-verifier|wallet-auth-next-action)
+  all|access-recovery-source-binding|access-recovery-unsynced-verifier|command-redaction|wallet-auth-next-action)
     ;;
   *)
     echo "unsupported ROADMAP_PROGRESS_REPORT_FOCUS: $ROADMAP_PROGRESS_REPORT_FOCUS"
@@ -367,6 +367,168 @@ if grep -Fq 'pilot-handoff-not-ready' scripts/roadmap_progress_report.sh; then
   echo "roadmap progress report still contains unreachable Access Recovery pilot-handoff-not-ready state"
   exit 1
 fi
+
+echo "[roadmap-progress-report] command secret redaction across summary, report, and stdout"
+COMMAND_REDACTION_SECRET_CODE_FILE="$TMP_DIR/command_redaction_private_code.txt"
+COMMAND_REDACTION_SECRET_CLIENT_KEY="$TMP_DIR/command_redaction_client.key"
+COMMAND_REDACTION_SECRET_PROVENANCE_KEY="$TMP_DIR/command_redaction_provenance.key"
+COMMAND_REDACTION_SECRET_COMMAND="ACCESS_RECOVERY_PRIVATE_CODE_FILE=$COMMAND_REDACTION_SECRET_CODE_FILE GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN=bridge-token-secret ./scripts/easy_node.sh client-vpn-smoke --access-recovery-private-code-file $COMMAND_REDACTION_SECRET_CODE_FILE --access-recovery-mtls-client-key $COMMAND_REDACTION_SECRET_CLIENT_KEY --code-file $COMMAND_REDACTION_SECRET_CODE_FILE --private-code-file $COMMAND_REDACTION_SECRET_CODE_FILE --provenance-private-key-file=$COMMAND_REDACTION_SECRET_PROVENANCE_KEY --client-key $COMMAND_REDACTION_SECRET_CLIENT_KEY --token runtime-token-secret --print-summary-json 1"
+COMMAND_REDACTION_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_command_redaction_summary.json"
+jq -n --arg cmd "$COMMAND_REDACTION_SECRET_COMMAND" '
+  {
+    version: 1,
+    checks: [
+      {
+        check_id: "machine_c_vpn_smoke",
+        label: "Machine C VPN smoke test",
+        status: "pending",
+        command: $cmd
+      }
+    ],
+    summary: {
+      total_checks: 1,
+      pass_checks: 0,
+      warn_checks: 0,
+      fail_checks: 0,
+      pending_checks: 1,
+      next_action_check_id: "machine_c_vpn_smoke",
+      next_action_label: "Machine C VPN smoke test",
+      next_action_command: $cmd,
+      blocking_check_ids: ["machine_c_vpn_smoke"],
+      optional_check_ids: [],
+      roadmap_stage: "READY_FOR_MACHINE_C_SMOKE",
+      single_machine_ready: true,
+      real_host_gate: {
+        ready: false,
+        blockers: ["machine_c_vpn_smoke"],
+        next_command: $cmd
+      },
+      docker_rehearsal_gate: {
+        status: "skip",
+        next_command: $cmd
+      }
+    },
+    report: {
+      readiness_status: "NOT_READY",
+      ready: false
+    }
+  }
+' >"$COMMAND_REDACTION_MANUAL_SUMMARY_JSON"
+COMMAND_REDACTION_SUMMARY_JSON="$TMP_DIR/roadmap_progress_command_redaction_summary.json"
+COMMAND_REDACTION_REPORT_MD="$TMP_DIR/roadmap_progress_command_redaction_report.md"
+COMMAND_REDACTION_STDOUT_LOG="${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_command_redaction.log"
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$COMMAND_REDACTION_MANUAL_SUMMARY_JSON" \
+  --summary-json "$COMMAND_REDACTION_SUMMARY_JSON" \
+  --report-md "$COMMAND_REDACTION_REPORT_MD" \
+  --print-report 1 \
+  --print-summary-json 1 >"$COMMAND_REDACTION_STDOUT_LOG" 2>&1; then
+  echo "roadmap progress report failed in command redaction path"
+  cat "$COMMAND_REDACTION_STDOUT_LOG"
+  exit 1
+fi
+if ! jq -e '
+  (.vpn_track.next_action.command // "" | contains("ACCESS_RECOVERY_PRIVATE_CODE_FILE=[redacted]"))
+  and (.vpn_track.next_action.command // "" | contains("GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN=[redacted]"))
+  and (.vpn_track.next_action.command // "" | contains("--access-recovery-private-code-file [redacted]"))
+  and (.vpn_track.next_action.command // "" | contains("--access-recovery-mtls-client-key [redacted]"))
+  and (.vpn_track.next_action.command // "" | contains("--code-file [redacted]"))
+  and (.vpn_track.next_action.command // "" | contains("--private-code-file [redacted]"))
+  and (.vpn_track.next_action.command // "" | contains("--provenance-private-key-file=[redacted]"))
+  and (.vpn_track.next_action.command // "" | contains("--client-key [redacted]"))
+  and (.vpn_track.next_action.command // "" | contains("--token [redacted]"))
+  and ((.next_actions // []) | any((.command // "") | contains("--client-key [redacted]")))
+  and ((.vpn_track.pending_real_host_checks // []) | any((.command // "") | contains("--code-file [redacted]")))
+' "$COMMAND_REDACTION_SUMMARY_JSON" >/dev/null; then
+  echo "command redaction summary mismatch"
+  cat "$COMMAND_REDACTION_SUMMARY_JSON"
+  exit 1
+fi
+if ! grep -Fq -- '--client-key [redacted]' "$COMMAND_REDACTION_REPORT_MD"; then
+  echo "command redaction report missing redacted client-key flag"
+  cat "$COMMAND_REDACTION_REPORT_MD"
+  exit 1
+fi
+if ! grep -Fq -- 'next_action_command=ACCESS_RECOVERY_PRIVATE_CODE_FILE=[redacted]' "$COMMAND_REDACTION_STDOUT_LOG"; then
+  echo "command redaction stdout missing redacted next_action_command"
+  cat "$COMMAND_REDACTION_STDOUT_LOG"
+  exit 1
+fi
+for leaked in \
+  "$COMMAND_REDACTION_SECRET_CODE_FILE" \
+  "$COMMAND_REDACTION_SECRET_CLIENT_KEY" \
+  "$COMMAND_REDACTION_SECRET_PROVENANCE_KEY" \
+  "bridge-token-secret" \
+  "runtime-token-secret"; do
+  if grep -F -- "$leaked" "$COMMAND_REDACTION_SUMMARY_JSON" "$COMMAND_REDACTION_REPORT_MD" "$COMMAND_REDACTION_STDOUT_LOG" >/dev/null; then
+    echo "command redaction leaked raw secret value: $leaked"
+    grep -F -- "$leaked" "$COMMAND_REDACTION_SUMMARY_JSON" "$COMMAND_REDACTION_REPORT_MD" "$COMMAND_REDACTION_STDOUT_LOG" || true
+    exit 1
+  fi
+done
+COMMAND_REDACTION_HELPER_FILE="$TMP_DIR/roadmap_progress_command_redaction_helper.sh"
+awk '
+  /^roadmap_progress_redact_summary_command_surfaces_json\(\) \{/ { capture=1 }
+  capture { print }
+  capture && /^}$/ { exit }
+' scripts/roadmap_progress_report.sh >"$COMMAND_REDACTION_HELPER_FILE"
+COMMAND_REDACTION_SYNTHETIC_JSON="$TMP_DIR/roadmap_progress_command_redaction_synthetic.json"
+COMMAND_REDACTION_SYNTHETIC_REDACTED_JSON="$TMP_DIR/roadmap_progress_command_redaction_synthetic_redacted.json"
+jq -n --arg cmd "$COMMAND_REDACTION_SECRET_COMMAND" '
+  {
+    access_recovery_track: {
+      unsynced_trusted_verifier_receipt: {
+        sync_command: $cmd
+      },
+      recommended_next_action: {
+        command: $cmd
+      },
+      preferred_operator_next_action: {
+        command: $cmd
+      }
+    },
+    next_actions: [
+      {
+        id: "synthetic_secret_command",
+        command: $cmd
+      }
+    ]
+  }
+' >"$COMMAND_REDACTION_SYNTHETIC_JSON"
+if ! (
+  source "$COMMAND_REDACTION_HELPER_FILE"
+  roadmap_progress_redact_summary_command_surfaces_json
+) <"$COMMAND_REDACTION_SYNTHETIC_JSON" >"$COMMAND_REDACTION_SYNTHETIC_REDACTED_JSON"; then
+  echo "command redaction helper failed on synthetic sync_command payload"
+  cat "$COMMAND_REDACTION_SYNTHETIC_JSON"
+  exit 1
+fi
+if ! jq -e '
+  (.access_recovery_track.unsynced_trusted_verifier_receipt.sync_command // "" | contains("--client-key [redacted]"))
+  and (.access_recovery_track.unsynced_trusted_verifier_receipt.sync_command // "" | contains("--provenance-private-key-file=[redacted]"))
+  and (.access_recovery_track.recommended_next_action.command // "" | contains("--access-recovery-private-code-file [redacted]"))
+  and (.access_recovery_track.preferred_operator_next_action.command // "" | contains("GPM_ADMIN_SETTLEMENT_BRIDGE_TOKEN=[redacted]"))
+  and ((.next_actions // []) | any((.command // "") | contains("--token [redacted]")))
+' "$COMMAND_REDACTION_SYNTHETIC_REDACTED_JSON" >/dev/null; then
+  echo "command redaction helper synthetic sync_command mismatch"
+  cat "$COMMAND_REDACTION_SYNTHETIC_REDACTED_JSON"
+  exit 1
+fi
+for leaked in \
+  "$COMMAND_REDACTION_SECRET_CODE_FILE" \
+  "$COMMAND_REDACTION_SECRET_CLIENT_KEY" \
+  "$COMMAND_REDACTION_SECRET_PROVENANCE_KEY" \
+  "bridge-token-secret" \
+  "runtime-token-secret"; do
+  if grep -F -- "$leaked" "$COMMAND_REDACTION_SYNTHETIC_REDACTED_JSON" >/dev/null; then
+    echo "command redaction helper leaked raw synthetic secret value: $leaked"
+    cat "$COMMAND_REDACTION_SYNTHETIC_REDACTED_JSON"
+    exit 1
+  fi
+done
+finish_focus_if "command-redaction" "command redaction"
 
 FAKE_MANUAL_REFRESH_RESILIENCE="$TMP_DIR/fake_manual_validation_report_refresh_resilience.sh"
 cat >"$FAKE_MANUAL_REFRESH_RESILIENCE" <<'EOF_FAKE_MANUAL_REFRESH_RESILIENCE'
@@ -3427,7 +3589,7 @@ if ! jq -e '
   and .access_recovery_track.access_bridge_service_smoke.details.base_url == "http://127.0.0.1:19820"
   and .access_recovery_track.recommended_next_action.id == "real_helper_https_evidence"
   and ((.access_recovery_track.recommended_next_action.command // "") | test("access-recovery-real-helper-evidence-run"))
-  and ((.access_recovery_track.recommended_next_action.command // "") | test("--provenance-private-key-file PROVENANCE_PRIVATE_KEY_FILE"))
+  and ((.access_recovery_track.recommended_next_action.command // "") | contains("--provenance-private-key-file [redacted]"))
   and ((.access_recovery_track.recommended_next_action.command // "") | test("--trust-store TRUST_STORE"))
   and ((.next_actions // []) | any(
     .id == "real_helper_https_evidence"
@@ -4029,7 +4191,7 @@ if ! jq -e '
   and (.access_recovery_track.recommended_next_action.command | contains("--require-mtls 1"))
   and (.access_recovery_track.recommended_next_action.command | contains("--cacert MTLS_CA_FILE"))
   and (.access_recovery_track.recommended_next_action.command | contains("--client-cert MTLS_CLIENT_CERT_FILE"))
-  and (.access_recovery_track.recommended_next_action.command | contains("--client-key MTLS_CLIENT_KEY_FILE"))
+  and (.access_recovery_track.recommended_next_action.command | contains("--client-key [redacted]"))
   and ((.next_actions // []) | any(
     .id == "access_bridge_service_smoke"
     and .placeholder_unresolved == true
@@ -9994,16 +10156,22 @@ if ! jq -e '
   and (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
   and (((.next_actions // []) | any(.id == "runtime_actuation_promotion")) | not)
   and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion")) | not)
-  and ((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability"))
+  and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability")) | not)
   and ((.next_actions // []) | any(.id == "roadmap_live_evidence_actionable_run"))
-  and (((.next_actions // []) | any(.id == "roadmap_live_evidence_cycle_batch_run")) | not)
+  and ((.next_actions // []) | any(
+    .id == "roadmap_live_evidence_cycle_batch_run"
+    and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs --include-track-id profile_compare_multi_vm_stability_promotion_cycle --print-summary-json 1"
+    and .selected_track_ids == ["profile_compare_multi_vm_stability_promotion_cycle"]
+    and .covered_next_action_ids == ["profile_compare_multi_vm_stability"]
+    and .missing_evidence_families == ["multi-vm"]
+  ))
   and .next_actions_summary.live_evidence_batch_helper_emitted == true
   and .next_actions_summary.live_evidence_cycle_batch_helper_available == true
-  and .next_actions_summary.live_evidence_cycle_batch_helper_emitted == false
-  and .next_actions_summary.live_evidence_cycle_batch_helper_count == 0
+  and .next_actions_summary.live_evidence_cycle_batch_helper_emitted == true
+  and .next_actions_summary.live_evidence_cycle_batch_helper_count == 1
   and .next_actions_summary.live_evidence_pending_action_count_after_bundle >= 1
 ' "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_base_only_summary.json" >/dev/null; then
-  echo "base-only multi-VM stability cycle-batch summary mismatch"
+  echo "base-only multi-VM stability cycle-batch coverage summary mismatch"
   cat "$TMP_DIR/roadmap_progress_profile_compare_multi_vm_stability_base_only_summary.json"
   exit 1
 fi
@@ -12718,8 +12886,10 @@ if ! jq -e \
          and ((.next_actions // []) | any(
            .id == "roadmap_live_evidence_cycle_batch_run"
            and (.label // "") == "Roadmap live-evidence cycle-batch run"
-           and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs --print-summary-json 1"
-           and (.reason // "") == "repeat pending live evidence cycles across tracks in one helper run"
+           and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs --include-track-id runtime_actuation_promotion_cycle --include-track-id profile_compare_multi_vm_stability_promotion_cycle --print-summary-json 1"
+           and (.reason // "") == "repeat pending cycle-batch covered live evidence cycles across tracks in one helper run"
+           and .selected_track_ids == ["runtime_actuation_promotion_cycle","profile_compare_multi_vm_stability_promotion_cycle"]
+           and .covered_next_action_ids == ["runtime_actuation_promotion","profile_compare_multi_vm_stability_promotion"]
            and .requires_real_hosts == true
            and .local_pack_only == false
            and ((.missing_evidence_families // []) | index("runtime-actuation")) != null
@@ -12856,7 +13026,9 @@ if ! jq -e \
          and .next_actions_summary.live_evidence_cycle_batch_helper_count == 1
          and ((.next_actions // []) | any(
            .id == "roadmap_live_evidence_cycle_batch_run"
-           and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs --print-summary-json 1"
+           and (.command // "") == "./scripts/easy_node.sh roadmap-live-evidence-cycle-batch-run --reports-dir .easy-node-logs --include-track-id runtime_actuation_promotion_cycle --include-track-id profile_compare_multi_vm_stability_promotion_cycle --print-summary-json 1"
+           and .selected_track_ids == ["runtime_actuation_promotion_cycle","profile_compare_multi_vm_stability_promotion_cycle"]
+           and .covered_next_action_ids == ["runtime_actuation_promotion","profile_compare_multi_vm_stability_promotion"]
            and .requires_real_hosts == true
            and .local_pack_only == false
            and ((.missing_evidence_families // []) | index("runtime-actuation")) != null
@@ -12877,7 +13049,7 @@ if ! jq -e \
   exit 1
 fi
 
-echo "[roadmap-progress-report] suppression mode preserves base multi-VM action when cycle-batch helper is present"
+echo "[roadmap-progress-report] suppression mode treats cycle-batch helper as covering base multi-VM action"
 if ! EASY_NODE_LOG_DIR="$PROFILE_COMPARE_MULTI_VM_STABILITY_FALLBACK_REPORTS_DIR" run_roadmap_progress_report \
   --refresh-manual-validation 0 \
   --refresh-single-machine-readiness 0 \
@@ -12896,7 +13068,7 @@ fi
 if ! jq -e \
   --argjson expect_cycle_batch_helper "$INVALID_PROMOTION_REASON_EXPECT_CYCLE_BATCH_HELPER_JSON" \
   '
-  ((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability"))
+  (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability")) | not)
   and (((.next_actions // []) | any(.id == "profile_default_gate")) | not)
   and (((.next_actions // []) | any(.id == "profile_compare_multi_vm_stability_promotion")) | not)
   and (((.next_actions // []) | any(.id == "runtime_actuation_promotion")) | not)
@@ -12912,7 +13084,9 @@ if ! jq -e \
          and ((.next_actions // []) | any(
            .id == "roadmap_live_evidence_cycle_batch_run"
            and ((.missing_evidence_families // []) | index("runtime-actuation")) != null
-           and (((.missing_evidence_families // []) | index("multi-vm")) == null)
+           and ((.missing_evidence_families // []) | index("multi-vm")) != null
+           and .selected_track_ids == ["runtime_actuation_promotion_cycle","profile_compare_multi_vm_stability_promotion_cycle"]
+           and .covered_next_action_ids == ["runtime_actuation_promotion","profile_compare_multi_vm_stability"]
          ))
        else
          .next_actions_summary.live_evidence_cycle_batch_helper_emitted == false
@@ -14126,6 +14300,71 @@ if ! jq -e '
 ' "$LONG_NEXT_ACTIONS_SUMMARY_JSON" >/dev/null; then
   echo "long next-action payload summary mismatch"
   cat "$LONG_NEXT_ACTIONS_SUMMARY_JSON"
+  exit 1
+fi
+
+echo "[roadmap-progress-report] next-action command secrets are redacted across JSON, markdown, and stdout"
+REDACTION_MANUAL_SUMMARY_JSON="$TMP_DIR/manual_validation_redaction_summary.json"
+REDACTION_SUMMARY_JSON="$TMP_DIR/roadmap_progress_redaction_summary.json"
+REDACTION_REPORT_MD="$TMP_DIR/roadmap_progress_redaction_report.md"
+cat >"$REDACTION_MANUAL_SUMMARY_JSON" <<'EOF_REDACTION_MANUAL_SUMMARY'
+{
+  "version": 1,
+  "summary": {
+    "next_action_check_id": "machine_c_vpn_smoke",
+    "next_action_label": "Machine C VPN smoke test",
+    "next_action_command": "ACCESS_RECOVERY_MTLS_CLIENT_KEY=/tmp/raw-mtls-client.key ./scripts/easy_node.sh client-vpn-smoke --subject INVITE_KEY --client-key /tmp/raw-client.key --code-file /tmp/raw-private-code.txt --access-recovery-private-code-file /tmp/raw-access-code.txt"
+  },
+  "report": {
+    "readiness_status": "NOT_READY"
+  }
+}
+EOF_REDACTION_MANUAL_SUMMARY
+if ! run_roadmap_progress_report \
+  --refresh-manual-validation 0 \
+  --refresh-single-machine-readiness 0 \
+  --manual-validation-summary-json "$REDACTION_MANUAL_SUMMARY_JSON" \
+  --summary-json "$REDACTION_SUMMARY_JSON" \
+  --report-md "$REDACTION_REPORT_MD" \
+  --print-report 0 \
+  --print-summary-json 0 >${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_redaction.log 2>&1; then
+  echo "expected success for command redaction report path"
+  cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_redaction.log
+  exit 1
+fi
+for raw_secret in \
+  "/tmp/raw-mtls-client.key" \
+  "/tmp/raw-client.key" \
+  "/tmp/raw-private-code.txt" \
+  "/tmp/raw-access-code.txt"; do
+  if grep -F -- "$raw_secret" "$REDACTION_SUMMARY_JSON" "$REDACTION_REPORT_MD" ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_redaction.log >/dev/null 2>&1; then
+    echo "raw command secret leaked through progress report surface: $raw_secret"
+    cat "$REDACTION_SUMMARY_JSON"
+    cat "$REDACTION_REPORT_MD"
+    cat ${ROADMAP_PROGRESS_REPORT_LOG_PREFIX}_redaction.log
+    exit 1
+  fi
+done
+if ! jq -e '
+  (.vpn_track.next_action.command // "" | contains("ACCESS_RECOVERY_MTLS_CLIENT_KEY=[redacted]"))
+  and (.vpn_track.next_action.command // "" | contains("--subject INVITE_KEY"))
+  and (.vpn_track.next_action.command // "" | contains("--client-key [redacted]"))
+  and ((.next_actions // []) | any(
+    .id == "machine_c_vpn_smoke"
+    and ((.command // "") | contains("ACCESS_RECOVERY_MTLS_CLIENT_KEY=[redacted]"))
+    and ((.command // "") | contains("--subject INVITE_KEY"))
+    and ((.command // "") | contains("--client-key [redacted]"))
+    and ((.command // "") | contains("--code-file [redacted]"))
+    and ((.command // "") | contains("--access-recovery-private-code-file [redacted]"))
+  ))
+' "$REDACTION_SUMMARY_JSON" >/dev/null; then
+  echo "redacted command summary mismatch"
+  cat "$REDACTION_SUMMARY_JSON"
+  exit 1
+fi
+if ! grep -F -- "[redacted]" "$REDACTION_REPORT_MD" >/dev/null; then
+  echo "redacted marker missing from redaction report"
+  cat "$REDACTION_REPORT_MD"
   exit 1
 fi
 

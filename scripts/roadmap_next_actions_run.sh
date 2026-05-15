@@ -321,6 +321,30 @@ is_sensitive_env_var_name() {
   esac
 }
 
+is_operator_placeholder_value() {
+  local value="${1:-}"
+  local upper=""
+  value="$(strip_optional_wrapping_quotes "$value")"
+  upper="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
+  case "$upper" in
+    ""|"[REDACTED]"|REDACTED)
+      return 1
+      ;;
+    REPLACE_WITH*|*REPLACE_WITH*|*SET-REAL*|*SET_REAL*|YOUR_*|"<"*">"|"\${"*"}"|"$"*)
+      return 0
+      ;;
+    PRIVATE_CODE_FILE|PROVENANCE_PRIVATE_KEY_FILE|MTLS_CLIENT_KEY_FILE|MTLS_CLIENT_CERT_FILE|MTLS_CA_FILE|TRUST_STORE|ACCESS_RECOVERY_TRUST_STORE)
+      return 0
+      ;;
+    HELPER_PUBLIC_DNS|HELPER_ID|BRIDGE_SERVICE_CONFIG|BRIDGE_DEPLOY_PACK|ORG_ID|ORG_NAME|ACCESS_RECOVERY_REPORTS_DIR)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 render_log_token() {
   local token="${1:-}"
   if [[ "$token" == *[[:space:]]* ]]; then
@@ -2029,6 +2053,7 @@ redact_command_secrets() {
   local flag_regex='--campaign-subject|--subject|--key|--invite-key|--campaign-anon-cred|--anon-cred|--token|--auth-token|--admin-token|--authorization|--bearer|--password|--passwd|--secret|--api-key|--private-key|--private-key-file|--provenance-private-key-file|--secret-key|--secret-key-file|--admin-key|--admin-key-file|--code-file|--private-code-file|--client-key|--mtls-client-key|--access-recovery-private-code-file|--access-recovery-provenance-private-key-file|--access-recovery-mtls-client-key'
   local token=""
   local key=""
+  local value=""
   local rendered=""
   local idx=0
   local token_count=0
@@ -2040,7 +2065,12 @@ redact_command_secrets() {
       if is_sensitive_secret_flag "$token"; then
         rendered="${rendered}${rendered:+ }$(render_log_token "$token")"
         if (( idx + 1 < token_count )); then
-          rendered="${rendered}${rendered:+ }[redacted]"
+          value="${COMMAND_STRING_ARGV[$((idx + 1))]}"
+          if is_operator_placeholder_value "$value"; then
+            rendered="${rendered}${rendered:+ }$(render_log_token "$value")"
+          else
+            rendered="${rendered}${rendered:+ }[redacted]"
+          fi
           idx=$((idx + 2))
         else
           idx=$((idx + 1))
@@ -2051,7 +2081,12 @@ redact_command_secrets() {
       if [[ "$token" == --*=* ]]; then
         key="${token%%=*}"
         if is_sensitive_secret_flag "$key"; then
-          rendered="${rendered}${rendered:+ }${key}=[redacted]"
+          value="${token#*=}"
+          if is_operator_placeholder_value "$value"; then
+            rendered="${rendered}${rendered:+ }${key}=$(render_log_token "$value")"
+          else
+            rendered="${rendered}${rendered:+ }${key}=[redacted]"
+          fi
           idx=$((idx + 1))
           continue
         fi
@@ -2059,7 +2094,12 @@ redact_command_secrets() {
       if [[ "$token" =~ ^[A-Za-z_][A-Za-z0-9_]*=.*$ ]]; then
         key="${token%%=*}"
         if is_sensitive_env_var_name "$key"; then
-          rendered="${rendered}${rendered:+ }${key}=[redacted]"
+          value="${token#*=}"
+          if is_operator_placeholder_value "$value"; then
+            rendered="${rendered}${rendered:+ }${key}=$(render_log_token "$value")"
+          else
+            rendered="${rendered}${rendered:+ }${key}=[redacted]"
+          fi
           idx=$((idx + 1))
           continue
         fi
