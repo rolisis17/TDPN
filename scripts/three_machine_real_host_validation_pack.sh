@@ -201,6 +201,9 @@ json_file_semantically_usable_01() {
               true
             end
           )
+        elif $schema_id == "three_machine_docker_profile_matrix_summary" then
+          (((.summary.profiles_total // 0) | tonumber?) > 0)
+          and (((.summary.profiles_fail // 0) | tonumber?) == 0)
         else
           true
         end
@@ -477,6 +480,7 @@ copy_for_pack() {
 declare -a artifact_specs=(
   "docker_matrix_summary|docker_matrix|three_machine_docker_profile_matrix_summary.json|Docker profile matrix summary"
   "docker_matrix_record_summary|docker_matrix|three_machine_docker_profile_matrix_record_summary.json|Docker profile matrix record summary"
+  "docker_matrix_record_summary_timestamped|docker_matrix|three_machine_docker_profile_matrix_record_????????_??????.json|Docker profile matrix timestamped record summary"
   "docker_matrix_record_matrix|docker_matrix|three_machine_docker_profile_matrix_record_*_matrix.json|Docker profile matrix record matrix artifact"
   "docker_matrix_run_matrix|docker_matrix|three_machine_docker_profile_matrix_*_matrix.json|Docker profile matrix run matrix artifact"
   "docker_readiness_1hop|docker_readiness|three_machine_docker_readiness_1hop.json|Docker readiness 1-hop summary"
