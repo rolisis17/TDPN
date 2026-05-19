@@ -71,7 +71,7 @@ for token in \
   '--access-recovery-reports-dir DIR' \
   '--access-recovery-install-dir DIR' \
   '--access-recovery-systemd-unit-file PATH' \
-  '--access-recovery-proxy-kind caddy|nginx|none' \
+  '--access-recovery-proxy-kind caddy|nginx' \
   '--access-recovery-proxy-config-file PATH' \
   '--access-recovery-trust-store PATH' \
   '--access-recovery-mtls-ca PATH' \
@@ -97,7 +97,7 @@ for token in \
   './scripts/easy_node.sh roadmap-next-actions-run' \
   '--access-recovery-helper-public-dns HOST' \
   '--access-recovery-bridge-deploy-pack DIR' \
-  '--access-recovery-proxy-kind caddy|nginx|none' \
+  '--access-recovery-proxy-kind caddy|nginx' \
   '--access-recovery-mtls-client-key PATH' \
   'Access Recovery operator input overrides for helper/org/code/config/deploy/provenance/reports/install/proxy fields'
 do

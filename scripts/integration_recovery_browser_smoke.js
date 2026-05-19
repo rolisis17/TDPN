@@ -8,9 +8,32 @@ const path = require("path");
 const vm = require("vm");
 
 const repoRoot = path.resolve(__dirname, "..");
-const recoveryHtml = fs.readFileSync(path.join(repoRoot, "apps", "web", "recovery.html"), "utf8");
+const recoveryHtmlPath = path.join(repoRoot, "apps", "web", "recovery.html");
+const recoveryAssetPath = path.join(repoRoot, "apps", "web", "assets", "recovery.js");
+const recoveryHtml = fs.readFileSync(recoveryHtmlPath, "utf8");
 if (!recoveryHtml.includes("Bridge invites trust helper paths only after Verify Signed succeeds")) {
   throw new Error("recovery page must disclose signed helper registry policy");
+}
+if (!/<script\s+src=["']\.\/assets\/recovery\.js["']\s*><\/script>/u.test(recoveryHtml)) {
+  throw new Error("recovery page must load ./assets/recovery.js");
+}
+
+function idsFromHtml(html) {
+  const ids = new Set();
+  const idPattern = /\bid\s*=\s*["']([^"']+)["']/gu;
+  let match;
+  while ((match = idPattern.exec(html)) !== null) {
+    ids.add(match[1]);
+  }
+  return ids;
+}
+
+function assertRecoveryHtmlIds(requiredIds) {
+  const htmlIds = idsFromHtml(recoveryHtml);
+  const missing = requiredIds.filter((id) => !htmlIds.has(id));
+  if (missing.length > 0) {
+    throw new Error(`recovery page missing required verifier IDs: ${missing.join(", ")}`);
+  }
 }
 
 class Element {
@@ -163,10 +186,7 @@ function makeDocument(ids) {
       return new Element(tagName);
     },
     getElementById(id) {
-      if (!elements.has(id)) {
-        elements.set(id, new Element("div", id));
-      }
-      return elements.get(id);
+      return elements.get(id) || null;
     },
     _elements: elements,
   };
@@ -304,6 +324,7 @@ async function main() {
     "paths_list",
     "path_count",
   ];
+  assertRecoveryHtmlIds(ids);
 
   const document = makeDocument(ids);
   let qrScanText = "";
@@ -363,7 +384,7 @@ async function main() {
   window.createImageBitmap = context.createImageBitmap;
 
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync(path.join(repoRoot, "apps/web/assets/recovery.js"), "utf8"), context, {
+  vm.runInContext(fs.readFileSync(recoveryAssetPath, "utf8"), context, {
     filename: "apps/web/assets/recovery.js",
   });
 

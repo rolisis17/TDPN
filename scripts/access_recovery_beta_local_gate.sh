@@ -17,8 +17,9 @@ Purpose:
   Run the focused local Access Recovery beta gate without running the legacy
   VPN/GPM production matrix. This checks the signed artifact demo/examples,
   browser-local verifier flow, local bridge service evidence, host-install
-  checks, pilot evidence bundle generation, and the trusted verifier receipt
-  contract plus real-helper evidence-run wrapper required for pilot handoff.
+  checks, pilot evidence bundle generation, the local evidence refresh wrapper,
+  and the trusted verifier receipt contract plus real-helper evidence-run
+  wrapper required for pilot handoff.
 
 Notes:
   Live real helper HTTPS deployment evidence is still a separate real-host gate.
@@ -271,6 +272,7 @@ run_step "bridge_deployment_evidence" "Bridge deployment evidence contract" "ACC
 run_step "bridge_host_install" "Bridge host-install check contract" "ACCESS_RECOVERY_BETA_LOCAL_GATE_BRIDGE_HOST_INSTALL_SCRIPT" "scripts/integration_access_bridge_host_install_check.sh"
 run_step "pilot_evidence_bundle" "Pilot evidence bundle contract" "ACCESS_RECOVERY_BETA_LOCAL_GATE_PILOT_EVIDENCE_BUNDLE_SCRIPT" "scripts/integration_access_bridge_pilot_evidence_bundle.sh"
 run_step "pilot_evidence_bundle_verify" "Pilot evidence bundle verifier contract" "ACCESS_RECOVERY_BETA_LOCAL_GATE_PILOT_EVIDENCE_BUNDLE_VERIFY_SCRIPT" "scripts/integration_access_bridge_pilot_evidence_bundle_verify.sh"
+run_step "local_evidence_refresh" "Local evidence refresh wrapper contract" "ACCESS_RECOVERY_BETA_LOCAL_GATE_LOCAL_EVIDENCE_REFRESH_SCRIPT" "scripts/integration_easy_node_access_recovery_local_evidence_refresh.sh"
 run_step "real_helper_evidence_run" "Real helper evidence-run wrapper contract" "ACCESS_RECOVERY_BETA_LOCAL_GATE_REAL_HELPER_EVIDENCE_RUN_SCRIPT" "scripts/integration_access_recovery_real_helper_evidence_run.sh"
 
 steps_json="$(jq -s '.' "$steps_jsonl")"
@@ -296,7 +298,7 @@ jq -n \
   --argjson steps "$steps_json" \
   '{
     version: 1,
-    schema: {id: "access_recovery_beta_local_gate_summary", major: 1, minor: 0},
+    schema: {id: "access_recovery_beta_local_gate_summary", major: 1, minor: 1},
     generated_at_utc: $generated_at_utc,
     status: $status,
     rc: (if $status == "pass" then 0 else 1 end),
