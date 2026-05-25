@@ -7,7 +7,7 @@ toolchain go1.25.9
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/redis/go-redis/v9 v9.18.0
-	golang.org/x/sys v0.43.0
+	golang.org/x/sys v0.45.0
 )
 
 require (
