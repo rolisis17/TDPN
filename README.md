@@ -1,5 +1,7 @@
 # Trust-Tiered Decentralized Privacy Network (MVP Scaffold)
 
+Deep handoff document: [TDPN Project Deep Dive](docs/tdpn-project-deep-dive.md)
+
 This repository starts a decentralized privacy network where one `node` program can run as:
 - client
 - entry relay
