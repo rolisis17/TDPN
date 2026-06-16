@@ -46,7 +46,7 @@ jobs:
           RELEASE_REQUIRE_TAG_NOTES: ${{ vars.RELEASE_REQUIRE_TAG_NOTES }}
 
       - name: Upload workflow artifact bundle
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: release-${{ github.ref_name }}
           path: dist/${{ github.ref_name }}
